@@ -9,10 +9,11 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий production runtime baseline — merge SHA
-`22ab6b81dacc726068d0dfcc5172fe67581a45b1` (PR #111). Fast CI
-`33514154571` и Full Release Admission `33514154601` зелёные на exact merge
-SHA. Active green и hot-rollback blue работают в `COMBINED`, оба проходят
-exact readiness `CURRENT_189/189`; nginx cutover generation — `20`.
+`f3f119fa81fc497b75cc1e57f046d8539676c943` (PR #122). Fast CI
+`33718092094` и Full Release Admission `33718092121` зелёные на exact merge
+SHA. Active blue `f3f119fa…` и hot-rollback green `22ab6b81…` работают в
+`COMBINED`, оба проходят exact readiness `CURRENT_189/189`; nginx cutover
+generation — `21`.
 `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
 `GUEST_BUG_REPORTING_MODE=LIVE`. Split systemd/nginx candidate остаётся
 `DORMANT / NOT INSTALLED`.
@@ -72,19 +73,21 @@ orchestrator выполняет exact `HYDRATE -> BIND -> SMOKE -> CUTOVER -> PO
 продолжает ту же operation после lost response и отклоняет control, slot,
 receipt или generation drift; previous slot остаётся hot rollback. Orchestrator
 включён в immutable production-control payload и проверяется в Fast/Full.
-Successor PR #121 merge `be907cf0…` прошёл exact pre/post-merge Fast и Full
-Admission; его admitted production-control generation установлена и прошла
-root verification. Runtime rollout остановлен до plan/apply: первый live
-preflight обнаружил отсутствовавший переход hot-rollback target в exact
-masked/inactive состояние, а первый `prepare` successor 03.09.2026 был
-отклонён до создания plan, потому что Bash повторно экспортировал
-`PWD/SHLVL/_` после очистки environment. Узкий следующий successor делает
-final `env -i` перед Node и проверяет exact installed bootstrap в disposable
-root. `mask --now` остаётся в BIND, `unmask` — в SMOKE; production
-runtime/nginx/DB остаются на healthy `22ab6b81…`/generation 20/CURRENT189.
-Orchestrator не выполняет
-Prisma/SQL, ACL, auth/scope, guest flags или worker effects. Последний backlog item — измеримые
-duration/failure-phase p50/p95.
+Successor PR #122 merge `f3f119fa…` прошёл exact post-merge Fast и Full
+Admission, production-control/root verification и первый controlled five-phase
+rollout. Terminal operation receipt зафиксировал generation 21, active blue
+`f3f119fa…`, hot rollback green `22ab6b81…` и zero pending records. Public и
+loopback API/Web, authenticated reads, CURRENT189 и worker timers прошли QA;
+schema/ACL/flags не менялись. Live rollout обнаружил пять recovery cases, не
+требующих нового SHA: transient cache cleanup, systemd failed state после stop,
+отсутствующий automatic slot-env bind, ранний readiness probe и accepted
+cutover с диагностическим stderr. V3 source successor автоматизирует их
+fail-closed: bounded retry только под exact fence, reset-failed с
+inactive/dead/PID=0, root-only previous slot-env backup и atomic lineage bind,
+startup wait и принятие stderr только по exact durable cutover successor.
+Orchestrator не выполняет Prisma/SQL, ACL, auth/scope, guest flags или worker
+effects. Последний backlog item — накопительные duration/failure-phase p50/p95;
+одного rollout sample недостаточно для осмысленного p95.
 
 Ниже сохранена история fail-closed restored-copy итераций, которые предшествовали
 успешному rehearsal и production rollout 01.09.2026.
@@ -226,7 +229,7 @@ Production HTTP/DB/ACL/guard QA прошёл; синтетический тик�
 - A domain-scoped, idempotent identity resolver refreshes stale Langame links from the verified guest identity during authentication and synchronization. Ambiguous matches fail closed instead of binding a profile to the wrong guest.
 - Check-in streak progress is based on unique club-local calendar dates and resets after a missed date. Reward-only `REWARD_TEMPLATE` loot boxes are excluded from the standalone catalog.
 - Product categories keep separate `LANGAME` and `LEETPLUS` identities. Exact tariff dictionaries remain blocked by readiness checks until a reliable structured source is available.
-- The production snapshot at documentation time is exact release `22ab6b81dacc726068d0dfcc5172fe67581a45b1`, active green generation 20, exact `CURRENT_189/189`; admitted API/Web are aligned and both green and rollback blue services remain active. This revision marker is operational evidence only: runtime status and `/gamification/log` remain authoritative for feature modes and queue health.
+- The production snapshot at documentation time is exact release `f3f119fa81fc497b75cc1e57f046d8539676c943`, active blue generation 21, exact `CURRENT_189/189`; rollback green remains exact `22ab6b81dacc726068d0dfcc5172fe67581a45b1` and both slot pairs are active. This revision marker is operational evidence only: runtime status and `/gamification/log` remain authoritative for feature modes and queue health.
 - The LIVE-primary purchase pipeline now reserves bounded scheduler capacity for `PRODUCT_EXPENSE`, drains eligible pending external purchase facts beyond the newest 30-row window, and prioritizes facts that match active category missions. A positive guest-bound device-rental expense can qualify like any other mapped product expense; it is not rejected merely because the business calls it a service. Stable sale identity, cancellation, return and supersede handling remain required before enabling a Ledger purchase fallback.
 - Purchase missions support `ANY_PRODUCT`, exact products, or explicitly sourced categories, plus ANY/ALL selection and per-purchase/cumulative amount thresholds. Guest-facing conditions list the selected categories and omit the internal completion-window value.
 - Mission and loot-box editors expose `maxPendingRewards` (`Максимальное количество накопленных наград для получения`). The default for newly created and migrated existing elements is `1`; an explicit operator value is preserved. The guard counts pending ordinary rewards and unconsumed entitlements from the same source and blocks only a new qualification, not an already-earned claim/open.

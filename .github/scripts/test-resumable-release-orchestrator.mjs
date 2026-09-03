@@ -40,6 +40,25 @@ function digest(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function slotEnvironment(slot, releaseSha = PREVIOUS_SHA) {
+  const blue = slot === "blue";
+  return [
+    "# Protected /etc/leetplus/slots/" + slot + ".env metadata.",
+    "RELEASE_SHA=" + releaseSha,
+    "WEB_BUILD_ID=" + releaseSha,
+    "EXPECTED_DATABASE_MIGRATION=" + MIGRATION,
+    "EXPECTED_DATABASE_MIGRATION_COUNT=189",
+    "BUILD_TIME=2026-09-01T00:00:00.000Z",
+    "API_BIND_HOST=127.0.0.1",
+    "PORT=" + (blue ? "4100" : "4200"),
+    "WEB_PORT=" + (blue ? "3100" : "3200"),
+    "API_URL=http://127.0.0.1:" + (blue ? "4100" : "4200"),
+    "GUEST_BUG_REPORTING_MODE=LIVE",
+    "GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF",
+    "",
+  ].join("\n");
+}
+
 async function writeJson(filePath, value) {
   await writeFile(filePath, JSON.stringify(value, null, 2) + "\n", {
     mode: 0o600,
@@ -54,6 +73,7 @@ async function setupFixture(suffix = "") {
   const receiptRoot = path.join(root, "var/lib/leetplus/deploy-receipts");
   const slotRoot = path.join(root, "srv/leetplus/slots");
   const releaseRoot = path.join(root, "srv/leetplus/releases");
+  const slotEnvironmentRoot = path.join(root, "etc/leetplus/slots");
   const upstreamRoot = path.join(root, "etc/nginx/leetplus/upstreams");
   await Promise.all([
     mkdir(commands, { recursive: true }),
@@ -65,8 +85,25 @@ async function setupFixture(suffix = "") {
     }),
     mkdir(slotRoot, { recursive: true }),
     mkdir(releaseRoot, { recursive: true }),
+    mkdir(slotEnvironmentRoot, { recursive: true }),
     mkdir(upstreamRoot, { recursive: true }),
     mkdir(path.join(root, "etc/systemd/system"), { recursive: true }),
+  ]);
+  const previousRelease = path.join(releaseRoot, PREVIOUS_SHA);
+  await mkdir(previousRelease, { recursive: true });
+  await Promise.all([
+    symlink(previousRelease, path.join(slotRoot, "blue")),
+    symlink(previousRelease, path.join(slotRoot, "green")),
+    writeFile(
+      path.join(slotEnvironmentRoot, "blue.env"),
+      slotEnvironment("blue"),
+      { mode: 0o440 },
+    ),
+    writeFile(
+      path.join(slotEnvironmentRoot, "green.env"),
+      slotEnvironment("green"),
+      { mode: 0o440 },
+    ),
   ]);
   await writeFile(path.join(upstreamRoot, "blue.conf"), "blue\n");
   await writeFile(path.join(upstreamRoot, "green.conf"), "green\n");
@@ -147,9 +184,13 @@ async function setupFixture(suffix = "") {
     previousSlot: "green",
     promoteCalls: 0,
     readinessCalls: 0,
+    readinessFailures: 0,
     releaseSha: RELEASE_SHA,
+    resetFailedCalls: 0,
+    resetFailedEffects: 0,
     runtimeStartCalls: 0,
     slotMasked: false,
+    slotFailed: false,
     stopCalls: 0,
     targetSlot: "blue",
     unmaskCalls: 0,
@@ -245,9 +286,26 @@ test("runs five phases and publishes a chained final receipt", async (t) => {
   assert.equal(state.bindEffects, 1);
   assert.equal(state.cutoverEffects, 1);
   assert.equal(state.maskEffects, 1);
+  assert.equal(state.resetFailedCalls, 1);
   assert.equal(state.unmaskEffects, 1);
   assert.equal(state.slotMasked, false);
   const operationRoot = path.dirname(fixture.planPath);
+  const acceptedSlotEnvironment = await readFile(
+    path.join(fixture.root, "etc/leetplus/slots/blue.env"),
+    "utf8",
+  );
+  assert.ok(acceptedSlotEnvironment.includes("RELEASE_SHA=" + RELEASE_SHA));
+  assert.ok(
+    acceptedSlotEnvironment.includes("BUILD_TIME=" + fixture.plan.preparedAt),
+  );
+  assert.match(acceptedSlotEnvironment, /GUEST_BUG_REPORTING_MODE=LIVE/u);
+  assert.equal(
+    await readFile(
+      path.join(operationRoot, "02-bind-slot-environment.previous.env"),
+      "utf8",
+    ),
+    slotEnvironment("blue"),
+  );
   const final = JSON.parse(
     await readFile(path.join(operationRoot, "final.json"), "utf8"),
   );
@@ -264,6 +322,101 @@ test("runs five phases and publishes a chained final receipt", async (t) => {
     0,
   );
   assert.deepEqual(await fixtureState(fixture.root), state);
+});
+
+test("normalizes a stopped failed target before cache and bind", async (t) => {
+  const fixture = await preparedFixture("reset-failed-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const state = await fixtureState(fixture.root);
+  state.slotFailed = true;
+  await writeJson(path.join(fixture.root, "fixture-state.json"), state);
+  assert.equal(
+    await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+    0,
+  );
+  const after = await fixtureState(fixture.root);
+  assert.equal(after.resetFailedCalls, 1);
+  assert.equal(after.resetFailedEffects, 1);
+  assert.equal(after.slotFailed, false);
+  assert.equal(after.bindEffects, 1);
+  assert.equal(after.cutoverEffects, 1);
+});
+
+test("rejects slot environment lineage drift while the rebound target is fenced", async (t) => {
+  const fixture = await preparedFixture("slot-environment-lineage-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const environmentPath = path.join(
+    fixture.root,
+    "etc/leetplus/slots/blue.env",
+  );
+  await chmod(environmentPath, 0o600);
+  await writeFile(
+    environmentPath,
+    slotEnvironment("blue", "c".repeat(40)),
+  );
+  await chmod(environmentPath, 0o440);
+  assert.equal(
+    await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+    1,
+  );
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.bindEffects, 1);
+  assert.equal(state.slotMasked, true);
+  assert.equal(state.unmaskEffects, 0);
+  assert.equal(state.cutoverEffects, 0);
+});
+
+test("retries only a failed loopback readiness probe in one apply", async (t) => {
+  const fixture = await preparedFixture("readiness-retry-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_READINESS_ONCE = "true";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      0,
+    );
+  } finally {
+    delete process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_READINESS_ONCE;
+  }
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.readinessFailures, 1);
+  assert.equal(state.readinessCalls, 3);
+  assert.equal(state.cutoverEffects, 1);
+});
+
+test("accepts exact durable cutover evidence despite diagnostic stderr", async (t) => {
+  const fixture = await preparedFixture("cutover-stderr-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  process.env.TEST_ORCHESTRATOR_FIXTURE_CUTOVER_STDERR_AFTER_EFFECT = "true";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      0,
+    );
+  } finally {
+    delete process.env.TEST_ORCHESTRATOR_FIXTURE_CUTOVER_STDERR_AFTER_EFFECT;
+  }
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.cutoverCalls, 1);
+  assert.equal(state.cutoverEffects, 1);
+  await lstat(path.join(path.dirname(fixture.planPath), "final.json"));
+});
+
+test("rejects cutover stderr when no exact successor receipt exists", async (t) => {
+  const fixture = await preparedFixture("cutover-stderr-without-effect-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  process.env.TEST_ORCHESTRATOR_FIXTURE_CUTOVER_STDERR_WITHOUT_EFFECT = "true";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      1,
+    );
+  } finally {
+    delete process.env.TEST_ORCHESTRATOR_FIXTURE_CUTOVER_STDERR_WITHOUT_EFFECT;
+  }
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.cutoverCalls, 1);
+  assert.equal(state.cutoverEffects, 0);
 });
 
 for (const phase of PHASES) {
@@ -366,45 +519,59 @@ test("does not adopt or remove a pre-existing operator mask", async (t) => {
   assert.equal(after.cutoverEffects, 0);
 });
 
-test("resumes from a cache failure while the target remains masked", async (t) => {
-  const fixture = await preparedFixture("masked-cache-recovery-");
+test("retries a transient cache failure while the target remains masked", async (t) => {
+  const fixture = await preparedFixture("masked-cache-retry-");
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
   process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_CACHE_ONCE = "true";
   try {
     assert.equal(
       await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
-      1,
+      0,
     );
   } finally {
     delete process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_CACHE_ONCE;
   }
-  let state = await fixtureState(fixture.root);
+  const state = await fixtureState(fixture.root);
   assert.equal(state.maskEffects, 1);
-  assert.equal(state.slotMasked, true);
-  assert.equal(state.bindEffects, 0);
-  assert.equal(
-    await main(continuationArgs("resume", fixture.root, fixture.planSha256)),
-    0,
-  );
-  state = await fixtureState(fixture.root);
-  assert.equal(state.maskEffects, 1);
+  assert.equal(state.cacheCalls, 2);
+  assert.equal(state.cacheFailures, 1);
   assert.equal(state.unmaskEffects, 1);
   assert.equal(state.slotMasked, false);
   assert.equal(state.bindEffects, 1);
   assert.equal(state.cutoverEffects, 1);
 });
 
-test("rejects a tampered quiesce intent and keeps the target masked", async (t) => {
-  const fixture = await preparedFixture("masked-intent-tamper-");
+test("keeps a target fenced after bounded cache retries are exhausted", async (t) => {
+  const fixture = await preparedFixture("masked-cache-exhausted-");
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
-  process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_CACHE_ONCE = "true";
+  process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_CACHE_ALWAYS = "true";
   try {
     assert.equal(
       await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
       1,
     );
   } finally {
-    delete process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_CACHE_ONCE;
+    delete process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_CACHE_ALWAYS;
+  }
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.cacheCalls, 3);
+  assert.equal(state.cacheFailures, 3);
+  assert.equal(state.slotMasked, true);
+  assert.equal(state.bindEffects, 0);
+  assert.equal(state.cutoverEffects, 0);
+});
+
+test("rejects a tampered quiesce intent and keeps the target masked", async (t) => {
+  const fixture = await preparedFixture("masked-intent-tamper-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_CACHE_ALWAYS = "true";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      1,
+    );
+  } finally {
+    delete process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_CACHE_ALWAYS;
   }
   const quiesceIntent = path.join(
     path.dirname(fixture.planPath),

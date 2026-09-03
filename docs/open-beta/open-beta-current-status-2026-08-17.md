@@ -1,20 +1,20 @@
-# LeetPlus open beta — текущее состояние на 01.09.2026
+# LeetPlus open beta — текущее состояние на 03.09.2026
 
 | Поле                 | Состояние                                                                                                                     |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                  |
-| Production runtime   | healthy; active green `22ab6b81…`, generation 20, `COMBINED`, bridge OFF, bug reporting LIVE                                   |
+| Production runtime   | healthy; active blue `f3f119fa…`, generation 21, `COMBINED`, bridge OFF, bug reporting LIVE; rollback green `22ab6b81…` ready   |
 | Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                  |
-| Release authority    | exact SHA `22ab6b81…`: Fast CI `33514154571`, Full Release Admission `33514154601`, immutable handoff и generation 20 receipt  |
+| Release authority    | exact SHA `f3f119fa…`: Fast CI `33718092094`, Full Release Admission `33718092121`, immutable handoff и generation 21 receipt  |
 | Runtime successor    | Dedicated bonus-ledger worker active; bounded backlog recovery завершён, timer enabled/healthy                                |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                              |
-| Role-aware landing   | входит в active `22ab6b81…`; real-account canary pending                                                                      |
+| Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                      |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                      |
 | Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                   |
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                 |
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
-| Release acceleration | 7/8: topology twin, impact classifier, exact main-push authority, parallel L2 evidence и resumable five-phase rollout реализованы; новый orchestrator source/CI only, production не менялся |
+| Release acceleration | 7/8: первый five-phase production rollout завершён; V3 one-shot recovery hardening реализован в source, cumulative p50/p95 остаётся последним item |
 
 ## Ускорение release pipeline без ослабления gates (02.09.2026)
 
@@ -65,12 +65,23 @@ effect; `apply` требует отдельного production GO. Immutable pha
 Orchestrator не выполняет schema/ACL/worker changes и оставляет previous slot
 горячим rollback.
 
-Это source/CI изменение, а не production rollout: текущая production baseline
-остаётся `22ab6b81…`, CURRENT189, generation 20. Ускорение не меняет решение
-open beta `NO-GO` и не закрывает Gate 1MT/2. Public guest, corporate tenant и
-workers/control-plane остаются независимыми; schema, auth/scope, systemd/nginx,
-worker и production-control изменения по-прежнему требуют полной admission,
-backup/restored-copy и отдельного production GO.
+Первый production rollout этого контура завершён 03.09.2026 на exact admitted
+SHA `f3f119fa81fc497b75cc1e57f046d8539676c943`. Approved five-phase operation
+переключила nginx на active blue generation 21, сохранила green `22ab6b81…` как
+hot rollback и получила terminal receipt без pending record. Public/loopback
+API и Web, authenticated reads, CURRENT189 и worker timers прошли postcheck.
+Schema, auth/scope, guest flags, ACL и worker state этим rollout не менялись.
+
+Production feedback показал пять безопасно возобновляемых late cases: transient
+cache cleanup, systemd failed state после stop, отсутствие automatic slot-env
+bind, readiness до окончания startup и already-accepted cutover с
+диагностическим stderr. V3 source successor автоматизирует только эти exact
+случаи с bounded retry, повторной fence/receipt attestation и atomic root-owned
+slot-env lineage backup. Ambiguous outcome, чужая generation или flag drift
+по-прежнему останавливают operation. Это не меняет open beta `NO-GO` и не
+закрывает Gate 1MT/2. Public guest, corporate tenant и workers/control-plane
+остаются независимыми; schema/security effects сохраняют полную admission,
+backup/restored-copy, signed controller и отдельный production GO.
 
 ## Production CURRENT189 rollout (01.09.2026)
 

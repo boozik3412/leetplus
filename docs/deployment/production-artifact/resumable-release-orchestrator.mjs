@@ -17,13 +17,14 @@ import {
   writeFileSync,
   fsyncSync,
   fchmodSync,
+  fchownSync,
 } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-export const CONTRACT_VERSION = "LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V2";
+export const CONTRACT_VERSION = "LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V3";
 export const PLAN_DECISION = "PREPARED_NOT_EFFECT_AUTHORIZATION";
 export const APPROVAL_DECISION = "EXACT_PLAN_DIGEST_APPLY_AUTHORIZED";
 export const COMPLETE_DECISION = "ROLLOUT_PHASES_COMPLETED";
@@ -45,6 +46,11 @@ const SAFE_RECORD_VALUE = /^[^\0\r\n]{0,8192}$/u;
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_OPERATION_ENTRIES = 4096;
+const MAX_SLOT_ENVIRONMENT_BYTES = 16 * 1024;
+const CACHE_PREPARATION_ATTEMPTS = 3;
+const CACHE_PREPARATION_RETRY_DELAY_MS = 1000;
+const LOOPBACK_READINESS_ATTEMPTS = 12;
+const LOOPBACK_READINESS_RETRY_DELAY_MS = 2000;
 const PRODUCTION_ENGINE =
   "/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs";
 const PRODUCTION_BOOTSTRAP = "LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP_V1";
@@ -120,6 +126,19 @@ const SLOT_BIND_RECEIPT_KEYS = Object.freeze([
   "REQUESTED_TARGET",
   "SLOT",
   "SOURCE_RECEIPT_SHA256",
+]);
+const SLOT_ENVIRONMENT_KEYS = Object.freeze([
+  "RELEASE_SHA",
+  "WEB_BUILD_ID",
+  "EXPECTED_DATABASE_MIGRATION",
+  "EXPECTED_DATABASE_MIGRATION_COUNT",
+  "BUILD_TIME",
+  "GUEST_BUG_REPORTING_MODE",
+  "GUEST_SUPPORT_SCHEMA_BRIDGE_MODE",
+  "API_BIND_HOST",
+  "PORT",
+  "WEB_PORT",
+  "API_URL",
 ]);
 
 export class ReleaseOrchestratorError extends Error {
@@ -364,12 +383,14 @@ function buildPaths(args) {
       deployReceiptRoot: "/var/lib/leetplus/deploy-receipts",
       installedVerifier:
         "/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs",
+      getent: "/usr/bin/getent",
       nginxRoot: "/etc/nginx/leetplus",
       node: "/usr/bin/node",
       promoter: "/usr/local/sbin/leetplus-promote-release-artifact",
       readiness: "/usr/local/libexec/leetplus/verify-release-readiness.sh",
       releaseRoot: "/srv/leetplus/releases",
       slotRoot: "/srv/leetplus/slots",
+      slotEnvironmentRoot: "/etc/leetplus/slots",
       stateRoot: "/var/lib/leetplus/deploy-receipts/release-orchestrator",
       systemctl: "/usr/bin/systemctl",
       systemdUnitRoot: "/etc/systemd/system",
@@ -387,12 +408,14 @@ function buildPaths(args) {
       commandRoot,
       "verify-installed-production-control-generation.mjs",
     ),
+    getent: path.join(commandRoot, "getent"),
     nginxRoot: path.join(root, "etc/nginx/leetplus"),
     node: process.execPath,
     promoter: path.join(commandRoot, "promote-release-artifact"),
     readiness: path.join(commandRoot, "verify-release-readiness"),
     releaseRoot: path.join(root, "srv/leetplus/releases"),
     slotRoot: path.join(root, "srv/leetplus/slots"),
+    slotEnvironmentRoot: path.join(root, "etc/leetplus/slots"),
     stateRoot: path.join(
       root,
       "var/lib/leetplus/deploy-receipts/release-orchestrator",
@@ -515,6 +538,9 @@ function readCanonicalJson(filePath, args, expectedModes = [0o400, 0o600]) {
       fail("ORCHESTRATOR_RECORD_FILE_CHANGED");
     }
     const raw = bytes.toString("utf8");
+    if (!Buffer.from(raw, "utf8").equals(bytes)) {
+      fail("ORCHESTRATOR_RECORD_JSON_INVALID");
+    }
     if (raw.includes("\0") || raw.includes("\r")) {
       fail("ORCHESTRATOR_RECORD_JSON_INVALID");
     }
@@ -715,6 +741,363 @@ function readKeyValueFile(
   } finally {
     closeSync(fd);
   }
+}
+
+function runtimeGroupGid(paths, args) {
+  if (args.testMode) return process.getgid?.();
+  const output = runCommand(
+    paths.getent,
+    ["group", "leetplus-runtime"],
+    args,
+    "ORCHESTRATOR_RUNTIME_GROUP_LOOKUP",
+    30000,
+  );
+  const match = /^leetplus-runtime:[^:\n]*:([0-9]+):[^\n]*\n$/u.exec(output);
+  if (!match) fail("ORCHESTRATOR_RUNTIME_GROUP_INVALID");
+  return exactInteger(
+    Number(match[1]),
+    1,
+    2 ** 31 - 1,
+    "ORCHESTRATOR_RUNTIME_GROUP_INVALID",
+  );
+}
+
+function readExactBytes(
+  filePath,
+  args,
+  { expectedGid, expectedMode, expectedUid, maximumBytes, reasonCode },
+) {
+  const details = lstatSync(filePath);
+  if (
+    !details.isFile() ||
+    details.isSymbolicLink() ||
+    details.nlink !== 1 ||
+    details.size < 1 ||
+    details.size > maximumBytes ||
+    details.uid !== expectedUid ||
+    details.gid !== expectedGid ||
+    (details.mode & 0o777) !== expectedMode
+  ) {
+    fail(reasonCode);
+  }
+  const canonicalPath = realpathSync(filePath);
+  if (canonicalPath !== path.resolve(filePath)) fail(reasonCode);
+  const fd = openSync(
+    canonicalPath,
+    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const before = fstatSync(fd);
+    if (fileIdentity(before) !== fileIdentity(details)) fail(reasonCode);
+    const bytes = readFileSync(fd);
+    const after = fstatSync(fd);
+    if (
+      bytes.length !== before.size ||
+      fileIdentity(before) !== fileIdentity(after)
+    ) {
+      fail(reasonCode);
+    }
+    const raw = bytes.toString("utf8");
+    if (!Buffer.from(raw, "utf8").equals(bytes)) fail(reasonCode);
+    return {
+      bytes,
+      details,
+      path: canonicalPath,
+      raw,
+      sha256: sha256(bytes),
+    };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function parseSlotEnvironment(raw, slot, reasonCode) {
+  if (
+    typeof raw !== "string" ||
+    raw.length === 0 ||
+    raw.includes("\0") ||
+    raw.includes("\r") ||
+    !raw.endsWith("\n")
+  ) {
+    fail(reasonCode);
+  }
+  const values = new Map();
+  for (const line of raw.slice(0, -1).split("\n")) {
+    if (line === "" || line.startsWith("#")) continue;
+    const separator = line.indexOf("=");
+    if (separator < 1) fail(reasonCode);
+    const key = line.slice(0, separator);
+    const value = line.slice(separator + 1);
+    if (
+      !SLOT_ENVIRONMENT_KEYS.includes(key) ||
+      values.has(key) ||
+      !SAFE_RECORD_VALUE.test(value)
+    ) {
+      fail(reasonCode);
+    }
+    values.set(key, value);
+  }
+  exactRecordKeys(values, SLOT_ENVIRONMENT_KEYS, reasonCode);
+  const expected =
+    slot === "blue"
+      ? { apiUrl: "http://127.0.0.1:4100", port: "4100", webPort: "3100" }
+      : { apiUrl: "http://127.0.0.1:4200", port: "4200", webPort: "3200" };
+  if (
+    !SHA40.test(values.get("RELEASE_SHA") ?? "") ||
+    values.get("WEB_BUILD_ID") !== values.get("RELEASE_SHA") ||
+    !MIGRATION.test(values.get("EXPECTED_DATABASE_MIGRATION") ?? "") ||
+    !/^[1-9][0-9]{0,8}$/u.test(
+      values.get("EXPECTED_DATABASE_MIGRATION_COUNT") ?? "",
+    ) ||
+    !["OFF", "LIVE"].includes(values.get("GUEST_BUG_REPORTING_MODE")) ||
+    !["OFF", "ALLOW_CURRENT_187", "ALLOW_CURRENT_188"].includes(
+      values.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE"),
+    ) ||
+    (values.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") !== "OFF" &&
+      values.get("GUEST_BUG_REPORTING_MODE") !== "OFF") ||
+    values.get("API_BIND_HOST") !== "127.0.0.1" ||
+    values.get("PORT") !== expected.port ||
+    values.get("WEB_PORT") !== expected.webPort ||
+    values.get("API_URL") !== expected.apiUrl
+  ) {
+    fail(reasonCode);
+  }
+  exactIso(values.get("BUILD_TIME"), reasonCode);
+  return values;
+}
+
+function renderSlotEnvironment(slot, values) {
+  return (
+    [
+      "# Protected /etc/leetplus/slots/" + slot + ".env metadata.",
+      "RELEASE_SHA=" + values.get("RELEASE_SHA"),
+      "WEB_BUILD_ID=" + values.get("WEB_BUILD_ID"),
+      "EXPECTED_DATABASE_MIGRATION=" +
+        values.get("EXPECTED_DATABASE_MIGRATION"),
+      "EXPECTED_DATABASE_MIGRATION_COUNT=" +
+        values.get("EXPECTED_DATABASE_MIGRATION_COUNT"),
+      "BUILD_TIME=" + values.get("BUILD_TIME"),
+      "API_BIND_HOST=" + values.get("API_BIND_HOST"),
+      "PORT=" + values.get("PORT"),
+      "WEB_PORT=" + values.get("WEB_PORT"),
+      "API_URL=" + values.get("API_URL"),
+      "GUEST_BUG_REPORTING_MODE=" +
+        values.get("GUEST_BUG_REPORTING_MODE"),
+      "GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=" +
+        values.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE"),
+      "",
+    ].join("\n")
+  );
+}
+
+function publishExactBytes(
+  filePath,
+  bytes,
+  args,
+  { expectedGid, expectedMode, expectedUid, reasonCode },
+) {
+  if (existsSync(filePath)) {
+    const current = readExactBytes(filePath, args, {
+      expectedGid,
+      expectedMode,
+      expectedUid,
+      maximumBytes: Math.max(bytes.length, 1),
+      reasonCode,
+    });
+    if (!current.bytes.equals(bytes)) fail(reasonCode);
+    return current;
+  }
+  const temporary = filePath + ".new";
+  if (existsSync(temporary)) {
+    const staged = readExactBytes(temporary, args, {
+      expectedGid,
+      expectedMode,
+      expectedUid,
+      maximumBytes: Math.max(bytes.length, 1),
+      reasonCode,
+    });
+    if (!staged.bytes.equals(bytes)) fail(reasonCode);
+  } else {
+    const fd = openSync(
+      temporary,
+      fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        fsConstants.O_WRONLY |
+        (fsConstants.O_NOFOLLOW ?? 0),
+      0o600,
+    );
+    try {
+      writeFileSync(fd, bytes);
+      if (!args.testMode) fchownSync(fd, expectedUid, expectedGid);
+      fchmodSync(fd, expectedMode);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  }
+  renameSync(temporary, filePath);
+  syncDirectory(path.dirname(filePath), args);
+  return readExactBytes(filePath, args, {
+    expectedGid,
+    expectedMode,
+    expectedUid,
+    maximumBytes: Math.max(bytes.length, 1),
+    reasonCode,
+  });
+}
+
+function bindSlotEnvironment(plan, authority, paths, args) {
+  const expectedUid = args.testMode ? process.getuid?.() : 0;
+  const expectedRuntimeGid = runtimeGroupGid(paths, args);
+  const expectedRecordGid = args.testMode ? process.getgid?.() : 0;
+  const rootDetails = lstatSync(paths.slotEnvironmentRoot);
+  if (
+    !rootDetails.isDirectory() ||
+    rootDetails.isSymbolicLink() ||
+    realpathSync(paths.slotEnvironmentRoot) !==
+      path.resolve(paths.slotEnvironmentRoot) ||
+    (!args.testMode &&
+      (rootDetails.uid !== 0 ||
+        rootDetails.gid !== 0 ||
+        (rootDetails.mode & 0o777) !== 0o755))
+  ) {
+    fail("ORCHESTRATOR_SLOT_ENVIRONMENT_ROOT_INVALID");
+  }
+  const environmentPath = path.join(
+    paths.slotEnvironmentRoot,
+    plan.targetSlot + ".env",
+  );
+  const previousPath = path.join(
+    operationDirectory(paths, plan.operationId),
+    "02-bind-slot-environment.previous.env",
+  );
+  let previous;
+  if (existsSync(previousPath)) {
+    previous = readExactBytes(previousPath, args, {
+      expectedGid: expectedRecordGid,
+      expectedMode: 0o400,
+      expectedUid,
+      maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
+      reasonCode: "ORCHESTRATOR_SLOT_ENVIRONMENT_BACKUP_INVALID",
+    });
+  } else {
+    const current = readExactBytes(environmentPath, args, {
+      expectedGid: expectedRuntimeGid,
+      expectedMode: 0o440,
+      expectedUid,
+      maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
+      reasonCode: "ORCHESTRATOR_SLOT_ENVIRONMENT_INVALID",
+    });
+    parseSlotEnvironment(
+      current.raw,
+      plan.targetSlot,
+      "ORCHESTRATOR_SLOT_ENVIRONMENT_INVALID",
+    );
+    previous = publishExactBytes(previousPath, current.bytes, args, {
+      expectedGid: expectedRecordGid,
+      expectedMode: 0o400,
+      expectedUid,
+      reasonCode: "ORCHESTRATOR_SLOT_ENVIRONMENT_BACKUP_INVALID",
+    });
+  }
+  const previousValues = parseSlotEnvironment(
+    previous.raw,
+    plan.targetSlot,
+    "ORCHESTRATOR_SLOT_ENVIRONMENT_BACKUP_INVALID",
+  );
+  const expectedPreviousReleaseSha =
+    authority.priorState === "BOUND"
+      ? authority.priorReleaseSha
+      : plan.previousReleaseSha;
+  if (
+    previousValues.get("RELEASE_SHA") !== expectedPreviousReleaseSha ||
+    previousValues.get("EXPECTED_DATABASE_MIGRATION") !==
+      plan.previousMigration ||
+    Number(previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !==
+      plan.previousMigrationCount
+  ) {
+    fail("ORCHESTRATOR_SLOT_ENVIRONMENT_LINEAGE_INVALID");
+  }
+  const targetValues = new Map(previousValues);
+  targetValues.set("RELEASE_SHA", plan.releaseSha);
+  targetValues.set("WEB_BUILD_ID", plan.releaseSha);
+  targetValues.set("EXPECTED_DATABASE_MIGRATION", plan.expectedMigration);
+  targetValues.set(
+    "EXPECTED_DATABASE_MIGRATION_COUNT",
+    String(plan.expectedMigrationCount),
+  );
+  targetValues.set("BUILD_TIME", plan.preparedAt);
+  const targetBytes = Buffer.from(
+    renderSlotEnvironment(plan.targetSlot, targetValues),
+    "utf8",
+  );
+  const current = readExactBytes(environmentPath, args, {
+    expectedGid: expectedRuntimeGid,
+    expectedMode: 0o440,
+    expectedUid,
+    maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
+    reasonCode: "ORCHESTRATOR_SLOT_ENVIRONMENT_INVALID",
+  });
+  if (!current.bytes.equals(previous.bytes) && !current.bytes.equals(targetBytes)) {
+    fail("ORCHESTRATOR_SLOT_ENVIRONMENT_DRIFT");
+  }
+  const temporary = environmentPath + ".next." + plan.operationId;
+  if (current.bytes.equals(previous.bytes)) {
+    if (existsSync(temporary)) {
+      const staged = readExactBytes(temporary, args, {
+        expectedGid: expectedRuntimeGid,
+        expectedMode: 0o440,
+        expectedUid,
+        maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
+        reasonCode: "ORCHESTRATOR_SLOT_ENVIRONMENT_STAGING_INVALID",
+      });
+      if (!staged.bytes.equals(targetBytes)) {
+        fail("ORCHESTRATOR_SLOT_ENVIRONMENT_STAGING_INVALID");
+      }
+    } else {
+      const fd = openSync(
+        temporary,
+        fsConstants.O_CREAT |
+          fsConstants.O_EXCL |
+          fsConstants.O_WRONLY |
+          (fsConstants.O_NOFOLLOW ?? 0),
+        0o600,
+      );
+      try {
+        writeFileSync(fd, targetBytes);
+        if (!args.testMode) fchownSync(fd, expectedUid, expectedRuntimeGid);
+        fchmodSync(fd, 0o440);
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+    }
+    renameSync(temporary, environmentPath);
+    syncDirectory(paths.slotEnvironmentRoot, args);
+  } else if (existsSync(temporary)) {
+    fail("ORCHESTRATOR_SLOT_ENVIRONMENT_STAGING_INVALID");
+  }
+  const accepted = readExactBytes(environmentPath, args, {
+    expectedGid: expectedRuntimeGid,
+    expectedMode: 0o440,
+    expectedUid,
+    maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
+    reasonCode: "ORCHESTRATOR_SLOT_ENVIRONMENT_INVALID",
+  });
+  if (!accepted.bytes.equals(targetBytes)) {
+    fail("ORCHESTRATOR_SLOT_ENVIRONMENT_NOT_ACCEPTED");
+  }
+  parseSlotEnvironment(
+    accepted.raw,
+    plan.targetSlot,
+    "ORCHESTRATOR_SLOT_ENVIRONMENT_INVALID",
+  );
+  return {
+    slotEnvironmentPath: accepted.path,
+    slotEnvironmentPreviousPath: previous.path,
+    slotEnvironmentPreviousSha256: previous.sha256,
+    slotEnvironmentSha256: accepted.sha256,
+  };
 }
 
 function verifyInstalledControl(releaseSha, paths, args) {
@@ -918,6 +1301,31 @@ function latestSlotBinding(slot, releaseSha, paths, args) {
   ) {
     return null;
   }
+  const priorState = receipt.values.get("PRIOR_STATE");
+  const priorReleaseSha = receipt.values.get("PRIOR_RELEASE_SHA") ?? "";
+  const priorTarget = receipt.values.get("PRIOR_TARGET") ?? "";
+  const priorDigests = [
+    "PRIOR_SHA256SUMS_SHA256",
+    "PRIOR_HYDRATED_SHA256SUMS_SHA256",
+    "PRIOR_SYMLINK_MANIFEST_SHA256",
+    "PRIOR_PROVENANCE_SHA256",
+    "PRIOR_HYDRATION_ATTESTATION_SHA256",
+  ].map((key) => receipt.values.get(key) ?? "");
+  if (
+    !["ABSENT", "BOUND"].includes(priorState) ||
+    receipt.values.get("SOURCE_RECEIPT_SHA256") !== "" ||
+    receipt.values.get("ACTIVE_SLOT_SAFE_MODE") !== "false" ||
+    (priorState === "ABSENT" &&
+      (priorReleaseSha !== "" ||
+        priorTarget !== "" ||
+        priorDigests.some((value) => value !== ""))) ||
+    (priorState === "BOUND" &&
+      (!SHA40.test(priorReleaseSha) ||
+        priorTarget !== path.join(paths.releaseRoot, priorReleaseSha) ||
+        priorDigests.some((value) => !SHA256.test(value))))
+  ) {
+    fail("ORCHESTRATOR_SLOT_RECEIPT_INVALID");
+  }
   if (
     receiptPath !==
     path.join(
@@ -927,7 +1335,12 @@ function latestSlotBinding(slot, releaseSha, paths, args) {
   ) {
     fail("ORCHESTRATOR_SLOT_RECEIPT_INVALID");
   }
-  return { receiptPath, receiptSha256: receipt.sha256 };
+  return {
+    priorReleaseSha,
+    priorState,
+    receiptPath,
+    receiptSha256: receipt.sha256,
+  };
 }
 
 function currentSlotTarget(slot, paths) {
@@ -1115,6 +1528,10 @@ function validateEvidenceDetails(details, phase, plan) {
       "commandOutputSha256",
       "quiesceIntentSha256",
       "releaseSha",
+      "slotEnvironmentPath",
+      "slotEnvironmentPreviousPath",
+      "slotEnvironmentPreviousSha256",
+      "slotEnvironmentSha256",
       "slotLinkReceiptPath",
       "slotLinkReceiptSha256",
       "targetSlot",
@@ -1441,27 +1858,53 @@ function readInvocationId(unit, paths, args) {
   return output;
 }
 
-function runReadiness(plan, apiUrl, webUrl, paths, args, label) {
-  return runCommand(
-    paths.readiness,
-    [
-      "--release-sha",
-      plan.releaseSha,
-      "--expected-migration",
-      plan.expectedMigration,
-      "--expected-migration-count",
-      String(plan.expectedMigrationCount),
-      "--expected-web-build-id",
-      plan.releaseSha,
-      "--api-base-url",
-      apiUrl,
-      "--web-url",
-      webUrl,
-    ],
-    args,
-    label,
-    120000,
-  );
+function waitMilliseconds(milliseconds) {
+  if (milliseconds <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function runReadiness(
+  plan,
+  apiUrl,
+  webUrl,
+  paths,
+  args,
+  label,
+  attempts = 1,
+) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return runCommand(
+        paths.readiness,
+        [
+          "--release-sha",
+          plan.releaseSha,
+          "--expected-migration",
+          plan.expectedMigration,
+          "--expected-migration-count",
+          String(plan.expectedMigrationCount),
+          "--expected-web-build-id",
+          plan.releaseSha,
+          "--api-base-url",
+          apiUrl,
+          "--web-url",
+          webUrl,
+        ],
+        args,
+        label,
+        120000,
+      );
+    } catch (error) {
+      if (
+        error?.reasonCode !== label + "_FAILED" ||
+        attempt === attempts
+      ) {
+        throw error;
+      }
+      waitMilliseconds(args.testMode ? 1 : LOOPBACK_READINESS_RETRY_DELAY_MS);
+    }
+  }
+  fail(label + "_FAILED");
 }
 
 function runAuthenticated(apiUrl, paths, args, label) {
@@ -1570,6 +2013,46 @@ function readSystemdProperty(unit, property, paths, args) {
     fail("ORCHESTRATOR_SYSTEMD_UNIT_BOUNDARY_INVALID");
   }
   return output.slice(0, -1);
+}
+
+function assertStoppedInstance(unit, paths, args) {
+  if (
+    readSystemdProperty(unit, "ActiveState", paths, args) !== "inactive" ||
+    readSystemdProperty(unit, "SubState", paths, args) !== "dead" ||
+    readSystemdProperty(unit, "MainPID", paths, args) !== "0" ||
+    readSystemdProperty(unit, "ControlPID", paths, args) !== "0"
+  ) {
+    fail("ORCHESTRATOR_TARGET_UNIT_NOT_QUIESCED");
+  }
+}
+
+function prepareCacheWithRetry(plan, apiUnit, webUnit, paths, args) {
+  for (let attempt = 1; attempt <= CACHE_PREPARATION_ATTEMPTS; attempt += 1) {
+    try {
+      return runCommand(
+        paths.cache,
+        ["--slot", plan.targetSlot, "--release-sha", plan.releaseSha],
+        args,
+        "ORCHESTRATOR_CACHE_PREPARATION",
+        300000,
+      );
+    } catch (error) {
+      if (
+        error?.reasonCode !== "ORCHESTRATOR_CACHE_PREPARATION_FAILED" ||
+        attempt === CACHE_PREPARATION_ATTEMPTS
+      ) {
+        throw error;
+      }
+      for (const unit of [apiUnit, webUnit]) {
+        if (inspectInstanceMask(unit, paths, args) !== "MASKED") {
+          fail("ORCHESTRATOR_TARGET_UNIT_MASK_INVALID");
+        }
+        assertStoppedInstance(unit, paths, args);
+      }
+      waitMilliseconds(args.testMode ? 1 : CACHE_PREPARATION_RETRY_DELAY_MS);
+    }
+  }
+  fail("ORCHESTRATOR_CACHE_PREPARATION_FAILED");
 }
 
 function inspectInstanceMask(unit, paths, args) {
@@ -1751,17 +2234,25 @@ function bindPhase(plan, paths, args, phaseIntentSha256) {
     "ORCHESTRATOR_SLOT_STOP",
     180000,
   );
+  commandOutput += runCommand(
+    paths.systemctl,
+    ["reset-failed", apiUnit, webUnit],
+    args,
+    "ORCHESTRATOR_SLOT_RESET_FAILED",
+    30000,
+  );
   for (const unit of [apiUnit, webUnit]) {
     if (inspectInstanceMask(unit, paths, args) !== "MASKED") {
       fail("ORCHESTRATOR_TARGET_UNIT_MASK_INVALID");
     }
+    assertStoppedInstance(unit, paths, args);
   }
-  commandOutput += runCommand(
-    paths.cache,
-    ["--slot", plan.targetSlot, "--release-sha", plan.releaseSha],
+  commandOutput += prepareCacheWithRetry(
+    plan,
+    apiUnit,
+    webUnit,
+    paths,
     args,
-    "ORCHESTRATOR_CACHE_PREPARATION",
-    300000,
   );
   const expectedTarget = path.join(paths.releaseRoot, plan.releaseSha);
   let authority =
@@ -1797,10 +2288,12 @@ function bindPhase(plan, paths, args, phaseIntentSha256) {
   ) {
     fail("ORCHESTRATOR_SLOT_BINDING_NOT_ACCEPTED");
   }
+  const slotEnvironment = bindSlotEnvironment(plan, authority, paths, args);
   return {
     commandOutputSha256: sha256(commandOutput),
     quiesceIntentSha256: quiesce.intentSha256,
     releaseSha: plan.releaseSha,
+    ...slotEnvironment,
     slotLinkReceiptPath: authority.receiptPath,
     slotLinkReceiptSha256: authority.receiptSha256,
     targetSlot: plan.targetSlot,
@@ -1870,6 +2363,7 @@ function smokePhase(plan, paths, args, phaseIntentSha256) {
     paths,
     args,
     "ORCHESTRATOR_LOOPBACK_READINESS",
+    LOOPBACK_READINESS_ATTEMPTS,
   );
   const authenticated = runAuthenticated(
     plan.urls.loopbackApi,
@@ -1951,46 +2445,65 @@ function cutoverPhase(plan, paths, args) {
     ) {
       fail("ORCHESTRATOR_CUTOVER_GENERATION_DRIFT");
     }
-    commandOutput += runCommand(
-      paths.cutover,
-      [
-        "switch",
-        "--slot",
-        plan.targetSlot,
-        "--release-sha",
-        plan.releaseSha,
-        "--expected-migration",
-        plan.expectedMigration,
-        "--expected-migration-count",
-        String(plan.expectedMigrationCount),
-        "--expected-web-build-id",
-        plan.releaseSha,
-        "--loopback-api-url",
-        plan.urls.loopbackApi,
-        "--loopback-web-url",
-        plan.urls.loopbackWeb,
-        "--public-api-url",
-        plan.urls.publicApi,
-        "--public-web-url",
-        plan.urls.publicWeb,
-        "--previous-release-sha",
-        plan.previousReleaseSha,
-        "--previous-migration",
-        plan.previousMigration,
-        "--previous-migration-count",
-        String(plan.previousMigrationCount),
-        "--previous-web-build-id",
-        plan.previousWebBuildId,
-        "--watchdog-seconds",
-        String(plan.watchdogSeconds),
-      ],
-      args,
-      "ORCHESTRATOR_CUTOVER_SWITCH",
-      900000,
-    );
+    try {
+      commandOutput += runCommand(
+        paths.cutover,
+        [
+          "switch",
+          "--slot",
+          plan.targetSlot,
+          "--release-sha",
+          plan.releaseSha,
+          "--expected-migration",
+          plan.expectedMigration,
+          "--expected-migration-count",
+          String(plan.expectedMigrationCount),
+          "--expected-web-build-id",
+          plan.releaseSha,
+          "--loopback-api-url",
+          plan.urls.loopbackApi,
+          "--loopback-web-url",
+          plan.urls.loopbackWeb,
+          "--public-api-url",
+          plan.urls.publicApi,
+          "--public-web-url",
+          plan.urls.publicWeb,
+          "--previous-release-sha",
+          plan.previousReleaseSha,
+          "--previous-migration",
+          plan.previousMigration,
+          "--previous-migration-count",
+          String(plan.previousMigrationCount),
+          "--previous-web-build-id",
+          plan.previousWebBuildId,
+          "--watchdog-seconds",
+          String(plan.watchdogSeconds),
+        ],
+        args,
+        "ORCHESTRATOR_CUTOVER_SWITCH",
+        900000,
+      );
+    } catch (error) {
+      if (
+        error?.reasonCode !==
+        "ORCHESTRATOR_CUTOVER_SWITCH_UNEXPECTED_STDERR"
+      ) {
+        throw error;
+      }
+      const accepted = latestCutover(paths, args);
+      if (
+        !cutoverMatches(accepted, plan, paths) ||
+        currentActiveSlot(paths) !== plan.targetSlot
+      ) {
+        throw error;
+      }
+    }
     current = latestCutover(paths, args);
   }
-  if (!cutoverMatches(current, plan, paths)) {
+  if (
+    !cutoverMatches(current, plan, paths) ||
+    currentActiveSlot(paths) !== plan.targetSlot
+  ) {
     fail("ORCHESTRATOR_CUTOVER_NOT_ACCEPTED");
   }
   return {

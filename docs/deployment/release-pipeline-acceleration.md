@@ -1,6 +1,6 @@
 # Ускорение безопасного release pipeline
 
-Статус: **7/8 backlog items implemented; production preflight остановлен до runtime effect, bootstrap hardening находится в admission**
+Статус: **7/8 backlog items implemented; первый controlled production rollout завершён, V3 one-shot recovery hardening реализован в source**
 
 Актуально на: **03.09.2026**
 
@@ -213,9 +213,28 @@ Exact successor из PR #121 прошёл pre/post-merge Fast и Full Admission 
 root verifier. Первый `prepare` 03.09.2026 снова остановился до plan/effect:
 production Bash после очистки environment синтезировал экспортируемые `PWD`,
 `SHLVL` и `_`, тогда как engine корректно разрешает только шесть exact ключей.
-Следующий узкий successor выполняет финальный `env -i` непосредственно перед
-Node и добавляет disposable-root запуск exact installed bootstrap. Production
-runtime/nginx/DB при этом остались на `22ab6b81…`/generation 20/CURRENT189.
+PR #122 перенёс финальный `env -i` непосредственно перед Node и добавил
+disposable-root запуск exact installed bootstrap.
+
+Post-merge Fast CI `33718092094` и Full Release Admission `33718092121` для
+exact `f3f119fa81fc497b75cc1e57f046d8539676c943` завершились `SUCCESS`.
+Immutable runtime/control handoff был установлен и verified, после чего один
+approved plan прошёл все пять фаз. Production теперь active blue generation 21
+на `f3f119fa…`; hot rollback green `22ab6b81…` остаётся active. Public и
+loopback API/Web, authenticated reads, CURRENT189 и worker timers прошли
+postcheck; schema, ACL и security flags не менялись.
+
+Один exact plan не потребовал нового SHA/admission, однако V2 понадобились
+несколько коротких resume. Live evidence локализовал пять late cases: transient
+cache cleanup, systemd `failed` после stop, отсутствие atomic slot-env bind,
+readiness раньше завершения Nest startup и уже accepted cutover с
+диагностическим stderr. V3 successor делает их частью того же fail-closed
+контракта: bounded cache retry только под повторно проверенным fence,
+`reset-failed` с exact inactive/dead/PID=0, root-only previous slot-env backup и
+atomic lineage-bound update, bounded retry только обычного readiness failure и
+принятие cutover stderr лишь по exact durable successor receipt/active link.
+Timeout, oversized output, чужая generation, изменённые flags или receipt drift
+не повторяются и не принимаются.
 
 Этот successor не включает schema, ACL, worker или security-flag effects: L2
 продолжает использовать параллельный evidence binding и отдельно подписанный
@@ -223,12 +242,18 @@ database/security controller.
 
 ## Что не меняется
 
-- Production runtime остаётся по последнему каноническому evidence exact
-  `22ab6b81…`, CURRENT189, generation 20; live состояние повторно сверено перед
-  preflight, runtime switch не выполнялся.
+- Production runtime по последнему каноническому evidence — active blue exact
+  `f3f119fa…`, CURRENT189, generation 21; hot rollback green `22ab6b81…`
+  остаётся independently ready.
 - Public guest, corporate tenant и workers/control-plane не объединяются ради
   ускорения.
 - Schema/security lane сохраняет backup, restored-copy acceptance, signed
   checksum-pinned controller и post-effect dual-slot verification.
 - Любое расхождение topology, receipt, runtime identity или current DB state
   останавливает effect до отдельного исправления.
+
+Последний, восьмой backlog item остаётся измерительным: накопить несколько
+terminal operation receipts и публиковать duration/failure-phase p50/p95 без
+включения production secrets или пользовательских данных. Один успешный rollout
+уже является первым sample, но недостаточен для осмысленного p95; этот пункт не
+должен задерживать обычный admitted release и не ослабляет ни один gate.

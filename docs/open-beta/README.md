@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.201                                        |
-| Дата             | 28.08.2026                                   |
+| Версия           | 1.202                                        |
+| Дата             | 03.09.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -44,12 +44,20 @@ administration, workers или deployment обязателен единый
 tenant сети `1337` сохранён, пользовательский cohort не переносился, а
 одноимённые пустые tenant остаются отдельным подтверждаемым cleanup.
 
-Role-aware successor корпоративного входа слит и admitted на exact SHA
-`359e5aeb...`: менеджер по стандартам получает `/staff`, остальные системные
-роли — свой поддерживаемый рабочий контур, а stale dashboard `returnTo` не
-обходит выбор роли. Production deploy и real-account canary ещё не выполнены;
-статус и исполнимый checklist находятся в
-[evidence 28.08.2026](./role-aware-corporate-landing-evidence-2026-08-28.md).
+Role-aware corporate landing входит в active production release
+`f3f119fa81fc497b75cc1e57f046d8539676c943`: менеджер по стандартам получает
+`/staff`, остальные системные роли — свой поддерживаемый рабочий контур, а
+stale dashboard `returnTo` не обходит выбор роли. Real-account canary остаётся
+отдельной проверкой; исходное evidence находится в
+[отчёте 28.08.2026](./role-aware-corporate-landing-evidence-2026-08-28.md).
+
+Текущий production baseline — active blue `f3f119fa…`, generation 21,
+`CURRENT_189/189`, bridge `OFF`, bug reporting `LIVE`; hot rollback green
+`22ab6b81…` independently ready. Первый approved five-phase release rollout
+завершён terminal receipt без schema/ACL/security-flag effects. V3 source
+hardening автоматизирует только exact fenced recovery cases; подробности и
+остаточный metrics backlog зафиксированы в
+[плане ускорения release pipeline](../deployment/release-pipeline-acceleration.md).
 
 Основной путь первого внешнего клуба — `SHARED_MULTI_TENANT_BETA`: новый
 `Tenant B/Store B1` в общем web/API/workers/PostgreSQL/Telegram data plane.

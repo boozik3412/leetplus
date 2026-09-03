@@ -2,11 +2,10 @@
 
 Статус: **канонический current-state contract**
 
-Актуально на: **02.09.2026**
+Актуально на: **03.09.2026**
 Runtime implementation baseline:
-`22ab6b81dacc726068d0dfcc5172fe67581a45b1` (PR #111; включает
-status-only review-переходы чек-листов, отдельный bonus-ledger worker,
-CURRENT189 guest-support repair и standards-manager invite delegation)
+`f3f119fa81fc497b75cc1e57f046d8539676c943` (PR #122; включает
+CURRENT189 application baseline и admitted resumable release orchestrator)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -17,14 +16,14 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                                                          |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Runtime implementation   | CURRENT189 production baseline, merge SHA `22ab6b81dacc726068d0dfcc5172fe67581a45b1`                                                                                                                          |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33514154571) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33514154601) — `SUCCESS`                                 |
-| Production API topology  | active green exact `22ab6b81…`, generation 20, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback blue exact того же SHA, оба slot active                                     |
+| Runtime implementation   | CURRENT189 production baseline, merge SHA `f3f119fa81fc497b75cc1e57f046d8539676c943`                                                                                                                          |
+| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33718092094) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33718092121) — `SUCCESS`                                 |
+| Production API topology  | active blue exact `f3f119fa…`, generation 21, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback green exact `22ab6b81…`, оба slot active                                     |
 | Guest bug-report repair  | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                |
 | Corporate invite repair  | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                    |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
-| Corporate landing        | role-aware successor входит в active `22ab6b81…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
-| Release acceleration     | 7/8: topology twin, impact classifier, exact main-push candidate, parallel L2 evidence и resumable five-phase runtime orchestrator добавлены; первая control-generation установлена без runtime effect, quiesce/mask hardening проходит новый admission; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
+| Corporate landing        | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
+| Release acceleration     | 7/8: первый controlled five-phase rollout завершён на generation 21; V3 one-shot recovery hardening реализован в source и требует exact admission; последний backlog item — накопительные p50/p95 по duration/failure phase; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -93,6 +92,27 @@ layer не становится четвёртым
 security-контуром и не получает право на Prisma/SQL, ACL, auth/scope,
 USER_CALL, guest flags или worker state. Такие L2 effects по-прежнему требуют
 своих signed controllers, backup/restored-copy evidence и отдельного GO.
+
+Первый controlled production rollout оркестратора завершён 03.09.2026 на exact
+admitted SHA `f3f119fa81fc497b75cc1e57f046d8539676c943`: active upstream —
+blue, cutover generation — 21, hot rollback — green `22ab6b81…`. Public и
+loopback API/Web readiness, authenticated reads, worker timers и exact
+`CURRENT_189/189` прошли postcheck; schema, ACL и runtime security flags не
+менялись. Операция сохранила terminal five-phase receipt и не оставила pending
+record.
+
+Этот rollout также дал точный production feedback для successor-контракта V3.
+Target, остающийся в systemd `failed` после stop, теперь проходит только
+идемпотентный `reset-failed` и повторную проверку `masked/inactive/dead/PID=0`.
+Slot metadata обновляется атомарно под fence с root-only exact previous-byte
+backup, lineage к bind receipt и сохранением guest reporting/schema-bridge
+flags. Cache повторяется ограниченно только после обычного non-zero результата
+и повторной проверки fence; ambiguous outcome не повторяется. Loopback
+readiness получает bounded startup wait, но timeout/oversize/stderr остаются
+fail-closed. Cutover с диагностическим stderr принимается только если уже
+опубликованный latest receipt является точным successor generation и active
+nginx link совпадает. Эти правила относятся только к deployment coordination и
+не дают оркестратору SQL, auth/scope, provider или worker authority.
 
 Rollout 01.09.2026 прошёл на exact admitted SHA после restored-copy PASS и
 checksum-pinned перехода `CURRENT_188 -> CURRENT_189`. Оба runtime slot готовы

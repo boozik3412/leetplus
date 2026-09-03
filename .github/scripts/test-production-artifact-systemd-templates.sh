@@ -515,6 +515,10 @@ grep -F -x 'RuntimeDirectoryPreserve=yes' "$langame_audit_preflight_unit" > /dev
 grep -F -x 'CapabilityBoundingSet=CAP_SETGID CAP_SETUID' "$langame_audit_preflight_unit" > /dev/null
 grep -F -x 'AmbientCapabilities=CAP_SETGID CAP_SETUID' "$langame_audit_preflight_unit" > /dev/null
 grep -F -x 'RestrictSUIDSGID=false' "$langame_audit_preflight_unit" > /dev/null
+grep -F -x "[[ -x /usr/bin/id && ! -L /usr/bin/id ]] || die 'trusted id utility is unavailable'" \
+  "$langame_audit_authority" > /dev/null
+grep -F -x '[[ ${EUID:-99999} -eq 0 && "$(/usr/bin/id -g)" == 0 ]] || die '\''root authority is required'\''' \
+  "$langame_audit_authority" > /dev/null
 if grep -F -x 'RemainAfterExit=yes' "$langame_audit_preflight_unit" > /dev/null \
   || grep -F '/run/leetplus-production-control' "$langame_audit_preflight_unit" > /dev/null; then
   printf 'Langame audit preflight retains stale completion state or broad rollout-lock ownership\n' >&2

@@ -156,6 +156,8 @@ cleanup() {
   remove_fixture_tree "$API_DROPIN_ROOT"
   remove_fixture_tree "$WEB_DROPIN_ROOT"
   /usr/bin/systemctl daemon-reload >/dev/null 2>&1
+  remove_fixture_tree /run/leetplus-langame-discrepancy-audit
+  remove_fixture_tree /run/leetplus-production-control
   if /usr/bin/getent passwd leetplus-rehearsal >/dev/null 2>&1; then
     /usr/sbin/userdel leetplus-rehearsal
   fi

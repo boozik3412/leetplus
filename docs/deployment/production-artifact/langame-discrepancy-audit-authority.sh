@@ -59,7 +59,8 @@ check before returning terminal evidence (it does not claim a durable receipt).
 USAGE
 }
 
-[[ ${EUID:-99999} -eq 0 && ${EGID:-99999} -eq 0 ]] || die 'root authority is required'
+[[ -x /usr/bin/id && ! -L /usr/bin/id ]] || die 'trusted id utility is unavailable'
+[[ ${EUID:-99999} -eq 0 && "$(/usr/bin/id -g)" == 0 ]] || die 'root authority is required'
 for required in awk find findmnt flock getent id install mktemp readlink rm runuser sha256sum sort stat; do
   command -v "$required" >/dev/null 2>&1 || die "required command is unavailable: ${required}"
 done

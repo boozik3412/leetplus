@@ -769,6 +769,14 @@ test("production bridge adapter matches the canonical slot-link receipt contract
       .bridgeProductionControlVerifierAuthorityArgument,
     "--require-root-authority",
   );
+  assert.match(
+    controller,
+    /"PRODUCTION_CONTROL_EFFECTIVE_LANE",\s*"PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256",/u,
+  );
+  assert.match(
+    controller,
+    /values\.PRODUCTION_CONTROL_EFFECTIVE_LANE !== "L2_SCHEMA_SECURITY"/u,
+  );
   assert.equal(
     FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS
       .bridgeSlotLinkBoundEffectState,

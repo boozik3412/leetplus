@@ -27,6 +27,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       effective_lane: ${{ steps.classify.outputs.effective_lane }}
+      impact_receipt_sha256: ${{ steps.classify.outputs.impact_receipt_sha256 }}
       runtime_artifact_eligible: ${{ steps.classify.outputs.runtime_artifact_eligible }}
       deployable_candidate: ${{ steps.classify.outputs.deployable_candidate }}
 
@@ -101,8 +102,10 @@ jobs:
             --impact-receipt "$receipt" \
             --verify-receipt "$candidate_receipt"
           RECEIPT="$receipt" CANDIDATE_RECEIPT="$candidate_receipt" node --input-type=module <<'NODE'
+          import crypto from "node:crypto";
           import fs from "node:fs";
-          const receipt = JSON.parse(fs.readFileSync(process.env.RECEIPT, "utf8"));
+          const impactRaw = fs.readFileSync(process.env.RECEIPT, "utf8");
+          const receipt = JSON.parse(impactRaw);
           const candidate = JSON.parse(fs.readFileSync(process.env.CANDIDATE_RECEIPT, "utf8"));
           if (!["L0_DOCS", "L1_RUNTIME", "L2_SCHEMA_SECURITY"].includes(receipt.effectiveLane)) {
             throw new Error("release impact receipt has an invalid effective lane");
@@ -116,6 +119,7 @@ jobs:
           fs.appendFileSync(
             process.env.GITHUB_OUTPUT,
             `effective_lane=${receipt.effectiveLane}\n` +
+              `impact_receipt_sha256=${crypto.createHash("sha256").update(impactRaw, "utf8").digest("hex")}\n` +
               `runtime_artifact_eligible=${receipt.runtimeArtifactEligible}\n` +
               `deployable_candidate=${candidate.deployableCandidate}\n`,
           );
@@ -311,7 +315,9 @@ jobs:
           node --check docs/deployment/production-artifact/resumable-release-orchestrator.mjs
           node --check .github/scripts/resumable-release-orchestrator-fixture-command.mjs
           node --check .github/scripts/test-resumable-release-orchestrator.mjs
+          node --check .github/scripts/test-resumable-release-orchestrator-metrics.mjs
           node .github/scripts/test-resumable-release-orchestrator.mjs
+          node --test .github/scripts/test-resumable-release-orchestrator-metrics.mjs
           bash -n .github/scripts/test-production-artifact-systemd-templates.sh
           bash .github/scripts/test-production-artifact-systemd-templates.sh
           bash -n docs/deployment/production-artifact/preflight-legacy-rollback.sh
@@ -1002,9 +1008,14 @@ jobs:
 
       - name: Create deterministic release artifact
         shell: bash
+        env:
+          RELEASE_EFFECTIVE_LANE: ${{ needs.release_impact.outputs.effective_lane }}
+          RELEASE_IMPACT_RECEIPT_SHA256: ${{ needs.release_impact.outputs.impact_receipt_sha256 }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+          [[ "$RELEASE_EFFECTIVE_LANE" =~ ^(L1_RUNTIME|L2_SCHEMA_SECURITY)$ ]]
+          [[ "$RELEASE_IMPACT_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]]
 
           node_realpath="$(realpath -e -- "$(command -v node)")"
           case "$node_realpath" in
@@ -1094,10 +1105,12 @@ jobs:
             '  "pnpmVersion": "10.33.2",' \
             "  \"databaseMigration\": \"$database_migration\"," \
             "  \"databaseMigrationCount\": $database_migration_count," \
+            "  \"effectiveLane\": \"$RELEASE_EFFECTIVE_LANE\"," \
             '  "runtimePackageManifestsIncluded": true,' \
             '  "canonicalPrismaDeployScriptsIncluded": true,' \
             '  "canonicalPrismaDeployScriptCount": 1,' \
             '  "founderPilotOperationalScriptsIncluded": true,' \
+            "  \"impactReceiptSha256\": \"$RELEASE_IMPACT_RECEIPT_SHA256\"," \
             '  "founderPilotOperationalScriptCount": 18,' \
             '  "runtimeEnrollmentOperationalScriptsIncluded": true,' \
             '  "runtimeEnrollmentOperationalScriptCount": 6,' \
@@ -1241,6 +1254,8 @@ jobs:
                 --release-root "$verification_root_real" \
                 --expected-release-sha "$CI_RELEASE_SHA"
             test "$(node -p 'require("./release-provenance.json").releaseSha')" = "$CI_RELEASE_SHA"
+            test "$(node -p 'require("./release-provenance.json").effectiveLane')" = "$RELEASE_EFFECTIVE_LANE"
+            test "$(node -p 'require("./release-provenance.json").impactReceiptSha256')" = "$RELEASE_IMPACT_RECEIPT_SHA256"
             test "$(node -p 'require("./release-provenance.json").runtimePackageManifestsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").canonicalPrismaDeployScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").canonicalPrismaDeployScriptCount')" = '1'
@@ -1342,7 +1357,7 @@ jobs:
         run: |
           set -euo pipefail
           helper_source="$GITHUB_WORKSPACE/.github/scripts/hydrate-runtime-release-artifact-ci.sh"
-          helper_sha256='c6cb3f115dbc5657f8f12c79b44a718f63475cfe9a8497233d35cd94b53f7891'
+          helper_sha256='27fe0adfbff6ac1d5462cdaffc2be6c1e74c1fc7bd290b66883023c0efd9d467'
           authority_parent='/srv/leetplus-ci-runtime-authority'
           authority_root="$authority_parent/$CI_RELEASE_SHA"
           sudo -n /usr/bin/env -i \
@@ -2201,6 +2216,7 @@ jobs:
   production-control-candidate:
     name: Production-control candidate
     needs:
+      - release_impact
       - authority-root-trust
       - release-artifact-api
       - migration-smoke
@@ -2226,8 +2242,13 @@ jobs:
 
       - name: Build independently verified production-control candidate
         shell: bash
+        env:
+          RELEASE_EFFECTIVE_LANE: ${{ needs.release_impact.outputs.effective_lane }}
+          RELEASE_IMPACT_RECEIPT_SHA256: ${{ needs.release_impact.outputs.impact_receipt_sha256 }}
         run: |
           set -euo pipefail
+          [[ "$RELEASE_EFFECTIVE_LANE" =~ ^(L1_RUNTIME|L2_SCHEMA_SECURITY)$ ]]
+          [[ "$RELEASE_IMPACT_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]]
           node_realpath="$(realpath -e -- "$(command -v node)")"
           runner_tool_cache_real="$(realpath -e -- "$RUNNER_TOOL_CACHE")"
           repository_root="$(realpath -e -- "$GITHUB_WORKSPACE")"
@@ -2279,6 +2300,8 @@ jobs:
               --repository-root "$repository_root" \
               --runner-tool-cache "$control_tool_cache_real" \
               --node-path "$control_node_realpath" \
+              --effective-lane "$RELEASE_EFFECTIVE_LANE" \
+              --impact-receipt-sha256 "$RELEASE_IMPACT_RECEIPT_SHA256" \
               --output-directory "$output_directory"
 
       - name: Upload non-deployable production-control candidate
@@ -2329,6 +2352,7 @@ jobs:
           path: ${{ runner.temp }}/release-handoff-candidate-authority
 
       - name: Re-verify exact main-push candidate authority
+        id: candidate_authority
         shell: bash
         env:
           RELEASE_CANDIDATE_EVENT_BEFORE: ${{ github.event.before || '' }}
@@ -2355,10 +2379,17 @@ jobs:
           const receipt = JSON.parse(fs.readFileSync(process.env.CANDIDATE_RECEIPT, "utf8"));
           if (
             receipt.deployableCandidate !== true ||
-            receipt.decision !== "EXACT_MAIN_PUSH_DEPLOYABLE_CANDIDATE"
+            receipt.decision !== "EXACT_MAIN_PUSH_DEPLOYABLE_CANDIDATE" ||
+            !["L1_RUNTIME", "L2_SCHEMA_SECURITY"].includes(receipt.effectiveLane) ||
+            !/^[0-9a-f]{64}$/u.test(receipt.impactReceiptSha256 ?? "")
           ) {
             throw new Error("handoff source is not the exact deployable main-push candidate");
           }
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `effective_lane=${receipt.effectiveLane}\n` +
+              `impact_receipt_sha256=${receipt.impactReceiptSha256}\n`,
+          );
           NODE
 
       - name: Download exact runtime candidate
@@ -2375,8 +2406,13 @@ jobs:
 
       - name: Re-verify runtime candidate from a fresh checkout
         shell: bash
+        env:
+          RELEASE_EFFECTIVE_LANE: ${{ steps.candidate_authority.outputs.effective_lane }}
+          RELEASE_IMPACT_RECEIPT_SHA256: ${{ steps.candidate_authority.outputs.impact_receipt_sha256 }}
         run: |
           set -euo pipefail
+          [[ "$RELEASE_EFFECTIVE_LANE" =~ ^(L1_RUNTIME|L2_SCHEMA_SECURITY)$ ]]
+          [[ "$RELEASE_IMPACT_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]]
           download_root="$RUNNER_TEMP/release-handoff-runtime-candidate"
           archive="$download_root/leetplus-release-$CI_RELEASE_SHA.tar.gz"
           checksum="$archive.sha256"
@@ -2441,12 +2477,19 @@ jobs:
             GITHUB_ACTIONS=true \
             "$node_realpath" "$GITHUB_WORKSPACE/.github/scripts/verify-runtime-release-artifact.mjs" \
               --release-root "$extraction_root_real" \
-              --expected-release-sha "$CI_RELEASE_SHA"
+              --expected-release-sha "$CI_RELEASE_SHA" \
+              --expected-effective-lane "$RELEASE_EFFECTIVE_LANE" \
+              --expected-impact-receipt-sha256 "$RELEASE_IMPACT_RECEIPT_SHA256"
 
       - name: Independently rebuild and compare production-control bytes
         shell: bash
+        env:
+          RELEASE_EFFECTIVE_LANE: ${{ steps.candidate_authority.outputs.effective_lane }}
+          RELEASE_IMPACT_RECEIPT_SHA256: ${{ steps.candidate_authority.outputs.impact_receipt_sha256 }}
         run: |
           set -euo pipefail
+          [[ "$RELEASE_EFFECTIVE_LANE" =~ ^(L1_RUNTIME|L2_SCHEMA_SECURITY)$ ]]
+          [[ "$RELEASE_IMPACT_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]]
           candidate_root="$RUNNER_TEMP/release-handoff-control-candidate"
           candidate_archive="$candidate_root/leetplus-production-control-$CI_RELEASE_SHA.tar.gz"
           candidate_checksum="$candidate_archive.sha256"
@@ -2521,6 +2564,8 @@ jobs:
               --repository-root "$repository_root" \
               --runner-tool-cache "$control_tool_cache_real" \
               --node-path "$control_node_realpath" \
+              --effective-lane "$RELEASE_EFFECTIVE_LANE" \
+              --impact-receipt-sha256 "$RELEASE_IMPACT_RECEIPT_SHA256" \
               --output-directory "$rebuilt_root"
           rebuilt_archive="$rebuilt_root/leetplus-production-control-$CI_RELEASE_SHA.tar.gz"
           rebuilt_checksum="$rebuilt_archive.sha256"
@@ -2589,6 +2634,8 @@ jobs:
           RECEIPT_REPOSITORY_ID: ${{ github.repository_id }}
           RECEIPT_WORKFLOW_REF: ${{ github.workflow_ref }}
           RECEIPT_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RECEIPT_EFFECTIVE_LANE: ${{ steps.candidate_authority.outputs.effective_lane }}
+          RECEIPT_IMPACT_RECEIPT_SHA256: ${{ steps.candidate_authority.outputs.impact_receipt_sha256 }}
         run: |
           set -euo pipefail
           receipt="$RUNNER_TEMP/release-handoff-publication-$CI_RELEASE_SHA/admission/leetplus-release-admission-$CI_RELEASE_SHA.json"
@@ -2610,10 +2657,14 @@ jobs:
           repository_id="$RECEIPT_REPOSITORY_ID"
           workflow_ref="$RECEIPT_WORKFLOW_REF"
           workflow_sha="$RECEIPT_WORKFLOW_SHA"
+          effective_lane="$RECEIPT_EFFECTIVE_LANE"
+          impact_receipt_sha256="$RECEIPT_IMPACT_RECEIPT_SHA256"
           [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
           [[ "$repository_id" =~ ^[1-9][0-9]*$ ]]
           [[ "$workflow_ref" == "${repository}/.github/workflows/ci.yml@"* ]]
           [[ "$workflow_sha" == "$CI_RELEASE_SHA" ]]
+          [[ "$effective_lane" =~ ^(L1_RUNTIME|L2_SCHEMA_SECURITY)$ ]]
+          [[ "$impact_receipt_sha256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$GITHUB_EVENT_NAME" == 'push' ]]
           [[ "$GITHUB_REF" == 'refs/heads/main' ]]
           [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
@@ -2635,7 +2686,8 @@ jobs:
             "$repository" "$repository_id" "$workflow_ref" "$workflow_sha" \
             "$runtime_payload_digest" "$control_payload_digest" \
             "$runtime_artifact_id" "$runtime_transport_digest" \
-            "$control_artifact_id" "$control_transport_digest" <<'NODE'
+            "$control_artifact_id" "$control_transport_digest" \
+            "$effective_lane" "$impact_receipt_sha256" <<'NODE'
           const fs = require("node:fs");
           const [
             receiptPath,
@@ -2652,9 +2704,11 @@ jobs:
             runtimeTransportDigest,
             controlId,
             controlTransportDigest,
+            effectiveLane,
+            impactReceiptSha256,
           ] = process.argv.slice(2);
           const receipt = {
-            schemaVersion: 1,
+            schemaVersion: 2,
             admission: "PASS",
             releaseSha,
             runId,
@@ -2663,6 +2717,8 @@ jobs:
             repositoryId,
             workflowRef,
             workflowSha,
+            effectiveLane,
+            impactReceiptSha256,
             runtimeArtifactName: `leetplus-release-${releaseSha}-handoff-payload-${runId}-${runAttempt}`,
             runtimeArchiveSha256: runtimePayloadDigest,
             productionControlArtifactName:

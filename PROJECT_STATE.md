@@ -43,7 +43,7 @@ Release provenance вычисляется из immutable artifact `prisma/migrat
 миграция не становится допустимой автоматически.
 
 Для сокращения поздних fail-closed итераций source/CI-инициатива ускорения
-release pipeline выполнена на 7/8. Канонические blue/green/N−1 ports, runtime NSS topology,
+release pipeline выполнена на 8/8. Канонические blue/green/N−1 ports, runtime NSS topology,
 API/Web EnvironmentFiles, transient restored-copy membership и независимые
 slot-link receipts зафиксированы в
 `docs/deployment/production-artifact/production-topology-contract.json` и
@@ -81,7 +81,9 @@ loopback API/Web, authenticated reads, CURRENT189 и worker timers прошли 
 schema/ACL/flags не менялись. Live rollout обнаружил пять recovery cases, не
 требующих нового SHA: transient cache cleanup, systemd failed state после stop,
 отсутствующий automatic slot-env bind, ранний readiness probe и accepted
-cutover с диагностическим stderr. V3 source successor автоматизирует их
+cutover с диагностическим stderr. V3 successor объединён в `main` через PR #123
+как `c955e99e…`; post-merge Fast `33728044375` и Full `33728044457` завершились
+`SUCCESS`. Он автоматизирует их
 fail-closed: bounded retry только под exact fence, reset-failed с
 inactive/dead/PID=0, root-only previous slot-env backup и atomic lineage bind,
 bounded normalization фактического legacy `API_BIND_HOST=localhost` к
@@ -89,8 +91,14 @@ canonical `127.0.0.1` только после target fence, startup wait и пр
 только по exact durable cutover successor. Любой иной bind-host alias остаётся
 fail-closed.
 Orchestrator не выполняет Prisma/SQL, ACL, auth/scope, guest flags или worker
-effects. Последний backlog item — накопительные duration/failure-phase p50/p95;
-одного rollout sample недостаточно для осмысленного p95.
+effects. REL-ACC-008 связывает lane не с параметром оператора, а с exact impact
+receipt через final admission, immutable runtime/control provenance и root-only
+installed receipt. `apply|resume` публикуют только обезличенные attempt records,
+а read-only `metrics` считает duration/failure-phase и p50/p95 отдельно для
+`L1_RUNTIME`/`L2_SCHEMA_SECURITY`, не обращаясь к DB, runtime units или сети.
+Исторический V2 rollout `f3f119fa…` учитывается как `LEGACY_UNCLASSIFIED`; пока
+нет 20 terminal samples одной lane, p50/p95 остаются `null` с решением
+`INSUFFICIENT_SAMPLE_SIZE`.
 
 Ниже сохранена история fail-closed restored-copy итераций, которые предшествовали
 успешному rehearsal и production rollout 01.09.2026.

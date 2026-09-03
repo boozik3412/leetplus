@@ -52,6 +52,8 @@ const EXPECTED_PNPM_VERSION = "10.33.2";
 const EXPECTED_DATABASE_DEPLOY_COMMAND =
   "node scripts/canonical-prisma-deploy.mjs";
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
+const IMPACT_RECEIPT_SHA256_PATTERN = /^[0-9a-f]{64}$/u;
+const RUNTIME_ELIGIBLE_LANES = new Set(["L1_RUNTIME", "L2_SCHEMA_SECURITY"]);
 const MIGRATION_NAME_PATTERN = /^[0-9]{14}_[a-z0-9_]+$/u;
 const REQUIRED_CORE_FILES = [
   "./apps/api/dist/main.js",
@@ -76,13 +78,27 @@ function fail(message) {
 function parseArguments(argv) {
   let releaseRoot;
   let expectedReleaseSha;
+  let expectedEffectiveLane;
+  let expectedImpactReceiptSha256;
+  const seen = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument === "--release-root") {
-      releaseRoot = argv[index + 1];
-      index += 1;
-    } else if (argument === "--expected-release-sha") {
-      expectedReleaseSha = argv[index + 1];
+    if (
+      argument === "--release-root" ||
+      argument === "--expected-release-sha" ||
+      argument === "--expected-effective-lane" ||
+      argument === "--expected-impact-receipt-sha256"
+    ) {
+      if (seen.has(argument)) fail(`duplicate argument: ${argument}`);
+      seen.add(argument);
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        fail(`${argument} requires one value`);
+      }
+      if (argument === "--release-root") releaseRoot = value;
+      else if (argument === "--expected-release-sha") expectedReleaseSha = value;
+      else if (argument === "--expected-effective-lane") expectedEffectiveLane = value;
+      else expectedImpactReceiptSha256 = value;
       index += 1;
     } else {
       fail(`unknown argument: ${argument}`);
@@ -92,7 +108,22 @@ function parseArguments(argv) {
   if (!RELEASE_SHA_PATTERN.test(expectedReleaseSha ?? "")) {
     fail("--expected-release-sha must be 40 lowercase hexadecimal characters");
   }
-  return { expectedReleaseSha, releaseRoot };
+  if ((expectedEffectiveLane === undefined) !== (expectedImpactReceiptSha256 === undefined)) {
+    fail("expected admission lane and impact receipt digest must be provided together");
+  }
+  if (
+    expectedEffectiveLane !== undefined &&
+    (!RUNTIME_ELIGIBLE_LANES.has(expectedEffectiveLane) ||
+      !IMPACT_RECEIPT_SHA256_PATTERN.test(expectedImpactReceiptSha256))
+  ) {
+    fail("expected admission lane is invalid");
+  }
+  return {
+    expectedEffectiveLane,
+    expectedImpactReceiptSha256,
+    expectedReleaseSha,
+    releaseRoot,
+  };
 }
 
 function assertSafePath(relativePath, source) {
@@ -394,7 +425,13 @@ function assertOperationalScriptIdentity(actualPaths) {
   }
 }
 
-function assertProvenance(root, expectedReleaseSha, migrationIdentity) {
+function assertProvenance(
+  root,
+  expectedReleaseSha,
+  migrationIdentity,
+  expectedEffectiveLane,
+  expectedImpactReceiptSha256,
+) {
   const provenancePath = path.join(root, "release-provenance.json");
   let provenance;
   try {
@@ -409,6 +446,12 @@ function assertProvenance(root, expectedReleaseSha, migrationIdentity) {
   ) {
     fail("release-provenance.json must contain one JSON object");
   }
+  if (
+    !RUNTIME_ELIGIBLE_LANES.has(provenance.effectiveLane) ||
+    !IMPACT_RECEIPT_SHA256_PATTERN.test(provenance.impactReceiptSha256 ?? "")
+  ) {
+    fail("release provenance admission lane is invalid");
+  }
   const expectedFields = {
     canonicalPrismaDeployScriptCount: 1,
     canonicalPrismaDeployScriptsIncluded: true,
@@ -418,8 +461,10 @@ function assertProvenance(root, expectedReleaseSha, migrationIdentity) {
     currentReleaseRuntimeAcceptanceScriptsIncluded: true,
     databaseMigration: migrationIdentity.databaseMigration,
     databaseMigrationCount: migrationIdentity.databaseMigrationCount,
+    effectiveLane: provenance.effectiveLane,
     founderPilotOperationalScriptCount: 18,
     founderPilotOperationalScriptsIncluded: true,
+    impactReceiptSha256: provenance.impactReceiptSha256,
     nodeVersion: EXPECTED_NODE_VERSION,
     operationalScriptCount: 35,
     parallelBackupRestoredCopyEvidenceScriptCount: 2,
@@ -456,9 +501,21 @@ function assertProvenance(root, expectedReleaseSha, migrationIdentity) {
       fail(`release provenance field is not exact: ${key}`);
     }
   }
+  if (
+    expectedEffectiveLane !== undefined &&
+    (provenance.effectiveLane !== expectedEffectiveLane ||
+      provenance.impactReceiptSha256 !== expectedImpactReceiptSha256)
+  ) {
+    fail("release provenance admission authority differs from the expected handoff");
+  }
 }
 
-const { expectedReleaseSha, releaseRoot } = parseArguments(
+const {
+  expectedEffectiveLane,
+  expectedImpactReceiptSha256,
+  expectedReleaseSha,
+  releaseRoot,
+} = parseArguments(
   process.argv.slice(2),
 );
 const unresolvedRoot = path.resolve(releaseRoot);
@@ -485,7 +542,13 @@ const migrationIdentity = assertCoreTopology(
   actualPaths,
   expectedReleaseSha,
 );
-assertProvenance(root, expectedReleaseSha, migrationIdentity);
+assertProvenance(
+  root,
+  expectedReleaseSha,
+  migrationIdentity,
+  expectedEffectiveLane,
+  expectedImpactReceiptSha256,
+);
 
 const manifestDigest = crypto
   .createHash("sha256")

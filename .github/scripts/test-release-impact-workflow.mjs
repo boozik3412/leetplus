@@ -75,7 +75,7 @@ for (const jobId of ["authority-root-trust", "application", "migration-smoke"]) 
 const releaseArtifactApi = jobBlock(workflows.get("Full Release Admission"), "release-artifact-api");
 assert.match(releaseArtifactApi, /needs: application/u, "runtime candidate must remain downstream of application gates");
 const productionControl = jobBlock(workflows.get("Full Release Admission"), "production-control-candidate");
-for (const dependency of ["authority-root-trust", "release-artifact-api", "migration-smoke"]) {
+for (const dependency of ["release_impact", "authority-root-trust", "release-artifact-api", "migration-smoke"]) {
   assert.match(productionControl, new RegExp(`- ${dependency}`, "u"), `control candidate must still require ${dependency}`);
 }
 

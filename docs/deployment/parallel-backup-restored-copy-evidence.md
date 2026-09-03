@@ -46,7 +46,9 @@ Preparation допускается только для deployable `L2_SCHEMA_SEC
 exact `push` в `refs/heads/main`. `L0`, `L1`, manual/schedule/feature runs и
 nondeployable candidates отклоняются. Runtime candidate digest должен совпасть
 одновременно с restored-copy runtime acceptance и поздним final admission
-receipt.
+receipt. Preparation schema `2` дополнительно сохраняет exact
+`effectiveLane=L2_SCHEMA_SECURITY` и `impactReceiptSha256` из уже проверенного
+candidate receipt; свободная метка оператора не принимается.
 
 ## Что связывает preparation receipt
 
@@ -69,8 +71,9 @@ receipt.
 После появления final admission receipt режим `bind` требует свежий
 `LEETPLUS_PARALLEL_BACKUP_RESTORED_COPY_LIVE_EVIDENCE_V1` и повторно проверяет:
 
-- final admission `PASS` выпущен exact main workflow для того же SHA и runtime
-  archive bytes;
+- final admission schema `2`/`PASS` выпущен exact main workflow для того же SHA,
+  runtime archive bytes, `effectiveLane=L2_SCHEMA_SECURITY` и exact impact
+  receipt SHA-256;
 - installed production-control generation относится к тому же release и exact
   admission receipt digest;
 - live release tree/runtime, source DB evidence, backup/off-host bytes,
@@ -125,6 +128,8 @@ node packages/database/scripts/parallel-backup-restored-copy-evidence.cli.mjs \
 Fast CI и Full Release Admission проверяют positive path и отказы для:
 
 - L1/nondeployable или подменённого candidate receipt;
+- отсутствующего, L1 либо изменившегося impact receipt в candidate/final
+  admission;
 - несовпавших dump/off-host/restored runtime digests;
 - просроченного backup/preparation/live evidence;
 - другого final runtime archive или admission receipt digest;

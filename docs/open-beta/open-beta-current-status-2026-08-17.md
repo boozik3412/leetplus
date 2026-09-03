@@ -14,7 +14,7 @@
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                 |
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
-| Release acceleration | 7/8: первый five-phase production rollout завершён; V3 one-shot recovery hardening реализован в source, cumulative p50/p95 остаётся последним item |
+| Release acceleration | 8/8: первый five-phase production rollout завершён; V3 merged как `c955e99e…`, post-merge Fast/Full green; trusted lane duration/failure metrics реализованы в source |
 
 ## Ускорение release pipeline без ослабления gates (02.09.2026)
 
@@ -84,6 +84,16 @@ canonical `127.0.0.1` только после target fence и с отдельн�
 закрывает Gate 1MT/2. Public guest, corporate tenant и workers/control-plane
 остаются независимыми; schema/security effects сохраняют полную admission,
 backup/restored-copy, signed controller и отдельный production GO.
+
+Восьмой срез делает ускорение измеримым. Final admission и обе immutable
+provenance цепочки переносят exact impact receipt и только trusted
+`L1_RUNTIME|L2_SCHEMA_SECURITY` до root-only installed receipt и нового plan.
+Read-only `metrics` считает approval→final, phase durations, failure histogram,
+unresolved и p50/p95 по lane только из локальных root-owned receipts. Attempt
+records не содержат operation ID, SHA, paths, env, command output или PII. До 20
+terminal samples возвращается `INSUFFICIENT_SAMPLE_SIZE`; первый реальный V2
+rollout помечается `LEGACY_UNCLASSIFIED` и не влияет на процентили. Отдельный
+production deploy только ради метрик не выполняется.
 
 ## Production CURRENT189 rollout (01.09.2026)
 

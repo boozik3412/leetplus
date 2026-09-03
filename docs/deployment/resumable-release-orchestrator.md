@@ -1,6 +1,6 @@
 # Resumable blue/green release orchestrator
 
-Статус: **V2 production rollout завершён; V3 one-shot recovery hardening реализован в source и требует exact admission**
+Статус: **V2 production rollout завершён; V3 one-shot recovery hardening объединён в main; lane-aware metrics реализованы в source**
 
 Актуально на: **03.09.2026**
 
@@ -40,10 +40,16 @@ Bootstrap:
 - хранит records только в
   `/var/lib/leetplus/deploy-receipts/release-orchestrator/<operation-id>`.
 
+Исключение — точная команда `metrics`: bootstrap берёт non-blocking shared
+`install.lock` до проверки engine, но не берёт orchestrator lock и не создаёт
+state. Это исключает гонку с install/rollout, сохраняя команду read-only.
+
 `prepare` создаёт только `plan.json` с решением
 `PREPARED_NOT_EFFECT_AUTHORIZATION`. План связывает exact target SHA/slot,
 schema head/count, active rollback release, installed-control attestation и
-latest accepted cutover generation/receipt. Он отказывает при pending child
+latest accepted cutover generation/receipt. Для новых операций тот же plan
+обязательно получает `effectiveLane=L1_RUNTIME|L2_SCHEMA_SECURITY` и SHA-256
+impact receipt только из verified installed-control output. Он отказывает при pending child
 intent, consumed rollback, неканоническом active upstream или уже активном
 target slot. State inventory допускает только одну незавершённую orchestrator
 operation: новый plan/apply блокируется, пока предыдущая цепочка не получила
@@ -80,6 +86,12 @@ generation останавливает продолжение.
 сравнивает стабильные authority-поля с записанным evidence. Завершение
 публикует `final.json` с решением `ROLLOUT_PHASES_COMPLETED`. Предыдущий slot
 контроллер не останавливает — он остаётся hot rollback.
+
+Каждый запуск `apply|resume` дополнительно публикует append-only metric attempt
+в отдельном root-only каталоге. Запись содержит только trusted lane, время
+старта/завершения, outcome, failure phase и нормализованный reason class; в ней
+нет operation/release identifiers, SHA, путей, environment, command output или
+PII. Эти записи не заменяют authoritative phase/final receipts.
 
 До BIND target slot может быть предыдущим hot rollback и поэтому оставаться
 `active/enabled`. BIND сам создаёт persistent instance masks для обеих unit с
@@ -159,6 +171,24 @@ sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
 sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
   resume --operation-id <uuid-v4> --plan-sha256 <exact-plan-sha256>
 ```
+
+Накопительная read-only сводка:
+
+```bash
+sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator metrics
+```
+
+Она читает только canonical root-owned operation и обезличенные attempt
+records. Внешних запросов, DB, systemd/service/timer probes и новых файлов при
+самом чтении нет. Для каждой trusted lane выводятся approval→final и
+phase intent→receipt p50/p95, failure-phase histogram и unresolved count. Пока
+одна lane не накопила 20 terminal operations, процентили равны `null` с
+`INSUFFICIENT_SAMPLE_SIZE`. Единственный исторический V2 rollout валидируется
+по своей точной terminal schema как `LEGACY_UNCLASSIFIED` и не влияет на lane
+percentiles; incomplete или повреждённая V2/V3 цепочка отклоняет отчёт. Reader
+fail-closed ограничивает inventory `16 384` attempt records; до `10 000` записей
+нужно отдельно принять root-authorized retention/archive процедуру. Команда
+`metrics` записи не удаляет и не ротирует.
 
 Нельзя начинать новую операцию, редактировать records или вручную увеличивать
 generation, пока предыдущая цепочка не получила terminal status либо не была

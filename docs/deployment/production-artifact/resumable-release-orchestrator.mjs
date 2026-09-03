@@ -46,6 +46,8 @@ const SAFE_RECORD_VALUE = /^[^\0\r\n]{0,8192}$/u;
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_OPERATION_ENTRIES = 4096;
+const MAX_METRIC_ATTEMPT_ENTRIES = 16384;
+const METRIC_SAMPLE_MINIMUM = 20;
 const MAX_SLOT_ENVIRONMENT_BYTES = 16 * 1024;
 const CACHE_PREPARATION_ATTEMPTS = 3;
 const CACHE_PREPARATION_RETRY_DELAY_MS = 1000;
@@ -53,6 +55,14 @@ const LOOPBACK_READINESS_ATTEMPTS = 12;
 const LOOPBACK_READINESS_RETRY_DELAY_MS = 2000;
 const CANONICAL_API_BIND_HOST = "127.0.0.1";
 const LEGACY_API_BIND_HOST = "localhost";
+const TRUSTED_LANES = Object.freeze(["L1_RUNTIME", "L2_SCHEMA_SECURITY"]);
+const CONTROL_LANE_LINE =
+  /^PRODUCTION_CONTROL_EFFECTIVE_LANE=(L1_RUNTIME|L2_SCHEMA_SECURITY)$/u;
+const CONTROL_IMPACT_LINE =
+  /^PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256=([0-9a-f]{64})$/u;
+const LEGACY_UNCLASSIFIED_LANE = "LEGACY_UNCLASSIFIED";
+const METRIC_FAILURE_PHASES = Object.freeze(["PRECHECK", ...PHASES]);
+const V2_CONTRACT_VERSION = "LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V2";
 const PRODUCTION_ENGINE =
   "/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs";
 const PRODUCTION_BOOTSTRAP = "LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP_V1";
@@ -229,9 +239,13 @@ function usage() {
     "  leetplus-resumable-release-orchestrator apply|resume|status \\",
     "    --operation-id <uuid-v4> --plan-sha256 <sha256>",
     "",
+    "  leetplus-resumable-release-orchestrator metrics",
+    "",
     "prepare is read-only apart from a protected nonauthorizing plan. apply is",
     "the explicit effect boundary. resume may continue only that exact approved",
     "plan and validates every terminal phase receipt before proceeding.",
+    "metrics is read-only: it reads only canonical root-owned operation and",
+    "attempt records; it never contacts runtime services, databases or timers.",
   ].join("\n");
 }
 
@@ -262,7 +276,7 @@ function parseArguments(argv) {
     values.set(argument, value);
     index += 1;
   }
-  if (!["prepare", "apply", "resume", "status"].includes(mode)) {
+  if (!["prepare", "apply", "resume", "status", "metrics"].includes(mode)) {
     fail("ORCHESTRATOR_ARGUMENTS_INVALID");
   }
   const fixtureRoot = values.get("--fixture-root");
@@ -273,6 +287,12 @@ function parseArguments(argv) {
     }
   } else if (fixtureRoot !== undefined) {
     fail("ORCHESTRATOR_PRODUCTION_OVERRIDE_FORBIDDEN");
+  }
+  if (mode === "metrics") {
+    if (argv[0] !== "metrics" || values.size !== 0) {
+      fail("ORCHESTRATOR_ARGUMENTS_INVALID");
+    }
+    return { help: false, fixtureRoot, mode, testMode };
   }
   const common = ["--operation-id"];
   const expected =
@@ -394,6 +414,8 @@ function buildPaths(args) {
       slotRoot: "/srv/leetplus/slots",
       slotEnvironmentRoot: "/etc/leetplus/slots",
       stateRoot: "/var/lib/leetplus/deploy-receipts/release-orchestrator",
+      metricsRoot:
+        "/var/lib/leetplus/deploy-receipts/release-orchestrator-metrics",
       systemctl: "/usr/bin/systemctl",
       systemdUnitRoot: "/etc/systemd/system",
     };
@@ -421,6 +443,10 @@ function buildPaths(args) {
     stateRoot: path.join(
       root,
       "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    ),
+    metricsRoot: path.join(
+      root,
+      "var/lib/leetplus/deploy-receipts/release-orchestrator-metrics",
     ),
     systemctl: path.join(commandRoot, "systemctl"),
     systemdUnitRoot: path.join(root, "etc/systemd/system"),
@@ -472,6 +498,7 @@ function validateBootstrap(args) {
   ) {
     fail("ORCHESTRATOR_PRODUCTION_CONTROL_LOCK_INVALID");
   }
+  if (args.mode === "metrics") return;
 }
 
 function assertDirectory(directory, args, expectedMode = 0o700) {
@@ -1131,16 +1158,34 @@ function verifyInstalledControl(releaseSha, paths, args) {
     120000,
   );
   const lines = stdout.split("\n");
+  const laneMatch = CONTROL_LANE_LINE.exec(lines[14] ?? "");
+  const impactMatch = CONTROL_IMPACT_LINE.exec(lines[15] ?? "");
   if (
-    lines.length !== 15 ||
+    lines.length !== 17 ||
     lines[0] !== "PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS" ||
     lines[1] !== "PRODUCTION_CONTROL_RELEASE_SHA=" + releaseSha ||
     lines[13] !== "PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=52" ||
-    lines[14] !== ""
+    laneMatch === null ||
+    impactMatch === null ||
+    lines[16] !== ""
   ) {
     fail("ORCHESTRATOR_CONTROL_ATTESTATION_INVALID");
   }
-  return sha256(stdout);
+  return {
+    attestationSha256: sha256(stdout),
+    effectiveLane: laneMatch[1],
+    impactReceiptSha256: impactMatch[1],
+  };
+}
+
+function assertControlAttestationMatches(control, plan) {
+  if (
+    control.attestationSha256 !== plan.controlAttestationSha256 ||
+    control.effectiveLane !== plan.effectiveLane ||
+    control.impactReceiptSha256 !== plan.impactReceiptSha256
+  ) {
+    fail("ORCHESTRATOR_CONTROL_GENERATION_DRIFT");
+  }
 }
 
 function latestCutover(paths, args, allowMissing = false) {
@@ -1406,30 +1451,42 @@ function planUrls(slot) {
       };
 }
 
-function validatePlan(plan) {
-  exactKeys(
-    plan,
-    [
-      "baselineCutover",
-      "contractVersion",
-      "controlAttestationSha256",
-      "decision",
-      "expectedMigration",
-      "expectedMigrationCount",
-      "operationId",
-      "preparedAt",
-      "previousMigration",
-      "previousMigrationCount",
-      "previousReleaseSha",
-      "previousWebBuildId",
-      "releaseSha",
-      "schemaVersion",
-      "targetSlot",
-      "urls",
-      "watchdogSeconds",
-    ],
-    "ORCHESTRATOR_PLAN_INVALID",
+function validatePlan(plan, { allowLegacyLane = false } = {}) {
+  const currentKeys = [
+    "baselineCutover",
+    "contractVersion",
+    "controlAttestationSha256",
+    "decision",
+    "expectedMigration",
+    "expectedMigrationCount",
+    "effectiveLane",
+    "impactReceiptSha256",
+    "operationId",
+    "preparedAt",
+    "previousMigration",
+    "previousMigrationCount",
+    "previousReleaseSha",
+    "previousWebBuildId",
+    "releaseSha",
+    "schemaVersion",
+    "targetSlot",
+    "urls",
+    "watchdogSeconds",
+  ];
+  const legacyKeys = currentKeys.filter(
+    (key) => !["effectiveLane", "impactReceiptSha256"].includes(key),
   );
+  const observedKeys =
+    plan !== null && typeof plan === "object" && !Array.isArray(plan)
+      ? Object.keys(plan).sort().join("\0")
+      : "";
+  const isLegacy =
+    observedKeys === legacyKeys.slice().sort().join("\0");
+  if (isLegacy) {
+    if (!allowLegacyLane) fail("ORCHESTRATOR_PLAN_INVALID");
+  } else {
+    exactKeys(plan, currentKeys, "ORCHESTRATOR_PLAN_INVALID");
+  }
   exactKeys(
     plan.baselineCutover,
     ["generation", "receiptPath", "receiptSha256"],
@@ -1459,6 +1516,8 @@ function validatePlan(plan) {
     plan.watchdogSeconds < 5 ||
     plan.watchdogSeconds > 60 ||
     !SHA256.test(plan.controlAttestationSha256 ?? "") ||
+    (!isLegacy && !TRUSTED_LANES.includes(plan.effectiveLane)) ||
+    (!isLegacy && !SHA256.test(plan.impactReceiptSha256 ?? "")) ||
     !Number.isSafeInteger(plan.baselineCutover.generation) ||
     plan.baselineCutover.generation < 1 ||
     !SHA256.test(plan.baselineCutover.receiptSha256 ?? "") ||
@@ -1468,6 +1527,77 @@ function validatePlan(plan) {
     fail("ORCHESTRATOR_PLAN_INVALID");
   }
   exactIso(plan.preparedAt, "ORCHESTRATOR_PLAN_INVALID");
+  return plan;
+}
+
+function effectiveLaneForPlan(plan) {
+  return TRUSTED_LANES.includes(plan.effectiveLane)
+    ? plan.effectiveLane
+    : LEGACY_UNCLASSIFIED_LANE;
+}
+
+function validateV2MetricPlan(plan) {
+  exactKeys(
+    plan,
+    [
+      "baselineCutover",
+      "contractVersion",
+      "controlAttestationSha256",
+      "decision",
+      "expectedMigration",
+      "expectedMigrationCount",
+      "operationId",
+      "preparedAt",
+      "previousMigration",
+      "previousMigrationCount",
+      "previousReleaseSha",
+      "previousWebBuildId",
+      "releaseSha",
+      "schemaVersion",
+      "targetSlot",
+      "urls",
+      "watchdogSeconds",
+    ],
+    "ORCHESTRATOR_LEGACY_V2_PLAN_INVALID",
+  );
+  exactKeys(
+    plan.baselineCutover,
+    ["generation", "receiptPath", "receiptSha256"],
+    "ORCHESTRATOR_LEGACY_V2_PLAN_INVALID",
+  );
+  exactKeys(
+    plan.urls,
+    ["loopbackApi", "loopbackWeb", "publicApi", "publicWeb"],
+    "ORCHESTRATOR_LEGACY_V2_PLAN_INVALID",
+  );
+  if (
+    plan.schemaVersion !== 1 ||
+    plan.contractVersion !== V2_CONTRACT_VERSION ||
+    plan.decision !== PLAN_DECISION ||
+    !UUID.test(plan.operationId ?? "") ||
+    !SHA40.test(plan.releaseSha ?? "") ||
+    !["blue", "green"].includes(plan.targetSlot) ||
+    !MIGRATION.test(plan.expectedMigration ?? "") ||
+    !Number.isSafeInteger(plan.expectedMigrationCount) ||
+    plan.expectedMigrationCount < 1 ||
+    !SHA40.test(plan.previousReleaseSha ?? "") ||
+    !MIGRATION.test(plan.previousMigration ?? "") ||
+    !Number.isSafeInteger(plan.previousMigrationCount) ||
+    plan.previousMigrationCount < 1 ||
+    plan.previousWebBuildId !== plan.previousReleaseSha ||
+    !Number.isSafeInteger(plan.watchdogSeconds) ||
+    plan.watchdogSeconds < 5 ||
+    plan.watchdogSeconds > 60 ||
+    !SHA256.test(plan.controlAttestationSha256 ?? "") ||
+    !Number.isSafeInteger(plan.baselineCutover.generation) ||
+    plan.baselineCutover.generation < 1 ||
+    !SHA256.test(plan.baselineCutover.receiptSha256 ?? "") ||
+    typeof plan.baselineCutover.receiptPath !== "string" ||
+    canonicalJson(planUrls(plan.targetSlot)) !== canonicalJson(plan.urls)
+  ) {
+    fail("ORCHESTRATOR_LEGACY_V2_PLAN_INVALID");
+  }
+  exactIso(plan.preparedAt, "ORCHESTRATOR_LEGACY_V2_PLAN_INVALID");
   return plan;
 }
 
@@ -1669,6 +1799,193 @@ function validateEvidence(record, phase, index, plan, planSha256) {
   return record;
 }
 
+function validateV2MetricPhaseRecord(
+  record,
+  recordType,
+  phase,
+  index,
+  plan,
+  planSha256,
+  previousReceiptSha256,
+) {
+  const common = [
+    "contractVersion",
+    "createdAt",
+    "operationId",
+    "phase",
+    "phaseIndex",
+    "planSha256",
+    "previousPhaseReceiptSha256",
+    "recordType",
+    "schemaVersion",
+  ];
+  exactKeys(
+    record,
+    recordType === "PHASE_INTENT"
+      ? common
+      : [
+          ...common,
+          "acceptedAt",
+          "controlAttestationSha256",
+          "decision",
+          "evidenceSha256",
+          "intentSha256",
+        ],
+    "ORCHESTRATOR_LEGACY_V2_PHASE_RECORD_INVALID",
+  );
+  if (
+    record.schemaVersion !== 1 ||
+    record.contractVersion !== V2_CONTRACT_VERSION ||
+    record.recordType !== recordType ||
+    record.operationId !== plan.operationId ||
+    record.planSha256 !== planSha256 ||
+    record.phase !== phase ||
+    record.phaseIndex !== index + 1 ||
+    record.previousPhaseReceiptSha256 !== previousReceiptSha256
+  ) {
+    fail("ORCHESTRATOR_LEGACY_V2_PHASE_RECORD_INVALID");
+  }
+  exactIso(record.createdAt, "ORCHESTRATOR_LEGACY_V2_PHASE_RECORD_INVALID");
+  if (
+    recordType === "PHASE_RECEIPT" &&
+    (!SHA256.test(record.intentSha256 ?? "") ||
+      !SHA256.test(record.evidenceSha256 ?? "") ||
+      record.controlAttestationSha256 !== plan.controlAttestationSha256 ||
+      record.decision !== "PHASE_ACCEPTED")
+  ) {
+    fail("ORCHESTRATOR_LEGACY_V2_PHASE_RECORD_INVALID");
+  }
+  if (recordType === "PHASE_RECEIPT") {
+    exactIso(record.acceptedAt, "ORCHESTRATOR_LEGACY_V2_PHASE_RECORD_INVALID");
+  }
+  return record;
+}
+
+function validateV2MetricEvidenceDetails(details, phase, plan) {
+  const schemas = {
+    HYDRATE: [
+      "commandOutputSha256",
+      "hydrationReceiptPath",
+      "hydrationReceiptSha256",
+      "releaseDirectory",
+      "releaseSha",
+      "targetSlot",
+    ],
+    BIND: [
+      "commandOutputSha256",
+      "quiesceIntentSha256",
+      "releaseSha",
+      "slotLinkReceiptPath",
+      "slotLinkReceiptSha256",
+      "targetSlot",
+    ],
+    SMOKE: [
+      "apiInvocationId",
+      "authenticatedSmokeSha256",
+      "commandOutputSha256",
+      "readinessSha256",
+      "releaseSha",
+      "targetSlot",
+      "unmaskIntentSha256",
+      "webInvocationId",
+    ],
+    CUTOVER: [
+      "commandOutputSha256",
+      "cutoverReceiptPath",
+      "cutoverReceiptSha256",
+      "generation",
+      "releaseSha",
+      "targetSlot",
+    ],
+    POSTCHECK: [
+      "authenticatedSmokeSha256",
+      "cutoverReceiptSha256",
+      "generation",
+      "readinessSha256",
+      "releaseSha",
+      "targetSlot",
+    ],
+  };
+  exactKeys(details, schemas[phase], "ORCHESTRATOR_LEGACY_V2_EVIDENCE_INVALID");
+  for (const [key, value] of Object.entries(details)) {
+    if (
+      key.endsWith("Sha256") &&
+      (typeof value !== "string" || !SHA256.test(value))
+    ) {
+      fail("ORCHESTRATOR_LEGACY_V2_EVIDENCE_INVALID");
+    }
+    if (
+      key.endsWith("Path") &&
+      (typeof value !== "string" || !path.isAbsolute(value))
+    ) {
+      fail("ORCHESTRATOR_LEGACY_V2_EVIDENCE_INVALID");
+    }
+  }
+  if (
+    phase === "HYDRATE" &&
+    (typeof details.releaseDirectory !== "string" ||
+      !path.isAbsolute(details.releaseDirectory))
+  ) {
+    fail("ORCHESTRATOR_LEGACY_V2_EVIDENCE_INVALID");
+  }
+  if (
+    phase === "SMOKE" &&
+    (!INVOCATION_ID.test(details.apiInvocationId) ||
+      !INVOCATION_ID.test(details.webInvocationId))
+  ) {
+    fail("ORCHESTRATOR_LEGACY_V2_EVIDENCE_INVALID");
+  }
+  if (
+    ["CUTOVER", "POSTCHECK"].includes(phase) &&
+    details.generation !== plan.baselineCutover.generation + 1
+  ) {
+    fail("ORCHESTRATOR_LEGACY_V2_EVIDENCE_INVALID");
+  }
+}
+
+function validateV2MetricEvidence(record, phase, index, plan, planSha256) {
+  exactKeys(
+    record,
+    [
+      "contractVersion",
+      "controlAttestationSha256",
+      "details",
+      "observedAt",
+      "operationId",
+      "phase",
+      "phaseIndex",
+      "planSha256",
+      "recordType",
+      "schemaVersion",
+    ],
+    "ORCHESTRATOR_LEGACY_V2_EVIDENCE_INVALID",
+  );
+  if (
+    record.schemaVersion !== 1 ||
+    record.contractVersion !== V2_CONTRACT_VERSION ||
+    record.recordType !== "PHASE_EVIDENCE" ||
+    record.operationId !== plan.operationId ||
+    record.planSha256 !== planSha256 ||
+    record.phase !== phase ||
+    record.phaseIndex !== index + 1 ||
+    record.controlAttestationSha256 !== plan.controlAttestationSha256 ||
+    record.details === null ||
+    typeof record.details !== "object" ||
+    Array.isArray(record.details)
+  ) {
+    fail("ORCHESTRATOR_LEGACY_V2_EVIDENCE_INVALID");
+  }
+  exactIso(record.observedAt, "ORCHESTRATOR_LEGACY_V2_EVIDENCE_INVALID");
+  validateV2MetricEvidenceDetails(record.details, phase, plan);
+  if (
+    record.details.releaseSha !== plan.releaseSha ||
+    record.details.targetSlot !== plan.targetSlot
+  ) {
+    fail("ORCHESTRATOR_LEGACY_V2_EVIDENCE_TARGET_MISMATCH");
+  }
+  return record;
+}
+
 function createPlan(args, paths) {
   ensureStateRoot(paths, args);
   assertNoOtherIncompleteOperation(paths, args, args.operationId);
@@ -1686,7 +2003,7 @@ function createPlan(args, paths) {
   ) {
     fail("ORCHESTRATOR_PENDING_CHILD_OPERATION");
   }
-  const controlAttestationSha256 = verifyInstalledControl(
+  const control = verifyInstalledControl(
     args.releaseSha,
     paths,
     args,
@@ -1728,7 +2045,9 @@ function createPlan(args, paths) {
       receiptPath: baseline.receiptPath,
       receiptSha256: baseline.receiptSha256,
     },
-    controlAttestationSha256,
+    controlAttestationSha256: control.attestationSha256,
+    effectiveLane: control.effectiveLane,
+    impactReceiptSha256: control.impactReceiptSha256,
     preparedAt: nowIso(),
     decision: PLAN_DECISION,
   };
@@ -1868,6 +2187,56 @@ function readCurrentPhaseChain(context, args) {
     fail("ORCHESTRATOR_PREMATURE_FINAL_RECEIPT");
   }
   return { completed, pendingRecord, previousReceiptSha256 };
+}
+
+function readV2MetricPhaseChain(context, args) {
+  let previousReceiptSha256 = "";
+  let completed = 0;
+  for (let index = 0; index < PHASES.length; index += 1) {
+    const phase = PHASES[index];
+    const records = phasePaths(context.directory, index, phase);
+    if (!existsSync(records.receipt)) break;
+    const intent = readCanonicalJson(records.intent, args, [0o600]);
+    validateV2MetricPhaseRecord(
+      intent.value,
+      "PHASE_INTENT",
+      phase,
+      index,
+      context.plan,
+      context.planSha256,
+      previousReceiptSha256,
+    );
+    const evidence = readCanonicalJson(records.evidence, args, [0o400]);
+    validateV2MetricEvidence(
+      evidence.value,
+      phase,
+      index,
+      context.plan,
+      context.planSha256,
+    );
+    const receipt = readCanonicalJson(records.receipt, args, [0o400]);
+    validateV2MetricPhaseRecord(
+      receipt.value,
+      "PHASE_RECEIPT",
+      phase,
+      index,
+      context.plan,
+      context.planSha256,
+      previousReceiptSha256,
+    );
+    if (
+      receipt.value.intentSha256 !== intent.sha256 ||
+      receipt.value.evidenceSha256 !== evidence.sha256
+    ) {
+      fail("ORCHESTRATOR_LEGACY_V2_PHASE_CHAIN_INVALID");
+    }
+    previousReceiptSha256 = receipt.sha256;
+    completed += 1;
+  }
+  if (completed !== PHASES.length) {
+    fail("ORCHESTRATOR_LEGACY_V2_NONTERMINAL_UNSUPPORTED");
+  }
+  return { completed, previousReceiptSha256 };
 }
 
 function readInvocationId(unit, paths, args) {
@@ -2713,6 +3082,68 @@ function validateFinalReceipt(record, context, lastReceiptSha256) {
   return record;
 }
 
+function validateV2MetricApproval(record, context) {
+  exactKeys(
+    record,
+    [
+      "approvedAt",
+      "contractVersion",
+      "decision",
+      "operationId",
+      "planSha256",
+      "recordType",
+      "schemaVersion",
+    ],
+    "ORCHESTRATOR_LEGACY_V2_APPROVAL_INVALID",
+  );
+  if (
+    record.schemaVersion !== 1 ||
+    record.contractVersion !== V2_CONTRACT_VERSION ||
+    record.recordType !== "APPLY_APPROVAL" ||
+    record.operationId !== context.plan.operationId ||
+    record.planSha256 !== context.planSha256 ||
+    record.decision !== APPROVAL_DECISION
+  ) {
+    fail("ORCHESTRATOR_LEGACY_V2_APPROVAL_INVALID");
+  }
+  exactIso(record.approvedAt, "ORCHESTRATOR_LEGACY_V2_APPROVAL_INVALID");
+  return record;
+}
+
+function validateV2MetricFinalReceipt(record, context, lastReceiptSha256) {
+  exactKeys(
+    record,
+    [
+      "completedAt",
+      "contractVersion",
+      "decision",
+      "lastPhaseReceiptSha256",
+      "operationId",
+      "planSha256",
+      "recordType",
+      "releaseSha",
+      "schemaVersion",
+      "targetSlot",
+    ],
+    "ORCHESTRATOR_LEGACY_V2_FINAL_RECEIPT_INVALID",
+  );
+  if (
+    record.schemaVersion !== 1 ||
+    record.contractVersion !== V2_CONTRACT_VERSION ||
+    record.recordType !== "ROLLOUT_RECEIPT" ||
+    record.operationId !== context.plan.operationId ||
+    record.planSha256 !== context.planSha256 ||
+    record.releaseSha !== context.plan.releaseSha ||
+    record.targetSlot !== context.plan.targetSlot ||
+    record.lastPhaseReceiptSha256 !== lastReceiptSha256 ||
+    record.decision !== COMPLETE_DECISION
+  ) {
+    fail("ORCHESTRATOR_LEGACY_V2_FINAL_RECEIPT_INVALID");
+  }
+  exactIso(record.completedAt, "ORCHESTRATOR_LEGACY_V2_FINAL_RECEIPT_INVALID");
+  return record;
+}
+
 function readValidatedFinalReceipt(context, lastReceiptSha256, args) {
   const finalPath = path.join(context.directory, "final.json");
   const final = readCanonicalJson(finalPath, args, [0o400]);
@@ -2747,7 +3178,10 @@ function assertNoOtherIncompleteOperation(paths, args, operationId) {
       args,
       [0o400],
     );
-    const plan = validatePlan(planRecord.value);
+    const isV2 = planRecord.value?.contractVersion === V2_CONTRACT_VERSION;
+    const plan = isV2
+      ? validateV2MetricPlan(planRecord.value)
+      : validatePlan(planRecord.value, { allowLegacyLane: true });
     if (plan.operationId !== entry.name) {
       fail("ORCHESTRATOR_STATE_INVENTORY_INVALID");
     }
@@ -2757,14 +3191,29 @@ function assertNoOtherIncompleteOperation(paths, args, operationId) {
       planPath: path.join(directory, "plan.json"),
       planSha256: planRecord.sha256,
     };
-    const chain = readCurrentPhaseChain(context, args);
+    const chain = isV2
+      ? readV2MetricPhaseChain(context, args)
+      : readCurrentPhaseChain(context, args);
     if (
       chain.completed !== PHASES.length ||
       !existsSync(path.join(directory, "final.json"))
     ) {
       fail("ORCHESTRATOR_OTHER_OPERATION_INCOMPLETE");
     }
-    readValidatedFinalReceipt(context, chain.previousReceiptSha256, args);
+    const final = readCanonicalJson(
+      path.join(directory, "final.json"),
+      args,
+      [0o400],
+    );
+    if (isV2) {
+      validateV2MetricFinalReceipt(
+        final.value,
+        context,
+        chain.previousReceiptSha256,
+      );
+    } else {
+      validateFinalReceipt(final.value, context, chain.previousReceiptSha256);
+    }
   }
 }
 
@@ -2842,9 +3291,7 @@ function runPipeline(context, paths, args) {
         paths,
         args,
       );
-      if (beforeControl !== context.plan.controlAttestationSha256) {
-        fail("ORCHESTRATOR_CONTROL_GENERATION_DRIFT");
-      }
+      assertControlAttestationMatches(beforeControl, context.plan);
       const observed = executePhase(
         phase,
         context.plan,
@@ -2858,9 +3305,7 @@ function runPipeline(context, paths, args) {
         paths,
         args,
       );
-      if (afterControl !== context.plan.controlAttestationSha256) {
-        fail("ORCHESTRATOR_CONTROL_GENERATION_DRIFT");
-      }
+      assertControlAttestationMatches(afterControl, context.plan);
       assertRecoveredEvidenceMatches(phase, evidence.value.details, observed);
     } else {
       const beforeControl = verifyInstalledControl(
@@ -2868,9 +3313,7 @@ function runPipeline(context, paths, args) {
         paths,
         args,
       );
-      if (beforeControl !== context.plan.controlAttestationSha256) {
-        fail("ORCHESTRATOR_CONTROL_GENERATION_DRIFT");
-      }
+      assertControlAttestationMatches(beforeControl, context.plan);
       const details = executePhase(
         phase,
         context.plan,
@@ -2884,9 +3327,7 @@ function runPipeline(context, paths, args) {
         paths,
         args,
       );
-      if (afterControl !== context.plan.controlAttestationSha256) {
-        fail("ORCHESTRATOR_CONTROL_GENERATION_DRIFT");
-      }
+      assertControlAttestationMatches(afterControl, context.plan);
       const value = {
         schemaVersion: 1,
         contractVersion: CONTRACT_VERSION,
@@ -2895,7 +3336,7 @@ function runPipeline(context, paths, args) {
         planSha256: context.planSha256,
         phaseIndex: index + 1,
         phase,
-        controlAttestationSha256: afterControl,
+        controlAttestationSha256: afterControl.attestationSha256,
         observedAt: nowIso(),
         details,
       };
@@ -2983,8 +3424,363 @@ function status(context, args) {
   };
 }
 
+const METRIC_REASON_CLASSES = Object.freeze([
+  "NONE",
+  "PRECHECK",
+  "CONTROL_DRIFT",
+  "CHILD_COMMAND",
+  "RETRY_EXHAUSTED",
+  "RECOVERY_DRIFT",
+  "RECEIPT_INTEGRITY",
+  "UNEXPECTED_FAIL_CLOSED",
+]);
+
+function ensureMetricsRoot(paths, args) {
+  assertDirectory(paths.deployReceiptRoot, args, 0o700);
+  if (!existsSync(paths.metricsRoot)) {
+    mkdirSync(paths.metricsRoot, { mode: 0o700 });
+  }
+  assertDirectory(paths.metricsRoot, args, 0o700);
+}
+
+function normalizeMetricReasonClass(reasonCode) {
+  if (reasonCode === "ORCHESTRATOR_UNEXPECTED_FAILURE") {
+    return "UNEXPECTED_FAIL_CLOSED";
+  }
+  if (reasonCode.includes("CONTROL_") || reasonCode.includes("ATTESTATION")) {
+    return "CONTROL_DRIFT";
+  }
+  if (reasonCode.includes("RECOVERY") || reasonCode.includes("LOST_RESPONSE")) {
+    return "RECOVERY_DRIFT";
+  }
+  if (reasonCode.includes("RETRY") || reasonCode.includes("READINESS")) {
+    return "RETRY_EXHAUSTED";
+  }
+  if (
+    reasonCode.includes("COMMAND") ||
+    reasonCode.includes("SYSTEMD") ||
+    reasonCode.includes("CACHE") ||
+    reasonCode.includes("CUTOVER")
+  ) {
+    return "CHILD_COMMAND";
+  }
+  if (
+    reasonCode.includes("RECORD") ||
+    reasonCode.includes("RECEIPT") ||
+    reasonCode.includes("PLAN_") ||
+    reasonCode.includes("PHASE_")
+  ) {
+    return "RECEIPT_INTEGRITY";
+  }
+  return "PRECHECK";
+}
+
+function validateMetricAttempt(record) {
+  exactKeys(
+    record,
+    [
+      "attemptFinishedAt",
+      "attemptMode",
+      "attemptStartedAt",
+      "contractVersion",
+      "effectiveLane",
+      "failurePhase",
+      "outcome",
+      "reasonClass",
+      "recordType",
+      "schemaVersion",
+    ],
+    "ORCHESTRATOR_METRIC_ATTEMPT_INVALID",
+  );
+  if (
+    record.schemaVersion !== 1 ||
+    record.contractVersion !== CONTRACT_VERSION ||
+    record.recordType !== "ROLLOUT_ATTEMPT_METRIC" ||
+    !["apply", "resume"].includes(record.attemptMode) ||
+    !TRUSTED_LANES.includes(record.effectiveLane) ||
+    !["COMPLETED", "BLOCKED"].includes(record.outcome) ||
+    !METRIC_REASON_CLASSES.includes(record.reasonClass) ||
+    !["NONE", ...METRIC_FAILURE_PHASES].includes(record.failurePhase) ||
+    (record.outcome === "COMPLETED" &&
+      (record.failurePhase !== "NONE" || record.reasonClass !== "NONE")) ||
+    (record.outcome === "BLOCKED" &&
+      (record.reasonClass === "NONE" || record.failurePhase === "NONE"))
+  ) {
+    fail("ORCHESTRATOR_METRIC_ATTEMPT_INVALID");
+  }
+  const started = Date.parse(
+    exactIso(record.attemptStartedAt, "ORCHESTRATOR_METRIC_ATTEMPT_INVALID"),
+  );
+  const finished = Date.parse(
+    exactIso(record.attemptFinishedAt, "ORCHESTRATOR_METRIC_ATTEMPT_INVALID"),
+  );
+  if (finished < started) fail("ORCHESTRATOR_METRIC_ATTEMPT_INVALID");
+  return record;
+}
+
+function writeAttemptMetric(paths, args, attempt) {
+  if (!TRUSTED_LANES.includes(attempt.effectiveLane)) return;
+  ensureMetricsRoot(paths, args);
+  const record = {
+    schemaVersion: 1,
+    contractVersion: CONTRACT_VERSION,
+    recordType: "ROLLOUT_ATTEMPT_METRIC",
+    attemptMode: args.mode,
+    attemptStartedAt: attempt.startedAt,
+    attemptFinishedAt: nowIso(),
+    effectiveLane: attempt.effectiveLane,
+    outcome: attempt.outcome,
+    failurePhase: attempt.failurePhase,
+    reasonClass: attempt.reasonClass,
+  };
+  validateMetricAttempt(record);
+  publishCanonicalJson(
+    path.join(paths.metricsRoot, randomUUID() + ".json"),
+    record,
+    0o400,
+    args,
+  );
+}
+
+function currentAttemptFailurePhase(context, args) {
+  if (context === undefined) return "PRECHECK";
+  try {
+    const chain = readCurrentPhaseChain(context, args);
+    return chain.completed === PHASES.length
+      ? "POSTCHECK"
+      : PHASES[chain.completed];
+  } catch {
+    return "PRECHECK";
+  }
+}
+
+function durationMilliseconds(start, end, reasonCode) {
+  const startMilliseconds = Date.parse(exactIso(start, reasonCode));
+  const endMilliseconds = Date.parse(exactIso(end, reasonCode));
+  if (endMilliseconds < startMilliseconds) fail(reasonCode);
+  return endMilliseconds - startMilliseconds;
+}
+
+function metricOperationInventory(paths, args) {
+  assertDirectory(paths.deployReceiptRoot, args, 0o700);
+  assertDirectory(paths.stateRoot, args, 0o700);
+  const entries = readdirSync(paths.stateRoot, { withFileTypes: true });
+  if (entries.length > MAX_OPERATION_ENTRIES) {
+    fail("ORCHESTRATOR_STATE_INVENTORY_OVERSIZED");
+  }
+  const result = [];
+  for (const entry of entries) {
+    if (entry.name === "orchestrator.lock") {
+      if (!entry.isFile() || entry.isSymbolicLink()) {
+        fail("ORCHESTRATOR_STATE_INVENTORY_INVALID");
+      }
+      continue;
+    }
+    if (!UUID.test(entry.name) || !entry.isDirectory() || entry.isSymbolicLink()) {
+      fail("ORCHESTRATOR_STATE_INVENTORY_INVALID");
+    }
+    const directory = operationDirectory(paths, entry.name);
+    assertDirectory(directory, args, 0o700);
+    const planRecord = readCanonicalJson(
+      path.join(directory, "plan.json"),
+      args,
+      [0o400],
+    );
+    const isV2 = planRecord.value?.contractVersion === V2_CONTRACT_VERSION;
+    const plan = isV2
+      ? validateV2MetricPlan(planRecord.value)
+      : validatePlan(planRecord.value, { allowLegacyLane: true });
+    if (plan.operationId !== entry.name) {
+      fail("ORCHESTRATOR_STATE_INVENTORY_INVALID");
+    }
+    const context = {
+      directory,
+      plan,
+      planPath: path.join(directory, "plan.json"),
+      planSha256: planRecord.sha256,
+    };
+    const chain = isV2
+      ? readV2MetricPhaseChain(context, args)
+      : readCurrentPhaseChain(context, args);
+    const lane = effectiveLaneForPlan(plan);
+    const finalPath = path.join(directory, "final.json");
+    const approvalPath = path.join(directory, "approval.json");
+    let approval;
+    if (existsSync(approvalPath)) {
+      approval = readCanonicalJson(approvalPath, args, [0o400]);
+      if (isV2) {
+        validateV2MetricApproval(approval.value, context);
+      } else {
+        validateApproval(approval.value, context);
+      }
+    }
+    if (isV2 && !existsSync(finalPath)) {
+      fail("ORCHESTRATOR_LEGACY_V2_NONTERMINAL_UNSUPPORTED");
+    }
+    if (chain.completed !== PHASES.length || !existsSync(finalPath)) {
+      if (existsSync(finalPath)) fail("ORCHESTRATOR_PREMATURE_FINAL_RECEIPT");
+      result.push({ lane, state: "UNRESOLVED" });
+      continue;
+    }
+    const final = readCanonicalJson(finalPath, args, [0o400]);
+    if (isV2) {
+      validateV2MetricFinalReceipt(
+        final.value,
+        context,
+        chain.previousReceiptSha256,
+      );
+    } else {
+      validateFinalReceipt(final.value, context, chain.previousReceiptSha256);
+    }
+    if (approval === undefined) {
+      fail(
+        isV2
+          ? "ORCHESTRATOR_LEGACY_V2_APPROVAL_INVALID"
+          : "ORCHESTRATOR_APPROVAL_INVALID",
+      );
+    }
+    const phaseDurations = {};
+    for (let index = 0; index < PHASES.length; index += 1) {
+      const phase = PHASES[index];
+      const receipt = readCanonicalJson(
+        phasePaths(directory, index, phase).receipt,
+        args,
+        [0o400],
+      );
+      phaseDurations[phase] = durationMilliseconds(
+        receipt.value.createdAt,
+        receipt.value.acceptedAt,
+        "ORCHESTRATOR_METRIC_OPERATION_INVALID",
+      );
+    }
+    result.push({
+      approvalToFinalMilliseconds: durationMilliseconds(
+        approval.value.approvedAt,
+        final.value.completedAt,
+        "ORCHESTRATOR_METRIC_OPERATION_INVALID",
+      ),
+      lane,
+      phaseDurations,
+      state: "COMPLETED",
+    });
+  }
+  return result;
+}
+
+function metricAttemptInventory(paths, args) {
+  if (!existsSync(paths.metricsRoot)) return [];
+  assertDirectory(paths.metricsRoot, args, 0o700);
+  const entries = readdirSync(paths.metricsRoot, { withFileTypes: true });
+  if (entries.length > MAX_METRIC_ATTEMPT_ENTRIES) {
+    fail("ORCHESTRATOR_METRIC_ATTEMPT_INVENTORY_OVERSIZED");
+  }
+  return entries.map((entry) => {
+    if (
+      !entry.isFile() ||
+      entry.isSymbolicLink() ||
+      !new RegExp("^" + UUID.source.slice(1, -1) + "\\.json$", "u").test(
+        entry.name,
+      )
+    ) {
+      fail("ORCHESTRATOR_METRIC_ATTEMPT_INVENTORY_INVALID");
+    }
+    return validateMetricAttempt(
+      readCanonicalJson(path.join(paths.metricsRoot, entry.name), args, [0o400])
+        .value,
+    );
+  });
+}
+
+function percentileSummary(values) {
+  if (values.length < METRIC_SAMPLE_MINIMUM) {
+    return {
+      decision: "INSUFFICIENT_SAMPLE_SIZE",
+      p50: null,
+      p95: null,
+    };
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const percentile = (fraction) =>
+    sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)];
+  return {
+    decision: "AVAILABLE",
+    p50: percentile(0.5),
+    p95: percentile(0.95),
+  };
+}
+
+function laneMetricSummary(lane, operations, attempts) {
+  const completed = operations.filter(
+    (operation) => operation.lane === lane && operation.state === "COMPLETED",
+  );
+  const laneAttempts = attempts.filter((attempt) => attempt.effectiveLane === lane);
+  const failurePhaseHistogram = Object.fromEntries(
+    METRIC_FAILURE_PHASES.map((phase) => [phase, 0]),
+  );
+  for (const attempt of laneAttempts) {
+    if (attempt.outcome === "BLOCKED") {
+      failurePhaseHistogram[attempt.failurePhase] += 1;
+    }
+  }
+  return {
+    approvalToFinalMilliseconds: percentileSummary(
+      completed.map((operation) => operation.approvalToFinalMilliseconds),
+    ),
+    completedOperationCount: completed.length,
+    failurePhaseHistogram,
+    phaseIntentToReceiptMilliseconds: Object.fromEntries(
+      PHASES.map((phase) => [
+        phase,
+        percentileSummary(completed.map((operation) => operation.phaseDurations[phase])),
+      ]),
+    ),
+    rolloutAttemptCount: laneAttempts.length,
+  };
+}
+
+function metrics(paths, args) {
+  const operations = metricOperationInventory(paths, args);
+  const attempts = metricAttemptInventory(paths, args);
+  const unresolved = operations.filter(
+    (operation) => operation.state === "UNRESOLVED",
+  );
+  return {
+    contractVersion: CONTRACT_VERSION,
+    decision: "METRICS_READ_ONLY",
+    lanes: Object.fromEntries(
+      TRUSTED_LANES.map((lane) => [
+        lane,
+        laneMetricSummary(lane, operations, attempts),
+      ]),
+    ),
+    legacyUnclassified: {
+      completedOperationCount: operations.filter(
+        (operation) =>
+          operation.lane === LEGACY_UNCLASSIFIED_LANE &&
+          operation.state === "COMPLETED",
+      ).length,
+      rolloutAttemptCount: 0,
+    },
+    sampleSizeMinimum: METRIC_SAMPLE_MINIMUM,
+    schemaVersion: 1,
+    unresolved: {
+      byLane: Object.fromEntries(
+        [...TRUSTED_LANES, LEGACY_UNCLASSIFIED_LANE].map((lane) => [
+          lane,
+          unresolved.filter((operation) => operation.lane === lane).length,
+        ]),
+      ),
+      operationCount: unresolved.length,
+    },
+  };
+}
+
 export async function main(argv = process.argv.slice(2)) {
   let args;
+  let paths;
+  let context;
+  let attempt;
+  let attemptWritten = false;
   try {
     args = parseArguments(argv);
     if (args.help) {
@@ -2992,22 +3788,52 @@ export async function main(argv = process.argv.slice(2)) {
       return 0;
     }
     validateBootstrap(args);
-    const paths = buildPaths(args);
+    paths = buildPaths(args);
+    if (args.mode === "metrics") {
+      process.stdout.write(JSON.stringify(metrics(paths, args)) + "\n");
+      return 0;
+    }
     if (args.mode === "prepare") {
       process.stdout.write(JSON.stringify(createPlan(args, paths)) + "\n");
       return 0;
     }
-    const context = readPlan(args, paths);
+    context = readPlan(args, paths);
     if (args.mode === "status") {
       process.stdout.write(JSON.stringify(status(context, args)) + "\n");
       return 0;
     }
+    attempt = {
+      effectiveLane: context.plan.effectiveLane,
+      startedAt: nowIso(),
+    };
     assertNoOtherIncompleteOperation(paths, args, args.operationId);
-    process.stdout.write(
-      JSON.stringify(runPipeline(context, paths, args)) + "\n",
-    );
+    const result = runPipeline(context, paths, args);
+    writeAttemptMetric(paths, args, {
+      ...attempt,
+      failurePhase: "NONE",
+      outcome: "COMPLETED",
+      reasonClass: "NONE",
+    });
+    attemptWritten = true;
+    process.stdout.write(JSON.stringify(result) + "\n");
     return 0;
   } catch (error) {
+    if (attempt !== undefined && !attemptWritten && paths !== undefined) {
+      const reasonCode =
+        error?.safeContractError === true
+          ? error.reasonCode
+          : "ORCHESTRATOR_UNEXPECTED_FAILURE";
+      try {
+        writeAttemptMetric(paths, args, {
+          ...attempt,
+          failurePhase: currentAttemptFailurePhase(context, args),
+          outcome: "BLOCKED",
+          reasonClass: normalizeMetricReasonClass(reasonCode),
+        });
+      } catch (metricError) {
+        error = metricError;
+      }
+    }
     if (args?.testMode && error?.safeContractError !== true) {
       process.stderr.write(
         JSON.stringify({

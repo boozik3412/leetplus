@@ -2,9 +2,9 @@
 
 ## Ускорение безопасного production release — 03.09.2026
 
-Статус: `[███████░░░] 7/8` — topology twin, impact classifier, один exact
+Статус: `[██████████] 8/8` — topology twin, impact classifier, один exact
 merge-candidate admission, параллельный backup/restored-copy evidence bind и
-resumable runtime rollout реализованы. Первый approved exact plan завершил все
+resumable runtime rollout с измеримыми lane-метриками реализованы. Первый approved exact plan завершил все
 пять фаз на production: active blue `f3f119fa…`, generation `21`, hot rollback
 green `22ab6b81…`; public/loopback API и Web, authenticated reads, CURRENT189 и
 worker timers прошли postcheck без изменения schema, ACL или security flags.
@@ -19,8 +19,12 @@ fail-closed: повторно проверяет fence, нормализует s
 `API_BIND_HOST=localhost`: только после mask/stop/process-free fence BIND
 сохраняет его exact backup и нормализует output к canonical `127.0.0.1`;
 другие aliases/DNS names запрещены.
-Production этим source hardening не менялся; successor должен пройти exact
-Fast и Full Admission перед merge.
+Production этим source hardening не менялся. V3 successor объединён в `main`
+через PR #123 как `c955e99e…`; exact post-merge Fast `33728044375` и Full
+`33728044457` завершились `SUCCESS`. REL-ACC-008 добавляет trusted lane provenance и read-only
+агрегатор; отдельный deploy только ради метрик не выполняется — команда станет
+доступна вместе со следующей admitted production-control generation и прочитает
+сохранённую V2 историю.
 Подробный контракт и целевые метрики:
 [release-pipeline-acceleration.md](./docs/deployment/release-pipeline-acceleration.md).
 
@@ -89,9 +93,17 @@ receipt-contract drift уже после admission.
   one-shot path без ослабления receipt, topology или rollback-инвариантов;
   exact legacy `localhost` bind host сходится только к canonical IPv4 loopback
   после полного target fence и фиксируется отдельным evidence enum.
-- [ ] `REL-ACC-008`: публиковать duration/failure-phase summary для каждого
-  rollout и держать p50/p95 по lane, чтобы ускорение измерялось, а не
-  оценивалось вручную.
+- [x] `REL-ACC-008`: final admission, immutable runtime/control provenance и
+  root-only installed receipt теперь связывают exact impact receipt и только
+  `L1_RUNTIME|L2_SCHEMA_SECURITY`. Каждый `apply|resume` оставляет отдельную
+  обезличенную attempt-запись, а read-only `metrics` публикует duration,
+  failure-phase histogram и p50/p95 по lane. До 20 terminal samples процентили
+  возвращаются как `INSUFFICIENT_SAMPLE_SIZE`; реальный первый V2 rollout
+  остаётся `LEGACY_UNCLASSIFIED` и не искажает lane-статистику.
+
+Неблокирующий operational follow-up: до накопления `10 000` attempt records
+добавить отдельную root-authorized retention/archive процедуру. Текущий reader
+fail-closed ограничен `16 384` файлами и сам ничего не удаляет.
 
 ### Инварианты приёмки
 

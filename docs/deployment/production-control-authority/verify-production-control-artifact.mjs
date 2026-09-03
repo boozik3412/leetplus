@@ -25,6 +25,7 @@ const PROVENANCE_PATH = "production-control-provenance.json";
 const ROOT_MANIFEST_PATH = "SHA256SUMS";
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
+const EFFECTIVE_LANES = new Set(["L1_RUNTIME", "L2_SCHEMA_SECURITY"]);
 const SAFE_PATH_PATTERN = /^[A-Za-z0-9_.@+/-]+$/u;
 const MAX_PAYLOAD_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES_READ = 128 * 1024 * 1024;
@@ -156,12 +157,19 @@ function sha256(bytes) {
 function parseArguments(argv) {
   let artifactRoot;
   let expectedReleaseSha;
+  let expectedEffectiveLane;
+  let expectedImpactReceiptSha256;
   let requireRootAuthority = false;
   const seen = new Set();
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument === "--artifact-root" || argument === "--expected-release-sha") {
+    if (
+      argument === "--artifact-root" ||
+      argument === "--expected-release-sha" ||
+      argument === "--expected-effective-lane" ||
+      argument === "--expected-impact-receipt-sha256"
+    ) {
       if (seen.has(argument)) fail(`duplicate argument: ${argument}`);
       seen.add(argument);
       const value = argv[index + 1];
@@ -169,7 +177,9 @@ function parseArguments(argv) {
         fail(`${argument} requires one value`);
       }
       if (argument === "--artifact-root") artifactRoot = value;
-      else expectedReleaseSha = value;
+      else if (argument === "--expected-release-sha") expectedReleaseSha = value;
+      else if (argument === "--expected-effective-lane") expectedEffectiveLane = value;
+      else expectedImpactReceiptSha256 = value;
       index += 1;
     } else if (argument === "--require-root-authority") {
       if (seen.has(argument)) fail(`duplicate argument: ${argument}`);
@@ -184,7 +194,23 @@ function parseArguments(argv) {
   if (!RELEASE_SHA_PATTERN.test(expectedReleaseSha ?? "")) {
     fail("--expected-release-sha must be 40 lowercase hexadecimal characters");
   }
-  return { artifactRoot, expectedReleaseSha, requireRootAuthority };
+  if ((expectedEffectiveLane === undefined) !== (expectedImpactReceiptSha256 === undefined)) {
+    fail("expected admission lane and impact receipt digest must be provided together");
+  }
+  if (
+    expectedEffectiveLane !== undefined &&
+    (!EFFECTIVE_LANES.has(expectedEffectiveLane) ||
+      !SHA256_PATTERN.test(expectedImpactReceiptSha256))
+  ) {
+    fail("expected admission lane is invalid");
+  }
+  return {
+    artifactRoot,
+    expectedEffectiveLane,
+    expectedImpactReceiptSha256,
+    expectedReleaseSha,
+    requireRootAuthority,
+  };
 }
 
 function assertProcessBoundary() {
@@ -472,15 +498,23 @@ function readProvenance(root, expectedReleaseSha, allowlistBytes, allowlistCount
     fail("production control provenance has no exact Node executable digest");
   }
   const expected = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     artifactKind: ARTIFACT_KIND,
     releaseSha: expectedReleaseSha,
+    effectiveLane: parsed.effectiveLane,
+    impactReceiptSha256: parsed.impactReceiptSha256,
     nodeMajor: 22,
     nodeExecutableSha256: parsed.nodeExecutableSha256,
     payloadAllowlistSha256: sha256(allowlistBytes),
     payloadFileCount: allowlistCount,
     controlBundleManifestSha256: sha256(innerBytes),
   };
+  if (
+    !EFFECTIVE_LANES.has(parsed.effectiveLane) ||
+    !SHA256_PATTERN.test(parsed.impactReceiptSha256 ?? "")
+  ) {
+    fail("production control provenance has an invalid admission lane");
+  }
   const canonical = `${JSON.stringify(expected, null, 2)}\n`;
   if (text !== canonical) {
     fail("production control provenance is not the exact canonical expected record");
@@ -717,7 +751,13 @@ function assertRootAuthority(root) {
 }
 
 assertProcessBoundary();
-const { artifactRoot, expectedReleaseSha, requireRootAuthority } = parseArguments(
+const {
+  artifactRoot,
+  expectedEffectiveLane,
+  expectedImpactReceiptSha256,
+  expectedReleaseSha,
+  requireRootAuthority,
+} = parseArguments(
   process.argv.slice(2),
 );
 const unresolvedRoot = path.resolve(artifactRoot);
@@ -760,6 +800,13 @@ const provenance = readProvenance(
 assertInnerBundle(root, innerBytes);
 assertInstallAuthorityContract(root);
 assertResumableOrchestratorContract(root);
+if (
+  expectedEffectiveLane !== undefined &&
+  (provenance.effectiveLane !== expectedEffectiveLane ||
+    provenance.impactReceiptSha256 !== expectedImpactReceiptSha256)
+) {
+  fail("production control provenance differs from the expected admission authority");
+}
 
 process.stdout.write(
   `PRODUCTION_CONTROL_ARTIFACT_INTEGRITY=PASS\n` +
@@ -769,5 +816,7 @@ process.stdout.write(
     `PRODUCTION_CONTROL_PAYLOAD_FILE_COUNT=${allowlistPaths.length}\n` +
     `PRODUCTION_CONTROL_INNER_MANIFEST_SHA256=${sha256(innerBytes)}\n` +
     `PRODUCTION_CONTROL_NODE_SHA256=${provenance.nodeExecutableSha256}\n` +
+    `PRODUCTION_CONTROL_EFFECTIVE_LANE=${provenance.effectiveLane}\n` +
+    `PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256=${provenance.impactReceiptSha256}\n` +
     `PRODUCTION_CONTROL_ROOT_AUTHORITY=${requireRootAuthority ? "REQUIRED" : "NOT_REQUESTED"}\n`,
 );

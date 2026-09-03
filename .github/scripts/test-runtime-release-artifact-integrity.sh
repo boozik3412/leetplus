@@ -139,10 +139,12 @@ make_runtime_root() {
   "pnpmVersion": "10.33.2",
   "databaseMigration": "${DATABASE_MIGRATION}",
   "databaseMigrationCount": 1,
+  "effectiveLane": "L1_RUNTIME",
   "runtimePackageManifestsIncluded": true,
   "canonicalPrismaDeployScriptsIncluded": true,
   "canonicalPrismaDeployScriptCount": 1,
   "founderPilotOperationalScriptsIncluded": true,
+  "impactReceiptSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "founderPilotOperationalScriptCount": 18,
   "runtimeEnrollmentOperationalScriptsIncluded": true,
   "runtimeEnrollmentOperationalScriptCount": 6,
@@ -261,6 +263,24 @@ expect_rejected \
   wrong-provenance \
   "$wrong_provenance_root" \
   'release provenance field is not exact: nodeVersion'
+
+handoff_lane_drift_root="${TEST_ROOT}/handoff-lane-drift"
+cp -a -- "$accepted_root" "$handoff_lane_drift_root"
+node -e \
+  'const fs = require("node:fs"); const file = process.argv[1]; const value = JSON.parse(fs.readFileSync(file, "utf8")); value.impactReceiptSha256 = "b".repeat(64); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);' \
+  "$handoff_lane_drift_root/release-provenance.json"
+write_manifest "$handoff_lane_drift_root"
+if node "$VERIFIER" \
+  --release-root "$(canonical_root "$handoff_lane_drift_root")" \
+  --expected-release-sha "$RELEASE_SHA" \
+  --expected-effective-lane 'L1_RUNTIME' \
+  --expected-impact-receipt-sha256 "$(printf 'a%.0s' {1..64})" \
+  > "$TEST_ROOT/handoff-lane-drift.out" 2>&1; then
+  printf 'handoff provenance drift runtime artifact was unexpectedly accepted\n' >&2
+  exit 1
+fi
+grep -F 'release provenance admission authority differs from the expected handoff' \
+  "$TEST_ROOT/handoff-lane-drift.out" > /dev/null
 
 node_modules_root="${TEST_ROOT}/node-modules"
 cp -a -- "$accepted_root" "$node_modules_root"

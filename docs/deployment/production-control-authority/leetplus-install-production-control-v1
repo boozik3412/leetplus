@@ -430,6 +430,7 @@ def parse_final_admission(value, release_sha, archive_digest):
     keys = [
         "schemaVersion", "admission", "releaseSha", "runId", "runAttempt",
         "repository", "repositoryId", "workflowRef", "workflowSha",
+        "effectiveLane", "impactReceiptSha256",
         "runtimeArtifactName", "runtimeArchiveSha256",
         "productionControlArtifactName", "productionControlArchiveSha256",
         "runtimeArtifactId", "runtimeTransportDigest",
@@ -441,7 +442,7 @@ def parse_final_admission(value, release_sha, archive_digest):
     if text != canonical:
         die("final admission receipt is not canonical JSON")
     if (
-        parsed["schemaVersion"] != 1
+        parsed["schemaVersion"] != 2
         or parsed["admission"] != "PASS"
         or parsed["releaseSha"] != release_sha
         or parsed["repository"] != EXPECTED_REPOSITORY
@@ -457,6 +458,8 @@ def parse_final_admission(value, release_sha, archive_digest):
         or not SHA256_RE.fullmatch(parsed["productionControlTransportDigest"])
         or parsed["workflowRef"]
         != f"{EXPECTED_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main"
+        or parsed["effectiveLane"] not in ("L1_RUNTIME", "L2_SCHEMA_SECURITY")
+        or not SHA256_RE.fullmatch(parsed["impactReceiptSha256"])
         or parsed["runtimeArtifactName"]
         != f"leetplus-release-{release_sha}-handoff-payload-{parsed['runId']}-{parsed['runAttempt']}"
         or parsed["productionControlArtifactName"]
@@ -665,11 +668,13 @@ def parse_install_map(value, manifest):
     return result
 
 
-def verify_artifact(node_path, generation_root, release_sha, fixture_mode):
+def verify_artifact(node_path, generation_root, release_sha, fixture_mode, effective_lane, impact_receipt_sha256):
     verifier = os.path.join(generation_root, *ARTIFACT_VERIFIER_SOURCE.split("/"))
     arguments = [
         node_path, verifier, "--artifact-root", generation_root,
         "--expected-release-sha", release_sha,
+        "--expected-effective-lane", effective_lane,
+        "--expected-impact-receipt-sha256", impact_receipt_sha256,
     ]
     if not fixture_mode:
         arguments.append("--require-root-authority")
@@ -687,6 +692,8 @@ def verify_artifact(node_path, generation_root, release_sha, fixture_mode):
         completed.returncode != 0
         or b"PRODUCTION_CONTROL_ARTIFACT_INTEGRITY=PASS\n" not in completed.stdout
         or f"PRODUCTION_CONTROL_RELEASE_SHA={release_sha}\n".encode() not in completed.stdout
+        or f"PRODUCTION_CONTROL_EFFECTIVE_LANE={effective_lane}\n".encode() not in completed.stdout
+        or f"PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256={impact_receipt_sha256}\n".encode() not in completed.stdout
         or b"PRODUCTION_CONTROL_ROOT_AUTHORITY=" + expected_authority + b"\n" not in completed.stdout
         or completed.stderr
     ):
@@ -826,7 +833,7 @@ archive_bytes, archive_identity = stable_read(archive_path, MAX_COMPRESSED_BYTES
 archive_digest = sha256_bytes(archive_bytes)
 if archive_digest != archive_expected_digest:
     die("production-control archive digest differs from its checksum")
-parse_final_admission(admission_bytes, options.release_sha, archive_digest)
+admission = parse_final_admission(admission_bytes, options.release_sha, archive_digest)
 
 generation_root = os.path.join(generation_base, options.release_sha)
 stage_root = os.path.join(generation_base, f".{options.release_sha}.staging")
@@ -887,7 +894,14 @@ try:
 except (OSError, EOFError) as error:
     die(f"archive gzip stream is invalid: {error}")
 extract_canonical_tar(tar_bytes, generation_temporary, uid, gid)
-verify_artifact(node_path, generation_temporary, options.release_sha, fixture_mode)
+verify_artifact(
+    node_path,
+    generation_temporary,
+    options.release_sha,
+    fixture_mode,
+    admission["effectiveLane"],
+    admission["impactReceiptSha256"],
+)
 candidate_manifest_bytes = stable_read(
     os.path.join(generation_temporary, "SHA256SUMS"),
     MAX_MEMBER_BYTES,
@@ -900,7 +914,14 @@ else:
     details = os.lstat(generation_root)
     if not stat.S_ISDIR(details.st_mode) or stat.S_ISLNK(details.st_mode) or details.st_uid != uid or details.st_gid != gid or stat.S_IMODE(details.st_mode) != 0o500:
         die("existing generation is not exact immutable authority")
-    verify_artifact(node_path, generation_root, options.release_sha, fixture_mode)
+    verify_artifact(
+        node_path,
+        generation_root,
+        options.release_sha,
+        fixture_mode,
+        admission["effectiveLane"],
+        admission["impactReceiptSha256"],
+    )
     existing_manifest_bytes = stable_read(
         os.path.join(generation_root, "SHA256SUMS"),
         MAX_MEMBER_BYTES,
@@ -934,13 +955,15 @@ def manifest_pin(source, label):
 receipt_path = os.path.join(receipt_base, f"production-control-generation-{options.release_sha}.receipt.json")
 intent_path = os.path.join(receipt_base, f"production-control-generation-{options.release_sha}.intent.json")
 expected_receipt = {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "recordKind": "leetplus-production-control-installed-generation",
     "state": "ACCEPTED",
     "releaseSha": options.release_sha,
     "repository": EXPECTED_REPOSITORY,
     "archiveSha256": archive_digest,
     "admissionReceiptSha256": admission_expected_digest,
+    "effectiveLane": admission["effectiveLane"],
+    "impactReceiptSha256": admission["impactReceiptSha256"],
     "generationRoot": f"{GENERATION_BASE}/{options.release_sha}",
     "artifactRootManifestSha256": sha256_bytes(root_manifest_bytes),
     "payloadAllowlistSha256": sha256_bytes(allowlist_bytes),
@@ -970,12 +993,14 @@ if os.path.lexists(receipt_path) and not os.path.lexists(intent_path):
     raise SystemExit(0)
 
 intent_record = {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "recordKind": "leetplus-production-control-install-intent",
     "state": "INTENT",
     "releaseSha": options.release_sha,
     "archiveSha256": archive_digest,
     "admissionReceiptSha256": admission_expected_digest,
+    "effectiveLane": admission["effectiveLane"],
+    "impactReceiptSha256": admission["impactReceiptSha256"],
     "generationRoot": f"{GENERATION_BASE}/{options.release_sha}",
     "installMapSha256": sha256_bytes(install_map_bytes),
 }

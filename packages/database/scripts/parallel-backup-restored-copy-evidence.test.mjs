@@ -45,7 +45,7 @@ function candidateReceipt(overrides = {}) {
 function manifest(overrides = {}) {
   const candidate = candidateReceipt();
   const value = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     contractVersion: PARALLEL_BACKUP_RESTORED_COPY_EVIDENCE_CONTRACT,
     operationId: OPERATION_ID,
     candidateReceiptSha256: canonicalReceiptSha256(candidate),
@@ -103,9 +103,11 @@ function prepare(options = {}) {
 
 function admissionReceipt(overrides = {}) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     admission: "PASS",
     releaseSha: RELEASE_SHA,
+    impactReceiptSha256: "d".repeat(64),
+    effectiveLane: "L2_SCHEMA_SECURITY",
     runId: "33563003804",
     runAttempt: "1",
     repository: "boozik3412/leetplus",
@@ -200,6 +202,9 @@ function reason(error) {
 test("prepares exact L2 candidate, backup and restored-copy evidence without effect authority", () => {
   const receipt = prepare();
   assert.equal(receipt.decision, PARALLEL_BACKUP_RESTORED_COPY_PREPARED);
+  assert.equal(receipt.schemaVersion, 2);
+  assert.equal(receipt.candidate.effectiveLane, "L2_SCHEMA_SECURITY");
+  assert.equal(receipt.candidate.impactReceiptSha256, "d".repeat(64));
   assert.equal(receipt.candidate.releaseSha, RELEASE_SHA);
   assert.equal(receipt.candidate.runtimeArchiveSha256, RUNTIME_ARCHIVE_SHA256);
   assert.equal(receipt.expiresAt, "2026-09-02T11:15:00.000Z");
@@ -243,6 +248,9 @@ test("rejects preparation outside the backup freshness window", () => {
 test("binds exact final admission, live topology and zero pending intents", () => {
   const binding = bind();
   assert.equal(binding.decision, PARALLEL_BACKUP_RESTORED_COPY_BOUND);
+  assert.equal(binding.schemaVersion, 2);
+  assert.equal(binding.effectiveLane, "L2_SCHEMA_SECURITY");
+  assert.equal(binding.impactReceiptSha256, "d".repeat(64));
   assert.equal(binding.expiresAt, "2026-09-02T10:25:00.000Z");
   assert.match(binding.effectBindingDigest, /^[0-9a-f]{64}$/u);
   const admission = admissionReceipt();
@@ -255,6 +263,41 @@ test("binds exact final admission, live topology and zero pending intents", () =
     preparationReceipt: prepare(),
   });
   assert.equal(verified.effectBindingDigest, binding.effectBindingDigest);
+});
+
+test("requires final-admission schema 2, L2 and the exact candidate impact receipt", () => {
+  for (const admission of [
+    admissionReceipt({ schemaVersion: 1 }),
+    admissionReceipt({ effectiveLane: "L1_RUNTIME" }),
+    admissionReceipt({ impactReceiptSha256: undefined }),
+  ]) {
+    assert.throws(
+      () => bind({ admissionReceipt: admission, liveEvidence: liveEvidence(admission) }),
+      (error) => reason(error) === "PARALLEL_PREPARATION_ADMISSION_RECEIPT_INVALID",
+    );
+  }
+
+  const driftedAdmission = admissionReceipt({ impactReceiptSha256: "a".repeat(64) });
+  assert.throws(
+    () =>
+      bind({
+        admissionReceipt: driftedAdmission,
+        liveEvidence: liveEvidence(driftedAdmission),
+      }),
+    (error) => reason(error) === "PARALLEL_PREPARATION_PRE_EFFECT_DRIFT",
+  );
+});
+
+test("rejects missing or non-L2 impact evidence before preparation", () => {
+  for (const candidate of [
+    candidateReceipt({ impactReceiptSha256: undefined }),
+    candidateReceipt({ effectiveLane: "L1_RUNTIME" }),
+  ]) {
+    assert.throws(
+      () => prepare({ candidateReceipt: candidate }),
+      (error) => reason(error) === "PARALLEL_PREPARATION_CANDIDATE_RECEIPT_INVALID",
+    );
+  }
 });
 
 test("rejects final admission for different runtime bytes", () => {

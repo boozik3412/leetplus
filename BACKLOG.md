@@ -21,10 +21,12 @@ fail-closed: повторно проверяет fence, нормализует s
 другие aliases/DNS names запрещены.
 Production этим source hardening не менялся. V3 successor объединён в `main`
 через PR #123 как `c955e99e…`; exact post-merge Fast `33728044375` и Full
-`33728044457` завершились `SUCCESS`. REL-ACC-008 добавляет trusted lane provenance и read-only
-агрегатор; отдельный deploy только ради метрик не выполняется — команда станет
-доступна вместе со следующей admitted production-control generation и прочитает
-сохранённую V2 историю.
+`33728044457` завершились `SUCCESS`. REL-ACC-008 с trusted lane provenance и
+read-only агрегатором объединён через PR #124 как `5d6c0eb3…`; exact-head Fast
+`33733457026` и Full `33734441310`, а также post-merge Fast `33736086893` и
+Full `33736086906` завершились `SUCCESS`. Отдельный deploy только ради метрик
+не выполняется — команда станет доступна вместе со следующей admitted
+production-control generation и прочитает сохранённую V2 историю.
 Подробный контракт и целевые метрики:
 [release-pipeline-acceleration.md](./docs/deployment/release-pipeline-acceleration.md).
 

@@ -99,6 +99,11 @@ installed receipt. `apply|resume` публикуют только обезлич
 Исторический V2 rollout `f3f119fa…` учитывается как `LEGACY_UNCLASSIFIED`; пока
 нет 20 terminal samples одной lane, p50/p95 остаются `null` с решением
 `INSUFFICIENT_SAMPLE_SIZE`.
+REL-ACC-008 объединён в `main` через PR #124 как exact merge `5d6c0eb3…`:
+exact-head Fast `33733457026` и Full `33734441310`, post-merge Fast
+`33736086893` и Full `33736086906` завершились `SUCCESS`. Production для этого
+source/control изменения не переключался; фактический baseline остаётся
+generation 21 на `f3f119fa…` с hot rollback `22ab6b81…`.
 
 Ниже сохранена история fail-closed restored-copy итераций, которые предшествовали
 успешному rehearsal и production rollout 01.09.2026.

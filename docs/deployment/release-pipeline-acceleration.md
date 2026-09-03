@@ -1,6 +1,6 @@
 # Ускорение безопасного release pipeline
 
-Статус: **7/8 backlog items implemented; первый controlled production rollout завершён, V3 one-shot recovery hardening реализован в source**
+Статус: **8/8 backlog items implemented; первый controlled production rollout завершён, V3 recovery hardening и trusted lane metrics объединены в main**
 
 Актуально на: **03.09.2026**
 
@@ -278,3 +278,13 @@ failure-phase histogram, unresolved inventory и p50/p95 отдельно для
 trusted lane provenance, поэтому проходит отдельный exact V2 terminal reader,
 помечается `LEGACY_UNCLASSIFIED` и не входит в lane percentiles. Метрики не
 разрешают deploy и не ослабляют ни один gate.
+
+REL-ACC-008 объединён в `main` через PR #124 как exact merge
+`5d6c0eb3623e66da2009e9f578053fa39da2ee66`. Exact-head Fast
+`33733457026` и manual Full `33734441310`, затем post-merge Fast
+`33736086893` и Full `33736086906` завершились `SUCCESS`. Admission до merge
+fail-closed обнаружил и остановил два trust-chain расхождения: чтение JSON
+receipt через parser формата `KEY=value` и stale SHA-256 hydration-controller.
+Оба были исправлены и повторно доказаны на новом exact head. Production для
+этого source/control изменения не переключался; метрики станут доступны со
+следующей отдельно одобренной admitted production-control generation.

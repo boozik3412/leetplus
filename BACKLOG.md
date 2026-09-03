@@ -4,17 +4,19 @@
 
 Статус: `[███████░░░] 7/8` — topology twin, impact classifier, один exact
 merge-candidate admission, параллельный backup/restored-copy evidence bind и
-resumable runtime rollout реализованы. Первая control-generation установлена и
-проверена на production, но runtime rollout остановлен до prepare/apply: live
-preflight выявил пропущенную quiesce/mask границу hot-rollback target. Successor
-добавляет crash-safe `mask --now -> cache/bind -> unmask/start`; production
-runtime остаётся на предыдущем healthy SHA до нового exact admission.
-Successor PR #121 (`be907cf0…`) уже прошёл exact Fast/Full, а его control
-generation установлена и root-verified. Первый `prepare` не создал plan:
-Bash-синтезированные `PWD/SHLVL/_` были корректно отклонены engine. Узкий
-bootstrap successor теперь повторно строит exact environment через `env -i`
-прямо перед Node и проверяет installed path в disposable-root fixture;
-runtime/nginx/DB не изменялись.
+resumable runtime rollout реализованы. Первый approved exact plan завершил все
+пять фаз на production: active blue `f3f119fa…`, generation `21`, hot rollback
+green `22ab6b81…`; public/loopback API и Web, authenticated reads, CURRENT189 и
+worker timers прошли postcheck без изменения schema, ACL или security flags.
+Live evidence одного rollout локализовал пять поздних recovery cases:
+transient cache cleanup, systemd `failed` после stop, отсутствие atomic
+slot-env bind, readiness до завершения Nest startup и уже принятый cutover с
+диагностическим stderr. V3 successor в PR #123 закрывает их bounded и
+fail-closed: повторно проверяет fence, нормализует stopped units, атомарно
+обновляет lineage-bound slot env, повторяет только обычный readiness failure и
+принимает stderr только при exact durable successor receipt/active link.
+Production этим source hardening не менялся; successor должен пройти exact
+Fast и Full Admission перед merge.
 Подробный контракт и целевые метрики:
 [release-pipeline-acceleration.md](./docs/deployment/release-pipeline-acceleration.md).
 
@@ -78,6 +80,9 @@ receipt-contract drift уже после admission.
   обязательную ownership-границу hot rollback: BIND сам маскирует/останавливает
   target units, а SMOKE снимает masks только перед start. Контракт:
   [`resumable-release-orchestrator.md`](./docs/deployment/resumable-release-orchestrator.md).
+  Первый production plan завершён на generation `21`; V3 recovery hardening
+  переносит все обнаруженные при этом bounded resume cases в проверяемый
+  one-shot path без ослабления receipt, topology или rollback-инвариантов.
 - [ ] `REL-ACC-008`: публиковать duration/failure-phase summary для каждого
   rollout и держать p50/p95 по lane, чтобы ускорение измерялось, а не
   оценивалось вручную.

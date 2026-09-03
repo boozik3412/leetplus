@@ -8,6 +8,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   realpath,
   rm,
@@ -19,6 +20,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   COMPLETE_DECISION,
+  CONTRACT_VERSION,
   PHASES,
   canonicalRecordSha256,
   main,
@@ -29,6 +31,7 @@ const PREVIOUS_SHA = "b".repeat(40);
 const MIGRATION = "20260831120000_guest_support_bug_report_input_repair";
 const OPERATION_ID = "11111111-1111-4111-8111-111111111111";
 const SECOND_OPERATION_ID = "22222222-2222-4222-8222-222222222222";
+const V2_CONTRACT_VERSION = "LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V2";
 const FIXTURE_COMMAND = path.resolve(
   ".github/scripts/resumable-release-orchestrator-fixture-command.mjs",
 );
@@ -275,6 +278,84 @@ async function fixtureState(root) {
   );
 }
 
+async function replaceProtectedJson(filePath, value) {
+  await chmod(filePath, 0o600);
+  await writeJson(filePath, value);
+  await chmod(filePath, 0o400);
+}
+
+async function rewriteCompletedOperationAsHistorical(
+  root,
+  contractVersion,
+) {
+  const directory = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    OPERATION_ID,
+  );
+  const planPath = path.join(directory, "plan.json");
+  const plan = JSON.parse(await readFile(planPath, "utf8"));
+  plan.contractVersion = contractVersion;
+  delete plan.effectiveLane;
+  delete plan.impactReceiptSha256;
+  await replaceProtectedJson(planPath, plan);
+  const planSha256 = canonicalRecordSha256(plan);
+
+  const approvalPath = path.join(directory, "approval.json");
+  const approval = JSON.parse(await readFile(approvalPath, "utf8"));
+  approval.contractVersion = contractVersion;
+  approval.planSha256 = planSha256;
+  await replaceProtectedJson(approvalPath, approval);
+
+  let previousPhaseReceiptSha256 = "";
+  for (const [index, phase] of PHASES.entries()) {
+    const prefix =
+      String(index + 1).padStart(2, "0") + "-" + phase.toLowerCase();
+    const intentPath = path.join(directory, prefix + ".intent.json");
+    const evidencePath = path.join(directory, prefix + ".evidence.json");
+    const receiptPath = path.join(directory, prefix + ".receipt.json");
+    const intent = JSON.parse(await readFile(intentPath, "utf8"));
+    intent.contractVersion = contractVersion;
+    intent.planSha256 = planSha256;
+    intent.previousPhaseReceiptSha256 = previousPhaseReceiptSha256;
+    await replaceProtectedJson(intentPath, intent);
+    const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
+    evidence.contractVersion = contractVersion;
+    evidence.planSha256 = planSha256;
+    if (contractVersion === V2_CONTRACT_VERSION && phase === "BIND") {
+      delete evidence.details.slotEnvironmentApiBindHostNormalization;
+      delete evidence.details.slotEnvironmentPath;
+      delete evidence.details.slotEnvironmentPreviousPath;
+      delete evidence.details.slotEnvironmentPreviousSha256;
+      delete evidence.details.slotEnvironmentSha256;
+    }
+    await replaceProtectedJson(evidencePath, evidence);
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+    receipt.contractVersion = contractVersion;
+    receipt.planSha256 = planSha256;
+    receipt.previousPhaseReceiptSha256 = previousPhaseReceiptSha256;
+    receipt.intentSha256 = canonicalRecordSha256(intent);
+    receipt.evidenceSha256 = canonicalRecordSha256(evidence);
+    await replaceProtectedJson(receiptPath, receipt);
+    previousPhaseReceiptSha256 = canonicalRecordSha256(receipt);
+  }
+
+  const finalPath = path.join(directory, "final.json");
+  const final = JSON.parse(await readFile(finalPath, "utf8"));
+  final.contractVersion = contractVersion;
+  final.planSha256 = planSha256;
+  final.lastPhaseReceiptSha256 = previousPhaseReceiptSha256;
+  await replaceProtectedJson(finalPath, final);
+}
+
+function nextPrepareArgs(root) {
+  const args = prepareArgs(root, SECOND_OPERATION_ID);
+  args[args.indexOf("--slot") + 1] = "green";
+  args[args.indexOf("--previous-release-sha") + 1] = RELEASE_SHA;
+  args[args.indexOf("--previous-web-build-id") + 1] = RELEASE_SHA;
+  return args;
+}
+
 if (process.platform !== "linux" || process.getuid?.() === 0) {
   process.stdout.write(
     "resumable release orchestrator test: SKIP " +
@@ -331,6 +412,27 @@ test("runs five phases and publishes a chained final receipt", async (t) => {
     await readFile(path.join(operationRoot, "final.json"), "utf8"),
   );
   assert.equal(final.decision, COMPLETE_DECISION);
+  const metricEntries = await readdir(
+    path.join(
+      fixture.root,
+      "var/lib/leetplus/deploy-receipts/release-orchestrator-metrics",
+    ),
+  );
+  assert.equal(metricEntries.length, 1);
+  const metric = JSON.parse(
+    await readFile(
+      path.join(
+        fixture.root,
+        "var/lib/leetplus/deploy-receipts/release-orchestrator-metrics",
+        metricEntries[0],
+      ),
+      "utf8",
+    ),
+  );
+  assert.equal(metric.effectiveLane, "L1_RUNTIME");
+  assert.equal(metric.outcome, "COMPLETED");
+  assert.equal(metric.failurePhase, "NONE");
+  assert.equal(metric.reasonClass, "NONE");
   for (const [index, phase] of PHASES.entries()) {
     const prefix =
       String(index + 1).padStart(2, "0") + "-" + phase.toLowerCase();
@@ -344,6 +446,22 @@ test("runs five phases and publishes a chained final receipt", async (t) => {
   );
   assert.deepEqual(await fixtureState(fixture.root), state);
 });
+
+for (const [label, contractVersion] of [
+  ["pre-lane V3", CONTRACT_VERSION],
+  ["exact V2", V2_CONTRACT_VERSION],
+]) {
+  test(`accepts completed ${label} history before a new prepare`, async (t) => {
+    const fixture = await preparedFixture(`historical-${label.replaceAll(" ", "-")}-`);
+    t.after(() => rm(fixture.root, { recursive: true, force: true }));
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      0,
+    );
+    await rewriteCompletedOperationAsHistorical(fixture.root, contractVersion);
+    assert.equal(await main(nextPrepareArgs(fixture.root)), 0);
+  });
+}
 
 test("preserves an already canonical IPv4 loopback bind host", async (t) => {
   const fixture = await preparedFixture("canonical-bind-host-", {

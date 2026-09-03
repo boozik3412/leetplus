@@ -114,9 +114,11 @@ write_provenance() {
     "$root/$ARTIFACT_ALLOWLIST")"
   printf '%s\n' \
     '{' \
-    '  "schemaVersion": 1,' \
+    '  "schemaVersion": 2,' \
     '  "artifactKind": "leetplus-production-control",' \
     "  \"releaseSha\": \"${RELEASE_SHA}\"," \
+    '  "effectiveLane": "L1_RUNTIME",' \
+    '  "impactReceiptSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",' \
     '  "nodeMajor": 22,' \
     "  \"nodeExecutableSha256\": \"${node_digest}\"," \
     "  \"payloadAllowlistSha256\": \"${allowlist_digest}\"," \
@@ -176,7 +178,7 @@ write_admission() {
 const fs = require('node:fs');
 const [receipt, controlDigest, releaseSha] = process.argv.slice(2);
 const record = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   admission: 'PASS',
   releaseSha,
   runId: '123456',
@@ -185,6 +187,8 @@ const record = {
   repositoryId: '987654',
   workflowRef: 'boozik3412/leetplus/.github/workflows/ci.yml@refs/heads/main',
   workflowSha: releaseSha,
+  effectiveLane: 'L1_RUNTIME',
+  impactReceiptSha256: 'a'.repeat(64),
   runtimeArtifactName: `leetplus-release-${releaseSha}-handoff-payload-123456-1`,
   runtimeArchiveSha256: 'b'.repeat(64),
   productionControlArtifactName:
@@ -276,6 +280,9 @@ run_installer "$accepted_root" > "$TEST_ROOT/accepted.out"
 grep -F -x 'PRODUCTION_CONTROL_INSTALL=PASS' "$TEST_ROOT/accepted.out" >/dev/null
 grep -F -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' "$TEST_ROOT/accepted.out" >/dev/null
 grep -F -x 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=52' "$TEST_ROOT/accepted.out" >/dev/null
+grep -F -x 'PRODUCTION_CONTROL_EFFECTIVE_LANE=L1_RUNTIME' "$TEST_ROOT/accepted.out" >/dev/null
+grep -F -x "PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256=$(printf 'a%.0s' {1..64})" \
+  "$TEST_ROOT/accepted.out" >/dev/null
 [[ -f "$accepted_root/var/lib/leetplus/deploy-receipts/production-control/production-control-generation-${RELEASE_SHA}.receipt.json" \
   && ! -e "$accepted_root/var/lib/leetplus/deploy-receipts/production-control/production-control-generation-${RELEASE_SHA}.intent.json" ]] \
   || die 'accepted install did not finalize the exact durable receipt state'
@@ -291,6 +298,8 @@ fixture_gid="$(id -g)"
   || die 'accepted install did not preserve executable service-helper authority modes'
 run_installed_verifier "$accepted_root" > "$TEST_ROOT/accepted-verify.out"
 grep -F -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' \
+  "$TEST_ROOT/accepted-verify.out" >/dev/null
+grep -F -x 'PRODUCTION_CONTROL_EFFECTIVE_LANE=L1_RUNTIME' \
   "$TEST_ROOT/accepted-verify.out" >/dev/null
 chmod 0777 -- "$accepted_root"
 if run_installed_verifier "$accepted_root" > "$TEST_ROOT/writable-fixture-root.out" 2>&1; then

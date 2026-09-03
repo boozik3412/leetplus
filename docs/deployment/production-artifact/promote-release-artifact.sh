@@ -157,6 +157,38 @@ extract_installed_verifier_pin() {
   ' "$receipt"
 }
 
+extract_installed_effective_lane() {
+  local receipt="$1"
+  awk '
+    /^  "effectiveLane": "(L1_RUNTIME|L2_SCHEMA_SECURITY)",$/ {
+      count += 1
+      value = $0
+      sub(/^  "effectiveLane": "/, "", value)
+      sub(/",$/, "", value)
+    }
+    END {
+      if (count != 1) exit 1
+      print value
+    }
+  ' "$receipt"
+}
+
+extract_installed_impact_receipt_sha256() {
+  local receipt="$1"
+  awk '
+    /^  "impactReceiptSha256": "[0-9a-f]+",$/ {
+      count += 1
+      value = $0
+      sub(/^  "impactReceiptSha256": "/, "", value)
+      sub(/",$/, "", value)
+    }
+    END {
+      if (count != 1 || length(value) != 64) exit 1
+      print value
+    }
+  ' "$receipt"
+}
+
 validate_installed_generation_attestation() {
   local record="$1"
   local -a lines=()
@@ -164,19 +196,21 @@ validate_installed_generation_attestation() {
   local receipt_sha256 root_manifest_sha256 install_map_sha256
   local installer_sha256 verifier_sha256 stager_sha256 attestor_sha256
   local hydration_unit_sha256 sealer_sha256 promoter_sha256
-  local attested_digest
+  local effective_lane impact_receipt_sha256 attested_digest
 
   [[ -f "$record" && ! -L "$record" \
     && "$(stat -c '%u:%g:%a' -- "$record")" == '0:0:600' \
     && "$(stat -c '%s' -- "$record")" -le 16384 ]] \
     || die 'installed-generation verifier output is absent or unsafe'
   mapfile -t lines < "$record"
-  ((${#lines[@]} == 14)) \
-    || die 'installed-generation verifier output does not have the exact 14-line schema'
+  ((${#lines[@]} == 16)) \
+    || die 'installed-generation verifier output does not have the exact 16-line schema'
   [[ "${lines[0]}" == 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' \
     && "${lines[1]}" == "PRODUCTION_CONTROL_RELEASE_SHA=${release_sha}" \
     && "${lines[2]}" == "PRODUCTION_CONTROL_RECEIPT_PATH=${production_control_receipt}" \
-    && "${lines[13]}" == 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=52' ]] \
+    && "${lines[13]}" == 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=52' \
+    && "${lines[14]}" =~ ^PRODUCTION_CONTROL_EFFECTIVE_LANE=(L1_RUNTIME|L2_SCHEMA_SECURITY)$ \
+    && "${lines[15]}" =~ ^PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256=([0-9a-f]{64})$ ]] \
     || die 'installed-generation verifier output identity is malformed'
   [[ "${lines[3]}" =~ ^PRODUCTION_CONTROL_RECEIPT_SHA256=([0-9a-f]{64})$ \
     && "${lines[4]}" =~ ^PRODUCTION_CONTROL_ROOT_MANIFEST_SHA256=([0-9a-f]{64})$ \
@@ -200,6 +234,8 @@ validate_installed_generation_attestation() {
   hydration_unit_sha256="${lines[10]#*=}"
   sealer_sha256="${lines[11]#*=}"
   promoter_sha256="${lines[12]#*=}"
+  effective_lane="${lines[14]#*=}"
+  impact_receipt_sha256="${lines[15]#*=}"
   for attested_digest in \
     "$receipt_sha256" "$root_manifest_sha256" "$install_map_sha256" \
     "$installer_sha256" "$verifier_sha256" "$stager_sha256" \
@@ -208,6 +244,10 @@ validate_installed_generation_attestation() {
     [[ "$attested_digest" =~ $sha256_pattern ]] \
       || die 'installed-generation verifier emitted an invalid SHA-256 digest'
   done
+
+  [[ "$effective_lane" == "$(extract_installed_effective_lane "$production_control_receipt")" \
+    && "$impact_receipt_sha256" == "$(extract_installed_impact_receipt_sha256 "$production_control_receipt")" ]] \
+    || die 'installed-generation verifier lane provenance differs from its accepted receipt'
 
   [[ "$receipt_sha256" == "$(sha256sum -- "$production_control_receipt" | awk '{ print $1 }')" \
     && "$root_manifest_sha256" == "$(sha256sum -- "$production_control_generation_root/SHA256SUMS" | awk '{ print $1 }')" \

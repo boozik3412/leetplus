@@ -54,6 +54,11 @@ assert.match(
 );
 assert.match(
   impact,
+  /impact_receipt_sha256: \$\{\{ steps\.classify\.outputs\.impact_receipt_sha256 \}\}/u,
+  "Full admission must publish the exact classified-impact digest",
+);
+assert.match(
+  impact,
   /node \.github\/scripts\/classify-release-candidate\.mjs[\s\S]*?--output "\$candidate_receipt"/u,
   "Full admission must materialize the candidate receipt",
 );
@@ -86,6 +91,22 @@ assert.match(
   /if: needs\.release_impact\.outputs\.deployable_candidate == 'true'/u,
   "only an exact deployable candidate may enter the final handoff",
 );
+assert.match(
+  handoff,
+  /id: candidate_authority/u,
+  "final handoff must make the reverified lane authority available only to downstream steps",
+);
+assert.match(
+  handoff,
+  /RECEIPT_EFFECTIVE_LANE: \$\{\{ steps\.candidate_authority\.outputs\.effective_lane \}\}/u,
+  "final admission receipt must bind the reverified effective lane",
+);
+assert.match(
+  handoff,
+  /RECEIPT_IMPACT_RECEIPT_SHA256: \$\{\{ steps\.candidate_authority\.outputs\.impact_receipt_sha256 \}\}/u,
+  "final admission receipt must bind the reverified impact receipt digest",
+);
+assert.match(handoff, /schemaVersion: 2,/u, "final admission receipt must use the lane-aware schema");
 assert.match(
   handoff,
   /name: Download exact release-candidate authority/u,

@@ -207,10 +207,14 @@ digests. Наличие receipt само по себе недостаточно:
 запускать `/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs`
 с `--release-sha <SHA> --require-root-authority`; outstanding intent, drift любого
 installed byte, mount/link/hardlink, неверный mode/owner или receipt pin дают
-fail-closed отказ. Promoter до global hydration lock получает и удерживает
+fail-closed отказ. Final admission schema `2` дополнительно фиксирует только
+`effectiveLane=L1_RUNTIME|L2_SCHEMA_SECURITY` и SHA-256 exact impact receipt.
+Эти значения должны совпадать в immutable runtime/control provenance; installer
+переносит их только в root-only installed-generation receipt, не из operator
+environment. Promoter до global hydration lock получает и удерживает
 installer lock, извлекает единственный verifier digest из root-only receipt,
 сверяет exact installed verifier byte и запускает его в `env -i`. Только exact
-14-line PASS record с тем же release/receipt и текущими manifest, map,
+16-line PASS record с тем же release/receipt, trusted lane/impact digest и текущими manifest, map,
 installer, stager, hydration attestor/unit, sealer и promoter digests допускает
 обращение к promotion state; lock остаётся открыт до последнего publication
 effect.

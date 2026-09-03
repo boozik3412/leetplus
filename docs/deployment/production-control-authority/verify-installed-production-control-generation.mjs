@@ -9,6 +9,7 @@ import { TextDecoder } from "node:util";
 
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
+const EFFECTIVE_LANES = new Set(["L1_RUNTIME", "L2_SCHEMA_SECURITY"]);
 const SAFE_SOURCE_PATTERN = /^[A-Za-z0-9_.@+/-]+$/u;
 const SAFE_DESTINATION_PATTERN = /^\/[A-Za-z0-9_.@+/-]+$/u;
 const EXPECTED_INSTALL_MAP_SHA256 =
@@ -601,7 +602,14 @@ function assertInstalledDestinations(
   }
 }
 
-function assertArtifactVerifier(rootPrefix, generationRoot, releaseSha, fixtureMode) {
+function assertArtifactVerifier(
+  rootPrefix,
+  generationRoot,
+  releaseSha,
+  fixtureMode,
+  effectiveLane,
+  impactReceiptSha256,
+) {
   const verifier = path.join(generationRoot, ...ARTIFACT_VERIFIER_SOURCE.split("/"));
   const nodePath = fixtureMode ? process.execPath : "/usr/bin/node";
   if (!fixtureMode) {
@@ -619,6 +627,10 @@ function assertArtifactVerifier(rootPrefix, generationRoot, releaseSha, fixtureM
     generationRoot,
     "--expected-release-sha",
     releaseSha,
+    "--expected-effective-lane",
+    effectiveLane,
+    "--expected-impact-receipt-sha256",
+    impactReceiptSha256,
   ];
   if (!fixtureMode) args.push("--require-root-authority");
   const result = spawnSync(nodePath, args, {
@@ -774,13 +786,15 @@ if (sha256(installerAuthorityBytes) !== pin(INSTALLER_SOURCE, "installer authori
 
 const provisional = JSON.parse(decodeUtf8(receiptBytes, "installed generation receipt"));
 const expectedReceipt = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   recordKind: "leetplus-production-control-installed-generation",
   state: "ACCEPTED",
   releaseSha: parsedArguments.releaseSha,
   repository: EXPECTED_REPOSITORY,
   archiveSha256: provisional?.archiveSha256,
   admissionReceiptSha256: provisional?.admissionReceiptSha256,
+  effectiveLane: provisional?.effectiveLane,
+  impactReceiptSha256: provisional?.impactReceiptSha256,
   generationRoot: `${GENERATION_BASE}/${parsedArguments.releaseSha}`,
   artifactRootManifestSha256: sha256(rootManifestBytes),
   payloadAllowlistSha256: sha256(allowlistBytes),
@@ -817,12 +831,21 @@ const expectedReceipt = {
 };
 if (
   !SHA256_PATTERN.test(expectedReceipt.archiveSha256 ?? "") ||
-  !SHA256_PATTERN.test(expectedReceipt.admissionReceiptSha256 ?? "")
+  !SHA256_PATTERN.test(expectedReceipt.admissionReceiptSha256 ?? "") ||
+  !EFFECTIVE_LANES.has(expectedReceipt.effectiveLane) ||
+  !SHA256_PATTERN.test(expectedReceipt.impactReceiptSha256 ?? "")
 ) {
   fail("installed generation receipt has malformed admission digests");
 }
 parseReceipt(receiptBytes, expectedReceipt);
-assertArtifactVerifier(rootPrefix, generationRoot, parsedArguments.releaseSha, fixtureMode);
+assertArtifactVerifier(
+  rootPrefix,
+  generationRoot,
+  parsedArguments.releaseSha,
+  fixtureMode,
+  expectedReceipt.effectiveLane,
+  expectedReceipt.impactReceiptSha256,
+);
 assertInstalledDestinations(
   rootPrefix,
   generationRoot,
@@ -847,5 +870,7 @@ process.stdout.write(
     `PRODUCTION_CONTROL_HYDRATION_UNIT_SHA256=${expectedReceipt.hydrationUnitSha256}\n` +
     `PRODUCTION_CONTROL_SEALER_SHA256=${expectedReceipt.sealerSha256}\n` +
     `PRODUCTION_CONTROL_PROMOTER_SHA256=${expectedReceipt.promoterSha256}\n` +
-    `PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=${expectedReceipt.installedFileCount}\n`,
+    `PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=${expectedReceipt.installedFileCount}\n` +
+    `PRODUCTION_CONTROL_EFFECTIVE_LANE=${expectedReceipt.effectiveLane}\n` +
+    `PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256=${expectedReceipt.impactReceiptSha256}\n`,
 );

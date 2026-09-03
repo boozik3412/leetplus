@@ -62,7 +62,16 @@ schema/security lane. Неизвестный, смешанный или недо
 получает non-deployable `L0` receipt и пропускает runtime jobs. Manifest не
 доказывает фактическое live состояние и не заменяет exact-SHA admission,
 installed-control verification, production receipts, backup/restored-copy или
-отдельный GO.
+отдельный GO. Для накопительных release-метрик trusted lane не берётся из
+параметров оператора: final admission schema `2` фиксирует только `L1_RUNTIME`
+или `L2_SCHEMA_SECURITY` вместе с SHA-256 exact impact receipt. Те же два поля
+входят в immutable runtime/control provenance, root-only installed-generation
+receipt и machine-readable verifier output. Историческая terminal операция без
+этих полей остаётся `LEGACY_UNCLASSIFIED` и не участвует в lane percentile;
+это не понижает требования admission или security-контуров. Read-only metrics
+держит только shared install lock, читает canonical root-owned receipts и не
+обращается к public guest, corporate tenant, DB, worker units, timers или сети;
+attempt record не содержит identifiers, SHA, paths, environment, output или PII.
 
 Поверх impact lane действует независимый merge-candidate guard. Final runtime и
 production-control handoff разрешён только runtime-eligible exact `push` SHA в

@@ -1207,7 +1207,9 @@ process.stdout.write(
     `PRODUCTION_CONTROL_HYDRATION_UNIT_SHA256=${digest("/etc/systemd/system/leetplus-release-hydrate@.service")}\n` +
     `PRODUCTION_CONTROL_SEALER_SHA256=${digest("/usr/local/sbin/leetplus-seal-release-artifact")}\n` +
     `PRODUCTION_CONTROL_PROMOTER_SHA256=${digest("/usr/local/sbin/leetplus-promote-release-artifact")}\n` +
-    `PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=52\n`,
+    `PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=52\n` +
+    `PRODUCTION_CONTROL_EFFECTIVE_LANE=L1_RUNTIME\n` +
+    `PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256=${"f".repeat(64)}\n`,
 );
 FIXTURE_GENERATION_VERIFIER
 /usr/bin/node --check "$fixture_generation_verifier"
@@ -1264,13 +1266,15 @@ const [
   promoterSha256,
 ] = process.argv.slice(2);
 const record = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   recordKind: 'leetplus-production-control-installed-generation',
   state: 'ACCEPTED',
   releaseSha,
   repository: 'boozik3412/leetplus',
   archiveSha256: 'a'.repeat(64),
   admissionReceiptSha256: 'b'.repeat(64),
+  effectiveLane: 'L1_RUNTIME',
+  impactReceiptSha256: 'f'.repeat(64),
   generationRoot: `/srv/leetplus/production-control-generations/${releaseSha}`,
   artifactRootManifestSha256,
   payloadAllowlistSha256: 'c'.repeat(64),

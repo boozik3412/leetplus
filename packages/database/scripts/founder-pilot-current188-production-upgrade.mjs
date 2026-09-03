@@ -1249,6 +1249,8 @@ async function inspectBridgeProductionControl({ node, releaseSha }) {
     "PRODUCTION_CONTROL_SEALER_SHA256",
     "PRODUCTION_CONTROL_PROMOTER_SHA256",
     "PRODUCTION_CONTROL_INSTALLED_FILE_COUNT",
+    "PRODUCTION_CONTROL_EFFECTIVE_LANE",
+    "PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256",
   ]);
   if (
     values.PRODUCTION_CONTROL_INSTALLED_GENERATION !== "PASS" ||
@@ -1256,6 +1258,8 @@ async function inspectBridgeProductionControl({ node, releaseSha }) {
     values.PRODUCTION_CONTROL_RECEIPT_PATH !==
       `${BRIDGE_STATE_ROOT}/production-control/production-control-generation-${releaseSha}.receipt.json` ||
     values.PRODUCTION_CONTROL_VERIFIER_SHA256 !== sha256(verifierBytes) ||
+    values.PRODUCTION_CONTROL_EFFECTIVE_LANE !== "L2_SCHEMA_SECURITY" ||
+    !SHA256.test(values.PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256) ||
     ![
       values.PRODUCTION_CONTROL_RECEIPT_SHA256,
       values.PRODUCTION_CONTROL_ROOT_MANIFEST_SHA256,

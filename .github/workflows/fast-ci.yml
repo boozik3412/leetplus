@@ -263,8 +263,10 @@ jobs:
           node --check docs/deployment/production-artifact/resumable-release-orchestrator.mjs
           node --check .github/scripts/resumable-release-orchestrator-fixture-command.mjs
           node --check .github/scripts/test-resumable-release-orchestrator.mjs
+          node --check .github/scripts/test-resumable-release-orchestrator-metrics.mjs
           printf 'FAST_CI_FIXTURE_RESUMABLE_RELEASE_ORCHESTRATOR=START\n'
           node .github/scripts/test-resumable-release-orchestrator.mjs
+          node --test .github/scripts/test-resumable-release-orchestrator-metrics.mjs
           printf 'FAST_CI_FIXTURE_RESUMABLE_RELEASE_ORCHESTRATOR=PASS\n'
           bash -n .github/scripts/test-production-artifact-systemd-templates.sh
           printf 'FAST_CI_FIXTURE_SYSTEMD_TEMPLATES=START\n'

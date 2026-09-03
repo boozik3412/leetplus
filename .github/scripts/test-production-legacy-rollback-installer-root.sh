@@ -855,6 +855,36 @@ install -o root -g root -m 0555 \
 install -d -o root -g root -m 0700 /run/leetplus-production-control
 install -o root -g root -m 0600 /dev/null \
   /run/leetplus-production-control/install.lock
+
+# The metrics path is a filesystem-only read. It may take the shared install
+# lock, but it must not create either the rollout lock or the metrics directory.
+install -d -o root -g root -m 0700 \
+  /var/lib/leetplus/deploy-receipts \
+  /var/lib/leetplus/deploy-receipts/release-orchestrator
+test ! -e /var/lib/leetplus/deploy-receipts/release-orchestrator/orchestrator.lock
+test ! -e /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics
+/usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator metrics \
+  > /run/fixture-orchestrator-production-metrics.out
+grep -F '"decision":"METRICS_READ_ONLY"' \
+  /run/fixture-orchestrator-production-metrics.out >/dev/null \
+  || die 'production orchestrator metrics did not emit its read-only decision'
+test ! -e /var/lib/leetplus/deploy-receipts/release-orchestrator/orchestrator.lock \
+  || die 'production orchestrator metrics created the rollout lock'
+test ! -e /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics \
+  || die 'production orchestrator metrics created the attempt-record directory'
+
+exec 7<> /run/leetplus-production-control/install.lock
+flock -n 7 || die 'fixture could not acquire the exclusive production-control lock'
+if /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator metrics \
+  > /run/fixture-orchestrator-production-metrics-locked.out 2>&1; then
+  die 'production orchestrator metrics ignored an exclusive install lock'
+fi
+grep -F 'production-control install or rollout operation is active' \
+  /run/fixture-orchestrator-production-metrics-locked.out >/dev/null \
+  || die 'production orchestrator metrics lock rejection was not exact'
+flock -u 7
+exec 7>&-
+
 if /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
   status \
   --operation-id 00000000-0000-4000-8000-000000000001 \

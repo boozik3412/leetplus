@@ -53,6 +53,11 @@ Final handoff скачивает intermediate authority в fresh job, повто
 классификатор и проверяет решение
 `EXACT_MAIN_PUSH_DEPLOYABLE_CANDIDATE`. Deployable runtime/control payload и
 final admission receipt по-прежнему привязаны к producing `run_attempt`.
+Lane-aware final admission schema `2` дополнительно переносит только повторно
+проверенные `effectiveLane=L1_RUNTIME|L2_SCHEMA_SECURITY` и SHA-256 exact impact
+receipt. Оба поля обязаны совпасть в runtime и production-control provenance,
+независимой rebuild-проверке, root-only installed-generation receipt и его
+verifier output; свободный параметр оператора не является authority.
 
 ## Concurrency
 

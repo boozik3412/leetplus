@@ -154,9 +154,11 @@ write_provenance() {
   ' "$root/$ARTIFACT_ALLOWLIST")"
   printf '%s\n' \
     '{' \
-    '  "schemaVersion": 1,' \
+    '  "schemaVersion": 2,' \
     '  "artifactKind": "leetplus-production-control",' \
     "  \"releaseSha\": \"${RELEASE_SHA}\"," \
+    '  "effectiveLane": "L1_RUNTIME",' \
+    '  "impactReceiptSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",' \
     '  "nodeMajor": 22,' \
     "  \"nodeExecutableSha256\": \"${node_digest}\"," \
     "  \"payloadAllowlistSha256\": \"${allowlist_digest}\"," \
@@ -448,5 +450,20 @@ expect_rejected \
   malformed-node-digest \
   "$malformed_node_root" \
   'production control provenance has no exact Node executable digest'
+
+malformed_lane_root="${TEST_ROOT}/malformed-lane"
+cp -a -- "$accepted_root" "$malformed_lane_root"
+clean_node -e '
+  const fs = require("node:fs");
+  const target = `${process.argv[1]}/production-control-provenance.json`;
+  const record = JSON.parse(fs.readFileSync(target, "utf8"));
+  record.effectiveLane = "L0_DOCS";
+  fs.writeFileSync(target, `${JSON.stringify(record, null, 2)}\n`);
+' "$malformed_lane_root"
+write_root_manifest "$malformed_lane_root"
+expect_rejected \
+  malformed-lane \
+  "$malformed_lane_root" \
+  'production control provenance has an invalid admission lane'
 
 printf 'production control artifact integrity fixture: PASS\n'

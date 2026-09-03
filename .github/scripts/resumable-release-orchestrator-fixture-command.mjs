@@ -56,6 +56,9 @@ function writeControlAttestation() {
       "PRODUCTION_CONTROL_SEALER_SHA256=" + "9".repeat(64),
       "PRODUCTION_CONTROL_PROMOTER_SHA256=" + "0".repeat(64),
       "PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=52",
+      "PRODUCTION_CONTROL_EFFECTIVE_LANE=" +
+        (state.effectiveLane ?? "L1_RUNTIME"),
+      "PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256=" + "f".repeat(64),
       "",
     ].join("\n"),
   );

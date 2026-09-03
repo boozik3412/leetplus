@@ -57,8 +57,11 @@ stale dashboard `returnTo` не обходит выбор роли. Real-account
 завершён terminal receipt без schema/ACL/security-flag effects. V3 source
 hardening автоматизирует только exact fenced recovery cases, включая bounded
 `localhost -> 127.0.0.1` normalization фактического legacy slot env; другие
-bind-host aliases запрещены. Подробности и
-остаточный metrics backlog зафиксированы в
+bind-host aliases запрещены. PR #123 объединил V3 в `main` как `c955e99e…` без
+production deploy. Восьмой acceleration item добавляет trusted lane provenance
+и обезличенные duration/failure-phase metrics; до 20 samples p50/p95 не
+публикуются, а исторический V2 rollout остаётся `LEGACY_UNCLASSIFIED`.
+Подробности зафиксированы в
 [плане ускорения release pipeline](../deployment/release-pipeline-acceleration.md).
 
 Основной путь первого внешнего клуба — `SHARED_MULTI_TENANT_BETA`: новый

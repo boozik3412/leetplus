@@ -18,6 +18,8 @@ IFS=$'\n\t'
 umask 0077
 
 readonly RELEASE_SHA_PATTERN='^[0-9a-f]{40}$'
+readonly EFFECTIVE_LANE_PATTERN='^(L1_RUNTIME|L2_SCHEMA_SECURITY)$'
+readonly SHA256_PATTERN='^[0-9a-f]{64}$'
 readonly ALLOWLIST_PATH='docs/deployment/production-control-authority/production-control-payload.allowlist'
 readonly VERIFIER_PATH='docs/deployment/production-control-authority/verify-production-control-artifact.mjs'
 readonly INNER_MANIFEST_PATH='docs/deployment/production-artifact/CONTROL_BUNDLE_SHA256SUMS'
@@ -34,6 +36,8 @@ repository_root_input=''
 node_path_input=''
 runner_tool_cache_input=''
 output_directory_input=''
+effective_lane=''
+impact_receipt_sha256=''
 
 while (($# > 0)); do
   case "$1" in
@@ -63,6 +67,17 @@ while (($# > 0)); do
       [[ -z "$output_directory_input" && $# -ge 2 ]] \
         || die 'duplicate or incomplete --output-directory'
       output_directory_input="$2"
+      shift 2
+      ;;
+    --effective-lane)
+      [[ -z "$effective_lane" && $# -ge 2 ]] || die 'duplicate or incomplete --effective-lane'
+      effective_lane="$2"
+      shift 2
+      ;;
+    --impact-receipt-sha256)
+      [[ -z "$impact_receipt_sha256" && $# -ge 2 ]] \
+        || die 'duplicate or incomplete --impact-receipt-sha256'
+      impact_receipt_sha256="$2"
       shift 2
       ;;
     *) die "unknown argument: $1" ;;
@@ -95,11 +110,16 @@ TZ='UTC'
 export PATH LANG LC_ALL TZ
 export -n \
   release_sha repository_root_input node_path_input output_directory_input \
-  runner_tool_cache_input forbidden_environment_name inherited_environment_name \
+  runner_tool_cache_input effective_lane impact_receipt_sha256 \
+  forbidden_environment_name inherited_environment_name \
   2>/dev/null || true
 
 [[ "$release_sha" =~ $RELEASE_SHA_PATTERN ]] \
   || die 'release SHA must be 40 lowercase hexadecimal characters'
+[[ "$effective_lane" =~ $EFFECTIVE_LANE_PATTERN ]] \
+  || die 'effective lane must be one exact runtime-eligible lane'
+[[ "$impact_receipt_sha256" =~ $SHA256_PATTERN ]] \
+  || die 'impact receipt digest must be 64 lowercase hexadecimal characters'
 [[ "$repository_root_input" == /* && "$node_path_input" == /* \
   && "$runner_tool_cache_input" == /* \
   && "$output_directory_input" == /* ]] \
@@ -653,9 +673,11 @@ inner_manifest_digest="${inner_manifest_digest%% *}"
 provenance_path="${payload_root}/production-control-provenance.json"
 printf '%s\n' \
   '{' \
-  '  "schemaVersion": 1,' \
+  '  "schemaVersion": 2,' \
   '  "artifactKind": "leetplus-production-control",' \
   "  \"releaseSha\": \"${release_sha}\"," \
+  "  \"effectiveLane\": \"${effective_lane}\"," \
+  "  \"impactReceiptSha256\": \"${impact_receipt_sha256}\"," \
   '  "nodeMajor": 22,' \
   "  \"nodeExecutableSha256\": \"${node_snapshot_sha256}\"," \
   "  \"payloadAllowlistSha256\": \"${allowlist_digest}\"," \
@@ -1248,15 +1270,19 @@ root_tar_digest="${root_tar_digest%% *}"
 root_verification="$(node_command "${root_extraction}/${VERIFIER_PATH}" \
     --artifact-root "$root_extraction" \
     --expected-release-sha "$release_sha" \
+    --expected-effective-lane "$effective_lane" \
+    --expected-impact-receipt-sha256 "$impact_receipt_sha256" \
     --require-root-authority)" \
   || die 'root-owned extraction failed the verifier shipped inside the artifact'
 root_verification_line_count=0
 while IFS= read -r _; do
   root_verification_line_count=$((root_verification_line_count + 1))
 done <<< "$root_verification"
-[[ "$root_verification_line_count" == '8' \
+[[ "$root_verification_line_count" == '10' \
   && "$root_verification" == *$'PRODUCTION_CONTROL_ARTIFACT_INTEGRITY=PASS\n'* \
   && "$root_verification" == *"PRODUCTION_CONTROL_NODE_SHA256=${node_snapshot_sha256}"* \
+  && "$root_verification" == *"PRODUCTION_CONTROL_EFFECTIVE_LANE=${effective_lane}"* \
+  && "$root_verification" == *"PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256=${impact_receipt_sha256}"* \
   && "$root_verification" == *'PRODUCTION_CONTROL_ROOT_AUTHORITY=REQUIRED'* ]] \
   || die 'root authority verifier output is malformed'
 

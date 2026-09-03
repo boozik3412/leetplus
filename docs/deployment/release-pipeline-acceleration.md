@@ -239,6 +239,11 @@ atomic lineage-bound update. Фактический legacy `API_BIND_HOST=localh
 Timeout, oversized output, чужая generation, изменённые flags или receipt drift
 не повторяются и не принимаются.
 
+V3 hardening объединён в `main` через PR #123 как exact merge
+`c955e99e77a63ce959045fd75c2bbf2259dc62c4`. Production для этого source-only
+изменения не переключался; post-merge Fast `33728044375` и Full `33728044457`
+завершились `SUCCESS`, а фактическим baseline остаётся generation 21 ниже.
+
 Этот successor не включает schema, ACL, worker или security-flag effects: L2
 продолжает использовать параллельный evidence binding и отдельно подписанный
 database/security controller.
@@ -255,8 +260,21 @@ database/security controller.
 - Любое расхождение topology, receipt, runtime identity или current DB state
   останавливает effect до отдельного исправления.
 
-Последний, восьмой backlog item остаётся измерительным: накопить несколько
-terminal operation receipts и публиковать duration/failure-phase p50/p95 без
-включения production secrets или пользовательских данных. Один успешный rollout
-уже является первым sample, но недостаточен для осмысленного p95; этот пункт не
-должен задерживать обычный admitted release и не ослабляет ни один gate.
+Восьмой backlog item реализует измерительный контур без нового внешнего сервиса.
+Final admission schema 2, immutable runtime/control provenance и root-only
+installed-generation receipt переносят exact `effectiveLane` и SHA-256 impact
+receipt до orchestrator plan; ручная метка lane не принимается. Каждый
+`apply|resume` пишет append-only attempt record только с lane, временем,
+результатом, фазой и нормализованным классом причины — без operation ID, SHA,
+путей, environment, command output или пользовательских данных.
+
+Read-only команда `metrics` берёт shared production-control install lock и
+читает только canonical root-owned operation/attempt receipts: она не создаёт
+state, не берёт rollout lock и не обращается к DB, runtime units, timers или
+сети. Отчёт содержит duration approval→final, intent→receipt по каждой фазе,
+failure-phase histogram, unresolved inventory и p50/p95 отдельно для
+`L1_RUNTIME`/`L2_SCHEMA_SECURITY`. До 20 terminal samples lane возвращается
+`INSUFFICIENT_SAMPLE_SIZE` с `p50/p95=null`. Реальный первый V2 rollout не имеет
+trusted lane provenance, поэтому проходит отдельный exact V2 terminal reader,
+помечается `LEGACY_UNCLASSIFIED` и не входит в lane percentiles. Метрики не
+разрешают deploy и не ослабляют ни один gate.

@@ -18,6 +18,8 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const POSITIVE_INTEGER_STRING = /^[1-9][0-9]{0,19}$/u;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const PREPARATION_SCHEMA_VERSION = 2;
+const FINAL_ADMISSION_SCHEMA_VERSION = 2;
 
 export class ParallelBackupRestoredCopyEvidenceError extends Error {
   constructor(reasonCode) {
@@ -168,6 +170,8 @@ function normalizeFinalAdmissionReceipt(value) {
       "schemaVersion",
       "admission",
       "releaseSha",
+      "impactReceiptSha256",
+      "effectiveLane",
       "runId",
       "runAttempt",
       "repository",
@@ -186,11 +190,13 @@ function normalizeFinalAdmissionReceipt(value) {
     "PARALLEL_PREPARATION_ADMISSION_RECEIPT_INVALID",
   );
   if (
-    receipt.schemaVersion !== 1 ||
+    receipt.schemaVersion !== FINAL_ADMISSION_SCHEMA_VERSION ||
     receipt.admission !== "PASS" ||
+    receipt.effectiveLane !== "L2_SCHEMA_SECURITY" ||
     receipt.repository !== EXPECTED_REPOSITORY ||
     receipt.workflowRef !== EXPECTED_WORKFLOW_REF ||
     !SHA40.test(receipt.releaseSha ?? "") ||
+    !SHA256.test(receipt.impactReceiptSha256 ?? "") ||
     receipt.workflowSha !== receipt.releaseSha ||
     ![receipt.runId, receipt.runAttempt, receipt.repositoryId, receipt.runtimeArtifactId,
       receipt.productionControlArtifactId].every((value) => POSITIVE_INTEGER_STRING.test(value ?? "")) ||
@@ -227,7 +233,7 @@ function normalizePreparationManifest(value) {
     "PARALLEL_PREPARATION_MANIFEST_INVALID",
   );
   if (
-    manifest.schemaVersion !== 1 ||
+    manifest.schemaVersion !== PREPARATION_SCHEMA_VERSION ||
     manifest.contractVersion !== PARALLEL_BACKUP_RESTORED_COPY_EVIDENCE_CONTRACT ||
     !UUID.test(manifest.operationId ?? "") ||
     !SHA256.test(manifest.candidateReceiptSha256 ?? "")
@@ -363,15 +369,26 @@ function normalizePreparationReceipt(value) {
   );
   const candidate = exactRecord(
     receipt.candidate,
-    ["candidateReceiptSha256", "releaseSha", "releaseTreeSha", "runtimeArchiveSha256"],
+    [
+      "candidateReceiptSha256",
+      "effectiveLane",
+      "impactReceiptSha256",
+      "releaseSha",
+      "releaseTreeSha",
+      "runtimeArchiveSha256",
+    ],
     "PARALLEL_PREPARATION_RECEIPT_INVALID",
   );
   if (
-    receipt.schemaVersion !== 1 ||
+    receipt.schemaVersion !== PREPARATION_SCHEMA_VERSION ||
     receipt.contractVersion !== PARALLEL_BACKUP_RESTORED_COPY_EVIDENCE_CONTRACT ||
     receipt.decision !== PARALLEL_BACKUP_RESTORED_COPY_PREPARED ||
+    candidate.effectiveLane !== "L2_SCHEMA_SECURITY" ||
     !UUID.test(receipt.operationId ?? "") ||
-    ![candidate.candidateReceiptSha256, candidate.runtimeArchiveSha256,
+    ![
+      candidate.candidateReceiptSha256,
+      candidate.impactReceiptSha256,
+      candidate.runtimeArchiveSha256,
       receipt.preparationDigest].every((value) => SHA256.test(value ?? "")) ||
     ![candidate.releaseSha, candidate.releaseTreeSha].every((value) => SHA40.test(value ?? ""))
   ) {
@@ -555,6 +572,8 @@ export function prepareParallelBackupRestoredCopyEvidence({
     backup: manifest.backup,
     candidate: {
       candidateReceiptSha256: manifest.candidateReceiptSha256,
+      effectiveLane: candidateReceipt.effectiveLane,
+      impactReceiptSha256: candidateReceipt.impactReceiptSha256,
       releaseSha: candidateReceipt.releaseSha,
       releaseTreeSha: candidateReceipt.releaseTreeSha,
       runtimeArchiveSha256: manifest.runtimeCandidate.archiveSha256,
@@ -566,7 +585,7 @@ export function prepareParallelBackupRestoredCopyEvidence({
     policy: manifest.policy,
     preparedAt: preparedAt.toISOString(),
     restoredCopy: manifest.restoredCopy,
-    schemaVersion: 1,
+    schemaVersion: PREPARATION_SCHEMA_VERSION,
     topology: manifest.topology,
   };
   return normalizePreparationReceipt({
@@ -578,6 +597,8 @@ export function prepareParallelBackupRestoredCopyEvidence({
 function assertLiveBinding(preparation, admission, admissionReceiptSha256, live) {
   if (
     admission.releaseSha !== preparation.candidate.releaseSha ||
+    admission.effectiveLane !== preparation.candidate.effectiveLane ||
+    admission.impactReceiptSha256 !== preparation.candidate.impactReceiptSha256 ||
     admission.runtimeArchiveSha256 !== preparation.candidate.runtimeArchiveSha256 ||
     live.operationId !== preparation.operationId ||
     live.release.releaseSha !== preparation.candidate.releaseSha ||
@@ -660,13 +681,15 @@ export function bindParallelBackupRestoredCopyEvidence({
     boundAt: boundAt.toISOString(),
     contractVersion: PARALLEL_BACKUP_RESTORED_COPY_EVIDENCE_CONTRACT,
     decision: PARALLEL_BACKUP_RESTORED_COPY_BOUND,
+    effectiveLane: preparation.candidate.effectiveLane,
     expiresAt: expiresAt.toISOString(),
+    impactReceiptSha256: preparation.candidate.impactReceiptSha256,
     liveEvidenceDigest: digest("live-evidence", live),
     operationId: preparation.operationId,
     preparationDigest: preparation.preparationDigest,
     releaseSha: preparation.candidate.releaseSha,
     runtimeArchiveSha256: preparation.candidate.runtimeArchiveSha256,
-    schemaVersion: 1,
+    schemaVersion: PREPARATION_SCHEMA_VERSION,
   };
   return freeze({ ...base, effectBindingDigest: digest("effect-binding", base) });
 }
@@ -679,8 +702,10 @@ function normalizeEffectBinding(value) {
       "boundAt",
       "contractVersion",
       "decision",
+      "effectiveLane",
       "effectBindingDigest",
       "expiresAt",
+      "impactReceiptSha256",
       "liveEvidenceDigest",
       "operationId",
       "preparationDigest",
@@ -691,9 +716,10 @@ function normalizeEffectBinding(value) {
     "PARALLEL_PREPARATION_EFFECT_BINDING_INVALID",
   );
   if (
-    binding.schemaVersion !== 1 ||
+    binding.schemaVersion !== PREPARATION_SCHEMA_VERSION ||
     binding.contractVersion !== PARALLEL_BACKUP_RESTORED_COPY_EVIDENCE_CONTRACT ||
     binding.decision !== PARALLEL_BACKUP_RESTORED_COPY_BOUND ||
+    binding.effectiveLane !== "L2_SCHEMA_SECURITY" ||
     !UUID.test(binding.operationId ?? "") ||
     !SHA40.test(binding.releaseSha ?? "") ||
     ![
@@ -701,6 +727,7 @@ function normalizeEffectBinding(value) {
       binding.effectBindingDigest,
       binding.liveEvidenceDigest,
       binding.preparationDigest,
+      binding.impactReceiptSha256,
       binding.runtimeArchiveSha256,
     ].every((value) => SHA256.test(value ?? ""))
   ) {

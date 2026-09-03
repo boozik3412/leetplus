@@ -51,7 +51,7 @@ umask 0077
 
 readonly INSTALLED_BOOTSTRAP='/usr/local/sbin/leetplus-resumable-release-orchestrator'
 readonly INSTALLED_ENGINE='/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs'
-readonly EXPECTED_ENGINE_SHA256='ad7340b6b428e2080037f9dfea563c0fa4f15c03d5db9617eaccc982245c2073'
+readonly EXPECTED_ENGINE_SHA256='b3cb5cb9f8c0feea85d64312cd90f0f28486a304b65e30f5d1dc34866a6f60a3'
 readonly PRODUCTION_CONTROL_RUN_ROOT='/run/leetplus-production-control'
 readonly PRODUCTION_CONTROL_INSTALL_LOCK="${PRODUCTION_CONTROL_RUN_ROOT}/install.lock"
 readonly STATE_PARENT='/var/lib/leetplus/deploy-receipts'
@@ -81,7 +81,11 @@ control_lock_identity="$(stat -c '%d:%i' -- "$PRODUCTION_CONTROL_INSTALL_LOCK")"
 exec 8<> "$PRODUCTION_CONTROL_INSTALL_LOCK"
 [[ "$(stat -Lc '%d:%i' -- /proc/self/fd/8)" == "$control_lock_identity" ]] \
   || die 'opened production-control install lock differs from the validated path'
-flock -n 8 || die 'another production-control install or rollout operation is active'
+if [[ "${1:-}" == 'metrics' ]]; then
+  flock -sn 8 || die 'production-control install or rollout operation is active'
+else
+  flock -n 8 || die 'another production-control install or rollout operation is active'
+fi
 [[ "$(stat -c '%d:%i:%U:%G:%a:%h' -- "$PRODUCTION_CONTROL_INSTALL_LOCK")" == \
     "${control_lock_identity}:root:root:600:1" ]] \
   || die 'production-control install lock changed while held'
@@ -96,6 +100,24 @@ flock -n 8 || die 'another production-control install or rollout operation is ac
   && -z "$(find -P /usr/bin/node -maxdepth 0 -perm /022 -print -quit)" \
   && "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" == '22' ]] \
   || die 'production execution requires exact root-controlled Node major 22'
+
+# Exact `metrics` has no operation arguments. It holds only the shared install
+# lock acquired before engine verification, so it cannot race a control install
+# or rollout but never takes the exclusive orchestrator lock or creates state.
+# The engine performs filesystem-only reads.
+if [[ "${1:-}" == 'metrics' ]]; then
+  LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP='LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP_V1'
+  LEETPLUS_RESUMABLE_RELEASE_INSTALL_LOCK_FD='8'
+  export LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP LEETPLUS_RESUMABLE_RELEASE_INSTALL_LOCK_FD
+  exec /usr/bin/env -i \
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    TZ=UTC \
+    LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP=LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP_V1 \
+    LEETPLUS_RESUMABLE_RELEASE_INSTALL_LOCK_FD=8 \
+    /usr/bin/node "$INSTALLED_ENGINE" "$@"
+fi
 [[ -d "$STATE_PARENT" && ! -L "$STATE_PARENT" \
   && "$(realpath -e -- "$STATE_PARENT")" == "$STATE_PARENT" \
   && "$(stat -c '%U:%G:%a' -- "$STATE_PARENT")" == 'root:root:700' ]] \

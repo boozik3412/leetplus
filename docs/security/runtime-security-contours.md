@@ -106,7 +106,10 @@ Target, остающийся в systemd `failed` после stop, теперь �
 идемпотентный `reset-failed` и повторную проверку `masked/inactive/dead/PID=0`.
 Slot metadata обновляется атомарно под fence с root-only exact previous-byte
 backup, lineage к bind receipt и сохранением guest reporting/schema-bridge
-flags. Cache повторяется ограниченно только после обычного non-zero результата
+flags. Фактический legacy `API_BIND_HOST=localhost` допускается только как
+точный previous input и после полного target fence нормализуется к canonical
+`127.0.0.1`; это сужает listener contract и не разрешает `::1`, DNS name или
+иной alias. Cache повторяется ограниченно только после обычного non-zero результата
 и повторной проверки fence; ambiguous outcome не повторяется. Loopback
 readiness получает bounded startup wait, но timeout/oversize/stderr остаются
 fail-closed. Cutover с диагностическим stderr принимается только если уже

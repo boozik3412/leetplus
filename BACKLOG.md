@@ -15,6 +15,10 @@ slot-env bind, readiness до завершения Nest startup и уже при
 fail-closed: повторно проверяет fence, нормализует stopped units, атомарно
 обновляет lineage-bound slot env, повторяет только обычный readiness failure и
 принимает stderr только при exact durable successor receipt/active link.
+Единственное допустимое legacy-отклонение slot env — фактический production
+`API_BIND_HOST=localhost`: только после mask/stop/process-free fence BIND
+сохраняет его exact backup и нормализует output к canonical `127.0.0.1`;
+другие aliases/DNS names запрещены.
 Production этим source hardening не менялся; successor должен пройти exact
 Fast и Full Admission перед merge.
 Подробный контракт и целевые метрики:
@@ -82,7 +86,9 @@ receipt-contract drift уже после admission.
   [`resumable-release-orchestrator.md`](./docs/deployment/resumable-release-orchestrator.md).
   Первый production plan завершён на generation `21`; V3 recovery hardening
   переносит все обнаруженные при этом bounded resume cases в проверяемый
-  one-shot path без ослабления receipt, topology или rollback-инвариантов.
+  one-shot path без ослабления receipt, topology или rollback-инвариантов;
+  exact legacy `localhost` bind host сходится только к canonical IPv4 loopback
+  после полного target fence и фиксируется отдельным evidence enum.
 - [ ] `REL-ACC-008`: публиковать duration/failure-phase summary для каждого
   rollout и держать p50/p95 по lane, чтобы ускорение измерялось, а не
   оценивалось вручную.

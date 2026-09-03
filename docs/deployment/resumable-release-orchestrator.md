@@ -97,8 +97,13 @@ V3 также делает `/etc/leetplus/slots/<slot>.env` частью BIND ev
 изменения проверяются exact `root:leetplus-runtime 0440`, один hard link,
 canonical keys/ports, previous release/schema lineage и допустимая пара
 reporting/bridge flags. Старые bytes атомарно сохраняются в operation directory
-как `root:root 0400`; новый файл меняет только release SHA, Web build ID,
-ожидаемый schema head/count и plan-bound release-window timestamp. Ports,
+как `root:root 0400`; новый файл меняет release SHA, Web build ID, ожидаемый
+schema head/count и plan-bound release-window timestamp. Дополнительно exact
+legacy input `API_BIND_HOST=localhost`, обнаруженный на production, только
+после `masked/inactive/dead/PID=0` нормализуется к canonical
+`API_BIND_HOST=127.0.0.1`; evidence явно пишет
+`LEGACY_LOCALHOST_TO_IPV4_LOOPBACK`. Уже canonical input пишет `NONE`, а
+`::1`, `localhost.`, DNS names и другие aliases запрещены. Ports,
 `GUEST_BUG_REPORTING_MODE` и `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE` сохраняются.
 Любой неизвестный key, смена security flag, чужой previous SHA, symlink/hardlink
 или drift между old/new exact bytes останавливает запуск target.
@@ -171,4 +176,6 @@ workers/control-plane — отдельными unit/controller gates. Ни од�
 lost response до evidence и после durable evidence каждой из пяти фаз,
 installed-control drift, plan/receipt tampering, чужую cutover generation,
 failed-state normalization, bounded cache/readiness retry, slot-env lineage и
-accepted-cutover recovery после диагностического stderr.
+legacy bind-host normalization, reporting/bridge pair, exhaustion exact 12
+readiness attempts и accepted-cutover recovery после диагностического stderr,
+включая запрет receipt без совпавшего active nginx link.

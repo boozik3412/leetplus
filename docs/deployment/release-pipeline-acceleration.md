@@ -231,8 +231,11 @@ readiness раньше завершения Nest startup и уже accepted cuto
 диагностическим stderr. V3 successor делает их частью того же fail-closed
 контракта: bounded cache retry только под повторно проверенным fence,
 `reset-failed` с exact inactive/dead/PID=0, root-only previous slot-env backup и
-atomic lineage-bound update, bounded retry только обычного readiness failure и
-принятие cutover stderr лишь по exact durable successor receipt/active link.
+atomic lineage-bound update. Фактический legacy `API_BIND_HOST=localhost`
+разрешён только как bounded input после полного target fence и всегда
+нормализуется к canonical `127.0.0.1`; любой другой alias запрещён. Readiness
+повторяется bounded только после обычного failure, а cutover stderr принимается
+лишь по exact durable successor receipt и совпавшему active link.
 Timeout, oversized output, чужая generation, изменённые flags или receipt drift
 не повторяются и не принимаются.
 

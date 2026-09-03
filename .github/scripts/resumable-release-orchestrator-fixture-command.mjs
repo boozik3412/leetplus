@@ -141,7 +141,7 @@ function writeBindReceipt(slot) {
   );
 }
 
-function writeCutoverReceipt() {
+function writeCutoverReceipt({ activateTarget = true } = {}) {
   const generation = state.baselineGeneration + 1;
   const receiptPath = path.join(
     receiptRoot,
@@ -205,10 +205,12 @@ function writeCutoverReceipt() {
       ["CONSUMED", "false"],
     ]),
   );
-  replaceLink(
-    path.join(nginxRoot, "active-upstreams.conf"),
-    path.join(nginxRoot, "upstreams/" + state.targetSlot + ".conf"),
-  );
+  if (activateTarget) {
+    replaceLink(
+      path.join(nginxRoot, "active-upstreams.conf"),
+      path.join(nginxRoot, "upstreams/" + state.targetSlot + ".conf"),
+    );
+  }
 }
 
 switch (name) {
@@ -407,8 +409,9 @@ switch (name) {
   case "verify-release-readiness":
     state.readinessCalls += 1;
     if (
-      process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_READINESS_ONCE === "true" &&
-      state.readinessFailures === 0
+      process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_READINESS_ALWAYS === "true" ||
+      (process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_READINESS_ONCE === "true" &&
+        state.readinessFailures === 0)
     ) {
       state.readinessFailures += 1;
       save();
@@ -432,15 +435,20 @@ switch (name) {
     const suppressCutoverEffect =
       process.env.TEST_ORCHESTRATOR_FIXTURE_CUTOVER_STDERR_WITHOUT_EFFECT ===
       "true";
+    const receiptWithoutActiveLink =
+      process.env
+        .TEST_ORCHESTRATOR_FIXTURE_CUTOVER_RECEIPT_WITHOUT_ACTIVE_LINK ===
+      "true";
     if (!state.cutover && !suppressCutoverEffect) {
       state.cutover = true;
       state.cutoverEffects += 1;
-      writeCutoverReceipt();
+      writeCutoverReceipt({ activateTarget: !receiptWithoutActiveLink });
     }
     save();
     if (
       process.env.TEST_ORCHESTRATOR_FIXTURE_CUTOVER_STDERR_AFTER_EFFECT ===
         "true" ||
+      receiptWithoutActiveLink ||
       suppressCutoverEffect
     ) {
       process.stderr.write("fixture accepted cutover with diagnostic stderr\n");

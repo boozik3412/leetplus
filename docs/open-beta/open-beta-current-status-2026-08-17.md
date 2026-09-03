@@ -77,7 +77,9 @@ cache cleanup, systemd failed state после stop, отсутствие automa
 bind, readiness до окончания startup и already-accepted cutover с
 диагностическим stderr. V3 source successor автоматизирует только эти exact
 случаи с bounded retry, повторной fence/receipt attestation и atomic root-owned
-slot-env lineage backup. Ambiguous outcome, чужая generation или flag drift
+slot-env lineage backup. Exact legacy `API_BIND_HOST=localhost` сходится к
+canonical `127.0.0.1` только после target fence и с отдельным evidence enum;
+иной alias запрещён. Ambiguous outcome, чужая generation или flag drift
 по-прежнему останавливают operation. Это не меняет open beta `NO-GO` и не
 закрывает Gate 1MT/2. Public guest, corporate tenant и workers/control-plane
 остаются независимыми; schema/security effects сохраняют полную admission,

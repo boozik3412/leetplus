@@ -84,7 +84,10 @@ schema/ACL/flags не менялись. Live rollout обнаружил пять
 cutover с диагностическим stderr. V3 source successor автоматизирует их
 fail-closed: bounded retry только под exact fence, reset-failed с
 inactive/dead/PID=0, root-only previous slot-env backup и atomic lineage bind,
-startup wait и принятие stderr только по exact durable cutover successor.
+bounded normalization фактического legacy `API_BIND_HOST=localhost` к
+canonical `127.0.0.1` только после target fence, startup wait и принятие stderr
+только по exact durable cutover successor. Любой иной bind-host alias остаётся
+fail-closed.
 Orchestrator не выполняет Prisma/SQL, ACL, auth/scope, guest flags или worker
 effects. Последний backlog item — накопительные duration/failure-phase p50/p95;
 одного rollout sample недостаточно для осмысленного p95.

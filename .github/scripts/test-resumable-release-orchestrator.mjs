@@ -9,6 +9,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -40,7 +41,15 @@ function digest(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function slotEnvironment(slot, releaseSha = PREVIOUS_SHA) {
+function slotEnvironment(
+  slot,
+  releaseSha = PREVIOUS_SHA,
+  {
+    apiBindHost = "localhost",
+    bridgeMode = "OFF",
+    bugReportingMode = "LIVE",
+  } = {},
+) {
   const blue = slot === "blue";
   return [
     "# Protected /etc/leetplus/slots/" + slot + ".env metadata.",
@@ -49,12 +58,12 @@ function slotEnvironment(slot, releaseSha = PREVIOUS_SHA) {
     "EXPECTED_DATABASE_MIGRATION=" + MIGRATION,
     "EXPECTED_DATABASE_MIGRATION_COUNT=189",
     "BUILD_TIME=2026-09-01T00:00:00.000Z",
-    "API_BIND_HOST=127.0.0.1",
+    "API_BIND_HOST=" + apiBindHost,
     "PORT=" + (blue ? "4100" : "4200"),
     "WEB_PORT=" + (blue ? "3100" : "3200"),
     "API_URL=http://127.0.0.1:" + (blue ? "4100" : "4200"),
-    "GUEST_BUG_REPORTING_MODE=LIVE",
-    "GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF",
+    "GUEST_BUG_REPORTING_MODE=" + bugReportingMode,
+    "GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=" + bridgeMode,
     "",
   ].join("\n");
 }
@@ -65,7 +74,7 @@ async function writeJson(filePath, value) {
   });
 }
 
-async function setupFixture(suffix = "") {
+async function setupFixture(suffix = "", environmentOptions = {}) {
   const root = await mkdtemp(
     path.join(os.tmpdir(), "leetplus-orchestrator-" + suffix),
   );
@@ -96,12 +105,12 @@ async function setupFixture(suffix = "") {
     symlink(previousRelease, path.join(slotRoot, "green")),
     writeFile(
       path.join(slotEnvironmentRoot, "blue.env"),
-      slotEnvironment("blue"),
+      slotEnvironment("blue", PREVIOUS_SHA, environmentOptions),
       { mode: 0o440 },
     ),
     writeFile(
       path.join(slotEnvironmentRoot, "green.env"),
-      slotEnvironment("green"),
+      slotEnvironment("green", PREVIOUS_SHA, environmentOptions),
       { mode: 0o440 },
     ),
   ]);
@@ -242,8 +251,8 @@ function continuationArgs(mode, root, planSha256, operationId = OPERATION_ID) {
   ];
 }
 
-async function preparedFixture(suffix = "") {
-  const root = await setupFixture(suffix);
+async function preparedFixture(suffix = "", environmentOptions = {}) {
+  const root = await setupFixture(suffix, environmentOptions);
   assert.equal(await main(prepareArgs(root)), 0);
   const planPath = path.join(
     root,
@@ -298,6 +307,8 @@ test("runs five phases and publishes a chained final receipt", async (t) => {
   assert.ok(
     acceptedSlotEnvironment.includes("BUILD_TIME=" + fixture.plan.preparedAt),
   );
+  assert.match(acceptedSlotEnvironment, /API_BIND_HOST=127\.0\.0\.1/u);
+  assert.doesNotMatch(acceptedSlotEnvironment, /API_BIND_HOST=localhost/u);
   assert.match(acceptedSlotEnvironment, /GUEST_BUG_REPORTING_MODE=LIVE/u);
   assert.equal(
     await readFile(
@@ -305,6 +316,16 @@ test("runs five phases and publishes a chained final receipt", async (t) => {
       "utf8",
     ),
     slotEnvironment("blue"),
+  );
+  const bindEvidence = JSON.parse(
+    await readFile(
+      path.join(operationRoot, "02-bind.evidence.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    bindEvidence.details.slotEnvironmentApiBindHostNormalization,
+    "LEGACY_LOCALHOST_TO_IPV4_LOOPBACK",
   );
   const final = JSON.parse(
     await readFile(path.join(operationRoot, "final.json"), "utf8"),
@@ -322,6 +343,35 @@ test("runs five phases and publishes a chained final receipt", async (t) => {
     0,
   );
   assert.deepEqual(await fixtureState(fixture.root), state);
+});
+
+test("preserves an already canonical IPv4 loopback bind host", async (t) => {
+  const fixture = await preparedFixture("canonical-bind-host-", {
+    apiBindHost: "127.0.0.1",
+  });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  assert.equal(
+    await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+    0,
+  );
+  const operationRoot = path.dirname(fixture.planPath);
+  assert.equal(
+    await readFile(
+      path.join(operationRoot, "02-bind-slot-environment.previous.env"),
+      "utf8",
+    ),
+    slotEnvironment("blue", PREVIOUS_SHA, { apiBindHost: "127.0.0.1" }),
+  );
+  const bindEvidence = JSON.parse(
+    await readFile(
+      path.join(operationRoot, "02-bind.evidence.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    bindEvidence.details.slotEnvironmentApiBindHostNormalization,
+    "NONE",
+  );
 });
 
 test("normalizes a stopped failed target before cache and bind", async (t) => {
@@ -366,6 +416,71 @@ test("rejects slot environment lineage drift while the rebound target is fenced"
   assert.equal(state.cutoverEffects, 0);
 });
 
+test("rejects every noncanonical nonlegacy API bind host while fenced", async (t) => {
+  const fixture = await preparedFixture("slot-environment-bind-host-drift-", {
+    apiBindHost: "localhost.",
+  });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  assert.equal(
+    await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+    1,
+  );
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.bindEffects, 1);
+  assert.equal(state.slotMasked, true);
+  assert.equal(state.unmaskEffects, 0);
+  assert.equal(state.cutoverEffects, 0);
+});
+
+test("preserves a valid reporting-off schema bridge pair", async (t) => {
+  const options = {
+    bridgeMode: "ALLOW_CURRENT_188",
+    bugReportingMode: "OFF",
+  };
+  const fixture = await preparedFixture("slot-environment-bridge-", options);
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  assert.equal(
+    await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+    0,
+  );
+  const accepted = await readFile(
+    path.join(fixture.root, "etc/leetplus/slots/blue.env"),
+    "utf8",
+  );
+  assert.match(accepted, /GUEST_BUG_REPORTING_MODE=OFF/u);
+  assert.match(
+    accepted,
+    /GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_188/u,
+  );
+  assert.equal(
+    await readFile(
+      path.join(
+        path.dirname(fixture.planPath),
+        "02-bind-slot-environment.previous.env",
+      ),
+      "utf8",
+    ),
+    slotEnvironment("blue", PREVIOUS_SHA, options),
+  );
+});
+
+test("rejects LIVE reporting against a schema bridge while fenced", async (t) => {
+  const fixture = await preparedFixture("slot-environment-unsafe-bridge-", {
+    bridgeMode: "ALLOW_CURRENT_187",
+    bugReportingMode: "LIVE",
+  });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  assert.equal(
+    await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+    1,
+  );
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.bindEffects, 1);
+  assert.equal(state.slotMasked, true);
+  assert.equal(state.unmaskEffects, 0);
+  assert.equal(state.cutoverEffects, 0);
+});
+
 test("retries only a failed loopback readiness probe in one apply", async (t) => {
   const fixture = await preparedFixture("readiness-retry-");
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
@@ -382,6 +497,25 @@ test("retries only a failed loopback readiness probe in one apply", async (t) =>
   assert.equal(state.readinessFailures, 1);
   assert.equal(state.readinessCalls, 3);
   assert.equal(state.cutoverEffects, 1);
+});
+
+test("stops after the exact bounded loopback readiness attempts", async (t) => {
+  const fixture = await preparedFixture("readiness-exhausted-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_READINESS_ALWAYS = "true";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      1,
+    );
+  } finally {
+    delete process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_READINESS_ALWAYS;
+  }
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.readinessCalls, 12);
+  assert.equal(state.readinessFailures, 12);
+  assert.equal(state.authCalls, 0);
+  assert.equal(state.cutoverEffects, 0);
 });
 
 test("accepts exact durable cutover evidence despite diagnostic stderr", async (t) => {
@@ -419,6 +553,39 @@ test("rejects cutover stderr when no exact successor receipt exists", async (t) 
   assert.equal(state.cutoverEffects, 0);
 });
 
+test("rejects an exact cutover receipt when the active link did not move", async (t) => {
+  const fixture = await preparedFixture("cutover-receipt-without-link-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  process.env.TEST_ORCHESTRATOR_FIXTURE_CUTOVER_RECEIPT_WITHOUT_ACTIVE_LINK =
+    "true";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      1,
+    );
+  } finally {
+    delete process.env
+      .TEST_ORCHESTRATOR_FIXTURE_CUTOVER_RECEIPT_WITHOUT_ACTIVE_LINK;
+  }
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.cutoverCalls, 1);
+  assert.equal(state.cutoverEffects, 1);
+  assert.equal(
+    await realpath(
+      path.join(fixture.root, "etc/nginx/leetplus/active-upstreams.conf"),
+    ),
+    path.join(fixture.root, "etc/nginx/leetplus/upstreams/green.conf"),
+  );
+  await assert.rejects(
+    lstat(path.join(path.dirname(fixture.planPath), "04-cutover.evidence.json")),
+    { code: "ENOENT" },
+  );
+  await assert.rejects(
+    lstat(path.join(path.dirname(fixture.planPath), "final.json")),
+    { code: "ENOENT" },
+  );
+});
+
 for (const phase of PHASES) {
   test("recovers exact lost response after " + phase, async (t) => {
     const fixture = await preparedFixture("lost-" + phase.toLowerCase() + "-");
@@ -440,6 +607,21 @@ for (const phase of PHASES) {
     assert.equal(state.hydrationEffects, 1);
     assert.equal(state.bindEffects, 1);
     assert.equal(state.cutoverEffects, 1);
+    if (phase === "BIND") {
+      const operationRoot = path.dirname(fixture.planPath);
+      const accepted = await readFile(
+        path.join(fixture.root, "etc/leetplus/slots/blue.env"),
+        "utf8",
+      );
+      assert.match(accepted, /API_BIND_HOST=127\.0\.0\.1/u);
+      assert.equal(
+        await readFile(
+          path.join(operationRoot, "02-bind-slot-environment.previous.env"),
+          "utf8",
+        ),
+        slotEnvironment("blue"),
+      );
+    }
   });
 }
 

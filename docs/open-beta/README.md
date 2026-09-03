@@ -55,7 +55,9 @@ stale dashboard `returnTo` не обходит выбор роли. Real-account
 `CURRENT_189/189`, bridge `OFF`, bug reporting `LIVE`; hot rollback green
 `22ab6b81…` independently ready. Первый approved five-phase release rollout
 завершён terminal receipt без schema/ACL/security-flag effects. V3 source
-hardening автоматизирует только exact fenced recovery cases; подробности и
+hardening автоматизирует только exact fenced recovery cases, включая bounded
+`localhost -> 127.0.0.1` normalization фактического legacy slot env; другие
+bind-host aliases запрещены. Подробности и
 остаточный metrics backlog зафиксированы в
 [плане ускорения release pipeline](../deployment/release-pipeline-acceleration.md).
 

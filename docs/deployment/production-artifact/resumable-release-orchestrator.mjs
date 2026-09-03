@@ -51,6 +51,8 @@ const CACHE_PREPARATION_ATTEMPTS = 3;
 const CACHE_PREPARATION_RETRY_DELAY_MS = 1000;
 const LOOPBACK_READINESS_ATTEMPTS = 12;
 const LOOPBACK_READINESS_RETRY_DELAY_MS = 2000;
+const CANONICAL_API_BIND_HOST = "127.0.0.1";
+const LEGACY_API_BIND_HOST = "localhost";
 const PRODUCTION_ENGINE =
   "/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs";
 const PRODUCTION_BOOTSTRAP = "LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP_V1";
@@ -811,7 +813,12 @@ function readExactBytes(
   }
 }
 
-function parseSlotEnvironment(raw, slot, reasonCode) {
+function parseSlotEnvironment(
+  raw,
+  slot,
+  reasonCode,
+  { allowLegacyApiBindHost = false } = {},
+) {
   if (
     typeof raw !== "string" ||
     raw.length === 0 ||
@@ -855,7 +862,9 @@ function parseSlotEnvironment(raw, slot, reasonCode) {
     ) ||
     (values.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") !== "OFF" &&
       values.get("GUEST_BUG_REPORTING_MODE") !== "OFF") ||
-    values.get("API_BIND_HOST") !== "127.0.0.1" ||
+    (values.get("API_BIND_HOST") !== CANONICAL_API_BIND_HOST &&
+      (!allowLegacyApiBindHost ||
+        values.get("API_BIND_HOST") !== LEGACY_API_BIND_HOST)) ||
     values.get("PORT") !== expected.port ||
     values.get("WEB_PORT") !== expected.webPort ||
     values.get("API_URL") !== expected.apiUrl
@@ -992,6 +1001,7 @@ function bindSlotEnvironment(plan, authority, paths, args) {
       current.raw,
       plan.targetSlot,
       "ORCHESTRATOR_SLOT_ENVIRONMENT_INVALID",
+      { allowLegacyApiBindHost: true },
     );
     previous = publishExactBytes(previousPath, current.bytes, args, {
       expectedGid: expectedRecordGid,
@@ -1004,6 +1014,7 @@ function bindSlotEnvironment(plan, authority, paths, args) {
     previous.raw,
     plan.targetSlot,
     "ORCHESTRATOR_SLOT_ENVIRONMENT_BACKUP_INVALID",
+    { allowLegacyApiBindHost: true },
   );
   const expectedPreviousReleaseSha =
     authority.priorState === "BOUND"
@@ -1027,6 +1038,11 @@ function bindSlotEnvironment(plan, authority, paths, args) {
     String(plan.expectedMigrationCount),
   );
   targetValues.set("BUILD_TIME", plan.preparedAt);
+  targetValues.set("API_BIND_HOST", CANONICAL_API_BIND_HOST);
+  const apiBindHostNormalization =
+    previousValues.get("API_BIND_HOST") === LEGACY_API_BIND_HOST
+      ? "LEGACY_LOCALHOST_TO_IPV4_LOOPBACK"
+      : "NONE";
   const targetBytes = Buffer.from(
     renderSlotEnvironment(plan.targetSlot, targetValues),
     "utf8",
@@ -1093,6 +1109,7 @@ function bindSlotEnvironment(plan, authority, paths, args) {
     "ORCHESTRATOR_SLOT_ENVIRONMENT_INVALID",
   );
   return {
+    slotEnvironmentApiBindHostNormalization: apiBindHostNormalization,
     slotEnvironmentPath: accepted.path,
     slotEnvironmentPreviousPath: previous.path,
     slotEnvironmentPreviousSha256: previous.sha256,
@@ -1528,6 +1545,7 @@ function validateEvidenceDetails(details, phase, plan) {
       "commandOutputSha256",
       "quiesceIntentSha256",
       "releaseSha",
+      "slotEnvironmentApiBindHostNormalization",
       "slotEnvironmentPath",
       "slotEnvironmentPreviousPath",
       "slotEnvironmentPreviousSha256",
@@ -1582,6 +1600,14 @@ function validateEvidenceDetails(details, phase, plan) {
     phase === "HYDRATE" &&
     (typeof details.releaseDirectory !== "string" ||
       !path.isAbsolute(details.releaseDirectory))
+  ) {
+    fail("ORCHESTRATOR_PHASE_EVIDENCE_INVALID");
+  }
+  if (
+    phase === "BIND" &&
+    !["NONE", "LEGACY_LOCALHOST_TO_IPV4_LOOPBACK"].includes(
+      details.slotEnvironmentApiBindHostNormalization,
+    )
   ) {
     fail("ORCHESTRATOR_PHASE_EVIDENCE_INVALID");
   }

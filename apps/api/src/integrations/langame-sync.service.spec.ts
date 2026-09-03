@@ -5,7 +5,16 @@ import {
   UserRole,
 } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -169,9 +178,29 @@ type SyncJobUpdateCall = [
       salesCount: number;
       discrepancyCount: number;
       discrepancyLogPath?: string | null;
+      errorMessage?: string | null;
     };
   },
 ];
+
+type IntegrationSourceUpdateCall = [
+  {
+    where: { id: string };
+    data: {
+      lastSyncedAt?: Date;
+      lastSyncedDate?: Date;
+    };
+  },
+];
+
+type DiscrepancyLogWriter = {
+  writeDiscrepancyLog(input: {
+    tenantId: string;
+    domain: string;
+    syncJobId: string;
+    discrepancies: unknown[];
+  }): Promise<string>;
+};
 
 const user: AuthenticatedUser = {
   id: 'user-1',
@@ -235,6 +264,7 @@ function emptySyncResult(tenantId: string): LangameSyncResult {
     tenantId,
     sources: 0,
     failedSources: 0,
+    partialSources: 0,
     stores: 0,
     products: 0,
     productGroups: 0,
@@ -425,6 +455,7 @@ describe('LangameSyncService', () => {
       tenantId: 'tenant-1',
       sources: 1,
       failedSources: 0,
+      partialSources: 0,
       stores: 1,
       products: 1,
       productGroups: 1,
@@ -446,6 +477,8 @@ describe('LangameSyncService', () => {
           clubRevenueFacts: 2,
           discrepancies: 0,
           discrepancyLogPath: null,
+          discrepancyLogStatus: 'NOT_REQUIRED',
+          discrepancyLogError: null,
           errorMessage: null,
         },
       ],
@@ -553,6 +586,153 @@ describe('LangameSyncService', () => {
       );
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps imported facts successful when only the post-fact discrepancy audit write fails', async () => {
+    prisma.product.findUnique.mockResolvedValue({
+      name: 'Old product name',
+      isActive: true,
+    });
+    jest
+      .spyOn(service as unknown as DiscrepancyLogWriter, 'writeDiscrepancyLog')
+      .mockRejectedValueOnce(
+        Object.assign(
+          new Error(
+            'EACCES: permission denied, open /var/lib/leetplus/langame-sync/tenant-secret/audit.json',
+          ),
+          { code: 'EACCES' },
+        ),
+      );
+
+    const result = await service.syncTenant(user, {
+      dateFrom: '2026-04-29',
+      dateTo: '2026-04-29',
+    });
+
+    expect(result).toMatchObject({
+      failedSources: 0,
+      partialSources: 1,
+      sourceResults: [
+        expect.objectContaining({
+          domain: '443.langame.ru',
+          status: 'PARTIAL',
+          discrepancyLogStatus: 'FAILED',
+          discrepancyLogPath: null,
+          discrepancyLogError: 'LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED: EACCES',
+        }),
+      ],
+    });
+    expect(prisma.product.upsert).toHaveBeenCalledTimes(1);
+    const [sourceUpdate] = prisma.integrationSource.update.mock
+      .calls[0] as IntegrationSourceUpdateCall;
+    expect(sourceUpdate.where).toEqual({ id: 'source-1' });
+    expect(sourceUpdate.data.lastSyncedAt).toBeInstanceOf(Date);
+    expect(sourceUpdate.data.lastSyncedDate).toBeInstanceOf(Date);
+    const successfulUpdate = (
+      prisma.integrationSyncJob.update.mock.calls as SyncJobUpdateCall[]
+    )
+      .map(([call]) => call)
+      .find((call) => call.data.status === 'SUCCESS');
+    expect(successfulUpdate?.where).toEqual({ id: 'sync-job-1' });
+    expect(successfulUpdate?.data.discrepancyLogPath).toBeNull();
+    expect(successfulUpdate?.data.errorMessage).toBe(
+      'LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED: EACCES',
+    );
+    expect(JSON.stringify(result)).not.toContain('/var/lib/leetplus');
+  });
+
+  it('keeps a provider failure as FAILED without advancing source freshness', async () => {
+    client.listProducts.mockRejectedValueOnce(new Error('Langame unavailable'));
+
+    const result = await service.syncTenant(user, {
+      dateFrom: '2026-04-29',
+      dateTo: '2026-04-29',
+    });
+
+    expect(result).toMatchObject({
+      failedSources: 1,
+      partialSources: 0,
+      sourceResults: [
+        expect.objectContaining({
+          domain: '443.langame.ru',
+          status: 'FAILED',
+          discrepancyLogStatus: 'NOT_REQUIRED',
+          errorMessage: 'Langame unavailable',
+        }),
+      ],
+    });
+    expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+    const failedUpdate = (
+      prisma.integrationSyncJob.update.mock.calls as SyncJobUpdateCall[]
+    )
+      .map(([call]) => call)
+      .find((call) => call.data.status === 'FAILED');
+    expect(failedUpdate?.data.errorMessage).toBe('Langame unavailable');
+    expect(failedUpdate?.data.status).toBe('FAILED');
+  });
+
+  it('normalizes only a newly-created discrepancy tenant directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'leetplus-langame-discrepancy-'));
+    const existingDirectory = join(root, 'tenant-existing');
+    const newTenantId = 'tenant-new';
+    config.get.mockImplementation((key: string) =>
+      key === 'LANGAME_DISCREPANCY_LOG_ROOT' ? root : undefined,
+    );
+    await mkdir(existingDirectory, { recursive: true, mode: 0o750 });
+    await chmod(existingDirectory, 0o750);
+    const discrepancyLogWriter = service as unknown as DiscrepancyLogWriter;
+
+    try {
+      await discrepancyLogWriter.writeDiscrepancyLog({
+        tenantId: 'tenant-existing',
+        domain: '443.langame.ru',
+        syncJobId: 'existing-job',
+        discrepancies: [],
+      });
+      await discrepancyLogWriter.writeDiscrepancyLog({
+        tenantId: newTenantId,
+        domain: '443.langame.ru',
+        syncJobId: 'new-job',
+        discrepancies: [],
+      });
+
+      if (process.platform !== 'win32') {
+        expect((await stat(existingDirectory)).mode & 0o7777).toBe(0o750);
+        expect((await stat(join(root, newTenantId))).mode & 0o7777).toBe(
+          0o2770,
+        );
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a symlinked discrepancy tenant directory before writing', async () => {
+    if (process.platform === 'win32') {
+      return;
+    }
+
+    const root = await mkdtemp(join(tmpdir(), 'leetplus-langame-root-'));
+    const outside = await mkdtemp(join(tmpdir(), 'leetplus-langame-outside-'));
+    config.get.mockImplementation((key: string) =>
+      key === 'LANGAME_DISCREPANCY_LOG_ROOT' ? root : undefined,
+    );
+    await symlink(outside, join(root, 'tenant-linked'), 'dir');
+
+    try {
+      await expect(
+        (service as unknown as DiscrepancyLogWriter).writeDiscrepancyLog({
+          tenantId: 'tenant-linked',
+          domain: '443.langame.ru',
+          syncJobId: 'linked-job',
+          discrepancies: [],
+        }),
+      ).rejects.toThrow('Unsafe Langame discrepancy tenant directory');
+      await expect(readdir(outside)).resolves.toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
     }
   });
 

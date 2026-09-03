@@ -209,12 +209,12 @@ grep -F -x 'PRODUCTION_CONTROL_ARTIFACT_INTEGRITY=PASS' \
   "${TEST_ROOT}/accepted.out" >/dev/null
 grep -F -x "PRODUCTION_CONTROL_RELEASE_SHA=${RELEASE_SHA}" \
   "${TEST_ROOT}/accepted.out" >/dev/null
-grep -F -x 'PRODUCTION_CONTROL_PAYLOAD_FILE_COUNT=64' \
+grep -F -x 'PRODUCTION_CONTROL_PAYLOAD_FILE_COUNT=70' \
   "${TEST_ROOT}/accepted.out" >/dev/null
 grep -F -x "PRODUCTION_CONTROL_NODE_SHA256=$(node_executable_sha256)" \
   "${TEST_ROOT}/accepted.out" >/dev/null
 grep -F -x \
-  'PRODUCTION_CONTROL_INNER_MANIFEST_SHA256=17fef647a78db93f9d71e6680e8fcd5d5e43d51d44196d9ce4c4d75cfe0f868c' \
+  'PRODUCTION_CONTROL_INNER_MANIFEST_SHA256=22fad25790f16f65faf29bd9f0f24fecc17b596db1344389a69c03b9a0ec9c97' \
   "${TEST_ROOT}/accepted.out" >/dev/null
 if clean_node "$VERIFIER" \
   --artifact-root "$(canonical_root "$accepted_root")" \

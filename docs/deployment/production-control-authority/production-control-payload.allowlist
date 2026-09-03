@@ -6,6 +6,7 @@ docs/deployment/production-artifact/apply-legacy-rollback-egress.sh
 docs/deployment/production-artifact/bind-release-slot.sh
 docs/deployment/production-artifact/blue-green-cutover.sh
 docs/deployment/production-artifact/install-legacy-rollback-contour.sh
+docs/deployment/production-artifact/langame-discrepancy-audit-authority.sh
 docs/deployment/production-artifact/legacy-rollback-auth-edge.mjs
 docs/deployment/production-artifact/legacy-rollback-child-loopback.cjs
 docs/deployment/production-artifact/nginx/README.md
@@ -20,6 +21,7 @@ docs/deployment/production-artifact/promote-release-artifact.sh
 docs/deployment/production-artifact/resumable-release-orchestrator.mjs
 docs/deployment/production-artifact/resumable-release-orchestrator.sh
 docs/deployment/production-artifact/run-active-bonus-ledger-worker.sh
+docs/deployment/production-artifact/run-active-langame-daily-worker.sh
 docs/deployment/production-artifact/run-current-release-restored-copy-acceptance.sh
 docs/deployment/production-artifact/scheduler-free-n-minus-one-runbook.md
 docs/deployment/production-artifact/seal-release-artifact.sh
@@ -31,6 +33,7 @@ docs/deployment/production-artifact/systemd/bonus-ledger-worker.env.example
 docs/deployment/production-artifact/systemd/canary-safe.env.example
 docs/deployment/production-artifact/systemd/green.env.example
 docs/deployment/production-artifact/systemd/guest-user-call-live.env.example
+docs/deployment/production-artifact/systemd/langame-daily-worker.env.example
 docs/deployment/production-artifact/systemd/leetplus-api-rollback@.service
 docs/deployment/production-artifact/systemd/leetplus-api@.service
 docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery-watchdog.service
@@ -38,6 +41,9 @@ docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery.service
 docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery.timer
 docs/deployment/production-artifact/systemd/leetplus-bonus-ledger-worker.service
 docs/deployment/production-artifact/systemd/leetplus-bonus-ledger-worker.timer
+docs/deployment/production-artifact/systemd/leetplus-langame-daily-worker.service
+docs/deployment/production-artifact/systemd/leetplus-langame-daily-worker.timer
+docs/deployment/production-artifact/systemd/leetplus-langame-discrepancy-audit-preflight.service
 docs/deployment/production-artifact/systemd/leetplus-release-hydrate@.service
 docs/deployment/production-artifact/systemd/leetplus-rollback-egress.service
 docs/deployment/production-artifact/systemd/leetplus-web-rollback@.service

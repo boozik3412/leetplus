@@ -516,6 +516,11 @@ jobs:
       - name: Run focused API acceptance tests
         run: pnpm --filter api test:ci:focused
 
+      - name: Verify Langame sync recovery boundary
+        run: |
+          pnpm --filter api lint:ci:langame-recovery
+          pnpm --filter api test:ci:langame-recovery
+
       - name: Verify split guest/corporate runtime boundary
         run: |
           pnpm --filter api lint:ci:runtime-boundary

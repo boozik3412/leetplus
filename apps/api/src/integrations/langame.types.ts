@@ -3,6 +3,9 @@ import type { TenantExecutionAdmissionDecision } from '../tenancy/tenant-executi
 export const BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE =
   'BACKGROUND_EXECUTION_FENCE_PENDING' as const;
 
+export const LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX =
+  'LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED' as const;
+
 export type BackgroundExecutionFencePendingReasonCode =
   typeof BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE;
 
@@ -573,6 +576,7 @@ export type LangameSyncResult = {
   tenantId: string;
   sources: number;
   failedSources: number;
+  partialSources: number;
   stores: number;
   products: number;
   productGroups: number;
@@ -586,7 +590,7 @@ export type LangameSyncResult = {
 
 export type LangameSyncSourceResult = {
   domain: string;
-  status: 'SUCCESS' | 'FAILED';
+  status: 'SUCCESS' | 'PARTIAL' | 'FAILED';
   stores: number;
   products: number;
   productGroups: number;
@@ -596,6 +600,8 @@ export type LangameSyncSourceResult = {
   clubRevenueFacts: number;
   discrepancies: number;
   discrepancyLogPath: string | null;
+  discrepancyLogStatus: 'NOT_REQUIRED' | 'WRITTEN' | 'FAILED';
+  discrepancyLogError: string | null;
   errorMessage: string | null;
 };
 

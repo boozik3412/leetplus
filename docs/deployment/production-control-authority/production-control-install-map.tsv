@@ -6,6 +6,7 @@ docs/deployment/production-artifact/bind-release-slot.sh	/usr/local/sbin/leetplu
 docs/deployment/production-artifact/blue-green-cutover.sh	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/blue-green-cutover.sh	0400
 docs/deployment/production-artifact/blue-green-cutover.sh	/usr/local/sbin/leetplus-blue-green-cutover	0500
 docs/deployment/production-artifact/install-legacy-rollback-contour.sh	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/install-legacy-rollback-contour.sh	0400
+docs/deployment/production-artifact/langame-discrepancy-audit-authority.sh	/usr/local/sbin/leetplus-langame-discrepancy-audit-authority	0500
 docs/deployment/production-artifact/legacy-rollback-auth-edge.mjs	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/legacy-rollback-auth-edge.mjs	0400
 docs/deployment/production-artifact/legacy-rollback-child-loopback.cjs	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/legacy-rollback-child-loopback.cjs	0400
 docs/deployment/production-artifact/nginx/blue.conf.example	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/nginx/blue.conf.example	0400
@@ -18,6 +19,7 @@ docs/deployment/production-artifact/promote-release-artifact.sh	/usr/local/sbin/
 docs/deployment/production-artifact/resumable-release-orchestrator.mjs	/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs	0555
 docs/deployment/production-artifact/resumable-release-orchestrator.sh	/usr/local/sbin/leetplus-resumable-release-orchestrator	0500
 docs/deployment/production-artifact/run-active-bonus-ledger-worker.sh	/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh	0555
+docs/deployment/production-artifact/run-active-langame-daily-worker.sh	/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh	0555
 docs/deployment/production-artifact/run-current-release-restored-copy-acceptance.sh	/usr/local/sbin/leetplus-run-current-release-restored-copy-acceptance	0500
 docs/deployment/production-artifact/seal-release-artifact.sh	/usr/local/sbin/leetplus-seal-release-artifact	0500
 docs/deployment/production-artifact/stage-pnpm-store.sh	/usr/local/libexec/leetplus/stage-pnpm-store.sh	0555
@@ -30,6 +32,9 @@ docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery.service
 docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery.timer	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/leetplus-blue-green-recovery.timer	0400
 docs/deployment/production-artifact/systemd/leetplus-bonus-ledger-worker.service	/etc/systemd/system/leetplus-bonus-ledger-worker.service	0444
 docs/deployment/production-artifact/systemd/leetplus-bonus-ledger-worker.timer	/etc/systemd/system/leetplus-bonus-ledger-worker.timer	0444
+docs/deployment/production-artifact/systemd/leetplus-langame-daily-worker.service	/etc/systemd/system/leetplus-langame-daily-worker.service	0444
+docs/deployment/production-artifact/systemd/leetplus-langame-daily-worker.timer	/etc/systemd/system/leetplus-langame-daily-worker.timer	0444
+docs/deployment/production-artifact/systemd/leetplus-langame-discrepancy-audit-preflight.service	/etc/systemd/system/leetplus-langame-discrepancy-audit-preflight.service	0444
 docs/deployment/production-artifact/systemd/leetplus-release-hydrate@.service	/etc/systemd/system/leetplus-release-hydrate@.service	0444
 docs/deployment/production-artifact/systemd/leetplus-rollback-egress.service	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/leetplus-rollback-egress.service	0400
 docs/deployment/production-artifact/systemd/leetplus-web-rollback@.service	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/leetplus-web-rollback@.service	0400

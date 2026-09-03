@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
 import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
+import { LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX } from './langame.types';
 import { SecretEncryptionService } from './secret-encryption.service';
 
 type PrismaMock = {
@@ -234,6 +235,48 @@ describe('LangameSettingsService', () => {
     expect(prisma.integrationSource.upsert).not.toHaveBeenCalled();
   });
 
+  it('projects a successful fact import with failed discrepancy audit as PARTIAL', async () => {
+    const startedAt = new Date('2026-09-03T08:00:00.000Z');
+    const partialJob = {
+      id: 'sync-job-1',
+      domain: '443.langame.ru',
+      status: 'SUCCESS',
+      startedAt,
+      finishedAt: startedAt,
+      storesCount: 1,
+      productsCount: 2,
+      inventoryCount: 3,
+      salesCount: 4,
+      discrepancyCount: 1,
+      discrepancyLogPath: null,
+      errorMessage: `${LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX}: EACCES`,
+    };
+    prisma.integrationSyncJob.findMany.mockResolvedValue([partialJob]);
+    prisma.integrationSyncJob.findFirst.mockResolvedValue(partialJob);
+
+    const result = await service.getSettings(user);
+
+    expect(result.syncJobs).toEqual([
+      expect.objectContaining({
+        status: 'PARTIAL',
+        hasDiscrepancyLog: false,
+        discrepancyLogStatus: 'FAILED',
+        discrepancyLogError: `${LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX}: EACCES`,
+      }),
+    ]);
+    expect(result.latestSuccessfulSyncJob).toEqual(
+      expect.objectContaining({ status: 'PARTIAL' }),
+    );
+    expect(prisma.integrationSyncJob.findFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        provider: IntegrationProvider.LANGAME,
+        status: 'SUCCESS',
+      },
+      orderBy: { startedAt: 'desc' },
+    });
+  });
+
   it('denies the legacy direct activation path to an external pilot tenant', async () => {
     await expect(
       service.saveSettings(
@@ -315,9 +358,7 @@ describe('LangameSettingsService', () => {
       { timeoutMs: 5_000 },
     );
     expect(JSON.stringify(result)).not.toContain('submitted-secret-key');
-    expect(JSON.stringify(result)).not.toContain(
-      'must-not-leak-from-upstream',
-    );
+    expect(JSON.stringify(result)).not.toContain('must-not-leak-from-upstream');
     expect(encryption.encrypt).not.toHaveBeenCalled();
     expect(prisma.tenant.update).not.toHaveBeenCalled();
     expect(prisma.integrationCredential.upsert).not.toHaveBeenCalled();

@@ -18,6 +18,18 @@ generation — `21`.
 `GUEST_BUG_REPORTING_MODE=LIVE`. Split systemd/nginx candidate остаётся
 `DORMANT / NOT INSTALLED`.
 
+Read-only проверка 03.09 выявила отдельный P0 Langame: факты трёх ручных
+источников записывались, но post-fact discrepancy audit получал filesystem
+`EACCES` в slot-owned tenant directory, поэтому job ложно завершался как полный
+`FAILED`. Встроенный daily scheduler выключен на обоих slot и отдельного owner
+не было; unattended freshness/snapshots остановились после 26.08. Source
+candidate отделяет audit failure в `PARTIAL`, вводит shared setgid storage с
+двусторонним blue/green preflight и отдельный single-owner oneshot/timer для
+одного exact internal tenant. Внешние tenant остаются `EXTERNAL_DENY`.
+Production для этого recovery ещё не менялся; до него обязательны exact-SHA
+Fast+Full, backup/restored-copy, hot rollback и отдельный GO. Runbook:
+[`docs/deployment/langame-sync-production-recovery.md`](docs/deployment/langame-sync-production-recovery.md).
+
 Production migration
 `20260831120000_guest_support_bug_report_input_repair` применена
 контроллером `GUEST_SUPPORT_PRODUCTION_188_TO_189_V1` после PASS на

@@ -24,6 +24,7 @@ fail-closed правилу одного контура снова сломать
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
 | Release acceleration     | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
+| Langame recovery         | source candidate: shared API audit storage + dedicated exact-internal-tenant worker; production не менялся, external unattended остаётся deny                                                                            |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -292,6 +293,32 @@ Production activation завершена 30.08.2026 на exact admitted SHA
   `active (waiting)` и выполняет 30-секундные проходы из exact active release;
   два последовательных автоматических tick завершились `0/0/0` без failed,
   blocked или reconciliation записей.
+
+### Langame daily sync и discrepancy audit
+
+Langame HTTP/manual sync остаётся corporate API path, но unattended daily sync
+относится только к workers/control-plane. Два одновременно работающих API slot
+не могут владеть scheduler: `LANGAME_DAILY_SYNC_SCHEDULER_ENABLED=false` и
+`LANGAME_SCHEDULED_HTTP_ENABLED=false` обязательны и для API, и для dedicated
+worker profile.
+
+Единственный допустимый owner — отдельный systemd timer/oneshot. Worker
+разрешает active immutable release на каждом запуске, принимает ровно один
+lowercase tenant slug и падает, если tenant не обработан ровно один раз либо
+хотя бы один scope `FAILED`. Explicit date разрешена только в canary. Current
+containment допускает этот путь только для `INTERNAL`; `PILOT/BETA/LIVE`
+сохраняют `EXTERNAL_DENY` до revision/lease-fenced successor.
+
+Mutable discrepancy JSON не является authority и не хранится в release. Его
+root и direct UUID tenant directories доступны только группе
+`leetplus-api-runtime`; Web/public guest identities в группу не входят.
+Root-only preflight перед API/worker стартом проверяет отсутствие symlink,
+nested mount и unexpected entries, exact `2770`, а также blue→green и
+green→blue create/read/delete. Repair меняет только group/mode по exact
+digest-bound plan, сохраняет owner и не получает DB/network/systemd effect.
+После сохранения DB facts audit-write failure становится `PARTIAL`, а не
+откатом facts или ложным provider `FAILED`; наружу выходит только allowlisted
+filesystem code.
 
 ### Runtime repair contract 29–30.08.2026
 

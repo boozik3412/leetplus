@@ -13,7 +13,7 @@ const EFFECTIVE_LANES = new Set(["L1_RUNTIME", "L2_SCHEMA_SECURITY"]);
 const SAFE_SOURCE_PATTERN = /^[A-Za-z0-9_.@+/-]+$/u;
 const SAFE_DESTINATION_PATTERN = /^\/[A-Za-z0-9_.@+/-]+$/u;
 const EXPECTED_INSTALL_MAP_SHA256 =
-  "1a105aedeff9282217828c784597f7b183f3ff04667df401a0d2a4fcfd6fb40f";
+  "e6a6f4288c9d1c581886b83c445d591515f6303d5800f61cbfda3a06101e2d96";
 const EXPECTED_REPOSITORY = "boozik3412/leetplus";
 const GENERATION_BASE = "/srv/leetplus/production-control-generations";
 const RECEIPT_BASE = "/var/lib/leetplus/deploy-receipts/production-control";
@@ -63,12 +63,16 @@ const REQUIRED_DESTINATIONS = new Set([
   "/etc/systemd/system/leetplus-bonus-ledger-worker.service",
   "/etc/systemd/system/leetplus-bonus-ledger-worker.timer",
   "/etc/systemd/system/leetplus-api@.service",
+  "/etc/systemd/system/leetplus-langame-daily-worker.service",
+  "/etc/systemd/system/leetplus-langame-daily-worker.timer",
+  "/etc/systemd/system/leetplus-langame-discrepancy-audit-preflight.service",
   "/etc/systemd/system/leetplus-release-hydrate@.service",
   "/etc/systemd/system/leetplus-web@.service",
   "/etc/tmpfiles.d/leetplus-release.conf",
   "/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/CONTROL_BUNDLE_SHA256SUMS",
   "/usr/local/libexec/leetplus/stage-release-artifact.sh",
   "/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh",
+  "/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh",
   "/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs",
   "/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs",
   "/usr/local/libexec/leetplus/verify-production-control-artifact.mjs",
@@ -76,6 +80,7 @@ const REQUIRED_DESTINATIONS = new Set([
   "/usr/local/sbin/leetplus-bind-release-slot",
   "/usr/local/sbin/leetplus-blue-green-cutover",
   "/usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1",
+  "/usr/local/sbin/leetplus-langame-discrepancy-audit-authority",
   "/usr/local/sbin/leetplus-promote-release-artifact",
   "/usr/local/sbin/leetplus-resumable-release-orchestrator",
   "/usr/local/sbin/leetplus-seal-release-artifact",

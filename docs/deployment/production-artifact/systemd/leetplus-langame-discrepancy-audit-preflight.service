@@ -1,0 +1,43 @@
+[Unit]
+Description=Verify Langame discrepancy audit storage for both API slots
+After=local-fs.target
+Before=leetplus-api@blue.service leetplus-api@green.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+SupplementaryGroups=leetplus-api-runtime
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+UnsetEnvironment=BASH_ENV ENV HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy NODE_USE_ENV_PROXY NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR PRISMA_QUERY_ENGINE_BINARY PRISMA_QUERY_ENGINE_LIBRARY PRISMA_SCHEMA_ENGINE_BINARY PRISMA_FMT_BINARY TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig PNPM_HOME COREPACK_HOME COREPACK_NPM_REGISTRY COREPACK_INTEGRITY_KEYS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM
+ExecStart=/usr/local/sbin/leetplus-langame-discrepancy-audit-authority check
+TimeoutStartSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProtectSystem=strict
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+RestrictNamespaces=true
+RestrictRealtime=true
+# The authority drops to each fixed API identity for the two cross-slot probes.
+# A seccomp prohibition on setuid/setgid would make those probes untestable.
+RestrictSUIDSGID=false
+RemoveIPC=true
+LockPersonality=true
+CapabilityBoundingSet=CAP_SETGID CAP_SETUID
+AmbientCapabilities=CAP_SETGID CAP_SETUID
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/leetplus/langame-sync /run/leetplus-langame-discrepancy-audit
+RuntimeDirectory=leetplus-langame-discrepancy-audit
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes

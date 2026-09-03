@@ -3,6 +3,8 @@ Description=LeetPlus API blue/green slot %i (SHA-bound artifact)
 After=network-online.target
 Wants=network-online.target
 Before=nginx.service
+Requires=leetplus-langame-discrepancy-audit-preflight.service
+After=leetplus-langame-discrepancy-audit-preflight.service
 
 [Service]
 Type=simple

@@ -14,7 +14,7 @@ import {
   TenantModule,
 } from '@prisma/client';
 import { createHash } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { LANGAME_DISCREPANCY_LOG_ROOT_KEY } from '../config/environment-validation';
@@ -28,7 +28,10 @@ import {
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
-import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
+import {
+  BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+  LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX,
+} from './langame.types';
 import type {
   LangameGood,
   LangameClubProductConfiguration,
@@ -47,6 +50,16 @@ const MAX_LANGAME_PERIOD_DAYS = 365;
 const MAX_LANGAME_OPERATION_LOG_PERIOD_DAYS = 31;
 export const EXTERNAL_LEGACY_LANGAME_SYNC_DENIAL_REASON_CODE =
   'EXTERNAL_LEGACY_LANGAME_SYNC_REQUIRES_CURRENT188';
+const SAFE_DISCREPANCY_AUDIT_ERROR_CODES = new Set([
+  'EACCES',
+  'EDQUOT',
+  'EEXIST',
+  'EMFILE',
+  'ENFILE',
+  'ENOSPC',
+  'EPERM',
+  'EROFS',
+]);
 
 type DiscrepancyLogEntry = {
   entity: 'Product' | 'InventorySnapshot' | 'SalesFact';
@@ -224,6 +237,7 @@ export class LangameSyncService {
       tenantId,
       sources: sources.length,
       failedSources: 0,
+      partialSources: 0,
       stores: 0,
       products: 0,
       productGroups: 0,
@@ -284,6 +298,8 @@ export class LangameSyncService {
         clubRevenueFacts: 0,
         discrepancies: 0,
         discrepancyLogPath: null,
+        discrepancyLogStatus: 'NOT_REQUIRED',
+        discrepancyLogError: null,
         errorMessage: null,
       };
 
@@ -432,15 +448,28 @@ export class LangameSyncService {
         }
         sourceResult.discrepancies = discrepancies.length;
         result.discrepancies += discrepancies.length;
-        const discrepancyLogPath =
-          trigger === IntegrationSyncTrigger.MANUAL && discrepancies.length > 0
-            ? await this.writeDiscrepancyLog({
-                tenantId,
-                domain: source.domain,
-                syncJobId: syncJob.id,
-                discrepancies,
-              })
-            : null;
+        let discrepancyLogPath: string | null = null;
+        if (
+          trigger === IntegrationSyncTrigger.MANUAL &&
+          discrepancies.length > 0
+        ) {
+          try {
+            discrepancyLogPath = await this.writeDiscrepancyLog({
+              tenantId,
+              domain: source.domain,
+              syncJobId: syncJob.id,
+              discrepancies,
+            });
+            sourceResult.discrepancyLogStatus = 'WRITTEN';
+          } catch (error) {
+            const auditError = this.discrepancyAuditWriteError(error);
+            sourceResult.status = 'PARTIAL';
+            sourceResult.discrepancyLogStatus = 'FAILED';
+            sourceResult.discrepancyLogError = auditError;
+            sourceResult.errorMessage = auditError;
+            result.partialSources += 1;
+          }
+        }
         sourceResult.discrepancyLogPath = discrepancyLogPath;
 
         await this.prisma.integrationSource.update({
@@ -468,10 +497,12 @@ export class LangameSyncService {
             salesCount: sourceResult.salesFacts,
             discrepancyCount: sourceResult.discrepancies,
             discrepancyLogPath,
-            errorMessage: null,
+            errorMessage: sourceResult.discrepancyLogError,
           },
         });
-        sourceResult.status = 'SUCCESS';
+        if (sourceResult.status !== 'PARTIAL') {
+          sourceResult.status = 'SUCCESS';
+        }
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown Langame sync error';
@@ -1582,7 +1613,24 @@ export class LangameSyncService {
     const root = this.discrepancyLogRoot();
     const directory = resolve(root, tenantId);
     this.assertPathInside(root, directory, 'tenant directory');
-    await mkdir(directory, { recursive: true });
+    const createdDirectory = await mkdir(directory, {
+      recursive: true,
+      mode: 0o770,
+    });
+    // Existing directories are provisioned and attested by the root-owned
+    // release control. An API slot must never change their ownership or mode.
+    // A directory it has just created inherits the root's setgid API group;
+    // normalize only that directory so the other blue/green slot can write.
+    if (createdDirectory) {
+      await chmod(directory, 0o2770);
+    }
+    const directoryMetadata = await lstat(directory);
+    if (
+      directoryMetadata.isSymbolicLink() ||
+      !directoryMetadata.isDirectory()
+    ) {
+      throw new Error('Unsafe Langame discrepancy tenant directory');
+    }
     const fileName = `${new Date().toISOString().replace(/[:.]/g, '-')}-${this.safeLogComponent(domain)}-${this.safeLogComponent(syncJobId)}.json`;
     const filePath = resolve(directory, fileName);
     this.assertPathInside(directory, filePath, 'log file');
@@ -1600,10 +1648,21 @@ export class LangameSyncService {
         null,
         2,
       ),
-      'utf8',
+      { encoding: 'utf8', flag: 'wx', mode: 0o640 },
     );
 
     return filePath;
+  }
+
+  private discrepancyAuditWriteError(error: unknown) {
+    const candidate =
+      error && typeof error === 'object' && 'code' in error
+        ? String((error as NodeJS.ErrnoException).code ?? '').toUpperCase()
+        : '';
+    const safeCode = SAFE_DISCREPANCY_AUDIT_ERROR_CODES.has(candidate)
+      ? candidate
+      : 'UNKNOWN';
+    return `${LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX}: ${safeCode}`;
   }
 
   private discrepancyLogRoot() {

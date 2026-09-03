@@ -1,6 +1,6 @@
 # Resumable blue/green release orchestrator
 
-Статус: **реализован в source/CI; production deployment требует отдельного GO**
+Статус: **V2 production rollout завершён; V3 one-shot recovery hardening реализован в source и требует exact admission**
 
 Актуально на: **03.09.2026**
 
@@ -70,9 +70,9 @@ generation останавливает продолжение.
 | Фаза | Effect | Точное восстановление после lost response |
 | --- | --- | --- |
 | `HYDRATE` | versioned hydration unit + immutable promotion | existing sealed release принимается только через тот же hydration receipt; promoter выполняет собственный reconcile |
-| `BIND` | persistent exact instance masks + `--now`, cache preparation + inactive slot link | повтор оставляет target fenced; cache принимает только stopped `enabled` unit или exact root-owned `/etc/systemd/system/<unit> -> /dev/null`; pending binder intent продолжает только `reconcile` |
-| `SMOKE` | снять exact masks, enable/start target API/Web, loopback readiness и authenticated reads | unmask/start/probes повторяются идемпотентно; invocation IDs и результаты должны совпасть |
-| `CUTOVER` | штатный atomic nginx switch с watchdog | pending child intent проходит `recover-pending`; terminal successor принимается только как baseline generation + 1 с exact target и previous-runtime contract |
+| `BIND` | persistent exact instance masks + `--now`, reset failed state, cache preparation, inactive slot link и atomic slot-env bind | повтор оставляет target fenced; cache повторяется не более трёх раз только после обычного non-zero exit и повторной проверки `masked/inactive/dead/PID=0`; pending binder intent продолжает только `reconcile`; previous slot-env bytes сохраняются root-only и принимаются только по exact lineage |
+| `SMOKE` | снять exact masks, enable/start target API/Web, loopback readiness и authenticated reads | unmask/start повторяются идемпотентно; loopback readiness ждёт startup bounded-серией, но ambiguous/timeout/oversize/stderr не повторяются; invocation IDs и результаты должны совпасть |
+| `CUTOVER` | штатный atomic nginx switch с watchdog | pending child intent проходит `recover-pending`; terminal successor принимается только как baseline generation + 1 с exact target и previous-runtime contract; диагностический stderr после exit 0 допустим только когда такой exact receipt уже durable и active link совпал |
 | `POSTCHECK` | public readiness + authenticated reads | read-only проверки повторяются; active link и accepted cutover receipt должны остаться теми же |
 
 Если evidence успел стать durable, а ответ/receipt потерян, `resume` не
@@ -91,7 +91,38 @@ operation, не требуя ручной правки link или records. От
 quiesce/unmask intents связаны с plan и phase intent: контроллер не принимает и
 не снимает pre-existing operator mask, а после interrupted `mask --now` может
 продолжить только маски, созданные уже внутри той же operation. Эта схема
-использует record contract `LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V2`.
+использует record contract `LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V3`.
+
+V3 также делает `/etc/leetplus/slots/<slot>.env` частью BIND evidence. До
+изменения проверяются exact `root:leetplus-runtime 0440`, один hard link,
+canonical keys/ports, previous release/schema lineage и допустимая пара
+reporting/bridge flags. Старые bytes атомарно сохраняются в operation directory
+как `root:root 0400`; новый файл меняет release SHA, Web build ID, ожидаемый
+schema head/count и plan-bound release-window timestamp. Дополнительно exact
+legacy input `API_BIND_HOST=localhost`, обнаруженный на production, только
+после `masked/inactive/dead/PID=0` нормализуется к canonical
+`API_BIND_HOST=127.0.0.1`; evidence явно пишет
+`LEGACY_LOCALHOST_TO_IPV4_LOOPBACK`. Уже canonical input пишет `NONE`, а
+`::1`, `localhost.`, DNS names и другие aliases запрещены. Ports,
+`GUEST_BUG_REPORTING_MODE` и `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE` сохраняются.
+Любой неизвестный key, смена security flag, чужой previous SHA, symlink/hardlink
+или drift между old/new exact bytes останавливает запуск target.
+
+## Первый production rollout
+
+03.09.2026 exact admitted release
+`f3f119fa81fc497b75cc1e57f046d8539676c943` прошёл все пять фаз и переключил
+production на active blue generation 21; green `22ab6b81…` сохранён hot
+rollback. Public и loopback API/Web, authenticated reads и CURRENT189 postcheck
+успешны, pending record отсутствует. Schema, ACL, guest flags и worker state не
+менялись.
+
+V2 корректно сохранил доступность и позволил продолжать тот же exact plan, но
+потребовал несколько быстрых `resume`: transient cache process cleanup,
+systemd failed state после stop, отсутствующий automatic slot-env bind,
+ранний readiness probe и уже принятый cutover с диагностическим stderr. V3
+автоматизирует ровно эти безопасные recovery cases; чужой receipt или
+неоднозначный effect по-прежнему требует остановки и разбора.
 
 ## Операторский интерфейс
 
@@ -143,4 +174,8 @@ workers/control-plane — отдельными unit/controller gates. Ни од�
 
 Интеграционный тест в Fast CI и Full Release Admission покрывает happy path,
 lost response до evidence и после durable evidence каждой из пяти фаз,
-installed-control drift, plan/receipt tampering и чужую cutover generation.
+installed-control drift, plan/receipt tampering, чужую cutover generation,
+failed-state normalization, bounded cache/readiness retry, slot-env lineage и
+legacy bind-host normalization, reporting/bridge pair, exhaustion exact 12
+readiness attempts и accepted-cutover recovery после диагностического stderr,
+включая запрет receipt без совпавшего active nginx link.

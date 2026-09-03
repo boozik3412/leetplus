@@ -61,6 +61,11 @@ bind-host aliases запрещены. PR #123 объединил V3 в `main` к
 production deploy. Восьмой acceleration item добавляет trusted lane provenance
 и обезличенные duration/failure-phase metrics; до 20 samples p50/p95 не
 публикуются, а исторический V2 rollout остаётся `LEGACY_UNCLASSIFIED`.
+Отдельный source-контракт retention использует read-only exact plan и явный
+root-only apply под exclusive production-control/orchestrator locks: immutable
+segments сохраняются до удаления live copies, lost response продолжает только
+тот же plan, а incomplete archive блокирует metrics и новый rollout. Он не
+обращается к DB/runtime/сети и не меняет фактический production baseline.
 Подробности зафиксированы в
 [плане ускорения release pipeline](../deployment/release-pipeline-acceleration.md).
 

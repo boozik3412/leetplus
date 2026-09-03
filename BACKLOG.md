@@ -26,7 +26,9 @@ read-only агрегатором объединён через PR #124 как `5
 `33733457026` и Full `33734441310`, а также post-merge Fast `33736086893` и
 Full `33736086906` завершились `SUCCESS`. Отдельный deploy только ради метрик
 не выполняется — команда станет доступна вместе со следующей admitted
-production-control generation и прочитает сохранённую V2 историю.
+production-control generation и прочитает сохранённую V2 историю. REL-ACC-009
+добавляет к тому же authority явный plan/apply архив обезличенных attempt
+records; это source/control изменение также не является production deploy.
 Подробный контракт и целевые метрики:
 [release-pipeline-acceleration.md](./docs/deployment/release-pipeline-acceleration.md).
 
@@ -102,10 +104,23 @@ receipt-contract drift уже после admission.
   failure-phase histogram и p50/p95 по lane. До 20 terminal samples процентили
   возвращаются как `INSUFFICIENT_SAMPLE_SIZE`; реальный первый V2 rollout
   остаётся `LEGACY_UNCLASSIFIED` и не искажает lane-статистику.
+- [x] `REL-ACC-009`: добавлена отдельная ручная root-authorized retention
+  процедура до достижения `10 000` live attempt files. Read-only
+  `metrics-retention-plan --retain-attempt-count <N>` создаёт только
+  детерминированный exact plan/digest под shared install lock; effect возможен
+  лишь через `metrics-retention-apply` с тем же count и plan SHA-256 под
+  exclusive `install.lock -> orchestrator.lock`. Canonical raw records сначала
+  попадают в immutable manifest/segments, повторно проверяются и только затем
+  удаляются из live-каталога. Потерянный ответ продолжает тот же plan, обычные
+  `metrics`, новый retention plan и runtime `apply|resume` блокируются на
+  незавершённом архиве. Reader объединяет live+archive без двойного подсчёта;
+  сеть, DB, systemd/runtime и пользовательские контуры не затрагиваются.
 
-Неблокирующий operational follow-up: до накопления `10 000` attempt records
-добавить отдельную root-authorized retention/archive процедуру. Текущий reader
-fail-closed ограничен `16 384` файлами и сам ничего не удаляет.
+Отдельный capacity boundary: duration percentiles всё ещё читают terminal
+operation directories с fail-closed пределом `4 096`. Их удаление не входит в
+REL-ACC-009; до этого объёма нужен самостоятельный receipt-chain/status archive
+controller. Attempt archive отдельно ограничен `4 096` файлами, `128 MiB` и
+`131 072` записями, чтобы read-only diagnostic оставался bounded.
 
 ### Инварианты приёмки
 

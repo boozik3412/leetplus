@@ -288,3 +288,17 @@ receipt через parser формата `KEY=value` и stale SHA-256 hydration-
 Оба были исправлены и повторно доказаны на новом exact head. Production для
 этого source/control изменения не переключался; метрики станут доступны со
 следующей отдельно одобренной admitted production-control generation.
+
+REL-ACC-009 закрывает operational retention до достижения live reader cap.
+Отдельный read-only `metrics-retention-plan` под shared install lock выдаёт
+детерминированный exact source/archive plan. Только явный root-only
+`metrics-retention-apply` с тем же count и SHA-256 получает exclusive
+`install.lock -> orchestrator.lock`: он публикует и повторно проверяет immutable
+raw-record segments до удаления exact live copies, а terminal receipt пишет
+последним. Lost response возобновляет только тот же plan; незавершённый archive
+блокирует metrics, новый retention plan и rollout `apply|resume`. Reader
+продолжает считать live+archive без дублей и имеет отдельные bounds: `4 096`
+archive files, `128 MiB`, `131 072` archived attempts. Процедура не обращается к
+DB, runtime/systemd, workers или сети и не является production deploy. Предел
+`4 096` terminal operation directories для duration percentiles остаётся
+отдельным будущим receipt-chain retention boundary; REL-ACC-009 их не удаляет.

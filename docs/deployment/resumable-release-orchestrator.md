@@ -1,6 +1,6 @@
 # Resumable blue/green release orchestrator
 
-Статус: **V2 production rollout завершён; V3 one-shot recovery hardening объединён в main; lane-aware metrics реализованы в source**
+Статус: **V2 production rollout завершён; V3 recovery, lane-aware metrics и root-authorized metrics retention реализованы в source**
 
 Актуально на: **03.09.2026**
 
@@ -40,9 +40,12 @@ Bootstrap:
 - хранит records только в
   `/var/lib/leetplus/deploy-receipts/release-orchestrator/<operation-id>`.
 
-Исключение — точная команда `metrics`: bootstrap берёт non-blocking shared
-`install.lock` до проверки engine, но не берёт orchestrator lock и не создаёт
-state. Это исключает гонку с install/rollout, сохраняя команду read-only.
+Исключение — точные команды `metrics` и `metrics-retention-plan`: bootstrap
+берёт non-blocking shared `install.lock` до проверки engine, но не берёт
+orchestrator lock и не создаёт state. Это исключает гонку с install/rollout,
+сохраняя обе команды read-only. `metrics-retention-apply` не входит в
+исключение: он всегда использует exclusive `install.lock`, затем canonical
+orchestrator lock.
 
 `prepare` создаёт только `plan.json` с решением
 `PREPARED_NOT_EFFECT_AUTHORIZATION`. План связывает exact target SHA/slot,
@@ -186,9 +189,61 @@ phase intent→receipt p50/p95, failure-phase histogram и unresolved count. П�
 `INSUFFICIENT_SAMPLE_SIZE`. Единственный исторический V2 rollout валидируется
 по своей точной terminal schema как `LEGACY_UNCLASSIFIED` и не влияет на lane
 percentiles; incomplete или повреждённая V2/V3 цепочка отклоняет отчёт. Reader
-fail-closed ограничивает inventory `16 384` attempt records; до `10 000` записей
-нужно отдельно принять root-authorized retention/archive процедуру. Команда
-`metrics` записи не удаляет и не ротирует.
+fail-closed ограничивает live inventory `16 384` attempt records. Команда
+`metrics` записи не удаляет и не ротирует; для этого существует только
+отдельная двухфазная процедура ниже.
+
+### Retention обезличенных attempt records
+
+Рекомендуемая операционная точка — до `10 000` live files, с сохранением
+последних `4 096`:
+
+```bash
+sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  metrics-retention-plan --retain-attempt-count 4096
+```
+
+Plan является детерминированным и nonauthorizing: он связывает exact live и
+archive inventory, per-file digests, оставляемое окно и segments не более 512
+записей. Он ничего не создаёт. После независимой сверки `plan` и его SHA-256
+оператор отдельно запускает effect:
+
+```bash
+sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  metrics-retention-apply \
+  --retain-attempt-count 4096 \
+  --plan-sha256 <exact-plan-sha256>
+```
+
+Apply допускает только root-installed authority и порядок exclusive
+`production-control install.lock -> orchestrator.lock`. Незавершённая rollout
+operation, изменённый source/archive inventory, другой count или plan digest
+останавливают effect. Процедура не принимает произвольные paths/record IDs и не
+обращается к DB, systemd, runtime, timers или сети.
+
+Archive публикуется в sibling-каталоге
+`/var/lib/leetplus/deploy-receipts/release-orchestrator-metrics-archive`:
+canonical manifest, один или несколько immutable segments и terminal receipt
+имеют `root:root 0400`, каталог — `0700`. Каждый segment содержит исходный уже
+обезличенный metric record, его UUID filename и SHA-256; release/operation SHA,
+environment, command output и PII не добавляются. Сначала все segment bytes
+fsync/publish/reopen проходят полную проверку, затем exact live copies
+удаляются и fsync выполняется для live directory; receipt публикуется последним.
+
+Если ответ потерян между этими шагами, durable manifest является единственным
+разрешением продолжить. Обычные `metrics`, новый retention plan и rollout
+`apply|resume` fail-closed блокируются, пока exact
+`metrics-retention-apply --plan-sha256` не закончит тот же plan. Replay допускает
+только исходный retained inventory плюс ещё не удалённые exact planned files;
+новая или изменённая live-запись запрещена. Уже опубликованный segment не
+перезаписывается, exact duplicate live copy не считается дважды.
+
+Диагностический reader остаётся bounded: максимум `4 096` archive files,
+`128 MiB` archive bytes и `131 072` archived attempts. Это не разрешение удалить
+authoritative operation directories: duration p50/p95 по-прежнему читаются из
+terminal receipt chains, для которых действует отдельный предел `4 096`.
+Будущий operation-history archive обязан сохранить status/replay semantics и
+оформляется отдельным controller до достижения этого объёма.
 
 Нельзя начинать новую операцию, редактировать records или вручную увеличивать
 generation, пока предыдущая цепочка не получила terminal status либо не была

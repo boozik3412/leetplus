@@ -23,7 +23,7 @@ fail-closed правилу одного контура снова сломать
 | Corporate invite repair  | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                    |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
-| Release acceleration     | 7/8: первый controlled five-phase rollout завершён на generation 21; V3 one-shot recovery hardening реализован в source и требует exact admission; последний backlog item — накопительные p50/p95 по duration/failure phase; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
+| Release acceleration     | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -72,6 +72,17 @@ receipt и machine-readable verifier output. Историческая terminal �
 держит только shared install lock, читает canonical root-owned receipts и не
 обращается к public guest, corporate tenant, DB, worker units, timers или сети;
 attempt record не содержит identifiers, SHA, paths, environment, output или PII.
+Retention не встроен в read-only report и не запускается автоматически.
+`metrics-retention-plan` держит тот же shared install lock и только связывает
+exact live/archive inventory. Отдельный `metrics-retention-apply` требует root,
+plan SHA-256 и exclusive порядок `install.lock -> orchestrator.lock`, сначала
+публикует immutable segments, затем удаляет только их exact live copies.
+Incomplete archive блокирует metrics и rollout `apply|resume` до replay того же
+plan. Этот filesystem-only production-control boundary не вызывает DB,
+systemd/runtime, timers, providers или сеть и не получает authority public
+guest, corporate tenant либо worker contour. Source/CI наличие команды не
+означает её установку или запуск на production; для новой control generation и
+самой retention operation нужны отдельные admission/GO соответственно.
 
 Поверх impact lane действует независимый merge-candidate guard. Final runtime и
 production-control handoff разрешён только runtime-eligible exact `push` SHA в

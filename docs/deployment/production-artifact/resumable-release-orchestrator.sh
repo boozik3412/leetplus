@@ -51,7 +51,7 @@ umask 0077
 
 readonly INSTALLED_BOOTSTRAP='/usr/local/sbin/leetplus-resumable-release-orchestrator'
 readonly INSTALLED_ENGINE='/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs'
-readonly EXPECTED_ENGINE_SHA256='b3cb5cb9f8c0feea85d64312cd90f0f28486a304b65e30f5d1dc34866a6f60a3'
+readonly EXPECTED_ENGINE_SHA256='37eee92a71e50ecc70eb997bf8925789b9286bc404fb6d4bf39dcf1ff1b49274'
 readonly PRODUCTION_CONTROL_RUN_ROOT='/run/leetplus-production-control'
 readonly PRODUCTION_CONTROL_INSTALL_LOCK="${PRODUCTION_CONTROL_RUN_ROOT}/install.lock"
 readonly STATE_PARENT='/var/lib/leetplus/deploy-receipts'
@@ -81,7 +81,7 @@ control_lock_identity="$(stat -c '%d:%i' -- "$PRODUCTION_CONTROL_INSTALL_LOCK")"
 exec 8<> "$PRODUCTION_CONTROL_INSTALL_LOCK"
 [[ "$(stat -Lc '%d:%i' -- /proc/self/fd/8)" == "$control_lock_identity" ]] \
   || die 'opened production-control install lock differs from the validated path'
-if [[ "${1:-}" == 'metrics' ]]; then
+if [[ "${1:-}" == 'metrics' || "${1:-}" == 'metrics-retention-plan' ]]; then
   flock -sn 8 || die 'production-control install or rollout operation is active'
 else
   flock -n 8 || die 'another production-control install or rollout operation is active'
@@ -101,11 +101,11 @@ fi
   && "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" == '22' ]] \
   || die 'production execution requires exact root-controlled Node major 22'
 
-# Exact `metrics` has no operation arguments. It holds only the shared install
-# lock acquired before engine verification, so it cannot race a control install
-# or rollout but never takes the exclusive orchestrator lock or creates state.
-# The engine performs filesystem-only reads.
-if [[ "${1:-}" == 'metrics' ]]; then
+# Exact `metrics` and `metrics-retention-plan` hold only the shared install lock
+# acquired before engine verification, so neither can race a control install or
+# rollout; neither takes the exclusive orchestrator lock or creates state. Both
+# engine paths perform filesystem-only reads.
+if [[ "${1:-}" == 'metrics' || "${1:-}" == 'metrics-retention-plan' ]]; then
   LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP='LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP_V1'
   LEETPLUS_RESUMABLE_RELEASE_INSTALL_LOCK_FD='8'
   export LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP LEETPLUS_RESUMABLE_RELEASE_INSTALL_LOCK_FD

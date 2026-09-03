@@ -40,6 +40,14 @@ const SHA40 = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const METRIC_ATTEMPT_FILE = new RegExp(
+  "^" + UUID.source.slice(1, -1) + "\\.json$",
+  "u",
+);
+const METRIC_ARCHIVE_MANIFEST_FILE = /^([0-9a-f]{64})\.manifest\.json$/u;
+const METRIC_ARCHIVE_SEGMENT_FILE =
+  /^([0-9a-f]{64})\.([0-9]{4})\.segment\.json$/u;
+const METRIC_ARCHIVE_RECEIPT_FILE = /^([0-9a-f]{64})\.receipt\.json$/u;
 const MIGRATION = /^[0-9]{14}_[a-z0-9_]+$/u;
 const INVOCATION_ID = /^[0-9a-f]{32}$/u;
 const SAFE_RECORD_VALUE = /^[^\0\r\n]{0,8192}$/u;
@@ -47,6 +55,11 @@ const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_OPERATION_ENTRIES = 4096;
 const MAX_METRIC_ATTEMPT_ENTRIES = 16384;
+const MAX_METRIC_ARCHIVE_FILES = 4096;
+const MAX_METRIC_ARCHIVE_BYTES = 128 * 1024 * 1024;
+const MAX_METRIC_ARCHIVED_ATTEMPTS = 131072;
+const MAX_METRIC_RETENTION_PLAN_ENTRIES = 8192;
+const METRIC_ARCHIVE_SEGMENT_ENTRIES = 512;
 const METRIC_SAMPLE_MINIMUM = 20;
 const MAX_SLOT_ENVIRONMENT_BYTES = 16 * 1024;
 const CACHE_PREPARATION_ATTEMPTS = 3;
@@ -62,6 +75,10 @@ const CONTROL_IMPACT_LINE =
   /^PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256=([0-9a-f]{64})$/u;
 const LEGACY_UNCLASSIFIED_LANE = "LEGACY_UNCLASSIFIED";
 const METRIC_FAILURE_PHASES = Object.freeze(["PRECHECK", ...PHASES]);
+const METRIC_RETENTION_PLAN_DECISION =
+  "METRIC_RETENTION_PREPARED_NOT_EFFECT_AUTHORIZATION";
+const METRIC_RETENTION_NOOP_DECISION = "METRIC_RETENTION_NOT_REQUIRED";
+const METRIC_RETENTION_APPLIED_DECISION = "METRIC_RETENTION_APPLIED";
 const V2_CONTRACT_VERSION = "LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V2";
 const PRODUCTION_ENGINE =
   "/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs";
@@ -174,6 +191,14 @@ function canonicalJson(value) {
   return JSON.stringify(value, null, 2) + "\n";
 }
 
+function canonicalJsonByteLength(value) {
+  return Buffer.byteLength(canonicalJson(value), "utf8");
+}
+
+function compareCanonicalText(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 export function canonicalRecordSha256(value) {
   return sha256(canonicalJson(value));
 }
@@ -241,11 +266,19 @@ function usage() {
     "",
     "  leetplus-resumable-release-orchestrator metrics",
     "",
+    "  leetplus-resumable-release-orchestrator metrics-retention-plan \\",
+    "    --retain-attempt-count <count>",
+    "",
+    "  leetplus-resumable-release-orchestrator metrics-retention-apply \\",
+    "    --retain-attempt-count <count> --plan-sha256 <sha256>",
+    "",
     "prepare is read-only apart from a protected nonauthorizing plan. apply is",
     "the explicit effect boundary. resume may continue only that exact approved",
     "plan and validates every terminal phase receipt before proceeding.",
     "metrics is read-only: it reads only canonical root-owned operation and",
     "attempt records; it never contacts runtime services, databases or timers.",
+    "metrics-retention-plan is also read-only. metrics-retention-apply is the",
+    "explicit root-only archive/delete boundary for one exact plan digest.",
   ].join("\n");
 }
 
@@ -276,7 +309,17 @@ function parseArguments(argv) {
     values.set(argument, value);
     index += 1;
   }
-  if (!["prepare", "apply", "resume", "status", "metrics"].includes(mode)) {
+  if (
+    ![
+      "prepare",
+      "apply",
+      "resume",
+      "status",
+      "metrics",
+      "metrics-retention-plan",
+      "metrics-retention-apply",
+    ].includes(mode)
+  ) {
     fail("ORCHESTRATOR_ARGUMENTS_INVALID");
   }
   const fixtureRoot = values.get("--fixture-root");
@@ -293,6 +336,54 @@ function parseArguments(argv) {
       fail("ORCHESTRATOR_ARGUMENTS_INVALID");
     }
     return { help: false, fixtureRoot, mode, testMode };
+  }
+  if (mode === "metrics-retention-plan") {
+    if (
+      argv[0] !== "metrics-retention-plan" ||
+      values.size !== 1 ||
+      !values.has("--retain-attempt-count")
+    ) {
+      fail("ORCHESTRATOR_ARGUMENTS_INVALID");
+    }
+    return {
+      help: false,
+      fixtureRoot,
+      mode,
+      retainAttemptCount: exactInteger(
+        Number(values.get("--retain-attempt-count")),
+        1,
+        MAX_METRIC_ATTEMPT_ENTRIES - 1,
+        "ORCHESTRATOR_METRIC_RETENTION_COUNT_INVALID",
+      ),
+      testMode,
+    };
+  }
+  if (mode === "metrics-retention-apply") {
+    if (
+      argv[0] !== "metrics-retention-apply" ||
+      values.size !== 2 ||
+      !values.has("--retain-attempt-count") ||
+      !values.has("--plan-sha256")
+    ) {
+      fail("ORCHESTRATOR_ARGUMENTS_INVALID");
+    }
+    return {
+      help: false,
+      fixtureRoot,
+      mode,
+      planSha256: exactString(
+        values.get("--plan-sha256") ?? "",
+        SHA256,
+        "ORCHESTRATOR_METRIC_RETENTION_PLAN_SHA256_INVALID",
+      ),
+      retainAttemptCount: exactInteger(
+        Number(values.get("--retain-attempt-count")),
+        1,
+        MAX_METRIC_ATTEMPT_ENTRIES - 1,
+        "ORCHESTRATOR_METRIC_RETENTION_COUNT_INVALID",
+      ),
+      testMode,
+    };
   }
   const common = ["--operation-id"];
   const expected =
@@ -416,6 +507,8 @@ function buildPaths(args) {
       stateRoot: "/var/lib/leetplus/deploy-receipts/release-orchestrator",
       metricsRoot:
         "/var/lib/leetplus/deploy-receipts/release-orchestrator-metrics",
+      metricsArchiveRoot:
+        "/var/lib/leetplus/deploy-receipts/release-orchestrator-metrics-archive",
       systemctl: "/usr/bin/systemctl",
       systemdUnitRoot: "/etc/systemd/system",
     };
@@ -447,6 +540,10 @@ function buildPaths(args) {
     metricsRoot: path.join(
       root,
       "var/lib/leetplus/deploy-receipts/release-orchestrator-metrics",
+    ),
+    metricsArchiveRoot: path.join(
+      root,
+      "var/lib/leetplus/deploy-receipts/release-orchestrator-metrics-archive",
     ),
     systemctl: path.join(commandRoot, "systemctl"),
     systemdUnitRoot: path.join(root, "etc/systemd/system"),
@@ -498,7 +595,7 @@ function validateBootstrap(args) {
   ) {
     fail("ORCHESTRATOR_PRODUCTION_CONTROL_LOCK_INVALID");
   }
-  if (args.mode === "metrics") return;
+  if (["metrics", "metrics-retention-plan"].includes(args.mode)) return;
 }
 
 function assertDirectory(directory, args, expectedMode = 0o700) {
@@ -526,6 +623,15 @@ function ensureStateRoot(paths, args) {
 
 function fileIdentity(details) {
   return [details.dev, details.ino, details.size, details.mtimeMs].join(":");
+}
+
+function lstatIfPresent(filePath) {
+  try {
+    return lstatSync(filePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    throw error;
+  }
 }
 
 function readCanonicalJson(filePath, args, expectedModes = [0o400, 0o600]) {
@@ -602,6 +708,10 @@ function syncDirectory(directory, args) {
 
 function publishCanonicalJson(filePath, value, mode, args) {
   if (existsSync(filePath)) fail("ORCHESTRATOR_RECORD_ALREADY_EXISTS");
+  const bytes = canonicalJson(value);
+  if (Buffer.byteLength(bytes, "utf8") > MAX_JSON_BYTES) {
+    fail("ORCHESTRATOR_RECORD_FILE_INVALID");
+  }
   const temporary = filePath + ".new." + process.pid + "." + randomUUID();
   const fd = openSync(
     temporary,
@@ -612,7 +722,7 @@ function publishCanonicalJson(filePath, value, mode, args) {
     0o600,
   );
   try {
-    writeFileSync(fd, canonicalJson(value), "utf8");
+    writeFileSync(fd, bytes, "utf8");
     fchmodSync(fd, mode);
     fsyncSync(fd);
   } finally {
@@ -3667,28 +3777,868 @@ function metricOperationInventory(paths, args) {
   return result;
 }
 
-function metricAttemptInventory(paths, args) {
+function validateMetricSourceReference(value, reasonCode) {
+  exactKeys(value, ["fileName", "fileSha256"], reasonCode);
+  if (
+    !METRIC_ATTEMPT_FILE.test(value.fileName) ||
+    !SHA256.test(value.fileSha256)
+  ) {
+    fail(reasonCode);
+  }
+  return value;
+}
+
+function metricSourceReferences(entries) {
+  return entries.map(({ fileName, fileSha256 }) => ({ fileName, fileSha256 }));
+}
+
+function metricSourceSetSha256(entries) {
+  return sha256(canonicalJson(metricSourceReferences(entries)));
+}
+
+function metricInventorySha256(entries) {
+  const references = metricSourceReferences(entries).sort((left, right) =>
+    compareCanonicalText(left.fileName, right.fileName),
+  );
+  return sha256(canonicalJson(references));
+}
+
+function validateMetricRetentionPlan(plan) {
+  exactKeys(
+    plan,
+    [
+      "activeAttemptCount",
+      "archiveAttemptCount",
+      "archiveInventorySha256",
+      "cleanupEntries",
+      "contractVersion",
+      "decision",
+      "liveInventorySha256",
+      "recordType",
+      "retainAttemptCount",
+      "replayLiveDriftPolicy",
+      "retainedAttemptCount",
+      "retainedInventorySha256",
+      "schemaVersion",
+      "segments",
+      "selectedAttemptCount",
+    ],
+    "ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID",
+  );
+  if (
+    plan.schemaVersion !== 1 ||
+    plan.contractVersion !== CONTRACT_VERSION ||
+    plan.recordType !== "ROLLOUT_ATTEMPT_METRIC_RETENTION_PLAN" ||
+    !SHA256.test(plan.archiveInventorySha256) ||
+    !SHA256.test(plan.liveInventorySha256) ||
+    !SHA256.test(plan.retainedInventorySha256) ||
+    plan.replayLiveDriftPolicy !==
+      "EXACT_RETAINED_PLUS_OPTIONAL_PLANNED_SOURCES" ||
+    !Array.isArray(plan.cleanupEntries) ||
+    !Array.isArray(plan.segments)
+  ) {
+    fail("ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID");
+  }
+  exactInteger(
+    plan.retainAttemptCount,
+    1,
+    MAX_METRIC_ATTEMPT_ENTRIES - 1,
+    "ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID",
+  );
+  for (const key of [
+    "activeAttemptCount",
+    "archiveAttemptCount",
+    "retainedAttemptCount",
+    "selectedAttemptCount",
+  ]) {
+    exactInteger(
+      plan[key],
+      0,
+      Number.MAX_SAFE_INTEGER,
+      "ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID",
+    );
+  }
+  if (
+    plan.activeAttemptCount !==
+      plan.retainedAttemptCount + plan.selectedAttemptCount ||
+    plan.selectedAttemptCount > MAX_METRIC_RETENTION_PLAN_ENTRIES ||
+    plan.archiveAttemptCount + plan.selectedAttemptCount >
+      MAX_METRIC_ARCHIVED_ATTEMPTS ||
+    plan.cleanupEntries.length + plan.selectedAttemptCount >
+      MAX_METRIC_RETENTION_PLAN_ENTRIES
+  ) {
+    fail("ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID");
+  }
+  const seen = new Set();
+  for (const entry of plan.cleanupEntries) {
+    validateMetricSourceReference(
+      entry,
+      "ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID",
+    );
+    if (seen.has(entry.fileName)) {
+      fail("ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID");
+    }
+    seen.add(entry.fileName);
+  }
+  let selectedAttemptCount = 0;
+  for (let index = 0; index < plan.segments.length; index += 1) {
+    const segment = plan.segments[index];
+    exactKeys(
+      segment,
+      ["segmentIndex", "sourceEntries", "sourceEntryCount", "sourceSetSha256"],
+      "ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID",
+    );
+    if (
+      segment.segmentIndex !== index + 1 ||
+      !Array.isArray(segment.sourceEntries) ||
+      segment.sourceEntries.length < 1 ||
+      segment.sourceEntries.length > METRIC_ARCHIVE_SEGMENT_ENTRIES ||
+      segment.sourceEntryCount !== segment.sourceEntries.length ||
+      !SHA256.test(segment.sourceSetSha256)
+    ) {
+      fail("ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID");
+    }
+    for (const entry of segment.sourceEntries) {
+      validateMetricSourceReference(
+        entry,
+        "ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID",
+      );
+      if (seen.has(entry.fileName)) {
+        fail("ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID");
+      }
+      seen.add(entry.fileName);
+    }
+    if (metricSourceSetSha256(segment.sourceEntries) !== segment.sourceSetSha256) {
+      fail("ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID");
+    }
+    selectedAttemptCount += segment.sourceEntryCount;
+  }
+  if (
+    selectedAttemptCount !== plan.selectedAttemptCount ||
+    (selectedAttemptCount === 0 && plan.segments.length !== 0)
+  ) {
+    fail("ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID");
+  }
+  const expectedDecision =
+    selectedAttemptCount + plan.cleanupEntries.length === 0
+      ? METRIC_RETENTION_NOOP_DECISION
+      : METRIC_RETENTION_PLAN_DECISION;
+  if (plan.decision !== expectedDecision) {
+    fail("ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID");
+  }
+  return plan;
+}
+
+function validateMetricArchiveManifest(record, filePlanSha256) {
+  exactKeys(
+    record,
+    ["contractVersion", "plan", "planSha256", "recordType", "schemaVersion"],
+    "ORCHESTRATOR_METRIC_ARCHIVE_MANIFEST_INVALID",
+  );
+  const plan = validateMetricRetentionPlan(record.plan);
+  if (
+    record.schemaVersion !== 1 ||
+    record.contractVersion !== CONTRACT_VERSION ||
+    record.recordType !== "ROLLOUT_ATTEMPT_METRIC_RETENTION_MANIFEST" ||
+    record.planSha256 !== filePlanSha256 ||
+    canonicalRecordSha256(plan) !== record.planSha256 ||
+    plan.decision === METRIC_RETENTION_NOOP_DECISION
+  ) {
+    fail("ORCHESTRATOR_METRIC_ARCHIVE_MANIFEST_INVALID");
+  }
+  return record;
+}
+
+function validateMetricArchiveSegment(record, plan, planSha256, segmentIndex) {
+  exactKeys(
+    record,
+    [
+      "contractVersion",
+      "planSha256",
+      "recordType",
+      "schemaVersion",
+      "segmentCount",
+      "segmentIndex",
+      "sourceEntries",
+      "sourceEntryCount",
+      "sourceSetSha256",
+    ],
+    "ORCHESTRATOR_METRIC_ARCHIVE_SEGMENT_INVALID",
+  );
+  const expected = plan.segments[segmentIndex - 1];
+  if (
+    expected === undefined ||
+    record.schemaVersion !== 1 ||
+    record.contractVersion !== CONTRACT_VERSION ||
+    record.recordType !== "ROLLOUT_ATTEMPT_METRIC_ARCHIVE_SEGMENT" ||
+    record.planSha256 !== planSha256 ||
+    record.segmentIndex !== segmentIndex ||
+    record.segmentCount !== plan.segments.length ||
+    record.sourceEntryCount !== expected.sourceEntryCount ||
+    record.sourceSetSha256 !== expected.sourceSetSha256 ||
+    !Array.isArray(record.sourceEntries) ||
+    record.sourceEntries.length !== expected.sourceEntryCount
+  ) {
+    fail("ORCHESTRATOR_METRIC_ARCHIVE_SEGMENT_INVALID");
+  }
+  const references = [];
+  const metrics = [];
+  for (let index = 0; index < record.sourceEntries.length; index += 1) {
+    const entry = record.sourceEntries[index];
+    exactKeys(
+      entry,
+      ["fileName", "fileSha256", "metric"],
+      "ORCHESTRATOR_METRIC_ARCHIVE_SEGMENT_INVALID",
+    );
+    const reference = validateMetricSourceReference(
+      { fileName: entry.fileName, fileSha256: entry.fileSha256 },
+      "ORCHESTRATOR_METRIC_ARCHIVE_SEGMENT_INVALID",
+    );
+    const metric = validateMetricAttempt(entry.metric);
+    if (
+      canonicalRecordSha256(metric) !== reference.fileSha256 ||
+      canonicalJson(reference) !== canonicalJson(expected.sourceEntries[index])
+    ) {
+      fail("ORCHESTRATOR_METRIC_ARCHIVE_SEGMENT_INVALID");
+    }
+    references.push(reference);
+    metrics.push({ ...reference, metric });
+  }
+  if (metricSourceSetSha256(references) !== record.sourceSetSha256) {
+    fail("ORCHESTRATOR_METRIC_ARCHIVE_SEGMENT_INVALID");
+  }
+  return metrics;
+}
+
+function metricRetentionReceipt(plan, planSha256) {
+  return {
+    schemaVersion: 1,
+    contractVersion: CONTRACT_VERSION,
+    recordType: "ROLLOUT_ATTEMPT_METRIC_RETENTION_RECEIPT",
+    planSha256,
+    archiveSegmentCount: plan.segments.length,
+    archivedAttemptCount: plan.selectedAttemptCount,
+    cleanupAttemptCount: plan.cleanupEntries.length,
+    retainedAttemptCount: plan.retainedAttemptCount,
+    decision: METRIC_RETENTION_APPLIED_DECISION,
+  };
+}
+
+function metricRetentionNoopResult(plan, planSha256) {
+  return {
+    schemaVersion: 1,
+    contractVersion: CONTRACT_VERSION,
+    recordType: "ROLLOUT_ATTEMPT_METRIC_RETENTION_RESULT",
+    planSha256,
+    archiveSegmentCount: 0,
+    archivedAttemptCount: 0,
+    cleanupAttemptCount: 0,
+    retainedAttemptCount: plan.retainedAttemptCount,
+    decision: METRIC_RETENTION_NOOP_DECISION,
+  };
+}
+
+function validateMetricRetentionReceipt(record, plan, planSha256) {
+  exactKeys(
+    record,
+    [
+      "archiveSegmentCount",
+      "archivedAttemptCount",
+      "cleanupAttemptCount",
+      "contractVersion",
+      "decision",
+      "planSha256",
+      "recordType",
+      "retainedAttemptCount",
+      "schemaVersion",
+    ],
+    "ORCHESTRATOR_METRIC_ARCHIVE_RECEIPT_INVALID",
+  );
+  if (canonicalJson(record) !== canonicalJson(metricRetentionReceipt(plan, planSha256))) {
+    fail("ORCHESTRATOR_METRIC_ARCHIVE_RECEIPT_INVALID");
+  }
+  return record;
+}
+
+function metricArchiveFileName(planSha256, kind, segmentIndex = 0) {
+  if (kind === "manifest") return planSha256 + ".manifest.json";
+  if (kind === "receipt") return planSha256 + ".receipt.json";
+  return (
+    planSha256 +
+    "." +
+    String(segmentIndex).padStart(4, "0") +
+    ".segment.json"
+  );
+}
+
+function readLiveMetricAttemptEntries(paths, args) {
   if (!existsSync(paths.metricsRoot)) return [];
   assertDirectory(paths.metricsRoot, args, 0o700);
   const entries = readdirSync(paths.metricsRoot, { withFileTypes: true });
   if (entries.length > MAX_METRIC_ATTEMPT_ENTRIES) {
     fail("ORCHESTRATOR_METRIC_ATTEMPT_INVENTORY_OVERSIZED");
   }
-  return entries.map((entry) => {
-    if (
-      !entry.isFile() ||
-      entry.isSymbolicLink() ||
-      !new RegExp("^" + UUID.source.slice(1, -1) + "\\.json$", "u").test(
-        entry.name,
-      )
-    ) {
-      fail("ORCHESTRATOR_METRIC_ATTEMPT_INVENTORY_INVALID");
-    }
-    return validateMetricAttempt(
-      readCanonicalJson(path.join(paths.metricsRoot, entry.name), args, [0o400])
-        .value,
-    );
+  return entries
+    .map((entry) => {
+      if (
+        !entry.isFile() ||
+        entry.isSymbolicLink() ||
+        !METRIC_ATTEMPT_FILE.test(entry.name)
+      ) {
+        fail("ORCHESTRATOR_METRIC_ATTEMPT_INVENTORY_INVALID");
+      }
+      const record = readCanonicalJson(
+        path.join(paths.metricsRoot, entry.name),
+        args,
+        [0o400],
+      );
+      return {
+        fileName: entry.name,
+        fileSha256: record.sha256,
+        metric: validateMetricAttempt(record.value),
+      };
+    })
+    .sort((left, right) => compareCanonicalText(left.fileName, right.fileName));
+}
+
+function readMetricArchiveInventory(
+  paths,
+  args,
+  { allowIncompletePlanSha256 } = {},
+) {
+  if (!existsSync(paths.metricsArchiveRoot)) {
+    return {
+      attempts: [],
+      baseFileInventory: [],
+      fileInventory: [],
+      sourceByName: new Map(),
+      target: undefined,
+      totalBytes: 0,
+      baseTotalBytes: 0,
+    };
+  }
+  assertDirectory(paths.metricsArchiveRoot, args, 0o700);
+  const directoryEntries = readdirSync(paths.metricsArchiveRoot, {
+    withFileTypes: true,
   });
+  if (directoryEntries.length > MAX_METRIC_ARCHIVE_FILES) {
+    fail("ORCHESTRATOR_METRIC_ARCHIVE_INVENTORY_OVERSIZED");
+  }
+  let totalBytes = 0;
+  for (const entry of directoryEntries) {
+    const details = lstatSync(path.join(paths.metricsArchiveRoot, entry.name));
+    if (!details.isFile() || details.isSymbolicLink() || details.nlink !== 1) {
+      fail("ORCHESTRATOR_METRIC_ARCHIVE_INVENTORY_INVALID");
+    }
+    totalBytes += details.size;
+    if (totalBytes > MAX_METRIC_ARCHIVE_BYTES) {
+      fail("ORCHESTRATOR_METRIC_ARCHIVE_INVENTORY_OVERSIZED");
+    }
+  }
+  const groups = new Map();
+  const fileInventory = [];
+  for (const entry of directoryEntries) {
+    if (!entry.isFile() || entry.isSymbolicLink()) {
+      fail("ORCHESTRATOR_METRIC_ARCHIVE_INVENTORY_INVALID");
+    }
+    const manifestMatch = METRIC_ARCHIVE_MANIFEST_FILE.exec(entry.name);
+    const segmentMatch = METRIC_ARCHIVE_SEGMENT_FILE.exec(entry.name);
+    const receiptMatch = METRIC_ARCHIVE_RECEIPT_FILE.exec(entry.name);
+    const match = manifestMatch ?? segmentMatch ?? receiptMatch;
+    if (!match) fail("ORCHESTRATOR_METRIC_ARCHIVE_INVENTORY_INVALID");
+    const record = readCanonicalJson(
+      path.join(paths.metricsArchiveRoot, entry.name),
+      args,
+      [0o400],
+    );
+    fileInventory.push({ fileName: entry.name, fileSha256: record.sha256 });
+    const planSha256 = match[1];
+    const group = groups.get(planSha256) ?? {
+      files: [],
+      manifest: undefined,
+      receipt: undefined,
+      segments: new Map(),
+    };
+    group.files.push({ fileName: entry.name, fileSha256: record.sha256 });
+    if (manifestMatch) {
+      if (group.manifest !== undefined) {
+        fail("ORCHESTRATOR_METRIC_ARCHIVE_INVENTORY_INVALID");
+      }
+      group.manifest = record.value;
+    } else if (receiptMatch) {
+      if (group.receipt !== undefined) {
+        fail("ORCHESTRATOR_METRIC_ARCHIVE_INVENTORY_INVALID");
+      }
+      group.receipt = record.value;
+    } else {
+      const segmentIndex = Number(segmentMatch[2]);
+      if (segmentIndex < 1 || group.segments.has(segmentIndex)) {
+        fail("ORCHESTRATOR_METRIC_ARCHIVE_INVENTORY_INVALID");
+      }
+      group.segments.set(segmentIndex, record.value);
+    }
+    groups.set(planSha256, group);
+  }
+  fileInventory.sort((left, right) =>
+    compareCanonicalText(left.fileName, right.fileName),
+  );
+  const attempts = [];
+  const sourceByName = new Map();
+  let target;
+  for (const [planSha256, group] of groups) {
+    if (group.manifest === undefined) {
+      fail("ORCHESTRATOR_METRIC_ARCHIVE_INVENTORY_INVALID");
+    }
+    const manifest = validateMetricArchiveManifest(group.manifest, planSha256);
+    const plan = manifest.plan;
+    const incompleteAllowed = planSha256 === allowIncompletePlanSha256;
+    for (const [segmentIndex, segment] of group.segments) {
+      validateMetricArchiveSegment(segment, plan, planSha256, segmentIndex);
+    }
+    if (group.receipt !== undefined) {
+      validateMetricRetentionReceipt(group.receipt, plan, planSha256);
+    }
+    const complete =
+      group.receipt !== undefined && group.segments.size === plan.segments.length;
+    if (!complete && !incompleteAllowed) {
+      fail("ORCHESTRATOR_METRIC_ARCHIVE_INCOMPLETE");
+    }
+    if (complete) {
+      for (let index = 1; index <= plan.segments.length; index += 1) {
+        const segment = group.segments.get(index);
+        if (segment === undefined) {
+          fail("ORCHESTRATOR_METRIC_ARCHIVE_INCOMPLETE");
+        }
+        for (const archived of validateMetricArchiveSegment(
+          segment,
+          plan,
+          planSha256,
+          index,
+        )) {
+          if (sourceByName.has(archived.fileName)) {
+            fail("ORCHESTRATOR_METRIC_ARCHIVE_SOURCE_OVERLAP");
+          }
+          sourceByName.set(archived.fileName, archived);
+          attempts.push(archived.metric);
+          if (attempts.length > MAX_METRIC_ARCHIVED_ATTEMPTS) {
+            fail("ORCHESTRATOR_METRIC_ARCHIVE_INVENTORY_OVERSIZED");
+          }
+        }
+      }
+    }
+    if (incompleteAllowed) {
+      target = { complete, group, manifest, plan, planSha256 };
+    }
+  }
+  const baseFileInventory = fileInventory.filter(
+    (entry) => !target?.group.files.some((item) => item.fileName === entry.fileName),
+  );
+  const targetBytes = target?.group.files.reduce(
+    (sum, entry) =>
+      sum +
+      lstatSync(path.join(paths.metricsArchiveRoot, entry.fileName)).size,
+    0,
+  );
+  return {
+    attempts,
+    baseFileInventory,
+    fileInventory,
+    sourceByName,
+    target,
+    totalBytes,
+    baseTotalBytes: totalBytes - (targetBytes ?? 0),
+  };
+}
+
+function metricAttemptInventory(paths, args) {
+  const archive = readMetricArchiveInventory(paths, args);
+  const live = readLiveMetricAttemptEntries(paths, args);
+  const attempts = [...archive.attempts];
+  for (const entry of live) {
+    const archived = archive.sourceByName.get(entry.fileName);
+    if (archived !== undefined) {
+      if (
+        archived.fileSha256 !== entry.fileSha256 ||
+        canonicalJson(archived.metric) !== canonicalJson(entry.metric)
+      ) {
+        fail("ORCHESTRATOR_METRIC_ARCHIVE_LIVE_MISMATCH");
+      }
+      continue;
+    }
+    attempts.push(entry.metric);
+  }
+  return attempts;
+}
+
+function assertMetricRetentionOperationsTerminal(paths, args) {
+  if (
+    metricOperationInventory(paths, args).some(
+      (operation) => operation.state !== "COMPLETED",
+    )
+  ) {
+    fail("ORCHESTRATOR_METRIC_RETENTION_OPERATION_UNRESOLVED");
+  }
+}
+
+function buildMetricRetentionPlan(paths, args) {
+  assertMetricRetentionOperationsTerminal(paths, args);
+  const archive = readMetricArchiveInventory(paths, args);
+  const live = readLiveMetricAttemptEntries(paths, args);
+  const cleanupCandidates = [];
+  const active = [];
+  for (const entry of live) {
+    const archived = archive.sourceByName.get(entry.fileName);
+    if (archived === undefined) {
+      active.push(entry);
+      continue;
+    }
+    if (
+      archived.fileSha256 !== entry.fileSha256 ||
+      canonicalJson(archived.metric) !== canonicalJson(entry.metric)
+    ) {
+      fail("ORCHESTRATOR_METRIC_ARCHIVE_LIVE_MISMATCH");
+    }
+    cleanupCandidates.push(entry);
+  }
+  active.sort(
+    (left, right) =>
+      compareCanonicalText(
+        left.metric.attemptFinishedAt,
+        right.metric.attemptFinishedAt,
+      ) || compareCanonicalText(left.fileName, right.fileName),
+  );
+  cleanupCandidates.sort((left, right) =>
+    compareCanonicalText(left.fileName, right.fileName),
+  );
+  const cleanupEntries = metricSourceReferences(
+    cleanupCandidates.slice(0, MAX_METRIC_RETENTION_PLAN_ENTRIES),
+  );
+  const selectionCapacity =
+    MAX_METRIC_RETENTION_PLAN_ENTRIES - cleanupEntries.length;
+  const requiredSelection = Math.max(0, active.length - args.retainAttemptCount);
+  const selected = active.slice(0, Math.min(requiredSelection, selectionCapacity));
+  const segments = [];
+  for (
+    let offset = 0;
+    offset < selected.length;
+    offset += METRIC_ARCHIVE_SEGMENT_ENTRIES
+  ) {
+    const sourceEntries = metricSourceReferences(
+      selected.slice(offset, offset + METRIC_ARCHIVE_SEGMENT_ENTRIES),
+    );
+    segments.push({
+      segmentIndex: segments.length + 1,
+      sourceEntries,
+      sourceEntryCount: sourceEntries.length,
+      sourceSetSha256: metricSourceSetSha256(sourceEntries),
+    });
+  }
+  const plan = {
+    schemaVersion: 1,
+    contractVersion: CONTRACT_VERSION,
+    recordType: "ROLLOUT_ATTEMPT_METRIC_RETENTION_PLAN",
+    retainAttemptCount: args.retainAttemptCount,
+    liveInventorySha256: metricInventorySha256(live),
+    archiveInventorySha256: sha256(canonicalJson(archive.fileInventory)),
+    activeAttemptCount: active.length,
+    archiveAttemptCount: archive.attempts.length,
+    cleanupEntries,
+    segments,
+    selectedAttemptCount: selected.length,
+    retainedAttemptCount: active.length - selected.length,
+    retainedInventorySha256: metricInventorySha256(
+      active.slice(selected.length),
+    ),
+    replayLiveDriftPolicy: "EXACT_RETAINED_PLUS_OPTIONAL_PLANNED_SOURCES",
+    decision:
+      selected.length + cleanupEntries.length === 0
+        ? METRIC_RETENTION_NOOP_DECISION
+        : METRIC_RETENTION_PLAN_DECISION,
+  };
+  return validateMetricRetentionPlan(plan);
+}
+
+function metricRetentionPlan(paths, args) {
+  const plan = buildMetricRetentionPlan(paths, args);
+  return {
+    schemaVersion: 1,
+    contractVersion: CONTRACT_VERSION,
+    decision: plan.decision,
+    plan,
+    planSha256: canonicalRecordSha256(plan),
+  };
+}
+
+function ensureMetricArchiveRoot(paths, args) {
+  assertDirectory(paths.deployReceiptRoot, args, 0o700);
+  if (!existsSync(paths.metricsArchiveRoot)) {
+    mkdirSync(paths.metricsArchiveRoot, { mode: 0o700 });
+    syncDirectory(paths.deployReceiptRoot, args);
+  }
+  assertDirectory(paths.metricsArchiveRoot, args, 0o700);
+}
+
+function metricArchiveManifest(plan, planSha256) {
+  return {
+    schemaVersion: 1,
+    contractVersion: CONTRACT_VERSION,
+    recordType: "ROLLOUT_ATTEMPT_METRIC_RETENTION_MANIFEST",
+    planSha256,
+    plan,
+  };
+}
+
+function metricArchiveSegment(plan, planSha256, segmentPlan, sourceByName) {
+  const sourceEntries = segmentPlan.sourceEntries.map((reference) => {
+    const source = sourceByName.get(reference.fileName);
+    if (
+      source === undefined ||
+      source.fileSha256 !== reference.fileSha256 ||
+      canonicalRecordSha256(source.metric) !== reference.fileSha256
+    ) {
+      fail("ORCHESTRATOR_METRIC_RETENTION_SOURCE_DRIFT");
+    }
+    return { ...reference, metric: source.metric };
+  });
+  return {
+    schemaVersion: 1,
+    contractVersion: CONTRACT_VERSION,
+    recordType: "ROLLOUT_ATTEMPT_METRIC_ARCHIVE_SEGMENT",
+    planSha256,
+    segmentIndex: segmentPlan.segmentIndex,
+    segmentCount: plan.segments.length,
+    sourceEntryCount: segmentPlan.sourceEntryCount,
+    sourceSetSha256: segmentPlan.sourceSetSha256,
+    sourceEntries,
+  };
+}
+
+function unlinkMetricSourceIfPresent(paths, args, reference, archivedSource) {
+  const filePath = path.join(paths.metricsRoot, reference.fileName);
+  const details = lstatIfPresent(filePath);
+  if (details === undefined) return false;
+  if (!details.isFile() || details.isSymbolicLink() || details.nlink !== 1) {
+    fail("ORCHESTRATOR_METRIC_RETENTION_SOURCE_DRIFT");
+  }
+  const source = readCanonicalJson(filePath, args, [0o400]);
+  const metric = validateMetricAttempt(source.value);
+  if (
+    source.sha256 !== reference.fileSha256 ||
+    archivedSource === undefined ||
+    archivedSource.fileSha256 !== reference.fileSha256 ||
+    canonicalJson(archivedSource.metric) !== canonicalJson(metric)
+  ) {
+    fail("ORCHESTRATOR_METRIC_RETENTION_SOURCE_DRIFT");
+  }
+  unlinkSync(filePath);
+  return true;
+}
+
+function applyMetricRetention(paths, args) {
+  assertMetricRetentionOperationsTerminal(paths, args);
+  let archive = readMetricArchiveInventory(paths, args, {
+    allowIncompletePlanSha256: args.planSha256,
+  });
+  let plan;
+  if (archive.target === undefined) {
+    plan = buildMetricRetentionPlan(paths, args);
+    if (canonicalRecordSha256(plan) !== args.planSha256) {
+      fail("ORCHESTRATOR_METRIC_RETENTION_PLAN_DRIFT");
+    }
+    if (plan.decision === METRIC_RETENTION_NOOP_DECISION) {
+      return metricRetentionNoopResult(plan, args.planSha256);
+    }
+    const projectedLive = readLiveMetricAttemptEntries(paths, args);
+    const projectedLiveByName = new Map(
+      projectedLive.map((entry) => [entry.fileName, entry]),
+    );
+    const projectedBytes =
+      archive.totalBytes +
+      canonicalJsonByteLength(metricArchiveManifest(plan, args.planSha256)) +
+      plan.segments.reduce(
+        (sum, segmentPlan) =>
+          sum +
+          canonicalJsonByteLength(
+            metricArchiveSegment(
+              plan,
+              args.planSha256,
+              segmentPlan,
+              projectedLiveByName,
+            ),
+          ),
+        0,
+      ) +
+      canonicalJsonByteLength(metricRetentionReceipt(plan, args.planSha256));
+    const projectedFiles =
+      archive.fileInventory.length + plan.segments.length + 2;
+    if (
+      projectedFiles > MAX_METRIC_ARCHIVE_FILES ||
+      projectedBytes > MAX_METRIC_ARCHIVE_BYTES
+    ) {
+      fail("ORCHESTRATOR_METRIC_ARCHIVE_INVENTORY_OVERSIZED");
+    }
+    ensureMetricArchiveRoot(paths, args);
+    publishCanonicalJson(
+      path.join(
+        paths.metricsArchiveRoot,
+        metricArchiveFileName(args.planSha256, "manifest"),
+      ),
+      metricArchiveManifest(plan, args.planSha256),
+      0o400,
+      args,
+    );
+    archive = readMetricArchiveInventory(paths, args, {
+      allowIncompletePlanSha256: args.planSha256,
+    });
+  } else {
+    plan = archive.target.plan;
+    if (
+      plan.retainAttemptCount !== args.retainAttemptCount ||
+      canonicalRecordSha256(plan) !== args.planSha256
+    ) {
+      fail("ORCHESTRATOR_METRIC_RETENTION_PLAN_DRIFT");
+    }
+  }
+  if (
+    sha256(canonicalJson(archive.baseFileInventory)) !==
+    plan.archiveInventorySha256
+  ) {
+    fail("ORCHESTRATOR_METRIC_RETENTION_ARCHIVE_DRIFT");
+  }
+  const live = readLiveMetricAttemptEntries(paths, args);
+  const liveByName = new Map(live.map((entry) => [entry.fileName, entry]));
+  const targetSourceNames = new Set(
+    plan.segments.flatMap((segment) =>
+      segment.sourceEntries.map((entry) => entry.fileName),
+    ),
+  );
+  const priorSourceByName = new Map(
+    [...archive.sourceByName].filter(([fileName]) => !targetSourceNames.has(fileName)),
+  );
+  const plannedRemovalNames = new Set([
+    ...targetSourceNames,
+    ...plan.cleanupEntries.map((entry) => entry.fileName),
+  ]);
+  for (const segment of plan.segments) {
+    for (const reference of segment.sourceEntries) {
+      const current = liveByName.get(reference.fileName);
+      if (current !== undefined && current.fileSha256 !== reference.fileSha256) {
+        fail("ORCHESTRATOR_METRIC_RETENTION_SOURCE_DRIFT");
+      }
+    }
+  }
+  for (const reference of plan.cleanupEntries) {
+    const current = liveByName.get(reference.fileName);
+    if (current !== undefined && current.fileSha256 !== reference.fileSha256) {
+      fail("ORCHESTRATOR_METRIC_RETENTION_SOURCE_DRIFT");
+    }
+  }
+  const retainedLive = live.filter(
+    (entry) => !plannedRemovalNames.has(entry.fileName),
+  );
+  if (
+    retainedLive.length !== plan.retainedAttemptCount ||
+    metricInventorySha256(retainedLive) !== plan.retainedInventorySha256
+  ) {
+    fail("ORCHESTRATOR_METRIC_RETENTION_REPLAY_LIVE_DRIFT");
+  }
+  for (const segment of plan.segments) {
+    for (const reference of segment.sourceEntries) {
+      if (priorSourceByName.has(reference.fileName)) {
+        fail("ORCHESTRATOR_METRIC_RETENTION_ARCHIVE_DRIFT");
+      }
+    }
+  }
+  for (const reference of plan.cleanupEntries) {
+    const archived = priorSourceByName.get(reference.fileName);
+    if (archived === undefined || archived.fileSha256 !== reference.fileSha256) {
+      fail("ORCHESTRATOR_METRIC_RETENTION_ARCHIVE_DRIFT");
+    }
+  }
+  const missingSegments = [];
+  for (const segmentPlan of plan.segments) {
+    const segmentPath = path.join(
+      paths.metricsArchiveRoot,
+      metricArchiveFileName(args.planSha256, "segment", segmentPlan.segmentIndex),
+    );
+    if (!existsSync(segmentPath)) {
+      const segment = metricArchiveSegment(
+        plan,
+        args.planSha256,
+        segmentPlan,
+        liveByName,
+      );
+      missingSegments.push({ segment, segmentPath });
+    }
+  }
+  const receipt = metricRetentionReceipt(plan, args.planSha256);
+  const receiptPath = path.join(
+    paths.metricsArchiveRoot,
+    metricArchiveFileName(args.planSha256, "receipt"),
+  );
+  const projectedReplayBytes =
+    archive.totalBytes +
+    missingSegments.reduce(
+      (sum, entry) => sum + canonicalJsonByteLength(entry.segment),
+      0,
+    ) +
+    (existsSync(receiptPath) ? 0 : canonicalJsonByteLength(receipt));
+  const projectedReplayFiles =
+    archive.fileInventory.length +
+    missingSegments.length +
+    (existsSync(receiptPath) ? 0 : 1);
+  if (
+    projectedReplayFiles > MAX_METRIC_ARCHIVE_FILES ||
+    projectedReplayBytes > MAX_METRIC_ARCHIVE_BYTES
+  ) {
+    fail("ORCHESTRATOR_METRIC_ARCHIVE_INVENTORY_OVERSIZED");
+  }
+  for (const { segment, segmentPath } of missingSegments) {
+    publishCanonicalJson(segmentPath, segment, 0o400, args);
+  }
+  archive = readMetricArchiveInventory(paths, args, {
+    allowIncompletePlanSha256: args.planSha256,
+  });
+  const targetArchivedByName = new Map();
+  for (let index = 1; index <= plan.segments.length; index += 1) {
+    const segment = archive.target?.group.segments.get(index);
+    if (segment === undefined) fail("ORCHESTRATOR_METRIC_ARCHIVE_INCOMPLETE");
+    for (const source of validateMetricArchiveSegment(
+      segment,
+      plan,
+      args.planSha256,
+      index,
+    )) {
+      targetArchivedByName.set(source.fileName, source);
+    }
+  }
+  let removed = false;
+  for (const segmentPlan of plan.segments) {
+    for (const reference of segmentPlan.sourceEntries) {
+      removed =
+        unlinkMetricSourceIfPresent(
+          paths,
+          args,
+          reference,
+          targetArchivedByName.get(reference.fileName),
+        ) || removed;
+    }
+  }
+  for (const reference of plan.cleanupEntries) {
+    removed =
+      unlinkMetricSourceIfPresent(
+        paths,
+        args,
+        reference,
+        priorSourceByName.get(reference.fileName),
+      ) || removed;
+  }
+  if (removed) syncDirectory(paths.metricsRoot, args);
+  if (!existsSync(receiptPath)) {
+    publishCanonicalJson(receiptPath, receipt, 0o400, args);
+  }
+  readMetricArchiveInventory(paths, args);
+  return receipt;
 }
 
 function percentileSummary(values) {
@@ -3793,9 +4743,20 @@ export async function main(argv = process.argv.slice(2)) {
       process.stdout.write(JSON.stringify(metrics(paths, args)) + "\n");
       return 0;
     }
+    if (args.mode === "metrics-retention-plan") {
+      process.stdout.write(JSON.stringify(metricRetentionPlan(paths, args)) + "\n");
+      return 0;
+    }
+    if (args.mode === "metrics-retention-apply") {
+      process.stdout.write(JSON.stringify(applyMetricRetention(paths, args)) + "\n");
+      return 0;
+    }
     if (args.mode === "prepare") {
       process.stdout.write(JSON.stringify(createPlan(args, paths)) + "\n");
       return 0;
+    }
+    if (["apply", "resume"].includes(args.mode)) {
+      readMetricArchiveInventory(paths, args);
     }
     context = readPlan(args, paths);
     if (args.mode === "status") {

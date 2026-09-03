@@ -839,4 +839,41 @@ grep -F -x 'WEB_CACHE_ALREADY_PREPARED_SLOT=blue' \
   }
 /usr/bin/systemctl unmask leetplus-web@blue.service
 
+# Bash synthesizes and exports PWD, SHLVL and `_` even when its parent starts
+# with env -i. Exercise the exact installed production bootstrap so the final
+# Node process must receive only the six explicitly reconstructed keys. The
+# absent operation is expected to fail after bootstrap validation; an
+# environment rejection proves that the launcher leaked shell metadata.
+test ! -e /usr/local/sbin/leetplus-resumable-release-orchestrator
+test ! -e /usr/local/libexec/leetplus/resumable-release-orchestrator.mjs
+install -o root -g root -m 0500 \
+  "$DEPLOY_ROOT/resumable-release-orchestrator.sh" \
+  /usr/local/sbin/leetplus-resumable-release-orchestrator
+install -o root -g root -m 0555 \
+  "$DEPLOY_ROOT/resumable-release-orchestrator.mjs" \
+  /usr/local/libexec/leetplus/resumable-release-orchestrator.mjs
+install -d -o root -g root -m 0700 /run/leetplus-production-control
+install -o root -g root -m 0600 /dev/null \
+  /run/leetplus-production-control/install.lock
+if /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  status \
+  --operation-id 00000000-0000-4000-8000-000000000001 \
+  --plan-sha256 0000000000000000000000000000000000000000000000000000000000000000 \
+  > /run/fixture-orchestrator-production-bootstrap.out 2>&1; then
+  orchestrator_bootstrap_status=0
+else
+  orchestrator_bootstrap_status=$?
+fi
+[[ "$orchestrator_bootstrap_status" == 1 ]] \
+  || die 'production orchestrator bootstrap unexpectedly accepted an absent operation'
+grep -F '"reasonCode":"ORCHESTRATOR_UNEXPECTED_FAILURE"' \
+  /run/fixture-orchestrator-production-bootstrap.out >/dev/null || {
+    sed -n '1,120p' /run/fixture-orchestrator-production-bootstrap.out >&2
+    die 'production orchestrator bootstrap did not reach the engine after exact env reconstruction'
+  }
+if grep -F 'ORCHESTRATOR_PRODUCTION_ENVIRONMENT_INVALID' \
+  /run/fixture-orchestrator-production-bootstrap.out >/dev/null; then
+  die 'production orchestrator bootstrap leaked shell-synthesized environment keys'
+fi
+
 printf 'production legacy rollback installer root fixture: PASS\n'

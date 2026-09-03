@@ -2,7 +2,7 @@
 
 Статус: **реализован в source/CI; production deployment требует отдельного GO**
 
-Актуально на: **02.09.2026**
+Актуально на: **03.09.2026**
 
 ## Назначение
 
@@ -30,6 +30,9 @@ Production разрешает запуск только через устано�
 Bootstrap:
 
 - удаляет inherited environment и использует exact `/usr/bin/node` major 22;
+- непосредственно перед Node повторно строит environment через `env -i` из
+  exact `PATH/LANG/LC_ALL/TZ` и двух bootstrap/lock ключей. Одного Bash
+  `unset` недостаточно: Bash заново экспортирует `PWD`, `SHLVL` и `_`;
 - проверяет root ownership, modes и SHA-256 установленного engine;
 - сначала удерживает canonical production-control `install.lock`, затем единый
   root-only orchestrator lock; install lock наследуется каждым child command,

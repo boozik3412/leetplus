@@ -1,8 +1,8 @@
 # Ускорение безопасного release pipeline
 
-Статус: **7/8 backlog items implemented; первый production preflight остановлен до runtime effect, hardening находится в admission**
+Статус: **7/8 backlog items implemented; production preflight остановлен до runtime effect, bootstrap hardening находится в admission**
 
-Актуально на: **02.09.2026**
+Актуально на: **03.09.2026**
 
 ## Результат анализа
 
@@ -207,6 +207,15 @@ BIND выполняет persistent exact `mask --now` API/Web, cache прини�
 root-owned mask, slot binder повторно проверяет обе fenced units, а SMOKE
 снимает masks перед enable/start. При сбое public active slot не меняется;
 resume продолжает ту же operation с target, оставленным fenced.
+
+Exact successor из PR #121 прошёл pre/post-merge Fast и Full Admission как
+`be907cf0…`; его production-control generation установлена и повторно проверена
+root verifier. Первый `prepare` 03.09.2026 снова остановился до plan/effect:
+production Bash после очистки environment синтезировал экспортируемые `PWD`,
+`SHLVL` и `_`, тогда как engine корректно разрешает только шесть exact ключей.
+Следующий узкий successor выполняет финальный `env -i` непосредственно перед
+Node и добавляет disposable-root запуск exact installed bootstrap. Production
+runtime/nginx/DB при этом остались на `22ab6b81…`/generation 20/CURRENT189.
 
 Этот successor не включает schema, ACL, worker или security-flag effects: L2
 продолжает использовать параллельный evidence binding и отдельно подписанный

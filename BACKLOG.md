@@ -1,6 +1,6 @@
 # LeetPlus Бэклог
 
-## Ускорение безопасного production release — 01.09.2026
+## Ускорение безопасного production release — 03.09.2026
 
 Статус: `[███████░░░] 7/8` — topology twin, impact classifier, один exact
 merge-candidate admission, параллельный backup/restored-copy evidence bind и
@@ -9,6 +9,12 @@ resumable runtime rollout реализованы. Первая control-generatio
 preflight выявил пропущенную quiesce/mask границу hot-rollback target. Successor
 добавляет crash-safe `mask --now -> cache/bind -> unmask/start`; production
 runtime остаётся на предыдущем healthy SHA до нового exact admission.
+Successor PR #121 (`be907cf0…`) уже прошёл exact Fast/Full, а его control
+generation установлена и root-verified. Первый `prepare` не создал plan:
+Bash-синтезированные `PWD/SHLVL/_` были корректно отклонены engine. Узкий
+bootstrap successor теперь повторно строит exact environment через `env -i`
+прямо перед Node и проверяет installed path в disposable-root fixture;
+runtime/nginx/DB не изменялись.
 Подробный контракт и целевые метрики:
 [release-pipeline-acceleration.md](./docs/deployment/release-pipeline-acceleration.md).
 

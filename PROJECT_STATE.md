@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-## Canonical current-state guardrail (02.09.2026)
+## Canonical current-state guardrail (03.09.2026)
 
 Перед задачами по auth, landing, access scope, игровому модулю, integrations,
 workers или deployment обязательно прочитать
@@ -72,12 +72,17 @@ orchestrator выполняет exact `HYDRATE -> BIND -> SMOKE -> CUTOVER -> PO
 продолжает ту же operation после lost response и отклоняет control, slot,
 receipt или generation drift; previous slot остаётся hot rollback. Orchestrator
 включён в immutable production-control payload и проверяется в Fast/Full.
-Первая admitted control-generation `f521e201…` установлена и прошла root
-verification, но runtime rollout остановлен до plan/apply: live preflight
-обнаружил отсутствовавший переход hot-rollback target в exact
-masked/inactive состояние между cache и slot bind. Successor переносит
-`mask --now` в BIND, а `unmask` — в SMOKE; production runtime/nginx/DB остаются
-на healthy `22ab6b81…` до нового exact admission. Orchestrator не выполняет
+Successor PR #121 merge `be907cf0…` прошёл exact pre/post-merge Fast и Full
+Admission; его admitted production-control generation установлена и прошла
+root verification. Runtime rollout остановлен до plan/apply: первый live
+preflight обнаружил отсутствовавший переход hot-rollback target в exact
+masked/inactive состояние, а первый `prepare` successor 03.09.2026 был
+отклонён до создания plan, потому что Bash повторно экспортировал
+`PWD/SHLVL/_` после очистки environment. Узкий следующий successor делает
+final `env -i` перед Node и проверяет exact installed bootstrap в disposable
+root. `mask --now` остаётся в BIND, `unmask` — в SMOKE; production
+runtime/nginx/DB остаются на healthy `22ab6b81…`/generation 20/CURRENT189.
+Orchestrator не выполняет
 Prisma/SQL, ACL, auth/scope, guest flags или worker effects. Последний backlog item — измеримые
 duration/failure-phase p50/p95.
 

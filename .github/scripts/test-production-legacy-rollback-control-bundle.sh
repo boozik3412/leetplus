@@ -19,6 +19,7 @@ readonly INJECTION_ROOT='/run/leetplus-control-bundle-injection'
 readonly DESTINATION_FIXTURE='/usr/local/libexec/leetplus'
 readonly GUARD_MARKER='/run/leetplus-control-bundle-fixture.marker'
 cleanup_armed=false
+destination_parent_created=false
 
 die() {
   printf 'legacy rollback control-bundle fixture: %s\n' "$*" >&2
@@ -50,6 +51,9 @@ cleanup() {
     elif [[ -f "${DESTINATION_FIXTURE}/.ci-legacy-control-destination" ]]; then
       find -P "$DESTINATION_FIXTURE" -depth -mindepth 1 -delete
       rmdir "$DESTINATION_FIXTURE"
+    fi
+    if [[ "$destination_parent_created" == true ]]; then
+      rmdir -- "$(dirname -- "$DESTINATION_FIXTURE")" 2>/dev/null
     fi
     rm -f -- "$GUARD_MARKER"
   fi
@@ -154,6 +158,15 @@ grep -F 'control manifest is not the authority-pinned reviewed digest' \
 printf '%s\n' "$(sha256sum "$CONTROL_ROOT/CONTROL_BUNDLE_SHA256SUMS" | awk '{ print $1 }')" > "$TRUST_FILE"
 chmod 0400 "$TRUST_FILE"
 
+destination_parent="$(dirname -- "$DESTINATION_FIXTURE")"
+if [[ ! -e "$destination_parent" && ! -L "$destination_parent" ]]; then
+  install -d -o root -g root -m 0755 -- "$destination_parent"
+  destination_parent_created=true
+fi
+[[ -d "$destination_parent" && ! -L "$destination_parent" \
+  && "$(realpath -e -- "$destination_parent")" == "$destination_parent" \
+  && "$(stat -c '%U:%G:%a' -- "$destination_parent")" == 'root:root:755' ]] \
+  || die 'fixture install destination parent is not exact root-controlled'
 ln -s -- "$INJECTION_ROOT" "$DESTINATION_FIXTURE"
 if /usr/bin/bash -p "$CONTROL_ROOT/install-legacy-rollback-contour.sh" --verify-destinations-only \
   > /tmp/leetplus-control-destination-symlink.out 2>&1; then

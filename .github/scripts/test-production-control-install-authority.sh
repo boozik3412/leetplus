@@ -279,7 +279,7 @@ prepare_fixture_root "$accepted_root" "$archive"
 run_installer "$accepted_root" > "$TEST_ROOT/accepted.out"
 grep -F -x 'PRODUCTION_CONTROL_INSTALL=PASS' "$TEST_ROOT/accepted.out" >/dev/null
 grep -F -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' "$TEST_ROOT/accepted.out" >/dev/null
-grep -F -x 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=52' "$TEST_ROOT/accepted.out" >/dev/null
+grep -F -x 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=57' "$TEST_ROOT/accepted.out" >/dev/null
 grep -F -x 'PRODUCTION_CONTROL_EFFECTIVE_LANE=L1_RUNTIME' "$TEST_ROOT/accepted.out" >/dev/null
 grep -F -x "PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256=$(printf 'a%.0s' {1..64})" \
   "$TEST_ROOT/accepted.out" >/dev/null

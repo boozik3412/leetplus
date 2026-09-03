@@ -14,7 +14,7 @@
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                 |
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
-| Release acceleration | 8/8: первый five-phase production rollout завершён; V3 merged как `c955e99e…`, post-merge Fast/Full green; trusted lane duration/failure metrics реализованы в source |
+| Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
 
 ## Ускорение release pipeline без ослабления gates (02.09.2026)
 
@@ -94,6 +94,17 @@ records не содержат operation ID, SHA, paths, env, command output ил
 terminal samples возвращается `INSUFFICIENT_SAMPLE_SIZE`; первый реальный V2
 rollout помечается `LEGACY_UNCLASSIFIED` и не влияет на процентили. Отдельный
 production deploy только ради метрик не выполняется.
+
+Operational retention отделён от read-only отчёта. До `10 000` live attempt
+files оператор создаёт nonauthorizing `metrics-retention-plan`, затем отдельным
+root-only apply подтверждает тот же retain count и plan SHA-256. Apply держит
+exclusive production-control/orchestrator locks, публикует immutable raw-record
+segments до удаления live copies и допускает lost-response recovery только по
+тому же manifest. Incomplete archive блокирует metrics и runtime apply/resume;
+DB, systemd/runtime, сеть, public guest, corporate tenant и workers не
+вызываются. Archive reader ограничен `4 096` файлами, `128 MiB` и `131 072`
+записями. Terminal operation directories не удаляются; их предел `4 096`
+остаётся отдельным capacity boundary.
 
 ## Production CURRENT189 rollout (01.09.2026)
 

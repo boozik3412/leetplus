@@ -104,6 +104,15 @@ exact-head Fast `33733457026` и Full `33734441310`, post-merge Fast
 `33736086893` и Full `33736086906` завершились `SUCCESS`. Production для этого
 source/control изменения не переключался; фактический baseline остаётся
 generation 21 на `f3f119fa…` с hot rollback `22ab6b81…`.
+REL-ACC-009 добавляет явный root-only retention для attempt metrics: read-only
+plan под shared install lock и exact-digest apply под exclusive
+`install.lock -> orchestrator.lock`. Immutable archive segments сохраняют
+исходные обезличенные records до удаления live copies; incomplete archive
+допускает только replay того же plan и блокирует обычные metrics/rollout.
+Reader bounded по files/bytes/attempt count и объединяет live+archive без
+дублей. DB, runtime, systemd, сеть и три пользовательских security-контура не
+затрагиваются; production baseline выше не менялся. Operation-history cap
+`4 096` остаётся отдельной будущей receipt-chain retention задачей.
 
 Ниже сохранена история fail-closed restored-copy итераций, которые предшествовали
 успешному rehearsal и production rollout 01.09.2026.

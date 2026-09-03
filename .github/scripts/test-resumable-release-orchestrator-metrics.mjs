@@ -1,7 +1,16 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -263,6 +272,22 @@ async function captureMain(argv) {
   }
 }
 
+function metricAttempt(index, overrides = {}) {
+  return {
+    schemaVersion: 1,
+    contractVersion: CONTRACT_VERSION,
+    recordType: "ROLLOUT_ATTEMPT_METRIC",
+    attemptMode: index % 2 === 0 ? "apply" : "resume",
+    attemptStartedAt: iso(index * 1000),
+    attemptFinishedAt: iso(index * 1000 + 100),
+    effectiveLane: index % 2 === 0 ? "L1_RUNTIME" : "L2_SCHEMA_SECURITY",
+    outcome: "BLOCKED",
+    failurePhase: index % 2 === 0 ? "HYDRATE" : "SMOKE",
+    reasonClass: "CHILD_COMMAND",
+    ...overrides,
+  };
+}
+
 test("metrics aggregates only trusted L1/L2 records and fails closed on malformed samples", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "leetplus-orchestrator-metrics-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -395,4 +420,300 @@ test("metrics aggregates only trusted L1/L2 records and fails closed on malforme
   ]);
   assert.equal(malformed.status, 1);
   assert.match(malformed.stderr, /ORCHESTRATOR_METRIC_ATTEMPT_INVENTORY_INVALID/u);
+});
+
+test("metrics retention requires an exact plan, preserves history, and replays cleanup", async (t) => {
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "leetplus-orchestrator-metrics-retention-"),
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const receiptRoot = path.join(root, "var/lib/leetplus/deploy-receipts");
+  const stateRoot = path.join(receiptRoot, "release-orchestrator");
+  const metricsRoot = path.join(receiptRoot, "release-orchestrator-metrics");
+  const archiveRoot = path.join(
+    receiptRoot,
+    "release-orchestrator-metrics-archive",
+  );
+  await mkdir(stateRoot, { recursive: true });
+  await mkdir(metricsRoot, { recursive: true });
+  const names = [];
+  for (let index = 0; index < 6; index += 1) {
+    const name = `60000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}.json`;
+    names.push(name);
+    await writeCanonical(path.join(metricsRoot, name), metricAttempt(index));
+  }
+
+  const planResult = await captureMain([
+    "metrics-retention-plan",
+    "--retain-attempt-count",
+    "2",
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(planResult.status, 0);
+  assert.equal((await readdir(receiptRoot)).includes(path.basename(archiveRoot)), false);
+  const prepared = JSON.parse(planResult.stdout);
+  assert.equal(
+    prepared.decision,
+    "METRIC_RETENTION_PREPARED_NOT_EFFECT_AUTHORIZATION",
+  );
+  assert.equal(prepared.plan.selectedAttemptCount, 4);
+  assert.equal(prepared.plan.retainedAttemptCount, 2);
+  assert.equal(prepared.plan.segments.length, 1);
+
+  const rejected = await captureMain([
+    "metrics-retention-apply",
+    "--retain-attempt-count",
+    "2",
+    "--plan-sha256",
+    "f".repeat(64),
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /ORCHESTRATOR_METRIC_RETENTION_PLAN_DRIFT/u);
+  assert.equal((await readdir(metricsRoot)).length, 6);
+  assert.equal((await readdir(receiptRoot)).includes(path.basename(archiveRoot)), false);
+
+  const applied = await captureMain([
+    "metrics-retention-apply",
+    "--retain-attempt-count",
+    "2",
+    "--plan-sha256",
+    prepared.planSha256,
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(applied.status, 0);
+  const receipt = JSON.parse(applied.stdout);
+  assert.equal(receipt.decision, "METRIC_RETENTION_APPLIED");
+  assert.equal(receipt.archivedAttemptCount, 4);
+  assert.deepEqual((await readdir(metricsRoot)).sort(), names.slice(4));
+  const archiveNames = (await readdir(archiveRoot)).sort();
+  assert.equal(archiveNames.length, 3);
+  assert.ok(archiveNames.includes(prepared.planSha256 + ".manifest.json"));
+  assert.ok(archiveNames.includes(prepared.planSha256 + ".0001.segment.json"));
+  assert.ok(archiveNames.includes(prepared.planSha256 + ".receipt.json"));
+
+  const reportResult = await captureMain([
+    "metrics",
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(reportResult.status, 0);
+  const report = JSON.parse(reportResult.stdout);
+  assert.equal(report.lanes.L1_RUNTIME.rolloutAttemptCount, 3);
+  assert.equal(report.lanes.L2_SCHEMA_SECURITY.rolloutAttemptCount, 3);
+  assert.equal(report.lanes.L1_RUNTIME.failurePhaseHistogram.HYDRATE, 3);
+  assert.equal(report.lanes.L2_SCHEMA_SECURITY.failurePhaseHistogram.SMOKE, 3);
+
+  const replay = await captureMain([
+    "metrics-retention-apply",
+    "--retain-attempt-count",
+    "2",
+    "--plan-sha256",
+    prepared.planSha256,
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(replay.status, 0);
+  assert.equal(JSON.parse(replay.stdout).decision, "METRIC_RETENTION_APPLIED");
+  assert.deepEqual((await readdir(metricsRoot)).sort(), names.slice(4));
+
+  const segmentPath = path.join(
+    archiveRoot,
+    prepared.planSha256 + ".0001.segment.json",
+  );
+  const segment = JSON.parse(await readFile(segmentPath, "utf8"));
+  await unlink(path.join(archiveRoot, prepared.planSha256 + ".receipt.json"));
+  await writeCanonical(
+    path.join(metricsRoot, segment.sourceEntries[0].fileName),
+    segment.sourceEntries[0].metric,
+  );
+  const incompleteMetrics = await captureMain([
+    "metrics",
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(incompleteMetrics.status, 1);
+  assert.match(
+    incompleteMetrics.stderr,
+    /ORCHESTRATOR_METRIC_ARCHIVE_INCOMPLETE/u,
+  );
+  const incompletePlan = await captureMain([
+    "metrics-retention-plan",
+    "--retain-attempt-count",
+    "2",
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(incompletePlan.status, 1);
+  assert.match(
+    incompletePlan.stderr,
+    /ORCHESTRATOR_METRIC_ARCHIVE_INCOMPLETE/u,
+  );
+  const newAttemptName = "90000000-0000-4000-8000-000000000001.json";
+  await writeCanonical(path.join(metricsRoot, newAttemptName), metricAttempt(9));
+  const replayWithNewAttempt = await captureMain([
+    "metrics-retention-apply",
+    "--retain-attempt-count",
+    "2",
+    "--plan-sha256",
+    prepared.planSha256,
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(replayWithNewAttempt.status, 1);
+  assert.match(
+    replayWithNewAttempt.stderr,
+    /ORCHESTRATOR_METRIC_RETENTION_REPLAY_LIVE_DRIFT/u,
+  );
+  await unlink(path.join(metricsRoot, newAttemptName));
+  const recovered = await captureMain([
+    "metrics-retention-apply",
+    "--retain-attempt-count",
+    "2",
+    "--plan-sha256",
+    prepared.planSha256,
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(recovered.status, 0);
+  assert.equal(
+    (await readdir(metricsRoot)).includes(segment.sourceEntries[0].fileName),
+    false,
+  );
+  assert.equal(
+    (await readdir(archiveRoot)).includes(prepared.planSha256 + ".receipt.json"),
+    true,
+  );
+
+  segment.sourceEntries[0].metric.reasonClass = "PRECHECK";
+  await chmod(segmentPath, 0o600);
+  await writeCanonical(segmentPath, segment);
+  const tampered = await captureMain([
+    "metrics",
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(tampered.status, 1);
+  assert.match(
+    tampered.stderr,
+    /ORCHESTRATOR_METRIC_ARCHIVE_SEGMENT_INVALID/u,
+  );
+});
+
+test("metrics retention is a no-op below the explicit retain count", async (t) => {
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "leetplus-orchestrator-metrics-retention-noop-"),
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const receiptRoot = path.join(root, "var/lib/leetplus/deploy-receipts");
+  await mkdir(path.join(receiptRoot, "release-orchestrator"), { recursive: true });
+  const planResult = await captureMain([
+    "metrics-retention-plan",
+    "--retain-attempt-count",
+    "10",
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(planResult.status, 0);
+  const prepared = JSON.parse(planResult.stdout);
+  assert.equal(prepared.decision, "METRIC_RETENTION_NOT_REQUIRED");
+  const applied = await captureMain([
+    "metrics-retention-apply",
+    "--retain-attempt-count",
+    "10",
+    "--plan-sha256",
+    prepared.planSha256,
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(applied.status, 0);
+  assert.equal(JSON.parse(applied.stdout).decision, "METRIC_RETENTION_NOT_REQUIRED");
+  assert.equal(
+    (await readdir(receiptRoot)).includes("release-orchestrator-metrics-archive"),
+    false,
+  );
+});
+
+test("metrics retention blocks source drift and unresolved rollouts before effects", async (t) => {
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "leetplus-orchestrator-metrics-retention-drift-"),
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const receiptRoot = path.join(root, "var/lib/leetplus/deploy-receipts");
+  const stateRoot = path.join(receiptRoot, "release-orchestrator");
+  const metricsRoot = path.join(receiptRoot, "release-orchestrator-metrics");
+  await mkdir(stateRoot, { recursive: true });
+  await mkdir(metricsRoot, { recursive: true });
+  const names = [];
+  for (let index = 0; index < 3; index += 1) {
+    const name = `70000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}.json`;
+    names.push(name);
+    await writeCanonical(path.join(metricsRoot, name), metricAttempt(index));
+  }
+  const planResult = await captureMain([
+    "metrics-retention-plan",
+    "--retain-attempt-count",
+    "1",
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(planResult.status, 0);
+  const prepared = JSON.parse(planResult.stdout);
+  await writeCanonical(
+    path.join(metricsRoot, names[0]),
+    metricAttempt(0, { attemptFinishedAt: iso(999) }),
+  );
+  const drifted = await captureMain([
+    "metrics-retention-apply",
+    "--retain-attempt-count",
+    "1",
+    "--plan-sha256",
+    prepared.planSha256,
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(drifted.status, 1);
+  assert.match(drifted.stderr, /ORCHESTRATOR_METRIC_RETENTION_PLAN_DRIFT/u);
+  assert.equal((await readdir(metricsRoot)).length, 3);
+  assert.equal(
+    (await readdir(receiptRoot)).includes("release-orchestrator-metrics-archive"),
+    false,
+  );
+
+  await writeUnresolvedOperation(
+    root,
+    "80000000-0000-4000-8000-000000000001",
+    "L1_RUNTIME",
+  );
+  const unresolved = await captureMain([
+    "metrics-retention-plan",
+    "--retain-attempt-count",
+    "1",
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(unresolved.status, 1);
+  assert.match(
+    unresolved.stderr,
+    /ORCHESTRATOR_METRIC_RETENTION_OPERATION_UNRESOLVED/u,
+  );
+  assert.equal((await readdir(metricsRoot)).length, 3);
 });

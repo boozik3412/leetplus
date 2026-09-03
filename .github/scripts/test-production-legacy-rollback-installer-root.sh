@@ -856,13 +856,15 @@ install -d -o root -g root -m 0700 /run/leetplus-production-control
 install -o root -g root -m 0600 /dev/null \
   /run/leetplus-production-control/install.lock
 
-# The metrics path is a filesystem-only read. It may take the shared install
-# lock, but it must not create either the rollout lock or the metrics directory.
+# The metrics and retention-plan paths are filesystem-only reads. They may take
+# the shared install lock, but must not create the rollout lock, metrics, or
+# archive directories.
 install -d -o root -g root -m 0700 \
   /var/lib/leetplus/deploy-receipts \
   /var/lib/leetplus/deploy-receipts/release-orchestrator
 test ! -e /var/lib/leetplus/deploy-receipts/release-orchestrator/orchestrator.lock
 test ! -e /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics
+test ! -e /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics-archive
 /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator metrics \
   > /run/fixture-orchestrator-production-metrics.out
 grep -F '"decision":"METRICS_READ_ONLY"' \
@@ -872,6 +874,18 @@ test ! -e /var/lib/leetplus/deploy-receipts/release-orchestrator/orchestrator.lo
   || die 'production orchestrator metrics created the rollout lock'
 test ! -e /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics \
   || die 'production orchestrator metrics created the attempt-record directory'
+/usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  metrics-retention-plan --retain-attempt-count 4096 \
+  > /run/fixture-orchestrator-production-metrics-retention-plan.out
+grep -F '"decision":"METRIC_RETENTION_NOT_REQUIRED"' \
+  /run/fixture-orchestrator-production-metrics-retention-plan.out >/dev/null \
+  || die 'production metrics retention plan did not emit its exact no-op decision'
+test ! -e /var/lib/leetplus/deploy-receipts/release-orchestrator/orchestrator.lock \
+  || die 'production metrics retention plan created the rollout lock'
+test ! -e /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics \
+  || die 'production metrics retention plan created the attempt-record directory'
+test ! -e /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics-archive \
+  || die 'production metrics retention plan created the archive directory'
 
 exec 7<> /run/leetplus-production-control/install.lock
 flock -n 7 || die 'fixture could not acquire the exclusive production-control lock'
@@ -882,6 +896,172 @@ fi
 grep -F 'production-control install or rollout operation is active' \
   /run/fixture-orchestrator-production-metrics-locked.out >/dev/null \
   || die 'production orchestrator metrics lock rejection was not exact'
+if /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  metrics-retention-plan --retain-attempt-count 4096 \
+  > /run/fixture-orchestrator-production-metrics-retention-plan-locked.out 2>&1; then
+  die 'production metrics retention plan ignored an exclusive install lock'
+fi
+grep -F 'production-control install or rollout operation is active' \
+  /run/fixture-orchestrator-production-metrics-retention-plan-locked.out >/dev/null \
+  || die 'production metrics retention plan lock rejection was not exact'
+flock -u 7
+exec 7>&-
+
+exec 7<> /run/leetplus-production-control/install.lock
+flock -sn 7 || die 'fixture could not acquire the shared production-control lock'
+if /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  metrics-retention-apply --retain-attempt-count 4096 \
+  --plan-sha256 0000000000000000000000000000000000000000000000000000000000000000 \
+  > /run/fixture-orchestrator-production-metrics-retention-apply-locked.out 2>&1; then
+  die 'production metrics retention apply ignored a shared install lock'
+fi
+grep -F 'another production-control install or rollout operation is active' \
+  /run/fixture-orchestrator-production-metrics-retention-apply-locked.out >/dev/null \
+  || die 'production metrics retention apply did not require the exclusive install lock'
+flock -u 7
+exec 7>&-
+
+install -d -o root -g root -m 0700 \
+  /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics
+/usr/bin/node <<'NODE'
+const fs = require('node:fs');
+const root = '/var/lib/leetplus/deploy-receipts/release-orchestrator-metrics';
+for (let index = 0; index < 3; index += 1) {
+  const record = {
+    schemaVersion: 1,
+    contractVersion: 'LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V3',
+    recordType: 'ROLLOUT_ATTEMPT_METRIC',
+    attemptMode: index % 2 === 0 ? 'apply' : 'resume',
+    attemptStartedAt: `2026-09-03T00:00:0${index}.000Z`,
+    attemptFinishedAt: `2026-09-03T00:00:0${index}.100Z`,
+    effectiveLane: 'L1_RUNTIME',
+    outcome: 'BLOCKED',
+    failurePhase: 'HYDRATE',
+    reasonClass: 'CHILD_COMMAND',
+  };
+  const name = `a0000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}.json`;
+  fs.writeFileSync(`${root}/${name}`, JSON.stringify(record, null, 2) + '\n', {
+    flag: 'wx',
+    mode: 0o400,
+  });
+}
+NODE
+chown root:root /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics/*.json
+chmod 0400 /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics/*.json
+/usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator metrics \
+  > /run/fixture-orchestrator-production-metrics-before-retention.out
+grep -F '"rolloutAttemptCount":3' \
+  /run/fixture-orchestrator-production-metrics-before-retention.out >/dev/null \
+  || die 'production metrics fixture did not observe all live attempts'
+/usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  metrics-retention-plan --retain-attempt-count 1 \
+  > /run/fixture-orchestrator-production-metrics-retention-effect-plan.out
+retention_plan_sha256="$(/usr/bin/node -e \
+  "const fs=require('node:fs');const value=JSON.parse(fs.readFileSync('/run/fixture-orchestrator-production-metrics-retention-effect-plan.out','utf8'));process.stdout.write(value.planSha256)")"
+[[ "$retention_plan_sha256" =~ ^[0-9a-f]{64}$ ]] \
+  || die 'production metrics retention plan digest is invalid'
+/usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  metrics-retention-apply --retain-attempt-count 1 \
+  --plan-sha256 "$retention_plan_sha256" \
+  > /run/fixture-orchestrator-production-metrics-retention-apply.out
+grep -F '"decision":"METRIC_RETENTION_APPLIED"' \
+  /run/fixture-orchestrator-production-metrics-retention-apply.out >/dev/null \
+  || die 'production metrics retention apply did not emit its terminal receipt'
+mapfile -t retained_metric_files < <(find \
+  /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics \
+  -maxdepth 1 -type f -name '*.json' -print)
+((${#retained_metric_files[@]} == 1)) \
+  || die 'production metrics retention did not preserve the exact live window'
+[[ -f /var/lib/leetplus/deploy-receipts/release-orchestrator/orchestrator.lock \
+  && "$(stat -c '%U:%G:%a:%h' \
+    /var/lib/leetplus/deploy-receipts/release-orchestrator/orchestrator.lock)" == 'root:root:600:1' ]] \
+  || die 'production metrics retention apply did not use the exact rollout lock'
+archive_root=/var/lib/leetplus/deploy-receipts/release-orchestrator-metrics-archive
+[[ -d "$archive_root" && "$(stat -c '%U:%G:%a' "$archive_root")" == 'root:root:700' ]] \
+  || die 'production metrics retention archive root identity is unsafe'
+mapfile -t archived_metric_files < <(find \
+  "$archive_root" -maxdepth 1 -type f -name '*.json' -print)
+((${#archived_metric_files[@]} == 3)) \
+  || die 'production metrics retention archive file set is incomplete'
+while IFS= read -r archive_file; do
+  [[ "$(stat -c '%U:%G:%a:%h' "$archive_file")" == 'root:root:400:1' ]] \
+    || die 'production metrics retention archive record identity is unsafe'
+done < <(find "$archive_root" -maxdepth 1 -type f -name '*.json' -print)
+/usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator metrics \
+  > /run/fixture-orchestrator-production-metrics-after-retention.out
+grep -F '"rolloutAttemptCount":3' \
+  /run/fixture-orchestrator-production-metrics-after-retention.out >/dev/null \
+  || die 'production metrics history changed after retention'
+
+# Recreate one exact planned source and remove only the terminal receipt to
+# model a lost response after archive publication/deletion. The installed
+# root launcher must replay the exact plan, remove the duplicate source, and
+# recreate the immutable receipt without changing aggregate history.
+mapfile -t retention_segment_files < <(find \
+  "$archive_root" -maxdepth 1 -type f -name '*.segment.json' -print)
+mapfile -t retention_receipt_files < <(find \
+  "$archive_root" -maxdepth 1 -type f -name '*.receipt.json' -print)
+((${#retention_segment_files[@]} == 1 && ${#retention_receipt_files[@]} == 1)) \
+  || die 'production metrics retention recovery fixture is ambiguous'
+/usr/bin/node - \
+  "${retention_segment_files[0]}" \
+  /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const [, , segmentPath, liveRoot] = process.argv;
+const segment = JSON.parse(fs.readFileSync(segmentPath, 'utf8'));
+const source = segment.sourceEntries[0];
+fs.writeFileSync(
+  path.join(liveRoot, source.fileName),
+  JSON.stringify(source.metric, null, 2) + '\n',
+  { flag: 'wx', mode: 0o400 },
+);
+NODE
+chown root:root /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics/*.json
+chmod 0400 /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics/*.json
+rm -- "${retention_receipt_files[0]}"
+/usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  metrics-retention-apply --retain-attempt-count 1 \
+  --plan-sha256 "$retention_plan_sha256" \
+  > /run/fixture-orchestrator-production-metrics-retention-recovery.out
+grep -F '"decision":"METRIC_RETENTION_APPLIED"' \
+  /run/fixture-orchestrator-production-metrics-retention-recovery.out >/dev/null \
+  || die 'production metrics retention recovery did not recreate its receipt'
+mapfile -t retained_metric_files < <(find \
+  /var/lib/leetplus/deploy-receipts/release-orchestrator-metrics \
+  -maxdepth 1 -type f -name '*.json' -print)
+((${#retained_metric_files[@]} == 1)) \
+  || die 'production metrics retention recovery left a planned duplicate live'
+mapfile -t archived_metric_files < <(find \
+  "$archive_root" -maxdepth 1 -type f -name '*.json' -print)
+((${#archived_metric_files[@]} == 3)) \
+  || die 'production metrics retention recovery archive is incomplete'
+while IFS= read -r archive_file; do
+  [[ "$(stat -c '%U:%G:%a:%h' "$archive_file")" == 'root:root:400:1' ]] \
+    || die 'production metrics retention recovery changed archive identity'
+done < <(find "$archive_root" -maxdepth 1 -type f -name '*.json' -print)
+/usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator metrics \
+  > /run/fixture-orchestrator-production-metrics-after-recovery.out
+grep -F '"rolloutAttemptCount":3' \
+  /run/fixture-orchestrator-production-metrics-after-recovery.out >/dev/null \
+  || die 'production metrics history changed after retention recovery'
+
+/usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  metrics-retention-plan --retain-attempt-count 1 \
+  > /run/fixture-orchestrator-production-metrics-retention-noop-plan.out
+retention_noop_sha256="$(/usr/bin/node -e \
+  "const fs=require('node:fs');const value=JSON.parse(fs.readFileSync('/run/fixture-orchestrator-production-metrics-retention-noop-plan.out','utf8'));process.stdout.write(value.planSha256)")"
+exec 7<> /var/lib/leetplus/deploy-receipts/release-orchestrator/orchestrator.lock
+flock -n 7 || die 'fixture could not acquire the exclusive orchestrator lock'
+if /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  metrics-retention-apply --retain-attempt-count 1 \
+  --plan-sha256 "$retention_noop_sha256" \
+  > /run/fixture-orchestrator-production-metrics-retention-operation-locked.out 2>&1; then
+  die 'production metrics retention apply ignored the orchestrator lock'
+fi
+grep -F 'another release orchestration operation is active' \
+  /run/fixture-orchestrator-production-metrics-retention-operation-locked.out >/dev/null \
+  || die 'production metrics retention apply did not require the orchestrator lock'
 flock -u 7
 exec 7>&-
 

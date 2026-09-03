@@ -102,6 +102,12 @@ live evidence, а короткоживущий binding сам по себе не
 blue/green authority, но связывает их защищённой цепочкой phase receipts и
 возобновляет exact operation после lost response. Orchestrator не выполняет
 schema/ACL/worker effects и не заменяет L2 signed controller.
+Тот же installed authority предоставляет только ручной двухфазный retention
+обезличенных attempt metrics: read-only exact plan и root-only digest-bound
+apply под exclusive install/orchestrator locks. Archive остаётся локальным
+root-owned evidence; runtime, DB, network и user security contours не
+затрагиваются. Наличие source bytes не разрешает установку или запуск без
+admitted production-control generation и отдельного GO.
 
 Legacy `git pull → build → restart` не является допустимым заменителем этой
 процедуры. Замена production timer/unit, перенос sensitive backup residue и

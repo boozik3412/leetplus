@@ -8,6 +8,7 @@ type SyncPeriod = "today" | "last7" | "last30" | "custom";
 type SyncResult = {
   sources: number;
   failedSources: number;
+  partialSources: number;
   stores: number;
   products: number;
   inventorySnapshots: number;
@@ -88,7 +89,7 @@ type SourceSyncHealth = {
   id: string;
   domain: string;
   name: string;
-  status: "SUCCESS" | "FAILED" | "IDLE";
+  status: "SUCCESS" | "PARTIAL" | "FAILED" | "IDLE";
   lastSyncedAt: string | null;
   errorMessage: string | null;
   latestJob: LangameSyncJob | null;
@@ -456,7 +457,8 @@ const endpointProfileOptions: EndpointProfileOption[] = [
     group: "assortment",
     paramMode: "page",
     requiredParams: [],
-    description: "Приходы для no-sales, новинок, supplier scorecard и движения товаров.",
+    description:
+      "Приходы для no-sales, новинок, supplier scorecard и движения товаров.",
   },
   {
     key: "clubs",
@@ -682,7 +684,8 @@ const langameEndpointMap: EndpointMapItem[] = [
     path: "/public_api/guests/balance",
     group: "guests",
     title: "Баланс гостя",
-    description: "Деньги на балансе для CRM, рисков и будущего гостевого логина.",
+    description:
+      "Деньги на балансе для CRM, рисков и будущего гостевого логина.",
     usageStatus: "IN_USE",
     freshnessSource: "guests",
   },
@@ -709,7 +712,8 @@ const langameEndpointMap: EndpointMapItem[] = [
     path: "/public_api/guests/logs",
     group: "guests",
     title: "Логи гостей",
-    description: "Нужна проверка типов событий для миссий, квестов и anti-fraud.",
+    description:
+      "Нужна проверка типов событий для миссий, квестов и anti-fraud.",
     usageStatus: "NEEDS_PARAMETERS",
     freshnessSource: "guests",
   },
@@ -727,7 +731,8 @@ const langameEndpointMap: EndpointMapItem[] = [
     path: "/public_api/guests/search",
     group: "guests",
     title: "Точечный поиск гостя",
-    description: "Диагностика для ручного поиска, связки телефона и messenger-профиля.",
+    description:
+      "Диагностика для ручного поиска, связки телефона и messenger-профиля.",
     usageStatus: "NEEDS_PARAMETERS",
     freshnessSource: "planned",
   },
@@ -871,7 +876,8 @@ const langameEndpointMap: EndpointMapItem[] = [
     path: "/public_api/routes",
     group: "service",
     title: "Карта маршрутов",
-    description: "Диагностика доступности Langame endpoints без раскрытия API key.",
+    description:
+      "Диагностика доступности Langame endpoints без раскрытия API key.",
     usageStatus: "IN_USE",
     freshnessSource: "routes",
   },
@@ -904,7 +910,11 @@ const langameEndpointMap: EndpointMapItem[] = [
   },
 ];
 
-const syncPeriodOptions: { value: SyncPeriod; label: string; caption: string }[] = [
+const syncPeriodOptions: {
+  value: SyncPeriod;
+  label: string;
+  caption: string;
+}[] = [
   {
     value: "today",
     label: "Сегодня",
@@ -996,14 +1006,16 @@ export function LangameSyncPanel({
     useState<RouteDiagnosticsResult | null>(null);
   const [routeDiagnosticsStatus, setRouteDiagnosticsStatus] =
     useState<RouteDiagnosticsStatus>("idle");
-  const [routeDiagnosticsError, setRouteDiagnosticsError] =
-    useState<string | null>(null);
+  const [routeDiagnosticsError, setRouteDiagnosticsError] = useState<
+    string | null
+  >(null);
   const [serviceDiagnostics, setServiceDiagnostics] =
     useState<ServiceDiagnosticsResult | null>(null);
   const [serviceDiagnosticsStatus, setServiceDiagnosticsStatus] =
     useState<ServiceDiagnosticsStatus>("idle");
-  const [serviceDiagnosticsError, setServiceDiagnosticsError] =
-    useState<string | null>(null);
+  const [serviceDiagnosticsError, setServiceDiagnosticsError] = useState<
+    string | null
+  >(null);
   const [guestSearchQuery, setGuestSearchQuery] = useState("");
   const [guestSearchField, setGuestSearchField] =
     useState<GuestSearchField>("auto");
@@ -1018,25 +1030,29 @@ export function LangameSyncPanel({
   const [endpointProfileClubId, setEndpointProfileClubId] = useState("");
   const [endpointProfileGuestId, setEndpointProfileGuestId] = useState("");
   const [endpointProfilePage, setEndpointProfilePage] = useState("1");
-  const [endpointProfilePageLimit, setEndpointProfilePageLimit] = useState("20");
+  const [endpointProfilePageLimit, setEndpointProfilePageLimit] =
+    useState("20");
   const [endpointProfileResult, setEndpointProfileResult] =
     useState<EndpointProfileDiagnosticsResult | null>(null);
   const [endpointProfileStatus, setEndpointProfileStatus] =
     useState<EndpointProfileStatus>("idle");
-  const [endpointProfileError, setEndpointProfileError] =
-    useState<string | null>(null);
+  const [endpointProfileError, setEndpointProfileError] = useState<
+    string | null
+  >(null);
   const [endpointSnapshotResult, setEndpointSnapshotResult] =
     useState<EndpointSnapshotResult | null>(null);
   const [endpointSnapshotStatus, setEndpointSnapshotStatus] =
     useState<EndpointSnapshotStatus>("idle");
-  const [endpointSnapshotError, setEndpointSnapshotError] =
-    useState<string | null>(null);
+  const [endpointSnapshotError, setEndpointSnapshotError] = useState<
+    string | null
+  >(null);
   const [businessSnapshots, setBusinessSnapshots] =
     useState<BusinessSnapshotStatusResult | null>(null);
   const [businessSnapshotStatus, setBusinessSnapshotStatus] =
     useState<BusinessSnapshotStatus>("idle");
-  const [businessSnapshotError, setBusinessSnapshotError] =
-    useState<string | null>(null);
+  const [businessSnapshotError, setBusinessSnapshotError] = useState<
+    string | null
+  >(null);
   const [businessSnapshotRunResult, setBusinessSnapshotRunResult] =
     useState<BusinessSnapshotRunResult | null>(null);
 
@@ -1118,9 +1134,7 @@ export function LangameSyncPanel({
       if (!assortment) {
         setAssortmentStatus("error");
       } else {
-        setAssortmentStatus(
-          assortment.failedSources > 0 ? "error" : "success",
-        );
+        setAssortmentStatus(assortment.failedSources > 0 ? "error" : "success");
       }
 
       try {
@@ -1165,7 +1179,9 @@ export function LangameSyncPanel({
       await refreshBusinessSnapshotStatus();
       await refreshSettings();
     } catch (syncError) {
-      setError(syncError instanceof Error ? syncError.message : "API недоступен");
+      setError(
+        syncError instanceof Error ? syncError.message : "API недоступен",
+      );
       setAssortmentStatus("error");
       setGuestStatus("error");
     } finally {
@@ -1291,7 +1307,9 @@ export function LangameSyncPanel({
     }
   }
 
-  async function checkEndpointProfileDiagnostics(event: FormEvent<HTMLFormElement>) {
+  async function checkEndpointProfileDiagnostics(
+    event: FormEvent<HTMLFormElement>,
+  ) {
     event.preventDefault();
 
     const selectedEndpoint = endpointProfileOptions.find(
@@ -1507,10 +1525,7 @@ export function LangameSyncPanel({
             type="button"
             onClick={syncAllLangameData}
             disabled={
-              !settings.hasApiKey ||
-              !syncDateFrom ||
-              !syncDateTo ||
-              isSyncing
+              !settings.hasApiKey || !syncDateFrom || !syncDateTo || isSyncing
             }
             className="rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
           >
@@ -1532,7 +1547,9 @@ export function LangameSyncPanel({
                     : "border-zinc-200 bg-zinc-50 text-zinc-900 hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-zinc-700",
                 ].join(" ")}
               >
-                <span className="block text-sm font-semibold">{option.label}</span>
+                <span className="block text-sm font-semibold">
+                  {option.label}
+                </span>
                 <span className="mt-1 block text-xs opacity-70">
                   {option.caption}
                 </span>
@@ -1585,8 +1602,8 @@ export function LangameSyncPanel({
             </span>
             <span className="mt-1 block leading-5 text-zinc-600 dark:text-zinc-400">
               Опционально загрузит типы событий гостя за выбранный период для
-              миссий, лутбоксов, battle pass и anti-fraud. Обычная
-              синхронизация остается легче, если флаг выключен.
+              миссий, лутбоксов, battle pass и anti-fraud. Обычная синхронизация
+              остается легче, если флаг выключен.
               {initialIncludeGuestLogs
                 ? " Флаг включен по ссылке из чек-листа геймификации."
                 : ""}
@@ -1765,14 +1782,24 @@ function SyncResultSummary({ result }: { result: CombinedSyncResult }) {
     <div className="mt-5 rounded-lg border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
       <h3 className="text-sm font-semibold">Результат синхронизации</h3>
       {result.assortment ? (
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-9">
           <Metric label="Источников" value={result.assortment.sources} />
           <Metric label="Ошибок" value={result.assortment.failedSources} />
+          <Metric
+            label="Предупреждений аудита"
+            value={result.assortment.partialSources}
+          />
           <Metric label="Клубов" value={result.assortment.stores} />
           <Metric label="Товаров" value={result.assortment.products} />
-          <Metric label="Остатков" value={result.assortment.inventorySnapshots} />
+          <Metric
+            label="Остатков"
+            value={result.assortment.inventorySnapshots}
+          />
           <Metric label="Продаж" value={result.assortment.salesFacts} />
-          <Metric label="Выручка клубов" value={result.assortment.clubRevenueFacts} />
+          <Metric
+            label="Выручка клубов"
+            value={result.assortment.clubRevenueFacts}
+          />
           <Metric label="Расхождений" value={result.assortment.discrepancies} />
         </div>
       ) : null}
@@ -1802,12 +1829,19 @@ function SyncHealthSummary({
   const activeSourcesCount = settings.sources.filter(
     (source) => source.isActive,
   ).length;
-  const failedSources = sourceRows.filter((source) => source.status === "FAILED");
+  const failedSources = sourceRows.filter(
+    (source) => source.status === "FAILED",
+  );
+  const partialSources = sourceRows.filter(
+    (source) => source.status === "PARTIAL",
+  );
   const sourcesWithoutSuccess = sourceRows.filter(
     (source) => !source.lastSyncedAt && source.status !== "FAILED",
   );
   const latestSuccess = settings.latestSuccessfulSyncJob;
-  const latestSuccessTime = latestSuccess ? getSyncJobTime(latestSuccess) : null;
+  const latestSuccessTime = latestSuccess
+    ? getSyncJobTime(latestSuccess)
+    : null;
   const guestRun = latestGuestStatus?.latestRun ?? null;
   const guestStatus = guestRun?.status ?? latestGuestStatus?.status ?? "IDLE";
   const guestEndpointErrors = Object.entries(
@@ -1843,7 +1877,9 @@ function SyncHealthSummary({
         <SyncHealthMetric
           detail={latestSuccess?.domain ?? "успешных запусков пока нет"}
           label="Последний успех"
-          value={latestSuccessTime ? formatDateTime(latestSuccessTime) : "не было"}
+          value={
+            latestSuccessTime ? formatDateTime(latestSuccessTime) : "не было"
+          }
         />
         <SyncHealthMetric
           detail={
@@ -1854,6 +1890,16 @@ function SyncHealthSummary({
           label="Ошибки источников"
           tone={failedSources.length > 0 ? "danger" : "neutral"}
           value={failedSources.length}
+        />
+        <SyncHealthMetric
+          detail={
+            partialSources.length > 0
+              ? `${partialSources.map((source) => source.domain).join(", ")}: данные сохранены, файл расхождений нужно повторить`
+              : "Файлы аудита расхождений доступны"
+          }
+          label="Предупреждения аудита"
+          tone={partialSources.length > 0 ? "warning" : "neutral"}
+          value={partialSources.length}
         />
         <SyncHealthMetric
           detail={
@@ -1911,7 +1957,14 @@ function SyncHealthSummary({
                     </span>
                   </div>
                   {source.errorMessage ? (
-                    <p className="mt-2 break-words text-xs text-red-700 dark:text-red-300">
+                    <p
+                      className={[
+                        "mt-2 break-words text-xs",
+                        source.status === "PARTIAL"
+                          ? "text-amber-700 dark:text-amber-300"
+                          : "text-red-700 dark:text-red-300",
+                      ].join(" ")}
+                    >
                       {compactEndpointError(source.errorMessage)}
                     </p>
                   ) : null}
@@ -1948,7 +2001,9 @@ function SyncHealthSummary({
                   <p className="mt-1 font-medium text-zinc-950 dark:text-zinc-50">
                     {formatDateTime(guestRun.startedAt)}
                   </p>
-                  <p className="mt-1 text-xs text-zinc-500">{guestRun.domain}</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {guestRun.domain}
+                  </p>
                 </div>
                 <div className="rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
                   <p className="text-xs text-zinc-500">Endpoint-ошибки</p>
@@ -2007,8 +2062,12 @@ function BusinessSnapshotPanel({
   onRun: () => void;
 }) {
   const snapshotRows = snapshots?.snapshots ?? [];
-  const freshCount = snapshotRows.filter((item) => item.status === "FRESH").length;
-  const staleCount = snapshotRows.filter((item) => item.status === "STALE").length;
+  const freshCount = snapshotRows.filter(
+    (item) => item.status === "FRESH",
+  ).length;
+  const staleCount = snapshotRows.filter(
+    (item) => item.status === "STALE",
+  ).length;
   const problemCount = snapshotRows.filter(
     (item) => item.status === "FAILED" || item.status === "EMPTY",
   ).length;
@@ -2109,9 +2168,7 @@ function BusinessSnapshotPanel({
               <MiniSnapshotMetric
                 label="возраст"
                 value={
-                  snapshot.ageHours === null
-                    ? "нет"
-                    : `${snapshot.ageHours} ч`
+                  snapshot.ageHours === null ? "нет" : `${snapshot.ageHours} ч`
                 }
               />
               <MiniSnapshotMetric
@@ -2163,9 +2220,7 @@ function MiniSnapshotMetric({
 }) {
   return (
     <div className="rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
-      <p className="text-[11px] font-medium uppercase text-zinc-500">
-        {label}
-      </p>
+      <p className="text-[11px] font-medium uppercase text-zinc-500">{label}</p>
       <p className="mt-1 truncate text-sm font-semibold text-zinc-950 dark:text-zinc-50">
         {typeof value === "number" ? formatNumber(value) : value}
       </p>
@@ -2181,7 +2236,9 @@ function SnapshotKeyValues({
   values: Record<string, unknown>;
 }) {
   const entries = Object.entries(values)
-    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .filter(
+      ([, value]) => value !== null && value !== undefined && value !== "",
+    )
     .slice(0, 6);
 
   return (
@@ -2240,7 +2297,9 @@ function EndpointMapPanel({
   );
   const endpointsByGroup = endpointGroupOrder.map((group) => ({
     group,
-    endpoints: langameEndpointMap.filter((endpoint) => endpoint.group === group),
+    endpoints: langameEndpointMap.filter(
+      (endpoint) => endpoint.group === group,
+    ),
   }));
   const inUseCount = langameEndpointMap.filter(
     (endpoint) => endpoint.usageStatus === "IN_USE",
@@ -2349,7 +2408,9 @@ function EndpointMapPanel({
           label="Гости и операции"
           value={
             latestGuestRun
-              ? formatDateTime(latestGuestRun.finishedAt ?? latestGuestRun.startedAt)
+              ? formatDateTime(
+                  latestGuestRun.finishedAt ?? latestGuestRun.startedAt,
+                )
               : "не обновлялись"
           }
         />
@@ -2361,7 +2422,11 @@ function EndpointMapPanel({
           }
           label="Маршруты"
           tone={failedDiagnosticSources.length > 0 ? "warning" : "neutral"}
-          value={diagnostics ? formatDateTime(diagnostics.checkedAt) : "не проверялись"}
+          value={
+            diagnostics
+              ? formatDateTime(diagnostics.checkedAt)
+              : "не проверялись"
+          }
         />
       </div>
 
@@ -2403,7 +2468,7 @@ function EndpointMapPanel({
                 );
                 const profileKey = getEndpointProfileKeyForMapItem(endpoint);
                 const profileHealth = profileKey
-                  ? profileHealthByKey.get(profileKey) ?? null
+                  ? (profileHealthByKey.get(profileKey) ?? null)
                   : null;
                 const canOpenProfile = Boolean(profileKey);
                 const canOpenGuestSearch =
@@ -2437,7 +2502,11 @@ function EndpointMapPanel({
                         </p>
                       </div>
                       <div className="flex flex-wrap justify-end gap-1.5">
-                        <span className={endpointStatusBadgeClass(endpoint.usageStatus)}>
+                        <span
+                          className={endpointStatusBadgeClass(
+                            endpoint.usageStatus,
+                          )}
+                        >
                           {endpointStatusLabels[endpoint.usageStatus]}
                         </span>
                         <span className={availabilityBadgeClass(availability)}>
@@ -2449,7 +2518,8 @@ function EndpointMapPanel({
                               profileHealth.status,
                             )}
                           >
-                            профиль: {endpointProfileHealthLabel(profileHealth.status)}
+                            профиль:{" "}
+                            {endpointProfileHealthLabel(profileHealth.status)}
                           </span>
                         ) : null}
                       </div>
@@ -2541,10 +2611,9 @@ function GuestEndpointReadinessPanel({
           </p>
           <p className="mt-1 max-w-3xl text-xs leading-5 text-zinc-600 dark:text-zinc-400">
             Проверяем не только наличие маршрута в Langame, но и реальный
-            payload: строки, поля, пустые ответы и ошибки по активным источникам.
-            {problemCount > 0
-              ? ` Требуют внимания: ${problemCount}.`
-              : ""}
+            payload: строки, поля, пустые ответы и ошибки по активным
+            источникам.
+            {problemCount > 0 ? ` Требуют внимания: ${problemCount}.` : ""}
           </p>
         </div>
         <div className="grid min-w-0 gap-2 sm:grid-cols-3 lg:w-[28rem]">
@@ -2555,10 +2624,13 @@ function GuestEndpointReadinessPanel({
           />
           <SyncHealthMetric
             detail={endpointProfileHealthDetail(
-              guestSessionsHealth ?? fallbackEndpointProfileHealth("guestSessions"),
+              guestSessionsHealth ??
+                fallbackEndpointProfileHealth("guestSessions"),
             )}
             label="Сессии"
-            tone={guestSessionsHealth?.status === "ready" ? "neutral" : "warning"}
+            tone={
+              guestSessionsHealth?.status === "ready" ? "neutral" : "warning"
+            }
             value={endpointProfileHealthLabel(
               guestSessionsHealth?.status ?? "unchecked",
             )}
@@ -2620,11 +2692,14 @@ function EndpointProfileQualityOverview({
   const checkedProfiles = profiles.filter(
     (profile) => profile.status !== "unchecked",
   );
-  const readyProfiles = profiles.filter((profile) => profile.status === "ready");
-  const staleProfiles = profiles.filter((profile) => profile.status === "stale");
+  const readyProfiles = profiles.filter(
+    (profile) => profile.status === "ready",
+  );
+  const staleProfiles = profiles.filter(
+    (profile) => profile.status === "stale",
+  );
   const problemProfiles = profiles.filter(
-    (profile) =>
-      profile.status === "partial" || profile.status === "failed",
+    (profile) => profile.status === "partial" || profile.status === "failed",
   );
   const profilesByGroup = endpointGroupOrder
     .map((group) => ({
@@ -2645,8 +2720,8 @@ function EndpointProfileQualityOverview({
           </h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
             Это сохраненные результаты ручных проверок, а не живой запрос при
-            открытии страницы. Их используем как gate перед переносом endpoint
-            в snapshot-джобы и бизнес-расчеты.
+            открытии страницы. Их используем как gate перед переносом endpoint в
+            snapshot-джобы и бизнес-расчеты.
           </p>
         </div>
         <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
@@ -2690,8 +2765,12 @@ function EndpointProfileQualityOverview({
                 {endpointGroupLabels[group]}
               </h3>
               <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                {groupProfiles.filter((profile) => profile.status !== "unchecked").length}/
-                {groupProfiles.length}
+                {
+                  groupProfiles.filter(
+                    (profile) => profile.status !== "unchecked",
+                  ).length
+                }
+                /{groupProfiles.length}
               </span>
             </div>
 
@@ -2720,7 +2799,11 @@ function EndpointProfileQualityOverview({
                           {profile.endpoint.path}
                         </p>
                       </div>
-                      <span className={endpointProfileHealthBadgeClass(profile.status)}>
+                      <span
+                        className={endpointProfileHealthBadgeClass(
+                          profile.status,
+                        )}
+                      >
                         {endpointProfileHealthLabel(profile.status)}
                       </span>
                     </div>
@@ -3091,7 +3174,10 @@ function EndpointProfileDiagnosticsPanel({
                         {source.fieldKeys.length > 18 ? "..." : ""}
                       </p>
                     ) : (
-                      <p>Поля не обнаружены или endpoint вернул пустой/scalar ответ.</p>
+                      <p>
+                        Поля не обнаружены или endpoint вернул пустой/scalar
+                        ответ.
+                      </p>
                     )}
                   </div>
                 )}
@@ -3336,8 +3422,12 @@ function ServiceDiagnosticsPanel({
   onCheckDiagnostics: () => void;
 }) {
   const sources = diagnostics?.sources ?? [];
-  const successfulSources = sources.filter((source) => source.status === "SUCCESS");
-  const partialSources = sources.filter((source) => source.status === "PARTIAL");
+  const successfulSources = sources.filter(
+    (source) => source.status === "SUCCESS",
+  );
+  const partialSources = sources.filter(
+    (source) => source.status === "PARTIAL",
+  );
   const failedSources = sources.filter((source) => source.status === "FAILED");
   const endpoints = sources.flatMap((source) => source.endpoints);
   const successfulEndpoints = endpoints.filter(
@@ -3359,8 +3449,8 @@ function ServiceDiagnosticsPanel({
           </h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
             Ручная проверка сервисного окружения по активным источникам. Эти
-            данные помогают увидеть расхождения версий и модулей, но не
-            попадают в расчеты выручки, гостей, ассортимента или персонала.
+            данные помогают увидеть расхождения версий и модулей, но не попадают
+            в расчеты выручки, гостей, ассортимента или персонала.
           </p>
         </div>
         <button
@@ -3379,7 +3469,11 @@ function ServiceDiagnosticsPanel({
         <SyncHealthMetric
           detail="config, PUF и версии"
           label="Endpoints"
-          value={diagnostics ? successfulEndpoints.length + failedEndpoints.length : 5}
+          value={
+            diagnostics
+              ? successfulEndpoints.length + failedEndpoints.length
+              : 5
+          }
         />
         <SyncHealthMetric
           detail="ответили без ошибок"
@@ -3399,7 +3493,11 @@ function ServiceDiagnosticsPanel({
               : "проверка выполняется вручную"
           }
           label="Источники"
-          tone={failedSources.length > 0 || partialSources.length > 0 ? "warning" : "neutral"}
+          tone={
+            failedSources.length > 0 || partialSources.length > 0
+              ? "warning"
+              : "neutral"
+          }
           value={diagnostics ? sources.length : settings.sources.length}
         />
       </div>
@@ -3721,7 +3819,8 @@ function LatestGuestDiagnostics({
             Диагностика гостевой синхронизации
           </h2>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Последний запуск: {latestRun.domain}, {formatDateTime(latestRun.startedAt)}.
+            Последний запуск: {latestRun.domain},{" "}
+            {formatDateTime(latestRun.startedAt)}.
           </p>
         </div>
         <span
@@ -3832,7 +3931,10 @@ function PcDiagnostics({
           value={endpointErrors.length}
           details={
             endpointErrors.length > 0
-              ? endpointErrors.map(([key]) => key).slice(0, 3).join(", ")
+              ? endpointErrors
+                  .map(([key]) => key)
+                  .slice(0, 3)
+                  .join(", ")
               : "ошибок нет"
           }
           tone={endpointErrors.length > 0 ? "danger" : "neutral"}
@@ -3938,10 +4040,16 @@ function SyncHistory({ jobs }: { jobs: LangameSettings["syncJobs"] }) {
                     "rounded-full px-2.5 py-1 text-xs font-medium",
                     job.status === "SUCCESS"
                       ? "bg-emerald-50 text-emerald-700"
-                      : "bg-red-50 text-red-700",
+                      : job.status === "PARTIAL"
+                        ? "bg-amber-50 text-amber-700"
+                        : "bg-red-50 text-red-700",
                   ].join(" ")}
                 >
-                  {job.status === "SUCCESS" ? "Успешно" : "Ошибка"}
+                  {job.status === "SUCCESS"
+                    ? "Успешно"
+                    : job.status === "PARTIAL"
+                      ? "Данные сохранены, аудит не записан"
+                      : "Ошибка"}
                 </span>
               </div>
               <p className="mt-2 text-zinc-600 dark:text-zinc-400">
@@ -3960,8 +4068,8 @@ function SyncHistory({ jobs }: { jobs: LangameSettings["syncJobs"] }) {
           ))}
           {jobs.length > latestJobs.length ? (
             <p className="px-5 py-3 text-xs text-zinc-500 dark:text-zinc-400">
-              Показан последний запуск по каждому источнику. Повторные ошибки
-              по тем же доменам скрыты, чтобы история не дублировалась.
+              Показан последний запуск по каждому источнику. Повторные ошибки по
+              тем же доменам скрыты, чтобы история не дублировалась.
             </p>
           ) : null}
         </div>
@@ -4085,7 +4193,10 @@ function EndpointFreshnessCard({
       <p className="mt-1 font-semibold text-zinc-950 dark:text-zinc-50">
         {value}
       </p>
-      <p className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400" title={detail}>
+      <p
+        className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400"
+        title={detail}
+      >
         {detail}
       </p>
     </div>
@@ -4129,7 +4240,9 @@ function buildEndpointProfileHealth(
   });
 }
 
-function fallbackEndpointProfileHealth(key: EndpointProfileKey): EndpointProfileHealth {
+function fallbackEndpointProfileHealth(
+  key: EndpointProfileKey,
+): EndpointProfileHealth {
   const endpoint =
     endpointProfileOptions.find((profile) => profile.key === key) ??
     endpointProfileOptions[0];
@@ -4525,14 +4638,18 @@ function getLatestSyncJobsByDomain(jobs: LangameSettings["syncJobs"]) {
 
 function getSourceSyncHealth(settings: LangameSettings): SourceSyncHealth[] {
   const latestJobsByDomain = new Map(
-    getLatestSyncJobsByDomain(settings.syncJobs).map((job) => [job.domain, job]),
+    getLatestSyncJobsByDomain(settings.syncJobs).map((job) => [
+      job.domain,
+      job,
+    ]),
   );
 
   return settings.sources
     .filter((source) => source.isActive)
     .map((source) => {
       const latestJob = latestJobsByDomain.get(source.domain) ?? null;
-      const status = latestJob?.status ?? (source.lastSyncedAt ? "SUCCESS" : "IDLE");
+      const status =
+        latestJob?.status ?? (source.lastSyncedAt ? "SUCCESS" : "IDLE");
 
       return {
         id: source.id,
@@ -4541,7 +4658,9 @@ function getSourceSyncHealth(settings: LangameSettings): SourceSyncHealth[] {
         status,
         lastSyncedAt: source.lastSyncedAt,
         errorMessage:
-          latestJob?.status === "FAILED" ? latestJob.errorMessage : null,
+          latestJob?.status === "FAILED" || latestJob?.status === "PARTIAL"
+            ? latestJob.errorMessage
+            : null,
         latestJob,
       };
     });
@@ -4564,6 +4683,10 @@ function statusTone(value: string): "neutral" | "danger" | "warning" {
     return "danger";
   }
 
+  if (value === "PARTIAL") {
+    return "warning";
+  }
+
   if (value === "RUNNING" || value === "IDLE") {
     return "warning";
   }
@@ -4580,6 +4703,10 @@ function statusBadgeClass(value: string) {
 
   if (value === "FAILED") {
     return `${base} bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200`;
+  }
+
+  if (value === "PARTIAL") {
+    return `${base} bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200`;
   }
 
   if (value === "RUNNING") {
@@ -4615,7 +4742,10 @@ function SyncHealthMetric({
       <p className="mt-1 text-lg font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
         {value}
       </p>
-      <p className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400" title={detail}>
+      <p
+        className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400"
+        title={detail}
+      >
         {detail}
       </p>
     </div>
@@ -4782,6 +4912,10 @@ function syncStatusLabel(value: string) {
 
   if (value === "FAILED") {
     return "Ошибка";
+  }
+
+  if (value === "PARTIAL") {
+    return "Данные сохранены, аудит не записан";
   }
 
   if (value === "RUNNING") {

@@ -48,9 +48,10 @@ const DAILY_SYNC_OUTBOUND_REQUIREMENTS = [
   { module: TenantModule.STAFF, action: 'OUTBOUND' },
 ] as const;
 
-type DailySyncInput = {
+export type DailySyncInput = {
   date?: string;
   force?: boolean;
+  tenantSlug?: string;
 };
 
 type DailySyncScopeResult = {
@@ -76,7 +77,7 @@ type DailySyncTenantResult = {
   scopes: DailySyncScopeResult[];
 };
 
-type DailySyncResult = {
+export type DailySyncResult = {
   date: string;
   force: boolean;
   tenants: number;
@@ -131,7 +132,11 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       : this.previousBusinessDate(new Date());
     const dateInput = this.toDateInputValue(businessDate);
     const force = Boolean(input.force);
-    const tenants = await this.findConfiguredTenants();
+    const tenantSlug = input.tenantSlug?.trim();
+    if (tenantSlug && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(tenantSlug)) {
+      throw new BadRequestException('tenantSlug must be a lowercase slug');
+    }
+    const tenants = await this.findConfiguredTenants(tenantSlug);
     const results: DailySyncTenantResult[] = [];
 
     for (const tenant of tenants) {
@@ -652,9 +657,10 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async findConfiguredTenants() {
+  private async findConfiguredTenants(tenantSlug?: string) {
     return this.prisma.tenant.findMany({
       where: {
+        ...(tenantSlug ? { slug: tenantSlug } : {}),
         integrationCredentials: {
           some: {
             provider: IntegrationProvider.LANGAME,
@@ -765,9 +771,14 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('date must be YYYY-MM-DD');
     }
 
-    return new Date(
+    const businessDate = new Date(
       Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
     );
+    if (this.toDateInputValue(businessDate) !== value) {
+      throw new BadRequestException('date must be a valid YYYY-MM-DD');
+    }
+
+    return businessDate;
   }
 
   private toDateInputValue(value: Date) {
@@ -803,6 +814,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     return {
       sources: result.sources,
       failedSources: result.failedSources,
+      partialSources: result.partialSources,
       stores: result.stores,
       products: result.products,
       productGroups: result.productGroups,
@@ -819,6 +831,8 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       domains: result.sourceResults.map((source) => ({
         domain: source.domain,
         status: source.status,
+        discrepancyLogStatus: source.discrepancyLogStatus,
+        discrepancyLogError: source.discrepancyLogError,
         errorMessage: source.errorMessage,
       })),
     };

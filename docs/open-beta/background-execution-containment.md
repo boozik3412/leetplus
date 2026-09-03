@@ -2,8 +2,8 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.19                                                    |
-| Дата             | 20.08.2026                                              |
+| Версия           | 1.20                                                    |
+| Дата             | 03.09.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
 | Топология        | Shared API/workers/PostgreSQL, отдельный tenant на сеть |
@@ -26,6 +26,20 @@
 
 Документ не разрешает production deployment, migration apply, создание
 внешнего tenant, owner invite или тестовой учётной записи.
+
+### Addendum: Langame single-owner recovery
+
+Source candidate 03.09 добавляет отдельный
+`leetplus-langame-daily-worker.timer`, но не меняет normative external policy.
+Worker требует один exact internal tenant slug, выключенные API scheduler и
+scheduled HTTP, ровно один processed tenant и zero failed scopes. Наличие
+systemd unit не включает timer и не является production approval.
+
+Для `PILOT/BETA/LIVE` job `LANGAME_DAILY_SYNC` остаётся `EXTERNAL_DENY`.
+Расширять env несколькими tenant slug запрещено; сначала необходимы durable
+revision/lease fence и tenant-system identity. Persistent discrepancy audit
+доступен только API/worker группе и не даёт worker authority Web/public guest
+или corporate role.
 
 ## 2. Нормативная policy
 

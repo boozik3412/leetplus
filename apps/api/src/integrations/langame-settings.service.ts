@@ -16,6 +16,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { LangameClient } from './langame.client';
+import { LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX } from './langame.types';
 import { SecretEncryptionService } from './secret-encryption.service';
 import type {
   LangameEndpointProfileDefinition,
@@ -369,20 +370,36 @@ export class LangameSettingsService {
         take: 100,
       }),
     ]);
-    const mapSyncJob = (job: (typeof syncJobs)[number]) => ({
-      id: job.id,
-      domain: job.domain,
-      status: job.status,
-      startedAt: job.startedAt.toISOString(),
-      finishedAt: job.finishedAt?.toISOString() ?? null,
-      storesCount: job.storesCount,
-      productsCount: job.productsCount,
-      inventoryCount: job.inventoryCount,
-      salesCount: job.salesCount,
-      discrepancyCount: job.discrepancyCount,
-      hasDiscrepancyLog: Boolean(job.discrepancyLogPath),
-      errorMessage: job.errorMessage,
-    });
+    const mapSyncJob = (job: (typeof syncJobs)[number]) => {
+      const discrepancyLogError =
+        job.status === 'SUCCESS' &&
+        job.errorMessage?.startsWith(
+          `${LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX}:`,
+        )
+          ? job.errorMessage
+          : null;
+
+      return {
+        id: job.id,
+        domain: job.domain,
+        status: discrepancyLogError ? 'PARTIAL' : job.status,
+        startedAt: job.startedAt.toISOString(),
+        finishedAt: job.finishedAt?.toISOString() ?? null,
+        storesCount: job.storesCount,
+        productsCount: job.productsCount,
+        inventoryCount: job.inventoryCount,
+        salesCount: job.salesCount,
+        discrepancyCount: job.discrepancyCount,
+        hasDiscrepancyLog: Boolean(job.discrepancyLogPath),
+        discrepancyLogStatus: job.discrepancyLogPath
+          ? 'WRITTEN'
+          : discrepancyLogError
+            ? 'FAILED'
+            : 'NOT_REQUIRED',
+        discrepancyLogError,
+        errorMessage: job.errorMessage,
+      };
+    };
 
     const endpointProfiles = this.toEndpointProfileSummaries(
       latestEndpointProfileRuns,
@@ -2532,8 +2549,7 @@ export class LangameSettingsService {
     const unsupportedDomain = normalized.find(
       (domain) =>
         !LANGAME_DOMAIN_SUFFIXES.some(
-          (suffix) =>
-            domain === suffix.slice(1) || domain.endsWith(suffix),
+          (suffix) => domain === suffix.slice(1) || domain.endsWith(suffix),
         ),
     );
 

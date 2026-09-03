@@ -436,13 +436,33 @@ Mutable Langame discrepancy evidence не записывается в immutable 
 абсолютный путь в `/etc/leetplus/runtime.env`:
 
 ```bash
-install -d -o root -g leetplus-api-runtime -m 0770 /var/lib/leetplus/langame-sync
+install -d -o root -g leetplus-api-runtime -m 2770 /var/lib/leetplus/langame-sync
 ```
 
 Только API slot users входят в `leetplus-api-runtime`; Web/legacy identities не
 получают write в этот path. Per-slot log directories создаёт systemd через
 `LogsDirectory=leetplus/api-%i`. Перед установкой оператор отдельно проверяет
 exact membership обеих shared groups.
+
+`leetplus-langame-discrepancy-audit-preflight.service` запускается перед каждым
+стартом обоих API slot и только проверяет этот контракт: root и только его
+direct UUID tenant directories, отсутствие symlink/mount/unexpected objects,
+`root:leetplus-api-runtime 2770` на root и `leetplus-api-<slot>:leetplus-api-runtime
+2770` на tenant directory. Он выполняет bounded двусторонние blue→green и
+green→blue create/read/delete probes и не делает repair. Если legacy directory
+остаётся в `0770`/`0750`, root operator сначала получает exact `plan` от
+`leetplus-langame-discrepancy-audit-authority`, а затем отдельным explicit
+confirmation применяет только group/mode repair; owners, releases, database,
+network и systemd unit files этот authority не меняет.
+
+Unattended daily sync не запускается внутри обоих API slot. Отдельные
+`leetplus-langame-daily-worker.service`/`.timer` разрешают active immutable
+release и требуют тот же storage preflight. Secret env создаётся оператором как
+`/etc/leetplus/langame-daily-worker.env` (`root:leetplus-api-runtime 0640`) и не
+входит в install map. Установка unit files оставляет timer disabled; canary и
+enable требуют отдельного production GO. Current profile допускает ровно один
+internal tenant и сохраняет external background deny. Полный порядок описан в
+[`../langame-sync-production-recovery.md`](../langame-sync-production-recovery.md).
 
 `LANGAME_DISCREPANCY_LOG_ROOT=/var/lib/leetplus/langame-sync` обязателен для
 production startup. Относительный путь, filesystem root и путь с `..`

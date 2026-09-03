@@ -15,6 +15,24 @@
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
+| Langame freshness    | P0 source recovery готовится: production audit EACCES и отсутствие single nightly owner подтверждены; production fix/backfill ещё не выполнялись          |
+
+## P0 Langame recovery (03.09.2026)
+
+Production остаётся healthy для public/corporate запросов, но Langame
+freshness нельзя считать готовой к открытому тесту. Read-only diagnosis
+подтвердил: business facts коммитятся, после чего запись discrepancy JSON
+падает из-за несовместимых прав blue/green; все три источника поэтому получают
+ложный полный `FAILED`. Отдельного nightly owner нет, последние unattended
+данные относятся к 26.08.
+
+Source candidate вводит `PARTIAL` для post-fact audit failure, общий storage
+contract с двусторонним slot preflight и один dedicated worker для exact
+internal tenant. Он не расширяет public guest/corporate права и сохраняет
+`EXTERNAL_DENY`. До exact Fast+Full, backup, отдельного production GO, backfill
+`27.08–02.09` и QA `3/3 + guest + five snapshots + zero duplicates` решение
+open beta остаётся `NO-GO`. Подробности:
+[`langame-sync-production-recovery.md`](../deployment/langame-sync-production-recovery.md).
 
 ## Ускорение release pipeline без ослабления gates (02.09.2026)
 

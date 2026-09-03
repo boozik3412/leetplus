@@ -65,6 +65,7 @@ const REQUIRED_PATHS = [
   INNER_MANIFEST_PATH,
   `${INNER_ROOT}/README.md`,
   `${INNER_ROOT}/bind-release-slot.sh`,
+  `${INNER_ROOT}/langame-discrepancy-audit-authority.sh`,
   `${INNER_ROOT}/legacy-rollback-auth-edge.mjs`,
   `${INNER_ROOT}/legacy-rollback-child-loopback.cjs`,
   `${INNER_ROOT}/nginx/README.md`,
@@ -77,6 +78,7 @@ const REQUIRED_PATHS = [
   `${INNER_ROOT}/resumable-release-orchestrator.mjs`,
   `${INNER_ROOT}/resumable-release-orchestrator.sh`,
   `${INNER_ROOT}/run-active-bonus-ledger-worker.sh`,
+  `${INNER_ROOT}/run-active-langame-daily-worker.sh`,
   `${INNER_ROOT}/run-current-release-restored-copy-acceptance.sh`,
   `${INNER_ROOT}/scheduler-free-n-minus-one-runbook.md`,
   `${INNER_ROOT}/seal-release-artifact.sh`,
@@ -88,7 +90,11 @@ const REQUIRED_PATHS = [
   `${INNER_ROOT}/systemd/canary-safe.env.example`,
   `${INNER_ROOT}/systemd/green.env.example`,
   `${INNER_ROOT}/systemd/guest-user-call-live.env.example`,
+  `${INNER_ROOT}/systemd/langame-daily-worker.env.example`,
   `${INNER_ROOT}/systemd/leetplus-api@.service`,
+  `${INNER_ROOT}/systemd/leetplus-langame-daily-worker.service`,
+  `${INNER_ROOT}/systemd/leetplus-langame-daily-worker.timer`,
+  `${INNER_ROOT}/systemd/leetplus-langame-discrepancy-audit-preflight.service`,
   `${INNER_ROOT}/systemd/leetplus-bonus-ledger-worker.service`,
   `${INNER_ROOT}/systemd/leetplus-bonus-ledger-worker.timer`,
   `${INNER_ROOT}/systemd/leetplus-release-hydrate@.service`,
@@ -601,20 +607,25 @@ function assertInstallAuthorityContract(root) {
     priorLine = line;
     destinations.add(destination);
   }
-  if (lines.length !== 52) {
+  if (lines.length !== 57) {
     fail("production control install map does not have the exact reviewed entry count");
   }
   for (const requiredDestination of [
     "/etc/systemd/system/leetplus-release-hydrate@.service",
     "/etc/systemd/system/leetplus-bonus-ledger-worker.service",
     "/etc/systemd/system/leetplus-bonus-ledger-worker.timer",
+    "/etc/systemd/system/leetplus-langame-daily-worker.service",
+    "/etc/systemd/system/leetplus-langame-daily-worker.timer",
+    "/etc/systemd/system/leetplus-langame-discrepancy-audit-preflight.service",
     "/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/CONTROL_BUNDLE_SHA256SUMS",
     "/usr/local/libexec/leetplus/stage-release-artifact.sh",
     "/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh",
+    "/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh",
     "/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs",
     "/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs",
     "/usr/local/libexec/leetplus/verify-release-hydration-systemd.mjs",
     "/usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1",
+    "/usr/local/sbin/leetplus-langame-discrepancy-audit-authority",
     "/usr/local/sbin/leetplus-promote-release-artifact",
     "/usr/local/sbin/leetplus-resumable-release-orchestrator",
     "/usr/local/sbin/leetplus-seal-release-artifact",

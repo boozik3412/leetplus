@@ -1,8 +1,4 @@
-import {
-  getApiUrl,
-  getAuthHeaders,
-  requestJsonWithTimeout,
-} from "./api";
+import { getApiUrl, getAuthHeaders, requestJsonWithTimeout } from "./api";
 
 export type LangameSourceSettings = {
   id: string;
@@ -88,7 +84,7 @@ export type LangameEndpointSnapshotRunSummary = {
 export type LangameSyncJob = {
   id: string;
   domain: string;
-  status: "SUCCESS" | "FAILED";
+  status: "SUCCESS" | "PARTIAL" | "FAILED";
   startedAt: string;
   finishedAt: string | null;
   storesCount: number;
@@ -97,6 +93,8 @@ export type LangameSyncJob = {
   salesCount: number;
   discrepancyCount: number;
   hasDiscrepancyLog: boolean;
+  discrepancyLogStatus: "NOT_REQUIRED" | "WRITTEN" | "FAILED";
+  discrepancyLogError: string | null;
   errorMessage: string | null;
 };
 
@@ -109,9 +107,7 @@ export async function getLangameSettings(): Promise<LangameSettings> {
   );
 
   if (!response.ok) {
-    throw new Error(
-      `Failed to fetch Langame settings: ${response.error}`,
-    );
+    throw new Error(`Failed to fetch Langame settings: ${response.error}`);
   }
 
   if (!response.data) {

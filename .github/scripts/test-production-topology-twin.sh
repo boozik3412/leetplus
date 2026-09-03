@@ -26,15 +26,19 @@ umask 0077
 readonly REPOSITORY_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly CONTRACT_VERIFIER="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-production-topology-contract.mjs"
 readonly API_TEMPLATE="${REPOSITORY_ROOT}/docs/deployment/production-artifact/systemd/leetplus-api@.service"
+readonly LANGAME_AUDIT_AUTHORITY_SOURCE="${REPOSITORY_ROOT}/docs/deployment/production-artifact/langame-discrepancy-audit-authority.sh"
+readonly LANGAME_AUDIT_PREFLIGHT_TEMPLATE="${REPOSITORY_ROOT}/docs/deployment/production-artifact/systemd/leetplus-langame-discrepancy-audit-preflight.service"
 readonly WEB_TEMPLATE="${REPOSITORY_ROOT}/docs/deployment/production-artifact/systemd/leetplus-web@.service"
 readonly LISTENER_SOURCE="${REPOSITORY_ROOT}/.github/scripts/production-topology-twin-listener.mjs"
 readonly FIXED_NODE='/usr/local/libexec/leetplus/production-topology-twin-node22'
 readonly FIXED_LISTENER='/usr/local/libexec/leetplus/production-topology-twin-listener.mjs'
 readonly API_UNIT_PATH='/run/systemd/system/leetplus-api@.service'
+readonly LANGAME_AUDIT_PREFLIGHT_UNIT_PATH='/run/systemd/system/leetplus-langame-discrepancy-audit-preflight.service'
 readonly WEB_UNIT_PATH='/run/systemd/system/leetplus-web@.service'
 readonly API_DROPIN_ROOT='/run/systemd/system/leetplus-api@.service.d'
 readonly WEB_DROPIN_ROOT='/run/systemd/system/leetplus-web@.service.d'
 readonly REHEARSAL_UNIT='leetplus-topology-rehearsal-twin.service'
+readonly LANGAME_AUDIT_PREFLIGHT_UNIT='leetplus-langame-discrepancy-audit-preflight.service'
 readonly RELEASE_SHA='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 readonly -a SLOT_UNITS=(
   leetplus-api@blue.service
@@ -68,6 +72,8 @@ die() {
 [[ -f "$CONTRACT_VERIFIER" && ! -L "$CONTRACT_VERIFIER" \
   && -f "$API_TEMPLATE" && ! -L "$API_TEMPLATE" \
   && -f "$WEB_TEMPLATE" && ! -L "$WEB_TEMPLATE" \
+  && -f "$LANGAME_AUDIT_AUTHORITY_SOURCE" && ! -L "$LANGAME_AUDIT_AUTHORITY_SOURCE" \
+  && -f "$LANGAME_AUDIT_PREFLIGHT_TEMPLATE" && ! -L "$LANGAME_AUDIT_PREFLIGHT_TEMPLATE" \
   && -f "$LISTENER_SOURCE" && ! -L "$LISTENER_SOURCE" ]] \
   || die 'repository topology inputs are absent or unsafe'
 
@@ -105,7 +111,8 @@ done
 for target in \
   /etc/leetplus /srv/leetplus /var/lib/leetplus /var/log/leetplus \
   /var/cache/leetplus-web-blue /var/cache/leetplus-web-green \
-  "$FIXED_NODE" "$FIXED_LISTENER" "$API_UNIT_PATH" "$WEB_UNIT_PATH" \
+  "$FIXED_NODE" "$FIXED_LISTENER" "$API_UNIT_PATH" "$WEB_UNIT_PATH" "$LANGAME_AUDIT_PREFLIGHT_UNIT_PATH" \
+  /usr/local/sbin/leetplus-langame-discrepancy-audit-authority /run/leetplus-production-control /run/leetplus-langame-discrepancy-audit \
   "$API_DROPIN_ROOT" "$WEB_DROPIN_ROOT"; do
   [[ ! -e "$target" && ! -L "$target" ]] || die "fixture target already exists: ${target}"
 done
@@ -117,7 +124,7 @@ remove_fixture_tree() {
   local target="$1"
   case "$target" in
     /etc/leetplus|/srv/leetplus|/var/lib/leetplus|/var/log/leetplus|\
-    /var/cache/leetplus-web-blue|/var/cache/leetplus-web-green|\
+    /var/cache/leetplus-web-blue|/var/cache/leetplus-web-green|/run/leetplus-production-control|/run/leetplus-langame-discrepancy-audit|\
     /run/systemd/system/leetplus-api@.service.d|/run/systemd/system/leetplus-web@.service.d) ;;
     *) return 1 ;;
   esac
@@ -133,17 +140,19 @@ cleanup() {
   trap - EXIT
   set +e
   if ((cleanup_status != 0)); then
-    for unit in "${SLOT_UNITS[@]}" "$REHEARSAL_UNIT"; do
+    for unit in "${SLOT_UNITS[@]}" "$REHEARSAL_UNIT" "$LANGAME_AUDIT_PREFLIGHT_UNIT"; do
       /usr/bin/journalctl --no-pager -n 40 -u "$unit" >&2
     done
   fi
-  for unit in "${SLOT_UNITS[@]}" "$REHEARSAL_UNIT"; do
+  for unit in "${SLOT_UNITS[@]}" "$REHEARSAL_UNIT" "$LANGAME_AUDIT_PREFLIGHT_UNIT"; do
     /usr/bin/systemctl stop "$unit" >/dev/null 2>&1 || true
     /usr/bin/systemctl reset-failed "$unit" >/dev/null 2>&1 || true
   done
   /usr/bin/rm -f -- /run/leetplus-topology-twin-drift.out \
-    /run/leetplus-topology-twin-phase.out
-  /usr/bin/rm -f -- "$API_UNIT_PATH" "$WEB_UNIT_PATH" "$FIXED_LISTENER" "$FIXED_NODE"
+    /run/leetplus-topology-twin-phase.out /run/leetplus-topology-twin-langame-plan.json \
+    /run/leetplus-topology-twin-langame-apply.out /run/leetplus-topology-twin-langame-check.out
+  /usr/bin/rm -f -- "$API_UNIT_PATH" "$WEB_UNIT_PATH" "$LANGAME_AUDIT_PREFLIGHT_UNIT_PATH" "$FIXED_LISTENER" "$FIXED_NODE" \
+    /usr/local/sbin/leetplus-langame-discrepancy-audit-authority
   remove_fixture_tree "$API_DROPIN_ROOT"
   remove_fixture_tree "$WEB_DROPIN_ROOT"
   /usr/bin/systemctl daemon-reload >/dev/null 2>&1
@@ -173,7 +182,7 @@ cleanup() {
     && -d /usr/local/libexec/leetplus && ! -L /usr/local/libexec/leetplus ]]; then
     /usr/bin/rmdir -- /usr/local/libexec/leetplus
   fi
-  for unit in "${SLOT_UNITS[@]}" "$REHEARSAL_UNIT"; do
+  for unit in "${SLOT_UNITS[@]}" "$REHEARSAL_UNIT" "$LANGAME_AUDIT_PREFLIGHT_UNIT"; do
     if [[ "$(/usr/bin/systemctl show "$unit" --value --property=LoadState 2>/dev/null || true)" != not-found ]]; then
       printf 'production topology twin: cleanup left unit %s\n' "$unit" >&2
       cleanup_failed=true
@@ -194,9 +203,12 @@ cleanup() {
   for target in \
     /etc/leetplus /srv/leetplus /var/lib/leetplus /var/log/leetplus \
     /var/cache/leetplus-web-blue /var/cache/leetplus-web-green \
-    "$FIXED_NODE" "$FIXED_LISTENER" "$API_UNIT_PATH" "$WEB_UNIT_PATH" \
+    "$FIXED_NODE" "$FIXED_LISTENER" "$API_UNIT_PATH" "$WEB_UNIT_PATH" "$LANGAME_AUDIT_PREFLIGHT_UNIT_PATH" \
+    /usr/local/sbin/leetplus-langame-discrepancy-audit-authority /run/leetplus-production-control /run/leetplus-langame-discrepancy-audit \
     "$API_DROPIN_ROOT" "$WEB_DROPIN_ROOT" \
-    /run/leetplus-topology-twin-drift.out /run/leetplus-topology-twin-phase.out; do
+    /run/leetplus-topology-twin-drift.out /run/leetplus-topology-twin-phase.out \
+    /run/leetplus-topology-twin-langame-plan.json /run/leetplus-topology-twin-langame-apply.out \
+    /run/leetplus-topology-twin-langame-check.out; do
     if [[ -e "$target" || -L "$target" ]]; then
       printf 'production topology twin: cleanup left target %s\n' "$target" >&2
       cleanup_failed=true
@@ -267,11 +279,22 @@ for slot in blue green; do
     "/srv/leetplus/slots/${slot}/apps/web/.next" \
     "/srv/leetplus/slots/${slot}/apps/web/.next/cache"
 done
-/usr/bin/install -d -o root -g leetplus-api-runtime -m 0750 \
-  /var/lib/leetplus /var/lib/leetplus/langame-sync
+/usr/bin/install -d -o root -g root -m 0755 /var/lib/leetplus
+/usr/bin/install -d -o root -g leetplus-api-runtime -m 2770 \
+  /var/lib/leetplus/langame-sync
+/usr/bin/install -d -o leetplus-api-blue -g leetplus-runtime -m 0750 \
+  /var/lib/leetplus/langame-sync/11111111-1111-1111-1111-111111111111
+/usr/bin/install -d -o root -g root -m 0700 /run/leetplus-production-control
+/usr/bin/install -o root -g root -m 0600 /dev/null /run/leetplus-production-control/install.lock
+/usr/bin/install -d -o root -g root -m 0700 /run/leetplus-langame-discrepancy-audit
+/usr/bin/install -o root -g root -m 0600 /dev/null /run/leetplus-langame-discrepancy-audit/audit.lock
 
 /usr/bin/install -o root -g root -m 0644 "$API_TEMPLATE" "$API_UNIT_PATH"
 /usr/bin/install -o root -g root -m 0644 "$WEB_TEMPLATE" "$WEB_UNIT_PATH"
+/usr/bin/install -o root -g root -m 0500 "$LANGAME_AUDIT_AUTHORITY_SOURCE" \
+  /usr/local/sbin/leetplus-langame-discrepancy-audit-authority
+/usr/bin/install -o root -g root -m 0644 "$LANGAME_AUDIT_PREFLIGHT_TEMPLATE" \
+  "$LANGAME_AUDIT_PREFLIGHT_UNIT_PATH"
 /usr/bin/install -d -o root -g root -m 0755 "$API_DROPIN_ROOT" "$WEB_DROPIN_ROOT"
 printf '%s\n' '[Service]' 'ExecStartPre=' \
   "ExecStartPre=/usr/bin/test -x ${FIXED_LISTENER}" 'ExecStart=' \
@@ -285,7 +308,22 @@ chmod 0644 "${API_DROPIN_ROOT}/90-topology-twin.conf" \
   "${WEB_DROPIN_ROOT}/90-topology-twin.conf"
 
 /usr/bin/systemctl daemon-reload
+/usr/local/sbin/leetplus-langame-discrepancy-audit-authority plan \
+  > /run/leetplus-topology-twin-langame-plan.json
+langame_plan_sha256="$(/usr/bin/sed -n 's/.*"planSha256":"\([0-9a-f]\{64\}\)".*/\1/p' /run/leetplus-topology-twin-langame-plan.json)"
+[[ "$langame_plan_sha256" =~ ^[0-9a-f]{64}$ ]] || die 'Langame audit fixture plan digest is invalid'
+/usr/local/sbin/leetplus-langame-discrepancy-audit-authority apply \
+  --plan-sha256 "$langame_plan_sha256" --action-count 1 \
+  --confirm I_ACCEPT_EXACT_LANGAME_DISCREPANCY_AUDIT_REPAIR \
+  > /run/leetplus-topology-twin-langame-apply.out
+/usr/local/sbin/leetplus-langame-discrepancy-audit-authority check \
+  > /run/leetplus-topology-twin-langame-check.out
+/usr/bin/grep -F -x 'LANGAME_DISCREPANCY_AUDIT_CHECK=PASS tenantDirectoryCount=1' \
+  /run/leetplus-topology-twin-langame-check.out >/dev/null \
+  || die 'Langame audit fixture did not prove both slot identities'
 /usr/bin/systemctl start leetplus-api@blue.service leetplus-api@green.service
+/usr/bin/systemctl show "$LANGAME_AUDIT_PREFLIGHT_UNIT" --value --property=Result | /usr/bin/grep -F -x 'success' >/dev/null \
+  || die 'Langame audit systemd preflight did not pass under its confined runtime identity'
 /usr/bin/systemctl start leetplus-web@blue.service leetplus-web@green.service
 for port in 4100 4200 3100 3200; do
   ready=false

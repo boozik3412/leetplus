@@ -1,5 +1,34 @@
 # LeetPlus Бэклог
 
+## P0 — восстановление Langame sync и freshness — 03.09.2026
+
+Статус: `[███████░░░] 7/10` — source implementation и локальные gates готовы;
+production не менялся.
+
+- [x] Подтверждена причина: DB facts сохраняются, но post-fact audit JSON
+  получает `EACCES` из-за slot-owned tenant directory; UI ложно показывает
+  полный `FAILED`.
+- [x] Audit failure отделён от import failure: безопасный `PARTIAL`, freshness
+  продвигается, raw path/tenant ID не раскрываются.
+- [x] Новый файл создаётся exclusive с mode `0640`; symlink tenant directory
+  отклоняется.
+- [x] Root-only digest-bound repair и повторяемый blue↔green storage preflight
+  добавлены в production-control authority.
+- [x] Добавлен отдельный single-owner daily worker/timer; встроенные scheduler
+  обоих API slot и scheduled HTTP обязаны оставаться выключенными.
+- [x] Internal tenant ограничен exact slug; внешний tenant остаётся
+  `EXTERNAL_DENY`.
+- [x] Focused API `46/46`, API/Web lint, Web typecheck и static Bash/control
+  tests локально зелёные.
+- [ ] Получить Fast CI и Full Release Admission на одном exact SHA.
+- [ ] После отдельного production GO: backup, exact repair plan/apply, canary и
+  idempotent backfill `27.08–02.09`.
+- [ ] Подтвердить 3/3 Langame sources, guest foundation, пять свежих snapshots,
+  zero duplicates, public/corporate smoke и healthy rollback; только затем
+  включить nightly timer.
+
+Runbook: [langame-sync-production-recovery.md](./docs/deployment/langame-sync-production-recovery.md).
+
 ## Ускорение безопасного production release — 03.09.2026
 
 Статус: `[██████████] 8/8` — topology twin, impact classifier, один exact

@@ -8,6 +8,8 @@ REQUIRED_DRAIN leetplus-deploy.timer
 OPTIONAL_DRAIN leetplus-deploy.service
 OPTIONAL_DRAIN leetplus-guest-game-bot-consumer.timer
 OPTIONAL_DRAIN leetplus-guest-game-bot-consumer.service
+OPTIONAL_DRAIN leetplus-langame-daily-worker.timer
+OPTIONAL_DRAIN leetplus-langame-daily-worker.service
 SAFE leetplus-api-rollback@.service
 SAFE leetplus-web-rollback@.service
 SAFE leetplus-api-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service
@@ -24,3 +26,4 @@ SAFE leetplus-release-hydrate@7de04ff4ccc814494810730be3fa6bf661097b07.service
 SAFE leetplus-blue-green-recovery.service
 SAFE leetplus-blue-green-recovery-watchdog.service
 SAFE leetplus-blue-green-recovery.timer
+SAFE leetplus-langame-discrepancy-audit-preflight.service

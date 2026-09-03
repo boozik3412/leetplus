@@ -26,6 +26,12 @@ bonus_ledger_worker_overlay="${TEMPLATE_ROOT}/bonus-ledger-worker.env.example"
 bonus_ledger_worker_service="${TEMPLATE_ROOT}/leetplus-bonus-ledger-worker.service"
 bonus_ledger_worker_timer="${TEMPLATE_ROOT}/leetplus-bonus-ledger-worker.timer"
 bonus_ledger_worker_runner="${REPOSITORY_ROOT}/docs/deployment/production-artifact/run-active-bonus-ledger-worker.sh"
+langame_daily_worker_overlay="${TEMPLATE_ROOT}/langame-daily-worker.env.example"
+langame_daily_worker_service="${TEMPLATE_ROOT}/leetplus-langame-daily-worker.service"
+langame_daily_worker_timer="${TEMPLATE_ROOT}/leetplus-langame-daily-worker.timer"
+langame_daily_worker_runner="${REPOSITORY_ROOT}/docs/deployment/production-artifact/run-active-langame-daily-worker.sh"
+langame_audit_authority="${REPOSITORY_ROOT}/docs/deployment/production-artifact/langame-discrepancy-audit-authority.sh"
+langame_audit_preflight_unit="${TEMPLATE_ROOT}/leetplus-langame-discrepancy-audit-preflight.service"
 slot_preflight="${REPOSITORY_ROOT}/docs/deployment/production-artifact/preflight-release-slot.sh"
 cache_preparer="${REPOSITORY_ROOT}/docs/deployment/production-artifact/prepare-web-slot-cache.sh"
 release_promoter="${REPOSITORY_ROOT}/docs/deployment/production-artifact/promote-release-artifact.sh"
@@ -41,6 +47,8 @@ blue_green_cutover="${REPOSITORY_ROOT}/docs/deployment/production-artifact/blue-
 release_readiness="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-release-readiness.sh"
 legacy_readiness="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-legacy-rollback-readiness.sh"
 legacy_installer="${REPOSITORY_ROOT}/docs/deployment/production-artifact/install-legacy-rollback-contour.sh"
+legacy_drain_verifier="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-legacy-runtime-drain.sh"
+legacy_drain_units="${TEMPLATE_ROOT}/legacy-drain-units.conf.example"
 authenticated_reads="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-legacy-rollback-authenticated-reads.mjs"
 production_control_install_map="${REPOSITORY_ROOT}/docs/deployment/production-control-authority/production-control-install-map.tsv"
 
@@ -54,6 +62,7 @@ root_authorities=(
   bind-release-slot.sh
   blue-green-cutover.sh
   install-legacy-rollback-contour.sh
+  langame-discrepancy-audit-authority.sh
   prepare-web-slot-cache.sh
   promote-release-artifact.sh
   run-current-release-restored-copy-acceptance.sh
@@ -74,7 +83,7 @@ done
 
 for required_file in \
   "$api_unit" "$web_unit" "$migration_unit" "$hydration_unit" "$release_environment" \
-  "$slot_api_unit" "$slot_web_unit" "$safe_overlay" "$user_call_live_overlay" "$bonus_ledger_worker_overlay" "$bonus_ledger_worker_service" "$bonus_ledger_worker_timer" "$bonus_ledger_worker_runner" "$slot_preflight" "$cache_preparer" "$release_promoter" "$release_sealer" "$store_stager" "$blue_environment" "$green_environment" "$web_runtime_environment" "$blue_nginx" "$green_nginx" "$recovery_unit" "$recovery_watchdog_unit" "$recovery_timer" "$nginx_recovery_dropin" "$hydration_tmpfiles"; do
+  "$slot_api_unit" "$slot_web_unit" "$safe_overlay" "$user_call_live_overlay" "$bonus_ledger_worker_overlay" "$bonus_ledger_worker_service" "$bonus_ledger_worker_timer" "$bonus_ledger_worker_runner" "$langame_daily_worker_overlay" "$langame_daily_worker_service" "$langame_daily_worker_timer" "$langame_daily_worker_runner" "$langame_audit_authority" "$langame_audit_preflight_unit" "$slot_preflight" "$cache_preparer" "$release_promoter" "$release_sealer" "$store_stager" "$blue_environment" "$green_environment" "$web_runtime_environment" "$blue_nginx" "$green_nginx" "$recovery_unit" "$recovery_watchdog_unit" "$recovery_timer" "$nginx_recovery_dropin" "$hydration_tmpfiles"; do
   test -f "$required_file"
 done
 
@@ -331,6 +340,17 @@ if command -v systemd-analyze >/dev/null 2>&1; then
     > "$verification_root/leetplus-bonus-ledger-worker.service"
   cp "$bonus_ledger_worker_timer" \
     "$verification_root/leetplus-bonus-ledger-worker.timer"
+  sed -e 's#^EnvironmentFile=.*#EnvironmentFile=-/dev/null#' \
+    -e 's#^ExecStart=.*#ExecStart=/bin/true#' \
+    -e '/^SupplementaryGroups=/d' \
+    "$langame_daily_worker_service" \
+    > "$verification_root/leetplus-langame-daily-worker.service"
+  cp "$langame_daily_worker_timer" \
+    "$verification_root/leetplus-langame-daily-worker.timer"
+  sed -e 's#^ExecStart=.*#ExecStart=/bin/true#' \
+    -e '/^SupplementaryGroups=/d' \
+    "$langame_audit_preflight_unit" \
+    > "$verification_root/leetplus-langame-discrepancy-audit-preflight.service"
   printf '[Unit]\nDescription=fixture target\n' > "$verification_root/network-online.target"
   cp "$verification_root/network-online.target" "$verification_root/multi-user.target"
   printf '[Unit]\nDescription=fixture nginx\n[Service]\nType=oneshot\nExecStart=/bin/true\n' \
@@ -339,8 +359,11 @@ if command -v systemd-analyze >/dev/null 2>&1; then
     systemd-analyze verify \
       "$verification_root/leetplus-api@blue.service" \
       "$verification_root/leetplus-web@blue.service" \
+      "$verification_root/leetplus-langame-discrepancy-audit-preflight.service" \
       "$verification_root/leetplus-bonus-ledger-worker.service" \
-      "$verification_root/leetplus-bonus-ledger-worker.timer"
+      "$verification_root/leetplus-bonus-ledger-worker.timer" \
+      "$verification_root/leetplus-langame-daily-worker.service" \
+      "$verification_root/leetplus-langame-daily-worker.timer"
   case "$verification_root" in /tmp/tmp.*) ;; *) printf 'unsafe systemd verification root\n' >&2; exit 1 ;; esac
   rm -rf -- "$verification_root"
 fi
@@ -348,6 +371,8 @@ fi
 grep -F -x 'WorkingDirectory=/srv/leetplus/slots/%i' "$slot_api_unit" > /dev/null
 grep -F -x 'User=leetplus-api-%i' "$slot_api_unit" > /dev/null
 grep -F -x 'EnvironmentFile=/etc/leetplus/runtime.env' "$slot_api_unit" > /dev/null
+grep -F -x 'Requires=leetplus-langame-discrepancy-audit-preflight.service' "$slot_api_unit" > /dev/null
+grep -F -x 'After=leetplus-langame-discrepancy-audit-preflight.service' "$slot_api_unit" > /dev/null
 grep -F 'ExecStartPre=/usr/bin/node /srv/leetplus/slots/%i/apps/api/dist/config/validate-production-environment.cli.js' "$slot_api_unit" > /dev/null
 grep -F -- '--api-runtime' "$slot_api_unit" > /dev/null
 grep -F -x 'ExecStart=/usr/bin/node /srv/leetplus/slots/%i/apps/api/dist/main.js' "$slot_api_unit" > /dev/null
@@ -436,8 +461,13 @@ if grep -F '/run/leetplus-' "$blue_green_cutover" > /dev/null; then
   exit 1
 fi
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-api@.service\t/etc/systemd/system/leetplus-api@.service\t0444' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/langame-discrepancy-audit-authority.sh\t/usr/local/sbin/leetplus-langame-discrepancy-audit-authority\t0500' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-langame-discrepancy-audit-preflight.service\t/etc/systemd/system/leetplus-langame-discrepancy-audit-preflight.service\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/systemd/guest-user-call-live.env.example\t/etc/leetplus/guest-user-call-live.env\t0400' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/run-active-bonus-ledger-worker.sh\t/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh\t0555' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/run-active-langame-daily-worker.sh\t/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh\t0555' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-langame-daily-worker.service\t/etc/systemd/system/leetplus-langame-daily-worker.service\t0444' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-langame-daily-worker.timer\t/etc/systemd/system/leetplus-langame-daily-worker.timer\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-bonus-ledger-worker.service\t/etc/systemd/system/leetplus-bonus-ledger-worker.service\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-bonus-ledger-worker.timer\t/etc/systemd/system/leetplus-bonus-ledger-worker.timer\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-web@.service\t/etc/systemd/system/leetplus-web@.service\t0444' "$production_control_install_map" > /dev/null
@@ -458,6 +488,38 @@ grep -F -x 'Requires=leetplus-blue-green-recovery.service' "$nginx_recovery_drop
 grep -F 'production pnpm store already exists' "$store_stager" > /dev/null
 grep -F 'PNPM_STORE_PACKAGE_CODE_EXECUTED=false' "$store_stager" > /dev/null
 grep -F -x 'DynamicUser=yes' "$bonus_ledger_worker_service" > /dev/null
+grep -F -x 'DynamicUser=yes' "$langame_daily_worker_service" > /dev/null
+grep -F -x 'Requires=leetplus-langame-discrepancy-audit-preflight.service' "$langame_daily_worker_service" > /dev/null
+grep -F -x 'After=leetplus-langame-discrepancy-audit-preflight.service' "$langame_daily_worker_service" > /dev/null
+grep -F -x 'EnvironmentFile=/etc/leetplus/langame-daily-worker.env' "$langame_daily_worker_service" > /dev/null
+grep -F -x 'ExecStart=/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh' "$langame_daily_worker_service" > /dev/null
+grep -F -x 'Unit=leetplus-langame-daily-worker.service' "$langame_daily_worker_timer" > /dev/null
+grep -F -x 'OPTIONAL_DRAIN leetplus-langame-daily-worker.timer' "$legacy_drain_units" > /dev/null
+grep -F -x 'OPTIONAL_DRAIN leetplus-langame-daily-worker.service' "$legacy_drain_units" > /dev/null
+grep -F -x 'SAFE leetplus-langame-discrepancy-audit-preflight.service' "$legacy_drain_units" > /dev/null
+grep -F 'leetplus-langame-discrepancy-audit-preflight.service)' "$legacy_drain_verifier" > /dev/null
+grep -F 'active-upstreams.conf' "$langame_daily_worker_runner" > /dev/null
+grep -F 'langame-daily-worker.cli.js' "$langame_daily_worker_runner" > /dev/null
+if grep -F -x 'EnvironmentFile=/etc/leetplus/runtime.env' "$langame_daily_worker_service" > /dev/null; then
+  printf 'Langame daily worker inherited the broad API runtime profile\n' >&2
+  exit 1
+fi
+grep -F -x 'User=root' "$langame_audit_preflight_unit" > /dev/null
+grep -F -x 'SupplementaryGroups=leetplus-api-runtime' "$langame_audit_preflight_unit" > /dev/null
+grep -F -x 'ExecStart=/usr/local/sbin/leetplus-langame-discrepancy-audit-authority check' "$langame_audit_preflight_unit" > /dev/null
+grep -F -x 'Before=leetplus-api@blue.service leetplus-api@green.service' "$langame_audit_preflight_unit" > /dev/null
+grep -F -x 'ReadWritePaths=/var/lib/leetplus/langame-sync /run/leetplus-langame-discrepancy-audit' "$langame_audit_preflight_unit" > /dev/null
+grep -F -x 'RuntimeDirectory=leetplus-langame-discrepancy-audit' "$langame_audit_preflight_unit" > /dev/null
+grep -F -x 'RuntimeDirectoryMode=0700' "$langame_audit_preflight_unit" > /dev/null
+grep -F -x 'RuntimeDirectoryPreserve=yes' "$langame_audit_preflight_unit" > /dev/null
+grep -F -x 'CapabilityBoundingSet=CAP_SETGID CAP_SETUID' "$langame_audit_preflight_unit" > /dev/null
+grep -F -x 'AmbientCapabilities=CAP_SETGID CAP_SETUID' "$langame_audit_preflight_unit" > /dev/null
+grep -F -x 'RestrictSUIDSGID=false' "$langame_audit_preflight_unit" > /dev/null
+if grep -F -x 'RemainAfterExit=yes' "$langame_audit_preflight_unit" > /dev/null \
+  || grep -F '/run/leetplus-production-control' "$langame_audit_preflight_unit" > /dev/null; then
+  printf 'Langame audit preflight retains stale completion state or broad rollout-lock ownership\n' >&2
+  exit 1
+fi
 grep -F -x 'Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin' "$bonus_ledger_worker_service" > /dev/null
 grep -F -x 'EnvironmentFile=/etc/leetplus/bonus-ledger-worker.env' "$bonus_ledger_worker_service" > /dev/null
 grep -F -x 'ExecStart=/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh' "$bonus_ledger_worker_service" > /dev/null

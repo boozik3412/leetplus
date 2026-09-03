@@ -63,6 +63,15 @@ describe('LangameDailySyncService tenant execution admission', () => {
     };
   }
 
+  it('rejects calendar dates that JavaScript would silently normalize', async () => {
+    const subject = createSubject();
+
+    await expect(
+      subject.service.runDailySync({ date: '2026-02-31' }),
+    ).rejects.toThrow('date must be a valid YYYY-MM-DD');
+    expect(subject.prisma.tenant.findMany).not.toHaveBeenCalled();
+  });
+
   it('skips a denied tenant and continues the daily orchestration for an allowed tenant', async () => {
     const subject = createSubject();
     subject.prisma.tenant.findMany.mockResolvedValue([
@@ -199,6 +208,40 @@ describe('LangameDailySyncService tenant execution admission', () => {
     expect(
       subject.businessSnapshotService.runSnapshotsForTenant,
     ).not.toHaveBeenCalled();
+  });
+
+  it('limits an unattended caller to one exact configured tenant slug', async () => {
+    const subject = createSubject();
+    subject.prisma.tenant.findMany.mockResolvedValue([]);
+
+    await expect(
+      subject.service.runDailySync({
+        date: '2026-07-27',
+        tenantSlug: 'demo',
+      }),
+    ).resolves.toMatchObject({
+      tenants: 0,
+      processedTenants: 0,
+      skippedTenants: 0,
+    });
+
+    expect(subject.prisma.tenant.findMany).toHaveBeenCalledWith({
+      where: {
+        slug: 'demo',
+        integrationCredentials: {
+          some: {
+            provider: 'LANGAME',
+            isActive: true,
+            apiKeyEncrypted: { not: null },
+          },
+        },
+        integrationSources: {
+          some: { provider: 'LANGAME', isActive: true },
+        },
+      },
+      select: { id: true, slug: true },
+      orderBy: { slug: 'asc' },
+    });
   });
 
   it('skips an admitted external tenant before any daily scope or coverage mutation', async () => {

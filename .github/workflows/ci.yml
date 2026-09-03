@@ -815,6 +815,9 @@ jobs:
       - name: Lint Langame staged onboarding boundary
         run: pnpm --filter api lint:ci:langame-onboarding
 
+      - name: Lint Langame sync recovery boundary
+        run: pnpm --filter api lint:ci:langame-recovery
+
       - name: Lint CURRENT189 employee invitation boundary
         run: pnpm --filter api lint:ci:employee-invite-current189
 
@@ -877,6 +880,9 @@ jobs:
 
       - name: Test dormant CURRENT188 Langame onboarding adapter
         run: pnpm --filter api test:ci:langame-onboarding
+
+      - name: Test Langame sync recovery boundary
+        run: pnpm --filter api test:ci:langame-recovery
 
       - name: Test dormant CURRENT189 employee invitation boundary
         run: pnpm --filter api test:ci:employee-invite-current189

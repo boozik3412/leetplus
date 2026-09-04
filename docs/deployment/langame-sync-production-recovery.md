@@ -58,6 +58,8 @@ corporate scope или Langame credentials. Внешние tenant остаютс
 - worker timer disabled, API scheduler false, scheduled HTTP false до canary.
 - установленный `/etc/leetplus/legacy-drain-units.conf` содержит exact
   `OPTIONAL_DRAIN` для worker service/timer и exact `SAFE` для audit preflight;
+  уже активные автономные bonus-ledger service/timer остаются exact `SAFE` и
+  не останавливаются ради Langame rollout;
   после установки unit inventory обязан снова пройти legacy drain verifier.
 
 Ни один CI result, merge или этот документ не является production GO.

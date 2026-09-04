@@ -320,6 +320,13 @@ digest-bound plan, сохраняет owner и не получает DB/network/
 откатом facts или ложным provider `FAILED`; наружу выходит только allowlisted
 filesystem code.
 
+Legacy drain inventory сохраняет уже принятый autonomous bonus-ledger contour:
+его service/timer классифицируются `SAFE` и не останавливаются ради Langame
+rollout. Новый Langame daily service/timer остаётся `OPTIONAL_DRAIN` до canary и
+явного включения, а общий audit preflight является `SAFE`. Все пять unit должны
+быть одновременно перечислены в admitted manifest и закрытом verifier allowlist;
+иначе rollout останавливается до runtime effect.
+
 ### Runtime repair contract 29–30.08.2026
 
 - `USER_CALL` остаётся обычным public API request path. Advisory transaction

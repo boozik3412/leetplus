@@ -329,7 +329,9 @@ while IFS=$' \t' read -r classification unit extra; do
       leetplus-release-hydrate@.service|\
       leetplus-release-hydrate@7de04ff4ccc814494810730be3fa6bf661097b07.service|\
       leetplus-blue-green-recovery.service|leetplus-blue-green-recovery-watchdog.service|\
-      leetplus-blue-green-recovery.timer) ;;
+      leetplus-blue-green-recovery.timer|\
+      leetplus-bonus-ledger-worker.service|leetplus-bonus-ledger-worker.timer|\
+      leetplus-langame-discrepancy-audit-preflight.service) ;;
       *) die "unit is not on the closed SAFE allowlist: ${unit}" ;;
     esac
   fi

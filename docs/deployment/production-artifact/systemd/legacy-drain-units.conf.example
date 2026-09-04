@@ -26,4 +26,6 @@ SAFE leetplus-release-hydrate@7de04ff4ccc814494810730be3fa6bf661097b07.service
 SAFE leetplus-blue-green-recovery.service
 SAFE leetplus-blue-green-recovery-watchdog.service
 SAFE leetplus-blue-green-recovery.timer
+SAFE leetplus-bonus-ledger-worker.service
+SAFE leetplus-bonus-ledger-worker.timer
 SAFE leetplus-langame-discrepancy-audit-preflight.service

@@ -34,6 +34,14 @@ internal tenant. Он не расширяет public guest/corporate права 
 open beta остаётся `NO-GO`. Подробности:
 [`langame-sync-production-recovery.md`](../deployment/langame-sync-production-recovery.md).
 
+Exact candidate `64a0efed…` прошёл Fast+Full, но production preflight 04.09
+правильно остановил rollout до effect: уже активный автономный bonus-ledger
+service отсутствовал в exact legacy-drain manifest кандидата. Production
+остался на `f3f119fa…`. Исправление должно одновременно классифицировать оба
+bonus-ledger unit как `SAFE` в manifest и закрытом verifier allowlist и пройти
+новый exact-main admission; ручной manifest override или остановка здорового
+bonus-ledger worker запрещены.
+
 ## Ускорение release pipeline без ослабления gates (02.09.2026)
 
 В backlog добавлена отдельная инициатива

@@ -94,8 +94,10 @@ oneshot перед возможным `Persistent=true` catch-up, исключа
 CI successor дополнительно обязан пройти реальный PID 1/DynamicUser путь.
 Wrapper принимает permit только при совпадении `MainPID/InvocationID`,
 прочитанном через system D-Bus; недоступность шины не понижает проверку до
-UID/cgroup. Временная fixture-шина разрешена только на явно подтверждённом
-disposable GitHub runner и обязана завершиться без socket/process residue.
+UID/cgroup. На явно подтверждённом disposable GitHub runner временно разрешён
+только PID-1 запуск штатных vendor `dbus.socket`/`dbus.service` после exact
+inactive-state attestation; без ручной публикации socket, изменения enablement
+и с обязательным identity-bound zero-residue восстановлением.
 
 ## Ускорение release pipeline без ослабления gates (02.09.2026)
 

@@ -328,10 +328,34 @@ receipt/manifest fixture и проигрывать весь lifecycle:
 7. Реальный PID 1 positive path wrapper→active release, system D-Bus
    `MainPID/InvocationID` attestation, immediate persistent timer fire,
    PID/cgroup residue и полный digest-bound timer revoke/recovery. Если
-   disposable GitHub runner не предоставляет system bus, fixture создаёт её
-   только в private root, публикует exact socket атомарно и удаляет по
-   PID/start-time/socket identity; production fallback не добавляется.
+   disposable GitHub runner не предоставляет system bus, fixture после exact
+   vendor-fragment и clean inactive-state attestation временно запускает
+   штатные `dbus.socket`/`dbus.service` через PID 1. Она не публикует socket
+   вручную, не меняет enablement и останавливает только записанный
+   PID/start-time/InvocationID/socket identity с обязательным zero-residue;
+   production fallback не добавляется.
 
 Это не сокращает L2 admission. Оно переносит ещё один класс live discovery в
 тот же 15–20-минутный disposable Linux gate, чтобы один topology successor не
 порождал цепочку новых SHA и почти суточный operator cycle.
+
+### REL-ACC-010: журнал предотвращения повторных ошибок
+
+Каждая проблема, найденная при доведении live-systemd gate, закрепляется не
+только исправлением, но и исполняемым regression-контрактом. Повторять
+отклонённый подход без нового документированного authority запрещено.
+
+| Наблюдавшаяся ошибка | Точная причина | Постоянный guard |
+| --- | --- | --- |
+| Production-control fixture принимал неканонический authority path/digest | synthetic authority не совпадал с root-owned production contract | exact canonical path/digest pins и root-trust negative matrix |
+| Drain fixture ожидал одинаковый enablement для service и timer | oneshot service является `static`, timer — `disabled` | раздельный `UnitFileState` contract и regression fixture |
+| Live systemd fixture не находил `/usr/bin/node` | GitHub Node 22 находится в toolcache, а production unit использует exact `/usr/bin/node` | identity/digest-bound staging только exact Node 22 с race-safe cleanup |
+| Slot fixture падал до worker gate | clean runner не содержал `/etc/leetplus/slots` | fixture создаёт и удаляет exact parent; production provisioning не расширен |
+| Ошибка systemd worker была непрозрачной | failure скрывался без bounded unit journal/status | diagnostics печатаются только после failure и не принимаются как success evidence |
+| DynamicUser получал `Transport endpoint is not connected` | вручную поднятый `dbus-daemon`, даже с `--systemd-activation`, не является system bus, интегрированным с PID 1 | только vendor `dbus.socket`/`dbus.service` через PID 1; ручная socket publication запрещена |
+| Exact Noble unit отклонялся общим allowlist | Ubuntu 24.04 использует literal `ExecStart=@/usr/bin/dbus-daemon @dbus-daemon ...`, поэтому `argv[0]=@dbus-daemon` | отдельные exact unit-text и `/proc/<pid>/cmdline` варианты, без wildcard |
+| Timeout/SIGTERM мог оставить D-Bus job после fixture | cleanup intent вооружался после `systemctl start`, то есть позже PID 1 side effect | intent arm до `start --no-block`, exact pending-job validation и два pre-identity recovery прогона с zero-residue postcheck |
+
+При новом падении сначала дополняются эта таблица и соответствующая negative
+проверка; повторный exact-SHA CI запускается только после локальных syntax,
+diff-integrity и blocker-only security review.

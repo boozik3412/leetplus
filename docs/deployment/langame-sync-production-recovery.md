@@ -52,7 +52,9 @@ corporate scope или Langame credentials. Внешние tenant остаютс
 - Full Release Admission того же exact SHA `SUCCESS`;
 - live-systemd gate подтверждает доступ DynamicUser к system D-Bus и точное
   совпадение systemd `MainPID/InvocationID`; отсутствие шины не разрешает
-  fallback и блокирует worker до Langame effect;
+  fallback и блокирует worker до Langame effect; на disposable CI runner
+  допустим только bounded запуск штатных vendor `dbus.socket`/`dbus.service`
+  через PID 1 с exact initial/final state attestation и zero residue;
 - immutable runtime/control handoff и installed-generation verification;
 - fresh production backup, off-host checksum и restored-copy smoke;
 - healthy active slot и независимо healthy hot rollback;

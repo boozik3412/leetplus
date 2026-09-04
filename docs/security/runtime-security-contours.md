@@ -389,10 +389,14 @@ authority state и не является terminal rollback.
 Worker wrapper не доверяет одному `INVOCATION_ID` из environment: он обязан
 получить через system D-Bus точные `MainPID` и `InvocationID` свежего systemd
 invocation. Недоступная или недоверенная шина завершает запуск fail-closed без
-Langame effect; fallback на UID/cgroup запрещён. CI может временно поднять такую
-шину только внутри явно подтверждённого disposable GitHub runner, из private
-root с identity-bound публикацией и zero-residue cleanup. Это не production
-provisioning и не даёт worker новых provider/runtime полномочий.
+Langame effect; fallback на UID/cgroup запрещён. Если на явно подтверждённом
+disposable GitHub runner system bus отсутствует, CI может временно запустить
+только штатные vendor `dbus.socket`/`dbus.service` через PID 1 после exact
+fragment/inactive-state attestation. Ручная публикация socket запрещена;
+cleanup intent вооружается до передачи start-job в PID 1, связан с
+PID/start-time/InvocationID/socket identity, не меняет unit enablement и обязан
+вернуть исходное inactive/zero-residue состояние. Это не production provisioning
+и не даёт worker новых provider/runtime полномочий.
 
 ### Runtime repair contract 29–30.08.2026
 

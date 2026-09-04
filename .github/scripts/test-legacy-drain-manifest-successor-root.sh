@@ -144,6 +144,22 @@ while IFS=' ' read -r classification unit; do
   chown root:root "/etc/systemd/system/${unit}.d/90-leetplus-nminus1-start-fence.conf"; chmod 0644 "/etc/systemd/system/${unit}.d/90-leetplus-nminus1-start-fence.conf"
 done < /etc/leetplus/legacy-drain-units.conf
 
+# Model the exact safe precursor for the two additive manifest entries: systemd
+# may already have a canonical drop-in directory, but neither the durable fence
+# nor any worker authorization authority exists yet.  The generic verifier must
+# therefore stop specifically at the missing fence file, after directory trust.
+for unit in leetplus-langame-daily-worker.timer leetplus-langame-daily-worker.service; do
+  fence_directory="/etc/systemd/system/${unit}.d"
+  fence_path="${fence_directory}/90-leetplus-nminus1-start-fence.conf"
+  authorization_path="${fence_directory}/91-leetplus-langame-worker-authorization.conf"
+  install -d -o root -g root -m 0755 -- "$fence_directory"
+  [[ -d "$fence_directory" && ! -L "$fence_directory" ]] || die "additive fence directory is not exact: ${unit}"
+  [[ "$(stat -c '%U:%G:%a' -- "$fence_directory")" == 'root:root:755' ]] || die "additive fence directory authority is unsafe: ${unit}"
+  [[ ! -e "$fence_path" && ! -L "$fence_path" ]] || die "additive fence unexpectedly exists before successor apply: ${unit}"
+  [[ ! -e "$authorization_path" && ! -L "$authorization_path" ]] || die "worker authorization unexpectedly exists before successor apply: ${unit}"
+done
+unset unit fence_directory fence_path authorization_path
+
 # The fixture facade gives production-shaped, loaded systemd state while the
 # authority still creates and reloads real drop-in bytes under exact paths.
 cat > /usr/bin/systemctl <<'SYSTEMCTL'
@@ -185,6 +201,22 @@ printf '0|0|0|0|1|1|0|2|0|0|1|1|1|0|0|0|1|leetplus|127.0.0.1|5432|12345678901234
 PSQL
 chmod 0755 /usr/bin/psql
 
+# Keep the verifier's earlier directory-authority guard covered independently
+# from the intended missing-file precursor below.
+probe_directory='/etc/systemd/system/leetplus-langame-daily-worker.timer.d'
+probe_saved='/run/fixture-successor-missing-timer-dir'
+[[ ! -e "$probe_saved" && ! -L "$probe_saved" ]] || die 'directory negative scratch path already exists'
+mv -- "$probe_directory" "$probe_saved"
+if timeout 5s "$DRAIN_PATH" > /run/fixture-successor-directory-negative.out 2>&1; then
+  die 'generic drain verifier accepted an absent start-fence directory'
+fi
+grep -F 'legacy unit start-fence directory is noncanonical: leetplus-langame-daily-worker.timer' /run/fixture-successor-directory-negative.out >/dev/null \
+  || { cat /run/fixture-successor-directory-negative.out >&2; die 'directory negative stopped at an unexpected guard'; }
+mv -- "$probe_saved" "$probe_directory"
+[[ -d "$probe_directory" && ! -L "$probe_directory" && "$(stat -c '%U:%G:%a' -- "$probe_directory")" == 'root:root:755' ]] \
+  || die 'directory negative did not restore exact timer fence authority'
+unset probe_directory probe_saved
+
 # A bounded direct verifier call demonstrates that the historical receipt is
 # intentionally insufficient for the expanded manifest.  It must fail due to
 # the two absent exact start fences, never due to an unrelated setup defect.
@@ -204,9 +236,15 @@ $AUTHORITY_PATH apply --control-release-sha "$CONTROL_SHA" --plan-sha256 "$plan_
 grep -F -x 'LEGACY_DRAIN_MANIFEST_SUCCESSOR_APPLY=PASS' /run/fixture-successor-apply.out >/dev/null || die 'apply did not publish success'
 [[ -f /run/fixture-successor-daemon-reload ]] || die 'apply did not reload the fixture systemd manager'
 for unit in leetplus-langame-daily-worker.timer leetplus-langame-daily-worker.service; do
+  fence_directory="/etc/systemd/system/${unit}.d"
   fence="/etc/systemd/system/${unit}.d/90-leetplus-nminus1-start-fence.conf"
+  [[ -d "$fence_directory" && ! -L "$fence_directory" && "$(stat -c '%U:%G:%a' -- "$fence_directory")" == 'root:root:755' ]] \
+    || die "created fence directory is not exact: ${unit}"
+  [[ -f "$fence" && ! -L "$fence" && "$(stat -c '%U:%G:%a:%h' -- "$fence")" == 'root:root:644:1' ]] \
+    || die "created fence authority is not exact: ${unit}"
   [[ "$(cat "$fence")" == $'[Unit]\nConditionPathExists=!/var/lib/leetplus/legacy-drain/legacy-start-fence' ]] || die "created fence is not exact: ${unit}"
 done
+unset unit fence_directory fence
 $AUTHORITY_PATH check --control-release-sha "$CONTROL_SHA" > /run/fixture-successor-check.out
 grep -F -x 'LEGACY_DRAIN_MANIFEST_SUCCESSOR_CHECK=PASS' /run/fixture-successor-check.out >/dev/null || die 'check did not accept live drain and receipt chain'
 

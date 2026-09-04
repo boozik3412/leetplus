@@ -386,6 +386,14 @@ quiesce, удаление узких 91 permit conditions и active pointer, в�
 fences и immutable revoke receipt. Простой ручной `disable --now` не закрывает
 authority state и не является terminal rollback.
 
+Worker wrapper не доверяет одному `INVOCATION_ID` из environment: он обязан
+получить через system D-Bus точные `MainPID` и `InvocationID` свежего systemd
+invocation. Недоступная или недоверенная шина завершает запуск fail-closed без
+Langame effect; fallback на UID/cgroup запрещён. CI может временно поднять такую
+шину только внутри явно подтверждённого disposable GitHub runner, из private
+root с identity-bound публикацией и zero-residue cleanup. Это не production
+provisioning и не даёт worker новых provider/runtime полномочий.
+
 ### Runtime repair contract 29–30.08.2026
 
 - `USER_CALL` остаётся обычным public API request path. Advisory transaction

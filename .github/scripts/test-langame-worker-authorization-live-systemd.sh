@@ -23,9 +23,14 @@ readonly MARKER='/var/lib/leetplus/langame-sync/live-systemd-wrapper-ran'
 readonly TIMER_STAMP='/var/lib/systemd/timers/stamp-leetplus-langame-daily-worker.timer'
 readonly WRAPPER='/usr/local/libexec/leetplus/run-authorized-langame-daily-worker.sh'
 readonly RUNNER='/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh'
+readonly SYSTEM_BUS_ROOT='/run/dbus'
+readonly SYSTEM_BUS_SOCKET='/run/dbus/system_bus_socket'
 
 created_runtime=false; created_api=false; created_system_node=false
 system_node_root=''; system_node_root_device_inode=''; system_node_stage=''; system_node_stage_device_inode=''; system_node_claim=''; system_node_digest=''
+created_system_bus=false; created_system_bus_root=false; system_bus_publication_attempted=false; reused_system_bus=false
+system_bus_pid=''; system_bus_parent_pid=''; system_bus_start_time=''; system_bus_cmdline_sha256=''; system_bus_socket_device_inode=''; system_bus_root_device_inode=''
+system_bus_fixture_root=''; system_bus_fixture_root_device_inode=''; system_bus_private_socket=''; system_bus_claim=''
 die() { printf 'Langame worker live-systemd fixture: %s\n' "$*" >&2; exit 1; }
 bounded_systemctl() { timeout --foreground --kill-after=2s 12s systemctl "$@"; }
 start_worker_or_report() {
@@ -33,6 +38,40 @@ start_worker_or_report() {
   systemctl --no-pager --full status "$SERVICE" >&2 || true
   journalctl --no-pager --output=short-precise --unit "$SERVICE" --lines=80 >&2 || true
   die 'authorized systemd worker invocation failed'
+}
+system_bus_process_is_owned_child() {
+  [[ "$system_bus_pid" =~ ^[1-9][0-9]*$ \
+    && -r "/proc/${system_bus_pid}/stat" \
+    && "$(awk '{print $4}' "/proc/${system_bus_pid}/stat")" == "$system_bus_parent_pid" \
+    && "$(awk '{print $22}' "/proc/${system_bus_pid}/stat")" == "$system_bus_start_time" \
+    && "$(readlink -e -- "/proc/${system_bus_pid}/exe")" == /usr/bin/dbus-daemon ]]
+}
+system_bus_process_is_exact() {
+  system_bus_process_is_owned_child \
+    && [[ -n "$system_bus_cmdline_sha256" \
+      && "$(sha256sum -- "/proc/${system_bus_pid}/cmdline" | awk '{print $1}')" == "$system_bus_cmdline_sha256" ]]
+}
+system_bus_socket_is_exact() {
+  local path="$1"
+  [[ -S "$path" && ! -L "$path" \
+    && "$(stat -c '%U:%G:%d:%i' -- "$path")" == "root:root:${system_bus_socket_device_inode}" ]]
+}
+system_bus_root_is_exact() {
+  [[ -d "$SYSTEM_BUS_ROOT" && ! -L "$SYSTEM_BUS_ROOT" \
+    && "$(stat -c '%U:%G:%d:%i' -- "$SYSTEM_BUS_ROOT")" == "root:root:${system_bus_root_device_inode}" \
+    && -z "$(find -P "$SYSTEM_BUS_ROOT" -maxdepth 0 -perm /022 -print -quit)" ]]
+}
+preexisting_system_bus_is_exact() {
+  [[ "$reused_system_bus" == true ]] \
+    && system_bus_root_is_exact \
+    && system_bus_socket_is_exact "$SYSTEM_BUS_SOCKET"
+}
+system_bus_process_has_exact_executable() {
+  [[ "$system_bus_pid" =~ ^[1-9][0-9]*$ \
+    && -r "/proc/${system_bus_pid}/stat" \
+    && "$(readlink -e -- "/proc/${system_bus_pid}/exe")" == /usr/bin/dbus-daemon \
+    && "$(awk '{print $4}' "/proc/${system_bus_pid}/stat")" == "$system_bus_parent_pid" \
+    && "$(awk '{print $22}' "/proc/${system_bus_pid}/stat")" == "$system_bus_start_time" ]]
 }
 assert_zero_processes() {
   local unit="$1" property value cgroup
@@ -98,6 +137,68 @@ cleanup() {
   systemctl daemon-reload
   [[ "$created_api" == true ]] && groupdel leetplus-api-runtime
   [[ "$created_runtime" == true ]] && groupdel leetplus-runtime
+  if [[ "$created_system_bus" == true ]]; then
+    if system_bus_process_is_owned_child; then
+      kill -TERM "$system_bus_pid"
+      for _ in {1..50}; do
+        system_bus_process_is_owned_child || break
+        sleep 0.1
+      done
+      if system_bus_process_is_owned_child; then
+        kill -KILL "$system_bus_pid"
+        for _ in {1..20}; do
+          system_bus_process_is_owned_child || break
+          sleep 0.1
+        done
+      fi
+      system_bus_process_is_owned_child && cleanup_status=1
+    elif [[ -e "/proc/${system_bus_pid}" ]]; then
+      printf 'Langame worker live-systemd fixture: refusing to signal a reused system-bus PID\n' >&2
+      cleanup_status=1
+    fi
+    wait "$system_bus_pid" 2>/dev/null || true
+    if [[ "$system_bus_publication_attempted" == true && ( -e "$SYSTEM_BUS_SOCKET" || -L "$SYSTEM_BUS_SOCKET" ) ]]; then
+      mv -T -n -- "$SYSTEM_BUS_SOCKET" "$system_bus_claim"
+      if system_bus_socket_is_exact "$system_bus_claim"; then
+        rm -f -- "$system_bus_claim"
+      else
+        if [[ -e "$system_bus_claim" || -L "$system_bus_claim" ]]; then
+          mv -T -n -- "$system_bus_claim" "$SYSTEM_BUS_SOCKET"
+        fi
+        printf 'Langame worker live-systemd fixture: preserved unexpected system-bus socket replacement\n' >&2
+        cleanup_status=1
+      fi
+    fi
+    if [[ -e "$system_bus_private_socket" || -L "$system_bus_private_socket" ]]; then
+      if system_bus_socket_is_exact "$system_bus_private_socket"; then
+        rm -f -- "$system_bus_private_socket"
+      else
+        printf 'Langame worker live-systemd fixture: refusing to remove replaced private system-bus socket\n' >&2
+        cleanup_status=1
+      fi
+    fi
+  elif [[ "$reused_system_bus" == true ]] && ! preexisting_system_bus_is_exact; then
+    printf 'Langame worker live-systemd fixture: pre-existing system bus changed during fixture\n' >&2
+    cleanup_status=1
+  fi
+  if [[ -n "$system_bus_fixture_root" && ( -e "$system_bus_fixture_root" || -L "$system_bus_fixture_root" ) ]]; then
+    if [[ -d "$system_bus_fixture_root" && ! -L "$system_bus_fixture_root" \
+      && "$(stat -c '%d:%i' -- "$system_bus_fixture_root")" == "$system_bus_fixture_root_device_inode" ]]; then
+      rmdir -- "$system_bus_fixture_root" || cleanup_status=1
+    else
+      printf 'Langame worker live-systemd fixture: refusing to remove replaced system-bus fixture root\n' >&2
+      cleanup_status=1
+    fi
+  fi
+  if [[ "$created_system_bus_root" == true && ( -e "$SYSTEM_BUS_ROOT" || -L "$SYSTEM_BUS_ROOT" ) ]]; then
+    if [[ -d "$SYSTEM_BUS_ROOT" && ! -L "$SYSTEM_BUS_ROOT" \
+      && "$(stat -c '%d:%i' -- "$SYSTEM_BUS_ROOT")" == "$system_bus_root_device_inode" ]]; then
+      rmdir -- "$SYSTEM_BUS_ROOT" || cleanup_status=1
+    else
+      printf 'Langame worker live-systemd fixture: refusing to remove replaced system-bus root\n' >&2
+      cleanup_status=1
+    fi
+  fi
   ((original_status != 0)) && exit "$original_status"
   exit "$cleanup_status"
 }
@@ -106,7 +207,71 @@ trap cleanup EXIT
 [[ "$fixture_ci" == true && "$fixture_github_actions" == true && "$fixture_confirm" == "$ACK" ]] || die 'explicit GitHub Actions fixture confirmation is required'
 ((EUID == 0)) || die 'root is required'
 [[ "$(ps -p 1 -o comm= | tr -d ' ')" == systemd ]] || die 'a real systemd PID 1 is required'
-for binary in install mkdir mktemp rm rmdir systemctl journalctl timeout stat find awk grep groupadd groupdel getent ps tr readlink realpath sha256sum sed date chown chmod ln touch cat mv; do command -v "$binary" >/dev/null || die "missing ${binary}"; done
+for binary in install mkdir mktemp rm rmdir systemctl journalctl dbus-daemon timeout stat find awk grep groupadd groupdel getent ps tr readlink realpath sha256sum sed date chown chmod ln touch cat mv sleep; do command -v "$binary" >/dev/null || die "missing ${binary}"; done
+[[ "$(realpath -e -- "$(command -v dbus-daemon)")" == /usr/bin/dbus-daemon \
+  && -f /usr/bin/dbus-daemon && ! -L /usr/bin/dbus-daemon \
+  && "$(stat -c '%U:%G:%h' -- /usr/bin/dbus-daemon)" == 'root:root:1' \
+  && -z "$(find -P /usr/bin/dbus-daemon -maxdepth 0 -perm /022 -print -quit)" ]] \
+  || die 'fixture system-bus executable is not exact immutable root authority'
+if [[ ! -e "$SYSTEM_BUS_ROOT" && ! -L "$SYSTEM_BUS_ROOT" ]]; then
+  if mkdir -m 0755 -- "$SYSTEM_BUS_ROOT"; then
+    created_system_bus_root=true
+  elif [[ ! -e "$SYSTEM_BUS_ROOT" && ! -L "$SYSTEM_BUS_ROOT" ]]; then
+    die 'failed to create the system-bus root exclusively'
+  fi
+fi
+[[ -d "$SYSTEM_BUS_ROOT" && ! -L "$SYSTEM_BUS_ROOT" \
+  && "$(realpath -e -- "$SYSTEM_BUS_ROOT")" == "$SYSTEM_BUS_ROOT" \
+  && "$(stat -c '%U:%G' -- "$SYSTEM_BUS_ROOT")" == 'root:root' \
+  && -z "$(find -P "$SYSTEM_BUS_ROOT" -maxdepth 0 -perm /022 -print -quit)" ]] \
+  || die 'system-bus root is not immutable root authority'
+system_bus_root_device_inode="$(stat -c '%d:%i' -- "$SYSTEM_BUS_ROOT")"
+if [[ -e "$SYSTEM_BUS_SOCKET" || -L "$SYSTEM_BUS_SOCKET" ]]; then
+  [[ -S "$SYSTEM_BUS_SOCKET" && ! -L "$SYSTEM_BUS_SOCKET" \
+    && "$(stat -c '%U:%G' -- "$SYSTEM_BUS_SOCKET")" == 'root:root' ]] \
+    || die 'pre-existing system-bus endpoint is not an exact root-owned socket'
+  reused_system_bus=true
+  system_bus_socket_device_inode="$(stat -c '%d:%i' -- "$SYSTEM_BUS_SOCKET")"
+  preexisting_system_bus_is_exact \
+    || die 'pre-existing system-bus authority drifted during attestation'
+else
+  system_bus_fixture_root="$(mktemp -d -p /run '.leetplus-langame-system-bus.XXXXXXXX')"
+  system_bus_fixture_root_device_inode="$(stat -c '%d:%i' -- "$system_bus_fixture_root")"
+  [[ "$(stat -c '%U:%G:%a:%h' -- "$system_bus_fixture_root")" == 'root:root:700:2' ]] \
+    || die 'system-bus fixture root is not private root authority'
+  system_bus_private_socket="${system_bus_fixture_root}/system_bus_socket"
+  system_bus_claim="${system_bus_fixture_root}/system_bus_socket"
+  system_bus_parent_pid="$BASHPID"
+  /usr/bin/dbus-daemon --system --nofork --nopidfile \
+    "--address=unix:path=${system_bus_private_socket}" >/dev/null &
+  system_bus_pid=$!
+  system_bus_start_time="$(awk '{print $22}' "/proc/${system_bus_pid}/stat" 2>/dev/null || true)"
+  created_system_bus=true
+  [[ "$system_bus_pid" =~ ^[1-9][0-9]*$ && "$system_bus_start_time" =~ ^[1-9][0-9]*$ ]] \
+    || die 'fixture-owned system-bus child identity is invalid'
+  for _ in {1..50}; do
+    system_bus_process_has_exact_executable && [[ -S "$system_bus_private_socket" ]] && break
+    [[ -e "/proc/${system_bus_pid}" ]] || die 'fixture-owned system bus exited before publishing its endpoint'
+    sleep 0.1
+  done
+  system_bus_process_has_exact_executable \
+    || die 'fixture-owned system-bus process identity is invalid'
+  system_bus_cmdline_sha256="$(sha256sum -- "/proc/${system_bus_pid}/cmdline" | awk '{print $1}')"
+  [[ "$(tr '\0' '\n' < "/proc/${system_bus_pid}/cmdline")" == $'/usr/bin/dbus-daemon\n--system\n--nofork\n--nopidfile\n--address=unix:path='"${system_bus_private_socket}" \
+    && -S "$system_bus_private_socket" && ! -L "$system_bus_private_socket" \
+    && "$(stat -c '%U:%G' -- "$system_bus_private_socket")" == 'root:root' ]] \
+    || die 'fixture-owned system-bus process or socket failed exact attestation'
+  system_bus_socket_device_inode="$(stat -c '%d:%i' -- "$system_bus_private_socket")"
+  system_bus_process_is_exact && system_bus_socket_is_exact "$system_bus_private_socket" \
+    || die 'fixture-owned private system-bus authority drifted before publication'
+  system_bus_claim="${system_bus_fixture_root}/claimed-system_bus_socket"
+  system_bus_publication_attempted=true
+  mv -T -n -- "$system_bus_private_socket" "$SYSTEM_BUS_SOCKET"
+  [[ ! -e "$system_bus_private_socket" && ! -L "$system_bus_private_socket" ]] \
+    || die 'system-bus endpoint publication lost the exclusive destination race'
+  system_bus_socket_is_exact "$SYSTEM_BUS_SOCKET" \
+    || die 'published fixture-owned system-bus endpoint identity drifted'
+fi
 if [[ ! -e /usr/bin/node && ! -L /usr/bin/node ]]; then
   [[ -n "$fixture_node_input" ]] || die 'an exact fixture Node source is required'
   fixture_node="$(realpath -e -- "$fixture_node_input")"

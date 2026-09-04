@@ -91,6 +91,12 @@ oneshot перед возможным `Persistent=true` catch-up, исключа
 `inactive/disabled`, public/corporate и действующий bonus-ledger worker не
 затронуты.
 
+CI successor дополнительно обязан пройти реальный PID 1/DynamicUser путь.
+Wrapper принимает permit только при совпадении `MainPID/InvocationID`,
+прочитанном через system D-Bus; недоступность шины не понижает проверку до
+UID/cgroup. Временная fixture-шина разрешена только на явно подтверждённом
+disposable GitHub runner и обязана завершиться без socket/process residue.
+
 ## Ускорение release pipeline без ослабления gates (02.09.2026)
 
 В backlog добавлена отдельная инициатива

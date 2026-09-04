@@ -325,8 +325,12 @@ receipt/manifest fixture и проигрывать весь lifecycle:
    по-прежнему не получают исключения.
 6. Crash/lost-response, tampered receipt, symlink/mount, wrong owner/mode,
    active worker, чужой release/env/tenant и lock contention negative matrix.
-7. Реальный PID 1 positive path wrapper→active release, immediate persistent
-   timer fire, PID/cgroup residue и полный digest-bound timer revoke/recovery.
+7. Реальный PID 1 positive path wrapper→active release, system D-Bus
+   `MainPID/InvocationID` attestation, immediate persistent timer fire,
+   PID/cgroup residue и полный digest-bound timer revoke/recovery. Если
+   disposable GitHub runner не предоставляет system bus, fixture создаёт её
+   только в private root, публикует exact socket атомарно и удаляет по
+   PID/start-time/socket identity; production fallback не добавляется.
 
 Это не сокращает L2 admission. Оно переносит ещё один класс live discovery в
 тот же 15–20-минутный disposable Linux gate, чтобы один topology successor не

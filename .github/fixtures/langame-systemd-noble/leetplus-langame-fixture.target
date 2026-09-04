@@ -1,0 +1,5 @@
+[Unit]
+Description=LeetPlus boot-integrated Langame systemd fixture
+Requires=basic.target sockets.target dbus.socket dbus.service
+After=basic.target sockets.target dbus.socket dbus.service
+AllowIsolate=yes

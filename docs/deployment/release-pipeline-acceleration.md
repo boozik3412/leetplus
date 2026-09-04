@@ -1,6 +1,6 @@
 # Ускорение безопасного release pipeline
 
-Статус: **REL-ACC-001..009 implemented; REL-ACC-010 incremental control-state rehearsal в работе**
+Статус: **REL-ACC-001..010 implemented**
 
 Актуально на: **04.09.2026**
 
@@ -339,6 +339,16 @@ receipt/manifest fixture и проигрывать весь lifecycle:
 Это не сокращает L2 admission. Оно переносит ещё один класс live discovery в
 тот же 15–20-минутный disposable Linux gate, чтобы один topology successor не
 порождал цепочку новых SHA и почти суточный operator cycle.
+
+REL-ACC-010 завершён через PR #129, merge SHA
+`4ad789c0509147037ee0f5b87c60655de12af63a`. На exact pre-merge head
+`84609d0d932bc1992574c14e05a09c72fcbae589` Fast CI `33885210796` завершился
+за 10 минут 23 секунды, а запущенный одновременно Full Release Admission
+`33885215321` — за 17 минут 20 секунд. После merge exact-main Fast
+`33886942753` завершился за 10 минут 20 секунд, Full `33886942868` — за
+17 минут 44 секунды; оба `SUCCESS`. Это подтверждает целевую параллельную
+модель и direct-PID1 gate без nested container bootstrap. Production в рамках
+этой реализации не изменялся.
 
 ### REL-ACC-010: журнал предотвращения повторных ошибок
 

@@ -132,11 +132,19 @@ assert_no_unexpected_env_keys() {
 }
 systemctl_bounded() { timeout --kill-after=2s 10s systemctl "$@"; }
 unit_has_no_processes() {
-  local unit="$1" property value control_group cgroup_path events
-  for property in MainPID ControlPID ExecMainPID; do
+  local unit="$1" property value exec_main_pid control_group cgroup_path events
+  # ExecMainPID is historical terminal metadata for a completed oneshot on
+  # supported systemd 255. It is harmless only when the recorded PID has no
+  # live /proc identity; PID reuse stays fail-closed. MainPID/ControlPID plus
+  # cgroup.events remain the authoritative live-process boundary.
+  for property in MainPID ControlPID; do
     value="$(systemctl_bounded show --property="$property" --value "$unit")" || return 1
     [[ "$value" == 0 ]] || return 1
   done
+  exec_main_pid="$(systemctl_bounded show --property=ExecMainPID --value "$unit")" || return 1
+  if [[ -n "$exec_main_pid" && "$exec_main_pid" != 0 ]]; then
+    [[ "$exec_main_pid" =~ ^[1-9][0-9]*$ && ! -e "/proc/${exec_main_pid}" ]] || return 1
+  fi
   control_group="$(systemctl_bounded show --property=ControlGroup --value "$unit")" || return 1
   [[ "$control_group" != *$'\r'* && "$control_group" != *$'\n'* ]] || return 1
   [[ -n "$control_group" ]] || return 0
@@ -496,16 +504,25 @@ write_permit() {
   printf '%s' "$path"
 }
 wait_for_canary_terminal() {
-  local before_invocation="$1" invocation active result status deadline
+  local before_start="$1" current_start current_exit active result status deadline
+  [[ "$before_start" =~ ^[0-9]{1,18}$ ]] || return 1
   deadline="$(( $(date +%s) + 2700 ))"
   while (( $(date +%s) < deadline )); do
-    invocation="$(systemctl_bounded show --property=InvocationID --value "$WORKER_SERVICE")"
+    current_start="$(systemctl_bounded show --property=ExecMainStartTimestampMonotonic --value "$WORKER_SERVICE")"
     active="$(systemctl_bounded show --property=ActiveState --value "$WORKER_SERVICE")"
     result="$(systemctl_bounded show --property=Result --value "$WORKER_SERVICE")"
     status="$(systemctl_bounded show --property=ExecMainStatus --value "$WORKER_SERVICE")"
-    [[ -n "$invocation" && "$invocation" != "$before_invocation" ]] || { /usr/bin/sleep 2; continue; }
+    [[ "$current_start" =~ ^[0-9]{1,18}$ ]] || return 1
+    case "$active" in
+      inactive|activating|active) ;;
+      failed|deactivating|*) return 1 ;;
+    esac
+    (( 10#$current_start > 10#$before_start )) || { /usr/bin/sleep 2; continue; }
     if [[ "$active" == inactive ]]; then
-      [[ "$result" == success && "$status" == 0 ]] || return 1
+      current_exit="$(systemctl_bounded show --property=ExecMainExitTimestampMonotonic --value "$WORKER_SERVICE")"
+      [[ "$current_exit" =~ ^[0-9]{1,18}$
+        && 10#$current_exit -ge 10#$current_start
+        && "$result" == success && "$status" == 0 ]] || return 1
       service_is_quiescent && worker_jobs_are_absent && return 0
     fi
     /usr/bin/sleep 2
@@ -579,7 +596,7 @@ write_intent() {
 }
 clear_intent() { local intent; intent="$(intent_path)"; [[ -f "$intent" && ! -L "$intent" ]] || die 'authorization intent disappeared unexpectedly'; rm -f -- "$intent"; sync -d "$STATE_ROOT"; }
 recover_intent() {
-  local intent permit recorded_phase recorded_release current_permit before_invocation validation_path service_authorization timer_authorization
+  local intent permit recorded_phase recorded_release current_permit before_start validation_path service_authorization timer_authorization
   intent="$(intent_path)"; [[ -e "$intent" || -L "$intent" ]] || die 'no authorization intent exists for this phase'
   assert_regular "$intent" 'root:root:400'
   recorded_phase="$(awk -F= '$1 == "PHASE" { print $2 }' "$intent")"; recorded_release="$(awk -F= '$1 == "RELEASE_SHA" { print $2 }' "$intent")"; permit="$(awk -F= '$1 == "PERMIT_PATH" { print $2 }' "$intent")"
@@ -618,8 +635,8 @@ recover_intent() {
   fi
   assert_timer_validation "$permit"
   if systemctl_bounded is-enabled --quiet "$WORKER_TIMER" && systemctl_bounded is-active --quiet "$WORKER_TIMER"; then
-    before_invocation="$(systemctl_bounded show --property=InvocationID --value "$WORKER_SERVICE")"
-    if settle_enabled_timer "$before_invocation"; then
+    before_start="$(systemctl_bounded show --property=ExecMainStartTimestampMonotonic --value "$WORKER_SERVICE")"
+    if settle_enabled_timer "$before_start"; then
       write_timer_enabled "$permit"; assert_timer_enabled "$permit"; clear_intent
       if "$WORKER_VERIFIER" >/dev/null && "$DRAIN_VERIFIER" >/dev/null; then
         printf 'LANGAME_DAILY_WORKER_AUTHORIZATION_RECOVERED=PASS phase=timer\n'
@@ -681,18 +698,30 @@ assert_authorization_dropins() {
   done
 }
 settle_enabled_timer() {
-  local before_invocation="$1" current_invocation result status stable=0 previous_sample='' _
-  [[ -z "$before_invocation" || "$before_invocation" =~ ^[0-9a-f]{32}$ || "$before_invocation" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || return 1
+  local before_start="$1" current_start current_exit service_state result status stable=0 previous_sample='' _
+  [[ "$before_start" =~ ^[0-9]{1,18}$ ]] || return 1
   for _ in {1..30}; do
+    service_state="$(systemctl_bounded show --property=ActiveState --value "$WORKER_SERVICE")" || return 1
+    case "$service_state" in
+      failed|deactivating) return 1 ;;
+      activating|active) stable=0; previous_sample=''; /usr/bin/sleep 2; continue ;;
+      inactive) ;;
+      *) return 1 ;;
+    esac
     if timer_is_waiting_quiescent && service_is_quiescent && worker_jobs_are_absent; then
-      current_invocation="$(systemctl_bounded show --property=InvocationID --value "$WORKER_SERVICE")" || return 1
-      [[ -z "$current_invocation" || "$current_invocation" =~ ^[0-9a-f]{32}$ || "$current_invocation" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || return 1
-      if [[ -n "$current_invocation" ]]; then
+      current_start="$(systemctl_bounded show --property=ExecMainStartTimestampMonotonic --value "$WORKER_SERVICE")" || return 1
+      [[ "$current_start" =~ ^[0-9]{1,18}$ && 10#$current_start -ge 10#$before_start ]] || return 1
+      if (( 10#$current_start > 0 )); then
+        current_exit="$(systemctl_bounded show --property=ExecMainExitTimestampMonotonic --value "$WORKER_SERVICE")" || return 1
+        [[ "$current_exit" =~ ^[0-9]{1,18}$ ]] || return 1
+        if (( 10#$current_exit < 10#$current_start )); then
+          stable=0; previous_sample=''; /usr/bin/sleep 2; continue
+        fi
         result="$(systemctl_bounded show --property=Result --value "$WORKER_SERVICE")" || return 1
         status="$(systemctl_bounded show --property=ExecMainStatus --value "$WORKER_SERVICE")" || return 1
         [[ "$result" == success && "$status" == 0 ]] || return 1
       fi
-      if [[ "$current_invocation" == "$previous_sample" ]]; then stable="$((stable + 1))"; else stable=1; previous_sample="$current_invocation"; fi
+      if [[ "$current_start" == "$previous_sample" ]]; then stable="$((stable + 1))"; else stable=1; previous_sample="$current_start"; fi
       ((stable >= 3)) && return 0
     else
       stable=0; previous_sample=''
@@ -895,9 +924,9 @@ case "$mode" in
     next_attempt; [[ "$attempt" == "$expected_attempt" ]] || die 'authorization attempt changed after plan confirmation'
     permit="$(receipt_path)"; write_intent "$actual_plan" "$permit"; permit="$(write_permit "$plan_json" "$actual_plan")"; assert_permit "$permit"
     if [[ "$phase" == canary ]]; then
-      before_invocation="$(systemctl_bounded show --property=InvocationID --value "$WORKER_SERVICE")"; release_worker_fences "$permit"
+      before_start="$(systemctl_bounded show --property=ExecMainStartTimestampMonotonic --value "$WORKER_SERVICE")"; release_worker_fences "$permit"
       if ! systemctl_bounded start --no-block "$WORKER_SERVICE"; then stop_service_and_assert_quiescent; write_canary_failure "$permit"; restore_worker_fences; clear_pointer; clear_intent; die 'canary service start was not accepted; fences restored'; fi
-      if ! wait_for_canary_terminal "$before_invocation"; then stop_service_and_assert_quiescent; write_canary_failure "$permit"; restore_worker_fences; clear_pointer; clear_intent; die 'canary did not reach a fresh successful terminal result'; fi
+      if ! wait_for_canary_terminal "$before_start"; then stop_service_and_assert_quiescent; write_canary_failure "$permit"; restore_worker_fences; clear_pointer; clear_intent; die 'canary did not reach a fresh successful terminal result'; fi
       service_is_quiescent && worker_jobs_are_absent || die 'successful canary retained a process, cgroup member, or systemd job'
       write_execution "$permit"
       restore_worker_fences
@@ -910,9 +939,9 @@ case "$mode" in
       # timer is enabled, and a manual preflight would duplicate that daily
       # sync. This receipt records validation, not a second execution.
       write_timer_validation "$permit"
-      before_enable_invocation="$(systemctl_bounded show --property=InvocationID --value "$WORKER_SERVICE")"
+      before_enable_start="$(systemctl_bounded show --property=ExecMainStartTimestampMonotonic --value "$WORKER_SERVICE")"
       if ! systemctl_bounded enable --now "$WORKER_TIMER"; then disable_timer_and_assert_quiescent; restore_worker_fences; clear_pointer; clear_intent; die 'timer enable failed after permit; timer disabled and fences restored'; fi
-      if ! settle_enabled_timer "$before_enable_invocation"; then disable_timer_and_assert_quiescent; restore_worker_fences; clear_pointer; clear_intent; die 'timer did not settle as enabled/waiting with a successful or absent immediate invocation'; fi
+      if ! settle_enabled_timer "$before_enable_start"; then disable_timer_and_assert_quiescent; restore_worker_fences; clear_pointer; clear_intent; die 'timer did not settle as enabled/waiting with a successful or absent immediate invocation'; fi
       write_timer_enabled "$permit"; assert_timer_enabled "$permit"; clear_intent
       if ! "$WORKER_VERIFIER" >/dev/null || ! "$DRAIN_VERIFIER" >/dev/null; then
         disable_timer_and_assert_quiescent; restore_worker_fences; clear_pointer

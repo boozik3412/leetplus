@@ -80,23 +80,27 @@ cat >/usr/bin/systemctl <<'EOF'
 set -euo pipefail
 state=/run/langame-fixture; mkdir -p "$state"; unit="${!#}"; prop=''
 for arg in "$@"; do [[ "$arg" == --property=* ]] && prop="${arg#--property=}"; done
-mode="$(cat "$state/mode" 2>/dev/null || printf success)"; enabled="$(cat "$state/timer-enabled" 2>/dev/null || printf 0)"
+mode="$(cat "$state/mode" 2>/dev/null || printf success)"; enabled="$(cat "$state/timer-enabled" 2>/dev/null || printf 0)"; service_active="$(cat "$state/service-active" 2>/dev/null || printf inactive)"
 case "$1" in
  daemon-reload) exit 0;;
  is-active) [[ "$unit" == leetplus-api@blue.service || "$unit" == leetplus-web@blue.service ]] && exit 0; [[ "$unit" == leetplus-langame-daily-worker.timer && "$enabled" == 1 ]] && exit 0; exit 3;;
  is-enabled) [[ "$unit" == leetplus-langame-daily-worker.timer && "$enabled" == 1 ]] && exit 0; exit 1;;
- start) if [[ "$unit" == leetplus-langame-daily-worker.service ]]; then if grep -F -x 'LANGAME_DAILY_WORKER_CANARY=false' /etc/leetplus/langame-daily-worker.env >/dev/null; then n="$(cat "$state/timer-profile-starts" 2>/dev/null || printf 0)"; printf '%s\n' "$((n + 1))" >"$state/timer-profile-starts"; fi; before="$(cat "$state/invocation" 2>/dev/null || printf old)"; if [[ "$mode" == stale ]]; then :; elif [[ "$mode" == failure ]]; then printf 'fresh-failure\n' >"$state/invocation"; printf failure >"$state/result"; else printf 'fresh-success\n' >"$state/invocation"; printf success >"$state/result"; fi; fi; exit 0;;
- enable) printf 1 >"$state/timer-enabled"; if [[ "$unit" == leetplus-langame-daily-worker.timer ]]; then n="$(cat "$state/timer-profile-starts" 2>/dev/null || printf 0)"; printf '%s\n' "$((n + 1))" >"$state/timer-profile-starts"; if [[ "$mode" == timer-fire-failure ]]; then printf timer-fire-failure >"$state/invocation"; printf failure >"$state/result"; else printf timer-fire-success >"$state/invocation"; printf success >"$state/result"; fi; fi; exit 0;;
+ start) if [[ "$unit" == leetplus-langame-daily-worker.service ]]; then if grep -F -x 'LANGAME_DAILY_WORKER_CANARY=false' /etc/leetplus/langame-daily-worker.env >/dev/null; then n="$(cat "$state/timer-profile-starts" 2>/dev/null || printf 0)"; printf '%s\n' "$((n + 1))" >"$state/timer-profile-starts"; fi; if [[ "$mode" == stale ]]; then :; else started="$(cat "$state/start-monotonic" 2>/dev/null || printf 0)"; printf '%s\n' "$((started + 10))" >"$state/start-monotonic"; if [[ "$mode" == failure ]]; then printf 'fresh-failure\n' >"$state/invocation"; printf failure >"$state/result"; printf failed >"$state/service-active"; else printf 'fresh-success\n' >"$state/invocation"; printf success >"$state/result"; printf inactive >"$state/service-active"; fi; fi; fi; exit 0;;
+ enable) printf 1 >"$state/timer-enabled"; if [[ "$unit" == leetplus-langame-daily-worker.timer ]]; then n="$(cat "$state/timer-profile-starts" 2>/dev/null || printf 0)"; printf '%s\n' "$((n + 1))" >"$state/timer-profile-starts"; started="$(cat "$state/start-monotonic" 2>/dev/null || printf 0)"; printf '%s\n' "$((started + 10))" >"$state/start-monotonic"; if [[ "$mode" == timer-fire-failure ]]; then printf timer-fire-failure >"$state/invocation"; printf failure >"$state/result"; printf failed >"$state/service-active"; else printf timer-fire-success >"$state/invocation"; printf success >"$state/result"; printf inactive >"$state/service-active"; fi; fi; exit 0;;
  disable) printf 0 >"$state/timer-enabled"; exit 0;;
  stop) exit 0;;
+ reset-failed) if [[ "$unit" == leetplus-langame-daily-worker.service ]]; then printf inactive >"$state/service-active"; if [[ "$mode" == failure || "$mode" == timer-fire-failure ]]; then printf success >"$state/mode"; printf success >"$state/result"; fi; fi; exit 0;;
  show) case "$prop" in
    FragmentPath) [[ "$unit" == *.timer ]] && printf '%s\n' /etc/systemd/system/leetplus-langame-daily-worker.timer || printf '%s\n' /etc/systemd/system/leetplus-langame-daily-worker.service;;
    InvocationID) cat "$state/invocation" 2>/dev/null || printf old;;
-   ActiveState) if [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == deactivating ]]; then printf deactivating; elif [[ "$unit" == *.timer && "$enabled" == 1 ]]; then printf active; else printf inactive; fi;;
-   SubState) if [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == deactivating ]]; then printf stop-sigterm; elif [[ "$unit" == *.timer && "$enabled" == 1 ]]; then printf waiting; else printf dead; fi;;
+   ExecMainStartTimestampMonotonic) cat "$state/start-monotonic" 2>/dev/null || printf 0;;
+   ExecMainExitTimestampMonotonic) started="$(cat "$state/start-monotonic" 2>/dev/null || printf 0)"; if ((started > 0)); then printf '%s' "$((started + 1))"; else printf 0; fi;;
+   ActiveState) if [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == deactivating ]]; then printf deactivating; elif [[ "$unit" == leetplus-langame-daily-worker.service ]]; then printf '%s' "$service_active"; elif [[ "$unit" == *.timer && "$enabled" == 1 ]]; then printf active; else printf inactive; fi;;
+   SubState) if [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == deactivating ]]; then printf stop-sigterm; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$service_active" == failed ]]; then printf failed; elif [[ "$unit" == *.timer && "$enabled" == 1 ]]; then printf waiting; else printf dead; fi;;
    Result) cat "$state/result" 2>/dev/null || printf success;;
    ExecMainStatus) printf 0;;
-   MainPID|ControlPID|ExecMainPID) if [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == pid-residue ]]; then printf 4242; else printf 0; fi;;
+   MainPID|ControlPID) if [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == pid-residue ]]; then printf 4242; else printf 0; fi;;
+   ExecMainPID) if [[ "$unit" == leetplus-langame-daily-worker.service && ( "$mode" == pid-residue || "$mode" == historical-exec-pid ) ]]; then printf 2147483646; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == live-historical-exec-pid ]]; then printf 1; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == malformed-exec-pid ]]; then printf invalid; else printf 0; fi;;
    UnitFileState) [[ "$unit" == *.timer ]] && { [[ "$enabled" == 1 ]] && printf enabled || printf disabled; } || printf static;;
    ControlGroup) printf '\n';;
    DropInPaths) for f in "/etc/systemd/system/${unit}.d/90-leetplus-nminus1-start-fence.conf" "/etc/systemd/system/${unit}.d/91-leetplus-langame-worker-authorization.conf"; do [[ -f "$f" ]] && printf '%s ' "$f"; done; printf '\n';;
@@ -118,13 +122,32 @@ chmod 755 /usr/bin/date
 printf '#!/usr/bin/bash\nexit 0\n' >/usr/bin/sleep; chmod 755 /usr/bin/sleep
 plan() { /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority plan --phase "$1" | sed -n 's/.*"planSha256":"\([0-9a-f]*\)".*/\1/p'; }
 apply() { local p; p="$(plan "$1")"; /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority apply --phase "$1" --plan-sha256 "$p" --action-count 1 --confirm I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_AUTHORIZATION; }
+apply_bounded() { local p; p="$(plan "$1")"; timeout --kill-after=1s 5s /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority apply --phase "$1" --plan-sha256 "$p" --action-count 1 --confirm I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_AUTHORIZATION; }
 apply canary
 /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority check --phase canary
 if /usr/local/libexec/leetplus/run-authorized-langame-daily-worker.sh; then echo 'direct API-runtime wrapper invocation was accepted' >&2; exit 1; fi
+printf historical-exec-pid >/run/langame-fixture/mode
+/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority check --phase canary
+printf live-historical-exec-pid >/run/langame-fixture/mode
+if /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority check --phase canary; then echo 'live/reused historical ExecMainPID was accepted' >&2; exit 1; fi
+printf malformed-exec-pid >/run/langame-fixture/mode
+if /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority check --phase canary; then echo 'malformed historical ExecMainPID was accepted' >&2; exit 1; fi
 printf pid-residue >/run/langame-fixture/mode
 if /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority check --phase canary; then echo 'PID residue after canary was accepted' >&2; exit 1; fi
 printf deactivating >/run/langame-fixture/mode
 if /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority check --phase canary; then echo 'deactivating canary was accepted as quiescent' >&2; exit 1; fi
+failure_receipts_before="$(find /var/lib/leetplus/langame-worker-authorizations -name 'failed-canary-*.receipt' | wc -l)"
+printf failure >/run/langame-fixture/mode
+if apply_bounded canary; then
+  echo 'failed terminal canary was accepted' >&2; exit 1
+else
+  failed_rc="$?"
+  [[ "$failed_rc" != 124 && "$failed_rc" != 137 ]] || { echo 'failed terminal canary did not fail immediately' >&2; exit 1; }
+fi
+test ! -e /var/lib/leetplus/langame-worker-authorizations/active-canary.permit
+test ! -e /etc/systemd/system/leetplus-langame-daily-worker.service.d/91-leetplus-langame-worker-authorization.conf
+failure_receipts_after="$(find /var/lib/leetplus/langame-worker-authorizations -name 'failed-canary-*.receipt' | wc -l)"
+test "$failure_receipts_after" = "$((failure_receipts_before + 1))"
 printf stale >/run/langame-fixture/mode
 if apply canary; then echo 'failed canary was accepted' >&2; exit 1; fi
 test ! -e /etc/systemd/system/leetplus-langame-daily-worker.service.d/91-leetplus-langame-worker-authorization.conf
@@ -143,7 +166,13 @@ printf success >/run/langame-fixture/mode
 printf 0 >/run/langame-fixture/timer-profile-starts
 apply timer
 test "$(cat /run/langame-fixture/timer-profile-starts)" = 1
+printf historical-exec-pid >/run/langame-fixture/mode
 /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority check --phase timer
+printf live-historical-exec-pid >/run/langame-fixture/mode
+if /usr/local/libexec/leetplus/verify-langame-daily-worker-authorization.sh; then echo 'timer verifier accepted live/reused historical ExecMainPID' >&2; exit 1; fi
+printf malformed-exec-pid >/run/langame-fixture/mode
+if /usr/local/libexec/leetplus/verify-langame-daily-worker-authorization.sh; then echo 'timer verifier accepted malformed historical ExecMainPID' >&2; exit 1; fi
+printf historical-exec-pid >/run/langame-fixture/mode
 printf '# tamper\n' >>/etc/systemd/system/leetplus-langame-daily-worker.timer.d/91-leetplus-langame-worker-authorization.conf
 if /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority check --phase timer; then echo 'tampered authorization was accepted' >&2; exit 1; fi
 sed -i '$d' /etc/systemd/system/leetplus-langame-daily-worker.timer.d/91-leetplus-langame-worker-authorization.conf

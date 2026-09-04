@@ -101,8 +101,12 @@ corporate scope или Langame credentials. Внешние tenant остаютс
    permit связывает active admitted release, installed control, exact env,
    INTERNAL tenant и выключенные API scheduler/scheduled HTTP. Canary permit
    bounded и после terminal run возвращает оба durable legacy fence. Каждый
-   terminal result требует `MainPID/ControlPID/ExecMainPID=0`, пустой cgroup и
-   отсутствие systemd jobs; одного `is-active=false` недостаточно.
+   Свежесть canary подтверждается ростом exact
+   `ExecMainStartTimestampMonotonic` и непротиворечивым terminal exit timestamp,
+   а не сохраняемым после завершения `InvocationID`. Terminal result требует
+   `MainPID/ControlPID=0`, пустой cgroup и отсутствие systemd jobs;
+   исторический `ExecMainPID` допустим только при отсутствии его `/proc`
+   identity. Одного `is-active=false` недостаточно.
 6. Проверить: три источника без `FAILED`, guest foundation успешен, ровно пять
    snapshot scopes свежие, JSON audit доступен при наличии расхождений, нет
    повторных rows по business keys.

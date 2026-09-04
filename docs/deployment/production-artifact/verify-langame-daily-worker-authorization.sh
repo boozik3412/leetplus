@@ -31,11 +31,19 @@ systemctl_bounded() { timeout --kill-after=2s 10s systemctl "$@"; }
 dropin() { printf '/etc/systemd/system/%s.d/91-leetplus-langame-worker-authorization.conf' "$1"; }
 legacy_fence() { printf '/etc/systemd/system/%s.d/90-leetplus-nminus1-start-fence.conf' "$1"; }
 assert_zero_unit_processes() {
-  local unit="$1" property value control_group cgroup_path events
-  for property in MainPID ControlPID ExecMainPID; do
+  local unit="$1" property value exec_main_pid control_group cgroup_path events
+  # ExecMainPID may remain as historical terminal metadata after a completed
+  # oneshot. It is accepted only when that PID has no live /proc identity;
+  # MainPID/ControlPID and the actual cgroup prove live quiescence.
+  for property in MainPID ControlPID; do
     value="$(systemctl_bounded show --property="$property" --value "$unit")"
     [[ "$value" == 0 ]] || die "unit retains ${property}: ${unit}"
   done
+  exec_main_pid="$(systemctl_bounded show --property=ExecMainPID --value "$unit")"
+  if [[ -n "$exec_main_pid" && "$exec_main_pid" != 0 ]]; then
+    [[ "$exec_main_pid" =~ ^[1-9][0-9]*$ ]] || die "unit exposes invalid historical ExecMainPID: ${unit}"
+    [[ ! -e "/proc/${exec_main_pid}" ]] || die "unit historical ExecMainPID is still live or reused: ${unit}"
+  fi
   control_group="$(systemctl_bounded show --property=ControlGroup --value "$unit")"
   [[ -z "$control_group" ]] && return 0
   [[ "$control_group" == /* && "$control_group" != *'//'*

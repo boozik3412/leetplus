@@ -42,7 +42,8 @@ report_worker_state() {
   printf 'Langame worker live-systemd fixture: service state follows\n' >&2
   bounded_systemctl show --no-pager \
     -p LoadState -p ActiveState -p SubState -p Result -p ExecMainStatus \
-    -p InvocationID -p MainPID -p ControlPID -p ExecMainPID "$SERVICE" >&2 || true
+    -p InvocationID -p ExecMainStartTimestampMonotonic -p ExecMainExitTimestampMonotonic \
+    -p MainPID -p ControlPID -p ExecMainPID "$SERVICE" >&2 || true
   bounded_systemctl --no-pager --full status "$SERVICE" >&2 || true
   timeout --foreground --kill-after=2s 12s journalctl --no-pager --output=short-precise --unit "$SERVICE" --lines=80 >&2 || true
 }
@@ -137,11 +138,20 @@ run_dynamic_manager_isolation_canary() {
     || die 'DynamicUser isolation canary left a transient unit'
 }
 assert_zero_processes() {
-  local unit="$1" property value cgroup
-  for property in MainPID ControlPID ExecMainPID; do
+  local unit="$1" property value exec_main_pid cgroup
+  # ExecMainPID is historical terminal metadata for a completed oneshot on
+  # systemd 255. It blocks only while its exact /proc identity is live; PID
+  # reuse is deliberately conservative. MainPID/ControlPID and the cgroup are
+  # the primary live-process boundary.
+  for property in MainPID ControlPID; do
     value="$(systemctl show -p "$property" --value "$unit")"
     [[ "$value" == 0 ]] || die "${unit} retained ${property}=${value}"
   done
+  exec_main_pid="$(systemctl show -p ExecMainPID --value "$unit")"
+  if [[ -n "$exec_main_pid" && "$exec_main_pid" != 0 ]]; then
+    [[ "$exec_main_pid" =~ ^[1-9][0-9]*$ ]] || die "${unit} exposes invalid historical ExecMainPID=${exec_main_pid}"
+    [[ ! -e "/proc/${exec_main_pid}" ]] || die "${unit} historical ExecMainPID is still live or reused: ${exec_main_pid}"
+  fi
   cgroup="$(systemctl show -p ControlGroup --value "$unit")"
   [[ -z "$cgroup" || ! -d "/sys/fs/cgroup${cgroup}" || -z "$(find "/sys/fs/cgroup${cgroup}" -type f -name cgroup.procs -exec awk 'NF { print; exit }' {} + 2>/dev/null)" ]] || die "${unit} retained a cgroup process"
 }

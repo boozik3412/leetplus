@@ -24,7 +24,9 @@ readonly TIMER_STAMP='/var/lib/systemd/timers/stamp-leetplus-langame-daily-worke
 readonly WRAPPER='/usr/local/libexec/leetplus/run-authorized-langame-daily-worker.sh'
 readonly RUNNER='/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh'
 readonly MANAGER_ISOLATION_CANARY='leetplus-langame-manager-isolation-canary.service'
+readonly MANAGER_ISOLATION_USER='lp-langame-isolate'
 readonly WRONG_UNIT_CANARY='leetplus-langame-worker-wrong-unit-canary.service'
+readonly WRONG_UNIT_USER='lp-langame-wrong'
 
 created_runtime=false; created_api=false; created_system_node=false
 system_node_root=''; system_node_root_device_inode=''; system_node_stage=''; system_node_stage_device_inode=''; system_node_claim=''; system_node_digest=''
@@ -49,7 +51,7 @@ run_dynamic_manager_isolation_canary() {
   if ! bounded_systemd_run --quiet --wait --collect --unit="$MANAGER_ISOLATION_CANARY" \
     --property=Type=exec \
     --property=DynamicUser=yes \
-    --property=User=leetplus-langame-manager-isolation-canary \
+    --property=User="$MANAGER_ISOLATION_USER" \
     --property=NoNewPrivileges=yes \
     --property=PrivateDevices=yes \
     --property=PrivateNetwork=yes \
@@ -158,6 +160,10 @@ cleanup() {
 ((EUID == 0)) || die 'root is required'
 [[ "$(ps -p 1 -o comm= | tr -d ' ')" == systemd ]] || die 'a real systemd PID 1 is required'
 for binary in install mkdir mktemp rm rmdir systemctl systemd-run journalctl timeout stat find awk grep groupadd groupdel getent id ps tr readlink realpath sha256sum sed date chown chmod ln touch cat mv sleep dirname; do command -v "$binary" >/dev/null || die "missing ${binary}"; done
+for dynamic_user in "$MANAGER_ISOLATION_USER" "$WRONG_UNIT_USER"; do
+  [[ "$dynamic_user" =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] \
+    || die "fixture DynamicUser name is outside the portable systemd limit: ${dynamic_user}"
+done
 
 # Refuse foreign state before cleanup is armed. A failed cleanliness check must
 # never stop or remove a pre-existing unit/path that belongs to another task.
@@ -345,13 +351,19 @@ systemctl daemon-reload
 # Valid files cannot make a direct caller enter the exact root-managed worker
 # cgroup as its singleton process.
 if INVOCATION_ID=00000000000000000000000000000000 "$WRAPPER" >/dev/null 2>&1; then die 'direct wrapper invocation was accepted'; fi
-if bounded_systemd_run --quiet --wait --collect --unit="$WRONG_UNIT_CANARY" \
+set +e
+wrong_unit_output="$(bounded_systemd_run --quiet --wait --collect --pipe --unit="$WRONG_UNIT_CANARY" \
   --property=Type=exec \
   --property=DynamicUser=yes \
-  --property=User=leetplus-langame-worker-wrong-unit-canary \
+  --property=User="$WRONG_UNIT_USER" \
   --property=NoNewPrivileges=yes \
-  "$WRAPPER" >/dev/null 2>&1; then
-  die 'a different systemd unit reused the Langame worker authorization'
+  "$WRAPPER" 2>&1)"
+wrong_unit_status=$?
+set -e
+if [[ "$wrong_unit_status" != 1 \
+  || "$wrong_unit_output" != *'caller is outside the exact Langame worker systemd unit'* ]]; then
+  printf 'wrong-unit canary status=%s output=%s\n' "$wrong_unit_status" "$wrong_unit_output" >&2
+  die 'wrong-unit canary did not reach the exact wrapper cgroup denial'
 fi
 transient_unit_is_absent "$WRONG_UNIT_CANARY" \
   || die 'wrong-unit denial canary left a transient unit'

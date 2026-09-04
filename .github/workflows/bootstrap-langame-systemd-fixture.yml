@@ -230,7 +230,7 @@ jobs:
               --property=ProtectControlGroups=yes \
               --property=RestrictNamespaces=yes \
               --property="InaccessiblePaths=/run/dbus /run/systemd/private" \
-              /usr/bin/bash -p -ceu '\''
+              /usr/bin/bash -p -ceux '\''
                 expected=/system.slice/leetplus-langame-bootstrap-dynamic-isolation.service
                 mapfile -t cgroups < /proc/self/cgroup
                 [[ "${#cgroups[@]}" == 1 && "${cgroups[0]}" == "0::${expected}" ]]

@@ -23,7 +23,7 @@ readonly ACTIVATION_RECEIPT="${STATE_ROOT}/activation.receipt"
 readonly SUCCESSOR_RECEIPT="${STATE_ROOT}/manifest-successor.receipt"
 readonly CONTROL_VERIFIER_EVIDENCE="${STATE_ROOT}/manifest-successor-control-verification.v1"
 readonly FENCE_MARKER="${STATE_ROOT}/legacy-start-fence"
-readonly DRAIN_VERIFIER='/usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh'
+readonly DRAIN_VERIFIER='/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/verify-legacy-runtime-drain.sh'
 readonly CONTROL_VERIFIER='/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs'
 readonly SYSTEMD_ROOT='/etc/systemd/system'
 readonly INSTALL_LOCK='/run/leetplus-production-control/install.lock'
@@ -108,7 +108,11 @@ assert_fixed_paths() {
   assert_root_file "$UNIT_MANIFEST" 600
   assert_root_file "$ACTIVATION_RECEIPT" 600
   assert_root_file "$FENCE_MARKER" 600
-  assert_root_file "$DRAIN_VERIFIER" 755
+  # The /usr/local copy belongs to the already-accepted historical N-1
+  # activation and intentionally remains immutable.  Successor checks must use
+  # the verifier published by the currently admitted production-control
+  # generation instead of silently falling back to that frozen predecessor.
+  assert_root_file "$DRAIN_VERIFIER" 400
   assert_root_file "$CONTROL_VERIFIER" 555
   assert_no_nested_mount "$STATE_ROOT"
   assert_no_nested_mount "$SYSTEMD_ROOT"
@@ -355,7 +359,7 @@ if [[ "$mode" == check ]]; then
   assert_successor_receipt
   for unit in "${ADDED_DRAIN_UNITS[@]}"; do assert_fence "$unit"; done
   assert_units_quiescent
-  timeout --kill-after=5s 90s "$DRAIN_VERIFIER" || die 'live drain verifier did not accept successor state'
+  timeout --kill-after=5s 90s /usr/bin/bash -p "$DRAIN_VERIFIER" || die 'live drain verifier did not accept successor state'
   printf 'LEGACY_DRAIN_MANIFEST_SUCCESSOR_CHECK=PASS\n'
   exit 0
 fi
@@ -398,13 +402,13 @@ if [[ -e "$verifier_output" || -L "$verifier_output" ]]; then
   assert_root_file "$verifier_output" 600
   recovery_verifier_output="${verifier_output}.reverify.$$"
   [[ ! -e "$recovery_verifier_output" && ! -L "$recovery_verifier_output" ]] || die 'successor verifier reverify temporary already exists'
-  timeout --kill-after=5s 90s "$DRAIN_VERIFIER" > "$recovery_verifier_output" || { rm -f -- "$recovery_verifier_output"; die 'live drain verifier rejected successor recovery state'; }
+  timeout --kill-after=5s 90s /usr/bin/bash -p "$DRAIN_VERIFIER" > "$recovery_verifier_output" || { rm -f -- "$recovery_verifier_output"; die 'live drain verifier rejected successor recovery state'; }
   cmp -s -- "$verifier_output" "$recovery_verifier_output" || { rm -f -- "$recovery_verifier_output"; die 'successor verifier evidence is not reproducible during recovery'; }
   rm -f -- "$recovery_verifier_output"
 else
   temporary_verifier_output="${verifier_output}.new.$$"
   [[ ! -e "$temporary_verifier_output" && ! -L "$temporary_verifier_output" ]] || die 'successor verifier temporary already exists'
-  timeout --kill-after=5s 90s "$DRAIN_VERIFIER" > "$temporary_verifier_output" || { rm -f -- "$temporary_verifier_output"; die 'live drain verifier rejected successor state'; }
+  timeout --kill-after=5s 90s /usr/bin/bash -p "$DRAIN_VERIFIER" > "$temporary_verifier_output" || { rm -f -- "$temporary_verifier_output"; die 'live drain verifier rejected successor state'; }
   chmod 0600 "$temporary_verifier_output"; chown root:root "$temporary_verifier_output"; mv -T -- "$temporary_verifier_output" "$verifier_output"; sync -f "$verifier_output"; sync -d "$STATE_ROOT"
 fi
 grep -F -x 'LEGACY_RUNTIME_DRAIN_ACCEPTED=true' "$verifier_output" >/dev/null || die 'successor drain verifier output is not accepted'

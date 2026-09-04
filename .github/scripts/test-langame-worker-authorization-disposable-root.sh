@@ -20,6 +20,7 @@ readonly sha_b=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 groupadd --system leetplus-runtime
 groupadd --system leetplus-api-runtime
 mkdir -p /etc/{leetplus,nginx/leetplus/upstreams,systemd/system} /srv/leetplus/{releases,slots} /var/lib/leetplus/{legacy-drain,deploy-receipts} /run/leetplus-production-control /usr/local/{sbin,libexec/leetplus}
+install -d -o root -g root -m 0500 /srv/leetplus/control-bundles /srv/leetplus/control-bundles/scheduler-free-nminus1-v1
 chmod 755 /var/lib/leetplus /var/lib/leetplus/{legacy-drain,deploy-receipts}; chmod 700 /run/leetplus-production-control
 touch /run/leetplus-production-control/install.lock /var/lib/leetplus/deploy-receipts/cutover.lock
 chmod 600 /run/leetplus-production-control/install.lock /var/lib/leetplus/deploy-receipts/cutover.lock
@@ -76,7 +77,8 @@ cat >/usr/local/libexec/leetplus/verify-installed-production-control-generation.
 console.log('PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS'); console.log('PRODUCTION_CONTROL_RELEASE_SHA=${sha_b}');
 EOF
 chmod 555 /usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs
-printf '#!/usr/bin/bash\nprintf "LANGAME_DAILY_WORKER_AUTHORIZATION=PASS releaseSha=%s tenantSlug=internal-fixture\\n"\n' "$sha_b" >/usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh; chmod 555 /usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh
+printf '#!/usr/bin/bash\nprintf "LANGAME_DAILY_WORKER_AUTHORIZATION=PASS releaseSha=%s tenantSlug=internal-fixture\\n"\n' "$sha_b" >/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/verify-legacy-runtime-drain.sh; chmod 400 /srv/leetplus/control-bundles/scheduler-free-nminus1-v1/verify-legacy-runtime-drain.sh
+printf '#!/usr/bin/bash\nprintf "historical frozen drain verifier must not be used by worker authority\\n" >&2\nexit 97\n' >/usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh; chmod 555 /usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh
 install -d -o root -g leetplus-api-runtime -m 0710 /var/lib/leetplus/langame-worker-authorizations
 cp /usr/bin/systemctl /usr/bin/systemctl.real
 cat >/usr/bin/systemctl <<'EOF'

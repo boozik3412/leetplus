@@ -19,7 +19,8 @@ readonly ARTIFACT_ROOT="${ROOT}/docs/deployment/production-artifact"
 readonly AUTHORITY_SOURCE="${ARTIFACT_ROOT}/rebind-legacy-drain-manifest-successor.sh"
 readonly AUTHORITY_PATH='/usr/local/sbin/leetplus-rebind-legacy-drain-manifest-successor'
 readonly DRAIN_SOURCE="${ARTIFACT_ROOT}/verify-legacy-runtime-drain.sh"
-readonly DRAIN_PATH='/usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh'
+readonly DRAIN_PATH='/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/verify-legacy-runtime-drain.sh'
+readonly HISTORICAL_DRAIN_PATH='/usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh'
 readonly CONTROL_PATH='/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs'
 readonly CONTROL_SHA='475d7e0c3583c36b6ec2138a06f4cc4a1bc46eb7'
 readonly SUCCESSOR_MANIFEST_SHA256='d6e7b4fe8e0aeb9a77caae62d2fb4ed9322e6383148934c5e26ff3f9126120dd'
@@ -48,7 +49,8 @@ for forbidden in /etc/leetplus /etc/systemd/system/leetplus-langame-daily-worker
   [[ ! -e "$forbidden" && ! -L "$forbidden" ]] || die "disposable root is not clean: ${forbidden}"
 done
 
-install -d -o root -g root -m 0755 /etc /etc/leetplus /etc/systemd /etc/systemd/system /usr/local /usr/local/sbin /usr/local/libexec /usr/local/libexec/leetplus /var /var/lib /var/lib/leetplus
+install -d -o root -g root -m 0755 /etc /etc/leetplus /etc/systemd /etc/systemd/system /usr/local /usr/local/sbin /usr/local/libexec /usr/local/libexec/leetplus /var /var/lib /var/lib/leetplus /srv /srv/leetplus
+install -d -o root -g root -m 0500 /srv/leetplus/control-bundles /srv/leetplus/control-bundles/scheduler-free-nminus1-v1
 install -d -o root -g root -m 0700 "$STATE_ROOT" /run/leetplus-production-control /var/lib/leetplus/deploy-receipts
 for lock_parent in /run/leetplus-production-control /var/lib/leetplus/deploy-receipts; do
   [[ -d "$lock_parent" && ! -L "$lock_parent" ]] || die "fixture lock parent is not an exact directory: ${lock_parent}"
@@ -66,7 +68,16 @@ for lock_path in /run/leetplus-production-control/install.lock /var/lib/leetplus
 done
 unset lock_path
 install -o root -g root -m 0500 "$AUTHORITY_SOURCE" "$AUTHORITY_PATH"
-install -o root -g root -m 0755 "$DRAIN_SOURCE" "$DRAIN_PATH"
+install -o root -g root -m 0400 "$DRAIN_SOURCE" "$DRAIN_PATH"
+# The predecessor activation deliberately retains its historical verifier in
+# /usr/local.  Make that byte fail loudly so this fixture proves the successor
+# controller never executes it after the control-bundle update.
+cat > "$HISTORICAL_DRAIN_PATH" <<'HISTORICAL'
+#!/usr/bin/bash
+printf 'historical frozen drain verifier must not be used by successor authority\n' >&2
+exit 97
+HISTORICAL
+chown root:root "$HISTORICAL_DRAIN_PATH"; chmod 0755 "$HISTORICAL_DRAIN_PATH"
 install -o root -g root -m 0600 "$ARTIFACT_ROOT/systemd/legacy-drain-units.conf.example" /etc/leetplus/legacy-drain-units.conf
 [[ "$(sha256sum /etc/leetplus/legacy-drain-units.conf | awk '{ print $1 }')" == "$SUCCESSOR_MANIFEST_SHA256" \
   && "$(wc -l < /etc/leetplus/legacy-drain-units.conf | tr -d '[:space:]')" == 31 ]] \

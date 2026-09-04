@@ -392,6 +392,13 @@ receipt после live drain verification. Редактирование ста�
 удаление общего fence marker или ручное создание drop-in не являются
 разрешённым recovery.
 
+Verifier исторической принятой N−1 activation под `/usr/local/libexec` также
+остаётся immutable и не является authority для более нового control generation.
+Manifest-successor и worker authorization текущего поколения принимают только
+root-owned `0400` byte из exact immutable scheduler-free control bundle. Это
+сохраняет старое rollback evidence и одновременно исключает drift решения на
+обновлённом systemd-контракте.
+
 Manifest-successor не выдаёт network/provider authority. Снять точный fence
 Langame service/timer для canary или live timer может только второй
 worker-specific authority, связанный с active admitted release, exact INTERNAL

@@ -34,7 +34,7 @@ readonly TIMER_FILE='/etc/systemd/system/leetplus-langame-daily-worker.timer'
 readonly RUNNER='/usr/local/libexec/leetplus/run-authorized-langame-daily-worker.sh'
 readonly CONTROL_VERIFIER='/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs'
 readonly WORKER_VERIFIER='/usr/local/libexec/leetplus/verify-langame-daily-worker-authorization.sh'
-readonly DRAIN_VERIFIER='/usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh'
+readonly DRAIN_VERIFIER='/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/verify-legacy-runtime-drain.sh'
 readonly FENCE_MARKER='/var/lib/leetplus/legacy-drain/legacy-start-fence'
 readonly FENCE_LINE="ConditionPathExists=!${FENCE_MARKER}"
 readonly SHA_RE='^[0-9a-f]{64}$'
@@ -273,6 +273,10 @@ assert_worker_envelope() {
   assert_regular "$SERVICE_FILE" 'root:root:444'
   assert_regular "$TIMER_FILE" 'root:root:444'
   assert_regular "$RUNNER" 'root:root:555'
+  # The historical /usr/local drain verifier is pinned to the accepted N-1
+  # activation.  Worker authorization must follow the verifier delivered by
+  # the currently admitted control generation.
+  assert_regular "$DRAIN_VERIFIER" 'root:root:400'
   assert_no_unexpected_env_keys "$WORKER_ENV"; assert_no_unexpected_env_keys "$AUTH_ENV"; assert_no_unexpected_env_keys "$SAFE_ENV"
   while IFS= read -r worker_key; do
     case "$worker_key" in DATABASE_URL|APP_ENCRYPTION_KEY|INTEGRATION_ENCRYPTION_KEY|LANGAME_DISCREPANCY_LOG_ROOT|LANGAME_DAILY_WORKER_ENABLED|LANGAME_DAILY_WORKER_LIVE|LANGAME_DAILY_WORKER_TENANT_SLUG|LANGAME_DAILY_WORKER_CANARY|LANGAME_DAILY_SYNC_SCHEDULER_ENABLED|LANGAME_SCHEDULED_HTTP_ENABLED|LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED|LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT|LANGAME_DAILY_WORKER_RETENTION_ENABLED|LANGAME_DAILY_WORKER_RETENTION_LIVE|LANGAME_DAILY_WORKER_DATE) ;; *) die "worker environment contains an unauthorized key: ${worker_key}" ;; esac
@@ -648,7 +652,7 @@ recover_intent() {
     before_start="$(systemctl_bounded show --property=ExecMainStartTimestampMonotonic --value "$WORKER_SERVICE")"
     if settle_enabled_timer "$before_start"; then
       write_timer_enabled "$permit"; assert_timer_enabled "$permit"; clear_intent
-      if "$WORKER_VERIFIER" >/dev/null && "$DRAIN_VERIFIER" >/dev/null; then
+      if "$WORKER_VERIFIER" >/dev/null && /usr/bin/bash -p "$DRAIN_VERIFIER" >/dev/null; then
         printf 'LANGAME_DAILY_WORKER_AUTHORIZATION_RECOVERED=PASS phase=timer\n'
         return 0
       fi
@@ -834,7 +838,7 @@ assert_revoked_runtime() {
   timer_is_disabled_quiescent || die 'revoked worker timer is not strictly disabled/quiescent'
   assert_no_authorization_dropins; assert_exact_loaded_fences_only
   [[ ! -e "$(pointer_path)" && ! -L "$(pointer_path)" ]] || die 'revoked timer authorization pointer remains active'
-  "$DRAIN_VERIFIER" >/dev/null || die 'generic legacy drain verifier rejected revoked worker state'
+  /usr/bin/bash -p "$DRAIN_VERIFIER" >/dev/null || die 'generic legacy drain verifier rejected revoked worker state'
 }
 clear_timer_pointer_for_permit() {
   local expected="$permit" selected
@@ -871,7 +875,7 @@ case "$mode" in
     lock_file 9 "$INSTALL_LOCK"; lock_file 8 "$CUTOVER_LOCK"; prepare; assert_no_pending_operations
     load_current_timer_authorization
     "$WORKER_VERIFIER" >/dev/null || die 'worker authorization verifier rejected revocation source state'
-    "$DRAIN_VERIFIER" >/dev/null || die 'generic drain verifier rejected revocation source state'
+    /usr/bin/bash -p "$DRAIN_VERIFIER" >/dev/null || die 'generic drain verifier rejected revocation source state'
     revoke_plan_json="$(canonical_revoke_plan)"; revoke_plan_sha="$(printf '%s' "$revoke_plan_json" | sha256sum | awk '{print $1}')"
     printf '{"actionCount":1,"decision":"LANGAME_DAILY_WORKER_REVOCATION_PLAN","plan":%s,"planSha256":"%s"}\n' "$revoke_plan_json" "$revoke_plan_sha"
     ;;
@@ -879,7 +883,7 @@ case "$mode" in
     lock_file 9 "$INSTALL_LOCK"; lock_file 8 "$CUTOVER_LOCK"; prepare; assert_no_pending_operations
     load_current_timer_authorization
     "$WORKER_VERIFIER" >/dev/null || die 'worker authorization verifier rejected revocation source state'
-    "$DRAIN_VERIFIER" >/dev/null || die 'generic drain verifier rejected revocation source state'
+    /usr/bin/bash -p "$DRAIN_VERIFIER" >/dev/null || die 'generic drain verifier rejected revocation source state'
     revoke_plan_json="$(canonical_revoke_plan)"; revoke_plan_sha="$(printf '%s' "$revoke_plan_json" | sha256sum | awk '{print $1}')"
     [[ "$revoke_plan_sha" == "$expected_plan" ]] || die 'worker revocation plan digest changed before effect'
     write_revoke_intent
@@ -916,7 +920,7 @@ case "$mode" in
     else
       assert_timer_validation "$permit"; assert_timer_enabled "$permit"
       "$WORKER_VERIFIER" >/dev/null || die 'worker timer authorization verifier failed'
-      "$DRAIN_VERIFIER" >/dev/null || die 'generic legacy drain verifier failed after timer authorization'
+      /usr/bin/bash -p "$DRAIN_VERIFIER" >/dev/null || die 'generic legacy drain verifier failed after timer authorization'
     fi
     printf 'LANGAME_DAILY_WORKER_AUTHORIZATION_CHECK=PASS phase=%s releaseSha=%s tenantSlug=%s\n' "$phase" "$release_sha" "$tenant_slug"
     ;;
@@ -953,7 +957,7 @@ case "$mode" in
       if ! systemctl_bounded enable --now "$WORKER_TIMER"; then disable_timer_and_assert_quiescent; restore_worker_fences; clear_pointer; clear_intent; die 'timer enable failed after permit; timer disabled and fences restored'; fi
       if ! settle_enabled_timer "$before_enable_start"; then disable_timer_and_assert_quiescent; restore_worker_fences; clear_pointer; clear_intent; die 'timer did not settle as enabled/waiting with a successful or absent immediate invocation'; fi
       write_timer_enabled "$permit"; assert_timer_enabled "$permit"; clear_intent
-      if ! "$WORKER_VERIFIER" >/dev/null || ! "$DRAIN_VERIFIER" >/dev/null; then
+      if ! "$WORKER_VERIFIER" >/dev/null || ! /usr/bin/bash -p "$DRAIN_VERIFIER" >/dev/null; then
         disable_timer_and_assert_quiescent; restore_worker_fences; clear_pointer
         die 'timer final authorization verification failed; timer was disabled and fences restored'
       fi

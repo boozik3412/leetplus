@@ -3,6 +3,7 @@
 # runs only on an explicitly acknowledged disposable GitHub Actions host.
 [[ $- == *p* ]] || { printf 'Langame worker live-systemd fixture requires Bash -p\n' >&2; exit 1; }
 fixture_ci="${CI-}"; fixture_github_actions="${GITHUB_ACTIONS-}"; fixture_confirm="${LANGAME_WORKER_LIVE_SYSTEMD_FIXTURE_CONFIRM-}"
+fixture_node_input="${LEETPLUS_FIXTURE_NODE-}"
 while IFS= read -r name; do unset "$name" 2>/dev/null || true; done < <(compgen -e); unset name
 PATH='/usr/sbin:/usr/bin:/sbin:/bin'; LANG=C.UTF-8; LC_ALL=C.UTF-8; TZ=UTC; export PATH LANG LC_ALL TZ
 set -Eeuo pipefail; IFS=$'\n\t'; umask 0077
@@ -23,7 +24,8 @@ readonly TIMER_STAMP='/var/lib/systemd/timers/stamp-leetplus-langame-daily-worke
 readonly WRAPPER='/usr/local/libexec/leetplus/run-authorized-langame-daily-worker.sh'
 readonly RUNNER='/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh'
 
-created_runtime=false; created_api=false
+created_runtime=false; created_api=false; created_system_node=false
+system_node_root=''; system_node_root_device_inode=''; system_node_stage=''; system_node_stage_device_inode=''; system_node_claim=''; system_node_digest=''
 die() { printf 'Langame worker live-systemd fixture: %s\n' "$*" >&2; exit 1; }
 bounded_systemctl() { timeout --foreground --kill-after=2s 12s systemctl "$@"; }
 assert_zero_processes() {
@@ -36,6 +38,8 @@ assert_zero_processes() {
   [[ -z "$cgroup" || ! -d "/sys/fs/cgroup${cgroup}" || -z "$(find "/sys/fs/cgroup${cgroup}" -type f -name cgroup.procs -exec awk 'NF { print; exit }' {} + 2>/dev/null)" ]] || die "${unit} retained a cgroup process"
 }
 cleanup() {
+  local original_status=$? cleanup_status=0 current_stage_device_inode='' current_root_device_inode=''
+  trap - EXIT
   set +e
   bounded_systemctl disable --now "$TIMER"
   bounded_systemctl stop "$SERVICE"
@@ -44,16 +48,102 @@ cleanup() {
   rm -rf -- "/etc/systemd/system/${SERVICE}.d" "/etc/systemd/system/${TIMER}.d" "$AUTH_ROOT" "$RELEASE"
   rm -f -- "$FENCE" "$ENV_FILE" /etc/leetplus/slots/blue.env /etc/nginx/leetplus/active-upstreams.conf /etc/nginx/leetplus/upstreams/blue.conf "$MARKER" "$TIMER_STAMP" /srv/leetplus/slots/blue
   rmdir -- /srv/leetplus/slots /srv/leetplus/releases /srv/leetplus /var/lib/leetplus/langame-sync /var/lib/leetplus/legacy-drain /var/lib/leetplus /etc/nginx/leetplus/upstreams /etc/nginx/leetplus /etc/nginx /etc/leetplus /usr/local/libexec/leetplus 2>/dev/null || true
+  if [[ "$created_system_node" == true ]]; then
+    # Move the global name atomically into the fixture's private directory
+    # before inspecting or deleting it. A concurrent replacement is restored,
+    # never unlinked as though it were the file published by this fixture.
+    mv -T -n -- /usr/bin/node "$system_node_claim"
+    if [[ -f "$system_node_claim" && ! -L "$system_node_claim" \
+      && -f "$system_node_stage" && ! -L "$system_node_stage" \
+      && "$system_node_claim" -ef "$system_node_stage" \
+      && "$(stat -c '%d:%i' -- "$system_node_claim")" == "$system_node_stage_device_inode" \
+      && "$(sha256sum -- "$system_node_claim" | awk '{print $1}')" == "$system_node_digest" ]]; then
+      rm -f -- "$system_node_claim"
+    else
+      if [[ -e "$system_node_claim" || -L "$system_node_claim" ]]; then
+        mv -T -n -- "$system_node_claim" /usr/bin/node
+      fi
+      printf 'Langame worker live-systemd fixture: preserved unexpected /usr/bin/node replacement\n' >&2
+      cleanup_status=1
+    fi
+  fi
+  if [[ -n "$system_node_stage" && ( -e "$system_node_stage" || -L "$system_node_stage" ) ]]; then
+    if [[ -f "$system_node_stage" && ! -L "$system_node_stage" ]]; then
+      current_stage_device_inode="$(stat -c '%d:%i' -- "$system_node_stage")"
+    fi
+    if [[ "$current_stage_device_inode" == "$system_node_stage_device_inode" ]]; then
+      rm -f -- "$system_node_stage"
+    else
+      printf 'Langame worker live-systemd fixture: refusing to remove replaced Node staging file\n' >&2
+      cleanup_status=1
+    fi
+  fi
+  if [[ -n "$system_node_root" && ( -e "$system_node_root" || -L "$system_node_root" ) ]]; then
+    if [[ -d "$system_node_root" && ! -L "$system_node_root" ]]; then
+      current_root_device_inode="$(stat -c '%d:%i' -- "$system_node_root")"
+    fi
+    if [[ "$current_root_device_inode" == "$system_node_root_device_inode" ]]; then
+      rmdir -- "$system_node_root" || cleanup_status=1
+    else
+      printf 'Langame worker live-systemd fixture: refusing to remove replaced Node staging directory\n' >&2
+      cleanup_status=1
+    fi
+  fi
   systemctl daemon-reload
   [[ "$created_api" == true ]] && groupdel leetplus-api-runtime
   [[ "$created_runtime" == true ]] && groupdel leetplus-runtime
+  ((original_status != 0)) && exit "$original_status"
+  exit "$cleanup_status"
 }
 trap cleanup EXIT
 
 [[ "$fixture_ci" == true && "$fixture_github_actions" == true && "$fixture_confirm" == "$ACK" ]] || die 'explicit GitHub Actions fixture confirmation is required'
 ((EUID == 0)) || die 'root is required'
 [[ "$(ps -p 1 -o comm= | tr -d ' ')" == systemd ]] || die 'a real systemd PID 1 is required'
-for binary in install mkdir rm rmdir systemctl timeout stat find awk grep groupadd groupdel getent ps tr readlink sha256sum sed date node chown chmod ln touch cat mv; do command -v "$binary" >/dev/null || die "missing ${binary}"; done
+for binary in install mkdir mktemp rm rmdir systemctl timeout stat find awk grep groupadd groupdel getent ps tr readlink realpath sha256sum sed date chown chmod ln touch cat mv; do command -v "$binary" >/dev/null || die "missing ${binary}"; done
+if [[ ! -e /usr/bin/node && ! -L /usr/bin/node ]]; then
+  [[ -n "$fixture_node_input" ]] || die 'an exact fixture Node source is required'
+  fixture_node="$(realpath -e -- "$fixture_node_input")"
+  [[ "$fixture_node" == "$fixture_node_input" && -f "$fixture_node" && ! -L "$fixture_node" && -x "$fixture_node" ]] \
+    || die 'fixture Node source is not one canonical regular executable'
+  case "$fixture_node" in
+    /opt/hostedtoolcache/node/22.*/x64/bin/node) ;;
+    *) die 'fixture Node source is outside the exact GitHub Actions Node 22 authority' ;;
+  esac
+  [[ "$("$fixture_node" -p 'process.versions.node.split(".")[0]')" == 22 ]] \
+    || die 'fixture Node source is not Node 22 authority'
+  fixture_node_identity="$(stat -c '%d:%i:%s:%Y:%Z' -- "$fixture_node")"
+  fixture_node_digest="$(sha256sum -- "$fixture_node" | awk '{print $1}')"
+  system_node_root="$(mktemp -d -p /usr/bin '.leetplus-langame-node.XXXXXXXX')"
+  system_node_root_device_inode="$(stat -c '%d:%i' -- "$system_node_root")"
+  [[ "$(stat -c '%u:%g:%a:%h' -- "$system_node_root")" == '0:0:700:2' ]] \
+    || die 'fixture Node staging directory is not private root authority'
+  system_node_stage="${system_node_root}/node"
+  system_node_claim="${system_node_root}/published"
+  install -o root -g root -m 0555 -- "$fixture_node" "$system_node_stage"
+  system_node_stage_device_inode="$(stat -c '%d:%i' -- "$system_node_stage")"
+  system_node_digest="$fixture_node_digest"
+  [[ "$(stat -c '%d:%i:%s:%Y:%Z' -- "$fixture_node")" == "$fixture_node_identity" \
+    && "$(sha256sum -- "$fixture_node" | awk '{print $1}')" == "$fixture_node_digest" \
+    && "$(stat -c '%d:%i' -- "$system_node_stage")" == "$system_node_stage_device_inode" \
+    && "$(stat -c '%u:%g:%a:%h' -- "$system_node_stage")" == '0:0:555:1' \
+    && "$(sha256sum -- "$system_node_stage" | awk '{print $1}')" == "$fixture_node_digest" ]] \
+    || die 'fixture Node snapshot changed during root-owned staging'
+  ln -T -- "$system_node_stage" /usr/bin/node \
+    || die 'atomic exclusive publication of fixture /usr/bin/node failed'
+  created_system_node=true
+  [[ "$system_node_stage" -ef /usr/bin/node \
+    && "$(stat -c '%u:%g:%a:%h' -- /usr/bin/node)" == '0:0:555:2' \
+    && "$(sha256sum -- /usr/bin/node | awk '{print $1}')" == "$fixture_node_digest" ]] \
+    || die 'fixture Node publication identity or digest drifted'
+else
+  [[ -f /usr/bin/node && ! -L /usr/bin/node \
+    && "$(stat -c '%u:%g:%h' -- /usr/bin/node)" == '0:0:1' \
+    && -z "$(find -P /usr/bin/node -maxdepth 0 -perm /022 -print -quit)" ]] \
+    || die 'existing /usr/bin/node is not immutable root authority'
+fi
+[[ "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" == 22 ]] \
+  || die 'fixture requires exact /usr/bin/node major 22'
 for path in "$SERVICE_PATH" "$TIMER_PATH" "/etc/systemd/system/${SERVICE}.d" "/etc/systemd/system/${TIMER}.d" "$AUTH_ROOT" "$ENV_FILE" /etc/leetplus /etc/nginx/leetplus /srv/leetplus /var/lib/leetplus "$WRAPPER" "$RUNNER" "$TIMER_STAMP"; do [[ ! -e "$path" && ! -L "$path" ]] || die "fixture root is not clean at ${path}"; done
 if ! getent group leetplus-runtime >/dev/null; then groupadd --system leetplus-runtime; created_runtime=true; fi
 if ! getent group leetplus-api-runtime >/dev/null; then groupadd --system leetplus-api-runtime; created_api=true; fi

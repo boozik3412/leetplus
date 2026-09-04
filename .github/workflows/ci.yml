@@ -258,6 +258,7 @@ jobs:
             CI=true \
             GITHUB_ACTIONS=true \
             LANGAME_WORKER_LIVE_SYSTEMD_FIXTURE_CONFIRM=run-bounded-root-langame-worker-live-systemd-fixture \
+            LEETPLUS_FIXTURE_NODE="$authority_node" \
             LANG=C.UTF-8 \
             LC_ALL=C.UTF-8 \
             TZ=UTC \

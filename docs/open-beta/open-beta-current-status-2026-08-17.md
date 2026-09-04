@@ -1,4 +1,4 @@
-# LeetPlus open beta — текущее состояние на 03.09.2026
+# LeetPlus open beta — текущее состояние на 04.09.2026
 
 | Поле                 | Состояние                                                                                                                     |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -16,6 +16,32 @@
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
 | Langame freshness    | P0 source recovery готовится: production audit EACCES и отсутствие single nightly owner подтверждены; production fix/backfill ещё не выполнялись          |
+
+## Исправление двух обращений геймификации (04.09.2026)
+
+Разбор `LP-BUG-AFDE6B03` подтвердил гонку первого публичного check-in с
+асинхронным `APP_OPEN`: корректный check-in мог оказаться на несколько секунд
+раньше сохранённого `gameActivatedAt` и затем отбрасывался как
+pre-activation. Source candidate закрепляет activation boundary до rule
+evaluation, создаёт exact canonical `CHECK_IN_PERFORMED` и связывает с ним
+событие. Идентичность включает локальную дату клуба, поэтому повтор запроса в
+тот же день безопасен, а новая дата в долгоживущей Langame-сессии не теряется.
+
+Разбор `LP-BUG-42A647BA` подтвердил иной сценарий. Пополнение на `920 ₽`
+произошло, пока последовательный Battle Pass ещё ожидал предыдущий шаг
+`PLAY_TIME`. По текущему продуктовому контракту закрытый третий шаг не
+потребляет событие задним числом. Восстановление unattended Langame sync должно
+вернуть отсутствующие play-time/top-up facts и актуальный прогресс, но не
+обходить последовательность и не выдавать награду повторно. Если бизнес решит
+компенсировать конкретное ранее совершённое пополнение, это отдельный bounded
+operator effect с собственным idempotency key и audit receipt.
+
+До production rollout обязательны: exact Fast+Full admission, существующие
+backup/rollback gates, canary автономного Langame worker, backfill пропущенных
+полных дат и точечная сверка обоих профилей. Для первого обращения допустим
+только preview подтверждённых false pre-activation событий и единичное
+идемпотентное восстановление; широкий replay наград запрещён. Production этим
+source candidate ещё не менялся.
 
 ## P0 Langame recovery (03.09.2026)
 

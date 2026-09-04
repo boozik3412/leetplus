@@ -2,7 +2,7 @@
 
 Статус: **source candidate; production effects запрещены до exact-SHA admission и отдельного GO**
 
-Актуально на: **03.09.2026**
+Актуально на: **04.09.2026**
 
 ## Причина и граница исправления
 
@@ -83,13 +83,26 @@ corporate scope или Langame credentials. Внешние tenant остаютс
 6. Проверить: три источника без `FAILED`, guest foundation успешен, ровно пять
    snapshot scopes свежие, JSON audit доступен при наличии расхождений, нет
    повторных rows по business keys.
-7. Идемпотентно повторить canary для каждой отсутствующей даты
-   `2026-08-27..2026-09-02`. Уже успешный scope обязан стать безопасным skip,
+7. Идемпотентно повторить canary для каждой отсутствующей полной business date
+   начиная с `2026-08-27` и заканчивая последним завершённым локальным днём
+   перед rollout. Уже успешный scope обязан стать безопасным skip,
    а не вторым effect.
 8. Удалить explicit date, переключить `CANARY=false`, ещё раз вручную запустить
    oneshot. Только после повторного PASS включить timer.
 9. Провести public guest и corporate smoke независимо от worker QA; проверить
    оба slot, ingress, error logs и отсутствие новых duplicate facts.
+10. Точечно сверить обращения `LP-BUG-AFDE6B03` и `LP-BUG-42A647BA`:
+    - у первого профиля check-in 02.09 имеет canonical
+      `CHECK_IN_PERFORMED`, один event/reward effect и не блокируется как
+      pre-activation;
+    - у второго профиля импортированы play-time и пополнение `920 ₽` 02.09,
+      но пополнение не потребляется третьим шагом, если на его момент второй
+      последовательный шаг ещё не был выполнен;
+    - повтор canary/backfill не меняет counts, bonus ledger и wallet повторно.
+11. После включения timer получить минимум два автоматических успешных tick,
+    проверить fresh daily job/snapshots, дренирование pending sync jobs и zero
+    `FAILED`, duplicate facts или повторных reward effects. Наличие только
+    ручного успешного запуска не считается автономным восстановлением.
 
 ## Rollback
 

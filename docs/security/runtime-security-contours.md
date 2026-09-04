@@ -2,7 +2,7 @@
 
 Статус: **канонический current-state contract**
 
-Актуально на: **03.09.2026**
+Актуально на: **04.09.2026**
 Runtime implementation baseline:
 `f3f119fa81fc497b75cc1e57f046d8539676c943` (PR #122; включает
 CURRENT189 application baseline и admitted resumable release orchestrator)
@@ -21,6 +21,7 @@ fail-closed правилу одного контура снова сломать
 | Production API topology  | active blue exact `f3f119fa…`, generation 21, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback green exact `22ab6b81…`, оба slot active                                     |
 | Guest bug-report repair  | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                |
 | Corporate invite repair  | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                    |
+| Guest check-in consistency | source candidate: публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; production этим изменением ещё не затронут                                      |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
 | Release acceleration     | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
@@ -326,6 +327,35 @@ rollout. Новый Langame daily service/timer остаётся `OPTIONAL_DRAIN
 явного включения, а общий audit preflight является `SAFE`. Все пять unit должны
 быть одновременно перечислены в admitted manifest и закрытом verifier allowlist;
 иначе rollout останавливается до runtime effect.
+
+### Public check-in activation и canonical activity fact
+
+Публичный check-in остаётся пользовательским request path GuestRuntime и не
+получает worker/corporate полномочий. После успешной guest-JWT и store/guest
+resolution, но до rule evaluation, GuestPortal обязан закрепить
+`GuestGameProfile.gameActivatedAt`. Сам authenticated check-in является
+наблюдаемым входом в игровой модуль; поэтому первый check-in не может быть
+классифицирован как pre-activation только из-за гонки с параллельным
+`APP_OPEN`.
+
+Подтверждённый активной Langame-сессией check-in обязан создать или
+идемпотентно переиспользовать exact `GuestActivityFact`:
+
+- `factType=CHECK_IN_PERFORMED`, `confidence=EXACT`;
+- source identity включает tenant, Langame domain, session, guest и локальную
+  календарную дату клуба;
+- один и тот же check-in в тот же локальный день не создаёт повторного факта
+  или reward, но долгоживущая сессия не блокирует check-in следующего дня;
+- `GuestGameEvent` ссылается на canonical fact и отдельно сохраняет
+  `sessionExternalId`; evidence не содержит provider token, phone или другой
+  секрет.
+
+Историческое восстановление не расширяет эту request authority. Старые
+ложно-заблокированные check-in сначала проходят bounded read-only preview по
+exact profile/event/rule, затем восстанавливаются по одному idempotency key или
+оформляются как явно аудируемая компенсация. Массовый replay, повторная выдача
+и ретроактивное потребление события следующим ещё закрытым шагом Battle Pass
+запрещены.
 
 ### Runtime repair contract 29–30.08.2026
 

@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-## Canonical current-state guardrail (04.09.2026)
+## Canonical current-state guardrail (05.09.2026)
 
 Перед задачами по auth, landing, access scope, игровому модулю, integrations,
 workers или deployment обязательно прочитать
@@ -48,6 +48,16 @@ properties отсутствуют, а controller ожидал строковые
 нормализует только timer-представление; `.service` остаётся fail-closed с
 обязательными явными zero PID. До нового admission runtime остаётся
 `f3f119fa…`, Langame timer `inactive/disabled`, routing и schema не менялись.
+
+Следующий exact production-control `3281c070…` был установлен после зелёных
+Fast/Full, но manifest-successor снова остановился до runtime cutover: новый
+controller обращался к frozen N−1 verifier из `/usr/local`, который не содержит
+принятой нормализации `static` service. Два additive start-fence drop-in уже
+установлены, но successor receipt не опубликован; traffic, schema и данные не
+менялись. Текущий source repair связывает manifest-successor и Langame worker
+authorization только с root-owned `0400` verifier из exact immutable control
+bundle и negative fixture делает историческую копию заведомо аварийной. До
+нового exact-main admission active runtime остаётся `f3f119fa…`.
 
 Production migration
 `20260831120000_guest_support_bug_report_input_repair` применена

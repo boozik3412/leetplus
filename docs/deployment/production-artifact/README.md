@@ -196,6 +196,14 @@ digest-pinned `production-control-install-map.tsv`, provision-ит полный 
 scheduler-free inner bundle и выполняет `daemon-reload`. Отдельный inner launcher
 по-прежнему отвечает за установку rollback contour; outer installer не активирует
 его сервисы и не делает cutover.
+
+Историческая `/usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh`
+принадлежит уже принятой N−1 activation и намеренно остаётся frozen. Любой
+manifest-successor и Langame worker authorization текущего поколения обязаны
+использовать только root-owned `0400` verifier из exact immutable bundle
+`/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/`. Подмена этого пути
+исторической копией или fallback на неё являются fail-closed ошибкой.
+
 Installer удерживает exclusive inode
 `/run/leetplus-production-control/install.lock` от чтения admitted inputs до
 финальной проверки. Любой caller, включая promoter, обязан получить и удерживать

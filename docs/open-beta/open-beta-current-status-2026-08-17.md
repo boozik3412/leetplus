@@ -1,11 +1,11 @@
-# LeetPlus open beta — текущее состояние на 04.09.2026
+# LeetPlus open beta — текущее состояние на 05.09.2026
 
 | Поле                 | Состояние                                                                                                                     |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                  |
 | Production runtime   | healthy; active blue `f3f119fa…`, generation 21, `COMBINED`, bridge OFF, bug reporting LIVE; rollback green `22ab6b81…` ready   |
 | Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                  |
-| Release authority    | runtime остаётся exact `f3f119fa…`; production-control `475d7e0c…` установлен после Fast/Full, runtime cutover не выполнялся |
+| Release authority    | runtime остаётся exact `f3f119fa…`; production-control `3281c070…` установлен после Fast/Full, runtime cutover не выполнялся |
 | Runtime successor    | Dedicated bonus-ledger worker active; bounded backlog recovery завершён, timer enabled/healthy                                |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                              |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                      |
@@ -122,6 +122,17 @@ generation установлена, но successor apply 05.09 вновь ост�
 `.service` и добавляет отрицательный тест этого различия. Runtime cutover,
 route, schema и worker activation не выполнялись; перед продолжением нужен
 новый exact-main Fast+Full и новая immutable control generation.
+
+Следующий exact production-control `3281c070…` успешно установлен 05.09, но
+manifest-successor apply снова fail-closed остановился до runtime cutover.
+Controller использовал frozen verifier принятой N−1 activation из `/usr/local`,
+а не обновлённый verifier exact control bundle; поэтому штатный systemd 255
+service state `static` был ошибочно отклонён как boot-enabled. Два additive
+start-fence drop-in присутствуют, но successor receipt отсутствует; traffic,
+schema, rewards и active runtime не менялись. Новый source candidate привязывает
+оба successor/worker authorities к root-owned `0400` verifier внутри immutable
+bundle и проверяет отсутствие fallback отрицательным fixture. Rollout остаётся
+на HOLD до нового exact-main Fast+Full и повторного контролируемого apply.
 
 ## Ускорение release pipeline без ослабления gates (02.09.2026)
 

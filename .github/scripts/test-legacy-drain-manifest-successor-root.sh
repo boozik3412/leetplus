@@ -187,7 +187,11 @@ case "${1:-}" in
       LoadState) value=loaded ;;
       ActiveState) value=inactive ;;
       UnitFileState) [[ "$unit" == leetplus-langame-daily-worker.service ]] && value=static || value=disabled ;;
-      MainPID|ControlPID|ExecMainPID) value=0 ;;
+      # Real systemd 255 omits service-only PID properties for .timer units.
+      # The authority must normalize this exact timer representation while
+      # keeping the service representation explicit and fail-closed.
+      MainPID|ControlPID|ExecMainPID)
+        [[ "$unit" == *.timer || -e /run/fixture-successor-blank-service-pids ]] && value='' || value=0 ;;
       ControlGroup) value='' ;;
       FragmentPath) value="/etc/systemd/system/${unit}" ;;
       DropInPaths) [[ -f "$dropin" ]] && value="$dropin" || value='' ;;
@@ -237,6 +241,16 @@ printf '%s\n' "$plan_output" | grep -F -x 'LEGACY_DRAIN_MANIFEST_SUCCESSOR_PLAN=
 plan_sha="$(printf '%s\n' "$plan_output" | awk -F= '$1 == "PLAN_SHA256" {print $2}')"
 [[ "$plan_sha" =~ ^[0-9a-f]{64}$ ]] || die 'plan digest is invalid'
 [[ "$(printf '%s\n' "$plan_output" | grep -c '^ACTION=ENSURE_START_FENCE|')" == 2 ]] || die 'plan action set is not exact'
+
+# Timer PID fields may be absent on systemd 255, but the same ambiguity must
+# never be accepted for the oneshot service itself.
+touch /run/fixture-successor-blank-service-pids
+if $AUTHORITY_PATH apply --control-release-sha "$CONTROL_SHA" --plan-sha256 "$plan_sha" --action-count 2 --confirmation "$CONFIRMATION" > /run/fixture-successor-blank-service.out 2>&1; then
+  die 'apply accepted absent PID properties for the Langame service'
+fi
+grep -F 'newly admitted drain service is not exact loaded/inactive/static/PID-zero: leetplus-langame-daily-worker.service' /run/fixture-successor-blank-service.out >/dev/null \
+  || { cat /run/fixture-successor-blank-service.out >&2; die 'blank service PID negative stopped at an unexpected guard'; }
+rm -f -- /run/fixture-successor-blank-service-pids
 
 $AUTHORITY_PATH apply --control-release-sha "$CONTROL_SHA" --plan-sha256 "$plan_sha" --action-count 2 --confirmation "$CONFIRMATION" > /run/fixture-successor-apply.out
 grep -F -x 'LEGACY_DRAIN_MANIFEST_SUCCESSOR_APPLY=PASS' /run/fixture-successor-apply.out >/dev/null || die 'apply did not publish success'

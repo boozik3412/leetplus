@@ -114,6 +114,15 @@ recovery и выполняет bounded maintenance. Canary остаётся dry-
 tenant. Production остаётся на `f3f119fa…` до нового exact-main Fast+Full,
 immutable handoff, controlled canary/backfill и отдельного postflight.
 
+Exact-main successor `e4da6a04…` прошёл Fast+Full, его production-control
+generation установлена, но successor apply 05.09 вновь остановился до effect:
+реальный systemd 255 возвращает пустые service-only PID properties у `.timer`,
+тогда как disposable fixture возвращал `0`. Узкий source repair принимает
+пустые PID properties только для `.timer`, продолжает требовать явные нули у
+`.service` и добавляет отрицательный тест этого различия. Runtime cutover,
+route, schema и worker activation не выполнялись; перед продолжением нужен
+новый exact-main Fast+Full и новая immutable control generation.
+
 ## Ускорение release pipeline без ослабления gates (02.09.2026)
 
 В backlog добавлена отдельная инициатива

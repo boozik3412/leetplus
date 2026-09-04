@@ -9,7 +9,7 @@ ea25c3cf121ff21f21c02b5bf017ac6b20e943918b6624210d593e800493127c  ./legacy-rollb
 a9e449bcd5f7d56be97f347455f7d0629f393d471cdf2b87029b4bede2d58462  ./nginx/green.conf.example
 ebd449a4221dcb0c1d5449b4f87893bcad58b1f16319551730ca5aefde571b25  ./nginx/legacy-safe.conf.example
 e6b1486289123178c5e86a3ed09ed26e39f12a80b9391caa8b92ae80d4a1b0bf  ./preflight-legacy-rollback.sh
-b2c520d547b2ff16480a0526e89b19f9bca9485d45f768531131884eb7123a5d  ./rebind-legacy-drain-manifest-successor.sh
+688dbdd285233cd32add59b976b394dd939095d7fce318abc932533aecee1959  ./rebind-legacy-drain-manifest-successor.sh
 f08dea0e41ce5269b0bacabdacb9441efec26897a83f7331e9fb8bad8a377365  ./systemd/leetplus-api-rollback@.service
 783502a1c17ae50f4f2d438c9df258a4d5a805ca577b3017c4ae92f43a54b34f  ./systemd/leetplus-blue-green-recovery-watchdog.service
 bd9e890104a2ca771dbbfebcd781b7648bf39fdee0d5d1fb2f950050b2513709  ./systemd/leetplus-blue-green-recovery.service

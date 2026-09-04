@@ -190,6 +190,15 @@ unit_state() {
   control="$(timeout --kill-after=2s 10s systemctl show --property=ControlPID --value "$unit")"
   exec="$(timeout --kill-after=2s 10s systemctl show --property=ExecMainPID --value "$unit")"
   cgroup="$(timeout --kill-after=2s 10s systemctl show --property=ControlGroup --value "$unit")"
+  # systemd 255 does not expose service-only PID properties for timer units.
+  # Treat only that exact, documented absence as the canonical zero-PID timer
+  # state.  Service units must continue to report explicit zeroes so an
+  # incomplete or unexpected service serialization still fails closed.
+  if [[ "$unit" == *.timer ]]; then
+    [[ -n "$main" ]] || main=0
+    [[ -n "$control" ]] || control=0
+    [[ -n "$exec" ]] || exec=0
+  fi
   printf '%s|%s|%s|%s|%s|%s|%s\n' "$unit" "$load" "$active" "$enabled" "$main" "$control" "$exec:$cgroup"
 }
 snapshot_unit_states() { for unit in "${ADDED_DRAIN_UNITS[@]}"; do unit_state "$unit"; done; }

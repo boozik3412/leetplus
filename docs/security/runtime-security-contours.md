@@ -52,6 +52,17 @@ pipeline/reward effect. Наличие этого source-контракта не
 deployment: нужен новый exact-main Fast+Full admission, immutable handoff,
 canary и postflight.
 
+Production preflight 05.09 для admitted successor `e4da6a04…` остановился до
+runtime hydration: Ubuntu 24.04 / systemd 255 не публикует service-only
+`MainPID`, `ControlPID` и `ExecMainPID` для `.timer`, а root successor
+controller ошибочно считал пустые timer-поля неканоническим PID-состоянием.
+Source repair нормализует только это exact отсутствие у `.timer` в нулевое
+состояние; для `.service` по-прежнему обязательны явные `0`, а проверки
+`inactive/disabled`, cgroup, fragment path, start-fence и immutable receipt не
+ослабляются. До нового exact-main Fast+Full и установки новой control
+generation production runtime остаётся `f3f119fa…`, Langame timer —
+`inactive/disabled`; routing, БД и active services preflight не менял.
+
 ### Guardrail ускорения release pipeline
 
 [`production-topology-contract.json`](../deployment/production-artifact/production-topology-contract.json)

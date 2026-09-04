@@ -69,6 +69,8 @@ regular "$ENV_FILE" 'root:leetplus-api-runtime:640'; regular "$AUTH_ENV" 'root:r
 [[ "$(env_value LANGAME_DAILY_WORKER_CANARY)" == false ]] || die 'only a non-canary timer profile may bypass optional drain'
 ! grep -q '^LANGAME_DAILY_WORKER_DATE=' "$ENV_FILE" || die 'timer profile retains canary date'
 [[ "$(env_value LANGAME_DAILY_SYNC_SCHEDULER_ENABLED)" == false && "$(env_value LANGAME_SCHEDULED_HTTP_ENABLED)" == false ]] || die 'worker/API scheduler denial drifted'
+[[ "$(env_value LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED)" == true && "$(env_value LANGAME_DAILY_WORKER_RETENTION_ENABLED)" == true && "$(env_value LANGAME_DAILY_WORKER_RETENTION_LIVE)" == false ]] || die 'timer maintenance profile is not autonomous and dry-run-safe'
+recovery_limit="$(env_value LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT)"; [[ "$recovery_limit" =~ ^[1-9][0-9]*$ && "$recovery_limit" -le 100 ]] || die 'activity recovery limit is invalid'
 tenant="$(env_value LANGAME_DAILY_WORKER_TENANT_SLUG)"; [[ "$tenant" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || die 'tenant slug is unsafe'
 [[ -L /etc/nginx/leetplus/active-upstreams.conf ]] || die 'active upstream is absent'
 case "$(readlink -e -- /etc/nginx/leetplus/active-upstreams.conf)" in /etc/nginx/leetplus/upstreams/blue.conf) slot=blue ;; /etc/nginx/leetplus/upstreams/green.conf) slot=green ;; *) die 'active upstream is not a modern slot' ;; esac

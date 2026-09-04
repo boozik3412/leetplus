@@ -1,6 +1,7 @@
 import type { DailySyncResult } from './langame-daily-sync.service';
 import {
   loadLangameDailyWorkerConfig,
+  runLangameDailyMaintenanceOnce,
   runLangameDailyWorkerOnce,
 } from './langame-daily-worker';
 
@@ -10,6 +11,10 @@ function baseEnv(): NodeJS.ProcessEnv {
     LANGAME_DAILY_WORKER_LIVE: 'true',
     LANGAME_DAILY_WORKER_TENANT_SLUG: 'demo',
     LANGAME_DAILY_WORKER_CANARY: 'false',
+    LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED: 'true',
+    LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT: '20',
+    LANGAME_DAILY_WORKER_RETENTION_ENABLED: 'true',
+    LANGAME_DAILY_WORKER_RETENTION_LIVE: 'false',
     LANGAME_DAILY_SYNC_SCHEDULER_ENABLED: 'false',
     LANGAME_SCHEDULED_HTTP_ENABLED: 'false',
   };
@@ -91,9 +96,21 @@ describe('Langame daily worker', () => {
       loadLangameDailyWorkerConfig({
         ...baseEnv(),
         LANGAME_DAILY_WORKER_CANARY: 'true',
+        LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED: 'false',
+        LANGAME_DAILY_WORKER_RETENTION_ENABLED: 'false',
         LANGAME_DAILY_WORKER_DATE: '2026-09-02',
       }),
     ).toMatchObject({ tenantSlug: 'demo', date: '2026-09-02', canary: true });
+  });
+
+  it('keeps daily maintenance disabled for a dated canary', () => {
+    expect(() =>
+      loadLangameDailyWorkerConfig({
+        ...baseEnv(),
+        LANGAME_DAILY_WORKER_CANARY: 'true',
+        LANGAME_DAILY_WORKER_DATE: '2026-09-02',
+      }),
+    ).toThrow('maintenance must stay disabled in canary mode');
   });
 
   it('runs exactly one tenant and writes aggregate-only output', async () => {
@@ -128,5 +145,66 @@ describe('Langame daily worker', () => {
         baseEnv(),
       ),
     ).rejects.toThrow('failed scopes: BUSINESS_FACTS');
+  });
+
+  it('runs exact-tenant recovery and dry-run retention after stable sync', async () => {
+    const services = {
+      activityLedger: {
+        enqueueDueRecoverySyncs: jest.fn().mockResolvedValue({
+          scanned: 3,
+          queued: 2,
+          skipped: 1,
+        }),
+      },
+      retention: {
+        runTenantMaintenance: jest.fn().mockResolvedValue({
+          recoveredOpenings: 1,
+          expiredOrphanClaims: 0,
+          deletedWalletItems: 2,
+          retention: { status: 'DRY_RUN_COMPLETE' },
+        }),
+      },
+    };
+    const now = new Date('2026-09-04T12:00:00.000Z');
+
+    await expect(
+      runLangameDailyMaintenanceOnce(
+        result(),
+        services as never,
+        baseEnv(),
+        console,
+        now,
+      ),
+    ).resolves.toMatchObject({ skipped: false });
+    expect(
+      services.activityLedger.enqueueDueRecoverySyncs,
+    ).toHaveBeenCalledWith(20, now, 'tenant-1');
+    expect(services.retention.runTenantMaintenance).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      now,
+      liveRequested: false,
+    });
+  });
+
+  it('does not mutate maintenance state during canary', async () => {
+    const services = {
+      activityLedger: { enqueueDueRecoverySyncs: jest.fn() },
+      retention: { runTenantMaintenance: jest.fn() },
+    };
+    const env = {
+      ...baseEnv(),
+      LANGAME_DAILY_WORKER_CANARY: 'true',
+      LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED: 'false',
+      LANGAME_DAILY_WORKER_RETENTION_ENABLED: 'false',
+      LANGAME_DAILY_WORKER_DATE: '2026-09-02',
+    };
+
+    await expect(
+      runLangameDailyMaintenanceOnce(result(), services as never, env),
+    ).resolves.toMatchObject({ skipped: true });
+    expect(
+      services.activityLedger.enqueueDueRecoverySyncs,
+    ).not.toHaveBeenCalled();
+    expect(services.retention.runTenantMaintenance).not.toHaveBeenCalled();
   });
 });

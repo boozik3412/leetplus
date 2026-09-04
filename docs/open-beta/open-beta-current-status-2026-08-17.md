@@ -102,6 +102,18 @@ DynamicUser canary доказывает cgroup singleton и отсутствие
 проверки. Gate не устанавливает container engine, не собирает образ и не меняет
 system D-Bus. Exact cleanup требует zero unit/PID/cgroup/timer residue.
 
+Следующий source successor закрывает обнаруженный после этого admission разрыв
+автономности. Отдельный nightly Langame worker сам по себе обновлял бы daily
+facts, но не дренировал `GuestActivitySyncJob`, не запускал основной и
+supplemental pipeline и не собирал quality snapshots. Эти пути нельзя включать
+в обоих blue/green API одновременно. Поэтому уже существующий active-slot
+bonus-ledger systemd singleton расширен tenant-scoped обработкой activity,
+pipeline и monitoring, а nightly worker после exact успешного sync ставит due
+recovery и выполняет bounded maintenance. Canary остаётся dry-run/SHADOW с
+лимитами `1`; stable — bounded LIVE только для canonical `demo` INTERNAL
+tenant. Production остаётся на `f3f119fa…` до нового exact-main Fast+Full,
+immutable handoff, controlled canary/backfill и отдельного postflight.
+
 ## Ускорение release pipeline без ослабления gates (02.09.2026)
 
 В backlog добавлена отдельная инициатива

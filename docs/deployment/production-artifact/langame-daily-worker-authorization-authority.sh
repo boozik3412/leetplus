@@ -266,7 +266,7 @@ assert_active_identity() {
   systemctl_bounded is-active --quiet "leetplus-web@${active_slot}.service" || die 'active Web slot is not active'
 }
 assert_worker_envelope() {
-  local allowed_slug class actual_scheduler actual_scheduled api_unit service_fragment timer_fragment
+  local allowed_slug class actual_scheduler actual_scheduled api_unit service_fragment timer_fragment recovery_enabled recovery_limit retention_enabled retention_live
   assert_regular "$WORKER_ENV" 'root:leetplus-api-runtime:640'
   assert_regular "$AUTH_ENV" 'root:root:400'
   assert_regular "$SAFE_ENV" 'root:leetplus-runtime:440'
@@ -275,7 +275,7 @@ assert_worker_envelope() {
   assert_regular "$RUNNER" 'root:root:555'
   assert_no_unexpected_env_keys "$WORKER_ENV"; assert_no_unexpected_env_keys "$AUTH_ENV"; assert_no_unexpected_env_keys "$SAFE_ENV"
   while IFS= read -r worker_key; do
-    case "$worker_key" in DATABASE_URL|APP_ENCRYPTION_KEY|INTEGRATION_ENCRYPTION_KEY|LANGAME_DISCREPANCY_LOG_ROOT|LANGAME_DAILY_WORKER_ENABLED|LANGAME_DAILY_WORKER_LIVE|LANGAME_DAILY_WORKER_TENANT_SLUG|LANGAME_DAILY_WORKER_CANARY|LANGAME_DAILY_SYNC_SCHEDULER_ENABLED|LANGAME_SCHEDULED_HTTP_ENABLED|LANGAME_DAILY_WORKER_DATE) ;; *) die "worker environment contains an unauthorized key: ${worker_key}" ;; esac
+    case "$worker_key" in DATABASE_URL|APP_ENCRYPTION_KEY|INTEGRATION_ENCRYPTION_KEY|LANGAME_DISCREPANCY_LOG_ROOT|LANGAME_DAILY_WORKER_ENABLED|LANGAME_DAILY_WORKER_LIVE|LANGAME_DAILY_WORKER_TENANT_SLUG|LANGAME_DAILY_WORKER_CANARY|LANGAME_DAILY_SYNC_SCHEDULER_ENABLED|LANGAME_SCHEDULED_HTTP_ENABLED|LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED|LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT|LANGAME_DAILY_WORKER_RETENTION_ENABLED|LANGAME_DAILY_WORKER_RETENTION_LIVE|LANGAME_DAILY_WORKER_DATE) ;; *) die "worker environment contains an unauthorized key: ${worker_key}" ;; esac
   done < <(sed -n '/^[^#[:space:]]/s/=.*$//p' "$WORKER_ENV")
   tenant_slug="$(read_env_value "$WORKER_ENV" LANGAME_DAILY_WORKER_TENANT_SLUG)"
   [[ "$tenant_slug" =~ $SLUG_RE ]] || die 'worker tenant slug is not canonical lowercase'
@@ -283,6 +283,8 @@ assert_worker_envelope() {
   class="$(read_env_value "$AUTH_ENV" LANGAME_DAILY_WORKER_AUTHORIZED_TENANT_CLASS)"
   [[ "$allowed_slug" == "$tenant_slug" && "$class" == INTERNAL ]] || die 'worker tenant is not exactly authorized as INTERNAL'
   [[ "$(read_env_value "$WORKER_ENV" LANGAME_DAILY_WORKER_ENABLED)" == true && "$(read_env_value "$WORKER_ENV" LANGAME_DAILY_WORKER_LIVE)" == true ]] || die 'dedicated worker is not explicitly enabled/live'
+  recovery_enabled="$(read_env_value "$WORKER_ENV" LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED)"; recovery_limit="$(read_env_value "$WORKER_ENV" LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT)"; retention_enabled="$(read_env_value "$WORKER_ENV" LANGAME_DAILY_WORKER_RETENTION_ENABLED)"; retention_live="$(read_env_value "$WORKER_ENV" LANGAME_DAILY_WORKER_RETENTION_LIVE)"
+  [[ "$recovery_limit" =~ ^[1-9][0-9]*$ && "$recovery_limit" -le 100 ]] || die 'activity recovery limit is invalid'
   actual_scheduler="$(read_env_value "$WORKER_ENV" LANGAME_DAILY_SYNC_SCHEDULER_ENABLED)"; actual_scheduled="$(read_env_value "$WORKER_ENV" LANGAME_SCHEDULED_HTTP_ENABLED)"
   [[ "$actual_scheduler" == false && "$actual_scheduled" == false ]] || die 'worker profile enables an API scheduler or scheduled HTTP'
   [[ "$(read_env_value "$SAFE_ENV" LANGAME_DAILY_SYNC_SCHEDULER_ENABLED)" == false && "$(read_env_value "$SAFE_ENV" LANGAME_SCHEDULED_HTTP_ENABLED)" == false ]] || die 'API safety overlay enables Langame scheduler ownership'
@@ -302,16 +304,18 @@ assert_worker_envelope() {
   service_fragment="$(systemctl_bounded show --property=FragmentPath --value "$WORKER_SERVICE")"; timer_fragment="$(systemctl_bounded show --property=FragmentPath --value "$WORKER_TIMER")"
   [[ "$service_fragment" == "$SERVICE_FILE" && "$timer_fragment" == "$TIMER_FILE" ]] || die 'loaded worker unit fragment drifted'
   assert_worker_fence "$WORKER_SERVICE"; assert_worker_fence "$WORKER_TIMER"
-  worker_env_sha="$(sha "$WORKER_ENV")"; worker_stable_env_sha="$(sed -E '/^LANGAME_DAILY_WORKER_CANARY=|^LANGAME_DAILY_WORKER_DATE=/d' "$WORKER_ENV" | sha256sum | awk '{print $1}')"; auth_env_sha="$(sha "$AUTH_ENV")"; service_sha="$(sha "$SERVICE_FILE")"; timer_sha="$(sha "$TIMER_FILE")"; safe_env_sha="$(sha "$SAFE_ENV")"
+  worker_env_sha="$(sha "$WORKER_ENV")"; worker_stable_env_sha="$(sed -E '/^LANGAME_DAILY_WORKER_CANARY=|^LANGAME_DAILY_WORKER_DATE=|^LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=|^LANGAME_DAILY_WORKER_RETENTION_ENABLED=/d' "$WORKER_ENV" | sha256sum | awk '{print $1}')"; auth_env_sha="$(sha "$AUTH_ENV")"; service_sha="$(sha "$SERVICE_FILE")"; timer_sha="$(sha "$TIMER_FILE")"; safe_env_sha="$(sha "$SAFE_ENV")"
   case "$phase" in
     canary)
       worker_mode="CANARY"; canary_date="$(read_env_value "$WORKER_ENV" LANGAME_DAILY_WORKER_DATE)"
       [[ "$(read_env_value "$WORKER_ENV" LANGAME_DAILY_WORKER_CANARY)" == true && "$canary_date" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]] || die 'canary requires true and one explicit ISO date'
+      [[ "$recovery_enabled" == false && "$retention_enabled" == false && "$retention_live" == false ]] || die 'canary maintenance must be disabled'
       timer_is_disabled_quiescent || die 'timer must be exact disabled/inactive/PID-zero before canary authorization'
       ;;
     timer)
       worker_mode="TIMER"; [[ "$(read_env_value "$WORKER_ENV" LANGAME_DAILY_WORKER_CANARY)" == false ]] || die 'timer requires canary=false'
       ! grep -q '^LANGAME_DAILY_WORKER_DATE=' "$WORKER_ENV" || die 'timer profile must not retain an explicit canary date'
+      [[ "$recovery_enabled" == true && "$retention_enabled" == true && "$retention_live" == false ]] || die 'timer maintenance profile is not autonomous and dry-run-safe'
       if [[ "$mode" == plan || "$mode" == apply ]]; then
         timer_is_disabled_quiescent || die 'timer must be exact disabled/inactive/PID-zero before timer authorization'
       fi

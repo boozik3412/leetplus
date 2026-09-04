@@ -2,6 +2,8 @@ import type {
   DailySyncResult,
   LangameDailySyncService,
 } from './langame-daily-sync.service';
+import type { GuestActivityLedgerService } from '../guest-gamification/guest-activity-ledger.service';
+import type { GuestGameDataRetentionService } from '../guest-gamification/guest-game-data-retention.service';
 
 export type LangameDailyWorkerLogger = Pick<Console, 'error' | 'log' | 'warn'>;
 
@@ -9,7 +11,16 @@ export type LangameDailyWorkerConfig = Readonly<{
   tenantSlug: string;
   date: string | null;
   canary: boolean;
+  activityRecoveryEnabled: boolean;
+  activityRecoveryLimit: number;
+  retentionEnabled: boolean;
+  retentionLive: boolean;
 }>;
+
+type LangameDailyMaintenanceServices = {
+  activityLedger: Pick<GuestActivityLedgerService, 'enqueueDueRecoverySyncs'>;
+  retention: Pick<GuestGameDataRetentionService, 'runTenantMaintenance'>;
+};
 
 const workerEnabledKey = 'LANGAME_DAILY_WORKER_ENABLED';
 const workerLiveKey = 'LANGAME_DAILY_WORKER_LIVE';
@@ -51,7 +62,47 @@ export function loadLangameDailyWorkerConfig(
     throw new Error('LANGAME_DAILY_WORKER_DATE is allowed only in canary mode');
   }
 
-  return { tenantSlug, date, canary };
+  const activityRecoveryEnabled = parseBoolean(
+    env.LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED,
+    false,
+    'LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED',
+  );
+  const retentionEnabled = parseBoolean(
+    env.LANGAME_DAILY_WORKER_RETENTION_ENABLED,
+    false,
+    'LANGAME_DAILY_WORKER_RETENTION_ENABLED',
+  );
+  const retentionLive = parseBoolean(
+    env.LANGAME_DAILY_WORKER_RETENTION_LIVE,
+    false,
+    'LANGAME_DAILY_WORKER_RETENTION_LIVE',
+  );
+  if (
+    canary &&
+    (activityRecoveryEnabled || retentionEnabled || retentionLive)
+  ) {
+    throw new Error('Daily maintenance must stay disabled in canary mode');
+  }
+  if (retentionLive && !retentionEnabled) {
+    throw new Error(
+      'LANGAME_DAILY_WORKER_RETENTION_ENABLED=true is required for live retention',
+    );
+  }
+
+  return {
+    tenantSlug,
+    date,
+    canary,
+    activityRecoveryEnabled,
+    activityRecoveryLimit: boundedPositiveInt(
+      env.LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT,
+      20,
+      100,
+      'LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT',
+    ),
+    retentionEnabled,
+    retentionLive,
+  };
 }
 
 export async function runLangameDailyWorkerOnce(
@@ -103,6 +154,76 @@ export async function runLangameDailyWorkerOnce(
   return result;
 }
 
+/**
+ * Runs maintenance only after the exact daily-sync tenant has passed all
+ * admission and scope checks. Canary runs are deliberately read-only.
+ */
+export async function runLangameDailyMaintenanceOnce(
+  result: DailySyncResult,
+  services: LangameDailyMaintenanceServices,
+  env: NodeJS.ProcessEnv = process.env,
+  logger: LangameDailyWorkerLogger = console,
+  now = new Date(),
+) {
+  const config = loadLangameDailyWorkerConfig(env);
+  const tenant = result.results[0];
+  if (
+    result.tenants !== 1 ||
+    result.processedTenants !== 1 ||
+    result.results.length !== 1 ||
+    !tenant ||
+    tenant.slug !== config.tenantSlug ||
+    tenant.status !== 'PROCESSED'
+  ) {
+    throw new Error(
+      'Daily maintenance requires one successfully synced tenant',
+    );
+  }
+
+  if (config.canary) {
+    return {
+      tenantId: tenant.tenantId,
+      recovery: null,
+      retention: null,
+      skipped: true,
+    };
+  }
+
+  const recovery = config.activityRecoveryEnabled
+    ? await services.activityLedger.enqueueDueRecoverySyncs(
+        config.activityRecoveryLimit,
+        now,
+        tenant.tenantId,
+      )
+    : null;
+  const retention = config.retentionEnabled
+    ? await services.retention.runTenantMaintenance({
+        tenantId: tenant.tenantId,
+        now,
+        liveRequested: config.retentionLive,
+      })
+    : null;
+
+  logger.log(
+    [
+      'Langame daily maintenance finished:',
+      `recoveryScanned=${recovery?.scanned ?? 0}`,
+      `recoveryQueued=${recovery?.queued ?? 0}`,
+      `walletOpeningsRecovered=${retention?.recoveredOpenings ?? 0}`,
+      `orphanClaimsExpired=${retention?.expiredOrphanClaims ?? 0}`,
+      `walletItemsDeleted=${retention?.deletedWalletItems ?? 0}`,
+      `retention=${retention?.retention.status ?? 'DISABLED'}`,
+    ].join(' '),
+  );
+
+  return {
+    tenantId: tenant.tenantId,
+    recovery,
+    retention,
+    skipped: false,
+  };
+}
+
 function optional(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
@@ -132,4 +253,18 @@ function parseBoolean(
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
   throw new Error(`${key} must be a boolean`);
+}
+
+function boundedPositiveInt(
+  value: string | undefined,
+  fallback: number,
+  maximum: number,
+  key: string,
+) {
+  if (!value?.trim()) return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) {
+    throw new Error(`${key} must be an integer between 1 and ${maximum}`);
+  }
+  return parsed;
 }

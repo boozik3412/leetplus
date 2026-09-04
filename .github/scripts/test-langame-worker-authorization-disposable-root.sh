@@ -43,6 +43,10 @@ LANGAME_DAILY_WORKER_CANARY=true
 LANGAME_DAILY_WORKER_DATE=2026-09-04
 LANGAME_DAILY_SYNC_SCHEDULER_ENABLED=false
 LANGAME_SCHEDULED_HTTP_ENABLED=false
+LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=false
+LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT=20
+LANGAME_DAILY_WORKER_RETENTION_ENABLED=false
+LANGAME_DAILY_WORKER_RETENTION_LIVE=false
 EOF
 chown root:leetplus-api-runtime /etc/leetplus/langame-daily-worker.env; chmod 640 /etc/leetplus/langame-daily-worker.env
 printf 'LANGAME_DAILY_WORKER_AUTHORIZED_TENANT_SLUG=internal-fixture\nLANGAME_DAILY_WORKER_AUTHORIZED_TENANT_CLASS=INTERNAL\n' >/etc/leetplus/langame-daily-worker-authorization.env; chmod 400 /etc/leetplus/langame-daily-worker-authorization.env
@@ -155,6 +159,8 @@ test "$(cat /run/langame-fixture/timer-enabled 2>/dev/null || echo 0)" = 0
 test -n "$(find /var/lib/leetplus/langame-worker-authorizations -name 'failed-canary-*.receipt' -print -quit)"
 sed -i '/LANGAME_DAILY_WORKER_CANARY=/c\LANGAME_DAILY_WORKER_CANARY=false' /etc/leetplus/langame-daily-worker.env
 sed -i '/LANGAME_DAILY_WORKER_DATE=/d' /etc/leetplus/langame-daily-worker.env
+sed -i '/LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=/c\LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=true' /etc/leetplus/langame-daily-worker.env
+sed -i '/LANGAME_DAILY_WORKER_RETENTION_ENABLED=/c\LANGAME_DAILY_WORKER_RETENTION_ENABLED=true' /etc/leetplus/langame-daily-worker.env
 printf timer-fire-failure >/run/langame-fixture/mode
 printf 0 >/run/langame-fixture/timer-profile-starts
 if apply timer; then echo 'failed immediate timer invocation was accepted' >&2; exit 1; fi

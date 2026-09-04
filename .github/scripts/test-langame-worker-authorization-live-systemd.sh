@@ -358,6 +358,10 @@ LANGAME_DAILY_WORKER_CANARY=true
 LANGAME_DAILY_WORKER_DATE=2026-09-04
 LANGAME_DAILY_SYNC_SCHEDULER_ENABLED=false
 LANGAME_SCHEDULED_HTTP_ENABLED=false
+LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=false
+LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT=20
+LANGAME_DAILY_WORKER_RETENTION_ENABLED=false
+LANGAME_DAILY_WORKER_RETENTION_LIVE=false
 EOF
 chown root:leetplus-api-runtime "$ENV_FILE"; chmod 0640 "$ENV_FILE"
 install -o root -g root -m 0444 "$ROOT/docs/deployment/production-artifact/systemd/leetplus-langame-daily-worker.service" "$SERVICE_PATH"
@@ -377,7 +381,7 @@ done
 # Full 3-key pointer and 19-key receipt: the exact production wrapper must
 # consume this synthetic record before it can hand off to the active runner.
 env_sha="$(sha256sum "$ENV_FILE" | awk '{print $1}')"
-stable_sha="$(sed -E '/^LANGAME_DAILY_WORKER_CANARY=|^LANGAME_DAILY_WORKER_DATE=/d' "$ENV_FILE" | sha256sum | awk '{print $1}')"
+stable_sha="$(sed -E '/^LANGAME_DAILY_WORKER_CANARY=|^LANGAME_DAILY_WORKER_DATE=|^LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=|^LANGAME_DAILY_WORKER_RETENTION_ENABLED=/d' "$ENV_FILE" | sha256sum | awk '{print $1}')"
 permit_id="$(printf '%s:%s:%s:%s' canary 1 "$SHA" "$env_sha" | sha256sum | awk '{print $1}')"
 permit="$AUTH_ROOT/authorization-canary-1-${permit_id}.receipt"
 cat >"$permit" <<EOF
@@ -467,7 +471,7 @@ canary_invocation="$(read_marker_invocation)"
 # Transition to the exact persistent timer profile. A canary pointer or a 91
 # drop-in naming the canary receipt must not authorize CANARY=false.
 rm -f -- "$MARKER"
-sed -E '/^LANGAME_DAILY_WORKER_DATE=/d; s/^LANGAME_DAILY_WORKER_CANARY=true$/LANGAME_DAILY_WORKER_CANARY=false/' "$ENV_FILE" > "$TIMER_ENV_TEMP"
+sed -E '/^LANGAME_DAILY_WORKER_DATE=/d; s/^LANGAME_DAILY_WORKER_CANARY=true$/LANGAME_DAILY_WORKER_CANARY=false/; s/^LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=false$/LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=true/; s/^LANGAME_DAILY_WORKER_RETENTION_ENABLED=false$/LANGAME_DAILY_WORKER_RETENTION_ENABLED=true/' "$ENV_FILE" > "$TIMER_ENV_TEMP"
 chown root:leetplus-api-runtime "$TIMER_ENV_TEMP"; chmod 0640 "$TIMER_ENV_TEMP"
 if [[ "$(grep -c '^LANGAME_DAILY_WORKER_CANARY=false$' "$TIMER_ENV_TEMP" || true)" != 1 ]] \
   || grep -q '^LANGAME_DAILY_WORKER_DATE=' "$TIMER_ENV_TEMP"; then
@@ -475,7 +479,7 @@ if [[ "$(grep -c '^LANGAME_DAILY_WORKER_CANARY=false$' "$TIMER_ENV_TEMP" || true
 fi
 mv -T -- "$TIMER_ENV_TEMP" "$ENV_FILE"
 timer_env_sha="$(sha256sum "$ENV_FILE" | awk '{print $1}')"
-timer_stable_sha="$(sed -E '/^LANGAME_DAILY_WORKER_CANARY=|^LANGAME_DAILY_WORKER_DATE=/d' "$ENV_FILE" | sha256sum | awk '{print $1}')"
+timer_stable_sha="$(sed -E '/^LANGAME_DAILY_WORKER_CANARY=|^LANGAME_DAILY_WORKER_DATE=|^LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=|^LANGAME_DAILY_WORKER_RETENTION_ENABLED=/d' "$ENV_FILE" | sha256sum | awk '{print $1}')"
 [[ "$timer_stable_sha" == "$stable_sha" && "$timer_env_sha" != "$env_sha" ]] \
   || die 'timer worker profile stable/full digest transition is invalid'
 if bounded_systemctl start "$SERVICE"; then

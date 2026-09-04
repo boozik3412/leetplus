@@ -330,7 +330,11 @@ export class GuestActivityLedgerService {
     }
   }
 
-  async processQueuedSyncJobs(limit = 5, workerId = `api-${process.pid}`) {
+  async processQueuedSyncJobs(
+    limit = 5,
+    workerId = `api-${process.pid}`,
+    tenantId?: string,
+  ) {
     const results: Array<{
       jobId: string;
       status: string;
@@ -338,7 +342,7 @@ export class GuestActivityLedgerService {
     }> = [];
 
     for (let index = 0; index < limit; index += 1) {
-      const job = await this.claimNextSyncJob(workerId);
+      const job = await this.claimNextSyncJob(workerId, tenantId);
 
       if (!job) {
         break;
@@ -376,12 +380,17 @@ export class GuestActivityLedgerService {
     };
   }
 
-  async enqueueDueRecoverySyncs(limit = 20, now = new Date()) {
+  async enqueueDueRecoverySyncs(
+    limit = 20,
+    now = new Date(),
+    tenantId?: string,
+  ) {
     const retryBefore = new Date(now.getTime() - 5 * 60 * 1_000);
     const scanLimit = Math.max(limit * 3, limit);
     const [recoveryStates, hourlyReplayStates] = await Promise.all([
       this.prisma.guestActivitySyncState.findMany({
         where: {
+          ...(tenantId ? { tenantId } : {}),
           tenant: {
             customerStage: TenantCustomerStage.INTERNAL,
           },
@@ -448,6 +457,7 @@ export class GuestActivityLedgerService {
           AND state."externalGuestId" = fact."externalGuestId"
         WHERE fact."profileId" IS NOT NULL
           AND tenant."customerStage" = 'INTERNAL'
+          ${tenantId ? Prisma.sql`AND fact."tenantId" = ${tenantId}` : Prisma.empty}
           AND fact."externalProvider" = 'LANGAME'
           AND fact."sourceKind" IN (
             'LANGAME_GUEST_SESSION',
@@ -567,10 +577,11 @@ export class GuestActivityLedgerService {
     return { scanned: states.length, queued, skipped };
   }
 
-  private async claimNextSyncJob(workerId: string) {
+  private async claimNextSyncJob(workerId: string, tenantId?: string) {
     const now = new Date();
     const staleAt = new Date(now.getTime() - SYNC_JOB_LOCK_STALE_MS);
-    const availableWhere = {
+    const availableWhere: Prisma.GuestActivitySyncJobWhereInput = {
+      ...(tenantId ? { tenantId } : {}),
       tenant: {
         customerStage: TenantCustomerStage.INTERNAL,
       },

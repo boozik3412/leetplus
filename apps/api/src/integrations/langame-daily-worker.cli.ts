@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { GuestActivityLedgerService } from '../guest-gamification/guest-activity-ledger.service';
+import { GuestGameDataRetentionService } from '../guest-gamification/guest-game-data-retention.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { BusinessSnapshotService } from './business-snapshot.service';
@@ -12,6 +14,7 @@ import { LangameSettingsService } from './langame-settings.service';
 import { LangameSyncService } from './langame-sync.service';
 import {
   loadLangameDailyWorkerConfig,
+  runLangameDailyMaintenanceOnce,
   runLangameDailyWorkerOnce,
 } from './langame-daily-worker';
 import { SecretEncryptionService } from './secret-encryption.service';
@@ -27,6 +30,8 @@ import { SecretEncryptionService } from './secret-encryption.service';
     BusinessSnapshotService,
     GuestDataFoundationService,
     GuestIdentityResolverService,
+    GuestActivityLedgerService,
+    GuestGameDataRetentionService,
     LangameClient,
     LangameDailySyncService,
     LangameSettingsService,
@@ -46,7 +51,13 @@ async function main() {
   );
 
   try {
-    await runLangameDailyWorkerOnce(application.get(LangameDailySyncService));
+    const result = await runLangameDailyWorkerOnce(
+      application.get(LangameDailySyncService),
+    );
+    await runLangameDailyMaintenanceOnce(result, {
+      activityLedger: application.get(GuestActivityLedgerService),
+      retention: application.get(GuestGameDataRetentionService),
+    });
   } finally {
     await application.close();
   }

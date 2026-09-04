@@ -166,9 +166,12 @@ jobs:
               test -s /usr/lib/systemd/system/leetplus-langame-fixture.target
             '
 
-          # Prove the published base can boot systemd and expose the manager on
-          # the canonical system bus to a DynamicUser process. Container-local
-          # privilege is confined to a rootless auto user namespace.
+          # Prove the published base can boot systemd and isolate DynamicUser
+          # from manager transports while preserving kernel cgroup evidence.
+          # Ubuntu's dbus-daemon cannot authenticate DynamicUser (systemd
+          # upstream #22737), so unprivileged production code must not depend
+          # on that backend. Container-local privilege remains confined to a
+          # rootless auto user namespace.
           container_id="$(podman_long run --detach \
             --name "$container" \
             --hostname leetplus-langame-bootstrap \
@@ -220,11 +223,25 @@ jobs:
           done
           test "$boot_ready" = true
           timeout --foreground --kill-after=5s 30s /usr/bin/podman exec "$container" /usr/bin/bash -p -ceu '
-            owner="$(systemd-run --quiet --wait --pipe --collect \
+            systemd-run --quiet --wait --pipe --collect \
+              --unit=leetplus-langame-bootstrap-dynamic-isolation.service \
               --property=DynamicUser=yes \
               --property=NoNewPrivileges=yes \
-              /usr/bin/busctl --system call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetNameOwner s org.freedesktop.systemd1)"
-            [[ "$owner" =~ ^s[[:space:]]+\":[1-9][0-9]*\.[0-9]+\"$ ]]
+              --property=ProtectControlGroups=yes \
+              --property=RestrictNamespaces=yes \
+              --property="InaccessiblePaths=/run/dbus /run/systemd/private" \
+              /usr/bin/bash -p -ceu '\''
+                expected=/system.slice/leetplus-langame-bootstrap-dynamic-isolation.service
+                mapfile -t cgroups < /proc/self/cgroup
+                [[ "${#cgroups[@]}" == 1 && "${cgroups[0]}" == "0::${expected}" ]]
+                mapfile -t pids < "/sys/fs/cgroup${expected}/cgroup.procs"
+                [[ "${#pids[@]}" == 1 && "${pids[0]}" == "$$" ]]
+                [[ "${INVOCATION_ID:-}" =~ ^[0-9a-f]{32}$ ]]
+                [[ ! -e /run/dbus/system_bus_socket && ! -e /run/systemd/private ]]
+                if /usr/bin/busctl --system call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetNameOwner s org.freedesktop.systemd1 >/dev/null 2>&1; then
+                  exit 40
+                fi
+              '\''
           '
           retired_container_id="$container_id"
           timeout --foreground --kill-after=5s 20s /usr/bin/podman stop --time 10 "$container" >/dev/null || true

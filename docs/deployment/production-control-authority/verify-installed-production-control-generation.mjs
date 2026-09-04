@@ -117,11 +117,16 @@ function decodeUtf8(bytes, source) {
 function parseArguments(argv) {
   let releaseSha;
   let fixtureRoot;
+  let fixtureLangameWorkerGid;
   let requireRootAuthority = false;
   const seen = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument === "--release-sha" || argument === "--fixture-root") {
+    if (
+      argument === "--release-sha" ||
+      argument === "--fixture-root" ||
+      argument === "--fixture-langame-worker-gid"
+    ) {
       if (seen.has(argument)) fail(`duplicate argument: ${argument}`);
       seen.add(argument);
       const value = argv[index + 1];
@@ -129,7 +134,8 @@ function parseArguments(argv) {
         fail(`${argument} requires one value`);
       }
       if (argument === "--release-sha") releaseSha = value;
-      else fixtureRoot = value;
+      else if (argument === "--fixture-root") fixtureRoot = value;
+      else fixtureLangameWorkerGid = value;
       index += 1;
     } else if (argument === "--require-root-authority") {
       if (seen.has(argument)) fail(`duplicate argument: ${argument}`);
@@ -152,10 +158,28 @@ function parseArguments(argv) {
     if (requireRootAuthority) {
       fail("--fixture-root and --require-root-authority are mutually exclusive");
     }
+    if (
+      fixtureLangameWorkerGid !== undefined &&
+      (!/^(?:0|[1-9][0-9]{0,9})$/u.test(fixtureLangameWorkerGid) ||
+        !Number.isSafeInteger(Number(fixtureLangameWorkerGid)) ||
+        Number(fixtureLangameWorkerGid) > 4_294_967_295)
+    ) {
+      fail("--fixture-langame-worker-gid must be a valid unsigned decimal gid");
+    }
   } else if (!requireRootAuthority) {
     fail("production verification requires --require-root-authority");
+  } else if (fixtureLangameWorkerGid !== undefined) {
+    fail("--fixture-langame-worker-gid requires --fixture-root");
   }
-  return { releaseSha, fixtureRoot, requireRootAuthority };
+  return {
+    releaseSha,
+    fixtureRoot,
+    fixtureLangameWorkerGid:
+      fixtureLangameWorkerGid === undefined
+        ? undefined
+        : Number(fixtureLangameWorkerGid),
+    requireRootAuthority,
+  };
 }
 
 function assertProcessBoundary(fixtureMode) {
@@ -271,8 +295,15 @@ function assertExactDirectoryAuthority(
   expectedGid,
   mode,
   source,
+  trustedAncestorUid = expectedUid,
+  trustedAncestorGid = expectedGid,
 ) {
-  assertTrustedAncestors(absolutePath, expectedUid, expectedGid, false);
+  assertTrustedAncestors(
+    absolutePath,
+    trustedAncestorUid,
+    trustedAncestorGid,
+    false,
+  );
   const stat = fs.lstatSync(absolutePath);
   if (
     !stat.isDirectory() ||
@@ -582,8 +613,11 @@ function assertRegularAuthority(file, expectedUid, expectedGid, mode, source) {
   }
 }
 
-function resolveLangameWorkerAuthorizationGid(fixtureMode) {
-  if (fixtureMode) return process.getgid();
+function resolveLangameWorkerAuthorizationGid(
+  fixtureMode,
+  fixtureLangameWorkerGid,
+) {
+  if (fixtureMode) return fixtureLangameWorkerGid ?? process.getgid();
   const groupPath = "/etc/group";
   const groupFile = fs.lstatSync(groupPath);
   if (
@@ -719,7 +753,10 @@ const rootPrefix = fixtureMode
   ? canonicalRoot(parsedArguments.fixtureRoot, "fixture root")
   : "/";
 trustedAuthorityRoot = rootPrefix;
-const langameWorkerAuthorizationGid = resolveLangameWorkerAuthorizationGid(fixtureMode);
+const langameWorkerAuthorizationGid = resolveLangameWorkerAuthorizationGid(
+  fixtureMode,
+  parsedArguments.fixtureLangameWorkerGid,
+);
 const generationRoot = hostPath(
   rootPrefix,
   `${GENERATION_BASE}/${parsedArguments.releaseSha}`,
@@ -756,6 +793,8 @@ assertExactDirectoryAuthority(
   langameWorkerAuthorizationGid,
   0o710,
   "Langame worker authorization root",
+  expectedUid,
+  expectedGid,
 );
 assertTrustedAncestors(generationRoot, expectedUid, expectedGid, false);
 assertTrustedAncestors(receiptPath, expectedUid, expectedGid, false);

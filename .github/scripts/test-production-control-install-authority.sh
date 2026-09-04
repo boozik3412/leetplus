@@ -247,6 +247,11 @@ run_installer() {
 
 run_installed_verifier() {
   local root="$1"
+  local fixture_langame_worker_gid="${2:-}"
+  local -a fixture_worker_args=()
+  if [[ -n "$fixture_langame_worker_gid" ]]; then
+    fixture_worker_args=(--fixture-langame-worker-gid "$fixture_langame_worker_gid")
+  fi
   /usr/bin/env -i \
     PATH="$VERIFIER_PATH" \
     LANG='C.UTF-8' \
@@ -255,7 +260,8 @@ run_installed_verifier() {
     LEETPLUS_PRODUCTION_CONTROL_FIXTURE_CONFIRMATION='verify-installed-production-control-generation' \
     "$FIXTURE_NODE" "$root/$INSTALLED_VERIFIER" \
       --release-sha "$RELEASE_SHA" \
-      --fixture-root "$root"
+      --fixture-root "$root" \
+      "${fixture_worker_args[@]}"
 }
 
 expect_installer_rejected() {
@@ -304,6 +310,17 @@ grep -F -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' \
   "$TEST_ROOT/accepted-verify.out" >/dev/null
 grep -F -x 'PRODUCTION_CONTROL_EFFECTIVE_LANE=L1_RUNTIME' \
   "$TEST_ROOT/accepted-verify.out" >/dev/null
+if ((EUID == 0)); then
+  mixed_owner_root="$TEST_ROOT/mixed-owner-root"
+  prepare_fixture_root "$mixed_owner_root" "$archive"
+  run_installer "$mixed_owner_root" > /dev/null
+  chown "${fixture_uid}:65534" -- \
+    "$mixed_owner_root/var/lib/leetplus/langame-worker-authorizations"
+  run_installed_verifier "$mixed_owner_root" 65534 \
+    > "$TEST_ROOT/mixed-owner-verify.out"
+  grep -F -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' \
+    "$TEST_ROOT/mixed-owner-verify.out" >/dev/null
+fi
 chmod 0777 -- "$accepted_root"
 if run_installed_verifier "$accepted_root" > "$TEST_ROOT/writable-fixture-root.out" 2>&1; then
   die 'installed-generation verifier accepted a writable fixture root boundary'

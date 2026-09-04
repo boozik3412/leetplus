@@ -41,11 +41,10 @@ jobs:
           trap 'status=$?; printf "LANGAME_SYSTEMD_BOOTSTRAP_FAILED line=%s status=%s\n" "$LINENO" "$status" >&2; exit "$status"' ERR
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(uname -m)" = x86_64
-          podman_command="$(command -v podman)"
-          podman_authority="$(realpath -e -- "$podman_command")"
-          printf 'PODMAN_AUTHORITY_PATH=%s\n' "$podman_authority"
-          stat -c 'PODMAN_AUTHORITY_METADATA=%F:%U:%G:%a:%h' -- "$podman_authority"
-          test "$podman_authority" = /usr/bin/podman
+          test -f /usr/bin/podman && test ! -L /usr/bin/podman
+          test "$(stat -c '%U:%G:%h' -- /usr/bin/podman)" = root:root:1
+          test -z "$(find -P /usr/bin/podman -maxdepth 0 -perm /022 -print -quit)"
+          printf 'PODMAN_AUTHORITY_PATH=/usr/bin/podman\n'
           podman_short() { timeout --foreground --kill-after=10s 60s /usr/bin/podman "$@"; }
           podman_long() { timeout --foreground --kill-after=30s 900s /usr/bin/podman "$@"; }
           test "$(podman_short info --format '{{.Host.Security.Rootless}}')" = true

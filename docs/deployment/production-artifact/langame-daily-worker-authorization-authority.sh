@@ -139,10 +139,16 @@ unit_has_no_processes() {
   # cgroup.events remain the authoritative live-process boundary.
   for property in MainPID ControlPID; do
     value="$(systemctl_bounded show --property="$property" --value "$unit")" || return 1
-    [[ "$value" == 0 ]] || return 1
+    if [[ "$unit" == "$WORKER_TIMER" ]]; then
+      [[ -z "$value" || "$value" == 0 ]] || return 1
+    else
+      [[ "$value" == 0 ]] || return 1
+    fi
   done
   exec_main_pid="$(systemctl_bounded show --property=ExecMainPID --value "$unit")" || return 1
-  if [[ -n "$exec_main_pid" && "$exec_main_pid" != 0 ]]; then
+  if [[ "$unit" == "$WORKER_TIMER" ]]; then
+    [[ -z "$exec_main_pid" || "$exec_main_pid" == 0 ]] || return 1
+  elif [[ -n "$exec_main_pid" && "$exec_main_pid" != 0 ]]; then
     [[ "$exec_main_pid" =~ ^[1-9][0-9]*$ && ! -e "/proc/${exec_main_pid}" ]] || return 1
   fi
   control_group="$(systemctl_bounded show --property=ControlGroup --value "$unit")" || return 1

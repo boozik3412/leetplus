@@ -99,8 +99,8 @@ case "$1" in
    SubState) if [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == deactivating ]]; then printf stop-sigterm; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$service_active" == failed ]]; then printf failed; elif [[ "$unit" == *.timer && "$enabled" == 1 ]]; then printf waiting; else printf dead; fi;;
    Result) cat "$state/result" 2>/dev/null || printf success;;
    ExecMainStatus) printf 0;;
-   MainPID|ControlPID) if [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == pid-residue ]]; then printf 4242; else printf 0; fi;;
-   ExecMainPID) if [[ "$unit" == leetplus-langame-daily-worker.service && ( "$mode" == pid-residue || "$mode" == historical-exec-pid ) ]]; then printf 2147483646; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == live-historical-exec-pid ]]; then printf 1; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == malformed-exec-pid ]]; then printf invalid; else printf 0; fi;;
+   MainPID|ControlPID) if [[ "$unit" == leetplus-langame-daily-worker.timer && "$mode" == timer-pid-residue ]]; then printf 4242; elif [[ "$unit" == leetplus-langame-daily-worker.timer ]]; then printf ''; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == pid-residue ]]; then printf 4242; else printf 0; fi;;
+   ExecMainPID) if [[ "$unit" == leetplus-langame-daily-worker.timer && "$mode" == timer-pid-residue ]]; then printf 4242; elif [[ "$unit" == leetplus-langame-daily-worker.timer ]]; then printf ''; elif [[ "$unit" == leetplus-langame-daily-worker.service && ( "$mode" == pid-residue || "$mode" == historical-exec-pid ) ]]; then printf 2147483646; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == live-historical-exec-pid ]]; then printf 1; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == malformed-exec-pid ]]; then printf invalid; else printf 0; fi;;
    UnitFileState) [[ "$unit" == *.timer ]] && { [[ "$enabled" == 1 ]] && printf enabled || printf disabled; } || printf static;;
    ControlGroup) printf '\n';;
    DropInPaths) for f in "/etc/systemd/system/${unit}.d/90-leetplus-nminus1-start-fence.conf" "/etc/systemd/system/${unit}.d/91-leetplus-langame-worker-authorization.conf"; do [[ -f "$f" ]] && printf '%s ' "$f"; done; printf '\n';;
@@ -172,6 +172,8 @@ printf live-historical-exec-pid >/run/langame-fixture/mode
 if /usr/local/libexec/leetplus/verify-langame-daily-worker-authorization.sh; then echo 'timer verifier accepted live/reused historical ExecMainPID' >&2; exit 1; fi
 printf malformed-exec-pid >/run/langame-fixture/mode
 if /usr/local/libexec/leetplus/verify-langame-daily-worker-authorization.sh; then echo 'timer verifier accepted malformed historical ExecMainPID' >&2; exit 1; fi
+printf timer-pid-residue >/run/langame-fixture/mode
+if /usr/local/libexec/leetplus/verify-langame-daily-worker-authorization.sh; then echo 'timer verifier accepted timer PID residue' >&2; exit 1; fi
 printf historical-exec-pid >/run/langame-fixture/mode
 printf '# tamper\n' >>/etc/systemd/system/leetplus-langame-daily-worker.timer.d/91-leetplus-langame-worker-authorization.conf
 if /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority check --phase timer; then echo 'tampered authorization was accepted' >&2; exit 1; fi

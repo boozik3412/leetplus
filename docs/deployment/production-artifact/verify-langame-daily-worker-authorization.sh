@@ -37,10 +37,16 @@ assert_zero_unit_processes() {
   # MainPID/ControlPID and the actual cgroup prove live quiescence.
   for property in MainPID ControlPID; do
     value="$(systemctl_bounded show --property="$property" --value "$unit")"
-    [[ "$value" == 0 ]] || die "unit retains ${property}: ${unit}"
+    if [[ "$unit" == "$TIMER" ]]; then
+      [[ -z "$value" || "$value" == 0 ]] || die "timer retains ${property}: ${unit}"
+    else
+      [[ "$value" == 0 ]] || die "unit retains ${property}: ${unit}"
+    fi
   done
   exec_main_pid="$(systemctl_bounded show --property=ExecMainPID --value "$unit")"
-  if [[ -n "$exec_main_pid" && "$exec_main_pid" != 0 ]]; then
+  if [[ "$unit" == "$TIMER" ]]; then
+    [[ -z "$exec_main_pid" || "$exec_main_pid" == 0 ]] || die "timer retains ExecMainPID: ${unit}"
+  elif [[ -n "$exec_main_pid" && "$exec_main_pid" != 0 ]]; then
     [[ "$exec_main_pid" =~ ^[1-9][0-9]*$ ]] || die "unit exposes invalid historical ExecMainPID: ${unit}"
     [[ ! -e "/proc/${exec_main_pid}" ]] || die "unit historical ExecMainPID is still live or reused: ${unit}"
   fi

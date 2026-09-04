@@ -145,10 +145,16 @@ assert_zero_processes() {
   # the primary live-process boundary.
   for property in MainPID ControlPID; do
     value="$(systemctl show -p "$property" --value "$unit")"
-    [[ "$value" == 0 ]] || die "${unit} retained ${property}=${value}"
+    if [[ "$unit" == "$TIMER" ]]; then
+      [[ -z "$value" || "$value" == 0 ]] || die "${unit} retained ${property}=${value}"
+    else
+      [[ "$value" == 0 ]] || die "${unit} retained ${property}=${value}"
+    fi
   done
   exec_main_pid="$(systemctl show -p ExecMainPID --value "$unit")"
-  if [[ -n "$exec_main_pid" && "$exec_main_pid" != 0 ]]; then
+  if [[ "$unit" == "$TIMER" ]]; then
+    [[ -z "$exec_main_pid" || "$exec_main_pid" == 0 ]] || die "${unit} retained ExecMainPID=${exec_main_pid}"
+  elif [[ -n "$exec_main_pid" && "$exec_main_pid" != 0 ]]; then
     [[ "$exec_main_pid" =~ ^[1-9][0-9]*$ ]] || die "${unit} exposes invalid historical ExecMainPID=${exec_main_pid}"
     [[ ! -e "/proc/${exec_main_pid}" ]] || die "${unit} historical ExecMainPID is still live or reused: ${exec_main_pid}"
   fi

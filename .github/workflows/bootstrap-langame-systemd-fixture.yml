@@ -35,21 +35,68 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
+          IFS=$'\n\t'
+          umask 0077
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(uname -m)" = x86_64
-          command -v podman >/dev/null
+          test "$(realpath -e -- "$(command -v podman)")" = /usr/bin/podman
+          podman_short() { timeout --foreground --kill-after=10s 60s /usr/bin/podman "$@"; }
+          podman_long() { timeout --foreground --kill-after=30s 900s /usr/bin/podman "$@"; }
+          test "$(podman_short info --format '{{.Host.Security.Rootless}}')" = true
+          test "$(podman_short info --format '{{.Host.CgroupsVersion}}')" = v2
+          subuid_capacity="$(awk -F: -v user="$(id -un)" '$1 == user { total += $3 } END { print total + 0 }' /etc/subuid)"
+          subgid_capacity="$(awk -F: -v user="$(id -un)" '$1 == user { total += $3 } END { print total + 0 }' /etc/subgid)"
+          test "$subuid_capacity" -ge 65536
+          test "$subgid_capacity" -ge 65536
           image="ghcr.io/boozik3412/leetplus-langame-systemd-fixture:bootstrap-${GITHUB_SHA}"
           auth_file="$RUNNER_TEMP/leetplus-langame-systemd-fixture-auth.json"
           digest_file="$RUNNER_TEMP/leetplus-langame-systemd-fixture.digest"
-          trap 'podman logout --authfile "$auth_file" ghcr.io >/dev/null 2>&1 || true; rm -f -- "$auth_file" "$digest_file"' EXIT
-          test ! -e "$auth_file"
-          test ! -e "$digest_file"
-          printf '%s' "$GHCR_TOKEN" | podman login \
+          run_identity="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          container="leetplus-langame-systemd-bootstrap-${run_identity}"
+          label_key='io.leetplus.langame-systemd-bootstrap-run'
+          label="${label_key}=${run_identity}"
+          container_id=''
+          retired_container_id=''
+          auth_armed=false
+
+          cleanup() {
+            original_status=$?
+            cleanup_status=0
+            trap - EXIT INT TERM HUP
+            set +e
+            mapfile -t ids < <(podman_short ps -aq --no-trunc --filter "label=${label}" 2>/dev/null)
+            for id in "${ids[@]}"; do
+              [[ -z "$container_id" || "$id" == "$container_id" ]] || cleanup_status=1
+              test "$(podman_short inspect --format "{{index .Config.Labels \"${label_key}\"}}" "$id")" = "$run_identity" || cleanup_status=1
+              test "$(podman_short inspect --format '{{.Name}}' "$id")" = "$container" || cleanup_status=1
+              if ((original_status != 0)); then podman_short logs --tail 250 "$id" >&2 || true; fi
+              timeout --foreground --kill-after=5s 20s /usr/bin/podman stop --time 10 "$id" >/dev/null 2>&1 || true
+              podman_short rm -f "$id" >/dev/null 2>&1 || cleanup_status=1
+            done
+            if [[ "$auth_armed" == true ]]; then
+              podman_short logout --authfile "$auth_file" ghcr.io >/dev/null 2>&1 || cleanup_status=1
+            fi
+            rm -f -- "$auth_file" "$digest_file" || cleanup_status=1
+            ((original_status != 0)) && exit "$original_status"
+            exit "$cleanup_status"
+          }
+          trap cleanup EXIT
+          trap 'exit 129' HUP
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          test ! -e "$auth_file" && test ! -L "$auth_file"
+          test ! -e "$digest_file" && test ! -L "$digest_file"
+          test -z "$(podman_short ps -aq --no-trunc --filter "label=${label}")"
+          auth_armed=true
+          printf '%s' "$GHCR_TOKEN" | podman_short login \
             --authfile "$auth_file" \
             --username "$GITHUB_ACTOR" \
             --password-stdin \
             ghcr.io >/dev/null
-          podman build \
+          unset GHCR_TOKEN
+          test "$(stat -c '%u:%g:%a:%h' -- "$auth_file")" = "$(id -u):$(id -g):600:1"
+          podman_long build \
             --pull-always \
             --platform linux/amd64 \
             --format oci \
@@ -57,10 +104,10 @@ jobs:
             --file .github/fixtures/langame-systemd-noble/Dockerfile \
             --tag "$image" \
             .github/fixtures/langame-systemd-noble
-          test "$(podman image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" = linux/amd64
-          test "$(podman image inspect --format '{{index .Labels "io.leetplus.fixture"}}' "$image")" = langame-booted-systemd-base-v1
-          test "$(podman image inspect --format '{{index .Labels "org.opencontainers.image.revision"}}' "$image")" = "$GITHUB_SHA"
-          podman run --rm \
+          test "$(podman_short image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" = linux/amd64
+          test "$(podman_short image inspect --format '{{index .Labels "io.leetplus.fixture"}}' "$image")" = langame-booted-systemd-base-v1
+          test "$(podman_short image inspect --format '{{index .Labels "org.opencontainers.image.revision"}}' "$image")" = "$GITHUB_SHA"
+          podman_short run --rm \
             --network none \
             --entrypoint /usr/bin/bash \
             "$image" -p -ceu '
@@ -69,7 +116,84 @@ jobs:
               sha256sum --check /usr/share/leetplus-langame-fixture/dpkg-packages.sha256
               test -s /usr/lib/systemd/system/leetplus-langame-fixture.target
             '
-          podman push \
+
+          # Prove the published base can boot systemd and expose the manager on
+          # the canonical system bus to a DynamicUser process. Container-local
+          # privilege is confined to a rootless auto user namespace.
+          container_id="$(podman_long run --detach \
+            --name "$container" \
+            --hostname leetplus-langame-bootstrap \
+            --label "$label" \
+            --env container=podman \
+            --pull=never \
+            --systemd=always \
+            --userns=auto:size=65536 \
+            --privileged \
+            --read-only \
+            --cgroups=enabled \
+            --cgroupns=private \
+            --network=none \
+            --pids-limit=256 \
+            --memory=1g \
+            --tmpfs /run:rw,nosuid,nodev,mode=755,size=128m \
+            --tmpfs /run/lock:rw,nosuid,nodev,mode=755,size=16m \
+            --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=32m \
+            --tmpfs /var/lib/systemd/timers:rw,nosuid,nodev,noexec,mode=755,size=16m \
+            "$image")"
+          test "$container_id" = "$(podman_short ps -q --no-trunc --filter "label=${label}")"
+          host_pid="$(podman_short inspect --format '{{.State.Pid}}' "$container")"
+          test "$(stat -Lc '%i' /proc/self/ns/user)" != "$(stat -Lc '%i' "/proc/${host_pid}/ns/user")"
+          awk -v outer_id="$(id -u)" '
+            NF != 3 { exit 1 }
+            $1 == 0 && $3 >= 65536 && !(outer_id >= $2 && outer_id < $2 + $3) { covers = 1 }
+            END { exit(covers == 1 ? 0 : 1) }
+          ' "/proc/${host_pid}/uid_map"
+          awk -v outer_id="$(id -g)" '
+            NF != 3 { exit 1 }
+            $1 == 0 && $3 >= 65536 && !(outer_id >= $2 && outer_id < $2 + $3) { covers = 1 }
+            END { exit(covers == 1 ? 0 : 1) }
+          ' "/proc/${host_pid}/gid_map"
+          deadline=$((SECONDS + 75))
+          boot_ready=false
+          while ((SECONDS < deadline)); do
+            if timeout --foreground --kill-after=2s 8s /usr/bin/podman exec "$container" /usr/bin/bash -p -ceu '
+              test "$(cat /proc/1/comm)" = systemd
+              test "$(systemctl show -p ActiveState --value dbus.socket)" = active
+              test "$(systemctl show -p ActiveState --value dbus.service)" = active
+              test -d /var/lib/systemd/timers
+              owner="$(busctl --system call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetNameOwner s org.freedesktop.systemd1)"
+              [[ "$owner" =~ ^s[[:space:]]+\":[1-9][0-9]*\.[0-9]+\"$ ]]
+            ' >/dev/null 2>&1; then
+              boot_ready=true
+              break
+            fi
+            sleep 0.25
+          done
+          test "$boot_ready" = true
+          timeout --foreground --kill-after=5s 30s /usr/bin/podman exec "$container" /usr/bin/bash -p -ceu '
+            owner="$(systemd-run --quiet --wait --pipe --collect \
+              --property=DynamicUser=yes \
+              --property=NoNewPrivileges=yes \
+              /usr/bin/busctl --system call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetNameOwner s org.freedesktop.systemd1)"
+            [[ "$owner" =~ ^s[[:space:]]+\":[1-9][0-9]*\.[0-9]+\"$ ]]
+          '
+          retired_container_id="$container_id"
+          timeout --foreground --kill-after=5s 20s /usr/bin/podman stop --time 10 "$container" >/dev/null || true
+          podman_short rm -f "$container" >/dev/null
+          container_id=''
+          for _ in {1..40}; do
+            if [[ -z "$(find /sys/fs/cgroup -type d \
+              \( -name "*${retired_container_id}*" -o -name "*${retired_container_id:0:12}*" \) \
+              -print -quit 2>/dev/null)" ]]; then
+              break
+            fi
+            sleep 0.1
+          done
+          test -z "$(find /sys/fs/cgroup -type d \
+            \( -name "*${retired_container_id}*" -o -name "*${retired_container_id:0:12}*" \) \
+            -print -quit 2>/dev/null)"
+
+          podman_long push \
             --authfile "$auth_file" \
             --digestfile "$digest_file" \
             "$image"

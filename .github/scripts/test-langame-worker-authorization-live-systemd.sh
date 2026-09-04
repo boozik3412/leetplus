@@ -79,7 +79,38 @@ run_dynamic_manager_isolation_canary() {
       mapfile -t pids < "/sys/fs/cgroup${expected}/cgroup.procs"
       [[ "${#pids[@]}" == 1 && "${pids[0]}" == "$$" ]] || fail "cgroup is not singleton"
       [[ "${INVOCATION_ID:-}" =~ ^[0-9a-f]{32}$ ]] || fail "InvocationID is invalid"
-      [[ ! -S /run/dbus/system_bus_socket && ! -S /run/systemd/private ]] || fail "system-manager socket transport is still visible"
+      "$1" -e "$2"
+      mapfile -t pids < "/sys/fs/cgroup${expected}/cgroup.procs"
+      [[ "${#pids[@]}" == 1 && "${pids[0]}" == "$$" ]] || fail "cgroup did not return to singleton after transport probes"
+    ' langame-isolation-canary /usr/bin/node '
+      const net = require("node:net");
+      const deniedCodes = new Set(["EACCES", "EPERM", "ENOENT", "ENOTSOCK", "ENXIO", "ECONNREFUSED"]);
+      function assertDenied(path) {
+        return new Promise((resolve, reject) => {
+          let finished = false;
+          let timer;
+          const socket = net.createConnection({ path });
+          const finish = (denied, error) => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timer);
+            socket.destroy();
+            if (denied) resolve(); else reject(error);
+          };
+          timer = setTimeout(() => finish(false, new Error(`manager transport probe timed out: ${path}`)), 1000);
+          socket.once("connect", () => finish(false, new Error(`manager transport accepted a connection: ${path}`)));
+          socket.once("error", (error) => {
+            if (deniedCodes.has(error.code)) finish(true);
+            else finish(false, new Error(`manager transport returned unexpected ${error.code || "UNKNOWN"}: ${path}`));
+          });
+        });
+      }
+      (async () => {
+        for (const path of ["/run/dbus/system_bus_socket", "/run/systemd/private"]) await assertDenied(path);
+      })().catch((error) => {
+        console.error(`Langame isolation canary: ${error.message}`);
+        process.exitCode = 41;
+      });
     '; then
     systemctl --no-pager --full status "$MANAGER_ISOLATION_CANARY" >&2 || true
     journalctl --no-pager --output=short-precise --unit "$MANAGER_ISOLATION_CANARY" --lines=80 >&2 || true
@@ -185,7 +216,6 @@ for unit in \
 done
 trap cleanup EXIT
 
-run_dynamic_manager_isolation_canary
 if [[ ! -e /usr/bin/node && ! -L /usr/bin/node ]]; then
   [[ -n "$fixture_node_input" ]] || die 'an exact fixture Node source is required'
   fixture_node="$(realpath -e -- "$fixture_node_input")"
@@ -229,6 +259,7 @@ else
 fi
 [[ "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" == 22 ]] \
   || die 'fixture requires exact /usr/bin/node major 22'
+run_dynamic_manager_isolation_canary
 if ! getent group leetplus-runtime >/dev/null; then groupadd --system leetplus-runtime; created_runtime=true; fi
 if ! getent group leetplus-api-runtime >/dev/null; then groupadd --system leetplus-api-runtime; created_api=true; fi
 
@@ -243,6 +274,7 @@ ln -s /etc/nginx/leetplus/upstreams/blue.conf /etc/nginx/leetplus/active-upstrea
 cat >"$RELEASE/apps/api/dist/integrations/langame-daily-worker.cli.js" <<'EOF'
 'use strict';
 const fs = require('node:fs');
+const net = require('node:net');
 const expectedCgroup = '/system.slice/leetplus-langame-daily-worker.service';
 if (fs.readFileSync('/proc/self/cgroup', 'utf8') !== `0::${expectedCgroup}\n`) {
   throw new Error('worker cgroup identity drifted after wrapper exec');
@@ -251,16 +283,34 @@ const members = fs.readFileSync(`/sys/fs/cgroup${expectedCgroup}/cgroup.procs`, 
 if (members.length !== 1 || members[0] !== String(process.pid)) {
   throw new Error('worker is not the singleton cgroup process after wrapper exec');
 }
-for (const path of ['/run/dbus/system_bus_socket', '/run/systemd/private']) {
-  try {
-    if (fs.statSync(path).isSocket()) {
-      throw new Error(`worker unexpectedly sees manager socket ${path}`);
-    }
-  } catch (error) {
-    if (!['EACCES', 'ENOENT'].includes(error.code)) throw error;
-  }
+const deniedCodes = new Set(['EACCES', 'EPERM', 'ENOENT', 'ENOTSOCK', 'ENXIO', 'ECONNREFUSED']);
+function assertDenied(path) {
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    let timer;
+    const socket = net.createConnection({ path });
+    const finish = (denied, error) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      socket.destroy();
+      if (denied) resolve(); else reject(error);
+    };
+    timer = setTimeout(() => finish(false, new Error(`manager transport probe timed out: ${path}`)), 1000);
+    socket.once('connect', () => finish(false, new Error(`manager transport accepted a connection: ${path}`)));
+    socket.once('error', (error) => {
+      if (deniedCodes.has(error.code)) finish(true);
+      else finish(false, new Error(`manager transport returned unexpected ${error.code || 'UNKNOWN'}: ${path}`));
+    });
+  });
 }
-fs.appendFileSync('/var/lib/leetplus/langame-sync/live-systemd-wrapper-ran', `${process.env.INVOCATION_ID}\n`, { mode: 0o600 });
+(async () => {
+  for (const path of ['/run/dbus/system_bus_socket', '/run/systemd/private']) await assertDenied(path);
+  fs.appendFileSync('/var/lib/leetplus/langame-sync/live-systemd-wrapper-ran', `${process.env.INVOCATION_ID}\n`, { mode: 0o600 });
+})().catch((error) => {
+  console.error(`Langame worker transport assertion failed: ${error.message}`);
+  process.exitCode = 41;
+});
 EOF
 chown root:leetplus-runtime "$RELEASE/apps/api/dist/integrations/langame-daily-worker.cli.js"; chmod 0555 "$RELEASE/apps/api/dist/integrations/langame-daily-worker.cli.js"
 cat >"$ENV_FILE" <<'EOF'

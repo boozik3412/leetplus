@@ -49,7 +49,21 @@ done
 
 install -d -o root -g root -m 0755 /etc /etc/leetplus /etc/systemd /etc/systemd/system /usr/local /usr/local/sbin /usr/local/libexec /usr/local/libexec/leetplus /var /var/lib /var/lib/leetplus
 install -d -o root -g root -m 0700 "$STATE_ROOT" /run/leetplus-production-control /var/lib/leetplus/deploy-receipts
-install -o root -g root -m 0600 /dev/null /run/leetplus-production-control/install.lock /var/lib/leetplus/deploy-receipts/cutover.lock
+for lock_parent in /run/leetplus-production-control /var/lib/leetplus/deploy-receipts; do
+  [[ -d "$lock_parent" && ! -L "$lock_parent" ]] || die "fixture lock parent is not an exact directory: ${lock_parent}"
+  [[ "$(stat -c '%U:%G:%a' -- "$lock_parent")" == 'root:root:700' ]] || die "fixture lock parent ownership or mode is unsafe: ${lock_parent}"
+done
+unset lock_parent
+# GNU install accepts multiple source operands only when the final operand is a
+# directory.  Create each exact lock path separately so neither lock is ever
+# reinterpreted as a source file during disposable-root setup.
+install -o root -g root -m 0600 /dev/null /run/leetplus-production-control/install.lock
+install -o root -g root -m 0600 /dev/null /var/lib/leetplus/deploy-receipts/cutover.lock
+for lock_path in /run/leetplus-production-control/install.lock /var/lib/leetplus/deploy-receipts/cutover.lock; do
+  [[ -f "$lock_path" && ! -L "$lock_path" ]] || die "fixture lock is not an exact regular file: ${lock_path}"
+  [[ "$(stat -c '%U:%G:%a' -- "$lock_path")" == 'root:root:600' ]] || die "fixture lock ownership or mode is unsafe: ${lock_path}"
+done
+unset lock_path
 install -o root -g root -m 0500 "$AUTHORITY_SOURCE" "$AUTHORITY_PATH"
 install -o root -g root -m 0755 "$DRAIN_SOURCE" "$DRAIN_PATH"
 install -o root -g root -m 0600 "$ARTIFACT_ROOT/systemd/legacy-drain-units.conf.example" /etc/leetplus/legacy-drain-units.conf

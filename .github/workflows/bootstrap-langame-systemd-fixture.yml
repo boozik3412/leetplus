@@ -41,6 +41,26 @@ jobs:
           trap 'status=$?; printf "LANGAME_SYSTEMD_BOOTSTRAP_FAILED line=%s status=%s\n" "$LINENO" "$status" >&2; exit "$status"' ERR
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(uname -m)" = x86_64
+          snapshot_source="$GITHUB_WORKSPACE/.github/fixtures/langame-systemd-noble/ubuntu-snapshot.sources"
+          test -f "$snapshot_source" && test ! -L "$snapshot_source"
+          test "$(sha256sum "$snapshot_source" | awk '{print $1}')" = 2aecb1f023a3c426c9409b98a81b23ca6fc045c1ae47f1ce59001b6f86470ae4
+          if [[ ! -x /usr/bin/podman ]] \
+            || [[ "$(dpkg-query -W -f='${Version}' podman 2>/dev/null || true)" != 4.9.3+ds1-1ubuntu0.2 ]]; then
+            timeout --foreground --kill-after=30s 300s sudo -n /usr/bin/apt-get \
+              -o "Dir::Etc::sourcelist=${snapshot_source}" \
+              -o 'Dir::Etc::sourceparts=-' \
+              -o 'APT::Get::List-Cleanup=0' \
+              -o 'Acquire::Retries=3' \
+              update
+            timeout --foreground --kill-after=30s 300s sudo -n /usr/bin/apt-get \
+              -o "Dir::Etc::sourcelist=${snapshot_source}" \
+              -o 'Dir::Etc::sourceparts=-' \
+              -o 'APT::Get::List-Cleanup=0' \
+              -o 'Acquire::Retries=3' \
+              install --yes --no-install-recommends --allow-downgrades \
+              podman=4.9.3+ds1-1ubuntu0.2
+          fi
+          test "$(dpkg-query -W -f='${Version}' podman)" = 4.9.3+ds1-1ubuntu0.2
           test -f /usr/bin/podman && test ! -L /usr/bin/podman
           test "$(stat -c '%U:%G:%h' -- /usr/bin/podman)" = root:root:1
           test -z "$(find -P /usr/bin/podman -maxdepth 0 -perm /022 -print -quit)"

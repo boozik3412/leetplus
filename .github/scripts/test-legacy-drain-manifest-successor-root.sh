@@ -228,7 +228,7 @@ probe_directory='/etc/systemd/system/leetplus-langame-daily-worker.timer.d'
 probe_saved='/run/fixture-successor-missing-timer-dir'
 [[ ! -e "$probe_saved" && ! -L "$probe_saved" ]] || die 'directory negative scratch path already exists'
 mv -- "$probe_directory" "$probe_saved"
-if timeout 5s "$DRAIN_PATH" > /run/fixture-successor-directory-negative.out 2>&1; then
+if timeout 5s /usr/bin/bash -p "$DRAIN_PATH" > /run/fixture-successor-directory-negative.out 2>&1; then
   die 'generic drain verifier accepted an absent start-fence directory'
 fi
 grep -F 'legacy unit start-fence directory is noncanonical: leetplus-langame-daily-worker.timer' /run/fixture-successor-directory-negative.out >/dev/null \
@@ -241,7 +241,7 @@ unset probe_directory probe_saved
 # A bounded direct verifier call demonstrates that the historical receipt is
 # intentionally insufficient for the expanded manifest.  It must fail due to
 # the two absent exact start fences, never due to an unrelated setup defect.
-if timeout 5s "$DRAIN_PATH" > /run/fixture-successor-pre.out 2>&1; then
+if timeout 5s /usr/bin/bash -p "$DRAIN_PATH" > /run/fixture-successor-pre.out 2>&1; then
   die 'generic drain verifier accepted the unfenced successor manifest'
 fi
 grep -F 'legacy unit lacks its durable start-fence drop-in: leetplus-langame-daily-worker.timer' /run/fixture-successor-pre.out >/dev/null \

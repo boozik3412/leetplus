@@ -28,6 +28,12 @@ created_runtime=false; created_api=false; created_system_node=false
 system_node_root=''; system_node_root_device_inode=''; system_node_stage=''; system_node_stage_device_inode=''; system_node_claim=''; system_node_digest=''
 die() { printf 'Langame worker live-systemd fixture: %s\n' "$*" >&2; exit 1; }
 bounded_systemctl() { timeout --foreground --kill-after=2s 12s systemctl "$@"; }
+start_worker_or_report() {
+  if bounded_systemctl start "$SERVICE"; then return 0; fi
+  systemctl --no-pager --full status "$SERVICE" >&2 || true
+  journalctl --no-pager --output=short-precise --unit "$SERVICE" --lines=80 >&2 || true
+  die 'authorized systemd worker invocation failed'
+}
 assert_zero_processes() {
   local unit="$1" property value cgroup
   for property in MainPID ControlPID ExecMainPID; do
@@ -100,7 +106,7 @@ trap cleanup EXIT
 [[ "$fixture_ci" == true && "$fixture_github_actions" == true && "$fixture_confirm" == "$ACK" ]] || die 'explicit GitHub Actions fixture confirmation is required'
 ((EUID == 0)) || die 'root is required'
 [[ "$(ps -p 1 -o comm= | tr -d ' ')" == systemd ]] || die 'a real systemd PID 1 is required'
-for binary in install mkdir mktemp rm rmdir systemctl timeout stat find awk grep groupadd groupdel getent ps tr readlink realpath sha256sum sed date chown chmod ln touch cat mv; do command -v "$binary" >/dev/null || die "missing ${binary}"; done
+for binary in install mkdir mktemp rm rmdir systemctl journalctl timeout stat find awk grep groupadd groupdel getent ps tr readlink realpath sha256sum sed date chown chmod ln touch cat mv; do command -v "$binary" >/dev/null || die "missing ${binary}"; done
 if [[ ! -e /usr/bin/node && ! -L /usr/bin/node ]]; then
   [[ -n "$fixture_node_input" ]] || die 'an exact fixture Node source is required'
   fixture_node="$(realpath -e -- "$fixture_node_input")"
@@ -253,7 +259,7 @@ systemctl daemon-reload
 # Valid files cannot make a direct caller look like PID 1's fresh MainPID.
 if INVOCATION_ID=00000000000000000000000000000000 "$WRAPPER" >/dev/null 2>&1; then die 'direct wrapper invocation was accepted'; fi
 before="$(systemctl show -p InvocationID --value "$SERVICE")"
-bounded_systemctl start "$SERVICE"
+start_worker_or_report
 after="$(systemctl show -p InvocationID --value "$SERVICE")"
 [[ -n "$after" && "$after" != "$before" && "$(systemctl show -p Result --value "$SERVICE")" == success && "$(systemctl show -p ExecMainStatus --value "$SERVICE")" == 0 ]] || die 'authorized wrapper/runner did not obtain a fresh successful invocation'
 assert_zero_processes "$SERVICE"

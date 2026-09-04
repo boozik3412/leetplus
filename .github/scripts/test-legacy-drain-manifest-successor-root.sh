@@ -201,7 +201,9 @@ SYSTEMCTL
 chmod 0755 /usr/bin/systemctl
 cat > /usr/bin/psql <<'PSQL'
 #!/usr/bin/bash
-printf '0|0|0|0|1|1|0|2|0|0|1|1|1|0|0|0|1|leetplus|127.0.0.1|5432|1234567890123456|leetplus_drain_audit\n'
+# Exact 22-field clean audit row: both runtime and audit roles retain their
+# single direct membership while all legacy sessions and unsafe grants are 0.
+printf '0|0|0|0|1|1|1|2|0|0|1|1|1|1|0|0|1|leetplus|127.0.0.1|5432|1234567890123456|leetplus_drain_audit\n'
 PSQL
 chmod 0755 /usr/bin/psql
 

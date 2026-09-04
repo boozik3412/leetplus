@@ -74,6 +74,22 @@ CONTROLLER=LEGACY_DRAIN_MANIFEST_SUCCESSOR_V1
 EOF
 chmod 400 /var/lib/leetplus/legacy-drain/manifest-successor.receipt
 cat >/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs <<EOF
+const expectedEnvironment = {
+  PATH: '/usr/sbin:/usr/bin:/sbin:/bin',
+  LANG: 'C.UTF-8',
+  LC_ALL: 'C.UTF-8',
+  TZ: 'UTC',
+};
+const actualNames = Object.keys(process.env).sort();
+const expectedNames = Object.keys(expectedEnvironment).sort();
+if (
+  actualNames.length !== expectedNames.length ||
+  actualNames.some((name, index) => name !== expectedNames[index]) ||
+  Object.entries(expectedEnvironment).some(([name, value]) => process.env[name] !== value)
+) {
+  console.error('fixture control verifier received a noncanonical environment');
+  process.exit(1);
+}
 console.log('PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS'); console.log('PRODUCTION_CONTROL_RELEASE_SHA=${sha_b}');
 EOF
 chmod 555 /usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs

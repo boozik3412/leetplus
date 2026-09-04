@@ -2,10 +2,11 @@
 
 Статус: **канонический current-state contract**
 
-Актуально на: **04.09.2026**
+Актуально на: **05.09.2026**
 Runtime implementation baseline:
-`f3f119fa81fc497b75cc1e57f046d8539676c943` (PR #122; включает
-CURRENT189 application baseline и admitted resumable release orchestrator)
+`982b537c99340b94e0cfad07ce5c139264f5a99f` (PR #136; включает
+CURRENT189 application baseline, check-in consistency repair и autonomous
+gamification worker successor)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -16,16 +17,16 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                                                          |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Runtime implementation   | CURRENT189 production baseline, merge SHA `f3f119fa81fc497b75cc1e57f046d8539676c943`                                                                                                                          |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33718092094) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33718092121) — `SUCCESS`                                 |
-| Production API topology  | active blue exact `f3f119fa…`, generation 21, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback green exact `22ab6b81…`, оба slot active                                     |
+| Runtime implementation   | CURRENT189 production baseline, merge SHA `982b537c99340b94e0cfad07ce5c139264f5a99f`                                                                                                                          |
+| Admission merge SHA      | exact-main Fast CI и Full Release Admission для `982b537c…` — `SUCCESS`                                                                                                                                    |
+| Production API topology  | active green exact `982b537c…`, generation 22, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback blue остаётся active                                                        |
 | Guest bug-report repair  | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                |
 | Corporate invite repair  | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                    |
-| Guest check-in consistency | source candidate: публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; production этим изменением ещё не затронут                                      |
+| Guest check-in consistency | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                         |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
 | Release acceleration     | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
-| Langame recovery         | audit storage repair применён exact plan/check; runtime всё ещё `f3f119fa…`, worker inactive/disabled; rollout HOLD до immutable legacy-drain successor и отдельного modern-worker permit; external unattended остаётся deny |
+| Langame recovery         | bonus-ledger/gamification timer active и bounded backlog drain выполняется; Langame daily worker fenced/disabled до admitted repair canonical verifier environment; external unattended остаётся deny       |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -62,6 +63,18 @@ Source repair нормализует только это exact отсутств�
 ослабляются. До нового exact-main Fast+Full и установки новой control
 generation production runtime остаётся `f3f119fa…`, Langame timer —
 `inactive/disabled`; routing, БД и active services preflight не менял.
+
+Controlled rollout 05.09 завершён на exact admitted SHA `982b537c…`: active
+green, generation 22, blue сохранён hot rollback, production schema осталась
+exact `CURRENT_189/189`. Частый `leetplus-bonus-ledger-worker.timer` включён и
+bounded-пакетами дренирует историческую activity queue без bonus-ledger
+`FAILED`, `BLOCKED` или `RECONCILIATION_REQUIRED`. Langame daily canary
+остановился до worker effect: authorization authority передавал строгому
+installed-control verifier унаследованную bash-переменную `_`, хотя verifier
+разрешает только canonical `PATH/LANG/LC_ALL/TZ`. Source repair запускает
+verifier через exact `/usr/bin/env -i` и фиксирует отрицательным fixture любое
+добавочное окружение. Это не расширяет worker authority и не считается
+deployed до нового exact-main Fast/Full, control install, canary и timer check.
 
 ### Guardrail ускорения release pipeline
 

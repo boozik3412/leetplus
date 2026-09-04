@@ -47,6 +47,10 @@ function createFixture(configValues: Record<string, string | undefined> = {}) {
           customerStage: TenantCustomerStage.INTERNAL,
         },
       ]),
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'tenant-1',
+        customerStage: TenantCustomerStage.INTERNAL,
+      }),
     },
     guestGameDataRetentionPolicy: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -192,6 +196,44 @@ describe('GuestGameDataRetentionService', () => {
     expect(
       delegates.guestGameDataRetentionPolicy.findMany,
     ).not.toHaveBeenCalled();
+    expect(delegates.guestGameDataRetentionRun.create).not.toHaveBeenCalled();
+  });
+
+  it('runs maintenance only for the exact admitted tenant', async () => {
+    const { service, delegates } = createFixture();
+
+    await expect(
+      service.runTenantMaintenance({
+        tenantId: 'tenant-1',
+        now,
+        liveRequested: false,
+      }),
+    ).resolves.toMatchObject({
+      tenantId: 'tenant-1',
+      retention: { status: 'DRY_RUN_COMPLETE' },
+    });
+    expect(delegates.tenant.findUnique).toHaveBeenCalledWith({
+      where: { id: 'tenant-1' },
+      select: { id: true, customerStage: true },
+    });
+    expect(delegates.guestGameRewardWalletItem.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ tenantId: { in: ['tenant-1'] } }),
+      }),
+    );
+  });
+
+  it('rejects maintenance for a tenant outside the background contour', async () => {
+    const { service, delegates } = createFixture();
+    delegates.tenant.findUnique.mockResolvedValueOnce({
+      id: 'tenant-pilot',
+      customerStage: TenantCustomerStage.PILOT,
+    });
+
+    await expect(
+      service.runTenantMaintenance({ tenantId: 'tenant-pilot', now }),
+    ).rejects.toThrow('not admitted');
+    expect(delegates.guestGameRewardWalletItem.findMany).not.toHaveBeenCalled();
     expect(delegates.guestGameDataRetentionRun.create).not.toHaveBeenCalled();
   });
 

@@ -552,6 +552,12 @@ grep -F 'ConditionPathExists=' "$langame_worker_authority" > /dev/null
 grep -F "GUEST_PORTAL_USER_CALL" "$langame_worker_authority" > /dev/null
 grep -F 'LANGAME_DAILY_SYNC_SCHEDULER_ENABLED' "$langame_worker_authority" > /dev/null
 grep -F 'LANGAME_SCHEDULED_HTTP_ENABLED' "$langame_worker_authority" > /dev/null
+grep -F 'LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED' "$langame_worker_authority" > /dev/null
+grep -F 'LANGAME_DAILY_WORKER_RETENTION_ENABLED' "$langame_worker_authority" > /dev/null
+grep -F -x 'LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=false' "$langame_daily_worker_overlay" > /dev/null
+grep -F -x 'LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT=20' "$langame_daily_worker_overlay" > /dev/null
+grep -F -x 'LANGAME_DAILY_WORKER_RETENTION_ENABLED=false' "$langame_daily_worker_overlay" > /dev/null
+grep -F -x 'LANGAME_DAILY_WORKER_RETENTION_LIVE=false' "$langame_daily_worker_overlay" > /dev/null
 grep -F 'restore_worker_fences' "$langame_worker_authority" > /dev/null
 if grep -F -x 'EnvironmentFile=/etc/leetplus/runtime.env' "$langame_daily_worker_service" > /dev/null; then
   printf 'Langame daily worker inherited the broad API runtime profile\n' >&2
@@ -588,6 +594,20 @@ grep -F -x 'OnUnitInactiveSec=30s' "$bonus_ledger_worker_timer" > /dev/null
 grep -F -x 'Unit=leetplus-bonus-ledger-worker.service' "$bonus_ledger_worker_timer" > /dev/null
 grep -F 'active-upstreams.conf' "$bonus_ledger_worker_runner" > /dev/null
 grep -F 'guest-bonus-ledger-worker.cli.js' "$bonus_ledger_worker_runner" > /dev/null
+for worker_value in \
+  'GUEST_GAMIFICATION_WORKER_ENABLED=true' \
+  'GUEST_GAMIFICATION_WORKER_CANARY=true' \
+  'GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT=1' \
+  'GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT=1' \
+  'GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE=SHADOW' \
+  'GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT=1' \
+  'GUEST_GAMIFICATION_WORKER_MONITORING_ENABLED=false' \
+  'GUEST_ACTIVITY_LEDGER_SCHEDULER_ENABLED=false' \
+  'GUEST_GAME_PIPELINE_SCHEDULER_ENABLED=false' \
+  'GUEST_GAME_SUPPLEMENTAL_PIPELINE_MODE=OFF' \
+  'GUEST_GAME_MONITORING_ENABLED=false'; do
+  grep -F -x "$worker_value" "$bonus_ledger_worker_overlay" > /dev/null
+done
 if grep -F -x 'EnvironmentFile=/etc/leetplus/runtime.env' "$bonus_ledger_worker_service" > /dev/null; then
   printf 'Bonus-ledger worker inherited the broad API runtime profile\n' >&2
   exit 1

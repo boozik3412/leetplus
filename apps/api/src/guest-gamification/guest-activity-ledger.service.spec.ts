@@ -2625,6 +2625,28 @@ describe('GuestActivityLedgerService', () => {
     );
   });
 
+  it('keeps a dedicated worker claim inside its exact tenant', async () => {
+    await service.enqueueProfileSync({
+      tenantId,
+      profileId,
+      guestId,
+      storeId,
+      reason: 'DEDICATED_WORKER',
+    });
+    jest.spyOn(service, 'syncProfile').mockResolvedValue({
+      status: 'SUCCESS',
+    } as any);
+
+    await service.processQueuedSyncJobs(1, 'systemd-worker', tenantId);
+
+    expect(
+      (prisma.guestActivitySyncJob.findFirst as jest.Mock).mock.calls[0]?.[0],
+    ).toMatchObject({ where: { tenantId } });
+    expect(
+      (prisma.guestActivitySyncJob.updateMany as jest.Mock).mock.calls[0]?.[0],
+    ).toMatchObject({ where: { tenantId } });
+  });
+
   it('does not claim queued sync work for an external tenant', async () => {
     await service.enqueueProfileSync({
       tenantId,
@@ -2798,6 +2820,24 @@ describe('GuestActivityLedgerService', () => {
     expect(replayQuery.strings.join(' ')).toContain("'INTERNAL'");
     expect(replayQuery.strings.join(' ')).toContain('state."id" IS NULL');
     expect(replayQuery.values).toContain('hourly-session-expand-v1');
+  });
+
+  it('keeps automatic recovery reads inside its exact worker tenant', async () => {
+    await service.enqueueDueRecoverySyncs(
+      10,
+      new Date('2026-09-04T12:00:00.000Z'),
+      tenantId,
+    );
+
+    expect(
+      (prisma.guestActivitySyncState.findMany as jest.Mock).mock.calls[0]?.[0],
+    ).toMatchObject({ where: { tenantId } });
+    const replayQuery = (prisma.$queryRaw as jest.Mock).mock.calls[0]?.[0] as {
+      strings: readonly string[];
+      values: readonly unknown[];
+    };
+    expect(replayQuery.strings.join(' ')).toContain('AND fact."tenantId" =');
+    expect(replayQuery.values).toContain(tenantId);
   });
 
   it('does not enqueue or mutate recovery state for an external tenant', async () => {

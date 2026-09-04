@@ -1,6 +1,6 @@
 # Langame sync production recovery
 
-Статус: **audit storage repaired; runtime rollout HOLD до admitted drain-successor/worker authority и нового exact-SHA GO**
+Статус: **audit storage repaired; autonomous successor готовится к exact-SHA admission и controlled rollout**
 
 Актуально на: **04.09.2026**
 
@@ -45,6 +45,16 @@ corporate scope или Langame credentials. Внешние tenant остаютс
    zero failed scopes. Explicit business date допустима только в canary.
 8. Установка unit files не включает timer. Operator-owned secret env не входит
    в install map и не может быть перезаписан production-control artifact.
+9. После одного exact успешного stable daily sync тот же authorized worker
+   ставит только due recovery jobs этого tenant и выполняет его bounded wallet /
+   retention maintenance. Dated canary всегда оставляет maintenance выключенным.
+   В timer profile recovery и maintenance включены, но policy-retention остаётся
+   dry-run (`RETENTION_LIVE=false`); обязательные stale-opening, orphan-claim и
+   expired-wallet repairs сохраняют собственные tenant/idempotency границы.
+10. Очередь activity, основной/supplemental pipeline и quality monitoring
+    принадлежат уже существующему `leetplus-bonus-ledger-worker.timer`. Это тот
+    же active-slot singleton, а не новый unit. Встроенные schedulers обоих API
+    остаются выключенными; внешний tenant не получает unattended authority.
 
 ## Обязательные gates до production
 
@@ -107,6 +117,8 @@ corporate scope или Langame credentials. Внешние tenant остаютс
    `MainPID/ControlPID=0`, пустой cgroup и отсутствие systemd jobs;
    исторический `ExecMainPID` допустим только при отсутствии его `/proc`
    identity. Одного `is-active=false` недостаточно.
+   Canary обязан иметь `ACTIVITY_RECOVERY_ENABLED=false`,
+   `RETENTION_ENABLED=false`, `RETENTION_LIVE=false`.
 6. Проверить: три источника без `FAILED`, guest foundation успешен, ровно пять
    snapshot scopes свежие, JSON audit доступен при наличии расхождений, нет
    повторных rows по business keys.
@@ -123,6 +135,8 @@ corporate scope или Langame credentials. Внешние tenant остаютс
    result возможного единственного catch-up запуска, строгую quiescence и
    повторно запускает worker-specific + generic drain verifiers. Ручное
    удаление fence запрещено.
+   Stable profile включает bounded activity recovery и tenant maintenance, но
+   оставляет destructive policy-retention в dry-run.
 9. Провести public guest и corporate smoke независимо от worker QA; проверить
    оба slot, ingress, error logs и отсутствие новых duplicate facts.
 10. Точечно сверить обращения `LP-BUG-AFDE6B03` и `LP-BUG-42A647BA`:

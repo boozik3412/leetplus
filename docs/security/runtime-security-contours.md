@@ -39,6 +39,19 @@ exclusive `parts` cap с 6 на 7 не расширяет allowlist: `fields=5`,
 тип, сигнатура и размер файла продолжают проверяться отдельно. Production
 работает на exact CURRENT189, bridge выключен, reporting включён.
 
+Source successor 04.09 восстанавливает автономность геймификации без переноса
+worker authority в public/corporate runtime. Существующий active-slot
+`leetplus-bonus-ledger-worker.timer` остаётся единственным частым owner и
+последовательно обслуживает bonus delivery, tenant-scoped activity queue,
+основной/supplemental pipeline и quality monitoring. Отдельный authorized
+`leetplus-langame-daily-worker.timer` владеет daily import, recovery enqueue и
+bounded tenant maintenance. Оба API slot сохраняют встроенные schedulers
+выключенными; оба worker требуют ровно один `ACTIVE + INTERNAL` tenant, а
+`EXTERNAL_DENY` остаётся неизменным. Canary ограничен одной записью и не создаёт
+pipeline/reward effect. Наличие этого source-контракта не доказывает production
+deployment: нужен новый exact-main Fast+Full admission, immutable handoff,
+canary и postflight.
+
 ### Guardrail ускорения release pipeline
 
 [`production-topology-contract.json`](../deployment/production-artifact/production-topology-contract.json)

@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-## Canonical current-state guardrail (03.09.2026)
+## Canonical current-state guardrail (04.09.2026)
 
 Перед задачами по auth, landing, access scope, игровому модулю, integrations,
 workers или deployment обязательно прочитать
@@ -29,6 +29,18 @@ candidate отделяет audit failure в `PARTIAL`, вводит shared setgi
 Production для этого recovery ещё не менялся; до него обязательны exact-SHA
 Fast+Full, backup/restored-copy, hot rollback и отдельный GO. Runbook:
 [`docs/deployment/langame-sync-production-recovery.md`](docs/deployment/langame-sync-production-recovery.md).
+
+Source successor 04.09 устраняет дополнительный autonomy gap: nightly Langame
+sync не являлся владельцем накопленной activity queue, snapshot/supplemental
+pipeline и monitoring. Новый контракт не включает schedulers в двух API slot.
+Вместо этого существующий exact-active-slot
+`leetplus-bonus-ledger-worker.timer` последовательно обслуживает bonus dispatch,
+tenant-scoped activity jobs, основной/supplemental pipeline и monitoring для
+ровно одного `ACTIVE + INTERNAL` tenant. Authorized daily worker после одного
+успешного exact-tenant sync ставит due recovery и выполняет bounded maintenance;
+dated canary не имеет maintenance effects, destructive policy-retention остаётся
+dry-run. Production всё ещё `f3f119fa…` до нового exact-main Fast+Full,
+immutable handoff, canary и postflight.
 
 Production migration
 `20260831120000_guest_support_bug_report_input_repair` применена
@@ -321,6 +333,9 @@ Last updated: 2026-08-30
   is bound to the exact active release. It uses a separate minimal worker
   environment and preserves the existing database
   lease/idempotency/reconciliation boundary.
+- The 04.09 source successor intentionally reuses this singleton for activity
+  sync, main/supplemental evaluation and quality monitoring. This source state
+  is not yet production state; both embedded API schedulers remain disabled.
 - The activation sequence completed on exact `4036d312…`: admitted artifact ->
   inactive blue rollout -> one non-staff canary -> Langame/database
   reconciliation -> bounded batch -> enabled timer. Staff/test accrual remains

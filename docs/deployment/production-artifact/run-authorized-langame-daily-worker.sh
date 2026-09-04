@@ -52,7 +52,7 @@ while IFS= read -r env_line; do
   [[ -z "$env_line" || "$env_line" == \#* ]] && continue
   env_key="${env_line%%=*}"
   case "$env_key" in
-    DATABASE_URL|APP_ENCRYPTION_KEY|INTEGRATION_ENCRYPTION_KEY|LANGAME_DISCREPANCY_LOG_ROOT|LANGAME_DAILY_WORKER_ENABLED|LANGAME_DAILY_WORKER_LIVE|LANGAME_DAILY_WORKER_TENANT_SLUG|LANGAME_DAILY_WORKER_CANARY|LANGAME_DAILY_SYNC_SCHEDULER_ENABLED|LANGAME_SCHEDULED_HTTP_ENABLED|LANGAME_DAILY_WORKER_DATE) ;;
+    DATABASE_URL|APP_ENCRYPTION_KEY|INTEGRATION_ENCRYPTION_KEY|LANGAME_DISCREPANCY_LOG_ROOT|LANGAME_DAILY_WORKER_ENABLED|LANGAME_DAILY_WORKER_LIVE|LANGAME_DAILY_WORKER_TENANT_SLUG|LANGAME_DAILY_WORKER_CANARY|LANGAME_DAILY_SYNC_SCHEDULER_ENABLED|LANGAME_SCHEDULED_HTTP_ENABLED|LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED|LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT|LANGAME_DAILY_WORKER_RETENTION_ENABLED|LANGAME_DAILY_WORKER_RETENTION_LIVE|LANGAME_DAILY_WORKER_DATE) ;;
     *) die "worker env contains an unauthorized key: ${env_key}" ;;
   esac
   env_value="${env_line#*=}"
@@ -60,7 +60,7 @@ while IFS= read -r env_line; do
   seen["$env_key"]=1
   printf -v "$env_key" '%s' "$env_value"; export "$env_key"
 done < "$ENV_FILE"
-for required_key in DATABASE_URL APP_ENCRYPTION_KEY INTEGRATION_ENCRYPTION_KEY LANGAME_DISCREPANCY_LOG_ROOT LANGAME_DAILY_WORKER_ENABLED LANGAME_DAILY_WORKER_LIVE LANGAME_DAILY_WORKER_TENANT_SLUG LANGAME_DAILY_WORKER_CANARY LANGAME_DAILY_SYNC_SCHEDULER_ENABLED LANGAME_SCHEDULED_HTTP_ENABLED; do
+for required_key in DATABASE_URL APP_ENCRYPTION_KEY INTEGRATION_ENCRYPTION_KEY LANGAME_DISCREPANCY_LOG_ROOT LANGAME_DAILY_WORKER_ENABLED LANGAME_DAILY_WORKER_LIVE LANGAME_DAILY_WORKER_TENANT_SLUG LANGAME_DAILY_WORKER_CANARY LANGAME_DAILY_SYNC_SCHEDULER_ENABLED LANGAME_SCHEDULED_HTTP_ENABLED LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT LANGAME_DAILY_WORKER_RETENTION_ENABLED LANGAME_DAILY_WORKER_RETENTION_LIVE; do
   [[ -n "${seen[$required_key]:-}" && -n "${!required_key}" ]] || die "required worker env key is absent or empty: ${required_key}"
 done
 [[ -d "$ROOT" && ! -L "$ROOT" && "$(stat -c '%U:%G:%a' -- "$ROOT")" == 'root:leetplus-api-runtime:710' ]] || die 'authorization root authority drifted'
@@ -71,8 +71,10 @@ done
 target="$(readlink -e -- "$UPSTREAM")"; case "$target" in /etc/nginx/leetplus/upstreams/blue.conf) slot=blue ;; /etc/nginx/leetplus/upstreams/green.conf) slot=green ;; *) die 'active upstream is not a slot' ;; esac
 release="$(readlink -e -- "/srv/leetplus/slots/${slot}")"; [[ "$release" =~ ^/srv/leetplus/releases/([0-9a-f]{40})$ ]] || die 'active slot release is unsafe'; release_sha="${BASH_REMATCH[1]}"
 tenant="$(value LANGAME_DAILY_WORKER_TENANT_SLUG)"; canary="$(value LANGAME_DAILY_WORKER_CANARY)"; env_sha="$(sha "$ENV_FILE")"
-if [[ "$canary" == true ]]; then phase=canary; date_value="$(value LANGAME_DAILY_WORKER_DATE)"; [[ "$date_value" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]] || die 'canary date is invalid';
-elif [[ "$canary" == false ]]; then phase=timer; ! grep -q '^LANGAME_DAILY_WORKER_DATE=' "$ENV_FILE" || die 'timer profile retains canary date'; date_value=''
+recovery="$(value LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED)"; recovery_limit="$(value LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT)"; retention="$(value LANGAME_DAILY_WORKER_RETENTION_ENABLED)"; retention_live="$(value LANGAME_DAILY_WORKER_RETENTION_LIVE)"
+[[ "$recovery_limit" =~ ^[1-9][0-9]*$ && "$recovery_limit" -le 100 ]] || die 'activity recovery limit is invalid'
+if [[ "$canary" == true ]]; then phase=canary; date_value="$(value LANGAME_DAILY_WORKER_DATE)"; [[ "$date_value" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]] || die 'canary date is invalid'; [[ "$recovery" == false && "$retention" == false && "$retention_live" == false ]] || die 'canary maintenance must be disabled';
+elif [[ "$canary" == false ]]; then phase=timer; ! grep -q '^LANGAME_DAILY_WORKER_DATE=' "$ENV_FILE" || die 'timer profile retains canary date'; date_value=''; [[ "$recovery" == true && "$retention" == true && "$retention_live" == false ]] || die 'timer maintenance profile is not autonomous and dry-run-safe'
 else die 'canary flag is invalid'; fi
 
 # A root-only pointer selects a bounded, monotonically named attempt receipt.
@@ -102,7 +104,7 @@ grep -F -x "PHASE=${phase}" "$permit" >/dev/null || die 'authorization receipt p
 grep -F -x "RELEASE_SHA=${release_sha}" "$permit" >/dev/null || die 'authorization receipt release drifted'
 grep -F -x "TENANT_SLUG=${tenant}" "$permit" >/dev/null || die 'authorization receipt tenant drifted'
 grep -F -x "WORKER_ENV_SHA256=${env_sha}" "$permit" >/dev/null || die 'authorization receipt worker-env drifted'
-stable_env_sha="$(sed -E '/^LANGAME_DAILY_WORKER_CANARY=|^LANGAME_DAILY_WORKER_DATE=/d' "$ENV_FILE" | sha256sum | awk '{print $1}')"
+stable_env_sha="$(sed -E '/^LANGAME_DAILY_WORKER_CANARY=|^LANGAME_DAILY_WORKER_DATE=|^LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=|^LANGAME_DAILY_WORKER_RETENTION_ENABLED=/d' "$ENV_FILE" | sha256sum | awk '{print $1}')"
 grep -F -x "WORKER_STABLE_ENV_SHA256=${stable_env_sha}" "$permit" >/dev/null || die 'authorization receipt stable worker-env drifted'
 grep -F -x "CANARY_DATE=${date_value}" "$permit" >/dev/null || die 'authorization receipt date drifted'
 attempt="$(sed -n 's/^ATTEMPT=//p' "$permit")"; [[ "$attempt" =~ ^[1-9][0-9]*$ ]] || die 'authorization receipt attempt is invalid'

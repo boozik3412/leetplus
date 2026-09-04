@@ -1,9 +1,11 @@
 # Автономный bonus-ledger worker для геймификации
 
-## Текущий production-контракт (30.08.2026)
+## Текущий production-контракт и successor (04.09.2026)
 
 - Входящее пополнение для условий заданий обрабатывается отдельным tenant-scoped `LEDGER_SUPPLEMENTAL` только как `BALANCE_TOPUP`; наличие игровой сессии не требуется.
-- Автономный reward materializer включён для tenant `demo` и последовательно обрабатывает immutable intent, затем effect. Он не выполняет внешний Langame write.
+- Автономный reward materializer выключен. Явное действие гостя по-прежнему
+  materialize-ит один wallet/reward effect через существующую идемпотентную
+  inline-границу; отдельный фоновый materializer не является владельцем очереди.
 - Bonus-ledger scheduler и Langame write gate разрешают все поддерживаемые балансные награды: `BONUS`, `BONUS_POINTS`, `BONUS_BALANCE`, `LOYALTY_BONUS` отправляются как `bonus_balance`; `BALANCE`, `MONEY_BALANCE`, `CASH_BALANCE`, `DEPOSIT`, `WALLET_BALANCE`, `LANGAME_BALANCE` — как `balance`.
 - `BALANCE_WRITE_OFF` и `BONUS_TOPUP` могут присутствовать в activity ledger для диагностики, но не являются доступными типами условия mission v2. Их нельзя добавлять в supplemental allow-list до появления отдельного versioned evaluator-контракта.
 - Все контуры остаются tenant-scoped, используют claim/idempotency, а неоднозначный внешний POST переводится в `RECONCILIATION_REQUIRED` без автоматического повтора.
@@ -48,6 +50,25 @@ profile, не регистрирует HTTP controllers и не входит в 
 Смена blue/green slot не требует второго worker: следующий tick автоматически
 возьмёт новый active release.
 
+Successor 04.09 расширяет этот же единственный systemd oneshot, не создавая
+второго owner. После bonus-ledger dispatch он для одного exact `ACTIVE +
+INTERNAL` tenant последовательно:
+
+1. claim-ит ограниченный пакет `GuestActivitySyncJob`;
+2. запускает основной snapshot pipeline;
+3. запускает supplemental `BALANCE_TOPUP` pipeline;
+4. при наступлении интервала собирает quality snapshot.
+
+Оба долгоживущих API slot сохраняют
+`GUEST_ACTIVITY_LEDGER_SCHEDULER_ENABLED=false`,
+`GUEST_GAME_PIPELINE_SCHEDULER_ENABLED=false`,
+`GUEST_GAME_SUPPLEMENTAL_PIPELINE_MODE=OFF` и
+`GUEST_GAME_MONITORING_ENABLED=false`. Canary принудительно ограничен одной
+записью, основной pipeline работает как dry-run, supplemental — только
+`SHADOW`, monitoring выключен. Stable profile использует bounded limits,
+supplemental `LIVE` и monitoring; database lease/idempotency остаются второй
+границей exactly-once.
+
 Bonus ledger не оценивает условия миссии, Battle Pass, лутбокса или чекина. LIVE, последовательный Ledger fallback и supplemental-контур сходятся до него в единые immutable event/intent/effect/wallet записи; дальше действует один claim gate и один контур доставки.
 
 ## Что делает scheduler
@@ -88,6 +109,19 @@ GUEST_BONUS_LEDGER_WORKER_CANARY="true"
 GUEST_BONUS_LEDGER_WORKER_LIMIT="1"
 GUEST_BONUS_LEDGER_WORKER_QUEUE_APPROVED_REWARDS="true"
 GUEST_BONUS_LEDGER_WORKER_REWARD_TYPES="BONUS,BONUS_POINTS,BONUS_BALANCE,LOYALTY_BONUS"
+
+GUEST_GAMIFICATION_WORKER_ENABLED="true"
+GUEST_GAMIFICATION_WORKER_CANARY="true"
+GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT="1"
+GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT="1"
+GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE="SHADOW"
+GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT="1"
+GUEST_GAMIFICATION_WORKER_MONITORING_ENABLED="false"
+GUEST_GAMIFICATION_WORKER_MONITORING_INTERVAL_MS="300000"
+GUEST_ACTIVITY_LEDGER_SCHEDULER_ENABLED="false"
+GUEST_GAME_PIPELINE_SCHEDULER_ENABLED="false"
+GUEST_GAME_SUPPLEMENTAL_PIPELINE_MODE="OFF"
+GUEST_GAME_MONITORING_ENABLED="false"
 # Только для контролируемой canary одной существующей записи:
 # GUEST_BONUS_LEDGER_WORKER_REWARD_ID="<uuid>"
 ```
@@ -99,18 +133,19 @@ fail-closed требует `WORKER_ENABLED=true`, `DRY_RUN=false` и
 
 ## Связь с игровым pipeline
 
-Для автоматической квалификации активных Battle Pass и заданий дополнительно используется API-side scheduler внутри `leetplus-api.service`:
+Для автоматической квалификации активных Battle Pass и заданий используется
+тот же active-slot systemd singleton. API-side scheduler в обоих API slot
+обязан оставаться выключенным:
 
 ```env
-# Пустое значение: в production scheduler включается автоматически при заданном SYNC_SERVICE_TOKEN.
-GUEST_GAME_PIPELINE_SCHEDULER_ENABLED=""
-GUEST_GAME_PIPELINE_SCHEDULER_INTERVAL_MS="15000"
-GUEST_GAME_PIPELINE_SCHEDULER_LIMIT="30"
-GUEST_GAME_PIPELINE_SCHEDULER_TENANT_ID=""
-GUEST_GAME_PIPELINE_SCHEDULER_TENANT_SLUG=""
+GUEST_GAME_PIPELINE_SCHEDULER_ENABLED="false"
+GUEST_ACTIVITY_LEDGER_SCHEDULER_ENABLED="false"
+GUEST_GAME_SUPPLEMENTAL_PIPELINE_MODE="OFF"
+GUEST_GAME_MONITORING_ENABLED="false"
 ```
 
-- `GUEST_GAME_PIPELINE_SCHEDULER_ENABLED=true|false` явно переопределяет production default.
+- Любое `true` для встроенных API scheduler или API supplemental mode, отличный
+  от `OFF`, останавливает dedicated worker до обработки данных.
 - `GUEST_BONUS_LEDGER_WORKER_QUEUE_APPROVED_REWARDS=true` не отменяет claim gate: один `APPROVED` недостаточен для reward с `claimRequired=true`.
 - Scheduler запускает `runSnapshotPipelineScheduled`, принимает только подготовленные факты и не допускает параллельных tick-ов.
 - При обработке используются только активные правила. Черновик с совпадающими условиями не должен подавлять активное правило.

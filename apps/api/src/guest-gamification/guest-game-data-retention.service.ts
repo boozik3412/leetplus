@@ -131,6 +131,59 @@ export class GuestGameDataRetentionService {
     };
   }
 
+  async runTenantMaintenance(options: {
+    tenantId: string;
+    now?: Date;
+    liveRequested?: boolean;
+  }) {
+    const now = options.now ?? new Date();
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: options.tenantId },
+      select: { id: true, customerStage: true },
+    });
+    if (!tenant) {
+      throw new Error('Retention maintenance tenant was not found');
+    }
+    const executionDecision = evaluateTenantBackgroundExecutionPolicy({
+      stage: tenantBackgroundStageForCustomerStage(tenant.customerStage),
+      jobKind: 'GUEST_GAME_DATA_RETENTION',
+    });
+    const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+      decision: executionDecision,
+      actorKind: 'TENANT_SYSTEM',
+      tenantId: tenant.id,
+    });
+    if (!executionDecision.allowed || !runtimeIdentity.accepted) {
+      throw new Error('Retention maintenance tenant is not admitted');
+    }
+    const tenantIds = [options.tenantId];
+    const recoveredOpenings = await this.recoverStaleRewardWalletOpeningBatches(
+      now,
+      tenantIds,
+    );
+    const expiredOrphanClaims = await this.expireOrphanRewardClaimBatches(
+      now,
+      tenantIds,
+    );
+    const deletedWalletItems = await this.deleteExpiredRewardWalletItemBatches(
+      now,
+      tenantIds,
+    );
+    const retention = await this.runTenant({
+      tenantId: options.tenantId,
+      now,
+      liveRequested: options.liveRequested,
+    });
+
+    return {
+      tenantId: options.tenantId,
+      recoveredOpenings,
+      expiredOrphanClaims,
+      deletedWalletItems,
+      retention,
+    };
+  }
+
   async runTenant(options: {
     tenantId: string;
     now?: Date;

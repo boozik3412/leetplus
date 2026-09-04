@@ -3,10 +3,10 @@
 | Поле                 | Состояние                                                                                                                     |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                  |
-| Production runtime   | healthy; active blue `f3f119fa…`, generation 21, `COMBINED`, bridge OFF, bug reporting LIVE; rollback green `22ab6b81…` ready   |
+| Production runtime   | healthy; active green `982b537c…`, generation 22, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue ready              |
 | Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                  |
-| Release authority    | runtime остаётся exact `f3f119fa…`; production-control `fc7b6e65…` установлен после Fast/Full, runtime cutover не выполнялся |
-| Runtime successor    | Dedicated bonus-ledger worker active; bounded backlog recovery завершён, timer enabled/healthy                                |
+| Release authority    | runtime и production-control exact `982b537c…`; five-phase rollout завершён с terminal receipt                              |
+| Runtime successor    | Bonus-ledger/gamification timer enabled/healthy; bounded historical activity backlog drain продолжается                      |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                              |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                      |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                      |
@@ -15,7 +15,7 @@
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
-| Langame freshness    | audit storage repair применён и проверен; runtime/canary/backfill/timer на HOLD до admitted drain-successor + worker authorization |
+| Langame freshness    | audit storage repair и drain-successor применены; daily canary/backfill/timer на HOLD до admitted canonical-verifier-env repair  |
 
 На 05.09 installed production-control уже обновлён до exact `fc7b6e65…`, но
 runtime не переключался. Successor остановлен fail-closed из-за orphaned
@@ -23,6 +23,23 @@ verifier evidence поколения `3281c070…`; successor receipt отсут
 route/schema/data не менялись. Новый source recovery сохраняет старые bytes и
 связывает их с replacement через immutable receipt вместо ручного удаления.
 До его exact-main Fast+Full, successor `check` и canary статус внешнего beta
+остаётся `NO-GO`.
+
+Позднее 05.09 controlled rollout exact admitted `982b537c…` завершил все пять
+фаз: production active green generation 22, blue сохранён hot rollback,
+public/API readiness и exact `CURRENT_189/189` проходят. Autonomous
+bonus-ledger/gamification timer включён; на read-only срезе очередь уменьшилась
+до `74 PENDING + 1 RUNNING`, проходы завершаются без activity retry и без новых
+bonus-ledger ошибок. Один ранний timeout безопасно оставил lease для штатного
+reclaim и не создал повторного provider effect.
+
+Langame daily canary при этом не запускался: официальный authorization
+authority fail-closed остановился до effect, потому что direct Node invocation
+добавлял служебную bash-переменную `_` в окружение strict installed-control
+verifier. Source repair передаёт verifier только exact
+`PATH/LANG/LC_ALL/TZ` через `/usr/bin/env -i`, а disposable-root fixture теперь
+отвергает любую лишнюю переменную. До нового exact-main Fast/Full, установки
+control generation, успешных date-by-date canary и timer check внешний beta
 остаётся `NO-GO`.
 
 ## Исправление двух обращений геймификации (04.09.2026)

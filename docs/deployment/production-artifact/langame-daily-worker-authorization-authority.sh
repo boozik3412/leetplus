@@ -352,7 +352,13 @@ assert_control() {
   local output
   assert_regular "$CONTROL_VERIFIER" 'root:root:555'
   output="$(mktemp /tmp/leetplus-langame-worker-control.XXXXXX)"; trap 'rm -f -- "$output"' RETURN
-  /usr/bin/node "$CONTROL_VERIFIER" --release-sha "$release_sha" --require-root-authority > "$output" || die 'installed production-control verifier rejected active release'
+  /usr/bin/env -i \
+    PATH='/usr/sbin:/usr/bin:/sbin:/bin' \
+    LANG='C.UTF-8' \
+    LC_ALL='C.UTF-8' \
+    TZ='UTC' \
+    /usr/bin/node "$CONTROL_VERIFIER" --release-sha "$release_sha" --require-root-authority > "$output" \
+    || die 'installed production-control verifier rejected active release'
   grep -F -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' "$output" >/dev/null || die 'control verifier did not accept generation'
   grep -F -x "PRODUCTION_CONTROL_RELEASE_SHA=${release_sha}" "$output" >/dev/null || die 'control verifier release identity drifted'
   control_output_sha="$(sha "$output")"; rm -f -- "$output"; trap - RETURN

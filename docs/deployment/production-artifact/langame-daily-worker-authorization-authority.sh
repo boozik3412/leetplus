@@ -274,8 +274,14 @@ assert_worker_envelope() {
   [[ "$(read_env_value "$SAFE_ENV" LANGAME_DAILY_SYNC_SCHEDULER_ENABLED)" == false && "$(read_env_value "$SAFE_ENV" LANGAME_SCHEDULED_HTTP_ENABLED)" == false ]] || die 'API safety overlay enables Langame scheduler ownership'
   if grep -Eq '^(GUEST_PORTAL_USER_CALL|SMS_RU|GUEST_PORTAL_).*=' "$WORKER_ENV"; then die 'worker environment imports USER_CALL/provider request-path settings'; fi
   grep -F -x 'EnvironmentFile=/etc/leetplus/langame-daily-worker.env' "$SERVICE_FILE" >/dev/null || die 'worker service env identity drifted'
+  grep -F -x 'Type=oneshot' "$SERVICE_FILE" >/dev/null || die 'worker service is not exact oneshot'
+  [[ "$(grep -Ec '^ExecStart=' "$SERVICE_FILE" || true)" == 1 \
+    && "$(grep -Ec '^Exec(StartPre|StartPost|Stop|StopPost|Reload)=' "$SERVICE_FILE" || true)" == 0 ]] \
+    || die 'worker service has additional process hooks'
   grep -F -x "ExecStart=${RUNNER}" "$SERVICE_FILE" >/dev/null || die 'worker service does not use the authorization wrapper'
   grep -F -x 'DynamicUser=yes' "$SERVICE_FILE" >/dev/null || die 'worker service identity is not dynamic'
+  grep -F -x 'InaccessiblePaths=/run/dbus /run/systemd/private' "$SERVICE_FILE" >/dev/null \
+    || die 'worker service can still reach a system-manager transport'
   grep -F -x 'SupplementaryGroups=leetplus-runtime leetplus-api-runtime' "$SERVICE_FILE" >/dev/null || die 'worker service group identity drifted'
   grep -F -x 'Unit=leetplus-langame-daily-worker.service' "$TIMER_FILE" >/dev/null || die 'worker timer target drifted'
   grep -F -x 'OnCalendar=*-*-* 04:30:00 Asia/Yekaterinburg' "$TIMER_FILE" >/dev/null || die 'worker timer schedule drifted'

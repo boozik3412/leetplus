@@ -9,6 +9,9 @@ set -euo pipefail
 IFS=$'\n\t'
 umask 0077
 
+readonly EXPECTED_SERVICE_CGROUP='/system.slice/leetplus-langame-daily-worker.service'
+readonly SERVICE_CGROUP_PROCS="/sys/fs/cgroup${EXPECTED_SERVICE_CGROUP}/cgroup.procs"
+
 PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 LANG='C.UTF-8'
 LC_ALL='C.UTF-8'
@@ -18,6 +21,26 @@ export PATH LANG LC_ALL TZ
 die() {
   printf 'leetplus Langame daily worker: %s\n' "$*" >&2
   exit 1
+}
+
+assert_exact_service_main_process() {
+  local -a cgroup_records=()
+  local -a member_pids=()
+
+  [[ "${INVOCATION_ID:-}" =~ ^[0-9a-f]{32}$ ]] \
+    || die 'systemd InvocationID is absent or invalid'
+  mapfile -t cgroup_records < /proc/self/cgroup \
+    || die 'cannot read the current cgroup identity'
+  [[ "${#cgroup_records[@]}" == 1 \
+    && "${cgroup_records[0]}" == "0::${EXPECTED_SERVICE_CGROUP}" ]] \
+    || die 'caller is outside the exact Langame worker systemd unit'
+  [[ -f "$SERVICE_CGROUP_PROCS" && ! -L "$SERVICE_CGROUP_PROCS" ]] \
+    || die 'exact worker cgroup membership is unavailable'
+  mapfile -t member_pids < "$SERVICE_CGROUP_PROCS" \
+    || die 'cannot read exact worker cgroup membership'
+  [[ "${#member_pids[@]}" == 1 && "${member_pids[0]}" =~ ^[1-9][0-9]*$ \
+    && "${member_pids[0]}" == "$$" ]] \
+    || die 'active worker runner is not the sole process of its exact systemd unit'
 }
 
 expected_release_sha=''
@@ -34,15 +57,10 @@ while (($#)); do
 done
 [[ -n "$expected_release_sha" ]] || die 'an exact authorized release SHA is required'
 
-# This runner is executable by the DynamicUser, so it independently proves it
-# remains the main process of the dedicated systemd unit after the wrapper's
-# exec.  A direct API-runtime invocation cannot reuse a permit.
-[[ "${INVOCATION_ID:-}" =~ ^[0-9a-f]{32}$ ]] || die 'systemd InvocationID is absent or invalid'
-systemctl_bounded() { /usr/bin/timeout --kill-after=2s 10s /usr/bin/systemctl "$@"; }
-unit_main_pid="$(systemctl_bounded show --property=MainPID --value leetplus-langame-daily-worker.service)"
-unit_invocation="$(systemctl_bounded show --property=InvocationID --value leetplus-langame-daily-worker.service)"
-[[ "$unit_main_pid" == "$$" && "$unit_invocation" == "$INVOCATION_ID" ]] \
-  || die 'active worker runner is not the fresh main process of its exact systemd invocation'
+# This runner independently repeats the kernel-owned cgroup proof after exec.
+# A direct API-runtime invocation cannot join this root-managed systemd unit or
+# make itself the unit's singleton process.
+assert_exact_service_main_process
 
 active_upstream='/etc/nginx/leetplus/active-upstreams.conf'
 [[ -L "$active_upstream" ]] || die 'active nginx upstream must be a symlink'

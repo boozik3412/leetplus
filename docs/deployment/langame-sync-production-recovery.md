@@ -50,11 +50,14 @@ corporate scope или Langame credentials. Внешние tenant остаютс
 
 - exact candidate Fast CI `SUCCESS`;
 - Full Release Admission того же exact SHA `SUCCESS`;
-- live-systemd gate подтверждает доступ DynamicUser к system D-Bus и точное
-  совпадение systemd `MainPID/InvocationID`; отсутствие шины не разрешает
-  fallback и блокирует worker до Langame effect; на disposable CI runner
-  допустим только bounded запуск штатных vendor `dbus.socket`/`dbus.service`
-  через PID 1 с exact initial/final state attestation и zero residue;
+- live-systemd gate прямо на одноразовом GitHub-hosted Ubuntu runner с реальным
+  PID 1 systemd подтверждает
+  exact cgroup-v2 worker unit, singleton PID и `InvocationID` до первого helper
+  process; direct/wrong-unit вызовы отклоняются, а `/run/dbus` и
+  `/run/systemd/private` недоступны DynamicUser. Только root authorization
+  authority использует system manager. Gate не устанавливает пакеты, не строит
+  контейнер и не меняет system D-Bus; exact fixture lifecycle очищает созданные
+  units, files, groups, PID/cgroup и timer residue;
 - immutable runtime/control handoff и installed-generation verification;
 - fresh production backup, off-host checksum и restored-copy smoke;
 - healthy active slot и независимо healthy hot rollback;

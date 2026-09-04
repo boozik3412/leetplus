@@ -325,15 +325,16 @@ receipt/manifest fixture и проигрывать весь lifecycle:
    по-прежнему не получают исключения.
 6. Crash/lost-response, tampered receipt, symlink/mount, wrong owner/mode,
    active worker, чужой release/env/tenant и lock contention negative matrix.
-7. Реальный PID 1 positive path wrapper→active release, system D-Bus
-   `MainPID/InvocationID` attestation, immediate persistent timer fire,
-   PID/cgroup residue и полный digest-bound timer revoke/recovery. Если
-   disposable GitHub runner не предоставляет system bus, fixture после exact
-   vendor-fragment и clean inactive-state attestation временно запускает
-   штатные `dbus.socket`/`dbus.service` через PID 1. Она не публикует socket
-   вручную, не меняет enablement и останавливает только записанный
-   PID/start-time/InvocationID/socket identity с обязательным zero-residue;
-   production fallback не добавляется.
+7. Реальный PID 1 positive path wrapper→active release, kernel cgroup-v2
+   singleton + `InvocationID` attestation, immediate persistent timer fire,
+   PID/cgroup residue и полный digest-bound timer revoke/recovery выполняются
+   прямо на disposable GitHub-hosted Ubuntu runner с настоящим PID 1 systemd.
+   Gate не устанавливает container engine, не выполняет сетевой apt/build и не
+   меняет system D-Bus. DynamicUser до любых helper process обязан доказать
+   exact `/system.slice/leetplus-langame-daily-worker.service`, единственный PID
+   `$$` и 32-hex `InvocationID`; `/run/dbus` и `/run/systemd/private` скрыты unit
+   sandbox. Direct и wrong-unit вызовы fail-closed, teardown требует zero
+   unit/PID/cgroup/timer residue; production fallback не добавляется.
 
 Это не сокращает L2 admission. Оно переносит ещё один класс live discovery в
 тот же 15–20-минутный disposable Linux gate, чтобы один topology successor не
@@ -352,9 +353,27 @@ receipt/manifest fixture и проигрывать весь lifecycle:
 | Live systemd fixture не находил `/usr/bin/node` | GitHub Node 22 находится в toolcache, а production unit использует exact `/usr/bin/node` | identity/digest-bound staging только exact Node 22 с race-safe cleanup |
 | Slot fixture падал до worker gate | clean runner не содержал `/etc/leetplus/slots` | fixture создаёт и удаляет exact parent; production provisioning не расширен |
 | Ошибка systemd worker была непрозрачной | failure скрывался без bounded unit journal/status | diagnostics печатаются только после failure и не принимаются как success evidence |
-| DynamicUser получал `Transport endpoint is not connected` | вручную поднятый `dbus-daemon`, даже с `--systemd-activation`, не является system bus, интегрированным с PID 1 | только vendor `dbus.socket`/`dbus.service` через PID 1; ручная socket publication запрещена |
+| DynamicUser получал `Transport endpoint is not connected` с private bus | вручную поднятый `dbus-daemon`, даже с `--systemd-activation`, не является system bus, интегрированным с PID 1 | private/manual socket publication запрещена; unprivileged production wrapper не имеет D-Bus path или fallback |
 | Exact Noble unit отклонялся общим allowlist | Ubuntu 24.04 использует literal `ExecStart=@/usr/bin/dbus-daemon @dbus-daemon ...`, поэтому `argv[0]=@dbus-daemon` | отдельные exact unit-text и `/proc/<pid>/cmdline` варианты, без wildcard |
-| Timeout/SIGTERM мог оставить D-Bus job после fixture | cleanup intent вооружался после `systemctl start`, то есть позже PID 1 side effect | intent arm до `start --no-block`, exact pending-job validation и два pre-identity recovery прогона с zero-residue postcheck |
+| DynamicUser повторно получил `Transport endpoint is not connected` со штатными vendor units | Ubuntu `dbus-daemon` не может безопасно аутентифицировать ephemeral DynamicUser; root success не доказывает worker path | worker полностью исключает D-Bus и первым shell-builtin-only шагом доказывает authority через kernel cgroup, singleton PID и `InvocationID` |
+| Попытка чинить late-start bus создала сложный start/cleanup race | fixture меняла глобальное состояние PID 1, хотя worker вообще не должен зависеть от bus | live fixture не стартует/останавливает D-Bus; manager transports скрыты от DynamicUser, root systemctl остаётся только у authority |
+| Читающий system D-Bus canary мог скрыть расширение полномочий | успешный `systemctl show` сам по себе не доказывает read-only границу | read/control bus path удалён из worker; sandbox скрывает `/run/dbus` и `/run/systemd/private`, что проверяется внутри actual entrypoint |
+| Fast CI `33859630641`, job `100980939250`, SHA `f96a5d7e…` повторил `Transport endpoint is not connected` после позднего старта vendor D-Bus | root `systemctl` использовал private PID-1 transport и ошибочно считался доказательством system-bus доступности для DynamicUser | exact failed run сохранён; positive gate проверяет kernel cgroup singleton, а не bus |
+| Прерывание Docker/Podman build/run могло произойти до присвоения client ID | nested fixture потребовал отдельный lost-response cleanup protocol, не относящийся к production worker | container build/run полностью удалён из Langame critical path; возврат требует отдельного доказанного architecture decision |
+| `--privileged` и host bind mounts расширяли границу теста | inner root мог менять host/workspace и следующие CI gates | nested privileged/container fixture запрещён; gate работает только с exact files на disposable hosted runner и race-safe teardown |
+| Базовый rootfs собирался сетевым `apt` внутри consumer CI | зеркало и установка пакетов делали exact-SHA gate зависимым от внешнего состояния и добавляли до 17 минут | live gate не устанавливает пакеты и не строит rootfs; использует уже предоставленный runner image |
+| Rootless Podman требовал отдельные UID/GID/cgroup namespace proofs | дополнительная изоляция не доказывала actual host systemd cgroup worker path | container layer удалён; authoritative proof выполняется непосредственно под реальным hosted-runner PID 1 |
+| Container-engine вызовы требовали собственных timeout/cleanup gates | инфраструктура теста стала длиннее и сложнее проверяемого worker lifecycle | в critical path нет container engine; bounded остаются только systemctl/systemd-run и exact unit teardown |
+| Broad `--tmpfs /var` скрывал `/var/lib/systemd/timers` | container mount менял реальную topology persistent timer state | container mount path удалён; timer проверяется на реальном systemd runner и очищается exact fixture teardown |
+| Bootstrap runs `33863271594`/`33864400686` заняли около 17 минут и не дошли до публикации из-за TLS/mirror fallback | отдельный image supply chain не ускорял admission и добавил изменяемую сеть | bootstrap branch сохраняется только как failed evidence; consumer workflow больше от него не зависит |
+| Первая версия rootless wrapper имела незакрытые кавычки | большой shell rewrite не был сразу syntax-checked | canonical Git Bash `bash -n` обязателен после каждого shell patch; Fast/Full повторяют syntax gate |
+| Bootstrap run `33865588055` увидел PATH-selected `/usr/local/bin/podman` mode `0777` | hosted-runner tool availability/PATH не является стабильной authority | Podman исключён из gate, поэтому PATH shim больше не влияет на admission |
+| Bootstrap run `33865713120` дошёл до booted PID 1, но DynamicUser получил `Transport endpoint is not connected` от штатного Ubuntu `dbus-daemon` | известная открытая несовместимость systemd DynamicUser с dbus-daemon: backend не может NSS-resolve ephemeral UID и разрывает D-Bus HELLO; root success не является доказательством worker path | unprivileged wrapper больше не использует `systemctl`/`busctl`: первым shell-builtin-only шагом проверяет exact cgroup-v2 record, singleton PID `$$` и `InvocationID`; unit скрывает оба manager transport, а fixture фиксирует direct/wrong-unit отказ и реальный positive worker path |
+| Bootstrap run `33866876064` завершился без достаточного inner-cgroup evidence | canary сообщал только общий exit status | cgroup canary печатает bounded PID/InvocationID и literal `/proc/self/cgroup` только при failure |
+| Bootstrap run `33867160633` не дошёл до fixture: exact `/usr/bin/podman` отсутствовал | состав hosted runner не гарантирует один container-engine binary между запусками | admission не зависит от Podman или динамической установки пакетов |
+| Bootstrap run `33867408386` установил Podman и загрузил PID 1, но nested rootless process получил zero cgroup records | вложенный cgroup namespace не воспроизводит authoritative host service cgroup и не может доказать production invariant | nested OCI path окончательно исключён; direct disposable PID-1 gate является единственным positive authority |
+| Cleanup trap был armed до проверки clean fixture root | отказ на чужом одноимённом path/unit мог остановить или удалить именно обнаруженное pre-existing state | path и loaded-unit preflight выполняются до trap; cleanup включается только после доказанного clean disposable namespace |
+| Локальный Windows control-integrity test сообщал 16 ложных digest mismatch | часть `.cjs`/`.service`/`.example` файлов production artifact не имела LF attribute и checkout переводил canonical bytes в CRLF | `.gitattributes` закрепляет `text eol=lf` для всего `docs/deployment/production-artifact/**`; digest test одинаков на Windows и Linux |
 
 При новом падении сначала дополняются эта таблица и соответствующая negative
 проверка; повторный exact-SHA CI запускается только после локальных syntax,

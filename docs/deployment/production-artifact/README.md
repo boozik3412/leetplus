@@ -465,7 +465,11 @@ immutable evidence в `/var/lib/leetplus/langame-worker-authorizations`, тре�
 strict PID/cgroup quiescence, проверяет возможный немедленный persistent-timer
 run и не выполняет перед ним дублирующий timer-profile oneshot. Exact
 canary/stable-env evidence сохраняется отдельным validation receipt. Authority
-имеет digest-bound `revoke-plan/apply/check/recover`, который
+запускает worker только как exact oneshot unit: до первого helper process wrapper
+требует kernel cgroup-v2 path, singleton PID и `InvocationID`, а unit скрывает
+`/run/dbus` и `/run/systemd/private`. Поэтому DynamicUser не зависит от system
+D-Bus и direct/wrong-unit permit reuse отклоняется. Authority имеет digest-bound
+`revoke-plan/apply/check/recover`, который
 возвращает exact 90 fences. Current profile допускает ровно один internal
 tenant и сохраняет external background deny. Полный порядок описан в
 [`../langame-sync-production-recovery.md`](../langame-sync-production-recovery.md).

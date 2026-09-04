@@ -386,17 +386,22 @@ quiesce, удаление узких 91 permit conditions и active pointer, в�
 fences и immutable revoke receipt. Простой ручной `disable --now` не закрывает
 authority state и не является terminal rollback.
 
-Worker wrapper не доверяет одному `INVOCATION_ID` из environment: он обязан
-получить через system D-Bus точные `MainPID` и `InvocationID` свежего systemd
-invocation. Недоступная или недоверенная шина завершает запуск fail-closed без
-Langame effect; fallback на UID/cgroup запрещён. Если на явно подтверждённом
-disposable GitHub runner system bus отсутствует, CI может временно запустить
-только штатные vendor `dbus.socket`/`dbus.service` через PID 1 после exact
-fragment/inactive-state attestation. Ручная публикация socket запрещена;
-cleanup intent вооружается до передачи start-job в PID 1, связан с
-PID/start-time/InvocationID/socket identity, не меняет unit enablement и обязан
-вернуть исходное inactive/zero-residue состояние. Это не production provisioning
-и не даёт worker новых provider/runtime полномочий.
+Worker wrapper не доверяет одному `INVOCATION_ID` из environment. Самым первым
+shell-builtin-only действием он требует единственную cgroup-v2 запись
+`0::/system.slice/leetplus-langame-daily-worker.service`, единственный PID `$$`
+в kernel-owned `cgroup.procs` и exact 32-hex `INVOCATION_ID`. Direct caller и
+другая systemd unit не могут присоединить себя к root-managed worker cgroup.
+`/run/dbus` и `/run/systemd/private` скрыты от worker через `InaccessiblePaths`:
+Ubuntu `dbus-daemon` не умеет безопасно аутентифицировать DynamicUser, поэтому
+root `systemctl` остаётся только в authorization authority и не является
+runtime-зависимостью worker. Positive gate выполняется прямо на одноразовом
+GitHub-hosted Ubuntu runner с настоящим PID 1 systemd. Он не устанавливает
+container engine, не строит образ и не меняет system D-Bus. До worker отдельный
+DynamicUser canary доказывает exact singleton cgroup и недоступность обоих
+manager transport; actual Node entrypoint повторно подтверждает те же свойства.
+Direct/wrong-unit invocation fail-closed, а teardown требует zero
+unit/PID/cgroup/timer residue. Это не production provisioning и не даёт worker
+новых provider/runtime полномочий.
 
 ### Runtime repair contract 29–30.08.2026
 

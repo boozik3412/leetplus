@@ -21,6 +21,14 @@ admitted SHA и отдельного GO.
   `EXTERNAL_DENY`.
 - [x] Focused API `46/46`, API/Web lint, Web typecheck и static Bash/control
   tests локально зелёные.
+- [x] Все найденные при live-systemd доводке расхождения внесены в исполняемый
+  журнал предотвращения повторов. Hosted-runner late-start D-Bus исключён;
+  unprivileged wrapper больше не зависит от D-Bus и до первого helper process
+  доказывает exact cgroup-v2 unit, singleton PID и `InvocationID`. Positive path
+  выполняется прямо на одноразовом GitHub-hosted runner с настоящим PID 1
+  systemd; direct/wrong-unit вызовы отклоняются, manager transports скрыты,
+  persistent timer и zero residue проверяются. Вложенный OCI/Podman fixture
+  удалён из critical path как медленный и недостоверный для host cgroup.
 - [ ] Получить Fast CI и Full Release Admission на одном exact SHA.
 - [x] Fresh backup/off-host/restored-copy проверены; exact двухдействийный
   storage repair применён, повторный check даёт zero-action plan.
@@ -34,7 +42,7 @@ Runbook: [langame-sync-production-recovery.md](./docs/deployment/langame-sync-pr
 
 ## Ускорение безопасного production release — 03.09.2026
 
-Статус: `[██████████] 8/8` — topology twin, impact classifier, один exact
+Статус: `[█████████░] 9/10` — topology twin, impact classifier, один exact
 merge-candidate admission, параллельный backup/restored-copy evidence bind и
 resumable runtime rollout с измеримыми lane-метриками реализованы. Первый approved exact plan завершил все
 пять фаз на production: active blue `f3f119fa…`, generation `21`, hot rollback
@@ -147,6 +155,14 @@ receipt-contract drift уже после admission.
   `metrics`, новый retention plan и runtime `apply|resume` блокируются на
   незавершённом архиве. Reader объединяет live+archive без двойного подсчёта;
   сеть, DB, systemd/runtime и пользовательские контуры не затрагиваются.
+- [ ] `REL-ACC-010`: additive control-state rehearsal реализует historical
+  receipt/manifest successor, точные `static` service / `disabled` timer
+  состояния и полный canary→timer lifecycle. Реальный DynamicUser positive
+  path больше не использует D-Bus из unprivileged worker: disposable hosted
+  runner с реальным PID 1 обязан доказать exact cgroup-v2 unit, singleton PID,
+  `InvocationID`, недоступность manager transports, direct/wrong-unit отказ,
+  persistent timer execution и zero residue. Завершение — только после Fast+Full
+  exact-SHA green.
 
 Отдельный capacity boundary: duration percentiles всё ещё читают terminal
 operation directories с fail-closed пределом `4 096`. Их удаление не входит в

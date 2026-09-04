@@ -92,12 +92,15 @@ oneshot перед возможным `Persistent=true` catch-up, исключа
 затронуты.
 
 CI successor дополнительно обязан пройти реальный PID 1/DynamicUser путь.
-Wrapper принимает permit только при совпадении `MainPID/InvocationID`,
-прочитанном через system D-Bus; недоступность шины не понижает проверку до
-UID/cgroup. На явно подтверждённом disposable GitHub runner временно разрешён
-только PID-1 запуск штатных vendor `dbus.socket`/`dbus.service` после exact
-inactive-state attestation; без ручной публикации socket, изменения enablement
-и с обязательным identity-bound zero-residue восстановлением.
+Wrapper принимает permit только когда его первым shell-builtin-only шагом
+совпали exact cgroup-v2 unit path, единственный PID `$$` и `InvocationID`;
+direct/wrong-unit вызовы fail-closed, а оба system-manager transport скрыты.
+Positive path запускается прямо на уничтожаемом GitHub-hosted Ubuntu runner с
+настоящим PID 1 systemd. Root controller создаёт только exact fixture units;
+DynamicUser canary доказывает cgroup singleton и отсутствие доступа к
+`/run/dbus` и `/run/systemd/private`, actual Node entrypoint повторяет те же
+проверки. Gate не устанавливает container engine, не собирает образ и не меняет
+system D-Bus. Exact cleanup требует zero unit/PID/cgroup/timer residue.
 
 ## Ускорение release pipeline без ослабления gates (02.09.2026)
 

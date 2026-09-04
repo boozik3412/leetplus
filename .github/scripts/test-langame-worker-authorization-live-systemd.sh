@@ -23,305 +23,68 @@ readonly MARKER='/var/lib/leetplus/langame-sync/live-systemd-wrapper-ran'
 readonly TIMER_STAMP='/var/lib/systemd/timers/stamp-leetplus-langame-daily-worker.timer'
 readonly WRAPPER='/usr/local/libexec/leetplus/run-authorized-langame-daily-worker.sh'
 readonly RUNNER='/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh'
-readonly SYSTEM_BUS_ROOT='/run/dbus'
-readonly SYSTEM_BUS_SOCKET='/run/dbus/system_bus_socket'
-readonly SYSTEM_BUS_SOCKET_UNIT='dbus.socket'
-readonly SYSTEM_BUS_SERVICE_UNIT='dbus.service'
+readonly MANAGER_ISOLATION_CANARY='leetplus-langame-manager-isolation-canary.service'
+readonly WRONG_UNIT_CANARY='leetplus-langame-worker-wrong-unit-canary.service'
 
 created_runtime=false; created_api=false; created_system_node=false
 system_node_root=''; system_node_root_device_inode=''; system_node_stage=''; system_node_stage_device_inode=''; system_node_claim=''; system_node_digest=''
-system_bus_socket_start_attempted=false; system_bus_service_start_attempted=false; reused_system_bus=false
-system_bus_pid=''; system_bus_start_time=''; system_bus_cmdline_sha256=''; system_bus_invocation_id=''; system_bus_socket_device_inode=''; system_bus_root_device_inode=''
-system_bus_socket_invocation_id=''; system_bus_socket_previous_invocation_id=''; system_bus_previous_invocation_id=''
-system_bus_socket_unit_state=''; system_bus_service_unit_state=''
-system_bus_socket_fragment=''; system_bus_socket_fragment_identity=''; system_bus_socket_fragment_sha256=''
-system_bus_service_fragment=''; system_bus_service_fragment_identity=''; system_bus_service_fragment_sha256=''
 die() { printf 'Langame worker live-systemd fixture: %s\n' "$*" >&2; exit 1; }
 bounded_systemctl() { timeout --foreground --kill-after=2s 12s systemctl "$@"; }
+bounded_systemd_run() { timeout --foreground --kill-after=4s 30s systemd-run "$@"; }
 start_worker_or_report() {
   if bounded_systemctl start "$SERVICE"; then return 0; fi
   systemctl --no-pager --full status "$SERVICE" >&2 || true
   journalctl --no-pager --output=short-precise --unit "$SERVICE" --lines=80 >&2 || true
   die 'authorized systemd worker invocation failed'
 }
-system_bus_socket_is_exact() {
-  local path="$1"
-  [[ -S "$path" && ! -L "$path" \
-    && "$(stat -c '%U:%G:%d:%i' -- "$path")" == "root:root:${system_bus_socket_device_inode}" ]]
-}
-system_bus_root_is_exact() {
-  [[ -d "$SYSTEM_BUS_ROOT" && ! -L "$SYSTEM_BUS_ROOT" \
-    && "$(stat -c '%U:%G:%d:%i' -- "$SYSTEM_BUS_ROOT")" == "root:root:${system_bus_root_device_inode}" \
-    && -z "$(find -P "$SYSTEM_BUS_ROOT" -maxdepth 0 -perm /022 -print -quit)" ]]
-}
-preexisting_system_bus_is_exact() {
-  [[ "$reused_system_bus" == true ]] \
-    && system_bus_root_is_exact \
-    && system_bus_socket_is_exact "$SYSTEM_BUS_SOCKET"
-}
-system_bus_process_is_exact() {
-  [[ "$system_bus_pid" =~ ^[1-9][0-9]*$ \
-    && -r "/proc/${system_bus_pid}/stat" \
-    && "$(readlink -e -- "/proc/${system_bus_pid}/exe")" == /usr/bin/dbus-daemon \
-    && "$(awk '{print $22}' "/proc/${system_bus_pid}/stat")" == "$system_bus_start_time" \
-      && "$(sha256sum -- "/proc/${system_bus_pid}/cmdline" | awk '{print $1}')" == "$system_bus_cmdline_sha256" ]]
-}
-system_bus_process_cmdline_is_canonical() {
-  local pid="$1" cmdline=''
-  [[ "$pid" =~ ^[1-9][0-9]*$ && -r "/proc/${pid}/cmdline" ]] || return 1
-  cmdline="$(tr '\0' '\n' < "/proc/${pid}/cmdline")"
-  case "$cmdline" in
-    $'/usr/bin/dbus-daemon\n--system\n--address=systemd:\n--nofork\n--nopidfile\n--systemd-activation\n--syslog-only'|\
-    $'@dbus-daemon\n--system\n--address=systemd:\n--nofork\n--nopidfile\n--systemd-activation\n--syslog-only') return 0 ;;
-    *) return 1 ;;
-  esac
-}
-unit_fragment_is_exact() {
-  local unit="$1" expected_path="$2" expected_identity="$3" expected_sha256="$4" actual_path='' parent=''
-  actual_path="$(bounded_systemctl show -p FragmentPath --value "$unit")" || return 1
-  parent="$(dirname -- "$actual_path")"
-  [[ "$actual_path" == "$expected_path" \
-    && "$(realpath -e -- "$actual_path")" == "$actual_path" \
-    && -f "$actual_path" && ! -L "$actual_path" \
-    && "$(stat -c '%d:%i:%s:%Y:%Z:%U:%G:%a:%h' -- "$actual_path")" == "$expected_identity" \
-    && "$(sha256sum -- "$actual_path" | awk '{print $1}')" == "$expected_sha256" \
-    && "$parent" == /usr/lib/systemd/system \
-    && -d "$parent" && ! -L "$parent" \
-    && "$(stat -c '%U:%G' -- "$parent")" == 'root:root' \
-    && -z "$(find -P "$parent" -maxdepth 0 -perm /022 -print -quit)" \
-    && -z "$(bounded_systemctl show -p DropInPaths --value "$unit")" ]]
-}
-record_vendor_unit_fragment() {
-  local unit="$1" path_var="$2" identity_var="$3" sha256_var="$4" fragment='' parent=''
-  [[ "$(bounded_systemctl show -p LoadState --value "$unit")" == loaded \
-    && -z "$(bounded_systemctl show -p DropInPaths --value "$unit")" ]] \
-    || die "${unit} is not one loaded vendor unit without drop-ins"
-  fragment="$(bounded_systemctl show -p FragmentPath --value "$unit")"
-  [[ "$fragment" == "/usr/lib/systemd/system/${unit}" \
-    && "$(realpath -e -- "$fragment")" == "$fragment" \
-    && -f "$fragment" && ! -L "$fragment" \
-    && "$(stat -c '%U:%G:%h' -- "$fragment")" == 'root:root:1' \
-    && -z "$(find -P "$fragment" -maxdepth 0 -perm /022 -print -quit)" ]] \
-    || die "${unit} fragment is not immutable vendor root authority"
-  parent="$(dirname -- "$fragment")"
-  [[ "$parent" == /usr/lib/systemd/system \
-    && -d "$parent" && ! -L "$parent" \
-    && "$(stat -c '%U:%G' -- "$parent")" == 'root:root' \
-    && -z "$(find -P "$parent" -maxdepth 0 -perm /022 -print -quit)" ]] \
-    || die "${unit} fragment parent is not immutable vendor root authority"
-  printf -v "$path_var" '%s' "$fragment"
-  printf -v "$identity_var" '%s' "$(stat -c '%d:%i:%s:%Y:%Z:%U:%G:%a:%h' -- "$fragment")"
-  printf -v "$sha256_var" '%s' "$(sha256sum -- "$fragment" | awk '{print $1}')"
-}
-assert_vendor_dbus_unit_semantics() {
-  local socket_listen_count='' socket_all_listen_count='' socket_service_count=''
-  local service_exec_start='' service_requires=''
-  socket_listen_count="$(grep -Ec '^[[:space:]]*ListenStream[[:space:]]*=[[:space:]]*/run/dbus/system_bus_socket[[:space:]]*$' "$system_bus_socket_fragment" || true)"
-  socket_all_listen_count="$(grep -Ec '^[[:space:]]*Listen(Stream|Datagram|SequentialPacket|FIFO|Special|Netlink|MessageQueue)[[:space:]]*=' "$system_bus_socket_fragment" || true)"
-  socket_service_count="$(grep -Ec '^[[:space:]]*Service[[:space:]]*=' "$system_bus_socket_fragment" || true)"
-  [[ "$socket_listen_count" == 1 && "$socket_all_listen_count" == 1 \
-    && "$(bounded_systemctl show -p Service --value "$SYSTEM_BUS_SOCKET_UNIT")" == "$SYSTEM_BUS_SERVICE_UNIT" \
-    && "$(bounded_systemctl show -p Accept --value "$SYSTEM_BUS_SOCKET_UNIT")" == no ]] \
-    || die 'dbus.socket does not expose only the canonical system-bus stream'
-  if [[ "$socket_service_count" != 0 ]]; then
-    [[ "$socket_service_count" == 1 \
-      && "$(grep -Ec '^[[:space:]]*Service[[:space:]]*=[[:space:]]*dbus\.service[[:space:]]*$' "$system_bus_socket_fragment" || true)" == 1 ]] \
-      || die 'dbus.socket has a non-canonical service binding'
-  fi
-  service_exec_start="$(sed -nE 's/^[[:space:]]*ExecStart[[:space:]]*=[[:space:]]*//p' "$system_bus_service_fragment")"
-  case "$service_exec_start" in
-    '/usr/bin/dbus-daemon --system --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only'|\
-    '@/usr/bin/dbus-daemon @dbus-daemon --system --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only') ;;
-    *) die 'dbus.service ExecStart is outside the canonical systemd-activation profile' ;;
-  esac
-  service_requires="$(bounded_systemctl show -p Requires --value "$SYSTEM_BUS_SERVICE_UNIT")"
-  [[ "$(bounded_systemctl show -p Type --value "$SYSTEM_BUS_SERVICE_UNIT")" == notify \
-    && "$(tr ' ' '\n' <<<"$service_requires" | grep -Fxc "$SYSTEM_BUS_SOCKET_UNIT" || true)" == 1 ]] \
-    || die 'dbus.service is not the canonical notify service bound to dbus.socket'
-}
-system_bus_fragments_are_exact() {
-  unit_fragment_is_exact "$SYSTEM_BUS_SOCKET_UNIT" "$system_bus_socket_fragment" "$system_bus_socket_fragment_identity" "$system_bus_socket_fragment_sha256" \
-    && unit_fragment_is_exact "$SYSTEM_BUS_SERVICE_UNIT" "$system_bus_service_fragment" "$system_bus_service_fragment_identity" "$system_bus_service_fragment_sha256"
-}
-capture_system_bus_socket_identity() {
-  local current_invocation='' current_device_inode=''
-  [[ "$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SOCKET_UNIT")" == active \
-    && "$(bounded_systemctl show -p SubState --value "$SYSTEM_BUS_SOCKET_UNIT")" == listening \
-    && "$(bounded_systemctl show -p UnitFileState --value "$SYSTEM_BUS_SOCKET_UNIT")" == "$system_bus_socket_unit_state" \
-    && -S "$SYSTEM_BUS_SOCKET" && ! -L "$SYSTEM_BUS_SOCKET" \
-    && "$(stat -c '%U:%G' -- "$SYSTEM_BUS_SOCKET")" == 'root:root' ]] || return 1
-  current_invocation="$(bounded_systemctl show -p InvocationID --value "$SYSTEM_BUS_SOCKET_UNIT")" || return 1
-  current_device_inode="$(stat -c '%d:%i' -- "$SYSTEM_BUS_SOCKET")"
-  [[ "$current_invocation" =~ ^[0-9a-f]{32}$ \
-    && "$current_invocation" != "$system_bus_socket_previous_invocation_id" ]] || return 1
-  if [[ -n "$system_bus_socket_invocation_id" || -n "$system_bus_socket_device_inode" ]]; then
-    [[ "$current_invocation" == "$system_bus_socket_invocation_id" \
-      && "$current_device_inode" == "$system_bus_socket_device_inode" ]] || return 1
-  else
-    system_bus_socket_invocation_id="$current_invocation"
-    system_bus_socket_device_inode="$current_device_inode"
-  fi
-  system_bus_root_is_exact && system_bus_socket_is_exact "$SYSTEM_BUS_SOCKET"
-}
-capture_system_bus_service_identity() {
-  local current_pid='' current_invocation='' current_start_time='' current_cmdline_sha256=''
-  current_pid="$(bounded_systemctl show -p MainPID --value "$SYSTEM_BUS_SERVICE_UNIT")" || return 1
-  current_invocation="$(bounded_systemctl show -p InvocationID --value "$SYSTEM_BUS_SERVICE_UNIT")" || return 1
-  [[ "$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SERVICE_UNIT")" =~ ^(active|activating)$ \
-    && "$(bounded_systemctl show -p SubState --value "$SYSTEM_BUS_SERVICE_UNIT")" =~ ^(running|start|start-post)$ \
-    && "$(bounded_systemctl show -p UnitFileState --value "$SYSTEM_BUS_SERVICE_UNIT")" == "$system_bus_service_unit_state" \
-    && "$current_pid" =~ ^[1-9][0-9]*$ \
-    && "$current_invocation" =~ ^[0-9a-f]{32}$ \
-    && "$current_invocation" != "$system_bus_previous_invocation_id" \
-    && -r "/proc/${current_pid}/stat" \
-    && "$(readlink -e -- "/proc/${current_pid}/exe")" == /usr/bin/dbus-daemon ]] || return 1
-  system_bus_process_cmdline_is_canonical "$current_pid" || return 1
-  current_start_time="$(awk '{print $22}' "/proc/${current_pid}/stat")"
-  current_cmdline_sha256="$(sha256sum -- "/proc/${current_pid}/cmdline" | awk '{print $1}')"
-  [[ "$current_start_time" =~ ^[1-9][0-9]*$ ]] || return 1
-  if [[ -n "$system_bus_pid" || -n "$system_bus_invocation_id" ]]; then
-    [[ "$current_pid" == "$system_bus_pid" \
-      && "$current_invocation" == "$system_bus_invocation_id" \
-      && "$current_start_time" == "$system_bus_start_time" \
-      && "$current_cmdline_sha256" == "$system_bus_cmdline_sha256" ]] || return 1
-  else
-    system_bus_pid="$current_pid"
-    system_bus_invocation_id="$current_invocation"
-    system_bus_start_time="$current_start_time"
-    system_bus_cmdline_sha256="$current_cmdline_sha256"
-  fi
-}
-dbus_service_is_quiescent() {
-  local property value cgroup
-  for property in MainPID ControlPID; do
-    value="$(bounded_systemctl show -p "$property" --value "$SYSTEM_BUS_SERVICE_UNIT")" || return 1
-    [[ "$value" == 0 ]] || return 1
-  done
-  cgroup="$(bounded_systemctl show -p ControlGroup --value "$SYSTEM_BUS_SERVICE_UNIT")" || return 1
-  [[ -z "$cgroup" || ! -d "/sys/fs/cgroup${cgroup}" \
-    || -z "$(find "/sys/fs/cgroup${cgroup}" -type f -name cgroup.procs -exec awk 'NF { print; exit }' {} + 2>/dev/null)" ]]
-}
-system_bus_units_are_exact() {
-  [[ "$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SOCKET_UNIT")" == active \
-    && "$(bounded_systemctl show -p SubState --value "$SYSTEM_BUS_SOCKET_UNIT")" == listening \
-    && "$(bounded_systemctl show -p InvocationID --value "$SYSTEM_BUS_SOCKET_UNIT")" == "$system_bus_socket_invocation_id" \
-    && "$(bounded_systemctl show -p UnitFileState --value "$SYSTEM_BUS_SOCKET_UNIT")" == "$system_bus_socket_unit_state" \
-    && "$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SERVICE_UNIT")" == active \
-    && "$(bounded_systemctl show -p SubState --value "$SYSTEM_BUS_SERVICE_UNIT")" == running \
-    && "$(bounded_systemctl show -p MainPID --value "$SYSTEM_BUS_SERVICE_UNIT")" == "$system_bus_pid" \
-    && "$(bounded_systemctl show -p InvocationID --value "$SYSTEM_BUS_SERVICE_UNIT")" == "$system_bus_invocation_id" \
-    && "$(bounded_systemctl show -p UnitFileState --value "$SYSTEM_BUS_SERVICE_UNIT")" == "$system_bus_service_unit_state" ]] \
-    && system_bus_fragments_are_exact \
-    && system_bus_root_is_exact \
-    && system_bus_socket_is_exact "$SYSTEM_BUS_SOCKET" \
-    && system_bus_process_is_exact
-}
-assert_dbus_service_quiescent() {
-  dbus_service_is_quiescent || die 'dbus.service retained a process or cgroup member'
-}
-unit_invocation_is_fresh() {
-  local unit="$1" previous="$2" current=''
-  current="$(bounded_systemctl show -p InvocationID --value "$unit")" || return 1
-  [[ "$current" =~ ^[0-9a-f]{32}$ && "$current" != "$previous" ]]
-}
-unit_has_no_job() {
-  local unit="$1" jobs=''
-  jobs="$(bounded_systemctl list-jobs --no-legend --plain --no-pager "$unit")" || return 1
-  [[ -z "$jobs" ]]
-}
-unit_start_job_is_absent_or_exact() {
-  local unit="$1" jobs=''
-  jobs="$(bounded_systemctl list-jobs --no-legend --plain --no-pager "$unit")" || return 1
-  [[ -z "$jobs" ]] && return 0
-  awk -v expected_unit="$unit" '
-    NF != 4 || $1 !~ /^[1-9][0-9]*$/ || $2 != expected_unit || $3 != "start" || ($4 != "waiting" && $4 != "running") { exit 1 }
-  ' <<<"$jobs"
-}
-restore_attempted_system_bus() {
-  local socket_state='' socket_substate='' service_state='' service_substate=''
-  local observed_drift=false command_failed=false
-  [[ "$system_bus_socket_start_attempted" == true ]] || return 0
-  system_bus_fragments_are_exact && system_bus_root_is_exact \
-    && [[ "$(bounded_systemctl show -p UnitFileState --value "$SYSTEM_BUS_SOCKET_UNIT")" == "$system_bus_socket_unit_state" \
-      && "$(bounded_systemctl show -p UnitFileState --value "$SYSTEM_BUS_SERVICE_UNIT")" == "$system_bus_service_unit_state" ]] \
-    || return 1
-  for _ in {1..50}; do
-    socket_state="$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SOCKET_UNIT")" || return 1
-    socket_substate="$(bounded_systemctl show -p SubState --value "$SYSTEM_BUS_SOCKET_UNIT")" || return 1
-    service_state="$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SERVICE_UNIT")" || return 1
-    service_substate="$(bounded_systemctl show -p SubState --value "$SYSTEM_BUS_SERVICE_UNIT")" || return 1
-    [[ "$socket_state" != activating && "$socket_state" != deactivating \
-      && "$service_state" != deactivating ]] && break
+transient_unit_is_absent() {
+  local unit="$1"
+  for _ in {1..40}; do
+    [[ "$(bounded_systemctl show -p LoadState --value "$unit")" == not-found ]] && return 0
     sleep 0.1
   done
-  unit_start_job_is_absent_or_exact "$SYSTEM_BUS_SOCKET_UNIT" || return 1
-  case "$socket_state:$socket_substate" in
-    active:listening) capture_system_bus_socket_identity || return 1 ;;
-    inactive:dead)
-      [[ ! -e "$SYSTEM_BUS_SOCKET" && ! -L "$SYSTEM_BUS_SOCKET" ]] || return 1
-      [[ -z "$system_bus_socket_invocation_id" ]] || observed_drift=true
-      ;;
-    failed:failed)
-      [[ ! -e "$SYSTEM_BUS_SOCKET" && ! -L "$SYSTEM_BUS_SOCKET" ]] \
-        && unit_invocation_is_fresh "$SYSTEM_BUS_SOCKET_UNIT" "$system_bus_socket_previous_invocation_id" \
-        || return 1
-      observed_drift=true
-      ;;
-    *) return 1 ;;
-  esac
-  if [[ "$system_bus_service_start_attempted" == true ]]; then
-    unit_start_job_is_absent_or_exact "$SYSTEM_BUS_SERVICE_UNIT" || return 1
-    case "$service_state:$service_substate" in
-      active:running|activating:start|activating:start-post)
-        capture_system_bus_service_identity || return 1
-        ;;
-      inactive:dead)
-        dbus_service_is_quiescent || return 1
-        [[ -z "$system_bus_invocation_id" ]] || observed_drift=true
-        ;;
-      failed:failed)
-        dbus_service_is_quiescent \
-          && unit_invocation_is_fresh "$SYSTEM_BUS_SERVICE_UNIT" "$system_bus_previous_invocation_id" \
-          || return 1
-        observed_drift=true
-        ;;
-      *) return 1 ;;
-    esac
-  else
-    [[ "$service_state:$service_substate" == inactive:dead \
-      && "$(bounded_systemctl show -p InvocationID --value "$SYSTEM_BUS_SERVICE_UNIT")" == "$system_bus_previous_invocation_id" ]] \
-      && dbus_service_is_quiescent && unit_has_no_job "$SYSTEM_BUS_SERVICE_UNIT" || return 1
+  return 1
+}
+run_dynamic_manager_isolation_canary() {
+  if ! bounded_systemd_run --quiet --wait --collect --unit="$MANAGER_ISOLATION_CANARY" \
+    --property=Type=exec \
+    --property=DynamicUser=yes \
+    --property=User=leetplus-langame-manager-isolation-canary \
+    --property=NoNewPrivileges=yes \
+    --property=PrivateDevices=yes \
+    --property=PrivateNetwork=yes \
+    --property=PrivateTmp=yes \
+    --property=ProtectControlGroups=yes \
+    --property=ProtectHome=yes \
+    --property=ProtectProc=invisible \
+    --property=ProtectSystem=strict \
+    --property=ProcSubset=pid \
+    --property=RestrictAddressFamilies=AF_UNIX \
+    --property=RestrictNamespaces=yes \
+    --property='InaccessiblePaths=/run/dbus /run/systemd/private' \
+    /usr/bin/bash -p -ceu '
+      fail() {
+        printf "Langame isolation canary: %s; pid=%s invocation=%s\n" "$1" "$$" "${INVOCATION_ID:-unset}" >&2
+        printf "Langame isolation canary: /proc/self/cgroup=" >&2
+        while IFS= read -r record; do printf "<%s>" "$record" >&2; done < /proc/self/cgroup
+        printf "\n" >&2
+        exit 41
+      }
+      (( EUID != 0 ))
+      readonly expected="/system.slice/leetplus-langame-manager-isolation-canary.service"
+      mapfile -t cgroups < /proc/self/cgroup
+      [[ "${#cgroups[@]}" == 1 && "${cgroups[0]}" == "0::${expected}" ]] || fail "cgroup record mismatch"
+      mapfile -t pids < "/sys/fs/cgroup${expected}/cgroup.procs"
+      [[ "${#pids[@]}" == 1 && "${pids[0]}" == "$$" ]] || fail "cgroup is not singleton"
+      [[ "${INVOCATION_ID:-}" =~ ^[0-9a-f]{32}$ ]] || fail "InvocationID is invalid"
+      [[ ! -e /run/dbus/system_bus_socket && ! -e /run/systemd/private ]] || fail "system-manager transport is reachable"
+    '; then
+    systemctl --no-pager --full status "$MANAGER_ISOLATION_CANARY" >&2 || true
+    journalctl --no-pager --output=short-precise --unit "$MANAGER_ISOLATION_CANARY" --lines=80 >&2 || true
+    die 'DynamicUser cgroup proof or system-manager isolation failed'
   fi
-  # A remaining start job is accepted only for the exact unit whose intent was
-  # armed before PID 1 was called; the bounded stop cancels that transaction.
-  if [[ "$system_bus_service_start_attempted" == true ]]; then
-    bounded_systemctl stop "$SYSTEM_BUS_SERVICE_UNIT" "$SYSTEM_BUS_SOCKET_UNIT" || command_failed=true
-  else
-    bounded_systemctl stop "$SYSTEM_BUS_SOCKET_UNIT" || command_failed=true
-  fi
-  if [[ "$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SERVICE_UNIT")" == failed ]]; then
-    bounded_systemctl reset-failed "$SYSTEM_BUS_SERVICE_UNIT" || command_failed=true
-  fi
-  if [[ "$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SOCKET_UNIT")" == failed ]]; then
-    bounded_systemctl reset-failed "$SYSTEM_BUS_SOCKET_UNIT" || command_failed=true
-  fi
-  system_bus_fragments_are_exact && system_bus_root_is_exact \
-    && [[ "$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SERVICE_UNIT")" == inactive \
-      && "$(bounded_systemctl show -p SubState --value "$SYSTEM_BUS_SERVICE_UNIT")" == dead \
-      && "$(bounded_systemctl show -p UnitFileState --value "$SYSTEM_BUS_SERVICE_UNIT")" == "$system_bus_service_unit_state" \
-      && "$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SOCKET_UNIT")" == inactive \
-      && "$(bounded_systemctl show -p SubState --value "$SYSTEM_BUS_SOCKET_UNIT")" == dead \
-      && "$(bounded_systemctl show -p UnitFileState --value "$SYSTEM_BUS_SOCKET_UNIT")" == "$system_bus_socket_unit_state" \
-      && ! -e "$SYSTEM_BUS_SOCKET" && ! -L "$SYSTEM_BUS_SOCKET" ]] \
-    && dbus_service_is_quiescent \
-    && unit_has_no_job "$SYSTEM_BUS_SERVICE_UNIT" \
-    && unit_has_no_job "$SYSTEM_BUS_SOCKET_UNIT" || return 1
-  system_bus_socket_previous_invocation_id="$(bounded_systemctl show -p InvocationID --value "$SYSTEM_BUS_SOCKET_UNIT")" || return 1
-  system_bus_previous_invocation_id="$(bounded_systemctl show -p InvocationID --value "$SYSTEM_BUS_SERVICE_UNIT")" || return 1
-  system_bus_socket_start_attempted=false; system_bus_service_start_attempted=false
-  system_bus_socket_invocation_id=''; system_bus_socket_device_inode=''
-  system_bus_pid=''; system_bus_start_time=''; system_bus_cmdline_sha256=''; system_bus_invocation_id=''
-  [[ "$command_failed" == false && "$observed_drift" == false ]]
+  transient_unit_is_absent "$MANAGER_ISOLATION_CANARY" \
+    || die 'DynamicUser isolation canary left a transient unit'
 }
 assert_zero_processes() {
   local unit="$1" property value cgroup
@@ -337,8 +100,8 @@ cleanup() {
   trap - EXIT
   set +e
   bounded_systemctl disable --now "$TIMER"
-  bounded_systemctl stop "$SERVICE"
-  systemctl reset-failed "$SERVICE" "$TIMER"
+  bounded_systemctl stop "$SERVICE" "$MANAGER_ISOLATION_CANARY" "$WRONG_UNIT_CANARY"
+  systemctl reset-failed "$SERVICE" "$TIMER" "$MANAGER_ISOLATION_CANARY" "$WRONG_UNIT_CANARY"
   rm -f -- "$WRAPPER" "$RUNNER" "$SERVICE_PATH" "$TIMER_PATH" /etc/systemd/system/leetplus-langame-discrepancy-audit-preflight.service
   rm -rf -- "/etc/systemd/system/${SERVICE}.d" "/etc/systemd/system/${TIMER}.d" "$AUTH_ROOT" "$RELEASE"
   rm -f -- "$FENCE" "$ENV_FILE" /etc/leetplus/slots/blue.env /etc/nginx/leetplus/active-upstreams.conf /etc/nginx/leetplus/upstreams/blue.conf "$MARKER" "$TIMER_STAMP" /srv/leetplus/slots/blue
@@ -387,103 +150,34 @@ cleanup() {
   systemctl daemon-reload
   [[ "$created_api" == true ]] && groupdel leetplus-api-runtime
   [[ "$created_runtime" == true ]] && groupdel leetplus-runtime
-  if [[ "$system_bus_socket_start_attempted" == true ]]; then
-    if ! restore_attempted_system_bus; then
-      printf 'Langame worker live-systemd fixture: attempted system-bus transaction was not restored exactly\n' >&2
-      cleanup_status=1
-    fi
-  elif [[ "$reused_system_bus" == true ]] && ! preexisting_system_bus_is_exact; then
-    printf 'Langame worker live-systemd fixture: pre-existing system bus changed during fixture\n' >&2
-    cleanup_status=1
-  fi
   ((original_status != 0)) && exit "$original_status"
   exit "$cleanup_status"
 }
-trap cleanup EXIT
-
-[[ "$fixture_ci" == true && "$fixture_github_actions" == true && "$fixture_confirm" == "$ACK" ]] || die 'explicit GitHub Actions fixture confirmation is required'
+[[ "$fixture_ci" == true && "$fixture_github_actions" == true && "$fixture_confirm" == "$ACK" ]] \
+  || die 'explicit disposable GitHub Actions fixture confirmation is required'
 ((EUID == 0)) || die 'root is required'
 [[ "$(ps -p 1 -o comm= | tr -d ' ')" == systemd ]] || die 'a real systemd PID 1 is required'
-for binary in install mkdir mktemp rm rmdir systemctl journalctl dbus-daemon timeout stat find awk grep groupadd groupdel getent ps tr readlink realpath sha256sum sed date chown chmod ln touch cat mv sleep dirname; do command -v "$binary" >/dev/null || die "missing ${binary}"; done
-[[ "$(realpath -e -- "$(command -v dbus-daemon)")" == /usr/bin/dbus-daemon \
-  && -f /usr/bin/dbus-daemon && ! -L /usr/bin/dbus-daemon \
-  && "$(stat -c '%U:%G:%h' -- /usr/bin/dbus-daemon)" == 'root:root:1' \
-  && -z "$(find -P /usr/bin/dbus-daemon -maxdepth 0 -perm /022 -print -quit)" ]] \
-  || die 'fixture system-bus executable is not exact immutable root authority'
-[[ -d "$SYSTEM_BUS_ROOT" && ! -L "$SYSTEM_BUS_ROOT" \
-  && "$(realpath -e -- "$SYSTEM_BUS_ROOT")" == "$SYSTEM_BUS_ROOT" \
-  && "$(stat -c '%U:%G' -- "$SYSTEM_BUS_ROOT")" == 'root:root' \
-  && -z "$(find -P "$SYSTEM_BUS_ROOT" -maxdepth 0 -perm /022 -print -quit)" ]] \
-  || die 'pre-existing system-bus root is not immutable root authority'
-system_bus_root_device_inode="$(stat -c '%d:%i' -- "$SYSTEM_BUS_ROOT")"
-if [[ -e "$SYSTEM_BUS_SOCKET" || -L "$SYSTEM_BUS_SOCKET" ]]; then
-  [[ -S "$SYSTEM_BUS_SOCKET" && ! -L "$SYSTEM_BUS_SOCKET" \
-    && "$(stat -c '%U:%G' -- "$SYSTEM_BUS_SOCKET")" == 'root:root' ]] \
-    || die 'pre-existing system-bus endpoint is not an exact root-owned socket'
-  reused_system_bus=true
-  system_bus_socket_device_inode="$(stat -c '%d:%i' -- "$SYSTEM_BUS_SOCKET")"
-  preexisting_system_bus_is_exact \
-    || die 'pre-existing system-bus authority drifted during attestation'
-else
-  record_vendor_unit_fragment "$SYSTEM_BUS_SOCKET_UNIT" system_bus_socket_fragment system_bus_socket_fragment_identity system_bus_socket_fragment_sha256
-  record_vendor_unit_fragment "$SYSTEM_BUS_SERVICE_UNIT" system_bus_service_fragment system_bus_service_fragment_identity system_bus_service_fragment_sha256
-  assert_vendor_dbus_unit_semantics
-  system_bus_socket_unit_state="$(bounded_systemctl show -p UnitFileState --value "$SYSTEM_BUS_SOCKET_UNIT")"
-  system_bus_service_unit_state="$(bounded_systemctl show -p UnitFileState --value "$SYSTEM_BUS_SERVICE_UNIT")"
-  case "$system_bus_socket_unit_state" in ''|masked*|bad|not-found|generated|transient) die 'dbus.socket is not an installed unmasked vendor unit' ;; esac
-  case "$system_bus_service_unit_state" in ''|masked*|bad|not-found|generated|transient) die 'dbus.service is not an installed unmasked vendor unit' ;; esac
-  [[ "$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SOCKET_UNIT")" == inactive \
-    && "$(bounded_systemctl show -p SubState --value "$SYSTEM_BUS_SOCKET_UNIT")" == dead \
-    && "$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SERVICE_UNIT")" == inactive \
-    && "$(bounded_systemctl show -p SubState --value "$SYSTEM_BUS_SERVICE_UNIT")" == dead ]] \
-    || die 'vendor system-bus units were not initially inactive'
-  assert_dbus_service_quiescent
-  unit_has_no_job "$SYSTEM_BUS_SOCKET_UNIT" && unit_has_no_job "$SYSTEM_BUS_SERVICE_UNIT" \
-    || die 'vendor system-bus units already have a pending job'
-  system_bus_socket_previous_invocation_id="$(bounded_systemctl show -p InvocationID --value "$SYSTEM_BUS_SOCKET_UNIT")"
-  system_bus_previous_invocation_id="$(bounded_systemctl show -p InvocationID --value "$SYSTEM_BUS_SERVICE_UNIT")"
-  system_bus_fragments_are_exact || die 'vendor system-bus fragments drifted before activation'
+for binary in install mkdir mktemp rm rmdir systemctl systemd-run journalctl timeout stat find awk grep groupadd groupdel getent id ps tr readlink realpath sha256sum sed date chown chmod ln touch cat mv sleep dirname; do command -v "$binary" >/dev/null || die "missing ${binary}"; done
 
-  # Regression for the start-intent race: recover once immediately after PID 1
-  # accepts a socket job, before normal identity capture can arm cleanup.
-  system_bus_socket_start_attempted=true
-  bounded_systemctl start --no-block "$SYSTEM_BUS_SOCKET_UNIT"
-  restore_attempted_system_bus \
-    || die 'pre-identity dbus.socket start-intent recovery left residue'
+# Refuse foreign state before cleanup is armed. A failed cleanliness check must
+# never stop or remove a pre-existing unit/path that belongs to another task.
+for path in \
+  "$SERVICE_PATH" "$TIMER_PATH" \
+  "/etc/systemd/system/${SERVICE}.d" "/etc/systemd/system/${TIMER}.d" \
+  /etc/systemd/system/leetplus-langame-discrepancy-audit-preflight.service \
+  "$AUTH_ROOT" "$ENV_FILE" /etc/leetplus /etc/nginx/leetplus /srv/leetplus \
+  /var/lib/leetplus "$WRAPPER" "$RUNNER" "$TIMER_STAMP"; do
+  [[ ! -e "$path" && ! -L "$path" ]] || die "fixture root is not clean at ${path}"
+done
+for unit in \
+  "$SERVICE" "$TIMER" leetplus-langame-discrepancy-audit-preflight.service \
+  "$MANAGER_ISOLATION_CANARY" "$WRONG_UNIT_CANARY"; do
+  [[ "$(bounded_systemctl show -p LoadState --value "$unit")" == not-found ]] \
+    || die "fixture unit already exists: ${unit}"
+done
+trap cleanup EXIT
 
-  # Repeat with both jobs accepted and no normal-path identity stored. This is
-  # the bounded equivalent of a timeout/SIGTERM immediately after service start.
-  system_bus_socket_start_attempted=true
-  bounded_systemctl start --no-block "$SYSTEM_BUS_SOCKET_UNIT"
-  system_bus_service_start_attempted=true
-  bounded_systemctl start --no-block "$SYSTEM_BUS_SERVICE_UNIT"
-  restore_attempted_system_bus \
-    || die 'pre-identity dbus.service start-intent recovery left residue'
-
-  system_bus_socket_start_attempted=true
-  bounded_systemctl start --no-block "$SYSTEM_BUS_SOCKET_UNIT"
-  for _ in {1..50}; do
-    capture_system_bus_socket_identity && break
-    sleep 0.1
-  done
-  capture_system_bus_socket_identity \
-    || die 'PID-1 did not publish the canonical system-bus socket'
-  system_bus_service_start_attempted=true
-  bounded_systemctl start --no-block "$SYSTEM_BUS_SERVICE_UNIT"
-  for _ in {1..50}; do
-    capture_system_bus_service_identity \
-      && [[ "$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SERVICE_UNIT")" == active \
-        && "$(bounded_systemctl show -p SubState --value "$SYSTEM_BUS_SERVICE_UNIT")" == running ]] \
-      && break
-    sleep 0.1
-  done
-  capture_system_bus_service_identity \
-    && [[ "$(bounded_systemctl show -p ActiveState --value "$SYSTEM_BUS_SERVICE_UNIT")" == active \
-      && "$(bounded_systemctl show -p SubState --value "$SYSTEM_BUS_SERVICE_UNIT")" == running ]] \
-    || die 'fixture-started dbus.service process identity is invalid'
-  system_bus_units_are_exact \
-    || die 'fixture-started PID-1 system-bus authority drifted after activation'
-fi
+run_dynamic_manager_isolation_canary
 if [[ ! -e /usr/bin/node && ! -L /usr/bin/node ]]; then
   [[ -n "$fixture_node_input" ]] || die 'an exact fixture Node source is required'
   fixture_node="$(realpath -e -- "$fixture_node_input")"
@@ -527,7 +221,6 @@ else
 fi
 [[ "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" == 22 ]] \
   || die 'fixture requires exact /usr/bin/node major 22'
-for path in "$SERVICE_PATH" "$TIMER_PATH" "/etc/systemd/system/${SERVICE}.d" "/etc/systemd/system/${TIMER}.d" "$AUTH_ROOT" "$ENV_FILE" /etc/leetplus /etc/nginx/leetplus /srv/leetplus /var/lib/leetplus "$WRAPPER" "$RUNNER" "$TIMER_STAMP"; do [[ ! -e "$path" && ! -L "$path" ]] || die "fixture root is not clean at ${path}"; done
 if ! getent group leetplus-runtime >/dev/null; then groupadd --system leetplus-runtime; created_runtime=true; fi
 if ! getent group leetplus-api-runtime >/dev/null; then groupadd --system leetplus-api-runtime; created_api=true; fi
 
@@ -542,6 +235,22 @@ ln -s /etc/nginx/leetplus/upstreams/blue.conf /etc/nginx/leetplus/active-upstrea
 cat >"$RELEASE/apps/api/dist/integrations/langame-daily-worker.cli.js" <<'EOF'
 'use strict';
 const fs = require('node:fs');
+const expectedCgroup = '/system.slice/leetplus-langame-daily-worker.service';
+if (fs.readFileSync('/proc/self/cgroup', 'utf8') !== `0::${expectedCgroup}\n`) {
+  throw new Error('worker cgroup identity drifted after wrapper exec');
+}
+const members = fs.readFileSync(`/sys/fs/cgroup${expectedCgroup}/cgroup.procs`, 'utf8').trim().split('\n');
+if (members.length !== 1 || members[0] !== String(process.pid)) {
+  throw new Error('worker is not the singleton cgroup process after wrapper exec');
+}
+for (const path of ['/run/dbus/system_bus_socket', '/run/systemd/private']) {
+  try {
+    fs.statSync(path);
+    throw new Error(`worker unexpectedly reached ${path}`);
+  } catch (error) {
+    if (!['EACCES', 'ENOENT'].includes(error.code)) throw error;
+  }
+}
 fs.appendFileSync('/var/lib/leetplus/langame-sync/live-systemd-wrapper-ran', `${process.env.INVOCATION_ID}\n`, { mode: 0o600 });
 EOF
 chown root:leetplus-runtime "$RELEASE/apps/api/dist/integrations/langame-daily-worker.cli.js"; chmod 0555 "$RELEASE/apps/api/dist/integrations/langame-daily-worker.cli.js"
@@ -633,8 +342,19 @@ bounded_systemctl start "$TIMER"
 mv -- "${permit}.hidden" "$permit"
 systemctl daemon-reload
 
-# Valid files cannot make a direct caller look like PID 1's fresh MainPID.
+# Valid files cannot make a direct caller enter the exact root-managed worker
+# cgroup as its singleton process.
 if INVOCATION_ID=00000000000000000000000000000000 "$WRAPPER" >/dev/null 2>&1; then die 'direct wrapper invocation was accepted'; fi
+if bounded_systemd_run --quiet --wait --collect --unit="$WRONG_UNIT_CANARY" \
+  --property=Type=exec \
+  --property=DynamicUser=yes \
+  --property=User=leetplus-langame-worker-wrong-unit-canary \
+  --property=NoNewPrivileges=yes \
+  "$WRAPPER" >/dev/null 2>&1; then
+  die 'a different systemd unit reused the Langame worker authorization'
+fi
+transient_unit_is_absent "$WRONG_UNIT_CANARY" \
+  || die 'wrong-unit denial canary left a transient unit'
 before="$(systemctl show -p InvocationID --value "$SERVICE")"
 start_worker_or_report
 after="$(systemctl show -p InvocationID --value "$SERVICE")"

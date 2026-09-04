@@ -44,5 +44,6 @@ SystemCallArchitectures=native
 RestrictNetworkInterfaces=
 IPAddressDeny=
 IPAddressAllow=
+InaccessiblePaths=/run/dbus /run/systemd/private
 ReadOnlyPaths=/etc/leetplus/slots /etc/nginx/leetplus /srv/leetplus/releases /srv/leetplus/slots
 ReadWritePaths=/var/lib/leetplus/langame-sync

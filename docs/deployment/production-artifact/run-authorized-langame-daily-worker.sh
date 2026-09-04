@@ -4,13 +4,39 @@
 # root-only authority writes the immutable receipt; this wrapper only consumes
 # it and cannot create, alter or discover arbitrary permits.
 [[ $- == *p* ]] || { printf 'Langame authorized worker: privileged Bash mode is required\n' >&2; exit 1; }
+readonly EXPECTED_SERVICE_CGROUP='/system.slice/leetplus-langame-daily-worker.service'
+readonly SERVICE_CGROUP_PROCS="/sys/fs/cgroup${EXPECTED_SERVICE_CGROUP}/cgroup.procs"
 readonly SYSTEMD_INVOCATION_ID_SNAPSHOT="${INVOCATION_ID-}"
-while IFS= read -r inherited_name; do unset "$inherited_name" 2>/dev/null || true; done < <(compgen -e)
-unset inherited_name
-PATH='/usr/sbin:/usr/bin:/sbin:/bin'; LANG='C.UTF-8'; LC_ALL='C.UTF-8'; TZ='UTC'; export PATH LANG LC_ALL TZ
 set -Eeuo pipefail; IFS=$'\n\t'; umask 0077; cd /
 
 die() { printf 'Langame authorized worker: %s\n' "$*" >&2; exit 1; }
+assert_exact_service_main_process() {
+  local -a cgroup_records=()
+  local -a member_pids=()
+
+  [[ "$SYSTEMD_INVOCATION_ID_SNAPSHOT" =~ ^[0-9a-f]{32}$ ]] \
+    || die 'systemd InvocationID is absent or invalid'
+  mapfile -t cgroup_records < /proc/self/cgroup \
+    || die 'cannot read the current cgroup identity'
+  [[ "${#cgroup_records[@]}" == 1 \
+    && "${cgroup_records[0]}" == "0::${EXPECTED_SERVICE_CGROUP}" ]] \
+    || die 'caller is outside the exact Langame worker systemd unit'
+  [[ -f "$SERVICE_CGROUP_PROCS" && ! -L "$SERVICE_CGROUP_PROCS" ]] \
+    || die 'exact worker cgroup membership is unavailable'
+  mapfile -t member_pids < "$SERVICE_CGROUP_PROCS" \
+    || die 'cannot read exact worker cgroup membership'
+  [[ "${#member_pids[@]}" == 1 && "${member_pids[0]}" =~ ^[1-9][0-9]*$ \
+    && "${member_pids[0]}" == "$$" ]] \
+    || die 'authorized worker is not the sole process of its exact systemd unit'
+}
+
+# Do this before launching even a helper process. The kernel-owned cgroup path
+# and singleton membership replace the D-Bus MainPID query, which is not
+# available to DynamicUser on Ubuntu's dbus-daemon backend.
+assert_exact_service_main_process
+while IFS= read -r inherited_name; do unset "$inherited_name" 2>/dev/null || true; done < <(compgen -e)
+unset inherited_name
+PATH='/usr/sbin:/usr/bin:/sbin:/bin'; LANG='C.UTF-8'; LC_ALL='C.UTF-8'; TZ='UTC'; export PATH LANG LC_ALL TZ
 readonly ROOT='/var/lib/leetplus/langame-worker-authorizations'
 readonly ENV_FILE='/etc/leetplus/langame-daily-worker.env'
 readonly UPSTREAM='/etc/nginx/leetplus/active-upstreams.conf'
@@ -19,14 +45,8 @@ sha() { sha256sum -- "$1" | awk '{print $1}'; }
 value() { local key="$1" count; count="$(grep -Ec "^${key}=" "$ENV_FILE" || true)"; [[ "$count" == 1 ]] || die "worker env key absent or duplicate: ${key}"; sed -n "s/^${key}=//p" "$ENV_FILE"; }
 assert_regular() { [[ -f "$1" && ! -L "$1" && "$(readlink -e -- "$1")" == "$1" ]] || die "unsafe file: $1"; }
 assert_regular "$ENV_FILE"; [[ "$(stat -c '%U:%G:%a:%h' -- "$ENV_FILE")" == 'root:leetplus-api-runtime:640:1' ]] || die 'worker env authority drifted'
-[[ "$SYSTEMD_INVOCATION_ID_SNAPSHOT" =~ ^[0-9a-f]{32}$ ]] || die 'systemd InvocationID is absent or invalid'
 INVOCATION_ID="$SYSTEMD_INVOCATION_ID_SNAPSHOT"
 export INVOCATION_ID
-systemctl_bounded() { timeout --kill-after=2s 10s systemctl "$@"; }
-[[ "$(systemctl_bounded show --property=MainPID --value leetplus-langame-daily-worker.service)" == "$$" \
-  && "$(systemctl_bounded show --property=InvocationID --value leetplus-langame-daily-worker.service)" == "$SYSTEMD_INVOCATION_ID_SNAPSHOT" \
-  && "$(systemctl_bounded show --property=ActiveState --value leetplus-langame-daily-worker.service)" == activating ]] \
-  || die 'authorized worker wrapper is not the main process of a fresh activating systemd invocation'
 declare -A seen=()
 while IFS= read -r env_line; do
   [[ -z "$env_line" || "$env_line" == \#* ]] && continue
@@ -45,8 +65,8 @@ for required_key in DATABASE_URL APP_ENCRYPTION_KEY INTEGRATION_ENCRYPTION_KEY L
 done
 [[ -d "$ROOT" && ! -L "$ROOT" && "$(stat -c '%U:%G:%a' -- "$ROOT")" == 'root:leetplus-api-runtime:710' ]] || die 'authorization root authority drifted'
 # This executable is deliberately group-readable for systemd DynamicUser, but
-# it is not a general API-runtime command: the PID-1 InvocationID/MainPID
-# attestation above survives ProtectControlGroups' private cgroup namespace.
+# it is not a general API-runtime command: the kernel cgroup singleton proof
+# above survives ProtectControlGroups' read-only cgroup mount.
 [[ -L "$UPSTREAM" ]] || die 'active upstream is absent'
 target="$(readlink -e -- "$UPSTREAM")"; case "$target" in /etc/nginx/leetplus/upstreams/blue.conf) slot=blue ;; /etc/nginx/leetplus/upstreams/green.conf) slot=green ;; *) die 'active upstream is not a slot' ;; esac
 release="$(readlink -e -- "/srv/leetplus/slots/${slot}")"; [[ "$release" =~ ^/srv/leetplus/releases/([0-9a-f]{40})$ ]] || die 'active slot release is unsafe'; release_sha="${BASH_REMATCH[1]}"

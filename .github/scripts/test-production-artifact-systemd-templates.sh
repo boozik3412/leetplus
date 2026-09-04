@@ -500,6 +500,10 @@ grep -F 'production pnpm store already exists' "$store_stager" > /dev/null
 grep -F 'PNPM_STORE_PACKAGE_CODE_EXECUTED=false' "$store_stager" > /dev/null
 grep -F -x 'DynamicUser=yes' "$bonus_ledger_worker_service" > /dev/null
 grep -F -x 'DynamicUser=yes' "$langame_daily_worker_service" > /dev/null
+grep -F -x 'Type=oneshot' "$langame_daily_worker_service" > /dev/null
+[[ "$(grep -Ec '^ExecStart=' "$langame_daily_worker_service" || true)" == 1 \
+  && "$(grep -Ec '^Exec(StartPre|StartPost|Stop|StopPost|Reload)=' "$langame_daily_worker_service" || true)" == 0 ]]
+grep -F -x 'InaccessiblePaths=/run/dbus /run/systemd/private' "$langame_daily_worker_service" > /dev/null
 grep -F -x 'Requires=leetplus-langame-discrepancy-audit-preflight.service' "$langame_daily_worker_service" > /dev/null
 grep -F -x 'After=leetplus-langame-discrepancy-audit-preflight.service' "$langame_daily_worker_service" > /dev/null
 grep -F -x 'EnvironmentFile=/etc/leetplus/langame-daily-worker.env' "$langame_daily_worker_service" > /dev/null
@@ -517,6 +521,12 @@ grep -F 'leetplus-langame-discrepancy-audit-preflight.service)' "$legacy_activat
 grep -F 'active-upstreams.conf' "$langame_daily_worker_runner" > /dev/null
 grep -F 'langame-daily-worker.cli.js' "$langame_daily_worker_runner" > /dev/null
 grep -F 'AUTHORIZATION_PERMITTED=true' "$langame_daily_worker_authorized_runner" > /dev/null
+if grep -Eq '(^|[^[:alnum:]_])(systemctl|busctl)([^[:alnum:]_]|$)' "$langame_daily_worker_authorized_runner" "$langame_daily_worker_runner"; then
+  printf 'unprivileged Langame worker wrapper retained a system-manager client\n' >&2
+  exit 1
+fi
+grep -F '0::${EXPECTED_SERVICE_CGROUP}' "$langame_daily_worker_authorized_runner" > /dev/null
+grep -F '"${#member_pids[@]}" == 1' "$langame_daily_worker_authorized_runner" > /dev/null
 grep -F 'LANGAME_DAILY_WORKER_AUTHORIZATION=PASS' "$langame_worker_authorization_verifier" > /dev/null
 grep -F 'I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_AUTHORIZATION' "$langame_worker_authority" > /dev/null
 grep -F 'LEETPLUS_LANGAME_DAILY_WORKER_TIMER_PROFILE_VALIDATION_V1' "$langame_worker_authority" > /dev/null

@@ -219,6 +219,7 @@ function createPrismaMock() {
     },
     guestActivityFact: {
       findMany: jest.fn().mockResolvedValue([]),
+      upsert: jest.fn().mockResolvedValue({ id: 'check-in-fact-1' }),
     },
     guestGameSupplementalFactReceipt: {
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -11809,6 +11810,12 @@ describe('GuestGamificationService', () => {
         store,
         raw: {},
       });
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile: profileFixture({
+          gameActivatedAt: '2026-06-10T09:59:00.000Z',
+        }),
+        profileCreated: false,
+      });
     }
 
     it('blocks a second check-in in the same club during the local calendar day', async () => {
@@ -11874,7 +11881,7 @@ describe('GuestGamificationService', () => {
             appliedXpDelta: 0,
             createdRewards: 0,
             queuedRewardAmount: 0,
-            idempotencyKey: 'check-in:club-1:session-1:lg-guest-1',
+            idempotencyKey: 'check-in:club-1:session-1:lg-guest-1:2026-06-10',
             idempotent: false,
             langameWrite: false,
           },
@@ -11893,13 +11900,109 @@ describe('GuestGamificationService', () => {
         });
 
         expect(result.checkedIn).toBe(true);
+        expect(prisma.guestActivityFact.upsert).toHaveBeenCalledWith({
+          where: {
+            tenantId_factType_sourceHash_parserVersion: {
+              tenantId: user.tenantId,
+              factType: 'CHECK_IN_PERFORMED',
+              sourceHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+              parserVersion: 'live-check-in-v1',
+            },
+          },
+          create: expect.objectContaining({
+            tenantId: user.tenantId,
+            guestId: 'guest-1',
+            profileId: 'profile-1',
+            storeId: 'store-1',
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: 'club-1',
+            externalGuestId: 'lg-guest-1',
+            externalClubId: 'club-external-1',
+            sourceKind: 'LEETPLUS_LIVE_CHECK_IN',
+            sourceExternalId: 'check-in:club-1:session-1:lg-guest-1:2026-06-10',
+            factType: 'CHECK_IN_PERFORMED',
+            happenedAt: new Date('2026-06-10T10:00:00.000Z'),
+            sourceLocalDate: '2026-06-10',
+            sessionExternalId: 'session-1',
+            confidence: 'EXACT',
+            parserVersion: 'live-check-in-v1',
+            lifecycleStatus: 'ACTIVE',
+          }),
+          update: expect.objectContaining({
+            guestId: 'guest-1',
+            profileId: 'profile-1',
+            lifecycleStatus: 'ACTIVE',
+            supersededAt: null,
+          }),
+          select: { id: true },
+        });
+        const factUpsert = prisma.guestActivityFact.upsert.mock.calls[0][0];
+        expect(factUpsert.update).not.toHaveProperty('happenedAt');
+        expect(factUpsert.update).not.toHaveProperty('evidence');
         expect(processEventSpy).toHaveBeenCalledWith(
           user,
           expect.objectContaining({
+            profileId: 'profile-1',
             guestId: 'guest-1',
             storeId: 'store-1',
             eventType: 'CHECK_IN',
+            sourceFactId: 'check-in-fact-1',
+            sourceFactKind: 'LIVE_CHECK_IN',
+            sessionExternalId: 'session-1',
+            externalId: 'check-in:club-1:session-1:lg-guest-1:2026-06-10',
             suppressLootBoxRewards: true,
+          }),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('uses the club-local date so one long-running session can check in on the next day', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-10T20:00:00.000Z'));
+
+      try {
+        const { service, prisma } = createService();
+        const processEventSpy = jest
+          .spyOn(service, 'processEvent')
+          .mockResolvedValue({
+            processed: true,
+            dryRun: noRewardDryRunResult(),
+            event: eventResult({ eventType: 'CHECK_IN' }),
+            rewards: [],
+            summary: {
+              profileCreated: false,
+              appliedXpDelta: 0,
+              createdRewards: 0,
+              queuedRewardAmount: 0,
+              idempotencyKey: 'check-in:club-1:session-1:lg-guest-1:2026-06-11',
+              idempotent: false,
+              langameWrite: false,
+            },
+            note: 'created',
+          });
+
+        mockCheckInGuestAndSession(service);
+        prisma.guestGameEvent.findMany.mockResolvedValue([]);
+
+        await service.checkIn(user, {
+          guestId: 'guest-1',
+          storeId: 'store-1',
+        });
+
+        expect(processEventSpy).toHaveBeenCalledWith(
+          user,
+          expect.objectContaining({
+            externalId: 'check-in:club-1:session-1:lg-guest-1:2026-06-11',
+          }),
+        );
+        expect(prisma.guestActivityFact.upsert).toHaveBeenCalledWith(
+          expect.objectContaining({
+            create: expect.objectContaining({
+              sourceLocalDate: '2026-06-11',
+              sourceExternalId:
+                'check-in:club-1:session-1:lg-guest-1:2026-06-11',
+            }),
           }),
         );
       } finally {
@@ -11942,6 +12045,12 @@ describe('GuestGamificationService', () => {
       try {
         const { service, prisma, langameSettingsService, langameClient } =
           createService();
+        jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+          profile: profileFixture({
+            gameActivatedAt: '2026-06-10T09:59:00.000Z',
+          }),
+          profileCreated: false,
+        });
         const processResult = {
           processed: true,
           dryRun: noRewardDryRunResult(),
@@ -11953,7 +12062,7 @@ describe('GuestGamificationService', () => {
             createdRewards: 0,
             queuedRewardAmount: 0,
             idempotencyKey:
-              'check-in:shared-domain:session-holmogorova:lg-guest-1',
+              'check-in:shared-domain:session-holmogorova:lg-guest-1:2026-06-10',
             idempotent: false,
             langameWrite: false,
           },
@@ -12019,7 +12128,8 @@ describe('GuestGamificationService', () => {
             guestId: 'guest-1',
             storeId: 'store-push',
             eventType: 'CHECK_IN',
-            sourceFactId: 'session-holmogorova',
+            sourceFactId: 'check-in-fact-1',
+            sessionExternalId: 'session-holmogorova',
             externalDomain: 'shared-domain',
             payload: expect.objectContaining({
               langameSessionResolution: expect.objectContaining({
@@ -12042,6 +12152,12 @@ describe('GuestGamificationService', () => {
       try {
         const { service, prisma, langameSettingsService, langameClient } =
           createService();
+        jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+          profile: profileFixture({
+            gameActivatedAt: '2026-06-10T09:59:00.000Z',
+          }),
+          profileCreated: false,
+        });
         const processResult = {
           processed: true,
           dryRun: noRewardDryRunResult(),
@@ -12053,7 +12169,7 @@ describe('GuestGamificationService', () => {
             createdRewards: 0,
             queuedRewardAmount: 0,
             idempotencyKey:
-              'check-in:shared-domain:session-without-club:lg-guest-1',
+              'check-in:shared-domain:session-without-club:lg-guest-1:2026-06-10',
             idempotent: false,
             langameWrite: false,
           },
@@ -12119,7 +12235,8 @@ describe('GuestGamificationService', () => {
             guestId: 'guest-1',
             storeId: 'store-push',
             eventType: 'CHECK_IN',
-            sourceFactId: 'session-without-club',
+            sourceFactId: 'check-in-fact-1',
+            sessionExternalId: 'session-without-club',
             payload: {
               langameSessionResolution: {
                 externalClubId: 'push-club',

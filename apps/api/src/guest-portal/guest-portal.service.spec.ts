@@ -7547,6 +7547,124 @@ describe('GuestPortalService', () => {
     });
   });
 
+  describe('checkIn', () => {
+    it('persists the game activation boundary before evaluating a first check-in', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-02T16:34:41.000Z'));
+
+      try {
+        const { guestGamificationService, service } = createService({
+          GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+          WEB_URL: 'https://leetplus.ru',
+        });
+        const portal = portalPayloadFixture();
+        const tokenPayload = {
+          sub: 'profile-1',
+          purpose: 'guest_portal',
+          tenantId: 'tenant-1',
+          storeId: portal.store.id,
+          guestId: 'guest-1',
+          profileId: portal.profile.id,
+          phoneHash: 'phone-hash',
+        };
+        const context = {
+          tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+          store: {
+            id: portal.store.id,
+            publicSlug: portal.store.publicSlug,
+            name: portal.store.name,
+            address: portal.store.address,
+            externalDomain: '1337.langame.ru',
+            externalClubId: 'club-1',
+            integrationSourceId: 'source-1',
+          },
+        };
+        const guest = {
+          id: 'guest-1',
+          tenantId: 'tenant-1',
+          externalDomain: '1337.langame.ru',
+          externalGuestId: 'lg-guest-1',
+          isDisabled: false,
+        };
+
+        jest
+          .spyOn(service as any, 'verifyGuestToken')
+          .mockResolvedValue(tokenPayload);
+        jest
+          .spyOn(service as any, 'getTenantStoreByIds')
+          .mockResolvedValue(context);
+        jest
+          .spyOn(service as any, 'resolveContextLangameCheckInReadiness')
+          .mockResolvedValue({ ready: true, message: null });
+        jest.spyOn(service as any, 'findGuest').mockResolvedValue(guest);
+        jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+          id: portal.profile.id,
+          guestId: guest.id,
+          gameActivatedAt: null,
+        });
+        const reconcile = jest
+          .spyOn(service as any, 'reconcileGameActivationBoundary')
+          .mockResolvedValue({
+            gameActivatedAt: new Date('2026-09-02T16:34:41.000Z'),
+            excludedDelta: 0,
+          });
+        jest
+          .spyOn(service as any, 'buildPortalPayload')
+          .mockResolvedValue(portal);
+        guestGamificationService.checkIn.mockResolvedValue({
+          checkedIn: true,
+          checkedAt: '2026-09-02T16:34:41.000Z',
+          liveSession: {
+            externalDomain: '1337.langame.ru',
+            externalSessionId: 'session-1',
+            externalUuid: null,
+            startedAt: '2026-09-02T16:00:00.000Z',
+            durationMinutes: 34,
+            sessionType: 'regular_session',
+            sessionPacket: false,
+            store: { id: portal.store.id, name: portal.store.name },
+          },
+          processResult: {
+            event: {
+              id: 'check-in-event-1',
+              occurredAt: '2026-09-02T16:34:41.000Z',
+              profile: { id: portal.profile.id },
+            },
+            rewards: [{ id: 'reward-1' }],
+            summary: {
+              appliedXpDelta: 0,
+              createdRewards: 1,
+              idempotent: false,
+            },
+          },
+        });
+
+        await service.checkIn('Bearer guest-token', {});
+
+        expect(reconcile).toHaveBeenCalledWith(
+          tokenPayload.tenantId,
+          portal.profile.id,
+          new Date('2026-09-02T16:34:41.000Z'),
+        );
+        expect(reconcile.mock.invocationCallOrder[0]).toBeLessThan(
+          guestGamificationService.checkIn.mock.invocationCallOrder[0],
+        );
+        expect(guestGamificationService.checkIn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: 'guest-portal:profile-1',
+            tenantId: tokenPayload.tenantId,
+            allowedStoreIds: [portal.store.id],
+          }),
+          expect.objectContaining({
+            guestId: guest.id,
+            storeId: portal.store.id,
+          }),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+  });
+
   describe('selectGameClub', () => {
     it('rejects conflicting club selectors before store lookup or profile mutation', async () => {
       const { jwtService, prisma, service } = createService();

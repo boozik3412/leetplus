@@ -206,6 +206,8 @@ const LANGAME_TARIFF_TYPE_GROUP_CACHE_MS = 10 * 60 * 1000;
 const liveSessionStartCacheDefaultTtlMs = 30_000;
 const liveSessionStartLookupDefaultTimeoutMs = 4_000;
 const liveSessionStartCacheMaxEntries = 1_000;
+const liveCheckInFactSourceKind = 'LEETPLUS_LIVE_CHECK_IN';
+const liveCheckInFactParserVersion = 'live-check-in-v1';
 const promoBannerDisplayLimit = 4;
 const otpSmsRateLimitDefaults = {
   phoneWindowMinutes: 60,
@@ -16841,12 +16843,37 @@ export class GuestGamificationService {
       });
     }
 
+    const sourceLocalDate = checkInDateLabel(
+      this.checkInLocalDateParts(
+        checkedAt,
+        this.checkInTimeZone(checkInStore?.timeZone),
+      ),
+    );
     const eventExternalId = [
       'check-in',
       liveSession.externalDomain,
       liveSession.externalSessionId,
       guest.externalGuestId,
+      sourceLocalDate,
     ].join(':');
+    const { profile } = await this.ensureProcessProfile(user, {
+      guestId: guest.id,
+      storeId: checkInStore?.id ?? null,
+      eventType: 'CHECK_IN',
+      occurredAt: checkedAt.toISOString(),
+    });
+    const sourceFact = await this.persistLiveCheckInFact(user, {
+      profileId: profile.id,
+      guestId: guest.id,
+      storeId: checkInStore?.id ?? null,
+      externalDomain: liveSession.externalDomain,
+      externalGuestId: guest.externalGuestId,
+      externalClubId: liveSession.externalClubId,
+      externalSessionId: liveSession.externalSessionId,
+      checkedAt,
+      sourceLocalDate,
+      eventExternalId,
+    });
     const storeResolvedBy =
       checkInStore &&
       expectedStore &&
@@ -16861,6 +16888,7 @@ export class GuestGamificationService {
             ? 'langame_session'
             : 'none';
     const processResult = await this.processEvent(user, {
+      profileId: profile.id,
       guestId: guest.id,
       storeId: checkInStore?.id ?? null,
       eventType: 'CHECK_IN',
@@ -16868,8 +16896,9 @@ export class GuestGamificationService {
       sessionType: liveSession.sessionType,
       sessionPacket: liveSession.sessionPacket,
       sessionMinutes: liveSession.durationMinutes ?? 0,
-      sourceFactId: liveSession.externalSessionId,
+      sourceFactId: sourceFact.id,
       sourceFactKind: 'LIVE_CHECK_IN',
+      sessionExternalId: liveSession.externalSessionId,
       externalProvider: IntegrationProvider.LANGAME,
       externalDomain: liveSession.externalDomain,
       externalId: eventExternalId,
@@ -16905,6 +16934,92 @@ export class GuestGamificationService {
       processResult,
       note: 'Чекин подтвержден активной сессией Langame и обработан правилами геймификации.',
     };
+  }
+
+  private persistLiveCheckInFact(
+    user: AuthenticatedUser,
+    input: {
+      profileId: string;
+      guestId: string;
+      storeId: string | null;
+      externalDomain: string;
+      externalGuestId: string;
+      externalClubId: string | null;
+      externalSessionId: string;
+      checkedAt: Date;
+      sourceLocalDate: string;
+      eventExternalId: string;
+    },
+  ) {
+    const sourceHash = createHash('sha256')
+      .update(
+        [
+          liveCheckInFactParserVersion,
+          user.tenantId,
+          input.externalDomain,
+          input.externalSessionId,
+          input.externalGuestId,
+          input.sourceLocalDate,
+        ].join('\u0000'),
+      )
+      .digest('hex');
+    const identity = {
+      tenantId: user.tenantId,
+      factType: 'CHECK_IN_PERFORMED',
+      sourceHash,
+      parserVersion: liveCheckInFactParserVersion,
+    };
+    const evidence: Prisma.InputJsonObject = {
+      sourceFactKind: 'LIVE_CHECK_IN',
+      sourceExternalId: input.eventExternalId,
+      sessionExternalId: input.externalSessionId,
+      checkedAt: input.checkedAt.toISOString(),
+      sourceLocalDate: input.sourceLocalDate,
+    };
+
+    return this.prisma.guestActivityFact.upsert({
+      where: {
+        tenantId_factType_sourceHash_parserVersion: identity,
+      },
+      create: {
+        tenantId: user.tenantId,
+        guestId: input.guestId,
+        profileId: input.profileId,
+        storeId: input.storeId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: input.externalDomain,
+        externalGuestId: input.externalGuestId,
+        externalClubId: input.externalClubId,
+        sourceKind: liveCheckInFactSourceKind,
+        sourceHash,
+        sourceExternalId: input.eventExternalId,
+        factType: 'CHECK_IN_PERFORMED',
+        happenedAt: input.checkedAt,
+        sourceLocalDate: input.sourceLocalDate,
+        sessionExternalId: input.externalSessionId,
+        confidence: 'EXACT',
+        parserVersion: liveCheckInFactParserVersion,
+        lifecycleStatus: 'ACTIVE',
+        evidence,
+      },
+      update: {
+        guestId: input.guestId,
+        profileId: input.profileId,
+        storeId: input.storeId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: input.externalDomain,
+        externalGuestId: input.externalGuestId,
+        externalClubId: input.externalClubId,
+        sourceKind: liveCheckInFactSourceKind,
+        sourceExternalId: input.eventExternalId,
+        sourceLocalDate: input.sourceLocalDate,
+        sessionExternalId: input.externalSessionId,
+        confidence: 'EXACT',
+        lifecycleStatus: 'ACTIVE',
+        supersededAt: null,
+      },
+      select: { id: true },
+    });
   }
 
   private async createProcessEvent(

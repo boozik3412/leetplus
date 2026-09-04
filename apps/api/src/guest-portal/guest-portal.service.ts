@@ -7934,6 +7934,19 @@ export class GuestPortalService {
       );
     }
 
+    const checkInProfile = await this.findProfile(payload, guest.id);
+    if (checkInProfile) {
+      // A check-in request is itself an authenticated visit to the game
+      // module. Persist the boundary before rule evaluation so the first
+      // check-in cannot race the asynchronous APP_OPEN request and be
+      // misclassified as pre-activation activity.
+      await this.reconcileGameActivationBoundary(
+        context.tenant.id,
+        checkInProfile.id,
+        new Date(),
+      );
+    }
+
     const actor: AuthenticatedUser = {
       id: `guest-portal:${payload.sub}`,
       email: 'guest-portal@leetplus.local',

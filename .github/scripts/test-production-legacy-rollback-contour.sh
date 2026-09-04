@@ -1648,6 +1648,8 @@ REQUIRED_DRAIN leetplus-deploy.timer
 OPTIONAL_DRAIN leetplus-deploy.service
 OPTIONAL_DRAIN leetplus-guest-game-bot-consumer.timer
 OPTIONAL_DRAIN leetplus-guest-game-bot-consumer.service
+SAFE leetplus-bonus-ledger-worker.service
+SAFE leetplus-bonus-ledger-worker.timer
 SAFE leetplus-api-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service
 SAFE leetplus-web-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service
 SAFE leetplus-rollback-egress.service

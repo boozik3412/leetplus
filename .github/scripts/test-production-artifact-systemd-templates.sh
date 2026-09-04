@@ -496,7 +496,10 @@ grep -F -x 'ExecStart=/usr/local/libexec/leetplus/run-active-langame-daily-worke
 grep -F -x 'Unit=leetplus-langame-daily-worker.service' "$langame_daily_worker_timer" > /dev/null
 grep -F -x 'OPTIONAL_DRAIN leetplus-langame-daily-worker.timer' "$legacy_drain_units" > /dev/null
 grep -F -x 'OPTIONAL_DRAIN leetplus-langame-daily-worker.service' "$legacy_drain_units" > /dev/null
+grep -F -x 'SAFE leetplus-bonus-ledger-worker.service' "$legacy_drain_units" > /dev/null
+grep -F -x 'SAFE leetplus-bonus-ledger-worker.timer' "$legacy_drain_units" > /dev/null
 grep -F -x 'SAFE leetplus-langame-discrepancy-audit-preflight.service' "$legacy_drain_units" > /dev/null
+grep -F 'leetplus-bonus-ledger-worker.service|leetplus-bonus-ledger-worker.timer' "$legacy_drain_verifier" > /dev/null
 grep -F 'leetplus-langame-discrepancy-audit-preflight.service)' "$legacy_drain_verifier" > /dev/null
 grep -F 'active-upstreams.conf' "$langame_daily_worker_runner" > /dev/null
 grep -F 'langame-daily-worker.cli.js' "$langame_daily_worker_runner" > /dev/null

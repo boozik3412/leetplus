@@ -1434,6 +1434,7 @@ case "$command_name" in
     [[ "${TEST_SYSTEMCTL_HANG:-false}" != true ]] || { sleep 30; exit 0; }
     printf '%s enabled\n' \
       leetplus-api.service leetplus-web.service leetplus-deploy.timer \
+      leetplus-bonus-ledger-worker.service leetplus-bonus-ledger-worker.timer \
       leetplus-rollback-egress.service \
       leetplus-api-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service \
       leetplus-web-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service
@@ -1444,6 +1445,7 @@ case "$command_name" in
   list-units)
     printf '%s loaded active running fixture\n' \
       leetplus-api.service leetplus-web.service leetplus-deploy.timer \
+      leetplus-bonus-ledger-worker.service leetplus-bonus-ledger-worker.timer \
       leetplus-rollback-egress.service \
       leetplus-api-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service \
       leetplus-web-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service

@@ -47,6 +47,7 @@ blue_green_cutover="${REPOSITORY_ROOT}/docs/deployment/production-artifact/blue-
 release_readiness="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-release-readiness.sh"
 legacy_readiness="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-legacy-rollback-readiness.sh"
 legacy_installer="${REPOSITORY_ROOT}/docs/deployment/production-artifact/install-legacy-rollback-contour.sh"
+legacy_activator="${REPOSITORY_ROOT}/docs/deployment/production-artifact/activate-legacy-rollback-contour.sh"
 legacy_drain_verifier="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-legacy-runtime-drain.sh"
 legacy_drain_units="${TEMPLATE_ROOT}/legacy-drain-units.conf.example"
 authenticated_reads="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-legacy-rollback-authenticated-reads.mjs"
@@ -501,6 +502,8 @@ grep -F -x 'SAFE leetplus-bonus-ledger-worker.timer' "$legacy_drain_units" > /de
 grep -F -x 'SAFE leetplus-langame-discrepancy-audit-preflight.service' "$legacy_drain_units" > /dev/null
 grep -F 'leetplus-bonus-ledger-worker.service|leetplus-bonus-ledger-worker.timer' "$legacy_drain_verifier" > /dev/null
 grep -F 'leetplus-langame-discrepancy-audit-preflight.service)' "$legacy_drain_verifier" > /dev/null
+grep -F 'leetplus-bonus-ledger-worker.service|leetplus-bonus-ledger-worker.timer' "$legacy_activator" > /dev/null
+grep -F 'leetplus-langame-discrepancy-audit-preflight.service)' "$legacy_activator" > /dev/null
 grep -F 'active-upstreams.conf' "$langame_daily_worker_runner" > /dev/null
 grep -F 'langame-daily-worker.cli.js' "$langame_daily_worker_runner" > /dev/null
 if grep -F -x 'EnvironmentFile=/etc/leetplus/runtime.env' "$langame_daily_worker_service" > /dev/null; then

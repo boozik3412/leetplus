@@ -208,6 +208,8 @@ jobs:
           node .github/scripts/test-production-topology-contract.mjs
           node --check .github/scripts/test-release-admission-selective-rerun.mjs
           node .github/scripts/test-release-admission-selective-rerun.mjs
+          bash -n .github/scripts/test-legacy-drain-manifest-parser.sh
+          bash .github/scripts/test-legacy-drain-manifest-parser.sh
 
       - name: Verify production-control installed-generation authority
         shell: bash

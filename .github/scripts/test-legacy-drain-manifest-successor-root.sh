@@ -205,34 +205,6 @@ printf '0|0|0|0|1|1|0|2|0|0|1|1|1|0|0|0|1|leetplus|127.0.0.1|5432|12345678901234
 PSQL
 chmod 0755 /usr/bin/psql
 
-# Exercise the controller's grammar itself while keeping the exact positive
-# manifest as the only state that can proceed to a plan.  Each mutation retains
-# 31 physical lines and 27 candidate entries, so it must stop at schema rather
-# than a line-count shortcut; all bytes are restored before any effect.
-for mutation in unknown-class third-field duplicate-unit; do
-  awk -v mutation="$mutation" '
-    {
-      if ($0 == "SAFE leetplus-bonus-ledger-worker.timer") {
-        if (mutation == "unknown-class") sub(/^SAFE /, "UNKNOWN ")
-        else if (mutation == "third-field") $0 = $0 " unexpected"
-        else if (mutation == "duplicate-unit") $0 = "SAFE leetplus-bonus-ledger-worker.service"
-      }
-      print
-    }
-  ' "$ARTIFACT_ROOT/systemd/legacy-drain-units.conf.example" > "/run/fixture-successor-${mutation}.conf"
-  install -o root -g root -m 0600 "/run/fixture-successor-${mutation}.conf" /etc/leetplus/legacy-drain-units.conf
-  if "$AUTHORITY_PATH" plan --control-release-sha "$CONTROL_SHA" > "/run/fixture-successor-${mutation}.out" 2>&1; then
-    die "successor parser accepted malformed classified entry: ${mutation}"
-  fi
-  grep -F 'successor manifest schema is malformed' "/run/fixture-successor-${mutation}.out" >/dev/null \
-    || { cat "/run/fixture-successor-${mutation}.out" >&2; die "successor parser mutation stopped at an unexpected guard: ${mutation}"; }
-done
-install -o root -g root -m 0600 "$ARTIFACT_ROOT/systemd/legacy-drain-units.conf.example" /etc/leetplus/legacy-drain-units.conf
-[[ "$(sha256sum /etc/leetplus/legacy-drain-units.conf | awk '{ print $1 }')" == "$SUCCESSOR_MANIFEST_SHA256" \
-  && "$(wc -l < /etc/leetplus/legacy-drain-units.conf | tr -d '[:space:]')" == 31 ]] \
-  || die 'successor parser matrix did not restore exact admitted manifest bytes'
-unset mutation
-
 # Keep the verifier's earlier directory-authority guard covered independently
 # from the intended missing-file precursor below.
 probe_directory='/etc/systemd/system/leetplus-langame-daily-worker.timer.d'

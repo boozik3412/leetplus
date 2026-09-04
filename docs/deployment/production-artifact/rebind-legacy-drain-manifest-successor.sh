@@ -116,13 +116,13 @@ assert_fixed_paths() {
 
 validate_manifest() {
   local expected_lines actual_lines classified_lines
+  [[ "$(sha256 "$UNIT_MANIFEST")" == "$EXPECTED_SUCCESSOR_MANIFEST_SHA256" ]] \
+    || die 'installed unit manifest is not the exact admitted successor bytes'
   [[ "$(wc -l < "$UNIT_MANIFEST" | tr -d '[:space:]')" == 31 ]] || die 'successor manifest line count is invalid'
   classified_lines="$(awk 'NF != 0 && $1 !~ /^#/ { count++ } END { print count + 0 }' "$UNIT_MANIFEST")"
   [[ "$classified_lines" == 27 ]] || die 'successor manifest classified entry count is invalid'
-  [[ -z "$(awk 'NF == 0 || $1 ~ /^#/ { next } NF != 2 || ($1 != "REQUIRED_DRAIN" && $1 != "OPTIONAL_DRAIN" && $1 != "SAFE") || $2 !~ /^leetplus-[A-Za-z0-9@_.-]+\\.(service|timer)$/ || seen[$2]++ { print; exit }' "$UNIT_MANIFEST")" ]] \
+  [[ -z "$(awk 'NF == 0 || $1 ~ /^#/ { next } NF != 2 || ($1 != "REQUIRED_DRAIN" && $1 != "OPTIONAL_DRAIN" && $1 != "SAFE") || $2 !~ /^leetplus-[A-Za-z0-9@_.-]+\.(service|timer)$/ || seen[$2]++ { print; exit }' "$UNIT_MANIFEST")" ]] \
     || die 'successor manifest schema is malformed'
-  [[ "$(sha256 "$UNIT_MANIFEST")" == "$EXPECTED_SUCCESSOR_MANIFEST_SHA256" ]] \
-    || die 'installed unit manifest is not the exact admitted successor bytes'
   for expected_lines in \
     'OPTIONAL_DRAIN leetplus-langame-daily-worker.timer' \
     'OPTIONAL_DRAIN leetplus-langame-daily-worker.service' \

@@ -22,6 +22,7 @@ readonly DRAIN_SOURCE="${ARTIFACT_ROOT}/verify-legacy-runtime-drain.sh"
 readonly DRAIN_PATH='/usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh'
 readonly CONTROL_PATH='/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs'
 readonly CONTROL_SHA='475d7e0c3583c36b6ec2138a06f4cc4a1bc46eb7'
+readonly SUCCESSOR_MANIFEST_SHA256='d6e7b4fe8e0aeb9a77caae62d2fb4ed9322e6383148934c5e26ff3f9126120dd'
 readonly CONFIRMATION='I_ACCEPT_EXACT_LEGACY_DRAIN_MANIFEST_SUCCESSOR_APPLY'
 readonly STATE_ROOT='/var/lib/leetplus/legacy-drain'
 readonly FENCE_MARKER="${STATE_ROOT}/legacy-start-fence"
@@ -67,6 +68,9 @@ unset lock_path
 install -o root -g root -m 0500 "$AUTHORITY_SOURCE" "$AUTHORITY_PATH"
 install -o root -g root -m 0755 "$DRAIN_SOURCE" "$DRAIN_PATH"
 install -o root -g root -m 0600 "$ARTIFACT_ROOT/systemd/legacy-drain-units.conf.example" /etc/leetplus/legacy-drain-units.conf
+[[ "$(sha256sum /etc/leetplus/legacy-drain-units.conf | awk '{ print $1 }')" == "$SUCCESSOR_MANIFEST_SHA256" \
+  && "$(wc -l < /etc/leetplus/legacy-drain-units.conf | tr -d '[:space:]')" == 31 ]] \
+  || die 'checked-in successor manifest identity is not exact'
 install -o root -g root -m 0644 "$ARTIFACT_ROOT/systemd/leetplus-langame-daily-worker.service" /etc/systemd/system/leetplus-langame-daily-worker.service
 install -o root -g root -m 0644 "$ARTIFACT_ROOT/systemd/leetplus-langame-daily-worker.timer" /etc/systemd/system/leetplus-langame-daily-worker.timer
 
@@ -200,6 +204,34 @@ cat > /usr/bin/psql <<'PSQL'
 printf '0|0|0|0|1|1|0|2|0|0|1|1|1|0|0|0|1|leetplus|127.0.0.1|5432|1234567890123456|leetplus_drain_audit\n'
 PSQL
 chmod 0755 /usr/bin/psql
+
+# Exercise the controller's grammar itself while keeping the exact positive
+# manifest as the only state that can proceed to a plan.  Each mutation retains
+# 31 physical lines and 27 candidate entries, so it must stop at schema rather
+# than a line-count shortcut; all bytes are restored before any effect.
+for mutation in unknown-class third-field duplicate-unit; do
+  awk -v mutation="$mutation" '
+    {
+      if ($0 == "SAFE leetplus-bonus-ledger-worker.timer") {
+        if (mutation == "unknown-class") sub(/^SAFE /, "UNKNOWN ")
+        else if (mutation == "third-field") $0 = $0 " unexpected"
+        else if (mutation == "duplicate-unit") $0 = "SAFE leetplus-bonus-ledger-worker.service"
+      }
+      print
+    }
+  ' "$ARTIFACT_ROOT/systemd/legacy-drain-units.conf.example" > "/run/fixture-successor-${mutation}.conf"
+  install -o root -g root -m 0600 "/run/fixture-successor-${mutation}.conf" /etc/leetplus/legacy-drain-units.conf
+  if "$AUTHORITY_PATH" plan --control-release-sha "$CONTROL_SHA" > "/run/fixture-successor-${mutation}.out" 2>&1; then
+    die "successor parser accepted malformed classified entry: ${mutation}"
+  fi
+  grep -F 'successor manifest schema is malformed' "/run/fixture-successor-${mutation}.out" >/dev/null \
+    || { cat "/run/fixture-successor-${mutation}.out" >&2; die "successor parser mutation stopped at an unexpected guard: ${mutation}"; }
+done
+install -o root -g root -m 0600 "$ARTIFACT_ROOT/systemd/legacy-drain-units.conf.example" /etc/leetplus/legacy-drain-units.conf
+[[ "$(sha256sum /etc/leetplus/legacy-drain-units.conf | awk '{ print $1 }')" == "$SUCCESSOR_MANIFEST_SHA256" \
+  && "$(wc -l < /etc/leetplus/legacy-drain-units.conf | tr -d '[:space:]')" == 31 ]] \
+  || die 'successor parser matrix did not restore exact admitted manifest bytes'
+unset mutation
 
 # Keep the verifier's earlier directory-authority guard covered independently
 # from the intended missing-file precursor below.

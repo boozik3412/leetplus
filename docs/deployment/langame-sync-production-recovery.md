@@ -1,6 +1,6 @@
 # Langame sync production recovery
 
-Статус: **source candidate; production effects запрещены до exact-SHA admission и отдельного GO**
+Статус: **audit storage repaired; runtime rollout HOLD до admitted drain-successor/worker authority и нового exact-SHA GO**
 
 Актуально на: **04.09.2026**
 
@@ -60,7 +60,13 @@ corporate scope или Langame credentials. Внешние tenant остаютс
   `OPTIONAL_DRAIN` для worker service/timer и exact `SAFE` для audit preflight;
   уже активные автономные bonus-ledger service/timer остаются exact `SAFE` и
   не останавливаются ради Langame rollout;
-  после установки unit inventory обязан снова пройти legacy drain verifier.
+  после установки unit inventory обязан снова пройти legacy drain verifier;
+- если immutable N−1 activation receipt связан с предыдущим manifest, только
+  admitted `LEGACY_DRAIN_MANIFEST_SUCCESSOR_V1` может добавить exact fences и
+  новый linked receipt. Старый receipt не редактируется и не пересоздаётся;
+- наличие successor receipt само по себе не разрешает Langame effect.
+  Canary и timer требуют отдельного release/tenant/env-bound worker permit;
+  общий legacy fence marker никогда не удаляется.
 
 Ни один CI result, merge или этот документ не является production GO.
 
@@ -76,10 +82,19 @@ corporate scope или Langame credentials. Внешние tenant остаютс
    authenticated read smoke должны пройти до cutover.
    Перед установкой новых unit atomically синхронизировать production
    legacy-drain manifest с admitted example, сохранив root-only backup; при
-   любом другом расхождении unit inventory остановить rollout.
+   любом другом расхождении unit inventory остановить rollout. Если manifest
+   уже является exact additive successor исторического activation receipt,
+   выполнить его отдельный digest-bound `plan/apply/check`; ручные drop-in или
+   receipt edits запрещены.
 4. Выполнить штатный atomic blue/green cutover. Timer всё ещё disabled.
 5. Создать root-owned `/etc/leetplus/langame-daily-worker.env` в canary mode с
    exact internal tenant и одной датой. Первый canary — `2026-09-02`.
+   Запускать oneshot только через отдельный worker-authorization plan/apply:
+   permit связывает active admitted release, installed control, exact env,
+   INTERNAL tenant и выключенные API scheduler/scheduled HTTP. Canary permit
+   bounded и после terminal run возвращает оба durable legacy fence. Каждый
+   terminal result требует `MainPID/ControlPID/ExecMainPID=0`, пустой cgroup и
+   отсутствие systemd jobs; одного `is-active=false` недостаточно.
 6. Проверить: три источника без `FAILED`, guest foundation успешен, ровно пять
    snapshot scopes свежие, JSON audit доступен при наличии расхождений, нет
    повторных rows по business keys.
@@ -87,8 +102,15 @@ corporate scope или Langame credentials. Внешние tenant остаютс
    начиная с `2026-08-27` и заканчивая последним завершённым локальным днём
    перед rollout. Уже успешный scope обязан стать безопасным skip,
    а не вторым effect.
-8. Удалить explicit date, переключить `CANARY=false`, ещё раз вручную запустить
-   oneshot. Только после повторного PASS включить timer.
+8. Удалить explicit date и переключить `CANARY=false`. Отдельный
+   timer-authorization plan сверяет timer profile с successful canary по
+   stable-env digest, но не запускает oneshot вручную: при `Persistent=true`
+   последующий `enable --now` сам может выполнить один пропущенный daily run,
+   и ручной preflight создал бы второй effect за ту же business date. Authority
+   публикует timer-profile validation receipt, включает timer, ждёт terminal
+   result возможного единственного catch-up запуска, строгую quiescence и
+   повторно запускает worker-specific + generic drain verifiers. Ручное
+   удаление fence запрещено.
 9. Провести public guest и corporate smoke независимо от worker QA; проверить
    оба slot, ingress, error logs и отсутствие новых duplicate facts.
 10. Точечно сверить обращения `LP-BUG-AFDE6B03` и `LP-BUG-42A647BA`:
@@ -106,7 +128,12 @@ corporate scope или Langame credentials. Внешние tenant остаютс
 
 ## Rollback
 
-- немедленно: `systemctl disable --now leetplus-langame-daily-worker.timer`;
+- немедленно: получить exact `revoke-plan`, подтвердить его digest/count строкой
+  `I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_REVOCATION`, выполнить `revoke-apply`,
+  затем `revoke-check`. Authority отключает timer/service, доказывает пустые
+  PID/cgroup, удаляет только 91 permit drop-ins и active pointer, возвращает
+  exact 90 fences и сохраняет immutable revocation receipt. Ручной
+  `systemctl disable --now` сам по себе не является завершённым rollback;
 - до cutover: candidate не маршрутизировать;
 - после cutover: вернуть только последний accepted hot rollback штатным
   blue/green controller;

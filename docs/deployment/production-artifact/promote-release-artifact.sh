@@ -208,7 +208,7 @@ validate_installed_generation_attestation() {
   [[ "${lines[0]}" == 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' \
     && "${lines[1]}" == "PRODUCTION_CONTROL_RELEASE_SHA=${release_sha}" \
     && "${lines[2]}" == "PRODUCTION_CONTROL_RECEIPT_PATH=${production_control_receipt}" \
-    && "${lines[13]}" == 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=57' \
+    && "${lines[13]}" == 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=62' \
     && "${lines[14]}" =~ ^PRODUCTION_CONTROL_EFFECTIVE_LANE=(L1_RUNTIME|L2_SCHEMA_SECURITY)$ \
     && "${lines[15]}" =~ ^PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256=([0-9a-f]{64})$ ]] \
     || die 'installed-generation verifier output identity is malformed'

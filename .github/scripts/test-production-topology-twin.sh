@@ -314,12 +314,15 @@ chmod 0644 "${API_DROPIN_ROOT}/90-topology-twin.conf" \
   > /run/leetplus-topology-twin-langame-plan.json
 langame_plan_sha256="$(/usr/bin/sed -n 's/.*"planSha256":"\([0-9a-f]\{64\}\)".*/\1/p' /run/leetplus-topology-twin-langame-plan.json)"
 [[ "$langame_plan_sha256" =~ ^[0-9a-f]{64}$ ]] || die 'Langame audit fixture plan digest is invalid'
-/usr/local/sbin/leetplus-langame-discrepancy-audit-authority apply \
-  --plan-sha256 "$langame_plan_sha256" --action-count 1 \
-  --confirm I_ACCEPT_EXACT_LANGAME_DISCREPANCY_AUDIT_REPAIR \
-  > /run/leetplus-topology-twin-langame-apply.out
-/usr/local/sbin/leetplus-langame-discrepancy-audit-authority check \
-  > /run/leetplus-topology-twin-langame-check.out
+(
+  cd /root
+  /usr/local/sbin/leetplus-langame-discrepancy-audit-authority apply \
+    --plan-sha256 "$langame_plan_sha256" --action-count 1 \
+    --confirm I_ACCEPT_EXACT_LANGAME_DISCREPANCY_AUDIT_REPAIR \
+    > /run/leetplus-topology-twin-langame-apply.out
+  /usr/local/sbin/leetplus-langame-discrepancy-audit-authority check \
+    > /run/leetplus-topology-twin-langame-check.out
+)
 /usr/bin/grep -F -x 'LANGAME_DISCREPANCY_AUDIT_CHECK=PASS tenantDirectoryCount=1' \
   /run/leetplus-topology-twin-langame-check.out >/dev/null \
   || die 'Langame audit fixture did not prove both slot identities'

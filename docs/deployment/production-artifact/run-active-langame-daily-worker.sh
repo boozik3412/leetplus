@@ -20,6 +20,30 @@ die() {
   exit 1
 }
 
+expected_release_sha=''
+while (($#)); do
+  case "$1" in
+    --expected-release-sha)
+      [[ $# -eq 2 && -z "$expected_release_sha" && "$2" =~ ^[0-9a-f]{40}$ ]] \
+        || die 'expected release SHA must be supplied exactly once'
+      expected_release_sha="$2"
+      shift 2
+      ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+[[ -n "$expected_release_sha" ]] || die 'an exact authorized release SHA is required'
+
+# This runner is executable by the DynamicUser, so it independently proves it
+# remains the main process of the dedicated systemd unit after the wrapper's
+# exec.  A direct API-runtime invocation cannot reuse a permit.
+[[ "${INVOCATION_ID:-}" =~ ^[0-9a-f]{32}$ ]] || die 'systemd InvocationID is absent or invalid'
+systemctl_bounded() { /usr/bin/timeout --kill-after=2s 10s /usr/bin/systemctl "$@"; }
+unit_main_pid="$(systemctl_bounded show --property=MainPID --value leetplus-langame-daily-worker.service)"
+unit_invocation="$(systemctl_bounded show --property=InvocationID --value leetplus-langame-daily-worker.service)"
+[[ "$unit_main_pid" == "$$" && "$unit_invocation" == "$INVOCATION_ID" ]] \
+  || die 'active worker runner is not the fresh main process of its exact systemd invocation'
+
 active_upstream='/etc/nginx/leetplus/active-upstreams.conf'
 [[ -L "$active_upstream" ]] || die 'active nginx upstream must be a symlink'
 active_target="$(/usr/bin/readlink -e -- "$active_upstream")"
@@ -36,6 +60,8 @@ release_root="$(/usr/bin/readlink -e -- "$slot_link")"
 [[ "$release_root" =~ ^/srv/leetplus/releases/([0-9a-f]{40})$ ]] \
   || die 'active slot does not resolve to an immutable release path'
 release_sha="${BASH_REMATCH[1]}"
+[[ "$expected_release_sha" == "$release_sha" ]] \
+  || die 'active slot changed after worker authorization; refusing a different release'
 
 slot_environment="/etc/leetplus/slots/${slot}.env"
 [[ -f "$slot_environment" && ! -L "$slot_environment" ]] \

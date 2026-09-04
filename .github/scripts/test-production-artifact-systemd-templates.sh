@@ -30,6 +30,9 @@ langame_daily_worker_overlay="${TEMPLATE_ROOT}/langame-daily-worker.env.example"
 langame_daily_worker_service="${TEMPLATE_ROOT}/leetplus-langame-daily-worker.service"
 langame_daily_worker_timer="${TEMPLATE_ROOT}/leetplus-langame-daily-worker.timer"
 langame_daily_worker_runner="${REPOSITORY_ROOT}/docs/deployment/production-artifact/run-active-langame-daily-worker.sh"
+langame_worker_authority="${REPOSITORY_ROOT}/docs/deployment/production-artifact/langame-daily-worker-authorization-authority.sh"
+langame_daily_worker_authorized_runner="${REPOSITORY_ROOT}/docs/deployment/production-artifact/run-authorized-langame-daily-worker.sh"
+langame_worker_authorization_verifier="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-langame-daily-worker-authorization.sh"
 langame_audit_authority="${REPOSITORY_ROOT}/docs/deployment/production-artifact/langame-discrepancy-audit-authority.sh"
 langame_audit_preflight_unit="${TEMPLATE_ROOT}/leetplus-langame-discrepancy-audit-preflight.service"
 slot_preflight="${REPOSITORY_ROOT}/docs/deployment/production-artifact/preflight-release-slot.sh"
@@ -49,6 +52,7 @@ legacy_readiness="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-
 legacy_installer="${REPOSITORY_ROOT}/docs/deployment/production-artifact/install-legacy-rollback-contour.sh"
 legacy_activator="${REPOSITORY_ROOT}/docs/deployment/production-artifact/activate-legacy-rollback-contour.sh"
 legacy_drain_verifier="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-legacy-runtime-drain.sh"
+legacy_manifest_successor="${REPOSITORY_ROOT}/docs/deployment/production-artifact/rebind-legacy-drain-manifest-successor.sh"
 legacy_drain_units="${TEMPLATE_ROOT}/legacy-drain-units.conf.example"
 authenticated_reads="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-legacy-rollback-authenticated-reads.mjs"
 production_control_install_map="${REPOSITORY_ROOT}/docs/deployment/production-control-authority/production-control-install-map.tsv"
@@ -64,6 +68,8 @@ root_authorities=(
   blue-green-cutover.sh
   install-legacy-rollback-contour.sh
   langame-discrepancy-audit-authority.sh
+  langame-daily-worker-authorization-authority.sh
+  rebind-legacy-drain-manifest-successor.sh
   prepare-web-slot-cache.sh
   promote-release-artifact.sh
   run-current-release-restored-copy-acceptance.sh
@@ -72,6 +78,7 @@ root_authorities=(
   stage-release-artifact.sh
   verify-legacy-rollback-readiness.sh
   verify-legacy-runtime-drain.sh
+  verify-langame-daily-worker-authorization.sh
   verify-release-readiness.sh
 )
 for authority_name in "${root_authorities[@]}"; do
@@ -83,8 +90,8 @@ for authority_name in "${root_authorities[@]}"; do
 done
 
 for required_file in \
-  "$api_unit" "$web_unit" "$migration_unit" "$hydration_unit" "$release_environment" \
-  "$slot_api_unit" "$slot_web_unit" "$safe_overlay" "$user_call_live_overlay" "$bonus_ledger_worker_overlay" "$bonus_ledger_worker_service" "$bonus_ledger_worker_timer" "$bonus_ledger_worker_runner" "$langame_daily_worker_overlay" "$langame_daily_worker_service" "$langame_daily_worker_timer" "$langame_daily_worker_runner" "$langame_audit_authority" "$langame_audit_preflight_unit" "$slot_preflight" "$cache_preparer" "$release_promoter" "$release_sealer" "$store_stager" "$blue_environment" "$green_environment" "$web_runtime_environment" "$blue_nginx" "$green_nginx" "$recovery_unit" "$recovery_watchdog_unit" "$recovery_timer" "$nginx_recovery_dropin" "$hydration_tmpfiles"; do
+  "$api_unit" "$web_unit" "$migration_unit" "$hydration_unit" "$release_environment" "$legacy_manifest_successor" \
+  "$slot_api_unit" "$slot_web_unit" "$safe_overlay" "$user_call_live_overlay" "$bonus_ledger_worker_overlay" "$bonus_ledger_worker_service" "$bonus_ledger_worker_timer" "$bonus_ledger_worker_runner" "$langame_daily_worker_overlay" "$langame_daily_worker_service" "$langame_daily_worker_timer" "$langame_daily_worker_runner" "$langame_worker_authority" "$langame_daily_worker_authorized_runner" "$langame_worker_authorization_verifier" "$langame_audit_authority" "$langame_audit_preflight_unit" "$slot_preflight" "$cache_preparer" "$release_promoter" "$release_sealer" "$store_stager" "$blue_environment" "$green_environment" "$web_runtime_environment" "$blue_nginx" "$green_nginx" "$recovery_unit" "$recovery_watchdog_unit" "$recovery_timer" "$nginx_recovery_dropin" "$hydration_tmpfiles"; do
   test -f "$required_file"
 done
 
@@ -467,6 +474,9 @@ grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-langame-discre
 grep -F -x $'docs/deployment/production-artifact/systemd/guest-user-call-live.env.example\t/etc/leetplus/guest-user-call-live.env\t0400' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/run-active-bonus-ledger-worker.sh\t/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh\t0555' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/run-active-langame-daily-worker.sh\t/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh\t0555' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/langame-daily-worker-authorization-authority.sh\t/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority\t0500' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/run-authorized-langame-daily-worker.sh\t/usr/local/libexec/leetplus/run-authorized-langame-daily-worker.sh\t0555' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/verify-langame-daily-worker-authorization.sh\t/usr/local/libexec/leetplus/verify-langame-daily-worker-authorization.sh\t0555' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-langame-daily-worker.service\t/etc/systemd/system/leetplus-langame-daily-worker.service\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-langame-daily-worker.timer\t/etc/systemd/system/leetplus-langame-daily-worker.timer\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-bonus-ledger-worker.service\t/etc/systemd/system/leetplus-bonus-ledger-worker.service\t0444' "$production_control_install_map" > /dev/null
@@ -493,7 +503,7 @@ grep -F -x 'DynamicUser=yes' "$langame_daily_worker_service" > /dev/null
 grep -F -x 'Requires=leetplus-langame-discrepancy-audit-preflight.service' "$langame_daily_worker_service" > /dev/null
 grep -F -x 'After=leetplus-langame-discrepancy-audit-preflight.service' "$langame_daily_worker_service" > /dev/null
 grep -F -x 'EnvironmentFile=/etc/leetplus/langame-daily-worker.env' "$langame_daily_worker_service" > /dev/null
-grep -F -x 'ExecStart=/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh' "$langame_daily_worker_service" > /dev/null
+grep -F -x 'ExecStart=/usr/local/libexec/leetplus/run-authorized-langame-daily-worker.sh' "$langame_daily_worker_service" > /dev/null
 grep -F -x 'Unit=leetplus-langame-daily-worker.service' "$langame_daily_worker_timer" > /dev/null
 grep -F -x 'OPTIONAL_DRAIN leetplus-langame-daily-worker.timer' "$legacy_drain_units" > /dev/null
 grep -F -x 'OPTIONAL_DRAIN leetplus-langame-daily-worker.service' "$legacy_drain_units" > /dev/null
@@ -506,6 +516,16 @@ grep -F 'leetplus-bonus-ledger-worker.service|leetplus-bonus-ledger-worker.timer
 grep -F 'leetplus-langame-discrepancy-audit-preflight.service)' "$legacy_activator" > /dev/null
 grep -F 'active-upstreams.conf' "$langame_daily_worker_runner" > /dev/null
 grep -F 'langame-daily-worker.cli.js' "$langame_daily_worker_runner" > /dev/null
+grep -F 'AUTHORIZATION_PERMITTED=true' "$langame_daily_worker_authorized_runner" > /dev/null
+grep -F 'LANGAME_DAILY_WORKER_AUTHORIZATION=PASS' "$langame_worker_authorization_verifier" > /dev/null
+grep -F 'I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_AUTHORIZATION' "$langame_worker_authority" > /dev/null
+grep -F 'LEETPLUS_LANGAME_DAILY_WORKER_TIMER_PROFILE_VALIDATION_V1' "$langame_worker_authority" > /dev/null
+grep -F 'I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_REVOCATION' "$langame_worker_authority" > /dev/null
+grep -F 'ConditionPathExists=' "$langame_worker_authority" > /dev/null
+grep -F "GUEST_PORTAL_USER_CALL" "$langame_worker_authority" > /dev/null
+grep -F 'LANGAME_DAILY_SYNC_SCHEDULER_ENABLED' "$langame_worker_authority" > /dev/null
+grep -F 'LANGAME_SCHEDULED_HTTP_ENABLED' "$langame_worker_authority" > /dev/null
+grep -F 'restore_worker_fences' "$langame_worker_authority" > /dev/null
 if grep -F -x 'EnvironmentFile=/etc/leetplus/runtime.env' "$langame_daily_worker_service" > /dev/null; then
   printf 'Langame daily worker inherited the broad API runtime profile\n' >&2
   exit 1
@@ -525,6 +545,7 @@ grep -F -x "[[ -x /usr/bin/id && ! -L /usr/bin/id ]] || die 'trusted id utility 
   "$langame_audit_authority" > /dev/null
 grep -F -x '[[ ${EUID:-99999} -eq 0 && "$(/usr/bin/id -g)" == 0 ]] || die '\''root authority is required'\''' \
   "$langame_audit_authority" > /dev/null
+grep -F -x 'cd /' "$langame_audit_authority" > /dev/null
 if grep -F -x 'RemainAfterExit=yes' "$langame_audit_preflight_unit" > /dev/null \
   || grep -F '/run/leetplus-production-control' "$langame_audit_preflight_unit" > /dev/null; then
   printf 'Langame audit preflight retains stale completion state or broad rollout-lock ownership\n' >&2

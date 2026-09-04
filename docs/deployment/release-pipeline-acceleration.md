@@ -1,8 +1,8 @@
 # Ускорение безопасного release pipeline
 
-Статус: **8/8 backlog items implemented; первый controlled production rollout завершён, V3 recovery hardening и trusted lane metrics объединены в main**
+Статус: **REL-ACC-001..009 implemented; REL-ACC-010 incremental control-state rehearsal в работе**
 
-Актуально на: **03.09.2026**
+Актуально на: **04.09.2026**
 
 ## Результат анализа
 
@@ -302,3 +302,32 @@ archive files, `128 MiB`, `131 072` archived attempts. Процедура не �
 DB, runtime/systemd, workers или сети и не является production deploy. Предел
 `4 096` terminal operation directories для duration percentiles остаётся
 отдельным будущим receipt-chain retention boundary; REL-ACC-009 их не удаляет.
+
+REL-ACC-010 добавлен по результату Langame preflight 04.09.2026. Disposable
+topology twin доказывал fresh install, но не воспроизводил переход от уже
+принятого immutable N−1 activation receipt к additive unit manifest. Поэтому
+production до runtime effect обнаружил сразу два контракта, которые должны
+были быть видны в CI: stale predecessor manifest digest и systemd-состояние
+oneshot service `static` при disabled timer.
+
+Новый gate должен начинаться не с пустого state root, а с exact historical
+receipt/manifest fixture и проигрывать весь lifecycle:
+
+1. Установка новой control generation поверх старого immutable evidence.
+2. Pinned additive manifest-successor `plan/apply/check` без route, DB или
+   start/stop/enable effects; old receipt остаётся byte-for-byte неизменным.
+3. Durable fences для новых `OPTIONAL_DRAIN` units и повторный
+   `verify-legacy-runtime-drain` + readiness `--require-drain`.
+4. Отдельный exact canary permit с возвратом fences после bounded execution.
+5. Отдельный live-timer permit после совпавшего canary evidence без ручного
+   timer-profile запуска перед `enable --now`: возможный `Persistent=true`
+   catch-up остаётся единственным daily execution. Остальные OPTIONAL units
+   по-прежнему не получают исключения.
+6. Crash/lost-response, tampered receipt, symlink/mount, wrong owner/mode,
+   active worker, чужой release/env/tenant и lock contention negative matrix.
+7. Реальный PID 1 positive path wrapper→active release, immediate persistent
+   timer fire, PID/cgroup residue и полный digest-bound timer revoke/recovery.
+
+Это не сокращает L2 admission. Оно переносит ещё один класс live discovery в
+тот же 15–20-минутный disposable Linux gate, чтобы один topology successor не
+порождал цепочку новых SHA и почти суточный operator cycle.

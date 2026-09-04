@@ -25,7 +25,7 @@ fail-closed правилу одного контура снова сломать
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
 | Release acceleration     | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
-| Langame recovery         | source candidate: shared API audit storage + dedicated exact-internal-tenant worker; production не менялся, external unattended остаётся deny                                                                            |
+| Langame recovery         | audit storage repair применён exact plan/check; runtime всё ещё `f3f119fa…`, worker inactive/disabled; rollout HOLD до immutable legacy-drain successor и отдельного modern-worker permit; external unattended остаётся deny |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -356,6 +356,35 @@ exact profile/event/rule, затем восстанавливаются по о�
 оформляются как явно аудируемая компенсация. Массовый replay, повторная выдача
 и ретроактивное потребление события следующим ещё закрытым шагом Battle Pass
 запрещены.
+
+### Langame N−1 manifest successor и worker authorization
+
+Исторический N−1 `activation.receipt` остаётся immutable даже при additive
+расширении unit manifest. Такой переход допустим только через exact
+manifest-successor controller: он связывает digest старого receipt, старого и
+нового manifest, installed production-control generation, создаёт durable
+fence только для двух новых `OPTIONAL_DRAIN` unit и публикует отдельный linked
+receipt после live drain verification. Редактирование старого receipt,
+удаление общего fence marker или ручное создание drop-in не являются
+разрешённым recovery.
+
+Manifest-successor не выдаёт network/provider authority. Снять точный fence
+Langame service/timer для canary или live timer может только второй
+worker-specific authority, связанный с active admitted release, exact INTERNAL
+tenant, worker env и неизменными `LANGAME_DAILY_SYNC_SCHEDULER_ENABLED=false` /
+`LANGAME_SCHEDULED_HTTP_ENABLED=false`. Canary разрешается bounded permit и
+обязан вернуть legacy fence после terminal run. Live timer получает отдельный
+permit только после совпавшего successful canary evidence; timer-profile
+validation не выполняет второй oneshot перед `enable --now`, потому что
+`Persistent=true` может сам выполнить ровно один missed daily run. USER_CALL,
+public-guest и corporate identities/env в permit не входят. Generic
+`OPTIONAL_DRAIN` semantics для остальных unit не меняется. Success/recovery
+принимаются только при zero PID, пустом cgroup и отсутствии systemd jobs;
+`enable --now` отдельно учитывает немедленный `Persistent=true` запуск. Отмена
+live timer выполняется только exact revocation plan/apply/check: service/timer
+quiesce, удаление узких 91 permit conditions и active pointer, возврат exact 90
+fences и immutable revoke receipt. Простой ручной `disable --now` не закрывает
+authority state и не является terminal rollback.
 
 ### Runtime repair contract 29–30.08.2026
 

@@ -2,8 +2,9 @@
 
 ## P0 — восстановление Langame sync и freshness — 03.09.2026
 
-Статус: `[███████░░░] 7/10` — source implementation и локальные gates готовы;
-production не менялся.
+Статус: `[███████▎░░] 8/11` — production storage repair и restored-copy
+проверка завершены; runtime/canary/backfill остаются на HOLD до нового
+admitted SHA и отдельного GO.
 
 - [x] Подтверждена причина: DB facts сохраняются, но post-fact audit JSON
   получает `EACCES` из-за slot-owned tenant directory; UI ложно показывает
@@ -21,8 +22,10 @@ production не менялся.
 - [x] Focused API `46/46`, API/Web lint, Web typecheck и static Bash/control
   tests локально зелёные.
 - [ ] Получить Fast CI и Full Release Admission на одном exact SHA.
-- [ ] После отдельного production GO: backup, exact repair plan/apply, canary и
-  idempotent backfill `27.08–02.09`.
+- [x] Fresh backup/off-host/restored-copy проверены; exact двухдействийный
+  storage repair применён, повторный check даёт zero-action plan.
+- [ ] После нового exact-SHA production GO: manifest-successor, runtime cutover,
+  canary и идемпотентный backfill `27.08–02.09`.
 - [ ] Подтвердить 3/3 Langame sources, guest foundation, пять свежих snapshots,
   zero duplicates, public/corporate smoke и healthy rollback; только затем
   включить nightly timer.

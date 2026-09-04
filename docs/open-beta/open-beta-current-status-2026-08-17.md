@@ -5,7 +5,7 @@
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                  |
 | Production runtime   | healthy; active blue `f3f119fa…`, generation 21, `COMBINED`, bridge OFF, bug reporting LIVE; rollback green `22ab6b81…` ready   |
 | Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                  |
-| Release authority    | exact SHA `f3f119fa…`: Fast CI `33718092094`, Full Release Admission `33718092121`, immutable handoff и generation 21 receipt  |
+| Release authority    | runtime остаётся exact `f3f119fa…`; production-control `475d7e0c…` установлен после Fast/Full, runtime cutover не выполнялся |
 | Runtime successor    | Dedicated bonus-ledger worker active; bounded backlog recovery завершён, timer enabled/healthy                                |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                              |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                      |
@@ -15,7 +15,7 @@
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
-| Langame freshness    | P0 source recovery готовится: production audit EACCES и отсутствие single nightly owner подтверждены; production fix/backfill ещё не выполнялись          |
+| Langame freshness    | audit storage repair применён и проверен; runtime/canary/backfill/timer на HOLD до admitted drain-successor + worker authorization |
 
 ## Исправление двух обращений геймификации (04.09.2026)
 
@@ -43,7 +43,7 @@ backup/rollback gates, canary автономного Langame worker, backfill п
 идемпотентное восстановление; широкий replay наград запрещён. Production этим
 source candidate ещё не менялся.
 
-## P0 Langame recovery (03.09.2026)
+## P0 Langame recovery (04.09.2026)
 
 Production остаётся healthy для public/corporate запросов, но Langame
 freshness нельзя считать готовой к открытому тесту. Read-only diagnosis
@@ -67,6 +67,29 @@ service отсутствовал в exact legacy-drain manifest кандидат
 bonus-ledger unit как `SAFE` в manifest и закрытом verifier allowlist и пройти
 новый exact-main admission; ручной manifest override или остановка здорового
 bonus-ledger worker запрещены.
+
+Successor `475d7e0c…` прошёл exact-main Fast+Full. До runtime hydration были
+созданы fresh production backup, off-host copy и полностью проверенная
+restored copy PostgreSQL 16. Exact подтверждённый audit plan с двумя действиями
+применён: persistent root и один tenant directory теперь имеют canonical
+`leetplus-api-runtime:2770`, owner tenant directory сохранён; повторный
+`check` с двусторонними slot probes прошёл. Public HTTP и обе blue/green пары
+остались healthy, схема и routing не менялись.
+
+Установка exact production-control `475d7e0c…` выявила следующий fail-closed
+разрыв до hydration/cutover. Исторический immutable N−1 activation receipt
+связан с предыдущим legacy-drain manifest, а добавленные
+`OPTIONAL_DRAIN` Langame service/timer ещё не имеют durable start-fence и
+successor receipt. Ручная правка receipt/drop-in запрещена. Новый source fix
+должен дать один pinned additive manifest-successor controller, сохранить
+исторический receipt неизменным и отдельным exact worker authorization
+разрешить canary/timer без снятия общей legacy-защиты. Timer authorization
+связывается с successful canary/stable-env и не выполняет ручной timer-profile
+oneshot перед возможным `Persistent=true` catch-up, исключая двойной daily run.
+До нового admitted SHA и
+отдельного GO production rollout остаётся на HOLD; Langame timer
+`inactive/disabled`, public/corporate и действующий bonus-ledger worker не
+затронуты.
 
 ## Ускорение release pipeline без ослабления gates (02.09.2026)
 

@@ -2,13 +2,14 @@
 cf95e1a3a704833a67b27cbc356abf16ab62c517b23ec708d19796818b332de3  ./apply-legacy-database-login-fence.sh
 4a25ff7561727f707ce37aa394ca5e0b0b28f52f5b63516dcdac5dfa6a60c130  ./apply-legacy-rollback-egress.sh
 1efbf40f1a357a5f2853d20aebd5ed6dd1621fa8067384f39cbfa31263448e75  ./blue-green-cutover.sh
-9c83a218fe211c47358cb1f12aa4da2f4cdbe4153205c9536ee975f8b0a12913  ./install-legacy-rollback-contour.sh
+754d19795a8fd798906fdbcf44652adb9ad6b869ce272b22e3891893d3fd2a39  ./install-legacy-rollback-contour.sh
 e533a946eb7d4393b7f1f692da2f57f4d8bf86180658ff82d677084fc683b50a  ./legacy-rollback-auth-edge.mjs
 ea25c3cf121ff21f21c02b5bf017ac6b20e943918b6624210d593e800493127c  ./legacy-rollback-child-loopback.cjs
 3553e31012e1c00d695381c76ad4df184113c71c5a8b018bf5d934c2cea3fd8e  ./nginx/blue.conf.example
 a9e449bcd5f7d56be97f347455f7d0629f393d471cdf2b87029b4bede2d58462  ./nginx/green.conf.example
 ebd449a4221dcb0c1d5449b4f87893bcad58b1f16319551730ca5aefde571b25  ./nginx/legacy-safe.conf.example
 e6b1486289123178c5e86a3ed09ed26e39f12a80b9391caa8b92ae80d4a1b0bf  ./preflight-legacy-rollback.sh
+7a7fb9b320bd790ad2a2bc800fbd7ec2cd246f88d6504a1d8edcbe545a3a57b9  ./rebind-legacy-drain-manifest-successor.sh
 f08dea0e41ce5269b0bacabdacb9441efec26897a83f7331e9fb8bad8a377365  ./systemd/leetplus-api-rollback@.service
 783502a1c17ae50f4f2d438c9df258a4d5a805ca577b3017c4ae92f43a54b34f  ./systemd/leetplus-blue-green-recovery-watchdog.service
 bd9e890104a2ca771dbbfebcd781b7648bf39fdee0d5d1fb2f950050b2513709  ./systemd/leetplus-blue-green-recovery.service
@@ -22,5 +23,5 @@ d6e7b4fe8e0aeb9a77caae62d2fb4ed9322e6383148934c5e26ff3f9126120dd  ./systemd/lega
 b12c41795c0c798498dbfd20f338edfdc75f80decb9bf91d7c5d928a40e03808  ./systemd/legacy-rollback-safe.env.example
 65d7aae54bdded580a491713185229d81bec9f560249f5f4cb82e279900358f8  ./systemd/nginx.service.d/leetplus-blue-green-recovery.conf
 da53c65c0dec67895c688d7a847e76a574025eff2e344d60cb206123cb492de2  ./verify-legacy-rollback-authenticated-reads.mjs
-9ba94b6f162e3df1f002b0da316b0bf797e94704bbf73f3fdf119ed47bcebb42  ./verify-legacy-rollback-readiness.sh
-86af968420a6c465b9be7c8ac94f7d0b89adba679ac99eb79ee851e14e403550  ./verify-legacy-runtime-drain.sh
+c5bc4da0b6f449ecc95b4c5fabc1c7aabe5cfadc6e564a7a8ea95d4a3720be8f  ./verify-legacy-rollback-readiness.sh
+3d43aed52db9f28b7b54d9fd7042a04fcf0fd16f873e14944c12dd98c23487f5  ./verify-legacy-runtime-drain.sh

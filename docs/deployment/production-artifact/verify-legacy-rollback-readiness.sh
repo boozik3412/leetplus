@@ -44,6 +44,8 @@ readonly API_UNIT_SHA256='f08dea0e41ce5269b0bacabdacb9441efec26897a83f7331e9fb8b
 readonly WEB_UNIT_SHA256='ec17749189040daaff879ff67d9c80b636c9a7ab5025ca87a3b2524d8430ea0e'
 readonly EGRESS_UNIT_SHA256='c9d90ee74181cd0c705eb717478f39533613070bbed258bfe9c48545f9067ce2'
 readonly AUTH_EDGE_SHA256='e533a946eb7d4393b7f1f692da2f57f4d8bf86180658ff82d677084fc683b50a'
+readonly LEGACY_DRAIN_SUCCESSOR_PREDECESSOR_SHA256='89930527907a1bf993c9b4db9165c8f8ba305d81be985264ecd3b5fa4ff86b13'
+readonly LEGACY_DRAIN_SUCCESSOR_TARGET_SHA256='d6e7b4fe8e0aeb9a77caae62d2fb4ed9322e6383148934c5e26ff3f9126120dd'
 readonly CHILD_PRELOAD_SHA256='ea25c3cf121ff21f21c02b5bf017ac6b20e943918b6624210d593e800493127c'
 readonly DATABASE_AUTHORITY_SQL_SHA256='3283ce5f488ed7b3fe145ec12340602fa3bdcf22d0faee1f635ddd095de4017d'
 
@@ -60,6 +62,7 @@ drain_verifier='/usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh'
 authenticated_smoke='/usr/local/libexec/leetplus/verify-legacy-rollback-authenticated-reads.mjs'
 egress_verifier='/usr/local/libexec/leetplus/apply-legacy-rollback-egress.sh'
 drain_receipt='/var/lib/leetplus/legacy-drain/activation.receipt'
+successor_receipt='/var/lib/leetplus/legacy-drain/manifest-successor.receipt'
 require_drain=false
 unprivileged_test_mode=false
 declare -a drain_verifier_arguments=()
@@ -78,6 +81,7 @@ while (($# > 0)); do
     --drain-verifier-argument) drain_verifier_arguments+=("${2:-}"); shift 2 ;;
     --authenticated-smoke-argument) authenticated_smoke_arguments+=("${2:-}"); shift 2 ;;
     --require-drain) require_drain=true; shift ;;
+    --successor-receipt) successor_receipt="${2:-}"; shift 2 ;;
     --unprivileged-test-mode) unprivileged_test_mode=true; shift ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -99,6 +103,7 @@ else
   [[ "$egress_verifier" == '/usr/local/libexec/leetplus/apply-legacy-rollback-egress.sh' ]] \
     || die 'production egress verifier cannot be overridden'
   [[ "$drain_receipt" == '/var/lib/leetplus/legacy-drain/activation.receipt' ]] || die 'production drain receipt cannot be overridden'
+  [[ "$successor_receipt" == '/var/lib/leetplus/legacy-drain/manifest-successor.receipt' ]] || die 'production successor receipt cannot be overridden'
   ((${#drain_verifier_arguments[@]} == 0 && ${#authenticated_smoke_arguments[@]} == 0)) \
     || die 'production verifier arguments cannot be extended'
 fi
@@ -650,6 +655,10 @@ if [[ "$require_drain" == true ]]; then
     || die 'scheduler drain receipt schema is not exact'
   [[ -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$drain_receipt")" ]] \
     || die 'scheduler drain receipt contains a malformed or duplicate key'
+  expected_drain_receipt_keys="$(printf '%s\n' RECORD_VERSION LEGACY_ROLLBACK_SHA DRAIN_ACCEPTED_AT ACTIVATION_INTENT_SHA256 UNIT_MANIFEST_SHA256 PUBLIC_ROUTE_MARKER_SHA256 CONNECTION_DRAIN_MARKER_SHA256 NGINX_WORKER_SNAPSHOT_SHA256 START_FENCE_MARKER_SHA256 DATABASE_LOGIN_FENCE_MARKER_SHA256 DRAIN_VERIFIER_OUTPUT_SHA256 LEGACY_RUNTIME_DRAIN_ACCEPTED LEGACY_RUNTIME_DRAIN_CLEAN_SAMPLES LEGACY_RUNTIME_DRAIN_PROCESS_SNAPSHOT_SHA256 LEGACY_RUNTIME_DRAIN_DATABASE_ROLE | sort)"
+  actual_drain_receipt_keys="$(awk -F= '{ print $1 }' "$drain_receipt" | sort)"
+  [[ "$actual_drain_receipt_keys" == "$expected_drain_receipt_keys" ]] \
+    || die 'scheduler drain receipt key set is not exact'
   grep -F -x 'RECORD_VERSION=2' "$drain_receipt" >/dev/null || die 'scheduler drain receipt version is invalid'
   grep -F -x 'LEGACY_RUNTIME_DRAIN_ACCEPTED=true' "$drain_receipt" >/dev/null \
     || die 'scheduler drain receipt is not accepted'
@@ -657,7 +666,6 @@ if [[ "$require_drain" == true ]]; then
     || die 'scheduler drain receipt is bound to another release'
   declare -A receipt_evidence=(
     [ACTIVATION_INTENT_SHA256]="${receipt_root}/activation.intent"
-    [UNIT_MANIFEST_SHA256]='/etc/leetplus/legacy-drain-units.conf'
     [PUBLIC_ROUTE_MARKER_SHA256]="${receipt_root}/routed-publicly.marker"
     [CONNECTION_DRAIN_MARKER_SHA256]="${receipt_root}/legacy-connections-drained.marker"
     [NGINX_WORKER_SNAPSHOT_SHA256]="${receipt_root}/legacy-nginx-workers.snapshot"
@@ -673,6 +681,70 @@ if [[ "$require_drain" == true ]]; then
   done
   grep -F -x "LEGACY_RUNTIME_DRAIN_PROCESS_SNAPSHOT_SHA256=$(sha256sum "${receipt_root}/legacy-processes.snapshot" | awk '{ print $1 }')" \
     "$drain_receipt" >/dev/null || die 'receipt process snapshot digest mismatch'
+  receipt_manifest_sha="$(awk -F= '$1 == "UNIT_MANIFEST_SHA256" { print $2 }' "$drain_receipt")"
+  [[ "$receipt_manifest_sha" =~ ^[0-9a-f]{64}$ ]] || die 'scheduler drain receipt manifest digest is invalid'
+  if [[ "$receipt_manifest_sha" == "$(sha256sum '/etc/leetplus/legacy-drain-units.conf' | awk '{ print $1 }')" ]]; then
+    : # Historical receipt is directly bound to the installed manifest.
+  else
+    successor_verifier_output="${receipt_root}/manifest-successor-drain-verification.v1"
+    successor_control_output="${receipt_root}/manifest-successor-control-verification.v1"
+    [[ -f "$successor_receipt" && ! -L "$successor_receipt" ]] \
+      || die 'manifest successor receipt is absent while activation manifest is stale'
+    if [[ "$unprivileged_test_mode" == false ]]; then
+      [[ "$(stat -c '%U:%G:%a:%h' -- "$successor_receipt")" == 'root:root:400:1' ]] \
+        || die 'manifest successor receipt must be root:root mode 0400'
+    fi
+    [[ "$(wc -l < "$successor_receipt" | tr -d '[:space:]')" == 12 ]] \
+      || die 'manifest successor receipt schema is not exact'
+    [[ -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$successor_receipt")" ]] \
+      || die 'manifest successor receipt contains a malformed or duplicate key'
+    grep -F -x 'RECORD_VERSION=1' "$successor_receipt" >/dev/null \
+      || die 'manifest successor receipt version is invalid'
+    expected_successor_keys="$(printf '%s\n' RECORD_VERSION LEGACY_DRAIN_MANIFEST_SUCCESSOR_ACCEPTED PREVIOUS_ACTIVATION_RECEIPT_SHA256 PREVIOUS_UNIT_MANIFEST_SHA256 UNIT_MANIFEST_SHA256 CONTROL_RELEASE_SHA CONTROL_VERIFIER_OUTPUT_SHA256 PLAN_SHA256 SUCCESSOR_VERIFIER_OUTPUT_SHA256 NO_ROUTE_DATABASE_OR_UNIT_STATE_EFFECTS ACCEPTED_AT CONTROLLER | sort)"
+    actual_successor_keys="$(awk -F= '{ print $1 }' "$successor_receipt" | sort)"
+    [[ "$actual_successor_keys" == "$expected_successor_keys" ]] \
+      || die 'manifest successor receipt key set is not exact'
+    grep -F -x 'LEGACY_DRAIN_MANIFEST_SUCCESSOR_ACCEPTED=true' "$successor_receipt" >/dev/null \
+      || die 'manifest successor receipt is not accepted'
+    grep -F -x "PREVIOUS_ACTIVATION_RECEIPT_SHA256=$(sha256sum "$drain_receipt" | awk '{ print $1 }')" \
+      "$successor_receipt" >/dev/null || die 'manifest successor predecessor receipt link mismatches'
+    [[ "$receipt_manifest_sha" == "$LEGACY_DRAIN_SUCCESSOR_PREDECESSOR_SHA256" ]] \
+      || die 'manifest successor predecessor digest is not the pinned accepted value'
+    [[ "$(sha256sum '/etc/leetplus/legacy-drain-units.conf' | awk '{ print $1 }')" == "$LEGACY_DRAIN_SUCCESSOR_TARGET_SHA256" ]] \
+      || die 'manifest successor target digest is not the pinned accepted value'
+    grep -F -x "PREVIOUS_UNIT_MANIFEST_SHA256=${receipt_manifest_sha}" "$successor_receipt" >/dev/null \
+      || die 'manifest successor predecessor manifest link mismatches'
+    grep -F -x "UNIT_MANIFEST_SHA256=$(sha256sum '/etc/leetplus/legacy-drain-units.conf' | awk '{ print $1 }')" \
+      "$successor_receipt" >/dev/null || die 'manifest successor target manifest link mismatches'
+    [[ -f "$successor_verifier_output" && ! -L "$successor_verifier_output" ]] \
+      || die 'manifest successor verifier evidence is absent'
+    if [[ "$unprivileged_test_mode" == false ]]; then
+      [[ "$(stat -c '%U:%G:%a:%h' -- "$successor_verifier_output")" == 'root:root:600:1' ]] \
+        || die 'manifest successor verifier evidence must be root:root mode 0600'
+    fi
+    grep -F -x "SUCCESSOR_VERIFIER_OUTPUT_SHA256=$(sha256sum "$successor_verifier_output" | awk '{ print $1 }')" \
+      "$successor_receipt" >/dev/null || die 'manifest successor verifier evidence digest mismatches'
+    grep -F -x 'NO_ROUTE_DATABASE_OR_UNIT_STATE_EFFECTS=true' "$successor_receipt" >/dev/null \
+      || die 'manifest successor receipt effect boundary is invalid'
+    grep -F -x 'CONTROLLER=LEGACY_DRAIN_MANIFEST_SUCCESSOR_V1' "$successor_receipt" >/dev/null \
+      || die 'manifest successor controller identity is invalid'
+    grep -E -x 'CONTROL_RELEASE_SHA=[0-9a-f]{40}' "$successor_receipt" >/dev/null \
+      || die 'manifest successor control generation is invalid'
+    grep -E -x 'CONTROL_VERIFIER_OUTPUT_SHA256=[0-9a-f]{64}' "$successor_receipt" >/dev/null \
+      || die 'manifest successor control verifier digest is invalid'
+    [[ -f "$successor_control_output" && ! -L "$successor_control_output" ]] \
+      || die 'manifest successor control verifier evidence is absent'
+    if [[ "$unprivileged_test_mode" == false ]]; then
+      [[ "$(stat -c '%U:%G:%a:%h' -- "$successor_control_output")" == 'root:root:600:1' ]] \
+        || die 'manifest successor control verifier evidence must be root:root mode 0600'
+    fi
+    grep -F -x "CONTROL_VERIFIER_OUTPUT_SHA256=$(sha256sum "$successor_control_output" | awk '{ print $1 }')" \
+      "$successor_receipt" >/dev/null || die 'manifest successor control verifier evidence digest mismatches'
+    grep -E -x 'PLAN_SHA256=[0-9a-f]{64}' "$successor_receipt" >/dev/null \
+      || die 'manifest successor plan digest is invalid'
+    grep -E -x 'ACCEPTED_AT=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z' "$successor_receipt" >/dev/null \
+      || die 'manifest successor receipt timestamp is invalid'
+  fi
   [[ -x "$drain_verifier" && ! -L "$drain_verifier" ]] || die 'drain verifier is absent or symlinked'
   timeout 90 "$drain_verifier" "${drain_verifier_arguments[@]}" \
     || die 'live scheduler/session drain re-verification failed'

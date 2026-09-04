@@ -80,6 +80,7 @@ readonly EXPECTED_MANIFEST_PATHS="$(printf '%s\n' \
   './nginx/green.conf.example' \
   './nginx/legacy-safe.conf.example' \
   './preflight-legacy-rollback.sh' \
+  './rebind-legacy-drain-manifest-successor.sh' \
   './systemd/leetplus-api-rollback@.service' \
   './systemd/leetplus-blue-green-recovery-watchdog.service' \
   './systemd/leetplus-blue-green-recovery.service' \
@@ -97,9 +98,9 @@ readonly EXPECTED_MANIFEST_PATHS="$(printf '%s\n' \
   './verify-legacy-runtime-drain.sh')"
 actual_manifest_paths="$(awk '{ print $2 }' "$SOURCE_MANIFEST" | LC_ALL=C sort)" \
   || die 'repository control manifest path inventory failed'
-[[ "$(awk 'END { print NR }' "$SOURCE_MANIFEST")" == 26 \
+[[ "$(awk 'END { print NR }' "$SOURCE_MANIFEST")" == 27 \
   && "$actual_manifest_paths" == "$EXPECTED_MANIFEST_PATHS" ]] \
-  || die 'repository control manifest is not the exact reviewed 26-member inventory'
+  || die 'repository control manifest is not the exact reviewed 27-member inventory'
 unset actual_manifest_paths
 [[ ! -e "$CONTROL_PARENT" && ! -L "$CONTROL_PARENT" ]] || die 'fixture control path already exists'
 [[ ! -e "$TRUST_ROOT" && ! -L "$TRUST_ROOT" ]] || die 'fixture trust path already exists'

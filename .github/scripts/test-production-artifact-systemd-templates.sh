@@ -509,6 +509,23 @@ grep -F -x 'After=leetplus-langame-discrepancy-audit-preflight.service' "$langam
 grep -F -x 'EnvironmentFile=/etc/leetplus/langame-daily-worker.env' "$langame_daily_worker_service" > /dev/null
 grep -F -x 'ExecStart=/usr/local/libexec/leetplus/run-authorized-langame-daily-worker.sh' "$langame_daily_worker_service" > /dev/null
 grep -F -x 'Unit=leetplus-langame-daily-worker.service' "$langame_daily_worker_timer" > /dev/null
+expected_langame_daily_worker_timer="$(cat <<'EOF'
+[Unit]
+Description=Run the LeetPlus Langame daily worker once at 04:30 Asia/Yekaterinburg
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 Asia/Yekaterinburg
+Persistent=true
+AccuracySec=1min
+RandomizedDelaySec=30s
+Unit=leetplus-langame-daily-worker.service
+
+[Install]
+WantedBy=timers.target
+EOF
+)"
+[[ "$(tr -d '\r' < "$langame_daily_worker_timer")" == "$expected_langame_daily_worker_timer" ]] \
+  || { printf 'Langame daily worker production timer contract drifted\n' >&2; exit 1; }
 grep -F -x 'OPTIONAL_DRAIN leetplus-langame-daily-worker.timer' "$legacy_drain_units" > /dev/null
 grep -F -x 'OPTIONAL_DRAIN leetplus-langame-daily-worker.service' "$legacy_drain_units" > /dev/null
 grep -F -x 'SAFE leetplus-bonus-ledger-worker.service' "$legacy_drain_units" > /dev/null

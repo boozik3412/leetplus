@@ -17,10 +17,10 @@ readonly TIMER_PATH="/etc/systemd/system/${TIMER}"
 readonly FENCE='/var/lib/leetplus/legacy-drain/legacy-start-fence'
 readonly AUTH_ROOT='/var/lib/leetplus/langame-worker-authorizations'
 readonly ENV_FILE='/etc/leetplus/langame-daily-worker.env'
+readonly TIMER_ENV_TEMP='/etc/leetplus/langame-daily-worker.timer.env.tmp'
 readonly SHA='1111111111111111111111111111111111111111'
 readonly RELEASE="/srv/leetplus/releases/${SHA}"
 readonly MARKER='/var/lib/leetplus/langame-sync/live-systemd-wrapper-ran'
-readonly TIMER_STAMP='/var/lib/systemd/timers/stamp-leetplus-langame-daily-worker.timer'
 readonly WRAPPER='/usr/local/libexec/leetplus/run-authorized-langame-daily-worker.sh'
 readonly RUNNER='/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh'
 readonly MANAGER_ISOLATION_CANARY='leetplus-langame-manager-isolation-canary.service'
@@ -35,9 +35,26 @@ bounded_systemctl() { timeout --foreground --kill-after=2s 12s systemctl "$@"; }
 bounded_systemd_run() { timeout --foreground --kill-after=4s 30s systemd-run --expand-environment=no "$@"; }
 start_worker_or_report() {
   if bounded_systemctl start "$SERVICE"; then return 0; fi
-  systemctl --no-pager --full status "$SERVICE" >&2 || true
-  journalctl --no-pager --output=short-precise --unit "$SERVICE" --lines=80 >&2 || true
+  report_worker_state
   die 'authorized systemd worker invocation failed'
+}
+report_worker_state() {
+  printf 'Langame worker live-systemd fixture: service state follows\n' >&2
+  bounded_systemctl show --no-pager \
+    -p LoadState -p ActiveState -p SubState -p Result -p ExecMainStatus \
+    -p InvocationID -p MainPID -p ControlPID -p ExecMainPID "$SERVICE" >&2 || true
+  bounded_systemctl --no-pager --full status "$SERVICE" >&2 || true
+  timeout --foreground --kill-after=2s 12s journalctl --no-pager --output=short-precise --unit "$SERVICE" --lines=80 >&2 || true
+}
+read_marker_invocation() {
+  local line_count invocation
+  [[ -f "$MARKER" && ! -L "$MARKER" && "$(stat -c '%G:%a:%h' "$MARKER")" == 'leetplus-api-runtime:600:1' ]] \
+    || { report_worker_state; die 'synthetic Node entrypoint did not publish one safe marker'; }
+  line_count="$(wc -l < "$MARKER" | tr -d '[:space:]')"
+  invocation="$(tr -d '\n' < "$MARKER")"
+  [[ "$line_count" == 1 && "$invocation" =~ ^[0-9a-f]{32}$ ]] \
+    || { printf 'markerLineCount=%s markerInvocation=%s\n' "$line_count" "$invocation" >&2; report_worker_state; die 'synthetic Node entrypoint marker is not one exact InvocationID'; }
+  printf '%s' "$invocation"
 }
 transient_unit_is_absent() {
   local unit="$1"
@@ -137,7 +154,7 @@ cleanup() {
   systemctl reset-failed "$SERVICE" "$TIMER" "$MANAGER_ISOLATION_CANARY" "$WRONG_UNIT_CANARY"
   rm -f -- "$WRAPPER" "$RUNNER" "$SERVICE_PATH" "$TIMER_PATH" /etc/systemd/system/leetplus-langame-discrepancy-audit-preflight.service
   rm -rf -- "/etc/systemd/system/${SERVICE}.d" "/etc/systemd/system/${TIMER}.d" "$AUTH_ROOT" "$RELEASE"
-  rm -f -- "$FENCE" "$ENV_FILE" /etc/leetplus/slots/blue.env /etc/nginx/leetplus/active-upstreams.conf /etc/nginx/leetplus/upstreams/blue.conf "$MARKER" "$TIMER_STAMP" /srv/leetplus/slots/blue
+  rm -f -- "$FENCE" "$ENV_FILE" "$TIMER_ENV_TEMP" /etc/leetplus/slots/blue.env /etc/nginx/leetplus/active-upstreams.conf /etc/nginx/leetplus/upstreams/blue.conf "$MARKER" /srv/leetplus/slots/blue
   rmdir -- /srv/leetplus/slots /srv/leetplus/releases /srv/leetplus /var/lib/leetplus/langame-sync /var/lib/leetplus/legacy-drain /var/lib/leetplus /etc/nginx/leetplus/upstreams /etc/nginx/leetplus /etc/nginx /etc/leetplus/slots /etc/leetplus /usr/local/libexec/leetplus 2>/dev/null || true
   if [[ "$created_system_node" == true ]]; then
     # Move the global name atomically into the fixture's private directory
@@ -204,8 +221,8 @@ for path in \
   "$SERVICE_PATH" "$TIMER_PATH" \
   "/etc/systemd/system/${SERVICE}.d" "/etc/systemd/system/${TIMER}.d" \
   /etc/systemd/system/leetplus-langame-discrepancy-audit-preflight.service \
-  "$AUTH_ROOT" "$ENV_FILE" /etc/leetplus /etc/nginx/leetplus /srv/leetplus \
-  /var/lib/leetplus "$WRAPPER" "$RUNNER" "$TIMER_STAMP"; do
+  "$AUTH_ROOT" "$ENV_FILE" "$TIMER_ENV_TEMP" /etc/leetplus /etc/nginx/leetplus /srv/leetplus \
+  /var/lib/leetplus "$WRAPPER" "$RUNNER"; do
   [[ ! -e "$path" && ! -L "$path" ]] || die "fixture root is not clean at ${path}"
 done
 for unit in \
@@ -420,21 +437,93 @@ if [[ "$wrong_unit_status" != 1 \
 fi
 transient_unit_is_absent "$WRONG_UNIT_CANARY" \
   || die 'wrong-unit denial canary left a transient unit'
-before="$(systemctl show -p InvocationID --value "$SERVICE")"
 start_worker_or_report
-after="$(systemctl show -p InvocationID --value "$SERVICE")"
-[[ -n "$after" && "$after" != "$before" && "$(systemctl show -p Result --value "$SERVICE")" == success && "$(systemctl show -p ExecMainStatus --value "$SERVICE")" == 0 ]] || die 'authorized wrapper/runner did not obtain a fresh successful invocation'
+if [[ "$(systemctl show -p ActiveState --value "$SERVICE")" != inactive \
+  || "$(systemctl show -p SubState --value "$SERVICE")" != dead \
+  || "$(systemctl show -p Result --value "$SERVICE")" != success \
+  || "$(systemctl show -p ExecMainStatus --value "$SERVICE")" != 0 ]]; then
+  report_worker_state
+  die 'authorized wrapper/runner did not reach a successful terminal state'
+fi
 assert_zero_processes "$SERVICE"
-[[ -f "$MARKER" && ! -L "$MARKER" && "$(stat -c '%G:%a:%h' "$MARKER")" == 'leetplus-api-runtime:600:1' ]] || die 'synthetic Node entrypoint did not run under the systemd wrapper path'
-[[ "$(tr -d '\n' < "$MARKER")" == "$after" ]] || die 'Node entrypoint did not receive systemd InvocationID through both wrappers'
+canary_invocation="$(read_marker_invocation)"
 
-# Force one deterministic missed-elapse activation. The production controller
-# no longer performs a timer-profile service preflight before this point, so a
-# Persistent=true catch-up remains the only timer-profile invocation.
+# Transition to the exact persistent timer profile. A canary pointer or a 91
+# drop-in naming the canary receipt must not authorize CANARY=false.
 rm -f -- "$MARKER"
-install -o root -g root -m 0644 /dev/null "$TIMER_STAMP"
-touch -d '2020-01-01 00:00:00 UTC' "$TIMER_STAMP"
-before_timer_invocation="$(systemctl show -p InvocationID --value "$SERVICE")"
+sed -E '/^LANGAME_DAILY_WORKER_DATE=/d; s/^LANGAME_DAILY_WORKER_CANARY=true$/LANGAME_DAILY_WORKER_CANARY=false/' "$ENV_FILE" > "$TIMER_ENV_TEMP"
+chown root:leetplus-api-runtime "$TIMER_ENV_TEMP"; chmod 0640 "$TIMER_ENV_TEMP"
+if [[ "$(grep -c '^LANGAME_DAILY_WORKER_CANARY=false$' "$TIMER_ENV_TEMP" || true)" != 1 ]] \
+  || grep -q '^LANGAME_DAILY_WORKER_DATE=' "$TIMER_ENV_TEMP"; then
+  die 'timer worker profile rewrite is not exact'
+fi
+mv -T -- "$TIMER_ENV_TEMP" "$ENV_FILE"
+timer_env_sha="$(sha256sum "$ENV_FILE" | awk '{print $1}')"
+timer_stable_sha="$(sed -E '/^LANGAME_DAILY_WORKER_CANARY=|^LANGAME_DAILY_WORKER_DATE=/d' "$ENV_FILE" | sha256sum | awk '{print $1}')"
+[[ "$timer_stable_sha" == "$stable_sha" && "$timer_env_sha" != "$env_sha" ]] \
+  || die 'timer worker profile stable/full digest transition is invalid'
+if bounded_systemctl start "$SERVICE"; then
+  report_worker_state
+  die 'canary authorization unexpectedly accepted the timer worker profile'
+fi
+[[ ! -e "$MARKER" && ! -L "$MARKER" ]] \
+  || die 'rejected canary-to-timer transition executed the worker entrypoint'
+assert_zero_processes "$SERVICE"
+bounded_systemctl reset-failed "$SERVICE"
+
+timer_permit_id="$(printf '%s:%s:%s:%s' timer 1 "$SHA" "$timer_env_sha" | sha256sum | awk '{print $1}')"
+timer_permit="$AUTH_ROOT/authorization-timer-1-${timer_permit_id}.receipt"
+cat >"$timer_permit" <<EOF
+RECORD_VERSION=1
+KIND=LEETPLUS_LANGAME_DAILY_WORKER_AUTHORIZATION_V1
+AUTHORIZATION_PERMITTED=true
+PHASE=timer
+ATTEMPT=1
+PLAN_SHA256=$(printf '1%.0s' {1..64})
+RELEASE_SHA=${SHA}
+TENANT_SLUG=fixture-tenant
+WORKER_ENV_SHA256=${timer_env_sha}
+WORKER_STABLE_ENV_SHA256=${timer_stable_sha}
+AUTH_ENV_SHA256=$(printf '2%.0s' {1..64})
+SAFE_ENV_SHA256=$(printf '3%.0s' {1..64})
+SERVICE_SHA256=$(sha256sum "$SERVICE_PATH" | awk '{print $1}')
+TIMER_SHA256=$(sha256sum "$TIMER_PATH" | awk '{print $1}')
+SUCCESSOR_RECEIPT_SHA256=$(printf '4%.0s' {1..64})
+CONTROL_VERIFIER_OUTPUT_SHA256=$(printf '5%.0s' {1..64})
+CANARY_DATE=
+NOT_AFTER_EPOCH=0
+PLAN_JSON_SHA256=$(printf '6%.0s' {1..64})
+EOF
+chown root:leetplus-api-runtime "$timer_permit"; chmod 0440 "$timer_permit"
+timer_permit_sha="$(sha256sum "$timer_permit" | awk '{print $1}')"
+cat >"$AUTH_ROOT/active-timer.permit" <<EOF
+RECORD_VERSION=1
+PERMIT_PATH=${timer_permit}
+PERMIT_SHA256=${timer_permit_sha}
+EOF
+chown root:leetplus-api-runtime "$AUTH_ROOT/active-timer.permit"; chmod 0440 "$AUTH_ROOT/active-timer.permit"
+for unit in "$SERVICE" "$TIMER"; do
+  cat >"/etc/systemd/system/${unit}.d/91-leetplus-langame-worker-authorization.conf" <<EOF
+[Unit]
+ConditionPathExists=
+ConditionPathExists=${timer_permit}
+EOF
+done
+cat >"/etc/systemd/system/${TIMER}.d/92-leetplus-langame-fixture-schedule.conf" <<'EOF'
+[Timer]
+OnCalendar=
+OnCalendar=2099-01-01 00:00:00 UTC
+OnActiveSec=2s
+Persistent=false
+AccuracySec=1s
+RandomizedDelaySec=0
+EOF
+chmod 0644 "/etc/systemd/system/${TIMER}.d/92-leetplus-langame-fixture-schedule.conf"
+systemctl daemon-reload
+
+# Exercise one deterministic timer-to-service activation without waiting for
+# the production unit's legitimate 90-second calendar coalescing window. The
+# exact production schedule remains pinned by the static template regression.
 bounded_systemctl enable --now "$TIMER"
 [[ "$(systemctl show -p UnitFileState --value "$TIMER")" == enabled && "$(systemctl show -p ActiveState --value "$TIMER")" == active && "$(systemctl show -p SubState --value "$TIMER")" == waiting ]] || die 'authorized timer is not enabled active(waiting)'
 assert_zero_processes "$TIMER"
@@ -442,15 +531,42 @@ for _ in {1..20}; do
   [[ -f "$MARKER" && "$(systemctl show -p ActiveState --value "$SERVICE")" == inactive ]] && break
   sleep 1
 done
-[[ "$(systemctl show -p ActiveState --value "$SERVICE")" == inactive && "$(systemctl show -p Result --value "$SERVICE")" == success ]] || die 'persistent timer left a failed or in-flight service'
-after_timer_invocation="$(systemctl show -p InvocationID --value "$SERVICE")"
-[[ -n "$after_timer_invocation" && "$after_timer_invocation" != "$before_timer_invocation" && "$(wc -l < "$MARKER" | tr -d '[:space:]')" == 1 ]] || die 'missed persistent timer did not execute exactly one timer-profile worker'
+if [[ "$(systemctl show -p ActiveState --value "$SERVICE")" != inactive \
+  || "$(systemctl show -p SubState --value "$SERVICE")" != dead \
+  || "$(systemctl show -p Result --value "$SERVICE")" != success \
+  || "$(systemctl show -p ExecMainStatus --value "$SERVICE")" != 0 ]]; then
+  report_worker_state
+  die 'persistent timer left a failed or in-flight service'
+fi
+timer_invocation="$(read_marker_invocation)"
+[[ "$timer_invocation" != "$canary_invocation" ]] \
+  || { report_worker_state; die 'timer did not prove a fresh timer-profile invocation'; }
 assert_zero_processes "$SERVICE"
 bounded_systemctl disable --now "$TIMER"
-rm -f -- "/etc/systemd/system/${SERVICE}.d/91-leetplus-langame-worker-authorization.conf" "/etc/systemd/system/${TIMER}.d/91-leetplus-langame-worker-authorization.conf" "$AUTH_ROOT/active-canary.permit"
+bounded_systemctl stop "$SERVICE"
+bounded_systemctl reset-failed "$SERVICE" "$TIMER"
+[[ "$(systemctl show -p ActiveState --value "$SERVICE")" == inactive \
+  && "$(systemctl show -p SubState --value "$SERVICE")" == dead \
+  && "$(systemctl show -p ActiveState --value "$TIMER")" == inactive \
+  && "$(systemctl show -p UnitFileState --value "$TIMER")" == disabled ]] \
+  || die 'worker service/timer were not quiescent before authorization cleanup'
+assert_zero_processes "$SERVICE"
+assert_zero_processes "$TIMER"
+rm -f -- "/etc/systemd/system/${SERVICE}.d/91-leetplus-langame-worker-authorization.conf" "/etc/systemd/system/${TIMER}.d/91-leetplus-langame-worker-authorization.conf" "$AUTH_ROOT/active-canary.permit" "$AUTH_ROOT/active-timer.permit"
 systemctl daemon-reload
+[[ ! -e "$AUTH_ROOT/active-canary.permit" && ! -L "$AUTH_ROOT/active-canary.permit" \
+  && ! -e "$AUTH_ROOT/active-timer.permit" && ! -L "$AUTH_ROOT/active-timer.permit" \
+  && ! -e "/etc/systemd/system/${SERVICE}.d/91-leetplus-langame-worker-authorization.conf" \
+  && ! -e "/etc/systemd/system/${TIMER}.d/91-leetplus-langame-worker-authorization.conf" ]] \
+  || die 'authorization pointer or drop-in remained after revocation'
+rm -f -- "$MARKER"
 bounded_systemctl start "$SERVICE"
 [[ "$(systemctl show -p ActiveState --value "$SERVICE")" == inactive ]] || die 'service starts after authorization cleanup despite absent 91 permit'
+bounded_systemctl start "$TIMER"
+[[ "$(systemctl show -p ActiveState --value "$TIMER")" == inactive \
+  && "$(systemctl show -p UnitFileState --value "$TIMER")" == disabled \
+  && ! -e "$MARKER" && ! -L "$MARKER" ]] \
+  || die 'service or timer executed after authorization cleanup despite the retained legacy fence'
 assert_zero_processes "$SERVICE"
 assert_zero_processes "$TIMER"
 printf 'LANGAME_WORKER_AUTHORITY_LIVE_SYSTEMD_FIXTURE=PASS\n'

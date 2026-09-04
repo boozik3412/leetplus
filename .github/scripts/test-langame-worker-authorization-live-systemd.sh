@@ -47,7 +47,7 @@ cleanup() {
   rm -f -- "$WRAPPER" "$RUNNER" "$SERVICE_PATH" "$TIMER_PATH" /etc/systemd/system/leetplus-langame-discrepancy-audit-preflight.service
   rm -rf -- "/etc/systemd/system/${SERVICE}.d" "/etc/systemd/system/${TIMER}.d" "$AUTH_ROOT" "$RELEASE"
   rm -f -- "$FENCE" "$ENV_FILE" /etc/leetplus/slots/blue.env /etc/nginx/leetplus/active-upstreams.conf /etc/nginx/leetplus/upstreams/blue.conf "$MARKER" "$TIMER_STAMP" /srv/leetplus/slots/blue
-  rmdir -- /srv/leetplus/slots /srv/leetplus/releases /srv/leetplus /var/lib/leetplus/langame-sync /var/lib/leetplus/legacy-drain /var/lib/leetplus /etc/nginx/leetplus/upstreams /etc/nginx/leetplus /etc/nginx /etc/leetplus /usr/local/libexec/leetplus 2>/dev/null || true
+  rmdir -- /srv/leetplus/slots /srv/leetplus/releases /srv/leetplus /var/lib/leetplus/langame-sync /var/lib/leetplus/legacy-drain /var/lib/leetplus /etc/nginx/leetplus/upstreams /etc/nginx/leetplus /etc/nginx /etc/leetplus/slots /etc/leetplus /usr/local/libexec/leetplus 2>/dev/null || true
   if [[ "$created_system_node" == true ]]; then
     # Move the global name atomically into the fixture's private directory
     # before inspecting or deleting it. A concurrent replacement is restored,
@@ -148,7 +148,7 @@ for path in "$SERVICE_PATH" "$TIMER_PATH" "/etc/systemd/system/${SERVICE}.d" "/e
 if ! getent group leetplus-runtime >/dev/null; then groupadd --system leetplus-runtime; created_runtime=true; fi
 if ! getent group leetplus-api-runtime >/dev/null; then groupadd --system leetplus-api-runtime; created_api=true; fi
 
-install -d -o root -g root -m 0755 /etc/leetplus /etc/nginx/leetplus/upstreams /srv/leetplus/releases /srv/leetplus/slots /var/lib/leetplus/legacy-drain /usr/local/libexec/leetplus
+install -d -o root -g root -m 0755 /etc/leetplus/slots /etc/nginx/leetplus/upstreams /srv/leetplus/releases /srv/leetplus/slots /var/lib/leetplus/legacy-drain /usr/local/libexec/leetplus
 install -d -o root -g leetplus-api-runtime -m 0710 "$AUTH_ROOT"
 install -d -o root -g leetplus-api-runtime -m 2770 /var/lib/leetplus/langame-sync
 install -d -o root -g leetplus-runtime -m 0755 "$RELEASE/apps/api/dist/integrations"

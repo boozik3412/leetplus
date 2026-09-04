@@ -25,6 +25,13 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 0077
 
+# A privileged operator can invoke this authority from /root (for example over
+# SSH).  runuser preserves the current working directory, and an unprivileged
+# slot identity cannot traverse /root even though every probe target itself is
+# valid.  Normalize the inherited cwd before any cross-identity probe so the
+# result depends only on the audited namespace.
+cd /
+
 readonly ROOT='/var/lib/leetplus/langame-sync'
 readonly ROOT_GROUP='leetplus-api-runtime'
 readonly PRIMARY_GROUP='leetplus-runtime'

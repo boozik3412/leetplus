@@ -41,6 +41,7 @@ umask 0077
 readonly LEGACY_DATABASE_ROLE='leetplus'
 readonly ROLLBACK_DATABASE_ROLE='leetplus_legacy_rollback'
 readonly ROLLBACK_APPLICATION_NAME='leetplus-nminus1-http-7de04ff4'
+readonly LANGAME_WORKER_AUTHORIZER='/usr/local/libexec/leetplus/verify-langame-daily-worker-authorization.sh'
 
 die() {
   printf 'verify-legacy-runtime-drain: %s\n' "$*" >&2
@@ -275,9 +276,41 @@ legacy_process_survives() {
 }
 
 unit_not_drained() {
-  local unit load_state main_pid control_pid exec_main_pid control_group cgroup_path cgroup_pid cgroup_pids
-  local fence_dropin fence_directory loaded_dropins expected_fence_line
+  local unit load_state unit_file_state main_pid control_pid exec_main_pid control_group cgroup_path cgroup_pid cgroup_pids
+  local fence_dropin fence_directory loaded_dropins expected_fence_line authorized_dropin
   expected_fence_line="ConditionPathExists=!${fence_marker}"
+  # This is the sole successor exception. The dedicated authorizer proves the
+  # exact two-unit TIMER worker contract (including the successor receipt and
+  # modern-slot identity); no other OPTIONAL_DRAIN unit can bypass the durable
+  # generic start fence or inactive/disabled process checks below.
+  declare -A langame_authorized_units=()
+  local langame_service_authorization="${systemd_root}/leetplus-langame-daily-worker.service.d/91-leetplus-langame-worker-authorization.conf"
+  local langame_timer_authorization="${systemd_root}/leetplus-langame-daily-worker.timer.d/91-leetplus-langame-worker-authorization.conf"
+  if [[ -e "$langame_service_authorization" || -L "$langame_service_authorization" \
+    || -e "$langame_timer_authorization" || -L "$langame_timer_authorization" ]]; then
+    [[ -f "$langame_service_authorization" && ! -L "$langame_service_authorization" \
+      && -f "$langame_timer_authorization" && ! -L "$langame_timer_authorization" ]] \
+      || { printf 'Langame worker authorization drop-ins are incomplete or symlinked\n' >&2; return 0; }
+    if [[ "$unprivileged_test_mode" == false ]]; then
+      [[ "$(stat -c '%U:%G:%a:%h' -- "$langame_service_authorization" "$langame_timer_authorization" | sort -u)" == 'root:root:644:1' ]] \
+        || { printf 'Langame worker authorization drop-in authority is unsafe\n' >&2; return 0; }
+      [[ -x "$LANGAME_WORKER_AUTHORIZER" && ! -L "$LANGAME_WORKER_AUTHORIZER" \
+        && "$(stat -c '%U:%G:%a:%h' -- "$LANGAME_WORKER_AUTHORIZER")" == 'root:root:555:1' ]] \
+        || { printf 'Langame worker authorization verifier is absent or unsafe\n' >&2; return 0; }
+      langame_authorizer_output="$(timeout --kill-after=5s 90s "$LANGAME_WORKER_AUTHORIZER" 2>&1)" || {
+        printf 'Langame worker authorization verifier rejected the worker pair\n' >&2; return 0;
+      }
+      [[ "$langame_authorizer_output" == LANGAME_DAILY_WORKER_AUTHORIZATION=PASS\ * && "$langame_authorizer_output" != *$'\n'* ]] \
+        || { printf 'Langame worker authorization verifier output is not exact\n' >&2; return 0; }
+    else
+      # Test fixtures must exercise the normal fenced path; they cannot forge
+      # a production worker authorization receipt.
+      printf 'Langame worker authorization drop-ins are forbidden in unprivileged drain tests\n' >&2
+      return 0
+    fi
+    langame_authorized_units[leetplus-langame-daily-worker.service]=1
+    langame_authorized_units[leetplus-langame-daily-worker.timer]=1
+  fi
   for unit in "${drain_units[@]}"; do
     load_state="$(systemctl_bounded show --property=LoadState --value "$unit" 2>/dev/null || true)"
     fence_dropin="${systemd_root}/${unit}.d/90-leetplus-nminus1-start-fence.conf"
@@ -314,19 +347,36 @@ unit_not_drained() {
       printf 'required drain unit disappeared: %s\n' "$unit" >&2
       return 0
     fi
-    if systemctl_bounded is-active --quiet "$unit"; then
-      printf 'legacy unit is still active: %s\n' "$unit" >&2
-      return 0
-    fi
-    if systemctl_bounded is-enabled --quiet "$unit"; then
-      printf 'legacy unit is still boot-enabled: %s\n' "$unit" >&2
-      return 0
-    fi
     loaded_dropins="$(systemctl_bounded show --property=DropInPaths --value "$unit" 2>/dev/null || true)"
     case " $loaded_dropins " in
       *" $fence_dropin "*) ;;
       *)
         printf 'legacy unit start-fence drop-in is not loaded: %s\n' "$unit" >&2
+        return 0
+        ;;
+    esac
+    if [[ -n "${langame_authorized_units[$unit]:-}" ]]; then
+      continue
+    fi
+    if systemctl_bounded is-active --quiet "$unit"; then
+      printf 'legacy unit is still active: %s\n' "$unit" >&2
+      return 0
+    fi
+    unit_file_state="$(systemctl_bounded show --property=UnitFileState --value "$unit" 2>/dev/null || true)"
+    case "$unit_file_state" in
+      disabled|masked|not-found) ;;
+      static)
+        # systemd reports a unit without an [Install] section as static and
+        # `is-enabled` may return success for it.  A fenced inactive optional
+        # service is not boot-enabled, whereas accepting static timers or a
+        # REQUIRED service would widen the legacy drain boundary.
+        if [[ "$unit" != 'leetplus-langame-daily-worker.service' ]]; then
+          printf 'legacy unit has an unacceptable static boot state: %s\n' "$unit" >&2
+          return 0
+        fi
+        ;;
+      *)
+        printf 'legacy unit is still boot-enabled: unit=%s state=%s\n' "$unit" "$unit_file_state" >&2
         return 0
         ;;
     esac

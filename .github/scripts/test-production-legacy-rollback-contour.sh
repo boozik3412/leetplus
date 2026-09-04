@@ -1457,6 +1457,13 @@ case "$command_name" in
     property="${1#--property=}"
     case "$property" in
       LoadState) printf 'loaded\n' ;;
+      UnitFileState)
+        if [[ -f "${TEST_STATE_ROOT}/enabled-${state_key}" ]]; then
+          printf 'enabled\n'
+        else
+          printf 'disabled\n'
+        fi
+        ;;
       MainPID)
         if [[ "$unit" == 'nginx.service' ]]; then
           printf '5000\n'

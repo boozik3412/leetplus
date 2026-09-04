@@ -44,6 +44,7 @@ const EXPECTED_INNER_MEMBERS = [
   "nginx/green.conf.example",
   "nginx/legacy-safe.conf.example",
   "preflight-legacy-rollback.sh",
+  "rebind-legacy-drain-manifest-successor.sh",
   "systemd/leetplus-api-rollback@.service",
   "systemd/leetplus-blue-green-recovery-watchdog.service",
   "systemd/leetplus-blue-green-recovery.service",
@@ -66,6 +67,7 @@ const REQUIRED_PATHS = [
   `${INNER_ROOT}/README.md`,
   `${INNER_ROOT}/bind-release-slot.sh`,
   `${INNER_ROOT}/langame-discrepancy-audit-authority.sh`,
+  `${INNER_ROOT}/langame-daily-worker-authorization-authority.sh`,
   `${INNER_ROOT}/legacy-rollback-auth-edge.mjs`,
   `${INNER_ROOT}/legacy-rollback-child-loopback.cjs`,
   `${INNER_ROOT}/nginx/README.md`,
@@ -73,12 +75,14 @@ const REQUIRED_PATHS = [
   `${INNER_ROOT}/nginx/blue.conf.example`,
   `${INNER_ROOT}/nginx/green.conf.example`,
   `${INNER_ROOT}/preflight-release-slot.sh`,
+  `${INNER_ROOT}/rebind-legacy-drain-manifest-successor.sh`,
   `${INNER_ROOT}/prepare-web-slot-cache.sh`,
   `${INNER_ROOT}/promote-release-artifact.sh`,
   `${INNER_ROOT}/resumable-release-orchestrator.mjs`,
   `${INNER_ROOT}/resumable-release-orchestrator.sh`,
   `${INNER_ROOT}/run-active-bonus-ledger-worker.sh`,
   `${INNER_ROOT}/run-active-langame-daily-worker.sh`,
+  `${INNER_ROOT}/run-authorized-langame-daily-worker.sh`,
   `${INNER_ROOT}/run-current-release-restored-copy-acceptance.sh`,
   `${INNER_ROOT}/scheduler-free-n-minus-one-runbook.md`,
   `${INNER_ROOT}/seal-release-artifact.sh`,
@@ -105,6 +109,7 @@ const REQUIRED_PATHS = [
   `${INNER_ROOT}/verify-pnpm-store-integrity.mjs`,
   `${INNER_ROOT}/verify-release-hydration-systemd.mjs`,
   `${INNER_ROOT}/verify-release-readiness.sh`,
+  `${INNER_ROOT}/verify-langame-daily-worker-authorization.sh`,
   AUTHORITY_PATH,
   INSTALL_AUTHORITY_PATH,
   INSTALL_MAP_PATH,
@@ -607,7 +612,7 @@ function assertInstallAuthorityContract(root) {
     priorLine = line;
     destinations.add(destination);
   }
-  if (lines.length !== 57) {
+  if (lines.length !== 62) {
     fail("production control install map does not have the exact reviewed entry count");
   }
   for (const requiredDestination of [
@@ -621,6 +626,7 @@ function assertInstallAuthorityContract(root) {
     "/usr/local/libexec/leetplus/stage-release-artifact.sh",
     "/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh",
     "/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh",
+    "/usr/local/sbin/leetplus-rebind-legacy-drain-manifest-successor",
     "/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs",
     "/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs",
     "/usr/local/libexec/leetplus/verify-release-hydration-systemd.mjs",

@@ -33,7 +33,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for command_name in basename cd chmod cp dirname find grep gzip install ln mkdir mktemp mv realpath rm sed sha256sum sort stat tar; do
+for command_name in basename cd chmod chown cp dirname find grep gzip install ln mkdir mktemp mv realpath rm sed sha256sum sort stat tar; do
   command -v "$command_name" >/dev/null 2>&1 \
     || die "missing fixture command: ${command_name}"
 done
@@ -279,7 +279,7 @@ prepare_fixture_root "$accepted_root" "$archive"
 run_installer "$accepted_root" > "$TEST_ROOT/accepted.out"
 grep -F -x 'PRODUCTION_CONTROL_INSTALL=PASS' "$TEST_ROOT/accepted.out" >/dev/null
 grep -F -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' "$TEST_ROOT/accepted.out" >/dev/null
-grep -F -x 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=57' "$TEST_ROOT/accepted.out" >/dev/null
+grep -F -x 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=62' "$TEST_ROOT/accepted.out" >/dev/null
 grep -F -x 'PRODUCTION_CONTROL_EFFECTIVE_LANE=L1_RUNTIME' "$TEST_ROOT/accepted.out" >/dev/null
 grep -F -x "PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256=$(printf 'a%.0s' {1..64})" \
   "$TEST_ROOT/accepted.out" >/dev/null
@@ -296,6 +296,9 @@ fixture_gid="$(id -g)"
     "$accepted_root/usr/local/libexec/leetplus/stage-release-artifact.sh")" == \
     "${fixture_uid}:${fixture_gid}:555:1" ]] \
   || die 'accepted install did not preserve executable service-helper authority modes'
+[[ "$(stat -c '%u:%g:%a' -- "$accepted_root/var/lib/leetplus/langame-worker-authorizations")" == \
+    "${fixture_uid}:${fixture_gid}:710" ]] \
+  || die 'accepted install did not provision the exact Langame worker authorization root'
 run_installed_verifier "$accepted_root" > "$TEST_ROOT/accepted-verify.out"
 grep -F -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' \
   "$TEST_ROOT/accepted-verify.out" >/dev/null
@@ -402,6 +405,45 @@ expect_installer_rejected \
   map-drift \
   "$map_drift_root" \
   'shipped artifact verifier rejected the private generation'
+
+linked_worker_root="$TEST_ROOT/linked-worker-root"
+prepare_fixture_root "$linked_worker_root" "$archive"
+install -d -m 0755 -- "$linked_worker_root/var/lib/leetplus"
+ln -s -- "$TEST_ROOT/linked-worker-target" \
+  "$linked_worker_root/var/lib/leetplus/langame-worker-authorizations"
+expect_installer_rejected \
+  linked-worker-authorization-root \
+  "$linked_worker_root" \
+  'langame worker authorization root is not a real directory'
+
+if ((EUID == 0)); then
+  foreign_worker_root="$TEST_ROOT/foreign-worker-root"
+  prepare_fixture_root "$foreign_worker_root" "$archive"
+  install -d -m 0710 -- "$foreign_worker_root/var/lib/leetplus/langame-worker-authorizations"
+  chown 65534:65534 -- "$foreign_worker_root/var/lib/leetplus/langame-worker-authorizations"
+  expect_installer_rejected \
+    foreign-worker-authorization-root \
+    "$foreign_worker_root" \
+    'langame worker authorization root is foreign-owned'
+fi
+
+mode_worker_root="$TEST_ROOT/mode-worker-root"
+prepare_fixture_root "$mode_worker_root" "$archive"
+install -d -m 0700 -- "$mode_worker_root/var/lib/leetplus/langame-worker-authorizations"
+expect_installer_rejected \
+  mode-worker-authorization-root \
+  "$mode_worker_root" \
+  'langame worker authorization root mode drift'
+
+verifier_worker_mode_root="$TEST_ROOT/verifier-worker-mode-root"
+prepare_fixture_root "$verifier_worker_mode_root" "$archive"
+run_installer "$verifier_worker_mode_root" > /dev/null
+chmod 0750 -- "$verifier_worker_mode_root/var/lib/leetplus/langame-worker-authorizations"
+if run_installed_verifier "$verifier_worker_mode_root" > "$TEST_ROOT/verifier-worker-mode.out" 2>&1; then
+  die 'installed-generation verifier accepted Langame worker authorization root mode drift'
+fi
+grep -F 'Langame worker authorization root does not have exact directory authority mode 710' \
+  "$TEST_ROOT/verifier-worker-mode.out" >/dev/null
 
 mode_drift_root="$TEST_ROOT/mode-drift-root"
 prepare_fixture_root "$mode_drift_root" "$archive"

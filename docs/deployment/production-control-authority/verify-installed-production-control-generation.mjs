@@ -13,10 +13,13 @@ const EFFECTIVE_LANES = new Set(["L1_RUNTIME", "L2_SCHEMA_SECURITY"]);
 const SAFE_SOURCE_PATTERN = /^[A-Za-z0-9_.@+/-]+$/u;
 const SAFE_DESTINATION_PATTERN = /^\/[A-Za-z0-9_.@+/-]+$/u;
 const EXPECTED_INSTALL_MAP_SHA256 =
-  "e6a6f4288c9d1c581886b83c445d591515f6303d5800f61cbfda3a06101e2d96";
+  "ac6a6415373f33351d31dc428534574d7fe61b22350015dd33ef47c1b60a4fe7";
 const EXPECTED_REPOSITORY = "boozik3412/leetplus";
 const GENERATION_BASE = "/srv/leetplus/production-control-generations";
 const RECEIPT_BASE = "/var/lib/leetplus/deploy-receipts/production-control";
+const LANGAME_WORKER_AUTHORIZATION_ROOT =
+  "/var/lib/leetplus/langame-worker-authorizations";
+const LANGAME_WORKER_AUTHORIZATION_GROUP = "leetplus-api-runtime";
 const INSTALLED_AUTHORITY = "/usr/local/sbin/leetplus-install-production-control-v1";
 const ARTIFACT_VERIFIER_SOURCE =
   "docs/deployment/production-control-authority/verify-production-control-artifact.mjs";
@@ -73,6 +76,9 @@ const REQUIRED_DESTINATIONS = new Set([
   "/usr/local/libexec/leetplus/stage-release-artifact.sh",
   "/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh",
   "/usr/local/libexec/leetplus/run-active-langame-daily-worker.sh",
+  "/usr/local/sbin/leetplus-rebind-legacy-drain-manifest-successor",
+  "/usr/local/libexec/leetplus/run-authorized-langame-daily-worker.sh",
+  "/usr/local/libexec/leetplus/verify-langame-daily-worker-authorization.sh",
   "/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs",
   "/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs",
   "/usr/local/libexec/leetplus/verify-production-control-artifact.mjs",
@@ -81,6 +87,7 @@ const REQUIRED_DESTINATIONS = new Set([
   "/usr/local/sbin/leetplus-blue-green-cutover",
   "/usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1",
   "/usr/local/sbin/leetplus-langame-discrepancy-audit-authority",
+  "/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority",
   "/usr/local/sbin/leetplus-promote-release-artifact",
   "/usr/local/sbin/leetplus-resumable-release-orchestrator",
   "/usr/local/sbin/leetplus-seal-release-artifact",
@@ -575,6 +582,41 @@ function assertRegularAuthority(file, expectedUid, expectedGid, mode, source) {
   }
 }
 
+function resolveLangameWorkerAuthorizationGid(fixtureMode) {
+  if (fixtureMode) return process.getgid();
+  const groupPath = "/etc/group";
+  const groupFile = fs.lstatSync(groupPath);
+  if (
+    fs.realpathSync.native(groupPath) !== groupPath ||
+    !groupFile.isFile() ||
+    groupFile.isSymbolicLink() ||
+    groupFile.nlink !== 1 ||
+    groupFile.uid !== 0 ||
+    groupFile.gid !== 0 ||
+    (groupFile.mode & 0o022) !== 0 ||
+    groupFile.size <= 0 ||
+    groupFile.size > 1024 * 1024
+  ) {
+    fail("production local group authority is not exact root authority");
+  }
+  const records = decodeUtf8(
+    readBoundedRegularFile(groupPath, "Langame worker local group authority"),
+    "Langame worker local group authority",
+  )
+    .split("\n")
+    .filter((line) => line.startsWith(`${LANGAME_WORKER_AUTHORIZATION_GROUP}:`));
+  if (records.length !== 1) {
+    fail("required Langame worker runtime group is unavailable or ambiguous");
+  }
+  const match = /^leetplus-api-runtime:[^:\n]*:([0-9]+):[^\n]*$/u.exec(records[0]);
+  if (!match) fail("required Langame worker runtime group is malformed");
+  const gid = Number(match[1]);
+  if (!Number.isSafeInteger(gid) || gid < 0 || gid > 4_294_967_295) {
+    fail("required Langame worker runtime group has an invalid gid");
+  }
+  return gid;
+}
+
 function assertInstalledDestinations(
   rootPrefix,
   generationRoot,
@@ -677,6 +719,7 @@ const rootPrefix = fixtureMode
   ? canonicalRoot(parsedArguments.fixtureRoot, "fixture root")
   : "/";
 trustedAuthorityRoot = rootPrefix;
+const langameWorkerAuthorizationGid = resolveLangameWorkerAuthorizationGid(fixtureMode);
 const generationRoot = hostPath(
   rootPrefix,
   `${GENERATION_BASE}/${parsedArguments.releaseSha}`,
@@ -703,10 +746,26 @@ assertExactDirectoryAuthority(
   0o700,
   "production-control receipt base",
 );
+const langameWorkerAuthorizationRoot = hostPath(
+  rootPrefix,
+  LANGAME_WORKER_AUTHORIZATION_ROOT,
+);
+assertExactDirectoryAuthority(
+  langameWorkerAuthorizationRoot,
+  expectedUid,
+  langameWorkerAuthorizationGid,
+  0o710,
+  "Langame worker authorization root",
+);
 assertTrustedAncestors(generationRoot, expectedUid, expectedGid, false);
 assertTrustedAncestors(receiptPath, expectedUid, expectedGid, false);
 const mountTargets = readMountTargets();
 assertNoExactOrNestedMount(generationRoot, mountTargets, "installed generation");
+assertNoExactOrNestedMount(
+  langameWorkerAuthorizationRoot,
+  mountTargets,
+  "Langame worker authorization root",
+);
 let intentPresent = false;
 try {
   fs.lstatSync(intentPath);

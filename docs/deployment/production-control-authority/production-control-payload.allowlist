@@ -6,6 +6,7 @@ docs/deployment/production-artifact/apply-legacy-rollback-egress.sh
 docs/deployment/production-artifact/bind-release-slot.sh
 docs/deployment/production-artifact/blue-green-cutover.sh
 docs/deployment/production-artifact/install-legacy-rollback-contour.sh
+docs/deployment/production-artifact/langame-daily-worker-authorization-authority.sh
 docs/deployment/production-artifact/langame-discrepancy-audit-authority.sh
 docs/deployment/production-artifact/legacy-rollback-auth-edge.mjs
 docs/deployment/production-artifact/legacy-rollback-child-loopback.cjs
@@ -18,10 +19,12 @@ docs/deployment/production-artifact/preflight-legacy-rollback.sh
 docs/deployment/production-artifact/preflight-release-slot.sh
 docs/deployment/production-artifact/prepare-web-slot-cache.sh
 docs/deployment/production-artifact/promote-release-artifact.sh
+docs/deployment/production-artifact/rebind-legacy-drain-manifest-successor.sh
 docs/deployment/production-artifact/resumable-release-orchestrator.mjs
 docs/deployment/production-artifact/resumable-release-orchestrator.sh
 docs/deployment/production-artifact/run-active-bonus-ledger-worker.sh
 docs/deployment/production-artifact/run-active-langame-daily-worker.sh
+docs/deployment/production-artifact/run-authorized-langame-daily-worker.sh
 docs/deployment/production-artifact/run-current-release-restored-copy-acceptance.sh
 docs/deployment/production-artifact/scheduler-free-n-minus-one-runbook.md
 docs/deployment/production-artifact/seal-release-artifact.sh
@@ -56,6 +59,7 @@ docs/deployment/production-artifact/systemd/legacy-rollback-safe.env.example
 docs/deployment/production-artifact/systemd/nginx.service.d/leetplus-blue-green-recovery.conf
 docs/deployment/production-artifact/systemd/tmpfiles.d/leetplus-release.conf
 docs/deployment/production-artifact/systemd/web-runtime.env.example
+docs/deployment/production-artifact/verify-langame-daily-worker-authorization.sh
 docs/deployment/production-artifact/verify-legacy-rollback-authenticated-reads.mjs
 docs/deployment/production-artifact/verify-legacy-rollback-readiness.sh
 docs/deployment/production-artifact/verify-legacy-runtime-drain.sh

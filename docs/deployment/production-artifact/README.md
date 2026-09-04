@@ -460,8 +460,18 @@ Unattended daily sync не запускается внутри обоих API sl
 release и требуют тот же storage preflight. Secret env создаётся оператором как
 `/etc/leetplus/langame-daily-worker.env` (`root:leetplus-api-runtime 0640`) и не
 входит в install map. Установка unit files оставляет timer disabled; canary и
-enable требуют отдельного production GO. Current profile допускает ровно один
-internal tenant и сохраняет external background deny. Полный порядок описан в
+enable требуют отдельного production GO. Permit authority хранит root-owned
+immutable evidence в `/var/lib/leetplus/langame-worker-authorizations`, требует
+strict PID/cgroup quiescence, проверяет возможный немедленный persistent-timer
+run и не выполняет перед ним дублирующий timer-profile oneshot. Exact
+canary/stable-env evidence сохраняется отдельным validation receipt. Authority
+запускает worker только как exact oneshot unit: до первого helper process wrapper
+требует kernel cgroup-v2 path, singleton PID и `InvocationID`, а unit скрывает
+`/run/dbus` и `/run/systemd/private`. Поэтому DynamicUser не зависит от system
+D-Bus и direct/wrong-unit permit reuse отклоняется. Authority имеет digest-bound
+`revoke-plan/apply/check/recover`, который
+возвращает exact 90 fences. Current profile допускает ровно один internal
+tenant и сохраняет external background deny. Полный порядок описан в
 [`../langame-sync-production-recovery.md`](../langame-sync-production-recovery.md).
 
 `LANGAME_DISCREPANCY_LOG_ROOT=/var/lib/leetplus/langame-sync` обязателен для

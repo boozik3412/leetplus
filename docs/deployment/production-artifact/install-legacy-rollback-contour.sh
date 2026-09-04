@@ -570,6 +570,7 @@ add_install_file 0444 "${systemd_source}/legacy-database-login-fence-authority.s
 add_install_file 0755 "${source_root}/verify-legacy-rollback-authenticated-reads.mjs" "${libexec_root}/verify-legacy-rollback-authenticated-reads.mjs"
 add_install_file 0755 "${source_root}/verify-legacy-runtime-drain.sh" "${libexec_root}/verify-legacy-runtime-drain.sh"
 add_install_file 0755 "${source_root}/verify-legacy-rollback-readiness.sh" "${libexec_root}/verify-legacy-rollback-readiness.sh"
+add_install_file 0500 "${source_root}/rebind-legacy-drain-manifest-successor.sh" "${sbin_root}/leetplus-rebind-legacy-drain-manifest-successor"
 add_install_file 0755 "${source_root}/activate-legacy-rollback-contour.sh" "${libexec_root}/activate-legacy-rollback-contour.sh"
 # This fixed root authority is also installed by production-control. Keep the
 # mode contract identical so installing a newer admitted control generation

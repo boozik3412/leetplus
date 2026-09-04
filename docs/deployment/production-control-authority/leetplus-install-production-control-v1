@@ -133,6 +133,7 @@ fi
 import argparse
 import fcntl
 import gzip
+import grp
 import hashlib
 import json
 import os
@@ -146,10 +147,12 @@ RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SAFE_SOURCE_RE = re.compile(r"^[A-Za-z0-9_.@+/-]+$")
 EXPECTED_REPOSITORY = "boozik3412/leetplus"
-EXPECTED_INSTALL_MAP_SHA256 = "e6a6f4288c9d1c581886b83c445d591515f6303d5800f61cbfda3a06101e2d96"
+EXPECTED_INSTALL_MAP_SHA256 = "ac6a6415373f33351d31dc428534574d7fe61b22350015dd33ef47c1b60a4fe7"
 GENERATION_BASE = "/srv/leetplus/production-control-generations"
 INBOX_BASE = "/srv/leetplus/production-control-inbox"
 RECEIPT_BASE = "/var/lib/leetplus/deploy-receipts/production-control"
+LANGAME_WORKER_AUTHORIZATION_ROOT = "/var/lib/leetplus/langame-worker-authorizations"
+LANGAME_WORKER_AUTHORIZATION_GROUP = "leetplus-api-runtime"
 CONTROL_BUNDLE_ROOT = "/srv/leetplus/control-bundles/scheduler-free-nminus1-v1"
 AUTHORITY_PATH = "/usr/local/sbin/leetplus-install-production-control-v1"
 INSTALLER_SOURCE = "docs/deployment/production-control-authority/leetplus-install-production-control-v1"
@@ -229,6 +232,21 @@ def expected_identity(fixture_mode):
     return (os.getuid(), os.getgid()) if fixture_mode else (0, 0)
 
 
+def expected_langame_worker_authorization_gid(fixture_mode, fixture_gid):
+    if fixture_mode:
+        return fixture_gid
+    try:
+        group = grp.getgrnam(LANGAME_WORKER_AUTHORIZATION_GROUP)
+    except KeyError:
+        die(
+            "required Langame worker runtime group is absent: "
+            + LANGAME_WORKER_AUTHORIZATION_GROUP
+        )
+    if group.gr_name != LANGAME_WORKER_AUTHORIZATION_GROUP or group.gr_gid < 0:
+        die("required Langame worker runtime group is malformed")
+    return group.gr_gid
+
+
 def assert_ancestors(absolute_path, root_prefix, uid, gid, include_leaf=False):
     candidates = path_components(absolute_path)
     if not include_leaf:
@@ -296,6 +314,27 @@ def ensure_directory(
                 or stat.S_IMODE(details.st_mode) != mode
             ):
                 die(f"directory authority path does not have exact mode {mode:04o}: {candidate}")
+
+
+def ensure_langame_worker_authorization_root(root_prefix, parent_uid, parent_gid, leaf_gid):
+    """Provision only the runtime-owned leaf; its root-owned parent is prechecked."""
+    pathname = host_path(root_prefix, LANGAME_WORKER_AUTHORIZATION_ROOT)
+    assert_ancestors(pathname, root_prefix, parent_uid, parent_gid)
+    try:
+        details = os.lstat(pathname)
+    except FileNotFoundError:
+        os.mkdir(pathname, 0o710)
+        os.chown(pathname, parent_uid, leaf_gid)
+        os.chmod(pathname, 0o710)
+        fsync_directory(os.path.dirname(pathname))
+        details = os.lstat(pathname)
+    if not stat.S_ISDIR(details.st_mode) or stat.S_ISLNK(details.st_mode):
+        die("langame worker authorization root is not a real directory")
+    if details.st_uid != parent_uid or details.st_gid != leaf_gid:
+        die("langame worker authorization root is foreign-owned")
+    if (details.st_mode & 0o7777) != 0o710:
+        die("langame worker authorization root mode drift")
+    return pathname
 
 
 def read_mount_targets():
@@ -747,6 +786,9 @@ root_prefix = os.path.realpath(options.fixture_root) if fixture_mode else "/"
 if fixture_mode and (root_prefix != os.path.abspath(options.fixture_root) or os.path.islink(root_prefix)):
     die("fixture root is not canonical")
 uid, gid = expected_identity(fixture_mode)
+langame_worker_authorization_gid = expected_langame_worker_authorization_gid(
+    fixture_mode, gid
+)
 if fixture_mode:
     root_details = os.lstat(root_prefix)
     if (
@@ -778,6 +820,9 @@ receipt_base = host_path(root_prefix, RECEIPT_BASE)
 run_root = host_path(root_prefix, "/run/leetplus-production-control")
 ensure_directory(host_path(root_prefix, "/srv/leetplus"), root_prefix, uid, gid, 0o755)
 ensure_directory(host_path(root_prefix, "/var/lib/leetplus"), root_prefix, uid, gid, 0o755)
+langame_worker_authorization_root = host_path(
+    root_prefix, LANGAME_WORKER_AUTHORIZATION_ROOT
+)
 for directory, mode in ((inbox, 0o700), (generation_base, 0o700), (receipt_base, 0o700), (run_root, 0o700)):
     ensure_directory(directory, root_prefix, uid, gid, mode)
     assert_ancestors(directory, root_prefix, uid, gid, include_leaf=True)
@@ -788,6 +833,11 @@ for directory, mode in ((inbox, 0o700), (generation_base, 0o700), (receipt_base,
 mount_targets = read_mount_targets()
 for directory, label in ((inbox, "production-control inbox"), (generation_base, "generation root"), (receipt_base, "receipt root")):
     reject_mounts_at_or_below(directory, mount_targets, label)
+reject_mounts_at_or_below(
+    langame_worker_authorization_root,
+    mount_targets,
+    "Langame worker authorization root",
+)
 
 lock_path = os.path.join(run_root, "install.lock")
 lock_flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
@@ -1073,6 +1123,15 @@ for source, destination, mode in install_entries:
     installed_count += 1
     if options.fixture_abort_after == installed_count:
         die("fixture-requested interruption during install-map publication")
+
+langame_worker_authorization_root = ensure_langame_worker_authorization_root(
+    root_prefix, uid, gid, langame_worker_authorization_gid
+)
+reject_mounts_at_or_below(
+    langame_worker_authorization_root,
+    mount_targets,
+    "Langame worker authorization root",
+)
 
 inner_digest = sha256_bytes(inner_manifest_bytes)
 trust_path = host_path(root_prefix, "/etc/leetplus/rollback-control-manifest.sha256")

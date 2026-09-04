@@ -208,6 +208,8 @@ jobs:
           node .github/scripts/test-production-topology-contract.mjs
           node --check .github/scripts/test-release-admission-selective-rerun.mjs
           node .github/scripts/test-release-admission-selective-rerun.mjs
+          bash -n .github/scripts/test-legacy-drain-manifest-parser.sh
+          bash .github/scripts/test-legacy-drain-manifest-parser.sh
 
       - name: Verify production-control installed-generation authority
         shell: bash
@@ -238,6 +240,7 @@ jobs:
           bash -n docs/deployment/production-artifact/promote-release-artifact.sh
           node --check docs/deployment/production-artifact/verify-release-hydration-systemd.mjs
           bash -n .github/scripts/test-release-hydration-systemd-attestation.sh
+          bash -n .github/scripts/test-langame-worker-authorization-live-systemd.sh
           authority_node="$(realpath "$(command -v node)")"
           case "$authority_node" in
             "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
@@ -253,6 +256,16 @@ jobs:
             TZ=UTC \
             PATH="${authority_node_dir}:/usr/sbin:/usr/bin:/sbin:/bin" \
             /usr/bin/bash -p .github/scripts/test-release-hydration-systemd-attestation.sh
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            LANGAME_WORKER_LIVE_SYSTEMD_FIXTURE_CONFIRM=run-bounded-root-langame-worker-live-systemd-fixture \
+            LEETPLUS_FIXTURE_NODE="$authority_node" \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            /usr/bin/bash -p .github/scripts/test-langame-worker-authorization-live-systemd.sh
 
       - name: Verify trusted pnpm store integrity boundary
         shell: bash
@@ -324,13 +337,19 @@ jobs:
           bash -n docs/deployment/production-artifact/apply-legacy-rollback-egress.sh
           bash -n docs/deployment/production-artifact/apply-legacy-database-login-fence.sh
           bash -n docs/deployment/production-artifact/verify-legacy-runtime-drain.sh
+          bash -n docs/deployment/production-artifact/rebind-legacy-drain-manifest-successor.sh
           bash -n docs/deployment/production-artifact/verify-legacy-rollback-readiness.sh
           bash -n docs/deployment/production-artifact/activate-legacy-rollback-contour.sh
           bash -n docs/deployment/production-artifact/install-legacy-rollback-contour.sh
+          bash -n docs/deployment/production-artifact/langame-daily-worker-authorization-authority.sh
+          bash -n docs/deployment/production-artifact/run-authorized-langame-daily-worker.sh
+          bash -n docs/deployment/production-artifact/verify-langame-daily-worker-authorization.sh
+          bash -n .github/scripts/test-langame-worker-authorization-disposable-root.sh
           bash -n docs/deployment/production-control-authority/leetplus-install-scheduler-free-nminus1-v1
           bash -n .github/scripts/test-production-legacy-rollback-contour.sh
           bash -n .github/scripts/test-production-legacy-rollback-service-user.sh
           bash -n .github/scripts/test-production-legacy-rollback-control-bundle.sh
+          bash -n .github/scripts/test-legacy-drain-manifest-successor-root.sh
           bash -n .github/scripts/test-production-legacy-database-authority-pg16.sh
           bash -n .github/scripts/test-current188-legacy-production-executor-pg16.sh
           node --check docs/deployment/production-artifact/legacy-rollback-auth-edge.mjs
@@ -358,6 +377,7 @@ jobs:
             TZ=UTC \
             PATH=/usr/sbin:/usr/bin:/sbin:/bin \
             /usr/bin/bash -p .github/scripts/test-production-legacy-rollback-control-bundle.sh
+          bash .github/scripts/test-langame-worker-authorization-disposable-root.sh
 
       - name: Verify production installer path in a disposable root
         shell: bash
@@ -389,6 +409,38 @@ jobs:
                 TZ=UTC \
                 PATH=/usr/sbin:/usr/bin:/sbin:/bin \
                 /usr/bin/bash -p .github/scripts/test-production-legacy-rollback-installer-root.sh
+            '
+
+      - name: Verify legacy-drain manifest successor in a disposable root
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_image='node:22.23.2-bookworm@sha256:0557ac14e0d45d02ed563067b82856ca5e7aa3437fa28d98d4350ea9c3d9494a'
+          workspace_real="$(realpath -e -- "$GITHUB_WORKSPACE")"
+          test "$workspace_real" = "$GITHUB_WORKSPACE"
+          git diff --exit-code -- .
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          docker pull --platform linux/amd64 "$fixture_image"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$fixture_image")" = 'linux/amd64'
+          docker run --rm \
+            --platform linux/amd64 \
+            --network none \
+            --pids-limit 512 \
+            --memory 2g \
+            --mount "type=bind,src=${workspace_real},dst=/workspace,readonly" \
+            --workdir /workspace \
+            --entrypoint /usr/bin/bash \
+            "$fixture_image" -p -c '
+              set -euo pipefail
+              /usr/bin/install -o root -g root -m 0755 /usr/local/bin/node /usr/bin/node
+              /usr/bin/node -e "if (!/^22[.]/.test(process.versions.node)) process.exit(1)"
+              exec /usr/bin/env -i \
+                LEETPLUS_DISPOSABLE_ROOT_FIXTURE=CONFIRMED_DESTROYABLE_CI_ROOT \
+                LANG=C.UTF-8 \
+                LC_ALL=C.UTF-8 \
+                TZ=UTC \
+                PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+                /usr/bin/bash -p .github/scripts/test-legacy-drain-manifest-successor-root.sh
             '
 
       - name: Verify exact runtime and production-control artifact identities

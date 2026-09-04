@@ -59,6 +59,19 @@ authorization только с root-owned `0400` verifier из exact immutable co
 bundle и negative fixture делает историческую копию заведомо аварийной. До
 нового exact-main admission active runtime остаётся `f3f119fa…`.
 
+Exact production-control `fc7b6e65…` установлен после Fast/Full, но повторный
+manifest-successor корректно остановился до нового filesystem effect: от
+оборванной попытки `3281c070…` сохранился root-only verifier evidence, а
+successor receipt отсутствует. Удалять или переписывать такое доказательство
+вручную запрещено. Текущий recovery-контракт принимает только структурно
+валидный PASS witness и явный трёхдействийный plan, атомарно сохраняет исходные
+bytes как `root:root 0400`, публикует детерминированную digest-bound recovery
+receipt и лишь затем устанавливает verifier текущего поколения. План остаётся
+воспроизводимым после interruption; route, PostgreSQL и enable/start/stop unit
+не входят в полномочия recovery. Production runtime по-прежнему `f3f119fa…`,
+bonus/Langame worker timer удерживается `inactive/disabled` до нового admission,
+successor check и canary.
+
 Production migration
 `20260831120000_guest_support_bug_report_input_repair` применена
 контроллером `GUEST_SUPPORT_PRODUCTION_188_TO_189_V1` после PASS на

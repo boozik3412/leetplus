@@ -203,6 +203,15 @@ manifest-successor и Langame worker authorization текущего поколе
 использовать только root-owned `0400` verifier из exact immutable bundle
 `/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/`. Подмена этого пути
 исторической копией или fallback на неё являются fail-closed ошибкой.
+Если interruption оставил `manifest-successor-control-verification.v1` от
+предыдущего admitted production-control без финального successor receipt,
+следующий `plan` добавляет ровно одно явное recovery-действие. `apply` никогда
+не удаляет свидетельство: сначала сохраняет его exact bytes в immutable
+`root:root 0400` archive, затем создаёт детерминированную receipt с digest
+старого и нового verifier output и только после неё атомарно заменяет текущий
+evidence. Невалидный PASS/schema, symlink/hardlink, неизвестный digest-переход,
+receipt без archive или replacement без receipt дают fail-closed отказ; ручная
+очистка state root не является recovery-процедурой.
 
 Installer удерживает exclusive inode
 `/run/leetplus-production-control/install.lock` от чтения admitted inputs до

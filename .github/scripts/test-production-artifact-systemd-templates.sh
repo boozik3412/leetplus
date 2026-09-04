@@ -558,6 +558,10 @@ grep -F -x "readonly DRAIN_VERIFIER='/srv/leetplus/control-bundles/scheduler-fre
 grep -F "assert_regular \"\$DRAIN_VERIFIER\" 'root:root:400'" "$langame_worker_authority" > /dev/null
 grep -F -x "readonly DRAIN_VERIFIER='/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/verify-legacy-runtime-drain.sh'" "$legacy_manifest_successor" > /dev/null
 grep -F 'assert_root_file "$DRAIN_VERIFIER" 400' "$legacy_manifest_successor" > /dev/null
+grep -F 'CONTROL_VERIFIER_EVIDENCE_RECOVERY_AUTHORIZED=true' "$legacy_manifest_successor" > /dev/null
+grep -F 'ACTION=RECOVER_CONTROL_VERIFIER_EVIDENCE|' "$legacy_manifest_successor" > /dev/null
+grep -F 'NO_ROUTE_DATABASE_OR_UNIT_STATE_EFFECTS=true' "$legacy_manifest_successor" > /dev/null
+grep -F 'write_atomic_root_file "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" 400 < "$CONTROL_VERIFIER_EVIDENCE"' "$legacy_manifest_successor" > /dev/null
 test "$(grep -Fc '/usr/bin/bash -p "$DRAIN_VERIFIER"' "$langame_worker_authority")" = 6
 test "$(grep -Fc '/usr/bin/bash -p "$DRAIN_VERIFIER"' "$legacy_manifest_successor")" = 3
 grep -F -x 'LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=false' "$langame_daily_worker_overlay" > /dev/null

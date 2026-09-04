@@ -5,7 +5,7 @@
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                  |
 | Production runtime   | healthy; active blue `f3f119fa…`, generation 21, `COMBINED`, bridge OFF, bug reporting LIVE; rollback green `22ab6b81…` ready   |
 | Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                  |
-| Release authority    | runtime остаётся exact `f3f119fa…`; production-control `3281c070…` установлен после Fast/Full, runtime cutover не выполнялся |
+| Release authority    | runtime остаётся exact `f3f119fa…`; production-control `fc7b6e65…` установлен после Fast/Full, runtime cutover не выполнялся |
 | Runtime successor    | Dedicated bonus-ledger worker active; bounded backlog recovery завершён, timer enabled/healthy                                |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                              |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                      |
@@ -16,6 +16,14 @@
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
 | Langame freshness    | audit storage repair применён и проверен; runtime/canary/backfill/timer на HOLD до admitted drain-successor + worker authorization |
+
+На 05.09 installed production-control уже обновлён до exact `fc7b6e65…`, но
+runtime не переключался. Successor остановлен fail-closed из-за orphaned
+verifier evidence поколения `3281c070…`; successor receipt отсутствует,
+route/schema/data не менялись. Новый source recovery сохраняет старые bytes и
+связывает их с replacement через immutable receipt вместо ручного удаления.
+До его exact-main Fast+Full, successor `check` и canary статус внешнего beta
+остаётся `NO-GO`.
 
 ## Исправление двух обращений геймификации (04.09.2026)
 

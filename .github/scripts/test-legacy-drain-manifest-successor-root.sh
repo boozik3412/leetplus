@@ -23,6 +23,7 @@ readonly DRAIN_PATH='/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/ver
 readonly HISTORICAL_DRAIN_PATH='/usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh'
 readonly CONTROL_PATH='/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs'
 readonly CONTROL_SHA='475d7e0c3583c36b6ec2138a06f4cc4a1bc46eb7'
+readonly ABANDONED_CONTROL_SHA='3281c07047661ad9f73cc0f51fa83691fdc87b22'
 readonly SUCCESSOR_MANIFEST_SHA256='d6e7b4fe8e0aeb9a77caae62d2fb4ed9322e6383148934c5e26ff3f9126120dd'
 readonly CONFIRMATION='I_ACCEPT_EXACT_LEGACY_DRAIN_MANIFEST_SUCCESSOR_APPLY'
 readonly STATE_ROOT='/var/lib/leetplus/legacy-drain'
@@ -30,6 +31,8 @@ readonly FENCE_MARKER="${STATE_ROOT}/legacy-start-fence"
 readonly SUCCESSOR_RECEIPT="${STATE_ROOT}/manifest-successor.receipt"
 readonly SUCCESSOR_EVIDENCE="${STATE_ROOT}/manifest-successor-drain-verification.v1"
 readonly CONTROL_EVIDENCE="${STATE_ROOT}/manifest-successor-control-verification.v1"
+readonly CONTROL_RECOVERY_ARCHIVE="${STATE_ROOT}/manifest-successor-control-verification.abandoned.v1"
+readonly CONTROL_RECOVERY_RECEIPT="${STATE_ROOT}/manifest-successor-control-verification-recovery.v1.receipt"
 
 die() { printf 'manifest successor root fixture: %s\n' "$*" >&2; exit 1; }
 trap 'status=$?; printf "manifest successor root fixture: unhandled failure at line %s (exit %s): %s\\n" "$LINENO" "$status" "$BASH_COMMAND" >&2; exit "$status"' ERR
@@ -247,24 +250,56 @@ fi
 grep -F 'legacy unit lacks its durable start-fence drop-in: leetplus-langame-daily-worker.timer' /run/fixture-successor-pre.out >/dev/null \
   || { cat /run/fixture-successor-pre.out >&2; die 'pre-successor negative stopped at an unexpected guard'; }
 
+# Reproduce the production lifecycle edge: a prior admitted controller wrote
+# its verifier evidence, then stopped before publishing a successor receipt.
+# A malformed orphan must fail closed; only a structurally valid PASS witness
+# from a different exact release may enter the explicit recovery plan.
+printf 'PRODUCTION_CONTROL_RELEASE_SHA=%s\n' "$ABANDONED_CONTROL_SHA" > "$CONTROL_EVIDENCE"
+chown root:root "$CONTROL_EVIDENCE"; chmod 0600 "$CONTROL_EVIDENCE"
+if $AUTHORITY_PATH plan --control-release-sha "$CONTROL_SHA" > /run/fixture-successor-malformed-orphan.out 2>&1; then
+  die 'plan accepted malformed abandoned control verifier evidence'
+fi
+grep -F 'abandoned installed-control verifier evidence is not an accepted generation' /run/fixture-successor-malformed-orphan.out >/dev/null \
+  || { cat /run/fixture-successor-malformed-orphan.out >&2; die 'malformed orphan negative stopped at an unexpected guard'; }
+cat > "$CONTROL_EVIDENCE" <<EOF
+PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS
+PRODUCTION_CONTROL_RELEASE_SHA=${ABANDONED_CONTROL_SHA}
+EOF
+chown root:root "$CONTROL_EVIDENCE"; chmod 0600 "$CONTROL_EVIDENCE"
+abandoned_control_evidence_sha="$(sha256sum "$CONTROL_EVIDENCE" | awk '{print $1}')"
+
 plan_output="$($AUTHORITY_PATH plan --control-release-sha "$CONTROL_SHA")"
 printf '%s\n' "$plan_output" | grep -F -x 'LEGACY_DRAIN_MANIFEST_SUCCESSOR_PLAN=READY' >/dev/null || die 'plan did not report ready'
 plan_sha="$(printf '%s\n' "$plan_output" | awk -F= '$1 == "PLAN_SHA256" {print $2}')"
+plan_action_count="$(printf '%s\n' "$plan_output" | awk -F= '$1 == "ACTION_COUNT" { value=$2 } END { print value }')"
 [[ "$plan_sha" =~ ^[0-9a-f]{64}$ ]] || die 'plan digest is invalid'
+[[ "$plan_action_count" == 3 ]] || die 'orphan recovery plan action count is not exact'
+[[ "$(printf '%s\n' "$plan_output" | grep -c '^ACTION=RECOVER_CONTROL_VERIFIER_EVIDENCE|')" == 1 ]] || die 'orphan recovery plan action is not exact'
 [[ "$(printf '%s\n' "$plan_output" | grep -c '^ACTION=ENSURE_START_FENCE|')" == 2 ]] || die 'plan action set is not exact'
 
 # Timer PID fields may be absent on systemd 255, but the same ambiguity must
 # never be accepted for the oneshot service itself.
 touch /run/fixture-successor-blank-service-pids
-if $AUTHORITY_PATH apply --control-release-sha "$CONTROL_SHA" --plan-sha256 "$plan_sha" --action-count 2 --confirmation "$CONFIRMATION" > /run/fixture-successor-blank-service.out 2>&1; then
+if $AUTHORITY_PATH apply --control-release-sha "$CONTROL_SHA" --plan-sha256 "$plan_sha" --action-count "$plan_action_count" --confirmation "$CONFIRMATION" > /run/fixture-successor-blank-service.out 2>&1; then
   die 'apply accepted absent PID properties for the Langame service'
 fi
 grep -F 'newly admitted drain service is not exact loaded/inactive/static/PID-zero: leetplus-langame-daily-worker.service' /run/fixture-successor-blank-service.out >/dev/null \
   || { cat /run/fixture-successor-blank-service.out >&2; die 'blank service PID negative stopped at an unexpected guard'; }
 rm -f -- /run/fixture-successor-blank-service-pids
 
-$AUTHORITY_PATH apply --control-release-sha "$CONTROL_SHA" --plan-sha256 "$plan_sha" --action-count 2 --confirmation "$CONFIRMATION" > /run/fixture-successor-apply.out
+$AUTHORITY_PATH apply --control-release-sha "$CONTROL_SHA" --plan-sha256 "$plan_sha" --action-count "$plan_action_count" --confirmation "$CONFIRMATION" > /run/fixture-successor-apply.out
 grep -F -x 'LEGACY_DRAIN_MANIFEST_SUCCESSOR_APPLY=PASS' /run/fixture-successor-apply.out >/dev/null || die 'apply did not publish success'
+[[ -f "$CONTROL_RECOVERY_ARCHIVE" && ! -L "$CONTROL_RECOVERY_ARCHIVE" \
+  && "$(stat -c '%U:%G:%a:%h' -- "$CONTROL_RECOVERY_ARCHIVE")" == 'root:root:400:1' \
+  && "$(sha256sum "$CONTROL_RECOVERY_ARCHIVE" | awk '{print $1}')" == "$abandoned_control_evidence_sha" ]] \
+  || die 'apply did not retain the exact abandoned verifier evidence'
+[[ -f "$CONTROL_RECOVERY_RECEIPT" && ! -L "$CONTROL_RECOVERY_RECEIPT" \
+  && "$(stat -c '%U:%G:%a:%h' -- "$CONTROL_RECOVERY_RECEIPT")" == 'root:root:400:1' ]] \
+  || die 'apply did not retain an exact recovery receipt'
+grep -F -x "ABANDONED_CONTROL_VERIFIER_OUTPUT_SHA256=${abandoned_control_evidence_sha}" "$CONTROL_RECOVERY_RECEIPT" >/dev/null \
+  || die 'recovery receipt is not bound to the abandoned verifier evidence'
+grep -F -x "REPLACEMENT_CONTROL_VERIFIER_OUTPUT_SHA256=$(sha256sum "$CONTROL_EVIDENCE" | awk '{print $1}')" "$CONTROL_RECOVERY_RECEIPT" >/dev/null \
+  || die 'recovery receipt is not bound to the replacement verifier evidence'
 [[ -f /run/fixture-successor-daemon-reload ]] || die 'apply did not reload the fixture systemd manager'
 for unit in leetplus-langame-daily-worker.timer leetplus-langame-daily-worker.service; do
   fence_directory="/etc/systemd/system/${unit}.d"
@@ -282,7 +317,7 @@ grep -F -x 'LEGACY_DRAIN_MANIFEST_SUCCESSOR_CHECK=PASS' /run/fixture-successor-c
 # Idempotent retry preserves the immutable receipt rather than reconstructing
 # a different plan.  This is the normal lost-response caller recovery path.
 receipt_before="$(sha256sum "$SUCCESSOR_RECEIPT" | awk '{print $1}')"
-$AUTHORITY_PATH apply --control-release-sha "$CONTROL_SHA" --plan-sha256 "$plan_sha" --action-count 2 --confirmation "$CONFIRMATION" > /run/fixture-successor-idempotent.out
+$AUTHORITY_PATH apply --control-release-sha "$CONTROL_SHA" --plan-sha256 "$plan_sha" --action-count "$plan_action_count" --confirmation "$CONFIRMATION" > /run/fixture-successor-idempotent.out
 grep -F -x 'LEGACY_DRAIN_MANIFEST_SUCCESSOR_ALREADY_ACCEPTED=true' /run/fixture-successor-idempotent.out >/dev/null || die 'idempotent apply was not recognized'
 [[ "$(sha256sum "$SUCCESSOR_RECEIPT" | awk '{print $1}')" == "$receipt_before" ]] || die 'idempotent apply rewrote immutable receipt'
 
@@ -290,7 +325,7 @@ grep -F -x 'LEGACY_DRAIN_MANIFEST_SUCCESSOR_ALREADY_ACCEPTED=true' /run/fixture-
 # The recovery path must re-attest the exact retained evidence and publish one
 # receipt without reopening unit, route, or database authority.
 rm -f -- "$SUCCESSOR_RECEIPT"
-$AUTHORITY_PATH apply --control-release-sha "$CONTROL_SHA" --plan-sha256 "$plan_sha" --action-count 2 --confirmation "$CONFIRMATION" > /run/fixture-successor-recovery.out
+$AUTHORITY_PATH apply --control-release-sha "$CONTROL_SHA" --plan-sha256 "$plan_sha" --action-count "$plan_action_count" --confirmation "$CONFIRMATION" > /run/fixture-successor-recovery.out
 grep -F -x 'LEGACY_DRAIN_MANIFEST_SUCCESSOR_APPLY=PASS' /run/fixture-successor-recovery.out >/dev/null || die 'crash recovery did not republish successor receipt'
 $AUTHORITY_PATH check --control-release-sha "$CONTROL_SHA" > /run/fixture-successor-recovery-check.out
 

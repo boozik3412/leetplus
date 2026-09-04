@@ -22,6 +22,8 @@ readonly UNIT_MANIFEST='/etc/leetplus/legacy-drain-units.conf'
 readonly ACTIVATION_RECEIPT="${STATE_ROOT}/activation.receipt"
 readonly SUCCESSOR_RECEIPT="${STATE_ROOT}/manifest-successor.receipt"
 readonly CONTROL_VERIFIER_EVIDENCE="${STATE_ROOT}/manifest-successor-control-verification.v1"
+readonly CONTROL_VERIFIER_RECOVERY_ARCHIVE="${STATE_ROOT}/manifest-successor-control-verification.abandoned.v1"
+readonly CONTROL_VERIFIER_RECOVERY_RECEIPT="${STATE_ROOT}/manifest-successor-control-verification-recovery.v1.receipt"
 readonly FENCE_MARKER="${STATE_ROOT}/legacy-start-fence"
 readonly DRAIN_VERIFIER='/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/verify-legacy-runtime-drain.sh'
 readonly CONTROL_VERIFIER='/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs'
@@ -43,13 +45,18 @@ usage() {
   cat <<'USAGE'
 Usage:
   rebind-legacy-drain-manifest-successor.sh plan --control-release-sha <sha>
-  rebind-legacy-drain-manifest-successor.sh apply --control-release-sha <sha> --plan-sha256 <sha256> --action-count 2 --confirmation I_ACCEPT_EXACT_LEGACY_DRAIN_MANIFEST_SUCCESSOR_APPLY
+  rebind-legacy-drain-manifest-successor.sh apply --control-release-sha <sha> --plan-sha256 <sha256> --action-count <2|3> --confirmation I_ACCEPT_EXACT_LEGACY_DRAIN_MANIFEST_SUCCESSOR_APPLY
   rebind-legacy-drain-manifest-successor.sh check --control-release-sha <sha>
 
 The only accepted transition is the immutable additive manifest successor
 89930527907a... -> d6e7b4fe8e... . It creates/re-attests two durable start
 fences and writes a predecessor-linked receipt. It never changes routing,
 database state, or unit enable/start/stop state.
+
+Action count 3 is emitted only when an orphaned, structurally-valid verifier
+evidence file from an earlier admitted control generation must be archived and
+rebound before the two fences can be re-attested. The abandoned bytes and a
+deterministic recovery receipt are retained permanently.
 USAGE
 }
 
@@ -247,6 +254,120 @@ control_verifier_output() {
   printf '%s\n' "$output"
 }
 
+validate_abandoned_control_evidence() {
+  local path="$1" current_sha="$2" release_sha
+  [[ "$(stat -c '%s' -- "$path")" -le 1048576 && "$(cat "$path")" != *$'\r'* ]] \
+    || die 'abandoned installed-control verifier evidence is oversized or noncanonical'
+  [[ "$(grep -F -c -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' "$path")" == 1 ]] \
+    || die 'abandoned installed-control verifier evidence is not an accepted generation'
+  [[ "$(grep -E -c -x 'PRODUCTION_CONTROL_RELEASE_SHA=[0-9a-f]{40}' "$path")" == 1 ]] \
+    || die 'abandoned installed-control verifier evidence release identity is invalid'
+  release_sha="$(awk -F= '$1 == "PRODUCTION_CONTROL_RELEASE_SHA" { print $2 }' "$path")"
+  [[ "$release_sha" != "$control_release_sha" && "$(sha256 "$path")" != "$current_sha" ]] \
+    || die 'abandoned installed-control verifier evidence is not from an earlier generation'
+}
+
+control_recovery_receipt_body() {
+  local abandoned_sha="$1" replacement_sha="$2"
+  printf 'RECORD_VERSION=1\n'
+  printf 'CONTROL_VERIFIER_EVIDENCE_RECOVERY_AUTHORIZED=true\n'
+  printf 'CONTROL_RELEASE_SHA=%s\n' "$control_release_sha"
+  printf 'ABANDONED_CONTROL_VERIFIER_OUTPUT_SHA256=%s\n' "$abandoned_sha"
+  printf 'REPLACEMENT_CONTROL_VERIFIER_OUTPUT_SHA256=%s\n' "$replacement_sha"
+  printf 'ARCHIVE_SHA256=%s\n' "$abandoned_sha"
+  printf 'NO_ROUTE_DATABASE_OR_UNIT_STATE_EFFECTS=true\n'
+  printf 'CONTROLLER=%s\n' "$CONTROLLER"
+}
+
+assert_control_recovery_receipt() {
+  local abandoned_sha="$1" replacement_sha="$2" expected
+  assert_root_file "$CONTROL_VERIFIER_RECOVERY_RECEIPT" 400
+  [[ "$(wc -l < "$CONTROL_VERIFIER_RECOVERY_RECEIPT" | tr -d '[:space:]')" == 8 ]] \
+    || die 'control verifier recovery receipt schema is not exact'
+  [[ -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$CONTROL_VERIFIER_RECOVERY_RECEIPT")" ]] \
+    || die 'control verifier recovery receipt contains malformed keys'
+  expected="$(control_recovery_receipt_body "$abandoned_sha" "$replacement_sha")"
+  [[ "$(cat "$CONTROL_VERIFIER_RECOVERY_RECEIPT")" == "$expected" ]] \
+    || die 'control verifier recovery receipt drifted'
+}
+
+control_recovery_abandoned_sha() {
+  local current_sha="$1" evidence_sha archive_sha
+  if [[ -e "$CONTROL_VERIFIER_RECOVERY_RECEIPT" || -L "$CONTROL_VERIFIER_RECOVERY_RECEIPT" ]]; then
+    [[ -e "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" && ! -L "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" ]] \
+      || die 'control verifier recovery receipt exists without its abandoned evidence archive'
+  fi
+  if [[ -e "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" || -L "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" ]]; then
+    assert_root_file "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" 400
+    archive_sha="$(sha256 "$CONTROL_VERIFIER_RECOVERY_ARCHIVE")"
+    validate_abandoned_control_evidence "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" "$current_sha"
+    [[ -e "$CONTROL_VERIFIER_EVIDENCE" && ! -L "$CONTROL_VERIFIER_EVIDENCE" ]] \
+      || die 'control verifier recovery archive exists without current verifier evidence'
+    assert_root_file "$CONTROL_VERIFIER_EVIDENCE" 600
+    evidence_sha="$(sha256 "$CONTROL_VERIFIER_EVIDENCE")"
+    [[ "$evidence_sha" == "$archive_sha" || "$evidence_sha" == "$current_sha" ]] \
+      || die 'control verifier evidence is outside the admitted recovery transition'
+    if [[ -e "$CONTROL_VERIFIER_RECOVERY_RECEIPT" || -L "$CONTROL_VERIFIER_RECOVERY_RECEIPT" ]]; then
+      assert_control_recovery_receipt "$archive_sha" "$current_sha"
+    else
+      [[ "$evidence_sha" == "$archive_sha" ]] \
+        || die 'replacement verifier evidence exists without its recovery receipt'
+    fi
+    printf '%s\n' "$archive_sha"
+    return
+  fi
+  if [[ ! -e "$CONTROL_VERIFIER_EVIDENCE" && ! -L "$CONTROL_VERIFIER_EVIDENCE" ]]; then
+    printf '\n'
+    return
+  fi
+  assert_root_file "$CONTROL_VERIFIER_EVIDENCE" 600
+  evidence_sha="$(sha256 "$CONTROL_VERIFIER_EVIDENCE")"
+  if [[ "$evidence_sha" == "$current_sha" ]]; then
+    printf '\n'
+    return
+  fi
+  validate_abandoned_control_evidence "$CONTROL_VERIFIER_EVIDENCE" "$current_sha"
+  printf '%s\n' "$evidence_sha"
+}
+
+recover_control_verifier_evidence() {
+  local abandoned_sha="$1" replacement_sha="$2" evidence_sha temporary
+  assert_root_file "$CONTROL_VERIFIER_EVIDENCE" 600
+  evidence_sha="$(sha256 "$CONTROL_VERIFIER_EVIDENCE")"
+  [[ "$evidence_sha" == "$abandoned_sha" || "$evidence_sha" == "$replacement_sha" ]] \
+    || die 'control verifier evidence changed after recovery plan validation'
+  if [[ -e "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" || -L "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" ]]; then
+    assert_root_file "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" 400
+    [[ "$(sha256 "$CONTROL_VERIFIER_RECOVERY_ARCHIVE")" == "$abandoned_sha" ]] \
+      || die 'control verifier recovery archive digest drifted'
+  else
+    [[ "$evidence_sha" == "$abandoned_sha" ]] || die 'abandoned verifier evidence is unavailable for archival'
+    write_atomic_root_file "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" 400 < "$CONTROL_VERIFIER_EVIDENCE"
+  fi
+  validate_abandoned_control_evidence "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" "$replacement_sha"
+  if [[ -e "$CONTROL_VERIFIER_RECOVERY_RECEIPT" || -L "$CONTROL_VERIFIER_RECOVERY_RECEIPT" ]]; then
+    assert_control_recovery_receipt "$abandoned_sha" "$replacement_sha"
+  else
+    control_recovery_receipt_body "$abandoned_sha" "$replacement_sha" \
+      | write_atomic_root_file "$CONTROL_VERIFIER_RECOVERY_RECEIPT" 400
+  fi
+  if [[ "$evidence_sha" == "$abandoned_sha" ]]; then
+    temporary="${CONTROL_VERIFIER_EVIDENCE}.replacement.$$"
+    [[ ! -e "$temporary" && ! -L "$temporary" ]] || die 'control verifier replacement temporary already exists'
+    control_verifier_output > "$temporary" \
+      || { rm -f -- "$temporary"; die 'installed production-control verifier rejected recovery replacement'; }
+    chown root:root "$temporary"; chmod 0600 "$temporary"
+    [[ "$(sha256 "$temporary")" == "$replacement_sha" ]] \
+      || { rm -f -- "$temporary"; die 'control verifier recovery replacement digest drifted'; }
+    mv -T -- "$temporary" "$CONTROL_VERIFIER_EVIDENCE"
+    sync -f "$CONTROL_VERIFIER_EVIDENCE"; sync -d "$STATE_ROOT"
+  fi
+  assert_root_file "$CONTROL_VERIFIER_EVIDENCE" 600
+  [[ "$(sha256 "$CONTROL_VERIFIER_EVIDENCE")" == "$replacement_sha" ]] \
+    || die 'control verifier recovery did not install the admitted replacement'
+  assert_control_recovery_receipt "$abandoned_sha" "$replacement_sha"
+}
+
 create_fence() {
   local unit="$1" directory path temporary
   directory="$(fence_directory "$unit")"; path="$(fence_path "$unit")"
@@ -281,32 +402,57 @@ assert_lock_descriptor() {
 }
 
 plan_body() {
+  local current_control_sha abandoned_control_sha planned_action_count
+  current_control_sha="$(control_verifier_output | sha256sum | awk '{ print $1 }')" \
+    || die 'current installed-control verifier digest could not be planned'
+  abandoned_control_sha="$(control_recovery_abandoned_sha "$current_control_sha")" \
+    || die 'control verifier evidence recovery state is invalid'
+  planned_action_count=2
+  [[ -z "$abandoned_control_sha" ]] || planned_action_count=3
   printf 'RECORD_VERSION=1\n'
   printf 'CONTROLLER=%s\n' "$CONTROLLER"
   printf 'PREDECESSOR_ACTIVATION_RECEIPT_SHA256=%s\n' "$(sha256 "$ACTIVATION_RECEIPT")"
   printf 'PREDECESSOR_UNIT_MANIFEST_SHA256=%s\n' "$EXPECTED_PREDECESSOR_MANIFEST_SHA256"
   printf 'UNIT_MANIFEST_SHA256=%s\n' "$EXPECTED_SUCCESSOR_MANIFEST_SHA256"
   printf 'CONTROL_RELEASE_SHA=%s\n' "$control_release_sha"
-  printf 'CONTROL_VERIFIER_OUTPUT_SHA256=%s\n' "$(control_verifier_output | sha256sum | awk '{ print $1 }')"
-  printf 'ACTION_COUNT=2\n'
+  printf 'CONTROL_VERIFIER_OUTPUT_SHA256=%s\n' "$current_control_sha"
+  if [[ -n "$abandoned_control_sha" ]]; then
+    printf 'ABANDONED_CONTROL_VERIFIER_OUTPUT_SHA256=%s\n' "$abandoned_control_sha"
+    printf 'CONTROL_VERIFIER_RECOVERY_ARCHIVE_SHA256=%s\n' "$abandoned_control_sha"
+    printf 'CONTROL_VERIFIER_RECOVERY_RECEIPT_SHA256=%s\n' \
+      "$(control_recovery_receipt_body "$abandoned_control_sha" "$current_control_sha" | sha256sum | awk '{ print $1 }')"
+  fi
+  printf 'ACTION_COUNT=%s\n' "$planned_action_count"
+  if [[ -n "$abandoned_control_sha" ]]; then
+    printf 'ACTION=RECOVER_CONTROL_VERIFIER_EVIDENCE|%s|%s|%s|%s\n' \
+      "$abandoned_control_sha" "$current_control_sha" "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" "$CONTROL_VERIFIER_RECOVERY_RECEIPT"
+  fi
   for unit in "${ADDED_DRAIN_UNITS[@]}"; do printf 'ACTION=ENSURE_START_FENCE|%s|%s\n' "$unit" "$(fence_path "$unit")"; done
   printf 'NO_ROUTE_DATABASE_OR_UNIT_STATE_EFFECTS=true\n'
 }
 
 write_plan() {
-  plan_content="$(plan_body)"
+  local planned_action_count
+  plan_content="$(plan_body)" || die 'successor plan construction failed'
+  planned_action_count="$(awk -F= '$1 == "ACTION_COUNT" { print $2 }' <<< "$plan_content")"
+  [[ "$planned_action_count" == 2 || "$planned_action_count" == 3 ]] || die 'planned action count is invalid'
   printf 'LEGACY_DRAIN_MANIFEST_SUCCESSOR_PLAN=READY\n'
   printf 'PLAN_SHA256=%s\n' "$(printf '%s\n' "$plan_content" | sha256sum | awk '{ print $1}')"
-  printf 'ACTION_COUNT=2\n'
+  printf 'ACTION_COUNT=%s\n' "$planned_action_count"
   printf '%s\n' "$plan_content"
 }
 validate_plan() {
-  [[ "$plan_sha256" =~ ^[0-9a-f]{64}$ && "$action_count" == 2 && "$confirmation" == "$APPLY_CONFIRMATION" ]] || die 'apply confirmation, plan digest or action count is invalid'
-  [[ "$(plan_body | sha256sum | awk '{ print $1}')" == "$plan_sha256" ]] || die 'provided plan digest does not match the current exact successor state'
+  local current_plan current_action_count
+  current_plan="$(plan_body)" || die 'current successor plan construction failed'
+  current_action_count="$(awk -F= '$1 == "ACTION_COUNT" { print $2 }' <<< "$current_plan")"
+  [[ "$plan_sha256" =~ ^[0-9a-f]{64}$ && "$action_count" == "$current_action_count" && "$confirmation" == "$APPLY_CONFIRMATION" ]] \
+    || die 'apply confirmation, plan digest or action count is invalid'
+  [[ "$(printf '%s\n' "$current_plan" | sha256sum | awk '{ print $1}')" == "$plan_sha256" ]] \
+    || die 'provided plan digest does not match the current exact successor state'
 }
 
 assert_successor_receipt() {
-  local verifier_output="${STATE_ROOT}/manifest-successor-drain-verification.v1"
+  local verifier_output="${STATE_ROOT}/manifest-successor-drain-verification.v1" current_plan current_plan_sha
   assert_root_file "$SUCCESSOR_RECEIPT" 400
   [[ "$(wc -l < "$SUCCESSOR_RECEIPT" | tr -d '[:space:]')" == 12 ]] || die 'successor receipt schema is not exact'
   [[ -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$SUCCESSOR_RECEIPT")" ]] || die 'successor receipt contains malformed keys'
@@ -326,7 +472,9 @@ assert_successor_receipt() {
   [[ -f "$verifier_output" && ! -L "$verifier_output" ]] || die 'successor verifier evidence is absent'
   grep -F -x "SUCCESSOR_VERIFIER_OUTPUT_SHA256=$(sha256 "$verifier_output")" "$SUCCESSOR_RECEIPT" >/dev/null || die 'successor verifier evidence digest drifted'
   grep -F -x 'NO_ROUTE_DATABASE_OR_UNIT_STATE_EFFECTS=true' "$SUCCESSOR_RECEIPT" >/dev/null || die 'successor receipt effect boundary is invalid'
-  grep -F -x "PLAN_SHA256=$(plan_body | sha256sum | awk '{ print $1 }')" "$SUCCESSOR_RECEIPT" >/dev/null \
+  current_plan="$(plan_body)" || die 'accepted successor plan cannot be reconstructed'
+  current_plan_sha="$(printf '%s\n' "$current_plan" | sha256sum | awk '{ print $1 }')"
+  grep -F -x "PLAN_SHA256=${current_plan_sha}" "$SUCCESSOR_RECEIPT" >/dev/null \
     || die 'successor receipt plan digest is not reproducible from the exact admitted state'
   grep -E -x 'ACCEPTED_AT=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z' "$SUCCESSOR_RECEIPT" >/dev/null || die 'successor receipt timestamp is invalid'
   grep -F -x "CONTROLLER=${CONTROLLER}" "$SUCCESSOR_RECEIPT" >/dev/null || die 'successor receipt controller identity is invalid'
@@ -380,7 +528,13 @@ if [[ -e "$SUCCESSOR_RECEIPT" || -L "$SUCCESSOR_RECEIPT" ]]; then
   exit 0
 fi
 assert_units_quiescent
-if [[ -e "$CONTROL_VERIFIER_EVIDENCE" || -L "$CONTROL_VERIFIER_EVIDENCE" ]]; then
+current_control_verifier_sha="$(control_verifier_output | sha256sum | awk '{ print $1 }')" \
+  || die 'current installed-control verifier digest could not be applied'
+abandoned_control_verifier_sha="$(control_recovery_abandoned_sha "$current_control_verifier_sha")" \
+  || die 'control verifier evidence recovery state changed before apply'
+if [[ -n "$abandoned_control_verifier_sha" ]]; then
+  recover_control_verifier_evidence "$abandoned_control_verifier_sha" "$current_control_verifier_sha"
+elif [[ -e "$CONTROL_VERIFIER_EVIDENCE" || -L "$CONTROL_VERIFIER_EVIDENCE" ]]; then
   assert_root_file "$CONTROL_VERIFIER_EVIDENCE" 600
 else
   temporary_control_verifier_evidence="${CONTROL_VERIFIER_EVIDENCE}.new.$$"
@@ -389,7 +543,7 @@ else
   chown root:root "$temporary_control_verifier_evidence"; chmod 0600 "$temporary_control_verifier_evidence"
   mv -T -- "$temporary_control_verifier_evidence" "$CONTROL_VERIFIER_EVIDENCE"; sync -f "$CONTROL_VERIFIER_EVIDENCE"; sync -d "$STATE_ROOT"
 fi
-[[ "$(sha256 "$CONTROL_VERIFIER_EVIDENCE")" == "$(control_verifier_output | sha256sum | awk '{ print $1 }')" ]] \
+[[ "$(sha256 "$CONTROL_VERIFIER_EVIDENCE")" == "$current_control_verifier_sha" ]] \
   || die 'installed production-control verifier evidence drifted before any filesystem effect'
 before_states="$(snapshot_unit_states)"
 for unit in "${ADDED_DRAIN_UNITS[@]}"; do create_fence "$unit"; done

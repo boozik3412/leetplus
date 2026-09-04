@@ -42,6 +42,13 @@ dated canary не имеет maintenance effects, destructive policy-retention �
 dry-run. Production всё ещё `f3f119fa…` до нового exact-main Fast+Full,
 immutable handoff, canary и postflight.
 
+Production successor preflight 05.09 на exact `e4da6a04…` остановился до
+runtime effect из-за различия systemd 255: у `.timer` service-only PID
+properties отсутствуют, а controller ожидал строковые нули. Source repair
+нормализует только timer-представление; `.service` остаётся fail-closed с
+обязательными явными zero PID. До нового admission runtime остаётся
+`f3f119fa…`, Langame timer `inactive/disabled`, routing и schema не менялись.
+
 Production migration
 `20260831120000_guest_support_bug_report_input_repair` применена
 контроллером `GUEST_SUPPORT_PRODUCTION_188_TO_189_V1` после PASS на

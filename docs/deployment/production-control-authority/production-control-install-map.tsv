@@ -6,8 +6,8 @@ docs/deployment/production-artifact/bind-release-slot.sh	/usr/local/sbin/leetplu
 docs/deployment/production-artifact/blue-green-cutover.sh	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/blue-green-cutover.sh	0400
 docs/deployment/production-artifact/blue-green-cutover.sh	/usr/local/sbin/leetplus-blue-green-cutover	0500
 docs/deployment/production-artifact/install-legacy-rollback-contour.sh	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/install-legacy-rollback-contour.sh	0400
-docs/deployment/production-artifact/langame-discrepancy-audit-authority.sh	/usr/local/sbin/leetplus-langame-discrepancy-audit-authority	0500
 docs/deployment/production-artifact/langame-daily-worker-authorization-authority.sh	/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority	0500
+docs/deployment/production-artifact/langame-discrepancy-audit-authority.sh	/usr/local/sbin/leetplus-langame-discrepancy-audit-authority	0500
 docs/deployment/production-artifact/legacy-rollback-auth-edge.mjs	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/legacy-rollback-auth-edge.mjs	0400
 docs/deployment/production-artifact/legacy-rollback-child-loopback.cjs	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/legacy-rollback-child-loopback.cjs	0400
 docs/deployment/production-artifact/nginx/blue.conf.example	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/nginx/blue.conf.example	0400
@@ -50,10 +50,10 @@ docs/deployment/production-artifact/systemd/legacy-rollback-7de04ff4.env.example
 docs/deployment/production-artifact/systemd/legacy-rollback-safe.env.example	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/legacy-rollback-safe.env.example	0400
 docs/deployment/production-artifact/systemd/nginx.service.d/leetplus-blue-green-recovery.conf	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/nginx.service.d/leetplus-blue-green-recovery.conf	0400
 docs/deployment/production-artifact/systemd/tmpfiles.d/leetplus-release.conf	/etc/tmpfiles.d/leetplus-release.conf	0444
+docs/deployment/production-artifact/verify-langame-daily-worker-authorization.sh	/usr/local/libexec/leetplus/verify-langame-daily-worker-authorization.sh	0555
 docs/deployment/production-artifact/verify-legacy-rollback-authenticated-reads.mjs	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/verify-legacy-rollback-authenticated-reads.mjs	0400
 docs/deployment/production-artifact/verify-legacy-rollback-readiness.sh	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/verify-legacy-rollback-readiness.sh	0400
 docs/deployment/production-artifact/verify-legacy-runtime-drain.sh	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/verify-legacy-runtime-drain.sh	0400
-docs/deployment/production-artifact/verify-langame-daily-worker-authorization.sh	/usr/local/libexec/leetplus/verify-langame-daily-worker-authorization.sh	0555
 docs/deployment/production-artifact/verify-pnpm-store-integrity.mjs	/usr/local/libexec/leetplus/verify-pnpm-store-integrity.mjs	0555
 docs/deployment/production-artifact/verify-release-hydration-systemd.mjs	/usr/local/libexec/leetplus/verify-release-hydration-systemd.mjs	0555
 docs/deployment/production-artifact/verify-release-readiness.sh	/usr/local/libexec/leetplus/verify-release-readiness.sh	0555

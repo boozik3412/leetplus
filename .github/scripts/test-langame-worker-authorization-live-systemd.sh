@@ -242,7 +242,7 @@ else
   system_bus_private_socket="${system_bus_fixture_root}/system_bus_socket"
   system_bus_claim="${system_bus_fixture_root}/system_bus_socket"
   system_bus_parent_pid="$BASHPID"
-  /usr/bin/dbus-daemon --system --nofork --nopidfile \
+  /usr/bin/dbus-daemon --system --nofork --nopidfile --systemd-activation \
     "--address=unix:path=${system_bus_private_socket}" >/dev/null &
   system_bus_pid=$!
   system_bus_start_time="$(awk '{print $22}' "/proc/${system_bus_pid}/stat" 2>/dev/null || true)"
@@ -257,7 +257,7 @@ else
   system_bus_process_has_exact_executable \
     || die 'fixture-owned system-bus process identity is invalid'
   system_bus_cmdline_sha256="$(sha256sum -- "/proc/${system_bus_pid}/cmdline" | awk '{print $1}')"
-  [[ "$(tr '\0' '\n' < "/proc/${system_bus_pid}/cmdline")" == $'/usr/bin/dbus-daemon\n--system\n--nofork\n--nopidfile\n--address=unix:path='"${system_bus_private_socket}" \
+  [[ "$(tr '\0' '\n' < "/proc/${system_bus_pid}/cmdline")" == $'/usr/bin/dbus-daemon\n--system\n--nofork\n--nopidfile\n--systemd-activation\n--address=unix:path='"${system_bus_private_socket}" \
     && -S "$system_bus_private_socket" && ! -L "$system_bus_private_socket" \
     && "$(stat -c '%U:%G' -- "$system_bus_private_socket")" == 'root:root' ]] \
     || die 'fixture-owned system-bus process or socket failed exact attestation'

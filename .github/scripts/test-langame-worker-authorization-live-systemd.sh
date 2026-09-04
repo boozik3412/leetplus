@@ -540,7 +540,7 @@ systemctl daemon-reload
 # Exercise one deterministic timer-to-service activation without waiting for
 # the production unit's legitimate 90-second calendar coalescing window. The
 # exact production schedule remains pinned by the static template regression.
-bounded_systemctl enable --now "$TIMER"
+bounded_systemctl enable --now "$TIMER" || { report_worker_state; die 'authorized timer enablement failed'; }
 [[ "$(systemctl show -p UnitFileState --value "$TIMER")" == enabled && "$(systemctl show -p ActiveState --value "$TIMER")" == active && "$(systemctl show -p SubState --value "$TIMER")" == waiting ]] || die 'authorized timer is not enabled active(waiting)'
 assert_zero_processes "$TIMER"
 for _ in {1..20}; do
@@ -558,9 +558,11 @@ timer_invocation="$(read_marker_invocation)"
 [[ "$timer_invocation" != "$canary_invocation" ]] \
   || { report_worker_state; die 'timer did not prove a fresh timer-profile invocation'; }
 assert_zero_processes "$SERVICE"
-bounded_systemctl disable --now "$TIMER"
-bounded_systemctl stop "$SERVICE"
-bounded_systemctl reset-failed "$SERVICE" "$TIMER"
+bounded_systemctl disable --now "$TIMER" || { report_worker_state; die 'authorized timer disablement failed'; }
+bounded_systemctl stop "$SERVICE" || { report_worker_state; die 'successful worker service could not be stopped'; }
+# A successful inactive oneshot has no failed state to reset. PID 1 may already
+# garbage-collect its manager object after stop; reset-failed would then return
+# nonzero for a safe not-loaded unit and turn the fixture into a false failure.
 [[ "$(systemctl show -p ActiveState --value "$SERVICE")" == inactive \
   && "$(systemctl show -p SubState --value "$SERVICE")" == dead \
   && "$(systemctl show -p ActiveState --value "$TIMER")" == inactive \
@@ -569,16 +571,16 @@ bounded_systemctl reset-failed "$SERVICE" "$TIMER"
 assert_zero_processes "$SERVICE"
 assert_zero_processes "$TIMER"
 rm -f -- "/etc/systemd/system/${SERVICE}.d/91-leetplus-langame-worker-authorization.conf" "/etc/systemd/system/${TIMER}.d/91-leetplus-langame-worker-authorization.conf" "$AUTH_ROOT/active-canary.permit" "$AUTH_ROOT/active-timer.permit"
-systemctl daemon-reload
+systemctl daemon-reload || die 'authorization cleanup daemon-reload failed'
 [[ ! -e "$AUTH_ROOT/active-canary.permit" && ! -L "$AUTH_ROOT/active-canary.permit" \
   && ! -e "$AUTH_ROOT/active-timer.permit" && ! -L "$AUTH_ROOT/active-timer.permit" \
   && ! -e "/etc/systemd/system/${SERVICE}.d/91-leetplus-langame-worker-authorization.conf" \
   && ! -e "/etc/systemd/system/${TIMER}.d/91-leetplus-langame-worker-authorization.conf" ]] \
   || die 'authorization pointer or drop-in remained after revocation'
 rm -f -- "$MARKER"
-bounded_systemctl start "$SERVICE"
+bounded_systemctl start "$SERVICE" || die 'fenced service start request returned an unexpected error'
 [[ "$(systemctl show -p ActiveState --value "$SERVICE")" == inactive ]] || die 'service starts after authorization cleanup despite absent 91 permit'
-bounded_systemctl start "$TIMER"
+bounded_systemctl start "$TIMER" || die 'fenced timer start request returned an unexpected error'
 [[ "$(systemctl show -p ActiveState --value "$TIMER")" == inactive \
   && "$(systemctl show -p UnitFileState --value "$TIMER")" == disabled \
   && ! -e "$MARKER" && ! -L "$MARKER" ]] \

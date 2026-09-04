@@ -3,6 +3,8 @@ FROM ubuntu:24.04@sha256:1e0a86e57d247923571b75e0aaf48a1449cf8c543d51fb3e07a4a7d
 ARG DEBIAN_FRONTEND=noninteractive
 ARG FIXTURE_SOURCE_SHA
 ARG UBUNTU_SNAPSHOT=20260818T000000Z
+ARG BOOTSTRAP_CA_BUNDLE_SHA256
+ARG SNAPSHOT_SOURCES_SHA256
 
 LABEL org.opencontainers.image.source="https://github.com/boozik3412/leetplus" \
       org.opencontainers.image.revision="${FIXTURE_SOURCE_SHA}" \
@@ -10,13 +12,33 @@ LABEL org.opencontainers.image.source="https://github.com/boozik3412/leetplus" \
       org.opencontainers.image.base.digest="sha256:1e0a86e57d247923571b75e0aaf48a1449cf8c543d51fb3e07a4a7d7bfa79316" \
       org.opencontainers.image.version="ubuntu-24.04-systemd-255.4-1ubuntu8.17-dbus-1.14.10-4ubuntu4.1" \
       io.leetplus.fixture="langame-booted-systemd-base-v1" \
-      io.leetplus.fixture.ubuntu-snapshot="${UBUNTU_SNAPSHOT}"
+      io.leetplus.fixture.ubuntu-snapshot="${UBUNTU_SNAPSHOT}" \
+      io.leetplus.fixture.bootstrap-ca-bundle-sha256="${BOOTSTRAP_CA_BUNDLE_SHA256}" \
+      io.leetplus.fixture.snapshot-sources-sha256="${SNAPSHOT_SOURCES_SHA256}"
+
+COPY bootstrap-ca-certificates.crt /tmp/bootstrap-ca-certificates.crt
+COPY ubuntu-snapshot.sources /tmp/ubuntu-snapshot.sources
 
 # Canonical Noble apt understands --snapshot natively. Network is permitted
 # only while this project-owned base is built once; consumer gates pull its
 # immutable manifest digest and run/build their overlay with network=none.
-RUN apt-get update --snapshot "${UBUNTU_SNAPSHOT}" \
-    && apt-get install -y --no-install-recommends --snapshot "${UBUNTU_SNAPSHOT}" \
+RUN test "$(sha256sum /tmp/bootstrap-ca-certificates.crt | awk '{print $1}')" \
+      = "${BOOTSTRAP_CA_BUNDLE_SHA256}" \
+    && test "$(sha256sum /tmp/ubuntu-snapshot.sources | awk '{print $1}')" \
+      = "${SNAPSHOT_SOURCES_SHA256}" \
+    && install -d -o root -g root -m 0755 /etc/ssl/certs \
+    && install -o root -g root -m 0444 /tmp/bootstrap-ca-certificates.crt \
+      /etc/ssl/certs/ca-certificates.crt \
+    && rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
+    && install -o root -g root -m 0444 /tmp/ubuntu-snapshot.sources \
+      /etc/apt/sources.list.d/ubuntu.sources \
+    && grep -F -x "URIs: https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/" \
+      /etc/apt/sources.list.d/ubuntu.sources \
+    && ! grep -R -E 'archive\.ubuntu\.com|security\.ubuntu\.com' \
+      /etc/apt/sources.list.d \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+      ca-certificates \
       dbus=1.14.10-4ubuntu4.1 \
       libnss-systemd=255.4-1ubuntu8.17 \
       passwd \
@@ -24,7 +46,9 @@ RUN apt-get update --snapshot "${UBUNTU_SNAPSHOT}" \
       systemd=255.4-1ubuntu8.17 \
       systemd-sysv=255.4-1ubuntu8.17 \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/lib/apt/lists/* /tmp/bootstrap-ca-certificates.crt \
+      /tmp/ubuntu-snapshot.sources \
+    && test -s /etc/ssl/certs/ca-certificates.crt \
     && test "$(dpkg-query -W -f='${Version}' systemd)" = 255.4-1ubuntu8.17 \
     && test "$(dpkg-query -W -f='${Version}' dbus)" = 1.14.10-4ubuntu4.1
 

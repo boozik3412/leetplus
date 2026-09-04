@@ -7,6 +7,7 @@ on:
     paths:
       - .github/fixtures/langame-systemd-noble/Dockerfile
       - .github/fixtures/langame-systemd-noble/leetplus-langame-fixture.target
+      - .github/fixtures/langame-systemd-noble/ubuntu-snapshot.sources
       - .github/workflows/bootstrap-langame-systemd-fixture.yml
 
 permissions:
@@ -52,12 +53,15 @@ jobs:
           auth_file="$RUNNER_TEMP/leetplus-langame-systemd-fixture-auth.json"
           digest_file="$RUNNER_TEMP/leetplus-langame-systemd-fixture.digest"
           run_identity="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          build_context="$RUNNER_TEMP/leetplus-langame-systemd-bootstrap-context.${run_identity}"
+          host_ca_bundle='/etc/ssl/certs/ca-certificates.crt'
           container="leetplus-langame-systemd-bootstrap-${run_identity}"
           label_key='io.leetplus.langame-systemd-bootstrap-run'
           label="${label_key}=${run_identity}"
           container_id=''
           retired_container_id=''
           auth_armed=false
+          build_context_armed=false
 
           cleanup() {
             original_status=$?
@@ -77,6 +81,12 @@ jobs:
               podman_short logout --authfile "$auth_file" ghcr.io >/dev/null 2>&1 || cleanup_status=1
             fi
             rm -f -- "$auth_file" "$digest_file" || cleanup_status=1
+            case "$build_context" in "$RUNNER_TEMP"/leetplus-langame-systemd-bootstrap-context."${run_identity}") ;; *) cleanup_status=1 ;; esac
+            if [[ "$build_context_armed" == true && ( -e "$build_context" || -L "$build_context" ) ]]; then
+              test -d "$build_context" && test ! -L "$build_context" || cleanup_status=1
+              test -z "$(find -P "$build_context" -xdev -type l -print -quit 2>/dev/null)" || cleanup_status=1
+              rm -rf -- "$build_context" || cleanup_status=1
+            fi
             ((original_status != 0)) && exit "$original_status"
             exit "$cleanup_status"
           }
@@ -87,6 +97,7 @@ jobs:
 
           test ! -e "$auth_file" && test ! -L "$auth_file"
           test ! -e "$digest_file" && test ! -L "$digest_file"
+          test ! -e "$build_context" && test ! -L "$build_context"
           test -z "$(podman_short ps -aq --no-trunc --filter "label=${label}")"
           auth_armed=true
           printf '%s' "$GHCR_TOKEN" | podman_short login \
@@ -96,17 +107,49 @@ jobs:
             ghcr.io >/dev/null
           unset GHCR_TOKEN
           test "$(stat -c '%u:%g:%a:%h' -- "$auth_file")" = "$(id -u):$(id -g):600:1"
+          test -f "$host_ca_bundle" && test ! -L "$host_ca_bundle"
+          test "$(stat -c '%U:%G:%a:%h' -- "$host_ca_bundle")" = root:root:644:1
+          test -z "$(find -P "$host_ca_bundle" -maxdepth 0 -perm /022 -print -quit)"
+          ca_bundle_identity="$(stat -c '%d:%i:%s:%Y:%Z:%U:%G:%a:%h' -- "$host_ca_bundle")"
+          ca_bundle_sha256="$(sha256sum "$host_ca_bundle" | awk '{print $1}')"
+          [[ "$ca_bundle_sha256" =~ ^[0-9a-f]{64}$ ]]
+          install -d -o "$(id -u)" -g "$(id -g)" -m 0700 -- "$build_context"
+          build_context_armed=true
+          test "$(stat -c '%u:%g:%a:%h' -- "$build_context")" = "$(id -u):$(id -g):700:2"
+          for source in \
+            .github/fixtures/langame-systemd-noble/Dockerfile \
+            .github/fixtures/langame-systemd-noble/leetplus-langame-fixture.target \
+            .github/fixtures/langame-systemd-noble/ubuntu-snapshot.sources; do
+            test -f "$source" && test ! -L "$source"
+            source_identity="$(stat -c '%d:%i:%s:%Y:%Z:%U:%G:%a:%h' -- "$source")"
+            source_sha256="$(sha256sum "$source" | awk '{print $1}')"
+            install -o "$(id -u)" -g "$(id -g)" -m 0444 -- "$source" "$build_context/$(basename "$source")"
+            test "$(stat -c '%d:%i:%s:%Y:%Z:%U:%G:%a:%h' -- "$source")" = "$source_identity"
+            test "$(sha256sum "$source" | awk '{print $1}')" = "$source_sha256"
+            test "$(sha256sum "$build_context/$(basename "$source")" | awk '{print $1}')" = "$source_sha256"
+          done
+          install -o "$(id -u)" -g "$(id -g)" -m 0444 -- "$host_ca_bundle" "$build_context/bootstrap-ca-certificates.crt"
+          test "$(stat -c '%d:%i:%s:%Y:%Z:%U:%G:%a:%h' -- "$host_ca_bundle")" = "$ca_bundle_identity"
+          test "$(sha256sum "$host_ca_bundle" | awk '{print $1}')" = "$ca_bundle_sha256"
+          test "$(sha256sum "$build_context/bootstrap-ca-certificates.crt" | awk '{print $1}')" = "$ca_bundle_sha256"
+          snapshot_sources_sha256="$(sha256sum "$build_context/ubuntu-snapshot.sources" | awk '{print $1}')"
+          test "$snapshot_sources_sha256" = 2aecb1f023a3c426c9409b98a81b23ca6fc045c1ae47f1ce59001b6f86470ae4
           podman_long build \
             --pull-always \
             --platform linux/amd64 \
             --format oci \
             --build-arg "FIXTURE_SOURCE_SHA=${GITHUB_SHA}" \
-            --file .github/fixtures/langame-systemd-noble/Dockerfile \
+            --build-arg "BOOTSTRAP_CA_BUNDLE_SHA256=${ca_bundle_sha256}" \
+            --build-arg "SNAPSHOT_SOURCES_SHA256=${snapshot_sources_sha256}" \
+            --file "$build_context/Dockerfile" \
             --tag "$image" \
-            .github/fixtures/langame-systemd-noble
+            "$build_context"
           test "$(podman_short image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" = linux/amd64
           test "$(podman_short image inspect --format '{{index .Labels "io.leetplus.fixture"}}' "$image")" = langame-booted-systemd-base-v1
           test "$(podman_short image inspect --format '{{index .Labels "org.opencontainers.image.revision"}}' "$image")" = "$GITHUB_SHA"
+          test "$(podman_short image inspect --format '{{index .Labels "io.leetplus.fixture.bootstrap-ca-bundle-sha256"}}' "$image")" = "$ca_bundle_sha256"
+          test "$(podman_short image inspect --format '{{index .Labels "io.leetplus.fixture.snapshot-sources-sha256"}}' "$image")" = "$snapshot_sources_sha256"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
           podman_short run --rm \
             --network none \
             --entrypoint /usr/bin/bash \
@@ -201,3 +244,5 @@ jobs:
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           printf 'PUBLISHED_IMAGE=%s@%s\n' "${image%%:*}" "$digest"
           printf 'PUBLISHED_DIGEST=%s\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
+          printf 'BOOTSTRAP_CA_BUNDLE_SHA256=%s\n' "$ca_bundle_sha256" >> "$GITHUB_STEP_SUMMARY"
+          printf 'SNAPSHOT_SOURCES_SHA256=%s\n' "$snapshot_sources_sha256" >> "$GITHUB_STEP_SUMMARY"

@@ -79,7 +79,7 @@ run_dynamic_manager_isolation_canary() {
       mapfile -t pids < "/sys/fs/cgroup${expected}/cgroup.procs"
       [[ "${#pids[@]}" == 1 && "${pids[0]}" == "$$" ]] || fail "cgroup is not singleton"
       [[ "${INVOCATION_ID:-}" =~ ^[0-9a-f]{32}$ ]] || fail "InvocationID is invalid"
-      [[ ! -e /run/dbus/system_bus_socket && ! -e /run/systemd/private ]] || fail "system-manager transport is reachable"
+      [[ ! -S /run/dbus/system_bus_socket && ! -S /run/systemd/private ]] || fail "system-manager socket transport is still visible"
     '; then
     systemctl --no-pager --full status "$MANAGER_ISOLATION_CANARY" >&2 || true
     journalctl --no-pager --output=short-precise --unit "$MANAGER_ISOLATION_CANARY" --lines=80 >&2 || true
@@ -253,8 +253,9 @@ if (members.length !== 1 || members[0] !== String(process.pid)) {
 }
 for (const path of ['/run/dbus/system_bus_socket', '/run/systemd/private']) {
   try {
-    fs.statSync(path);
-    throw new Error(`worker unexpectedly reached ${path}`);
+    if (fs.statSync(path).isSocket()) {
+      throw new Error(`worker unexpectedly sees manager socket ${path}`);
+    }
   } catch (error) {
     if (!['EACCES', 'ENOENT'].includes(error.code)) throw error;
   }

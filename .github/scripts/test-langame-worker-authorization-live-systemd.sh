@@ -32,7 +32,7 @@ created_runtime=false; created_api=false; created_system_node=false
 system_node_root=''; system_node_root_device_inode=''; system_node_stage=''; system_node_stage_device_inode=''; system_node_claim=''; system_node_digest=''
 die() { printf 'Langame worker live-systemd fixture: %s\n' "$*" >&2; exit 1; }
 bounded_systemctl() { timeout --foreground --kill-after=2s 12s systemctl "$@"; }
-bounded_systemd_run() { timeout --foreground --kill-after=4s 30s systemd-run "$@"; }
+bounded_systemd_run() { timeout --foreground --kill-after=4s 30s systemd-run --expand-environment=no "$@"; }
 start_worker_or_report() {
   if bounded_systemctl start "$SERVICE"; then return 0; fi
   systemctl --no-pager --full status "$SERVICE" >&2 || true
@@ -160,6 +160,8 @@ cleanup() {
 ((EUID == 0)) || die 'root is required'
 [[ "$(ps -p 1 -o comm= | tr -d ' ')" == systemd ]] || die 'a real systemd PID 1 is required'
 for binary in install mkdir mktemp rm rmdir systemctl systemd-run journalctl timeout stat find awk grep groupadd groupdel getent id ps tr readlink realpath sha256sum sed date chown chmod ln touch cat mv sleep dirname; do command -v "$binary" >/dev/null || die "missing ${binary}"; done
+systemd-run --help | grep -F -- '--expand-environment=BOOL' >/dev/null \
+  || die 'systemd-run lacks literal-argument transport required by the fixture'
 for dynamic_user in "$MANAGER_ISOLATION_USER" "$WRONG_UNIT_USER"; do
   [[ "$dynamic_user" =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] \
     || die "fixture DynamicUser name is outside the portable systemd limit: ${dynamic_user}"

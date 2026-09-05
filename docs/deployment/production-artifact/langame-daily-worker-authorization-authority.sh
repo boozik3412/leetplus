@@ -537,7 +537,7 @@ write_permit() {
   printf '%s' "$path"
 }
 wait_for_canary_terminal() {
-  local before_start="$1" current_start current_exit active result status failed_state deadline
+  local before_start="$1" current_start current_exit active substate result status failed_state deadline
   local saw_fresh_start=false
   [[ "$before_start" =~ ^[0-9]{1,18}$ ]] || return 1
   deadline="$(( $(date +%s) + 2700 ))"
@@ -572,6 +572,20 @@ wait_for_canary_terminal() {
         && 10#$current_exit -ge 10#$current_start
         && "$result" == success && "$status" == 0 ]] || return 1
       service_is_quiescent && worker_jobs_are_absent && return 0
+    elif [[ "$active" == active ]]; then
+      # Canary authorization pins this Type=oneshot unit in active(exited)
+      # until the controller has captured its fresh terminal metadata. This
+      # closes the race where an idempotent run can finish and be collected
+      # before the first two-second sample, without changing the persistent
+      # timer profile or trusting journal text as an execution receipt.
+      substate="$(systemctl_bounded show --property=SubState --value "$WORKER_SERVICE")"
+      if [[ "$substate" == exited ]]; then
+        current_exit="$(systemctl_bounded show --property=ExecMainExitTimestampMonotonic --value "$WORKER_SERVICE")"
+        [[ "$current_exit" =~ ^[0-9]{1,18}$
+          && 10#$current_exit -ge 10#$current_start
+          && "$result" == success && "$status" == 0 ]] || return 1
+        unit_has_no_processes "$WORKER_SERVICE" && worker_jobs_are_absent && return 0
+      fi
     fi
     /usr/bin/sleep 2
   done
@@ -738,7 +752,11 @@ assert_authorization_dropins() {
     legacy_path="$(fence_path "$unit")"
     authorization_path="$(dirname -- "$legacy_path")/91-leetplus-langame-worker-authorization.conf"
     assert_worker_fence "$unit"; assert_regular "$authorization_path" 'root:root:644'
-    [[ "$(tr -d '\r' < "$authorization_path")" == $'[Unit]\nConditionPathExists=\n'"ConditionPathExists=${permit}" ]] \
+    expected=$'[Unit]\nConditionPathExists=\n'"ConditionPathExists=${permit}"
+    if [[ "$phase" == canary && "$unit" == "$WORKER_SERVICE" ]]; then
+      expected+=$'\n[Service]\nRemainAfterExit=yes'
+    fi
+    [[ "$(tr -d '\r' < "$authorization_path")" == "$expected" ]] \
       || die "worker authorization drop-in content drifted: ${unit}"
     expected="$(printf '%s\n%s\n' "$legacy_path" "$authorization_path" | sort)"
     actual="$(systemctl_bounded show --property=DropInPaths --value "$unit" | tr ' ' '\n' | sed '/^$/d' | sort)"
@@ -788,6 +806,9 @@ release_worker_fences() {
     [[ ! -e "$path" && ! -L "$path" ]] || die 'worker authorization drop-in already exists'
     temporary="$(mktemp "${directory}/.leetplus-langame-worker-authorization.XXXXXX")"
     expected=$'[Unit]\nConditionPathExists=\n'"ConditionPathExists=${permit}"
+    if [[ "$phase" == canary && "$unit" == "$WORKER_SERVICE" ]]; then
+      expected+=$'\n[Service]\nRemainAfterExit=yes'
+    fi
     printf '%s\n' "$expected" > "$temporary"; chown root:root "$temporary"; chmod 0644 "$temporary"
     [[ "$(stat -c '%U:%G:%a:%h' -- "$temporary")" == 'root:root:644:1' ]] || die 'worker authorization temporary authority drifted'
     mv -T "$temporary" "$path"; sync -f "$path"; sync -d "$directory"
@@ -975,6 +996,7 @@ case "$mode" in
       before_start="$(systemctl_bounded show --property=ExecMainStartTimestampMonotonic --value "$WORKER_SERVICE")"; release_worker_fences "$permit"
       if ! systemctl_bounded start --no-block "$WORKER_SERVICE"; then stop_service_and_assert_quiescent; write_canary_failure "$permit"; restore_worker_fences; clear_pointer; clear_intent; die 'canary service start was not accepted; fences restored'; fi
       if ! wait_for_canary_terminal "$before_start"; then stop_service_and_assert_quiescent; write_canary_failure "$permit"; restore_worker_fences; clear_pointer; clear_intent; die 'canary did not reach a fresh successful terminal result'; fi
+      stop_service_and_assert_quiescent
       service_is_quiescent && worker_jobs_are_absent || die 'successful canary retained a process, cgroup member, or systemd job'
       write_execution "$permit"
       restore_worker_fences

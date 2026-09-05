@@ -9,14 +9,24 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий production runtime baseline — merge SHA
-`f3f119fa81fc497b75cc1e57f046d8539676c943` (PR #122). Fast CI
-`33718092094` и Full Release Admission `33718092121` зелёные на exact merge
-SHA. Active blue `f3f119fa…` и hot-rollback green `22ab6b81…` работают в
-`COMBINED`, оба проходят exact readiness `CURRENT_189/189`; nginx cutover
-generation — `21`.
+`96b28f44fbd0e57d3e4c6ed5bc78492b2621f365` (PR #138). Fast CI
+`33935658207` и Full Release Admission `33935658206` зелёные на exact merge
+SHA. Active green `96b28f44…` и hot-rollback blue `2b8c7dfd…` работают в
+`COMBINED`, оба проходят exact readiness `CURRENT_189/189`.
 `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
 `GUEST_BUG_REPORTING_MODE=LIVE`. Split systemd/nginx candidate остаётся
 `DORMANT / NOT INSTALLED`.
+
+Повторный Langame canary за `2026-08-27` на этом runtime выполнил один INTERNAL
+tenant без failed scope и повторных effects, но завершился быстрее первого
+poll interval и был garbage-collected до захвата fresh terminal metadata.
+Штатный recovery подтвердил zero PID/cgroup/jobs, удалил temporary permit и
+вернул оба 90-fence; daily timer остался `inactive/disabled`. Текущий source
+successor удерживает только canary service в `active(exited)` временным
+`RemainAfterExit=yes`, проверяет свежие terminal metadata и явно останавливает
+service до success receipt. Timer profile не меняется. До exact-main Fast/Full,
+control install, принятого canary, date-by-date backfill и timer check этот
+successor не считается deployed.
 
 Read-only проверка 03.09 выявила отдельный P0 Langame: факты трёх ручных
 источников записывались, но post-fact discrepancy audit получал filesystem

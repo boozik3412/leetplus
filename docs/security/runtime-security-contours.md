@@ -4,7 +4,7 @@
 
 Актуально на: **05.09.2026**
 Runtime implementation baseline:
-`2b8c7dfd77641b518eec21d851570a51c37b285b` (PR #137; включает
+`96b28f44fbd0e57d3e4c6ed5bc78492b2621f365` (PR #138; включает
 CURRENT189 application baseline, check-in consistency repair, autonomous
 gamification worker successor и canonical verifier environment repair)
 
@@ -17,9 +17,9 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                                                          |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Runtime implementation   | CURRENT189 production baseline, merge SHA `2b8c7dfd77641b518eec21d851570a51c37b285b`                                                                                                                          |
-| Admission merge SHA      | exact-main Fast CI и Full Release Admission для `2b8c7dfd…` — `SUCCESS`                                                                                                                                    |
-| Production API topology  | active blue exact `2b8c7dfd…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback green `982b537c…` остаётся active                                                        |
+| Runtime implementation   | CURRENT189 production baseline, merge SHA `96b28f44fbd0e57d3e4c6ed5bc78492b2621f365`                                                                                                                          |
+| Admission merge SHA      | exact-main Fast CI и Full Release Admission для `96b28f44…` — `SUCCESS`                                                                                                                                    |
+| Production API topology  | active green exact `96b28f44…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback blue `2b8c7dfd…` остаётся active                                                        |
 | Guest bug-report repair  | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                |
 | Corporate invite repair  | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                    |
 | Guest check-in consistency | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                         |
@@ -98,6 +98,25 @@ allowlist/hash identity; это делает корректными quoted syste
 ослабления secret set. До exact-main Fast/Full, установки control generation,
 повторного принятого canary и timer check Langame timer остаётся
 `inactive/disabled`.
+
+Exact admitted rollout `96b28f44…` 05.09 завершён штатным пятифазным
+оркестратором: production active green, blue `2b8c7dfd…` сохранён healthy hot
+rollback, schema осталась `CURRENT_189/189`. Повторный идемпотентный canary за
+`2026-08-27` фактически завершился success настолько быстро, что systemd успел
+выгрузить static oneshot до первого двухсекундного sample. Контроллер был
+остановлен только после подтверждённого terminal app-result; штатный `recover`
+доказал zero PID/cgroup/jobs, удалил temporary permit/drop-ins и восстановил
+оба 90-fence. Timer не включался.
+
+Follow-up repair удерживает только canary service после успешного `Type=oneshot`
+в `active(exited)` временным authorization drop-in
+`[Service] RemainAfterExit=yes`. Authority обязан увидеть fresh monotonic start,
+валидные exit timestamp/result/status и zero PID/cgroup/jobs, после чего сам
+останавливает service до публикации execution receipt и восстановления fence.
+Timer-profile не получает `RemainAfterExit`, поэтому ежедневные запускаемые
+таймером jobs не могут остаться active и заблокировать следующий день. Journal
+не используется как authority, failed/deactivating/чужой drop-in по-прежнему
+fail-closed.
 
 ### Guardrail ускорения release pipeline
 

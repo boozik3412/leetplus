@@ -554,6 +554,8 @@ grep -F 'LANGAME_DAILY_SYNC_SCHEDULER_ENABLED' "$langame_worker_authority" > /de
 grep -F 'LANGAME_SCHEDULED_HTTP_ENABLED' "$langame_worker_authority" > /dev/null
 grep -F 'LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED' "$langame_worker_authority" > /dev/null
 grep -F 'LANGAME_DAILY_WORKER_RETENTION_ENABLED' "$langame_worker_authority" > /dev/null
+grep -F "expected+=\$'\\n[Service]\\nRemainAfterExit=yes'" "$langame_worker_authority" > /dev/null
+grep -F 'stop_service_and_assert_quiescent' "$langame_worker_authority" > /dev/null
 grep -F -x "readonly DRAIN_VERIFIER='/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/verify-legacy-runtime-drain.sh'" "$langame_worker_authority" > /dev/null
 grep -F "assert_regular \"\$DRAIN_VERIFIER\" 'root:root:400'" "$langame_worker_authority" > /dev/null
 grep -F -x "readonly DRAIN_VERIFIER='/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/verify-legacy-runtime-drain.sh'" "$legacy_manifest_successor" > /dev/null

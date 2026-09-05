@@ -1,8 +1,16 @@
 # Langame sync production recovery
 
-Статус: **backfill canary завершён; stable timer fail-closed до systemd DropInPaths verifier repair**
+Статус: **backfill canary и stable timer приняты; оба worker timer активны**
 
 Актуально на: **05.09.2026**
+
+Production checkpoint: active green `81ae920c…`, rollback blue `72b1b053…`,
+schema `CURRENT_189/189`. Daily worker прошёл повторный canary `2026-09-04`
+`4/4`, stable timer включён. Частый bonus-ledger/gamification singleton имеет
+отдельный Prisma pool `connection_limit=2`, activity batch `1` и effective
+`TimeoutStartSec=900`; оба API slot сохраняют встроенные schedulers
+выключенными. Эти границы не расширяют INTERNAL tenant authority и нужны,
+чтобы два API pool и worker не превышали production role connection limit.
 
 ## Причина и граница исправления
 
@@ -196,6 +204,11 @@ corporate scope или Langame credentials. Внешние tenant остаютс
       но пополнение не потребляется третьим шагом, если на его момент второй
       последовательный шаг ещё не был выполнен;
     - повтор canary/backfill не меняет counts, bonus ledger и wallet повторно.
+    Production checkpoint 05.09: для первого обращения exact recovery дал
+    `fact/event/reward/effect/wallet = 1/1/1/1/1`; effect ожидает штатный
+    guest claim. Для второго job завершился `SUCCESS`, но предыдущий
+    `PLAY_TIME` остаётся `0/60`, поэтому top-up не закрыл следующий шаг и
+    дополнительная награда не создавалась.
 11. После включения timer получить минимум два автоматических успешных tick,
     проверить fresh daily job/snapshots, дренирование pending sync jobs и zero
     `FAILED`, duplicate facts или повторных reward effects. Наличие только

@@ -34,6 +34,8 @@ export function loadGuestBonusLedgerWorkerConfig(
     throw new Error(`${workerEnabledKey}=true is required`);
   }
 
+  requireBoundedWorkerDatabasePool(env.DATABASE_URL);
+
   const tenantId = optional(env.GUEST_BONUS_LEDGER_WORKER_TENANT_ID);
   const tenantSlug = optional(env.GUEST_BONUS_LEDGER_WORKER_TENANT_SLUG);
   if (Boolean(tenantId) === Boolean(tenantSlug)) {
@@ -213,4 +215,50 @@ function parseRewardTypes(value: string | undefined) {
     );
   }
   return unique;
+}
+
+function requireBoundedWorkerDatabasePool(value: string | undefined) {
+  const error =
+    'DATABASE_URL must reserve the dedicated worker pool with connection_limit=2, pool_timeout=5 and connect_timeout=5';
+  if (!value || value !== value.trim()) {
+    throw new Error(error);
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(error);
+  }
+
+  const allowedOptions = new Set([
+    'schema',
+    'connection_limit',
+    'pool_timeout',
+    'connect_timeout',
+    'sslmode',
+    'sslaccept',
+  ]);
+  const seen = new Set<string>();
+  for (const [key] of parsed.searchParams) {
+    if (seen.has(key) || !allowedOptions.has(key)) {
+      throw new Error(error);
+    }
+    seen.add(key);
+  }
+
+  if (
+    parsed.protocol !== 'postgresql:' ||
+    !parsed.username ||
+    !parsed.password ||
+    !parsed.hostname ||
+    parsed.pathname.length <= 1 ||
+    parsed.hash ||
+    parsed.searchParams.get('schema') !== 'public' ||
+    parsed.searchParams.get('connection_limit') !== '2' ||
+    parsed.searchParams.get('pool_timeout') !== '5' ||
+    parsed.searchParams.get('connect_timeout') !== '5'
+  ) {
+    throw new Error(error);
+  }
 }

@@ -1,6 +1,16 @@
 # Автономный bonus-ledger worker для геймификации
 
-## Текущий production-контракт и successor (04.09.2026)
+## Текущий production-контракт и successor (05.09.2026)
+
+Production diagnosis подтвердил, что очередь может остановиться даже при
+исправном Langame: два blue/green API slot держали 14 соединений роли с limit
+`20`, а worker без `connection_limit` пытался открыть стандартный Prisma pool.
+Дополнительно activity batch `3` не укладывался в старый timeout `120s`.
+Канонический worker profile теперь требует ровно один activity-профиль за
+tick, отдельный pool `2` с `pool_timeout=5`/`connect_timeout=5` и systemd
+timeout `900s`. Конфигурация с более широким, отсутствующим, повторным или
+неизвестным URL option отклоняется до подключения Prisma. Это fail-closed
+операционная граница, а не изменение правил квалификации или выдачи наград.
 
 - Входящее пополнение для условий заданий обрабатывается отдельным tenant-scoped `LEDGER_SUPPLEMENTAL` только как `BALANCE_TOPUP`; наличие игровой сессии не требуется.
 - Автономный reward materializer выключен. Явное действие гостя по-прежнему
@@ -94,7 +104,7 @@ Bonus ledger не оценивает условия миссии, Battle Pass, �
 Минимальные переменные:
 
 ```env
-DATABASE_URL="<runtime database url>"
+DATABASE_URL="postgresql://<worker-user>:<secret>@<host>:5432/<database>?schema=public&connection_limit=2&pool_timeout=5&connect_timeout=5"
 APP_ENCRYPTION_KEY="<runtime application key>"
 INTEGRATION_ENCRYPTION_KEY="<runtime integration key>"
 LANGAME_BONUS_ACCRUAL_ENABLED="true"

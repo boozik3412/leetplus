@@ -3,10 +3,10 @@
 | Поле                 | Состояние                                                                                                                     |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                  |
-| Production runtime   | healthy; active blue `2b8c7dfd…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback green `982b537c…` ready              |
+| Production runtime   | healthy; active green `96b28f44…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue `2b8c7dfd…` ready             |
 | Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                  |
-| Release authority    | runtime и production-control exact `2b8c7dfd…`; five-phase rollout завершён с terminal receipt                              |
-| Runtime successor    | Bonus-ledger/gamification timer enabled/healthy; bounded historical activity backlog drain продолжается                      |
+| Release authority    | runtime и production-control exact `96b28f44…`; five-phase rollout завершён с terminal receipt                              |
+| Runtime successor    | Bonus-ledger/gamification timer enabled/healthy; activity queue обработана; Langame daily worker fenced до terminal repair      |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                              |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                      |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                      |
@@ -15,7 +15,7 @@
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
-| Langame freshness    | audit storage repair и drain-successor применены; canary 27.08 выполнил sync, но не получил authority receipt после systemd GC; daily timer остаётся fenced/disabled до admitted terminal-state repair  |
+| Langame freshness    | audit storage repair применён; repeat canary 27.08 идемпотентно выполнился, fast-GC безопасно recovered; daily timer fenced/disabled до admitted canary-only `RemainAfterExit` repair |
 
 На 05.09 installed production-control уже обновлён до exact `fc7b6e65…`, но
 runtime не переключался. Successor остановлен fail-closed из-за orphaned
@@ -44,6 +44,18 @@ Source candidate разрешает только этот узкий terminal st
 allowlist или secret scope. До exact-main Fast/Full, control install,
 повторного принятого canary, date-by-date backfill и timer check внешний beta
 остаётся `NO-GO`.
+
+Последний production rollout 05.09 обновил active slot до exact admitted
+`96b28f44…`: active green, blue `2b8c7dfd…` сохранён independently healthy hot
+rollback, schema осталась `CURRENT_189/189`. Повторный canary за `2026-08-27`
+завершился success и подтвердил идемпотентность, но был короче первого poll
+interval, поэтому systemd выгрузил unit до захвата fresh terminal metadata.
+Штатный recovery доказал zero PID/cgroup/jobs, удалил temporary authorization и
+вернул оба 90-fence; timer не включался. Follow-up source repair добавляет
+`RemainAfterExit=yes` только во временный canary service drop-in, проверяет
+`active(exited)` и затем явно останавливает service. Timer profile остаётся без
+этого флага. До exact-main Fast/Full, нового control install, принятого canary,
+date-by-date backfill и timer check внешний beta остаётся `NO-GO`.
 
 Позднее 05.09 controlled rollout exact admitted `982b537c…` завершил все пять
 фаз: production active green generation 22, blue сохранён hot rollback,

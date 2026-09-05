@@ -60,10 +60,15 @@ corporate scope или Langame credentials. Внешние tenant остаютс
     `INTEGRATION_ENCRYPTION_KEY`) worker получает из уже разобранного systemd
     environment, поэтому canonical double quotes в EnvFile не становятся
     частью секрета. Пустые значения и CR/LF отклоняются до запуска Node.
-12. Static oneshot может быть garbage-collected сразу после успешного выхода.
-    Authority считает такой terminal state успешным только если тот же apply
-    уже наблюдал fresh monotonic start, последующий `is-failed` вернул exact
-    `inactive`, а service PID/cgroup и systemd jobs пусты. Failed,
+12. Static oneshot может быть garbage-collected сразу после успешного выхода,
+    включая идемпотентный запуск короче первого poll interval. Поэтому только
+    canary authorization добавляет временный service drop-in
+    `RemainAfterExit=yes`: успешный `Type=oneshot` остаётся `active(exited)` до
+    того, как тот же apply проверит fresh monotonic start, exit timestamp,
+    result/status и zero PID/cgroup/jobs. Затем authority сам останавливает
+    service и только после strict quiescence публикует execution receipt.
+    Timer-profile этот флаг не получает. GC fallback принимается лишь после
+    уже наблюдённого fresh start и exact `is-failed=inactive`; failed,
     deactivating, не наблюдавшийся или неоднозначный запуск остаётся
     fail-closed. Cleanup вызывает `reset-failed` только для exact `failed`.
 
@@ -117,7 +122,8 @@ corporate scope или Langame credentials. Внешние tenant остаютс
    receipt edits запрещены.
 4. Выполнить штатный atomic blue/green cutover. Timer всё ещё disabled.
 5. Создать root-owned `/etc/leetplus/langame-daily-worker.env` в canary mode с
-   exact internal tenant и одной датой. Первый canary — `2026-09-02`.
+   exact internal tenant и одной датой. Первый/repeat canary для текущего
+   recovery — `2026-08-27`.
    Запускать oneshot только через отдельный worker-authorization plan/apply:
    permit связывает active admitted release, installed control, exact env,
    INTERNAL tenant и выключенные API scheduler/scheduled HTTP. Canary permit
@@ -127,10 +133,14 @@ corporate scope или Langame credentials. Внешние tenant остаютс
    а не сохраняемым после завершения `InvocationID`. Terminal result требует
    `MainPID/ControlPID=0`, пустой cgroup и отсутствие systemd jobs;
    исторический `ExecMainPID` допустим только при отсутствии его `/proc`
-   identity. Если успешный static oneshot уже garbage-collected, authority
-   принимает исчезнувшие timestamps/result только после наблюдённого тем же
-   apply fresh start, exact `is-failed=inactive` и повторной strict quiescence.
-   Одного `is-active=false` недостаточно.
+   identity. Canary-only authorization временно добавляет
+   `RemainAfterExit=yes`: быстрый успешный oneshot остаётся `active(exited)`,
+   пока authority не проверит fresh start, exit timestamp, success/status,
+   zero PID/cgroup/jobs и затем сам не остановит service. Timer-profile этот
+   флаг не получает. Если уже наблюдавшийся fresh static oneshot всё же был
+   garbage-collected, fallback принимает исчезнувшие timestamps/result только
+   после exact `is-failed=inactive` и повторной strict quiescence. Одного
+   `is-active=false` недостаточно.
    Canary обязан иметь `ACTIVITY_RECOVERY_ENABLED=false`,
    `RETENTION_ENABLED=false`, `RETENTION_LIVE=false`.
 6. Проверить: три источника без `FAILED`, guest foundation успешен, ровно пять

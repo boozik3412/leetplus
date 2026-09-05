@@ -316,6 +316,11 @@ const members = fs.readFileSync(`/sys/fs/cgroup${expectedCgroup}/cgroup.procs`, 
 if (members.length !== 1 || members[0] !== String(process.pid)) {
   throw new Error('worker is not the singleton cgroup process after wrapper exec');
 }
+if (process.env.DATABASE_URL !== 'postgresql://fixture'
+  || process.env.APP_ENCRYPTION_KEY !== 'fixture-app-key'
+  || process.env.INTEGRATION_ENCRYPTION_KEY !== 'fixture-integration-key') {
+  throw new Error('systemd-parsed worker secret environment was not preserved');
+}
 const deniedCodes = new Set(['EACCES', 'EPERM', 'ENOENT', 'ENOTSOCK', 'ENXIO', 'ECONNREFUSED']);
 function assertDenied(path) {
   return new Promise((resolve, reject) => {
@@ -347,8 +352,8 @@ function assertDenied(path) {
 EOF
 chown root:leetplus-runtime "$RELEASE/apps/api/dist/integrations/langame-daily-worker.cli.js"; chmod 0555 "$RELEASE/apps/api/dist/integrations/langame-daily-worker.cli.js"
 cat >"$ENV_FILE" <<'EOF'
-DATABASE_URL=postgresql://fixture
-APP_ENCRYPTION_KEY=fixture-app-key
+DATABASE_URL="postgresql://fixture"
+APP_ENCRYPTION_KEY="fixture-app-key"
 INTEGRATION_ENCRYPTION_KEY=fixture-integration-key
 LANGAME_DISCREPANCY_LOG_ROOT=/var/lib/leetplus/langame-sync
 LANGAME_DAILY_WORKER_ENABLED=true

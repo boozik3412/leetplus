@@ -3,9 +3,9 @@
 | Поле                 | Состояние                                                                                                                     |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                  |
-| Production runtime   | healthy; active green `982b537c…`, generation 22, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue ready              |
+| Production runtime   | healthy; active blue `2b8c7dfd…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback green `982b537c…` ready              |
 | Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                  |
-| Release authority    | runtime и production-control exact `982b537c…`; five-phase rollout завершён с terminal receipt                              |
+| Release authority    | runtime и production-control exact `2b8c7dfd…`; five-phase rollout завершён с terminal receipt                              |
 | Runtime successor    | Bonus-ledger/gamification timer enabled/healthy; bounded historical activity backlog drain продолжается                      |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                              |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                      |
@@ -15,7 +15,7 @@
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
-| Langame freshness    | audit storage repair и drain-successor применены; daily canary/backfill/timer на HOLD до admitted canonical-verifier-env repair  |
+| Langame freshness    | audit storage repair и drain-successor применены; canary 27.08 выполнил sync, но не получил authority receipt после systemd GC; daily timer остаётся fenced/disabled до admitted terminal-state repair  |
 
 На 05.09 installed production-control уже обновлён до exact `fc7b6e65…`, но
 runtime не переключался. Successor остановлен fail-closed из-за orphaned
@@ -23,6 +23,26 @@ verifier evidence поколения `3281c070…`; successor receipt отсут
 route/schema/data не менялись. Новый source recovery сохраняет старые bytes и
 связывает их с replacement через immutable receipt вместо ручного удаления.
 До его exact-main Fast+Full, successor `check` и canary статус внешнего beta
+остаётся `NO-GO`.
+
+Текущий production baseline позднее обновлён штатным пятифазным rollout до
+exact admitted `2b8c7dfd…`: active blue, green `982b537c…` сохранён hot
+rollback, schema `CURRENT_189/189`, public/corporate runtime healthy.
+Application canary Langame за `2026-08-27` обработал ровно один INTERNAL tenant
+без failed scope. Однако controller не зафиксировал success receipt: после
+завершения static oneshot systemd 255 выгрузил unit и больше не отдавал
+terminal timestamps/result; cleanup затем ошибочно вызвал `reset-failed` для
+уже inactive/unloaded unit. Timer не включён, temporary authorization был
+снят после строгой сверки permit/intent и zero PID/cgroup/jobs, исходные
+90-fence восстановлены.
+
+Source candidate разрешает только этот узкий terminal state: fresh start
+должен быть наблюдён тем же apply, `is-failed` обязан вернуть exact `inactive`,
+а PID/cgroup/jobs — оставаться пустыми. Failed, ambiguous и не наблюдавшийся
+запуск по-прежнему rejected. Одновременно wrapper сохраняет systemd-parsed
+значения трёх секретных переменных при quoted EnvFile, не меняя raw-file hash,
+allowlist или secret scope. До exact-main Fast/Full, control install,
+повторного принятого canary, date-by-date backfill и timer check внешний beta
 остаётся `NO-GO`.
 
 Позднее 05.09 controlled rollout exact admitted `982b537c…` завершил все пять

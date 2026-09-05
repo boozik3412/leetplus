@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-## Canonical current-state guardrail (05.09.2026)
+## Canonical current-state guardrail (06.09.2026)
 
 Перед задачами по auth, landing, access scope, игровому модулю, integrations,
 workers или deployment обязательно прочитать
@@ -39,6 +39,17 @@ worker-only fallback для фиксированного набора exact play
 schedulers и общий API fallback остаются `OFF`; `LIVE` допускается только для
 одного exact `ACTIVE + INTERNAL` tenant с явной UTC-границей, bounded batch и
 существующими idempotency/origin keys.
+
+Оставшийся production blocker — отсутствие store-bound runtime identity:
+migration 165 корректно оставила четыре Store с
+`backgroundExecutionEnabled=false`, поэтому worker доходил до fallback, но
+получал `BACKGROUND_STORE_ID_REQUIRED`. Source successor добавляет узкий
+platform-admin-only control plane: exact Tenant/Store, expected revision,
+typed confirmation, reason, idempotency request ID и runtime `RELEASE_SHA`
+фиксируются одним атомарным `PlatformAdminAuditEvent`. `ENABLE` разрешён только
+для `ACTIVE + INTERNAL` tenant и active gamification Store; внешний tenant
+остаётся fail-closed, а `DISABLE` доступен как authority-reducing emergency
+stop. Production включение выполняется отдельно по canary/replay runbook.
 
 Точечная production-сверка двух обращений отделила дефект от штатной
 последовательности. Для `LP-BUG-AFDE6B03` восстановлен один пропущенный

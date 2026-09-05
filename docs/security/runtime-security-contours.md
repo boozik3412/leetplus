@@ -2,11 +2,11 @@
 
 Статус: **канонический current-state contract**
 
-Актуально на: **05.09.2026**
+Актуально на: **06.09.2026**
 Runtime implementation baseline:
-`81ae920cbd4f673f23d2bfedcf506224c8532d07` (PR #142; включает
-CURRENT189 application baseline, check-in consistency repair, autonomous
-gamification worker successor и stable worker digest parity repair)
+`cfc99902bf825801c042a04a918003de259aea60` (PR #145; включает
+CURRENT189 application baseline, autonomous continuation для `PARTIAL`,
+worker-owned ledger fallback и exact play-time replay)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -15,19 +15,30 @@ fail-closed правилу одного контура снова сломать
 
 ## Текущее состояние
 
-| Область                  | Состояние                                                                                                                                                                                                          |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Runtime implementation   | CURRENT189 production baseline, merge SHA `81ae920cbd4f673f23d2bfedcf506224c8532d07`                                                                                                                          |
-| Admission merge SHA      | exact-main Fast CI и Full Release Admission для `81ae920c…` — `SUCCESS`                                                                                                                                    |
-| Production API topology  | active green exact `81ae920c…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback blue `72b1b053…` остаётся active                                                        |
-| Guest bug-report repair  | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                |
-| Corporate invite repair  | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                    |
-| Guest check-in consistency | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                         |
-| Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
-| Corporate landing        | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
-| Release acceleration     | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
-| Langame recovery         | оба systemd timer active; daily canary/backfill принят; bonus-ledger/gamification singleton дренирует activity по одному профилю с отдельным Prisma pool `2` и effective timeout `15m`; external unattended остаётся deny       |
-| Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
+| Область                    | Состояние                                                                                                                                                                                                                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Runtime implementation     | CURRENT189 production baseline, merge SHA `81ae920cbd4f673f23d2bfedcf506224c8532d07`                                                                                                                                                                                           |
+| Admission merge SHA        | exact-main Fast CI и Full Release Admission для `81ae920c…` — `SUCCESS`                                                                                                                                                                                                        |
+| Production API topology    | active green exact `81ae920c…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback blue `72b1b053…` остаётся active                                                                                                                            |
+| Guest bug-report repair    | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                                                                                |
+| Corporate invite repair    | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                                                                                     |
+| Guest check-in consistency | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                                                                                          |
+| Split-runtime deployment   | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                                                                                       |
+| Corporate landing          | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                             |
+| Release acceleration       | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
+| Langame recovery           | оба systemd timer active; daily canary/backfill принят; bonus-ledger/gamification singleton дренирует activity по одному профилю с отдельным Prisma pool `2` и effective timeout `15m`; external unattended остаётся deny                                                      |
+| Внешний open beta          | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                                                                               |
+
+Store execution fence остаётся отдельным явным полномочием. Migration 165
+правильно создала все существующие Store с `backgroundExecutionEnabled=false`,
+но до 06.09 для текущего INTERNAL tenant не существовало реализованного
+аудитируемого пути включения. Поэтому worker запускался, но ledger fallback,
+reward materializer и другие store-bound background jobs останавливались на
+`BACKGROUND_STORE_ID_REQUIRED` до чтения/выдачи эффекта. Новый platform-admin
+control-plane route использует точные Tenant/Store IDs, expected Store revision,
+reason, request ID, exact confirmation и validated release SHA; update и
+`PlatformAdminAuditEvent` атомарны. Обычный tenant/public guest доступа не
+получают, а внешний tenant не может пройти `ENABLE` этим маршрутом.
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
 зелёный CI не доказывают production deployment. Фактический production runtime,
@@ -400,6 +411,26 @@ lease и idempotency не позволяют повторному replay соз�
 one-item canary, сверку Langame balance before/after и отдельный GO; rollback —
 `systemctl disable --now leetplus-bonus-ledger-worker.timer` без переключения
 public/corporate runtime.
+
+#### Store-bound runtime identity control plane
+
+Один active `backgroundExecutionEnabled` Store внутри INTERNAL tenant является
+минимальной `TENANT_STORE_SYSTEM` identity для scheduled run. Это не делает
+его источником всех фактов и не расширяет store scope правил: конкретные
+mission/season/lootbox по-прежнему проверяются по собственным `storeIds`,
+`externalDomain`, `externalClubId` и canonical fact evidence.
+
+Текущее включение/выключение разрешено только platform admin через
+`POST /admin/tenants/:tenantId/stores/:storeId/background-execution` в
+corporate runtime. `ENABLE` требует exact `ACTIVE + INTERNAL` tenant, active
+`gamificationEnabled` Store, expected trigger-owned revision, подтверждение
+`tenant_slug:store_id:ENABLE`, причину и idempotency request ID. API связывает
+audit receipt с validated `RELEASE_SHA`; клиент не передаёт SHA. `DISABLE`
+разрешён и после смены stage/status как authority-reducing emergency stop.
+Public guest route/module/secret set не меняются.
+
+Production порядок и rollback:
+[`store-background-execution-production-recovery.md`](../deployment/store-background-execution-production-recovery.md).
 
 Production activation завершена 30.08.2026 на exact admitted SHA
 `4036d312b5760e9daf292e416288d68949419aaa`:

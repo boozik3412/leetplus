@@ -1,4 +1,5 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
 import {
   TenantCustomerStage,
   TenantLifecycleStatus,
@@ -16,6 +17,11 @@ type AdminPrismaMock = {
     findUniqueOrThrow: jest.Mock;
     updateMany: jest.Mock;
   };
+  store: {
+    findFirst: jest.Mock;
+    findUniqueOrThrow: jest.Mock;
+    updateMany: jest.Mock;
+  };
   platformAdminAuditEvent: {
     findFirst: jest.Mock;
     findMany: jest.Mock;
@@ -28,6 +34,11 @@ function createPrismaMock(): AdminPrismaMock {
   const prisma: AdminPrismaMock = {
     tenant: {
       findUnique: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    store: {
+      findFirst: jest.fn(),
       findUniqueOrThrow: jest.fn(),
       updateMany: jest.fn(),
     },
@@ -48,6 +59,12 @@ function createPrismaMock(): AdminPrismaMock {
 const actor = {
   id: 'platform-admin-1',
 } as AuthenticatedUser;
+
+const configService = {
+  get: jest.fn((key: string) =>
+    key === 'RELEASE_SHA' ? 'a'.repeat(40) : undefined,
+  ),
+} as unknown as ConfigService;
 
 const suspendedTenant = {
   id: 'tenant-design-partner',
@@ -80,6 +97,7 @@ describe('AdminService design-partner lifecycle guard', () => {
       prisma as unknown as PrismaService,
       {} as LangameSettingsService,
       tenantExecutionPolicy as unknown as TenantExecutionPolicyService,
+      configService,
     );
     prisma.tenant.findUnique.mockResolvedValue(suspendedTenant);
   });
@@ -329,5 +347,300 @@ describe('AdminService design-partner lifecycle guard', () => {
     const csv = exported.buffer.toString('utf8');
     expect(csv).toContain('Request ID');
     expect(csv).toContain(auditEvent.requestId);
+  });
+});
+
+describe('AdminService store background execution control plane', () => {
+  let prisma: AdminPrismaMock;
+  let service: AdminService;
+
+  const store = {
+    id: 'store-1',
+    tenantId: 'tenant-1',
+    name: '1337-Пушкинская',
+    isActive: true,
+    gamificationEnabled: true,
+    backgroundExecutionEnabled: false,
+    executionRevision: 4,
+    updatedAt: new Date('2026-09-06T08:00:00.000Z'),
+    tenant: {
+      id: 'tenant-1',
+      slug: 'demo',
+      status: TenantLifecycleStatus.ACTIVE,
+      customerStage: TenantCustomerStage.INTERNAL,
+    },
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma = createPrismaMock();
+    service = new AdminService(
+      prisma as unknown as PrismaService,
+      {} as LangameSettingsService,
+      {} as TenantExecutionPolicyService,
+      configService,
+    );
+    prisma.store.findFirst.mockResolvedValue(store);
+    prisma.platformAdminAuditEvent.findFirst.mockResolvedValue(null);
+  });
+
+  it('enables one exact active store with revision fencing and an audit receipt', async () => {
+    prisma.store.updateMany.mockResolvedValue({ count: 1 });
+    prisma.store.findUniqueOrThrow.mockResolvedValue({
+      ...store,
+      backgroundExecutionEnabled: true,
+      executionRevision: 5,
+      updatedAt: new Date('2026-09-06T08:01:00.000Z'),
+    });
+    prisma.platformAdminAuditEvent.create.mockResolvedValue({ id: 'audit-1' });
+
+    await expect(
+      service.setStoreBackgroundExecution(actor, store.tenantId, store.id, {
+        action: 'ENABLE',
+        confirmation: `demo:${store.id}:ENABLE`,
+        expectedExecutionRevision: 4,
+        reason: 'Restore autonomous gamification worker identity',
+        requestId: 'bg-runtime-20260906',
+        supportTicket: 'LP-BUG-2F3F9F62',
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      replayed: false,
+      store: {
+        id: store.id,
+        backgroundExecutionEnabled: true,
+        executionRevision: 5,
+      },
+      audit: {
+        id: 'audit-1',
+        requestId: 'bg-runtime-20260906',
+        releaseSha: 'a'.repeat(40),
+      },
+    });
+
+    expect(prisma.store.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: store.id,
+        tenantId: store.tenantId,
+        isActive: true,
+        gamificationEnabled: true,
+        backgroundExecutionEnabled: false,
+        executionRevision: 4,
+        updatedAt: store.updatedAt,
+      },
+      data: { backgroundExecutionEnabled: true },
+    });
+    const auditCreateMock = prisma.platformAdminAuditEvent.create as jest.Mock<
+      Promise<{ id: string }>,
+      [
+        {
+          data: {
+            tenantId: string;
+            actorUserId: string;
+            requestId: string;
+            action: string;
+            targetType: string;
+            targetId: string;
+            metadata: {
+              operation: string;
+              expectedExecutionRevision: number;
+              releaseSha: string;
+            };
+          };
+          select: { id: true };
+        },
+      ]
+    >;
+    const auditCreateCall = auditCreateMock.mock.calls[0]?.[0];
+    expect(auditCreateCall).toMatchObject({
+      data: {
+        tenantId: store.tenantId,
+        actorUserId: actor.id,
+        requestId: 'bg-runtime-20260906',
+        action: 'STORE_BACKGROUND_EXECUTION_CHANGE',
+        targetType: 'STORE',
+        targetId: store.id,
+        metadata: {
+          operation: 'ENABLE',
+          expectedExecutionRevision: 4,
+          releaseSha: 'a'.repeat(40),
+        },
+      },
+    });
+  });
+
+  it('returns an idempotent replay for the same persisted command', async () => {
+    prisma.store.findFirst.mockResolvedValue({
+      ...store,
+      backgroundExecutionEnabled: true,
+      executionRevision: 5,
+    });
+    prisma.platformAdminAuditEvent.findFirst.mockResolvedValue({
+      id: 'audit-1',
+      targetId: store.id,
+      reason: 'Retry the same autonomous worker activation',
+      after: {},
+      metadata: {
+        operation: 'ENABLE',
+        expectedExecutionRevision: 4,
+        releaseSha: 'b'.repeat(40),
+        supportTicket: null,
+      },
+    });
+
+    await expect(
+      service.setStoreBackgroundExecution(actor, store.tenantId, store.id, {
+        action: 'ENABLE',
+        confirmation: `demo:${store.id}:ENABLE`,
+        expectedExecutionRevision: 4,
+        reason: 'Retry the same autonomous worker activation',
+        requestId: 'bg-runtime-20260906',
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      replayed: true,
+      audit: { id: 'audit-1', releaseSha: 'b'.repeat(40) },
+    });
+
+    expect(prisma.store.updateMany).not.toHaveBeenCalled();
+    expect(prisma.platformAdminAuditEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a reused request ID when command details differ', async () => {
+    prisma.store.findFirst.mockResolvedValue({
+      ...store,
+      backgroundExecutionEnabled: true,
+      executionRevision: 5,
+    });
+    prisma.platformAdminAuditEvent.findFirst.mockResolvedValue({
+      id: 'audit-1',
+      targetId: store.id,
+      reason: 'Original autonomous worker activation',
+      after: {},
+      metadata: {
+        operation: 'ENABLE',
+        expectedExecutionRevision: 4,
+        releaseSha: 'b'.repeat(40),
+        supportTicket: null,
+      },
+    });
+
+    await expect(
+      service.setStoreBackgroundExecution(actor, store.tenantId, store.id, {
+        action: 'ENABLE',
+        confirmation: `demo:${store.id}:ENABLE`,
+        expectedExecutionRevision: 4,
+        reason: 'Different autonomous worker activation reason',
+        requestId: 'bg-runtime-20260906',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.store.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects an idempotent replay after a later store policy change', async () => {
+    prisma.store.findFirst.mockResolvedValue({
+      ...store,
+      backgroundExecutionEnabled: true,
+      executionRevision: 6,
+    });
+    prisma.platformAdminAuditEvent.findFirst.mockResolvedValue({
+      id: 'audit-1',
+      targetId: store.id,
+      reason: 'Retry the same autonomous worker activation',
+      after: {},
+      metadata: {
+        operation: 'ENABLE',
+        expectedExecutionRevision: 4,
+        releaseSha: 'b'.repeat(40),
+        supportTicket: null,
+      },
+    });
+
+    await expect(
+      service.setStoreBackgroundExecution(actor, store.tenantId, store.id, {
+        action: 'ENABLE',
+        confirmation: `demo:${store.id}:ENABLE`,
+        expectedExecutionRevision: 4,
+        reason: 'Retry the same autonomous worker activation',
+        requestId: 'bg-runtime-20260906',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.store.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects stale execution revisions before changing the store', async () => {
+    await expect(
+      service.setStoreBackgroundExecution(actor, store.tenantId, store.id, {
+        action: 'ENABLE',
+        confirmation: `demo:${store.id}:ENABLE`,
+        expectedExecutionRevision: 3,
+        reason: 'Attempt with a stale background execution revision',
+        requestId: 'bg-runtime-stale',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.store.updateMany).not.toHaveBeenCalled();
+    expect(prisma.platformAdminAuditEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps background execution fail-closed for external tenants', async () => {
+    prisma.store.findFirst.mockResolvedValue({
+      ...store,
+      tenant: {
+        ...store.tenant,
+        customerStage: TenantCustomerStage.PILOT,
+      },
+    });
+
+    await expect(
+      service.setStoreBackgroundExecution(actor, store.tenantId, store.id, {
+        action: 'ENABLE',
+        confirmation: `demo:${store.id}:ENABLE`,
+        expectedExecutionRevision: 4,
+        reason: 'Attempt external tenant activation without dedicated GO',
+        requestId: 'bg-runtime-external',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.store.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('allows an emergency disable after a tenant leaves the internal stage', async () => {
+    const externallyStagedStore = {
+      ...store,
+      backgroundExecutionEnabled: true,
+      executionRevision: 5,
+      tenant: {
+        ...store.tenant,
+        customerStage: TenantCustomerStage.PILOT,
+      },
+    };
+    prisma.store.findFirst.mockResolvedValue(externallyStagedStore);
+    prisma.store.updateMany.mockResolvedValue({ count: 1 });
+    prisma.store.findUniqueOrThrow.mockResolvedValue({
+      ...externallyStagedStore,
+      backgroundExecutionEnabled: false,
+      executionRevision: 6,
+      updatedAt: new Date('2026-09-06T08:02:00.000Z'),
+    });
+    prisma.platformAdminAuditEvent.create.mockResolvedValue({ id: 'audit-2' });
+
+    await expect(
+      service.setStoreBackgroundExecution(actor, store.tenantId, store.id, {
+        action: 'DISABLE',
+        confirmation: `demo:${store.id}:DISABLE`,
+        expectedExecutionRevision: 5,
+        reason: 'Emergency stop after tenant stage transition',
+        requestId: 'bg-runtime-disable',
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      store: {
+        backgroundExecutionEnabled: false,
+        executionRevision: 6,
+      },
+    });
   });
 });

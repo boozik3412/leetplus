@@ -9,6 +9,9 @@ import type { SharedTenantProvisioningService } from './shared-tenant-provisioni
 
 describe('AdminController shared beta provisioning boundary', () => {
   function controller() {
+    const adminService = {
+      setStoreBackgroundExecution: jest.fn(),
+    };
     const sharedTenantProvisioningService = {
       provision: jest.fn(),
       activateInitialOwner: jest.fn(),
@@ -28,7 +31,7 @@ describe('AdminController shared beta provisioning boundary', () => {
     };
     return {
       controller: new AdminController(
-        {} as AdminService,
+        adminService as unknown as AdminService,
         {} as TenantEntitlementProfileService,
         sharedTenantProvisioningService as unknown as SharedTenantProvisioningService,
         founderOperatorBetaGoService as unknown as FounderOperatorBetaGoService,
@@ -39,8 +42,33 @@ describe('AdminController shared beta provisioning boundary', () => {
       founderOperatorBetaGoService,
       founderOperatorBetaActivationService,
       founderOwnerInviteLifecycleService,
+      adminService,
     };
   }
+
+  it('delegates exact store background execution commands to the platform control plane', async () => {
+    const { controller: adminController, adminService } = controller();
+    const user = {
+      id: 'platform-admin',
+      isPlatformAdmin: true,
+    } as AuthenticatedUser;
+    adminService.setStoreBackgroundExecution.mockResolvedValue({ ok: true });
+
+    await expect(
+      adminController.setStoreBackgroundExecution(
+        user,
+        'tenant-id',
+        'store-id',
+        { action: 'ENABLE' },
+      ),
+    ).resolves.toEqual({ ok: true });
+    expect(adminService.setStoreBackgroundExecution).toHaveBeenCalledWith(
+      user,
+      'tenant-id',
+      'store-id',
+      { action: 'ENABLE' },
+    );
+  });
 
   it('allows only policy-gated dormant shell provisioning', async () => {
     const {

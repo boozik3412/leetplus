@@ -167,6 +167,21 @@ export class AdminController {
     return this.adminService.addTenantSupportNote(user, tenantId, body ?? {});
   }
 
+  @Post('tenants/:tenantId/stores/:storeId/background-execution')
+  setStoreBackgroundExecution(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Param('storeId') storeId: string,
+    @Body() body: unknown,
+  ) {
+    return this.adminService.setStoreBackgroundExecution(
+      user,
+      tenantId,
+      storeId,
+      body ?? {},
+    );
+  }
+
   @Post('integration-sources/:sourceId/support-action')
   updateIntegrationSourceSupportAction(
     @CurrentUser() user: AuthenticatedUser,

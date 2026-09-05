@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   IntegrationProvider,
   IntegrationSyncStatus,
@@ -30,6 +31,17 @@ type TenantSupportNoteDto = {
   confirmation?: unknown;
   note?: unknown;
   visibility?: unknown;
+  supportTicket?: unknown;
+};
+
+type StoreBackgroundExecutionAction = 'ENABLE' | 'DISABLE';
+
+type StoreBackgroundExecutionDto = {
+  action?: unknown;
+  confirmation?: unknown;
+  expectedExecutionRevision?: unknown;
+  reason?: unknown;
+  requestId?: unknown;
   supportTicket?: unknown;
 };
 
@@ -93,6 +105,9 @@ export type PlatformAdminAuditExportFile = {
 
 const STALE_SYNC_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const DESIGN_PARTNER_PROVISION_ACTION = 'SINGLE_DESIGN_PARTNER_PROVISIONED';
+const STORE_BACKGROUND_EXECUTION_AUDIT_ACTION =
+  'STORE_BACKGROUND_EXECUTION_CHANGE';
+const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 
 const lifecycleStatusByAction: Record<
   TenantLifecycleAction,
@@ -140,12 +155,32 @@ const tenantLifecycleResultSelect = {
   statusReason: true,
 } satisfies Prisma.TenantSelect;
 
+const storeBackgroundExecutionSelect = {
+  id: true,
+  tenantId: true,
+  name: true,
+  isActive: true,
+  gamificationEnabled: true,
+  backgroundExecutionEnabled: true,
+  executionRevision: true,
+  updatedAt: true,
+  tenant: {
+    select: {
+      id: true,
+      slug: true,
+      status: true,
+      customerStage: true,
+    },
+  },
+} satisfies Prisma.StoreSelect;
+
 @Injectable()
 export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly langameSettingsService: LangameSettingsService,
     private readonly tenantExecutionPolicy: TenantExecutionPolicyService,
+    private readonly configService: ConfigService,
   ) {}
 
   async getOverview() {
@@ -634,6 +669,184 @@ export class AdminService {
     };
   }
 
+  async setStoreBackgroundExecution(
+    actor: AuthenticatedUser,
+    tenantId: string,
+    storeId: string,
+    dto: StoreBackgroundExecutionDto,
+  ) {
+    const action = this.parseStoreBackgroundExecutionAction(dto.action);
+    const expectedExecutionRevision = this.parseNonNegativeInteger(
+      dto.expectedExecutionRevision,
+      'expectedExecutionRevision',
+    );
+    const reason = this.normalizeRequiredText(dto.reason, 'reason', 10);
+    const requestId = this.normalizeRequiredText(dto.requestId, 'requestId', 8);
+    const supportTicket = this.normalizeOptionalText(dto.supportTicket);
+    const releaseSha = this.releaseSha();
+    const enabled = action === 'ENABLE';
+
+    return this.prisma.$transaction(async (tx) => {
+      const store = await tx.store.findFirst({
+        where: { id: storeId, tenantId },
+        select: storeBackgroundExecutionSelect,
+      });
+
+      if (!store) {
+        throw new NotFoundException('Store was not found');
+      }
+
+      this.assertStoreBackgroundExecutionConfirmation(
+        dto.confirmation,
+        store.tenant.slug,
+        store.id,
+        action,
+      );
+
+      const previous = await tx.platformAdminAuditEvent.findFirst({
+        where: {
+          tenantId,
+          action: STORE_BACKGROUND_EXECUTION_AUDIT_ACTION,
+          requestId,
+        },
+        select: {
+          id: true,
+          targetId: true,
+          reason: true,
+          after: true,
+          metadata: true,
+        },
+      });
+
+      if (previous) {
+        const metadata = this.asJsonObject(previous.metadata);
+        const previousSupportTicket =
+          typeof metadata?.supportTicket === 'string'
+            ? metadata.supportTicket
+            : null;
+        if (
+          previous.targetId !== store.id ||
+          metadata?.operation !== action ||
+          metadata.expectedExecutionRevision !== expectedExecutionRevision ||
+          previous.reason !== reason ||
+          previousSupportTicket !== supportTicket
+        ) {
+          throw new ConflictException(
+            'requestId was already used for another background execution command',
+          );
+        }
+        if (
+          store.backgroundExecutionEnabled !== enabled ||
+          store.executionRevision !== expectedExecutionRevision + 1
+        ) {
+          throw new ConflictException(
+            'The original command was applied, but store execution state has since changed',
+          );
+        }
+
+        return {
+          ok: true,
+          replayed: true,
+          store: this.serializeStoreBackgroundExecution(store),
+          audit: {
+            id: previous.id,
+            requestId,
+            releaseSha:
+              typeof metadata.releaseSha === 'string'
+                ? metadata.releaseSha
+                : null,
+          },
+        };
+      }
+
+      if (
+        enabled &&
+        (store.tenant.status !== TenantLifecycleStatus.ACTIVE ||
+          store.tenant.customerStage !== TenantCustomerStage.INTERNAL)
+      ) {
+        throw new ForbiddenException(
+          'External or inactive tenants require their dedicated activation workflow',
+        );
+      }
+      if (enabled && (!store.isActive || !store.gamificationEnabled)) {
+        throw new ForbiddenException(
+          'Background execution requires an active gamification-enabled store',
+        );
+      }
+      if (store.executionRevision !== expectedExecutionRevision) {
+        throw new ConflictException('Store execution state has changed');
+      }
+      if (enabled && expectedExecutionRevision >= 2_147_483_646) {
+        throw new ConflictException(
+          'Store execution revision permits only terminal revocation',
+        );
+      }
+      if (store.backgroundExecutionEnabled === enabled) {
+        throw new BadRequestException(
+          `Store background execution is already ${enabled ? 'enabled' : 'disabled'}`,
+        );
+      }
+
+      const changed = await tx.store.updateMany({
+        where: {
+          id: store.id,
+          tenantId,
+          isActive: store.isActive,
+          gamificationEnabled: store.gamificationEnabled,
+          backgroundExecutionEnabled: store.backgroundExecutionEnabled,
+          executionRevision: expectedExecutionRevision,
+          updatedAt: store.updatedAt,
+        },
+        data: { backgroundExecutionEnabled: enabled },
+      });
+      if (changed.count !== 1) {
+        throw new ConflictException('Store execution state has changed');
+      }
+
+      const updated = await tx.store.findUniqueOrThrow({
+        where: { id: store.id },
+        select: storeBackgroundExecutionSelect,
+      });
+      if (
+        updated.backgroundExecutionEnabled !== enabled ||
+        updated.executionRevision !== expectedExecutionRevision + 1
+      ) {
+        throw new ConflictException(
+          'Store execution revision changed during background execution update',
+        );
+      }
+
+      const audit = await tx.platformAdminAuditEvent.create({
+        data: {
+          tenantId,
+          actorUserId: actor.id,
+          requestId,
+          action: STORE_BACKGROUND_EXECUTION_AUDIT_ACTION,
+          targetType: 'STORE',
+          targetId: store.id,
+          reason,
+          before: this.serializeStoreBackgroundExecution(store),
+          after: this.serializeStoreBackgroundExecution(updated),
+          metadata: {
+            operation: action,
+            expectedExecutionRevision,
+            releaseSha,
+            supportTicket,
+            confirmationRule: 'tenant_slug:store_id:operation',
+          },
+        },
+        select: { id: true },
+      });
+
+      return {
+        ok: true,
+        replayed: false,
+        store: this.serializeStoreBackgroundExecution(updated),
+        audit: { id: audit.id, requestId, releaseSha },
+      };
+    });
+  }
+
   async updateIntegrationSourceSupportAction(
     actor: AuthenticatedUser,
     sourceId: string,
@@ -777,6 +990,37 @@ export class AdminService {
     throw new BadRequestException('Unsupported integration source action');
   }
 
+  private parseStoreBackgroundExecutionAction(
+    value: unknown,
+  ): StoreBackgroundExecutionAction {
+    if (value === 'ENABLE' || value === 'DISABLE') {
+      return value;
+    }
+
+    throw new BadRequestException(
+      'Unsupported store background execution action',
+    );
+  }
+
+  private parseNonNegativeInteger(value: unknown, field: string) {
+    const parsed =
+      typeof value === 'number'
+        ? value
+        : typeof value === 'string' && value.trim() !== ''
+          ? Number(value)
+          : Number.NaN;
+
+    if (
+      !Number.isSafeInteger(parsed) ||
+      parsed < 0 ||
+      parsed >= 2_147_483_647
+    ) {
+      throw new BadRequestException(`${field} must be a non-negative integer`);
+    }
+
+    return parsed;
+  }
+
   private normalizeRequiredText(
     value: unknown,
     field: string,
@@ -810,6 +1054,36 @@ export class AdminService {
     if (typeof value !== 'string' || value.trim() !== tenantSlug) {
       throw new BadRequestException('Tenant slug confirmation is required');
     }
+  }
+
+  private assertStoreBackgroundExecutionConfirmation(
+    value: unknown,
+    tenantSlug: string,
+    storeId: string,
+    action: StoreBackgroundExecutionAction,
+  ) {
+    const expected = `${tenantSlug}:${storeId}:${action}`;
+    if (typeof value !== 'string' || value.trim() !== expected) {
+      throw new BadRequestException(
+        'Exact tenant, store and operation confirmation is required',
+      );
+    }
+  }
+
+  private releaseSha() {
+    const releaseSha =
+      this.configService.get<string>('RELEASE_SHA')?.trim().toLowerCase() ?? '';
+    if (!RELEASE_SHA_PATTERN.test(releaseSha)) {
+      throw new ConflictException('Runtime release identity is unavailable');
+    }
+
+    return releaseSha;
+  }
+
+  private asJsonObject(value: Prisma.JsonValue | null | undefined) {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? value
+      : null;
   }
 
   private parseAuditEventQuery(
@@ -1017,6 +1291,28 @@ export class AdminService {
       executionRevision: tenant.executionRevision,
       statusChangedAt: tenant.statusChangedAt?.toISOString() ?? null,
       statusReason: tenant.statusReason,
+    };
+  }
+
+  private serializeStoreBackgroundExecution(store: {
+    id: string;
+    tenantId: string;
+    name: string;
+    isActive: boolean;
+    gamificationEnabled: boolean;
+    backgroundExecutionEnabled: boolean;
+    executionRevision: number;
+    updatedAt: Date;
+  }) {
+    return {
+      id: store.id,
+      tenantId: store.tenantId,
+      name: store.name,
+      isActive: store.isActive,
+      gamificationEnabled: store.gamificationEnabled,
+      backgroundExecutionEnabled: store.backgroundExecutionEnabled,
+      executionRevision: store.executionRevision,
+      updatedAt: store.updatedAt.toISOString(),
     };
   }
 

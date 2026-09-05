@@ -1,21 +1,21 @@
-# LeetPlus open beta — текущее состояние на 05.09.2026
+# LeetPlus open beta — текущее состояние на 06.09.2026
 
-| Поле                 | Состояние                                                                                                                     |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Release decision     | `NO-GO` для внешнего доступа                                                                                                  |
-| Production runtime   | healthy; active green `81ae920c…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue `72b1b053…` ready             |
-| Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                  |
-| Release authority    | runtime и production-control exact `81ae920c…`; five-phase rollout завершён с terminal receipt                              |
-| Runtime successor    | Оба worker timer active; activity queue автономно дренируется по одному профилю; worker pool `2`, timeout `15m`; API schedulers выключены      |
-| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                              |
-| Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                      |
-| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                      |
-| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                   |
-| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                 |
-| Offline/USB key      | исключён из beta critical path                                                                                                |
-| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
+| Поле                 | Состояние                                                                                                                                                            |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Release decision     | `NO-GO` для внешнего доступа                                                                                                                                         |
+| Production runtime   | healthy; active green `81ae920c…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue `72b1b053…` ready                                                       |
+| Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                                                         |
+| Release authority    | runtime и production-control exact `81ae920c…`; five-phase rollout завершён с terminal receipt                                                                       |
+| Runtime successor    | Оба worker timer active; activity queue автономно дренируется по одному профилю; worker pool `2`, timeout `15m`; API schedulers выключены                            |
+| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                                                     |
+| Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                                                             |
+| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                                                             |
+| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                                                          |
+| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                                                        |
+| Offline/USB key      | исключён из beta critical path                                                                                                                                       |
+| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                                                                   |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
-| Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`, повтор 04.09 — `4/4`; daily timer enabled/active, следующий scheduled run 06.09 |
+| Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`, повтор 04.09 — `4/4`; daily timer enabled/active, следующий scheduled run 06.09               |
 
 Operational-проверка 05.09 на active `81ae920c…` нашла не дефект public или
 corporate контура, а drift профиля singleton worker: activity batch был `3`,
@@ -35,6 +35,16 @@ singleton не владел ledger fallback. Source successor добавляет
 за tick и worker-only fallback для трёх exact play-time fact types. Встроенные
 API schedulers/fallback остаются `OFF`; stable `LIVE` требует exact INTERNAL
 tenant, UTC cutoff, bounded batch и сохраняет existing idempotency.
+
+Финальный найденный blocker находится в store execution fence, а не в
+Langame-факте: у всех четырёх Store текущего tenant
+`backgroundExecutionEnabled=false`, поэтому fallback останавливается с
+`BACKGROUND_STORE_ID_REQUIRED`. Source successor добавляет единственный
+platform-admin-only route с exact Store/Tenant, CAS по execution revision,
+typed confirmation, persisted request ID, reason и server-owned release SHA.
+Внешний tenant через этот route включить нельзя. Production GO требует одного
+store canary, exact replay сессии `548185`, доказательства отсутствия дублей и
+возврата singleton timer в `enabled + active(waiting)`.
 
 На 05.09 installed production-control уже обновлён до exact `fc7b6e65…`, но
 runtime не переключался. Successor остановлен fail-closed из-за orphaned

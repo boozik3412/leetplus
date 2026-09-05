@@ -60,14 +60,21 @@ profile, не регистрирует HTTP controllers и не входит в 
 Смена blue/green slot не требует второго worker: следующий tick автоматически
 возьмёт новый active release.
 
-Successor 04.09 расширяет этот же единственный systemd oneshot, не создавая
+Successor 05.09 расширяет этот же единственный systemd oneshot, не создавая
 второго owner. После bonus-ledger dispatch он для одного exact `ACTIVE +
 INTERNAL` tenant последовательно:
 
-1. claim-ит ограниченный пакет `GuestActivitySyncJob`;
-2. запускает основной snapshot pipeline;
-3. запускает supplemental `BALANCE_TOPUP` pipeline;
-4. при наступлении интервала собирает quality snapshot.
+1. ставит в очередь не более одного due recovery-профиля;
+2. claim-ит ограниченный пакет `GuestActivitySyncJob`; cursor-based `PARTIAL`
+   без source error возвращается в `PENDING` и автоматически продолжает
+   следующую страницу, а `PARTIAL` с ошибкой источника использует bounded
+   `RETRY`/backoff;
+3. запускает основной snapshot pipeline;
+4. запускает tenant-scoped ledger fallback только для exact play-time facts
+   `SESSION_PLAY_TIME_ACCUMULATED`, `HOURLY_PLAY_TIME_ACCUMULATED` и
+   `PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED`;
+5. запускает supplemental `BALANCE_TOPUP` pipeline;
+6. при наступлении интервала собирает quality snapshot.
 
 Оба долгоживущих API slot сохраняют
 `GUEST_ACTIVITY_LEDGER_SCHEDULER_ENABLED=false`,
@@ -78,6 +85,14 @@ INTERNAL` tenant последовательно:
 `SHADOW`, monitoring выключен. Stable profile использует bounded limits,
 supplemental `LIVE` и monitoring; database lease/idempotency остаются второй
 границей exactly-once.
+
+Ledger fallback управляется только worker-specific переменными
+`GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_*`. Встроенный API fallback остаётся
+`OFF`: это исключает второго владельца при одновременно работающих blue/green
+slot. Canary разрешает только `SHADOW` с limit `1`; `LIVE` требует stable
+profile, exact tenant, явную нижнюю временную границу и bounded batch. Повторный
+fact обрабатывается по существующим deterministic origin/idempotency keys и не
+может создать второй reward/effect.
 
 Bonus ledger не оценивает условия миссии, Battle Pass, лутбокса или чекина. LIVE, последовательный Ledger fallback и supplemental-контур сходятся до него в единые immutable event/intent/effect/wallet записи; дальше действует один claim gate и один контур доставки.
 
@@ -124,12 +139,17 @@ GUEST_GAMIFICATION_WORKER_ENABLED="true"
 GUEST_GAMIFICATION_WORKER_CANARY="true"
 GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT="1"
 GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT="1"
+GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_MODE="SHADOW"
+GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIMIT="1"
+# Обязательная UTC-граница перед переводом stable worker в LIVE:
+# GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE="2026-09-05T00:00:00.000Z"
 GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE="SHADOW"
 GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT="1"
 GUEST_GAMIFICATION_WORKER_MONITORING_ENABLED="false"
 GUEST_GAMIFICATION_WORKER_MONITORING_INTERVAL_MS="300000"
 GUEST_ACTIVITY_LEDGER_SCHEDULER_ENABLED="false"
 GUEST_GAME_PIPELINE_SCHEDULER_ENABLED="false"
+GUEST_GAME_LEDGER_FALLBACK_MODE="OFF"
 GUEST_GAME_SUPPLEMENTAL_PIPELINE_MODE="OFF"
 GUEST_GAME_MONITORING_ENABLED="false"
 # Только для контролируемой canary одной существующей записи:
@@ -150,6 +170,7 @@ fail-closed требует `WORKER_ENABLED=true`, `DRY_RUN=false` и
 ```env
 GUEST_GAME_PIPELINE_SCHEDULER_ENABLED="false"
 GUEST_ACTIVITY_LEDGER_SCHEDULER_ENABLED="false"
+GUEST_GAME_LEDGER_FALLBACK_MODE="OFF"
 GUEST_GAME_SUPPLEMENTAL_PIPELINE_MODE="OFF"
 GUEST_GAME_MONITORING_ENABLED="false"
 ```
@@ -158,6 +179,14 @@ GUEST_GAME_MONITORING_ENABLED="false"
   от `OFF`, останавливает dedicated worker до обработки данных.
 - `GUEST_BONUS_LEDGER_WORKER_QUEUE_APPROVED_REWARDS=true` не отменяет claim gate: один `APPROVED` недостаточен для reward с `claimRequired=true`.
 - Scheduler запускает `runSnapshotPipelineScheduled`, принимает только подготовленные факты и не допускает параллельных tick-ов.
+- Worker сначала автоматически продолжает cursor-based activity sync до
+  полного `SUCCESS`. Ошибка одной страницы не маскируется как успех: она
+  переходит в bounded `RETRY`, а исчерпание попыток остаётся видимым для
+  recovery/monitoring.
+- Worker-specific ledger fallback не читает произвольные активности и не
+  расширяет tenant scope. В `LIVE` он требует явный
+  `GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE`, поэтому rollout
+  не превращается в неограниченный исторический replay.
 - При обработке используются только активные правила. Черновик с совпадающими условиями не должен подавлять активное правило.
 - Профиль допускается к прогрессу только после первого trusted `APP_OPEN`, сохранённого в `GuestGameProfile.gameActivatedAt`. Исторические факты до этой границы не создают wallet item.
 - Ordinary reward и event XP квалифицируются в разные 30-дневные item. XP не применяется, reward не dispatch-ится, пока гость явно не выполнит claim соответствующего item.

@@ -16,6 +16,7 @@ import {
   runGuestBonusLedgerWorkerOnce,
 } from './guest-bonus-ledger-worker';
 import { GuestGamificationService } from './guest-gamification.service';
+import { GuestGameLedgerFallbackService } from './guest-game-ledger-fallback.service';
 import {
   loadGuestGamificationWorkerConfig,
   runGuestGamificationWorkerOnce,
@@ -52,6 +53,7 @@ const disabledInProcessBonusScheduler = {
     GuestActivityLedgerService,
     GuestBonusLedgerService,
     GuestGamificationService,
+    GuestGameLedgerFallbackService,
     GuestGameQualityMonitoringService,
     {
       provide: GuestBonusLedgerSchedulerService,
@@ -78,6 +80,7 @@ async function main() {
     await runGuestGamificationWorkerOnce({
       prisma: application.get(PrismaService),
       activityLedger: application.get(GuestActivityLedgerService),
+      ledgerFallback: application.get(GuestGameLedgerFallbackService),
       gamification: application.get(GuestGamificationService),
       monitoring: application.get(GuestGameQualityMonitoringService),
     });

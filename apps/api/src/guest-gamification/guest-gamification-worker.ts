@@ -1,6 +1,10 @@
 import { TenantCustomerStage, TenantLifecycleStatus } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { GuestActivityLedgerService } from './guest-activity-ledger.service';
+import type {
+  GuestGameLedgerFallbackMode,
+  GuestGameLedgerFallbackService,
+} from './guest-game-ledger-fallback.service';
 import type { GuestGamificationService } from './guest-gamification.service';
 import type { GuestGameQualityMonitoringService } from './guest-game-quality-monitoring.service';
 
@@ -15,6 +19,9 @@ export type GuestGamificationWorkerConfig = Readonly<{
   canary: boolean;
   activityLimit: number;
   pipelineLimit: number;
+  ledgerFallbackMode: GuestGameLedgerFallbackMode;
+  ledgerFallbackLimit: number;
+  ledgerFallbackLiveNotBefore: Date | null;
   supplementalLimit: number;
   monitoringEnabled: boolean;
   monitoringIntervalMs: number;
@@ -22,7 +29,11 @@ export type GuestGamificationWorkerConfig = Readonly<{
 
 type GuestGamificationWorkerServices = {
   prisma: Pick<PrismaService, 'tenant' | 'guestGameQualitySnapshot'>;
-  activityLedger: Pick<GuestActivityLedgerService, 'processQueuedSyncJobs'>;
+  activityLedger: Pick<
+    GuestActivityLedgerService,
+    'enqueueDueRecoverySyncs' | 'processQueuedSyncJobs'
+  >;
+  ledgerFallback: Pick<GuestGameLedgerFallbackService, 'runScheduled'>;
   gamification: Pick<
     GuestGamificationService,
     'runSnapshotPipelineScheduled' | 'runSupplementalPipelineScheduled'
@@ -34,6 +45,11 @@ const workerEnabledKey = 'GUEST_GAMIFICATION_WORKER_ENABLED';
 const tenantSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const playTimeFallbackFactTypes = [
+  'SESSION_PLAY_TIME_ACCUMULATED',
+  'HOURLY_PLAY_TIME_ACCUMULATED',
+  'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+] as const;
 
 /**
  * The active-slot systemd worker is the only unattended owner of this path.
@@ -83,6 +99,29 @@ export function loadGuestGamificationWorkerConfig(
     30,
     'GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT',
   );
+  const ledgerFallbackMode = workerLedgerFallbackMode(
+    env.GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_MODE,
+  );
+  if (canary && ledgerFallbackMode === 'LIVE') {
+    throw new Error(
+      'GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_MODE=LIVE is forbidden in canary mode',
+    );
+  }
+  const ledgerFallbackLimit = boundedPositiveInt(
+    env.GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIMIT,
+    canary ? 1 : 30,
+    100,
+    'GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIMIT',
+  );
+  const ledgerFallbackLiveNotBefore = optionalDate(
+    env.GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE,
+    'GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE',
+  );
+  if (ledgerFallbackMode === 'LIVE' && !ledgerFallbackLiveNotBefore) {
+    throw new Error(
+      'GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE is required in LIVE mode',
+    );
+  }
   const supplementalLimit = boundedPositiveInt(
     env.GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT,
     canary ? 1 : 30,
@@ -91,7 +130,9 @@ export function loadGuestGamificationWorkerConfig(
   );
   if (
     canary &&
-    [pipelineLimit, supplementalLimit].some((value) => value !== 1)
+    [pipelineLimit, ledgerFallbackLimit, supplementalLimit].some(
+      (value) => value !== 1,
+    )
   ) {
     throw new Error(
       'All gamification worker limits must equal 1 in canary mode',
@@ -125,6 +166,9 @@ export function loadGuestGamificationWorkerConfig(
     canary,
     activityLimit,
     pipelineLimit,
+    ledgerFallbackMode,
+    ledgerFallbackLimit,
+    ledgerFallbackLiveNotBefore,
     supplementalLimit,
     monitoringEnabled,
     monitoringIntervalMs: boundedPositiveInt(
@@ -169,6 +213,18 @@ export async function runGuestGamificationWorkerOnce(
     );
   }
 
+  const activityRecovery =
+    await services.activityLedger.enqueueDueRecoverySyncs(
+      config.activityLimit,
+      now,
+      tenant.id,
+    );
+  if (activityRecovery.skipped > 0) {
+    logger.warn(
+      `Guest activity recovery skipped candidates: skipped=${activityRecovery.skipped}`,
+    );
+  }
+
   const activity = await services.activityLedger.processQueuedSyncJobs(
     config.activityLimit,
     `gamification-worker-${process.pid}`,
@@ -203,6 +259,32 @@ export async function runGuestGamificationWorkerOnce(
       .slice(0, 500);
     throw new Error(
       `Snapshot pipeline failed exact tenant processing: checked=${pipeline.checkedTenants}, processed=${pipeline.processedTenants}, tenantsFailed=${pipeline.erroredTenants}, factsFailed=${pipeline.erroredFacts}${failureReason ? ` reason=${failureReason}` : ''}`,
+    );
+  }
+
+  const ledgerFallback =
+    config.ledgerFallbackMode === 'OFF'
+      ? null
+      : await services.ledgerFallback.runScheduled({
+          mode: config.ledgerFallbackMode,
+          tenantId: tenant.id,
+          playTimeAllowAllProfiles: true,
+          factTypes: [...playTimeFallbackFactTypes],
+          limit: config.ledgerFallbackLimit,
+          ...(config.ledgerFallbackLiveNotBefore
+            ? {
+                liveNotBefore: config.ledgerFallbackLiveNotBefore.toISOString(),
+              }
+            : {}),
+        });
+  if (
+    ledgerFallback &&
+    (ledgerFallback.checkedTenants !== 1 ||
+      ledgerFallback.erroredTenants > 0 ||
+      ledgerFallback.failedFacts > 0)
+  ) {
+    throw new Error(
+      `Ledger fallback failed exact tenant processing: checked=${ledgerFallback.checkedTenants}, tenantsFailed=${ledgerFallback.erroredTenants}, factsFailed=${ledgerFallback.failedFacts}`,
     );
   }
 
@@ -247,22 +329,61 @@ export async function runGuestGamificationWorkerOnce(
       `tenant=${tenant.slug}`,
       `canary=${config.canary}`,
       `activity=${activity.processed}`,
+      `activityRecovery=${activityRecovery.queued}`,
       `activitySuccess=${activity.success}`,
       `activityRetry=${activity.retried}`,
+      `activityRerun=${activity.rerun}`,
       `pipelineFacts=${pipeline.processedFacts}`,
       `pipelineRewards=${pipeline.queuedRewards}`,
+      `ledgerFallback=${config.ledgerFallbackMode}`,
+      `ledgerFallbackFacts=${ledgerFallback?.liveHandledFacts ?? 0}`,
+      `ledgerFallbackRewards=${ledgerFallback?.createdRewards ?? 0}`,
       `supplementalFacts=${supplemental.processedFacts}`,
       `supplementalRewards=${supplemental.createdRewards}`,
       `monitoring=${monitoring ? 'COLLECTED' : 'SKIPPED'}`,
     ].join(' '),
   );
 
-  return { tenantId: tenant.id, activity, pipeline, supplemental, monitoring };
+  return {
+    tenantId: tenant.id,
+    activityRecovery,
+    activity,
+    pipeline,
+    ledgerFallback,
+    supplemental,
+    monitoring,
+  };
 }
 
 function optional(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function optionalDate(value: string | undefined, key: string) {
+  const normalized = optional(value);
+  if (!normalized) return null;
+  const parsed = new Date(normalized);
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new Error(`${key} must be a valid ISO date`);
+  }
+  return parsed;
+}
+
+function workerLedgerFallbackMode(
+  value: string | undefined,
+): GuestGameLedgerFallbackMode {
+  const normalized = optional(value)?.toUpperCase() ?? 'OFF';
+  if (
+    normalized === 'OFF' ||
+    normalized === 'SHADOW' ||
+    normalized === 'LIVE'
+  ) {
+    return normalized;
+  }
+  throw new Error(
+    'GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_MODE must be OFF, SHADOW or LIVE',
+  );
 }
 
 function requireBoolean(

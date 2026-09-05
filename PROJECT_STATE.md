@@ -29,6 +29,17 @@ oneshot timeout увеличен до 15 минут. После изменени
 значения fail-closed, публикует безопасную причину tenant pipeline failure и
 не меняет API schedulers, public/corporate guards или database role limits.
 
+`LP-BUG-2F3F9F62` выявил отдельный autonomy gap после корректного закрытия
+Langame-сессии `548185`: exact `HOURLY_PLAY_TIME_ACCUMULATED` на `63` минуты
+был сохранён, но cursor-based activity job ошибочно считался `SUCCESS` после
+первой `PARTIAL` страницы, а частый singleton не запускал ledger fallback.
+Source successor возвращает незавершённый cursor в `PENDING`, source error — в
+bounded `RETRY`, сам ставит по одному due recovery и после snapshot запускает
+worker-only fallback для фиксированного набора exact play-time facts. API
+schedulers и общий API fallback остаются `OFF`; `LIVE` допускается только для
+одного exact `ACTIVE + INTERNAL` tenant с явной UTC-границей, bounded batch и
+существующими idempotency/origin keys.
+
 Точечная production-сверка двух обращений отделила дефект от штатной
 последовательности. Для `LP-BUG-AFDE6B03` восстановлен один пропущенный
 `CHECK_IN_PERFORMED`; связанная цепочка `fact/event/reward/effect/wallet`

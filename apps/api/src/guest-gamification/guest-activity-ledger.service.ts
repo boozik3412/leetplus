@@ -43,6 +43,7 @@ const RUNNING_SYNC_STALE_MS = 5 * 60 * 1000;
 const SYNC_JOB_LOCK_STALE_MS = 10 * 60 * 1000;
 const SYNC_JOB_MAX_ATTEMPTS = 5;
 const SYNC_JOB_BASE_BACKOFF_MS = 15 * 1000;
+const SYNC_JOB_PARTIAL_CONTINUATION_DELAY_MS = 1_000;
 const INFERRED_PACKAGE_USAGE_LOOKBACK_DAYS = 30;
 const INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS = 15 * 60 * 1000;
 // Keep persisted fact identity stable during the fail-closed hourly rollout.
@@ -356,11 +357,25 @@ export class GuestActivityLedgerService {
           storeId: job.storeId,
           reason: job.reason ?? 'QUEUED_SYNC',
         });
-        const status = await this.completeSyncJob(
-          job.id,
-          syncResult.status === 'STALE_BINDING' ? 'SKIPPED' : 'SUCCESS',
-        );
-        results.push({ jobId: job.id, status });
+        const partialError =
+          syncResult.status === 'PARTIAL'
+            ? nullableString(syncResult.errorMessage)
+            : null;
+        const status = partialError
+          ? await this.failSyncJob(job.id, partialError)
+          : syncResult.status === 'PARTIAL'
+            ? await this.continuePartialSyncJob(job.id)
+            : await this.completeSyncJob(
+                job.id,
+                ['SKIPPED', 'STALE_BINDING'].includes(syncResult.status)
+                  ? 'SKIPPED'
+                  : 'SUCCESS',
+              );
+        results.push({
+          jobId: job.id,
+          status,
+          ...(partialError ? { errorMessage: partialError } : {}),
+        });
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
@@ -687,6 +702,26 @@ export class GuestActivityLedgerService {
       },
     });
     return completedStatus;
+  }
+
+  private async continuePartialSyncJob(jobId: string) {
+    const now = new Date();
+    await this.prisma.guestActivitySyncJob.update({
+      where: { id: jobId },
+      data: {
+        status: 'PENDING',
+        attempts: 0,
+        nextAttemptAt: new Date(
+          now.getTime() + SYNC_JOB_PARTIAL_CONTINUATION_DELAY_MS,
+        ),
+        lockedAt: null,
+        lockedBy: null,
+        rerunRequested: false,
+        lastError: null,
+        lastFinishedAt: now,
+      },
+    });
+    return 'PENDING';
   }
 
   private async failSyncJob(jobId: string, errorMessage: string) {

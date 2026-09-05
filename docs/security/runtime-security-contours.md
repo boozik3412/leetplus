@@ -4,7 +4,7 @@
 
 Актуально на: **05.09.2026**
 Runtime implementation baseline:
-`96b28f44fbd0e57d3e4c6ed5bc78492b2621f365` (PR #138; включает
+`85920b7b13e6f9ac6d7d45d076a2d5fd968918a4` (PR #139; включает
 CURRENT189 application baseline, check-in consistency repair, autonomous
 gamification worker successor и canonical verifier environment repair)
 
@@ -17,16 +17,16 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                                                          |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Runtime implementation   | CURRENT189 production baseline, merge SHA `96b28f44fbd0e57d3e4c6ed5bc78492b2621f365`                                                                                                                          |
-| Admission merge SHA      | exact-main Fast CI и Full Release Admission для `96b28f44…` — `SUCCESS`                                                                                                                                    |
-| Production API topology  | active green exact `96b28f44…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback blue `2b8c7dfd…` остаётся active                                                        |
+| Runtime implementation   | CURRENT189 production baseline, merge SHA `85920b7b13e6f9ac6d7d45d076a2d5fd968918a4`                                                                                                                          |
+| Admission merge SHA      | exact-main Fast CI и Full Release Admission для `85920b7b…` — `SUCCESS`                                                                                                                                    |
+| Production API topology  | active blue exact `85920b7b…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback green `96b28f44…` остаётся active                                                        |
 | Guest bug-report repair  | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                |
 | Corporate invite repair  | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                    |
 | Guest check-in consistency | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                         |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
 | Release acceleration     | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
-| Langame recovery         | bonus-ledger/gamification timer active и bounded backlog drain выполняется; Langame daily worker fenced/disabled до admitted terminal-state/systemd-env repair и принятого canary; external unattended остаётся deny       |
+| Langame recovery         | bonus-ledger/gamification timer active; date-by-date canary `27.08–04.09` принят; Langame daily worker fenced/disabled после fail-closed nested-verifier env rejection; external unattended остаётся deny       |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -117,6 +117,19 @@ Timer-profile не получает `RemainAfterExit`, поэтому ежедн
 таймером jobs не могут остаться active и заблокировать следующий день. Journal
 не используется как authority, failed/deactivating/чужой drop-in по-прежнему
 fail-closed.
+
+Exact admitted rollout `85920b7b…` сохранил active blue и healthy rollback
+green, schema `CURRENT_189/189`; canary по всем датам `2026-08-27`–`2026-09-04`
+дал `36/36 SUCCESS` и zero duplicate idempotency keys. Stable timer authority
+остановился fail-closed на последней повторной проверке installed control:
+вложенный authorization verifier вызывал Node напрямую, и Bash передал strict
+verifier служебную exported-переменную `_`. Authority удалил temporary permit,
+выключил timer и восстановил оба 90-fence; runtime и данные не откатывались.
+Source repair не меняет allowlist или worker authority: child verifier всегда
+запускается через `/usr/bin/env -i` только с canonical
+`PATH/LANG/LC_ALL/TZ`. Disposable fixture и static gate закрепляют эту exact
+границу. До нового exact-main admission, control install, повторного canary и
+timer check repair не считается deployed.
 
 ### Guardrail ускорения release pipeline
 

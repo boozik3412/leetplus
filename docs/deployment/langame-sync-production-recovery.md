@@ -1,8 +1,8 @@
 # Langame sync production recovery
 
-Статус: **audit storage repaired; production runtime deployed; worker terminal-state repair проходит exact-SHA admission перед canary/backfill/timer**
+Статус: **backfill canary завершён; stable timer fail-closed до nested-verifier environment repair**
 
-Актуально на: **04.09.2026**
+Актуально на: **05.09.2026**
 
 ## Причина и граница исправления
 
@@ -71,6 +71,24 @@ corporate scope или Langame credentials. Внешние tenant остаютс
     уже наблюдённого fresh start и exact `is-failed=inactive`; failed,
     deactivating, не наблюдавшийся или неоднозначный запуск остаётся
     fail-closed. Cleanup вызывает `reset-failed` только для exact `failed`.
+13. Любой child-process strict installed-control verifier запускается только
+    через `/usr/bin/env -i` с exact `PATH`, `LANG`, `LC_ALL`, `TZ`. Очистка
+    exported environment родительского Bash недостаточна: служебная переменная
+    `_` может быть добавлена при прямом внешнем вызове. Этот guard не добавляет
+    worker secrets или authority и проверяется fixture, чей Node verifier
+    отклоняет любой пятый ключ environment.
+
+## Фактический production checkpoint 05.09.2026
+
+- active blue exact `85920b7b…`, hot rollback green `96b28f44…`, schema
+  `CURRENT_189/189`, public/corporate readiness healthy;
+- canary/backfill дат `2026-08-27`–`2026-09-04` дал `36/36 SUCCESS`, duplicate
+  reward/reward-effect idempotency keys — `0/0`;
+- stable timer apply дошёл до финальной проверки, затем fail-closed отклонил
+  вложенный Node verifier из-за лишней `_`; authority выключил timer и вернул
+  legacy fences, поэтому unattended effect не остался частично включённым;
+- следующий допустимый шаг — exact-main Fast+Full с `env -i` repair, установка
+  control generation, повтор одного canary на новом SHA и один timer apply/check.
 
 ## Обязательные gates до production
 

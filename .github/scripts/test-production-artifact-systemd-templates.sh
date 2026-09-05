@@ -509,6 +509,15 @@ grep -F -x 'After=leetplus-langame-discrepancy-audit-preflight.service' "$langam
 grep -F -x 'EnvironmentFile=/etc/leetplus/langame-daily-worker.env' "$langame_daily_worker_service" > /dev/null
 grep -F -x 'ExecStart=/usr/local/libexec/leetplus/run-authorized-langame-daily-worker.sh' "$langame_daily_worker_service" > /dev/null
 grep -F -x 'Unit=leetplus-langame-daily-worker.service' "$langame_daily_worker_timer" > /dev/null
+grep -F "/usr/bin/env -i \\" "$langame_worker_authorization_verifier" > /dev/null
+grep -F "  PATH='/usr/sbin:/usr/bin:/sbin:/bin' \\" "$langame_worker_authorization_verifier" > /dev/null
+grep -F "  LANG='C.UTF-8' \\" "$langame_worker_authorization_verifier" > /dev/null
+grep -F "  LC_ALL='C.UTF-8' \\" "$langame_worker_authorization_verifier" > /dev/null
+grep -F "  TZ='UTC' \\" "$langame_worker_authorization_verifier" > /dev/null
+if grep -F -x '/usr/bin/node "$CONTROL_VERIFIER" --release-sha "$release_sha" --require-root-authority >"$control_output" || die '\''current installed control verifier rejected active release'\''' "$langame_worker_authorization_verifier" > /dev/null; then
+  printf 'Langame timer verifier invokes the strict installed-control verifier without an empty canonical environment\n' >&2
+  exit 1
+fi
 expected_langame_daily_worker_timer="$(cat <<'EOF'
 [Unit]
 Description=Run the LeetPlus Langame daily worker once at 04:30 Asia/Yekaterinburg

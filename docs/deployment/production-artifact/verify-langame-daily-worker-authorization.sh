@@ -77,7 +77,13 @@ case "$(readlink -e -- /etc/nginx/leetplus/active-upstreams.conf)" in /etc/nginx
 release="$(readlink -e -- "/srv/leetplus/slots/${slot}")"; [[ "$release" =~ ^/srv/leetplus/releases/([0-9a-f]{40})$ ]] || die 'active slot release is unsafe'; release_sha="${BASH_REMATCH[1]}"
 env_sha="$(sha "$ENV_FILE")"; stable_env_sha="$(sed -E '/^LANGAME_DAILY_WORKER_CANARY=|^LANGAME_DAILY_WORKER_DATE=/d' "$ENV_FILE" | sha256sum | awk '{print $1}')"; auth_sha="$(sha "$AUTH_ENV")"; safe_sha="$(sha "$SAFE_ENV")"; service_sha="$(sha "$SERVICE_FILE")"; timer_sha="$(sha "$TIMER_FILE")"; successor_sha="$(sha "$SUCCESSOR")"
 control_output="$(mktemp /tmp/leetplus-langame-worker-verifier-control.XXXXXX)"; trap 'rm -f -- "$control_output"' EXIT
-/usr/bin/node "$CONTROL_VERIFIER" --release-sha "$release_sha" --require-root-authority >"$control_output" || die 'current installed control verifier rejected active release'
+/usr/bin/env -i \
+  PATH='/usr/sbin:/usr/bin:/sbin:/bin' \
+  LANG='C.UTF-8' \
+  LC_ALL='C.UTF-8' \
+  TZ='UTC' \
+  /usr/bin/node "$CONTROL_VERIFIER" --release-sha "$release_sha" --require-root-authority \
+  >"$control_output" || die 'current installed control verifier rejected active release'
 grep -F -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' "$control_output" >/dev/null && grep -F -x "PRODUCTION_CONTROL_RELEASE_SHA=${release_sha}" "$control_output" >/dev/null || die 'current installed control identity drifted'
 control_sha="$(sha "$control_output")"
 pointer="${ROOT}/active-timer.permit"; regular "$pointer" 'root:leetplus-api-runtime:440'; [[ "$(wc -l < "$pointer" | tr -d '[:space:]')" == 3 && -z "$(awk -F= 'NF < 2 || seen[$1]++ {print; exit}' "$pointer")" ]] || die 'timer authorization pointer schema is invalid'; [[ "$(awk -F= '{print $1}' "$pointer" | sort)" == "$(printf '%s\n' RECORD_VERSION PERMIT_PATH PERMIT_SHA256 | sort)" ]] || die 'timer authorization pointer key set drifted'; grep -F -x 'RECORD_VERSION=1' "$pointer" >/dev/null || die 'timer authorization pointer version is invalid'; permit="$(sed -n 's/^PERMIT_PATH=//p' "$pointer")"; permit_sha="$(sed -n 's/^PERMIT_SHA256=//p' "$pointer")"

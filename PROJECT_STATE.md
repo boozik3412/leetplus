@@ -9,23 +9,24 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий production runtime baseline — merge SHA
-`85920b7b13e6f9ac6d7d45d076a2d5fd968918a4` (PR #139). Active blue
-`85920b7b…` и hot-rollback green `96b28f44…` работают в
+`72b1b053410050ed0de7d06d4cf54af376c4fe7c` (PR #141). Active blue
+`72b1b053…` и hot-rollback green `466ca90d…` работают в
 `COMBINED`, оба проходят exact readiness `CURRENT_189/189`.
 `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
 `GUEST_BUG_REPORTING_MODE=LIVE`. Split systemd/nginx candidate остаётся
 `DORMANT / NOT INSTALLED`.
 
-На exact `85920b7b…` date-by-date Langame canary за `2026-08-27`–`2026-09-04`
-завершён без failed scope и duplicate effects; daily coverage имеет `36/36`
-`SUCCESS`. Финальное включение stable timer корректно откатилось до worker
-effect: worker authorization verifier напрямую запускал strict installed-control
-Node verifier и передавал ему служебную exported bash-переменную `_`, хотя
-допустимы только `PATH/LANG/LC_ALL/TZ`. Timer снова `inactive/disabled`, оба
-90-fence восстановлены, public/corporate runtime и bonus-ledger timer остаются
-healthy. Текущий source repair запускает вложенный verifier через exact
-`/usr/bin/env -i`; до нового exact-main Fast/Full, control install, повторного
-canary и timer check это не является production fix.
+На exact `72b1b053…` повторный Langame canary `2026-09-04` завершён `4/4
+SUCCESS` без failed scope и duplicate effects; предшествующий date-by-date
+backfill `2026-08-27`–`2026-09-04` сохраняет `36/36 SUCCESS`. Stable timer
+прошёл canonical child environment и stable-env digest, но финальный verifier
+корректно откатил включение: systemd 255 сериализовал два exact `DropInPaths`
+через один пробел, а избыточный pattern ожидал двойной разделитель. Timer снова
+`inactive/disabled`, temporary permit удалён, оба 90-fence восстановлены,
+public/corporate runtime и bonus-ledger timer остаются healthy. Текущий source
+repair использует единственную строгую sorted exact-set проверку двух путей и
+продолжает отклонять любой третий drop-in. До нового exact-main Fast/Full,
+control install, повторного canary и timer check это не production fix.
 
 Повторный Langame canary за `2026-08-27` на этом runtime выполнил один INTERNAL
 tenant без failed scope и повторных effects, но завершился быстрее первого

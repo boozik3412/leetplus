@@ -126,7 +126,7 @@ case "$1" in
    ExecMainPID) if [[ "$unit" == leetplus-langame-daily-worker.timer && "$mode" == timer-pid-residue ]]; then printf 4242; elif [[ "$unit" == leetplus-langame-daily-worker.timer ]]; then printf ''; elif [[ "$unit" == leetplus-langame-daily-worker.service && ( "$mode" == pid-residue || "$mode" == historical-exec-pid ) ]]; then printf 2147483646; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == live-historical-exec-pid ]]; then printf 1; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == malformed-exec-pid ]]; then printf invalid; else printf 0; fi;;
    UnitFileState) [[ "$unit" == *.timer ]] && { [[ "$enabled" == 1 ]] && printf enabled || printf disabled; } || printf static;;
    ControlGroup) printf '\n';;
-   DropInPaths) for f in "/etc/systemd/system/${unit}.d/90-leetplus-nminus1-start-fence.conf" "/etc/systemd/system/${unit}.d/91-leetplus-langame-worker-authorization.conf"; do [[ -f "$f" ]] && printf '%s ' "$f"; done; printf '\n';;
+   DropInPaths) first=1; for f in "/etc/systemd/system/${unit}.d/90-leetplus-nminus1-start-fence.conf" "/etc/systemd/system/${unit}.d/91-leetplus-langame-worker-authorization.conf"; do if [[ -f "$f" ]]; then [[ "$first" == 1 ]] || printf ' '; printf '%s' "$f"; first=0; fi; done; [[ "$mode" == unexpected-dropin ]] && printf ' %s' "/etc/systemd/system/${unit}.d/92-unexpected.conf"; printf '\n';;
  esac; exit 0;;
  *) exit 0;; esac
 EOF
@@ -199,6 +199,10 @@ printf success >/run/langame-fixture/mode
 printf 0 >/run/langame-fixture/timer-profile-starts
 apply timer
 test "$(cat /run/langame-fixture/timer-profile-starts)" = 1
+expected_service_dropins='/etc/systemd/system/leetplus-langame-daily-worker.service.d/90-leetplus-nminus1-start-fence.conf /etc/systemd/system/leetplus-langame-daily-worker.service.d/91-leetplus-langame-worker-authorization.conf'
+test "$(systemctl show --property=DropInPaths --value leetplus-langame-daily-worker.service)" = "$expected_service_dropins"
+printf unexpected-dropin >/run/langame-fixture/mode
+if /usr/local/libexec/leetplus/verify-langame-daily-worker-authorization.sh; then echo 'timer verifier accepted an unexpected effective drop-in' >&2; exit 1; fi
 printf historical-exec-pid >/run/langame-fixture/mode
 /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority check --phase timer
 printf live-historical-exec-pid >/run/langame-fixture/mode

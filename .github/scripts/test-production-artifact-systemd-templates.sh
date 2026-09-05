@@ -555,6 +555,11 @@ grep -F '0::${EXPECTED_SERVICE_CGROUP}' "$langame_daily_worker_authorized_runner
 grep -F '"${#member_pids[@]}" == 1' "$langame_daily_worker_authorized_runner" > /dev/null
 grep -F 'LANGAME_DAILY_WORKER_AUTHORIZATION=PASS' "$langame_worker_authorization_verifier" > /dev/null
 grep -F 'I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_AUTHORIZATION' "$langame_worker_authority" > /dev/null
+stable_worker_env_filter="/^LANGAME_DAILY_WORKER_CANARY=|^LANGAME_DAILY_WORKER_DATE=|^LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=|^LANGAME_DAILY_WORKER_RETENTION_ENABLED=/d"
+for stable_worker_env_consumer in "$langame_worker_authority" "$langame_worker_authorization_verifier" "$langame_worker_authorized_runner"; do
+  test "$(grep -Fc "$stable_worker_env_filter" "$stable_worker_env_consumer")" = 1 \
+    || { printf 'Langame worker stable-environment digest contract drifted: %s\n' "$stable_worker_env_consumer" >&2; exit 1; }
+done
 grep -F 'LEETPLUS_LANGAME_DAILY_WORKER_TIMER_PROFILE_VALIDATION_V1' "$langame_worker_authority" > /dev/null
 grep -F 'I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_REVOCATION' "$langame_worker_authority" > /dev/null
 grep -F 'ConditionPathExists=' "$langame_worker_authority" > /dev/null

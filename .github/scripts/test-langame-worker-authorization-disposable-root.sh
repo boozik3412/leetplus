@@ -106,7 +106,7 @@ mode="$(cat "$state/mode" 2>/dev/null || printf success)"; enabled="$(cat "$stat
 case "$1" in
  daemon-reload) exit 0;;
  is-failed) if [[ "$unit" == leetplus-langame-daily-worker.service && "$service_active" == failed ]]; then printf 'failed\n'; exit 0; fi; printf 'inactive\n'; exit 1;;
- is-active) [[ "$unit" == leetplus-api@blue.service || "$unit" == leetplus-web@blue.service ]] && exit 0; [[ "$unit" == leetplus-langame-daily-worker.timer && "$enabled" == 1 ]] && exit 0; exit 3;;
+ is-active) [[ "$unit" == leetplus-api@blue.service || "$unit" == leetplus-web@blue.service || "$unit" == leetplus-api@green.service || "$unit" == leetplus-web@green.service ]] && exit 0; [[ "$unit" == leetplus-langame-daily-worker.timer && "$enabled" == 1 ]] && exit 0; exit 3;;
  is-enabled) [[ "$unit" == leetplus-langame-daily-worker.timer && "$enabled" == 1 ]] && exit 0; exit 1;;
  start) if [[ "$unit" == leetplus-langame-daily-worker.service ]]; then if grep -F -x 'LANGAME_DAILY_WORKER_CANARY=false' /etc/leetplus/langame-daily-worker.env >/dev/null; then n="$(cat "$state/timer-profile-starts" 2>/dev/null || printf 0)"; printf '%s\n' "$((n + 1))" >"$state/timer-profile-starts"; fi; if [[ "$mode" == stale ]]; then :; else started="$(cat "$state/start-monotonic" 2>/dev/null || printf 0)"; printf '%s\n' "$((started + 10))" >"$state/start-monotonic"; if [[ "$mode" == failure ]]; then printf 'fresh-failure\n' >"$state/invocation"; printf failure >"$state/result"; printf failed >"$state/service-active"; elif grep -F -x 'RemainAfterExit=yes' "/etc/systemd/system/${unit}.d/91-leetplus-langame-worker-authorization.conf" >/dev/null 2>&1; then printf 'fresh-success\n' >"$state/invocation"; printf success >"$state/result"; printf active >"$state/service-active"; touch "$state/canary-remain-after-exit-seen"; else printf 'fresh-success\n' >"$state/invocation"; printf success >"$state/result"; printf inactive >"$state/service-active"; fi; fi; fi; exit 0;;
  enable) printf 1 >"$state/timer-enabled"; if [[ "$unit" == leetplus-langame-daily-worker.timer ]]; then n="$(cat "$state/timer-profile-starts" 2>/dev/null || printf 0)"; printf '%s\n' "$((n + 1))" >"$state/timer-profile-starts"; started="$(cat "$state/start-monotonic" 2>/dev/null || printf 0)"; printf '%s\n' "$((started + 10))" >"$state/start-monotonic"; if [[ "$mode" == timer-fire-failure ]]; then printf timer-fire-failure >"$state/invocation"; printf failure >"$state/result"; printf failed >"$state/service-active"; else printf timer-fire-success >"$state/invocation"; printf success >"$state/result"; printf inactive >"$state/service-active"; fi; fi; exit 0;;
@@ -221,5 +221,65 @@ revoke_plan="$(/usr/local/sbin/leetplus-langame-daily-worker-authorization-autho
 test ! -e /var/lib/leetplus/langame-worker-authorizations/active-timer.permit
 test ! -e /etc/systemd/system/leetplus-langame-daily-worker.timer.d/91-leetplus-langame-worker-authorization.conf
 test "$(cat /run/langame-fixture/timer-enabled 2>/dev/null || echo 0)" = 0
+
+# Re-authorize the original release, then model one accepted cutover. The old
+# timer permit must be removable only through the cutover-bound supersession
+# path; no worker invocation is allowed during that transition.
+apply timer
+mkdir -p "/srv/leetplus/releases/${sha_a}"
+ln -s "/srv/leetplus/releases/${sha_a}" /srv/leetplus/slots/green
+printf 'RELEASE_SHA=%s\n' "$sha_a" >/etc/leetplus/slots.green.env
+chown root:leetplus-runtime /etc/leetplus/slots.green.env; chmod 440 /etc/leetplus/slots.green.env
+touch /etc/nginx/leetplus/upstreams/green.conf
+rm -f /etc/nginx/leetplus/active-upstreams.conf
+ln -s /etc/nginx/leetplus/upstreams/green.conf /etc/nginx/leetplus/active-upstreams.conf
+sed -i "s/${sha_b}/${sha_a}/g" /usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs
+cutover_receipt="/var/lib/leetplus/deploy-receipts/20260905T010203123456789Z-g2-${sha_a}-green.receipt"
+cat >"$cutover_receipt" <<EOF
+RECORD_VERSION=3
+GENERATION=2
+RELEASE_SHA=${sha_a}
+SLOT=green
+PREVIOUS_TARGET=/etc/nginx/leetplus/upstreams/blue.conf
+PREVIOUS_SHA256=1111111111111111111111111111111111111111111111111111111111111111
+PREVIOUS_RUNTIME_KIND=SLOT
+PREVIOUS_SLOT=blue
+PREVIOUS_API_UNIT=leetplus-api@blue.service
+PREVIOUS_WEB_UNIT=leetplus-web@blue.service
+PREVIOUS_API_URL=http://127.0.0.1:4100
+PREVIOUS_WEB_URL=http://127.0.0.1:3100
+PREVIOUS_RELEASE_SHA=${sha_b}
+PREVIOUS_MIGRATION=fixture
+PREVIOUS_MIGRATION_COUNT=1
+PREVIOUS_WEB_BUILD_ID=${sha_b}
+ACTIVATED_TARGET=/etc/nginx/leetplus/upstreams/green.conf
+ACTIVATED_SHA256=2222222222222222222222222222222222222222222222222222222222222222
+INTENT_RECORDED_AT=20260905T010203123456789Z
+ACCEPTED_AT=2026-09-05T01:02:03.123456789Z
+EOF
+chmod 600 "$cutover_receipt"
+cat >/var/lib/leetplus/deploy-receipts/latest-accepted.index <<EOF
+RECORD_VERSION=2
+GENERATION=2
+RECEIPT_PATH=${cutover_receipt}
+RECEIPT_SHA256=$(sha256sum "$cutover_receipt" | awk '{ print $1 }')
+CONSUMED=false
+EOF
+chmod 600 /var/lib/leetplus/deploy-receipts/latest-accepted.index
+printf 0 >/run/langame-fixture/timer-enabled
+timer_starts_before_supersession="$(cat /run/langame-fixture/timer-profile-starts)"
+supersede_plan="$(/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority supersede-plan --control-release-sha "$sha_a" | sed -n 's/.*"planSha256":"\([0-9a-f]*\)".*/\1/p')"
+test -n "$supersede_plan"
+/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority supersede-apply \
+  --control-release-sha "$sha_a" \
+  --plan-sha256 "$supersede_plan" \
+  --action-count 1 \
+  --confirm I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_SUPERSESSION
+/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority supersede-check --control-release-sha "$sha_a"
+test ! -e /var/lib/leetplus/langame-worker-authorizations/active-timer.permit
+test ! -e /etc/systemd/system/leetplus-langame-daily-worker.service.d/91-leetplus-langame-worker-authorization.conf
+test ! -e /etc/systemd/system/leetplus-langame-daily-worker.timer.d/91-leetplus-langame-worker-authorization.conf
+test -f /var/lib/leetplus/langame-worker-authorizations/latest-supersession.receipt
+test "$(cat /run/langame-fixture/timer-profile-starts)" = "$timer_starts_before_supersession"
 printf 'LANGAME_WORKER_AUTHORITY_DISPOSABLE_FIXTURE=PASS\n'
 INNER

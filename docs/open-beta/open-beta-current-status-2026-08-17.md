@@ -27,6 +27,15 @@ role limit `20` и 14 idle connections двух API slot. Production profile
 обязательными и fail-closed; перед внешним beta он должен пройти exact-main
 Fast/Full и controlled rollout.
 
+Дополнительный разбор `LP-BUG-2F3F9F62` подтвердил: Langame-сессия `548185`
+закрылась корректно и дала exact `63` минуты, но progress не материализовался.
+Причина — cursor-based `PARTIAL` ошибочно закрывался как `SUCCESS`, а frequent
+singleton не владел ledger fallback. Source successor добавляет автономное
+продолжение `PARTIAL`, bounded retry для source error, по одному due recovery
+за tick и worker-only fallback для трёх exact play-time fact types. Встроенные
+API schedulers/fallback остаются `OFF`; stable `LIVE` требует exact INTERNAL
+tenant, UTC cutoff, bounded batch и сохраняет existing idempotency.
+
 На 05.09 installed production-control уже обновлён до exact `fc7b6e65…`, но
 runtime не переключался. Successor остановлен fail-closed из-за orphaned
 verifier evidence поколения `3281c070…`; successor receipt отсутствует,

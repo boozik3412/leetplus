@@ -382,6 +382,18 @@ production встроенный `GuestBonusLedgerSchedulerService` обязан 
 - pre-dispatch ошибки используют bounded retry, а неоднозначный внешний POST
   остаётся `RECONCILIATION_REQUIRED` без автоматического повтора.
 
+Тот же singleton worker является единственным частым owner автоматической
+квалификации игрового прогресса. Он не включает scheduler в API и в каждом tick
+для ровно одного `ACTIVE + INTERNAL` tenant: ставит не более одного due recovery
+в activity queue, обрабатывает bounded sync, запускает snapshot pipeline,
+worker-specific ledger fallback, supplemental pipeline и monitoring. Ledger
+fallback ограничен тремя exact play-time fact types; canary допускает только
+`SHADOW/limit=1`, а stable `LIVE` требует явную UTC-границу
+`GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE`. Любой другой
+tenant, неизвестный fact type, отсутствие границы или включённый API scheduler
+останавливают обработку до reward effect. Существующие origin keys, database
+lease и idempotency не позволяют повторному replay создать второй результат.
+
 Установка unit/runner выполняется только exact production-control artifact с
 отдельно закреплённым install-map digest. Само наличие файлов в `main` или
 установка control generation не включает timer. Production activation требует
@@ -434,6 +446,13 @@ digest-bound plan, сохраняет owner и не получает DB/network/
 После сохранения DB facts audit-write failure становится `PARTIAL`, а не
 откатом facts или ложным provider `FAILED`; наружу выходит только allowlisted
 filesystem code.
+
+`PARTIAL` с сохранённым cursor и без source error не является завершением
+очереди: sync job атомарно возвращается в `PENDING` и продолжает следующую
+страницу. `PARTIAL` с ошибкой источника переводится в bounded `RETRY`/backoff и
+после исчерпания попыток остаётся наблюдаемым terminal failure. Помечать любой
+из этих случаев `SUCCESS` запрещено: иначе exact facts сохранятся в ledger, но
+не попадут в автоматическую квалификацию.
 
 Legacy drain inventory сохраняет уже принятый autonomous bonus-ledger contour:
 его service/timer классифицируются `SAFE` и не останавливаются ради Langame

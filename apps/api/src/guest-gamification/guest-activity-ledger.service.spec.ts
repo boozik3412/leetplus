@@ -2625,6 +2625,97 @@ describe('GuestActivityLedgerService', () => {
     );
   });
 
+  it('keeps a PARTIAL sync job pending so the saved source cursor continues automatically', async () => {
+    await service.enqueueProfileSync({
+      tenantId,
+      profileId,
+      guestId,
+      storeId,
+      reason: 'PARTIAL_CURSOR_CONTINUATION',
+    });
+    jest.spyOn(service, 'syncProfile').mockResolvedValue({
+      status: 'PARTIAL',
+    } as any);
+
+    const before = Date.now();
+    const result = await service.processQueuedSyncJobs(1, 'test-worker');
+    const job = Array.from(syncJobs.values())[0];
+
+    expect(result).toMatchObject({
+      processed: 1,
+      success: 0,
+      failed: 0,
+      rerun: 1,
+    });
+    expect(job).toEqual(
+      expect.objectContaining({
+        status: 'PENDING',
+        attempts: 0,
+        lockedAt: null,
+        lockedBy: null,
+        rerunRequested: false,
+        lastError: null,
+        nextAttemptAt: expect.any(Date),
+      }),
+    );
+    expect(job.nextAttemptAt.getTime()).toBeGreaterThan(before);
+  });
+
+  it('retries a PARTIAL sync with a source error through the bounded backoff path', async () => {
+    await service.enqueueProfileSync({
+      tenantId,
+      profileId,
+      guestId,
+      storeId,
+      reason: 'PARTIAL_SOURCE_FAILURE',
+    });
+    jest.spyOn(service, 'syncProfile').mockResolvedValue({
+      status: 'PARTIAL',
+      errorMessage: 'transactions unavailable',
+    } as any);
+
+    const result = await service.processQueuedSyncJobs(1, 'test-worker');
+    const job = Array.from(syncJobs.values())[0];
+
+    expect(result).toMatchObject({
+      processed: 1,
+      retried: 1,
+      rerun: 0,
+      results: [
+        expect.objectContaining({
+          status: 'RETRY',
+          errorMessage: 'transactions unavailable',
+        }),
+      ],
+    });
+    expect(job).toEqual(
+      expect.objectContaining({
+        status: 'RETRY',
+        attempts: 1,
+        lastError: 'transactions unavailable',
+      }),
+    );
+  });
+
+  it('marks an intentionally skipped queued sync as skipped', async () => {
+    await service.enqueueProfileSync({
+      tenantId,
+      profileId,
+      guestId,
+      storeId,
+      reason: 'NO_RESOLVABLE_CONTEXT',
+    });
+    jest.spyOn(service, 'syncProfile').mockResolvedValue({
+      status: 'SKIPPED',
+    } as any);
+
+    const result = await service.processQueuedSyncJobs(1, 'test-worker');
+    const job = Array.from(syncJobs.values())[0];
+
+    expect(result).toMatchObject({ processed: 1, skipped: 1, success: 0 });
+    expect(job.status).toBe('SKIPPED');
+  });
+
   it('keeps a dedicated worker claim inside its exact tenant', async () => {
     await service.enqueueProfileSync({
       tenantId,

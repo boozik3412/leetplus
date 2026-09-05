@@ -10,6 +10,8 @@ function baseEnv(): NodeJS.ProcessEnv {
     GUEST_GAMIFICATION_WORKER_CANARY: 'true',
     GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT: '1',
     GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT: '1',
+    GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_MODE: 'SHADOW',
+    GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIMIT: '1',
     GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE: 'SHADOW',
     GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT: '1',
     GUEST_GAMIFICATION_WORKER_MONITORING_ENABLED: 'false',
@@ -39,6 +41,11 @@ function services() {
       },
     },
     activityLedger: {
+      enqueueDueRecoverySyncs: jest.fn().mockResolvedValue({
+        scanned: 1,
+        queued: 1,
+        skipped: 0,
+      }),
       processQueuedSyncJobs: jest.fn().mockResolvedValue({
         processed: 1,
         success: 1,
@@ -47,6 +54,25 @@ function services() {
         skipped: 0,
         rerun: 0,
         results: [],
+      }),
+    },
+    ledgerFallback: {
+      runScheduled: jest.fn().mockResolvedValue({
+        mode: 'SHADOW',
+        checkedTenants: 1,
+        processedTenants: 1,
+        skippedTenants: 0,
+        erroredTenants: 0,
+        checkedFacts: 1,
+        deferredFacts: 0,
+        liveHandledFacts: 0,
+        shadowFacts: 1,
+        fallbackFacts: 1,
+        duplicateFacts: 0,
+        failedFacts: 0,
+        createdEvents: 0,
+        createdRewards: 0,
+        tenants: [],
       }),
     },
     gamification: {
@@ -104,6 +130,36 @@ describe('guest gamification singleton worker', () => {
         GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE: 'LIVE',
       }),
     ).toThrow('SUPPLEMENTAL_MODE=SHADOW');
+    expect(() =>
+      loadGuestGamificationWorkerConfig({
+        ...baseEnv(),
+        GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_MODE: 'LIVE',
+        GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE:
+          '2026-09-05T00:00:00.000Z',
+      }),
+    ).toThrow('LEDGER_FALLBACK_MODE=LIVE is forbidden in canary mode');
+  });
+
+  it('requires a valid replay cutoff before stable LIVE ledger fallback', () => {
+    const stable = {
+      ...baseEnv(),
+      GUEST_GAMIFICATION_WORKER_CANARY: 'false',
+      GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT: '30',
+      GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_MODE: 'LIVE',
+      GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIMIT: '30',
+      GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE: 'LIVE',
+      GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT: '30',
+    };
+
+    expect(() => loadGuestGamificationWorkerConfig(stable)).toThrow(
+      'LEDGER_FALLBACK_LIVE_NOT_BEFORE is required in LIVE mode',
+    );
+    expect(() =>
+      loadGuestGamificationWorkerConfig({
+        ...stable,
+        GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE: 'invalid',
+      }),
+    ).toThrow('LEDGER_FALLBACK_LIVE_NOT_BEFORE must be a valid ISO date');
   });
 
   it('keeps activity recovery at one profile in stable mode', () => {
@@ -131,6 +187,9 @@ describe('guest gamification singleton worker', () => {
     );
 
     expect(
+      dependencies.activityLedger.enqueueDueRecoverySyncs,
+    ).toHaveBeenCalledWith(1, new Date('2026-09-04T12:00:00.000Z'), 'tenant-1');
+    expect(
       dependencies.activityLedger.processQueuedSyncJobs,
     ).toHaveBeenCalledWith(
       1,
@@ -142,6 +201,17 @@ describe('guest gamification singleton worker', () => {
     ).toHaveBeenCalledWith({
       tenantId: 'tenant-1',
       dryRunOnly: true,
+      limit: 1,
+    });
+    expect(dependencies.ledgerFallback.runScheduled).toHaveBeenCalledWith({
+      mode: 'SHADOW',
+      tenantId: 'tenant-1',
+      playTimeAllowAllProfiles: true,
+      factTypes: [
+        'SESSION_PLAY_TIME_ACCUMULATED',
+        'HOURLY_PLAY_TIME_ACCUMULATED',
+        'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+      ],
       limit: 1,
     });
     expect(
@@ -162,6 +232,10 @@ describe('guest gamification singleton worker', () => {
       GUEST_GAMIFICATION_WORKER_CANARY: 'false',
       GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT: '1',
       GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT: '30',
+      GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_MODE: 'LIVE',
+      GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIMIT: '30',
+      GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE:
+        '2026-09-05T00:00:00.000Z',
       GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE: 'LIVE',
       GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT: '30',
       GUEST_GAMIFICATION_WORKER_MONITORING_ENABLED: 'true',
@@ -180,6 +254,15 @@ describe('guest gamification singleton worker', () => {
       dependencies.gamification.runSnapshotPipelineScheduled,
     ).toHaveBeenCalledWith(
       expect.objectContaining({ dryRunOnly: false, limit: 30 }),
+    );
+    expect(dependencies.ledgerFallback.runScheduled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'LIVE',
+        tenantId: 'tenant-1',
+        playTimeAllowAllProfiles: true,
+        liveNotBefore: '2026-09-05T00:00:00.000Z',
+        limit: 30,
+      }),
     );
     expect(
       dependencies.gamification.runSupplementalPipelineScheduled,
@@ -227,6 +310,33 @@ describe('guest gamification singleton worker', () => {
       runGuestGamificationWorkerOnce(failed as never, baseEnv()),
     ).rejects.toThrow(
       'Snapshot pipeline failed exact tenant processing: checked=1, processed=0, tenantsFailed=1, factsFailed=1 reason=Too many database connections opened',
+    );
+  });
+
+  it('fails closed when exact-tenant ledger fallback reports a failed fact', async () => {
+    const failed = services();
+    failed.ledgerFallback.runScheduled.mockResolvedValueOnce({
+      mode: 'SHADOW',
+      checkedTenants: 1,
+      processedTenants: 0,
+      skippedTenants: 0,
+      erroredTenants: 1,
+      checkedFacts: 1,
+      deferredFacts: 0,
+      liveHandledFacts: 0,
+      shadowFacts: 0,
+      fallbackFacts: 0,
+      duplicateFacts: 0,
+      failedFacts: 1,
+      createdEvents: 0,
+      createdRewards: 0,
+      tenants: [],
+    });
+
+    await expect(
+      runGuestGamificationWorkerOnce(failed as never, baseEnv()),
+    ).rejects.toThrow(
+      'Ledger fallback failed exact tenant processing: checked=1, tenantsFailed=1, factsFailed=1',
     );
   });
 });

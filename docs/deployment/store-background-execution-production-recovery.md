@@ -1,6 +1,6 @@
 # Store background execution production recovery
 
-Статус: **audited platform-admin control plane implemented; production GO is a separate effect**
+Статус: **production activation completed for one INTERNAL Store; repeatable rollback remains available**
 
 Актуально на: **06.09.2026**
 
@@ -70,6 +70,24 @@ request ID для другой цели или состояние, измени�
    проверить минимум два автоматических tick.
 9. Проверить public/corporate health, active release, rollback и unresolved
    worker queues.
+
+## Production результат 06.09.2026
+
+- admitted/runtime SHA:
+  `43d447a3c3bd08dcf496f783771c28130e13c82a` (PR #146);
+- active green, hot-rollback blue `cfc99902…`, schema exact
+  `CURRENT_189/189`;
+- tenant `demo`, Store `5b07123f-9db7-453c-9a03-ccd75aa1cf49`:
+  `backgroundExecutionEnabled=true`, revision `0 -> 1`;
+- audit event: `07b471ca-83f4-45a1-995a-d1a6ce7d4715`; повтор exact команды
+  вернул `replayed=true` без новой revision;
+- canary fact `6df3d604-1e75-4ff5-b423-628e92d3bba8`, Langame session
+  `548185`: receipt `PROCESSED`, один event, один reward intent, одна reward и
+  один `AVAILABLE` lootbox entitlement; повторный cursor-pass вернул duplicate,
+  `createdEvents=0`, `createdRewards=0`;
+- `leetplus-bonus-ledger-worker.timer` возвращён в enabled/active, штатные
+  проходы выполняют bounded recovery, autonomous `PARTIAL` continuation и
+  ledger fallback без переноса scheduler authority в API.
 
 ## Откат
 

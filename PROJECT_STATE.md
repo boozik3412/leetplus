@@ -9,8 +9,8 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий production runtime baseline — merge SHA
-`81ae920cbd4f673f23d2bfedcf506224c8532d07` (PR #142). Active green
-`81ae920c…` и hot-rollback blue `72b1b053…` работают в
+`43d447a3c3bd08dcf496f783771c28130e13c82a` (PR #146). Active green
+`43d447a3…` и hot-rollback blue `cfc99902…` работают в
 `COMBINED`, оба проходят exact readiness `CURRENT_189/189`.
 `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
 `GUEST_BUG_REPORTING_MODE=LIVE`. Split systemd/nginx candidate остаётся
@@ -24,32 +24,42 @@ Production-проверка автономной геймификации 05.09 
 connections`, а очередь переставала устойчиво дренироваться. Live profile
 возвращён к одному activity-профилю за tick, worker DATABASE_URL ограничен
 `connection_limit=2`, `pool_timeout=5`, `connect_timeout=5`, effective
-oneshot timeout увеличен до 15 минут. После изменения последовательные
-автоматические tick завершаются успешно. Source successor закрепляет эти три
-значения fail-closed, публикует безопасную причину tenant pipeline failure и
-не меняет API schedulers, public/corporate guards или database role limits.
+oneshot timeout увеличен до 15 минут. Exact successor `43d447a3…` закрепил эти
+три значения fail-closed и развёрнут в production; последовательные
+автоматические tick завершаются без terminal worker failure. API schedulers,
+public/corporate guards и database role limits не менялись.
 
 `LP-BUG-2F3F9F62` выявил отдельный autonomy gap после корректного закрытия
 Langame-сессии `548185`: exact `HOURLY_PLAY_TIME_ACCUMULATED` на `63` минуты
 был сохранён, но cursor-based activity job ошибочно считался `SUCCESS` после
 первой `PARTIAL` страницы, а частый singleton не запускал ledger fallback.
-Source successor возвращает незавершённый cursor в `PENDING`, source error — в
-bounded `RETRY`, сам ставит по одному due recovery и после snapshot запускает
-worker-only fallback для фиксированного набора exact play-time facts. API
-schedulers и общий API fallback остаются `OFF`; `LIVE` допускается только для
-одного exact `ACTIVE + INTERNAL` tenant с явной UTC-границей, bounded batch и
-существующими idempotency/origin keys.
+Развёрнутый successor возвращает незавершённый cursor в `PENDING`, source
+error — в bounded `RETRY`, сам ставит по одному due recovery и после snapshot
+запускает worker-only fallback для фиксированного набора exact play-time
+facts. API schedulers и общий API fallback остаются `OFF`; `LIVE` допускается
+только для одного exact `ACTIVE + INTERNAL` tenant с явной UTC-границей,
+bounded batch и существующими idempotency/origin keys.
 
-Оставшийся production blocker — отсутствие store-bound runtime identity:
-migration 165 корректно оставила четыре Store с
-`backgroundExecutionEnabled=false`, поэтому worker доходил до fallback, но
-получал `BACKGROUND_STORE_ID_REQUIRED`. Source successor добавляет узкий
-platform-admin-only control plane: exact Tenant/Store, expected revision,
-typed confirmation, reason, idempotency request ID и runtime `RELEASE_SHA`
-фиксируются одним атомарным `PlatformAdminAuditEvent`. `ENABLE` разрешён только
-для `ACTIVE + INTERNAL` tenant и active gamification Store; внешний tenant
-остаётся fail-closed, а `DISABLE` доступен как authority-reducing emergency
-stop. Production включение выполняется отдельно по canary/replay runbook.
+Store-bound production blocker снят через узкий platform-admin-only control
+plane. Для INTERNAL tenant `demo` включена одна минимальная runtime identity —
+Store `5b07123f-9db7-453c-9a03-ccd75aa1cf49`, revision `0 -> 1`; audit event
+`07b471ca-83f4-45a1-995a-d1a6ce7d4715` связан с runtime `43d447a3…` и тикетом
+`LP-BUG-2F3F9F62`. Остальные Store не включались, scope правил не расширялся.
+Повтор control-команды вернул `replayed=true`. Bounded replay сессии `548185`
+создал один `PLAY_HOUR`, один reward intent, одну reward-запись и один
+entitlement `КЕЙС «КАМБЭК»`; второй проход создал `0/0` новых event/reward и
+оставил исходный receipt с `attempts=1`. Частый timer возвращён в
+`enabled + active`, а очереди продолжают дренироваться автономно bounded
+пакетами.
+
+Post-activation drain выявил provider-compatibility крайний случай на
+`1337.langame.ru`: сервер принимает ISO `YYYY-MM-DD`, но после штатной пустой
+последней страницы отвергает дополнительный legacy probe с `DD.MM.YYYY` как
+`400 Validation failed`. Из-за этого конец пагинации ошибочно переводил job в
+`RETRY`. Source repair сохраняет уже успешный пустой ISO-ответ как
+authoritative только при validation-отказе compatibility probe; auth,
+transport и server ошибки по-прежнему выходят наружу. До exact-main admission
+и controlled rollout этот follow-up не считается deployed.
 
 Точечная production-сверка двух обращений отделила дефект от штатной
 последовательности. Для `LP-BUG-AFDE6B03` восстановлен один пропущенный

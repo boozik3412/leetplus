@@ -3,10 +3,10 @@
 | Поле                 | Состояние                                                                                                                     |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                  |
-| Production runtime   | healthy; active blue `72b1b053…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback green `466ca90d…` ready             |
+| Production runtime   | healthy; active green `81ae920c…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue `72b1b053…` ready             |
 | Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                  |
-| Release authority    | runtime и production-control exact `72b1b053…`; five-phase rollout завершён с terminal receipt                              |
-| Runtime successor    | Bonus-ledger/gamification timer enabled/healthy; activity queue обработана; Langame daily worker fenced до terminal repair      |
+| Release authority    | runtime и production-control exact `81ae920c…`; five-phase rollout завершён с terminal receipt                              |
+| Runtime successor    | Оба worker timer active; activity queue автономно дренируется по одному профилю; worker pool `2`, timeout `15m`; API schedulers выключены      |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                              |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                      |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                      |
@@ -15,7 +15,17 @@
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
-| Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`, повтор 04.09 — `4/4`; daily timer fenced/disabled до `DropInPaths` exact-set repair |
+| Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`, повтор 04.09 — `4/4`; daily timer enabled/active, следующий scheduled run 06.09 |
+
+Operational-проверка 05.09 на active `81ae920c…` нашла не дефект public или
+corporate контура, а drift профиля singleton worker: activity batch был `3`,
+timeout `120s`, а Prisma использовал общий неограниченный pool при PostgreSQL
+role limit `20` и 14 idle connections двух API slot. Production profile
+сужен до `activity=1`, worker pool — до двух соединений, timeout — до `900s`.
+После этого серия автоматических timer tick завершается успешно и очередь
+уменьшается без duplicate reward/effect. Source hardening делает эти границы
+обязательными и fail-closed; перед внешним beta он должен пройти exact-main
+Fast/Full и controlled rollout.
 
 На 05.09 installed production-control уже обновлён до exact `fc7b6e65…`, но
 runtime не переключался. Successor остановлен fail-closed из-за orphaned
@@ -113,6 +123,14 @@ evaluation, создаёт exact canonical `CHECK_IN_PERFORMED` и связыв�
 обходить последовательность и не выдавать награду повторно. Если бизнес решит
 компенсировать конкретное ранее совершённое пополнение, это отдельный bounded
 operator effect с собственным idempotency key и audit receipt.
+
+Production-проверка 05.09 завершила точечный recovery первого обращения:
+созданы ровно один canonical fact, event, reward, effect и wallet item
+(`1/1/1/1/1`). Effect имеет ожидаемый `WAITING_CLAIM`, wallet item — `PENDING`:
+это граница явного получения гостем, а не зависшее начисление. По второму
+обращению activity job завершился `SUCCESS`, но шаг `PLAY_TIME` сохраняет
+`0/60`, поэтому награда за следующий шаг не создавалась. Эти результаты не
+разрешают широкий replay исторических наград.
 
 До production rollout обязательны: exact Fast+Full admission, существующие
 backup/rollback gates, canary автономного Langame worker, backfill пропущенных

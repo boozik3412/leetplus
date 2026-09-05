@@ -9,12 +9,34 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий production runtime baseline — merge SHA
-`72b1b053410050ed0de7d06d4cf54af376c4fe7c` (PR #141). Active blue
-`72b1b053…` и hot-rollback green `466ca90d…` работают в
+`81ae920cbd4f673f23d2bfedcf506224c8532d07` (PR #142). Active green
+`81ae920c…` и hot-rollback blue `72b1b053…` работают в
 `COMBINED`, оба проходят exact readiness `CURRENT_189/189`.
 `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
 `GUEST_BUG_REPORTING_MODE=LIVE`. Split systemd/nginx candidate остаётся
 `DORMANT / NOT INSTALLED`.
+
+Production-проверка автономной геймификации 05.09 выявила operational drift:
+частый singleton получил `GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT=3` и
+двухминутный timeout, а его Prisma URL не имел отдельного лимита соединений.
+Два одновременно работающих API slot уже занимали 14 из 20 разрешённых
+соединений роли, поэтому snapshot pipeline периодически завершался `too many
+connections`, а очередь переставала устойчиво дренироваться. Live profile
+возвращён к одному activity-профилю за tick, worker DATABASE_URL ограничен
+`connection_limit=2`, `pool_timeout=5`, `connect_timeout=5`, effective
+oneshot timeout увеличен до 15 минут. После изменения последовательные
+автоматические tick завершаются успешно. Source successor закрепляет эти три
+значения fail-closed, публикует безопасную причину tenant pipeline failure и
+не меняет API schedulers, public/corporate guards или database role limits.
+
+Точечная production-сверка двух обращений отделила дефект от штатной
+последовательности. Для `LP-BUG-AFDE6B03` восстановлен один пропущенный
+`CHECK_IN_PERFORMED`; связанная цепочка `fact/event/reward/effect/wallet`
+проверена как `1/1/1/1/1`, а бонус остаётся в обычном `WAITING_CLAIM` до
+действия гостя. Для `LP-BUG-42A647BA` activity job завершился успешно, но
+предыдущий шаг `PLAY_TIME` остаётся `0/60`; поэтому пополнение `920 ₽` не может
+ретроактивно закрыть следующий шаг и новая награда не создаётся. Широкий replay
+или ручное обходное начисление не выполнялись.
 
 На exact `72b1b053…` повторный Langame canary `2026-09-04` завершён `4/4
 SUCCESS` без failed scope и duplicate effects; предшествующий date-by-date

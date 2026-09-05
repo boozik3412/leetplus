@@ -74,6 +74,9 @@ export function loadGuestGamificationWorkerConfig(
     10,
     'GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT',
   );
+  if (activityLimit !== 1) {
+    throw new Error('GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT=1 is required');
+  }
   const pipelineLimit = boundedPositiveInt(
     env.GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT,
     canary ? 1 : 30,
@@ -88,9 +91,7 @@ export function loadGuestGamificationWorkerConfig(
   );
   if (
     canary &&
-    [activityLimit, pipelineLimit, supplementalLimit].some(
-      (value) => value !== 1,
-    )
+    [pipelineLimit, supplementalLimit].some((value) => value !== 1)
   ) {
     throw new Error(
       'All gamification worker limits must equal 1 in canary mode',
@@ -195,8 +196,13 @@ export async function runGuestGamificationWorkerOnce(
     pipeline.erroredTenants > 0 ||
     pipeline.erroredFacts > 0
   ) {
+    const failureReason = pipeline.tenants
+      ?.find((tenant) => tenant.status !== 'PROCESSED')
+      ?.reason?.replace(/\s+/gu, ' ')
+      .trim()
+      .slice(0, 500);
     throw new Error(
-      `Snapshot pipeline failed exact tenant processing: checked=${pipeline.checkedTenants}, processed=${pipeline.processedTenants}, tenantsFailed=${pipeline.erroredTenants}, factsFailed=${pipeline.erroredFacts}`,
+      `Snapshot pipeline failed exact tenant processing: checked=${pipeline.checkedTenants}, processed=${pipeline.processedTenants}, tenantsFailed=${pipeline.erroredTenants}, factsFailed=${pipeline.erroredFacts}${failureReason ? ` reason=${failureReason}` : ''}`,
     );
   }
 

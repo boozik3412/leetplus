@@ -106,6 +106,19 @@ describe('guest gamification singleton worker', () => {
     ).toThrow('SUPPLEMENTAL_MODE=SHADOW');
   });
 
+  it('keeps activity recovery at one profile in stable mode', () => {
+    expect(() =>
+      loadGuestGamificationWorkerConfig({
+        ...baseEnv(),
+        GUEST_GAMIFICATION_WORKER_CANARY: 'false',
+        GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT: '3',
+        GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT: '30',
+        GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE: 'LIVE',
+        GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT: '30',
+      }),
+    ).toThrow('GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT=1');
+  });
+
   it('processes one exact INTERNAL tenant without live canary rewards', async () => {
     const dependencies = services();
     const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
@@ -147,7 +160,7 @@ describe('guest gamification singleton worker', () => {
     const env = {
       ...baseEnv(),
       GUEST_GAMIFICATION_WORKER_CANARY: 'false',
-      GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT: '5',
+      GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT: '1',
       GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT: '30',
       GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE: 'LIVE',
       GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT: '30',
@@ -202,9 +215,18 @@ describe('guest gamification singleton worker', () => {
       erroredFacts: 1,
       processedFacts: 0,
       queuedRewards: 0,
+      tenants: [
+        {
+          tenantId: 'tenant-1',
+          status: 'ERRORED',
+          reason: 'Too many database connections\nopened',
+        },
+      ],
     });
     await expect(
       runGuestGamificationWorkerOnce(failed as never, baseEnv()),
-    ).rejects.toThrow('Snapshot pipeline failed');
+    ).rejects.toThrow(
+      'Snapshot pipeline failed exact tenant processing: checked=1, processed=0, tenantsFailed=1, factsFailed=1 reason=Too many database connections opened',
+    );
   });
 });

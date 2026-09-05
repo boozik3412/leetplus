@@ -6,6 +6,8 @@ import {
 
 function baseEnv(): NodeJS.ProcessEnv {
   return {
+    DATABASE_URL:
+      'postgresql://leetplus_runtime:test-password@127.0.0.1:5432/leetplus?schema=public&connection_limit=2&pool_timeout=5&connect_timeout=5',
     GUEST_BONUS_LEDGER_WORKER_ENABLED: 'true',
     GUEST_BONUS_LEDGER_WORKER_TENANT_SLUG: 'demo',
     GUEST_BONUS_LEDGER_WORKER_DRY_RUN: 'true',
@@ -47,6 +49,34 @@ describe('guest bonus ledger worker', () => {
         GUEST_BONUS_LEDGER_WORKER_ENABLED: 'false',
       }),
     ).toThrow('GUEST_BONUS_LEDGER_WORKER_ENABLED=true is required');
+  });
+
+  it('fails closed when the worker database pool is not explicitly bounded', () => {
+    expect(() =>
+      loadGuestBonusLedgerWorkerConfig({
+        ...baseEnv(),
+        DATABASE_URL:
+          'postgresql://leetplus_runtime:test-password@127.0.0.1:5432/leetplus?schema=public',
+      }),
+    ).toThrow('connection_limit=2');
+  });
+
+  it('rejects duplicate or broader worker database pool options', () => {
+    expect(() =>
+      loadGuestBonusLedgerWorkerConfig({
+        ...baseEnv(),
+        DATABASE_URL:
+          'postgresql://leetplus_runtime:test-password@127.0.0.1:5432/leetplus?schema=public&connection_limit=2&connection_limit=2&pool_timeout=5&connect_timeout=5',
+      }),
+    ).toThrow('connection_limit=2');
+
+    expect(() =>
+      loadGuestBonusLedgerWorkerConfig({
+        ...baseEnv(),
+        DATABASE_URL:
+          'postgresql://leetplus_runtime:test-password@127.0.0.1:5432/leetplus?schema=public&connection_limit=3&pool_timeout=5&connect_timeout=5',
+      }),
+    ).toThrow('connection_limit=2');
   });
 
   it('requires exactly one bounded tenant scope', () => {

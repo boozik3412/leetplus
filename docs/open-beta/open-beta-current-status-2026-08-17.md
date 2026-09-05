@@ -3,9 +3,9 @@
 | Поле                 | Состояние                                                                                                                     |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                  |
-| Production runtime   | healthy; active blue `85920b7b…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback green `96b28f44…` ready             |
+| Production runtime   | healthy; active blue `72b1b053…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback green `466ca90d…` ready             |
 | Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                  |
-| Release authority    | runtime и production-control exact `85920b7b…`; five-phase rollout завершён с terminal receipt                              |
+| Release authority    | runtime и production-control exact `72b1b053…`; five-phase rollout завершён с terminal receipt                              |
 | Runtime successor    | Bonus-ledger/gamification timer enabled/healthy; activity queue обработана; Langame daily worker fenced до terminal repair      |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                              |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                      |
@@ -15,7 +15,7 @@
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
-| Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`; daily timer fenced/disabled до nested-verifier `env -i` repair |
+| Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`, повтор 04.09 — `4/4`; daily timer fenced/disabled до `DropInPaths` exact-set repair |
 
 На 05.09 installed production-control уже обновлён до exact `fc7b6e65…`, но
 runtime не переключался. Successor остановлен fail-closed из-за orphaned
@@ -84,6 +84,16 @@ public/corporate runtime и данные остались healthy. Source repair
 child verifier через exact `/usr/bin/env -i PATH/LANG/LC_ALL/TZ` и не расширяет
 worker authority. До нового exact-main Fast+Full, control install, repeat
 canary и timer check внешний beta остаётся `NO-GO`.
+
+Следующий admitted rollout `72b1b053…` переключил production на active blue и
+сохранил green `466ca90d…` hot rollback. Повторный canary `2026-09-04` прошёл
+`4/4 SUCCESS` без дублей. Stable timer дошёл до финального authorization check,
+но штатный systemd 255 вернул два exact `DropInPaths` через один пробел, тогда
+как избыточный предварительный pattern ожидал двойной разделитель. Fail-closed
+cleanup выключил timer, удалил permit/drop-in и восстановил 90-fence. Source
+repair оставляет exact sorted-set проверку обоих обязательных путей и запрет
+третьего, устраняя только зависимость от whitespace. До нового Fast+Full,
+control install, canary и terminal timer check внешний beta остаётся `NO-GO`.
 
 ## Исправление двух обращений геймификации (04.09.2026)
 

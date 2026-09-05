@@ -1,6 +1,6 @@
 # Langame sync production recovery
 
-Статус: **backfill canary завершён; stable timer fail-closed до nested-verifier environment repair**
+Статус: **backfill canary завершён; stable timer fail-closed до systemd DropInPaths verifier repair**
 
 Актуально на: **05.09.2026**
 
@@ -77,17 +77,24 @@ corporate scope или Langame credentials. Внешние tenant остаютс
     `_` может быть добавлена при прямом внешнем вызове. Этот guard не добавляет
     worker secrets или authority и проверяется fixture, чей Node verifier
     отклоняет любой пятый ключ environment.
+14. Effective `DropInPaths` проверяется как отсортированное exact-множество из
+    двух путей: immutable 90-fence и текущий 91-authorization. Systemd 255
+    сериализует их одним пробелом; whitespace не является authority. Отсутствие
+    любого обязательного пути, третий drop-in, linked/unsafe file или drift его
+    содержимого по-прежнему fail-closed.
 
 ## Фактический production checkpoint 05.09.2026
 
-- active blue exact `85920b7b…`, hot rollback green `96b28f44…`, schema
+- active blue exact `72b1b053…`, hot rollback green `466ca90d…`, schema
   `CURRENT_189/189`, public/corporate readiness healthy;
-- canary/backfill дат `2026-08-27`–`2026-09-04` дал `36/36 SUCCESS`, duplicate
+- canary/backfill дат `2026-08-27`–`2026-09-04` дал `36/36 SUCCESS`, повторный
+  canary `2026-09-04` на active release дал `4/4 SUCCESS`; duplicate
   reward/reward-effect idempotency keys — `0/0`;
-- stable timer apply дошёл до финальной проверки, затем fail-closed отклонил
-  вложенный Node verifier из-за лишней `_`; authority выключил timer и вернул
-  legacy fences, поэтому unattended effect не остался частично включённым;
-- следующий допустимый шаг — exact-main Fast+Full с `env -i` repair, установка
+- stable timer apply прошёл canonical child environment и stable-env digest,
+  затем fail-closed отклонил single-space `DropInPaths` systemd 255 из-за
+  избыточного whitespace pattern; authority выключил timer и вернул legacy
+  fences, поэтому unattended effect не остался частично включённым;
+- следующий допустимый шаг — exact-main Fast+Full с exact-set repair, установка
   control generation, повтор одного canary на новом SHA и один timer apply/check.
 
 ## Обязательные gates до production

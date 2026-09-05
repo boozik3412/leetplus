@@ -4,9 +4,9 @@
 
 Актуально на: **05.09.2026**
 Runtime implementation baseline:
-`85920b7b13e6f9ac6d7d45d076a2d5fd968918a4` (PR #139; включает
+`72b1b053410050ed0de7d06d4cf54af376c4fe7c` (PR #141; включает
 CURRENT189 application baseline, check-in consistency repair, autonomous
-gamification worker successor и canonical verifier environment repair)
+gamification worker successor и stable worker digest parity repair)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -17,16 +17,16 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                                                          |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Runtime implementation   | CURRENT189 production baseline, merge SHA `85920b7b13e6f9ac6d7d45d076a2d5fd968918a4`                                                                                                                          |
-| Admission merge SHA      | exact-main Fast CI и Full Release Admission для `85920b7b…` — `SUCCESS`                                                                                                                                    |
-| Production API topology  | active blue exact `85920b7b…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback green `96b28f44…` остаётся active                                                        |
+| Runtime implementation   | CURRENT189 production baseline, merge SHA `72b1b053410050ed0de7d06d4cf54af376c4fe7c`                                                                                                                          |
+| Admission merge SHA      | exact-main Fast CI и Full Release Admission для `72b1b053…` — `SUCCESS`                                                                                                                                    |
+| Production API topology  | active blue exact `72b1b053…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback green `466ca90d…` остаётся active                                                        |
 | Guest bug-report repair  | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                |
 | Corporate invite repair  | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                    |
 | Guest check-in consistency | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                         |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
 | Release acceleration     | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
-| Langame recovery         | bonus-ledger/gamification timer active; date-by-date canary `27.08–04.09` принят; Langame daily worker fenced/disabled после fail-closed nested-verifier env rejection; external unattended остаётся deny       |
+| Langame recovery         | bonus-ledger/gamification timer active; date-by-date canary `27.08–04.09` и повтор `04.09` приняты; Langame daily worker fenced/disabled после fail-closed `DropInPaths` serialization rejection; external unattended остаётся deny       |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -130,6 +130,20 @@ Source repair не меняет allowlist или worker authority: child verifie
 `PATH/LANG/LC_ALL/TZ`. Disposable fixture и static gate закрепляют эту exact
 границу. До нового exact-main admission, control install, повторного canary и
 timer check repair не считается deployed.
+
+Exact admitted rollout `72b1b053…` завершён штатным пятифазным оркестратором:
+production active blue, healthy green `466ca90d…` сохранён hot rollback, schema
+осталась `CURRENT_189/189`. Повторный canary `2026-09-04` дал `4/4 SUCCESS` и
+zero duplicate effects. Stable authority прошёл permit/stable-env digest
+проверки, установил временные authorization drop-in и включил timer, но
+финальный verifier fail-closed отклонил штатную сериализацию systemd 255:
+`DropInPaths` содержит два exact пути через один пробел, а избыточный
+предварительный pattern ожидал двойной разделитель. Authority выключил timer,
+удалил temporary authorization и восстановил оба 90-fence; runtime и данные
+остались healthy. Source repair сохраняет строгую sorted equality двух exact
+путей и запрет любого третьего drop-in, но не зависит от лишнего whitespace.
+До нового exact-main Fast+Full, control install, canary и timer check этот
+repair не считается deployed.
 
 ### Guardrail ускорения release pipeline
 

@@ -103,8 +103,10 @@ for unit in "$SERVICE" "$TIMER"; do
   legacy_path="$(legacy_fence "$unit")"; regular "$legacy_path" 'root:root:644'
   [[ "$(tr -d '\r' < "$legacy_path")" == $'[Unit]\n'"ConditionPathExists=!${FENCE}" ]] || die "legacy fence drop-in drifted: ${unit}"
   loaded_dropins="$(systemctl_bounded show --property=DropInPaths --value "$unit")"
-  case " $loaded_dropins " in *" $legacy_path "*" $path "*|*" $path "*" $legacy_path "*) ;; *) die "worker drop-ins are not loaded: ${unit}" ;; esac
-  exact_dropins="$(tr ' ' '\n' <<< "$loaded_dropins" | sed '/^$/d' | sort)"
+  # systemd 255 serializes DropInPaths as a single-space-delimited list.  The
+  # exact sorted comparison proves that both required files (and no third file)
+  # are loaded without depending on redundant whitespace between entries.
+  exact_dropins="$(printf '%s\n' "$loaded_dropins" | tr ' ' '\n' | sed '/^$/d' | sort)"
   expected_dropins="$(printf '%s\n%s\n' "$legacy_path" "$path" | sort)"
   [[ "$exact_dropins" == "$expected_dropins" ]] || die "worker has an unexpected effective drop-in: ${unit}"
 done

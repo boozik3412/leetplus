@@ -196,8 +196,21 @@ wait_for_service_quiescent() {
   return 1
 }
 stop_service_and_assert_quiescent() {
+  local failed_state
   systemctl_bounded stop "$WORKER_SERVICE" || die 'cannot stop the dedicated worker service'
-  systemctl_bounded reset-failed "$WORKER_SERVICE" || die 'cannot clear the dedicated worker terminal state'
+  failed_state="$(systemctl_bounded is-failed "$WORKER_SERVICE" 2>/dev/null || true)"
+  case "$failed_state" in
+    failed)
+      systemctl_bounded reset-failed "$WORKER_SERVICE" \
+        || die 'cannot clear the dedicated worker failed state'
+      ;;
+    inactive)
+      # An inactive static unit may already have been garbage-collected. It
+      # has no failed state to reset; the strict PID/cgroup checks below still
+      # prove that cleanup is complete.
+      ;;
+    *) die 'dedicated worker terminal state is ambiguous after stop' ;;
+  esac
   wait_for_service_quiescent || die 'dedicated worker service did not reach strict PID/cgroup quiescence'
 }
 lock_file() {
@@ -524,7 +537,8 @@ write_permit() {
   printf '%s' "$path"
 }
 wait_for_canary_terminal() {
-  local before_start="$1" current_start current_exit active result status deadline
+  local before_start="$1" current_start current_exit active result status failed_state deadline
+  local saw_fresh_start=false
   [[ "$before_start" =~ ^[0-9]{1,18}$ ]] || return 1
   deadline="$(( $(date +%s) + 2700 ))"
   while (( $(date +%s) < deadline )); do
@@ -532,12 +546,26 @@ wait_for_canary_terminal() {
     active="$(systemctl_bounded show --property=ActiveState --value "$WORKER_SERVICE")"
     result="$(systemctl_bounded show --property=Result --value "$WORKER_SERVICE")"
     status="$(systemctl_bounded show --property=ExecMainStatus --value "$WORKER_SERVICE")"
-    [[ "$current_start" =~ ^[0-9]{1,18}$ ]] || return 1
     case "$active" in
       inactive|activating|active) ;;
       failed|deactivating|*) return 1 ;;
     esac
-    (( 10#$current_start > 10#$before_start )) || { /usr/bin/sleep 2; continue; }
+    if [[ "$current_start" =~ ^[0-9]{1,18}$ ]] && (( 10#$current_start > 10#$before_start )); then
+      saw_fresh_start=true
+    elif [[ "$saw_fresh_start" == true && "$active" == inactive ]]; then
+      # A successful static oneshot can be garbage-collected immediately after
+      # it exits. In that state systemd no longer exposes historical
+      # timestamps/result, while a failed unit remains loaded as `failed`.
+      # Accept it only after this controller observed the same invocation with
+      # a fresh monotonic start timestamp.
+      failed_state="$(systemctl_bounded is-failed "$WORKER_SERVICE" 2>/dev/null || true)"
+      [[ "$failed_state" == inactive ]] || return 1
+      service_is_quiescent && worker_jobs_are_absent && return 0
+      return 1
+    else
+      /usr/bin/sleep 2
+      continue
+    fi
     if [[ "$active" == inactive ]]; then
       current_exit="$(systemctl_bounded show --property=ExecMainExitTimestampMonotonic --value "$WORKER_SERVICE")"
       [[ "$current_exit" =~ ^[0-9]{1,18}$

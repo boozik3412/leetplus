@@ -1,6 +1,6 @@
 # Langame sync production recovery
 
-Статус: **audit storage repaired; autonomous successor готовится к exact-SHA admission и controlled rollout**
+Статус: **audit storage repaired; production runtime deployed; worker terminal-state repair проходит exact-SHA admission перед canary/backfill/timer**
 
 Актуально на: **04.09.2026**
 
@@ -55,6 +55,17 @@ corporate scope или Langame credentials. Внешние tenant остаютс
     принадлежат уже существующему `leetplus-bonus-ledger-worker.timer`. Это тот
     же active-slot singleton, а не новый unit. Встроенные schedulers обоих API
     остаются выключенными; внешний tenant не получает unattended authority.
+11. Root-owned EnvFile остаётся byte-for-byte источником allowlist и permit
+    hash. Три секретных значения (`DATABASE_URL`, `APP_ENCRYPTION_KEY`,
+    `INTEGRATION_ENCRYPTION_KEY`) worker получает из уже разобранного systemd
+    environment, поэтому canonical double quotes в EnvFile не становятся
+    частью секрета. Пустые значения и CR/LF отклоняются до запуска Node.
+12. Static oneshot может быть garbage-collected сразу после успешного выхода.
+    Authority считает такой terminal state успешным только если тот же apply
+    уже наблюдал fresh monotonic start, последующий `is-failed` вернул exact
+    `inactive`, а service PID/cgroup и systemd jobs пусты. Failed,
+    deactivating, не наблюдавшийся или неоднозначный запуск остаётся
+    fail-closed. Cleanup вызывает `reset-failed` только для exact `failed`.
 
 ## Обязательные gates до production
 
@@ -116,7 +127,10 @@ corporate scope или Langame credentials. Внешние tenant остаютс
    а не сохраняемым после завершения `InvocationID`. Terminal result требует
    `MainPID/ControlPID=0`, пустой cgroup и отсутствие systemd jobs;
    исторический `ExecMainPID` допустим только при отсутствии его `/proc`
-   identity. Одного `is-active=false` недостаточно.
+   identity. Если успешный static oneshot уже garbage-collected, authority
+   принимает исчезнувшие timestamps/result только после наблюдённого тем же
+   apply fresh start, exact `is-failed=inactive` и повторной strict quiescence.
+   Одного `is-active=false` недостаточно.
    Canary обязан иметь `ACTIVITY_RECOVERY_ENABLED=false`,
    `RETENTION_ENABLED=false`, `RETENTION_LIVE=false`.
 6. Проверить: три источника без `FAILED`, guest foundation успешен, ровно пять

@@ -105,9 +105,10 @@ for arg in "$@"; do [[ "$arg" == --property=* ]] && prop="${arg#--property=}"; d
 mode="$(cat "$state/mode" 2>/dev/null || printf success)"; enabled="$(cat "$state/timer-enabled" 2>/dev/null || printf 0)"; service_active="$(cat "$state/service-active" 2>/dev/null || printf inactive)"
 case "$1" in
  daemon-reload) exit 0;;
+ is-failed) if [[ "$unit" == leetplus-langame-daily-worker.service && "$service_active" == failed ]]; then printf 'failed\n'; exit 0; fi; printf 'inactive\n'; exit 1;;
  is-active) [[ "$unit" == leetplus-api@blue.service || "$unit" == leetplus-web@blue.service ]] && exit 0; [[ "$unit" == leetplus-langame-daily-worker.timer && "$enabled" == 1 ]] && exit 0; exit 3;;
  is-enabled) [[ "$unit" == leetplus-langame-daily-worker.timer && "$enabled" == 1 ]] && exit 0; exit 1;;
- start) if [[ "$unit" == leetplus-langame-daily-worker.service ]]; then if grep -F -x 'LANGAME_DAILY_WORKER_CANARY=false' /etc/leetplus/langame-daily-worker.env >/dev/null; then n="$(cat "$state/timer-profile-starts" 2>/dev/null || printf 0)"; printf '%s\n' "$((n + 1))" >"$state/timer-profile-starts"; fi; if [[ "$mode" == stale ]]; then :; else started="$(cat "$state/start-monotonic" 2>/dev/null || printf 0)"; printf '%s\n' "$((started + 10))" >"$state/start-monotonic"; if [[ "$mode" == failure ]]; then printf 'fresh-failure\n' >"$state/invocation"; printf failure >"$state/result"; printf failed >"$state/service-active"; else printf 'fresh-success\n' >"$state/invocation"; printf success >"$state/result"; printf inactive >"$state/service-active"; fi; fi; fi; exit 0;;
+ start) if [[ "$unit" == leetplus-langame-daily-worker.service ]]; then if grep -F -x 'LANGAME_DAILY_WORKER_CANARY=false' /etc/leetplus/langame-daily-worker.env >/dev/null; then n="$(cat "$state/timer-profile-starts" 2>/dev/null || printf 0)"; printf '%s\n' "$((n + 1))" >"$state/timer-profile-starts"; fi; if [[ "$mode" == stale ]]; then :; else started="$(cat "$state/start-monotonic" 2>/dev/null || printf 0)"; printf '%s\n' "$((started + 10))" >"$state/start-monotonic"; if [[ "$mode" == failure ]]; then printf 'fresh-failure\n' >"$state/invocation"; printf failure >"$state/result"; printf failed >"$state/service-active"; elif [[ "$mode" == gc-success ]]; then rm -f "$state/gc-observed"; printf 'fresh-success\n' >"$state/invocation"; printf success >"$state/result"; printf active >"$state/service-active"; else printf 'fresh-success\n' >"$state/invocation"; printf success >"$state/result"; printf inactive >"$state/service-active"; fi; fi; fi; exit 0;;
  enable) printf 1 >"$state/timer-enabled"; if [[ "$unit" == leetplus-langame-daily-worker.timer ]]; then n="$(cat "$state/timer-profile-starts" 2>/dev/null || printf 0)"; printf '%s\n' "$((n + 1))" >"$state/timer-profile-starts"; started="$(cat "$state/start-monotonic" 2>/dev/null || printf 0)"; printf '%s\n' "$((started + 10))" >"$state/start-monotonic"; if [[ "$mode" == timer-fire-failure ]]; then printf timer-fire-failure >"$state/invocation"; printf failure >"$state/result"; printf failed >"$state/service-active"; else printf timer-fire-success >"$state/invocation"; printf success >"$state/result"; printf inactive >"$state/service-active"; fi; fi; exit 0;;
  disable) printf 0 >"$state/timer-enabled"; exit 0;;
  stop) exit 0;;
@@ -115,11 +116,11 @@ case "$1" in
  show) case "$prop" in
    FragmentPath) [[ "$unit" == *.timer ]] && printf '%s\n' /etc/systemd/system/leetplus-langame-daily-worker.timer || printf '%s\n' /etc/systemd/system/leetplus-langame-daily-worker.service;;
    InvocationID) cat "$state/invocation" 2>/dev/null || printf old;;
-   ExecMainStartTimestampMonotonic) cat "$state/start-monotonic" 2>/dev/null || printf 0;;
+   ExecMainStartTimestampMonotonic) if [[ "$mode" == gc-success && -e "$state/gc-observed" ]]; then printf ''; else cat "$state/start-monotonic" 2>/dev/null || printf 0; fi;;
    ExecMainExitTimestampMonotonic) started="$(cat "$state/start-monotonic" 2>/dev/null || printf 0)"; if ((started > 0)); then printf '%s' "$((started + 1))"; else printf 0; fi;;
-   ActiveState) if [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == deactivating ]]; then printf deactivating; elif [[ "$unit" == leetplus-langame-daily-worker.service ]]; then printf '%s' "$service_active"; elif [[ "$unit" == *.timer && "$enabled" == 1 ]]; then printf active; else printf inactive; fi;;
-   SubState) if [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == deactivating ]]; then printf stop-sigterm; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$service_active" == failed ]]; then printf failed; elif [[ "$unit" == *.timer && "$enabled" == 1 ]]; then printf waiting; else printf dead; fi;;
-   Result) cat "$state/result" 2>/dev/null || printf success;;
+   ActiveState) if [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == deactivating ]]; then printf deactivating; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == gc-success ]]; then if [[ -e "$state/gc-observed" ]]; then printf inactive >"$state/service-active"; printf inactive; else touch "$state/gc-observed"; printf active; fi; elif [[ "$unit" == leetplus-langame-daily-worker.service ]]; then printf '%s' "$service_active"; elif [[ "$unit" == *.timer && "$enabled" == 1 ]]; then printf active; else printf inactive; fi;;
+   SubState) if [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == deactivating ]]; then printf stop-sigterm; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == gc-success && ! -e "$state/gc-observed" ]]; then printf running; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$service_active" == failed ]]; then printf failed; elif [[ "$unit" == *.timer && "$enabled" == 1 ]]; then printf waiting; else printf dead; fi;;
+   Result) if [[ "$mode" == gc-success && -e "$state/gc-observed" ]]; then printf ''; else cat "$state/result" 2>/dev/null || printf success; fi;;
    ExecMainStatus) printf 0;;
    MainPID|ControlPID) if [[ "$unit" == leetplus-langame-daily-worker.timer && "$mode" == timer-pid-residue ]]; then printf 4242; elif [[ "$unit" == leetplus-langame-daily-worker.timer ]]; then printf ''; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == pid-residue ]]; then printf 4242; else printf 0; fi;;
    ExecMainPID) if [[ "$unit" == leetplus-langame-daily-worker.timer && "$mode" == timer-pid-residue ]]; then printf 4242; elif [[ "$unit" == leetplus-langame-daily-worker.timer ]]; then printf ''; elif [[ "$unit" == leetplus-langame-daily-worker.service && ( "$mode" == pid-residue || "$mode" == historical-exec-pid ) ]]; then printf 2147483646; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == live-historical-exec-pid ]]; then printf 1; elif [[ "$unit" == leetplus-langame-daily-worker.service && "$mode" == malformed-exec-pid ]]; then printf invalid; else printf 0; fi;;
@@ -147,6 +148,12 @@ apply() { local p; p="$(plan "$1")"; /usr/local/sbin/leetplus-langame-daily-work
 apply_bounded() { local p; p="$(plan "$1")"; timeout --kill-after=1s 5s /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority apply --phase "$1" --plan-sha256 "$p" --action-count 1 --confirm I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_AUTHORIZATION; }
 apply canary
 /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority check --phase canary
+printf gc-success >/run/langame-fixture/mode
+rm -f /run/langame-fixture/gc-observed
+apply canary
+/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority check --phase canary
+printf success >/run/langame-fixture/mode
+rm -f /run/langame-fixture/gc-observed
 if /usr/local/libexec/leetplus/run-authorized-langame-daily-worker.sh; then echo 'direct API-runtime wrapper invocation was accepted' >&2; exit 1; fi
 printf historical-exec-pid >/run/langame-fixture/mode
 /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority check --phase canary

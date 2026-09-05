@@ -34,6 +34,13 @@ assert_exact_service_main_process() {
 # and singleton membership replace the D-Bus MainPID query, which is not
 # available to DynamicUser on Ubuntu's dbus-daemon backend.
 assert_exact_service_main_process
+# EnvironmentFile is parsed by systemd before this process starts. Preserve
+# only the three secret values whose canonical files may legitimately use
+# systemd double-quote syntax; the raw root-owned file remains the identity
+# source for key allowlisting and permit hashing below.
+readonly SYSTEMD_DATABASE_URL_SNAPSHOT="${DATABASE_URL-}"
+readonly SYSTEMD_APP_ENCRYPTION_KEY_SNAPSHOT="${APP_ENCRYPTION_KEY-}"
+readonly SYSTEMD_INTEGRATION_ENCRYPTION_KEY_SNAPSHOT="${INTEGRATION_ENCRYPTION_KEY-}"
 while IFS= read -r inherited_name; do unset "$inherited_name" 2>/dev/null || true; done < <(compgen -e)
 unset inherited_name
 PATH='/usr/sbin:/usr/bin:/sbin:/bin'; LANG='C.UTF-8'; LC_ALL='C.UTF-8'; TZ='UTC'; export PATH LANG LC_ALL TZ
@@ -57,6 +64,13 @@ while IFS= read -r env_line; do
   esac
   env_value="${env_line#*=}"
   [[ "$env_line" == *=* && "$env_key" =~ ^[A-Z][A-Z0-9_]*$ && -z "${seen[$env_key]:-}" && "$env_value" != *$'\r'* && "$env_value" != *$'\n'* ]] || die 'worker env line is malformed or duplicate'
+  case "$env_key" in
+    DATABASE_URL) env_value="$SYSTEMD_DATABASE_URL_SNAPSHOT" ;;
+    APP_ENCRYPTION_KEY) env_value="$SYSTEMD_APP_ENCRYPTION_KEY_SNAPSHOT" ;;
+    INTEGRATION_ENCRYPTION_KEY) env_value="$SYSTEMD_INTEGRATION_ENCRYPTION_KEY_SNAPSHOT" ;;
+  esac
+  [[ -n "$env_value" && "$env_value" != *$'\r'* && "$env_value" != *$'\n'* ]] \
+    || die "systemd did not provide a canonical required worker environment: ${env_key}"
   seen["$env_key"]=1
   printf -v "$env_key" '%s' "$env_value"; export "$env_key"
 done < "$ENV_FILE"

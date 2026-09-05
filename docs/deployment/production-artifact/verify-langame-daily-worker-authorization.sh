@@ -75,7 +75,7 @@ tenant="$(env_value LANGAME_DAILY_WORKER_TENANT_SLUG)"; [[ "$tenant" =~ ^[a-z0-9
 [[ -L /etc/nginx/leetplus/active-upstreams.conf ]] || die 'active upstream is absent'
 case "$(readlink -e -- /etc/nginx/leetplus/active-upstreams.conf)" in /etc/nginx/leetplus/upstreams/blue.conf) slot=blue ;; /etc/nginx/leetplus/upstreams/green.conf) slot=green ;; *) die 'active upstream is not a modern slot' ;; esac
 release="$(readlink -e -- "/srv/leetplus/slots/${slot}")"; [[ "$release" =~ ^/srv/leetplus/releases/([0-9a-f]{40})$ ]] || die 'active slot release is unsafe'; release_sha="${BASH_REMATCH[1]}"
-env_sha="$(sha "$ENV_FILE")"; stable_env_sha="$(sed -E '/^LANGAME_DAILY_WORKER_CANARY=|^LANGAME_DAILY_WORKER_DATE=/d' "$ENV_FILE" | sha256sum | awk '{print $1}')"; auth_sha="$(sha "$AUTH_ENV")"; safe_sha="$(sha "$SAFE_ENV")"; service_sha="$(sha "$SERVICE_FILE")"; timer_sha="$(sha "$TIMER_FILE")"; successor_sha="$(sha "$SUCCESSOR")"
+env_sha="$(sha "$ENV_FILE")"; stable_env_sha="$(sed -E '/^LANGAME_DAILY_WORKER_CANARY=|^LANGAME_DAILY_WORKER_DATE=|^LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=|^LANGAME_DAILY_WORKER_RETENTION_ENABLED=/d' "$ENV_FILE" | sha256sum | awk '{print $1}')"; auth_sha="$(sha "$AUTH_ENV")"; safe_sha="$(sha "$SAFE_ENV")"; service_sha="$(sha "$SERVICE_FILE")"; timer_sha="$(sha "$TIMER_FILE")"; successor_sha="$(sha "$SUCCESSOR")"
 control_output="$(mktemp /tmp/leetplus-langame-worker-verifier-control.XXXXXX)"; trap 'rm -f -- "$control_output"' EXIT
 /usr/bin/env -i \
   PATH='/usr/sbin:/usr/bin:/sbin:/bin' \

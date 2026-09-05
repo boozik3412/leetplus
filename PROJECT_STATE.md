@@ -9,8 +9,8 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий production runtime baseline — merge SHA
-`43d447a3c3bd08dcf496f783771c28130e13c82a` (PR #146). Active green
-`43d447a3…` и hot-rollback blue `cfc99902…` работают в
+`94f9462ecf3b77b610b8d2ce73fcc68be7625eac` (PR #147). Active blue
+`94f9462e…` и hot-rollback green `43d447a3…` работают в
 `COMBINED`, оба проходят exact readiness `CURRENT_189/189`.
 `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
 `GUEST_BUG_REPORTING_MODE=LIVE`. Split systemd/nginx candidate остаётся
@@ -33,7 +33,7 @@ public/corporate guards и database role limits не менялись.
 Langame-сессии `548185`: exact `HOURLY_PLAY_TIME_ACCUMULATED` на `63` минуты
 был сохранён, но cursor-based activity job ошибочно считался `SUCCESS` после
 первой `PARTIAL` страницы, а частый singleton не запускал ledger fallback.
-Развёрнутый successor возвращает незавершённый cursor в `PENDING`, source
+Развёрнутый runtime возвращает незавершённый cursor в `PENDING`, source
 error — в bounded `RETRY`, сам ставит по одному due recovery и после snapshot
 запускает worker-only fallback для фиксированного набора exact play-time
 facts. API schedulers и общий API fallback остаются `OFF`; `LIVE` допускается
@@ -56,10 +56,16 @@ Post-activation drain выявил provider-compatibility крайний слу�
 `1337.langame.ru`: сервер принимает ISO `YYYY-MM-DD`, но после штатной пустой
 последней страницы отвергает дополнительный legacy probe с `DD.MM.YYYY` как
 `400 Validation failed`. Из-за этого конец пагинации ошибочно переводил job в
-`RETRY`. Source repair сохраняет уже успешный пустой ISO-ответ как
+`RETRY`. Развёрнутый repair сохраняет уже успешный пустой ISO-ответ как
 authoritative только при validation-отказе compatibility probe; auth,
-transport и server ошибки по-прежнему выходят наружу. До exact-main admission
-и controlled rollout этот follow-up не считается deployed.
+transport и server ошибки по-прежнему выходят наружу. Exact-main Fast CI
+`33997351479` и Full Release Admission `33997351444` завершены `SUCCESS`;
+five-phase operation `413f9c4b-504e-4cbe-b044-b47aa5598bb9` терминально
+развернула `94f9462e…`. Точный job профиля из обращения больше не имеет
+`RETRY`: `PRODUCT_EXPENSE` завершён (`page=16`, `rows=3000`), а следующий
+`TRANSACTION PARTIAL` сохранён как штатный `PENDING` cursor (`nextPage=41`).
+На postflight нет `RETRY`/`FAILED` activity jobs, bonus-ledger backlog равен
+нулю, frequent timer включён и активен.
 
 Точечная production-сверка двух обращений отделила дефект от штатной
 последовательности. Для `LP-BUG-AFDE6B03` восстановлен один пропущенный

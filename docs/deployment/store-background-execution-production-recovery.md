@@ -1,6 +1,6 @@
 # Store background execution production recovery
 
-Статус: **production activation completed for one INTERNAL Store; repeatable rollback remains available**
+Статус: **production activation and Langame empty-page repair completed; repeatable rollback remains available**
 
 Актуально на: **06.09.2026**
 
@@ -73,9 +73,12 @@ request ID для другой цели или состояние, измени�
 
 ## Production результат 06.09.2026
 
-- admitted/runtime SHA:
+- Store activation/control-plane baseline:
   `43d447a3c3bd08dcf496f783771c28130e13c82a` (PR #146);
-- active green, hot-rollback blue `cfc99902…`, schema exact
+- текущий admitted/runtime SHA:
+  `94f9462ecf3b77b610b8d2ce73fcc68be7625eac` (PR #147), Fast
+  `33997351479`, Full `33997351444`;
+- active blue, hot-rollback green `43d447a3…`, schema exact
   `CURRENT_189/189`;
 - tenant `demo`, Store `5b07123f-9db7-453c-9a03-ccd75aa1cf49`:
   `backgroundExecutionEnabled=true`, revision `0 -> 1`;
@@ -88,6 +91,11 @@ request ID для другой цели или состояние, измени�
 - `leetplus-bonus-ledger-worker.timer` возвращён в enabled/active, штатные
   проходы выполняют bounded recovery, autonomous `PARTIAL` continuation и
   ledger fallback без переноса scheduler authority в API.
+- follow-up operation `413f9c4b-504e-4cbe-b044-b47aa5598bb9` устранила
+  ложный `RETRY` после пустой ISO-страницы: точный `PRODUCT_EXPENSE` source
+  завершён (`page=16`, `rows=3000`), а `TRANSACTION PARTIAL` автоматически
+  продолжен через `PENDING nextPage=41`; глобально `RETRY=0`, `FAILED=0` и
+  unresolved bonus-ledger backlog равен `0`.
 
 ## Откат
 

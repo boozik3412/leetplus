@@ -126,7 +126,7 @@ assert_zero_unit_processes "$SERVICE"
 [[ "$(systemctl_bounded show --property=UnitFileState --value "$SERVICE")" == static ]] || die 'worker service UnitFileState is not exact static'
 [[ "$(systemctl_bounded show --property=ActiveState --value "$TIMER")" == active && "$(systemctl_bounded show --property=SubState --value "$TIMER")" == waiting && "$(systemctl_bounded show --property=UnitFileState --value "$TIMER")" == enabled ]] || die 'worker timer is not enabled active(waiting)'
 assert_zero_unit_processes "$TIMER"
-for pending_intent in /var/lib/leetplus/langame-worker-authorizations/authorization.timer.intent /var/lib/leetplus/langame-worker-authorizations/authorization.revoke.intent; do
-  [[ ! -e "$pending_intent" && ! -L "$pending_intent" ]] || die 'worker timer authorization or revocation intent remains pending'
+for pending_intent in /var/lib/leetplus/langame-worker-authorizations/authorization.timer.intent /var/lib/leetplus/langame-worker-authorizations/authorization.revoke.intent /var/lib/leetplus/langame-worker-authorizations/authorization.supersede.intent; do
+  [[ ! -e "$pending_intent" && ! -L "$pending_intent" ]] || die 'worker timer authorization, revocation, or supersession intent remains pending'
 done
 printf 'LANGAME_DAILY_WORKER_AUTHORIZATION=PASS releaseSha=%s tenantSlug=%s\n' "$release_sha" "$tenant"

@@ -153,7 +153,20 @@ corporate scope или Langame credentials. Внешние tenant остаютс
    уже является exact additive successor исторического activation receipt,
    выполнить его отдельный digest-bound `plan/apply/check`; ручные drop-in или
    receipt edits запрещены.
-4. Выполнить штатный atomic blue/green cutover. Timer всё ещё disabled.
+4. Выполнить штатный atomic blue/green cutover. Timer всё ещё disabled. Если
+   до cutover существовал принятый timer permit предыдущего release, не
+   удалять его pointer/drop-in вручную и не переиспользовать его для нового
+   release. После установки exact production-control нового admitted release
+   выполнить `supersede-plan --control-release-sha <new-release>`, подтвердить
+   полученный digest/count строкой
+   `I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_SUPERSESSION`, затем выполнить
+   `supersede-apply` и `supersede-check`. Authority принимает только permit,
+   чей `RELEASE_SHA` равен `PREVIOUS_RELEASE_SHA` последнего immutable accepted
+   cutover receipt, требует hot rollback slot, disabled/quiescent worker pair и
+   неизменные tenant/env/timer/successor bindings, возвращает exact 90-fence и
+   пишет root-only supersession receipt. Supersession ничего не запускает и не
+   заменяет новый canary; interrupted effect завершается только через
+   `supersede-recover` с тем же exact control release.
 5. Создать root-owned `/etc/leetplus/langame-daily-worker.env` в canary mode с
    exact internal tenant и одной датой. Первый/repeat canary для текущего
    recovery — `2026-08-27`.

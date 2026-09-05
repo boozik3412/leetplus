@@ -562,6 +562,10 @@ for stable_worker_env_consumer in "$langame_worker_authority" "$langame_worker_a
 done
 grep -F 'LEETPLUS_LANGAME_DAILY_WORKER_TIMER_PROFILE_VALIDATION_V1' "$langame_worker_authority" > /dev/null
 grep -F 'I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_REVOCATION' "$langame_worker_authority" > /dev/null
+grep -F 'I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_SUPERSESSION' "$langame_worker_authority" > /dev/null
+grep -F -x "readonly LATEST_CUTOVER_INDEX='/var/lib/leetplus/deploy-receipts/latest-accepted.index'" "$langame_worker_authority" > /dev/null
+grep -F 'LEETPLUS_LANGAME_DAILY_WORKER_SUPERSESSION_V1' "$langame_worker_authority" > /dev/null
+grep -F 'authorization.supersede.intent' "$langame_worker_authority" "$langame_worker_authorization_verifier" > /dev/null
 grep -F 'ConditionPathExists=' "$langame_worker_authority" > /dev/null
 grep -F "GUEST_PORTAL_USER_CALL" "$langame_worker_authority" > /dev/null
 grep -F 'LANGAME_DAILY_SYNC_SCHEDULER_ENABLED' "$langame_worker_authority" > /dev/null
@@ -578,7 +582,7 @@ grep -F 'CONTROL_VERIFIER_EVIDENCE_RECOVERY_AUTHORIZED=true' "$legacy_manifest_s
 grep -F 'ACTION=RECOVER_CONTROL_VERIFIER_EVIDENCE|' "$legacy_manifest_successor" > /dev/null
 grep -F 'NO_ROUTE_DATABASE_OR_UNIT_STATE_EFFECTS=true' "$legacy_manifest_successor" > /dev/null
 grep -F 'write_atomic_root_file "$CONTROL_VERIFIER_RECOVERY_ARCHIVE" 400 < "$CONTROL_VERIFIER_EVIDENCE"' "$legacy_manifest_successor" > /dev/null
-test "$(grep -Fc '/usr/bin/bash -p "$DRAIN_VERIFIER"' "$langame_worker_authority")" = 6
+test "$(grep -Fc '/usr/bin/bash -p "$DRAIN_VERIFIER"' "$langame_worker_authority")" = 7
 test "$(grep -Fc '/usr/bin/bash -p "$DRAIN_VERIFIER"' "$legacy_manifest_successor")" = 3
 grep -F -x 'LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED=false' "$langame_daily_worker_overlay" > /dev/null
 grep -F -x 'LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT=20' "$langame_daily_worker_overlay" > /dev/null

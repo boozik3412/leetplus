@@ -43,6 +43,50 @@ describe('LangameClient', () => {
     expect(secondUrl.searchParams.get('date_to')).toBe('21.05.2026');
   });
 
+  it('keeps an empty ISO page when the European compatibility probe is rejected', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(responseWithRows([]))
+      .mockResolvedValueOnce(responseWithError(400, 'Bad Request'));
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(
+      client.listProductExpenses(
+        'https://1337.langame.ru/public_api',
+        'test-key',
+        {
+          page: 3_001,
+          pageLimit: 1,
+          dateFrom: '2026-06-25',
+          dateTo: '2026-09-05',
+        },
+      ),
+    ).resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not hide non-validation failure from the European compatibility probe', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(responseWithRows([]))
+      .mockResolvedValueOnce(responseWithError(503, 'Service Unavailable'));
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(
+      client.listProductExpenses(
+        'https://1337.langame.ru/public_api',
+        'test-key',
+        {
+          page: 3_001,
+          pageLimit: 1,
+          dateFrom: '2026-06-25',
+          dateTo: '2026-09-05',
+        },
+      ),
+    ).rejects.toThrow('503 Service Unavailable');
+  });
+
   it('does not retry date requests when ISO dates return rows', async () => {
     const fetchMock = jest
       .fn()

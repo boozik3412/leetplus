@@ -726,13 +726,25 @@ export class LangameClient {
         return rows;
       }
 
-      return this.getList<T>(
-        baseUrl,
-        path,
-        apiKey,
-        this.toEuropeanDateParams(params),
-        options,
-      );
+      try {
+        return await this.getList<T>(
+          baseUrl,
+          path,
+          apiKey,
+          this.toEuropeanDateParams(params),
+          options,
+        );
+      } catch (error) {
+        // The ISO request already succeeded and its empty page is therefore
+        // authoritative. Some current Langame installations reject the
+        // legacy European compatibility probe with a validation 400. Treat
+        // only that rejection as end-of-pagination; transport/auth/server
+        // failures must remain observable and retryable.
+        if (this.rejectedEuropeanDateCompatibilityProbe(error)) {
+          return rows;
+        }
+        throw error;
+      }
     } catch (error) {
       if (!this.shouldRetryWithEuropeanDates(error, params)) {
         throw error;
@@ -829,6 +841,12 @@ export class LangameClient {
 
   private shouldRetryEmptyWithEuropeanDates(params: LangameQueryParams) {
     return this.isIsoDate(params.date_from) || this.isIsoDate(params.date_to);
+  }
+
+  private rejectedEuropeanDateCompatibilityProbe(error: unknown) {
+    const message = error instanceof Error ? error.message : '';
+
+    return message.includes('400') && message.includes('Validation failed');
   }
 
   private toEuropeanDateParams(params: LangameQueryParams) {

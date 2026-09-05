@@ -3,10 +3,10 @@
 | Поле                 | Состояние                                                                                                                                                            |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                                                         |
-| Production runtime   | healthy; active green `81ae920c…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue `72b1b053…` ready                                                       |
+| Production runtime   | healthy; active green `43d447a3…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue `cfc99902…` ready                                                       |
 | Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                                                         |
-| Release authority    | runtime и production-control exact `81ae920c…`; five-phase rollout завершён с terminal receipt                                                                       |
-| Runtime successor    | Оба worker timer active; activity queue автономно дренируется по одному профилю; worker pool `2`, timeout `15m`; API schedulers выключены                            |
+| Release authority    | runtime и production-control exact `43d447a3…`; Fast/Full admission успешен, five-phase rollout завершён с terminal receipt                                           |
+| Runtime successor    | Оба worker timer enabled/active; activity `PARTIAL` автоматически продолжает cursor, ledger fallback работает в `LIVE`; worker pool `2`, activity limit `1`, timeout `15m`; API schedulers выключены |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                                                     |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                                                             |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                                                             |
@@ -36,15 +36,20 @@ singleton не владел ledger fallback. Source successor добавляет
 API schedulers/fallback остаются `OFF`; stable `LIVE` требует exact INTERNAL
 tenant, UTC cutoff, bounded batch и сохраняет existing idempotency.
 
-Финальный найденный blocker находится в store execution fence, а не в
-Langame-факте: у всех четырёх Store текущего tenant
-`backgroundExecutionEnabled=false`, поэтому fallback останавливается с
-`BACKGROUND_STORE_ID_REQUIRED`. Source successor добавляет единственный
-platform-admin-only route с exact Store/Tenant, CAS по execution revision,
-typed confirmation, persisted request ID, reason и server-owned release SHA.
-Внешний tenant через этот route включить нельзя. Production GO требует одного
-store canary, exact replay сессии `548185`, доказательства отсутствия дублей и
-возврата singleton timer в `enabled + active(waiting)`.
+Store execution blocker закрыт 06.09.2026 на exact `43d447a3…`: у INTERNAL
+tenant включена ровно одна audited Store runtime identity, остальные три Store
+остались выключены. Exact replay сессии `548185` создал один доступный кейс
+`КАМБЭК`; повторный проход создал `0` новых событий и `0` наград. Singleton
+timer возвращён в enabled/active и автоматически продолжает cursor-based
+`PARTIAL`. Внешний tenant по-прежнему не может пройти `ENABLE` этим route.
+
+Первый автономный drain обнаружил дополнительный source edge: на
+`1337.langame.ru` успешная пустая ISO-страница сопровождалась отвергнутым
+legacy date probe и превращалась в `RETRY`. Follow-up source repair сохраняет
+авторитетный пустой ISO-результат только для `400 Validation failed` второго
+probe, не маскируя transport/auth/`5xx`. Нужны exact-main admission и
+controlled rollout, после чего retry-job должен завершиться и очередь —
+продолжить bounded drain.
 
 На 05.09 installed production-control уже обновлён до exact `fc7b6e65…`, но
 runtime не переключался. Successor остановлен fail-closed из-за orphaned

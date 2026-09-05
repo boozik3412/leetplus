@@ -18,9 +18,11 @@ cd /
 
 readonly CONFIRMATION='I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_AUTHORIZATION'
 readonly REVOCATION_CONFIRMATION='I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_REVOCATION'
+readonly SUPERSESSION_CONFIRMATION='I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_SUPERSESSION'
 readonly INSTALL_LOCK='/run/leetplus-production-control/install.lock'
 readonly CUTOVER_LOCK='/var/lib/leetplus/deploy-receipts/cutover.lock'
 readonly STATE_ROOT='/var/lib/leetplus/langame-worker-authorizations'
+readonly LATEST_CUTOVER_INDEX='/var/lib/leetplus/deploy-receipts/latest-accepted.index'
 readonly SUCCESSOR_RECEIPT='/var/lib/leetplus/legacy-drain/manifest-successor.receipt'
 readonly ACTIVATION_RECEIPT='/var/lib/leetplus/legacy-drain/activation.receipt'
 readonly ACTIVE_UPSTREAM='/etc/nginx/leetplus/active-upstreams.conf'
@@ -57,6 +59,16 @@ Usage:
   leetplus-langame-daily-worker-authorization-authority revoke-apply \
     --plan-sha256 <64-lowercase-hex> --action-count 1 \
     --confirm I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_REVOCATION
+  leetplus-langame-daily-worker-authorization-authority supersede-plan \
+    --control-release-sha <exact-next-control-sha>
+  leetplus-langame-daily-worker-authorization-authority supersede-check \
+    --control-release-sha <exact-next-control-sha>
+  leetplus-langame-daily-worker-authorization-authority supersede-recover \
+    --control-release-sha <exact-next-control-sha>
+  leetplus-langame-daily-worker-authorization-authority supersede-apply \
+    --control-release-sha <exact-next-control-sha> \
+    --plan-sha256 <64-lowercase-hex> --action-count 1 \
+    --confirm I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_SUPERSESSION
 
 The controller is root-only.  It requires an accepted legacy-drain manifest
 successor receipt, an exact admitted active release/control generation, the
@@ -65,6 +77,12 @@ starts one bounded explicit-date service while the timer is disabled; `timer`
 requires a successful matching canary evidence record and only then enables the
 timer.  Neither command removes the global legacy fence marker or changes
 nginx, API/Web units, database state, or USER_CALL.
+
+`supersede-*` is the only supported bridge when an accepted cutover has made
+the active timer permit stale.  It accepts only the permit bound to the exact
+PREVIOUS_RELEASE_SHA in the latest immutable cutover receipt, disables and
+quiesces the worker pair, restores the durable fences, and records an immutable
+supersession receipt before a new canary authorization can be issued.
 USAGE
 }
 
@@ -73,21 +91,22 @@ for required in awk basename cat chmod chown cmp cut date dirname env find findm
   command -v "$required" >/dev/null 2>&1 || die "required command is unavailable: ${required}"
 done
 
-mode=''; phase=''; expected_plan=''; expected_count=''; confirmation=''
+mode=''; phase=''; expected_plan=''; expected_count=''; confirmation=''; control_release_sha=''
 while (($#)); do
   case "$1" in
-    plan|check|apply|recover|revoke-plan|revoke-check|revoke-apply|revoke-recover) [[ -z "$mode" ]] || die 'exactly one mode is required'; mode="$1"; shift ;;
+    plan|check|apply|recover|revoke-plan|revoke-check|revoke-apply|revoke-recover|supersede-plan|supersede-check|supersede-apply|supersede-recover) [[ -z "$mode" ]] || die 'exactly one mode is required'; mode="$1"; shift ;;
     --phase) [[ $# -ge 2 && -z "$phase" ]] || die '--phase requires one value'; phase="$2"; shift 2 ;;
     --plan-sha256) [[ $# -ge 2 && -z "$expected_plan" ]] || die '--plan-sha256 requires one value'; expected_plan="$2"; shift 2 ;;
     --action-count) [[ $# -ge 2 && -z "$expected_count" ]] || die '--action-count requires one value'; expected_count="$2"; shift 2 ;;
     --confirm) [[ $# -ge 2 && -z "$confirmation" ]] || die '--confirm requires one value'; confirmation="$2"; shift 2 ;;
+    --control-release-sha) [[ $# -ge 2 && -z "$control_release_sha" ]] || die '--control-release-sha requires one value'; control_release_sha="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 [[ -n "$mode" ]] || die 'one exact mode is required'
-if [[ "$mode" == revoke-* ]]; then
-  [[ -z "$phase" ]] || die 'revocation modes do not accept --phase'
+if [[ "$mode" == revoke-* || "$mode" == supersede-* ]]; then
+  [[ -z "$phase" ]] || die 'revocation/supersession modes do not accept --phase'
   phase=timer
 else
   [[ "$phase" == canary || "$phase" == timer ]] || die 'exact phase canary|timer is required'
@@ -98,7 +117,14 @@ if [[ "$mode" == apply ]]; then
 elif [[ "$mode" == revoke-apply ]]; then
   [[ "$expected_plan" =~ $SHA_RE && "$expected_count" == 1 && "$confirmation" == "$REVOCATION_CONFIRMATION" ]] \
     || die 'revoke-apply requires exact plan digest, action-count=1 and explicit revocation confirmation'
+elif [[ "$mode" == supersede-apply ]]; then
+  [[ "$control_release_sha" =~ $RELEASE_RE && "$expected_plan" =~ $SHA_RE && "$expected_count" == 1 && "$confirmation" == "$SUPERSESSION_CONFIRMATION" ]] \
+    || die 'supersede-apply requires exact control release, plan digest, action-count=1 and explicit supersession confirmation'
+elif [[ "$mode" == supersede-* ]]; then
+  [[ "$control_release_sha" =~ $RELEASE_RE ]] || die 'supersede modes require one exact control release SHA'
+  [[ -z "$expected_plan$expected_count$confirmation" ]] || die 'non-apply supersede modes do not accept apply arguments'
 else
+  [[ -z "$control_release_sha" ]] || die '--control-release-sha is supported only by supersede modes'
   [[ -z "$expected_plan$expected_count$confirmation" ]] || die 'non-apply modes do not accept apply arguments'
 fi
 
@@ -362,7 +388,8 @@ assert_successor_receipt() {
   successor_sha="$(sha "$SUCCESSOR_RECEIPT")"
 }
 assert_control() {
-  local output
+  local expected_release="${1:-$release_sha}" output
+  [[ "$expected_release" =~ $RELEASE_RE ]] || die 'control verifier release identity is invalid'
   assert_regular "$CONTROL_VERIFIER" 'root:root:555'
   output="$(mktemp /tmp/leetplus-langame-worker-control.XXXXXX)"; trap 'rm -f -- "$output"' RETURN
   /usr/bin/env -i \
@@ -370,16 +397,16 @@ assert_control() {
     LANG='C.UTF-8' \
     LC_ALL='C.UTF-8' \
     TZ='UTC' \
-    /usr/bin/node "$CONTROL_VERIFIER" --release-sha "$release_sha" --require-root-authority > "$output" \
-    || die 'installed production-control verifier rejected active release'
+    /usr/bin/node "$CONTROL_VERIFIER" --release-sha "$expected_release" --require-root-authority > "$output" \
+    || die 'installed production-control verifier rejected expected release'
   grep -F -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' "$output" >/dev/null || die 'control verifier did not accept generation'
-  grep -F -x "PRODUCTION_CONTROL_RELEASE_SHA=${release_sha}" "$output" >/dev/null || die 'control verifier release identity drifted'
+  grep -F -x "PRODUCTION_CONTROL_RELEASE_SHA=${expected_release}" "$output" >/dev/null || die 'control verifier release identity drifted'
   control_output_sha="$(sha "$output")"; rm -f -- "$output"; trap - RETURN
 }
 intent_path() { printf '%s/authorization.%s.intent' "$STATE_ROOT" "$phase"; }
 pointer_path() { printf '%s/active-%s.permit' "$STATE_ROOT" "$phase"; }
 attempt_counter_path() { printf '%s/attempt-%s.counter' "$STATE_ROOT" "$phase"; }
-assert_no_pending_operations() { local candidate; for candidate in "$STATE_ROOT"/authorization.canary.intent "$STATE_ROOT"/authorization.timer.intent "$STATE_ROOT"/authorization.revoke.intent; do [[ ! -e "$candidate" && ! -L "$candidate" ]] || die 'an authorization intent is already outstanding'; done; }
+assert_no_pending_operations() { local candidate; for candidate in "$STATE_ROOT"/authorization.canary.intent "$STATE_ROOT"/authorization.timer.intent "$STATE_ROOT"/authorization.revoke.intent "$STATE_ROOT"/authorization.supersede.intent; do [[ ! -e "$candidate" && ! -L "$candidate" ]] || die 'an authorization intent is already outstanding'; done; }
 attempt=''
 next_attempt() {
   local counter current=0 temporary
@@ -925,7 +952,296 @@ load_latest_revocation() {
   assert_revocation_receipt
 }
 
+# A timer permit is deliberately release-bound.  After a successful blue/green
+# cutover it therefore becomes stale even though the worker environment and
+# tenant boundary may be unchanged.  The supersession flow below is the only
+# bridge across that state: it accepts exactly the permit for
+# PREVIOUS_RELEASE_SHA in the latest accepted cutover receipt, only while the
+# timer is disabled and quiescent, and only under a separately admitted next
+# control generation.  It never authorizes execution; it merely restores the
+# durable fences so the ordinary canary -> timer flow can issue a new permit.
+record_value() {
+  local file="$1" key="$2" count value
+  count="$(awk -F= -v key="$key" '$1 == key { count++ } END { print count + 0 }' "$file")"
+  [[ "$count" == 1 ]] || die "record key is absent or duplicated: ${key}"
+  value="$(awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print }' "$file")"
+  [[ "$value" != *$'\r'* && "$value" != *$'\n'* ]] || die "record value is noncanonical: ${key}"
+  printf '%s' "$value"
+}
+
+previous_slot=''; previous_release_sha=''; latest_cutover_receipt=''; latest_cutover_sha=''
+assert_latest_cutover_transition() {
+  local expected_index_keys actual_index_keys expected_receipt_keys actual_receipt_keys indexed_generation receipt_generation indexed_consumed
+  local indexed_path indexed_sha receipt_slot receipt_release receipt_previous_slot receipt_previous_release previous_target activated_target target
+  assert_regular "$LATEST_CUTOVER_INDEX" 'root:root:600'
+  expected_index_keys="$(printf '%s\n' RECORD_VERSION GENERATION RECEIPT_PATH RECEIPT_SHA256 CONSUMED | sort)"
+  actual_index_keys="$(awk -F= '{ print $1 }' "$LATEST_CUTOVER_INDEX" | sort)"
+  [[ "$actual_index_keys" == "$expected_index_keys"
+    && -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$LATEST_CUTOVER_INDEX")" ]] \
+    || die 'latest accepted cutover index schema drifted'
+  [[ "$(record_value "$LATEST_CUTOVER_INDEX" RECORD_VERSION)" == 2 ]] || die 'latest accepted cutover index version drifted'
+  indexed_generation="$(record_value "$LATEST_CUTOVER_INDEX" GENERATION)"
+  indexed_path="$(record_value "$LATEST_CUTOVER_INDEX" RECEIPT_PATH)"
+  indexed_sha="$(record_value "$LATEST_CUTOVER_INDEX" RECEIPT_SHA256)"
+  indexed_consumed="$(record_value "$LATEST_CUTOVER_INDEX" CONSUMED)"
+  [[ "$indexed_generation" =~ ^[1-9][0-9]*$ && "$indexed_sha" =~ $SHA_RE && "$indexed_consumed" == false ]] \
+    || die 'latest accepted cutover index values are invalid'
+  [[ "$indexed_path" =~ ^/var/lib/leetplus/deploy-receipts/[0-9]{8}T[0-9]{15}Z-g${indexed_generation}-[0-9a-f]{40}-(blue|green)\.receipt$ ]] \
+    || die 'latest accepted cutover receipt path is invalid'
+  assert_regular "$indexed_path" 'root:root:600'
+  [[ "$(sha "$indexed_path")" == "$indexed_sha" ]] || die 'latest accepted cutover receipt digest drifted'
+
+  expected_receipt_keys="$(printf '%s\n' RECORD_VERSION GENERATION RELEASE_SHA SLOT PREVIOUS_TARGET PREVIOUS_SHA256 PREVIOUS_RUNTIME_KIND PREVIOUS_SLOT PREVIOUS_API_UNIT PREVIOUS_WEB_UNIT PREVIOUS_API_URL PREVIOUS_WEB_URL PREVIOUS_RELEASE_SHA PREVIOUS_MIGRATION PREVIOUS_MIGRATION_COUNT PREVIOUS_WEB_BUILD_ID ACTIVATED_TARGET ACTIVATED_SHA256 INTENT_RECORDED_AT ACCEPTED_AT | sort)"
+  actual_receipt_keys="$(awk -F= '{ print $1 }' "$indexed_path" | sort)"
+  [[ "$actual_receipt_keys" == "$expected_receipt_keys"
+    && -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$indexed_path")" ]] \
+    || die 'latest accepted cutover receipt schema drifted'
+  [[ "$(record_value "$indexed_path" RECORD_VERSION)" == 3 ]] || die 'latest accepted cutover receipt version drifted'
+  receipt_generation="$(record_value "$indexed_path" GENERATION)"
+  receipt_slot="$(record_value "$indexed_path" SLOT)"
+  receipt_release="$(record_value "$indexed_path" RELEASE_SHA)"
+  receipt_previous_slot="$(record_value "$indexed_path" PREVIOUS_SLOT)"
+  receipt_previous_release="$(record_value "$indexed_path" PREVIOUS_RELEASE_SHA)"
+  previous_target="$(record_value "$indexed_path" PREVIOUS_TARGET)"
+  activated_target="$(record_value "$indexed_path" ACTIVATED_TARGET)"
+  [[ "$receipt_generation" == "$indexed_generation" && "$receipt_slot" == "$active_slot" && "$receipt_release" == "$release_sha" ]] \
+    || die 'latest accepted cutover does not describe the active release'
+  [[ ( "$receipt_previous_slot" == blue || "$receipt_previous_slot" == green )
+    && "$receipt_previous_slot" != "$active_slot" && "$receipt_previous_release" =~ $RELEASE_RE && "$receipt_previous_release" != "$release_sha" ]] \
+    || die 'latest accepted cutover has no exact previous release transition'
+  [[ "$(record_value "$indexed_path" PREVIOUS_RUNTIME_KIND)" == SLOT
+    && "$previous_target" == "/etc/nginx/leetplus/upstreams/${receipt_previous_slot}.conf"
+    && "$activated_target" == "/etc/nginx/leetplus/upstreams/${active_slot}.conf" ]] \
+    || die 'latest accepted cutover slot topology drifted'
+  [[ "$(record_value "$indexed_path" PREVIOUS_SHA256)" =~ $SHA_RE
+    && "$(record_value "$indexed_path" ACTIVATED_SHA256)" =~ $SHA_RE
+    && "$(record_value "$indexed_path" ACCEPTED_AT)" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$ ]] \
+    || die 'latest accepted cutover evidence is invalid'
+  [[ -L "/srv/leetplus/slots/${receipt_previous_slot}" ]] || die 'previous rollback slot link is absent'
+  target="$(readlink -e -- "/srv/leetplus/slots/${receipt_previous_slot}")"
+  [[ "$target" == "/srv/leetplus/releases/${receipt_previous_release}" ]] || die 'previous rollback slot no longer matches accepted cutover'
+  systemctl_bounded is-active --quiet "leetplus-api@${receipt_previous_slot}.service" || die 'previous rollback API slot is not hot'
+  systemctl_bounded is-active --quiet "leetplus-web@${receipt_previous_slot}.service" || die 'previous rollback Web slot is not hot'
+  previous_slot="$receipt_previous_slot"
+  previous_release_sha="$receipt_previous_release"
+  latest_cutover_receipt="$indexed_path"
+  latest_cutover_sha="$indexed_sha"
+}
+
+supersede_intent_path() { printf '%s/authorization.supersede.intent' "$STATE_ROOT"; }
+supersession_pointer_path() { printf '%s/latest-supersession.receipt' "$STATE_ROOT"; }
+supersession_receipt_path() { printf '%s/supersession-timer-%s.receipt' "$STATE_ROOT" "$(sha "$1")"; }
+clear_supersede_intent() { local path; path="$(supersede_intent_path)"; assert_regular "$path" 'root:root:400'; rm -f -- "$path"; sync -d "$STATE_ROOT"; }
+
+authorization_release_sha=''; stale_permit_sha=''; stale_timer_validation=''; stale_timer_enabled=''
+supersede_plan_json=''; supersede_plan_sha=''; supersede_timestamp=''
+validate_stale_timer_records() {
+  local saved_active_slot="$active_slot" saved_release_sha="$release_sha" saved_service_sha="$service_sha" saved_control_output_sha="$control_output_sha" saved_canary_date="$canary_date"
+  local recorded_service recorded_control recorded_attempt expected_permit binding
+  assert_regular "$permit" 'root:leetplus-api-runtime:440'
+  stale_permit_sha="$(sha "$permit")"
+  authorization_release_sha="$(record_value "$permit" RELEASE_SHA)"
+  [[ "$authorization_release_sha" == "$previous_release_sha" ]] || die 'stale timer permit is not bound to PREVIOUS_RELEASE_SHA'
+  for binding in \
+    "PHASE=timer" \
+    "TENANT_SLUG=${tenant_slug}" \
+    "WORKER_ENV_SHA256=${worker_env_sha}" \
+    "WORKER_STABLE_ENV_SHA256=${worker_stable_env_sha}" \
+    "AUTH_ENV_SHA256=${auth_env_sha}" \
+    "SAFE_ENV_SHA256=${safe_env_sha}" \
+    "TIMER_SHA256=${timer_sha}" \
+    "SUCCESSOR_RECEIPT_SHA256=${successor_sha}" \
+    'CANARY_DATE=' \
+    'NOT_AFTER_EPOCH=0'; do
+    grep -F -x "$binding" "$permit" >/dev/null || die 'stale timer permit differs outside the accepted release/control transition'
+  done
+  recorded_service="$(record_value "$permit" SERVICE_SHA256)"
+  recorded_control="$(record_value "$permit" CONTROL_VERIFIER_OUTPUT_SHA256)"
+  recorded_attempt="$(record_value "$permit" ATTEMPT)"
+  [[ "$recorded_service" =~ $SHA_RE && "$recorded_control" =~ $SHA_RE && "$recorded_attempt" =~ ^[1-9][0-9]*$ ]] \
+    || die 'stale timer permit historical evidence is invalid'
+
+  active_slot="$previous_slot"; release_sha="$authorization_release_sha"; service_sha="$recorded_service"; control_output_sha="$recorded_control"; canary_date=''
+  attempt="$recorded_attempt"; plan_attempt="$attempt"; plan_json="$(canonical_plan)"; plan_sha="$(printf '%s' "$plan_json" | sha256sum | awk '{ print $1 }')"
+  expected_permit="$(receipt_path)"
+  [[ "$permit" == "$expected_permit" ]] || die 'stale timer permit filename does not reproduce its immutable identity'
+  assert_permit "$permit"
+  stale_timer_validation="$(timer_validation_path "$permit")"
+  stale_timer_enabled="$(timer_enabled_path "$permit")"
+  assert_timer_validation "$permit"
+  assert_timer_enabled "$permit"
+
+  active_slot="$saved_active_slot"; release_sha="$saved_release_sha"; service_sha="$saved_service_sha"; control_output_sha="$saved_control_output_sha"; canary_date="$saved_canary_date"
+}
+
+load_stale_timer_authorization() {
+  local pointer expected_keys actual_keys selected_permit selected_digest
+  pointer="$(pointer_path)"; assert_regular "$pointer" 'root:leetplus-api-runtime:440'
+  expected_keys="$(printf '%s\n' RECORD_VERSION PERMIT_PATH PERMIT_SHA256 | sort)"
+  actual_keys="$(awk -F= '{ print $1 }' "$pointer" | sort)"
+  [[ "$actual_keys" == "$expected_keys" && -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$pointer")" ]] \
+    || die 'stale timer authorization pointer schema drifted'
+  [[ "$(record_value "$pointer" RECORD_VERSION)" == 1 ]] || die 'stale timer authorization pointer version drifted'
+  selected_permit="$(record_value "$pointer" PERMIT_PATH)"; selected_digest="$(record_value "$pointer" PERMIT_SHA256)"
+  [[ "$selected_permit" =~ ^${STATE_ROOT}/authorization-timer-[1-9][0-9]*-[0-9a-f]{64}\.receipt$ && "$selected_digest" =~ $SHA_RE ]] \
+    || die 'stale timer authorization pointer values are invalid'
+  permit="$selected_permit"; assert_regular "$permit" 'root:leetplus-api-runtime:440'
+  [[ "$(sha "$permit")" == "$selected_digest" ]] || die 'stale timer authorization pointer digest drifted'
+  validate_stale_timer_records
+  assert_authorization_dropins "$permit"
+}
+
+canonical_supersede_plan() {
+  printf '{"actionCount":1,"activeSlot":"%s","authorizationReleaseSha":"%s","authorizationReceiptSha256":"%s","controlReleaseSha":"%s","controlVerifierOutputSha256":"%s","currentReleaseSha":"%s","cutoverReceiptSha256":"%s","kind":"LEETPLUS_LANGAME_DAILY_WORKER_SUPERSESSION_V1","previousSlot":"%s","serviceSha256":"%s","successorReceiptSha256":"%s","tenantSlug":"%s","timerEnablementReceiptSha256":"%s","timerSha256":"%s","timerValidationReceiptSha256":"%s","workerEnvSha256":"%s"}' \
+    "$active_slot" "$authorization_release_sha" "$stale_permit_sha" "$control_release_sha" "$control_output_sha" "$release_sha" "$latest_cutover_sha" "$previous_slot" "$service_sha" "$successor_sha" "$tenant_slug" "$(sha "$stale_timer_enabled")" "$timer_sha" "$(sha "$stale_timer_validation")" "$worker_env_sha"
+}
+
+prepare_supersession_base() {
+  assert_state_root; assert_no_nested_mounts; assert_active_identity; assert_worker_envelope; assert_successor_receipt
+  assert_control "$control_release_sha"
+  assert_latest_cutover_transition
+  service_is_quiescent || die 'stale worker service must be quiescent before permit supersession'
+  timer_is_disabled_quiescent || die 'stale worker timer must be disabled and quiescent before permit supersession'
+}
+
+write_supersede_intent() {
+  local path; path="$(supersede_intent_path)"; [[ ! -e "$path" && ! -L "$path" ]] || die 'worker supersession intent already exists'
+  supersede_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  {
+    printf 'RECORD_VERSION=1\nKIND=LEETPLUS_LANGAME_DAILY_WORKER_SUPERSESSION_INTENT_V1\nPHASE=timer\n'
+    printf 'PLAN_SHA256=%s\nCURRENT_RELEASE_SHA=%s\nAUTHORIZATION_RELEASE_SHA=%s\nCONTROL_RELEASE_SHA=%s\n' "$supersede_plan_sha" "$release_sha" "$authorization_release_sha" "$control_release_sha"
+    printf 'PERMIT_PATH=%s\nAUTHORIZATION_RECEIPT_SHA256=%s\nTIMER_VALIDATION_RECEIPT_SHA256=%s\nTIMER_ENABLEMENT_RECEIPT_SHA256=%s\n' "$permit" "$stale_permit_sha" "$(sha "$stale_timer_validation")" "$(sha "$stale_timer_enabled")"
+    printf 'WORKER_ENV_SHA256=%s\nSUCCESSOR_RECEIPT_SHA256=%s\nCUTOVER_RECEIPT_PATH=%s\nCUTOVER_RECEIPT_SHA256=%s\nCONTROL_VERIFIER_OUTPUT_SHA256=%s\nSTARTED_AT=%s\n' "$worker_env_sha" "$successor_sha" "$latest_cutover_receipt" "$latest_cutover_sha" "$control_output_sha" "$supersede_timestamp"
+  } | atomic_write_root "$path"
+}
+
+load_supersede_intent() {
+  local path expected_keys actual_keys recorded_permit_sha recorded_validation_sha recorded_enabled_sha
+  path="$(supersede_intent_path)"; assert_regular "$path" 'root:root:400'
+  expected_keys="$(printf '%s\n' RECORD_VERSION KIND PHASE PLAN_SHA256 CURRENT_RELEASE_SHA AUTHORIZATION_RELEASE_SHA CONTROL_RELEASE_SHA PERMIT_PATH AUTHORIZATION_RECEIPT_SHA256 TIMER_VALIDATION_RECEIPT_SHA256 TIMER_ENABLEMENT_RECEIPT_SHA256 WORKER_ENV_SHA256 SUCCESSOR_RECEIPT_SHA256 CUTOVER_RECEIPT_PATH CUTOVER_RECEIPT_SHA256 CONTROL_VERIFIER_OUTPUT_SHA256 STARTED_AT | sort)"
+  actual_keys="$(awk -F= '{ print $1 }' "$path" | sort)"
+  [[ "$actual_keys" == "$expected_keys" && -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$path")" ]] || die 'worker supersession intent schema drifted'
+  for binding in 'RECORD_VERSION=1' 'KIND=LEETPLUS_LANGAME_DAILY_WORKER_SUPERSESSION_INTENT_V1' 'PHASE=timer' \
+    "CURRENT_RELEASE_SHA=${release_sha}" "AUTHORIZATION_RELEASE_SHA=${previous_release_sha}" "CONTROL_RELEASE_SHA=${control_release_sha}" \
+    "WORKER_ENV_SHA256=${worker_env_sha}" "SUCCESSOR_RECEIPT_SHA256=${successor_sha}" "CUTOVER_RECEIPT_PATH=${latest_cutover_receipt}" \
+    "CUTOVER_RECEIPT_SHA256=${latest_cutover_sha}" "CONTROL_VERIFIER_OUTPUT_SHA256=${control_output_sha}"; do
+    grep -F -x "$binding" "$path" >/dev/null || die 'worker supersession intent no longer matches current authority'
+  done
+  permit="$(record_value "$path" PERMIT_PATH)"; [[ "$permit" =~ ^${STATE_ROOT}/authorization-timer-[1-9][0-9]*-[0-9a-f]{64}\.receipt$ ]] || die 'worker supersession intent permit path is invalid'
+  recorded_permit_sha="$(record_value "$path" AUTHORIZATION_RECEIPT_SHA256)"; recorded_validation_sha="$(record_value "$path" TIMER_VALIDATION_RECEIPT_SHA256)"; recorded_enabled_sha="$(record_value "$path" TIMER_ENABLEMENT_RECEIPT_SHA256)"
+  [[ "$recorded_permit_sha" =~ $SHA_RE && "$recorded_validation_sha" =~ $SHA_RE && "$recorded_enabled_sha" =~ $SHA_RE ]] || die 'worker supersession intent evidence digests are invalid'
+  validate_stale_timer_records
+  [[ "$stale_permit_sha" == "$recorded_permit_sha" && "$(sha "$stale_timer_validation")" == "$recorded_validation_sha" && "$(sha "$stale_timer_enabled")" == "$recorded_enabled_sha" ]] || die 'worker supersession intent source evidence drifted'
+  supersede_timestamp="$(record_value "$path" STARTED_AT)"; [[ "$supersede_timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || die 'worker supersession intent timestamp is invalid'
+  supersede_plan_sha="$(record_value "$path" PLAN_SHA256)"; supersede_plan_json="$(canonical_supersede_plan)"
+  [[ "$supersede_plan_sha" =~ $SHA_RE && "$(printf '%s' "$supersede_plan_json" | sha256sum | awk '{ print $1 }')" == "$supersede_plan_sha" ]] || die 'worker supersession plan no longer reproduces intent'
+}
+
+clear_stale_timer_pointer() {
+  local pointer selected selected_sha expected_keys actual_keys
+  pointer="$(pointer_path)"
+  if [[ ! -e "$pointer" && ! -L "$pointer" ]]; then return 0; fi
+  assert_regular "$pointer" 'root:leetplus-api-runtime:440'
+  expected_keys="$(printf '%s\n' RECORD_VERSION PERMIT_PATH PERMIT_SHA256 | sort)"
+  actual_keys="$(awk -F= '{ print $1 }' "$pointer" | sort)"
+  [[ "$actual_keys" == "$expected_keys" && -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$pointer")"
+    && "$(record_value "$pointer" RECORD_VERSION)" == 1 ]] || die 'active timer pointer schema changed during supersession'
+  selected="$(record_value "$pointer" PERMIT_PATH)"; selected_sha="$(record_value "$pointer" PERMIT_SHA256)"
+  [[ "$selected" == "$permit" && "$selected_sha" == "$stale_permit_sha" && "$(sha "$permit")" == "$selected_sha" ]] || die 'active timer pointer changed during supersession'
+  rm -f -- "$pointer"; sync -d "$STATE_ROOT"
+}
+
+assert_superseded_runtime() {
+  service_is_quiescent || die 'superseded worker service is not strictly quiescent'
+  timer_is_disabled_quiescent || die 'superseded worker timer is not strictly disabled/quiescent'
+  assert_no_authorization_dropins; assert_exact_loaded_fences_only
+  [[ ! -e "$(pointer_path)" && ! -L "$(pointer_path)" ]] || die 'superseded timer authorization pointer remains active'
+  /usr/bin/bash -p "$DRAIN_VERIFIER" >/dev/null || die 'generic legacy drain verifier rejected superseded worker state'
+}
+
+supersession_receipt_content() {
+  printf 'RECORD_VERSION=1\nKIND=LEETPLUS_LANGAME_DAILY_WORKER_SUPERSESSION_V1\nAUTHORIZATION_SUPERSEDED=true\n'
+  printf 'PLAN_SHA256=%s\nCURRENT_RELEASE_SHA=%s\nAUTHORIZATION_RELEASE_SHA=%s\nCONTROL_RELEASE_SHA=%s\n' "$supersede_plan_sha" "$release_sha" "$authorization_release_sha" "$control_release_sha"
+  printf 'AUTHORIZATION_RECEIPT_PATH=%s\nAUTHORIZATION_RECEIPT_SHA256=%s\nTIMER_VALIDATION_RECEIPT_SHA256=%s\nTIMER_ENABLEMENT_RECEIPT_SHA256=%s\n' "$permit" "$stale_permit_sha" "$(sha "$stale_timer_validation")" "$(sha "$stale_timer_enabled")"
+  printf 'WORKER_ENV_SHA256=%s\nSUCCESSOR_RECEIPT_SHA256=%s\nCUTOVER_RECEIPT_PATH=%s\nCUTOVER_RECEIPT_SHA256=%s\nCONTROL_VERIFIER_OUTPUT_SHA256=%s\nSUPERSEDED_AT=%s\n' "$worker_env_sha" "$successor_sha" "$latest_cutover_receipt" "$latest_cutover_sha" "$control_output_sha" "$supersede_timestamp"
+}
+
+write_supersession_receipt() {
+  local path pointer; path="$(supersession_receipt_path "$permit")"; pointer="$(supersession_pointer_path)"
+  if [[ -e "$path" || -L "$path" ]]; then
+    assert_regular "$path" 'root:root:400'; cmp -s -- "$path" <(supersession_receipt_content) || die 'existing worker supersession receipt conflicts with recovery'
+  else
+    supersession_receipt_content | atomic_write_root "$path"
+  fi
+  if [[ -e "$pointer" || -L "$pointer" ]]; then assert_regular "$pointer" 'root:root:400'; fi
+  { printf 'RECORD_VERSION=1\nRECEIPT_PATH=%s\nRECEIPT_SHA256=%s\n' "$path" "$(sha "$path")"; } | atomic_write_root "$pointer"
+}
+
+assert_supersession_receipt() {
+  local pointer path expected_keys actual_keys
+  pointer="$(supersession_pointer_path)"; assert_regular "$pointer" 'root:root:400'
+  [[ "$(awk -F= '{ print $1 }' "$pointer" | sort)" == "$(printf '%s\n' RECORD_VERSION RECEIPT_PATH RECEIPT_SHA256 | sort)"
+    && -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$pointer")" ]] || die 'worker supersession pointer schema drifted'
+  [[ "$(record_value "$pointer" RECORD_VERSION)" == 1 ]] || die 'worker supersession pointer version drifted'
+  path="$(record_value "$pointer" RECEIPT_PATH)"; [[ "$path" == "$(supersession_receipt_path "$permit")" ]] || die 'worker supersession pointer path drifted'
+  assert_regular "$path" 'root:root:400'; [[ "$(record_value "$pointer" RECEIPT_SHA256)" == "$(sha "$path")" ]] || die 'worker supersession pointer digest drifted'
+  expected_keys="$(printf '%s\n' RECORD_VERSION KIND AUTHORIZATION_SUPERSEDED PLAN_SHA256 CURRENT_RELEASE_SHA AUTHORIZATION_RELEASE_SHA CONTROL_RELEASE_SHA AUTHORIZATION_RECEIPT_PATH AUTHORIZATION_RECEIPT_SHA256 TIMER_VALIDATION_RECEIPT_SHA256 TIMER_ENABLEMENT_RECEIPT_SHA256 WORKER_ENV_SHA256 SUCCESSOR_RECEIPT_SHA256 CUTOVER_RECEIPT_PATH CUTOVER_RECEIPT_SHA256 CONTROL_VERIFIER_OUTPUT_SHA256 SUPERSEDED_AT | sort)"
+  actual_keys="$(awk -F= '{ print $1 }' "$path" | sort)"
+  [[ "$actual_keys" == "$expected_keys" && -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$path")" ]] || die 'worker supersession receipt schema drifted'
+  cmp -s -- "$path" <(supersession_receipt_content) || die 'worker supersession receipt content drifted'
+}
+
+load_latest_supersession() {
+  local pointer path
+  pointer="$(supersession_pointer_path)"; assert_regular "$pointer" 'root:root:400'
+  path="$(record_value "$pointer" RECEIPT_PATH)"; [[ "$path" =~ ^${STATE_ROOT}/supersession-timer-[0-9a-f]{64}\.receipt$ ]] || die 'latest worker supersession receipt path is invalid'
+  assert_regular "$path" 'root:root:400'; [[ "$(record_value "$pointer" RECEIPT_SHA256)" == "$(sha "$path")" ]] || die 'latest worker supersession receipt digest drifted'
+  for binding in 'RECORD_VERSION=1' 'KIND=LEETPLUS_LANGAME_DAILY_WORKER_SUPERSESSION_V1' 'AUTHORIZATION_SUPERSEDED=true' \
+    "CURRENT_RELEASE_SHA=${release_sha}" "AUTHORIZATION_RELEASE_SHA=${previous_release_sha}" "CONTROL_RELEASE_SHA=${control_release_sha}" \
+    "WORKER_ENV_SHA256=${worker_env_sha}" "SUCCESSOR_RECEIPT_SHA256=${successor_sha}" "CUTOVER_RECEIPT_PATH=${latest_cutover_receipt}" \
+    "CUTOVER_RECEIPT_SHA256=${latest_cutover_sha}" "CONTROL_VERIFIER_OUTPUT_SHA256=${control_output_sha}"; do
+    grep -F -x "$binding" "$path" >/dev/null || die 'latest worker supersession receipt no longer matches current authority'
+  done
+  permit="$(record_value "$path" AUTHORIZATION_RECEIPT_PATH)"; validate_stale_timer_records
+  [[ "$(record_value "$path" AUTHORIZATION_RECEIPT_SHA256)" == "$stale_permit_sha"
+    && "$(record_value "$path" TIMER_VALIDATION_RECEIPT_SHA256)" == "$(sha "$stale_timer_validation")"
+    && "$(record_value "$path" TIMER_ENABLEMENT_RECEIPT_SHA256)" == "$(sha "$stale_timer_enabled")" ]] \
+    || die 'latest worker supersession source evidence drifted'
+  supersede_timestamp="$(record_value "$path" SUPERSEDED_AT)"; [[ "$supersede_timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || die 'latest worker supersession timestamp is invalid'
+  supersede_plan_sha="$(record_value "$path" PLAN_SHA256)"; supersede_plan_json="$(canonical_supersede_plan)"
+  [[ "$supersede_plan_sha" =~ $SHA_RE && "$(printf '%s' "$supersede_plan_json" | sha256sum | awk '{ print $1 }')" == "$supersede_plan_sha" ]] || die 'latest worker supersession plan drifted'
+  assert_supersession_receipt
+}
+
 case "$mode" in
+  supersede-plan)
+    lock_file 9 "$INSTALL_LOCK"; lock_file 8 "$CUTOVER_LOCK"; prepare_supersession_base; assert_no_pending_operations
+    load_stale_timer_authorization
+    supersede_plan_json="$(canonical_supersede_plan)"; supersede_plan_sha="$(printf '%s' "$supersede_plan_json" | sha256sum | awk '{ print $1 }')"
+    printf '{"actionCount":1,"decision":"LANGAME_DAILY_WORKER_SUPERSESSION_PLAN","plan":%s,"planSha256":"%s"}\n' "$supersede_plan_json" "$supersede_plan_sha"
+    ;;
+  supersede-apply)
+    lock_file 9 "$INSTALL_LOCK"; lock_file 8 "$CUTOVER_LOCK"; prepare_supersession_base; assert_no_pending_operations
+    load_stale_timer_authorization
+    supersede_plan_json="$(canonical_supersede_plan)"; supersede_plan_sha="$(printf '%s' "$supersede_plan_json" | sha256sum | awk '{ print $1 }')"
+    [[ "$supersede_plan_sha" == "$expected_plan" ]] || die 'worker supersession plan digest changed before effect'
+    write_supersede_intent
+    disable_timer_and_assert_quiescent; restore_worker_fences; clear_stale_timer_pointer; assert_superseded_runtime
+    write_supersession_receipt; assert_supersession_receipt; clear_supersede_intent
+    printf 'LANGAME_DAILY_WORKER_SUPERSESSION_APPLY=PASS planSha256=%s authorizationReceiptSha256=%s\n' "$supersede_plan_sha" "$stale_permit_sha"
+    ;;
+  supersede-recover)
+    lock_file 9 "$INSTALL_LOCK"; lock_file 8 "$CUTOVER_LOCK"; prepare_supersession_base
+    load_supersede_intent
+    disable_timer_and_assert_quiescent; restore_worker_fences; clear_stale_timer_pointer; assert_superseded_runtime
+    write_supersession_receipt; assert_supersession_receipt; clear_supersede_intent
+    printf 'LANGAME_DAILY_WORKER_SUPERSESSION_RECOVERED=PASS planSha256=%s\n' "$supersede_plan_sha"
+    ;;
+  supersede-check)
+    lock_file 9 "$INSTALL_LOCK"; lock_file 8 "$CUTOVER_LOCK"; prepare_supersession_base; assert_no_pending_operations
+    assert_superseded_runtime; load_latest_supersession
+    printf 'LANGAME_DAILY_WORKER_SUPERSESSION_CHECK=PASS currentReleaseSha=%s authorizationReleaseSha=%s controlReleaseSha=%s\n' "$release_sha" "$authorization_release_sha" "$control_release_sha"
+    ;;
   revoke-plan)
     lock_file 9 "$INSTALL_LOCK"; lock_file 8 "$CUTOVER_LOCK"; prepare; assert_no_pending_operations
     load_current_timer_authorization

@@ -76,9 +76,9 @@ request ID для другой цели или состояние, измени�
 - Store activation/control-plane baseline:
   `43d447a3c3bd08dcf496f783771c28130e13c82a` (PR #146);
 - текущий admitted/runtime SHA:
-  `94f9462ecf3b77b610b8d2ce73fcc68be7625eac` (PR #147), Fast
-  `33997351479`, Full `33997351444`;
-- active blue, hot-rollback green `43d447a3…`, schema exact
+  `92f29b7a9fbf518589b621e70535bfc089733f48` (PR #148), Fast
+  `34001346341`, Full `34001346308`;
+- active green, hot-rollback blue `94f9462e…`, schema exact
   `CURRENT_189/189`;
 - tenant `demo`, Store `5b07123f-9db7-453c-9a03-ccd75aa1cf49`:
   `backgroundExecutionEnabled=true`, revision `0 -> 1`;
@@ -96,6 +96,13 @@ request ID для другой цели или состояние, измени�
   завершён (`page=16`, `rows=3000`), а `TRANSACTION PARTIAL` автоматически
   продолжен через `PENDING nextPage=41`; глобально `RETRY=0`, `FAILED=0` и
   unresolved bonus-ledger backlog равен `0`.
+- final worker-authority rollout
+  `b2dac027-cd4c-4b2d-ab98-531d6cb7518f` снял старый permit через exact chain
+  четырёх cutover receipts, принял canary `2026-09-05` и stable timer. Точный
+  job `547df0dd-120c-44f7-b033-2889da4d5eec` теперь `SUCCESS`; все пять
+  источников успешны, включая `TRANSACTION page=77 / rows=3211`. Новых source
+  failure за 24 часа, duplicate idempotency keys и unresolved bonus-ledger
+  записей — `0`.
 
 ## Откат
 

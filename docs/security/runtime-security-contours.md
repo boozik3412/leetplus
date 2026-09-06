@@ -4,10 +4,11 @@
 
 Актуально на: **06.09.2026**
 Runtime implementation baseline:
-`94f9462ecf3b77b610b8d2ce73fcc68be7625eac` (PR #147; включает
+`92f29b7a9fbf518589b621e70535bfc089733f48` (PR #148; включает
 CURRENT189 application baseline, autonomous continuation для `PARTIAL`,
 worker-owned ledger fallback, exact play-time replay и audited Store execution
-control plane, а также корректный terminal empty-page contract Langame)
+control plane, корректный terminal empty-page contract Langame и bounded
+multi-cutover supersession устаревшего worker permit)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -18,16 +19,16 @@ fail-closed правилу одного контура снова сломать
 
 | Область                    | Состояние                                                                                                                                                                                                                                                                      |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Runtime implementation     | CURRENT189 production baseline, merge SHA `94f9462ecf3b77b610b8d2ce73fcc68be7625eac`                                                                                                                                                                                           |
-| Admission merge SHA        | exact-main Fast CI `33997351479` и Full Release Admission `33997351444` для `94f9462e…` — `SUCCESS`                                                                                                                                                                            |
-| Production API topology    | active blue exact `94f9462e…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback green `43d447a3…` остаётся active                                                                                                                            |
+| Runtime implementation     | CURRENT189 production baseline, merge SHA `92f29b7a9fbf518589b621e70535bfc089733f48`                                                                                                                                                                                           |
+| Admission merge SHA        | exact-main Fast CI `34001346341` и Full Release Admission `34001346308` для `92f29b7a…` — `SUCCESS`                                                                                                                                                                            |
+| Production API topology    | active green exact `92f29b7a…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback blue `94f9462e…` остаётся active                                                                                                                            |
 | Guest bug-report repair    | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                                                                                |
 | Corporate invite repair    | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                                                                                     |
 | Guest check-in consistency | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                                                                                          |
 | Split-runtime deployment   | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                                                                                       |
 | Corporate landing          | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                             |
 | Release acceleration       | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
-| Langame recovery           | оба systemd timer enabled/active; daily canary/backfill принят; bonus-ledger/gamification singleton дренирует activity по одному профилю с отдельным Prisma pool `2` и effective timeout `15m`; одна audited Store identity включена только для INTERNAL tenant; external unattended остаётся deny |
+| Langame recovery           | оба systemd timer enabled/active; daily canary `2026-09-05` принят на exact `92f29b7a…`; старый permit снят через проверенную цепочку 4 cutover receipts; bonus-ledger/gamification singleton автономно продолжает `PARTIAL` по одному профилю с pool `2` и timeout `15m`; external unattended остаётся deny |
 | Внешний open beta          | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                                                                               |
 
 Store execution fence остаётся отдельным явным полномочием. Migration 165
@@ -44,6 +45,13 @@ reason, request ID, exact confirmation и validated release SHA; update и
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
 зелёный CI не доказывают production deployment. Фактический production runtime,
 env, systemd, nginx и database roles проверяются отдельно.
+
+Production worker authority 06.09 дополнительно запрещает single-hop догадки о
+предыдущем release. Если permit пережил несколько штатных cutover, authority
+может снять его только по непрерывной immutable цепочке accepted receipts с
+точными generation/SHA/slot bindings и bounded длиной. После supersession
+обязательны новый canary и отдельный timer permit текущего release; перенос
+старого разрешения или ручное удаление fence/pointer остаются запрещены.
 
 Worker/control-plane не делит Prisma pool с двумя API slot. Для частого
 `leetplus-bonus-ledger-worker` обязателен exact URL с `schema=public`,

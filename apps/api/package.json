@@ -19,6 +19,7 @@
     "guest-game:bonus-ledger-worker": "node dist/guest-gamification/guest-bonus-ledger-worker.cli",
     "guest-game:telegram-edge": "node dist/guest-portal/telegram-edge-adapter.cli",
     "guest-game:telegram-poller": "node dist/guest-portal/telegram-edge-poller.cli",
+    "guest-game:telegram-poller-health": "node dist/guest-portal/telegram-edge-poller-health.cli",
     "config:validate:production": "node dist/config/validate-production-environment.cli.js",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "lint:check": "eslint \"{src,apps,libs,test}/**/*.ts\"",

@@ -21,6 +21,36 @@ Telegram bot и Mini App перенесены на сервер 1337.
 
 Важно: используется polling, не webhook. Telegram webhook должен быть пустым. Poller сам делает `deleteWebhook(drop_pending_updates=false)` на старте.
 
+## Обязательный egress после recovery 06.09.2026
+
+31.08.2026 poller перестал получать update, хотя container оставался `Up`.
+Причиной был конфликт двух proxy/DNS слоев: router DNS вернул
+`api.telegram.org -> 198.18.0.42`, локальный `TG_PROXY` отправил fake-IP через
+redsocks в Tor, а Tor уже не мог восстановить hostname. Bot token, webhook mode
+и основной LeetPlus API были исправны.
+
+Закрепленный production route:
+
+```text
+telegram-poller 172.25.0.10
+  -> HTTP CONNECT 172.25.0.1:18118
+  -> 1337-telegram-http-proxy.service (Privoxy)
+  -> forward-socks5t 127.0.0.1:9050 (Tor remote DNS)
+  -> api.telegram.org
+```
+
+- `leetplus_telegram_edge_default` — external Docker network,
+  `172.25.0.0/16`, gateway `172.25.0.1`;
+- proxy listener не публикуется и ACL-разрешает только `172.25.0.10`;
+- poller получает `GUEST_GAME_TG_EDGE_TELEGRAM_PROXY_URL` только через
+  service-specific Compose environment;
+- прямой `socks5h://` URL не поддерживается текущим Undici adapter; нужен
+  HTTP(S) CONNECT bridge;
+- старый transparent redsocks может оставаться для других workloads, но не
+  является Telegram poller egress;
+- перед каждым обновлением проверяются service/listener/ACL, state checksum,
+  один poller, пустой webhook и свежий heartbeat.
+
 ## Сервисы на 1337
 
 ```bash
@@ -97,7 +127,29 @@ mkdir -p backups
 tar -czf backups/app-before-update-$(date +%Y%m%d-%H%M%S).tgz app docker-compose.yml secrets/telegram-edge.env
 ```
 
-5. Заменить `/srv/leetplus-telegram-edge/app` новой версией кода.
+5. Заменить `/srv/leetplus-telegram-edge/app` immutable source tree только
+   принятого exact-main SHA. Затем установить versioned runtime-контракт из
+   этого же дерева и проверить Compose до сборки:
+
+```bash
+cd /srv/leetplus-telegram-edge
+install -m 0644 app/deploy/leetplus-telegram-edge/docker-compose.yml \
+  docker-compose.yml
+app/deploy/leetplus-telegram-edge/install-telegram-http-proxy.sh
+install -m 0755 \
+  app/deploy/leetplus-telegram-edge/1337-telegram-proxy-update-ipset.sh \
+  /srv/1337-telegram-proxy/scripts/update-ipset.sh
+install -m 0755 \
+  app/deploy/leetplus-telegram-edge/1337-telegram-proxy-apply-iptables.sh \
+  /srv/1337-telegram-proxy/scripts/apply-iptables.sh
+/srv/1337-telegram-proxy/scripts/update-ipset.sh
+/srv/1337-telegram-proxy/scripts/apply-iptables.sh
+docker compose config --quiet
+```
+
+Compose собирает канонический
+`app/deploy/leetplus-telegram-edge/Dockerfile`; отдельный вручную изменённый
+`app/Dockerfile` не является authority и не должен сохраняться между релизами.
 
 Не перетирать:
 
@@ -175,10 +227,13 @@ GUEST_GAME_TG_EDGE_BOT_TOKEN=<secret>
 GUEST_GAME_TG_EDGE_WEBHOOK_SECRET=<secret>
 GUEST_GAME_TG_EDGE_SHARED_SECRET=<secret>
 GUEST_GAME_TG_EDGE_TELEGRAM_API_BASE_URL=https://api.telegram.org
+GUEST_GAME_TG_EDGE_TELEGRAM_PROXY_URL=http://172.25.0.1:18118
 
 GUEST_GAME_TG_EDGE_POLLING_DELETE_WEBHOOK_ON_START=true
 GUEST_GAME_TG_EDGE_POLLING_DROP_PENDING_UPDATES=false
 GUEST_GAME_TG_EDGE_POLLING_STATE_PATH=/app/data/telegram-poller-state.json
+GUEST_GAME_TG_EDGE_POLLING_HEARTBEAT_PATH=/app/data/telegram-poller-heartbeat.json
+GUEST_GAME_TG_EDGE_POLLING_HEARTBEAT_MAX_AGE_MS=150000
 
 GUEST_GAME_BOT_CONSUMER_DRY_RUN=true
 ```
@@ -197,6 +252,11 @@ GUEST_GAME_TELEGRAM_WEBHOOK_SECRET=<same as edge webhook secret>
 
 - Не включать Telegram webhook, пока используется polling.
 - Запускать ровно один `telegram-poller` на bot token.
+- Не запускать ручной `getUpdates` и не восстанавливать старый offset поверх
+  более нового state.
+- Не удалять private HTTP CONNECT bridge и статический poller IP при
+  обновлении Compose.
+- `Up` без свежего heartbeat/Docker health не считается готовностью Telegram.
 - Не коммитить `.env`, bot token, sync token, SSH credentials.
 - `bot-consumer` пока держать в dry-run, если отдельно не принято решение включать live-доставки.
 - После каждого обновления проверять Telegram canary, а не только `docker compose ps`.

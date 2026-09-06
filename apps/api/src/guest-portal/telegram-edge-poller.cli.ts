@@ -19,10 +19,42 @@ export type TelegramPollingConfig = {
   allowedUpdates: string[];
   deleteWebhookOnStart: boolean;
   dropPendingUpdatesOnDelete: boolean;
+  heartbeatMaxAgeMs: number;
+  heartbeatPath: string;
   limit: number;
   retryDelayMs: number;
   statePath: string;
   timeoutSeconds: number;
+};
+
+export type TelegramPollingErrorCategory =
+  | 'CONNECT'
+  | 'DNS'
+  | 'FETCH'
+  | 'HTTP'
+  | 'SOCKS'
+  | 'TIMEOUT'
+  | 'TLS'
+  | 'UNKNOWN';
+
+export type TelegramPollingHeartbeat = {
+  consecutiveFailures: number;
+  errorCategory: TelegramPollingErrorCategory | null;
+  errorCode: string | null;
+  lastErrorAt: string | null;
+  lastPollStartedAt: string;
+  lastPollSucceededAt: string | null;
+  offset: number | null;
+  status: 'ERROR' | 'OK';
+  updatedAt: string;
+  version: 1;
+};
+
+export type TelegramPollingHealth = {
+  ageMs: number | null;
+  consecutiveFailures: number | null;
+  healthy: boolean;
+  reason: 'HEALTHY' | 'INVALID_HEARTBEAT' | 'NO_SUCCESS' | 'STALE';
 };
 
 export type TelegramUpdateItem = Record<string, unknown> & {
@@ -68,6 +100,8 @@ const defaultAllowedUpdates = ['message', 'edited_message', 'callback_query'];
 const defaultPollingLimit = 100;
 const defaultPollingRetryDelayMs = 5000;
 const defaultPollingStatePath = '/app/data/telegram-poller-state.json';
+const defaultPollingHeartbeatPath = '/app/data/telegram-poller-heartbeat.json';
+const defaultPollingHeartbeatMaxAgeMs = 150_000;
 const defaultPollingTimeoutSeconds = 50;
 
 async function main() {
@@ -111,6 +145,8 @@ async function main() {
   }
 
   let offset = await readPollingOffset(pollingConfig.statePath);
+  let consecutiveFailures = 0;
+  let lastPollSucceededAt: string | null = null;
 
   logger.log(
     `Telegram poller started timeout=${pollingConfig.timeoutSeconds}s limit=${pollingConfig.limit} offset=${offset ?? '-'}`,
@@ -124,6 +160,8 @@ async function main() {
   }
 
   while (!stopRequested) {
+    const lastPollStartedAt = new Date().toISOString();
+
     try {
       const tick = await runTelegramPollingTick(
         edgeConfig,
@@ -137,8 +175,42 @@ async function main() {
         },
       );
       offset = tick.offset;
+      consecutiveFailures = 0;
+      lastPollSucceededAt = new Date().toISOString();
+      await writePollingHeartbeat(pollingConfig.heartbeatPath, {
+        consecutiveFailures,
+        errorCategory: null,
+        errorCode: null,
+        lastErrorAt: null,
+        lastPollStartedAt,
+        lastPollSucceededAt,
+        offset,
+        status: 'OK',
+        updatedAt: lastPollSucceededAt,
+        version: 1,
+      });
     } catch (error) {
-      logger.error(`Telegram poller tick failed: ${safeErrorMessage(error)}`);
+      consecutiveFailures += 1;
+      const failure = telegramPollingFailure(error);
+      const lastErrorAt = new Date().toISOString();
+
+      logger.error(
+        `Telegram poller tick failed category=${failure.category} code=${
+          failure.code ?? '-'
+        }: ${safeErrorMessage(error)}`,
+      );
+      await writePollingHeartbeat(pollingConfig.heartbeatPath, {
+        consecutiveFailures,
+        errorCategory: failure.category,
+        errorCode: failure.code,
+        lastErrorAt,
+        lastPollStartedAt,
+        lastPollSucceededAt,
+        offset,
+        status: 'ERROR',
+        updatedAt: lastErrorAt,
+        version: 1,
+      });
       await delay(pollingConfig.retryDelayMs);
     }
   }
@@ -162,6 +234,15 @@ export function loadTelegramPollingConfig(
       env.GUEST_GAME_TG_EDGE_POLLING_DROP_PENDING_UPDATES,
       false,
     ),
+    heartbeatMaxAgeMs: parseBoundedInt(
+      env.GUEST_GAME_TG_EDGE_POLLING_HEARTBEAT_MAX_AGE_MS,
+      defaultPollingHeartbeatMaxAgeMs,
+      60_000,
+      900_000,
+    ),
+    heartbeatPath:
+      env.GUEST_GAME_TG_EDGE_POLLING_HEARTBEAT_PATH?.trim() ||
+      defaultPollingHeartbeatPath,
     limit: parseBoundedInt(
       env.GUEST_GAME_TG_EDGE_POLLING_LIMIT,
       defaultPollingLimit,
@@ -372,15 +453,189 @@ export async function readPollingOffset(path: string) {
 }
 
 export async function writePollingOffset(path: string, offset: number) {
+  await writeJsonState(path, {
+    offset,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function readPollingHeartbeat(path: string) {
+  try {
+    const raw = await readFile(path, 'utf8');
+
+    return normalizeTelegramPollingHeartbeat(JSON.parse(raw));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+export async function writePollingHeartbeat(
+  path: string,
+  heartbeat: TelegramPollingHeartbeat,
+) {
+  await writeJsonState(path, heartbeat);
+}
+
+export function evaluateTelegramPollingHealth(
+  heartbeat: TelegramPollingHeartbeat | null,
+  maxAgeMs: number,
+  nowMs = Date.now(),
+): TelegramPollingHealth {
+  if (!heartbeat) {
+    return {
+      ageMs: null,
+      consecutiveFailures: null,
+      healthy: false,
+      reason: 'INVALID_HEARTBEAT',
+    };
+  }
+
+  if (!heartbeat.lastPollSucceededAt) {
+    return {
+      ageMs: null,
+      consecutiveFailures: heartbeat.consecutiveFailures,
+      healthy: false,
+      reason: 'NO_SUCCESS',
+    };
+  }
+
+  const succeededAtMs = Date.parse(heartbeat.lastPollSucceededAt);
+
+  if (!Number.isFinite(succeededAtMs)) {
+    return {
+      ageMs: null,
+      consecutiveFailures: heartbeat.consecutiveFailures,
+      healthy: false,
+      reason: 'INVALID_HEARTBEAT',
+    };
+  }
+
+  const ageMs = Math.max(0, nowMs - succeededAtMs);
+
+  return {
+    ageMs,
+    consecutiveFailures: heartbeat.consecutiveFailures,
+    healthy: ageMs <= maxAgeMs,
+    reason: ageMs <= maxAgeMs ? 'HEALTHY' : 'STALE',
+  };
+}
+
+export function telegramPollingFailure(error: unknown): {
+  category: TelegramPollingErrorCategory;
+  code: string | null;
+} {
+  const chain = errorChain(error);
+  const code =
+    chain
+      .map((item) => safeErrorCode(item))
+      .find((value): value is string => value !== null) ?? null;
+  const summary = chain
+    .map((item) =>
+      item instanceof Error
+        ? `${item.name} ${item.message}`
+        : typeof item === 'string'
+          ? item
+          : '',
+    )
+    .join(' ')
+    .toUpperCase();
+
+  if (
+    summary.includes('ABORTERROR') ||
+    summary.includes('TIMEOUT') ||
+    code === 'ETIMEDOUT' ||
+    code === 'UND_ERR_CONNECT_TIMEOUT' ||
+    code === 'UND_ERR_HEADERS_TIMEOUT'
+  ) {
+    return { category: 'TIMEOUT', code };
+  }
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || summary.includes('DNS')) {
+    return { category: 'DNS', code };
+  }
+  if (summary.includes('SOCKS')) {
+    return { category: 'SOCKS', code };
+  }
+  if (
+    summary.includes('CERTIFICATE') ||
+    summary.includes(' TLS ') ||
+    code?.includes('CERT') ||
+    code?.includes('TLS')
+  ) {
+    return { category: 'TLS', code };
+  }
+  if (/TELEGRAM \S+ HTTP \d{3}/.test(summary)) {
+    return { category: 'HTTP', code };
+  }
+  if (
+    code === 'ECONNREFUSED' ||
+    code === 'ECONNRESET' ||
+    code === 'EHOSTUNREACH' ||
+    code === 'ENETUNREACH' ||
+    code === 'UND_ERR_SOCKET'
+  ) {
+    return { category: 'CONNECT', code };
+  }
+  if (summary.includes('FETCH')) {
+    return { category: 'FETCH', code };
+  }
+
+  return { category: 'UNKNOWN', code };
+}
+
+async function writeJsonState(path: string, value: unknown) {
   await mkdir(dirname(path), { recursive: true });
   const tmpPath = `${path}.${process.pid}.tmp`;
 
-  await writeFile(
-    tmpPath,
-    `${JSON.stringify({ offset, updatedAt: new Date().toISOString() })}\n`,
-    'utf8',
-  );
+  await writeFile(tmpPath, `${JSON.stringify(value)}\n`, 'utf8');
   await rename(tmpPath, path);
+}
+
+function normalizeTelegramPollingHeartbeat(
+  value: unknown,
+): TelegramPollingHeartbeat | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const heartbeat = value as Partial<TelegramPollingHeartbeat>;
+  const offset =
+    heartbeat.offset === null ? null : normalizedOffset(heartbeat.offset);
+
+  if (
+    heartbeat.version !== 1 ||
+    (heartbeat.status !== 'OK' && heartbeat.status !== 'ERROR') ||
+    typeof heartbeat.consecutiveFailures !== 'number' ||
+    !Number.isSafeInteger(heartbeat.consecutiveFailures) ||
+    heartbeat.consecutiveFailures < 0 ||
+    typeof heartbeat.lastPollStartedAt !== 'string' ||
+    (heartbeat.lastPollSucceededAt !== null &&
+      typeof heartbeat.lastPollSucceededAt !== 'string') ||
+    typeof heartbeat.updatedAt !== 'string' ||
+    (heartbeat.offset !== null && offset === null)
+  ) {
+    return null;
+  }
+
+  return {
+    consecutiveFailures: heartbeat.consecutiveFailures,
+    errorCategory: isTelegramPollingErrorCategory(heartbeat.errorCategory)
+      ? heartbeat.errorCategory
+      : null,
+    errorCode:
+      typeof heartbeat.errorCode === 'string' ? heartbeat.errorCode : null,
+    lastErrorAt:
+      typeof heartbeat.lastErrorAt === 'string' ? heartbeat.lastErrorAt : null,
+    lastPollStartedAt: heartbeat.lastPollStartedAt,
+    lastPollSucceededAt: heartbeat.lastPollSucceededAt,
+    offset,
+    status: heartbeat.status,
+    updatedAt: heartbeat.updatedAt,
+    version: 1,
+  };
 }
 
 function telegramUpdateId(update: TelegramUpdateItem) {
@@ -459,6 +714,51 @@ function delay(ms: number) {
 
 function stringValue(value: unknown) {
   return typeof value === 'string' ? value : '-';
+}
+
+function errorChain(error: unknown) {
+  const chain: unknown[] = [];
+  let current = error;
+
+  for (let depth = 0; depth < 5 && current !== null; depth += 1) {
+    chain.push(current);
+    current =
+      typeof current === 'object' && current && 'cause' in current
+        ? ((current as { cause?: unknown }).cause ?? null)
+        : null;
+  }
+
+  return chain;
+}
+
+function safeErrorCode(error: unknown) {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return null;
+  }
+
+  const code = (error as { code?: unknown }).code;
+
+  return typeof code === 'string' && /^[A-Z0-9_]{1,80}$/.test(code)
+    ? code
+    : null;
+}
+
+function isTelegramPollingErrorCategory(
+  value: unknown,
+): value is TelegramPollingErrorCategory {
+  return (
+    typeof value === 'string' &&
+    [
+      'CONNECT',
+      'DNS',
+      'FETCH',
+      'HTTP',
+      'SOCKS',
+      'TIMEOUT',
+      'TLS',
+      'UNKNOWN',
+    ].includes(value)
+  );
 }
 
 function safeErrorMessage(error: unknown) {

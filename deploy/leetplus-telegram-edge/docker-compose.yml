@@ -1,0 +1,77 @@
+name: leetplus_telegram_edge
+
+x-edge-app: &edge-app
+  image: leetplus-telegram-edge:local
+  build:
+    context: ./app
+    dockerfile: deploy/leetplus-telegram-edge/Dockerfile
+    args:
+      API_URL: https://api.leetplus.ru
+      NEXT_PUBLIC_API_URL: https://api.leetplus.ru
+  env_file:
+    - ./secrets/telegram-edge.env
+  volumes:
+    - ./data:/app/data
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+
+services:
+  telegram-edge:
+    <<: *edge-app
+    command: ["pnpm", "--filter", "api", "guest-game:telegram-edge"]
+    ports:
+      - "127.0.0.1:4010:4010"
+
+  telegram-poller:
+    <<: *edge-app
+    command: ["pnpm", "--filter", "api", "guest-game:telegram-poller"]
+    stop_grace_period: 75s
+    environment:
+      # Process-scoped HTTP CONNECT proxy. The host bridge forwards the
+      # hostname to Tor through SOCKS5t, so router fake-IP DNS is never used
+      # by the poller and cannot be captured by the transparent TG_PROXY rule.
+      GUEST_GAME_TG_EDGE_TELEGRAM_PROXY_URL: http://172.25.0.1:18118
+    networks:
+      default:
+        ipv4_address: 172.25.0.10
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "/app/apps/api/dist/guest-portal/telegram-edge-poller-health.cli",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  telegram-mini-app-web:
+    <<: *edge-app
+    command:
+      [
+        "sh",
+        "-lc",
+        "cd apps/web && node node_modules/next/dist/bin/next start -H ${TG_EDGE_WEB_HOST:-0.0.0.0} -p ${TG_EDGE_WEB_PORT:-3100}",
+      ]
+    ports:
+      - "127.0.0.1:3100:3100"
+    depends_on:
+      - telegram-edge
+
+  bot-consumer:
+    <<: *edge-app
+    profiles: ["consumer"]
+    command: ["pnpm", "--filter", "api", "guest-game:bot-consumer"]
+
+networks:
+  default:
+    # Provisioned and validated by install-telegram-http-proxy.sh. Keeping it
+    # external prevents Compose upgrades from trying to recreate the live
+    # bridge while edge and Mini App endpoints are attached.
+    external: true
+    name: leetplus_telegram_edge_default

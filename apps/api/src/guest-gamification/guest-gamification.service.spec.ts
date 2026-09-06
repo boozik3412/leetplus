@@ -21899,6 +21899,15 @@ describe('GuestGamificationService', () => {
             { id: 'issued-case-entitlement', status: 'AVAILABLE' },
           ],
         }),
+        rewardRow({
+          id: 'approved-case-with-consumed-entitlement',
+          status: 'APPROVED',
+          rewardType: 'LOOT_BOX_ENTITLEMENT',
+          rewardCode: null,
+          sourceEntitlements: [
+            { id: 'opened-case-entitlement', status: 'CONSUMED' },
+          ],
+        }),
       ]);
 
       const mappedRewards = await service.getRewards(user, { take: null });
@@ -21907,19 +21916,28 @@ describe('GuestGamificationService', () => {
         mappedRewards.map((reward) => ({
           id: reward.id,
           walletState: reward.walletState,
+          sourceEntitlementStatus: reward.sourceEntitlementStatus,
         })),
       ).toEqual([
         {
           id: 'approved-case-without-entitlement',
           walletState: 'DELIVERY_PROCESSING',
+          sourceEntitlementStatus: null,
         },
         {
           id: 'paid-case-without-entitlement',
           walletState: 'DELIVERY_PROCESSING',
+          sourceEntitlementStatus: null,
         },
         {
           id: 'approved-case-with-entitlement',
           walletState: 'REDEEMED',
+          sourceEntitlementStatus: 'AVAILABLE',
+        },
+        {
+          id: 'approved-case-with-consumed-entitlement',
+          walletState: 'REDEEMED',
+          sourceEntitlementStatus: 'CONSUMED',
         },
       ]);
     });

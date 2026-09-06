@@ -33,6 +33,13 @@ import {
   type BattlePassStepConditionValue,
 } from "@/components/battle-pass-step-condition-editor";
 import { normalizeExternalActionUrl } from "@/lib/external-links";
+import {
+  guestRewardActionNotice,
+  guestRewardFulfillmentLabel,
+  guestRewardLifecycleDescription,
+  guestRewardStatusLabel,
+  isAutomaticLedgerReward,
+} from "@/lib/guest-reward-status-labels";
 import type {
   GuestAudience,
   GuestCrmLead,
@@ -849,19 +856,6 @@ const rewardTypeLabelOptions = [
   ...legacyRewardTypeLabelOptions,
 ];
 
-const automaticLedgerRewardTypes = new Set([
-  "BALANCE",
-  "BONUS",
-  "BONUS_BALANCE",
-  "BONUS_POINTS",
-  "CASH_BALANCE",
-  "DEPOSIT",
-  "LANGAME_BALANCE",
-  "LOYALTY_BONUS",
-  "MONEY_BALANCE",
-  "WALLET_BALANCE",
-]);
-
 const sessionTypeOptions = [
   { value: "regular_session", label: "почасовая сессия" },
   { value: "packet_hours", label: "пакет или абонемент" },
@@ -894,16 +888,6 @@ const rewardStatusLabels: Record<GuestGameRewardStatus, string> = {
   CANCELED: "отменено",
   EXPIRED: "сгорело",
 };
-
-const rewardWalletStateLabels: Record<GuestGameReward["walletState"], string> =
-  {
-    WAITING_APPROVAL: "ожидает подтверждения",
-    READY: "можно выдать",
-    DELIVERY_PROCESSING: "кейс создаётся",
-    REDEEMED: "погашено",
-    CANCELED: "отменено",
-    EXPIRED: "срок истек",
-  };
 
 const rewardRarityLabels: Record<
   NonNullable<GuestGameReward["rewardRarity"]>,
@@ -960,15 +944,6 @@ const rewardStatusActionLabels: Record<GuestGameRewardStatus, string> = {
   PAID: "Отметить выдано",
   CANCELED: "Отменить",
   EXPIRED: "Списать как сгоревшую",
-};
-
-const rewardStatusDescriptions: Record<GuestGameRewardStatus, string> = {
-  PENDING: "Награда создана и ждет проверки сотрудником.",
-  APPROVED:
-    "Согласовано: сотрудник подтвердил право гостя на приз. Автоматические бонусы попадут в очередь начисления, а ручную выдачу нужно закрыть кодом кассира или отметкой выдачи.",
-  PAID: "Выдано: приз уже погашен или начислен, повторно выдать его нельзя.",
-  CANCELED: "Отменено: награда не будет выдана гостю.",
-  EXPIRED: "Сгорело: срок действия награды истек.",
 };
 
 type RewardSortMode = "newest" | "oldest";
@@ -13210,50 +13185,11 @@ function rewardSearchTokens(reward: GuestGameReward) {
     .map((token) => String(token).toLocaleLowerCase("ru-RU"));
 }
 
-function isAutomaticLedgerReward(reward: GuestGameReward) {
-  return (
-    reward.rewardAmount > 0 &&
-    automaticLedgerRewardTypes.has(reward.rewardType.toUpperCase())
-  );
-}
-
 function rewardRarityLabel(reward: GuestGameReward) {
   return (
     reward.rewardRarityLabel ??
     (reward.rewardRarity ? rewardRarityLabels[reward.rewardRarity] : null)
   );
-}
-
-function rewardWalletLabel(reward: GuestGameReward) {
-  if (
-    reward.status === "APPROVED" &&
-    reward.walletState === "READY" &&
-    isAutomaticLedgerReward(reward)
-  ) {
-    return "в начислении";
-  }
-
-  return rewardWalletStateLabels[reward.walletState];
-}
-
-function rewardActionNotice(reward: GuestGameReward) {
-  if (reward.status === "PENDING" && isAutomaticLedgerReward(reward)) {
-    return "Нажмите «Согласовать и начислить»: право на приз подтвердится, а бонусы сразу уйдут в очередь начисления Langame.";
-  }
-
-  if (reward.status === "PENDING") {
-    return "Сначала согласуйте право на приз. После этого ручную выдачу можно закрыть кодом кассира или кнопкой «Отметить выдано».";
-  }
-
-  if (reward.status === "APPROVED" && isAutomaticLedgerReward(reward)) {
-    return "Награда согласована и передана в очередь начисления Langame. После успешной записи в Langame статус станет «выдано».";
-  }
-
-  if (reward.status === "APPROVED") {
-    return "Награда согласована. Выдайте приз вручную и закройте его кодом кассира или кнопкой «Отметить выдано».";
-  }
-
-  return rewardStatusDescriptions[reward.status];
 }
 
 function rewardStatusButtonLabel(
@@ -13339,11 +13275,11 @@ function RewardRow({
               />
             ) : null}
             <StatusPill
-              label={rewardStatusLabels[reward.status]}
+              label={guestRewardStatusLabel(reward)}
               tone={rewardStatusPillTone(reward.status)}
             />
             <StatusPill
-              label={rewardWalletLabel(reward)}
+              label={guestRewardFulfillmentLabel(reward)}
               tone={rewardWalletPillTone(reward.walletState)}
             />
           </div>
@@ -13357,11 +13293,11 @@ function RewardRow({
                 {reward.rewardLabel}
               </h3>
               <StatusPill
-                label={rewardStatusLabels[reward.status]}
+                label={guestRewardStatusLabel(reward)}
                 tone={rewardStatusPillTone(reward.status)}
               />
               <StatusPill
-                label={rewardWalletLabel(reward)}
+                label={guestRewardFulfillmentLabel(reward)}
                 tone={rewardWalletPillTone(reward.walletState)}
               />
               {rarityLabel ? (
@@ -13387,7 +13323,7 @@ function RewardRow({
               {storeName} · {qualifiedAt}
             </p>
             <p className="mt-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
-              {rewardStatusDescriptions[reward.status]}
+              {guestRewardLifecycleDescription(reward)}
             </p>
             <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
               <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
@@ -13419,7 +13355,7 @@ function RewardRow({
           {canApprove ? (
             <div className="min-w-0 space-y-2">
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-                {rewardActionNotice(reward)}
+                {guestRewardActionNotice(reward)}
               </p>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
                 <button

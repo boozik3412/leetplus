@@ -17,6 +17,8 @@ set -Eeuo pipefail
 IFS=$'\n\t'; umask 0077
 readonly sha_a=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 readonly sha_b=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+readonly sha_c=cccccccccccccccccccccccccccccccccccccccc
+readonly sha_d=dddddddddddddddddddddddddddddddddddddddd
 groupadd --system leetplus-runtime
 groupadd --system leetplus-api-runtime
 mkdir -p /etc/{leetplus,nginx/leetplus/upstreams,systemd/system} /srv/leetplus/{releases,slots} /var/lib/leetplus/{legacy-drain,deploy-receipts} /run/leetplus-production-control /usr/local/{sbin,libexec/leetplus}
@@ -222,45 +224,57 @@ test ! -e /var/lib/leetplus/langame-worker-authorizations/active-timer.permit
 test ! -e /etc/systemd/system/leetplus-langame-daily-worker.timer.d/91-leetplus-langame-worker-authorization.conf
 test "$(cat /run/langame-fixture/timer-enabled 2>/dev/null || echo 0)" = 0
 
-# Re-authorize the original release, then model one accepted cutover. The old
-# timer permit must be removable only through the cutover-bound supersession
-# path; no worker invocation is allowed during that transition.
+# Re-authorize the original release, then model three accepted cutovers without
+# renewing the timer permit. The old timer permit must be removable only through
+# a complete, contiguous cutover chain; no worker invocation is allowed during
+# that transition.
 apply timer
-mkdir -p "/srv/leetplus/releases/${sha_a}"
-ln -s "/srv/leetplus/releases/${sha_a}" /srv/leetplus/slots/green
-printf 'RELEASE_SHA=%s\n' "$sha_a" >/etc/leetplus/slots.green.env
-chown root:leetplus-runtime /etc/leetplus/slots.green.env; chmod 440 /etc/leetplus/slots.green.env
+mkdir -p "/srv/leetplus/releases/${sha_a}" "/srv/leetplus/releases/${sha_c}" "/srv/leetplus/releases/${sha_d}"
+rm -f /srv/leetplus/slots/blue
+ln -s "/srv/leetplus/releases/${sha_c}" /srv/leetplus/slots/blue
+ln -s "/srv/leetplus/releases/${sha_d}" /srv/leetplus/slots/green
+printf 'RELEASE_SHA=%s\n' "$sha_c" >/etc/leetplus/slots.blue.env
+printf 'RELEASE_SHA=%s\n' "$sha_d" >/etc/leetplus/slots.green.env
+chown root:leetplus-runtime /etc/leetplus/slots.blue.env /etc/leetplus/slots.green.env
+chmod 440 /etc/leetplus/slots.blue.env /etc/leetplus/slots.green.env
 touch /etc/nginx/leetplus/upstreams/green.conf
 rm -f /etc/nginx/leetplus/active-upstreams.conf
 ln -s /etc/nginx/leetplus/upstreams/green.conf /etc/nginx/leetplus/active-upstreams.conf
-sed -i "s/${sha_b}/${sha_a}/g" /usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs
-cutover_receipt="/var/lib/leetplus/deploy-receipts/20260905T010203123456789Z-g2-${sha_a}-green.receipt"
-cat >"$cutover_receipt" <<EOF
+sed -i "s/${sha_b}/${sha_d}/g" /usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs
+write_cutover_receipt() {
+  local timestamp="$1" generation="$2" release="$3" slot="$4" previous_release="$5" previous_slot="$6" path
+  path="/var/lib/leetplus/deploy-receipts/${timestamp}-g${generation}-${release}-${slot}.receipt"
+  cat >"$path" <<EOF
 RECORD_VERSION=3
-GENERATION=2
-RELEASE_SHA=${sha_a}
-SLOT=green
-PREVIOUS_TARGET=/etc/nginx/leetplus/upstreams/blue.conf
+GENERATION=${generation}
+RELEASE_SHA=${release}
+SLOT=${slot}
+PREVIOUS_TARGET=/etc/nginx/leetplus/upstreams/${previous_slot}.conf
 PREVIOUS_SHA256=1111111111111111111111111111111111111111111111111111111111111111
 PREVIOUS_RUNTIME_KIND=SLOT
-PREVIOUS_SLOT=blue
-PREVIOUS_API_UNIT=leetplus-api@blue.service
-PREVIOUS_WEB_UNIT=leetplus-web@blue.service
+PREVIOUS_SLOT=${previous_slot}
+PREVIOUS_API_UNIT=leetplus-api@${previous_slot}.service
+PREVIOUS_WEB_UNIT=leetplus-web@${previous_slot}.service
 PREVIOUS_API_URL=http://127.0.0.1:4100
 PREVIOUS_WEB_URL=http://127.0.0.1:3100
-PREVIOUS_RELEASE_SHA=${sha_b}
+PREVIOUS_RELEASE_SHA=${previous_release}
 PREVIOUS_MIGRATION=fixture
 PREVIOUS_MIGRATION_COUNT=1
-PREVIOUS_WEB_BUILD_ID=${sha_b}
-ACTIVATED_TARGET=/etc/nginx/leetplus/upstreams/green.conf
+PREVIOUS_WEB_BUILD_ID=${previous_release}
+ACTIVATED_TARGET=/etc/nginx/leetplus/upstreams/${slot}.conf
 ACTIVATED_SHA256=2222222222222222222222222222222222222222222222222222222222222222
-INTENT_RECORDED_AT=20260905T010203123456789Z
+INTENT_RECORDED_AT=${timestamp}
 ACCEPTED_AT=2026-09-05T01:02:03.123456789Z
 EOF
-chmod 600 "$cutover_receipt"
+  chmod 600 "$path"
+  printf '%s' "$path"
+}
+cutover_receipt_g2="$(write_cutover_receipt 20260905T010203123456789Z 2 "$sha_a" green "$sha_b" blue)"
+cutover_receipt_g3="$(write_cutover_receipt 20260905T020304123456789Z 3 "$sha_c" blue "$sha_a" green)"
+cutover_receipt="$(write_cutover_receipt 20260905T030405123456789Z 4 "$sha_d" green "$sha_c" blue)"
 cat >/var/lib/leetplus/deploy-receipts/latest-accepted.index <<EOF
 RECORD_VERSION=2
-GENERATION=2
+GENERATION=4
 RECEIPT_PATH=${cutover_receipt}
 RECEIPT_SHA256=$(sha256sum "$cutover_receipt" | awk '{ print $1 }')
 CONSUMED=false
@@ -268,14 +282,23 @@ EOF
 chmod 600 /var/lib/leetplus/deploy-receipts/latest-accepted.index
 printf 0 >/run/langame-fixture/timer-enabled
 timer_starts_before_supersession="$(cat /run/langame-fixture/timer-profile-starts)"
-supersede_plan="$(/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority supersede-plan --control-release-sha "$sha_a" | sed -n 's/.*"planSha256":"\([0-9a-f]*\)".*/\1/p')"
+# A missing intermediate receipt must reject the authority-reducing transition.
+mv "$cutover_receipt_g3" "${cutover_receipt_g3}.hold"
+if /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority supersede-plan --control-release-sha "$sha_d"; then
+  echo 'disconnected historical cutover chain was accepted' >&2; exit 1
+fi
+mv "${cutover_receipt_g3}.hold" "$cutover_receipt_g3"
+supersede_plan_json="$(/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority supersede-plan --control-release-sha "$sha_d")"
+grep -F '"authorizationSlot":"blue"' <<<"$supersede_plan_json" >/dev/null
+grep -F '"cutoverChainLength":3' <<<"$supersede_plan_json" >/dev/null
+supersede_plan="$(sed -n 's/.*"planSha256":"\([0-9a-f]*\)".*/\1/p' <<<"$supersede_plan_json")"
 test -n "$supersede_plan"
 /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority supersede-apply \
-  --control-release-sha "$sha_a" \
+  --control-release-sha "$sha_d" \
   --plan-sha256 "$supersede_plan" \
   --action-count 1 \
   --confirm I_ACCEPT_EXACT_LANGAME_DAILY_WORKER_SUPERSESSION
-/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority supersede-check --control-release-sha "$sha_a"
+/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority supersede-check --control-release-sha "$sha_d"
 test ! -e /var/lib/leetplus/langame-worker-authorizations/active-timer.permit
 test ! -e /etc/systemd/system/leetplus-langame-daily-worker.service.d/91-leetplus-langame-worker-authorization.conf
 test ! -e /etc/systemd/system/leetplus-langame-daily-worker.timer.d/91-leetplus-langame-worker-authorization.conf

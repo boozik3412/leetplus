@@ -3,9 +3,9 @@
 | Поле                 | Состояние                                                                                                                                                            |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                                                         |
-| Production runtime   | healthy; active green `43d447a3…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue `cfc99902…` ready                                                       |
+| Production runtime   | healthy; active blue `94f9462e…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback green `43d447a3…` ready                                                       |
 | Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                                                         |
-| Release authority    | runtime и production-control exact `43d447a3…`; Fast/Full admission успешен, five-phase rollout завершён с terminal receipt                                           |
+| Release authority    | runtime и production-control exact `94f9462e…`; Fast `33997351479` и Full `33997351444` успешны, five-phase rollout завершён с terminal receipt                                           |
 | Runtime successor    | Оба worker timer enabled/active; activity `PARTIAL` автоматически продолжает cursor, ledger fallback работает в `LIVE`; worker pool `2`, activity limit `1`, timeout `15m`; API schedulers выключены |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                                                     |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                                                             |
@@ -45,11 +45,14 @@ timer возвращён в enabled/active и автоматически про�
 
 Первый автономный drain обнаружил дополнительный source edge: на
 `1337.langame.ru` успешная пустая ISO-страница сопровождалась отвергнутым
-legacy date probe и превращалась в `RETRY`. Follow-up source repair сохраняет
+legacy date probe и превращалась в `RETRY`. Развёрнутый follow-up сохраняет
 авторитетный пустой ISO-результат только для `400 Validation failed` второго
-probe, не маскируя transport/auth/`5xx`. Нужны exact-main admission и
-controlled rollout, после чего retry-job должен завершиться и очередь —
-продолжить bounded drain.
+probe, не маскируя transport/auth/`5xx`. Exact `94f9462e…` прошёл Fast/Full и
+controlled rollout. Проблемный job больше не находится в `RETRY`:
+`PRODUCT_EXPENSE` завершён на странице 16 с 3000 строками, следующий
+`TRANSACTION PARTIAL` автоматически сохранён как `PENDING` cursor страницы 41.
+На postflight нет `RETRY`/`FAILED` activity jobs и bonus-ledger backlog;
+singleton timer включён и продолжает bounded drain без ручного вмешательства.
 
 На 05.09 installed production-control уже обновлён до exact `fc7b6e65…`, но
 runtime не переключался. Successor остановлен fail-closed из-за orphaned

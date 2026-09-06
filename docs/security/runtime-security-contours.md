@@ -4,10 +4,10 @@
 
 Актуально на: **06.09.2026**
 Runtime implementation baseline:
-`43d447a3c3bd08dcf496f783771c28130e13c82a` (PR #146; включает
+`94f9462ecf3b77b610b8d2ce73fcc68be7625eac` (PR #147; включает
 CURRENT189 application baseline, autonomous continuation для `PARTIAL`,
 worker-owned ledger fallback, exact play-time replay и audited Store execution
-control plane)
+control plane, а также корректный terminal empty-page contract Langame)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -18,9 +18,9 @@ fail-closed правилу одного контура снова сломать
 
 | Область                    | Состояние                                                                                                                                                                                                                                                                      |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Runtime implementation     | CURRENT189 production baseline, merge SHA `43d447a3c3bd08dcf496f783771c28130e13c82a`                                                                                                                                                                                           |
-| Admission merge SHA        | exact-main Fast CI `33992960668` и Full Release Admission `33992960667` для `43d447a3…` — `SUCCESS`                                                                                                                                                                            |
-| Production API topology    | active green exact `43d447a3…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback blue `cfc99902…` остаётся active                                                                                                                            |
+| Runtime implementation     | CURRENT189 production baseline, merge SHA `94f9462ecf3b77b610b8d2ce73fcc68be7625eac`                                                                                                                                                                                           |
+| Admission merge SHA        | exact-main Fast CI `33997351479` и Full Release Admission `33997351444` для `94f9462e…` — `SUCCESS`                                                                                                                                                                            |
+| Production API topology    | active blue exact `94f9462e…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback green `43d447a3…` остаётся active                                                                                                                            |
 | Guest bug-report repair    | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                                                                                |
 | Corporate invite repair    | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                                                                                     |
 | Guest check-in consistency | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                                                                                          |
@@ -455,11 +455,18 @@ SHA `43d447a3c3bd08dcf496f783771c28130e13c82a`:
 Первый bounded drain после активации выявил совместимый, но ошибочный второй
 date probe: `1337.langame.ru` успешно отвечает на ISO-запрос пустой последней
 страницей, после чего отвергает legacy `DD.MM.YYYY` с `400 Validation failed`.
-Source follow-up принимает исходный пустой ISO-ответ как authoritative только
+Развёрнутый follow-up принимает исходный пустой ISO-ответ как authoritative только
 для такого validation-отказа compatibility probe. `401/403`, timeout, network
-и `5xx` не скрываются и остаются bounded retry/failure. До exact-main
-admission и controlled rollout это source-свойство не является production
-baseline.
+и `5xx` не скрываются и остаются bounded retry/failure. Exact-main admission
+`33997351479`/`33997351444` успешен; operation
+`413f9c4b-504e-4cbe-b044-b47aa5598bb9` завершила controlled rollout exact
+`94f9462e…` на active blue при healthy hot-rollback green `43d447a3…`.
+Postflight exact проблемного профиля: `PRODUCT_EXPENSE SUCCESS` (`page=16`,
+`rows=3000`), `TRANSACTION PARTIAL` продолжен как `PENDING` с
+`nextPage=41`; глобально нет `RETRY`/`FAILED` activity jobs и unresolved
+bonus-ledger записей. Один actual evaluation receipt сессии `548185` по-прежнему
+соответствует ровно одному event/intent/reward/entitlement; повторный replay не
+создаёт дубли.
 
 Production activation завершена 30.08.2026 на exact admitted SHA
 `4036d312b5760e9daf292e416288d68949419aaa`:

@@ -969,7 +969,7 @@ record_value() {
   printf '%s' "$value"
 }
 
-previous_slot=''; previous_release_sha=''; latest_cutover_receipt=''; latest_cutover_sha=''
+previous_slot=''; previous_release_sha=''; latest_cutover_receipt=''; latest_cutover_sha=''; latest_generation=''
 assert_latest_cutover_transition() {
   local expected_index_keys actual_index_keys expected_receipt_keys actual_receipt_keys indexed_generation receipt_generation indexed_consumed
   local indexed_path indexed_sha receipt_slot receipt_release receipt_previous_slot receipt_previous_release previous_target activated_target target
@@ -1026,6 +1026,84 @@ assert_latest_cutover_transition() {
   previous_release_sha="$receipt_previous_release"
   latest_cutover_receipt="$indexed_path"
   latest_cutover_sha="$indexed_sha"
+  latest_generation="$receipt_generation"
+}
+
+assert_chain_cutover_receipt() {
+  local path="$1" expected_generation="$2" expected_release="$3"
+  local expected_keys actual_keys generation receipt_release slot previous_slot_value previous_release_value intent_recorded basename_value
+  assert_regular "$path" 'root:root:600'
+  expected_keys="$(printf '%s\n' RECORD_VERSION GENERATION RELEASE_SHA SLOT PREVIOUS_TARGET PREVIOUS_SHA256 PREVIOUS_RUNTIME_KIND PREVIOUS_SLOT PREVIOUS_API_UNIT PREVIOUS_WEB_UNIT PREVIOUS_API_URL PREVIOUS_WEB_URL PREVIOUS_RELEASE_SHA PREVIOUS_MIGRATION PREVIOUS_MIGRATION_COUNT PREVIOUS_WEB_BUILD_ID ACTIVATED_TARGET ACTIVATED_SHA256 INTENT_RECORDED_AT ACCEPTED_AT | sort)"
+  actual_keys="$(awk -F= '{ print $1 }' "$path" | sort)"
+  [[ "$actual_keys" == "$expected_keys"
+    && -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$path")" ]] \
+    || die 'historical cutover receipt schema drifted'
+  [[ "$(record_value "$path" RECORD_VERSION)" == 3 ]] || die 'historical cutover receipt version drifted'
+  generation="$(record_value "$path" GENERATION)"
+  receipt_release="$(record_value "$path" RELEASE_SHA)"
+  slot="$(record_value "$path" SLOT)"
+  previous_slot_value="$(record_value "$path" PREVIOUS_SLOT)"
+  previous_release_value="$(record_value "$path" PREVIOUS_RELEASE_SHA)"
+  intent_recorded="$(record_value "$path" INTENT_RECORDED_AT)"
+  [[ "$generation" == "$expected_generation" && "$receipt_release" == "$expected_release"
+    && "$generation" =~ ^[1-9][0-9]*$ && "$receipt_release" =~ $RELEASE_RE
+    && "$previous_release_value" =~ $RELEASE_RE
+    && ( "$slot" == blue || "$slot" == green )
+    && ( "$previous_slot_value" == blue || "$previous_slot_value" == green )
+    && "$slot" != "$previous_slot_value" ]] || die 'historical cutover receipt identity drifted'
+  [[ "$(record_value "$path" PREVIOUS_RUNTIME_KIND)" == SLOT
+    && "$(record_value "$path" PREVIOUS_TARGET)" == "/etc/nginx/leetplus/upstreams/${previous_slot_value}.conf"
+    && "$(record_value "$path" ACTIVATED_TARGET)" == "/etc/nginx/leetplus/upstreams/${slot}.conf"
+    && "$(record_value "$path" PREVIOUS_API_UNIT)" == "leetplus-api@${previous_slot_value}.service"
+    && "$(record_value "$path" PREVIOUS_WEB_UNIT)" == "leetplus-web@${previous_slot_value}.service"
+    && "$(record_value "$path" PREVIOUS_WEB_BUILD_ID)" == "$previous_release_value" ]] \
+    || die 'historical cutover receipt topology drifted'
+  [[ "$(record_value "$path" PREVIOUS_SHA256)" =~ $SHA_RE
+    && "$(record_value "$path" ACTIVATED_SHA256)" =~ $SHA_RE
+    && "$(record_value "$path" PREVIOUS_MIGRATION_COUNT)" =~ ^[0-9]+$
+    && "$intent_recorded" =~ ^[0-9]{8}T[0-9]{15}Z$
+    && "$(record_value "$path" ACCEPTED_AT)" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$ ]] \
+    || die 'historical cutover receipt evidence drifted'
+  basename_value="$(basename -- "$path")"
+  [[ "$basename_value" == "${intent_recorded}-g${generation}-${receipt_release}-${slot}.receipt" ]] \
+    || die 'historical cutover receipt filename drifted'
+}
+
+authorization_slot=''; cutover_chain_length=''; cutover_chain_sha=''
+load_cutover_chain_to_authorization() {
+  local cursor="$latest_cutover_receipt" cursor_generation="$latest_generation" cursor_release="$release_sha"
+  local cursor_previous cursor_slot cursor_previous_slot expected_generation inventory candidate receipt_digest chain_material='' count=0
+  [[ "$authorization_release_sha" =~ $RELEASE_RE && "$authorization_release_sha" != "$release_sha"
+    && "$cursor_generation" =~ ^[1-9][0-9]*$ ]] || die 'stale timer permit does not precede the current release'
+  while (( count < 128 )); do
+    assert_chain_cutover_receipt "$cursor" "$cursor_generation" "$cursor_release"
+    cursor_previous="$(record_value "$cursor" PREVIOUS_RELEASE_SHA)"
+    cursor_slot="$(record_value "$cursor" SLOT)"
+    cursor_previous_slot="$(record_value "$cursor" PREVIOUS_SLOT)"
+    receipt_digest="$(sha "$cursor")"
+    chain_material+="${cursor_generation}:${cursor_release}:${cursor_previous}:${cursor_slot}:${cursor_previous_slot}:${receipt_digest}"$'\n'
+    count="$((count + 1))"
+    if [[ "$cursor_previous" == "$authorization_release_sha" ]]; then
+      authorization_slot="$cursor_previous_slot"
+      cutover_chain_length="$count"
+      cutover_chain_sha="$(printf '%s' "$chain_material" | sha256sum | awk '{ print $1 }')"
+      [[ "$authorization_slot" == blue || "$authorization_slot" == green ]]
+      [[ "$cutover_chain_length" =~ ^[1-9][0-9]*$ && "$cutover_chain_sha" =~ $SHA_RE ]]
+      return 0
+    fi
+    (( cursor_generation > 1 )) || die 'stale timer permit release is absent from the accepted cutover chain'
+    expected_generation="$((cursor_generation - 1))"
+    inventory="$(find -P /var/lib/leetplus/deploy-receipts -maxdepth 1 -type f \
+      \( -name "*-g${expected_generation}-${cursor_previous}-blue.receipt" -o -name "*-g${expected_generation}-${cursor_previous}-green.receipt" \) -print | sort)"
+    [[ -n "$inventory" && "${#inventory}" -le 4096
+      && "$(printf '%s\n' "$inventory" | wc -l | tr -d '[:space:]')" == 1 ]] \
+      || die 'accepted cutover chain is missing or ambiguous'
+    candidate="$inventory"
+    cursor="$candidate"
+    cursor_generation="$expected_generation"
+    cursor_release="$cursor_previous"
+  done
+  die 'accepted cutover chain exceeds the bounded supersession depth'
 }
 
 supersede_intent_path() { printf '%s/authorization.supersede.intent' "$STATE_ROOT"; }
@@ -1041,7 +1119,7 @@ validate_stale_timer_records() {
   assert_regular "$permit" 'root:leetplus-api-runtime:440'
   stale_permit_sha="$(sha "$permit")"
   authorization_release_sha="$(record_value "$permit" RELEASE_SHA)"
-  [[ "$authorization_release_sha" == "$previous_release_sha" ]] || die 'stale timer permit is not bound to PREVIOUS_RELEASE_SHA'
+  load_cutover_chain_to_authorization
   for binding in \
     "PHASE=timer" \
     "TENANT_SLUG=${tenant_slug}" \
@@ -1061,7 +1139,7 @@ validate_stale_timer_records() {
   [[ "$recorded_service" =~ $SHA_RE && "$recorded_control" =~ $SHA_RE && "$recorded_attempt" =~ ^[1-9][0-9]*$ ]] \
     || die 'stale timer permit historical evidence is invalid'
 
-  active_slot="$previous_slot"; release_sha="$authorization_release_sha"; service_sha="$recorded_service"; control_output_sha="$recorded_control"; canary_date=''
+  active_slot="$authorization_slot"; release_sha="$authorization_release_sha"; service_sha="$recorded_service"; control_output_sha="$recorded_control"; canary_date=''
   attempt="$recorded_attempt"; plan_attempt="$attempt"; plan_json="$(canonical_plan)"; plan_sha="$(printf '%s' "$plan_json" | sha256sum | awk '{ print $1 }')"
   expected_permit="$(receipt_path)"
   [[ "$permit" == "$expected_permit" ]] || die 'stale timer permit filename does not reproduce its immutable identity'
@@ -1092,8 +1170,8 @@ load_stale_timer_authorization() {
 }
 
 canonical_supersede_plan() {
-  printf '{"actionCount":1,"activeSlot":"%s","authorizationReleaseSha":"%s","authorizationReceiptSha256":"%s","controlReleaseSha":"%s","controlVerifierOutputSha256":"%s","currentReleaseSha":"%s","cutoverReceiptSha256":"%s","kind":"LEETPLUS_LANGAME_DAILY_WORKER_SUPERSESSION_V1","previousSlot":"%s","serviceSha256":"%s","successorReceiptSha256":"%s","tenantSlug":"%s","timerEnablementReceiptSha256":"%s","timerSha256":"%s","timerValidationReceiptSha256":"%s","workerEnvSha256":"%s"}' \
-    "$active_slot" "$authorization_release_sha" "$stale_permit_sha" "$control_release_sha" "$control_output_sha" "$release_sha" "$latest_cutover_sha" "$previous_slot" "$service_sha" "$successor_sha" "$tenant_slug" "$(sha "$stale_timer_enabled")" "$timer_sha" "$(sha "$stale_timer_validation")" "$worker_env_sha"
+  printf '{"actionCount":1,"activeSlot":"%s","authorizationReleaseSha":"%s","authorizationReceiptSha256":"%s","authorizationSlot":"%s","controlReleaseSha":"%s","controlVerifierOutputSha256":"%s","currentReleaseSha":"%s","cutoverChainLength":%s,"cutoverChainSha256":"%s","cutoverReceiptSha256":"%s","kind":"LEETPLUS_LANGAME_DAILY_WORKER_SUPERSESSION_V1","previousSlot":"%s","serviceSha256":"%s","successorReceiptSha256":"%s","tenantSlug":"%s","timerEnablementReceiptSha256":"%s","timerSha256":"%s","timerValidationReceiptSha256":"%s","workerEnvSha256":"%s"}' \
+    "$active_slot" "$authorization_release_sha" "$stale_permit_sha" "$authorization_slot" "$control_release_sha" "$control_output_sha" "$release_sha" "$cutover_chain_length" "$cutover_chain_sha" "$latest_cutover_sha" "$previous_slot" "$service_sha" "$successor_sha" "$tenant_slug" "$(sha "$stale_timer_enabled")" "$timer_sha" "$(sha "$stale_timer_validation")" "$worker_env_sha"
 }
 
 prepare_supersession_base() {
@@ -1111,26 +1189,27 @@ write_supersede_intent() {
     printf 'RECORD_VERSION=1\nKIND=LEETPLUS_LANGAME_DAILY_WORKER_SUPERSESSION_INTENT_V1\nPHASE=timer\n'
     printf 'PLAN_SHA256=%s\nCURRENT_RELEASE_SHA=%s\nAUTHORIZATION_RELEASE_SHA=%s\nCONTROL_RELEASE_SHA=%s\n' "$supersede_plan_sha" "$release_sha" "$authorization_release_sha" "$control_release_sha"
     printf 'PERMIT_PATH=%s\nAUTHORIZATION_RECEIPT_SHA256=%s\nTIMER_VALIDATION_RECEIPT_SHA256=%s\nTIMER_ENABLEMENT_RECEIPT_SHA256=%s\n' "$permit" "$stale_permit_sha" "$(sha "$stale_timer_validation")" "$(sha "$stale_timer_enabled")"
-    printf 'WORKER_ENV_SHA256=%s\nSUCCESSOR_RECEIPT_SHA256=%s\nCUTOVER_RECEIPT_PATH=%s\nCUTOVER_RECEIPT_SHA256=%s\nCONTROL_VERIFIER_OUTPUT_SHA256=%s\nSTARTED_AT=%s\n' "$worker_env_sha" "$successor_sha" "$latest_cutover_receipt" "$latest_cutover_sha" "$control_output_sha" "$supersede_timestamp"
+    printf 'AUTHORIZATION_SLOT=%s\nCUTOVER_CHAIN_LENGTH=%s\nCUTOVER_CHAIN_SHA256=%s\nWORKER_ENV_SHA256=%s\nSUCCESSOR_RECEIPT_SHA256=%s\nCUTOVER_RECEIPT_PATH=%s\nCUTOVER_RECEIPT_SHA256=%s\nCONTROL_VERIFIER_OUTPUT_SHA256=%s\nSTARTED_AT=%s\n' "$authorization_slot" "$cutover_chain_length" "$cutover_chain_sha" "$worker_env_sha" "$successor_sha" "$latest_cutover_receipt" "$latest_cutover_sha" "$control_output_sha" "$supersede_timestamp"
   } | atomic_write_root "$path"
 }
 
 load_supersede_intent() {
   local path expected_keys actual_keys recorded_permit_sha recorded_validation_sha recorded_enabled_sha
   path="$(supersede_intent_path)"; assert_regular "$path" 'root:root:400'
-  expected_keys="$(printf '%s\n' RECORD_VERSION KIND PHASE PLAN_SHA256 CURRENT_RELEASE_SHA AUTHORIZATION_RELEASE_SHA CONTROL_RELEASE_SHA PERMIT_PATH AUTHORIZATION_RECEIPT_SHA256 TIMER_VALIDATION_RECEIPT_SHA256 TIMER_ENABLEMENT_RECEIPT_SHA256 WORKER_ENV_SHA256 SUCCESSOR_RECEIPT_SHA256 CUTOVER_RECEIPT_PATH CUTOVER_RECEIPT_SHA256 CONTROL_VERIFIER_OUTPUT_SHA256 STARTED_AT | sort)"
+  expected_keys="$(printf '%s\n' RECORD_VERSION KIND PHASE PLAN_SHA256 CURRENT_RELEASE_SHA AUTHORIZATION_RELEASE_SHA CONTROL_RELEASE_SHA PERMIT_PATH AUTHORIZATION_RECEIPT_SHA256 TIMER_VALIDATION_RECEIPT_SHA256 TIMER_ENABLEMENT_RECEIPT_SHA256 AUTHORIZATION_SLOT CUTOVER_CHAIN_LENGTH CUTOVER_CHAIN_SHA256 WORKER_ENV_SHA256 SUCCESSOR_RECEIPT_SHA256 CUTOVER_RECEIPT_PATH CUTOVER_RECEIPT_SHA256 CONTROL_VERIFIER_OUTPUT_SHA256 STARTED_AT | sort)"
   actual_keys="$(awk -F= '{ print $1 }' "$path" | sort)"
   [[ "$actual_keys" == "$expected_keys" && -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$path")" ]] || die 'worker supersession intent schema drifted'
+  permit="$(record_value "$path" PERMIT_PATH)"; [[ "$permit" =~ ^${STATE_ROOT}/authorization-timer-[1-9][0-9]*-[0-9a-f]{64}\.receipt$ ]] || die 'worker supersession intent permit path is invalid'
+  validate_stale_timer_records
   for binding in 'RECORD_VERSION=1' 'KIND=LEETPLUS_LANGAME_DAILY_WORKER_SUPERSESSION_INTENT_V1' 'PHASE=timer' \
-    "CURRENT_RELEASE_SHA=${release_sha}" "AUTHORIZATION_RELEASE_SHA=${previous_release_sha}" "CONTROL_RELEASE_SHA=${control_release_sha}" \
+    "CURRENT_RELEASE_SHA=${release_sha}" "AUTHORIZATION_RELEASE_SHA=${authorization_release_sha}" "CONTROL_RELEASE_SHA=${control_release_sha}" \
+    "AUTHORIZATION_SLOT=${authorization_slot}" "CUTOVER_CHAIN_LENGTH=${cutover_chain_length}" "CUTOVER_CHAIN_SHA256=${cutover_chain_sha}" \
     "WORKER_ENV_SHA256=${worker_env_sha}" "SUCCESSOR_RECEIPT_SHA256=${successor_sha}" "CUTOVER_RECEIPT_PATH=${latest_cutover_receipt}" \
     "CUTOVER_RECEIPT_SHA256=${latest_cutover_sha}" "CONTROL_VERIFIER_OUTPUT_SHA256=${control_output_sha}"; do
     grep -F -x "$binding" "$path" >/dev/null || die 'worker supersession intent no longer matches current authority'
   done
-  permit="$(record_value "$path" PERMIT_PATH)"; [[ "$permit" =~ ^${STATE_ROOT}/authorization-timer-[1-9][0-9]*-[0-9a-f]{64}\.receipt$ ]] || die 'worker supersession intent permit path is invalid'
   recorded_permit_sha="$(record_value "$path" AUTHORIZATION_RECEIPT_SHA256)"; recorded_validation_sha="$(record_value "$path" TIMER_VALIDATION_RECEIPT_SHA256)"; recorded_enabled_sha="$(record_value "$path" TIMER_ENABLEMENT_RECEIPT_SHA256)"
   [[ "$recorded_permit_sha" =~ $SHA_RE && "$recorded_validation_sha" =~ $SHA_RE && "$recorded_enabled_sha" =~ $SHA_RE ]] || die 'worker supersession intent evidence digests are invalid'
-  validate_stale_timer_records
   [[ "$stale_permit_sha" == "$recorded_permit_sha" && "$(sha "$stale_timer_validation")" == "$recorded_validation_sha" && "$(sha "$stale_timer_enabled")" == "$recorded_enabled_sha" ]] || die 'worker supersession intent source evidence drifted'
   supersede_timestamp="$(record_value "$path" STARTED_AT)"; [[ "$supersede_timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || die 'worker supersession intent timestamp is invalid'
   supersede_plan_sha="$(record_value "$path" PLAN_SHA256)"; supersede_plan_json="$(canonical_supersede_plan)"
@@ -1163,7 +1242,7 @@ supersession_receipt_content() {
   printf 'RECORD_VERSION=1\nKIND=LEETPLUS_LANGAME_DAILY_WORKER_SUPERSESSION_V1\nAUTHORIZATION_SUPERSEDED=true\n'
   printf 'PLAN_SHA256=%s\nCURRENT_RELEASE_SHA=%s\nAUTHORIZATION_RELEASE_SHA=%s\nCONTROL_RELEASE_SHA=%s\n' "$supersede_plan_sha" "$release_sha" "$authorization_release_sha" "$control_release_sha"
   printf 'AUTHORIZATION_RECEIPT_PATH=%s\nAUTHORIZATION_RECEIPT_SHA256=%s\nTIMER_VALIDATION_RECEIPT_SHA256=%s\nTIMER_ENABLEMENT_RECEIPT_SHA256=%s\n' "$permit" "$stale_permit_sha" "$(sha "$stale_timer_validation")" "$(sha "$stale_timer_enabled")"
-  printf 'WORKER_ENV_SHA256=%s\nSUCCESSOR_RECEIPT_SHA256=%s\nCUTOVER_RECEIPT_PATH=%s\nCUTOVER_RECEIPT_SHA256=%s\nCONTROL_VERIFIER_OUTPUT_SHA256=%s\nSUPERSEDED_AT=%s\n' "$worker_env_sha" "$successor_sha" "$latest_cutover_receipt" "$latest_cutover_sha" "$control_output_sha" "$supersede_timestamp"
+  printf 'AUTHORIZATION_SLOT=%s\nCUTOVER_CHAIN_LENGTH=%s\nCUTOVER_CHAIN_SHA256=%s\nWORKER_ENV_SHA256=%s\nSUCCESSOR_RECEIPT_SHA256=%s\nCUTOVER_RECEIPT_PATH=%s\nCUTOVER_RECEIPT_SHA256=%s\nCONTROL_VERIFIER_OUTPUT_SHA256=%s\nSUPERSEDED_AT=%s\n' "$authorization_slot" "$cutover_chain_length" "$cutover_chain_sha" "$worker_env_sha" "$successor_sha" "$latest_cutover_receipt" "$latest_cutover_sha" "$control_output_sha" "$supersede_timestamp"
 }
 
 write_supersession_receipt() {
@@ -1185,7 +1264,7 @@ assert_supersession_receipt() {
   [[ "$(record_value "$pointer" RECORD_VERSION)" == 1 ]] || die 'worker supersession pointer version drifted'
   path="$(record_value "$pointer" RECEIPT_PATH)"; [[ "$path" == "$(supersession_receipt_path "$permit")" ]] || die 'worker supersession pointer path drifted'
   assert_regular "$path" 'root:root:400'; [[ "$(record_value "$pointer" RECEIPT_SHA256)" == "$(sha "$path")" ]] || die 'worker supersession pointer digest drifted'
-  expected_keys="$(printf '%s\n' RECORD_VERSION KIND AUTHORIZATION_SUPERSEDED PLAN_SHA256 CURRENT_RELEASE_SHA AUTHORIZATION_RELEASE_SHA CONTROL_RELEASE_SHA AUTHORIZATION_RECEIPT_PATH AUTHORIZATION_RECEIPT_SHA256 TIMER_VALIDATION_RECEIPT_SHA256 TIMER_ENABLEMENT_RECEIPT_SHA256 WORKER_ENV_SHA256 SUCCESSOR_RECEIPT_SHA256 CUTOVER_RECEIPT_PATH CUTOVER_RECEIPT_SHA256 CONTROL_VERIFIER_OUTPUT_SHA256 SUPERSEDED_AT | sort)"
+  expected_keys="$(printf '%s\n' RECORD_VERSION KIND AUTHORIZATION_SUPERSEDED PLAN_SHA256 CURRENT_RELEASE_SHA AUTHORIZATION_RELEASE_SHA CONTROL_RELEASE_SHA AUTHORIZATION_RECEIPT_PATH AUTHORIZATION_RECEIPT_SHA256 TIMER_VALIDATION_RECEIPT_SHA256 TIMER_ENABLEMENT_RECEIPT_SHA256 AUTHORIZATION_SLOT CUTOVER_CHAIN_LENGTH CUTOVER_CHAIN_SHA256 WORKER_ENV_SHA256 SUCCESSOR_RECEIPT_SHA256 CUTOVER_RECEIPT_PATH CUTOVER_RECEIPT_SHA256 CONTROL_VERIFIER_OUTPUT_SHA256 SUPERSEDED_AT | sort)"
   actual_keys="$(awk -F= '{ print $1 }' "$path" | sort)"
   [[ "$actual_keys" == "$expected_keys" && -z "$(awk -F= 'NF < 2 || seen[$1]++ { print; exit }' "$path")" ]] || die 'worker supersession receipt schema drifted'
   cmp -s -- "$path" <(supersession_receipt_content) || die 'worker supersession receipt content drifted'
@@ -1196,13 +1275,14 @@ load_latest_supersession() {
   pointer="$(supersession_pointer_path)"; assert_regular "$pointer" 'root:root:400'
   path="$(record_value "$pointer" RECEIPT_PATH)"; [[ "$path" =~ ^${STATE_ROOT}/supersession-timer-[0-9a-f]{64}\.receipt$ ]] || die 'latest worker supersession receipt path is invalid'
   assert_regular "$path" 'root:root:400'; [[ "$(record_value "$pointer" RECEIPT_SHA256)" == "$(sha "$path")" ]] || die 'latest worker supersession receipt digest drifted'
+  permit="$(record_value "$path" AUTHORIZATION_RECEIPT_PATH)"; validate_stale_timer_records
   for binding in 'RECORD_VERSION=1' 'KIND=LEETPLUS_LANGAME_DAILY_WORKER_SUPERSESSION_V1' 'AUTHORIZATION_SUPERSEDED=true' \
-    "CURRENT_RELEASE_SHA=${release_sha}" "AUTHORIZATION_RELEASE_SHA=${previous_release_sha}" "CONTROL_RELEASE_SHA=${control_release_sha}" \
+    "CURRENT_RELEASE_SHA=${release_sha}" "AUTHORIZATION_RELEASE_SHA=${authorization_release_sha}" "CONTROL_RELEASE_SHA=${control_release_sha}" \
+    "AUTHORIZATION_SLOT=${authorization_slot}" "CUTOVER_CHAIN_LENGTH=${cutover_chain_length}" "CUTOVER_CHAIN_SHA256=${cutover_chain_sha}" \
     "WORKER_ENV_SHA256=${worker_env_sha}" "SUCCESSOR_RECEIPT_SHA256=${successor_sha}" "CUTOVER_RECEIPT_PATH=${latest_cutover_receipt}" \
     "CUTOVER_RECEIPT_SHA256=${latest_cutover_sha}" "CONTROL_VERIFIER_OUTPUT_SHA256=${control_output_sha}"; do
     grep -F -x "$binding" "$path" >/dev/null || die 'latest worker supersession receipt no longer matches current authority'
   done
-  permit="$(record_value "$path" AUTHORIZATION_RECEIPT_PATH)"; validate_stale_timer_records
   [[ "$(record_value "$path" AUTHORIZATION_RECEIPT_SHA256)" == "$stale_permit_sha"
     && "$(record_value "$path" TIMER_VALIDATION_RECEIPT_SHA256)" == "$(sha "$stale_timer_validation")"
     && "$(record_value "$path" TIMER_ENABLEMENT_RECEIPT_SHA256)" == "$(sha "$stale_timer_enabled")" ]] \

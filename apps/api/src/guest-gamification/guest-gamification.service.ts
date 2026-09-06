@@ -1315,6 +1315,7 @@ export type GuestGameReward = {
   rewardDropChance: number | null;
   rewardCode: string | null;
   claimPayload: string | null;
+  sourceEntitlementStatus: string | null;
   claimRequired: boolean;
   deliveryRequestedAt: string | null;
   claimExpiresAt: string | null;
@@ -25544,6 +25545,7 @@ function mapReward(row: RewardRow): GuestGameReward {
       legacyDeliveryEligible && row.rewardCode && walletState !== 'REDEEMED'
         ? buildRewardClaimPayload(row.id, row.rewardCode)
         : null,
+    sourceEntitlementStatus: row.sourceEntitlements[0]?.status ?? null,
     claimRequired: row.claimRequired,
     deliveryRequestedAt: iso(row.deliveryRequestedAt),
     claimExpiresAt: iso(row.claimExpiresAt),

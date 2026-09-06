@@ -494,6 +494,10 @@ export type GuestGameReward = {
   rewardDropChance: number | null;
   rewardCode: string | null;
   claimPayload: string | null;
+  sourceEntitlementStatus: string | null;
+  claimRequired: boolean;
+  deliveryRequestedAt: string | null;
+  claimExpiresAt: string | null;
   qualifiedAt: string;
   expiresAt: string | null;
   paidAt: string | null;

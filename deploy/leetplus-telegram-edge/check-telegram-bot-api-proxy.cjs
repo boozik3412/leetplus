@@ -1,6 +1,22 @@
 'use strict';
 
-const { ProxyAgent, fetch } = require('undici');
+const { createRequire } = require('module');
+const { resolve } = require('path');
+
+function loadUndici() {
+  try {
+    return require('undici');
+  } catch (error) {
+    if (error?.code !== 'MODULE_NOT_FOUND') throw error;
+
+    const requireFromApiWorkspace = createRequire(
+      resolve(__dirname, '../../apps/api/package.json'),
+    );
+    return requireFromApiWorkspace('undici');
+  }
+}
+
+const { ProxyAgent, fetch } = loadUndici();
 
 const token = process.env.GUEST_GAME_TG_EDGE_BOT_TOKEN?.trim();
 const proxyUrl = process.env.GUEST_GAME_TG_EDGE_TELEGRAM_PROXY_URL?.trim();

@@ -28,3 +28,4 @@ docs/deployment/production-artifact/** text eol=lf
 .github/workflows/*.yml text eol=lf
 docs/deployment/release-impact-classifier.json text eol=lf
 docs/deployment/release-candidate-admission.md text eol=lf
+deploy/leetplus-telegram-edge/** text eol=lf

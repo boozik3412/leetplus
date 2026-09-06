@@ -118,6 +118,16 @@ node C:\Users\ALIENWARE\Desktop\leetplus\.codex-tools\node_modules\pnpm\bin\pnpm
 
 - исключить `.git`, `node_modules`, `.next`, `dist`, `.env*`, логи, кеши
 - не класть реальные токены в архив
+- экспортировать exact-main Git tree с каноническими LF байтами и сохранить
+  digest:
+
+```powershell
+git -c core.autocrlf=false archive --format=tar.gz `
+  --output=leetplus-telegram-edge-source.tar.gz <exact-main-sha>
+Get-FileHash -Algorithm SHA256 leetplus-telegram-edge-source.tar.gz
+```
+
+На 1337 архив нельзя распаковывать до совпадения того же SHA-256.
 
 4. На 1337 перед заменой сделать backup:
 

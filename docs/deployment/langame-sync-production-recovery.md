@@ -2,11 +2,12 @@
 
 Статус: **backfill canary и stable timer приняты; оба worker timer активны**
 
-Актуально на: **05.09.2026**
+Актуально на: **06.09.2026**
 
-Production checkpoint: active green `81ae920c…`, rollback blue `72b1b053…`,
-schema `CURRENT_189/189`. Daily worker прошёл повторный canary `2026-09-04`
-`4/4`, stable timer включён. Частый bonus-ledger/gamification singleton имеет
+Production checkpoint: active green `92f29b7a…`, rollback blue `94f9462e…`,
+schema `CURRENT_189/189`. Daily worker прошёл canary `2026-09-05` для одного
+INTERNAL tenant, stable timer принят и включён. Частый
+bonus-ledger/gamification singleton имеет
 отдельный Prisma pool `connection_limit=2`, activity batch `1` и effective
 `TimeoutStartSec=900`; оба API slot сохраняют встроенные schedulers
 выключенными. Эти границы не расширяют INTERNAL tenant authority и нужны,
@@ -90,6 +91,42 @@ corporate scope или Langame credentials. Внешние tenant остаютс
     сериализует их одним пробелом; whitespace не является authority. Отсутствие
     любого обязательного пути, третий drop-in, linked/unsafe file или drift его
     содержимого по-прежнему fail-closed.
+
+15. Supersession устаревшего timer permit проходит не только через последний
+    соседний release, а через bounded непрерывную цепочку не более 128
+    immutable accepted cutover receipts. Каждый шаг обязан уменьшать generation
+    ровно на один и связывать current/previous SHA; пропуск, неоднозначность,
+    неверный slot или изменившийся receipt отклоняются до effect. План фиксирует
+    исходный authorization slot, длину и SHA-256 всей цепочки. Операция только
+    снимает старое полномочие и никогда не запускает worker.
+
+## Фактический production checkpoint 06.09.2026
+
+- PR #148, merge SHA `92f29b7a9fbf518589b621e70535bfc089733f48`;
+  exact-main Fast CI `34001346341` и Full Release Admission `34001346308` —
+  `SUCCESS`;
+- five-phase operation `b2dac027-cd4c-4b2d-ab98-531d6cb7518f` завершена;
+  final receipt SHA-256
+  `adcd96aecdc140ea7dc57bfa109d8794817bc872bc2a1bd111b17f9e363b55496`;
+- active green `92f29b7a…`, hot rollback blue `94f9462e…`; оба loopback и
+  public readiness принимают exact `CURRENT_189/189` и соответствующий Web
+  build ID;
+- старый permit release `03db1358…` supersede-нут через непрерывную цепочку
+  четырёх cutover receipts. Supersession receipt SHA-256
+  `2cd5a2a912cbe168fbe36182c19fedd2fcb7be270982174743b3a8885d0dbc6a`;
+- canary `2026-09-05` обработал `1/1` INTERNAL tenant и завершился `PASS`;
+  execution receipt SHA-256
+  `0aa4c3611f916d10f4c9c434ef2f30f324f0978ceaa9166c05f3be39200b1794`;
+- stable timer validation/enable receipts имеют SHA-256
+  `f9b1ae2eadaaad06fae53d70c96cb235dfd0f66a59e540ae6686efd883b9105c`
+  и `d55aa4ff3c4cc09a0f70c7aef4f00aff412a597de5120effa3ccffa09841ac9c`;
+  daily и frequent timer — `enabled + active`, оба oneshot service после
+  прохода имеют `Result=success`, `ExecMainStatus=0`, `MainPID=0`;
+- activity job `547df0dd-120c-44f7-b033-2889da4d5eec` завершён `SUCCESS`:
+  все пять источников успешны, `TRANSACTION page=77 / rows=3211`;
+- replay сессии `548185` остаётся строго `1 event / 1 intent / 1 reward /
+  1 AVAILABLE entitlement / 0 bonus ledger`; duplicate idempotency keys и
+  новые source failure за 24 часа — `0`, unresolved bonus ledger — `0`.
 
 ## Фактический production checkpoint 05.09.2026
 

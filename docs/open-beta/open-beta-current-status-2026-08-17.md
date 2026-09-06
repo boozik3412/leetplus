@@ -3,9 +3,9 @@
 | Поле                 | Состояние                                                                                                                                                            |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                                                         |
-| Production runtime   | healthy; active blue `94f9462e…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback green `43d447a3…` ready                                                       |
+| Production runtime   | healthy; active green `92f29b7a…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue `94f9462e…` ready                                                       |
 | Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                                                         |
-| Release authority    | runtime и production-control exact `94f9462e…`; Fast `33997351479` и Full `33997351444` успешны, five-phase rollout завершён с terminal receipt                                           |
+| Release authority    | runtime и production-control exact `92f29b7a…`; Fast `34001346341` и Full `34001346308` успешны, five-phase rollout `b2dac027…` завершён с terminal receipt                                           |
 | Runtime successor    | Оба worker timer enabled/active; activity `PARTIAL` автоматически продолжает cursor, ledger fallback работает в `LIVE`; worker pool `2`, activity limit `1`, timeout `15m`; API schedulers выключены |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                                                     |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                                                             |
@@ -15,7 +15,15 @@
 | Offline/USB key      | исключён из beta critical path                                                                                                                                       |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                                                                   |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
-| Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`, повтор 04.09 — `4/4`; daily timer enabled/active, следующий scheduled run 06.09               |
+| Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`, canary 05.09 обработал `1/1` INTERNAL tenant; daily timer enabled/active, следующий scheduled run 07.09               |
+
+Production follow-up 06.09 завершён на exact `92f29b7a…`. Устаревший
+daily-worker permit `03db1358…` безопасно снят через проверенную непрерывную
+цепочку четырёх cutover receipts; новый canary `2026-09-05`, stable timer
+plan/apply/check и оба exact readiness прошли. Daily и frequent timer сейчас
+`enabled + active`; новые source failure за 24 часа, unresolved bonus ledger и
+duplicate event/reward/intent/ledger keys равны `0`. Решение внешнего beta
+остаётся `NO-GO` по независимым Gate 1MT/2, а не из-за worker-контура.
 
 Operational-проверка 05.09 на active `81ae920c…` нашла не дефект public или
 corporate контура, а drift профиля singleton worker: activity batch был `3`,

@@ -9,8 +9,8 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий production runtime baseline — merge SHA
-`94f9462ecf3b77b610b8d2ce73fcc68be7625eac` (PR #147). Active blue
-`94f9462e…` и hot-rollback green `43d447a3…` работают в
+`92f29b7a9fbf518589b621e70535bfc089733f48` (PR #148). Active green
+`92f29b7a…` и hot-rollback blue `94f9462e…` работают в
 `COMBINED`, оба проходят exact readiness `CURRENT_189/189`.
 `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
 `GUEST_BUG_REPORTING_MODE=LIVE`. Split systemd/nginx candidate остаётся
@@ -66,6 +66,22 @@ five-phase operation `413f9c4b-504e-4cbe-b044-b47aa5598bb9` терминальн
 `TRANSACTION PARTIAL` сохранён как штатный `PENDING` cursor (`nextPage=41`).
 На postflight нет `RETRY`/`FAILED` activity jobs, bonus-ledger backlog равен
 нулю, frequent timer включён и активен.
+
+Финальный production follow-up 06.09 устранён без расширения worker authority.
+После нескольких cutover старый daily-worker permit всё ещё был привязан к
+`03db1358…`, поэтому single-hop supersession fail-closed остановил daily timer.
+PR #148 добавил проверяемый непрерывный immutable cutover chain: exact-main Fast
+CI `34001346341` и Full Release Admission `34001346308` завершены `SUCCESS`, а
+five-phase operation `b2dac027-cd4c-4b2d-ab98-531d6cb7518f` развернула
+`92f29b7a…` с terminal receipt
+`adcd96aecdc140ea7dc57bfa109d8794817bc872bc2a1bd111b17f9e363b55496`.
+Authority принял bounded chain длиной `4`, штатно supersede-нул старый permit,
+после чего canary `2026-09-05` и stable timer `plan/apply/check` прошли `PASS`.
+Оба worker timer снова `enabled + active`; API schedulers остаются выключены.
+Точный activity job `547df0dd-120c-44f7-b033-2889da4d5eec` завершён
+`SUCCESS`, включая `TRANSACTION page=77 / rows=3211`; новых source failure за
+24 часа, unresolved bonus-ledger записей и дублей event/reward/intent/ledger
+idempotency keys — `0`.
 
 Точечная production-сверка двух обращений отделила дефект от штатной
 последовательности. Для `LP-BUG-AFDE6B03` восстановлен один пропущенный

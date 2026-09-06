@@ -121,6 +121,17 @@ node C:\Users\ALIENWARE\Desktop\leetplus\.codex-tools\node_modules\pnpm\bin\pnpm
 node C:\Users\ALIENWARE\Desktop\leetplus\.codex-tools\node_modules\pnpm\bin\pnpm.cjs --filter web build
 ```
 
+Source archive выпускать из принятого exact-main SHA с каноническими LF
+байтами, независимо от Windows checkout:
+
+```powershell
+git -c core.autocrlf=false archive --format=tar.gz `
+  --output=leetplus-telegram-edge-source.tar.gz <exact-main-sha>
+Get-FileHash -Algorithm SHA256 leetplus-telegram-edge-source.tar.gz
+```
+
+Тот же SHA-256 обязательно сверяется на 1337 до распаковки.
+
 2. На 1337 перед заменой сделать backup:
 
 ```bash

@@ -13,6 +13,15 @@ source tree and before any build, install and validate its complete operational
 contract:
 
 ```bash
+git -c core.autocrlf=false archive --format=tar.gz \
+  --output=leetplus-telegram-edge-source.tar.gz <exact-main-sha>
+```
+
+The explicit Git setting plus the repository `.gitattributes` keep the exported
+operational files LF-only even when the operator checkout is on Windows. Record
+the archive SHA-256 before transfer and verify the same digest on 1337.
+
+```bash
 cd /srv/leetplus-telegram-edge
 install -m 0644 app/deploy/leetplus-telegram-edge/docker-compose.yml \
   docker-compose.yml
@@ -122,6 +131,21 @@ over a larger live offset:
 sha256sum data/telegram-poller-state.json
 docker compose stop telegram-poller
 cp -a data/telegram-poller-state.json backups/telegram-poller-state.before-update.json
+```
+
+After stopping the only poller and before replacing its image, run the
+non-consuming candidate preflight from the reserved poller address. It calls
+only `getMe` and `getWebhookInfo`; never add `getUpdates` to this check:
+
+```bash
+test -n "${TELEGRAM_EDGE_CANDIDATE_IMAGE:?set exact candidate image}"
+docker run --rm \
+  --network leetplus_telegram_edge_default \
+  --ip 172.25.0.10 \
+  --env-file /srv/leetplus-telegram-edge/secrets/telegram-edge.env \
+  -e GUEST_GAME_TG_EDGE_TELEGRAM_PROXY_URL=http://172.25.0.1:18118 \
+  "$TELEGRAM_EDGE_CANDIDATE_IMAGE" \
+  node /app/deploy/leetplus-telegram-edge/check-telegram-bot-api-proxy.cjs
 ```
 
 Optional live Telegram delivery consumer:

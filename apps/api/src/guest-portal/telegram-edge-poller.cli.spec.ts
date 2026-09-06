@@ -8,12 +8,17 @@ import type {
 } from './telegram-edge-adapter';
 import {
   deleteTelegramWebhook,
+  evaluateTelegramPollingHealth,
   getTelegramUpdates,
   loadTelegramPollingConfig,
+  readPollingHeartbeat,
   readPollingOffset,
   runTelegramPollingTick,
+  telegramPollingFailure,
   validatePollingConfig,
+  writePollingHeartbeat,
   writePollingOffset,
+  type TelegramPollingHeartbeat,
   type TelegramPollingConfig,
 } from './telegram-edge-poller.cli';
 
@@ -36,6 +41,11 @@ describe('telegram edge poller', () => {
     allowedUpdates: ['message', 'callback_query'],
     deleteWebhookOnStart: true,
     dropPendingUpdatesOnDelete: false,
+    heartbeatMaxAgeMs: 150_000,
+    heartbeatPath: join(
+      tmpdir(),
+      `leetplus-telegram-poller-heartbeat-${process.pid}.json`,
+    ),
     limit: 100,
     retryDelayMs: 5000,
     statePath: join(tmpdir(), `leetplus-telegram-poller-${process.pid}.json`),
@@ -44,6 +54,7 @@ describe('telegram edge poller', () => {
 
   afterEach(async () => {
     await rm(pollingConfig.statePath, { force: true });
+    await rm(pollingConfig.heartbeatPath, { force: true });
   });
 
   it('loads polling config with safe 1337 defaults', () => {
@@ -53,6 +64,8 @@ describe('telegram edge poller', () => {
       allowedUpdates: ['message', 'edited_message', 'callback_query'],
       deleteWebhookOnStart: true,
       dropPendingUpdatesOnDelete: false,
+      heartbeatMaxAgeMs: 150_000,
+      heartbeatPath: '/app/data/telegram-poller-heartbeat.json',
       limit: 100,
       retryDelayMs: 5000,
       statePath: '/app/data/telegram-poller-state.json',
@@ -176,6 +189,80 @@ describe('telegram edge poller', () => {
     await writePollingOffset(pollingConfig.statePath, 123);
 
     expect(await readPollingOffset(pollingConfig.statePath)).toBe(123);
+  });
+
+  it('persists a sanitized heartbeat and evaluates freshness', async () => {
+    const heartbeat: TelegramPollingHeartbeat = {
+      consecutiveFailures: 0,
+      errorCategory: null,
+      errorCode: null,
+      lastErrorAt: null,
+      lastPollStartedAt: '2026-09-06T13:00:00.000Z',
+      lastPollSucceededAt: '2026-09-06T13:00:50.000Z',
+      offset: 225150231,
+      status: 'OK',
+      updatedAt: '2026-09-06T13:00:50.000Z',
+      version: 1,
+    };
+
+    await writePollingHeartbeat(pollingConfig.heartbeatPath, heartbeat);
+
+    const stored = await readPollingHeartbeat(pollingConfig.heartbeatPath);
+
+    expect(stored).toEqual(heartbeat);
+    expect(
+      evaluateTelegramPollingHealth(
+        stored,
+        150_000,
+        Date.parse('2026-09-06T13:02:00.000Z'),
+      ),
+    ).toEqual({
+      ageMs: 70_000,
+      consecutiveFailures: 0,
+      healthy: true,
+      reason: 'HEALTHY',
+    });
+  });
+
+  it('fails health when the last successful poll is stale', () => {
+    const heartbeat: TelegramPollingHeartbeat = {
+      consecutiveFailures: 18,
+      errorCategory: 'CONNECT',
+      errorCode: 'ECONNRESET',
+      lastErrorAt: '2026-09-06T13:04:00.000Z',
+      lastPollStartedAt: '2026-09-06T13:04:00.000Z',
+      lastPollSucceededAt: '2026-09-06T13:00:00.000Z',
+      offset: 225150231,
+      status: 'ERROR',
+      updatedAt: '2026-09-06T13:04:00.000Z',
+      version: 1,
+    };
+
+    expect(
+      evaluateTelegramPollingHealth(
+        heartbeat,
+        150_000,
+        Date.parse('2026-09-06T13:04:00.000Z'),
+      ),
+    ).toEqual({
+      ageMs: 240_000,
+      consecutiveFailures: 18,
+      healthy: false,
+      reason: 'STALE',
+    });
+  });
+
+  it('classifies nested fetch failures without returning cause text', () => {
+    const error = new TypeError('fetch failed', {
+      cause: Object.assign(new Error('private upstream detail'), {
+        code: 'ECONNRESET',
+      }),
+    });
+
+    expect(telegramPollingFailure(error)).toEqual({
+      category: 'CONNECT',
+      code: 'ECONNRESET',
+    });
   });
 });
 

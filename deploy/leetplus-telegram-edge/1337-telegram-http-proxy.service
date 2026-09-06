@@ -1,0 +1,33 @@
+[Unit]
+Description=LeetPlus Telegram HTTP CONNECT to Tor bridge
+Wants=network-online.target
+After=network-online.target tor@default.service docker.service
+Requires=tor@default.service
+ConditionPathExists=/etc/privoxy/leetplus-telegram-http-proxy.conf
+
+[Service]
+Type=simple
+User=privoxy
+Group=nogroup
+ExecStart=/usr/sbin/privoxy --no-daemon /etc/privoxy/leetplus-telegram-http-proxy.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/log/privoxy
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

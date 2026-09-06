@@ -4,11 +4,11 @@
 
 Актуально на: **06.09.2026**
 Runtime implementation baseline:
-`92f29b7a9fbf518589b621e70535bfc089733f48` (PR #148; включает
+`c14272cabf085d4f630500c7cbbe1991288b0dda` (PR #150; включает
 CURRENT189 application baseline, autonomous continuation для `PARTIAL`,
 worker-owned ledger fallback, exact play-time replay и audited Store execution
-control plane, корректный terminal empty-page contract Langame и bounded
-multi-cutover supersession устаревшего worker permit)
+control plane, корректный terminal empty-page contract Langame, bounded
+multi-cutover supersession устаревшего worker permit и понятные статусы наград)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -19,9 +19,9 @@ fail-closed правилу одного контура снова сломать
 
 | Область                    | Состояние                                                                                                                                                                                                                                                                      |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Runtime implementation     | CURRENT189 production baseline, merge SHA `92f29b7a9fbf518589b621e70535bfc089733f48`                                                                                                                                                                                           |
+| Runtime implementation     | CURRENT189 production baseline, merge SHA `c14272cabf085d4f630500c7cbbe1991288b0dda`; hot rollback `92f29b7a9fbf518589b621e70535bfc089733f48`                                                                                                                                   |
 | Admission merge SHA        | exact-main Fast CI `34001346341` и Full Release Admission `34001346308` для `92f29b7a…` — `SUCCESS`                                                                                                                                                                            |
-| Production API topology    | active green exact `92f29b7a…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback blue `94f9462e…` остаётся active                                                                                                                            |
+| Production API topology    | active blue exact `c14272ca…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback `92f29b7a…`                                                                                                                                                    |
 | Guest bug-report repair    | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                                                                                |
 | Corporate invite repair    | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                                                                                     |
 | Guest check-in consistency | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                                                                                          |
@@ -29,7 +29,8 @@ fail-closed правилу одного контура снова сломать
 | Corporate landing          | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                             |
 | Release acceleration       | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
 | Langame recovery           | оба systemd timer enabled/active; daily canary `2026-09-05` принят на exact `92f29b7a…`; старый permit снят через проверенную цепочку 4 cutover receipts; bonus-ledger/gamification singleton автономно продолжает `PARTIAL` по одному профилю с pool `2` и timeout `15m`; external unattended остаётся deny |
-| Внешний open beta          | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                                                                               |
+| Telegram guest auth        | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                                   |
+| Внешний open beta          | `NO-GO` до Telegram end-to-end canary, admitted heartbeat/readiness rollout, закрытия SSH credential/public-port incident и оставшихся Gate 1MT/2                                                                                                                             |
 
 Store execution fence остаётся отдельным явным полномочием. Migration 165
 правильно создала все существующие Store с `backgroundExecutionEnabled=false`,
@@ -779,6 +780,37 @@ Exact runtime `a130c13e8d694b605d86a924b1524a6174ae1b51` разделяет эт
 7. Raw phone, provider token/API id, raw Telegram update/chat id и Langame
    payload не возвращаются в браузер и не попадают в readiness/audit.
 
+### Telegram polling egress и liveness
+
+1. Production использует long polling и ровно один `telegram-poller` на bot
+   token. Webhook URL остается пустым; ручной `getUpdates`, второй consumer и
+   `drop_pending_updates=true` запрещены.
+2. Poller имеет process-scoped egress и не использует router fake-IP через
+   transparent `TG_PROXY`. Exact route на 1337:
+   `172.25.0.10 -> HTTP CONNECT 172.25.0.1:18118 -> Privoxy
+   forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
+3. Privoxy слушает только gateway private Docker network, не имеет published,
+   LAN или public listener и ACL-разрешает только exact poller IP. Штатный
+   default `privoxy.service` выключен; работает hardened
+   `1337-telegram-http-proxy.service`.
+4. `GUEST_GAME_TG_EDGE_TELEGRAM_PROXY_URL` задается только poller service и
+   имеет `http(s)` scheme. Подстановка `socks5h://` в текущий Undici adapter
+   является startup error, а hard-coded Telegram IP/fake-IP allowlist не
+   допускаются.
+5. Poller пишет отдельный atomic heartbeat после каждого успешного poll tick,
+   включая пустой ответ. Heartbeat содержит только timestamps, monotonic
+   offset, failure count и allowlisted error category/code; raw update, chat,
+   contact, URL с token и response body туда не попадают.
+6. `Up`/наличие env не является readiness. Docker health и operational alert
+   fail-closed при stale successful heartbeat; проверка health сама не вызывает
+   `getUpdates`.
+7. Перед update state сохраняется и хешируется после остановки единственного
+   poller. Rollback может вернуть config/image, но никогда не перезаписывает
+   более новый offset старым snapshot.
+8. Production GO требует non-consuming `getMe`/`getWebhookInfo`, пустой webhook,
+   ровно один process, свежий heartbeat, monotonic state, Telegram canary и
+   отрицательную public/corporate/worker matrix.
+
 ## Инварианты корпоративного входа
 
 Маршрут после login — часть безопасного UX, но не замена authorization:
@@ -837,9 +869,11 @@ Exact runtime `a130c13e8d694b605d86a924b1524a6174ae1b51` разделяет эт
 ## Langame и outbound network boundary
 
 1. Web runtime остаётся localhost-only.
-2. API/worker может требовать reviewed TCP/DNS egress к Langame, SMTP, SMS.ru
-   и другим явно принятым providers. Копирование Web sandbox на API 27.08.2026
-   остановило Langame/check-in и не должно повторяться.
+2. API/worker может требовать reviewed TCP/DNS egress к Langame, Telegram,
+   SMTP, SMS.ru и другим явно принятым providers. Telegram hostname должен
+   сохраняться до SOCKS remote DNS; fake-IP нельзя передавать в Tor как raw
+   destination. Копирование Web sandbox на API 27.08.2026 остановило
+   Langame/check-in и не должно повторяться.
 3. Каждый dedicated runtime получает только свой dependency allowlist; egress
    не означает доступ ко всем secret sets.
 4. Для shared Langame domain fact без `club_id` допустима domain routing только

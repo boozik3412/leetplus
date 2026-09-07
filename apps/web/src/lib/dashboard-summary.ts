@@ -21,6 +21,10 @@ export type DashboardSalesTrendSegment = {
   revenue: number;
   soldQuantity: number;
   grossProfit: number;
+  visitsCount: number;
+  saleOperationCount: number;
+  saleOperationsPer100Visits: number | null;
+  averageSaleOperationAmount: number | null;
   clubRevenue: number;
   revenueSharePercent: number | null;
   revenueDeltaPercent: number | null;
@@ -35,6 +39,81 @@ export type DashboardSalesTrendSegment = {
   noSalesSkuDeltaPercent21: number | null;
   outOfStockSkuCount: number;
   outOfStockSkuDeltaPercent: number | null;
+};
+
+export type DashboardGrowthMetric = {
+  value: number;
+  previousValue: number;
+  deltaPercent: number | null;
+};
+
+export type DashboardOptionalGrowthMetric = {
+  value: number | null;
+  previousValue: number | null;
+  deltaPercent: number | null;
+};
+
+export type DashboardMetricCalculation = {
+  key: string;
+  label: string;
+  source: string;
+  formula: string;
+  grain: string;
+  state: "READY" | "NO_DATA" | "PARTIAL_COVERAGE";
+  note: string | null;
+};
+
+export type DashboardAssortmentDrivers = {
+  identifiedActiveGuests: number;
+  guestIdentificationCoveragePercent: number | null;
+  sessionsPerIdentifiedGuest: number | null;
+  stockTrackedSkuCount: number;
+  stockCoveragePercent: number | null;
+  availabilityPercent: number | null;
+  itemsPerSaleOperation: number | null;
+  averageItemPrice: number | null;
+  costCoveragePercent: number | null;
+  leadingCategory: {
+    categoryId: string | null;
+    categoryName: string;
+    revenueSharePercent: number;
+  } | null;
+  productMarginPercent: number | null;
+};
+
+export type DashboardAssortmentOpportunity = {
+  state: "READY" | "NO_DATA";
+  storeId: string | null;
+  storeName: string | null;
+  currentSharePercent: number | null;
+  benchmarkSharePercent: number | null;
+  gapPoints: number | null;
+  revenueOpportunity: number | null;
+  reason: string | null;
+};
+
+export type DashboardAssortmentGrowth = {
+  visits: DashboardGrowthMetric;
+  saleOperations: DashboardGrowthMetric & {
+    per100Visits: number | null;
+    previousPer100Visits: number | null;
+    per100VisitsDeltaPoints: number | null;
+  };
+  averageSaleOperationAmount: DashboardOptionalGrowthMetric;
+  revenue: DashboardGrowthMetric;
+  drivers: DashboardAssortmentDrivers;
+  opportunity: DashboardAssortmentOpportunity;
+  calculations: DashboardMetricCalculation[];
+  methodology: {
+    visitUnit: "GAME_SESSION";
+    saleUnit: "PRODUCT_SALE_OPERATION";
+    saleUnitIsExact: true;
+    receiptMetrics: {
+      state: "SOURCE_UNAVAILABLE";
+      requiredField: "RECEIPT_OR_ORDER_ID";
+      reason: string;
+    };
+  };
 };
 
 export type DashboardCategoryMetric = {
@@ -53,6 +132,11 @@ export type DashboardStoreRevenueMetric = {
   storeId: string;
   storeName: string;
   totalRevenue: number;
+  totalRevenueSource:
+    | "BALANCE_OPERATIONS"
+    | "TRANSACTIONS"
+    | "PRODUCTS"
+    | "EMPTY";
   productRevenue: number;
   activeGuests: number;
   productRevenueSharePercent: number | null;
@@ -102,6 +186,7 @@ export type DashboardSummaryFilters = {
   dateFrom?: string;
   dateTo?: string;
   storeIds?: string[];
+  categoryIds?: string[];
   skuGrouping?: "club" | "network";
 };
 
@@ -112,6 +197,7 @@ export type DashboardSummary = {
   periodLabel: string;
   skuGrouping: "club" | "network";
   selectedStoreIds: string[];
+  selectedCategoryIds: string[];
   periodFrom: string;
   periodTo: string;
   totalSku: number;
@@ -145,6 +231,7 @@ export type DashboardSummary = {
   stockQuantity: number;
   outOfStockRiskCount: number;
   recommendedOrderQuantity: number;
+  assortmentGrowth: DashboardAssortmentGrowth;
   storeRevenueBreakdown: DashboardStoreRevenueMetric[];
   salesTrend: DashboardSalesTrendSegment[];
   categoryAnalytics: DashboardCategoryMetric[];
@@ -229,7 +316,10 @@ export type DashboardRevenueDiagnostics = {
   selectedStoreIds: string[];
   revenueSnapshot: DashboardRevenueSnapshot;
   rows: DashboardRevenueDiagnosticsRow[];
-  totals: Omit<DashboardRevenueDiagnosticsRow, "storeId" | "storeName" | "notes">;
+  totals: Omit<
+    DashboardRevenueDiagnosticsRow,
+    "storeId" | "storeName" | "notes"
+  >;
   unallocatedTopups: DashboardRevenueDiagnosticsUnallocatedTopups;
   revenueScenarios: DashboardRevenueDiagnosticsScenario[];
   sourceMetrics: DashboardRevenueDiagnosticsSourceMetric[];
@@ -281,6 +371,10 @@ async function getDashboardResource<T>(
 
   filters.storeIds?.forEach((storeId) => {
     params.append("storeIds", storeId);
+  });
+
+  filters.categoryIds?.forEach((categoryId) => {
+    params.append("categoryIds", categoryId);
   });
 
   const query = params.toString();

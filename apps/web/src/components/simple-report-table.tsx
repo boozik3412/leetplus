@@ -1,6 +1,14 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { Info } from "@phosphor-icons/react";
+import {
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 
 export type SimpleReportRow = Record<string, string | number | null>;
 
@@ -8,6 +16,7 @@ export type SimpleReportColumn = {
   key: string;
   label: string;
   align?: "left" | "right";
+  tooltip?: string;
 };
 
 export type SimpleReportFilter = {
@@ -269,20 +278,28 @@ export function SimpleReportTable({
                     column.align === "right" ? "text-right" : "",
                   ].join(" ")}
                 >
-                  <button
-                    type="button"
-                    onClick={() => toggleSort(column.key)}
-                    className="inline-flex items-center gap-1 uppercase hover:text-zinc-900 dark:hover:text-zinc-100"
-                  >
-                    {column.label}
-                    <span className={sortKey === column.key ? "text-zinc-900 dark:text-zinc-100" : "text-zinc-300 dark:text-zinc-700"}>
-                      {sortKey === column.key
-                        ? sortDirection === "asc"
-                          ? "↑"
-                          : "↓"
-                        : "↕"}
-                    </span>
-                  </button>
+                  <span className="inline-flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(column.key)}
+                      className="inline-flex items-center gap-1 uppercase hover:text-zinc-900 dark:hover:text-zinc-100"
+                    >
+                      {column.label}
+                      <span className={sortKey === column.key ? "text-zinc-900 dark:text-zinc-100" : "text-zinc-300 dark:text-zinc-700"}>
+                        {sortKey === column.key
+                          ? sortDirection === "asc"
+                            ? "↑"
+                            : "↓"
+                          : "↕"}
+                      </span>
+                    </button>
+                    {column.tooltip ? (
+                      <ColumnHeaderTooltip
+                        label={column.label}
+                        text={column.tooltip}
+                      />
+                    ) : null}
+                  </span>
                 </th>
               ))}
             </tr>
@@ -307,6 +324,80 @@ export function SimpleReportTable({
         </table>
       </div>
     </div>
+  );
+}
+
+function ColumnHeaderTooltip({ label, text }: { label: string; text: string }) {
+  const tooltipId = useId();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [position, setPosition] = useState<{
+    left: number;
+    top: number;
+    placement: "top" | "bottom";
+  } | null>(null);
+
+  function showTooltip() {
+    const trigger = triggerRef.current;
+
+    if (!trigger) {
+      return;
+    }
+
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(288, window.innerWidth - 24);
+    const margin = 12;
+    const estimatedHeight = 92;
+    const left = Math.min(
+      Math.max(rect.left + rect.width / 2 - width / 2, margin),
+      window.innerWidth - width - margin,
+    );
+    const hasSpaceBelow =
+      rect.bottom + estimatedHeight + margin <= window.innerHeight;
+
+    setPosition({
+      left,
+      top: hasSpaceBelow ? rect.bottom + 8 : Math.max(margin, rect.top - 8),
+      placement: hasSpaceBelow ? "bottom" : "top",
+    });
+  }
+
+  return (
+    <span className="inline-flex normal-case">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-describedby={tooltipId}
+        aria-label={`Пояснение к столбцу ${label}`}
+        onBlur={() => setPosition(null)}
+        onFocus={showTooltip}
+        onMouseEnter={showTooltip}
+        onMouseLeave={() => setPosition(null)}
+        className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full text-zinc-400 outline-none transition-colors hover:text-zinc-700 focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 dark:text-zinc-600 dark:hover:text-zinc-300 dark:focus-visible:ring-offset-zinc-950"
+      >
+        <Info aria-hidden="true" size={14} weight="bold" />
+      </button>
+      {position
+        ? createPortal(
+            <span
+              id={tooltipId}
+              role="tooltip"
+              style={{
+                left: position.left,
+                top: position.top,
+                width: Math.min(288, window.innerWidth - 24),
+                transform:
+                  position.placement === "top"
+                    ? "translateY(-100%)"
+                    : undefined,
+              }}
+              className="pointer-events-none fixed z-[1000] rounded-lg border border-zinc-200 bg-white px-3 py-2 text-left text-xs font-medium leading-5 tracking-normal text-zinc-700 shadow-xl dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+            >
+              {text}
+            </span>,
+            document.body,
+          )
+        : null}
+    </span>
   );
 }
 

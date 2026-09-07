@@ -52,7 +52,13 @@ export default async function OosTablePage({
           { key: "storeName", label: "Клуб" },
           { key: "name", label: "Товар" },
           { key: "stockQuantity", label: "Остаток", align: "right" },
-          { key: "averageDailySales", label: "ССР", align: "right" },
+          {
+            key: "averageDailySales",
+            label: "ССР",
+            align: "right",
+            tooltip:
+              "ССР — среднесуточные продажи: количество проданных единиц товара за последние 21 полный день, делённое на 21.",
+          },
           {
             key: "revenueAtRiskPerDay",
             label: "Выручка в риске / день",

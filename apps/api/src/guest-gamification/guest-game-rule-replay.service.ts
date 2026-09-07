@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -10,9 +11,13 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasSessionFactsPendingHourlyReplay } from './guest-activity-hourly-replay';
 import {
+  buildGuestGamePhysicalProgressIdentity,
+  buildGuestGamePhysicalSessionStartIdentity,
   buildGuestGameOriginKey,
   buildGuestGamePlayTimeOriginKey,
   canonicalGuestGameEventType,
+  normalizeGuestGameExternalDomain,
+  normalizeGuestGameSourceKind,
 } from './guest-game-origin-key';
 import {
   GuestGamificationService,
@@ -129,6 +134,67 @@ export type GuestGameLootBoxEntitlementOverLimitRepairResult = {
     preservedEntitlementId: string;
   }>;
   updatedCount: number;
+  note: string;
+};
+
+export type GuestGameSupportRewardRecoveryActionDto = {
+  factId?: string | null;
+  ruleKind?: 'LOOT_BOX' | 'MISSION' | null;
+  ruleId?: string | null;
+};
+
+export type GuestGameSupportRewardRecoveryPreviewDto = {
+  ticketNumber?: string | null;
+  actions?: GuestGameSupportRewardRecoveryActionDto[] | null;
+};
+
+export type GuestGameSupportRewardRecoveryApplyDto =
+  GuestGameSupportRewardRecoveryPreviewDto & {
+    expectedActionCount?: number | string | null;
+    expectedDigest?: string | null;
+    allowedRuleIds?: string[] | null;
+    confirmation?: string | null;
+  };
+
+export type GuestGameSupportRewardRecoveryResult = {
+  mode: 'PREVIEW' | 'APPLY';
+  outcome: 'READY' | 'APPLIED';
+  ticket: {
+    id: string;
+    ticketNumber: string;
+    tenantId: string;
+    profileId: string;
+    guestId: string;
+    storeId: string;
+  };
+  actionCount: number;
+  digest: string;
+  allowedRuleIds: string[];
+  expectedEffects: {
+    availableLootBoxEntitlements: number;
+    directBonusAmount: 0;
+    battlePassRewards: 0;
+    xpDelta: number;
+  };
+  actions: Array<{
+    factId: string;
+    factUpdatedAt: string;
+    factType: string;
+    happenedAt: string;
+    sourceLocalDate: string;
+    sessionExternalId: string;
+    physicalSessionKey: string;
+    originKey: string;
+    ruleKind: 'LOOT_BOX' | 'MISSION';
+    ruleId: string;
+    ruleUpdatedAt: string;
+    ruleName: string;
+    expectedXpDelta: number;
+    expectedEntitlementCount: 1;
+    directBonusAmount: 0;
+    eventId: string | null;
+    entitlementId: string | null;
+  }>;
   note: string;
 };
 
@@ -372,6 +438,64 @@ type PreparedExactCanonicalization = {
   receipt: ExactCanonicalReceiptRow | null;
   event: ExactCanonicalEventRow | null;
   confirmationHash: string;
+};
+
+type PreparedSupportRewardRecoveryAction = {
+  fact: Prisma.GuestActivityFactGetPayload<Record<string, never>> & {
+    happenedAt: Date;
+    profileId: string;
+    guestId: string;
+    storeId: string;
+    sessionExternalId: string;
+    sourceLocalDate: string;
+  };
+  rule: GuestGameDryRunRule & {
+    kind: 'LOOT_BOX' | 'MISSION';
+    ruleUpdatedAt: string;
+  };
+  processDto: GuestGameProcessEventDto;
+  originKey: string;
+  physicalSessionKey: string;
+  expectedXpDelta: number;
+  dependency: {
+    kind: 'LOOT_BOX';
+    id: string;
+    updatedAt: Date;
+  } | null;
+};
+
+type PreparedSupportRewardRecovery = {
+  ticket: {
+    id: string;
+    ticketNumber: string;
+    tenantId: string;
+    profileId: string;
+    guestId: string;
+    storeId: string;
+  };
+  authority: {
+    ticketId: string;
+    ticketNumber: string;
+    ticketStatus: 'NEW' | 'IN_PROGRESS';
+    gameActivatedAt: Date;
+    storeTimeZone: string;
+  };
+  actions: PreparedSupportRewardRecoveryAction[];
+  digest: string;
+  allowedRuleIds: string[];
+};
+
+type PreparedSupportRewardRecoveryExactScope = {
+  sourceFactId: string;
+  sourceFactUpdatedAt: Date;
+  physicalSessionKey: string;
+  supportRecoveryAuthority: PreparedSupportRewardRecovery['authority'];
+  rules: Array<{
+    ruleKind: 'LOOT_BOX' | 'MISSION';
+    ruleId: string;
+    battlePassStep: null;
+    ruleUpdatedAt: Date;
+  }>;
 };
 
 type ExactEntitlementReconciliationCandidateRow = {
@@ -1047,6 +1171,179 @@ export class GuestGameRuleReplayService {
     }
   }
 
+  async previewSupportRewardRecovery(
+    user: AuthenticatedUser,
+    dto: GuestGameSupportRewardRecoveryPreviewDto,
+  ): Promise<GuestGameSupportRewardRecoveryResult> {
+    const prepared = await this.prepareSupportRewardRecovery(user, dto);
+    return this.supportRewardRecoveryResult(
+      prepared,
+      'PREVIEW',
+      'READY',
+      prepared.actions.map(() => ({ eventId: null, entitlementId: null })),
+      'Preview is read-only. Apply is limited to the exact facts and rules in this digest and creates case entitlements only.',
+    );
+  }
+
+  async applySupportRewardRecovery(
+    user: AuthenticatedUser,
+    dto: GuestGameSupportRewardRecoveryApplyDto,
+  ): Promise<GuestGameSupportRewardRecoveryResult> {
+    const prepared = await this.prepareSupportRewardRecovery(user, dto);
+    const expectedActionCount = nonNegativeInteger(dto.expectedActionCount);
+    const expectedDigest = normalizedString(dto.expectedDigest)?.toLowerCase();
+    const allowedRuleIds = uniqueSortedIds(dto.allowedRuleIds);
+    if (expectedActionCount === null) {
+      throw new BadRequestException(
+        'For apply pass the non-negative expectedActionCount from preview.',
+      );
+    }
+    if (!expectedDigest || !/^[a-f0-9]{64}$/.test(expectedDigest)) {
+      throw new BadRequestException(
+        'For apply pass the expectedDigest SHA-256 value from preview.',
+      );
+    }
+    if (
+      normalizedString(dto.confirmation) !== 'APPLY_SUPPORT_REWARD_RECOVERY'
+    ) {
+      throw new BadRequestException(
+        'For apply pass confirmation=APPLY_SUPPORT_REWARD_RECOVERY.',
+      );
+    }
+    if (
+      expectedActionCount !== prepared.actions.length ||
+      expectedDigest !== prepared.digest ||
+      !sameStringArray(allowedRuleIds, prepared.allowedRuleIds)
+    ) {
+      throw new ConflictException(
+        'The support recovery plan changed after preview. Run preview again and confirm its exact action count, digest and rule allowlist.',
+      );
+    }
+
+    const applied: Array<{ eventId: string; entitlementId: string }> = [];
+    for (const action of prepared.actions) {
+      const exactScope: PreparedSupportRewardRecoveryExactScope = {
+        sourceFactId: action.fact.id,
+        sourceFactUpdatedAt: action.fact.updatedAt,
+        physicalSessionKey: action.physicalSessionKey,
+        supportRecoveryAuthority: prepared.authority,
+        rules: [
+          {
+            ruleKind: action.rule.kind,
+            ruleId: action.rule.id,
+            battlePassStep: null,
+            ruleUpdatedAt: new Date(action.rule.ruleUpdatedAt),
+          },
+        ],
+      };
+      const eventId = await this.ensureSupportRecoveryCanonicalEvent(
+        user,
+        prepared,
+        action,
+        exactScope,
+      );
+      const processed = await this.gamification.processEvent(
+        user,
+        action.processDto,
+        {
+          allowedRuleIds: [action.rule.id],
+          evaluationMode: 'LIVE_LEDGER_FALLBACK',
+          evaluatorVersion: 'support-reward-recovery-v1',
+          originKey: action.originKey,
+          exactReconciliationScope: exactScope,
+          suppressLedgerShadow: true,
+        },
+      );
+      if (
+        processed.event.id !== eventId ||
+        processed.summary.idempotent !== true ||
+        processed.summary.appliedXpDelta !== action.expectedXpDelta ||
+        processed.summary.queuedRewardAmount !== 0
+      ) {
+        throw new ConflictException(
+          'Support recovery produced an effect outside the confirmed action plan.',
+        );
+      }
+      const postcondition = await this.assertSupportRecoveryPostcondition(
+        user,
+        action,
+        eventId,
+      );
+      const beforeReplay = await this.supportRecoveryEffectSnapshot(
+        user.tenantId,
+        action,
+        eventId,
+      );
+      const replay = await this.gamification.processEvent(
+        user,
+        action.processDto,
+        {
+          allowedRuleIds: [action.rule.id],
+          evaluationMode: 'LIVE_LEDGER_FALLBACK',
+          evaluatorVersion: 'support-reward-recovery-v1',
+          originKey: action.originKey,
+          exactReconciliationScope: exactScope,
+          suppressLedgerShadow: true,
+        },
+      );
+      const afterReplay = await this.supportRecoveryEffectSnapshot(
+        user.tenantId,
+        action,
+        eventId,
+      );
+      if (
+        replay.event.id !== eventId ||
+        replay.summary.idempotent !== true ||
+        replay.summary.appliedXpDelta !== 0 ||
+        replay.summary.createdRewards !== 0 ||
+        sha256(beforeReplay) !== sha256(afterReplay)
+      ) {
+        throw new ConflictException(
+          'Support recovery replay was not zero-diff.',
+        );
+      }
+      applied.push({
+        eventId,
+        entitlementId: postcondition.entitlementId,
+      });
+    }
+
+    await this.prisma.guestGameAuditEvent.create({
+      data: {
+        tenantId: user.tenantId,
+        profileId: prepared.ticket.profileId,
+        guestId: prepared.ticket.guestId,
+        storeId: prepared.ticket.storeId,
+        entityType: 'GUEST_SUPPORT_TICKET',
+        entityId: prepared.ticket.id,
+        action: 'SUPPORT_REWARD_RECOVERY_APPLIED',
+        status: 'PROCESSED',
+        reasonCode: prepared.ticket.ticketNumber,
+        reasonText:
+          'An operator-confirmed exact support plan created only the bounded case entitlements proved by active rules.',
+        payload: {
+          actorUserId: user.id,
+          ticketNumber: prepared.ticket.ticketNumber,
+          planDigest: prepared.digest,
+          actionCount: prepared.actions.length,
+          allowedRuleIds: prepared.allowedRuleIds,
+          directBonusAmount: 0,
+          battlePassRewards: 0,
+          eventIds: applied.map((item) => item.eventId),
+          entitlementIds: applied.map((item) => item.entitlementId),
+        },
+      },
+    });
+
+    return this.supportRewardRecoveryResult(
+      prepared,
+      'APPLY',
+      'APPLIED',
+      applied,
+      'The exact plan was applied. Every action produced one AVAILABLE case entitlement; direct bonuses and Battle Pass rewards remained zero, and replay was zero-diff.',
+    );
+  }
+
   async previewBattlePass(
     user: AuthenticatedUser,
     dto: GuestGameBattlePassReplayPreviewDto,
@@ -1334,6 +1631,921 @@ export class GuestGameRuleReplayService {
       `,
     );
     return rollingSevenDayOverLimitCandidates(rows);
+  }
+
+  private async prepareSupportRewardRecovery(
+    user: AuthenticatedUser,
+    dto: GuestGameSupportRewardRecoveryPreviewDto,
+  ): Promise<PreparedSupportRewardRecovery> {
+    if (!user.isPlatformAdmin || user.platformTenantContext !== true) {
+      throw new ForbiddenException(
+        'Support reward recovery requires a platform administrator with an explicitly selected tenant context.',
+      );
+    }
+    const ticketNumber = requiredId(dto.ticketNumber, 'ticketNumber');
+    if (!Array.isArray(dto.actions) || dto.actions.length < 1) {
+      throw new BadRequestException(
+        'Support reward recovery requires at least one exact fact/rule action.',
+      );
+    }
+    if (dto.actions.length > 5) {
+      throw new BadRequestException(
+        'Support reward recovery is limited to five exact actions per confirmed plan.',
+      );
+    }
+    const requestedActions = dto.actions.map((action, index) => {
+      const ruleKind = normalizedString(action.ruleKind)?.toUpperCase();
+      if (ruleKind !== 'LOOT_BOX' && ruleKind !== 'MISSION') {
+        throw new BadRequestException(
+          `actions[${index}].ruleKind must be LOOT_BOX or MISSION.`,
+        );
+      }
+      return {
+        factId: requiredId(action.factId, `actions[${index}].factId`),
+        ruleKind,
+        ruleId: requiredId(action.ruleId, `actions[${index}].ruleId`),
+      };
+    });
+    if (
+      new Set(requestedActions.map((action) => action.factId)).size !==
+        requestedActions.length ||
+      new Set(requestedActions.map((action) => action.ruleId)).size !==
+        requestedActions.length
+    ) {
+      throw new BadRequestException(
+        'Every recovery action must use a unique fact and a unique rule.',
+      );
+    }
+
+    const ticket = await this.prisma.guestSupportTicket.findUnique({
+      where: { ticketNumber },
+      select: {
+        id: true,
+        ticketNumber: true,
+        tenantId: true,
+        profileId: true,
+        guestId: true,
+        storeId: true,
+        status: true,
+        profile: {
+          select: {
+            id: true,
+            status: true,
+            gameActivatedAt: true,
+            guestId: true,
+            guest: {
+              select: {
+                id: true,
+                externalProvider: true,
+                externalDomain: true,
+                externalGuestId: true,
+                isDisabled: true,
+              },
+            },
+          },
+        },
+        store: {
+          select: {
+            id: true,
+            isActive: true,
+            externalDomain: true,
+            timeZone: true,
+          },
+        },
+      },
+    });
+    if (!ticket || ticket.tenantId !== user.tenantId) {
+      throw new NotFoundException(
+        'The support ticket was not found in the selected tenant context.',
+      );
+    }
+    if (
+      !ticket.guestId ||
+      !['NEW', 'IN_PROGRESS'].includes(ticket.status) ||
+      ticket.profile.status !== 'ACTIVE' ||
+      !ticket.profile.gameActivatedAt ||
+      ticket.profile.guestId !== ticket.guestId ||
+      !ticket.profile.guest ||
+      ticket.profile.guest.isDisabled ||
+      ticket.profile.guest.id !== ticket.guestId ||
+      !ticket.store.isActive ||
+      !ticket.store.timeZone
+    ) {
+      throw new ConflictException(
+        'The ticket no longer has one active guest, game profile, store and activation boundary.',
+      );
+    }
+
+    const factRows = await this.prisma.guestActivityFact.findMany({
+      where: {
+        tenantId: user.tenantId,
+        id: { in: requestedActions.map((action) => action.factId) },
+      },
+    });
+    if (factRows.length !== requestedActions.length) {
+      throw new NotFoundException(
+        'One or more exact activity facts were not found in the selected tenant.',
+      );
+    }
+    const factsById = new Map(factRows.map((fact) => [fact.id, fact]));
+    const preparedActions: PreparedSupportRewardRecoveryAction[] = [];
+
+    for (const requested of requestedActions) {
+      const fact = factsById.get(requested.factId);
+      if (!fact) {
+        throw new NotFoundException('The exact activity fact was not found.');
+      }
+      const isPlayTime = replayFactTypes.has(fact.factType);
+      const isTypedSessionStart = [
+        'HOURLY_SESSION_STARTED',
+        'PACKAGE_OR_SUBSCRIPTION_USED',
+      ].includes(fact.factType);
+      if (
+        fact.lifecycleStatus !== 'ACTIVE' ||
+        fact.confidence !== 'EXACT' ||
+        fact.supersededAt ||
+        !fact.happenedAt ||
+        !fact.sourceLocalDate ||
+        !fact.sessionExternalId ||
+        fact.profileId !== ticket.profileId ||
+        fact.guestId !== ticket.guestId ||
+        fact.storeId !== ticket.storeId ||
+        fact.externalProvider !== ticket.profile.guest.externalProvider ||
+        normalizeGuestGameExternalDomain(fact.externalDomain) !==
+          normalizeGuestGameExternalDomain(
+            ticket.profile.guest.externalDomain,
+          ) ||
+        fact.externalGuestId !== ticket.profile.guest.externalGuestId ||
+        normalizeGuestGameExternalDomain(fact.externalDomain) !==
+          normalizeGuestGameExternalDomain(ticket.store.externalDomain) ||
+        fact.happenedAt.getTime() < ticket.profile.gameActivatedAt.getTime() ||
+        (!isPlayTime && !isTypedSessionStart) ||
+        (requested.ruleKind === 'MISSION' && !isPlayTime) ||
+        (requested.ruleKind === 'LOOT_BOX' && !isTypedSessionStart)
+      ) {
+        throw new ConflictException(
+          `Fact ${fact.id} is outside the ticket identity, activation, store or supported exact event scope.`,
+        );
+      }
+      if (
+        await hasSessionFactsPendingHourlyReplay(this.prisma, {
+          tenantId: user.tenantId,
+          factId: fact.id,
+          factTypes: [fact.factType],
+          profileId: fact.profileId,
+          happenedAtGte: fact.happenedAt,
+        })
+      ) {
+        throw new ConflictException(
+          `Fact ${fact.id} predates an incomplete hourly source replay.`,
+        );
+      }
+
+      const physicalIdentity = isPlayTime
+        ? buildGuestGamePhysicalProgressIdentity({
+            externalProvider: fact.externalProvider,
+            externalDomain: fact.externalDomain,
+            sourceKind: fact.sourceKind,
+            sessionExternalId: fact.sessionExternalId,
+            eventType: fact.factType,
+          })
+        : buildGuestGamePhysicalSessionStartIdentity({
+            externalProvider: fact.externalProvider,
+            externalDomain: fact.externalDomain,
+            sourceKind: fact.sourceKind,
+            sessionExternalId: fact.sessionExternalId,
+            eventType: fact.factType,
+          });
+      const originKey = isPlayTime
+        ? buildGuestGamePlayTimeOriginKey({
+            externalProvider: fact.externalProvider,
+            externalDomain: fact.externalDomain,
+            sourceKind: fact.sourceKind,
+            sessionExternalId: fact.sessionExternalId,
+            eventType: fact.factType,
+          })
+        : (physicalIdentity?.key ?? null);
+      if (!physicalIdentity || !originKey) {
+        throw new ConflictException(
+          `Fact ${fact.id} has no stable physical-session identity.`,
+        );
+      }
+      await this.assertSingleSupportRecoveryPhysicalFact(
+        user.tenantId,
+        fact,
+        physicalIdentity.key,
+        isPlayTime,
+      );
+
+      const processDto = supportRecoveryProcessDto(
+        fact as PreparedSupportRewardRecoveryAction['fact'],
+        ticket.ticketNumber,
+      );
+      const dryRun = await this.gamification.dryRun(user, processDto);
+      const eligibleRules = dryRun.rules.filter(
+        (rule) =>
+          rule.status === 'ACTIVE' &&
+          rule.eligible &&
+          guestGamePolicyAllowsEvaluation(
+            rule.evaluationPolicy,
+            'LIVE_LEDGER_FALLBACK',
+          ),
+      );
+      if (
+        eligibleRules.length !== 1 ||
+        eligibleRules[0]?.id !== requested.ruleId ||
+        eligibleRules[0]?.kind !== requested.ruleKind
+      ) {
+        throw new ConflictException(
+          `Fact ${fact.id} no longer resolves to the single confirmed active rule ${requested.ruleId}.`,
+        );
+      }
+      const dryRule = eligibleRules[0];
+      if (dryRule.kind === 'SEASON') {
+        throw new ConflictException(
+          'Battle Pass rules are forbidden in support reward recovery.',
+        );
+      }
+      const ruleUpdatedAt = dateValue(dryRule.ruleUpdatedAt);
+      if (!ruleUpdatedAt) {
+        throw new ConflictException(
+          `Rule ${dryRule.id} has no immutable version in dry-run.`,
+        );
+      }
+
+      let dependency: PreparedSupportRewardRecoveryAction['dependency'] = null;
+      if (dryRule.kind === 'LOOT_BOX') {
+        const config = await this.prisma.guestGameLootBox.findFirst({
+          where: { id: dryRule.id, tenantId: user.tenantId },
+          select: {
+            status: true,
+            usageKind: true,
+            limits: true,
+            manualApprovalRequired: true,
+            updatedAt: true,
+          },
+        });
+        const maxPendingRewards = Number(
+          jsonRecord(config?.limits).maxPendingRewards,
+        );
+        if (
+          !config ||
+          config.status !== 'ACTIVE' ||
+          !['STANDALONE', 'BOTH'].includes(config.usageKind) ||
+          config.manualApprovalRequired ||
+          config.updatedAt.getTime() !== ruleUpdatedAt.getTime() ||
+          maxPendingRewards !== 1 ||
+          dryRule.xpDelta !== 0 ||
+          !dryRule.periodicLimitPeriod
+        ) {
+          throw new ConflictException(
+            `Loot-box rule ${dryRule.id} is not a one-pending, automatic standalone case entitlement.`,
+          );
+        }
+      } else {
+        const config = await this.prisma.guestGameMission.findFirst({
+          where: { id: dryRule.id, tenantId: user.tenantId },
+          select: {
+            status: true,
+            rewardType: true,
+            rewardAmount: true,
+            xpReward: true,
+            maxPendingRewards: true,
+            manualApprovalRequired: true,
+            conditions: true,
+            updatedAt: true,
+          },
+        });
+        const reward = jsonRecord(jsonRecord(config?.conditions).reward);
+        const targetLootBoxId = normalizedString(
+          dryRule.rewardLootBoxId ?? reward.lootBoxId,
+        );
+        const targetLootBox = targetLootBoxId
+          ? await this.prisma.guestGameLootBox.findFirst({
+              where: { id: targetLootBoxId, tenantId: user.tenantId },
+              select: {
+                id: true,
+                status: true,
+                usageKind: true,
+                updatedAt: true,
+              },
+            })
+          : null;
+        if (
+          !config ||
+          config.status !== 'ACTIVE' ||
+          config.rewardType !== 'LOOT_BOX_ENTITLEMENT' ||
+          Number(config.rewardAmount ?? 0) !== 0 ||
+          config.maxPendingRewards !== 1 ||
+          config.manualApprovalRequired ||
+          config.updatedAt.getTime() !== ruleUpdatedAt.getTime() ||
+          dryRule.rewardType !== 'LOOT_BOX_ENTITLEMENT' ||
+          (dryRule.rewardAmount ?? 0) !== 0 ||
+          dryRule.xpDelta !== config.xpReward ||
+          !targetLootBox ||
+          targetLootBox.status !== 'ACTIVE' ||
+          !['REWARD_TEMPLATE', 'BOTH'].includes(targetLootBox.usageKind)
+        ) {
+          throw new ConflictException(
+            `Mission ${dryRule.id} is not an active one-pending automatic case reward with an active reward template.`,
+          );
+        }
+        dependency = {
+          kind: 'LOOT_BOX',
+          id: targetLootBox.id,
+          updatedAt: targetLootBox.updatedAt,
+        };
+      }
+
+      preparedActions.push({
+        fact: fact as PreparedSupportRewardRecoveryAction['fact'],
+        rule: {
+          ...dryRule,
+          kind: dryRule.kind,
+          ruleUpdatedAt: ruleUpdatedAt.toISOString(),
+        },
+        processDto,
+        originKey,
+        physicalSessionKey: physicalIdentity.key,
+        expectedXpDelta: dryRule.xpDelta,
+        dependency,
+      });
+    }
+
+    preparedActions.sort(
+      (left, right) =>
+        left.fact.happenedAt.getTime() - right.fact.happenedAt.getTime() ||
+        left.fact.id.localeCompare(right.fact.id),
+    );
+    const allowedRuleIds = preparedActions
+      .map((action) => action.rule.id)
+      .sort();
+    const digest = sha256({
+      schemaVersion: 1,
+      tenantId: ticket.tenantId,
+      ticketId: ticket.id,
+      ticketNumber: ticket.ticketNumber,
+      ticketStatus: ticket.status,
+      profileId: ticket.profileId,
+      guestId: ticket.guestId,
+      storeId: ticket.storeId,
+      gameActivatedAt: ticket.profile.gameActivatedAt.toISOString(),
+      storeTimeZone: ticket.store.timeZone,
+      allowedRuleIds,
+      directBonusAmount: 0,
+      battlePassRewards: 0,
+      actions: preparedActions.map((action) => ({
+        factId: action.fact.id,
+        factUpdatedAt: action.fact.updatedAt.toISOString(),
+        factType: action.fact.factType,
+        happenedAt: action.fact.happenedAt.toISOString(),
+        sourceLocalDate: action.fact.sourceLocalDate,
+        sourceKind: normalizeGuestGameSourceKind(action.fact.sourceKind),
+        sessionExternalId: action.fact.sessionExternalId,
+        physicalSessionKey: action.physicalSessionKey,
+        originKey: action.originKey,
+        ruleKind: action.rule.kind,
+        ruleId: action.rule.id,
+        ruleUpdatedAt: action.rule.ruleUpdatedAt,
+        ruleName: action.rule.name,
+        evaluationPolicy: action.rule.evaluationPolicy,
+        expectedXpDelta: action.expectedXpDelta,
+        expectedEntitlementCount: 1,
+        directBonusAmount: 0,
+        dependency: action.dependency
+          ? {
+              kind: action.dependency.kind,
+              id: action.dependency.id,
+              updatedAt: action.dependency.updatedAt.toISOString(),
+            }
+          : null,
+        reasons: action.rule.reasons,
+        blockers: action.rule.blockers,
+      })),
+    });
+
+    return {
+      ticket: {
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        tenantId: ticket.tenantId,
+        profileId: ticket.profileId,
+        guestId: ticket.guestId,
+        storeId: ticket.storeId,
+      },
+      authority: {
+        ticketId: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        ticketStatus: ticket.status as 'NEW' | 'IN_PROGRESS',
+        gameActivatedAt: ticket.profile.gameActivatedAt,
+        storeTimeZone: ticket.store.timeZone,
+      },
+      actions: preparedActions,
+      digest,
+      allowedRuleIds,
+    };
+  }
+
+  private async assertSingleSupportRecoveryPhysicalFact(
+    tenantId: string,
+    fact: Prisma.GuestActivityFactGetPayload<Record<string, never>>,
+    physicalSessionKey: string,
+    playTime: boolean,
+  ) {
+    const candidates = await this.prisma.guestActivityFact.findMany({
+      where: {
+        tenantId,
+        externalProvider: fact.externalProvider,
+        sessionExternalId: fact.sessionExternalId,
+        factType: {
+          in: playTime
+            ? [...replayFactTypes]
+            : ['HOURLY_SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED'],
+        },
+        lifecycleStatus: 'ACTIVE',
+        confidence: 'EXACT',
+        supersededAt: null,
+      },
+      select: {
+        id: true,
+        externalProvider: true,
+        externalDomain: true,
+        sourceKind: true,
+        sessionExternalId: true,
+        factType: true,
+      },
+    });
+    const samePhysical = candidates.filter((candidate) => {
+      const identity = playTime
+        ? buildGuestGamePhysicalProgressIdentity({
+            ...candidate,
+            eventType: candidate.factType,
+          })
+        : buildGuestGamePhysicalSessionStartIdentity({
+            ...candidate,
+            eventType: candidate.factType,
+          });
+      return identity?.key === physicalSessionKey;
+    });
+    if (samePhysical.length !== 1 || samePhysical[0]?.id !== fact.id) {
+      throw new ConflictException(
+        `Physical session ${fact.sessionExternalId ?? 'unknown'} has conflicting active exact facts.`,
+      );
+    }
+  }
+
+  private async ensureSupportRecoveryCanonicalEvent(
+    user: AuthenticatedUser,
+    prepared: PreparedSupportRewardRecovery,
+    action: PreparedSupportRewardRecoveryAction,
+    exactScope: PreparedSupportRewardRecoveryExactScope,
+  ): Promise<string> {
+    const processed = await this.gamification.processEvent(
+      user,
+      action.processDto,
+      {
+        allowedRuleIds: [],
+        evaluationMode: 'LIVE_LEDGER_FALLBACK',
+        evaluatorVersion: 'support-reward-recovery-canonical-v1',
+        materializeRewards: false,
+        originKey: action.originKey,
+        suppressLedgerShadow: true,
+        supportRecoveryCanonicalizationScope: {
+          exactReconciliationScope: exactScope,
+          planDigest: prepared.digest,
+          dependency: action.dependency,
+        },
+      },
+    );
+    if (
+      processed.summary.appliedXpDelta !== 0 ||
+      processed.summary.createdRewards !== 0 ||
+      processed.rewards.length !== 0
+    ) {
+      throw new ConflictException(
+        'Support recovery canonicalization created an unexpected material effect.',
+      );
+    }
+    const eventId = processed.event.id;
+    await this.prisma.$transaction(
+      async (tx) => {
+        const [facts, events, rules, dependencies] = await Promise.all([
+          tx.$queryRaw<Array<{ id: string; updatedAt: Date }>>(Prisma.sql`
+            SELECT "id", "updatedAt"
+            FROM "GuestActivityFact"
+            WHERE "tenantId" = ${user.tenantId}
+              AND "id" = ${action.fact.id}
+              AND "profileId" = ${prepared.ticket.profileId}
+              AND "guestId" = ${prepared.ticket.guestId}
+              AND "storeId" = ${prepared.ticket.storeId}
+              AND "lifecycleStatus" = 'ACTIVE'
+              AND "confidence" = 'EXACT'
+              AND "supersededAt" IS NULL
+            FOR SHARE
+          `),
+          tx.$queryRaw<
+            Array<{
+              id: string;
+              profileId: string | null;
+              guestId: string | null;
+              eventType: string;
+              originKey: string | null;
+              xpDelta: number;
+              payload: Prisma.JsonValue | null;
+            }>
+          >(Prisma.sql`
+            SELECT "id", "profileId", "guestId", "eventType", "originKey",
+                   "xpDelta", "payload"
+            FROM "GuestGameEvent"
+            WHERE "tenantId" = ${user.tenantId}
+              AND "id" = ${eventId}
+              AND "originKey" = ${action.originKey}
+            FOR UPDATE
+          `),
+          action.rule.kind === 'MISSION'
+            ? tx.$queryRaw<Array<{ id: string; updatedAt: Date }>>(Prisma.sql`
+                SELECT "id", "updatedAt"
+                FROM "GuestGameMission"
+                WHERE "tenantId" = ${user.tenantId}
+                  AND "id" = ${action.rule.id}
+                  AND "status" = 'ACTIVE'
+                FOR SHARE
+              `)
+            : tx.$queryRaw<Array<{ id: string; updatedAt: Date }>>(Prisma.sql`
+                SELECT "id", "updatedAt"
+                FROM "GuestGameLootBox"
+                WHERE "tenantId" = ${user.tenantId}
+                  AND "id" = ${action.rule.id}
+                  AND "status" = 'ACTIVE'
+                FOR SHARE
+              `),
+          action.dependency
+            ? tx.$queryRaw<Array<{ id: string; updatedAt: Date }>>(Prisma.sql`
+                SELECT "id", "updatedAt"
+                FROM "GuestGameLootBox"
+                WHERE "tenantId" = ${user.tenantId}
+                  AND "id" = ${action.dependency.id}
+                  AND "status" = 'ACTIVE'
+                  AND "usageKind" IN ('REWARD_TEMPLATE', 'BOTH')
+                FOR SHARE
+              `)
+            : Promise.resolve([] as Array<{ id: string; updatedAt: Date }>),
+        ]);
+        const fact = facts[0];
+        const event = events[0];
+        const rule = rules[0];
+        const dependency = dependencies[0] ?? null;
+        const payload = jsonRecord(event?.payload);
+        if (
+          facts.length !== 1 ||
+          !fact ||
+          fact.updatedAt.getTime() !== action.fact.updatedAt.getTime() ||
+          events.length !== 1 ||
+          !event ||
+          event.profileId !== prepared.ticket.profileId ||
+          event.guestId !== prepared.ticket.guestId ||
+          canonicalGuestGameEventType(event.eventType) !==
+            canonicalGuestGameEventType(action.processDto.eventType) ||
+          event.originKey !== action.originKey ||
+          event.xpDelta !== 0 ||
+          normalizedString(payload.sourceFactId) !== action.fact.id ||
+          rules.length !== 1 ||
+          !rule ||
+          rule.updatedAt.getTime() !==
+            new Date(action.rule.ruleUpdatedAt).getTime() ||
+          (action.dependency &&
+            (!dependency ||
+              dependency.updatedAt.getTime() !==
+                action.dependency.updatedAt.getTime()))
+        ) {
+          throw new ConflictException(
+            'A support recovery fact, event, rule or dependency changed before qualification.',
+          );
+        }
+        const [xpPostingCount, intentCount, entitlementCount, rewardCount] =
+          await Promise.all([
+            tx.guestGameXpPosting.count({ where: { eventId } }),
+            tx.guestGameRewardIntent.count({
+              where: {
+                tenantId: user.tenantId,
+                OR: [{ eventId }, { originKey: action.originKey }],
+              },
+            }),
+            tx.guestGameEntitlement.count({
+              where: {
+                tenantId: user.tenantId,
+                OR: [{ eventId }, { originKey: action.originKey }],
+              },
+            }),
+            tx.guestGameReward.count({
+              where: { tenantId: user.tenantId, originKey: action.originKey },
+            }),
+          ]);
+        if (
+          xpPostingCount !== 0 ||
+          intentCount !== 0 ||
+          entitlementCount !== 0 ||
+          rewardCount !== 0 ||
+          'exactReconciliationPlan' in payload
+        ) {
+          throw new ConflictException(
+            'The canonical event is not pristine; support recovery stopped without adding another effect.',
+          );
+        }
+
+        const existingReceipt = await tx.guestGameOriginReceipt.findUnique({
+          where: {
+            tenantId_originKey: {
+              tenantId: user.tenantId,
+              originKey: action.originKey,
+            },
+          },
+        });
+        if (
+          !existingReceipt ||
+          existingReceipt.factId !== action.fact.id ||
+          existingReceipt.eventId !== eventId ||
+          canonicalGuestGameEventType(existingReceipt.eventType) !==
+            canonicalGuestGameEventType(action.processDto.eventType) ||
+          existingReceipt.policy !== 'EXACT_OPERATOR_CANONICALIZATION' ||
+          existingReceipt.status !== 'PROCESSED' ||
+          ![
+            'EXACT_CANONICALIZATION',
+            'EXACT_OPERATOR_CANONICALIZATION',
+          ].includes(existingReceipt.claimedSource ?? '')
+        ) {
+          throw new ConflictException(
+            'The atomic support canonicalization did not produce the exact completed origin receipt.',
+          );
+        }
+      },
+      { isolationLevel: 'Serializable' },
+    );
+    return eventId;
+  }
+
+  private async assertSupportRecoveryPostcondition(
+    user: AuthenticatedUser,
+    action: PreparedSupportRewardRecoveryAction,
+    eventId: string,
+  ): Promise<{ entitlementId: string }> {
+    const snapshot = await this.supportRecoveryEffectSnapshot(
+      user.tenantId,
+      action,
+      eventId,
+    );
+    const entitlements = snapshot.entitlements.filter((entitlement) =>
+      action.rule.kind === 'LOOT_BOX'
+        ? entitlement.ruleType === 'LOOT_BOX' &&
+          entitlement.ruleId === action.rule.id &&
+          entitlement.sourceFactId === action.fact.id
+        : entitlement.sourceMissionId === action.rule.id,
+    );
+    const expectedRewardCount = action.rule.kind === 'MISSION' ? 1 : 0;
+    const rewardsAreSafe = snapshot.rewards.every(
+      (reward) =>
+        action.rule.kind === 'MISSION' &&
+        reward.missionId === action.rule.id &&
+        reward.seasonId === null &&
+        reward.lootBoxId === null &&
+        reward.rewardType === 'LOOT_BOX_ENTITLEMENT' &&
+        reward.rewardAmount === 0,
+    );
+    const intentsAreSafe = snapshot.intents.every(
+      (intent) =>
+        intent.ruleType === action.rule.kind &&
+        intent.ruleId === action.rule.id &&
+        ['QUALIFICATION', 'REWARD', 'XP_POSTING'].includes(intent.effectKind),
+    );
+    const rewardEffectsAreSafe = snapshot.rewardEffects.every(
+      (effect) =>
+        effect.effectKind === 'LOOT_BOX_ENTITLEMENT' &&
+        effect.status === 'APPLIED',
+    );
+    const xpIsSafe =
+      action.expectedXpDelta === 0
+        ? snapshot.event.xpDelta === 0 && snapshot.xpPosting === null
+        : snapshot.event.xpDelta === action.expectedXpDelta &&
+          snapshot.xpPosting?.requestedDelta === action.expectedXpDelta &&
+          snapshot.xpPosting.appliedDelta === action.expectedXpDelta;
+    if (
+      snapshot.entitlements.length !== 1 ||
+      entitlements.length !== 1 ||
+      entitlements[0]?.status !== 'AVAILABLE' ||
+      entitlements[0].consumedAt !== null ||
+      entitlements[0].canceledAt !== null ||
+      snapshot.rewards.length !== expectedRewardCount ||
+      !rewardsAreSafe ||
+      !intentsAreSafe ||
+      !rewardEffectsAreSafe ||
+      snapshot.bonusLedgerEntries.length !== 0 ||
+      snapshot.walletItems.length !== 0 ||
+      !xpIsSafe
+    ) {
+      throw new ConflictException(
+        'Support recovery postcondition failed: exactly one AVAILABLE case and only the configured XP were expected.',
+      );
+    }
+    return { entitlementId: entitlements[0].id };
+  }
+
+  private async supportRecoveryEffectSnapshot(
+    tenantId: string,
+    action: PreparedSupportRewardRecoveryAction,
+    eventId: string,
+  ) {
+    const [
+      event,
+      profile,
+      intents,
+      entitlements,
+      rewards,
+      rewardEffects,
+      bonusLedgerEntries,
+      walletItems,
+      xpPosting,
+    ] = await Promise.all([
+      this.prisma.guestGameEvent.findFirst({
+        where: { id: eventId, tenantId, originKey: action.originKey },
+        select: { id: true, xpDelta: true },
+      }),
+      this.prisma.guestGameProfile.findFirst({
+        where: { id: action.fact.profileId, tenantId },
+        select: { xp: true },
+      }),
+      this.prisma.guestGameRewardIntent.findMany({
+        where: { tenantId, eventId },
+        orderBy: { id: 'asc' },
+        select: {
+          id: true,
+          ruleType: true,
+          ruleId: true,
+          effectKind: true,
+          status: true,
+          rewardId: true,
+        },
+      }),
+      this.prisma.guestGameEntitlement.findMany({
+        where: { tenantId, eventId },
+        orderBy: { id: 'asc' },
+        select: {
+          id: true,
+          ruleType: true,
+          ruleId: true,
+          status: true,
+          sourceFactId: true,
+          sourceRewardId: true,
+          rewardId: true,
+          consumedAt: true,
+          canceledAt: true,
+          evidence: true,
+          sourceReward: { select: { missionId: true } },
+        },
+      }),
+      this.prisma.guestGameReward.findMany({
+        where: { tenantId, originKey: action.originKey },
+        orderBy: { id: 'asc' },
+        select: {
+          id: true,
+          missionId: true,
+          seasonId: true,
+          lootBoxId: true,
+          rewardType: true,
+          rewardAmount: true,
+          status: true,
+        },
+      }),
+      this.prisma.guestGameRewardEffect.findMany({
+        where: {
+          tenantId,
+          reward: { originKey: action.originKey },
+        },
+        orderBy: { id: 'asc' },
+        select: {
+          id: true,
+          effectKind: true,
+          status: true,
+          rewardId: true,
+        },
+      }),
+      this.prisma.guestBonusLedgerEntry.findMany({
+        where: {
+          tenantId,
+          reward: { originKey: action.originKey },
+        },
+        orderBy: { id: 'asc' },
+        select: { id: true, rewardId: true, amount: true, status: true },
+      }),
+      this.prisma.guestGameRewardWalletItem.findMany({
+        where: {
+          tenantId,
+          OR: [
+            { eventId },
+            { reward: { originKey: action.originKey } },
+            { entitlement: { eventId } },
+          ],
+        },
+        orderBy: { id: 'asc' },
+        select: {
+          id: true,
+          kind: true,
+          status: true,
+          rewardId: true,
+          entitlementId: true,
+          eventId: true,
+        },
+      }),
+      this.prisma.guestGameXpPosting.findUnique({
+        where: { eventId },
+        select: {
+          requestedDelta: true,
+          appliedDelta: true,
+          balanceBefore: true,
+          balanceAfter: true,
+        },
+      }),
+    ]);
+    if (!event || !profile) {
+      throw new ConflictException(
+        'The support recovery event or profile disappeared during verification.',
+      );
+    }
+    return {
+      event,
+      profile,
+      intents,
+      entitlements: entitlements.map((entitlement) => ({
+        id: entitlement.id,
+        ruleType: entitlement.ruleType,
+        ruleId: entitlement.ruleId,
+        status: entitlement.status,
+        sourceFactId: entitlement.sourceFactId,
+        sourceRewardId: entitlement.sourceRewardId,
+        rewardId: entitlement.rewardId,
+        consumedAt: entitlement.consumedAt?.toISOString() ?? null,
+        canceledAt: entitlement.canceledAt?.toISOString() ?? null,
+        sourceMissionId:
+          entitlement.sourceReward?.missionId ??
+          normalizedString(jsonRecord(entitlement.evidence).missionId),
+      })),
+      rewards: rewards.map((reward) => ({
+        ...reward,
+        rewardAmount: Number(reward.rewardAmount),
+      })),
+      rewardEffects,
+      bonusLedgerEntries: bonusLedgerEntries.map((entry) => ({
+        ...entry,
+        amount: Number(entry.amount),
+      })),
+      walletItems,
+      xpPosting,
+    };
+  }
+
+  private supportRewardRecoveryResult(
+    prepared: PreparedSupportRewardRecovery,
+    mode: GuestGameSupportRewardRecoveryResult['mode'],
+    outcome: GuestGameSupportRewardRecoveryResult['outcome'],
+    effects: Array<{ eventId: string | null; entitlementId: string | null }>,
+    note: string,
+  ): GuestGameSupportRewardRecoveryResult {
+    return {
+      mode,
+      outcome,
+      ticket: prepared.ticket,
+      actionCount: prepared.actions.length,
+      digest: prepared.digest,
+      allowedRuleIds: prepared.allowedRuleIds,
+      expectedEffects: {
+        availableLootBoxEntitlements: prepared.actions.length,
+        directBonusAmount: 0,
+        battlePassRewards: 0,
+        xpDelta: prepared.actions.reduce(
+          (sum, action) => sum + action.expectedXpDelta,
+          0,
+        ),
+      },
+      actions: prepared.actions.map((action, index) => ({
+        factId: action.fact.id,
+        factUpdatedAt: action.fact.updatedAt.toISOString(),
+        factType: action.fact.factType,
+        happenedAt: action.fact.happenedAt.toISOString(),
+        sourceLocalDate: action.fact.sourceLocalDate,
+        sessionExternalId: action.fact.sessionExternalId,
+        physicalSessionKey: action.physicalSessionKey,
+        originKey: action.originKey,
+        ruleKind: action.rule.kind,
+        ruleId: action.rule.id,
+        ruleUpdatedAt: action.rule.ruleUpdatedAt,
+        ruleName: action.rule.name,
+        expectedXpDelta: action.expectedXpDelta,
+        expectedEntitlementCount: 1,
+        directBonusAmount: 0,
+        eventId: effects[index]?.eventId ?? null,
+        entitlementId: effects[index]?.entitlementId ?? null,
+      })),
+      note,
+    };
   }
 
   private async prepareExactCanonicalization(
@@ -2825,6 +4037,78 @@ function replaySessionPacket(
     : sessionType === 'HOURLY'
       ? false
       : null;
+}
+
+function supportRecoveryProcessDto(
+  fact: Prisma.GuestActivityFactGetPayload<Record<string, never>> & {
+    happenedAt: Date;
+    profileId: string;
+    guestId: string;
+    storeId: string;
+    sessionExternalId: string;
+  },
+  ticketNumber: string,
+): GuestGameProcessEventDto {
+  const playTime = replayFactTypes.has(fact.factType);
+  const sessionType =
+    fact.factType === 'HOURLY_SESSION_STARTED' ||
+    fact.factType === 'HOURLY_PLAY_TIME_ACCUMULATED'
+      ? 'HOURLY'
+      : fact.factType === 'PACKAGE_OR_SUBSCRIPTION_USED' ||
+          fact.factType === 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
+        ? 'PACKAGE_OR_SUBSCRIPTION'
+        : null;
+  if (playTime && (!fact.durationMinutes || fact.durationMinutes <= 0)) {
+    throw new ConflictException(
+      `Play-time fact ${fact.id} has no positive exact duration.`,
+    );
+  }
+  return {
+    profileId: fact.profileId,
+    guestId: fact.guestId,
+    storeId: fact.storeId,
+    eventType: playTime ? 'PLAY_HOUR' : 'SESSION_START',
+    occurredAt: fact.happenedAt.toISOString(),
+    limitOccurredAt: fact.happenedAt.toISOString(),
+    sessionType,
+    sessionPacket: replaySessionPacket(sessionType),
+    sessionMinutes: playTime ? fact.durationMinutes : 0,
+    sourceFactId: fact.id,
+    sourceFactKind: 'GUEST_SESSION',
+    externalProvider: fact.externalProvider,
+    externalDomain: fact.externalDomain,
+    externalId: fact.sessionExternalId,
+    sourceKind: fact.sourceKind,
+    sessionExternalId: fact.sessionExternalId,
+    activeRulesOnly: true,
+    suppressLootBoxRewards: true,
+    payload: {
+      supportRewardRecovery: true,
+      ticketNumber,
+      factType: fact.factType,
+      confidence: fact.confidence,
+      sourceKind: fact.sourceKind,
+      sessionExternalId: fact.sessionExternalId,
+    },
+  };
+}
+
+function uniqueSortedIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value
+        .map((item) => normalizedString(item))
+        .filter((item): item is string => Boolean(item)),
+    ),
+  ].sort();
+}
+
+function sameStringArray(left: readonly string[], right: readonly string[]) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
 }
 
 function requiredId(value: unknown, field: string) {

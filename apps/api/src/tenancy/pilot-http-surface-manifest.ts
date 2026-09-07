@@ -23,11 +23,13 @@ export type PilotHttpScope = 'NETWORK' | 'STORES';
 export type PilotHttpStoreFilter = 'NOT_APPLICABLE' | 'REQUIRED';
 export type PilotHttpPrincipal =
   | 'TENANT_OPERATOR'
+  | 'PLATFORM_ADMIN'
   | 'GUEST_SESSION'
   | 'SERVICE_TOKEN';
 export type PilotHttpDecision = 'ALLOW' | 'BLOCKED';
 export type PilotHttpCapability =
   | AccessCapability
+  | 'platform_admin'
   | 'guest_session'
   | 'service_token';
 
@@ -53,6 +55,7 @@ type ScopeProfile =
   | 'STORES_VERIFIED'
   | 'STORES_GAP'
   | 'LEGACY_STORES_GAP'
+  | 'PLATFORM_ADMIN_ONLY'
   | 'PUBLIC_GAP'
   | 'INTERNAL_ONLY';
 
@@ -469,6 +472,14 @@ const definitions: readonly ControllerDefinition[] = [
     module: 'GAMIFICATION',
     profile: 'PUBLIC_GAP',
     routes: [['GET', [':id']]],
+  },
+  {
+    source:
+      'src/guest-gamification/platform-guest-game-support-recovery.controller.ts',
+    prefix: '/admin/guest-gamification/support-reward-recovery',
+    module: 'GAMIFICATION',
+    profile: 'PLATFORM_ADMIN_ONLY',
+    routes: [['POST', ['preview', 'apply']]],
   },
   {
     source: 'src/guest-gamification/guest-gamification-scheduled.controller.ts',
@@ -985,6 +996,14 @@ function profileFields(
           'PUBLIC_STORE_BINDING_NOT_ATTESTED',
         ],
       };
+    case 'PLATFORM_ADMIN_ONLY':
+      return {
+        minimumScope: 'NETWORK',
+        storeFilter: 'NOT_APPLICABLE',
+        principal: 'PLATFORM_ADMIN',
+        decision: 'BLOCKED',
+        gaps: ['PLATFORM_ADMIN_CONTROL_PLANE_ONLY'],
+      };
     case 'INTERNAL_ONLY':
       return {
         minimumScope: 'NETWORK',
@@ -1007,6 +1026,9 @@ function resolveCapability(
   }
   if (principal === 'SERVICE_TOKEN') {
     return 'service_token';
+  }
+  if (principal === 'PLATFORM_ADMIN') {
+    return 'platform_admin';
   }
 
   if (module === 'USERS_ROLES') {

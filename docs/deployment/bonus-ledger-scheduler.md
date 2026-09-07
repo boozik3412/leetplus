@@ -73,8 +73,12 @@ INTERNAL` tenant последовательно:
 4. запускает tenant-scoped ledger fallback только для exact play-time facts
    `SESSION_PLAY_TIME_ACCUMULATED`, `HOURLY_PLAY_TIME_ACCUMULATED` и
    `PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED`;
-5. запускает supplemental `BALANCE_TOPUP` pipeline;
-6. при наступлении интервала собирает quality snapshot.
+5. отдельным, по умолчанию выключенным проходом обрабатывает session-start
+   family (`SESSION_STARTED`, `HOURLY_SESSION_STARTED`,
+   `PACKAGE_OR_SUBSCRIPTION_USED`); этот проход имеет собственный mode, limit,
+   cutoff и exact-profile/allow-all scope;
+6. запускает supplemental `BALANCE_TOPUP` pipeline;
+7. при наступлении интервала собирает quality snapshot.
 
 Оба долгоживущих API slot сохраняют
 `GUEST_ACTIVITY_LEDGER_SCHEDULER_ENABLED=false`,
@@ -93,6 +97,16 @@ slot. Canary разрешает только `SHADOW` с limit `1`; `LIVE` тр�
 profile, exact tenant, явную нижнюю временную границу и bounded batch. Повторный
 fact обрабатывается по существующим deterministic origin/idempotency keys и не
 может создать второй reward/effect.
+
+Session-start fallback независимо управляется переменными
+`GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_*` и по умолчанию имеет mode
+`OFF`. Любой включённый mode требует ровно один scope: UUID одного профиля либо
+явный `ALLOW_ALL_PROFILES=true`, но не оба. Canary разрешает только
+`SHADOW/limit=1`; stable `LIVE` дополнительно требует UTC cutoff. Проход
+повторяет обычную оценку всех активных правил для события: миссия или шаг
+Battle Pass материализуется только при выполнении собственных условий.
+`suppressLootBoxRewards` отдельно гарантирует, что standalone-лутбокс создаёт
+только доступный кейс, но никогда не открывает его и не выбирает денежный приз.
 
 Bonus ledger не оценивает условия миссии, Battle Pass, лутбокса или чекина. LIVE, последовательный Ledger fallback и supplemental-контур сходятся до него в единые immutable event/intent/effect/wallet записи; дальше действует один claim gate и один контур доставки.
 
@@ -142,6 +156,13 @@ GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_MODE="SHADOW"
 GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIMIT="1"
 # Обязательная UTC-граница перед переводом stable worker в LIVE:
 # GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE="2026-09-05T00:00:00.000Z"
+GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_MODE="OFF"
+GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_LIMIT="1"
+GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_ALLOW_ALL_PROFILES="false"
+# Для bounded canary задаётся UUID ровно одного профиля:
+# GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_PROFILE_ID="<profile-uuid>"
+# Для stable LIVE обязательна отдельная UTC-граница:
+# GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_LIVE_NOT_BEFORE="2026-09-07T00:00:00.000Z"
 GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE="SHADOW"
 GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT="1"
 GUEST_GAMIFICATION_WORKER_MONITORING_ENABLED="false"
@@ -186,6 +207,11 @@ GUEST_GAME_MONITORING_ENABLED="false"
   расширяет tenant scope. В `LIVE` он требует явный
   `GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE`, поэтому rollout
   не превращается в неограниченный исторический replay.
+- Session-start fallback остаётся отдельным `OFF`-by-default контуром. Для
+  canary задаются один `PROFILE_ID`, `SHADOW` и limit `1`; переход к stable
+  `LIVE` требует удаления profile scope, явного `ALLOW_ALL_PROFILES=true` и
+  отдельного `LIVE_NOT_BEFORE`. Изменение scope и mode выполняется как
+  самостоятельный rollout с dry-run evidence.
 - При обработке используются только активные правила. Черновик с совпадающими условиями не должен подавлять активное правило.
 - Профиль допускается к прогрессу только после первого trusted `APP_OPEN`, сохранённого в `GuestGameProfile.gameActivatedAt`. Исторические факты до этой границы не создают wallet item.
 - Ordinary reward и event XP квалифицируются в разные 30-дневные item. XP не применяется, reward не dispatch-ится, пока гость явно не выполнит claim соответствующего item.

@@ -22,6 +22,11 @@ export type GuestGamificationWorkerConfig = Readonly<{
   ledgerFallbackMode: GuestGameLedgerFallbackMode;
   ledgerFallbackLimit: number;
   ledgerFallbackLiveNotBefore: Date | null;
+  sessionStartFallbackMode: GuestGameLedgerFallbackMode;
+  sessionStartFallbackLimit: number;
+  sessionStartFallbackLiveNotBefore: Date | null;
+  sessionStartFallbackProfileId: string | null;
+  sessionStartFallbackAllowAllProfiles: boolean;
   supplementalLimit: number;
   monitoringEnabled: boolean;
   monitoringIntervalMs: number;
@@ -49,6 +54,11 @@ const playTimeFallbackFactTypes = [
   'SESSION_PLAY_TIME_ACCUMULATED',
   'HOURLY_PLAY_TIME_ACCUMULATED',
   'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+] as const;
+const sessionStartFallbackFactTypes = [
+  'SESSION_STARTED',
+  'HOURLY_SESSION_STARTED',
+  'PACKAGE_OR_SUBSCRIPTION_USED',
 ] as const;
 
 /**
@@ -122,6 +132,56 @@ export function loadGuestGamificationWorkerConfig(
       'GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE is required in LIVE mode',
     );
   }
+  const sessionStartFallbackMode = workerLedgerFallbackMode(
+    env.GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_MODE,
+    'GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_MODE',
+  );
+  if (canary && sessionStartFallbackMode === 'LIVE') {
+    throw new Error(
+      'GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_MODE=LIVE is forbidden in canary mode',
+    );
+  }
+  const sessionStartFallbackLimit = boundedPositiveInt(
+    env.GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_LIMIT,
+    1,
+    100,
+    'GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_LIMIT',
+  );
+  const sessionStartFallbackLiveNotBefore = optionalDate(
+    env.GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_LIVE_NOT_BEFORE,
+    'GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_LIVE_NOT_BEFORE',
+  );
+  const sessionStartFallbackProfileId = optional(
+    env.GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_PROFILE_ID,
+  );
+  if (
+    sessionStartFallbackProfileId &&
+    !uuidPattern.test(sessionStartFallbackProfileId)
+  ) {
+    throw new Error('Session-start fallback profile ID must be a UUID');
+  }
+  const sessionStartFallbackAllowAllProfiles = parseBoolean(
+    env.GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_ALLOW_ALL_PROFILES,
+    false,
+    'GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_ALLOW_ALL_PROFILES',
+  );
+  if (
+    sessionStartFallbackMode !== 'OFF' &&
+    Boolean(sessionStartFallbackProfileId) ===
+      sessionStartFallbackAllowAllProfiles
+  ) {
+    throw new Error(
+      'Session-start fallback requires exactly one profile ID or allow-all-profiles=true',
+    );
+  }
+  if (
+    sessionStartFallbackMode === 'LIVE' &&
+    !sessionStartFallbackLiveNotBefore
+  ) {
+    throw new Error(
+      'GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_LIVE_NOT_BEFORE is required in LIVE mode',
+    );
+  }
   const supplementalLimit = boundedPositiveInt(
     env.GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT,
     canary ? 1 : 30,
@@ -130,9 +190,12 @@ export function loadGuestGamificationWorkerConfig(
   );
   if (
     canary &&
-    [pipelineLimit, ledgerFallbackLimit, supplementalLimit].some(
-      (value) => value !== 1,
-    )
+    [
+      pipelineLimit,
+      ledgerFallbackLimit,
+      sessionStartFallbackLimit,
+      supplementalLimit,
+    ].some((value) => value !== 1)
   ) {
     throw new Error(
       'All gamification worker limits must equal 1 in canary mode',
@@ -169,6 +232,11 @@ export function loadGuestGamificationWorkerConfig(
     ledgerFallbackMode,
     ledgerFallbackLimit,
     ledgerFallbackLiveNotBefore,
+    sessionStartFallbackMode,
+    sessionStartFallbackLimit,
+    sessionStartFallbackLiveNotBefore,
+    sessionStartFallbackProfileId,
+    sessionStartFallbackAllowAllProfiles,
     supplementalLimit,
     monitoringEnabled,
     monitoringIntervalMs: boundedPositiveInt(
@@ -288,6 +356,34 @@ export async function runGuestGamificationWorkerOnce(
     );
   }
 
+  const sessionStartFallback =
+    config.sessionStartFallbackMode === 'OFF'
+      ? null
+      : await services.ledgerFallback.runScheduled({
+          mode: config.sessionStartFallbackMode,
+          tenantId: tenant.id,
+          profileId: config.sessionStartFallbackProfileId,
+          playTimeAllowAllProfiles: config.sessionStartFallbackAllowAllProfiles,
+          factTypes: [...sessionStartFallbackFactTypes],
+          limit: config.sessionStartFallbackLimit,
+          ...(config.sessionStartFallbackLiveNotBefore
+            ? {
+                liveNotBefore:
+                  config.sessionStartFallbackLiveNotBefore.toISOString(),
+              }
+            : {}),
+        });
+  if (
+    sessionStartFallback &&
+    (sessionStartFallback.checkedTenants !== 1 ||
+      sessionStartFallback.erroredTenants > 0 ||
+      sessionStartFallback.failedFacts > 0)
+  ) {
+    throw new Error(
+      `Session-start fallback failed exact tenant processing: checked=${sessionStartFallback.checkedTenants}, tenantsFailed=${sessionStartFallback.erroredTenants}, factsFailed=${sessionStartFallback.failedFacts}`,
+    );
+  }
+
   const supplemental =
     await services.gamification.runSupplementalPipelineScheduled({
       tenantId: tenant.id,
@@ -338,6 +434,9 @@ export async function runGuestGamificationWorkerOnce(
       `ledgerFallback=${config.ledgerFallbackMode}`,
       `ledgerFallbackFacts=${ledgerFallback?.liveHandledFacts ?? 0}`,
       `ledgerFallbackRewards=${ledgerFallback?.createdRewards ?? 0}`,
+      `sessionStartFallback=${config.sessionStartFallbackMode}`,
+      `sessionStartFallbackFacts=${sessionStartFallback?.liveHandledFacts ?? 0}`,
+      `sessionStartFallbackRewards=${sessionStartFallback?.createdRewards ?? 0}`,
       `supplementalFacts=${supplemental.processedFacts}`,
       `supplementalRewards=${supplemental.createdRewards}`,
       `monitoring=${monitoring ? 'COLLECTED' : 'SKIPPED'}`,
@@ -350,6 +449,7 @@ export async function runGuestGamificationWorkerOnce(
     activity,
     pipeline,
     ledgerFallback,
+    sessionStartFallback,
     supplemental,
     monitoring,
   };
@@ -372,6 +472,7 @@ function optionalDate(value: string | undefined, key: string) {
 
 function workerLedgerFallbackMode(
   value: string | undefined,
+  key = 'GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_MODE',
 ): GuestGameLedgerFallbackMode {
   const normalized = optional(value)?.toUpperCase() ?? 'OFF';
   if (
@@ -381,9 +482,7 @@ function workerLedgerFallbackMode(
   ) {
     return normalized;
   }
-  throw new Error(
-    'GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_MODE must be OFF, SHADOW or LIVE',
-  );
+  throw new Error(`${key} must be OFF, SHADOW or LIVE`);
 }
 
 function requireBoolean(

@@ -9,6 +9,7 @@ import {
 import { GuestGamificationModule } from '../guest-gamification/guest-gamification.module';
 import { GuestGamificationController } from '../guest-gamification/guest-gamification.controller';
 import { GuestGamificationService } from '../guest-gamification/guest-gamification.service';
+import { PlatformGuestGameSupportRecoveryController } from '../guest-gamification/platform-guest-game-support-recovery.controller';
 import { GuestPortalModule } from '../guest-portal/guest-portal.module';
 import { GuestPortalService } from '../guest-portal/guest-portal.service';
 import { GuestSupportService } from '../guest-portal/guest-support.service';
@@ -62,7 +63,19 @@ describe('split API runtime boundary', () => {
 
     expect(controllers).toContain(GuestGamificationController);
     expect(controllers).toContain(GuestGameMediaController);
+    expect(controllers).toContain(PlatformGuestGameSupportRecoveryController);
     expect(controllers).not.toContain(GuestGamePublicMediaController);
+  });
+
+  it('keeps the platform support recovery controller out of the broad guest gamification module', () => {
+    const controllers = Reflect.getMetadata(
+      MODULE_METADATA.CONTROLLERS,
+      GuestGamificationModule,
+    ) as unknown[];
+
+    expect(controllers).not.toContain(
+      PlatformGuestGameSupportRecoveryController,
+    );
   });
 
   it('compiles the corporate graph without public guest services', async () => {

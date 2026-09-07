@@ -614,9 +614,9 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(301);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(303);
     expect(allowed).toHaveLength(246);
-    expect(blocked).toHaveLength(55);
+    expect(blocked).toHaveLength(57);
     expect(outbound).toHaveLength(21);
     expect(
       PILOT_HTTP_SURFACE_MANIFEST.filter((entry) =>
@@ -947,6 +947,12 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       }
       if (entry.principal === 'SERVICE_TOKEN') {
         expect(entry.decision).toBe('BLOCKED');
+        continue;
+      }
+      if (entry.principal === 'PLATFORM_ADMIN') {
+        expect(access).toBeNull();
+        expect(entry.decision).toBe('BLOCKED');
+        expect(entry.gaps).toContain('PLATFORM_ADMIN_CONTROL_PLANE_ONLY');
         continue;
       }
       if (!access) {

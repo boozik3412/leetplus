@@ -2007,6 +2007,89 @@ describe('GuestGameLedgerFallbackService', () => {
     );
   });
 
+  it('allows a LIVE session-start canary scoped to one exact profile', async () => {
+    const harness = createService();
+    const remediation = jest
+      .spyOn(
+        genericSessionRemediation,
+        'remediateLegacyGenericSessionClassifications',
+      )
+      .mockResolvedValue({
+        scanned: 0,
+        remediated: 0,
+        quarantined: 0,
+        deferred: 0,
+        failed: 0,
+        hasMore: false,
+        complete: true,
+      });
+    configureSessionStartRules(harness);
+    const hourly = sessionStartFact(
+      new Date(now.getTime() - 60_000),
+      'HOURLY_SESSION_STARTED',
+    );
+    harness.prisma.guestActivityFact.findMany.mockResolvedValue([hourly]);
+    harness.prisma.guestGameOriginReceipt.upsert.mockResolvedValue({
+      id: 'receipt-profile-session-start',
+      factId: hourly.id,
+      eventId: null,
+      eventType: 'SESSION_START',
+      policy: 'LIVE_WITH_LEDGER_FALLBACK',
+      status: 'WAITING_LIVE',
+      claimedSource: null,
+      ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+      graceUntil: new Date(now.getTime() - 1_000),
+      attempts: 0,
+      claimExpiresAt: null,
+    });
+
+    await expect(
+      harness.service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        profileId: liveCanaryScope.profileId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        factTypes: ['HOURLY_SESSION_STARTED'],
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedTenants: 1,
+      fallbackFacts: 1,
+      createdEvents: 1,
+      createdRewards: 1,
+    });
+
+    expect(harness.gamification.processEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        profileId: 'profile-1',
+        eventType: 'SESSION_START',
+        sessionType: 'HOURLY',
+        activeRulesOnly: true,
+        suppressLootBoxRewards: true,
+      }),
+      expect.objectContaining({
+        evaluationMode: 'LIVE_LEDGER_FALLBACK',
+        suppressLedgerShadow: true,
+        allowedRuleIds: new Set(['loot-box-start']),
+        allowedBattlePassSteps: new Map(),
+      }),
+    );
+    expect(harness.prisma.guestActivityFact.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ profileId: 'profile-1' }),
+      }),
+    );
+    expect(remediation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        includeSessionStart: false,
+        includePlayTime: false,
+      }),
+    );
+  });
+
   it('upgrades an unclaimed generic start receipt when a delayed typed marker arrives', async () => {
     const harness = createService({
       receiptGraceUntil: new Date(now.getTime() + 60_000),

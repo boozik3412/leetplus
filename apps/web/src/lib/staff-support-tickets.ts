@@ -42,6 +42,8 @@ export type StaffSupportTicket = {
     id: string;
     displayName: string | null;
     contactMasked: string | null;
+    fullName: string | null;
+    phone: string | null;
   };
   assignedTo: TicketUser | null;
   comments: Array<{

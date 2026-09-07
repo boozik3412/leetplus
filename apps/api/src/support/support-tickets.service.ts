@@ -10,6 +10,7 @@ import { roleCapabilities, type AccessCapability } from '../auth/capabilities';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { GUEST_BUG_REPORT_TOPICS } from '../guest-portal/guest-support.service';
+import { SecretEncryptionService } from '../integrations/secret-encryption.service';
 
 export const SUPPORT_TICKET_STATUSES = [
   'NEW',
@@ -57,6 +58,7 @@ export class SupportTicketsService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly configService: ConfigService,
+    private readonly secretEncryptionService: SecretEncryptionService,
   ) {}
 
   getTenantTickets(user: AuthenticatedUser, query: SupportTicketsQuery) {
@@ -212,7 +214,28 @@ export class SupportTicketsService {
             tenant: { select: { id: true, name: true, slug: true } },
             store: { select: { id: true, name: true } },
             profile: {
-              select: { id: true, displayName: true, contactMasked: true },
+              select: {
+                id: true,
+                displayName: true,
+                contactMasked: true,
+                phoneEncrypted: true,
+                guest: {
+                  select: {
+                    fullNameMasked: true,
+                    fullNameEncrypted: true,
+                    phoneMasked: true,
+                    phoneEncrypted: true,
+                  },
+                },
+              },
+            },
+            guest: {
+              select: {
+                fullNameMasked: true,
+                fullNameEncrypted: true,
+                phoneMasked: true,
+                phoneEncrypted: true,
+              },
             },
             assignedTo: {
               select: { id: true, fullName: true, email: true },
@@ -327,8 +350,67 @@ export class SupportTicketsService {
       },
       tenants,
       users,
-      rows,
+      rows: rows.map((row) => this.projectTicketContact(row)),
     };
+  }
+
+  private projectTicketContact<
+    T extends {
+      guest: {
+        fullNameMasked: string | null;
+        fullNameEncrypted: string | null;
+        phoneMasked: string | null;
+        phoneEncrypted: string | null;
+      } | null;
+      profile: {
+        id: string;
+        displayName: string | null;
+        contactMasked: string | null;
+        phoneEncrypted: string | null;
+        guest: {
+          fullNameMasked: string | null;
+          fullNameEncrypted: string | null;
+          phoneMasked: string | null;
+          phoneEncrypted: string | null;
+        } | null;
+      };
+    },
+  >(row: T) {
+    const { guest: ticketGuest, profile: sourceProfile, ...ticket } = row;
+    const {
+      phoneEncrypted: profilePhoneEncrypted,
+      guest: currentProfileGuest,
+      ...profile
+    } = sourceProfile;
+    const guest = ticketGuest ?? currentProfileGuest;
+
+    return {
+      ...ticket,
+      profile: {
+        ...profile,
+        fullName:
+          this.decryptPii(guest?.fullNameEncrypted) ??
+          guest?.fullNameMasked ??
+          profile.displayName,
+        phone:
+          this.decryptPii(profilePhoneEncrypted) ??
+          this.decryptPii(guest?.phoneEncrypted) ??
+          profile.contactMasked ??
+          guest?.phoneMasked ??
+          null,
+      },
+    };
+  }
+
+  private decryptPii(value: string | null | undefined) {
+    if (!value) return null;
+
+    try {
+      return this.secretEncryptionService.decrypt(value, 'pii').trim() || null;
+    } catch {
+      // A damaged legacy value must not make the whole support queue unavailable.
+      return null;
+    }
   }
 
   private async updateTicket(

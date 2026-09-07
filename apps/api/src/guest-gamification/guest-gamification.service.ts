@@ -31271,7 +31271,10 @@ async function validateExactSessionStartEvidence(
            "factType", "happenedAt"
     FROM "GuestActivityFact"
     WHERE "tenantId" = ${tenantId}
-      AND "externalProvider" = ${fact.externalProvider}
+      AND "externalProvider" = CAST(
+        ${fact.externalProvider}
+        AS "IntegrationProvider"
+      )
       AND "sessionExternalId" = ${fact.sessionExternalId}
       AND "factType" IN ('HOURLY_SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED')
       AND "lifecycleStatus" = 'ACTIVE'
@@ -31447,7 +31450,10 @@ async function validateSessionStartReclassificationEvidence(
            "sessionExternalId", "factType"
     FROM "GuestActivityFact"
     WHERE "tenantId" = ${tenantId}
-      AND "externalProvider" = ${fact.externalProvider}
+      AND "externalProvider" = CAST(
+        ${fact.externalProvider}
+        AS "IntegrationProvider"
+      )
       AND "sessionExternalId" = ${fact.sessionExternalId}
       AND "factType" IN ('HOURLY_SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED')
       AND "lifecycleStatus" = 'ACTIVE'

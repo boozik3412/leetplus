@@ -619,6 +619,12 @@ describe('exact typed session-start reconciliation', () => {
     });
     expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
     expect(prisma.guestGameXpPosting.create).not.toHaveBeenCalled();
+    const typedFactLockSql = (
+      prisma.$queryRaw.mock.calls[4]?.[0] as { strings?: readonly string[] }
+    ).strings?.join('__PARAM__');
+    expect(typedFactLockSql).toMatch(
+      /"externalProvider"\s*=\s*CAST\(\s*__PARAM__\s*AS\s*"IntegrationProvider"\s*\)/u,
+    );
     expect(prisma.guestGameEvent.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: eventId },

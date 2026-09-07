@@ -9,20 +9,28 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий production runtime baseline — merge SHA
-`92f29b7a9fbf518589b621e70535bfc089733f48` (PR #148). Active green
-`92f29b7a…` и hot-rollback blue `94f9462e…` работают в
+`54babfaf8f755e49d48fdae870bf085479ea7315` (PR #154). Active blue
+`54babfaf…` и hot-rollback green `0e51235d…` работают в
 `COMBINED`, оба проходят exact readiness `CURRENT_189/189`.
 `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
 `GUEST_BUG_REPORTING_MODE=LIVE`. Split systemd/nginx candidate остаётся
 `DORMANT / NOT INSTALLED`.
 
-Source 07.09 добавляет в staff-карточку тикета явные ФИО и телефон из
+Production rollout 07.09 добавил в staff-карточку тикета явные ФИО и телефон из
 канонического зашифрованного гостевого профиля. Это read-time projection только
 в corporate support endpoints после существующих tenant/platform guards:
 support tables, public guest response, route boundaries и schema не меняются;
 ciphertext удаляется до сериализации, malformed legacy values используют
-masked fallback. Production effect фиксируется только после exact-SHA
-admission и штатного rollout.
+masked fallback. Exact-main Fast CI `34098587581` и Full Release Admission
+`34098587544` завершились `SUCCESS`; restored-copy acceptance прошёл на свежем
+production backup. Five-phase operation
+`2232646f-3eab-470f-8619-784a9b24a31d` терминально развернула exact SHA
+`54babfaf…`, final receipt
+`832ca85fa6dcff7db2fd0e732e058af7bb3b4fa32e5339700a6eb026c3d0d32ba`.
+Authenticated production UI QA подтвердила явные поля на всех `7/7` карточках,
+корректную узкую и desktop-компоновку без горизонтального переполнения и чистую
+консоль в новой браузерной сессии. Предыдущий exact SHA `0e51235d…` сохранён как
+готовый hot rollback.
 
 Production-проверка автономной геймификации 05.09 выявила operational drift:
 частый singleton получил `GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT=3` и

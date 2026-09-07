@@ -107,6 +107,23 @@ Production authenticated read-smoke обязан принимать эти дв�
 immutable smoke allowlist является fail-closed deployment drift и блокирует
 cutover до создания durable intent.
 
+### Production rollout 07.09.2026
+
+Защищённая проекция ФИО и телефона развернута в production через PR #154 на
+exact SHA `54babfaf8f755e49d48fdae870bf085479ea7315`. Fast CI
+`34098587581` и Full Release Admission `34098587544` завершились `SUCCESS`;
+restored-copy acceptance прошёл на свежем production backup. Five-phase
+operation `2232646f-3eab-470f-8619-784a9b24a31d` завершилась terminal receipt
+`832ca85fa6dcff7db2fd0e732e058af7bb3b4fa32e5339700a6eb026c3d0d32ba`.
+
+Postflight подтвердил active blue на exact `54babfaf…`, hot-rollback green на
+`0e51235d…`, readiness обоих slot на `CURRENT_189/189`, bridge `OFF` и reporting
+`LIVE`. Authenticated UI QA проверила все `7/7` доступных карточек: ФИО раскрыто,
+телефон показан отдельным полем, desktop и узкая компоновка не создают
+горизонтального переполнения. В новой браузерной сессии console errors и
+warnings отсутствовали. Support schema, public response, audit/attachment
+metadata и существующие tenant/platform guards не менялись.
+
 Каждое создание, изменение и комментарий записываются в отдельный support audit
 ledger. Tenant API всегда добавляет `tenantId` в read/update/comment/download;
 несуществующий или cross-tenant объект возвращается как not found.

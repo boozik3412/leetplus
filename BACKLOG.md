@@ -179,6 +179,26 @@ receipt-contract drift уже после admission.
     receipt + active link; timeout/stderr/receipt drift не повторяются;
   - проверять HTTP-level route matrix `COMBINED + CORPORATE = mounted`,
     isolated `GUEST = 404` для platform support recovery.
+  Первый срез готов: public POSTCHECK получил bounded retry и exact receipt/link
+  re-attestation. Production rollout `cd1c10da…` подтвердил исходный дефект:
+  generation `41` была уже безопасно принята и public/loopback отвечали `200`,
+  но одиночный probe оставил операцию на `POSTCHECK`; штатный `resume` завершил
+  только read-only фазу. До закрытия item остаются обязательными:
+  - единая clone-preparation команда: DB создаётся владельцем
+    `leetplus_runtime`, restore выполняется `--no-owner` от этой роли, затем
+    `NOSUPERUSER/NOINHERIT` и schema/ACL boundary проверяются до acceptance;
+  - preflight login subject требует ровно одного active non-platform
+    `OWNER/NETWORK` выбранного tenant, даже если последующий support-canary
+    выполняет platform-admin с явно подписанным tenant context;
+  - credential ID передаётся без `.json`, credential имеет LF, wrapper берётся
+    только из sealed release и запускается `/usr/bin/bash -p`;
+  - SSH reverse port обязан совпадать с `inet_server_port()`, а strict installed
+    control verifier использует exact `PATH=/usr/sbin:/usr/bin:/sbin:/bin`;
+  - transient unit collection после durable PASS завершается только exact
+    `--reconcile`; collected/not-found unit не разрешает повтор main operation;
+  - old server backup удаляется только после checksum-verified off-host copy и
+    fresh restored-copy PASS, а clone credentials/tunnel/cluster удаляются после
+    переноса terminal evidence.
   Завершение — Linux fixture + Fast/Full exact-SHA green; production rollout
   этого hardening выполняется только вместе со следующим admitted release.
 

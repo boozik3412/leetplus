@@ -183,7 +183,12 @@ receipt-contract drift уже после admission.
   re-attestation. Production rollout `cd1c10da…` подтвердил исходный дефект:
   generation `41` была уже безопасно принята и public/loopback отвечали `200`,
   но одиночный probe оставил операцию на `POSTCHECK`; штатный `resume` завершил
-  только read-only фазу. До закрытия item остаются обязательными:
+  только read-only фазу. Первый Fast CI `34165349566` отдельно доказал, что
+  проверка одного immutable receipt недостаточна: negative fixture сменила
+  фактическую active nginx link между попытками и была ошибочно принята. Guard
+  теперь перед каждым retry требует одновременно тот же receipt и exact active
+  target slot; этот regression нельзя ослаблять. До закрытия item остаются
+  обязательными:
   - единая clone-preparation команда: DB создаётся владельцем
     `leetplus_runtime`, restore выполняется `--no-owner` от этой роли, затем
     `NOSUPERUSER/NOINHERIT` и schema/ACL boundary проверяются до acceptance;

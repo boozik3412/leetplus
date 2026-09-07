@@ -3030,6 +3030,7 @@ function postcheckPhase(plan, paths, args) {
     const observed = latestCutover(paths, args);
     if (
       !cutoverMatches(observed, plan, paths) ||
+      currentActiveSlot(paths) !== plan.targetSlot ||
       (current !== undefined &&
         observed.receiptSha256 !== current.receiptSha256)
     ) {

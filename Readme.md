@@ -119,7 +119,7 @@ Guest Game Hub читает такие eligible-события как snapshot-f
 
 ### Langame balance write API
 
-Автоматические бонусы могут получать все участники, включая профили, чей телефон совпал с сотрудником tenant или Langame staff. Такой профиль остается помеченным как staff/test для аудита, но reward и bonus ledger по умолчанию проходят к начислению, а evidence/ledger metadata/audit payload сохраняют причину и признак override. Если нужно временно вернуть старую блокировку staff/test-начислений, выставьте `GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED=false`.
+Автоматические бонусы могут получать все участники, включая профили, чей телефон совпал с сотрудником tenant или Langame staff. Такой профиль остается помеченным как staff/test для аудита, но эта метка не влияет на участие, статус reward, постановку в bonus ledger или live dispatch. Evidence, ledger metadata и audit payload сохраняют причину совпадения и политику `staffRewardsPolicy=ALLOW`; отдельного env-флага для блокировки сотрудников больше нет.
 
 Для геймификации подтвержден отдельный master endpoint Langame: `POST /master_api/guests/balance/phone`. Backend вызывает его по активному tenant-источнику Langame с заголовком `X-Request-Token`, используя сохраненный зашифрованный ключ источника; токены не передаются на frontend и не пишутся в audit.
 

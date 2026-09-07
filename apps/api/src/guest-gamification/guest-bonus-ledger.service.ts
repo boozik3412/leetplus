@@ -54,13 +54,10 @@ const scheduledBonusLedgerActorRoles = [
 ] as const;
 const guestPortalExternalDomain = 'leetplus-guest-portal';
 const guestPortalExternalDomains = new Set([guestPortalExternalDomain]);
-const staffTestProfileErrorCode = 'STAFF_TEST_PROFILE';
 const staffTestProfileReasons = {
   staffPhone: 'STAFF_PHONE_MATCH',
   langameStaffPhone: 'LANGAME_STAFF_PHONE_MATCH',
 } as const;
-const staffTestRewardAccrualEnabledEnv =
-  'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED';
 const bonusLedgerOutboundRequirements = [
   {
     module: TenantModule.GAMIFICATION,
@@ -224,7 +221,6 @@ type BonusLedgerConfig = {
   maxAttempts: number;
   retryMinutes: number;
   staleLockMinutes: number;
-  staffTestRewardAccrualEnabled: boolean;
   executionRevision: number | null;
 };
 
@@ -396,8 +392,6 @@ export class GuestBonusLedgerService {
     const storeId = nullableString(dto.storeId);
     const rewardId = nullableString(dto.rewardId);
     const limit = positiveInt(dto.limit, 500, 1000);
-    const staffTestRewardAccrualEnabled =
-      this.isStaffTestRewardAccrualEnabled();
     const now = new Date();
 
     if (rewardTypes.length === 0) {
@@ -481,8 +475,6 @@ export class GuestBonusLedgerService {
     });
     const items: GuestGameBonusLedgerQueueItem[] = [];
     const data: Prisma.GuestBonusLedgerEntryCreateManyInput[] = [];
-    const staffTestRewardIds: string[] = [];
-
     for (const reward of rewards) {
       const externalGuestId =
         nullableString(reward.guestExternalId) ??
@@ -506,6 +498,7 @@ export class GuestBonusLedgerService {
           ? await this.resolveStaffTestReason(user.tenantId, phone.value)
           : null;
 
+      // Keep the classification for audit, never as a queue or delivery gate.
       if (staffTestReason) {
         if (reward.profileId) {
           await this.markProfileStaffTest(
@@ -513,19 +506,6 @@ export class GuestBonusLedgerService {
             reward.profileId,
             staffTestReason,
           );
-        }
-        if (!staffTestRewardAccrualEnabled) {
-          staffTestRewardIds.push(reward.id);
-          items.push({
-            rewardId: reward.id,
-            status: 'SKIPPED',
-            reason:
-              'Профиль определен как тест сотрудника; автоначисление в Langame заблокировано.',
-            externalDomain,
-            externalGuestId,
-            amount,
-          });
-          continue;
         }
       }
 
@@ -565,12 +545,10 @@ export class GuestBonusLedgerService {
           rewardLabel: reward.rewardLabel,
           rewardCode: reward.rewardCode,
           phoneMasked: phone.masked,
-          ...(staffTestReason && staffTestRewardAccrualEnabled
+          ...(staffTestReason
             ? {
                 staffTestReason,
-                staffTestAccrualOverride: true,
-                staffTestRewardAccrualEnabled: true,
-                staffTestRewardAccrualEnv: staffTestRewardAccrualEnabledEnv,
+                staffRewardsPolicy: 'ALLOW',
               }
             : {}),
         },
@@ -578,10 +556,9 @@ export class GuestBonusLedgerService {
       items.push({
         rewardId: reward.id,
         status: 'QUEUED',
-        reason:
-          staffTestReason && staffTestRewardAccrualEnabled
-            ? 'Staff/test награда поставлена в ledger: автоначисление разрешено для всех профилей.'
-            : null,
+        reason: staffTestReason
+          ? 'Награда сотрудника поставлена в ledger на общих условиях.'
+          : null,
         externalDomain,
         externalGuestId,
         amount,
@@ -595,10 +572,6 @@ export class GuestBonusLedgerService {
             skipDuplicates: true,
           })
         : { count: 0 };
-
-    if (staffTestRewardIds.length > 0) {
-      await this.cancelStaffTestRewards(user.tenantId, staffTestRewardIds);
-    }
 
     return {
       checkedRewards: rewards.length,
@@ -1618,45 +1591,13 @@ export class GuestBonusLedgerService {
         phone.value,
       );
 
-      if (staffTestReason && config.staffTestRewardAccrualEnabled === false) {
-        const canceled = await this.cancelStaffTestEntry(
-          actorUserId,
-          sourcedEntry,
-          staffTestReason,
-        );
-
-        if (!canceled) {
-          return {
-            ledgerEntryId: sourcedEntry.id,
-            rewardId: sourcedEntry.rewardId,
-            status: 'BLOCKED',
-            amount: decimalToNumber(sourcedEntry.amount),
-            externalDomain: sourcedEntry.externalDomain,
-            externalGuestId: sourcedEntry.externalGuestId,
-            note: 'Ledger-запись уже была повторно захвачена или изменилась; поздняя отмена тестовой награды не применена.',
-          };
-        }
-
-        return {
-          ledgerEntryId: sourcedEntry.id,
-          rewardId: sourcedEntry.rewardId,
-          status: 'CANCELED',
-          amount: decimalToNumber(sourcedEntry.amount),
-          externalDomain: sourcedEntry.externalDomain,
-          externalGuestId: sourcedEntry.externalGuestId,
-          note: staffTestLedgerNote(),
-        };
-      }
-
       const payload = this.buildLangamePayload(sourcedEntry, phone.value);
       const auditPayload = {
         ...this.buildLangameAuditPayload(payload, phone.masked),
-        ...(staffTestReason && config.staffTestRewardAccrualEnabled !== false
+        ...(staffTestReason
           ? {
               staffTestReason,
-              staffTestAccrualOverride: true,
-              staffTestRewardAccrualEnabled: true,
-              staffTestRewardAccrualEnv: staffTestRewardAccrualEnabledEnv,
+              staffRewardsPolicy: 'ALLOW',
             }
           : {}),
       };
@@ -1763,27 +1704,6 @@ export class GuestBonusLedgerService {
         sourcedEntry,
         dispatchingPhone.value,
       );
-      if (staffTestReason && config.staffTestRewardAccrualEnabled === false) {
-        const canceled = await this.cancelStaffTestEntry(
-          actorUserId,
-          sourcedEntry,
-          staffTestReason,
-          'DISPATCHING',
-          dispatchLockedAt,
-        );
-
-        return {
-          ledgerEntryId: sourcedEntry.id,
-          rewardId: sourcedEntry.rewardId,
-          status: canceled ? 'CANCELED' : 'BLOCKED',
-          amount: decimalToNumber(sourcedEntry.amount),
-          externalDomain: sourcedEntry.externalDomain,
-          externalGuestId: sourcedEntry.externalGuestId,
-          note: canceled
-            ? staffTestLedgerNote()
-            : 'Ledger-запись уже была повторно захвачена или изменилась; поздняя отмена тестовой награды не применена.',
-        };
-      }
 
       const access = await this.langameSettingsService.resolveTenantAccess(
         sourcedEntry.tenantId,
@@ -3037,93 +2957,6 @@ export class GuestBonusLedgerService {
     });
   }
 
-  private async cancelStaffTestRewards(tenantId: string, rewardIds: string[]) {
-    await this.prisma.guestGameReward.updateMany({
-      where: {
-        tenantId,
-        id: { in: [...new Set(rewardIds)] },
-        status: 'APPROVED',
-      },
-      data: {
-        status: 'CANCELED',
-      },
-    });
-  }
-
-  private async cancelStaffTestEntry(
-    actorUserId: string | null,
-    entry: ClaimedBonusLedgerEntry,
-    reason: string,
-    expectedStatus: 'PROCESSING' | 'DISPATCHING' = 'PROCESSING',
-    expectedLockedAt: Date | null = entry.lockedAt,
-  ) {
-    const now = new Date();
-    const metadata = {
-      ...jsonRecord(entry.metadata),
-      staffTestBlocked: true,
-      staffTestReason: reason,
-    };
-
-    return this.prisma.$transaction(async (tx) => {
-      const canceled = await tx.guestBonusLedgerEntry.updateMany({
-        where: {
-          id: entry.id,
-          tenantId: entry.tenantId,
-          status: expectedStatus,
-          attempts: entry.attempts,
-          claimGeneration: entry.claimGeneration,
-          lockedAt: expectedLockedAt,
-          executionRevision: entry.executionRevision,
-        },
-        data: {
-          status: 'CANCELED',
-          processedByUserId: actorUserId,
-          externalProvider: entry.externalProvider,
-          externalDomain: entry.externalDomain,
-          lockedAt: null,
-          nextAttemptAt: null,
-          canceledAt: now,
-          failedAt: null,
-          errorCode: staffTestProfileErrorCode,
-          errorMessage: staffTestLedgerNote(),
-          metadata: metadata,
-        },
-      });
-      if (canceled.count !== 1) {
-        return false;
-      }
-
-      if (entry.rewardId) {
-        await tx.guestGameReward.updateMany({
-          where: {
-            id: entry.rewardId,
-            tenantId: entry.tenantId,
-            status: { in: ['PENDING', 'APPROVED'] },
-          },
-          data: {
-            status: 'CANCELED',
-          },
-        });
-      }
-
-      if (entry.profileId) {
-        await tx.guestGameProfile.updateMany({
-          where: {
-            id: entry.profileId,
-            tenantId: entry.tenantId,
-          },
-          data: {
-            isStaffTest: true,
-            staffTestReason: reason,
-            staffTestMatchedAt: now,
-          },
-        });
-      }
-
-      return true;
-    });
-  }
-
   private async resolveEntrySource(
     entry: ClaimedBonusLedgerEntry,
     access: TenantAccess,
@@ -3251,13 +3084,6 @@ export class GuestBonusLedgerService {
     };
   }
 
-  private isStaffTestRewardAccrualEnabled() {
-    return booleanValue(
-      this.configService.get<string>(staffTestRewardAccrualEnabledEnv),
-      true,
-    );
-  }
-
   private resolveConfig(
     dto: GuestGameBonusLedgerDispatchDto | GuestGameBonusLedgerQueueDto = {},
     forceDryRun = false,
@@ -3313,7 +3139,6 @@ export class GuestBonusLedgerService {
         15,
         24 * 60,
       ),
-      staffTestRewardAccrualEnabled: this.isStaffTestRewardAccrualEnabled(),
       executionRevision: null,
     };
   }
@@ -3525,10 +3350,6 @@ function langameBalanceConfirmationNote(entry: ClaimedBonusLedgerEntry) {
   const actionLabel = toDecimal(entry.amount).lt(0) ? 'списание' : 'начисление';
 
   return `Langame подтвердил ${actionLabel} ${balanceLabel}.`;
-}
-
-function staffTestLedgerNote() {
-  return 'Профиль определен как тест сотрудника; автоначисление в Langame заблокировано.';
 }
 
 function bonusLedgerCancelNote(

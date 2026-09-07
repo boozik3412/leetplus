@@ -30,6 +30,7 @@ fail-closed правилу одного контура снова сломать
 | Release acceleration       | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
 | Langame recovery           | оба systemd timer enabled/active; daily canary `2026-09-05` принят на exact `92f29b7a…`; старый permit снят через проверенную цепочку 4 cutover receipts; bonus-ledger/gamification singleton автономно продолжает `PARTIAL` по одному профилю с pool `2` и timeout `15m`; external unattended остаётся deny |
 | Telegram guest auth        | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                                   |
+| Staff rewards              | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                    |
 | Внешний open beta          | `NO-GO` до Telegram end-to-end canary, admitted heartbeat/readiness rollout, закрытия SSH credential/public-port incident и оставшихся Gate 1MT/2                                                                                                                             |
 
 Store execution fence остаётся отдельным явным полномочием. Migration 165
@@ -398,8 +399,10 @@ production встроенный `GuestBonusLedgerSchedulerService` обязан 
   проходит `TENANT_STORE_SYSTEM` identity с exact `entry.storeId`; запись без
   store остаётся заблокированной без Langame write. Corporate/manual dispatch
   без exact `storeId` по-прежнему отклоняется до claim;
-- staff/test accrual override в production остаётся `false`: такие записи
-  отменяются до provider write и не попадают на реальные балансы сотрудников;
+- source successor не использует staff/test как eligibility или delivery gate:
+  совпадение телефона сохраняется только в audit metadata, а сотрудник участвует
+  и получает награду на общих условиях; исторические `CANCELED` записи не
+  переигрываются автоматически;
 - pre-dispatch ошибки используют bounded retry, а неоднозначный внешний POST
   остаётся `RECONCILIATION_REQUIRED` без автоматического повтора.
 

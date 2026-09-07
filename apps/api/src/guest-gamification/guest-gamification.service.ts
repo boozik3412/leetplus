@@ -200,8 +200,6 @@ const deliveryStatuses = [
   'FAILED',
   'CANCELED',
 ] as const;
-const staffTestRewardAccrualEnabledEnv =
-  'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED';
 const LANGAME_TARIFF_TYPE_GROUP_CACHE_MS = 10 * 60 * 1000;
 const liveSessionStartCacheDefaultTtlMs = 30_000;
 const liveSessionStartLookupDefaultTimeoutMs = 4_000;
@@ -18826,16 +18824,8 @@ export class GuestGamificationService {
     const staffTestReason = profileStaffTest?.isStaffTest
       ? (profileStaffTest.staffTestReason ?? 'STAFF_PHONE_MATCH')
       : null;
-    const staffTestRewardAccrualEnabled =
-      Boolean(staffTestReason) &&
-      booleanValue(
-        this.configService.get<string>(staffTestRewardAccrualEnabledEnv),
-        true,
-      );
-    const staffTestBlocked = Boolean(
-      staffTestReason && !staffTestRewardAccrualEnabled,
-    );
-
+    // Staff identity is diagnostic only; employees participate and receive
+    // rewards under the same rules as every other guest.
     for (const rule of eligibleRules) {
       const link = rewardRuleLink(rule);
       const externalRewardSlot =
@@ -18875,11 +18865,7 @@ export class GuestGamificationService {
             profileId,
             guestId,
             storeId: nullableId(dto.storeId),
-            status: staffTestBlocked
-              ? 'CANCELED'
-              : rule.manualApprovalRequired
-                ? 'PENDING'
-                : 'APPROVED',
+            status: rule.manualApprovalRequired ? 'PENDING' : 'APPROVED',
             source: 'API_IMPORT',
             externalProvider: eventReference?.externalProvider ?? null,
             externalDomain: eventReference?.externalDomain ?? null,
@@ -18904,11 +18890,9 @@ export class GuestGamificationService {
                 ? rule.selectedReward?.chancePercent
                 : null,
             qualifiedAt,
-            note: staffTestBlocked
-              ? 'Создано как тест сотрудника; автоматическое начисление в Langame заблокировано.'
-              : staffTestReason
-                ? 'Создано как тест сотрудника; автоматическое начисление в Langame разрешено для всех профилей.'
-                : 'Создано подтвержденным запуском события геймификации.',
+            note: staffTestReason
+              ? 'Создано для профиля сотрудника; участие и начисление награды выполняются на общих условиях.'
+              : 'Создано подтвержденным запуском события геймификации.',
             evidence: {
               source: 'guest_gamification_process_event',
               langameWrite: false,
@@ -18922,16 +18906,8 @@ export class GuestGamificationService {
               rule,
               ...(staffTestReason
                 ? {
-                    staffTestBlocked,
                     staffTestReason,
-                    ...(staffTestRewardAccrualEnabled
-                      ? {
-                          staffTestAccrualOverride: true,
-                          staffTestRewardAccrualEnabled: true,
-                          staffTestRewardAccrualEnv:
-                            staffTestRewardAccrualEnabledEnv,
-                        }
-                      : {}),
+                    staffRewardsPolicy: 'ALLOW',
                   }
                 : {}),
             },

@@ -16,6 +16,13 @@ workers/control plane, а также инцидентные уроки 27–28.0
 `GUEST_BUG_REPORTING_MODE=LIVE`. Split systemd/nginx candidate остаётся
 `DORMANT / NOT INSTALLED`.
 
+Source candidate по `LP-BUG-A56627F5` удаляет staff/test exclusion из
+геймификации. Совпадение телефона сотрудника остаётся диагностической меткой,
+но больше не может отменить reward, исключить его из bonus-ledger queue или
+остановить Langame dispatch; audit metadata содержит
+`staffRewardsPolicy=ALLOW`. Production runtime и исторические отменённые
+награды не меняются без отдельного admitted rollout и bounded repair.
+
 Production rollout 07.09 добавил в staff-карточку тикета явные ФИО и телефон из
 канонического зашифрованного гостевого профиля. Это read-time projection только
 в corporate support endpoints после существующих tenant/platform guards:

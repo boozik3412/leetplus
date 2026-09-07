@@ -23,6 +23,7 @@ export type DashboardQuery = {
   dateFrom?: string;
   dateTo?: string;
   storeIds?: string | string[];
+  categoryIds?: string | string[];
   skuGrouping?: DashboardSkuGrouping;
 };
 
@@ -55,6 +56,7 @@ export type DashboardStoreRevenueMetric = {
   storeId: string;
   storeName: string;
   totalRevenue: number;
+  totalRevenueSource: Exclude<DashboardRevenueSource, 'SNAPSHOT'>;
   productRevenue: number;
   activeGuests: number;
   productRevenueSharePercent: number | null;
@@ -121,6 +123,10 @@ export type DashboardSalesTrendSegment = {
   revenue: number;
   soldQuantity: number;
   grossProfit: number;
+  visitsCount: number;
+  saleOperationCount: number;
+  saleOperationsPer100Visits: number | null;
+  averageSaleOperationAmount: number | null;
   clubRevenue: number;
   revenueSharePercent: number | null;
   revenueDeltaPercent: number | null;
@@ -137,6 +143,81 @@ export type DashboardSalesTrendSegment = {
   outOfStockSkuDeltaPercent: number | null;
 };
 
+export type DashboardGrowthMetric = {
+  value: number;
+  previousValue: number;
+  deltaPercent: number | null;
+};
+
+export type DashboardOptionalGrowthMetric = {
+  value: number | null;
+  previousValue: number | null;
+  deltaPercent: number | null;
+};
+
+export type DashboardMetricCalculation = {
+  key: string;
+  label: string;
+  source: string;
+  formula: string;
+  grain: string;
+  state: 'READY' | 'NO_DATA' | 'PARTIAL_COVERAGE';
+  note: string | null;
+};
+
+export type DashboardAssortmentDrivers = {
+  identifiedActiveGuests: number;
+  guestIdentificationCoveragePercent: number | null;
+  sessionsPerIdentifiedGuest: number | null;
+  stockTrackedSkuCount: number;
+  stockCoveragePercent: number | null;
+  availabilityPercent: number | null;
+  itemsPerSaleOperation: number | null;
+  averageItemPrice: number | null;
+  costCoveragePercent: number | null;
+  leadingCategory: {
+    categoryId: string | null;
+    categoryName: string;
+    revenueSharePercent: number;
+  } | null;
+  productMarginPercent: number | null;
+};
+
+export type DashboardAssortmentOpportunity = {
+  state: 'READY' | 'NO_DATA';
+  storeId: string | null;
+  storeName: string | null;
+  currentSharePercent: number | null;
+  benchmarkSharePercent: number | null;
+  gapPoints: number | null;
+  revenueOpportunity: number | null;
+  reason: string | null;
+};
+
+export type DashboardAssortmentGrowth = {
+  visits: DashboardGrowthMetric;
+  saleOperations: DashboardGrowthMetric & {
+    per100Visits: number | null;
+    previousPer100Visits: number | null;
+    per100VisitsDeltaPoints: number | null;
+  };
+  averageSaleOperationAmount: DashboardOptionalGrowthMetric;
+  revenue: DashboardGrowthMetric;
+  drivers: DashboardAssortmentDrivers;
+  opportunity: DashboardAssortmentOpportunity;
+  calculations: DashboardMetricCalculation[];
+  methodology: {
+    visitUnit: 'GAME_SESSION';
+    saleUnit: 'PRODUCT_SALE_OPERATION';
+    saleUnitIsExact: true;
+    receiptMetrics: {
+      state: 'SOURCE_UNAVAILABLE';
+      requiredField: 'RECEIPT_OR_ORDER_ID';
+      reason: string;
+    };
+  };
+};
+
 export type DashboardSummary = {
   tenantId: string;
   tenantSlug: string;
@@ -144,6 +225,7 @@ export type DashboardSummary = {
   periodLabel: string;
   skuGrouping: DashboardSkuGrouping;
   selectedStoreIds: string[];
+  selectedCategoryIds: string[];
   periodFrom: string;
   periodTo: string;
   totalSku: number;
@@ -177,6 +259,7 @@ export type DashboardSummary = {
   stockQuantity: number;
   outOfStockRiskCount: number;
   recommendedOrderQuantity: number;
+  assortmentGrowth: DashboardAssortmentGrowth;
   storeRevenueBreakdown: DashboardStoreRevenueMetric[];
   salesTrend: DashboardSalesTrendSegment[];
   categoryAnalytics: DashboardCategoryMetric[];
@@ -287,6 +370,7 @@ export class DashboardService {
     query: DashboardQuery = {},
   ): Promise<DashboardSummary> {
     const requestedStoreIds = this.resolveStoreIds(query.storeIds);
+    const requestedCategoryIds = this.resolveCategoryIds(query.categoryIds);
     const { tenantId, tenantSlug, effectiveStoreIds } =
       await this.freshStoreScopeService.resolveRequestedStoreIds(
         user,
@@ -294,10 +378,21 @@ export class DashboardService {
       );
     const period = this.resolvePeriod(query);
     const selectedStoreIds = effectiveStoreIds ? [...effectiveStoreIds] : [];
+    const selectedCategoryIds = requestedCategoryIds
+      ? [...requestedCategoryIds]
+      : [];
     const storeFilter = effectiveStoreIds
       ? { storeId: { in: [...effectiveStoreIds] } }
       : {};
     const productVisibility = this.productVisibility(effectiveStoreIds);
+    const productCategoryFilter: Prisma.ProductWhereInput =
+      selectedCategoryIds.length > 0
+        ? { categoryId: { in: selectedCategoryIds } }
+        : {};
+    const relatedProductCategoryFilter =
+      selectedCategoryIds.length > 0
+        ? { product: { categoryId: { in: selectedCategoryIds } } }
+        : {};
     const skuGrouping = query.skuGrouping === 'club' ? 'club' : 'network';
     const demandPeriod = this.resolveDemandPeriod();
     const activeSkuPeriod = this.resolveActiveSkuPeriod();
@@ -323,6 +418,8 @@ export class DashboardService {
       currentInventorySnapshots,
       stockMovements,
       periodGuestSessions,
+      trendGuestSessions,
+      previousGuestSessions,
       periodGuestTransactions,
       periodGuestOperationLogs,
       fullDayRevenueFacts,
@@ -350,26 +447,42 @@ export class DashboardService {
         },
       }),
       this.prisma.product.count({
-        where: { tenantId, ...productVisibility },
+        where: { tenantId, ...productVisibility, ...productCategoryFilter },
       }),
       this.prisma.category.count({
         where: {
           tenantId,
+          ...(selectedCategoryIds.length > 0
+            ? { id: { in: selectedCategoryIds } }
+            : {}),
           ...(effectiveStoreIds
-            ? { products: { some: productVisibility } }
+            ? {
+                products: {
+                  some: { ...productVisibility, ...productCategoryFilter },
+                },
+              }
             : {}),
         },
       }),
       this.prisma.supplier.count({
         where: {
           tenantId,
-          ...(effectiveStoreIds
-            ? { products: { some: productVisibility } }
+          ...(effectiveStoreIds || selectedCategoryIds.length > 0
+            ? {
+                products: {
+                  some: { ...productVisibility, ...productCategoryFilter },
+                },
+              }
             : {}),
         },
       }),
       this.prisma.product.findMany({
-        where: { tenantId, isActive: true, ...productVisibility },
+        where: {
+          tenantId,
+          isActive: true,
+          ...productVisibility,
+          ...productCategoryFilter,
+        },
         select: {
           id: true,
           article: true,
@@ -395,6 +508,7 @@ export class DashboardService {
           tenantId,
           isCanceled: false,
           ...storeFilter,
+          ...relatedProductCategoryFilter,
           saleDate: {
             gte: period.fromDate,
             lte: period.toDate,
@@ -433,6 +547,7 @@ export class DashboardService {
           tenantId,
           isCanceled: false,
           ...storeFilter,
+          ...relatedProductCategoryFilter,
           saleDate: {
             gte: this.noSalesTrendFromDate(period.trendFromDate),
             lte: period.trendToDate,
@@ -451,6 +566,7 @@ export class DashboardService {
           tenantId,
           isCanceled: false,
           ...storeFilter,
+          ...relatedProductCategoryFilter,
           saleDate: {
             gte: demandPeriod.fromDate,
             lte: demandPeriod.toDate,
@@ -466,6 +582,7 @@ export class DashboardService {
           tenantId,
           isCanceled: false,
           ...storeFilter,
+          ...relatedProductCategoryFilter,
           saleDate: {
             gte: activeSkuPeriod.fromDate,
             lte: activeSkuPeriod.toDate,
@@ -480,6 +597,7 @@ export class DashboardService {
         where: {
           tenantId,
           ...storeFilter,
+          ...relatedProductCategoryFilter,
           snapshotDate: {
             lte: period.toDate,
           },
@@ -498,6 +616,7 @@ export class DashboardService {
         where: {
           tenantId,
           ...storeFilter,
+          ...relatedProductCategoryFilter,
           snapshotDate: {
             lte: activeSkuPeriod.toDate,
           },
@@ -516,6 +635,7 @@ export class DashboardService {
         where: {
           tenantId,
           ...storeFilter,
+          ...relatedProductCategoryFilter,
           movementDate: {
             gte: period.fromDate,
             lte: period.toDate,
@@ -530,15 +650,51 @@ export class DashboardService {
         where: {
           tenantId,
           ...storeFilter,
-          startedAt: { lte: period.toDate },
-          OR: [{ stoppedAt: null }, { stoppedAt: { gte: period.fromDate } }],
+          startedAt: { gte: period.fromDate, lte: period.toDate },
         },
         select: {
+          id: true,
           storeId: true,
+          externalProvider: true,
+          externalDomain: true,
           externalClubId: true,
           externalSessionId: true,
           guestId: true,
           externalGuestId: true,
+          startedAt: true,
+        },
+      }),
+      this.prisma.guestSession.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          startedAt: {
+            gte: period.trendFromDate,
+            lte: period.trendToDate,
+          },
+        },
+        select: {
+          id: true,
+          externalProvider: true,
+          externalDomain: true,
+          externalSessionId: true,
+          startedAt: true,
+        },
+      }),
+      this.prisma.guestSession.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          startedAt: {
+            gte: previousPeriod.fromDate,
+            lte: previousPeriod.toDate,
+          },
+        },
+        select: {
+          id: true,
+          externalProvider: true,
+          externalDomain: true,
+          externalSessionId: true,
         },
       }),
       this.prisma.guestTransaction.findMany({
@@ -549,6 +705,8 @@ export class DashboardService {
         },
         select: {
           storeId: true,
+          externalProvider: true,
+          externalDomain: true,
           externalClubId: true,
           guestId: true,
           externalGuestId: true,
@@ -576,6 +734,7 @@ export class DashboardService {
           tenantId,
           isCanceled: false,
           ...storeFilter,
+          ...relatedProductCategoryFilter,
           saleDate: {
             gte: fullDayPeriod.averageFromDate,
             lte: fullDayPeriod.currentToDate,
@@ -591,6 +750,7 @@ export class DashboardService {
           tenantId,
           isCanceled: false,
           ...storeFilter,
+          ...relatedProductCategoryFilter,
           saleDate: {
             gte: previousPeriod.fromDate,
             lte: previousPeriod.toDate,
@@ -605,6 +765,7 @@ export class DashboardService {
         where: {
           tenantId,
           ...storeFilter,
+          ...relatedProductCategoryFilter,
           movementDate: {
             gte: previousPeriod.fromDate,
             lte: previousPeriod.toDate,
@@ -770,6 +931,7 @@ export class DashboardService {
     );
     const salesTrend = this.buildSalesTrend(
       trendSalesFacts,
+      trendGuestSessions,
       period.trendFromDate,
       period.trendToDate,
       period.labelGranularity,
@@ -777,21 +939,31 @@ export class DashboardService {
       productsForAverages,
       inventorySnapshots,
     );
-    const demand = productsForAverages.map((product) => {
-      const sold = demandSoldByProduct.get(product.id) ?? 0;
-      const averageDailySales = sold / DEMAND_PERIOD_DAYS;
-      const stock = stockByProduct.get(product.id) ?? 0;
+    const demand = productsForAverages
+      .filter((product) => activeProductIds.has(product.id))
+      .map((product) => {
+        const sold = demandSoldByProduct.get(product.id) ?? 0;
+        const averageDailySales = sold / DEMAND_PERIOD_DAYS;
+        const hasStockSnapshot = stockByProduct.has(product.id);
+        const stock = stockByProduct.get(product.id) ?? 0;
 
-      return {
-        stock,
-        averageDailySales,
-        stockDays: averageDailySales > 0 ? stock / averageDailySales : null,
-        recommendedOrder: this.recommendedOrder(
-          Math.max(0, averageDailySales - stock),
-          product.supplier?.orderMultiplicity ?? null,
-        ),
-      };
-    });
+        return {
+          productId: product.id,
+          hasStockSnapshot,
+          stock,
+          averageDailySales,
+          stockDays:
+            hasStockSnapshot && averageDailySales > 0
+              ? stock / averageDailySales
+              : null,
+          recommendedOrder: hasStockSnapshot
+            ? this.recommendedOrder(
+                Math.max(0, averageDailySales - stock),
+                product.supplier?.orderMultiplicity ?? null,
+              )
+            : 0,
+        };
+      });
     const fullDayRevenue = this.fullDayRevenueComparison(
       fullDayRevenueFacts,
       fullDayPeriod,
@@ -863,6 +1035,38 @@ export class DashboardService {
       totalRevenue,
       grossProfit,
     );
+    const currentVisitStats = this.sessionIdentityStats(periodGuestSessions);
+    const previousVisitStats = this.sessionIdentityStats(previousGuestSessions);
+    const outOfStockRiskCount = demand.filter(
+      (item) =>
+        item.hasStockSnapshot &&
+        item.averageDailySales > 0 &&
+        item.stockDays !== null &&
+        item.stockDays <= 3,
+    ).length;
+    const stockTrackedSkuCount = demand.filter(
+      (item) => item.hasStockSnapshot,
+    ).length;
+    const assortmentGrowth = this.buildAssortmentGrowth({
+      currentRevenue: totalRevenue,
+      currentSaleOperationCount: salesFacts.length,
+      currentVisitCount: currentVisitStats.visits,
+      previousRevenue,
+      previousSaleOperationCount: previousSalesFacts.length,
+      previousVisitCount: previousVisitStats.visits,
+      identifiedActiveGuests: currentVisitStats.identifiedGuests,
+      identifiedVisitCount: currentVisitStats.identifiedVisits,
+      activeSkuCount: activeProductIds.size,
+      stockTrackedSkuCount,
+      outOfStockRiskCount,
+      soldQuantity,
+      categoryAnalytics,
+      grossProfit,
+      costedSaleOperationCount: salesFacts.filter(
+        (fact) => fact.revenue.toNumber() <= 0 || fact.cost.toNumber() > 0,
+      ).length,
+      storeRevenueBreakdown,
+    });
 
     return {
       tenantId,
@@ -871,6 +1075,7 @@ export class DashboardService {
       periodLabel: period.label,
       skuGrouping,
       selectedStoreIds,
+      selectedCategoryIds,
       periodFrom: this.toDateInputValue(period.fromDate),
       periodTo: this.toDateInputValue(period.toDate),
       totalSku,
@@ -919,15 +1124,11 @@ export class DashboardService {
       writeOffAmount: this.round(movementImpact.writeOffAmount),
       returnAmount: this.round(movementImpact.returnAmount),
       stockQuantity: this.round(stockQuantity),
-      outOfStockRiskCount: demand.filter(
-        (item) =>
-          item.averageDailySales > 0 &&
-          item.stockDays !== null &&
-          item.stockDays <= 3,
-      ).length,
+      outOfStockRiskCount,
       recommendedOrderQuantity: this.round(
         demand.reduce((sum, item) => sum + item.recommendedOrder, 0),
       ),
+      assortmentGrowth,
       storeRevenueBreakdown,
       salesTrend,
       categoryAnalytics,
@@ -1333,6 +1534,20 @@ export class DashboardService {
     return values.map((value) => value.trim());
   }
 
+  private resolveCategoryIds(
+    categoryIds?: string | string[],
+  ): readonly string[] | undefined {
+    if (categoryIds === undefined) {
+      return undefined;
+    }
+
+    const values = Array.isArray(categoryIds)
+      ? categoryIds
+      : categoryIds.split(',');
+
+    return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+  }
+
   private productVisibility(
     storeIds: readonly string[] | null,
   ): Prisma.ProductWhereInput {
@@ -1578,6 +1793,512 @@ export class DashboardService {
     }
 
     return this.round(((current - previous) / previous) * 100);
+  }
+
+  private buildAssortmentGrowth(input: {
+    currentRevenue: number;
+    currentSaleOperationCount: number;
+    currentVisitCount: number;
+    previousRevenue: number;
+    previousSaleOperationCount: number;
+    previousVisitCount: number;
+    identifiedActiveGuests: number;
+    identifiedVisitCount: number;
+    activeSkuCount: number;
+    stockTrackedSkuCount: number;
+    outOfStockRiskCount: number;
+    soldQuantity: number;
+    categoryAnalytics: DashboardCategoryMetric[];
+    grossProfit: number;
+    costedSaleOperationCount: number;
+    storeRevenueBreakdown: DashboardStoreRevenueMetric[];
+  }): DashboardAssortmentGrowth {
+    const currentAverageSaleOperation =
+      input.currentSaleOperationCount > 0
+        ? input.currentRevenue / input.currentSaleOperationCount
+        : null;
+    const previousAverageSaleOperation =
+      input.previousSaleOperationCount > 0
+        ? input.previousRevenue / input.previousSaleOperationCount
+        : null;
+    const currentSaleOperationsPer100Visits =
+      input.currentVisitCount > 0
+        ? (input.currentSaleOperationCount / input.currentVisitCount) * 100
+        : null;
+    const previousSaleOperationsPer100Visits =
+      input.previousVisitCount > 0
+        ? (input.previousSaleOperationCount / input.previousVisitCount) * 100
+        : null;
+    const guestIdentificationCoveragePercent =
+      input.currentVisitCount > 0
+        ? this.round(
+            (input.identifiedVisitCount / input.currentVisitCount) * 100,
+          )
+        : null;
+    const sessionsPerIdentifiedGuest =
+      input.identifiedActiveGuests > 0
+        ? this.round(input.identifiedVisitCount / input.identifiedActiveGuests)
+        : null;
+    const stockCoveragePercent =
+      input.activeSkuCount > 0
+        ? this.round((input.stockTrackedSkuCount / input.activeSkuCount) * 100)
+        : null;
+    const availabilityPercent =
+      input.stockTrackedSkuCount > 0
+        ? this.round(
+            ((input.stockTrackedSkuCount - input.outOfStockRiskCount) /
+              input.stockTrackedSkuCount) *
+              100,
+          )
+        : null;
+    const itemsPerSaleOperation =
+      input.currentSaleOperationCount > 0
+        ? this.round(input.soldQuantity / input.currentSaleOperationCount)
+        : null;
+    const averageItemPrice =
+      input.soldQuantity > 0
+        ? this.round(input.currentRevenue / input.soldQuantity)
+        : null;
+    const leadingCategory = input.categoryAnalytics[0]
+      ? {
+          categoryId: input.categoryAnalytics[0].categoryId,
+          categoryName: input.categoryAnalytics[0].categoryName,
+          revenueSharePercent: input.categoryAnalytics[0].revenueSharePercent,
+        }
+      : null;
+    const costCoveragePercent =
+      input.currentSaleOperationCount > 0
+        ? this.round(
+            (input.costedSaleOperationCount / input.currentSaleOperationCount) *
+              100,
+          )
+        : null;
+    const productMarginPercent =
+      costCoveragePercent === 100
+        ? this.ratioPercent(input.grossProfit, input.currentRevenue)
+        : null;
+    const opportunity = this.buildAssortmentOpportunity(
+      input.storeRevenueBreakdown,
+    );
+    const calculations: DashboardMetricCalculation[] = [
+      {
+        key: 'visits',
+        label: 'Визиты',
+        source: 'GuestSession / guests/sessions',
+        formula: 'COUNT(DISTINCT session)',
+        grain: 'Одна игровая сессия',
+        state: 'READY',
+        note: null,
+      },
+      {
+        key: 'saleOperations',
+        label: 'Товарные операции',
+        source: 'SalesFact / products/expense',
+        formula: 'COUNT(sale operation)',
+        grain: 'Одна строка продажи одного товара',
+        state: 'READY',
+        note: null,
+      },
+      {
+        key: 'averageSaleOperationAmount',
+        label: 'Средняя сумма товарной операции',
+        source: 'SalesFact / products/expense',
+        formula: 'SUM(revenue) / COUNT(sale operation)',
+        grain: 'Товарная операция',
+        state: currentAverageSaleOperation === null ? 'NO_DATA' : 'READY',
+        note:
+          currentAverageSaleOperation === null
+            ? 'В периоде нет товарных операций.'
+            : null,
+      },
+      {
+        key: 'productRevenue',
+        label: 'Товарная выручка',
+        source: 'SalesFact / products/expense',
+        formula: 'SUM(revenue)',
+        grain: 'Товарная операция',
+        state: 'READY',
+        note: null,
+      },
+      {
+        key: 'periodDelta',
+        label: 'Изменение к прошлому периоду',
+        source: 'Текущий и предыдущий сопоставимые периоды',
+        formula: '(current − previous) / previous × 100',
+        grain: 'Период той же длины',
+        state:
+          input.previousVisitCount > 0 ||
+          input.previousSaleOperationCount > 0 ||
+          input.previousRevenue > 0
+            ? 'READY'
+            : 'NO_DATA',
+        note:
+          input.previousVisitCount > 0 ||
+          input.previousSaleOperationCount > 0 ||
+          input.previousRevenue > 0
+            ? null
+            : 'В предыдущем периоде нет ненулевой базы сравнения.',
+      },
+      {
+        key: 'saleOperationsPer100Visits',
+        label: 'Товарных операций на 100 визитов',
+        source: 'SalesFact + GuestSession',
+        formula: 'sale operations / visits × 100',
+        grain: 'Выбранный период и фильтры',
+        state: currentSaleOperationsPer100Visits === null ? 'NO_DATA' : 'READY',
+        note:
+          currentSaleOperationsPer100Visits === null
+            ? 'В периоде нет игровых сессий.'
+            : null,
+      },
+      {
+        key: 'identifiedActiveGuests',
+        label: 'Идентифицированные активные гости',
+        source: 'GuestSession',
+        formula: 'COUNT(DISTINCT guest identity)',
+        grain: 'Гость в выбранном периоде',
+        state:
+          guestIdentificationCoveragePercent !== null &&
+          guestIdentificationCoveragePercent < 100
+            ? 'PARTIAL_COVERAGE'
+            : 'READY',
+        note:
+          guestIdentificationCoveragePercent !== null &&
+          guestIdentificationCoveragePercent < 100
+            ? `Идентификатор гостя есть у ${guestIdentificationCoveragePercent}% визитов.`
+            : null,
+      },
+      {
+        key: 'guestIdentificationCoveragePercent',
+        label: 'Покрытие ID гостей',
+        source: 'GuestSession',
+        formula: 'identified visits / visits × 100',
+        grain: 'Игровая сессия',
+        state:
+          guestIdentificationCoveragePercent === null ? 'NO_DATA' : 'READY',
+        note:
+          guestIdentificationCoveragePercent === null
+            ? 'В периоде нет игровых сессий.'
+            : null,
+      },
+      {
+        key: 'sessionsPerIdentifiedGuest',
+        label: 'Сессий на идентифицированного гостя',
+        source: 'GuestSession',
+        formula: 'identified visits / distinct identified guests',
+        grain: 'Гость в выбранном периоде',
+        state: sessionsPerIdentifiedGuest === null ? 'NO_DATA' : 'READY',
+        note:
+          sessionsPerIdentifiedGuest === null
+            ? 'Нет сессий с идентификатором гостя.'
+            : null,
+      },
+      {
+        key: 'availabilityPercent',
+        label: 'Наличие среди SKU с остатками',
+        source: 'InventorySnapshot + SalesFact',
+        formula:
+          '(tracked active SKU − OOS risk SKU) / tracked active SKU × 100',
+        grain: 'Активный SKU',
+        state:
+          availabilityPercent === null
+            ? 'NO_DATA'
+            : stockCoveragePercent !== null && stockCoveragePercent < 100
+              ? 'PARTIAL_COVERAGE'
+              : 'READY',
+        note:
+          availabilityPercent === null
+            ? 'Нет снимков остатков для активных SKU.'
+            : stockCoveragePercent !== null && stockCoveragePercent < 100
+              ? `Остатки загружены для ${stockCoveragePercent}% активных SKU.`
+              : null,
+      },
+      {
+        key: 'stockCoveragePercent',
+        label: 'Покрытие остатков',
+        source: 'InventorySnapshot',
+        formula: 'tracked active SKU / active SKU × 100',
+        grain: 'Активный SKU',
+        state: stockCoveragePercent === null ? 'NO_DATA' : 'READY',
+        note:
+          stockCoveragePercent === null ? 'В периоде нет активных SKU.' : null,
+      },
+      {
+        key: 'itemsPerSaleOperation',
+        label: 'Товаров в операции',
+        source: 'SalesFact / products/expense',
+        formula: 'SUM(quantity) / COUNT(sale operation)',
+        grain: 'Товарная операция',
+        state: itemsPerSaleOperation === null ? 'NO_DATA' : 'READY',
+        note:
+          itemsPerSaleOperation === null
+            ? 'В периоде нет товарных операций.'
+            : null,
+      },
+      {
+        key: 'averageItemPrice',
+        label: 'Средняя цена проданного товара',
+        source: 'SalesFact / products/expense',
+        formula: 'SUM(revenue) / SUM(quantity)',
+        grain: 'Проданная единица товара',
+        state: averageItemPrice === null ? 'NO_DATA' : 'READY',
+        note:
+          averageItemPrice === null
+            ? 'В периоде нет проданных единиц товара.'
+            : null,
+      },
+      {
+        key: 'leadingCategory',
+        label: 'Категория-лидер',
+        source: 'SalesFact + Product.category',
+        formula: 'MAX(category revenue)',
+        grain: 'Категория',
+        state: leadingCategory === null ? 'NO_DATA' : 'READY',
+        note:
+          leadingCategory === null
+            ? 'В периоде нет продаж по категориям.'
+            : null,
+      },
+      {
+        key: 'costCoveragePercent',
+        label: 'Покрытие себестоимости',
+        source: 'SalesFact / products/expense',
+        formula: 'operations with positive cost / sale operations × 100',
+        grain: 'Товарная операция',
+        state: costCoveragePercent === null ? 'NO_DATA' : 'READY',
+        note:
+          costCoveragePercent === null
+            ? 'В периоде нет товарных операций.'
+            : null,
+      },
+      {
+        key: 'productMarginPercent',
+        label: 'Маржа товаров',
+        source: 'SalesFact / products/expense',
+        formula: '(SUM(revenue) − SUM(cost)) / SUM(revenue) × 100',
+        grain: 'Товарная операция',
+        state: productMarginPercent === null ? 'NO_DATA' : 'READY',
+        note:
+          productMarginPercent === null
+            ? costCoveragePercent !== null && costCoveragePercent < 100
+              ? `Положительная себестоимость есть у ${costCoveragePercent}% товарных операций.`
+              : 'В периоде нет товарной выручки.'
+            : null,
+      },
+      {
+        key: 'storeOpportunity',
+        label: 'Потенциал клуба',
+        source: 'SalesFact + confirmed club revenue',
+        formula: 'club revenue × (network median share − club product share)',
+        grain: 'Клуб',
+        state: opportunity.state,
+        note: opportunity.reason,
+      },
+    ];
+
+    return {
+      visits: {
+        value: input.currentVisitCount,
+        previousValue: input.previousVisitCount,
+        deltaPercent: this.changePercent(
+          input.currentVisitCount,
+          input.previousVisitCount,
+        ),
+      },
+      saleOperations: {
+        value: input.currentSaleOperationCount,
+        previousValue: input.previousSaleOperationCount,
+        deltaPercent: this.changePercent(
+          input.currentSaleOperationCount,
+          input.previousSaleOperationCount,
+        ),
+        per100Visits:
+          currentSaleOperationsPer100Visits === null
+            ? null
+            : this.round(currentSaleOperationsPer100Visits),
+        previousPer100Visits:
+          previousSaleOperationsPer100Visits === null
+            ? null
+            : this.round(previousSaleOperationsPer100Visits),
+        per100VisitsDeltaPoints:
+          currentSaleOperationsPer100Visits !== null &&
+          previousSaleOperationsPer100Visits !== null
+            ? this.round(
+                currentSaleOperationsPer100Visits -
+                  previousSaleOperationsPer100Visits,
+              )
+            : null,
+      },
+      averageSaleOperationAmount: {
+        value:
+          currentAverageSaleOperation === null
+            ? null
+            : this.round(currentAverageSaleOperation),
+        previousValue:
+          previousAverageSaleOperation === null
+            ? null
+            : this.round(previousAverageSaleOperation),
+        deltaPercent:
+          currentAverageSaleOperation !== null &&
+          previousAverageSaleOperation !== null
+            ? this.changePercent(
+                currentAverageSaleOperation,
+                previousAverageSaleOperation,
+              )
+            : null,
+      },
+      revenue: {
+        value: this.round(input.currentRevenue),
+        previousValue: this.round(input.previousRevenue),
+        deltaPercent: this.changePercent(
+          input.currentRevenue,
+          input.previousRevenue,
+        ),
+      },
+      drivers: {
+        identifiedActiveGuests: input.identifiedActiveGuests,
+        guestIdentificationCoveragePercent,
+        sessionsPerIdentifiedGuest,
+        stockTrackedSkuCount: input.stockTrackedSkuCount,
+        stockCoveragePercent,
+        availabilityPercent,
+        itemsPerSaleOperation,
+        averageItemPrice,
+        costCoveragePercent,
+        leadingCategory,
+        productMarginPercent,
+      },
+      opportunity,
+      calculations,
+      methodology: {
+        visitUnit: 'GAME_SESSION',
+        saleUnit: 'PRODUCT_SALE_OPERATION',
+        saleUnitIsExact: true,
+        receiptMetrics: {
+          state: 'SOURCE_UNAVAILABLE',
+          requiredField: 'RECEIPT_OR_ORDER_ID',
+          reason:
+            'products/expense не передаёт идентификатор чека или заказа, поэтому чековые метрики не подменяются товарными операциями.',
+        },
+      },
+    };
+  }
+
+  private sessionIdentityStats(
+    sessions: Array<{
+      id?: string;
+      externalProvider?: string | null;
+      externalDomain?: string | null;
+      externalSessionId: string;
+      guestId?: string | null;
+      externalGuestId?: string | null;
+    }>,
+  ) {
+    const sessionGuests = new Map<string, string | null>();
+
+    sessions.forEach((session, index) => {
+      const sessionKey =
+        session.id ??
+        [
+          session.externalProvider ?? 'unknown-provider',
+          session.externalDomain ?? 'unknown-domain',
+          session.externalSessionId || `row-${index}`,
+        ].join(':');
+      const guestKey = this.guestIdentityKey(session);
+
+      sessionGuests.set(sessionKey, guestKey);
+    });
+
+    const identifiedGuestIds = new Set(
+      [...sessionGuests.values()].filter((guestKey): guestKey is string =>
+        Boolean(guestKey),
+      ),
+    );
+
+    return {
+      visits: sessionGuests.size,
+      identifiedVisits: [...sessionGuests.values()].filter(Boolean).length,
+      identifiedGuests: identifiedGuestIds.size,
+    };
+  }
+
+  private guestIdentityKey(identity: {
+    guestId?: string | null;
+    externalProvider?: string | null;
+    externalDomain?: string | null;
+    externalGuestId?: string | null;
+  }) {
+    if (identity.guestId) {
+      return `guest:${identity.guestId}`;
+    }
+
+    if (!identity.externalGuestId) {
+      return null;
+    }
+
+    return [
+      'external-guest',
+      identity.externalProvider ?? 'unknown-provider',
+      identity.externalDomain ?? 'unknown-domain',
+      identity.externalGuestId,
+    ].join(':');
+  }
+
+  private buildAssortmentOpportunity(
+    stores: DashboardStoreRevenueMetric[],
+  ): DashboardAssortmentOpportunity {
+    const eligibleStores = stores
+      .filter(
+        (store) =>
+          store.totalRevenue > 0 &&
+          store.totalRevenueSource !== 'PRODUCTS' &&
+          store.totalRevenueSource !== 'EMPTY' &&
+          store.productRevenueSharePercent !== null,
+      )
+      .sort(
+        (first, second) =>
+          (first.productRevenueSharePercent ?? 0) -
+          (second.productRevenueSharePercent ?? 0),
+      );
+
+    if (eligibleStores.length < 2) {
+      return {
+        state: 'NO_DATA',
+        storeId: null,
+        storeName: null,
+        currentSharePercent: null,
+        benchmarkSharePercent: null,
+        gapPoints: null,
+        revenueOpportunity: null,
+        reason:
+          'Для сравнения нужны минимум два клуба с подтверждённой общей выручкой.',
+      };
+    }
+
+    const weakest = eligibleStores[0];
+    const sortedShares = eligibleStores
+      .map((store) => store.productRevenueSharePercent ?? 0)
+      .sort((first, second) => first - second);
+    const middleIndex = Math.floor(sortedShares.length / 2);
+    const benchmarkSharePercent =
+      sortedShares.length % 2 === 0
+        ? (sortedShares[middleIndex - 1] + sortedShares[middleIndex]) / 2
+        : sortedShares[middleIndex];
+    const gapPoints = Math.max(
+      0,
+      benchmarkSharePercent - (weakest.productRevenueSharePercent ?? 0),
+    );
+
+    return {
+      state: 'READY',
+      storeId: weakest.storeId,
+      storeName: weakest.storeName,
+      currentSharePercent: weakest.productRevenueSharePercent,
+      benchmarkSharePercent: this.round(benchmarkSharePercent),
+      gapPoints: this.round(gapPoints),
+      revenueOpportunity: this.round((weakest.totalRevenue * gapPoints) / 100),
+      reason: null,
+    };
   }
 
   private buildDashboardRevenueBreakdown(input: {
@@ -2693,6 +3414,8 @@ export class DashboardService {
     salesFacts: {
       storeId: string;
       guestId?: string | null;
+      externalProvider?: string | null;
+      externalDomain?: string | null;
       externalGuestId?: string | null;
       revenue: { toNumber: () => number };
     }[],
@@ -2701,12 +3424,16 @@ export class DashboardService {
       externalClubId: string | null;
       externalSessionId: string;
       guestId: string | null;
+      externalProvider?: string | null;
+      externalDomain?: string | null;
       externalGuestId: string | null;
     }[],
     guestTransactions: {
       storeId: string | null;
       externalClubId: string | null;
       guestId: string | null;
+      externalProvider?: string | null;
+      externalDomain?: string | null;
       externalGuestId: string | null;
       type: string | null;
       amount: { toNumber: () => number } | null;
@@ -2753,7 +3480,7 @@ export class DashboardService {
           fact.revenue.toNumber(),
       );
 
-      const guestKey = fact.guestId ?? fact.externalGuestId;
+      const guestKey = this.guestIdentityKey(fact);
       if (guestKey) {
         const guestIds = guestIdsByStore.get(fact.storeId) ?? new Set<string>();
         guestIds.add(guestKey);
@@ -2767,21 +3494,13 @@ export class DashboardService {
 
     guestSessions.forEach((session) => {
       const storeId = resolveStoreId(session.storeId, session.externalClubId);
-      const guestKey =
-        session.guestId ??
-        session.externalGuestId ??
-        `session:${session.externalSessionId}`;
+      const guestKey = this.guestIdentityKey(session);
 
       if (!storeId || !guestKey) {
         return;
       }
 
-      if (session.guestId || session.externalGuestId) {
-        storeIdByGuestKey.set(
-          session.guestId ?? session.externalGuestId!,
-          storeId,
-        );
-      }
+      storeIdByGuestKey.set(guestKey, storeId);
 
       const guestIds = guestIdsByStore.get(storeId) ?? new Set<string>();
       guestIds.add(guestKey);
@@ -2789,7 +3508,7 @@ export class DashboardService {
     });
 
     guestTransactions.forEach((transaction) => {
-      const guestKey = transaction.guestId ?? transaction.externalGuestId;
+      const guestKey = this.guestIdentityKey(transaction);
       const storeId =
         resolveStoreId(transaction.storeId, transaction.externalClubId) ??
         (guestKey ? storeIdByGuestKey.get(guestKey) : null);
@@ -2838,11 +3557,21 @@ export class DashboardService {
           transactionRevenue,
           productRevenue,
         );
+        const totalRevenueSource: Exclude<DashboardRevenueSource, 'SNAPSHOT'> =
+          totalRevenue <= 0
+            ? 'EMPTY'
+            : operationRevenue >= transactionRevenue &&
+                operationRevenue >= productRevenue
+              ? 'BALANCE_OPERATIONS'
+              : transactionRevenue >= productRevenue
+                ? 'TRANSACTIONS'
+                : 'PRODUCTS';
 
         return {
           storeId: store.id,
           storeName: store.name,
           totalRevenue: this.round(totalRevenue),
+          totalRevenueSource,
           productRevenue: this.round(productRevenue),
           activeGuests: guestIdsByStore.get(store.id)?.size ?? 0,
           productRevenueSharePercent: this.ratioPercent(
@@ -2885,6 +3614,13 @@ export class DashboardService {
       revenue: { toNumber: () => number };
       cost: { toNumber: () => number };
     }[],
+    guestSessions: {
+      id?: string;
+      externalProvider?: string | null;
+      externalDomain?: string | null;
+      externalSessionId: string;
+      startedAt: Date | null;
+    }[],
     fromDate: Date,
     toDate: Date,
     labelGranularity: DashboardTrendGranularity,
@@ -2918,12 +3654,35 @@ export class DashboardService {
       const cost = fact.cost.toNumber();
 
       segment.revenue += revenue;
+      segment.saleOperationCount += 1;
       segment.soldQuantity += fact.quantity.toNumber();
       segment.grossProfit += revenue - cost;
       segment.soldByProduct.set(
         fact.productId,
         (segment.soldByProduct.get(fact.productId) ?? 0) +
           fact.quantity.toNumber(),
+      );
+    });
+
+    guestSessions.forEach((session, index) => {
+      if (!session.startedAt) {
+        return;
+      }
+
+      const startedAt = session.startedAt.getTime();
+      const segment = segments.find(
+        (item) =>
+          startedAt >= item.fromDate.getTime() &&
+          startedAt <= item.toDate.getTime(),
+      );
+
+      segment?.visitIds.add(
+        session.id ??
+          [
+            session.externalProvider ?? 'unknown-provider',
+            session.externalDomain ?? 'unknown-domain',
+            session.externalSessionId || `row-${index}`,
+          ].join(':'),
       );
     });
 
@@ -2942,6 +3701,10 @@ export class DashboardService {
       );
       const noSalesSkuCount = noSalesCounts[7];
       const outOfStockSkuCount = activeProducts.filter((product) => {
+        if (!stockByProduct.has(product.id)) {
+          return false;
+        }
+
         const sold = segment.soldByProduct.get(product.id) ?? 0;
         const averageDailySales = sold / segmentDays;
         const stock = stockByProduct.get(product.id) ?? 0;
@@ -2965,6 +3728,18 @@ export class DashboardService {
         revenue: this.round(segment.revenue),
         soldQuantity: this.round(segment.soldQuantity),
         grossProfit: this.round(segment.grossProfit),
+        visitsCount: segment.visitIds.size,
+        saleOperationCount: segment.saleOperationCount,
+        saleOperationsPer100Visits:
+          segment.visitIds.size > 0
+            ? this.round(
+                (segment.saleOperationCount / segment.visitIds.size) * 100,
+              )
+            : null,
+        averageSaleOperationAmount:
+          segment.saleOperationCount > 0
+            ? this.round(segment.revenue / segment.saleOperationCount)
+            : null,
         clubRevenue: this.round(segment.clubRevenue),
         revenueSharePercent:
           segment.clubRevenue > 0
@@ -3062,6 +3837,8 @@ export class DashboardService {
       revenue: 0,
       soldQuantity: 0,
       grossProfit: 0,
+      saleOperationCount: 0,
+      visitIds: new Set<string>(),
       clubRevenue: 0,
       soldByProduct: new Map<string, number>(),
       noSalesSkuCount: 0,

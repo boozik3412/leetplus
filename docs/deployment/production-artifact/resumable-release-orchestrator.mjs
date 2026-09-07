@@ -66,6 +66,7 @@ const CACHE_PREPARATION_ATTEMPTS = 3;
 const CACHE_PREPARATION_RETRY_DELAY_MS = 1000;
 const LOOPBACK_READINESS_ATTEMPTS = 12;
 const LOOPBACK_READINESS_RETRY_DELAY_MS = 2000;
+const PUBLIC_READINESS_ATTEMPTS = 3;
 const CANONICAL_API_BIND_HOST = "127.0.0.1";
 const LEGACY_API_BIND_HOST = "localhost";
 const TRUSTED_LANES = Object.freeze(["L1_RUNTIME", "L2_SCHEMA_SECURITY"]);
@@ -2376,9 +2377,11 @@ function runReadiness(
   args,
   label,
   attempts = 1,
+  beforeAttempt = undefined,
 ) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
+      beforeAttempt?.();
       return runCommand(
         paths.readiness,
         [
@@ -3022,10 +3025,19 @@ function cutoverPhase(plan, paths, args) {
 }
 
 function postcheckPhase(plan, paths, args) {
-  const current = latestCutover(paths, args);
-  if (!cutoverMatches(current, plan, paths)) {
-    fail("ORCHESTRATOR_POSTCHECK_CUTOVER_DRIFT");
-  }
+  let current;
+  const attestCurrentCutover = () => {
+    const observed = latestCutover(paths, args);
+    if (
+      !cutoverMatches(observed, plan, paths) ||
+      currentActiveSlot(paths) !== plan.targetSlot ||
+      (current !== undefined &&
+        observed.receiptSha256 !== current.receiptSha256)
+    ) {
+      fail("ORCHESTRATOR_POSTCHECK_CUTOVER_DRIFT");
+    }
+    current = observed;
+  };
   const readiness = runReadiness(
     plan,
     plan.urls.publicApi,
@@ -3033,13 +3045,17 @@ function postcheckPhase(plan, paths, args) {
     paths,
     args,
     "ORCHESTRATOR_PUBLIC_READINESS",
+    PUBLIC_READINESS_ATTEMPTS,
+    attestCurrentCutover,
   );
+  attestCurrentCutover();
   const authenticated = runAuthenticated(
     plan.urls.publicApi,
     paths,
     args,
     "ORCHESTRATOR_PUBLIC_AUTHENTICATED_SMOKE",
   );
+  attestCurrentCutover();
   return {
     authenticatedSmokeSha256: sha256(authenticated),
     cutoverReceiptSha256: current.receiptSha256,

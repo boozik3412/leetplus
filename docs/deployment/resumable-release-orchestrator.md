@@ -82,7 +82,7 @@ generation останавливает продолжение.
 | `BIND` | persistent exact instance masks + `--now`, reset failed state, cache preparation, inactive slot link и atomic slot-env bind | повтор оставляет target fenced; cache повторяется не более трёх раз только после обычного non-zero exit и повторной проверки `masked/inactive/dead/PID=0`; pending binder intent продолжает только `reconcile`; previous slot-env bytes сохраняются root-only и принимаются только по exact lineage |
 | `SMOKE` | снять exact masks, enable/start target API/Web, loopback readiness и authenticated reads | unmask/start повторяются идемпотентно; loopback readiness ждёт startup bounded-серией, но ambiguous/timeout/oversize/stderr не повторяются; invocation IDs и результаты должны совпасть |
 | `CUTOVER` | штатный atomic nginx switch с watchdog | pending child intent проходит `recover-pending`; terminal successor принимается только как baseline generation + 1 с exact target и previous-runtime contract; диагностический stderr после exit 0 допустим только когда такой exact receipt уже durable и active link совпал |
-| `POSTCHECK` | public readiness + authenticated reads | read-only проверки повторяются; active link и accepted cutover receipt должны остаться теми же |
+| `POSTCHECK` | public readiness + authenticated reads | обычный non-zero public readiness повторяется не более трёх раз; перед каждой попыткой и после authenticated smoke заново проверяются active link и тот же accepted cutover receipt; timeout/stderr/receipt drift не повторяются |
 
 Если evidence успел стать durable, а ответ/receipt потерян, `resume` не
 дописывает receipt вслепую: он повторно исполняет идемпотентную проверку фазы и
@@ -131,6 +131,16 @@ production на active blue generation 21; green `22ab6b81…` сохранён 
 rollback. Public и loopback API/Web, authenticated reads и CURRENT189 postcheck
 успешны, pending record отсутствует. Schema, ACL, guest flags и worker state не
 менялись.
+
+Production rollout 07.09.2026 подтвердил необходимость отдельного bounded
+public POSTCHECK retry: cutover уже имел exact durable successor receipt и новый
+slot отвечал loopback/readiness, но единственный немедленный public probe вернул
+обычный non-zero результат. Ручная точная проверка сразу после fail-closed была
+успешной, а `resume` завершил только POSTCHECK без второго cutover. Successor
+повторяет только этот обычный probe до трёх раз и перед каждой попыткой заново
+сверяет active nginx link и immutable receipt. Ambiguous outcome, timeout,
+stderr, смена generation/receipt/link или authenticated-smoke failure остаются
+однократным fail-closed отказом.
 
 V2 корректно сохранил доступность и позволил продолжать тот же exact plan, но
 потребовал несколько быстрых `resume`: transient cache process cleanup,

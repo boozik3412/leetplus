@@ -163,6 +163,49 @@ receipt-contract drift уже после admission.
   `InvocationID`, недоступность manager transports, direct/wrong-unit отказ,
   persistent timer execution и zero residue. Завершение — только после Fast+Full
   exact-SHA green.
+- [ ] `REL-ACC-011`: сделать L1/L2 preparation детерминированной до первого
+  production effect. Обязательный executable contract должен:
+  - отклонять пустые systemd timestamps до преобразования даты;
+  - запускать strict production-control verifier только через canonical
+    `env -i PATH/LANG/LC_ALL/TZ`;
+  - завершать transient `leetplus-rehearsal` membership и доказывать пустой
+    explicit member set `leetplus-runtime` до BIND/cache;
+  - проверять LF credentials, равенство tunnel/DB port, `autovacuum=off`, zero
+    foreign sessions и owner-normalized disposable clone до acceptance;
+  - продолжать systemd collection только через exact `reconcile`, запрещая
+    повтор main operation и standalone promotion active hot rollback;
+  - повторять public POSTCHECK readiness не более трёх раз только при обычном
+    non-zero probe и перед каждой попыткой заново подтверждать accepted cutover
+    receipt + active link; timeout/stderr/receipt drift не повторяются;
+  - проверять HTTP-level route matrix `COMBINED + CORPORATE = mounted`,
+    isolated `GUEST = 404` для platform support recovery.
+  Первый срез готов: public POSTCHECK получил bounded retry и exact receipt/link
+  re-attestation. Production rollout `cd1c10da…` подтвердил исходный дефект:
+  generation `41` была уже безопасно принята и public/loopback отвечали `200`,
+  но одиночный probe оставил операцию на `POSTCHECK`; штатный `resume` завершил
+  только read-only фазу. Первый Fast CI `34165349566` отдельно доказал, что
+  проверка одного immutable receipt недостаточна: negative fixture сменила
+  фактическую active nginx link между попытками и была ошибочно принята. Guard
+  теперь перед каждым retry требует одновременно тот же receipt и exact active
+  target slot; этот regression нельзя ослаблять. До закрытия item остаются
+  обязательными:
+  - единая clone-preparation команда: DB создаётся владельцем
+    `leetplus_runtime`, restore выполняется `--no-owner` от этой роли, затем
+    `NOSUPERUSER/NOINHERIT` и schema/ACL boundary проверяются до acceptance;
+  - preflight login subject требует ровно одного active non-platform
+    `OWNER/NETWORK` выбранного tenant, даже если последующий support-canary
+    выполняет platform-admin с явно подписанным tenant context;
+  - credential ID передаётся без `.json`, credential имеет LF, wrapper берётся
+    только из sealed release и запускается `/usr/bin/bash -p`;
+  - SSH reverse port обязан совпадать с `inet_server_port()`, а strict installed
+    control verifier использует exact `PATH=/usr/sbin:/usr/bin:/sbin:/bin`;
+  - transient unit collection после durable PASS завершается только exact
+    `--reconcile`; collected/not-found unit не разрешает повтор main operation;
+  - old server backup удаляется только после checksum-verified off-host copy и
+    fresh restored-copy PASS, а clone credentials/tunnel/cluster удаляются после
+    переноса terminal evidence.
+  Завершение — Linux fixture + Fast/Full exact-SHA green; production rollout
+  этого hardening выполняется только вместе со следующим admitted release.
 
 Отдельный capacity boundary: duration percentiles всё ещё читают terminal
 operation directories с fail-closed пределом `4 096`. Их удаление не входит в

@@ -408,3 +408,51 @@ REL-ACC-010 завершён через PR #129, merge SHA
 При новом падении сначала дополняются эта таблица и соответствующая negative
 проверка; повторный exact-SHA CI запускается только после локальных syntax,
 diff-integrity и blocker-only security review.
+
+### REL-ACC-011: L2 preparation и post-cutover determinism
+
+Rollout 07.09.2026 сохранил production доступным, но показал, что несколько
+уже известных требований ещё не собраны в один terminal preflight. Поздно и
+последовательно обнаружились: пустые systemd execution timestamps, strict env
+verifier, временное membership `leetplus-rehearsal`, CRLF credentials,
+несовпадающий tunnel/DB port, autovacuum sessions, mixed-owner restored clone,
+collection/reset-failed reconcile и одиночный public POSTCHECK probe. Отдельно
+runtime route существовал в artifact, но не был смонтирован фактическим
+`COMBINED` root graph.
+
+REL-ACC-011 переносит эти проверки до rollout effect и закрепляет их negative
+fixtures. Первый реализованный срез — bounded public POSTCHECK: не более трёх
+повторов только обычного non-zero readiness, exact accepted receipt и active
+link проверяются перед каждой попыткой и после authenticated smoke. Timeout,
+stderr и topology/receipt drift не повторяются. Следующие срезы объединяют
+rehearsal cleanup, clone/tunnel/credential preflight и HTTP-level module-route
+matrix. Ни один guard не объединяет public guest, corporate tenant и worker
+contours и не понижает `L2_SCHEMA_SECURITY` до runtime lane.
+
+#### Production evidence `cd1c10da…` и правила следующего прогона
+
+Rollout 07–08.09.2026 подтвердил, что эти проверки нельзя оставлять оператору в
+виде неупорядоченных заметок. Exact последовательность и найденные ранние
+остановки фиксируются как regression backlog:
+
+| Наблюдение | Причина | Обязательное правило |
+| --- | --- | --- |
+| Control installer отклонил inbox до effect | production-control inbox был `0750`, а authority требует закрытый root-only каталог | control inbox `root:root:0700`, control/admission bytes `root:root:0440`; runtime inbox отдельно `root:leetplus-build:0440` |
+| Wrapper/credential preflight несколько раз завершился до runtime | использовался installed launcher, ID с `.json`, CRLF либо лишний URL query | запускать только sealed wrapper через `/usr/bin/bash -p`; credential ID — basename, JSON — LF, URL допускает только canonical schema/sslmode keys |
+| Tunnel/DB identity не совпали | reverse port отличался от фактического `inet_server_port()` | один exact loopback port используется одновременно PostgreSQL, reverse tunnel, credential URL и expected identity |
+| Runtime-role attestation показала `1103/88/384` owner mismatch | dump восстановили с production mixed owners, затем изменили только owner DB/schema | disposable DB сразу создаётся owner=`leetplus_runtime`; restore `--no-owner` выполняется этой ролью, временный restore privilege снимается до gate; итоговые class/function/type mismatch строго `0/0/0` |
+| После корректного restore остался schema boundary mismatch | `public` сохранил owner/grant pseudo-role `pg_database_owner` | до acceptance отдельно требовать `public.nspowner=runtime` и zero foreign `CREATE`; не исправлять production ownership этим rehearsal шагом |
+| DB прошла, но subject был отклонён | runtime acceptance принимает tenant-owner, а clone credential указывал platform-admin | для runtime acceptance выбирать active non-platform `OWNER + NETWORK` того же tenant; platform-admin используется только отдельным support QA после signed tenant selection |
+| Durable PASS сначала оставил active marker | transient systemd metadata была ещё в collection/reset race | не повторять main; дождаться collected/terminal state и повторить ту же команду только с `--reconcile`, затем требовать marker/group/process residue `0` |
+| Installed-control verifier отклонил обычную shell environment | даже лишний PATH segment нарушает root authority | exact `env -i`, `PATH=/usr/sbin:/usr/bin:/sbin:/bin`, `LANG=LC_ALL=C.UTF-8`, `TZ=UTC`; пустые timestamps не передавать date parser |
+| Cutover был принят, но первый public POSTCHECK дал non-zero | единичный probe попал в краткий reload/startup интервал | реализованный bounded retry повторяет только ordinary non-zero readiness и перед/после каждой попытки заново связывает accepted receipt + active link; timeout/stderr/drift остаются manual stop |
+| Fast CI `34165349566` принял negative active-link drift и завершил rollout fixture | postcheck retry повторно читал immutable cutover receipt, но не сравнивал фактическую nginx active link с target slot | каждый pre-attempt и post-auth attestation одновременно проверяет exact receipt и `currentActiveSlot === targetSlot`; deterministic negative меняет link после первого probe failure и требует остановку до retry |
+| Fast/Full `34166174741`/`34166201746` остановились на installed-generation authority до behavioral test | после изменения production-control engine не был в том же commit обновлён его bootstrap `EXPECTED_ENGINE_SHA256` | изменение любого pinned control payload атомарно включает пересчёт embedded digest и локальный installed-generation integrity check до отправки exact-SHA CI |
+| Очистка могла уничтожить единственную восстановимую копию | server backup занимал место до окончания rehearsal | сначала checksum server/off-host, fresh restore и runtime PASS; только затем удалить предыдущий server backup, сохранив off-host, и убрать tunnel/clone/clone-only credentials |
+
+Фактический rollout завершился generation `41`: active blue `cd1c10da…`, hot
+rollback green `25a6b2a0…`, CURRENT189 без schema effect. Первый вызов оставил
+операцию на `POSTCHECK`, а штатный `resume` выполнил только read-only postcheck и
+выпустил terminal receipt. Это production-доказательство для уже реализованного
+retry slice; остальные строки таблицы должны стать одним executable preflight,
+а не новыми ручными production исправлениями.

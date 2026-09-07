@@ -636,6 +636,106 @@ test("stops after the exact bounded loopback readiness attempts", async (t) => {
   assert.equal(state.cutoverEffects, 0);
 });
 
+test("retries bounded public readiness while the accepted cutover stays exact", async (t) => {
+  const fixture = await preparedFixture("public-readiness-retry-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_PUBLIC_READINESS_ONCE_AFTER_CUTOVER =
+    "true";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      0,
+    );
+  } finally {
+    delete process.env
+      .TEST_ORCHESTRATOR_FIXTURE_FAIL_PUBLIC_READINESS_ONCE_AFTER_CUTOVER;
+  }
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.readinessFailures, 1);
+  assert.equal(state.readinessCalls, 3);
+  assert.equal(state.authCalls, 2);
+  assert.equal(state.cutoverEffects, 1);
+  await lstat(path.join(path.dirname(fixture.planPath), "final.json"));
+});
+
+test("stops after the exact bounded public readiness attempts", async (t) => {
+  const fixture = await preparedFixture("public-readiness-exhausted-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_PUBLIC_READINESS_ALWAYS_AFTER_CUTOVER =
+    "true";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      1,
+    );
+  } finally {
+    delete process.env
+      .TEST_ORCHESTRATOR_FIXTURE_FAIL_PUBLIC_READINESS_ALWAYS_AFTER_CUTOVER;
+  }
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.readinessFailures, 3);
+  assert.equal(state.readinessCalls, 4);
+  assert.equal(state.authCalls, 1);
+  assert.equal(state.cutoverEffects, 1);
+  await assert.rejects(
+    lstat(path.join(path.dirname(fixture.planPath), "final.json")),
+    { code: "ENOENT" },
+  );
+});
+
+test("does not retry public readiness after accepted cutover drift", async (t) => {
+  const fixture = await preparedFixture("public-readiness-drift-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_PUBLIC_READINESS_ONCE_AFTER_CUTOVER =
+    "true";
+  process.env.TEST_ORCHESTRATOR_FIXTURE_DRIFT_AFTER_PUBLIC_READINESS_FAILURE =
+    "true";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      1,
+    );
+  } finally {
+    delete process.env
+      .TEST_ORCHESTRATOR_FIXTURE_FAIL_PUBLIC_READINESS_ONCE_AFTER_CUTOVER;
+    delete process.env
+      .TEST_ORCHESTRATOR_FIXTURE_DRIFT_AFTER_PUBLIC_READINESS_FAILURE;
+  }
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.readinessFailures, 1);
+  assert.equal(state.readinessCalls, 2);
+  assert.equal(state.authCalls, 1);
+  assert.equal(state.cutoverEffects, 1);
+  await assert.rejects(
+    lstat(path.join(path.dirname(fixture.planPath), "final.json")),
+    { code: "ENOENT" },
+  );
+});
+
+test("does not retry ambiguous public readiness output", async (t) => {
+  const fixture = await preparedFixture("public-readiness-stderr-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  process.env.TEST_ORCHESTRATOR_FIXTURE_PUBLIC_READINESS_STDERR_AFTER_CUTOVER =
+    "true";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      1,
+    );
+  } finally {
+    delete process.env
+      .TEST_ORCHESTRATOR_FIXTURE_PUBLIC_READINESS_STDERR_AFTER_CUTOVER;
+  }
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.readinessCalls, 2);
+  assert.equal(state.authCalls, 1);
+  assert.equal(state.cutoverEffects, 1);
+  await assert.rejects(
+    lstat(path.join(path.dirname(fixture.planPath), "final.json")),
+    { code: "ENOENT" },
+  );
+});
+
 test("accepts exact durable cutover evidence despite diagnostic stderr", async (t) => {
   const fixture = await preparedFixture("cutover-stderr-");
   t.after(() => rm(fixture.root, { recursive: true, force: true }));

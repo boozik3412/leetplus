@@ -242,7 +242,10 @@ export async function reconcileExactCanonicalEventOwnerInTransaction(
       "updatedAt"
     FROM "GuestActivityFact"
     WHERE "tenantId" = ${input.tenantId}
-      AND "externalProvider" = ${sourceFact.externalProvider}
+      AND "externalProvider" = CAST(
+        ${sourceFact.externalProvider}
+        AS "IntegrationProvider"
+      )
       AND "sessionExternalId" = ${sourceFact.sessionExternalId}
       AND "factType" IN (${Prisma.join([...exactPlayTimeFactTypes])})
       AND "lifecycleStatus" = 'ACTIVE'

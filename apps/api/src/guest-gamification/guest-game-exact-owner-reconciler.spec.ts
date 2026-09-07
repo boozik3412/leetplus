@@ -134,6 +134,11 @@ function firstCallArgument(mock: jest.Mock): unknown {
   return calls[0]?.[0];
 }
 
+function callArgument(mock: jest.Mock, callIndex: number): unknown {
+  const calls = mock.mock.calls as unknown[][];
+  return calls[callIndex]?.[0];
+}
+
 describe('reconcileExactCanonicalEventOwner', () => {
   it('atomically rebinds a pristine stale exact event and receipt to the active owner', async () => {
     const { prisma, tx } = ownerReconcilePrisma([
@@ -178,6 +183,12 @@ describe('reconcileExactCanonicalEventOwner', () => {
       where: { tenantId: 'tenant-1', eventId: 'event-1' },
       data: { profileId: 'profile-b', guestId: 'guest-b' },
     });
+    const activePhysicalFactLockSql = (
+      callArgument(tx.$queryRaw, 2) as { strings?: readonly string[] }
+    ).strings?.join('__PARAM__');
+    expect(activePhysicalFactLockSql).toMatch(
+      /"externalProvider"\s*=\s*CAST\(\s*__PARAM__\s*AS\s*"IntegrationProvider"\s*\)/u,
+    );
   });
 
   it('rebinds diagnostic decisions with the pristine event instead of treating them as effects', async () => {

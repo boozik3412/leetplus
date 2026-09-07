@@ -17236,7 +17236,10 @@ export class GuestGamificationService {
                     "originKey" = ${input.originKey}
                     OR (
                       "source" = 'API_IMPORT'
-                      AND "externalProvider" = ${input.eventReference.externalProvider}
+                      AND "externalProvider" = CAST(
+                        ${input.eventReference.externalProvider}
+                        AS "IntegrationProvider"
+                      )
                       AND "externalDomain" = ${input.eventReference.externalDomain}
                       AND "externalId" = ${input.eventReference.externalId}
                     )
@@ -17337,7 +17340,10 @@ export class GuestGamificationService {
                      "sourceKind", "sessionExternalId", "factType", "happenedAt"
               FROM "GuestActivityFact"
               WHERE "tenantId" = ${input.user.tenantId}
-                AND "externalProvider" = ${fact.externalProvider}
+                AND "externalProvider" = CAST(
+                  ${fact.externalProvider}
+                  AS "IntegrationProvider"
+                )
                 AND "sessionExternalId" = ${fact.sessionExternalId}
                 AND "factType" IN (${Prisma.join(candidateFactTypes)})
                 AND "lifecycleStatus" = 'ACTIVE'
@@ -31265,7 +31271,10 @@ async function validateExactSessionStartEvidence(
            "factType", "happenedAt"
     FROM "GuestActivityFact"
     WHERE "tenantId" = ${tenantId}
-      AND "externalProvider" = ${fact.externalProvider}
+      AND "externalProvider" = CAST(
+        ${fact.externalProvider}
+        AS "IntegrationProvider"
+      )
       AND "sessionExternalId" = ${fact.sessionExternalId}
       AND "factType" IN ('HOURLY_SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED')
       AND "lifecycleStatus" = 'ACTIVE'
@@ -31441,7 +31450,10 @@ async function validateSessionStartReclassificationEvidence(
            "sessionExternalId", "factType"
     FROM "GuestActivityFact"
     WHERE "tenantId" = ${tenantId}
-      AND "externalProvider" = ${fact.externalProvider}
+      AND "externalProvider" = CAST(
+        ${fact.externalProvider}
+        AS "IntegrationProvider"
+      )
       AND "sessionExternalId" = ${fact.sessionExternalId}
       AND "factType" IN ('HOURLY_SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED')
       AND "lifecycleStatus" = 'ACTIVE'

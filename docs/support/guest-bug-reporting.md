@@ -53,6 +53,14 @@ route без query string, release SHA, класс браузера/устрой
 timezone. Raw phone, guest JWT, corporate JWT, cookies, provider payloads и
 secrets не сохраняются.
 
+Защищённые staff-очереди при чтении дополняют карточку текущими ФИО и телефоном
+из канонических `Guest`/`GuestGameProfile`. Значения расшифровываются только в
+`CorporateRuntimeModule` после соответствующего tenant либо platform guard и
+удаляются из внутреннего Prisma payload до сериализации ответа. Открытые ФИО и
+телефон не копируются в support-owned таблицы, не возвращаются public guest и
+не попадают в attachment/audit metadata. Повреждённое legacy-значение не
+ломает очередь: интерфейс использует сохранённые инициалы и маску.
+
 ## Вложения
 
 - не более одного файла и 5 MiB;
@@ -87,6 +95,12 @@ network scope. Назначение, смена статуса и внутрен
 переписывания `UserRoleOverride`. Техническому специалисту capability выдаются
 явно через custom role или exact tenant role override. Platform-wide очередь
 доступна только platform admin.
+
+Карточка обращения показывает сотруднику явные поля `ФИО гостя` и `Телефон`.
+Tenant endpoint может получить эти данные только для тикетов exact tenant;
+platform endpoint — только после `PlatformAdminGuard`. Private BFF сохраняет
+`no-store`, а public guest response по-прежнему содержит только безопасный
+номер обращения и дату создания.
 
 Production authenticated read-smoke обязан принимать эти две capability как
 часть exact текущего каталога. Их отсутствие в application response либо в

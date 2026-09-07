@@ -17,6 +17,16 @@
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
 | Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`, canary 05.09 обработал `1/1` INTERNAL tenant; daily timer enabled/active, следующий scheduled run 07.09               |
 
+Source candidate 07.09 дополняет карточки защищённой очереди поддержки полным
+ФИО и телефоном гостя. Production-проверка `LP-BUG-A56627F5` подтвердила, что
+оба значения уже существуют в канонических зашифрованных профилях; дефект был
+только в staff read projection, которая выбирала инициалы и маску. Candidate
+не меняет public guest response, guard, БД или схему: расшифровка выполняется
+только внутри corporate API после tenant/platform authorization, sensitive
+Prisma fields удаляются до сериализации, а при повреждённом legacy ciphertext
+остаётся безопасный masked fallback. Production effect будет зафиксирован
+отдельно после exact-SHA admission и штатного rollout.
+
 Production follow-up 06.09 завершён на exact `92f29b7a…`. Устаревший
 daily-worker permit `03db1358…` безопасно снят через проверенную непрерывную
 цепочку четырёх cutover receipts; новый canary `2026-09-05`, stable timer

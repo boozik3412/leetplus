@@ -131,3 +131,19 @@ test("keeps tenant and platform ticket mutations on separate private BFF routes"
     assert.match(route, /forwardQuery:\s*false/);
   }
 });
+
+test("shows the resolved guest identity and phone in staff ticket cards", async () => {
+  const [component, contract] = await Promise.all([
+    readFile(
+      path.join(sourceRoot, "components", "staff-support-tickets-workspace.tsx"),
+      "utf8",
+    ),
+    readFile(path.join(sourceRoot, "lib", "staff-support-tickets.ts"), "utf8"),
+  ]);
+
+  assert.match(contract, /fullName:\s*string\s*\|\s*null/);
+  assert.match(contract, /phone:\s*string\s*\|\s*null/);
+  assert.match(component, /ticket\.profile\.fullName/);
+  assert.match(component, /label="ФИО гостя"/);
+  assert.match(component, /label="Телефон"/);
+});

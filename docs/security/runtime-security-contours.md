@@ -689,6 +689,15 @@ Support-функциональность следует тем же трём г�
 - tenant user работает только с `/support/bug-reports*` после corporate JWT,
   support capability и `FreshNetworkScopeGuard`;
 - platform-wide `/admin/support-tickets*` требует `PlatformAdminGuard`;
+- ФИО и телефон в карточке обращения являются read-time projection из
+  канонических зашифрованных `Guest`/`GuestGameProfile`: расшифровка разрешена
+  только после tenant/platform guard в corporate process, Prisma ciphertext и
+  nested identity удаляются до HTTP-сериализации, а public guest route этих
+  полей не получает;
+- tenant support видит identity только внутри exact tenant, platform support —
+  только через `PlatformAdminGuard`; открытые значения не копируются в
+  support-owned таблицы, audit metadata или вложения, а private BFF остаётся
+  `no-store`;
 - guest process пишет только support-owned tables и не импортирует corporate
   auth, staff tasks, notifications или outbound transports;
 - вложение ограничено одним JPG/PNG/WebP до 5 MiB, проверяется по bytes,

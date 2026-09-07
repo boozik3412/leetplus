@@ -16,6 +16,14 @@ workers/control plane, а также инцидентные уроки 27–28.0
 `GUEST_BUG_REPORTING_MODE=LIVE`. Split systemd/nginx candidate остаётся
 `DORMANT / NOT INSTALLED`.
 
+Source 07.09 добавляет в staff-карточку тикета явные ФИО и телефон из
+канонического зашифрованного гостевого профиля. Это read-time projection только
+в corporate support endpoints после существующих tenant/platform guards:
+support tables, public guest response, route boundaries и schema не меняются;
+ciphertext удаляется до сериализации, malformed legacy values используют
+masked fallback. Production effect фиксируется только после exact-SHA
+admission и штатного rollout.
+
 Production-проверка автономной геймификации 05.09 выявила operational drift:
 частый singleton получил `GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT=3` и
 двухминутный timeout, а его Prisma URL не имел отдельного лимита соединений.

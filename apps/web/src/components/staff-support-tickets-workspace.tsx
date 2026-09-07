@@ -96,9 +96,11 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath }:
                   <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">{topicLabels[ticket.topic]}</span>
                   <span className="font-mono text-xs font-bold text-cyan-700 dark:text-cyan-300">{ticket.ticketNumber}</span>
                 </div>
-                <h2 className="mt-3 text-lg font-semibold">{ticket.profile.displayName ?? ticket.profile.contactMasked ?? 'Гость игрового модуля'}</h2>
+                <h2 className="mt-3 text-lg font-semibold">{ticket.profile.fullName ?? ticket.profile.displayName ?? ticket.profile.contactMasked ?? 'Гость игрового модуля'}</h2>
                 <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-600 dark:text-zinc-300">{ticket.description}</p>
-                <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                  <Meta label="ФИО гостя" value={ticket.profile.fullName ?? ticket.profile.displayName ?? 'не указано'} />
+                  <Meta label="Телефон" value={formatPhone(ticket.profile.phone ?? ticket.profile.contactMasked)} />
                   <Meta label="Сеть / клуб" value={`${ticket.tenant.name} · ${ticket.store.name}`} />
                   <Meta label="Создано" value={formatDateTime(ticket.createdAt)} />
                   <Meta label="Среда" value={[ticket.device, ticket.browser, ticket.viewport].filter(Boolean).join(' · ') || 'не определена'} />
@@ -168,3 +170,11 @@ function StatusBadge({ status }: { status: SupportTicketStatus }) {
 function Meta({ label, value }: { label: string; value: string }) { return <div><dt className="font-bold uppercase text-zinc-400">{label}</dt><dd className="mt-1 break-words text-zinc-600 dark:text-zinc-300">{value}</dd></div>; }
 function formatDateTime(value: string) { return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value)); }
 function formatBytes(value: number) { return value < 1024 * 1024 ? `${Math.ceil(value / 1024)} КБ` : `${(value / 1024 / 1024).toFixed(1)} МБ`; }
+function formatPhone(value: string | null) {
+  if (!value) return 'не указан';
+  if (value.includes('*')) return value;
+  const digits = value.replace(/\D/g, '');
+  const normalized = digits.length === 10 ? `7${digits}` : digits;
+  if (normalized.length !== 11 || !/^[78]/.test(normalized)) return value;
+  return `+7 (${normalized.slice(1, 4)}) ${normalized.slice(4, 7)}-${normalized.slice(7, 9)}-${normalized.slice(9)}`;
+}

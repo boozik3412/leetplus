@@ -906,6 +906,132 @@ describe('exact typed session-start reconciliation', () => {
     expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
   });
 
+  it('casts provider parameters to the Postgres enum in support recovery locks', async () => {
+    const { service, prisma } = createService();
+    const platformUser = {
+      ...user,
+      isPlatformAdmin: true,
+      platformTenantContext: true,
+    };
+    const sourceFactId = 'fact-provider-enum-cast';
+    const sessionExternalId = 'session-provider-enum-cast';
+    const gameActivatedAt = new Date(now.getTime() - 60_000);
+    const physicalIdentity = buildGuestGamePhysicalSessionStartIdentity({
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId,
+      eventType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+    });
+    expect(physicalIdentity).not.toBeNull();
+    const fact = {
+      id: sourceFactId,
+      updatedAt: now,
+      profileId: 'profile-1',
+      guestId: 'guest-1',
+      storeId: 'store-1',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      externalGuestId: 'external-guest-1',
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId,
+      factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+      happenedAt: now,
+    };
+    jest.spyOn(service as any, 'buildEventData').mockResolvedValue({});
+    prisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([fact])
+      .mockResolvedValueOnce([
+        {
+          ticketId: 'ticket-1',
+          ticketNumber: 'LP-BUG-TEST',
+          ticketStatus: 'IN_PROGRESS',
+          ticketProfileId: 'profile-1',
+          ticketGuestId: 'guest-1',
+          ticketStoreId: 'store-1',
+          profileStatus: 'ACTIVE',
+          profileGuestId: 'guest-1',
+          gameActivatedAt,
+          guestDisabled: false,
+          guestExternalProvider: IntegrationProvider.LANGAME,
+          guestExternalDomain: 'club-1',
+          guestExternalId: 'external-guest-1',
+          storeActive: true,
+          storeExternalDomain: 'club-1',
+          storeTimeZone: 'Europe/Samara',
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([fact])
+      .mockResolvedValueOnce([]);
+
+    await expect(
+      (service as any).persistSupportRecoveryCanonicalEvent({
+        user: platformUser,
+        dto: {
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          storeId: 'store-1',
+          eventType: 'SESSION_START',
+        },
+        dryRun: noRewardDryRunResult({
+          eventType: 'SESSION_START',
+          occurredAt: now.toISOString(),
+        }),
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+        eventReference: {
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: `guest-game:GUEST_SESSION:SESSION_START:${sessionExternalId}`,
+        },
+        originKey: physicalIdentity!.key,
+        processPayload: {},
+        scope: {
+          exactReconciliationScope: {
+            sourceFactId,
+            sourceFactUpdatedAt: now,
+            physicalSessionKey: physicalIdentity!.key,
+            supportRecoveryAuthority: {
+              ticketId: 'ticket-1',
+              ticketNumber: 'LP-BUG-TEST',
+              ticketStatus: 'IN_PROGRESS',
+              gameActivatedAt,
+              storeTimeZone: 'Europe/Samara',
+            },
+            rules: [
+              {
+                ruleKind: 'LOOT_BOX',
+                ruleId: 'loot-box-1',
+                battlePassStep: null,
+                ruleUpdatedAt: now,
+              },
+            ],
+          },
+          planDigest: 'a'.repeat(64),
+          dependency: null,
+        },
+      }),
+    ).rejects.toThrow(
+      'support recovery rule or dependency changed before canonicalization',
+    );
+
+    const eventLockSql = (
+      prisma.$queryRaw.mock.calls[0]?.[0] as { strings?: readonly string[] }
+    ).strings?.join('__PARAM__');
+    const physicalFactLockSql = (
+      prisma.$queryRaw.mock.calls[4]?.[0] as { strings?: readonly string[] }
+    ).strings?.join('__PARAM__');
+    const providerEnumCast =
+      /"externalProvider"\s*=\s*CAST\(\s*__PARAM__\s*AS\s*"IntegrationProvider"\s*\)/u;
+    expect(eventLockSql).toMatch(providerEnumCast);
+    expect(physicalFactLockSql).toMatch(providerEnumCast);
+    expect(prisma.guestGameEvent.create).not.toHaveBeenCalled();
+    expect(prisma.guestGameOriginReceipt.upsert).not.toHaveBeenCalled();
+  });
+
   it('rejects a generic start marker from the exact typed operator path', async () => {
     const { service, prisma } = createService();
     const eventId = 'event-generic-session-start';

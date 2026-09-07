@@ -2,6 +2,15 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
+import {
+  CalendarBlank,
+  CaretDown,
+  Check,
+  SpinnerGap,
+  Tag,
+  TrendUp,
+  UsersThree,
+} from "@phosphor-icons/react";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 import type { Store } from "@/lib/stores";
 
@@ -18,7 +27,12 @@ type DashboardPeriod =
   | "full-year"
   | "custom";
 type DashboardSkuGrouping = "club" | "network";
-type OpenPanel = "period" | "clubs" | null;
+type OpenPanel = "period" | "clubs" | "categories" | null;
+
+type DashboardCategoryFilterOption = {
+  id: string;
+  name: string;
+};
 
 const periodLabels: Record<DashboardPeriod, string> = {
   day: "Текущие сутки",
@@ -45,8 +59,7 @@ const periodHints: Record<
   },
   "full-day": {
     period: "Последние завершенные сутки: вчера с 00:00 до 23:59.",
-    comparison:
-      "Сравнение период к периоду: вчерашние сутки к позавчерашним.",
+    comparison: "Сравнение период к периоду: вчерашние сутки к позавчерашним.",
   },
   week: {
     period: "Текущая календарная неделя с понедельника до текущего дня.",
@@ -54,7 +67,8 @@ const periodHints: Record<
       "Динамика сравнивает каждый отрезок с предыдущим аналогичным; для строгой оценки используйте полную неделю.",
   },
   "full-week": {
-    period: "Последняя завершенная календарная неделя с понедельника по воскресенье.",
+    period:
+      "Последняя завершенная календарная неделя с понедельника по воскресенье.",
     comparison:
       "Сравнение период к периоду: полная неделя к предыдущей полной неделе.",
   },
@@ -69,7 +83,8 @@ const periodHints: Record<
       "Сравнение период к периоду: полный месяц к предыдущему полному месяцу.",
   },
   quarter: {
-    period: "Текущий календарный квартал с первого дня квартала до текущего дня.",
+    period:
+      "Текущий календарный квартал с первого дня квартала до текущего дня.",
     comparison:
       "Динамика сравнивает каждый отрезок с предыдущим аналогичным; для строгой оценки используйте полный квартал.",
   },
@@ -95,7 +110,10 @@ const periodHints: Record<
   },
 };
 
-const periodOptionGroups: { current: DashboardPeriod; full: DashboardPeriod }[] = [
+const periodOptionGroups: {
+  current: DashboardPeriod;
+  full: DashboardPeriod;
+}[] = [
   { current: "day", full: "full-day" },
   { current: "week", full: "full-week" },
   { current: "month", full: "full-month" },
@@ -110,6 +128,9 @@ export function DashboardFilters({
   skuGrouping,
   stores,
   selectedStoreIds,
+  categories,
+  selectedCategoryIds = [],
+  showComparison = false,
 }: {
   period: string;
   dateFrom: string;
@@ -117,6 +138,9 @@ export function DashboardFilters({
   skuGrouping?: DashboardSkuGrouping;
   stores: Store[];
   selectedStoreIds: string[];
+  categories?: DashboardCategoryFilterOption[];
+  selectedCategoryIds?: string[];
+  showComparison?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -129,6 +153,8 @@ export function DashboardFilters({
   const [customFrom, setCustomFrom] = useState(dateFrom);
   const [customTo, setCustomTo] = useState(dateTo);
   const [selectedStores, setSelectedStores] = useState(selectedStoreIds);
+  const [selectedCategories, setSelectedCategories] =
+    useState(selectedCategoryIds);
   const shouldPersistSkuGrouping =
     Boolean(skuGrouping) && isAssortmentPath(pathname);
   const selectedGrouping = shouldPersistSkuGrouping ? skuGrouping : undefined;
@@ -143,6 +169,13 @@ export function DashboardFilters({
     selectedPeriod === "custom"
       ? formatCustomPeriodLabel(customFrom, customTo)
       : periodLabels[selectedPeriod];
+  const selectedCategoriesLabel =
+    selectedCategories.length === 0
+      ? "Все категории"
+      : categories
+          ?.filter((category) => selectedCategories.includes(category.id))
+          .map((category) => category.name)
+          .join(", ") || `${selectedCategories.length} категорий`;
 
   useEffect(() => {
     if (!openPanel) {
@@ -181,7 +214,14 @@ export function DashboardFilters({
       : [...selectedStores, storeId];
 
     setSelectedStores(nextStores);
-    applyFilters({ storeIds: nextStores }, { closePanel: false });
+  }
+
+  function toggleCategory(categoryId: string) {
+    const nextCategories = selectedCategories.includes(categoryId)
+      ? selectedCategories.filter((id) => id !== categoryId)
+      : [...selectedCategories, categoryId];
+
+    setSelectedCategories(nextCategories);
   }
 
   function applyFilters(
@@ -189,6 +229,7 @@ export function DashboardFilters({
       period: DashboardPeriod;
       skuGrouping: DashboardSkuGrouping;
       storeIds: string[];
+      categoryIds: string[];
       dateFrom: string;
       dateTo: string;
     }> = {},
@@ -200,6 +241,7 @@ export function DashboardFilters({
       ? (overrides.skuGrouping ?? selectedGrouping)
       : undefined;
     const nextStores = overrides.storeIds ?? selectedStores;
+    const nextCategories = overrides.categoryIds ?? selectedCategories;
     const nextDateFrom = overrides.dateFrom ?? customFrom;
     const nextDateTo = overrides.dateTo ?? customTo;
     const closePanel = options.closePanel ?? true;
@@ -219,6 +261,10 @@ export function DashboardFilters({
       params.append("storeIds", storeId);
     });
 
+    nextCategories.forEach((categoryId) => {
+      params.append("categoryIds", categoryId);
+    });
+
     startNavigationFeedback();
     startTransition(() => {
       router.push(`${pathname}?${params.toString()}`);
@@ -231,7 +277,6 @@ export function DashboardFilters({
 
   function selectPeriod(value: DashboardPeriod) {
     setSelectedPeriod(value);
-    applyFilters({ period: value }, { closePanel: value !== "custom" });
   }
 
   return (
@@ -244,21 +289,48 @@ export function DashboardFilters({
         <FilterButton
           label="Период"
           value={selectedPeriodLabel}
+          icon={<CalendarBlank aria-hidden="true" weight="duotone" />}
           isOpen={openPanel === "period"}
           onClick={() => setOpenPanel(openPanel === "period" ? null : "period")}
         />
         <FilterButton
           label="Клубы"
           value={selectedStoresLabel}
+          icon={<UsersThree aria-hidden="true" weight="duotone" />}
           isOpen={openPanel === "clubs"}
           onClick={() => setOpenPanel(openPanel === "clubs" ? null : "clubs")}
         />
+        {categories ? (
+          <FilterButton
+            label="Категории"
+            value={selectedCategoriesLabel}
+            icon={<Tag aria-hidden="true" weight="duotone" />}
+            isOpen={openPanel === "categories"}
+            onClick={() =>
+              setOpenPanel(openPanel === "categories" ? null : "categories")
+            }
+          />
+        ) : null}
+        {showComparison ? (
+          <span className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+            <TrendUp className="h-4 w-4 text-emerald-600" aria-hidden="true" />
+            <span>К прошлому периоду</span>
+          </span>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => applyFilters()}
+          disabled={isPending}
+          className="min-h-11 rounded-xl bg-zinc-950 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+        >
+          Применить
+        </button>
         {isPending ? (
           <span
             aria-live="polite"
             className="inline-flex h-10 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300"
           >
-            <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            <SpinnerGap className="h-4 w-4 animate-spin" aria-hidden="true" />
             Обновляем данные...
           </span>
         ) : null}
@@ -300,10 +372,6 @@ export function DashboardFilters({
 
                   setSelectedPeriod("custom");
                   setCustomFrom(nextDate);
-                  applyFilters(
-                    { period: "custom", dateFrom: nextDate },
-                    { closePanel: false },
-                  );
                 }}
                 className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               />
@@ -320,10 +388,6 @@ export function DashboardFilters({
 
                   setSelectedPeriod("custom");
                   setCustomTo(nextDate);
-                  applyFilters(
-                    { period: "custom", dateTo: nextDate },
-                    { closePanel: false },
-                  );
                 }}
                 className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               />
@@ -349,12 +413,20 @@ export function DashboardFilters({
               >
                 <span
                   className={[
-                    "h-3 w-3 rounded border",
+                    "flex h-4 w-4 items-center justify-center rounded border",
                     selectedStores.includes(store.id)
                       ? "border-white bg-white dark:border-zinc-950 dark:bg-zinc-950"
                       : "border-zinc-400",
                   ].join(" ")}
-                />
+                >
+                  {selectedStores.includes(store.id) ? (
+                    <Check
+                      className="h-3 w-3 text-zinc-950 dark:text-emerald-400"
+                      weight="bold"
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                </span>
                 <span>{store.name}</span>
               </button>
             ))}
@@ -368,7 +440,6 @@ export function DashboardFilters({
                 type="button"
                 onClick={() => {
                   setSelectedStores([]);
-                  applyFilters({ storeIds: [] }, { closePanel: false });
                 }}
                 className="text-sm font-medium text-zinc-900 underline underline-offset-4 dark:text-zinc-100"
               >
@@ -379,6 +450,57 @@ export function DashboardFilters({
         </DropdownPanel>
       ) : null}
 
+      {openPanel === "categories" && categories ? (
+        <DropdownPanel className="left-0 top-full w-[min(620px,calc(100vw-3rem))]">
+          <div className="max-h-80 overflow-y-auto pr-1">
+            <div className="grid gap-2 sm:grid-cols-2">
+              {categories.map((category) => (
+                <button
+                  key={category.id}
+                  type="button"
+                  onClick={() => toggleCategory(category.id)}
+                  className={[
+                    "flex items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm",
+                    selectedCategories.includes(category.id)
+                      ? "border-zinc-950 bg-zinc-950 text-white dark:border-emerald-400 dark:bg-emerald-400 dark:text-zinc-950"
+                      : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900",
+                  ].join(" ")}
+                >
+                  <span
+                    className={[
+                      "flex h-4 w-4 items-center justify-center rounded border",
+                      selectedCategories.includes(category.id)
+                        ? "border-white bg-white dark:border-zinc-950 dark:bg-zinc-950"
+                        : "border-zinc-400",
+                    ].join(" ")}
+                  >
+                    {selectedCategories.includes(category.id) ? (
+                      <Check
+                        className="h-3 w-3 text-zinc-950 dark:text-emerald-400"
+                        weight="bold"
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                  </span>
+                  <span>{category.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-800">
+            <p className="text-xs text-zinc-500">
+              Выбрано: {selectedCategories.length || "все категории"}
+            </p>
+            <button
+              type="button"
+              onClick={() => setSelectedCategories([])}
+              className="text-sm font-medium text-zinc-900 underline underline-offset-4 dark:text-zinc-100"
+            >
+              Очистить
+            </button>
+          </div>
+        </DropdownPanel>
+      ) : null}
     </section>
   );
 }
@@ -386,11 +508,13 @@ export function DashboardFilters({
 function FilterButton({
   label,
   value,
+  icon,
   isOpen,
   onClick,
 }: {
   label: string;
   value: string;
+  icon?: React.ReactNode;
   isOpen: boolean;
   onClick: () => void;
 }) {
@@ -400,34 +524,28 @@ function FilterButton({
       aria-label={`${label}: ${value}`}
       onClick={onClick}
       className={[
-        "inline-flex w-full min-w-0 items-center justify-between gap-2 rounded-full border px-3 py-2 text-left text-sm transition-colors sm:w-auto",
+        "inline-flex min-h-11 w-full min-w-0 items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-sm shadow-sm transition-colors sm:w-auto",
         isOpen
           ? "border-zinc-950 bg-zinc-950 text-white dark:border-emerald-400 dark:bg-emerald-400 dark:text-zinc-950"
-          : "border-zinc-200 bg-zinc-50/80 text-zinc-950 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-50 dark:hover:bg-zinc-900",
+          : "border-zinc-200 bg-white text-zinc-950 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50 dark:hover:bg-zinc-900",
       ].join(" ")}
     >
-      <span className="min-w-0">
+      <span className="flex min-w-0 items-center gap-2">
+        {icon ? (
+          <span className="h-4 w-4 shrink-0 opacity-70">{icon}</span>
+        ) : null}
         <span className="inline-block max-w-[190px] truncate align-bottom font-semibold">
           {value}
         </span>
       </span>
-      <svg
+      <CaretDown
         aria-hidden="true"
-        viewBox="0 0 20 20"
-        fill="none"
         className={[
           "h-4 w-4 shrink-0 self-center opacity-60 transition-transform",
           isOpen ? "rotate-180" : "",
         ].join(" ")}
-      >
-        <path
-          d="M5.75 8.25 10 12.5l4.25-4.25"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+        weight="bold"
+      />
     </button>
   );
 }

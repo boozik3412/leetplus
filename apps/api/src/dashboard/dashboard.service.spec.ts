@@ -350,6 +350,34 @@ describe('DashboardService', () => {
     });
     expect(summary.periodFrom).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(summary.periodTo).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(summary.assortmentGrowth).toMatchObject({
+      visits: { value: 0 },
+      saleOperations: { value: 2, per100Visits: null },
+      averageSaleOperationAmount: { value: 620 },
+      drivers: {
+        identifiedActiveGuests: 0,
+        guestIdentificationCoveragePercent: null,
+        sessionsPerIdentifiedGuest: null,
+        stockTrackedSkuCount: 2,
+        stockCoveragePercent: 100,
+        availabilityPercent: 50,
+        itemsPerSaleOperation: 6,
+        averageItemPrice: 103.3,
+        costCoveragePercent: 100,
+        productMarginPercent: 50,
+      },
+      revenue: { value: 1240 },
+      methodology: {
+        visitUnit: 'GAME_SESSION',
+        saleUnit: 'PRODUCT_SALE_OPERATION',
+        saleUnitIsExact: true,
+        receiptMetrics: {
+          state: 'SOURCE_UNAVAILABLE',
+          requiredField: 'RECEIPT_OR_ORDER_ID',
+        },
+      },
+    });
+    expect(summary.assortmentGrowth.calculations).toHaveLength(17);
     expect(summary.salesTrend).toHaveLength(8);
     expect(summary.salesTrend.some((segment) => segment.clubRevenue > 0)).toBe(
       true,
@@ -407,7 +435,122 @@ describe('DashboardService', () => {
       totalRevenue: 0,
       topSkuByRevenue: [],
     });
+    expect(summary.outOfStockRiskCount).toBe(0);
+    expect(
+      summary.assortmentGrowth.averageSaleOperationAmount.value,
+    ).toBeNull();
+    expect(summary.assortmentGrowth.drivers.availabilityPercent).toBeNull();
+    expect(
+      summary.assortmentGrowth.calculations.find(
+        (metric) => metric.key === 'averageSaleOperationAmount',
+      ),
+    ).toMatchObject({ state: 'NO_DATA' });
     expect(summary.salesTrend).toHaveLength(8);
+  });
+
+  it('counts identified guests once across clubs and reports identity coverage', async () => {
+    mockEmptyDashboardData();
+    prisma.store.findMany.mockResolvedValue([
+      { id: 'store-1', name: 'Club A', externalClubId: '1' },
+      { id: 'store-2', name: 'Club B', externalClubId: '2' },
+    ]);
+    prisma.guestSession.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'session-1',
+          storeId: 'store-1',
+          externalClubId: '1',
+          externalSessionId: 'external-session-1',
+          guestId: 'guest-1',
+          externalGuestId: '101',
+          startedAt: new Date(),
+        },
+        {
+          id: 'session-2',
+          storeId: 'store-2',
+          externalClubId: '2',
+          externalSessionId: 'external-session-2',
+          guestId: 'guest-1',
+          externalGuestId: '101',
+          startedAt: new Date(),
+        },
+        {
+          id: 'session-3',
+          storeId: 'store-2',
+          externalClubId: '2',
+          externalSessionId: 'external-session-3',
+          guestId: null,
+          externalGuestId: null,
+          startedAt: new Date(),
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const summary = await service.getSummary(user);
+
+    expect(summary.assortmentGrowth.visits.value).toBe(3);
+    expect(summary.assortmentGrowth.drivers).toMatchObject({
+      identifiedActiveGuests: 1,
+      guestIdentificationCoveragePercent: 66.7,
+      sessionsPerIdentifiedGuest: 2,
+    });
+    expect(
+      summary.assortmentGrowth.calculations.find(
+        (metric) => metric.key === 'identifiedActiveGuests',
+      ),
+    ).toMatchObject({ state: 'PARTIAL_COVERAGE' });
+  });
+
+  it('does not publish margin when sale cost coverage is incomplete', async () => {
+    mockEmptyDashboardData();
+    prisma.product.findMany.mockResolvedValue([
+      {
+        id: 'product-1',
+        article: 'A',
+        name: 'A',
+        purchasePrice: new Prisma.Decimal(0),
+        salePrice: new Prisma.Decimal(100),
+        facing: 1,
+        categoryId: null,
+        category: null,
+        supplier: null,
+      },
+    ]);
+    prisma.salesFact.findMany.mockResolvedValueOnce([
+      {
+        productId: 'product-1',
+        storeId: 'store-1',
+        saleDate: new Date(),
+        quantity: new Prisma.Decimal(1),
+        revenue: new Prisma.Decimal(100),
+        cost: new Prisma.Decimal(0),
+        product: {
+          id: 'product-1',
+          article: 'A',
+          name: 'A',
+          categoryId: null,
+          category: null,
+          canonicalProduct: null,
+        },
+        store: { id: 'store-1', name: 'Club A' },
+      },
+    ]);
+
+    const summary = await service.getSummary(user);
+
+    expect(summary.assortmentGrowth.drivers).toMatchObject({
+      costCoveragePercent: 0,
+      productMarginPercent: null,
+    });
+    expect(
+      summary.assortmentGrowth.calculations.find(
+        (metric) => metric.key === 'productMarginPercent',
+      ),
+    ).toMatchObject({
+      state: 'NO_DATA',
+      note: 'Положительная себестоимость есть у 0% товарных операций.',
+    });
   });
 
   it('uses the fresh club-owner allow-list and never reads network snapshots', async () => {
@@ -429,10 +572,37 @@ describe('DashboardService', () => {
         where: { tenantId: 'tenant-demo', id: { in: ['store-1'] } },
       }),
     );
-    for (const [query] of prisma.salesFact.findMany.mock.calls) {
+    for (const [query] of prisma.salesFact.findMany.mock
+      .calls as SalesFactFindManyCall[]) {
       expect(query.where.storeId).toEqual({ in: ['store-1'] });
     }
     expect(prisma.businessSnapshotRun.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('applies selected categories to every assortment fact query', async () => {
+    mockEmptyDashboardData();
+
+    const summary = await service.getSummary(user, {
+      period: 'full-day',
+      categoryIds: ['category-drinks', 'category-snacks'],
+    });
+
+    expect(summary.selectedCategoryIds).toEqual([
+      'category-drinks',
+      'category-snacks',
+    ]);
+    expect(prisma.product.count).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-demo',
+        categoryId: { in: ['category-drinks', 'category-snacks'] },
+      },
+    });
+    for (const [query] of prisma.salesFact.findMany.mock
+      .calls as SalesFactFindManyCall[]) {
+      expect(query.where.product).toEqual({
+        categoryId: { in: ['category-drinks', 'category-snacks'] },
+      });
+    }
   });
 
   it('compares the latest full day with the previous 30 full-day average', async () => {
@@ -597,7 +767,109 @@ describe('DashboardService', () => {
     expect(summary.storeRevenueBreakdown[0]).toMatchObject({
       storeId: 'store-1',
       totalRevenue: 7200,
+      totalRevenueSource: 'TRANSACTIONS',
       productRevenue: 0,
+    });
+  });
+
+  it('calculates the club opportunity only from confirmed total-revenue denominators', async () => {
+    mockEmptyDashboardData();
+    prisma.store.findMany.mockResolvedValue([
+      { id: 'store-1', name: 'Club A', externalClubId: '1' },
+      { id: 'store-2', name: 'Club B', externalClubId: '2' },
+      { id: 'store-3', name: 'Club C', externalClubId: '3' },
+    ]);
+    prisma.salesFact.findMany.mockResolvedValueOnce([
+      {
+        productId: 'product-1',
+        storeId: 'store-1',
+        saleDate: new Date(),
+        quantity: new Prisma.Decimal(1),
+        revenue: new Prisma.Decimal(100),
+        cost: new Prisma.Decimal(50),
+        product: {
+          id: 'product-1',
+          article: 'A',
+          name: 'A',
+          categoryId: null,
+          category: null,
+          canonicalProduct: null,
+        },
+        store: { id: 'store-1', name: 'Club A' },
+      },
+      {
+        productId: 'product-2',
+        storeId: 'store-2',
+        saleDate: new Date(),
+        quantity: new Prisma.Decimal(1),
+        revenue: new Prisma.Decimal(400),
+        cost: new Prisma.Decimal(200),
+        product: {
+          id: 'product-2',
+          article: 'B',
+          name: 'B',
+          categoryId: null,
+          category: null,
+          canonicalProduct: null,
+        },
+        store: { id: 'store-2', name: 'Club B' },
+      },
+      {
+        productId: 'product-3',
+        storeId: 'store-3',
+        saleDate: new Date(),
+        quantity: new Prisma.Decimal(1),
+        revenue: new Prisma.Decimal(600),
+        cost: new Prisma.Decimal(300),
+        product: {
+          id: 'product-3',
+          article: 'C',
+          name: 'C',
+          categoryId: null,
+          category: null,
+          canonicalProduct: null,
+        },
+        store: { id: 'store-3', name: 'Club C' },
+      },
+    ]);
+    prisma.guestTransaction.findMany.mockResolvedValue([
+      {
+        storeId: 'store-1',
+        externalClubId: '1',
+        guestId: null,
+        externalGuestId: null,
+        type: '1',
+        amount: new Prisma.Decimal(1000),
+      },
+      {
+        storeId: 'store-2',
+        externalClubId: '2',
+        guestId: null,
+        externalGuestId: null,
+        type: '1',
+        amount: new Prisma.Decimal(1000),
+      },
+      {
+        storeId: 'store-3',
+        externalClubId: '3',
+        guestId: null,
+        externalGuestId: null,
+        type: '1',
+        amount: new Prisma.Decimal(1000),
+      },
+    ]);
+
+    const summary = await service.getSummary(user);
+
+    expect(summary.assortmentGrowth.opportunity).toEqual({
+      state: 'READY',
+      storeId: 'store-1',
+      storeName: 'Club A',
+      currentSharePercent: 10,
+      benchmarkSharePercent: 40,
+      gapPoints: 30,
+      revenueOpportunity: 300,
+      reason: null,
     });
   });
 
@@ -798,6 +1070,11 @@ describe('DashboardService', () => {
 
       expect(summary.totalRevenue).toBe(300);
       expect(summary.soldQuantity).toBe(3);
+      expect(summary.outOfStockRiskCount).toBe(0);
+      expect(summary.assortmentGrowth.drivers).toMatchObject({
+        stockTrackedSkuCount: 0,
+        availabilityPercent: null,
+      });
       expect(summary.periodFrom).toBe('2026-04-29');
       expect(summary.periodTo).toBe('2026-04-29');
       expect(summary.salesTrend[7]).toMatchObject({
@@ -807,7 +1084,7 @@ describe('DashboardService', () => {
         revenueSharePercent: 100,
         soldQuantity: 3,
         noSalesSkuCount: 0,
-        outOfStockSkuCount: 1,
+        outOfStockSkuCount: 0,
       });
       expect(summary.salesTrend.map((segment) => segment.label)).toEqual([
         '22.04',

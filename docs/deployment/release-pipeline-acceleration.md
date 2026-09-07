@@ -408,3 +408,23 @@ REL-ACC-010 завершён через PR #129, merge SHA
 При новом падении сначала дополняются эта таблица и соответствующая negative
 проверка; повторный exact-SHA CI запускается только после локальных syntax,
 diff-integrity и blocker-only security review.
+
+### REL-ACC-011: L2 preparation и post-cutover determinism
+
+Rollout 07.09.2026 сохранил production доступным, но показал, что несколько
+уже известных требований ещё не собраны в один terminal preflight. Поздно и
+последовательно обнаружились: пустые systemd execution timestamps, strict env
+verifier, временное membership `leetplus-rehearsal`, CRLF credentials,
+несовпадающий tunnel/DB port, autovacuum sessions, mixed-owner restored clone,
+collection/reset-failed reconcile и одиночный public POSTCHECK probe. Отдельно
+runtime route существовал в artifact, но не был смонтирован фактическим
+`COMBINED` root graph.
+
+REL-ACC-011 переносит эти проверки до rollout effect и закрепляет их negative
+fixtures. Первый реализованный срез — bounded public POSTCHECK: не более трёх
+повторов только обычного non-zero readiness, exact accepted receipt и active
+link проверяются перед каждой попыткой и после authenticated smoke. Timeout,
+stderr и topology/receipt drift не повторяются. Следующие срезы объединяют
+rehearsal cleanup, clone/tunnel/credential preflight и HTTP-level module-route
+matrix. Ни один guard не объединяет public guest, corporate tenant и worker
+contours и не понижает `L2_SCHEMA_SECURITY` до runtime lane.

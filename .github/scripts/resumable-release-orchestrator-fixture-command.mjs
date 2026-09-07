@@ -412,12 +412,43 @@ switch (name) {
   case "verify-release-readiness":
     state.readinessCalls += 1;
     if (
+      process.env
+        .TEST_ORCHESTRATOR_FIXTURE_PUBLIC_READINESS_STDERR_AFTER_CUTOVER ===
+        "true" &&
+      state.cutoverEffects > 0
+    ) {
+      save();
+      process.stderr.write("fixture public readiness diagnostic stderr\n");
+      process.stdout.write("RELEASE_READINESS=PASS\n");
+      break;
+    }
+    if (
       process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_READINESS_ALWAYS === "true" ||
+      (process.env
+        .TEST_ORCHESTRATOR_FIXTURE_FAIL_PUBLIC_READINESS_ALWAYS_AFTER_CUTOVER ===
+        "true" &&
+        state.cutoverEffects > 0) ||
+      (process.env
+        .TEST_ORCHESTRATOR_FIXTURE_FAIL_PUBLIC_READINESS_ONCE_AFTER_CUTOVER ===
+        "true" &&
+        state.cutoverEffects > 0 &&
+        state.readinessFailures === 0) ||
       (process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_READINESS_ONCE === "true" &&
         state.readinessFailures === 0)
     ) {
       state.readinessFailures += 1;
       save();
+      if (
+        process.env
+          .TEST_ORCHESTRATOR_FIXTURE_DRIFT_AFTER_PUBLIC_READINESS_FAILURE ===
+          "true" &&
+        state.cutoverEffects > 0
+      ) {
+        replaceLink(
+          path.join(nginxRoot, "active-upstreams.conf"),
+          path.join(nginxRoot, "upstreams/" + state.previousSlot + ".conf"),
+        );
+      }
       process.exit(105);
     }
     save();

@@ -163,6 +163,24 @@ receipt-contract drift уже после admission.
   `InvocationID`, недоступность manager transports, direct/wrong-unit отказ,
   persistent timer execution и zero residue. Завершение — только после Fast+Full
   exact-SHA green.
+- [ ] `REL-ACC-011`: сделать L1/L2 preparation детерминированной до первого
+  production effect. Обязательный executable contract должен:
+  - отклонять пустые systemd timestamps до преобразования даты;
+  - запускать strict production-control verifier только через canonical
+    `env -i PATH/LANG/LC_ALL/TZ`;
+  - завершать transient `leetplus-rehearsal` membership и доказывать пустой
+    explicit member set `leetplus-runtime` до BIND/cache;
+  - проверять LF credentials, равенство tunnel/DB port, `autovacuum=off`, zero
+    foreign sessions и owner-normalized disposable clone до acceptance;
+  - продолжать systemd collection только через exact `reconcile`, запрещая
+    повтор main operation и standalone promotion active hot rollback;
+  - повторять public POSTCHECK readiness не более трёх раз только при обычном
+    non-zero probe и перед каждой попыткой заново подтверждать accepted cutover
+    receipt + active link; timeout/stderr/receipt drift не повторяются;
+  - проверять HTTP-level route matrix `COMBINED + CORPORATE = mounted`,
+    isolated `GUEST = 404` для platform support recovery.
+  Завершение — Linux fixture + Fast/Full exact-SHA green; production rollout
+  этого hardening выполняется только вместе со следующим admitted release.
 
 Отдельный capacity boundary: duration percentiles всё ещё читают terminal
 operation directories с fail-closed пределом `4 096`. Их удаление не входит в

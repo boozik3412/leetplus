@@ -410,13 +410,17 @@ production встроенный `GuestBonusLedgerSchedulerService` обязан 
 квалификации игрового прогресса. Он не включает scheduler в API и в каждом tick
 для ровно одного `ACTIVE + INTERNAL` tenant: ставит не более одного due recovery
 в activity queue, обрабатывает bounded sync, запускает snapshot pipeline,
-worker-specific ledger fallback, supplemental pipeline и monitoring. Ledger
-fallback ограничен тремя exact play-time fact types; canary допускает только
-`SHADOW/limit=1`, а stable `LIVE` требует явную UTC-границу
-`GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE`. Любой другой
-tenant, неизвестный fact type, отсутствие границы или включённый API scheduler
-останавливают обработку до reward effect. Существующие origin keys, database
-lease и idempotency не позволяют повторному replay создать второй результат.
+worker-specific ledger fallback, supplemental pipeline и monitoring. Основной
+fallback ограничен тремя exact play-time fact types; отдельный session-start
+проход по умолчанию `OFF` и использует собственные mode/limit/cutoff и
+exact-profile XOR allow-all scope. Canary допускает только `SHADOW/limit=1`, а
+stable `LIVE` каждого прохода требует явную UTC-границу. Session-start путь
+оценивает миссии и Battle Pass по их собственным условиям, а для standalone
+лутбокса подавляет открытие и выбор материального приза: создаётся только
+entitlement кейса. Любой другой tenant, неизвестный fact type, отсутствие
+границы/scope или включённый API scheduler останавливают обработку до reward
+effect. Существующие origin keys, database lease и idempotency не позволяют
+повторному replay создать второй результат.
 
 Установка unit/runner выполняется только exact production-control artifact с
 отдельно закреплённым install-map digest. Само наличие файлов в `main` или

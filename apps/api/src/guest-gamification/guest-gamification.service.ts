@@ -2744,12 +2744,22 @@ type ExactReconciliationPersistence = {
 
 type CanonicalRuleReconciliationKind =
   | 'EXACT_PLAY_TIME'
+  | 'EXACT_SESSION_START'
   | 'SESSION_START_RECLASSIFICATION';
+
+type SupportRecoveryAuthority = {
+  ticketId: string;
+  ticketNumber: string;
+  ticketStatus: 'NEW' | 'IN_PROGRESS';
+  gameActivatedAt: Date;
+  storeTimeZone: string;
+};
 
 type CanonicalRuleReconciliationScope = {
   sourceFactId: string;
   sourceFactUpdatedAt: Date;
   physicalSessionKey: string;
+  supportRecoveryAuthority?: SupportRecoveryAuthority;
   rules: Array<{
     ruleKind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
     ruleId: string;
@@ -2757,6 +2767,18 @@ type CanonicalRuleReconciliationScope = {
     battlePassStepId?: string | null;
     ruleUpdatedAt: Date;
   }>;
+};
+
+type SupportRecoveryCanonicalizationScope = {
+  exactReconciliationScope: CanonicalRuleReconciliationScope & {
+    supportRecoveryAuthority: SupportRecoveryAuthority;
+  };
+  planDigest: string;
+  dependency: {
+    kind: 'LOOT_BOX';
+    id: string;
+    updatedAt: Date;
+  } | null;
 };
 
 type GuestGamePrequalifiedLootBoxOpen = {
@@ -2802,21 +2824,18 @@ type GuestGameProcessEventOptions = {
   /**
    * Bounded recovery for an exact canonical physical event that was created
    * without evaluating rules. The caller must pin both the active source fact
-   * and every allowed rule version. This path may add only the effects of the
-   * supplied rules to the already-owned event; it never creates a new event.
+   * and every allowed rule version. Exact play-time and typed session-start
+   * facts are supported. This path may add only the effects of the supplied
+   * rules to the already-owned event; it never creates a new event.
    */
-  exactReconciliationScope?: {
-    sourceFactId: string;
-    sourceFactUpdatedAt: Date;
-    physicalSessionKey: string;
-    rules: Array<{
-      ruleKind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
-      ruleId: string;
-      battlePassStep: number | null;
-      battlePassStepId?: string | null;
-      ruleUpdatedAt: Date;
-    }>;
-  };
+  exactReconciliationScope?: CanonicalRuleReconciliationScope;
+  /**
+   * Operator-only zero-effect canonicalization used by the bounded support
+   * recovery controller. The ticket authority, exact fact, rule versions,
+   * canonical event, origin receipt and audit record are fenced by one
+   * serializable transaction before any row is created.
+   */
+  supportRecoveryCanonicalizationScope?: SupportRecoveryCanonicalizationScope;
   /**
    * Bounded enrichment of one already-created generic SESSION_START event
    * after the same physical session receives an exact HOURLY/PACKAGE marker.
@@ -15174,10 +15193,27 @@ export class GuestGamificationService {
     ].filter(Boolean).length;
     if (
       (options.replayRewardScope && reconciliationScopeCount > 0) ||
-      reconciliationScopeCount > 1
+      reconciliationScopeCount > 1 ||
+      (options.supportRecoveryCanonicalizationScope &&
+        (options.replayRewardScope || reconciliationScopeCount > 0))
     ) {
       throw new BadRequestException(
         'Rule replay and canonical reconciliation modes cannot run together.',
+      );
+    }
+    if (
+      options.supportRecoveryCanonicalizationScope &&
+      (!user.isPlatformAdmin ||
+        user.platformTenantContext !== true ||
+        !nullableId(dto.profileId) ||
+        !nullableId(dto.guestId) ||
+        !nullableId(dto.storeId) ||
+        options.materializeRewards !== false ||
+        !Array.isArray(options.allowedRuleIds) ||
+        options.allowedRuleIds.length !== 0)
+    ) {
+      throw new BadRequestException(
+        'Support recovery canonicalization requires explicit platform authority and exact existing owners before evaluation.',
       );
     }
     const { profile, profileCreated } = await this.ensureProcessProfile(
@@ -15315,6 +15351,61 @@ export class GuestGamificationService {
       materializeRewards,
       Boolean(options.prequalifiedLootBoxOpen),
     );
+    if (options.supportRecoveryCanonicalizationScope) {
+      const canonicalScope = options.supportRecoveryCanonicalizationScope;
+      if (
+        !user.isPlatformAdmin ||
+        user.platformTenantContext !== true ||
+        profileCreated ||
+        materializeRewards ||
+        !Array.isArray(options.allowedRuleIds) ||
+        options.allowedRuleIds.length !== 0 ||
+        !booleanValue(dto.activeRulesOnly) ||
+        !booleanValue(dto.suppressLootBoxRewards) ||
+        !originKey ||
+        !eventReference ||
+        !processGuestId ||
+        !requestedStoreId ||
+        nullableId(dto.sourceFactId) !==
+          canonicalScope.exactReconciliationScope.sourceFactId ||
+        canonicalScope.exactReconciliationScope.rules.length !== 1 ||
+        !/^[a-f0-9]{64}$/u.test(canonicalScope.planDigest)
+      ) {
+        throw new BadRequestException(
+          'Support recovery canonicalization requires one exact, zero-effect, platform-admin plan.',
+        );
+      }
+      const canonical = await this.persistSupportRecoveryCanonicalEvent({
+        user,
+        dto,
+        dryRun,
+        profileId: profile.id,
+        guestId: processGuestId,
+        storeId: requestedStoreId,
+        eventReference,
+        originKey,
+        processPayload,
+        scope: canonicalScope,
+      });
+      return {
+        processed: true,
+        dryRun: processPersistedEventDryRun(canonical.event, dryRun) ?? dryRun,
+        event: canonical.event,
+        rewards: [],
+        summary: {
+          profileCreated: false,
+          appliedXpDelta: 0,
+          createdRewards: 0,
+          queuedRewardAmount: 0,
+          idempotencyKey: originKey,
+          idempotent: !canonical.created,
+          langameWrite: false,
+        },
+        note: canonical.created
+          ? 'The exact support event and its operator receipt were canonicalized atomically with zero material effects.'
+          : 'The exact support event and its operator receipt were already canonicalized; no material effect was repeated.',
+      };
+    }
     let existingEvent: EventRow | null = null;
     for (const candidateOriginKey of originCandidates) {
       existingEvent = await this.findProcessEventByOriginKey(
@@ -15425,7 +15516,9 @@ export class GuestGamificationService {
     if (existingEvent) {
       const reconciliationKind: CanonicalRuleReconciliationKind | null =
         options.exactReconciliationScope
-          ? 'EXACT_PLAY_TIME'
+          ? canonicalGuestGameEventType(dryRun.eventType) === 'SESSION_START'
+            ? 'EXACT_SESSION_START'
+            : 'EXACT_PLAY_TIME'
           : options.sessionStartReclassificationScope
             ? 'SESSION_START_RECLASSIFICATION'
             : null;
@@ -15633,7 +15726,9 @@ export class GuestGamificationService {
             evaluationRunId: [
               reconciliationKind === 'SESSION_START_RECLASSIFICATION'
                 ? 'session-start-reclassification'
-                : 'exact-canonical-reconciliation',
+                : reconciliationKind === 'EXACT_SESSION_START'
+                  ? 'exact-session-start-reconciliation'
+                  : 'exact-canonical-reconciliation',
               existingEvent.id,
             ].join(':'),
             evaluationMode: 'LIVE_LEDGER_FALLBACK',
@@ -15644,7 +15739,10 @@ export class GuestGamificationService {
             excludeSeasonRewardIds: processRewards.map((reward) => reward.id),
             evidence: {
               exactCanonicalReconciliation:
-                reconciliationKind === 'EXACT_PLAY_TIME',
+                reconciliationKind === 'EXACT_PLAY_TIME' ||
+                reconciliationKind === 'EXACT_SESSION_START',
+              exactSessionStartReconciliation:
+                reconciliationKind === 'EXACT_SESSION_START',
               sessionStartReclassification:
                 reconciliationKind === 'SESSION_START_RECLASSIFICATION',
               sourceFactId: exactPersistence.sourceFactId,
@@ -17044,6 +17142,502 @@ export class GuestGamificationService {
     }
   }
 
+  private async persistSupportRecoveryCanonicalEvent(input: {
+    user: AuthenticatedUser;
+    dto: GuestGameProcessEventDto;
+    dryRun: GuestGameDryRunResult;
+    profileId: string;
+    guestId: string;
+    storeId: string;
+    eventReference: ProcessExternalReference;
+    originKey: string;
+    processPayload: Prisma.InputJsonObject;
+    scope: SupportRecoveryCanonicalizationScope;
+  }): Promise<{ event: GuestGameEvent; created: boolean }> {
+    const eventType = canonicalGuestGameEventType(input.dryRun.eventType);
+    const exactScope = input.scope.exactReconciliationScope;
+    const expectedRule = exactScope.rules[0];
+    if (
+      !eventType ||
+      !['SESSION_START', 'PLAY_HOUR'].includes(eventType) ||
+      !expectedRule ||
+      !['LOOT_BOX', 'MISSION'].includes(expectedRule.ruleKind) ||
+      expectedRule.battlePassStep !== null ||
+      !exactScope.supportRecoveryAuthority
+    ) {
+      throw new BadRequestException(
+        'Support recovery canonicalization has an invalid exact rule scope.',
+      );
+    }
+
+    const eventData = await this.buildEventData(
+      input.user,
+      {
+        profileId: input.profileId,
+        guestId: input.guestId,
+        lootBoxId: nullableId(input.dto.lootBoxId),
+        eventType: input.dryRun.eventType,
+        source: 'API_IMPORT',
+        externalProvider: input.eventReference.externalProvider,
+        externalDomain: input.eventReference.externalDomain,
+        externalId: input.eventReference.externalId,
+        xpDelta: 0,
+        occurredAt: input.dryRun.occurredAt,
+        payload: input.processPayload,
+        note:
+          nullableString(input.dto.note) ??
+          'Exact zero-effect event canonicalized for bounded support recovery.',
+      },
+      { originKey: input.originKey },
+    );
+
+    type LockedSupportEvent = {
+      id: string;
+      profileId: string | null;
+      guestId: string | null;
+      eventType: string;
+      source: string;
+      externalProvider: string | null;
+      externalDomain: string | null;
+      externalId: string | null;
+      originKey: string | null;
+      occurredAt: Date;
+      xpDelta: number;
+      payload: Prisma.JsonValue | null;
+    };
+    type LockedSupportFact = {
+      id: string;
+      updatedAt: Date;
+      profileId: string | null;
+      guestId: string | null;
+      storeId: string | null;
+      externalProvider: string;
+      externalDomain: string;
+      externalGuestId: string;
+      sourceKind: string;
+      sessionExternalId: string | null;
+      factType: string;
+      happenedAt: Date | null;
+    };
+
+    const maxAttempts = 4;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(
+          async (tx) => {
+            const lockEvents = () =>
+              tx.$queryRaw<LockedSupportEvent[]>(Prisma.sql`
+                SELECT "id", "profileId", "guestId", "eventType", "source",
+                       "externalProvider", "externalDomain", "externalId",
+                       "originKey", "occurredAt", "xpDelta", "payload"
+                FROM "GuestGameEvent"
+                WHERE "tenantId" = ${input.user.tenantId}
+                  AND (
+                    "originKey" = ${input.originKey}
+                    OR (
+                      "source" = 'API_IMPORT'
+                      AND "externalProvider" = ${input.eventReference.externalProvider}
+                      AND "externalDomain" = ${input.eventReference.externalDomain}
+                      AND "externalId" = ${input.eventReference.externalId}
+                    )
+                  )
+                ORDER BY "id"
+                FOR UPDATE
+              `);
+            let eventRows = await lockEvents();
+            if (eventRows.length > 1) {
+              throw new ConflictException(
+                'The support recovery origin resolves to multiple canonical events.',
+              );
+            }
+
+            const factRows = await tx.$queryRaw<LockedSupportFact[]>(
+              Prisma.sql`
+                SELECT "id", "updatedAt", "profileId", "guestId", "storeId",
+                       "externalProvider", "externalDomain", "externalGuestId",
+                       "sourceKind", "sessionExternalId", "factType", "happenedAt"
+                FROM "GuestActivityFact"
+                WHERE "tenantId" = ${input.user.tenantId}
+                  AND "id" = ${exactScope.sourceFactId}
+                  AND "lifecycleStatus" = 'ACTIVE'
+                  AND "confidence" = 'EXACT'
+                  AND "supersededAt" IS NULL
+                FOR SHARE
+              `,
+            );
+            const fact = factRows[0];
+            if (factRows.length !== 1 || !fact) {
+              throw new ConflictException(
+                'The exact support fact changed before canonicalization.',
+              );
+            }
+            await validateSupportRecoveryAuthorityInTransaction(tx, {
+              tenantId: input.user.tenantId,
+              profileId: input.profileId,
+              guestId: input.guestId,
+              fact,
+              authority: exactScope.supportRecoveryAuthority,
+            });
+
+            // A concurrent request may have created the event while this
+            // transaction waited for the ticket authority lock.
+            if (eventRows.length === 0) eventRows = await lockEvents();
+            if (eventRows.length > 1) {
+              throw new ConflictException(
+                'The support recovery origin resolves to multiple canonical events.',
+              );
+            }
+
+            const physicalIdentity =
+              eventType === 'SESSION_START'
+                ? buildGuestGamePhysicalSessionStartIdentity({
+                    externalProvider: fact.externalProvider,
+                    externalDomain: fact.externalDomain,
+                    sourceKind: fact.sourceKind,
+                    sessionExternalId: fact.sessionExternalId,
+                    eventType: fact.factType,
+                  })
+                : buildGuestGamePhysicalProgressIdentity({
+                    externalProvider: fact.externalProvider,
+                    externalDomain: fact.externalDomain,
+                    sourceKind: fact.sourceKind,
+                    sessionExternalId: fact.sessionExternalId,
+                    eventType: fact.factType,
+                  });
+            if (
+              fact.updatedAt.getTime() !==
+                exactScope.sourceFactUpdatedAt.getTime() ||
+              fact.profileId !== input.profileId ||
+              fact.guestId !== input.guestId ||
+              fact.storeId !== input.storeId ||
+              !fact.happenedAt ||
+              fact.happenedAt.getTime() !==
+                new Date(input.dryRun.occurredAt).getTime() ||
+              !physicalIdentity ||
+              physicalIdentity.key !== exactScope.physicalSessionKey
+            ) {
+              throw new ConflictException(
+                'The exact support fact identity or version changed before canonicalization.',
+              );
+            }
+
+            const candidateFactTypes =
+              eventType === 'SESSION_START'
+                ? ['HOURLY_SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED']
+                : [
+                    'SESSION_PLAY_TIME_ACCUMULATED',
+                    'HOURLY_PLAY_TIME_ACCUMULATED',
+                    'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+                  ];
+            const physicalCandidates = await tx.$queryRaw<
+              LockedSupportFact[]
+            >(Prisma.sql`
+              SELECT "id", "updatedAt", "profileId", "guestId", "storeId",
+                     "externalProvider", "externalDomain", "externalGuestId",
+                     "sourceKind", "sessionExternalId", "factType", "happenedAt"
+              FROM "GuestActivityFact"
+              WHERE "tenantId" = ${input.user.tenantId}
+                AND "externalProvider" = ${fact.externalProvider}
+                AND "sessionExternalId" = ${fact.sessionExternalId}
+                AND "factType" IN (${Prisma.join(candidateFactTypes)})
+                AND "lifecycleStatus" = 'ACTIVE'
+                AND "confidence" = 'EXACT'
+                AND "supersededAt" IS NULL
+              ORDER BY "id"
+              FOR SHARE
+            `);
+            const samePhysicalFacts = physicalCandidates.filter(
+              (candidate) =>
+                (eventType === 'SESSION_START'
+                  ? buildGuestGamePhysicalSessionStartIdentity({
+                      externalProvider: candidate.externalProvider,
+                      externalDomain: candidate.externalDomain,
+                      sourceKind: candidate.sourceKind,
+                      sessionExternalId: candidate.sessionExternalId,
+                      eventType: candidate.factType,
+                    })
+                  : buildGuestGamePhysicalProgressIdentity({
+                      externalProvider: candidate.externalProvider,
+                      externalDomain: candidate.externalDomain,
+                      sourceKind: candidate.sourceKind,
+                      sessionExternalId: candidate.sessionExternalId,
+                      eventType: candidate.factType,
+                    })
+                )?.key === exactScope.physicalSessionKey,
+            );
+            if (
+              samePhysicalFacts.length !== 1 ||
+              samePhysicalFacts[0]?.id !== fact.id
+            ) {
+              throw new ConflictException(
+                'The physical support session has no single active exact fact.',
+              );
+            }
+
+            const ruleRows =
+              expectedRule.ruleKind === 'MISSION'
+                ? await tx.$queryRaw<Array<{ id: string; updatedAt: Date }>>(
+                    Prisma.sql`
+                      SELECT "id", "updatedAt"
+                      FROM "GuestGameMission"
+                      WHERE "tenantId" = ${input.user.tenantId}
+                        AND "id" = ${expectedRule.ruleId}
+                        AND "status" = 'ACTIVE'
+                      FOR SHARE
+                    `,
+                  )
+                : await tx.$queryRaw<Array<{ id: string; updatedAt: Date }>>(
+                    Prisma.sql`
+                      SELECT "id", "updatedAt"
+                      FROM "GuestGameLootBox"
+                      WHERE "tenantId" = ${input.user.tenantId}
+                        AND "id" = ${expectedRule.ruleId}
+                        AND "status" = 'ACTIVE'
+                      FOR SHARE
+                    `,
+                  );
+            const dependencyRows = input.scope.dependency
+              ? await tx.$queryRaw<Array<{ id: string; updatedAt: Date }>>(
+                  Prisma.sql`
+                    SELECT "id", "updatedAt"
+                    FROM "GuestGameLootBox"
+                    WHERE "tenantId" = ${input.user.tenantId}
+                      AND "id" = ${input.scope.dependency.id}
+                      AND "status" = 'ACTIVE'
+                      AND "usageKind" IN ('REWARD_TEMPLATE', 'BOTH')
+                    FOR SHARE
+                  `,
+                )
+              : [];
+            if (
+              ruleRows.length !== 1 ||
+              ruleRows[0]?.updatedAt.getTime() !==
+                expectedRule.ruleUpdatedAt.getTime() ||
+              (input.scope.dependency &&
+                (dependencyRows.length !== 1 ||
+                  dependencyRows[0]?.updatedAt.getTime() !==
+                    input.scope.dependency.updatedAt.getTime()))
+            ) {
+              throw new ConflictException(
+                'A support recovery rule or dependency changed before canonicalization.',
+              );
+            }
+
+            let lockedEvent = eventRows[0] ?? null;
+            let created = false;
+            let event: EventRow;
+            if (!lockedEvent) {
+              event = await tx.guestGameEvent.create({
+                data: eventData,
+                include: eventInclude,
+              });
+              created = true;
+              lockedEvent = {
+                id: event.id,
+                profileId: event.profileId,
+                guestId: event.guestId,
+                eventType: event.eventType,
+                source: event.source,
+                externalProvider: event.externalProvider,
+                externalDomain: event.externalDomain,
+                externalId: event.externalId,
+                originKey: event.originKey,
+                occurredAt: event.occurredAt,
+                xpDelta: event.xpDelta,
+                payload: event.payload,
+              };
+            } else {
+              const reloaded = await tx.guestGameEvent.findFirst({
+                where: {
+                  id: lockedEvent.id,
+                  tenantId: input.user.tenantId,
+                },
+                include: eventInclude,
+              });
+              if (!reloaded) {
+                throw new ConflictException(
+                  'The locked support recovery event disappeared.',
+                );
+              }
+              event = reloaded;
+            }
+
+            const payload = jsonRecord(lockedEvent.payload);
+            if (
+              lockedEvent.profileId !== input.profileId ||
+              lockedEvent.guestId !== input.guestId ||
+              canonicalGuestGameEventType(lockedEvent.eventType) !==
+                eventType ||
+              lockedEvent.source !== 'API_IMPORT' ||
+              nullableString(lockedEvent.externalProvider)?.toUpperCase() !==
+                input.eventReference.externalProvider ||
+              normalizeGuestGameExternalDomain(lockedEvent.externalDomain) !==
+                normalizeGuestGameExternalDomain(
+                  input.eventReference.externalDomain,
+                ) ||
+              lockedEvent.externalId !== input.eventReference.externalId ||
+              lockedEvent.originKey !== input.originKey ||
+              lockedEvent.occurredAt.getTime() !== fact.happenedAt.getTime() ||
+              lockedEvent.xpDelta !== 0 ||
+              nullableId(payload.sourceFactId) !== fact.id ||
+              nullableString(payload.sourceFactKind) !== 'GUEST_SESSION' ||
+              'exactReconciliationPlan' in payload
+            ) {
+              throw new ConflictException(
+                'The support recovery canonical event is not pristine or belongs to different evidence.',
+              );
+            }
+
+            if (!created) {
+              const [
+                xpPostingCount,
+                intentCount,
+                entitlementCount,
+                rewardCount,
+              ] = await Promise.all([
+                tx.guestGameXpPosting.count({
+                  where: { eventId: lockedEvent.id },
+                }),
+                tx.guestGameRewardIntent.count({
+                  where: {
+                    tenantId: input.user.tenantId,
+                    OR: [
+                      { eventId: lockedEvent.id },
+                      { originKey: input.originKey },
+                    ],
+                  },
+                }),
+                tx.guestGameEntitlement.count({
+                  where: {
+                    tenantId: input.user.tenantId,
+                    OR: [
+                      { eventId: lockedEvent.id },
+                      { originKey: input.originKey },
+                    ],
+                  },
+                }),
+                tx.guestGameReward.count({
+                  where: {
+                    tenantId: input.user.tenantId,
+                    originKey: input.originKey,
+                  },
+                }),
+              ]);
+              if (
+                xpPostingCount !== 0 ||
+                intentCount !== 0 ||
+                entitlementCount !== 0 ||
+                rewardCount !== 0
+              ) {
+                throw new ConflictException(
+                  'The canonical event is not pristine; support recovery stopped without adding another effect.',
+                );
+              }
+            }
+
+            const existingReceipt = await tx.guestGameOriginReceipt.findUnique({
+              where: {
+                tenantId_originKey: {
+                  tenantId: input.user.tenantId,
+                  originKey: input.originKey,
+                },
+              },
+            });
+            const recordedAt = new Date();
+            const receipt = await tx.guestGameOriginReceipt.upsert({
+              where: {
+                tenantId_originKey: {
+                  tenantId: input.user.tenantId,
+                  originKey: input.originKey,
+                },
+              },
+              create: {
+                tenantId: input.user.tenantId,
+                originKey: input.originKey,
+                factId: fact.id,
+                eventId: lockedEvent.id,
+                eventType,
+                externalProvider: fact.externalProvider as IntegrationProvider,
+                externalDomain: fact.externalDomain,
+                policy: 'EXACT_OPERATOR_CANONICALIZATION',
+                status: 'PROCESSED',
+                claimedSource: 'EXACT_OPERATOR_CANONICALIZATION',
+                ledgerFirstSeenAt: recordedAt,
+                graceUntil: recordedAt,
+                processedAt: recordedAt,
+                attempts: 1,
+              },
+              update: {},
+            });
+            if (
+              receipt.factId !== fact.id ||
+              receipt.eventId !== lockedEvent.id ||
+              canonicalGuestGameEventType(receipt.eventType) !== eventType ||
+              nullableString(receipt.externalProvider)?.toUpperCase() !==
+                nullableString(fact.externalProvider)?.toUpperCase() ||
+              normalizeGuestGameExternalDomain(receipt.externalDomain) !==
+                normalizeGuestGameExternalDomain(fact.externalDomain) ||
+              receipt.policy !== 'EXACT_OPERATOR_CANONICALIZATION' ||
+              receipt.status !== 'PROCESSED' ||
+              ![
+                'EXACT_CANONICALIZATION',
+                'EXACT_OPERATOR_CANONICALIZATION',
+              ].includes(receipt.claimedSource ?? '')
+            ) {
+              throw new ConflictException(
+                'The support recovery origin receipt is owned by different evidence.',
+              );
+            }
+
+            if (!existingReceipt) {
+              await tx.guestGameAuditEvent.create({
+                data: {
+                  tenantId: input.user.tenantId,
+                  profileId: input.profileId,
+                  guestId: input.guestId,
+                  storeId: input.storeId,
+                  entityType: 'GUEST_GAME_EVENT',
+                  entityId: lockedEvent.id,
+                  action: 'SUPPORT_RECOVERY_EVENT_CANONICALIZED',
+                  status: 'PROCESSED',
+                  reasonCode: exactScope.supportRecoveryAuthority.ticketNumber,
+                  reasonText:
+                    'An exact support fact, event and receipt were atomically canonicalized with zero material effects.',
+                  payload: {
+                    actorUserId: input.user.id,
+                    ticketNumber:
+                      exactScope.supportRecoveryAuthority.ticketNumber,
+                    planDigest: input.scope.planDigest,
+                    sourceFactId: fact.id,
+                    ruleKind: expectedRule.ruleKind,
+                    ruleId: expectedRule.ruleId,
+                    originKey: input.originKey,
+                  },
+                },
+              });
+            }
+
+            return { event: mapEvent(event), created };
+          },
+          { isolationLevel: 'Serializable' },
+        );
+      } catch (error) {
+        if (
+          (isSerializationConflictError(error) ||
+            isUniqueConstraintError(error)) &&
+          attempt < maxAttempts
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw new Error(
+      'Support recovery canonicalization serialization retry exhausted.',
+    );
+  }
+
   private findProcessEventByReference(
     user: AuthenticatedUser,
     eventReference: ProcessExternalReference,
@@ -17285,17 +17879,19 @@ export class GuestGamificationService {
                 updatedAt: Date;
                 profileId: string | null;
                 guestId: string | null;
+                storeId: string | null;
                 externalProvider: string;
                 externalDomain: string;
+                externalGuestId: string;
                 sourceKind: string;
                 sessionExternalId: string | null;
                 factType: string;
                 happenedAt: Date | null;
               }>
             >(Prisma.sql`
-              SELECT "id", "updatedAt", "profileId", "guestId", "externalProvider",
-                     "externalDomain", "sourceKind", "sessionExternalId",
-                     "factType", "happenedAt"
+              SELECT "id", "updatedAt", "profileId", "guestId", "storeId",
+                     "externalProvider", "externalDomain", "externalGuestId",
+                     "sourceKind", "sessionExternalId", "factType", "happenedAt"
               FROM "GuestActivityFact"
               WHERE "id" = ${scope.sourceFactId}
                 AND "tenantId" = ${user.tenantId}
@@ -17317,7 +17913,8 @@ export class GuestGamificationService {
               );
             }
             const factPhysicalIdentity =
-              reconciliationKind === 'SESSION_START_RECLASSIFICATION'
+              reconciliationKind === 'SESSION_START_RECLASSIFICATION' ||
+              reconciliationKind === 'EXACT_SESSION_START'
                 ? buildGuestGamePhysicalSessionStartIdentity({
                     externalProvider: factRow.externalProvider,
                     externalDomain: factRow.externalDomain,
@@ -17340,6 +17937,15 @@ export class GuestGamificationService {
                 'The active exact fact does not belong to the expected physical session.',
               );
             }
+            if (scope.supportRecoveryAuthority) {
+              await validateSupportRecoveryAuthorityInTransaction(tx, {
+                tenantId: user.tenantId,
+                profileId,
+                guestId,
+                fact: factRow,
+                authority: scope.supportRecoveryAuthority,
+              });
+            }
 
             const ownerReconciliation =
               reconciliationKind === 'SESSION_START_RECLASSIFICATION'
@@ -17352,16 +17958,27 @@ export class GuestGamificationService {
                     guestId,
                     scope,
                   )
-                : await reconcileExactCanonicalEventOwnerInTransaction(tx, {
-                    tenantId: user.tenantId,
-                    eventId,
-                    originKey,
-                    expectedEventType: dryRun.eventType,
-                    targetProfileId: profileId,
-                    targetGuestId: guestId,
-                    sourceFactId: scope.sourceFactId,
-                    sourceFactUpdatedAt: scope.sourceFactUpdatedAt,
-                  });
+                : reconciliationKind === 'EXACT_SESSION_START'
+                  ? await validateExactSessionStartEvidence(
+                      tx,
+                      user.tenantId,
+                      eventRow,
+                      factRow,
+                      profileId,
+                      guestId,
+                      originKey,
+                      scope,
+                    )
+                  : await reconcileExactCanonicalEventOwnerInTransaction(tx, {
+                      tenantId: user.tenantId,
+                      eventId,
+                      originKey,
+                      expectedEventType: dryRun.eventType,
+                      targetProfileId: profileId,
+                      targetGuestId: guestId,
+                      sourceFactId: scope.sourceFactId,
+                      sourceFactUpdatedAt: scope.sourceFactUpdatedAt,
+                    });
             if (ownerReconciliation.status === 'QUARANTINED') {
               return {
                 dryRun,
@@ -30381,6 +30998,309 @@ function restrictSessionStartReclassificationScopeToPersistedRules(
   };
 }
 
+async function validateSupportRecoveryAuthorityInTransaction(
+  tx: Prisma.TransactionClient,
+  input: {
+    tenantId: string;
+    profileId: string;
+    guestId: string | null;
+    fact: {
+      profileId: string | null;
+      guestId: string | null;
+      storeId: string | null;
+      externalProvider: string;
+      externalDomain: string;
+      externalGuestId: string;
+      happenedAt: Date | null;
+    };
+    authority: NonNullable<
+      CanonicalRuleReconciliationScope['supportRecoveryAuthority']
+    >;
+  },
+) {
+  const rows = await tx.$queryRaw<
+    Array<{
+      ticketId: string;
+      ticketNumber: string;
+      ticketStatus: string;
+      ticketProfileId: string;
+      ticketGuestId: string | null;
+      ticketStoreId: string;
+      profileStatus: string;
+      profileGuestId: string | null;
+      gameActivatedAt: Date | null;
+      guestDisabled: boolean;
+      guestExternalProvider: string | null;
+      guestExternalDomain: string | null;
+      guestExternalId: string;
+      storeActive: boolean;
+      storeExternalDomain: string | null;
+      storeTimeZone: string | null;
+    }>
+  >(Prisma.sql`
+    SELECT t."id" AS "ticketId",
+           t."ticketNumber" AS "ticketNumber",
+           t."status"::text AS "ticketStatus",
+           t."profileId" AS "ticketProfileId",
+           t."guestId" AS "ticketGuestId",
+           t."storeId" AS "ticketStoreId",
+           p."status" AS "profileStatus",
+           p."guestId" AS "profileGuestId",
+           p."gameActivatedAt" AS "gameActivatedAt",
+           g."isDisabled" AS "guestDisabled",
+           g."externalProvider"::text AS "guestExternalProvider",
+           g."externalDomain" AS "guestExternalDomain",
+           g."externalGuestId" AS "guestExternalId",
+           s."isActive" AS "storeActive",
+           s."externalDomain" AS "storeExternalDomain",
+           s."timeZone" AS "storeTimeZone"
+    FROM "GuestSupportTicket" t
+    JOIN "GuestGameProfile" p
+      ON p."tenantId" = t."tenantId" AND p."id" = t."profileId"
+    JOIN "Guest" g
+      ON g."tenantId" = t."tenantId" AND g."id" = t."guestId"
+    JOIN "Store" s
+      ON s."tenantId" = t."tenantId" AND s."id" = t."storeId"
+    WHERE t."tenantId" = ${input.tenantId}
+      AND t."id" = ${input.authority.ticketId}
+    FOR UPDATE OF t, p, g, s
+  `);
+  const row = rows[0];
+  const factProvider = nullableString(
+    input.fact.externalProvider,
+  )?.toUpperCase();
+  if (
+    rows.length !== 1 ||
+    !row ||
+    row.ticketNumber !== input.authority.ticketNumber ||
+    row.ticketStatus !== input.authority.ticketStatus ||
+    !['NEW', 'IN_PROGRESS'].includes(row.ticketStatus) ||
+    row.ticketProfileId !== input.profileId ||
+    row.ticketGuestId !== input.guestId ||
+    row.ticketStoreId !== input.fact.storeId ||
+    input.fact.profileId !== input.profileId ||
+    input.fact.guestId !== input.guestId ||
+    row.profileStatus !== 'ACTIVE' ||
+    row.profileGuestId !== input.guestId ||
+    !row.gameActivatedAt ||
+    row.gameActivatedAt.getTime() !==
+      input.authority.gameActivatedAt.getTime() ||
+    !input.fact.happenedAt ||
+    input.fact.happenedAt.getTime() < row.gameActivatedAt.getTime() ||
+    row.guestDisabled ||
+    !factProvider ||
+    nullableString(row.guestExternalProvider)?.toUpperCase() !== factProvider ||
+    normalizeGuestGameExternalDomain(row.guestExternalDomain) !==
+      normalizeGuestGameExternalDomain(input.fact.externalDomain) ||
+    row.guestExternalId !== input.fact.externalGuestId ||
+    !row.storeActive ||
+    normalizeGuestGameExternalDomain(row.storeExternalDomain) !==
+      normalizeGuestGameExternalDomain(input.fact.externalDomain) ||
+    row.storeTimeZone !== input.authority.storeTimeZone
+  ) {
+    throw new ConflictException(
+      'The open support ticket, profile, guest or store changed before recovery effects were persisted.',
+    );
+  }
+}
+
+async function validateExactSessionStartEvidence(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  event: {
+    id: string;
+    profileId: string | null;
+    guestId: string | null;
+    eventType: string;
+    externalProvider: string | null;
+    externalDomain: string | null;
+    externalId: string | null;
+    occurredAt: Date;
+    payload: Prisma.JsonValue | null;
+  },
+  fact: {
+    id: string;
+    updatedAt: Date;
+    profileId: string | null;
+    guestId: string | null;
+    storeId: string | null;
+    externalProvider: string;
+    externalDomain: string;
+    externalGuestId: string;
+    sourceKind: string;
+    sessionExternalId: string | null;
+    factType: string;
+    happenedAt: Date | null;
+  },
+  profileId: string,
+  guestId: string | null,
+  originKey: string,
+  scope: CanonicalRuleReconciliationScope,
+): Promise<ExactCanonicalOwnerReconcileOutcome> {
+  const payload = jsonRecord(event.payload);
+  const input = jsonRecord(payload.input as Prisma.JsonValue | null);
+  const store = jsonRecord(payload.store as Prisma.JsonValue | null);
+  const expectedSessionType =
+    fact.factType === 'HOURLY_SESSION_STARTED'
+      ? 'HOURLY'
+      : fact.factType === 'PACKAGE_OR_SUBSCRIPTION_USED'
+        ? 'PACKAGE_OR_SUBSCRIPTION'
+        : null;
+  const expectedSessionPacket =
+    expectedSessionType === 'PACKAGE_OR_SUBSCRIPTION';
+  const eventProvider = nullableString(event.externalProvider)?.toUpperCase();
+  const factProvider = nullableString(fact.externalProvider)?.toUpperCase();
+  const payloadProvider = nullableString(
+    payload.externalProvider,
+  )?.toUpperCase();
+  const eventDomain = normalizeGuestGameExternalDomain(event.externalDomain);
+  const factDomain = normalizeGuestGameExternalDomain(fact.externalDomain);
+  const payloadDomain = normalizeGuestGameExternalDomain(
+    payload.externalDomain,
+  );
+  const payloadSourceKind = normalizeGuestGameSourceKind(payload.sourceKind);
+  const factSourceKind = normalizeGuestGameSourceKind(fact.sourceKind);
+  const payloadSessionExternalId = nullableString(payload.sessionExternalId);
+  const factSessionExternalId = nullableString(fact.sessionExternalId);
+  const expectedExternalId = factSessionExternalId
+    ? [
+        'guest-game',
+        'GUEST_SESSION',
+        'SESSION_START',
+        factSessionExternalId,
+      ].join(':')
+    : null;
+
+  if (
+    !guestId ||
+    !expectedSessionType ||
+    event.profileId !== profileId ||
+    event.guestId !== guestId ||
+    fact.profileId !== profileId ||
+    fact.guestId !== guestId ||
+    !fact.storeId ||
+    nullableId(store.id) !== fact.storeId ||
+    fact.updatedAt.getTime() !== scope.sourceFactUpdatedAt.getTime() ||
+    canonicalGuestGameEventType(event.eventType) !== 'SESSION_START' ||
+    canonicalGuestGameEventType(fact.factType) !== 'SESSION_START' ||
+    intValue(payload.processSchemaVersion) !== 2 ||
+    nullableString(payload.source) !== 'guest_gamification_process_event' ||
+    nullableId(payload.sourceFactId) !== fact.id ||
+    nullableString(payload.sourceFactKind) !== 'GUEST_SESSION' ||
+    nullableString(input.sessionType) !== expectedSessionType ||
+    booleanValue(input.sessionPacket) !== expectedSessionPacket ||
+    !eventProvider ||
+    eventProvider !== factProvider ||
+    eventProvider !== payloadProvider ||
+    !eventDomain ||
+    eventDomain !== factDomain ||
+    eventDomain !== payloadDomain ||
+    !factSourceKind ||
+    factSourceKind !== payloadSourceKind ||
+    !factSessionExternalId ||
+    factSessionExternalId !== payloadSessionExternalId ||
+    nullableString(event.externalId) !== expectedExternalId ||
+    !fact.happenedAt ||
+    event.occurredAt.getTime() !== fact.happenedAt.getTime()
+  ) {
+    throw new ConflictException(
+      'The exact typed session-start fact does not match the pristine canonical event.',
+    );
+  }
+
+  const receiptRows = await tx.$queryRaw<
+    Array<{
+      factId: string | null;
+      eventId: string | null;
+      eventType: string;
+      externalProvider: string;
+      externalDomain: string;
+      policy: string;
+      status: string;
+      claimedSource: string | null;
+    }>
+  >(Prisma.sql`
+    SELECT "factId", "eventId", "eventType", "externalProvider",
+           "externalDomain", "policy", "status", "claimedSource"
+    FROM "GuestGameOriginReceipt"
+    WHERE "tenantId" = ${tenantId}
+      AND "originKey" = ${originKey}
+    FOR UPDATE
+  `);
+  const receipt = receiptRows[0];
+  if (
+    receiptRows.length !== 1 ||
+    !receipt ||
+    receipt.factId !== fact.id ||
+    receipt.eventId !== event.id ||
+    canonicalGuestGameEventType(receipt.eventType) !== 'SESSION_START' ||
+    nullableString(receipt.externalProvider)?.toUpperCase() !== factProvider ||
+    normalizeGuestGameExternalDomain(receipt.externalDomain) !== factDomain ||
+    receipt.policy !== 'EXACT_OPERATOR_CANONICALIZATION' ||
+    receipt.status !== 'PROCESSED' ||
+    !['EXACT_CANONICALIZATION', 'EXACT_OPERATOR_CANONICALIZATION'].includes(
+      receipt.claimedSource ?? '',
+    )
+  ) {
+    throw new ConflictException(
+      'The exact session-start event has no completed operator receipt.',
+    );
+  }
+
+  const typedCandidates = await tx.$queryRaw<
+    Array<{
+      id: string;
+      profileId: string | null;
+      guestId: string | null;
+      externalProvider: string;
+      externalDomain: string;
+      sourceKind: string;
+      sessionExternalId: string | null;
+      factType: string;
+      happenedAt: Date | null;
+    }>
+  >(Prisma.sql`
+    SELECT "id", "profileId", "guestId", "externalProvider",
+           "externalDomain", "sourceKind", "sessionExternalId",
+           "factType", "happenedAt"
+    FROM "GuestActivityFact"
+    WHERE "tenantId" = ${tenantId}
+      AND "externalProvider" = ${fact.externalProvider}
+      AND "sessionExternalId" = ${fact.sessionExternalId}
+      AND "factType" IN ('HOURLY_SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED')
+      AND "lifecycleStatus" = 'ACTIVE'
+      AND "confidence" = 'EXACT'
+      AND "supersededAt" IS NULL
+    ORDER BY "id"
+    FOR SHARE
+  `);
+  const samePhysicalTypedFacts = typedCandidates.filter(
+    (candidate) =>
+      buildGuestGamePhysicalSessionStartIdentity({
+        externalProvider: candidate.externalProvider,
+        externalDomain: candidate.externalDomain,
+        sourceKind: candidate.sourceKind,
+        sessionExternalId: candidate.sessionExternalId,
+        eventType: candidate.factType,
+      })?.key === scope.physicalSessionKey,
+  );
+  if (
+    samePhysicalTypedFacts.length !== 1 ||
+    samePhysicalTypedFacts[0]?.id !== fact.id ||
+    samePhysicalTypedFacts[0]?.profileId !== profileId ||
+    samePhysicalTypedFacts[0]?.guestId !== guestId ||
+    !samePhysicalTypedFacts[0]?.happenedAt ||
+    samePhysicalTypedFacts[0].happenedAt.getTime() !==
+      event.occurredAt.getTime()
+  ) {
+    throw new ConflictException(
+      'The physical session has no single active exact typed start marker.',
+    );
+  }
+
+  return { status: 'UNCHANGED' };
+}
+
 async function validateSessionStartReclassificationEvidence(
   tx: Prisma.TransactionClient,
   tenantId: string,
@@ -31091,7 +32011,9 @@ function parseExactReconciliationPlan(
   const reconciliationKind: CanonicalRuleReconciliationKind =
     rawReconciliationKind === 'SESSION_START_RECLASSIFICATION'
       ? 'SESSION_START_RECLASSIFICATION'
-      : 'EXACT_PLAY_TIME';
+      : rawReconciliationKind === 'EXACT_SESSION_START'
+        ? 'EXACT_SESSION_START'
+        : 'EXACT_PLAY_TIME';
   const eventId = nullableId(value.eventId);
   const originKey = nullableString(value.originKey);
   const profileId = nullableId(value.profileId);

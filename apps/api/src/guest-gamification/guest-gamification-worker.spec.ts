@@ -12,6 +12,10 @@ function baseEnv(): NodeJS.ProcessEnv {
     GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT: '1',
     GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_MODE: 'SHADOW',
     GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIMIT: '1',
+    GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_MODE: 'OFF',
+    GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_LIMIT: '1',
+    GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_ALLOW_ALL_PROFILES:
+      'false',
     GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE: 'SHADOW',
     GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT: '1',
     GUEST_GAMIFICATION_WORKER_MONITORING_ENABLED: 'false',
@@ -162,6 +166,37 @@ describe('guest gamification singleton worker', () => {
     ).toThrow('LEDGER_FALLBACK_LIVE_NOT_BEFORE must be a valid ISO date');
   });
 
+  it('fails closed unless session-start fallback has one explicit profile scope', () => {
+    expect(() =>
+      loadGuestGamificationWorkerConfig({
+        ...baseEnv(),
+        GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_MODE: 'SHADOW',
+      }),
+    ).toThrow(
+      'Session-start fallback requires exactly one profile ID or allow-all-profiles=true',
+    );
+    expect(() =>
+      loadGuestGamificationWorkerConfig({
+        ...baseEnv(),
+        GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_MODE: 'SHADOW',
+        GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_PROFILE_ID:
+          '25fc121f-c69a-4050-9bda-6def1424f45d',
+        GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_ALLOW_ALL_PROFILES:
+          'true',
+      }),
+    ).toThrow(
+      'Session-start fallback requires exactly one profile ID or allow-all-profiles=true',
+    );
+    expect(() =>
+      loadGuestGamificationWorkerConfig({
+        ...baseEnv(),
+        GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_MODE: 'LIVE',
+        GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_PROFILE_ID:
+          '25fc121f-c69a-4050-9bda-6def1424f45d',
+      }),
+    ).toThrow('SESSION_START_FALLBACK_MODE=LIVE is forbidden in canary mode');
+  });
+
   it('keeps activity recovery at one profile in stable mode', () => {
     expect(() =>
       loadGuestGamificationWorkerConfig({
@@ -223,6 +258,68 @@ describe('guest gamification singleton worker', () => {
       limit: 1,
     });
     expect(dependencies.monitoring.collectTenant).not.toHaveBeenCalled();
+  });
+
+  it('runs session-start recovery as a separately scoped shadow pass', async () => {
+    const dependencies = services();
+    const profileId = '25fc121f-c69a-4050-9bda-6def1424f45d';
+
+    await runGuestGamificationWorkerOnce(
+      dependencies as never,
+      {
+        ...baseEnv(),
+        GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_MODE: 'SHADOW',
+        GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_PROFILE_ID: profileId,
+      },
+      console,
+      new Date('2026-09-07T12:00:00.000Z'),
+    );
+
+    expect(dependencies.ledgerFallback.runScheduled).toHaveBeenCalledTimes(2);
+    expect(dependencies.ledgerFallback.runScheduled).toHaveBeenNthCalledWith(
+      2,
+      {
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+        profileId,
+        playTimeAllowAllProfiles: false,
+        factTypes: [
+          'SESSION_STARTED',
+          'HOURLY_SESSION_STARTED',
+          'PACKAGE_OR_SUBSCRIPTION_USED',
+        ],
+        limit: 1,
+      },
+    );
+  });
+
+  it('requires a cutoff for stable profile-scoped session-start LIVE', () => {
+    const stable = {
+      ...baseEnv(),
+      GUEST_GAMIFICATION_WORKER_CANARY: 'false',
+      GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT: '30',
+      GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE: 'LIVE',
+      GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT: '30',
+      GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_MODE: 'LIVE',
+      GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_PROFILE_ID:
+        '25fc121f-c69a-4050-9bda-6def1424f45d',
+    };
+
+    expect(() => loadGuestGamificationWorkerConfig(stable)).toThrow(
+      'SESSION_START_FALLBACK_LIVE_NOT_BEFORE is required in LIVE mode',
+    );
+    expect(
+      loadGuestGamificationWorkerConfig({
+        ...stable,
+        GUEST_GAMIFICATION_WORKER_SESSION_START_FALLBACK_LIVE_NOT_BEFORE:
+          '2026-09-07T00:00:00.000Z',
+      }),
+    ).toMatchObject({
+      sessionStartFallbackMode: 'LIVE',
+      sessionStartFallbackProfileId: '25fc121f-c69a-4050-9bda-6def1424f45d',
+      sessionStartFallbackAllowAllProfiles: false,
+      sessionStartFallbackLiveNotBefore: new Date('2026-09-07T00:00:00.000Z'),
+    });
   });
 
   it('runs live pipelines and due monitoring from the same singleton', async () => {

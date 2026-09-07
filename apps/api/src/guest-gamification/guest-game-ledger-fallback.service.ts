@@ -128,6 +128,12 @@ export class GuestGameLedgerFallbackService {
   ): Promise<GuestGameLedgerFallbackRunResult> {
     const mode = fallbackMode(dto.mode);
     const factTypes = requestedFallbackFactTypes(dto.factTypes, mode);
+    const supportsPlayTime = factTypes.some((factType) =>
+      isPlayTimeFactType(factType),
+    );
+    const supportsSessionStart = factTypes.some((factType) =>
+      isSessionStartFactType(factType),
+    );
     const limit = boundedInteger(dto.limit, 30, 1, 100);
     const graceMs = boundedInteger(dto.graceMs, 60_000, 15_000, 10 * 60_000);
     const claimLeaseMs = boundedInteger(
@@ -144,6 +150,8 @@ export class GuestGameLedgerFallbackService {
     const liveNotBefore = validDate(dto.liveNotBefore);
     const missionsAllowAllProfiles = dto.missionsAllowAllProfiles === true;
     const playTimeAllowAllProfiles = dto.playTimeAllowAllProfiles === true;
+    const sessionStartProfileCanary =
+      supportsSessionStart && !supportsPlayTime && Boolean(profileId);
     if (
       mode !== 'OFF' &&
       !tenantId &&
@@ -156,6 +164,7 @@ export class GuestGameLedgerFallbackService {
       mode === 'LIVE' &&
       (dto.allowAllTenants === true ||
         (!playTimeAllowAllProfiles &&
+          !sessionStartProfileCanary &&
           (!profileId || !seasonId || battlePassStep === null)) ||
         !liveNotBefore)
     ) {
@@ -317,11 +326,19 @@ export class GuestGameLedgerFallbackService {
     const supportsSessionStart = factTypes.some((factType) =>
       isSessionStartFactType(factType),
     );
+    const profileScopedSessionStart =
+      supportsSessionStart &&
+      !supportsPlayHour &&
+      Boolean(profileId) &&
+      !playTimeAllowAllProfiles;
     const genericClassificationRemediation =
       await remediateLegacyGenericSessionClassifications(this.prisma, {
         tenantId: user.tenantId,
         limit,
-        includeSessionStart: supportsSessionStart,
+        // Generic remediation mutates canonical events. A profile-scoped
+        // session-start canary must never let that tenant-wide maintenance
+        // path touch another guest before the scoped fact query runs.
+        includeSessionStart: supportsSessionStart && !profileScopedSessionStart,
         includePlayTime: supportsPlayHour,
       });
     if (genericClassificationRemediation.scanned > 0) {
@@ -413,7 +430,9 @@ export class GuestGameLedgerFallbackService {
           : allSeasons.filter((season) => season.id === seasonId)
         : allSeasons;
     const fallbackLootBoxes =
-      mode === 'LIVE' && !playTimeAllowAllProfiles
+      mode === 'LIVE' &&
+      !playTimeAllowAllProfiles &&
+      !(supportsSessionStart && !supportsPlayHour && Boolean(profileId))
         ? []
         : allLootBoxes.filter((lootBox) => {
             const triggerKind = normalizedString(lootBox.triggerKind);
@@ -1188,6 +1207,9 @@ export class GuestGameLedgerFallbackService {
                   battlePassStep,
                   missionsAllowAllProfiles,
                   playTimeAllowAllProfiles,
+                  sessionStartProfileCanary:
+                    isSessionStartFactType(fact.factType) &&
+                    fact.profileId === profileId,
                 }
               : null,
           );
@@ -3036,6 +3058,7 @@ function routedFallbackDryRun(
     battlePassStep: number | null;
     missionsAllowAllProfiles: boolean;
     playTimeAllowAllProfiles: boolean;
+    sessionStartProfileCanary: boolean;
   } | null = null,
 ): GuestGameDryRunResult {
   const rules = dryRun.rules.filter(
@@ -3047,6 +3070,8 @@ function routedFallbackDryRun(
       ) &&
       (!liveBattlePassScope ||
         liveBattlePassScope.playTimeAllowAllProfiles ||
+        (rule.kind === 'LOOT_BOX' &&
+          liveBattlePassScope.sessionStartProfileCanary) ||
         (rule.kind === 'MISSION' &&
           liveBattlePassScope.missionsAllowAllProfiles) ||
         (rule.kind === 'SEASON' &&

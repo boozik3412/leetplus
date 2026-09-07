@@ -19,6 +19,7 @@ import { EXACT_CANONICAL_OWNER_QUARANTINED_CODE } from './guest-game-exact-owner
 import {
   buildGuestGameOriginKey,
   buildGuestGamePhysicalProgressIdentity,
+  buildGuestGamePhysicalSessionStartIdentity,
 } from './guest-game-origin-key';
 import {
   canonicalGuestGameJsonFingerprint,
@@ -207,6 +208,10 @@ function createPrismaMock() {
           count: where?.attempts?.gte ? 0 : 1,
         }),
       ),
+    },
+    guestGameOriginReceipt: {
+      findUnique: jest.fn(),
+      upsert: jest.fn(),
     },
     guestGameRewardEffect: {
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -481,6 +486,492 @@ function createService(
     ),
   };
 }
+
+describe('exact typed session-start reconciliation', () => {
+  it('accepts one exact package start only with its completed operator receipt', async () => {
+    const { service, prisma } = createService();
+    const eventId = 'event-exact-session-start';
+    const sourceFactId = 'fact-exact-session-start';
+    const sessionExternalId = 'session-exact-session-start';
+    const gameActivatedAt = new Date(now.getTime() - 60_000);
+    const physicalIdentity = buildGuestGamePhysicalSessionStartIdentity({
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId,
+      eventType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+    });
+    expect(physicalIdentity).not.toBeNull();
+    const originKey = physicalIdentity!.key;
+    const event = {
+      id: eventId,
+      profileId: 'profile-1',
+      guestId: 'guest-1',
+      eventType: 'SESSION_START',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      externalId: `guest-game:GUEST_SESSION:SESSION_START:${sessionExternalId}`,
+      occurredAt: now,
+      xpDelta: 0,
+      payload: {
+        processSchemaVersion: 2,
+        source: 'guest_gamification_process_event',
+        sourceFactId,
+        sourceFactKind: 'GUEST_SESSION',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        sourceKind: 'GUEST_SESSION',
+        sessionExternalId,
+        store: { id: 'store-1' },
+        input: {
+          sessionType: 'PACKAGE_OR_SUBSCRIPTION',
+          sessionPacket: true,
+        },
+      },
+    };
+    const fact = {
+      id: sourceFactId,
+      updatedAt: now,
+      profileId: 'profile-1',
+      guestId: 'guest-1',
+      storeId: 'store-1',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      externalGuestId: 'external-guest-1',
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId,
+      factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+      happenedAt: now,
+    };
+    const receipt = {
+      factId: sourceFactId,
+      eventId,
+      eventType: 'SESSION_START',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      policy: 'EXACT_OPERATOR_CANONICALIZATION',
+      status: 'PROCESSED',
+      claimedSource: 'EXACT_OPERATOR_CANONICALIZATION',
+    };
+    prisma.$queryRaw
+      .mockResolvedValueOnce([event])
+      .mockResolvedValueOnce([fact])
+      .mockResolvedValueOnce([
+        {
+          ticketId: 'ticket-1',
+          ticketNumber: 'LP-BUG-TEST',
+          ticketStatus: 'IN_PROGRESS',
+          ticketProfileId: 'profile-1',
+          ticketGuestId: 'guest-1',
+          ticketStoreId: 'store-1',
+          profileStatus: 'ACTIVE',
+          profileGuestId: 'guest-1',
+          gameActivatedAt,
+          guestDisabled: false,
+          guestExternalProvider: IntegrationProvider.LANGAME,
+          guestExternalDomain: 'club-1',
+          guestExternalId: 'external-guest-1',
+          storeActive: true,
+          storeExternalDomain: 'club-1',
+          storeTimeZone: 'Europe/Samara',
+        },
+      ])
+      .mockResolvedValueOnce([receipt])
+      .mockResolvedValueOnce([fact]);
+    prisma.guestGameXpPosting.findUnique.mockResolvedValue(null);
+
+    const result = await (service as any).persistExactReconciliationEffects(
+      user,
+      noRewardDryRunResult({
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        input: {
+          sessionType: 'PACKAGE_OR_SUBSCRIPTION',
+          sessionPacket: true,
+        },
+      }),
+      eventId,
+      'profile-1',
+      'guest-1',
+      originKey,
+      {
+        sourceFactId,
+        sourceFactUpdatedAt: now,
+        physicalSessionKey: physicalIdentity!.key,
+        supportRecoveryAuthority: {
+          ticketId: 'ticket-1',
+          ticketNumber: 'LP-BUG-TEST',
+          ticketStatus: 'IN_PROGRESS',
+          gameActivatedAt,
+          storeTimeZone: 'Europe/Samara',
+        },
+        rules: [],
+      },
+      'EXACT_SESSION_START',
+    );
+
+    expect(result).toMatchObject({
+      appliedXpDelta: 0,
+      intentIds: [],
+      physicalSessionKey: physicalIdentity!.key,
+      sourceFactId,
+      ownerReconciliation: { status: 'UNCHANGED' },
+    });
+    expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameXpPosting.create).not.toHaveBeenCalled();
+    expect(prisma.guestGameEvent.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: eventId },
+        data: {
+          payload: expect.objectContaining({
+            exactReconciliationPlan: expect.objectContaining({
+              reconciliationKind: 'EXACT_SESSION_START',
+              sourceFactId,
+              expectedXpDelta: 0,
+              rules: [],
+              rewardIntents: [],
+            }),
+          }),
+        },
+      }),
+    );
+  });
+
+  it('rejects a support recovery when its ticket closes before the effect transaction', async () => {
+    const { service, prisma } = createService();
+    const eventId = 'event-closed-support-ticket';
+    const sourceFactId = 'fact-closed-support-ticket';
+    const sessionExternalId = 'session-closed-support-ticket';
+    const gameActivatedAt = new Date(now.getTime() - 60_000);
+    const physicalIdentity = buildGuestGamePhysicalSessionStartIdentity({
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId,
+      eventType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+    });
+    expect(physicalIdentity).not.toBeNull();
+    const originKey = physicalIdentity!.key;
+    prisma.$queryRaw
+      .mockResolvedValueOnce([
+        {
+          id: eventId,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          eventType: 'SESSION_START',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: `guest-game:GUEST_SESSION:SESSION_START:${sessionExternalId}`,
+          occurredAt: now,
+          xpDelta: 0,
+          payload: {},
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: sourceFactId,
+          updatedAt: now,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          storeId: 'store-1',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalGuestId: 'external-guest-1',
+          sourceKind: 'GUEST_SESSION',
+          sessionExternalId,
+          factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+          happenedAt: now,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          ticketId: 'ticket-1',
+          ticketNumber: 'LP-BUG-TEST',
+          ticketStatus: 'CLOSED',
+          ticketProfileId: 'profile-1',
+          ticketGuestId: 'guest-1',
+          ticketStoreId: 'store-1',
+          profileStatus: 'ACTIVE',
+          profileGuestId: 'guest-1',
+          gameActivatedAt,
+          guestDisabled: false,
+          guestExternalProvider: IntegrationProvider.LANGAME,
+          guestExternalDomain: 'club-1',
+          guestExternalId: 'external-guest-1',
+          storeActive: true,
+          storeExternalDomain: 'club-1',
+          storeTimeZone: 'Europe/Samara',
+        },
+      ]);
+
+    await expect(
+      (service as any).persistExactReconciliationEffects(
+        user,
+        noRewardDryRunResult({ eventType: 'SESSION_START' }),
+        eventId,
+        'profile-1',
+        'guest-1',
+        originKey,
+        {
+          sourceFactId,
+          sourceFactUpdatedAt: now,
+          physicalSessionKey: physicalIdentity!.key,
+          supportRecoveryAuthority: {
+            ticketId: 'ticket-1',
+            ticketNumber: 'LP-BUG-TEST',
+            ticketStatus: 'IN_PROGRESS',
+            gameActivatedAt,
+            storeTimeZone: 'Europe/Samara',
+          },
+          rules: [],
+        },
+        'EXACT_SESSION_START',
+      ),
+    ).rejects.toThrow(
+      'support ticket, profile, guest or store changed before recovery effects',
+    );
+
+    const authoritySql = (
+      prisma.$queryRaw.mock.calls[2]?.[0] as { strings?: readonly string[] }
+    ).strings?.join(' ');
+    expect(authoritySql).toContain('FOR UPDATE OF t, p, g, s');
+    expect(prisma.guestGameEvent.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameXpPosting.create).not.toHaveBeenCalled();
+    expect(prisma.guestGameRewardIntent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('leaves zero canonical rows when the ticket closes before the full apply path', async () => {
+    const { service, prisma } = createService();
+    const platformUser = {
+      ...user,
+      isPlatformAdmin: true,
+      platformTenantContext: true,
+    };
+    const sourceFactId = 'fact-closed-before-canonicalization';
+    const sessionExternalId = 'session-closed-before-canonicalization';
+    const gameActivatedAt = new Date(now.getTime() - 60_000);
+    const physicalIdentity = buildGuestGamePhysicalSessionStartIdentity({
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId,
+      eventType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+    });
+    expect(physicalIdentity).not.toBeNull();
+    const profile = profileFixture();
+    jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+      profile,
+      profileCreated: false,
+    });
+    jest
+      .spyOn(service as any, 'resolveProfileIdentityGuestIds')
+      .mockResolvedValue(['guest-1']);
+    jest.spyOn(service, 'dryRun').mockResolvedValue(
+      noRewardDryRunResult({
+        eventType: 'SESSION_START',
+        occurredAt: now.toISOString(),
+        input: {
+          sessionType: 'PACKAGE_OR_SUBSCRIPTION',
+          sessionPacket: true,
+          sessionMinutes: 0,
+        },
+      }),
+    );
+    jest.spyOn(service as any, 'buildEventData').mockResolvedValue({
+      tenantId: user.tenantId,
+      profileId: profile.id,
+      guestId: 'guest-1',
+      eventType: 'SESSION_START',
+      source: 'API_IMPORT',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      externalId: `guest-game:GUEST_SESSION:SESSION_START:${sessionExternalId}`,
+      originKey: physicalIdentity!.key,
+      xpDelta: 0,
+      occurredAt: now,
+      payload: {},
+    });
+    prisma.guest.findFirst.mockResolvedValue({ id: 'guest-1' });
+    prisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: sourceFactId,
+          updatedAt: now,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          storeId: 'store-1',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalGuestId: 'external-guest-1',
+          sourceKind: 'GUEST_SESSION',
+          sessionExternalId,
+          factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+          happenedAt: now,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          ticketId: 'ticket-1',
+          ticketNumber: 'LP-BUG-TEST',
+          ticketStatus: 'CLOSED',
+          ticketProfileId: 'profile-1',
+          ticketGuestId: 'guest-1',
+          ticketStoreId: 'store-1',
+          profileStatus: 'ACTIVE',
+          profileGuestId: 'guest-1',
+          gameActivatedAt,
+          guestDisabled: false,
+          guestExternalProvider: IntegrationProvider.LANGAME,
+          guestExternalDomain: 'club-1',
+          guestExternalId: 'external-guest-1',
+          storeActive: true,
+          storeExternalDomain: 'club-1',
+          storeTimeZone: 'Europe/Samara',
+        },
+      ]);
+
+    await expect(
+      service.processEvent(
+        platformUser,
+        {
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          storeId: 'store-1',
+          eventType: 'SESSION_START',
+          occurredAt: now.toISOString(),
+          sessionType: 'PACKAGE_OR_SUBSCRIPTION',
+          sessionPacket: true,
+          sessionMinutes: 0,
+          sourceFactId,
+          sourceFactKind: 'GUEST_SESSION',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: sessionExternalId,
+          sourceKind: 'GUEST_SESSION',
+          sessionExternalId,
+          activeRulesOnly: true,
+          suppressLootBoxRewards: true,
+          payload: { supportRewardRecovery: true },
+        },
+        {
+          allowedRuleIds: [],
+          evaluationMode: 'LIVE_LEDGER_FALLBACK',
+          evaluatorVersion: 'support-reward-recovery-canonical-v1',
+          materializeRewards: false,
+          originKey: physicalIdentity!.key,
+          suppressLedgerShadow: true,
+          supportRecoveryCanonicalizationScope: {
+            exactReconciliationScope: {
+              sourceFactId,
+              sourceFactUpdatedAt: now,
+              physicalSessionKey: physicalIdentity!.key,
+              supportRecoveryAuthority: {
+                ticketId: 'ticket-1',
+                ticketNumber: 'LP-BUG-TEST',
+                ticketStatus: 'IN_PROGRESS',
+                gameActivatedAt,
+                storeTimeZone: 'Europe/Samara',
+              },
+              rules: [
+                {
+                  ruleKind: 'LOOT_BOX',
+                  ruleId: 'loot-box-1',
+                  battlePassStep: null,
+                  ruleUpdatedAt: now,
+                },
+              ],
+            },
+            planDigest: 'a'.repeat(64),
+            dependency: null,
+          },
+        },
+      ),
+    ).rejects.toThrow(
+      'support ticket, profile, guest or store changed before recovery effects',
+    );
+
+    const authoritySql = (
+      prisma.$queryRaw.mock.calls[2]?.[0] as { strings?: readonly string[] }
+    ).strings?.join(' ');
+    expect(authoritySql).toContain('FOR UPDATE OF t, p, g, s');
+    expect(prisma.guestGameEvent.create).not.toHaveBeenCalled();
+    expect(prisma.guestGameOriginReceipt.upsert).not.toHaveBeenCalled();
+    expect(prisma.guestGameAuditEvent.create).not.toHaveBeenCalled();
+    expect(prisma.guestGameRewardIntent.upsert).not.toHaveBeenCalled();
+    expect(prisma.guestGameEntitlement.upsert).not.toHaveBeenCalled();
+    expect(prisma.guestGameXpPosting.create).not.toHaveBeenCalled();
+    expect(prisma.guestGameRewardWalletItem.upsert).not.toHaveBeenCalled();
+    expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a generic start marker from the exact typed operator path', async () => {
+    const { service, prisma } = createService();
+    const eventId = 'event-generic-session-start';
+    const sourceFactId = 'fact-generic-session-start';
+    const sessionExternalId = 'session-generic-session-start';
+    const physicalIdentity = buildGuestGamePhysicalSessionStartIdentity({
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId,
+      eventType: 'SESSION_STARTED',
+    });
+    expect(physicalIdentity).not.toBeNull();
+    prisma.$queryRaw
+      .mockResolvedValueOnce([
+        {
+          id: eventId,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          eventType: 'SESSION_START',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: `guest-game:GUEST_SESSION:SESSION_START:${sessionExternalId}`,
+          occurredAt: now,
+          xpDelta: 0,
+          payload: {},
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: sourceFactId,
+          updatedAt: now,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          storeId: 'store-1',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalGuestId: 'external-guest-1',
+          sourceKind: 'GUEST_SESSION',
+          sessionExternalId,
+          factType: 'SESSION_STARTED',
+          happenedAt: now,
+        },
+      ]);
+
+    await expect(
+      (service as any).persistExactReconciliationEffects(
+        user,
+        noRewardDryRunResult({ eventType: 'SESSION_START' }),
+        eventId,
+        'profile-1',
+        'guest-1',
+        physicalIdentity!.key,
+        {
+          sourceFactId,
+          sourceFactUpdatedAt: now,
+          physicalSessionKey: physicalIdentity!.key,
+          rules: [],
+        },
+        'EXACT_SESSION_START',
+      ),
+    ).rejects.toThrow('exact typed session-start fact');
+    expect(prisma.guestGameEvent.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
+  });
+});
 
 describe('promo banner media migration', () => {
   it('moves a legacy inline image into the media store before returning cards', async () => {

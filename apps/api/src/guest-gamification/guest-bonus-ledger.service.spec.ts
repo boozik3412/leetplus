@@ -1486,7 +1486,7 @@ describe('GuestBonusLedgerService', () => {
     ).not.toContain('79992223344');
   });
 
-  it('cancels approved rewards for profiles already marked as staff tests when accrual is explicitly disabled', async () => {
+  it('queues approved staff rewards even when the legacy accrual flag is false', async () => {
     const { service, prisma, secretEncryptionService } = createService({
       GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED: 'false',
     });
@@ -1514,6 +1514,7 @@ describe('GuestBonusLedgerService', () => {
         },
       },
     ]);
+    prisma.guestBonusLedgerEntry.createMany.mockResolvedValue({ count: 1 });
 
     const result = await service.queueApprovedRewards(user, {
       limit: 1,
@@ -1522,17 +1523,29 @@ describe('GuestBonusLedgerService', () => {
 
     expect(result).toMatchObject({
       checkedRewards: 1,
-      queued: 0,
-      skipped: 1,
+      queued: 1,
+      skipped: 0,
       items: [
         expect.objectContaining({
           rewardId: 'reward-staff-test',
-          status: 'SKIPPED',
-          reason: expect.stringContaining('тест сотрудника'),
+          status: 'QUEUED',
+          reason: expect.stringContaining('общих условиях'),
         }),
       ],
     });
-    expect(prisma.guestBonusLedgerEntry.createMany).not.toHaveBeenCalled();
+    expect(prisma.guestBonusLedgerEntry.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          rewardId: 'reward-staff-test',
+          status: 'PENDING',
+          metadata: expect.objectContaining({
+            staffTestReason: 'STAFF_PHONE_MATCH',
+            staffRewardsPolicy: 'ALLOW',
+          }),
+        }),
+      ],
+      skipDuplicates: true,
+    });
     expect(prisma.guestGameProfile.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'profile-staff', tenantId: user.tenantId },
@@ -1542,16 +1555,7 @@ describe('GuestBonusLedgerService', () => {
         }),
       }),
     );
-    expect(prisma.guestGameReward.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          tenantId: user.tenantId,
-          id: { in: ['reward-staff-test'] },
-          status: 'APPROVED',
-        }),
-        data: { status: 'CANCELED' },
-      }),
-    );
+    expect(prisma.guestGameReward.updateMany).not.toHaveBeenCalled();
   });
 
   it('queues approved staff test rewards by default', async () => {
@@ -1595,7 +1599,7 @@ describe('GuestBonusLedgerService', () => {
         expect.objectContaining({
           rewardId: 'reward-staff-test',
           status: 'QUEUED',
-          reason: expect.stringContaining('всех профилей'),
+          reason: expect.stringContaining('общих условиях'),
         }),
       ],
     });
@@ -1615,10 +1619,7 @@ describe('GuestBonusLedgerService', () => {
           status: 'PENDING',
           metadata: expect.objectContaining({
             staffTestReason: 'STAFF_PHONE_MATCH',
-            staffTestAccrualOverride: true,
-            staffTestRewardAccrualEnabled: true,
-            staffTestRewardAccrualEnv:
-              'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED',
+            staffRewardsPolicy: 'ALLOW',
           }),
         }),
       ],
@@ -1627,7 +1628,7 @@ describe('GuestBonusLedgerService', () => {
     expect(prisma.guestGameReward.updateMany).not.toHaveBeenCalled();
   });
 
-  it('detects staff phones before canceling rewards when staff test accrual is explicitly disabled', async () => {
+  it('detects staff phones without excluding their rewards when the legacy flag is false', async () => {
     const { service, prisma, secretEncryptionService } = createService({
       GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED: 'false',
     });
@@ -1656,6 +1657,7 @@ describe('GuestBonusLedgerService', () => {
         },
       },
     ]);
+    prisma.guestBonusLedgerEntry.createMany.mockResolvedValue({ count: 1 });
 
     const result = await service.queueApprovedRewards(user, {
       limit: 1,
@@ -1664,10 +1666,22 @@ describe('GuestBonusLedgerService', () => {
 
     expect(result).toMatchObject({
       checkedRewards: 1,
-      queued: 0,
-      skipped: 1,
+      queued: 1,
+      skipped: 0,
     });
-    expect(prisma.guestBonusLedgerEntry.createMany).not.toHaveBeenCalled();
+    expect(prisma.guestBonusLedgerEntry.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          rewardId: 'reward-staff-phone',
+          status: 'PENDING',
+          metadata: expect.objectContaining({
+            staffTestReason: 'STAFF_PHONE_MATCH',
+            staffRewardsPolicy: 'ALLOW',
+          }),
+        }),
+      ],
+      skipDuplicates: true,
+    });
     expect(prisma.guestGameProfile.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'profile-staff-phone', tenantId: user.tenantId },
@@ -1677,15 +1691,7 @@ describe('GuestBonusLedgerService', () => {
         }),
       }),
     );
-    expect(prisma.guestGameReward.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          id: { in: ['reward-staff-phone'] },
-          status: 'APPROVED',
-        }),
-        data: { status: 'CANCELED' },
-      }),
-    );
+    expect(prisma.guestGameReward.updateMany).not.toHaveBeenCalled();
   });
 
   it('queues detected staff phone rewards by default', async () => {
@@ -1743,7 +1749,7 @@ describe('GuestBonusLedgerService', () => {
           status: 'PENDING',
           metadata: expect.objectContaining({
             staffTestReason: 'STAFF_PHONE_MATCH',
-            staffTestAccrualOverride: true,
+            staffRewardsPolicy: 'ALLOW',
           }),
         }),
       ],
@@ -2212,7 +2218,7 @@ describe('GuestBonusLedgerService', () => {
     expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
   });
 
-  it('does not call Langame when a profile becomes a blocked staff test after DISPATCHING', async () => {
+  it('continues Langame dispatch when a profile becomes a staff profile after DISPATCHING', async () => {
     const {
       service,
       prisma,
@@ -2238,6 +2244,20 @@ describe('GuestBonusLedgerService', () => {
         staffTestReason: 'STAFF_PHONE_MATCH',
       });
     secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+    langameSettingsService.resolveTenantAccess.mockResolvedValue({
+      apiKey: 'request-token',
+      sources: [
+        {
+          domain: 'club-1',
+          baseUrl: 'https://46.langamepro.ru/public_api',
+        },
+      ],
+    });
+    langameClient.adjustGuestBalanceByPhone.mockResolvedValue({
+      status: true,
+      phone: '79991112233',
+    });
+    jest.spyOn(service as any, 'confirmEntry').mockResolvedValue(null);
 
     await expect(
       (service as any).processClaimedEntry(user.id, entry, {
@@ -2248,29 +2268,13 @@ describe('GuestBonusLedgerService', () => {
       }),
     ).resolves.toMatchObject({
       ledgerEntryId: entry.id,
-      status: 'CANCELED',
+      status: 'CONFIRMED',
     });
 
     expect(prisma.guestGameProfile.findFirst).toHaveBeenCalledTimes(2);
-    expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          id: entry.id,
-          status: 'DISPATCHING',
-          attempts: entry.attempts,
-          claimGeneration: entry.claimGeneration,
-          lockedAt: expect.any(Date),
-          executionRevision: entry.executionRevision,
-        }),
-        data: expect.objectContaining({
-          status: 'CANCELED',
-          errorCode: 'STAFF_TEST_PROFILE',
-        }),
-      }),
-    );
-    expect(tenantExecutionAdmission.evaluatePermit).not.toHaveBeenCalled();
-    expect(langameSettingsService.resolveTenantAccess).not.toHaveBeenCalled();
-    expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
+    expect(tenantExecutionAdmission.evaluatePermit).toHaveBeenCalled();
+    expect(langameSettingsService.resolveTenantAccess).toHaveBeenCalled();
+    expect(langameClient.adjustGuestBalanceByPhone).toHaveBeenCalled();
   });
 
   it('does not call Langame when the DISPATCHING claim or tenant revision changes before provider invocation', async () => {
@@ -3281,10 +3285,9 @@ describe('GuestBonusLedgerService', () => {
     },
   );
 
-  it('cancels claimed ledger entries for staff test profiles before Langame dispatch when accrual is explicitly disabled', async () => {
+  it('dispatches staff rewards even when the legacy accrual flag is false', async () => {
     const { service, prisma, langameClient, secretEncryptionService } =
       createService();
-    const tx = ledgerTransactionMock();
     const entry = ledgerEntry({
       id: 'ledger-staff-test',
       profileId: 'profile-staff',
@@ -3310,7 +3313,11 @@ describe('GuestBonusLedgerService', () => {
       staffTestReason: 'STAFF_PHONE_MATCH',
     });
     secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
-    prisma.$transaction.mockImplementation((callback) => callback(tx as any));
+    langameClient.adjustGuestBalanceByPhone.mockResolvedValue({
+      status: true,
+      phone: '79991112233',
+    });
+    jest.spyOn(service as any, 'confirmEntry').mockResolvedValue(null);
 
     const result = await (service as any).processClaimedEntry(
       user.id,
@@ -3327,104 +3334,18 @@ describe('GuestBonusLedgerService', () => {
     expect(result).toMatchObject({
       ledgerEntryId: 'ledger-staff-test',
       rewardId: 'reward-staff',
-      status: 'CANCELED',
-      note: expect.stringContaining('тест сотрудника'),
+      status: 'CONFIRMED',
     });
-    expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
-    expect(tx.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          id: 'ledger-staff-test',
-          tenantId: user.tenantId,
-          status: 'PROCESSING',
-          attempts: entry.attempts,
-          claimGeneration: entry.claimGeneration,
-          lockedAt: entry.lockedAt,
-          executionRevision: entry.executionRevision,
-        },
-        data: expect.objectContaining({
-          status: 'CANCELED',
-          errorCode: 'STAFF_TEST_PROFILE',
-          metadata: expect.objectContaining({
-            staffTestBlocked: true,
-            staffTestReason: 'STAFF_PHONE_MATCH',
-          }),
-        }),
-      }),
-    );
-    expect(tx.guestGameReward.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          id: 'reward-staff',
-          tenantId: user.tenantId,
-          status: { in: ['PENDING', 'APPROVED'] },
-        }),
-        data: { status: 'CANCELED' },
-      }),
-    );
-    expect(tx.guestGameProfile.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'profile-staff', tenantId: user.tenantId },
-        data: expect.objectContaining({
-          isStaffTest: true,
-          staffTestReason: 'STAFF_PHONE_MATCH',
-        }),
-      }),
-    );
-  });
-
-  it('does not let a stale staff-test worker cancel a newer claim generation', async () => {
-    const { service, prisma, langameClient, secretEncryptionService } =
-      createService();
-    const tx = ledgerTransactionMock();
-    const entry = ledgerEntry({
-      id: 'ledger-stale-staff-test',
-      profileId: 'profile-staff',
-      rewardId: 'reward-staff',
-      attempts: 1,
-    });
-    const access = {
-      apiKey: 'request-token',
-      sources: [
-        {
-          domain: 'club-1',
-          baseUrl: 'https://46.langamepro.ru/public_api',
-        },
-      ],
-    };
-
-    prisma.guest.findFirst.mockResolvedValue({
-      phoneEncrypted: 'encrypted-phone',
-      phoneMasked: '+7 *** **-33',
-    });
-    prisma.guestGameProfile.findFirst.mockResolvedValue({
-      isStaffTest: true,
-      staffTestReason: 'STAFF_PHONE_MATCH',
-    });
-    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
-    tx.guestBonusLedgerEntry.updateMany.mockResolvedValueOnce({ count: 0 });
-    prisma.$transaction.mockImplementation((callback) => callback(tx as any));
-
-    const result = await (service as any).processClaimedEntry(
+    expect(langameClient.adjustGuestBalanceByPhone).toHaveBeenCalled();
+    expect((service as any).confirmEntry).toHaveBeenCalledWith(
       user.id,
       entry,
-      {
-        ready: true,
-        path: '/master_api/guests/balance/phone',
-        maxAttempts: 3,
-        staffTestRewardAccrualEnabled: false,
-      },
-      access,
+      expect.objectContaining({
+        staffTestReason: 'STAFF_PHONE_MATCH',
+        staffRewardsPolicy: 'ALLOW',
+      }),
+      expect.objectContaining({ status: true }),
     );
-
-    expect(result).toMatchObject({
-      ledgerEntryId: 'ledger-stale-staff-test',
-      status: 'BLOCKED',
-      note: expect.stringContaining('поздняя отмена'),
-    });
-    expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
-    expect(tx.guestGameReward.updateMany).not.toHaveBeenCalled();
-    expect(tx.guestGameProfile.updateMany).not.toHaveBeenCalled();
   });
 
   it('dispatches staff test ledger entries by default', async () => {
@@ -3493,10 +3414,7 @@ describe('GuestBonusLedgerService', () => {
       expect.objectContaining({
         phone: '+7 *** **-33',
         staffTestReason: 'STAFF_PHONE_MATCH',
-        staffTestAccrualOverride: true,
-        staffTestRewardAccrualEnabled: true,
-        staffTestRewardAccrualEnv:
-          'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED',
+        staffRewardsPolicy: 'ALLOW',
       }),
       expect.objectContaining({
         status: true,

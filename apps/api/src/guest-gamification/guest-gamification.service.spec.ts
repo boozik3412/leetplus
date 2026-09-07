@@ -18968,7 +18968,7 @@ describe('GuestGamificationService', () => {
       );
     });
 
-    it('creates process rewards as canceled for staff test profiles when accrual is explicitly disabled', async () => {
+    it('allows process rewards for staff profiles even when the legacy accrual flag is false', async () => {
       const { service, prisma, configService } = createService();
 
       configService.get.mockImplementation((key: string) =>
@@ -18982,8 +18982,8 @@ describe('GuestGamificationService', () => {
       });
       jest.spyOn(service as any, 'createReward').mockResolvedValue(
         rewardResult({
-          status: 'CANCELED',
-          walletState: 'CANCELED',
+          status: 'APPROVED',
+          walletState: 'PENDING',
         }),
       );
 
@@ -19005,13 +19005,13 @@ describe('GuestGamificationService', () => {
       expect((service as any).createReward).toHaveBeenCalledWith(
         user,
         expect.objectContaining({
-          status: 'CANCELED',
+          status: 'APPROVED',
           rewardType: 'BONUS',
           rewardAmount: 50,
-          note: expect.stringContaining('тест сотрудника'),
+          note: expect.stringContaining('общих условиях'),
           evidence: expect.objectContaining({
-            staffTestBlocked: true,
             staffTestReason: 'STAFF_PHONE_MATCH',
+            staffRewardsPolicy: 'ALLOW',
           }),
         }),
         expect.any(Object),
@@ -19053,14 +19053,10 @@ describe('GuestGamificationService', () => {
           status: 'APPROVED',
           rewardType: 'BONUS',
           rewardAmount: 50,
-          note: expect.stringContaining('всех профилей'),
+          note: expect.stringContaining('общих условиях'),
           evidence: expect.objectContaining({
-            staffTestBlocked: false,
             staffTestReason: 'STAFF_PHONE_MATCH',
-            staffTestAccrualOverride: true,
-            staffTestRewardAccrualEnabled: true,
-            staffTestRewardAccrualEnv:
-              'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED',
+            staffRewardsPolicy: 'ALLOW',
           }),
         }),
         expect.any(Object),

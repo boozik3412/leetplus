@@ -17,6 +17,15 @@
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
 | Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`, canary 05.09 обработал `1/1` INTERNAL tenant; daily timer enabled/active, следующий scheduled run 07.09               |
 
+Source-разбор `LP-BUG-A56627F5` подтвердил, что отменённые награды не были
+ошибкой связи профилей: единственный профиль гостя был отмечен как staff/test
+по `LANGAME_STAFF_PHONE_MATCH`, после чего reward creation, bonus-ledger queue
+и pre-dispatch gate могли переводить его награды в `CANCELED`. Новый candidate
+делает staff/test только audit-классификацией: сотрудники участвуют и получают
+награды на общих условиях, а metadata фиксирует `staffRewardsPolicy=ALLOW`.
+Legacy env-флаг блокировки удалён. Исторические отмены и компенсация конкретному
+гостю требуют отдельного bounded production repair после exact-SHA rollout.
+
 Source candidate 07.09 дополняет карточки защищённой очереди поддержки полным
 ФИО и телефоном гостя. Production-проверка `LP-BUG-A56627F5` подтвердила, что
 оба значения уже существуют в канонических зашифрованных профилях; дефект был

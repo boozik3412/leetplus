@@ -28,6 +28,7 @@ import { GuestGamificationScheduledController } from './guest-gamification-sched
 import { GuestGamificationStatisticsService } from './guest-gamification-statistics.service';
 import { GuestGamificationController } from './guest-gamification.controller';
 import { GuestGamificationService } from './guest-gamification.service';
+import { PlatformGuestGameSupportRecoveryController } from './platform-guest-game-support-recovery.controller';
 
 export const GUEST_GAMIFICATION_PROVIDERS = [
   GuestGamificationService,
@@ -67,6 +68,7 @@ export const GUEST_GAMIFICATION_EXPORTS = [
     GuestGamificationScheduledController,
     GuestGameMediaController,
     GuestGamePublicMediaController,
+    PlatformGuestGameSupportRecoveryController,
   ],
   providers: [...GUEST_GAMIFICATION_PROVIDERS],
   exports: [...GUEST_GAMIFICATION_EXPORTS],

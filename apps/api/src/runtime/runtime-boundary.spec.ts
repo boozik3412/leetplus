@@ -67,13 +67,20 @@ describe('split API runtime boundary', () => {
     expect(controllers).not.toContain(GuestGamePublicMediaController);
   });
 
-  it('keeps the platform support recovery controller out of the broad guest gamification module', () => {
-    const controllers = Reflect.getMetadata(
+  it('mounts platform support recovery in combined/corporate runtimes but not the public guest runtime', () => {
+    const combinedControllers = Reflect.getMetadata(
       MODULE_METADATA.CONTROLLERS,
       GuestGamificationModule,
     ) as unknown[];
+    const guestControllers = Reflect.getMetadata(
+      MODULE_METADATA.CONTROLLERS,
+      GuestRuntimeModule,
+    ) as unknown[];
 
-    expect(controllers).not.toContain(
+    expect(combinedControllers).toContain(
+      PlatformGuestGameSupportRecoveryController,
+    );
+    expect(guestControllers).not.toContain(
       PlatformGuestGameSupportRecoveryController,
     );
   });

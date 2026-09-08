@@ -1,23 +1,23 @@
 # LeetPlus open beta — текущее состояние на 08.09.2026
 
-| Поле                 | Состояние                                                                                                                                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Release decision     | `NO-GO` для внешнего доступа                                                                                                                                                                                  |
-| Production runtime   | healthy; active green `1cf42bb…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue `6aa452d5…` independently healthy                                                                                |
-| Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                                                                                                  |
-| Release authority    | runtime и production-control exact `1cf42bb…`; Fast `34203683926` и Full `34203683901` успешны, five-phase operation `6be461db…` завершён terminal receipt `c9cbf2c9…`                                      |
-| Runtime successor    | Оба worker timer enabled/active; activity `PARTIAL` автоматически продолжает cursor, ledger fallback работает в `LIVE`; worker pool `2`, activity limit `1`, timeout `15m`; API schedulers выключены          |
-| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                                                                                              |
-| Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                                                                                                      |
-| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                                                                                                      |
-| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                                                                                                   |
-| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                                                                                                 |
-| Offline/USB key      | исключён из beta critical path                                                                                                                                                                                |
-| Owner onboarding     | production: email-bound; source candidate: явный выбор EMAIL или одноразовой LINK, пользователь сам задаёт пароль                                                                                            |
-| Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect                                          |
-| Langame freshness    | audit storage repair применён; canary 07.09 принят на exact `1cf42bb…`; старый permit superseded, daily timer и bonus-ledger timer enabled/active                                                            |
-| Assortment dashboard | deployed exact `1cf42bb…`: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз работают на production; schema/route ownership не менялись                                               |
-| Guest profile owner  | source repair: exact active identity link с подтверждённым phone hash побеждает пустой legacy-дубль; cleanup без replay/reward effect ждёт общего exact-main rollout                                      |
+| Поле                 | Состояние                                                                                                                                                                                            |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Release decision     | `NO-GO` для внешнего доступа                                                                                                                                                                         |
+| Production runtime   | healthy; active exact `797001d5…`, `COMBINED`, bridge OFF, bug reporting LIVE; previous admitted `1cf42bb…` retained as independently healthy rollback                                               |
+| Prisma schema        | production exact `CURRENT_190/190`; migration `20260908090000_initial_owner_invite_link_mode` applied                                                                                                |
+| Release authority    | runtime и production-control exact `797001d5…`; Fast `34212764624` и Full `34212764559` успешны                                                                                                      |
+| Runtime successor    | Оба worker timer enabled/active; activity `PARTIAL` автоматически продолжает cursor, ledger fallback работает в `LIVE`; worker pool `2`, activity limit `1`, timeout `15m`; API schedulers выключены |
+| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                                                                                     |
+| Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                                                                                             |
+| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                                                                                             |
+| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                                                                                          |
+| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                                                                                        |
+| Offline/USB key      | исключён из beta critical path                                                                                                                                                                       |
+| Owner onboarding     | production: email-bound; source candidate: явный выбор EMAIL или одноразовой LINK, пользователь сам задаёт пароль                                                                                    |
+| Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect                                 |
+| Langame freshness    | daily и bonus-ledger timers enabled/active для всех admitted сетей платформы; authority привязана к exact `797001d5…`                                                                                |
+| Assortment dashboard | deployed exact `1cf42bb…`: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз работают на production; schema/route ownership не менялись                                        |
+| Guest profile owner  | exact-link repair deployed в `797001d5…`; source successor добавляет selected-domain поиск RU-вариантов подтверждённого телефона до создания профиля; reward replay запрещён                         |
 
 Production release `1cf42bb311aafa7f41ad7f42784463fe34c152c7` превращает
 `/assortment/dashboard` в ежедневный
@@ -61,6 +61,21 @@ tests `229/229`, lint и API build проходят. После admitted rollout
 repair деактивирует дубль/conflict-link, переносит только future-sync cursor
 ownership на canonical профиль и пишет audit; исторические activity/events не
 replay-ятся, перенос или повторное начисление запрещены.
+
+Второе обращение (`*3669`) выявило соседний registration defect уже после
+успешного Callcheck: predecessor искал existing profile только по одному
+literal phone hash, создавал свежий phone-only профиль для эквивалентного
+варианта номера, а club selection затем возвращался к старому Langame guest.
+Из-за этого `SESSION_START` и его физические facts получали разных profile
+owners, и клиент видел `409`. Source successor до profile create рассматривает
+RU-варианты `7/8/10 digits` только в selected Langame domain, переиспользует
+ровно одного existing guest owner и fail-closed отклоняет неоднозначность до
+любых mutations/effects. Targeted tests `218/218`, typecheck и lint проходят.
+Migration, route, secret, egress и worker authority не меняются; rollout ждёт
+нового exact-main admission. Для `*3669` допустим только bounded zero-reward
+repair одного технического события и его `14` zero-effect decisions с
+последующим `SUPERSEDED` пустого дубля; facts, raw, OTP, sync job, XP, rewards,
+entitlements, wallet, intents, deliveries и bonus ledger остаются нетронутыми.
 
 Source-разбор `LP-BUG-A56627F5` подтвердил, что отменённые награды не были
 ошибкой связи профилей: единственный профиль гостя был отмечен как staff/test

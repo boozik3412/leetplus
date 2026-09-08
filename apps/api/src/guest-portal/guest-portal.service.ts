@@ -3802,23 +3802,12 @@ export class GuestPortalService {
         challenge = persistedChallenge;
       }
 
-      const guest = challenge.guestId
-        ? await tx.guest.findFirst({
-            where: {
-              id: challenge.guestId,
-              tenantId: challenge.tenantId,
-              isDisabled: false,
-            },
-            select: {
-              id: true,
-              externalGuestId: true,
-              fullNameMasked: true,
-              phoneMasked: true,
-              emailMasked: true,
-            },
-          })
-        : null;
-      const existingProfile = await this.findRegistrationProfile(tx, challenge);
+      const { guest, profile: existingProfile } =
+        await this.findRegistrationIdentity(
+          tx,
+          challenge,
+          context.store.externalDomain,
+        );
       const profile = existingProfile
         ? await tx.guestGameProfile.update({
             where: { id: existingProfile.id },
@@ -4058,10 +4047,79 @@ export class GuestPortalService {
     };
   }
 
-  private async findRegistrationProfile(
+  private async findRegistrationIdentity(
     tx: Prisma.TransactionClient,
     challenge: GuestPortalOtpChallengeRegistration,
+    storeExternalDomain: string | null,
   ) {
+    const externalDomain = storeExternalDomain?.trim() || null;
+    const phoneHashes = this.guestPhoneHashCandidates(
+      challenge.phoneHash,
+      challenge,
+    );
+    const phoneHashWhere =
+      phoneHashes.length === 1
+        ? phoneHashes[0]
+        : {
+            in: phoneHashes,
+          };
+    const guestSelect = {
+      id: true,
+      externalGuestId: true,
+      fullNameMasked: true,
+      phoneMasked: true,
+      emailMasked: true,
+    } as const;
+    const scopedGuests = externalDomain
+      ? await tx.guest.findMany({
+          where: {
+            tenantId: challenge.tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain,
+            phoneHash: phoneHashWhere,
+            isDisabled: false,
+          },
+          orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
+          select: guestSelect,
+          take: 2,
+        })
+      : [];
+
+    if (scopedGuests.length > 1) {
+      throw new ConflictException(
+        'По подтвержденному телефону найдено несколько гостей Langame в выбранном клубе. Нужна ручная проверка администратора.',
+      );
+    }
+
+    const challengeGuest =
+      scopedGuests.length === 0 && challenge.guestId
+        ? await tx.guest.findFirst({
+            where: {
+              id: challenge.guestId,
+              tenantId: challenge.tenantId,
+              isDisabled: false,
+              ...(externalDomain ? { externalDomain } : {}),
+            },
+            select: guestSelect,
+          })
+        : null;
+    const guest = scopedGuests[0] ?? challengeGuest;
+
+    if (guest) {
+      const guestProfile = await tx.guestGameProfile.findFirst({
+        where: {
+          tenantId: challenge.tenantId,
+          guestId: guest.id,
+          status: 'ACTIVE',
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      if (guestProfile) {
+        return { guest, profile: guestProfile };
+      }
+    }
+
     if (challenge.profileId) {
       const profile = await tx.guestGameProfile.findFirst({
         where: {
@@ -4072,32 +4130,20 @@ export class GuestPortalService {
       });
 
       if (profile) {
-        return profile;
+        return { guest, profile };
       }
     }
 
-    if (challenge.guestId) {
-      const profile = await tx.guestGameProfile.findFirst({
-        where: {
-          tenantId: challenge.tenantId,
-          guestId: challenge.guestId,
-          status: 'ACTIVE',
-        },
-      });
-
-      if (profile) {
-        return profile;
-      }
-    }
-
-    return tx.guestGameProfile.findFirst({
+    const profile = await tx.guestGameProfile.findFirst({
       where: {
         tenantId: challenge.tenantId,
-        phoneHash: challenge.phoneHash,
+        phoneHash: phoneHashWhere,
         status: 'ACTIVE',
       },
       orderBy: { updatedAt: 'desc' },
     });
+
+    return { guest, profile };
   }
 
   async getSession(authorization: string | undefined) {

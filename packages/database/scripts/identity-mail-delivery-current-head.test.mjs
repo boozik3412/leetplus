@@ -26,7 +26,7 @@ const productionHistoryPreterminalManifestDigest =
 const workerAssertSourceDigest =
   "645feb480c46c42d7d8ca2dae07ec1c82f88264ac5d0e30d26593a8e566f3f66";
 const workerAssertDefinitionDigest =
-  "a48f6bf4e52306fcf476178c668a7b5bd130f9e957f16ca14d018e22154f43fc";
+  "29446cffe3c46a02cb6b776f2923511bb7981afa1047bcbe8a238bb83a3d8682";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -220,7 +220,7 @@ test("the active worker repository consumes the exact CURRENT190 receipt", async
   );
 });
 
-test("the legacy inventory pins the CURRENT187 worker function definition", async () => {
+test("the legacy inventory pins the CURRENT190 worker function definition", async () => {
   const inventory = await readFile(
     path.join(
       databaseRoot,

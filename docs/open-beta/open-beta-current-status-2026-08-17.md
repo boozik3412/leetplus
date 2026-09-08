@@ -16,7 +16,7 @@
 | Owner onboarding     | production CURRENT190: явный EMAIL или одноразовый LINK; пользователь сам задаёт пароль, LINK не сохраняется и не ставит письмо в outbox                                                              |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect                                 |
 | Langame freshness    | daily и bonus-ledger timers enabled/active; authority привязана к exact `def5174f…`, daily worker обходит `3/3` active domains текущего admitted INTERNAL tenant                                      |
-| Assortment dashboard | deployed exact `1cf42bb…`: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз работают на production; schema/route ownership не менялись                                        |
+| Assortment dashboard | входит в active `def5174f…`: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз работают; блок источников по умолчанию свёрнут, обновление всегда доступно                      |
 | Guest profile owner  | exact-link и verified-phone repairs deployed в `def5174f…`; `*6330`, `*3669` и остальные выявленные split owners исправлены, active structural остаток `0`, reward replay запрещён                     |
 | External Langame     | source target `CURRENT_191/191`: preview → revalidated atomic settings → exact-binding manual backfill; production GO и external unattended authority не выданы                                       |
 
@@ -29,7 +29,8 @@ Public и loopback readiness принимают `CURRENT_190/190`, unfinished mi
 для внешнего onboarding, но production остаётся на `def5174f…/CURRENT190` до
 отдельного admission и rollout.
 
-Production release `1cf42bb311aafa7f41ad7f42784463fe34c152c7` превращает
+Впервые выпущенный release `1cf42bb311aafa7f41ad7f42784463fe34c152c7` и
+текущий active `def5174f16f49212dd21d243cda89dffeff7837f` превращают
 `/assortment/dashboard` в ежедневный
 action center. Сервер рассчитывает состояние источников визитов, продаж,
 остатков, себестоимости и категорий; приоритетный список действий; OOS-риск,
@@ -41,13 +42,17 @@ receipt token. Если Langame не отдаёт поле, CSV продаж п�
 `Чек`, а UI показывает `SOURCE_UNAVAILABLE` без подмены покупки товарной
 операцией.
 
-Релиз не добавил migration, новый secret, egress, runtime или scheduler;
-production schema осталась `CURRENT_189/189`. Exact-main Fast `34203683926`
+Исходный релиз дашборда не добавил migration, новый secret, egress, runtime или
+scheduler; на момент его rollout production schema оставалась
+`CURRENT_189/189`. Exact-main Fast `34203683926`
 и Full `34203683901` успешны; пятифазный rollout operation `6be461db…`
 завершён receipt `c9cbf2c9…`. Daily Langame worker прошёл exact supersession,
 canary `2026-09-07` и stable timer `plan/apply/check` на новом release SHA;
-оба worker timer включены и активны. Решение внешнего beta остаётся `NO-GO`
-по независимым открытым gates.
+оба worker timer включены и активны. В active `def5174f…` подробные карточки
+пяти источников по умолчанию свёрнуты; заголовок раскрывает их без нового
+запроса, а отдельная кнопка «Обновить данные» всегда ведёт на `/sync`.
+Production QA на ширине 944 px подтвердил отсутствие горизонтального overflow.
+Решение внешнего beta остаётся `NO-GO` по независимым открытым gates.
 
 Production CURRENT190 добавил на `/administration` выбор доставки initial
 OWNER приглашения: «Отправка на почту» или «Ссылка без почты». В режиме LINK

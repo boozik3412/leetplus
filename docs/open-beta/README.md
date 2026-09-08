@@ -73,6 +73,12 @@ Langame domains текущего admitted INTERNAL tenant. Source target
 `CURRENT_191/191` для внешнего Langame onboarding не является production
 state до отдельного admission и rollout.
 
+Текущий assortment action center входит в этот же `def5174f…`: сводка качества
+источников остаётся видимой, а пять подробных карточек по умолчанию свёрнуты.
+Заголовок раскрывает их без нового запроса или перерасчёта, кнопка «Обновить
+данные» всегда ведёт на `/sync`. Полный UI и metric contract находится в
+[`docs/assortment-dashboard-metric-contract.md`](../assortment-dashboard-metric-contract.md).
+
 Исторические release-acceleration и recovery checkpoints ниже сохраняются как
 аудит эволюции системы; их старые слова `source`, `pending` или
 `inactive/disabled` не переопределяют текущий checkpoint выше. Актуальные

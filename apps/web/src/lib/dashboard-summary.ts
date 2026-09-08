@@ -59,8 +59,83 @@ export type DashboardMetricCalculation = {
   source: string;
   formula: string;
   grain: string;
-  state: "READY" | "NO_DATA" | "PARTIAL_COVERAGE";
+  state:
+    | "READY"
+    | "NO_DATA"
+    | "PARTIAL_COVERAGE"
+    | "SOURCE_UNAVAILABLE"
+    | "SOURCE_CONFLICT"
+    | "STALE";
   note: string | null;
+};
+
+export type DashboardAssortmentSourceHealth = {
+  key: "visits" | "sales" | "inventory" | "costs" | "categories";
+  label: string;
+  state: "FRESH" | "STALE" | "MISSING" | "FAILED" | "PARTIAL";
+  lastFactAt: string | null;
+  lastImportedAt: string | null;
+  coveragePercent: number | null;
+  detail: string;
+};
+
+export type DashboardAssortmentAction = {
+  key: string;
+  priority: number;
+  tone: "CRITICAL" | "WARNING" | "OPPORTUNITY" | "INFO";
+  title: string;
+  description: string;
+  metric: string;
+  impactRubles: number | null;
+  href: string;
+};
+
+export type DashboardReceiptMetrics = {
+  state: "READY" | "PARTIAL_COVERAGE" | "SOURCE_UNAVAILABLE" | "NO_DATA";
+  requiredField: "RECEIPT_OR_ORDER_ID";
+  reason: string;
+  coveragePercent: number | null;
+  coveredRevenuePercent: number | null;
+  purchaseCount: number | null;
+  averageCheck: number | null;
+  itemsPerCheck: number | null;
+  topBasketPair: {
+    firstProductName: string;
+    secondProductName: string;
+    receiptsCount: number;
+  } | null;
+};
+
+export type DashboardAssortmentForecastDay = {
+  date: string;
+  label: string;
+  revenue: number;
+};
+
+export type DashboardAssortmentForecast = {
+  state: "READY" | "NO_DATA" | "PARTIAL_COVERAGE";
+  confidence: "HIGH" | "MEDIUM" | "LOW";
+  horizonDays: 7;
+  historyDays: number;
+  revenue: number | null;
+  suggestedTargetRevenue: number | null;
+  targetUpliftPercent: 5;
+  oosRiskSkuCount: number;
+  lostRevenue: number | null;
+  recommendedOrderQuantity: number;
+  recoverableRevenue: number | null;
+  days: DashboardAssortmentForecastDay[];
+  reason: string | null;
+};
+
+export type DashboardAssortmentCoverageGaps = {
+  missingCostOperationCount: number;
+  missingCostRevenue: number;
+  missingStockSkuCount: number;
+  uncategorizedSkuCount: number;
+  uncategorizedRevenue: number;
+  uncategorizedRevenueSharePercent: number | null;
+  categoryNormalizationCandidateCount: number;
 };
 
 export type DashboardAssortmentDrivers = {
@@ -103,16 +178,16 @@ export type DashboardAssortmentGrowth = {
   revenue: DashboardGrowthMetric;
   drivers: DashboardAssortmentDrivers;
   opportunity: DashboardAssortmentOpportunity;
+  sources: DashboardAssortmentSourceHealth[];
+  actions: DashboardAssortmentAction[];
+  coverageGaps: DashboardAssortmentCoverageGaps;
+  forecast: DashboardAssortmentForecast;
   calculations: DashboardMetricCalculation[];
   methodology: {
     visitUnit: "GAME_SESSION";
     saleUnit: "PRODUCT_SALE_OPERATION";
     saleUnitIsExact: true;
-    receiptMetrics: {
-      state: "SOURCE_UNAVAILABLE";
-      requiredField: "RECEIPT_OR_ORDER_ID";
-      reason: string;
-    };
+    receiptMetrics: DashboardReceiptMetrics;
   };
 };
 
@@ -139,6 +214,9 @@ export type DashboardStoreRevenueMetric = {
     | "EMPTY";
   productRevenue: number;
   activeGuests: number;
+  visitsCount: number;
+  saleOperationCount: number;
+  saleOperationsPer100Visits: number | null;
   productRevenueSharePercent: number | null;
 };
 

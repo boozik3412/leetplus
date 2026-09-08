@@ -1,23 +1,28 @@
 import { BadRequestException } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { receiptIdentityFromSourceHash } from '../common/receipt-source-identity';
 import { PrismaService } from '../prisma/prisma.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
 import { FactCsvImportService } from './fact-csv-import.service';
 
 type PrismaMock = {
   store: {
     findMany: jest.Mock;
+    findUnique: jest.Mock;
   };
   product: {
     findMany: jest.Mock;
+    findUnique: jest.Mock;
   };
   inventorySnapshot: {
     upsert: jest.Mock;
   };
   salesFact: {
     upsert: jest.Mock;
+    findFirst: jest.Mock;
+    create: jest.Mock;
+    update: jest.Mock;
   };
   stockMovement: {
     upsert: jest.Mock;
@@ -86,18 +91,23 @@ const user: AuthenticatedUser = {
 };
 
 function createPrismaMock(): PrismaMock {
-  return {
+  const prisma: PrismaMock = {
     store: {
       findMany: jest.fn(),
+      findUnique: jest.fn(),
     },
     product: {
       findMany: jest.fn(),
+      findUnique: jest.fn(),
     },
     inventorySnapshot: {
       upsert: jest.fn((args: unknown) => args),
     },
     salesFact: {
       upsert: jest.fn((args: unknown) => args),
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn((args: unknown) => Promise.resolve(args)),
+      update: jest.fn((args: unknown) => Promise.resolve(args)),
     },
     stockMovement: {
       upsert: jest.fn((args: unknown) => args),
@@ -105,10 +115,17 @@ function createPrismaMock(): PrismaMock {
     importJob: {
       create: jest.fn((args: unknown) => Promise.resolve(args)),
     },
-    $transaction: jest.fn((operations: unknown[]) =>
-      Promise.resolve(operations),
-    ),
+    $transaction: jest.fn(),
   };
+
+  prisma.$transaction.mockImplementation(
+    (operations: unknown[] | ((tx: PrismaMock) => unknown)) =>
+      typeof operations === 'function'
+        ? Promise.resolve(operations(prisma))
+        : Promise.resolve(operations),
+  );
+
+  return prisma;
 }
 
 function firstUpsertCall(mock: jest.Mock) {
@@ -160,6 +177,14 @@ describe('FactCsvImportService', () => {
       { id: 'store-2', name: 'LeetPlus Arena Центр' },
       { id: 'store-3', name: 'LeetPlus Arena Север' },
     ]);
+    prisma.store.findUnique.mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve(
+          where.id === 'store-1'
+            ? { name: 'Club A' }
+            : { name: 'LeetPlus Arena' },
+        ),
+    );
     prisma.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -190,9 +215,17 @@ describe('FactCsvImportService', () => {
         salePrice: new Prisma.Decimal(249),
       },
     ]);
+    prisma.product.findUnique.mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve(
+          where.id === 'product-1'
+            ? { name: 'Adrenaline Rush' }
+            : { name: "Lay's Сметана и зелень 140 г" },
+        ),
+    );
     service = new FactCsvImportService(
       prisma as unknown as PrismaService,
-      tenantContext as unknown as TenantContextService,
+      tenantContext,
       freshStoreScope as unknown as FreshStoreScopeService,
     );
   });
@@ -226,6 +259,29 @@ describe('FactCsvImportService', () => {
 
     expect(preview.errors).toEqual([]);
     expect(preview.rows[0]?.cost).toBe('124');
+  });
+
+  it('imports separate receipts for the same product and keeps only private receipt identities', async () => {
+    const csv = [
+      'Дата,Торговая точка,Артикул,Количество,Выручка,Себестоимость,Чек',
+      '2026-04-28,Club A,DRK-001,1,139,62,check-101',
+      '2026-04-28,Club A,DRK-001,2,278,124,check-102',
+    ].join('\n');
+
+    const result = await service.importSales(csv, user, 'sales.csv');
+
+    expect(result.importedRows).toBe(2);
+    expect(prisma.salesFact.create).toHaveBeenCalledTimes(2);
+    const hashes = prisma.salesFact.create.mock.calls.map(
+      ([call]) =>
+        (call as { data: { sourcePayloadHash: string } }).data
+          .sourcePayloadHash,
+    );
+    const identities = hashes.map(receiptIdentityFromSourceHash);
+    expect(identities[0]).toMatch(/^[0-9a-f]{64}$/);
+    expect(identities[1]).toMatch(/^[0-9a-f]{64}$/);
+    expect(identities[0]).not.toBe(identities[1]);
+    expect(hashes.join(' ')).not.toContain('check-10');
   });
 
   it('previews downloadable fact templates without errors', async () => {

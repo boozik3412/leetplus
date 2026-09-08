@@ -60,6 +60,10 @@ export type LangameProductExpense = {
   price_sale: number;
   count: number;
   cancel: number;
+  receipt_id?: number | string | null;
+  order_id?: number | string | null;
+  check_id?: number | string | null;
+  sale_check_id?: number | string | null;
 } & Record<string, unknown>;
 
 export type LangameGuest = {

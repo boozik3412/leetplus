@@ -31,10 +31,10 @@ const templates: Record<ImportTemplateKind, ImportTemplate> = {
   sales: {
     fileName: "leetplus-sales-template.csv",
     csv: [
-      "Дата,Торговая точка,Артикул,Количество,Выручка,Себестоимость",
-      "2026-04-28,LeetPlus Arena Центр,DRK-001,4,556,248",
-      "2026-04-28,LeetPlus Arena Центр,SNK-001,2,358,162",
-      "2026-04-28,LeetPlus Arena Север,COF-002,6,834,156",
+      "Дата,Торговая точка,Чек,Артикул,Количество,Выручка,Себестоимость",
+      "2026-04-28,LeetPlus Arena Центр,CHK-1001,DRK-001,2,278,124",
+      "2026-04-28,LeetPlus Arena Центр,CHK-1001,SNK-001,1,179,81",
+      "2026-04-28,LeetPlus Arena Север,CHK-2057,COF-002,2,278,52",
     ].join("\n"),
   },
   movements: {

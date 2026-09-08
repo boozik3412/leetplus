@@ -2,7 +2,7 @@
 
 Статус: **канонический current-state contract**
 
-Актуально на: **06.09.2026**
+Актуально на: **08.09.2026**
 Runtime implementation baseline:
 `c14272cabf085d4f630500c7cbbe1991288b0dda` (PR #150; включает
 CURRENT189 application baseline, autonomous continuation для `PARTIAL`,
@@ -17,21 +17,49 @@ fail-closed правилу одного контура снова сломать
 
 ## Текущее состояние
 
-| Область                    | Состояние                                                                                                                                                                                                                                                                      |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Runtime implementation     | CURRENT189 production baseline, merge SHA `c14272cabf085d4f630500c7cbbe1991288b0dda`; hot rollback `92f29b7a9fbf518589b621e70535bfc089733f48`                                                                                                                                   |
-| Admission merge SHA        | exact-main Fast CI `34001346341` и Full Release Admission `34001346308` для `92f29b7a…` — `SUCCESS`                                                                                                                                                                            |
-| Production API topology    | active blue exact `c14272ca…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback `92f29b7a…`                                                                                                                                                    |
-| Guest bug-report repair    | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                                                                                |
-| Corporate invite repair    | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                                                                                     |
-| Guest check-in consistency | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                                                                                          |
-| Split-runtime deployment   | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                                                                                       |
-| Corporate landing          | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                             |
-| Release acceleration       | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
+| Область                    | Состояние                                                                                                                                                                                                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Runtime implementation     | CURRENT189 production baseline, merge SHA `c14272cabf085d4f630500c7cbbe1991288b0dda`; hot rollback `92f29b7a9fbf518589b621e70535bfc089733f48`                                                                                                                                                                |
+| Admission merge SHA        | exact-main Fast CI `34001346341` и Full Release Admission `34001346308` для `92f29b7a…` — `SUCCESS`                                                                                                                                                                                                          |
+| Production API topology    | active blue exact `c14272ca…`, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback `92f29b7a…`                                                                                                                                                                                |
+| Guest bug-report repair    | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                                                                                                              |
+| Corporate invite repair    | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                                                                                                                   |
+| Guest check-in consistency | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                                                                                                                        |
+| Split-runtime deployment   | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                                                                                                                     |
+| Corporate landing          | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                                                           |
+| Release acceleration       | 8/8 + retention: controlled five-phase rollout завершён на generation 21; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect; public/corporate/worker контуры нельзя объединять или понижать ради скорости                               |
 | Langame recovery           | оба systemd timer enabled/active; daily canary `2026-09-05` принят на exact `92f29b7a…`; старый permit снят через проверенную цепочку 4 cutover receipts; bonus-ledger/gamification singleton автономно продолжает `PARTIAL` по одному профилю с pool `2` и timeout `15m`; external unattended остаётся deny |
-| Telegram guest auth        | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                                   |
-| Staff rewards              | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                    |
-| Внешний open beta          | `NO-GO` до Telegram end-to-end canary, admitted heartbeat/readiness rollout, закрытия SSH credential/public-port incident и оставшихся Gate 1MT/2                                                                                                                             |
+| Telegram guest auth        | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                                                            |
+| Staff rewards              | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                                                |
+| Внешний open beta          | `NO-GO` до Telegram end-to-end canary, admitted heartbeat/readiness rollout, закрытия SSH credential/public-port incident и оставшихся Gate 1MT/2                                                                                                                                                            |
+
+### Assortment action center candidate 08.09.2026
+
+Текущий source candidate расширяет существующий tenant-authenticated
+`GET /dashboard/summary` и экран `/assortment/dashboard` операционными
+показателями ассортимента: свежестью источников, приоритетными действиями,
+покрытием себестоимости/остатков/категорий, чековыми метриками и семидневным
+прогнозом. Route ownership, corporate JWT, fresh tenant/store scope и
+`COMBINED` runtime остаются прежними. Public guest routes и platform-admin
+контур не затронуты.
+
+Langame daily worker остаётся единственным unattended owner загрузки продаж и
+остатков. Candidate читает опциональный receipt/order identifier из уже
+разрешённого ответа `/products/expense`, но сохраняет только SHA-256-bound
+receipt token внутри существующего `SalesFact.sourcePayloadHash`; raw
+идентификатор чека не пишется в БД, логи, readiness или HTTP response. Если
+источник не передал идентификатор, чековые показатели честно остаются
+`SOURCE_UNAVAILABLE`. Отсутствующая `price_purchase` дополняется только
+tenant/store/product-scoped закупочной ценой из существующей конфигурации
+Langame; provider write и новый egress не появляются.
+
+Изменение не добавляет migration, database role, secret, systemd unit,
+scheduler или network authority: schema остаётся exact `CURRENT_189/189`, API
+schedulers остаются `OFF`, а worker profile — отдельным fail-closed permit.
+После каждого application cutover старый Langame permit нельзя переносить:
+production release обязан тем же операционным проходом выполнить exact
+`supersede -> canary -> timer plan/apply/check` для нового release SHA. Source,
+CI или merge сами по себе не считаются production deployment.
 
 Store execution fence остаётся отдельным явным полномочием. Migration 165
 правильно создала все существующие Store с `backgroundExecutionEnabled=false`,
@@ -804,7 +832,7 @@ Exact runtime `a130c13e8d694b605d86a924b1524a6174ae1b51` разделяет эт
 2. Poller имеет process-scoped egress и не использует router fake-IP через
    transparent `TG_PROXY`. Exact route на 1337:
    `172.25.0.10 -> HTTP CONNECT 172.25.0.1:18118 -> Privoxy
-   forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
+forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
 3. Privoxy слушает только gateway private Docker network, не имеет published,
    LAN или public listener и ACL-разрешает только exact poller IP. Штатный
    default `privoxy.service` выключен; работает hardened

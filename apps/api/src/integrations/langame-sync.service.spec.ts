@@ -18,6 +18,7 @@ import {
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { receiptIdentityFromSourceHash } from '../common/receipt-source-identity';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
@@ -57,6 +58,7 @@ type PrismaMock = {
     updateMany: jest.Mock;
   };
   langameClubProductConfiguration: {
+    findMany: jest.Mock;
     upsert: jest.Mock;
     updateMany: jest.Mock;
   };
@@ -150,6 +152,7 @@ type SalesFactUpsertCall = [
       tenantId: string;
       revenue: Prisma.Decimal;
       cost: Prisma.Decimal;
+      sourcePayloadHash: string;
     };
   },
 ];
@@ -237,6 +240,7 @@ function createPrismaMock(): PrismaMock {
       updateMany: jest.fn(),
     },
     langameClubProductConfiguration: {
+      findMany: jest.fn().mockResolvedValue([]),
       upsert: jest.fn(),
       updateMany: jest.fn(),
     },
@@ -546,6 +550,45 @@ describe('LangameSyncService', () => {
     expect(syncJobUpdate.data.inventoryCount).toBe(1);
     expect(syncJobUpdate.data.salesCount).toBe(1);
     expect(syncJobUpdate.data.discrepancyCount).toBe(0);
+  });
+
+  it('uses configured purchase cost and preserves a hashed receipt identity when the expense omits cost', async () => {
+    prisma.langameClubProductConfiguration.findMany.mockResolvedValueOnce([
+      {
+        externalClubId: '1',
+        externalProductId: '10',
+        purchasePrice: new Prisma.Decimal(47),
+      },
+    ]);
+    client.listProductExpenses.mockReset();
+    client.listProductExpenses
+      .mockResolvedValueOnce([
+        {
+          id: 100,
+          date: '2026-04-29 10:12:16',
+          list_goods_id: 10,
+          list_clubs_id: 1,
+          price_purchase: null,
+          price_sale: 100,
+          count: 2,
+          cancel: 0,
+          order_id: 'order-9001',
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    await service.syncTenant(user, {
+      dateFrom: '2026-04-29',
+      dateTo: '2026-04-29',
+    });
+
+    const [salesUpsert] = prisma.salesFact.upsert.mock
+      .calls[0] as SalesFactUpsertCall;
+    expect(salesUpsert.create.cost).toEqual(new Prisma.Decimal(94));
+    expect(
+      receiptIdentityFromSourceHash(salesUpsert.create.sourcePayloadHash),
+    ).toMatch(/^[0-9a-f]{64}$/);
+    expect(salesUpsert.create.sourcePayloadHash).not.toContain('order-9001');
   });
 
   it('writes manual discrepancy logs under the configured persistent absolute root', async () => {

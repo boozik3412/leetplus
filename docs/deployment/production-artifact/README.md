@@ -96,8 +96,10 @@ Admission только через
 после final admission его digests обязательно повторно связываются со свежим
 live evidence, а короткоживущий binding сам по себе не разрешает effect.
 
-Для migration `20260908090000_initial_owner_invite_link_mode` candidate API
-должен запускаться с exact target `CURRENT_190/190` и временным
+Следующий фрагмент описывает исторический переход к CURRENT190 и не является
+инструкцией для текущего external Langame rollout. Для migration
+`20260908090000_initial_owner_invite_link_mode` candidate API должен запускаться
+с exact target `CURRENT_190/190` и временным
 `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_189`, пока production database
 ещё на `CURRENT_189/189`. После backup/restored-copy PASS и schema apply bridge
 обязан быть возвращён в `OFF` до postcheck. Migration добавляет только
@@ -109,10 +111,21 @@ smoke; при ошибке public upstream остаётся на предыду�
 Для canonical external Langame onboarding migration
 `20260908180000_external_langame_simple_onboarding` candidate должен объявлять
 target `CURRENT_191/191`. Пока production DB остаётся на admitted
-`CURRENT_190/190`, разрешён только контролируемый forward schema bridge для
-этой exact пары. Он нужен лишь для candidate preflight и schema apply, не
-разрешает external onboarding на старой schema и обязан быть `OFF` до
-postcheck. Migration закрепляет глобальную Store identity
+`CURRENT_190/190`, blue и green slot должны быть одним exact target-191
+release и использовать
+`GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_190` (только `COMBINED` с
+`GUEST_BUG_REPORTING_MODE=OFF`). Это dual-target bridge ровно для
+`CURRENT_190 → CURRENT_191`, а не общий N/N+1 допуск.
+
+Database effect принадлежит только exact external Langame `CURRENT191` signed
+schema controller. Его signed plan обязан связывать release SHA, source/target
+migration head/count и accepted receipts обоих slots; controller применяет
+migration транзакционно. Manual apply, другой schema controller, частичная
+migration или drift signature/slot receipt являются fail-closed stop condition.
+После commit оба slots обязаны быть repin-ены на
+`GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`, подтвердить exact CURRENT191 readiness
+и только затем выполнить final postcheck. Нельзя оставить bridge включённым на
+active или rollback slot. Migration закрепляет глобальную Store identity
 `(externalProvider, externalDomain, externalClubId)`; production artifact не
 может обходить её ручной записью, repair или rollback script.
 

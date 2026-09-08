@@ -6,13 +6,18 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  EXTERNAL_LANGAME_SIMPLE_ONBOARDING_CURRENT191_BRIDGE_CONSTANTS,
   FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONFIRMATION,
   FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS,
   applyFounderPilotCurrent188ProductionUpgradePlan,
   buildFounderPilotCurrent188ProductionUpgradePlan,
   createFounderPilotCurrent188ProductionBridgeRuntimeAdapter,
+  createExternalLangameSimpleOnboardingCurrent191ProductionBridgeRuntimeAdapter,
+  externalLangameSimpleOnboardingCurrent191BridgeAttestationDigest,
+  externalLangameSimpleOnboardingCurrent191BridgeAttestationInvariant,
   founderPilotCurrent188BridgeAttestationDigest,
   normalizeFounderPilotCurrent188BridgeAttestation,
+  normalizeExternalLangameSimpleOnboardingCurrent191BridgeAttestation,
   normalizeFounderPilotCurrent188ProductionUpgradeManifest,
   parseFounderPilotCurrent188BridgeSystemdProperties,
   signFounderPilotCurrent188ProductionUpgradePlan,
@@ -370,6 +375,43 @@ function bridgeAttestation(phase = "SOURCE_187", overrides = {}) {
     }),
     topologyMode: "DUAL_BRIDGE_N_MINUS_ONE",
     ...overrides,
+  };
+}
+
+function current191BridgeAttestation(phase = "SOURCE_190") {
+  const source = phase === "SOURCE_190";
+  const releaseSha = "c".repeat(40);
+  const transition = EXTERNAL_LANGAME_SIMPLE_ONBOARDING_CURRENT191_BRIDGE_CONSTANTS;
+  const base = bridgeAttestation("SOURCE_187");
+  const slot = (value) => ({
+    ...value,
+    compatibilityMode: source
+      ? "EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE"
+      : null,
+    compatibilityTargetMigration: source ? transition.targetMigrationHead : null,
+    compatibilityTargetMigrationCount: source
+      ? transition.targetMigrationCount
+      : null,
+    databaseMigration: source
+      ? transition.sourceMigrationHead
+      : transition.targetMigrationHead,
+    databaseMigrationCount: source
+      ? transition.sourceMigrationCount
+      : transition.targetMigrationCount,
+    releaseProvenanceMigration: transition.targetMigrationHead,
+    releaseProvenanceMigrationCount: transition.targetMigrationCount,
+    releaseSha,
+    schemaBridgeMode: transition.schemaBridgeMode,
+    targetMigrationSha256: transition.targetMigrationSha256,
+    webBuildId: releaseSha,
+  });
+  return {
+    ...base,
+    active: slot(base.active),
+    bridgeContract: transition.attestationContract,
+    phase,
+    productionControl: { ...base.productionControl, releaseSha },
+    rollback: slot(base.rollback),
   };
 }
 
@@ -737,6 +779,75 @@ test("bridge attestation is exact and rejects unsafe first-cutover states", asyn
       reasonCode: "CURRENT188_UPGRADE_BRIDGE_ATTESTATION_INVALID",
     });
     assert.equal(value.bridge.locks(), 0);
+  }
+});
+
+test("CURRENT191 external Langame bridge pins the exact 190 to 191 transition", () => {
+  const exact = current191BridgeAttestation();
+  const normalized =
+    normalizeExternalLangameSimpleOnboardingCurrent191BridgeAttestation(
+      exact,
+      {
+        expectedPhase: "SOURCE_190",
+        expectedReleaseSha: "c".repeat(40),
+      },
+    );
+
+  assert.equal(
+    EXTERNAL_LANGAME_SIMPLE_ONBOARDING_CURRENT191_BRIDGE_CONSTANTS
+      .sourceMigrationHead,
+    "20260908090000_initial_owner_invite_link_mode",
+  );
+  assert.equal(
+    EXTERNAL_LANGAME_SIMPLE_ONBOARDING_CURRENT191_BRIDGE_CONSTANTS
+      .targetMigrationHead,
+    "20260908180000_external_langame_simple_onboarding",
+  );
+  assert.equal(
+    EXTERNAL_LANGAME_SIMPLE_ONBOARDING_CURRENT191_BRIDGE_CONSTANTS
+      .targetMigrationSha256,
+    "a149122148b0270ad870883f81cba6bd61365c0babca56f81c18523af4b78beb",
+  );
+  assert.equal(normalized.rollback.releaseSha, "c".repeat(40));
+  assert.match(
+    externalLangameSimpleOnboardingCurrent191BridgeAttestationDigest(exact, {
+      expectedPhase: "SOURCE_190",
+      expectedReleaseSha: "c".repeat(40),
+    }),
+    /^[0-9a-f]{64}$/u,
+  );
+  assert.equal(
+    externalLangameSimpleOnboardingCurrent191BridgeAttestationInvariant(
+      normalized,
+    ).active.databaseMigration,
+    undefined,
+  );
+  assert.throws(
+    () =>
+      normalizeExternalLangameSimpleOnboardingCurrent191BridgeAttestation(
+        {
+          ...exact,
+          rollback: { ...exact.rollback, releaseSha: "d".repeat(40) },
+        },
+        {
+          expectedPhase: "SOURCE_190",
+          expectedReleaseSha: "c".repeat(40),
+        },
+      ),
+    { reasonCode: "CURRENT188_UPGRADE_BRIDGE_ATTESTATION_INVALID" },
+  );
+  if (
+    process.platform !== "linux" ||
+    typeof process.geteuid !== "function" ||
+    process.geteuid() !== 0
+  ) {
+    assert.throws(
+      () =>
+        createExternalLangameSimpleOnboardingCurrent191ProductionBridgeRuntimeAdapter(
+          { releaseSha: "c".repeat(40) },
+        ),
+      { reasonCode: "CURRENT188_UPGRADE_BRIDGE_RUNTIME_AUTHORITY_REQUIRED" },
+    );
   }
 });
 

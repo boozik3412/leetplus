@@ -550,36 +550,52 @@ test("rejects every noncanonical nonlegacy API bind host while fenced", async (t
   assert.equal(state.cutoverEffects, 0);
 });
 
-test("preserves a valid reporting-off schema bridge pair", async (t) => {
-  const options = {
-    bridgeMode: "ALLOW_CURRENT_188",
+for (const bridgeMode of ["ALLOW_CURRENT_189", "ALLOW_CURRENT_190"]) {
+  test(`preserves the valid reporting-off ${bridgeMode} schema bridge pair`, async (t) => {
+    const options = { bridgeMode, bugReportingMode: "OFF" };
+    const fixture = await preparedFixture("slot-environment-bridge-", options);
+    t.after(() => rm(fixture.root, { recursive: true, force: true }));
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      0,
+    );
+    const accepted = await readFile(
+      path.join(fixture.root, "etc/leetplus/slots/blue.env"),
+      "utf8",
+    );
+    assert.match(accepted, /GUEST_BUG_REPORTING_MODE=OFF/u);
+    assert.match(
+      accepted,
+      new RegExp(`GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=${bridgeMode}`, "u"),
+    );
+    assert.equal(
+      await readFile(
+        path.join(
+          path.dirname(fixture.planPath),
+          "02-bind-slot-environment.previous.env",
+        ),
+        "utf8",
+      ),
+      slotEnvironment("blue", PREVIOUS_SHA, options),
+    );
+  });
+}
+
+test("rejects an unadmitted schema bridge value while fenced", async (t) => {
+  const fixture = await preparedFixture("slot-environment-unadmitted-bridge-", {
+    bridgeMode: "ALLOW_CURRENT_191",
     bugReportingMode: "OFF",
-  };
-  const fixture = await preparedFixture("slot-environment-bridge-", options);
+  });
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
   assert.equal(
     await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
-    0,
+    1,
   );
-  const accepted = await readFile(
-    path.join(fixture.root, "etc/leetplus/slots/blue.env"),
-    "utf8",
-  );
-  assert.match(accepted, /GUEST_BUG_REPORTING_MODE=OFF/u);
-  assert.match(
-    accepted,
-    /GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_188/u,
-  );
-  assert.equal(
-    await readFile(
-      path.join(
-        path.dirname(fixture.planPath),
-        "02-bind-slot-environment.previous.env",
-      ),
-      "utf8",
-    ),
-    slotEnvironment("blue", PREVIOUS_SHA, options),
-  );
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.bindEffects, 1);
+  assert.equal(state.slotMasked, true);
+  assert.equal(state.unmaskEffects, 0);
+  assert.equal(state.cutoverEffects, 0);
 });
 
 test("rejects LIVE reporting against a schema bridge while fenced", async (t) => {

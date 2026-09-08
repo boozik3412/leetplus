@@ -93,11 +93,37 @@ scheduler и background jobs при этом не запускаются. Нал
 ## Schema и rollout
 
 Canonical schema target — `CURRENT_191`, `migrationCount=191`, latest
-`20260908180000_external_langame_simple_onboarding`. Release с этим target
-допускает только контролируемый forward bridge от admitted `CURRENT_190`; bridge
-существует исключительно на interval candidate/preflight/schema apply и обязан
-быть выключен до postcheck. Обратная совместимость не означает, что новый
-external onboarding можно исполнять на schema ниже `CURRENT_191`.
+`20260908180000_external_langame_simple_onboarding`. Единственный допустимый
+переход от admitted `CURRENT_190/190` выполняет exact external-Langame
+`CURRENT191` signed schema controller:
+`packages/database/scripts/external-langame-current191-production-upgrade.cli.mjs`.
+Его signed plan связывает один release SHA, source `190`, target `191`,
+migration head/count и оба slot receipts; shell, ручной Prisma apply или иной
+controller не являются заменой. Поддерживаемая последовательность CLI —
+`inventory → plan → approve → apply → check`; применяемый plan должен быть
+подтверждён своим exact SHA-256 и отдельным Ed25519 approval.
+Перед production plan тот же controller обязательно запускается в режиме
+`rehearse --target restored-copy` на изолированной восстановленной копии. Этот
+режим отвергает production database name, стандартный port/socket и не принимает
+production approval как основание для эффекта.
+
+До database effect blue и green обязаны работать как dual-target candidate
+одного exact `CURRENT_191` release с
+`GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_190`, `COMBINED` runtime и
+`GUEST_BUG_REPORTING_MODE=OFF`. Этот bridge допускает только exact пару
+`CURRENT_190 → CURRENT_191`; он не является общим N/N+1 режимом и не разрешает
+external onboarding на schema ниже `CURRENT_191`.
+
+После dual-target readiness signed controller применяет migration
+транзакционно. Частичный apply, другой head/count, потерянная signature,
+несовпавший slot receipt или незавершённая migration останавливают rollout до
+effect. Только после committed schema `CURRENT_191/191` bridge выключается
+контролируемо по одному слоту: сначала inactive slot переводится в
+`GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`, проверяется и становится active, затем
+бывший active/текущий rollback slot переводится в `OFF` и отдельно проверяется.
+Final postcheck допускается лишь когда оба exact slot receipts подтверждают
+`CURRENT_191/191` и `OFF`. Нельзя оставить bridge включённым на active или
+rollback slot.
 
 Перед production activation обязательны exact artifact/SHA, backup и
 restored-copy rehearsal, migration admission, loopback/public smoke, controlled

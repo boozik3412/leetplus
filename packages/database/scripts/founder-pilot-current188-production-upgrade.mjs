@@ -83,6 +83,22 @@ const CURRENT189_BRIDGE_TRANSITION = Object.freeze({
   targetPhase: "TARGET_189",
   topologyMode: "DUAL_BRIDGE_N_MINUS_ONE",
 });
+const CURRENT191_BRIDGE_TRANSITION = Object.freeze({
+  attestationContract:
+    "EXTERNAL_LANGAME_SIMPLE_ONBOARDING_CURRENT190_DUAL_BRIDGE_CUTOVER_V1",
+  compatibilityMode: "EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE",
+  requireSameReleaseBothSlots: true,
+  schemaBridgeMode: "ALLOW_CURRENT_190",
+  sourceCount: 190,
+  sourceHead: "20260908090000_initial_owner_invite_link_mode",
+  sourcePhase: "SOURCE_190",
+  targetCount: 191,
+  targetHead: "20260908180000_external_langame_simple_onboarding",
+  targetMigrationSha256:
+    "a149122148b0270ad870883f81cba6bd61365c0babca56f81c18523af4b78beb",
+  targetPhase: "TARGET_191",
+  topologyMode: "DUAL_BRIDGE_N_MINUS_ONE",
+});
 const BRIDGE_STATE_ROOT = "/var/lib/leetplus/deploy-receipts";
 const BRIDGE_SLOT_LINK_STATE_ROOT = `${BRIDGE_STATE_ROOT}/slot-links`;
 const BRIDGE_PRODUCTION_CONTROL_RUN_ROOT =
@@ -506,6 +522,26 @@ export function normalizeGuestSupportCurrent189BridgeAttestation(
   });
 }
 
+export function normalizeExternalLangameSimpleOnboardingCurrent191BridgeAttestation(
+  value,
+  options = {},
+) {
+  return normalizeFounderPilotCurrent188BridgeAttestation(value, {
+    ...options,
+    transition: CURRENT191_BRIDGE_TRANSITION,
+  });
+}
+
+export function normalizeExternalLangameCurrent191BridgeAttestation(
+  value,
+  options = {},
+) {
+  return normalizeExternalLangameSimpleOnboardingCurrent191BridgeAttestation(
+    value,
+    options,
+  );
+}
+
 function bridgeSlotAttestationInvariant(attestation) {
   const {
     compatibilityMode: _compatibilityMode,
@@ -543,6 +579,39 @@ export function guestSupportCurrent189BridgeAttestationDigest(value, options) {
     stableJson(
       normalizeGuestSupportCurrent189BridgeAttestation(value, options),
     ),
+  );
+}
+
+export function externalLangameSimpleOnboardingCurrent191BridgeAttestationInvariant(
+  attestation,
+) {
+  return founderPilotCurrent188BridgeAttestationInvariant(attestation);
+}
+
+export function externalLangameSimpleOnboardingCurrent191BridgeAttestationDigest(
+  value,
+  options,
+) {
+  return sha256(
+    stableJson(
+      normalizeExternalLangameSimpleOnboardingCurrent191BridgeAttestation(
+        value,
+        options,
+      ),
+    ),
+  );
+}
+
+export function externalLangameCurrent191BridgeAttestationInvariant(attestation) {
+  return externalLangameSimpleOnboardingCurrent191BridgeAttestationInvariant(
+    attestation,
+  );
+}
+
+export function externalLangameCurrent191BridgeAttestationDigest(value, options) {
+  return externalLangameSimpleOnboardingCurrent191BridgeAttestationDigest(
+    value,
+    options,
   );
 }
 
@@ -1677,9 +1746,11 @@ export function createFounderPilotCurrent188ProductionBridgeRuntimeAdapter({
     typeof process.geteuid !== "function" ||
     process.geteuid() !== 0 ||
     !SHA40.test(releaseSha ?? "") ||
-    ![CURRENT188_BRIDGE_TRANSITION, CURRENT189_BRIDGE_TRANSITION].includes(
-      transition,
-    )
+    ![
+      CURRENT188_BRIDGE_TRANSITION,
+      CURRENT189_BRIDGE_TRANSITION,
+      CURRENT191_BRIDGE_TRANSITION,
+    ].includes(transition)
   ) {
     fail("CURRENT188_UPGRADE_BRIDGE_RUNTIME_AUTHORITY_REQUIRED");
   }
@@ -1814,6 +1885,23 @@ export function createGuestSupportCurrent189ProductionBridgeRuntimeAdapter(
     ...options,
     transition: CURRENT189_BRIDGE_TRANSITION,
   });
+}
+
+export function createExternalLangameSimpleOnboardingCurrent191ProductionBridgeRuntimeAdapter(
+  options = {},
+) {
+  return createFounderPilotCurrent188ProductionBridgeRuntimeAdapter({
+    ...options,
+    transition: CURRENT191_BRIDGE_TRANSITION,
+  });
+}
+
+export function createExternalLangameCurrent191ProductionBridgeRuntimeAdapter(
+  options = {},
+) {
+  return createExternalLangameSimpleOnboardingCurrent191ProductionBridgeRuntimeAdapter(
+    options,
+  );
 }
 
 function toLegacyManifest(manifest) {
@@ -2756,3 +2844,20 @@ export const GUEST_SUPPORT_CURRENT189_BRIDGE_CONSTANTS = Object.freeze({
   targetPhase: CURRENT189_BRIDGE_TRANSITION.targetPhase,
   topologyMode: CURRENT189_BRIDGE_TRANSITION.topologyMode,
 });
+
+export const EXTERNAL_LANGAME_SIMPLE_ONBOARDING_CURRENT191_BRIDGE_CONSTANTS =
+  Object.freeze({
+    attestationContract: CURRENT191_BRIDGE_TRANSITION.attestationContract,
+    schemaBridgeMode: CURRENT191_BRIDGE_TRANSITION.schemaBridgeMode,
+    sourceMigrationCount: CURRENT191_BRIDGE_TRANSITION.sourceCount,
+    sourceMigrationHead: CURRENT191_BRIDGE_TRANSITION.sourceHead,
+    sourcePhase: CURRENT191_BRIDGE_TRANSITION.sourcePhase,
+    targetMigrationCount: CURRENT191_BRIDGE_TRANSITION.targetCount,
+    targetMigrationHead: CURRENT191_BRIDGE_TRANSITION.targetHead,
+    targetMigrationSha256: CURRENT191_BRIDGE_TRANSITION.targetMigrationSha256,
+    targetPhase: CURRENT191_BRIDGE_TRANSITION.targetPhase,
+    topologyMode: CURRENT191_BRIDGE_TRANSITION.topologyMode,
+  });
+
+export const EXTERNAL_LANGAME_CURRENT191_BRIDGE_CONSTANTS =
+  EXTERNAL_LANGAME_SIMPLE_ONBOARDING_CURRENT191_BRIDGE_CONSTANTS;

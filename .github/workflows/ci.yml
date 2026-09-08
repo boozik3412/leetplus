@@ -809,6 +809,9 @@ jobs:
       - name: Validate fail-closed CURRENT_188 to CURRENT_189 guest-support upgrade controller
         run: pnpm --filter database check:guest-support-current189-production-upgrade
 
+      - name: Validate fail-closed CURRENT_190 to CURRENT_191 external Langame upgrade controller
+        run: pnpm --filter database check:external-langame-current191-production-upgrade
+
       - name: Validate fail-closed CURRENT_188 legacy mixed-owner upgrade controller
         run: pnpm --filter database check:founder-pilot-current188-legacy-ownership-upgrade
 
@@ -1132,6 +1135,8 @@ jobs:
             packages/database/scripts/founder-pilot-current188-production-upgrade.cli.mjs \
             packages/database/scripts/guest-support-current189-production-upgrade.mjs \
             packages/database/scripts/guest-support-current189-production-upgrade.cli.mjs \
+            packages/database/scripts/external-langame-current191-production-upgrade.mjs \
+            packages/database/scripts/external-langame-current191-production-upgrade.cli.mjs \
             packages/database/scripts/founder-pilot-current188-legacy-ownership-upgrade.mjs \
             packages/database/scripts/founder-pilot-current188-legacy-ownership-upgrade.cli.mjs \
             packages/database/scripts/founder-pilot-activation-role-deployment.mjs \
@@ -1172,7 +1177,7 @@ jobs:
             '  "canonicalPrismaDeployScriptCount": 1,' \
             '  "founderPilotOperationalScriptsIncluded": true,' \
             "  \"impactReceiptSha256\": \"$RELEASE_IMPACT_RECEIPT_SHA256\"," \
-            '  "founderPilotOperationalScriptCount": 18,' \
+            '  "founderPilotOperationalScriptCount": 20,' \
             '  "runtimeEnrollmentOperationalScriptsIncluded": true,' \
             '  "runtimeEnrollmentOperationalScriptCount": 6,' \
             '  "currentReleaseRuntimeAcceptanceScriptsIncluded": true,' \
@@ -1183,7 +1188,7 @@ jobs:
             '  "currentNetworkAccessScopeClassificationScriptCount": 2,' \
             '  "staffAttachmentReconciliationScriptsIncluded": true,' \
             '  "staffAttachmentReconciliationScriptCount": 3,' \
-            '  "operationalScriptCount": 35,' \
+            '  "operationalScriptCount": 37,' \
             '  "webPublicAssetsIncluded": true' \
             '}' > "$release_root/release-provenance.json"
 
@@ -1261,6 +1266,7 @@ jobs:
             './packages/database/scripts/founder-pilot-production-history-production.cli.mjs' \
             './packages/database/scripts/founder-pilot-current188-production-upgrade.cli.mjs' \
             './packages/database/scripts/guest-support-current189-production-upgrade.cli.mjs' \
+            './packages/database/scripts/external-langame-current191-production-upgrade.cli.mjs' \
             './packages/database/scripts/founder-pilot-current188-legacy-ownership-upgrade.cli.mjs' \
             './packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs' \
             './packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs' \
@@ -1286,7 +1292,7 @@ jobs:
             exit 1
           fi
           script_file_count="$(grep -E '^\./packages/database/scripts/[^/]+$' "$archive_listing" | wc -l | tr -d ' ')"
-          test "$script_file_count" = '35'
+          test "$script_file_count" = '37'
           if grep -E '^\./packages/database/scripts/.*(\.test\.|\.spec\.|\.pem$|\.key$)' "$archive_listing" > /dev/null; then
             printf 'Release artifact contains a forbidden operational fixture\n' >&2
             exit 1
@@ -1321,7 +1327,7 @@ jobs:
             test "$(node -p 'require("./release-provenance.json").canonicalPrismaDeployScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").canonicalPrismaDeployScriptCount')" = '1'
             test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptsIncluded')" = 'true'
-            test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptCount')" = '18'
+            test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptCount')" = '20'
             test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptCount')" = '6'
             test "$(node -p 'require("./release-provenance.json").currentReleaseRuntimeAcceptanceScriptsIncluded')" = 'true'
@@ -1332,7 +1338,7 @@ jobs:
             test "$(node -p 'require("./release-provenance.json").currentNetworkAccessScopeClassificationScriptCount')" = '2'
             test "$(node -p 'require("./release-provenance.json").staffAttachmentReconciliationScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").staffAttachmentReconciliationScriptCount')" = '3'
-            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '35'
+            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '37'
             test "$(node -p 'require("./release-provenance.json").webPublicAssetsIncluded')" = 'true'
             node --check packages/database/scripts/canonical-prisma-deploy.mjs
             node --check packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs
@@ -1340,6 +1346,7 @@ jobs:
             node --check packages/database/scripts/founder-pilot-production-history-production.cli.mjs
             node --check packages/database/scripts/founder-pilot-current188-production-upgrade.cli.mjs
             node --check packages/database/scripts/guest-support-current189-production-upgrade.cli.mjs
+            node --check packages/database/scripts/external-langame-current191-production-upgrade.cli.mjs
             node --check packages/database/scripts/founder-pilot-current188-legacy-ownership-upgrade.cli.mjs
             node --check packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs
             node --check packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs
@@ -1418,7 +1425,7 @@ jobs:
         run: |
           set -euo pipefail
           helper_source="$GITHUB_WORKSPACE/.github/scripts/hydrate-runtime-release-artifact-ci.sh"
-          helper_sha256='27fe0adfbff6ac1d5462cdaffc2be6c1e74c1fc7bd290b66883023c0efd9d467'
+          helper_sha256='9a98f1e20e7d9472a514c26ce91779aa6a45ddc1afe1c96d5a73cd13a9eb2360'
           authority_parent='/srv/leetplus-ci-runtime-authority'
           authority_root="$authority_parent/$CI_RELEASE_SHA"
           sudo -n /usr/bin/env -i \

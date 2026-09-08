@@ -60,7 +60,8 @@ Usage:
 The API must expose /version and /health/ready. The probe accepts only an
 exact release SHA and either the expected completed migration name/count or
 one of the explicitly admitted guest-support forward-compatibility envelopes:
-CURRENT_187 -> CURRENT_188, CURRENT_188 -> CURRENT_189, or CURRENT_189 -> CURRENT_190. It also requires an
+CURRENT_187 -> CURRENT_188, CURRENT_188 -> CURRENT_189, CURRENT_189 -> CURRENT_190,
+or CURRENT_190 -> CURRENT_191. It also requires an
 HTTP-success Web response and the exact Next.js BUILD_ID static manifest. It
 performs no write or restart operation. Tests may add
 --unprivileged-test-mode; root may not use that mode.

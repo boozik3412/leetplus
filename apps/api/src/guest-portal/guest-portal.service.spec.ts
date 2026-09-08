@@ -2,6 +2,7 @@
 
 import {
   BadRequestException,
+  ConflictException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -12883,6 +12884,180 @@ describe('GuestPortalService', () => {
   });
 
   describe('verifyOtp', () => {
+    it('reuses the selected-domain Langame guest profile across RU phone hash variants', async () => {
+      const { jwtService, prisma, secretEncryptionService, service } =
+        createService({
+          APP_ENCRYPTION_KEY: 'test-secret',
+        });
+      const challengeId = 'challenge-legacy-profile';
+      const code = '123456';
+      const currentPhoneHash = createHmac('sha256', 'test-secret')
+        .update('79991113669')
+        .digest('hex');
+      const legacyPhoneHash = createHmac('sha256', 'test-secret')
+        .update('89991113669')
+        .digest('hex');
+      const codeHash = createHash('sha256')
+        .update(`test-secret:${challengeId}:${code}`)
+        .digest('hex');
+      const consentAcceptedAt = new Date('2026-09-08T11:05:10.000Z');
+      const existingGuest = {
+        id: 'guest-legacy-profile',
+        externalGuestId: 'external-3669',
+        fullNameMasked: 'Гость 3669',
+        phoneMasked: '***3669',
+        emailMasked: null,
+      };
+      const existingProfile = {
+        id: 'canonical-profile',
+        guestId: existingGuest.id,
+        phoneHash: legacyPhoneHash,
+        phoneEncrypted: 'encrypted-legacy-phone',
+        contactMasked: '***3669',
+        displayName: 'Гость 3669',
+      };
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337 Радищева',
+            address: 'Радищева',
+            externalDomain: '1337.langame.ru',
+          },
+        ],
+      });
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
+        id: challengeId,
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        phoneHash: currentPhoneHash,
+        phoneMasked: '***3669',
+        phoneEncrypted: 'encrypted-current-phone',
+        guestId: null,
+        profileId: null,
+        codeHash,
+        status: 'PENDING',
+        attempts: 0,
+        expiresAt: new Date(Date.now() + 60_000),
+        gameConsentAcceptedAt: consentAcceptedAt,
+        gameConsentVersion: 'guest-game-v1-2026-06-15',
+      });
+      secretEncryptionService.decrypt.mockReturnValue('79991113669');
+      prisma.guest.findMany.mockResolvedValue([existingGuest]);
+      prisma.guestGameProfile.findFirst.mockResolvedValue(existingProfile);
+      prisma.guestGameProfile.update.mockResolvedValue(existingProfile);
+      jest
+        .spyOn(service as any, 'buildLocalGameProfileMatch')
+        .mockResolvedValue({
+          checkedAt: consentAcceptedAt.toISOString(),
+          status: 'MATCHED_LOCAL',
+          localGuestFound: true,
+          localGuestId: existingGuest.id,
+          profileId: existingProfile.id,
+          linkStatus: 'ALREADY_LINKED',
+          linkedGuestId: existingGuest.id,
+          linkedProfileId: existingProfile.id,
+          backfilled: {
+            rewards: 0,
+            events: 0,
+            deliveries: 0,
+            bonusLedgerEntries: 0,
+          },
+          nextAction: 'NONE',
+        });
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: existingProfile.id },
+      });
+      jwtService.signAsync.mockResolvedValue('canonical-token');
+
+      const result = await service.verifyOtp('leet', 'club-1337', {
+        challengeId,
+        code,
+      });
+
+      expect(prisma.guest.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: 'tenant-1',
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: '1337.langame.ru',
+            phoneHash: {
+              in: expect.arrayContaining([currentPhoneHash, legacyPhoneHash]),
+            },
+            isDisabled: false,
+          }),
+          take: 2,
+        }),
+      );
+      expect(prisma.guestGameProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: existingProfile.id },
+        }),
+      );
+      expect(prisma.guestGameProfile.create).not.toHaveBeenCalled();
+      expect(prisma.guestPortalOtpChallenge.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: challengeId },
+          data: expect.objectContaining({
+            status: 'VERIFIED',
+            guestId: existingGuest.id,
+            profileId: existingProfile.id,
+          }),
+        }),
+      );
+      expect(result.token).toBe('canonical-token');
+    });
+
+    it('fails closed before profile mutation when the selected domain has multiple matching guests', async () => {
+      const { prisma, secretEncryptionService, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+      });
+      secretEncryptionService.decrypt.mockReturnValue('79991113669');
+      prisma.guest.findMany.mockResolvedValue([
+        {
+          id: 'guest-1',
+          externalGuestId: 'external-1',
+          fullNameMasked: 'Гость 1',
+          phoneMasked: '***3669',
+          emailMasked: null,
+        },
+        {
+          id: 'guest-2',
+          externalGuestId: 'external-2',
+          fullNameMasked: 'Гость 2',
+          phoneMasked: '***3669',
+          emailMasked: null,
+        },
+      ]);
+
+      await expect(
+        service['findRegistrationIdentity'](
+          prisma,
+          {
+            id: 'challenge-ambiguous',
+            tenantId: 'tenant-1',
+            storeId: 'store-1',
+            guestId: null,
+            profileId: null,
+            phoneHash: 'current-phone-hash',
+            phoneMasked: '***3669',
+            phoneEncrypted: 'encrypted-current-phone',
+            gameConsentAcceptedAt: new Date(),
+            gameConsentVersion: 'guest-game-v1-2026-06-15',
+          },
+          '1337.langame.ru',
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.guestGameProfile.findFirst).not.toHaveBeenCalled();
+      expect(prisma.guestGameProfile.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
+    });
+
     it('creates a separate game profile for phone-only gamification registration', async () => {
       const { jwtService, prisma, service } = createService({
         APP_ENCRYPTION_KEY: 'test-secret',

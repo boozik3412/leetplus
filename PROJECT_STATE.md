@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-## Canonical current-state guardrail (06.09.2026)
+## Canonical current-state guardrail (08.09.2026)
 
 Перед задачами по auth, landing, access scope, игровому модулю, integrations,
 workers или deployment обязательно прочитать
@@ -9,9 +9,9 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий production runtime baseline — merge SHA
-`54babfaf8f755e49d48fdae870bf085479ea7315` (PR #154). Active blue
-`54babfaf…` и hot-rollback green `0e51235d…` работают в
-`COMBINED`, оба проходят exact readiness `CURRENT_189/189`.
+`def5174f16f49212dd21d243cda89dffeff7837f` (PR #170). Active blue
+`def5174f…` и hot-rollback green `797001d5…` работают в
+`COMBINED`, оба проходят exact readiness `CURRENT_190/190`.
 `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
 `GUEST_BUG_REPORTING_MODE=LIVE`. Split systemd/nginx candidate остаётся
 `DORMANT / NOT INSTALLED`.
@@ -22,6 +22,32 @@ Source candidate по `LP-BUG-A56627F5` удаляет staff/test exclusion из
 остановить Langame dispatch; audit metadata содержит
 `staffRewardsPolicy=ALLOW`. Production runtime и исторические отменённые
 награды не меняются без отдельного admitted rollout и bounded repair.
+
+Production hotfix PR #170 развёрнут five-phase operation
+`9687947d-722c-45e9-8a72-999e433434ab`; terminal receipt SHA-256 —
+`4d2f6c32ed57736a01f7f389467313bba0e410ba444aee5d1629c33c284f540d`.
+Он чинит canonical profile owner для `*6330`, а также поиск существующего
+Langame guest по подтверждённым RU-вариантам телефона для `*3669` и соседних
+случаев. Bounded repairs закрыли девять выявленных дублей; контрольный active
+structural остаток равен `0`. Переносились только доказанные технические
+`SESSION_START`, zero-effect decisions и future-sync ownership. Facts, raw,
+OTP, sync jobs, XP, rewards, completion notifications, lootbox/mission/season
+state, wallet, intents, deliveries и bonus ledger не replay-ились и повторно
+не начислялись. Уже затронутый пользователь при stale session начинает новую
+авторизацию и подтверждает телефон; новый аккаунт или ручная награда не нужны.
+Операционный порядок:
+[`docs/support/guest-auth-profile-owner-incidents.md`](docs/support/guest-auth-profile-owner-incidents.md).
+
+Langame daily и bonus-ledger timers сейчас `enabled + active`; daily authority
+привязана к exact `def5174f…` и обходит все `3/3` active Langame domains
+текущего admitted INTERNAL tenant. Source после PR #171 содержит только
+controlled target `CURRENT_191/191` для external onboarding; production GO и
+unattended authority внешним tenant этим не выданы.
+
+Записи ниже — хронологический журнал предыдущих production/source
+checkpoints. Их старые формулировки про active SHA, schema или
+`inactive/disabled` timer не являются текущим состоянием и читаются только с
+датой соответствующего абзаца.
 
 Production rollout 07.09 добавил в staff-карточку тикета явные ФИО и телефон из
 канонического зашифрованного гостевого профиля. Это read-time projection только

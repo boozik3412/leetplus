@@ -1,12 +1,14 @@
 # Langame sync production recovery
 
-Статус: **backfill canary и stable timer приняты; оба worker timer активны**
+Статус: **CURRENT190 canary и stable timer приняты; оба worker timer активны**
 
-Актуально на: **06.09.2026**
+Актуально на: **08.09.2026**
 
-Production checkpoint: active green `92f29b7a…`, rollback blue `94f9462e…`,
-schema `CURRENT_189/189`. Daily worker прошёл canary `2026-09-05` для одного
-INTERNAL tenant, stable timer принят и включён. Частый
+Production checkpoint: active blue `def5174f…`, rollback green `797001d5…`,
+schema `CURRENT_190/190`. Daily worker прошёл canary `2026-09-07` для одного
+admitted INTERNAL tenant и всех его `3/3` active Langame domains; stable timer
+принят и включён. Он не закрепляется за одним клубом или источником: каждый
+tick обходит все active sources текущего admitted scope. Частый
 bonus-ledger/gamification singleton имеет
 отдельный Prisma pool `connection_limit=2`, activity batch `1` и effective
 `TimeoutStartSec=900`; оба API slot сохраняют встроенные schedulers
@@ -50,8 +52,10 @@ corporate scope или Langame credentials. Внешние tenant остаютс
    `leetplus-langame-daily-worker.timer` → oneshot service. Он каждый раз
    разрешает exact active nginx slot и immutable release SHA. Оба API scheduler
    и scheduled HTTP owner обязаны оставаться `false`.
-7. Worker требует exact lowercase tenant slug, ровно один processed tenant и
-   zero failed scopes. Explicit business date допустима только в canary.
+7. Worker требует exact lowercase tenant slug, ровно один processed tenant,
+   полный обход всех active Langame sources/domains этого admitted tenant и
+   zero failed scopes. Выбор одного клуба не является допустимым timer scope.
+   Explicit business date допустима только в canary.
 8. Установка unit files не включает timer. Operator-owned secret env не входит
    в install map и не может быть перезаписан production-control artifact.
 9. После одного exact успешного stable daily sync тот же authorized worker
@@ -99,6 +103,59 @@ corporate scope или Langame credentials. Внешние tenant остаютс
     неверный slot или изменившийся receipt отклоняются до effect. План фиксирует
     исходный authorization slot, длину и SHA-256 всей цепочки. Операция только
     снимает старое полномочие и никогда не запускает worker.
+
+16. Если старый timer permit ещё активен, штатный supersession precondition
+    требует предварительно выполнить только
+    `systemctl disable --now leetplus-langame-daily-worker.timer` и доказать
+    disabled/inactive timer вместе с quiescent service (`inactive/dead`,
+    `Result=success`, `ExecMainStatus=0`, zero service PID/cgroup/jobs). На
+    systemd 255 service-only PID поля timer могут быть пустыми или `0`; для
+    `.service` явный zero остаётся обязательным. Pointer и drop-in вручную не
+    удаляются. Это временное снятие старой authority перед supersession, а не
+    terminal revocation. Operator-owned EnvFile меняется атомарно с
+    сохранением root ownership, mode и secret bytes: canary использует явную
+    дату и выключенные recovery/retention, timer profile — без даты, с
+    recovery/retention и `RETENTION_LIVE=false`.
+
+## Фактический production checkpoint 08.09.2026
+
+- PR #170, merge SHA `def5174f16f49212dd21d243cda89dffeff7837f`;
+  exact-main Fast CI `34226209000` и Full Release Admission `34226209023` —
+  `SUCCESS`;
+- five-phase operation `9687947d-722c-45e9-8a72-999e433434ab` завершена;
+  final receipt SHA-256
+  `4d2f6c32ed57736a01f7f389467313bba0e410ba444aee5d1629c33c284f540d`;
+- active blue `def5174f…`, hot rollback green `797001d5…`; public и loopback
+  readiness принимают exact `CURRENT_190/190`, unfinished migrations `0`,
+  bridge `OFF`;
+- устаревший permit `797001d5…` supersede-нут по plan SHA-256
+  `5abc1334360267b97beafbf9272908a13296d84053487a7b44e78202c1cd3e80`;
+  supersession receipt SHA-256
+  `863838cb60718eb089f3ebac5f17e37ccd4e186a7bdad48b7b4e419ccd095096`;
+- canary `2026-09-07` имеет plan SHA-256
+  `b6197d2afea25066419ee27a8a8feec555648b7d676b175966769eceb93ef5e3`,
+  authorization receipt
+  `697da32d7d3f1e163c5fa872c3429f8f65d2b4e54fa2c4fd290ab042a75bf480`
+  и execution receipt
+  `bab3e61fb7c2bc4f260cbbcdb8c3bc3be3656ad1c8c51f43c2a6b2bbefdedea1`;
+  check — `PASS`;
+- production содержит один configured INTERNAL tenant и три active Langame
+  domains. Canary подтвердил `3/3 SUCCESS`; существующие timestamps успешных
+  scopes не изменились, duplicate effect не возник;
+- stable timer plan SHA-256
+  `ed630275624960f788811b15ac92a4bd992729bd36b81d752c5f9c2385658da7`,
+  authorization receipt
+  `6d282f46f8c6ddfd4f6875cbb1df8a95aaffc80a4a7160d47f0a9cb4fa0f1522`,
+  validation receipt
+  `773e5996d79a1ca4f2f07b70457fd69fd51e5b418a96ef4c2c3898bbcbed47a0`,
+  enable receipt
+  `9c3830f5b8b5acecae28b04ac1132a4f3824a0b2ec20bad17b0ee29294990882`;
+- daily timer `enabled/active (waiting)`, service после прохода
+  `inactive/dead`, `Result=success`, `ExecMainStatus=0`; следующий tick —
+  `09.09.2026 04:30 Asia/Yekaterinburg`. Bonus-ledger timer также
+  `enabled/active`, последний service result успешен;
+- внешние `PILOT/BETA/LIVE` tenant не получают unattended authority этим
+  checkpoint: для них по-прежнему требуется отдельный admission и GO.
 
 ## Фактический production checkpoint 06.09.2026
 
@@ -190,9 +247,11 @@ corporate scope или Langame credentials. Внешние tenant остаютс
    уже является exact additive successor исторического activation receipt,
    выполнить его отдельный digest-bound `plan/apply/check`; ручные drop-in или
    receipt edits запрещены.
-4. Выполнить штатный atomic blue/green cutover. Timer всё ещё disabled. Если
-   до cutover существовал принятый timer permit предыдущего release, не
-   удалять его pointer/drop-in вручную и не переиспользовать его для нового
+4. Выполнить штатный atomic blue/green cutover. Перед supersession старого
+   permit выполнить только предварительный
+   `systemctl disable --now leetplus-langame-daily-worker.timer`, затем
+   подтвердить disabled/inactive timer и quiescent service. Не удалять
+   pointer/drop-in вручную и не переиспользовать старый permit для нового
    release. После установки exact production-control нового admitted release
    выполнить `supersede-plan --control-release-sha <new-release>`, подтвердить
    полученный digest/count строкой

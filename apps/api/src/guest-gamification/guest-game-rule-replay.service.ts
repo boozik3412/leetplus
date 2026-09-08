@@ -462,6 +462,10 @@ type PreparedSupportRewardRecoveryAction = {
     id: string;
     updatedAt: Date;
   } | null;
+  existingEffect: {
+    eventId: string;
+    entitlementId: string;
+  } | null;
 };
 
 type PreparedSupportRewardRecovery = {
@@ -1180,8 +1184,13 @@ export class GuestGameRuleReplayService {
       prepared,
       'PREVIEW',
       'READY',
-      prepared.actions.map(() => ({ eventId: null, entitlementId: null })),
-      'Preview is read-only. Apply is limited to the exact facts and rules in this digest and creates case entitlements only.',
+      prepared.actions.map(
+        (action) =>
+          action.existingEffect ?? { eventId: null, entitlementId: null },
+      ),
+      prepared.actions.some((action) => action.existingEffect)
+        ? 'Preview is read-only. Previously materialized exact actions will only have their missing support audit finalized; their rules will not run again.'
+        : 'Preview is read-only. Apply is limited to the exact facts and rules in this digest and creates case entitlements only.',
     );
   }
 
@@ -1222,6 +1231,22 @@ export class GuestGameRuleReplayService {
 
     const applied: Array<{ eventId: string; entitlementId: string }> = [];
     for (const action of prepared.actions) {
+      if (action.existingEffect) {
+        const postcondition = await this.assertSupportRecoveryPostcondition(
+          user,
+          action,
+          action.existingEffect.eventId,
+        );
+        if (
+          postcondition.entitlementId !== action.existingEffect.entitlementId
+        ) {
+          throw new ConflictException(
+            'The previously materialized support recovery effect changed after preview.',
+          );
+        }
+        applied.push(action.existingEffect);
+        continue;
+      }
       const exactScope: PreparedSupportRewardRecoveryExactScope = {
         sourceFactId: action.fact.id,
         sourceFactUpdatedAt: action.fact.updatedAt,
@@ -1308,6 +1333,45 @@ export class GuestGameRuleReplayService {
       });
     }
 
+    await this.persistSupportRecoveryAppliedAudit(user, prepared, applied);
+
+    return this.supportRewardRecoveryResult(
+      prepared,
+      'APPLY',
+      'APPLIED',
+      applied,
+      prepared.actions.some((action) => action.existingEffect)
+        ? 'The exact plan was finalized. Previously materialized actions were verified without rerunning their rules; every action has one AVAILABLE case, and direct bonuses and Battle Pass rewards remain zero.'
+        : 'The exact plan was applied. Every action produced one AVAILABLE case entitlement; direct bonuses and Battle Pass rewards remained zero, and replay was zero-diff.',
+    );
+  }
+
+  private async persistSupportRecoveryAppliedAudit(
+    user: AuthenticatedUser,
+    prepared: PreparedSupportRewardRecovery,
+    applied: Array<{ eventId: string; entitlementId: string }>,
+  ) {
+    const eventIds = applied.map((item) => item.eventId);
+    const entitlementIds = applied.map((item) => item.entitlementId);
+    const traceId = `support-recovery:${sha256({
+      ticketId: prepared.ticket.id,
+      eventIds,
+      entitlementIds,
+      allowedRuleIds: prepared.allowedRuleIds,
+    })}`;
+    const existing = await this.prisma.guestGameAuditEvent.findFirst({
+      where: {
+        tenantId: user.tenantId,
+        entityType: 'GUEST_SUPPORT_TICKET',
+        entityId: prepared.ticket.id,
+        action: 'SUPPORT_REWARD_RECOVERY_APPLIED',
+        status: 'PROCESSED',
+        traceId,
+      },
+      select: { id: true },
+    });
+    if (existing) return false;
+
     await this.prisma.guestGameAuditEvent.create({
       data: {
         tenantId: user.tenantId,
@@ -1320,28 +1384,25 @@ export class GuestGameRuleReplayService {
         status: 'PROCESSED',
         reasonCode: prepared.ticket.ticketNumber,
         reasonText:
-          'An operator-confirmed exact support plan created only the bounded case entitlements proved by active rules.',
+          'An operator-confirmed exact support plan created or verified only the bounded case entitlements proved by active rules.',
+        traceId,
         payload: {
           actorUserId: user.id,
           ticketNumber: prepared.ticket.ticketNumber,
           planDigest: prepared.digest,
           actionCount: prepared.actions.length,
+          resumedActionCount: prepared.actions.filter(
+            (action) => action.existingEffect,
+          ).length,
           allowedRuleIds: prepared.allowedRuleIds,
           directBonusAmount: 0,
           battlePassRewards: 0,
-          eventIds: applied.map((item) => item.eventId),
-          entitlementIds: applied.map((item) => item.entitlementId),
+          eventIds,
+          entitlementIds,
         },
       },
     });
-
-    return this.supportRewardRecoveryResult(
-      prepared,
-      'APPLY',
-      'APPLIED',
-      applied,
-      'The exact plan was applied. Every action produced one AVAILABLE case entitlement; direct bonuses and Battle Pass rewards remained zero, and replay was zero-diff.',
-    );
+    return true;
   }
 
   async previewBattlePass(
@@ -1851,16 +1912,24 @@ export class GuestGameRuleReplayService {
             'LIVE_LEDGER_FALLBACK',
           ),
       );
-      if (
-        eligibleRules.length !== 1 ||
-        eligibleRules[0]?.id !== requested.ruleId ||
-        eligibleRules[0]?.kind !== requested.ruleKind
-      ) {
+      const matchingRules = dryRun.rules.filter(
+        (rule) =>
+          rule.status === 'ACTIVE' &&
+          rule.id === requested.ruleId &&
+          rule.kind === requested.ruleKind &&
+          guestGamePolicyAllowsEvaluation(
+            rule.evaluationPolicy,
+            'LIVE_LEDGER_FALLBACK',
+          ),
+      );
+      if (matchingRules.length !== 1) {
         throw new ConflictException(
-          `Fact ${fact.id} no longer resolves to the single confirmed active rule ${requested.ruleId}.`,
+          `Fact ${fact.id} no longer resolves to the confirmed active rule ${requested.ruleId}.`,
         );
       }
-      const dryRule = eligibleRules[0];
+      const dryRule = matchingRules[0];
+      const isFreshAction =
+        eligibleRules.length === 1 && eligibleRules[0] === dryRule;
       if (dryRule.kind === 'SEASON') {
         throw new ConflictException(
           'Battle Pass rules are forbidden in support reward recovery.',
@@ -1957,7 +2026,7 @@ export class GuestGameRuleReplayService {
         };
       }
 
-      preparedActions.push({
+      const preparedAction: PreparedSupportRewardRecoveryAction = {
         fact: fact as PreparedSupportRewardRecoveryAction['fact'],
         rule: {
           ...dryRule,
@@ -1969,7 +2038,29 @@ export class GuestGameRuleReplayService {
         physicalSessionKey: physicalIdentity.key,
         expectedXpDelta: dryRule.xpDelta,
         dependency,
-      });
+        existingEffect: null,
+      };
+      const existingEventId = await this.findExistingSupportRecoveryEventId(
+        user.tenantId,
+        ticket.ticketNumber,
+        preparedAction,
+      );
+      if (existingEventId) {
+        const postcondition = await this.assertSupportRecoveryPostcondition(
+          user,
+          preparedAction,
+          existingEventId,
+        );
+        preparedAction.existingEffect = {
+          eventId: existingEventId,
+          entitlementId: postcondition.entitlementId,
+        };
+      } else if (!isFreshAction) {
+        throw new ConflictException(
+          `Fact ${fact.id} no longer resolves to the single confirmed active rule ${requested.ruleId}.`,
+        );
+      }
+      preparedActions.push(preparedAction);
     }
 
     preparedActions.sort(
@@ -2012,6 +2103,7 @@ export class GuestGameRuleReplayService {
         expectedXpDelta: action.expectedXpDelta,
         expectedEntitlementCount: 1,
         directBonusAmount: 0,
+        existingEffect: action.existingEffect,
         dependency: action.dependency
           ? {
               kind: action.dependency.kind,
@@ -2092,6 +2184,193 @@ export class GuestGameRuleReplayService {
         `Physical session ${fact.sessionExternalId ?? 'unknown'} has conflicting active exact facts.`,
       );
     }
+  }
+
+  private async findExistingSupportRecoveryEventId(
+    tenantId: string,
+    ticketNumber: string,
+    action: PreparedSupportRewardRecoveryAction,
+  ): Promise<string | null> {
+    const event = await this.prisma.guestGameEvent.findFirst({
+      where: { tenantId, originKey: action.originKey },
+      select: {
+        id: true,
+        profileId: true,
+        guestId: true,
+        eventType: true,
+        source: true,
+        externalProvider: true,
+        externalDomain: true,
+        externalId: true,
+        originKey: true,
+        xpDelta: true,
+        occurredAt: true,
+        payload: true,
+      },
+    });
+    if (!event) return null;
+
+    const payload = jsonRecord(event.payload);
+    if (
+      !Object.prototype.hasOwnProperty.call(payload, 'exactReconciliationPlan')
+    ) {
+      return null;
+    }
+    const plan = jsonRecord(payload.exactReconciliationPlan);
+    const extra = jsonRecord(payload.extra);
+    const store = jsonRecord(payload.store);
+    const rawRules = Array.isArray(plan.rules) ? plan.rules : [];
+    const rawRuleVersions = Array.isArray(plan.ruleVersions)
+      ? plan.ruleVersions
+      : [];
+    const rawRewardIntents = Array.isArray(plan.rewardIntents)
+      ? plan.rewardIntents
+      : [];
+    const planRule = jsonRecord(rawRules[0]);
+    const planRuleVersion = jsonRecord(rawRuleVersions[0]);
+    const planRewardIntent = jsonRecord(rawRewardIntents[0]);
+    const planRewardIntentRule = jsonRecord(planRewardIntent.rule);
+    const expectedEventType =
+      action.rule.kind === 'MISSION' ? 'PLAY_HOUR' : 'SESSION_START';
+    const expectedReconciliationKind =
+      action.rule.kind === 'MISSION'
+        ? 'EXACT_PLAY_TIME'
+        : 'EXACT_SESSION_START';
+    const expectedExternalId = [
+      'guest-game',
+      'GUEST_SESSION',
+      expectedEventType,
+      action.fact.sessionExternalId,
+    ].join(':');
+    const expectedRuleUpdatedAt = new Date(
+      action.rule.ruleUpdatedAt,
+    ).toISOString();
+    const rewardIntentIsSafe =
+      action.rule.kind === 'LOOT_BOX'
+        ? rawRewardIntents.length === 0
+        : rawRewardIntents.length === 1 &&
+          numberValue(planRewardIntent.schemaVersion, -1) === 1 &&
+          normalizedString(planRewardIntent.slotKey) ===
+            'LOOT_BOX_ENTITLEMENT' &&
+          normalizedString(planRewardIntent.claimKey) === null &&
+          normalizedString(planRewardIntentRule.kind) === 'MISSION' &&
+          normalizedString(planRewardIntentRule.id) === action.rule.id &&
+          normalizedString(planRewardIntent.qualifiedAt) ===
+            action.fact.happenedAt.toISOString();
+    const ruleEffectIsSafe =
+      action.rule.kind === 'LOOT_BOX'
+        ? planRule.rewardMaterializationSuppressed === true &&
+          Boolean(normalizedString(planRule.periodicLimitPeriod))
+        : normalizedString(planRule.rewardType) === 'LOOT_BOX_ENTITLEMENT' &&
+          (nullableNumber(planRule.rewardAmount) ?? 0) === 0 &&
+          normalizedString(planRule.rewardLootBoxId) === action.dependency?.id;
+    const receipt = await this.prisma.guestGameOriginReceipt.findUnique({
+      where: {
+        tenantId_originKey: { tenantId, originKey: action.originKey },
+      },
+      select: {
+        factId: true,
+        eventId: true,
+        eventType: true,
+        externalProvider: true,
+        externalDomain: true,
+        policy: true,
+        status: true,
+        claimedSource: true,
+      },
+    });
+    if (
+      event.profileId !== action.fact.profileId ||
+      event.guestId !== action.fact.guestId ||
+      canonicalGuestGameEventType(event.eventType) !== expectedEventType ||
+      event.source !== 'API_IMPORT' ||
+      normalizedString(event.externalProvider)?.toUpperCase() !==
+        normalizedString(action.fact.externalProvider)?.toUpperCase() ||
+      normalizeGuestGameExternalDomain(event.externalDomain) !==
+        normalizeGuestGameExternalDomain(action.fact.externalDomain) ||
+      event.externalId !== expectedExternalId ||
+      event.originKey !== action.originKey ||
+      event.occurredAt.getTime() !== action.fact.happenedAt.getTime() ||
+      event.xpDelta !== action.expectedXpDelta ||
+      numberValue(payload.processSchemaVersion, -1) !== 2 ||
+      normalizedString(payload.source) !== 'guest_gamification_process_event' ||
+      normalizedString(payload.sourceFactId) !== action.fact.id ||
+      normalizedString(payload.sourceFactKind) !== 'GUEST_SESSION' ||
+      normalizedString(payload.externalId) !== action.fact.sessionExternalId ||
+      normalizeGuestGameExternalDomain(payload.externalDomain) !==
+        normalizeGuestGameExternalDomain(action.fact.externalDomain) ||
+      normalizeGuestGameSourceKind(payload.sourceKind) !==
+        normalizeGuestGameSourceKind(action.fact.sourceKind) ||
+      normalizedString(payload.sessionExternalId) !==
+        action.fact.sessionExternalId ||
+      normalizedString(store.id) !== action.fact.storeId ||
+      extra.supportRewardRecovery !== true ||
+      normalizedString(extra.ticketNumber) !== ticketNumber ||
+      normalizedString(extra.factType) !== action.fact.factType ||
+      normalizedString(extra.confidence) !== 'EXACT' ||
+      normalizeGuestGameSourceKind(extra.sourceKind) !==
+        normalizeGuestGameSourceKind(action.fact.sourceKind) ||
+      normalizedString(extra.sessionExternalId) !==
+        action.fact.sessionExternalId ||
+      numberValue(plan.schemaVersion, -1) !== 1 ||
+      normalizedString(plan.reconciliationKind) !==
+        expectedReconciliationKind ||
+      normalizedString(plan.eventId) !== event.id ||
+      normalizedString(plan.originKey) !== action.originKey ||
+      normalizedString(plan.profileId) !== action.fact.profileId ||
+      normalizedString(plan.physicalSessionKey) !== action.physicalSessionKey ||
+      normalizedString(plan.sourceFactId) !== action.fact.id ||
+      dateValue(plan.sourceFactUpdatedAt)?.getTime() !==
+        action.fact.updatedAt.getTime() ||
+      !dateValue(plan.createdAt) ||
+      dateValue(plan.occurredAt)?.getTime() !==
+        action.fact.happenedAt.getTime() ||
+      canonicalGuestGameEventType(normalizedString(plan.eventType)) !==
+        expectedEventType ||
+      numberValue(plan.expectedXpDelta, -1) !== action.expectedXpDelta ||
+      rawRules.length !== 1 ||
+      normalizedString(planRule.kind) !== action.rule.kind ||
+      normalizedString(planRule.id) !== action.rule.id ||
+      normalizedString(planRule.status) !== 'ACTIVE' ||
+      planRule.eligible !== true ||
+      !guestGamePolicyAllowsEvaluation(
+        normalizedString(planRule.evaluationPolicy) ?? '',
+        'LIVE_LEDGER_FALLBACK',
+      ) ||
+      planRule.manualApprovalRequired !== false ||
+      dateValue(planRule.ruleUpdatedAt)?.toISOString() !==
+        expectedRuleUpdatedAt ||
+      numberValue(planRule.xpDelta, -1) !== action.expectedXpDelta ||
+      nullableNumber(planRule.battlePassStep) !== null ||
+      normalizedString(planRule.battlePassStepId) !== null ||
+      !ruleEffectIsSafe ||
+      rawRuleVersions.length !== 1 ||
+      normalizedString(planRuleVersion.ruleKind) !== action.rule.kind ||
+      normalizedString(planRuleVersion.ruleId) !== action.rule.id ||
+      nullableNumber(planRuleVersion.battlePassStep) !== null ||
+      normalizedString(planRuleVersion.battlePassStepId) !== null ||
+      dateValue(planRuleVersion.ruleUpdatedAt)?.toISOString() !==
+        expectedRuleUpdatedAt ||
+      !rewardIntentIsSafe ||
+      !receipt ||
+      receipt.factId !== action.fact.id ||
+      receipt.eventId !== event.id ||
+      canonicalGuestGameEventType(receipt.eventType) !== expectedEventType ||
+      normalizedString(receipt.externalProvider)?.toUpperCase() !==
+        normalizedString(action.fact.externalProvider)?.toUpperCase() ||
+      normalizeGuestGameExternalDomain(receipt.externalDomain) !==
+        normalizeGuestGameExternalDomain(action.fact.externalDomain) ||
+      receipt.policy !== 'EXACT_OPERATOR_CANONICALIZATION' ||
+      receipt.status !== 'PROCESSED' ||
+      !['EXACT_CANONICALIZATION', 'EXACT_OPERATOR_CANONICALIZATION'].includes(
+        receipt.claimedSource ?? '',
+      )
+    ) {
+      throw new ConflictException(
+        'The existing support recovery event is not the exact immutable effect for this ticket action.',
+      );
+    }
+    return event.id;
   }
 
   private async ensureSupportRecoveryCanonicalEvent(
@@ -2309,7 +2588,8 @@ export class GuestGameRuleReplayService {
         reward.seasonId === null &&
         reward.lootBoxId === null &&
         reward.rewardType === 'LOOT_BOX_ENTITLEMENT' &&
-        reward.rewardAmount === 0,
+        reward.rewardAmount === 0 &&
+        reward.status === 'APPROVED',
     );
     const intentsAreSafe = snapshot.intents.every(
       (intent) =>
@@ -2327,7 +2607,40 @@ export class GuestGameRuleReplayService {
         ? snapshot.event.xpDelta === 0 && snapshot.xpPosting === null
         : snapshot.event.xpDelta === action.expectedXpDelta &&
           snapshot.xpPosting?.requestedDelta === action.expectedXpDelta &&
-          snapshot.xpPosting.appliedDelta === action.expectedXpDelta;
+          snapshot.xpPosting.appliedDelta === action.expectedXpDelta &&
+          snapshot.xpPosting.balanceAfter - snapshot.xpPosting.balanceBefore ===
+            action.expectedXpDelta;
+    const entitlement = entitlements[0];
+    const sourceLinksAreSafe =
+      action.rule.kind === 'MISSION'
+        ? entitlement?.sourceRewardId === snapshot.rewards[0]?.id &&
+          entitlement.rewardId === null &&
+          snapshot.rewardEffects.length === 1 &&
+          snapshot.rewardEffects[0]?.rewardId === snapshot.rewards[0]?.id
+        : entitlement?.sourceFactId === action.fact.id &&
+          entitlement.sourceRewardId === null &&
+          entitlement.rewardId === null &&
+          snapshot.rewardEffects.length === 0;
+    const walletItem = snapshot.walletItems[0];
+    const walletItemIsSafe =
+      snapshot.walletItems.length === 1 &&
+      Boolean(entitlement) &&
+      walletItem?.profileId === action.fact.profileId &&
+      walletItem.storeId === action.fact.storeId &&
+      walletItem.kind === 'LOOT_BOX_ENTITLEMENT' &&
+      walletItem.sourceKind ===
+        (action.rule.kind === 'MISSION' ? 'MISSION' : 'LOOT_BOX') &&
+      walletItem.sourceId === action.rule.id &&
+      walletItem.title === action.rule.name &&
+      walletItem.rewardLabel === '1 попытка открытия' &&
+      walletItem.status === 'PENDING' &&
+      walletItem.claimXpDelta === 0 &&
+      walletItem.rewardId === null &&
+      walletItem.entitlementId === entitlement?.id &&
+      walletItem.eventId === null &&
+      walletItem.claimedAt === null &&
+      walletItem.availableAt === entitlement?.qualifiedAt &&
+      Date.parse(walletItem.expiresAt) > Date.parse(walletItem.availableAt);
     if (
       snapshot.entitlements.length !== 1 ||
       entitlements.length !== 1 ||
@@ -2338,8 +2651,9 @@ export class GuestGameRuleReplayService {
       !rewardsAreSafe ||
       !intentsAreSafe ||
       !rewardEffectsAreSafe ||
+      !sourceLinksAreSafe ||
       snapshot.bonusLedgerEntries.length !== 0 ||
-      snapshot.walletItems.length !== 0 ||
+      !walletItemIsSafe ||
       !xpIsSafe
     ) {
       throw new ConflictException(
@@ -2398,6 +2712,7 @@ export class GuestGameRuleReplayService {
           rewardId: true,
           consumedAt: true,
           canceledAt: true,
+          qualifiedAt: true,
           evidence: true,
           sourceReward: { select: { missionId: true } },
         },
@@ -2448,11 +2763,21 @@ export class GuestGameRuleReplayService {
         orderBy: { id: 'asc' },
         select: {
           id: true,
+          profileId: true,
+          storeId: true,
           kind: true,
+          sourceKind: true,
+          sourceId: true,
+          title: true,
+          rewardLabel: true,
           status: true,
+          claimXpDelta: true,
           rewardId: true,
           entitlementId: true,
           eventId: true,
+          availableAt: true,
+          expiresAt: true,
+          claimedAt: true,
         },
       }),
       this.prisma.guestGameXpPosting.findUnique({
@@ -2484,6 +2809,7 @@ export class GuestGameRuleReplayService {
         rewardId: entitlement.rewardId,
         consumedAt: entitlement.consumedAt?.toISOString() ?? null,
         canceledAt: entitlement.canceledAt?.toISOString() ?? null,
+        qualifiedAt: entitlement.qualifiedAt.toISOString(),
         sourceMissionId:
           entitlement.sourceReward?.missionId ??
           normalizedString(jsonRecord(entitlement.evidence).missionId),
@@ -2497,7 +2823,12 @@ export class GuestGameRuleReplayService {
         ...entry,
         amount: Number(entry.amount),
       })),
-      walletItems,
+      walletItems: walletItems.map((item) => ({
+        ...item,
+        availableAt: item.availableAt.toISOString(),
+        expiresAt: item.expiresAt.toISOString(),
+        claimedAt: item.claimedAt?.toISOString() ?? null,
+      })),
       xpPosting,
     };
   }

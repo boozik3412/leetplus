@@ -655,8 +655,11 @@ describe('resolveGuestSupportSchemaBridgeMode', () => {
     expect(resolveGuestSupportSchemaBridgeMode('allow_current_188')).toBe(
       'ALLOW_CURRENT_188',
     );
+    expect(resolveGuestSupportSchemaBridgeMode('allow_current_189')).toBe(
+      'ALLOW_CURRENT_189',
+    );
     expect(() => resolveGuestSupportSchemaBridgeMode('enabled')).toThrow(
-      /must be OFF, ALLOW_CURRENT_187, or ALLOW_CURRENT_188/,
+      /must be OFF, ALLOW_CURRENT_187, ALLOW_CURRENT_188, or ALLOW_CURRENT_189/,
     );
   });
 
@@ -711,6 +714,37 @@ describe('resolveGuestSupportSchemaBridgeMode', () => {
       validateEnvironment({
         ...bridge,
         EXPECTED_DATABASE_MIGRATION_COUNT: '188',
+      }),
+    ).toThrow(/requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF/);
+    expect(() =>
+      validateEnvironment({
+        ...bridge,
+        LEETPLUS_API_RUNTIME_ROLE: 'GUEST',
+      }),
+    ).toThrow(/requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF/);
+  });
+
+  it('admits the CURRENT_189 bridge only for the disabled combined CURRENT_190 release', () => {
+    const bridge = {
+      ...validProductionEnvironment(),
+      EXPECTED_DATABASE_MIGRATION:
+        '20260908090000_initial_owner_invite_link_mode',
+      EXPECTED_DATABASE_MIGRATION_COUNT: '190',
+      GUEST_BUG_REPORTING_MODE: 'OFF',
+      GUEST_SUPPORT_SCHEMA_BRIDGE_MODE: 'ALLOW_CURRENT_189',
+    };
+
+    expect(validateEnvironment(bridge)).toMatchObject({
+      GUEST_BUG_REPORTING_MODE: 'OFF',
+      GUEST_SUPPORT_SCHEMA_BRIDGE_MODE: 'ALLOW_CURRENT_189',
+    });
+    expect(() =>
+      validateEnvironment({ ...bridge, GUEST_BUG_REPORTING_MODE: 'LIVE' }),
+    ).toThrow(/requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF/);
+    expect(() =>
+      validateEnvironment({
+        ...bridge,
+        EXPECTED_DATABASE_MIGRATION_COUNT: '189',
       }),
     ).toThrow(/requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF/);
     expect(() =>

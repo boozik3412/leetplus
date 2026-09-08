@@ -13,7 +13,7 @@
 | Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                                                                                                   |
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                                                                                                 |
 | Offline/USB key      | исключён из beta critical path                                                                                                                                                                                |
-| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                                                                                                            |
+| Owner onboarding     | production: email-bound; source candidate: явный выбор EMAIL или одноразовой LINK, пользователь сам задаёт пароль                                                                                            |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect                                          |
 | Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`, canary 05.09 обработал `1/1` INTERNAL tenant; daily timer enabled/active, следующий scheduled run 07.09                                |
 | Assortment dashboard | source candidate: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз готовы; schema/route ownership не меняются, production effect требует exact-main admission, rollout и worker rebind |
@@ -35,6 +35,16 @@ worker должен пройти отдельный exact supersession стар�
 stable timer `plan/apply/check` на новом release SHA. До этой цепочки статус
 строки является только source-ready, а не deployed. Решение внешнего beta
 остаётся `NO-GO` по независимым открытым gates.
+
+Source candidate 08.09 добавляет на `/administration` выбор доставки initial
+OWNER приглашения: «Отправка на почту» или «Ссылка без почты». В режиме LINK
+Platform Admin получает URL один раз; SMTP outbox атомарно отменяется до
+provider attempt, ciphertext очищается, URL не сохраняется в audit/log/browser
+storage. CURRENT_190 database guard допускает accept только при exact
+`EMAIL/SENT` либо `LINK/CANCELED/OWNER_INVITE_LINK_ONLY` evidence. Добавлен
+forward rollout bridge `CURRENT_189 → CURRENT_190`; production пока остаётся
+на `CURRENT_189/189` до exact-SHA admission, restored-copy rehearsal и
+controlled rollout.
 
 Source-разбор `LP-BUG-A56627F5` подтвердил, что отменённые награды не были
 ошибкой связи профилей: единственный профиль гостя был отмечен как staff/test

@@ -34,6 +34,7 @@ export const STAFF_TASK_ALLOWED_ADDITIVE_TAIL = Object.freeze([
   "20260820010000_guest_portal_telegram_update_ledger",
   "20260828190000_guest_support_bug_reports",
   "20260831120000_guest_support_bug_report_input_repair",
+  "20260908090000_initial_owner_invite_link_mode",
 ]);
 
 export const CURRENT_EXPECTED_MIGRATION_COUNT =
@@ -44,4 +45,4 @@ export const CURRENT_EXPECTED_LATEST_MIGRATION =
 
 // Keep the reader-facing admission state explicit. A later release migration
 // must update this value together with the additive-tail allowlist.
-export const STAFF_TASK_CURRENT_RELEASE_STATE = "CURRENT_189";
+export const STAFF_TASK_CURRENT_RELEASE_STATE = "CURRENT_190";

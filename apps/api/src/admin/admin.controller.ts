@@ -145,6 +145,19 @@ export class AdminController {
     );
   }
 
+  @Post('tenants/:tenantId/initial-owner-invite/publish-link')
+  publishSharedBetaInitialOwnerInviteLink(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Body() body: unknown,
+  ) {
+    return this.founderOwnerInviteLifecycleService.publishLink(
+      user,
+      tenantId,
+      body ?? {},
+    );
+  }
+
   @Post('tenants/:tenantId/entitlement-profile')
   replaceTenantEntitlementProfile(
     @CurrentUser() user: AuthenticatedUser,

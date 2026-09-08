@@ -133,6 +133,7 @@ export const GUEST_SUPPORT_SCHEMA_BRIDGE_MODES = [
   'OFF',
   'ALLOW_CURRENT_187',
   'ALLOW_CURRENT_188',
+  'ALLOW_CURRENT_189',
 ] as const;
 export type GuestSupportSchemaBridgeMode =
   (typeof GUEST_SUPPORT_SCHEMA_BRIDGE_MODES)[number];
@@ -153,6 +154,14 @@ export const GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT189_TARGET = Object.freeze({
   migration: '20260831120000_guest_support_bug_report_input_repair',
   migrationCount: 189,
 });
+export const GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT189_SOURCE = Object.freeze({
+  migration: '20260831120000_guest_support_bug_report_input_repair',
+  migrationCount: 189,
+});
+export const GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT190_TARGET = Object.freeze({
+  migration: '20260908090000_initial_owner_invite_link_mode',
+  migrationCount: 190,
+});
 export const GUEST_SUPPORT_SCHEMA_BRIDGE_CONTRACTS = Object.freeze({
   ALLOW_CURRENT_187: Object.freeze({
     source: GUEST_SUPPORT_SCHEMA_BRIDGE_SOURCE,
@@ -161,6 +170,10 @@ export const GUEST_SUPPORT_SCHEMA_BRIDGE_CONTRACTS = Object.freeze({
   ALLOW_CURRENT_188: Object.freeze({
     source: GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT188_SOURCE,
     target: GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT189_TARGET,
+  }),
+  ALLOW_CURRENT_189: Object.freeze({
+    source: GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT189_SOURCE,
+    target: GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT190_TARGET,
   }),
 });
 
@@ -188,7 +201,7 @@ export function resolveGuestSupportSchemaBridgeMode(
     return normalized as GuestSupportSchemaBridgeMode;
   }
   throw new Error(
-    'GUEST_SUPPORT_SCHEMA_BRIDGE_MODE must be OFF, ALLOW_CURRENT_187, or ALLOW_CURRENT_188',
+    'GUEST_SUPPORT_SCHEMA_BRIDGE_MODE must be OFF, ALLOW_CURRENT_187, ALLOW_CURRENT_188, or ALLOW_CURRENT_189',
   );
 }
 

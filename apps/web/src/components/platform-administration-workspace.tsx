@@ -46,6 +46,33 @@ type TenantServiceDiagnosticsResult = {
   };
 };
 
+type OwnerInviteDeliveryMode = "EMAIL" | "LINK";
+
+type OwnerInviteStatusResult = {
+  ownerInvite: {
+    id: string;
+    state: "ACTIVE" | "ACCEPTED" | "EXPIRED" | "REVOKED";
+    deliveryStatus: string;
+    deliveryMode: OwnerInviteDeliveryMode;
+    expiresAt: string;
+  };
+};
+
+type OwnerInvitePublishedLinkResult = {
+  registrationUrl: string;
+  expiresAt: string;
+};
+
+type OwnerInvitePanelState = {
+  choice: OwnerInviteDeliveryMode;
+  status: OwnerInviteStatusResult | null;
+  registrationUrl: string | null;
+  isLoading: boolean;
+  isCopying: boolean;
+  message: string | null;
+  error: string | null;
+};
+
 type TenantFormState = {
   action: LifecycleAction;
   reason: string;
@@ -191,6 +218,18 @@ function initialSourceFormState(source: LangameSource): SourceFormState {
     reason: "",
     confirmation: "",
     supportTicket: "",
+    message: null,
+    error: null,
+  };
+}
+
+function initialOwnerInvitePanelState(): OwnerInvitePanelState {
+  return {
+    choice: "LINK",
+    status: null,
+    registrationUrl: null,
+    isLoading: false,
+    isCopying: false,
     message: null,
     error: null,
   };
@@ -437,6 +476,9 @@ export function PlatformAdministrationWorkspace({
     useState<Record<string, ServiceDiagnosticsStatus>>({});
   const [serviceDiagnosticsErrorsByTenant, setServiceDiagnosticsErrorsByTenant] =
     useState<Record<string, string | null>>({});
+  const [ownerInvitePanels, setOwnerInvitePanels] = useState<
+    Record<string, OwnerInvitePanelState>
+  >({});
   const targetTypeOptions = Array.from(
     new Set([
       ...baseTargetTypeOptions,
@@ -504,6 +546,19 @@ export function PlatformAdministrationWorkspace({
           message: null,
           error: null,
         }),
+        ...patch,
+      },
+    }));
+  }
+
+  function updateOwnerInvitePanel(
+    tenantId: string,
+    patch: Partial<OwnerInvitePanelState>,
+  ) {
+    setOwnerInvitePanels((current) => ({
+      ...current,
+      [tenantId]: {
+        ...(current[tenantId] ?? initialOwnerInvitePanelState()),
         ...patch,
       },
     }));
@@ -722,6 +777,133 @@ export function PlatformAdministrationWorkspace({
     router.refresh();
   }
 
+  async function loadOwnerInviteStatus(
+    tenant: Tenant,
+  ): Promise<OwnerInviteStatusResult | null> {
+    const response = await fetch(
+      `/api/admin/tenants/${tenant.id}/initial-owner-invite`,
+      { cache: "no-store" },
+    );
+
+    if (!response.ok) {
+      updateOwnerInvitePanel(tenant.id, {
+        error: await readError(response),
+        isLoading: false,
+      });
+      return null;
+    }
+
+    const status = (await response.json()) as OwnerInviteStatusResult;
+    updateOwnerInvitePanel(tenant.id, {
+      status,
+      choice: status.ownerInvite.deliveryMode,
+      error: null,
+      isLoading: false,
+    });
+    return status;
+  }
+
+  async function refreshOwnerInviteStatus(tenant: Tenant) {
+    updateOwnerInvitePanel(tenant.id, {
+      isLoading: true,
+      error: null,
+      message: null,
+    });
+    await loadOwnerInviteStatus(tenant);
+  }
+
+  async function publishOwnerInviteLink(tenant: Tenant) {
+    const panel =
+      ownerInvitePanels[tenant.id] ?? initialOwnerInvitePanelState();
+    updateOwnerInvitePanel(tenant.id, {
+      isLoading: true,
+      registrationUrl: null,
+      error: null,
+      message: null,
+    });
+
+    const status = panel.status ?? (await loadOwnerInviteStatus(tenant));
+    if (!status) {
+      return;
+    }
+
+    if (
+      status.ownerInvite.state !== "ACTIVE" ||
+      status.ownerInvite.deliveryMode !== "EMAIL"
+    ) {
+      updateOwnerInvitePanel(tenant.id, {
+        isLoading: false,
+        error:
+          status.ownerInvite.deliveryMode === "LINK"
+            ? "Ссылка уже была показана один раз. Для новой ссылки отзовите и перевыпустите приглашение."
+            : "Ссылку можно создать только для активного приглашения в режиме отправки на почту.",
+      });
+      return;
+    }
+
+    const response = await fetch(
+      `/api/admin/tenants/${tenant.id}/initial-owner-invite/publish-link`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirmation: `PUBLISH OWNER INVITE LINK ${tenant.id}`,
+          requestId: crypto.randomUUID(),
+          reason: "Прямая ссылка выбрана администратором платформы",
+          supportTicket: null,
+          expectedInviteId: status.ownerInvite.id,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      updateOwnerInvitePanel(tenant.id, {
+        isLoading: false,
+        error: await readError(response),
+      });
+      return;
+    }
+
+    const result = (await response.json()) as OwnerInvitePublishedLinkResult;
+    updateOwnerInvitePanel(tenant.id, {
+      isLoading: false,
+      registrationUrl: result.registrationUrl,
+      status: {
+        ownerInvite: {
+          ...status.ownerInvite,
+          deliveryMode: "LINK",
+          deliveryStatus: "CANCELED",
+          expiresAt: result.expiresAt,
+        },
+      },
+      choice: "LINK",
+      message:
+        "Ссылка создана и показана один раз. Скопируйте её до обновления страницы.",
+    });
+    await loadAuditEvents();
+  }
+
+  async function copyOwnerInviteLink(tenant: Tenant) {
+    const link = ownerInvitePanels[tenant.id]?.registrationUrl;
+    if (!link) {
+      return;
+    }
+
+    updateOwnerInvitePanel(tenant.id, { isCopying: true, error: null });
+    try {
+      await navigator.clipboard.writeText(link);
+      updateOwnerInvitePanel(tenant.id, {
+        isCopying: false,
+        message: "Ссылка скопирована. Передайте её владельцу защищённым способом.",
+      });
+    } catch {
+      updateOwnerInvitePanel(tenant.id, {
+        isCopying: false,
+        error: "Не удалось скопировать автоматически. Скопируйте ссылку из поля.",
+      });
+    }
+  }
+
   const auditExportHref = `/api/admin/audit-events/export?${buildAuditSearchParams().toString()}`;
 
   return (
@@ -909,6 +1091,9 @@ export function PlatformAdministrationWorkspace({
             {orderedTenants.map((tenant) => {
               const form = forms[tenant.id] ?? initialFormState(tenant);
               const hasBusinessData = hasTenantBusinessData(tenant);
+              const ownerInvitePanel =
+                ownerInvitePanels[tenant.id] ??
+                initialOwnerInvitePanelState();
 
               return (
                 <article
@@ -1010,6 +1195,116 @@ export function PlatformAdministrationWorkspace({
 
                   <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_420px]">
                     <div className="space-y-3 text-sm">
+                      <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4 dark:bg-emerald-500/10">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+                              Доступ владельца сети
+                            </p>
+                            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                              Выберите отправку на почту или разовую выдачу
+                              прямой ссылки.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={ownerInvitePanel.isLoading}
+                            onClick={() => void refreshOwnerInviteStatus(tenant)}
+                            className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold transition hover:border-emerald-400 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:hover:text-emerald-200"
+                          >
+                            Обновить статус
+                          </button>
+                        </div>
+
+                        <label className="mt-3 block text-sm">
+                          <span className="text-xs font-semibold uppercase text-zinc-500">
+                            Способ выдачи доступа
+                          </span>
+                          <select
+                            value={ownerInvitePanel.choice}
+                            onChange={(event) =>
+                              updateOwnerInvitePanel(tenant.id, {
+                                choice: event.target
+                                  .value as OwnerInviteDeliveryMode,
+                                error: null,
+                                message: null,
+                              })
+                            }
+                            className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none transition hover:border-emerald-400 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+                          >
+                            <option value="LINK">Ссылка без почты</option>
+                            <option value="EMAIL">Отправка на почту</option>
+                          </select>
+                        </label>
+
+                        {ownerInvitePanel.status ? (
+                          <p className="mt-2 text-xs text-zinc-500">
+                            Приглашение: {ownerInvitePanel.status.ownerInvite.state}
+                            {" · "}
+                            режим: {ownerInvitePanel.status.ownerInvite.deliveryMode}
+                            {" · "}
+                            действует до {formatDate(
+                              ownerInvitePanel.status.ownerInvite.expiresAt,
+                            )}
+                          </p>
+                        ) : null}
+
+                        {ownerInvitePanel.choice === "LINK" ? (
+                          <button
+                            type="button"
+                            disabled={ownerInvitePanel.isLoading}
+                            onClick={() => void publishOwnerInviteLink(tenant)}
+                            className="mt-3 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {ownerInvitePanel.isLoading
+                              ? "Создаём ссылку…"
+                              : "Создать ссылку доступа"}
+                          </button>
+                        ) : (
+                          <p className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
+                            Почтовый режим использует настроенную очередь SMTP.
+                            Если письмо недоступно, выберите «Ссылка без почты».
+                          </p>
+                        )}
+
+                        {ownerInvitePanel.registrationUrl ? (
+                          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+                            <p className="text-xs font-semibold text-amber-800 dark:text-amber-100">
+                              Ссылка содержит секрет доступа. Она не хранится в
+                              журнале и повторно не показывается.
+                            </p>
+                            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                              <input
+                                readOnly
+                                value={ownerInvitePanel.registrationUrl}
+                                aria-label="Ссылка регистрации владельца"
+                                className="min-w-0 flex-1 rounded-lg border border-amber-500/30 bg-white px-3 py-2 text-xs outline-none dark:bg-zinc-950"
+                              />
+                              <button
+                                type="button"
+                                disabled={ownerInvitePanel.isCopying}
+                                onClick={() => void copyOwnerInviteLink(tenant)}
+                                className="rounded-lg border border-amber-500/40 bg-white px-3 py-2 text-xs font-semibold transition hover:border-amber-500 disabled:opacity-60 dark:bg-zinc-950"
+                              >
+                                {ownerInvitePanel.isCopying
+                                  ? "Копируем…"
+                                  : "Копировать"}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {ownerInvitePanel.error ? (
+                          <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-200">
+                            {ownerInvitePanel.error}
+                          </p>
+                        ) : null}
+                        {ownerInvitePanel.message ? (
+                          <p className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-200">
+                            {ownerInvitePanel.message}
+                          </p>
+                        ) : null}
+                      </div>
                       <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
                         <p className="text-xs font-semibold uppercase text-zinc-500">
                           Langame источники

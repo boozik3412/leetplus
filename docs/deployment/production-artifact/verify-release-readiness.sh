@@ -60,7 +60,7 @@ Usage:
 The API must expose /version and /health/ready. The probe accepts only an
 exact release SHA and either the expected completed migration name/count or
 one of the explicitly admitted guest-support forward-compatibility envelopes:
-CURRENT_187 -> CURRENT_188 or CURRENT_188 -> CURRENT_189. It also requires an
+CURRENT_187 -> CURRENT_188, CURRENT_188 -> CURRENT_189, or CURRENT_189 -> CURRENT_190. It also requires an
 HTTP-success Web response and the exact Next.js BUILD_ID static manifest. It
 performs no write or restart operation. Tests may add
 --unprivileged-test-mode; root may not use that mode.
@@ -269,6 +269,12 @@ const admittedGuestSupportForwardBridges = [
     sourceMigrationCount: 188,
     targetMigration: '20260831120000_guest_support_bug_report_input_repair',
     targetMigrationCount: 189,
+  },
+  {
+    sourceMigration: '20260831120000_guest_support_bug_report_input_repair',
+    sourceMigrationCount: 189,
+    targetMigration: '20260908090000_initial_owner_invite_link_mode',
+    targetMigrationCount: 190,
   },
 ];
 const guestSupportForwardBridgeAccepted =

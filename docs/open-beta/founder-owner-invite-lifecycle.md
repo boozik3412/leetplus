@@ -1,7 +1,7 @@
 # Founder pilot: initial owner invite lifecycle
 
 Статус:
-`STATUS + REVOKE + REISSUE EXACT-SHA ACCEPTED / CURRENT185 SENT+ACCEPT LOCAL PASS / PRODUCTION NO-GO`.
+`STATUS + REVOKE + REISSUE ACCEPTED / EMAIL|LINK SOURCE CANDIDATE / PRODUCTION NO-GO`.
 
 ## Назначение
 
@@ -10,16 +10,43 @@
 Platform Admin должен иметь безопасный способ увидеть состояние initial OWNER
 invite и отозвать ошибочный или скомпрометированный токен без ручной правки БД.
 
-Доступны два route под существующими `JwtAuthGuard + PlatformAdminGuard`:
+Доступны четыре route под существующими `JwtAuthGuard + PlatformAdminGuard`:
 
 - `GET /admin/tenants/:tenantId/initial-owner-invite` — PII-free status;
+- `POST /admin/tenants/:tenantId/initial-owner-invite/publish-link` —
+  одноразово показать прямую ссылку и отменить SMTP delivery;
 - `POST /admin/tenants/:tenantId/initial-owner-invite/revoke` — атомарный revoke;
 - `POST /admin/tenants/:tenantId/initial-owner-invite/reissue` — новый
   predecessor-bound invite/outbox/token без resend старого секрета.
 
 Оба route повторно проверяют активный `isPlatformAdmin` в БД после общего
 tenant advisory lock. Значение из JWT само по себе не является достаточной
-authority.
+authority. Кнопка выбора способа и публикации ссылки находится в карточке сети
+на `/administration`; Web обращается только к private/no-store BFF.
+
+## Выбор способа доставки
+
+Каждое initial OWNER приглашение имеет ровно один неизменяемый после выбора
+способ доставки:
+
+- `EMAIL` — прежний режим по умолчанию. Регистрация разрешается только после
+  доказанного `SENT` и совпадающего terminal delivery event;
+- `LINK` — Platform Admin явно выбирает «Ссылка без почты». API расшифровывает
+  существующий invite token только внутри tenant-locked транзакции, переводит
+  delivery в `CANCELED` с причиной `OWNER_INVITE_LINK_ONLY`, очищает ciphertext
+  и возвращает URL один раз.
+
+Ссылка является bearer-секретом: она не записывается в audit, логи, cookie,
+`localStorage` или `sessionStorage`. Audit хранит только факт смены режима и
+digest команды. Повторно получить тот же URL нельзя; для новой ссылки нужно
+отозвать и перевыпустить приглашение. Владение ссылкой не расширяет tenant,
+роль или scope: accept по-прежнему создаёт только initial `OWNER/NETWORK` того
+же tenant. SMTP-конфигурация для режима `LINK` не требуется.
+
+Migration `20260908090000_initial_owner_invite_link_mode` добавляет
+`UserInvite.deliveryMode`, запрет произвольной смены режима и отдельную
+database-проверку регистрации. Разрешены только два точных доказательства:
+verified `EMAIL/SENT` либо explicit `LINK/CANCELED/OWNER_INVITE_LINK_ONLY`.
 
 ## Revoke command
 
@@ -85,7 +112,7 @@ Migration `20260818010000_founder_owner_invite_reissue_v1` добавляет im
 
 - API typecheck;
 - scoped lint без warnings;
-- controller/service unit: `2 suites / 18 tests PASS`;
+- controller/service unit: `2 suites / 20 tests PASS`;
 - fail-closed cases: stale Platform Admin, tenant/invite drift, unsafe delivery
   state, payload smuggling и PII в audit metadata.
 
@@ -137,5 +164,5 @@ Successor не развёрнут в production.
 - Gate 1MT/2 и production activation. Clean migration/activation-role
   restored-copy rehearsal уже принят 18.08.2026.
 
-Production, текущая сеть из четырёх клубов и внешний tester этим этапом не
-изменяются.
+До exact-SHA admission и controlled rollout это source candidate: production,
+текущая сеть и внешний tester не изменены.

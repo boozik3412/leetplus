@@ -1049,6 +1049,9 @@ jobs:
       - name: Test dormant CURRENT189 employee invitation Web BFF candidate
         run: pnpm --filter web test:employee-invite-current189-bff-candidate
 
+      - name: Test owner invitation direct-link BFF boundary
+        run: pnpm --filter web test:owner-invite-link-bff-boundary
+
       - name: Lint web
         run: pnpm --filter web lint
 

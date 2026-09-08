@@ -134,13 +134,13 @@ describe('Identity email claim application boundary', () => {
     expect(founderLifecycleSource).not.toContain('.bindTransaction(');
     expect(
       founderLifecycleSource.match(/\.lockTenantTransaction\s*\(/gu) ?? [],
-    ).toHaveLength(3);
+    ).toHaveLength(4);
     expect(
       founderLifecycleSource.match(/\.releaseInvite\s*\(/gu) ?? [],
     ).toHaveLength(1);
     expect(
       founderLifecycleSource.match(/\.userInvite\.updateMany\s*\(/gu) ?? [],
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(
       founderLifecycleSource.match(/founder_owner_invite_reissue_v1/gu) ?? [],
     ).toHaveLength(1);

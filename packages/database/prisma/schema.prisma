@@ -628,6 +628,7 @@ model UserInvite {
   revokedAt             DateTime?
   revokedByUserId       String?
   identityClaimRevision Int?
+  deliveryMode          String           @default("EMAIL") @db.VarChar(16)
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
 

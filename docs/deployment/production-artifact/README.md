@@ -96,6 +96,16 @@ Admission только через
 после final admission его digests обязательно повторно связываются со свежим
 live evidence, а короткоживущий binding сам по себе не разрешает effect.
 
+Для migration `20260908090000_initial_owner_invite_link_mode` candidate API
+должен запускаться с exact target `CURRENT_190/190` и временным
+`GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_189`, пока production database
+ещё на `CURRENT_189/189`. После backup/restored-copy PASS и schema apply bridge
+обязан быть возвращён в `OFF` до postcheck. Migration добавляет только
+forward-only delivery-mode boundary и re-pin worker readiness; ручная пометка
+outbox как `SENT`, synthetic provider event или прямое раскрытие ciphertext
+запрещены. Active slot и N−1 rollback не заменяются до успешного candidate
+smoke; при ошибке public upstream остаётся на предыдущем slot.
+
 Обычный runtime rollout после отдельного production GO можно выполнять через
 [`resumable-release-orchestrator`](../resumable-release-orchestrator.md). Он
 последовательно вызывает те же hydration/promote, slot bind, loopback smoke и

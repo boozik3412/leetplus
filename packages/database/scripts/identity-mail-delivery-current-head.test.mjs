@@ -14,8 +14,10 @@ const guardMigrationName =
 const telegramMigrationName =
   "20260820010000_guest_portal_telegram_update_ledger";
 const previousCurrentMigrationName = "20260828190000_guest_support_bug_reports";
-const currentMigrationName =
+const previousCurrent189MigrationName =
   "20260831120000_guest_support_bug_report_input_repair";
+const currentMigrationName =
+  "20260908090000_initial_owner_invite_link_mode";
 const predecessorName = "20260818020000_identity_mail_delivery_current_head_v1";
 const preterminalManifestDigest =
   "589dd0a39f2372041a284392c72ad6ed59027877e909e1a5d377b9017c662fda";
@@ -49,16 +51,17 @@ async function canonicalManifest() {
   return { entries, rows };
 }
 
-test("CURRENT189 preserves the reviewed CURRENT185 digest and advances readiness exactly once", async () => {
+test("CURRENT190 preserves the reviewed CURRENT185 digest and advances readiness exactly once", async () => {
   const { entries, rows } = await canonicalManifest();
-  assert.equal(entries.length, 189);
-  assert.equal(entries.at(-5), predecessorName);
-  assert.equal(entries.at(-4), guardMigrationName);
-  assert.equal(entries.at(-3), telegramMigrationName);
-  assert.equal(entries.at(-2), previousCurrentMigrationName);
+  assert.equal(entries.length, 190);
+  assert.equal(entries.at(-6), predecessorName);
+  assert.equal(entries.at(-5), guardMigrationName);
+  assert.equal(entries.at(-4), telegramMigrationName);
+  assert.equal(entries.at(-3), previousCurrentMigrationName);
+  assert.equal(entries.at(-2), previousCurrent189MigrationName);
   assert.equal(entries.at(-1), currentMigrationName);
   assert.equal(
-    sha256(`${rows.slice(0, -4).join("\n")}\n`),
+    sha256(`${rows.slice(0, -5).join("\n")}\n`),
     preterminalManifestDigest,
   );
 
@@ -124,28 +127,75 @@ test("CURRENT189 preserves the reviewed CURRENT185 digest and advances readiness
     new RegExp(productionHistoryPreterminalManifestDigest, "u"),
   );
 
+  const previousCurrent189Sql = normalizedBytes(
+    await readFile(
+      path.join(
+        migrationsRoot,
+        previousCurrent189MigrationName,
+        "migration.sql",
+      ),
+    ),
+  ).toString("utf8");
+  assert.match(
+    previousCurrent189Sql,
+    /pg_catalog\.length\("description"\) BETWEEN 20 AND 2000/u,
+  );
+  assert.match(previousCurrent189Sql, /migration_count IS DISTINCT FROM 189/u);
+  assert.match(
+    previousCurrent189Sql,
+    new RegExp(previousCurrent189MigrationName, "u"),
+  );
+  assert.match(
+    previousCurrent189Sql,
+    new RegExp(previousCurrentMigrationName, "u"),
+  );
+  assert.match(previousCurrent189Sql, new RegExp(telegramMigrationName, "u"));
+  assert.match(previousCurrent189Sql, new RegExp(guardMigrationName, "u"));
+  assert.match(
+    previousCurrent189Sql,
+    new RegExp(preterminalManifestDigest, "u"),
+  );
+  assert.match(
+    previousCurrent189Sql,
+    new RegExp(productionHistoryPreterminalManifestDigest, "u"),
+  );
+
   const currentSql = normalizedBytes(
     await readFile(
       path.join(migrationsRoot, currentMigrationName, "migration.sql"),
     ),
   ).toString("utf8");
-  assert.match(
-    currentSql,
-    /pg_catalog\.length\("description"\) BETWEEN 20 AND 2000/u,
-  );
-  assert.match(currentSql, /migration_count IS DISTINCT FROM 189/u);
+  assert.match(currentSql, /migration_count IS DISTINCT FROM 190/u);
   assert.match(currentSql, new RegExp(currentMigrationName, "u"));
-  assert.match(currentSql, new RegExp(previousCurrentMigrationName, "u"));
-  assert.match(currentSql, new RegExp(telegramMigrationName, "u"));
-  assert.match(currentSql, new RegExp(guardMigrationName, "u"));
+  assert.match(currentSql, new RegExp(previousCurrent189MigrationName, "u"));
   assert.match(currentSql, new RegExp(preterminalManifestDigest, "u"));
   assert.match(
     currentSql,
     new RegExp(productionHistoryPreterminalManifestDigest, "u"),
   );
+  assert.match(currentSql, /"deliveryMode" IN \('EMAIL', 'LINK'\)/u);
+  assert.match(currentSql, /OWNER_INVITE_LINK_ONLY/u);
+  assert.match(
+    currentSql,
+    /CREATE TRIGGER "UserInvite_initial_owner_delivery_mode_guard_trigger"/u,
+  );
+  assert.match(
+    currentSql,
+    /identity_initial_owner_invite_registration_allowed_v1/u,
+  );
+  assert.match(
+    currentSql,
+    /target_invite\."deliveryMode" = 'EMAIL'[\s\S]*?target_outbox\."status" =\s*'SENT'/u,
+  );
+  assert.match(
+    currentSql,
+    /target_invite\."deliveryMode" = 'LINK'[\s\S]*?target_outbox\."status" =\s*'CANCELED'/u,
+  );
+  assert.match(currentSql, /^BEGIN;/u);
+  assert.match(currentSql, /COMMIT;\s*$/u);
 });
 
-test("the active worker repository consumes the exact CURRENT189 receipt", async () => {
+test("the active worker repository consumes the exact CURRENT190 receipt", async () => {
   const repository = await readFile(
     path.join(
       repositoryRoot,
@@ -158,7 +208,7 @@ test("the active worker repository consumes the exact CURRENT189 receipt", async
     "utf8",
   );
   assert.match(repository, new RegExp(currentMigrationName, "u"));
-  assert.match(repository, /CURRENT_MIGRATION_COUNT = 189 as const/u);
+  assert.match(repository, /CURRENT_MIGRATION_COUNT = 190 as const/u);
   assert.match(repository, new RegExp(preterminalManifestDigest, "u"));
   assert.match(
     repository,

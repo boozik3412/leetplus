@@ -133,8 +133,9 @@ intents, deliveries и bonus ledger не replay-ились и не начисл�
 
 ### Assortment action center deployed 08.09.2026
 
-Production release `1cf42bb311aafa7f41ad7f42784463fe34c152c7`
-расширяет существующий tenant-authenticated
+Впервые выпущенный release `1cf42bb311aafa7f41ad7f42784463fe34c152c7` и
+текущий active `def5174f16f49212dd21d243cda89dffeff7837f`
+расширяют существующий tenant-authenticated
 `GET /dashboard/summary` и экран `/assortment/dashboard` операционными
 показателями ассортимента: свежестью источников, приоритетными действиями,
 покрытием себестоимости/остатков/категорий, чековыми метриками и семидневным
@@ -162,6 +163,13 @@ Active green и hot rollback blue независимо healthy. Старый Lan
 снят штатным supersession; canary `2026-09-07` и stable timer
 `plan/apply/check` прошли на новом SHA, apply receipt
 `593b13108eb19ee10151a880e5b889318c65f399614b83d6cb55fd733b192a06`.
+
+Текущий Web сворачивает подробные пять карточек источников по умолчанию. Сводка
+готовности источников и ссылка «Обновить данные» остаются видимыми, раскрытие не
+вызывает sync и не меняет серверные расчёты. Production QA на ширине 944 px
+подтвердил отсутствие горизонтального переполнения и корректный цикл
+`collapsed → 5 cards → collapsed`.
+
 После каждого будущего application cutover старый Langame permit нельзя переносить:
 production release обязан тем же операционным проходом выполнить exact
 `supersede -> canary -> timer plan/apply/check` для нового release SHA. Source,

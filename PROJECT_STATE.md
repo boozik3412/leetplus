@@ -44,6 +44,21 @@ Langame daily и bonus-ledger timers сейчас `enabled + active`; daily auth
 controlled target `CURRENT_191/191` для external onboarding; production GO и
 unattended authority внешним tenant этим не выданы.
 
+Дашборд `/assortment/dashboard` работает как action center с проверяемыми
+метриками, приоритетами, OOS-риском и прогнозом. Блок «Свежесть и полнота
+данных» по умолчанию свёрнут: в строке остаются заголовок и кнопка «Обновить
+данные», заголовок раскрывает пять карточек без повторного расчёта. Production
+QA на ширине 944 px подтвердил отсутствие горизонтального overflow. Формулы,
+null/zero semantics и источники зафиксированы в
+[`docs/assortment-dashboard-metric-contract.md`](docs/assortment-dashboard-metric-contract.md).
+
+Initial OWNER onboarding в production поддерживает `EMAIL` и явный `LINK`.
+Режим LINK атомарно отменяет outbox как
+`CANCELED/OWNER_INVITE_LINK_ONLY`, очищает ciphertext и возвращает bearer URL
+только один раз; регистрация сохраняет тот же `OWNER/NETWORK` tenant scope.
+Полный lifecycle и evidence описаны в
+[`docs/open-beta/founder-owner-invite-lifecycle.md`](docs/open-beta/founder-owner-invite-lifecycle.md).
+
 Записи ниже — хронологический журнал предыдущих production/source
 checkpoints. Их старые формулировки про active SHA, schema или
 `inactive/disabled` timer не являются текущим состоянием и читаются только с

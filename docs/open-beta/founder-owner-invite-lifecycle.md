@@ -1,7 +1,7 @@
 # Founder pilot: initial owner invite lifecycle
 
 Статус:
-`STATUS + REVOKE + REISSUE ACCEPTED / EMAIL|LINK SOURCE CANDIDATE / PRODUCTION NO-GO`.
+`STATUS + REVOKE + REISSUE + EMAIL|LINK DEPLOYED / EXTERNAL BETA NO-GO`.
 
 ## Назначение
 
@@ -19,7 +19,7 @@ invite и отозвать ошибочный или скомпрометиро�
 - `POST /admin/tenants/:tenantId/initial-owner-invite/reissue` — новый
   predecessor-bound invite/outbox/token без resend старого секрета.
 
-Оба route повторно проверяют активный `isPlatformAdmin` в БД после общего
+Все route повторно проверяют активный `isPlatformAdmin` в БД после общего
 tenant advisory lock. Значение из JWT само по себе не является достаточной
 authority. Кнопка выбора способа и публикации ссылки находится в карточке сети
 на `/administration`; Web обращается только к private/no-store BFF.
@@ -47,6 +47,29 @@ Migration `20260908090000_initial_owner_invite_link_mode` добавляет
 `UserInvite.deliveryMode`, запрет произвольной смены режима и отдельную
 database-проверку регистрации. Разрешены только два точных доказательства:
 verified `EMAIL/SENT` либо explicit `LINK/CANCELED/OWNER_INVITE_LINK_ONLY`.
+
+## Production-состояние 08.09.2026
+
+Контур впервые развернут в exact release
+`797001d5f48c460bd431a65435b2fb387233c7fc` и остаётся частью текущего active
+`def5174f16f49212dd21d243cda89dffeff7837f`. Для текущего release Fast CI
+`34226209000` и Full Release Admission `34226209023` завершились `SUCCESS`;
+production schema — `CURRENT_190/190`, bridge — `OFF`. Active blue
+`def5174f…` и hot-rollback green `797001d5…` проходят readiness. Оба worker
+timer включены и активны; daily authority привязана к `def5174f…` и обходит
+все `3/3` active Langame domains текущего INTERNAL tenant.
+
+Terminal smoke подтвердил полный режим `LINK`: новое приглашение стало
+`ACTIVE/LINK`, прежнее `EMAIL` было отозвано, outbox завершён как
+`CANCELED/OWNER_INVITE_LINK_ONLY`, ciphertext очищен. В чистой браузерной сессии
+форма регистрации распознала сеть, роль `OWNER` и предзаполненный email; accept
+и создание пользователя намеренно не выполнялись. Сам URL и token в evidence не
+сохраняются.
+
+Минимальные production ACL, необходимые текущему runtime для status/publish,
+проверены отдельным root-only receipt:
+`/var/lib/leetplus/deploy-receipts/current190-manual-rollout/owner-invite-link-current190.receipt`,
+SHA-256 `ec2f0a8498650c9870cc11e523d4fd6b0e9beb1a003d3c1cc06a8b6fb4102288`.
 
 ## Revoke command
 
@@ -138,7 +161,7 @@ Status/revoke принят на exact SHA
 artifact `9311012974`, digest
 `sha256:f0843edc24b9664436258910b2149b60d999fc58ed9bad5ca48c8ed248c77e81`.
 
-Следующий локальный successor добавляет только forward-only readiness re-pin
+Подготовленный successor добавил только forward-only readiness re-pin
 `20260818020000_identity_mail_delivery_current_head_v1`. Active worker теперь
 принимает ровно `185` canonical migrations и прежний точный delivery RPC/ACL
 контур. Disposable PostgreSQL acceptance выполняет полную цепочку
@@ -154,15 +177,17 @@ SMTP проверяет реальный transport boundary, а deterministic pr
 implementation SHA `14193e5151cf5ba1118466facdaf4a8a4a4e0922` принят push/PR
 CI `32105326187`/`32105331954` как `4/4 SUCCESS`; artifact `9313186108`, digest
 `sha256:6d2747e7642f7ebd52714638bb229c0abd0c1b4fc221c2de3c09d04d2eb2fe09`.
-Successor не развёрнут в production.
+Этот delivery checkpoint вошёл в последующий production baseline; актуальное
+состояние LINK-контура и schema зафиксировано выше.
 
 ## Что ещё не реализовано
 
 - resend уже созданного токена запрещён: используется только reissue;
-- новый artifact-bound restored-copy worker enrollment и trusted SMTP canary;
-- production canary нового reissued invite с подтверждённым `SENT` и accept;
-- Gate 1MT/2 и production activation. Clean migration/activation-role
-  restored-copy rehearsal уже принят 18.08.2026.
+- production canary нового reissued `EMAIL` invite с подтверждённым `SENT` и
+  accept остаётся отдельной проверкой почтового пути;
+- Gate 1MT/2 и production activation внешнего tenant. Clean
+  migration/activation-role restored-copy rehearsal уже принят 18.08.2026.
 
-До exact-SHA admission и controlled rollout это source candidate: production,
-текущая сеть и внешний tester не изменены.
+Возможность `LINK` уже работает в production, но сама по себе не разрешает
+выдачу доступа внешнему tester: для неё по-прежнему нужны Gate 1MT/2 и отдельный
+`SHARED BETA GO`.

@@ -994,7 +994,13 @@ function parseSlotEnvironment(
       values.get("EXPECTED_DATABASE_MIGRATION_COUNT") ?? "",
     ) ||
     !["OFF", "LIVE"].includes(values.get("GUEST_BUG_REPORTING_MODE")) ||
-    !["OFF", "ALLOW_CURRENT_187", "ALLOW_CURRENT_188"].includes(
+    ![
+      "OFF",
+      "ALLOW_CURRENT_187",
+      "ALLOW_CURRENT_188",
+      "ALLOW_CURRENT_189",
+      "ALLOW_CURRENT_190",
+    ].includes(
       values.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE"),
     ) ||
     (values.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") !== "OFF" &&

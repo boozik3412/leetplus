@@ -39,8 +39,10 @@ checkout не является допустимым источником product
 `PILOT/BETA/LIVE`, привязывает только выбранные clubs и не меняет legacy
 `INTERNAL` tenant `1337`. Scheduled/daily external и guest-foundation paths
 остаются denied; после сохранения Web запускает только пользовательский
-`BACKFILL/MANUAL` по точным bindings. Новый schema target — `CURRENT_191/191` с
-контролируемым bridge от `CURRENT_190`.
+`BACKFILL/MANUAL` по точным bindings. Новый schema target — `CURRENT_191/191`;
+переход `CURRENT_190 → CURRENT_191` допускается лишь через exact signed schema
+controller с dual-target `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_190`,
+транзакционным apply и обязательным `OFF` на обоих слотах до final postcheck.
 
 Перед изменением auth, role landing, access scope, игрового HTTP, game
 administration, workers или deployment обязателен единый
@@ -609,7 +611,9 @@ platform-admin tenant switch и диагностика одноимённых п
    0e. [Canonical simple safe external Langame onboarding](./langame-simple-onboarding.md) —
    один production-candidate путь: `/settings/preview`, точный club selection,
    повторная проверка и атомарный `PUT /settings`, global Store identity и
-   external manual-only sync на `CURRENT_191/191`.
+   external manual-only sync на `CURRENT_191/191`; signed controller выполняет
+   только `CURRENT_190 → CURRENT_191` dual-target bridge
+   `ALLOW_CURRENT_190`, transactional schema apply и two-slot bridge-off.
    0e.0. [Архивный CURRENT188 Langame Web BFF candidate](./langame-current188-bff-candidate.md) —
    superseded historical evidence, не route-wired и не production authority.
    0e.1. [CURRENT188 legacy sync deny CI evidence](./langame-current188-legacy-sync-deny-ci-evidence-2026-08-13.md) —

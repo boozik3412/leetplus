@@ -30,7 +30,7 @@ fail-closed правилу одного контура снова сломать
 | Corporate landing          | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                           |
 | Release acceleration       | 8/8 + retention: controlled five-phase rollout operation `6be461db-c600-4fe7-9e87-6267d708554e` завершён receipt `c9cbf2c9…`; V3 и trusted lane metrics merged; public/corporate/worker контуры нельзя объединять или понижать ради скорости                                 |
 | Langame recovery           | оба systemd timer `enabled/active`; daily authority привязана к exact `def5174f…` и обходит все `3/3` active Langame domains единственного admitted INTERNAL tenant; external unattended остаётся deny до отдельного admission                                                   |
-| External Langame onboarding | canonical source target `CURRENT_191/191`: only `/settings/preview` followed by revalidated atomic `PUT /settings` and a user-triggered exact-binding `BACKFILL/MANUAL`; `PILOT/BETA/LIVE` manual exact-Store sync only, `CURRENT_190 → CURRENT_191` controlled bridge, no production GO implied |
+| External Langame onboarding | canonical source target `CURRENT_191/191`: only `/settings/preview` followed by revalidated atomic `PUT /settings` and a user-triggered exact-binding `BACKFILL/MANUAL`; `PILOT/BETA/LIVE` manual exact-Store sync only; signed controller performs only the `CURRENT_190 → CURRENT_191` dual-target `ALLOW_CURRENT_190` bridge, transactional apply and two-slot bridge-off; no production GO implied |
 | Telegram guest auth        | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                            |
 | Staff rewards              | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                |
 | Guest identity owner       | exact-link и verified-phone repairs deployed в `def5174f…`; RU-варианты подтверждённого телефона разрешаются только внутри выбранного Langame domain, неоднозначность fail-closed; все 9 выявленных split-owner дублей погашены без reward replay, контрольный остаток `0`      |
@@ -58,9 +58,15 @@ external Langame, generic sync без persisted exact Store binding и guest fou
 его semantics.
 
 Schema target этого контракта — `CURRENT_191/191`, migration
-`20260908180000_external_langame_simple_onboarding`; допустим только
-контролируемый forward bridge `CURRENT_190 → CURRENT_191`, который выключается
-до postcheck. Это source contract, не заявление о deployed production или GO.
+`20260908180000_external_langame_simple_onboarding`. Только exact external
+Langame `CURRENT191` signed schema controller может применить её: signature
+привязана к release SHA, source/target heads и counts, миграции и receipts
+обоих slots. До effect оба slot одного exact target-191 release используют
+`GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_190` (`COMBINED` и
+`GUEST_BUG_REPORTING_MODE=OFF`); controller применяет schema транзакционно.
+После commit оба slot обязаны вернуться в bridge `OFF`, подтвердить
+CURRENT191-readiness и лишь затем пройти final postcheck. Это source contract,
+не заявление о deployed production или GO.
 
 ### Public guest canonical profile owner repair 08.09.2026
 
@@ -853,9 +859,10 @@ Support-функциональность следует тем же трём г�
   очищается от metadata и выдаётся только как private attachment;
 - runtime flag `GUEST_BUG_REPORTING_MODE=OFF|LIVE` fail-closed и по умолчанию
   равен `OFF`.
-- schema bridge содержит только две именованные exact-пары:
-  `ALLOW_CURRENT_187` для `187 -> 188` и `ALLOW_CURRENT_188` для `188 -> 189`.
-  Обе разрешены только `COMBINED` runtime при
+- schema bridge содержит только именованные exact-пары:
+  `ALLOW_CURRENT_187` для `187 -> 188`, `ALLOW_CURRENT_188` для `188 -> 189`,
+  `ALLOW_CURRENT_189` для `189 -> 190` и `ALLOW_CURRENT_190` для `190 -> 191`.
+  Каждая разрешена только `COMBINED` runtime при
   `GUEST_BUG_REPORTING_MODE=OFF`; любой другой head/count, target release,
   unfinished migration, split runtime или `LIVE` блокирует startup/readiness.
   Это переходные deployment-контракты, а не общий N/N+1-допуск и не разрешение

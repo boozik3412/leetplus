@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.203                                        |
+| Версия           | 1.204                                        |
 | Дата             | 08.09.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -61,23 +61,24 @@ stale dashboard `returnTo` не обходит выбор роли. Real-account
 отдельной проверкой; исходное evidence находится в
 [отчёте 28.08.2026](./role-aware-corporate-landing-evidence-2026-08-28.md).
 
-Текущий production baseline — active blue `f3f119fa…`, generation 21,
-`CURRENT_189/189`, bridge `OFF`, bug reporting `LIVE`; hot rollback green
-`22ab6b81…` independently ready. Первый approved five-phase release rollout
-завершён terminal receipt без schema/ACL/security-flag effects. V3 source
-hardening автоматизирует только exact fenced recovery cases, включая bounded
-`localhost -> 127.0.0.1` normalization фактического legacy slot env; другие
-bind-host aliases запрещены. PR #123 объединил V3 в `main` как `c955e99e…` без
-production deploy. Восьмой acceleration item добавляет trusted lane provenance
-и обезличенные duration/failure-phase metrics; до 20 samples p50/p95 не
-публикуются, а исторический V2 rollout остаётся `LEGACY_UNCLASSIFIED`.
-Отдельный source-контракт retention использует read-only exact plan и явный
-root-only apply под exclusive production-control/orchestrator locks: immutable
-segments сохраняются до удаления live copies, lost response продолжает только
-тот же plan, а incomplete archive блокирует metrics и новый rollout. Он не
-обращается к DB/runtime/сети и не меняет фактический production baseline.
-Подробности зафиксированы в
-[плане ускорения release pipeline](../deployment/release-pipeline-acceleration.md).
+Текущий production baseline — active blue
+`def5174f16f49212dd21d243cda89dffeff7837f`, `CURRENT_190/190`, bridge `OFF`,
+bug reporting `LIVE`; hot rollback green `797001d5…` independently ready.
+Exact-main Fast CI `34226209000` и Full Release Admission `34226209023`
+завершены `SUCCESS`; five-phase operation
+`9687947d-722c-45e9-8a72-999e433434ab` имеет terminal receipt SHA-256
+`4d2f6c32ed57736a01f7f389467313bba0e410ba444aee5d1629c33c284f540d`.
+Оба worker timer включены и активны; daily worker обходит все `3/3` active
+Langame domains текущего admitted INTERNAL tenant. Source target
+`CURRENT_191/191` для внешнего Langame onboarding не является production
+state до отдельного admission и rollout.
+
+Исторические release-acceleration и recovery checkpoints ниже сохраняются как
+аудит эволюции системы; их старые слова `source`, `pending` или
+`inactive/disabled` не переопределяют текущий checkpoint выше. Актуальные
+правила остаются в
+[плане ускорения release pipeline](../deployment/release-pipeline-acceleration.md)
+и [Langame recovery runbook](../deployment/langame-sync-production-recovery.md).
 
 Основной путь первого внешнего клуба — `SHARED_MULTI_TENANT_BETA`: новый
 `Tenant B/Store B1` в общем web/API/workers/PostgreSQL/Telegram data plane.
@@ -91,7 +92,8 @@ hardening. Они остаются deny-only и не заменяются фик
 onboarding использует persisted `FOUNDER_OPERATOR_BETA_GO_V1`: fresh Platform
 Admin, exact release SHA, конкретный tenant shell, 30-day trial, тот же founder
 как rollback owner и явные stop conditions. Клиенту по-прежнему не нужен ключ:
-он получает email-bound OWNER invite и сам задаёт пароль. Обычные production
+initial OWNER получает приглашение в явном режиме `EMAIL` либо одноразовую
+`LINK` без отправки письма и сам задаёт пароль. Обычные production
 JWT/encryption/SMTP secrets, tenant isolation, backup/restore и rollback
 остаются обязательными.
 
@@ -109,8 +111,9 @@ JWT/encryption/SMTP secrets, tenant isolation, backup/restore и rollback
   ассортимент/товары, сотрудников целиком, коммуникации,
   users/roles и integrations только внутри своей сети;
 - shared web, API, workers, PostgreSQL и Telegram являются целевой topology;
-- OWNER получает email-bound invite, а затем управляет пользователями,
-  ролями, клубами и интеграциями только своей сети;
+- initial OWNER получает явный `EMAIL` invite или одноразовую `LINK` без
+  сохранения URL; после установки пароля он управляет пользователями, ролями,
+  клубами и интеграциями только своей сети;
 - все external effects и unattended jobs по умолчанию `OFF` и включаются
   только после отдельных evidence и `GO`;
 - первая внешняя когорта подключается только вручную и по приглашениям;
@@ -247,15 +250,20 @@ candidate/profile lookup и JWT signing, чтобы один доступный 
 выбирался молча при конфликтующих selectors. Targeted guest portal service
 suite `196/196`; полный Telegram/public-guest/outbound matrix ещё открыт.
 
-Successor canonical profile owner repair устраняет переключение public guest на
+Deployed canonical profile owner repair устраняет переключение public guest на
 пустой legacy-дубль при выборе другого клуба. Ровно одна active exact identity
-link с тем же подтверждённым phone hash теперь сильнее прямого `guestId` и
-stale signed `profileId`; несколько owners дают `409` до mutation/JWT и игровых
-effects. Targeted resolver + guest portal suite: `229/229`; API build и
-targeted lint проходят. Schema, routes, secrets, network и worker authority не
-меняются. Production остаётся без этого эффекта до общего exact-main admission
-и controlled rollout; последующая bounded очистка дубля не replay-ит события и
-не создаёт XP, награды, bonus-ledger entries или новые попытки кейсов.
+link с тем же подтверждённым phone hash сильнее прямого `guestId` и stale
+signed `profileId`; несколько owners дают `409` до mutation/JWT и игровых
+effects. Registration дополнительно проверяет эквивалентные RU-варианты
+подтверждённого телефона только в выбранном Langame domain до profile create.
+После rollout `def5174f…` закрыты `*6330`, `*3669` и ещё семь подтверждённых
+split owners: девять дублей погашены, active structural остаток равен `0`.
+Repair не replay-ил факты и не создавал XP, награды, lootbox/mission/season
+effects, wallet, deliveries или bonus-ledger entries. Уже затронутому
+пользователю нужно начать новую авторизацию и подтвердить телефон, если старая
+вкладка сохранила прежнюю сессию; новый аккаунт и ручное начисление запрещены.
+Порядок диагностики и repair:
+[guest auth/profile-owner incidents](../support/guest-auth-profile-owner-incidents.md).
 
 Successor public guest BFF query allowlist: active
 `/api/guest-portal/[...path]` GET пересылает только `lat/lng/radiusKm` для

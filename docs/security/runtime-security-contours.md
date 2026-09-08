@@ -4,10 +4,12 @@
 
 Актуально на: **08.09.2026**
 Runtime implementation baseline:
-`797001d5f48c460bd431a65435b2fb387233c7fc` (PR #169; CURRENT190 production
-baseline, включая canonical public-guest profile owner repair и initial OWNER
-invite link mode; автономные Langame worker timers перепривязаны к тому же
-exact SHA)
+`def5174f16f49212dd21d243cda89dffeff7837f` (PR #170; CURRENT190 production
+baseline, включая canonical public-guest profile owner repair, verified-phone
+registration repair и initial OWNER invite link mode; автономные Langame
+worker timers перепривязаны к тому же exact SHA). Source после PR #171 уже
+содержит target `CURRENT_191/191` для external Langame onboarding, но этот
+successor не является production state до отдельного admission и rollout.
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -18,20 +20,20 @@ fail-closed правилу одного контура снова сломать
 
 | Область                    | Состояние                                                                                                                                                                                                                                                                    |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation     | CURRENT190 production baseline, merge SHA `797001d5f48c460bd431a65435b2fb387233c7fc`; предыдущий admitted `1cf42bb311aafa7f41ad7f42784463fe34c152c7` сохранён как rollback                                                                                                   |
-| Admission merge SHA        | exact-main Fast CI `34212764624` и Full Release Admission `34212764559` для `797001d5…` — `SUCCESS`                                                                                                                                                                          |
-| Production API topology    | active exact `797001d5…`, `COMBINED`, schema `CURRENT_190/190`, bridge `OFF`, reporting `LIVE`; rollback slot независимо healthy                                                                                                                                             |
+| Runtime implementation     | CURRENT190 production baseline, merge SHA `def5174f16f49212dd21d243cda89dffeff7837f`; previous admitted `797001d5f48c460bd431a65435b2fb387233c7fc` сохранён как hot rollback                                                                                               |
+| Admission merge SHA        | exact-main Fast CI `34226209000` и Full Release Admission `34226209023` для `def5174f…` — `SUCCESS`                                                                                                                                                                          |
+| Production API topology    | active blue exact `def5174f…`, `COMBINED`, schema `CURRENT_190/190`, bridge `OFF`, reporting `LIVE`; rollback green `797001d5…` независимо healthy                                                                                                                            |
 | Guest bug-report repair    | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                                                                              |
 | Corporate invite repair    | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                                                                                   |
 | Guest check-in consistency | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                                                                                        |
 | Split-runtime deployment   | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                                                                                     |
 | Corporate landing          | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                           |
 | Release acceleration       | 8/8 + retention: controlled five-phase rollout operation `6be461db-c600-4fe7-9e87-6267d708554e` завершён receipt `c9cbf2c9…`; V3 и trusted lane metrics merged; public/corporate/worker контуры нельзя объединять или понижать ради скорости                                 |
-| Langame recovery           | оба systemd timer enabled/active для всех admitted сетей платформы; release authority обновлена на exact `797001d5…`; bonus-ledger/gamification singleton автономно продолжает bounded `PARTIAL`; external unattended остаётся deny                                          |
+| Langame recovery           | оба systemd timer `enabled/active`; daily authority привязана к exact `def5174f…` и обходит все `3/3` active Langame domains единственного admitted INTERNAL tenant; external unattended остаётся deny до отдельного admission                                                   |
 | External Langame onboarding | canonical source target `CURRENT_191/191`: only `/settings/preview` followed by revalidated atomic `PUT /settings` and a user-triggered exact-binding `BACKFILL/MANUAL`; `PILOT/BETA/LIVE` manual exact-Store sync only, `CURRENT_190 → CURRENT_191` controlled bridge, no production GO implied |
 | Telegram guest auth        | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                            |
 | Staff rewards              | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                |
-| Guest identity owner       | exact-link owner repair deployed в `797001d5…`; source successor до создания профиля разрешает подтверждённый телефон по RU-вариантам только внутри выбранного Langame domain, неоднозначность fail-closed; production effect successor требует отдельного exact-SHA rollout |
+| Guest identity owner       | exact-link и verified-phone repairs deployed в `def5174f…`; RU-варианты подтверждённого телефона разрешаются только внутри выбранного Langame domain, неоднозначность fail-closed; все 9 выявленных split-owner дублей погашены без reward replay, контрольный остаток `0`      |
 | Внешний open beta          | `NO-GO` до Telegram end-to-end canary, admitted heartbeat/readiness rollout, закрытия SSH credential/public-port incident и оставшихся Gate 1MT/2                                                                                                                            |
 
 ### Canonical simple safe external Langame onboarding
@@ -62,7 +64,7 @@ Schema target этого контракта — `CURRENT_191/191`, migration
 
 ### Public guest canonical profile owner repair 08.09.2026
 
-Source repair сохраняет один профиль владельцем истории гостя при переходе между
+Active repair сохраняет один профиль владельцем истории гостя при переходе между
 клубами Langame. Для подтверждённого phone hash портал сначала ищет ровно один
 `ACTIVE` профиль через `GuestGameProfileIdentityLink` того же tenant,
 `LANGAME` provider и текущего domain/guest. Такая exact-связка имеет приоритет
@@ -73,16 +75,16 @@ profile mutation, JWT signing и любых event/reward effects. Профиль
 обычная поддерживаемая реактивация `INACTIVE` профиля не меняется.
 
 Изменение не добавляет route, migration, database role, secret, egress,
-scheduler или worker authority. Bounded production repair после rollout только
-переводит доказанный пустой профиль-дубль и его conflict-link в `SUPERSEDED`,
-переназначает canonical профилю только ownership уже существующих future-sync
-cursors и сохраняет audit/history. Канонические события, XP, wallet,
-bonus-ledger и существующее право на открытие кейса не переносятся и не
-проигрываются повторно; исторические activity facts остаются evidence, а exact
-zero-effect facts ошибочной сессии можно только supersede, не переоценивать.
-Новые награды этой операцией не создаются. Source/CI и merge сами по себе не
-являются production effect: нужны общий exact-main SHA, Full Admission,
-backup/restored-copy, явный rollout GO и postcheck.
+scheduler или worker authority. Production repair для обращения `*6330`
+завершён: доказанный пустой профиль-дубль и conflict-link переведены в
+`SUPERSEDED`, future-sync cursor ownership закреплён за canonical профилем,
+audit `SUPPORT_CANONICAL_PROFILE_OWNER_REPAIR` сохранён. Канонические события,
+XP, wallet, bonus-ledger и существующее право на открытие кейса не переносились
+и не проигрывались повторно; исторические activity facts сохранены как
+evidence. Новые награды этой операцией не создавались. Для любого следующего
+аналогичного repair всё равно обязательны exact preview, отдельный production
+GO, backup/restored-copy и postcheck; source/CI или merge сами по себе не дают
+права на data effect.
 
 ### Public guest verified-phone registration repair 08.09.2026
 
@@ -95,7 +97,7 @@ guest был сохранён с эквивалентным RU-варианто�
 новым профилем, а facts этой же сессии — с каноническим. `app-open` и
 `game-summary` затем штатно отвечали fail-closed `409` owner collision.
 
-Source successor внутри той же challenge-scoped registration transaction
+Deployed successor внутри той же challenge-scoped registration transaction
 сначала получает все HMAC-варианты только из уже подтверждённого зашифрованного
 телефона и ищет Langame guest только в выбранном `externalDomain`. Ровно один
 guest возвращает его существующий `ACTIVE` профиль до create; два результата
@@ -103,14 +105,31 @@ guest возвращает его существующий `ACTIVE` профил
 остаётся вне DB transaction, lock scope и публичные routes не меняются.
 
 Изменение не добавляет migration, secret, egress, role, worker или scheduler.
-Targeted regression проходит `218/218`, API typecheck и targeted lint зелёные.
-До admitted exact-SHA rollout это только source candidate. Bounded repair
-доказанного пустого дубля может переназначить каноническому профилю только один
-технический `SESSION_START` и его zero-effect decisions, затем перевести дубль
-в `SUPERSEDED`. Исторические facts, raw records, OTP, sync jobs, XP, rewards,
-entitlements, wallet, reward intents, deliveries и bonus ledger не переносятся,
-не переоцениваются и не начисляются повторно. Любое отличие precondition
-останавливает repair целиком.
+Targeted regression `218/218`, API typecheck и targeted lint прошли. PR #170
+развёрнут как exact SHA `def5174f16f49212dd21d243cda89dffeff7837f`
+пятифазной operation `9687947d-722c-45e9-8a72-999e433434ab`; terminal receipt
+SHA-256 —
+`4d2f6c32ed57736a01f7f389467313bba0e410ba444aee5d1629c33c284f540d`.
+Fresh backup, off-host checksum и restored-copy acceptance прошли до cutover.
+
+После rollout bounded repair закрыл ещё восемь подтверждённых split-owner
+состояний, включая `*3669`: семь физических `SESSION_START` и `98`
+zero-effect decisions перенесены к canonical owners по audit
+`LP_SPLIT_OWNER_REPAIR_V1`; один дополнительный no-fact `SESSION_START` и его
+`14` zero-effect decisions — по `LP_SPLIT_OWNER_REPAIR_V2`. Все восемь пустых
+phone-only профилей стали `SUPERSEDED`. Вместе с отдельным repair `*6330`
+исправлены все девять выявленных дублей; контрольный поиск active structural
+split owners вернул `0`. Facts, raw records, OTP, sync jobs, XP, rewards,
+completion notifications, loot-box/mission/season entitlements, wallet, reward
+intents, deliveries и bonus ledger не replay-ились и не начислялись повторно.
+Любое отличие precondition в будущем обязано останавливать repair целиком.
+
+Старая вкладка может сохранить JWT, выпущенный до repair. Exact identity owner
+имеет приоритет над stale `profileId`, а `SUPERSEDED` профиль не реактивируется;
+если клиент всё ещё показывает прежний экран, поддерживаемое действие — начать
+новую авторизацию и ещё раз подтвердить телефон, а не создавать аккаунт или
+начислять награду вручную. Операционный порядок описан в
+[`guest-auth-profile-owner-incidents.md`](../support/guest-auth-profile-owner-incidents.md).
 
 ### Assortment action center deployed 08.09.2026
 
@@ -983,9 +1002,10 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   fail-closed.
 - Повторная выдача секрета запрещена. Новый URL требует revoke/reissue, после
   чего новый invite снова начинает в `EMAIL`.
-- Source candidate 08.09.2026 использует forward-only CURRENT_190 и отдельный
-  `CURRENT_189 → CURRENT_190` rollout bridge. До exact-SHA admission,
-  restored-copy проверки и controlled rollout он не считается deployed.
+- Режимы `EMAIL/LINK` deployed в CURRENT190 exact `def5174f…`; использованный
+  `CURRENT_189 → CURRENT_190` rollout bridge выключен после postcheck. Любое
+  следующее schema изменение снова требует exact-SHA admission,
+  restored-copy проверки и controlled rollout.
 
 ### Делегирование учётных записей сотрудникам
 

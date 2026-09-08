@@ -3,9 +3,9 @@
 | Поле                 | Состояние                                                                                                                                                                                            |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                                                                                         |
-| Production runtime   | healthy; active exact `797001d5…`, `COMBINED`, bridge OFF, bug reporting LIVE; previous admitted `1cf42bb…` retained as independently healthy rollback                                               |
+| Production runtime   | healthy; active blue exact `def5174f…`, `COMBINED`, bridge OFF, bug reporting LIVE; previous admitted `797001d5…` retained as independently healthy rollback                                             |
 | Prisma schema        | production exact `CURRENT_190/190`; migration `20260908090000_initial_owner_invite_link_mode` applied                                                                                                |
-| Release authority    | runtime и production-control exact `797001d5…`; Fast `34212764624` и Full `34212764559` успешны                                                                                                      |
+| Release authority    | runtime и production-control exact `def5174f…`; Fast `34226209000` и Full `34226209023` успешны                                                                                                      |
 | Runtime successor    | Оба worker timer enabled/active; activity `PARTIAL` автоматически продолжает cursor, ledger fallback работает в `LIVE`; worker pool `2`, activity limit `1`, timeout `15m`; API schedulers выключены |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                                                                                     |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                                                                                             |
@@ -13,11 +13,21 @@
 | Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                                                                                          |
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                                                                                        |
 | Offline/USB key      | исключён из beta critical path                                                                                                                                                                       |
-| Owner onboarding     | production: email-bound; source candidate: явный выбор EMAIL или одноразовой LINK, пользователь сам задаёт пароль                                                                                    |
+| Owner onboarding     | production CURRENT190: явный EMAIL или одноразовый LINK; пользователь сам задаёт пароль, LINK не сохраняется и не ставит письмо в outbox                                                              |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect                                 |
-| Langame freshness    | daily и bonus-ledger timers enabled/active для всех admitted сетей платформы; authority привязана к exact `797001d5…`                                                                                |
+| Langame freshness    | daily и bonus-ledger timers enabled/active; authority привязана к exact `def5174f…`, daily worker обходит `3/3` active domains текущего admitted INTERNAL tenant                                      |
 | Assortment dashboard | deployed exact `1cf42bb…`: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз работают на production; schema/route ownership не менялись                                        |
-| Guest profile owner  | exact-link repair deployed в `797001d5…`; source successor добавляет selected-domain поиск RU-вариантов подтверждённого телефона до создания профиля; reward replay запрещён                         |
+| Guest profile owner  | exact-link и verified-phone repairs deployed в `def5174f…`; `*6330`, `*3669` и остальные выявленные split owners исправлены, active structural остаток `0`, reward replay запрещён                     |
+| External Langame     | source target `CURRENT_191/191`: preview → revalidated atomic settings → exact-binding manual backfill; production GO и external unattended authority не выданы                                       |
+
+Production hotfix PR #170 развёрнут как exact SHA
+`def5174f16f49212dd21d243cda89dffeff7837f` operation
+`9687947d-722c-45e9-8a72-999e433434ab`; final receipt SHA-256
+`4d2f6c32ed57736a01f7f389467313bba0e410ba444aee5d1629c33c284f540d`.
+Public и loopback readiness принимают `CURRENT_190/190`, unfinished migrations
+равны `0`. Source после PR #171 содержит controlled target `CURRENT_191/191`
+для внешнего onboarding, но production остаётся на `def5174f…/CURRENT190` до
+отдельного admission и rollout.
 
 Production release `1cf42bb311aafa7f41ad7f42784463fe34c152c7` превращает
 `/assortment/dashboard` в ежедневный
@@ -39,17 +49,16 @@ canary `2026-09-07` и stable timer `plan/apply/check` на новом release S
 оба worker timer включены и активны. Решение внешнего beta остаётся `NO-GO`
 по независимым открытым gates.
 
-Source candidate 08.09 добавляет на `/administration` выбор доставки initial
+Production CURRENT190 добавил на `/administration` выбор доставки initial
 OWNER приглашения: «Отправка на почту» или «Ссылка без почты». В режиме LINK
 Platform Admin получает URL один раз; SMTP outbox атомарно отменяется до
 provider attempt, ciphertext очищается, URL не сохраняется в audit/log/browser
 storage. CURRENT_190 database guard допускает accept только при exact
-`EMAIL/SENT` либо `LINK/CANCELED/OWNER_INVITE_LINK_ONLY` evidence. Добавлен
-forward rollout bridge `CURRENT_189 → CURRENT_190`; production пока остаётся
-на `CURRENT_189/189` до exact-SHA admission, restored-copy rehearsal и
-controlled rollout.
+`EMAIL/SENT` либо `LINK/CANCELED/OWNER_INVITE_LINK_ONLY` evidence. Исторический
+forward bridge `CURRENT_189 → CURRENT_190` был выключен после rollout; active
+schema — exact `CURRENT_190/190`.
 
-Source repair 08.09 для гостя клуба на Радищева фиксирует canonical ownership
+Production repair 08.09 для гостя клуба на Радищева зафиксировал canonical ownership
 профиля, а не компенсирует награды. Проверка подтвердила: рабочая история,
 награды и существующее право на кейс находятся в одном active профиле. Второй
 профиль имеет исторический activity-ledger и `13` zero-XP игровых событий, но
@@ -57,25 +66,36 @@ Source repair 08.09 для гостя клуба на Радищева фикс�
 или bonus-ledger entries. Новая авторизация, выбор клуба и stale token сначала
 разрешают единственного exact identity owner по подтверждённому phone hash;
 ambiguity даёт `409`, `SUPERSEDED`-дубль не может быть восстановлен. Targeted
-tests `229/229`, lint и API build проходят. После admitted rollout bounded
-repair деактивирует дубль/conflict-link, переносит только future-sync cursor
-ownership на canonical профиль и пишет audit; исторические activity/events не
-replay-ятся, перенос или повторное начисление запрещены.
+tests `229/229`, lint и API build проходят. Bounded repair деактивировал
+дубль/conflict-link, перенёс только future-sync cursor ownership на canonical
+профиль и записал audit `SUPPORT_CANONICAL_PROFILE_OWNER_REPAIR`;
+исторические activity/events не replay-ились, перенос или повторное начисление
+не выполнялись.
 
 Второе обращение (`*3669`) выявило соседний registration defect уже после
 успешного Callcheck: predecessor искал existing profile только по одному
 literal phone hash, создавал свежий phone-only профиль для эквивалентного
 варианта номера, а club selection затем возвращался к старому Langame guest.
 Из-за этого `SESSION_START` и его физические facts получали разных profile
-owners, и клиент видел `409`. Source successor до profile create рассматривает
+owners, и клиент видел `409`. Deployed successor до profile create рассматривает
 RU-варианты `7/8/10 digits` только в selected Langame domain, переиспользует
 ровно одного existing guest owner и fail-closed отклоняет неоднозначность до
 любых mutations/effects. Targeted tests `218/218`, typecheck и lint проходят.
-Migration, route, secret, egress и worker authority не меняются; rollout ждёт
-нового exact-main admission. Для `*3669` допустим только bounded zero-reward
-repair одного технического события и его `14` zero-effect decisions с
-последующим `SUPERSEDED` пустого дубля; facts, raw, OTP, sync job, XP, rewards,
-entitlements, wallet, intents, deliveries и bonus ledger остаются нетронутыми.
+Migration, route, secret, egress и worker authority не менялись. После rollout
+`def5174f…` bounded zero-reward repair исправил `*3669` и ещё семь найденных
+phone-only split owners: восемь профилей стали `SUPERSEDED`, ownership только
+технических `SESSION_START` и их zero-effect decisions закреплён за canonical
+профилями. Вместе с `*6330` исправлено девять выявленных дублей; active
+structural остаток равен `0`. Facts, raw, OTP, sync jobs, XP, rewards,
+completion notifications, loot-box/mission/season state, wallet, intents,
+deliveries и bonus ledger остались нетронутыми.
+
+Пользователь с уже показанной ошибкой не должен регистрировать новый аккаунт:
+stale token сначала разрешается к canonical exact identity owner, а
+`SUPERSEDED` дубль нельзя восстановить. Если старая вкладка сохранила прежнюю
+сессию, поддерживаемое действие — заново открыть вход и подтвердить телефон.
+Диагностика и граница repair описаны в
+[`guest-auth-profile-owner-incidents.md`](../support/guest-auth-profile-owner-incidents.md).
 
 Source-разбор `LP-BUG-A56627F5` подтвердил, что отменённые награды не были
 ошибкой связи профилей: единственный профиль гостя был отмечен как staff/test

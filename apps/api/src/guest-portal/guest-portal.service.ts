@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -2571,7 +2572,7 @@ export class GuestPortalService {
       });
     }
 
-    const [guest, profileByPhone] = await Promise.all([
+    const [guest, profileByPhone, identityProfile] = await Promise.all([
       this.prisma.guest.findFirst({
         where: {
           tenantId: context.tenant.id,
@@ -2600,25 +2601,32 @@ export class GuestPortalService {
           unsubscribedAt: true,
         },
       }),
+      this.findCanonicalIdentityProfile({
+        tenantId: context.tenant.id,
+        phoneHash: phone.hash,
+        externalDomain: context.store.externalDomain,
+      }),
     ]);
 
-    const profile = guest
-      ? await this.prisma.guestGameProfile.findFirst({
-          where: {
-            tenantId: context.tenant.id,
-            guestId: guest.id,
-            status: 'ACTIVE',
-          },
-          orderBy: { updatedAt: 'desc' },
-          select: {
-            id: true,
-            telegramIdentity: true,
-            maxIdentity: true,
-            phoneConsentStatus: true,
-            unsubscribedAt: true,
-          },
-        })
-      : profileByPhone;
+    const profile =
+      identityProfile ??
+      (guest
+        ? await this.prisma.guestGameProfile.findFirst({
+            where: {
+              tenantId: context.tenant.id,
+              guestId: guest.id,
+              status: 'ACTIVE',
+            },
+            orderBy: { updatedAt: 'desc' },
+            select: {
+              id: true,
+              telegramIdentity: true,
+              maxIdentity: true,
+              phoneConsentStatus: true,
+              unsubscribedAt: true,
+            },
+          })
+        : profileByPhone);
 
     const id = randomUUID();
     const code = this.generateOtp();
@@ -2705,7 +2713,7 @@ export class GuestPortalService {
         : OTP_TTL_MINUTES;
     const expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
 
-    const [guest, profileByPhone] = await Promise.all([
+    const [guest, profileByPhone, identityProfile] = await Promise.all([
       this.prisma.guest.findFirst({
         where: {
           tenantId: context.tenant.id,
@@ -2734,25 +2742,32 @@ export class GuestPortalService {
           unsubscribedAt: true,
         },
       }),
+      this.findCanonicalIdentityProfile({
+        tenantId: context.tenant.id,
+        phoneHash: phone.hash,
+        externalDomain: context.store.externalDomain,
+      }),
     ]);
 
-    const profile = guest
-      ? await this.prisma.guestGameProfile.findFirst({
-          where: {
-            tenantId: context.tenant.id,
-            guestId: guest.id,
-            status: 'ACTIVE',
-          },
-          orderBy: { updatedAt: 'desc' },
-          select: {
-            id: true,
-            telegramIdentity: true,
-            maxIdentity: true,
-            phoneConsentStatus: true,
-            unsubscribedAt: true,
-          },
-        })
-      : profileByPhone;
+    const profile =
+      identityProfile ??
+      (guest
+        ? await this.prisma.guestGameProfile.findFirst({
+            where: {
+              tenantId: context.tenant.id,
+              guestId: guest.id,
+              status: 'ACTIVE',
+            },
+            orderBy: { updatedAt: 'desc' },
+            select: {
+              id: true,
+              telegramIdentity: true,
+              maxIdentity: true,
+              phoneConsentStatus: true,
+              unsubscribedAt: true,
+            },
+          })
+        : profileByPhone);
     const id = randomUUID();
     const opaqueCode = randomBytes(18).toString('hex');
     const lockKey = guestAuthScopeLockKey({
@@ -3103,7 +3118,7 @@ export class GuestPortalService {
       );
     }
 
-    const [guest, profileByPhone] = await Promise.all([
+    const [guest, profileByPhone, identityProfile] = await Promise.all([
       this.prisma.guest.findFirst({
         where: {
           tenantId: context.tenant.id,
@@ -3132,25 +3147,32 @@ export class GuestPortalService {
           unsubscribedAt: true,
         },
       }),
+      this.findCanonicalIdentityProfile({
+        tenantId: context.tenant.id,
+        phoneHash: phone.hash,
+        externalDomain: context.store.externalDomain,
+      }),
     ]);
 
-    const profile = guest
-      ? await this.prisma.guestGameProfile.findFirst({
-          where: {
-            tenantId: context.tenant.id,
-            guestId: guest.id,
-            status: 'ACTIVE',
-          },
-          orderBy: { updatedAt: 'desc' },
-          select: {
-            id: true,
-            telegramIdentity: true,
-            maxIdentity: true,
-            phoneConsentStatus: true,
-            unsubscribedAt: true,
-          },
-        })
-      : profileByPhone;
+    const profile =
+      identityProfile ??
+      (guest
+        ? await this.prisma.guestGameProfile.findFirst({
+            where: {
+              tenantId: context.tenant.id,
+              guestId: guest.id,
+              status: 'ACTIVE',
+            },
+            orderBy: { updatedAt: 'desc' },
+            select: {
+              id: true,
+              telegramIdentity: true,
+              maxIdentity: true,
+              phoneConsentStatus: true,
+              unsubscribedAt: true,
+            },
+          })
+        : profileByPhone);
     const id = randomUUID();
     const code = this.generateIncomingCallLast4Code();
     const delivery = await this.deliverIncomingCallLast4({
@@ -7588,16 +7610,27 @@ export class GuestPortalService {
       context.store,
       sourceProfile,
     );
-    const targetGuestProfile = targetGuest
-      ? await this.prisma.guestGameProfile.findFirst({
-          where: {
-            tenantId: context.tenant.id,
-            guestId: targetGuest.id,
-          },
-          orderBy: { updatedAt: 'desc' },
+    const targetIdentityProfile = targetGuest
+      ? await this.findCanonicalIdentityProfile({
+          tenantId: context.tenant.id,
+          phoneHash: payload.phoneHash,
+          guestId: targetGuest.id,
+          externalDomain: context.store.externalDomain,
         })
       : null;
+    const targetGuestProfile =
+      targetGuest && !targetIdentityProfile
+        ? await this.prisma.guestGameProfile.findFirst({
+            where: {
+              tenantId: context.tenant.id,
+              guestId: targetGuest.id,
+              status: { not: 'SUPERSEDED' },
+            },
+            orderBy: { updatedAt: 'desc' },
+          })
+        : null;
     let targetProfile =
+      targetIdentityProfile ??
       targetGuestProfile ??
       (await this.findProfile(targetPayloadBase, targetGuest?.id ?? null));
     const now = new Date();
@@ -14017,11 +14050,24 @@ export class GuestPortalService {
     payload: GuestPortalTokenPayload,
     guestId: string | null,
   ) {
+    const identityProfile = guestId
+      ? await this.findCanonicalIdentityProfile({
+          tenantId: payload.tenantId,
+          phoneHash: payload.phoneHash,
+          guestId,
+        })
+      : null;
+
+    if (identityProfile) {
+      return identityProfile;
+    }
+
     if (payload.profileId) {
       const profile = await this.prisma.guestGameProfile.findFirst({
         where: {
           id: payload.profileId,
           tenantId: payload.tenantId,
+          status: { not: 'SUPERSEDED' },
         },
       });
 
@@ -14041,6 +14087,29 @@ export class GuestPortalService {
       },
       orderBy: { updatedAt: 'desc' },
     });
+  }
+
+  private async findCanonicalIdentityProfile(input: {
+    tenantId: string;
+    phoneHash: string;
+    externalDomain?: string | null;
+    guestId?: string | null;
+  }) {
+    const owner = await this.guestIdentityResolver.findActiveProfileOwner({
+      tenantId: input.tenantId,
+      phoneHash: input.phoneHash,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: input.externalDomain,
+      guestId: input.guestId,
+    });
+
+    if (owner.ambiguous) {
+      throw new ConflictException(
+        'По подтвержденному телефону найдено несколько канонических игровых профилей. Нужна ручная проверка администратора.',
+      );
+    }
+
+    return owner.profile;
   }
 
   private async findProfileByLead(tenantId: string, leadId: string) {

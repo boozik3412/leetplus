@@ -30,7 +30,32 @@ fail-closed правилу одного контура снова сломать
 | Langame recovery           | оба systemd timer enabled/active; daily canary `2026-09-07` и stable timer `plan/apply/check` приняты на exact `1cf42bb…`; старый permit штатно superseded; bonus-ledger/gamification singleton автономно продолжает `PARTIAL` по одному профилю с pool `2` и timeout `15m`; external unattended остаётся deny |
 | Telegram guest auth        | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                                                            |
 | Staff rewards              | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                                                |
+| Guest identity owner       | source repair: exact active identity link с тем же подтверждённым phone hash имеет приоритет над legacy `guestId` и stale signed `profileId`; неоднозначность fail-closed, production effect требует exact-SHA rollout и отдельной bounded очистки дубля                                                     |
 | Внешний open beta          | `NO-GO` до Telegram end-to-end canary, admitted heartbeat/readiness rollout, закрытия SSH credential/public-port incident и оставшихся Gate 1MT/2                                                                                                                                                            |
+
+### Public guest canonical profile owner repair 08.09.2026
+
+Source repair сохраняет один профиль владельцем истории гостя при переходе между
+клубами Langame. Для подтверждённого phone hash портал сначала ищет ровно один
+`ACTIVE` профиль через `GuestGameProfileIdentityLink` того же tenant,
+`LANGAME` provider и текущего domain/guest. Такая exact-связка имеет приоритет
+над legacy `GuestGameProfile.guestId` и над `profileId` из уже выданного токена.
+Если подходящих active owners больше одного, запрос завершается `409` до
+profile mutation, JWT signing и любых event/reward effects. Профиль со статусом
+`SUPERSEDED` нельзя восстановить через legacy token или club-selection fallback;
+обычная поддерживаемая реактивация `INACTIVE` профиля не меняется.
+
+Изменение не добавляет route, migration, database role, secret, egress,
+scheduler или worker authority. Bounded production repair после rollout только
+переводит доказанный пустой профиль-дубль и его conflict-link в `SUPERSEDED`,
+переназначает canonical профилю только ownership уже существующих future-sync
+cursors и сохраняет audit/history. Канонические события, XP, wallet,
+bonus-ledger и существующее право на открытие кейса не переносятся и не
+проигрываются повторно; исторические activity facts остаются evidence, а exact
+zero-effect facts ошибочной сессии можно только supersede, не переоценивать.
+Новые награды этой операцией не создаются. Source/CI и merge сами по себе не
+являются production effect: нужны общий exact-main SHA, Full Admission,
+backup/restored-copy, явный rollout GO и postcheck.
 
 ### Assortment action center deployed 08.09.2026
 

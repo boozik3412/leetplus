@@ -237,6 +237,16 @@ candidate/profile lookup и JWT signing, чтобы один доступный 
 выбирался молча при конфликтующих selectors. Targeted guest portal service
 suite `196/196`; полный Telegram/public-guest/outbound matrix ещё открыт.
 
+Successor canonical profile owner repair устраняет переключение public guest на
+пустой legacy-дубль при выборе другого клуба. Ровно одна active exact identity
+link с тем же подтверждённым phone hash теперь сильнее прямого `guestId` и
+stale signed `profileId`; несколько owners дают `409` до mutation/JWT и игровых
+effects. Targeted resolver + guest portal suite: `229/229`; API build и
+targeted lint проходят. Schema, routes, secrets, network и worker authority не
+меняются. Production остаётся без этого эффекта до общего exact-main admission
+и controlled rollout; последующая bounded очистка дубля не replay-ит события и
+не создаёт XP, награды, bonus-ledger entries или новые попытки кейсов.
+
 Successor public guest BFF query allowlist: active
 `/api/guest-portal/[...path]` GET пересылает только `lat/lng/radiusKm` для
 public club directory и `offset/limit` для authenticated missions paging. Все

@@ -3,9 +3,9 @@
 | Поле                 | Состояние                                                                                                                                                                                                     |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                                                                                                  |
-| Production runtime   | healthy; active green `92f29b7a…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue `94f9462e…` ready                                                                                                |
+| Production runtime   | healthy; active green `1cf42bb…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue `6aa452d5…` independently healthy                                                                                |
 | Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                                                                                                  |
-| Release authority    | runtime и production-control exact `92f29b7a…`; Fast `34001346341` и Full `34001346308` успешны, five-phase rollout `b2dac027…` завершён с terminal receipt                                                   |
+| Release authority    | runtime и production-control exact `1cf42bb…`; Fast `34203683926` и Full `34203683901` успешны, five-phase operation `6be461db…` завершён terminal receipt `c9cbf2c9…`                                      |
 | Runtime successor    | Оба worker timer enabled/active; activity `PARTIAL` автоматически продолжает cursor, ledger fallback работает в `LIVE`; worker pool `2`, activity limit `1`, timeout `15m`; API schedulers выключены          |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                                                                                              |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                                                                                                      |
@@ -15,10 +15,11 @@
 | Offline/USB key      | исключён из beta critical path                                                                                                                                                                                |
 | Owner onboarding     | production: email-bound; source candidate: явный выбор EMAIL или одноразовой LINK, пользователь сам задаёт пароль                                                                                            |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect                                          |
-| Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`, canary 05.09 обработал `1/1` INTERNAL tenant; daily timer enabled/active, следующий scheduled run 07.09                                |
-| Assortment dashboard | source candidate: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз готовы; schema/route ownership не меняются, production effect требует exact-main admission, rollout и worker rebind |
+| Langame freshness    | audit storage repair применён; canary 07.09 принят на exact `1cf42bb…`; старый permit superseded, daily timer и bonus-ledger timer enabled/active                                                            |
+| Assortment dashboard | deployed exact `1cf42bb…`: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз работают на production; schema/route ownership не менялись                                               |
 
-Source candidate 08.09 превращает `/assortment/dashboard` в ежедневный
+Production release `1cf42bb311aafa7f41ad7f42784463fe34c152c7` превращает
+`/assortment/dashboard` в ежедневный
 action center. Сервер рассчитывает состояние источников визитов, продаж,
 остатков, себестоимости и категорий; приоритетный список действий; OOS-риск,
 потенциально потерянную и восстанавливаемую выручку; недельный прогноз и
@@ -29,12 +30,13 @@ receipt token. Если Langame не отдаёт поле, CSV продаж п�
 `Чек`, а UI показывает `SOURCE_UNAVAILABLE` без подмены покупки товарной
 операцией.
 
-Candidate не добавляет migration, новый secret, egress, runtime или scheduler;
-production schema остаётся `CURRENT_189/189`. После rollout daily Langame
-worker должен пройти отдельный exact supersession старого permit, canary и
-stable timer `plan/apply/check` на новом release SHA. До этой цепочки статус
-строки является только source-ready, а не deployed. Решение внешнего beta
-остаётся `NO-GO` по независимым открытым gates.
+Релиз не добавил migration, новый secret, egress, runtime или scheduler;
+production schema осталась `CURRENT_189/189`. Exact-main Fast `34203683926`
+и Full `34203683901` успешны; пятифазный rollout operation `6be461db…`
+завершён receipt `c9cbf2c9…`. Daily Langame worker прошёл exact supersession,
+canary `2026-09-07` и stable timer `plan/apply/check` на новом release SHA;
+оба worker timer включены и активны. Решение внешнего beta остаётся `NO-GO`
+по независимым открытым gates.
 
 Source candidate 08.09 добавляет на `/administration` выбор доставки initial
 OWNER приглашения: «Отправка на почту» или «Ссылка без почты». В режиме LINK

@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { IntegrationProvider, Prisma } from '@prisma/client';
+import {
+  type GuestGameProfile,
+  IntegrationProvider,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 const ACTIVE_LINK_STATUS = 'ACTIVE';
@@ -56,6 +60,11 @@ export type GuestIdentitySnapshotReconcileResult = {
   alreadyLinked: number;
   conflicts: number;
   ambiguous: number;
+};
+
+export type GuestIdentityProfileOwnerResult = {
+  profile: GuestGameProfile | null;
+  ambiguous: boolean;
 };
 
 type ResolveExactMatchInput = {
@@ -574,6 +583,46 @@ export class GuestIdentityResolverService {
     });
 
     return link?.guest ?? null;
+  }
+
+  async findActiveProfileOwner(input: {
+    tenantId: string;
+    phoneHash: string;
+    externalProvider: IntegrationProvider;
+    externalDomain?: string | null;
+    guestId?: string | null;
+  }): Promise<GuestIdentityProfileOwnerResult> {
+    const externalDomain = input.externalDomain?.trim() || null;
+    const guestId = input.guestId?.trim() || null;
+
+    if (!externalDomain && !guestId) {
+      return { profile: null, ambiguous: false };
+    }
+
+    const profiles = await this.prisma.guestGameProfile.findMany({
+      where: {
+        tenantId: input.tenantId,
+        phoneHash: input.phoneHash,
+        status: 'ACTIVE',
+        identityLinks: {
+          some: {
+            tenantId: input.tenantId,
+            externalProvider: input.externalProvider,
+            ...(externalDomain ? { externalDomain } : {}),
+            ...(guestId ? { guestId } : {}),
+            status: ACTIVE_LINK_STATUS,
+            guest: { isDisabled: false },
+          },
+        },
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+      take: 2,
+    });
+
+    return {
+      profile: profiles.length === 1 ? profiles[0] : null,
+      ambiguous: profiles.length > 1,
+    };
   }
 
   async listActiveGuestIds(tenantId: string, profileId: string) {

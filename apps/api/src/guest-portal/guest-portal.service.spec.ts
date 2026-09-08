@@ -265,6 +265,10 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   };
   const guestIdentityResolver = {
     findActiveGuestForProfileDomain: jest.fn().mockResolvedValue(null),
+    findActiveProfileOwner: jest.fn().mockResolvedValue({
+      profile: null,
+      ambiguous: false,
+    }),
     resolveExactMatch: jest.fn().mockImplementation((input: any) =>
       Promise.resolve({
         status: 'LINKED',
@@ -7914,6 +7918,7 @@ describe('GuestPortalService', () => {
         where: {
           tenantId: 'tenant-1',
           guestId: targetGuest.id,
+          status: { not: 'SUPERSEDED' },
         },
         orderBy: { updatedAt: 'desc' },
       });
@@ -7936,6 +7941,200 @@ describe('GuestPortalService', () => {
         expect.any(Object),
       );
       expect(result.clubId).toBe('leet:club-2');
+    });
+
+    it('keeps the canonical identity owner instead of switching to a direct guest profile duplicate', async () => {
+      const { guestIdentityResolver, jwtService, prisma, service } =
+        createService({
+          GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+          WEB_URL: 'https://leetplus.ru',
+        });
+      const tokenPayload = {
+        sub: 'guest-portal:duplicate-profile',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: 'guest-radishcheva',
+        profileId: 'duplicate-profile',
+        phoneHash: 'phone-hash-1',
+      };
+      const targetGuest = {
+        id: 'guest-radishcheva',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: '1337.langame.ru',
+        externalGuestId: '65366',
+        fullNameMasked: 'Игрок 1337',
+        phoneMasked: '***6330',
+        emailMasked: null,
+      };
+      const duplicateProfile = {
+        id: 'duplicate-profile',
+        guestId: targetGuest.id,
+        phoneHash: tokenPayload.phoneHash,
+        displayName: 'Дубль',
+        contactMasked: '***6330',
+        phoneConsentStatus: 'GRANTED',
+        phoneConsentSource: 'guest_portal_game_consent',
+        phoneConsentAt: new Date('2026-09-08T07:48:00.000Z'),
+        unsubscribedAt: null,
+      };
+      const canonicalProfile = {
+        ...duplicateProfile,
+        id: 'canonical-profile',
+        guestId: 'guest-other-domain',
+        displayName: 'Канонический профиль',
+      };
+      const portal = {
+        ...portalPayloadFixture(),
+        tenant: { name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: 'store-2',
+          publicSlug: 'radishcheva',
+          name: '1337 Радищева',
+          address: 'Радищева',
+        },
+        profile: {
+          ...portalPayloadFixture().profile,
+          id: canonicalProfile.id,
+        },
+      };
+
+      jest
+        .spyOn(service as any, 'verifyGuestToken')
+        .mockResolvedValue(tokenPayload);
+      jest.spyOn(service as any, 'getTenantStore').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: 'store-2',
+          publicSlug: 'radishcheva',
+          name: '1337 Радищева',
+          address: 'Радищева',
+          externalDomain: '1337.langame.ru',
+        },
+      });
+      jest
+        .spyOn(service as any, 'ensureGamificationClubAvailable')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValueOnce(targetGuest)
+        .mockResolvedValueOnce(targetGuest);
+      jest
+        .spyOn(service as any, 'findProfile')
+        .mockResolvedValueOnce(duplicateProfile);
+      jest
+        .spyOn(service as any, 'buildPortalPayload')
+        .mockResolvedValue(portal);
+      guestIdentityResolver.findActiveProfileOwner.mockResolvedValueOnce({
+        profile: canonicalProfile,
+        ambiguous: false,
+      });
+      prisma.guestGameProfile.update.mockResolvedValue(canonicalProfile);
+      jwtService.signAsync.mockResolvedValue('canonical-club-token');
+
+      const result = await service.selectGameClub('Bearer duplicate-token', {
+        clubId: 'leet:radishcheva',
+      });
+
+      expect(prisma.guestGameProfile.findFirst).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ guestId: targetGuest.id }),
+        }),
+      );
+      expect(prisma.guestGameProfile.update).toHaveBeenCalledWith({
+        where: { id: canonicalProfile.id },
+        data: expect.objectContaining({ status: 'ACTIVE' }),
+      });
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: `game-club:${canonicalProfile.id}:store-2`,
+          guestId: targetGuest.id,
+          profileId: canonicalProfile.id,
+        }),
+        expect.any(Object),
+      );
+      expect(result).toMatchObject({
+        token: 'canonical-club-token',
+        clubId: 'leet:radishcheva',
+        portal,
+      });
+    });
+  });
+
+  describe('canonical profile resolution', () => {
+    it('repairs a stale duplicate token from the active exact identity owner', async () => {
+      const { guestIdentityResolver, prisma, service } = createService();
+      const canonicalProfile = {
+        id: 'canonical-profile',
+        tenantId: 'tenant-1',
+        guestId: 'guest-other-domain',
+        phoneHash: 'phone-hash-1',
+        status: 'ACTIVE',
+      };
+      guestIdentityResolver.findActiveProfileOwner.mockResolvedValue({
+        profile: canonicalProfile,
+        ambiguous: false,
+      });
+
+      const result = await service['findProfile'](
+        {
+          sub: 'game-club:duplicate-profile:store-1',
+          purpose: 'guest_portal',
+          tenantId: 'tenant-1',
+          storeId: 'store-1',
+          guestId: 'guest-radishcheva',
+          profileId: 'duplicate-profile',
+          phoneHash: 'phone-hash-1',
+        },
+        'guest-radishcheva',
+      );
+
+      expect(result).toBe(canonicalProfile);
+      expect(prisma.guestGameProfile.findFirst).not.toHaveBeenCalled();
+      expect(guestIdentityResolver.findActiveProfileOwner).toHaveBeenCalledWith(
+        {
+          tenantId: 'tenant-1',
+          phoneHash: 'phone-hash-1',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: undefined,
+          guestId: 'guest-radishcheva',
+        },
+      );
+    });
+
+    it('never restores a superseded duplicate from a signed legacy token', async () => {
+      const { prisma, service } = createService();
+      prisma.guestGameProfile.findFirst.mockResolvedValue(null);
+
+      const result = await service['findProfile'](
+        {
+          sub: 'game-club:inactive-profile:store-1',
+          purpose: 'guest_portal',
+          tenantId: 'tenant-1',
+          storeId: 'store-1',
+          guestId: 'guest-radishcheva',
+          profileId: 'inactive-profile',
+          phoneHash: 'phone-hash-1',
+        },
+        'guest-radishcheva',
+      );
+
+      expect(result).toBeNull();
+      expect(prisma.guestGameProfile.findFirst).toHaveBeenNthCalledWith(1, {
+        where: {
+          id: 'inactive-profile',
+          tenantId: 'tenant-1',
+          status: { not: 'SUPERSEDED' },
+        },
+      });
+      expect(prisma.guestGameProfile.findFirst).toHaveBeenNthCalledWith(2, {
+        where: {
+          tenantId: 'tenant-1',
+          status: 'ACTIVE',
+          OR: [{ guestId: 'guest-radishcheva' }, { phoneHash: 'phone-hash-1' }],
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
     });
   });
 
@@ -10651,6 +10850,77 @@ describe('GuestPortalService', () => {
         freeCall: false,
         status: 'PENDING',
       });
+    });
+
+    it('reserves the domain-linked canonical profile instead of a newer phone duplicate', async () => {
+      const { guestIdentityResolver, prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_PORTAL_USER_CALL_ENABLED: 'true',
+        GUEST_PORTAL_USER_CALL_PHONE_NUMBER: '+7 343 000-00-00',
+        GUEST_PORTAL_USER_CALL_SECRET: 'call-secret',
+      });
+      const canonicalProfile = {
+        id: 'canonical-profile',
+        guestId: 'guest-other-domain',
+        phoneHash: 'canonical-phone-hash',
+        telegramIdentity: null,
+        maxIdentity: null,
+        phoneConsentStatus: 'GRANTED',
+        unsubscribedAt: null,
+      };
+      const duplicateProfile = {
+        ...canonicalProfile,
+        id: 'newer-duplicate-profile',
+        guestId: 'guest-radishcheva',
+      };
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337 Радищева',
+            address: 'Радищева',
+            externalDomain: '1337.langame.ru',
+          },
+        ],
+      });
+      prisma.guestGameProfile.findFirst.mockResolvedValue(duplicateProfile);
+      guestIdentityResolver.findActiveProfileOwner.mockResolvedValueOnce({
+        profile: canonicalProfile,
+        ambiguous: false,
+      });
+
+      await service.startUserCallAuth('leet', 'club-1337', {
+        phone: '+7 999 999-63-30',
+        gameConsentAccepted: true,
+      });
+
+      expect(guestIdentityResolver.findActiveProfileOwner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: 'tenant-1',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: '1337.langame.ru',
+          guestId: undefined,
+        }),
+      );
+      expect(prisma.guestPortalOtpChallenge.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            profileId: canonicalProfile.id,
+          }),
+        }),
+      );
+      expect(prisma.guestPortalOtpChallenge.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            profileId: duplicateProfile.id,
+          }),
+        }),
+      );
     });
 
     it('starts SMS.ru callcheck without exposing provider secrets', async () => {

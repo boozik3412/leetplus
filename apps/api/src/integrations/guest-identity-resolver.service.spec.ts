@@ -146,6 +146,62 @@ describe('GuestIdentityResolverService', () => {
     prisma.guestGameProfile.findMany.mockResolvedValue([]);
   });
 
+  it('returns the unique active identity owner for an exact guest phone scope', async () => {
+    const canonicalProfile = profile({
+      status: 'ACTIVE',
+      updatedAt: verifiedAt,
+    });
+    prisma.guestGameProfile.findMany.mockResolvedValue([canonicalProfile]);
+
+    const result = await service.findActiveProfileOwner({
+      tenantId,
+      phoneHash,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain,
+      guestId,
+    });
+
+    expect(result).toEqual({
+      profile: canonicalProfile,
+      ambiguous: false,
+    });
+    expect(prisma.guestGameProfile.findMany).toHaveBeenCalledWith({
+      where: {
+        tenantId,
+        phoneHash,
+        status: 'ACTIVE',
+        identityLinks: {
+          some: {
+            tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain,
+            guestId,
+            status: 'ACTIVE',
+            guest: { isDisabled: false },
+          },
+        },
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+      take: 2,
+    });
+  });
+
+  it('reports multiple active identity owners as ambiguous', async () => {
+    prisma.guestGameProfile.findMany.mockResolvedValue([
+      profile({ id: 'profile-1', status: 'ACTIVE' }),
+      profile({ id: 'profile-2', status: 'ACTIVE' }),
+    ]);
+
+    const result = await service.findActiveProfileOwner({
+      tenantId,
+      phoneHash,
+      externalProvider: IntegrationProvider.LANGAME,
+      guestId,
+    });
+
+    expect(result).toEqual({ profile: null, ambiguous: true });
+  });
+
   it('casts advisory lock results to a Prisma-supported type', async () => {
     await service.resolveExactMatch({
       tenantId,

@@ -17,6 +17,7 @@
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect                                          |
 | Langame freshness    | audit storage repair применён; canary 07.09 принят на exact `1cf42bb…`; старый permit superseded, daily timer и bonus-ledger timer enabled/active                                                            |
 | Assortment dashboard | deployed exact `1cf42bb…`: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз работают на production; schema/route ownership не менялись                                               |
+| Guest profile owner  | source repair: exact active identity link с подтверждённым phone hash побеждает пустой legacy-дубль; cleanup без replay/reward effect ждёт общего exact-main rollout                                      |
 
 Production release `1cf42bb311aafa7f41ad7f42784463fe34c152c7` превращает
 `/assortment/dashboard` в ежедневный
@@ -47,6 +48,19 @@ storage. CURRENT_190 database guard допускает accept только пр�
 forward rollout bridge `CURRENT_189 → CURRENT_190`; production пока остаётся
 на `CURRENT_189/189` до exact-SHA admission, restored-copy rehearsal и
 controlled rollout.
+
+Source repair 08.09 для гостя клуба на Радищева фиксирует canonical ownership
+профиля, а не компенсирует награды. Проверка подтвердила: рабочая история,
+награды и существующее право на кейс находятся в одном active профиле. Второй
+профиль имеет исторический activity-ledger и `13` zero-XP игровых событий, но
+не имеет XP postings, rewards, wallet, entitlements, reward intents, deliveries
+или bonus-ledger entries. Новая авторизация, выбор клуба и stale token сначала
+разрешают единственного exact identity owner по подтверждённому phone hash;
+ambiguity даёт `409`, `SUPERSEDED`-дубль не может быть восстановлен. Targeted
+tests `229/229`, lint и API build проходят. После admitted rollout bounded
+repair деактивирует дубль/conflict-link, переносит только future-sync cursor
+ownership на canonical профиль и пишет audit; исторические activity/events не
+replay-ятся, перенос или повторное начисление запрещены.
 
 Source-разбор `LP-BUG-A56627F5` подтвердил, что отменённые награды не были
 ошибкой связи профилей: единственный профиль гостя был отмечен как staff/test

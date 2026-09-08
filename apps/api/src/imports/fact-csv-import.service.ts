@@ -1,7 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma, StockMovementType } from '@prisma/client';
 import { parse } from 'csv-parse/sync';
+import { createHash } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import {
+  bindReceiptIdentityToSourceHash,
+  receiptIdentitySourcePrefix,
+} from '../common/receipt-source-identity';
 import { PrismaService } from '../prisma/prisma.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -45,6 +50,7 @@ export type InventoryImportRow = {
 export type SalesImportRow = InventoryImportRow & {
   revenue: string;
   cost: string;
+  receiptId: string | null;
 };
 
 export type StockMovementImportRow = InventoryImportRow & {
@@ -146,11 +152,7 @@ export class FactCsvImportService {
         return;
       }
 
-      const key = this.factKey(
-        normalized.date,
-        normalized.storeId,
-        normalized.productId,
-      );
+      const key = this.salesFactKey(normalized);
 
       if (seen.has(key)) {
         errors.push({
@@ -320,6 +322,23 @@ export class FactCsvImportService {
       const results: unknown[] = [];
 
       for (const row of preview.rows) {
+        const sourcePayloadHash = row.receiptId
+          ? bindReceiptIdentityToSourceHash(
+              row.receiptId,
+              createHash('sha256')
+                .update(
+                  JSON.stringify({
+                    date: row.date,
+                    storeId: row.storeId,
+                    productId: row.productId,
+                    quantity: row.quantity,
+                    revenue: row.revenue,
+                    cost: row.cost,
+                  }),
+                )
+                .digest('hex'),
+            )
+          : null;
         const [product, store] = await Promise.all([
           tx.product.findUnique({
             where: { id: row.productId },
@@ -337,6 +356,9 @@ export class FactCsvImportService {
             productId: row.productId,
             saleDate: new Date(row.date),
             externalProvider: null,
+            sourcePayloadHash: row.receiptId
+              ? { startsWith: receiptIdentitySourcePrefix(row.receiptId) }
+              : null,
           },
           select: { id: true },
         });
@@ -349,6 +371,7 @@ export class FactCsvImportService {
                 quantity: new Prisma.Decimal(row.quantity),
                 revenue: new Prisma.Decimal(row.revenue),
                 cost: new Prisma.Decimal(row.cost),
+                sourcePayloadHash,
                 productNameAtSale: product?.name ?? null,
                 storeNameAtSale: store?.name ?? null,
                 isCanceled: false,
@@ -367,6 +390,7 @@ export class FactCsvImportService {
                 quantity: new Prisma.Decimal(row.quantity),
                 revenue: new Prisma.Decimal(row.revenue),
                 cost: new Prisma.Decimal(row.cost),
+                sourcePayloadHash,
                 productNameAtSale: product?.name ?? null,
                 storeNameAtSale: store?.name ?? null,
               },
@@ -622,6 +646,26 @@ export class FactCsvImportService {
       'costAmount',
       'себестоимость',
     ]);
+    const receiptId = this.readField(record, [
+      'receiptId',
+      'receipt_id',
+      'orderId',
+      'order_id',
+      'checkId',
+      'check_id',
+      'чек',
+      'номер чека',
+      'заказ',
+      'номер заказа',
+    ]);
+
+    if (receiptId.length > 200) {
+      errors.push({
+        row: rowNumber,
+        field: 'receiptId',
+        message: 'Идентификатор чека должен быть короче 200 символов',
+      });
+    }
 
     this.requireValue(
       revenue,
@@ -652,7 +696,14 @@ export class FactCsvImportService {
       ...base,
       revenue,
       cost,
+      receiptId: receiptId || null,
     };
+  }
+
+  private salesFactKey(row: SalesImportRow) {
+    const base = this.factKey(row.date, row.storeId, row.productId);
+
+    return row.receiptId ? `${base}:receipt:${row.receiptId}` : base;
   }
 
   private normalizeStockMovementRecord(

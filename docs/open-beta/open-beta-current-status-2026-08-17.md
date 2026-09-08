@@ -1,21 +1,40 @@
-# LeetPlus open beta — текущее состояние на 06.09.2026
+# LeetPlus open beta — текущее состояние на 08.09.2026
 
-| Поле                 | Состояние                                                                                                                                                            |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Release decision     | `NO-GO` для внешнего доступа                                                                                                                                         |
-| Production runtime   | healthy; active green `92f29b7a…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue `94f9462e…` ready                                                       |
-| Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                                                         |
-| Release authority    | runtime и production-control exact `92f29b7a…`; Fast `34001346341` и Full `34001346308` успешны, five-phase rollout `b2dac027…` завершён с terminal receipt                                           |
-| Runtime successor    | Оба worker timer enabled/active; activity `PARTIAL` автоматически продолжает cursor, ledger fallback работает в `LIVE`; worker pool `2`, activity limit `1`, timeout `15m`; API schedulers выключены |
-| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                                                     |
-| Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                                                             |
-| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                                                             |
-| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                                                          |
-| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                                                        |
-| Offline/USB key      | исключён из beta critical path                                                                                                                                       |
-| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                                                                   |
-| Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect |
-| Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`, canary 05.09 обработал `1/1` INTERNAL tenant; daily timer enabled/active, следующий scheduled run 07.09               |
+| Поле                 | Состояние                                                                                                                                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Release decision     | `NO-GO` для внешнего доступа                                                                                                                                                                                  |
+| Production runtime   | healthy; active green `92f29b7a…`, `COMBINED`, bridge OFF, bug reporting LIVE; rollback blue `94f9462e…` ready                                                                                                |
+| Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                                                                                                  |
+| Release authority    | runtime и production-control exact `92f29b7a…`; Fast `34001346341` и Full `34001346308` успешны, five-phase rollout `b2dac027…` завершён с terminal receipt                                                   |
+| Runtime successor    | Оба worker timer enabled/active; activity `PARTIAL` автоматически продолжает cursor, ledger fallback работает в `LIVE`; worker pool `2`, activity limit `1`, timeout `15m`; API schedulers выключены          |
+| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                                                                                              |
+| Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                                                                                                      |
+| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                                                                                                      |
+| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                                                                                                   |
+| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                                                                                                 |
+| Offline/USB key      | исключён из beta critical path                                                                                                                                                                                |
+| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                                                                                                            |
+| Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect                                          |
+| Langame freshness    | audit storage repair применён; canary 27.08–04.09 дал `36/36 SUCCESS`, canary 05.09 обработал `1/1` INTERNAL tenant; daily timer enabled/active, следующий scheduled run 07.09                                |
+| Assortment dashboard | source candidate: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз готовы; schema/route ownership не меняются, production effect требует exact-main admission, rollout и worker rebind |
+
+Source candidate 08.09 превращает `/assortment/dashboard` в ежедневный
+action center. Сервер рассчитывает состояние источников визитов, продаж,
+остатков, себестоимости и категорий; приоритетный список действий; OOS-риск,
+потенциально потерянную и восстанавливаемую выручку; недельный прогноз и
+рекомендуемый заказ. Покупки, средний чек, товаров в чеке и товарные пары
+появляются только при подтверждённом receipt/order ID. Raw ID не сохраняется:
+в существующем `SalesFact.sourcePayloadHash` хранится только SHA-256-bound
+receipt token. Если Langame не отдаёт поле, CSV продаж принимает колонку
+`Чек`, а UI показывает `SOURCE_UNAVAILABLE` без подмены покупки товарной
+операцией.
+
+Candidate не добавляет migration, новый secret, egress, runtime или scheduler;
+production schema остаётся `CURRENT_189/189`. После rollout daily Langame
+worker должен пройти отдельный exact supersession старого permit, canary и
+stable timer `plan/apply/check` на новом release SHA. До этой цепочки статус
+строки является только source-ready, а не deployed. Решение внешнего beta
+остаётся `NO-GO` по независимым открытым gates.
 
 Source-разбор `LP-BUG-A56627F5` подтвердил, что отменённые награды не были
 ошибкой связи профилей: единственный профиль гостя был отмечен как staff/test

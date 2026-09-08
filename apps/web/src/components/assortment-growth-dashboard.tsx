@@ -3,9 +3,13 @@
 import Link from "next/link";
 import {
   ArrowRight,
+  ArrowsClockwise,
+  CalendarCheck,
   CaretDown,
   ChartLineUp,
   CheckCircle,
+  Coins,
+  Database,
   Equals,
   Info,
   Package,
@@ -16,6 +20,8 @@ import {
   TrendDown,
   TrendUp,
   UsersThree,
+  WarningCircle,
+  Wrench,
   X,
 } from "@phosphor-icons/react";
 import {
@@ -29,6 +35,8 @@ import {
 } from "recharts";
 import type {
   DashboardMetricCalculation,
+  DashboardAssortmentAction,
+  DashboardAssortmentSourceHealth,
   DashboardSalesTrendSegment,
   DashboardSummary,
 } from "@/lib/dashboard-summary";
@@ -69,29 +77,52 @@ export function AssortmentGrowthDashboard({
   const growth = summary.assortmentGrowth;
   const drivers = growth.drivers;
   const calculationsWithData = growth.calculations.filter(
-    (calculation) => calculation.state !== "NO_DATA",
+    (calculation) =>
+      calculation.state === "READY" ||
+      calculation.state === "PARTIAL_COVERAGE" ||
+      calculation.state === "STALE",
   ).length;
   const calculationCaveats = growth.calculations.filter(
-    (calculation) => calculation.state === "PARTIAL_COVERAGE",
+    (calculation) => calculation.state !== "READY",
   ).length;
   const opportunity = buildStoreOpportunity(summary);
+  const freshSources = growth.sources.filter(
+    (source) => source.state === "FRESH",
+  ).length;
+  const sourceAlert = growth.sources.some((source) =>
+    ["FAILED", "MISSING"].includes(source.state),
+  );
 
   return (
     <div className="space-y-5">
-      <section className="flex flex-col gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 shadow-sm dark:border-emerald-900 dark:bg-emerald-950/20 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+      <section
+        className={`flex flex-col gap-3 rounded-2xl border px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:px-5 ${
+          sourceAlert
+            ? "border-amber-200 bg-amber-50/70 dark:border-amber-900 dark:bg-amber-950/20"
+            : "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/20"
+        }`}
+      >
         <div className="flex min-w-0 items-start gap-3">
-          <CheckCircle
-            className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-300"
-            weight="fill"
-            aria-hidden="true"
-          />
+          {sourceAlert ? (
+            <WarningCircle
+              className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-300"
+              weight="fill"
+              aria-hidden="true"
+            />
+          ) : (
+            <CheckCircle
+              className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-300"
+              weight="fill"
+              aria-hidden="true"
+            />
+          )}
           <div className="min-w-0">
             <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
-              Все показанные цифры имеют источник и формулу
+              {freshSources} из {growth.sources.length} источников готовы
             </p>
             <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-              Единица продажи — товарная операция Langame.{" "}
-              {growth.methodology.receiptMetrics.reason}
+              Дашборд отделяет точные чеки от товарных операций и скрывает
+              производные метрики при конфликте источников.
             </p>
           </div>
         </div>
@@ -103,9 +134,14 @@ export function AssortmentGrowthDashboard({
               : "Все источники выбранного периода имеют полное покрытие."
           }
         >
-          {calculationsWithData} из {growth.calculations.length} с данными
+          {calculationsWithData} рассчитано · {calculationCaveats} требуют
+          внимания
         </span>
       </section>
+
+      <SourceHealthPanel sources={growth.sources} />
+
+      <ActionCenter actions={growth.actions} summary={summary} />
 
       <details className="group rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500 dark:text-zinc-200 sm:px-5">
@@ -198,6 +234,8 @@ export function AssortmentGrowthDashboard({
         </div>
       </section>
 
+      <ReceiptMetricsPanel summary={summary} />
+
       <section className="grid overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950 md:grid-cols-2 xl:grid-cols-3">
         <TrendPanel
           title="Визиты"
@@ -231,6 +269,8 @@ export function AssortmentGrowthDashboard({
           className="md:col-span-2 xl:col-span-1 xl:border-b-0"
         />
       </section>
+
+      <ForecastPanel summary={summary} />
 
       <section className="grid overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950 md:grid-cols-2 xl:grid-cols-3">
         <DriverGroup
@@ -326,6 +366,8 @@ export function AssortmentGrowthDashboard({
         />
       </section>
 
+      <CoverageGapsPanel summary={summary} />
+
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
         <div className="flex flex-col gap-5 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5 shadow-sm dark:border-emerald-900 dark:bg-emerald-950/20 sm:flex-row sm:items-center">
           <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white text-emerald-600 shadow-sm dark:bg-zinc-950 dark:text-emerald-300">
@@ -369,6 +411,495 @@ export function AssortmentGrowthDashboard({
         </div>
       </section>
     </div>
+  );
+}
+
+function SourceHealthPanel({
+  sources,
+}: {
+  sources: DashboardAssortmentSourceHealth[];
+}) {
+  return (
+    <section aria-labelledby="source-health-title">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2
+            id="source-health-title"
+            className="text-base font-semibold text-zinc-950 dark:text-zinc-50"
+          >
+            Свежесть и полнота данных
+          </h2>
+          <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            Каждый источник проверяется отдельно до расчёта производных метрик.
+          </p>
+        </div>
+        <Link
+          href="/sync"
+          className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-zinc-700 hover:text-emerald-700 dark:text-zinc-200 dark:hover:text-emerald-300"
+        >
+          Обновить данные
+          <ArrowsClockwise
+            className="h-4 w-4"
+            weight="bold"
+            aria-hidden="true"
+          />
+        </Link>
+      </div>
+      <div className="grid overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:grid-cols-2 xl:grid-cols-5">
+        {sources.map((source) => (
+          <article
+            key={source.key}
+            className="min-w-0 border-b border-zinc-100 p-4 last:border-b-0 dark:border-zinc-800 sm:border-r sm:[&:nth-child(2n)]:border-r-0 xl:border-b-0 xl:[&:nth-child(2n)]:border-r xl:last:border-r-0"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+                <Database
+                  className="h-5 w-5"
+                  weight="duotone"
+                  aria-hidden="true"
+                />
+              </span>
+              <span
+                className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${sourceStateTone(source.state)}`}
+              >
+                {sourceStateLabel(source.state)}
+              </span>
+            </div>
+            <p className="mt-3 text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+              {source.label}
+            </p>
+            <p className="mt-1 min-h-10 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+              {source.detail}
+            </p>
+            <p className="mt-2 text-[11px] tabular-nums text-zinc-400 dark:text-zinc-500">
+              {source.coveragePercent === null
+                ? formatSourceDate(source.lastFactAt)
+                : `${formatPercent(source.coveragePercent)} покрытия`}
+            </p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ActionCenter({
+  actions,
+  summary,
+}: {
+  actions: DashboardAssortmentAction[];
+  summary: DashboardSummary;
+}) {
+  return (
+    <section
+      aria-labelledby="action-center-title"
+      className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+    >
+      <div className="flex flex-col gap-2 border-b border-zinc-100 px-4 py-4 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-600 dark:text-emerald-300">
+            Приоритеты
+          </p>
+          <h2
+            id="action-center-title"
+            className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50"
+          >
+            Что сделать сегодня
+          </h2>
+        </div>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          До {actions.length} действий по влиянию и качеству данных
+        </p>
+      </div>
+      <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        {actions.map((action, index) => (
+          <article
+            key={action.key}
+            className="grid gap-3 px-4 py-4 sm:grid-cols-[40px_minmax(0,1fr)_auto] sm:items-center sm:px-5"
+          >
+            <span
+              className={`flex h-10 w-10 items-center justify-center rounded-xl text-sm font-semibold tabular-nums ${actionTone(action.tone).soft}`}
+              aria-label={`Приоритет ${index + 1}`}
+            >
+              {index + 1}
+            </span>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                  {action.title}
+                </h3>
+                <span
+                  className={`text-xs font-semibold ${actionTone(action.tone).text}`}
+                >
+                  {action.metric}
+                </span>
+              </div>
+              <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                {action.description}
+                {action.impactRubles !== null && action.impactRubles > 0
+                  ? ` Потенциал: ${formatSignedRubles(action.impactRubles)}.`
+                  : ""}
+              </p>
+            </div>
+            <Link
+              href={buildActionHref(action.href, summary)}
+              className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900 sm:w-auto"
+            >
+              Открыть
+              <ArrowRight
+                className="h-4 w-4"
+                weight="bold"
+                aria-hidden="true"
+              />
+            </Link>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReceiptMetricsPanel({ summary }: { summary: DashboardSummary }) {
+  const receipts = summary.assortmentGrowth.methodology.receiptMetrics;
+  const available =
+    receipts.state === "READY" || receipts.state === "PARTIAL_COVERAGE";
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 border-b border-zinc-100 px-4 py-4 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div>
+          <div className="flex items-center gap-2">
+            <Receipt
+              className="h-5 w-5 text-blue-600 dark:text-blue-300"
+              weight="duotone"
+              aria-hidden="true"
+            />
+            <h2 className="text-base font-semibold text-zinc-950 dark:text-zinc-50">
+              Покупки и средний чек
+            </h2>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            {receipts.reason}
+          </p>
+        </div>
+        <Link
+          href="/import"
+          className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900 sm:w-auto"
+        >
+          Загрузить чеки
+          <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
+        </Link>
+      </div>
+      <div className="grid sm:grid-cols-2 xl:grid-cols-4">
+        <CompactMetric
+          label="Покупки"
+          value={
+            available && receipts.purchaseCount !== null
+              ? formatInteger(receipts.purchaseCount)
+              : "Ожидает ID чека"
+          }
+          hint={
+            receipts.coveragePercent === null
+              ? "нет операций"
+              : `${formatPercent(receipts.coveragePercent)} операций с ID`
+          }
+        />
+        <CompactMetric
+          label="Средний чек"
+          value={
+            available
+              ? formatOptionalRubles(receipts.averageCheck)
+              : "Нет данных"
+          }
+          hint="выручка на подтверждённый чек"
+        />
+        <CompactMetric
+          label="Товаров в чеке"
+          value={
+            available && receipts.itemsPerCheck !== null
+              ? `${formatDecimal(receipts.itemsPerCheck)} шт`
+              : "Нет данных"
+          }
+          hint="по строкам с ID чека"
+        />
+        <CompactMetric
+          label="Частая пара"
+          value={
+            receipts.topBasketPair
+              ? `${receipts.topBasketPair.receiptsCount} чек.`
+              : "Нет данных"
+          }
+          hint={
+            receipts.topBasketPair
+              ? `${receipts.topBasketPair.firstProductName} + ${receipts.topBasketPair.secondProductName}`
+              : "появится при двух товарах в чеке"
+          }
+          last
+        />
+      </div>
+    </section>
+  );
+}
+
+function ForecastPanel({ summary }: { summary: DashboardSummary }) {
+  const forecast = summary.assortmentGrowth.forecast;
+
+  return (
+    <section className="grid overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,1fr)]">
+      <article className="min-w-0 border-b border-zinc-100 p-4 dark:border-zinc-800 sm:p-5 xl:border-b-0 xl:border-r">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <CalendarCheck
+                className="h-5 w-5 text-emerald-600 dark:text-emerald-300"
+                weight="duotone"
+                aria-hidden="true"
+              />
+              <h2 className="text-base font-semibold text-zinc-950 dark:text-zinc-50">
+                Прогноз на 7 дней
+              </h2>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+              {forecast.reason}
+            </p>
+          </div>
+          <span
+            className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${forecastConfidenceTone(forecast.confidence)}`}
+          >
+            {forecastConfidenceLabel(forecast.confidence)} точность
+          </span>
+        </div>
+        {forecast.days.length > 0 ? (
+          <div
+            className="mt-4 h-48 w-full"
+            aria-label="Прогноз товарной выручки на семь дней"
+          >
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={forecast.days}
+                margin={{ top: 8, right: 8, bottom: 0, left: -18 }}
+              >
+                <CartesianGrid
+                  vertical={false}
+                  stroke="#e4e4e7"
+                  strokeDasharray="3 3"
+                />
+                <XAxis
+                  dataKey="label"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: "#71717a", fontSize: 11 }}
+                  minTickGap={12}
+                />
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: "#71717a", fontSize: 11 }}
+                  width={60}
+                  tickFormatter={formatCompactRubles}
+                />
+                <Tooltip
+                  cursor={{ stroke: "#a1a1aa", strokeDasharray: "3 3" }}
+                  formatter={(value) => [
+                    formatRubles(Number(value)),
+                    "Прогноз",
+                  ]}
+                  labelFormatter={(label) => String(label)}
+                  contentStyle={{
+                    borderRadius: 12,
+                    borderColor: "#e4e4e7",
+                    fontSize: 12,
+                  }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="revenue"
+                  stroke="#10b981"
+                  strokeWidth={2.5}
+                  dot={{ r: 3, fill: "#10b981", strokeWidth: 0 }}
+                  activeDot={{ r: 5, strokeWidth: 2, stroke: "#ffffff" }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <div className="mt-4 flex h-48 items-center justify-center rounded-xl bg-zinc-50 px-6 text-center text-sm text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+            Нужна история продаж, чтобы построить прогноз.
+          </div>
+        )}
+      </article>
+      <div className="grid sm:grid-cols-2 xl:grid-cols-1">
+        <ForecastMetric
+          icon={ChartLineUp}
+          label="Базовый прогноз"
+          value={formatOptionalRubles(forecast.revenue)}
+          hint={
+            forecast.suggestedTargetRevenue === null
+              ? "нет базы"
+              : `рекомендуемый план +${forecast.targetUpliftPercent}%: ${formatRubles(forecast.suggestedTargetRevenue)}`
+          }
+        />
+        <ForecastMetric
+          icon={WarningCircle}
+          label="Выручка под риском OOS"
+          value={formatOptionalRubles(forecast.lostRevenue)}
+          hint={`${forecast.oosRiskSkuCount} SKU могут закончиться за 3 дня`}
+        />
+        <ForecastMetric
+          icon={Coins}
+          label="Эффект заказа"
+          value={formatOptionalRubles(forecast.recoverableRevenue)}
+          hint={`${formatInteger(forecast.recommendedOrderQuantity)} шт. в рекомендуемом заказе`}
+          className="sm:col-span-2 xl:col-span-1"
+        />
+      </div>
+    </section>
+  );
+}
+
+function CoverageGapsPanel({ summary }: { summary: DashboardSummary }) {
+  const gaps = summary.assortmentGrowth.coverageGaps;
+  const rows = [
+    {
+      label: "Без себестоимости",
+      value: gaps.missingCostOperationCount,
+      hint: `${formatRubles(gaps.missingCostRevenue)} выручки`,
+      href: "/products/table",
+    },
+    {
+      label: "Без остатка",
+      value: gaps.missingStockSkuCount,
+      hint: "не входят в OOS-прогноз",
+      href: "/import",
+    },
+    {
+      label: "Без категории",
+      value: gaps.uncategorizedSkuCount,
+      hint:
+        gaps.uncategorizedRevenueSharePercent === null
+          ? "нет товарной выручки"
+          : `${formatPercent(gaps.uncategorizedRevenueSharePercent)} выручки`,
+      href: "/categories/triage",
+    },
+    {
+      label: "Похожие категории",
+      value: gaps.categoryNormalizationCandidateCount,
+      hint: "кандидаты на объединение",
+      href: "/categories/triage",
+    },
+  ];
+
+  return (
+    <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-5">
+      <div className="flex items-center gap-2">
+        <Wrench
+          className="h-5 w-5 text-zinc-600 dark:text-zinc-300"
+          weight="duotone"
+          aria-hidden="true"
+        />
+        <h2 className="text-base font-semibold text-zinc-950 dark:text-zinc-50">
+          Пробелы, которые мешают точному расчёту
+        </h2>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {rows.map((row) => (
+          <Link
+            key={row.label}
+            href={buildActionHref(row.href, summary)}
+            className="group rounded-xl border border-zinc-200 p-3 transition hover:border-emerald-300 hover:bg-emerald-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-zinc-800 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/20"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                {row.label}
+              </p>
+              <ArrowRight
+                className="h-4 w-4 text-zinc-400 transition group-hover:translate-x-0.5 group-hover:text-emerald-600"
+                weight="bold"
+                aria-hidden="true"
+              />
+            </div>
+            <p
+              className={`mt-2 text-2xl font-semibold tabular-nums ${row.value > 0 ? "text-amber-600 dark:text-amber-300" : "text-emerald-600 dark:text-emerald-300"}`}
+            >
+              {formatInteger(row.value)}
+            </p>
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              {row.hint}
+            </p>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CompactMetric({
+  label,
+  value,
+  hint,
+  last = false,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  last?: boolean;
+}) {
+  return (
+    <article
+      className={`min-w-0 border-b border-zinc-100 p-4 dark:border-zinc-800 sm:border-r sm:[&:nth-child(2n)]:border-r-0 xl:border-b-0 xl:[&:nth-child(2n)]:border-r ${last ? "xl:border-r-0" : ""}`}
+    >
+      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {label}
+      </p>
+      <p className="mt-2 break-words text-2xl font-semibold tracking-tight tabular-nums text-blue-600 dark:text-blue-300">
+        {value}
+      </p>
+      <p
+        className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+        title={hint}
+      >
+        {hint}
+      </p>
+    </article>
+  );
+}
+
+type ForecastIcon = typeof ChartLineUp;
+
+function ForecastMetric({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  className = "",
+}: {
+  icon: ForecastIcon;
+  label: string;
+  value: string;
+  hint: string;
+  className?: string;
+}) {
+  return (
+    <article
+      className={`min-w-0 border-b border-zinc-100 p-4 last:border-b-0 dark:border-zinc-800 sm:p-5 ${className}`}
+    >
+      <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+          <Icon className="h-5 w-5" weight="duotone" aria-hidden="true" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            {label}
+          </p>
+          <p className="mt-1 break-words text-2xl font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+            {value}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            {hint}
+          </p>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -692,6 +1223,117 @@ function formatPointsDelta(value: number | null) {
   return `${value >= 0 ? "+" : ""}${formatDecimal(value)} п.п. к прошлому периоду`;
 }
 
+function formatCompactRubles(value: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function formatSourceDate(value: string | null) {
+  if (!value) {
+    return "нет даты факта";
+  }
+
+  return `факт до ${new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    timeZone: "UTC",
+  }).format(new Date(value))}`;
+}
+
+function sourceStateLabel(state: DashboardAssortmentSourceHealth["state"]) {
+  const labels: Record<DashboardAssortmentSourceHealth["state"], string> = {
+    FRESH: "Готово",
+    PARTIAL: "Неполно",
+    STALE: "Устарело",
+    MISSING: "Нет данных",
+    FAILED: "Ошибка",
+  };
+
+  return labels[state];
+}
+
+function sourceStateTone(state: DashboardAssortmentSourceHealth["state"]) {
+  if (state === "FRESH") {
+    return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300";
+  }
+
+  if (state === "PARTIAL" || state === "STALE") {
+    return "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300";
+  }
+
+  return "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300";
+}
+
+function actionTone(tone: DashboardAssortmentAction["tone"]) {
+  const tones: Record<
+    DashboardAssortmentAction["tone"],
+    { soft: string; text: string }
+  > = {
+    CRITICAL: {
+      soft: "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300",
+      text: "text-red-600 dark:text-red-300",
+    },
+    WARNING: {
+      soft: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+      text: "text-amber-600 dark:text-amber-300",
+    },
+    OPPORTUNITY: {
+      soft: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+      text: "text-emerald-600 dark:text-emerald-300",
+    },
+    INFO: {
+      soft: "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300",
+      text: "text-blue-600 dark:text-blue-300",
+    },
+  };
+
+  return tones[tone];
+}
+
+function forecastConfidenceLabel(
+  confidence: DashboardSummary["assortmentGrowth"]["forecast"]["confidence"],
+) {
+  if (confidence === "HIGH") {
+    return "Высокая";
+  }
+  if (confidence === "MEDIUM") {
+    return "Средняя";
+  }
+  return "Низкая";
+}
+
+function forecastConfidenceTone(
+  confidence: DashboardSummary["assortmentGrowth"]["forecast"]["confidence"],
+) {
+  if (confidence === "HIGH") {
+    return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300";
+  }
+  if (confidence === "MEDIUM") {
+    return "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300";
+  }
+  return "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300";
+}
+
+function buildActionHref(href: string, summary: DashboardSummary) {
+  if (!href.startsWith("/reports/")) {
+    return href;
+  }
+
+  const params = new URLSearchParams({
+    from: summary.periodFrom,
+    to: summary.periodTo,
+  });
+
+  if (summary.selectedStoreIds.length === 1) {
+    params.set("storeId", summary.selectedStoreIds[0]);
+  }
+
+  return `${href}?${params.toString()}`;
+}
+
 function calculationStateLabel(state: DashboardMetricCalculation["state"]) {
   if (state === "READY") {
     return "Рассчитано";
@@ -699,6 +1341,18 @@ function calculationStateLabel(state: DashboardMetricCalculation["state"]) {
 
   if (state === "PARTIAL_COVERAGE") {
     return "Покрытие";
+  }
+
+  if (state === "SOURCE_UNAVAILABLE") {
+    return "Нет источника";
+  }
+
+  if (state === "SOURCE_CONFLICT") {
+    return "Конфликт";
+  }
+
+  if (state === "STALE") {
+    return "Устарело";
   }
 
   return "Нет данных";
@@ -711,6 +1365,14 @@ function calculationStateTone(state: DashboardMetricCalculation["state"]) {
 
   if (state === "PARTIAL_COVERAGE") {
     return "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300";
+  }
+
+  if (state === "STALE") {
+    return "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300";
+  }
+
+  if (state === "SOURCE_CONFLICT") {
+    return "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300";
   }
 
   return "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300";

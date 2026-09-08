@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import {
   ArrowRight,
   ArrowsClockwise,
@@ -419,23 +420,36 @@ function SourceHealthPanel({
 }: {
   sources: DashboardAssortmentSourceHealth[];
 }) {
+  const [isOpen, setIsOpen] = useState(false);
+
   return (
-    <section aria-labelledby="source-health-title">
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-        <div>
+    <section
+      aria-labelledby="source-health-title"
+      className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+    >
+      <div className="flex min-h-14 items-center gap-2 px-2 sm:px-3">
+        <button
+          type="button"
+          aria-expanded={isOpen}
+          aria-controls="source-health-details"
+          onClick={() => setIsOpen((current) => !current)}
+          className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-3 rounded-xl px-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 sm:px-3"
+        >
           <h2
             id="source-health-title"
             className="text-base font-semibold text-zinc-950 dark:text-zinc-50"
           >
             Свежесть и полнота данных
           </h2>
-          <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-            Каждый источник проверяется отдельно до расчёта производных метрик.
-          </p>
-        </div>
+          <CaretDown
+            className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform ${isOpen ? "rotate-180" : ""}`}
+            weight="bold"
+            aria-hidden="true"
+          />
+        </button>
         <Link
           href="/sync"
-          className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-zinc-700 hover:text-emerald-700 dark:text-zinc-200 dark:hover:text-emerald-300"
+          className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-xl px-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-zinc-200 dark:hover:bg-zinc-900 dark:hover:text-emerald-300 sm:px-3"
         >
           Обновить данные
           <ArrowsClockwise
@@ -445,40 +459,47 @@ function SourceHealthPanel({
           />
         </Link>
       </div>
-      <div className="grid overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:grid-cols-2 xl:grid-cols-5">
-        {sources.map((source) => (
-          <article
-            key={source.key}
-            className="min-w-0 border-b border-zinc-100 p-4 last:border-b-0 dark:border-zinc-800 sm:border-r sm:[&:nth-child(2n)]:border-r-0 xl:border-b-0 xl:[&:nth-child(2n)]:border-r xl:last:border-r-0"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
-                <Database
-                  className="h-5 w-5"
-                  weight="duotone"
-                  aria-hidden="true"
-                />
-              </span>
-              <span
-                className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${sourceStateTone(source.state)}`}
+      {isOpen ? (
+        <div id="source-health-details" className="border-t border-zinc-100 dark:border-zinc-800">
+          <p className="px-4 py-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400 sm:px-5">
+            Каждый источник проверяется отдельно до расчёта производных метрик.
+          </p>
+          <div className="grid border-t border-zinc-100 dark:border-zinc-800 sm:grid-cols-2 xl:grid-cols-5">
+            {sources.map((source) => (
+              <article
+                key={source.key}
+                className="min-w-0 border-b border-zinc-100 p-4 last:border-b-0 dark:border-zinc-800 sm:border-r sm:[&:nth-child(2n)]:border-r-0 xl:border-b-0 xl:[&:nth-child(2n)]:border-r xl:last:border-r-0"
               >
-                {sourceStateLabel(source.state)}
-              </span>
-            </div>
-            <p className="mt-3 text-sm font-semibold text-zinc-950 dark:text-zinc-50">
-              {source.label}
-            </p>
-            <p className="mt-1 min-h-10 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-              {source.detail}
-            </p>
-            <p className="mt-2 text-[11px] tabular-nums text-zinc-400 dark:text-zinc-500">
-              {source.coveragePercent === null
-                ? formatSourceDate(source.lastFactAt)
-                : `${formatPercent(source.coveragePercent)} покрытия`}
-            </p>
-          </article>
-        ))}
-      </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+                    <Database
+                      className="h-5 w-5"
+                      weight="duotone"
+                      aria-hidden="true"
+                    />
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${sourceStateTone(source.state)}`}
+                  >
+                    {sourceStateLabel(source.state)}
+                  </span>
+                </div>
+                <p className="mt-3 text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                  {source.label}
+                </p>
+                <p className="mt-1 min-h-10 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                  {source.detail}
+                </p>
+                <p className="mt-2 text-[11px] tabular-nums text-zinc-400 dark:text-zinc-500">
+                  {source.coveragePercent === null
+                    ? formatSourceDate(source.lastFactAt)
+                    : `${formatPercent(source.coveragePercent)} покрытия`}
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

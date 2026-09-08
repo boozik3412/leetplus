@@ -1397,6 +1397,7 @@ model Store {
 
   @@unique([tenantId, id], map: "store_tenant_id_uidx")
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
+  @@unique([externalProvider, externalDomain, externalClubId], map: "store_external_identity_global_uidx")
   @@unique([tenantId, publicSlug], map: "store_tenant_public_slug_uidx")
   @@index([tenantId])
   @@index([integrationSourceId])

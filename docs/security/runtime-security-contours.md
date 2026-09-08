@@ -28,10 +28,37 @@ fail-closed правилу одного контура снова сломать
 | Corporate landing          | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                           |
 | Release acceleration       | 8/8 + retention: controlled five-phase rollout operation `6be461db-c600-4fe7-9e87-6267d708554e` завершён receipt `c9cbf2c9…`; V3 и trusted lane metrics merged; public/corporate/worker контуры нельзя объединять или понижать ради скорости                                 |
 | Langame recovery           | оба systemd timer enabled/active для всех admitted сетей платформы; release authority обновлена на exact `797001d5…`; bonus-ledger/gamification singleton автономно продолжает bounded `PARTIAL`; external unattended остаётся deny                                          |
+| External Langame onboarding | canonical source target `CURRENT_191/191`: only `/settings/preview` followed by revalidated atomic `PUT /settings` and a user-triggered exact-binding `BACKFILL/MANUAL`; `PILOT/BETA/LIVE` manual exact-Store sync only, `CURRENT_190 → CURRENT_191` controlled bridge, no production GO implied |
 | Telegram guest auth        | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                            |
 | Staff rewards              | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                |
 | Guest identity owner       | exact-link owner repair deployed в `797001d5…`; source successor до создания профиля разрешает подтверждённый телефон по RU-вариантам только внутри выбранного Langame domain, неоднозначность fail-closed; production effect successor требует отдельного exact-SHA rollout |
 | Внешний open beta          | `NO-GO` до Telegram end-to-end canary, admitted heartbeat/readiness rollout, закрытия SSH credential/public-port incident и оставшихся Gate 1MT/2                                                                                                                            |
+
+### Canonical simple safe external Langame onboarding
+
+Для tenant со stage `PILOT`, `BETA` или `LIVE` canonical corporate path —
+`POST /integrations/langame/settings/preview`, затем
+`PUT /integrations/langame/settings`. Preview разрешён только authenticated
+OWNER/ADMIN с fresh `NETWORK` scope и делает bounded read клубов; он не
+сохраняет source/Store и не запускает sync. Ровно один returned club выбирается
+автоматически, а при нескольких пользователь обязан передать точные club
+bindings.
+
+`PUT /settings` повторяет provider discovery и проверяет actor, tenant, club и
+Store непосредственно перед единой transaction. Глобальная unique Store
+identity `(externalProvider, externalDomain, externalClubId)` не позволяет
+одному provider club оказаться в двух tenant; collision или preview drift
+останавливают запись fail-closed. После подключения external tenant вправе
+запускать только manual sync по persisted exact Store bindings. Scheduled/daily
+external Langame, generic sync без persisted exact Store binding и guest foundation остаются
+`EXTERNAL_DENY`; timers, permits и credentials INTERNAL-контура не
+переиспользуются. Tenant `1337` остаётся `INTERNAL` legacy contour без смены
+его semantics.
+
+Schema target этого контракта — `CURRENT_191/191`, migration
+`20260908180000_external_langame_simple_onboarding`; допустим только
+контролируемый forward bridge `CURRENT_190 → CURRENT_191`, который выключается
+до postcheck. Это source contract, не заявление о deployed production или GO.
 
 ### Public guest canonical profile owner repair 08.09.2026
 

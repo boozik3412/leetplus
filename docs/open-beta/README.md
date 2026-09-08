@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.202                                        |
-| Дата             | 03.09.2026                                   |
+| Версия           | 1.203                                        |
+| Дата             | 08.09.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -31,6 +31,16 @@ checkout не является допустимым источником product
 полноценную работу и последующего invite-only теста с внешними сетями. Он не
 разрешает deployment, миграцию production-данных или выдачу доступа сам по
 себе.
+
+Канонический путь подключения Langame для внешнего tenant теперь описан в
+[simple safe external onboarding](./langame-simple-onboarding.md): preview
+`/settings/preview`, auto-selection ровно одного клуба, явный выбор при
+нескольких, повторная проверка и атомарный `PUT /settings`. Он сохраняет stage
+`PILOT/BETA/LIVE`, привязывает только выбранные clubs и не меняет legacy
+`INTERNAL` tenant `1337`. Scheduled/daily external и guest-foundation paths
+остаются denied; после сохранения Web запускает только пользовательский
+`BACKFILL/MANUAL` по точным bindings. Новый schema target — `CURRENT_191/191` с
+контролируемым bridge от `CURRENT_190`.
 
 Перед изменением auth, role landing, access scope, игрового HTTP, game
 administration, workers или deployment обязателен единый
@@ -582,11 +592,12 @@ platform-admin tenant switch и диагностика одноимённых п
    exact revoke-before-cookie-clear and tenant-media transport contract,
    bounded private responses and an explicit proof that no active Route
    Handler imports it.
-   0e. [CURRENT188 dormant Langame Web BFF candidate](./langame-current188-bff-candidate.md) —
-   exact preview/activate/status/reconcile/initial-sync-preflight transport;
-   все новые адаптеры default-off и production-denied, а persisted selected-
-   Store import остаётся явным blocker; legacy external sync также
-   fail-closed до credentials/provider/database effects.
+   0e. [Canonical simple safe external Langame onboarding](./langame-simple-onboarding.md) —
+   один production-candidate путь: `/settings/preview`, точный club selection,
+   повторная проверка и атомарный `PUT /settings`, global Store identity и
+   external manual-only sync на `CURRENT_191/191`.
+   0e.0. [Архивный CURRENT188 Langame Web BFF candidate](./langame-current188-bff-candidate.md) —
+   superseded historical evidence, не route-wired и не production authority.
    0e.1. [CURRENT188 legacy sync deny CI evidence](./langame-current188-legacy-sync-deny-ci-evidence-2026-08-13.md) —
    exact-SHA `3/3 SUCCESS`, SHA-bound artifact и доказательство, что external
    legacy sync прекращается до credential/provider/job/business effects.

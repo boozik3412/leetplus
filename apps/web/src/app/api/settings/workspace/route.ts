@@ -74,8 +74,10 @@ function sanitizeLangameSettingsForSettingsPage(
 ): LangameSettings {
   return {
     tenantName: settings.tenantName,
+    connectionMode: settings.connectionMode,
     hasApiKey: settings.hasApiKey,
     domains: settings.domains,
+    stores: settings.stores,
     sources: settings.sources,
     syncJobs: [],
     latestSuccessfulSyncJob: null,

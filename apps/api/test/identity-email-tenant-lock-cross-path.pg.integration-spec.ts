@@ -169,6 +169,15 @@ describePostgres(
         migrationCount: CURRENT_MIGRATION_COUNT,
         latestMigration: CURRENT_MIGRATION,
       });
+
+      // This seam intentionally freezes the database at CURRENT180 while using
+      // the current generated Prisma client. Keep only the additive scalar
+      // needed by that client; applying the current invite migration here would
+      // change the CURRENT180 delivery guards that this fixture exists to test.
+      await admin.$executeRawUnsafe(`
+        ALTER TABLE public."UserInvite"
+        ADD COLUMN "deliveryMode" TEXT NOT NULL DEFAULT 'EMAIL'
+      `);
       await installLeastPrivilegeWorkerRole(
         admin,
         disposableDatabase,

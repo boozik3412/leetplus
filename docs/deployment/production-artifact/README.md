@@ -106,6 +106,23 @@ outbox как `SENT`, synthetic provider event или прямое раскры�
 запрещены. Active slot и N−1 rollback не заменяются до успешного candidate
 smoke; при ошибке public upstream остаётся на предыдущем slot.
 
+Для canonical external Langame onboarding migration
+`20260908180000_external_langame_simple_onboarding` candidate должен объявлять
+target `CURRENT_191/191`. Пока production DB остаётся на admitted
+`CURRENT_190/190`, разрешён только контролируемый forward schema bridge для
+этой exact пары. Он нужен лишь для candidate preflight и schema apply, не
+разрешает external onboarding на старой schema и обязан быть `OFF` до
+postcheck. Migration закрепляет глобальную Store identity
+`(externalProvider, externalDomain, externalClubId)`; production artifact не
+может обходить её ручной записью, repair или rollback script.
+
+После schema admission artifact допускает для external `PILOT/BETA/LIVE` только
+`/settings/preview` и revalidated atomic `PUT /settings`; неявный выбор всех
+clubs, scheduled/daily external sync, guest foundation и перенос INTERNAL
+worker permit остаются denied. Manual sync разрешается только для persisted
+exact Store bindings. Эти source правила не заменяют backup/restored-copy,
+exact SHA, public smoke, controlled cutover и отдельное production `GO`.
+
 Обычный runtime rollout после отдельного production GO можно выполнять через
 [`resumable-release-orchestrator`](../resumable-release-orchestrator.md). Он
 последовательно вызывает те же hydration/promote, slot bind, loopback smoke и

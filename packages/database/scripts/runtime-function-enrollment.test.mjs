@@ -254,7 +254,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20260908090000_initial_owner_invite_link_mode 190$/u,
+    /20260908180000_external_langame_simple_onboarding 191$/u,
   );
 });
 

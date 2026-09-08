@@ -7,6 +7,7 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
 import { LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX } from './langame.types';
@@ -16,6 +17,13 @@ type PrismaMock = {
   tenant: {
     findUnique: jest.Mock;
     update: jest.Mock;
+  };
+  store: {
+    create: jest.Mock;
+    findFirst: jest.Mock;
+    findMany: jest.Mock;
+    update: jest.Mock;
+    updateMany: jest.Mock;
   };
   integrationCredential: {
     findFirst: jest.Mock;
@@ -39,10 +47,15 @@ type PrismaMock = {
     create: jest.Mock;
     findMany: jest.Mock;
   };
+  $transaction: jest.Mock;
 };
 
 type TenantContextMock = {
   resolve: jest.Mock;
+};
+
+type FreshStoreScopeMock = {
+  assertNetwork: jest.Mock;
 };
 
 type EncryptionMock = {
@@ -82,6 +95,28 @@ type CredentialUpsertCall = [
   },
 ];
 
+type StoreCreateCall = [
+  {
+    data: {
+      tenantId: string;
+      name: string;
+      address: string | null;
+      externalProvider: IntegrationProvider;
+      externalDomain: string;
+      externalClubId: string;
+      integrationSourceId: string;
+    };
+  },
+];
+
+type StoreFindManyCall = [
+  {
+    where?: {
+      externalProvider?: IntegrationProvider | null;
+    };
+  },
+];
+
 const user: AuthenticatedUser = {
   id: 'user-1',
   email: 'owner@example.com',
@@ -107,6 +142,13 @@ function createPrismaMock(): PrismaMock {
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    store: {
+      create: jest.fn(),
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+    },
     integrationCredential: {
       findFirst: jest.fn(),
       findMany: jest.fn(),
@@ -129,12 +171,14 @@ function createPrismaMock(): PrismaMock {
       create: jest.fn(),
       findMany: jest.fn(),
     },
+    $transaction: jest.fn(),
   };
 }
 
 describe('LangameSettingsService', () => {
   let prisma: PrismaMock;
   let tenantContext: TenantContextMock;
+  let freshStoreScope: FreshStoreScopeMock;
   let encryption: EncryptionMock;
   let configService: ConfigServiceMock;
   let langameClient: LangameClientMock;
@@ -147,6 +191,9 @@ describe('LangameSettingsService', () => {
         tenantId: 'tenant-1',
         tenantSlug: 'demo',
       }),
+    };
+    freshStoreScope = {
+      assertNetwork: jest.fn().mockResolvedValue({ tenantId: 'tenant-1' }),
     };
     encryption = {
       encrypt: jest.fn((value: string) => `encrypted:${value}`),
@@ -164,6 +211,7 @@ describe('LangameSettingsService', () => {
     };
     prisma.tenant.findUnique.mockResolvedValue({
       name: 'Demo Cyber Club',
+      customerStage: TenantCustomerStage.INTERNAL,
     });
     prisma.tenant.update.mockResolvedValue({
       id: 'tenant-1',
@@ -182,6 +230,7 @@ describe('LangameSettingsService', () => {
       apiKeyEncrypted: 'encrypted:key',
       apiKeyEnvVar: null,
     });
+    prisma.integrationSource.upsert.mockResolvedValue({ id: 'source-1' });
     prisma.integrationSource.findMany.mockResolvedValue([
       {
         id: 'source-1',
@@ -192,6 +241,14 @@ describe('LangameSettingsService', () => {
         lastSyncedAt: null,
       },
     ]);
+    prisma.store.findMany.mockResolvedValue([]);
+    prisma.store.findFirst.mockResolvedValue(null);
+    prisma.store.create.mockResolvedValue({ id: 'store-1' });
+    prisma.store.update.mockResolvedValue({ id: 'store-1' });
+    prisma.$transaction.mockImplementation(
+      async (callback: (transaction: PrismaMock) => Promise<unknown>) =>
+        callback(prisma),
+    );
     prisma.integrationSyncJob.findFirst.mockResolvedValue(null);
     prisma.integrationSyncJob.findMany.mockResolvedValue([]);
     prisma.langameEndpointProfileRun.findMany.mockResolvedValue([]);
@@ -211,10 +268,15 @@ describe('LangameSettingsService', () => {
       encryption as unknown as SecretEncryptionService,
       configService as unknown as ConfigService,
       langameClient as unknown as LangameClient,
+      freshStoreScope as unknown as FreshStoreScopeService,
     );
   });
 
   it('denies tenant-wide Langame settings changes and preview to STORES scope', async () => {
+    freshStoreScope.assertNetwork.mockRejectedValue(
+      new Error('Network access is required'),
+    );
+
     await expect(
       service.saveSettings(storeScopedUser, {
         apiKey: 'must-not-be-read',
@@ -228,11 +290,42 @@ describe('LangameSettingsService', () => {
       }),
     ).rejects.toThrow('Network access is required');
 
+    expect(freshStoreScope.assertNetwork).toHaveBeenCalledTimes(2);
     expect(tenantContext.resolve).not.toHaveBeenCalled();
     expect(langameClient.getDiagnosticEndpoint).not.toHaveBeenCalled();
     expect(prisma.integrationCredential.upsert).not.toHaveBeenCalled();
     expect(prisma.integrationSource.updateMany).not.toHaveBeenCalled();
     expect(prisma.integrationSource.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed onboarding payloads before provider calls or mutations', async () => {
+    await expect(
+      service.previewSettings(user, {
+        apiKey: 123,
+        domains: ['443.langame.ru'],
+      } as never),
+    ).rejects.toThrow('Langame API key must be a string');
+    await expect(
+      service.saveSettings(user, {
+        apiKey: 'submitted-secret-key',
+        domains: '443.langame.ru',
+      } as never),
+    ).rejects.toThrow('Langame domains must be a string array');
+    await expect(
+      service.saveSettings(user, {
+        apiKey: 'submitted-secret-key',
+        domains: ['443.langame.ru'],
+        clubBindings: [null],
+      } as never),
+    ).rejects.toThrow('Invalid Langame club bindings');
+
+    expect(freshStoreScope.assertNetwork).toHaveBeenCalledTimes(3);
+    expect(langameClient.getDiagnosticEndpoint).not.toHaveBeenCalled();
+    expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
+    expect(prisma.integrationCredential.upsert).not.toHaveBeenCalled();
+    expect(prisma.integrationSource.upsert).not.toHaveBeenCalled();
+    expect(prisma.store.create).not.toHaveBeenCalled();
+    expect(prisma.store.update).not.toHaveBeenCalled();
   });
 
   it('projects a successful fact import with failed discrepancy audit as PARTIAL', async () => {
@@ -277,41 +370,88 @@ describe('LangameSettingsService', () => {
     });
   });
 
-  it('denies the legacy direct activation path to an external pilot tenant', async () => {
+  it('connects an external tenant to its single verified Langame club', async () => {
+    prisma.tenant.findUnique.mockResolvedValue({
+      name: 'Pilot club',
+      customerStage: TenantCustomerStage.PILOT,
+    });
+    langameClient.getDiagnosticEndpoint.mockResolvedValue({
+      status: true,
+      data: [{ id: 42, name: 'Pilot club', address: 'Main street', active: 1 }],
+    });
+
     await expect(
       service.saveSettings(
+        { ...user, tenantCustomerStage: TenantCustomerStage.PILOT },
         {
-          ...user,
-          tenantCustomerStage: TenantCustomerStage.PILOT,
-        },
-        {
-          apiKey: 'must-not-be-persisted',
+          apiKey: 'external-secret-key',
           domains: ['443.langame.ru'],
         },
       ),
-    ).rejects.toThrow('External tenants must use staged Langame onboarding');
+    ).resolves.toMatchObject({
+      connectionMode: 'SAFE_EXTERNAL',
+      hasApiKey: true,
+    });
 
-    expect(tenantContext.resolve).not.toHaveBeenCalled();
-    expect(prisma.integrationCredential.upsert).not.toHaveBeenCalled();
-    expect(prisma.integrationSource.upsert).not.toHaveBeenCalled();
+    expect(freshStoreScope.assertNetwork).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: 'tenant-1' }),
+    );
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.integrationCredential.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.integrationSource.upsert).toHaveBeenCalledTimes(1);
+    const storeFindManyCalls = prisma.store.findMany.mock
+      .calls as StoreFindManyCall[];
+    const automaticStoreQueryIndex = storeFindManyCalls.findIndex(
+      ([query]) => query.where?.externalProvider === null,
+    );
+    expect(automaticStoreQueryIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      prisma.store.findMany.mock.invocationCallOrder[automaticStoreQueryIndex],
+    ).toBeLessThan(prisma.store.updateMany.mock.invocationCallOrder[0]);
+    const [storeCreate] = prisma.store.create.mock.calls[0] as StoreCreateCall;
+    expect(storeCreate.data).toMatchObject({
+      tenantId: 'tenant-1',
+      name: 'Pilot club',
+      address: 'Main street',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: '443.langame.ru',
+      externalClubId: '42',
+      integrationSourceId: 'source-1',
+    });
   });
 
-  it('fails closed when the legacy caller has no authoritative customer stage', async () => {
-    const unclassifiedUser: AuthenticatedUser = {
-      ...user,
-      tenantCustomerStage: undefined,
-    };
+  it('requires explicit selection for multiple verified clubs without mutation', async () => {
+    prisma.tenant.findUnique.mockResolvedValue({
+      name: 'Pilot club',
+      customerStage: TenantCustomerStage.PILOT,
+    });
+    langameClient.getDiagnosticEndpoint.mockResolvedValue({
+      status: true,
+      data: [
+        { id: 1, name: 'Club one', active: 1 },
+        { id: 2, name: 'Club two', active: 1 },
+      ],
+    });
 
     await expect(
-      service.saveSettings(unclassifiedUser, {
-        apiKey: 'must-not-be-persisted',
-        domains: ['443.langame.ru'],
-      }),
-    ).rejects.toThrow('External tenants must use staged Langame onboarding');
+      service.saveSettings(
+        { ...user, tenantCustomerStage: TenantCustomerStage.PILOT },
+        {
+          apiKey: 'external-secret-key',
+          domains: ['443.langame.ru'],
+        },
+      ),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'LANGAME_CLUB_SELECTION_REQUIRED' },
+    });
 
-    expect(tenantContext.resolve).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.tenant.update).not.toHaveBeenCalled();
     expect(prisma.integrationCredential.upsert).not.toHaveBeenCalled();
+    expect(prisma.integrationSource.updateMany).not.toHaveBeenCalled();
     expect(prisma.integrationSource.upsert).not.toHaveBeenCalled();
+    expect(prisma.store.create).not.toHaveBeenCalled();
+    expect(prisma.store.update).not.toHaveBeenCalled();
   });
 
   it('allows NETWORK scope to preview credentials without leaking or activating them', async () => {
@@ -320,6 +460,8 @@ describe('LangameSettingsService', () => {
       data: [
         {
           id: 42,
+          name: 'Verified club',
+          active: 1,
           api_key: 'must-not-leak-from-upstream',
         },
       ],
@@ -339,12 +481,21 @@ describe('LangameSettingsService', () => {
         timeoutMs: 5_000,
         maxAttempts: 1,
         maxDomains: 20,
+        maxClubs: 100,
       },
       diagnostics: [
         {
           domain: '443.langame.ru',
           status: 'SUCCESS',
           clubCount: 1,
+          clubs: [
+            {
+              externalClubId: '42',
+              name: 'Verified club',
+              address: null,
+            },
+          ],
+          requiresSelection: false,
           reasonCode: null,
         },
       ],
@@ -414,6 +565,7 @@ describe('LangameSettingsService', () => {
   it('saves encrypted API key and active domains for tenant', async () => {
     prisma.tenant.findUnique.mockResolvedValue({
       name: 'F5',
+      customerStage: TenantCustomerStage.INTERNAL,
     });
     prisma.integrationCredential.findMany
       .mockResolvedValueOnce([])

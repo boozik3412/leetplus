@@ -12,6 +12,7 @@ import {
   Prisma,
   TenantCustomerStage,
   TenantModule,
+  type IntegrationSource,
 } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, writeFile } from 'node:fs/promises';
@@ -35,6 +36,7 @@ import {
 } from './langame.types';
 import type {
   LangameGood,
+  LangameClub,
   LangameClubProductConfiguration,
   LangameOperationLog,
   LangameProduct,
@@ -51,6 +53,10 @@ const MAX_LANGAME_PERIOD_DAYS = 365;
 const MAX_LANGAME_OPERATION_LOG_PERIOD_DAYS = 31;
 export const EXTERNAL_LEGACY_LANGAME_SYNC_DENIAL_REASON_CODE =
   'EXTERNAL_LEGACY_LANGAME_SYNC_REQUIRES_CURRENT188';
+export const EXTERNAL_LANGAME_BINDING_REQUIRED_REASON_CODE =
+  'EXTERNAL_LANGAME_BINDING_REQUIRED';
+export const EXTERNAL_LANGAME_BINDING_STALE_REASON_CODE =
+  'EXTERNAL_LANGAME_BINDING_STALE';
 const SAFE_DISCREPANCY_AUDIT_ERROR_CODES = new Set([
   'EACCES',
   'EDQUOT',
@@ -85,6 +91,12 @@ type ResolvedSyncPeriod = {
   toDate: Date;
   from: string;
   to: string;
+};
+
+type ExternalSourceScope = {
+  allowedClubIds: ReadonlySet<string>;
+  clubs: LangameClub[];
+  storesByClubId: ReadonlyMap<string, StoreSyncRef>;
 };
 
 const LANGAME_SYNC_MODULES = [
@@ -223,17 +235,13 @@ export class LangameSyncService {
         });
       }
     }
-    if (admission.customerStage !== TenantCustomerStage.INTERNAL) {
-      throw new ServiceUnavailableException({
-        reasonCode: EXTERNAL_LEGACY_LANGAME_SYNC_DENIAL_REASON_CODE,
-        message:
-          'External tenant Langame sync requires the staged, store-bound onboarding workflow',
-      });
-    }
-
     const requestedPeriod = this.resolvePeriod(query);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
+    const externalSourceScopes =
+      admission.customerStage === TenantCustomerStage.INTERNAL
+        ? null
+        : await this.resolveExternalSourceScopes(tenantId, sources, apiKey);
     const result: LangameSyncResult = {
       tenantId,
       sources: sources.length,
@@ -265,6 +273,9 @@ export class LangameSyncService {
     const shouldSyncClubRevenue = shouldSyncSales;
 
     for (const source of sources) {
+      const externalSourceScope = externalSourceScopes?.get(source.id) ?? null;
+      const allowedExternalClubIds =
+        externalSourceScope?.allowedClubIds ?? null;
       const period = this.resolveSourcePeriod(
         query,
         requestedPeriod,
@@ -343,39 +354,51 @@ export class LangameSyncService {
         }
 
         if (shouldSyncProductGroups || shouldSyncInventory) {
-          const clubs = await this.langameClient.listClubs(
-            source.baseUrl,
-            apiKey,
-          );
+          const clubs =
+            externalSourceScope?.clubs ??
+            (await this.langameClient.listClubs(source.baseUrl, apiKey));
 
           for (const club of clubs) {
-            const store = await this.prisma.store.upsert({
-              where: {
-                tenantId_externalProvider_externalDomain_externalClubId: {
-                  tenantId,
-                  externalProvider: IntegrationProvider.LANGAME,
-                  externalDomain: source.domain,
-                  externalClubId: String(club.id),
-                },
-              },
-              create: {
-                tenantId,
-                name: club.name,
-                address:
-                  this.knownAddress(source.domain, club.id) ?? club.address,
-                isActive: club.active === 1,
-                externalProvider: IntegrationProvider.LANGAME,
-                externalDomain: source.domain,
-                externalClubId: String(club.id),
-                integrationSourceId: source.id,
-              },
-              update: {
-                address:
-                  this.knownAddress(source.domain, club.id) ?? club.address,
-                isActive: club.active === 1,
-                integrationSourceId: source.id,
-              },
-            });
+            const externalStore = externalSourceScope?.storesByClubId.get(
+              String(club.id),
+            );
+            const store = externalStore
+              ? await this.prisma.store.update({
+                  where: { id: externalStore.id },
+                  data: {
+                    name: club.name,
+                    address: club.address,
+                    isActive: true,
+                    integrationSourceId: source.id,
+                  },
+                })
+              : await this.prisma.store.upsert({
+                  where: {
+                    tenantId_externalProvider_externalDomain_externalClubId: {
+                      tenantId,
+                      externalProvider: IntegrationProvider.LANGAME,
+                      externalDomain: source.domain,
+                      externalClubId: String(club.id),
+                    },
+                  },
+                  create: {
+                    tenantId,
+                    name: club.name,
+                    address:
+                      this.knownAddress(source.domain, club.id) ?? club.address,
+                    isActive: club.active === 1,
+                    externalProvider: IntegrationProvider.LANGAME,
+                    externalDomain: source.domain,
+                    externalClubId: String(club.id),
+                    integrationSourceId: source.id,
+                  },
+                  update: {
+                    address:
+                      this.knownAddress(source.domain, club.id) ?? club.address,
+                    isActive: club.active === 1,
+                    integrationSourceId: source.id,
+                  },
+                });
 
             result.stores += 1;
             sourceResult.stores += 1;
@@ -432,6 +455,7 @@ export class LangameSyncService {
             productsByExternalId,
             period,
             discrepancies,
+            allowedExternalClubIds,
           );
           result.salesFacts += salesFacts;
           sourceResult.salesFacts = salesFacts;
@@ -443,6 +467,7 @@ export class LangameSyncService {
             source.domain,
             apiKey,
             period,
+            allowedExternalClubIds,
           );
           result.clubRevenueFacts += clubRevenueFacts;
           sourceResult.clubRevenueFacts = clubRevenueFacts;
@@ -528,6 +553,183 @@ export class LangameSyncService {
     }
 
     return result;
+  }
+
+  private async resolveExternalSourceScopes(
+    tenantId: string,
+    sources: IntegrationSource[],
+    apiKey: string,
+  ): Promise<Map<string, ExternalSourceScope>> {
+    const sourceIds = sources.map(({ id }) => id);
+    const bindings = await this.prisma.store.findMany({
+      where: {
+        tenantId,
+        isActive: true,
+        externalProvider: IntegrationProvider.LANGAME,
+        integrationSourceId: { in: sourceIds },
+        externalDomain: { not: null },
+        externalClubId: { not: null },
+      },
+      select: {
+        id: true,
+        name: true,
+        integrationSourceId: true,
+        externalDomain: true,
+        externalClubId: true,
+      },
+    });
+    const bindingsBySource = new Map<string, Map<string, StoreSyncRef>>();
+
+    for (const binding of bindings) {
+      if (
+        !binding.integrationSourceId ||
+        !binding.externalDomain ||
+        !binding.externalClubId
+      ) {
+        continue;
+      }
+      const source = sources.find(
+        ({ id, domain }) =>
+          id === binding.integrationSourceId &&
+          domain === binding.externalDomain,
+      );
+      if (!source) {
+        continue;
+      }
+      const storesByClubId =
+        bindingsBySource.get(source.id) ?? new Map<string, StoreSyncRef>();
+      storesByClubId.set(binding.externalClubId, {
+        id: binding.id,
+        name: binding.name,
+      });
+      bindingsBySource.set(source.id, storesByClubId);
+    }
+
+    for (const source of sources) {
+      if ((bindingsBySource.get(source.id)?.size ?? 0) === 0) {
+        throw new ServiceUnavailableException({
+          reasonCode: EXTERNAL_LANGAME_BINDING_REQUIRED_REASON_CODE,
+          message: 'Сначала подтвердите клубы Langame в настройках интеграции.',
+        });
+      }
+    }
+
+    const sourceScopes = await Promise.all(
+      sources.map(async (source) => {
+        const storesByClubId = bindingsBySource.get(source.id)!;
+        const allowedClubIds = new Set(storesByClubId.keys());
+        const availableClubs = this.normalizeExternalClubs(
+          await this.langameClient.listClubs(source.baseUrl, apiKey),
+        );
+        const selectedClubs: LangameClub[] = [];
+        const seenClubIds = new Set<string>();
+
+        for (const club of availableClubs) {
+          const externalClubId = String(club.id);
+          if (!/^[1-9][0-9]{0,18}$/.test(externalClubId)) {
+            throw new ServiceUnavailableException({
+              reasonCode: EXTERNAL_LANGAME_BINDING_STALE_REASON_CODE,
+              message:
+                'Langame вернул некорректный список клубов. Подключение не изменено.',
+            });
+          }
+          if (seenClubIds.has(externalClubId)) {
+            throw new ServiceUnavailableException({
+              reasonCode: EXTERNAL_LANGAME_BINDING_STALE_REASON_CODE,
+              message:
+                'Langame вернул неоднозначный список клубов. Подключение не изменено.',
+            });
+          }
+          seenClubIds.add(externalClubId);
+          if (allowedClubIds.has(externalClubId) && club.active === 1) {
+            selectedClubs.push(club);
+          }
+        }
+
+        if (selectedClubs.length !== allowedClubIds.size) {
+          throw new ServiceUnavailableException({
+            reasonCode: EXTERNAL_LANGAME_BINDING_STALE_REASON_CODE,
+            message:
+              'Один из подтверждённых клубов Langame больше недоступен. Переподключите интеграцию.',
+          });
+        }
+
+        return [
+          source.id,
+          { allowedClubIds, clubs: selectedClubs, storesByClubId },
+        ] as const;
+      }),
+    );
+
+    return new Map(sourceScopes);
+  }
+
+  private normalizeExternalClubs(payload: unknown): LangameClub[] {
+    if (!Array.isArray(payload)) {
+      throw this.externalBindingStaleError(
+        'Langame вернул некорректный список клубов. Подключение не изменено.',
+      );
+    }
+
+    const clubs: LangameClub[] = [];
+    const seenClubIds = new Set<string>();
+    for (const candidate of payload) {
+      if (
+        !candidate ||
+        typeof candidate !== 'object' ||
+        Array.isArray(candidate)
+      ) {
+        throw this.externalBindingStaleError(
+          'Langame вернул некорректный список клубов. Подключение не изменено.',
+        );
+      }
+      const row = candidate as Record<string, unknown>;
+      const rawId = row.id;
+      const externalClubId =
+        typeof rawId === 'number' && Number.isSafeInteger(rawId) && rawId > 0
+          ? String(rawId)
+          : typeof rawId === 'string' &&
+              /^[1-9][0-9]{0,15}$/.test(rawId.trim()) &&
+              Number.isSafeInteger(Number(rawId.trim()))
+            ? rawId.trim()
+            : null;
+      if (!externalClubId || seenClubIds.has(externalClubId)) {
+        throw this.externalBindingStaleError(
+          'Langame вернул неоднозначный список клубов. Подключение не изменено.',
+        );
+      }
+      seenClubIds.add(externalClubId);
+
+      const rawActive = row.active;
+      const active =
+        rawActive === true ||
+        rawActive === 1 ||
+        rawActive === '1' ||
+        (typeof rawActive === 'string' &&
+          rawActive.trim().toLowerCase() === 'true');
+      const name =
+        typeof row.name === 'string' && row.name.trim()
+          ? row.name.trim().slice(0, 255)
+          : `Langame club #${externalClubId}`;
+      const address =
+        typeof row.address === 'string' && row.address.trim()
+          ? row.address.trim().slice(0, 1_000)
+          : null;
+      clubs.push({
+        id: Number(externalClubId),
+        name,
+        address,
+        active: active ? 1 : 0,
+      });
+    }
+    return clubs;
+  }
+
+  private externalBindingStaleError(message: string) {
+    return new ServiceUnavailableException({
+      reasonCode: EXTERNAL_LANGAME_BINDING_STALE_REASON_CODE,
+      message,
+    });
   }
 
   private async loadProductMap(tenantId: string, domain: string) {
@@ -869,12 +1071,16 @@ export class LangameSyncService {
     productsByExternalId: Map<string, ProductSyncRef>,
     period: { from: string; to: string },
     discrepancies: DiscrepancyLogEntry[],
+    allowedExternalClubIds: ReadonlySet<string> | null,
   ) {
     const stores = await this.prisma.store.findMany({
       where: {
         tenantId,
         externalProvider: IntegrationProvider.LANGAME,
         externalDomain: domain,
+        ...(allowedExternalClubIds
+          ? { externalClubId: { in: [...allowedExternalClubIds] } }
+          : {}),
       },
       select: {
         id: true,
@@ -938,6 +1144,12 @@ export class LangameSyncService {
           const externalProductId = String(row.list_goods_id);
           const externalClubId =
             row.list_clubs_id === null ? null : String(row.list_clubs_id);
+          if (
+            allowedExternalClubIds &&
+            (!externalClubId || !allowedExternalClubIds.has(externalClubId))
+          ) {
+            continue;
+          }
           const product = await this.resolveSaleProduct(
             tenantId,
             domain,
@@ -950,6 +1162,7 @@ export class LangameSyncService {
                 domain,
                 storesByExternalClubId,
                 externalClubId,
+                !allowedExternalClubIds,
               )
             : null;
 
@@ -1203,11 +1416,15 @@ export class LangameSyncService {
     domain: string,
     storesByExternalClubId: Map<string | null, StoreSyncRef>,
     externalClubId: string,
+    allowPlaceholder = true,
   ) {
     const existing = storesByExternalClubId.get(externalClubId);
 
     if (existing) {
       return existing;
+    }
+    if (!allowPlaceholder) {
+      return null;
     }
 
     const placeholderName = `Langame club #${externalClubId}`;
@@ -1280,12 +1497,16 @@ export class LangameSyncService {
     domain: string,
     apiKey: string,
     period: { from: string; to: string; fromDate: Date; toDate: Date },
+    allowedExternalClubIds: ReadonlySet<string> | null,
   ) {
     const stores = await this.prisma.store.findMany({
       where: {
         tenantId,
         externalProvider: IntegrationProvider.LANGAME,
         externalDomain: domain,
+        ...(allowedExternalClubIds
+          ? { externalClubId: { in: [...allowedExternalClubIds] } }
+          : {}),
       },
       select: {
         id: true,
@@ -1327,6 +1548,12 @@ export class LangameSyncService {
 
       const externalClubId =
         operation.club_id === null ? null : String(operation.club_id);
+      if (
+        allowedExternalClubIds &&
+        (!externalClubId || !allowedExternalClubIds.has(externalClubId))
+      ) {
+        continue;
+      }
       const storeId = externalClubId
         ? storesByExternalClubId.get(externalClubId)
         : null;
@@ -1355,6 +1582,9 @@ export class LangameSyncService {
         tenantId,
         externalProvider: IntegrationProvider.LANGAME,
         externalDomain: domain,
+        ...(allowedExternalClubIds
+          ? { externalClubId: { in: [...allowedExternalClubIds] } }
+          : {}),
         revenueDate: {
           gte: this.startOfUtcDay(period.fromDate),
           lte: this.startOfUtcDay(period.toDate),

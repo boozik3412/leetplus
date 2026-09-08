@@ -1,8 +1,15 @@
-# CURRENT188 dormant Langame Web BFF candidate
+# CURRENT188 dormant Langame Web BFF candidate — archived / superseded
 
 ## Статус
 
-`DORMANT / NONCANONICAL / NOT ROUTE-WIRED / NO PRODUCTION EFFECTS`.
+`ARCHIVED / SUPERSEDED / NONCANONICAL / NOT ROUTE-WIRED / NO PRODUCTION EFFECTS`.
+
+Этот файл сохранён только как historical evidence. Он заменён
+[canonical simple safe external Langame onboarding](./langame-simple-onboarding.md)
+и не является production contract, release authority или допустимым route
+cutover. Новый canonical путь использует `/settings/preview` и повторно
+проверяемый атомарный `PUT /settings`; CURRENT188 нельзя активировать вместо
+него.
 
 Файл `apps/web/src/lib/langame-current188-bff-candidate.ts` является чистым
 server-side transport-кандидатом. Литеральный флаг

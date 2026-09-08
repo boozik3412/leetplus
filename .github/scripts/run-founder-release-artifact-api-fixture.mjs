@@ -11,8 +11,8 @@ const DATABASE_PATTERN = /^lp_founder_artifact_api_[0-9a-f]{32}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const MAX_CHILD_OUTPUT_BYTES = 256 * 1024;
 const EXPECTED_MIGRATION =
-  "20260908090000_initial_owner_invite_link_mode";
-const EXPECTED_MIGRATION_COUNT = 190;
+  "20260908180000_external_langame_simple_onboarding";
+const EXPECTED_MIGRATION_COUNT = 191;
 
 if (
   process.env.FOUNDER_RELEASE_ARTIFACT_API_CONFIRM !== REQUIRED_CONFIRMATION

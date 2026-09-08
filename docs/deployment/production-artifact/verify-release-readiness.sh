@@ -276,6 +276,12 @@ const admittedGuestSupportForwardBridges = [
     targetMigration: '20260908090000_initial_owner_invite_link_mode',
     targetMigrationCount: 190,
   },
+  {
+    sourceMigration: '20260908090000_initial_owner_invite_link_mode',
+    sourceMigrationCount: 190,
+    targetMigration: '20260908180000_external_langame_simple_onboarding',
+    targetMigrationCount: 191,
+  },
 ];
 const guestSupportForwardBridgeAccepted =
   bridgeKeys === 'mode,targetMigration,targetMigrationCount' &&

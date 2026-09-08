@@ -1,6 +1,6 @@
 import {
   BadRequestException,
-  ForbiddenException,
+  ConflictException,
   Injectable,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -14,6 +14,7 @@ import { readFile } from 'node:fs/promises';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { LangameClient } from './langame.client';
 import { LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX } from './langame.types';
@@ -52,6 +53,7 @@ const ONBOARDING_DIAGNOSTIC_PATH = '/clubs/list';
 const ONBOARDING_DIAGNOSTIC_TIMEOUT_MS = 5_000;
 const ONBOARDING_DIAGNOSTIC_MAX_ATTEMPTS = 1;
 const ONBOARDING_MAX_DOMAINS = 20;
+const ONBOARDING_MAX_CLUBS = 100;
 const LANGAME_DOMAIN_SUFFIXES = ['.langame.ru', '.langamepro.ru'] as const;
 
 const SERVICE_DIAGNOSTIC_ENDPOINTS: LangameServiceEndpointDefinition[] = [
@@ -281,6 +283,13 @@ export type LangameSettingsDto = {
   tenantName?: string;
   apiKey?: string;
   domains?: string[];
+  clubBindings?: LangameClubBindingDto[];
+};
+
+export type LangameClubBindingDto = {
+  domain?: string;
+  externalClubId?: string;
+  storeId?: string | null;
 };
 
 export type LangameSettingsPreviewDto = Pick<
@@ -294,6 +303,31 @@ type EndpointSnapshotSourceDraft = Omit<
 > & {
   payloadPreview: unknown;
   rows: Record<string, unknown>[];
+};
+
+type LangameOnboardingClub = {
+  externalClubId: string;
+  name: string;
+  address: string | null;
+};
+
+type LangameOnboardingDiagnostic = {
+  domain: string;
+  status: 'SUCCESS' | 'FAILED';
+  clubCount: number;
+  clubs: LangameOnboardingClub[];
+  requiresSelection: boolean;
+  reasonCode:
+    | 'LANGAME_DIAGNOSTIC_FAILED'
+    | 'LANGAME_NO_ACTIVE_CLUBS'
+    | 'LANGAME_CLUB_LIST_INVALID'
+    | null;
+};
+
+type ResolvedLangameClubBinding = {
+  domain: string;
+  club: LangameOnboardingClub;
+  storeId: string | null;
 };
 
 const tariffSnapshotEndpointKeys = new Set<LangameEndpointProfileKey>([
@@ -312,6 +346,7 @@ export class LangameSettingsService {
     private readonly secretEncryptionService: SecretEncryptionService,
     private readonly configService: ConfigService,
     private readonly langameClient: LangameClient,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
 
   async getSettings(user: AuthenticatedUser) {
@@ -324,10 +359,11 @@ export class LangameSettingsService {
       latestSuccessfulSyncJob,
       latestEndpointProfileRuns,
       latestEndpointSnapshotRuns,
+      stores,
     ] = await Promise.all([
       this.prisma.tenant.findUnique({
         where: { id: tenantId },
-        select: { name: true },
+        select: { name: true, customerStage: true },
       }),
       this.findCredential(tenantId),
       this.prisma.integrationSource.findMany({
@@ -368,6 +404,17 @@ export class LangameSettingsService {
         },
         orderBy: { startedAt: 'desc' },
         take: 100,
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId, isActive: true },
+        select: {
+          id: true,
+          name: true,
+          externalDomain: true,
+          externalClubId: true,
+          integrationSourceId: true,
+        },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
       }),
     ]);
     const mapSyncJob = (job: (typeof syncJobs)[number]) => {
@@ -410,6 +457,10 @@ export class LangameSettingsService {
 
     return {
       tenantName: tenant?.name ?? '',
+      connectionMode:
+        tenant?.customerStage === TenantCustomerStage.INTERNAL
+          ? ('INTERNAL' as const)
+          : ('SAFE_EXTERNAL' as const),
       hasApiKey: Boolean(credential?.apiKeyEncrypted),
       domains: sources
         .filter((source) => source.isActive)
@@ -435,32 +486,335 @@ export class LangameSettingsService {
       endpointSnapshots: this.toEndpointSnapshotRunSummaries(
         latestEndpointSnapshotRuns,
       ),
+      stores: stores.map((store) => ({
+        id: store.id,
+        name: store.name,
+        externalDomain: store.externalDomain,
+        externalClubId: store.externalClubId,
+        integrationSourceId: store.integrationSourceId,
+      })),
     };
   }
 
   async saveSettings(user: AuthenticatedUser, dto: LangameSettingsDto) {
-    this.accessScopeService.assertNetwork(user);
-    if (user.tenantCustomerStage !== TenantCustomerStage.INTERNAL) {
-      throw new ForbiddenException(
-        'External tenants must use staged Langame onboarding',
-      );
-    }
-    const { tenantId } = this.tenantContextService.resolve(user);
+    const { tenantId } = await this.freshStoreScopeService.assertNetwork(user);
+    this.assertSettingsPayload(dto);
     const domains = this.normalizeDomains(dto.domains ?? []);
-    const apiKey = dto.apiKey?.trim();
+    const submittedApiKey = dto.apiKey?.trim();
     const tenantName = dto.tenantName?.trim();
 
     if (domains.length === 0) {
       throw new BadRequestException('At least one Langame domain is required');
     }
+    if (domains.length > ONBOARDING_MAX_DOMAINS) {
+      throw new BadRequestException(
+        `No more than ${ONBOARDING_MAX_DOMAINS} Langame domains can be configured at once`,
+      );
+    }
 
-    const existingCredential = await this.findCredential(tenantId);
+    const [tenant, existingCredential] = await Promise.all([
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { customerStage: true },
+      }),
+      this.findCredential(tenantId),
+    ]);
+    if (!tenant) {
+      throw new BadRequestException('Tenant is unavailable');
+    }
     const existingApiKeyEncrypted = existingCredential?.apiKeyEncrypted ?? null;
     const existingApiKeyEnvVar = existingCredential?.apiKeyEnvVar ?? null;
+    const apiKey =
+      submittedApiKey ||
+      (existingCredential
+        ? this.resolveCredentialApiKey(existingCredential)
+        : null);
 
     if (!apiKey && !existingApiKeyEncrypted && !existingApiKeyEnvVar) {
       throw new BadRequestException('Langame API key is required');
     }
+
+    if (tenant.customerStage === TenantCustomerStage.INTERNAL) {
+      await this.saveInternalSettings({
+        tenantId,
+        tenantName,
+        submittedApiKey,
+        domains,
+        existingApiKeyEncrypted,
+        existingApiKeyEnvVar,
+      });
+      return this.getSettings(user);
+    }
+
+    if (!apiKey) {
+      throw new BadRequestException('Langame API key is required');
+    }
+
+    const diagnostics = await this.diagnoseOnboardingDomains(domains, apiKey);
+    const selectedBindings = this.resolveExternalClubBindings(
+      diagnostics,
+      dto.clubBindings ?? [],
+    );
+    const encryptedApiKey = submittedApiKey
+      ? this.secretEncryptionService.encrypt(submittedApiKey)
+      : existingApiKeyEncrypted;
+
+    try {
+      await this.prisma.$transaction(async (transaction) => {
+        if (tenantName) {
+          await transaction.tenant.update({
+            where: { id: tenantId },
+            data: { name: tenantName },
+          });
+        }
+
+        const credential = await transaction.integrationCredential.upsert({
+          where: {
+            tenantId_provider_name: {
+              tenantId,
+              provider: IntegrationProvider.LANGAME,
+              name: CREDENTIAL_NAME,
+            },
+          },
+          create: {
+            tenantId,
+            provider: IntegrationProvider.LANGAME,
+            name: CREDENTIAL_NAME,
+            apiKeyEncrypted: encryptedApiKey,
+            apiKeyEnvVar: submittedApiKey ? null : existingApiKeyEnvVar,
+          },
+          update: {
+            apiKeyEncrypted: encryptedApiKey,
+            apiKeyEnvVar: submittedApiKey ? null : existingApiKeyEnvVar,
+            isActive: true,
+          },
+        });
+
+        await transaction.integrationSource.updateMany({
+          where: {
+            tenantId,
+            provider: IntegrationProvider.LANGAME,
+            domain: { notIn: domains },
+          },
+          data: { isActive: false },
+        });
+
+        const sourceIdByDomain = new Map<string, string>();
+        for (const domain of domains) {
+          const source = await transaction.integrationSource.upsert({
+            where: {
+              tenantId_provider_domain: {
+                tenantId,
+                provider: IntegrationProvider.LANGAME,
+                domain,
+              },
+            },
+            create: {
+              tenantId,
+              credentialId: credential.id,
+              provider: IntegrationProvider.LANGAME,
+              name: domain,
+              domain,
+              baseUrl: `https://${domain}/public_api`,
+              isActive: true,
+            },
+            update: {
+              credentialId: credential.id,
+              baseUrl: `https://${domain}/public_api`,
+              isActive: true,
+            },
+            select: { id: true },
+          });
+          sourceIdByDomain.set(domain, source.id);
+        }
+
+        const singleAutomaticStore =
+          selectedBindings.length === 1 && !selectedBindings[0]?.storeId
+            ? await transaction.store.findMany({
+                where: {
+                  tenantId,
+                  isActive: true,
+                  externalProvider: null,
+                  integrationSourceId: null,
+                },
+                select: { id: true },
+                take: 2,
+              })
+            : [];
+        const automaticStoreId =
+          singleAutomaticStore.length === 1
+            ? singleAutomaticStore[0]?.id
+            : null;
+
+        await transaction.store.updateMany({
+          where: {
+            tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            NOT: {
+              OR: selectedBindings.map(({ domain, club }) => ({
+                externalDomain: domain,
+                externalClubId: club.externalClubId,
+              })),
+            },
+          },
+          data: {
+            externalProvider: null,
+            externalDomain: null,
+            externalClubId: null,
+            integrationSourceId: null,
+          },
+        });
+
+        const foreignClaims = await transaction.store.findMany({
+          where: {
+            tenantId: { not: tenantId },
+            OR: selectedBindings.map(({ domain, club }) => ({
+              externalProvider: IntegrationProvider.LANGAME,
+              externalDomain: domain,
+              externalClubId: club.externalClubId,
+            })),
+          },
+          select: { id: true },
+          take: 1,
+        });
+        if (foreignClaims.length > 0) {
+          throw this.clubAlreadyConnectedError();
+        }
+
+        const requestedStoreIds = [
+          ...new Set(
+            selectedBindings
+              .map(({ storeId }) => storeId)
+              .filter((storeId): storeId is string => Boolean(storeId)),
+          ),
+        ];
+        const requestedStores = requestedStoreIds.length
+          ? await transaction.store.findMany({
+              where: {
+                tenantId,
+                id: { in: requestedStoreIds },
+                isActive: true,
+              },
+              select: {
+                id: true,
+                externalProvider: true,
+                externalDomain: true,
+                externalClubId: true,
+              },
+            })
+          : [];
+        if (requestedStores.length !== requestedStoreIds.length) {
+          throw new BadRequestException('Selected store is unavailable');
+        }
+
+        for (const binding of selectedBindings) {
+          const sourceId = sourceIdByDomain.get(binding.domain);
+          if (!sourceId) {
+            throw new BadRequestException('Langame source is unavailable');
+          }
+          const targetStoreId = binding.storeId ?? automaticStoreId;
+          const existingBinding = await transaction.store.findFirst({
+            where: {
+              tenantId,
+              externalProvider: IntegrationProvider.LANGAME,
+              externalDomain: binding.domain,
+              externalClubId: binding.club.externalClubId,
+            },
+            select: { id: true },
+          });
+
+          if (targetStoreId) {
+            const requestedStore = requestedStores.find(
+              (store) => store.id === targetStoreId,
+            );
+            if (
+              requestedStore &&
+              requestedStore.externalProvider !== null &&
+              (requestedStore.externalProvider !==
+                IntegrationProvider.LANGAME ||
+                requestedStore.externalDomain !== binding.domain ||
+                requestedStore.externalClubId !== binding.club.externalClubId)
+            ) {
+              throw new ConflictException({
+                reasonCode: 'LANGAME_STORE_ALREADY_BOUND',
+                message:
+                  'Выбранный клуб LeetPlus уже связан с другим источником.',
+              });
+            }
+            if (existingBinding && existingBinding.id !== targetStoreId) {
+              throw this.clubAlreadyConnectedError();
+            }
+
+            await transaction.store.update({
+              where: { id: targetStoreId },
+              data: {
+                name: binding.club.name,
+                address: binding.club.address,
+                isActive: true,
+                externalProvider: IntegrationProvider.LANGAME,
+                externalDomain: binding.domain,
+                externalClubId: binding.club.externalClubId,
+                integrationSourceId: sourceId,
+              },
+            });
+          } else if (existingBinding) {
+            await transaction.store.update({
+              where: { id: existingBinding.id },
+              data: {
+                name: binding.club.name,
+                address: binding.club.address,
+                isActive: true,
+                integrationSourceId: sourceId,
+              },
+            });
+          } else {
+            await transaction.store.create({
+              data: {
+                tenantId,
+                name: binding.club.name,
+                address: binding.club.address,
+                isActive: true,
+                externalProvider: IntegrationProvider.LANGAME,
+                externalDomain: binding.domain,
+                externalClubId: binding.club.externalClubId,
+                integrationSourceId: sourceId,
+              },
+            });
+          }
+        }
+      });
+    } catch (error) {
+      if (
+        error instanceof ConflictException ||
+        (error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002')
+      ) {
+        throw error instanceof ConflictException
+          ? error
+          : this.clubAlreadyConnectedError();
+      }
+      throw error;
+    }
+
+    return this.getSettings(user);
+  }
+
+  private async saveInternalSettings(input: {
+    tenantId: string;
+    tenantName: string | undefined;
+    submittedApiKey: string | undefined;
+    domains: string[];
+    existingApiKeyEncrypted: string | null;
+    existingApiKeyEnvVar: string | null;
+  }) {
+    const {
+      tenantId,
+      tenantName,
+      submittedApiKey,
+      domains,
+      existingApiKeyEncrypted,
+      existingApiKeyEnvVar,
+    } = input;
 
     if (tenantName) {
       await this.prisma.tenant.update({
@@ -481,15 +835,16 @@ export class LangameSettingsService {
         tenantId,
         provider: IntegrationProvider.LANGAME,
         name: CREDENTIAL_NAME,
-        apiKeyEncrypted: apiKey
-          ? this.secretEncryptionService.encrypt(apiKey)
+        apiKeyEncrypted: submittedApiKey
+          ? this.secretEncryptionService.encrypt(submittedApiKey)
           : existingApiKeyEncrypted,
-        apiKeyEnvVar: apiKey ? null : existingApiKeyEnvVar,
+        apiKeyEnvVar: submittedApiKey ? null : existingApiKeyEnvVar,
       },
       update: {
-        ...(apiKey
+        ...(submittedApiKey
           ? {
-              apiKeyEncrypted: this.secretEncryptionService.encrypt(apiKey),
+              apiKeyEncrypted:
+                this.secretEncryptionService.encrypt(submittedApiKey),
               apiKeyEnvVar: null,
             }
           : {
@@ -534,16 +889,14 @@ export class LangameSettingsService {
         },
       });
     }
-
-    return this.getSettings(user);
   }
 
   async previewSettings(
     user: AuthenticatedUser,
     dto: LangameSettingsPreviewDto,
   ) {
-    this.accessScopeService.assertNetwork(user);
-    const { tenantId } = this.tenantContextService.resolve(user);
+    const { tenantId } = await this.freshStoreScopeService.assertNetwork(user);
+    this.assertPreviewPayload(dto);
     const domains = this.normalizeDomains(dto.domains ?? []);
 
     if (domains.length === 0) {
@@ -569,33 +922,7 @@ export class LangameSettingsService {
       throw new BadRequestException('Langame API key is required');
     }
 
-    const diagnostics = await Promise.all(
-      domains.map(async (domain) => {
-        try {
-          const payload = await this.langameClient.getDiagnosticEndpoint(
-            `https://${domain}/public_api`,
-            apiKey,
-            ONBOARDING_DIAGNOSTIC_PATH,
-            {},
-            { timeoutMs: ONBOARDING_DIAGNOSTIC_TIMEOUT_MS },
-          );
-
-          return {
-            domain,
-            status: 'SUCCESS' as const,
-            clubCount: this.extractDiagnosticRows(payload).length,
-            reasonCode: null,
-          };
-        } catch {
-          return {
-            domain,
-            status: 'FAILED' as const,
-            clubCount: 0,
-            reasonCode: 'LANGAME_DIAGNOSTIC_FAILED' as const,
-          };
-        }
-      }),
-    );
+    const diagnostics = await this.diagnoseOnboardingDomains(domains, apiKey);
     const ready = diagnostics.every(({ status }) => status === 'SUCCESS');
 
     return {
@@ -612,6 +939,7 @@ export class LangameSettingsService {
         timeoutMs: ONBOARDING_DIAGNOSTIC_TIMEOUT_MS,
         maxAttempts: ONBOARDING_DIAGNOSTIC_MAX_ATTEMPTS,
         maxDomains: ONBOARDING_MAX_DOMAINS,
+        maxClubs: ONBOARDING_MAX_CLUBS,
       },
       diagnostics,
     };
@@ -2523,6 +2851,276 @@ export class LangameSettingsService {
       credentials[0] ??
       null
     );
+  }
+
+  private async diagnoseOnboardingDomains(
+    domains: string[],
+    apiKey: string,
+  ): Promise<LangameOnboardingDiagnostic[]> {
+    const diagnostics = await Promise.all(
+      domains.map(async (domain) => {
+        try {
+          const payload = await this.langameClient.getDiagnosticEndpoint(
+            `https://${domain}/public_api`,
+            apiKey,
+            ONBOARDING_DIAGNOSTIC_PATH,
+            {},
+            { timeoutMs: ONBOARDING_DIAGNOSTIC_TIMEOUT_MS },
+          );
+          const parsed = this.toOnboardingClubs(payload);
+
+          if (!parsed.valid) {
+            return {
+              domain,
+              status: 'FAILED' as const,
+              clubCount: 0,
+              clubs: [],
+              requiresSelection: false,
+              reasonCode: 'LANGAME_CLUB_LIST_INVALID' as const,
+            };
+          }
+          if (parsed.clubs.length === 0) {
+            return {
+              domain,
+              status: 'FAILED' as const,
+              clubCount: 0,
+              clubs: [],
+              requiresSelection: false,
+              reasonCode: 'LANGAME_NO_ACTIVE_CLUBS' as const,
+            };
+          }
+
+          return {
+            domain,
+            status: 'SUCCESS' as const,
+            clubCount: parsed.clubs.length,
+            clubs: parsed.clubs,
+            requiresSelection: parsed.clubs.length > 1,
+            reasonCode: null,
+          };
+        } catch {
+          return {
+            domain,
+            status: 'FAILED' as const,
+            clubCount: 0,
+            clubs: [],
+            requiresSelection: false,
+            reasonCode: 'LANGAME_DIAGNOSTIC_FAILED' as const,
+          };
+        }
+      }),
+    );
+    const totalClubCount = diagnostics.reduce(
+      (total, diagnostic) => total + diagnostic.clubCount,
+      0,
+    );
+    if (totalClubCount > ONBOARDING_MAX_CLUBS) {
+      throw new BadRequestException(
+        `No more than ${ONBOARDING_MAX_CLUBS} Langame clubs can be configured at once`,
+      );
+    }
+
+    return diagnostics;
+  }
+
+  private toOnboardingClubs(payload: unknown): {
+    valid: boolean;
+    clubs: LangameOnboardingClub[];
+  } {
+    const rows = this.extractDiagnosticRows(payload);
+    const clubs: LangameOnboardingClub[] = [];
+    const seen = new Set<string>();
+
+    for (const row of rows) {
+      const rawId = row.id;
+      const externalClubId =
+        typeof rawId === 'number' && Number.isSafeInteger(rawId) && rawId > 0
+          ? String(rawId)
+          : typeof rawId === 'string' &&
+              /^[1-9][0-9]{0,15}$/.test(rawId.trim()) &&
+              Number.isSafeInteger(Number(rawId.trim()))
+            ? rawId.trim()
+            : null;
+      if (!externalClubId || seen.has(externalClubId)) {
+        return { valid: false, clubs: [] };
+      }
+      seen.add(externalClubId);
+
+      const rawActive = row.active;
+      const active =
+        rawActive === true ||
+        rawActive === 1 ||
+        rawActive === '1' ||
+        (typeof rawActive === 'string' &&
+          rawActive.trim().toLowerCase() === 'true');
+      if (!active) {
+        continue;
+      }
+
+      const name =
+        typeof row.name === 'string' && row.name.trim()
+          ? row.name.trim().slice(0, 255)
+          : `Langame club #${externalClubId}`;
+      const address =
+        typeof row.address === 'string' && row.address.trim()
+          ? row.address.trim().slice(0, 1_000)
+          : null;
+      clubs.push({ externalClubId, name, address });
+      if (clubs.length > ONBOARDING_MAX_CLUBS) {
+        return { valid: false, clubs: [] };
+      }
+    }
+
+    clubs.sort((left, right) =>
+      left.externalClubId.localeCompare(right.externalClubId, 'en', {
+        numeric: true,
+      }),
+    );
+    return { valid: true, clubs };
+  }
+
+  private resolveExternalClubBindings(
+    diagnostics: LangameOnboardingDiagnostic[],
+    requestedBindings: LangameClubBindingDto[],
+  ): ResolvedLangameClubBinding[] {
+    const failed = diagnostics.find(({ status }) => status !== 'SUCCESS');
+    if (failed) {
+      throw new BadRequestException({
+        reasonCode: failed.reasonCode ?? 'LANGAME_DIAGNOSTIC_FAILED',
+        message: 'Не удалось проверить клубы Langame. Проверьте ключ и домены.',
+        diagnostics,
+      });
+    }
+
+    const diagnosticsByDomain = new Map(
+      diagnostics.map((diagnostic) => [diagnostic.domain, diagnostic]),
+    );
+    const explicitByDomain = new Map<string, LangameClubBindingDto[]>();
+    const seenBindings = new Set<string>();
+    const seenStoreIds = new Set<string>();
+
+    for (const binding of requestedBindings) {
+      const domain = this.normalizeDomains([binding.domain ?? ''])[0];
+      const externalClubId = binding.externalClubId?.trim();
+      const storeId = binding.storeId?.trim() || null;
+      if (
+        !domain ||
+        !externalClubId ||
+        !/^[1-9][0-9]{0,15}$/.test(externalClubId) ||
+        !Number.isSafeInteger(Number(externalClubId)) ||
+        !diagnosticsByDomain.has(domain)
+      ) {
+        throw new BadRequestException('Invalid Langame club selection');
+      }
+      const key = `${domain}\u0000${externalClubId}`;
+      if (seenBindings.has(key) || (storeId && seenStoreIds.has(storeId))) {
+        throw new BadRequestException('Duplicate Langame club selection');
+      }
+      seenBindings.add(key);
+      if (storeId) {
+        seenStoreIds.add(storeId);
+      }
+      const entries = explicitByDomain.get(domain) ?? [];
+      entries.push({ domain, externalClubId, storeId });
+      explicitByDomain.set(domain, entries);
+    }
+
+    const resolved: ResolvedLangameClubBinding[] = [];
+    for (const diagnostic of diagnostics) {
+      const explicit = explicitByDomain.get(diagnostic.domain) ?? [];
+      if (explicit.length === 0) {
+        if (diagnostic.clubs.length !== 1) {
+          throw new ConflictException({
+            reasonCode: 'LANGAME_CLUB_SELECTION_REQUIRED',
+            message: 'Выберите клубы, которые относятся к вашей сети.',
+            diagnostics,
+          });
+        }
+        resolved.push({
+          domain: diagnostic.domain,
+          club: diagnostic.clubs[0],
+          storeId: null,
+        });
+        continue;
+      }
+
+      for (const binding of explicit) {
+        const club = diagnostic.clubs.find(
+          ({ externalClubId }) => externalClubId === binding.externalClubId,
+        );
+        if (!club) {
+          throw new BadRequestException(
+            'Selected Langame club is no longer available',
+          );
+        }
+        resolved.push({
+          domain: diagnostic.domain,
+          club,
+          storeId: binding.storeId?.trim() || null,
+        });
+      }
+    }
+
+    if (resolved.length === 0 || resolved.length > ONBOARDING_MAX_CLUBS) {
+      throw new BadRequestException('Invalid Langame club selection');
+    }
+    return resolved;
+  }
+
+  private clubAlreadyConnectedError() {
+    return new ConflictException({
+      reasonCode: 'LANGAME_CLUB_ALREADY_CONNECTED',
+      message: 'Один из выбранных клубов уже подключён к другой сети.',
+    });
+  }
+
+  private assertPreviewPayload(
+    dto: LangameSettingsPreviewDto,
+  ): asserts dto is LangameSettingsPreviewDto {
+    if (!dto || typeof dto !== 'object' || Array.isArray(dto)) {
+      throw new BadRequestException('Invalid Langame settings payload');
+    }
+    if (dto.apiKey !== undefined && typeof dto.apiKey !== 'string') {
+      throw new BadRequestException('Langame API key must be a string');
+    }
+    if (
+      dto.domains !== undefined &&
+      (!Array.isArray(dto.domains) ||
+        dto.domains.some((domain) => typeof domain !== 'string'))
+    ) {
+      throw new BadRequestException('Langame domains must be a string array');
+    }
+  }
+
+  private assertSettingsPayload(
+    dto: LangameSettingsDto,
+  ): asserts dto is LangameSettingsDto {
+    this.assertPreviewPayload(dto);
+    if (dto.tenantName !== undefined && typeof dto.tenantName !== 'string') {
+      throw new BadRequestException('Tenant name must be a string');
+    }
+    if (dto.clubBindings === undefined) {
+      return;
+    }
+    if (
+      !Array.isArray(dto.clubBindings) ||
+      dto.clubBindings.length > ONBOARDING_MAX_CLUBS ||
+      dto.clubBindings.some(
+        (binding) =>
+          !binding ||
+          typeof binding !== 'object' ||
+          Array.isArray(binding) ||
+          (binding.domain !== undefined &&
+            typeof binding.domain !== 'string') ||
+          (binding.externalClubId !== undefined &&
+            typeof binding.externalClubId !== 'string') ||
+          (binding.storeId !== undefined &&
+            binding.storeId !== null &&
+            typeof binding.storeId !== 'string'),
+      )
+    ) {
+      throw new BadRequestException('Invalid Langame club bindings');
+    }
   }
 
   private normalizeDomains(domains: string[]) {

@@ -2719,10 +2719,10 @@ export function runSelfTest() {
     [...SHARED_BETA_ADMISSION_DORMANT_RELATIONS].sort(),
     [...SHARED_BETA_ADMISSION_RELATIONS].sort(),
   );
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 190);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 191);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260908090000_initial_owner_invite_link_mode",
+    "20260908180000_external_langame_simple_onboarding",
   );
   assert.deepEqual(DISPOSABLE_RESET_TRUNCATE_GUARDS, [
     {

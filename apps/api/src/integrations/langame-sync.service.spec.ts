@@ -1,4 +1,5 @@
 import {
+  IntegrationProvider,
   Prisma,
   TenantCustomerStage,
   TenantModule,
@@ -25,7 +26,8 @@ import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-adm
 import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
 import {
-  EXTERNAL_LEGACY_LANGAME_SYNC_DENIAL_REASON_CODE,
+  EXTERNAL_LANGAME_BINDING_REQUIRED_REASON_CODE,
+  EXTERNAL_LANGAME_BINDING_STALE_REASON_CODE,
   LangameSyncService,
 } from './langame-sync.service';
 import {
@@ -49,6 +51,7 @@ type PrismaMock = {
     update: jest.Mock;
   };
   product: {
+    findMany: jest.Mock;
     findUnique: jest.Mock;
     updateMany: jest.Mock;
     upsert: jest.Mock;
@@ -64,6 +67,7 @@ type PrismaMock = {
   };
   store: {
     upsert: jest.Mock;
+    update: jest.Mock;
     findMany: jest.Mock;
   };
   inventorySnapshot: {
@@ -115,6 +119,29 @@ type StoreUpsertCall = [
       externalClubId: string | null;
     };
     update: Record<string, unknown>;
+  },
+];
+
+type StoreBindingQueryCall = [
+  {
+    where: {
+      tenantId: string;
+      integrationSourceId: { in: string[] };
+      externalProvider: IntegrationProvider;
+    };
+    select: Record<string, boolean>;
+  },
+];
+
+type StoreUpdateCall = [
+  {
+    where: { id: string };
+    data: {
+      name: string;
+      address: string | null;
+      isActive: boolean;
+      integrationSourceId: string;
+    };
   },
 ];
 
@@ -231,6 +258,7 @@ function createPrismaMock(): PrismaMock {
       update: jest.fn(),
     },
     product: {
+      findMany: jest.fn().mockResolvedValue([]),
       findUnique: jest.fn(),
       updateMany: jest.fn(),
       upsert: jest.fn(),
@@ -246,6 +274,7 @@ function createPrismaMock(): PrismaMock {
     },
     store: {
       upsert: jest.fn(),
+      update: jest.fn().mockResolvedValue({ id: 'store-1' }),
       findMany: jest.fn(),
     },
     inventorySnapshot: {
@@ -828,7 +857,7 @@ describe('LangameSyncService', () => {
     }
   });
 
-  it('rejects legacy external sync before credentials, provider calls or mutations', async () => {
+  it('syncs an external tenant only for its exact verified club binding', async () => {
     admission.assertAllowed.mockResolvedValueOnce({
       allowed: true,
       tenantId: 'tenant-1',
@@ -836,26 +865,76 @@ describe('LangameSyncService', () => {
       failedRequirement: null,
       customerStage: TenantCustomerStage.PILOT,
     });
+    prisma.store.findMany.mockImplementation(
+      ({ where }: { where: { integrationSourceId?: { in?: string[] } } }) => {
+        if (where.integrationSourceId?.in) {
+          return Promise.resolve([
+            {
+              id: 'store-1',
+              name: '1337',
+              integrationSourceId: 'source-1',
+              externalDomain: '443.langame.ru',
+              externalClubId: '1',
+            },
+          ]);
+        }
+        return Promise.resolve([
+          { id: 'store-1', externalClubId: '1', name: '1337' },
+        ]);
+      },
+    );
+    client.listClubs.mockResolvedValue([
+      { id: 1, name: '1337', address: '', active: true },
+      { id: 2, name: 'Foreign club', address: '', active: 1 },
+    ]);
 
     await expect(
       service.syncTenant(user, {
-        mode: 'FULL',
+        mode: 'CATEGORIES',
         dateFrom: '2026-04-29',
         dateTo: '2026-04-29',
       }),
-    ).rejects.toMatchObject({
-      response: {
-        reasonCode: EXTERNAL_LEGACY_LANGAME_SYNC_DENIAL_REASON_CODE,
-      },
+    ).resolves.toMatchObject({
+      failedSources: 0,
+      stores: 1,
+      productGroups: 1,
+      productConfigurations: 1,
+      sourceResults: [expect.objectContaining({ stores: 1 })],
     });
 
-    expect(settings.resolveTenantAccess).not.toHaveBeenCalled();
-    expect(prisma.integrationSyncJob.create).not.toHaveBeenCalled();
-    expect(prisma.product.upsert).not.toHaveBeenCalled();
+    const [storeBindingQuery] = prisma.store.findMany.mock
+      .calls[0] as StoreBindingQueryCall;
+    expect(storeBindingQuery.where).toMatchObject({
+      tenantId: 'tenant-1',
+      integrationSourceId: { in: ['source-1'] },
+      externalProvider: IntegrationProvider.LANGAME,
+    });
+    expect(storeBindingQuery.select).toEqual({
+      id: true,
+      name: true,
+      integrationSourceId: true,
+      externalDomain: true,
+      externalClubId: true,
+    });
+    expect(client.listClubs).toHaveBeenCalledTimes(1);
+    expect(client.listClubProductConfiguration).toHaveBeenCalledWith(
+      'https://443.langame.ru/public_api',
+      'test-key',
+      1,
+    );
+    expect(client.listClubProductConfiguration).not.toHaveBeenCalledWith(
+      'https://443.langame.ru/public_api',
+      'test-key',
+      2,
+    );
     expect(prisma.store.upsert).not.toHaveBeenCalled();
-    for (const method of Object.values(client)) {
-      expect(method).not.toHaveBeenCalled();
-    }
+    const [storeUpdate] = prisma.store.update.mock.calls[0] as StoreUpdateCall;
+    expect(storeUpdate.where).toEqual({ id: 'store-1' });
+    expect(storeUpdate.data).toMatchObject({
+      name: '1337',
+      isActive: true,
+      integrationSourceId: 'source-1',
+    });
   });
 
   it('keeps the current day in catch-up sync when a source was already synced today', async () => {
@@ -1094,7 +1173,7 @@ describe('LangameSyncService', () => {
     }
   });
 
-  it('rejects a direct authenticated external manual sync before credentials or effects', async () => {
+  it('fails closed when an external tenant has no current Langame binding', async () => {
     admission.assertAllowed.mockResolvedValueOnce({
       allowed: true,
       tenantId: 'tenant-pilot',
@@ -1102,6 +1181,8 @@ describe('LangameSyncService', () => {
       failedRequirement: null,
       customerStage: TenantCustomerStage.PILOT,
     });
+    prisma.store.findMany.mockResolvedValue([]);
+
     await expect(
       service.syncTenantById('tenant-pilot', {
         mode: 'QUICK',
@@ -1110,15 +1191,95 @@ describe('LangameSyncService', () => {
     ).rejects.toMatchObject({
       status: 503,
       response: {
-        reasonCode: EXTERNAL_LEGACY_LANGAME_SYNC_DENIAL_REASON_CODE,
+        reasonCode: EXTERNAL_LANGAME_BINDING_REQUIRED_REASON_CODE,
       },
     });
 
-    expect(settings.resolveTenantAccess).not.toHaveBeenCalled();
+    expect(settings.resolveTenantAccess).toHaveBeenCalledWith('tenant-pilot');
     expect(prisma.integrationSyncJob.create).not.toHaveBeenCalled();
     expect(prisma.store.upsert).not.toHaveBeenCalled();
     for (const method of Object.values(client)) {
       expect(method).not.toHaveBeenCalled();
     }
+  });
+
+  it('fails closed when a verified external binding is stale upstream', async () => {
+    admission.assertAllowed.mockResolvedValueOnce({
+      allowed: true,
+      tenantId: 'tenant-pilot',
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      customerStage: TenantCustomerStage.PILOT,
+    });
+    prisma.store.findMany.mockResolvedValue([
+      {
+        integrationSourceId: 'source-1',
+        externalDomain: '443.langame.ru',
+        externalClubId: '1',
+      },
+    ]);
+    client.listClubs.mockResolvedValue([
+      { id: 2, name: 'Different club', address: '', active: 1 },
+    ]);
+
+    await expect(
+      service.syncTenantById('tenant-pilot', {
+        mode: 'QUICK',
+        trigger: 'MANUAL',
+      }),
+    ).rejects.toMatchObject({
+      status: 503,
+      response: {
+        reasonCode: EXTERNAL_LANGAME_BINDING_STALE_REASON_CODE,
+      },
+    });
+
+    expect(settings.resolveTenantAccess).toHaveBeenCalledWith('tenant-pilot');
+    expect(client.listClubs).toHaveBeenCalledWith(
+      'https://443.langame.ru/public_api',
+      'test-key',
+    );
+    expect(prisma.integrationSyncJob.create).not.toHaveBeenCalled();
+    expect(prisma.store.upsert).not.toHaveBeenCalled();
+    expect(client.listProductExpenses).not.toHaveBeenCalled();
+    expect(client.listAllOperationsLog).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on malformed external club rows before business effects', async () => {
+    admission.assertAllowed.mockResolvedValueOnce({
+      allowed: true,
+      tenantId: 'tenant-pilot',
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      customerStage: TenantCustomerStage.PILOT,
+    });
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-1',
+        name: '1337',
+        integrationSourceId: 'source-1',
+        externalDomain: '443.langame.ru',
+        externalClubId: '1',
+      },
+    ]);
+    client.listClubs.mockResolvedValue([null]);
+
+    await expect(
+      service.syncTenantById('tenant-pilot', {
+        mode: 'QUICK',
+        trigger: 'MANUAL',
+      }),
+    ).rejects.toMatchObject({
+      status: 503,
+      response: {
+        reasonCode: EXTERNAL_LANGAME_BINDING_STALE_REASON_CODE,
+      },
+    });
+
+    expect(prisma.integrationSyncJob.create).not.toHaveBeenCalled();
+    expect(prisma.store.update).not.toHaveBeenCalled();
+    expect(prisma.store.upsert).not.toHaveBeenCalled();
+    expect(client.listProductExpenses).not.toHaveBeenCalled();
+    expect(client.listAllOperationsLog).not.toHaveBeenCalled();
   });
 });

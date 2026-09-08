@@ -12,14 +12,48 @@ export type LangameSourceSettings = {
 
 export type LangameSettings = {
   tenantName: string;
+  connectionMode: "INTERNAL" | "SAFE_EXTERNAL";
   hasApiKey: boolean;
   domains: string[];
+  stores: LangameStoreSettings[];
   sources: LangameSourceSettings[];
   syncJobs: LangameSyncJob[];
   latestSuccessfulSyncJob: LangameSyncJob | null;
   endpointProfiles: LangameEndpointProfileRunSummary[];
   endpointSnapshotCandidates: LangameEndpointSnapshotCandidate[];
   endpointSnapshots: LangameEndpointSnapshotRunSummary[];
+};
+
+export type LangameStoreSettings = {
+  id: string;
+  name: string;
+  externalDomain: string | null;
+  externalClubId: string | null;
+  integrationSourceId: string | null;
+};
+
+export type LangameOnboardingClub = {
+  externalClubId: string;
+  name: string;
+  address: string | null;
+};
+
+export type LangameOnboardingDiagnostic = {
+  domain: string;
+  status: "SUCCESS" | "FAILED";
+  clubCount: number;
+  clubs: LangameOnboardingClub[];
+  requiresSelection: boolean;
+  reasonCode:
+    | "LANGAME_DIAGNOSTIC_FAILED"
+    | "LANGAME_NO_ACTIVE_CLUBS"
+    | "LANGAME_CLUB_LIST_INVALID"
+    | null;
+};
+
+export type LangameSettingsPreview = {
+  status: "READY" | "REJECTED";
+  diagnostics: LangameOnboardingDiagnostic[];
 };
 
 export type LangameEndpointProfileRunSummary = {

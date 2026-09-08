@@ -17,6 +17,7 @@ import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { bindReceiptIdentityToSourceHash } from '../common/receipt-source-identity';
 import { LANGAME_DISCREPANCY_LOG_ROOT_KEY } from '../config/environment-validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -890,6 +891,32 @@ export class LangameSyncService {
         },
       ]),
     );
+    const productConfigurations =
+      await this.prisma.langameClubProductConfiguration.findMany({
+        where: {
+          tenantId,
+          externalDomain: domain,
+          isActive: true,
+          purchasePrice: { not: null },
+        },
+        select: {
+          externalClubId: true,
+          externalProductId: true,
+          purchasePrice: true,
+        },
+      });
+    const configuredPurchasePrice = new Map(
+      productConfigurations
+        .filter(
+          (configuration) =>
+            configuration.purchasePrice !== null &&
+            configuration.purchasePrice.gt(0),
+        )
+        .map((configuration) => [
+          `${configuration.externalClubId}:${configuration.externalProductId}`,
+          configuration.purchasePrice,
+        ]),
+    );
     let synced = 0;
 
     for (const chunk of this.splitPeriodByLangameLimit(period)) {
@@ -931,15 +958,25 @@ export class LangameSyncService {
           }
 
           const isCanceled = row.cancel === 1;
+          const rowPurchasePrice = new Prisma.Decimal(row.price_purchase ?? 0);
+          const purchasePrice = rowPurchasePrice.gt(0)
+            ? rowPurchasePrice
+            : (configuredPurchasePrice.get(
+                `${externalClubId}:${externalProductId}`,
+              ) ?? new Prisma.Decimal(0));
           const nextRevenue = isCanceled
             ? new Prisma.Decimal(0)
             : new Prisma.Decimal(row.price_sale).mul(row.count);
           const nextCost = isCanceled
             ? new Prisma.Decimal(0)
-            : new Prisma.Decimal(row.price_purchase ?? 0).mul(row.count);
+            : purchasePrice.mul(row.count);
           const nextQuantity = isCanceled ? 0 : row.count;
           const nextSaleDate = this.parseLangameDate(row.date);
-          const sourcePayloadHash = this.langameSalePayloadHash(row);
+          const externalReceiptId = this.langameReceiptId(row);
+          const sourcePayloadHash = bindReceiptIdentityToSourceHash(
+            externalReceiptId,
+            this.langameSalePayloadHash(row),
+          );
           const existing = await this.prisma.salesFact.findUnique({
             where: {
               tenantId_externalProvider_externalDomain_externalSaleId: {
@@ -956,6 +993,7 @@ export class LangameSyncService {
               quantity: true,
               revenue: true,
               cost: true,
+              sourcePayloadHash: true,
               externalProductId: true,
               externalClubId: true,
               productNameAtSale: true,
@@ -1020,6 +1058,13 @@ export class LangameSyncService {
             field: 'cost',
             previousValue: existing?.cost.toNumber() ?? null,
             nextValue: nextCost.toNumber(),
+          });
+          this.addDiscrepancy(discrepancies, {
+            entity: 'SalesFact',
+            externalId: String(row.id),
+            field: 'sourcePayloadHash',
+            previousValue: existing?.sourcePayloadHash ?? null,
+            nextValue: sourcePayloadHash,
           });
           this.addDiscrepancy(discrepancies, {
             entity: 'SalesFact',
@@ -1202,6 +1247,31 @@ export class LangameSyncService {
 
   private langameSalePayloadHash(row: LangameProductExpense) {
     return createHash('sha256').update(JSON.stringify(row)).digest('hex');
+  }
+
+  private langameReceiptId(row: LangameProductExpense) {
+    const candidates = [
+      row.receipt_id,
+      row.order_id,
+      row.check_id,
+      row.sale_check_id,
+      row.receiptId,
+      row.orderId,
+      row.checkId,
+      row.saleCheckId,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+        return String(candidate);
+      }
+
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+
+    return null;
   }
 
   private async syncClubRevenueFacts(

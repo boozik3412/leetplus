@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { DashboardService, type DashboardPeriod } from './dashboard.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { bindReceiptIdentityToSourceHash } from '../common/receipt-source-identity';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 
 type DashboardPrismaMock = {
@@ -46,6 +47,9 @@ type DashboardPrismaMock = {
     findMany: jest.Mock;
   };
   businessSnapshotRun: {
+    findFirst: jest.Mock;
+  };
+  integrationSyncJob: {
     findFirst: jest.Mock;
   };
 };
@@ -165,6 +169,9 @@ function createPrismaMock(): DashboardPrismaMock {
     businessSnapshotRun: {
       findFirst: jest.fn(),
     },
+    integrationSyncJob: {
+      findFirst: jest.fn(),
+    },
   };
 }
 
@@ -213,6 +220,7 @@ describe('DashboardService', () => {
     prisma.guestOperationLog.findMany.mockResolvedValue([]);
     prisma.guestWorkingShift.findMany.mockResolvedValue([]);
     prisma.businessSnapshotRun.findFirst.mockResolvedValue(null);
+    prisma.integrationSyncJob.findFirst.mockResolvedValue(null);
     service = new DashboardService(
       prisma as unknown as PrismaService,
       freshStoreScope as unknown as FreshStoreScopeService,
@@ -261,6 +269,10 @@ describe('DashboardService', () => {
         quantity: new Prisma.Decimal(10),
         revenue: new Prisma.Decimal(1000),
         cost: new Prisma.Decimal(500),
+        sourcePayloadHash: bindReceiptIdentityToSourceHash(
+          'receipt-1',
+          'a'.repeat(64),
+        ),
         product: {
           id: 'product-1',
           article: 'DRK-001',
@@ -277,6 +289,10 @@ describe('DashboardService', () => {
         quantity: new Prisma.Decimal(2),
         revenue: new Prisma.Decimal(240),
         cost: new Prisma.Decimal(120),
+        sourcePayloadHash: bindReceiptIdentityToSourceHash(
+          'receipt-1',
+          'b'.repeat(64),
+        ),
         product: {
           id: 'product-2',
           article: 'SNK-001',
@@ -346,7 +362,7 @@ describe('DashboardService', () => {
       returnAmount: 20,
       stockQuantity: 21,
       outOfStockRiskCount: 1,
-      recommendedOrderQuantity: 0,
+      recommendedOrderQuantity: 6,
     });
     expect(summary.periodFrom).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(summary.periodTo).toMatch(/^\d{4}-\d{2}-\d{2}$/);
@@ -372,12 +388,38 @@ describe('DashboardService', () => {
         saleUnit: 'PRODUCT_SALE_OPERATION',
         saleUnitIsExact: true,
         receiptMetrics: {
-          state: 'SOURCE_UNAVAILABLE',
+          state: 'READY',
           requiredField: 'RECEIPT_OR_ORDER_ID',
+          coveragePercent: 100,
+          coveredRevenuePercent: 100,
+          purchaseCount: 1,
+          averageCheck: 1240,
+          itemsPerCheck: 12,
+          topBasketPair: {
+            firstProductName: 'Chips',
+            secondProductName: 'Energy Drink',
+            receiptsCount: 1,
+          },
         },
       },
     });
-    expect(summary.assortmentGrowth.calculations).toHaveLength(17);
+    expect(summary.assortmentGrowth.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'visits', state: 'MISSING' }),
+        expect.objectContaining({ key: 'sales', state: 'FRESH' }),
+      ]),
+    );
+    expect(summary.assortmentGrowth.actions[0]).toMatchObject({
+      key: 'restore-data-sources',
+      title: 'Восстановить загрузку визитов',
+      href: '/sync',
+    });
+    expect(
+      summary.assortmentGrowth.calculations.find(
+        (calculation) => calculation.key === 'saleOperationsPer100Visits',
+      ),
+    ).toMatchObject({ state: 'SOURCE_CONFLICT' });
+    expect(summary.assortmentGrowth.calculations).toHaveLength(23);
     expect(summary.salesTrend).toHaveLength(8);
     expect(summary.salesTrend.some((segment) => segment.clubRevenue > 0)).toBe(
       true,

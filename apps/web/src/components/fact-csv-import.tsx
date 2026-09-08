@@ -23,6 +23,7 @@ type FactImportRow = {
   quantity: string;
   revenue?: string;
   cost?: string;
+  receiptId?: string | null;
   type?: "WRITEOFF" | "RETURN";
   amount?: string;
   reason?: string | null;
@@ -65,8 +66,9 @@ const copy: Record<
   sales: {
     title: "CSV продаж",
     description:
-      "Загрузите дневные продажи по торговым точкам и артикулам. Себестоимость можно передать колонкой или рассчитать от закупочной цены товара.",
-    columns: "Дата, Торговая точка, Артикул, Количество, Выручка, Себестоимость",
+      "Загрузите продажи по торговым точкам и артикулам. Колонка «Чек» включает точное число покупок, средний чек и состав корзины; себестоимость можно передать отдельно.",
+    columns:
+      "Дата, Торговая точка, Чек (необязательно), Артикул, Количество, Выручка, Себестоимость",
     previewUrl: "/api/imports/sales/preview",
     importUrl: "/api/imports/sales",
     templateKind: "sales",
@@ -75,8 +77,7 @@ const copy: Record<
     title: "CSV списаний и возвратов",
     description:
       "Загрузите дневные списания и возвраты по SKU. Сумму можно передать колонкой или рассчитать от цены товара.",
-    columns:
-      "Дата, Торговая точка, Артикул, Тип, Количество, Сумма, Причина",
+    columns: "Дата, Торговая точка, Артикул, Тип, Количество, Сумма, Причина",
     previewUrl: "/api/imports/movements/preview",
     importUrl: "/api/imports/movements",
     templateKind: "movements",
@@ -166,7 +167,8 @@ export function FactCsvImport({ kind }: { kind: FactImportKind }) {
     }
   }
 
-  const canImport = preview && preview.errors.length === 0 && preview.validRows > 0;
+  const canImport =
+    preview && preview.errors.length === 0 && preview.validRows > 0;
 
   return (
     <section className="grid gap-6 lg:grid-cols-[minmax(0,420px)_1fr]">
@@ -177,7 +179,9 @@ export function FactCsvImport({ kind }: { kind: FactImportKind }) {
         </p>
 
         <label className="mt-5 block">
-          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Файл CSV</span>
+          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            Файл CSV
+          </span>
           <input
             type="file"
             accept=".csv,text/csv"
@@ -191,7 +195,9 @@ export function FactCsvImport({ kind }: { kind: FactImportKind }) {
         ) : null}
 
         <div className="mt-5 rounded-2xl bg-zinc-50 p-3 text-xs leading-5 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
-          <p className="font-medium text-zinc-800 dark:text-zinc-200">Поддерживаемые колонки:</p>
+          <p className="font-medium text-zinc-800 dark:text-zinc-200">
+            Поддерживаемые колонки:
+          </p>
           <p>{config.columns}</p>
         </div>
 
@@ -269,6 +275,9 @@ export function FactCsvImport({ kind }: { kind: FactImportKind }) {
                     <th className="px-3 py-2 font-medium">Точка</th>
                     <th className="px-3 py-2 font-medium">Артикул</th>
                     <th className="px-3 py-2 font-medium">Товар</th>
+                    {kind === "sales" ? (
+                      <th className="px-3 py-2 font-medium">Чек</th>
+                    ) : null}
                     <th className="px-3 py-2 text-right font-medium">
                       Количество
                     </th>
@@ -303,6 +312,11 @@ export function FactCsvImport({ kind }: { kind: FactImportKind }) {
                       <td className="px-3 py-2 font-medium">
                         {row.productName}
                       </td>
+                      {kind === "sales" ? (
+                        <td className="px-3 py-2 font-mono text-xs text-zinc-600 dark:text-zinc-300">
+                          {row.receiptId ?? "—"}
+                        </td>
+                      ) : null}
                       <td className="px-3 py-2 text-right text-zinc-700">
                         {row.quantity}
                       </td>

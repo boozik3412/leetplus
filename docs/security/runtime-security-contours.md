@@ -849,6 +849,29 @@ Exact runtime `a130c13e8d694b605d86a924b1524a6174ae1b51` разделяет эт
 - Сохранённая platform-admin сессия не является tenant-контекстом. Tenant
   выбирается явно и подписывается.
 
+### Initial OWNER: почта или прямая ссылка
+
+- Выбор выполняет только свежепроверенный Platform Admin через
+  `/admin/tenants/:tenantId/initial-owner-invite/publish-link`; ссылка в Web
+  проходит через private/no-store BFF на `/administration`.
+- `EMAIL` остаётся безопасным режимом по умолчанию и требует verified `SENT`.
+  `LINK` допускается только как атомарный переход активного initial
+  `OWNER/NETWORK`: outbox отменяется до provider attempt с причиной
+  `OWNER_INVITE_LINK_ONLY`, ciphertext очищается, а URL возвращается ровно
+  один раз.
+- Registration URL является bearer-секретом. Его запрещено сохранять в БД,
+  audit, application/proxy logs, cookie или browser storage. Audit содержит
+  только PII-free факт перехода и digest команды.
+- `LINK` не имитирует отправленное письмо и не ослабляет tenant/scope. Database
+  guard принимает либо точное `EMAIL/SENT` evidence, либо точное
+  `LINK/CANCELED/OWNER_INVITE_LINK_ONLY` evidence; все смешанные состояния
+  fail-closed.
+- Повторная выдача секрета запрещена. Новый URL требует revoke/reissue, после
+  чего новый invite снова начинает в `EMAIL`.
+- Source candidate 08.09.2026 использует forward-only CURRENT_190 и отдельный
+  `CURRENT_189 → CURRENT_190` rollout bridge. До exact-SHA admission,
+  restored-copy проверки и controlled rollout он не считается deployed.
+
 ### Делегирование учётных записей сотрудникам
 
 - `/users/invites*` принадлежит corporate tenant contour и всегда требует

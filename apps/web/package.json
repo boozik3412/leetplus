@@ -18,7 +18,8 @@
     "test:guest-bug-report": "node --test --experimental-strip-types src/lib/guest-bug-report-bff.test.mts",
     "test:guest-session-current190-bff-candidate": "node --test --experimental-strip-types src/lib/guest-session-current190-bff-candidate.test.mts",
     "test:langame-current188-bff-candidate": "node --test --experimental-strip-types src/lib/langame-current188-bff-candidate.test.mts",
-    "test:employee-invite-current189-bff-candidate": "node --test --experimental-strip-types src/lib/employee-invite-current189-bff-candidate.test.mts"
+    "test:employee-invite-current189-bff-candidate": "node --test --experimental-strip-types src/lib/employee-invite-current189-bff-candidate.test.mts",
+    "test:owner-invite-link-bff-boundary": "node --test --experimental-strip-types src/lib/owner-invite-link-bff-boundary.test.mts"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

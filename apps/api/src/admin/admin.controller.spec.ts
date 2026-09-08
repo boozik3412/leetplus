@@ -28,6 +28,7 @@ describe('AdminController shared beta provisioning boundary', () => {
       status: jest.fn(),
       revoke: jest.fn(),
       reissue: jest.fn(),
+      publishLink: jest.fn(),
     };
     return {
       controller: new AdminController(
@@ -166,6 +167,9 @@ describe('AdminController shared beta provisioning boundary', () => {
     founderOwnerInviteLifecycleService.reissue.mockResolvedValue({
       decision: 'REISSUED',
     });
+    founderOwnerInviteLifecycleService.publishLink.mockResolvedValue({
+      decision: 'LINK_PUBLISHED',
+    });
 
     await expect(
       adminController.getSharedBetaInitialOwnerInviteStatus(user, 'tenant-id'),
@@ -180,6 +184,13 @@ describe('AdminController shared beta provisioning boundary', () => {
         {},
       ),
     ).resolves.toEqual({ decision: 'REISSUED' });
+    await expect(
+      adminController.publishSharedBetaInitialOwnerInviteLink(
+        user,
+        'tenant-id',
+        {},
+      ),
+    ).resolves.toEqual({ decision: 'LINK_PUBLISHED' });
     expect(founderOwnerInviteLifecycleService.status).toHaveBeenCalledWith(
       user,
       'tenant-id',
@@ -190,6 +201,11 @@ describe('AdminController shared beta provisioning boundary', () => {
       {},
     );
     expect(founderOwnerInviteLifecycleService.reissue).toHaveBeenCalledWith(
+      user,
+      'tenant-id',
+      {},
+    );
+    expect(founderOwnerInviteLifecycleService.publishLink).toHaveBeenCalledWith(
       user,
       'tenant-id',
       {},

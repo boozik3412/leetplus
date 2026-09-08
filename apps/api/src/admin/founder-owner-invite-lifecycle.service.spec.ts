@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import {
+  IdentityMailTemplate,
   IdentityMailOutboxStatus,
   TenantCustomerStage,
   TenantLifecycleStatus,
@@ -13,6 +14,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { IdentityMailSecretEnvelopeService } from '../auth/identity-mail-secret-envelope.service';
 import {
   IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
   IdentityEmailClaimService,
@@ -73,6 +75,17 @@ function reissueBody(overrides: Record<string, unknown> = {}) {
     supportTicket: 'BETA-OWNER-2',
     expectedInviteId: INVITE_ID,
     expiresAt: REISSUE_EXPIRES_AT.toISOString(),
+    ...overrides,
+  };
+}
+
+function publishLinkBody(overrides: Record<string, unknown> = {}) {
+  return {
+    confirmation: `PUBLISH OWNER INVITE LINK ${TENANT_ID}`,
+    requestId: REISSUE_REQUEST_ID,
+    reason: 'Use a directly shared link while SMTP is unavailable',
+    supportTicket: 'BETA-OWNER-LINK-1',
+    expectedInviteId: INVITE_ID,
     ...overrides,
   };
 }
@@ -155,6 +168,7 @@ describe('FounderOwnerInviteLifecycleService', () => {
     revokedByUserId: null;
     identityClaimRevision: number;
     updatedAt: Date;
+    deliveryMode: string;
   };
 
   beforeEach(() => {
@@ -184,21 +198,22 @@ describe('FounderOwnerInviteLifecycleService', () => {
       .mockReturnValueOnce(NEW_INVITE_ID)
       .mockReturnValueOnce(NEW_OUTBOX_ID)
       .mockReturnValueOnce(MESSAGE_KEY);
+    const config = {
+      get: jest.fn((key: string) => {
+        if (key === 'IDENTITY_MAIL_ENCRYPTION_KEY') {
+          return Buffer.from(
+            Array.from({ length: 32 }, (_, index) => index + 1),
+          ).toString('base64url');
+        }
+        if (key === 'IDENTITY_MAIL_ENCRYPTION_KEY_VERSION') return 'v1';
+        if (key === 'IDENTITY_MAIL_AAD_ENVIRONMENT') return 'test';
+        return undefined;
+      }),
+    } as unknown as ConfigService;
     service = new FounderOwnerInviteLifecycleService(
       prisma as unknown as PrismaService,
       identity,
-      {
-        get: jest.fn((key: string) => {
-          if (key === 'IDENTITY_MAIL_ENCRYPTION_KEY') {
-            return Buffer.from(
-              Array.from({ length: 32 }, (_, index) => index + 1),
-            ).toString('base64url');
-          }
-          if (key === 'IDENTITY_MAIL_ENCRYPTION_KEY_VERSION') return 'v1';
-          if (key === 'IDENTITY_MAIL_AAD_ENVIRONMENT') return 'test';
-          return undefined;
-        }),
-      } as unknown as ConfigService,
+      config,
       () => NOW,
       uuidFactory,
     );
@@ -230,14 +245,40 @@ describe('FounderOwnerInviteLifecycleService', () => {
       revokedByUserId: null,
       identityClaimRevision: 2,
       updatedAt: new Date('2026-08-18T00:00:00.000Z'),
+      deliveryMode: 'EMAIL',
     };
     prisma.userInvite.findFirst.mockImplementation(() =>
       Promise.resolve(invite),
     );
+    const binding = {
+      tenantId: TENANT_ID,
+      workflowLocator: RESERVATION_ID,
+      inviteId: INVITE_ID,
+      outboxId: OUTBOX_ID,
+      template: 'INITIAL_OWNER_INVITE' as const,
+      messageKey: MESSAGE_KEY,
+      requestDigest: 'c'.repeat(64),
+      recipientEmail: OWNER_EMAIL,
+      expiresAt: invite.expiresAt,
+    };
+    const sealed = new IdentityMailSecretEnvelopeService(
+      config,
+    ).sealInitialOwnerInviteToken(binding);
     prisma.identityMailOutbox.findFirst.mockResolvedValue({
       id: OUTBOX_ID,
       status: IdentityMailOutboxStatus.PENDING,
       providerAttemptKey: null,
+      workflowLocator: RESERVATION_ID,
+      aadEnvironment: sealed.aadEnvironment,
+      template: IdentityMailTemplate.INITIAL_OWNER_INVITE,
+      messageKey: MESSAGE_KEY,
+      issueRequestDigest: binding.requestDigest,
+      tokenHash: sealed.tokenHash,
+      tokenDigestVersion: sealed.digestVersion,
+      secretCiphertext: sealed.secretCiphertext,
+      envelopeVersion: sealed.envelopeVersion,
+      keyVersion: sealed.keyVersion,
+      expiresAt: invite.expiresAt,
     });
     prisma.userInvite.updateMany.mockResolvedValue({ count: 1 });
     prisma.identityMailOutbox.updateMany.mockResolvedValue({ count: 1 });
@@ -259,6 +300,7 @@ describe('FounderOwnerInviteLifecycleService', () => {
         id: INVITE_ID,
         state: 'ACTIVE',
         deliveryStatus: IdentityMailOutboxStatus.PENDING,
+        deliveryMode: 'EMAIL',
         expiresAt: invite.expiresAt.toISOString(),
       },
       actions: { revokeAllowed: true, reissueRequired: false },
@@ -268,6 +310,50 @@ describe('FounderOwnerInviteLifecycleService', () => {
     expect(prisma.user.findUnique).toHaveBeenCalledWith({
       where: { id: ACTOR_ID },
       select: { isActive: true, isPlatformAdmin: true },
+    });
+  });
+
+  it('publishes a directly shareable link and cancels SMTP delivery atomically', async () => {
+    const result = await service.publishLink(
+      actor,
+      TENANT_ID,
+      publishLinkBody(),
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      decision: 'LINK_PUBLISHED',
+      tenantId: TENANT_ID,
+      inviteId: INVITE_ID,
+      deliveryMode: 'LINK',
+      deliveryStatus: IdentityMailOutboxStatus.CANCELED,
+    });
+    expect(result.registrationUrl).toMatch(
+      /^https:\/\/leetplus\.ru\/register#invite=[A-Za-z0-9_-]{43}$/u,
+    );
+    expect(callArgument(prisma.userInvite.updateMany)).toMatchObject({
+      where: {
+        id: INVITE_ID,
+        tenantId: TENANT_ID,
+        deliveryMode: 'EMAIL',
+      },
+      data: { deliveryMode: 'LINK' },
+    });
+    expect(callArgument(prisma.identityMailOutbox.updateMany)).toMatchObject({
+      data: {
+        status: IdentityMailOutboxStatus.CANCELED,
+        stateReasonCode: 'OWNER_INVITE_LINK_ONLY',
+        secretCiphertext: null,
+      },
+    });
+    const audit = callArgument(prisma.platformAdminAuditEvent.create);
+    expect(JSON.stringify(audit)).not.toContain(result.registrationUrl);
+    expect(audit).toMatchObject({
+      data: {
+        action: 'FOUNDER_OWNER_INVITE_LINK_PUBLISHED',
+        targetId: INVITE_ID,
+        metadata: { tokenPersisted: false },
+      },
     });
   });
 

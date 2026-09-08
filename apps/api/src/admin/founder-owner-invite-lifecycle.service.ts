@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  IdentityMailTemplate,
   IdentityMailOutboxStatus,
   Prisma,
   TenantCustomerStage,
@@ -32,6 +33,7 @@ export const FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT =
 
 const REVOKE_ACTION = 'FOUNDER_OWNER_INVITE_REVOKED' as const;
 const REISSUE_ACTION = 'FOUNDER_OWNER_INVITE_REISSUED' as const;
+const PUBLISH_LINK_ACTION = 'FOUNDER_OWNER_INVITE_LINK_PUBLISHED' as const;
 const REVOKE_FIELDS = new Set([
   'confirmation',
   'requestId',
@@ -46,6 +48,13 @@ const REISSUE_FIELDS = new Set([
   'supportTicket',
   'expectedInviteId',
   'expiresAt',
+]);
+const PUBLISH_LINK_FIELDS = new Set([
+  'confirmation',
+  'requestId',
+  'reason',
+  'supportTicket',
+  'expectedInviteId',
 ]);
 const MINIMUM_INVITE_LIFETIME_MS = 15 * 60 * 1_000;
 const MAXIMUM_INVITE_LIFETIME_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -91,11 +100,23 @@ type OwnerInviteAggregate = Readonly<{
     revokedByUserId: string | null;
     identityClaimRevision: number | null;
     updatedAt: Date;
+    deliveryMode: string;
   };
   outbox: {
     id: string;
     status: IdentityMailOutboxStatus;
     providerAttemptKey: string | null;
+    workflowLocator: string;
+    aadEnvironment: string;
+    template: IdentityMailTemplate;
+    messageKey: string;
+    issueRequestDigest: string;
+    tokenHash: string;
+    tokenDigestVersion: string;
+    secretCiphertext: Uint8Array | null;
+    envelopeVersion: number;
+    keyVersion: string;
+    expiresAt: Date;
   };
 }>;
 
@@ -111,12 +132,25 @@ export type FounderOwnerInviteStatusResult = Readonly<{
     id: string;
     state: InviteState;
     deliveryStatus: IdentityMailOutboxStatus;
+    deliveryMode: 'EMAIL' | 'LINK';
     expiresAt: string;
   };
   actions: {
     revokeAllowed: boolean;
     reissueRequired: boolean;
   };
+}>;
+
+export type FounderOwnerInvitePublishLinkResult = Readonly<{
+  ok: true;
+  contractVersion: typeof FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT;
+  decision: 'LINK_PUBLISHED';
+  tenantId: string;
+  inviteId: string;
+  deliveryMode: 'LINK';
+  deliveryStatus: typeof IdentityMailOutboxStatus.CANCELED;
+  registrationUrl: string;
+  expiresAt: string;
 }>;
 
 export type FounderOwnerInviteRevokeResult = Readonly<{
@@ -195,6 +229,7 @@ export class FounderOwnerInviteLifecycleService {
           id: aggregate.invite.id,
           state,
           deliveryStatus: aggregate.outbox.status,
+          deliveryMode: this.deliveryMode(aggregate.invite.deliveryMode),
           expiresAt: aggregate.invite.expiresAt.toISOString(),
         },
         actions: {
@@ -204,6 +239,198 @@ export class FounderOwnerInviteLifecycleService {
             (state === 'REVOKED' || state === 'EXPIRED') &&
             this.ownerInviteStage(aggregate.tenant),
         },
+      };
+    }, IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+  }
+
+  async publishLink(
+    actor: AuthenticatedUser,
+    routeTenantId: unknown,
+    body: unknown,
+  ): Promise<FounderOwnerInvitePublishLinkResult> {
+    this.assertPlatformAdmin(actor);
+    const tenantId = this.uuid(routeTenantId, 'tenantId');
+    const parsed = this.parsePublishLink(tenantId, body);
+    const requestDigest = this.digest({
+      contractVersion: FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT,
+      operation: PUBLISH_LINK_ACTION,
+      actorUserId: actor.id,
+      tenantId,
+      expectedInviteId: parsed.expectedInviteId,
+      requestId: parsed.requestId,
+      reasonDigest: this.textDigest(parsed.reason),
+      supportTicketDigest: parsed.supportTicket
+        ? this.textDigest(parsed.supportTicket)
+        : null,
+    });
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.identityClaimBoundary.lockTenantTransaction(tx, tenantId);
+      await this.assertFreshPlatformAuthority(tx, actor.id);
+      const replay = await tx.platformAdminAuditEvent.findUnique({
+        where: {
+          tenantId_action_requestId: {
+            tenantId,
+            action: PUBLISH_LINK_ACTION,
+            requestId: parsed.requestId,
+          },
+        },
+        select: { metadata: true },
+      });
+      if (replay) {
+        if (
+          !this.record(replay.metadata) ||
+          replay.metadata.requestDigest !== requestDigest
+        ) {
+          throw new ConflictException(
+            'requestId was already used with a different operation payload',
+          );
+        }
+        throw new ConflictException({
+          message:
+            'The link was already shown once. Revoke and reissue the invite to create a new link.',
+          reasonCode: 'FOUNDER_OWNER_INVITE_LINK_ALREADY_PUBLISHED',
+        });
+      }
+
+      const aggregate = await this.loadAggregate(tx, tenantId);
+      const now = this.clock();
+      if (!this.ownerInviteStage(aggregate.tenant)) {
+        throw new ConflictException({
+          message: 'Tenant is not awaiting its initial owner',
+          reasonCode: 'FOUNDER_OWNER_INVITE_TENANT_STATE_INVALID',
+        });
+      }
+      if (aggregate.invite.id !== parsed.expectedInviteId) {
+        throw new ConflictException({
+          message: 'Initial owner invite changed before link publication',
+          reasonCode: 'FOUNDER_OWNER_INVITE_CHANGED',
+        });
+      }
+      if (this.inviteState(aggregate.invite, now) !== 'ACTIVE') {
+        throw new ConflictException({
+          message: 'Initial owner invite is not active',
+          reasonCode: 'FOUNDER_OWNER_INVITE_LINK_NOT_ALLOWED',
+        });
+      }
+      if (aggregate.invite.deliveryMode !== 'EMAIL') {
+        throw new ConflictException({
+          message: 'Initial owner invite already uses link delivery',
+          reasonCode: 'FOUNDER_OWNER_INVITE_LINK_ALREADY_SELECTED',
+        });
+      }
+      if (
+        !aggregate.invite.email ||
+        aggregate.outbox.template !==
+          IdentityMailTemplate.INITIAL_OWNER_INVITE ||
+        aggregate.outbox.tokenDigestVersion !== 'sha256-v1' ||
+        aggregate.outbox.keyVersion !== 'v1' ||
+        aggregate.outbox.envelopeVersion !== 1 ||
+        !aggregate.outbox.secretCiphertext
+      ) {
+        throw new ConflictException({
+          message: 'Initial owner invite link is unavailable',
+          reasonCode: 'FOUNDER_OWNER_INVITE_LINK_UNAVAILABLE',
+        });
+      }
+
+      const envelope = new IdentityMailSecretEnvelopeService(this.config);
+      let registrationUrl: string;
+      const ciphertextBuffer = Buffer.from(aggregate.outbox.secretCiphertext);
+      try {
+        const token = envelope.openInitialOwnerInviteToken({
+          tenantId,
+          workflowLocator: aggregate.outbox.workflowLocator,
+          inviteId: aggregate.invite.id,
+          outboxId: aggregate.outbox.id,
+          template: OWNER_TEMPLATE,
+          messageKey: aggregate.outbox.messageKey,
+          requestDigest: aggregate.outbox.issueRequestDigest,
+          recipientEmail: aggregate.invite.email,
+          expiresAt: aggregate.outbox.expiresAt,
+          tokenHash: aggregate.outbox.tokenHash,
+          digestVersion: 'sha256-v1',
+          secretCiphertext: ciphertextBuffer,
+          envelopeVersion: 1,
+          keyVersion: 'v1',
+          aadEnvironment: aggregate.outbox.aadEnvironment,
+        });
+        registrationUrl = this.buildRegistrationUrl(token);
+
+        const selected = await tx.userInvite.updateMany({
+          where: {
+            id: aggregate.invite.id,
+            tenantId,
+            acceptedAt: null,
+            revokedAt: null,
+            expiresAt: { gt: now },
+            deliveryMode: 'EMAIL',
+            updatedAt: aggregate.invite.updatedAt,
+          },
+          data: { deliveryMode: 'LINK' },
+        });
+        if (selected.count !== 1) {
+          throw new ConflictException({
+            message: 'Initial owner invite changed before link publication',
+            reasonCode: 'FOUNDER_OWNER_INVITE_CHANGED',
+          });
+        }
+        const delivery = await this.stopDelivery(
+          tx,
+          aggregate.outbox,
+          tenantId,
+          now,
+          'OWNER_INVITE_LINK_ONLY',
+        );
+        if (delivery.status !== IdentityMailOutboxStatus.CANCELED) {
+          throw new ConflictException({
+            message: 'Initial owner invite email delivery cannot be stopped',
+            reasonCode: 'FOUNDER_OWNER_INVITE_LINK_NOT_ALLOWED',
+          });
+        }
+
+        await tx.platformAdminAuditEvent.create({
+          data: {
+            id: this.uuidFactory(),
+            tenantId,
+            actorUserId: actor.id,
+            action: PUBLISH_LINK_ACTION,
+            requestId: parsed.requestId,
+            targetType: 'UserInvite',
+            targetId: aggregate.invite.id,
+            reason: parsed.reason,
+            before: {
+              deliveryMode: 'EMAIL',
+              deliveryStatus: aggregate.outbox.status,
+            },
+            after: {
+              deliveryMode: 'LINK',
+              deliveryStatus: IdentityMailOutboxStatus.CANCELED,
+            },
+            metadata: {
+              contractVersion: FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT,
+              requestDigest,
+              supportTicket: parsed.supportTicket,
+              expectedInviteId: parsed.expectedInviteId,
+              tokenPersisted: false,
+            },
+          },
+        });
+      } finally {
+        ciphertextBuffer.fill(0);
+        aggregate.outbox.secretCiphertext.fill(0);
+      }
+
+      return {
+        ok: true,
+        contractVersion: FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT,
+        decision: 'LINK_PUBLISHED',
+        tenantId,
+        inviteId: aggregate.invite.id,
+        deliveryMode: 'LINK',
+        deliveryStatus: IdentityMailOutboxStatus.CANCELED,
+        registrationUrl,
+        expiresAt: aggregate.invite.expiresAt.toISOString(),
       };
     }, IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
   }
@@ -494,6 +721,7 @@ export class FounderOwnerInviteLifecycleService {
     outbox: OwnerInviteAggregate['outbox'],
     tenantId: string,
     revokedAt: Date,
+    stateReasonCode = 'OWNER_INVITE_REVOKED',
   ): Promise<{
     status: IdentityMailOutboxStatus;
     disposition: DeliveryDisposition;
@@ -539,7 +767,7 @@ export class FounderOwnerInviteLifecycleService {
           terminalAckDigest: null,
           sentAt: null,
           terminalAt: revokedAt,
-          stateReasonCode: 'OWNER_INVITE_REVOKED',
+          stateReasonCode,
           updatedAt: revokedAt,
         },
       });
@@ -630,11 +858,27 @@ export class FounderOwnerInviteLifecycleService {
           revokedByUserId: true,
           identityClaimRevision: true,
           updatedAt: true,
+          deliveryMode: true,
         },
       }),
       tx.identityMailOutbox.findFirst({
         where: { id: activation.outboxId, tenantId },
-        select: { id: true, status: true, providerAttemptKey: true },
+        select: {
+          id: true,
+          status: true,
+          providerAttemptKey: true,
+          workflowLocator: true,
+          aadEnvironment: true,
+          template: true,
+          messageKey: true,
+          issueRequestDigest: true,
+          tokenHash: true,
+          tokenDigestVersion: true,
+          secretCiphertext: true,
+          envelopeVersion: true,
+          keyVersion: true,
+          expiresAt: true,
+        },
       }),
     ]);
     if (!invite || !outbox) {
@@ -810,6 +1054,58 @@ export class FounderOwnerInviteLifecycleService {
       expectedInviteId: this.uuid(body.expectedInviteId, 'expectedInviteId'),
       expiresAt,
     };
+  }
+
+  private parsePublishLink(tenantId: string, body: unknown): ParsedRevoke {
+    if (!this.record(body)) {
+      throw new BadRequestException(
+        'Owner invite link publication body must be an object',
+      );
+    }
+    const unexpected = Object.keys(body).filter(
+      (field) => !PUBLISH_LINK_FIELDS.has(field),
+    );
+    if (unexpected.length > 0) {
+      throw new BadRequestException({
+        message: 'Owner invite link publication contains unsupported fields',
+        reasonCode: 'FOUNDER_OWNER_INVITE_FIELD_NOT_ALLOWED',
+      });
+    }
+    const expectedConfirmation = `PUBLISH OWNER INVITE LINK ${tenantId}`;
+    if (body.confirmation !== expectedConfirmation) {
+      throw new BadRequestException(
+        `confirmation must exactly equal "${expectedConfirmation}"`,
+      );
+    }
+    return {
+      requestId: this.uuid(body.requestId, 'requestId'),
+      reason: this.requiredText(body.reason, 'reason', 10, 500),
+      supportTicket: this.optionalText(
+        body.supportTicket,
+        'supportTicket',
+        200,
+      ),
+      expectedInviteId: this.uuid(body.expectedInviteId, 'expectedInviteId'),
+    };
+  }
+
+  private deliveryMode(value: string): 'EMAIL' | 'LINK' {
+    if (value !== 'EMAIL' && value !== 'LINK') {
+      throw new ServiceUnavailableException({
+        message: 'Initial owner invite delivery mode is invalid',
+        reasonCode: 'FOUNDER_OWNER_INVITE_DELIVERY_MODE_INVALID',
+      });
+    }
+    return value;
+  }
+
+  private buildRegistrationUrl(token: string): string {
+    const configuredBase =
+      this.config.get<string>('WEB_URL') ??
+      this.config.get<string>('FRONTEND_URL') ??
+      this.config.get<string>('NEXT_PUBLIC_WEB_URL') ??
+      'https://leetplus.ru';
+    return `${configuredBase.replace(/\/+$/u, '')}/register#invite=${token}`;
   }
 
   private revokeDigest(

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONFIRMATION,
   EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS,
   applyExternalLangameCurrent191ProductionUpgradePlan,
+  buildExternalLangameCurrent191ProductionMigrationSql,
   buildExternalLangameCurrent191ProductionUpgradePlan,
   inspectExternalLangameCurrent191ProductionUpgradeInventory,
   rehearseExternalLangameCurrent191ProductionUpgrade,
@@ -84,20 +86,20 @@ function rawInventory(phase = "source", overrides = {}) {
     databaseName: "leetplus",
     descriptionsBelow20: 0,
     historicalOwnership: [
-      { acl: null, identity: "390873", kind: "class", name: "Store", owner: "postgres" },
+      { acl: null, identity: "390873", kind: "class", name: "Store", owner: "leetplus" },
       { acl: null, identity: "286718", kind: "function", name: "identity_mail_delivery_worker_assert_v1(text)", owner: "postgres" },
     ],
     migrationCount: target ? 191 : 190,
     migrationHead: target
       ? EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationHead
       : EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS.sourceMigrationHead,
-    migrationTable: { acl: null, oid: "16392", owner: "postgres" },
+    migrationTable: { acl: null, oid: "16392", owner: "leetplus" },
     roleMemberships: [],
     rolledBackMigrations: [],
     sessionUser: "postgres",
     systemIdentifier: SYSTEM_IDENTIFIER,
     targetMigrationRows: target ? 1 : 0,
-    ticketTable: { acl: ["postgres=arwdDxt/postgres"], oid: "390873", owner: "postgres" },
+    ticketTable: { acl: ["leetplus=arwdDxt/leetplus"], oid: "390873", owner: "leetplus" },
     unfinishedMigrationCount: 0,
     workerFunction: { acl: ["postgres=X/postgres"], oid: "286718", owner: "postgres" },
     workerFunctionComment: target ? TARGET_COMMENT : SOURCE_COMMENT,
@@ -261,6 +263,65 @@ test("builds a signed exact CURRENT190 to CURRENT191 plan", async () => {
   assert.equal(inventory.migrationCount, 190);
 });
 
+test("pins the production split-owner topology before any migration", async () => {
+  const productionManifest = manifest();
+  const artifactInspector = async () => artifactEvidence();
+  const drifts = [
+    {
+      ticketTable: { acl: ["postgres=arwdDxt/postgres"], oid: "390873", owner: "postgres" },
+    },
+    {
+      migrationTable: { acl: null, oid: "16392", owner: "postgres" },
+    },
+    {
+      workerFunction: { acl: ["leetplus=X/leetplus"], oid: "286718", owner: "leetplus" },
+    },
+  ];
+  for (const drift of drifts) {
+    await assert.rejects(
+      inspectExternalLangameCurrent191ProductionUpgradeInventory({
+        adapter: { inspect: async () => rawInventory("source", drift) },
+        artifactInspector,
+        manifest: productionManifest,
+      }),
+      { reasonCode: "CURRENT191_UPGRADE_SOURCE_STATE_MISMATCH" },
+    );
+  }
+});
+
+test("executes relation DDL as leetplus and privileged function DDL as postgres", () => {
+  const rawMigration = readFileSync(
+    new URL(
+      "../prisma/migrations/20260908180000_external_langame_simple_onboarding/migration.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const sql = buildExternalLangameCurrent191ProductionMigrationSql({
+    migrationId: "11111111-1111-4111-8111-111111111111",
+    rawMigration,
+    source: rawInventory("source"),
+    target: manifest().target,
+  });
+  const firstApplicationRole = sql.indexOf('SET LOCAL ROLE "leetplus";');
+  const relationDdl = sql.indexOf('CREATE UNIQUE INDEX "store_external_identity_global_uidx"');
+  const resetToPostgres = sql.indexOf("RESET ROLE;", relationDdl);
+  const privilegedDdl = sql.indexOf(
+    'CREATE OR REPLACE FUNCTION public."identity_mail_delivery_worker_assert_v1"',
+  );
+  const secondApplicationRole = sql.indexOf(
+    'SET LOCAL ROLE "leetplus";',
+    firstApplicationRole + 1,
+  );
+  assert.ok(firstApplicationRole >= 0);
+  assert.ok(firstApplicationRole < relationDdl);
+  assert.ok(relationDdl < resetToPostgres);
+  assert.ok(resetToPostgres < privilegedDdl);
+  assert.ok(privilegedDdl < secondApplicationRole);
+  assert.equal(sql.match(/SET LOCAL ROLE "leetplus";/gu)?.length, 2);
+  assert.equal(sql.includes('SET LOCAL ROLE "postgres";'), false);
+});
+
 test("applies once, preserves database authority and restores the worker", async () => {
   const fixture = await planFixture();
   const phases = [];
@@ -381,21 +442,31 @@ test("recovers a lost response from the exact final state without repeating DDL"
   assert.equal(fixture.runtime.locks(), 0);
 });
 
-test("rejects a final state that changes table ownership or ACL", async () => {
+test("rejects a final state that changes protected ownership or ACL", async () => {
   const fixture = await planFixture();
   fixture.makeTarget();
-  const drifted = rawInventory("target", {
-    ticketTable: { acl: null, oid: "390873", owner: "postgres" },
-  });
-  await assert.rejects(
-    verifyExternalLangameCurrent191ProductionUpgradeFinal({
-      adapter: { inspect: async () => drifted },
-      manifest: fixture.manifest,
-      plan: fixture.plan,
-      runtimeAdapter: fixture.runtime.adapter,
-    }),
-    { reasonCode: "CURRENT191_UPGRADE_FINAL_DATABASE_STATE_NOT_REACHED" },
-  );
+  const drifts = [
+    { ticketTable: { acl: null, oid: "390873", owner: "leetplus" } },
+    { migrationTable: { acl: null, oid: "16392", owner: "postgres" } },
+    {
+      workerFunction: {
+        acl: ["leetplus=X/leetplus"],
+        oid: "286718",
+        owner: "leetplus",
+      },
+    },
+  ];
+  for (const drift of drifts) {
+    await assert.rejects(
+      verifyExternalLangameCurrent191ProductionUpgradeFinal({
+        adapter: { inspect: async () => rawInventory("target", drift) },
+        manifest: fixture.manifest,
+        plan: fixture.plan,
+        runtimeAdapter: fixture.runtime.adapter,
+      }),
+      { reasonCode: "CURRENT191_UPGRADE_FINAL_DATABASE_STATE_NOT_REACHED" },
+    );
+  }
   assert.equal(fixture.runtime.locks(), 0);
 });
 

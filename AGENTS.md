@@ -35,6 +35,13 @@ canonical boundary contract and current-state handoff for those areas.
 - `main` is source, not proof of production state. Production changes require
   one exact admitted SHA, immutable handoff and a separate explicit production
   GO. The dormant split-runtime candidate must not be installed manually.
+- Run independent local and CI verification gates as one bounded batch that
+  preserves a separate output log and exit code for every gate, then report all
+  failures from that pass together. Fail fast only at an effect boundary where
+  continuing could mutate production, invalidate evidence, or make later
+  results unsafe to interpret. Before retrying a failed gate, read the durable
+  error log and record the changed condition; never restart an unchanged full
+  batch merely to discover one failure at a time.
 
 If a change alters any route ownership, identity, secret, process, database
 role, scheduler placement, provider egress or rollout state, update

@@ -28,10 +28,11 @@ export const CONTRACT_VERSION = "LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V3";
 export const PLAN_DECISION = "PREPARED_NOT_EFFECT_AUTHORIZATION";
 export const APPROVAL_DECISION = "EXACT_PLAN_DIGEST_APPLY_AUTHORIZED";
 export const COMPLETE_DECISION = "ROLLOUT_PHASES_COMPLETED";
-export const SUPERSEDED_DECISION =
-  "ROLLOUT_SUPERSEDED_BEFORE_RUNTIME_EFFECT";
+export const SUPERSEDED_DECISION = "ROLLOUT_SUPERSEDED_BEFORE_RUNTIME_EFFECT";
 export const ROLLED_BACK_SUPERSEDED_DECISION =
   "ROLLOUT_SUPERSEDED_AFTER_TARGET_BIND_ROLLBACK";
+export const SMOKE_ROLLED_BACK_SUPERSEDED_DECISION =
+  "ROLLOUT_SUPERSEDED_AFTER_SMOKE_BIND_ROLLBACK";
 export const PHASES = Object.freeze([
   "HYDRATE",
   "BIND",
@@ -44,8 +45,7 @@ const SHA40 = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const SLOT_LINK_OPERATION_ID =
-  /^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[0-9]+$/u;
+const SLOT_LINK_OPERATION_ID = /^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[0-9]+$/u;
 const SLOT_LINK_TIMESTAMP =
   /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{9}Z$/u;
 const METRIC_ATTEMPT_FILE = new RegExp(
@@ -271,10 +271,7 @@ function exactIso(value, reasonCode) {
 
 function exactSlotLinkTimestamp(value, reasonCode) {
   exactString(value, SLOT_LINK_TIMESTAMP, reasonCode);
-  const millisecondValue = value.replace(
-    /\.([0-9]{3})[0-9]{6}Z$/u,
-    ".$1Z",
-  );
+  const millisecondValue = value.replace(/\.([0-9]{3})[0-9]{6}Z$/u, ".$1Z");
   const parsed = new Date(millisecondValue);
   if (
     !Number.isFinite(parsed.valueOf()) ||
@@ -326,6 +323,12 @@ function usage() {
     "    --slot-bind-receipt-sha256 <sha256> \\",
     "    --slot-rollback-receipt-sha256 <sha256>",
     "",
+    "  leetplus-resumable-release-orchestrator supersede-after-smoke-bind-rollback \\",
+    "    --operation-id <uuid-v4> --plan-sha256 <sha256> \\",
+    "    --replacement-release-sha <sha> \\",
+    "    --slot-bind-receipt-sha256 <sha256> \\",
+    "    --slot-rollback-receipt-sha256 <sha256>",
+    "",
     "  leetplus-resumable-release-orchestrator metrics",
     "",
     "  leetplus-resumable-release-orchestrator metrics-retention-plan \\",
@@ -342,6 +345,9 @@ function usage() {
     "supersede-after-bind-rollback terminalizes only the exact CURRENT191",
     "second-slot bridge after its target bind was receipt-rolled back before",
     "BIND evidence, with the target stopped, unmasked and restored byte-exact.",
+    "supersede-after-smoke-bind-rollback terminalizes only the exact first-slot",
+    "CURRENT191 bridge after accepted BIND and a pre-evidence SMOKE failure,",
+    "with the same accepted bind receipt rolled back and target restored/stopped.",
     "metrics is read-only: it reads only canonical root-owned operation and",
     "attempt records; it never contacts runtime services, databases or timers.",
     "metrics-retention-plan is also read-only. metrics-retention-apply is the",
@@ -384,6 +390,7 @@ function parseArguments(argv) {
       "status",
       "supersede-pre-runtime",
       "supersede-after-bind-rollback",
+      "supersede-after-smoke-bind-rollback",
       "metrics",
       "metrics-retention-plan",
       "metrics-retention-apply",
@@ -473,7 +480,10 @@ function parseArguments(argv) {
         ]
       : mode === "supersede-pre-runtime"
         ? [...common, "--plan-sha256", "--replacement-release-sha"]
-        : mode === "supersede-after-bind-rollback"
+        : [
+              "supersede-after-bind-rollback",
+              "supersede-after-smoke-bind-rollback",
+            ].includes(mode)
           ? [
               ...common,
               "--plan-sha256",
@@ -481,7 +491,7 @@ function parseArguments(argv) {
               "--slot-bind-receipt-sha256",
               "--slot-rollback-receipt-sha256",
             ]
-        : [...common, "--plan-sha256"];
+          : [...common, "--plan-sha256"];
   if (mode === "prepare" && !values.has("--watchdog-seconds")) {
     values.set("--watchdog-seconds", "30");
   }
@@ -513,32 +523,37 @@ function parseArguments(argv) {
         SHA256,
         "ORCHESTRATOR_PLAN_DIGEST_INVALID",
       ),
-      replacementReleaseSha:
-        ["supersede-pre-runtime", "supersede-after-bind-rollback"].includes(
-          mode,
-        )
-          ? exactString(
-              values.get("--replacement-release-sha") ?? "",
-              SHA40,
-              "ORCHESTRATOR_REPLACEMENT_RELEASE_SHA_INVALID",
-            )
-          : null,
-      slotBindReceiptSha256:
-        mode === "supersede-after-bind-rollback"
-          ? exactString(
-              values.get("--slot-bind-receipt-sha256") ?? "",
-              SHA256,
-              "ORCHESTRATOR_SLOT_BIND_RECEIPT_DIGEST_INVALID",
-            )
-          : null,
-      slotRollbackReceiptSha256:
-        mode === "supersede-after-bind-rollback"
-          ? exactString(
-              values.get("--slot-rollback-receipt-sha256") ?? "",
-              SHA256,
-              "ORCHESTRATOR_SLOT_ROLLBACK_RECEIPT_DIGEST_INVALID",
-            )
-          : null,
+      replacementReleaseSha: [
+        "supersede-pre-runtime",
+        "supersede-after-bind-rollback",
+        "supersede-after-smoke-bind-rollback",
+      ].includes(mode)
+        ? exactString(
+            values.get("--replacement-release-sha") ?? "",
+            SHA40,
+            "ORCHESTRATOR_REPLACEMENT_RELEASE_SHA_INVALID",
+          )
+        : null,
+      slotBindReceiptSha256: [
+        "supersede-after-bind-rollback",
+        "supersede-after-smoke-bind-rollback",
+      ].includes(mode)
+        ? exactString(
+            values.get("--slot-bind-receipt-sha256") ?? "",
+            SHA256,
+            "ORCHESTRATOR_SLOT_BIND_RECEIPT_DIGEST_INVALID",
+          )
+        : null,
+      slotRollbackReceiptSha256: [
+        "supersede-after-bind-rollback",
+        "supersede-after-smoke-bind-rollback",
+      ].includes(mode)
+        ? exactString(
+            values.get("--slot-rollback-receipt-sha256") ?? "",
+            SHA256,
+            "ORCHESTRATOR_SLOT_ROLLBACK_RECEIPT_DIGEST_INVALID",
+          )
+        : null,
       testMode,
     };
   }
@@ -1444,9 +1459,7 @@ function bindSlotEnvironment(plan, authority, paths, args) {
       ? authority.priorReleaseSha
       : plan.previousReleaseSha;
   const slotRuntimeProfile = slotRuntimeProfileForPlan(plan);
-  const previousMigration = previousValues.get(
-    "EXPECTED_DATABASE_MIGRATION",
-  );
+  const previousMigration = previousValues.get("EXPECTED_DATABASE_MIGRATION");
   const previousMigrationCount = Number(
     previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT"),
   );
@@ -1863,7 +1876,13 @@ function latestSlotBinding(slot, releaseSha, paths, args) {
   };
 }
 
-function readSlotRollbackPair(rollbackReceiptPath, slot, releaseSha, paths, args) {
+function readSlotRollbackPair(
+  rollbackReceiptPath,
+  slot,
+  releaseSha,
+  paths,
+  args,
+) {
   const root = path.join(paths.deployReceiptRoot, "slot-links");
   const resolvedRollbackPath = path.resolve(rollbackReceiptPath);
   assertInside(
@@ -1983,15 +2002,14 @@ function readSlotRollbackPair(rollbackReceiptPath, slot, releaseSha, paths, args
     bindAcceptedAt <= bindCreatedAt ||
     rollbackCreatedAt <= bindAcceptedAt ||
     rollbackAcceptedAt <= rollbackCreatedAt ||
-    sharedKeys.some(
-      (key) => rollback.values.get(key) !== bind.values.get(key),
-    )
+    sharedKeys.some((key) => rollback.values.get(key) !== bind.values.get(key))
   ) {
     fail("ORCHESTRATOR_SLOT_ROLLBACK_RECEIPT_INVALID");
   }
   return {
     bindReceiptPath,
     bindReceiptSha256: bind.sha256,
+    bindAcceptedAt,
     bindCreatedAt,
     operationId,
     priorReleaseSha,
@@ -3929,6 +3947,224 @@ function validateRolledBackSupersessionReceipt(
   return record;
 }
 
+function validateSmokeRolledBackSupersessionReceipt(
+  record,
+  context,
+  chain,
+  approvalSha256,
+  expectedReplacementReleaseSha,
+  args,
+) {
+  const reasonCode = "ORCHESTRATOR_SMOKE_ROLLBACK_SUPERSESSION_RECEIPT_INVALID";
+  exactKeys(
+    record,
+    [
+      "approvalSha256",
+      "bindPhaseEvidenceSha256",
+      "bindPhaseIntentSha256",
+      "bindPhaseReceiptSha256",
+      "completedPhases",
+      "contractVersion",
+      "decision",
+      "operationId",
+      "pendingPhase",
+      "pendingIntentSha256",
+      "pendingRecord",
+      "planSha256",
+      "previousPhaseReceiptSha256",
+      "quiesceIntentSha256",
+      "recordType",
+      "releaseSha",
+      "replacementControlAttestationSha256",
+      "replacementEffectiveLane",
+      "replacementImpactReceiptSha256",
+      "replacementReleaseSha",
+      "schemaVersion",
+      "slotBindReceiptPath",
+      "slotBindReceiptSha256",
+      "slotEnvironmentPreviousSha256",
+      "slotLinkOperationId",
+      "slotRollbackReceiptPath",
+      "slotRollbackReceiptSha256",
+      "smokeUnmaskIntentSha256",
+      "supersededAt",
+      "targetPriorReleaseSha",
+      "targetSlot",
+    ],
+    reasonCode,
+  );
+  if (
+    record.schemaVersion !== 3 ||
+    record.contractVersion !== CONTRACT_VERSION ||
+    record.recordType !== "ROLLOUT_SUPERSESSION_RECEIPT" ||
+    record.operationId !== context.plan.operationId ||
+    record.planSha256 !== context.planSha256 ||
+    record.approvalSha256 !== approvalSha256 ||
+    !SHA256.test(record.approvalSha256 ?? "") ||
+    record.releaseSha !== context.plan.releaseSha ||
+    record.targetSlot !== context.plan.targetSlot ||
+    record.completedPhases !== 2 ||
+    record.previousPhaseReceiptSha256 !== chain.previousReceiptSha256 ||
+    !SHA256.test(record.previousPhaseReceiptSha256 ?? "") ||
+    record.pendingPhase !== "SMOKE" ||
+    record.pendingIntentSha256 !== chain.pendingRecordSha256 ||
+    !SHA256.test(record.pendingIntentSha256 ?? "") ||
+    record.pendingRecord !== "INTENT" ||
+    record.decision !== SMOKE_ROLLED_BACK_SUPERSEDED_DECISION ||
+    !SHA40.test(record.replacementReleaseSha ?? "") ||
+    record.replacementReleaseSha === context.plan.releaseSha ||
+    (expectedReplacementReleaseSha !== null &&
+      record.replacementReleaseSha !== expectedReplacementReleaseSha) ||
+    !SHA256.test(record.replacementControlAttestationSha256 ?? "") ||
+    record.replacementControlAttestationSha256 ===
+      context.plan.controlAttestationSha256 ||
+    !TRUSTED_LANES.includes(record.replacementEffectiveLane) ||
+    record.replacementEffectiveLane !== context.plan.effectiveLane ||
+    !SHA256.test(record.replacementImpactReceiptSha256 ?? "") ||
+    !SHA256.test(record.bindPhaseIntentSha256 ?? "") ||
+    !SHA256.test(record.bindPhaseEvidenceSha256 ?? "") ||
+    !SHA256.test(record.bindPhaseReceiptSha256 ?? "") ||
+    !SHA256.test(record.quiesceIntentSha256 ?? "") ||
+    !SHA256.test(record.slotBindReceiptSha256 ?? "") ||
+    !SHA256.test(record.slotEnvironmentPreviousSha256 ?? "") ||
+    !SLOT_LINK_OPERATION_ID.test(record.slotLinkOperationId ?? "") ||
+    !SHA256.test(record.slotRollbackReceiptSha256 ?? "") ||
+    !SHA256.test(record.smokeUnmaskIntentSha256 ?? "") ||
+    !SHA40.test(record.targetPriorReleaseSha ?? "") ||
+    chain.completed !== 2 ||
+    chain.pendingRecord !== "INTENT"
+  ) {
+    fail(reasonCode);
+  }
+  exactIso(record.supersededAt, reasonCode);
+  const paths = buildPaths(args);
+  const bindIntent = readCanonicalJson(
+    path.join(context.directory, "02-bind.intent.json"),
+    args,
+    [0o600],
+  );
+  const bindEvidence = readCanonicalJson(
+    path.join(context.directory, "02-bind.evidence.json"),
+    args,
+    [0o400],
+  );
+  const bindReceipt = readCanonicalJson(
+    path.join(context.directory, "02-bind.receipt.json"),
+    args,
+    [0o400],
+  );
+  const smokeIntent = readCanonicalJson(
+    path.join(context.directory, "03-smoke.intent.json"),
+    args,
+    [0o600],
+  );
+  const quiesce = readCanonicalJson(
+    path.join(context.directory, "02-bind-quiesce.intent.json"),
+    args,
+    [0o400],
+  );
+  const unmask = readCanonicalJson(
+    path.join(context.directory, "03-smoke-unmask.intent.json"),
+    args,
+    [0o400],
+  );
+  validateSlotTransitionIntent(
+    quiesce.value,
+    "TARGET_SLOT_QUIESCE_INTENT",
+    "TARGET_SLOT_QUIESCE_AUTHORIZED",
+    context.plan,
+    bindIntent.sha256,
+  );
+  validateSlotTransitionIntent(
+    unmask.value,
+    "TARGET_SLOT_UNMASK_INTENT",
+    "TARGET_SLOT_UNMASK_AUTHORIZED",
+    context.plan,
+    smokeIntent.sha256,
+  );
+  const previousPath = path.join(
+    context.directory,
+    "02-bind-slot-environment.previous.env",
+  );
+  const previous = readExactBytes(previousPath, args, {
+    expectedGid: args.testMode ? process.getgid?.() : 0,
+    expectedMode: 0o400,
+    expectedUid: args.testMode ? process.getuid?.() : 0,
+    maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
+    reasonCode,
+  });
+  const previousValues = parseSlotEnvironment(
+    previous.raw,
+    context.plan.targetSlot,
+    reasonCode,
+    { allowLegacyApiBindHost: true },
+  );
+  const pair = readSlotRollbackPair(
+    record.slotRollbackReceiptPath,
+    context.plan.targetSlot,
+    context.plan.releaseSha,
+    paths,
+    args,
+  );
+  if (
+    context.plan.slotRuntimeProfile !==
+      SLOT_RUNTIME_PROFILE_CURRENT191_BRIDGE ||
+    context.plan.expectedMigration !== CURRENT191_MIGRATION ||
+    context.plan.expectedMigrationCount !== CURRENT191_MIGRATION_COUNT ||
+    context.plan.previousMigration !== CURRENT191_MIGRATION ||
+    context.plan.previousMigrationCount !== CURRENT191_MIGRATION_COUNT ||
+    bindIntent.sha256 !== record.bindPhaseIntentSha256 ||
+    bindEvidence.sha256 !== record.bindPhaseEvidenceSha256 ||
+    bindReceipt.sha256 !== record.bindPhaseReceiptSha256 ||
+    bindReceipt.sha256 !== chain.previousReceiptSha256 ||
+    bindReceipt.value.intentSha256 !== bindIntent.sha256 ||
+    bindReceipt.value.evidenceSha256 !== bindEvidence.sha256 ||
+    smokeIntent.sha256 !== chain.pendingRecordSha256 ||
+    smokeIntent.sha256 !== record.pendingIntentSha256 ||
+    quiesce.sha256 !== record.quiesceIntentSha256 ||
+    unmask.sha256 !== record.smokeUnmaskIntentSha256 ||
+    bindEvidence.value.details.quiesceIntentSha256 !== quiesce.sha256 ||
+    bindEvidence.value.details.slotEnvironmentPreviousPath !== previousPath ||
+    bindEvidence.value.details.slotEnvironmentPreviousSha256 !==
+      previous.sha256 ||
+    bindEvidence.value.details.slotLinkReceiptPath !== pair.bindReceiptPath ||
+    bindEvidence.value.details.slotLinkReceiptSha256 !==
+      pair.bindReceiptSha256 ||
+    previous.sha256 !== record.slotEnvironmentPreviousSha256 ||
+    previousValues.get("RELEASE_SHA") !== context.plan.previousReleaseSha ||
+    previousValues.get("RELEASE_SHA") !== record.targetPriorReleaseSha ||
+    previousValues.get("EXPECTED_DATABASE_MIGRATION") !==
+      CURRENT191_MIGRATION ||
+    Number(previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !==
+      CURRENT191_MIGRATION_COUNT ||
+    previousValues.get("GUEST_BUG_REPORTING_MODE") !== "OFF" ||
+    previousValues.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") !==
+      "ALLOW_CURRENT_190" ||
+    pair.bindReceiptPath !== record.slotBindReceiptPath ||
+    pair.bindReceiptSha256 !== record.slotBindReceiptSha256 ||
+    pair.operationId !== record.slotLinkOperationId ||
+    pair.rollbackReceiptPath !== record.slotRollbackReceiptPath ||
+    pair.rollbackReceiptSha256 !== record.slotRollbackReceiptSha256 ||
+    pair.priorReleaseSha !== context.plan.previousReleaseSha ||
+    pair.priorReleaseSha !== record.targetPriorReleaseSha ||
+    pair.bindCreatedAt <=
+      isoToSlotLinkTimestamp(quiesce.value.createdAt, reasonCode) ||
+    pair.bindAcceptedAt >=
+      isoToSlotLinkTimestamp(bindEvidence.value.observedAt, reasonCode) ||
+    isoToSlotLinkTimestamp(bindEvidence.value.observedAt, reasonCode) >
+      isoToSlotLinkTimestamp(bindReceipt.value.acceptedAt, reasonCode) ||
+    bindReceipt.value.acceptedAt >= smokeIntent.value.createdAt ||
+    smokeIntent.value.createdAt > unmask.value.createdAt ||
+    pair.rollbackAcceptedAt <=
+      isoToSlotLinkTimestamp(unmask.value.createdAt, reasonCode) ||
+    isoToSlotLinkTimestamp(record.supersededAt, reasonCode) <=
+      pair.rollbackAcceptedAt
+  ) {
+    fail(reasonCode);
+  }
+  return record;
+}
+
 function validateSupersessionReceipt(
   record,
   context,
@@ -3939,6 +4175,16 @@ function validateSupersessionReceipt(
 ) {
   if (record?.decision === ROLLED_BACK_SUPERSEDED_DECISION) {
     return validateRolledBackSupersessionReceipt(
+      record,
+      context,
+      chain,
+      approvalSha256,
+      expectedReplacementReleaseSha,
+      args,
+    );
+  }
+  if (record?.decision === SMOKE_ROLLED_BACK_SUPERSEDED_DECISION) {
+    return validateSmokeRolledBackSupersessionReceipt(
       record,
       context,
       chain,
@@ -4141,27 +4387,15 @@ function assertNoOtherIncompleteOperation(paths, args, operationId) {
       : readCurrentPhaseChain(context, args);
     const finalPath = path.join(directory, "final.json");
     const supersessionPath = path.join(directory, "superseded.json");
-    if (
-      chain.completed !== PHASES.length ||
-      !existsSync(finalPath)
-    ) {
-      if (
-        !isV2 &&
-        !existsSync(finalPath) &&
-        existsSync(supersessionPath)
-      ) {
+    if (chain.completed !== PHASES.length || !existsSync(finalPath)) {
+      if (!isV2 && !existsSync(finalPath) && existsSync(supersessionPath)) {
         const approval = readCanonicalJson(
           path.join(directory, "approval.json"),
           args,
           [0o400],
         );
         validateApproval(approval.value, context);
-        readValidatedSupersessionReceipt(
-          context,
-          chain,
-          args,
-          approval.sha256,
-        );
+        readValidatedSupersessionReceipt(context, chain, args, approval.sha256);
         continue;
       }
       fail("ORCHESTRATOR_OTHER_OPERATION_INCOMPLETE");
@@ -4169,11 +4403,7 @@ function assertNoOtherIncompleteOperation(paths, args, operationId) {
     if (existsSync(supersessionPath)) {
       fail("ORCHESTRATOR_STATE_INVENTORY_INVALID");
     }
-    const final = readCanonicalJson(
-      finalPath,
-      args,
-      [0o400],
-    );
+    const final = readCanonicalJson(finalPath, args, [0o400]);
     if (isV2) {
       validateV2MetricFinalReceipt(
         final.value,
@@ -4278,8 +4508,7 @@ function supersedePreRuntimeOperation(context, paths, args) {
     pendingRecord: "INTENT",
     pendingIntentSha256: chain.pendingRecordSha256,
     replacementReleaseSha: args.replacementReleaseSha,
-    replacementControlAttestationSha256:
-      replacementControl.attestationSha256,
+    replacementControlAttestationSha256: replacementControl.attestationSha256,
     replacementEffectiveLane: replacementControl.effectiveLane,
     replacementImpactReceiptSha256: replacementControl.impactReceiptSha256,
     supersededAt: nowIso(),
@@ -4529,8 +4758,7 @@ function supersedeAfterBindRollbackOperation(context, paths, args) {
     slotRollbackReceiptSha256: rollback.rollbackReceiptSha256,
     targetPriorReleaseSha: rollback.priorReleaseSha,
     replacementReleaseSha: args.replacementReleaseSha,
-    replacementControlAttestationSha256:
-      replacementControl.attestationSha256,
+    replacementControlAttestationSha256: replacementControl.attestationSha256,
     replacementEffectiveLane: replacementControl.effectiveLane,
     replacementImpactReceiptSha256: replacementControl.impactReceiptSha256,
     supersededAt: nowIso(),
@@ -4547,6 +4775,281 @@ function supersedeAfterBindRollbackOperation(context, paths, args) {
   return {
     contractVersion: CONTRACT_VERSION,
     decision: ROLLED_BACK_SUPERSEDED_DECISION,
+    operationId: context.plan.operationId,
+    planSha256: context.planSha256,
+    releaseSha: context.plan.releaseSha,
+    replacementReleaseSha: args.replacementReleaseSha,
+    supersessionReceiptPath: published.path,
+    supersessionReceiptSha256: published.sha256,
+    targetSlot: context.plan.targetSlot,
+  };
+}
+
+function supersedeAfterSmokeBindRollbackOperation(context, paths, args) {
+  const reasonCode = "ORCHESTRATOR_SMOKE_ROLLBACK_SUPERSESSION_STATE_INVALID";
+  const finalPath = path.join(context.directory, "final.json");
+  const supersessionPath = path.join(context.directory, "superseded.json");
+  if (existsSync(finalPath)) {
+    fail("ORCHESTRATOR_SUPERSESSION_OPERATION_ALREADY_TERMINAL");
+  }
+  if (!existsSync(path.join(context.directory, "approval.json"))) {
+    fail("ORCHESTRATOR_SUPERSESSION_APPROVAL_REQUIRED");
+  }
+  const approval = readCanonicalJson(
+    path.join(context.directory, "approval.json"),
+    args,
+    [0o400],
+  );
+  validateApproval(approval.value, context);
+  const chain = readCurrentPhaseChain(context, args);
+  if (existsSync(supersessionPath)) {
+    const existing = readValidatedSupersessionReceipt(
+      context,
+      chain,
+      args,
+      approval.sha256,
+      args.replacementReleaseSha,
+    );
+    if (existing.value.decision !== SMOKE_ROLLED_BACK_SUPERSEDED_DECISION) {
+      fail("ORCHESTRATOR_SMOKE_ROLLBACK_SUPERSESSION_RECEIPT_INVALID");
+    }
+    if (
+      existing.value.slotBindReceiptSha256 !== args.slotBindReceiptSha256 ||
+      existing.value.slotRollbackReceiptSha256 !==
+        args.slotRollbackReceiptSha256
+    ) {
+      fail("ORCHESTRATOR_SMOKE_ROLLBACK_SUPERSESSION_RECEIPT_INVALID");
+    }
+    return {
+      contractVersion: CONTRACT_VERSION,
+      decision: SMOKE_ROLLED_BACK_SUPERSEDED_DECISION,
+      operationId: context.plan.operationId,
+      planSha256: context.planSha256,
+      releaseSha: context.plan.releaseSha,
+      replacementReleaseSha: args.replacementReleaseSha,
+      supersessionReceiptPath: existing.path,
+      supersessionReceiptSha256: existing.sha256,
+      targetSlot: context.plan.targetSlot,
+    };
+  }
+  if (
+    chain.completed !== 2 ||
+    chain.pendingRecord !== "INTENT" ||
+    !SHA256.test(chain.previousReceiptSha256 ?? "") ||
+    context.plan.slotRuntimeProfile !==
+      SLOT_RUNTIME_PROFILE_CURRENT191_BRIDGE ||
+    context.plan.expectedMigration !== CURRENT191_MIGRATION ||
+    context.plan.expectedMigrationCount !== CURRENT191_MIGRATION_COUNT ||
+    context.plan.previousMigration !== CURRENT191_MIGRATION ||
+    context.plan.previousMigrationCount !== CURRENT191_MIGRATION_COUNT
+  ) {
+    fail(reasonCode);
+  }
+  assertCutoverContinuity(context.plan, paths, args, 2);
+  const bindIntent = readCanonicalJson(
+    path.join(context.directory, "02-bind.intent.json"),
+    args,
+    [0o600],
+  );
+  const bindEvidence = readCanonicalJson(
+    path.join(context.directory, "02-bind.evidence.json"),
+    args,
+    [0o400],
+  );
+  const bindReceipt = readCanonicalJson(
+    path.join(context.directory, "02-bind.receipt.json"),
+    args,
+    [0o400],
+  );
+  const smokeIntent = readCanonicalJson(
+    path.join(context.directory, "03-smoke.intent.json"),
+    args,
+    [0o600],
+  );
+  const quiesce = readCanonicalJson(
+    path.join(context.directory, "02-bind-quiesce.intent.json"),
+    args,
+    [0o400],
+  );
+  const unmask = readCanonicalJson(
+    path.join(context.directory, "03-smoke-unmask.intent.json"),
+    args,
+    [0o400],
+  );
+  validateSlotTransitionIntent(
+    quiesce.value,
+    "TARGET_SLOT_QUIESCE_INTENT",
+    "TARGET_SLOT_QUIESCE_AUTHORIZED",
+    context.plan,
+    bindIntent.sha256,
+  );
+  validateSlotTransitionIntent(
+    unmask.value,
+    "TARGET_SLOT_UNMASK_INTENT",
+    "TARGET_SLOT_UNMASK_AUTHORIZED",
+    context.plan,
+    smokeIntent.sha256,
+  );
+  const expectedUid = args.testMode ? process.getuid?.() : 0;
+  const expectedRecordGid = args.testMode ? process.getgid?.() : 0;
+  const expectedRuntimeGid = runtimeGroupGid(paths, args);
+  const previousPath = path.join(
+    context.directory,
+    "02-bind-slot-environment.previous.env",
+  );
+  const previous = readExactBytes(previousPath, args, {
+    expectedGid: expectedRecordGid,
+    expectedMode: 0o400,
+    expectedUid,
+    maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
+    reasonCode,
+  });
+  const current = readExactBytes(
+    path.join(paths.slotEnvironmentRoot, context.plan.targetSlot + ".env"),
+    args,
+    {
+      expectedGid: expectedRuntimeGid,
+      expectedMode: 0o440,
+      expectedUid,
+      maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
+      reasonCode,
+    },
+  );
+  if (!current.bytes.equals(previous.bytes)) {
+    fail(reasonCode);
+  }
+  const previousValues = parseSlotEnvironment(
+    previous.raw,
+    context.plan.targetSlot,
+    reasonCode,
+    { allowLegacyApiBindHost: true },
+  );
+  const activeSlot = currentActiveSlot(paths);
+  if (activeSlot === context.plan.targetSlot) {
+    fail(reasonCode);
+  }
+  const active = readExactBytes(
+    path.join(paths.slotEnvironmentRoot, activeSlot + ".env"),
+    args,
+    {
+      expectedGid: expectedRuntimeGid,
+      expectedMode: 0o440,
+      expectedUid,
+      maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
+      reasonCode,
+    },
+  );
+  const activeValues = parseSlotEnvironment(
+    active.raw,
+    activeSlot,
+    reasonCode,
+    { allowLegacyApiBindHost: true },
+  );
+  const rollback = latestSlotRollback(
+    context.plan.targetSlot,
+    context.plan.releaseSha,
+    paths,
+    args,
+  );
+  if (
+    rollback.bindReceiptSha256 !== args.slotBindReceiptSha256 ||
+    rollback.rollbackReceiptSha256 !== args.slotRollbackReceiptSha256 ||
+    rollback.bindCreatedAt <=
+      isoToSlotLinkTimestamp(quiesce.value.createdAt, reasonCode) ||
+    rollback.priorReleaseSha !== context.plan.previousReleaseSha ||
+    previousValues.get("RELEASE_SHA") !== context.plan.previousReleaseSha ||
+    previousValues.get("EXPECTED_DATABASE_MIGRATION") !==
+      CURRENT191_MIGRATION ||
+    Number(previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !==
+      CURRENT191_MIGRATION_COUNT ||
+    previousValues.get("GUEST_BUG_REPORTING_MODE") !== "OFF" ||
+    previousValues.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") !==
+      "ALLOW_CURRENT_190" ||
+    activeValues.get("RELEASE_SHA") !== context.plan.previousReleaseSha ||
+    activeValues.get("EXPECTED_DATABASE_MIGRATION") !== CURRENT191_MIGRATION ||
+    Number(activeValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !==
+      CURRENT191_MIGRATION_COUNT ||
+    activeValues.get("GUEST_BUG_REPORTING_MODE") !== "OFF" ||
+    activeValues.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") !==
+      "ALLOW_CURRENT_190" ||
+    currentSlotTarget(context.plan.targetSlot, paths) !== rollback.priorTarget
+  ) {
+    fail(reasonCode);
+  }
+  for (const unit of [
+    "leetplus-api@" + context.plan.targetSlot + ".service",
+    "leetplus-web@" + context.plan.targetSlot + ".service",
+  ]) {
+    if (inspectInstanceMask(unit, paths, args) !== "UNMASKED") {
+      fail(reasonCode);
+    }
+    assertStoppedInstance(unit, paths, args);
+  }
+  const replacementControl = verifyInstalledControl(
+    args.replacementReleaseSha,
+    paths,
+    args,
+  );
+  if (
+    args.replacementReleaseSha === context.plan.releaseSha ||
+    replacementControl.attestationSha256 ===
+      context.plan.controlAttestationSha256 ||
+    replacementControl.effectiveLane !== context.plan.effectiveLane
+  ) {
+    fail("ORCHESTRATOR_SUPERSESSION_CONTROL_SUCCESSOR_INVALID");
+  }
+  const receipt = {
+    schemaVersion: 3,
+    contractVersion: CONTRACT_VERSION,
+    recordType: "ROLLOUT_SUPERSESSION_RECEIPT",
+    operationId: context.plan.operationId,
+    planSha256: context.planSha256,
+    approvalSha256: approval.sha256,
+    releaseSha: context.plan.releaseSha,
+    targetSlot: context.plan.targetSlot,
+    completedPhases: 2,
+    previousPhaseReceiptSha256: chain.previousReceiptSha256,
+    pendingPhase: "SMOKE",
+    pendingRecord: "INTENT",
+    pendingIntentSha256: chain.pendingRecordSha256,
+    bindPhaseIntentSha256: bindIntent.sha256,
+    bindPhaseEvidenceSha256: bindEvidence.sha256,
+    bindPhaseReceiptSha256: bindReceipt.sha256,
+    quiesceIntentSha256: quiesce.sha256,
+    smokeUnmaskIntentSha256: unmask.sha256,
+    slotEnvironmentPreviousSha256: previous.sha256,
+    slotBindReceiptPath: rollback.bindReceiptPath,
+    slotBindReceiptSha256: rollback.bindReceiptSha256,
+    slotLinkOperationId: rollback.operationId,
+    slotRollbackReceiptPath: rollback.rollbackReceiptPath,
+    slotRollbackReceiptSha256: rollback.rollbackReceiptSha256,
+    targetPriorReleaseSha: rollback.priorReleaseSha,
+    replacementReleaseSha: args.replacementReleaseSha,
+    replacementControlAttestationSha256: replacementControl.attestationSha256,
+    replacementEffectiveLane: replacementControl.effectiveLane,
+    replacementImpactReceiptSha256: replacementControl.impactReceiptSha256,
+    supersededAt: nowIso(),
+    decision: SMOKE_ROLLED_BACK_SUPERSEDED_DECISION,
+  };
+  validateSmokeRolledBackSupersessionReceipt(
+    receipt,
+    context,
+    chain,
+    approval.sha256,
+    args.replacementReleaseSha,
+    args,
+  );
+  publishCanonicalJson(supersessionPath, receipt, 0o400, args);
+  const published = readValidatedSupersessionReceipt(
+    context,
+    chain,
+    args,
+    approval.sha256,
+    args.replacementReleaseSha,
+  );
+  return {
+    contractVersion: CONTRACT_VERSION,
+    decision: SMOKE_ROLLED_BACK_SUPERSEDED_DECISION,
     operationId: context.plan.operationId,
     planSha256: context.planSha256,
     releaseSha: context.plan.releaseSha,
@@ -4977,12 +5480,7 @@ function metricOperationInventory(paths, args) {
         if (approval === undefined) {
           fail("ORCHESTRATOR_APPROVAL_INVALID");
         }
-        readValidatedSupersessionReceipt(
-          context,
-          chain,
-          args,
-          approval.sha256,
-        );
+        readValidatedSupersessionReceipt(context, chain, args, approval.sha256);
         result.push({ lane, state: "SUPERSEDED" });
         continue;
       }
@@ -5536,8 +6034,7 @@ function metricAttemptInventory(paths, args) {
 function assertMetricRetentionOperationsTerminal(paths, args) {
   if (
     metricOperationInventory(paths, args).some(
-      (operation) =>
-        !["COMPLETED", "SUPERSEDED"].includes(operation.state),
+      (operation) => !["COMPLETED", "SUPERSEDED"].includes(operation.state),
     )
   ) {
     fail("ORCHESTRATOR_METRIC_RETENTION_OPERATION_UNRESOLVED");
@@ -6058,18 +6555,21 @@ export async function main(argv = process.argv.slice(2)) {
       return 0;
     }
     if (
-      ["supersede-pre-runtime", "supersede-after-bind-rollback"].includes(
-        args.mode,
-      )
+      [
+        "supersede-pre-runtime",
+        "supersede-after-bind-rollback",
+        "supersede-after-smoke-bind-rollback",
+      ].includes(args.mode)
     ) {
       assertNoOtherIncompleteOperation(paths, args, args.operationId);
       process.stdout.write(
         JSON.stringify(
           args.mode === "supersede-pre-runtime"
             ? supersedePreRuntimeOperation(context, paths, args)
-            : supersedeAfterBindRollbackOperation(context, paths, args),
-        ) +
-          "\n",
+            : args.mode === "supersede-after-bind-rollback"
+              ? supersedeAfterBindRollbackOperation(context, paths, args)
+              : supersedeAfterSmokeBindRollbackOperation(context, paths, args),
+        ) + "\n",
       );
       return 0;
     }

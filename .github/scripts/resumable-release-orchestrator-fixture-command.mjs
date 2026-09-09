@@ -106,6 +106,31 @@ function writeBindReceipt(slot) {
   mkdirSync(target, { recursive: true });
   replaceLink(path.join(slotRoot, slot), target);
   const operationId = "20260902T000000.000000000Z-1";
+  const slotTimestamp = (date) =>
+    date
+      .toISOString()
+      .replace(
+        /\.([0-9]{3})Z$/u,
+        (_match, milliseconds) => "." + milliseconds + "000000Z",
+      );
+  let createdAt = "2026-09-02T00:00:00.000000000Z";
+  let acceptedAt = "2026-09-02T00:00:00.000000000Z";
+  if (state.correlateBindTimestamps === true) {
+    const quiesce = JSON.parse(
+      readFileSync(
+        path.join(
+          receiptRoot,
+          "release-orchestrator",
+          state.orchestratorOperationId,
+          "02-bind-quiesce.intent.json",
+        ),
+        "utf8",
+      ),
+    );
+    const base = new Date(quiesce.createdAt).valueOf();
+    createdAt = slotTimestamp(new Date(base + 1));
+    acceptedAt = slotTimestamp(new Date(base + 2));
+  }
   const receiptPath = path.join(
     journal,
     slot + "-" + operationId + ".bind.receipt",
@@ -133,10 +158,10 @@ function writeBindReceipt(slot) {
     ["PRIOR_HYDRATION_ATTESTATION_SHA256", "b".repeat(64)],
     ["SOURCE_RECEIPT_SHA256", ""],
     ["ACTIVE_SLOT_SAFE_MODE", "false"],
-    ["CREATED_AT", "2026-09-02T00:00:00.000000000Z"],
+    ["CREATED_AT", createdAt],
     ["INTENT_SHA256", "6".repeat(64)],
     ["EFFECT_STATE", "REQUESTED_BOUND"],
-    ["ACCEPTED_AT", "2026-09-02T00:00:00.000000000Z"],
+    ["ACCEPTED_AT", acceptedAt],
   ]);
   writeFileSync(receiptPath, receipt);
   writeFileSync(
@@ -148,7 +173,7 @@ function writeBindReceipt(slot) {
       ["OPERATION_ID", operationId],
       ["RECEIPT_PATH", receiptPath],
       ["RECEIPT_SHA256", sha(receipt)],
-      ["UPDATED_AT", "2026-09-02T00:00:00.000Z"],
+      ["UPDATED_AT", acceptedAt.replace(/\.([0-9]{3})[0-9]{6}Z$/u, ".$1Z")],
     ]),
   );
 }
@@ -250,6 +275,7 @@ switch (name) {
         state.slotMasked = true;
         state.maskEffects += 1;
       }
+      state.slotActive = false;
       save();
       break;
     }
@@ -299,6 +325,7 @@ switch (name) {
         process.exit(102);
       }
       state.stopCalls += 1;
+      state.slotActive = false;
       save();
       break;
     }
@@ -342,6 +369,7 @@ switch (name) {
     if (command === "start") {
       if (state.slotMasked) process.exit(98);
       state.runtimeStartCalls += 1;
+      state.slotActive = true;
       save();
       break;
     }
@@ -359,15 +387,29 @@ switch (name) {
         break;
       }
       if (property === "ActiveState") {
-        process.stdout.write(state.slotFailed ? "failed\n" : "inactive\n");
+        process.stdout.write(
+          state.slotFailed
+            ? "failed\n"
+            : state.slotActive
+              ? "active\n"
+              : "inactive\n",
+        );
         break;
       }
       if (property === "SubState") {
-        process.stdout.write(state.slotFailed ? "failed\n" : "dead\n");
+        process.stdout.write(
+          state.slotFailed
+            ? "failed\n"
+            : state.slotActive
+              ? "running\n"
+              : "dead\n",
+        );
         break;
       }
       if (property === "MainPID" || property === "ControlPID") {
-        process.stdout.write("0\n");
+        process.stdout.write(
+          property === "MainPID" && state.slotActive ? "1234\n" : "0\n",
+        );
         break;
       }
       if (property !== "InvocationID") process.exit(103);

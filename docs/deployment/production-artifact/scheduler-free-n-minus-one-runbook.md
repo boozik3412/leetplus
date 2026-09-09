@@ -11,17 +11,17 @@ restored copy, но его scheduler-пути нельзя оставлять а
 
 Новый N−1 сохраняет HTTP rollback без второго scheduler owner:
 
-| Компонент | Контракт |
-| --- | --- |
-| Source | только exact `7de04ff4ccc814494810730be3fa6bf661097b07` |
-| API edge | `127.0.0.1:4300`, MainPID user `leetplus-api-nminus1`; public только exact `GET /health` и `POST /auth/login` |
-| Legacy API child | `127.0.0.1:4301`, тот же user и exact systemd cgroup; никогда не является nginx/public upstream |
-| Web | `127.0.0.1:3300`, user `leetplus-web-nminus1` |
-| PostgreSQL login | `leetplus_legacy_rollback`, `NOINHERIT`, единственное membership в `leetplus` с `SET=true`, `INHERIT=false`, `ADMIN=false` |
-| DB application name | `leetplus-nminus1-http-7de04ff4` |
-| Network | API/Web units разрешают только `AF_INET/AF_INET6` на loopback (без `AF_UNIX`); exact nft fence разрешает `4301` только API UID и отвергает его для всех остальных local UID |
-| Effects | scheduler, scheduled HTTP, recovery/materializer, email, Telegram, SMS, MAX, Langame write и tenant outbound принудительно выключены final overlay |
-| Nginx target | `legacy-safe.conf`, API/Web `4300/3300` |
+| Компонент           | Контракт                                                                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source              | только exact `7de04ff4ccc814494810730be3fa6bf661097b07`                                                                                                                     |
+| API edge            | `127.0.0.1:4300`, MainPID user `leetplus-api-nminus1`; public только exact `GET /health` и `POST /auth/login`                                                               |
+| Legacy API child    | `127.0.0.1:4301`, тот же user и exact systemd cgroup; никогда не является nginx/public upstream                                                                             |
+| Web                 | `127.0.0.1:3300`, user `leetplus-web-nminus1`                                                                                                                               |
+| PostgreSQL login    | `leetplus_legacy_rollback`, `NOINHERIT`, единственное membership в `leetplus` с `SET=true`, `INHERIT=false`, `ADMIN=false`                                                  |
+| DB application name | `leetplus-nminus1-http-7de04ff4`                                                                                                                                            |
+| Network             | API/Web units разрешают только `AF_INET/AF_INET6` на loopback (без `AF_UNIX`); exact nft fence разрешает `4301` только API UID и отвергает его для всех остальных local UID |
+| Effects             | scheduler, scheduled HTTP, recovery/materializer, email, Telegram, SMS, MAX, Langame write и tenant outbound принудительно выключены final overlay                          |
+| Nginx target        | `legacy-safe.conf`, API/Web `4300/3300`                                                                                                                                     |
 
 Одна переменная в прежнем `runtime.env` не может включить effect: deny overlay
 загружается последним, проверяется `ExecStartPre`, а unit дополнительно запрещает
@@ -137,7 +137,7 @@ nginx-конфигурациях нет независимых API/Web `backup` 
    `127.0.0.1:5432`, `schema=public`, `application_name` из таблицы выше и
    единственным `options=-c role=leetplus`; любые дополнительные URL options
    запрещены. Файл `root:leetplus-api-runtime
-   0640`. `/etc/leetplus/rollback-web-runtime.env` содержит только Web-safe
+0640`. `/etc/leetplus/rollback-web-runtime.env` содержит только Web-safe
    runtime values и `NODE_ENV=production`, `root:leetplus-web-runtime 0640`.
    API/provider credentials в Web-файле запрещены. API-файл обязан содержать
    случайный `JWT_SECRET` длиной не менее 32 и не более 4096 символов, без
@@ -170,6 +170,7 @@ nginx-конфигурациях нет независимых API/Web `backup` 
    root-owned target file дополнительно пинит `system_identifier` и exact
    `session_user`. Verifier передаёт только service name, поэтому password/URI
    не появляется в process arguments или receipt.
+
 8. `/etc/leetplus/legacy-rollback-smoke.env`, `root:root 0600`, имеет ровно
    десять ключей: `EMAIL`, `PASSWORD`, `TENANT_SLUG`, SHA-256 exact tenant ID,
    SHA-256 отсортированных четырёх store IDs (строки соединены `\n`, включая
@@ -202,7 +203,7 @@ entry, writable ancestor, лишний файл или digest drift блокир
 Bootstrap authority берётся из того же immutable CI artifact, но не является
 частью исполняемого control bundle (это устраняет self-verification). Его
 reviewed SHA-256 для этой версии:
-`06a3fae25ed6bebe0f7920879dcc704505aef9a940130be477fbfd478ba6fc74`.
+`d392c5a7af38fde8067be03711044cff6384533fbf6a93aa9cd55738586d12a4`.
 Сначала byte копируется во временный root-owned файл, проверяется уже после
 копирования и только затем атомарно публикуется:
 
@@ -210,7 +211,7 @@ reviewed SHA-256 для этой версии:
 sudo install -o root -g root -m 0500 \
   <immutable-ci-artifact>/leetplus-install-scheduler-free-nminus1-v1 \
   /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new
-echo '06a3fae25ed6bebe0f7920879dcc704505aef9a940130be477fbfd478ba6fc74  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
+echo 'd392c5a7af38fde8067be03711044cff6384533fbf6a93aa9cd55738586d12a4  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
   | sudo sha256sum --check --strict
 sudo mv -T /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new \
   /usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1
@@ -361,7 +362,7 @@ sudo /usr/local/libexec/leetplus/activate-legacy-rollback-contour.sh
 7. дождаться выхода captured pre-reload nginx workers и clean samples
    соединений к `3000/4000`; установить exact systemd start-fence drop-ins,
    применить внутри одной target-pinned DB transaction `ALTER ROLE leetplus
-   NOLOGIN`, создать durable fence marker и только затем `disable --now`
+NOLOGIN`, создать durable fence marker и только затем `disable --now`
    каждого DRAIN unit;
 8. несколько последовательных clean samples: units inactive+disabled и exact
    fence drop-ins loaded,

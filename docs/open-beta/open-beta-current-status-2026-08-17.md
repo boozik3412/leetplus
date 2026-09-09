@@ -3,7 +3,7 @@
 | Поле                 | Состояние                                                                                                                                                                                            |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                                                                                         |
-| Production runtime   | healthy; active blue exact `def5174f…`, `COMBINED`, bridge OFF, bug reporting LIVE; previous admitted `797001d5…` retained as independently healthy rollback                                             |
+| Production runtime   | healthy; active blue exact `def5174f…`, `COMBINED`, bridge OFF, bug reporting LIVE; previous admitted `797001d5…` retained as independently healthy rollback                                         |
 | Prisma schema        | production exact `CURRENT_190/190`; migration `20260908090000_initial_owner_invite_link_mode` applied                                                                                                |
 | Release authority    | runtime и production-control exact `def5174f…`; Fast `34226209000` и Full `34226209023` успешны                                                                                                      |
 | Runtime successor    | Оба worker timer enabled/active; activity `PARTIAL` автоматически продолжает cursor, ledger fallback работает в `LIVE`; worker pool `2`, activity limit `1`, timeout `15m`; API schedulers выключены |
@@ -13,12 +13,12 @@
 | Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                                                                                          |
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                                                                                        |
 | Offline/USB key      | исключён из beta critical path                                                                                                                                                                       |
-| Owner onboarding     | production CURRENT190: явный EMAIL или одноразовый LINK; пользователь сам задаёт пароль, LINK не сохраняется и не ставит письмо в outbox                                                              |
+| Owner onboarding     | production CURRENT190: явный EMAIL или одноразовый LINK; пользователь сам задаёт пароль, LINK не сохраняется и не ставит письмо в outbox                                                             |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect                                 |
-| Langame freshness    | daily и bonus-ledger timers enabled/active; authority привязана к exact `def5174f…`, daily worker обходит `3/3` active domains текущего admitted INTERNAL tenant                                      |
+| Langame freshness    | daily и bonus-ledger timers enabled/active; authority привязана к exact `def5174f…`, daily worker обходит `3/3` active domains текущего admitted INTERNAL tenant                                     |
 | Assortment dashboard | входит в active `def5174f…`: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз работают; блок источников по умолчанию свёрнут, обновление всегда доступно                      |
-| Guest profile owner  | exact-link и verified-phone repairs deployed в `def5174f…`; `*6330`, `*3669` и остальные выявленные split owners исправлены, active structural остаток `0`, reward replay запрещён                     |
-| External Langame     | source target `CURRENT_191/191`: preview → atomic settings → manual backfill; rollout требует protected check receipt, 2 inactive-slot final cutover и `final-check`; production GO не выдан        |
+| Guest profile owner  | exact-link и verified-phone repairs deployed в `def5174f…`; `*6330`, `*3669` и остальные выявленные split owners исправлены, active structural остаток `0`, reward replay запрещён                   |
+| External Langame     | source target `CURRENT_191/191`: preview → atomic settings → manual backfill; rollout требует protected check receipt, 2 inactive-slot final cutover и `final-check`; production GO не выдан         |
 
 Production hotfix PR #170 развёрнут как exact SHA
 `def5174f16f49212dd21d243cda89dffeff7837f` operation
@@ -31,6 +31,23 @@ Public и loopback readiness принимают `CURRENT_190/190`, unfinished mi
 slot-env edits: live `check` публикует `root:root 0400` receipt, каждый
 `current191-final` plan пинит его SHA-256 и проходит отдельно по inactive slot,
 после чего terminal `OFF/LIVE` на обоих slots подтверждает `final-check`.
+
+Для уже начатого первого inactive slot нового replacement rollout
+`CURRENT191 current191-bridge` существует только узкий fail-closed recovery
+`supersede-after-smoke-bind-rollback`. Он возможен, если canonical `SMOKE`
+intent и `SMOKE` unmask intent существуют, но нет `SMOKE` evidence/receipt, а
+`HYDRATE` и `BIND` chain уже accepted. Штатный
+binder обязан завершить exact digest-pinned `BIND → ROLLBACK`: rollback
+ссылается на accepted BIND receipt, возвращает target link к `PRIOR_RELEASE` и
+восстанавливает protected env byte-в-byte из до-BIND backup. Target обязан
+оставаться inactive; API/Web instances — unmasked, `inactive/dead`, `PID=0` и
+process-free. Terminalization затем допускает только отдельный admitted
+replacement с другим SHA/control-attestation digest в той же effective lane;
+он начинает собственные prepare/approval/GO. Ручная правка env/link или
+operation intents/evidence/receipts/terminal record запрещена.
+
+Этот режим не доказывает deployment: source/CI не являются production effect.
+Production пока exact `CURRENT_190/190`, а traffic остаётся на active blue.
 
 Впервые выпущенный release `1cf42bb311aafa7f41ad7f42784463fe34c152c7` и
 текущий active `def5174f16f49212dd21d243cda89dffeff7837f` превращают

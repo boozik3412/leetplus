@@ -2,14 +2,21 @@
 
 Статус: **канонический current-state contract**
 
-Актуально на: **09.09.2026**
-Текущий runtime state: public active blue —
-`fa21bbe99be78313a883893b2dd6dc1d7c892777`, inactive green —
-`f590875064bb84c7baf0d5665ef2d6856827df6a`; оба recovery runtime contracts
+Актуально на: **10.09.2026**
+Текущий runtime state: public active green —
+`a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, rollback blue —
+`fa21bbe99be78313a883893b2dd6dc1d7c892777`; оба recovery runtime contracts
 exact `CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`, тогда как physical DB ещё
-`CURRENT_190/190`. Operation `8f70269b-e4f2-450c-b117-31e1375c68ce` имеет
-accepted `HYDRATE/BIND/SMOKE` и pending `CUTOVER`; public blue продолжает
-serving, schema effect отсутствует.
+`CURRENT_190/190`. Историческая operation
+`8f70269b-e4f2-450c-b117-31e1375c68ce` безопасно terminalized после canonical
+rollback/restore. Replacement operation
+`53ac0c1e-2d61-42b9-a07e-d3cbab820531` имеет accepted
+`HYDRATE/BIND/SMOKE/CUTOVER` и pending `POSTCHECK`; public readiness и
+authenticated tenant reads отдельно подтверждены. Обычный `resume` блокирует
+historical terminal-receipt verifier, а новая control generation не может
+унаследовать старую plan attestation. Source добавляет узкое append-only
+successor-control завершение только read-only POSTCHECK; оно ещё не admitted и
+не установлено. Schema effect отсутствует.
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -18,23 +25,23 @@ fail-closed правилу одного контура снова сломать
 
 ## Текущее состояние
 
-| Область                     | Состояние                                                                                                                                                                                                                                                                                                                                                                              |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation      | active blue `fa21bbe99be78313a883893b2dd6dc1d7c892777`, inactive green `f590875064bb84c7baf0d5665ef2d6856827df6a`; оба runtime contracts `CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`, physical DB `CURRENT_190/190`                                                                                                                                                                                                           |
-| Admission merge SHA         | exact main `f590875064bb84c7baf0d5665ef2d6856827df6a` admitted; текущая operation `8f70269b-e4f2-450c-b117-31e1375c68ce` paused после accepted `HYDRATE/BIND/SMOKE` перед CUTOVER                                                                                                                                                                                                                                                                                    |
-| Production API topology     | public nginx active blue `fa21bbe99be78313a883893b2dd6dc1d7c892777`; inactive green `f590875064bb84c7baf0d5665ef2d6856827df6a`; оба bridge `COMBINED`, `ALLOW_CURRENT_190/OFF`; database остаётся `CURRENT_190/190`                                                                                                                                                                                                                                     |
-| Guest bug-report repair     | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                                                                                                                                                                                        |
-| Corporate invite repair     | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                                                                                                                                                                                             |
-| Guest check-in consistency  | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                                                                                                                                                                                                  |
-| Split-runtime deployment    | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                                                                                                                                                                                               |
-| Corporate landing           | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                                                                                                                                     |
-| Release acceleration        | 8/8 + retention: controlled five-phase rollout operation `6be461db-c600-4fe7-9e87-6267d708554e` завершён receipt `c9cbf2c9…`; V3 и trusted lane metrics merged; public/corporate/worker контуры нельзя объединять или понижать ради скорости                                                                                                                                           |
-| Langame recovery            | оба systemd timer `enabled/active`; public serving authority — active blue `fa21…`; external unattended остаётся deny до отдельного admission                                                                                                                                                         |
-| External Langame onboarding | canonical source target `CURRENT_191/191`: preview → atomic settings → manual exact-Store backfill; signed schema controller uses only the `CURRENT_190 → 191` bridge, while a pre-effect exact bridge re-pin may replace release SHA without DDL; transactional apply/check plus two final cutovers pin the SHA, terminal `OFF/LIVE` requires `final-check`; no production GO implied. Текущий accepted-SMOKE/pending-CUTOVER bridge остаётся paused; nginx продолжает healthy blue, schema effect отсутствует |
-| Telegram guest auth         | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                                                                                                                                      |
-| Staff rewards               | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                                                                                                                          |
-| Guest identity owner        | exact-link и verified-phone repairs deployed в `def5174f…`; RU-варианты подтверждённого телефона разрешаются только внутри выбранного Langame domain, неоднозначность fail-closed; все 9 выявленных split-owner дублей погашены без reward replay, контрольный остаток `0`                                                                                                             |
-| Внешний open beta           | `NO-GO` до Telegram end-to-end canary, admitted heartbeat/readiness rollout, закрытия SSH credential/public-port incident и оставшихся Gate 1MT/2                                                                                                                                                                                                                                      |
+| Область                     | Состояние                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime implementation      | active green `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, rollback blue `fa21bbe99be78313a883893b2dd6dc1d7c892777`; оба runtime contracts `CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`, physical DB `CURRENT_190/190`                                                                                                                                                                                                                                                                                                         |
+| Admission merge SHA         | exact main `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf` admitted и serving; replacement operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` paused после accepted `HYDRATE/BIND/SMOKE/CUTOVER` перед `POSTCHECK`; historical-verifier и successor-control POSTCHECK source-fix ещё не admitted/deployed                                                                                                                                                                                                                         |
+| Production API topology     | public nginx generation 51 active green `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; rollback blue `fa21bbe99be78313a883893b2dd6dc1d7c892777`; оба bridge `COMBINED`, `ALLOW_CURRENT_190/OFF`; database остаётся `CURRENT_190/190`                                                                                                                                                                                                                                                                                          |
+| Guest bug-report repair     | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                                                                                                                                                                                                                                                                                                                            |
+| Corporate invite repair     | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                                                                                                                                                                                                                                                                                                                                 |
+| Guest check-in consistency  | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                                                                                                                                                                                                                                                                                                                                      |
+| Split-runtime deployment    | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Corporate landing           | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Release acceleration        | 8/8 + retention: controlled five-phase rollout operation `6be461db-c600-4fe7-9e87-6267d708554e` завершён receipt `c9cbf2c9…`; V3 и trusted lane metrics merged; public/corporate/worker контуры нельзя объединять или понижать ради скорости                                                                                                                                                                                                                                                                               |
+| Langame recovery            | оба systemd timer `enabled/active`; public serving authority — active green `a05d…`; external unattended остаётся deny до отдельного admission                                                                                                                                                                                                                                                                                                                                                                             |
+| External Langame onboarding | canonical source target `CURRENT_191/191`: preview → atomic settings → manual exact-Store backfill; signed schema controller uses only the `CURRENT_190 → 191` bridge, while a pre-effect exact bridge re-pin may replace release SHA without DDL; transactional apply/check plus two final cutovers pin the SHA, terminal `OFF/LIVE` requires `final-check`; no production GO implied. Текущий bridge имеет accepted `HYDRATE/BIND/SMOKE/CUTOVER`, healthy green serving и pending `POSTCHECK`; schema effect отсутствует |
+| Telegram guest auth         | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                                                                                                                                                                                                                                                                          |
+| Staff rewards               | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                                                                                                                                                                                                                                                              |
+| Guest identity owner        | exact-link и verified-phone repairs deployed в `def5174f…`; RU-варианты подтверждённого телефона разрешаются только внутри выбранного Langame domain, неоднозначность fail-closed; все 9 выявленных split-owner дублей погашены без reward replay, контрольный остаток `0`                                                                                                                                                                                                                                                 |
+| Внешний open beta           | `NO-GO` до Telegram end-to-end canary, admitted heartbeat/readiness rollout, закрытия SSH credential/public-port incident и оставшихся Gate 1MT/2                                                                                                                                                                                                                                                                                                                                                                          |
 
 ### Canonical simple safe external Langame onboarding
 
@@ -129,6 +136,14 @@ exclusive-create immutable `superseded.json` (`root:root 0400`). Затем
 replacement проходит fresh plan, approval и отдельный GO; authority paused
 operation не переносится.
 
+Live link/env/unit/latest-cutover predicates повторно читаются непосредственно
+перед этой первой exclusive-публикацией. После terminalization исторический verifier
+проверяет только pinned immutable BIND→ROLLBACK paths/digests, phase chain,
+backup и restore records: штатный successor BIND, новое `slot.latest` или
+последующее допустимое runtime/cutover generation не возвращают terminal
+operation в incomplete state. Подмена любого pinned receipt/path/digest
+остаётся fail-closed.
+
 Canonical restore и terminalizer — единственные recovery modes, которые вместе
 с orchestrator lock удерживают hardened
 `/var/lib/leetplus/deploy-receipts/cutover.lock` штатного blue-green cutover.
@@ -138,8 +153,20 @@ fail-closed блокирует recovery. Обычные `apply`/`resume` не п
 заранее: CUTOVER phase вызывает canonical cutover, избегая self-deadlock.
 
 Это recovery source contract, а не production evidence: source или CI не
-означают deployed state. До отдельного receipt-backed admission и rollout
-production остаётся `CURRENT_190/190`, traffic направлен на active blue.
+означают deployed state. Фактическая production DB остаётся
+`CURRENT_190/190`, traffic направлен на active green `a05d…`, а исправление
+исторического verifier не считается deployed до receipt-backed admission и
+установки новой production-control generation.
+
+Для уже принятого CUTOVER исправленная generation не делает generic control
+handoff. Только exact CURRENT191 bridge с четырьмя accepted receipts и одним
+pending `05-postcheck.intent.json` может вызвать
+`complete-pending-postcheck-under-successor-control`. Режим под тремя locks
+проверяет active cutover, different admitted control SHA/attestation и ту же
+trusted lane, выполняет только public readiness/authenticated reads и связывает
+succession receipt с обычными POSTCHECK evidence/receipt/final через SHA-256.
+Он не имеет authority на runtime, DB, nginx, slot/env/link/unit effects;
+исходные plan, approval, phase records и POSTCHECK intent не изменяются.
 
 Controller применяет schema транзакционно, а его exact `check` обязателен до
 bridge-off и атомарно публикует receipt `root:root 0400`. Каждый
@@ -154,8 +181,8 @@ orchestrator выполняет `current191-final` также по
 одному inactive slot и с cutover: только `target191 ALLOW_CURRENT_190/OFF →
 target191 OFF/LIVE`. После двух exact final receipts CURRENT191 CLI выполняет
 `final-check`; только затем допустим final public postcheck. Это source
-contract, не заявление о deployed production или GO: production остаётся
-`CURRENT_190/190`.
+contract, не заявление о deployed production или GO: production DB остаётся
+`CURRENT_190/190`, а текущая bridge-operation остановлена перед `POSTCHECK`.
 
 ### Public guest canonical profile owner repair 08.09.2026
 

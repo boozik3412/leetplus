@@ -44,6 +44,8 @@ function replaceLink(linkPath, target) {
 }
 
 function writeControlAttestation() {
+  state.controlVerificationCalls = (state.controlVerificationCalls ?? 0) + 1;
+  save();
   const variant = state.controlVariant ?? "A";
   process.stdout.write(
     [
@@ -105,7 +107,7 @@ function writeBindReceipt(slot) {
   const target = path.join(releaseRoot, releaseSha);
   mkdirSync(target, { recursive: true });
   replaceLink(path.join(slotRoot, slot), target);
-  const operationId = "20260902T000000.000000000Z-1";
+  const operationId = state.bindOperationId ?? "20260902T000000.000000000Z-1";
   const slotTimestamp = (date) =>
     date
       .toISOString()

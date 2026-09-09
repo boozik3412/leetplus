@@ -51,7 +51,7 @@ umask 0077
 
 readonly INSTALLED_BOOTSTRAP='/usr/local/sbin/leetplus-resumable-release-orchestrator'
 readonly INSTALLED_ENGINE='/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs'
-readonly EXPECTED_ENGINE_SHA256='8a34e192a31053036566b86414461bdc5c184bc055e904fee1f1b97206a5e07f'
+readonly EXPECTED_ENGINE_SHA256='cc3b98426e465e85b1bff96353418b63561e975d427fefc6cf1f10c0905926ea'
 readonly PRODUCTION_CONTROL_RUN_ROOT='/run/leetplus-production-control'
 readonly PRODUCTION_CONTROL_INSTALL_LOCK="${PRODUCTION_CONTROL_RUN_ROOT}/install.lock"
 readonly STATE_PARENT='/var/lib/leetplus/deploy-receipts'
@@ -61,7 +61,7 @@ readonly CUTOVER_LOCK_PATH="${STATE_PARENT}/cutover.lock"
 
 cutover_recovery_mode=false
 case "${1:-}" in
-  restore-slot-environment-after-cutover-intent-bind-rollback|supersede-after-cutover-intent-bind-rollback)
+  complete-pending-postcheck-under-successor-control|restore-slot-environment-after-cutover-intent-bind-rollback|supersede-after-cutover-intent-bind-rollback)
     cutover_recovery_mode=true
     ;;
 esac

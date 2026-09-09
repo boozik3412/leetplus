@@ -35,6 +35,8 @@ export const SMOKE_ROLLED_BACK_SUPERSEDED_DECISION =
   "ROLLOUT_SUPERSEDED_AFTER_SMOKE_BIND_ROLLBACK";
 export const CUTOVER_INTENT_ROLLED_BACK_SUPERSEDED_DECISION =
   "ROLLOUT_SUPERSEDED_AFTER_CUTOVER_INTENT_BIND_ROLLBACK";
+export const POSTCHECK_CONTROL_SUCCESSION_DECISION =
+  "POSTCHECK_CONTROL_SUCCESSION_AUTHORIZED";
 export const PHASES = Object.freeze([
   "HYDRATE",
   "BIND",
@@ -200,6 +202,8 @@ const CURRENT190_MIGRATION_COUNT = 190;
 const CURRENT191_CHECK_RECEIPT_CONTRACT =
   "EXTERNAL_LANGAME_CURRENT191_PRE_FINAL_CHECK_RECEIPT_V1";
 const CURRENT191_CHECK_RECEIPT_DECISION = "CURRENT191_UPGRADE_CHECK_ACCEPTED";
+const POSTCHECK_CONTROL_SUCCESSION_FILE =
+  "05-postcheck-control-succession.receipt.json";
 
 export class ReleaseOrchestratorError extends Error {
   constructor(reasonCode) {
@@ -318,6 +322,10 @@ function usage() {
     "  leetplus-resumable-release-orchestrator apply|resume|status \\",
     "    --operation-id <uuid-v4> --plan-sha256 <sha256>",
     "",
+    "  leetplus-resumable-release-orchestrator complete-pending-postcheck-under-successor-control \\",
+    "    --operation-id <uuid-v4> --plan-sha256 <sha256> \\",
+    "    --successor-release-sha <sha>",
+    "",
     "  leetplus-resumable-release-orchestrator supersede-pre-runtime \\",
     "    --operation-id <uuid-v4> --plan-sha256 <sha256> \\",
     "    --replacement-release-sha <sha>",
@@ -357,6 +365,10 @@ function usage() {
     "prepare is read-only apart from a protected nonauthorizing plan. apply is",
     "the explicit effect boundary. resume may continue only that exact approved",
     "plan and validates every terminal phase receipt before proceeding.",
+    "complete-pending-postcheck-under-successor-control is the only narrow",
+    "control-succession path for an exact CURRENT191 bridge with four accepted",
+    "phases and a sole pending POSTCHECK intent. It performs only that read-only",
+    "POSTCHECK under a different admitted control in the same trusted lane.",
     "supersede-pre-runtime terminalizes only an approved operation that has",
     "exactly one pending HYDRATE intent and no accepted phase or runtime effect.",
     "supersede-after-bind-rollback terminalizes only the exact CURRENT191",
@@ -410,6 +422,7 @@ function parseArguments(argv) {
       "apply",
       "resume",
       "status",
+      "complete-pending-postcheck-under-successor-control",
       "supersede-pre-runtime",
       "supersede-after-bind-rollback",
       "supersede-after-smoke-bind-rollback",
@@ -504,29 +517,32 @@ function parseArguments(argv) {
         ]
       : mode === "supersede-pre-runtime"
         ? [...common, "--plan-sha256", "--replacement-release-sha"]
-        : mode === "restore-slot-environment-after-cutover-intent-bind-rollback"
-          ? [
-              ...common,
-              "--plan-sha256",
-              "--slot-bind-receipt-sha256",
-              "--slot-rollback-receipt-sha256",
-            ]
-          : [
-                "supersede-after-bind-rollback",
-                "supersede-after-smoke-bind-rollback",
-                "supersede-after-cutover-intent-bind-rollback",
-              ].includes(mode)
+        : mode === "complete-pending-postcheck-under-successor-control"
+          ? [...common, "--plan-sha256", "--successor-release-sha"]
+          : mode ===
+              "restore-slot-environment-after-cutover-intent-bind-rollback"
             ? [
                 ...common,
                 "--plan-sha256",
-                "--replacement-release-sha",
                 "--slot-bind-receipt-sha256",
                 "--slot-rollback-receipt-sha256",
-                ...(mode === "supersede-after-cutover-intent-bind-rollback"
-                  ? ["--slot-environment-restore-receipt-sha256"]
-                  : []),
               ]
-            : [...common, "--plan-sha256"];
+            : [
+                  "supersede-after-bind-rollback",
+                  "supersede-after-smoke-bind-rollback",
+                  "supersede-after-cutover-intent-bind-rollback",
+                ].includes(mode)
+              ? [
+                  ...common,
+                  "--plan-sha256",
+                  "--replacement-release-sha",
+                  "--slot-bind-receipt-sha256",
+                  "--slot-rollback-receipt-sha256",
+                  ...(mode === "supersede-after-cutover-intent-bind-rollback"
+                    ? ["--slot-environment-restore-receipt-sha256"]
+                    : []),
+                ]
+              : [...common, "--plan-sha256"];
   if (mode === "prepare" && !values.has("--watchdog-seconds")) {
     values.set("--watchdog-seconds", "30");
   }
@@ -570,6 +586,14 @@ function parseArguments(argv) {
             "ORCHESTRATOR_REPLACEMENT_RELEASE_SHA_INVALID",
           )
         : null,
+      successorReleaseSha:
+        mode === "complete-pending-postcheck-under-successor-control"
+          ? exactString(
+              values.get("--successor-release-sha") ?? "",
+              SHA40,
+              "ORCHESTRATOR_POSTCHECK_CONTROL_SUCCESSOR_RELEASE_SHA_INVALID",
+            )
+          : null,
       slotBindReceiptSha256: [
         "supersede-after-bind-rollback",
         "supersede-after-smoke-bind-rollback",
@@ -758,6 +782,7 @@ function buildPaths(args) {
 
 function isCutoverIntentRecoveryMode(mode) {
   return [
+    "complete-pending-postcheck-under-successor-control",
     "restore-slot-environment-after-cutover-intent-bind-rollback",
     "supersede-after-cutover-intent-bind-rollback",
   ].includes(mode);
@@ -2400,6 +2425,7 @@ function validatePhaseRecord(
   plan,
   planSha256,
   previousReceiptSha256,
+  expectedControlAttestationSha256 = plan.controlAttestationSha256,
 ) {
   const common = [
     "contractVersion",
@@ -2441,7 +2467,7 @@ function validatePhaseRecord(
     recordType === "PHASE_RECEIPT" &&
     (!SHA256.test(record.intentSha256 ?? "") ||
       !SHA256.test(record.evidenceSha256 ?? "") ||
-      record.controlAttestationSha256 !== plan.controlAttestationSha256 ||
+      record.controlAttestationSha256 !== expectedControlAttestationSha256 ||
       record.decision !== "PHASE_ACCEPTED")
   ) {
     fail("ORCHESTRATOR_PHASE_RECORD_INVALID");
@@ -2452,7 +2478,12 @@ function validatePhaseRecord(
   return record;
 }
 
-function validateEvidenceDetails(details, phase, plan) {
+function validateEvidenceDetails(
+  details,
+  phase,
+  plan,
+  expectedPostcheckControlSuccessionReceiptSha256 = null,
+) {
   const schemas = {
     HYDRATE: [
       "commandOutputSha256",
@@ -2495,6 +2526,9 @@ function validateEvidenceDetails(details, phase, plan) {
     ],
     POSTCHECK: [
       "authenticatedSmokeSha256",
+      ...(expectedPostcheckControlSuccessionReceiptSha256 === null
+        ? []
+        : ["controlSuccessionReceiptSha256"]),
       "cutoverReceiptSha256",
       "generation",
       "readinessSha256",
@@ -2545,9 +2579,25 @@ function validateEvidenceDetails(details, phase, plan) {
   ) {
     fail("ORCHESTRATOR_PHASE_EVIDENCE_INVALID");
   }
+  if (
+    phase === "POSTCHECK" &&
+    expectedPostcheckControlSuccessionReceiptSha256 !== null &&
+    details.controlSuccessionReceiptSha256 !==
+      expectedPostcheckControlSuccessionReceiptSha256
+  ) {
+    fail("ORCHESTRATOR_PHASE_EVIDENCE_INVALID");
+  }
 }
 
-function validateEvidence(record, phase, index, plan, planSha256) {
+function validateEvidence(
+  record,
+  phase,
+  index,
+  plan,
+  planSha256,
+  expectedControlAttestationSha256 = plan.controlAttestationSha256,
+  expectedPostcheckControlSuccessionReceiptSha256 = null,
+) {
   exactKeys(
     record,
     [
@@ -2572,7 +2622,7 @@ function validateEvidence(record, phase, index, plan, planSha256) {
     record.planSha256 !== planSha256 ||
     record.phase !== phase ||
     record.phaseIndex !== index + 1 ||
-    record.controlAttestationSha256 !== plan.controlAttestationSha256 ||
+    record.controlAttestationSha256 !== expectedControlAttestationSha256 ||
     record.details === null ||
     typeof record.details !== "object" ||
     Array.isArray(record.details)
@@ -2580,7 +2630,12 @@ function validateEvidence(record, phase, index, plan, planSha256) {
     fail("ORCHESTRATOR_PHASE_EVIDENCE_INVALID");
   }
   exactIso(record.observedAt, "ORCHESTRATOR_PHASE_EVIDENCE_INVALID");
-  validateEvidenceDetails(record.details, phase, plan);
+  validateEvidenceDetails(
+    record.details,
+    phase,
+    plan,
+    expectedPostcheckControlSuccessionReceiptSha256,
+  );
   if (
     record.details.releaseSha !== plan.releaseSha ||
     record.details.targetSlot !== plan.targetSlot
@@ -2908,6 +2963,129 @@ function phasePaths(directory, index, phase) {
   };
 }
 
+function postcheckControlSuccessionPath(directory) {
+  return path.join(directory, POSTCHECK_CONTROL_SUCCESSION_FILE);
+}
+
+function assertPostcheckControlSuccessionPlanScope(plan, reasonCode) {
+  if (
+    plan.slotRuntimeProfile !== SLOT_RUNTIME_PROFILE_CURRENT191_BRIDGE ||
+    plan.expectedMigration !== CURRENT191_MIGRATION ||
+    plan.expectedMigrationCount !== CURRENT191_MIGRATION_COUNT ||
+    plan.previousMigration !== CURRENT191_MIGRATION ||
+    plan.previousMigrationCount !== CURRENT191_MIGRATION_COUNT
+  ) {
+    fail(reasonCode);
+  }
+}
+
+function readPostcheckControlSuccessionReceipt(
+  context,
+  args,
+  previousPhaseReceiptSha256,
+  originalPostcheckIntentSha256,
+  expectedSuccessorReleaseSha = null,
+) {
+  const receiptPath = postcheckControlSuccessionPath(context.directory);
+  if (!existsSync(receiptPath)) return null;
+  assertPostcheckControlSuccessionPlanScope(
+    context.plan,
+    "ORCHESTRATOR_POSTCHECK_CONTROL_SUCCESSION_RECEIPT_INVALID",
+  );
+  const receipt = readCanonicalJson(receiptPath, args, [0o400]);
+  exactKeys(
+    receipt.value,
+    [
+      "approvalSha256",
+      "authorizedAt",
+      "contractVersion",
+      "cutoverReceiptSha256",
+      "decision",
+      "operationId",
+      "originalPostcheckIntentSha256",
+      "planSha256",
+      "previousPhaseReceiptSha256",
+      "recordType",
+      "releaseSha",
+      "schemaVersion",
+      "successorControlAttestationSha256",
+      "successorEffectiveLane",
+      "successorImpactReceiptSha256",
+      "successorReleaseSha",
+      "targetSlot",
+    ],
+    "ORCHESTRATOR_POSTCHECK_CONTROL_SUCCESSION_RECEIPT_INVALID",
+  );
+  const approval = readCanonicalJson(
+    path.join(context.directory, "approval.json"),
+    args,
+    [0o400],
+  );
+  validateApproval(approval.value, context);
+  const cutoverEvidence = readCanonicalJson(
+    phasePaths(context.directory, 3, "CUTOVER").evidence,
+    args,
+    [0o400],
+  );
+  validateEvidence(
+    cutoverEvidence.value,
+    "CUTOVER",
+    3,
+    context.plan,
+    context.planSha256,
+  );
+  const originalPostcheckIntent = readCanonicalJson(
+    phasePaths(context.directory, 4, "POSTCHECK").intent,
+    args,
+    [0o600],
+  );
+  validatePhaseRecord(
+    originalPostcheckIntent.value,
+    "PHASE_INTENT",
+    "POSTCHECK",
+    4,
+    context.plan,
+    context.planSha256,
+    previousPhaseReceiptSha256,
+  );
+  if (
+    receipt.value.schemaVersion !== 1 ||
+    receipt.value.contractVersion !== CONTRACT_VERSION ||
+    receipt.value.recordType !== "POSTCHECK_CONTROL_SUCCESSION_RECEIPT" ||
+    receipt.value.operationId !== context.plan.operationId ||
+    receipt.value.planSha256 !== context.planSha256 ||
+    receipt.value.approvalSha256 !== approval.sha256 ||
+    receipt.value.releaseSha !== context.plan.releaseSha ||
+    receipt.value.targetSlot !== context.plan.targetSlot ||
+    receipt.value.previousPhaseReceiptSha256 !== previousPhaseReceiptSha256 ||
+    receipt.value.originalPostcheckIntentSha256 !==
+      originalPostcheckIntentSha256 ||
+    originalPostcheckIntent.sha256 !== originalPostcheckIntentSha256 ||
+    receipt.value.cutoverReceiptSha256 !==
+      cutoverEvidence.value.details.cutoverReceiptSha256 ||
+    !SHA40.test(receipt.value.successorReleaseSha ?? "") ||
+    receipt.value.successorReleaseSha === context.plan.releaseSha ||
+    (expectedSuccessorReleaseSha !== null &&
+      receipt.value.successorReleaseSha !== expectedSuccessorReleaseSha) ||
+    !SHA256.test(receipt.value.successorControlAttestationSha256 ?? "") ||
+    receipt.value.successorControlAttestationSha256 ===
+      context.plan.controlAttestationSha256 ||
+    receipt.value.successorEffectiveLane !== context.plan.effectiveLane ||
+    !SHA256.test(receipt.value.successorImpactReceiptSha256 ?? "") ||
+    receipt.value.decision !== POSTCHECK_CONTROL_SUCCESSION_DECISION
+  ) {
+    fail("ORCHESTRATOR_POSTCHECK_CONTROL_SUCCESSION_RECEIPT_INVALID");
+  }
+  exactIso(
+    receipt.value.authorizedAt,
+    "ORCHESTRATOR_POSTCHECK_CONTROL_SUCCESSION_RECEIPT_INVALID",
+  );
+  if (receipt.value.authorizedAt < originalPostcheckIntent.value.createdAt) {
+    fail("ORCHESTRATOR_POSTCHECK_CONTROL_SUCCESSION_RECEIPT_INVALID");
+  }
+  return { path: receiptPath, sha256: receipt.sha256, value: receipt.value };
+}
+
 function readCurrentPhaseChain(context, args) {
   let previousReceiptSha256 = "";
   let completed = 0;
@@ -2925,6 +3103,18 @@ function readCurrentPhaseChain(context, args) {
       context.planSha256,
       previousReceiptSha256,
     );
+    const postcheckControlSuccession =
+      phase === "POSTCHECK"
+        ? readPostcheckControlSuccessionReceipt(
+            context,
+            args,
+            previousReceiptSha256,
+            intent.sha256,
+          )
+        : null;
+    const expectedControlAttestationSha256 =
+      postcheckControlSuccession?.value.successorControlAttestationSha256 ??
+      context.plan.controlAttestationSha256;
     const evidence = readCanonicalJson(paths.evidence, args, [0o400]);
     validateEvidence(
       evidence.value,
@@ -2932,6 +3122,8 @@ function readCurrentPhaseChain(context, args) {
       index,
       context.plan,
       context.planSha256,
+      expectedControlAttestationSha256,
+      postcheckControlSuccession?.sha256 ?? null,
     );
     const receipt = readCanonicalJson(paths.receipt, args, [0o400]);
     validatePhaseRecord(
@@ -2942,6 +3134,7 @@ function readCurrentPhaseChain(context, args) {
       context.plan,
       context.planSha256,
       previousReceiptSha256,
+      expectedControlAttestationSha256,
     );
     if (
       receipt.value.intentSha256 !== intent.sha256 ||
@@ -2965,6 +3158,15 @@ function readCurrentPhaseChain(context, args) {
   }
   let pendingRecord = "NONE";
   let pendingRecordSha256 = "";
+  const postcheckControlSuccessionReceiptPath = postcheckControlSuccessionPath(
+    context.directory,
+  );
+  if (
+    completed < PHASES.indexOf("POSTCHECK") &&
+    existsSync(postcheckControlSuccessionReceiptPath)
+  ) {
+    fail("ORCHESTRATOR_FUTURE_PHASE_RECORD_PRESENT");
+  }
   if (completed < PHASES.length) {
     const phase = PHASES[completed];
     const paths = phasePaths(context.directory, completed, phase);
@@ -2987,6 +3189,25 @@ function readCurrentPhaseChain(context, args) {
       pendingRecord = "INTENT";
       pendingRecordSha256 = intent.sha256;
     }
+    if (
+      phase === "POSTCHECK" &&
+      existsSync(postcheckControlSuccessionReceiptPath) &&
+      !hasIntent
+    ) {
+      fail("ORCHESTRATOR_PHASE_RECORD_ORDER_INVALID");
+    }
+    const postcheckControlSuccession =
+      phase === "POSTCHECK" && hasIntent
+        ? readPostcheckControlSuccessionReceipt(
+            context,
+            args,
+            previousReceiptSha256,
+            pendingRecordSha256,
+          )
+        : null;
+    const expectedControlAttestationSha256 =
+      postcheckControlSuccession?.value.successorControlAttestationSha256 ??
+      context.plan.controlAttestationSha256;
     if (hasEvidence) {
       const evidence = readCanonicalJson(paths.evidence, args, [0o400]);
       validateEvidence(
@@ -2995,6 +3216,8 @@ function readCurrentPhaseChain(context, args) {
         completed,
         context.plan,
         context.planSha256,
+        expectedControlAttestationSha256,
+        postcheckControlSuccession?.sha256 ?? null,
       );
       pendingRecord = "EVIDENCE";
       pendingRecordSha256 = evidence.sha256;
@@ -3853,6 +4076,27 @@ function maybeSimulateLostResponseAfterEvidence(phase, context, args) {
   fail("ORCHESTRATOR_SIMULATED_LOST_RESPONSE_AFTER_EVIDENCE_" + phase);
 }
 
+function maybeSimulateSuccessorPostcheckLostResponse(boundary, context, args) {
+  if (
+    !args.testMode ||
+    process.env.TEST_ORCHESTRATOR_SUCCESSOR_POSTCHECK_LOST_RESPONSE_AFTER !==
+      boundary
+  ) {
+    return;
+  }
+  const marker = path.join(
+    context.directory,
+    ".fixture-successor-postcheck-lost-response-after-" +
+      boundary.toLowerCase(),
+  );
+  if (existsSync(marker)) return;
+  writeFileSync(marker, "fired\n", { flag: "wx", mode: 0o600 });
+  fail(
+    "ORCHESTRATOR_SIMULATED_SUCCESSOR_POSTCHECK_LOST_RESPONSE_AFTER_" +
+      boundary,
+  );
+}
+
 function validateFinalReceipt(record, context, lastReceiptSha256) {
   exactKeys(
     record,
@@ -4362,6 +4606,8 @@ function validateCutoverIntentRolledBackSupersessionReceipt(
     fail(reasonCode);
   }
   exactIso(record.supersededAt, reasonCode);
+  // This validates an immutable historical receipt. Live slot/latest, runtime,
+  // unit, and cutover predicates are enforced before its first publication.
   const paths = buildPaths(args);
   const environmentRestore = readCutoverIntentEnvironmentRestoreReceipt(
     context,
@@ -4439,39 +4685,9 @@ function validateCutoverIntentRolledBackSupersessionReceipt(
     maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
     reasonCode,
   });
-  const expectedRuntimeGid = runtimeGroupGid(paths, args);
-  const current = readExactBytes(
-    path.join(paths.slotEnvironmentRoot, context.plan.targetSlot + ".env"),
-    args,
-    {
-      expectedGid: expectedRuntimeGid,
-      expectedMode: 0o440,
-      expectedUid: args.testMode ? process.getuid?.() : 0,
-      maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
-      reasonCode,
-    },
-  );
-  const activeSlot = currentActiveSlot(paths);
-  const active = readExactBytes(
-    path.join(paths.slotEnvironmentRoot, activeSlot + ".env"),
-    args,
-    {
-      expectedGid: expectedRuntimeGid,
-      expectedMode: 0o440,
-      expectedUid: args.testMode ? process.getuid?.() : 0,
-      maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
-      reasonCode,
-    },
-  );
   const previousValues = parseSlotEnvironment(
     previous.raw,
     context.plan.targetSlot,
-    reasonCode,
-    { allowLegacyApiBindHost: true },
-  );
-  const activeValues = parseSlotEnvironment(
-    active.raw,
-    activeSlot,
     reasonCode,
     { allowLegacyApiBindHost: true },
   );
@@ -4481,23 +4697,6 @@ function validateCutoverIntentRolledBackSupersessionReceipt(
     context.plan.releaseSha,
     paths,
     args,
-  );
-  const latestRollback = latestSlotRollback(
-    context.plan.targetSlot,
-    context.plan.releaseSha,
-    paths,
-    args,
-  );
-  const currentCutover = latestCutover(paths, args);
-  const nextGeneration = context.plan.baselineCutover.generation + 1;
-  const sharedCutoverEffect = readdirSync(paths.deployReceiptRoot).some(
-    (name) =>
-      new RegExp(
-        "-g" +
-          nextGeneration +
-          "-[0-9a-f]{40}-(?:blue|green)\\.(?:intent|receipt)$",
-        "u",
-      ).test(name),
   );
   if (
     context.plan.slotRuntimeProfile !==
@@ -4527,7 +4726,6 @@ function validateCutoverIntentRolledBackSupersessionReceipt(
     bindEvidence.value.details.slotLinkReceiptSha256 !==
       rollback.bindReceiptSha256 ||
     smokeEvidence.value.details.unmaskIntentSha256 !== unmask.sha256 ||
-    !current.bytes.equals(previous.bytes) ||
     previous.sha256 !== record.slotEnvironmentPreviousSha256 ||
     environmentRestore.sha256 !== record.slotEnvironmentRestoreReceiptSha256 ||
     environmentRestore.value.slotBindReceiptSha256 !==
@@ -4536,17 +4734,12 @@ function validateCutoverIntentRolledBackSupersessionReceipt(
       record.slotRollbackReceiptSha256 ||
     environmentRestore.value.slotEnvironmentPreviousSha256 !==
       previous.sha256 ||
-    activeSlot === context.plan.targetSlot ||
     rollback.bindReceiptPath !== record.slotBindReceiptPath ||
     rollback.bindReceiptSha256 !== record.slotBindReceiptSha256 ||
     rollback.operationId !== record.slotLinkOperationId ||
     rollback.rollbackReceiptSha256 !== record.slotRollbackReceiptSha256 ||
     rollback.priorReleaseSha !== context.plan.previousReleaseSha ||
     rollback.priorReleaseSha !== record.targetPriorReleaseSha ||
-    latestRollback.bindReceiptPath !== rollback.bindReceiptPath ||
-    latestRollback.bindReceiptSha256 !== rollback.bindReceiptSha256 ||
-    latestRollback.rollbackReceiptPath !== rollback.rollbackReceiptPath ||
-    latestRollback.rollbackReceiptSha256 !== rollback.rollbackReceiptSha256 ||
     previousValues.get("RELEASE_SHA") !== context.plan.previousReleaseSha ||
     previousValues.get("EXPECTED_DATABASE_MIGRATION") !==
       CURRENT191_MIGRATION ||
@@ -4555,24 +4748,6 @@ function validateCutoverIntentRolledBackSupersessionReceipt(
     previousValues.get("GUEST_BUG_REPORTING_MODE") !== "OFF" ||
     previousValues.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") !==
       "ALLOW_CURRENT_190" ||
-    activeValues.get("RELEASE_SHA") !== context.plan.previousReleaseSha ||
-    activeValues.get("EXPECTED_DATABASE_MIGRATION") !== CURRENT191_MIGRATION ||
-    Number(activeValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !==
-      CURRENT191_MIGRATION_COUNT ||
-    activeValues.get("GUEST_BUG_REPORTING_MODE") !== "OFF" ||
-    activeValues.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") !==
-      "ALLOW_CURRENT_190" ||
-    currentSlotTarget(context.plan.targetSlot, paths) !==
-      rollback.priorTarget ||
-    currentSlotTarget(activeSlot, paths) !==
-      path.join(paths.releaseRoot, context.plan.previousReleaseSha) ||
-    currentCutover.generation !== context.plan.baselineCutover.generation ||
-    currentCutover.receiptPath !== context.plan.baselineCutover.receiptPath ||
-    currentCutover.receiptSha256 !==
-      context.plan.baselineCutover.receiptSha256 ||
-    currentCutover.consumed ||
-    currentCutover.slot !== activeSlot ||
-    sharedCutoverEffect ||
     existsSync(phasePaths(context.directory, 3, "CUTOVER").evidence) ||
     existsSync(phasePaths(context.directory, 3, "CUTOVER").receipt) ||
     pairOutOfCutoverIntentRollbackOrder(
@@ -4592,15 +4767,6 @@ function validateCutoverIntentRolledBackSupersessionReceipt(
     )
   ) {
     fail(reasonCode);
-  }
-  for (const unit of [
-    "leetplus-api@" + context.plan.targetSlot + ".service",
-    "leetplus-web@" + context.plan.targetSlot + ".service",
-  ]) {
-    if (inspectInstanceMask(unit, paths, args) !== "UNMASKED") {
-      fail(reasonCode);
-    }
-    assertStoppedInstance(unit, paths, args);
   }
   return record;
 }
@@ -4628,6 +4794,153 @@ function pairOutOfCutoverIntentRollbackOrder(timeline, reasonCode) {
       timeline.rollback.rollbackAcceptedAt ||
     asSlotTime(timeline.supersededAt) <= timeline.rollback.rollbackAcceptedAt
   );
+}
+
+function assertCutoverIntentRolledBackSupersessionLivePublicationState(
+  record,
+  context,
+  chain,
+  paths,
+  args,
+) {
+  const reasonCode =
+    "ORCHESTRATOR_CUTOVER_INTENT_ROLLBACK_SUPERSESSION_STATE_INVALID";
+  assertNoIncompleteCutoverRecord(paths, args, reasonCode);
+  assertCutoverContinuity(context.plan, paths, args, 2);
+  const previous = readExactBytes(
+    path.join(context.directory, "02-bind-slot-environment.previous.env"),
+    args,
+    {
+      expectedGid: args.testMode ? process.getgid?.() : 0,
+      expectedMode: 0o400,
+      expectedUid: args.testMode ? process.getuid?.() : 0,
+      maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
+      reasonCode,
+    },
+  );
+  const expectedRuntimeGid = runtimeGroupGid(paths, args);
+  const current = readExactBytes(
+    path.join(paths.slotEnvironmentRoot, context.plan.targetSlot + ".env"),
+    args,
+    {
+      expectedGid: expectedRuntimeGid,
+      expectedMode: 0o440,
+      expectedUid: args.testMode ? process.getuid?.() : 0,
+      maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
+      reasonCode,
+    },
+  );
+  const activeSlot = currentActiveSlot(paths);
+  const active = readExactBytes(
+    path.join(paths.slotEnvironmentRoot, activeSlot + ".env"),
+    args,
+    {
+      expectedGid: expectedRuntimeGid,
+      expectedMode: 0o440,
+      expectedUid: args.testMode ? process.getuid?.() : 0,
+      maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
+      reasonCode,
+    },
+  );
+  const activeValues = parseSlotEnvironment(
+    active.raw,
+    activeSlot,
+    reasonCode,
+    { allowLegacyApiBindHost: true },
+  );
+  const rollback = latestSlotRollback(
+    context.plan.targetSlot,
+    context.plan.releaseSha,
+    paths,
+    args,
+  );
+  const currentCutover = latestCutover(paths, args);
+  const nextGeneration = context.plan.baselineCutover.generation + 1;
+  const sharedCutoverEffect = readdirSync(paths.deployReceiptRoot).some(
+    (name) =>
+      new RegExp(
+        "-g" +
+          nextGeneration +
+          "-[0-9a-f]{40}-(?:blue|green)\\.(?:intent|receipt)$",
+        "u",
+      ).test(name),
+  );
+  if (
+    rollback.bindReceiptSha256 !== args.slotBindReceiptSha256 ||
+    rollback.rollbackReceiptSha256 !== args.slotRollbackReceiptSha256 ||
+    rollback.bindReceiptPath !== record.slotBindReceiptPath ||
+    rollback.bindReceiptSha256 !== record.slotBindReceiptSha256 ||
+    rollback.operationId !== record.slotLinkOperationId ||
+    rollback.rollbackReceiptPath !== record.slotRollbackReceiptPath ||
+    rollback.rollbackReceiptSha256 !== record.slotRollbackReceiptSha256 ||
+    rollback.priorReleaseSha !== context.plan.previousReleaseSha ||
+    rollback.priorReleaseSha !== record.targetPriorReleaseSha ||
+    !current.bytes.equals(previous.bytes) ||
+    activeSlot === context.plan.targetSlot ||
+    activeValues.get("RELEASE_SHA") !== context.plan.previousReleaseSha ||
+    activeValues.get("EXPECTED_DATABASE_MIGRATION") !== CURRENT191_MIGRATION ||
+    Number(activeValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !==
+      CURRENT191_MIGRATION_COUNT ||
+    activeValues.get("GUEST_BUG_REPORTING_MODE") !== "OFF" ||
+    activeValues.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") !==
+      "ALLOW_CURRENT_190" ||
+    currentSlotTarget(context.plan.targetSlot, paths) !==
+      rollback.priorTarget ||
+    currentSlotTarget(activeSlot, paths) !==
+      path.join(paths.releaseRoot, context.plan.previousReleaseSha) ||
+    currentCutover.generation !== context.plan.baselineCutover.generation ||
+    currentCutover.receiptPath !== context.plan.baselineCutover.receiptPath ||
+    currentCutover.receiptSha256 !==
+      context.plan.baselineCutover.receiptSha256 ||
+    currentCutover.consumed ||
+    currentCutover.slot !== activeSlot ||
+    sharedCutoverEffect ||
+    existsSync(phasePaths(context.directory, 3, "CUTOVER").evidence) ||
+    existsSync(phasePaths(context.directory, 3, "CUTOVER").receipt) ||
+    chain.completed !== 3 ||
+    chain.pendingRecord !== "INTENT"
+  ) {
+    fail(reasonCode);
+  }
+  for (const unit of [
+    "leetplus-api@" + context.plan.targetSlot + ".service",
+    "leetplus-web@" + context.plan.targetSlot + ".service",
+  ]) {
+    if (inspectInstanceMask(unit, paths, args) !== "UNMASKED") {
+      fail(reasonCode);
+    }
+    assertStoppedInstance(unit, paths, args);
+  }
+  const replacementControl = verifyInstalledControl(
+    args.replacementReleaseSha,
+    paths,
+    args,
+  );
+  if (
+    args.replacementReleaseSha === context.plan.releaseSha ||
+    replacementControl.attestationSha256 !==
+      record.replacementControlAttestationSha256 ||
+    replacementControl.effectiveLane !== record.replacementEffectiveLane ||
+    replacementControl.impactReceiptSha256 !==
+      record.replacementImpactReceiptSha256
+  ) {
+    fail("ORCHESTRATOR_SUPERSESSION_CONTROL_SUCCESSOR_INVALID");
+  }
+}
+
+function maybeSimulateCutoverIntentSupersessionLiveDrift(args) {
+  if (
+    !args.testMode ||
+    process.env.TEST_ORCHESTRATOR_FIXTURE_SUPERSESSION_LIVE_DRIFT !== "true"
+  ) {
+    return;
+  }
+  const statePath = path.join(args.fixtureRoot, "fixture-state.json");
+  const state = JSON.parse(readFileSync(statePath, "utf8"));
+  state.slotActive = true;
+  writeFileSync(statePath, JSON.stringify(state, null, 2) + "\n", {
+    mode: 0o600,
+  });
 }
 
 function validateSupersessionReceipt(
@@ -6022,7 +6335,6 @@ function supersedeAfterCutoverIntentBindRollbackOperation(
   const approval = readCanonicalJson(approvalPath, args, [0o400]);
   validateApproval(approval.value, context);
   const chain = readCurrentPhaseChain(context, args);
-  assertNoIncompleteCutoverRecord(paths, args, reasonCode);
   const environmentRestore = readCutoverIntentEnvironmentRestoreReceipt(
     context,
     paths,
@@ -6060,6 +6372,7 @@ function supersedeAfterCutoverIntentBindRollbackOperation(
       targetSlot: context.plan.targetSlot,
     };
   }
+  assertNoIncompleteCutoverRecord(paths, args, reasonCode);
   if (
     chain.completed !== 3 ||
     chain.pendingRecord !== "INTENT" ||
@@ -6331,6 +6644,14 @@ function supersedeAfterCutoverIntentBindRollbackOperation(
     args.replacementReleaseSha,
     args,
   );
+  maybeSimulateCutoverIntentSupersessionLiveDrift(args);
+  assertCutoverIntentRolledBackSupersessionLivePublicationState(
+    receipt,
+    context,
+    chain,
+    paths,
+    args,
+  );
   assertNoIncompleteCutoverRecord(paths, args, reasonCode);
   publishCanonicalJson(supersessionPath, receipt, 0o400, args);
   const published = readValidatedSupersessionReceipt(
@@ -6351,6 +6672,313 @@ function supersedeAfterCutoverIntentBindRollbackOperation(
     supersessionReceiptSha256: published.sha256,
     targetSlot: context.plan.targetSlot,
   };
+}
+
+function assertPostcheckSuccessorControl(
+  control,
+  context,
+  successorReleaseSha,
+  acceptedSuccession = null,
+) {
+  if (
+    successorReleaseSha === context.plan.releaseSha ||
+    control.attestationSha256 === context.plan.controlAttestationSha256 ||
+    control.effectiveLane !== context.plan.effectiveLane ||
+    (acceptedSuccession !== null &&
+      (acceptedSuccession.value.successorReleaseSha !== successorReleaseSha ||
+        acceptedSuccession.value.successorControlAttestationSha256 !==
+          control.attestationSha256 ||
+        acceptedSuccession.value.successorEffectiveLane !==
+          control.effectiveLane ||
+        acceptedSuccession.value.successorImpactReceiptSha256 !==
+          control.impactReceiptSha256))
+  ) {
+    fail("ORCHESTRATOR_POSTCHECK_CONTROL_SUCCESSOR_INVALID");
+  }
+}
+
+function postcheckSuccessorCompletionResult(context, final, succession) {
+  return {
+    completedPhases: PHASES.length,
+    contractVersion: CONTRACT_VERSION,
+    decision: COMPLETE_DECISION,
+    finalReceiptPath: final.path,
+    finalReceiptSha256: final.sha256,
+    operationId: context.plan.operationId,
+    postcheckControlSuccessionReceiptPath: succession.path,
+    postcheckControlSuccessionReceiptSha256: succession.sha256,
+    releaseSha: context.plan.releaseSha,
+    successorReleaseSha: succession.value.successorReleaseSha,
+    targetSlot: context.plan.targetSlot,
+  };
+}
+
+function completePendingPostcheckUnderSuccessorControl(context, paths, args) {
+  const reasonCode = "ORCHESTRATOR_POSTCHECK_CONTROL_SUCCESSION_STATE_INVALID";
+  const finalPath = path.join(context.directory, "final.json");
+  const supersessionPath = path.join(context.directory, "superseded.json");
+  if (existsSync(supersessionPath)) {
+    fail("ORCHESTRATOR_OPERATION_SUPERSEDED");
+  }
+  assertPostcheckControlSuccessionPlanScope(context.plan, reasonCode);
+  const approvalPath = path.join(context.directory, "approval.json");
+  if (!existsSync(approvalPath)) {
+    fail("ORCHESTRATOR_POSTCHECK_CONTROL_SUCCESSION_APPROVAL_REQUIRED");
+  }
+  const approval = readCanonicalJson(approvalPath, args, [0o400]);
+  validateApproval(approval.value, context);
+  let chain = readCurrentPhaseChain(context, args);
+  const postcheckRecords = phasePaths(context.directory, 4, "POSTCHECK");
+  if (!existsSync(postcheckRecords.intent)) {
+    fail(reasonCode);
+  }
+  const originalPostcheckIntent = readCanonicalJson(
+    postcheckRecords.intent,
+    args,
+    [0o600],
+  );
+  validatePhaseRecord(
+    originalPostcheckIntent.value,
+    "PHASE_INTENT",
+    "POSTCHECK",
+    4,
+    context.plan,
+    context.planSha256,
+    chain.completed >= PHASES.length
+      ? readCanonicalJson(
+          phasePaths(context.directory, 3, "CUTOVER").receipt,
+          args,
+          [0o400],
+        ).sha256
+      : chain.previousReceiptSha256,
+  );
+  const previousPhaseReceiptSha256 = readCanonicalJson(
+    phasePaths(context.directory, 3, "CUTOVER").receipt,
+    args,
+    [0o400],
+  ).sha256;
+  let succession = readPostcheckControlSuccessionReceipt(
+    context,
+    args,
+    previousPhaseReceiptSha256,
+    originalPostcheckIntent.sha256,
+    args.successorReleaseSha,
+  );
+  if (chain.completed === PHASES.length) {
+    if (succession === null) fail(reasonCode);
+    const final = createFinalReceipt(
+      context,
+      chain.previousReceiptSha256,
+      args,
+    );
+    return postcheckSuccessorCompletionResult(context, final, succession);
+  }
+  if (
+    existsSync(finalPath) ||
+    chain.completed !== PHASES.indexOf("POSTCHECK") ||
+    !["INTENT", "EVIDENCE"].includes(chain.pendingRecord)
+  ) {
+    fail(reasonCode);
+  }
+  if (chain.pendingRecord === "EVIDENCE" && succession === null) {
+    fail(reasonCode);
+  }
+  let beforeControl;
+  if (succession === null) {
+    beforeControl = verifyInstalledControl(
+      args.successorReleaseSha,
+      paths,
+      args,
+    );
+    assertPostcheckSuccessorControl(
+      beforeControl,
+      context,
+      args.successorReleaseSha,
+    );
+    assertNoIncompleteCutoverRecord(paths, args, reasonCode);
+    assertCutoverContinuity(context.plan, paths, args, 4);
+    const currentCutover = latestCutover(paths, args);
+    if (
+      !cutoverMatches(currentCutover, context.plan, paths) ||
+      currentActiveSlot(paths) !== context.plan.targetSlot
+    ) {
+      fail(reasonCode);
+    }
+    const cutoverEvidence = readCanonicalJson(
+      phasePaths(context.directory, 3, "CUTOVER").evidence,
+      args,
+      [0o400],
+    );
+    validateEvidence(
+      cutoverEvidence.value,
+      "CUTOVER",
+      3,
+      context.plan,
+      context.planSha256,
+    );
+    const successionValue = {
+      schemaVersion: 1,
+      contractVersion: CONTRACT_VERSION,
+      recordType: "POSTCHECK_CONTROL_SUCCESSION_RECEIPT",
+      operationId: context.plan.operationId,
+      planSha256: context.planSha256,
+      approvalSha256: approval.sha256,
+      releaseSha: context.plan.releaseSha,
+      targetSlot: context.plan.targetSlot,
+      previousPhaseReceiptSha256,
+      originalPostcheckIntentSha256: originalPostcheckIntent.sha256,
+      cutoverReceiptSha256: cutoverEvidence.value.details.cutoverReceiptSha256,
+      successorReleaseSha: args.successorReleaseSha,
+      successorControlAttestationSha256: beforeControl.attestationSha256,
+      successorEffectiveLane: beforeControl.effectiveLane,
+      successorImpactReceiptSha256: beforeControl.impactReceiptSha256,
+      authorizedAt: nowIso(),
+      decision: POSTCHECK_CONTROL_SUCCESSION_DECISION,
+    };
+    assertNoIncompleteCutoverRecord(paths, args, reasonCode);
+    publishCanonicalJson(
+      postcheckControlSuccessionPath(context.directory),
+      successionValue,
+      0o400,
+      args,
+    );
+    succession = readPostcheckControlSuccessionReceipt(
+      context,
+      args,
+      previousPhaseReceiptSha256,
+      originalPostcheckIntent.sha256,
+      args.successorReleaseSha,
+    );
+  } else {
+    beforeControl = verifyInstalledControl(
+      args.successorReleaseSha,
+      paths,
+      args,
+    );
+  }
+  maybeSimulateSuccessorPostcheckLostResponse("SUCCESSION", context, args);
+  assertPostcheckSuccessorControl(
+    beforeControl,
+    context,
+    args.successorReleaseSha,
+    succession,
+  );
+  assertNoIncompleteCutoverRecord(paths, args, reasonCode);
+  assertCutoverContinuity(context.plan, paths, args, 4);
+  let evidence;
+  if (existsSync(postcheckRecords.evidence)) {
+    evidence = readCanonicalJson(postcheckRecords.evidence, args, [0o400]);
+    validateEvidence(
+      evidence.value,
+      "POSTCHECK",
+      4,
+      context.plan,
+      context.planSha256,
+      succession.value.successorControlAttestationSha256,
+      succession.sha256,
+    );
+    const observed = postcheckPhase(context.plan, paths, args);
+    maybeSimulateSuccessorPostcheckLostResponse("POSTCHECK", context, args);
+    const afterControl = verifyInstalledControl(
+      args.successorReleaseSha,
+      paths,
+      args,
+    );
+    assertPostcheckSuccessorControl(
+      afterControl,
+      context,
+      args.successorReleaseSha,
+      succession,
+    );
+    assertRecoveredEvidenceMatches("POSTCHECK", evidence.value.details, {
+      ...observed,
+      controlSuccessionReceiptSha256: succession.sha256,
+    });
+  } else {
+    const details = postcheckPhase(context.plan, paths, args);
+    maybeSimulateSuccessorPostcheckLostResponse("POSTCHECK", context, args);
+    maybeSimulateLostResponse("POSTCHECK", context, args);
+    const afterControl = verifyInstalledControl(
+      args.successorReleaseSha,
+      paths,
+      args,
+    );
+    assertPostcheckSuccessorControl(
+      afterControl,
+      context,
+      args.successorReleaseSha,
+      succession,
+    );
+    assertCutoverContinuity(context.plan, paths, args, 4);
+    const evidenceValue = {
+      schemaVersion: 1,
+      contractVersion: CONTRACT_VERSION,
+      recordType: "PHASE_EVIDENCE",
+      operationId: context.plan.operationId,
+      planSha256: context.planSha256,
+      phaseIndex: 5,
+      phase: "POSTCHECK",
+      controlAttestationSha256:
+        succession.value.successorControlAttestationSha256,
+      observedAt: nowIso(),
+      details: {
+        ...details,
+        controlSuccessionReceiptSha256: succession.sha256,
+      },
+    };
+    validateEvidence(
+      evidenceValue,
+      "POSTCHECK",
+      4,
+      context.plan,
+      context.planSha256,
+      succession.value.successorControlAttestationSha256,
+      succession.sha256,
+    );
+    publishCanonicalJson(postcheckRecords.evidence, evidenceValue, 0o400, args);
+    evidence = {
+      sha256: canonicalRecordSha256(evidenceValue),
+      value: evidenceValue,
+    };
+  }
+  maybeSimulateSuccessorPostcheckLostResponse("EVIDENCE", context, args);
+  maybeSimulateLostResponseAfterEvidence("POSTCHECK", context, args);
+  assertNoIncompleteCutoverRecord(paths, args, reasonCode);
+  assertCutoverContinuity(context.plan, paths, args, 4);
+  if (!existsSync(postcheckRecords.receipt)) {
+    const receipt = {
+      schemaVersion: 1,
+      contractVersion: CONTRACT_VERSION,
+      recordType: "PHASE_RECEIPT",
+      operationId: context.plan.operationId,
+      planSha256: context.planSha256,
+      phaseIndex: 5,
+      phase: "POSTCHECK",
+      previousPhaseReceiptSha256,
+      createdAt: originalPostcheckIntent.value.createdAt,
+      intentSha256: originalPostcheckIntent.sha256,
+      evidenceSha256: evidence.sha256,
+      controlAttestationSha256:
+        succession.value.successorControlAttestationSha256,
+      acceptedAt: nowIso(),
+      decision: "PHASE_ACCEPTED",
+    };
+    validatePhaseRecord(
+      receipt,
+      "PHASE_RECEIPT",
+      "POSTCHECK",
+      4,
+      context.plan,
+      context.planSha256,
+      previousPhaseReceiptSha256,
+      succession.value.successorControlAttestationSha256,
+    );
+    publishCanonicalJson(postcheckRecords.receipt, receipt, 0o400, args);
+  }
+  chain = readCurrentPhaseChain(context, args);
+  if (chain.completed !== PHASES.length) fail(reasonCode);
+  const final = createFinalReceipt(context, chain.previousReceiptSha256, args);
+  return postcheckSuccessorCompletionResult(context, final, succession);
 }
 
 function runPipeline(context, paths, args) {
@@ -7845,6 +8473,15 @@ export async function main(argv = process.argv.slice(2)) {
     context = readPlan(args, paths);
     if (args.mode === "status") {
       process.stdout.write(JSON.stringify(status(context, args)) + "\n");
+      return 0;
+    }
+    if (args.mode === "complete-pending-postcheck-under-successor-control") {
+      assertNoOtherIncompleteOperation(paths, args, args.operationId);
+      process.stdout.write(
+        JSON.stringify(
+          completePendingPostcheckUnderSuccessorControl(context, paths, args),
+        ) + "\n",
+      );
       return 0;
     }
     if (

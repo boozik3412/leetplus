@@ -51,12 +51,20 @@ umask 0077
 
 readonly INSTALLED_BOOTSTRAP='/usr/local/sbin/leetplus-resumable-release-orchestrator'
 readonly INSTALLED_ENGINE='/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs'
-readonly EXPECTED_ENGINE_SHA256='c85af76d80105f24f1c041e309c78f030027a22defadf882174869b207724dc5'
+readonly EXPECTED_ENGINE_SHA256='8a34e192a31053036566b86414461bdc5c184bc055e904fee1f1b97206a5e07f'
 readonly PRODUCTION_CONTROL_RUN_ROOT='/run/leetplus-production-control'
 readonly PRODUCTION_CONTROL_INSTALL_LOCK="${PRODUCTION_CONTROL_RUN_ROOT}/install.lock"
 readonly STATE_PARENT='/var/lib/leetplus/deploy-receipts'
 readonly STATE_ROOT="${STATE_PARENT}/release-orchestrator"
 readonly LOCK_PATH="${STATE_ROOT}/orchestrator.lock"
+readonly CUTOVER_LOCK_PATH="${STATE_PARENT}/cutover.lock"
+
+cutover_recovery_mode=false
+case "${1:-}" in
+  restore-slot-environment-after-cutover-intent-bind-rollback|supersede-after-cutover-intent-bind-rollback)
+    cutover_recovery_mode=true
+    ;;
+esac
 
 die() {
   printf 'resumable-release-orchestrator: %s\n' "$*" >&2
@@ -149,9 +157,48 @@ flock -n 9 || die 'another release orchestration operation is active'
     "${lock_identity}:root:root:600:1" ]] \
   || die 'orchestrator lock changed while held'
 
+if [[ "$cutover_recovery_mode" == true ]]; then
+  [[ -d "$STATE_PARENT" && ! -L "$STATE_PARENT" \
+    && "$(realpath -e -- "$STATE_PARENT")" == "$STATE_PARENT" \
+    && "$(stat -c '%U:%G:%a' -- "$STATE_PARENT")" == 'root:root:700' ]] \
+    || die 'cutover lock parent must be exact root:root mode 0700'
+  if [[ ! -e "$CUTOVER_LOCK_PATH" && ! -L "$CUTOVER_LOCK_PATH" ]]; then
+    (set -o noclobber; : > "$CUTOVER_LOCK_PATH") \
+      || die 'cannot create cutover lock exclusively'
+    chmod 0600 -- "$CUTOVER_LOCK_PATH"
+    sync -f "$CUTOVER_LOCK_PATH"
+    sync -d "$STATE_PARENT"
+  fi
+  [[ -f "$CUTOVER_LOCK_PATH" && ! -L "$CUTOVER_LOCK_PATH" \
+    && "$(realpath -e -- "$CUTOVER_LOCK_PATH")" == "$CUTOVER_LOCK_PATH" \
+    && "$(stat -c '%U:%G:%a:%h' -- "$CUTOVER_LOCK_PATH")" == 'root:root:600:1' ]] \
+    || die 'cutover lock identity is unsafe'
+  cutover_lock_identity="$(stat -c '%d:%i' -- "$CUTOVER_LOCK_PATH")"
+  exec 7<> "$CUTOVER_LOCK_PATH"
+  [[ "$(stat -Lc '%d:%i' -- /proc/self/fd/7)" == "$cutover_lock_identity" ]] \
+    || die 'opened cutover lock differs from the validated path'
+  flock -n 7 || die 'another blue/green cutover operation is active'
+  [[ "$(stat -c '%d:%i:%U:%G:%a:%h' -- "$CUTOVER_LOCK_PATH")" == \
+      "${cutover_lock_identity}:root:root:600:1" ]] \
+    || die 'cutover lock changed while held'
+fi
+
 LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP='LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP_V1'
 LEETPLUS_RESUMABLE_RELEASE_INSTALL_LOCK_FD='8'
 export LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP LEETPLUS_RESUMABLE_RELEASE_INSTALL_LOCK_FD
+if [[ "$cutover_recovery_mode" == true ]]; then
+  LEETPLUS_RESUMABLE_RELEASE_CUTOVER_LOCK_FD='7'
+  export LEETPLUS_RESUMABLE_RELEASE_CUTOVER_LOCK_FD
+  exec /usr/bin/env -i \
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    TZ=UTC \
+    LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP=LEETPLUS_RESUMABLE_RELEASE_BOOTSTRAP_V1 \
+    LEETPLUS_RESUMABLE_RELEASE_INSTALL_LOCK_FD=8 \
+    LEETPLUS_RESUMABLE_RELEASE_CUTOVER_LOCK_FD=7 \
+    /usr/bin/node "$INSTALLED_ENGINE" "$@"
+fi
 exec /usr/bin/env -i \
   PATH=/usr/sbin:/usr/bin:/sbin:/bin \
   LANG=C.UTF-8 \

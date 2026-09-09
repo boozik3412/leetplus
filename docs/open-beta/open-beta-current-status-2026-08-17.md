@@ -1,11 +1,11 @@
-# LeetPlus open beta — текущее состояние на 08.09.2026
+# LeetPlus open beta — текущее состояние на 09.09.2026
 
 | Поле                 | Состояние                                                                                                                                                                                            |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                                                                                         |
-| Production runtime   | healthy; active blue exact `def5174f…`, `COMBINED`, bridge OFF, bug reporting LIVE; previous admitted `797001d5…` retained as independently healthy rollback                                         |
+| Production runtime   | healthy; public active blue `fa21bbe99be78313a883893b2dd6dc1d7c892777`, inactive green `f590875064bb84c7baf0d5665ef2d6856827df6a`; оба runtime contracts `CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`, physical DB `CURRENT_190/190` |
 | Prisma schema        | production exact `CURRENT_190/190`; migration `20260908090000_initial_owner_invite_link_mode` applied                                                                                                |
-| Release authority    | runtime и production-control exact `def5174f…`; Fast `34226209000` и Full `34226209023` успешны                                                                                                      |
+| Release authority    | exact admitted `f590875064bb84c7baf0d5665ef2d6856827df6a`; operation `8f70269b-e4f2-450c-b117-31e1375c68ce` paused после accepted `HYDRATE/BIND/SMOKE` перед CUTOVER                                                                                                      |
 | Runtime successor    | Оба worker timer enabled/active; activity `PARTIAL` автоматически продолжает cursor, ledger fallback работает в `LIVE`; worker pool `2`, activity limit `1`, timeout `15m`; API schedulers выключены |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                                                                                     |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                                                                                             |
@@ -15,10 +15,10 @@
 | Offline/USB key      | исключён из beta critical path                                                                                                                                                                       |
 | Owner onboarding     | production CURRENT190: явный EMAIL или одноразовый LINK; пользователь сам задаёт пароль, LINK не сохраняется и не ставит письмо в outbox                                                             |
 | Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect                                 |
-| Langame freshness    | daily и bonus-ledger timers enabled/active; authority привязана к exact `def5174f…`, daily worker обходит `3/3` active domains текущего admitted INTERNAL tenant                                     |
-| Assortment dashboard | входит в active `def5174f…`: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз работают; блок источников по умолчанию свёрнут, обновление всегда доступно                      |
+| Langame freshness    | daily и bonus-ledger timers enabled/active; public serving release — active blue `fa21…`; daily worker обходит `3/3` active domains текущего admitted INTERNAL tenant                                     |
+| Assortment dashboard | доступен на active blue `fa21…`: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз работают; блок источников по умолчанию свёрнут, обновление всегда доступно                      |
 | Guest profile owner  | exact-link и verified-phone repairs deployed в `def5174f…`; `*6330`, `*3669` и остальные выявленные split owners исправлены, active structural остаток `0`, reward replay запрещён                   |
-| External Langame     | source target `CURRENT_191/191`: preview → atomic settings → manual backfill; rollout требует protected check receipt, 2 inactive-slot final cutover и `final-check`; production GO не выдан         |
+| External Langame     | current operation `8f70269b-e4f2-450c-b117-31e1375c68ce`: accepted `HYDRATE/BIND/SMOKE`, pending CUTOVER only; both runtime bridge contracts CURRENT191/191 + ALLOW_CURRENT_190/OFF, DB CURRENT190/190; public nginx serves blue `fa21…`, no schema effect or production success claimed |
 
 Production hotfix PR #170 развёрнут как exact SHA
 `def5174f16f49212dd21d243cda89dffeff7837f` operation
@@ -26,8 +26,8 @@ Production hotfix PR #170 развёрнут как exact SHA
 `4d2f6c32ed57736a01f7f389467313bba0e410ba444aee5d1629c33c284f540d`.
 Public и loopback readiness принимают `CURRENT_190/190`, unfinished migrations
 равны `0`. Source после PR #171 содержит controlled target `CURRENT_191/191`
-для внешнего onboarding, но production остаётся на `def5174f…/CURRENT190` до
-отдельного admission и rollout. Текущий source-контракт запрещает ручные
+для внешнего onboarding; на момент того historical rollout production был
+`def5174f…/CURRENT190`. Текущий source-контракт запрещает ручные
 slot-env edits: live `check` публикует `root:root 0400` receipt, каждый
 `current191-final` plan пинит его SHA-256 и проходит отдельно по inactive slot,
 после чего terminal `OFF/LIVE` на обоих slots подтверждает `final-check`.
@@ -47,10 +47,46 @@ replacement с другим SHA/control-attestation digest в той же effect
 operation intents/evidence/receipts/terminal record запрещена.
 
 Этот режим не доказывает deployment: source/CI не являются production effect.
-Production пока exact `CURRENT_190/190`, а traffic остаётся на active blue.
+Physical DB пока exact `CURRENT_190/190`, а traffic остаётся на active blue
+`fa21bbe99be78313a883893b2dd6dc1d7c892777`; inactive green — exact
+`f590875064bb84c7baf0d5665ef2d6856827df6a`. Оба runtime contracts recovery уже
+`CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`.
+
+Для более позднего узкого случая accepted `HYDRATE/BIND/SMOKE` плюс только
+pending `CUTOVER` intent (без CUTOVER evidence/receipt или shared cutover intent)
+добавлен `supersede-after-cutover-intent-bind-rollback`. Он не переключает
+nginx и не делает schema effect: safe previous blue продолжает обслуживать
+traffic. Legacy `GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE` и successor
+`EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE` совместимы только
+в exact `CURRENT_190/190 → CURRENT_191/191` readiness assertion; все остальные
+release/build/head/count/profile/flag/migration checks остаются strict.
+
+Это same-contract re-pin: previous и target contracts recovery оба
+`CURRENT191/191 + ALLOW_CURRENT_190/OFF`; binder rollback возвращает target link
+к `PRIOR_RELEASE=fa21bbe99be78313a883893b2dd6dc1d7c892777`, а не к historical
+first-bridge `CURRENT190 OFF/LIVE`.
+
+До terminalizer допускается только receipt-bound порядок: `fence target →
+canonical binder rollback → canonical
+restore-slot-environment-after-cutover-intent-bind-rollback → unmask/reset-failed
+while stopped/dead/PID=0/process-free → terminalize`. Restore mode получает
+exact bind/rollback digests, создаёт immutable `04` restore intent/receipt и
+crash-safe idempotently atomically возвращает только target env к byte-exact
+pre-BIND backup, пока units masked/stopped. Ручной env copy запрещён; restore
+не меняет DB, nginx, link или units, а unmask без start возможен лишь после его
+receipt. Terminalizer требует exact restore-receipt digest и пишет лишь
+immutable terminal receipt; DB, nginx, env, unit и link она не меняет. Новый candidate всегда
+получает fresh exact plan, approval и отдельный GO.
+
+Только canonical restore и terminalizer дополнительно к orchestrator lock
+удерживают hardened `/var/lib/leetplus/deploy-receipts/cutover.lock` штатного
+blue-green cutover; engine attest'ит inherited lock до env rename/terminal
+publication. Shared `.intent`, `.intent.accepting.new` или `.intent.recovering.new`
+блокирует recovery. `apply`/`resume` не берут lock заранее: canonical cutover
+берёт его только в своей CUTOVER phase.
 
 Впервые выпущенный release `1cf42bb311aafa7f41ad7f42784463fe34c152c7` и
-текущий active `def5174f16f49212dd21d243cda89dffeff7837f` превращают
+текущий active blue `fa21bbe99be78313a883893b2dd6dc1d7c892777` превращают
 `/assortment/dashboard` в ежедневный
 action center. Сервер рассчитывает состояние источников визитов, продаж,
 остатков, себестоимости и категорий; приоритетный список действий; OOS-риск,
@@ -68,7 +104,7 @@ scheduler; на момент его rollout production schema оставалас
 и Full `34203683901` успешны; пятифазный rollout operation `6be461db…`
 завершён receipt `c9cbf2c9…`. Daily Langame worker прошёл exact supersession,
 canary `2026-09-07` и stable timer `plan/apply/check` на новом release SHA;
-оба worker timer включены и активны. В active `def5174f…` подробные карточки
+оба worker timer включены и активны. В active blue `fa21…` подробные карточки
 пяти источников по умолчанию свёрнуты; заголовок раскрывает их без нового
 запроса, а отдельная кнопка «Обновить данные» всегда ведёт на `/sync`.
 Production QA на ширине 944 px подтвердил отсутствие горизонтального overflow.

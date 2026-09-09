@@ -1,7 +1,7 @@
 10bd5aa8531e40f2db7a7e35574ada86a2b92ec0ba1185a5e25f2c74513bec33  ./activate-legacy-rollback-contour.sh
 cf95e1a3a704833a67b27cbc356abf16ab62c517b23ec708d19796818b332de3  ./apply-legacy-database-login-fence.sh
 4a25ff7561727f707ce37aa394ca5e0b0b28f52f5b63516dcdac5dfa6a60c130  ./apply-legacy-rollback-egress.sh
-800f9ef1878fbcde6a5b98d0f2b0a4569c93fb0af50441204d54163b070c1ff9  ./blue-green-cutover.sh
+beec39068b116378f2e2f61d801e15f131e8a9e26f77154570065eff2ce3b277  ./blue-green-cutover.sh
 754d19795a8fd798906fdbcf44652adb9ad6b869ce272b22e3891893d3fd2a39  ./install-legacy-rollback-contour.sh
 e533a946eb7d4393b7f1f692da2f57f4d8bf86180658ff82d677084fc683b50a  ./legacy-rollback-auth-edge.mjs
 ea25c3cf121ff21f21c02b5bf017ac6b20e943918b6624210d593e800493127c  ./legacy-rollback-child-loopback.cjs

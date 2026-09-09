@@ -18,8 +18,8 @@ immutable hydration/promote, slot binder, readiness/authenticated smoke и
 blue/green cutover из той же установленной production-control generation,
 проверяя её до и после каждой незавершённой фазы.
 
-Это не database migration controller. Контроллер не выполняет Prisma/SQL, не
-меняет ACL, worker state или security flags. Для `L2_SCHEMA_SECURITY` backup,
+Это не database migration controller. Контроллер не выполняет Prisma/SQL и не
+меняет ACL или worker state. Для `L2_SCHEMA_SECURITY` backup,
 restored-copy evidence, отдельный подписанный schema-plan и его exact
 postcheck остаются обязательными до runtime rollout.
 
@@ -119,9 +119,58 @@ legacy input `API_BIND_HOST=localhost`, обнаруженный на production
 `API_BIND_HOST=127.0.0.1`; evidence явно пишет
 `LEGACY_LOCALHOST_TO_IPV4_LOOPBACK`. Уже canonical input пишет `NONE`, а
 `::1`, `localhost.`, DNS names и другие aliases запрещены. Ports,
-`GUEST_BUG_REPORTING_MODE` и `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE` сохраняются.
-Любой неизвестный key, смена security flag, чужой previous SHA, symlink/hardlink
-или drift между old/new exact bytes останавливает запуск target.
+`GUEST_BUG_REPORTING_MODE` и `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE` сохраняются,
+кроме узкого CURRENT191 runtime-profile ниже. Любой неизвестный key, смена
+security flag вне этого профиля, чужой previous SHA, symlink/hardlink или drift
+между old/new exact bytes останавливает запуск target.
+
+### Узкий CURRENT191 slot runtime-profile
+
+Установленный orchestrator допускает только два profile значения
+`--slot-runtime-profile current191-bridge|current191-final`. Они не являются
+общим writer для feature flags и принимаются только для exact target
+`CURRENT_191/191` с migration
+`20260908180000_external_langame_simple_onboarding` и count `191`.
+
+- `current191-bridge` разрешён только на inactive slot: source этого slot должен
+  быть admitted `CURRENT_190/190` с `bridge=OFF` и `reporting=LIVE`; target
+  получает только `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_190` и
+  `GUEST_BUG_REPORTING_MODE=OFF`.
+- `current191-final` разрешён только на inactive slot: source этого slot должен
+  уже быть exact target `CURRENT_191/191` с `ALLOW_CURRENT_190/OFF`; target
+  получает только `OFF/LIVE`. Prepare дополнительно требует
+  `--current191-check-receipt-sha256`: exact digest `root:root 0400` receipt,
+  который CURRENT191 CLI создаёт только после успешного live `check`. Receipt
+  привязан к release SHA, schema-plan digest, target head/count/checksum и
+  database/dual-slot bridge evidence. `checkedAt` является точным audit-полем,
+  но не TTL: один immutable receipt используется для обоих последовательных
+  final plan. После первого final cutover новый check, требующий два bridge
+  slots, уже невозможен, поэтому expiry между cutover нарушил бы resumability.
+  Файл публикуется exclusive-create как
+  `/var/lib/leetplus/deploy-receipts/external-langame-current191-<sha256>.check.json`;
+  имя и exact bytes обязаны совпасть с переданным digest.
+
+Каждый profile выполняется отдельно для одного inactive slot через обычные пять
+фаз. Profile и, для final, check receipt входят в plan digest и тем самым во всю
+цепочку phase receipts; следующий plan опирается на latest accepted cutover.
+После переключения прежний active slot становится единственным допустимым
+следующим inactive target. Нельзя менять оба slot одним plan, завершить rollout
+с bridge на любом slot или подменять profile ручным изменением
+`/etc/leetplus/slots/*.env`.
+
+Plan, approval и все phase receipts по-прежнему связаны exact `planSha256`.
+При timeout или lost response сначала используется `status`, затем только
+`resume` с тем же operation ID и digest. После bridge profile database
+controller выполняет свой exact `check`, сохраняет защищённый receipt, и его
+SHA-256 передаётся в каждый final plan до bridge-off. В обоих plan orchestrator
+заново сверяет immutable bytes и authority receipt; перед каждым effect source
+slot обязан оставаться тем же release в `CURRENT191 ALLOW_CURRENT_190/OFF`, а
+runtime readiness заново сверяет live DB. Поэтому отсутствие TTL не расширяет
+допустимый target или доступ, но позволяет безопасно завершить второй slot после
+паузы или разрыва SSH. После обоих `current191-final` операций external-Langame
+CURRENT191 CLI выполняет `final-check`; лишь затем возможен terminal
+orchestrator postcheck. Эти profile не выполняют DDL и не заменяют signed
+database controller.
 
 ## Первый production rollout
 
@@ -155,7 +204,23 @@ sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
   --previous-migration <active-migration> \
   --previous-migration-count <count> \
   --previous-web-build-id <active-exact-sha> \
+  --slot-runtime-profile current191-bridge \
   --watchdog-seconds 30
+```
+
+Для обычного rollout параметр profile не передаётся. Для CURRENT191 сначала
+используется `current191-bridge` ровно на одном inactive slot, затем отдельный
+exact plan/cutover для второго slot. Только после committed schema и exact
+database-controller `check` создаётся новый plan с `current191-final` для
+текущего inactive slot; после его cutover тем же образом завершается второй
+slot, а затем запускается CURRENT191 CLI `final-check`.
+
+Для обоих final plan передаётся один и тот же exact receipt из успешного
+dual-bridge `check`; его нельзя обновлять или заменять между slot cutover:
+
+```bash
+  --slot-runtime-profile current191-final \
+  --current191-check-receipt-sha256 <exact-check-receipt-sha256>
 ```
 
 После независимой сверки plan и отдельного production GO:

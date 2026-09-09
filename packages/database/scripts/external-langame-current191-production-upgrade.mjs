@@ -18,9 +18,12 @@ import {
 } from "./current-release-restored-copy-runtime-acceptance.mjs";
 import {
   createExternalLangameCurrent191ProductionBridgeRuntimeAdapter,
+  createExternalLangameCurrent191ProductionFinalRuntimeAdapter as createExternalLangameCurrent191ProductionFinalBridgeRuntimeAdapter,
   externalLangameCurrent191BridgeAttestationDigest,
   externalLangameCurrent191BridgeAttestationInvariant,
+  externalLangameCurrent191FinalRuntimeAttestationDigest,
   normalizeExternalLangameCurrent191BridgeAttestation,
+  normalizeExternalLangameCurrent191FinalRuntimeAttestation,
 } from "./founder-pilot-current188-production-upgrade.mjs";
 
 export const EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONTRACT =
@@ -31,6 +34,10 @@ export const EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_PLAN_READY =
   "CURRENT191_UPGRADE_PLAN_READY";
 export const EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_APPLIED =
   "CURRENT191_UPGRADE_APPLIED";
+export const EXTERNAL_LANGAME_CURRENT191_PRODUCTION_CHECK_RECEIPT_CONTRACT =
+  "EXTERNAL_LANGAME_CURRENT191_PRE_FINAL_CHECK_RECEIPT_V1";
+export const EXTERNAL_LANGAME_CURRENT191_PRODUCTION_CHECK_ACCEPTED =
+  "CURRENT191_UPGRADE_CHECK_ACCEPTED";
 
 const SOURCE_COUNT = 190;
 const SOURCE_HEAD = "20260908090000_initial_owner_invite_link_mode";
@@ -52,6 +59,7 @@ const TARGET_WORKER_COMMENT =
   "Fail-closed identity mail worker readiness receipt bound to exact CURRENT_191 while preserving the approved CURRENT_185 preterminal digest boundary.";
 const SOURCE_PHASE = "SOURCE_190";
 const TARGET_PHASE = "TARGET_191";
+const FINAL_RUNTIME_PHASE = "FINAL_191";
 const TIMER_UNIT = "leetplus-langame-daily-worker.timer";
 const WORKER_UNIT = "leetplus-langame-daily-worker.service";
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -107,7 +115,11 @@ function exactRecord(value, keys, reasonCode) {
 }
 
 function exactString(value, pattern, reasonCode) {
-  if (typeof value !== "string" || value.trim() !== value || !pattern.test(value)) {
+  if (
+    typeof value !== "string" ||
+    value.trim() !== value ||
+    !pattern.test(value)
+  ) {
     fail(reasonCode);
   }
   return value;
@@ -132,7 +144,10 @@ function safeEqual(left, right) {
   if (typeof left !== "string" || typeof right !== "string") return false;
   const leftBytes = Buffer.from(left);
   const rightBytes = Buffer.from(right);
-  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
+  return (
+    leftBytes.length === rightBytes.length &&
+    timingSafeEqual(leftBytes, rightBytes)
+  );
 }
 
 function canonicalPublicKey(pem, expectedDigest) {
@@ -151,13 +166,18 @@ function canonicalPublicKey(pem, expectedDigest) {
   return key;
 }
 
-export function normalizeExternalLangameCurrent191ProductionUpgradeManifest(value) {
+export function normalizeExternalLangameCurrent191ProductionUpgradeManifest(
+  value,
+) {
   const manifest = exactRecord(
     value,
     ["approval", "contractVersion", "operation", "release", "target"],
     "CURRENT191_UPGRADE_MANIFEST_INVALID",
   );
-  if (manifest.contractVersion !== EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONTRACT) {
+  if (
+    manifest.contractVersion !==
+    EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONTRACT
+  ) {
     fail("CURRENT191_UPGRADE_CONTRACT_INVALID");
   }
   const approval = exactRecord(
@@ -180,10 +200,23 @@ export function normalizeExternalLangameCurrent191ProductionUpgradeManifest(valu
     ["timeoutSeconds"],
     "CURRENT191_UPGRADE_OPERATION_INVALID",
   );
-  exactString(approval.keyId, /^[a-z0-9][a-z0-9._-]{2,63}$/u, "CURRENT191_UPGRADE_APPROVAL_CONFIG_INVALID");
-  exactString(approval.publicKeySpkiSha256, SHA256, "CURRENT191_UPGRADE_APPROVAL_CONFIG_INVALID");
+  exactString(
+    approval.keyId,
+    /^[a-z0-9][a-z0-9._-]{2,63}$/u,
+    "CURRENT191_UPGRADE_APPROVAL_CONFIG_INVALID",
+  );
+  exactString(
+    approval.publicKeySpkiSha256,
+    SHA256,
+    "CURRENT191_UPGRADE_APPROVAL_CONFIG_INVALID",
+  );
   canonicalPublicKey(approval.publicKeyPem, approval.publicKeySpkiSha256);
-  exactInteger(approval.maxPlanAgeSeconds, 60, 1800, "CURRENT191_UPGRADE_APPROVAL_CONFIG_INVALID");
+  exactInteger(
+    approval.maxPlanAgeSeconds,
+    60,
+    1800,
+    "CURRENT191_UPGRADE_APPROVAL_CONFIG_INVALID",
+  );
   exactString(release.releaseSha, SHA40, "CURRENT191_UPGRADE_RELEASE_INVALID");
   if (
     release.artifactRoot !== `/srv/leetplus/releases/${release.releaseSha}` ||
@@ -191,8 +224,16 @@ export function normalizeExternalLangameCurrent191ProductionUpgradeManifest(valu
   ) {
     fail("CURRENT191_UPGRADE_RELEASE_INVALID");
   }
-  exactString(target.databaseName, /^[a-zA-Z_][a-zA-Z0-9_]{2,62}$/u, "CURRENT191_UPGRADE_TARGET_INVALID");
-  exactString(target.systemIdentifier, /^[1-9][0-9]{8,24}$/u, "CURRENT191_UPGRADE_TARGET_INVALID");
+  exactString(
+    target.databaseName,
+    /^[a-zA-Z_][a-zA-Z0-9_]{2,62}$/u,
+    "CURRENT191_UPGRADE_TARGET_INVALID",
+  );
+  exactString(
+    target.systemIdentifier,
+    /^[1-9][0-9]{8,24}$/u,
+    "CURRENT191_UPGRADE_TARGET_INVALID",
+  );
   exactInteger(target.port, 1024, 65535, "CURRENT191_UPGRADE_TARGET_INVALID");
   if (
     !path.isAbsolute(target.socketDirectory) ||
@@ -200,7 +241,12 @@ export function normalizeExternalLangameCurrent191ProductionUpgradeManifest(valu
   ) {
     fail("CURRENT191_UPGRADE_TARGET_INVALID");
   }
-  exactInteger(operation.timeoutSeconds, 30, 300, "CURRENT191_UPGRADE_OPERATION_INVALID");
+  exactInteger(
+    operation.timeoutSeconds,
+    30,
+    300,
+    "CURRENT191_UPGRADE_OPERATION_INVALID",
+  );
   return Object.freeze({
     approval: Object.freeze({ ...approval }),
     contractVersion: manifest.contractVersion,
@@ -211,11 +257,7 @@ export function normalizeExternalLangameCurrent191ProductionUpgradeManifest(valu
 }
 
 function normalizeCriticalObject(value, reasonCode) {
-  const object = exactRecord(
-    value,
-    ["acl", "oid", "owner"],
-    reasonCode,
-  );
+  const object = exactRecord(value, ["acl", "oid", "owner"], reasonCode);
   exactString(object.oid, /^[1-9][0-9]*$/u, reasonCode);
   exactString(object.owner, /^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$/u, reasonCode);
   if (
@@ -266,7 +308,8 @@ function summarizeRawInventory(raw) {
     "roleMemberships",
     "rolledBackMigrations",
   ]) {
-    if (!Array.isArray(value[key])) fail("CURRENT191_UPGRADE_DATABASE_EVIDENCE_INVALID");
+    if (!Array.isArray(value[key]))
+      fail("CURRENT191_UPGRADE_DATABASE_EVIDENCE_INVALID");
   }
   const numeric = {};
   for (const key of [
@@ -276,7 +319,12 @@ function summarizeRawInventory(raw) {
     "unfinishedMigrationCount",
   ]) {
     numeric[key] = Number(value[key]);
-    exactInteger(numeric[key], 0, 10_000_000, "CURRENT191_UPGRADE_DATABASE_EVIDENCE_INVALID");
+    exactInteger(
+      numeric[key],
+      0,
+      10_000_000,
+      "CURRENT191_UPGRADE_DATABASE_EVIDENCE_INVALID",
+    );
   }
   const workerFunction = normalizeCriticalObject(
     value.workerFunction,
@@ -290,12 +338,36 @@ function summarizeRawInventory(raw) {
     value.migrationTable,
     "CURRENT191_UPGRADE_MIGRATION_TABLE_INVALID",
   );
-  exactString(value.databaseName, /^[a-zA-Z_][a-zA-Z0-9_]{2,62}$/u, "CURRENT191_UPGRADE_DATABASE_EVIDENCE_INVALID");
-  exactString(value.systemIdentifier, /^[1-9][0-9]{8,24}$/u, "CURRENT191_UPGRADE_DATABASE_EVIDENCE_INVALID");
-  exactString(value.sessionUser, /^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$/u, "CURRENT191_UPGRADE_DATABASE_EVIDENCE_INVALID");
-  exactString(value.currentUser, /^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$/u, "CURRENT191_UPGRADE_DATABASE_EVIDENCE_INVALID");
-  exactString(value.constraintOid, /^(?:0|[1-9][0-9]*)$/u, "CURRENT191_UPGRADE_CONSTRAINT_INVALID");
-  exactString(value.workerFunctionSha256, SHA256, "CURRENT191_UPGRADE_WORKER_FUNCTION_INVALID");
+  exactString(
+    value.databaseName,
+    /^[a-zA-Z_][a-zA-Z0-9_]{2,62}$/u,
+    "CURRENT191_UPGRADE_DATABASE_EVIDENCE_INVALID",
+  );
+  exactString(
+    value.systemIdentifier,
+    /^[1-9][0-9]{8,24}$/u,
+    "CURRENT191_UPGRADE_DATABASE_EVIDENCE_INVALID",
+  );
+  exactString(
+    value.sessionUser,
+    /^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$/u,
+    "CURRENT191_UPGRADE_DATABASE_EVIDENCE_INVALID",
+  );
+  exactString(
+    value.currentUser,
+    /^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$/u,
+    "CURRENT191_UPGRADE_DATABASE_EVIDENCE_INVALID",
+  );
+  exactString(
+    value.constraintOid,
+    /^(?:0|[1-9][0-9]*)$/u,
+    "CURRENT191_UPGRADE_CONSTRAINT_INVALID",
+  );
+  exactString(
+    value.workerFunctionSha256,
+    SHA256,
+    "CURRENT191_UPGRADE_WORKER_FUNCTION_INVALID",
+  );
   if (
     typeof value.constraintDef !== "string" ||
     typeof value.workerFunctionComment !== "string" ||
@@ -376,10 +448,12 @@ function preservedDatabaseState(source, target) {
     stableJson(target.ticketTable.acl) === stableJson(source.ticketTable.acl) &&
     target.ticketTable.owner === source.ticketTable.owner &&
     target.migrationTable.oid === source.migrationTable.oid &&
-    stableJson(target.migrationTable.acl) === stableJson(source.migrationTable.acl) &&
+    stableJson(target.migrationTable.acl) ===
+      stableJson(source.migrationTable.acl) &&
     target.migrationTable.owner === source.migrationTable.owner &&
     target.workerFunction.oid === source.workerFunction.oid &&
-    stableJson(target.workerFunction.acl) === stableJson(source.workerFunction.acl) &&
+    stableJson(target.workerFunction.acl) ===
+      stableJson(source.workerFunction.acl) &&
     target.workerFunction.owner === source.workerFunction.owner &&
     target.historicalOwnershipDigest === source.historicalOwnershipDigest &&
     target.roleMembershipDigest === source.roleMembershipDigest &&
@@ -409,7 +483,10 @@ function exactFinalState(evidence, source, manifest) {
   );
 }
 
-async function inspectArtifactAuthority(manifest, verifier = verifyCurrentReleaseArtifact) {
+async function inspectArtifactAuthority(
+  manifest,
+  verifier = verifyCurrentReleaseArtifact,
+) {
   const artifact = await verifier({
     artifactRoot: manifest.release.artifactRoot,
     expected: normalizeCurrentReleaseTarget({
@@ -489,8 +566,10 @@ function normalizePlan(value) {
     "CURRENT191_UPGRADE_PLAN_INVALID",
   );
   if (
-    plan.contractVersion !== EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONTRACT ||
-    plan.decision !== EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_PLAN_READY ||
+    plan.contractVersion !==
+      EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONTRACT ||
+    plan.decision !==
+      EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_PLAN_READY ||
     !SHA40.test(plan.releaseSha ?? "") ||
     ![
       plan.approvalKeySpkiSha256,
@@ -524,7 +603,8 @@ export async function inspectExternalLangameCurrent191ProductionUpgradeInventory
   manifest: rawManifest,
   verifyArtifact = verifyCurrentReleaseArtifact,
 }) {
-  const manifest = normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
+  const manifest =
+    normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
   if (
     typeof adapter?.inspect !== "function" ||
     typeof artifactInspector !== "function"
@@ -558,7 +638,8 @@ export async function buildExternalLangameCurrent191ProductionUpgradePlan({
   runtimeAdapter,
   verifyArtifact = verifyCurrentReleaseArtifact,
 }) {
-  const manifest = normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
+  const manifest =
+    normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
   if (
     typeof adapter?.inspect !== "function" ||
     typeof artifactInspector !== "function"
@@ -573,19 +654,24 @@ export async function buildExternalLangameCurrent191ProductionUpgradePlan({
   const plannedAt = currentDate(now);
   await runtimeAdapter.acquireLock();
   try {
-    const [rawEvidence, artifactEvidence, rawBridgeAttestation] = await Promise.all([
-      adapter.inspect(),
-      artifactInspector(manifest, verifyArtifact),
-      runtimeAdapter.inspectSource(),
-    ]);
+    const [rawEvidence, artifactEvidence, rawBridgeAttestation] =
+      await Promise.all([
+        adapter.inspect(),
+        artifactInspector(manifest, verifyArtifact),
+        runtimeAdapter.inspectSource(),
+      ]);
     const evidence = summarizeRawInventory(rawEvidence);
     if (!exactSourceState(evidence, manifest)) {
       fail("CURRENT191_UPGRADE_SOURCE_STATE_MISMATCH");
     }
-    const bridgeAttestation = normalizeExternalLangameCurrent191BridgeAttestation(
-      rawBridgeAttestation,
-      { expectedPhase: SOURCE_PHASE, expectedReleaseSha: manifest.release.releaseSha },
-    );
+    const bridgeAttestation =
+      normalizeExternalLangameCurrent191BridgeAttestation(
+        rawBridgeAttestation,
+        {
+          expectedPhase: SOURCE_PHASE,
+          expectedReleaseSha: manifest.release.releaseSha,
+        },
+      );
     const base = {
       approvalKeyId: manifest.approval.keyId,
       approvalKeySpkiSha256: manifest.approval.publicKeySpkiSha256,
@@ -594,7 +680,10 @@ export async function buildExternalLangameCurrent191ProductionUpgradePlan({
       bridgeAttestation,
       bridgeAttestationDigest: externalLangameCurrent191BridgeAttestationDigest(
         bridgeAttestation,
-        { expectedPhase: SOURCE_PHASE, expectedReleaseSha: manifest.release.releaseSha },
+        {
+          expectedPhase: SOURCE_PHASE,
+          expectedReleaseSha: manifest.release.releaseSha,
+        },
       ),
       contractVersion: EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONTRACT,
       decision: EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_PLAN_READY,
@@ -612,7 +701,10 @@ export async function buildExternalLangameCurrent191ProductionUpgradePlan({
       targetMigrationSha256: TARGET_MIGRATION_SHA256,
       targetSchemaHead: TARGET_HEAD,
     };
-    return Object.freeze({ ...base, planDigest: digest("production-plan", base) });
+    return Object.freeze({
+      ...base,
+      planDigest: digest("production-plan", base),
+    });
   } finally {
     await runtimeAdapter.releaseLock();
   }
@@ -629,7 +721,8 @@ export function signExternalLangameCurrent191ProductionUpgradePlan({
   plan: rawPlan,
   privateKeyPem,
 }) {
-  const manifest = normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
+  const manifest =
+    normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
   const plan = normalizePlan(rawPlan);
   let privateKey;
   try {
@@ -639,8 +732,9 @@ export function signExternalLangameCurrent191ProductionUpgradePlan({
   }
   if (
     privateKey.asymmetricKeyType !== "ed25519" ||
-    sha256(createPublicKey(privateKey).export({ format: "der", type: "spki" })) !==
-      manifest.approval.publicKeySpkiSha256
+    sha256(
+      createPublicKey(privateKey).export({ format: "der", type: "spki" }),
+    ) !== manifest.approval.publicKeySpkiSha256
   ) {
     fail("CURRENT191_UPGRADE_PRIVATE_KEY_INVALID");
   }
@@ -649,11 +743,18 @@ export function signExternalLangameCurrent191ProductionUpgradePlan({
     contractVersion: EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONTRACT,
     keyId: manifest.approval.keyId,
     planDigest: plan.planDigest,
-    signature: sign(null, approvalPayload(plan), privateKey).toString("base64url"),
+    signature: sign(null, approvalPayload(plan), privateKey).toString(
+      "base64url",
+    ),
   });
 }
 
-function verifyApproval({ approval, manifest, pinnedApprovalKeySpkiSha256, plan }) {
+function verifyApproval({
+  approval,
+  manifest,
+  pinnedApprovalKeySpkiSha256,
+  plan,
+}) {
   const receipt = exactRecord(
     approval,
     ["algorithm", "contractVersion", "keyId", "planDigest", "signature"],
@@ -661,7 +762,8 @@ function verifyApproval({ approval, manifest, pinnedApprovalKeySpkiSha256, plan 
   );
   if (
     receipt.algorithm !== "Ed25519" ||
-    receipt.contractVersion !== EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONTRACT ||
+    receipt.contractVersion !==
+      EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONTRACT ||
     receipt.keyId !== manifest.approval.keyId ||
     receipt.planDigest !== plan.planDigest ||
     !BASE64URL_SIGNATURE.test(receipt.signature ?? "") ||
@@ -697,7 +799,8 @@ function assertPlanWindow(plan, manifest, now) {
 }
 
 async function emitPhase(onPhase, plan, phase, extra = {}) {
-  if (typeof onPhase !== "function") fail("CURRENT191_UPGRADE_PHASE_JOURNAL_REQUIRED");
+  if (typeof onPhase !== "function")
+    fail("CURRENT191_UPGRADE_PHASE_JOURNAL_REQUIRED");
   await onPhase(
     Object.freeze({
       contractVersion: EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONTRACT,
@@ -731,10 +834,14 @@ export async function applyExternalLangameCurrent191ProductionUpgradePlan({
   verifyArtifact = verifyCurrentReleaseArtifact,
   workerSafetyAdapter,
 }) {
-  if (productionConfirmation !== EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONFIRMATION) {
+  if (
+    productionConfirmation !==
+    EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONFIRMATION
+  ) {
     fail("CURRENT191_UPGRADE_PRODUCTION_CONFIRMATION_REQUIRED");
   }
-  const manifest = normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
+  const manifest =
+    normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
   const plan = normalizePlan(rawPlan);
   if (!safeEqual(confirmPlanDigest, plan.planDigest)) {
     fail("CURRENT191_UPGRADE_PLAN_CONFIRMATION_MISMATCH");
@@ -747,14 +854,23 @@ export async function applyExternalLangameCurrent191ProductionUpgradePlan({
     plan,
   });
   for (const method of ["inspect"]) {
-    if (typeof adapter?.[method] !== "function") fail("CURRENT191_UPGRADE_ADAPTER_INVALID");
+    if (typeof adapter?.[method] !== "function")
+      fail("CURRENT191_UPGRADE_ADAPTER_INVALID");
   }
-  if (typeof artifactInspector !== "function") fail("CURRENT191_UPGRADE_ADAPTER_INVALID");
+  if (typeof artifactInspector !== "function")
+    fail("CURRENT191_UPGRADE_ADAPTER_INVALID");
   for (const method of ["migrate"]) {
-    if (typeof executor?.[method] !== "function") fail("CURRENT191_UPGRADE_EXECUTOR_INVALID");
+    if (typeof executor?.[method] !== "function")
+      fail("CURRENT191_UPGRADE_EXECUTOR_INVALID");
   }
-  for (const method of ["acquireLock", "inspectSource", "inspectTarget", "releaseLock"]) {
-    if (typeof runtimeAdapter?.[method] !== "function") fail("CURRENT191_UPGRADE_RUNTIME_ADAPTER_INVALID");
+  for (const method of [
+    "acquireLock",
+    "inspectSource",
+    "inspectTarget",
+    "releaseLock",
+  ]) {
+    if (typeof runtimeAdapter?.[method] !== "function")
+      fail("CURRENT191_UPGRADE_RUNTIME_ADAPTER_INVALID");
   }
   for (const method of ["quiesce", "restore"]) {
     if (typeof workerSafetyAdapter?.[method] !== "function") {
@@ -767,26 +883,38 @@ export async function applyExternalLangameCurrent191ProductionUpgradePlan({
   try {
     await runtimeAdapter.acquireLock();
     runtimeLockHeld = true;
-    await emitPhase(onPhase, plan, "PRODUCTION_CONTROL_AND_CUTOVER_LOCKS_ACQUIRED");
+    await emitPhase(
+      onPhase,
+      plan,
+      "PRODUCTION_CONTROL_AND_CUTOVER_LOCKS_ACQUIRED",
+    );
     const [artifactEvidence, rawCurrent] = await Promise.all([
       artifactInspector(manifest, verifyArtifact),
       adapter.inspect(),
     ]);
     const current = summarizeRawInventory(rawCurrent);
     if (
-      digest("production-manifest", manifest) !== plan.productionManifestDigest ||
+      digest("production-manifest", manifest) !==
+        plan.productionManifestDigest ||
       artifactEvidenceDigest(artifactEvidence) !== plan.artifactEvidenceDigest
     ) {
       fail("CURRENT191_UPGRADE_FRESH_PLAN_MISMATCH");
     }
     if (exactFinalState(current, plan.sourceDatabaseEvidence, manifest)) {
-      const recoveredBridge = normalizeExternalLangameCurrent191BridgeAttestation(
-        await runtimeAdapter.inspectTarget(),
-        { expectedPhase: TARGET_PHASE, expectedReleaseSha: manifest.release.releaseSha },
-      );
+      const recoveredBridge =
+        normalizeExternalLangameCurrent191BridgeAttestation(
+          await runtimeAdapter.inspectTarget(),
+          {
+            expectedPhase: TARGET_PHASE,
+            expectedReleaseSha: manifest.release.releaseSha,
+          },
+        );
       const plannedBridge = normalizeExternalLangameCurrent191BridgeAttestation(
         plan.bridgeAttestation,
-        { expectedPhase: SOURCE_PHASE, expectedReleaseSha: manifest.release.releaseSha },
+        {
+          expectedPhase: SOURCE_PHASE,
+          expectedReleaseSha: manifest.release.releaseSha,
+        },
       );
       if (!bridgeInvariantExact(plannedBridge, recoveredBridge)) {
         fail("CURRENT191_UPGRADE_BRIDGE_TARGET_STATE_MISMATCH");
@@ -796,13 +924,19 @@ export async function applyExternalLangameCurrent191ProductionUpgradePlan({
           expectedPhase: TARGET_PHASE,
           expectedReleaseSha: manifest.release.releaseSha,
         });
-      await emitPhase(onPhase, plan, "FINAL_191_AND_DUAL_SLOT_RUNTIME_VERIFIED", {
-        bridgeAttestationDigest: recoveredBridgeDigest,
-        recoveredFromLostResponse: true,
-      });
+      await emitPhase(
+        onPhase,
+        plan,
+        "FINAL_191_AND_DUAL_SLOT_RUNTIME_VERIFIED",
+        {
+          bridgeAttestationDigest: recoveredBridgeDigest,
+          recoveredFromLostResponse: true,
+        },
+      );
       return Object.freeze({
         bridgeAttestationDigest: recoveredBridgeDigest,
-        contractVersion: EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONTRACT,
+        contractVersion:
+          EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONTRACT,
         databaseEvidenceDigest: databaseEvidenceDigest(current),
         decision: EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_APPLIED,
         migrationCount: TARGET_COUNT,
@@ -815,10 +949,13 @@ export async function applyExternalLangameCurrent191ProductionUpgradePlan({
     }
     const source = current;
     const rawBridge = await runtimeAdapter.inspectSource();
-    const bridge = normalizeExternalLangameCurrent191BridgeAttestation(rawBridge, {
-      expectedPhase: SOURCE_PHASE,
-      expectedReleaseSha: manifest.release.releaseSha,
-    });
+    const bridge = normalizeExternalLangameCurrent191BridgeAttestation(
+      rawBridge,
+      {
+        expectedPhase: SOURCE_PHASE,
+        expectedReleaseSha: manifest.release.releaseSha,
+      },
+    );
     if (
       databaseEvidenceDigest(source) !== plan.sourceDatabaseEvidenceDigest ||
       stableJson(source) !== stableJson(plan.sourceDatabaseEvidence) ||
@@ -853,7 +990,10 @@ export async function applyExternalLangameCurrent191ProductionUpgradePlan({
     }
     const targetBridge = normalizeExternalLangameCurrent191BridgeAttestation(
       await runtimeAdapter.inspectTarget(),
-      { expectedPhase: TARGET_PHASE, expectedReleaseSha: manifest.release.releaseSha },
+      {
+        expectedPhase: TARGET_PHASE,
+        expectedReleaseSha: manifest.release.releaseSha,
+      },
     );
     if (!bridgeInvariantExact(bridge, targetBridge)) {
       fail("CURRENT191_UPGRADE_BRIDGE_TARGET_STATE_MISMATCH");
@@ -861,14 +1001,20 @@ export async function applyExternalLangameCurrent191ProductionUpgradePlan({
     await emitPhase(onPhase, plan, "FINAL_191_AND_DUAL_SLOT_RUNTIME_VERIFIED", {
       bridgeAttestationDigest: externalLangameCurrent191BridgeAttestationDigest(
         targetBridge,
-        { expectedPhase: TARGET_PHASE, expectedReleaseSha: manifest.release.releaseSha },
+        {
+          expectedPhase: TARGET_PHASE,
+          expectedReleaseSha: manifest.release.releaseSha,
+        },
       ),
       recoveredFromLostResponse: result.status === "AMBIGUOUS",
     });
     return Object.freeze({
       bridgeAttestationDigest: externalLangameCurrent191BridgeAttestationDigest(
         targetBridge,
-        { expectedPhase: TARGET_PHASE, expectedReleaseSha: manifest.release.releaseSha },
+        {
+          expectedPhase: TARGET_PHASE,
+          expectedReleaseSha: manifest.release.releaseSha,
+        },
       ),
       contractVersion: EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONTRACT,
       databaseEvidenceDigest: databaseEvidenceDigest(final),
@@ -894,7 +1040,8 @@ export async function verifyExternalLangameCurrent191ProductionUpgradeFinal({
   plan: rawPlan,
   runtimeAdapter,
 }) {
-  const manifest = normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
+  const manifest =
+    normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
   const plan = normalizePlan(rawPlan);
   if (
     plan.releaseSha !== manifest.release.releaseSha ||
@@ -903,7 +1050,8 @@ export async function verifyExternalLangameCurrent191ProductionUpgradeFinal({
     fail("CURRENT191_UPGRADE_PLAN_INVALID");
   }
   for (const method of ["acquireLock", "inspectTarget", "releaseLock"]) {
-    if (typeof runtimeAdapter?.[method] !== "function") fail("CURRENT191_UPGRADE_RUNTIME_ADAPTER_INVALID");
+    if (typeof runtimeAdapter?.[method] !== "function")
+      fail("CURRENT191_UPGRADE_RUNTIME_ADAPTER_INVALID");
   }
   await runtimeAdapter.acquireLock();
   try {
@@ -913,11 +1061,17 @@ export async function verifyExternalLangameCurrent191ProductionUpgradeFinal({
     }
     const sourceBridge = normalizeExternalLangameCurrent191BridgeAttestation(
       plan.bridgeAttestation,
-      { expectedPhase: SOURCE_PHASE, expectedReleaseSha: manifest.release.releaseSha },
+      {
+        expectedPhase: SOURCE_PHASE,
+        expectedReleaseSha: manifest.release.releaseSha,
+      },
     );
     const bridge = normalizeExternalLangameCurrent191BridgeAttestation(
       await runtimeAdapter.inspectTarget(),
-      { expectedPhase: TARGET_PHASE, expectedReleaseSha: manifest.release.releaseSha },
+      {
+        expectedPhase: TARGET_PHASE,
+        expectedReleaseSha: manifest.release.releaseSha,
+      },
     );
     if (!bridgeInvariantExact(sourceBridge, bridge)) {
       fail("CURRENT191_UPGRADE_BRIDGE_TARGET_STATE_MISMATCH");
@@ -925,7 +1079,10 @@ export async function verifyExternalLangameCurrent191ProductionUpgradeFinal({
     return Object.freeze({
       bridgeAttestationDigest: externalLangameCurrent191BridgeAttestationDigest(
         bridge,
-        { expectedPhase: TARGET_PHASE, expectedReleaseSha: manifest.release.releaseSha },
+        {
+          expectedPhase: TARGET_PHASE,
+          expectedReleaseSha: manifest.release.releaseSha,
+        },
       ),
       databaseEvidenceDigest: databaseEvidenceDigest(final),
       migrationCount: final.migrationCount,
@@ -937,6 +1094,119 @@ export async function verifyExternalLangameCurrent191ProductionUpgradeFinal({
   }
 }
 
+export function normalizeExternalLangameCurrent191ProductionCheckReceipt(
+  value,
+) {
+  const receipt = exactRecord(
+    value,
+    [
+      "bridgeAttestationDigest",
+      "checkedAt",
+      "contractVersion",
+      "databaseEvidenceDigest",
+      "decision",
+      "migrationCount",
+      "migrationHead",
+      "productionManifestDigest",
+      "releaseSha",
+      "schemaPlanDigest",
+      "schemaVersion",
+      "targetMigrationSha256",
+    ],
+    "CURRENT191_UPGRADE_CHECK_RECEIPT_INVALID",
+  );
+  if (
+    receipt.schemaVersion !== 1 ||
+    receipt.contractVersion !==
+      EXTERNAL_LANGAME_CURRENT191_PRODUCTION_CHECK_RECEIPT_CONTRACT ||
+    receipt.decision !==
+      EXTERNAL_LANGAME_CURRENT191_PRODUCTION_CHECK_ACCEPTED ||
+    receipt.migrationCount !== TARGET_COUNT ||
+    receipt.migrationHead !== TARGET_HEAD ||
+    receipt.targetMigrationSha256 !== TARGET_MIGRATION_SHA256
+  ) {
+    fail("CURRENT191_UPGRADE_CHECK_RECEIPT_INVALID");
+  }
+  exactString(
+    receipt.releaseSha,
+    SHA40,
+    "CURRENT191_UPGRADE_CHECK_RECEIPT_INVALID",
+  );
+  for (const value of [
+    receipt.bridgeAttestationDigest,
+    receipt.databaseEvidenceDigest,
+    receipt.productionManifestDigest,
+    receipt.schemaPlanDigest,
+  ]) {
+    exactString(value, SHA256, "CURRENT191_UPGRADE_CHECK_RECEIPT_INVALID");
+  }
+  const checkedAt = new Date(receipt.checkedAt);
+  if (
+    !ISO_TIMESTAMP.test(receipt.checkedAt ?? "") ||
+    !Number.isFinite(checkedAt.valueOf()) ||
+    checkedAt.toISOString() !== receipt.checkedAt
+  ) {
+    fail("CURRENT191_UPGRADE_CHECK_RECEIPT_INVALID");
+  }
+  return Object.freeze(receipt);
+}
+
+export function createExternalLangameCurrent191ProductionCheckReceipt({
+  manifest: rawManifest,
+  now = () => new Date(),
+  plan: rawPlan,
+  verification,
+}) {
+  const manifest =
+    normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
+  const plan = normalizePlan(rawPlan);
+  const checked = exactRecord(
+    verification,
+    [
+      "bridgeAttestationDigest",
+      "databaseEvidenceDigest",
+      "migrationCount",
+      "migrationHead",
+      "planDigest",
+    ],
+    "CURRENT191_UPGRADE_CHECK_RECEIPT_INVALID",
+  );
+  if (
+    plan.releaseSha !== manifest.release.releaseSha ||
+    plan.productionManifestDigest !== digest("production-manifest", manifest) ||
+    checked.planDigest !== plan.planDigest ||
+    checked.migrationCount !== TARGET_COUNT ||
+    checked.migrationHead !== TARGET_HEAD
+  ) {
+    fail("CURRENT191_UPGRADE_CHECK_RECEIPT_INVALID");
+  }
+  exactString(
+    checked.bridgeAttestationDigest,
+    SHA256,
+    "CURRENT191_UPGRADE_CHECK_RECEIPT_INVALID",
+  );
+  exactString(
+    checked.databaseEvidenceDigest,
+    SHA256,
+    "CURRENT191_UPGRADE_CHECK_RECEIPT_INVALID",
+  );
+  return normalizeExternalLangameCurrent191ProductionCheckReceipt({
+    bridgeAttestationDigest: checked.bridgeAttestationDigest,
+    checkedAt: currentDate(now).toISOString(),
+    contractVersion:
+      EXTERNAL_LANGAME_CURRENT191_PRODUCTION_CHECK_RECEIPT_CONTRACT,
+    databaseEvidenceDigest: checked.databaseEvidenceDigest,
+    decision: EXTERNAL_LANGAME_CURRENT191_PRODUCTION_CHECK_ACCEPTED,
+    migrationCount: TARGET_COUNT,
+    migrationHead: TARGET_HEAD,
+    productionManifestDigest: plan.productionManifestDigest,
+    releaseSha: manifest.release.releaseSha,
+    schemaPlanDigest: plan.planDigest,
+    schemaVersion: 1,
+    targetMigrationSha256: TARGET_MIGRATION_SHA256,
+  });
+}
+
 export async function rehearseExternalLangameCurrent191ProductionUpgrade({
   adapter,
   artifactInspector = inspectArtifactAuthority,
@@ -944,7 +1214,8 @@ export async function rehearseExternalLangameCurrent191ProductionUpgrade({
   manifest: rawManifest,
   verifyArtifact = verifyCurrentReleaseArtifact,
 }) {
-  const manifest = normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
+  const manifest =
+    normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
   if (
     !manifest.target.databaseName.startsWith("leetplus_restored_") ||
     manifest.target.port === 5432 ||
@@ -1310,12 +1581,16 @@ async function runPsql(target, sql, timeoutSeconds) {
     stdout,
     stdoutBytes: stdout.length,
     stdoutSha256: sha256(stdout),
-    status: result.code === 0 && result.signal === null ? "SUCCEEDED" : "FAILED",
+    status:
+      result.code === 0 && result.signal === null ? "SUCCEEDED" : "FAILED",
   });
 }
 
-export function createExternalLangameCurrent191ProductionPgAdapter(rawManifest) {
-  const manifest = normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
+export function createExternalLangameCurrent191ProductionPgAdapter(
+  rawManifest,
+) {
+  const manifest =
+    normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
   return Object.freeze({
     inspect: async () => {
       const result = await runPsql(
@@ -1331,7 +1606,8 @@ export function createExternalLangameCurrent191ProductionPgAdapter(rawManifest) 
         .split("\n")
         .map((line) => line.trim())
         .filter(Boolean);
-      if (rows.length !== 1) fail("CURRENT191_UPGRADE_DATABASE_INSPECTION_FAILED");
+      if (rows.length !== 1)
+        fail("CURRENT191_UPGRADE_DATABASE_INSPECTION_FAILED");
       try {
         return JSON.parse(rows[0]);
       } catch {
@@ -1358,6 +1634,55 @@ function migrationBody(rawMigration) {
     fail("CURRENT191_UPGRADE_TARGET_MIGRATION_BOUNDARY_INVALID");
   }
   return lines.slice(beginIndexes[0] + 1, commitIndexes[0]).join("\n");
+}
+
+export async function verifyExternalLangameCurrent191ProductionRuntimeFinalized({
+  adapter,
+  manifest: rawManifest,
+  plan: rawPlan,
+  runtimeAdapter,
+}) {
+  const manifest =
+    normalizeExternalLangameCurrent191ProductionUpgradeManifest(rawManifest);
+  const plan = normalizePlan(rawPlan);
+  if (
+    plan.releaseSha !== manifest.release.releaseSha ||
+    plan.productionManifestDigest !== digest("production-manifest", manifest)
+  ) {
+    fail("CURRENT191_UPGRADE_PLAN_INVALID");
+  }
+  for (const method of ["acquireLock", "inspectTarget", "releaseLock"]) {
+    if (typeof runtimeAdapter?.[method] !== "function") {
+      fail("CURRENT191_UPGRADE_RUNTIME_ADAPTER_INVALID");
+    }
+  }
+  await runtimeAdapter.acquireLock();
+  try {
+    const final = summarizeRawInventory(await adapter.inspect());
+    if (!exactFinalState(final, plan.sourceDatabaseEvidence, manifest)) {
+      fail("CURRENT191_UPGRADE_FINAL_DATABASE_STATE_NOT_REACHED");
+    }
+    const runtime = normalizeExternalLangameCurrent191FinalRuntimeAttestation(
+      await runtimeAdapter.inspectTarget(),
+      {
+        expectedPhase: FINAL_RUNTIME_PHASE,
+        expectedReleaseSha: manifest.release.releaseSha,
+      },
+    );
+    return Object.freeze({
+      databaseEvidenceDigest: databaseEvidenceDigest(final),
+      migrationCount: final.migrationCount,
+      migrationHead: final.migrationHead,
+      planDigest: plan.planDigest,
+      runtimeFinalAttestationDigest:
+        externalLangameCurrent191FinalRuntimeAttestationDigest(runtime, {
+          expectedPhase: FINAL_RUNTIME_PHASE,
+          expectedReleaseSha: manifest.release.releaseSha,
+        }),
+    });
+  } finally {
+    await runtimeAdapter.releaseLock();
+  }
 }
 
 function migrationBodiesByAuthority(rawMigration) {
@@ -1438,7 +1763,8 @@ export function buildExternalLangameCurrent191ProductionMigrationSql({
   ) {
     fail("CURRENT191_UPGRADE_SOURCE_OWNER_TOPOLOGY_INVALID");
   }
-  const { applicationSql, privilegedSql } = migrationBodiesByAuthority(rawMigration);
+  const { applicationSql, privilegedSql } =
+    migrationBodiesByAuthority(rawMigration);
   return [
     "BEGIN;",
     "SET LOCAL lock_timeout = '5s';",
@@ -1505,10 +1831,25 @@ export function createExternalLangameCurrent191ProductionLocalPostgresExecutor()
 }
 
 async function systemctlState(systemctl, unit) {
-  const child = spawn(systemctl, ["show", unit, "--no-pager", "--property=ActiveState", "--property=UnitFileState"], {
-    env: { LANG: "C", LC_ALL: "C", PATH: "/usr/sbin:/usr/bin:/sbin:/bin", TZ: "UTC" },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawn(
+    systemctl,
+    [
+      "show",
+      unit,
+      "--no-pager",
+      "--property=ActiveState",
+      "--property=UnitFileState",
+    ],
+    {
+      env: {
+        LANG: "C",
+        LC_ALL: "C",
+        PATH: "/usr/sbin:/usr/bin:/sbin:/bin",
+        TZ: "UTC",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (chunk) => (stdout += chunk.toString("utf8")));
@@ -1521,16 +1862,24 @@ async function systemctlState(systemctl, unit) {
     fail("CURRENT191_UPGRADE_WORKER_STATE_INVALID");
   }
   return Object.fromEntries(
-    stdout.split("\n").filter((line) => line.includes("=")).map((line) => {
-      const separator = line.indexOf("=");
-      return [line.slice(0, separator), line.slice(separator + 1)];
-    }),
+    stdout
+      .split("\n")
+      .filter((line) => line.includes("="))
+      .map((line) => {
+        const separator = line.indexOf("=");
+        return [line.slice(0, separator), line.slice(separator + 1)];
+      }),
   );
 }
 
 async function systemctlAction(systemctl, action, unit) {
   const child = spawn(systemctl, [action, unit], {
-    env: { LANG: "C", LC_ALL: "C", PATH: "/usr/sbin:/usr/bin:/sbin:/bin", TZ: "UTC" },
+    env: {
+      LANG: "C",
+      LC_ALL: "C",
+      PATH: "/usr/sbin:/usr/bin:/sbin:/bin",
+      TZ: "UTC",
+    },
     stdio: ["ignore", "ignore", "pipe"],
   });
   let stderr = "";
@@ -1565,7 +1914,10 @@ export function createExternalLangameCurrent191WorkerSafetyAdapter() {
         systemctlState(systemctl, TIMER_UNIT),
         systemctlState(systemctl, WORKER_UNIT),
       ]);
-      if (stoppedTimer.ActiveState !== "inactive" || stoppedWorker.ActiveState !== "inactive") {
+      if (
+        stoppedTimer.ActiveState !== "inactive" ||
+        stoppedWorker.ActiveState !== "inactive"
+      ) {
         fail("CURRENT191_UPGRADE_WORKER_NOT_QUIESCED");
       }
       quiesced = true;
@@ -1597,22 +1949,33 @@ export function createExternalLangameCurrent191WorkerSafetyAdapter() {
   });
 }
 
-export function createExternalLangameCurrent191ProductionRuntimeAdapter(options) {
+export function createExternalLangameCurrent191ProductionRuntimeAdapter(
+  options,
+) {
   return createExternalLangameCurrent191ProductionBridgeRuntimeAdapter(options);
 }
 
-export const EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS = Object.freeze({
-  applicationRelationOwner: APPLICATION_RELATION_OWNER,
-  privilegedWorkerFunctionOwner: PRIVILEGED_WORKER_FUNCTION_OWNER,
-  sourceConstraint: SOURCE_CONSTRAINT,
-  sourceMigrationCount: SOURCE_COUNT,
-  sourceMigrationHead: SOURCE_HEAD,
-  sourceWorkerFunctionSha256: SOURCE_WORKER_FUNCTION_SHA256,
-  targetConstraint: TARGET_CONSTRAINT,
-  targetMigrationCount: TARGET_COUNT,
-  targetMigrationHead: TARGET_HEAD,
-  targetMigrationSha256: TARGET_MIGRATION_SHA256,
-  targetWorkerFunctionSha256: TARGET_WORKER_FUNCTION_SHA256,
-  timerUnit: TIMER_UNIT,
-  workerUnit: WORKER_UNIT,
-});
+export function createExternalLangameCurrent191ProductionFinalRuntimeAdapter(
+  options,
+) {
+  return createExternalLangameCurrent191ProductionFinalBridgeRuntimeAdapter(
+    options,
+  );
+}
+
+export const EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS =
+  Object.freeze({
+    applicationRelationOwner: APPLICATION_RELATION_OWNER,
+    privilegedWorkerFunctionOwner: PRIVILEGED_WORKER_FUNCTION_OWNER,
+    sourceConstraint: SOURCE_CONSTRAINT,
+    sourceMigrationCount: SOURCE_COUNT,
+    sourceMigrationHead: SOURCE_HEAD,
+    sourceWorkerFunctionSha256: SOURCE_WORKER_FUNCTION_SHA256,
+    targetConstraint: TARGET_CONSTRAINT,
+    targetMigrationCount: TARGET_COUNT,
+    targetMigrationHead: TARGET_HEAD,
+    targetMigrationSha256: TARGET_MIGRATION_SHA256,
+    targetWorkerFunctionSha256: TARGET_WORKER_FUNCTION_SHA256,
+    timerUnit: TIMER_UNIT,
+    workerUnit: WORKER_UNIT,
+  });

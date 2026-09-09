@@ -29,6 +29,12 @@ const nginxRoot = path.join(root, "etc/nginx/leetplus");
 const systemdUnitRoot = path.join(root, "etc/systemd/system");
 const releaseSha = state.releaseSha;
 
+function argumentValue(name) {
+  const index = argv.indexOf(name);
+  if (index < 0 || argv[index + 1] === undefined) process.exit(94);
+  return argv[index + 1];
+}
+
 function replaceLink(linkPath, target) {
   try {
     unlinkSync(linkPath);
@@ -115,8 +121,8 @@ function writeBindReceipt(slot) {
     ["REQUESTED_PROVENANCE_SHA256", "4".repeat(64)],
     ["REQUESTED_HYDRATION_ATTESTATION_SHA256", "5".repeat(64)],
     ["PRIOR_STATE", "BOUND"],
-    ["PRIOR_RELEASE_SHA", "b".repeat(40)],
-    ["PRIOR_TARGET", path.join(releaseRoot, "b".repeat(40))],
+    ["PRIOR_RELEASE_SHA", state.sourceReleaseSha],
+    ["PRIOR_TARGET", path.join(releaseRoot, state.sourceReleaseSha)],
     ["PRIOR_SHA256SUMS_SHA256", "7".repeat(64)],
     ["PRIOR_HYDRATED_SHA256SUMS_SHA256", "8".repeat(64)],
     ["PRIOR_SYMLINK_MANIFEST_SHA256", "9".repeat(64)],
@@ -182,13 +188,10 @@ function writeCutoverReceipt({ activateTarget = true } = {}) {
         ? "http://127.0.0.1:3100"
         : "http://127.0.0.1:3200",
     ],
-    ["PREVIOUS_RELEASE_SHA", "b".repeat(40)],
-    [
-      "PREVIOUS_MIGRATION",
-      "20260831120000_guest_support_bug_report_input_repair",
-    ],
-    ["PREVIOUS_MIGRATION_COUNT", "189"],
-    ["PREVIOUS_WEB_BUILD_ID", "b".repeat(40)],
+    ["PREVIOUS_RELEASE_SHA", argumentValue("--previous-release-sha")],
+    ["PREVIOUS_MIGRATION", argumentValue("--previous-migration")],
+    ["PREVIOUS_MIGRATION_COUNT", argumentValue("--previous-migration-count")],
+    ["PREVIOUS_WEB_BUILD_ID", argumentValue("--previous-web-build-id")],
     [
       "ACTIVATED_TARGET",
       path.join(nginxRoot, "upstreams/" + state.targetSlot + ".conf"),

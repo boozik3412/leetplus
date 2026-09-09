@@ -8,9 +8,12 @@ import {
   applyExternalLangameCurrent191ProductionUpgradePlan,
   buildExternalLangameCurrent191ProductionMigrationSql,
   buildExternalLangameCurrent191ProductionUpgradePlan,
+  createExternalLangameCurrent191ProductionCheckReceipt,
   inspectExternalLangameCurrent191ProductionUpgradeInventory,
+  normalizeExternalLangameCurrent191ProductionCheckReceipt,
   rehearseExternalLangameCurrent191ProductionUpgrade,
   signExternalLangameCurrent191ProductionUpgradePlan,
+  verifyExternalLangameCurrent191ProductionRuntimeFinalized,
   verifyExternalLangameCurrent191ProductionUpgradeFinal,
 } from "./external-langame-current191-production-upgrade.mjs";
 
@@ -60,15 +63,17 @@ function manifest(authority = approvalAuthority()) {
 function migrationRows(count) {
   return Array.from({ length: count }, (_, index) => ({
     appliedStepsCount: 1,
-    checksum: index === count - 1 && count === 191
-      ? EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationSha256
-      : createHash("sha256").update(`migration-${index}`).digest("hex"),
+    checksum:
+      index === count - 1 && count === 191
+        ? EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationSha256
+        : createHash("sha256").update(`migration-${index}`).digest("hex"),
     finished: true,
-    name: index === count - 1
-      ? count === 190
-        ? EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS.sourceMigrationHead
-        : EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationHead
-      : `2026${String(index).padStart(8, "0")}_fixture`,
+    name:
+      index === count - 1
+        ? count === 190
+          ? EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS.sourceMigrationHead
+          : EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationHead
+        : `2026${String(index).padStart(8, "0")}_fixture`,
     rolledBack: false,
   }));
 }
@@ -86,8 +91,20 @@ function rawInventory(phase = "source", overrides = {}) {
     databaseName: "leetplus",
     descriptionsBelow20: 0,
     historicalOwnership: [
-      { acl: null, identity: "390873", kind: "class", name: "Store", owner: "leetplus" },
-      { acl: null, identity: "286718", kind: "function", name: "identity_mail_delivery_worker_assert_v1(text)", owner: "postgres" },
+      {
+        acl: null,
+        identity: "390873",
+        kind: "class",
+        name: "Store",
+        owner: "leetplus",
+      },
+      {
+        acl: null,
+        identity: "286718",
+        kind: "function",
+        name: "identity_mail_delivery_worker_assert_v1(text)",
+        owner: "postgres",
+      },
     ],
     migrationCount: target ? 191 : 190,
     migrationHead: target
@@ -99,9 +116,17 @@ function rawInventory(phase = "source", overrides = {}) {
     sessionUser: "postgres",
     systemIdentifier: SYSTEM_IDENTIFIER,
     targetMigrationRows: target ? 1 : 0,
-    ticketTable: { acl: ["leetplus=arwdDxt/leetplus"], oid: "390873", owner: "leetplus" },
+    ticketTable: {
+      acl: ["leetplus=arwdDxt/leetplus"],
+      oid: "390873",
+      owner: "leetplus",
+    },
     unfinishedMigrationCount: 0,
-    workerFunction: { acl: ["postgres=X/postgres"], oid: "286718", owner: "postgres" },
+    workerFunction: {
+      acl: ["postgres=X/postgres"],
+      oid: "286718",
+      owner: "postgres",
+    },
     workerFunctionComment: target ? TARGET_COMMENT : SOURCE_COMMENT,
     workerFunctionSha256: target
       ? EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS.targetWorkerFunctionSha256
@@ -205,14 +230,63 @@ function runtimeFixture() {
   let target = bridge("TARGET_191");
   return {
     adapter: {
-      acquireLock: async () => { locks += 1; },
+      acquireLock: async () => {
+        locks += 1;
+      },
       inspectSource: async () => source,
       inspectTarget: async () => target,
-      releaseLock: async () => { locks -= 1; },
+      releaseLock: async () => {
+        locks -= 1;
+      },
     },
     locks: () => locks,
-    setSource: (value) => { source = value; },
-    setTarget: (value) => { target = value; },
+    setSource: (value) => {
+      source = value;
+    },
+    setTarget: (value) => {
+      target = value;
+    },
+  };
+}
+
+function finalRuntime() {
+  const value = bridge("TARGET_191");
+  return {
+    ...value,
+    active: {
+      ...value.active,
+      bugReportingMode: "LIVE",
+      schemaBridgeMode: "OFF",
+    },
+    bridgeContract:
+      "EXTERNAL_LANGAME_SIMPLE_ONBOARDING_CURRENT191_FINAL_RUNTIME_V1",
+    phase: "FINAL_191",
+    rollback: {
+      ...value.rollback,
+      bugReportingMode: "LIVE",
+      schemaBridgeMode: "OFF",
+    },
+    topologyMode: "DUAL_CURRENT_N_MINUS_ONE",
+  };
+}
+
+function finalRuntimeFixture(initial = finalRuntime()) {
+  let locks = 0;
+  let target = initial;
+  return {
+    adapter: {
+      acquireLock: async () => {
+        locks += 1;
+      },
+      inspectTarget: async () => target,
+      releaseLock: async () => {
+        locks -= 1;
+      },
+    },
+    locks: () => locks,
+    setTarget: (value) => {
+      target = value;
+    },
   };
 }
 
@@ -241,7 +315,9 @@ async function planFixture() {
     approval,
     artifactInspector,
     authority,
-    makeTarget: () => { current = rawInventory("target"); },
+    makeTarget: () => {
+      current = rawInventory("target");
+    },
     manifest: productionManifest,
     now,
     plan,
@@ -255,11 +331,12 @@ test("builds a signed exact CURRENT190 to CURRENT191 plan", async () => {
   assert.equal(fixture.plan.targetMigrationCount, 191);
   assert.equal(fixture.plan.bridgeAttestation.phase, "SOURCE_190");
   assert.equal(fixture.runtime.locks(), 0);
-  const inventory = await inspectExternalLangameCurrent191ProductionUpgradeInventory({
-    adapter: fixture.adapter,
-    artifactInspector: fixture.artifactInspector,
-    manifest: fixture.manifest,
-  });
+  const inventory =
+    await inspectExternalLangameCurrent191ProductionUpgradeInventory({
+      adapter: fixture.adapter,
+      artifactInspector: fixture.artifactInspector,
+      manifest: fixture.manifest,
+    });
   assert.equal(inventory.migrationCount, 190);
 });
 
@@ -268,13 +345,21 @@ test("pins the production split-owner topology before any migration", async () =
   const artifactInspector = async () => artifactEvidence();
   const drifts = [
     {
-      ticketTable: { acl: ["postgres=arwdDxt/postgres"], oid: "390873", owner: "postgres" },
+      ticketTable: {
+        acl: ["postgres=arwdDxt/postgres"],
+        oid: "390873",
+        owner: "postgres",
+      },
     },
     {
       migrationTable: { acl: null, oid: "16392", owner: "postgres" },
     },
     {
-      workerFunction: { acl: ["leetplus=X/leetplus"], oid: "286718", owner: "leetplus" },
+      workerFunction: {
+        acl: ["leetplus=X/leetplus"],
+        oid: "286718",
+        owner: "leetplus",
+      },
     },
   ];
   for (const drift of drifts) {
@@ -304,7 +389,9 @@ test("executes relation DDL as leetplus and privileged function DDL as postgres"
     target: manifest().target,
   });
   const firstApplicationRole = sql.indexOf('SET LOCAL ROLE "leetplus";');
-  const relationDdl = sql.indexOf('CREATE UNIQUE INDEX "store_external_identity_global_uidx"');
+  const relationDdl = sql.indexOf(
+    'CREATE UNIQUE INDEX "store_external_identity_global_uidx"',
+  );
   const resetToPostgres = sql.indexOf("RESET ROLE;", relationDdl);
   const privilegedDdl = sql.indexOf(
     'CREATE OR REPLACE FUNCTION public."identity_mail_delivery_worker_assert_v1"',
@@ -349,9 +436,15 @@ test("applies once, preserves database authority and restores the worker", async
     workerSafetyAdapter: {
       quiesce: async () => {
         quiesced = true;
-        return { timerWasActive: true, timerWasEnabled: true, workerWasActive: false };
+        return {
+          timerWasActive: true,
+          timerWasEnabled: true,
+          workerWasActive: false,
+        };
       },
-      restore: async () => { quiesced = false; },
+      restore: async () => {
+        quiesced = false;
+      },
     },
   });
   assert.equal(result.decision, "CURRENT191_UPGRADE_APPLIED");
@@ -379,15 +472,13 @@ test("applies once, preserves database authority and restores the worker", async
 test("fails closed on drift before migration and still releases the runtime lock", async () => {
   const fixture = await planFixture();
   const driftedBridge = bridge("SOURCE_190");
-  fixture.runtime.setSource(
-    {
-      ...driftedBridge,
-      active: {
-        ...driftedBridge.active,
-        authenticatedSmokeSha256: "f".repeat(64),
-      },
+  fixture.runtime.setSource({
+    ...driftedBridge,
+    active: {
+      ...driftedBridge.active,
+      authenticatedSmokeSha256: "f".repeat(64),
     },
-  );
+  });
   let migrationCalls = 0;
   await assert.rejects(
     applyExternalLangameCurrent191ProductionUpgradePlan({
@@ -395,7 +486,11 @@ test("fails closed on drift before migration and still releases the runtime lock
       approval: fixture.approval,
       artifactInspector: fixture.artifactInspector,
       confirmPlanDigest: fixture.plan.planDigest,
-      executor: { migrate: async () => { migrationCalls += 1; } },
+      executor: {
+        migrate: async () => {
+          migrationCalls += 1;
+        },
+      },
       manifest: fixture.manifest,
       now: fixture.now,
       onPhase: async () => undefined,
@@ -404,7 +499,10 @@ test("fails closed on drift before migration and still releases the runtime lock
       productionConfirmation:
         EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONFIRMATION,
       runtimeAdapter: fixture.runtime.adapter,
-      workerSafetyAdapter: { quiesce: async () => ({}), restore: async () => undefined },
+      workerSafetyAdapter: {
+        quiesce: async () => ({}),
+        restore: async () => undefined,
+      },
     }),
     { reasonCode: "CURRENT191_UPGRADE_FRESH_PLAN_MISMATCH" },
   );
@@ -422,7 +520,11 @@ test("recovers a lost response from the exact final state without repeating DDL"
     approval: fixture.approval,
     artifactInspector: fixture.artifactInspector,
     confirmPlanDigest: fixture.plan.planDigest,
-    executor: { migrate: async () => { migrationCalls += 1; } },
+    executor: {
+      migrate: async () => {
+        migrationCalls += 1;
+      },
+    },
     manifest: fixture.manifest,
     now: fixture.now,
     onPhase: async () => undefined,
@@ -432,8 +534,13 @@ test("recovers a lost response from the exact final state without repeating DDL"
       EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONFIRMATION,
     runtimeAdapter: fixture.runtime.adapter,
     workerSafetyAdapter: {
-      quiesce: async () => { workerCalls += 1; return {}; },
-      restore: async () => { workerCalls += 1; },
+      quiesce: async () => {
+        workerCalls += 1;
+        return {};
+      },
+      restore: async () => {
+        workerCalls += 1;
+      },
     },
   });
   assert.equal(result.recoveredFromLostResponse, true);
@@ -470,6 +577,84 @@ test("rejects a final state that changes protected ownership or ACL", async () =
   assert.equal(fixture.runtime.locks(), 0);
 });
 
+test("publishes a CURRENT191 pre-final receipt only from an exact live check", async () => {
+  const fixture = await planFixture();
+  fixture.makeTarget();
+  const verified = await verifyExternalLangameCurrent191ProductionUpgradeFinal({
+    adapter: fixture.adapter,
+    manifest: fixture.manifest,
+    plan: fixture.plan,
+    runtimeAdapter: fixture.runtime.adapter,
+  });
+  const receipt = createExternalLangameCurrent191ProductionCheckReceipt({
+    manifest: fixture.manifest,
+    now: fixture.now,
+    plan: fixture.plan,
+    verification: verified,
+  });
+  assert.equal(receipt.schemaPlanDigest, fixture.plan.planDigest);
+  assert.equal(receipt.releaseSha, RELEASE_SHA);
+  assert.equal(receipt.migrationCount, 191);
+  assert.equal(
+    receipt.targetMigrationSha256,
+    EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationSha256,
+  );
+  assert.throws(
+    () =>
+      normalizeExternalLangameCurrent191ProductionCheckReceipt({
+        ...receipt,
+        migrationCount: 190,
+      }),
+    { reasonCode: "CURRENT191_UPGRADE_CHECK_RECEIPT_INVALID" },
+  );
+  assert.throws(
+    () =>
+      createExternalLangameCurrent191ProductionCheckReceipt({
+        manifest: fixture.manifest,
+        now: fixture.now,
+        plan: fixture.plan,
+        verification: { ...verified, databaseEvidenceDigest: "invalid" },
+      }),
+    { reasonCode: "CURRENT191_UPGRADE_CHECK_RECEIPT_INVALID" },
+  );
+});
+
+test("accepts only two exact CURRENT191 slots after bridge finalization", async () => {
+  const fixture = await planFixture();
+  fixture.makeTarget();
+  const runtime = finalRuntimeFixture();
+  const verified =
+    await verifyExternalLangameCurrent191ProductionRuntimeFinalized({
+      adapter: fixture.adapter,
+      manifest: fixture.manifest,
+      plan: fixture.plan,
+      runtimeAdapter: runtime.adapter,
+    });
+  assert.equal(verified.migrationCount, 191);
+  assert.match(verified.runtimeFinalAttestationDigest, /^[0-9a-f]{64}$/u);
+  assert.equal(runtime.locks(), 0);
+
+  const drifted = finalRuntime();
+  runtime.setTarget({
+    ...drifted,
+    rollback: {
+      ...drifted.rollback,
+      bugReportingMode: "OFF",
+      schemaBridgeMode: "ALLOW_CURRENT_190",
+    },
+  });
+  await assert.rejects(
+    verifyExternalLangameCurrent191ProductionRuntimeFinalized({
+      adapter: fixture.adapter,
+      manifest: fixture.manifest,
+      plan: fixture.plan,
+      runtimeAdapter: runtime.adapter,
+    }),
+    { reasonCode: "CURRENT188_UPGRADE_BRIDGE_ATTESTATION_INVALID" },
+  );
+  assert.equal(runtime.locks(), 0);
+});
+
 test("rehearses the exact executor only on an isolated restored-copy target", async () => {
   const fixture = await planFixture();
   await assert.rejects(
@@ -484,7 +669,8 @@ test("rehearses the exact executor only on an isolated restored-copy target", as
   const restoredManifest = structuredClone(fixture.manifest);
   restoredManifest.target.databaseName = "leetplus_restored_current191_test";
   restoredManifest.target.port = 55488;
-  restoredManifest.target.socketDirectory = "/srv/leetplus/restored-current191-test/socket";
+  restoredManifest.target.socketDirectory =
+    "/srv/leetplus/restored-current191-test/socket";
   const restoredAdapter = {
     inspect: async () => ({
       ...(await fixture.adapter.inspect()),

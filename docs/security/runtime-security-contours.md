@@ -30,7 +30,7 @@ fail-closed правилу одного контура снова сломать
 | Corporate landing          | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                           |
 | Release acceleration       | 8/8 + retention: controlled five-phase rollout operation `6be461db-c600-4fe7-9e87-6267d708554e` завершён receipt `c9cbf2c9…`; V3 и trusted lane metrics merged; public/corporate/worker контуры нельзя объединять или понижать ради скорости                                 |
 | Langame recovery           | оба systemd timer `enabled/active`; daily authority привязана к exact `def5174f…` и обходит все `3/3` active Langame domains единственного admitted INTERNAL tenant; external unattended остаётся deny до отдельного admission                                                   |
-| External Langame onboarding | canonical source target `CURRENT_191/191`: only `/settings/preview` followed by revalidated atomic `PUT /settings` and a user-triggered exact-binding `BACKFILL/MANUAL`; `PILOT/BETA/LIVE` manual exact-Store sync only; signed controller performs only the `CURRENT_190 → CURRENT_191` dual-target `ALLOW_CURRENT_190` bridge, transactional apply and two-slot bridge-off; no production GO implied |
+| External Langame onboarding | canonical source target `CURRENT_191/191`: preview → atomic settings → manual exact-Store backfill; signed controller uses only the `CURRENT_190 → 191` bridge, transactional apply and protected check receipt; two separate final cutovers pin its SHA, terminal `OFF/LIVE` requires `final-check`; no production GO implied |
 | Telegram guest auth        | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                            |
 | Staff rewards              | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                |
 | Guest identity owner       | exact-link и verified-phone repairs deployed в `def5174f…`; RU-варианты подтверждённого телефона разрешаются только внутри выбранного Langame domain, неоднозначность fail-closed; все 9 выявленных split-owner дублей погашены без reward replay, контрольный остаток `0`      |
@@ -61,12 +61,28 @@ Schema target этого контракта — `CURRENT_191/191`, migration
 `20260908180000_external_langame_simple_onboarding`. Только exact external
 Langame `CURRENT191` signed schema controller может применить её: signature
 привязана к release SHA, source/target heads и counts, миграции и receipts
-обоих slots. До effect оба slot одного exact target-191 release используют
-`GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_190` (`COMBINED` и
-`GUEST_BUG_REPORTING_MODE=OFF`); controller применяет schema транзакционно.
-После commit оба slot обязаны вернуться в bridge `OFF`, подтвердить
-CURRENT191-readiness и лишь затем пройти final postcheck. Это source contract,
-не заявление о deployed production или GO.
+обоих slots. До effect оба slot одного exact target-191 release проходят отдельно,
+по одному inactive slot, через orchestrator profile
+`--slot-runtime-profile current191-bridge`: только `CURRENT190 OFF/LIVE →
+target191 ALLOW_CURRENT_190/OFF` (`COMBINED`). Plan digest, phase receipts и
+recovery `resume` всегда относятся к одному slot и одному cutover; profile не
+является общим переключателем flags.
+
+Controller применяет schema транзакционно, а его exact `check` обязателен до
+bridge-off и атомарно публикует receipt `root:root 0400`. Каждый
+`current191-final` plan обязан пинить SHA-256 этого receipt; orchestrator до
+создания операции и при каждом чтении plan сверяет immutable bytes, release
+SHA, schema-plan, head/count/checksum и database/bridge evidence. Один exact
+receipt используется в обоих final plan без TTL между slot cutover: после
+первого final новый dual-bridge check уже невозможен. Это не ослабляет boundary,
+потому что перед каждым effect orchestrator отдельно требует тот же release,
+exact `ALLOW_CURRENT_190/OFF` source и повторную live DB readiness. После commit
+orchestrator выполняет `current191-final` также по
+одному inactive slot и с cutover: только `target191 ALLOW_CURRENT_190/OFF →
+target191 OFF/LIVE`. После двух exact final receipts CURRENT191 CLI выполняет
+`final-check`; только затем допустим final public postcheck. Это source
+contract, не заявление о deployed production или GO: production остаётся
+`CURRENT_190/190`.
 
 ### Public guest canonical profile owner repair 08.09.2026
 
@@ -866,7 +882,9 @@ Support-функциональность следует тем же трём г�
   `GUEST_BUG_REPORTING_MODE=OFF`; любой другой head/count, target release,
   unfinished migration, split runtime или `LIVE` блокирует startup/readiness.
   Это переходные deployment-контракты, а не общий N/N+1-допуск и не разрешение
-  читать ещё отсутствующие таблицы/колонки.
+  читать ещё отсутствующие таблицы/колонки. Они не разрешают ручную запись
+  `/etc/leetplus/slots/*.env`: для CURRENT191 единственный writer — установленный
+  orchestrator с именованными bridge/final profiles, exact plan и phase receipts;
 - фактическая production schema имеет историческую mixed-owner topology.
   Единственный допустимый переход — same-SHA signed legacy controller с
   пообъектным OID/owner/ACL digest, migration от локальной postgres identity,

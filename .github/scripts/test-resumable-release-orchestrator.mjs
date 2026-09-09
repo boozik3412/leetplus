@@ -29,6 +29,12 @@ import {
 const RELEASE_SHA = "a".repeat(40);
 const PREVIOUS_SHA = "b".repeat(40);
 const MIGRATION = "20260831120000_guest_support_bug_report_input_repair";
+const CURRENT190_MIGRATION = "20260908090000_initial_owner_invite_link_mode";
+const CURRENT191_MIGRATION =
+  "20260908180000_external_langame_simple_onboarding";
+const CURRENT191_MIGRATION_SHA256 =
+  "a149122148b0270ad870883f81cba6bd61365c0babca56f81c18523af4b78beb";
+const CURRENT191_SCHEMA_PLAN_DIGEST = "d".repeat(64);
 const OPERATION_ID = "11111111-1111-4111-8111-111111111111";
 const SECOND_OPERATION_ID = "22222222-2222-4222-8222-222222222222";
 const V2_CONTRACT_VERSION = "LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V2";
@@ -51,6 +57,8 @@ function slotEnvironment(
     apiBindHost = "localhost",
     bridgeMode = "OFF",
     bugReportingMode = "LIVE",
+    migration = MIGRATION,
+    migrationCount = 189,
   } = {},
 ) {
   const blue = slot === "blue";
@@ -58,8 +66,8 @@ function slotEnvironment(
     "# Protected /etc/leetplus/slots/" + slot + ".env metadata.",
     "RELEASE_SHA=" + releaseSha,
     "WEB_BUILD_ID=" + releaseSha,
-    "EXPECTED_DATABASE_MIGRATION=" + MIGRATION,
-    "EXPECTED_DATABASE_MIGRATION_COUNT=189",
+    "EXPECTED_DATABASE_MIGRATION=" + migration,
+    "EXPECTED_DATABASE_MIGRATION_COUNT=" + migrationCount,
     "BUILD_TIME=2026-09-01T00:00:00.000Z",
     "API_BIND_HOST=" + apiBindHost,
     "PORT=" + (blue ? "4100" : "4200"),
@@ -75,6 +83,34 @@ async function writeJson(filePath, value) {
   await writeFile(filePath, JSON.stringify(value, null, 2) + "\n", {
     mode: 0o600,
   });
+}
+
+async function publishCurrent191CheckReceipt(root, overrides = {}) {
+  const receipt = {
+    bridgeAttestationDigest: "1".repeat(64),
+    checkedAt: new Date().toISOString(),
+    contractVersion: "EXTERNAL_LANGAME_CURRENT191_PRE_FINAL_CHECK_RECEIPT_V1",
+    databaseEvidenceDigest: "2".repeat(64),
+    decision: "CURRENT191_UPGRADE_CHECK_ACCEPTED",
+    migrationCount: 191,
+    migrationHead: CURRENT191_MIGRATION,
+    productionManifestDigest: "3".repeat(64),
+    releaseSha: RELEASE_SHA,
+    schemaPlanDigest: CURRENT191_SCHEMA_PLAN_DIGEST,
+    schemaVersion: 1,
+    targetMigrationSha256: CURRENT191_MIGRATION_SHA256,
+    ...overrides,
+  };
+  const raw = JSON.stringify(receipt, null, 2) + "\n";
+  const receiptSha256 = digest(raw);
+  const receiptPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts",
+    `external-langame-current191-${receiptSha256}.check.json`,
+  );
+  await writeFile(receiptPath, raw, { mode: 0o600 });
+  await chmod(receiptPath, 0o400);
+  return { receipt, receiptPath, receiptSha256 };
 }
 
 async function setupFixture(suffix = "", environmentOptions = {}) {
@@ -101,19 +137,20 @@ async function setupFixture(suffix = "", environmentOptions = {}) {
     mkdir(upstreamRoot, { recursive: true }),
     mkdir(path.join(root, "etc/systemd/system"), { recursive: true }),
   ]);
-  const previousRelease = path.join(releaseRoot, PREVIOUS_SHA);
+  const sourceReleaseSha = environmentOptions.releaseSha ?? PREVIOUS_SHA;
+  const previousRelease = path.join(releaseRoot, sourceReleaseSha);
   await mkdir(previousRelease, { recursive: true });
   await Promise.all([
     symlink(previousRelease, path.join(slotRoot, "blue")),
     symlink(previousRelease, path.join(slotRoot, "green")),
     writeFile(
       path.join(slotEnvironmentRoot, "blue.env"),
-      slotEnvironment("blue", PREVIOUS_SHA, environmentOptions),
+      slotEnvironment("blue", sourceReleaseSha, environmentOptions),
       { mode: 0o440 },
     ),
     writeFile(
       path.join(slotEnvironmentRoot, "green.env"),
-      slotEnvironment("green", PREVIOUS_SHA, environmentOptions),
+      slotEnvironment("green", sourceReleaseSha, environmentOptions),
       { mode: 0o440 },
     ),
   ]);
@@ -125,12 +162,12 @@ async function setupFixture(suffix = "", environmentOptions = {}) {
   );
   const baselineReceiptPath = path.join(
     receiptRoot,
-    "20260901T000000000000000Z-g20-" + PREVIOUS_SHA + "-green.receipt",
+    "20260901T000000000000000Z-g20-" + sourceReleaseSha + "-green.receipt",
   );
   const baselineReceipt = kv([
     ["RECORD_VERSION", "3"],
     ["GENERATION", "20"],
-    ["RELEASE_SHA", PREVIOUS_SHA],
+    ["RELEASE_SHA", sourceReleaseSha],
     ["SLOT", "green"],
     ["PREVIOUS_TARGET", path.join(upstreamRoot, "blue.conf")],
     ["PREVIOUS_SHA256", "1".repeat(64)],
@@ -140,10 +177,13 @@ async function setupFixture(suffix = "", environmentOptions = {}) {
     ["PREVIOUS_WEB_UNIT", "leetplus-web@blue.service"],
     ["PREVIOUS_API_URL", "http://127.0.0.1:4100"],
     ["PREVIOUS_WEB_URL", "http://127.0.0.1:3100"],
-    ["PREVIOUS_RELEASE_SHA", PREVIOUS_SHA],
-    ["PREVIOUS_MIGRATION", MIGRATION],
-    ["PREVIOUS_MIGRATION_COUNT", "189"],
-    ["PREVIOUS_WEB_BUILD_ID", PREVIOUS_SHA],
+    ["PREVIOUS_RELEASE_SHA", sourceReleaseSha],
+    ["PREVIOUS_MIGRATION", environmentOptions.migration ?? MIGRATION],
+    [
+      "PREVIOUS_MIGRATION_COUNT",
+      String(environmentOptions.migrationCount ?? 189),
+    ],
+    ["PREVIOUS_WEB_BUILD_ID", sourceReleaseSha],
     ["ACTIVATED_TARGET", path.join(upstreamRoot, "green.conf")],
     ["ACTIVATED_SHA256", "2".repeat(64)],
     ["INTENT_RECORDED_AT", "20260901T000000000000000Z"],
@@ -203,6 +243,7 @@ async function setupFixture(suffix = "", environmentOptions = {}) {
     runtimeStartCalls: 0,
     slotMasked: false,
     slotFailed: false,
+    sourceReleaseSha,
     stopCalls: 0,
     targetSlot: "blue",
     unmaskCalls: 0,
@@ -239,6 +280,43 @@ function prepareArgs(root, operationId = OPERATION_ID) {
     root,
     "--unprivileged-test-mode",
   ];
+}
+
+function current191PrepareArgs(
+  root,
+  profile,
+  { checkReceiptSha256, operationId = OPERATION_ID } = {},
+) {
+  const args = prepareArgs(root, operationId);
+  args[args.indexOf("--expected-migration") + 1] = CURRENT191_MIGRATION;
+  args[args.indexOf("--expected-migration-count") + 1] = "191";
+  const previousMigration =
+    profile === "current191-bridge"
+      ? CURRENT190_MIGRATION
+      : CURRENT191_MIGRATION;
+  const previousMigrationCount =
+    profile === "current191-bridge" ? "190" : "191";
+  args[args.indexOf("--previous-migration") + 1] = previousMigration;
+  args[args.indexOf("--previous-migration-count") + 1] = previousMigrationCount;
+  if (profile === "current191-final") {
+    args[args.indexOf("--previous-release-sha") + 1] = RELEASE_SHA;
+    args[args.indexOf("--previous-web-build-id") + 1] = RELEASE_SHA;
+  }
+  args.splice(
+    args.indexOf("--fixture-root"),
+    0,
+    "--slot-runtime-profile",
+    profile,
+  );
+  if (checkReceiptSha256 !== undefined) {
+    args.splice(
+      args.indexOf("--fixture-root"),
+      0,
+      "--current191-check-receipt-sha256",
+      checkReceiptSha256,
+    );
+  }
+  return args;
 }
 
 function continuationArgs(mode, root, planSha256, operationId = OPERATION_ID) {
@@ -284,10 +362,7 @@ async function replaceProtectedJson(filePath, value) {
   await chmod(filePath, 0o400);
 }
 
-async function rewriteCompletedOperationAsHistorical(
-  root,
-  contractVersion,
-) {
+async function rewriteCompletedOperationAsHistorical(root, contractVersion) {
   const directory = path.join(
     root,
     "var/lib/leetplus/deploy-receipts/release-orchestrator",
@@ -298,6 +373,8 @@ async function rewriteCompletedOperationAsHistorical(
   plan.contractVersion = contractVersion;
   delete plan.effectiveLane;
   delete plan.impactReceiptSha256;
+  delete plan.current191CheckReceipt;
+  delete plan.slotRuntimeProfile;
   await replaceProtectedJson(planPath, plan);
   const planSha256 = canonicalRecordSha256(plan);
 
@@ -399,10 +476,7 @@ test("runs five phases and publishes a chained final receipt", async (t) => {
     slotEnvironment("blue"),
   );
   const bindEvidence = JSON.parse(
-    await readFile(
-      path.join(operationRoot, "02-bind.evidence.json"),
-      "utf8",
-    ),
+    await readFile(path.join(operationRoot, "02-bind.evidence.json"), "utf8"),
   );
   assert.equal(
     bindEvidence.details.slotEnvironmentApiBindHostNormalization,
@@ -452,7 +526,9 @@ for (const [label, contractVersion] of [
   ["exact V2", V2_CONTRACT_VERSION],
 ]) {
   test(`accepts completed ${label} history before a new prepare`, async (t) => {
-    const fixture = await preparedFixture(`historical-${label.replaceAll(" ", "-")}-`);
+    const fixture = await preparedFixture(
+      `historical-${label.replaceAll(" ", "-")}-`,
+    );
     t.after(() => rm(fixture.root, { recursive: true, force: true }));
     assert.equal(
       await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
@@ -481,15 +557,316 @@ test("preserves an already canonical IPv4 loopback bind host", async (t) => {
     slotEnvironment("blue", PREVIOUS_SHA, { apiBindHost: "127.0.0.1" }),
   );
   const bindEvidence = JSON.parse(
-    await readFile(
-      path.join(operationRoot, "02-bind.evidence.json"),
-      "utf8",
-    ),
+    await readFile(path.join(operationRoot, "02-bind.evidence.json"), "utf8"),
   );
   assert.equal(
     bindEvidence.details.slotEnvironmentApiBindHostNormalization,
     "NONE",
   );
+});
+
+test("authorizes only the exact CURRENT191 pre-schema bridge profile", async (t) => {
+  const sourceOptions = {
+    bridgeMode: "OFF",
+    bugReportingMode: "LIVE",
+    migration: CURRENT190_MIGRATION,
+    migrationCount: 190,
+  };
+  const root = await setupFixture("current191-bridge-", sourceOptions);
+  t.after(() => rm(root, { recursive: true, force: true }));
+  assert.equal(await main(current191PrepareArgs(root, "current191-bridge")), 0);
+  const planPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    OPERATION_ID,
+    "plan.json",
+  );
+  const plan = JSON.parse(await readFile(planPath, "utf8"));
+  assert.equal(plan.slotRuntimeProfile, "current191-bridge");
+  assert.equal(
+    await main(continuationArgs("apply", root, canonicalRecordSha256(plan))),
+    0,
+  );
+  const accepted = await readFile(
+    path.join(root, "etc/leetplus/slots/blue.env"),
+    "utf8",
+  );
+  assert.match(
+    accepted,
+    /EXPECTED_DATABASE_MIGRATION=20260908180000_external_langame_simple_onboarding/u,
+  );
+  assert.match(accepted, /EXPECTED_DATABASE_MIGRATION_COUNT=191/u);
+  assert.match(accepted, /GUEST_BUG_REPORTING_MODE=OFF/u);
+  assert.match(accepted, /GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_190/u);
+  assert.equal(
+    await readFile(
+      path.join(
+        path.dirname(planPath),
+        "02-bind-slot-environment.previous.env",
+      ),
+      "utf8",
+    ),
+    slotEnvironment("blue", PREVIOUS_SHA, sourceOptions),
+  );
+});
+
+test("authorizes only the exact CURRENT191 final runtime profile", async (t) => {
+  const sourceOptions = {
+    bridgeMode: "ALLOW_CURRENT_190",
+    bugReportingMode: "OFF",
+    migration: CURRENT191_MIGRATION,
+    migrationCount: 191,
+    releaseSha: RELEASE_SHA,
+  };
+  const root = await setupFixture("current191-final-", sourceOptions);
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const checkReceipt = await publishCurrent191CheckReceipt(root);
+  assert.equal(
+    await main(
+      current191PrepareArgs(root, "current191-final", {
+        checkReceiptSha256: checkReceipt.receiptSha256,
+      }),
+    ),
+    0,
+  );
+  const planPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    OPERATION_ID,
+    "plan.json",
+  );
+  const plan = JSON.parse(await readFile(planPath, "utf8"));
+  assert.equal(plan.slotRuntimeProfile, "current191-final");
+  assert.deepEqual(plan.current191CheckReceipt, {
+    receiptSha256: checkReceipt.receiptSha256,
+    schemaPlanDigest: CURRENT191_SCHEMA_PLAN_DIGEST,
+  });
+  assert.equal(
+    await main(continuationArgs("apply", root, canonicalRecordSha256(plan))),
+    0,
+  );
+  const accepted = await readFile(
+    path.join(root, "etc/leetplus/slots/blue.env"),
+    "utf8",
+  );
+  assert.match(accepted, /EXPECTED_DATABASE_MIGRATION_COUNT=191/u);
+  assert.match(accepted, /GUEST_BUG_REPORTING_MODE=LIVE/u);
+  assert.match(accepted, /GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF/u);
+});
+
+test("rejects CURRENT191 final before a protected schema check receipt exists", async (t) => {
+  const root = await setupFixture("current191-final-without-check-", {
+    bridgeMode: "ALLOW_CURRENT_190",
+    bugReportingMode: "OFF",
+    migration: CURRENT191_MIGRATION,
+    migrationCount: 191,
+    releaseSha: RELEASE_SHA,
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+  assert.equal(await main(current191PrepareArgs(root, "current191-final")), 1);
+  await assert.rejects(
+    lstat(
+      path.join(root, "var/lib/leetplus/deploy-receipts/release-orchestrator"),
+    ),
+    { code: "ENOENT" },
+  );
+  const state = await fixtureState(root);
+  assert.equal(state.maskEffects, 0);
+  assert.equal(state.cutoverEffects, 0);
+});
+
+test("rejects a mutable CURRENT191 schema check receipt before recording an operation", async (t) => {
+  const root = await setupFixture("current191-final-mutable-check-", {
+    bridgeMode: "ALLOW_CURRENT_190",
+    bugReportingMode: "OFF",
+    migration: CURRENT191_MIGRATION,
+    migrationCount: 191,
+    releaseSha: RELEASE_SHA,
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const checkReceipt = await publishCurrent191CheckReceipt(root);
+  await chmod(checkReceipt.receiptPath, 0o600);
+  assert.equal(
+    await main(
+      current191PrepareArgs(root, "current191-final", {
+        checkReceiptSha256: checkReceipt.receiptSha256,
+      }),
+    ),
+    1,
+  );
+  await assert.rejects(
+    lstat(
+      path.join(
+        root,
+        "var/lib/leetplus/deploy-receipts/release-orchestrator",
+        OPERATION_ID,
+      ),
+    ),
+    { code: "ENOENT" },
+  );
+  const state = await fixtureState(root);
+  assert.equal(state.maskEffects, 0);
+  assert.equal(state.cutoverEffects, 0);
+});
+
+test("rejects a foreign CURRENT191 schema check receipt before recording an operation", async (t) => {
+  const root = await setupFixture("current191-final-foreign-release-check-", {
+    bridgeMode: "ALLOW_CURRENT_190",
+    bugReportingMode: "OFF",
+    migration: CURRENT191_MIGRATION,
+    migrationCount: 191,
+    releaseSha: RELEASE_SHA,
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const checkReceipt = await publishCurrent191CheckReceipt(root, {
+    releaseSha: PREVIOUS_SHA,
+  });
+  assert.equal(
+    await main(
+      current191PrepareArgs(root, "current191-final", {
+        checkReceiptSha256: checkReceipt.receiptSha256,
+      }),
+    ),
+    1,
+  );
+  await assert.rejects(
+    lstat(
+      path.join(
+        root,
+        "var/lib/leetplus/deploy-receipts/release-orchestrator",
+        OPERATION_ID,
+      ),
+    ),
+    { code: "ENOENT" },
+  );
+  const state = await fixtureState(root);
+  assert.equal(state.maskEffects, 0);
+  assert.equal(state.cutoverEffects, 0);
+});
+
+test("rejects a CURRENT191 bridge transition from any non-CURRENT190 source", async (t) => {
+  const root = await setupFixture("current191-bridge-wrong-source-", {
+    migration: MIGRATION,
+    migrationCount: 189,
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+  assert.equal(await main(current191PrepareArgs(root, "current191-bridge")), 0);
+  const planPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    OPERATION_ID,
+    "plan.json",
+  );
+  const plan = JSON.parse(await readFile(planPath, "utf8"));
+  assert.equal(
+    await main(continuationArgs("apply", root, canonicalRecordSha256(plan))),
+    1,
+  );
+  const state = await fixtureState(root);
+  assert.equal(state.slotMasked, true);
+  assert.equal(state.unmaskEffects, 0);
+  assert.equal(state.cutoverEffects, 0);
+});
+
+test("rejects a CURRENT191 final transition unless the source is the exact bridge profile", async (t) => {
+  const sourceOptions = {
+    bridgeMode: "OFF",
+    bugReportingMode: "LIVE",
+    migration: CURRENT191_MIGRATION,
+    migrationCount: 191,
+    releaseSha: RELEASE_SHA,
+  };
+  const root = await setupFixture(
+    "current191-final-wrong-source-profile-",
+    sourceOptions,
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const checkReceipt = await publishCurrent191CheckReceipt(root);
+  assert.equal(
+    await main(
+      current191PrepareArgs(root, "current191-final", {
+        checkReceiptSha256: checkReceipt.receiptSha256,
+      }),
+    ),
+    0,
+  );
+  const planPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    OPERATION_ID,
+    "plan.json",
+  );
+  const plan = JSON.parse(await readFile(planPath, "utf8"));
+  assert.equal(
+    await main(continuationArgs("apply", root, canonicalRecordSha256(plan))),
+    1,
+  );
+  const state = await fixtureState(root);
+  assert.equal(state.slotMasked, true);
+  assert.equal(state.unmaskEffects, 0);
+  assert.equal(state.cutoverEffects, 0);
+  assert.equal(
+    await readFile(path.join(root, "etc/leetplus/slots/blue.env"), "utf8"),
+    slotEnvironment("blue", RELEASE_SHA, sourceOptions),
+  );
+});
+
+test("rejects CURRENT191 finalization from a different release SHA", async (t) => {
+  const sourceOptions = {
+    bridgeMode: "ALLOW_CURRENT_190",
+    bugReportingMode: "OFF",
+    migration: CURRENT191_MIGRATION,
+    migrationCount: 191,
+  };
+  const root = await setupFixture(
+    "current191-final-wrong-source-release-",
+    sourceOptions,
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const checkReceipt = await publishCurrent191CheckReceipt(root);
+  const args = current191PrepareArgs(root, "current191-final", {
+    checkReceiptSha256: checkReceipt.receiptSha256,
+  });
+  args[args.indexOf("--previous-release-sha") + 1] = PREVIOUS_SHA;
+  args[args.indexOf("--previous-web-build-id") + 1] = PREVIOUS_SHA;
+  assert.equal(await main(args), 0);
+  const planPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    OPERATION_ID,
+    "plan.json",
+  );
+  const plan = JSON.parse(await readFile(planPath, "utf8"));
+  assert.equal(
+    await main(continuationArgs("apply", root, canonicalRecordSha256(plan))),
+    1,
+  );
+  const state = await fixtureState(root);
+  assert.equal(state.slotMasked, true);
+  assert.equal(state.unmaskEffects, 0);
+  assert.equal(state.cutoverEffects, 0);
+});
+
+test("rejects a CURRENT191 runtime profile for any other target before recording an operation", async (t) => {
+  const root = await setupFixture("current191-profile-wrong-target-", {
+    migration: CURRENT190_MIGRATION,
+    migrationCount: 190,
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const args = current191PrepareArgs(root, "current191-bridge");
+  args[args.indexOf("--expected-migration") + 1] = CURRENT190_MIGRATION;
+  args[args.indexOf("--expected-migration-count") + 1] = "190";
+  assert.equal(await main(args), 1);
+  await assert.rejects(
+    lstat(
+      path.join(root, "var/lib/leetplus/deploy-receipts/release-orchestrator"),
+    ),
+    { code: "ENOENT" },
+  );
+  const state = await fixtureState(root);
+  assert.equal(state.maskEffects, 0);
+  assert.equal(state.unmaskEffects, 0);
+  assert.equal(state.cutoverEffects, 0);
 });
 
 test("normalizes a stopped failed target before cache and bind", async (t) => {
@@ -518,10 +895,7 @@ test("rejects slot environment lineage drift while the rebound target is fenced"
     "etc/leetplus/slots/blue.env",
   );
   await chmod(environmentPath, 0o600);
-  await writeFile(
-    environmentPath,
-    slotEnvironment("blue", "c".repeat(40)),
-  );
+  await writeFile(environmentPath, slotEnvironment("blue", "c".repeat(40)));
   await chmod(environmentPath, 0o440);
   assert.equal(
     await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
@@ -711,7 +1085,9 @@ test("rejects an exact cutover receipt when the active link did not move", async
     path.join(fixture.root, "etc/nginx/leetplus/upstreams/green.conf"),
   );
   await assert.rejects(
-    lstat(path.join(path.dirname(fixture.planPath), "04-cutover.evidence.json")),
+    lstat(
+      path.join(path.dirname(fixture.planPath), "04-cutover.evidence.json"),
+    ),
     { code: "ENOENT" },
   );
   await assert.rejects(
@@ -939,10 +1315,7 @@ test("resumes after bind when the first unmask attempt fails", async (t) => {
 test("enforces one incomplete orchestrator operation", async (t) => {
   const fixture = await preparedFixture("single-flight-");
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
-  assert.equal(
-    await main(prepareArgs(fixture.root, SECOND_OPERATION_ID)),
-    1,
-  );
+  assert.equal(await main(prepareArgs(fixture.root, SECOND_OPERATION_ID)), 1);
   const state = await fixtureState(fixture.root);
   assert.equal(state.hydrationEffects, 0);
   assert.equal(state.bindEffects, 0);

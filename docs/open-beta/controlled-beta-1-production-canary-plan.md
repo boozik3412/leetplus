@@ -9,6 +9,15 @@
 release SHA, свежие CI/browser/inventory/metrics/rollback receipts и exact
 target fingerprints. Provider traffic в `CONTROLLED_CANARY` запрещён.
 
+Для CURRENT191 external Langame rollout этот документ является только
+историческим gate/checklist. Актуальные effect authority и порядок задают
+[`runtime/security contour contract`](../security/runtime-security-contours.md),
+[`resumable release orchestrator`](../deployment/resumable-release-orchestrator.md)
+и [`simple safe onboarding`](./langame-simple-onboarding.md): никаких ручных
+slot-env edits, `check` публикует receipt `root:root 0400`, каждый из двух
+отдельных final plan пинит его SHA-256, а terminal оба slots подтверждаются
+`OFF/LIVE` через `final-check`.
+
 Этот документ — обязательная операционная последовательность для первого
 внешнего `Tenant B/Store B1`. Он не разрешает выпуск по ветке, `git pull` или
 из произвольной рабочей директории. Единственный разрешённый вход — exact
@@ -282,8 +291,11 @@ runtime на `/srv/leetplus/slots/blue|green` и secrets в
 6. Выполнить production-history controller. При неуспехе не запускать candidate
    и не менять nginx; сохранить evidence и перейти к incident, не повторять
    вслепую.
-7. Создать protected release/slot env. Final canary overlay обязан выключать
-   founder activation, schedulers, mail/provider/Langame/Telegram/MAX outbound.
+7. Не создавать и не редактировать protected slot env вручную. Его атомарно
+   публикует только установленный SHA-bound orchestrator в BIND-фазе exact
+   plan; final canary overlay обязан выключать founder activation, schedulers,
+   mail/provider/Langame/Telegram/MAX outbound. Для CURRENT191 применяются
+   только профили и check-receipt authority из актуальных контрактов выше.
 8. Выполнить `systemctl enable --now` только для exact candidate
    `leetplus-api@<slot>` и `leetplus-web@<slot>` на alternate loopback ports.
    Cutover принимает только одновременно active и boot-enabled units; Web

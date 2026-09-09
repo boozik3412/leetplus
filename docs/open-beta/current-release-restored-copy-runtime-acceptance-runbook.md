@@ -150,13 +150,37 @@ Interpreter фиксирован как `/usr/bin/bash -p`; wrapper до пер�
 sudo groupadd --system leetplus-rehearsal
 sudo useradd --system --gid leetplus-rehearsal \
   --home-dir /nonexistent --shell /usr/sbin/nologin leetplus-rehearsal
-sudo usermod --groups leetplus-runtime leetplus-rehearsal
 sudo install -d -o root -g root -m 0700 \
   /etc/leetplus/rehearsal-credentials \
   /var/lib/leetplus/rehearsal-control
 sudo install -d -o root -g leetplus-rehearsal -m 0710 \
   /var/lib/leetplus/rehearsal-evidence
 ```
+
+`leetplus-rehearsal` **не** является постоянным member `leetplus-runtime`.
+Непосредственно перед одним restored-copy gate root временно добавляет только
+эту supplementary group и проверяет точный результат:
+
+```bash
+sudo usermod --append --groups leetplus-runtime leetplus-rehearsal
+id -G leetplus-rehearsal
+```
+
+Сразу после terminal `PASS` или `FAIL`, а также после interrupt, lost response
+или любой cleanup/reconcile, root обязан удалить membership в `finally`-ветке
+до следующей production операции и подтвердить отсутствие runtime GID:
+
+```bash
+sudo gpasswd --delete leetplus-rehearsal leetplus-runtime
+id -G leetplus-rehearsal
+getent group leetplus-runtime
+```
+
+Нельзя считать gate закрытым, пока cleanup не подтверждён; если команда
+удаления возвращает ошибку или GID остаётся в `id -G`, это fail-closed residue.
+Persistent membership запрещён и блокирует production cache, slot bind и
+cutover preflight. Эта группа не даёт rehearsal пользователю database, secret,
+systemd или production release authority.
 
 Wrapper под глобальным lock сам создаёт transient root
 `/run/leetplus-current-release-evidence` как
@@ -168,10 +192,12 @@ durable evidence и безопасно пересоздаётся при reboot/
 
 Имена, UID/GID и production roots не имеют override. Primary group пользователя
 равна только `leetplus-rehearsal`, а полный вывод `id -G leetplus-rehearsal`
-обязан содержать ровно два уникальных GID: primary GID и GID
-`leetplus-runtime`. Эта единственная supplementary group нужна для чтения
-sealed artifact `root:leetplus-runtime 0550/0440`. `sudo`, `adm`, `wheel`,
-`docker`, `systemd-journal`, secret/admin и любые другие группы запрещены.
+во время active restored-copy gate обязан содержать ровно два уникальных GID:
+primary GID и временный GID `leetplus-runtime`; сразу после gate он обязан
+содержать только primary GID. Эта единственная временная supplementary group
+нужна для чтения sealed artifact `root:leetplus-runtime 0550/0440`. `sudo`,
+`adm`, `wheel`, `docker`, `systemd-journal`, secret/admin и любые другие группы
+запрещены.
 Wrapper сверяет exact passwd record (`home=/nonexistent`,
 `shell=/usr/sbin/nologin`), keyed reverse lookup и полную NSS enumeration всех
 passwd/group records с тем же числовым UID/GID. Ровно одна запись обязана быть

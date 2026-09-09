@@ -55,6 +55,7 @@ created_libexec_directory=false
 created_dropin_directory=false
 created_runtime_group=false
 created_api_user=false
+created_api_green_user=false
 created_receipt_root=false
 created_receipt_parent=false
 created_production_control_fixture=false
@@ -172,6 +173,9 @@ cleanup() {
   fi
   if [[ "$created_api_user" == true ]]; then
     userdel leetplus-api-blue
+  fi
+  if [[ "$created_api_green_user" == true ]]; then
+    userdel leetplus-api-green
   fi
   if [[ "$created_runtime_group" == true ]]; then
     groupdel leetplus-runtime
@@ -329,6 +333,7 @@ done
     && -z "$(getent group leetplus-build-adversarial)" \
     && -z "$(getent group leetplus-build-gid-adversarial)" \
     && -z "$(getent passwd leetplus-api-blue)" \
+    && -z "$(getent passwd leetplus-api-green)" \
     && -z "$(getent group leetplus-runtime)" ]] \
   || die 'fixture requires fresh leetplus-build NSS identities on the disposable host'
 
@@ -1055,6 +1060,9 @@ created_runtime_group=true
 useradd --system --no-create-home --home-dir "${TEST_ROOT}/no-api-home" \
   --shell /usr/sbin/nologin --gid leetplus-runtime leetplus-api-blue
 created_api_user=true
+useradd --system --no-create-home --home-dir "${TEST_ROOT}/no-api-home" \
+  --shell /usr/sbin/nologin --gid leetplus-runtime leetplus-api-green
+created_api_green_user=true
 
 install -d -o root -g leetplus-runtime -m 0710 '/srv/leetplus/release-promotions'
 install -d -o root -g root -m 0755 '/srv/leetplus/releases'
@@ -1450,7 +1458,8 @@ assert_promoted_release() {
 run_promoter() {
   local sha="$1"
   local output_path="$2"
-  "$INSTALLED_PROMOTER" --release-sha "$sha" --slot blue \
+  local slot="${3:-blue}"
+  "$INSTALLED_PROMOTER" --release-sha "$sha" --slot "$slot" \
     > "$output_path" 2>&1
 }
 
@@ -1510,8 +1519,8 @@ assert_fixture_output_contains() {
 }
 
 run_promoter_required() {
-  local sha="$1" output_path="$2" label="$3" bounded_output
-  if run_promoter "$sha" "$output_path"; then
+  local sha="$1" output_path="$2" label="$3" slot="${4:-blue}" bounded_output
+  if run_promoter "$sha" "$output_path" "$slot"; then
     return 0
   fi
   if [[ -f "$output_path" && ! -L "$output_path" ]]; then
@@ -1589,6 +1598,40 @@ run_promoter_required "$normal_sha" "${TEST_ROOT}/promote-normal-retry.out" prom
 grep -F -x 'PROMOTED_RELEASE_PUBLICATION_RECONCILED=true' \
   "${TEST_ROOT}/promote-normal-retry.out" >/dev/null \
   || die 'lost normal promotion response was not reconciled idempotently'
+
+# Published releases and their two immutable authority records are keyed by
+# release SHA, not by serving slot. A retry for the other slot must validate
+# the already published bytes against *that* slot's service identity without
+# rewriting the origin-slot receipts.
+normal_cross_slot_before="${TEST_ROOT}/promote-normal-cross-slot.before"
+normal_cross_slot_after="${TEST_ROOT}/promote-normal-cross-slot.after"
+snapshot_final_publication_state "$normal_sha" "$normal_cross_slot_before"
+usermod --gid root leetplus-api-green
+if run_promoter "$normal_sha" "${TEST_ROOT}/promote-normal-cross-slot-wrong-user.out" green; then
+  die 'cross-slot publication reuse accepted a target service user outside leetplus-runtime'
+fi
+assert_fixture_output_contains \
+  "${TEST_ROOT}/promote-normal-cross-slot-wrong-user.out" \
+  'production candidate API primary group must be leetplus-runtime' \
+  promote-normal-cross-slot-wrong-user
+snapshot_final_publication_state "$normal_sha" "${TEST_ROOT}/promote-normal-cross-slot-wrong-user.after"
+cmp --silent -- "$normal_cross_slot_before" \
+  "${TEST_ROOT}/promote-normal-cross-slot-wrong-user.after" \
+  || die 'rejected cross-slot target service identity mutated final publication state'
+usermod --gid leetplus-runtime leetplus-api-green
+run_promoter_required \
+  "$normal_sha" "${TEST_ROOT}/promote-normal-cross-slot-reuse.out" \
+  promote-normal-cross-slot-reuse green
+snapshot_final_publication_state "$normal_sha" "$normal_cross_slot_after"
+cmp --silent -- "$normal_cross_slot_before" "$normal_cross_slot_after" \
+  || die 'cross-slot final reconciliation rewrote immutable release or authority state'
+assert_fixture_output_contains \
+  "${TEST_ROOT}/promote-normal-cross-slot-reuse.out" \
+  'PROMOTED_RELEASE_SLOT=green' promote-normal-cross-slot-slot
+assert_fixture_output_contains \
+  "${TEST_ROOT}/promote-normal-cross-slot-reuse.out" \
+  'PROMOTED_RELEASE_PUBLICATION_RECONCILED=true' \
+  promote-normal-cross-slot-reconciled
 normal_release="/srv/leetplus/releases/${normal_sha}"
 normal_main="${normal_release}/apps/api/dist/main.js"
 normal_dist="${normal_release}/apps/api/dist"

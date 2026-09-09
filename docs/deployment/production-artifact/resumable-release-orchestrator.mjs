@@ -1196,14 +1196,21 @@ function targetRuntimeModes(profile, previousValues) {
     };
   }
   if (profile === SLOT_RUNTIME_PROFILE_CURRENT191_BRIDGE) {
-    if (
-      previousBugReportingMode !== "LIVE" ||
-      previousSchemaBridgeMode !== "OFF" ||
-      previousValues.get("EXPECTED_DATABASE_MIGRATION") !==
-        CURRENT190_MIGRATION ||
-      Number(previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !==
-        CURRENT190_MIGRATION_COUNT
-    ) {
+    const isCurrent190Source =
+      previousBugReportingMode === "LIVE" &&
+      previousSchemaBridgeMode === "OFF" &&
+      previousValues.get("EXPECTED_DATABASE_MIGRATION") ===
+        CURRENT190_MIGRATION &&
+      Number(previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) ===
+        CURRENT190_MIGRATION_COUNT;
+    const isCurrent191BridgeRepin =
+      previousBugReportingMode === "OFF" &&
+      previousSchemaBridgeMode === "ALLOW_CURRENT_190" &&
+      previousValues.get("EXPECTED_DATABASE_MIGRATION") ===
+        CURRENT191_MIGRATION &&
+      Number(previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) ===
+        CURRENT191_MIGRATION_COUNT;
+    if (!isCurrent190Source && !isCurrent191BridgeRepin) {
       fail("ORCHESTRATOR_CURRENT191_BRIDGE_SOURCE_PROFILE_INVALID");
     }
     return {

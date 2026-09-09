@@ -1377,16 +1377,62 @@ function bindSlotEnvironment(plan, authority, paths, args) {
     authority.priorState === "BOUND"
       ? authority.priorReleaseSha
       : plan.previousReleaseSha;
+  const slotRuntimeProfile = slotRuntimeProfileForPlan(plan);
+  const previousMigration = previousValues.get(
+    "EXPECTED_DATABASE_MIGRATION",
+  );
+  const previousMigrationCount = Number(
+    previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT"),
+  );
+  const migrationMatchesPlan =
+    previousMigration === plan.previousMigration &&
+    previousMigrationCount === plan.previousMigrationCount;
+  let isExactCrossSlotCurrent190Bridge =
+    slotRuntimeProfile === SLOT_RUNTIME_PROFILE_CURRENT191_BRIDGE &&
+    authority.priorState === "BOUND" &&
+    authority.priorReleaseSha !== plan.previousReleaseSha &&
+    plan.previousMigration === CURRENT191_MIGRATION &&
+    plan.previousMigrationCount === CURRENT191_MIGRATION_COUNT &&
+    previousMigration === CURRENT190_MIGRATION &&
+    previousMigrationCount === CURRENT190_MIGRATION_COUNT;
+  if (isExactCrossSlotCurrent190Bridge) {
+    const activeSlot = currentActiveSlot(paths);
+    if (activeSlot === plan.targetSlot) {
+      fail("ORCHESTRATOR_SLOT_ENVIRONMENT_LINEAGE_INVALID");
+    }
+    const activeEnvironment = readExactBytes(
+      path.join(paths.slotEnvironmentRoot, activeSlot + ".env"),
+      args,
+      {
+        expectedGid: expectedRuntimeGid,
+        expectedMode: 0o440,
+        expectedUid,
+        maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
+        reasonCode: "ORCHESTRATOR_SLOT_ENVIRONMENT_LINEAGE_INVALID",
+      },
+    );
+    const activeValues = parseSlotEnvironment(
+      activeEnvironment.raw,
+      activeSlot,
+      "ORCHESTRATOR_SLOT_ENVIRONMENT_LINEAGE_INVALID",
+      { allowLegacyApiBindHost: true },
+    );
+    isExactCrossSlotCurrent190Bridge =
+      activeValues.get("RELEASE_SHA") === plan.previousReleaseSha &&
+      activeValues.get("EXPECTED_DATABASE_MIGRATION") ===
+        plan.previousMigration &&
+      Number(activeValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) ===
+        plan.previousMigrationCount &&
+      activeValues.get("GUEST_BUG_REPORTING_MODE") === "OFF" &&
+      activeValues.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") ===
+        "ALLOW_CURRENT_190";
+  }
   if (
     previousValues.get("RELEASE_SHA") !== expectedPreviousReleaseSha ||
-    previousValues.get("EXPECTED_DATABASE_MIGRATION") !==
-      plan.previousMigration ||
-    Number(previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !==
-      plan.previousMigrationCount
+    (!migrationMatchesPlan && !isExactCrossSlotCurrent190Bridge)
   ) {
     fail("ORCHESTRATOR_SLOT_ENVIRONMENT_LINEAGE_INVALID");
   }
-  const slotRuntimeProfile = slotRuntimeProfileForPlan(plan);
   if (
     slotRuntimeProfile === SLOT_RUNTIME_PROFILE_CURRENT191_FINAL &&
     previousValues.get("RELEASE_SHA") !== plan.releaseSha

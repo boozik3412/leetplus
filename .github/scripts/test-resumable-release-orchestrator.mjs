@@ -676,6 +676,146 @@ test("repins an exact CURRENT191 bridge slot to a new admitted release", async (
   );
 });
 
+test("bridges an inactive CURRENT190 slot after the active slot reached CURRENT191 bridge", async (t) => {
+  const activeOptions = {
+    bridgeMode: "ALLOW_CURRENT_190",
+    bugReportingMode: "OFF",
+    migration: CURRENT191_MIGRATION,
+    migrationCount: 191,
+  };
+  const root = await setupFixture(
+    "current191-cross-slot-current190-",
+    activeOptions,
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const inactiveRelease = path.join(
+    root,
+    "srv/leetplus/releases",
+    SUCCESSOR_SHA,
+  );
+  await mkdir(inactiveRelease, { recursive: true });
+  const inactiveSlot = path.join(root, "srv/leetplus/slots/blue");
+  await rm(inactiveSlot, { force: true });
+  await symlink(inactiveRelease, inactiveSlot);
+  const inactiveEnvironment = path.join(root, "etc/leetplus/slots/blue.env");
+  await chmod(inactiveEnvironment, 0o600);
+  await writeFile(
+    inactiveEnvironment,
+    slotEnvironment("blue", SUCCESSOR_SHA, {
+      bridgeMode: "OFF",
+      bugReportingMode: "LIVE",
+      migration: CURRENT190_MIGRATION,
+      migrationCount: 190,
+    }),
+  );
+  await chmod(inactiveEnvironment, 0o440);
+  const state = await fixtureState(root);
+  state.sourceReleaseSha = SUCCESSOR_SHA;
+  await writeJson(path.join(root, "fixture-state.json"), state);
+
+  const args = current191PrepareArgs(root, "current191-bridge");
+  args[args.indexOf("--previous-migration") + 1] = CURRENT191_MIGRATION;
+  args[args.indexOf("--previous-migration-count") + 1] = "191";
+  assert.equal(await main(args), 0);
+  const planPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    OPERATION_ID,
+    "plan.json",
+  );
+  const plan = JSON.parse(await readFile(planPath, "utf8"));
+  assert.equal(
+    await main(continuationArgs("apply", root, canonicalRecordSha256(plan))),
+    0,
+  );
+  assert.equal(
+    await readFile(
+      path.join(
+        path.dirname(planPath),
+        "02-bind-slot-environment.previous.env",
+      ),
+      "utf8",
+    ),
+    slotEnvironment("blue", SUCCESSOR_SHA, {
+      bridgeMode: "OFF",
+      bugReportingMode: "LIVE",
+      migration: CURRENT190_MIGRATION,
+      migrationCount: 190,
+    }),
+  );
+  const accepted = await readFile(inactiveEnvironment, "utf8");
+  assert.match(accepted, new RegExp(`RELEASE_SHA=${RELEASE_SHA}`, "u"));
+  assert.match(accepted, /EXPECTED_DATABASE_MIGRATION_COUNT=191/u);
+  assert.match(accepted, /GUEST_BUG_REPORTING_MODE=OFF/u);
+  assert.match(accepted, /GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_190/u);
+});
+
+test("rejects active-profile drift on a cross-slot CURRENT191 bridge", async (t) => {
+  const root = await setupFixture("current191-cross-slot-reject-", {
+    bridgeMode: "ALLOW_CURRENT_190",
+    bugReportingMode: "OFF",
+    migration: CURRENT191_MIGRATION,
+    migrationCount: 191,
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const inactiveRelease = path.join(
+    root,
+    "srv/leetplus/releases",
+    SUCCESSOR_SHA,
+  );
+  await mkdir(inactiveRelease, { recursive: true });
+  const inactiveSlot = path.join(root, "srv/leetplus/slots/blue");
+  await rm(inactiveSlot, { force: true });
+  await symlink(inactiveRelease, inactiveSlot);
+  const inactiveEnvironment = path.join(root, "etc/leetplus/slots/blue.env");
+  await chmod(inactiveEnvironment, 0o600);
+  await writeFile(
+    inactiveEnvironment,
+    slotEnvironment("blue", SUCCESSOR_SHA, {
+      bridgeMode: "OFF",
+      bugReportingMode: "LIVE",
+      migration: CURRENT190_MIGRATION,
+      migrationCount: 190,
+    }),
+  );
+  await chmod(inactiveEnvironment, 0o440);
+  const state = await fixtureState(root);
+  state.sourceReleaseSha = SUCCESSOR_SHA;
+  await writeJson(path.join(root, "fixture-state.json"), state);
+
+  const args = current191PrepareArgs(root, "current191-bridge");
+  args[args.indexOf("--previous-migration") + 1] = CURRENT191_MIGRATION;
+  args[args.indexOf("--previous-migration-count") + 1] = "191";
+  assert.equal(await main(args), 0);
+  const activeEnvironment = path.join(root, "etc/leetplus/slots/green.env");
+  await chmod(activeEnvironment, 0o600);
+  await writeFile(
+    activeEnvironment,
+    slotEnvironment("green", PREVIOUS_SHA, {
+      bridgeMode: "OFF",
+      bugReportingMode: "LIVE",
+      migration: CURRENT191_MIGRATION,
+      migrationCount: 191,
+    }),
+  );
+  await chmod(activeEnvironment, 0o440);
+  const planPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    OPERATION_ID,
+    "plan.json",
+  );
+  const plan = JSON.parse(await readFile(planPath, "utf8"));
+  assert.equal(
+    await main(continuationArgs("apply", root, canonicalRecordSha256(plan))),
+    1,
+  );
+  const after = await fixtureState(root);
+  assert.equal(after.bindEffects, 1);
+  assert.equal(after.slotMasked, true);
+  assert.equal(after.cutoverEffects, 0);
+});
+
 test("authorizes only the exact CURRENT191 final runtime profile", async (t) => {
   const sourceOptions = {
     bridgeMode: "ALLOW_CURRENT_190",

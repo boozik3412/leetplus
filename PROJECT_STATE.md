@@ -29,7 +29,11 @@ production остаётся `CURRENT_190/190`, bridge `OFF`, reporting `LIVE`.
 `--slot-runtime-profile current191-bridge|current191-final` разрешён только
 для target CURRENT191 и только по одному inactive slot с отдельным exact plan
 digest, receipt chain, cutover и тем же `resume`. Bridge profile задаёт
-`CURRENT190 OFF/LIVE → target191 ALLOW_CURRENT_190/OFF`; единственное recovery-
+`CURRENT190 OFF/LIVE → target191 ALLOW_CURRENT_190/OFF`. После первого cutover
+второй cross-slot bridge отдельно доказывает active CURRENT191 previous lineage
+через protected active env и прежний CURRENT190 target origin через immutable
+slot-env backup плюс `BOUND PRIOR_*` bind receipt; правило недоступно другим
+profile/head/count/flags. Единственное recovery-
 исключение разрешает exact re-pin
 `CURRENT191 ALLOW_CURRENT_190/OFF → CURRENT191 ALLOW_CURRENT_190/OFF` на другой
 admitted release SHA без DDL и без переиспользования plan/approval/receipts.

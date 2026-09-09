@@ -133,8 +133,13 @@ effect. До bridge-off controller обязан завершить свой exac
 Bridge-off выполняется только штатным five-phase orchestrator через узкий
 `--slot-runtime-profile current191-final`, а не ручной записью slot env.
 `current191-bridge` допускает только переход одного inactive slot
-`CURRENT190 OFF/LIVE → target191 ALLOW_CURRENT_190/OFF`. Единственное
-recovery-исключение — exact bridge-to-bridge re-pin
+`CURRENT190 OFF/LIVE → target191 ALLOW_CURRENT_190/OFF`. После первого cutover
+у второго шага active previous уже CURRENT191 bridge, а inactive target ещё
+может быть CURRENT190. Такой cross-slot origin принимается только при двух
+совпадающих доказательствах: active protected env равен previous lineage plan,
+а immutable target-env backup равен `BOUND PRIOR_*` bind receipt и exact
+CURRENT190 profile. Это правило не применяется к другим profile или source.
+Единственное recovery-исключение — exact bridge-to-bridge re-pin
 `CURRENT191 ALLOW_CURRENT_190/OFF → CURRENT191 ALLOW_CURRENT_190/OFF` для
 другого exact admitted release SHA: schema/count и оба bridge flags сохраняются,
 DDL не выполняется, новый plan/approval/receipt chain не переиспользует старые

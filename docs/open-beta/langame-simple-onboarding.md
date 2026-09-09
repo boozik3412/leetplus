@@ -107,6 +107,16 @@ controller не являются заменой. Поддерживаемая п
 режим отвергает production database name, стандартный port/socket и не принимает
 production approval как основание для эффекта.
 
+Source inventory также фиксирует фактическое разделение владельцев production:
+таблицы `Store` и `_prisma_migrations` принадлежат роли `leetplus`, а
+привилегированная `identity_mail_delivery_worker_assert_v1(text)` — роли
+`postgres`. Контроллер отклоняет как произвольную смену владельца, так и попытку
+ошибочно свести эти объекты к одному владельцу; после migration те же owner,
+OID и ACL должны сохраниться без изменений. Внутри одной транзакции индекс и
+migration receipt выполняются под `leetplus`, затем controller возвращается к
+локальной `postgres` authority только для замены защищённой функции и снова
+ограничивается `leetplus` для закрытия receipt.
+
 До database effect blue и green обязаны работать как dual-target candidate
 одного exact `CURRENT_191` release с
 `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_190`, `COMBINED` runtime и

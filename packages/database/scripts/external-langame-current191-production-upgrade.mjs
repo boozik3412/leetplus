@@ -40,6 +40,8 @@ const TARGET_MIGRATION_SHA256 =
   "a149122148b0270ad870883f81cba6bd61365c0babca56f81c18523af4b78beb";
 const SOURCE_CONSTRAINT = "ABSENT";
 const TARGET_CONSTRAINT = "EXACT";
+const APPLICATION_RELATION_OWNER = "leetplus";
+const PRIVILEGED_WORKER_FUNCTION_OWNER = "postgres";
 const SOURCE_WORKER_FUNCTION_SHA256 =
   "29446cffe3c46a02cb6b776f2923511bb7981afa1047bcbe8a238bb83a3d8682";
 const TARGET_WORKER_FUNCTION_SHA256 =
@@ -357,8 +359,9 @@ function exactSourceState(evidence, manifest) {
     evidence.unfinishedMigrationCount === 0 &&
     evidence.targetMigrationRows === 0 &&
     evidence.targetMigration === null &&
-    evidence.ticketTable.owner === evidence.migrationTable.owner &&
-    evidence.ticketTable.owner === evidence.workerFunction.owner &&
+    evidence.ticketTable.owner === APPLICATION_RELATION_OWNER &&
+    evidence.migrationTable.owner === APPLICATION_RELATION_OWNER &&
+    evidence.workerFunction.owner === PRIVILEGED_WORKER_FUNCTION_OWNER &&
     evidence.constraintDef === SOURCE_CONSTRAINT &&
     evidence.constraintOid === "0" &&
     evidence.descriptionsBelow20 === 0 &&
@@ -1357,6 +1360,24 @@ function migrationBody(rawMigration) {
   return lines.slice(beginIndexes[0] + 1, commitIndexes[0]).join("\n");
 }
 
+function migrationBodiesByAuthority(rawMigration) {
+  const lines = migrationBody(rawMigration).split("\n");
+  const privilegedMarker =
+    "-- Keep the least-privilege mail worker on the exact new schema head. The";
+  const markerIndexes = lines
+    .map((line, index) => (line.trim() === privilegedMarker ? index : -1))
+    .filter((index) => index >= 0);
+  if (markerIndexes.length !== 1 || markerIndexes[0] === 0) {
+    fail("CURRENT191_UPGRADE_TARGET_MIGRATION_AUTHORITY_BOUNDARY_INVALID");
+  }
+  const applicationSql = lines.slice(0, markerIndexes[0]).join("\n").trim();
+  const privilegedSql = lines.slice(markerIndexes[0]).join("\n").trim();
+  if (applicationSql === "" || privilegedSql === "") {
+    fail("CURRENT191_UPGRADE_TARGET_MIGRATION_AUTHORITY_BOUNDARY_INVALID");
+  }
+  return Object.freeze({ applicationSql, privilegedSql });
+}
+
 function clusterGuardSql(target, source) {
   return String.raw`
 DO $guard$
@@ -1382,7 +1403,10 @@ BEGIN
      OR EXISTS (SELECT 1 FROM public."_prisma_migrations" WHERE migration_name=${sqlLiteral(TARGET_HEAD)})
      OR (SELECT oid::text FROM pg_catalog.pg_class WHERE oid='public."Store"'::regclass) IS DISTINCT FROM ${sqlLiteral(source.ticketTable.oid)}
      OR (SELECT owner.rolname FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_roles owner ON owner.oid=relation.relowner WHERE relation.oid='public."Store"'::regclass) IS DISTINCT FROM ${sqlLiteral(source.ticketTable.owner)}
+     OR (SELECT oid::text FROM pg_catalog.pg_class WHERE oid='public."_prisma_migrations"'::regclass) IS DISTINCT FROM ${sqlLiteral(source.migrationTable.oid)}
+     OR (SELECT owner.rolname FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_roles owner ON owner.oid=relation.relowner WHERE relation.oid='public."_prisma_migrations"'::regclass) IS DISTINCT FROM ${sqlLiteral(source.migrationTable.owner)}
      OR (SELECT oid::text FROM pg_catalog.pg_proc WHERE oid='public.identity_mail_delivery_worker_assert_v1(text)'::regprocedure) IS DISTINCT FROM ${sqlLiteral(source.workerFunction.oid)}
+     OR (SELECT owner.rolname FROM pg_catalog.pg_proc routine JOIN pg_catalog.pg_roles owner ON owner.oid=routine.proowner WHERE routine.oid='public.identity_mail_delivery_worker_assert_v1(text)'::regprocedure) IS DISTINCT FROM ${sqlLiteral(source.workerFunction.owner)}
      OR pg_catalog.to_regclass('public.store_external_identity_global_uidx') IS NOT NULL
      OR EXISTS (
        SELECT 1
@@ -1399,6 +1423,40 @@ BEGIN
   END IF;
 END $guard$;
 `;
+}
+
+export function buildExternalLangameCurrent191ProductionMigrationSql({
+  migrationId,
+  rawMigration,
+  source,
+  target,
+}) {
+  if (
+    source?.ticketTable?.owner !== APPLICATION_RELATION_OWNER ||
+    source?.migrationTable?.owner !== APPLICATION_RELATION_OWNER ||
+    source?.workerFunction?.owner !== PRIVILEGED_WORKER_FUNCTION_OWNER
+  ) {
+    fail("CURRENT191_UPGRADE_SOURCE_OWNER_TOPOLOGY_INVALID");
+  }
+  const { applicationSql, privilegedSql } = migrationBodiesByAuthority(rawMigration);
+  return [
+    "BEGIN;",
+    "SET LOCAL lock_timeout = '5s';",
+    "SET LOCAL statement_timeout = '2min';",
+    "SELECT pg_catalog.pg_advisory_xact_lock(13577189, 190191);",
+    clusterGuardSql(target, source),
+    `SET LOCAL ROLE ${sqlIdentifier(APPLICATION_RELATION_OWNER)};`,
+    `INSERT INTO public."_prisma_migrations" (id, checksum, finished_at, migration_name, logs, rolled_back_at, started_at, applied_steps_count) VALUES (${sqlLiteral(migrationId)}, ${sqlLiteral(TARGET_MIGRATION_SHA256)}, NULL, ${sqlLiteral(TARGET_HEAD)}, NULL, NULL, pg_catalog.clock_timestamp(), 0);`,
+    applicationSql,
+    "RESET ROLE;",
+    privilegedSql,
+    `SET LOCAL ROLE ${sqlIdentifier(APPLICATION_RELATION_OWNER)};`,
+    `UPDATE public."_prisma_migrations" SET finished_at=pg_catalog.clock_timestamp(), applied_steps_count=1 WHERE id=${sqlLiteral(migrationId)} AND migration_name=${sqlLiteral(TARGET_HEAD)} AND checksum=${sqlLiteral(TARGET_MIGRATION_SHA256)} AND finished_at IS NULL AND rolled_back_at IS NULL;`,
+    `DO $receipt$ BEGIN IF (SELECT pg_catalog.count(*) FROM public."_prisma_migrations" WHERE id=${sqlLiteral(migrationId)} AND migration_name=${sqlLiteral(TARGET_HEAD)} AND checksum=${sqlLiteral(TARGET_MIGRATION_SHA256)} AND finished_at IS NOT NULL AND rolled_back_at IS NULL AND applied_steps_count=1) <> 1 THEN RAISE EXCEPTION 'CURRENT191_UPGRADE_MIGRATION_RECEIPT_NOT_WRITTEN'; END IF; END $receipt$;`,
+    "RESET ROLE;",
+    "COMMIT;",
+    "",
+  ].join("\n");
 }
 
 export function createExternalLangameCurrent191ProductionLocalPostgresExecutor() {
@@ -1435,20 +1493,12 @@ export function createExternalLangameCurrent191ProductionLocalPostgresExecutor()
         fail("CURRENT191_UPGRADE_TARGET_MIGRATION_DRIFT");
       }
       const migrationId = randomUUID();
-      const sql = [
-        "BEGIN;",
-        "SET LOCAL lock_timeout = '5s';",
-        "SET LOCAL statement_timeout = '2min';",
-        "SELECT pg_catalog.pg_advisory_xact_lock(13577189, 190191);",
-        clusterGuardSql(target, source),
-        `SET LOCAL ROLE ${sqlIdentifier(source.ticketTable.owner)};`,
-        `INSERT INTO public."_prisma_migrations" (id, checksum, finished_at, migration_name, logs, rolled_back_at, started_at, applied_steps_count) VALUES (${sqlLiteral(migrationId)}, ${sqlLiteral(TARGET_MIGRATION_SHA256)}, NULL, ${sqlLiteral(TARGET_HEAD)}, NULL, NULL, pg_catalog.clock_timestamp(), 0);`,
-        migrationBody(rawMigration.toString("utf8")),
-        `UPDATE public."_prisma_migrations" SET finished_at=pg_catalog.clock_timestamp(), applied_steps_count=1 WHERE id=${sqlLiteral(migrationId)} AND migration_name=${sqlLiteral(TARGET_HEAD)} AND checksum=${sqlLiteral(TARGET_MIGRATION_SHA256)} AND finished_at IS NULL AND rolled_back_at IS NULL;`,
-        `DO $receipt$ BEGIN IF (SELECT pg_catalog.count(*) FROM public."_prisma_migrations" WHERE id=${sqlLiteral(migrationId)} AND migration_name=${sqlLiteral(TARGET_HEAD)} AND checksum=${sqlLiteral(TARGET_MIGRATION_SHA256)} AND finished_at IS NOT NULL AND rolled_back_at IS NULL AND applied_steps_count=1) <> 1 THEN RAISE EXCEPTION 'CURRENT191_UPGRADE_MIGRATION_RECEIPT_NOT_WRITTEN'; END IF; END $receipt$;`,
-        "COMMIT;",
-        "",
-      ].join("\n");
+      const sql = buildExternalLangameCurrent191ProductionMigrationSql({
+        migrationId,
+        rawMigration: rawMigration.toString("utf8"),
+        source,
+        target,
+      });
       return runPsql(target, sql, timeoutSeconds);
     },
   });
@@ -1552,6 +1602,8 @@ export function createExternalLangameCurrent191ProductionRuntimeAdapter(options)
 }
 
 export const EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONSTANTS = Object.freeze({
+  applicationRelationOwner: APPLICATION_RELATION_OWNER,
+  privilegedWorkerFunctionOwner: PRIVILEGED_WORKER_FUNCTION_OWNER,
   sourceConstraint: SOURCE_CONSTRAINT,
   sourceMigrationCount: SOURCE_COUNT,
   sourceMigrationHead: SOURCE_HEAD,

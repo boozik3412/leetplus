@@ -197,6 +197,25 @@ intent и проверенным replacement control. Идемпотентный
 cutover/control состояние; следующий `prepare` всё равно независимо проверяет
 installed control своего exact candidate SHA.
 
+Отдельный `supersede-after-bind-rollback --operation-id ... --plan-sha256 ...
+--replacement-release-sha ... --slot-bind-receipt-sha256 ...
+--slot-rollback-receipt-sha256 ...` существует только для exact второго
+`CURRENT191` `current191-bridge` шага. Он допустим после принятого `HYDRATE`,
+но только при pending `BIND` без BIND phase evidence/receipt, когда штатный
+binder уже выполнил проверяемую пару `BIND → ROLLBACK` для одного slot.
+Rollback обязан ссылаться на digest исходного bind receipt; target link должен
+быть возвращён к `PRIOR_RELEASE`, protected env byte-в-byte — к backup
+`CURRENT190 OFF/LIVE`, а обе target units — unmasked/stopped/process-free.
+Оба receipt digest передаются явно, latest index обязан иметь тот же binder
+`OPERATION_ID`, а timestamps — строгий причинный порядок после quiesce intent.
+Одновременно active slot обязан оставаться exact plan previous
+`CURRENT191 ALLOW_CURRENT_190/OFF`, а cutover generation — baseline. Installed
+replacement control допускается лишь с другим SHA в той же lane. Успех создаёт
+immutable terminal receipt и ничего не меняет в DB, runtime, slot env/link,
+units, nginx или cutover. Это не generic cancel, не BIND acceptance и не
+authority для schema/runtime effect; любой drift или другой profile остаётся
+fail-closed.
+
 Promotion receipt адресуется exact release SHA, поэтому его `RELEASE_SLOT` —
 не право release работать лишь в первом slot, а immutable **origin slot**
 первой публикации. Уже final-published

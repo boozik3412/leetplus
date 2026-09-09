@@ -448,6 +448,25 @@ legitimate control/cutover поколения не могут сделать ter
 снова незавершённым. Каждый новый `prepare` независимо проверяет собственный
 installed-control generation и не наследует authority superseded operation.
 
+Отдельный `supersede-after-bind-rollback` не расширяет это правило. Он
+применим только к exact второму `CURRENT191` `current191-bridge` plan, где
+`HYDRATE` принят, `BIND` intent pending, но BIND phase receipt/evidence ещё не
+создан. Перед terminal publication controller требует exact receipt-bound
+`BIND → ROLLBACK` pair того же slot/operation (`PRIOR_STATE=BOUND`, rollback
+привязан к digest bind receipt), возвращённый `PRIOR_RELEASE`, target env
+byte-в-byte из protected backup (`CURRENT190 OFF/LIVE`) и unmasked,
+stopped/process-free target units. Active side обязана всё ещё совпасть с plan
+previous `CURRENT191 ALLOW_CURRENT_190/OFF`, а cutover generation — с
+baseline; replacement installed control должен быть другой SHA той же lane.
+Exact bind/rollback digests обязательны в recovery-команде; controller также
+сверяет binder `OPERATION_ID` в latest index и receipt и причинный timestamp
+порядок после orchestration quiesce intent.
+Только после этого exclusive-create публикует immutable `superseded.json`.
+Команда не имеет права менять DB, runtime, env, slot link, units, nginx или
+cutover и не является generic cancel/rollback. Любое BIND evidence, active or
+target drift, иной profile/head/count/flags либо отсутствующий receipt
+останавливает её fail-closed.
+
 Immutable publication authority также не смешивает release и slot. Promotion
 intent/attestation хранятся по exact SHA; их `RELEASE_SLOT` фиксирует origin
 slot первой публикации. Reuse в другом slot разрешён исключительно для уже

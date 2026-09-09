@@ -22,6 +22,7 @@ import {
   COMPLETE_DECISION,
   CONTRACT_VERSION,
   PHASES,
+  ROLLED_BACK_SUPERSEDED_DECISION,
   SUPERSEDED_DECISION,
   canonicalRecordSha256,
   main,
@@ -47,6 +48,17 @@ const FIXTURE_COMMAND = path.resolve(
 
 function kv(entries) {
   return entries.map(([key, value]) => key + "=" + value).join("\n") + "\n";
+}
+
+function parseKv(value) {
+  return value
+    .trimEnd()
+    .split("\n")
+    .map((line) => {
+      const separator = line.indexOf("=");
+      assert.notEqual(separator, -1);
+      return [line.slice(0, separator), line.slice(separator + 1)];
+    });
 }
 
 function digest(value) {
@@ -352,6 +364,128 @@ function supersessionArgs(
     root,
     "--unprivileged-test-mode",
   ];
+}
+
+function rolledBackSupersessionArgs(
+  root,
+  planSha256,
+  replacementReleaseSha = SUCCESSOR_SHA,
+  slotBindReceiptSha256 = "0".repeat(64),
+  slotRollbackReceiptSha256 = "1".repeat(64),
+) {
+  const args = supersessionArgs(root, planSha256, replacementReleaseSha);
+  args[0] = "supersede-after-bind-rollback";
+  args.splice(
+    args.indexOf("--fixture-root"),
+    0,
+    "--slot-bind-receipt-sha256",
+    slotBindReceiptSha256,
+    "--slot-rollback-receipt-sha256",
+    slotRollbackReceiptSha256,
+  );
+  return args;
+}
+
+async function publishFixtureSlotRollback(root) {
+  const receiptRoot = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/slot-links",
+  );
+  const indexPath = path.join(receiptRoot, "blue.latest");
+  const indexEntries = parseKv(await readFile(indexPath, "utf8"));
+  const index = new Map(indexEntries);
+  const bindReceiptPath = index.get("RECEIPT_PATH");
+  assert.ok(bindReceiptPath);
+  const bindReceipt = await readFile(bindReceiptPath, "utf8");
+  const quiesceIntent = JSON.parse(
+    await readFile(
+      path.join(
+        root,
+        "var/lib/leetplus/deploy-receipts/release-orchestrator",
+        OPERATION_ID,
+        "02-bind-quiesce.intent.json",
+      ),
+      "utf8",
+    ),
+  );
+  const timestamp = (offsetMilliseconds) => {
+    const value = new Date(
+      new Date(quiesceIntent.createdAt).valueOf() + offsetMilliseconds,
+    ).toISOString();
+    return value.replace(
+      /\.([0-9]{3})Z$/u,
+      (_match, milliseconds) => "." + milliseconds + "000000Z",
+    );
+  };
+  const bindEntries = parseKv(bindReceipt).map(([key, value]) => {
+    const replacements = new Map([
+      ["CREATED_AT", timestamp(1)],
+      ["ACCEPTED_AT", timestamp(2)],
+    ]);
+    return [key, replacements.get(key) ?? value];
+  });
+  const correlatedBindReceipt = kv(bindEntries);
+  await writeFile(bindReceiptPath, correlatedBindReceipt, { mode: 0o600 });
+  await chmod(bindReceiptPath, 0o600);
+  const bind = new Map(bindEntries);
+  const operationId = bind.get("OPERATION_ID");
+  const priorReleaseSha = bind.get("PRIOR_RELEASE_SHA");
+  const priorTarget = bind.get("PRIOR_TARGET");
+  assert.ok(operationId);
+  assert.ok(priorReleaseSha);
+  assert.ok(priorTarget);
+  const rollbackEntries = bindEntries.map(([key, value]) => {
+    const replacements = new Map([
+      ["OPERATION", "ROLLBACK"],
+      ["SOURCE_RECEIPT_SHA256", digest(correlatedBindReceipt)],
+      ["CREATED_AT", timestamp(3)],
+      ["INTENT_SHA256", "e".repeat(64)],
+      ["EFFECT_STATE", "PRIOR_RESTORED"],
+      ["ACCEPTED_AT", timestamp(4)],
+    ]);
+    return [key, replacements.get(key) ?? value];
+  });
+  const rollbackReceipt = kv(rollbackEntries);
+  const rollbackReceiptPath = path.join(
+    receiptRoot,
+    `blue-${operationId}.rollback.receipt`,
+  );
+  await writeFile(rollbackReceiptPath, rollbackReceipt, { mode: 0o600 });
+  await chmod(rollbackReceiptPath, 0o600);
+  await writeFile(
+    indexPath,
+    kv([
+      ["RECORD_VERSION", "1"],
+      ["RECORD_KIND", "SLOT_LINK_LATEST"],
+      ["SLOT", "blue"],
+      ["OPERATION_ID", operationId],
+      ["RECEIPT_PATH", rollbackReceiptPath],
+      ["RECEIPT_SHA256", digest(rollbackReceipt)],
+      ["UPDATED_AT", "2026-09-02T00:01:00.000Z"],
+    ]),
+    { mode: 0o600 },
+  );
+  await chmod(indexPath, 0o600);
+  const slotPath = path.join(root, "srv/leetplus/slots/blue");
+  await rm(slotPath, { force: true });
+  await symlink(priorTarget, slotPath);
+  for (const unit of [
+    "leetplus-api@blue.service",
+    "leetplus-web@blue.service",
+  ]) {
+    await rm(path.join(root, "etc/systemd/system", unit), { force: true });
+  }
+  const state = await fixtureState(root);
+  state.bound = false;
+  state.slotFailed = false;
+  state.slotMasked = false;
+  state.sourceReleaseSha = priorReleaseSha;
+  await writeJson(path.join(root, "fixture-state.json"), state);
+  return {
+    bindReceiptSha256: digest(correlatedBindReceipt),
+    rollbackReceiptPath,
+    rollbackReceiptSha256: digest(rollbackReceipt),
+  };
 }
 
 async function preparedFixture(suffix = "", environmentOptions = {}) {
@@ -1689,6 +1823,186 @@ test("rejects supersession after any phase has been accepted", async (t) => {
     lstat(path.join(path.dirname(fixture.planPath), "superseded.json")),
     { code: "ENOENT" },
   );
+});
+
+test("terminalizes an exact failed cross-slot bridge only after receipt-bound bind rollback", async (t) => {
+  const activeOptions = {
+    bridgeMode: "ALLOW_CURRENT_190",
+    bugReportingMode: "OFF",
+    migration: CURRENT191_MIGRATION,
+    migrationCount: 191,
+  };
+  const root = await setupFixture(
+    "post-bind-rollback-supersession-",
+    activeOptions,
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const inactiveRelease = path.join(
+    root,
+    "srv/leetplus/releases",
+    FOLLOWING_SHA,
+  );
+  await mkdir(inactiveRelease, { recursive: true });
+  const inactiveSlot = path.join(root, "srv/leetplus/slots/blue");
+  await rm(inactiveSlot, { force: true });
+  await symlink(inactiveRelease, inactiveSlot);
+  const inactiveEnvironment = path.join(root, "etc/leetplus/slots/blue.env");
+  await chmod(inactiveEnvironment, 0o600);
+  await writeFile(
+    inactiveEnvironment,
+    slotEnvironment("blue", FOLLOWING_SHA, {
+      bridgeMode: "OFF",
+      bugReportingMode: "LIVE",
+      migration: CURRENT190_MIGRATION,
+      migrationCount: 190,
+    }),
+  );
+  await chmod(inactiveEnvironment, 0o440);
+  let state = await fixtureState(root);
+  state.sourceReleaseSha = FOLLOWING_SHA;
+  await writeJson(path.join(root, "fixture-state.json"), state);
+
+  const args = current191PrepareArgs(root, "current191-bridge");
+  args[args.indexOf("--previous-migration") + 1] = CURRENT191_MIGRATION;
+  args[args.indexOf("--previous-migration-count") + 1] = "191";
+  assert.equal(await main(args), 0);
+  const planPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    OPERATION_ID,
+    "plan.json",
+  );
+  const plan = JSON.parse(await readFile(planPath, "utf8"));
+  const planSha256 = canonicalRecordSha256(plan);
+  const activeEnvironment = path.join(root, "etc/leetplus/slots/green.env");
+  await chmod(activeEnvironment, 0o600);
+  await writeFile(
+    activeEnvironment,
+    slotEnvironment("green", PREVIOUS_SHA, {
+      bridgeMode: "OFF",
+      bugReportingMode: "LIVE",
+      migration: CURRENT191_MIGRATION,
+      migrationCount: 191,
+    }),
+  );
+  await chmod(activeEnvironment, 0o440);
+  assert.equal(
+    await main(continuationArgs("apply", root, planSha256)),
+    1,
+  );
+  state = await fixtureState(root);
+  assert.equal(state.hydrationEffects, 1);
+  assert.equal(state.bindEffects, 1);
+  assert.equal(state.slotMasked, true);
+  assert.equal(state.cutoverEffects, 0);
+  state.releaseSha = SUCCESSOR_SHA;
+  await writeJson(path.join(root, "fixture-state.json"), state);
+  assert.equal(
+    await main(rolledBackSupersessionArgs(root, planSha256)),
+    1,
+  );
+
+  await chmod(activeEnvironment, 0o600);
+  await writeFile(
+    activeEnvironment,
+    slotEnvironment("green", PREVIOUS_SHA, activeOptions),
+  );
+  await chmod(activeEnvironment, 0o440);
+  const rollback = await publishFixtureSlotRollback(root);
+  state = await fixtureState(root);
+  state.releaseSha = SUCCESSOR_SHA;
+  await writeJson(path.join(root, "fixture-state.json"), state);
+  const rollbackIndexPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/slot-links/blue.latest",
+  );
+  const rollbackIndex = await readFile(rollbackIndexPath, "utf8");
+  await writeFile(
+    rollbackIndexPath,
+    rollbackIndex.replace(
+      /^OPERATION_ID=.*$/mu,
+      "OPERATION_ID=20260902T000000.000000000Z-2",
+    ),
+  );
+  await chmod(rollbackIndexPath, 0o600);
+  assert.equal(
+    await main(
+      rolledBackSupersessionArgs(
+        root,
+        planSha256,
+        SUCCESSOR_SHA,
+        rollback.bindReceiptSha256,
+        rollback.rollbackReceiptSha256,
+      ),
+    ),
+    1,
+  );
+  await writeFile(rollbackIndexPath, rollbackIndex);
+  await chmod(rollbackIndexPath, 0o600);
+  assert.equal(
+    await main(
+      rolledBackSupersessionArgs(
+        root,
+        planSha256,
+        SUCCESSOR_SHA,
+        rollback.bindReceiptSha256,
+        rollback.rollbackReceiptSha256,
+      ),
+    ),
+    0,
+  );
+  assert.equal(
+    await main(
+      rolledBackSupersessionArgs(
+        root,
+        planSha256,
+        SUCCESSOR_SHA,
+        rollback.bindReceiptSha256,
+        rollback.rollbackReceiptSha256,
+      ),
+    ),
+    0,
+  );
+  const supersessionPath = path.join(
+    path.dirname(planPath),
+    "superseded.json",
+  );
+  const supersession = JSON.parse(await readFile(supersessionPath, "utf8"));
+  assert.equal(supersession.schemaVersion, 2);
+  assert.equal(supersession.decision, ROLLED_BACK_SUPERSEDED_DECISION);
+  assert.equal(supersession.completedPhases, 1);
+  assert.equal(supersession.pendingPhase, "BIND");
+  assert.equal(supersession.pendingRecord, "INTENT");
+  assert.equal(supersession.targetPriorReleaseSha, FOLLOWING_SHA);
+  assert.equal(supersession.replacementReleaseSha, SUCCESSOR_SHA);
+  assert.equal(
+    supersession.slotLinkOperationId,
+    "20260902T000000.000000000Z-1",
+  );
+  assert.equal(
+    supersession.slotRollbackReceiptPath,
+    rollback.rollbackReceiptPath,
+  );
+  assert.equal(
+    supersession.slotRollbackReceiptSha256,
+    rollback.rollbackReceiptSha256,
+  );
+  assert.equal(
+    await main(continuationArgs("status", root, planSha256)),
+    0,
+  );
+  assert.equal(
+    await main(continuationArgs("resume", root, planSha256)),
+    1,
+  );
+  const nextArgs = current191PrepareArgs(root, "current191-bridge", {
+    operationId: SECOND_OPERATION_ID,
+  });
+  nextArgs[nextArgs.indexOf("--release-sha") + 1] = SUCCESSOR_SHA;
+  nextArgs[nextArgs.indexOf("--previous-migration") + 1] =
+    CURRENT191_MIGRATION;
+  nextArgs[nextArgs.indexOf("--previous-migration-count") + 1] = "191";
+  assert.equal(await main(nextArgs), 0);
 });
 
 test("rejects a premature final record before phase effects", async (t) => {

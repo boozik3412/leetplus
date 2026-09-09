@@ -470,20 +470,21 @@ describePostgres(
               `SET LOCAL session_replication_role = 'replica'`,
             );
             const changed = await tx.$executeRaw(Prisma.sql`
+              WITH transition_clock AS MATERIALIZED (
+                SELECT pg_catalog.date_trunc(
+                  'milliseconds',
+                  pg_catalog.clock_timestamp()
+                ) AS "at"
+              )
               UPDATE public."IdentityMailDeliveryTenantEnrollment"
               SET
                 "state" = 'DRAINING',
                 "enabled" = false,
                 "activeCommandId" = ${drainCommandId},
                 "stateRevision" = "stateRevision" + 1,
-                "stateChangedAt" = pg_catalog.date_trunc(
-                  'milliseconds',
-                  pg_catalog.clock_timestamp()
-                ),
-                "updatedAt" = pg_catalog.date_trunc(
-                  'milliseconds',
-                  pg_catalog.clock_timestamp()
-                )
+                "stateChangedAt" = transition_clock."at",
+                "updatedAt" = transition_clock."at"
+              FROM transition_clock
               WHERE "tenantId" = ${contended.tenantId}
                 AND "state" = 'ACTIVE'
             `);

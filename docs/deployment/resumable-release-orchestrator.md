@@ -56,12 +56,53 @@ impact receipt только из verified installed-control output. Он отк�
 intent, consumed rollback, неканоническом active upstream или уже активном
 target slot. State inventory допускает только одну незавершённую orchestrator
 operation: новый plan/apply блокируется, пока предыдущая цепочка не получила
-валидный `final.json`; read-only `status` остаётся доступен для диагностики.
+валидный `final.json` либо узкий terminal `superseded.json`; read-only `status`
+остаётся доступен для диагностики.
 
 Только отдельный `apply` с точным `planSha256` создаёт immutable
 `approval.json` и начинает effect. `resume` не может создать approval и
 продолжает только уже одобренный exact plan. Как и прежде, сам запуск `apply`
 требует отдельного production GO владельца.
+
+### Terminalize stale operation до runtime effect
+
+`supersede-pre-runtime` — единственный допустимый способ закрыть V3 operation,
+которую нужно заменить новым admitted release до первого runtime effect:
+
+```bash
+sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  supersede-pre-runtime \
+  --operation-id <existing-uuid-v4> \
+  --plan-sha256 <existing-plan-sha256> \
+  --replacement-release-sha <different-exact-admitted-sha>
+```
+
+Команда допускается только для approved V3 operation, у которой нет `final.json`,
+ровно `0` accepted phase receipts и существует только pending `HYDRATE` intent.
+До terminalization она заново сверяет неизменённые baseline/accepted-cutover
+continuity прежнего plan, установленную control attestation replacement SHA,
+равенство `effectiveLane` и то, что replacement SHA отличается от исходного.
+Новый SHA не наследует approval, plan, phase receipt или authority старой
+операции.
+
+При успехе controller публикует ровно один immutable
+`superseded.json` (`root:root 0400`) в исходном operation directory. Он связывает
+старый plan/approval/pending HYDRATE intent, baseline/cutover evidence и новую
+installed-control attestation, но не изменяет runtime, DB, active link, slot env,
+systemd units или cutover generation. Это terminal audit/control state только
+снимает inventory blocker и разрешает новый `prepare` для replacement SHA.
+
+После любого accepted phase receipt, а также после появления любого `BIND`
+intent/evidence/receipt, эта команда запрещена. Так же запрещены ручное удаление, переименование или редактирование operation
+records, `approval.json`, phase records, `final.json` либо `superseded.json`:
+missing/mutated record остаётся fail-closed incident, а не supersession.
+
+Live-проверки replacement control и cutover continuity выполняются именно при
+первой exclusive-публикации receipt. Повтор той же команды с теми же тремя
+идентификаторами валидирует и возвращает уже существующий immutable receipt без
+зависимости от более поздних rollout/cutover поколений. Новый `prepare` отдельно
+проверяет installed control уже для запрошенного им exact release; authority из
+старого `superseded.json` никогда не переносится дальше.
 
 ### Immutable publication и slot-aware reconcile
 
@@ -273,6 +314,25 @@ sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
   resume --operation-id <uuid-v4> --plan-sha256 <exact-plan-sha256>
 ```
 
+Если `status` доказывает approved V3 operation с единственным pending
+`HYDRATE` intent и нулём accepted phase receipts, а новый exact admitted SHA
+должен заменить её до runtime effect, используется только отдельный terminalize
+command; затем создаётся новый plan, а не `resume` старого:
+
+```bash
+sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  supersede-pre-runtime \
+  --operation-id <old-uuid-v4> \
+  --plan-sha256 <old-exact-plan-sha256> \
+  --replacement-release-sha <different-exact-admitted-sha>
+```
+
+`superseded.json` не является runtime release receipt и не заменяет production
+GO для replacement. Он разрешён лишь до accepted `HYDRATE` receipt; после
+любой accepted phase/BIND остаётся только same-plan `resume` или отдельный
+fail-closed incident workflow. Удалять/править старую operation directory,
+чтобы освободить новый `prepare`, запрещено.
+
 Накопительная read-only сводка:
 
 ```bash
@@ -282,7 +342,8 @@ sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator met
 Она читает только canonical root-owned operation и обезличенные attempt
 records. Внешних запросов, DB, systemd/service/timer probes и новых файлов при
 самом чтении нет. Для каждой trusted lane выводятся approval→final и
-phase intent→receipt p50/p95, failure-phase histogram и unresolved count. Пока
+phase intent→receipt p50/p95, failure-phase histogram, terminal
+`supersededOperationCount` и unresolved count. Пока
 одна lane не накопила 20 terminal operations, процентили равны `null` с
 `INSUFFICIENT_SAMPLE_SIZE`. Единственный исторический V2 rollout валидируется
 по своей точной terminal schema как `LEGACY_UNCLASSIFIED` и не влияет на lane

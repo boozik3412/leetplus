@@ -28,8 +28,12 @@ production остаётся `CURRENT_190/190`, bridge `OFF`, reporting `LIVE`.
 Новый узкий orchestrator input
 `--slot-runtime-profile current191-bridge|current191-final` разрешён только
 для target CURRENT191 и только по одному inactive slot с отдельным exact plan
-digest, receipt chain, cutover и тем же `resume`. Bridge profile задаёт только
-`CURRENT190 OFF/LIVE → target191 ALLOW_CURRENT_190/OFF`; final profile — только
+digest, receipt chain, cutover и тем же `resume`. Bridge profile задаёт
+`CURRENT190 OFF/LIVE → target191 ALLOW_CURRENT_190/OFF`; единственное recovery-
+исключение разрешает exact re-pin
+`CURRENT191 ALLOW_CURRENT_190/OFF → CURRENT191 ALLOW_CURRENT_190/OFF` на другой
+admitted release SHA без DDL и без переиспользования plan/approval/receipts.
+Final profile разрешает только
 `target191 ALLOW_CURRENT_190/OFF → target191 OFF/LIVE` и требует SHA-256
 CURRENT191 check receipt `root:root 0400`. Database-controller `check` создаёт
 его только после exact DB/runtime проверки двух bridge slots; один immutable

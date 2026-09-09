@@ -28,6 +28,8 @@ export const CONTRACT_VERSION = "LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V3";
 export const PLAN_DECISION = "PREPARED_NOT_EFFECT_AUTHORIZATION";
 export const APPROVAL_DECISION = "EXACT_PLAN_DIGEST_APPLY_AUTHORIZED";
 export const COMPLETE_DECISION = "ROLLOUT_PHASES_COMPLETED";
+export const SUPERSEDED_DECISION =
+  "ROLLOUT_SUPERSEDED_BEFORE_RUNTIME_EFFECT";
 export const PHASES = Object.freeze([
   "HYDRATE",
   "BIND",
@@ -284,6 +286,10 @@ function usage() {
     "  leetplus-resumable-release-orchestrator apply|resume|status \\",
     "    --operation-id <uuid-v4> --plan-sha256 <sha256>",
     "",
+    "  leetplus-resumable-release-orchestrator supersede-pre-runtime \\",
+    "    --operation-id <uuid-v4> --plan-sha256 <sha256> \\",
+    "    --replacement-release-sha <sha>",
+    "",
     "  leetplus-resumable-release-orchestrator metrics",
     "",
     "  leetplus-resumable-release-orchestrator metrics-retention-plan \\",
@@ -295,6 +301,8 @@ function usage() {
     "prepare is read-only apart from a protected nonauthorizing plan. apply is",
     "the explicit effect boundary. resume may continue only that exact approved",
     "plan and validates every terminal phase receipt before proceeding.",
+    "supersede-pre-runtime terminalizes only an approved operation that has",
+    "exactly one pending HYDRATE intent and no accepted phase or runtime effect.",
     "metrics is read-only: it reads only canonical root-owned operation and",
     "attempt records; it never contacts runtime services, databases or timers.",
     "metrics-retention-plan is also read-only. metrics-retention-apply is the",
@@ -335,6 +343,7 @@ function parseArguments(argv) {
       "apply",
       "resume",
       "status",
+      "supersede-pre-runtime",
       "metrics",
       "metrics-retention-plan",
       "metrics-retention-apply",
@@ -422,7 +431,9 @@ function parseArguments(argv) {
           "--slot-runtime-profile",
           "--watchdog-seconds",
         ]
-      : [...common, "--plan-sha256"];
+      : mode === "supersede-pre-runtime"
+        ? [...common, "--plan-sha256", "--replacement-release-sha"]
+        : [...common, "--plan-sha256"];
   if (mode === "prepare" && !values.has("--watchdog-seconds")) {
     values.set("--watchdog-seconds", "30");
   }
@@ -454,6 +465,14 @@ function parseArguments(argv) {
         SHA256,
         "ORCHESTRATOR_PLAN_DIGEST_INVALID",
       ),
+      replacementReleaseSha:
+        mode === "supersede-pre-runtime"
+          ? exactString(
+              values.get("--replacement-release-sha") ?? "",
+              SHA40,
+              "ORCHESTRATOR_REPLACEMENT_RELEASE_SHA_INVALID",
+            )
+          : null,
       testMode,
     };
   }
@@ -2539,6 +2558,7 @@ function readCurrentPhaseChain(context, args) {
     }
   }
   let pendingRecord = "NONE";
+  let pendingRecordSha256 = "";
   if (completed < PHASES.length) {
     const phase = PHASES[completed];
     const paths = phasePaths(context.directory, completed, phase);
@@ -2548,8 +2568,9 @@ function readCurrentPhaseChain(context, args) {
       fail("ORCHESTRATOR_PHASE_RECORD_ORDER_INVALID");
     }
     if (hasIntent) {
+      const intent = readCanonicalJson(paths.intent, args, [0o600]);
       validatePhaseRecord(
-        readCanonicalJson(paths.intent, args, [0o600]).value,
+        intent.value,
         "PHASE_INTENT",
         phase,
         completed,
@@ -2558,16 +2579,19 @@ function readCurrentPhaseChain(context, args) {
         previousReceiptSha256,
       );
       pendingRecord = "INTENT";
+      pendingRecordSha256 = intent.sha256;
     }
     if (hasEvidence) {
+      const evidence = readCanonicalJson(paths.evidence, args, [0o400]);
       validateEvidence(
-        readCanonicalJson(paths.evidence, args, [0o400]).value,
+        evidence.value,
         phase,
         completed,
         context.plan,
         context.planSha256,
       );
       pendingRecord = "EVIDENCE";
+      pendingRecordSha256 = evidence.sha256;
     }
   }
   if (
@@ -2576,7 +2600,12 @@ function readCurrentPhaseChain(context, args) {
   ) {
     fail("ORCHESTRATOR_PREMATURE_FINAL_RECEIPT");
   }
-  return { completed, pendingRecord, previousReceiptSha256 };
+  return {
+    completed,
+    pendingRecord,
+    pendingRecordSha256,
+    previousReceiptSha256,
+  };
 }
 
 function readV2MetricPhaseChain(context, args) {
@@ -3449,6 +3478,92 @@ function validateFinalReceipt(record, context, lastReceiptSha256) {
   return record;
 }
 
+function validateSupersessionReceipt(
+  record,
+  context,
+  chain,
+  approvalSha256,
+  expectedReplacementReleaseSha = null,
+) {
+  exactKeys(
+    record,
+    [
+      "approvalSha256",
+      "completedPhases",
+      "contractVersion",
+      "decision",
+      "operationId",
+      "pendingPhase",
+      "pendingIntentSha256",
+      "pendingRecord",
+      "planSha256",
+      "recordType",
+      "releaseSha",
+      "replacementControlAttestationSha256",
+      "replacementEffectiveLane",
+      "replacementImpactReceiptSha256",
+      "replacementReleaseSha",
+      "schemaVersion",
+      "supersededAt",
+      "targetSlot",
+    ],
+    "ORCHESTRATOR_SUPERSESSION_RECEIPT_INVALID",
+  );
+  if (
+    record.schemaVersion !== 1 ||
+    record.contractVersion !== CONTRACT_VERSION ||
+    record.recordType !== "ROLLOUT_SUPERSESSION_RECEIPT" ||
+    record.operationId !== context.plan.operationId ||
+    record.planSha256 !== context.planSha256 ||
+    record.approvalSha256 !== approvalSha256 ||
+    !SHA256.test(record.approvalSha256 ?? "") ||
+    record.releaseSha !== context.plan.releaseSha ||
+    record.targetSlot !== context.plan.targetSlot ||
+    record.completedPhases !== 0 ||
+    record.pendingPhase !== "HYDRATE" ||
+    record.pendingIntentSha256 !== chain.pendingRecordSha256 ||
+    !SHA256.test(record.pendingIntentSha256 ?? "") ||
+    record.pendingRecord !== "INTENT" ||
+    record.decision !== SUPERSEDED_DECISION ||
+    !SHA40.test(record.replacementReleaseSha ?? "") ||
+    record.replacementReleaseSha === context.plan.releaseSha ||
+    (expectedReplacementReleaseSha !== null &&
+      record.replacementReleaseSha !== expectedReplacementReleaseSha) ||
+    !SHA256.test(record.replacementControlAttestationSha256 ?? "") ||
+    record.replacementControlAttestationSha256 ===
+      context.plan.controlAttestationSha256 ||
+    !TRUSTED_LANES.includes(record.replacementEffectiveLane) ||
+    record.replacementEffectiveLane !== context.plan.effectiveLane ||
+    !SHA256.test(record.replacementImpactReceiptSha256 ?? "") ||
+    chain.completed !== 0 ||
+    chain.pendingRecord !== "INTENT" ||
+    chain.previousReceiptSha256 !== ""
+  ) {
+    fail("ORCHESTRATOR_SUPERSESSION_RECEIPT_INVALID");
+  }
+  exactIso(record.supersededAt, "ORCHESTRATOR_SUPERSESSION_RECEIPT_INVALID");
+  return record;
+}
+
+function readValidatedSupersessionReceipt(
+  context,
+  chain,
+  args,
+  approvalSha256,
+  expectedReplacementReleaseSha = null,
+) {
+  const receiptPath = path.join(context.directory, "superseded.json");
+  const receipt = readCanonicalJson(receiptPath, args, [0o400]);
+  validateSupersessionReceipt(
+    receipt.value,
+    context,
+    chain,
+    approvalSha256,
+    expectedReplacementReleaseSha,
+  );
+  return { path: receiptPath, sha256: receipt.sha256, value: receipt.value };
+}
+
 function validateV2MetricApproval(record, context) {
   exactKeys(
     record,
@@ -3561,14 +3676,38 @@ function assertNoOtherIncompleteOperation(paths, args, operationId) {
     const chain = isV2
       ? readV2MetricPhaseChain(context, args)
       : readCurrentPhaseChain(context, args);
+    const finalPath = path.join(directory, "final.json");
+    const supersessionPath = path.join(directory, "superseded.json");
     if (
       chain.completed !== PHASES.length ||
-      !existsSync(path.join(directory, "final.json"))
+      !existsSync(finalPath)
     ) {
+      if (
+        !isV2 &&
+        !existsSync(finalPath) &&
+        existsSync(supersessionPath)
+      ) {
+        const approval = readCanonicalJson(
+          path.join(directory, "approval.json"),
+          args,
+          [0o400],
+        );
+        validateApproval(approval.value, context);
+        readValidatedSupersessionReceipt(
+          context,
+          chain,
+          args,
+          approval.sha256,
+        );
+        continue;
+      }
       fail("ORCHESTRATOR_OTHER_OPERATION_INCOMPLETE");
     }
+    if (existsSync(supersessionPath)) {
+      fail("ORCHESTRATOR_STATE_INVENTORY_INVALID");
+    }
     const final = readCanonicalJson(
-      path.join(directory, "final.json"),
+      finalPath,
       args,
       [0o400],
     );
@@ -3605,7 +3744,109 @@ function createFinalReceipt(context, lastReceiptSha256, args) {
   return { path: finalPath, sha256: canonicalRecordSha256(final) };
 }
 
+function supersedePreRuntimeOperation(context, paths, args) {
+  const finalPath = path.join(context.directory, "final.json");
+  const supersessionPath = path.join(context.directory, "superseded.json");
+  if (existsSync(finalPath)) {
+    fail("ORCHESTRATOR_SUPERSESSION_OPERATION_ALREADY_TERMINAL");
+  }
+  if (!existsSync(path.join(context.directory, "approval.json"))) {
+    fail("ORCHESTRATOR_SUPERSESSION_APPROVAL_REQUIRED");
+  }
+  const approval = readCanonicalJson(
+    path.join(context.directory, "approval.json"),
+    args,
+    [0o400],
+  );
+  validateApproval(approval.value, context);
+  const chain = readCurrentPhaseChain(context, args);
+  if (
+    chain.completed !== 0 ||
+    chain.pendingRecord !== "INTENT" ||
+    chain.previousReceiptSha256 !== ""
+  ) {
+    fail("ORCHESTRATOR_SUPERSESSION_RUNTIME_EFFECT_NOT_EXCLUDED");
+  }
+  if (existsSync(supersessionPath)) {
+    const existing = readValidatedSupersessionReceipt(
+      context,
+      chain,
+      args,
+      approval.sha256,
+      args.replacementReleaseSha,
+    );
+    return {
+      contractVersion: CONTRACT_VERSION,
+      decision: SUPERSEDED_DECISION,
+      operationId: context.plan.operationId,
+      planSha256: context.planSha256,
+      releaseSha: context.plan.releaseSha,
+      replacementReleaseSha: args.replacementReleaseSha,
+      supersessionReceiptPath: existing.path,
+      supersessionReceiptSha256: existing.sha256,
+      targetSlot: context.plan.targetSlot,
+    };
+  }
+  assertCutoverContinuity(context.plan, paths, args, 0);
+  const replacementControl = verifyInstalledControl(
+    args.replacementReleaseSha,
+    paths,
+    args,
+  );
+  if (
+    args.replacementReleaseSha === context.plan.releaseSha ||
+    replacementControl.attestationSha256 ===
+      context.plan.controlAttestationSha256 ||
+    replacementControl.effectiveLane !== context.plan.effectiveLane
+  ) {
+    fail("ORCHESTRATOR_SUPERSESSION_CONTROL_SUCCESSOR_INVALID");
+  }
+  const receipt = {
+    schemaVersion: 1,
+    contractVersion: CONTRACT_VERSION,
+    recordType: "ROLLOUT_SUPERSESSION_RECEIPT",
+    operationId: context.plan.operationId,
+    planSha256: context.planSha256,
+    approvalSha256: approval.sha256,
+    releaseSha: context.plan.releaseSha,
+    targetSlot: context.plan.targetSlot,
+    completedPhases: 0,
+    pendingPhase: "HYDRATE",
+    pendingRecord: "INTENT",
+    pendingIntentSha256: chain.pendingRecordSha256,
+    replacementReleaseSha: args.replacementReleaseSha,
+    replacementControlAttestationSha256:
+      replacementControl.attestationSha256,
+    replacementEffectiveLane: replacementControl.effectiveLane,
+    replacementImpactReceiptSha256: replacementControl.impactReceiptSha256,
+    supersededAt: nowIso(),
+    decision: SUPERSEDED_DECISION,
+  };
+  publishCanonicalJson(supersessionPath, receipt, 0o400, args);
+  const published = readValidatedSupersessionReceipt(
+    context,
+    chain,
+    args,
+    approval.sha256,
+    args.replacementReleaseSha,
+  );
+  return {
+    contractVersion: CONTRACT_VERSION,
+    decision: SUPERSEDED_DECISION,
+    operationId: context.plan.operationId,
+    planSha256: context.planSha256,
+    releaseSha: context.plan.releaseSha,
+    replacementReleaseSha: args.replacementReleaseSha,
+    supersessionReceiptPath: published.path,
+    supersessionReceiptSha256: published.sha256,
+    targetSlot: context.plan.targetSlot,
+  };
+}
+
 function runPipeline(context, paths, args) {
+  if (existsSync(path.join(context.directory, "superseded.json"))) {
+    fail("ORCHESTRATOR_OPERATION_SUPERSEDED");
+  }
   const approvalSha256 = ensureApproval(context, args, args.mode);
   let chain = readCurrentPhaseChain(context, args);
   while (chain.completed < PHASES.length) {
@@ -3753,15 +3994,42 @@ function runPipeline(context, paths, args) {
 function status(context, args) {
   const approvalPath = path.join(context.directory, "approval.json");
   const approved = existsSync(approvalPath);
+  let approval = null;
   if (approved) {
-    validateApproval(
-      readCanonicalJson(approvalPath, args, [0o400]).value,
-      context,
-    );
+    approval = readCanonicalJson(approvalPath, args, [0o400]);
+    validateApproval(approval.value, context);
   }
   const chain = readCurrentPhaseChain(context, args);
   const phasesComplete = chain.completed === PHASES.length;
   const finalPresent = existsSync(path.join(context.directory, "final.json"));
+  const supersessionPresent = existsSync(
+    path.join(context.directory, "superseded.json"),
+  );
+  if (supersessionPresent) {
+    if (!approved || finalPresent || phasesComplete) {
+      fail("ORCHESTRATOR_SUPERSESSION_RECEIPT_INVALID");
+    }
+    const supersession = readValidatedSupersessionReceipt(
+      context,
+      chain,
+      args,
+      approval.sha256,
+    );
+    return {
+      approved,
+      completedPhases: chain.completed,
+      contractVersion: CONTRACT_VERSION,
+      decision: SUPERSEDED_DECISION,
+      nextPhase: null,
+      operationId: context.plan.operationId,
+      pendingRecord: "NONE",
+      planSha256: context.planSha256,
+      releaseSha: context.plan.releaseSha,
+      replacementReleaseSha: supersession.value.replacementReleaseSha,
+      supersessionReceiptSha256: supersession.sha256,
+      targetSlot: context.plan.targetSlot,
+    };
+  }
   if (finalPresent && !phasesComplete) {
     fail("ORCHESTRATOR_PREMATURE_FINAL_RECEIPT");
   }
@@ -3975,6 +4243,7 @@ function metricOperationInventory(paths, args) {
       : readCurrentPhaseChain(context, args);
     const lane = effectiveLaneForPlan(plan);
     const finalPath = path.join(directory, "final.json");
+    const supersessionPath = path.join(directory, "superseded.json");
     const approvalPath = path.join(directory, "approval.json");
     let approval;
     if (existsSync(approvalPath)) {
@@ -3990,8 +4259,24 @@ function metricOperationInventory(paths, args) {
     }
     if (chain.completed !== PHASES.length || !existsSync(finalPath)) {
       if (existsSync(finalPath)) fail("ORCHESTRATOR_PREMATURE_FINAL_RECEIPT");
+      if (!isV2 && existsSync(supersessionPath)) {
+        if (approval === undefined) {
+          fail("ORCHESTRATOR_APPROVAL_INVALID");
+        }
+        readValidatedSupersessionReceipt(
+          context,
+          chain,
+          args,
+          approval.sha256,
+        );
+        result.push({ lane, state: "SUPERSEDED" });
+        continue;
+      }
       result.push({ lane, state: "UNRESOLVED" });
       continue;
+    }
+    if (existsSync(supersessionPath)) {
+      fail("ORCHESTRATOR_STATE_INVENTORY_INVALID");
     }
     const final = readCanonicalJson(finalPath, args, [0o400]);
     if (isV2) {
@@ -4537,7 +4822,8 @@ function metricAttemptInventory(paths, args) {
 function assertMetricRetentionOperationsTerminal(paths, args) {
   if (
     metricOperationInventory(paths, args).some(
-      (operation) => operation.state !== "COMPLETED",
+      (operation) =>
+        !["COMPLETED", "SUPERSEDED"].includes(operation.state),
     )
   ) {
     fail("ORCHESTRATOR_METRIC_RETENTION_OPERATION_UNRESOLVED");
@@ -4945,6 +5231,9 @@ function laneMetricSummary(lane, operations, attempts) {
   const completed = operations.filter(
     (operation) => operation.lane === lane && operation.state === "COMPLETED",
   );
+  const superseded = operations.filter(
+    (operation) => operation.lane === lane && operation.state === "SUPERSEDED",
+  );
   const laneAttempts = attempts.filter(
     (attempt) => attempt.effectiveLane === lane,
   );
@@ -4971,6 +5260,7 @@ function laneMetricSummary(lane, operations, attempts) {
       ]),
     ),
     rolloutAttemptCount: laneAttempts.length,
+    supersededOperationCount: superseded.length,
   };
 }
 
@@ -5051,6 +5341,14 @@ export async function main(argv = process.argv.slice(2)) {
     context = readPlan(args, paths);
     if (args.mode === "status") {
       process.stdout.write(JSON.stringify(status(context, args)) + "\n");
+      return 0;
+    }
+    if (args.mode === "supersede-pre-runtime") {
+      assertNoOtherIncompleteOperation(paths, args, args.operationId);
+      process.stdout.write(
+        JSON.stringify(supersedePreRuntimeOperation(context, paths, args)) +
+          "\n",
+      );
       return 0;
     }
     attempt = {

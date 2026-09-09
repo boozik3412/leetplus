@@ -20,6 +20,7 @@ import {
   CONTRACT_VERSION,
   main,
   PHASES,
+  SUPERSEDED_DECISION,
 } from "../../docs/deployment/production-artifact/resumable-release-orchestrator.mjs";
 
 const RELEASE_SHA = "a".repeat(40);
@@ -248,6 +249,66 @@ async function writeUnresolvedOperation(root, id, lane) {
   );
   await mkdir(directory, { recursive: true });
   await writeCanonical(path.join(directory, "plan.json"), planFor(id, lane));
+}
+
+async function writeSupersededOperation(root, id, lane, index) {
+  const directory = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    id,
+  );
+  await mkdir(directory, { recursive: true });
+  const plan = planFor(id, lane);
+  const planSha256 = canonicalRecordSha256(plan);
+  await writeCanonical(path.join(directory, "plan.json"), plan);
+  const approval = {
+    schemaVersion: 1,
+    contractVersion: CONTRACT_VERSION,
+    recordType: "APPLY_APPROVAL",
+    operationId: id,
+    planSha256,
+    approvedAt: iso(index * 100000),
+    decision: "EXACT_PLAN_DIGEST_APPLY_AUTHORIZED",
+  };
+  await writeCanonical(path.join(directory, "approval.json"), approval);
+  const hydrateIntent = {
+    schemaVersion: 1,
+    contractVersion: CONTRACT_VERSION,
+    recordType: "PHASE_INTENT",
+    operationId: id,
+    planSha256,
+    phaseIndex: 1,
+    phase: "HYDRATE",
+    previousPhaseReceiptSha256: "",
+    createdAt: iso(index * 100000 + 1000),
+  };
+  await writeCanonical(
+    path.join(directory, "01-hydrate.intent.json"),
+    hydrateIntent,
+  );
+  const superseded = {
+    schemaVersion: 1,
+    contractVersion: CONTRACT_VERSION,
+    recordType: "ROLLOUT_SUPERSESSION_RECEIPT",
+    operationId: id,
+    planSha256,
+    approvalSha256: canonicalRecordSha256(approval),
+    releaseSha: RELEASE_SHA,
+    targetSlot: "blue",
+    completedPhases: 0,
+    pendingPhase: "HYDRATE",
+    pendingIntentSha256: canonicalRecordSha256(hydrateIntent),
+    pendingRecord: "INTENT",
+    replacementReleaseSha: "f".repeat(40),
+    replacementControlAttestationSha256: "e".repeat(64),
+    replacementEffectiveLane: lane,
+    replacementImpactReceiptSha256: "f".repeat(64),
+    supersededAt: iso(index * 100000 + 2000),
+    decision: SUPERSEDED_DECISION,
+  };
+  const supersededPath = path.join(directory, "superseded.json");
+  await writeCanonical(supersededPath, superseded);
+  return { directory, superseded, supersededPath };
 }
 
 async function captureMain(argv) {
@@ -647,6 +708,70 @@ test("metrics retention is a no-op below the explicit retain count", async (t) =
     (await readdir(receiptRoot)).includes("release-orchestrator-metrics-archive"),
     false,
   );
+});
+
+test("metrics treats a validated pre-runtime supersession as terminal and rejects receipt drift", async (t) => {
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "leetplus-orchestrator-metrics-superseded-"),
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const receiptRoot = path.join(root, "var/lib/leetplus/deploy-receipts");
+  const stateRoot = path.join(receiptRoot, "release-orchestrator");
+  const supersededId = "81000000-0000-4000-8000-000000000001";
+  await mkdir(stateRoot, { recursive: true });
+  await writeCompletedOperation(
+    root,
+    "81000000-0000-4000-8000-000000000002",
+    "L1_RUNTIME",
+    1,
+  );
+  const { superseded, supersededPath } = await writeSupersededOperation(
+    root,
+    supersededId,
+    "L1_RUNTIME",
+    2,
+  );
+
+  const metrics = await captureMain([
+    "metrics",
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(metrics.status, 0);
+  const report = JSON.parse(metrics.stdout);
+  assert.equal(report.unresolved.operationCount, 0);
+  assert.equal(report.unresolved.byLane.L1_RUNTIME, 0);
+  assert.equal(report.lanes.L1_RUNTIME.completedOperationCount, 1);
+  assert.equal(report.lanes.L1_RUNTIME.supersededOperationCount, 1);
+  assert.equal(report.lanes.L2_SCHEMA_SECURITY.supersededOperationCount, 0);
+
+  const retention = await captureMain([
+    "metrics-retention-plan",
+    "--retain-attempt-count",
+    "1",
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(retention.status, 0);
+  assert.equal(
+    JSON.parse(retention.stdout).decision,
+    "METRIC_RETENTION_NOT_REQUIRED",
+  );
+
+  await writeCanonical(supersededPath, {
+    ...superseded,
+    pendingRecord: "RECEIPT",
+  });
+  const tampered = await captureMain([
+    "metrics",
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ]);
+  assert.equal(tampered.status, 1);
+  assert.match(tampered.stderr, /ORCHESTRATOR_SUPERSESSION_RECEIPT_INVALID/u);
 });
 
 test("metrics retention blocks source drift and unresolved rollouts before effects", async (t) => {

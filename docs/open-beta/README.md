@@ -42,7 +42,14 @@ checkout не является допустимым источником product
 `BACKFILL/MANUAL` по точным bindings. Новый schema target — `CURRENT_191/191`;
 переход `CURRENT_190 → CURRENT_191` допускается лишь через exact signed schema
 controller с dual-target `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_190`,
-транзакционным apply и обязательным `OFF` на обоих слотах до final postcheck.
+транзакционным apply и обязательным live `check`. `check` публикует
+`root:root 0400` receipt; его SHA-256 пинится в каждом из двух отдельных
+inactive-slot `current191-final` plan и проверяется вместе с
+release/schema-plan/head/count/checksum/evidence. Один immutable receipt
+используется для обоих final cutover без TTL между ними; каждый plan отдельно
+требует exact bridge source того же release и повторную live readiness.
+Terminal `OFF/LIVE` на обоих slots подтверждается CLI `final-check` до public
+postcheck; ручные изменения slot env запрещены.
 
 Перед изменением auth, role landing, access scope, игрового HTTP, game
 administration, workers или deployment обязателен единый
@@ -613,7 +620,8 @@ platform-admin tenant switch и диагностика одноимённых п
    повторная проверка и атомарный `PUT /settings`, global Store identity и
    external manual-only sync на `CURRENT_191/191`; signed controller выполняет
    только `CURRENT_190 → CURRENT_191` dual-target bridge
-   `ALLOW_CURRENT_190`, transactional schema apply и two-slot bridge-off.
+   `ALLOW_CURRENT_190`, transactional schema apply, защищённый check receipt,
+   два последовательных inactive-slot final cutover и terminal `final-check`.
    0e.0. [Архивный CURRENT188 Langame Web BFF candidate](./langame-current188-bff-candidate.md) —
    superseded historical evidence, не route-wired и не production authority.
    0e.1. [CURRENT188 legacy sync deny CI evidence](./langame-current188-legacy-sync-deny-ci-evidence-2026-08-13.md) —

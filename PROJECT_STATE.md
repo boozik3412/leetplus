@@ -23,6 +23,25 @@ Source candidate по `LP-BUG-A56627F5` удаляет staff/test exclusion из
 `staffRewardsPolicy=ALLOW`. Production runtime и исторические отменённые
 награды не меняются без отдельного admitted rollout и bounded repair.
 
+CURRENT191 external-Langame successor пока является только source/CI contract;
+production остаётся `CURRENT_190/190`, bridge `OFF`, reporting `LIVE`.
+Новый узкий orchestrator input
+`--slot-runtime-profile current191-bridge|current191-final` разрешён только
+для target CURRENT191 и только по одному inactive slot с отдельным exact plan
+digest, receipt chain, cutover и тем же `resume`. Bridge profile задаёт только
+`CURRENT190 OFF/LIVE → target191 ALLOW_CURRENT_190/OFF`; final profile — только
+`target191 ALLOW_CURRENT_190/OFF → target191 OFF/LIVE` и требует SHA-256
+CURRENT191 check receipt `root:root 0400`. Database-controller `check` создаёт
+его только после exact DB/runtime проверки двух bridge slots; один immutable
+receipt SHA используется в обоих final plan. `checkedAt` остаётся audit-полем,
+но между slot cutover receipt не истекает: после первого final cutover повторный
+dual-bridge `check` уже невозможен. Каждый plan заново сверяет exact bytes,
+release SHA, schema-plan, head/count/checksum, database/dual-slot evidence,
+source profile и live readiness до effect.
+CURRENT191 CLI `final-check` обязателен после двух отдельных inactive-slot
+final receipts и до terminal public postcheck. Это не production GO,
+deploy record или разрешение менять slot env вручную.
+
 Production hotfix PR #170 развёрнут five-phase operation
 `9687947d-722c-45e9-8a72-999e433434ab`; terminal receipt SHA-256 —
 `4d2f6c32ed57736a01f7f389467313bba0e410ba444aee5d1629c33c284f540d`.

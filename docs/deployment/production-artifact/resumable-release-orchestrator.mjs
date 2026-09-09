@@ -169,6 +169,24 @@ const SLOT_ENVIRONMENT_KEYS = Object.freeze([
   "WEB_PORT",
   "API_URL",
 ]);
+const SLOT_RUNTIME_PROFILE_PRESERVE = "preserve";
+const SLOT_RUNTIME_PROFILE_CURRENT191_BRIDGE = "current191-bridge";
+const SLOT_RUNTIME_PROFILE_CURRENT191_FINAL = "current191-final";
+const SLOT_RUNTIME_PROFILES = Object.freeze([
+  SLOT_RUNTIME_PROFILE_PRESERVE,
+  SLOT_RUNTIME_PROFILE_CURRENT191_BRIDGE,
+  SLOT_RUNTIME_PROFILE_CURRENT191_FINAL,
+]);
+const CURRENT191_MIGRATION =
+  "20260908180000_external_langame_simple_onboarding";
+const CURRENT191_MIGRATION_COUNT = 191;
+const CURRENT191_MIGRATION_SHA256 =
+  "a149122148b0270ad870883f81cba6bd61365c0babca56f81c18523af4b78beb";
+const CURRENT190_MIGRATION = "20260908090000_initial_owner_invite_link_mode";
+const CURRENT190_MIGRATION_COUNT = 190;
+const CURRENT191_CHECK_RECEIPT_CONTRACT =
+  "EXTERNAL_LANGAME_CURRENT191_PRE_FINAL_CHECK_RECEIPT_V1";
+const CURRENT191_CHECK_RECEIPT_DECISION = "CURRENT191_UPGRADE_CHECK_ACCEPTED";
 
 export class ReleaseOrchestratorError extends Error {
   constructor(reasonCode) {
@@ -259,6 +277,8 @@ function usage() {
     "    --expected-migration <name> --expected-migration-count <count> \\",
     "    --previous-release-sha <sha> --previous-migration <name> \\",
     "    --previous-migration-count <count> --previous-web-build-id <sha> \\",
+    "    [--slot-runtime-profile preserve|current191-bridge|current191-final] \\",
+    "    [--current191-check-receipt-sha256 <sha256>] \\",
     "    [--watchdog-seconds 30]",
     "",
     "  leetplus-resumable-release-orchestrator apply|resume|status \\",
@@ -392,17 +412,25 @@ function parseArguments(argv) {
           ...common,
           "--expected-migration",
           "--expected-migration-count",
+          "--current191-check-receipt-sha256",
           "--previous-migration",
           "--previous-migration-count",
           "--previous-release-sha",
           "--previous-web-build-id",
           "--release-sha",
           "--slot",
+          "--slot-runtime-profile",
           "--watchdog-seconds",
         ]
       : [...common, "--plan-sha256"];
   if (mode === "prepare" && !values.has("--watchdog-seconds")) {
     values.set("--watchdog-seconds", "30");
+  }
+  if (mode === "prepare" && !values.has("--slot-runtime-profile")) {
+    values.set("--slot-runtime-profile", SLOT_RUNTIME_PROFILE_PRESERVE);
+  }
+  if (mode === "prepare" && !values.has("--current191-check-receipt-sha256")) {
+    values.set("--current191-check-receipt-sha256", "NONE");
   }
   if (
     values.size !== expected.length ||
@@ -436,19 +464,48 @@ function parseArguments(argv) {
   );
   const slot = values.get("--slot");
   if (!["blue", "green"].includes(slot)) fail("ORCHESTRATOR_SLOT_INVALID");
+  const expectedMigration = exactString(
+    values.get("--expected-migration") ?? "",
+    MIGRATION,
+    "ORCHESTRATOR_MIGRATION_INVALID",
+  );
+  const expectedMigrationCount = exactInteger(
+    Number(values.get("--expected-migration-count")),
+    1,
+    999999,
+    "ORCHESTRATOR_MIGRATION_COUNT_INVALID",
+  );
+  const slotRuntimeProfile = exactString(
+    values.get("--slot-runtime-profile") ?? "",
+    /^(?:preserve|current191-bridge|current191-final)$/u,
+    "ORCHESTRATOR_SLOT_RUNTIME_PROFILE_INVALID",
+  );
+  if (
+    slotRuntimeProfile !== SLOT_RUNTIME_PROFILE_PRESERVE &&
+    (expectedMigration !== CURRENT191_MIGRATION ||
+      expectedMigrationCount !== CURRENT191_MIGRATION_COUNT)
+  ) {
+    fail("ORCHESTRATOR_SLOT_RUNTIME_PROFILE_INVALID");
+  }
+  const current191CheckReceiptSha256 = values.get(
+    "--current191-check-receipt-sha256",
+  );
+  if (
+    (slotRuntimeProfile === SLOT_RUNTIME_PROFILE_CURRENT191_FINAL &&
+      !SHA256.test(current191CheckReceiptSha256 ?? "")) ||
+    (slotRuntimeProfile !== SLOT_RUNTIME_PROFILE_CURRENT191_FINAL &&
+      current191CheckReceiptSha256 !== "NONE")
+  ) {
+    fail("ORCHESTRATOR_CURRENT191_CHECK_AUTHORITY_INVALID");
+  }
   return {
+    current191CheckReceiptSha256:
+      current191CheckReceiptSha256 === "NONE"
+        ? null
+        : current191CheckReceiptSha256,
     help: false,
-    expectedMigration: exactString(
-      values.get("--expected-migration") ?? "",
-      MIGRATION,
-      "ORCHESTRATOR_MIGRATION_INVALID",
-    ),
-    expectedMigrationCount: exactInteger(
-      Number(values.get("--expected-migration-count")),
-      1,
-      999999,
-      "ORCHESTRATOR_MIGRATION_COUNT_INVALID",
-    ),
+    expectedMigration,
+    expectedMigrationCount,
     fixtureRoot,
     mode,
     operationId,
@@ -475,6 +532,7 @@ function parseArguments(argv) {
     ),
     releaseSha,
     slot,
+    slotRuntimeProfile,
     testMode,
     watchdogSeconds: exactInteger(
       Number(values.get("--watchdog-seconds")),
@@ -692,6 +750,94 @@ function readCanonicalJson(filePath, args, expectedModes = [0o400, 0o600]) {
   } finally {
     closeSync(fd);
   }
+}
+
+function normalizeCurrent191CheckReceipt(value, expectedReleaseSha) {
+  const receipt = exactKeys(
+    value,
+    [
+      "bridgeAttestationDigest",
+      "checkedAt",
+      "contractVersion",
+      "databaseEvidenceDigest",
+      "decision",
+      "migrationCount",
+      "migrationHead",
+      "productionManifestDigest",
+      "releaseSha",
+      "schemaPlanDigest",
+      "schemaVersion",
+      "targetMigrationSha256",
+    ],
+    "ORCHESTRATOR_CURRENT191_CHECK_RECEIPT_INVALID",
+  );
+  if (
+    receipt.schemaVersion !== 1 ||
+    receipt.contractVersion !== CURRENT191_CHECK_RECEIPT_CONTRACT ||
+    receipt.decision !== CURRENT191_CHECK_RECEIPT_DECISION ||
+    receipt.releaseSha !== expectedReleaseSha ||
+    receipt.migrationCount !== CURRENT191_MIGRATION_COUNT ||
+    receipt.migrationHead !== CURRENT191_MIGRATION ||
+    receipt.targetMigrationSha256 !== CURRENT191_MIGRATION_SHA256 ||
+    ![
+      receipt.bridgeAttestationDigest,
+      receipt.databaseEvidenceDigest,
+      receipt.productionManifestDigest,
+      receipt.schemaPlanDigest,
+    ].every((candidate) => SHA256.test(candidate ?? ""))
+  ) {
+    fail("ORCHESTRATOR_CURRENT191_CHECK_RECEIPT_INVALID");
+  }
+  exactIso(receipt.checkedAt, "ORCHESTRATOR_CURRENT191_CHECK_RECEIPT_INVALID");
+  return receipt;
+}
+
+function readCurrent191CheckReceipt(
+  receiptSha256,
+  expectedReleaseSha,
+  paths,
+  args,
+) {
+  if (!SHA256.test(receiptSha256 ?? "")) {
+    fail("ORCHESTRATOR_CURRENT191_CHECK_AUTHORITY_INVALID");
+  }
+  const receiptPath = path.join(
+    paths.deployReceiptRoot,
+    `external-langame-current191-${receiptSha256}.check.json`,
+  );
+  assertInside(
+    receiptPath,
+    paths.deployReceiptRoot,
+    "ORCHESTRATOR_CURRENT191_CHECK_RECEIPT_PATH_INVALID",
+  );
+  if (!existsSync(receiptPath)) {
+    fail("ORCHESTRATOR_CURRENT191_CHECK_RECEIPT_MISSING");
+  }
+  const metadata = lstatSync(receiptPath);
+  const expectedUid = args.testMode ? process.getuid?.() : 0;
+  const expectedGid = args.testMode ? process.getgid?.() : 0;
+  if (
+    metadata.uid !== expectedUid ||
+    metadata.gid !== expectedGid ||
+    (metadata.mode & 0o777) !== 0o400
+  ) {
+    fail("ORCHESTRATOR_CURRENT191_CHECK_RECEIPT_INVALID");
+  }
+  const record = readCanonicalJson(receiptPath, args, [0o400]);
+  if (record.sha256 !== receiptSha256) {
+    fail("ORCHESTRATOR_CURRENT191_CHECK_RECEIPT_DIGEST_MISMATCH");
+  }
+  const receipt = normalizeCurrent191CheckReceipt(
+    record.value,
+    expectedReleaseSha,
+  );
+  return Object.freeze({
+    authority: Object.freeze({
+      receiptSha256: record.sha256,
+      schemaPlanDigest: receipt.schemaPlanDigest,
+    }),
+    receipt,
+  });
 }
 
 function syncDirectory(directory, args) {
@@ -1000,9 +1146,7 @@ function parseSlotEnvironment(
       "ALLOW_CURRENT_188",
       "ALLOW_CURRENT_189",
       "ALLOW_CURRENT_190",
-    ].includes(
-      values.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE"),
-    ) ||
+    ].includes(values.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE")) ||
     (values.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") !== "OFF" &&
       values.get("GUEST_BUG_REPORTING_MODE") !== "OFF") ||
     (values.get("API_BIND_HOST") !== CANONICAL_API_BIND_HOST &&
@@ -1019,27 +1163,71 @@ function parseSlotEnvironment(
 }
 
 function renderSlotEnvironment(slot, values) {
-  return (
-    [
-      "# Protected /etc/leetplus/slots/" + slot + ".env metadata.",
-      "RELEASE_SHA=" + values.get("RELEASE_SHA"),
-      "WEB_BUILD_ID=" + values.get("WEB_BUILD_ID"),
-      "EXPECTED_DATABASE_MIGRATION=" +
-        values.get("EXPECTED_DATABASE_MIGRATION"),
-      "EXPECTED_DATABASE_MIGRATION_COUNT=" +
-        values.get("EXPECTED_DATABASE_MIGRATION_COUNT"),
-      "BUILD_TIME=" + values.get("BUILD_TIME"),
-      "API_BIND_HOST=" + values.get("API_BIND_HOST"),
-      "PORT=" + values.get("PORT"),
-      "WEB_PORT=" + values.get("WEB_PORT"),
-      "API_URL=" + values.get("API_URL"),
-      "GUEST_BUG_REPORTING_MODE=" +
-        values.get("GUEST_BUG_REPORTING_MODE"),
-      "GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=" +
-        values.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE"),
-      "",
-    ].join("\n")
+  return [
+    "# Protected /etc/leetplus/slots/" + slot + ".env metadata.",
+    "RELEASE_SHA=" + values.get("RELEASE_SHA"),
+    "WEB_BUILD_ID=" + values.get("WEB_BUILD_ID"),
+    "EXPECTED_DATABASE_MIGRATION=" + values.get("EXPECTED_DATABASE_MIGRATION"),
+    "EXPECTED_DATABASE_MIGRATION_COUNT=" +
+      values.get("EXPECTED_DATABASE_MIGRATION_COUNT"),
+    "BUILD_TIME=" + values.get("BUILD_TIME"),
+    "API_BIND_HOST=" + values.get("API_BIND_HOST"),
+    "PORT=" + values.get("PORT"),
+    "WEB_PORT=" + values.get("WEB_PORT"),
+    "API_URL=" + values.get("API_URL"),
+    "GUEST_BUG_REPORTING_MODE=" + values.get("GUEST_BUG_REPORTING_MODE"),
+    "GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=" +
+      values.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE"),
+    "",
+  ].join("\n");
+}
+
+function targetRuntimeModes(profile, previousValues) {
+  const previousBugReportingMode = previousValues.get(
+    "GUEST_BUG_REPORTING_MODE",
   );
+  const previousSchemaBridgeMode = previousValues.get(
+    "GUEST_SUPPORT_SCHEMA_BRIDGE_MODE",
+  );
+  if (profile === SLOT_RUNTIME_PROFILE_PRESERVE) {
+    return {
+      bugReportingMode: previousBugReportingMode,
+      schemaBridgeMode: previousSchemaBridgeMode,
+    };
+  }
+  if (profile === SLOT_RUNTIME_PROFILE_CURRENT191_BRIDGE) {
+    if (
+      previousBugReportingMode !== "LIVE" ||
+      previousSchemaBridgeMode !== "OFF" ||
+      previousValues.get("EXPECTED_DATABASE_MIGRATION") !==
+        CURRENT190_MIGRATION ||
+      Number(previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !==
+        CURRENT190_MIGRATION_COUNT
+    ) {
+      fail("ORCHESTRATOR_CURRENT191_BRIDGE_SOURCE_PROFILE_INVALID");
+    }
+    return {
+      bugReportingMode: "OFF",
+      schemaBridgeMode: "ALLOW_CURRENT_190",
+    };
+  }
+  if (profile === SLOT_RUNTIME_PROFILE_CURRENT191_FINAL) {
+    if (
+      previousBugReportingMode !== "OFF" ||
+      previousSchemaBridgeMode !== "ALLOW_CURRENT_190" ||
+      previousValues.get("EXPECTED_DATABASE_MIGRATION") !==
+        CURRENT191_MIGRATION ||
+      Number(previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !==
+        CURRENT191_MIGRATION_COUNT
+    ) {
+      fail("ORCHESTRATOR_CURRENT191_FINAL_SOURCE_PROFILE_INVALID");
+    }
+    return {
+      bugReportingMode: "LIVE",
+      schemaBridgeMode: "OFF",
+    };
+  }
+  fail("ORCHESTRATOR_SLOT_RUNTIME_PROFILE_INVALID");
 }
 
 function publishExactBytes(
@@ -1172,6 +1360,14 @@ function bindSlotEnvironment(plan, authority, paths, args) {
   ) {
     fail("ORCHESTRATOR_SLOT_ENVIRONMENT_LINEAGE_INVALID");
   }
+  const slotRuntimeProfile = slotRuntimeProfileForPlan(plan);
+  if (
+    slotRuntimeProfile === SLOT_RUNTIME_PROFILE_CURRENT191_FINAL &&
+    previousValues.get("RELEASE_SHA") !== plan.releaseSha
+  ) {
+    fail("ORCHESTRATOR_CURRENT191_FINAL_SOURCE_PROFILE_INVALID");
+  }
+  const runtimeModes = targetRuntimeModes(slotRuntimeProfile, previousValues);
   const targetValues = new Map(previousValues);
   targetValues.set("RELEASE_SHA", plan.releaseSha);
   targetValues.set("WEB_BUILD_ID", plan.releaseSha);
@@ -1182,6 +1378,11 @@ function bindSlotEnvironment(plan, authority, paths, args) {
   );
   targetValues.set("BUILD_TIME", plan.preparedAt);
   targetValues.set("API_BIND_HOST", CANONICAL_API_BIND_HOST);
+  targetValues.set("GUEST_BUG_REPORTING_MODE", runtimeModes.bugReportingMode);
+  targetValues.set(
+    "GUEST_SUPPORT_SCHEMA_BRIDGE_MODE",
+    runtimeModes.schemaBridgeMode,
+  );
   const apiBindHostNormalization =
     previousValues.get("API_BIND_HOST") === LEGACY_API_BIND_HOST
       ? "LEGACY_LOCALHOST_TO_IPV4_LOOPBACK"
@@ -1197,7 +1398,10 @@ function bindSlotEnvironment(plan, authority, paths, args) {
     maximumBytes: MAX_SLOT_ENVIRONMENT_BYTES,
     reasonCode: "ORCHESTRATOR_SLOT_ENVIRONMENT_INVALID",
   });
-  if (!current.bytes.equals(previous.bytes) && !current.bytes.equals(targetBytes)) {
+  if (
+    !current.bytes.equals(previous.bytes) &&
+    !current.bytes.equals(targetBytes)
+  ) {
     fail("ORCHESTRATOR_SLOT_ENVIRONMENT_DRIFT");
   }
   const temporary = environmentPath + ".next." + plan.operationId;
@@ -1567,11 +1771,41 @@ function planUrls(slot) {
       };
 }
 
+function slotRuntimeProfileForPlan(plan) {
+  const profile = plan.slotRuntimeProfile ?? SLOT_RUNTIME_PROFILE_PRESERVE;
+  if (
+    !SLOT_RUNTIME_PROFILES.includes(profile) ||
+    (profile !== SLOT_RUNTIME_PROFILE_PRESERVE &&
+      (plan.expectedMigration !== CURRENT191_MIGRATION ||
+        plan.expectedMigrationCount !== CURRENT191_MIGRATION_COUNT))
+  ) {
+    fail("ORCHESTRATOR_SLOT_RUNTIME_PROFILE_INVALID");
+  }
+  const checkReceipt = plan.current191CheckReceipt ?? null;
+  if (profile === SLOT_RUNTIME_PROFILE_CURRENT191_FINAL) {
+    exactKeys(
+      checkReceipt,
+      ["receiptSha256", "schemaPlanDigest"],
+      "ORCHESTRATOR_CURRENT191_CHECK_AUTHORITY_INVALID",
+    );
+    if (
+      !SHA256.test(checkReceipt.receiptSha256 ?? "") ||
+      !SHA256.test(checkReceipt.schemaPlanDigest ?? "")
+    ) {
+      fail("ORCHESTRATOR_CURRENT191_CHECK_AUTHORITY_INVALID");
+    }
+  } else if (checkReceipt !== null) {
+    fail("ORCHESTRATOR_CURRENT191_CHECK_AUTHORITY_INVALID");
+  }
+  return profile;
+}
+
 function validatePlan(plan, { allowLegacyLane = false } = {}) {
   const currentKeys = [
     "baselineCutover",
     "contractVersion",
     "controlAttestationSha256",
+    "current191CheckReceipt",
     "decision",
     "expectedMigration",
     "expectedMigrationCount",
@@ -1585,21 +1819,29 @@ function validatePlan(plan, { allowLegacyLane = false } = {}) {
     "previousWebBuildId",
     "releaseSha",
     "schemaVersion",
+    "slotRuntimeProfile",
     "targetSlot",
     "urls",
     "watchdogSeconds",
   ];
-  const legacyKeys = currentKeys.filter(
+  const priorCurrentKeys = currentKeys.filter(
+    (key) => !["current191CheckReceipt", "slotRuntimeProfile"].includes(key),
+  );
+  const legacyKeys = priorCurrentKeys.filter(
     (key) => !["effectiveLane", "impactReceiptSha256"].includes(key),
   );
   const observedKeys =
     plan !== null && typeof plan === "object" && !Array.isArray(plan)
       ? Object.keys(plan).sort().join("\0")
       : "";
-  const isLegacy =
-    observedKeys === legacyKeys.slice().sort().join("\0");
+  const isLegacy = observedKeys === legacyKeys.slice().sort().join("\0");
+  const isPriorCurrent =
+    observedKeys === priorCurrentKeys.slice().sort().join("\0");
   if (isLegacy) {
     if (!allowLegacyLane) fail("ORCHESTRATOR_PLAN_INVALID");
+  } else if (isPriorCurrent) {
+    // Accepted only as an immutable historical V3 plan. New plans always pin
+    // one explicit runtime profile in their digest.
   } else {
     exactKeys(plan, currentKeys, "ORCHESTRATOR_PLAN_INVALID");
   }
@@ -1642,6 +1884,7 @@ function validatePlan(plan, { allowLegacyLane = false } = {}) {
   ) {
     fail("ORCHESTRATOR_PLAN_INVALID");
   }
+  slotRuntimeProfileForPlan(plan);
   exactIso(plan.preparedAt, "ORCHESTRATOR_PLAN_INVALID");
   return plan;
 }
@@ -2119,11 +2362,7 @@ function createPlan(args, paths) {
   ) {
     fail("ORCHESTRATOR_PENDING_CHILD_OPERATION");
   }
-  const control = verifyInstalledControl(
-    args.releaseSha,
-    paths,
-    args,
-  );
+  const control = verifyInstalledControl(args.releaseSha, paths, args);
   const baseline = latestCutover(paths, args);
   if (baseline.consumed) fail("ORCHESTRATOR_BASELINE_ROLLBACK_CONSUMED");
   const activeSlot = currentActiveSlot(paths);
@@ -2138,6 +2377,16 @@ function createPlan(args, paths) {
       path.join(paths.nginxRoot, "upstreams", activeSlot + ".conf")
   ) {
     fail("ORCHESTRATOR_PREVIOUS_RUNTIME_MISMATCH");
+  }
+  let current191CheckReceipt = null;
+  if (args.slotRuntimeProfile === SLOT_RUNTIME_PROFILE_CURRENT191_FINAL) {
+    const verifiedCheckReceipt = readCurrent191CheckReceipt(
+      args.current191CheckReceiptSha256,
+      args.releaseSha,
+      paths,
+      args,
+    );
+    current191CheckReceipt = verifiedCheckReceipt.authority;
   }
   mkdirSync(directory, { mode: 0o700 });
   assertDirectory(directory, args, 0o700);
@@ -2154,6 +2403,7 @@ function createPlan(args, paths) {
     previousMigration: args.previousMigration,
     previousMigrationCount: args.previousMigrationCount,
     previousWebBuildId: args.previousWebBuildId,
+    slotRuntimeProfile: args.slotRuntimeProfile,
     urls: planUrls(args.slot),
     watchdogSeconds: args.watchdogSeconds,
     baselineCutover: {
@@ -2162,6 +2412,7 @@ function createPlan(args, paths) {
       receiptSha256: baseline.receiptSha256,
     },
     controlAttestationSha256: control.attestationSha256,
+    current191CheckReceipt,
     effectiveLane: control.effectiveLane,
     impactReceiptSha256: control.impactReceiptSha256,
     preparedAt: nowIso(),
@@ -2196,6 +2447,22 @@ function readPlan(args, paths) {
     record.sha256 !== args.planSha256
   ) {
     fail("ORCHESTRATOR_PLAN_BINDING_MISMATCH");
+  }
+  if (
+    slotRuntimeProfileForPlan(plan) === SLOT_RUNTIME_PROFILE_CURRENT191_FINAL
+  ) {
+    const verifiedCheckReceipt = readCurrent191CheckReceipt(
+      plan.current191CheckReceipt.receiptSha256,
+      plan.releaseSha,
+      paths,
+      args,
+    );
+    if (
+      canonicalJson(verifiedCheckReceipt.authority) !==
+      canonicalJson(plan.current191CheckReceipt)
+    ) {
+      fail("ORCHESTRATOR_CURRENT191_CHECK_AUTHORITY_INVALID");
+    }
   }
   return { directory, plan, planPath, planSha256: record.sha256 };
 }
@@ -2374,15 +2641,7 @@ function waitMilliseconds(milliseconds) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
-function runReadiness(
-  plan,
-  apiUrl,
-  webUrl,
-  paths,
-  args,
-  label,
-  attempts = 1,
-) {
+function runReadiness(plan, apiUrl, webUrl, paths, args, label, attempts = 1) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       return runCommand(
@@ -2406,10 +2665,7 @@ function runReadiness(
         120000,
       );
     } catch (error) {
-      if (
-        error?.reasonCode !== label + "_FAILED" ||
-        attempt === attempts
-      ) {
+      if (error?.reasonCode !== label + "_FAILED" || attempt === attempts) {
         throw error;
       }
       waitMilliseconds(args.testMode ? 1 : LOOPBACK_READINESS_RETRY_DELAY_MS);
@@ -2568,12 +2824,7 @@ function prepareCacheWithRetry(plan, apiUnit, webUnit, paths, args) {
 
 function inspectInstanceMask(unit, paths, args) {
   const loadState = readSystemdProperty(unit, "LoadState", paths, args);
-  const unitFileState = readSystemdProperty(
-    unit,
-    "UnitFileState",
-    paths,
-    args,
-  );
+  const unitFileState = readSystemdProperty(unit, "UnitFileState", paths, args);
   const maskPath = path.join(paths.systemdUnitRoot, unit);
   let details = null;
   try {
@@ -2758,13 +3009,7 @@ function bindPhase(plan, paths, args, phaseIntentSha256) {
     }
     assertStoppedInstance(unit, paths, args);
   }
-  commandOutput += prepareCacheWithRetry(
-    plan,
-    apiUnit,
-    webUnit,
-    paths,
-    args,
-  );
+  commandOutput += prepareCacheWithRetry(plan, apiUnit, webUnit, paths, args);
   const expectedTarget = path.join(paths.releaseRoot, plan.releaseSha);
   let authority =
     currentSlotTarget(plan.targetSlot, paths) === expectedTarget
@@ -2996,8 +3241,7 @@ function cutoverPhase(plan, paths, args) {
       );
     } catch (error) {
       if (
-        error?.reasonCode !==
-        "ORCHESTRATOR_CUTOVER_SWITCH_UNEXPECTED_STDERR"
+        error?.reasonCode !== "ORCHESTRATOR_CUTOVER_SWITCH_UNEXPECTED_STDERR"
       ) {
         throw error;
       }
@@ -3692,7 +3936,11 @@ function metricOperationInventory(paths, args) {
       }
       continue;
     }
-    if (!UUID.test(entry.name) || !entry.isDirectory() || entry.isSymbolicLink()) {
+    if (
+      !UUID.test(entry.name) ||
+      !entry.isDirectory() ||
+      entry.isSymbolicLink()
+    ) {
       fail("ORCHESTRATOR_STATE_INVENTORY_INVALID");
     }
     const directory = operationDirectory(paths, entry.name);
@@ -3914,7 +4162,9 @@ function validateMetricRetentionPlan(plan) {
       }
       seen.add(entry.fileName);
     }
-    if (metricSourceSetSha256(segment.sourceEntries) !== segment.sourceSetSha256) {
+    if (
+      metricSourceSetSha256(segment.sourceEntries) !== segment.sourceSetSha256
+    ) {
       fail("ORCHESTRATOR_METRIC_RETENTION_PLAN_INVALID");
     }
     selectedAttemptCount += segment.sourceEntryCount;
@@ -4060,7 +4310,10 @@ function validateMetricRetentionReceipt(record, plan, planSha256) {
     ],
     "ORCHESTRATOR_METRIC_ARCHIVE_RECEIPT_INVALID",
   );
-  if (canonicalJson(record) !== canonicalJson(metricRetentionReceipt(plan, planSha256))) {
+  if (
+    canonicalJson(record) !==
+    canonicalJson(metricRetentionReceipt(plan, planSha256))
+  ) {
     fail("ORCHESTRATOR_METRIC_ARCHIVE_RECEIPT_INVALID");
   }
   return record;
@@ -4070,10 +4323,7 @@ function metricArchiveFileName(planSha256, kind, segmentIndex = 0) {
   if (kind === "manifest") return planSha256 + ".manifest.json";
   if (kind === "receipt") return planSha256 + ".receipt.json";
   return (
-    planSha256 +
-    "." +
-    String(segmentIndex).padStart(4, "0") +
-    ".segment.json"
+    planSha256 + "." + String(segmentIndex).padStart(4, "0") + ".segment.json"
   );
 }
 
@@ -4205,7 +4455,8 @@ function readMetricArchiveInventory(
       validateMetricRetentionReceipt(group.receipt, plan, planSha256);
     }
     const complete =
-      group.receipt !== undefined && group.segments.size === plan.segments.length;
+      group.receipt !== undefined &&
+      group.segments.size === plan.segments.length;
     if (!complete && !incompleteAllowed) {
       fail("ORCHESTRATOR_METRIC_ARCHIVE_INCOMPLETE");
     }
@@ -4237,12 +4488,12 @@ function readMetricArchiveInventory(
     }
   }
   const baseFileInventory = fileInventory.filter(
-    (entry) => !target?.group.files.some((item) => item.fileName === entry.fileName),
+    (entry) =>
+      !target?.group.files.some((item) => item.fileName === entry.fileName),
   );
   const targetBytes = target?.group.files.reduce(
     (sum, entry) =>
-      sum +
-      lstatSync(path.join(paths.metricsArchiveRoot, entry.fileName)).size,
+      sum + lstatSync(path.join(paths.metricsArchiveRoot, entry.fileName)).size,
     0,
   );
   return {
@@ -4321,8 +4572,14 @@ function buildMetricRetentionPlan(paths, args) {
   );
   const selectionCapacity =
     MAX_METRIC_RETENTION_PLAN_ENTRIES - cleanupEntries.length;
-  const requiredSelection = Math.max(0, active.length - args.retainAttemptCount);
-  const selected = active.slice(0, Math.min(requiredSelection, selectionCapacity));
+  const requiredSelection = Math.max(
+    0,
+    active.length - args.retainAttemptCount,
+  );
+  const selected = active.slice(
+    0,
+    Math.min(requiredSelection, selectionCapacity),
+  );
   const segments = [];
   for (
     let offset = 0;
@@ -4519,7 +4776,9 @@ function applyMetricRetention(paths, args) {
     ),
   );
   const priorSourceByName = new Map(
-    [...archive.sourceByName].filter(([fileName]) => !targetSourceNames.has(fileName)),
+    [...archive.sourceByName].filter(
+      ([fileName]) => !targetSourceNames.has(fileName),
+    ),
   );
   const plannedRemovalNames = new Set([
     ...targetSourceNames,
@@ -4528,7 +4787,10 @@ function applyMetricRetention(paths, args) {
   for (const segment of plan.segments) {
     for (const reference of segment.sourceEntries) {
       const current = liveByName.get(reference.fileName);
-      if (current !== undefined && current.fileSha256 !== reference.fileSha256) {
+      if (
+        current !== undefined &&
+        current.fileSha256 !== reference.fileSha256
+      ) {
         fail("ORCHESTRATOR_METRIC_RETENTION_SOURCE_DRIFT");
       }
     }
@@ -4557,7 +4819,10 @@ function applyMetricRetention(paths, args) {
   }
   for (const reference of plan.cleanupEntries) {
     const archived = priorSourceByName.get(reference.fileName);
-    if (archived === undefined || archived.fileSha256 !== reference.fileSha256) {
+    if (
+      archived === undefined ||
+      archived.fileSha256 !== reference.fileSha256
+    ) {
       fail("ORCHESTRATOR_METRIC_RETENTION_ARCHIVE_DRIFT");
     }
   }
@@ -4565,7 +4830,11 @@ function applyMetricRetention(paths, args) {
   for (const segmentPlan of plan.segments) {
     const segmentPath = path.join(
       paths.metricsArchiveRoot,
-      metricArchiveFileName(args.planSha256, "segment", segmentPlan.segmentIndex),
+      metricArchiveFileName(
+        args.planSha256,
+        "segment",
+        segmentPlan.segmentIndex,
+      ),
     );
     if (!existsSync(segmentPath)) {
       const segment = metricArchiveSegment(
@@ -4669,7 +4938,9 @@ function laneMetricSummary(lane, operations, attempts) {
   const completed = operations.filter(
     (operation) => operation.lane === lane && operation.state === "COMPLETED",
   );
-  const laneAttempts = attempts.filter((attempt) => attempt.effectiveLane === lane);
+  const laneAttempts = attempts.filter(
+    (attempt) => attempt.effectiveLane === lane,
+  );
   const failurePhaseHistogram = Object.fromEntries(
     METRIC_FAILURE_PHASES.map((phase) => [phase, 0]),
   );
@@ -4687,7 +4958,9 @@ function laneMetricSummary(lane, operations, attempts) {
     phaseIntentToReceiptMilliseconds: Object.fromEntries(
       PHASES.map((phase) => [
         phase,
-        percentileSummary(completed.map((operation) => operation.phaseDurations[phase])),
+        percentileSummary(
+          completed.map((operation) => operation.phaseDurations[phase]),
+        ),
       ]),
     ),
     rolloutAttemptCount: laneAttempts.length,
@@ -4750,11 +5023,15 @@ export async function main(argv = process.argv.slice(2)) {
       return 0;
     }
     if (args.mode === "metrics-retention-plan") {
-      process.stdout.write(JSON.stringify(metricRetentionPlan(paths, args)) + "\n");
+      process.stdout.write(
+        JSON.stringify(metricRetentionPlan(paths, args)) + "\n",
+      );
       return 0;
     }
     if (args.mode === "metrics-retention-apply") {
-      process.stdout.write(JSON.stringify(applyMetricRetention(paths, args)) + "\n");
+      process.stdout.write(
+        JSON.stringify(applyMetricRetention(paths, args)) + "\n",
+      );
       return 0;
     }
     if (args.mode === "prepare") {

@@ -56,6 +56,7 @@ const BRIDGE_TARGET_PHASE = "TARGET_188";
 const BRIDGE_COMPATIBILITY_MODE = "GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE";
 const CURRENT188_BRIDGE_TRANSITION = Object.freeze({
   attestationContract: BRIDGE_ATTESTATION_CONTRACT,
+  bugReportingMode: "OFF",
   compatibilityMode: BRIDGE_COMPATIBILITY_MODE,
   requireSameReleaseBothSlots: false,
   schemaBridgeMode: "ALLOW_CURRENT_187",
@@ -70,6 +71,7 @@ const CURRENT188_BRIDGE_TRANSITION = Object.freeze({
 });
 const CURRENT189_BRIDGE_TRANSITION = Object.freeze({
   attestationContract: "GUEST_SUPPORT_CURRENT188_DUAL_BRIDGE_CUTOVER_V1",
+  bugReportingMode: "OFF",
   compatibilityMode: BRIDGE_COMPATIBILITY_MODE,
   requireSameReleaseBothSlots: true,
   schemaBridgeMode: "ALLOW_CURRENT_188",
@@ -86,6 +88,7 @@ const CURRENT189_BRIDGE_TRANSITION = Object.freeze({
 const CURRENT191_BRIDGE_TRANSITION = Object.freeze({
   attestationContract:
     "EXTERNAL_LANGAME_SIMPLE_ONBOARDING_CURRENT190_DUAL_BRIDGE_CUTOVER_V1",
+  bugReportingMode: "OFF",
   compatibilityMode: "EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE",
   requireSameReleaseBothSlots: true,
   schemaBridgeMode: "ALLOW_CURRENT_190",
@@ -99,12 +102,27 @@ const CURRENT191_BRIDGE_TRANSITION = Object.freeze({
   targetPhase: "TARGET_191",
   topologyMode: "DUAL_BRIDGE_N_MINUS_ONE",
 });
+const CURRENT191_FINAL_RUNTIME = Object.freeze({
+  attestationContract:
+    "EXTERNAL_LANGAME_SIMPLE_ONBOARDING_CURRENT191_FINAL_RUNTIME_V1",
+  bugReportingMode: "LIVE",
+  compatibilityMode: null,
+  requireSameReleaseBothSlots: true,
+  schemaBridgeMode: "OFF",
+  sourceCount: 191,
+  sourceHead: "20260908180000_external_langame_simple_onboarding",
+  sourcePhase: "FINAL_191",
+  targetCount: 191,
+  targetHead: "20260908180000_external_langame_simple_onboarding",
+  targetMigrationSha256:
+    "a149122148b0270ad870883f81cba6bd61365c0babca56f81c18523af4b78beb",
+  targetPhase: "FINAL_191",
+  topologyMode: "DUAL_CURRENT_N_MINUS_ONE",
+});
 const BRIDGE_STATE_ROOT = "/var/lib/leetplus/deploy-receipts";
 const BRIDGE_SLOT_LINK_STATE_ROOT = `${BRIDGE_STATE_ROOT}/slot-links`;
-const BRIDGE_PRODUCTION_CONTROL_RUN_ROOT =
-  "/run/leetplus-production-control";
-const BRIDGE_PRODUCTION_CONTROL_INSTALL_LOCK =
-  `${BRIDGE_PRODUCTION_CONTROL_RUN_ROOT}/install.lock`;
+const BRIDGE_PRODUCTION_CONTROL_RUN_ROOT = "/run/leetplus-production-control";
+const BRIDGE_PRODUCTION_CONTROL_INSTALL_LOCK = `${BRIDGE_PRODUCTION_CONTROL_RUN_ROOT}/install.lock`;
 const BRIDGE_CONFIG_ROOT = "/etc/nginx/leetplus";
 const BRIDGE_ENVIRONMENT_ROOT = "/etc/leetplus";
 const BRIDGE_SYSTEMD_ROOT = "/etc/systemd/system";
@@ -408,7 +426,7 @@ function normalizeBridgeSlotAttestation(
     attestation.releaseProvenanceMigrationCount !== transition.targetCount ||
     attestation.targetMigrationSha256 !== transition.targetMigrationSha256 ||
     attestation.runtimeRole !== "COMBINED" ||
-    attestation.bugReportingMode !== "OFF" ||
+    attestation.bugReportingMode !== transition.bugReportingMode ||
     attestation.schemaBridgeMode !== transition.schemaBridgeMode ||
     attestation.webBuildId !== attestation.releaseSha
   ) {
@@ -419,8 +437,14 @@ function normalizeBridgeSlotAttestation(
       ? attestation.databaseMigration !== transition.sourceHead ||
         attestation.databaseMigrationCount !== transition.sourceCount ||
         attestation.compatibilityMode !== transition.compatibilityMode ||
-        attestation.compatibilityTargetMigration !== transition.targetHead ||
-        attestation.compatibilityTargetMigrationCount !== transition.targetCount
+        attestation.compatibilityTargetMigration !==
+          (transition.compatibilityMode === null
+            ? null
+            : transition.targetHead) ||
+        attestation.compatibilityTargetMigrationCount !==
+          (transition.compatibilityMode === null
+            ? null
+            : transition.targetCount)
       : attestation.databaseMigration !== transition.targetHead ||
         attestation.databaseMigrationCount !== transition.targetCount ||
         attestation.compatibilityMode !== null ||
@@ -542,6 +566,16 @@ export function normalizeExternalLangameCurrent191BridgeAttestation(
   );
 }
 
+export function normalizeExternalLangameCurrent191FinalRuntimeAttestation(
+  value,
+  options = {},
+) {
+  return normalizeFounderPilotCurrent188BridgeAttestation(value, {
+    ...options,
+    transition: CURRENT191_FINAL_RUNTIME,
+  });
+}
+
 function bridgeSlotAttestationInvariant(attestation) {
   const {
     compatibilityMode: _compatibilityMode,
@@ -602,16 +636,32 @@ export function externalLangameSimpleOnboardingCurrent191BridgeAttestationDigest
   );
 }
 
-export function externalLangameCurrent191BridgeAttestationInvariant(attestation) {
+export function externalLangameCurrent191BridgeAttestationInvariant(
+  attestation,
+) {
   return externalLangameSimpleOnboardingCurrent191BridgeAttestationInvariant(
     attestation,
   );
 }
 
-export function externalLangameCurrent191BridgeAttestationDigest(value, options) {
+export function externalLangameCurrent191BridgeAttestationDigest(
+  value,
+  options,
+) {
   return externalLangameSimpleOnboardingCurrent191BridgeAttestationDigest(
     value,
     options,
+  );
+}
+
+export function externalLangameCurrent191FinalRuntimeAttestationDigest(
+  value,
+  options,
+) {
+  return sha256(
+    stableJson(
+      normalizeExternalLangameCurrent191FinalRuntimeAttestation(value, options),
+    ),
   );
 }
 
@@ -841,10 +891,7 @@ async function runBridgeCommand(
   }).catch(() => fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID"));
 }
 
-export function parseFounderPilotCurrent188BridgeSystemdProperties(
-  text,
-  keys,
-) {
+export function parseFounderPilotCurrent188BridgeSystemdProperties(text, keys) {
   if (!text.endsWith("\n") || text.includes("\0") || text.includes("\r")) {
     fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
   }
@@ -1064,8 +1111,7 @@ const SLOT_LINK_RECEIPT_KEYS = Object.freeze([
   "EFFECT_STATE",
   "ACCEPTED_AT",
 ]);
-const SLOT_LINK_OPERATION_ID =
-  /^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[1-9][0-9]*$/u;
+const SLOT_LINK_OPERATION_ID = /^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[1-9][0-9]*$/u;
 
 function parseBridgeJson(bytes) {
   let value;
@@ -1177,8 +1223,7 @@ async function inspectBridgeSlotReleaseAuthority({
     hydration.RUNTIME_SWITCHED !== "false" ||
     hydration.HYDRATION_SOURCE_RECEIPT_SHA256 !==
       sha256(hydrationSourceReceiptBytes) ||
-    hydration.HYDRATED_MANIFEST_SHA256 !==
-      sha256(hydratedSha256SumsBytes) ||
+    hydration.HYDRATED_MANIFEST_SHA256 !== sha256(hydratedSha256SumsBytes) ||
     ![
       hydration.HYDRATION_UNIT_SHA256,
       hydration.HYDRATION_STAGER_SHA256,
@@ -1292,7 +1337,9 @@ async function inspectBridgeProductionControl({ node, releaseSha }) {
     BRIDGE_PRODUCTION_CONTROL_VERIFIER,
     /^\/usr\/local\/libexec\/leetplus\/verify-installed-production-control-generation\.mjs$/u,
   );
-  const verifierBytes = await readProtectedBridgeFile(verifier, { mode: 0o555 });
+  const verifierBytes = await readProtectedBridgeFile(verifier, {
+    mode: 0o555,
+  });
   const output = await runBridgeCommand(
     node,
     [
@@ -1340,9 +1387,7 @@ async function inspectBridgeProductionControl({ node, releaseSha }) {
       values.PRODUCTION_CONTROL_SEALER_SHA256,
       values.PRODUCTION_CONTROL_PROMOTER_SHA256,
     ].every((candidate) => SHA256.test(candidate)) ||
-    !/^[1-9][0-9]{0,5}$/u.test(
-      values.PRODUCTION_CONTROL_INSTALLED_FILE_COUNT,
-    )
+    !/^[1-9][0-9]{0,5}$/u.test(values.PRODUCTION_CONTROL_INSTALLED_FILE_COUNT)
   ) {
     fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
   }
@@ -1385,11 +1430,8 @@ async function inspectBridgeAuthenticatedSmoke({ apiPort, node }) {
   }
   return Object.freeze({
     sha256: sha256(output),
-    storeCount: Number(
-      values.LEGACY_ROLLBACK_AUTHENTICATED_READS_STORE_COUNT,
-    ),
-    usersCatalog:
-      values.LEGACY_ROLLBACK_AUTHENTICATED_READS_USERS_CATALOG,
+    storeCount: Number(values.LEGACY_ROLLBACK_AUTHENTICATED_READS_STORE_COUNT),
+    usersCatalog: values.LEGACY_ROLLBACK_AUTHENTICATED_READS_USERS_CATALOG,
   });
 }
 
@@ -1444,7 +1486,7 @@ async function inspectBridgeSlotRuntime({
     environment.EXPECTED_DATABASE_MIGRATION_COUNT !==
       String(transition.targetCount) ||
     (environment.LEETPLUS_API_RUNTIME_ROLE ?? "COMBINED") !== "COMBINED" ||
-    environment.GUEST_BUG_REPORTING_MODE !== "OFF" ||
+    environment.GUEST_BUG_REPORTING_MODE !== transition.bugReportingMode ||
     environment.GUEST_SUPPORT_SCHEMA_BRIDGE_MODE !== transition.schemaBridgeMode
   ) {
     fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
@@ -1478,14 +1520,16 @@ async function inspectBridgeSlotRuntime({
     bugReportingMode: environment.GUEST_BUG_REPORTING_MODE,
     canarySafeEnvironmentSha256: sha256(canarySafeEnvironment),
     compatibilityMode:
-      expectedPhase === transition.sourcePhase ? compatibility?.mode : null,
+      expectedPhase === transition.sourcePhase
+        ? (compatibility?.mode ?? null)
+        : null,
     compatibilityTargetMigration:
       expectedPhase === transition.sourcePhase
-        ? compatibility?.targetMigration
+        ? (compatibility?.targetMigration ?? null)
         : null,
     compatibilityTargetMigrationCount:
       expectedPhase === transition.sourcePhase
-        ? compatibility?.targetMigrationCount
+        ? (compatibility?.targetMigrationCount ?? null)
         : null,
     databaseMigration: database?.migration,
     databaseMigrationCount: database?.migrationCount,
@@ -1643,7 +1687,8 @@ async function inspectLiveBridgeRuntime({
   const pendingIntentCount = [...cutoverEntries, ...slotLinkEntries].filter(
     (entry) =>
       entry.isFile() &&
-      (/\.intent(?:\.|$)/u.test(entry.name) || /\.new(?:\.|$)/u.test(entry.name)),
+      (/\.intent(?:\.|$)/u.test(entry.name) ||
+        /\.new(?:\.|$)/u.test(entry.name)),
   ).length;
   if (pendingIntentCount !== 0) {
     fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
@@ -1750,6 +1795,7 @@ export function createFounderPilotCurrent188ProductionBridgeRuntimeAdapter({
       CURRENT188_BRIDGE_TRANSITION,
       CURRENT189_BRIDGE_TRANSITION,
       CURRENT191_BRIDGE_TRANSITION,
+      CURRENT191_FINAL_RUNTIME,
     ].includes(transition)
   ) {
     fail("CURRENT188_UPGRADE_BRIDGE_RUNTIME_AUTHORITY_REQUIRED");
@@ -1902,6 +1948,15 @@ export function createExternalLangameCurrent191ProductionBridgeRuntimeAdapter(
   return createExternalLangameSimpleOnboardingCurrent191ProductionBridgeRuntimeAdapter(
     options,
   );
+}
+
+export function createExternalLangameCurrent191ProductionFinalRuntimeAdapter(
+  options = {},
+) {
+  return createFounderPilotCurrent188ProductionBridgeRuntimeAdapter({
+    ...options,
+    transition: CURRENT191_FINAL_RUNTIME,
+  });
 }
 
 function toLegacyManifest(manifest) {
@@ -2818,8 +2873,7 @@ export async function createFounderPilotCurrent188ProductionUpgradePgAdapter(
 export const FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS =
   Object.freeze({
     bridgeAuthorityLockPaths: BRIDGE_AUTHORITY_LOCK_PATHS,
-    bridgeHydratedSha256SumsMaxBytes:
-      BRIDGE_HYDRATED_SHA256SUMS_MAX_BYTES,
+    bridgeHydratedSha256SumsMaxBytes: BRIDGE_HYDRATED_SHA256SUMS_MAX_BYTES,
     bridgeProductionControlVerifierAuthorityArgument:
       BRIDGE_PRODUCTION_CONTROL_VERIFIER_AUTHORITY_ARG,
     bridgeSlotLinkBoundEffectState: BRIDGE_SLOT_LINK_BOUND_EFFECT_STATE,
@@ -2861,3 +2915,14 @@ export const EXTERNAL_LANGAME_SIMPLE_ONBOARDING_CURRENT191_BRIDGE_CONSTANTS =
 
 export const EXTERNAL_LANGAME_CURRENT191_BRIDGE_CONSTANTS =
   EXTERNAL_LANGAME_SIMPLE_ONBOARDING_CURRENT191_BRIDGE_CONSTANTS;
+
+export const EXTERNAL_LANGAME_CURRENT191_FINAL_RUNTIME_CONSTANTS =
+  Object.freeze({
+    attestationContract: CURRENT191_FINAL_RUNTIME.attestationContract,
+    bugReportingMode: CURRENT191_FINAL_RUNTIME.bugReportingMode,
+    migrationCount: CURRENT191_FINAL_RUNTIME.targetCount,
+    migrationHead: CURRENT191_FINAL_RUNTIME.targetHead,
+    phase: CURRENT191_FINAL_RUNTIME.targetPhase,
+    schemaBridgeMode: CURRENT191_FINAL_RUNTIME.schemaBridgeMode,
+    topologyMode: CURRENT191_FINAL_RUNTIME.topologyMode,
+  });

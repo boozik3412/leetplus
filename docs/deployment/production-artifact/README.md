@@ -122,10 +122,22 @@ schema controller. Его signed plan обязан связывать release SH
 migration head/count и accepted receipts обоих slots; controller применяет
 migration транзакционно. Manual apply, другой schema controller, частичная
 migration или drift signature/slot receipt являются fail-closed stop condition.
-После commit оба slots обязаны быть repin-ены на
-`GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`, подтвердить exact CURRENT191 readiness
-и только затем выполнить final postcheck. Нельзя оставить bridge включённым на
-active или rollback slot. Migration закрепляет глобальную Store identity
+После commit controller выполняет exact live `check` и атомарно публикует
+receipt `root:root 0400`. Receipt связывает release SHA, schema-plan digest,
+target head/count/checksum и database/dual-slot bridge evidence. Каждый
+`current191-final` plan пинит SHA-256 этого receipt; orchestrator проверяет его
+до создания операции и повторно при чтении plan. Один immutable receipt
+используется для обоих последовательных final plan; `checkedAt` является
+audit-полем, а не TTL. Это сохраняет resumability между slot cutover, когда
+повторный dual-bridge `check` уже невозможен. Каждый cutover всё равно требует
+тот же release, точный bridge source profile и свежую live readiness до effect.
+
+Bridge выключается только двумя отдельными five-phase операциями: сначала на
+текущем inactive slot с readiness/cutover, затем на ставшем inactive прежнем
+active slot. Только после exact receipts обеих операций, terminal
+`OFF/LIVE` на active и rollback и CURRENT191 CLI `final-check` выполняется
+public postcheck. Ручное или одновременное изменение обоих slot env запрещено.
+Migration закрепляет глобальную Store identity
 `(externalProvider, externalDomain, externalClubId)`; production artifact не
 может обходить её ручной записью, repair или rollback script.
 

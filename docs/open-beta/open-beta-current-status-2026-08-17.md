@@ -18,7 +18,7 @@
 | Langame freshness    | daily и bonus-ledger timers enabled/active; authority привязана к exact `def5174f…`, daily worker обходит `3/3` active domains текущего admitted INTERNAL tenant                                      |
 | Assortment dashboard | входит в active `def5174f…`: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз работают; блок источников по умолчанию свёрнут, обновление всегда доступно                      |
 | Guest profile owner  | exact-link и verified-phone repairs deployed в `def5174f…`; `*6330`, `*3669` и остальные выявленные split owners исправлены, active structural остаток `0`, reward replay запрещён                     |
-| External Langame     | source target `CURRENT_191/191`: preview → revalidated atomic settings → exact-binding manual backfill; production GO и external unattended authority не выданы                                       |
+| External Langame     | source target `CURRENT_191/191`: preview → atomic settings → manual backfill; rollout требует protected check receipt, 2 inactive-slot final cutover и `final-check`; production GO не выдан        |
 
 Production hotfix PR #170 развёрнут как exact SHA
 `def5174f16f49212dd21d243cda89dffeff7837f` operation
@@ -27,7 +27,10 @@ Production hotfix PR #170 развёрнут как exact SHA
 Public и loopback readiness принимают `CURRENT_190/190`, unfinished migrations
 равны `0`. Source после PR #171 содержит controlled target `CURRENT_191/191`
 для внешнего onboarding, но production остаётся на `def5174f…/CURRENT190` до
-отдельного admission и rollout.
+отдельного admission и rollout. Текущий source-контракт запрещает ручные
+slot-env edits: live `check` публикует `root:root 0400` receipt, каждый
+`current191-final` plan пинит его SHA-256 и проходит отдельно по inactive slot,
+после чего terminal `OFF/LIVE` на обоих slots подтверждает `final-check`.
 
 Впервые выпущенный release `1cf42bb311aafa7f41ad7f42784463fe34c152c7` и
 текущий active `def5174f16f49212dd21d243cda89dffeff7837f` превращают

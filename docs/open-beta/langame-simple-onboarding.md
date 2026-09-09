@@ -99,8 +99,9 @@ Canonical schema target — `CURRENT_191`, `migrationCount=191`, latest
 `packages/database/scripts/external-langame-current191-production-upgrade.cli.mjs`.
 Его signed plan связывает один release SHA, source `190`, target `191`,
 migration head/count и оба slot receipts; shell, ручной Prisma apply или иной
-controller не являются заменой. Поддерживаемая последовательность CLI —
-`inventory → plan → approve → apply → check`; применяемый plan должен быть
+controller не являются заменой. Поддерживаемая последовательность —
+`inventory → plan → approve → apply → check → two final slot operations →
+final-check`; применяемый schema plan должен быть
 подтверждён своим exact SHA-256 и отдельным Ed25519 approval.
 Перед production plan тот же controller обязательно запускается в режиме
 `rehearse --target restored-copy` на изолированной восстановленной копии. Этот
@@ -127,13 +128,37 @@ external onboarding на schema ниже `CURRENT_191`.
 После dual-target readiness signed controller применяет migration
 транзакционно. Частичный apply, другой head/count, потерянная signature,
 несовпавший slot receipt или незавершённая migration останавливают rollout до
-effect. Только после committed schema `CURRENT_191/191` bridge выключается
-контролируемо по одному слоту: сначала inactive slot переводится в
-`GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`, проверяется и становится active, затем
-бывший active/текущий rollback slot переводится в `OFF` и отдельно проверяется.
-Final postcheck допускается лишь когда оба exact slot receipts подтверждают
-`CURRENT_191/191` и `OFF`. Нельзя оставить bridge включённым на active или
-rollback slot.
+effect. До bridge-off controller обязан завершить свой exact `check`.
+
+Bridge-off выполняется только штатным five-phase orchestrator через узкий
+`--slot-runtime-profile current191-final`, а не ручной записью slot env.
+`current191-bridge` допускает только переход одного inactive slot
+`CURRENT190 OFF/LIVE → target191 ALLOW_CURRENT_190/OFF`; `current191-final` —
+только `target191 ALLOW_CURRENT_190/OFF → target191 OFF/LIVE`. Каждый profile
+имеет свой exact plan digest, approval и receipt chain. Final profile также
+требует exact SHA-256 check receipt `root:root 0400`, который CLI публикует
+только после проверки live DB `CURRENT191/191` и двух bridge slots; receipt
+привязан к release SHA, schema-plan, head/count/checksum и database/dual-slot
+evidence. `checkedAt` сохраняется для audit, но receipt не истекает между двумя
+final cutover: после первого из них новый check, требующий два bridge slots, уже
+невозможен. `check` выводит точные path и SHA-256 опубликованного receipt; один
+и тот же SHA передаётся как `--current191-check-receipt-sha256` в оба final
+plan. Каждый plan повторно проверяет immutable receipt, exact release/source и
+live readiness. После каждого cutover `resume` допускается только с тем же
+operation ID и `planSha256`.
+
+Сначала `current191-final` применяется к одному inactive slot, он проходит
+readiness и становится active через cutover. Лишь затем аналогичным отдельным
+plan/cutover бывший active, теперь rollback, slot переводится в `OFF/LIVE`.
+После обоих exact final receipts external-Langame CURRENT191 CLI выполняет
+`final-check`; только этот результат открывает terminal public postcheck.
+Терминальное состояние не может оставлять bridge включённым ни на active, ни на
+rollback slot; промежуточное состояние между двумя final cutover ожидаемо имеет
+один `OFF/LIVE` и один `ALLOW_CURRENT_190/OFF` slot. Нельзя менять оба slot одним
+plan либо считать это database effect.
+
+Это source/CI contract: production по-прежнему находится на
+`CURRENT_190/190`; здесь не зафиксирован deployed CURRENT191 rollout или GO.
 
 Перед production activation обязательны exact artifact/SHA, backup и
 restored-copy rehearsal, migration admission, loopback/public smoke, controlled

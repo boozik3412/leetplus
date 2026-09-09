@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
@@ -8,8 +9,10 @@ import {
   EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONFIRMATION,
   applyExternalLangameCurrent191ProductionUpgradePlan,
   buildExternalLangameCurrent191ProductionUpgradePlan,
+  createExternalLangameCurrent191ProductionCheckReceipt,
   createExternalLangameCurrent191ProductionLocalPostgresExecutor,
   createExternalLangameCurrent191ProductionPgAdapter,
+  createExternalLangameCurrent191ProductionFinalRuntimeAdapter,
   createExternalLangameCurrent191ProductionRuntimeAdapter,
   createExternalLangameCurrent191WorkerSafetyAdapter,
   inspectExternalLangameCurrent191ProductionUpgradeInventory,
@@ -17,14 +20,17 @@ import {
   rehearseExternalLangameCurrent191ProductionUpgrade,
   signExternalLangameCurrent191ProductionUpgradePlan,
   verifyExternalLangameCurrent191ProductionUpgradeFinal,
+  verifyExternalLangameCurrent191ProductionRuntimeFinalized,
 } from "./external-langame-current191-production-upgrade.mjs";
 import { createFounderPilotProductionHistoryPhaseJournal } from "./founder-pilot-production-history-production.cli.mjs";
 
-const CONFIRMATION_ENV = "EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONFIRM";
+const CONFIRMATION_ENV =
+  "EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_CONFIRM";
 const APPROVAL_PIN_ENV =
   "EXTERNAL_LANGAME_CURRENT191_PRODUCTION_UPGRADE_APPROVAL_KEY_SPKI_SHA256";
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_PRIVATE_KEY_BYTES = 16 * 1024;
+const PRODUCTION_RECEIPT_ROOT = "/var/lib/leetplus/deploy-receipts";
 
 function usage() {
   return `Usage:
@@ -49,6 +55,10 @@ function usage() {
     --plan <absolute-json-path>
 
   node external-langame-current191-production-upgrade.cli.mjs \\
+    --mode final-check --target production --manifest <absolute-json-path> \\
+    --plan <absolute-json-path>
+
+  node external-langame-current191-production-upgrade.cli.mjs \\
     --mode rehearse --target restored-copy --manifest <absolute-json-path>
 
 Production environment (all modes except approve and rehearse):
@@ -61,7 +71,9 @@ database name and cluster system identifier. plan is read-only and short-lived.
 apply holds the protected production-control/cutover locks, quiesces the
 Langame daily worker, executes only the checksum-pinned CURRENT_191 migration in one
 transaction, verifies unchanged OIDs/owners/ACL/role memberships, verifies both
-runtime slots, restores the worker timer and writes a durable chained phase journal.`;
+runtime slots, restores the worker timer and writes a durable chained phase
+journal. check also publishes one root-protected receipt bound to its exact
+schema plan; current191-final cannot proceed without that receipt.`;
 }
 
 function absolutePath(value) {
@@ -109,6 +121,7 @@ function parseArgs(argv) {
       "--private-key",
     ],
     check: ["--manifest", "--mode", "--plan", "--target"],
+    "final-check": ["--manifest", "--mode", "--plan", "--target"],
     inventory: ["--manifest", "--mode", "--target"],
     plan: ["--manifest", "--mode", "--output-plan", "--target"],
     rehearse: ["--manifest", "--mode", "--target"],
@@ -187,17 +200,52 @@ async function loadJson(filePath) {
   }
 }
 
-async function writeExclusiveJson(filePath, value) {
+async function writeExclusiveJson(filePath, value, mode = 0o600) {
+  const bytes = `${JSON.stringify(value, null, 2)}\n`;
   const handle = await open(
     filePath,
-    fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
+    fsConstants.O_CREAT |
+      fsConstants.O_EXCL |
+      fsConstants.O_WRONLY |
+      (fsConstants.O_NOFOLLOW ?? 0),
     0o600,
   );
   try {
-    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await handle.writeFile(bytes, "utf8");
+    await handle.chmod(mode);
     await handle.sync();
   } finally {
     await handle.close();
+  }
+  const parent = await open(path.dirname(filePath), fsConstants.O_RDONLY);
+  try {
+    await parent.sync();
+  } finally {
+    await parent.close();
+  }
+  return {
+    path: filePath,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+}
+
+function jsonFileSha256(value) {
+  return createHash("sha256")
+    .update(`${JSON.stringify(value, null, 2)}\n`)
+    .digest("hex");
+}
+
+async function assertProductionReceiptRoot() {
+  const metadata = await lstat(PRODUCTION_RECEIPT_ROOT);
+  if (
+    !metadata.isDirectory() ||
+    metadata.isSymbolicLink() ||
+    metadata.uid !== 0 ||
+    metadata.gid !== 0 ||
+    (metadata.mode & 0o777) !== 0o700 ||
+    (await realpath(PRODUCTION_RECEIPT_ROOT)) !== PRODUCTION_RECEIPT_ROOT
+  ) {
+    throw new Error("CURRENT191_UPGRADE_RECEIPT_ROOT_INVALID");
   }
 }
 
@@ -243,9 +291,10 @@ export async function main(
   let journal = null;
   let runtimeAdapter = null;
   try {
-    const manifest = normalizeExternalLangameCurrent191ProductionUpgradeManifest(
-      await loadJson(args.manifestPath),
-    );
+    const manifest =
+      normalizeExternalLangameCurrent191ProductionUpgradeManifest(
+        await loadJson(args.manifestPath),
+      );
     if (args.mode === "approve") {
       const [plan, privateKeyPem] = await Promise.all([
         loadJson(args.planPath),
@@ -262,11 +311,13 @@ export async function main(
       );
       return 0;
     }
-    const adapter = createExternalLangameCurrent191ProductionPgAdapter(manifest);
+    const adapter =
+      createExternalLangameCurrent191ProductionPgAdapter(manifest);
     if (args.mode === "rehearse") {
       const result = await rehearseExternalLangameCurrent191ProductionUpgrade({
         adapter,
-        executor: createExternalLangameCurrent191ProductionLocalPostgresExecutor(),
+        executor:
+          createExternalLangameCurrent191ProductionLocalPostgresExecutor(),
         manifest,
       });
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -282,9 +333,14 @@ export async function main(
       process.stdout.write(`${JSON.stringify(inventory, null, 2)}\n`);
       return 0;
     }
-    runtimeAdapter = createExternalLangameCurrent191ProductionRuntimeAdapter({
-      releaseSha: manifest.release.releaseSha,
-    });
+    runtimeAdapter =
+      args.mode === "final-check"
+        ? createExternalLangameCurrent191ProductionFinalRuntimeAdapter({
+            releaseSha: manifest.release.releaseSha,
+          })
+        : createExternalLangameCurrent191ProductionRuntimeAdapter({
+            releaseSha: manifest.release.releaseSha,
+          });
     if (args.mode === "plan") {
       const plan = await buildExternalLangameCurrent191ProductionUpgradePlan({
         adapter,
@@ -299,12 +355,52 @@ export async function main(
     }
     const plan = await loadJson(args.planPath);
     if (args.mode === "check") {
-      const result = await verifyExternalLangameCurrent191ProductionUpgradeFinal({
-        adapter,
+      const result =
+        await verifyExternalLangameCurrent191ProductionUpgradeFinal({
+          adapter,
+          manifest,
+          plan,
+          runtimeAdapter,
+        });
+      const receipt = createExternalLangameCurrent191ProductionCheckReceipt({
         manifest,
         plan,
-        runtimeAdapter,
+        verification: result,
       });
+      const receiptSha256 = jsonFileSha256(receipt);
+      await assertProductionReceiptRoot();
+      const publication = await writeExclusiveJson(
+        path.join(
+          PRODUCTION_RECEIPT_ROOT,
+          `external-langame-current191-${receiptSha256}.check.json`,
+        ),
+        receipt,
+        0o400,
+      );
+      if (publication.sha256 !== receiptSha256) {
+        throw new Error("CURRENT191_UPGRADE_CHECK_RECEIPT_INVALID");
+      }
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ...result,
+            checkReceiptPath: publication.path,
+            checkReceiptSha256: publication.sha256,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      return 0;
+    }
+    if (args.mode === "final-check") {
+      const result =
+        await verifyExternalLangameCurrent191ProductionRuntimeFinalized({
+          adapter,
+          manifest,
+          plan,
+          runtimeAdapter,
+        });
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       return 0;
     }
@@ -316,7 +412,8 @@ export async function main(
       adapter,
       approval,
       confirmPlanDigest: args.confirmPlanDigest,
-      executor: createExternalLangameCurrent191ProductionLocalPostgresExecutor(),
+      executor:
+        createExternalLangameCurrent191ProductionLocalPostgresExecutor(),
       manifest,
       onPhase: journal.record,
       pinnedApprovalKeySpkiSha256: environment[APPROVAL_PIN_ENV],
@@ -336,4 +433,5 @@ export async function main(
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) process.exitCode = await main();
+if (import.meta.url === pathToFileURL(process.argv[1]).href)
+  process.exitCode = await main();

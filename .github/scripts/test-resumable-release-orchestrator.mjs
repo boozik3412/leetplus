@@ -1948,7 +1948,7 @@ test("completes only pending POSTCHECK under an admitted successor control", asy
     1,
   );
   assert.deepEqual((await readdir(directory)).sort(), beforeOrdinaryEntries);
-  assert.equal(
+  assert.deepEqual(
     await readFile(originalPostcheckIntentPath),
     originalPostcheckIntent,
   );
@@ -2022,7 +2022,7 @@ test("completes only pending POSTCHECK under an admitted successor control", asy
   assert.match(succession.successorImpactReceiptSha256, /^[0-9a-f]{64}$/u);
   assert.equal(succession.decision, "POSTCHECK_CONTROL_SUCCESSION_AUTHORIZED");
   assert.match(succession.authorizedAt, /^2026-[0-9]{2}-[0-9]{2}T/u);
-  assert.equal(
+  assert.deepEqual(
     await readFile(originalPostcheckIntentPath),
     originalPostcheckIntent,
   );

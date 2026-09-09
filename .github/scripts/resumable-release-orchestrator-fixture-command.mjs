@@ -2,6 +2,7 @@
 
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
   symlinkSync,
@@ -73,6 +74,14 @@ function writeControlAttestation() {
 function writeHydrationReceipt() {
   const releaseDirectory = path.join(releaseRoot, releaseSha);
   mkdirSync(releaseDirectory, { recursive: true });
+  const receiptPath = path.join(
+    receiptRoot,
+    "release-hydration-attestation-" + releaseSha + ".receipt",
+  );
+  // A completed release is SHA-addressed and its attestation is immutable:
+  // an opposite-slot reconciliation may reuse it, but cannot rewrite its
+  // original hydration slot.
+  if (existsSync(receiptPath)) return;
   const receipt = kv([
     ["RECORD_VERSION", "1"],
     ["RELEASE_SHA", releaseSha],
@@ -87,13 +96,7 @@ function writeHydrationReceipt() {
     ["PUBLICATION_AUTHORIZED", "true"],
     ["RUNTIME_SWITCHED", "false"],
   ]);
-  writeFileSync(
-    path.join(
-      receiptRoot,
-      "release-hydration-attestation-" + releaseSha + ".receipt",
-    ),
-    receipt,
-  );
+  writeFileSync(receiptPath, receipt);
 }
 
 function writeBindReceipt(slot) {

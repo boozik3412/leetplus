@@ -589,6 +589,19 @@ function nextPrepareArgs(root) {
   return args;
 }
 
+async function rearmFixtureForGreenRollout(root) {
+  const state = await fixtureState(root);
+  state.baselineGeneration += 1;
+  state.bound = false;
+  state.cutover = false;
+  state.previousSlot = "blue";
+  // The first cutover makes blue active on the new release; green remains the
+  // inactive, still-old slot until this second plan binds it.
+  state.sourceReleaseSha = PREVIOUS_SHA;
+  state.targetSlot = "green";
+  await writeJson(path.join(root, "fixture-state.json"), state);
+}
+
 if (process.platform !== "linux" || process.getuid?.() === 0) {
   process.stdout.write(
     "resumable release orchestrator test: SKIP " +
@@ -675,6 +688,105 @@ test("runs five phases and publishes a chained final receipt", async (t) => {
     0,
   );
   assert.deepEqual(await fixtureState(fixture.root), state);
+});
+
+test("reuses an exact release hydration attestation across the opposite slot", async (t) => {
+  const fixture = await preparedFixture("cross-slot-hydration-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  assert.equal(
+    await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+    0,
+  );
+  const hydrationReceipt = await readFile(
+    path.join(
+      fixture.root,
+      "var/lib/leetplus/deploy-receipts",
+      `release-hydration-attestation-${RELEASE_SHA}.receipt`,
+    ),
+    "utf8",
+  );
+  assert.match(hydrationReceipt, /^RELEASE_SLOT=blue$/mu);
+  await rearmFixtureForGreenRollout(fixture.root);
+  assert.equal(await main(nextPrepareArgs(fixture.root)), 0);
+  const secondPlanPath = path.join(
+    fixture.root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    SECOND_OPERATION_ID,
+    "plan.json",
+  );
+  const secondPlan = JSON.parse(await readFile(secondPlanPath, "utf8"));
+  assert.equal(
+    await main(
+      continuationArgs(
+        "apply",
+        fixture.root,
+        canonicalRecordSha256(secondPlan),
+        SECOND_OPERATION_ID,
+      ),
+    ),
+    0,
+  );
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.hydrationEffects, 1);
+  assert.equal(state.promoteCalls, 2);
+  assert.equal(state.bindEffects, 2);
+  assert.equal(state.cutoverEffects, 2);
+  assert.equal(
+    await readFile(
+      path.join(
+        fixture.root,
+        "var/lib/leetplus/deploy-receipts",
+        `release-hydration-attestation-${RELEASE_SHA}.receipt`,
+      ),
+      "utf8",
+    ),
+    hydrationReceipt,
+  );
+});
+
+test("rejects a hydration receipt whose origin is not a reviewed slot", async (t) => {
+  const fixture = await preparedFixture("invalid-hydration-origin-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  assert.equal(
+    await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+    0,
+  );
+  const hydrationReceiptPath = path.join(
+    fixture.root,
+    "var/lib/leetplus/deploy-receipts",
+    `release-hydration-attestation-${RELEASE_SHA}.receipt`,
+  );
+  const entries = parseKv(await readFile(hydrationReceiptPath, "utf8")).map(
+    ([key, value]) => [key, key === "RELEASE_SLOT" ? "unreviewed" : value],
+  );
+  await writeFile(hydrationReceiptPath, kv(entries), { mode: 0o600 });
+  await rearmFixtureForGreenRollout(fixture.root);
+  assert.equal(await main(nextPrepareArgs(fixture.root)), 0);
+  const secondPlan = JSON.parse(
+    await readFile(
+      path.join(
+        fixture.root,
+        "var/lib/leetplus/deploy-receipts/release-orchestrator",
+        SECOND_OPERATION_ID,
+        "plan.json",
+      ),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    await main(
+      continuationArgs(
+        "apply",
+        fixture.root,
+        canonicalRecordSha256(secondPlan),
+        SECOND_OPERATION_ID,
+      ),
+    ),
+    1,
+  );
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.bindEffects, 1);
+  assert.equal(state.cutoverEffects, 1);
 });
 
 for (const [label, contractVersion] of [

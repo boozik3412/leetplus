@@ -3066,10 +3066,13 @@ function hydratePhase(plan, paths, args) {
     HYDRATION_RECEIPT_KEYS,
     "ORCHESTRATOR_HYDRATION_RECEIPT_INVALID",
   );
+  // The SHA-addressed receipt records the reviewed slot that first hydrated the
+  // immutable release. The promoter above revalidates that root authority;
+  // target-slot authority remains exclusively with the later BIND phase.
   if (
     receipt.values.get("RECORD_VERSION") !== "1" ||
     receipt.values.get("RELEASE_SHA") !== plan.releaseSha ||
-    receipt.values.get("RELEASE_SLOT") !== plan.targetSlot ||
+    !["blue", "green"].includes(receipt.values.get("RELEASE_SLOT")) ||
     !INVOCATION_ID.test(receipt.values.get("HYDRATION_INVOCATION_ID") ?? "") ||
     [
       "HYDRATION_SOURCE_RECEIPT_SHA256",

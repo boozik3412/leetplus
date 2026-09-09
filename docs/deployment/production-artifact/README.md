@@ -117,13 +117,15 @@ release и использовать
 `GUEST_BUG_REPORTING_MODE=OFF`). Это dual-target bridge ровно для
 `CURRENT_190 → CURRENT_191`, а не общий N/N+1 допуск.
 
-Текущая production пауза не является первым bridge: public active blue —
-`fa21bbe99be78313a883893b2dd6dc1d7c892777`, inactive green —
-`f590875064bb84c7baf0d5665ef2d6856827df6a`, operation
-`8f70269b-e4f2-450c-b117-31e1375c68ce` имеет accepted `HYDRATE/BIND/SMOKE` и
-только pending `CUTOVER`. Physical DB остаётся `CURRENT_190/190`, но contracts
-обоих runtime slots уже `CURRENT_191/191 + ALLOW_CURRENT_190/OFF`; этот recovery
-является только same-contract re-pin, не переходом target обратно к CURRENT190.
+Историческая pending-CUTOVER operation
+`8f70269b-e4f2-450c-b117-31e1375c68ce` safely terminalized после canonical
+rollback/restore. Replacement operation
+`53ac0c1e-2d61-42b9-a07e-d3cbab820531` приняла
+`HYDRATE/BIND/SMOKE/CUTOVER` и имеет только pending `POSTCHECK`. Public active
+green — `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, rollback blue —
+`fa21bbe99be78313a883893b2dd6dc1d7c892777`. Physical DB остаётся
+`CURRENT_190/190`, contracts обоих runtime slots —
+`CURRENT_191/191 + ALLOW_CURRENT_190/OFF`; schema effect отсутствует.
 
 Readiness verifier для этого одного pre-DDL bridge принимает ровно два
 эквивалентных исторических identifier: legacy
@@ -288,6 +290,25 @@ installed/admitted control с другим SHA в той же lane. Она **с�
 nginx, database, env, units или slot link и публикует только immutable `root:root 0400`
 `superseded.json`. Replacement не наследует authority: требуется fresh exact
 plan, approval и отдельный production GO.
+
+Все live-проверки link/env/units/latest cutover повторно читаются непосредственно
+перед первой exclusive-публикацией terminal receipt. Позже историческая валидация использует
+только pinned immutable BIND→ROLLBACK paths/digests, phase chain, backup и
+restore records: штатный successor BIND, обновлённый `slot.latest` и новая
+допустимая runtime/cutover generation не отменяют terminal status. Любая
+подмена pinned receipt/path/digest остаётся fail-closed.
+
+После accepted CUTOVER старый plan нельзя продолжать обычным `resume` под новой
+installed control generation: exact plan attestation остаётся неизменяемой.
+Единственное исключение —
+`complete-pending-postcheck-under-successor-control` для exact CURRENT191 bridge
+с четырьмя accepted phase receipts и исходным pending POSTCHECK intent. Под
+production-control/orchestrator/cutover locks команда связывает old
+plan/approval/CUTOVER/POSTCHECK intent с другим admitted installed control той же
+lane, выполняет только public readiness + authenticated reads и записывает
+digest-pinned succession, стандартные POSTCHECK evidence/receipt и final.
+HYDRATE/BIND/SMOKE/CUTOVER, DB, nginx, env, link, units и runtime этим режимом
+не изменяются; ручная перепривязка старых records запрещена.
 
 Canonical restore и terminalizer, и только они, удерживают hardened
 `/var/lib/leetplus/deploy-receipts/cutover.lock` штатного blue-green cutover

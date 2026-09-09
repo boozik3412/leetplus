@@ -274,6 +274,7 @@ async function setupFixture(suffix = "", environmentOptions = {}) {
     cacheCalls: 0,
     cacheFailures: 0,
     controlVariant: "A",
+    controlVerificationCalls: 0,
     cutover: false,
     cutoverCalls: 0,
     cutoverEffects: 0,
@@ -377,6 +378,26 @@ function continuationArgs(mode, root, planSha256, operationId = OPERATION_ID) {
     operationId,
     "--plan-sha256",
     planSha256,
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ];
+}
+
+function successorPostcheckArgs(
+  root,
+  planSha256,
+  successorReleaseSha = SUCCESSOR_SHA,
+  operationId = OPERATION_ID,
+) {
+  return [
+    "complete-pending-postcheck-under-successor-control",
+    "--operation-id",
+    operationId,
+    "--plan-sha256",
+    planSha256,
+    "--successor-release-sha",
+    successorReleaseSha,
     "--fixture-root",
     root,
     "--unprivileged-test-mode",
@@ -707,6 +728,32 @@ async function publishAcceptedBindFixtureSlotRollback(
 async function preparedFixture(suffix = "", environmentOptions = {}) {
   const root = await setupFixture(suffix, environmentOptions);
   assert.equal(await main(prepareArgs(root)), 0);
+  const planPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    OPERATION_ID,
+    "plan.json",
+  );
+  const plan = JSON.parse(await readFile(planPath, "utf8"));
+  return {
+    plan,
+    planPath,
+    planSha256: canonicalRecordSha256(plan),
+    root,
+  };
+}
+
+async function current191BridgeRepinPreparedFixture(suffix = "") {
+  const root = await setupFixture(suffix, {
+    bridgeMode: "ALLOW_CURRENT_190",
+    bugReportingMode: "OFF",
+    migration: CURRENT191_MIGRATION,
+    migrationCount: 191,
+  });
+  const args = current191PrepareArgs(root, "current191-bridge");
+  args[args.indexOf("--previous-migration") + 1] = CURRENT191_MIGRATION;
+  args[args.indexOf("--previous-migration-count") + 1] = "191";
+  assert.equal(await main(args), 0);
   const planPath = path.join(
     root,
     "var/lib/leetplus/deploy-receipts/release-orchestrator",
@@ -1836,6 +1883,343 @@ for (const phase of PHASES) {
   );
 }
 
+async function pendingPostcheckUnderControlAFixture(suffix) {
+  const fixture = await current191BridgeRepinPreparedFixture(suffix);
+  process.env.TEST_ORCHESTRATOR_LOST_RESPONSE_AFTER_PHASE = "POSTCHECK";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      1,
+    );
+  } finally {
+    delete process.env.TEST_ORCHESTRATOR_LOST_RESPONSE_AFTER_PHASE;
+  }
+  const directory = path.dirname(fixture.planPath);
+  const originalPostcheckIntentPath = path.join(
+    directory,
+    "05-postcheck.intent.json",
+  );
+  const originalPostcheckIntent = await readFile(originalPostcheckIntentPath);
+  await lstat(path.join(directory, "01-hydrate.receipt.json"));
+  await lstat(path.join(directory, "02-bind.receipt.json"));
+  await lstat(path.join(directory, "03-smoke.receipt.json"));
+  await lstat(path.join(directory, "04-cutover.receipt.json"));
+  await assert.rejects(
+    lstat(path.join(directory, "05-postcheck.evidence.json")),
+    {
+      code: "ENOENT",
+    },
+  );
+  await assert.rejects(
+    lstat(path.join(directory, "05-postcheck.receipt.json")),
+    {
+      code: "ENOENT",
+    },
+  );
+  return {
+    directory,
+    fixture,
+    originalPostcheckIntent,
+    originalPostcheckIntentPath,
+  };
+}
+
+test("completes only pending POSTCHECK under an admitted successor control", async (t) => {
+  const pending = await pendingPostcheckUnderControlAFixture(
+    "postcheck-control-successor-",
+  );
+  const {
+    directory,
+    fixture,
+    originalPostcheckIntent,
+    originalPostcheckIntentPath,
+  } = pending;
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+
+  let state = await fixtureState(fixture.root);
+  state.releaseSha = SUCCESSOR_SHA;
+  state.controlVariant = "B";
+  await writeJson(path.join(fixture.root, "fixture-state.json"), state);
+  const beforeOrdinaryResume = await fixtureState(fixture.root);
+  const beforeOrdinaryEntries = (await readdir(directory)).sort();
+
+  assert.equal(
+    await main(continuationArgs("resume", fixture.root, fixture.planSha256)),
+    1,
+  );
+  assert.deepEqual((await readdir(directory)).sort(), beforeOrdinaryEntries);
+  assert.equal(
+    await readFile(originalPostcheckIntentPath),
+    originalPostcheckIntent,
+  );
+  state = await fixtureState(fixture.root);
+  assert.equal(state.hydrationEffects, beforeOrdinaryResume.hydrationEffects);
+  assert.equal(state.bindEffects, beforeOrdinaryResume.bindEffects);
+  assert.equal(state.unmaskEffects, beforeOrdinaryResume.unmaskEffects);
+  assert.equal(state.cutoverEffects, beforeOrdinaryResume.cutoverEffects);
+
+  assert.equal(
+    await main(successorPostcheckArgs(fixture.root, fixture.planSha256)),
+    0,
+  );
+  const successionPath = path.join(
+    directory,
+    "05-postcheck-control-succession.receipt.json",
+  );
+  const succession = JSON.parse(await readFile(successionPath, "utf8"));
+  assert.deepEqual(Object.keys(succession).sort(), [
+    "approvalSha256",
+    "authorizedAt",
+    "contractVersion",
+    "cutoverReceiptSha256",
+    "decision",
+    "operationId",
+    "originalPostcheckIntentSha256",
+    "planSha256",
+    "previousPhaseReceiptSha256",
+    "recordType",
+    "releaseSha",
+    "schemaVersion",
+    "successorControlAttestationSha256",
+    "successorEffectiveLane",
+    "successorImpactReceiptSha256",
+    "successorReleaseSha",
+    "targetSlot",
+  ]);
+  const approval = JSON.parse(
+    await readFile(path.join(directory, "approval.json"), "utf8"),
+  );
+  const cutoverPhaseReceipt = JSON.parse(
+    await readFile(path.join(directory, "04-cutover.receipt.json"), "utf8"),
+  );
+  const cutoverEvidence = JSON.parse(
+    await readFile(path.join(directory, "04-cutover.evidence.json"), "utf8"),
+  );
+  assert.equal(succession.schemaVersion, 1);
+  assert.equal(succession.contractVersion, CONTRACT_VERSION);
+  assert.equal(succession.recordType, "POSTCHECK_CONTROL_SUCCESSION_RECEIPT");
+  assert.equal(succession.operationId, OPERATION_ID);
+  assert.equal(succession.planSha256, fixture.planSha256);
+  assert.equal(succession.approvalSha256, canonicalRecordSha256(approval));
+  assert.equal(succession.releaseSha, RELEASE_SHA);
+  assert.equal(succession.targetSlot, "blue");
+  assert.equal(
+    succession.previousPhaseReceiptSha256,
+    canonicalRecordSha256(cutoverPhaseReceipt),
+  );
+  assert.equal(
+    succession.cutoverReceiptSha256,
+    cutoverEvidence.details.cutoverReceiptSha256,
+  );
+  assert.equal(
+    succession.originalPostcheckIntentSha256,
+    digest(originalPostcheckIntent),
+  );
+  assert.equal(succession.successorReleaseSha, SUCCESSOR_SHA);
+  assert.notEqual(succession.successorControlAttestationSha256, undefined);
+  assert.match(succession.successorControlAttestationSha256, /^[0-9a-f]{64}$/u);
+  assert.equal(succession.successorEffectiveLane, "L1_RUNTIME");
+  assert.match(succession.successorImpactReceiptSha256, /^[0-9a-f]{64}$/u);
+  assert.equal(succession.decision, "POSTCHECK_CONTROL_SUCCESSION_AUTHORIZED");
+  assert.match(succession.authorizedAt, /^2026-[0-9]{2}-[0-9]{2}T/u);
+  assert.equal(
+    await readFile(originalPostcheckIntentPath),
+    originalPostcheckIntent,
+  );
+
+  const postcheckEvidence = JSON.parse(
+    await readFile(path.join(directory, "05-postcheck.evidence.json"), "utf8"),
+  );
+  const postcheckReceipt = JSON.parse(
+    await readFile(path.join(directory, "05-postcheck.receipt.json"), "utf8"),
+  );
+  const final = JSON.parse(
+    await readFile(path.join(directory, "final.json"), "utf8"),
+  );
+  assert.equal(postcheckEvidence.phase, "POSTCHECK");
+  assert.equal(postcheckEvidence.planSha256, fixture.planSha256);
+  assert.equal(
+    postcheckEvidence.controlAttestationSha256,
+    succession.successorControlAttestationSha256,
+  );
+  assert.equal(postcheckReceipt.phase, "POSTCHECK");
+  assert.equal(postcheckReceipt.planSha256, fixture.planSha256);
+  assert.equal(postcheckReceipt.intentSha256, digest(originalPostcheckIntent));
+  assert.equal(
+    postcheckReceipt.controlAttestationSha256,
+    succession.successorControlAttestationSha256,
+  );
+  assert.equal(
+    final.lastPhaseReceiptSha256,
+    canonicalRecordSha256(postcheckReceipt),
+  );
+  assert.equal(final.releaseSha, RELEASE_SHA);
+
+  state = await fixtureState(fixture.root);
+  assert.equal(state.hydrationEffects, beforeOrdinaryResume.hydrationEffects);
+  assert.equal(state.bindEffects, beforeOrdinaryResume.bindEffects);
+  assert.equal(state.unmaskEffects, beforeOrdinaryResume.unmaskEffects);
+  assert.equal(state.cutoverEffects, beforeOrdinaryResume.cutoverEffects);
+  assert.equal(state.readinessCalls, beforeOrdinaryResume.readinessCalls + 1);
+  assert.equal(state.authCalls, beforeOrdinaryResume.authCalls + 1);
+  assert.equal(
+    state.controlVerificationCalls,
+    beforeOrdinaryResume.controlVerificationCalls + 3,
+  );
+  assert.equal(
+    await main(continuationArgs("status", fixture.root, fixture.planSha256)),
+    0,
+  );
+
+  const afterFirstCompletion = await fixtureState(fixture.root);
+  assert.equal(
+    await main(successorPostcheckArgs(fixture.root, fixture.planSha256)),
+    0,
+  );
+  assert.deepEqual(await fixtureState(fixture.root), afterFirstCompletion);
+});
+
+for (const boundary of ["SUCCESSION", "POSTCHECK", "EVIDENCE"]) {
+  test(
+    "recovers successor-control POSTCHECK after lost response at " + boundary,
+    async (t) => {
+      const pending = await pendingPostcheckUnderControlAFixture(
+        "postcheck-control-successor-lost-" + boundary.toLowerCase() + "-",
+      );
+      const { directory, fixture } = pending;
+      t.after(() => rm(fixture.root, { recursive: true, force: true }));
+
+      let state = await fixtureState(fixture.root);
+      state.releaseSha = SUCCESSOR_SHA;
+      state.controlVariant = "B";
+      await writeJson(path.join(fixture.root, "fixture-state.json"), state);
+      const before = await fixtureState(fixture.root);
+      process.env.TEST_ORCHESTRATOR_SUCCESSOR_POSTCHECK_LOST_RESPONSE_AFTER =
+        boundary;
+      try {
+        assert.equal(
+          await main(successorPostcheckArgs(fixture.root, fixture.planSha256)),
+          1,
+        );
+      } finally {
+        delete process.env
+          .TEST_ORCHESTRATOR_SUCCESSOR_POSTCHECK_LOST_RESPONSE_AFTER;
+      }
+
+      await lstat(
+        path.join(directory, "05-postcheck-control-succession.receipt.json"),
+      );
+      const evidencePath = path.join(directory, "05-postcheck.evidence.json");
+      if (boundary === "EVIDENCE") {
+        await lstat(evidencePath);
+      } else {
+        await assert.rejects(lstat(evidencePath), { code: "ENOENT" });
+      }
+      await assert.rejects(
+        lstat(path.join(directory, "05-postcheck.receipt.json")),
+        { code: "ENOENT" },
+      );
+      await assert.rejects(lstat(path.join(directory, "final.json")), {
+        code: "ENOENT",
+      });
+
+      state = await fixtureState(fixture.root);
+      assert.equal(state.hydrationEffects, before.hydrationEffects);
+      assert.equal(state.bindEffects, before.bindEffects);
+      assert.equal(state.unmaskEffects, before.unmaskEffects);
+      assert.equal(state.cutoverEffects, before.cutoverEffects);
+      const firstReadOnlyCalls = boundary === "SUCCESSION" ? 0 : 1;
+      assert.equal(
+        state.readinessCalls,
+        before.readinessCalls + firstReadOnlyCalls,
+      );
+      assert.equal(state.authCalls, before.authCalls + firstReadOnlyCalls);
+
+      assert.equal(
+        await main(successorPostcheckArgs(fixture.root, fixture.planSha256)),
+        0,
+      );
+      state = await fixtureState(fixture.root);
+      const totalReadOnlyCalls = boundary === "SUCCESSION" ? 1 : 2;
+      assert.equal(
+        state.readinessCalls,
+        before.readinessCalls + totalReadOnlyCalls,
+      );
+      assert.equal(state.authCalls, before.authCalls + totalReadOnlyCalls);
+      assert.equal(state.hydrationEffects, before.hydrationEffects);
+      assert.equal(state.bindEffects, before.bindEffects);
+      assert.equal(state.unmaskEffects, before.unmaskEffects);
+      assert.equal(state.cutoverEffects, before.cutoverEffects);
+      await lstat(path.join(directory, "05-postcheck.receipt.json"));
+      await lstat(path.join(directory, "final.json"));
+
+      const beforeReplay = await fixtureState(fixture.root);
+      assert.equal(
+        await main(successorPostcheckArgs(fixture.root, fixture.planSha256)),
+        0,
+      );
+      assert.deepEqual(await fixtureState(fixture.root), beforeReplay);
+    },
+  );
+}
+
+test("rejects an absent, same, or tampered successor-control POSTCHECK completion", async (t) => {
+  const pending = await pendingPostcheckUnderControlAFixture(
+    "postcheck-control-successor-reject-",
+  );
+  const { directory, fixture } = pending;
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+
+  let state = await fixtureState(fixture.root);
+  state.releaseSha = SUCCESSOR_SHA;
+  state.controlVariant = "B";
+  state.effectiveLane = "L2_SCHEMA_SECURITY";
+  await writeJson(path.join(fixture.root, "fixture-state.json"), state);
+  const beforeReject = (await readdir(directory)).sort();
+  assert.equal(
+    await main(successorPostcheckArgs(fixture.root, fixture.planSha256)),
+    1,
+  );
+  assert.deepEqual((await readdir(directory)).sort(), beforeReject);
+  state = await fixtureState(fixture.root);
+  delete state.effectiveLane;
+  await writeJson(path.join(fixture.root, "fixture-state.json"), state);
+  assert.equal(
+    await main(
+      successorPostcheckArgs(fixture.root, fixture.planSha256, FOLLOWING_SHA),
+    ),
+    1,
+  );
+  assert.deepEqual((await readdir(directory)).sort(), beforeReject);
+  assert.equal(
+    await main(
+      successorPostcheckArgs(fixture.root, fixture.planSha256, RELEASE_SHA),
+    ),
+    1,
+  );
+  assert.deepEqual((await readdir(directory)).sort(), beforeReject);
+
+  assert.equal(
+    await main(successorPostcheckArgs(fixture.root, fixture.planSha256)),
+    0,
+  );
+  const successionPath = path.join(
+    directory,
+    "05-postcheck-control-succession.receipt.json",
+  );
+  const succession = JSON.parse(await readFile(successionPath, "utf8"));
+  succession.successorReleaseSha = FOLLOWING_SHA;
+  await replaceProtectedJson(successionPath, succession);
+  assert.equal(
+    await main(continuationArgs("status", fixture.root, fixture.planSha256)),
+    1,
+  );
+  assert.equal(
+    await main(successorPostcheckArgs(fixture.root, fixture.planSha256)),
+    1,
+  );
+});
+
 test("rejects control drift before the first phase effect", async (t) => {
   const fixture = await preparedFixture("control-drift-");
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
@@ -2488,6 +2872,55 @@ test("pins inherited cutover-lock contention guards to CUTOVER-intent recovery m
     ),
     "utf8",
   );
+  const successionScopeStart = engine.indexOf(
+    "function assertPostcheckControlSuccessionPlanScope(",
+  );
+  const successionReaderStart = engine.indexOf(
+    "function readPostcheckControlSuccessionReceipt(",
+  );
+  const phaseChainStart = engine.indexOf("function readCurrentPhaseChain(");
+  const successorCompletionStart = engine.indexOf(
+    "function completePendingPostcheckUnderSuccessorControl(",
+  );
+  const pipelineStart = engine.indexOf("function runPipeline(");
+  for (const location of [
+    successionScopeStart,
+    successionReaderStart,
+    phaseChainStart,
+    successorCompletionStart,
+    pipelineStart,
+  ]) {
+    assert.notEqual(location, -1);
+  }
+  const successionScopeSource = engine.slice(
+    successionScopeStart,
+    successionReaderStart,
+  );
+  assert.match(
+    successionScopeSource,
+    /SLOT_RUNTIME_PROFILE_CURRENT191_BRIDGE/u,
+  );
+  assert.match(successionScopeSource, /plan\.expectedMigration/u);
+  assert.match(successionScopeSource, /plan\.expectedMigrationCount/u);
+  assert.match(successionScopeSource, /plan\.previousMigration/u);
+  assert.match(successionScopeSource, /plan\.previousMigrationCount/u);
+  const successionReaderSource = engine.slice(
+    successionReaderStart,
+    phaseChainStart,
+  );
+  assert.match(
+    successionReaderSource,
+    /assertPostcheckControlSuccessionPlanScope\(/u,
+  );
+  const successorCompletionSource = engine.slice(
+    successorCompletionStart,
+    pipelineStart,
+  );
+  assert.ok(
+    successorCompletionSource.indexOf(
+      "assertPostcheckControlSuccessionPlanScope(",
+    ) < successorCompletionSource.indexOf("readCurrentPhaseChain("),
+  );
   assert.match(
     bootstrap,
     /restore-slot-environment-after-cutover-intent-bind-rollback\|supersede-after-cutover-intent-bind-rollback/u,
@@ -2497,7 +2930,27 @@ test("pins inherited cutover-lock contention guards to CUTOVER-intent recovery m
     /flock -n 7 \|\| die 'another blue\/green cutover operation is active'/u,
   );
   assert.match(bootstrap, /LEETPLUS_RESUMABLE_RELEASE_CUTOVER_LOCK_FD=7/u);
+  assert.match(
+    bootstrap,
+    /complete-pending-postcheck-under-successor-control\|restore-slot-environment-after-cutover-intent-bind-rollback/u,
+  );
   assert.match(engine, /function assertInheritedCutoverRecoveryLock\(args\)/u);
+  assert.match(
+    engine,
+    /"complete-pending-postcheck-under-successor-control",\s*"restore-slot-environment-after-cutover-intent-bind-rollback"/u,
+  );
+  assert.match(
+    engine,
+    /function validateBootstrap\(args\)[\s\S]*?assertInheritedCutoverRecoveryLock\(args\)/u,
+  );
+  assert.match(
+    engine,
+    /function assertCutoverIntentRolledBackSupersessionLivePublicationState\(/u,
+  );
+  assert.match(
+    engine,
+    /maybeSimulateCutoverIntentSupersessionLiveDrift\(args\);\s*assertCutoverIntentRolledBackSupersessionLivePublicationState\([\s\S]*?assertNoIncompleteCutoverRecord\(paths, args, reasonCode\);\s*publishCanonicalJson\(supersessionPath, receipt, 0o400, args\)/u,
+  );
   assert.match(engine, /\.intent\.accepting\.new/u);
   assert.match(engine, /\.intent\.recovering\.new/u);
   assert.match(
@@ -2747,6 +3200,23 @@ test("terminalizes only the exact accepted CURRENT191 bridge pending CUTOVER int
     canonicalRecordSha256(restoreResult),
   );
 
+  process.env.TEST_ORCHESTRATOR_FIXTURE_SUPERSESSION_LIVE_DRIFT = "true";
+  try {
+    assert.equal(await main(exactArgs), 1);
+  } finally {
+    delete process.env.TEST_ORCHESTRATOR_FIXTURE_SUPERSESSION_LIVE_DRIFT;
+  }
+  await assert.rejects(
+    lstat(path.join(operationDirectory, "superseded.json")),
+    {
+      code: "ENOENT",
+    },
+  );
+  state = await fixtureState(root);
+  assert.equal(state.slotActive, true);
+  state.slotActive = false;
+  await writeJson(path.join(root, "fixture-state.json"), state);
+
   state = await fixtureState(root);
   state.slotActive = true;
   await writeJson(path.join(root, "fixture-state.json"), state);
@@ -2843,6 +3313,90 @@ test("terminalizes only the exact accepted CURRENT191 bridge pending CUTOVER int
   );
   assert.equal(await main(continuationArgs("status", root, planSha256)), 0);
   assert.equal(await main(continuationArgs("resume", root, planSha256)), 1);
+
+  // A later legitimate BIND owns slot.latest. The terminal receipt remains
+  // pinned to the immutable historical BIND -> ROLLBACK pair instead.
+  const successorPrepare = current191PrepareArgs(root, "current191-bridge", {
+    operationId: SECOND_OPERATION_ID,
+  });
+  successorPrepare[successorPrepare.indexOf("--release-sha") + 1] =
+    SUCCESSOR_SHA;
+  successorPrepare[successorPrepare.indexOf("--previous-migration") + 1] =
+    CURRENT191_MIGRATION;
+  successorPrepare[successorPrepare.indexOf("--previous-migration-count") + 1] =
+    "191";
+  assert.equal(await main(successorPrepare), 0);
+  const successorDirectory = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    SECOND_OPERATION_ID,
+  );
+  const successorPlan = JSON.parse(
+    await readFile(path.join(successorDirectory, "plan.json"), "utf8"),
+  );
+  const successorPlanSha256 = canonicalRecordSha256(successorPlan);
+  state = await fixtureState(root);
+  state.bindOperationId = "20260903T000000.000000000Z-2";
+  state.bound = false;
+  state.correlateBindTimestamps = false;
+  state.hydrated = false;
+  state.orchestratorOperationId = SECOND_OPERATION_ID;
+  await writeJson(path.join(root, "fixture-state.json"), state);
+  process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_READINESS_ALWAYS = "true";
+  try {
+    assert.equal(
+      await main(
+        continuationArgs(
+          "apply",
+          root,
+          successorPlanSha256,
+          SECOND_OPERATION_ID,
+        ),
+      ),
+      1,
+    );
+  } finally {
+    delete process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_READINESS_ALWAYS;
+  }
+  const successorSlotLatest = new Map(
+    parseKv(
+      await readFile(
+        path.join(
+          root,
+          "var/lib/leetplus/deploy-receipts/slot-links/blue.latest",
+        ),
+        "utf8",
+      ),
+    ),
+  );
+  assert.equal(
+    successorSlotLatest.get("OPERATION_ID"),
+    "20260903T000000.000000000Z-2",
+  );
+  assert.match(
+    successorSlotLatest.get("RECEIPT_PATH") ?? "",
+    /\.bind\.receipt$/u,
+  );
+  assert.equal(await main(continuationArgs("status", root, planSha256)), 0);
+  assert.equal(
+    await main(
+      continuationArgs(
+        "resume",
+        root,
+        successorPlanSha256,
+        SECOND_OPERATION_ID,
+      ),
+    ),
+    0,
+  );
+  assert.equal(await main(exactArgs), 0);
+
+  supersession.slotRollbackReceiptSha256 = "0".repeat(64);
+  await replaceProtectedJson(
+    path.join(operationDirectory, "superseded.json"),
+    supersession,
+  );
+  assert.equal(await main(continuationArgs("status", root, planSha256)), 1);
 });
 
 test("rejects post-SMOKE supersession when binder BIND predates quiesce", async (t) => {

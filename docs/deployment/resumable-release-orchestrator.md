@@ -15,19 +15,21 @@ Fail-fast применяется только перед production effect ил�
 batch. Это правило не разрешает параллельные production mutations и не
 ослабляет фазовые fail-closed границы оркестратора.
 
-Статус: **V2 production rollout завершён; V3 recovery, lane-aware metrics и root-authorized metrics retention реализованы в source. CURRENT191 bridge cutover остаётся незавершённым и не является production success.**
+Статус: **V2 production rollout завершён; V3 recovery, lane-aware metrics и root-authorized metrics retention реализованы. CURRENT191 runtime cutover принят, но операция не terminal: pending POSTCHECK ожидает admitted successor-control completion. Schema effect не выполнялся.**
 
-Актуально на: **09.09.2026**
+Актуально на: **10.09.2026**
 
-Текущий CURRENT191 incident — operation
-`8f70269b-e4f2-450c-b117-31e1375c68ce`: приняты `HYDRATE`, `BIND` и `SMOKE`,
-но есть только pending `CUTOVER` intent. Physical DB остаётся
-`CURRENT_190/190`; при этом оба runtime slot contracts recovery уже exact
-`CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`. Public nginx обслуживает active blue
-`fa21bbe99be78313a883893b2dd6dc1d7c892777`; inactive green —
-`f590875064bb84c7baf0d5665ef2d6856827df6a`. Нет CUTOVER evidence/receipt,
-shared cutover intent и смены active generation. Это защищённая пауза, а не
-причина вручную переключать nginx, env, link или operation records.
+Историческая operation `8f70269b-e4f2-450c-b117-31e1375c68ce` безопасно
+terminalized после canonical BIND rollback и byte-exact env restore. Текущая
+operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` приняла
+`HYDRATE/BIND/SMOKE/CUTOVER`; есть единственный pending `POSTCHECK` intent.
+Physical DB остаётся `CURRENT_190/190`, оба runtime slot contracts — exact
+`CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`. Public nginx generation 51
+обслуживает active green `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, rollback
+blue — `fa21bbe99be78313a883893b2dd6dc1d7c892777`; independent public readiness
+и authenticated reads проходят. Обычный `resume` не разрешается переносить на
+новую control generation: завершение требует узкой successor-control процедуры
+ниже. Ручное изменение nginx, env, link или operation records запрещено.
 
 ## Назначение
 
@@ -289,6 +291,15 @@ env, units или slot link: он только exclusive-create публикуе
 `superseded.json`. Любой manual effect, missing receipt, CUTOVER drift, running
 или masked target, либо иной profile/head/count/flags остаётся fail-closed.
 
+Эти live-предикаты повторно читаются непосредственно перед первой
+exclusive-публикацией terminal receipt. После terminalization verifier
+исторической записи читает только
+неизменяемые, digest-pinned BIND→ROLLBACK paths/receipts, phase chain, backup и
+restore records. Поэтому штатный более поздний BIND и новое `slot.latest`, либо
+следующее допустимое cutover/runtime generation, не делают старый terminal
+receipt incomplete; подмена pinned path/digest или любого связанного immutable
+record по-прежнему fail-closed.
+
 Только эти два recovery modes — canonical restore и terminalizer — держат тот
 же hardened `/var/lib/leetplus/deploy-receipts/cutover.lock`, что штатный
 blue-green cutover, дополнительно к orchestrator lock. Engine attest'ит
@@ -298,6 +309,45 @@ cutover record `.intent`, `.intent.accepting.new` либо `.intent.recovering.n
 фаза вызывает штатный cutover сама, чтобы не создать self-deadlock.
 Новый release не наследует старый plan/approval/GO: после terminal receipt ему
 нужны fresh exact `prepare`, approval и отдельный production GO.
+
+### Завершение единственного pending POSTCHECK под successor control
+
+Если exact `CURRENT191 current191-bridge` operation уже имеет четыре accepted
+receipts `HYDRATE/BIND/SMOKE/CUTOVER` и единственный исходный
+`05-postcheck.intent.json`, установка исправленной production-control generation
+с другим SHA намеренно делает обычный `resume` несовместимым со старой
+control-attestation. В этом состоянии разрешена только команда:
+
+```bash
+sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  complete-pending-postcheck-under-successor-control \
+  --operation-id <existing-uuid-v4> \
+  --plan-sha256 <existing-plan-sha256> \
+  --successor-release-sha <different-installed-admitted-sha>
+```
+
+Команда держит production-control, orchestrator и canonical cutover locks. Она
+повторно проверяет неизменяемые plan/approval и четыре phase chains, отсутствие
+`final.json`/`superseded.json`/future records, active target slot, exact accepted
+cutover generation/receipt и отсутствие shared cutover intent. До и после
+read-only POSTCHECK она attest'ит установленный successor control: release SHA
+и control-attestation обязаны отличаться от plan, effective lane — совпадать, а
+impact digest берётся только из installed verifier output.
+
+Единственная новая authority запись — immutable
+`05-postcheck-control-succession.receipt.json`. Она связывает old plan,
+approval, CUTOVER phase receipt, исходный POSTCHECK intent и exact successor
+control tuple. Обычный `05-postcheck.evidence.json` сохраняет SHA-256 этого
+succession receipt и фактическую successor attestation; затем штатные
+`05-postcheck.receipt.json` и `final.json` замыкают digest chain. Изменение
+succession receipt после завершения поэтому обнаруживается fail-closed.
+
+Этот режим выполняет только public readiness и authenticated reads. Он не имеет
+пути к HYDRATE/BIND/SMOKE/CUTOVER, не меняет schema, nginx, slot link/env, unit
+или runtime и не создаёт новый plan/approval. До phase receipt lost response
+возобновляет тот же read-only POSTCHECK только под тем же exact installed
+successor; после accepted receipt/final повтор является историческим чтением и
+не зависит от более поздней control generation.
 
 ### Immutable publication и slot-aware reconcile
 

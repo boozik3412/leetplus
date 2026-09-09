@@ -50,6 +50,23 @@ CURRENT191 CLI `final-check` обязателен после двух отдел
 final receipts и до terminal public postcheck. Это не production GO,
 deploy record или разрешение менять slot env вручную.
 
+Если второй cross-slot `current191-bridge` остановлен после accepted
+`HYDRATE`, но до accepted BIND, старую operation нельзя удалять или считать
+cancelled. Единственный terminal path —
+`supersede-after-bind-rollback --operation-id ... --plan-sha256 ...
+--replacement-release-sha ... --slot-bind-receipt-sha256 ...
+--slot-rollback-receipt-sha256 ...`: он требует pending BIND без BIND evidence,
+exact binder receipt pair `BIND → ROLLBACK`, target link к `PRIOR_RELEASE`,
+target protected env byte-в-byte из backup (`CURRENT190 OFF/LIVE`), unmasked
+stopped/process-free target units, неизменный active plan-previous
+`CURRENT191 ALLOW_CURRENT_190/OFF` и неизменный cutover baseline. Replacement
+control обязан быть installed, другой SHA и той же lane. Команда публикует
+только immutable terminal receipt; DB, runtime, slot env/link, systemd, nginx
+и cutover она не меняет и не authorizes effect. Оба receipt digest pin'ятся
+явно; binder `OPERATION_ID` и причинный порядок timestamps после quiesce
+intent проверяются fail-closed. Полный операторский синтаксис
+и fail-closed matrix: [`resumable-release-orchestrator.md`](docs/deployment/resumable-release-orchestrator.md).
+
 Production hotfix PR #170 развёрнут five-phase operation
 `9687947d-722c-45e9-8a72-999e433434ab`; terminal receipt SHA-256 —
 `4d2f6c32ed57736a01f7f389467313bba0e410ba444aee5d1629c33c284f540d`.

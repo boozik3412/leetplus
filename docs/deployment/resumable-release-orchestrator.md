@@ -104,6 +104,55 @@ Live-проверки replacement control и cutover continuity выполняю
 проверяет installed control уже для запрошенного им exact release; authority из
 старого `superseded.json` никогда не переносится дальше.
 
+### Terminalize после доказанного отката не принятого BIND
+
+`supersede-after-bind-rollback` — отдельное, более узкое terminalize-исключение
+для единственного случая, когда `HYDRATE` уже принят, а следующий `BIND`
+остановился fail-closed **до** phase evidence/receipt, и exact slot bind был
+сразу восстановлен receipt-bound rollback. Это не общий cancel и не способ
+пропустить фазу:
+
+```bash
+sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  supersede-after-bind-rollback \
+  --operation-id <existing-uuid-v4> \
+  --plan-sha256 <existing-plan-sha256> \
+  --replacement-release-sha <different-installed-admitted-sha> \
+  --slot-bind-receipt-sha256 <exact-bind-receipt-sha256> \
+  --slot-rollback-receipt-sha256 <exact-rollback-receipt-sha256>
+```
+
+Команда допускается только для exact второго `CURRENT191` cross-slot
+`current191-bridge` plan: accepted phases — ровно `HYDRATE`; существует
+единственный pending `BIND` intent; нет `BIND` phase evidence/receipt и нет
+`final.json`. Она требует пару immutable receipt от штатного binder'а
+`BIND → ROLLBACK` с тем же operation/slot и `PRIOR_STATE=BOUND`, где rollback
+ссылается на SHA-256 исходного bind receipt. Target slot обязан уже указывать
+на `PRIOR_RELEASE`, его protected env — byte-в-byte совпадать с сохранённым до
+BIND backup и быть exact `CURRENT190 OFF/LIVE`; обе target units должны быть
+unmasked, stopped и process-free.
+
+Оператор обязан передать SHA-256 обоих exact receipt. Controller связывает их
+с terminal record, сверяет `OPERATION_ID` latest index с receipt, а также
+канонический временной порядок: quiesce intent → bind create/accept → rollback
+create/accept. Поэтому случайная более поздняя receipt pair того же slot/release
+не принимается без её явного digest-pinned выбора в recovery-команде.
+
+Независимо от target evidence controller также сверяет, что active slot всё
+ещё является exact plan previous `CURRENT191 ALLOW_CURRENT_190/OFF`, а accepted
+cutover generation не изменилась относительно baseline. Replacement control
+должен быть установлен, принадлежать той же effective lane и иметь иной SHA.
+Любой drift, иной profile/head/count/flags, отсутствующий rollback receipt,
+masked/running target или BIND phase receipt остаётся fail-closed incident.
+
+Успех публикует только immutable `root:root 0400` `superseded.json` в старой
+operation directory, связывающий plan/approval/HYDRATE intent, protected env
+backup, bind/rollback receipts, baseline и replacement control. Команда не
+меняет DB, runtime env, slot link, units, nginx или cutover generation и не
+авторизует schema/runtime mutation. Идемпотентный повтор читает тот же terminal
+record; следующий release всё равно начинает новый exact `prepare` и получает
+собственный GO.
+
 ### Immutable publication и slot-aware reconcile
 
 `promote-release-artifact` публикует release ровно один раз по exact SHA в
@@ -342,6 +391,12 @@ GO для replacement. Он разрешён лишь до accepted `HYDRATE` re
 любой accepted phase/BIND остаётся только same-plan `resume` или отдельный
 fail-closed incident workflow. Удалять/править старую operation directory,
 чтобы освободить новый `prepare`, запрещено.
+
+Единственное исключение из этой последней границы описано выше:
+`supersede-after-bind-rollback` применим не после accepted BIND, а только после
+accepted `HYDRATE` и доказанного receipt-bound восстановления **не принятого**
+BIND exact CURRENT191 second-slot bridge. Он не заменяет `resume`, rollback
+или database controller.
 
 Накопительная read-only сводка:
 

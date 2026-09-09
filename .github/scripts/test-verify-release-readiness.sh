@@ -7,6 +7,8 @@ readonly RELEASE_SHA='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 readonly MIGRATION='20260828190000_guest_support_bug_reports'
 readonly BRIDGE_SOURCE_MIGRATION='20260820010000_guest_portal_telegram_update_ledger'
 readonly CURRENT189_MIGRATION='20260831120000_guest_support_bug_report_input_repair'
+readonly CURRENT190_MIGRATION='20260908090000_initial_owner_invite_link_mode'
+readonly CURRENT191_MIGRATION='20260908180000_external_langame_simple_onboarding'
 readonly REPOSITORY_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly PROBE="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-release-readiness.sh"
 readonly TEST_ROOT="$(mktemp -d)"
@@ -137,6 +139,8 @@ valid_version="{\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SH
 valid_ready="{\"ok\":true,\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"},\"dependencies\":{\"database\":{\"ok\":true,\"migration\":\"${MIGRATION}\",\"migrationCount\":188}}}"
 valid_bridge_ready="{\"ok\":true,\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"},\"dependencies\":{\"database\":{\"ok\":true,\"migration\":\"${BRIDGE_SOURCE_MIGRATION}\",\"migrationCount\":187,\"compatibility\":{\"mode\":\"GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE\",\"targetMigration\":\"${MIGRATION}\",\"targetMigrationCount\":188}}}}"
 valid_current189_bridge_ready="{\"ok\":true,\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"},\"dependencies\":{\"database\":{\"ok\":true,\"migration\":\"${MIGRATION}\",\"migrationCount\":188,\"compatibility\":{\"mode\":\"GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE\",\"targetMigration\":\"${CURRENT189_MIGRATION}\",\"targetMigrationCount\":189}}}}"
+valid_current190_bridge_ready="{\"ok\":true,\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"},\"dependencies\":{\"database\":{\"ok\":true,\"migration\":\"${CURRENT189_MIGRATION}\",\"migrationCount\":189,\"compatibility\":{\"mode\":\"GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE\",\"targetMigration\":\"${CURRENT190_MIGRATION}\",\"targetMigrationCount\":190}}}}"
+valid_current191_bridge_ready="{\"ok\":true,\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"},\"dependencies\":{\"database\":{\"ok\":true,\"migration\":\"${CURRENT190_MIGRATION}\",\"migrationCount\":190,\"compatibility\":{\"mode\":\"EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE\",\"targetMigration\":\"${CURRENT191_MIGRATION}\",\"targetMigrationCount\":191}}}}"
 valid_web_identity="{\"ok\":true,\"release\":{\"sha\":\"${RELEASE_SHA}\",\"webBuildId\":\"${RELEASE_SHA}\"}}"
 
 PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$valid_ready" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/curl.log" \
@@ -189,6 +193,68 @@ grep -F -x "RELEASE_READINESS_OBSERVED_MIGRATION=${MIGRATION}" \
   "$TEST_ROOT/current189-bridge-accepted.out" > /dev/null
 grep -F -x 'RELEASE_READINESS_OBSERVED_MIGRATION_COUNT=188' \
   "$TEST_ROOT/current189-bridge-accepted.out" > /dev/null
+
+PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$valid_current190_bridge_ready" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/current190-bridge-curl.log" \
+  /usr/bin/bash -p "$PROBE" \
+    --release-sha "$RELEASE_SHA" \
+    --expected-migration "$CURRENT190_MIGRATION" \
+    --expected-migration-count 190 \
+    --expected-web-build-id "$RELEASE_SHA" \
+    --api-base-url https://api.example.test/ \
+    --web-url https://web.example.test/ \
+    --unprivileged-test-mode > "$TEST_ROOT/current190-bridge-accepted.out"
+
+grep -F -x 'RELEASE_READINESS_ACCEPTED_DATABASE_STATE=GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE' \
+  "$TEST_ROOT/current190-bridge-accepted.out" > /dev/null
+grep -F -x "RELEASE_READINESS_OBSERVED_MIGRATION=${CURRENT189_MIGRATION}" \
+  "$TEST_ROOT/current190-bridge-accepted.out" > /dev/null
+grep -F -x 'RELEASE_READINESS_OBSERVED_MIGRATION_COUNT=189' \
+  "$TEST_ROOT/current190-bridge-accepted.out" > /dev/null
+
+PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$valid_current191_bridge_ready" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/current191-bridge-curl.log" \
+  /usr/bin/bash -p "$PROBE" \
+    --release-sha "$RELEASE_SHA" \
+    --expected-migration "$CURRENT191_MIGRATION" \
+    --expected-migration-count 191 \
+    --expected-web-build-id "$RELEASE_SHA" \
+    --api-base-url https://api.example.test/ \
+    --web-url https://web.example.test/ \
+    --unprivileged-test-mode > "$TEST_ROOT/current191-bridge-accepted.out"
+
+grep -F -x 'RELEASE_READINESS_ACCEPTED_DATABASE_STATE=EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE' \
+  "$TEST_ROOT/current191-bridge-accepted.out" > /dev/null
+grep -F -x "RELEASE_READINESS_OBSERVED_MIGRATION=${CURRENT190_MIGRATION}" \
+  "$TEST_ROOT/current191-bridge-accepted.out" > /dev/null
+grep -F -x 'RELEASE_READINESS_OBSERVED_MIGRATION_COUNT=190' \
+  "$TEST_ROOT/current191-bridge-accepted.out" > /dev/null
+
+legacy_mode_current191_bridge="${valid_current191_bridge_ready/EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE/GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE}"
+if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$legacy_mode_current191_bridge" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/curl.log" \
+  /usr/bin/bash -p "$PROBE" \
+    --release-sha "$RELEASE_SHA" \
+    --expected-migration "$CURRENT191_MIGRATION" \
+    --expected-migration-count 191 \
+    --expected-web-build-id "$RELEASE_SHA" \
+    --api-base-url https://api.example.test \
+    --web-url https://web.example.test/ \
+    --unprivileged-test-mode > "$TEST_ROOT/current191-legacy-mode-rejected.out" 2>&1; then
+  printf 'CURRENT_191 bridge with the legacy compatibility mode was unexpectedly accepted\n' >&2
+  exit 1
+fi
+
+external_mode_current189_bridge="${valid_current189_bridge_ready/GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE/EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE}"
+if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$external_mode_current189_bridge" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/curl.log" \
+  /usr/bin/bash -p "$PROBE" \
+    --release-sha "$RELEASE_SHA" \
+    --expected-migration "$CURRENT189_MIGRATION" \
+    --expected-migration-count 189 \
+    --expected-web-build-id "$RELEASE_SHA" \
+    --api-base-url https://api.example.test \
+    --web-url https://web.example.test/ \
+    --unprivileged-test-mode > "$TEST_ROOT/current189-external-mode-rejected.out" 2>&1; then
+  printf 'pre-CURRENT_191 bridge with the external Langame compatibility mode was unexpectedly accepted\n' >&2
+  exit 1
+fi
 
 invalid_current189_bridge_source_count="{\"ok\":true,\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"},\"dependencies\":{\"database\":{\"ok\":true,\"migration\":\"${MIGRATION}\",\"migrationCount\":187,\"compatibility\":{\"mode\":\"GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE\",\"targetMigration\":\"${CURRENT189_MIGRATION}\",\"targetMigrationCount\":189}}}}"
 if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$invalid_current189_bridge_source_count" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/curl.log" \

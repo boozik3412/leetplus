@@ -1,5 +1,20 @@
 # Resumable blue/green release orchestrator
 
+## Пакетная проверка и дисциплина повторов
+
+Независимые local/CI gates запускаются одним bounded batch. Для каждого gate
+обязательно сохраняются отдельные stdout/stderr и exit code; итоговая сводка
+показывает все ошибки одного прохода, чтобы исправлять их одной группой.
+Fail-fast применяется только перед production effect или в другой точке, где
+продолжение способно изменить production, испортить immutable evidence либо
+сделать последующие результаты недостоверными.
+
+Перед повтором оператор читает durable error log целиком, фиксирует причину и
+конкретно изменившееся условие. Неизменившийся полный batch не перезапускается.
+После targeted-проверок изменённых причин выполняется один итоговый полный
+batch. Это правило не разрешает параллельные production mutations и не
+ослабляет фазовые fail-closed границы оркестратора.
+
 Статус: **V2 production rollout завершён; V3 recovery, lane-aware metrics и root-authorized metrics retention реализованы в source**
 
 Актуально на: **03.09.2026**
@@ -153,6 +168,52 @@ backup, bind/rollback receipts, baseline и replacement control. Команда 
 record; следующий release всё равно начинает новый exact `prepare` и получает
 собственный GO.
 
+### Terminalize после SMOKE и доказанного binder rollback
+
+`supersede-after-smoke-bind-rollback` — ещё более узкое fail-closed
+исключение для первого inactive slot нового replacement rollout
+`CURRENT191 current191-bridge`. Оно допустимо, когда `HYDRATE` и `BIND` уже
+имеют accepted evidence/receipts, canonical `SMOKE` intent и отдельный SMOKE
+unmask intent опубликованы, а `SMOKE` остановился до своего evidence/receipt.
+Это не принимает неудачный smoke и не заменяет обычный `resume`:
+
+```bash
+sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  supersede-after-smoke-bind-rollback \
+  --operation-id <existing-uuid-v4> \
+  --plan-sha256 <existing-plan-sha256> \
+  --replacement-release-sha <different-installed-admitted-sha> \
+  --slot-bind-receipt-sha256 <exact-bind-receipt-sha256> \
+  --slot-rollback-receipt-sha256 <exact-rollback-receipt-sha256>
+```
+
+Контроллер допускает только ровно две accepted phase receipts и единственный
+pending `SMOKE` intent; plan обязан быть `current191-bridge`, а его current и
+previous schema head/count — exact `CURRENT_191/191`. Оба явно переданных
+digest должны обозначать штатную пару binder `BIND → ROLLBACK` того же
+operation/slot: rollback ссылается на accepted BIND receipt и возвращает link
+к `PRIOR_RELEASE`. Protected target env должен byte-в-byte совпасть с backup
+до BIND и остаться exact `CURRENT191`, `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=
+ALLOW_CURRENT_190`, `GUEST_BUG_REPORTING_MODE=OFF`. Target не может быть
+active; API и Web instances обязаны быть unmasked, stopped и process-free.
+
+Replacement — отдельный уже installed admitted control с иным release SHA,
+иной control-attestation digest и той же effective lane. Нельзя переносить
+authority старой operation в replacement: после terminal record новый release
+проходит собственный `prepare`, approval и GO. Любое отсутствие canonical
+SMOKE intent или SMOKE unmask intent, наличие SMOKE evidence/receipt,
+несоответствие backup/link/receipt, running or masked target, manual env/link
+change либо изменение operation record является fail-closed incident, а не
+основанием повторить команды вслепую.
+
+Успех создаёт только immutable `root:root 0400` `superseded.json`, связывающий
+accepted BIND chain, pending SMOKE intent, backup env, оба binder receipt и
+replacement control. Он не меняет DB, runtime env/link, units, nginx или
+cutover generation. Ручное редактирование intent/evidence/receipt/
+`superseded.json`, удаление operation directory или создание замещающих
+records запрещены; повтор той же exact команды может лишь вернуть уже
+опубликованный terminal record.
+
 ### Immutable publication и slot-aware reconcile
 
 `promote-release-artifact` публикует release ровно один раз по exact SHA в
@@ -189,13 +250,13 @@ receipt и installed-control attestation. Любой пропуск, будущ�
 изменённый byte, неверный mode/path, receipt-chain drift или чужая cutover
 generation останавливает продолжение.
 
-| Фаза | Effect | Точное восстановление после lost response |
-| --- | --- | --- |
-| `HYDRATE` | versioned hydration unit + immutable promotion | existing sealed release принимается только через тот же hydration receipt; promoter выполняет собственный reconcile |
-| `BIND` | persistent exact instance masks + `--now`, reset failed state, cache preparation, inactive slot link и atomic slot-env bind | повтор оставляет target fenced; cache повторяется не более трёх раз только после обычного non-zero exit и повторной проверки `masked/inactive/dead/PID=0`; pending binder intent продолжает только `reconcile`; previous slot-env bytes сохраняются root-only и принимаются только по exact lineage |
-| `SMOKE` | снять exact masks, enable/start target API/Web, loopback readiness и authenticated reads | unmask/start повторяются идемпотентно; loopback readiness ждёт startup bounded-серией, но ambiguous/timeout/oversize/stderr не повторяются; invocation IDs и результаты должны совпасть |
-| `CUTOVER` | штатный atomic nginx switch с watchdog | pending child intent проходит `recover-pending`; terminal successor принимается только как baseline generation + 1 с exact target и previous-runtime contract; диагностический stderr после exit 0 допустим только когда такой exact receipt уже durable и active link совпал |
-| `POSTCHECK` | public readiness + authenticated reads | read-only проверки повторяются; active link и accepted cutover receipt должны остаться теми же |
+| Фаза        | Effect                                                                                                                      | Точное восстановление после lost response                                                                                                                                                                                                                                                           |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HYDRATE`   | versioned hydration unit + immutable promotion                                                                              | existing sealed release принимается только через тот же hydration receipt; promoter выполняет собственный reconcile                                                                                                                                                                                 |
+| `BIND`      | persistent exact instance masks + `--now`, reset failed state, cache preparation, inactive slot link и atomic slot-env bind | повтор оставляет target fenced; cache повторяется не более трёх раз только после обычного non-zero exit и повторной проверки `masked/inactive/dead/PID=0`; pending binder intent продолжает только `reconcile`; previous slot-env bytes сохраняются root-only и принимаются только по exact lineage |
+| `SMOKE`     | снять exact masks, enable/start target API/Web, loopback readiness и authenticated reads                                    | unmask/start повторяются идемпотентно; loopback readiness ждёт startup bounded-серией, но ambiguous/timeout/oversize/stderr не повторяются; invocation IDs и результаты должны совпасть                                                                                                             |
+| `CUTOVER`   | штатный atomic nginx switch с watchdog                                                                                      | pending child intent проходит `recover-pending`; terminal successor принимается только как baseline generation + 1 с exact target и previous-runtime contract; диагностический stderr после exit 0 допустим только когда такой exact receipt уже durable и active link совпал                       |
+| `POSTCHECK` | public readiness + authenticated reads                                                                                      | read-only проверки повторяются; active link и accepted cutover receipt должны остаться теми же                                                                                                                                                                                                      |
 
 Если evidence успел стать durable, а ответ/receipt потерян, `resume` не
 дописывает receipt вслепую: он повторно исполняет идемпотентную проверку фазы и

@@ -258,43 +258,48 @@ const bridge = database?.compatibility;
 const bridgeKeys = bridge && typeof bridge === 'object' && !Array.isArray(bridge)
   ? Object.keys(bridge).sort().join(',')
   : '';
-const admittedGuestSupportForwardBridges = [
+const admittedSchemaForwardBridges = [
   {
+    compatibilityMode: 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE',
     sourceMigration: '20260820010000_guest_portal_telegram_update_ledger',
     sourceMigrationCount: 187,
     targetMigration: '20260828190000_guest_support_bug_reports',
     targetMigrationCount: 188,
   },
   {
+    compatibilityMode: 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE',
     sourceMigration: '20260828190000_guest_support_bug_reports',
     sourceMigrationCount: 188,
     targetMigration: '20260831120000_guest_support_bug_report_input_repair',
     targetMigrationCount: 189,
   },
   {
+    compatibilityMode: 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE',
     sourceMigration: '20260831120000_guest_support_bug_report_input_repair',
     sourceMigrationCount: 189,
     targetMigration: '20260908090000_initial_owner_invite_link_mode',
     targetMigrationCount: 190,
   },
   {
+    compatibilityMode: 'EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE',
     sourceMigration: '20260908090000_initial_owner_invite_link_mode',
     sourceMigrationCount: 190,
     targetMigration: '20260908180000_external_langame_simple_onboarding',
     targetMigrationCount: 191,
   },
 ];
-const guestSupportForwardBridgeAccepted =
+const admittedSchemaForwardBridge = admittedSchemaForwardBridges.find((candidate) =>
+  database?.migration === candidate.sourceMigration &&
+  database?.migrationCount === candidate.sourceMigrationCount &&
+  expectedMigration === candidate.targetMigration &&
+  expectedMigrationCountNumber === candidate.targetMigrationCount
+);
+const schemaForwardBridgeAccepted =
   bridgeKeys === 'mode,targetMigration,targetMigrationCount' &&
-  bridge.mode === 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE' &&
+  admittedSchemaForwardBridge !== undefined &&
+  bridge.mode === admittedSchemaForwardBridge.compatibilityMode &&
   bridge.targetMigration === expectedMigration &&
-  bridge.targetMigrationCount === expectedMigrationCountNumber &&
-  admittedGuestSupportForwardBridges.some((candidate) =>
-    database?.migration === candidate.sourceMigration &&
-    database?.migrationCount === candidate.sourceMigrationCount &&
-    expectedMigration === candidate.targetMigration &&
-    expectedMigrationCountNumber === candidate.targetMigrationCount
-  );
+  bridge.targetMigrationCount === expectedMigrationCountNumber;
 if (
   version.service !== 'leetplus-api' ||
   version.release?.sha !== releaseSha ||
@@ -302,14 +307,14 @@ if (
   ready.service !== 'leetplus-api' ||
   ready.release?.sha !== releaseSha ||
   database?.ok !== true ||
-  (!exactTargetAccepted && !guestSupportForwardBridgeAccepted) ||
+  (!exactTargetAccepted && !schemaForwardBridgeAccepted) ||
   webIdentity.ok !== true ||
   webIdentity.release?.sha !== releaseSha ||
   webIdentity.release?.webBuildId !== expectedWebBuildId
 ) throw new Error('running release readiness contract does not match expected evidence');
 process.stdout.write(
-  `RELEASE_READINESS_ACCEPTED_DATABASE_STATE=${guestSupportForwardBridgeAccepted
-    ? 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE'
+  `RELEASE_READINESS_ACCEPTED_DATABASE_STATE=${schemaForwardBridgeAccepted
+    ? bridge.mode
     : 'EXACT_TARGET'}\n` +
   `RELEASE_READINESS_OBSERVED_MIGRATION=${database.migration}\n` +
   `RELEASE_READINESS_OBSERVED_MIGRATION_COUNT=${database.migrationCount}\n`,

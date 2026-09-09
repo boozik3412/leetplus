@@ -216,6 +216,31 @@ units, nginx или cutover. Это не generic cancel, не BIND acceptance и
 authority для schema/runtime effect; любой drift или другой profile остаётся
 fail-closed.
 
+Отдельный `supersede-after-smoke-bind-rollback --operation-id ...
+--plan-sha256 ... --replacement-release-sha ... --slot-bind-receipt-sha256 ...
+--slot-rollback-receipt-sha256 ...` относится только к первому inactive slot
+нового replacement rollout exact `CURRENT191 current191-bridge`. Он
+terminalizes operation лишь после accepted
+`HYDRATE` и accepted `BIND`, когда существует только pending `SMOKE` intent, а
+canonical SMOKE unmask intent уже опубликован, но SMOKE evidence/receipt
+отсутствуют. Binder обязан сам завершить digest-pinned
+пару accepted `BIND → ROLLBACK`: rollback ссылается на этот BIND receipt,
+возвращает slot link к `PRIOR_RELEASE`, а protected target env byte-в-byte
+совпадает с до-BIND backup. Восстановленный target остаётся exact
+`CURRENT191/191`, `ALLOW_CURRENT_190/OFF`, не является active и имеет обе
+units unmasked, stopped и process-free.
+
+Replacement принимается только как отдельный installed admitted release с
+другим SHA и control-attestation digest в той же effective lane. Он не наследует
+authority старой operation и всё равно требует новый exact `prepare`, approval
+и GO. Успех публикует только immutable terminal record; он не применяет DB,
+не меняет runtime env/link, units, nginx или cutover. Любой missing/mismatched
+binder rollback, другой phase/profile, SMOKE evidence/receipt, env/link drift
+или running/masked target — fail-closed incident. Ручная правка operation
+intent/evidence/receipt, `superseded.json`, slot env/link либо удаление старой
+operation directory запрещены и не являются способом повторить или заменить
+rollout.
+
 Promotion receipt адресуется exact release SHA, поэтому его `RELEASE_SLOT` —
 не право release работать лишь в первом slot, а immutable **origin slot**
 первой публикации. Уже final-published

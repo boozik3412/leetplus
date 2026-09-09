@@ -65,6 +65,12 @@ Langame `CURRENT191` signed schema controller может применить её
 по одному inactive slot, через orchestrator profile
 `--slot-runtime-profile current191-bridge`: основной переход только
 `CURRENT190 OFF/LIVE → target191 ALLOW_CURRENT_190/OFF` (`COMBINED`). Узкое
+cross-slot правило для второго bridge шага разделяет две lineage: latest
+cutover и protected active env обязаны доказать previous CURRENT191 bridge
+baseline plan, а accepted bind receipt и immutable target-env backup — прежний
+BOUND CURRENT190 origin inactive slot. Исключение разрешено только для exact
+`current191-bridge`; оно не допускает `preserve`, `current191-final`, ABSENT
+origin, иной head/count/flags или ручную правку env. Узкое
 исключение для восстановления частичного rollout разрешает
 `CURRENT191 ALLOW_CURRENT_190/OFF →` тот же exact bridge profile нового
 admitted release SHA; flags не меняются, DDL не выполняется, readiness и

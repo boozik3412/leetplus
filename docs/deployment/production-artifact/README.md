@@ -117,6 +117,17 @@ release и использовать
 `GUEST_BUG_REPORTING_MODE=OFF`). Это dual-target bridge ровно для
 `CURRENT_190 → CURRENT_191`, а не общий N/N+1 допуск.
 
+После первого bridge cutover активный slot уже имеет
+`CURRENT_191/191 + ALLOW_CURRENT_190/OFF`, тогда как второй, теперь inactive,
+может всё ещё иметь прежний `CURRENT_190/190 + OFF/LIVE` release. Для этого
+ровно одного cross-slot шага plan previous-поля описывают активный CURRENT191
+baseline, а исходный CURRENT190 профиль target подтверждается отдельно:
+immutable `PRIOR_*` bind receipt обязан совпасть с защищённым backup target
+slot env, и live active slot env обязан совпасть с previous-полями plan и exact
+bridge flags. Только сочетание этих двух независимых lineage разрешает второй
+`CURRENT190 → CURRENT191` bridge; `preserve`, `current191-final`, иной
+head/count/flags или `PRIOR_STATE != BOUND` остаются fail-closed.
+
 При частично завершённом bridge rollout новый exact admitted release может
 перепривязать inactive slot, который уже имеет
 `CURRENT_191/191 + ALLOW_CURRENT_190/OFF`, через отдельный

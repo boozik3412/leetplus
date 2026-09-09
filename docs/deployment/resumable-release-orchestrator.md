@@ -203,7 +203,14 @@ security flag вне этого профиля, чужой previous SHA, symlink
   rollout допускается также exact source `CURRENT_191/191` уже в
   `ALLOW_CURRENT_190/OFF`: профиль только перепривязывает этот bridge slot к
   новому exact admitted release SHA, не меняя runtime flags и не выполняя DDL.
-  Любой иной head/count или набор flags отклоняется.
+  После первого bridge cutover второй inactive slot может всё ещё быть exact
+  `CURRENT_190/190 OFF/LIVE`, хотя previous-поля нового plan уже относятся к
+  активному `CURRENT_191/191 ALLOW_CURRENT_190/OFF`. Этот cross-slot переход
+  допускается только когда protected active env точно совпадает с previous
+  release/head/count и bridge flags plan, а immutable backup target env точно
+  совпадает с `PRIOR_*` принятого bind receipt и exact CURRENT190 source.
+  Любой иной head/count, набор flags, отсутствующий `BOUND` origin или попытка
+  применить исключение к `preserve`/`current191-final` отклоняется.
 - `current191-final` разрешён только на inactive slot: source этого slot должен
   уже быть exact target `CURRENT_191/191` с `ALLOW_CURRENT_190/OFF`; target
   получает только `OFF/LIVE`. Prepare дополнительно требует
@@ -278,7 +285,10 @@ sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
 
 Для обычного rollout параметр profile не передаётся. Для CURRENT191 сначала
 используется `current191-bridge` ровно на одном inactive slot, затем отдельный
-exact plan/cutover для второго slot. Только после committed schema и exact
+exact plan/cutover для второго slot. Во втором plan previous runtime описывает
+активный первый bridge slot, а прежний CURRENT190 target origin подтверждается
+bind receipt и immutable slot-env backup; это не разрешает ручную правку
+previous-полей или target env. Только после committed schema и exact
 database-controller `check` создаётся новый plan с `current191-final` для
 текущего inactive slot; после его cutover тем же образом завершается второй
 slot, а затем запускается CURRENT191 CLI `final-check`.

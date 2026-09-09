@@ -2502,11 +2502,11 @@ test("pins inherited cutover-lock contention guards to CUTOVER-intent recovery m
   assert.match(engine, /\.intent\.recovering\.new/u);
   assert.match(
     engine,
-    /timeline\.rollback\.bindAcceptedAt > asSlotTime\(timeline\.bindEvidence\.value\.observedAt\)/u,
+    /timeline\.rollback\.bindAcceptedAt\s*>\s*asSlotTime\(timeline\.bindEvidence\.value\.observedAt\)/u,
   );
   assert.doesNotMatch(
     engine,
-    /timeline\.rollback\.bindAcceptedAt < asSlotTime\(timeline\.bindEvidence\.value\.observedAt\)/u,
+    /timeline\.rollback\.bindAcceptedAt\s*<\s*asSlotTime\(timeline\.bindEvidence\.value\.observedAt\)/u,
   );
 });
 

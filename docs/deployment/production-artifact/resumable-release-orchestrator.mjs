@@ -512,21 +512,21 @@ function parseArguments(argv) {
               "--slot-rollback-receipt-sha256",
             ]
           : [
-              "supersede-after-bind-rollback",
-              "supersede-after-smoke-bind-rollback",
-              "supersede-after-cutover-intent-bind-rollback",
-            ].includes(mode)
-          ? [
-              ...common,
-              "--plan-sha256",
-              "--replacement-release-sha",
-              "--slot-bind-receipt-sha256",
-              "--slot-rollback-receipt-sha256",
-              ...(mode === "supersede-after-cutover-intent-bind-rollback"
-                ? ["--slot-environment-restore-receipt-sha256"]
-                : []),
-            ]
-          : [...common, "--plan-sha256"];
+                "supersede-after-bind-rollback",
+                "supersede-after-smoke-bind-rollback",
+                "supersede-after-cutover-intent-bind-rollback",
+              ].includes(mode)
+            ? [
+                ...common,
+                "--plan-sha256",
+                "--replacement-release-sha",
+                "--slot-bind-receipt-sha256",
+                "--slot-rollback-receipt-sha256",
+                ...(mode === "supersede-after-cutover-intent-bind-rollback"
+                  ? ["--slot-environment-restore-receipt-sha256"]
+                  : []),
+              ]
+            : [...common, "--plan-sha256"];
   if (mode === "prepare" && !values.has("--watchdog-seconds")) {
     values.set("--watchdog-seconds", "30");
   }
@@ -4492,9 +4492,12 @@ function validateCutoverIntentRolledBackSupersessionReceipt(
   const nextGeneration = context.plan.baselineCutover.generation + 1;
   const sharedCutoverEffect = readdirSync(paths.deployReceiptRoot).some(
     (name) =>
-      new RegExp("-g" + nextGeneration + "-[0-9a-f]{40}-(?:blue|green)\\.(?:intent|receipt)$", "u").test(
-        name,
-      ),
+      new RegExp(
+        "-g" +
+          nextGeneration +
+          "-[0-9a-f]{40}-(?:blue|green)\\.(?:intent|receipt)$",
+        "u",
+      ).test(name),
   );
   if (
     context.plan.slotRuntimeProfile !==
@@ -4519,16 +4522,20 @@ function validateCutoverIntentRolledBackSupersessionReceipt(
     bindEvidence.value.details.slotEnvironmentPreviousPath !== previousPath ||
     bindEvidence.value.details.slotEnvironmentPreviousSha256 !==
       previous.sha256 ||
-    bindEvidence.value.details.slotLinkReceiptPath !== rollback.bindReceiptPath ||
+    bindEvidence.value.details.slotLinkReceiptPath !==
+      rollback.bindReceiptPath ||
     bindEvidence.value.details.slotLinkReceiptSha256 !==
       rollback.bindReceiptSha256 ||
     smokeEvidence.value.details.unmaskIntentSha256 !== unmask.sha256 ||
     !current.bytes.equals(previous.bytes) ||
     previous.sha256 !== record.slotEnvironmentPreviousSha256 ||
     environmentRestore.sha256 !== record.slotEnvironmentRestoreReceiptSha256 ||
-    environmentRestore.value.slotBindReceiptSha256 !== record.slotBindReceiptSha256 ||
-    environmentRestore.value.slotRollbackReceiptSha256 !== record.slotRollbackReceiptSha256 ||
-    environmentRestore.value.slotEnvironmentPreviousSha256 !== previous.sha256 ||
+    environmentRestore.value.slotBindReceiptSha256 !==
+      record.slotBindReceiptSha256 ||
+    environmentRestore.value.slotRollbackReceiptSha256 !==
+      record.slotRollbackReceiptSha256 ||
+    environmentRestore.value.slotEnvironmentPreviousSha256 !==
+      previous.sha256 ||
     activeSlot === context.plan.targetSlot ||
     rollback.bindReceiptPath !== record.slotBindReceiptPath ||
     rollback.bindReceiptSha256 !== record.slotBindReceiptSha256 ||
@@ -4541,7 +4548,8 @@ function validateCutoverIntentRolledBackSupersessionReceipt(
     latestRollback.rollbackReceiptPath !== rollback.rollbackReceiptPath ||
     latestRollback.rollbackReceiptSha256 !== rollback.rollbackReceiptSha256 ||
     previousValues.get("RELEASE_SHA") !== context.plan.previousReleaseSha ||
-    previousValues.get("EXPECTED_DATABASE_MIGRATION") !== CURRENT191_MIGRATION ||
+    previousValues.get("EXPECTED_DATABASE_MIGRATION") !==
+      CURRENT191_MIGRATION ||
     Number(previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !==
       CURRENT191_MIGRATION_COUNT ||
     previousValues.get("GUEST_BUG_REPORTING_MODE") !== "OFF" ||
@@ -4554,29 +4562,34 @@ function validateCutoverIntentRolledBackSupersessionReceipt(
     activeValues.get("GUEST_BUG_REPORTING_MODE") !== "OFF" ||
     activeValues.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") !==
       "ALLOW_CURRENT_190" ||
-    currentSlotTarget(context.plan.targetSlot, paths) !== rollback.priorTarget ||
+    currentSlotTarget(context.plan.targetSlot, paths) !==
+      rollback.priorTarget ||
     currentSlotTarget(activeSlot, paths) !==
       path.join(paths.releaseRoot, context.plan.previousReleaseSha) ||
     currentCutover.generation !== context.plan.baselineCutover.generation ||
     currentCutover.receiptPath !== context.plan.baselineCutover.receiptPath ||
-    currentCutover.receiptSha256 !== context.plan.baselineCutover.receiptSha256 ||
+    currentCutover.receiptSha256 !==
+      context.plan.baselineCutover.receiptSha256 ||
     currentCutover.consumed ||
     currentCutover.slot !== activeSlot ||
     sharedCutoverEffect ||
     existsSync(phasePaths(context.directory, 3, "CUTOVER").evidence) ||
     existsSync(phasePaths(context.directory, 3, "CUTOVER").receipt) ||
-    pairOutOfCutoverIntentRollbackOrder({
-      bindEvidence,
-      bindReceipt,
-      cutoverIntent,
-      quiesce,
-      rollback,
-      smokeEvidence,
-      smokeIntent,
-      smokeReceipt,
-      unmask,
-      supersededAt: record.supersededAt,
-    }, reasonCode)
+    pairOutOfCutoverIntentRollbackOrder(
+      {
+        bindEvidence,
+        bindReceipt,
+        cutoverIntent,
+        quiesce,
+        rollback,
+        smokeEvidence,
+        smokeIntent,
+        smokeReceipt,
+        unmask,
+        supersededAt: record.supersededAt,
+      },
+      reasonCode,
+    )
   ) {
     fail(reasonCode);
   }
@@ -4595,18 +4608,24 @@ function validateCutoverIntentRolledBackSupersessionReceipt(
 function pairOutOfCutoverIntentRollbackOrder(timeline, reasonCode) {
   const asSlotTime = (iso) => isoToSlotLinkTimestamp(iso, reasonCode);
   return (
-    timeline.rollback.bindCreatedAt <= asSlotTime(timeline.quiesce.value.createdAt) ||
-    timeline.rollback.bindAcceptedAt < asSlotTime(timeline.bindEvidence.value.observedAt) ||
+    timeline.rollback.bindCreatedAt <=
+      asSlotTime(timeline.quiesce.value.createdAt) ||
+    timeline.rollback.bindAcceptedAt >
+      asSlotTime(timeline.bindEvidence.value.observedAt) ||
     asSlotTime(timeline.bindEvidence.value.observedAt) >
       asSlotTime(timeline.bindReceipt.value.acceptedAt) ||
-    timeline.bindReceipt.value.acceptedAt >= timeline.smokeIntent.value.createdAt ||
+    timeline.bindReceipt.value.acceptedAt >=
+      timeline.smokeIntent.value.createdAt ||
     timeline.smokeIntent.value.createdAt > timeline.unmask.value.createdAt ||
     timeline.unmask.value.createdAt > timeline.smokeEvidence.value.observedAt ||
-    timeline.smokeEvidence.value.observedAt > timeline.smokeReceipt.value.acceptedAt ||
-    timeline.smokeReceipt.value.acceptedAt >= timeline.cutoverIntent.value.createdAt ||
+    timeline.smokeEvidence.value.observedAt >
+      timeline.smokeReceipt.value.acceptedAt ||
+    timeline.smokeReceipt.value.acceptedAt >=
+      timeline.cutoverIntent.value.createdAt ||
     timeline.cutoverIntent.value.createdAt >=
       timeline.rollback.rollbackCreatedAt ||
-    timeline.rollback.rollbackCreatedAt >= timeline.rollback.rollbackAcceptedAt ||
+    timeline.rollback.rollbackCreatedAt >=
+      timeline.rollback.rollbackAcceptedAt ||
     asSlotTime(timeline.supersededAt) <= timeline.rollback.rollbackAcceptedAt
   );
 }
@@ -5516,13 +5535,20 @@ function supersedeAfterSmokeBindRollbackOperation(context, paths, args) {
   };
 }
 
-function assertCutoverIntentRollbackPending(context, paths, args, chain, reasonCode) {
+function assertCutoverIntentRollbackPending(
+  context,
+  paths,
+  args,
+  chain,
+  reasonCode,
+) {
   assertNoIncompleteCutoverRecord(paths, args, reasonCode);
   if (
     chain.completed !== 3 ||
     chain.pendingRecord !== "INTENT" ||
     !SHA256.test(chain.previousReceiptSha256 ?? "") ||
-    context.plan.slotRuntimeProfile !== SLOT_RUNTIME_PROFILE_CURRENT191_BRIDGE ||
+    context.plan.slotRuntimeProfile !==
+      SLOT_RUNTIME_PROFILE_CURRENT191_BRIDGE ||
     context.plan.expectedMigration !== CURRENT191_MIGRATION ||
     context.plan.expectedMigrationCount !== CURRENT191_MIGRATION_COUNT ||
     context.plan.previousMigration !== CURRENT191_MIGRATION ||
@@ -5537,7 +5563,9 @@ function assertCutoverIntentRollbackPending(context, paths, args, chain, reasonC
   if (
     readdirSync(paths.deployReceiptRoot).some((name) =>
       new RegExp(
-        "-g" + nextGeneration + "-[0-9a-f]{40}-(?:blue|green)\\.(?:intent|receipt)$",
+        "-g" +
+          nextGeneration +
+          "-[0-9a-f]{40}-(?:blue|green)\\.(?:intent|receipt)$",
         "u",
       ).test(name),
     )
@@ -5562,7 +5590,11 @@ function assertCutoverIntentRollbackPending(context, paths, args, chain, reasonC
   return cutoverIntent;
 }
 
-function restoreSlotEnvironmentAfterCutoverIntentBindRollback(context, paths, args) {
+function restoreSlotEnvironmentAfterCutoverIntentBindRollback(
+  context,
+  paths,
+  args,
+) {
   const reasonCode = "ORCHESTRATOR_CUTOVER_INTENT_ENVIRONMENT_RESTORE_INVALID";
   const approval = readCanonicalJson(
     path.join(context.directory, "approval.json"),
@@ -5619,7 +5651,10 @@ function restoreSlotEnvironmentAfterCutoverIntentBindRollback(context, paths, ar
   targetValues.set("RELEASE_SHA", context.plan.releaseSha);
   targetValues.set("WEB_BUILD_ID", context.plan.releaseSha);
   targetValues.set("EXPECTED_DATABASE_MIGRATION", CURRENT191_MIGRATION);
-  targetValues.set("EXPECTED_DATABASE_MIGRATION_COUNT", String(CURRENT191_MIGRATION_COUNT));
+  targetValues.set(
+    "EXPECTED_DATABASE_MIGRATION_COUNT",
+    String(CURRENT191_MIGRATION_COUNT),
+  );
   targetValues.set("BUILD_TIME", context.plan.preparedAt);
   targetValues.set("API_BIND_HOST", CANONICAL_API_BIND_HOST);
   targetValues.set("GUEST_BUG_REPORTING_MODE", "OFF");
@@ -5646,17 +5681,21 @@ function restoreSlotEnvironmentAfterCutoverIntentBindRollback(context, paths, ar
     rollback.bindReceiptSha256 !== args.slotBindReceiptSha256 ||
     rollback.rollbackReceiptSha256 !== args.slotRollbackReceiptSha256 ||
     rollback.priorReleaseSha !== context.plan.previousReleaseSha ||
-    currentSlotTarget(context.plan.targetSlot, paths) !== rollback.priorTarget ||
+    currentSlotTarget(context.plan.targetSlot, paths) !==
+      rollback.priorTarget ||
     activeSlot === context.plan.targetSlot ||
     currentSlotTarget(activeSlot, paths) !==
       path.join(paths.releaseRoot, context.plan.previousReleaseSha) ||
     previousValues.get("RELEASE_SHA") !== context.plan.previousReleaseSha ||
-    previousValues.get("EXPECTED_DATABASE_MIGRATION") !== CURRENT191_MIGRATION ||
-    Number(previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !== CURRENT191_MIGRATION_COUNT ||
+    previousValues.get("EXPECTED_DATABASE_MIGRATION") !==
+      CURRENT191_MIGRATION ||
+    Number(previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !==
+      CURRENT191_MIGRATION_COUNT ||
     previousValues.get("GUEST_BUG_REPORTING_MODE") !== "OFF" ||
     previousValues.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") !==
       "ALLOW_CURRENT_190" ||
-    (!current.bytes.equals(targetBytes) && !current.bytes.equals(previous.bytes))
+    (!current.bytes.equals(targetBytes) &&
+      !current.bytes.equals(previous.bytes))
   ) {
     fail(reasonCode);
   }
@@ -5691,7 +5730,10 @@ function restoreSlotEnvironmentAfterCutoverIntentBindRollback(context, paths, ar
   let intentSha256;
   if (existsSync(intentPath)) {
     const existing = readCanonicalJson(intentPath, args, [0o400]);
-    if (canonicalJson(existing.value) !== canonicalJson({ ...intent, createdAt: existing.value.createdAt })) {
+    if (
+      canonicalJson(existing.value) !==
+      canonicalJson({ ...intent, createdAt: existing.value.createdAt })
+    ) {
       fail(reasonCode);
     }
     exactIso(existing.value.createdAt, reasonCode);
@@ -5714,7 +5756,9 @@ function restoreSlotEnvironmentAfterCutoverIntentBindRollback(context, paths, ar
     } else {
       const fd = openSync(
         temporary,
-        fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY |
+        fsConstants.O_CREAT |
+          fsConstants.O_EXCL |
+          fsConstants.O_WRONLY |
           (fsConstants.O_NOFOLLOW ?? 0),
         0o600,
       );
@@ -5781,7 +5825,8 @@ function restoreSlotEnvironmentAfterCutoverIntentBindRollback(context, paths, ar
     );
     if (
       existing.value.slotBindReceiptSha256 !== args.slotBindReceiptSha256 ||
-      existing.value.slotRollbackReceiptSha256 !== args.slotRollbackReceiptSha256 ||
+      existing.value.slotRollbackReceiptSha256 !==
+        args.slotRollbackReceiptSha256 ||
       existing.value.slotEnvironmentPreviousSha256 !== previous.sha256 ||
       existing.value.slotEnvironmentSha256 !== restored.sha256
     ) {
@@ -5820,7 +5865,8 @@ function restoreSlotEnvironmentAfterCutoverIntentBindRollback(context, paths, ar
   assertNoIncompleteCutoverRecord(paths, args, reasonCode);
   publishCanonicalJson(receiptPath, receipt, 0o400, args);
   const published = readCanonicalJson(receiptPath, args, [0o400]);
-  if (canonicalJson(published.value) !== canonicalJson(receipt)) fail(reasonCode);
+  if (canonicalJson(published.value) !== canonicalJson(receipt))
+    fail(reasonCode);
   return {
     contractVersion: CONTRACT_VERSION,
     decision: receipt.decision,
@@ -5832,7 +5878,12 @@ function restoreSlotEnvironmentAfterCutoverIntentBindRollback(context, paths, ar
   };
 }
 
-function readCutoverIntentEnvironmentRestoreReceipt(context, paths, chain, args) {
+function readCutoverIntentEnvironmentRestoreReceipt(
+  context,
+  paths,
+  chain,
+  args,
+) {
   const reasonCode =
     "ORCHESTRATOR_CUTOVER_INTENT_ENVIRONMENT_RESTORE_RECEIPT_INVALID";
   const receiptPath = path.join(
@@ -5859,28 +5910,53 @@ function readCutoverIntentEnvironmentRestoreReceipt(context, paths, chain, args)
   );
   validateApproval(approval.value, context);
   const expected = [
-    "approvalSha256", "contractVersion", "cutoverIntentSha256", "decision",
-    "intentSha256", "operationId", "planSha256", "previousPhaseReceiptSha256",
-    "recordType", "releaseSha", "restoredAt", "schemaVersion",
-    "slotBindReceiptSha256", "slotEnvironmentPath", "slotEnvironmentPreviousSha256",
-    "slotEnvironmentSha256", "slotRollbackReceiptSha256", "targetSlot",
+    "approvalSha256",
+    "contractVersion",
+    "cutoverIntentSha256",
+    "decision",
+    "intentSha256",
+    "operationId",
+    "planSha256",
+    "previousPhaseReceiptSha256",
+    "recordType",
+    "releaseSha",
+    "restoredAt",
+    "schemaVersion",
+    "slotBindReceiptSha256",
+    "slotEnvironmentPath",
+    "slotEnvironmentPreviousSha256",
+    "slotEnvironmentSha256",
+    "slotRollbackReceiptSha256",
+    "targetSlot",
   ];
   exactKeys(receipt.value, expected, reasonCode);
   const intent = readRequiredCanonicalJson(intentPath);
   exactKeys(
     intent.value,
     [
-      "approvalSha256", "contractVersion", "createdAt", "cutoverIntentSha256",
-      "decision", "operationId", "planSha256", "previousPhaseReceiptSha256",
-      "recordType", "releaseSha", "schemaVersion", "slotBindReceiptSha256",
-      "slotEnvironmentPreviousSha256", "slotRollbackReceiptSha256", "targetSlot",
+      "approvalSha256",
+      "contractVersion",
+      "createdAt",
+      "cutoverIntentSha256",
+      "decision",
+      "operationId",
+      "planSha256",
+      "previousPhaseReceiptSha256",
+      "recordType",
+      "releaseSha",
+      "schemaVersion",
+      "slotBindReceiptSha256",
+      "slotEnvironmentPreviousSha256",
+      "slotRollbackReceiptSha256",
+      "targetSlot",
     ],
     reasonCode,
   );
   if (
     receipt.value.schemaVersion !== 1 ||
     receipt.value.contractVersion !== CONTRACT_VERSION ||
-    receipt.value.recordType !== "CUTOVER_INTENT_SLOT_ENVIRONMENT_RESTORE_RECEIPT" ||
+    receipt.value.recordType !==
+      "CUTOVER_INTENT_SLOT_ENVIRONMENT_RESTORE_RECEIPT" ||
     receipt.value.operationId !== context.plan.operationId ||
     receipt.value.planSha256 !== context.planSha256 ||
     receipt.value.approvalSha256 !== approval.sha256 ||
@@ -5892,7 +5968,8 @@ function readCutoverIntentEnvironmentRestoreReceipt(context, paths, chain, args)
     receipt.value.intentSha256 !== intent.sha256 ||
     intent.value.schemaVersion !== 1 ||
     intent.value.contractVersion !== CONTRACT_VERSION ||
-    intent.value.recordType !== "CUTOVER_INTENT_SLOT_ENVIRONMENT_RESTORE_INTENT" ||
+    intent.value.recordType !==
+      "CUTOVER_INTENT_SLOT_ENVIRONMENT_RESTORE_INTENT" ||
     intent.value.operationId !== context.plan.operationId ||
     intent.value.planSha256 !== context.planSha256 ||
     intent.value.approvalSha256 !== receipt.value.approvalSha256 ||
@@ -5900,16 +5977,21 @@ function readCutoverIntentEnvironmentRestoreReceipt(context, paths, chain, args)
     intent.value.targetSlot !== context.plan.targetSlot ||
     intent.value.cutoverIntentSha256 !== chain.pendingRecordSha256 ||
     intent.value.previousPhaseReceiptSha256 !== chain.previousReceiptSha256 ||
-    intent.value.slotBindReceiptSha256 !== receipt.value.slotBindReceiptSha256 ||
-    intent.value.slotRollbackReceiptSha256 !== receipt.value.slotRollbackReceiptSha256 ||
-    intent.value.slotEnvironmentPreviousSha256 !== receipt.value.slotEnvironmentPreviousSha256 ||
-    intent.value.decision !== "CUTOVER_INTENT_SLOT_ENVIRONMENT_RESTORE_AUTHORIZED" ||
+    intent.value.slotBindReceiptSha256 !==
+      receipt.value.slotBindReceiptSha256 ||
+    intent.value.slotRollbackReceiptSha256 !==
+      receipt.value.slotRollbackReceiptSha256 ||
+    intent.value.slotEnvironmentPreviousSha256 !==
+      receipt.value.slotEnvironmentPreviousSha256 ||
+    intent.value.decision !==
+      "CUTOVER_INTENT_SLOT_ENVIRONMENT_RESTORE_AUTHORIZED" ||
     !SHA256.test(receipt.value.approvalSha256 ?? "") ||
     !SHA256.test(receipt.value.slotBindReceiptSha256 ?? "") ||
     !SHA256.test(receipt.value.slotRollbackReceiptSha256 ?? "") ||
     !SHA256.test(receipt.value.slotEnvironmentPreviousSha256 ?? "") ||
     !SHA256.test(receipt.value.slotEnvironmentSha256 ?? "") ||
-    receipt.value.slotEnvironmentPreviousSha256 !== receipt.value.slotEnvironmentSha256 ||
+    receipt.value.slotEnvironmentPreviousSha256 !==
+      receipt.value.slotEnvironmentSha256 ||
     receipt.value.slotEnvironmentPath !==
       path.join(paths.slotEnvironmentRoot, context.plan.targetSlot + ".env")
   ) {
@@ -5920,7 +6002,11 @@ function readCutoverIntentEnvironmentRestoreReceipt(context, paths, chain, args)
   return { path: receiptPath, sha256: receipt.sha256, value: receipt.value };
 }
 
-function supersedeAfterCutoverIntentBindRollbackOperation(context, paths, args) {
+function supersedeAfterCutoverIntentBindRollbackOperation(
+  context,
+  paths,
+  args,
+) {
   const reasonCode =
     "ORCHESTRATOR_CUTOVER_INTENT_ROLLBACK_SUPERSESSION_STATE_INVALID";
   const supersededAt = nowIso();
@@ -5960,9 +6046,7 @@ function supersedeAfterCutoverIntentBindRollbackOperation(context, paths, args) 
       existing.value.slotEnvironmentRestoreReceiptSha256 !==
         args.slotEnvironmentRestoreReceiptSha256
     ) {
-      fail(
-        "ORCHESTRATOR_CUTOVER_INTENT_ROLLBACK_SUPERSESSION_RECEIPT_INVALID",
-      );
+      fail("ORCHESTRATOR_CUTOVER_INTENT_ROLLBACK_SUPERSESSION_RECEIPT_INVALID");
     }
     return {
       contractVersion: CONTRACT_VERSION,
@@ -6106,9 +6190,12 @@ function supersedeAfterCutoverIntentBindRollbackOperation(context, paths, args) 
   const nextGeneration = context.plan.baselineCutover.generation + 1;
   const sharedCutoverEffect = readdirSync(paths.deployReceiptRoot).some(
     (name) =>
-      new RegExp("-g" + nextGeneration + "-[0-9a-f]{40}-(?:blue|green)\\.(?:intent|receipt)$", "u").test(
-        name,
-      ),
+      new RegExp(
+        "-g" +
+          nextGeneration +
+          "-[0-9a-f]{40}-(?:blue|green)\\.(?:intent|receipt)$",
+        "u",
+      ).test(name),
   );
   if (
     rollback.bindReceiptSha256 !== args.slotBindReceiptSha256 ||
@@ -6122,7 +6209,8 @@ function supersedeAfterCutoverIntentBindRollbackOperation(context, paths, args) 
     bindEvidence.value.details.slotEnvironmentPreviousPath !== previousPath ||
     bindEvidence.value.details.slotEnvironmentPreviousSha256 !==
       previous.sha256 ||
-    bindEvidence.value.details.slotLinkReceiptPath !== rollback.bindReceiptPath ||
+    bindEvidence.value.details.slotLinkReceiptPath !==
+      rollback.bindReceiptPath ||
     bindEvidence.value.details.slotLinkReceiptSha256 !==
       rollback.bindReceiptSha256 ||
     smokeEvidence.value.details.unmaskIntentSha256 !== unmask.sha256 ||
@@ -6130,7 +6218,8 @@ function supersedeAfterCutoverIntentBindRollbackOperation(context, paths, args) 
     activeSlot === context.plan.targetSlot ||
     rollback.priorReleaseSha !== context.plan.previousReleaseSha ||
     previousValues.get("RELEASE_SHA") !== context.plan.previousReleaseSha ||
-    previousValues.get("EXPECTED_DATABASE_MIGRATION") !== CURRENT191_MIGRATION ||
+    previousValues.get("EXPECTED_DATABASE_MIGRATION") !==
+      CURRENT191_MIGRATION ||
     Number(previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT")) !==
       CURRENT191_MIGRATION_COUNT ||
     previousValues.get("GUEST_BUG_REPORTING_MODE") !== "OFF" ||
@@ -6143,29 +6232,34 @@ function supersedeAfterCutoverIntentBindRollbackOperation(context, paths, args) 
     activeValues.get("GUEST_BUG_REPORTING_MODE") !== "OFF" ||
     activeValues.get("GUEST_SUPPORT_SCHEMA_BRIDGE_MODE") !==
       "ALLOW_CURRENT_190" ||
-    currentSlotTarget(context.plan.targetSlot, paths) !== rollback.priorTarget ||
+    currentSlotTarget(context.plan.targetSlot, paths) !==
+      rollback.priorTarget ||
     currentSlotTarget(activeSlot, paths) !==
       path.join(paths.releaseRoot, context.plan.previousReleaseSha) ||
     currentCutover.generation !== context.plan.baselineCutover.generation ||
     currentCutover.receiptPath !== context.plan.baselineCutover.receiptPath ||
-    currentCutover.receiptSha256 !== context.plan.baselineCutover.receiptSha256 ||
+    currentCutover.receiptSha256 !==
+      context.plan.baselineCutover.receiptSha256 ||
     currentCutover.consumed ||
     currentCutover.slot !== activeSlot ||
     sharedCutoverEffect ||
     existsSync(phasePaths(context.directory, 3, "CUTOVER").evidence) ||
     existsSync(phasePaths(context.directory, 3, "CUTOVER").receipt) ||
-    pairOutOfCutoverIntentRollbackOrder({
-      bindEvidence,
-      bindReceipt,
-      cutoverIntent,
-      quiesce,
-      rollback,
-      smokeEvidence,
-      smokeIntent,
-      smokeReceipt,
-      unmask,
-      supersededAt,
-    }, reasonCode)
+    pairOutOfCutoverIntentRollbackOrder(
+      {
+        bindEvidence,
+        bindReceipt,
+        cutoverIntent,
+        quiesce,
+        rollback,
+        smokeEvidence,
+        smokeIntent,
+        smokeReceipt,
+        unmask,
+        supersededAt,
+      },
+      reasonCode,
+    )
   ) {
     fail(reasonCode);
   }
@@ -6185,7 +6279,8 @@ function supersedeAfterCutoverIntentBindRollbackOperation(context, paths, args) 
   );
   if (
     args.replacementReleaseSha === context.plan.releaseSha ||
-    replacementControl.attestationSha256 === context.plan.controlAttestationSha256 ||
+    replacementControl.attestationSha256 ===
+      context.plan.controlAttestationSha256 ||
     replacementControl.effectiveLane !== context.plan.effectiveLane
   ) {
     fail("ORCHESTRATOR_SUPERSESSION_CONTROL_SUCCESSOR_INVALID");

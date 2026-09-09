@@ -17,6 +17,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
 import {
   COMPLETE_DECISION,
@@ -65,6 +66,23 @@ function parseKv(value) {
 
 function digest(value) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function isoToSlotLinkTimestamp(value) {
+  return value.replace(
+    /\.([0-9]{3})Z$/u,
+    (_match, milliseconds) => "." + milliseconds + "000000Z",
+  );
+}
+
+async function waitForRollbackCausalBarrier(rollbackAcceptedMilliseconds) {
+  const deadline = performance.now() + 50;
+  while (Date.now() <= rollbackAcceptedMilliseconds) {
+    if (performance.now() >= deadline) {
+      throw new Error("fixture wall clock did not advance beyond rollback");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
 }
 
 async function captureStderr(run) {
@@ -488,10 +506,9 @@ async function publishFixtureSlotRollback(root) {
       "utf8",
     ),
   );
+  const base = new Date(quiesceIntent.createdAt).valueOf();
   const timestamp = (offsetMilliseconds) => {
-    const value = new Date(
-      new Date(quiesceIntent.createdAt).valueOf() + offsetMilliseconds,
-    ).toISOString();
+    const value = new Date(base + offsetMilliseconds).toISOString();
     return value.replace(
       /\.([0-9]{3})Z$/u,
       (_match, milliseconds) => "." + milliseconds + "000000Z",
@@ -561,6 +578,7 @@ async function publishFixtureSlotRollback(root) {
   state.slotMasked = false;
   state.sourceReleaseSha = priorReleaseSha;
   await writeJson(path.join(root, "fixture-state.json"), state);
+  await waitForRollbackCausalBarrier(base + 4);
   return {
     bindReceiptSha256: digest(correlatedBindReceipt),
     rollbackReceiptPath,
@@ -633,10 +651,10 @@ async function publishAcceptedBindFixtureSlotRollback(
     const replacements = new Map([
       ["OPERATION", "ROLLBACK"],
       ["SOURCE_RECEIPT_SHA256", digest(bindReceipt)],
-      ["CREATED_AT", timestamp(1000)],
+      ["CREATED_AT", timestamp(1)],
       ["INTENT_SHA256", "e".repeat(64)],
       ["EFFECT_STATE", "PRIOR_RESTORED"],
-      ["ACCEPTED_AT", timestamp(2000)],
+      ["ACCEPTED_AT", timestamp(2)],
     ]);
     return [key, replacements.get(key) ?? value];
   });
@@ -656,7 +674,7 @@ async function publishAcceptedBindFixtureSlotRollback(
       ["OPERATION_ID", operationId],
       ["RECEIPT_PATH", rollbackReceiptPath],
       ["RECEIPT_SHA256", digest(rollbackReceipt)],
-      ["UPDATED_AT", new Date(base + 2000).toISOString()],
+      ["UPDATED_AT", new Date(base + 2).toISOString()],
     ]),
     { mode: 0o600 },
   );
@@ -677,6 +695,7 @@ async function publishAcceptedBindFixtureSlotRollback(
   state.slotMasked = false;
   state.sourceReleaseSha = priorReleaseSha;
   await writeJson(path.join(root, "fixture-state.json"), state);
+  await waitForRollbackCausalBarrier(base + 2);
   return {
     bindReceiptPath,
     bindReceiptSha256: digest(bindReceipt),
@@ -2291,6 +2310,13 @@ test("terminalizes an exact failed cross-slot bridge only after receipt-bound bi
     supersession.slotRollbackReceiptSha256,
     rollback.rollbackReceiptSha256,
   );
+  const rollbackRecord = new Map(
+    parseKv(await readFile(rollback.rollbackReceiptPath, "utf8")),
+  );
+  assert.ok(
+    rollbackRecord.get("ACCEPTED_AT") <
+      isoToSlotLinkTimestamp(supersession.supersededAt),
+  );
   assert.equal(await main(continuationArgs("status", root, planSha256)), 0);
   assert.equal(await main(continuationArgs("resume", root, planSha256)), 1);
   const nextArgs = current191PrepareArgs(root, "current191-bridge", {
@@ -2427,6 +2453,13 @@ test("terminalizes an accepted BIND after failed SMOKE only after exact rollback
     supersession.slotRollbackReceiptSha256,
     rollback.rollbackReceiptSha256,
   );
+  const rollbackRecord = new Map(
+    parseKv(await readFile(rollback.rollbackReceiptPath, "utf8")),
+  );
+  assert.ok(
+    rollbackRecord.get("ACCEPTED_AT") <
+      isoToSlotLinkTimestamp(supersession.supersededAt),
+  );
   assert.equal(await main(continuationArgs("status", root, planSha256)), 0);
   assert.equal(await main(continuationArgs("resume", root, planSha256)), 1);
   const nextArgs = current191PrepareArgs(root, "current191-bridge", {
@@ -2463,21 +2496,17 @@ test("pins inherited cutover-lock contention guards to CUTOVER-intent recovery m
     bootstrap,
     /flock -n 7 \|\| die 'another blue\/green cutover operation is active'/u,
   );
-  assert.match(
-    bootstrap,
-    /LEETPLUS_RESUMABLE_RELEASE_CUTOVER_LOCK_FD=7/u,
-  );
-  assert.match(
-    engine,
-    /function assertInheritedCutoverRecoveryLock\(args\)/u,
-  );
+  assert.match(bootstrap, /LEETPLUS_RESUMABLE_RELEASE_CUTOVER_LOCK_FD=7/u);
+  assert.match(engine, /function assertInheritedCutoverRecoveryLock\(args\)/u);
+  assert.match(engine, /\.intent\.accepting\.new/u);
+  assert.match(engine, /\.intent\.recovering\.new/u);
   assert.match(
     engine,
-    /\.intent\.accepting\.new/u,
+    /timeline\.rollback\.bindAcceptedAt > asSlotTime\(timeline\.bindEvidence\.value\.observedAt\)/u,
   );
-  assert.match(
+  assert.doesNotMatch(
     engine,
-    /\.intent\.recovering\.new/u,
+    /timeline\.rollback\.bindAcceptedAt < asSlotTime\(timeline\.bindEvidence\.value\.observedAt\)/u,
   );
 });
 
@@ -2540,8 +2569,7 @@ test("terminalizes only the exact accepted CURRENT191 bridge pending CUTOVER int
   state.correlateBindTimestamps = true;
   state.orchestratorOperationId = OPERATION_ID;
   await writeJson(path.join(root, "fixture-state.json"), state);
-  process.env.TEST_ORCHESTRATOR_FIXTURE_CUTOVER_STDERR_WITHOUT_EFFECT =
-    "true";
+  process.env.TEST_ORCHESTRATOR_FIXTURE_CUTOVER_STDERR_WITHOUT_EFFECT = "true";
   try {
     assert.equal(await main(continuationArgs("apply", root, planSha256)), 1);
   } finally {
@@ -2585,6 +2613,85 @@ test("terminalizes only the exact accepted CURRENT191 bridge pending CUTOVER int
   const rollback = await publishAcceptedBindFixtureSlotRollback(root, {
     afterCutoverIntent: true,
   });
+  const rollbackRecord = new Map(
+    parseKv(await readFile(rollback.rollbackReceiptPath, "utf8")),
+  );
+  const bindRecord = new Map(
+    parseKv(await readFile(rollback.bindReceiptPath, "utf8")),
+  );
+  const pendingCutoverIntent = JSON.parse(
+    await readFile(
+      path.join(operationDirectory, "04-cutover.intent.json"),
+      "utf8",
+    ),
+  );
+  const quiesceIntent = JSON.parse(
+    await readFile(
+      path.join(operationDirectory, "02-bind-quiesce.intent.json"),
+      "utf8",
+    ),
+  );
+  const bindEvidence = JSON.parse(
+    await readFile(
+      path.join(operationDirectory, "02-bind.evidence.json"),
+      "utf8",
+    ),
+  );
+  const bindPhaseReceipt = JSON.parse(
+    await readFile(
+      path.join(operationDirectory, "02-bind.receipt.json"),
+      "utf8",
+    ),
+  );
+  const smokeIntent = JSON.parse(
+    await readFile(
+      path.join(operationDirectory, "03-smoke.intent.json"),
+      "utf8",
+    ),
+  );
+  const smokeUnmaskIntent = JSON.parse(
+    await readFile(
+      path.join(operationDirectory, "03-smoke-unmask.intent.json"),
+      "utf8",
+    ),
+  );
+  const smokeEvidence = JSON.parse(
+    await readFile(
+      path.join(operationDirectory, "03-smoke.evidence.json"),
+      "utf8",
+    ),
+  );
+  const smokeReceipt = JSON.parse(
+    await readFile(
+      path.join(operationDirectory, "03-smoke.receipt.json"),
+      "utf8",
+    ),
+  );
+  assert.ok(
+    bindRecord.get("CREATED_AT") >
+      isoToSlotLinkTimestamp(quiesceIntent.createdAt),
+  );
+  assert.ok(
+    bindRecord.get("ACCEPTED_AT") <=
+      isoToSlotLinkTimestamp(bindEvidence.observedAt),
+  );
+  assert.ok(
+    isoToSlotLinkTimestamp(bindEvidence.observedAt) <=
+      isoToSlotLinkTimestamp(bindPhaseReceipt.acceptedAt),
+  );
+  assert.ok(bindPhaseReceipt.acceptedAt < smokeIntent.createdAt);
+  assert.ok(smokeIntent.createdAt <= smokeUnmaskIntent.createdAt);
+  assert.ok(smokeUnmaskIntent.createdAt <= smokeEvidence.observedAt);
+  assert.ok(smokeEvidence.observedAt <= smokeReceipt.acceptedAt);
+  assert.ok(smokeReceipt.acceptedAt < pendingCutoverIntent.createdAt);
+  assert.ok(rollbackRecord.get("CREATED_AT") > bindRecord.get("ACCEPTED_AT"));
+  assert.ok(
+    rollbackRecord.get("CREATED_AT") >
+      isoToSlotLinkTimestamp(pendingCutoverIntent.createdAt),
+  );
+  assert.ok(
+    rollbackRecord.get("ACCEPTED_AT") > rollbackRecord.get("CREATED_AT"),
+  );
   const stateRoot = await fixtureState(root);
   stateRoot.slotMasked = true;
   await writeJson(path.join(root, "fixture-state.json"), stateRoot);
@@ -2729,6 +2836,10 @@ test("terminalizes only the exact accepted CURRENT191 bridge pending CUTOVER int
   assert.equal(
     supersession.slotEnvironmentRestoreReceiptSha256,
     canonicalRecordSha256(restoreResult),
+  );
+  assert.ok(
+    rollbackRecord.get("ACCEPTED_AT") <
+      isoToSlotLinkTimestamp(supersession.supersededAt),
   );
   assert.equal(await main(continuationArgs("status", root, planSha256)), 0);
   assert.equal(await main(continuationArgs("resume", root, planSha256)), 1);

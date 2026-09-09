@@ -117,6 +117,23 @@ release и использовать
 `GUEST_BUG_REPORTING_MODE=OFF`). Это dual-target bridge ровно для
 `CURRENT_190 → CURRENT_191`, а не общий N/N+1 допуск.
 
+Текущая production пауза не является первым bridge: public active blue —
+`fa21bbe99be78313a883893b2dd6dc1d7c892777`, inactive green —
+`f590875064bb84c7baf0d5665ef2d6856827df6a`, operation
+`8f70269b-e4f2-450c-b117-31e1375c68ce` имеет accepted `HYDRATE/BIND/SMOKE` и
+только pending `CUTOVER`. Physical DB остаётся `CURRENT_190/190`, но contracts
+обоих runtime slots уже `CURRENT_191/191 + ALLOW_CURRENT_190/OFF`; этот recovery
+является только same-contract re-pin, не переходом target обратно к CURRENT190.
+
+Readiness verifier для этого одного pre-DDL bridge принимает ровно два
+эквивалентных исторических identifier: legacy
+`GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE` и successor
+`EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE`. Допуск ограничен
+exact `CURRENT_190/190 → CURRENT_191/191`; identity release/API/Web build,
+head/count, profile, bridge flags, unfinished migrations и все прочие
+assertions остаются без ослабления. Ни иной mode, ни иной schema transition не
+получает compatibility exemption.
+
 После первого bridge cutover активный slot уже имеет
 `CURRENT_191/191 + ALLOW_CURRENT_190/OFF`, тогда как второй, теперь inactive,
 может всё ещё иметь прежний `CURRENT_190/190 + OFF/LIVE` release. Для этого
@@ -240,6 +257,44 @@ binder rollback, другой phase/profile, SMOKE evidence/receipt, env/link dr
 intent/evidence/receipt, `superseded.json`, slot env/link либо удаление старой
 operation directory запрещены и не являются способом повторить или заменить
 rollout.
+
+Отдельный `supersede-after-cutover-intent-bind-rollback --operation-id ...
+--plan-sha256 ... --replacement-release-sha ... --slot-bind-receipt-sha256 ...
+--slot-rollback-receipt-sha256 ... --slot-environment-restore-receipt-sha256 ...`
+разрешён лишь для exact CURRENT191
+`current191-bridge`, в котором приняты ровно `HYDRATE`, `BIND`, `SMOKE`, есть
+единственный pending `CUTOVER` intent, но отсутствуют CUTOVER evidence/receipt
+и shared cutover intent. Nginx active link и accepted generation обязаны всё ещё
+совпадать с baseline/previous runtime, поэтому public traffic продолжает
+обслуживать safe blue.
+
+В этом pending-CUTOVER случае plan previous и target contracts оба exact
+`CURRENT191/191 + ALLOW_CURRENT_190/OFF`; exact binder rollback receipt обязан
+вернуть target link к `PRIOR_RELEASE=fa21bbe99be78313a883893b2dd6dc1d7c892777`,
+а не к first-bridge `CURRENT190 OFF/LIVE` profile.
+
+Это terminalizer, не repair script. До него строго выполняется только
+`fence target → canonical binder rollback from exact BIND receipt → byte-exact
+protected-env restore by canonical
+restore-slot-environment-after-cutover-intent-bind-rollback → unmask/reset-failed
+while stopped/dead/PID=0/process-free`. Restore mode получает exact BIND/ROLLBACK
+digests, пишет immutable `04` restore intent/receipt и crash-safe idempotently
+atomically меняет только target slot env до byte-exact pre-BIND backup, пока
+target masked/stopped. Ручной copy env запрещён; nginx, database, link и units
+этой командой не меняются. Лишь после restore receipt возможен unmask без start.
+После этого terminalizer сверяет оба binder digest, exact restore receipt,
+operation/slot, causal order, restored link/env, fence, baseline и replacement
+installed/admitted control с другим SHA в той же lane. Она **сама** не изменяет
+nginx, database, env, units или slot link и публикует только immutable `root:root 0400`
+`superseded.json`. Replacement не наследует authority: требуется fresh exact
+plan, approval и отдельный production GO.
+
+Canonical restore и terminalizer, и только они, удерживают hardened
+`/var/lib/leetplus/deploy-receipts/cutover.lock` штатного blue-green cutover
+дополнительно к orchestrator lock; engine attest'ит inherited lock до env rename
+или terminal publication. Любой shared cutover `.intent`, `.intent.accepting.new`
+или `.intent.recovering.new` блокирует recovery. `apply`/`resume` не берут этот
+lock заранее: они вызывают штатный cutover только в собственной CUTOVER фазе.
 
 Promotion receipt адресуется exact release SHA, поэтому его `RELEASE_SLOT` —
 не право release работать лишь в первом slot, а immutable **origin slot**

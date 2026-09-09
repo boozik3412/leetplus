@@ -2,14 +2,14 @@
 
 Статус: **канонический current-state contract**
 
-Актуально на: **08.09.2026**
-Runtime implementation baseline:
-`def5174f16f49212dd21d243cda89dffeff7837f` (PR #170; CURRENT190 production
-baseline, включая canonical public-guest profile owner repair, verified-phone
-registration repair и initial OWNER invite link mode; автономные Langame
-worker timers перепривязаны к тому же exact SHA). Source после PR #171 уже
-содержит target `CURRENT_191/191` для external Langame onboarding, но этот
-successor не является production state до отдельного admission и rollout.
+Актуально на: **09.09.2026**
+Текущий runtime state: public active blue —
+`fa21bbe99be78313a883893b2dd6dc1d7c892777`, inactive green —
+`f590875064bb84c7baf0d5665ef2d6856827df6a`; оба recovery runtime contracts
+exact `CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`, тогда как physical DB ещё
+`CURRENT_190/190`. Operation `8f70269b-e4f2-450c-b117-31e1375c68ce` имеет
+accepted `HYDRATE/BIND/SMOKE` и pending `CUTOVER`; public blue продолжает
+serving, schema effect отсутствует.
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -20,17 +20,17 @@ fail-closed правилу одного контура снова сломать
 
 | Область                     | Состояние                                                                                                                                                                                                                                                                                                                                                                              |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation      | CURRENT190 production baseline, merge SHA `def5174f16f49212dd21d243cda89dffeff7837f`; previous admitted `797001d5f48c460bd431a65435b2fb387233c7fc` сохранён как hot rollback                                                                                                                                                                                                           |
-| Admission merge SHA         | exact-main Fast CI `34226209000` и Full Release Admission `34226209023` для `def5174f…` — `SUCCESS`                                                                                                                                                                                                                                                                                    |
-| Production API topology     | active blue exact `def5174f…`, `COMBINED`, schema `CURRENT_190/190`, bridge `OFF`, reporting `LIVE`; rollback green `797001d5…` независимо healthy                                                                                                                                                                                                                                     |
+| Runtime implementation      | active blue `fa21bbe99be78313a883893b2dd6dc1d7c892777`, inactive green `f590875064bb84c7baf0d5665ef2d6856827df6a`; оба runtime contracts `CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`, physical DB `CURRENT_190/190`                                                                                                                                                                                                           |
+| Admission merge SHA         | exact main `f590875064bb84c7baf0d5665ef2d6856827df6a` admitted; текущая operation `8f70269b-e4f2-450c-b117-31e1375c68ce` paused после accepted `HYDRATE/BIND/SMOKE` перед CUTOVER                                                                                                                                                                                                                                                                                    |
+| Production API topology     | public nginx active blue `fa21bbe99be78313a883893b2dd6dc1d7c892777`; inactive green `f590875064bb84c7baf0d5665ef2d6856827df6a`; оба bridge `COMBINED`, `ALLOW_CURRENT_190/OFF`; database остаётся `CURRENT_190/190`                                                                                                                                                                                                                                     |
 | Guest bug-report repair     | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                                                                                                                                                                                        |
 | Corporate invite repair     | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                                                                                                                                                                                             |
 | Guest check-in consistency  | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                                                                                                                                                                                                  |
 | Split-runtime deployment    | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                                                                                                                                                                                               |
 | Corporate landing           | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                                                                                                                                     |
 | Release acceleration        | 8/8 + retention: controlled five-phase rollout operation `6be461db-c600-4fe7-9e87-6267d708554e` завершён receipt `c9cbf2c9…`; V3 и trusted lane metrics merged; public/corporate/worker контуры нельзя объединять или понижать ради скорости                                                                                                                                           |
-| Langame recovery            | оба systemd timer `enabled/active`; daily authority привязана к exact `def5174f…` и обходит все `3/3` active Langame domains единственного admitted INTERNAL tenant; external unattended остаётся deny до отдельного admission                                                                                                                                                         |
-| External Langame onboarding | canonical source target `CURRENT_191/191`: preview → atomic settings → manual exact-Store backfill; signed schema controller uses only the `CURRENT_190 → 191` bridge, while a pre-effect exact bridge re-pin may replace release SHA without DDL; transactional apply/check plus two final cutovers pin the SHA, terminal `OFF/LIVE` requires `final-check`; no production GO implied |
+| Langame recovery            | оба systemd timer `enabled/active`; public serving authority — active blue `fa21…`; external unattended остаётся deny до отдельного admission                                                                                                                                                         |
+| External Langame onboarding | canonical source target `CURRENT_191/191`: preview → atomic settings → manual exact-Store backfill; signed schema controller uses only the `CURRENT_190 → 191` bridge, while a pre-effect exact bridge re-pin may replace release SHA without DDL; transactional apply/check plus two final cutovers pin the SHA, terminal `OFF/LIVE` requires `final-check`; no production GO implied. Текущий accepted-SMOKE/pending-CUTOVER bridge остаётся paused; nginx продолжает healthy blue, schema effect отсутствует |
 | Telegram guest auth         | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                                                                                                                                      |
 | Staff rewards               | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                                                                                                                          |
 | Guest identity owner        | exact-link и verified-phone repairs deployed в `def5174f…`; RU-варианты подтверждённого телефона разрешаются только внутри выбранного Langame domain, неоднозначность fail-closed; все 9 выявленных split-owner дублей погашены без reward replay, контрольный остаток `0`                                                                                                             |
@@ -93,6 +93,49 @@ units — unmasked, `inactive/dead` с `PID=0` и без процессов. Т�
 отдельным уже admitted control с иным SHA/control-attestation digest в той же
 effective lane. Ручная правка env/link или operation
 intent/evidence/receipt/terminal record запрещена и остаётся fail-closed.
+
+Если exact CURRENT191 bridge имеет уже accepted `HYDRATE`, `BIND` и `SMOKE`, но
+только pending `CUTOVER` intent без CUTOVER evidence/receipt и без shared cutover
+intent, допустим исключительно
+`supersede-after-cutover-intent-bind-rollback`. Это не меняет public routing:
+active nginx link и accepted generation обязаны совпадать с plan baseline, а
+previous blue остаётся serving. Для N-1 readiness этого exact
+`CURRENT_190/190 -> CURRENT_191/191` перехода verifier принимает legacy
+`GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE` либо
+`EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE`; все identity,
+head/count, profile, flags, migration и остальные assertions остаются строгими,
+а иной transition/mode отклоняется.
+
+Это exact bridge-to-bridge recovery: plan previous и target contracts оба
+`CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`; canonical rollback receipt обязан
+вернуть target link к `PRIOR_RELEASE=fa21bbe99be78313a883893b2dd6dc1d7c892777`,
+не к historical first-bridge `CURRENT190 OFF/LIVE`.
+
+Единственный допустимый operator sequence до terminal receipt:
+**fence target → canonical binder rollback by exact BIND receipt → byte-exact
+restore protected env только через canonical
+`restore-slot-environment-after-cutover-intent-bind-rollback` → unmask/reset-failed
+with both target units stopped/dead/PID=0/process-free → terminalize**. Restore
+mode принимает exact BIND/ROLLBACK digests, публикует immutable `04` restore
+intent/receipt и crash-safe idempotently atomically восстанавливает только target
+slot env из byte-exact pre-BIND backup, пока target masked/stopped. Ручной env
+copy запрещён; restore не меняет DB, nginx, link или units. Только после его
+receipt разрешён unmask без start. Terminalizer принимает exact bind/rollback
+digests и `--slot-environment-restore-receipt-sha256`, проверяет chain,
+restore receipt, link/env/fence/baseline и installed replacement control с другим
+SHA в той же effective lane. Он сам не имеет authority менять DB, nginx, runtime
+env, slot link или units: только
+exclusive-create immutable `superseded.json` (`root:root 0400`). Затем
+replacement проходит fresh plan, approval и отдельный GO; authority paused
+operation не переносится.
+
+Canonical restore и terminalizer — единственные recovery modes, которые вместе
+с orchestrator lock удерживают hardened
+`/var/lib/leetplus/deploy-receipts/cutover.lock` штатного blue-green cutover.
+Engine attest'ит inherited lock до env rename или terminal publication; shared
+cutover `.intent`, `.intent.accepting.new` либо `.intent.recovering.new`
+fail-closed блокирует recovery. Обычные `apply`/`resume` не получают этот lock
+заранее: CUTOVER phase вызывает canonical cutover, избегая self-deadlock.
 
 Это recovery source contract, а не production evidence: source или CI не
 означают deployed state. До отдельного receipt-backed admission и rollout
@@ -186,7 +229,7 @@ intents, deliveries и bonus ledger не replay-ились и не начисл�
 ### Assortment action center deployed 08.09.2026
 
 Впервые выпущенный release `1cf42bb311aafa7f41ad7f42784463fe34c152c7` и
-текущий active `def5174f16f49212dd21d243cda89dffeff7837f`
+текущий active blue `fa21bbe99be78313a883893b2dd6dc1d7c892777`
 расширяют существующий tenant-authenticated
 `GET /dashboard/summary` и экран `/assortment/dashboard` операционными
 показателями ассортимента: свежестью источников, приоритетными действиями,

@@ -260,28 +260,31 @@ const bridgeKeys = bridge && typeof bridge === 'object' && !Array.isArray(bridge
   : '';
 const admittedSchemaForwardBridges = [
   {
-    compatibilityMode: 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE',
+    compatibilityModes: ['GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE'],
     sourceMigration: '20260820010000_guest_portal_telegram_update_ledger',
     sourceMigrationCount: 187,
     targetMigration: '20260828190000_guest_support_bug_reports',
     targetMigrationCount: 188,
   },
   {
-    compatibilityMode: 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE',
+    compatibilityModes: ['GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE'],
     sourceMigration: '20260828190000_guest_support_bug_reports',
     sourceMigrationCount: 188,
     targetMigration: '20260831120000_guest_support_bug_report_input_repair',
     targetMigrationCount: 189,
   },
   {
-    compatibilityMode: 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE',
+    compatibilityModes: ['GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE'],
     sourceMigration: '20260831120000_guest_support_bug_report_input_repair',
     sourceMigrationCount: 189,
     targetMigration: '20260908090000_initial_owner_invite_link_mode',
     targetMigrationCount: 190,
   },
   {
-    compatibilityMode: 'EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE',
+    compatibilityModes: [
+      'EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE',
+      'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE',
+    ],
     sourceMigration: '20260908090000_initial_owner_invite_link_mode',
     sourceMigrationCount: 190,
     targetMigration: '20260908180000_external_langame_simple_onboarding',
@@ -297,7 +300,7 @@ const admittedSchemaForwardBridge = admittedSchemaForwardBridges.find((candidate
 const schemaForwardBridgeAccepted =
   bridgeKeys === 'mode,targetMigration,targetMigrationCount' &&
   admittedSchemaForwardBridge !== undefined &&
-  bridge.mode === admittedSchemaForwardBridge.compatibilityMode &&
+  admittedSchemaForwardBridge.compatibilityModes.includes(bridge.mode) &&
   bridge.targetMigration === expectedMigration &&
   bridge.targetMigrationCount === expectedMigrationCountNumber;
 if (

@@ -229,7 +229,7 @@ grep -F -x 'RELEASE_READINESS_OBSERVED_MIGRATION_COUNT=190' \
   "$TEST_ROOT/current191-bridge-accepted.out" > /dev/null
 
 legacy_mode_current191_bridge="${valid_current191_bridge_ready/EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE/GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE}"
-if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$legacy_mode_current191_bridge" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/curl.log" \
+PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$legacy_mode_current191_bridge" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/current191-legacy-mode-curl.log" \
   /usr/bin/bash -p "$PROBE" \
     --release-sha "$RELEASE_SHA" \
     --expected-migration "$CURRENT191_MIGRATION" \
@@ -237,8 +237,22 @@ if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BOD
     --expected-web-build-id "$RELEASE_SHA" \
     --api-base-url https://api.example.test \
     --web-url https://web.example.test/ \
-    --unprivileged-test-mode > "$TEST_ROOT/current191-legacy-mode-rejected.out" 2>&1; then
-  printf 'CURRENT_191 bridge with the legacy compatibility mode was unexpectedly accepted\n' >&2
+    --unprivileged-test-mode > "$TEST_ROOT/current191-legacy-mode-accepted.out"
+
+grep -F -x 'RELEASE_READINESS_ACCEPTED_DATABASE_STATE=GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE' \
+  "$TEST_ROOT/current191-legacy-mode-accepted.out" > /dev/null
+
+unreviewed_mode_current191_bridge="${valid_current191_bridge_ready/EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE/UNREVIEWED_SCHEMA_FORWARD_BRIDGE}"
+if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$unreviewed_mode_current191_bridge" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/curl.log" \
+  /usr/bin/bash -p "$PROBE" \
+    --release-sha "$RELEASE_SHA" \
+    --expected-migration "$CURRENT191_MIGRATION" \
+    --expected-migration-count 191 \
+    --expected-web-build-id "$RELEASE_SHA" \
+    --api-base-url https://api.example.test \
+    --web-url https://web.example.test/ \
+    --unprivileged-test-mode > "$TEST_ROOT/current191-unreviewed-mode-rejected.out" 2>&1; then
+  printf 'CURRENT_191 bridge with an unreviewed compatibility mode was unexpectedly accepted\n' >&2
   exit 1
 fi
 

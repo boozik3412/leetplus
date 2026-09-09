@@ -21,6 +21,7 @@ import test from "node:test";
 import {
   COMPLETE_DECISION,
   CONTRACT_VERSION,
+  CUTOVER_INTENT_ROLLED_BACK_SUPERSEDED_DECISION,
   PHASES,
   ROLLED_BACK_SUPERSEDED_DECISION,
   SMOKE_ROLLED_BACK_SUPERSEDED_DECISION,
@@ -406,6 +407,50 @@ function smokeRolledBackSupersessionArgs(
   return args;
 }
 
+function cutoverIntentRolledBackSupersessionArgs(
+  root,
+  planSha256,
+  replacementReleaseSha = SUCCESSOR_SHA,
+  slotBindReceiptSha256 = "0".repeat(64),
+  slotRollbackReceiptSha256 = "1".repeat(64),
+  slotEnvironmentRestoreReceiptSha256 = "2".repeat(64),
+) {
+  const args = rolledBackSupersessionArgs(
+    root,
+    planSha256,
+    replacementReleaseSha,
+    slotBindReceiptSha256,
+    slotRollbackReceiptSha256,
+  );
+  args[0] = "supersede-after-cutover-intent-bind-rollback";
+  args.splice(
+    args.indexOf("--fixture-root"),
+    0,
+    "--slot-environment-restore-receipt-sha256",
+    slotEnvironmentRestoreReceiptSha256,
+  );
+  return args;
+}
+
+function cutoverIntentEnvironmentRestoreArgs(
+  root,
+  planSha256,
+  slotBindReceiptSha256,
+  slotRollbackReceiptSha256,
+) {
+  const args = rolledBackSupersessionArgs(
+    root,
+    planSha256,
+    SUCCESSOR_SHA,
+    slotBindReceiptSha256,
+    slotRollbackReceiptSha256,
+  );
+  args[0] = "restore-slot-environment-after-cutover-intent-bind-rollback";
+  const replacementIndex = args.indexOf("--replacement-release-sha");
+  args.splice(replacementIndex, 2);
+  return args;
+}
+
 async function publishFixtureSlotRollback(root) {
   const receiptRoot = path.join(
     root,
@@ -510,7 +555,7 @@ async function publishFixtureSlotRollback(root) {
 
 async function publishAcceptedBindFixtureSlotRollback(
   root,
-  { leaveTargetActive = false } = {},
+  { afterCutoverIntent = false, leaveTargetActive = false } = {},
 ) {
   const receiptRoot = path.join(
     root,
@@ -542,12 +587,26 @@ async function publishAcceptedBindFixtureSlotRollback(
       "utf8",
     ),
   );
-  const base = Math.max(
+  let base = Math.max(
     new Date(
       bindAcceptedAt.replace(/\.([0-9]{3})[0-9]{6}Z$/u, ".$1Z"),
     ).valueOf(),
     new Date(unmaskIntent.createdAt).valueOf(),
   );
+  if (afterCutoverIntent) {
+    const cutoverIntent = JSON.parse(
+      await readFile(
+        path.join(
+          root,
+          "var/lib/leetplus/deploy-receipts/release-orchestrator",
+          OPERATION_ID,
+          "04-cutover.intent.json",
+        ),
+        "utf8",
+      ),
+    );
+    base = Math.max(base, new Date(cutoverIntent.createdAt).valueOf());
+  }
   const timestamp = (offsetMilliseconds) =>
     new Date(base + offsetMilliseconds)
       .toISOString()
@@ -2366,6 +2425,276 @@ test("terminalizes an accepted BIND after failed SMOKE only after exact rollback
   supersession.slotBindReceiptSha256 = "0".repeat(64);
   await replaceProtectedJson(supersessionPath, supersession);
   assert.equal(await main(continuationArgs("status", root, planSha256)), 1);
+});
+
+test("pins inherited cutover-lock contention guards to CUTOVER-intent recovery modes", async () => {
+  const bootstrap = await readFile(
+    path.resolve(
+      "docs/deployment/production-artifact/resumable-release-orchestrator.sh",
+    ),
+    "utf8",
+  );
+  const engine = await readFile(
+    path.resolve(
+      "docs/deployment/production-artifact/resumable-release-orchestrator.mjs",
+    ),
+    "utf8",
+  );
+  assert.match(
+    bootstrap,
+    /restore-slot-environment-after-cutover-intent-bind-rollback\|supersede-after-cutover-intent-bind-rollback/u,
+  );
+  assert.match(
+    bootstrap,
+    /flock -n 7 \|\| die 'another blue\/green cutover operation is active'/u,
+  );
+  assert.match(
+    bootstrap,
+    /LEETPLUS_RESUMABLE_RELEASE_CUTOVER_LOCK_FD=7/u,
+  );
+  assert.match(
+    engine,
+    /function assertInheritedCutoverRecoveryLock\(args\)/u,
+  );
+  assert.match(
+    engine,
+    /\.intent\.accepting\.new/u,
+  );
+  assert.match(
+    engine,
+    /\.intent\.recovering\.new/u,
+  );
+});
+
+test("terminalizes only the exact accepted CURRENT191 bridge pending CUTOVER intent after bind rollback", async (t) => {
+  const bridgeOptions = {
+    bridgeMode: "ALLOW_CURRENT_190",
+    bugReportingMode: "OFF",
+    migration: CURRENT191_MIGRATION,
+    migrationCount: 191,
+  };
+  const legacyPlanRoot = await setupFixture(
+    "cutover-intent-bind-rollback-legacy-previous-",
+    bridgeOptions,
+  );
+  t.after(() => rm(legacyPlanRoot, { recursive: true, force: true }));
+  assert.equal(
+    await main(current191PrepareArgs(legacyPlanRoot, "current191-bridge")),
+    0,
+  );
+  const legacyPlan = JSON.parse(
+    await readFile(
+      path.join(
+        legacyPlanRoot,
+        "var/lib/leetplus/deploy-receipts/release-orchestrator",
+        OPERATION_ID,
+        "plan.json",
+      ),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    await main(
+      continuationArgs(
+        "apply",
+        legacyPlanRoot,
+        canonicalRecordSha256(legacyPlan),
+      ),
+    ),
+    1,
+  );
+  const root = await setupFixture(
+    "cutover-intent-bind-rollback-supersession-",
+    bridgeOptions,
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const prepare = current191PrepareArgs(root, "current191-bridge");
+  prepare[prepare.indexOf("--previous-migration") + 1] = CURRENT191_MIGRATION;
+  prepare[prepare.indexOf("--previous-migration-count") + 1] = "191";
+  assert.equal(await main(prepare), 0);
+  const operationDirectory = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    OPERATION_ID,
+  );
+  const plan = JSON.parse(
+    await readFile(path.join(operationDirectory, "plan.json"), "utf8"),
+  );
+  const planSha256 = canonicalRecordSha256(plan);
+  process.env.TEST_ORCHESTRATOR_FIXTURE_CUTOVER_STDERR_WITHOUT_EFFECT =
+    "true";
+  try {
+    assert.equal(await main(continuationArgs("apply", root, planSha256)), 1);
+  } finally {
+    delete process.env.TEST_ORCHESTRATOR_FIXTURE_CUTOVER_STDERR_WITHOUT_EFFECT;
+  }
+  let state = await fixtureState(root);
+  assert.equal(state.hydrationEffects, 1);
+  assert.equal(state.bindEffects, 1);
+  assert.equal(state.cutoverEffects, 0);
+  await lstat(path.join(operationDirectory, "03-smoke.receipt.json"));
+  await lstat(path.join(operationDirectory, "04-cutover.intent.json"));
+  await assert.rejects(
+    lstat(path.join(operationDirectory, "04-cutover.evidence.json")),
+    { code: "ENOENT" },
+  );
+  const notRolledBack = cutoverIntentRolledBackSupersessionArgs(
+    root,
+    planSha256,
+  );
+  assert.equal(await main(notRolledBack), 1);
+  state.releaseSha = SUCCESSOR_SHA;
+  await writeJson(path.join(root, "fixture-state.json"), state);
+  const rollback = await publishAcceptedBindFixtureSlotRollback(root, {
+    afterCutoverIntent: true,
+  });
+  const stateRoot = await fixtureState(root);
+  stateRoot.slotMasked = true;
+  await writeJson(path.join(root, "fixture-state.json"), stateRoot);
+  for (const unit of [
+    "leetplus-api@blue.service",
+    "leetplus-web@blue.service",
+  ]) {
+    await symlink("/dev/null", path.join(root, "etc/systemd/system", unit));
+  }
+  const restoreArgs = cutoverIntentEnvironmentRestoreArgs(
+    root,
+    planSha256,
+    rollback.bindReceiptSha256,
+    rollback.rollbackReceiptSha256,
+  );
+  assert.equal(await main(restoreArgs), 0);
+  assert.equal(await main(restoreArgs), 0);
+  const restoreResult = JSON.parse(
+    await readFile(
+      path.join(
+        operationDirectory,
+        "04-cutover-slot-environment-restore.receipt.json",
+      ),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    restoreResult.recordType,
+    "CUTOVER_INTENT_SLOT_ENVIRONMENT_RESTORE_RECEIPT",
+  );
+  assert.equal(
+    restoreResult.decision,
+    "CUTOVER_INTENT_SLOT_ENVIRONMENT_RESTORED",
+  );
+  assert.equal(
+    restoreResult.slotEnvironmentPreviousSha256,
+    restoreResult.slotEnvironmentSha256,
+  );
+  for (const unit of [
+    "leetplus-api@blue.service",
+    "leetplus-web@blue.service",
+  ]) {
+    await rm(path.join(root, "etc/systemd/system", unit));
+  }
+  stateRoot.slotMasked = false;
+  await writeJson(path.join(root, "fixture-state.json"), stateRoot);
+  const exactArgs = cutoverIntentRolledBackSupersessionArgs(
+    root,
+    planSha256,
+    SUCCESSOR_SHA,
+    rollback.bindReceiptSha256,
+    rollback.rollbackReceiptSha256,
+    canonicalRecordSha256(restoreResult),
+  );
+
+  state = await fixtureState(root);
+  state.slotActive = true;
+  await writeJson(path.join(root, "fixture-state.json"), state);
+  assert.equal(await main(exactArgs), 1);
+  state.slotActive = false;
+  state.slotMasked = true;
+  await writeJson(path.join(root, "fixture-state.json"), state);
+  assert.equal(await main(exactArgs), 1);
+  state.slotMasked = false;
+  await writeJson(path.join(root, "fixture-state.json"), state);
+  assert.equal(
+    await main(
+      cutoverIntentRolledBackSupersessionArgs(
+        root,
+        planSha256,
+        SUCCESSOR_SHA,
+        "0".repeat(64),
+        rollback.rollbackReceiptSha256,
+      ),
+    ),
+    1,
+  );
+  const sharedIntentPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts",
+    `20260909T000000000000000Z-g21-${RELEASE_SHA}-blue.intent`,
+  );
+  await writeFile(sharedIntentPath, "fixture\n", { mode: 0o600 });
+  await chmod(sharedIntentPath, 0o600);
+  assert.equal(await main(exactArgs), 1);
+  await rm(sharedIntentPath);
+  await writeFile(
+    path.join(operationDirectory, "04-cutover.evidence.json"),
+    "{}\n",
+    { mode: 0o400 },
+  );
+  await chmod(path.join(operationDirectory, "04-cutover.evidence.json"), 0o400);
+  assert.equal(await main(exactArgs), 1);
+  await rm(path.join(operationDirectory, "04-cutover.evidence.json"));
+
+  const incompletePath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts",
+    `20260909T000000000000000Z-g21-${RELEASE_SHA}-blue.intent.accepting.new`,
+  );
+  await writeFile(incompletePath, "fixture\n", { mode: 0o600 });
+  await chmod(incompletePath, 0o600);
+  assert.equal(await main(exactArgs), 1);
+  await rm(incompletePath);
+
+  const nonNextGenerationIntentPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts",
+    `20260909T000000000000000Z-g19-${RELEASE_SHA}-blue.intent`,
+  );
+  await writeFile(nonNextGenerationIntentPath, "fixture\n", { mode: 0o600 });
+  await chmod(nonNextGenerationIntentPath, 0o600);
+  assert.equal(await main(exactArgs), 1);
+  await rm(nonNextGenerationIntentPath);
+
+  const historicalReceiptPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts",
+    `20260909T000000000000000Z-g19-${RELEASE_SHA}-blue.receipt`,
+  );
+  await writeFile(historicalReceiptPath, "fixture\n", { mode: 0o600 });
+  await chmod(historicalReceiptPath, 0o600);
+
+  assert.equal(await main(exactArgs), 0);
+  assert.equal(await main(exactArgs), 0);
+  const supersession = JSON.parse(
+    await readFile(path.join(operationDirectory, "superseded.json"), "utf8"),
+  );
+  assert.equal(supersession.schemaVersion, 4);
+  assert.equal(
+    supersession.decision,
+    CUTOVER_INTENT_ROLLED_BACK_SUPERSEDED_DECISION,
+  );
+  assert.equal(supersession.completedPhases, 3);
+  assert.equal(supersession.pendingPhase, "CUTOVER");
+  assert.equal(supersession.pendingRecord, "INTENT");
+  assert.equal(supersession.slotBindReceiptSha256, rollback.bindReceiptSha256);
+  assert.equal(
+    supersession.slotRollbackReceiptSha256,
+    rollback.rollbackReceiptSha256,
+  );
+  assert.equal(
+    supersession.slotEnvironmentRestoreReceiptSha256,
+    canonicalRecordSha256(restoreResult),
+  );
+  assert.equal(await main(continuationArgs("status", root, planSha256)), 0);
+  assert.equal(await main(continuationArgs("resume", root, planSha256)), 1);
 });
 
 test("rejects post-SMOKE supersession when binder BIND predates quiesce", async (t) => {

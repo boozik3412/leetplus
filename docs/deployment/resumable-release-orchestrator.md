@@ -15,9 +15,19 @@ Fail-fast применяется только перед production effect ил�
 batch. Это правило не разрешает параллельные production mutations и не
 ослабляет фазовые fail-closed границы оркестратора.
 
-Статус: **V2 production rollout завершён; V3 recovery, lane-aware metrics и root-authorized metrics retention реализованы в source**
+Статус: **V2 production rollout завершён; V3 recovery, lane-aware metrics и root-authorized metrics retention реализованы в source. CURRENT191 bridge cutover остаётся незавершённым и не является production success.**
 
-Актуально на: **03.09.2026**
+Актуально на: **09.09.2026**
+
+Текущий CURRENT191 incident — operation
+`8f70269b-e4f2-450c-b117-31e1375c68ce`: приняты `HYDRATE`, `BIND` и `SMOKE`,
+но есть только pending `CUTOVER` intent. Physical DB остаётся
+`CURRENT_190/190`; при этом оба runtime slot contracts recovery уже exact
+`CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`. Public nginx обслуживает active blue
+`fa21bbe99be78313a883893b2dd6dc1d7c892777`; inactive green —
+`f590875064bb84c7baf0d5665ef2d6856827df6a`. Нет CUTOVER evidence/receipt,
+shared cutover intent и смены active generation. Это защищённая пауза, а не
+причина вручную переключать nginx, env, link или operation records.
 
 ## Назначение
 
@@ -213,6 +223,81 @@ cutover generation. Ручное редактирование intent/evidence/re
 `superseded.json`, удаление operation directory или создание замещающих
 records запрещены; повтор той же exact команды может лишь вернуть уже
 опубликованный terminal record.
+
+### Terminalize после принятого SMOKE и pending CUTOVER intent
+
+`supersede-after-cutover-intent-bind-rollback` — единственный узкий recovery
+маршрут для exact `CURRENT191 current191-bridge` operation, в которой `HYDRATE`,
+`BIND` и `SMOKE` уже приняты, но `CUTOVER` остановился до evidence/receipt. Это
+не допускает cutover задним числом и не ослабляет N-1 proof: readiness verifier
+может признать legacy
+`GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE` наряду с
+`EXTERNAL_LANGAME_SIMPLE_ONBOARDING_SCHEMA_FORWARD_BRIDGE` **только** для exact
+`CURRENT_190/190 -> CURRENT_191/191` bridge. Release/API/Web build identity,
+source/target head/count, profile, flags, unfinished-migration и все остальные
+readiness assertions остаются точными; любой иной переход или mode rejected.
+
+```bash
+sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  supersede-after-cutover-intent-bind-rollback \
+  --operation-id <existing-uuid-v4> \
+  --plan-sha256 <existing-plan-sha256> \
+  --replacement-release-sha <different-installed-admitted-sha> \
+  --slot-bind-receipt-sha256 <exact-bind-receipt-sha256> \
+  --slot-rollback-receipt-sha256 <exact-rollback-receipt-sha256> \
+  --slot-environment-restore-receipt-sha256 <exact-04-restore-receipt-sha256>
+```
+
+Непосредственно перед terminalizer штатный effect-mode вызывается отдельно с
+тем же exact operation/plan и receipt pair:
+
+```bash
+sudo /usr/bin/env -i /usr/local/sbin/leetplus-resumable-release-orchestrator \
+  restore-slot-environment-after-cutover-intent-bind-rollback \
+  --operation-id <existing-uuid-v4> \
+  --plan-sha256 <existing-plan-sha256> \
+  --slot-bind-receipt-sha256 <exact-bind-receipt-sha256> \
+  --slot-rollback-receipt-sha256 <exact-rollback-receipt-sha256>
+```
+
+Gate принимает только ровно три accepted phase receipts, единственный pending
+`CUTOVER` intent, отсутствие CUTOVER evidence/receipt и отсутствие shared
+cutover intent. Active nginx link и accepted cutover generation обязаны всё ещё
+совпадать с baseline и exact plan previous runtime; target остаётся inactive.
+Replacement control уже installed/admitted, имеет другой release SHA и
+control-attestation digest, но ту же effective lane.
+
+Для текущего pending-CUTOVER recovery это только bridge-to-bridge re-pin:
+previous и target runtime contracts — оба exact `CURRENT_191/191` с
+`ALLOW_CURRENT_190/OFF`. Canonical rollback receipt должен вернуть target link
+к exact `PRIOR_RELEASE=fa21bbe99be78313a883893b2dd6dc1d7c892777`, а не к
+первому-bridge `CURRENT190 OFF/LIVE` состоянию.
+
+До terminalizer оператор выполняет единственный допустимый порядок effect,
+каждый шаг receipt-/byte-bound: **fence target units → canonical binder rollback
+от exact BIND receipt → canonical
+`restore-slot-environment-after-cutover-intent-bind-rollback` → unmask/reset-failed,
+оставив units stopped/dead/PID=0/process-free → terminalize**. Restore mode получает
+exact BIND/ROLLBACK digests, публикует immutable `04` restore intent/receipt и
+crash-safe idempotently atomically возвращает только target slot env к byte-exact
+pre-BIND backup, пока target masked/stopped. Ручной protected-env copy запрещён;
+restore mode не меняет nginx, DB, slot link или units. Только после его receipt
+допускается unmask без start. Terminalizer принимает оба binder digest **и**
+`--slot-environment-restore-receipt-sha256`, проверяет их causality/operation/slot,
+backup, restore receipt, link, fence и continuity, но сам не меняет nginx, DB,
+env, units или slot link: он только exclusive-create публикует immutable `root:root 0400`
+`superseded.json`. Любой manual effect, missing receipt, CUTOVER drift, running
+или masked target, либо иной profile/head/count/flags остаётся fail-closed.
+
+Только эти два recovery modes — canonical restore и terminalizer — держат тот
+же hardened `/var/lib/leetplus/deploy-receipts/cutover.lock`, что штатный
+blue-green cutover, дополнительно к orchestrator lock. Engine attest'ит
+inherited cutover lock до env rename или terminal publication. Любой shared
+cutover record `.intent`, `.intent.accepting.new` либо `.intent.recovering.new`
+блокирует recovery. Обычные `apply`/`resume` этот lock заранее не берут: CUTOVER
+фаза вызывает штатный cutover сама, чтобы не создать self-deadlock.
+Новый release не наследует старый plan/approval/GO: после terminal receipt ему
+нужны fresh exact `prepare`, approval и отдельный production GO.
 
 ### Immutable publication и slot-aware reconcile
 

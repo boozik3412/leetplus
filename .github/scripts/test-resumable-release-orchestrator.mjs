@@ -610,6 +610,50 @@ test("authorizes only the exact CURRENT191 pre-schema bridge profile", async (t)
   );
 });
 
+test("repins an exact CURRENT191 bridge slot to a new admitted release", async (t) => {
+  const sourceOptions = {
+    bridgeMode: "ALLOW_CURRENT_190",
+    bugReportingMode: "OFF",
+    migration: CURRENT191_MIGRATION,
+    migrationCount: 191,
+  };
+  const root = await setupFixture("current191-bridge-repin-", sourceOptions);
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const args = current191PrepareArgs(root, "current191-bridge");
+  args[args.indexOf("--previous-migration") + 1] = CURRENT191_MIGRATION;
+  args[args.indexOf("--previous-migration-count") + 1] = "191";
+  assert.equal(await main(args), 0);
+  const planPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    OPERATION_ID,
+    "plan.json",
+  );
+  const plan = JSON.parse(await readFile(planPath, "utf8"));
+  assert.equal(
+    await main(continuationArgs("apply", root, canonicalRecordSha256(plan))),
+    0,
+  );
+  const accepted = await readFile(
+    path.join(root, "etc/leetplus/slots/blue.env"),
+    "utf8",
+  );
+  assert.match(accepted, new RegExp(`RELEASE_SHA=${RELEASE_SHA}`, "u"));
+  assert.match(accepted, /EXPECTED_DATABASE_MIGRATION_COUNT=191/u);
+  assert.match(accepted, /GUEST_BUG_REPORTING_MODE=OFF/u);
+  assert.match(accepted, /GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_190/u);
+  assert.equal(
+    await readFile(
+      path.join(
+        path.dirname(planPath),
+        "02-bind-slot-environment.previous.env",
+      ),
+      "utf8",
+    ),
+    slotEnvironment("blue", PREVIOUS_SHA, sourceOptions),
+  );
+});
+
 test("authorizes only the exact CURRENT191 final runtime profile", async (t) => {
   const sourceOptions = {
     bridgeMode: "ALLOW_CURRENT_190",
@@ -744,7 +788,7 @@ test("rejects a foreign CURRENT191 schema check receipt before recording an oper
   assert.equal(state.cutoverEffects, 0);
 });
 
-test("rejects a CURRENT191 bridge transition from any non-CURRENT190 source", async (t) => {
+test("rejects a CURRENT191 bridge transition outside its two exact source profiles", async (t) => {
   const root = await setupFixture("current191-bridge-wrong-source-", {
     migration: MIGRATION,
     migrationCount: 189,

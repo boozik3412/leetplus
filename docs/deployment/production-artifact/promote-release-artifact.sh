@@ -440,7 +440,11 @@ normalize_attestation_publication() {
 validate_publication_attestation() {
   local record="$1"
   local artifact_directory="$2"
-  local source_receipt_sha256 hydrated_manifest_sha256
+  local allow_published_cross_slot_reuse="${3:-false}"
+  local publication_origin_slot source_receipt_sha256 hydrated_manifest_sha256
+  [[ "$allow_published_cross_slot_reuse" == 'true' \
+    || "$allow_published_cross_slot_reuse" == 'false' ]] \
+    || die 'release hydration attestation cross-slot policy is invalid'
   normalize_attestation_publication "$record"
   [[ "$(stat -c '%U:%G:%a:%h' -- "$record")" == 'root:root:400:1' ]] \
     || die 'release hydration attestation must be root:root mode 0400 with one link'
@@ -452,9 +456,12 @@ validate_publication_attestation() {
     { if ($1 != expected[NR] || seen[$1]++) exit 1 }
     END { if (NR != 12) exit 1 }
   ' "$record" || die 'release hydration attestation schema is not canonical'
+  publication_origin_slot="$(attestation_value "$record" RELEASE_SLOT)"
   [[ "$(attestation_value "$record" RECORD_VERSION)" == '1' \
     && "$(attestation_value "$record" RELEASE_SHA)" == "$release_sha" \
-    && "$(attestation_value "$record" RELEASE_SLOT)" == "$slot" \
+    && "$publication_origin_slot" =~ ^(blue|green)$ \
+    && ( "$publication_origin_slot" == "$slot" \
+      || "$allow_published_cross_slot_reuse" == 'true' ) \
     && "$(attestation_value "$record" HYDRATION_INVOCATION_ID)" =~ ^[0-9a-f]{32}$ \
     && "$(attestation_value "$record" RELEASE_DIRECTORY)" == "$release_directory" \
     && "$(attestation_value "$record" PUBLICATION_AUTHORIZED)" == 'true' \
@@ -482,7 +489,7 @@ validate_publication_attestation() {
     || die 'release hydration attestation differs from the exact artifact evidence'
   [[ -f "$promotion_intent" && ! -L "$promotion_intent" ]] \
     || die 'durable promotion intent is absent from published hydration authority'
-  validate_promotion_intent "$promotion_intent"
+  validate_promotion_intent "$promotion_intent" "$allow_published_cross_slot_reuse"
   local bound_key
   for bound_key in RELEASE_SHA RELEASE_SLOT HYDRATION_INVOCATION_ID \
     HYDRATION_SOURCE_RECEIPT_SHA256 HYDRATION_UNIT_SHA256 \
@@ -559,7 +566,11 @@ publish_publication_attestation() {
 
 validate_promotion_intent() {
   local record="$1"
-  local digest_key digest_value
+  local allow_published_cross_slot_reuse="${2:-false}"
+  local digest_key digest_value publication_origin_slot
+  [[ "$allow_published_cross_slot_reuse" == 'true' \
+    || "$allow_published_cross_slot_reuse" == 'false' ]] \
+    || die 'promotion intent cross-slot policy is invalid'
   normalize_attestation_publication "$record"
   [[ "$(stat -c '%U:%G:%a:%h' -- "$record")" == 'root:root:400:1' ]] \
     || die 'promotion intent must be root:root mode 0400 with one link'
@@ -571,9 +582,12 @@ validate_promotion_intent() {
     { if ($1 != expected[NR] || seen[$1]++) exit 1 }
     END { if (NR != 15) exit 1 }
   ' "$record" || die 'promotion intent schema is not canonical'
+  publication_origin_slot="$(attestation_value "$record" RELEASE_SLOT)"
   [[ "$(attestation_value "$record" RECORD_VERSION)" == '1' \
     && "$(attestation_value "$record" RELEASE_SHA)" == "$release_sha" \
-    && "$(attestation_value "$record" RELEASE_SLOT)" == "$slot" \
+    && "$publication_origin_slot" =~ ^(blue|green)$ \
+    && ( "$publication_origin_slot" == "$slot" \
+      || "$allow_published_cross_slot_reuse" == 'true' ) \
     && "$(attestation_value "$record" HYDRATION_UNIT)" == "$hydration_unit" \
     && "$(attestation_value "$record" HYDRATION_INVOCATION_ID)" =~ ^[0-9a-f]{32}$ \
     && "$(attestation_value "$record" SOURCE_DIRECTORY)" == "$source_directory" \
@@ -592,7 +606,8 @@ validate_promotion_intent() {
 }
 
 load_promotion_intent_authority() {
-  validate_promotion_intent "$promotion_intent"
+  local allow_published_cross_slot_reuse="${1:-false}"
+  validate_promotion_intent "$promotion_intent" "$allow_published_cross_slot_reuse"
   hydration_invocation_id="$(attestation_value "$promotion_intent" HYDRATION_INVOCATION_ID)"
   hydration_fragment_sha256="$(attestation_value "$promotion_intent" HYDRATION_UNIT_SHA256)"
   hydration_stager_sha256="$(attestation_value "$promotion_intent" HYDRATION_STAGER_SHA256)"
@@ -1207,8 +1222,13 @@ state_count=0
 ((state_count == 1)) || die 'promotion has no unique source/promotion/release state'
 
 intent_recovery=false
+published_release_reconciliation=false
+# SHA-addressed authority records retain the first publication slot. Only an
+# already-final release may reuse those immutable records for the other target
+# slot; source and quarantine recovery remain bound to their original slot.
+[[ -d "$release_directory" ]] && published_release_reconciliation=true
 if [[ -f "$promotion_intent" && ! -L "$promotion_intent" ]]; then
-  load_promotion_intent_authority
+  load_promotion_intent_authority "$published_release_reconciliation"
   intent_recovery=true
 else
   [[ ! -e "$promotion_intent" && ! -L "$promotion_intent" ]] \
@@ -1220,7 +1240,8 @@ if [[ -d "$release_directory" ]]; then
     && -f "$promotion_attestation_receipt" && ! -L "$promotion_attestation_receipt" ]] \
     || die 'final release lacks its durable intent or publication authority'
   validate_intent_artifact "$release_directory"
-  validate_publication_attestation "$promotion_attestation_receipt" "$release_directory"
+  validate_publication_attestation \
+    "$promotion_attestation_receipt" "$release_directory" true
   "$sealer" --release-sha "$release_sha" --release-root "$release_root" \
     --service-user "leetplus-api-${slot}" --dry-run >/dev/null \
     || die 'reconciled final release is no longer exactly sealed'

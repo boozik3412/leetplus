@@ -63,10 +63,15 @@ Langame `CURRENT191` signed schema controller может применить её
 привязана к release SHA, source/target heads и counts, миграции и receipts
 обоих slots. До effect оба slot одного exact target-191 release проходят отдельно,
 по одному inactive slot, через orchestrator profile
-`--slot-runtime-profile current191-bridge`: только `CURRENT190 OFF/LIVE →
-target191 ALLOW_CURRENT_190/OFF` (`COMBINED`). Plan digest, phase receipts и
-recovery `resume` всегда относятся к одному slot и одному cutover; profile не
-является общим переключателем flags.
+`--slot-runtime-profile current191-bridge`: основной переход только
+`CURRENT190 OFF/LIVE → target191 ALLOW_CURRENT_190/OFF` (`COMBINED`). Узкое
+исключение для восстановления частичного rollout разрешает
+`CURRENT191 ALLOW_CURRENT_190/OFF →` тот же exact bridge profile нового
+admitted release SHA; flags не меняются, DDL не выполняется, readiness и
+cutover повторяются для одного inactive slot. Любой другой source head/count
+или flags отклоняется. Plan digest, phase receipts и recovery `resume` всегда
+относятся к одному slot и одному cutover; profile не является общим
+переключателем flags.
 
 Controller применяет schema транзакционно, а его exact `check` обязателен до
 bridge-off и атомарно публикует receipt `root:root 0400`. Каждый
@@ -350,9 +355,13 @@ mismatch обнаруживались до artifact hydration и production effe
 Disposable topology twin воспроизводит обе API/Web slot-пары реальными systemd
 units, но только на одноразовом GitHub runner. Он проверяет exact effective
 EnvironmentFiles, NSS/process groups и ports, отдельно разрешает transient
-restored-copy identity и требует её удаления до slot bind/cutover fixtures.
-Zero-residue cleanup является частью gate; production host и production data
-этот тест не использует.
+restored-copy identity. Supplementary membership
+`leetplus-rehearsal -> leetplus-runtime` допустима только во время самого
+restored-copy gate и должна быть удалена при любом PASS, FAIL или interrupt
+до cache/slot bind/cutover fixtures. Persistent membership является privilege
+residue: production preflight намеренно блокирует cache/cutover, пока она не
+удалена и отсутствие не подтверждено. Zero-residue cleanup является частью
+gate; production host и production data этот тест не использует.
 
 Этот контракт не создаёт четвёртый security-контур и не позволяет применять
 правила corporate tenant к public guest либо worker authority к runtime.
@@ -414,6 +423,16 @@ layer не становится четвёртым
 security-контуром и не получает право на Prisma/SQL, ACL, auth/scope,
 USER_CALL, guest flags или worker state. Такие L2 effects по-прежнему требуют
 своих signed controllers, backup/restored-copy evidence и отдельного GO.
+
+Immutable publication authority также не смешивает release и slot. Promotion
+intent/attestation хранятся по exact SHA; их `RELEASE_SLOT` фиксирует origin
+slot первой публикации. Reuse в другом slot разрешён исключительно для уже
+существующего final `/srv/leetplus/releases/<SHA>`, когда intent и attestation
+cross-bound друг с другом, их immutable provenance/manifests совпали и
+`seal-release-artifact --dry-run` успешно выполнен от service-user target slot.
+Origin receipts не меняются. Source/staging или promotion/quarantine recovery
+остаются same-slot-only; missing/partial final release, mismatch или ручная
+правка дают fail-closed stop.
 
 Первый controlled production rollout оркестратора завершён 03.09.2026 на exact
 admitted SHA `f3f119fa81fc497b75cc1e57f046d8539676c943`: active upstream —

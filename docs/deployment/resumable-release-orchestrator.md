@@ -63,6 +63,29 @@ operation: новый plan/apply блокируется, пока предыду
 продолжает только уже одобренный exact plan. Как и прежде, сам запуск `apply`
 требует отдельного production GO владельца.
 
+### Immutable publication и slot-aware reconcile
+
+`promote-release-artifact` публикует release ровно один раз по exact SHA в
+`/srv/leetplus/releases/<SHA>`. Его immutable promotion intent и publication
+attestation также адресуются SHA; поле `RELEASE_SLOT` в этих receipts означает
+**только origin slot** первой публикации (`blue` или `green`), а не вечное
+ограничение самого release на этот slot.
+
+Повторное использование такого exact release в другом slot допускается только
+когда canonical final directory `/srv/leetplus/releases/<SHA>` уже существует,
+intent и attestation взаимно связаны exact digest/`RELEASE_SLOT`, а все их
+остальные provenance, manifest и hydration поля проходят обычную строгую
+проверку. Receipts при этом не переписываются и не создаются заново. Перед
+reconcile обязательно выполняется `seal-release-artifact --dry-run` от
+service-user **целевого** slot, поэтому доступность sealed tree доказывается
+для фактической runtime identity.
+
+Это исключение относится только к уже final-published release. Source/staging,
+promotion/quarantine recovery и любая отсутствующая или незавершённая
+publication остаются strict same-slot: origin `RELEASE_SLOT` обязан совпадать
+с requested slot. Ручная правка receipt, slot env или release directory не
+является recovery и останавливается fail-closed.
+
 ## Phase receipts и восстановление
 
 Каждая фаза публикует canonical JSON строго в порядке:
@@ -132,10 +155,14 @@ security flag вне этого профиля, чужой previous SHA, symlink
 `CURRENT_191/191` с migration
 `20260908180000_external_langame_simple_onboarding` и count `191`.
 
-- `current191-bridge` разрешён только на inactive slot: source этого slot должен
-  быть admitted `CURRENT_190/190` с `bridge=OFF` и `reporting=LIVE`; target
+- `current191-bridge` разрешён только на inactive slot. Обычный source этого
+  slot — admitted `CURRENT_190/190` с `bridge=OFF` и `reporting=LIVE`; target
   получает только `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_190` и
-  `GUEST_BUG_REPORTING_MODE=OFF`.
+  `GUEST_BUG_REPORTING_MODE=OFF`. Для восстановления частично завершённого
+  rollout допускается также exact source `CURRENT_191/191` уже в
+  `ALLOW_CURRENT_190/OFF`: профиль только перепривязывает этот bridge slot к
+  новому exact admitted release SHA, не меняя runtime flags и не выполняя DDL.
+  Любой иной head/count или набор flags отклоняется.
 - `current191-final` разрешён только на inactive slot: source этого slot должен
   уже быть exact target `CURRENT_191/191` с `ALLOW_CURRENT_190/OFF`; target
   получает только `OFF/LIVE`. Prepare дополнительно требует
@@ -214,6 +241,12 @@ exact plan/cutover для второго slot. Только после committed
 database-controller `check` создаётся новый plan с `current191-final` для
 текущего inactive slot; после его cutover тем же образом завершается второй
 slot, а затем запускается CURRENT191 CLI `final-check`.
+
+Если новый admitted SHA потребовался между двумя bridge cutover, inactive slot
+с `CURRENT191 ALLOW_CURRENT_190/OFF` проходит отдельный `current191-bridge`
+re-pin plan к этому SHA. Это единственный разрешённый bridge-to-bridge переход:
+оба runtime flags сохраняются, live DB readiness выполняется заново, а новый
+plan/approval/phase chain не переиспользует receipts предыдущей операции.
 
 Для обоих final plan передаётся один и тот же exact receipt из успешного
 dual-bridge `check`; его нельзя обновлять или заменять между slot cutover:
@@ -321,6 +354,14 @@ Orchestrator является только production-control coordination layer
 readiness/cutover watchdog, corporate tenant — authenticated catalog smoke,
 workers/control-plane — отдельными unit/controller gates. Ни один результат
 одного контура не подменяет admission другого.
+
+`leetplus-rehearsal` может быть supplementary member группы
+`leetplus-runtime` только внутри restored-copy rehearsal gate. После любого
+terminal PASS/FAIL, interrupted/reconciled gate или cleanup этот membership
+удаляется до следующей production операции. Persistent membership запрещён:
+preflight cache/BIND/cutover рассматривает его как privilege residue и
+останавливается fail-closed. Эта временная identity не получает runtime,
+database или cutover authority.
 
 Интеграционный тест в Fast CI и Full Release Admission покрывает happy path,
 lost response до evidence и после durable evidence каждой из пяти фаз,

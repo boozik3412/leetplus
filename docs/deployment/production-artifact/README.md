@@ -117,6 +117,13 @@ release и использовать
 `GUEST_BUG_REPORTING_MODE=OFF`). Это dual-target bridge ровно для
 `CURRENT_190 → CURRENT_191`, а не общий N/N+1 допуск.
 
+При частично завершённом bridge rollout новый exact admitted release может
+перепривязать inactive slot, который уже имеет
+`CURRENT_191/191 + ALLOW_CURRENT_190/OFF`, через отдельный
+`current191-bridge` plan. Такой re-pin сохраняет оба flag, повторяет target-slot
+readiness/cutover и не применяет schema. Иной bridge source profile, ручная
+правка slot env или перенос receipts остаются запрещены.
+
 Database effect принадлежит только exact external Langame `CURRENT191` signed
 schema controller. Его signed plan обязан связывать release SHA, source/target
 migration head/count и accepted receipts обоих slots; controller применяет
@@ -160,6 +167,17 @@ apply под exclusive install/orchestrator locks. Archive остаётся ло
 root-owned evidence; runtime, DB, network и user security contours не
 затрагиваются. Наличие source bytes не разрешает установку или запуск без
 admitted production-control generation и отдельного GO.
+
+Promotion receipt адресуется exact release SHA, поэтому его `RELEASE_SLOT` —
+не право release работать лишь в первом slot, а immutable **origin slot**
+первой публикации. Уже final-published
+`/srv/leetplus/releases/<SHA>` может быть reconciled для другого target slot
+только при cross-bound intent+attestation (включая их одинаковый origin slot),
+неизменных provenance/hydration/manifest digests и успешном
+`seal-release-artifact --dry-run` от service-user этого target slot. Receipt
+никогда не переписывается. До появления final directory, а также при
+source/staging/promotion/quarantine recovery, действует strict same-slot
+проверка; ручная подмена receipt или slot state запрещена.
 
 Legacy `git pull → build → restart` не является допустимым заменителем этой
 процедуры. Замена production timer/unit, перенос sensitive backup residue и
@@ -302,6 +320,13 @@ users без login/home `leetplus-api-blue`, `leetplus-api-green`,
 0700`. API secret env имеет `root:<api-only-group> 0640`, Web env —
 `root:<web-only-group> 0640`, slot/safety metadata — `root:leetplus-runtime
 0440`. Web identities никогда не входят в API-only secret group.
+
+Identity `leetplus-rehearsal` не является постоянным member
+`leetplus-runtime`: такое supplementary membership добавляется только на время
+isolated restored-copy acceptance и обязательно удаляется независимо от
+PASS/FAIL/interrupt до cache, slot bind или cutover. Persistent membership —
+privilege residue и production gate blocker; production runtime identities и
+группа `leetplus-runtime` не должны использоваться как обход этого правила.
 
 Production hydration выполняется только versioned unit
 `leetplus-release-hydrate@.service` с `IPAddressDeny=any`, без runtime env.

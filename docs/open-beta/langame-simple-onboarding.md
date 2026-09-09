@@ -133,9 +133,14 @@ effect. До bridge-off controller обязан завершить свой exac
 Bridge-off выполняется только штатным five-phase orchestrator через узкий
 `--slot-runtime-profile current191-final`, а не ручной записью slot env.
 `current191-bridge` допускает только переход одного inactive slot
-`CURRENT190 OFF/LIVE → target191 ALLOW_CURRENT_190/OFF`; `current191-final` —
-только `target191 ALLOW_CURRENT_190/OFF → target191 OFF/LIVE`. Каждый profile
-имеет свой exact plan digest, approval и receipt chain. Final profile также
+`CURRENT190 OFF/LIVE → target191 ALLOW_CURRENT_190/OFF`. Единственное
+recovery-исключение — exact bridge-to-bridge re-pin
+`CURRENT191 ALLOW_CURRENT_190/OFF → CURRENT191 ALLOW_CURRENT_190/OFF` для
+другого exact admitted release SHA: schema/count и оба bridge flags сохраняются,
+DDL не выполняется, новый plan/approval/receipt chain не переиспользует старые
+records. `current191-final` — только
+`target191 ALLOW_CURRENT_190/OFF → target191 OFF/LIVE`. Каждый profile имеет
+свой exact plan digest, approval и receipt chain. Final profile также
 требует exact SHA-256 check receipt `root:root 0400`, который CLI публикует
 только после проверки live DB `CURRENT191/191` и двух bridge slots; receipt
 привязан к release SHA, schema-plan, head/count/checksum и database/dual-slot

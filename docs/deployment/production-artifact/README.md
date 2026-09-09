@@ -168,6 +168,24 @@ root-owned evidence; runtime, DB, network и user security contours не
 затрагиваются. Наличие source bytes не разрешает установку или запуск без
 admitted production-control generation и отдельного GO.
 
+Если approved V3 operation остановилась до runtime effect, сменить candidate
+разрешено только штатным `supersede-pre-runtime --operation-id ...
+--plan-sha256 ... --replacement-release-sha ...`. Gate принимает исключительно
+operation без `final.json`, с нулём accepted phase receipts и единственным
+pending `HYDRATE` intent; он повторно связывает old baseline/cutover continuity
+с installed control replacement SHA, той же effective lane и другим SHA. Он
+публикует immutable `root:root 0400` `superseded.json` в старой operation
+directory и не изменяет runtime, database, slots или public cutover. После
+любой accepted phase или любого `BIND` record supersede запрещён. Ручное
+удаление/изменение operation records не является допустимым способом освободить
+новый `prepare`.
+
+Первая публикация связывает receipt с exact plan, approval, pending HYDRATE
+intent и проверенным replacement control. Идемпотентный повтор той же команды
+читает этот immutable terminal record без требования сохранить прежнее live
+cutover/control состояние; следующий `prepare` всё равно независимо проверяет
+installed control своего exact candidate SHA.
+
 Promotion receipt адресуется exact release SHA, поэтому его `RELEASE_SLOT` —
 не право release работать лишь в первом slot, а immutable **origin slot**
 первой публикации. Уже final-published

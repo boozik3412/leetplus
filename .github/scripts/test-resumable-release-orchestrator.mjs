@@ -22,12 +22,15 @@ import {
   COMPLETE_DECISION,
   CONTRACT_VERSION,
   PHASES,
+  SUPERSEDED_DECISION,
   canonicalRecordSha256,
   main,
 } from "../../docs/deployment/production-artifact/resumable-release-orchestrator.mjs";
 
 const RELEASE_SHA = "a".repeat(40);
 const PREVIOUS_SHA = "b".repeat(40);
+const SUCCESSOR_SHA = "c".repeat(40);
+const FOLLOWING_SHA = "d".repeat(40);
 const MIGRATION = "20260831120000_guest_support_bug_report_input_repair";
 const CURRENT190_MIGRATION = "20260908090000_initial_owner_invite_link_mode";
 const CURRENT191_MIGRATION =
@@ -326,6 +329,25 @@ function continuationArgs(mode, root, planSha256, operationId = OPERATION_ID) {
     operationId,
     "--plan-sha256",
     planSha256,
+    "--fixture-root",
+    root,
+    "--unprivileged-test-mode",
+  ];
+}
+
+function supersessionArgs(
+  root,
+  planSha256,
+  replacementReleaseSha = SUCCESSOR_SHA,
+) {
+  return [
+    "supersede-pre-runtime",
+    "--operation-id",
+    OPERATION_ID,
+    "--plan-sha256",
+    planSha256,
+    "--replacement-release-sha",
+    replacementReleaseSha,
     "--fixture-root",
     root,
     "--unprivileged-test-mode",
@@ -1364,6 +1386,169 @@ test("enforces one incomplete orchestrator operation", async (t) => {
   assert.equal(state.hydrationEffects, 0);
   assert.equal(state.bindEffects, 0);
   assert.equal(state.cutoverEffects, 0);
+});
+
+test("supersedes an approved HYDRATE-intent operation before runtime effects", async (t) => {
+  const fixture = await preparedFixture("pre-runtime-supersession-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  process.env.TEST_ORCHESTRATOR_LOST_RESPONSE_AFTER_PHASE = "HYDRATE";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      1,
+    );
+  } finally {
+    delete process.env.TEST_ORCHESTRATOR_LOST_RESPONSE_AFTER_PHASE;
+  }
+  let state = await fixtureState(fixture.root);
+  assert.equal(state.hydrationEffects, 1);
+  assert.equal(state.bindEffects, 0);
+  assert.equal(state.runtimeStartCalls, 0);
+  assert.equal(state.cutoverEffects, 0);
+  assert.equal(
+    await main(
+      supersessionArgs(fixture.root, fixture.planSha256, RELEASE_SHA),
+    ),
+    1,
+  );
+  await assert.rejects(
+    lstat(path.join(path.dirname(fixture.planPath), "superseded.json")),
+    { code: "ENOENT" },
+  );
+  state.releaseSha = SUCCESSOR_SHA;
+  await writeJson(path.join(fixture.root, "fixture-state.json"), state);
+  assert.equal(
+    await main(supersessionArgs(fixture.root, fixture.planSha256)),
+    0,
+  );
+  assert.equal(
+    await main(supersessionArgs(fixture.root, fixture.planSha256)),
+    0,
+  );
+  const supersessionPath = path.join(
+    path.dirname(fixture.planPath),
+    "superseded.json",
+  );
+  const supersession = JSON.parse(await readFile(supersessionPath, "utf8"));
+  assert.equal(supersession.decision, SUPERSEDED_DECISION);
+  assert.equal(supersession.completedPhases, 0);
+  assert.equal(supersession.pendingPhase, "HYDRATE");
+  assert.equal(supersession.pendingRecord, "INTENT");
+  assert.equal(supersession.releaseSha, RELEASE_SHA);
+  assert.equal(supersession.replacementReleaseSha, SUCCESSOR_SHA);
+  assert.match(supersession.approvalSha256, /^[0-9a-f]{64}$/u);
+  assert.match(supersession.pendingIntentSha256, /^[0-9a-f]{64}$/u);
+  state.releaseSha = FOLLOWING_SHA;
+  await writeJson(path.join(fixture.root, "fixture-state.json"), state);
+  assert.equal(
+    await main(supersessionArgs(fixture.root, fixture.planSha256)),
+    0,
+  );
+  assert.equal(
+    await main(
+      supersessionArgs(fixture.root, fixture.planSha256, FOLLOWING_SHA),
+    ),
+    1,
+  );
+  assert.equal(
+    await main(continuationArgs("status", fixture.root, fixture.planSha256)),
+    0,
+  );
+  assert.equal(
+    await main(continuationArgs("resume", fixture.root, fixture.planSha256)),
+    1,
+  );
+  state.releaseSha = SUCCESSOR_SHA;
+  await writeJson(path.join(fixture.root, "fixture-state.json"), state);
+  const nextArgs = prepareArgs(fixture.root, SECOND_OPERATION_ID);
+  nextArgs[nextArgs.indexOf("--release-sha") + 1] = SUCCESSOR_SHA;
+  assert.equal(await main(nextArgs), 0);
+  state = await fixtureState(fixture.root);
+  assert.equal(state.bindEffects, 0);
+  assert.equal(state.runtimeStartCalls, 0);
+  assert.equal(state.cutoverEffects, 0);
+});
+
+test("rejects supersession without an approval and pending HYDRATE intent", async (t) => {
+  const fixture = await preparedFixture("pre-runtime-supersession-unapproved-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const state = await fixtureState(fixture.root);
+  state.releaseSha = SUCCESSOR_SHA;
+  await writeJson(path.join(fixture.root, "fixture-state.json"), state);
+  assert.equal(
+    await main(supersessionArgs(fixture.root, fixture.planSha256)),
+    1,
+  );
+  await assert.rejects(
+    lstat(path.join(path.dirname(fixture.planPath), "superseded.json")),
+    { code: "ENOENT" },
+  );
+});
+
+test("rejects a tampered supersession receipt and keeps new prepare blocked", async (t) => {
+  const fixture = await preparedFixture("pre-runtime-supersession-tampered-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  process.env.TEST_ORCHESTRATOR_LOST_RESPONSE_AFTER_PHASE = "HYDRATE";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      1,
+    );
+  } finally {
+    delete process.env.TEST_ORCHESTRATOR_LOST_RESPONSE_AFTER_PHASE;
+  }
+  const state = await fixtureState(fixture.root);
+  state.releaseSha = SUCCESSOR_SHA;
+  await writeJson(path.join(fixture.root, "fixture-state.json"), state);
+  assert.equal(
+    await main(supersessionArgs(fixture.root, fixture.planSha256)),
+    0,
+  );
+  const supersessionPath = path.join(
+    path.dirname(fixture.planPath),
+    "superseded.json",
+  );
+  const supersession = JSON.parse(await readFile(supersessionPath, "utf8"));
+  supersession.pendingIntentSha256 = "0".repeat(64);
+  await replaceProtectedJson(supersessionPath, supersession);
+  assert.equal(
+    await main(continuationArgs("status", fixture.root, fixture.planSha256)),
+    1,
+  );
+  const nextArgs = prepareArgs(fixture.root, SECOND_OPERATION_ID);
+  nextArgs[nextArgs.indexOf("--release-sha") + 1] = SUCCESSOR_SHA;
+  assert.equal(await main(nextArgs), 1);
+  const after = await fixtureState(fixture.root);
+  assert.equal(after.bindEffects, 0);
+  assert.equal(after.runtimeStartCalls, 0);
+  assert.equal(after.cutoverEffects, 0);
+});
+
+test("rejects supersession after any phase has been accepted", async (t) => {
+  const fixture = await preparedFixture("pre-runtime-supersession-too-late-");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  process.env.TEST_ORCHESTRATOR_LOST_RESPONSE_AFTER_PHASE = "BIND";
+  try {
+    assert.equal(
+      await main(continuationArgs("apply", fixture.root, fixture.planSha256)),
+      1,
+    );
+  } finally {
+    delete process.env.TEST_ORCHESTRATOR_LOST_RESPONSE_AFTER_PHASE;
+  }
+  const state = await fixtureState(fixture.root);
+  assert.equal(state.hydrationEffects, 1);
+  assert.equal(state.bindEffects, 1);
+  state.releaseSha = SUCCESSOR_SHA;
+  await writeJson(path.join(fixture.root, "fixture-state.json"), state);
+  assert.equal(
+    await main(supersessionArgs(fixture.root, fixture.planSha256)),
+    1,
+  );
+  await assert.rejects(
+    lstat(path.join(path.dirname(fixture.planPath), "superseded.json")),
+    { code: "ENOENT" },
+  );
 });
 
 test("rejects a premature final record before phase effects", async (t) => {

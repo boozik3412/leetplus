@@ -30,7 +30,7 @@ fail-closed правилу одного контура снова сломать
 | Corporate landing          | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                           |
 | Release acceleration       | 8/8 + retention: controlled five-phase rollout operation `6be461db-c600-4fe7-9e87-6267d708554e` завершён receipt `c9cbf2c9…`; V3 и trusted lane metrics merged; public/corporate/worker контуры нельзя объединять или понижать ради скорости                                 |
 | Langame recovery           | оба systemd timer `enabled/active`; daily authority привязана к exact `def5174f…` и обходит все `3/3` active Langame domains единственного admitted INTERNAL tenant; external unattended остаётся deny до отдельного admission                                                   |
-| External Langame onboarding | canonical source target `CURRENT_191/191`: preview → atomic settings → manual exact-Store backfill; signed controller uses only the `CURRENT_190 → 191` bridge, transactional apply and protected check receipt; two separate final cutovers pin its SHA, terminal `OFF/LIVE` requires `final-check`; no production GO implied |
+| External Langame onboarding | canonical source target `CURRENT_191/191`: preview → atomic settings → manual exact-Store backfill; signed schema controller uses only the `CURRENT_190 → 191` bridge, while a pre-effect exact bridge re-pin may replace release SHA without DDL; transactional apply/check plus two final cutovers pin the SHA, terminal `OFF/LIVE` requires `final-check`; no production GO implied |
 | Telegram guest auth        | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                            |
 | Staff rewards              | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                |
 | Guest identity owner       | exact-link и verified-phone repairs deployed в `def5174f…`; RU-варианты подтверждённого телефона разрешаются только внутри выбранного Langame domain, неоднозначность fail-closed; все 9 выявленных split-owner дублей погашены без reward replay, контрольный остаток `0`      |
@@ -423,6 +423,24 @@ layer не становится четвёртым
 security-контуром и не получает право на Prisma/SQL, ACL, auth/scope,
 USER_CALL, guest flags или worker state. Такие L2 effects по-прежнему требуют
 своих signed controllers, backup/restored-copy evidence и отдельного GO.
+
+Узкий `supersede-pre-runtime` не является rollback и не допускает effect:
+он terminalize только approved V3 operation с `0` accepted phase receipts,
+единственным pending `HYDRATE` intent и отсутствующим `final.json`. Controller
+сверяет старую baseline/cutover continuity, installed-control attestation
+replacement SHA, одинаковую effective lane и разные old/replacement SHA, затем
+exclusive-create публикует `superseded.json` как `root:root 0400`. Он не меняет
+runtime, DB, slot env, unit или nginx/cutover state, а только закрывает
+audit/control record и открывает новый `prepare`. Любой accepted phase либо
+любой `BIND` record запрещает supersession; ручное удаление/правка operation
+records также запрещены и остаются fail-closed.
+
+Live continuity и replacement-control attestation являются precondition первой
+exclusive-публикации. Идемпотентный replay затем доверяет только каноническому
+receipt, связанному с exact plan, approval и HYDRATE intent: последующие
+legitimate control/cutover поколения не могут сделать terminal audit record
+снова незавершённым. Каждый новый `prepare` независимо проверяет собственный
+installed-control generation и не наследует authority superseded operation.
 
 Immutable publication authority также не смешивает release и slot. Promotion
 intent/attestation хранятся по exact SHA; их `RELEASE_SLOT` фиксирует origin

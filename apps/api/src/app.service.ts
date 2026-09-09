@@ -116,7 +116,7 @@ export class AppService {
             ...(schemaBridgeAccepted
               ? {
                   compatibility: {
-                    mode: 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE',
+                    mode: schemaBridgeAccepted.compatibilityMode,
                     targetMigration: schemaBridgeAccepted.target.migration,
                     targetMigrationCount:
                       schemaBridgeAccepted.target.migrationCount,

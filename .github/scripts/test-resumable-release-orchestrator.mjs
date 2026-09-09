@@ -67,6 +67,21 @@ function digest(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+async function captureStderr(run) {
+  let stderr = "";
+  const originalWrite = process.stderr.write;
+  process.stderr.write = (chunk) => {
+    stderr += String(chunk);
+    return true;
+  };
+  try {
+    const status = await run();
+    return { status, stderr };
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+}
+
 function slotEnvironment(
   slot,
   releaseSha = PREVIOUS_SHA,
@@ -618,10 +633,10 @@ async function publishAcceptedBindFixtureSlotRollback(
     const replacements = new Map([
       ["OPERATION", "ROLLBACK"],
       ["SOURCE_RECEIPT_SHA256", digest(bindReceipt)],
-      ["CREATED_AT", timestamp(1)],
+      ["CREATED_AT", timestamp(1000)],
       ["INTENT_SHA256", "e".repeat(64)],
       ["EFFECT_STATE", "PRIOR_RESTORED"],
-      ["ACCEPTED_AT", timestamp(2)],
+      ["ACCEPTED_AT", timestamp(2000)],
     ]);
     return [key, replacements.get(key) ?? value];
   });
@@ -641,7 +656,7 @@ async function publishAcceptedBindFixtureSlotRollback(
       ["OPERATION_ID", operationId],
       ["RECEIPT_PATH", rollbackReceiptPath],
       ["RECEIPT_SHA256", digest(rollbackReceipt)],
-      ["UPDATED_AT", new Date(base + 2).toISOString()],
+      ["UPDATED_AT", new Date(base + 2000).toISOString()],
     ]),
     { mode: 0o600 },
   );
@@ -2521,6 +2536,10 @@ test("terminalizes only the exact accepted CURRENT191 bridge pending CUTOVER int
     await readFile(path.join(operationDirectory, "plan.json"), "utf8"),
   );
   const planSha256 = canonicalRecordSha256(plan);
+  let state = await fixtureState(root);
+  state.correlateBindTimestamps = true;
+  state.orchestratorOperationId = OPERATION_ID;
+  await writeJson(path.join(root, "fixture-state.json"), state);
   process.env.TEST_ORCHESTRATOR_FIXTURE_CUTOVER_STDERR_WITHOUT_EFFECT =
     "true";
   try {
@@ -2528,7 +2547,7 @@ test("terminalizes only the exact accepted CURRENT191 bridge pending CUTOVER int
   } finally {
     delete process.env.TEST_ORCHESTRATOR_FIXTURE_CUTOVER_STDERR_WITHOUT_EFFECT;
   }
-  let state = await fixtureState(root);
+  state = await fixtureState(root);
   assert.equal(state.hydrationEffects, 1);
   assert.equal(state.bindEffects, 1);
   assert.equal(state.cutoverEffects, 0);
@@ -2542,7 +2561,25 @@ test("terminalizes only the exact accepted CURRENT191 bridge pending CUTOVER int
     root,
     planSha256,
   );
-  assert.equal(await main(notRolledBack), 1);
+  const preRestoreTerminalize = await captureStderr(() => main(notRolledBack));
+  assert.equal(preRestoreTerminalize.status, 1);
+  assert.match(
+    preRestoreTerminalize.stderr,
+    /ORCHESTRATOR_CUTOVER_INTENT_ENVIRONMENT_RESTORE_RECEIPT_INVALID/u,
+  );
+  assert.doesNotMatch(
+    preRestoreTerminalize.stderr,
+    /ORCHESTRATOR_UNEXPECTED_FAILURE/u,
+  );
+  for (const filename of [
+    "04-cutover-slot-environment-restore.intent.json",
+    "04-cutover-slot-environment-restore.receipt.json",
+    "superseded.json",
+  ]) {
+    await assert.rejects(lstat(path.join(operationDirectory, filename)), {
+      code: "ENOENT",
+    });
+  }
   state.releaseSha = SUCCESSOR_SHA;
   await writeJson(path.join(root, "fixture-state.json"), state);
   const rollback = await publishAcceptedBindFixtureSlotRollback(root, {

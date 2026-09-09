@@ -5839,7 +5839,19 @@ function readCutoverIntentEnvironmentRestoreReceipt(context, paths, chain, args)
     context.directory,
     "04-cutover-slot-environment-restore.receipt.json",
   );
-  const receipt = readCanonicalJson(receiptPath, args, [0o400]);
+  const intentPath = path.join(
+    context.directory,
+    "04-cutover-slot-environment-restore.intent.json",
+  );
+  const readRequiredCanonicalJson = (recordPath) => {
+    try {
+      return readCanonicalJson(recordPath, args, [0o400]);
+    } catch (error) {
+      if (error?.code === "ENOENT") fail(reasonCode);
+      throw error;
+    }
+  };
+  const receipt = readRequiredCanonicalJson(receiptPath);
   const approval = readCanonicalJson(
     path.join(context.directory, "approval.json"),
     args,
@@ -5854,11 +5866,7 @@ function readCutoverIntentEnvironmentRestoreReceipt(context, paths, chain, args)
     "slotEnvironmentSha256", "slotRollbackReceiptSha256", "targetSlot",
   ];
   exactKeys(receipt.value, expected, reasonCode);
-  const intent = readCanonicalJson(
-    path.join(context.directory, "04-cutover-slot-environment-restore.intent.json"),
-    args,
-    [0o400],
-  );
+  const intent = readRequiredCanonicalJson(intentPath);
   exactKeys(
     intent.value,
     [

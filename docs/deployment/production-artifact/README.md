@@ -143,19 +143,23 @@ rollback/restore. Replacement operation
 SHA-256 — `22f9f1f742b6f0a44a7d443b1eaf4628648f3cbe0690c1207217e8a46de2a4fc`,
 final production validation `17/17` — `2026-09-09T22:55:16Z`. Public active
 green — `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, rollback blue —
-  `fa21bbe99be78313a883893b2dd6dc1d7c892777`. Physical DB остаётся
-  `CURRENT_190/190`, migration `20260908180000_external_langame_simple_onboarding`
-  pending, contracts обоих runtime slots — `CURRENT_191/191 + ALLOW_CURRENT_190/OFF`.
-  Все rollout operations terminal, schema effect отсутствует. Fresh backup
-  `/var/lib/postgresql/pre-current191-a05d2a50-20260910T022100Z` создан и его
-  exact dump (`2,054,877,184` bytes,
-  `882572841d0ba79fa0a7f3f347117ca9fc66f8cad30f146d35f2606364b32ca7`)
-  проверен также в off-host копии. Isolated restored-copy ещё не запускалась:
-  read-only host preflight остановился только на capacity. Отдельный target-only
-  read-only inventory даёт расчётный projected объём `12,408,836,096` bytes при
-  требовании `12,103,890,199`; это не запуск и не authority нового controller.
-  Controller ещё должен пройти CI/admission, установку и отдельный `GO`; его
-  effect не заявлен.
+`fa21bbe99be78313a883893b2dd6dc1d7c892777`. Physical DB остаётся
+`CURRENT_190/190`, migration `20260908180000_external_langame_simple_onboarding`
+pending, contracts обоих runtime slots — `CURRENT_191/191 + ALLOW_CURRENT_190/OFF`.
+Все rollout operations terminal, schema effect отсутствует. Fresh backup
+`/var/lib/postgresql/pre-current191-a05d2a50-20260910T022100Z` создан и его
+exact dump (`2,054,877,184` bytes,
+`882572841d0ba79fa0a7f3f347117ca9fc66f8cad30f146d35f2606364b32ca7`)
+проверен также в off-host копии. Isolated restored-copy ещё не запускалась:
+read-only host preflight остановился только на capacity. Отдельный target-only
+read-only inventory после установки control даёт current available
+`10,356,858,880` и projected `12,378,058,752` bytes при прежнем требовании
+`12,103,890,199`; controller всё равно пересчитывает capacity непосредственно
+перед effect. Exact production-control `1ea4f39a0f14a18a446af1c937c288c342ac8ef0`
+установлен и независимо проверен. Первый `def5174-pre-rollout plan` остановлен
+E147 на штатной dangling dependency-ссылке systemd до публикации plan record;
+effect отсутствует. Узкая source-коррекция ещё должна пройти CI/admission,
+установку и отдельный `GO`.
 
 Readiness verifier для этого одного pre-DDL bridge принимает ровно два
 эквивалентных исторических identifier: legacy
@@ -245,9 +249,13 @@ admitted/installed как production-control
 (`2,021,194,384` logical и `2,021,199,872` allocated bytes). `globals.sql` и
 `manifest.json` того же backup, прежняя и fresh CURRENT191 recovery pair
 остаются сохранёнными. До plan/apply controller проверяет все standard systemd
-system-unit roots, запрещает escaping/dangling symlink, сканирует каждый другой
-state regular file независимо от имени/расширения, отвергает state symlink и
-special file, доказывает тот же filesystem и database-size + `2.5 GB` reserve.
+system-unit roots и каждый nested symlink. Existing target обязан канонически
+оставаться внутри этих roots либо быть `/dev/null`; отсутствующая файловая цель
+dependency-link допустима только когда её полная lexical normalization остаётся
+внутри тех же проверенных roots. Escaping, malformed или меняющаяся ссылка
+отклоняется. Каждый другой state regular file сканируется независимо от
+имени/расширения; state symlink и special file запрещены. Capacity gate
+доказывает тот же filesystem и database-size + `2.5 GB` reserve.
 
 Для обоих set `plan` ничего не authorizes. `apply` требует exact installed
 control SHA, immutable plan SHA, отдельную точную подтверждающую фразу, exclusive

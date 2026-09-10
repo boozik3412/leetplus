@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { CONTRACT, SCHEMA, PORTS, canonical, demand, digest, release, renderCompose, verifyContainer } from './contract.mjs';
 import { PHASES, execute, validateChain, validatePlan } from './orchestrator.mjs';
+import { validateWorkerGrant } from './worker-authority.mjs';
 
 const STATE = '/var/lib/leetplus-compose';
 const ROOT = '/srv/leetplus';
@@ -60,7 +61,7 @@ function run(binary, argv, { timeout = 120000, input, json = false } = {}) {
   }
   return json ? JSON.parse(result.stdout) : result.stdout.trim();
 }
-function docker(argv, options) { return run('/usr/bin/docker', argv, options); }
+function docker(argv, options) { return run('/usr/bin/docker', ['--host', 'unix:///var/run/docker.sock', '--config', '/etc/leetplus-compose/docker-cli', ...argv], options); }
 function compose(argv) { return docker(['compose', '--project-name', 'leetplus', '--file', `${ROOT}/compose.json`, ...argv]); }
 function installedDigest() {
   const manifest = readJSON(`${CONTROL}/install-manifest.json`, { immutable: true });
@@ -116,9 +117,14 @@ function probeSlot(plan, slot) {
   demand(api.ok === true && api.release?.sha === expected.releaseSha && api.dependencies?.database?.migration === SCHEMA.migration && api.dependencies?.database?.migrationCount === 191, 'API readiness mismatch');
   demand(web.release?.sha === expected.releaseSha && web.release?.webBuildId === expected.releaseSha, 'Web release identity mismatch');
   const specification = renderCompose({ blue: plan.blue, green: plan.green, activeSlot: plan.targetSlot });
+  for (const [name, expected] of Object.entries(specification.networks)) {
+    const actual = docker(['network', 'inspect', expected.name], { json: true })[0];
+    demand(actual.Internal === expected.internal && actual.EnableIPv6 === false && actual.Driver === 'bridge' && actual.IPAM.Config.length === 1 && actual.IPAM.Config[0].Subnet === expected.ipam.config[0].subnet, `${name}: network isolation drift`);
+  }
   return ['api', 'web'].map(role => {
     const name = `${role}-${slot}`;
-    return verifyContainer(docker(['inspect', specification.services[name].container_name], { json: true })[0], specification.services[name], name);
+    const imageEnvironment = docker(['image', 'inspect', specification.services[name].image], { json: true })[0].Config.Env;
+    return verifyContainer(docker(['inspect', specification.services[name].container_name], { json: true })[0], specification.services[name], name, { imageEnvironment });
   });
 }
 function authenticatedSmoke(slot) {
@@ -141,6 +147,7 @@ function driverFor(dir) {
   return {
     preflight: async (p) => {
       demand(hostIdentity() === p.hostIdentitySha256 && installedDigest() === p.controlSha256, 'Host/control identity drift');
+      run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, 'verify']);
       assertNoPending(p.operationId);
       const current = active();
       demand(canonical(current) === canonical(p.previous) || (current?.operationId === p.operationId && current.generation === p.generation + 1 && current.activeSlot === p.targetSlot), 'Active generation drift');
@@ -239,6 +246,10 @@ if (command === 'help' || !command) {
 } else {
   demand(process.platform === 'linux' && process.getuid() === 0 && process.versions.node.split('.')[0] === '22', 'Linux root and Node 22 required');
   demand(process.env.LEETPLUS_COMPOSE_LOCKED === '1', 'Use the installed flock bootstrap');
+  const lockInfo = fs.lstatSync(`${STATE}/control.lock`);
+  demand(lockInfo.isFile() && !lockInfo.isSymbolicLink() && lockInfo.uid === 0 && lockInfo.nlink === 1 && !(lockInfo.mode & 0o077), 'Untrusted control lock');
+  const locks = fs.readFileSync('/proc/locks', 'utf8').split('\n');
+  demand(locks.some(line => { const fields = line.trim().split(/\s+/); return fields[1] === 'FLOCK' && fields[3] === 'WRITE' && fields[4] === String(process.ppid) && fields[5]?.split(':').at(-1) === String(lockInfo.ino); }), 'Parent does not hold the kernel control lock');
   directory(STATE); directory(`${STATE}/operations`);
   installedDigest();
   if (command === 'status') {
@@ -258,6 +269,31 @@ if (command === 'help' || !command) {
     validatePlan(plan);
     const dir = operation(id); directory(dir); publish(`${dir}/plan.json`, plan);
     console.log(canonical({ decision: 'PREPARED_NOT_AUTHORIZATION', operationId: id, planSha256: digest(plan), planPath: `${dir}/plan.json` }));
+  } else if (command === 'worker-run') {
+    const name = options.name;
+    demand(['bonus-ledger-worker', 'langame-daily-worker'].includes(name), 'Unknown worker');
+    assertNoPending();
+    const current = active();
+    demand(current, 'No accepted active release');
+    run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, 'verify']);
+    const secretBytes = safeFile(`${ROOT}/secrets/${name}.json`);
+    const grant = validateWorkerGrant(readJSON(`${STATE}/worker-grants/${name}.json`, { immutable: true }), safeFile('/etc/leetplus-compose/approval-root.pem'), current, hostIdentity(), secretBytes);
+    const key = grant.mode === 'CANARY' ? grant.id : crypto.randomUUID();
+    const dir = `${STATE}/worker-runs`; directory(dir);
+    demand(!fs.existsSync(`${dir}/${key}.intent.json`), 'Canary already attempted; reconcile its existing outcome');
+    const spec = renderCompose({ blue: current.blue, green: current.green, activeSlot: current.activeSlot });
+    demand(digest(safeFile(`${ROOT}/compose.json`)) === digest(spec), 'Compose changed before worker execution');
+    publish(`${dir}/${key}.intent.json`, { grantId: grant.id, activeGeneration: current.generation, releaseSha: grant.releaseSha, worker: name, startedAt: new Date().toISOString() });
+    compose(['create', '--no-deps', '--force-recreate', name]);
+    const service = spec.services[name];
+    const imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
+    verifyContainer(docker(['inspect', service.container_name], { json: true })[0], service, name, { beforeStart: true, imageEnvironment });
+    const output = docker(['start', '--attach', service.container_name], { timeout: 960000 });
+    const observed = docker(['inspect', service.container_name], { json: true })[0];
+    demand(!observed.State.Running && observed.State.ExitCode === 0, 'Worker did not finish successfully');
+    const receipt = { grantId: grant.id, activeGeneration: current.generation, releaseSha: grant.releaseSha, worker: name, completedAt: new Date().toISOString(), containerId: observed.Id, outputSha256: digest(output), decision: 'PASS' };
+    publish(`${dir}/${key}.receipt.json`, receipt);
+    console.log(canonical(receipt));
   } else {
     demand(['apply', 'resume'].includes(command), 'Unknown command');
     const dir = operation(options.operation), plan = readJSON(`${dir}/plan.json`, { immutable: true });

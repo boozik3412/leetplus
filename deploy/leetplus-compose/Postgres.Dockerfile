@@ -9,6 +9,7 @@ RUN printf 'Types: deb\nURIs: https://snapshot.ubuntu.com/ubuntu/20260401T000000
     && localedef -i en_US -f UTF-8 en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/* /var/lib/postgresql/16/main
 ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+RUN groupadd -g 12030 leetplus-pg && useradd --no-log-init -u 12030 -g 12030 -M -s /usr/sbin/nologin leetplus-pg
 COPY deploy/leetplus-compose/postgres-entry.sh /usr/local/bin/leetplus-postgres
 RUN chmod 0555 /usr/local/bin/leetplus-postgres
 USER 12030:12030

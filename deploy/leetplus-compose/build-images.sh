@@ -38,6 +38,31 @@ NODE
 docker compose --file "$output/compose.rehearsal.json" config --quiet
 docker run --rm --network none --entrypoint /usr/lib/postgresql/16/bin/postgres "$pg_id" --version
 docker run --rm --network none --entrypoint /usr/bin/locale "$pg_id" -a | grep -F en_US.utf8
+docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=536870912,mode=1777 \
+  --entrypoint /bin/bash "$pg_id" -ec '
+    export PATH=/usr/lib/postgresql/16/bin:$PATH
+    initdb -D /tmp/pg --locale=en_US.UTF-8 --encoding=UTF8 -A trust
+    pg_ctl -D /tmp/pg -o "-k /tmp -h 127.0.0.1" -l /tmp/pg.log -w start
+    trap "pg_ctl -D /tmp/pg -m fast -w stop" EXIT
+    test "$(psql -h /tmp -d postgres -Atc "show server_version_num")" = 160013
+    test "$(psql -h /tmp -d postgres -Atc "show lc_collate")" = en_US.UTF-8
+  '
+web_name="leetplus-image-test-${sha:0:12}"
+docker run --detach --name "$web_name" --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --user 12020:12020 --tmpfs /tmp:rw,nosuid,nodev,size=134217728,mode=1777 \
+  --tmpfs /app/apps/web/.next/cache:rw,nosuid,nodev,size=134217728,uid=12020,gid=12020 \
+  -e "RELEASE_SHA=$sha" -e "WEB_BUILD_ID=$sha" -e "BUILD_TIME=$build_time" \
+  -e EXPECTED_DATABASE_MIGRATION=20260908180000_external_langame_simple_onboarding \
+  -e EXPECTED_DATABASE_MIGRATION_COUNT=191 -e API_URL=http://127.0.0.1:4000 "$web_id"
+trap 'docker rm --force "$web_name" >/dev/null' EXIT
+ready=false
+for attempt in $(seq 1 30); do
+  if docker exec "$web_name" node /opt/leetplus/health.cjs web; then ready=true; break; fi
+  sleep 1
+done
+if [[ "$ready" != true ]]; then docker logs "$web_name"; exit 1; fi
+docker rm --force "$web_name" >/dev/null
+trap - EXIT
 docker save "$api_id" "$web_id" "$pg_id" "$redis_id" | gzip -1 > "$output/images.tar.gz"
 git archive --format=tar.gz --output="$output/control.tar.gz" "$sha" deploy/leetplus-compose
 (

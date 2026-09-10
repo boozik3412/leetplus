@@ -94,18 +94,19 @@ export function renderCompose({ blue, green, activeSlot = 'blue', rehearsal = fa
   const networks = {};
   for (const [index, name] of ['blue', 'green', 'data', 'egress'].entries()) {
     if (name === 'egress' && rehearsal) continue;
-    networks[name] = { name: `${project}-${name}`, driver: 'bridge', internal: name !== 'egress', ipam: { config: [{ subnet: `${subnet(index)}.0/24` }] } };
+    networks[name] = { name: `${project}-${name}`, driver: 'bridge', enable_ipv6: false, internal: name !== 'egress', ipam: { config: [{ subnet: `${subnet(index)}.0/24` }] } };
   }
   return { name: project, services, networks };
 }
 
-export function verifyContainer(observed, service, name) {
+export function verifyContainer(observed, service, name, { beforeStart = false, imageEnvironment } = {}) {
   const h = observed.HostConfig, c = observed.Config;
   demand(observed.Name === `/${service.container_name}`, `${name}: container identity drift`);
   demand(observed.Image === service.image && c.User === service.user, `${name}: image/user drift`);
   demand(h && !h.Privileged && !h.PublishAllPorts && !['host', 'container'].some(x => h.NetworkMode?.startsWith(x)), `${name}: unsafe namespace`);
   demand(!h.PidMode && (!h.IpcMode || h.IpcMode === 'private') && !h.CapAdd?.length && h.ReadonlyRootfs, `${name}: unsafe process/filesystem privileges`);
-  demand(h.CapDrop?.length === 1 && h.CapDrop[0].toUpperCase() === 'ALL' && h.SecurityOpt?.some(x => /^no-new-privileges(?::true)?$/.test(x)), `${name}: missing privilege fence`);
+  demand(!h.Devices?.length && !h.DeviceRequests?.length && !h.ExtraHosts?.length, `${name}: unexpected device or host mapping`);
+  demand(h.CapDrop?.length === 1 && h.CapDrop[0].toUpperCase() === 'ALL' && h.SecurityOpt?.length === 1 && h.SecurityOpt.some(x => /^no-new-privileges(?::true)?$/.test(x)), `${name}: missing privilege fence`);
   demand(JSON.stringify(c.Cmd) === JSON.stringify(service.command ?? c.Cmd), `${name}: entrypoint arguments drift`);
   demand(JSON.stringify(c.Entrypoint) === JSON.stringify(service.entrypoint), `${name}: entrypoint drift`);
   const published = Object.entries(h.PortBindings ?? {}).flatMap(([key, values]) => (values ?? []).map(x => `${key}:${x.HostIp}:${x.HostPort}`)).sort();
@@ -115,12 +116,17 @@ export function verifyContainer(observed, service, name) {
   const expectedMounts = (service.volumes ?? []).map(m => `${m.type}:${m.source}:${m.target}:${!m.read_only}`).sort();
   demand(JSON.stringify(mounts) === JSON.stringify(expectedMounts), `${name}: unexpected mount`);
   const project = service.container_name.slice(0, -name.length - 1);
-  const actualNetworks = Object.entries(observed.NetworkSettings.Networks).map(([key, value]) => `${key}:${value.IPAddress}`).sort();
+  const actualNetworks = Object.entries(observed.NetworkSettings.Networks).map(([key, value]) => `${key}:${value.IPAddress || (beforeStart ? value.IPAMConfig?.IPv4Address : '')}`).sort();
   const expectedNetworks = Object.entries(service.networks).map(([key, value]) => `${project}-${key}:${value.ipv4_address}`).sort();
   demand(JSON.stringify(actualNetworks) === JSON.stringify(expectedNetworks), `${name}: network membership drift`);
   for (const [key, value] of Object.entries(service.labels)) demand(c.Labels[key] === value, `${name}: label drift`);
   for (const [key, value] of Object.entries(service.environment ?? {})) demand(c.Env.includes(`${key}=${value}`), `${name}: bound environment drift`);
+  if (imageEnvironment) {
+    const expected = Object.fromEntries(imageEnvironment.map(value => { const i = value.indexOf('='); return [value.slice(0, i), value.slice(i + 1)]; }));
+    Object.assign(expected, service.environment ?? {});
+    demand(JSON.stringify([...c.Env].sort()) === JSON.stringify(Object.entries(expected).map(([k, v]) => `${k}=${v}`).sort()), `${name}: unexpected process environment`);
+  }
   demand(h.Memory > 0 && h.NanoCpus > 0 && h.PidsLimit === service.pids_limit, `${name}: resource bounds missing`);
-  demand(observed.State.Running && (!service.healthcheck || observed.State.Health?.Status === 'healthy'), `${name}: not healthy`);
+  demand(beforeStart ? observed.State.Status === 'created' && !observed.State.Running && observed.State.Pid === 0 : observed.State.Running && (!service.healthcheck || observed.State.Health?.Status === 'healthy'), `${name}: unexpected runtime state`);
   return { name, id: observed.Id, image: observed.Image, startedAt: observed.State.StartedAt };
 }

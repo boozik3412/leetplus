@@ -1,0 +1,3 @@
+FROM redis:7.0.15-bookworm@sha256:497aa9b1f103f2bbcb7f176465360aee4224a724b3438eb8131c94057cfb5659
+ARG RELEASE_SHA
+LABEL org.opencontainers.image.revision=$RELEASE_SHA ru.leetplus.contract=LEETPLUS_COMPOSE_BLUE_GREEN_V1

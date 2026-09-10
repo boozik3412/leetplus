@@ -28,6 +28,12 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Match target Docker manifest store
+        uses: docker/setup-docker-action@77e84dbf09b47d1e29270283c22f16145aa85ca1
+        with:
+          version: v29.1.3
+          set-host: true
+          daemon-config: '{"features":{"containerd-snapshotter":true}}'
       - name: Verify controller and boundary negative matrix
         run: node --test deploy/leetplus-compose/*.test.mjs
       - name: Build exact non-deployable images

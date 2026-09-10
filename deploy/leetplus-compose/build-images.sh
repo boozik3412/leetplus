@@ -14,18 +14,19 @@ case "$output/" in "$repo/"*) echo 'Output must be outside checkout' >&2; exit 1
 mkdir -p "$output"
 [[ -z $(find "$output" -mindepth 1 -maxdepth 1 -print -quit) ]]
 build_time=$(git show -s --format=%cI "$sha" | xargs -I '{}' date -u -d '{}' +%Y-%m-%dT%H:%M:%SZ)
+test "$(docker version --format '{{.Server.Version}}')" = 29.1.3
+docker info --format '{{json .DriverStatus}}' | grep -F 'io.containerd.snapshotter.v1'
 for target in api web; do
-  docker build --platform linux/amd64 --file deploy/leetplus-compose/Dockerfile \
+  docker build --platform linux/amd64 --provenance=false --file deploy/leetplus-compose/Dockerfile \
     --target "$target" --build-arg "RELEASE_SHA=$sha" --build-arg "BUILD_TIME=$build_time" \
     --tag "leetplus-$target:$sha" .
 done
-docker build --platform linux/amd64 --file deploy/leetplus-compose/Postgres.Dockerfile --tag "leetplus-postgres:$sha" .
-redis=$(node -p 'JSON.parse(require("fs").readFileSync("deploy/leetplus-compose/base-images.json")).redis')
-docker pull --platform linux/amd64 "$redis"
+docker build --platform linux/amd64 --provenance=false --file deploy/leetplus-compose/Postgres.Dockerfile --tag "leetplus-postgres:$sha" .
+docker build --platform linux/amd64 --provenance=false --file deploy/leetplus-compose/Redis.Dockerfile --build-arg "RELEASE_SHA=$sha" --tag "leetplus-redis:$sha" .
 api_id=$(docker image inspect --format '{{.Id}}' "leetplus-api:$sha")
 web_id=$(docker image inspect --format '{{.Id}}' "leetplus-web:$sha")
 pg_id=$(docker image inspect --format '{{.Id}}' "leetplus-postgres:$sha")
-redis_id=$(docker image inspect --format '{{.Id}}' "$redis")
+redis_id=$(docker image inspect --format '{{.Id}}' "leetplus-redis:$sha")
 docker run --rm --network none --entrypoint node "$api_id" -e 'const m=require("/app/release.json");if(m.migrationCount!==191)process.exit(1);console.log(JSON.stringify(m))' > "$output/image-release.json"
 node --input-type=module - "$output" "$api_id" "$web_id" "$pg_id" "$redis_id" <<'NODE'
 import fs from 'node:fs';
@@ -64,10 +65,11 @@ if [[ "$ready" != true ]]; then docker logs "$web_name"; exit 1; fi
 docker rm --force "$web_name" >/dev/null
 trap - EXIT
 bash deploy/leetplus-compose/test-prisma-tls.sh "$api_id" "$pg_id" "$output/transport-validation.json"
-docker save "$api_id" "$web_id" "$pg_id" "$redis_id" | gzip -1 > "$output/images.tar.gz"
+docker save "leetplus-api:$sha" "leetplus-web:$sha" "leetplus-postgres:$sha" "leetplus-redis:$sha" | gzip -1 > "$output/images.tar.gz"
+bash deploy/leetplus-compose/test-image-roundtrip.sh "$output"
 git archive --format=tar.gz --output="$output/control.tar.gz" "$sha" deploy/leetplus-compose
 (
   cd "$output"
-  sha256sum images.tar.gz release.json control.tar.gz compose.rehearsal.json transport-validation.json > SHA256SUMS
+  sha256sum images.tar.gz release.json control.tar.gz compose.rehearsal.json transport-validation.json archive-roundtrip.json > SHA256SUMS
   sha256sum --check --strict SHA256SUMS
 )

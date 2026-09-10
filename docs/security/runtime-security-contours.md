@@ -5,7 +5,15 @@
 ## Docker migration candidate, 10.09.2026
 
 `deploy/leetplus-compose` is a separate CURRENT191 COMBINED migration candidate
-for server 1337. It is not installed or production-admitted. The default
+for server 1337. Admitted d53684a0 control files were installed without activation;
+image hydration stopped before database/application preparation because a classic
+Docker archive did not preserve the target containerd manifest identities. The
+successor builds on pinned Docker29.1.3/containerd, exports four named images and
+requires a fresh isolated daemon to import and run all four exact IDs. The
+target daemon/storage of other applications must not be changed to bypass this.
+An explicit predecessor control replacement is allowed only with the preparation
+marker, verified prior files and no prepared DB/runtime, operation, worker grant
+or project container. No existing installed file is patched in place. The default
 `HOST_LOOPBACK` keeps `API_BIND_HOST=127.0.0.1`. Explicit `DOCKER_BRIDGE` permits
 the container-local `0.0.0.0` listener only with the exact Compose V1 contract,
 ENFORCED tenant/file ACL, explicit COMBINED role and disabled API schedulers.

@@ -14,11 +14,11 @@
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                                                                                                                                                                                                                 |
 | Offline/USB key      | исключён из beta critical path                                                                                                                                                                                                                                                                                                |
 | Owner onboarding     | production CURRENT190: явный EMAIL или одноразовый LINK; пользователь сам задаёт пароль, LINK не сохраняется и не ставит письмо в outbox                                                                                                                                                                                      |
-| Release acceleration | 8/8 + retention: five-phase rollout завершён; V3 и trusted lane metrics merged; root-only exact plan/apply attempt archive реализован в source без production effect                                                                                                                                                          |
+| Release acceleration | five-phase rollout завершён; V3 и trusted lane metrics merged; independent production-control gates собираются bounded batch с отдельными logs/exit codes. Historical three-dump capacity retirement завершён; новый exact def5174 one-file controller ожидает Linux root fixture/CI, admission, install и GO |
 | Langame freshness    | daily и bonus-ledger timers enabled/active; public serving release — active green `a05d…`; daily worker обходит `3/3` active domains текущего admitted INTERNAL tenant                                                                                                                                                        |
 | Assortment dashboard | доступен на active green `a05d…`: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз работают; блок источников по умолчанию свёрнут, обновление всегда доступно                                                                                                                                          |
 | Guest profile owner  | exact-link и verified-phone repairs deployed в `def5174f…`; `*6330`, `*3669` и остальные выявленные split owners исправлены, active structural остаток `0`, reward replay запрещён                                                                                                                                            |
-| External Langame     | historical operation `8f70269b-e4f2-450c-b117-31e1375c68ce` and replacement `53ac0c1e-2d61-42b9-a07e-d3cbab820531` are terminal; replacement served runtime release `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, and its terminal `POSTCHECK` completed under successor production-control merge SHA `73a17b2d6ba70abd8f52876aa813cac66ab7e56a`. DB remains CURRENT190/190 with migration `20260908180000_external_langame_simple_onboarding` pending; no schema effect claimed, and capacity gate/restored-copy evidence remain pending |
+| External Langame     | обе rollout operations terminal; active green `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, rollback blue `fa21bbe99be78313a883893b2dd6dc1d7c892777`. DB остаётся CURRENT190/190, migration pending. Fresh backup + off-host verification завершены; restored-copy ещё не запускалась из-за capacity. Separate read-only identity/capacity projection подтверждён, но новый controller/effect ещё не admitted/applied |
 
 Production hotfix PR #170 развёрнут как exact SHA
 `def5174f16f49212dd21d243cda89dffeff7837f` operation
@@ -46,14 +46,16 @@ replacement с другим SHA/control-attestation digest в той же effect
 он начинает собственные prepare/approval/GO. Ручная правка env/link или
 operation intents/evidence/receipts/terminal record запрещена.
 
-Этот режим сам по себе не доказывает deployment: source/CI не являются
-production effect. Историческая operation уже terminalized. Physical DB пока
-exact `CURRENT_190/190`, а traffic обслуживает active green
-`a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; rollback blue — exact
-`fa21bbe99be78313a883893b2dd6dc1d7c892777`. Оба runtime contracts recovery —
-`CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`; replacement operation ожидает
-receipt-bound `complete-pending-postcheck-under-successor-control` после
-установки admitted исправленного controller.
+Source/CI сами по себе не доказывают deployment. Историческая и replacement
+operations уже terminal; replacement terminal `POSTCHECK` завершён под
+successor production-control
+`73a17b2d6ba70abd8f52876aa813cac66ab7e56a`. Physical DB пока exact
+`CURRENT_190/190`, traffic обслуживает active green
+`a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, rollback blue — exact
+`fa21bbe99be78313a883893b2dd6dc1d7c892777`; оба slot contracts —
+`CURRENT_191/191 + ALLOW_CURRENT_190/OFF`. Fresh CURRENT190 backup и его
+off-host copy verified; schema effect не выполнялся. Restored-copy execution
+ожидает отдельного admitted capacity controller и GO.
 
 Для более позднего узкого случая accepted `HYDRATE/BIND/SMOKE` плюс только
 pending `CUTOVER` intent (без CUTOVER evidence/receipt или shared cutover intent)
@@ -536,18 +538,34 @@ DB, systemd/runtime, сеть, public guest, corporate tenant и workers не
 записями. Terminal operation directories не удаляются; их предел `4 096`
 остаётся отдельным capacity boundary.
 
-`prune-three-superseded-dumps.sh` не относится к этой retention процедуре: это
-отдельная one-shot root-only capacity authority с compiled allowlist ровно трёх
-абсолютных файлов (`5,834,469,130` bytes). Ручное удаление архивов и
-произвольные paths запрещены. Она сохраняет/дважды проверяет pre-`CURRENT191`
-dump+globals; plan nonauthorizing, а apply требует exact control SHA,
-immutable plan SHA, явную фразу, install lock, installed-control verification,
-terminal rollout operations и DB exact `CURRENT190/190` с absent
-`CURRENT191/191` target. Перед exact unlink она повторно валидирует path, SHA,
-size, inode, UID/GID, mode, no-symlink/no-open-FD, fsync parent и создаёт
-immutable `0400` receipt; same-plan replay покрывает lost response. Fixture
-B075 PASS, но authority ещё не admitted/installed/applied, capacity gate
-pending; cleanup не завершён.
+`prune-three-superseded-dumps.sh` не относится к metrics retention: это
+отдельная root-only capacity authority с двумя compiled set и без произвольных
+paths. Historical three-file set (`5,834,469,130` bytes) уже
+admitted/installed/applied под production-control
+`c4a9eef2ced4a240ebcdd90848a87a8a01ba45f3`; terminal receipt SHA-256 —
+`a77fa2c06b65b93685a289fc91b40b398947ad3bfc9f5a8b73411256bf5c6582`.
+Successor допускает его старый control binding только для complete immutable
+terminal replay и выходит до любого effect; incomplete old plan не переносится.
+
+Новый `def5174-pre-rollout` set удаляет только exact
+`pre-rollout-def5174f-20260908t130000z/leetplus.dump` (`2,021,194,384` logical,
+`2,021,199,872` allocated bytes), сохраняя companions и обе CURRENT191 recovery
+pair. Reference gate сканирует полный standard systemd system-unit path, nested
+symlink и каждый внешний state regular file независимо от extension/basename;
+state symlink/special file denied. Capacity gate требует тот же filesystem и
+`pg_database_size + 2.5 GB`. Nonauthorizing plan, exact installed control SHA,
+immutable plan SHA, отдельная фраза, install lock, terminal rollouts,
+`CURRENT190/190`, no-open-FD и before-unlink повтор всех gates обязательны.
+
+Fresh backup `pre-current191-a05d2a50-20260910T022100Z` (`2,054,877,184`
+bytes, SHA-256
+`882572841d0ba79fa0a7f3f347117ca9fc66f8cad30f146d35f2606364b32ca7`) и
+off-host copy verified. Separate target-only read-only inventory показал current
+available `10,387,636,224` и projected available `12,408,836,096`, если future
+exact effect успешно завершится, при requirement `12,103,890,199`. Это не
+controller execution/authority. Новый controller ещё не прошёл root fixture/CI,
+exact-main admission/install/GO и не применён; restored-copy и schema effect
+остаются pending, manual deletion запрещено.
 
 ## Production CURRENT189 rollout (01.09.2026)
 

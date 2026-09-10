@@ -42,6 +42,10 @@ canonical boundary contract and current-state handoff for those areas.
   results unsafe to interpret. Before retrying a failed gate, read the durable
   error log and record the changed condition; never restart an unchanged full
   batch merely to discover one failure at a time.
+- Keep that append-only journal at
+  `deploy-evidence/<operation>/ERROR_LOG.md`. Read its complete current content
+  before every retry and every production command; a retry is permitted only
+  after the observed failure, cause and changed condition are recorded.
 
 If a change alters any route ownership, identity, secret, process, database
 role, scheduler placement, provider egress or rollout state, update

@@ -296,8 +296,7 @@ async function setupFixture(suffix = "", environmentOptions = {}) {
     slotMasked: false,
     slotFailed: false,
     sourceReleaseSha,
-    bindingPriorReleaseSha:
-      environmentOptions.bindingPriorReleaseSha ?? sourceReleaseSha,
+    bindingPriorReleaseSha: environmentOptions.bindingPriorReleaseSha,
     stopCalls: 0,
     targetSlot: "blue",
     unmaskCalls: 0,

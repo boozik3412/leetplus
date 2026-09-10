@@ -78,7 +78,8 @@ export function renderCompose({ blue, green, activeSlot = 'blue', rehearsal = fa
   }
   services.postgres = { ...base('postgres', blue.images.postgres, blue, '8g', '4.0'), restart: 'unless-stopped', shm_size: '1g', entrypoint: ['/usr/local/bin/leetplus-postgres'],
     networks: network('data', 2),
-    volumes: [bind('data/postgres', '/var/lib/postgresql/16/main', false), bind('secrets/postgres', '/etc/leetplus-postgres')],
+    group_add: rehearsal ? [] : ['12061'],
+    volumes: [bind('data/postgres', '/var/lib/postgresql/16/main', false), bind('secrets/postgres', '/etc/leetplus-postgres'), ...(!rehearsal ? [{ type: 'bind', source: '/run/leetplus-replication', target: '/run/leetplus-replication', read_only: true, bind: { create_host_path: false } }] : [])],
     healthcheck: { test: ['CMD', '/usr/lib/postgresql/16/bin/pg_isready', '-h', '127.0.0.1'], interval: '5s', timeout: '4s', retries: 12 },
   };
   services.redis = { ...base('redis', blue.images.redis, blue, '256m', '0.5'), restart: 'unless-stopped', entrypoint: ['docker-entrypoint.sh'], command: ['redis-server', '--save', '', '--appendonly', 'no', '--maxmemory', '128mb', '--maxmemory-policy', 'allkeys-lru'], networks: network('data', 3), volumes: [bind('data/redis', '/data', false)] };

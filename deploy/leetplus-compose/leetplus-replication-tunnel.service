@@ -1,0 +1,30 @@
+[Unit]
+Description=LeetPlus preparation-only PostgreSQL SSH transport over a private Unix socket
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/var/lib/leetplus-compose/preparation-only
+
+[Service]
+Type=simple
+User=leetplus-migration
+Group=leetplus-replication
+RuntimeDirectory=leetplus-replication
+RuntimeDirectoryMode=0770
+RuntimeDirectoryPreserve=yes
+LoadCredential=ssh_key:/etc/leetplus-compose/replication/id_ed25519
+LoadCredential=known_hosts:/etc/leetplus-compose/replication/known_hosts
+ExecStart=/usr/bin/ssh -F /dev/null -N -L /run/leetplus-replication/.s.PGSQL.15432:127.0.0.1:5432 -i %d/ssh_key -o UserKnownHostsFile=%d/known_hosts -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o BatchMode=yes -o ExitOnForwardFailure=yes -o StreamLocalBindMask=0117 -o StreamLocalBindUnlink=yes -o ConnectTimeout=10 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 leetplus-migration@168.222.143.243
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=168.222.143.243/32
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

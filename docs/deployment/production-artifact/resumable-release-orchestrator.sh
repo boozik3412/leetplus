@@ -51,7 +51,7 @@ umask 0077
 
 readonly INSTALLED_BOOTSTRAP='/usr/local/sbin/leetplus-resumable-release-orchestrator'
 readonly INSTALLED_ENGINE='/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs'
-readonly EXPECTED_ENGINE_SHA256='646317ec4259ad36ab849fadc45861797475346ce0d6561e6e4c7f74940e9d32'
+readonly EXPECTED_ENGINE_SHA256='27dd6265be3cae7e3e9fb3e11a7e9aff3d9d8bc7b3dc6de193de6212f2c6a334'
 readonly PRODUCTION_CONTROL_RUN_ROOT='/run/leetplus-production-control'
 readonly PRODUCTION_CONTROL_INSTALL_LOCK="${PRODUCTION_CONTROL_RUN_ROOT}/install.lock"
 readonly STATE_PARENT='/var/lib/leetplus/deploy-receipts'

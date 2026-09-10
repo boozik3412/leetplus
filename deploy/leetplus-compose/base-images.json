@@ -1,0 +1,7 @@
+{
+  "node": "node:22.22.2-bookworm-slim@sha256:868499d55378719bffa87b0ed1f099591823c029b543043c09c2483468e93201",
+  "ubuntu": "ubuntu:24.04@sha256:a61567bd31828687156d735ea8eb01ba4e37636e225dd6a48ba94136a70d9d61",
+  "redis": "redis:7.0.15-bookworm@sha256:497aa9b1f103f2bbcb7f176465360aee4224a724b3438eb8131c94057cfb5659",
+  "platform": "linux/amd64",
+  "postgresVersion": "16.13"
+}

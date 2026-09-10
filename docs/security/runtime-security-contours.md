@@ -2,6 +2,25 @@
 
 Статус: **канонический current-state contract**
 
+## Docker migration candidate, 10.09.2026
+
+`deploy/leetplus-compose` is a separate CURRENT191 COMBINED migration candidate
+for server 1337. It is not installed or production-admitted. The default
+`HOST_LOOPBACK` keeps `API_BIND_HOST=127.0.0.1`. Explicit `DOCKER_BRIDGE` permits
+the container-local `0.0.0.0` listener only with the exact Compose V1 contract,
+ENFORCED tenant/file ACL, explicit COMBINED role and disabled API schedulers.
+The root Docker controller must independently attest non-host networking,
+loopback-only published ports, separate Web/data/egress networks, non-root
+identities, immutable image IDs, read-only roots and minimal secret mounts.
+An environment flag alone is never network authority. Dormant split runtimes
+remain outside this migration. Existing production systemd/install receipts
+must not be reused as target-host or worker authorization.
+
+Cutover requires exact-main Fast/Full/Compose evidence, a signed host-bound plan,
+off-host backup, restored-copy acceptance and separate production GO. Source
+and target must never simultaneously own writes or unattended provider effects.
+See `docs/deployment/docker-migration-1337.md` for the candidate's limits.
+
 Актуально на: **10.09.2026**
 Текущий runtime: active green и hot rollback blue —
 `6097dc83863e1ab44d99d15ad0c19505cf7fa3fc`; physical DB и оба runtime —

@@ -1,0 +1,10 @@
+[Unit]
+Description=LeetPlus bonus worker (requires separate signed activation)
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=30s
+Unit=leetplus-compose-worker@bonus-ledger-worker.service
+
+[Install]
+WantedBy=timers.target

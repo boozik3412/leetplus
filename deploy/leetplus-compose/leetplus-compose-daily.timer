@@ -1,0 +1,10 @@
+[Unit]
+Description=LeetPlus daily worker (requires separate signed activation)
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 Asia/Yekaterinburg
+Persistent=false
+Unit=leetplus-compose-worker@langame-daily-worker.service
+
+[Install]
+WantedBy=timers.target

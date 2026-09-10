@@ -1,0 +1,11 @@
+[Unit]
+Description=LeetPlus signed single-owner Compose worker %i
+Requires=docker.service leetplus-compose-network.service
+After=docker.service leetplus-compose-network.service
+ConditionPathExists=/var/lib/leetplus-compose/active.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/leetplus-compose worker-run --name %i
+TimeoutStartSec=1000
+UMask=0077

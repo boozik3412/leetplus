@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh exact LeetPlus provider DNS addresses
+Requires=leetplus-compose-network.service
+After=leetplus-compose-network.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/leetplus-compose-network refresh
+UMask=0077

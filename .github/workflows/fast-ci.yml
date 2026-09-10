@@ -566,6 +566,12 @@ jobs:
           pnpm --filter api lint:ci:runtime-boundary
           pnpm --filter api test:ci:runtime-boundary
 
+      - name: Verify Compose migration boundaries
+        run: |
+          pnpm --filter api exec eslint src/config/production-network-profile.ts src/config/production-network-profile.spec.ts
+          pnpm --filter api exec jest src/config/production-network-profile.spec.ts --runInBand
+          node --test deploy/leetplus-compose/*.test.mjs
+
       - name: Type-check and build API
         run: |
           pnpm --filter api typecheck

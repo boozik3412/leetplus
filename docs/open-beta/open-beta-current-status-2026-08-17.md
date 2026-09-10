@@ -1,5 +1,12 @@
 # LeetPlus open beta — текущее состояние на 10.09.2026
 
+Docker/Compose migration to server 1337 is under implementation in
+`deploy/leetplus-compose`. This is an infrastructure candidate, not production
+state or external-beta GO. Current production remains the admitted systemd
+CURRENT191 release below. Host/network, database restore, worker authority,
+off-host backup and Docker release-controller acceptance must pass separately;
+the dormant guest/corporate split is not activated by the migration.
+
 | Поле                 | Состояние                                                                                                                                                                          |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для массового открытого запуска; controlled external onboarding доступен в разрешённых pilot tenant                                                                        |

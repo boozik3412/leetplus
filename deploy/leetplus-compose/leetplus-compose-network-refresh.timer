@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh LeetPlus provider IP sets before expiry
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Unit=leetplus-compose-network-refresh.service
+
+[Install]
+WantedBy=timers.target

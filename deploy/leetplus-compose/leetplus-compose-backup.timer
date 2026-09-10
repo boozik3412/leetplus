@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily encrypted LeetPlus backup at 06:00 Yekaterinburg
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 Asia/Yekaterinburg
+Persistent=true
+Unit=leetplus-compose-backup.service
+
+[Install]
+WantedBy=timers.target

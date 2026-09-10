@@ -7,6 +7,7 @@ import {
   resolveApiRuntimeRole,
 } from './api-runtime-role';
 import { dedicatedApiDatabaseEnvironmentErrors } from './api-runtime-database';
+import { productionNetworkErrors } from './production-network-profile';
 
 const MINIMUM_PRODUCTION_SECRET_LENGTH = 32;
 const ENVIRONMENT_MARKER_KEYS = [
@@ -721,11 +722,9 @@ export function validateEnvironment(config: EnvironmentValues) {
       'LANGAME_DISCREPANCY_LOG_ROOT must be a non-root absolute POSIX path without traversal segments',
     );
   }
-  if (apiBindHost !== PRODUCTION_API_BIND_HOST) {
-    errors.push(
-      `${API_BIND_HOST_KEY} must equal ${PRODUCTION_API_BIND_HOST} in production`,
-    );
-  }
+  errors.push(
+    ...productionNetworkErrors({ ...config, API_BIND_HOST: apiBindHost }),
+  );
   if (
     requiredSecretKeys.includes('IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY') &&
     identityEmailFingerprintKeyVersion !== 'v1'

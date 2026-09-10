@@ -23,12 +23,15 @@ chmod 0644 "$tmp/cert.pem" "$tmp/bad-cert.pem"
 chmod 0600 "$tmp/key.pem"
 sudo chown 12030:12030 "$tmp/key.pem"
 docker network create --internal "$name" >/dev/null
+fixture_cidr=$(docker network inspect --format '{{(index .IPAM.Config 0).Subnet}}' "$name")
+[[ "$fixture_cidr" =~ ^[0-9./]+$ ]]
 docker run --detach --name "$name" --network "$name" --network-alias postgres --network-alias wrong-postgres \
   --read-only --cap-drop ALL --security-opt no-new-privileges --user 12030:12030 \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=536870912 \
-  --mount "type=bind,source=$tmp,target=/tls,readonly" --entrypoint /bin/bash "$postgres" -ec '
+  --mount "type=bind,source=$tmp,target=/tls,readonly" -e "FIXTURE_CIDR=$fixture_cidr" --entrypoint /bin/bash "$postgres" -ec '
     export PATH=/usr/lib/postgresql/16/bin:$PATH
     initdb -D /tmp/pg -U postgres --locale=en_US.UTF-8 -A trust >/tmp/init.log
+    printf "hostssl postgres leetplus_runtime %s trust\n" "$FIXTURE_CIDR" >>/tmp/pg/pg_hba.conf
     pg_ctl -D /tmp/pg -o "-h 0.0.0.0 -k /tmp -c ssl=on -c ssl_cert_file=/tls/cert.pem -c ssl_key_file=/tls/key.pem" -l /tmp/pg.log -w start
     psql -h /tmp -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE leetplus_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;"
     touch /tmp/ready
@@ -47,7 +50,8 @@ async function probe(host,certificate,expected){
  const url=`postgresql://leetplus_runtime:synthetic-only@${host}:5432/postgres?schema=public&connection_limit=1&pool_timeout=3&connect_timeout=3&sslmode=require&sslcert=/tls/${certificate}&sslaccept=strict`;
  const client=new PrismaClient({datasources:{db:{url}}});
  let accepted=false;
- try { const rows=await client.$queryRawUnsafe("SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()");accepted=rows[0]?.ssl===true; } catch {}
+ try { const rows=await client.$queryRawUnsafe("SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()");accepted=rows[0]?.ssl===true; }
+ catch(error) { if(expected) console.error(String(error.message).replaceAll("synthetic-only","[fixture]")); }
  finally { await client.$disconnect(); }
  if(accepted!==expected) throw new Error(`TLS policy did not enforce expected result for ${host}/${certificate}`);
 }

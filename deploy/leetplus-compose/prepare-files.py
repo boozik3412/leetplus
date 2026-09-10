@@ -168,7 +168,7 @@ hot_standby_feedback=off
             if not member.name.startswith(prefix) or member.isdir():
                 continue
             relative = member.name[len(prefix):]
-            if not member.isfile() or not re.fullmatch(r'[a-f0-9-]{36}/[A-Za-z0-9_-]+\.json', relative) or member.size > 8 * 1024 * 1024:
+            if not member.isfile() or not re.fullmatch(r'[a-f0-9-]{36}/[A-Za-z0-9_.-]{1,200}\.json', relative) or member.size > 8 * 1024 * 1024:
                 raise ValueError('Unexpected mutable audit file in source capsule')
             parent = root / 'data/langame-sync' / relative.split('/')[0]
             mkdir(parent, gid=12050, mode=0o2770)

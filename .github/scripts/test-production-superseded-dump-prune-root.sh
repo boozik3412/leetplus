@@ -304,6 +304,44 @@ fi
   || die 'def5174 systemd-symlink rejection changed effect state'
 
 setup_fixture
+root_def_internal_dangling_systemd_symlink="$new_fixture_root"
+install -d -o root -g root -m 0700 -- \
+  "$root_def_internal_dangling_systemd_symlink/run/systemd/generator/multi-user.target.wants"
+ln -s -- '../systemd-networkd.service' \
+  "$root_def_internal_dangling_systemd_symlink/run/systemd/generator/multi-user.target.wants/systemd-networkd.service"
+digest_def_internal_dangling_systemd_symlink="$(plan_digest_def5174 "$root_def_internal_dangling_systemd_symlink")"
+[[ "$digest_def_internal_dangling_systemd_symlink" =~ ^[0-9a-f]{64}$ \
+  && -f "$(def5174_target "$root_def_internal_dangling_systemd_symlink")" \
+  && -f "$(def5174_state_root "$root_def_internal_dangling_systemd_symlink")/plan.v1" ]] \
+  || die 'def5174 rejected a lexically internal dangling systemd dependency link'
+
+setup_fixture
+root_def_newline_dangling_systemd_symlink="$new_fixture_root"
+install -d -o root -g root -m 0700 -- \
+  "$root_def_newline_dangling_systemd_symlink/run/systemd/generator/multi-user.target.wants"
+ln -s -- $'../systemd-networkd.service\n' \
+  "$root_def_newline_dangling_systemd_symlink/run/systemd/generator/multi-user.target.wants/systemd-networkd.service"
+if invoke "$root_def_newline_dangling_systemd_symlink" plan --retirement-set def5174-pre-rollout \
+  --control-release-sha "$RELEASE_SHA" >/dev/null; then
+  die 'def5174 accepted a dangling systemd symlink target ending in newline'
+fi
+[[ -f "$(def5174_target "$root_def_newline_dangling_systemd_symlink")" \
+  && ! -e "$(def5174_state_root "$root_def_newline_dangling_systemd_symlink")/plan.v1" ]] \
+  || die 'def5174 newline-symlink rejection changed effect state'
+
+setup_fixture
+root_def_external_dangling_systemd_symlink="$new_fixture_root"
+ln -s -- "$root_def_external_dangling_systemd_symlink/outside/missing.service" \
+  "$root_def_external_dangling_systemd_symlink/run/systemd/generator/escaping.service"
+if invoke "$root_def_external_dangling_systemd_symlink" plan --retirement-set def5174-pre-rollout \
+  --control-release-sha "$RELEASE_SHA" >/dev/null; then
+  die 'def5174 accepted an unresolved systemd symlink escaping reviewed roots'
+fi
+[[ -f "$(def5174_target "$root_def_external_dangling_systemd_symlink")" \
+  && ! -e "$(def5174_state_root "$root_def_external_dangling_systemd_symlink")/plan.v1" ]] \
+  || die 'def5174 unresolved escaping-symlink rejection changed effect state'
+
+setup_fixture
 root_def_state_symlink="$new_fixture_root"
 ln -s -- "$(def5174_manifest "$root_def_state_symlink")" \
   "$root_def_state_symlink/var/lib/leetplus/operator-handoff/def5174-reference"

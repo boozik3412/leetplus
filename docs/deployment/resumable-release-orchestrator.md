@@ -21,7 +21,7 @@ batch. Это правило не разрешает параллельные pr
 или устного резюме недостаточно. Повтор разрешён только после записи наблюдаемой
 ошибки, её причины и конкретного изменившегося условия.
 
-Статус: **V2 production rollout завершён; V3 recovery, lane-aware metrics и root-authorized metrics retention реализованы. Все rollout operations terminal. CURRENT191 runtime operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` обслуживала release `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; её terminal POSTCHECK завершён под production-control merge SHA `73a17b2d6ba70abd8f52876aa813cac66ab7e56a`. Schema effect не выполнялся. Fresh CURRENT190 backup и его off-host copy проверены. Restored-copy execution ожидает точечного capacity retirement, чей controller ещё не admitted/installed/applied.**
+Статус: **V2 production rollout завершён; V3 recovery, lane-aware metrics и root-authorized metrics retention реализованы. Все rollout operations terminal. CURRENT191 runtime operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` обслуживала release `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; её terminal POSTCHECK завершён под production-control merge SHA `73a17b2d6ba70abd8f52876aa813cac66ab7e56a`. Schema effect не выполнялся. Fresh CURRENT190 backup и его off-host copy проверены. Exact control `1ea4f39a…` установлен; первый one-file plan остановился на E147 до plan record/effect. Restored-copy execution ожидает admission и установку узкой systemd dangling-link коррекции, затем новый plan/GO.**
 
 Актуально на: **10.09.2026**
 
@@ -44,12 +44,15 @@ production-control generation —
 SHA-проверку; dump SHA-256 —
 `882572841d0ba79fa0a7f3f347117ca9fc66f8cad30f146d35f2606364b32ca7`.
 Read-only restored-copy host preflight остановлен только на дефиците capacity.
-Отдельный target-only read-only inventory рассчитал, что future exact one-file
-effect должен поднять available bytes с `10,387,636,224` до `12,408,836,096`
-при requirement `12,103,890,199`; это projection, а не controller execution или
-authority. Source controller ещё ожидает root fixture/CI, admission, install и
-отдельный GO. Ручное изменение nginx, env, link, operation records или удаление
-backup запрещено.
+После установки exact production-control `1ea4f39a…` отдельный read-only
+inventory наблюдал available `10,356,858,880` и projected `12,378,058,752`
+bytes при прежнем requirement `12,103,890,199`; это projection, а live controller
+всё равно пересчитывает capacity перед unlink. Первый plan fail-closed остановлен
+на E147: generated `.wants` link systemd не имел файловой цели по относительному
+пути, хотя unit штатно загружен из `/usr/lib/systemd/system`. Plan/intent/receipt
+не опубликованы, backup сохранён. Source-коррекция требует новую root fixture/CI,
+admission, install и отдельный GO. Ручное изменение systemd, nginx, env, link,
+operation records или удаление backup запрещено.
 
 ## Назначение
 
@@ -708,6 +711,15 @@ system-unit load path, nested symlinks, все остальные state regular 
 extension/basename exclusions, special entries, same-filesystem identity и
 `pg_database_size + 2.5 GB` reserve. Reference/capacity gates повторяются
 непосредственно перед единственным unlink.
+
+Для systemd symlink проверяется полная normalized target path. Existing target
+разрешён только внутри compiled unit-load roots либо как `/dev/null`. Dangling
+dependency-link не является автоматической ошибкой: systemd может разрешать unit
+по basename через load path; такая ссылка допускается только если её normalized
+отсутствующая цель остаётся внутри тех же roots. Выход наружу, malformed path,
+смена inode/raw target/normalization во время inventory и ссылка на target archive
+остаются fail-closed. E147 доказал необходимость этого различия на штатной
+`multi-user.target.wants/systemd-networkd.service`.
 
 Nonauthorizing `plan` не даёт effect; `apply` требует exact installed control
 SHA, immutable plan SHA, set-specific подтверждение, exclusive install lock,

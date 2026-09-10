@@ -859,9 +859,11 @@ assert_def5174_unreferenced() {
   [[ "$retirement_set" == 'def5174-pre-rollout' ]] || return 0
   local target_path="${target_paths[0]}" candidate_parent search_root rc index
   local state_symlink unsupported_state_entry state_entry internal_path skip_entry
-  local systemd_symlink resolved_systemd_path allowed_systemd_target systemd_root_identity
+  local systemd_symlink systemd_symlink_target final_systemd_symlink_target systemd_symlink_identity
+  local normalized_systemd_path resolved_systemd_path final_normalized_systemd_path
+  local allowed_systemd_target systemd_root_identity
   local -a systemd_root_candidates systemd_roots canonical_systemd_roots
-  local -a systemd_root_identities absent_systemd_roots state_roots
+  local -a systemd_root_identities absent_systemd_roots state_roots readlink_values
   candidate_parent="$(dirname -- "$target_path")"
 
   if [[ "$fixture_mode" == true ]]; then
@@ -941,23 +943,50 @@ assert_def5174_unreferenced() {
   fi
 
   # grep -r intentionally does not follow nested symlinks. Inventory every
-  # systemd symlink separately and allow only canonical targets already inside
-  # the three scanned unit roots (plus the standard /dev/null mask).
+  # systemd symlink separately. systemd resolves dependency links by unit name
+  # through its load path, so a generated .wants link may legitimately have no
+  # filesystem target at the relative pathname. For both existing and dangling
+  # links, require the fully normalized target to remain inside one of the
+  # reviewed unit roots (plus the standard /dev/null mask). An escaping,
+  # malformed or changing link remains fail-closed.
   if find -P "${systemd_roots[@]}" -type l -print0 | \
     while IFS= read -r -d '' systemd_symlink; do
-      if resolved_systemd_path="$(readlink -e -- "$systemd_symlink")"; then
-        :
-      else
-        printf 'unresolvable systemd symlink: %s\n' "$systemd_symlink" >&2
+      systemd_symlink_identity="$(stat -c '%d:%i' -- "$systemd_symlink")" \
+        || { printf 'cannot stat systemd symlink: %s\n' "$systemd_symlink" >&2; exit 20; }
+      readlink_values=()
+      mapfile -d '' -t readlink_values < <(readlink -z -- "$systemd_symlink" 2>/dev/null)
+      ((${#readlink_values[@]} == 1)) \
+        || { printf 'cannot read systemd symlink: %s\n' "$systemd_symlink" >&2; exit 20; }
+      systemd_symlink_target="${readlink_values[0]}"
+      readlink_values=()
+      mapfile -d '' -t readlink_values < <(readlink -z -m -- "$systemd_symlink" 2>/dev/null)
+      ((${#readlink_values[@]} == 1)) \
+        || { printf 'cannot normalize systemd symlink: %s\n' "$systemd_symlink" >&2; exit 20; }
+      normalized_systemd_path="${readlink_values[0]}"
+      [[ "$normalized_systemd_path" == /* \
+        && "$systemd_symlink" != *$'\n'* \
+        && "$systemd_symlink_target" != *$'\n'* \
+        && "$normalized_systemd_path" != *$'\n'* ]] \
+        || { printf 'malformed systemd symlink: %s\n' "$systemd_symlink" >&2; exit 20; }
+      [[ "$systemd_symlink_target" != *"$target_path"* ]] \
+        || { printf 'systemd symlink directly references retirement target: %s\n' "$systemd_symlink" >&2; exit 23; }
+      readlink_values=()
+      mapfile -d '' -t readlink_values < <(readlink -z -e -- "$systemd_symlink" 2>/dev/null)
+      if ((${#readlink_values[@]} == 1)); then
+        resolved_systemd_path="${readlink_values[0]}"
+        [[ "$resolved_systemd_path" == "$normalized_systemd_path" ]] \
+          || { printf 'systemd symlink normalization drifted: %s\n' "$systemd_symlink" >&2; exit 20; }
+      elif ((${#readlink_values[@]} != 0)); then
+        printf 'systemd symlink resolved ambiguously: %s\n' "$systemd_symlink" >&2
         exit 20
       fi
       allowed_systemd_target=false
-      if [[ "$resolved_systemd_path" == /dev/null ]]; then
+      if [[ "$normalized_systemd_path" == /dev/null ]]; then
         allowed_systemd_target=true
       else
         for search_root in "${canonical_systemd_roots[@]}"; do
-          if [[ "$resolved_systemd_path" == "$search_root" \
-            || "$resolved_systemd_path" == "$search_root/"* ]]; then
+          if [[ "$normalized_systemd_path" == "$search_root" \
+            || "$normalized_systemd_path" == "$search_root/"* ]]; then
             allowed_systemd_target=true
             break
           fi
@@ -965,9 +994,23 @@ assert_def5174_unreferenced() {
       fi
       if [[ "$allowed_systemd_target" != true ]]; then
         printf 'systemd symlink escapes reviewed roots: %s -> %s\n' \
-          "$systemd_symlink" "$resolved_systemd_path" >&2
+          "$systemd_symlink" "$normalized_systemd_path" >&2
         exit 21
       fi
+      readlink_values=()
+      mapfile -d '' -t readlink_values < <(readlink -z -- "$systemd_symlink" 2>/dev/null)
+      ((${#readlink_values[@]} == 1)) \
+        || { printf 'cannot reread systemd symlink: %s\n' "$systemd_symlink" >&2; exit 22; }
+      final_systemd_symlink_target="${readlink_values[0]}"
+      readlink_values=()
+      mapfile -d '' -t readlink_values < <(readlink -z -m -- "$systemd_symlink" 2>/dev/null)
+      ((${#readlink_values[@]} == 1)) \
+        || { printf 'cannot renormalize systemd symlink: %s\n' "$systemd_symlink" >&2; exit 22; }
+      final_normalized_systemd_path="${readlink_values[0]}"
+      [[ "$(stat -c '%d:%i' -- "$systemd_symlink")" == "$systemd_symlink_identity" \
+        && "$final_systemd_symlink_target" == "$systemd_symlink_target" \
+        && "$final_normalized_systemd_path" == "$normalized_systemd_path" ]] \
+        || { printf 'systemd symlink changed during inventory: %s\n' "$systemd_symlink" >&2; exit 22; }
     done; then
     :
   else

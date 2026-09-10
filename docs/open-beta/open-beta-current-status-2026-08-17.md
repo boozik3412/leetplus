@@ -4,8 +4,8 @@
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                                                                                                                                                                                                                  |
 | Production runtime   | healthy; public active green `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, rollback blue `fa21bbe99be78313a883893b2dd6dc1d7c892777`; оба runtime contracts `CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`, physical DB `CURRENT_190/190`                                                                                            |
-| Prisma schema        | production exact `CURRENT_190/190`; migration `20260908090000_initial_owner_invite_link_mode` applied                                                                                                                                                                                                                         |
-| Release authority    | exact admitted `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf` serving; operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` paused после accepted `HYDRATE/BIND/SMOKE/CUTOVER` перед `POSTCHECK`; historical-verifier + successor-control POSTCHECK source-fix ещё не admitted/deployed                                               |
+| Prisma schema        | production exact `CURRENT_190/190`; migration `20260908090000_initial_owner_invite_link_mode` applied; `20260908180000_external_langame_simple_onboarding` pending                                                                                                                                                             |
+| Release authority    | Operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` обслуживала runtime release `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; её terminal `POSTCHECK` завершён под successor production-control merge SHA `73a17b2d6ba70abd8f52876aa813cac66ab7e56a`. Все operations terminal; final receipt SHA-256 `22f9f1f742b6f0a44a7d443b1eaf4628648f3cbe0690c1207217e8a46de2a4fc`, final production validation `17/17` at `2026-09-09T22:55:16Z` |
 | Runtime successor    | Оба worker timer enabled/active; activity `PARTIAL` автоматически продолжает cursor, ledger fallback работает в `LIVE`; worker pool `2`, activity limit `1`, timeout `15m`; API schedulers выключены                                                                                                                          |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                                                                                                                                                                                                              |
 | Role-aware landing   | входит в active `f3f119fa…`; real-account canary pending                                                                                                                                                                                                                                                                      |
@@ -18,7 +18,7 @@
 | Langame freshness    | daily и bonus-ledger timers enabled/active; public serving release — active green `a05d…`; daily worker обходит `3/3` active domains текущего admitted INTERNAL tenant                                                                                                                                                        |
 | Assortment dashboard | доступен на active green `a05d…`: источники, действия, coverage gaps, receipt metrics и 7-дневный прогноз работают; блок источников по умолчанию свёрнут, обновление всегда доступно                                                                                                                                          |
 | Guest profile owner  | exact-link и verified-phone repairs deployed в `def5174f…`; `*6330`, `*3669` и остальные выявленные split owners исправлены, active structural остаток `0`, reward replay запрещён                                                                                                                                            |
-| External Langame     | historical operation `8f70269b-e4f2-450c-b117-31e1375c68ce` safely terminalized after canonical rollback/restore; replacement `53ac0c1e-2d61-42b9-a07e-d3cbab820531` has accepted `HYDRATE/BIND/SMOKE/CUTOVER` and pending `POSTCHECK`; public/auth read components pass, DB remains CURRENT190/190, no schema effect claimed |
+| External Langame     | historical operation `8f70269b-e4f2-450c-b117-31e1375c68ce` and replacement `53ac0c1e-2d61-42b9-a07e-d3cbab820531` are terminal; replacement served runtime release `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, and its terminal `POSTCHECK` completed under successor production-control merge SHA `73a17b2d6ba70abd8f52876aa813cac66ab7e56a`. DB remains CURRENT190/190 with migration `20260908180000_external_langame_simple_onboarding` pending; no schema effect claimed, and capacity gate/restored-copy evidence remain pending |
 
 Production hotfix PR #170 развёрнут как exact SHA
 `def5174f16f49212dd21d243cda89dffeff7837f` operation
@@ -535,6 +535,19 @@ DB, systemd/runtime, сеть, public guest, corporate tenant и workers не
 вызываются. Archive reader ограничен `4 096` файлами, `128 MiB` и `131 072`
 записями. Terminal operation directories не удаляются; их предел `4 096`
 остаётся отдельным capacity boundary.
+
+`prune-three-superseded-dumps.sh` не относится к этой retention процедуре: это
+отдельная one-shot root-only capacity authority с compiled allowlist ровно трёх
+абсолютных файлов (`5,834,469,130` bytes). Ручное удаление архивов и
+произвольные paths запрещены. Она сохраняет/дважды проверяет pre-`CURRENT191`
+dump+globals; plan nonauthorizing, а apply требует exact control SHA,
+immutable plan SHA, явную фразу, install lock, installed-control verification,
+terminal rollout operations и DB exact `CURRENT190/190` с absent
+`CURRENT191/191` target. Перед exact unlink она повторно валидирует path, SHA,
+size, inode, UID/GID, mode, no-symlink/no-open-FD, fsync parent и создаёт
+immutable `0400` receipt; same-plan replay покрывает lost response. Fixture
+B075 PASS, но authority ещё не admitted/installed/applied, capacity gate
+pending; cleanup не завершён.
 
 ## Production CURRENT189 rollout (01.09.2026)
 

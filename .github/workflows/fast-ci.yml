@@ -160,25 +160,9 @@ jobs:
       - name: Verify production-control installed-generation authority
         shell: bash
         run: |
-          bash -n docs/deployment/production-control-authority/leetplus-install-production-control-v1
-          node --check docs/deployment/production-control-authority/verify-installed-production-control-generation.mjs
-          bash -n .github/scripts/test-production-control-install-authority.sh
-          authority_node="$(realpath -e -- "$(command -v node)")"
-          case "$authority_node" in
-            "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
-            *) printf 'unexpected production-control authority Node path: %s\n' "$authority_node" >&2; exit 1 ;;
-          esac
+          bash -n .github/scripts/run-production-control-authority-batch.sh
           printf 'FAST_CI_FIXTURE_PRODUCTION_CONTROL_INSTALL=START\n'
-          sudo -n /usr/bin/env -i \
-            CI=true \
-            GITHUB_ACTIONS=true \
-            LEETPLUS_FIXTURE_NODE="$authority_node" \
-            PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            LANG=C.UTF-8 \
-            LC_ALL=C.UTF-8 \
-            TZ=UTC \
-            /usr/bin/bash --noprofile --norc -p \
-            .github/scripts/test-production-control-install-authority.sh
+          bash .github/scripts/run-production-control-authority-batch.sh
           printf 'FAST_CI_FIXTURE_PRODUCTION_CONTROL_INSTALL=PASS\n'
           printf 'FAST_CI_FIXTURE_LEGACY_PREFLIGHT=START\n'
           node .github/scripts/test-legacy-rollback-auth-edge.mjs

@@ -78,7 +78,7 @@ def install(inbox, expected):
             if not item.isfile() or not item.name.startswith(prefix):
                 raise ValueError('Control archive contains non-regular or unexpected entry')
             name = item.name[len(prefix):]
-            if not re.fullmatch(r'[a-zA-Z0-9_.-]+', name) or name == 'install-manifest.json' or name in payload or item.size > 2 * 1024 * 1024:
+            if not re.fullmatch(r'[a-zA-Z0-9_.@-]+', name) or name in ['.', '..', 'install-manifest.json'] or name in payload or item.size > 2 * 1024 * 1024:
                 raise ValueError('Invalid control leaf')
             payload[name] = tar.extractfile(item).read()
     for name in ['control.sh', 'control.mjs', 'orchestrator.mjs', 'contract.mjs', 'network-fence.py']:

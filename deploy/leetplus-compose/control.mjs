@@ -80,7 +80,7 @@ function installedDigest() {
   const manifest = readJSON(`${CONTROL}/install-manifest.json`, { immutable: true });
   demand(manifest.contract === `${CONTRACT}_INSTALL` && manifest.files && Object.keys(manifest.files).length > 5, 'Missing installed control manifest');
   for (const [name, hash] of Object.entries(manifest.files)) {
-    demand(/^[a-zA-Z0-9_.-]+$/.test(name) && /^[a-f0-9]{64}$/.test(hash), 'Invalid installed file record');
+    demand(/^[a-zA-Z0-9_.@-]+$/.test(name) && !['.', '..'].includes(name) && /^[a-f0-9]{64}$/.test(hash), 'Invalid installed file record');
     demand(digest(safeFile(`${CONTROL}/${name}`)) === hash, 'Installed control digest mismatch');
   }
   for (const name of ['control.mjs', 'orchestrator.mjs', 'contract.mjs', 'control.sh']) demand(manifest.files[name], 'Required control file is not attested');

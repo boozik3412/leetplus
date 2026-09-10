@@ -110,6 +110,9 @@ def prepare(root, manifest_path, source, rehearsal):
         raise ValueError('Existing preparation must be inspected, not overwritten')
     for relative in ['', 'secrets', 'secrets/postgres', 'data', 'data/cache-quarantine', 'backups', 'backups/export', 'acme']:
         mkdir(root / relative)
+    # The SSH backup reader is jailed here; it must be able to traverse its
+    # chroot after dropping privileges. Exported payloads stay encrypted.
+    mkdir(root / 'backups/export', mode=0o755)
     mkdir(root / 'secrets/postgres', gid=12030, mode=0o750)
     mkdir(root / 'data/postgres', uid=12030, gid=12030)
     mkdir(root / 'data/redis', uid=12031, gid=12031)

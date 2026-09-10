@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import tarfile
 from pathlib import Path
 
@@ -54,7 +55,30 @@ def publish(p, content, mode):
         os.fsync(f.fileno())
 
 
-def install(inbox, expected):
+def prepared_predecessor(sha):
+    if not re.fullmatch(r'[a-f0-9]{40}', sha) or not Path('/var/lib/leetplus-compose/preparation-only').is_file():
+        raise ValueError('Exact preparation-only predecessor required')
+    if Path('/var/lib/leetplus-compose/active.json').exists() or Path('/srv/leetplus/preparation.json').exists():
+        raise ValueError('Prepared control replacement cannot change an enrolled runtime')
+    for name in ['operations', 'worker-grants']:
+        p = Path('/var/lib/leetplus-compose') / name
+        if p.exists() and any(p.iterdir()):
+            raise ValueError('Existing deployment or worker authority forbids preparation replacement')
+    containers = subprocess.check_output(['/usr/bin/docker', '--host', 'unix:///var/run/docker.sock', 'ps', '--all',
+        '--filter', 'label=ru.leetplus.contract=LEETPLUS_COMPOSE_BLUE_GREEN_V1', '--format', '{{.ID}}'], text=True)
+    if containers.strip():
+        raise ValueError('Existing project containers forbid preparation replacement')
+    root = Path('/usr/local/lib/leetplus-compose') / sha
+    manifest = json.loads(secure_file(root / 'install-manifest.json', 65536))
+    if manifest.get('releaseSha') != sha or manifest.get('contract') != 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_INSTALL':
+        raise ValueError('Predecessor manifest identity mismatch')
+    for name, expected in manifest['files'].items():
+        if not re.fullmatch(r'[a-zA-Z0-9_.@-]+', name) or name in ['.', '..'] or digest(secure_file(root / name, 2 * 1024 * 1024)) != expected:
+            raise ValueError('Predecessor installed bytes differ')
+    return root
+
+
+def install(inbox, expected, previous_sha=None):
     if os.getuid() != 0 or not re.fullmatch(r'/srv/leetplus/inbox/[a-f0-9]{40}', str(inbox)):
         raise ValueError('Exact root inbox required')
     raw = secure_file(inbox / 'docker-admission.json', 65536)
@@ -62,6 +86,9 @@ def install(inbox, expected):
         raise ValueError('Admission digest mismatch')
     admission = json.loads(raw)
     sha = inbox.name
+    previous = prepared_predecessor(previous_sha) if previous_sha else None
+    if previous_sha == sha:
+        raise ValueError('Replacement must have a different exact SHA')
     if (admission.get('contract') != 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_ADMISSION' or admission.get('decision') != 'PASS' or
             admission.get('releaseSha') != sha or admission.get('repository') != 'boozik3412/leetplus' or
             admission.get('event') != 'push' or admission.get('ref') != 'refs/heads/main'):
@@ -101,8 +128,12 @@ def install(inbox, expected):
     for name, entrypoint in [('leetplus-compose', 'control.sh'), ('leetplus-compose-network', 'network.sh'), ('leetplus-compose-backup', 'backup.sh')]:
         link = Path('/usr/local/sbin') / name
         if link.exists() or link.is_symlink():
-            if not link.is_symlink() or link.resolve() != target / entrypoint:
+            if not link.is_symlink() or link.resolve() not in [target / entrypoint, *([previous / entrypoint] if previous else [])]:
                 raise ValueError('Existing command belongs to a different control generation; explicit handoff required')
+            if link.resolve() != target / entrypoint:
+                temporary = link.with_name(link.name + '.prepared-' + sha)
+                temporary.symlink_to(target / entrypoint)
+                os.replace(temporary, link)
         else:
             link.symlink_to(target / entrypoint)
     for name, content in payload.items():
@@ -115,5 +146,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--inbox', type=Path, required=True)
     parser.add_argument('--admission-sha256', required=True)
+    parser.add_argument('--previous-prepared-control-sha')
     args = parser.parse_args()
-    install(args.inbox, args.admission_sha256)
+    install(args.inbox, args.admission_sha256, args.previous_prepared_control_sha)

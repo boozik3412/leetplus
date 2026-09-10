@@ -1,6 +1,17 @@
 # LeetPlus: Docker migration to 1337
 
-Status: implementation candidate, NOT INSTALLED / NOT ADMITTED.
+Status: preparation only; d53684a0 control installed but image hydration rejected
+before DB/application startup. No target site is serving. The original image
+archive used classic-store config IDs and an incomplete untagged OCI index;
+target containerd correctly rejected that identity mismatch.
+
+Successor image packaging uses pinned Docker29.1.3/containerd, named single-platform
+images and a fresh independent daemon import/run check for all four exact image
+IDs. Its archive-roundtrip receipt is part of admission. Do not switch the target
+daemon storage backend or substitute loaded hashes. A control successor may
+replace command links only through `--previous-prepared-control-sha`, with every
+predecessor file verified and no preparation receipt, project container, operation,
+worker grant or accepted runtime. Installed generations remain immutable.
 
 Current authorization: preparation only. Do not switch DNS or public nginx,
 stop source API/Web/worker services, promote a standby, or enable target live

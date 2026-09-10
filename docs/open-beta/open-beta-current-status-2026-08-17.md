@@ -7,6 +7,13 @@ CURRENT191 release below. Host/network, database restore, worker authority,
 off-host backup and Docker release-controller acceptance must pass separately;
 the dormant guest/corporate split is not activated by the migration.
 
+Preparation feedback 10.09: exact d53684a0 Fast34508843900 and Full34508843894
+passed; its control installed, but the image-ID gate rejected the classic-store
+archive on target Docker29/containerd before DB/application startup. Successor
+requires named OCI image export and isolated import/runtime identity acceptance.
+This remains preparation only: no public routing, source service, target writer
+or live worker activation is authorized.
+
 | Поле                 | Состояние                                                                                                                                                                          |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для массового открытого запуска; controlled external onboarding доступен в разрешённых pilot tenant                                                                        |

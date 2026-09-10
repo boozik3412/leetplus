@@ -120,12 +120,18 @@ release и использовать
 Историческая pending-CUTOVER operation
 `8f70269b-e4f2-450c-b117-31e1375c68ce` safely terminalized после canonical
 rollback/restore. Replacement operation
-`53ac0c1e-2d61-42b9-a07e-d3cbab820531` приняла
-`HYDRATE/BIND/SMOKE/CUTOVER` и имеет только pending `POSTCHECK`. Public active
+`53ac0c1e-2d61-42b9-a07e-d3cbab820531` обслуживала runtime release
+`a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; её terminal `POSTCHECK` завершён
+под successor production-control merge SHA
+`73a17b2d6ba70abd8f52876aa813cac66ab7e56a`; final receipt
+SHA-256 — `22f9f1f742b6f0a44a7d443b1eaf4628648f3cbe0690c1207217e8a46de2a4fc`,
+final production validation `17/17` — `2026-09-09T22:55:16Z`. Public active
 green — `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, rollback blue —
 `fa21bbe99be78313a883893b2dd6dc1d7c892777`. Physical DB остаётся
-`CURRENT_190/190`, contracts обоих runtime slots —
-`CURRENT_191/191 + ALLOW_CURRENT_190/OFF`; schema effect отсутствует.
+`CURRENT_190/190`, migration `20260908180000_external_langame_simple_onboarding`
+pending, contracts обоих runtime slots — `CURRENT_191/191 + ALLOW_CURRENT_190/OFF`.
+Все operations terminal; capacity gate и restored-copy evidence остаются pending,
+schema effect отсутствует.
 
 Readiness verifier для этого одного pre-DDL bridge принимает ровно два
 эквивалентных исторических identifier: legacy
@@ -197,6 +203,23 @@ apply под exclusive install/orchestrator locks. Archive остаётся ло
 root-owned evidence; runtime, DB, network и user security contours не
 затрагиваются. Наличие source bytes не разрешает установку или запуск без
 admitted production-control generation и отдельного GO.
+
+Отдельный `prune-three-superseded-dumps.sh` — одноразовый root-only controller
+capacity authority, а не расширение generic metrics retention. Его compiled
+allowlist содержит ровно три абсолютных dump-файла общей ёмкостью
+`5,834,469,130` bytes; произвольные пути и ручное удаление архивов запрещены.
+До effect controller сохраняет и дважды валидирует pre-`CURRENT191` dump и
+globals. `plan` ничего не authorizes. `apply` требует exact control SHA,
+immutable plan SHA и явную подтверждающую фразу, удерживает install lock и
+проверяет installed control, terminal status всех rollout operations и exact DB
+`CURRENT190/190` с отсутствующим target `CURRENT191/191`. Непосредственно до
+unlink и при replay он повторно сверяет для каждого allowlisted leaf path, SHA,
+size, inode, UID/GID, mode, отсутствие symlink и открытых FD; удаляет только
+exact files, fsync parent и публикует immutable `root:root 0400` receipt.
+Идемпотентный replay/lost-response continuation допускается только для того же
+неизменного плана. Fixture B075 — PASS, однако production authority ещё не
+admitted, не installed и не applied; capacity gate pending, cleanup не заявлен
+завершённым.
 
 Если approved V3 operation остановилась до runtime effect, сменить candidate
 разрешено только штатным `supersede-pre-runtime --operation-id ...

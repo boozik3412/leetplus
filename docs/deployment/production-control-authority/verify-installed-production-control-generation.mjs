@@ -13,7 +13,7 @@ const EFFECTIVE_LANES = new Set(["L1_RUNTIME", "L2_SCHEMA_SECURITY"]);
 const SAFE_SOURCE_PATTERN = /^[A-Za-z0-9_.@+/-]+$/u;
 const SAFE_DESTINATION_PATTERN = /^\/[A-Za-z0-9_.@+/-]+$/u;
 const EXPECTED_INSTALL_MAP_SHA256 =
-  "ac6a6415373f33351d31dc428534574d7fe61b22350015dd33ef47c1b60a4fe7";
+  "03b6d50cbedd35145cc2378021d344eab414beceea5b0e2c12fe8ed33c2205f8";
 const EXPECTED_REPOSITORY = "boozik3412/leetplus";
 const GENERATION_BASE = "/srv/leetplus/production-control-generations";
 const RECEIPT_BASE = "/var/lib/leetplus/deploy-receipts/production-control";
@@ -89,6 +89,7 @@ const REQUIRED_DESTINATIONS = new Set([
   "/usr/local/sbin/leetplus-langame-discrepancy-audit-authority",
   "/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority",
   "/usr/local/sbin/leetplus-promote-release-artifact",
+  "/usr/local/sbin/leetplus-prune-three-superseded-dumps",
   "/usr/local/sbin/leetplus-resumable-release-orchestrator",
   "/usr/local/sbin/leetplus-seal-release-artifact",
 ]);

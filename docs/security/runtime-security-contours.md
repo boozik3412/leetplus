@@ -7,16 +7,17 @@
 `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, rollback blue —
 `fa21bbe99be78313a883893b2dd6dc1d7c892777`; оба recovery runtime contracts
 exact `CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`, тогда как physical DB ещё
-`CURRENT_190/190`. Историческая operation
-`8f70269b-e4f2-450c-b117-31e1375c68ce` безопасно terminalized после canonical
-rollback/restore. Replacement operation
-`53ac0c1e-2d61-42b9-a07e-d3cbab820531` имеет accepted
-`HYDRATE/BIND/SMOKE/CUTOVER` и pending `POSTCHECK`; public readiness и
-authenticated tenant reads отдельно подтверждены. Обычный `resume` блокирует
-historical terminal-receipt verifier, а новая control generation не может
-унаследовать старую plan attestation. Source добавляет узкое append-only
-successor-control завершение только read-only POSTCHECK; оно ещё не admitted и
-не установлено. Schema effect отсутствует.
+`CURRENT_190/190`, а migration
+`20260908180000_external_langame_simple_onboarding` pending. Историческая
+operation `8f70269b-e4f2-450c-b117-31e1375c68ce` и replacement operation
+`53ac0c1e-2d61-42b9-a07e-d3cbab820531` terminal. Replacement обслуживала
+runtime release `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; её terminal
+`POSTCHECK` завершён под successor production-control merge SHA
+`73a17b2d6ba70abd8f52876aa813cac66ab7e56a`; final receipt SHA-256 —
+`22f9f1f742b6f0a44a7d443b1eaf4628648f3cbe0690c1207217e8a46de2a4fc`, final
+production validation `17/17` завершена в `2026-09-09T22:55:16Z`. Все
+operations terminal; capacity gate и restored-copy evidence остаются pending.
+Schema effect отсутствует.
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -28,7 +29,7 @@ fail-closed правилу одного контура снова сломать
 | Область                     | Состояние                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Runtime implementation      | active green `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, rollback blue `fa21bbe99be78313a883893b2dd6dc1d7c892777`; оба runtime contracts `CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`, physical DB `CURRENT_190/190`                                                                                                                                                                                                                                                                                                         |
-| Admission merge SHA         | exact main `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf` admitted и serving; replacement operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` paused после accepted `HYDRATE/BIND/SMOKE/CUTOVER` перед `POSTCHECK`; historical-verifier и successor-control POSTCHECK source-fix ещё не admitted/deployed                                                                                                                                                                                                                         |
+| Admission merge SHA         | Replacement operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` обслуживала runtime release `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; её terminal `POSTCHECK` завершён под successor production-control merge SHA `73a17b2d6ba70abd8f52876aa813cac66ab7e56a`. All operations terminal; final receipt SHA-256 `22f9f1f742b6f0a44a7d443b1eaf4628648f3cbe0690c1207217e8a46de2a4fc`, final production validation `17/17` at `2026-09-09T22:55:16Z`                                                                                         |
 | Production API topology     | public nginx generation 51 active green `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; rollback blue `fa21bbe99be78313a883893b2dd6dc1d7c892777`; оба bridge `COMBINED`, `ALLOW_CURRENT_190/OFF`; database остаётся `CURRENT_190/190`                                                                                                                                                                                                                                                                                          |
 | Guest bug-report repair     | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                                                                                                                                                                                                                                                                                                                            |
 | Corporate invite repair     | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                                                                                                                                                                                                                                                                                                                                 |
@@ -37,7 +38,7 @@ fail-closed правилу одного контура снова сломать
 | Corporate landing           | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Release acceleration        | 8/8 + retention: controlled five-phase rollout operation `6be461db-c600-4fe7-9e87-6267d708554e` завершён receipt `c9cbf2c9…`; V3 и trusted lane metrics merged; public/corporate/worker контуры нельзя объединять или понижать ради скорости                                                                                                                                                                                                                                                                               |
 | Langame recovery            | оба systemd timer `enabled/active`; public serving authority — active green `a05d…`; external unattended остаётся deny до отдельного admission                                                                                                                                                                                                                                                                                                                                                                             |
-| External Langame onboarding | canonical source target `CURRENT_191/191`: preview → atomic settings → manual exact-Store backfill; signed schema controller uses only the `CURRENT_190 → 191` bridge, while a pre-effect exact bridge re-pin may replace release SHA without DDL; transactional apply/check plus two final cutovers pin the SHA, terminal `OFF/LIVE` requires `final-check`; no production GO implied. Текущий bridge имеет accepted `HYDRATE/BIND/SMOKE/CUTOVER`, healthy green serving и pending `POSTCHECK`; schema effect отсутствует |
+| External Langame onboarding | canonical source target `CURRENT_191/191`: preview → atomic settings → manual exact-Store backfill; signed schema controller uses only the `CURRENT_190 → 191` bridge, while a pre-effect exact bridge re-pin may replace release SHA without DDL; transactional apply/check plus two final cutovers pin the SHA, terminal `OFF/LIVE` requires `final-check`; no production GO implied. Current operation terminal after five phases; physical DB remains `CURRENT_190/190`, migration `20260908180000_external_langame_simple_onboarding`, capacity gate and restored-copy evidence remain pending; schema effect отсутствует |
 | Telegram guest auth         | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                                                                                                                                                                                                                                                                          |
 | Staff rewards               | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                                                                                                                                                                                                                                                              |
 | Guest identity owner        | exact-link и verified-phone repairs deployed в `def5174f…`; RU-варианты подтверждённого телефона разрешаются только внутри выбранного Langame domain, неоднозначность fail-closed; все 9 выявленных split-owner дублей погашены без reward replay, контрольный остаток `0`                                                                                                                                                                                                                                                 |
@@ -489,6 +490,20 @@ systemd/runtime, timers, providers или сеть и не получает auth
 guest, corporate tenant либо worker contour. Source/CI наличие команды не
 означает её установку или запуск на production; для новой control generation и
 самой retention operation нужны отдельные admission/GO соответственно.
+
+`prune-three-superseded-dumps.sh` из production-artifact — иной, one-shot
+root-only capacity controller: не generic metrics retention. Он компилирует
+ровно три абсолютных target files (`5,834,469,130` bytes), поэтому manual
+archive deletion и arbitrary paths denied. До effect он сохраняет и дважды
+проверяет pre-`CURRENT191` dump+globals. Nonauthorizing plan не разрешает
+effect; apply принимает только exact control SHA, immutable plan SHA и явную
+фразу, держит install lock, сверяет installed control, terminal rollout
+operations и DB exact `CURRENT190/190` с отсутствующим `CURRENT191/191` target.
+Каждый effect/replay заново проверяет path/SHA/size/inode/UID/GID/mode,
+no-symlink/no-open-FD, unlink'ит только exact files, fsync parent и публикует
+immutable `root:root 0400` receipt; same-plan replay покрывает lost response.
+Fixture B075 PASS, но production authority ещё не admitted, installed или
+applied; capacity gate pending и cleanup не заявлен завершённым.
 
 Поверх impact lane действует независимый merge-candidate guard. Final runtime и
 production-control handoff разрешён только runtime-eligible exact `push` SHA в

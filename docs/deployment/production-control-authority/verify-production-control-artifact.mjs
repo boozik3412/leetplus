@@ -75,6 +75,7 @@ const REQUIRED_PATHS = [
   `${INNER_ROOT}/nginx/blue.conf.example`,
   `${INNER_ROOT}/nginx/green.conf.example`,
   `${INNER_ROOT}/preflight-release-slot.sh`,
+  `${INNER_ROOT}/prune-three-superseded-dumps.sh`,
   `${INNER_ROOT}/rebind-legacy-drain-manifest-successor.sh`,
   `${INNER_ROOT}/prepare-web-slot-cache.sh`,
   `${INNER_ROOT}/promote-release-artifact.sh`,
@@ -612,7 +613,7 @@ function assertInstallAuthorityContract(root) {
     priorLine = line;
     destinations.add(destination);
   }
-  if (lines.length !== 62) {
+  if (lines.length !== 63) {
     fail("production control install map does not have the exact reviewed entry count");
   }
   for (const requiredDestination of [
@@ -633,6 +634,7 @@ function assertInstallAuthorityContract(root) {
     "/usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1",
     "/usr/local/sbin/leetplus-langame-discrepancy-audit-authority",
     "/usr/local/sbin/leetplus-promote-release-artifact",
+    "/usr/local/sbin/leetplus-prune-three-superseded-dumps",
     "/usr/local/sbin/leetplus-resumable-release-orchestrator",
     "/usr/local/sbin/leetplus-seal-release-artifact",
   ]) {

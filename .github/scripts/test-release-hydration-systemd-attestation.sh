@@ -1215,7 +1215,7 @@ process.stdout.write(
     `PRODUCTION_CONTROL_HYDRATION_UNIT_SHA256=${digest("/etc/systemd/system/leetplus-release-hydrate@.service")}\n` +
     `PRODUCTION_CONTROL_SEALER_SHA256=${digest("/usr/local/sbin/leetplus-seal-release-artifact")}\n` +
     `PRODUCTION_CONTROL_PROMOTER_SHA256=${digest("/usr/local/sbin/leetplus-promote-release-artifact")}\n` +
-    `PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=62\n` +
+    `PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=63\n` +
     `PRODUCTION_CONTROL_EFFECTIVE_LANE=L1_RUNTIME\n` +
     `PRODUCTION_CONTROL_IMPACT_RECEIPT_SHA256=${"f".repeat(64)}\n`,
 );

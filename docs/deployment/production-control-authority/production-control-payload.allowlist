@@ -19,6 +19,7 @@ docs/deployment/production-artifact/preflight-legacy-rollback.sh
 docs/deployment/production-artifact/preflight-release-slot.sh
 docs/deployment/production-artifact/prepare-web-slot-cache.sh
 docs/deployment/production-artifact/promote-release-artifact.sh
+docs/deployment/production-artifact/prune-three-superseded-dumps.sh
 docs/deployment/production-artifact/rebind-legacy-drain-manifest-successor.sh
 docs/deployment/production-artifact/resumable-release-orchestrator.mjs
 docs/deployment/production-artifact/resumable-release-orchestrator.sh

@@ -17,6 +17,7 @@ docs/deployment/production-artifact/preflight-legacy-rollback.sh	/srv/leetplus/c
 docs/deployment/production-artifact/preflight-release-slot.sh	/usr/local/libexec/leetplus/preflight-release-slot.sh	0555
 docs/deployment/production-artifact/prepare-web-slot-cache.sh	/usr/local/libexec/leetplus/prepare-web-slot-cache.sh	0555
 docs/deployment/production-artifact/promote-release-artifact.sh	/usr/local/sbin/leetplus-promote-release-artifact	0500
+docs/deployment/production-artifact/prune-three-superseded-dumps.sh	/usr/local/sbin/leetplus-prune-three-superseded-dumps	0500
 docs/deployment/production-artifact/rebind-legacy-drain-manifest-successor.sh	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/rebind-legacy-drain-manifest-successor.sh	0400
 docs/deployment/production-artifact/rebind-legacy-drain-manifest-successor.sh	/usr/local/sbin/leetplus-rebind-legacy-drain-manifest-successor	0500
 docs/deployment/production-artifact/resumable-release-orchestrator.mjs	/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs	0555

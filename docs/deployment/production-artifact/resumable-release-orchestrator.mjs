@@ -1753,7 +1753,7 @@ function verifyInstalledControl(releaseSha, paths, args) {
     lines.length !== 17 ||
     lines[0] !== "PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS" ||
     lines[1] !== "PRODUCTION_CONTROL_RELEASE_SHA=" + releaseSha ||
-    lines[13] !== "PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=62" ||
+    lines[13] !== "PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=63" ||
     laneMatch === null ||
     impactMatch === null ||
     lines[16] !== ""

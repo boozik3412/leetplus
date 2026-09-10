@@ -15,21 +15,25 @@ Fail-fast применяется только перед production effect ил�
 batch. Это правило не разрешает параллельные production mutations и не
 ослабляет фазовые fail-closed границы оркестратора.
 
-Статус: **V2 production rollout завершён; V3 recovery, lane-aware metrics и root-authorized metrics retention реализованы. CURRENT191 runtime cutover принят, но операция не terminal: pending POSTCHECK ожидает admitted successor-control completion. Schema effect не выполнялся.**
+Статус: **V2 production rollout завершён; V3 recovery, lane-aware metrics и root-authorized metrics retention реализованы. Все операции terminal. CURRENT191 runtime rollout operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` обслуживала release `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; её terminal POSTCHECK завершён под successor production-control merge SHA `73a17b2d6ba70abd8f52876aa813cac66ab7e56a`. Schema effect не выполнялся. Capacity gate и restored-copy evidence остаются pending.**
 
 Актуально на: **10.09.2026**
 
 Историческая operation `8f70269b-e4f2-450c-b117-31e1375c68ce` безопасно
-terminalized после canonical BIND rollback и byte-exact env restore. Текущая
-operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` приняла
-`HYDRATE/BIND/SMOKE/CUTOVER`; есть единственный pending `POSTCHECK` intent.
-Physical DB остаётся `CURRENT_190/190`, оба runtime slot contracts — exact
-`CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`. Public nginx generation 51
-обслуживает active green `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, rollback
-blue — `fa21bbe99be78313a883893b2dd6dc1d7c892777`; independent public readiness
-и authenticated reads проходят. Обычный `resume` не разрешается переносить на
-новую control generation: завершение требует узкой successor-control процедуры
-ниже. Ручное изменение nginx, env, link или operation records запрещено.
+terminalized после canonical BIND rollback и byte-exact env restore. Replacement
+operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` обслуживала runtime release
+`a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; её terminal `POSTCHECK`
+завершён под successor production-control merge SHA
+`73a17b2d6ba70abd8f52876aa813cac66ab7e56a`. Её final receipt SHA-256 —
+`22f9f1f742b6f0a44a7d443b1eaf4628648f3cbe0690c1207217e8a46de2a4fc`, а final
+production validation `17/17` завершена в `2026-09-09T22:55:16Z`. Physical DB
+остаётся `CURRENT_190/190`; migration
+`20260908180000_external_langame_simple_onboarding` pending. Оба runtime slot
+contracts — exact `CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`; public nginx
+generation 51 обслуживает active green `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`,
+rollback blue — `fa21bbe99be78313a883893b2dd6dc1d7c892777`. Capacity gate и
+restored-copy evidence остаются pending. Ручное изменение nginx, env, link или
+operation records запрещено.
 
 ## Назначение
 
@@ -664,6 +668,23 @@ authoritative operation directories: duration p50/p95 по-прежнему чи
 terminal receipt chains, для которых действует отдельный предел `4 096`.
 Будущий operation-history archive обязан сохранить status/replay semantics и
 оформляется отдельным controller до достижения этого объёма.
+
+### One-shot retirement трёх superseded dumps
+
+`docs/deployment/production-artifact/prune-three-superseded-dumps.sh` —
+отдельная one-shot root-only capacity authority, не generic metrics retention и
+не operation-history archive. В его compiled allowlist ровно три абсолютных
+файла (`5,834,469,130` bytes суммарно); ручное удаление архивов или подстановка
+путей запрещены. Он сохраняет и дважды валидирует pre-`CURRENT191` dump+globals.
+Неauthorizing `plan` не даёт effect; `apply` требует exact control SHA,
+immutable plan SHA, явную фразу подтверждения, install lock и проверку
+installed control, terminal всех rollout operations и exact DB
+`CURRENT190/190` при отсутствии `CURRENT191/191` target. Before-unlink/replay
+проверяет path/SHA/size/inode/UID/GID/mode, no-symlink и no-open-FD, unlink'ит
+лишь exact allowlisted leaves, fsync parent и публикует immutable `0400`
+receipt. Replay после lost response идемпотентен только для неизменного плана.
+Fixture B075 PASS; production authority не admitted/installed/applied, capacity
+gate pending, поэтому cleanup не считается завершённым.
 
 Нельзя начинать новую операцию, редактировать records или вручную увеличивать
 generation, пока предыдущая цепочка не получила terminal status либо не была

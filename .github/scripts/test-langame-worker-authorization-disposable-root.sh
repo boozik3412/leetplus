@@ -224,16 +224,16 @@ test ! -e /var/lib/leetplus/langame-worker-authorizations/active-timer.permit
 test ! -e /etc/systemd/system/leetplus-langame-daily-worker.timer.d/91-leetplus-langame-worker-authorization.conf
 test "$(cat /run/langame-fixture/timer-enabled 2>/dev/null || echo 0)" = 0
 
-# Re-authorize the original release, then model three accepted cutovers without
+# Re-authorize the original release, then model five accepted cutovers without
 # renewing the timer permit. The old timer permit must be removable only through
 # a complete, contiguous cutover chain; no worker invocation is allowed during
 # that transition.
 apply timer
 mkdir -p "/srv/leetplus/releases/${sha_a}" "/srv/leetplus/releases/${sha_c}" "/srv/leetplus/releases/${sha_d}"
 rm -f /srv/leetplus/slots/blue
-ln -s "/srv/leetplus/releases/${sha_c}" /srv/leetplus/slots/blue
+ln -s "/srv/leetplus/releases/${sha_d}" /srv/leetplus/slots/blue
 ln -s "/srv/leetplus/releases/${sha_d}" /srv/leetplus/slots/green
-printf 'RELEASE_SHA=%s\n' "$sha_c" >/etc/leetplus/slots.blue.env
+printf 'RELEASE_SHA=%s\n' "$sha_d" >/etc/leetplus/slots.blue.env
 printf 'RELEASE_SHA=%s\n' "$sha_d" >/etc/leetplus/slots.green.env
 chown root:leetplus-runtime /etc/leetplus/slots.blue.env /etc/leetplus/slots.green.env
 chmod 440 /etc/leetplus/slots.blue.env /etc/leetplus/slots.green.env
@@ -271,10 +271,13 @@ EOF
 }
 cutover_receipt_g2="$(write_cutover_receipt 20260905T010203123456789Z 2 "$sha_a" green "$sha_b" blue)"
 cutover_receipt_g3="$(write_cutover_receipt 20260905T020304123456789Z 3 "$sha_c" blue "$sha_a" green)"
-cutover_receipt="$(write_cutover_receipt 20260905T030405123456789Z 4 "$sha_d" green "$sha_c" blue)"
+cutover_receipt_g4="$(write_cutover_receipt 20260905T030405123456789Z 4 "$sha_d" green "$sha_c" blue)"
+# Profile-only finalization moves traffic between two slots of the same release.
+cutover_receipt_g5="$(write_cutover_receipt 20260905T040506123456789Z 5 "$sha_d" blue "$sha_d" green)"
+cutover_receipt="$(write_cutover_receipt 20260905T050607123456789Z 6 "$sha_d" green "$sha_d" blue)"
 cat >/var/lib/leetplus/deploy-receipts/latest-accepted.index <<EOF
 RECORD_VERSION=2
-GENERATION=4
+GENERATION=6
 RECEIPT_PATH=${cutover_receipt}
 RECEIPT_SHA256=$(sha256sum "$cutover_receipt" | awk '{ print $1 }')
 CONSUMED=false
@@ -290,7 +293,7 @@ fi
 mv "${cutover_receipt_g3}.hold" "$cutover_receipt_g3"
 supersede_plan_json="$(/usr/local/sbin/leetplus-langame-daily-worker-authorization-authority supersede-plan --control-release-sha "$sha_d")"
 grep -F '"authorizationSlot":"blue"' <<<"$supersede_plan_json" >/dev/null
-grep -F '"cutoverChainLength":3' <<<"$supersede_plan_json" >/dev/null
+grep -F '"cutoverChainLength":5' <<<"$supersede_plan_json" >/dev/null
 supersede_plan="$(sed -n 's/.*"planSha256":"\([0-9a-f]*\)".*/\1/p' <<<"$supersede_plan_json")"
 test -n "$supersede_plan"
 /usr/local/sbin/leetplus-langame-daily-worker-authorization-authority supersede-apply \

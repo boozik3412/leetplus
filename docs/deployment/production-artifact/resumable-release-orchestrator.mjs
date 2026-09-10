@@ -1572,11 +1572,16 @@ function bindSlotEnvironment(plan, authority, paths, args) {
     "ORCHESTRATOR_SLOT_ENVIRONMENT_BACKUP_INVALID",
     { allowLegacyApiBindHost: true },
   );
-  const expectedPreviousReleaseSha =
-    authority.priorState === "BOUND"
-      ? authority.priorReleaseSha
-      : plan.previousReleaseSha;
   const slotRuntimeProfile = slotRuntimeProfileForPlan(plan);
+  // Finalization changes only the profile of the already-bound release.
+  // Its signed schema-check receipt and latest binding pin that release;
+  // PRIOR_RELEASE_SHA describes the earlier link transition, not this env.
+  const expectedPreviousReleaseSha =
+    slotRuntimeProfile === SLOT_RUNTIME_PROFILE_CURRENT191_FINAL
+      ? plan.releaseSha
+      : authority.priorState === "BOUND"
+        ? authority.priorReleaseSha
+        : plan.previousReleaseSha;
   const previousMigration = previousValues.get("EXPECTED_DATABASE_MIGRATION");
   const previousMigrationCount = Number(
     previousValues.get("EXPECTED_DATABASE_MIGRATION_COUNT"),

@@ -21,7 +21,17 @@ batch. Это правило не разрешает параллельные pr
 или устного резюме недостаточно. Повтор разрешён только после записи наблюдаемой
 ошибки, её причины и конкретного изменившегося условия.
 
-Статус: **V2 production rollout завершён; V3 recovery, lane-aware metrics и root-authorized metrics retention реализованы. Все rollout operations terminal. CURRENT191 runtime operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` обслуживала release `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; её terminal POSTCHECK завершён под production-control merge SHA `73a17b2d6ba70abd8f52876aa813cac66ab7e56a`. Schema effect не выполнялся. Fresh CURRENT190 backup и его off-host copy проверены. Exact control `1ea4f39a…` установлен; первый one-file plan остановился на E147 до plan record/effect. Restored-copy execution ожидает admission и установку узкой systemd dangling-link коррекции, затем новый plan/GO.**
+Статус: **CURRENT191 runtime/schema завершены на6097dc83863e1ab44d99d15ad0c19505cf7fa3fc. Оба final profiles OFF/LIVE, physical191, generation55, schema final-check и итоговая acceptance PASS. Daily worker canary/timer восстановлены; незавершённых rollout operations нет.**
+
+Актуальные receipts и правила: [CURRENT191 completion](current191-completion-2026-09-10.md).
+
+Для `current191-final` текущий env относится к уже привязанному `plan.releaseSha`.
+Исторический `PRIOR_RELEASE_SHA` последнего BIND может быть другим и не является
+ожидаемым current env. Source fix учитывает это только для final profile;
+signed schema-check, current binding, fencing и остальные profiles неизменны.
+
+Ниже сохранена история подготовки до завершения CURRENT191; её старые
+runtime/schema/capacity значения не заменяют актуальный checkpoint выше.
 
 Актуально на: **10.09.2026**
 

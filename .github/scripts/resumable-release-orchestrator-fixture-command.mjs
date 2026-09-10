@@ -151,8 +151,17 @@ function writeBindReceipt(slot) {
     ["REQUESTED_PROVENANCE_SHA256", "4".repeat(64)],
     ["REQUESTED_HYDRATION_ATTESTATION_SHA256", "5".repeat(64)],
     ["PRIOR_STATE", "BOUND"],
-    ["PRIOR_RELEASE_SHA", state.sourceReleaseSha],
-    ["PRIOR_TARGET", path.join(releaseRoot, state.sourceReleaseSha)],
+    [
+      "PRIOR_RELEASE_SHA",
+      state.bindingPriorReleaseSha ?? state.sourceReleaseSha,
+    ],
+    [
+      "PRIOR_TARGET",
+      path.join(
+        releaseRoot,
+        state.bindingPriorReleaseSha ?? state.sourceReleaseSha,
+      ),
+    ],
     ["PRIOR_SHA256SUMS_SHA256", "7".repeat(64)],
     ["PRIOR_HYDRATED_SHA256SUMS_SHA256", "8".repeat(64)],
     ["PRIOR_SYMLINK_MANIFEST_SHA256", "9".repeat(64)],

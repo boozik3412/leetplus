@@ -296,6 +296,8 @@ async function setupFixture(suffix = "", environmentOptions = {}) {
     slotMasked: false,
     slotFailed: false,
     sourceReleaseSha,
+    bindingPriorReleaseSha:
+      environmentOptions.bindingPriorReleaseSha ?? sourceReleaseSha,
     stopCalls: 0,
     targetSlot: "blue",
     unmaskCalls: 0,
@@ -1365,6 +1367,44 @@ test("authorizes only the exact CURRENT191 final runtime profile", async (t) => 
     "utf8",
   );
   assert.match(accepted, /EXPECTED_DATABASE_MIGRATION_COUNT=191/u);
+  assert.match(accepted, /GUEST_BUG_REPORTING_MODE=LIVE/u);
+  assert.match(accepted, /GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF/u);
+});
+
+test("finalizes CURRENT191 when the existing binding has a historical prior release", async (t) => {
+  const root = await setupFixture("current191-final-historical-bind-", {
+    bridgeMode: "ALLOW_CURRENT_190",
+    bugReportingMode: "OFF",
+    migration: CURRENT191_MIGRATION,
+    migrationCount: 191,
+    releaseSha: RELEASE_SHA,
+    bindingPriorReleaseSha: PREVIOUS_SHA,
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const checkReceipt = await publishCurrent191CheckReceipt(root);
+  assert.equal(
+    await main(
+      current191PrepareArgs(root, "current191-final", {
+        checkReceiptSha256: checkReceipt.receiptSha256,
+      }),
+    ),
+    0,
+  );
+  const planPath = path.join(
+    root,
+    "var/lib/leetplus/deploy-receipts/release-orchestrator",
+    OPERATION_ID,
+    "plan.json",
+  );
+  const plan = JSON.parse(await readFile(planPath, "utf8"));
+  assert.equal(
+    await main(continuationArgs("apply", root, canonicalRecordSha256(plan))),
+    0,
+  );
+  const accepted = await readFile(
+    path.join(root, "etc/leetplus/slots/blue.env"),
+    "utf8",
+  );
   assert.match(accepted, /GUEST_BUG_REPORTING_MODE=LIVE/u);
   assert.match(accepted, /GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF/u);
 });

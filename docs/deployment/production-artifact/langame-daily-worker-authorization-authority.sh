@@ -1007,7 +1007,7 @@ assert_latest_cutover_transition() {
   [[ "$receipt_generation" == "$indexed_generation" && "$receipt_slot" == "$active_slot" && "$receipt_release" == "$release_sha" ]] \
     || die 'latest accepted cutover does not describe the active release'
   [[ ( "$receipt_previous_slot" == blue || "$receipt_previous_slot" == green )
-    && "$receipt_previous_slot" != "$active_slot" && "$receipt_previous_release" =~ $RELEASE_RE && "$receipt_previous_release" != "$release_sha" ]] \
+    && "$receipt_previous_slot" != "$active_slot" && "$receipt_previous_release" =~ $RELEASE_RE ]] \
     || die 'latest accepted cutover has no exact previous release transition'
   [[ "$(record_value "$indexed_path" PREVIOUS_RUNTIME_KIND)" == SLOT
     && "$previous_target" == "/etc/nginx/leetplus/upstreams/${receipt_previous_slot}.conf"

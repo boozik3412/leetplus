@@ -1,5 +1,22 @@
 # SHA-bound production artifact staging
 
+## Production checkpoint 10.09.2026
+
+Runtime и installed control — `6097dc83863e1ab44d99d15ad0c19505cf7fa3fc`,
+оба slot final `OFF/LIVE`, physical schema `CURRENT_191/191`, generation55.
+Fresh backup/off-host, restored-copy migration/runtime acceptance и production
+schema `final-check` прошли. Подробный актуальный checkpoint, сохранённые
+receipts и границы signed operator recovery описаны в
+[CURRENT191 completion](../current191-completion-2026-09-10.md).
+Ниже также сохранены исторические этапы подготовки; их прежние pending-статусы
+не являются текущим runtime state.
+
+Source correction для следующих deploy различает current final env и
+historical prior BIND release. Worker supersession допускает одинаковый SHA
+на последнем blue/green ребре только при полной проверке непрерывной истории
+до действительно устаревшего permit. Это не ослабляет tenant/store isolation,
+подпись schema plan или проверку installed control.
+
 `stage-release-artifact.sh` является только подготовительной частью
 production-release. Он принимает artifact, который уже был выпущен GitHub Full
 Release Admission для одного exact SHA, проверяет его целостность и помещает в

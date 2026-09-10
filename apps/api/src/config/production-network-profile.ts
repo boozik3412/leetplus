@@ -33,6 +33,39 @@ export function productionNetworkErrors(config: Record<string, unknown>) {
   if (config.DESIGN_PARTNER_ISOLATED_MODE === 'true') {
     errors.push('DOCKER_BRIDGE is not a design-partner runtime admission');
   }
+  try {
+    const url = new URL(String(config.DATABASE_URL ?? ''));
+    const expected = new Map([
+      ['schema', 'public'],
+      ['connection_limit', '4'],
+      ['pool_timeout', '5'],
+      ['connect_timeout', '5'],
+      ['sslmode', 'require'],
+      ['sslcert', '/run/secrets/db-ca.pem'],
+      ['sslaccept', 'strict'],
+    ]);
+    if (
+      url.protocol !== 'postgresql:' ||
+      url.username !== 'leetplus_runtime' ||
+      url.hostname !== 'postgres' ||
+      !['', '5432'].includes(url.port) ||
+      url.pathname !== '/leetplus' ||
+      !url.password ||
+      url.hash ||
+      [...url.searchParams.keys()].length !== expected.size ||
+      [...expected].some(
+        ([key, value]) =>
+          url.searchParams.getAll(key).length !== 1 ||
+          url.searchParams.get(key) !== value,
+      )
+    ) {
+      errors.push(
+        'DOCKER_BRIDGE requires the bounded non-owner Prisma database role and strict certificate verification',
+      );
+    }
+  } catch {
+    errors.push('DOCKER_BRIDGE requires a valid bounded PostgreSQL URL');
+  }
   for (const key of [
     'ACCESS_SCOPE_ENFORCEMENT_MODE',
     'STAFF_ATTACHMENT_ACL_MODE',

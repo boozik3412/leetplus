@@ -19,8 +19,8 @@ export function validateWorkerGrant(envelope, publicKey, active, hostIdentitySha
   const url = new URL(profile.DATABASE_URL);
   demand(['postgresql:', 'postgres:'].includes(url.protocol) && decodeURIComponent(url.username) === 'leetplus_runtime' && url.hostname === 'postgres' && url.pathname === '/leetplus', 'Worker must use the bounded application DB role');
   demand(url.searchParams.get('connection_limit') === '2' && url.searchParams.get('schema') === 'public' && url.searchParams.get('pool_timeout') === '5' && url.searchParams.get('connect_timeout') === '5', 'Worker connection budget mismatch');
-  demand(url.searchParams.get('sslmode') === 'verify-full' && url.searchParams.get('sslrootcert') === '/run/secrets/db-ca.pem', 'Worker database TLS verification is required');
-  const allowed = new Set(['schema', 'connection_limit', 'pool_timeout', 'connect_timeout', 'sslmode', 'sslrootcert']);
+  demand(url.searchParams.get('sslmode') === 'require' && url.searchParams.get('sslcert') === '/run/secrets/db-ca.pem' && url.searchParams.get('sslaccept') === 'strict', 'Worker database TLS verification is required');
+  const allowed = new Set(['schema', 'connection_limit', 'pool_timeout', 'connect_timeout', 'sslmode', 'sslcert', 'sslaccept']);
   for (const key of url.searchParams.keys()) demand(allowed.has(key) && url.searchParams.getAll(key).length === 1, 'Unknown or duplicate worker DB option');
   return grant;
 }

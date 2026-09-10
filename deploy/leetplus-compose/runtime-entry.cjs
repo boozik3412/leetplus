@@ -12,6 +12,10 @@ const mode = process.argv[2];
 if (!Object.hasOwn(commands, mode) || process.argv.length !== 3 || process.getuid() === 0) {
   throw new Error('Only an exact non-root runtime entrypoint is allowed');
 }
+// The only shared writable API/daily-worker mount is the declared audit tree.
+// Setgid directories must stay writable by the other slot after a new tenant
+// directory is created. Web and the other worker keep a private umask.
+process.umask(mode === 'api' || mode === 'langame-daily-worker' ? 0o007 : 0o077);
 const metadata = JSON.parse(fs.readFileSync('/app/release.json', 'utf8'));
 if (metadata.contract !== 'LEETPLUS_COMPOSE_BLUE_GREEN_V1' || process.env.RELEASE_SHA !== metadata.releaseSha ||
     process.env.BUILD_TIME !== metadata.builtAt || process.env.EXPECTED_DATABASE_MIGRATION !== metadata.migration ||

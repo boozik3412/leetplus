@@ -5,6 +5,8 @@ const docker = {
   COMPOSE_RUNTIME_CONTRACT: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1',
   API_BIND_HOST: '0.0.0.0',
   API_RUNTIME_ROLE: 'COMBINED',
+  DATABASE_URL:
+    'postgresql://leetplus_runtime:fixture-only@postgres:5432/leetplus?schema=public&connection_limit=4&pool_timeout=5&connect_timeout=5&sslmode=require&sslcert=/run/secrets/db-ca.pem&sslaccept=strict',
   ACCESS_SCOPE_ENFORCEMENT_MODE: 'ENFORCED',
   STAFF_ATTACHMENT_ACL_MODE: 'ENFORCED',
   GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED: 'false',
@@ -58,5 +60,20 @@ describe('production network profile', () => {
         productionNetworkErrors({ ...docker, [key as string]: value }),
       ).not.toEqual([]);
     }
+  });
+  it.each([
+    ['leetplus_runtime:', 'postgres:'],
+    ['@postgres:', '@another:'],
+    ['connection_limit=4', 'connection_limit=40'],
+    ['sslmode=require', 'sslmode=disable'],
+    ['sslaccept=strict', 'sslaccept=accept_invalid_certs'],
+    ['schema=public', 'schema=public&schema=private'],
+  ])('rejects unsafe database transport %s', (from, to) => {
+    expect(
+      productionNetworkErrors({
+        ...docker,
+        DATABASE_URL: docker.DATABASE_URL.replace(from, to),
+      }),
+    ).not.toEqual([]);
   });
 });

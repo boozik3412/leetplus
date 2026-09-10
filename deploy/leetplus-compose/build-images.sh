@@ -63,10 +63,11 @@ done
 if [[ "$ready" != true ]]; then docker logs "$web_name"; exit 1; fi
 docker rm --force "$web_name" >/dev/null
 trap - EXIT
+bash deploy/leetplus-compose/test-prisma-tls.sh "$api_id" "$pg_id" "$output/transport-validation.json"
 docker save "$api_id" "$web_id" "$pg_id" "$redis_id" | gzip -1 > "$output/images.tar.gz"
 git archive --format=tar.gz --output="$output/control.tar.gz" "$sha" deploy/leetplus-compose
 (
   cd "$output"
-  sha256sum images.tar.gz release.json control.tar.gz compose.rehearsal.json > SHA256SUMS
+  sha256sum images.tar.gz release.json control.tar.gz compose.rehearsal.json transport-validation.json > SHA256SUMS
   sha256sum --check --strict SHA256SUMS
 )

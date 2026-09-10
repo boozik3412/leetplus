@@ -7,7 +7,7 @@ import { validateWorkerGrant } from './worker-authority.mjs';
 test('worker grant is bound to host, active generation, exact tenant, secret profile and bounded pool', () => {
   const keys = crypto.generateKeyPairSync('ed25519');
   const pub = keys.publicKey.export({ type: 'spki', format: 'pem' });
-  const profile = { DATABASE_URL: 'postgresql://leetplus_runtime:fixture@postgres/leetplus?schema=public&connection_limit=2&pool_timeout=5&connect_timeout=5&sslmode=verify-full&sslrootcert=/run/secrets/db-ca.pem', GUEST_BONUS_LEDGER_WORKER_TENANT_SLUG: 'demo', GUEST_BONUS_LEDGER_WORKER_CANARY: 'false' };
+  const profile = { DATABASE_URL: 'postgresql://leetplus_runtime:fixture@postgres/leetplus?schema=public&connection_limit=2&pool_timeout=5&connect_timeout=5&sslmode=require&sslcert=/run/secrets/db-ca.pem&sslaccept=strict', GUEST_BONUS_LEDGER_WORKER_TENANT_SLUG: 'demo', GUEST_BONUS_LEDGER_WORKER_CANARY: 'false' };
   const bytes = Buffer.from(canonical(profile));
   const active = { activeSlot: 'blue', generation: 1, blue: { releaseSha: 'a'.repeat(40) } };
   const host = 'b'.repeat(64);

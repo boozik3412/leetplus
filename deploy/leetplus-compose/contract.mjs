@@ -61,7 +61,7 @@ export function renderCompose({ blue, green, activeSlot = 'blue', rehearsal = fa
     const api = `api-${slot}`, web = `web-${slot}`;
     const apiBase = base(api, r.images.api, r, '1g', '2.0');
     services[api] = { ...apiBase, entrypoint: ['node', '/opt/leetplus/runtime-entry.cjs'], command: ['api'], environment: { ...SAFE_API, ...metadata(r) },
-      ports: [{ target: 4000, published: String(PORTS[slot].api + (rehearsal ? 1000 : 0)), host_ip: '127.0.0.1', protocol: 'tcp' }],
+      ports: [{ target: 4000, published: String(PORTS[slot].api + (rehearsal ? 10000 : 0)), host_ip: '127.0.0.1', protocol: 'tcp' }],
       networks: { ...network(slot, 2), ...network('data', slot === 'blue' ? 10 : 11), ...(!rehearsal ? network('egress', slot === 'blue' ? 10 : 11) : {}) },
       volumes: [bind(`secrets/${api}.json`, '/run/secrets/runtime.json'), bind('secrets/db-ca.pem', '/run/secrets/db-ca.pem'), bind('data/langame-sync', '/var/lib/leetplus/langame-sync', false)],
       group_add: ['12050'],
@@ -70,7 +70,7 @@ export function renderCompose({ blue, green, activeSlot = 'blue', rehearsal = fa
     };
     services[web] = { ...base(web, r.images.web, r), entrypoint: ['node', '/opt/leetplus/runtime-entry.cjs'], command: ['web'],
       environment: { ...metadata(r), NODE_ENV: 'production', API_URL: `http://${api}:4000`, NEXT_PUBLIC_API_URL: 'https://api.leetplus.ru', NEXT_TELEMETRY_DISABLED: '1' },
-      ports: [{ target: 3000, published: String(PORTS[slot].web + (rehearsal ? 1000 : 0)), host_ip: '127.0.0.1', protocol: 'tcp' }],
+      ports: [{ target: 3000, published: String(PORTS[slot].web + (rehearsal ? 10000 : 0)), host_ip: '127.0.0.1', protocol: 'tcp' }],
       networks: network(slot, 3), volumes: [bind(`data/web-cache-${slot}`, '/app/apps/web/.next/cache', false)],
       healthcheck: { test: ['CMD', 'node', '/opt/leetplus/health.cjs', 'web'], interval: '10s', timeout: '6s', retries: 9, start_period: '30s' },
       depends_on: { [api]: { condition: 'service_healthy' } },

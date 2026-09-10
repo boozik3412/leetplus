@@ -45,7 +45,7 @@ docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=536
     pg_ctl -D /tmp/pg -o "-k /tmp -h 127.0.0.1" -l /tmp/pg.log -w start
     trap "pg_ctl -D /tmp/pg -m fast -w stop" EXIT
     test "$(psql -h /tmp -d postgres -Atc "show server_version_num")" = 160013
-    test "$(psql -h /tmp -d postgres -Atc "show lc_collate")" = en_US.UTF-8
+    test "$(psql -h /tmp -d postgres -Atc "SELECT datcollate FROM pg_database WHERE datname = current_database()")" = en_US.UTF-8
   '
 web_name="leetplus-image-test-${sha:0:12}"
 docker run --detach --name "$web_name" --network none --read-only --cap-drop ALL --security-opt no-new-privileges \

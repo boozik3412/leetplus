@@ -147,6 +147,8 @@ function driverFor(dir) {
   return {
     preflight: async (p) => {
       demand(hostIdentity() === p.hostIdentitySha256 && installedDigest() === p.controlSha256, 'Host/control identity drift');
+      for (const [leaf, hash] of Object.entries(p.secretDigests)) demand(digest(safeFile(`${ROOT}/secrets/${leaf}`)) === hash, 'Runtime secret-file binding drift');
+      demand(digest(safeFile('/etc/leetplus-compose/providers.json')) === p.networkPolicySha256, 'Provider policy binding drift');
       run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, 'verify']);
       assertNoPending(p.operationId);
       const current = active();
@@ -265,6 +267,8 @@ if (command === 'help' || !command) {
     const request = readJSON(options.request);
     const previous = active(), id = crypto.randomUUID();
     const plan = { ...request, contract: `${CONTRACT}_PLAN`, operationId: id, hostIdentitySha256: hostIdentity(), controlSha256: installedDigest(), previous, generation: previous?.generation ?? 0, action: previous ? 'ROLLOUT' : 'BOOTSTRAP' };
+    plan.secretDigests = Object.fromEntries(['acceptance.json', 'api-blue.json', 'api-green.json', 'db-ca.pem'].map(leaf => [leaf, digest(safeFile(`${ROOT}/secrets/${leaf}`))]));
+    plan.networkPolicySha256 = digest(safeFile('/etc/leetplus-compose/providers.json'));
     plan.composeSha256 = digest(renderCompose({ blue: plan.blue, green: plan.green, activeSlot: plan.targetSlot }));
     validatePlan(plan);
     const dir = operation(id); directory(dir); publish(`${dir}/plan.json`, plan);

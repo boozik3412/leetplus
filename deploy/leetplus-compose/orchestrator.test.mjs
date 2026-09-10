@@ -9,6 +9,8 @@ const pub = key.publicKey.export({ type: 'spki', format: 'pem' });
 const r = { contract: CONTRACT, ...SCHEMA, releaseSha: 'a'.repeat(40), builtAt: '2026-09-10T12:00:00Z', images: Object.fromEntries(['api', 'web', 'postgres', 'redis'].map((x, i) => [x, `sha256:${String(i + 1).repeat(64)}`])) };
 const plan = { contract: `${CONTRACT}_PLAN`, operationId: crypto.randomUUID(), action: 'BOOTSTRAP', hostIdentitySha256: 'c'.repeat(64), controlSha256: 'd'.repeat(64), admissionSha256: 'e'.repeat(64), archiveSha256: 'f'.repeat(64), backupReceiptSha256: '1'.repeat(64), rehearsalReceiptSha256: '2'.repeat(64), migrationReceiptSha256: '3'.repeat(64), targetSlot: 'blue', generation: 0, previous: null, blue: r, green: r };
 plan.composeSha256 = digest(renderCompose({ blue: r, green: r }));
+plan.secretDigests = Object.fromEntries(['acceptance.json', 'api-blue.json', 'api-green.json', 'db-ca.pem'].map(name => [name, '4'.repeat(64)]));
+plan.networkPolicySha256 = '5'.repeat(64);
 function envelope(p = plan) {
   const approval = { contract: `${CONTRACT}_APPROVAL`, operationId: p.operationId, action: p.action, hostIdentitySha256: p.hostIdentitySha256, planSha256: digest(p), issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3600000).toISOString() };
   return { approval, signature: crypto.sign(null, Buffer.from(canonical(approval)), key.privateKey).toString('base64') };

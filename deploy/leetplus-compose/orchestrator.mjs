@@ -9,6 +9,8 @@ export function validatePlan(plan) {
   demand(Number.isSafeInteger(plan.generation) && plan.generation >= 0, 'Invalid generation');
   demand(/^[a-f0-9]{64}$/.test(plan.controlSha256 ?? '') && /^[a-f0-9]{64}$/.test(plan.admissionSha256 ?? '') && /^[a-f0-9]{64}$/.test(plan.archiveSha256 ?? ''), 'Missing artifact/admission binding');
   demand(/^[a-f0-9]{64}$/.test(plan.backupReceiptSha256 ?? '') && /^[a-f0-9]{64}$/.test(plan.rehearsalReceiptSha256 ?? ''), 'Backup and rehearsal must be bound');
+  demand(plan.secretDigests && Object.keys(plan.secretDigests).sort().join(',') === ['acceptance.json', 'api-blue.json', 'api-green.json', 'db-ca.pem'].sort().join(',') && Object.values(plan.secretDigests).every(v => /^[a-f0-9]{64}$/.test(v)), 'Exact runtime secret-file digests are required');
+  demand(/^[a-f0-9]{64}$/.test(plan.networkPolicySha256 ?? ''), 'Network policy must be bound');
   demand(plan.action !== 'BOOTSTRAP' || /^[a-f0-9]{64}$/.test(plan.migrationReceiptSha256 ?? ''), 'Bootstrap needs a source-fenced migration receipt');
   release(plan.blue); release(plan.green);
   demand(plan.previous === null ? plan.action === 'BOOTSTRAP' && plan.generation === 0 :

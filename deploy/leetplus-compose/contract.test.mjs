@@ -32,7 +32,7 @@ test('rehearsal has no egress network or production ports/directories', () => {
   const c = renderCompose({ blue: r, green: r, rehearsal: true });
   assert.ok(Object.values(c.networks).every(n => n.internal));
   assert.ok(Object.values(c.services).every(s => !s.networks.egress));
-  assert.equal(c.services['api-blue'].ports[0].published, '15100');
+  assert.equal(c.services['api-blue'].ports[0].published, '24100');
   assert.ok(c.services.postgres.volumes[0].source.startsWith('/srv/leetplus-migration/rehearsal/'));
 });
 test('rejects arbitrary tag, schema mismatch and data-image drift', () => {

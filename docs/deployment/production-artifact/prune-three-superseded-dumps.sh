@@ -31,13 +31,18 @@ IFS=$'\n\t'
 umask 0077
 cd /
 
-readonly OPERATION_ID='current191-capacity-retirement-20260910'
+readonly DEFAULT_OPERATION_ID='current191-capacity-retirement-20260910'
+readonly DEF5174_OPERATION_ID='current191-def5174-retirement-20260910'
 readonly RELEASE_SHA_PATTERN='^[0-9a-f]{40}$'
 readonly SHA256_PATTERN='^[0-9a-f]{64}$'
 readonly FIXTURE_ROOT_PATTERN='^/tmp/leetplus-superseded-dump-prune-test\.[A-Za-z0-9_-]+$'
-readonly CONFIRMATION='I_ACCEPT_RETIRE_THREE_SUPERSEDED_DUMPS_FOR_CURRENT191'
+readonly DEFAULT_CONFIRMATION='I_ACCEPT_RETIRE_THREE_SUPERSEDED_DUMPS_FOR_CURRENT191'
+readonly DEF5174_CONFIRMATION='I_ACCEPT_RETIRE_EXACT_DEF5174_DUMP_FOR_CURRENT191'
 readonly FIXTURE_CONFIRMATION='run-bounded-root-current191-retirement-fixture'
 readonly SOURCE_DATABASE_STATE='190|20260908090000_initial_owner_invite_link_mode|0|0'
+readonly DEF5174_MINIMUM_RESERVE=2500000000
+readonly HISTORICAL_DEFAULT_CONTROL_SHA='c4a9eef2ced4a240ebcdd90848a87a8a01ba45f3'
+readonly HISTORICAL_FIXTURE_CONTROL_SHA='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 readonly PRODUCTION_CONTROL_VERIFIER='/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs'
 readonly PRODUCTION_ORCHESTRATOR='/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs'
 
@@ -60,15 +65,22 @@ Usage:
   leetplus-prune-three-superseded-dumps check \
     --control-release-sha <40-lowercase-hex>
 
-Production execution is root/Linux-only and has exactly three compiled file
-targets. plan writes only a protected nonauthorizing plan. apply is the sole
-effect boundary and requires its exact digest plus explicit confirmation.
+  leetplus-prune-three-superseded-dumps plan|apply|check \
+    --retirement-set def5174-pre-rollout \
+    --control-release-sha <40-lowercase-hex> \
+    [--plan-sha256 <64-lowercase-hex> \
+     --confirm I_ACCEPT_RETIRE_EXACT_DEF5174_DUMP_FOR_CURRENT191]
+
+Production execution is root/Linux-only and exposes two immutable retirement
+sets: the historical exact three-file set and the exact one-file def5174 set.
+plan writes only a protected nonauthorizing plan. apply is the sole effect
+boundary and requires its exact digest plus explicit confirmation.
 check is read-only. A published intent permits idempotent recovery after a
 lost response; an immutable receipt makes completed replay effect-free.
 USAGE
 }
 
-for required_command in awk basename chmod cmp dirname env find findmnt flock getent grep id install ln mktemp readlink sha256sum stat sync uname unlink wc; do
+for required_command in awk basename chmod cmp df dirname env find findmnt flock getent grep id install ln mktemp readlink sha256sum stat sync uname unlink wc; do
   command -v "$required_command" >/dev/null 2>&1 \
     || die "required command is unavailable: ${required_command}"
 done
@@ -79,6 +91,8 @@ mode=''
 control_release_sha=''
 plan_sha256=''
 confirmation=''
+retirement_set='three-superseded-dumps'
+retirement_set_seen=false
 fixture_mode=false
 fixture_root=''
 while (($# > 0)); do
@@ -103,6 +117,13 @@ while (($# > 0)); do
       confirmation="$2"
       shift 2
       ;;
+    --retirement-set)
+      [[ $# -ge 2 && "$retirement_set_seen" == false ]] \
+        || die '--retirement-set requires one nonrepeated value'
+      retirement_set="$2"
+      retirement_set_seen=true
+      shift 2
+      ;;
     --fixture-root)
       [[ $# -ge 2 && -z "$fixture_root" ]] || die '--fixture-root requires one value'
       fixture_root="$2"
@@ -120,6 +141,31 @@ done
 [[ -n "$mode" ]] || die 'one mode is required'
 [[ "$control_release_sha" =~ $RELEASE_SHA_PATTERN ]] \
   || die '--control-release-sha must be 40 lowercase hexadecimal characters'
+case "$retirement_set" in
+  three-superseded-dumps)
+    OPERATION_ID="$DEFAULT_OPERATION_ID"
+    CONFIRMATION="$DEFAULT_CONFIRMATION"
+    PLAN_RECORD_KIND='LEETPLUS_CURRENT191_CAPACITY_RETIREMENT_PLAN_V1'
+    INTENT_RECORD_KIND='LEETPLUS_CURRENT191_CAPACITY_RETIREMENT_INTENT_V1'
+    RECEIPT_RECORD_KIND='LEETPLUS_CURRENT191_CAPACITY_RETIREMENT_RECEIPT_V1'
+    INTENT_DECISION='THREE_EXACT_UNLINKS_AUTHORIZED'
+    RECEIPT_DECISION='THREE_SUPERSEDED_DUMPS_RETIRED'
+    RESULT_PREFIX='CURRENT191_CAPACITY_RETIREMENT'
+    ;;
+  def5174-pre-rollout)
+    OPERATION_ID="$DEF5174_OPERATION_ID"
+    CONFIRMATION="$DEF5174_CONFIRMATION"
+    PLAN_RECORD_KIND='LEETPLUS_CURRENT191_DEF5174_RETIREMENT_PLAN_V1'
+    INTENT_RECORD_KIND='LEETPLUS_CURRENT191_DEF5174_RETIREMENT_INTENT_V1'
+    RECEIPT_RECORD_KIND='LEETPLUS_CURRENT191_DEF5174_RETIREMENT_RECEIPT_V1'
+    INTENT_DECISION='ONE_EXACT_DEF5174_UNLINK_AUTHORIZED'
+    RECEIPT_DECISION='ONE_SUPERSEDED_DEF5174_DUMP_RETIRED'
+    RESULT_PREFIX='CURRENT191_DEF5174_RETIREMENT'
+    ;;
+  *) die 'unknown retirement set' ;;
+esac
+readonly retirement_set retirement_set_seen OPERATION_ID CONFIRMATION PLAN_RECORD_KIND INTENT_RECORD_KIND \
+  RECEIPT_RECORD_KIND INTENT_DECISION RECEIPT_DECISION RESULT_PREFIX
 if [[ "$mode" == apply ]]; then
   [[ "$plan_sha256" =~ $SHA256_PATTERN ]] \
     || die 'apply requires a 64 lowercase hexadecimal plan digest'
@@ -160,12 +206,32 @@ readonly plan_path="${state_root}/plan.v1"
 readonly intent_path="${state_root}/apply.intent.v1"
 readonly receipt_path="${state_root}/apply.receipt.v1"
 
+# The predecessor controller completed the original three-file operation under
+# c4a9eef. A successor may verify/replay that immutable terminal receipt, but it
+# must never create or resume an incomplete operation under the historical
+# binding. Every nonterminal operation remains bound to the admitted caller SHA.
+record_control_release_sha="$control_release_sha"
+historical_default_terminal_replay=false
+if [[ "$retirement_set" == 'three-superseded-dumps' \
+  && ( "$mode" == apply || "$mode" == check ) \
+  && -e "$plan_path" && -e "$intent_path" && -e "$receipt_path" ]]; then
+  historical_record_sha="$HISTORICAL_DEFAULT_CONTROL_SHA"
+  if [[ "$fixture_mode" == true ]]; then
+    historical_record_sha="$HISTORICAL_FIXTURE_CONTROL_SHA"
+  fi
+  if [[ "$control_release_sha" != "$historical_record_sha" ]]; then
+    record_control_release_sha="$historical_record_sha"
+    historical_default_terminal_replay=true
+  fi
+fi
+readonly record_control_release_sha historical_default_terminal_replay
+
 declare -a target_paths target_hashes target_sizes target_owners target_groups target_modes
 declare -a target_parent_owners target_parent_groups target_parent_modes
 declare -a preserved_paths preserved_hashes preserved_sizes preserved_owners preserved_groups preserved_modes
 declare -a preserved_parent_owners preserved_parent_groups preserved_parent_modes
 
-if [[ "$fixture_mode" == true ]]; then
+if [[ "$fixture_mode" == true && "$retirement_set" == 'three-superseded-dumps' ]]; then
   target_paths=(
     "${prefix}/var/lib/postgresql/current191-d5d9b60c-9b2434aa/leetplus.dump"
     "${prefix}/srv/leetplus/release-preparation/54babfaf-b97181ea/database.dump"
@@ -198,7 +264,40 @@ if [[ "$fixture_mode" == true ]]; then
   preserved_parent_owners=(root root)
   preserved_parent_groups=(root root)
   preserved_parent_modes=(700 700)
-else
+elif [[ "$fixture_mode" == true ]]; then
+  target_paths=(
+    "${prefix}/var/lib/leetplus/backups/pre-rollout-def5174f-20260908t130000z/leetplus.dump"
+  )
+  target_hashes=(
+    '1987f8376c1c3db21e22b6d9849d54e5a6858ea953d35c4efd465c1f9133fa0b'
+  )
+  target_sizes=(19)
+  target_owners=(root)
+  target_groups=(root)
+  target_modes=(400)
+  target_parent_owners=(root)
+  target_parent_groups=(root)
+  target_parent_modes=(700)
+  preserved_paths=(
+    "${prefix}/var/lib/postgresql/pre-current191-fa21bbe-20260909T102434Z/leetplus.dump"
+    "${prefix}/var/lib/postgresql/pre-current191-fa21bbe-20260909T102434Z/globals.sql"
+    "${prefix}/var/lib/postgresql/pre-current191-a05d2a50-20260910T022100Z/leetplus.dump"
+    "${prefix}/var/lib/postgresql/pre-current191-a05d2a50-20260910T022100Z/globals.sql"
+  )
+  preserved_hashes=(
+    '6011e179018f6e16d63920502b32db5cfb6c7118c3aa7cb0c8d529bb75ca758f'
+    '41f83320699487861d140706e1082702e7b60cd7980f4b780e42996195ac83e6'
+    '83fb3c9e058c9271caf94f639251f93c94152faadaa913ae325bd7d8545f2a5d'
+    '7bc3b9978f0b5f4710a1283d76ee82c303712c4c22a25de43fa8635d6c98aeef'
+  )
+  preserved_sizes=(17 14 15 12)
+  preserved_owners=(root root root root)
+  preserved_groups=(root root root root)
+  preserved_modes=(600 600 600 600)
+  preserved_parent_owners=(root root root root)
+  preserved_parent_groups=(root root root root)
+  preserved_parent_modes=(700 700 700 700)
+elif [[ "$retirement_set" == 'three-superseded-dumps' ]]; then
   target_paths=(
     '/var/lib/postgresql/current191-d5d9b60c-9b2434aa/leetplus.dump'
     '/srv/leetplus/release-preparation/54babfaf-b97181ea/database.dump'
@@ -231,6 +330,39 @@ else
   preserved_parent_owners=(postgres postgres)
   preserved_parent_groups=(postgres postgres)
   preserved_parent_modes=(700 700)
+else
+  target_paths=(
+    '/var/lib/leetplus/backups/pre-rollout-def5174f-20260908t130000z/leetplus.dump'
+  )
+  target_hashes=(
+    'ad61af2e2b4ec6acd0cb8a28e0ab17c13989b2c0ab93bdcbaacc7a32d0376f8f'
+  )
+  target_sizes=(2021194384)
+  target_owners=(root)
+  target_groups=(root)
+  target_modes=(400)
+  target_parent_owners=(root)
+  target_parent_groups=(root)
+  target_parent_modes=(700)
+  preserved_paths=(
+    '/var/lib/postgresql/pre-current191-fa21bbe-20260909T102434Z/leetplus.dump'
+    '/var/lib/postgresql/pre-current191-fa21bbe-20260909T102434Z/globals.sql'
+    '/var/lib/postgresql/pre-current191-a05d2a50-20260910T022100Z/leetplus.dump'
+    '/var/lib/postgresql/pre-current191-a05d2a50-20260910T022100Z/globals.sql'
+  )
+  preserved_hashes=(
+    '48bc33f87058aca0436b9a9b6f9fc48ede3b6d6d2db8602c55d3251329e9c98a'
+    '11f6a8262429ef2dbcceda70dd5f124293700526b0d21b27663f2cfc1181db4b'
+    '882572841d0ba79fa0a7f3f347117ca9fc66f8cad30f146d35f2606364b32ca7'
+    '48ba22fb9c70e8e14b121475350258e00e94acd51733499755f3dc76e6139462'
+  )
+  preserved_sizes=(2044343888 2383 2054877184 2383)
+  preserved_owners=(postgres postgres postgres postgres)
+  preserved_groups=(postgres postgres postgres postgres)
+  preserved_modes=(600 600 600 600)
+  preserved_parent_owners=(postgres postgres postgres postgres)
+  preserved_parent_groups=(postgres postgres postgres postgres)
+  preserved_parent_modes=(700 700 700 700)
 fi
 readonly -a target_paths target_hashes target_sizes target_owners target_groups target_modes
 readonly -a target_parent_owners target_parent_groups target_parent_modes
@@ -257,10 +389,34 @@ assert_safe_record() {
 }
 
 assert_no_open_descriptor() {
-  local path="$1" match
-  match="$(find -P /proc/[0-9]*/fd -mindepth 1 -maxdepth 1 -type l \
-    \( -lname "$path" -o -lname "${path} (deleted)" \) -print -quit 2>/dev/null || true)"
-  [[ -z "$match" ]] || die "reviewed target is open by a live process: ${path}"
+  local path="$1" proc_dir fd_dir match rc
+  local -a proc_dirs=()
+
+  for proc_dir in /proc/[0-9]*; do
+    [[ "$proc_dir" != '/proc/[0-9]*' ]] \
+      || die 'live-process descriptor inventory is unavailable'
+    proc_dirs+=("$proc_dir")
+  done
+  ((${#proc_dirs[@]} > 0)) || die 'live-process descriptor inventory is empty'
+
+  for proc_dir in "${proc_dirs[@]}"; do
+    [[ -d "$proc_dir" ]] || continue
+    fd_dir="${proc_dir}/fd"
+    if [[ ! -d "$fd_dir" ]]; then
+      [[ ! -e "$proc_dir" ]] && continue
+      die "cannot open live-process descriptor directory: ${proc_dir}"
+    fi
+    match=''
+    if match="$(find -P "$fd_dir" -mindepth 1 -maxdepth 1 -type l \
+      \( -lname "$path" -o -lname "${path} (deleted)" \) -print -quit 2>/dev/null)"; then
+      :
+    else
+      rc=$?
+      [[ ! -e "$proc_dir" ]] && continue
+      die "live-process descriptor enumeration failed with status ${rc}: ${proc_dir}"
+    fi
+    [[ -z "$match" ]] || die "reviewed target is open by a live process: ${path}"
+  done
 }
 
 snapshot_line() {
@@ -345,12 +501,12 @@ emit_plan() {
     total_bytes=$((total_bytes + target_sizes[index]))
   done
   printf 'RECORD_VERSION=1\n'
-  printf 'RECORD_KIND=LEETPLUS_CURRENT191_CAPACITY_RETIREMENT_PLAN_V1\n'
+  printf 'RECORD_KIND=%s\n' "$PLAN_RECORD_KIND"
   printf 'OPERATION_ID=%s\n' "$OPERATION_ID"
-  printf 'CONTROL_RELEASE_SHA=%s\n' "$control_release_sha"
+  printf 'CONTROL_RELEASE_SHA=%s\n' "$record_control_release_sha"
   printf 'SOURCE_DATABASE_STATE=%s\n' "$SOURCE_DATABASE_STATE"
-  printf 'TARGET_COUNT=3\n'
-  printf 'PRESERVED_COUNT=2\n'
+  printf 'TARGET_COUNT=%s\n' "${#target_paths[@]}"
+  printf 'PRESERVED_COUNT=%s\n' "${#preserved_paths[@]}"
   printf 'TOTAL_TARGET_BYTES=%s\n' "$total_bytes"
   printf 'DECISION=PREPARED_NOT_EFFECT_AUTHORIZATION\n'
   for index in "${!preserved_paths[@]}"; do
@@ -373,18 +529,20 @@ record_value() {
 }
 
 expected_plan_keys() {
-  local prefix_name number key
+  local prefix_name index number key
   printf '%s\n' RECORD_VERSION RECORD_KIND OPERATION_ID CONTROL_RELEASE_SHA SOURCE_DATABASE_STATE \
     TARGET_COUNT PRESERVED_COUNT TOTAL_TARGET_BYTES DECISION
   for prefix_name in PRESERVED TARGET; do
     if [[ "$prefix_name" == PRESERVED ]]; then
-      for number in 1 2; do
+      for index in "${!preserved_paths[@]}"; do
+        number=$((index + 1))
         for key in PATH SHA256 SIZE OWNER GROUP MODE DEVICE INODE UID GID LINK_COUNT MTIME CTIME BLOCKS BLOCK_SIZE; do
           printf '%s_%s_%s\n' "$prefix_name" "$number" "$key"
         done
       done
     else
-      for number in 1 2 3; do
+      for index in "${!target_paths[@]}"; do
+        number=$((index + 1))
         for key in PATH SHA256 SIZE OWNER GROUP MODE DEVICE INODE UID GID LINK_COUNT MTIME CTIME BLOCKS BLOCK_SIZE; do
           printf '%s_%s_%s\n' "$prefix_name" "$number" "$key"
         done
@@ -403,12 +561,12 @@ assert_plan_record() {
   [[ "$observed_keys" == "$expected_keys" ]] \
     || die 'retirement plan key order or set drifted'
   [[ "$(record_value "$record" RECORD_VERSION)" == 1 \
-    && "$(record_value "$record" RECORD_KIND)" == 'LEETPLUS_CURRENT191_CAPACITY_RETIREMENT_PLAN_V1' \
+    && "$(record_value "$record" RECORD_KIND)" == "$PLAN_RECORD_KIND" \
     && "$(record_value "$record" OPERATION_ID)" == "$OPERATION_ID" \
-    && "$(record_value "$record" CONTROL_RELEASE_SHA)" == "$control_release_sha" \
+    && "$(record_value "$record" CONTROL_RELEASE_SHA)" == "$record_control_release_sha" \
     && "$(record_value "$record" SOURCE_DATABASE_STATE)" == "$SOURCE_DATABASE_STATE" \
-    && "$(record_value "$record" TARGET_COUNT)" == 3 \
-    && "$(record_value "$record" PRESERVED_COUNT)" == 2 \
+    && "$(record_value "$record" TARGET_COUNT)" == "${#target_paths[@]}" \
+    && "$(record_value "$record" PRESERVED_COUNT)" == "${#preserved_paths[@]}" \
     && "$(record_value "$record" DECISION)" == 'PREPARED_NOT_EFFECT_AUTHORIZATION' ]] \
     || die 'retirement plan fixed fields drifted'
   for index in "${!target_sizes[@]}"; do total_bytes=$((total_bytes + target_sizes[index])); done
@@ -507,6 +665,10 @@ assert_preserved_against_plan() {
   if [[ "$fixture_mode" == false ]]; then
     /usr/bin/pg_restore --list "${preserved_paths[0]}" >/dev/null \
       || die 'preserved pre-CURRENT191 dump is not readable by pg_restore'
+    if [[ "$retirement_set" == 'def5174-pre-rollout' ]]; then
+      /usr/bin/pg_restore --list "${preserved_paths[2]}" >/dev/null \
+        || die 'fresh pre-CURRENT191 dump is not readable by pg_restore'
+    fi
   fi
 }
 
@@ -596,7 +758,7 @@ assert_install_lock() {
     && "$(stat -c '%U:%G:%a:%h' -- "$install_lock")" == 'root:root:600:1' ]] \
     || die 'production-control install lock is absent or unsafe'
   lock_identity="$(stat -c '%d:%i' -- "$install_lock")"
-  exec 8<> "$install_lock"
+  exec 8< "$install_lock"
   [[ "$(stat -Lc '%d:%i' -- /proc/self/fd/8)" == "$lock_identity" ]] \
     || die 'opened production-control lock differs from validated path'
   if [[ "$mode" == apply ]]; then
@@ -693,15 +855,247 @@ assert_database_source_state() {
     || die "database is not at the exact pre-CURRENT191 source state: ${observed}"
 }
 
+assert_def5174_unreferenced() {
+  [[ "$retirement_set" == 'def5174-pre-rollout' ]] || return 0
+  local target_path="${target_paths[0]}" candidate_parent search_root rc index
+  local state_symlink unsupported_state_entry state_entry internal_path skip_entry
+  local systemd_symlink resolved_systemd_path allowed_systemd_target systemd_root_identity
+  local -a systemd_root_candidates systemd_roots canonical_systemd_roots
+  local -a systemd_root_identities absent_systemd_roots state_roots
+  candidate_parent="$(dirname -- "$target_path")"
+
+  if [[ "$fixture_mode" == true ]]; then
+    systemd_root_candidates=(
+      "${fixture_root}/etc/systemd/system.control"
+      "${fixture_root}/run/systemd/system.control"
+      "${fixture_root}/run/systemd/transient"
+      "${fixture_root}/run/systemd/generator.early"
+      "${fixture_root}/etc/systemd/system"
+      "${fixture_root}/etc/systemd/system.attached"
+      "${fixture_root}/run/systemd/system"
+      "${fixture_root}/run/systemd/system.attached"
+      "${fixture_root}/run/systemd/generator"
+      "${fixture_root}/usr/local/lib/systemd/system"
+      "${fixture_root}/usr/lib/systemd/system"
+      "${fixture_root}/run/systemd/generator.late"
+    )
+    state_roots=(
+      "${fixture_root}/var/lib/leetplus/deploy-receipts"
+      "${fixture_root}/var/lib/leetplus/backups"
+      "${fixture_root}/var/lib/leetplus/recovery-evidence"
+      "${fixture_root}/var/lib/leetplus/operator-handoff"
+    )
+  else
+    systemd_root_candidates=(
+      /etc/systemd/system.control
+      /run/systemd/system.control
+      /run/systemd/transient
+      /run/systemd/generator.early
+      /etc/systemd/system
+      /etc/systemd/system.attached
+      /run/systemd/system
+      /run/systemd/system.attached
+      /run/systemd/generator
+      /usr/local/lib/systemd/system
+      /usr/lib/systemd/system
+      /run/systemd/generator.late
+    )
+    state_roots=(
+      /var/lib/leetplus/deploy-receipts
+      /var/lib/leetplus/backups
+      /var/lib/leetplus/recovery-evidence
+      /var/lib/leetplus/operator-handoff
+    )
+  fi
+
+  systemd_roots=()
+  canonical_systemd_roots=()
+  systemd_root_identities=()
+  absent_systemd_roots=()
+  for search_root in "${systemd_root_candidates[@]}"; do
+    if [[ -e "$search_root" || -L "$search_root" ]]; then
+      [[ -d "$search_root" && ! -L "$search_root" \
+        && "$(readlink -e -- "$search_root")" == "$search_root" ]] \
+        || die "def5174 reference-search root is unsafe: ${search_root}"
+      systemd_root_identity="$(stat -c '%d:%i' -- "$search_root")" \
+        || die "def5174 systemd root identity query failed: ${search_root}"
+      systemd_roots+=("$search_root")
+      canonical_systemd_roots+=("$search_root")
+      systemd_root_identities+=("$systemd_root_identity")
+    else
+      absent_systemd_roots+=("$search_root")
+    fi
+  done
+  ((${#systemd_roots[@]} > 0)) || die 'def5174 found no active systemd unit-load roots'
+  for search_root in "${state_roots[@]}"; do
+    [[ -d "$search_root" && ! -L "$search_root" \
+      && "$(readlink -e -- "$search_root")" == "$search_root" ]] \
+      || die "def5174 reference-search root is unsafe: ${search_root}"
+  done
+
+  if grep -raFl -- "$target_path" "${systemd_roots[@]}" >/dev/null 2>&1; then
+    die 'def5174 target is referenced by systemd'
+  else
+    rc=$?
+    ((rc == 1)) || die 'def5174 systemd reference query failed'
+  fi
+
+  # grep -r intentionally does not follow nested symlinks. Inventory every
+  # systemd symlink separately and allow only canonical targets already inside
+  # the three scanned unit roots (plus the standard /dev/null mask).
+  if find -P "${systemd_roots[@]}" -type l -print0 | \
+    while IFS= read -r -d '' systemd_symlink; do
+      if resolved_systemd_path="$(readlink -e -- "$systemd_symlink")"; then
+        :
+      else
+        printf 'unresolvable systemd symlink: %s\n' "$systemd_symlink" >&2
+        exit 20
+      fi
+      allowed_systemd_target=false
+      if [[ "$resolved_systemd_path" == /dev/null ]]; then
+        allowed_systemd_target=true
+      else
+        for search_root in "${canonical_systemd_roots[@]}"; do
+          if [[ "$resolved_systemd_path" == "$search_root" \
+            || "$resolved_systemd_path" == "$search_root/"* ]]; then
+            allowed_systemd_target=true
+            break
+          fi
+        done
+      fi
+      if [[ "$allowed_systemd_target" != true ]]; then
+        printf 'systemd symlink escapes reviewed roots: %s -> %s\n' \
+          "$systemd_symlink" "$resolved_systemd_path" >&2
+        exit 21
+      fi
+    done; then
+    :
+  else
+    die 'def5174 systemd symlink inventory failed'
+  fi
+
+  state_symlink="$(find -P "${state_roots[@]}" -type l -print -quit)" \
+    || die 'def5174 state symlink inventory query failed'
+  [[ -z "$state_symlink" ]] \
+    || die "def5174 state inventory contains a symlink: ${state_symlink}"
+  unsupported_state_entry="$(find -P "${state_roots[@]}" \
+    ! -type d ! -type f ! -type l -print -quit)" \
+    || die 'def5174 state entry-type inventory query failed'
+  [[ -z "$unsupported_state_entry" ]] \
+    || die "def5174 state inventory contains an unsupported entry: ${unsupported_state_entry}"
+
+  # Only exact internal paths are exempt: the target itself, its two retained
+  # companions, the compiled recovery files and this operation's own journal.
+  # Every other regular file is scanned regardless of its name or extension.
+  if find -P "${state_roots[@]}" -type f -print0 | \
+    while IFS= read -r -d '' state_entry; do
+      skip_entry=false
+      for internal_path in "$target_path" \
+        "${candidate_parent}/globals.sql" "${candidate_parent}/manifest.json" \
+        "${preserved_paths[@]}"; do
+        if [[ "$state_entry" == "$internal_path" ]]; then
+          skip_entry=true
+          break
+        fi
+      done
+      if [[ "$skip_entry" == true || "$state_entry" == "$state_root/"* ]]; then
+        continue
+      fi
+      if grep -aFl -- "$target_path" "$state_entry" >/dev/null 2>&1; then
+        printf 'external state reference found in %s\n' "$state_entry" >&2
+        exit 30
+      else
+        rc=$?
+        if ((rc != 1)); then
+          printf 'cannot scan state file (status %s): %s\n' "$rc" "$state_entry" >&2
+          exit 31
+        fi
+      fi
+    done; then
+    :
+  else
+    die 'def5174 external state reference inventory failed'
+  fi
+
+  for index in "${!systemd_roots[@]}"; do
+    search_root="${systemd_roots[$index]}"
+    [[ -d "$search_root" && ! -L "$search_root" \
+      && "$(readlink -e -- "$search_root")" == "$search_root" \
+      && "$(stat -c '%d:%i' -- "$search_root")" == "${systemd_root_identities[$index]}" ]] \
+      || die "def5174 systemd root changed during reference scan: ${search_root}"
+  done
+  for search_root in "${absent_systemd_roots[@]}"; do
+    [[ ! -e "$search_root" && ! -L "$search_root" ]] \
+      || die "def5174 systemd root appeared during reference scan: ${search_root}"
+  done
+}
+
+assert_def5174_capacity() {
+  [[ "$retirement_set" == 'def5174-pre-rollout' ]] || return 0
+  local database_bytes available_bytes required_bytes projected_bytes target_path target_device postgres_device blocks block_size allocated_bytes
+  local fixture_capacity_record fixture_postgres_device observed_keys
+  target_path="${target_paths[0]}"
+
+  if [[ "$fixture_mode" == true ]]; then
+    fixture_capacity_record="${fixture_root}/def5174-capacity.state"
+    assert_safe_record "$fixture_capacity_record" 'fixture def5174 capacity evidence'
+    [[ -z "$(awk -F= '!/^[A-Z0-9_]+=[0-9]+$/ || seen[$1]++ { print; exit }' "$fixture_capacity_record")" ]] \
+      || die 'fixture def5174 capacity evidence schema is malformed'
+    observed_keys="$(awk -F= '{ print $1 }' "$fixture_capacity_record")"
+    [[ "$observed_keys" == $'DATABASE_BYTES\nAVAILABLE_BYTES\nPOSTGRES_DEVICE' ]] \
+      || die 'fixture def5174 capacity evidence key order or set drifted'
+    database_bytes="$(record_value "$fixture_capacity_record" DATABASE_BYTES)" \
+      || die 'fixture def5174 database size is unavailable'
+    available_bytes="$(record_value "$fixture_capacity_record" AVAILABLE_BYTES)" \
+      || die 'fixture def5174 available bytes are unavailable'
+    postgres_device="$(record_value "$fixture_capacity_record" POSTGRES_DEVICE)" \
+      || die 'fixture def5174 PostgreSQL device is unavailable'
+    fixture_postgres_device="$(stat -c '%d' -- "${fixture_root}/var/lib/postgresql")" \
+      || die 'fixture def5174 PostgreSQL filesystem query failed'
+    [[ "$postgres_device" == "$fixture_postgres_device" ]] \
+      || die 'fixture def5174 PostgreSQL filesystem identity drifted'
+  else
+    database_bytes="$(/usr/sbin/runuser -u postgres -- /usr/bin/psql -X -A -t -v ON_ERROR_STOP=1 \
+      -d postgres -c "SELECT pg_database_size('leetplus');")" \
+      || die 'def5174 capacity database-size query failed'
+    available_bytes="$(df -B1 --output=avail /var/lib/postgresql | awk 'NR == 2 {gsub(/ /, ""); print}')" \
+      || die 'def5174 available-capacity query failed'
+    postgres_device="$(stat -c '%d' -- /var/lib/postgresql)" \
+      || die 'def5174 PostgreSQL filesystem query failed'
+  fi
+  [[ "$database_bytes" =~ ^[1-9][0-9]*$ && "$available_bytes" =~ ^[1-9][0-9]*$ ]] \
+    || die 'def5174 capacity inputs are invalid'
+  [[ "$postgres_device" =~ ^[1-9][0-9]*$ ]] \
+    || die 'def5174 PostgreSQL filesystem identity is invalid'
+  required_bytes=$((database_bytes + DEF5174_MINIMUM_RESERVE))
+  projected_bytes="$available_bytes"
+  if [[ -e "$target_path" || -L "$target_path" ]]; then
+    [[ -f "$target_path" && ! -L "$target_path" ]] || die 'def5174 capacity target is unsafe'
+    target_device="$(stat -c '%d' -- "$target_path")" \
+      || die 'def5174 target filesystem query failed'
+    [[ "$target_device" =~ ^[1-9][0-9]*$ && "$target_device" == "$postgres_device" ]] \
+      || die 'def5174 target is not on the PostgreSQL filesystem'
+    blocks="$(stat -c '%b' -- "$target_path")" \
+      || die 'def5174 allocated-block query failed'
+    block_size="$(stat -c '%B' -- "$target_path")" \
+      || die 'def5174 block-size query failed'
+    [[ "$blocks" =~ ^[1-9][0-9]*$ && "$block_size" =~ ^[1-9][0-9]*$ ]] \
+      || die 'def5174 allocated-block identity is invalid'
+    allocated_bytes=$((blocks * block_size))
+    projected_bytes=$((available_bytes + allocated_bytes))
+  fi
+  ((projected_bytes >= required_bytes)) || die 'def5174 retirement would not satisfy restored-copy reserve'
+}
+
 emit_intent() {
   printf 'RECORD_VERSION=1\n'
-  printf 'RECORD_KIND=LEETPLUS_CURRENT191_CAPACITY_RETIREMENT_INTENT_V1\n'
+  printf 'RECORD_KIND=%s\n' "$INTENT_RECORD_KIND"
   printf 'OPERATION_ID=%s\n' "$OPERATION_ID"
-  printf 'CONTROL_RELEASE_SHA=%s\n' "$control_release_sha"
+  printf 'CONTROL_RELEASE_SHA=%s\n' "$record_control_release_sha"
   printf 'PLAN_PATH=%s\n' "$plan_path"
   printf 'PLAN_SHA256=%s\n' "$plan_sha256"
-  printf 'TARGET_COUNT=3\n'
-  printf 'DECISION=THREE_EXACT_UNLINKS_AUTHORIZED\n'
+  printf 'TARGET_COUNT=%s\n' "${#target_paths[@]}"
+  printf 'DECISION=%s\n' "$INTENT_DECISION"
 }
 
 assert_intent() {
@@ -713,12 +1107,12 @@ assert_intent() {
 emit_receipt() {
   local index number
   printf 'RECORD_VERSION=1\n'
-  printf 'RECORD_KIND=LEETPLUS_CURRENT191_CAPACITY_RETIREMENT_RECEIPT_V1\n'
+  printf 'RECORD_KIND=%s\n' "$RECEIPT_RECORD_KIND"
   printf 'OPERATION_ID=%s\n' "$OPERATION_ID"
-  printf 'CONTROL_RELEASE_SHA=%s\n' "$control_release_sha"
+  printf 'CONTROL_RELEASE_SHA=%s\n' "$record_control_release_sha"
   printf 'PLAN_PATH=%s\n' "$plan_path"
   printf 'PLAN_SHA256=%s\n' "$plan_sha256"
-  printf 'TARGET_COUNT=3\n'
+  printf 'TARGET_COUNT=%s\n' "${#target_paths[@]}"
   printf 'TOTAL_TARGET_BYTES=%s\n' "$(record_value "$plan_path" TOTAL_TARGET_BYTES)"
   for index in "${!target_paths[@]}"; do
     number=$((index + 1))
@@ -728,11 +1122,19 @@ emit_receipt() {
     printf 'TARGET_%s_INODE=%s\n' "$number" "$(record_value "$plan_path" "TARGET_${number}_INODE")"
     printf 'TARGET_%s_STATUS=UNLINKED\n' "$number"
   done
-  printf 'PRESERVED_DUMP_PATH=%s\n' "$(record_value "$plan_path" PRESERVED_1_PATH)"
-  printf 'PRESERVED_DUMP_SHA256=%s\n' "$(record_value "$plan_path" PRESERVED_1_SHA256)"
-  printf 'PRESERVED_GLOBALS_PATH=%s\n' "$(record_value "$plan_path" PRESERVED_2_PATH)"
-  printf 'PRESERVED_GLOBALS_SHA256=%s\n' "$(record_value "$plan_path" PRESERVED_2_SHA256)"
-  printf 'DECISION=THREE_SUPERSEDED_DUMPS_RETIRED\n'
+  if [[ "$retirement_set" == 'three-superseded-dumps' ]]; then
+    printf 'PRESERVED_DUMP_PATH=%s\n' "$(record_value "$plan_path" PRESERVED_1_PATH)"
+    printf 'PRESERVED_DUMP_SHA256=%s\n' "$(record_value "$plan_path" PRESERVED_1_SHA256)"
+    printf 'PRESERVED_GLOBALS_PATH=%s\n' "$(record_value "$plan_path" PRESERVED_2_PATH)"
+    printf 'PRESERVED_GLOBALS_SHA256=%s\n' "$(record_value "$plan_path" PRESERVED_2_SHA256)"
+  else
+    for index in "${!preserved_paths[@]}"; do
+      number=$((index + 1))
+      printf 'PRESERVED_%s_PATH=%s\n' "$number" "$(record_value "$plan_path" "PRESERVED_${number}_PATH")"
+      printf 'PRESERVED_%s_SHA256=%s\n' "$number" "$(record_value "$plan_path" "PRESERVED_${number}_SHA256")"
+    done
+  fi
+  printf 'DECISION=%s\n' "$RECEIPT_DECISION"
 }
 
 assert_receipt() {
@@ -742,17 +1144,17 @@ assert_receipt() {
 }
 
 print_plan_result() {
-  printf 'CURRENT191_CAPACITY_RETIREMENT_PLAN=PASS\n'
-  printf 'CURRENT191_CAPACITY_RETIREMENT_PLAN_PATH=%s\n' "$plan_path"
-  printf 'CURRENT191_CAPACITY_RETIREMENT_PLAN_SHA256=%s\n' "$(sha256_file "$plan_path")"
-  printf 'CURRENT191_CAPACITY_RETIREMENT_TARGET_BYTES=%s\n' "$(record_value "$plan_path" TOTAL_TARGET_BYTES)"
+  printf '%s_PLAN=PASS\n' "$RESULT_PREFIX"
+  printf '%s_PLAN_PATH=%s\n' "$RESULT_PREFIX" "$plan_path"
+  printf '%s_PLAN_SHA256=%s\n' "$RESULT_PREFIX" "$(sha256_file "$plan_path")"
+  printf '%s_TARGET_BYTES=%s\n' "$RESULT_PREFIX" "$(record_value "$plan_path" TOTAL_TARGET_BYTES)"
 }
 
 print_receipt_result() {
-  printf 'CURRENT191_CAPACITY_RETIREMENT=PASS\n'
-  printf 'CURRENT191_CAPACITY_RETIREMENT_RECEIPT_PATH=%s\n' "$receipt_path"
-  printf 'CURRENT191_CAPACITY_RETIREMENT_RECEIPT_SHA256=%s\n' "$(sha256_file "$receipt_path")"
-  printf 'CURRENT191_CAPACITY_RETIREMENT_RECLAIMED_BYTES=%s\n' "$(record_value "$receipt_path" TOTAL_TARGET_BYTES)"
+  printf '%s=PASS\n' "$RESULT_PREFIX"
+  printf '%s_RECEIPT_PATH=%s\n' "$RESULT_PREFIX" "$receipt_path"
+  printf '%s_RECEIPT_SHA256=%s\n' "$RESULT_PREFIX" "$(sha256_file "$receipt_path")"
+  printf '%s_RECLAIMED_BYTES=%s\n' "$RESULT_PREFIX" "$(record_value "$receipt_path" TOTAL_TARGET_BYTES)"
 }
 
 assert_install_lock
@@ -764,6 +1166,25 @@ fi
 assert_control_generation
 assert_rollouts_terminal
 assert_database_source_state
+assert_def5174_unreferenced
+assert_def5174_capacity
+
+if [[ "$historical_default_terminal_replay" == true ]]; then
+  assert_plan_record "$plan_path"
+  terminal_plan_sha256="$(sha256_file "$plan_path")"
+  if [[ "$mode" == apply ]]; then
+    [[ "$plan_sha256" == "$terminal_plan_sha256" ]] \
+      || die 'supplied plan digest does not match the historical terminal plan'
+  else
+    plan_sha256="$terminal_plan_sha256"
+  fi
+  assert_intent
+  assert_receipt
+  assert_targets_absent
+  assert_preserved_against_plan
+  print_receipt_result
+  exit 0
+fi
 
 case "$mode" in
   plan)
@@ -793,6 +1214,8 @@ case "$mode" in
     fi
     assert_intent
     assert_preserved_against_plan
+    assert_def5174_unreferenced
+    assert_def5174_capacity
     for index in "${!target_paths[@]}"; do
       target_path="${target_paths[$index]}"
       if [[ -e "$target_path" || -L "$target_path" ]]; then
@@ -811,6 +1234,8 @@ case "$mode" in
     assert_control_generation
     assert_rollouts_terminal
     assert_database_source_state
+    assert_def5174_unreferenced
+    assert_def5174_capacity
     publish_record "$receipt_path" emit_receipt
     assert_receipt
     print_receipt_result

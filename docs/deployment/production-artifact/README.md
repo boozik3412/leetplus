@@ -21,6 +21,22 @@ signed receipts и отдельный GO остаются обязательны
 описан в
 [`release-pipeline-acceleration.md`](../release-pipeline-acceleration.md).
 
+## Пакетные проверки и повторы
+
+Независимые local/CI проверки production-control запускаются одним bounded
+batch через `.github/scripts/run-production-control-authority-batch.sh`. Каждый
+gate обязан завершиться независимо, сохранить отдельные stdout/stderr и exit
+code, после чего сводка показывает все ошибки прохода. Fail-fast сохраняется
+только у production effect boundary либо когда продолжение сделает evidence
+недостоверным; параллельные production mutations запрещены.
+
+Канонический append-only журнал операции —
+`deploy-evidence/<operation>/ERROR_LOG.md`. Перед каждым повтором и любой
+production-командой он читается целиком. В журнал заранее вносятся наблюдаемая
+ошибка, причина и конкретно изменившееся условие; неизменившийся полный прогон
+не повторяется. Source/CI PASS не заменяет exact-main admission, установленную
+production-control generation, signed receipts или отдельный production `GO`.
+
 ## Пример prepare-only проверки
 
 ```bash
@@ -127,11 +143,19 @@ rollback/restore. Replacement operation
 SHA-256 — `22f9f1f742b6f0a44a7d443b1eaf4628648f3cbe0690c1207217e8a46de2a4fc`,
 final production validation `17/17` — `2026-09-09T22:55:16Z`. Public active
 green — `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`, rollback blue —
-`fa21bbe99be78313a883893b2dd6dc1d7c892777`. Physical DB остаётся
-`CURRENT_190/190`, migration `20260908180000_external_langame_simple_onboarding`
-pending, contracts обоих runtime slots — `CURRENT_191/191 + ALLOW_CURRENT_190/OFF`.
-Все operations terminal; capacity gate и restored-copy evidence остаются pending,
-schema effect отсутствует.
+  `fa21bbe99be78313a883893b2dd6dc1d7c892777`. Physical DB остаётся
+  `CURRENT_190/190`, migration `20260908180000_external_langame_simple_onboarding`
+  pending, contracts обоих runtime slots — `CURRENT_191/191 + ALLOW_CURRENT_190/OFF`.
+  Все rollout operations terminal, schema effect отсутствует. Fresh backup
+  `/var/lib/postgresql/pre-current191-a05d2a50-20260910T022100Z` создан и его
+  exact dump (`2,054,877,184` bytes,
+  `882572841d0ba79fa0a7f3f347117ca9fc66f8cad30f146d35f2606364b32ca7`)
+  проверен также в off-host копии. Isolated restored-copy ещё не запускалась:
+  read-only host preflight остановился только на capacity. Отдельный target-only
+  read-only inventory даёт расчётный projected объём `12,408,836,096` bytes при
+  требовании `12,103,890,199`; это не запуск и не authority нового controller.
+  Controller ещё должен пройти CI/admission, установку и отдельный `GO`; его
+  effect не заявлен.
 
 Readiness verifier для этого одного pre-DDL bridge принимает ровно два
 эквивалентных исторических identifier: legacy
@@ -204,22 +228,38 @@ root-owned evidence; runtime, DB, network и user security contours не
 затрагиваются. Наличие source bytes не разрешает установку или запуск без
 admitted production-control generation и отдельного GO.
 
-Отдельный `prune-three-superseded-dumps.sh` — одноразовый root-only controller
-capacity authority, а не расширение generic metrics retention. Его compiled
-allowlist содержит ровно три абсолютных dump-файла общей ёмкостью
-`5,834,469,130` bytes; произвольные пути и ручное удаление архивов запрещены.
-До effect controller сохраняет и дважды валидирует pre-`CURRENT191` dump и
-globals. `plan` ничего не authorizes. `apply` требует exact control SHA,
-immutable plan SHA и явную подтверждающую фразу, удерживает install lock и
-проверяет installed control, terminal status всех rollout operations и exact DB
-`CURRENT190/190` с отсутствующим target `CURRENT191/191`. Непосредственно до
-unlink и при replay он повторно сверяет для каждого allowlisted leaf path, SHA,
-size, inode, UID/GID, mode, отсутствие symlink и открытых FD; удаляет только
-exact files, fsync parent и публикует immutable `root:root 0400` receipt.
-Идемпотентный replay/lost-response continuation допускается только для того же
-неизменного плана. Fixture B075 — PASS, однако production authority ещё не
-admitted, не installed и не applied; capacity gate pending, cleanup не заявлен
-завершённым.
+Отдельный `prune-three-superseded-dumps.sh` — root-only controller capacity
+authority, а не расширение generic metrics retention. Он имеет два неизменяемых
+retirement set и не принимает произвольные пути. Исторический default set
+содержал ровно три absolute dump-файла (`5,834,469,130` bytes): authority была
+admitted/installed как production-control
+`c4a9eef2ced4a240ebcdd90848a87a8a01ba45f3`, effect завершён, immutable receipt
+имеет SHA-256
+`a77fa2c06b65b93685a289fc91b40b398947ad3bfc9f5a8b73411256bf5c6582`.
+Его старые records остаются byte/schema неизменными; successor принимает их
+только как уже complete terminal replay, проверяет отсутствие всех targets и
+выходит до effect path. Незавершённый old plan под другой generation запрещён.
+
+Новый `def5174-pre-rollout` set компилирует единственный target
+`/var/lib/leetplus/backups/pre-rollout-def5174f-20260908t130000z/leetplus.dump`
+(`2,021,194,384` logical и `2,021,199,872` allocated bytes). `globals.sql` и
+`manifest.json` того же backup, прежняя и fresh CURRENT191 recovery pair
+остаются сохранёнными. До plan/apply controller проверяет все standard systemd
+system-unit roots, запрещает escaping/dangling symlink, сканирует каждый другой
+state regular file независимо от имени/расширения, отвергает state symlink и
+special file, доказывает тот же filesystem и database-size + `2.5 GB` reserve.
+
+Для обоих set `plan` ничего не authorizes. `apply` требует exact installed
+control SHA, immutable plan SHA, отдельную точную подтверждающую фразу, exclusive
+install lock, terminal rollout inventory и DB exact `CURRENT190/190` без target
+`CURRENT191/191`. Непосредственно перед unlink повторяются reference/capacity и
+path/SHA/size/inode/UID/GID/mode/no-open-FD checks; удаляется только compiled
+leaf, parent синхронизируется, receipt публикуется как immutable
+`root:root 0400`. Same-plan replay покрывает lost response. Для нового set
+отдельный target-only read-only inventory подтвердил текущую identity и
+capacity projection, но не controller execution/authority. Root fixture/CI,
+exact-main admission, установка, plan/apply/check и capacity effect ещё pending;
+manual deletion запрещено.
 
 Если approved V3 operation остановилась до runtime effect, сменить candidate
 разрешено только штатным `supersede-pre-runtime --operation-id ...

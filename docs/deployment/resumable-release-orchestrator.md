@@ -15,7 +15,13 @@ Fail-fast применяется только перед production effect ил�
 batch. Это правило не разрешает параллельные production mutations и не
 ослабляет фазовые fail-closed границы оркестратора.
 
-Статус: **V2 production rollout завершён; V3 recovery, lane-aware metrics и root-authorized metrics retention реализованы. Все операции terminal. CURRENT191 runtime rollout operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` обслуживала release `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; её terminal POSTCHECK завершён под successor production-control merge SHA `73a17b2d6ba70abd8f52876aa813cac66ab7e56a`. Schema effect не выполнялся. Capacity gate и restored-copy evidence остаются pending.**
+Канонический append-only журнал операции хранится в
+`deploy-evidence/<operation>/ERROR_LOG.md`. Его полное текущее содержимое
+читается перед каждым повтором и перед любой production-командой; одного tail
+или устного резюме недостаточно. Повтор разрешён только после записи наблюдаемой
+ошибки, её причины и конкретного изменившегося условия.
+
+Статус: **V2 production rollout завершён; V3 recovery, lane-aware metrics и root-authorized metrics retention реализованы. Все rollout operations terminal. CURRENT191 runtime operation `53ac0c1e-2d61-42b9-a07e-d3cbab820531` обслуживала release `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; её terminal POSTCHECK завершён под production-control merge SHA `73a17b2d6ba70abd8f52876aa813cac66ab7e56a`. Schema effect не выполнялся. Fresh CURRENT190 backup и его off-host copy проверены. Restored-copy execution ожидает точечного capacity retirement, чей controller ещё не admitted/installed/applied.**
 
 Актуально на: **10.09.2026**
 
@@ -31,9 +37,19 @@ production validation `17/17` завершена в `2026-09-09T22:55:16Z`. Phys
 `20260908180000_external_langame_simple_onboarding` pending. Оба runtime slot
 contracts — exact `CURRENT_191/191`, `ALLOW_CURRENT_190/OFF`; public nginx
 generation 51 обслуживает active green `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`,
-rollback blue — `fa21bbe99be78313a883893b2dd6dc1d7c892777`. Capacity gate и
-restored-copy evidence остаются pending. Ручное изменение nginx, env, link или
-operation records запрещено.
+rollback blue — `fa21bbe99be78313a883893b2dd6dc1d7c892777`. Текущая установленная
+production-control generation —
+`c4a9eef2ced4a240ebcdd90848a87a8a01ba45f3`. Fresh backup
+`pre-current191-a05d2a50-20260910T022100Z` и его off-host copy прошли exact
+SHA-проверку; dump SHA-256 —
+`882572841d0ba79fa0a7f3f347117ca9fc66f8cad30f146d35f2606364b32ca7`.
+Read-only restored-copy host preflight остановлен только на дефиците capacity.
+Отдельный target-only read-only inventory рассчитал, что future exact one-file
+effect должен поднять available bytes с `10,387,636,224` до `12,408,836,096`
+при requirement `12,103,890,199`; это projection, а не controller execution или
+authority. Source controller ещё ожидает root fixture/CI, admission, install и
+отдельный GO. Ручное изменение nginx, env, link, operation records или удаление
+backup запрещено.
 
 ## Назначение
 
@@ -669,22 +685,38 @@ terminal receipt chains, для которых действует отдельн
 Будущий operation-history archive обязан сохранить status/replay semantics и
 оформляется отдельным controller до достижения этого объёма.
 
-### One-shot retirement трёх superseded dumps
+### One-shot capacity retirement exact dump sets
 
 `docs/deployment/production-artifact/prune-three-superseded-dumps.sh` —
-отдельная one-shot root-only capacity authority, не generic metrics retention и
-не operation-history archive. В его compiled allowlist ровно три абсолютных
-файла (`5,834,469,130` bytes суммарно); ручное удаление архивов или подстановка
-путей запрещены. Он сохраняет и дважды валидирует pre-`CURRENT191` dump+globals.
-Неauthorizing `plan` не даёт effect; `apply` требует exact control SHA,
-immutable plan SHA, явную фразу подтверждения, install lock и проверку
-installed control, terminal всех rollout operations и exact DB
-`CURRENT190/190` при отсутствии `CURRENT191/191` target. Before-unlink/replay
-проверяет path/SHA/size/inode/UID/GID/mode, no-symlink и no-open-FD, unlink'ит
-лишь exact allowlisted leaves, fsync parent и публикует immutable `0400`
-receipt. Replay после lost response идемпотентен только для неизменного плана.
-Fixture B075 PASS; production authority не admitted/installed/applied, capacity
-gate pending, поэтому cleanup не считается завершённым.
+отдельная root-only capacity authority, не generic metrics retention и не
+operation-history archive. Она принимает только два compiled retirement set;
+ручное удаление архивов или подстановка путей запрещены.
+
+Исторический default set содержал три absolute files (`5,834,469,130` bytes).
+Он admitted/installed/applied под production-control
+`c4a9eef2ced4a240ebcdd90848a87a8a01ba45f3`; terminal receipt SHA-256 —
+`a77fa2c06b65b93685a289fc91b40b398947ad3bfc9f5a8b73411256bf5c6582`.
+Successor controller может только проверить/replay уже complete plan, intent и
+receipt, доказать отсутствие targets и выйти до effect. Незавершённая
+историческая операция никогда не переносит authority на новый control SHA.
+
+`def5174-pre-rollout` содержит ровно один target — historical
+`pre-rollout-def5174f-20260908t130000z/leetplus.dump`; две recovery pair и два
+его companion files сохраняются. Помимо path/SHA/size/inode/UID/GID/mode и
+no-open-FD controller fail-closed инвентаризирует полный стандартный systemd
+system-unit load path, nested symlinks, все остальные state regular files без
+extension/basename exclusions, special entries, same-filesystem identity и
+`pg_database_size + 2.5 GB` reserve. Reference/capacity gates повторяются
+непосредственно перед единственным unlink.
+
+Nonauthorizing `plan` не даёт effect; `apply` требует exact installed control
+SHA, immutable plan SHA, set-specific подтверждение, exclusive install lock,
+terminal rollout inventory и DB `CURRENT190/190` при отсутствующем
+`CURRENT191/191` target. Parent синхронизируется, receipt публикуется immutable
+`root:root 0400`; replay после lost response допускает только тот же plan.
+Отдельный target-only read-only inventory подтвердил identity кандидата и
+capacity projection, но не новый controller. Root fixture/CI, exact-main
+admission, install и production plan/apply/check ещё pending.
 
 Нельзя начинать новую операцию, редактировать records или вручную увеличивать
 generation, пока предыдущая цепочка не получила terminal status либо не была

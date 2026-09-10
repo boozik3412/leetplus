@@ -16,7 +16,10 @@ runtime release `a05d2a50f4d0382b40bd61cf296c29ea0798fcdf`; её terminal
 `73a17b2d6ba70abd8f52876aa813cac66ab7e56a`; final receipt SHA-256 —
 `22f9f1f742b6f0a44a7d443b1eaf4628648f3cbe0690c1207217e8a46de2a4fc`, final
 production validation `17/17` завершена в `2026-09-09T22:55:16Z`. Все
-operations terminal; capacity gate и restored-copy evidence остаются pending.
+operations terminal. Fresh CURRENT190 backup и off-host copy verified; isolated
+restored-copy ещё не запускалась, потому что host preflight остановился на
+capacity. Historical three-dump retirement уже terminal; новый exact def5174
+one-file controller/effect ожидает root fixture/CI, admission, install и GO.
 Schema effect отсутствует.
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
@@ -36,9 +39,9 @@ fail-closed правилу одного контура снова сломать
 | Guest check-in consistency  | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                                                                                                                                                                                                                                                                                                                                      |
 | Split-runtime deployment    | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Corporate landing           | role-aware successor входит в active `f3f119fa…`; real-account canary остаётся отдельной проверкой                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Release acceleration        | 8/8 + retention: controlled five-phase rollout operation `6be461db-c600-4fe7-9e87-6267d708554e` завершён receipt `c9cbf2c9…`; V3 и trusted lane metrics merged; public/corporate/worker контуры нельзя объединять или понижать ради скорости                                                                                                                                                                                                                                                                               |
+| Release acceleration        | five-phase rollout terminal; V3 и trusted lane metrics merged; independent production-control gates выполняются bounded batch с отдельными logs/exit codes. Historical capacity retirement terminal; новый exact one-file controller pending. Public/corporate/worker контуры нельзя объединять или понижать ради скорости                                                                                                                                                                                                  |
 | Langame recovery            | оба systemd timer `enabled/active`; public serving authority — active green `a05d…`; external unattended остаётся deny до отдельного admission                                                                                                                                                                                                                                                                                                                                                                             |
-| External Langame onboarding | canonical source target `CURRENT_191/191`: preview → atomic settings → manual exact-Store backfill; signed schema controller uses only the `CURRENT_190 → 191` bridge, while a pre-effect exact bridge re-pin may replace release SHA without DDL; transactional apply/check plus two final cutovers pin the SHA, terminal `OFF/LIVE` requires `final-check`; no production GO implied. Current operation terminal after five phases; physical DB remains `CURRENT_190/190`, migration `20260908180000_external_langame_simple_onboarding`, capacity gate and restored-copy evidence remain pending; schema effect отсутствует |
+| External Langame onboarding | canonical source target `CURRENT_191/191`: preview → atomic settings → manual exact-Store backfill; signed schema controller uses only `CURRENT_190 → 191`. Runtime operations terminal, physical DB остаётся `CURRENT_190/190`, migration pending. Fresh backup/off-host verified; restored-copy blocked only by capacity. Для exact def5174 выполнена отдельная read-only проверка identity/capacity; это projection, не controller authority. Новый retirement controller и effect ещё pending; schema effect отсутствует                         |
 | Telegram guest auth         | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                                                                                                                                                                                                                                                                          |
 | Staff rewards               | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                                                                                                                                                                                                                                                                              |
 | Guest identity owner        | exact-link и verified-phone repairs deployed в `def5174f…`; RU-варианты подтверждённого телефона разрешаются только внутри выбранного Langame domain, неоднозначность fail-closed; все 9 выявленных split-owner дублей погашены без reward replay, контрольный остаток `0`                                                                                                                                                                                                                                                 |
@@ -491,19 +494,51 @@ guest, corporate tenant либо worker contour. Source/CI наличие ком
 означает её установку или запуск на production; для новой control generation и
 самой retention operation нужны отдельные admission/GO соответственно.
 
-`prune-three-superseded-dumps.sh` из production-artifact — иной, one-shot
-root-only capacity controller: не generic metrics retention. Он компилирует
-ровно три абсолютных target files (`5,834,469,130` bytes), поэтому manual
-archive deletion и arbitrary paths denied. До effect он сохраняет и дважды
-проверяет pre-`CURRENT191` dump+globals. Nonauthorizing plan не разрешает
-effect; apply принимает только exact control SHA, immutable plan SHA и явную
-фразу, держит install lock, сверяет installed control, terminal rollout
-operations и DB exact `CURRENT190/190` с отсутствующим `CURRENT191/191` target.
-Каждый effect/replay заново проверяет path/SHA/size/inode/UID/GID/mode,
-no-symlink/no-open-FD, unlink'ит только exact files, fsync parent и публикует
-immutable `root:root 0400` receipt; same-plan replay покрывает lost response.
-Fixture B075 PASS, но production authority ещё не admitted, installed или
-applied; capacity gate pending и cleanup не заявлен завершённым.
+Независимые local/CI security gates выполняются bounded batch: каждый gate
+сохраняет отдельные stdout/stderr и exit code, а общий результат сообщает все
+ошибки прохода. Fail-fast обязателен на production effect boundary и при
+недостоверности последующих evidence; параллельные production mutations
+запрещены. Перед каждым повтором и любой production-командой полностью читается
+append-only `deploy-evidence/<operation>/ERROR_LOG.md`, где уже записаны ошибка,
+причина и изменившееся условие. Один tail, устное резюме или неизменившийся
+retry не удовлетворяют boundary.
+
+`prune-three-superseded-dumps.sh` из production-artifact — отдельный root-only
+capacity controller, не generic metrics retention. Он принимает два compiled
+retirement set и никогда arbitrary paths. Исторический default set из трёх
+target files (`5,834,469,130` bytes) admitted/installed/applied под
+production-control `c4a9eef2ced4a240ebcdd90848a87a8a01ba45f3`; immutable terminal
+receipt SHA-256 —
+`a77fa2c06b65b93685a289fc91b40b398947ad3bfc9f5a8b73411256bf5c6582`.
+Historical control binding доступен successor только когда complete immutable
+plan+intent+receipt уже существуют: controller валидирует records, сохранённые
+recovery bytes и отсутствие targets, затем выходит до effect. Incomplete plan
+не получает successor authority.
+
+Новый `def5174-pre-rollout` set компилирует один exact historical dump; его
+companions и обе CURRENT191 recovery pair сохраняются. До plan, apply и ещё раз
+непосредственно перед unlink fail-closed проверяются полный стандартный systemd
+system-unit load path, existing/absent root identities, nested symlink targets,
+каждый внешний state regular file без extension/basename exclusions, отсутствие
+state symlink/special file, same-filesystem identity и
+`pg_database_size + 2.5 GB` reserve. Target отдельно проходит
+path/SHA/size/inode/UID/GID/mode/link-count/no-open-FD checks; `/proc` scan не
+скрывает ошибки, а install lock открывается без `O_CREAT` и повторно связывается
+по inode.
+
+Nonauthorizing plan не разрешает effect. Apply принимает только exact installed
+control SHA, immutable plan SHA, set-specific фразу и exclusive install lock,
+проверяет terminal rollouts и DB `CURRENT190/190` без target `CURRENT191/191`,
+unlink'ит один compiled leaf, синхронизирует parent и публикует immutable
+`root:root 0400` receipt. Same-plan replay покрывает lost response. Отдельный
+target-only read-only inventory подтвердил identity кандидата и capacity
+projection, но не controller execution/authority. Root fixture/CI, admission,
+install, production plan/apply/check и сам capacity effect ещё не выполнены.
+Fresh dump SHA-256 —
+`882572841d0ba79fa0a7f3f347117ca9fc66f8cad30f146d35f2606364b32ca7`;
+off-host bytes verified. Independent read-only calculation gives current
+available `10,387,636,224`, projected `12,408,836,096` after a future exact
+effect and required `12,103,890,199`; these numbers are evidence only, not GO.
 
 Поверх impact lane действует независимый merge-candidate guard. Final runtime и
 production-control handoff разрешён только runtime-eligible exact `push` SHA в

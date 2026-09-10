@@ -20,8 +20,8 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=untrusted-ci-root \
   -keyout "$tmp/bad-key.pem" -out "$tmp/bad-cert.pem" 2>/dev/null
 chmod 0755 "$tmp"
 chmod 0644 "$tmp/cert.pem" "$tmp/bad-cert.pem"
-sudo chown 12030:12030 "$tmp/key.pem"
 chmod 0600 "$tmp/key.pem"
+sudo chown 12030:12030 "$tmp/key.pem"
 docker network create --internal "$name" >/dev/null
 docker run --detach --name "$name" --network "$name" --network-alias postgres --network-alias wrong-postgres \
   --read-only --cap-drop ALL --security-opt no-new-privileges --user 12030:12030 \

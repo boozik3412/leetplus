@@ -52,6 +52,7 @@ def restore(release_path, dump, globals_path, manifest_path):
     manifest = json.loads(manifest_path.read_text())
     if not prepared.get('rehearsal') or prepared['releaseSha'] != release['releaseSha']:
         raise ValueError('Preparation does not bind this rehearsal image')
+    execute(['/usr/bin/python3', str(CONTROL / 'network-fence.py'), 'install-rehearsal'], label='rehearsal-fence')
     if (ROOT / 'evidence/restore.json').exists():
         raise ValueError('Restore is already complete; do not replay it')
     for name, file in [('leetplus.dump', dump), ('globals.sql', globals_path)]:

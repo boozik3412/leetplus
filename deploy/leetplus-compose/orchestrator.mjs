@@ -11,6 +11,7 @@ export function validatePlan(plan) {
   demand(/^[a-f0-9]{64}$/.test(plan.backupReceiptSha256 ?? '') && /^[a-f0-9]{64}$/.test(plan.rehearsalReceiptSha256 ?? ''), 'Backup and rehearsal must be bound');
   demand(plan.secretDigests && Object.keys(plan.secretDigests).sort().join(',') === ['acceptance.json', 'api-blue.json', 'api-green.json', 'db-ca.pem'].sort().join(',') && Object.values(plan.secretDigests).every(v => /^[a-f0-9]{64}$/.test(v)), 'Exact runtime secret-file digests are required');
   demand(/^[a-f0-9]{64}$/.test(plan.networkPolicySha256 ?? ''), 'Network policy must be bound');
+  demand(/^[a-f0-9]{64}$/.test(plan.databaseIdentitySha256 ?? ''), 'Database system identity must be bound');
   demand(plan.action !== 'BOOTSTRAP' || /^[a-f0-9]{64}$/.test(plan.migrationReceiptSha256 ?? ''), 'Bootstrap needs a source-fenced migration receipt');
   release(plan.blue); release(plan.green);
   demand(plan.previous === null ? plan.action === 'BOOTSTRAP' && plan.generation === 0 :
@@ -65,7 +66,11 @@ export async function execute(plan, envelope, publicKey, store, driver) {
   validatePlan(plan);
   const initial = await store.read();
   validateChain(plan, initial.records);
-  validateApproval(plan, envelope, publicKey, { allowExpired: Boolean(initial.final) });
+  validateApproval(plan, envelope, publicKey, { allowExpired: Boolean(initial.final || initial.rolledBack) });
+  if (initial.rolledBack) {
+    demand(initial.rolledBack.planSha256 === digest(plan) && initial.rolledBack.contract === `${CONTRACT}_ROLLED_BACK` && plan.previous && initial.rolledBack.active.activeSlot === plan.previous.activeSlot && initial.rolledBack.active.generation === plan.generation + 2, 'Invalid terminal rollback');
+    return initial.rolledBack;
+  }
   if (initial.final) {
     demand(initial.final.planSha256 === digest(plan) && initial.final.lastReceiptSha256 === digest(initial.records.POSTCHECK?.receipt), 'Final record mismatch');
     return initial.final;

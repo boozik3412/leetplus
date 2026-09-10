@@ -118,12 +118,45 @@ def refresh(config):
         call(['/usr/sbin/ipset', 'destroy', temporary])
 
 
+def rehearsal_fence(install=False):
+    sources = ['172.31.50.0/23', '172.31.52.0/24']
+    definitions = [
+        ('LP_LEETPLUS_REH', 'DOCKER-USER', [
+            ['-m', 'conntrack', '--ctstate', 'RELATED,ESTABLISHED', '-j', 'RETURN'],
+            ['-d', sources[0], '-j', 'RETURN'], ['-d', sources[1], '-j', 'RETURN'], ['-j', 'DROP'],
+        ]),
+        ('LP_LEETPLUS_REH_HOST', 'INPUT', HOST_RULES),
+    ]
+    for name, parent, rules in definitions:
+        existing = call(['/usr/sbin/iptables', '-w', '5', '-S', name], check=False)
+        if install and existing.returncode:
+            call(['/usr/sbin/iptables', '-w', '5', '-N', name])
+            for rule in rules:
+                call(['/usr/sbin/iptables', '-w', '5', '-A', name] + rule)
+            for subnet in reversed(sources):
+                call(['/usr/sbin/iptables', '-w', '5', '-I', parent, '1', '-s', subnet, '-j', name])
+        output = call(['/usr/sbin/iptables', '-w', '5', '-S', name]).stdout.splitlines()
+        if len([line for line in output if line.startswith('-A ')]) != len(rules) or any(not rule_exists(name, rule) for rule in rules):
+            raise ValueError('Rehearsal firewall drift')
+        parents = [shlex.split(line)[2:] for line in call(['/usr/sbin/iptables', '-w', '5', '-S', parent]).stdout.splitlines() if line.startswith('-A ')]
+        production_hook = ['-s', SUBNET, '-j', CHAIN if parent == 'DOCKER-USER' else HOST_CHAIN]
+        if parents and parents[0] == production_hook:
+            parents = parents[1:]
+        expected = [['-s', subnet, '-j', name] for subnet in sources]
+        if parents[:2] != expected:
+            raise ValueError('Rehearsal fence must precede other matching rules')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['install', 'refresh', 'verify'])
+    parser.add_argument('command', choices=['install', 'refresh', 'verify', 'install-rehearsal', 'verify-rehearsal'])
     args = parser.parse_args()
     if os.getuid() != 0:
         raise SystemExit('Root control plane required')
+    if args.command.endswith('-rehearsal'):
+        rehearsal_fence(args.command == 'install-rehearsal')
+        print(json.dumps({'decision': 'PASS', 'contract': 'LEETPLUS_REHEARSAL_NETWORK_V1', 'providerEgress': 'DENIED', 'hostServices': 'DENIED'}))
+        raise SystemExit(0)
     config = provider_config()
     if args.command != 'verify':
         refresh(config)

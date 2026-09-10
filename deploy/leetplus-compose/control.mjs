@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { CONTRACT, SCHEMA, PORTS, canonical, demand, digest, release, renderCompose, verifyContainer } from './contract.mjs';
-import { PHASES, execute, validateChain, validatePlan } from './orchestrator.mjs';
+import { PHASES, execute, validateApproval, validateChain, validatePlan } from './orchestrator.mjs';
 import { validateWorkerGrant } from './worker-authority.mjs';
 
 const STATE = '/var/lib/leetplus-compose';
@@ -42,8 +42,13 @@ function directory(p) {
 function publish(p, value) {
   const bytes = Buffer.from(canonical(value));
   if (fs.existsSync(p)) { demand(safeFile(p, { immutable: true }).equals(bytes), 'Immutable publication conflict'); return; }
-  const fd = fs.openSync(p, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o400);
+  // Every control invocation holds the same kernel flock. Publish complete
+  // fsynced bytes by atomic rename, never leave a partially written final record.
+  const tmp = `${p}.publishing-${crypto.randomUUID()}`;
+  const fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o400);
   try { fs.writeFileSync(fd, bytes); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  demand(!fs.existsSync(p), 'Concurrent immutable publication outside control lock');
+  fs.renameSync(tmp, p);
   syncDir(path.dirname(p));
 }
 function replace(p, bytes, mode = 0o600) {
@@ -63,6 +68,14 @@ function run(binary, argv, { timeout = 120000, input, json = false } = {}) {
 }
 function docker(argv, options) { return run('/usr/bin/docker', ['--host', 'unix:///var/run/docker.sock', '--config', '/etc/leetplus-compose/docker-cli', ...argv], options); }
 function compose(argv) { return docker(['compose', '--project-name', 'leetplus', '--file', `${ROOT}/compose.json`, ...argv]); }
+function databaseIdentity() {
+  return docker(['exec', 'leetplus-postgres', '/usr/lib/postgresql/16/bin/psql', '-XAt', '-h', '/tmp', '-U', 'postgres', '-d', 'leetplus', '-c', 'SELECT system_identifier::text FROM pg_control_system();']);
+}
+function assertPrimaryDatabase(expectedIdentity) {
+  demand(digest(databaseIdentity()) === expectedIdentity, 'Database system identity changed');
+  const facts = docker(['exec', 'leetplus-postgres', '/usr/lib/postgresql/16/bin/psql', '-XAt', '-h', '/tmp', '-U', 'postgres', '-d', 'leetplus', '-c', "SELECT pg_is_in_recovery(),rolsuper,rolcreatedb,rolcreaterole,rolinherit,rolreplication,rolbypassrls,has_schema_privilege('leetplus_runtime','public','CREATE') FROM pg_roles WHERE rolname='leetplus_runtime';"]);
+  demand(facts === 'f|f|f|f|f|f|f|f', 'Database is not the admitted primary with a bounded runtime role');
+}
 function installedDigest() {
   const manifest = readJSON(`${CONTROL}/install-manifest.json`, { immutable: true });
   demand(manifest.contract === `${CONTRACT}_INSTALL` && manifest.files && Object.keys(manifest.files).length > 5, 'Missing installed control manifest');
@@ -87,7 +100,7 @@ function storeFor(dir) {
       }
       if (Object.keys(record).length) records[phase] = record;
     }
-    return { records, final: fs.existsSync(`${dir}/final.json`) ? readJSON(`${dir}/final.json`, { immutable: true }) : null };
+    return { records, final: fs.existsSync(`${dir}/final.json`) ? readJSON(`${dir}/final.json`, { immutable: true }) : null, rolledBack: fs.existsSync(`${dir}/rolled-back.json`) ? readJSON(`${dir}/rolled-back.json`, { immutable: true }) : null };
   };
   return { read, publish: async (phase, type, value) => publish(`${dir}/${PHASES.indexOf(phase) + 1}-${phase}.${type}.json`, value), finalize: async value => publish(`${dir}/final.json`, value) };
 }
@@ -95,7 +108,11 @@ function assertNoPending(except) {
   for (const id of fs.readdirSync(`${STATE}/operations`)) {
     if (id === except) continue;
     const dir = operation(id);
-    demand(fs.existsSync(`${dir}/final.json`), 'Another deployment operation is unfinished');
+    if (!fs.existsSync(`${dir}/final.json`)) {
+      const plan = readJSON(`${dir}/plan.json`, { immutable: true });
+      const rollback = readJSON(`${dir}/rolled-back.json`, { immutable: true });
+      demand(rollback.contract === `${CONTRACT}_ROLLED_BACK` && rollback.planSha256 === digest(plan) && plan.previous && rollback.active?.generation === plan.generation + 2 && rollback.active?.activeSlot === plan.previous.activeSlot, 'Another deployment operation is unfinished');
+    }
   }
 }
 function http(url, { headers = {}, resolve } = {}) {
@@ -143,6 +160,17 @@ function switchLink(slot) {
   fs.symlinkSync(`${slot}.conf`, tmp);
   fs.renameSync(tmp, `${NGINX}/active.conf`); syncDir(NGINX);
 }
+function rollbackAfterPostcheck(p, dir) {
+  demand(p.previous, 'Bootstrap has no local predecessor to roll back to');
+  probeSlot(p, p.previous.activeSlot); authenticatedSmoke(p.previous.activeSlot);
+  publish(`${dir}/rollback.intent.json`, { planSha256: digest(p), fromGeneration: p.generation + 1, targetSlot: p.previous.activeSlot });
+  switchLink(p.previous.activeSlot);
+  run('/usr/sbin/nginx', ['-t']); run('/usr/bin/systemctl', ['reload', 'nginx']);
+  probeSlot(p, p.previous.activeSlot);
+  const current = { operationId: p.operationId, generation: p.generation + 2, activeSlot: p.previous.activeSlot, blue: p.blue, green: p.green, planSha256: digest(p), outcome: 'ROLLED_BACK' };
+  replace(`${STATE}/active.json`, canonical(current));
+  publish(`${dir}/rolled-back.json`, { contract: `${CONTRACT}_ROLLED_BACK`, planSha256: digest(p), reason: 'POSTCHECK_FAILED', active: current });
+}
 function driverFor(dir) {
   return {
     preflight: async (p) => {
@@ -150,6 +178,7 @@ function driverFor(dir) {
       for (const [leaf, hash] of Object.entries(p.secretDigests)) demand(digest(safeFile(`${ROOT}/secrets/${leaf}`)) === hash, 'Runtime secret-file binding drift');
       demand(digest(safeFile('/etc/leetplus-compose/providers.json')) === p.networkPolicySha256, 'Provider policy binding drift');
       run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, 'verify']);
+      assertPrimaryDatabase(p.databaseIdentitySha256);
       assertNoPending(p.operationId);
       const current = active();
       demand(canonical(current) === canonical(p.previous) || (current?.operationId === p.operationId && current.generation === p.generation + 1 && current.activeSlot === p.targetSlot), 'Active generation drift');
@@ -212,10 +241,15 @@ function driverFor(dir) {
       }
       demand(phase === 'POSTCHECK', 'Unknown phase');
       demand(acceptedLink(p.targetSlot) && active()?.operationId === p.operationId, 'Cutover is not accepted');
-      const ready = JSON.parse(http('https://api.leetplus.ru/health/ready', { resolve: 'api.leetplus.ru:443:127.0.0.1' }));
-      const web = JSON.parse(http('https://leetplus.ru/api/release-identity', { resolve: 'leetplus.ru:443:127.0.0.1' }));
-      demand(ready.release?.sha === p[p.targetSlot].releaseSha && web.release?.sha === p[p.targetSlot].releaseSha, 'Nginx TLS/SNI readiness mismatch');
-      return { ...bound, slot: p.targetSlot, generation: p.generation + 1, authenticated: authenticatedSmoke(p.targetSlot) };
+      try {
+        const ready = JSON.parse(http('https://api.leetplus.ru/health/ready', { resolve: 'api.leetplus.ru:443:127.0.0.1' }));
+        const web = JSON.parse(http('https://leetplus.ru/api/release-identity', { resolve: 'leetplus.ru:443:127.0.0.1' }));
+        demand(ready.release?.sha === p[p.targetSlot].releaseSha && web.release?.sha === p[p.targetSlot].releaseSha, 'Nginx TLS/SNI readiness mismatch');
+        return { ...bound, slot: p.targetSlot, generation: p.generation + 1, authenticated: authenticatedSmoke(p.targetSlot) };
+      } catch (error) {
+        if (p.previous) rollbackAfterPostcheck(p, dir);
+        throw error;
+      }
     },
     reconcile: async function (phase, p) {
       // Each fixed phase is idempotent at its own boundary. Completed phases
@@ -251,7 +285,17 @@ if (command === 'help' || !command) {
   const lockInfo = fs.lstatSync(`${STATE}/control.lock`);
   demand(lockInfo.isFile() && !lockInfo.isSymbolicLink() && lockInfo.uid === 0 && lockInfo.nlink === 1 && !(lockInfo.mode & 0o077), 'Untrusted control lock');
   const locks = fs.readFileSync('/proc/locks', 'utf8').split('\n');
-  demand(locks.some(line => { const fields = line.trim().split(/\s+/); return fields[1] === 'FLOCK' && fields[3] === 'WRITE' && fields[4] === String(process.ppid) && fields[5]?.split(':').at(-1) === String(lockInfo.ino); }), 'Parent does not hold the kernel control lock');
+  const lockMode = ['status', 'boot', 'backup', 'worker-run'].includes(command) ? 'READ' : 'WRITE';
+  demand(locks.some(line => { const fields = line.trim().split(/\s+/); return fields[1] === 'FLOCK' && fields[3] === lockMode && fields[4] === String(process.ppid) && fields[5]?.split(':').at(-1) === String(lockInfo.ino); }), 'Parent does not hold the kernel control lock');
+  if (command === 'backup' || command === 'worker-run') {
+    const name = command === 'backup' ? 'backup' : options.name;
+    demand(['backup', 'bonus-ledger-worker', 'langame-daily-worker'].includes(name), 'Unknown singleton lock');
+    const singleton = fs.lstatSync(`${STATE}/${name}.lock`);
+    demand(singleton.isFile() && !singleton.isSymbolicLink() && singleton.uid === 0 && singleton.nlink === 1 && !(singleton.mode & 0o077), 'Invalid singleton lock file');
+    const parentStatus = fs.readFileSync(`/proc/${process.ppid}/status`, 'utf8');
+    const outerPid = parentStatus.match(/^PPid:\s+(\d+)$/m)?.[1];
+    demand(locks.some(line => { const fields = line.trim().split(/\s+/); return fields[1] === 'FLOCK' && fields[3] === 'WRITE' && fields[4] === outerPid && fields[5]?.split(':').at(-1) === String(singleton.ino); }), 'Singleton kernel lock is not held');
+  }
   directory(STATE); directory(`${STATE}/operations`);
   installedDigest();
   if (command === 'status') {
@@ -259,9 +303,14 @@ if (command === 'help' || !command) {
     for (const id of fs.readdirSync(`${STATE}/operations`)) {
       const dir = operation(id), plan = readJSON(`${dir}/plan.json`, { immutable: true }), state = await storeFor(dir).read();
       validatePlan(plan); validateChain(plan, state.records);
-      operations.push({ operationId: id, targetSlot: plan.targetSlot, completed: Boolean(state.final), phases: Object.keys(state.records) });
+      operations.push({ operationId: id, targetSlot: plan.targetSlot, completed: Boolean(state.final), rolledBack: Boolean(state.rolledBack), phases: Object.keys(state.records) });
     }
     console.log(canonical({ active: active(), operations }));
+  } else if (command === 'network') {
+    demand(['install', 'refresh', 'verify', 'install-rehearsal', 'verify-rehearsal'].includes(options.operation), 'Unknown network operation');
+    console.log(run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, options.operation]));
+  } else if (command === 'backup') {
+    console.log(run('/usr/bin/python3', [`${CONTROL}/daily-backup.py`], { timeout: 3600000 }));
   } else if (command === 'prepare') {
     assertNoPending();
     const request = readJSON(options.request);
@@ -269,16 +318,53 @@ if (command === 'help' || !command) {
     const plan = { ...request, contract: `${CONTRACT}_PLAN`, operationId: id, hostIdentitySha256: hostIdentity(), controlSha256: installedDigest(), previous, generation: previous?.generation ?? 0, action: previous ? 'ROLLOUT' : 'BOOTSTRAP' };
     plan.secretDigests = Object.fromEntries(['acceptance.json', 'api-blue.json', 'api-green.json', 'db-ca.pem'].map(leaf => [leaf, digest(safeFile(`${ROOT}/secrets/${leaf}`))]));
     plan.networkPolicySha256 = digest(safeFile('/etc/leetplus-compose/providers.json'));
+    plan.databaseIdentitySha256 = digest(databaseIdentity());
     plan.composeSha256 = digest(renderCompose({ blue: plan.blue, green: plan.green, activeSlot: plan.targetSlot }));
     validatePlan(plan);
     const dir = operation(id); directory(dir); publish(`${dir}/plan.json`, plan);
     console.log(canonical({ decision: 'PREPARED_NOT_AUTHORIZATION', operationId: id, planSha256: digest(plan), planPath: `${dir}/plan.json` }));
+  } else if (command === 'boot') {
+    const current = active();
+    if (!current) {
+      console.log(canonical({ decision: 'NO_PRODUCTION_ACTIVATION', started: false }));
+    } else {
+      const dir = operation(current.operationId), plan = readJSON(`${dir}/plan.json`, { immutable: true });
+      const history = await storeFor(dir).read();
+      validatePlan(plan); validateChain(plan, history.records);
+      validateApproval(plan, readJSON(`${dir}/approval.json`, { immutable: true }), safeFile('/etc/leetplus-compose/approval-root.pem'), { allowExpired: true });
+      const accepted = current.outcome === 'ROLLED_BACK'
+        ? history.rolledBack && canonical(history.rolledBack.active) === canonical(current) && plan.previous && current.generation === plan.generation + 2 && current.activeSlot === plan.previous.activeSlot
+        : current.generation === plan.generation + 1 && current.activeSlot === plan.targetSlot && history.records.SMOKE?.receipt && history.records.CUTOVER?.intent;
+      demand(current.planSha256 === digest(plan) && accepted && acceptedLink(current.activeSlot), 'No accepted routing authority for reboot');
+      run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, 'verify']);
+      assertPrimaryDatabase(plan.databaseIdentitySha256);
+      const slot = current.activeSlot;
+      demand(digest(safeFile(`${ROOT}/secrets/api-${slot}.json`)) === plan.secretDigests[`api-${slot}.json`] && digest(safeFile(`${ROOT}/secrets/db-ca.pem`)) === plan.secretDigests['db-ca.pem'], 'Accepted runtime secret identity drift');
+      const spec = renderCompose({ blue: current.blue, green: current.green, activeSlot: slot });
+      for (const role of ['api', 'web']) {
+        const name = `${role}-${slot}`, service = spec.services[name];
+        const item = docker(['inspect', service.container_name], { json: true })[0];
+        // Configuration-only attestation is distinct from a live-state proof;
+        // the real observed state is never rewritten to manufacture readiness.
+        const imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
+        verifyContainer(item, service, name, { imageEnvironment, configurationOnly: true });
+        docker(['start', service.container_name]);
+      }
+      let ready = false;
+      for (let attempt = 0; attempt < 60; attempt++) {
+        try { probeSlot(plan, slot); ready = true; break; } catch { await new Promise(resolve => setTimeout(resolve, 1000)); }
+      }
+      demand(ready, 'Accepted runtime did not recover after restart');
+      console.log(canonical({ decision: 'ACCEPTED_RUNTIME_RESTARTED', slot, generation: current.generation }));
+    }
   } else if (command === 'worker-run') {
     const name = options.name;
     demand(['bonus-ledger-worker', 'langame-daily-worker'].includes(name), 'Unknown worker');
-    assertNoPending();
     const current = active();
     demand(current, 'No accepted active release');
+    const activePlan = readJSON(`${operation(current.operationId)}/plan.json`, { immutable: true });
+    demand(current.planSha256 === digest(activePlan), 'Worker active plan drift');
+    assertPrimaryDatabase(activePlan.databaseIdentitySha256);
     run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, 'verify']);
     const secretBytes = safeFile(`${ROOT}/secrets/${name}.json`);
     const grant = validateWorkerGrant(readJSON(`${STATE}/worker-grants/${name}.json`, { immutable: true }), safeFile('/etc/leetplus-compose/approval-root.pem'), current, hostIdentity(), secretBytes);
@@ -286,9 +372,18 @@ if (command === 'help' || !command) {
     const dir = `${STATE}/worker-runs`; directory(dir);
     demand(!fs.existsSync(`${dir}/${key}.intent.json`), 'Canary already attempted; reconcile its existing outcome');
     const spec = renderCompose({ blue: current.blue, green: current.green, activeSlot: current.activeSlot });
-    demand(digest(safeFile(`${ROOT}/compose.json`)) === digest(spec), 'Compose changed before worker execution');
+    // A prepared/inactive application slot must not stop the accepted worker.
+    // Bind this tick to its own immutable accepted-state Compose document.
+    const workerCompose = `${dir}/${key}.compose.json`;
+    publish(workerCompose, spec);
+    const existing = docker(['ps', '--all', '--filter', `name=^/leetplus-${name}$`, '--format', '{{.ID}}']);
+    if (existing) {
+      const prior = docker(['inspect', `leetplus-${name}`], { json: true })[0];
+      demand(prior.Config.Labels?.['ru.leetplus.contract'] === CONTRACT && prior.Config.Labels?.['com.docker.compose.project'] === 'leetplus', 'Existing worker container is not owned by this project');
+      demand(!prior.State.Running && prior.State.Pid === 0, 'A prior worker is still running; no overlapping tick allowed');
+    }
     publish(`${dir}/${key}.intent.json`, { grantId: grant.id, activeGeneration: current.generation, releaseSha: grant.releaseSha, worker: name, startedAt: new Date().toISOString() });
-    compose(['create', '--no-deps', '--force-recreate', name]);
+    docker(['compose', '--project-name', 'leetplus', '--file', workerCompose, 'create', '--no-deps', '--force-recreate', name]);
     const service = spec.services[name];
     const imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
     verifyContainer(docker(['inspect', service.container_name], { json: true })[0], service, name, { beforeStart: true, imageEnvironment });

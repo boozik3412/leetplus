@@ -11,6 +11,7 @@ const plan = { contract: `${CONTRACT}_PLAN`, operationId: crypto.randomUUID(), a
 plan.composeSha256 = digest(renderCompose({ blue: r, green: r }));
 plan.secretDigests = Object.fromEntries(['acceptance.json', 'api-blue.json', 'api-green.json', 'db-ca.pem'].map(name => [name, '4'.repeat(64)]));
 plan.networkPolicySha256 = '5'.repeat(64);
+plan.databaseIdentitySha256 = '6'.repeat(64);
 function envelope(p = plan) {
   const approval = { contract: `${CONTRACT}_APPROVAL`, operationId: p.operationId, action: p.action, hostIdentitySha256: p.hostIdentitySha256, planSha256: digest(p), issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3600000).toISOString() };
   return { approval, signature: crypto.sign(null, Buffer.from(canonical(approval)), key.privateKey).toString('base64') };

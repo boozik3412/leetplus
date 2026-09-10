@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path('/srv/leetplus-migration/rehearsal')
 NAME = 'leetplus-rehearsal'
+CONTROL = Path(__file__).resolve().parent
 
 
 def command(args, data=None):
@@ -57,6 +58,7 @@ def run():
     restore = json.loads((ROOT / 'evidence/restore.json').read_text())
     if restore.get('decision') != 'DATABASE_RESTORE_PASS':
         raise ValueError('Verified restore required')
+    command(['/usr/bin/python3', str(CONTROL / 'network-fence.py'), 'verify-rehearsal'])
     original_counts = sql('SELECT json_build_object(\'events\',(SELECT count(*) FROM "GuestGameEvent"),\'rewards\',(SELECT count(*) FROM "GuestGameReward"),\'ledger\',(SELECT count(*) FROM "GuestBonusLedgerEntry"));')
     actor = json.loads(sql('SELECT row_to_json(x) FROM (SELECT u.id,u.email,u."tenantId" FROM "User" u JOIN "Tenant" t ON t.id=u."tenantId" WHERE t.slug=\'demo\' AND u."isActive" AND NOT u."isPlatformAdmin" AND u."accessScope"=\'NETWORK\' AND u.role IN (\'OWNER\',\'ADMIN\',\'MANAGER\') ORDER BY u.id LIMIT 1) x;'))
     # Change exactly one password in the disposable copy only. The clone JWT

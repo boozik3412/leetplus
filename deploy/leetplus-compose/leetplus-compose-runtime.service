@@ -1,0 +1,14 @@
+[Unit]
+Description=Start only the accepted LeetPlus Compose runtime after its network fence
+Requires=docker.service leetplus-compose-network.service
+After=docker.service leetplus-compose-network.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/leetplus-compose boot
+RemainAfterExit=yes
+TimeoutStartSec=180
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

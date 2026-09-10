@@ -98,6 +98,16 @@ def install(inbox, expected):
     for name in ['/etc/leetplus-compose', '/var/lib/leetplus-compose', '/var/lib/leetplus-compose/operations', '/etc/leetplus-compose/docker-cli']:
         mkdir(Path(name))
     publish(Path('/etc/leetplus-compose/docker-cli/config.json'), b'{}\n', 0o400)
+    for name, entrypoint in [('leetplus-compose', 'control.sh'), ('leetplus-compose-network', 'network.sh'), ('leetplus-compose-backup', 'backup.sh')]:
+        link = Path('/usr/local/sbin') / name
+        if link.exists() or link.is_symlink():
+            if not link.is_symlink() or link.resolve() != target / entrypoint:
+                raise ValueError('Existing command belongs to a different control generation; explicit handoff required')
+        else:
+            link.symlink_to(target / entrypoint)
+    for name, content in payload.items():
+        if name.startswith('leetplus-compose-') and name.endswith(('.service', '.timer')):
+            publish(Path('/etc/systemd/system') / name, content, 0o644)
     print(json.dumps({'decision': 'CONTROL_INSTALLED_NOT_ACTIVATED', 'controlRoot': str(target), 'controlSha256': digest(canonical(manifest)), 'releaseSha': sha}))
 
 

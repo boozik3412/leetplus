@@ -1,0 +1,14 @@
+[Unit]
+Description=LeetPlus scoped Docker network fence
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/leetplus-compose-network install
+RemainAfterExit=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

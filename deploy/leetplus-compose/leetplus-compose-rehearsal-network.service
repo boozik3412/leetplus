@@ -1,0 +1,13 @@
+[Unit]
+Description=LeetPlus restored-copy isolation from providers and host services
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/leetplus-compose-network install-rehearsal
+RemainAfterExit=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

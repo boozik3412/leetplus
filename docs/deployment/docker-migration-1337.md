@@ -2,6 +2,17 @@
 
 Status: implementation candidate, NOT INSTALLED / NOT ADMITTED.
 
+Current authorization: preparation only. Do not switch DNS or public nginx,
+stop source API/Web/worker services, promote a standby, or enable target live
+workers. The actual migration is a separate user-authorized operation.
+
+Source SSH hardening completed on 10.09.2026: exposed root password rotated,
+password/keyboard-interactive SSH disabled, fresh key login verified. Main is
+now protected by required Fast CI checks and PRs, including administrators;
+force pushes and branch deletion are disabled. These do not change the serving
+application. The encrypted off-host backup passed authentication and inner
+dump/global checksums; database/runtime restore acceptance is a separate gate.
+
 The source is CURRENT191 COMBINED on Ubuntu 24.04 / PostgreSQL16.13. The target
 is Ubuntu26.04 server 1337, LAN192.168.1.137 / public188.234.220.76. Domains
 stay unchanged. The accepted maintenance budget is 30 minutes; source VDS is
@@ -15,6 +26,21 @@ JSON. Production ports are loopback13100/13200 for Web and14100/14200 for API.
 PostgreSQL/Redis have no published ports. Web uses only its slot's internal
 API network; API/data/worker traffic is separated. Rehearsal uses a different
 project, root, subnets and ports, without an external egress network.
+Rehearsal ports are23100/23200 and24100/24200. Its project firewall also denies
+access to host services. This prevents an internal Docker network from using
+an unrelated host proxy as an outbound path.
+
+Database transport uses the native Prisma6 contract: `sslmode=require`,
+`sslcert=/run/secrets/db-ca.pem`, `sslaccept=strict`. CI must verify a real TLS
+connection and reject both a wrong CA and wrong hostname. libpq's similarly
+named URL options are not substituted. API uses the non-owner `leetplus_runtime`
+role with four connections per slot; each worker has two bounded connections.
+
+API/Web restart on failure but are started after a Docker daemon reboot only
+by the accepted-state boot controller, after the project network fence. Data
+services keep normal restart behavior. Worker/backup singleton locks are
+separate; shared control locks prevent them from starving normal application
+recovery. A merely prepared application operation is not worker authority.
 
 `PRODUCTION_NETWORK_PROFILE=HOST_LOOPBACK` is the unchanged default. Explicit
 `DOCKER_BRIDGE` is restricted to the reviewed COMBINED contract with enforced

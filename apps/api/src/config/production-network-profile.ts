@@ -34,7 +34,13 @@ export function productionNetworkErrors(config: Record<string, unknown>) {
     errors.push('DOCKER_BRIDGE is not a design-partner runtime admission');
   }
   try {
-    const url = new URL(String(config.DATABASE_URL ?? ''));
+    if (
+      typeof config.DATABASE_URL !== 'string' ||
+      config.DATABASE_URL !== config.DATABASE_URL.trim()
+    ) {
+      throw new Error('Invalid database URL type');
+    }
+    const url = new URL(config.DATABASE_URL);
     const expected = new Map([
       ['schema', 'public'],
       ['connection_limit', '4'],

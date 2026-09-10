@@ -2806,3 +2806,68 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
+
+  compose-images:
+    name: Compose immutable image candidate
+    needs: release_impact
+    if: needs.release_impact.outputs.runtime_artifact_eligible == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Test Compose authority boundaries
+        run: node --test deploy/leetplus-compose/*.test.mjs
+      - name: Build pinned images from exact source
+        run: bash deploy/leetplus-compose/build-images.sh "$RUNNER_TEMP/leetplus-compose"
+      - name: Upload non-deployable image candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: leetplus-compose-candidate-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/leetplus-compose/
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
+
+  compose-handoff:
+    name: Admitted Compose image handoff
+    needs:
+      - release_impact
+      - release-handoff
+      - compose-images
+    if: needs.release_impact.outputs.deployable_candidate == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Download exact parent admission
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: leetplus-release-admission-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}-*
+          path: ${{ runner.temp }}/compose-parent-admission
+          merge-multiple: true
+      - name: Download exact image candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: leetplus-compose-candidate-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/leetplus-compose
+      - name: Bind images to exact-main Full admission
+        run: node deploy/leetplus-compose/admit-images.mjs "$RUNNER_TEMP/leetplus-compose" "$RUNNER_TEMP/compose-parent-admission" "$RUNNER_TEMP/leetplus-compose/docker-admission.json"
+      - name: Publish admitted immutable Compose handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: leetplus-compose-admitted-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/leetplus-compose/
+          compression-level: 0
+          retention-days: 30

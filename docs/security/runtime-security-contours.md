@@ -1,121 +1,48 @@
 # Runtime и security-контуры LeetPlus
 
-Статус: **канонический current-state contract**
+Статус: **канонический current-state contract**, актуально на **11.09.2026**.
 
-## Cutover preflight: worker TLS repair, 11.09.2026
+Фактический перенос на сервер1337 выполнен по отдельному разрешению владельца.
+Новый узел `192.168.1.137`, public `188.234.220.76`, обслуживает exact
+`399876b560b4ac611eae35ee425d99422fb140b9`: active green, hot rollback blue,
+accepted Compose generation2. PostgreSQL16.13 на новом узле — единственный
+primary; физическая схема и оба API — `CURRENT_191/191`, bridge `OFF`, reporting
+`LIVE`. Старый VDS `168.222.143.243` работает только как HTTPS proxy;
+PostgreSQL и четыре старых API/Web unit остановлены и persistently masked,
+оба старых worker timer disabled. Source runtime6097/generation55 — история.
 
-Сверка effective source settings дополнительно закрепляет отдельные часы каждого
-контура. PostgreSQL и API/Web source используют `Europe/Moscow` (API/Web
-наследуют host zone при отсутствующем `TZ`), а штатный worker запускается с
-`TZ=UTC`. Compose явно сохраняет эти значения; generated PostgreSQL config
-задаёт `timezone` и `log_timezone=Europe/Moscow`. Глобальная timezone нового
-хоста не меняется. Контракт проверяет реальную локальную дату Node по обе
-стороны полуночи и отвергает container-env drift; после restage обязателен
-повторный `SHOW TimeZone`. Source ещё обслуживает сайт, target остаётся standby.
-Та же сверка сохраняет source `lc_messages/lc_monetary/lc_numeric/lc_time`
-`en_US.UTF-8` и `default_text_search_config=pg_catalog.english`. `DateStyle`,
-`IntervalStyle`, string и bytea semantics уже совпали. Измеренный source API
-memory peak `2,665,529,344` bytes превышает прежний candidate cap1GiB: API cap
-увеличен до ограниченных4GiB при64GBclass target, Web остаётся1GiB. Daily worker
-сохраняет source budget45минут; bonus controller остаётся ограничен16минутами,
-общий systemd envelope47минут не расширяет его native deadline. Worker scope,
-single-owner grants и ограничение соединений остаются прежними.
+В 12:16:23UTC master, NS5, NS6 и два публичных resolver подтвердили новый IP
+у root/www/api с TTL300. Сайт восстановлен в11:53:58.865UTC; консервативная
+пауза по maintenance intent —763секунды. Владелец подтвердил новый Telegram
+вход, профиль и личный кабинет. Полные receipts и эксплуатационные ограничения:
+[отчёт переноса](../deployment/docker-migration-completion-2026-09-11.md).
 
-Фактический перенос разрешён владельцем, но остановка исходного сайта ещё не
-началась. Дополнительный network-none запуск native worker config loader из
-подготовленного `ae0d76cc…` подтвердил несовместимость: Compose authority требует
-`sslcert=/run/secrets/db-ca.pem`, а application worker allowlist его отклоняет.
-Реплика остаётся standby, source `6097dc83…/CURRENT191` обслуживает пользователей.
+| Область              | Фактическое состояние                                                                                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime и admission  | Exact399876; Fast34590140633 и Full34590140602 SUCCESS; две штатные пятифазные операции завершены                                                                 |
+| Процессы             | Docker COMBINED blue/green API/Web, localhost ports; public/corporate guards и worker authority сохраняют разные границы                                          |
+| База                 | Единственный PG16.13 primary на1337, CURRENT191; прежние owners и restricted runtime grants сохранены                                                             |
+| Data baseline        | Отдельные `dataRelease`/`dataAdmissionSha256`; app rollout не заменяет PG/Redis images                                                                            |
+| Сеть                 | Per-slot loopback ingress, internal data bridge, V2 firewall и exact provider policy; Web не получает API/worker egress                                           |
+| Часы и ресурсы       | PG/API/Web Europe/Moscow, workers UTC; PG en_US.UTF-8/English search; API4GiB, Web1GiB; daily45min, bonus16min                                                    |
+| Workers              | Оба signed CANARY PASS, TIMER grants на exact399876/generation2/INTERNALdemo; daily04:30 Yekaterinburg, bonus singleton +30s после завершения; API schedulers OFF |
+| Telegram             | Тот же единственный poller/state, свежий heartbeat, empty webhook, monotonic offset и новый user canary PASS                                                      |
+| HTTPS                | Root/www/api Certbot webroot на1337, сертификат до10.12.2026; native renew dry-run PASS; scoped copy/reload hook                                                  |
+| Резервирование       | Ежедневный encrypted backup06:00 Yekaterinburg, Windows pull07:00 и logon; финальная копия и restore evidence указаны в отчёте                                    |
+| Host rollback        | После target writes только reverse transfer актуальных данных; старую БД нельзя просто запустить                                                                  |
+| Внешний beta и split | Миграция не выдаёт внешний beta GO и не активирует dormant physical split; отдельные tenant/provider gates сохраняются                                            |
 
-Source repair допускает этот CA только для `leetplus_runtime@postgres:5432/leetplus`
-при `sslmode=require`, `sslaccept=strict` и прежнем pool limit2. Другой CA, host,
-role, database, duplicate/unknown option либо relaxed TLS остаётся rejected;
-legacy URL без `sslcert` сохраняет свой контракт. CI дополнительно выполняет
-config loader из самого API image, а admission требует это evidence вместе с
-положительным и отрицательными Prisma TLS probes. Это ещё не установленный
-successor: до source fencing нужны его exact-main admission, restage и свежая
-acceptance. Public/corporate guards, worker scope и provider authority не меняются.
-
-## Подготовка Docker migration завершена, 11.09.2026
-
-Статус нового узла — **PREPARED_NOT_SERVING**. Exact
-`ae0d76ccb2d588893b50962bcd31310f0547be08` прошёл Fast `34568322877` и Full
-`34568322729`, включая импорт четырёх образов, TLS и реальные сетевые проверки.
-На target установлены соответствующие immutable control/images; исходный VDS
-продолжает обслуживать `6097dc83…/CURRENT191`. DNS и публичный Nginx не переключены.
-
-Target PostgreSQL16.13 — streaming standby с `pg_is_in_recovery()=true`.
-Полное SQL-восстановление, оба API/Web через реальные localhost-порты,
-corporate/guest auth, tenant oracle и отрицательная token/network matrix прошли.
-Игровые event/reward/ledger counts в acceptance не изменились. Зашифрованный
-backup с image/control bundle получен Windows, аутентифицирован и восстановлен
-в отдельной БД без сети. Backup schedules включены; target app/worker production
-containers, active state, operations и live grants отсутствуют.
-
-Per-slot ingress bridges публикуют порты только на loopback. Data bridge
-остаётся internal без published ports. Firewall V2 разрешает Web только свой
-API, а объявленным API/worker identities — соответствующие PG/Redis ports.
-Web→DB, другой slot, host proxy и внешний адрес запрещены; rehearsal API также
-не имеет доступа к production standby. Provider gateway priority и дополнительные
-группы контейнеров проверяются по точному контракту. API schedulers выключены.
-
-Default `HOST_LOOPBACK` по-прежнему требует `API_BIND_HOST=127.0.0.1`.
-`DOCKER_BRIDGE` допускается только для exact COMBINED Compose contract,
-ENFORCED tenant/file ACL и отключённых schedulers; флаг не заменяет host-level
-проверку namespaces, mounts, фактических портов и сетевого fence. Dormant split
-runtime не активирован. Generated modes явно применяются после umask0077;
-остановленное создание использует `up --no-start --no-deps`.
-
-Plan отдельно связывает `dataRelease` и data admission: последующие app
-blue/green updates сохраняют принятые PG/Redis images. Их замена через app
-rollout запрещена; manifests, actual containers и backup archive set проверяются.
-Cold preparation retirement сохраняет старые файлы/evidence и допускает
-переподготовку только без accepted runtime/operations/grants, сохраняя доказанную
-неповышенную реплику. Installed generations не правятся на месте.
-
-Сам перенос требует отдельного GO, fresh source/backup check, source fencing,
-final LSN replay, promotion, signed host-bound rollout и новой worker authority.
-Одновременные source/target writers запрещены. Подробное подтверждение и граница
-следующего этапа: [готовность подготовки](../deployment/docker-migration-prepared-2026-09-11.md).
-
-Актуально на: **10.09.2026**
-Текущий runtime: active green и hot rollback blue —
-`6097dc83863e1ab44d99d15ad0c19505cf7fa3fc`; physical DB и оба runtime —
-`CURRENT_191/191`, bridge `OFF`, reporting `LIVE`. Оба final rollout
-завершены, accepted generation 55, штатный schema `final-check` прошёл.
-Fresh backup, off-host copy, migration и signed runtime rehearsal проверены;
-disposable cluster удалён после сохранения evidence. Installed control остаётся
-exact6097, 63 файла. Historical same-SHA lineage ошибки закрыты ограниченными
-signed operator recoveries без изменения этих 63 файлов или старых receipts.
-Ежедневный worker: старый permit снят, canary за 09.09 и новый timer grant
-проверены. Daily и bonus-ledger timers enabled/active; итоговая acceptance PASS.
-Точные receipts, ограничения и наблюдения:
-[`CURRENT191 completion`](../deployment/current191-completion-2026-09-10.md).
+TLS использует существующий Nginx webroot `/srv/leetplus/acme`. Для доступа
+только Nginx группа `www-data` получает traverse на `/srv/leetplus`
+(`root:www-data 0710`) и read/traverse на `acme` (`0750`). Листинг project root,
+доступ к private subtrees и чтение private key от www-data проверены как denied.
+`secrets`, `data`, `backups` остаются `root:root 0700`; TLS key/cert root-only0400.
+Это host provisioning: immutable installed controller не редактировался.
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
-background jobs и production deployment. Его цель — не дать строгому
-fail-closed правилу одного контура снова сломать другой контур.
-
-## Текущее состояние
-
-| Область                     | Состояние                                                                                                                                                                                                                                                                  |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation      | active green и hot rollback blue exact `6097dc83863e1ab44d99d15ad0c19505cf7fa3fc`; runtime/physical DB `CURRENT_191/191`, `OFF/LIVE`                                                                                                                                       |
-| Admission merge SHA         | Exact6097: Fast34447421785 и Full34447421800 SUCCESS; оба final rollout terminal; schema final-check PASS. Подробные receipts — в CURRENT191 completion                                                                                                                    |
-| Production API topology     | nginx generation55 active green; оба COMBINED API/Web slot6097, schema191, bridgeOFF/reportingLIVE                                                                                                                                                                         |
-| Guest bug-report repair     | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                                                                            |
-| Corporate invite repair     | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                                                                                 |
-| Guest check-in consistency  | публичный чек-ин атомарно закрепляет activation boundary до evaluation и пишет exact `CHECK_IN_PERFORMED`; **deployed** в `982b537c…`                                                                                                                                      |
-| Split-runtime deployment    | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                                                                                   |
-| Corporate landing           | platform-admin real-account smoke PASS: saved session, administration redirect, signed demo/set-1 contexts; streaming redirect может возвращать HTTP200                                                                                                                    |
-| Release acceleration        | Batch logs/exit codes и журнал повторов обязательны. Retirement и restored-copy завершены; scope/tenant/worker границы сохраняются. Исторический same-SHA prior не равен текущему env identity                                                                             |
-| Langame recovery            | canary09.09 и timer apply/check PASS на6097; daily и bonus-ledger timers enabled/active; все4 DailyDataCoverage scopes SUCCESS                                                                                                                                             |
-| External Langame onboarding | DEPLOYED на6097/CURRENT191: preview → atomic settings → manual exact-Store sync. SAFE_EXTERNAL проверен для set-1; ключ этой сети ещё не сохранён. Original1337 — slugdemo, данные не переносились                                                                         |
-| Telegram guest auth         | egress recovery 06.09: один poller `172.25.0.10` через private HTTP CONNECT `172.25.0.1:18118` -> Privoxy SOCKS5t -> Tor remote DNS; webhook пуст, state monotonic; внешний canary и admitted heartbeat rollout обязательны до GO                                          |
-| Staff rewards               | source successor для `LP-BUG-A56627F5`: staff/test остаётся audit-меткой, но не ограничивает участие, reward, bonus-ledger queue или Langame dispatch; production effect требует отдельного exact-SHA rollout                                                              |
-| Guest identity owner        | exact-link и verified-phone repairs deployed в `def5174f…`; RU-варианты подтверждённого телефона разрешаются только внутри выбранного Langame domain, неоднозначность fail-closed; все 9 выявленных split-owner дублей погашены без reward replay, контрольный остаток `0` |
-| Внешний open beta           | `NO-GO` до Telegram end-to-end canary, admitted heartbeat/readiness rollout, закрытия SSH credential/public-port incident и оставшихся Gate 1MT/2                                                                                                                          |
+background jobs и production deployment. Он сохраняет независимость public
+guest, corporate tenant и worker/control-plane субъектов.
 
 ### Canonical simple safe external Langame onboarding
 
@@ -226,11 +153,11 @@ cutover `.intent`, `.intent.accepting.new` либо `.intent.recovering.new`
 fail-closed блокирует recovery. Обычные `apply`/`resume` не получают этот lock
 заранее: CUTOVER phase вызывает canonical cutover, избегая self-deadlock.
 
-Это recovery source contract, а не production evidence: source или CI не
-означают deployed state. Фактическая production DB остаётся
-`CURRENT_190/190`, traffic направлен на active green `a05d…`, а исправление
-исторического verifier не считается deployed до receipt-backed admission и
-установки новой production-control generation.
+Это recovery contract исторического CURRENT191 перехода: source или CI сами
+по себе не означают deployed state. На том checkpoint production DB была
+`CURRENT_190/190`, active green — `a05d…`. Переход впоследствии завершён на
+6097; текущий Compose399876/CURRENT191 указан в начале документа. Исторические
+operations/receipts не изменяются при переносе хоста.
 
 Для уже принятого CUTOVER исправленная generation не делает generic control
 handoff. Только exact CURRENT191 bridge с четырьмя accepted receipts и одним
@@ -254,9 +181,9 @@ exact `ALLOW_CURRENT_190/OFF` source и повторную live DB readiness. П
 orchestrator выполняет `current191-final` также по
 одному inactive slot и с cutover: только `target191 ALLOW_CURRENT_190/OFF →
 target191 OFF/LIVE`. После двух exact final receipts CURRENT191 CLI выполняет
-`final-check`; только затем допустим final public postcheck. Это source
-contract, не заявление о deployed production или GO: production DB остаётся
-`CURRENT_190/190`, а текущая bridge-operation остановлена перед `POSTCHECK`.
+`final-check`; только затем допустим final public postcheck. Это контракт
+уже завершённого CURRENT191 перехода. Упоминавшийся исторический checkpoint
+`CURRENT_190/190` с paused `POSTCHECK` не описывает текущее production состояние.
 
 ### Public guest canonical profile owner repair 08.09.2026
 

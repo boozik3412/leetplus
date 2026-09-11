@@ -1,37 +1,25 @@
 # LeetPlus: Docker migration to 1337
 
-Source compatibility also pins PostgreSQL and API/Web to `Europe/Moscow`,
-while both workers retain their source `UTC` environment. The target host's
-global timezone stays unchanged. Confirm `SHOW TimeZone` and actual container
-environment during restage; a healthy connection alone does not prove that
-local calendar dates were preserved.
-Preserve PostgreSQL en_US.UTF-8 formatting locales and the English default text
-search configuration as well. The source API cgroup reached2,665,529,344bytes peak,
-so its bounded container limit is4GiB; Web remains1GiB. Daily execution retains
-the source45-minute budget while bonus execution stays bounded to16minutes.
+Current state on11.09.2026: **SERVING_ON_TARGET**. Exact
+`399876b560b4ac611eae35ee425d99422fb140b9` is active green with healthy blue
+rollback, accepted Compose generation2. Target1337 is LAN192.168.1.137 /
+public188.234.220.76; PostgreSQL16.13 is the only primary, CURRENT191.
+Source168.222.143.243 is now a verified HTTPS forwarder. Its PostgreSQL and
+four app units are persistently masked/stopped; both worker timers are disabled.
+Root/www/api A records point to the target, TTL300. Do not repeat the cutover.
 
-Cutover preflight on11.09.2026 discovered that the prepared native bonus-worker
-URL validator rejected the strict Compose `sslcert` parameter before any DB
-connection. The source fix permits only the mounted Compose CA with strict
-verification and the original two-connection budget. Exact-image TLS validation
-now loads that worker profile and admission requires its positive result.
-The user authorized actual transfer, but the source still serves while a fresh
-exact-main admitted successor and its preparation acceptance are pending.
+See [actual operations, acceptance and backup receipts](docker-migration-completion-2026-09-11.md).
+[PREPARED_NOT_SERVING ae0d results](docker-migration-prepared-2026-09-11.md)
+are historical preparation evidence, superseded by the admitted399876 rehearsal
+and actual11September cutover. Final TLS validation fixed the native strict-CA
+worker parser; compatibility preserved PG/API/Web Europe/Moscow, worker UTC,
+PostgreSQL en_US.UTF-8/English search, API4GiB/Web1GiB and daily45min/bonus16min.
 
-Status on 11.09.2026: **PREPARED_NOT_SERVING**. Exact
-`ae0d76ccb2d588893b50962bcd31310f0547be08` control/images are installed and
-preparation acceptance passed. The VDS remains the serving site on
-`6097dc83863e1ab44d99d15ad0c19505cf7fa3fc` / CURRENT191.
-See [receipt-backed preparation results](docker-migration-prepared-2026-09-11.md).
-
-The original preparation excluded actual migration. The later user-authorized
-cutover remains gated on current evidence; no source fencing, target promotion
-or live worker activation has occurred at this checkpoint.
-
-The source is Ubuntu24.04 / PostgreSQL16.13; target is Ubuntu26.04 server1337,
-LAN192.168.1.137 / static public188.234.220.76. Domains stay unchanged. The accepted
-maintenance budget is 30 minutes and source retention is 14 days after cutover.
-No UPS is available; this migration does not provide high availability.
+The measured website/API maintenance was763seconds, within the30-minute budget.
+Retain the old VDS as proxy with fenced database/apps for14days, until at least
+25.09.2026 16:54 Asia/Yekaterinburg. Deletion is a separate decision. The target
+has no UPS; this move does not provide high availability. Host-global timezone
+and unrelated target applications/certificates are unchanged.
 
 ## Runtime and network contract
 
@@ -112,7 +100,10 @@ counts, real network denials and a full encrypted off-host SQL restore.
 Wait for **both API and Web** readiness before manual acceptance; an early Web
 startup reset is not authority to fake success or repeat a full restore.
 
-## Separate cutover and rollback
+## Cutover procedure executed on11.09.2026 and rollback boundaries
+
+The sequence below describes the completed transfer; do not replay it on the
+accepted target. A later host move requires a new current-data operation.
 
 Before the maintenance window, recheck exact source runtime/configuration,
 backup age, standby identity/streaming/lag, credentials and TLS. Preserve all
@@ -125,7 +116,11 @@ offset. Stop both source app slots, record/replay final LSN and stop the source
 primary before promotion. Run signed target bootstrap/TLS/auth acceptance, then
 activate the verified old-VDS HTTPS proxy and switch only root/www/api A records.
 Resume the same poller with a fresh user canary, and issue new worker authority.
-ACME webroot is prepared; enrol/verify renewal after DNS propagation.
+ACME renewal was enrolled and its dry-run passed after DNS propagation.
+Keep `/srv/leetplus` root:www-data0710 and its `acme` child root:www-data0750;
+secrets/data/backups remain root:root0700. Native preparation's private0700
+defaults require this explicit public-webroot provisioning before issuance.
+The exact hook, permissions checks and certificate receipt are in the completion report.
 
 Before target writes, rollback may restore the fenced source. After target
 writes, immediate rollback is application-only on the current target database;
@@ -133,6 +128,8 @@ host rollback requires a reverse transfer of the latest data. Source checksums
 and wal_log_hints are off, so pg_rewind is not assumed available. Never restore
 an old poller offset or run two writers/consumers.
 
-The replication login expires24.09.2026 16:46:57UTC; renew bounded access if the
-transfer is postponed beyond that date. Source server deletion remains a separate
-decision after the agreed 14-day retention period.
+The preparation replication login expires24.09.2026 16:46:57UTC; its tunnel is
+already stopped/disabled and no renewal is needed for the completed transfer.
+Any future data transfer needs newly reviewed authority. Source server deletion
+remains a separate decision after the agreed14-day retention period and review
+of the mail/FTP DNS dependencies that still point to it.

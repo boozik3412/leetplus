@@ -1,52 +1,34 @@
-# LeetPlus open beta — текущее состояние на 10.09.2026
+# LeetPlus open beta — текущее состояние на 11.09.2026
 
-Cutover preflight 11.09.2026: перенос разрешён, но source всё ещё обслуживает
-сайт. Native config loader бонусного worker из `ae0d76cc…` отверг подготовленный
-strict-TLS параметр `sslcert`. Source repair допускает только exact Compose CA и
-прежний pool limit2; image admission теперь требует positive native worker
-config evidence. Новый successor ещё не допущен/установлен. Source fencing,
-promotion и включение target workers ожидают его admission/restage/acceptance.
-Дополнительная source compatibility сохраняет PostgreSQL/API/Web timezone
-`Europe/Moscow` и worker `UTC` раздельно. Target host timezone не меняется;
-после нового restage нужны реальные timezone и calendar-boundary проверки.
-Сохранены также source PostgreSQL formatting locales/English search config,
-API cap4GiB по измеренному source peak2.67GB и source daily budget45минут;
-это source compatibility, не включение новых workers или provider полномочий.
+Сайт перенесён на1337 (`192.168.1.137` / public `188.234.220.76`). Exact
+`399876b560b4ac611eae35ee425d99422fb140b9` обслуживается active green,
+blue сохранён hot rollback; accepted Compose generation2. Source VDS6097 теперь
+HTTPS proxy с persistently masked БД/приложениями и disabled worker timers.
+DNS root/www/api подтверждён на master/NS5/NS6/Google/Cloudflare в12:16:23UTC.
 
-Обновление инфраструктуры 11.09.2026: подготовка Docker migration завершена как
-**PREPARED_NOT_SERVING** на exact `ae0d76ccb2d588893b50962bcd31310f0547be08`.
-Fast `34568322877` и Full `34568322729`, actual SQL restore, localhost API/Web
-auth/tenant/guest acceptance, container/network isolation и полный off-host
-encrypted restore прошли. Target PostgreSQL остаётся streaming standby;
-backup schedules включены. Source `6097dc83…` продолжает обслуживать сайт,
-DNS/public Nginx не переключены, target live workers/grants отсутствуют.
+Это инфраструктурный перенос существующих tenant/data и прежних полномочий.
+Он не создаёт внешний beta GO, не расширяет INTERNAL worker scope и не включает
+dormant split runtime. Данные внешнего пилота и ключ его Langame не подменяются
+данными текущей сети. Public guest, corporate tenant и worker boundaries
+сохранены и проверены отдельно.
 
-Это завершённая подготовка инфраструктуры, а не фактический перенос сайта,
-активация dormant split или внешний beta GO. App updates сохраняют отдельно
-принятый data baseline. Точные подтверждения и действия отдельного cutover —
-в [отчёте подготовки](../deployment/docker-migration-prepared-2026-09-11.md).
+| Поле               | Состояние                                                                                                                  |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| Release decision   | Прежние отдельные gates массового открытого запуска сохраняются; controlled onboarding доступен в разрешённых pilot tenant |
+| Production runtime | Exact399876, active green + healthy blue, generation2 на1337                                                               |
+| Release authority  | Fast34590140633/Full34590140602 SUCCESS, Docker admission5bb3fee5…, bootstrap6559701f… и green7087620d… terminal           |
+| Prisma schema      | CURRENT191, `20260908180000_external_langame_simple_onboarding`, unfinished0; bridgeOFF/reportingLIVE                      |
+| Workers            | Оба native canary PASS и TIMER grants exact399876/generation2/INTERNALdemo; API schedulers OFF                             |
+| User acceptance    | Новый вход Telegram, профиль и привычный кабинет подтверждены владельцем; corporate/guest и cross-token acceptance PASS    |
+| Tenant acceptance  | Native acceptance exact4 demo Store; customer tenant/store ownership не менялся                                            |
+| Platform admin     | `/administration` → явный подписанный tenant context; role-aware landing сохраняется                                       |
+| External Langame   | SAFE_EXTERNAL preview/settings/manual exact-Store sync сохранён; внешние tenant не используют INTERNAL timers/credentials  |
+| HTTPS и backup     | Новый cert до10.12.2026, renew dry-run PASS; backup06:00 и Windows07:00/logon                                              |
+| История            | Runtime6097/generation55 и PREPARED_NOT_SERVING ae0d — завершённые предыдущие checkpoints                                  |
 
-| Поле                 | Состояние                                                                                                                                                                          |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Release decision     | `NO-GO` для массового открытого запуска; controlled external onboarding доступен в разрешённых pilot tenant                                                                        |
-| Production runtime   | active green и hot rollback blue `6097dc83863e1ab44d99d15ad0c19505cf7fa3fc`, generation55; оба `CURRENT_191/191`, `OFF/LIVE`, final-check PASS                                     |
-| Prisma schema        | production exact `CURRENT_191/191`; `20260908180000_external_langame_simple_onboarding` applied and checked                                                                        |
-| Release authority    | Exact6097 Fast34447421785 и Full34447421800 SUCCESS; blue/green final receipts ac7f8ee4… / d65685fd…; immutable schema check2e2d54c3…                                              |
-| Runtime successor    | daily и bonus-ledger timers enabled/active; новый6097 permit, canary09.09 и timer apply/check PASS; API schedulers OFF                                                             |
-| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                                                                   |
-| Role-aware landing   | platform real-account smoke PASS, saved cookie и administration landing; для staff сохраняется role-aware рабочая смена                                                            |
-| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                                                                           |
-| Текущая сеть         | рабочая1337 имеет slug`demo`,4 Store; пустые`1337`/`club-a` не подменяют её. Пользователи/клубы не переносились                                                                    |
-| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                                                                      |
-| Offline/USB key      | исключён из beta critical path                                                                                                                                                     |
-| Owner onboarding     | EMAIL или одноразовый LINK остаются доступными; пользователь сам задаёт пароль, LINK не зависит от отправки письма                                                                 |
-| Release acceleration | runtime/schema191 завершены; signed operator recoveries сохранили installed6097 и историю. Будущие same-SHA guard fixes и regression tests отделены от фактического deployment     |
-| Langame freshness    | все4 scopes за09.09 SUCCESS; daily canary/timer6097 verified, bonus-ledger active, следующий daily11.09 около04:30 Asia/Yekaterinburg                                              |
-| Assortment dashboard | работает на6097; platform smoke полный dashboard200. Поток исходной сети~31.6s — отдельное performance observation                                                                 |
-| Guest profile owner  | exact-link и verified-phone repairs deployed в `def5174f…`; `*6330`, `*3669` и остальные выявленные split owners исправлены, active structural остаток `0`, reward replay запрещён |
-| External Langame     | DEPLOYED: SAFE_EXTERNAL preview/settings/manual Store-bound sync, tenant isolation сохранена; set-1 route доступен, API key ещё не сохранён                                        |
-
-Актуальное завершение, receipts и правила: [CURRENT191 completion](../deployment/current191-completion-2026-09-10.md).
+Actual release, контрольные суммы, final backup/restore, DNS и границы возврата:
+[отчёт переноса](../deployment/docker-migration-completion-2026-09-11.md).
+Физическое разделение corporate/guest процессов остаётся отдельным проектом.
 
 ## История подготовки до завершения CURRENT191
 

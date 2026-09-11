@@ -1,31 +1,17 @@
 # LeetPlus open beta — текущее состояние на 10.09.2026
 
-Docker/Compose migration to server 1337 is under implementation in
-`deploy/leetplus-compose`. This is an infrastructure candidate, not production
-state or external-beta GO. Current production remains the admitted systemd
-CURRENT191 release below. Host/network, database restore, worker authority,
-off-host backup and Docker release-controller acceptance must pass separately;
-the dormant guest/corporate split is not activated by the migration.
+Обновление инфраструктуры 11.09.2026: подготовка Docker migration завершена как
+**PREPARED_NOT_SERVING** на exact `ae0d76ccb2d588893b50962bcd31310f0547be08`.
+Fast `34568322877` и Full `34568322729`, actual SQL restore, localhost API/Web
+auth/tenant/guest acceptance, container/network isolation и полный off-host
+encrypted restore прошли. Target PostgreSQL остаётся streaming standby;
+backup schedules включены. Source `6097dc83…` продолжает обслуживать сайт,
+DNS/public Nginx не переключены, target live workers/grants отсутствуют.
 
-Preparation feedback 10.09: exact d53684a0 Fast34508843900 and Full34508843894
-passed; its control installed, but the image-ID gate rejected the classic-store
-archive on target Docker29/containerd before DB/application startup. Successor
-requires named OCI image export and isolated import/runtime identity acceptance.
-This remains preparation only: no public routing, source service, target writer
-or live worker activation is authorized.
-
-11.09 preparation: exact21ad staged, actual CURRENT191 SQL restore PASS and
-streaming standby confirmed (no promotion). Fresh encrypted target backup was
-pulled and authenticated on Windows. Host HTTP acceptance remains pending:
-Docker29 suppresses published ports on all-internal bridges. Source successor
-adds fenced ingress, stricter peer rules, real publication/denial CI, explicit
-generated modes and supported stopped-creation flags. Source6097 and original
-workers remain serving; these preparation results are not a site cutover or beta GO.
-
-The successor also freezes a separately admitted data baseline across future
-application blue/green updates. Rebuilding an application cannot restart or
-replace PostgreSQL/Redis implicitly; active data-image binding remains part of
-the signed plan, boot/worker checks and the encrypted backup archive set.
+Это завершённая подготовка инфраструктуры, а не фактический перенос сайта,
+активация dormant split или внешний beta GO. App updates сохраняют отдельно
+принятый data baseline. Точные подтверждения и действия отдельного cutover —
+в [отчёте подготовки](../deployment/docker-migration-prepared-2026-09-11.md).
 
 | Поле                 | Состояние                                                                                                                                                                          |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

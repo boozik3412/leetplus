@@ -2,54 +2,47 @@
 
 Статус: **канонический current-state contract**
 
-## Docker migration candidate, 10.09.2026
+## Подготовка Docker migration завершена, 11.09.2026
 
-Preparation update 11.09: exact21ad control/images are staged; real SQL restore
-passed (CURRENT191, mixed owners retained), and the target PG is a streaming
-unpromoted standby. Source6097 remains serving. Real host HTTP acceptance found
-that Docker29 does not publish ports on all-internal networks despite configured
-HostConfig bindings. The successor uses per-slot ingress bridges with loopback
-publication, an internal/unpublished data bridge, and exact firewall V2 rules:
-Web may reach only its own API; only declared API/worker data identities may
-reach PostgreSQL/Redis; reviewed provider egress has an explicit gateway priority.
-Rehearsal has no provider egress. Actual host publication and network denials,
-including a host proxy and Web-to-data, must pass in disposable CI and rehearsal.
-Generated modes are applied explicitly after restrictive umask; stopped creation
-uses `compose up --no-start --no-deps`. Cold preparation retirement archives old
-files and retains only a proven unpromoted standby, never accepted runtime,
-pending operations or worker grants. No source/DNS/promotion effect is permitted.
+Статус нового узла — **PREPARED_NOT_SERVING**. Exact
+`ae0d76ccb2d588893b50962bcd31310f0547be08` прошёл Fast `34568322877` и Full
+`34568322729`, включая импорт четырёх образов, TLS и реальные сетевые проверки.
+На target установлены соответствующие immutable control/images; исходный VDS
+продолжает обслуживать `6097dc83…/CURRENT191`. DNS и публичный Nginx не переключены.
 
-The Docker plan binds its data release and admission independently. BOOTSTRAP
-uses the initial admitted bundle; later application blue/green updates must
-retain that exact data baseline even when CI produces new data-image IDs.
-Changing PostgreSQL/Redis through an application rollout is rejected. Manifest
-bytes, image IDs, actual data containers, gateway priorities and supplementary
-groups are attested. Backups retain both application and data-baseline archives.
+Target PostgreSQL16.13 — streaming standby с `pg_is_in_recovery()=true`.
+Полное SQL-восстановление, оба API/Web через реальные localhost-порты,
+corporate/guest auth, tenant oracle и отрицательная token/network matrix прошли.
+Игровые event/reward/ledger counts в acceptance не изменились. Зашифрованный
+backup с image/control bundle получен Windows, аутентифицирован и восстановлен
+в отдельной БД без сети. Backup schedules включены; target app/worker production
+containers, active state, operations и live grants отсутствуют.
 
-`deploy/leetplus-compose` is a separate CURRENT191 COMBINED migration candidate
-for server 1337. Admitted d53684a0 control files were installed without activation;
-image hydration stopped before database/application preparation because a classic
-Docker archive did not preserve the target containerd manifest identities. The
-successor builds on pinned Docker29.1.3/containerd, exports four named images and
-requires a fresh isolated daemon to import and run all four exact IDs. The
-target daemon/storage of other applications must not be changed to bypass this.
-An explicit predecessor control replacement is allowed only with the preparation
-marker, verified prior files and no prepared DB/runtime, operation, worker grant
-or project container. No existing installed file is patched in place. The default
-`HOST_LOOPBACK` keeps `API_BIND_HOST=127.0.0.1`. Explicit `DOCKER_BRIDGE` permits
-the container-local `0.0.0.0` listener only with the exact Compose V1 contract,
-ENFORCED tenant/file ACL, explicit COMBINED role and disabled API schedulers.
-The root Docker controller must independently attest non-host networking,
-loopback-only published ports, separate Web/data/egress networks, non-root
-identities, immutable image IDs, read-only roots and minimal secret mounts.
-An environment flag alone is never network authority. Dormant split runtimes
-remain outside this migration. Existing production systemd/install receipts
-must not be reused as target-host or worker authorization.
+Per-slot ingress bridges публикуют порты только на loopback. Data bridge
+остаётся internal без published ports. Firewall V2 разрешает Web только свой
+API, а объявленным API/worker identities — соответствующие PG/Redis ports.
+Web→DB, другой slot, host proxy и внешний адрес запрещены; rehearsal API также
+не имеет доступа к production standby. Provider gateway priority и дополнительные
+группы контейнеров проверяются по точному контракту. API schedulers выключены.
 
-Cutover requires exact-main Fast/Full/Compose evidence, a signed host-bound plan,
-off-host backup, restored-copy acceptance and separate production GO. Source
-and target must never simultaneously own writes or unattended provider effects.
-See `docs/deployment/docker-migration-1337.md` for the candidate's limits.
+Default `HOST_LOOPBACK` по-прежнему требует `API_BIND_HOST=127.0.0.1`.
+`DOCKER_BRIDGE` допускается только для exact COMBINED Compose contract,
+ENFORCED tenant/file ACL и отключённых schedulers; флаг не заменяет host-level
+проверку namespaces, mounts, фактических портов и сетевого fence. Dormant split
+runtime не активирован. Generated modes явно применяются после umask0077;
+остановленное создание использует `up --no-start --no-deps`.
+
+Plan отдельно связывает `dataRelease` и data admission: последующие app
+blue/green updates сохраняют принятые PG/Redis images. Их замена через app
+rollout запрещена; manifests, actual containers и backup archive set проверяются.
+Cold preparation retirement сохраняет старые файлы/evidence и допускает
+переподготовку только без accepted runtime/operations/grants, сохраняя доказанную
+неповышенную реплику. Installed generations не правятся на месте.
+
+Сам перенос требует отдельного GO, fresh source/backup check, source fencing,
+final LSN replay, promotion, signed host-bound rollout и новой worker authority.
+Одновременные source/target writers запрещены. Подробное подтверждение и граница
+следующего этапа: [готовность подготовки](../deployment/docker-migration-prepared-2026-09-11.md).
 
 Актуально на: **10.09.2026**
 Текущий runtime: active green и hot rollback blue —

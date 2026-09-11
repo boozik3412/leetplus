@@ -1,142 +1,120 @@
 # LeetPlus: Docker migration to 1337
 
-Status: preparation only; d53684a0 control installed but image hydration rejected
-before DB/application startup. No target site is serving. The original image
-archive used classic-store config IDs and an incomplete untagged OCI index;
-target containerd correctly rejected that identity mismatch.
+Status on 11.09.2026: **PREPARED_NOT_SERVING**. Exact
+`ae0d76ccb2d588893b50962bcd31310f0547be08` control/images are installed and
+preparation acceptance passed. The VDS remains the serving site on
+`6097dc83863e1ab44d99d15ad0c19505cf7fa3fc` / CURRENT191.
+See [receipt-backed preparation results](docker-migration-prepared-2026-09-11.md).
 
-Successor image packaging uses pinned Docker29.1.3/containerd, named single-platform
-images and a fresh independent daemon import/run check for all four exact image
-IDs. Its archive-roundtrip receipt is part of admission. Do not switch the target
-daemon storage backend or substitute loaded hashes. A control successor may
-replace command links only through `--previous-prepared-control-sha`, with every
-predecessor file verified and no preparation receipt, project container, operation,
-worker grant or accepted runtime. Installed generations remain immutable.
+Current authorization excludes actual migration: do not switch DNS/public nginx,
+stop source services/workers/poller, promote the standby, or enable target live
+workers. The actual transfer is a separate user-authorized operation.
 
-11.09 update: exact21ad artifacts passed Fast/Full and were installed, preserving
-the previous generation. SQL restore passed; source identity and streaming
-recovery proved an unpromoted physical standby. A real encrypted backup from it
-was pulled/authenticated on Windows. Host HTTP acceptance then exposed Docker29
-all-internal port suppression. Source fixes must be admitted before restaging.
+The source is Ubuntu24.04 / PostgreSQL16.13; target is Ubuntu26.04 server1337,
+LAN192.168.1.137 / static public188.234.220.76. Domains stay unchanged. The accepted
+maintenance budget is 30 minutes and source retention is 14 days after cutover.
+No UPS is available; this migration does not provide high availability.
 
-The ingress successor keeps published addresses loopback-only, but makes the
-per-slot bridges non-internal so Docker actually publishes them. V2 firewall
-rules explicitly permit only Web-to-own-API and declared API/worker-to-data;
-Web-to-DB, host proxies and unapproved outbound are denied. The data bridge stays
-internal. API default gateway is pinned to its separately reviewed provider
-network. Real CI probes must prove publication, connectivity and DROP counters.
-No flag alone is network authority. Generated role modes explicitly survive
-caller umask0077, and stopped creation uses `up --no-start --no-deps`.
+## Runtime and network contract
 
-`retire-preparation.py` supports replacing only an unserved preparation. It
-requires no accepted state, operations or grants; verifies previous file/image
-bindings and a live unpromoted standby; stops/removes only exact project
-containers and archives old generated files/rehearsal while retaining physical
-standby data. It does not stop/change the VDS or promote anything. The verified
-new installer and prepare-files then create a fresh generation and receipts;
-the retained PG must resume recovery and the new rehearsal must pass separately.
+`deploy/leetplus-compose/contract.mjs` renders exact image-ID-bound Compose JSON.
+Production loopback ports are13100/13200 for Web and14100/14200 for API.
+Rehearsal has a separate root/project/database, ports23100/23200 and24100/24200,
+different authentication secrets and no provider authority.
 
-After bootstrap, the plan's `dataRelease` and `dataAdmissionSha256` remain bound
-to the initial admitted PostgreSQL/Redis set. Application CI may create new
-data-image candidates, but app BIND/rollback/boot/worker paths keep the accepted
-data services unchanged in either slot. Their separate manifest/admission and
-actual container IDs remain verified, and backups include that data bundle as
-well as current application bundles. Data upgrades are a separate operation.
+Docker29 does not actually publish ports when every attached bridge is internal.
+Per-slot ingress bridges therefore use explicit host loopback publication and
+the project V2 firewall. The data bridge stays internal; PG/Redis have no
+published ports. Web may reach only its own API. Only declared API/worker data
+identities may reach PG5432/Redis6379. Host proxy/SSH, other-slot and unapproved
+outbound paths are denied. API/worker provider gateway has explicit priority1.
+Do not copy Web's egress restrictions onto provider-capable API/worker traffic.
 
-Current authorization: preparation only. Do not switch DNS or public nginx,
-stop source API/Web/worker services, promote a standby, or enable target live
-workers. The actual migration is a separate user-authorized operation.
+The host controller verifies actual NetworkSettings publication, network/IP and
+gateway identities, immutable images, non-root users/supplementary groups,
+read-only roots, resource bounds and minimal mounts. A flag or HostConfig alone
+is not network authority. Scoped network services/refresh timer are enabled;
+they never flush global or unrelated Docker rules.
 
-Source SSH hardening completed on 10.09.2026: exposed root password rotated,
-password/keyboard-interactive SSH disabled, fresh key login verified. Main is
-now protected by required Fast CI checks and PRs, including administrators;
-force pushes and branch deletion are disabled. These do not change the serving
-application. The encrypted off-host backup passed authentication and inner
-dump/global checksums; database/runtime restore acceptance is a separate gate.
+`HOST_LOOPBACK` remains the normal default; `DOCKER_BRIDGE` is restricted to the
+reviewed COMBINED contract with ENFORCED tenant/file ACL and disabled API
+schedulers. The dormant corporate/guest split is not activated. Public guest,
+corporate tenant and worker/control-plane authority remain distinct.
 
-The source is CURRENT191 COMBINED on Ubuntu 24.04 / PostgreSQL16.13. The target
-is Ubuntu26.04 server 1337, LAN192.168.1.137 / public188.234.220.76. Domains
-stay unchanged. The accepted maintenance budget is 30 minutes; source VDS is
-retained for 14 days. Daily encrypted backups go to the operator's Windows
-computer. No UPS is available; this move does not provide site availability.
+Database transport uses Prisma6 native `sslmode=require`,
+`sslcert=/run/secrets/db-ca.pem`, `sslaccept=strict`. API uses the non-owner
+`leetplus_runtime` role with four connections; each worker has two. Generated
+secret/audit file modes are explicitly applied after caller umask0077.
+Stopped creation uses `compose up --no-start --no-deps`.
 
-## Runtime contract
+## Release and data authority
 
-`deploy/leetplus-compose/contract.mjs` renders exact image-ID-bound Compose
-JSON. Production ports are loopback13100/13200 for Web and14100/14200 for API.
-PostgreSQL/Redis have no published ports. Web uses only its slot's internal
-API network; API/data/worker traffic is separated. Rehearsal uses a different
-project, root, subnets and ports, without a provider egress network.
-Rehearsal ports are23100/23200 and24100/24200. Its project firewall also denies
-access to host services. This prevents an internal Docker network from using
-an unrelated host proxy as an outbound path.
+PR/manual image validation is not deployment admission. Exact-main Fast/Full,
+immutable handoff and a separately signed host/plan/action approval are required.
+CI uses pinned Docker29.1.3/containerd, exports four named images, and imports/runs
+their exact IDs in a second clean daemon. Admission binds this receipt, actual
+network/create tests and positive/wrong-CA/wrong-host Prisma TLS evidence.
 
-Database transport uses the native Prisma6 contract: `sslmode=require`,
-`sslcert=/run/secrets/db-ca.pem`, `sslaccept=strict`. CI must verify a real TLS
-connection and reject both a wrong CA and wrong hostname. libpq's similarly
-named URL options are not substituted. API uses the non-owner `leetplus_runtime`
-role with four connections per slot; each worker has two bounded connections.
+The five-phase controller retains immutable HYDRATE/BIND/SMOKE/CUTOVER/POSTCHECK
+intent/evidence/receipt chains; a lost response requires reconciliation.
+BOOTSTRAP also requires real source-fencing, final-LSN replay and promotion
+evidence. No such GO or migration receipt is created by preparation.
 
-API/Web restart on failure but are started after a Docker daemon reboot only
-by the accepted-state boot controller, after the project network fence. Data
-services keep normal restart behavior. Worker/backup singleton locks are
-separate; shared control locks prevent them from starving normal application
-recovery. A merely prepared application operation is not worker authority.
+The plan separately binds `dataRelease` and `dataAdmissionSha256`. Initial
+bootstrap uses its admitted bundle; subsequent application blue/green updates
+retain the accepted PG/Redis set even if CI built new data-image candidates.
+Manifest and actual container identities are checked; app rollout cannot replace
+the data baseline. Data upgrades require a separate operation. Backup archives
+include current app bundles and the independently accepted data bundle.
 
-`PRODUCTION_NETWORK_PROFILE=HOST_LOOPBACK` is the unchanged default. Explicit
-`DOCKER_BRIDGE` is restricted to the reviewed COMBINED contract with enforced
-ACL and disabled in-process schedulers. The flag is not namespace authority:
-the installed host controller must attest Docker identities and effective
-port/network/mount/secret/privilege/resource configuration.
+API/Web restart on failure. Host boot starts only an accepted application state
+after network-fence verification; a prepared application is not worker authority.
+Worker grants bind host, active release/generation, exact tenant and profile.
+Separate singleton locks and a shared control lock preserve those boundaries.
 
-The supplied image build is CI-only. Immutable `release.json` binds source
-SHA, build time and CURRENT191 inside both API and Web images. Secrets are
-mounted role-specific JSON files, outside images and Git. Web receives no
-database, JWT, integration or worker secrets. The singleton workers use the
-existing dedicated CLI module graphs; they are not API schedulers.
+`retire-preparation.py` can archive only an unserved preparation: no accepted
+state, pending operation or worker grant; verified old files/images; a live
+unpromoted standby and unchanged source identity. It stops/removes only exact
+project containers and empty rehearsal bridges, archives old generated files,
+and retains standby data for fresh preparation. Existing installed generations
+and historical receipts are preserved. It has no VDS/DNS/promotion effect.
 
-## Release authority
+## Backup and operational acceptance
 
-PR/manual Compose validation is non-deployable. Deployment needs the same
-exact-main Fast/Full admission, image/archive transport bindings, an installed
-control generation and a signed host/plan/action-bound approval. The candidate
-five-phase controller preserves immutable intent/evidence/receipt records and
-requires reconciliation after a lost response. BOOTSTRAP additionally requires
-evidence of source fencing, final LSN replay and target promotion.
+Daily encrypted backup is enabled at06:00 Asia/Yekaterinburg; the Windows reader
+runs at07:00 and user logon. SFTP is restricted to read-only encrypted exports.
+Private backup/deployment keys remain under Windows DPAPI custody. A stale,
+paused or disconnected standby is rejected as a fresh backup source. Nominal
+off-host RPO24h requires the Windows computer to be available.
 
-The current candidate is not permission to install or run the old systemd
-controllers against Docker. Namespace/network, source-to-target migration,
-worker permits, signed rehearsal, backup and production acceptance must all
-be verified before deployment. Never edit historical source receipts to make
-the target appear enrolled. Do not weaken existing controllers on the VDS.
+Actual preparation acceptance includes CURRENT191/unfinished0, mixed-owner and
+runtime-privilege preservation, both API/Web release identities, corporate/guest
+auth, exact tenant store oracle and cross-contour denials, unchanged game/ledger
+counts, real network denials and a full encrypted off-host SQL restore.
+Wait for **both API and Web** readiness before manual acceptance; an early Web
+startup reset is not authority to fake success or repeat a full restore.
 
-## Data and rollback
+## Separate cutover and rollback
 
-Retain PG16.13 and source-compatible glibc2.39/en_US.UTF-8. The host's PG18 and
-Alpine database images are not physical-restore targets. Preserve the complete
-cluster and mixed owners/ACL; CURRENT191 is not re-applied and historical
-rolled-back migration records are retained. Blob attachments live in the DB.
-Preserve encryption/HMAC/AAD key versions and discrepancy data separately.
+Before the maintenance window, recheck exact source runtime/configuration,
+backup age, standby identity/streaming/lag, credentials and TLS. Preserve all
+data encryption/HMAC versions. Keep PG16.13 and source-compatible
+glibc2.39/en_US.UTF-8; host PG18/Alpine are not physical-restore substitutes.
 
-Rehearse on an isolated copy with all provider writes denied. Prepare a standby
-over SSH with bounded WAL retention before the maintenance window. Drain both
-workers, pause the existing single Telegram poller without replacing its offset,
-fence all source writes, replay final LSN and stop the old primary before target
-promotion. DNS TTL reduction precedes the window; stale-DNS clients use the old
-Nginx as a temporary TLS/SNI-verified proxy to the fixed target IP.
+During the separately authorized transfer: fence source HTTP writes, drain both
+source workers and pause the single existing Telegram poller; preserve its newest
+offset. Stop both source app slots, record/replay final LSN and stop the source
+primary before promotion. Run signed target bootstrap/TLS/auth acceptance, then
+activate the verified old-VDS HTTPS proxy and switch only root/www/api A records.
+Resume the same poller with a fresh user canary, and issue new worker authority.
+ACME webroot is prepared; enrol/verify renewal after DNS propagation.
 
-Before target writes, host rollback may restore the fenced source. After target
-writes, only application blue/green rollback is immediate; host rollback needs
-an explicit reverse transfer of the latest database. Neither checksums nor
-wal_log_hints are enabled on the source, so pg_rewind is not assumed available.
+Before target writes, rollback may restore the fenced source. After target
+writes, immediate rollback is application-only on the current target database;
+host rollback requires a reverse transfer of the latest data. Source checksums
+and wal_log_hints are off, so pg_rewind is not assumed available. Never restore
+an old poller offset or run two writers/consumers.
 
-## Acceptance
-
-Verify exact API/Web release, migration191 and unfinished0; tenant/store and
-attachment negative matrix; corporate and guest auth; provider connectivity;
-one worker owner and no duplicate external effects; restored-copy parity;
-interrupted deploy/reconcile and nginx rollback; encrypted off-host restore.
-Use the working network's persisted identity (display1337, slugdemo), not an
-empty same-name tenant. Separate SSH credential and main-branch protection
-hardening from application data changes. No production state is claimed by
-this document until receipt-backed acceptance has completed.
+The replication login expires24.09.2026 16:46:57UTC; renew bounded access if the
+transfer is postponed beyond that date. Source server deletion remains a separate
+decision after the agreed 14-day retention period.

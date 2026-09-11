@@ -46,6 +46,13 @@ if [[ "$ready" != true ]]; then docker logs "$name"; exit 1; fi
 docker run --rm --network "$name" --read-only --cap-drop ALL --security-opt no-new-privileges \
   --mount "type=bind,source=$tmp,target=/tls,readonly" --entrypoint node "$api" -e '
 const {PrismaClient}=require(require.resolve("@prisma/client",{paths:["/app/apps/api"]}));
+const {loadGuestBonusLedgerWorkerConfig}=require("/app/apps/api/dist/guest-gamification/guest-bonus-ledger-worker.js");
+loadGuestBonusLedgerWorkerConfig({
+ DATABASE_URL:"postgresql://leetplus_runtime:synthetic-only@postgres:5432/leetplus?schema=public&connection_limit=2&pool_timeout=5&connect_timeout=5&sslmode=require&sslcert=/run/secrets/db-ca.pem&sslaccept=strict",
+ GUEST_BONUS_LEDGER_WORKER_ENABLED:"true",GUEST_BONUS_LEDGER_WORKER_TENANT_SLUG:"demo",
+ GUEST_BONUS_LEDGER_WORKER_DRY_RUN:"true",GUEST_BONUS_LEDGER_WORKER_CANARY:"true",
+ GUEST_BONUS_LEDGER_WORKER_LIMIT:"1",LANGAME_BONUS_ACCRUAL_ENABLED:"false"
+});
 async function probe(host,certificate,expected){
  const url=`postgresql://leetplus_runtime:synthetic-only@${host}:5432/postgres?schema=public&connection_limit=1&pool_timeout=3&connect_timeout=3&sslmode=require&sslcert=/tls/${certificate}&sslaccept=strict`;
  const client=new PrismaClient({datasources:{db:{url}}});
@@ -55,5 +62,5 @@ async function probe(host,certificate,expected){
  finally { await client.$disconnect(); }
  if(accepted!==expected) throw new Error(`TLS policy did not enforce expected result for ${host}/${certificate}`);
 }
-(async()=>{await probe("postgres","cert.pem",true);await probe("postgres","bad-cert.pem",false);await probe("wrong-postgres","cert.pem",false);console.log(JSON.stringify({decision:"PASS",driver:"Prisma6",tlsRequired:true,badCaRejected:true,badHostnameRejected:true}));})().catch(e=>{console.error(e.message);process.exitCode=1});
+(async()=>{await probe("postgres","cert.pem",true);await probe("postgres","bad-cert.pem",false);await probe("wrong-postgres","cert.pem",false);console.log(JSON.stringify({decision:"PASS",driver:"Prisma6",tlsRequired:true,badCaRejected:true,badHostnameRejected:true,nativeWorkerProfileAccepted:true}));})().catch(e=>{console.error(e.message);process.exitCode=1});
 ' > "$output"

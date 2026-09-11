@@ -27,6 +27,7 @@ for (const name of ['images.tar.gz', 'release.json', 'control.tar.gz', 'compose.
 }
 const transport = JSON.parse(fs.readFileSync(path.join(imagesRoot, 'transport-validation.json')));
 demand(transport.decision === 'PASS' && transport.tlsRequired === true && transport.badCaRejected === true && transport.badHostnameRejected === true, 'Real Prisma TLS negative matrix did not pass');
+demand(transport.nativeWorkerProfileAccepted === true, 'The exact API image must accept its strict Compose worker profile');
 const roundtrip = JSON.parse(fs.readFileSync(path.join(imagesRoot, 'archive-roundtrip.json')));
 demand(roundtrip.decision === 'PASS' && roundtrip.engine === '29.1.3' && roundtrip.store === 'containerd' && roundtrip.isolatedDaemon === true && canonical(roundtrip.images) === canonical(r.images), 'A fresh target-compatible daemon must load and run all four exact images');
 const network = JSON.parse(fs.readFileSync(path.join(imagesRoot, 'network-validation.json')));

@@ -238,6 +238,7 @@ function requireBoundedWorkerDatabasePool(value: string | undefined) {
     'connect_timeout',
     'sslmode',
     'sslaccept',
+    'sslcert',
   ]);
   const seen = new Set<string>();
   for (const [key] of parsed.searchParams) {
@@ -245,6 +246,21 @@ function requireBoundedWorkerDatabasePool(value: string | undefined) {
       throw new Error(error);
     }
     seen.add(key);
+  }
+
+  // Compose pins one mounted server CA. Other certificate paths or relaxed
+  // verification cannot use this exception to the legacy worker URL contract.
+  if (
+    parsed.searchParams.has('sslcert') &&
+    (parsed.hostname !== 'postgres' ||
+      parsed.port !== '5432' ||
+      parsed.pathname !== '/leetplus' ||
+      decodeURIComponent(parsed.username) !== 'leetplus_runtime' ||
+      parsed.searchParams.get('sslcert') !== '/run/secrets/db-ca.pem' ||
+      parsed.searchParams.get('sslmode') !== 'require' ||
+      parsed.searchParams.get('sslaccept') !== 'strict')
+  ) {
+    throw new Error(error);
   }
 
   if (

@@ -1,5 +1,12 @@
 # LeetPlus open beta — текущее состояние на 10.09.2026
 
+Cutover preflight 11.09.2026: перенос разрешён, но source всё ещё обслуживает
+сайт. Native config loader бонусного worker из `ae0d76cc…` отверг подготовленный
+strict-TLS параметр `sslcert`. Source repair допускает только exact Compose CA и
+прежний pool limit2; image admission теперь требует positive native worker
+config evidence. Новый successor ещё не допущен/установлен. Source fencing,
+promotion и включение target workers ожидают его admission/restage/acceptance.
+
 Обновление инфраструктуры 11.09.2026: подготовка Docker migration завершена как
 **PREPARED_NOT_SERVING** на exact `ae0d76ccb2d588893b50962bcd31310f0547be08`.
 Fast `34568322877` и Full `34568322729`, actual SQL restore, localhost API/Web

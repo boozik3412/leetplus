@@ -60,7 +60,7 @@ export function renderCompose({ blue, green, dataRelease, activeSlot = 'blue', r
   for (const slot of SLOTS) {
     const r = slot === 'blue' ? blue : green;
     const api = `api-${slot}`, web = `web-${slot}`;
-    const apiBase = base(api, r.images.api, r, '1g', '2.0');
+    const apiBase = base(api, r.images.api, r, '4g', '2.0');
     services[api] = { ...apiBase, entrypoint: ['node', '/opt/leetplus/runtime-entry.cjs'], command: ['api'], environment: { ...SAFE_API, ...metadata(r) },
       ports: [{ target: 4000, published: String(PORTS[slot].api + (rehearsal ? 10000 : 0)), host_ip: '127.0.0.1', protocol: 'tcp' }],
       networks: { ...network(slot, 2), ...network('data', slot === 'blue' ? 10 : 11), ...(!rehearsal ? network('egress', slot === 'blue' ? 10 : 11) : {}) },

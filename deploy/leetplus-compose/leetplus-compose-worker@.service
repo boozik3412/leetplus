@@ -7,5 +7,5 @@ ConditionPathExists=/var/lib/leetplus-compose/active.json
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/leetplus-compose worker-run --name %i
-TimeoutStartSec=1000
+TimeoutStartSec=2800
 UMask=0077

@@ -5,6 +5,10 @@ while both workers retain their source `UTC` environment. The target host's
 global timezone stays unchanged. Confirm `SHOW TimeZone` and actual container
 environment during restage; a healthy connection alone does not prove that
 local calendar dates were preserved.
+Preserve PostgreSQL en_US.UTF-8 formatting locales and the English default text
+search configuration as well. The source API cgroup reached2,665,529,344bytes peak,
+so its bounded container limit is4GiB; Web remains1GiB. Daily execution retains
+the source45-minute budget while bonus execution stays bounded to16minutes.
 
 Cutover preflight on11.09.2026 discovered that the prepared native bonus-worker
 URL validator rejected the strict Compose `sslcert` parameter before any DB

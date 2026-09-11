@@ -409,7 +409,7 @@ if (command === 'help' || !command) {
     const service = spec.services[name];
     const imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
     verifyContainer(docker(['inspect', service.container_name], { json: true })[0], service, name, { beforeStart: true, imageEnvironment });
-    const output = docker(['start', '--attach', service.container_name], { timeout: 960000 });
+    const output = docker(['start', '--attach', service.container_name], { timeout: name === 'langame-daily-worker' ? 2700000 : 960000 });
     const observed = docker(['inspect', service.container_name], { json: true })[0];
     demand(!observed.State.Running && observed.State.ExitCode === 0, 'Worker did not finish successfully');
     const receipt = { grantId: grant.id, activeGeneration: current.generation, releaseSha: grant.releaseSha, worker: name, completedAt: new Date().toISOString(), containerId: observed.Id, outputSha256: digest(output), decision: 'PASS' };

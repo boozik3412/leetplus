@@ -81,6 +81,14 @@ def main(old_sha,inbox,expected):
     stopped=json.loads(run(['/usr/bin/docker','inspect',*ids]))
     if any(i['State']['Running'] or i['State']['Pid']!=0 for i in stopped):raise ValueError('Preparation containers did not stop')
     run(['/usr/bin/docker','rm',*ids])
+    # Docker cannot change the internal flag of an existing bridge. Remove only
+    # this now-empty rehearsal project's exact networks before fresh rendering.
+    for name,subnet in [('blue','172.31.50.0/24'),('green','172.31.51.0/24'),('data','172.31.52.0/24')]:
+        network='leetplus-rehearsal-'+name
+        observed=json.loads(run(['/usr/bin/docker','network','inspect',network]))[0]
+        if observed.get('Containers') or observed.get('Labels',{}).get('com.docker.compose.project')!='leetplus-rehearsal' or observed['IPAM']['Config'][0]['Subnet']!=subnet:
+            raise ValueError('Rehearsal network is not empty or changed identity')
+        run(['/usr/bin/docker','network','rm',network])
     for p in paths:
         destination=archive/('langame-sync' if p==ROOT/'data/langame-sync' else p.name)
         p.rename(destination)

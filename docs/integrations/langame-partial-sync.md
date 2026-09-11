@@ -1,7 +1,8 @@
 # Langame: частичная ручная синхронизация
 
-Статус на 11.09.2026: source-контракт исправления; не подтверждение deployment.
-Production после переноса — Compose на server1337, а не прежний VDS.
+Статус на11.09.2026: **DEPLOYED** exactbcb0a4d3, activeblue/generation3 на server1337.
+Реальный CATALOG1171:466 товаров,423 активных, PARTIAL с комментариями об отказе
+категорий/конфигурации. [Доказательства выпуска](../deployment/langame-partial-sync-production-2026-09-11.md).
 
 ## Пользовательский результат
 
@@ -63,8 +64,9 @@ Regression coverage: недоступные категории/цены с ус�
 Settings/UI отдельно проверяют PARTIAL, FAILED, старый audit-only PARTIAL и
 отсутствие ложного success banner.
 
-Действующий baseline — exact `399876b560b4ac611eae35ee425d99422fb140b9`,
-Compose generation2, sole primary на `192.168.1.137` / `188.234.220.76`.
+Действующее приложение — exact `bcb0a4d37e5791b04cc4707aa65c35680385836e`,
+Compose generation3/activeblue, sole primary на `192.168.1.137` / `188.234.220.76`.
+Hot rollback green, installed control и dataRelease PG/Redis сохраняют399876.
 VDS `168.222.143.243` — только HTTPS proxy с остановленными/masked writers.
 Его БД и старые app/worker units нельзя запускать ради этого исправления.
 Provider policy уже включает `1171.langame.ru`; новый egress не требуется.

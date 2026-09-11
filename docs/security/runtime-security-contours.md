@@ -3,9 +3,10 @@
 Статус: **канонический current-state contract**, актуально на **11.09.2026**.
 
 Фактический перенос на сервер1337 выполнен по отдельному разрешению владельца.
-Новый узел `192.168.1.137`, public `188.234.220.76`, обслуживает exact
-`399876b560b4ac611eae35ee425d99422fb140b9`: active green, hot rollback blue,
-accepted Compose generation2. PostgreSQL16.13 на новом узле — единственный
+Новый узел `192.168.1.137`, public `188.234.220.76`, после обновления приложения11.09.2026
+обслуживает exact `bcb0a4d37e5791b04cc4707aa65c35680385836e`: active blue,
+hot rollback green399876, accepted Compose generation3. Installed control и
+dataRelease PG/Redis остаются399876. PostgreSQL16.13 на новом узле — единственный
 primary; физическая схема и оба API — `CURRENT_191/191`, bridge `OFF`, reporting
 `LIVE`. Старый VDS `168.222.143.243` работает только как HTTPS proxy;
 PostgreSQL и четыре старых API/Web unit остановлены и persistently masked,
@@ -16,21 +17,23 @@ PostgreSQL и четыре старых API/Web unit остановлены и p
 пауза по maintenance intent —763секунды. Владелец подтвердил новый Telegram
 вход, профиль и личный кабинет. Полные receipts и эксплуатационные ограничения:
 [отчёт переноса](../deployment/docker-migration-completion-2026-09-11.md).
+Последующий выпуск частичной Langame-синхронизации, реальный импорт466 товаров1171
+и новые worker grants: [production checkpoint](../deployment/langame-partial-sync-production-2026-09-11.md).
 
-| Область              | Фактическое состояние                                                                                                                                             |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime и admission  | Exact399876; Fast34590140633 и Full34590140602 SUCCESS; две штатные пятифазные операции завершены                                                                 |
-| Процессы             | Docker COMBINED blue/green API/Web, localhost ports; public/corporate guards и worker authority сохраняют разные границы                                          |
-| База                 | Единственный PG16.13 primary на1337, CURRENT191; прежние owners и restricted runtime grants сохранены                                                             |
-| Data baseline        | Отдельные `dataRelease`/`dataAdmissionSha256`; app rollout не заменяет PG/Redis images                                                                            |
-| Сеть                 | Per-slot loopback ingress, internal data bridge, V2 firewall и exact provider policy; Web не получает API/worker egress                                           |
-| Часы и ресурсы       | PG/API/Web Europe/Moscow, workers UTC; PG en_US.UTF-8/English search; API4GiB, Web1GiB; daily45min, bonus16min                                                    |
-| Workers              | Оба signed CANARY PASS, TIMER grants на exact399876/generation2/INTERNALdemo; daily04:30 Yekaterinburg, bonus singleton +30s после завершения; API schedulers OFF |
-| Telegram             | Тот же единственный poller/state, свежий heartbeat, empty webhook, monotonic offset и новый user canary PASS                                                      |
-| HTTPS                | Root/www/api Certbot webroot на1337, сертификат до10.12.2026; native renew dry-run PASS; scoped copy/reload hook                                                  |
-| Резервирование       | Ежедневный encrypted backup06:00 Yekaterinburg, Windows pull07:00 и logon; финальная копия и restore evidence указаны в отчёте                                    |
-| Host rollback        | После target writes только reverse transfer актуальных данных; старую БД нельзя просто запустить                                                                  |
-| Внешний beta и split | Миграция не выдаёт внешний beta GO и не активирует dormant physical split; отдельные tenant/provider gates сохраняются                                            |
+| Область              | Фактическое состояние                                                                                                                               |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime и admission  | Exactbcb0a4d3; Fast34604304891 и Full34604305010 SUCCESS; app operation722bf10f… terminal, generation3                                              |
+| Процессы             | Docker COMBINED blue/green API/Web, localhost ports; public/corporate guards и worker authority сохраняют разные границы                            |
+| База                 | Единственный PG16.13 primary на1337, CURRENT191; прежние owners и restricted runtime grants сохранены                                               |
+| Data baseline        | Отдельные `dataRelease`/`dataAdmissionSha256`; app rollout не заменяет PG/Redis images                                                              |
+| Сеть                 | Per-slot loopback ingress, internal data bridge, V2 firewall и exact provider policy; Web не получает API/worker egress                             |
+| Часы и ресурсы       | PG/API/Web Europe/Moscow, workers UTC; PG en_US.UTF-8/English search; API4GiB, Web1GiB; daily45min, bonus16min                                      |
+| Workers              | Оба native CANARY PASS, новые TIMER grants на exactbcb/generation3/INTERNALdemo; daily04:30 Yekaterinburg, bonus singleton +30s; API schedulers OFF |
+| Telegram             | Тот же единственный poller/state, свежий heartbeat, empty webhook, monotonic offset и новый user canary PASS                                        |
+| HTTPS                | Root/www/api Certbot webroot на1337, сертификат до10.12.2026; native renew dry-run PASS; scoped copy/reload hook                                    |
+| Резервирование       | Ежедневный encrypted backup06:00 Yekaterinburg, Windows pull07:00 и logon; финальная копия и restore evidence указаны в отчёте                      |
+| Host rollback        | После target writes только reverse transfer актуальных данных; старую БД нельзя просто запустить                                                    |
+| Внешний beta и split | Миграция не выдаёт внешний beta GO и не активирует dormant physical split; отдельные tenant/provider gates сохраняются                              |
 
 TLS использует существующий Nginx webroot `/srv/leetplus/acme`. Для доступа
 только Nginx группа `www-data` получает traverse на `/srv/leetplus`
@@ -46,14 +49,15 @@ guest, corporate tenant и worker/control-plane субъектов.
 
 ### Canonical simple safe external Langame onboarding
 
-Source successor ручной синхронизации изолирует отказы provider по разделам:
+Deployed bcb0a4d3 ручной синхронизации изолирует отказы provider по разделам:
 доступные товары можно сохранить без недоступных категорий. Это не обход scope:
 tenant/exact Store admission и DB ошибки остаются fail-closed, AUTO semantics
 не меняются. Неполный provider job хранится FAILED с явным partial marker,
 settings/UI показывает PARTIAL и комментарии; full-source freshness/cursor не
-продвигаются. Схема/ACL/egress/worker authority не расширяются. Этот source-контракт
-не меняет фактический Compose399876 baseline в начале документа; выпуск требует
-нового admission и отдельного GO на server1337, не запуска старого VDS.
+продвигаются. Схема/ACL/egress/worker scope не расширены. Выпуск на server1337
+завершён по отдельному GO, без запуска старого VDS. Для1171 подтверждены466 товаров,
+423 активных и PARTIAL из-за отказа категорий/клубных цен. Следующее изменение
+снова требует собственного admission/GO; installed control и dataRelease399876 сохранены.
 Подробности: [частичная синхронизация Langame](../integrations/langame-partial-sync.md).
 
 Для tenant со stage `PILOT`, `BETA` или `LIVE` canonical corporate path —

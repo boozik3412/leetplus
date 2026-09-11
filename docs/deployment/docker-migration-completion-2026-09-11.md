@@ -1,5 +1,10 @@
 # LeetPlus: фактический перенос на1337, 11.09.2026
 
+Этот отчёт фиксирует завершение переноса на399876/generation2. Позднее обычный
+app rollout обновил activeblue доbcb0a4d3/generation3, сохранив data/control399876
+и hotrollbackgreen. См. [последующий production checkpoint](langame-partial-sync-production-2026-09-11.md).
+Исторические migration receipts и цифры ниже не переписаны.
+
 Статус: **SERVING_ON_TARGET**. Сайт и API работают на новом сервере,
 DNS переключён, owner user canary подтверждён, оба worker расписания включены.
 Этот документ заменяет PREPARED_NOT_SERVING checkpoint как описание production.

@@ -714,10 +714,11 @@ describe('LangameSyncService', () => {
     expect(JSON.stringify(result)).not.toContain('/var/lib/leetplus');
   });
 
-  it('keeps a provider failure as FAILED without advancing source freshness', async () => {
+  it('keeps an automatic provider failure as FAILED without advancing source freshness', async () => {
     client.listProducts.mockRejectedValueOnce(new Error('Langame unavailable'));
 
     const result = await service.syncTenant(user, {
+      trigger: 'AUTO',
       dateFrom: '2026-04-29',
       dateTo: '2026-04-29',
     });
@@ -742,6 +743,366 @@ describe('LangameSyncService', () => {
       .find((call) => call.data.status === 'FAILED');
     expect(failedUpdate?.data.errorMessage).toBe('Langame unavailable');
     expect(failedUpdate?.data.status).toBe('FAILED');
+  });
+
+  describe('manual partial provider import', () => {
+    const period = { dateFrom: '2026-04-29', dateTo: '2026-04-29' };
+    const denied = () =>
+      new Error('No permissions to access this route; secret=test-key');
+
+    it('keeps products, inventory and sales when categories and configuration are denied', async () => {
+      client.listActiveProductGroups.mockRejectedValue(denied());
+      client.listClubProductConfiguration.mockRejectedValue(denied());
+      const result = await service.syncTenant(user, period);
+
+      expect(result).toMatchObject({
+        failedSources: 0,
+        partialSources: 1,
+        products: 1,
+        inventorySnapshots: 1,
+        salesFacts: 1,
+        clubRevenueFacts: 2,
+        sourceResults: [
+          {
+            status: 'PARTIAL',
+            steps: expect.arrayContaining([
+              expect.objectContaining({
+                component: 'PRODUCTS',
+                status: 'SUCCESS',
+                count: 1,
+              }),
+              expect.objectContaining({
+                component: 'CATEGORIES',
+                status: 'FAILED',
+                message: expect.stringContaining(
+                  'не разрешил доступ',
+                ) as unknown,
+              }),
+              expect.objectContaining({
+                component: 'CONFIGURATION',
+                status: 'FAILED',
+                clubId: '1',
+              }),
+            ]) as unknown,
+          },
+        ],
+      });
+      expect(prisma.langameProductGroup.upsert).not.toHaveBeenCalled();
+      expect(prisma.langameProductGroup.updateMany).not.toHaveBeenCalled();
+      expect(
+        prisma.langameClubProductConfiguration.updateMany,
+      ).not.toHaveBeenCalled();
+      expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+      expect(prisma.integrationSyncJob.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'FAILED',
+            productsCount: 1,
+            errorMessage: expect.stringMatching(
+              /^LANGAME_SYNC_PARTIAL:/,
+            ) as unknown,
+          }) as unknown,
+        }),
+      );
+      expect(JSON.stringify(result)).not.toContain('test-key');
+    });
+
+    it('continues categories without replacing old products when the catalog is unavailable', async () => {
+      client.listProducts.mockRejectedValue(denied());
+      const result = await service.syncTenant(user, {
+        ...period,
+        mode: 'CATALOG',
+      });
+      expect(result).toMatchObject({
+        products: 0,
+        productGroups: 1,
+        partialSources: 1,
+        failedSources: 0,
+      });
+      expect(prisma.product.upsert).not.toHaveBeenCalled();
+      expect(prisma.product.updateMany).not.toHaveBeenCalled();
+      expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+    });
+
+    it('retains exact external club scope when categories are unavailable', async () => {
+      admission.assertAllowed.mockResolvedValueOnce({
+        allowed: true,
+        tenantId: 'tenant-1',
+        customerStage: TenantCustomerStage.PILOT,
+      });
+      prisma.store.findMany.mockImplementation(
+        ({ where }: { where: { integrationSourceId?: unknown } }) =>
+          Promise.resolve(
+            where.integrationSourceId
+              ? [
+                  {
+                    id: 'store-1',
+                    name: 'Ez Game',
+                    integrationSourceId: 'source-1',
+                    externalDomain: '443.langame.ru',
+                    externalClubId: '1',
+                  },
+                ]
+              : [{ id: 'store-1', name: 'Ez Game', externalClubId: '1' }],
+          ),
+      );
+      client.listClubs.mockResolvedValue([
+        { id: 1, name: 'Ez Game', address: '', active: 1 },
+        { id: 2, name: 'Unselected club', address: '', active: 1 },
+      ]);
+      client.listActiveProductGroups.mockRejectedValue(denied());
+      client.listProductExpenses.mockReset().mockResolvedValueOnce([
+        {
+          id: 100,
+          date: '2026-04-29 10:00:00',
+          list_goods_id: 10,
+          list_clubs_id: 1,
+          price_purchase: 50,
+          price_sale: 100,
+          count: 1,
+        },
+        {
+          id: 101,
+          date: '2026-04-29 10:00:00',
+          list_goods_id: 10,
+          list_clubs_id: 2,
+          price_purchase: 50,
+          price_sale: 100,
+          count: 1,
+        },
+        {
+          id: 102,
+          date: '2026-04-29 10:00:00',
+          list_goods_id: 10,
+          list_clubs_id: null,
+          price_purchase: 50,
+          price_sale: 100,
+          count: 1,
+        },
+      ]);
+      const result = await service.syncTenant(user, period);
+      expect(result).toMatchObject({
+        partialSources: 1,
+        failedSources: 0,
+        products: 1,
+        stores: 1,
+        salesFacts: 1,
+        clubRevenueFacts: 1,
+      });
+      expect(prisma.store.upsert).not.toHaveBeenCalled();
+      expect(client.listGoods).toHaveBeenCalledTimes(1);
+      expect(client.listGoods).toHaveBeenCalledWith(
+        'https://443.langame.ru/public_api',
+        'test-key',
+        1,
+      );
+      expect(prisma.salesFact.upsert).toHaveBeenCalledTimes(1);
+      expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+    });
+
+    it('preserves automatic unmapped-inventory behavior without a new partial permission', async () => {
+      const result = await service.syncTenant(user, {
+        ...period,
+        mode: 'INVENTORY',
+        trigger: 'AUTO',
+      });
+      expect(result).toMatchObject({
+        failedSources: 0,
+        partialSources: 0,
+        inventorySnapshots: 0,
+      });
+      expect(prisma.integrationSource.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports all unavailable data sections and never invents success from club discovery alone', async () => {
+      for (const [name, method] of Object.entries(client)) {
+        if (name !== 'listClubs')
+          method.mockReset().mockRejectedValue(denied());
+      }
+      const result = await service.syncTenant(user, period);
+      expect(result).toMatchObject({
+        failedSources: 1,
+        partialSources: 0,
+        products: 0,
+        inventorySnapshots: 0,
+        salesFacts: 0,
+        sourceResults: [{ status: 'FAILED' }],
+      });
+      expect(
+        result.sourceResults[0].steps?.filter(
+          (step) => step.status === 'FAILED',
+        ),
+      ).toHaveLength(6);
+      expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+      expect(prisma.product.updateMany).not.toHaveBeenCalled();
+      expect(prisma.clubRevenueFact.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('continues the next club after one club inventory route is denied', async () => {
+      client.listClubs.mockResolvedValue([
+        { id: 1, name: 'First', active: 1 },
+        { id: 2, name: 'Second', active: 1 },
+      ]);
+      client.listGoods.mockRejectedValueOnce(denied());
+      prisma.product.findMany.mockResolvedValue([
+        { id: 'product-1', name: 'Cola', externalProductId: '10' },
+      ]);
+      const result = await service.syncTenant(user, {
+        ...period,
+        mode: 'INVENTORY',
+      });
+      expect(result).toMatchObject({
+        partialSources: 1,
+        failedSources: 0,
+        inventorySnapshots: 1,
+      });
+      expect(client.listGoods).toHaveBeenCalledTimes(2);
+      expect(result.sourceResults[0].steps).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            component: 'INVENTORY',
+            status: 'FAILED',
+            clubId: '1',
+          }),
+          expect.objectContaining({
+            component: 'INVENTORY',
+            status: 'SUCCESS',
+            clubId: '2',
+          }),
+        ]),
+      );
+    });
+
+    it('reports unmapped inventory instead of claiming a complete stock import', async () => {
+      const result = await service.syncTenant(user, {
+        ...period,
+        mode: 'INVENTORY',
+      });
+      expect(result).toMatchObject({
+        failedSources: 1,
+        partialSources: 0,
+        inventorySnapshots: 0,
+      });
+      expect(result.sourceResults[0].errorMessage).toContain(
+        'сначала загрузите каталог',
+      );
+      expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+    });
+
+    it('does not catch database failures as optional provider warnings', async () => {
+      prisma.product.upsert.mockRejectedValue(
+        new Error('database constraint violation'),
+      );
+      const result = await service.syncTenant(user, period);
+      expect(result).toMatchObject({
+        failedSources: 1,
+        partialSources: 0,
+        sourceResults: [
+          { status: 'FAILED', errorMessage: 'database constraint violation' },
+        ],
+      });
+      expect(prisma.langameProductGroup.upsert).not.toHaveBeenCalled();
+      expect(client.listGoods).not.toHaveBeenCalled();
+      expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+    });
+
+    it('retains the automatic category denial contract', async () => {
+      client.listActiveProductGroups.mockRejectedValue(
+        new Error('No permissions'),
+      );
+      const result = await service.syncTenant(user, {
+        ...period,
+        trigger: 'AUTO',
+      });
+      expect(result).toMatchObject({ failedSources: 1, partialSources: 0 });
+      expect(prisma.product.upsert).not.toHaveBeenCalled();
+      expect(client.listGoods).not.toHaveBeenCalled();
+    });
+
+    it('counts already persisted sales after a later page fails and still loads revenue', async () => {
+      client.listProductExpenses
+        .mockReset()
+        .mockResolvedValueOnce(
+          Array.from({ length: 200 }, (_, index) => ({
+            id: index + 100,
+            date: '2026-04-29 10:12:16',
+            list_goods_id: 10,
+            list_clubs_id: 1,
+            price_purchase: '50',
+            price_sale: 100,
+            count: 1,
+            cancel: 0,
+          })),
+        )
+        .mockRejectedValueOnce(denied());
+      const result = await service.syncTenant(user, period);
+      expect(result).toMatchObject({
+        partialSources: 1,
+        failedSources: 0,
+        salesFacts: 200,
+        clubRevenueFacts: 2,
+      });
+      expect(prisma.salesFact.upsert).toHaveBeenCalledTimes(200);
+      expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+      expect(prisma.integrationSyncJob.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'FAILED',
+            salesCount: 200,
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('does not delete existing revenue when a later date chunk is unavailable', async () => {
+      client.listProductExpenses.mockReset().mockResolvedValue([]);
+      client.listAllOperationsLog
+        .mockReset()
+        .mockResolvedValueOnce([
+          {
+            date_normal: '2026-04-01 10:00:00',
+            club_id: 1,
+            type: 'plus',
+            sum: 100,
+          },
+        ])
+        .mockRejectedValueOnce(denied());
+      const result = await service.syncTenant(user, {
+        mode: 'QUICK',
+        dateFrom: '2026-04-01',
+        dateTo: '2026-05-05',
+      });
+      expect(result).toMatchObject({
+        partialSources: 1,
+        failedSources: 0,
+        clubRevenueFacts: 0,
+      });
+      expect(client.listAllOperationsLog).toHaveBeenCalledTimes(2);
+      expect(prisma.clubRevenueFact.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.clubRevenueFact.upsert).not.toHaveBeenCalled();
+      expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+    });
+
+    it('clears the partial result on a fully successful retry using the same product identity', async () => {
+      client.listActiveProductGroups.mockRejectedValueOnce(denied());
+      const first = await service.syncTenant(user, {
+        ...period,
+        mode: 'CATALOG',
+      });
+      const second = await service.syncTenant(user, {
+        ...period,
+        mode: 'CATALOG',
+      });
+      expect(first.partialSources).toBe(1);
+      expect(second).toMatchObject({
+        partialSources: 0,
+        failedSources: 0,
+        sourceResults: [{ status: 'SUCCESS', errorMessage: null }],
+      });
+      expect(prisma.integrationSource.update).toHaveBeenCalledTimes(1);
+      const calls = prisma.product.upsert.mock.calls as [{ where: unknown }][];
+      expect(calls[0][0].where).toEqual(calls[1][0].where);
+    });
   });
 
   it('normalizes only a newly-created discrepancy tenant directory', async () => {

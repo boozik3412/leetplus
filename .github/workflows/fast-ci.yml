@@ -586,6 +586,7 @@ jobs:
           pnpm --filter web test:guest-session-transport
           pnpm --filter web test:guest-bug-report
           pnpm --filter web test:owner-invite-link-bff-boundary
+          pnpm --filter web test:langame-simple-onboarding
 
       - name: Lint, type-check and build Web
         run: |

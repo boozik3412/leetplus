@@ -370,6 +370,96 @@ describe('LangameSettingsService', () => {
     });
   });
 
+  it('projects marked incomplete provider jobs as PARTIAL without making them successful imports', async () => {
+    const startedAt = new Date('2026-09-11T11:04:00Z');
+    prisma.integrationSyncJob.findMany.mockResolvedValue([
+      {
+        id: 'partial-provider-job',
+        domain: '1171.langame.ru',
+        status: 'FAILED',
+        startedAt,
+        finishedAt: startedAt,
+        storesCount: 1,
+        productsCount: 12,
+        inventoryCount: 0,
+        salesCount: 0,
+        discrepancyCount: 0,
+        discrepancyLogPath: null,
+        errorMessage:
+          'LANGAME_SYNC_PARTIAL: Категории товаров: Langame не разрешил доступ.',
+      },
+    ]);
+    prisma.integrationSyncJob.findFirst.mockResolvedValue(null);
+    const result = await service.getSettings(user);
+    expect(result.syncJobs).toEqual([
+      expect.objectContaining({
+        status: 'PARTIAL',
+        productsCount: 12,
+        discrepancyLogStatus: 'NOT_REQUIRED',
+        discrepancyLogError: null,
+      }),
+    ]);
+    expect(result.latestSuccessfulSyncJob).toBeNull();
+    expect(prisma.integrationSyncJob.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: 'SUCCESS' }) as unknown,
+      }),
+    );
+  });
+
+  it('does not project an unmarked provider failure as partial success', async () => {
+    const startedAt = new Date('2026-09-11T11:04:00Z');
+    prisma.integrationSyncJob.findMany.mockResolvedValue([
+      {
+        id: 'failed-provider-job',
+        domain: '1171.langame.ru',
+        status: 'FAILED',
+        startedAt,
+        finishedAt: startedAt,
+        storesCount: 0,
+        productsCount: 0,
+        inventoryCount: 0,
+        salesCount: 0,
+        discrepancyCount: 0,
+        discrepancyLogPath: null,
+        errorMessage: 'No permissions to access this route',
+      },
+    ]);
+    const result = await service.getSettings(user);
+    expect(result.syncJobs).toEqual([
+      expect.objectContaining({ status: 'FAILED' }),
+    ]);
+  });
+
+  it('retains an audit failure alongside a partial provider result in history', async () => {
+    const startedAt = new Date('2026-09-11T11:04:00Z');
+    prisma.integrationSyncJob.findMany.mockResolvedValue([
+      {
+        id: 'partial-with-audit',
+        domain: '1171.langame.ru',
+        status: 'FAILED',
+        startedAt,
+        finishedAt: startedAt,
+        storesCount: 1,
+        productsCount: 12,
+        inventoryCount: 0,
+        salesCount: 0,
+        discrepancyCount: 1,
+        discrepancyLogPath: null,
+        errorMessage:
+          'LANGAME_SYNC_PARTIAL: Категории недоступны. LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED: EACCES',
+      },
+    ]);
+    const result = await service.getSettings(user);
+    expect(result.syncJobs).toEqual([
+      expect.objectContaining({
+        status: 'PARTIAL',
+        discrepancyLogStatus: 'FAILED',
+        discrepancyLogError: 'LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED: EACCES',
+      }),
+    ]);
+  });
+
   it('connects an external tenant to its single verified Langame club', async () => {
     prisma.tenant.findUnique.mockResolvedValue({
       name: 'Pilot club',

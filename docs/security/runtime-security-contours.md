@@ -46,6 +46,16 @@ guest, corporate tenant и worker/control-plane субъектов.
 
 ### Canonical simple safe external Langame onboarding
 
+Source successor ручной синхронизации изолирует отказы provider по разделам:
+доступные товары можно сохранить без недоступных категорий. Это не обход scope:
+tenant/exact Store admission и DB ошибки остаются fail-closed, AUTO semantics
+не меняются. Неполный provider job хранится FAILED с явным partial marker,
+settings/UI показывает PARTIAL и комментарии; full-source freshness/cursor не
+продвигаются. Схема/ACL/egress/worker authority не расширяются. Этот source-контракт
+не меняет фактический Compose399876 baseline в начале документа; выпуск требует
+нового admission и отдельного GO на server1337, не запуска старого VDS.
+Подробности: [частичная синхронизация Langame](../integrations/langame-partial-sync.md).
+
 Для tenant со stage `PILOT`, `BETA` или `LIVE` canonical corporate path —
 `POST /integrations/langame/settings/preview`, затем
 `PUT /integrations/langame/settings`. Preview разрешён только authenticated

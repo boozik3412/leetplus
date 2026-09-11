@@ -2,6 +2,14 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import type { LangameSettings } from "@/lib/langame-settings";
+import {
+  langameSyncCompletionMessage,
+  langameSyncComponentLabel,
+  langameSyncMessage,
+  langameSyncStepStatusLabel,
+  langameSyncStatusLabel,
+  type LangameSyncSourceResult,
+} from "@/lib/langame-sync-status";
 
 type SyncPeriod = "today" | "last7" | "last30" | "custom";
 
@@ -15,6 +23,7 @@ type SyncResult = {
   salesFacts: number;
   clubRevenueFacts: number;
   discrepancies: number;
+  sourceResults?: LangameSyncSourceResult[];
 };
 
 type GuestSyncStatus = {
@@ -76,7 +85,7 @@ type FieldDiagnostics = {
   candidateFields: Record<string, number>;
 };
 
-type SyncStepStatus = "idle" | "running" | "success" | "error";
+type SyncStepStatus = "idle" | "running" | "success" | "partial" | "error";
 
 type CombinedSyncResult = {
   assortment: SyncResult | null;
@@ -1000,6 +1009,7 @@ export function LangameSyncPanel({
     useState<SyncStepStatus>("idle");
   const [guestStatus, setGuestStatus] = useState<SyncStepStatus>("idle");
   const [success, setSuccess] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [routeDiagnostics, setRouteDiagnostics] =
@@ -1114,6 +1124,7 @@ export function LangameSyncPanel({
   async function syncAllLangameData() {
     setError(null);
     setSuccess(null);
+    setWarning(null);
     setSyncResult(null);
     setAssortmentStatus("running");
     setGuestStatus("running");
@@ -1134,7 +1145,13 @@ export function LangameSyncPanel({
       if (!assortment) {
         setAssortmentStatus("error");
       } else {
-        setAssortmentStatus(assortment.failedSources > 0 ? "error" : "success");
+        setAssortmentStatus(
+          assortment.failedSources > 0
+            ? "error"
+            : assortment.partialSources > 0
+              ? "partial"
+              : "success",
+        );
       }
 
       try {
@@ -1160,6 +1177,13 @@ export function LangameSyncPanel({
         setGuestStatus("success");
       }
 
+      const assortmentCompletionMessage = assortment
+        ? langameSyncCompletionMessage({
+            failedSources: assortment.failedSources,
+            partialSources: assortment.partialSources,
+          })
+        : null;
+
       if (!assortment || !guests) {
         const failure = assortmentError ?? guestError;
         setError(
@@ -1172,6 +1196,8 @@ export function LangameSyncPanel({
           guests.latestRun?.errorMessage ??
             "Гостевая синхронизация завершилась с ошибкой.",
         );
+      } else if (assortmentCompletionMessage) {
+        setWarning(assortmentCompletionMessage);
       } else {
         setSuccess("Общая синхронизация Langame завершена.");
       }
@@ -1632,6 +1658,11 @@ export function LangameSyncPanel({
             {success}
           </p>
         ) : null}
+        {warning ? (
+          <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">
+            {warning}
+          </p>
+        ) : null}
       </div>
 
       <SyncHealthSummary
@@ -1786,7 +1817,7 @@ function SyncResultSummary({ result }: { result: CombinedSyncResult }) {
           <Metric label="Источников" value={result.assortment.sources} />
           <Metric label="Ошибок" value={result.assortment.failedSources} />
           <Metric
-            label="Предупреждений аудита"
+            label="Частичных источников"
             value={result.assortment.partialSources}
           />
           <Metric label="Клубов" value={result.assortment.stores} />
@@ -1803,6 +1834,9 @@ function SyncResultSummary({ result }: { result: CombinedSyncResult }) {
           <Metric label="Расхождений" value={result.assortment.discrepancies} />
         </div>
       ) : null}
+      {result.assortment?.sourceResults ? (
+        <SyncSourceResults sources={result.assortment.sourceResults} />
+      ) : null}
       {guestRun ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Metric label="Гостей" value={guestRun.guestsCount} />
@@ -1814,6 +1848,94 @@ function SyncResultSummary({ result }: { result: CombinedSyncResult }) {
       {guestDiagnostics ? (
         <PcDiagnostics diagnostics={guestDiagnostics} className="mt-4" />
       ) : null}
+    </div>
+  );
+}
+
+function SyncSourceResults({
+  sources,
+}: {
+  sources: LangameSyncSourceResult[];
+}) {
+  if (sources.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div>
+        <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+          Результаты по источникам и разделам
+        </p>
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          Загруженные разделы остаются доступны, а не загруженные отмечены с
+          причиной.
+        </p>
+      </div>
+      <div className="mt-3 space-y-3">
+        {sources.map((source) => (
+          <div
+            key={source.domain}
+            className="rounded-md border border-zinc-200 px-3 py-2 dark:border-zinc-800"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                {source.domain}
+              </p>
+              <span className={statusBadgeClass(source.status)}>
+                {langameSyncStatusLabel(source.status)}
+              </span>
+            </div>
+            {source.errorMessage ? (
+              <p className="mt-2 break-words text-xs text-amber-800 dark:text-amber-200">
+                {langameSyncMessage(source.errorMessage)}
+              </p>
+            ) : null}
+            {source.steps?.length ? (
+              <ul
+                className="mt-3 space-y-2"
+                aria-label={`Разделы ${source.domain}`}
+              >
+                {source.steps.map((step) => (
+                  <li
+                    key={`${step.component}:${step.clubId ?? "network"}`}
+                    className="rounded border border-zinc-100 bg-zinc-50 px-2.5 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900/60"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                        {langameSyncComponentLabel(step.component)}
+                      </p>
+                      <span
+                        className={
+                          step.status === "SUCCESS"
+                            ? "text-emerald-700 dark:text-emerald-300"
+                            : "text-red-700 dark:text-red-300"
+                        }
+                      >
+                        {langameSyncStepStatusLabel(step)}
+                      </span>
+                    </div>
+                    <p className="mt-1 break-words text-zinc-600 dark:text-zinc-400">
+                      {step.message}
+                    </p>
+                    {step.clubId || typeof step.count === "number" ? (
+                      <p className="mt-1 text-zinc-500 dark:text-zinc-500">
+                        {step.clubId ? `Клуб: ${step.clubId}` : ""}
+                        {step.clubId && typeof step.count === "number"
+                          ? " · "
+                          : ""}
+                        {typeof step.count === "number"
+                          ? `Записей: ${formatNumber(step.count)}`
+                          : ""}
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1894,10 +2016,10 @@ function SyncHealthSummary({
         <SyncHealthMetric
           detail={
             partialSources.length > 0
-              ? `${partialSources.map((source) => source.domain).join(", ")}: данные сохранены, файл расхождений нужно повторить`
-              : "Файлы аудита расхождений доступны"
+              ? partialSources.map((source) => source.domain).join(", ")
+              : "частичных результатов нет"
           }
-          label="Предупреждения аудита"
+          label="Частичные источники"
           tone={partialSources.length > 0 ? "warning" : "neutral"}
           value={partialSources.length}
         />
@@ -1965,7 +2087,10 @@ function SyncHealthSummary({
                           : "text-red-700 dark:text-red-300",
                       ].join(" ")}
                     >
-                      {compactEndpointError(source.errorMessage)}
+                      {compactEndpointError(
+                        langameSyncMessage(source.errorMessage) ??
+                          source.errorMessage,
+                      )}
                     </p>
                   ) : null}
                 </div>
@@ -4018,7 +4143,7 @@ function SyncHistory({ jobs }: { jobs: LangameSettings["syncJobs"] }) {
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
         <h2 className="text-base font-semibold">История синхронизаций</h2>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Последние запуски товарной части Langame и файлы расхождений.
+          Последние запуски товарной части Langame и результаты по разделам.
         </p>
       </div>
 
@@ -4045,15 +4170,11 @@ function SyncHistory({ jobs }: { jobs: LangameSettings["syncJobs"] }) {
                         : "bg-red-50 text-red-700",
                   ].join(" ")}
                 >
-                  {job.status === "SUCCESS"
-                    ? "Успешно"
-                    : job.status === "PARTIAL"
-                      ? "Данные сохранены, аудит не записан"
-                      : "Ошибка"}
+                  {syncStatusLabel(job.status)}
                 </span>
               </div>
               <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-                {job.errorMessage ??
+                {langameSyncMessage(job.errorMessage) ??
                   `Клубов: ${job.storesCount}, товаров: ${job.productsCount}, остатков: ${job.inventoryCount}, продаж: ${job.salesCount}, расхождений: ${job.discrepancyCount}`}
               </p>
               {job.hasDiscrepancyLog ? (
@@ -4898,6 +5019,10 @@ function syncStepLabel(value: SyncStepStatus) {
     return "готово";
   }
 
+  if (value === "partial") {
+    return "частично";
+  }
+
   if (value === "error") {
     return "ошибка";
   }
@@ -4906,23 +5031,7 @@ function syncStepLabel(value: SyncStepStatus) {
 }
 
 function syncStatusLabel(value: string) {
-  if (value === "SUCCESS") {
-    return "Успешно";
-  }
-
-  if (value === "FAILED") {
-    return "Ошибка";
-  }
-
-  if (value === "PARTIAL") {
-    return "Данные сохранены, аудит не записан";
-  }
-
-  if (value === "RUNNING") {
-    return "Выполняется";
-  }
-
-  return value;
+  return langameSyncStatusLabel(value);
 }
 
 function syncFreshnessLabel(value: GuestSyncFreshness["status"]) {

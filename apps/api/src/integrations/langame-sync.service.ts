@@ -33,6 +33,7 @@ import { LangameSettingsService } from './langame-settings.service';
 import {
   BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
   LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX,
+  LANGAME_SYNC_PARTIAL_PREFIX,
 } from './langame.types';
 import type {
   LangameGood,
@@ -46,6 +47,8 @@ import type {
   LangameSyncResult,
   LangameScheduledSyncResult,
   LangameSyncSourceResult,
+  LangameSyncComponent,
+  LangameSyncStepResult,
 } from './langame.types';
 
 const DEFAULT_PAGE_LIMIT = 200;
@@ -97,6 +100,22 @@ type ExternalSourceScope = {
   allowedClubIds: ReadonlySet<string>;
   clubs: LangameClub[];
   storesByClubId: ReadonlyMap<string, StoreSyncRef>;
+};
+
+type SectionReader = <T>(
+  component: LangameSyncComponent,
+  request: () => Promise<T>,
+  clubId?: string,
+) => Promise<T | undefined>;
+
+const SYNC_COMPONENT_LABELS: Record<LangameSyncComponent, string> = {
+  PRODUCTS: 'Товары',
+  CATEGORIES: 'Категории товаров',
+  CONFIGURATION: 'Настройки и цены товаров клуба',
+  INVENTORY: 'Остатки',
+  SALES: 'Продажи товаров',
+  REVENUE: 'Выручка клуба',
+  CLUBS: 'Список клубов',
 };
 
 const LANGAME_SYNC_MODULES = [
@@ -315,34 +334,85 @@ export class LangameSyncService {
         errorMessage: null,
       };
 
+      const steps: LangameSyncStepResult[] = [];
+      const completed = (
+        component: LangameSyncComponent,
+        count: number,
+        clubId?: string,
+      ) => {
+        steps.push({
+          component,
+          status: 'SUCCESS',
+          message: `${SYNC_COMPONENT_LABELS[component]}: загружено ${count}.`,
+          count,
+          ...(clubId ? { clubId } : {}),
+        });
+      };
+      // Only the provider read belongs in this catch. Persistence and tenant
+      // admission must never be reclassified as an optional provider failure.
+      const readSection: SectionReader = async (component, request, clubId) => {
+        try {
+          return await request();
+        } catch (error) {
+          if (trigger !== IntegrationSyncTrigger.MANUAL) throw error;
+          const denied =
+            error instanceof Error &&
+            /no permissions|forbidden|unauthorized|\b40[13]\b/i.test(
+              error.message,
+            );
+          steps.push({
+            component,
+            status: 'FAILED',
+            message: `${SYNC_COMPONENT_LABELS[component]}: ${
+              denied
+                ? 'Langame не разрешил доступ. Проверьте права подключения на этот раздел.'
+                : 'не удалось полностью получить данные от Langame. Повторите загрузку после устранения ошибки источника.'
+            }`,
+            ...(clubId ? { clubId } : {}),
+          });
+          // No raw provider response, key, URL parameters or payload in comments.
+          return undefined;
+        }
+      };
+
       try {
-        let products: LangameProduct[] = [];
-        let productGroups: LangameProductGroup[] = [];
+        let products: LangameProduct[] | undefined;
+        let productGroups: LangameProductGroup[] | undefined;
 
         if (shouldSyncCatalog) {
           [products, productGroups] = await Promise.all([
-            this.langameClient.listProducts(source.baseUrl, apiKey),
-            this.langameClient.listActiveProductGroups(source.baseUrl, apiKey),
+            readSection('PRODUCTS', () =>
+              this.langameClient.listProducts(source.baseUrl, apiKey),
+            ),
+            readSection('CATEGORIES', () =>
+              this.langameClient.listActiveProductGroups(
+                source.baseUrl,
+                apiKey,
+              ),
+            ),
           ]);
         } else if (shouldSyncProductGroups) {
-          productGroups = await this.langameClient.listActiveProductGroups(
-            source.baseUrl,
-            apiKey,
+          productGroups = await readSection('CATEGORIES', () =>
+            this.langameClient.listActiveProductGroups(source.baseUrl, apiKey),
           );
         }
-        const productsByExternalId = shouldSyncCatalog
-          ? await this.syncProducts(
-              tenantId,
-              source.domain,
-              products,
-              discrepancies,
-            )
-          : await this.loadProductMap(tenantId, source.domain);
+        const productsByExternalId =
+          products !== undefined
+            ? await this.syncProducts(
+                tenantId,
+                source.domain,
+                products,
+                discrepancies,
+              )
+            : await this.loadProductMap(tenantId, source.domain);
 
-        result.products += products.length;
-        sourceResult.products = products.length;
+        if (products !== undefined) {
+          result.products += products.length;
+          sourceResult.products = products.length;
+          completed('PRODUCTS', products.length);
+        }
 
-        if (shouldSyncProductGroups) {
+        if (productGroups !== undefined) {
           const syncedGroups = await this.syncProductGroups(
             tenantId,
             source.id,
@@ -351,14 +421,17 @@ export class LangameSyncService {
           );
           result.productGroups += syncedGroups;
           sourceResult.productGroups = syncedGroups;
+          completed('CATEGORIES', syncedGroups);
         }
 
         if (shouldSyncProductGroups || shouldSyncInventory) {
           const clubs =
             externalSourceScope?.clubs ??
-            (await this.langameClient.listClubs(source.baseUrl, apiKey));
+            (await readSection('CLUBS', () =>
+              this.langameClient.listClubs(source.baseUrl, apiKey),
+            ));
 
-          for (const club of clubs) {
+          for (const club of clubs ?? []) {
             const externalStore = externalSourceScope?.storesByClubId.get(
               String(club.id),
             );
@@ -404,50 +477,78 @@ export class LangameSyncService {
             sourceResult.stores += 1;
 
             if (shouldSyncProductGroups) {
-              const configuration =
-                await this.langameClient.listClubProductConfiguration(
-                  source.baseUrl,
-                  apiKey,
-                  club.id,
+              const configuration = await readSection(
+                'CONFIGURATION',
+                () =>
+                  this.langameClient.listClubProductConfiguration(
+                    source.baseUrl,
+                    apiKey,
+                    club.id,
+                  ),
+                String(club.id),
+              );
+              if (configuration !== undefined) {
+                const syncedConfigurations =
+                  await this.syncClubProductConfiguration(
+                    tenantId,
+                    source.id,
+                    source.domain,
+                    store.id,
+                    String(club.id),
+                    productsByExternalId,
+                    configuration,
+                  );
+                result.productConfigurations += syncedConfigurations;
+                sourceResult.productConfigurations += syncedConfigurations;
+                completed(
+                  'CONFIGURATION',
+                  syncedConfigurations,
+                  String(club.id),
                 );
-              const syncedConfigurations =
-                await this.syncClubProductConfiguration(
+              }
+            }
+
+            if (shouldSyncInventory) {
+              const goods = await readSection(
+                'INVENTORY',
+                () =>
+                  this.langameClient.listGoods(source.baseUrl, apiKey, club.id),
+                String(club.id),
+              );
+              if (goods !== undefined) {
+                const inventorySnapshots = await this.syncInventory(
                   tenantId,
-                  source.id,
                   source.domain,
                   store.id,
                   String(club.id),
                   productsByExternalId,
-                  configuration,
+                  goods,
+                  period.toDate,
+                  discrepancies,
                 );
-              result.productConfigurations += syncedConfigurations;
-              sourceResult.productConfigurations += syncedConfigurations;
-            }
-
-            if (shouldSyncInventory) {
-              const goods = await this.langameClient.listGoods(
-                source.baseUrl,
-                apiKey,
-                club.id,
-              );
-              const inventorySnapshots = await this.syncInventory(
-                tenantId,
-                source.domain,
-                store.id,
-                String(club.id),
-                productsByExternalId,
-                goods,
-                period.toDate,
-                discrepancies,
-              );
-              result.inventorySnapshots += inventorySnapshots;
-              sourceResult.inventorySnapshots += inventorySnapshots;
+                result.inventorySnapshots += inventorySnapshots;
+                sourceResult.inventorySnapshots += inventorySnapshots;
+                if (
+                  inventorySnapshots < goods.length &&
+                  trigger === IntegrationSyncTrigger.MANUAL
+                ) {
+                  steps.push({
+                    component: 'INVENTORY',
+                    status: 'FAILED',
+                    clubId: String(club.id),
+                    count: inventorySnapshots,
+                    message: `Остатки: сохранено ${inventorySnapshots} из ${goods.length}; для остальных позиций сначала загрузите каталог товаров.`,
+                  });
+                } else {
+                  completed('INVENTORY', inventorySnapshots, String(club.id));
+                }
+              }
             }
           }
         }
 
         if (shouldSyncSales) {
-          const salesFacts = await this.syncProductExpenses(
+          const salesComplete = await this.syncProductExpenses(
             tenantId,
             source.baseUrl,
             source.domain,
@@ -456,9 +557,13 @@ export class LangameSyncService {
             period,
             discrepancies,
             allowedExternalClubIds,
+            readSection,
+            () => {
+              result.salesFacts += 1;
+              sourceResult.salesFacts += 1;
+            },
           );
-          result.salesFacts += salesFacts;
-          sourceResult.salesFacts = salesFacts;
+          if (salesComplete !== undefined) completed('SALES', salesComplete);
         }
         if (shouldSyncClubRevenue) {
           const clubRevenueFacts = await this.syncClubRevenueFacts(
@@ -468,9 +573,13 @@ export class LangameSyncService {
             apiKey,
             period,
             allowedExternalClubIds,
+            readSection,
           );
-          result.clubRevenueFacts += clubRevenueFacts;
-          sourceResult.clubRevenueFacts = clubRevenueFacts;
+          if (clubRevenueFacts !== undefined) {
+            result.clubRevenueFacts += clubRevenueFacts;
+            sourceResult.clubRevenueFacts = clubRevenueFacts;
+            completed('REVENUE', clubRevenueFacts);
+          }
         }
         sourceResult.discrepancies = discrepancies.length;
         result.discrepancies += discrepancies.length;
@@ -493,29 +602,64 @@ export class LangameSyncService {
             sourceResult.discrepancyLogStatus = 'FAILED';
             sourceResult.discrepancyLogError = auditError;
             sourceResult.errorMessage = auditError;
-            result.partialSources += 1;
           }
         }
         sourceResult.discrepancyLogPath = discrepancyLogPath;
 
-        await this.prisma.integrationSource.update({
-          where: { id: source.id },
-          data: {
-            lastSyncedAt: new Date(),
-            ...(mode === IntegrationSyncMode.CATEGORIES
-              ? {}
-              : {
-                  lastSyncedDate: this.maxSyncedDate(
-                    source.lastSyncedDate ?? null,
-                    period.toDate,
-                  ),
-                }),
-          },
-        });
+        const unavailable = steps.filter((step) => step.status === 'FAILED');
+        const incompleteSales = unavailable.find(
+          (step) => step.component === 'SALES',
+        );
+        if (incompleteSales) incompleteSales.count = sourceResult.salesFacts;
+        if (unavailable.length > 0) {
+          const saved =
+            steps.some((step) => step.status === 'SUCCESS') ||
+            sourceResult.salesFacts > 0 ||
+            sourceResult.inventorySnapshots > 0;
+          sourceResult.status = saved ? 'PARTIAL' : 'FAILED';
+          sourceResult.steps = steps;
+          sourceResult.errorMessage = [
+            `${saved ? LANGAME_SYNC_PARTIAL_PREFIX : 'LANGAME_SYNC_UNAVAILABLE'}:`,
+            ...unavailable
+              .slice(0, 50)
+              .map(
+                (step) =>
+                  `${step.clubId ? `Клуб ${step.clubId}: ` : ''}${step.message}`,
+              ),
+            ...(unavailable.length > 50
+              ? [`Ещё ошибок: ${unavailable.length - 50}.`]
+              : []),
+            ...(sourceResult.discrepancyLogError
+              ? [sourceResult.discrepancyLogError]
+              : []),
+          ].join(' ');
+        } else if (sourceResult.status !== 'PARTIAL') {
+          sourceResult.status = 'SUCCESS';
+        }
+        // A partial read is not evidence that this source/period is complete.
+        // Retain the full-success cursor, including after a later-page failure.
+        if (unavailable.length === 0)
+          await this.prisma.integrationSource.update({
+            where: { id: source.id },
+            data: {
+              lastSyncedAt: new Date(),
+              ...(mode === IntegrationSyncMode.CATEGORIES
+                ? {}
+                : {
+                    lastSyncedDate: this.maxSyncedDate(
+                      source.lastSyncedDate ?? null,
+                      period.toDate,
+                    ),
+                  }),
+            },
+          });
         await this.prisma.integrationSyncJob.update({
           where: { id: syncJob.id },
           data: {
-            status: IntegrationSyncStatus.SUCCESS,
+            status:
+              unavailable.length > 0
+                ? IntegrationSyncStatus.FAILED
+                : IntegrationSyncStatus.SUCCESS,
             finishedAt: new Date(),
             storesCount: sourceResult.stores,
             productsCount: sourceResult.products,
@@ -523,16 +667,16 @@ export class LangameSyncService {
             salesCount: sourceResult.salesFacts,
             discrepancyCount: sourceResult.discrepancies,
             discrepancyLogPath,
-            errorMessage: sourceResult.discrepancyLogError,
+            errorMessage: sourceResult.errorMessage,
           },
         });
-        if (sourceResult.status !== 'PARTIAL') {
-          sourceResult.status = 'SUCCESS';
-        }
+        if (sourceResult.status === 'PARTIAL') result.partialSources += 1;
+        if (sourceResult.status === 'FAILED') result.failedSources += 1;
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown Langame sync error';
         result.failedSources += 1;
+        sourceResult.status = 'FAILED';
         sourceResult.errorMessage = errorMessage;
         await this.prisma.integrationSyncJob.update({
           where: { id: syncJob.id },
@@ -1072,6 +1216,8 @@ export class LangameSyncService {
     period: { from: string; to: string },
     discrepancies: DiscrepancyLogEntry[],
     allowedExternalClubIds: ReadonlySet<string> | null,
+    readSection: SectionReader,
+    onSaved: () => void,
   ) {
     const stores = await this.prisma.store.findMany({
       where: {
@@ -1129,16 +1275,15 @@ export class LangameSyncService {
       let page = 1;
 
       while (true) {
-        const rows = await this.langameClient.listProductExpenses(
-          baseUrl,
-          apiKey,
-          {
+        const rows = await readSection('SALES', () =>
+          this.langameClient.listProductExpenses(baseUrl, apiKey, {
             page,
             pageLimit: DEFAULT_PAGE_LIMIT,
             dateFrom: chunk.from,
             dateTo: chunk.to,
-          },
+          }),
         );
+        if (rows === undefined) return undefined;
 
         for (const row of rows) {
           const externalProductId = String(row.list_goods_id);
@@ -1346,6 +1491,7 @@ export class LangameSyncService {
             },
           });
           synced += 1;
+          onSaved();
         }
 
         if (rows.length < DEFAULT_PAGE_LIMIT) {
@@ -1498,6 +1644,7 @@ export class LangameSyncService {
     apiKey: string,
     period: { from: string; to: string; fromDate: Date; toDate: Date },
     allowedExternalClubIds: ReadonlySet<string> | null,
+    readSection: SectionReader,
   ) {
     const stores = await this.prisma.store.findMany({
       where: {
@@ -1522,12 +1669,15 @@ export class LangameSyncService {
       period,
       MAX_LANGAME_OPERATION_LOG_PERIOD_DAYS,
     )) {
-      operations.push(
-        ...(await this.langameClient.listAllOperationsLog(baseUrl, apiKey, {
+      const rows = await readSection('REVENUE', () =>
+        this.langameClient.listAllOperationsLog(baseUrl, apiKey, {
           dateFrom: chunk.from,
           dateTo: chunk.to,
-        })),
+        }),
       );
+      // Do not replace old revenue with a truncated multi-chunk response.
+      if (rows === undefined) return undefined;
+      operations.push(...rows);
     }
     const revenueByStoreAndDate = new Map<
       string,

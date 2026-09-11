@@ -6,6 +6,25 @@ export const BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE =
 export const LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX =
   'LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED' as const;
 
+export const LANGAME_SYNC_PARTIAL_PREFIX = 'LANGAME_SYNC_PARTIAL' as const;
+
+export type LangameSyncComponent =
+  | 'PRODUCTS'
+  | 'CATEGORIES'
+  | 'CONFIGURATION'
+  | 'INVENTORY'
+  | 'SALES'
+  | 'REVENUE'
+  | 'CLUBS';
+
+export type LangameSyncStepResult = {
+  component: LangameSyncComponent;
+  status: 'SUCCESS' | 'FAILED';
+  message: string;
+  clubId?: string;
+  count?: number;
+};
+
 export type BackgroundExecutionFencePendingReasonCode =
   typeof BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE;
 
@@ -595,6 +614,7 @@ export type LangameSyncResult = {
 export type LangameSyncSourceResult = {
   domain: string;
   status: 'SUCCESS' | 'PARTIAL' | 'FAILED';
+  steps?: LangameSyncStepResult[];
   stores: number;
   products: number;
   productGroups: number;

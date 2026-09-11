@@ -17,7 +17,10 @@ import { AccessScopeService } from '../tenancy/access-scope.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { LangameClient } from './langame.client';
-import { LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX } from './langame.types';
+import {
+  LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX,
+  LANGAME_SYNC_PARTIAL_PREFIX,
+} from './langame.types';
 import { SecretEncryptionService } from './secret-encryption.service';
 import type {
   LangameEndpointProfileDefinition,
@@ -418,18 +421,23 @@ export class LangameSettingsService {
       }),
     ]);
     const mapSyncJob = (job: (typeof syncJobs)[number]) => {
+      const providerPartial =
+        job.status === 'FAILED' &&
+        job.errorMessage?.startsWith(`${LANGAME_SYNC_PARTIAL_PREFIX}:`);
+      const auditPrefix = `${LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX}:`;
+      const auditPosition = job.errorMessage?.lastIndexOf(auditPrefix) ?? -1;
       const discrepancyLogError =
-        job.status === 'SUCCESS' &&
-        job.errorMessage?.startsWith(
-          `${LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX}:`,
-        )
-          ? job.errorMessage
+        (job.status === 'SUCCESS' && auditPosition === 0) ||
+        (providerPartial && auditPosition > 0)
+          ? (job.errorMessage?.slice(auditPosition) ?? null)
           : null;
-
+      // Schema191 has only SUCCESS/FAILED. Keep incomplete provider jobs
+      // FAILED in storage so freshness/worker consumers cannot treat them
+      // as complete; the explicitly marked UI projection is PARTIAL.
       return {
         id: job.id,
         domain: job.domain,
-        status: discrepancyLogError ? 'PARTIAL' : job.status,
+        status: discrepancyLogError || providerPartial ? 'PARTIAL' : job.status,
         startedAt: job.startedAt.toISOString(),
         finishedAt: job.finishedAt?.toISOString() ?? null,
         storesCount: job.storesCount,

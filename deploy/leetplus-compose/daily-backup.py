@@ -32,6 +32,14 @@ def dump(path, args):
         raise RuntimeError('Database backup failed; private logs retained')
 
 
+def validate_backup_source(value):
+    if value.get('inRecovery') is True and (value.get('receiver') != 'streaming' or value.get('replayPaused') is not False or type(value.get('lastMessageAgeSeconds')) not in [int, float] or not 0 <= value['lastMessageAgeSeconds'] <= 90):
+        raise ValueError('Stale or paused standby is not a fresh backup source')
+    if type(value.get('inRecovery')) is not bool:
+        raise ValueError('Unknown backup recovery state')
+    return value
+
+
 def run():
     if os.getuid() != 0 or not (ROOT / 'preparation.json').is_file():
         raise ValueError('Prepared target required')
@@ -44,9 +52,12 @@ def run():
     work.mkdir(mode=0o700, parents=True, exist_ok=False)
     EXPORT.mkdir(mode=0o755, parents=True, exist_ok=True)
     pg = '/usr/lib/postgresql/16/bin/'
+    query = "SELECT json_build_object('inRecovery',pg_is_in_recovery(),'replayPaused',CASE WHEN pg_is_in_recovery() THEN pg_is_wal_replay_paused() ELSE false END,'receiver',(SELECT status FROM pg_stat_wal_receiver),'lastMessageAgeSeconds',(SELECT extract(epoch FROM clock_timestamp()-last_msg_receipt_time) FROM pg_stat_wal_receiver),'receiveLsn',pg_last_wal_receive_lsn(),'replayLsn',pg_last_wal_replay_lsn(),'systemIdentifier',system_identifier::text) FROM pg_control_system();"
+    source = validate_backup_source(json.loads(subprocess.check_output(['/usr/bin/docker','--host','unix:///var/run/docker.sock','exec','leetplus-postgres',pg+'psql','-XAt','-v','ON_ERROR_STOP=1','--host=/tmp','--username=postgres','--dbname=leetplus','-c',query], timeout=30)))
+    source['systemIdentifierSha256'] = hashlib.sha256(source.pop('systemIdentifier').encode()).hexdigest()
     dump(work / 'leetplus.dump', [pg + 'pg_dump', '--host=/tmp', '--username=postgres', '--format=custom', '--compress=1', '--dbname=leetplus'])
     dump(work / 'globals.sql', [pg + 'pg_dumpall', '--host=/tmp', '--username=postgres', '--globals-only'])
-    manifest = {'contract': 'LEETPLUS_DAILY_BACKUP_V1', 'capturedAt': started.isoformat(),
+    manifest = {'contract': 'LEETPLUS_DAILY_BACKUP_V1', 'capturedAt': started.isoformat(), 'dataSource': source,
                 'files': {leaf: {'sha256': file_hash(work / leaf), 'bytes': (work / leaf).stat().st_size} for leaf in ['leetplus.dump', 'globals.sql']}}
     (work / 'manifest.json').write_text(json.dumps(manifest, indent=2))
     with tarfile.open(work / 'capsule.tar', 'x') as archive:

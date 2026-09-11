@@ -45,7 +45,7 @@ export function renderCompose({ blue, green, activeSlot = 'blue', rehearsal = fa
   const offset = rehearsal ? 10 : 0;
   const subnet = n => `172.31.${40 + offset + n}`;
   const services = {};
-  const network = (name, suffix) => ({ [name]: { ipv4_address: `${subnet({ blue: 0, green: 1, data: 2, egress: 3 }[name])}.${suffix}` } });
+  const network = (name, suffix) => ({ [name]: { ipv4_address: `${subnet({ blue: 0, green: 1, data: 2, egress: 3 }[name])}.${suffix}`, ...(name === 'egress' ? { gw_priority: 1 } : {}) } });
   const bind = (source, target, readOnly = true) => ({ type: 'bind', source: `${root}/${source}`, target, read_only: readOnly, bind: { create_host_path: false } });
   const base = (name, image, r, memory = '1g', cpus = '1.0') => ({
     image: imageId(image), platform: 'linux/amd64', container_name: `${project}-${name}`,
@@ -95,7 +95,10 @@ export function renderCompose({ blue, green, activeSlot = 'blue', rehearsal = fa
   const networks = {};
   for (const [index, name] of ['blue', 'green', 'data', 'egress'].entries()) {
     if (name === 'egress' && rehearsal) continue;
-    networks[name] = { name: `${project}-${name}`, driver: 'bridge', enable_ipv6: false, internal: name !== 'egress', ipam: { config: [{ subnet: `${subnet(index)}.0/24` }] } };
+    // Docker29 suppresses host port publication when every attached bridge is
+    // internal. Ingress bridges are fenced by exact source/destination rules;
+    // the database bridge remains internal and has no published ports.
+    networks[name] = { name: `${project}-${name}`, driver: 'bridge', enable_ipv6: false, internal: name === 'data', ipam: { config: [{ subnet: `${subnet(index)}.0/24` }] } };
   }
   return { name: project, services, networks };
 }
@@ -113,6 +116,10 @@ export function verifyContainer(observed, service, name, { beforeStart = false, 
   const published = Object.entries(h.PortBindings ?? {}).flatMap(([key, values]) => (values ?? []).map(x => `${key}:${x.HostIp}:${x.HostPort}`)).sort();
   const wanted = (service.ports ?? []).map(p => `${p.target}/${p.protocol}:${p.host_ip}:${p.published}`).sort();
   demand(JSON.stringify(published) === JSON.stringify(wanted), `${name}: published port drift`);
+  if (!beforeStart && !configurationOnly) {
+    const livePorts = Object.entries(observed.NetworkSettings.Ports ?? {}).flatMap(([key, values]) => (values ?? []).map(x => `${key}:${x.HostIp}:${x.HostPort}`)).sort();
+    demand(JSON.stringify(livePorts) === JSON.stringify(wanted), `${name}: host ports are not actually published`);
+  }
   const mounts = observed.Mounts.filter(m => m.Type !== 'tmpfs').map(m => `${m.Type}:${m.Source}:${m.Destination}:${m.RW}`).sort();
   const expectedMounts = (service.volumes ?? []).map(m => `${m.type}:${m.source}:${m.target}:${!m.read_only}`).sort();
   demand(JSON.stringify(mounts) === JSON.stringify(expectedMounts), `${name}: unexpected mount`);
@@ -120,6 +127,7 @@ export function verifyContainer(observed, service, name, { beforeStart = false, 
   const actualNetworks = Object.entries(observed.NetworkSettings.Networks).map(([key, value]) => `${key}:${value.IPAddress || (beforeStart || configurationOnly ? value.IPAMConfig?.IPv4Address : '')}`).sort();
   const expectedNetworks = Object.entries(service.networks).map(([key, value]) => `${project}-${key}:${value.ipv4_address}`).sort();
   demand(JSON.stringify(actualNetworks) === JSON.stringify(expectedNetworks), `${name}: network membership drift`);
+  for (const [key, value] of Object.entries(service.networks)) demand((observed.NetworkSettings.Networks[`${project}-${key}`].GwPriority ?? 0) === (value.gw_priority ?? 0), `${name}: default gateway priority drift`);
   for (const [key, value] of Object.entries(service.labels)) demand(c.Labels[key] === value, `${name}: label drift`);
   for (const [key, value] of Object.entries(service.environment ?? {})) demand(c.Env.includes(`${key}=${value}`), `${name}: bound environment drift`);
   if (imageEnvironment) {

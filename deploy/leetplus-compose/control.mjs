@@ -210,7 +210,7 @@ function driverFor(dir) {
         publish(`${dir}/target-fence.json`, { planSha256: digest(p), slot: p.targetSlot });
         if (fs.existsSync(`${ROOT}/compose.json`)) compose(['stop', `api-${p.targetSlot}`, `web-${p.targetSlot}`]);
         replace(`${ROOT}/compose.json`, canonical(spec));
-        compose(['create', '--no-deps', '--force-recreate', `api-${p.targetSlot}`, `web-${p.targetSlot}`]);
+        compose(['up', '--no-start', '--no-deps', '--force-recreate', `api-${p.targetSlot}`, `web-${p.targetSlot}`]);
         for (const role of ['api', 'web']) demand(docker(['inspect', '--format', '{{.State.Running}}', `leetplus-${role}-${p.targetSlot}`]) === 'false', 'Target did not stop');
         return { ...bound, composeSha256: digest(spec), slot: p.targetSlot };
       }
@@ -383,7 +383,7 @@ if (command === 'help' || !command) {
       demand(!prior.State.Running && prior.State.Pid === 0, 'A prior worker is still running; no overlapping tick allowed');
     }
     publish(`${dir}/${key}.intent.json`, { grantId: grant.id, activeGeneration: current.generation, releaseSha: grant.releaseSha, worker: name, startedAt: new Date().toISOString() });
-    docker(['compose', '--project-name', 'leetplus', '--file', workerCompose, 'create', '--no-deps', '--force-recreate', name]);
+    docker(['compose', '--project-name', 'leetplus', '--file', workerCompose, 'up', '--no-start', '--no-deps', '--force-recreate', name]);
     const service = spec.services[name];
     const imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
     verifyContainer(docker(['inspect', service.container_name], { json: true })[0], service, name, { beforeStart: true, imageEnvironment });

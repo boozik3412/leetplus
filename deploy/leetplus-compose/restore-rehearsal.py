@@ -73,8 +73,8 @@ def restore(release_path, dump, globals_path, manifest_path):
         config_path.write_bytes(config)
         config_path.chmod(0o600)
     document = json.loads(config)
-    if document['name'] != NAME or not all(net['internal'] for net in document['networks'].values()):
-        raise ValueError('Rehearsal must have only internal networks')
+    if document['name'] != NAME or set(document['networks']) != {'blue', 'green', 'data'} or any(net['internal'] != (name == 'data') for name, net in document['networks'].items()):
+        raise ValueError('Rehearsal requires fenced ingress bridges and an internal database bridge')
     if not (ROOT / 'data/postgres/PG_VERSION').exists():
         if any((ROOT / 'data/postgres').iterdir()):
             raise ValueError('Partial initialization requires inspection')
@@ -83,11 +83,14 @@ def restore(release_path, dump, globals_path, manifest_path):
                 '--mount', f'type=bind,source={ROOT}/data/postgres,target=/var/lib/postgresql/16/main',
                 '--entrypoint', '/usr/lib/postgresql/16/bin/initdb', release['images']['postgres'],
                 '-D', '/var/lib/postgresql/16/main', '-U', 'postgres', '--locale=en_US.UTF-8', '--encoding=UTF8', '-A', 'trust'], label='initdb')
+    # Compose otherwise creates only the selected data network. Create stopped
+    # application containers first so their internal networks can be attested.
+    docker(['compose', '--project-name', NAME, '--file', str(config_path), 'up', '--no-start', '--no-deps', 'api-blue', 'api-green', 'web-blue', 'web-green'], label='application-create-stopped')
     docker(['compose', '--project-name', NAME, '--file', str(config_path), 'up', '--detach', 'postgres', 'redis'], label='data-start')
     for name, spec in document['networks'].items():
         actual = json.loads(docker(['network', 'inspect', spec['name']], label='network-' + name))[0]
-        if not actual['Internal'] or actual['EnableIPv6']:
-            raise ValueError('Observed rehearsal network has egress')
+        if actual['Internal'] != spec['internal'] or actual['EnableIPv6']:
+            raise ValueError('Observed rehearsal network differs from its fenced contract')
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         state = json.loads(docker(['inspect', NAME + '-postgres'], label='postgres-state'))[0]

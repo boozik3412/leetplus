@@ -17,3 +17,8 @@ test('prepared control replacement rejects active authority and changed predeces
   const root = path.dirname(fileURLToPath(import.meta.url));
   execFileSync(process.platform === 'win32' ? 'python' : 'python3', [path.join(root, 'test_prepared_handoff.py')], { stdio: 'pipe' });
 });
+
+test('prepared role modes survive the private caller umask on Linux', () => {
+  const root = path.dirname(fileURLToPath(import.meta.url));
+  execFileSync(process.platform === 'win32' ? 'python' : 'python3', [path.join(root, 'test_preparation_modes.py')], { stdio: 'pipe' });
+});

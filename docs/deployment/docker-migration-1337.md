@@ -1,14 +1,17 @@
 # LeetPlus: Docker migration to 1337
 
 Current state on11.09.2026: **SERVING_ON_TARGET**. Exact
-`399876b560b4ac611eae35ee425d99422fb140b9` is active green with healthy blue
-rollback, accepted Compose generation2. Target1337 is LAN192.168.1.137 /
+`bcb0a4d37e5791b04cc4707aa65c35680385836e` is active blue with healthy green399876
+rollback, accepted Compose generation3 after an ordinary app rollout. Installed
+control and PG/Redis dataRelease remain399876. Target1337 is LAN192.168.1.137 /
 public188.234.220.76; PostgreSQL16.13 is the only primary, CURRENT191.
 Source168.222.143.243 is now a verified HTTPS forwarder. Its PostgreSQL and
 four app units are persistently masked/stopped; both worker timers are disabled.
 Root/www/api A records point to the target, TTL300. Do not repeat the cutover.
 
 See [actual operations, acceptance and backup receipts](docker-migration-completion-2026-09-11.md).
+The later [partial-sync app rollout](langame-partial-sync-production-2026-09-11.md)
+did not repeat the migration or replace the accepted data baseline.
 [PREPARED_NOT_SERVING ae0d results](docker-migration-prepared-2026-09-11.md)
 are historical preparation evidence, superseded by the admitted399876 rehearsal
 and actual11September cutover. Final TLS validation fixed the native strict-CA

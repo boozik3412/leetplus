@@ -1,8 +1,9 @@
 # LeetPlus open beta — текущее состояние на 11.09.2026
 
 Сайт перенесён на1337 (`192.168.1.137` / public `188.234.220.76`). Exact
-`399876b560b4ac611eae35ee425d99422fb140b9` обслуживается active green,
-blue сохранён hot rollback; accepted Compose generation2. Source VDS6097 теперь
+`bcb0a4d37e5791b04cc4707aa65c35680385836e` обслуживается active blue,
+green399876 сохранён hot rollback; accepted Compose generation3. Data/control399876
+не заменялись при app rollout. Source VDS6097 теперь
 HTTPS proxy с persistently masked БД/приложениями и disabled worker timers.
 DNS root/www/api подтверждён на master/NS5/NS6/Google/Cloudflare в12:16:23UTC.
 
@@ -12,19 +13,19 @@ dormant split runtime. Данные внешнего пилота и ключ е
 данными текущей сети. Public guest, corporate tenant и worker boundaries
 сохранены и проверены отдельно.
 
-| Поле               | Состояние                                                                                                                  |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| Release decision   | Прежние отдельные gates массового открытого запуска сохраняются; controlled onboarding доступен в разрешённых pilot tenant |
-| Production runtime | Exact399876, active green + healthy blue, generation2 на1337                                                               |
-| Release authority  | Fast34590140633/Full34590140602 SUCCESS, Docker admission5bb3fee5…, bootstrap6559701f… и green7087620d… terminal           |
-| Prisma schema      | CURRENT191, `20260908180000_external_langame_simple_onboarding`, unfinished0; bridgeOFF/reportingLIVE                      |
-| Workers            | Оба native canary PASS и TIMER grants exact399876/generation2/INTERNALdemo; API schedulers OFF                             |
-| User acceptance    | Новый вход Telegram, профиль и привычный кабинет подтверждены владельцем; corporate/guest и cross-token acceptance PASS    |
-| Tenant acceptance  | Native acceptance exact4 demo Store; customer tenant/store ownership не менялся                                            |
-| Platform admin     | `/administration` → явный подписанный tenant context; role-aware landing сохраняется                                       |
-| External Langame   | SAFE_EXTERNAL preview/settings/manual exact-Store sync сохранён; внешние tenant не используют INTERNAL timers/credentials  |
-| HTTPS и backup     | Новый cert до10.12.2026, renew dry-run PASS; backup06:00 и Windows07:00/logon                                              |
-| История            | Runtime6097/generation55 и PREPARED_NOT_SERVING ae0d — завершённые предыдущие checkpoints                                  |
+| Поле               | Состояние                                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| Release decision   | Прежние отдельные gates массового открытого запуска сохраняются; controlled onboarding доступен в разрешённых pilot tenant      |
+| Production runtime | Exactbcb0a4d3, active blue + healthy green399876, generation3 на1337                                                            |
+| Release authority  | Fast34604304891/Full34604305010 SUCCESS, Docker admission79ea27d3…, ordinary app operation722bf10f… terminal                    |
+| Prisma schema      | CURRENT191, `20260908180000_external_langame_simple_onboarding`, unfinished0; bridgeOFF/reportingLIVE                           |
+| Workers            | Оба native canary PASS и новые TIMER grants exactbcb/generation3/INTERNALdemo; API schedulers OFF                               |
+| User acceptance    | Новый вход Telegram, профиль и привычный кабинет подтверждены владельцем; corporate/guest и cross-token acceptance PASS         |
+| Tenant acceptance  | Native acceptance exact4 demo Store; customer tenant/store ownership не менялся                                                 |
+| Platform admin     | `/administration` → явный подписанный tenant context; role-aware landing сохраняется                                            |
+| External Langame   | MANUAL partial sync deployed:1171 импорт466/423active, категории/конфигурация отмечены недоступными; exact Store scope сохранён |
+| HTTPS и backup     | Новый cert до10.12.2026, renew dry-run PASS; backup06:00 и Windows07:00/logon                                                   |
+| История            | Runtime6097/generation55 и PREPARED_NOT_SERVING ae0d — завершённые предыдущие checkpoints                                       |
 
 Actual release, контрольные суммы, final backup/restore, DNS и границы возврата:
 [отчёт переноса](../deployment/docker-migration-completion-2026-09-11.md).
@@ -32,12 +33,12 @@ Actual release, контрольные суммы, final backup/restore, DNS и 
 
 ## История подготовки до завершения CURRENT191
 
-Source follow-up 11.09: ручной Langame import сохраняет доступные разделы при
+Deployed follow-up11.09: ручной Langame import сохраняет доступные разделы при
 отказе отдельных provider methods и показывает PARTIAL с комментариями.
 Недоступные категории больше не обязаны блокировать каталог. DB/scope/AUTO
 границы сохраняются; неполный provider job не является full-success evidence.
-Это подготовленное изменение, не новый deployed runtime: baseline остаётся
-Compose399876 на1337 до отдельного admitted rollout.
+Выпуск exactbcb/generation3 на1337 завершён; реальный каталог1171 доступен без
+недоступных категорий. [Production evidence](../deployment/langame-partial-sync-production-2026-09-11.md).
 [Контракт и проверки](../integrations/langame-partial-sync.md).
 
 Ниже сохранены исторические checkpoints. Они не заменяют фактическое состояние в таблице выше.

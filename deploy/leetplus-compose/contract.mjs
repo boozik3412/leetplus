@@ -37,9 +37,10 @@ function metadata(r) {
   return { RELEASE_SHA: r.releaseSha, BUILD_TIME: r.builtAt, WEB_BUILD_ID: r.releaseSha,
     EXPECTED_DATABASE_MIGRATION: r.migration, EXPECTED_DATABASE_MIGRATION_COUNT: String(r.migrationCount) };
 }
-export function renderCompose({ blue, green, activeSlot = 'blue', rehearsal = false }) {
+export function renderCompose({ blue, green, dataRelease, activeSlot = 'blue', rehearsal = false }) {
   release(blue); release(green); demand(SLOTS.includes(activeSlot), 'Invalid active slot');
-  demand(blue.images.postgres === green.images.postgres && blue.images.redis === green.images.redis, 'Data services cannot change in an application rollout');
+  if (!dataRelease) demand(blue.images.postgres === green.images.postgres && blue.images.redis === green.images.redis, 'Different bundles require an explicit admitted data baseline');
+  const data = release(dataRelease ?? blue);
   const root = rootPath(rehearsal ? '/srv/leetplus-migration/rehearsal' : '/srv/leetplus', rehearsal);
   const project = rehearsal ? 'leetplus-rehearsal' : 'leetplus';
   const offset = rehearsal ? 10 : 0;
@@ -76,13 +77,13 @@ export function renderCompose({ blue, green, activeSlot = 'blue', rehearsal = fa
       depends_on: { [api]: { condition: 'service_healthy' } },
     };
   }
-  services.postgres = { ...base('postgres', blue.images.postgres, blue, '8g', '4.0'), restart: 'unless-stopped', shm_size: '1g', entrypoint: ['/usr/local/bin/leetplus-postgres'],
+  services.postgres = { ...base('postgres', data.images.postgres, data, '8g', '4.0'), restart: 'unless-stopped', shm_size: '1g', entrypoint: ['/usr/local/bin/leetplus-postgres'],
     networks: network('data', 2),
     group_add: rehearsal ? [] : ['12061'],
     volumes: [bind('data/postgres', '/var/lib/postgresql/16/main', false), bind('secrets/postgres', '/etc/leetplus-postgres'), ...(!rehearsal ? [{ type: 'bind', source: '/run/leetplus-replication', target: '/run/leetplus-replication', read_only: true, bind: { create_host_path: false } }] : [])],
     healthcheck: { test: ['CMD', '/usr/lib/postgresql/16/bin/pg_isready', '-h', '127.0.0.1'], interval: '5s', timeout: '4s', retries: 12 },
   };
-  services.redis = { ...base('redis', blue.images.redis, blue, '256m', '0.5'), restart: 'unless-stopped', entrypoint: ['docker-entrypoint.sh'], command: ['redis-server', '--save', '', '--appendonly', 'no', '--maxmemory', '128mb', '--maxmemory-policy', 'allkeys-lru'], networks: network('data', 3), volumes: [bind('data/redis', '/data', false)] };
+  services.redis = { ...base('redis', data.images.redis, data, '256m', '0.5'), restart: 'unless-stopped', entrypoint: ['docker-entrypoint.sh'], command: ['redis-server', '--save', '', '--appendonly', 'no', '--maxmemory', '128mb', '--maxmemory-policy', 'allkeys-lru'], networks: network('data', 3), volumes: [bind('data/redis', '/data', false)] };
   const active = activeSlot === 'blue' ? blue : green;
   for (const [index, name] of ['bonus-ledger-worker', 'langame-daily-worker'].entries()) {
     services[name] = { ...base(name, active.images.api, active, '1g', '2.0'), entrypoint: ['node', '/opt/leetplus/runtime-entry.cjs'], command: [name], restart: 'no', profiles: ['workers'],
@@ -111,6 +112,7 @@ export function verifyContainer(observed, service, name, { beforeStart = false, 
   demand(!h.PidMode && (!h.IpcMode || h.IpcMode === 'private') && !h.CapAdd?.length && h.ReadonlyRootfs, `${name}: unsafe process/filesystem privileges`);
   demand(!h.Devices?.length && !h.DeviceRequests?.length && !h.ExtraHosts?.length, `${name}: unexpected device or host mapping`);
   demand(h.CapDrop?.length === 1 && h.CapDrop[0].toUpperCase() === 'ALL' && h.SecurityOpt?.length === 1 && h.SecurityOpt.some(x => /^no-new-privileges(?::true)?$/.test(x)), `${name}: missing privilege fence`);
+  demand(JSON.stringify([...(h.GroupAdd ?? [])].sort()) === JSON.stringify([...(service.group_add ?? [])].sort()), `${name}: supplementary group drift`);
   demand(JSON.stringify(c.Cmd) === JSON.stringify(service.command ?? c.Cmd), `${name}: entrypoint arguments drift`);
   demand(JSON.stringify(c.Entrypoint) === JSON.stringify(service.entrypoint), `${name}: entrypoint drift`);
   const published = Object.entries(h.PortBindings ?? {}).flatMap(([key, values]) => (values ?? []).map(x => `${key}:${x.HostIp}:${x.HostPort}`)).sort();

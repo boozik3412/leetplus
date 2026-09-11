@@ -19,6 +19,13 @@ uses `compose up --no-start --no-deps`. Cold preparation retirement archives old
 files and retains only a proven unpromoted standby, never accepted runtime,
 pending operations or worker grants. No source/DNS/promotion effect is permitted.
 
+The Docker plan binds its data release and admission independently. BOOTSTRAP
+uses the initial admitted bundle; later application blue/green updates must
+retain that exact data baseline even when CI produces new data-image IDs.
+Changing PostgreSQL/Redis through an application rollout is rejected. Manifest
+bytes, image IDs, actual data containers, gateway priorities and supplementary
+groups are attested. Backups retain both application and data-baseline archives.
+
 `deploy/leetplus-compose` is a separate CURRENT191 COMBINED migration candidate
 for server 1337. Admitted d53684a0 control files were installed without activation;
 image hydration stopped before database/application preparation because a classic

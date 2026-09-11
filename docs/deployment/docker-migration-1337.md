@@ -36,6 +36,13 @@ standby data. It does not stop/change the VDS or promote anything. The verified
 new installer and prepare-files then create a fresh generation and receipts;
 the retained PG must resume recovery and the new rehearsal must pass separately.
 
+After bootstrap, the plan's `dataRelease` and `dataAdmissionSha256` remain bound
+to the initial admitted PostgreSQL/Redis set. Application CI may create new
+data-image candidates, but app BIND/rollback/boot/worker paths keep the accepted
+data services unchanged in either slot. Their separate manifest/admission and
+actual container IDs remain verified, and backups include that data bundle as
+well as current application bundles. Data upgrades are a separate operation.
+
 Current authorization: preparation only. Do not switch DNS or public nginx,
 stop source API/Web/worker services, promote a standby, or enable target live
 workers. The actual migration is a separate user-authorized operation.

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
 import { CONTRACT, SCHEMA, digest, canonical, renderCompose } from './contract.mjs';
-import { execute, PHASES, validateApproval, validateChain } from './orchestrator.mjs';
+import { execute, PHASES, validateApproval, validateChain, validatePlan } from './orchestrator.mjs';
 
 const key = crypto.generateKeyPairSync('ed25519');
 const pub = key.publicKey.export({ type: 'spki', format: 'pem' });
@@ -12,6 +12,8 @@ plan.composeSha256 = digest(renderCompose({ blue: r, green: r }));
 plan.secretDigests = Object.fromEntries(['acceptance.json', 'api-blue.json', 'api-green.json', 'db-ca.pem'].map(name => [name, '4'.repeat(64)]));
 plan.networkPolicySha256 = '5'.repeat(64);
 plan.databaseIdentitySha256 = '6'.repeat(64);
+plan.dataRelease = r;
+plan.dataAdmissionSha256 = plan.admissionSha256;
 function envelope(p = plan) {
   const approval = { contract: `${CONTRACT}_APPROVAL`, operationId: p.operationId, action: p.action, hostIdentitySha256: p.hostIdentitySha256, planSha256: digest(p), issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3600000).toISOString() };
   return { approval, signature: crypto.sign(null, Buffer.from(canonical(approval)), key.privateKey).toString('base64') };
@@ -52,4 +54,24 @@ for (const interrupted of PHASES) test(`lost response at ${interrupted} reconcil
 test('tampered receipt or skipped phase stops before any effect', async () => {
   const store = memoryStore(); store.data.records.SMOKE = { intent: { planSha256: digest(plan), phase: 'SMOKE', previousReceiptSha256: null } };
   await assert.rejects(execute(plan, envelope(), pub, store, { preflight: () => assert.fail('must not execute') }), /gap/);
+});
+
+test('application successors retain separately admitted data images in either slot', () => {
+  const successor={...r,releaseSha:'b'.repeat(40),images:{...r.images,api:`sha256:${'7'.repeat(64)}`,postgres:`sha256:${'8'.repeat(64)}`,redis:`sha256:${'9'.repeat(64)}`}};
+  const previous={activeSlot:'blue',generation:1,blue:r,green:r,dataRelease:r,dataAdmissionSha256:plan.dataAdmissionSha256};
+  const next={...structuredClone(plan),action:'ROLLOUT',previous,generation:1,targetSlot:'green',green:successor};
+  next.composeSha256=digest(renderCompose({...next,activeSlot:'green'}));
+  validatePlan(next);
+  const rendered=renderCompose({...next,activeSlot:'green'});
+  assert.equal(rendered.services.postgres.image,r.images.postgres);
+  assert.equal(rendered.services.redis.image,r.images.redis);
+  assert.equal(rendered.services['api-green'].image,successor.images.api);
+  const third={...successor,releaseSha:'c'.repeat(40),images:{...successor.images,api:`sha256:${'b'.repeat(64)}`}};
+  const second={...next,targetSlot:'blue',blue:third,green:successor,generation:2,previous:{...previous,activeSlot:'green',generation:2,green:successor}};
+  second.composeSha256=digest(renderCompose({...second,activeSlot:'blue'}));
+  validatePlan(second);
+  assert.equal(renderCompose({...second,activeSlot:'blue'}).services.postgres.image,r.images.postgres);
+  const bad={...next,dataRelease:successor};
+  bad.composeSha256=digest(renderCompose({...bad,activeSlot:'green'}));
+  assert.throws(()=>validatePlan(bad),/cannot replace data/);
 });

@@ -68,10 +68,16 @@ def run():
         state = Path('/var/lib/leetplus-compose/active.json')
         if state.exists():
             active = json.loads(state.read_text())
-            for sha in set(active[slot]['releaseSha'] for slot in ['blue', 'green']):
-                inbox = ROOT / 'inbox' / sha
-                for leaf in ['release.json', 'docker-admission.json', 'control.tar.gz', 'images.tar.gz']:
-                    archive.add(inbox / leaf, arcname=f'releases/{sha}/{leaf}', recursive=False)
+            release_shas = {active[slot]['releaseSha'] for slot in ['blue', 'green']}
+            release_shas.add(active['dataRelease']['releaseSha'])
+        else:
+            release_shas = {json.loads((ROOT / 'preparation.json').read_text())['releaseSha']}
+        for sha in release_shas:
+            if len(sha) != 40 or any(c not in '0123456789abcdef' for c in sha):
+                raise ValueError('Invalid backup release identity')
+            inbox = ROOT / 'inbox' / sha
+            for leaf in ['release.json', 'docker-admission.json', 'control.tar.gz', 'images.tar.gz']:
+                archive.add(inbox / leaf, arcname=f'releases/{sha}/{leaf}', recursive=False)
     destination = EXPORT / (name + '.lpbackup')
     receipt = encrypt(work / 'capsule.tar', destination, '/etc/leetplus-compose/backup-recipient.pem')
     os.chown(destination, 0, 12070)

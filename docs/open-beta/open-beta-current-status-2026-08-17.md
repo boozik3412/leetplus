@@ -22,6 +22,11 @@ adds fenced ingress, stricter peer rules, real publication/denial CI, explicit
 generated modes and supported stopped-creation flags. Source6097 and original
 workers remain serving; these preparation results are not a site cutover or beta GO.
 
+The successor also freezes a separately admitted data baseline across future
+application blue/green updates. Rebuilding an application cannot restart or
+replace PostgreSQL/Redis implicitly; active data-image binding remains part of
+the signed plan, boot/worker checks and the encrypted backup archive set.
+
 | Поле                 | Состояние                                                                                                                                                                          |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для массового открытого запуска; controlled external onboarding доступен в разрешённых pilot tenant                                                                        |

@@ -71,6 +71,17 @@ function compose(argv) { return docker(['compose', '--project-name', 'leetplus',
 function databaseIdentity() {
   return docker(['exec', 'leetplus-postgres', '/usr/lib/postgresql/16/bin/psql', '-XAt', '-h', '/tmp', '-U', 'postgres', '-d', 'leetplus', '-c', 'SELECT system_identifier::text FROM pg_control_system();']);
 }
+function attestAdmittedRelease(value, expectedAdmissionSha256) {
+  release(value);
+  const inbox = `${ROOT}/inbox/${value.releaseSha}`;
+  const raw = safeFile(`${inbox}/docker-admission.json`);
+  const admission = JSON.parse(raw);
+  demand(!expectedAdmissionSha256 || digest(raw) === expectedAdmissionSha256, 'Release admission digest changed');
+  demand(admission.contract === `${CONTRACT}_ADMISSION` && admission.decision === 'PASS' && admission.repository === 'boozik3412/leetplus' && admission.ref === 'refs/heads/main' && admission.event === 'push' && admission.releaseSha === value.releaseSha, 'Release is not exact-main admitted');
+  const manifest = safeFile(`${inbox}/release.json`);
+  demand(digest(manifest) === admission.releaseManifestSha256 && canonical(JSON.parse(manifest)) === canonical(value) && canonical(admission.images) === canonical(value.images), 'Release images do not match the admitted manifest');
+  return digest(raw);
+}
 function assertPrimaryDatabase(expectedIdentity) {
   demand(digest(databaseIdentity()) === expectedIdentity, 'Database system identity changed');
   const facts = docker(['exec', 'leetplus-postgres', '/usr/lib/postgresql/16/bin/psql', '-XAt', '-h', '/tmp', '-U', 'postgres', '-d', 'leetplus', '-c', "SELECT pg_is_in_recovery(),rolsuper,rolcreatedb,rolcreaterole,rolinherit,rolreplication,rolbypassrls,has_schema_privilege('leetplus_runtime','public','CREATE') FROM pg_roles WHERE rolname='leetplus_runtime';"]);
@@ -133,7 +144,7 @@ function probeSlot(plan, slot) {
   const web = JSON.parse(http(`http://127.0.0.1:${PORTS[slot].web}/api/release-identity`));
   demand(api.ok === true && api.release?.sha === expected.releaseSha && api.dependencies?.database?.migration === SCHEMA.migration && api.dependencies?.database?.migrationCount === 191, 'API readiness mismatch');
   demand(web.release?.sha === expected.releaseSha && web.release?.webBuildId === expected.releaseSha, 'Web release identity mismatch');
-  const specification = renderCompose({ blue: plan.blue, green: plan.green, activeSlot: plan.targetSlot });
+  const specification = renderCompose({ blue: plan.blue, green: plan.green, dataRelease: plan.dataRelease, activeSlot: plan.targetSlot });
   for (const [name, expected] of Object.entries(specification.networks)) {
     const actual = docker(['network', 'inspect', expected.name], { json: true })[0];
     demand(actual.Internal === expected.internal && actual.EnableIPv6 === false && actual.Driver === 'bridge' && actual.IPAM.Config.length === 1 && actual.IPAM.Config[0].Subnet === expected.ipam.config[0].subnet, `${name}: network isolation drift`);
@@ -167,7 +178,7 @@ function rollbackAfterPostcheck(p, dir) {
   switchLink(p.previous.activeSlot);
   run('/usr/sbin/nginx', ['-t']); run('/usr/bin/systemctl', ['reload', 'nginx']);
   probeSlot(p, p.previous.activeSlot);
-  const current = { operationId: p.operationId, generation: p.generation + 2, activeSlot: p.previous.activeSlot, blue: p.blue, green: p.green, planSha256: digest(p), outcome: 'ROLLED_BACK' };
+  const current = { operationId: p.operationId, generation: p.generation + 2, activeSlot: p.previous.activeSlot, blue: p.blue, green: p.green, dataRelease: p.dataRelease, dataAdmissionSha256: p.dataAdmissionSha256, planSha256: digest(p), outcome: 'ROLLED_BACK' };
   replace(`${STATE}/active.json`, canonical(current));
   publish(`${dir}/rolled-back.json`, { contract: `${CONTRACT}_ROLLED_BACK`, planSha256: digest(p), reason: 'POSTCHECK_FAILED', active: current });
 }
@@ -179,6 +190,10 @@ function driverFor(dir) {
       demand(digest(safeFile('/etc/leetplus-compose/providers.json')) === p.networkPolicySha256, 'Provider policy binding drift');
       run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, 'verify']);
       assertPrimaryDatabase(p.databaseIdentitySha256);
+      attestAdmittedRelease(p[p.targetSlot], p.admissionSha256);
+      attestAdmittedRelease(p.dataRelease, p.dataAdmissionSha256);
+      const dataSpec = renderCompose({ blue: p.blue, green: p.green, dataRelease: p.dataRelease, activeSlot: p.targetSlot });
+      for (const name of ['postgres', 'redis']) verifyContainer(docker(['inspect', `leetplus-${name}`], { json: true })[0], dataSpec.services[name], name);
       assertNoPending(p.operationId);
       const current = active();
       demand(canonical(current) === canonical(p.previous) || (current?.operationId === p.operationId && current.generation === p.generation + 1 && current.activeSlot === p.targetSlot), 'Active generation drift');
@@ -196,7 +211,7 @@ function driverFor(dir) {
     },
     run: async function (phase, p) {
       const bound = { phase, planSha256: digest(p) };
-      const spec = renderCompose({ blue: p.blue, green: p.green, activeSlot: p.targetSlot });
+      const spec = renderCompose({ blue: p.blue, green: p.green, dataRelease: p.dataRelease, activeSlot: p.targetSlot });
       if (phase === 'HYDRATE') {
         const archive = `${ROOT}/inbox/${p[p.targetSlot].releaseSha}/images.tar.gz`;
         // A bounded stream hash avoids loading the image archive into Node RAM.
@@ -235,7 +250,7 @@ function driverFor(dir) {
           if (p.previous) { switchLink(p.previous.activeSlot); run('/usr/sbin/nginx', ['-t']); run('/usr/bin/systemctl', ['reload', 'nginx']); }
           throw error;
         }
-        const current = { operationId: p.operationId, generation: p.generation + 1, activeSlot: p.targetSlot, blue: p.blue, green: p.green, planSha256: digest(p) };
+        const current = { operationId: p.operationId, generation: p.generation + 1, activeSlot: p.targetSlot, blue: p.blue, green: p.green, dataRelease: p.dataRelease, dataAdmissionSha256: p.dataAdmissionSha256, planSha256: digest(p) };
         replace(`${STATE}/active.json`, canonical(current));
         return { ...bound, generation: current.generation, slot: current.activeSlot };
       }
@@ -316,10 +331,13 @@ if (command === 'help' || !command) {
     const request = readJSON(options.request);
     const previous = active(), id = crypto.randomUUID();
     const plan = { ...request, contract: `${CONTRACT}_PLAN`, operationId: id, hostIdentitySha256: hostIdentity(), controlSha256: installedDigest(), previous, generation: previous?.generation ?? 0, action: previous ? 'ROLLOUT' : 'BOOTSTRAP' };
+    plan.dataRelease = previous ? previous.dataRelease : plan.blue;
+    plan.dataAdmissionSha256 = attestAdmittedRelease(plan.dataRelease, previous?.dataAdmissionSha256);
+    attestAdmittedRelease(plan[plan.targetSlot], plan.admissionSha256);
     plan.secretDigests = Object.fromEntries(['acceptance.json', 'api-blue.json', 'api-green.json', 'db-ca.pem'].map(leaf => [leaf, digest(safeFile(`${ROOT}/secrets/${leaf}`))]));
     plan.networkPolicySha256 = digest(safeFile('/etc/leetplus-compose/providers.json'));
     plan.databaseIdentitySha256 = digest(databaseIdentity());
-    plan.composeSha256 = digest(renderCompose({ blue: plan.blue, green: plan.green, activeSlot: plan.targetSlot }));
+    plan.composeSha256 = digest(renderCompose({ blue: plan.blue, green: plan.green, dataRelease: plan.dataRelease, activeSlot: plan.targetSlot }));
     validatePlan(plan);
     const dir = operation(id); directory(dir); publish(`${dir}/plan.json`, plan);
     console.log(canonical({ decision: 'PREPARED_NOT_AUTHORIZATION', operationId: id, planSha256: digest(plan), planPath: `${dir}/plan.json` }));
@@ -336,11 +354,13 @@ if (command === 'help' || !command) {
         ? history.rolledBack && canonical(history.rolledBack.active) === canonical(current) && plan.previous && current.generation === plan.generation + 2 && current.activeSlot === plan.previous.activeSlot
         : current.generation === plan.generation + 1 && current.activeSlot === plan.targetSlot && history.records.SMOKE?.receipt && history.records.CUTOVER?.intent;
       demand(current.planSha256 === digest(plan) && accepted && acceptedLink(current.activeSlot), 'No accepted routing authority for reboot');
+      demand(canonical(current.dataRelease) === canonical(plan.dataRelease) && current.dataAdmissionSha256 === plan.dataAdmissionSha256, 'Accepted data baseline changed');
+      attestAdmittedRelease(plan.dataRelease, plan.dataAdmissionSha256);
       run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, 'verify']);
       assertPrimaryDatabase(plan.databaseIdentitySha256);
       const slot = current.activeSlot;
       demand(digest(safeFile(`${ROOT}/secrets/api-${slot}.json`)) === plan.secretDigests[`api-${slot}.json`] && digest(safeFile(`${ROOT}/secrets/db-ca.pem`)) === plan.secretDigests['db-ca.pem'], 'Accepted runtime secret identity drift');
-      const spec = renderCompose({ blue: current.blue, green: current.green, activeSlot: slot });
+      const spec = renderCompose({ blue: current.blue, green: current.green, dataRelease: current.dataRelease, activeSlot: slot });
       for (const role of ['api', 'web']) {
         const name = `${role}-${slot}`, service = spec.services[name];
         const item = docker(['inspect', service.container_name], { json: true })[0];
@@ -364,6 +384,8 @@ if (command === 'help' || !command) {
     demand(current, 'No accepted active release');
     const activePlan = readJSON(`${operation(current.operationId)}/plan.json`, { immutable: true });
     demand(current.planSha256 === digest(activePlan), 'Worker active plan drift');
+    demand(canonical(current.dataRelease) === canonical(activePlan.dataRelease) && current.dataAdmissionSha256 === activePlan.dataAdmissionSha256, 'Worker data baseline drift');
+    attestAdmittedRelease(activePlan.dataRelease, activePlan.dataAdmissionSha256);
     assertPrimaryDatabase(activePlan.databaseIdentitySha256);
     run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, 'verify']);
     const secretBytes = safeFile(`${ROOT}/secrets/${name}.json`);
@@ -371,7 +393,7 @@ if (command === 'help' || !command) {
     const key = grant.mode === 'CANARY' ? grant.id : crypto.randomUUID();
     const dir = `${STATE}/worker-runs`; directory(dir);
     demand(!fs.existsSync(`${dir}/${key}.intent.json`), 'Canary already attempted; reconcile its existing outcome');
-    const spec = renderCompose({ blue: current.blue, green: current.green, activeSlot: current.activeSlot });
+    const spec = renderCompose({ blue: current.blue, green: current.green, dataRelease: current.dataRelease, activeSlot: current.activeSlot });
     // A prepared/inactive application slot must not stop the accepted worker.
     // Bind this tick to its own immutable accepted-state Compose document.
     const workerCompose = `${dir}/${key}.compose.json`;

@@ -52,6 +52,7 @@ test('attests live Docker identity and rejects privilege, network, secret and co
     x => x.Image = `sha256:${'9'.repeat(64)}`, x => x.Config.User = '0:0',
     x => x.HostConfig.Privileged = true, x => x.HostConfig.NetworkMode = 'host',
     x => x.HostConfig.ReadonlyRootfs = false, x => x.HostConfig.CapAdd = ['NET_ADMIN'],
+    x => x.HostConfig.GroupAdd = ['0'],
     x => x.HostConfig.PidMode = 'host', x => x.Config.Cmd = ['api'],
     x => x.Config.Entrypoint = ['sh', '-c'],
     x => x.HostConfig.PortBindings['3000/tcp'][0].HostIp = '0.0.0.0',

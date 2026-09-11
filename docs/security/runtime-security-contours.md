@@ -4,6 +4,23 @@
 
 ## Cutover preflight: worker TLS repair, 11.09.2026
 
+Сверка effective source settings дополнительно закрепляет отдельные часы каждого
+контура. PostgreSQL и API/Web source используют `Europe/Moscow` (API/Web
+наследуют host zone при отсутствующем `TZ`), а штатный worker запускается с
+`TZ=UTC`. Compose явно сохраняет эти значения; generated PostgreSQL config
+задаёт `timezone` и `log_timezone=Europe/Moscow`. Глобальная timezone нового
+хоста не меняется. Контракт проверяет реальную локальную дату Node по обе
+стороны полуночи и отвергает container-env drift; после restage обязателен
+повторный `SHOW TimeZone`. Source ещё обслуживает сайт, target остаётся standby.
+Та же сверка сохраняет source `lc_messages/lc_monetary/lc_numeric/lc_time`
+`en_US.UTF-8` и `default_text_search_config=pg_catalog.english`. `DateStyle`,
+`IntervalStyle`, string и bytea semantics уже совпали. Измеренный source API
+memory peak `2,665,529,344` bytes превышает прежний candidate cap1GiB: API cap
+увеличен до ограниченных4GiB при64GBclass target, Web остаётся1GiB. Daily worker
+сохраняет source budget45минут; bonus controller остаётся ограничен16минутами,
+общий systemd envelope47минут не расширяет его native deadline. Worker scope,
+single-owner grants и ограничение соединений остаются прежними.
+
 Фактический перенос разрешён владельцем, но остановка исходного сайта ещё не
 началась. Дополнительный network-none запуск native worker config loader из
 подготовленного `ae0d76cc…` подтвердил несовместимость: Compose authority требует

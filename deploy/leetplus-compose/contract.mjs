@@ -7,7 +7,7 @@ export const SLOTS = ['blue', 'green'];
 export const PORTS = { blue: { web: 13100, api: 14100 }, green: { web: 13200, api: 14200 } };
 export const USERS = { 'api-blue': 12010, 'api-green': 12011, 'web-blue': 12020, 'web-green': 12021, postgres: 12030, redis: 12031, 'bonus-ledger-worker': 12040, 'langame-daily-worker': 12041 };
 export const SAFE_API = Object.freeze({
-  NODE_ENV: 'production', API_RUNTIME_ROLE: 'COMBINED', API_BIND_HOST: '0.0.0.0', PORT: '4000',
+  NODE_ENV: 'production', TZ: 'Europe/Moscow', API_RUNTIME_ROLE: 'COMBINED', API_BIND_HOST: '0.0.0.0', PORT: '4000',
   PRODUCTION_NETWORK_PROFILE: 'DOCKER_BRIDGE', COMPOSE_RUNTIME_CONTRACT: CONTRACT,
   ACCESS_SCOPE_ENFORCEMENT_MODE: 'ENFORCED', STAFF_ATTACHMENT_ACL_MODE: 'ENFORCED',
   GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED: 'false', LANGAME_DAILY_SYNC_SCHEDULER_ENABLED: 'false',
@@ -60,7 +60,7 @@ export function renderCompose({ blue, green, dataRelease, activeSlot = 'blue', r
   for (const slot of SLOTS) {
     const r = slot === 'blue' ? blue : green;
     const api = `api-${slot}`, web = `web-${slot}`;
-    const apiBase = base(api, r.images.api, r, '1g', '2.0');
+    const apiBase = base(api, r.images.api, r, '4g', '2.0');
     services[api] = { ...apiBase, entrypoint: ['node', '/opt/leetplus/runtime-entry.cjs'], command: ['api'], environment: { ...SAFE_API, ...metadata(r) },
       ports: [{ target: 4000, published: String(PORTS[slot].api + (rehearsal ? 10000 : 0)), host_ip: '127.0.0.1', protocol: 'tcp' }],
       networks: { ...network(slot, 2), ...network('data', slot === 'blue' ? 10 : 11), ...(!rehearsal ? network('egress', slot === 'blue' ? 10 : 11) : {}) },
@@ -70,7 +70,7 @@ export function renderCompose({ blue, green, dataRelease, activeSlot = 'blue', r
       depends_on: { postgres: { condition: 'service_healthy' } },
     };
     services[web] = { ...base(web, r.images.web, r), entrypoint: ['node', '/opt/leetplus/runtime-entry.cjs'], command: ['web'],
-      environment: { ...metadata(r), NODE_ENV: 'production', API_URL: `http://${api}:4000`, NEXT_PUBLIC_API_URL: 'https://api.leetplus.ru', NEXT_TELEMETRY_DISABLED: '1' },
+      environment: { ...metadata(r), NODE_ENV: 'production', TZ: 'Europe/Moscow', API_URL: `http://${api}:4000`, NEXT_PUBLIC_API_URL: 'https://api.leetplus.ru', NEXT_TELEMETRY_DISABLED: '1' },
       ports: [{ target: 3000, published: String(PORTS[slot].web + (rehearsal ? 10000 : 0)), host_ip: '127.0.0.1', protocol: 'tcp' }],
       networks: network(slot, 3), volumes: [bind(`data/web-cache-${slot}`, '/app/apps/web/.next/cache', false)],
       healthcheck: { test: ['CMD', 'node', '/opt/leetplus/health.cjs', 'web'], interval: '10s', timeout: '6s', retries: 9, start_period: '30s' },
@@ -78,6 +78,7 @@ export function renderCompose({ blue, green, dataRelease, activeSlot = 'blue', r
     };
   }
   services.postgres = { ...base('postgres', data.images.postgres, data, '8g', '4.0'), restart: 'unless-stopped', shm_size: '1g', entrypoint: ['/usr/local/bin/leetplus-postgres'],
+    environment: { TZ: 'Europe/Moscow' },
     networks: network('data', 2),
     group_add: rehearsal ? [] : ['12061'],
     volumes: [bind('data/postgres', '/var/lib/postgresql/16/main', false), bind('secrets/postgres', '/etc/leetplus-postgres'), ...(!rehearsal ? [{ type: 'bind', source: '/run/leetplus-replication', target: '/run/leetplus-replication', read_only: true, bind: { create_host_path: false } }] : [])],
@@ -87,7 +88,7 @@ export function renderCompose({ blue, green, dataRelease, activeSlot = 'blue', r
   const active = activeSlot === 'blue' ? blue : green;
   for (const [index, name] of ['bonus-ledger-worker', 'langame-daily-worker'].entries()) {
     services[name] = { ...base(name, active.images.api, active, '1g', '2.0'), entrypoint: ['node', '/opt/leetplus/runtime-entry.cjs'], command: [name], restart: 'no', profiles: ['workers'],
-      environment: { ...metadata(active), NODE_ENV: 'production' },
+      environment: { ...metadata(active), NODE_ENV: 'production', TZ: 'UTC' },
       networks: { ...network('data', 20 + index), ...(!rehearsal ? network('egress', 20 + index) : {}) },
       volumes: [bind(`secrets/${name}.json`, '/run/secrets/runtime.json'), bind('secrets/db-ca.pem', '/run/secrets/db-ca.pem'), ...(index === 1 ? [bind('data/langame-sync', '/var/lib/leetplus/langame-sync', false)] : [])],
       group_add: index === 1 ? ['12050'] : [], stop_grace_period: '900s',

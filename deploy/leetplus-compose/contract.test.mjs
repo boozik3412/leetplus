@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
 import { CONTRACT, SCHEMA, renderCompose, verifyContainer, digest } from './contract.mjs';
 
 const r = { contract: CONTRACT, ...SCHEMA, releaseSha: 'a'.repeat(40), builtAt: '2026-09-10T12:00:00Z', images: Object.fromEntries(['api', 'web', 'postgres', 'redis'].map((x, i) => [x, `sha256:${String(i + 1).repeat(64)}`])) };
@@ -37,6 +38,21 @@ test('rehearsal has no egress network or production ports/directories', () => {
   assert.equal(c.services['api-blue'].ports[0].published, '24100');
   assert.ok(c.services.postgres.volumes[0].source.startsWith('/srv/leetplus-migration/rehearsal/'));
 });
+test('application and worker local dates preserve their distinct source timezones', () => {
+  for (const rehearsal of [false, true]) {
+    const compose = renderCompose({ blue: r, green: r, rehearsal });
+    for (const [name, expectedDay] of [
+      ['api-blue', 11], ['api-green', 11], ['web-blue', 11], ['web-green', 11],
+      ['bonus-ledger-worker', 10], ['langame-daily-worker', 10],
+    ]) {
+      const result = spawnSync(process.execPath, ['-e', 'console.log(new Date("2026-09-10T22:30:00Z").getDate())'], {
+        encoding: 'utf8', env: { ...process.env, TZ: compose.services[name].environment.TZ },
+      });
+      assert.equal(result.status, 0);
+      assert.equal(Number(result.stdout.trim()), expectedDay, `${name} local date changed`);
+    }
+  }
+});
 test('rejects arbitrary tag, schema mismatch and data-image drift', () => {
   for (const mutate of [x => x.images.api = 'node:latest', x => x.releaseSha = 'main', x => x.migrationCount = 192]) {
     const bad = clone(r); mutate(bad);
@@ -60,6 +76,7 @@ test('attests live Docker identity and rejects privilege, network, secret and co
     x => x.Mounts.push({ Type: 'bind', Source: '/var/run/docker.sock', Destination: '/var/run/docker.sock', RW: true }),
     x => x.NetworkSettings.Networks['leetplus-data'] = { IPAddress: '172.31.42.99' },
     x => x.Config.Env = x.Config.Env.filter(v => !v.startsWith('API_URL=')),
+    x => x.Config.Env = x.Config.Env.map(v => v.startsWith('TZ=') ? 'TZ=UTC' : v),
     x => x.State.Health.Status = 'unhealthy',
   ];
   for (const mutate of mutations) { const value = observed(service); mutate(value); assert.throws(() => verifyContainer(value, service, 'web-blue')); }

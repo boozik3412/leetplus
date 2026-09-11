@@ -10,7 +10,7 @@ function observed(service) {
     Config: { User: service.user, Cmd: service.command, Entrypoint: service.entrypoint, Labels: service.labels, Env: Object.entries(service.environment ?? {}).map(([k, v]) => `${k}=${v}`) },
     HostConfig: { NetworkMode: 'leetplus-blue', Privileged: false, PublishAllPorts: false, PidMode: '', IpcMode: 'private', CapAdd: null, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges:true'], ReadonlyRootfs: true, Memory: 1024, NanoCpus: 1000, PidsLimit: 256, PortBindings: Object.fromEntries((service.ports ?? []).map(p => [`${p.target}/${p.protocol}`, [{ HostIp: p.host_ip, HostPort: p.published }]])) },
     Mounts: (service.volumes ?? []).map(m => ({ Type: m.type, Source: m.source, Destination: m.target, RW: !m.read_only })),
-    NetworkSettings: { Networks: Object.fromEntries(Object.entries(service.networks).map(([k, v]) => [`${project}-${k}`, { IPAddress: v.ipv4_address }])) },
+    NetworkSettings: { Ports: Object.fromEntries((service.ports ?? []).map(p => [`${p.target}/${p.protocol}`, [{ HostIp: p.host_ip, HostPort: p.published }]])), Networks: Object.fromEntries(Object.entries(service.networks).map(([k, v]) => [`${project}-${k}`, { IPAddress: v.ipv4_address, GwPriority: v.gw_priority ?? 0 }])) },
     State: { Running: true, Health: { Status: 'healthy' }, StartedAt: '2026-09-10T12:00:00Z' },
   };
 }
@@ -30,7 +30,9 @@ test('stable rendering, exact image IDs and separate Web/DB/worker boundaries', 
 });
 test('rehearsal has no egress network or production ports/directories', () => {
   const c = renderCompose({ blue: r, green: r, rehearsal: true });
-  assert.ok(Object.values(c.networks).every(n => n.internal));
+  assert.equal(c.networks.data.internal, true);
+  assert.equal(c.networks.blue.internal, false);
+  assert.equal(c.networks.green.internal, false);
   assert.ok(Object.values(c.services).every(s => !s.networks.egress));
   assert.equal(c.services['api-blue'].ports[0].published, '24100');
   assert.ok(c.services.postgres.volumes[0].source.startsWith('/srv/leetplus-migration/rehearsal/'));
@@ -50,9 +52,11 @@ test('attests live Docker identity and rejects privilege, network, secret and co
     x => x.Image = `sha256:${'9'.repeat(64)}`, x => x.Config.User = '0:0',
     x => x.HostConfig.Privileged = true, x => x.HostConfig.NetworkMode = 'host',
     x => x.HostConfig.ReadonlyRootfs = false, x => x.HostConfig.CapAdd = ['NET_ADMIN'],
+    x => x.HostConfig.GroupAdd = ['0'],
     x => x.HostConfig.PidMode = 'host', x => x.Config.Cmd = ['api'],
     x => x.Config.Entrypoint = ['sh', '-c'],
     x => x.HostConfig.PortBindings['3000/tcp'][0].HostIp = '0.0.0.0',
+    x => x.NetworkSettings.Ports['3000/tcp'] = null,
     x => x.Mounts.push({ Type: 'bind', Source: '/var/run/docker.sock', Destination: '/var/run/docker.sock', RW: true }),
     x => x.NetworkSettings.Networks['leetplus-data'] = { IPAddress: '172.31.42.99' },
     x => x.Config.Env = x.Config.Env.filter(v => !v.startsWith('API_URL=')),

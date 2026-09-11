@@ -14,6 +14,19 @@ requires named OCI image export and isolated import/runtime identity acceptance.
 This remains preparation only: no public routing, source service, target writer
 or live worker activation is authorized.
 
+11.09 preparation: exact21ad staged, actual CURRENT191 SQL restore PASS and
+streaming standby confirmed (no promotion). Fresh encrypted target backup was
+pulled and authenticated on Windows. Host HTTP acceptance remains pending:
+Docker29 suppresses published ports on all-internal bridges. Source successor
+adds fenced ingress, stricter peer rules, real publication/denial CI, explicit
+generated modes and supported stopped-creation flags. Source6097 and original
+workers remain serving; these preparation results are not a site cutover or beta GO.
+
+The successor also freezes a separately admitted data baseline across future
+application blue/green updates. Rebuilding an application cannot restart or
+replace PostgreSQL/Redis implicitly; active data-image binding remains part of
+the signed plan, boot/worker checks and the encrypted backup archive set.
+
 | Поле                 | Состояние                                                                                                                                                                          |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для массового открытого запуска; controlled external onboarding доступен в разрешённых pilot tenant                                                                        |

@@ -33,6 +33,7 @@ def write(path, value, uid=0, gid=0, mode=0o400):
     data = value if isinstance(value, bytes) else (json.dumps(value, indent=2, ensure_ascii=False) + '\n').encode()
     fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, mode)
     with os.fdopen(fd, 'wb') as out:
+        os.fchmod(out.fileno(), mode)
         out.write(data)
         out.flush()
         os.fsync(out.fileno())

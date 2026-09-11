@@ -4,6 +4,28 @@
 
 ## Docker migration candidate, 10.09.2026
 
+Preparation update 11.09: exact21ad control/images are staged; real SQL restore
+passed (CURRENT191, mixed owners retained), and the target PG is a streaming
+unpromoted standby. Source6097 remains serving. Real host HTTP acceptance found
+that Docker29 does not publish ports on all-internal networks despite configured
+HostConfig bindings. The successor uses per-slot ingress bridges with loopback
+publication, an internal/unpublished data bridge, and exact firewall V2 rules:
+Web may reach only its own API; only declared API/worker data identities may
+reach PostgreSQL/Redis; reviewed provider egress has an explicit gateway priority.
+Rehearsal has no provider egress. Actual host publication and network denials,
+including a host proxy and Web-to-data, must pass in disposable CI and rehearsal.
+Generated modes are applied explicitly after restrictive umask; stopped creation
+uses `compose up --no-start --no-deps`. Cold preparation retirement archives old
+files and retains only a proven unpromoted standby, never accepted runtime,
+pending operations or worker grants. No source/DNS/promotion effect is permitted.
+
+The Docker plan binds its data release and admission independently. BOOTSTRAP
+uses the initial admitted bundle; later application blue/green updates must
+retain that exact data baseline even when CI produces new data-image IDs.
+Changing PostgreSQL/Redis through an application rollout is rejected. Manifest
+bytes, image IDs, actual data containers, gateway priorities and supplementary
+groups are attested. Backups retain both application and data-baseline archives.
+
 `deploy/leetplus-compose` is a separate CURRENT191 COMBINED migration candidate
 for server 1337. Admitted d53684a0 control files were installed without activation;
 image hydration stopped before database/application preparation because a classic

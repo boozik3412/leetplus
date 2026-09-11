@@ -16,8 +16,8 @@ from pathlib import Path
 
 SUBNET = '172.31.40.0/22'
 EGRESS = '172.31.43.0/24'
-CHAIN = 'LP_LEETPLUS_EGRESS'
-HOST_CHAIN = 'LP_LEETPLUS_HOST'
+CHAIN = 'LP_LEETPLUS_EGRESS_V2'
+HOST_CHAIN = 'LP_LEETPLUS_HOST_V2'
 CONFIG = Path('/etc/leetplus-compose/providers.json')
 
 
@@ -41,9 +41,19 @@ def provider_config():
     return value
 
 
+def internal_rules(blue, green, data):
+    rules = []
+    for slot in [blue, green]:
+        rules.append(['-s', f'172.31.{slot}.3/32', '-d', f'172.31.{slot}.2/32', '-p', 'tcp', '-m', 'tcp', '--dport', '4000', '-j', 'RETURN'])
+    for source in [10, 11, 20, 21]:
+        for destination, port in [(2, '5432'), (3, '6379')]:
+            rules.append(['-s', f'172.31.{data}.{source}/32', '-d', f'172.31.{data}.{destination}/32', '-p', 'tcp', '-m', 'tcp', '--dport', port, '-j', 'RETURN'])
+    return rules
+
+
 RULES = [
     ['-m', 'conntrack', '--ctstate', 'RELATED,ESTABLISHED', '-j', 'RETURN'],
-    ['-d', SUBNET, '-j', 'RETURN'],
+    *internal_rules(40, 41, 42),
     ['-s', EGRESS, '-p', 'tcp', '-m', 'tcp', '--dport', '443', '-m', 'set', '--match-set', 'lp_leetplus_https', 'dst', '-j', 'RETURN'],
     ['-s', EGRESS, '-p', 'tcp', '-m', 'multiport', '--dports', '465,587', '-m', 'set', '--match-set', 'lp_leetplus_smtp', 'dst', '-j', 'RETURN'],
     ['-j', 'DROP'],
@@ -121,11 +131,11 @@ def refresh(config):
 def rehearsal_fence(install=False):
     sources = ['172.31.50.0/23', '172.31.52.0/24']
     definitions = [
-        ('LP_LEETPLUS_REH', 'DOCKER-USER', [
+        ('LP_LEETPLUS_REH_V2', 'DOCKER-USER', [
             ['-m', 'conntrack', '--ctstate', 'RELATED,ESTABLISHED', '-j', 'RETURN'],
-            ['-d', sources[0], '-j', 'RETURN'], ['-d', sources[1], '-j', 'RETURN'], ['-j', 'DROP'],
+            *internal_rules(50, 51, 52), ['-j', 'DROP'],
         ]),
-        ('LP_LEETPLUS_REH_HOST', 'INPUT', HOST_RULES),
+        ('LP_LEETPLUS_REH_HOST_V2', 'INPUT', HOST_RULES),
     ]
     for name, parent, rules in definitions:
         existing = call(['/usr/sbin/iptables', '-w', '5', '-S', name], check=False)
@@ -155,7 +165,7 @@ if __name__ == '__main__':
         raise SystemExit('Root control plane required')
     if args.command.endswith('-rehearsal'):
         rehearsal_fence(args.command == 'install-rehearsal')
-        print(json.dumps({'decision': 'PASS', 'contract': 'LEETPLUS_REHEARSAL_NETWORK_V1', 'providerEgress': 'DENIED', 'hostServices': 'DENIED'}))
+        print(json.dumps({'decision': 'PASS', 'contract': 'LEETPLUS_REHEARSAL_NETWORK_V2', 'providerEgress': 'DENIED', 'hostServices': 'DENIED'}))
         raise SystemExit(0)
     config = provider_config()
     if args.command != 'verify':

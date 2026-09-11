@@ -13,15 +13,19 @@ export function validatePlan(plan) {
   demand(/^[a-f0-9]{64}$/.test(plan.networkPolicySha256 ?? ''), 'Network policy must be bound');
   demand(/^[a-f0-9]{64}$/.test(plan.databaseIdentitySha256 ?? ''), 'Database system identity must be bound');
   demand(plan.action !== 'BOOTSTRAP' || /^[a-f0-9]{64}$/.test(plan.migrationReceiptSha256 ?? ''), 'Bootstrap needs a source-fenced migration receipt');
-  release(plan.blue); release(plan.green);
+  release(plan.blue); release(plan.green); release(plan.dataRelease);
+  demand(/^[a-f0-9]{64}$/.test(plan.dataAdmissionSha256 ?? ''), 'Independent data admission must be bound');
   demand(plan.previous === null ? plan.action === 'BOOTSTRAP' && plan.generation === 0 :
     plan.action === 'ROLLOUT' && plan.previous.activeSlot !== plan.targetSlot && SLOTS.includes(plan.previous.activeSlot) && plan.previous.generation === plan.generation,
   'Invalid previous production state');
   if (plan.previous) {
     const active = plan.previous.activeSlot;
     demand(canonical(plan[active]) === canonical(plan.previous[active]), 'Active release cannot be changed by BIND');
+    demand(canonical(plan.dataRelease) === canonical(plan.previous.dataRelease) && plan.dataAdmissionSha256 === plan.previous.dataAdmissionSha256, 'Application rollout cannot replace data services');
+  } else {
+    demand(canonical(plan.dataRelease) === canonical(plan.blue) && plan.dataAdmissionSha256 === plan.admissionSha256, 'Bootstrap must use its admitted data image set');
   }
-  const compose = renderCompose({ blue: plan.blue, green: plan.green, activeSlot: plan.targetSlot });
+  const compose = renderCompose({ blue: plan.blue, green: plan.green, dataRelease: plan.dataRelease, activeSlot: plan.targetSlot });
   demand(digest(compose) === plan.composeSha256, 'Compose bytes are not bound to the plan');
   return plan;
 }

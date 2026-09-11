@@ -13,6 +13,36 @@ replace command links only through `--previous-prepared-control-sha`, with every
 predecessor file verified and no preparation receipt, project container, operation,
 worker grant or accepted runtime. Installed generations remain immutable.
 
+11.09 update: exact21ad artifacts passed Fast/Full and were installed, preserving
+the previous generation. SQL restore passed; source identity and streaming
+recovery proved an unpromoted physical standby. A real encrypted backup from it
+was pulled/authenticated on Windows. Host HTTP acceptance then exposed Docker29
+all-internal port suppression. Source fixes must be admitted before restaging.
+
+The ingress successor keeps published addresses loopback-only, but makes the
+per-slot bridges non-internal so Docker actually publishes them. V2 firewall
+rules explicitly permit only Web-to-own-API and declared API/worker-to-data;
+Web-to-DB, host proxies and unapproved outbound are denied. The data bridge stays
+internal. API default gateway is pinned to its separately reviewed provider
+network. Real CI probes must prove publication, connectivity and DROP counters.
+No flag alone is network authority. Generated role modes explicitly survive
+caller umask0077, and stopped creation uses `up --no-start --no-deps`.
+
+`retire-preparation.py` supports replacing only an unserved preparation. It
+requires no accepted state, operations or grants; verifies previous file/image
+bindings and a live unpromoted standby; stops/removes only exact project
+containers and archives old generated files/rehearsal while retaining physical
+standby data. It does not stop/change the VDS or promote anything. The verified
+new installer and prepare-files then create a fresh generation and receipts;
+the retained PG must resume recovery and the new rehearsal must pass separately.
+
+After bootstrap, the plan's `dataRelease` and `dataAdmissionSha256` remain bound
+to the initial admitted PostgreSQL/Redis set. Application CI may create new
+data-image candidates, but app BIND/rollback/boot/worker paths keep the accepted
+data services unchanged in either slot. Their separate manifest/admission and
+actual container IDs remain verified, and backups include that data bundle as
+well as current application bundles. Data upgrades are a separate operation.
+
 Current authorization: preparation only. Do not switch DNS or public nginx,
 stop source API/Web/worker services, promote a standby, or enable target live
 workers. The actual migration is a separate user-authorized operation.
@@ -36,7 +66,7 @@ computer. No UPS is available; this move does not provide site availability.
 JSON. Production ports are loopback13100/13200 for Web and14100/14200 for API.
 PostgreSQL/Redis have no published ports. Web uses only its slot's internal
 API network; API/data/worker traffic is separated. Rehearsal uses a different
-project, root, subnets and ports, without an external egress network.
+project, root, subnets and ports, without a provider egress network.
 Rehearsal ports are23100/23200 and24100/24200. Its project firewall also denies
 access to host services. This prevents an internal Docker network from using
 an unrelated host proxy as an outbound path.

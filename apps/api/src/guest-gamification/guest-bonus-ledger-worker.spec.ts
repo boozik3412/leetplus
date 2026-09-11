@@ -19,6 +19,9 @@ function baseEnv(): NodeJS.ProcessEnv {
   };
 }
 
+const composeDatabaseUrl =
+  'postgresql://leetplus_runtime:test-password@postgres:5432/leetplus?schema=public&connection_limit=2&pool_timeout=5&connect_timeout=5&sslmode=require&sslcert=/run/secrets/db-ca.pem&sslaccept=strict';
+
 function result(
   overrides: Partial<GuestGameScheduledBonusLedgerDispatchResult> = {},
 ): GuestGameScheduledBonusLedgerDispatchResult {
@@ -88,6 +91,36 @@ describe('guest bonus ledger worker', () => {
       }),
     ).toThrow('Exactly one');
   });
+
+  it('accepts the exact Compose CA with strict TLS and the bounded worker pool', () => {
+    expect(
+      loadGuestBonusLedgerWorkerConfig({
+        ...baseEnv(),
+        DATABASE_URL: composeDatabaseUrl,
+      }),
+    ).toMatchObject({ tenantSlug: 'demo', canary: true, limit: 1 });
+  });
+
+  it.each([
+    composeDatabaseUrl.replace('sslmode=require', 'sslmode=disable'),
+    composeDatabaseUrl.replace(
+      'sslaccept=strict',
+      'sslaccept=accept_invalid_certs',
+    ),
+    composeDatabaseUrl.replace('/run/secrets/db-ca.pem', '/tmp/another-ca.pem'),
+    composeDatabaseUrl.replace('@postgres:5432', '@127.0.0.1:5432'),
+    composeDatabaseUrl.replace('leetplus_runtime:', 'postgres:'),
+    composeDatabaseUrl.replace('/leetplus?', '/postgres?'),
+    `${composeDatabaseUrl}&sslcert=/run/secrets/db-ca.pem`,
+    `${composeDatabaseUrl}&application_name=unexpected`,
+  ])(
+    'rejects a certificate URL outside the exact Compose contract: %s',
+    (url) => {
+      expect(() =>
+        loadGuestBonusLedgerWorkerConfig({ ...baseEnv(), DATABASE_URL: url }),
+      ).toThrow('connection_limit=2');
+    },
+  );
 
   it('requires the Langame write gate for a live tick', () => {
     expect(() =>

@@ -2,6 +2,23 @@
 
 Статус: **канонический current-state contract**
 
+## Cutover preflight: worker TLS repair, 11.09.2026
+
+Фактический перенос разрешён владельцем, но остановка исходного сайта ещё не
+началась. Дополнительный network-none запуск native worker config loader из
+подготовленного `ae0d76cc…` подтвердил несовместимость: Compose authority требует
+`sslcert=/run/secrets/db-ca.pem`, а application worker allowlist его отклоняет.
+Реплика остаётся standby, source `6097dc83…/CURRENT191` обслуживает пользователей.
+
+Source repair допускает этот CA только для `leetplus_runtime@postgres:5432/leetplus`
+при `sslmode=require`, `sslaccept=strict` и прежнем pool limit2. Другой CA, host,
+role, database, duplicate/unknown option либо relaxed TLS остаётся rejected;
+legacy URL без `sslcert` сохраняет свой контракт. CI дополнительно выполняет
+config loader из самого API image, а admission требует это evidence вместе с
+положительным и отрицательными Prisma TLS probes. Это ещё не установленный
+successor: до source fencing нужны его exact-main admission, restage и свежая
+acceptance. Public/corporate guards, worker scope и provider authority не меняются.
+
 ## Подготовка Docker migration завершена, 11.09.2026
 
 Статус нового узла — **PREPARED_NOT_SERVING**. Exact

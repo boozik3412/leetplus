@@ -1,14 +1,22 @@
 # LeetPlus: Docker migration to 1337
 
+Cutover preflight on11.09.2026 discovered that the prepared native bonus-worker
+URL validator rejected the strict Compose `sslcert` parameter before any DB
+connection. The source fix permits only the mounted Compose CA with strict
+verification and the original two-connection budget. Exact-image TLS validation
+now loads that worker profile and admission requires its positive result.
+The user authorized actual transfer, but the source still serves while a fresh
+exact-main admitted successor and its preparation acceptance are pending.
+
 Status on 11.09.2026: **PREPARED_NOT_SERVING**. Exact
 `ae0d76ccb2d588893b50962bcd31310f0547be08` control/images are installed and
 preparation acceptance passed. The VDS remains the serving site on
 `6097dc83863e1ab44d99d15ad0c19505cf7fa3fc` / CURRENT191.
 See [receipt-backed preparation results](docker-migration-prepared-2026-09-11.md).
 
-Current authorization excludes actual migration: do not switch DNS/public nginx,
-stop source services/workers/poller, promote the standby, or enable target live
-workers. The actual transfer is a separate user-authorized operation.
+The original preparation excluded actual migration. The later user-authorized
+cutover remains gated on current evidence; no source fencing, target promotion
+or live worker activation has occurred at this checkpoint.
 
 The source is Ubuntu24.04 / PostgreSQL16.13; target is Ubuntu26.04 server1337,
 LAN192.168.1.137 / static public188.234.220.76. Domains stay unchanged. The accepted

@@ -61,6 +61,9 @@ gate_install_fixture() {
 }
 
 gate_retirement_fixture() {
+  # The fixture owns every process that can intentionally hold its temporary
+  # targets. Isolate that tree from unrelated runner/container FD churn while
+  # keeping the real /proc descriptor guard and inherited-open-FD negative case.
   sudo -n /usr/bin/env -i \
     CI=true \
     GITHUB_ACTIONS=true \
@@ -69,7 +72,7 @@ gate_retirement_fixture() {
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     TZ=UTC \
-    /usr/bin/bash -p \
+    /usr/bin/unshare --mount --pid --fork --mount-proc /usr/bin/bash -p \
     .github/scripts/test-production-superseded-dump-prune-root.sh
 }
 

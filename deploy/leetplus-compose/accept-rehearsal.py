@@ -71,7 +71,9 @@ def run():
     uuid.UUID(actor['id'])
     uuid.UUID(actor['tenantId'])
     sql(f'UPDATE "User" SET "passwordHash"=\'{password_hash}\' WHERE id=\'{actor["id"]}\';')
-    expected_stores = json.loads(sql(f'SELECT coalesce(json_agg(id),\'[]\'::json) FROM "Store" WHERE "tenantId"=\'{actor["tenantId"]}\' AND "isActive";'))
+    # NETWORK /stores is the tenant management catalog, including inactive rows.
+    # Public guest selectors still require an active store independently below.
+    expected_stores = json.loads(sql(f'SELECT coalesce(json_agg(id),\'[]\'::json) FROM "Store" WHERE "tenantId"=\'{actor["tenantId"]}\';'))
     command(['/usr/bin/docker', 'compose', '--project-name', NAME, '--file', str(ROOT / 'compose.json'), 'up', '--detach', '--no-deps', 'api-blue', 'api-green', 'web-blue', 'web-green'])
     evidence = []
     for slot, api_port, web_port in [('blue', 24100, 23100), ('green', 24200, 23200)]:

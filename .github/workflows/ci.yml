@@ -1033,6 +1033,9 @@ jobs:
       - name: Test dormant CURRENT188 Langame Web BFF candidate
         run: pnpm --filter web test:langame-current188-bff-candidate
 
+      - name: Verify simple Langame onboarding and partial-sync feedback
+        run: pnpm --filter web test:langame-simple-onboarding
+
       - name: Test dormant CURRENT189 employee invitation Web BFF candidate
         run: pnpm --filter web test:employee-invite-current189-bff-candidate
 

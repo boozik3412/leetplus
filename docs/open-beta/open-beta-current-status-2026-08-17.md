@@ -32,6 +32,14 @@ Actual release, контрольные суммы, final backup/restore, DNS и 
 
 ## История подготовки до завершения CURRENT191
 
+Source follow-up 11.09: ручной Langame import сохраняет доступные разделы при
+отказе отдельных provider methods и показывает PARTIAL с комментариями.
+Недоступные категории больше не обязаны блокировать каталог. DB/scope/AUTO
+границы сохраняются; неполный provider job не является full-success evidence.
+Это подготовленное изменение, не новый deployed runtime: baseline остаётся
+Compose399876 на1337 до отдельного admitted rollout.
+[Контракт и проверки](../integrations/langame-partial-sync.md).
+
 Ниже сохранены исторические checkpoints. Они не заменяют фактическое состояние в таблице выше.
 
 Production hotfix PR #170 развёрнут как exact SHA

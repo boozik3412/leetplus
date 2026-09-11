@@ -4,6 +4,15 @@
 
 ## Cutover preflight: worker TLS repair, 11.09.2026
 
+Сверка effective source settings дополнительно закрепляет отдельные часы каждого
+контура. PostgreSQL и API/Web source используют `Europe/Moscow` (API/Web
+наследуют host zone при отсутствующем `TZ`), а штатный worker запускается с
+`TZ=UTC`. Compose явно сохраняет эти значения; generated PostgreSQL config
+задаёт `timezone` и `log_timezone=Europe/Moscow`. Глобальная timezone нового
+хоста не меняется. Контракт проверяет реальную локальную дату Node по обе
+стороны полуночи и отвергает container-env drift; после restage обязателен
+повторный `SHOW TimeZone`. Source ещё обслуживает сайт, target остаётся standby.
+
 Фактический перенос разрешён владельцем, но остановка исходного сайта ещё не
 началась. Дополнительный network-none запуск native worker config loader из
 подготовленного `ae0d76cc…` подтвердил несовместимость: Compose authority требует

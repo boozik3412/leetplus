@@ -1,5 +1,11 @@
 # LeetPlus: Docker migration to 1337
 
+Source compatibility also pins PostgreSQL and API/Web to `Europe/Moscow`,
+while both workers retain their source `UTC` environment. The target host's
+global timezone stays unchanged. Confirm `SHOW TimeZone` and actual container
+environment during restage; a healthy connection alone does not prove that
+local calendar dates were preserved.
+
 Cutover preflight on11.09.2026 discovered that the prepared native bonus-worker
 URL validator rejected the strict Compose `sslcert` parameter before any DB
 connection. The source fix permits only the mounted Compose CA with strict

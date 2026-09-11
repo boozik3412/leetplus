@@ -126,6 +126,8 @@ def prepare(root, manifest_path, source, rehearsal):
 port=5432
 max_connections=100
 shared_buffers='2GB'
+timezone='Europe/Moscow'
+log_timezone='Europe/Moscow'
 ssl=on
 ssl_cert_file='/etc/leetplus-postgres/server.crt'
 ssl_key_file='/etc/leetplus-postgres/server.key'

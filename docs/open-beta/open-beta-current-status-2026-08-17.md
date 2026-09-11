@@ -6,6 +6,9 @@ strict-TLS параметр `sslcert`. Source repair допускает толь
 прежний pool limit2; image admission теперь требует positive native worker
 config evidence. Новый successor ещё не допущен/установлен. Source fencing,
 promotion и включение target workers ожидают его admission/restage/acceptance.
+Дополнительная source compatibility сохраняет PostgreSQL/API/Web timezone
+`Europe/Moscow` и worker `UTC` раздельно. Target host timezone не меняется;
+после нового restage нужны реальные timezone и calendar-boundary проверки.
 
 Обновление инфраструктуры 11.09.2026: подготовка Docker migration завершена как
 **PREPARED_NOT_SERVING** на exact `ae0d76ccb2d588893b50962bcd31310f0547be08`.

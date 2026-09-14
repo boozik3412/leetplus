@@ -37,6 +37,29 @@ PostgreSQL и четыре старых API/Web unit остановлены и p
 | Host rollback        | После target writes только reverse transfer актуальных данных; старую БД нельзя просто запустить                                                    |
 | Внешний beta и split | Миграция не выдаёт внешний beta GO и не активирует dormant physical split; отдельные tenant/provider gates сохраняются                              |
 
+### PR #203 assortment operational dashboard — source-only, 14.09.2026
+
+Это source candidate, а не deployment admission: read-only baseline на
+14.09.2026 16:30:52 UTC — active green exact
+`05cad9cd1611c014453603475e8e1ba4c953f839`, generation4, data/control
+`399876`, pending0. Локальные API `191/3564 PASS + 2 todo`, Web build и
+47 synthetic UI checks/G4 PASS не являются provider или production evidence.
+
+Candidate сохраняет полный выбранный scope: период, клубы, категории и cutoff.
+Обычный INTERNAL daily обновляет inventory отдельно от QUICK в каждом daily
+run; только недавний successful AUTO всех active domains подавляет update на
+1h, а 36h — отдельный stale threshold. Inventory/CATALOG не двигают sales
+cursor. Proven session Store binding не меняет historical timestamps; UI
+сохраняет UNKNOWN/PARTIAL, а OOS profit показывает только confirmed cost. Нет
+schema, control, network,
+worker placement, role или provider-egress effects; нет historical backfill,
+reward/event replay либо external-tenant GO. Метрики и границы DTO:
+[assortment metric contract](../assortment-dashboard-metric-contract.md).
+
+Перед любым runtime effect требуются отдельные exact-main Fast и Full gates,
+native plan, backup/rehearsal и worker acceptance; текущий PR head не служит
+deployment proof.
+
 TLS использует существующий Nginx webroot `/srv/leetplus/acme`. Для доступа
 только Nginx группа `www-data` получает traverse на `/srv/leetplus`
 (`root:www-data 0710`) и read/traverse на `acme` (`0750`). Листинг project root,

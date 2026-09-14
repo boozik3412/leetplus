@@ -1,13 +1,24 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { ReportEmailInlineForm } from "@/components/report-email-inline-form";
-import { SimpleReportTable, type SimpleReportRow } from "@/components/simple-report-table";
+import {
+  SimpleReportTable,
+  type SimpleReportRow,
+} from "@/components/simple-report-table";
 import { requireCurrentUser } from "@/lib/auth";
-import { getReplenishmentReport, type ReplenishmentRisk, type ReplenishmentRow } from "@/lib/reports";
+import {
+  getReplenishmentReport,
+  type ReplenishmentRisk,
+  type ReplenishmentRow,
+} from "@/lib/reports";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
 function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function searchParamsArray(value: string | string[] | undefined) {
+  return value ? (Array.isArray(value) ? value : [value]) : [];
 }
 
 function formatDateLabel(value: string) {
@@ -52,11 +63,17 @@ function exportHref({
   from,
   to,
   storeId,
+  storeIds,
+  categoryIds,
+  asOf,
   format,
 }: {
   from: string;
   to: string;
   storeId: string | null;
+  storeIds: readonly string[];
+  categoryIds: readonly string[];
+  asOf: string;
   format: "xlsx" | "csv";
 }) {
   const params = new URLSearchParams({
@@ -69,6 +86,10 @@ function exportHref({
   if (storeId) {
     params.set("storeId", storeId);
   }
+
+  storeIds.forEach((id) => params.append("storeIds", id));
+  categoryIds.forEach((id) => params.append("categoryIds", id));
+  if (asOf) params.set("asOf", asOf);
 
   return `/api/reports/export?${params.toString()}`;
 }
@@ -96,6 +117,9 @@ export default async function ReplenishmentTablePage({
     from: searchParam(params.from),
     to: searchParam(params.to),
     storeId: searchParam(params.storeId),
+    storeIds: searchParamsArray(params.storeIds),
+    categoryIds: searchParamsArray(params.categoryIds),
+    asOf: searchParam(params.asOf),
   });
 
   return (
@@ -104,16 +128,19 @@ export default async function ReplenishmentTablePage({
         <ReportBreadcrumbs current="Остатки и потребность" />
         <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-sm font-medium text-emerald-700">
-              Полный отчет
-            </p>
+            <p className="text-sm font-medium text-emerald-700">Полный отчет</p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight">
               Остатки и потребность
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-zinc-600">
               Все позиции по клубам за период {formatDateLabel(report.from)} -{" "}
-              {formatDateLabel(report.to)}: остаток, среднесуточная
-              реализация, потребность и рекомендованный заказ.
+              {formatDateLabel(report.to)}: остаток, среднесуточная реализация,
+              потребность и рекомендованный заказ.
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">
+              Расчёт остатков: {report.asOf}.{" "}
+              {report.coverage.reason ?? "Покрытие"}{" "}
+              {formatCoverage(report.coverage.percent)}.
             </p>
           </div>
           <a
@@ -156,6 +183,9 @@ export default async function ReplenishmentTablePage({
               from: report.from,
               to: report.to,
               storeId: report.storeId,
+              storeIds: report.storeIds,
+              categoryIds: report.categoryIds,
+              asOf: report.asOf,
               format: "xlsx",
             }),
             tableStateParams: replenishmentExportTableState,
@@ -166,6 +196,9 @@ export default async function ReplenishmentTablePage({
               from: report.from,
               to: report.to,
               storeId: report.storeId,
+              storeIds: report.storeIds,
+              categoryIds: report.categoryIds,
+              asOf: report.asOf,
               format: "csv",
             }),
             tableStateParams: replenishmentExportTableState,
@@ -186,4 +219,10 @@ export default async function ReplenishmentTablePage({
       />
     </main>
   );
+}
+
+function formatCoverage(value: number | null) {
+  return value === null
+    ? "покрытие неизвестно"
+    : `покрытие ${Math.round(value)}%`;
 }

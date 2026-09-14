@@ -44,7 +44,7 @@ import {
 const DEFAULT_DAILY_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 const DEFAULT_DAILY_SYNC_LOCAL_TIME = '04:30';
 const DEFAULT_UTC_OFFSET_MINUTES = 5 * 60;
-const INVENTORY_FRESHNESS_MS = 36 * 60 * 60 * 1000;
+const AUTO_INVENTORY_REPEAT_SUPPRESSION_MS = 60 * 60 * 1000;
 const DAILY_SYNC_OUTBOUND_REQUIREMENTS = [
   { module: TenantModule.INTEGRATIONS, action: 'OUTBOUND' },
   { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
@@ -477,7 +477,9 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async shouldRunCurrentInventory(tenantId: string) {
-    const freshnessCutoff = new Date(Date.now() - INVENTORY_FRESHNESS_MS);
+    const repeatSuppressionCutoff = new Date(
+      Date.now() - AUTO_INVENTORY_REPEAT_SUPPRESSION_MS,
+    );
     const [sources, successfulJobs] = await Promise.all([
       this.prisma.integrationSource.findMany({
         where: {
@@ -494,7 +496,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
           mode: IntegrationSyncMode.INVENTORY,
           trigger: IntegrationSyncTrigger.AUTO,
           status: IntegrationSyncStatus.SUCCESS,
-          finishedAt: { gte: freshnessCutoff },
+          finishedAt: { gte: repeatSuppressionCutoff },
         },
         select: { domain: true },
       }),

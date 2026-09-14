@@ -1145,4 +1145,275 @@ describe('buildAssortmentHealth', () => {
       asOf: null,
     });
   });
+
+  it('publishes OOS gross-profit risk from a confirmed club purchase cost', () => {
+    const health = buildAssortmentHealth(
+      valuationSummaryInput({
+        period: {
+          from: new Date('2026-09-05T00:00:00.000Z'),
+          to: new Date('2026-09-14T00:00:00.000Z'),
+        },
+        products: [{ id: 'known-cost', isActive: true }],
+        inventorySnapshots: [
+          {
+            storeId: 'store-1',
+            productId: 'known-cost',
+            snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+            quantity: 0,
+          },
+        ],
+        sales: [
+          {
+            storeId: 'store-1',
+            productId: 'known-cost',
+            saleDate: new Date('2026-09-10T00:00:00.000Z'),
+            quantity: 21,
+            revenue: 2100,
+            cost: 420,
+          },
+        ],
+        priceConfigurations: [
+          {
+            tenantId: 'tenant-1',
+            productId: 'known-cost',
+            externalDomain: 'club.example',
+            externalClubId: '1',
+            price: 100,
+            purchasePrice: 20,
+            updatedAt: new Date('2026-09-14T00:00:00.000Z'),
+          },
+        ],
+      }),
+    );
+
+    expect(health.rows[0].grossProfitAtRisk).toMatchObject({
+      perDay: {
+        value: 80,
+        state: 'AVAILABLE',
+        coverage: { covered: 3, total: 3, percent: 100 },
+        asOf: '2026-09-14',
+      },
+      forPeriod: { value: 800, state: 'AVAILABLE' },
+      costBasis: 'CLUB_PURCHASE_PRICE',
+    });
+  });
+
+  it('keeps profit risk unavailable when sale price is not a confirmed cost', () => {
+    const health = buildAssortmentHealth(
+      valuationSummaryInput({
+        products: [{ id: 'sale-estimate', isActive: true }],
+        inventorySnapshots: [
+          {
+            storeId: 'store-1',
+            productId: 'sale-estimate',
+            snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+            quantity: 0,
+          },
+        ],
+        sales: [
+          {
+            storeId: 'store-1',
+            productId: 'sale-estimate',
+            saleDate: new Date('2026-09-10T00:00:00.000Z'),
+            quantity: 21,
+            revenue: 2100,
+            cost: 0,
+          },
+        ],
+        priceConfigurations: [
+          {
+            tenantId: 'tenant-1',
+            productId: 'sale-estimate',
+            externalDomain: 'club.example',
+            externalClubId: '1',
+            price: 100,
+            updatedAt: new Date('2026-09-14T00:00:00.000Z'),
+          },
+        ],
+      }),
+    );
+
+    expect(health.rows[0].price).toMatchObject({
+      value: 100,
+      state: 'AVAILABLE',
+    });
+    expect(health.rows[0].grossProfitAtRisk).toMatchObject({
+      perDay: {
+        value: null,
+        state: 'UNKNOWN',
+        reason: 'Нет подтвержденной себестоимости для оценки риска.',
+      },
+      forPeriod: { value: null, state: 'UNKNOWN' },
+      costBasis: 'UNKNOWN',
+    });
+  });
+
+  it('preserves a signed negative margin in the OOS profit-risk estimate', () => {
+    const health = buildAssortmentHealth(
+      valuationSummaryInput({
+        period: {
+          from: new Date('2026-09-05T00:00:00.000Z'),
+          to: new Date('2026-09-14T00:00:00.000Z'),
+        },
+        products: [{ id: 'negative-margin', isActive: true }],
+        inventorySnapshots: [
+          {
+            storeId: 'store-1',
+            productId: 'negative-margin',
+            snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+            quantity: 0,
+          },
+        ],
+        sales: [
+          {
+            storeId: 'store-1',
+            productId: 'negative-margin',
+            saleDate: new Date('2026-09-10T00:00:00.000Z'),
+            quantity: 21,
+            revenue: 2100,
+            cost: 2520,
+          },
+        ],
+        priceConfigurations: [
+          {
+            tenantId: 'tenant-1',
+            productId: 'negative-margin',
+            externalDomain: 'club.example',
+            externalClubId: '1',
+            price: 100,
+            purchasePrice: 120,
+            updatedAt: new Date('2026-09-14T00:00:00.000Z'),
+          },
+        ],
+      }),
+    );
+
+    expect(health.rows[0].grossProfitAtRisk).toMatchObject({
+      perDay: { value: -20 },
+      forPeriod: { value: -200 },
+      costBasis: 'CLUB_PURCHASE_PRICE',
+    });
+  });
+
+  it('multiplies the unrounded daily OOS margin estimate for the selected period', () => {
+    const health = buildAssortmentHealth(
+      valuationSummaryInput({
+        products: [{ id: 'fractional-margin', isActive: true }],
+        inventorySnapshots: [
+          {
+            storeId: 'store-1',
+            productId: 'fractional-margin',
+            snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+            quantity: 0,
+          },
+        ],
+        sales: [
+          {
+            storeId: 'store-1',
+            productId: 'fractional-margin',
+            saleDate: new Date('2026-09-10T00:00:00.000Z'),
+            quantity: 7,
+            revenue: 71.4,
+            cost: 63.7,
+          },
+        ],
+        priceConfigurations: [
+          {
+            tenantId: 'tenant-1',
+            productId: 'fractional-margin',
+            externalDomain: 'club.example',
+            externalClubId: '1',
+            price: 10.2,
+            purchasePrice: 9.1,
+            updatedAt: new Date('2026-09-14T00:00:00.000Z'),
+          },
+        ],
+      }),
+    );
+
+    expect(health.rows[0]).toMatchObject({
+      demand21d: { value: 0.3 },
+      grossProfitAtRisk: {
+        perDay: { value: 0.4 },
+        forPeriod: { value: 7.7 },
+      },
+    });
+  });
+
+  it('uses confirmed unit cost from the demand21d cutoff and ignores future configuration', () => {
+    const health = buildAssortmentHealth(
+      valuationSummaryInput({
+        asOf: new Date('2026-09-14T12:00:00.000Z'),
+        demandTo: new Date('2026-09-13T23:59:59.999Z'),
+        period: {
+          from: new Date('2026-08-01T00:00:00.000Z'),
+          to: new Date('2026-09-14T12:00:00.000Z'),
+        },
+        products: [{ id: 'bounded-cost', isActive: true }],
+        inventorySnapshots: [
+          {
+            storeId: 'store-1',
+            productId: 'bounded-cost',
+            snapshotDate: new Date('2026-09-14T12:00:00.000Z'),
+            quantity: 0,
+          },
+        ],
+        sales: [
+          {
+            storeId: 'store-1',
+            productId: 'bounded-cost',
+            saleDate: new Date('2026-09-01T00:00:00.000Z'),
+            quantity: 21,
+            revenue: 2100,
+            cost: 420,
+          },
+          {
+            storeId: 'store-1',
+            productId: 'bounded-cost',
+            saleDate: new Date('2026-09-14T11:00:00.000Z'),
+            quantity: 21,
+            revenue: 2100,
+            cost: 210,
+          },
+        ],
+        salesCoverage: [
+          {
+            storeId: 'store-1',
+            from: new Date('2026-08-24T00:00:00.000Z'),
+            to: new Date('2026-09-13T23:59:59.999Z'),
+            status: 'CONFIRMED',
+          },
+        ],
+        priceConfigurations: [
+          {
+            tenantId: 'tenant-1',
+            productId: 'bounded-cost',
+            externalDomain: 'club.example',
+            externalClubId: '1',
+            price: 100,
+            updatedAt: new Date('2026-09-13T00:00:00.000Z'),
+          },
+          {
+            tenantId: 'tenant-1',
+            productId: 'bounded-cost',
+            externalDomain: 'club.example',
+            externalClubId: '1',
+            price: 100,
+            purchasePrice: 10,
+            updatedAt: new Date('2026-09-14T13:00:00.000Z'),
+          },
+        ],
+      }),
+    );
+
+    expect(health.rows[0].grossProfitAtRisk).toMatchObject({
+      perDay: {
+        value: 80,
+        state: 'PARTIAL',
+        asOf: '2026-09-13',
+      },
+      forPeriod: { value: 3600 },
+      costBasis: 'SALES_UNIT_COST',
+    });
+  });
 });

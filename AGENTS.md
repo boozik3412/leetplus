@@ -53,7 +53,21 @@ role, scheduler placement, provider egress or rollout state, update
 the same change.
 
 <!-- autopilot:start -->
-## Ассортимент: текущая работа
+## Ассортимент: готовое состояние исходного кода
 
-Исправление источников, расчётов и интерфейса ассортиментного дашборда ведётся по требованиям в `.autopilot/2026-09-14-assortment-operational-dashboard--wip/manifest.md`. Состояние — `.autopilot/state.js`. Проверки и ошибки — в отдельном `deploy-evidence/assortment-operational-20260914/ERROR_LOG.md`.
+- Входы — защищённые CSV imports товаров, остатков, продаж и движений, а также сохранённые интеграционные факты; они заполняют каталог, `InventorySnapshot`, `SalesFact`, `StockMovement`, покрытие и конфигурации цен.
+- Обычный INTERNAL daily обновляет inventory ежедневно даже при закрытом QUICK; только недавний повтор подавляется при success AUTO INVENTORY всех активных доменов за 1 час. Это не порог качества данных: freshness остаётся 36 часов. Inventory-only run не двигает sales cursor.
+- `resolveGuestSessionStore` доказывает Store по полной топологии tenant; вызывающий код затем применяет permissions. Inferred binding не меняет historical timestamps или parser timezone.
+- Общие точки реализации — `apps/api/src/common/assortment-health.ts`, `assortment-health-loader.service.ts` и `guest-session-store.ts`; loader строит доказанные store×product grains и передаёт факты в pure `buildAssortmentHealth`.
+- Устойчивые границы engine: `AssortmentHealth`/`AssortmentHealthRow` и `AssortmentMetric<T>` с `value|null`, `state`, `reason`, `coverage`, `asOf`; денежные оценки дополнительно несут `basis`.
+- Отсутствующие данные остаются `null`/`UNKNOWN`, известный ноль остаётся нулём, а `PARTIAL` не становится точным итогом; Web показывает причину и coverage у конкретной карточки.
+- Cutoff запроса — `selectedAssortmentAsOf`/report `asOf`; `inventory.asOf` — отдельная дата наблюдения остатка и не переносится как cutoff.
+- `DashboardService` добавляет summary в `GET /dashboard/summary`, а `ReportsService` использует те же row sets для `operations`, `inventory-turnover` и `replenishment` вместе с scoped rows и write-off details.
+- Web transport находится в `apps/web/src/lib/dashboard-summary.ts` и `apps/web/src/lib/reports.ts`; `/assortment/dashboard`, `/reports` и table pages сохраняют `from`, `to`, repeated `storeIds`/`categoryIds`, `asOf`, `noSalesDays` и subset URL.
+- Карточки ассортимента кликабельны: OOS/low-stock/no-sales ведут в отчёты, turnover/excess — в inventory-turnover, а списания — в movement table с `subset=write-offs`.
+- OOS `grossProfitAtRisk` хранит дневную/периодную оценку и cost basis: известная себестоимость позволяет расчёт, sale-price valuation не становится cost, отсутствие подтверждения остаётся null.
+- Команды из package: `pnpm dev`, `pnpm --filter api start:dev`, `pnpm --filter web dev`, API `tsc --noEmit -p tsconfig.build.json` и Web `typecheck`/`build` через соответствующий filter.
+- Один API test file: `pnpm.cmd --filter api exec jest --runInBand --runTestsByPath src/common/assortment-health.spec.ts`.
+- Синтетическая UI QA использует fixture `localhost:4311` и Next `localhost:4312` через `API_URL` и `PORT` с `pnpm --filter web start`; это не обычный dev или production запуск.
+- Источник и production proof определяются canonical deployment documentation, а не веткой или наличием исходного кода.
 <!-- autopilot:end -->

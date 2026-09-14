@@ -47,14 +47,14 @@ R13.1: все новые числовые карточки кликабельн�
 
 -01 repair: `excessStockDays?: number` defaultexisting30; `asOf` bounds allfactwindows,raw transactionprice requires confirmed salescoverage; config newest<=asOf; aggregate staleremainsstale,unknownnosales retainedinvaluationcoverage. Tests9+1,lint,tscPASS.
 
-##02 — согласование API (ещё реализуется)
+##02 — исходное согласование API (реализовано)
 
 - Dashboard query: `asOf=YYYY-MM-DD` отдельно от performance period; выбранное noSalesDays7/14/21/30 согласуется с summary.
 - Existing report API routes: operations, inventory-turnover. Query supports repeated `storeIds`/legacy`storeId`, repeated`categoryIds`/legacy`categoryId`, `from,to,asOf`, `noSalesDays=7|14|21|30`, `stockStatus=OUT_OF_STOCK|LOW_STOCK`, `excess=true|false`.
 - Response сохраняет legacy storeId и добавляет storeIds/categoryIds/asOf/noSalesDays и компактную assortmentHealth summary. Rows остаются в отчётах, не дублируются массово в dashboard.
 - Daily sales coverage legacy `summary.domains[]` содержит domain/status, sourceCounts источников. Новая03форма сохраняет quick/inventory раздельно; SUCCESS QUICK не доказывает inventory/movements.
 
-##03 — загрузка источников (на review)
+##03 — загрузка источников (принято)
 
 - BUSINESS_FACTS legacy summary.domains/top-level counts остаются QUICK; additive summary.quick/inventory и sourceCounts.quick/inventory.
 - Current ordinary INTERNAL daily обновляет INVENTORY, только если не подтверждены свежие successful AUTO INVENTORY jobs всех active source domains за36ч. Уже завершённый QUICK не перезаписывается при inventory-only run; failure виден в IntegrationSyncJob и результате daily.
@@ -64,7 +64,7 @@ R13.1: все новые числовые карточки кликабельн�
 
 - D04/D05 common final: summary frozenValue/excessValue имеют basis (включая MIXED); InventorySnapshot observedAt optional bounded<=asOf и определяет freshness/asOf. Common18tests+lintPASS; общийAPI191suites3540tests+2todoPASS, build-tscPASS перед handoff02.
 
-##02 — итоговый API contract (на review)
+##02 — итоговый API contract (принято)
 
 - Dashboard `selectedNoSalesDays:7|14|21|30`; `assortmentHealth?: AssortmentHealth['summary']` — ВАЖНО это сама summary, без повторной вложенности `.summary`.
 - Dashboard `visitBinding={state:'AVAILABLE'|'PARTIAL'|'MISSING',observedVisitCount:number,usableVisitCount:number|null,coverage:{covered,total,percent:number|null},reason:string|null}`. UI использует usable/status для scoped visits, не legacyzero.
@@ -87,9 +87,28 @@ R13.1: все новые числовые карточки кликабельн�
 `{state:'READY'|'PARTIAL'|'UNKNOWN',fullMarginPercent:number|null,fullGrossProfit:number|null,partialMarginPercent:number|null,partialGrossProfit:number|null,coveredRevenue:number,coveredOperations:number,totalRevenue:number,totalOperations:number}`.
 Legacy grossProfit/adjustedGrossProfit/marginPercent/adjustedMarginPercent (и dashboard previous adjustedprofit) nullable при неполном cost. Web04 переводит соответствующие formatters/types наnull guard и показывает partial* с coverage; не подменятьnullнулём.
 
-##02 final candidate (на приёмке)
+##02 final candidate (принято)
 
 -37 targeted loader/dashboard/reports tests, buildtsc+eslint PASS. Operations filterparity and turnover/recommendations use engine rows; duplicateunboundedhistorical rawqueries removed.
 - `sourceHealthEvidence.{sales,inventory}` только внутренне: scoped domain confirmed/failed/missing counts. Source modules isolated, historical sales/visits не stale простоиз-заold updatedAt.
 - `marginCoverage` implements agreed full/partial DTO; full legacy valuesnullable; reports-digest явно labels partial values.
 - Turnover legacy revenue/grossProfit ещёnumericcompatibilityfields; UI04 должен показывать state/reason/partial qualification изauthoritativeengine/report metadata и не выдавать cost gap за точную прибыль.
+
+-02 accepted: обаreviewPASS, fullAPI191suites3552PASS+2todo,tsc/lintPASS. Из-за package format script форматирование случайнозатронулосторонниеfiles; root сохранилpatch ивернултолько17format-onlydiffs+463provenEOL-onlyfiles. API02содержиттолькосогласованныеfiles. Formatonly через pnpm exec prettier EXACT_FILES, НИКОГДА pnpm run format --files.
+
+##04 — обнаруженные швы при UI интеграции
+
+- D07: `selectedAssortmentAsOf:string` в DashboardSummary содержит точный ISO cutoff расчёта. `assortmentHealth.inventory.asOf` остаётся датой фактического наблюдения и никогда не используется как query cutoff. Report/dashboard asOf принимает существующую дату YYYY-MM-DD и canonical ISO; дата сегодня ограничивается фактическим now. Ответы report сохраняют точный cutoff. Иначе переход на отчёт объявляет старый stock свежим и меняет набор строк.
+- Списания открывают существующий `/products/movement/table?subset=write-offs`, где отдельное представление читает `operations.assortmentRows.writeOffs` с теми же массивами клубов/категорий и from/to/asOf. Обычная таблица движения продаж сохраняется.
+- Replenishment API включается в тот же engine scope: старый метод игнорировал массивы категорий/клубов и stock asOf. Backend repair владеет только dashboard/reports/common loader; Web исполнитель обновляет соответствующий consumer и qualification.
+- No-sales selector не вложен в карточку-ссылку и сохраняет остальные выбранные параметры дашборда.
+
+##04 — завершённый backend integration DTO (на приёмке)
+
+- ReplenishmentReport: `storeIds`, `categoryIds`, exact ISO `asOf`, `assortmentHealth`, `coverage:{state,reason,covered,total,percent}`. Numeric totals относятся только к покрытым rows. Свежие OK/NO_SALES с подтверждённым спросом сохраняются для существующего movement consumer; stale/missing/insufficient-demand исключены. Explicit stockStatus сужает OOS/LOW. Supplier orderMultiplicity передаётся из уже выбранного loader catalog.
+- OperationalReport: `writeOffMovements?:{id,movementDate,storeId,storeName,productId,article,productName,categoryName,quantity,amount}[]` — сохранённые движения за тот же период/asOf и non-excluded health grains. Это детальные строки для `/products/movement/table?subset=write-offs`, а не повтор агрегатов SKU.
+- D07 parser repair: strict valid YYYY-MM-DD либо canonical ISO, сегодня сначала clamp к now, прошлая дата EOD, будущее/неканоническое/невалидная дата отвергается. Exact cutoff остаётся в dashboard и report responses.
+- Author gates: reports16 + dashboard24 + loader3, API build tsc и scoped ESLint PASS. Root full API и оба review выполняются отдельно.
+
+- Backend04 integration accepted and committed623362e4cbb053a287a5c33a9b7853de3c0f1683: bothreviewsCLOSED, fullAPI191/3556PASS+2todo, subsequentisolateddecimal/partialcoveragefixreports17+tsc/lintPASS. Rawwriteoffdecimals retained; allPARTIAL demand remainsPARTIAL noexactorders. D07closed.
+- Weblegacyrisk qualification completed:4callers passhealthstates, unknownempty!=0, knownempty0, knowncomponentretainedwithoutfalsefulltotal. Pure4tests+scopedlintPASS. Rootfinaltypecheck/buildafterallUIchangesstillrequired; latestcapturedbuild0predatesthishelperonly.

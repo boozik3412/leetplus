@@ -1,8 +1,8 @@
 window.STATE =
 {
   "slug": "assortment-operational-dashboard",
-  "dir": "2026-09-14-assortment-operational-dashboard--wip",
-  "title": "Надёжный дашборд ассортимента",
+  "dir": "2026-09-14-assortment-operational-dashboard",
+  "title": "Дашборд ассортимента: исходники приняты",
   "mode": "semi",
   "depth": "normal",
   "polish": null,
@@ -11,8 +11,8 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "skillDir": "C:\\Users\\ALIENWARE\\.codex\\skills\\autopilot",
   "startedAt": "2026-09-14T15:05:31+05:00",
-  "updatedAt": "2026-09-14T18:11:03+05:00",
-  "finishedAt": null,
+  "updatedAt": "2026-09-14T21:21:56+05:00",
+  "finishedAt": "2026-09-14T21:21:56+05:00",
   "stages": [
     {
       "id": "preflight",
@@ -46,23 +46,27 @@ window.STATE =
     },
     {
       "id": "build",
-      "status": "active",
-      "startedAt": "2026-09-14T15:15:18+05:00"
+      "status": "done",
+      "startedAt": "2026-09-14T15:15:18+05:00",
+      "finishedAt": "2026-09-14T21:21:56+05:00"
     },
     {
       "id": "review",
-      "status": "active",
-      "startedAt": "2026-09-14T15:38:08+05:00"
+      "status": "done",
+      "startedAt": "2026-09-14T15:38:08+05:00",
+      "finishedAt": "2026-09-14T21:21:56+05:00"
     },
     {
       "id": "final",
-      "status": "pending"
+      "status": "done",
+      "finishedAt": "2026-09-14T21:21:56+05:00",
+      "note": "G4 PASS, API 191/3564, Web build and 47 synthetic UI checks PASS. Production state remains in canonical deployment documentation."
     }
   ],
   "requirements": {
     "total": 17,
-    "done": 1,
-    "inTicket": 16,
+    "done": 17,
+    "inTicket": 0,
     "inSpec": 0,
     "placeholder": 0,
     "deferred": 0,
@@ -141,7 +145,7 @@ window.STATE =
         "apps/api/src/reports/",
         "apps/api/src/common/assortment-health-loader*"
       ],
-      "status": "review",
+      "status": "done",
       "retries": 0,
       "repairs": 1,
       "handoffs": 2,
@@ -160,7 +164,9 @@ window.STATE =
         "Covered margin instead of missing cost zero",
         "Confirmed zero-day forecast",
         "Restricted shared-domain visit counts must not leak"
-      ]
+      ],
+      "finishedAt": "2026-09-14T18:29:22+05:00",
+      "commit": "c7aa73695138e77e10fafc15bfeafa17e11e23b5"
     },
     {
       "id": "03",
@@ -218,15 +224,90 @@ window.STATE =
         "apps/web/",
         "docs/assortment-dashboard-metric-contract.md"
       ],
-      "status": "pending",
+      "status": "done",
+      "retries": 0,
+      "repairs": 1,
+      "handoffs": 2,
+      "startedAt": "2026-09-14T18:29:22+05:00",
+      "agent": "/root/browser_qa",
+      "note": "Web build PASS exit0; real Next4312 + syntheticAPI4311 QA running. Final decimal movement precision and partial-source labels repair in progress.",
+      "finishedAt": "2026-09-14T21:21:56+05:00"
+    },
+    {
+      "id": "05",
+      "title": "Сохранить область ассортимента на главном дашборде",
+      "requirements": [
+        "R13"
+      ],
+      "blockedBy": [],
+      "wave": 4,
+      "zone": [
+        "apps/web/src/app/(app)/dashboard/page.tsx",
+        "apps/web/src/app/reports/assortment-risk/table/page.tsx",
+        "apps/web/src/lib/assortment-report-query*"
+      ],
+      "status": "done",
       "retries": 0,
       "repairs": 0,
-      "handoffs": 0
+      "handoffs": 0,
+      "startedAt": "2026-09-14T19:47:56+05:00",
+      "agent": "/root/web_scope_finish",
+      "finishedAt": "2026-09-14T21:21:56+05:00"
+    },
+    {
+      "id": "06",
+      "title": "Отделить повтор загрузки от свежести остатков",
+      "requirements": [
+        "R01",
+        "R02"
+      ],
+      "blockedBy": [],
+      "wave": 5,
+      "zone": [
+        "apps/api/src/integrations/langame-daily-sync.service*"
+      ],
+      "status": "done",
+      "retries": 0,
+      "repairs": 0,
+      "handoffs": 0,
+      "finishedAt": "2026-09-14T21:21:56+05:00",
+      "agent": "/root/inventory_cadence",
+      "tests": {
+        "passed": 11,
+        "failed": 0
+      }
+    },
+    {
+      "id": "07",
+      "title": "Сохранить вычислимую прибыль OOS",
+      "requirements": [
+        "R04",
+        "R05",
+        "R14",
+        "R15"
+      ],
+      "blockedBy": [],
+      "wave": 5,
+      "zone": [
+        "apps/api/src/common/assortment-health*",
+        "apps/api/src/reports/reports.service*",
+        "apps/web/src/app/reports/oos/table/page.tsx"
+      ],
+      "status": "done",
+      "retries": 0,
+      "repairs": 0,
+      "handoffs": 0,
+      "finishedAt": "2026-09-14T21:21:56+05:00",
+      "agent": "/root/profit_risk_restore",
+      "tests": {
+        "passed": 40,
+        "failed": 0
+      }
     }
   ],
   "singlePass": null,
   "tests": {
-    "passed": 3548,
+    "passed": 3564,
     "failed": 0,
     "todo": 2,
     "suites": 191
@@ -243,10 +324,25 @@ window.STATE =
     "deferred": 0,
     "result": "PASS"
   },
-  "concerns": [],
+  "concerns": [
+    {
+      "source": "final source review",
+      "finding": "Legacy homepage assortment widget widens multi-club selection and drops report filters",
+      "decision": "fix now",
+      "ticket": "05",
+      "resolution": "fixed and independently accepted"
+    }
+  ],
   "reviewers": {
     "manifestSpec": "/root/spec_coverage",
     "craft": "/root/craft_review"
   },
-  "blind": null
+  "blind": {
+    "result": "PASS_LOCAL",
+    "drift": [],
+    "apiFocusedTests": 51,
+    "uiChecks": 47,
+    "productionVerified": false
+  },
+  "scope": "source implementation and local acceptance; production uses separate release controls"
 }

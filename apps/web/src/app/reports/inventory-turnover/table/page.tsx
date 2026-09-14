@@ -13,6 +13,10 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function searchParamsArray(value: string | string[] | undefined) {
+  return value ? (Array.isArray(value) ? value : [value]) : [];
+}
+
 function statusLabel(status: InventoryTurnoverRow["status"]) {
   const labels: Record<InventoryTurnoverRow["status"], string> = {
     OK: "Норма",
@@ -34,6 +38,15 @@ export default async function InventoryTurnoverTablePage({
     from: searchParam(params.from),
     to: searchParam(params.to),
     storeId: searchParam(params.storeId),
+    storeIds: searchParamsArray(params.storeIds),
+    categoryIds: searchParamsArray(params.categoryIds),
+    asOf: searchParam(params.asOf),
+    noSalesDays: ([7, 14, 21, 30] as const).includes(
+      Number(searchParam(params.noSalesDays)) as 7 | 14 | 21 | 30,
+    )
+      ? (Number(searchParam(params.noSalesDays)) as 7 | 14 | 21 | 30)
+      : undefined,
+    excess: searchParam(params.excess) === "true",
   });
   const rows = report.rows.map((row) => ({
     status: statusLabel(row.status),
@@ -46,11 +59,9 @@ export default async function InventoryTurnoverTablePage({
     averageDailySales: row.averageDailySales,
     stockDays: row.stockDays,
     turnoverRate: row.turnoverRate,
-    revenue: row.revenue,
-    grossProfit: row.grossProfit,
     frozenStockUnitValue: row.frozenStockUnitValue,
     frozenStockValuation: frozenStockValuationLabel(row.frozenStockValuation),
-    frozenStockAmount: row.frozenStockAmount,
+    frozenStockAmount: row.frozenStockAmount ?? "Нет оценки",
     lastSaleDate: row.lastSaleDate,
     daysWithoutSales: row.daysWithoutSales,
   }));
@@ -64,8 +75,12 @@ export default async function InventoryTurnoverTablePage({
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-zinc-600">
           Полный отчет по текущему остатку: продажи за {report.periodDays} дн.,
-          дни запаса, деньги в остатках и источник оценки. Медленные SKU -
-          запас от 30 дней; без продаж - остаток без продаж за выбранный период.
+          дни запаса, деньги в остатках и источник оценки. Медленные SKU - запас
+          от 30 дней; без продаж - остаток без продаж за выбранный период.
+        </p>
+        <p className="mt-1 text-xs text-zinc-500">
+          {report.assortmentHealth?.turnoverDays.reason ??
+            "Выручка и прибыль не показаны: legacy-поля не подтверждают покрытие себестоимости."}
         </p>
       </div>
       <SimpleReportTable
@@ -82,11 +97,13 @@ export default async function InventoryTurnoverTablePage({
           { key: "averageDailySales", label: "Ср/день", align: "right" },
           { key: "stockDays", label: "Дней запаса", align: "right" },
           { key: "turnoverRate", label: "Оборот/остаток", align: "right" },
-          { key: "revenue", label: "Выручка", align: "right" },
-          { key: "grossProfit", label: "Прибыль", align: "right" },
           { key: "frozenStockUnitValue", label: "Оценка/шт", align: "right" },
           { key: "frozenStockValuation", label: "Источник" },
-          { key: "frozenStockAmount", label: "Деньги в остатках", align: "right" },
+          {
+            key: "frozenStockAmount",
+            label: "Деньги в остатках",
+            align: "right",
+          },
           { key: "lastSaleDate", label: "Последняя продажа" },
           { key: "daysWithoutSales", label: "Дней без продаж", align: "right" },
         ]}

@@ -502,7 +502,7 @@ describe('LangameDailySyncService tenant execution admission', () => {
     }
   });
 
-  it('requests inventory for a stale active domain and skips it only when every domain is fresh', async () => {
+  it('runs inventory on two ordinary daily runs 24 hours apart', async () => {
     jest.useFakeTimers();
     const now = new Date('2026-09-14T09:00:00.000Z');
     jest.setSystemTime(now);
@@ -512,23 +512,13 @@ describe('LangameDailySyncService tenant execution admission', () => {
       subject.prisma.tenant.findMany.mockResolvedValue([
         { id: 'tenant-internal', slug: 'internal' },
       ]);
-      subject.prisma.dailyDataCoverage.findUnique.mockResolvedValue({
-        status: 'SUCCESS',
-      });
       subject.prisma.integrationSource.findMany.mockResolvedValue([
-        { domain: 'first.example' },
-        { domain: 'second.example' },
+        { domain: 'club.example' },
       ]);
-      const successfulInventoryJobs = [
-        {
-          domain: 'first.example',
-          finishedAt: new Date(now.getTime() - 36 * 60 * 60 * 1000 - 1),
-        },
-        {
-          domain: 'second.example',
-          finishedAt: new Date(now.getTime() - 35 * 60 * 60 * 1000),
-        },
-      ];
+      const successfulInventoryJobs = [] as {
+        domain: string;
+        finishedAt: Date;
+      }[];
       subject.prisma.integrationSyncJob.findMany.mockImplementation(
         ({ where }: { where: { finishedAt: { gte: Date } } }) =>
           Promise.resolve(
@@ -548,26 +538,126 @@ describe('LangameDailySyncService tenant execution admission', () => {
         failedSources: 0,
         partialSources: 0,
       });
+      subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
+        sources: 0,
+        failedSources: 0,
+        sourceResults: [],
+      });
+      subject.businessSnapshotService.runSnapshotsForTenant.mockResolvedValue({
+        runs: [],
+      });
 
-      const stale = await subject.service.runDailySync();
-      const staleTenant = stale.results[0] as unknown as {
-        inventoryRequested: boolean;
-      };
-      expect(staleTenant.inventoryRequested).toBe(true);
-      expect(subject.langameSyncService.syncTenantById).toHaveBeenCalledTimes(
-        1,
-      );
+      await subject.service.runDailySync();
+      successfulInventoryJobs.push({
+        domain: 'club.example',
+        finishedAt: now,
+      });
+      jest.setSystemTime(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+      await subject.service.runDailySync();
 
-      successfulInventoryJobs[0].finishedAt = new Date(
-        now.getTime() - 35 * 60 * 60 * 1000,
+      expect(subject.langameSyncService.syncTenantById).toHaveBeenNthCalledWith(
+        2,
+        'tenant-internal',
+        {
+          mode: 'INVENTORY',
+          trigger: 'AUTO',
+        },
+        'LANGAME_DAILY_SYNC',
       );
-      const fresh = await subject.service.runDailySync();
-      const freshTenant = fresh.results[0] as unknown as {
-        inventoryRequested: boolean;
-      };
-      expect(freshTenant.inventoryRequested).toBe(false);
-      expect(subject.langameSyncService.syncTenantById).toHaveBeenCalledTimes(
-        1,
+      expect(subject.langameSyncService.syncTenantById).toHaveBeenNthCalledWith(
+        4,
+        'tenant-internal',
+        {
+          mode: 'INVENTORY',
+          trigger: 'AUTO',
+        },
+        'LANGAME_DAILY_SYNC',
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('suppresses a repeated inventory run only after recent success for every active domain', async () => {
+    jest.useFakeTimers();
+    const now = new Date('2026-09-14T09:00:00.000Z');
+    jest.setSystemTime(now);
+
+    try {
+      const subject = createSubject();
+      subject.prisma.tenant.findMany.mockResolvedValue([
+        { id: 'tenant-internal', slug: 'internal' },
+      ]);
+      subject.prisma.dailyDataCoverage.findUnique.mockResolvedValue({
+        status: 'SUCCESS',
+      });
+      subject.prisma.integrationSource.findMany.mockResolvedValue([
+        { domain: 'first.example' },
+        { domain: 'second.example' },
+      ]);
+      subject.prisma.integrationSyncJob.findMany.mockResolvedValue([
+        { domain: 'first.example' },
+        { domain: 'second.example' },
+      ]);
+      subject.admissionService.evaluate.mockResolvedValue({
+        allowed: true,
+        tenantId: 'tenant-internal',
+        reasonCode: 'ALLOWED',
+        failedRequirement: null,
+        customerStage: TenantCustomerStage.INTERNAL,
+      });
+
+      const result = await subject.service.runDailySync();
+
+      expect(result.results[0]?.inventoryRequested).toBe(false);
+      expect(subject.langameSyncService.syncTenantById).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('refreshes inventory when any active domain lacks recent AUTO coverage', async () => {
+    jest.useFakeTimers();
+    const now = new Date('2026-09-14T09:00:00.000Z');
+    jest.setSystemTime(now);
+
+    try {
+      const subject = createSubject();
+      subject.prisma.tenant.findMany.mockResolvedValue([
+        { id: 'tenant-internal', slug: 'internal' },
+      ]);
+      subject.prisma.dailyDataCoverage.findUnique.mockResolvedValue({
+        status: 'SUCCESS',
+      });
+      subject.prisma.integrationSource.findMany.mockResolvedValue([
+        { domain: 'first.example' },
+        { domain: 'second.example' },
+      ]);
+      subject.prisma.integrationSyncJob.findMany.mockResolvedValue([
+        { domain: 'first.example' },
+      ]);
+      subject.admissionService.evaluate.mockResolvedValue({
+        allowed: true,
+        tenantId: 'tenant-internal',
+        reasonCode: 'ALLOWED',
+        failedRequirement: null,
+        customerStage: TenantCustomerStage.INTERNAL,
+      });
+      subject.langameSyncService.syncTenantById.mockResolvedValue({
+        failedSources: 0,
+        partialSources: 0,
+      });
+
+      const result = await subject.service.runDailySync();
+
+      expect(result.results[0]?.inventoryRequested).toBe(true);
+      expect(subject.langameSyncService.syncTenantById).toHaveBeenCalledWith(
+        'tenant-internal',
+        {
+          mode: 'INVENTORY',
+          trigger: 'AUTO',
+        },
+        'LANGAME_DAILY_SYNC',
       );
     } finally {
       jest.useRealTimers();

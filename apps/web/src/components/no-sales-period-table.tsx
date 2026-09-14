@@ -4,6 +4,10 @@ import { useState } from "react";
 import type { ProductWithoutSales } from "@/lib/reports";
 import { ReportLoadingLink } from "@/components/report-loading-link";
 import { frozenStockShortText } from "@/lib/frozen-stock";
+import {
+  buildAssortmentReportHref,
+  type AssortmentReportScope,
+} from "@/lib/assortment-report-query";
 
 type Period = 7 | 14 | 21;
 
@@ -22,9 +26,11 @@ function formatMoney(value: number) {
 export function NoSalesPeriodTable({
   rowsByPeriod,
   networkBadge,
+  scope,
 }: {
   rowsByPeriod: Record<Period, ProductWithoutSales[]>;
   networkBadge: React.ReactNode;
+  scope: Omit<AssortmentReportScope, "noSalesDays">;
 }) {
   const [period, setPeriod] = useState<Period>(7);
   const rows = rowsByPeriod[period];
@@ -37,8 +43,8 @@ export function NoSalesPeriodTable({
         <div>
           <h2 className="text-base font-semibold">Товары без продаж</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Активные SKU с остатком, но без продаж в выбранном периоде.
-            Высокие риски невыставленного товара. {frozenStockShortText}
+            Активные SKU с остатком, но без продаж в выбранном периоде. Высокие
+            риски невыставленного товара. {frozenStockShortText}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -58,7 +64,10 @@ export function NoSalesPeriodTable({
             ))}
           </div>
           <ReportLoadingLink
-            href={`/reports/no-sales/table?period=${period}`}
+            href={buildAssortmentReportHref(
+              { ...scope, noSalesDays: period },
+              "no-sales",
+            )}
             className={[
               "rounded-md border px-3 py-2 text-sm font-medium hover:bg-zinc-50",
               hasOverflow
@@ -94,13 +103,19 @@ export function NoSalesPeriodTable({
                       {row.isCanonical ? networkBadge : null}
                     </span>
                   </td>
-                  <td className="px-5 py-4 text-zinc-700">{row.categoryName ?? "—"}</td>
-                  <td className="px-5 py-4 text-zinc-700">{row.supplierName ?? "—"}</td>
+                  <td className="px-5 py-4 text-zinc-700">
+                    {row.categoryName ?? "—"}
+                  </td>
+                  <td className="px-5 py-4 text-zinc-700">
+                    {row.supplierName ?? "—"}
+                  </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                     {formatQuantity(row.stockQuantity)}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatMoney(row.frozenStockAmount)}
+                    {row.frozenStockAmount === null
+                      ? "Нет оценки"
+                      : formatMoney(row.frozenStockAmount)}
                   </td>
                 </tr>
               ))}
@@ -120,7 +135,10 @@ function topRowsByStore(rows: ProductWithoutSales[]) {
   const rowsByStore = new Map<string, ProductWithoutSales[]>();
 
   rows.forEach((row) => {
-    rowsByStore.set(row.storeId, [...(rowsByStore.get(row.storeId) ?? []), row]);
+    rowsByStore.set(row.storeId, [
+      ...(rowsByStore.get(row.storeId) ?? []),
+      row,
+    ]);
   });
 
   return [...rowsByStore.values()].flatMap((storeRows) =>

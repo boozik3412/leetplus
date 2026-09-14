@@ -15,18 +15,16 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function lastFullDaysRange(days: number) {
-  const now = new Date();
-  const toDate = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
-  );
-  const fromDate = new Date(toDate);
-  fromDate.setUTCDate(fromDate.getUTCDate() - (days - 1));
+function searchParamsArray(value: string | string[] | undefined) {
+  return value ? (Array.isArray(value) ? value : [value]) : [];
+}
 
-  return {
-    from: fromDate.toISOString().slice(0, 10),
-    to: toDate.toISOString().slice(0, 10),
-  };
+function noSalesDaysParam(value: string | string[] | undefined) {
+  const days = Number(searchParam(value));
+
+  return ([7, 14, 21, 30] as const).includes(days as 7 | 14 | 21 | 30)
+    ? (days as 7 | 14 | 21 | 30)
+    : 21;
 }
 
 export default async function AssortmentRiskTablePage({
@@ -36,19 +34,27 @@ export default async function AssortmentRiskTablePage({
 }) {
   await requireCurrentUser();
   const params = await searchParams;
-  const storeId = searchParam(params.storeId);
-  const periodReport = await getOperationalReport({
+  const noSalesDays = noSalesDaysParam(params.noSalesDays);
+  const reportScope = {
     from: searchParam(params.from),
     to: searchParam(params.to),
-    storeId,
+    storeId: searchParam(params.storeId),
+    storeIds: searchParamsArray(params.storeIds),
+    categoryIds: searchParamsArray(params.categoryIds),
+    asOf: searchParam(params.asOf),
+    noSalesDays,
+  };
+  const periodReport = await getOperationalReport({
+    ...reportScope,
   });
   const noSalesReport = await getOperationalReport({
-    ...lastFullDaysRange(21),
-    storeId,
+    ...reportScope,
   });
   const summary = buildAssortmentRiskSummary({
     oosRows: periodReport.outOfStockRiskProducts,
     noSalesRows: noSalesReport.productsWithoutSales,
+    oosState: periodReport.assortmentHealth?.outOfStock.state,
+    noSalesState: noSalesReport.assortmentHealth?.noSales[noSalesDays].state,
   });
   const rows = summary.rows.map((row) => ({
     riskTypeLabel: row.riskTypeLabel,
@@ -76,7 +82,7 @@ export default async function AssortmentRiskTablePage({
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-zinc-600">
           Гибридный отчет: прибыль в риске из-за OOS за выбранный период и
-          деньги, замороженные в товарах без движения 21 день.{" "}
+          деньги, замороженные в товарах без движения {noSalesDays} дней.{" "}
           {frozenStockFormulaText} {frozenStockScopeText}
         </p>
       </div>

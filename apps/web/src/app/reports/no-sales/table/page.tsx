@@ -8,7 +8,15 @@ import {
 } from "@/lib/frozen-stock";
 import { getOperationalReport } from "@/lib/reports";
 
-type SearchParams = Promise<{ period?: string }>;
+type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
+
+function searchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function searchParamsArray(value: string | string[] | undefined) {
+  return value ? (Array.isArray(value) ? value : [value]) : [];
+}
 
 function lastFullDaysRange(days: number) {
   const now = new Date();
@@ -31,8 +39,29 @@ export default async function NoSalesTablePage({
 }) {
   await requireCurrentUser();
   const params = await searchParams;
-  const period = Number(params.period ?? 7);
-  const report = await getOperationalReport(lastFullDaysRange(period));
+  const period = ([7, 14, 21, 30] as const).includes(
+    Number(searchParam(params.noSalesDays ?? params.period)) as
+      | 7
+      | 14
+      | 21
+      | 30,
+  )
+    ? (Number(searchParam(params.noSalesDays ?? params.period)) as
+        | 7
+        | 14
+        | 21
+        | 30)
+    : 21;
+  const report = await getOperationalReport({
+    ...(searchParam(params.from) && searchParam(params.to)
+      ? { from: searchParam(params.from), to: searchParam(params.to) }
+      : lastFullDaysRange(period)),
+    storeId: searchParam(params.storeId),
+    storeIds: searchParamsArray(params.storeIds),
+    categoryIds: searchParamsArray(params.categoryIds),
+    asOf: searchParam(params.asOf),
+    noSalesDays: period,
+  });
   const rows = report.productsWithoutSales.map((row) => ({
     storeName: row.storeName,
     name: row.name,
@@ -41,9 +70,9 @@ export default async function NoSalesTablePage({
     lastSaleDate: row.lastSaleDate ?? "",
     daysWithoutSales: row.daysWithoutSales ?? null,
     stockQuantity: row.stockQuantity,
-    frozenStockUnitValue: row.frozenStockUnitValue,
+    frozenStockUnitValue: row.frozenStockUnitValue ?? "Нет оценки",
     frozenStockValuation: frozenStockValuationLabel(row.frozenStockValuation),
-    frozenStockAmount: row.frozenStockAmount,
+    frozenStockAmount: row.frozenStockAmount ?? "Нет оценки",
   }));
 
   return (

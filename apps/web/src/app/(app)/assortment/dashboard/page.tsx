@@ -26,6 +26,25 @@ function searchParamsArray(value: string | string[] | undefined) {
   return Array.isArray(value) ? value : [value];
 }
 
+function allReportsHref(scope: {
+  from: string;
+  to: string;
+  asOf: string;
+  storeIds: readonly string[];
+  categoryIds: readonly string[];
+  noSalesDays: 7 | 14 | 21 | 30;
+}) {
+  const params = new URLSearchParams({
+    from: scope.from,
+    to: scope.to,
+    asOf: scope.asOf,
+    noSalesDays: String(scope.noSalesDays),
+  });
+  scope.storeIds.forEach((id) => params.append("storeIds", id));
+  scope.categoryIds.forEach((id) => params.append("categoryIds", id));
+  return `/reports?${params}`;
+}
+
 function formatDate(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
 
@@ -56,6 +75,12 @@ export default async function AssortmentDashboardPage({
     dateTo: searchParam(params.dateTo),
     storeIds: searchParamsArray(params.storeIds),
     categoryIds: searchParamsArray(params.categoryIds),
+    asOf: searchParam(params.asOf),
+    noSalesDays: ([7, 14, 21, 30] as const).includes(
+      Number(searchParam(params.noSalesDays)) as 7 | 14 | 21 | 30,
+    )
+      ? (Number(searchParam(params.noSalesDays)) as 7 | 14 | 21 | 30)
+      : 21,
     skuGrouping:
       searchParam(params.skuGrouping) === "club" ? "club" : "network",
   } as const;
@@ -88,7 +113,14 @@ export default async function AssortmentDashboardPage({
             </div>
 
             <Link
-              href="/reports"
+              href={allReportsHref({
+                from: summary.periodFrom,
+                to: summary.periodTo,
+                asOf: summary.selectedAssortmentAsOf,
+                storeIds: summary.selectedStoreIds,
+                categoryIds: summary.selectedCategoryIds,
+                noSalesDays: summary.selectedNoSalesDays,
+              })}
               className="inline-flex min-h-11 w-fit items-center gap-2 whitespace-nowrap rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >
               Все отчёты
@@ -116,7 +148,16 @@ export default async function AssortmentDashboardPage({
         </header>
 
         <div className="mt-5">
-          <AssortmentGrowthDashboard summary={summary} />
+          <AssortmentGrowthDashboard
+            summary={summary}
+            dashboardQuery={{
+              period: filters.period,
+              dateFrom: filters.dateFrom,
+              dateTo: filters.dateTo,
+              skuGrouping: filters.skuGrouping,
+              asOf: filters.asOf,
+            }}
+          />
         </div>
 
         <section className="mt-8 border-t border-zinc-200 pt-7 dark:border-zinc-800">
@@ -129,8 +170,11 @@ export default async function AssortmentDashboardPage({
                 Категории под выбранными фильтрами
               </h2>
               <p className="mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-                Сравните вклад категорий в оборот и прибыль после выбора клубов
-                и периода.
+                Сравните вклад категорий в оборот
+                {summary.marginCoverage.state === "READY"
+                  ? " и прибыль"
+                  : "; показатели прибыли появятся после полного покрытия себестоимости"}{" "}
+                после выбора клубов и периода.
               </p>
             </div>
             <Link
@@ -146,8 +190,14 @@ export default async function AssortmentDashboardPage({
             </Link>
           </div>
           <div className="mt-4 grid gap-5 xl:grid-cols-2">
-            <CategoryShareChart rows={summary.categoryAnalytics} />
-            <CategoryEfficiencyChart rows={summary.categoryAnalytics} />
+            <CategoryShareChart
+              rows={summary.categoryAnalytics}
+              profitAvailable={summary.marginCoverage.state === "READY"}
+            />
+            <CategoryEfficiencyChart
+              rows={summary.categoryAnalytics}
+              profitAvailable={summary.marginCoverage.state === "READY"}
+            />
           </div>
         </section>
       </div>

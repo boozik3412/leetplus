@@ -266,6 +266,67 @@ export type DashboardSummaryFilters = {
   storeIds?: string[];
   categoryIds?: string[];
   skuGrouping?: "club" | "network";
+  asOf?: string;
+  noSalesDays?: 7 | 14 | 21 | 30;
+};
+
+export type DashboardMetricState =
+  | "AVAILABLE"
+  | "PARTIAL"
+  | "STALE"
+  | "MISSING"
+  | "FAILED"
+  | "UNKNOWN";
+
+export type DashboardMetric<T> = {
+  value: T | null;
+  state: DashboardMetricState;
+  reason: string | null;
+  coverage: { covered: number; total: number; percent: number | null };
+  asOf: string | null;
+};
+
+export type DashboardValuationMetric = DashboardMetric<number> & {
+  basis:
+    | "CLUB_PURCHASE_PRICE"
+    | "SALES_UNIT_COST"
+    | "PRODUCT_PURCHASE_PRICE"
+    | "SALE_PRICE_ESTIMATE"
+    | "UNKNOWN"
+    | "MIXED";
+};
+
+export type DashboardAssortmentHealthSummary = {
+  inventory: DashboardMetric<number>;
+  outOfStock: DashboardMetric<number>;
+  lowStock: DashboardMetric<number>;
+  noSales: Record<7 | 14 | 21 | 30, DashboardMetric<number>>;
+  frozenValue: DashboardValuationMetric;
+  turnoverDays: DashboardMetric<number>;
+  excessQuantity: DashboardMetric<number>;
+  excessValue: DashboardValuationMetric;
+  writeOffQuantity: DashboardMetric<number>;
+  writeOffAmount: DashboardMetric<number>;
+};
+
+export type DashboardVisitBinding = {
+  state: "AVAILABLE" | "PARTIAL" | "MISSING";
+  observedVisitCount: number;
+  usableVisitCount: number | null;
+  coverage: { covered: number; total: number; percent: number | null };
+  reason: string | null;
+};
+
+export type DashboardMarginCoverage = {
+  state: "READY" | "PARTIAL" | "UNKNOWN";
+  fullMarginPercent: number | null;
+  fullGrossProfit: number | null;
+  partialMarginPercent: number | null;
+  partialGrossProfit: number | null;
+  coveredRevenue: number;
+  coveredOperations: number;
+  totalRevenue: number;
+  totalOperations: number;
 };
 
 export type DashboardSummary = {
@@ -276,6 +337,9 @@ export type DashboardSummary = {
   skuGrouping: "club" | "network";
   selectedStoreIds: string[];
   selectedCategoryIds: string[];
+  selectedNoSalesDays: 7 | 14 | 21 | 30;
+  selectedAssortmentAsOf: string;
+  visitBinding: DashboardVisitBinding;
   periodFrom: string;
   periodTo: string;
   totalSku: number;
@@ -297,12 +361,13 @@ export type DashboardSummary = {
   writeOffRevenuePercent: number | null;
   previousWriteOffRevenuePercent: number | null;
   writeOffRevenuePercentDelta: number | null;
-  previousAdjustedGrossProfit: number;
+  previousAdjustedGrossProfit: number | null;
   adjustedGrossProfitToPreviousPercent: number | null;
-  grossProfit: number;
-  adjustedGrossProfit: number;
-  marginPercent: number;
-  adjustedMarginPercent: number;
+  grossProfit: number | null;
+  adjustedGrossProfit: number | null;
+  marginPercent: number | null;
+  adjustedMarginPercent: number | null;
+  marginCoverage: DashboardMarginCoverage;
   soldQuantity: number;
   writeOffAmount: number;
   returnAmount: number;
@@ -314,6 +379,7 @@ export type DashboardSummary = {
   salesTrend: DashboardSalesTrendSegment[];
   categoryAnalytics: DashboardCategoryMetric[];
   topSkuByRevenue: DashboardTopSku[];
+  assortmentHealth?: DashboardAssortmentHealthSummary;
 };
 
 export type DashboardRevenueDiagnosticsTypeBreakdown = {
@@ -445,6 +511,14 @@ async function getDashboardResource<T>(
 
   if (filters.skuGrouping) {
     params.set("skuGrouping", filters.skuGrouping);
+  }
+
+  if (filters.asOf) {
+    params.set("asOf", filters.asOf);
+  }
+
+  if (filters.noSalesDays) {
+    params.set("noSalesDays", String(filters.noSalesDays));
   }
 
   filters.storeIds?.forEach((storeId) => {

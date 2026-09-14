@@ -61,6 +61,12 @@ export type AssortmentValuationSummaryMetric = AssortmentMetric<number> & {
   basis: AssortmentSummaryValuationBasis;
 };
 
+export type AssortmentGrossProfitAtRisk = {
+  perDay: AssortmentMetric<number>;
+  forPeriod: AssortmentMetric<number>;
+  costBasis: AssortmentValuationBasis;
+};
+
 export type AssortmentHealthStore = {
   id: string;
   tenantId: string;
@@ -159,6 +165,7 @@ export type AssortmentHealthRow = {
   inventory: AssortmentMetric<number>;
   demand21d: AssortmentMetric<number>;
   price: AssortmentPriceMetric;
+  grossProfitAtRisk?: AssortmentGrossProfitAtRisk;
   noSales: Record<AssortmentNoSalesWindow, boolean | null>;
   frozenValue: AssortmentValuationMetric;
   turnoverDays: AssortmentMetric<number>;
@@ -277,6 +284,16 @@ function buildRow(context: {
   const demandQuantity = sum(demandSales.map((sale) => sale.quantity));
   const demand21d = demandMetric(demandQuantity, demandCoverage, demandTo);
   const price = priceMetric(input, store, product.id);
+  const grossProfitAtRisk = grossProfitAtRiskMetrics(
+    input,
+    store,
+    product,
+    demand21d,
+    demandQuantity / 21,
+    price,
+    demandWindow,
+    demandTo,
+  );
   const noSales = ASSORTMENT_NO_SALES_WINDOWS.reduce(
     (result, days) => {
       const coverage = salesCoverageMetric(
@@ -313,7 +330,6 @@ function buildRow(context: {
     noSales[21] === null
       ? 'Для окна без продаж нет полного покрытия продаж или актуального остатка.'
       : null,
-    input.asOf,
   );
   const turnover = turnoverMetrics(inventory, input, store.id, product.id);
   const excess = excessMetrics(
@@ -322,7 +338,6 @@ function buildRow(context: {
     input,
     store,
     product,
-    input.asOf,
     input.excessStockDays ?? DEFAULT_EXCESS_STOCK_DAYS,
   );
   const writeOffs = writeOffMetrics(input, store.id, product.id);
@@ -355,6 +370,7 @@ function buildRow(context: {
     inventory,
     demand21d,
     price,
+    grossProfitAtRisk,
     noSales,
     frozenValue,
     turnoverDays: turnover.days,
@@ -822,7 +838,6 @@ function excessMetrics(
   input: AssortmentHealthInput,
   store: AssortmentHealthStore,
   product: AssortmentHealthProduct,
-  asOf: Date,
   excessStockDays: number,
 ) {
   if (inventory.state !== 'AVAILABLE' || demand.state !== 'AVAILABLE') {
@@ -861,7 +876,7 @@ function excessMetrics(
   );
   return {
     quantity: quantityMetric,
-    value: valuationMetric(input, store, product, quantity, null, asOf),
+    value: valuationMetric(input, store, product, quantity, null),
   };
 }
 
@@ -932,7 +947,6 @@ function valuationMetric(
   product: AssortmentHealthProduct,
   quantity: number | null,
   unavailableReason: string | null,
-  asOf: Date,
 ): AssortmentValuationMetric {
   if (quantity === null) {
     return valuationUnavailable(
@@ -942,66 +956,23 @@ function valuationMetric(
       null,
     );
   }
-  const config = latestConfiguration(input, store, product.id);
-  const configPurchasePrice = config?.purchasePrice;
-  if (isKnownMoney(configPurchasePrice)) {
-    const fresh = isFreshConfiguration(config, input);
-    return valuationFromUnitPrice(
-      quantity,
-      configPurchasePrice,
-      fresh ? 'AVAILABLE' : 'PARTIAL',
-      'CLUB_PURCHASE_PRICE',
-      coverage(1, 1),
-      fresh ? null : 'Оценка по устаревшей закупочной цене конфигурации клуба.',
-      dateValue(config.updatedAt),
-    );
-  }
-  const periodTo = boundedTo(input.period.to, input.asOf);
-  const salesCoverage = salesCoverageMetric(
-    input.salesCoverage,
-    store.id,
+  const cost = unitCostMetric(
+    input,
+    store,
+    product,
     input.period.from,
-    periodTo,
+    boundedTo(input.period.to, input.asOf),
   );
-  const costSales = salesInWindow(
-    input.sales,
-    store.id,
-    product.id,
-    input.period.from,
-    periodTo,
-  );
-  const costQuantity = sum(costSales.map((sale) => sale.quantity));
-  const cost = sum(
-    costSales.map((sale) =>
-      typeof sale.cost === 'number' && Number.isFinite(sale.cost)
-        ? sale.cost
-        : Number.NaN,
-    ),
-  );
-  if (
-    salesCoverage.state === 'AVAILABLE' &&
-    costQuantity > 0 &&
-    Number.isFinite(cost)
-  ) {
+  if (cost.value !== null && cost.basis !== 'UNKNOWN') {
+    const state = cost.state === 'AVAILABLE' ? 'AVAILABLE' : 'PARTIAL';
     return valuationFromUnitPrice(
       quantity,
-      cost / costQuantity,
-      'PARTIAL',
-      'SALES_UNIT_COST',
-      salesCoverage.coverage,
-      'Оценка по подтвержденной себестоимости продаж за период.',
-      dateValue(periodTo),
-    );
-  }
-  if (isKnownMoney(product.purchasePrice)) {
-    return valuationFromUnitPrice(
-      quantity,
-      product.purchasePrice,
-      'PARTIAL',
-      'PRODUCT_PURCHASE_PRICE',
-      coverage(1, 1),
-      'Оценка по закупочной цене каталога товара.',
-      dateValue(asOf),
+      cost.value,
+      state,
+      cost.basis,
+      cost.coverage,
+      cost.reason,
+      cost.asOf,
     );
   }
   const salePrice = priceMetric(input, store, product.id);
@@ -1022,6 +993,150 @@ function valuationMetric(
     'Нет подтвержденной цены для оценки остатка.',
     null,
   );
+}
+
+function grossProfitAtRiskMetrics(
+  input: AssortmentHealthInput,
+  store: AssortmentHealthStore,
+  product: AssortmentHealthProduct,
+  demand: AssortmentMetric<number>,
+  rawDailyDemand: number,
+  price: AssortmentPriceMetric,
+  demandFrom: Date,
+  demandTo: Date,
+): AssortmentGrossProfitAtRisk {
+  if (demand.state !== 'AVAILABLE' || demand.value === null) {
+    return grossProfitAtRiskUnavailable(demand);
+  }
+  if (price.state !== 'AVAILABLE' || price.value === null) {
+    return grossProfitAtRiskUnavailable(price);
+  }
+
+  const unitCost = unitCostMetric(input, store, product, demandFrom, demandTo);
+  if (unitCost.value === null || unitCost.basis === 'UNKNOWN') {
+    return grossProfitAtRiskUnavailable(unitCost);
+  }
+
+  const state = unitCost.state === 'AVAILABLE' ? 'AVAILABLE' : 'PARTIAL';
+  const metricCoverage = combinedCoverage([demand, price, unitCost]);
+  const asOf = oldestKnownAsOf([demand.asOf, price.asOf, unitCost.asOf]);
+  const rawPerDay = rawDailyDemand * (price.value - unitCost.value);
+  const periodTo = boundedTo(input.period.to, input.asOf);
+  const selectedPeriodDays = Math.max(
+    1,
+    daysInclusive(input.period.from, periodTo),
+  );
+
+  return {
+    perDay: metric(rawPerDay, state, metricCoverage, unitCost.reason, asOf),
+    forPeriod: metric(
+      rawPerDay * selectedPeriodDays,
+      state,
+      metricCoverage,
+      unitCost.reason,
+      asOf,
+    ),
+    costBasis: unitCost.basis,
+  };
+}
+
+function grossProfitAtRiskUnavailable(
+  source: AssortmentMetric<number>,
+): AssortmentGrossProfitAtRisk {
+  const state =
+    source.state === 'AVAILABLE' || source.state === 'PARTIAL'
+      ? 'UNKNOWN'
+      : source.state;
+  const unavailable = metric<number>(
+    null,
+    state,
+    source.coverage,
+    source.reason,
+    source.asOf,
+  );
+  return {
+    perDay: unavailable,
+    forPeriod: unavailable,
+    costBasis: 'UNKNOWN',
+  };
+}
+
+function unitCostMetric(
+  input: AssortmentHealthInput,
+  store: AssortmentHealthStore,
+  product: AssortmentHealthProduct,
+  from: Date,
+  to: Date,
+): AssortmentValuationMetric {
+  const config = latestConfiguration(input, store, product.id);
+  if (config && isConfirmedCost(config.purchasePrice)) {
+    const fresh = isFreshConfiguration(config, input);
+    return unitCostFromValue(
+      config.purchasePrice,
+      fresh ? 'AVAILABLE' : 'PARTIAL',
+      'CLUB_PURCHASE_PRICE',
+      coverage(1, 1),
+      fresh ? null : 'Оценка по устаревшей закупочной цене конфигурации клуба.',
+      dateValue(config.updatedAt),
+    );
+  }
+  const salesCoverage = salesCoverageMetric(
+    input.salesCoverage,
+    store.id,
+    from,
+    to,
+  );
+  const costSales = salesInWindow(input.sales, store.id, product.id, from, to);
+  const costQuantity = sum(costSales.map((sale) => sale.quantity));
+  const cost = sum(
+    costSales.map((sale) =>
+      isConfirmedCost(sale.cost) ? sale.cost : Number.NaN,
+    ),
+  );
+  if (
+    salesCoverage.state === 'AVAILABLE' &&
+    costQuantity > 0 &&
+    Number.isFinite(cost)
+  ) {
+    return unitCostFromValue(
+      cost / costQuantity,
+      'PARTIAL',
+      'SALES_UNIT_COST',
+      salesCoverage.coverage,
+      'Оценка по подтвержденной себестоимости продаж.',
+      dateValue(to),
+    );
+  }
+  if (isConfirmedCost(product.purchasePrice)) {
+    return unitCostFromValue(
+      product.purchasePrice,
+      'PARTIAL',
+      'PRODUCT_PURCHASE_PRICE',
+      coverage(1, 1),
+      'Оценка по закупочной цене каталога товара.',
+      dateValue(input.asOf),
+    );
+  }
+  return valuationUnavailable(
+    'UNKNOWN',
+    salesCoverage.coverage,
+    'Нет подтвержденной себестоимости для оценки риска.',
+    salesCoverage.asOf,
+  );
+}
+
+function unitCostFromValue(
+  value: number,
+  state: Extract<AssortmentMetricState, 'AVAILABLE' | 'PARTIAL'>,
+  basis: Exclude<AssortmentValuationBasis, 'SALE_PRICE_ESTIMATE' | 'UNKNOWN'>,
+  metricCoverage: AssortmentCoverage,
+  reason: string | null,
+  asOf: string | null,
+): AssortmentValuationMetric {
+  return {
+    ...metric(value, state, metricCoverage, reason, asOf),
+    basis,
+  };
 }
 
 function valuationFromUnitPrice(
@@ -1051,8 +1166,8 @@ function valuationUnavailable(
   };
 }
 
-function isKnownMoney(value: number | null | undefined): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+function isConfirmedCost(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
 function recommendation(
@@ -1207,6 +1322,13 @@ function coverage(covered: number, total: number): AssortmentCoverage {
     total,
     percent: total === 0 ? null : round((covered / total) * 100),
   };
+}
+
+function combinedCoverage(metrics: AssortmentMetric<number>[]) {
+  return coverage(
+    sum(metrics.map((item) => item.coverage.covered)),
+    sum(metrics.map((item) => item.coverage.total)),
+  );
 }
 
 function salesInWindow(

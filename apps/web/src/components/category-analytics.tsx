@@ -8,14 +8,21 @@ type EfficiencyMode = "profit" | "fill";
 
 export function CategoryShareChart({
   rows,
+  profitAvailable = true,
 }: {
   rows: DashboardCategoryMetric[];
+  profitAvailable?: boolean;
 }) {
   const [mode, setMode] = useState<ShareMode>("revenue");
+  const effectiveMode =
+    mode === "profit" && !profitAvailable ? "revenue" : mode;
   const sortedRows = [...rows]
-    .sort((a, b) => shareValue(b, mode) - shareValue(a, mode))
+    .sort((a, b) => shareValue(b, effectiveMode) - shareValue(a, effectiveMode))
     .slice(0, 10);
-  const maxShare = Math.max(...sortedRows.map((row) => shareValue(row, mode)), 1);
+  const maxShare = Math.max(
+    ...sortedRows.map((row) => shareValue(row, mode)),
+    1,
+  );
 
   return (
     <section className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -25,7 +32,8 @@ export function CategoryShareChart({
             Веса категорий
           </h2>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Доля каждой категории в общей {mode === "revenue" ? "выручке" : "прибыли"}.
+            Доля каждой категории в общей{" "}
+            {effectiveMode === "revenue" ? "выручке" : "прибыли"}.
           </p>
         </div>
         <SegmentedControl
@@ -41,7 +49,7 @@ export function CategoryShareChart({
       {sortedRows.length > 0 ? (
         <div className="mt-5 grid gap-3">
           {sortedRows.map((row) => {
-            const value = shareValue(row, mode);
+            const value = shareValue(row, effectiveMode);
             const width = Math.max(3, (Math.max(value, 0) / maxShare) * 100);
 
             return (
@@ -49,7 +57,7 @@ export function CategoryShareChart({
                 key={row.categoryId ?? "uncategorized"}
                 className="group"
                 title={`${row.categoryName}: ${formatPercent(value)} от ${
-                  mode === "revenue" ? "выручки" : "прибыли"
+                  effectiveMode === "revenue" ? "выручки" : "прибыли"
                 }`}
               >
                 <div className="mb-1 flex items-center justify-between gap-3 text-xs">
@@ -73,21 +81,34 @@ export function CategoryShareChart({
       ) : (
         <EmptyState />
       )}
+      {!profitAvailable ? (
+        <p className="mt-3 text-xs leading-5 text-amber-700 dark:text-amber-300">
+          Прибыль по категориям скрыта: себестоимость покрыта не полностью.
+        </p>
+      ) : null}
     </section>
   );
 }
 
 export function CategoryEfficiencyChart({
   rows,
+  profitAvailable = true,
 }: {
   rows: DashboardCategoryMetric[];
+  profitAvailable?: boolean;
 }) {
   const [mode, setMode] = useState<EfficiencyMode>("profit");
+  const effectiveMode = mode === "profit" && !profitAvailable ? "fill" : mode;
   const sortedRows = [...rows]
-    .sort((a, b) => efficiencyValue(b, mode) - efficiencyValue(a, mode))
+    .sort(
+      (a, b) =>
+        efficiencyValue(b, effectiveMode) - efficiencyValue(a, effectiveMode),
+    )
     .slice(0, 10);
   const maxValue = Math.max(
-    ...sortedRows.map((row) => Math.max(efficiencyValue(row, mode), 0)),
+    ...sortedRows.map((row) =>
+      Math.max(efficiencyValue(row, effectiveMode), 0),
+    ),
     1,
   );
 
@@ -99,7 +120,7 @@ export function CategoryEfficiencyChart({
             Эффективность категории
           </h2>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            {mode === "profit"
+            {effectiveMode === "profit"
               ? "Коэффициент: доля в прибыли / доля в выручке."
               : "Выручка категории на один активный SKU."}
           </p>
@@ -117,7 +138,7 @@ export function CategoryEfficiencyChart({
       {sortedRows.length > 0 ? (
         <div className="mt-5 grid gap-3">
           {sortedRows.map((row) => {
-            const value = efficiencyValue(row, mode);
+            const value = efficiencyValue(row, effectiveMode);
             const width = Math.max(3, (Math.max(value, 0) / maxValue) * 100);
 
             return (
@@ -125,7 +146,7 @@ export function CategoryEfficiencyChart({
                 key={row.categoryId ?? "uncategorized"}
                 className="group"
                 title={
-                  mode === "profit"
+                  effectiveMode === "profit"
                     ? `${row.categoryName}: ${formatCoefficient(row.profitEfficiency)}`
                     : `${row.categoryName}: ${formatMoney(row.fillEfficiency ?? 0)} на активный SKU`
                 }
@@ -135,7 +156,7 @@ export function CategoryEfficiencyChart({
                     {row.categoryName}
                   </span>
                   <span className="tabular-nums text-zinc-500 dark:text-zinc-400">
-                    {mode === "profit"
+                    {effectiveMode === "profit"
                       ? formatCoefficient(row.profitEfficiency)
                       : `${formatMoney(row.fillEfficiency ?? 0)} / SKU`}
                   </span>
@@ -153,6 +174,11 @@ export function CategoryEfficiencyChart({
       ) : (
         <EmptyState />
       )}
+      {!profitAvailable ? (
+        <p className="mt-3 text-xs leading-5 text-amber-700 dark:text-amber-300">
+          Показатель прибыли скрыт: себестоимость покрыта не полностью.
+        </p>
+      ) : null}
     </section>
   );
 }

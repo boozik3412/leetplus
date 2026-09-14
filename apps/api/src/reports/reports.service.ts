@@ -23,8 +23,10 @@ import {
 import type {
   AssortmentHealth,
   AssortmentHealthRow,
+  AssortmentMetric,
   AssortmentMetricState,
   AssortmentNoSalesWindow,
+  AssortmentValuationBasis,
 } from '../common/assortment-health';
 
 export type ReportGroup = {
@@ -107,6 +109,11 @@ export type OutOfStockRiskProduct = {
   revenueAtRiskPerDay: number | null;
   grossProfitAtRiskPerDay: number | null;
   grossProfitAtRiskForPeriod: number | null;
+  grossProfitAtRisk?: {
+    perDay: AssortmentMetric<number>;
+    forPeriod: AssortmentMetric<number>;
+    costBasis: AssortmentValuationBasis;
+  };
   stockDays: number | null;
   state?: AssortmentHealthRow['risk'];
   reason?: string | null;
@@ -4438,8 +4445,10 @@ export class ReportsService {
           stockQuantity: this.round(row.inventory.value),
           averageDailySales: this.round(demand),
           revenueAtRiskPerDay,
-          grossProfitAtRiskPerDay: null,
-          grossProfitAtRiskForPeriod: null,
+          grossProfitAtRiskPerDay: row.grossProfitAtRisk?.perDay.value ?? null,
+          grossProfitAtRiskForPeriod:
+            row.grossProfitAtRisk?.forPeriod.value ?? null,
+          grossProfitAtRisk: row.grossProfitAtRisk,
           stockDays: row.turnoverDays.value,
           state: row.risk,
           reason:

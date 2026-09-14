@@ -259,6 +259,45 @@ describe('DashboardService', () => {
     ).toBeDefined();
   });
 
+  it('publishes the exact requested assortment cutoff separately from inventory evidence', async () => {
+    mockEmptyDashboardData();
+
+    const summary = await service.getSummary(user, {
+      asOf: '2026-09-14T11:23:45.000Z',
+    });
+
+    expect(summary.selectedAssortmentAsOf).toBe('2026-09-14T11:23:45.000Z');
+    expect(assortmentHealthLoader.load).toHaveBeenCalledWith(
+      expect.objectContaining({ asOf: new Date('2026-09-14T11:23:45.000Z') }),
+    );
+  });
+
+  it('validates date-only and canonical ISO assortment cutoffs at the public boundary', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-09-14T12:00:00.000Z'));
+    try {
+      mockEmptyDashboardData();
+      const today = await service.getSummary(user, { asOf: '2026-09-14' });
+      expect(today.selectedAssortmentAsOf).toBe('2026-09-14T12:00:00.000Z');
+
+      mockEmptyDashboardData();
+      const past = await service.getSummary(user, { asOf: '2026-09-13' });
+      expect(past.selectedAssortmentAsOf).toBe('2026-09-13T23:59:59.999Z');
+
+      await expect(
+        service.getSummary(user, { asOf: '2026-09-15' }),
+      ).rejects.toThrow('asOf must not be in the future');
+      await expect(
+        service.getSummary(user, { asOf: '2026-02-30' }),
+      ).rejects.toThrow('asOf must be a valid YYYY-MM-DD date');
+      await expect(
+        service.getSummary(user, { asOf: '2026-09-14T12:00:00Z' }),
+      ).rejects.toThrow('canonical ISO timestamp');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('returns summary calculated for resolved tenant', async () => {
     prisma.product.count.mockResolvedValueOnce(2);
     prisma.category.count.mockResolvedValue(3);

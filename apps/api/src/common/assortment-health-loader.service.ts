@@ -44,6 +44,7 @@ export type AssortmentHealthCatalogProduct = {
   categoryId: string | null;
   categoryName: string | null;
   supplierName: string | null;
+  orderMultiplicity: number | null;
 };
 
 export type AssortmentHealthCatalogStore = {
@@ -51,10 +52,20 @@ export type AssortmentHealthCatalogStore = {
   name: string;
 };
 
+export type AssortmentHealthWriteOffMovement = {
+  id: string;
+  storeId: string;
+  productId: string;
+  movementDate: Date;
+  quantity: number;
+  amount: number;
+};
+
 export type AssortmentHealthLoaderResult = {
   health: AssortmentHealth;
   productsById: ReadonlyMap<string, AssortmentHealthCatalogProduct>;
   storesById: ReadonlyMap<string, AssortmentHealthCatalogStore>;
+  writeOffMovements: AssortmentHealthWriteOffMovement[];
   salesDayEvidence: AssortmentSalesDayEvidence[];
   sourceHealthEvidence: AssortmentSourceHealthEvidence;
 };
@@ -195,6 +206,7 @@ export class AssortmentHealthLoaderService {
           movementDate: { gte: query.period.from, lte: demandTo },
         },
         select: {
+          id: true,
           storeId: true,
           productId: true,
           movementDate: true,
@@ -303,6 +315,16 @@ export class AssortmentHealthLoaderService {
       })),
       writeOffCoverage,
     });
+    const writeOffGrains = new Set(
+      health.rows
+        .filter(
+          (row) =>
+            !row.excluded &&
+            (row.writeOffQuantity.value !== null ||
+              row.writeOffAmount.value !== null),
+        )
+        .map((row) => `${row.storeId}:${row.productId}`),
+    );
 
     return {
       health,
@@ -316,11 +338,26 @@ export class AssortmentHealthLoaderService {
             categoryId: product.categoryId,
             categoryName: product.category?.name ?? null,
             supplierName: product.supplier?.name ?? null,
+            orderMultiplicity: product.supplier?.orderMultiplicity ?? null,
           },
         ]),
       ),
       storesById: new Map(
         stores.map((store) => [store.id, { id: store.id, name: store.name }]),
+      ),
+      writeOffMovements: writeOffs.flatMap((movement) =>
+        writeOffGrains.has(`${movement.storeId}:${movement.productId}`)
+          ? [
+              {
+                id: movement.id,
+                storeId: movement.storeId,
+                productId: movement.productId,
+                movementDate: movement.movementDate,
+                quantity: movement.quantity.toNumber(),
+                amount: movement.amount.toNumber(),
+              },
+            ]
+          : [],
       ),
       salesDayEvidence: this.salesDayEvidence({
         stores,

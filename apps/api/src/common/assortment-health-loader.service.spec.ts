@@ -27,7 +27,7 @@ describe('AssortmentHealthLoaderService', () => {
             isActive: true,
             purchasePrice: new Prisma.Decimal(10),
             category: null,
-            supplier: null,
+            supplier: { name: 'Supplier A', orderMultiplicity: 6 },
           },
         ]),
       },
@@ -54,7 +54,18 @@ describe('AssortmentHealthLoaderService', () => {
       langameClubProductConfiguration: {
         findMany: jest.fn().mockResolvedValue([]),
       },
-      stockMovement: { findMany: jest.fn().mockResolvedValue([]) },
+      stockMovement: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'writeoff-1',
+            storeId: 'store-a',
+            productId: 'product-a',
+            movementDate: new Date('2026-09-13T12:00:00.000Z'),
+            quantity: new Prisma.Decimal(1),
+            amount: new Prisma.Decimal(10),
+          },
+        ]),
+      },
       dailyDataCoverage: { findMany: jest.fn().mockResolvedValue([]) },
     };
     const service = new AssortmentHealthLoaderService(
@@ -80,6 +91,17 @@ describe('AssortmentHealthLoaderService', () => {
     expect(row?.inventory.value).toBe(4);
     expect(row?.inventory.state).toBe('AVAILABLE');
     expect(row?.inventory.asOf).toBe('2026-09-14');
+    expect(result.productsById.get('product-a')?.orderMultiplicity).toBe(6);
+    expect(result.writeOffMovements).toEqual([
+      {
+        id: 'writeoff-1',
+        storeId: 'store-a',
+        productId: 'product-a',
+        movementDate: new Date('2026-09-13T12:00:00.000Z'),
+        quantity: 1,
+        amount: 10,
+      },
+    ]);
   });
 
   it('keeps the requested turnover horizon, cost-only club valuation, and observed write-offs', async () => {

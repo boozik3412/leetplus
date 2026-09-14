@@ -340,6 +340,7 @@ export type DashboardSummary = {
   selectedStoreIds: string[];
   selectedCategoryIds: string[];
   selectedNoSalesDays: AssortmentNoSalesWindow;
+  selectedAssortmentAsOf: string;
   visitBinding: DashboardVisitBinding;
   periodFrom: string;
   periodTo: string;
@@ -1341,6 +1342,7 @@ export class DashboardService {
       selectedStoreIds,
       selectedCategoryIds,
       selectedNoSalesDays,
+      selectedAssortmentAsOf: assortmentAsOf.toISOString(),
       visitBinding: periodVisits.binding,
       periodFrom: this.toDateInputValue(period.fromDate),
       periodTo: this.toDateInputValue(period.toDate),
@@ -5388,13 +5390,45 @@ export class DashboardService {
   }
 
   private resolveAssortmentAsOf(value?: string) {
-    if (!value) return new Date();
-
-    const asOf = this.parseDate(value, 'asOf');
-    asOf.setUTCHours(23, 59, 59, 999);
-    const today = new Date();
-    today.setUTCHours(23, 59, 59, 999);
-    if (asOf > today) {
+    const now = new Date();
+    if (!value) return now;
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (dateOnly) {
+      const asOf = new Date(
+        Date.UTC(
+          Number(dateOnly[1]),
+          Number(dateOnly[2]) - 1,
+          Number(dateOnly[3]),
+        ),
+      );
+      if (
+        asOf.getUTCFullYear() !== Number(dateOnly[1]) ||
+        asOf.getUTCMonth() !== Number(dateOnly[2]) - 1 ||
+        asOf.getUTCDate() !== Number(dateOnly[3])
+      ) {
+        throw new BadRequestException('asOf must be a valid YYYY-MM-DD date');
+      }
+      if (asOf.toISOString().slice(0, 10) === now.toISOString().slice(0, 10)) {
+        return now;
+      }
+      asOf.setUTCHours(23, 59, 59, 999);
+      if (asOf > now) {
+        throw new BadRequestException('asOf must not be in the future');
+      }
+      return asOf;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
+      throw new BadRequestException(
+        'asOf must be a canonical ISO timestamp or YYYY-MM-DD',
+      );
+    }
+    const asOf = new Date(value);
+    if (Number.isNaN(asOf.getTime()) || asOf.toISOString() !== value) {
+      throw new BadRequestException(
+        'asOf must be a canonical ISO timestamp or YYYY-MM-DD',
+      );
+    }
+    if (asOf > now) {
       throw new BadRequestException('asOf must not be in the future');
     }
     return asOf;

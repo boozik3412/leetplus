@@ -84,12 +84,16 @@ export async function resolveBonusSettlementStore(
       isActive: true,
       OR: [
         { externalDomain: { equals: domain, mode: 'insensitive' } },
+        { externalDomain: { equals: `${domain}.`, mode: 'insensitive' } },
         {
           integrationSource: {
             is: {
               provider: IntegrationProvider.LANGAME,
               isActive: true,
-              domain: { equals: domain, mode: 'insensitive' },
+              OR: [
+                { domain: { equals: domain, mode: 'insensitive' } },
+                { domain: { equals: `${domain}.`, mode: 'insensitive' } },
+              ],
             },
           },
         },

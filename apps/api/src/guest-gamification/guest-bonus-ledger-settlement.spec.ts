@@ -80,7 +80,7 @@ describe('GuestBonusLedgerService settlement routing', () => {
         guestId: 'guest-1',
         storeId: null,
         externalProvider: IntegrationProvider.LANGAME,
-        externalDomain: 'club.example',
+        externalDomain: 'CLUB.EXAMPLE.',
         guestExternalId: 'external-guest-1',
         rewardType: 'BONUS_BALANCE',
         rewardAmount: new Prisma.Decimal(150),
@@ -154,6 +154,17 @@ describe('GuestBonusLedgerService settlement routing', () => {
       skipDuplicates: true,
     });
     expect(prisma.guestGameReward.updateMany).not.toHaveBeenCalled();
+    const queued =
+      prisma.guestBonusLedgerEntry.createMany.mock.calls[0][0].data[0];
+    const source = { domain: 'club.example', baseUrl: 'https://club.example' };
+    await expect(
+      (service as any).resolveEntrySource(queued, { sources: [source] }),
+    ).resolves.toBe(source);
+    await expect(
+      (service as any).resolveEntrySource(queued, {
+        sources: [source, { ...source, domain: 'CLUB.EXAMPLE.' }],
+      }),
+    ).rejects.toThrow('is not active for this tenant');
   });
 
   it('blocks a settlement mismatch before any Langame delivery', async () => {

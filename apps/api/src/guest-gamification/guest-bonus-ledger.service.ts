@@ -32,6 +32,7 @@ import {
 } from './guest-game-delivery-protocol-gate';
 import {
   GUEST_BONUS_SETTLEMENT_BINDING,
+  bonusSettlementDomain,
   bonusSettlementStoreMatches,
   bonusSettlementStoreSelect,
 } from './guest-bonus-settlement';
@@ -3078,12 +3079,14 @@ export class GuestBonusLedgerService {
     const externalDomain = await this.resolveEntryLangameDomain(entry);
 
     if (externalDomain) {
-      const matched = access.sources.find(
-        (source) => source.domain === externalDomain,
+      const matched = access.sources.filter(
+        (source) =>
+          bonusSettlementDomain(source.domain) ===
+          bonusSettlementDomain(externalDomain),
       );
 
-      if (matched) {
-        return matched;
+      if (matched.length === 1) {
+        return matched[0];
       }
 
       throw new BadRequestException(

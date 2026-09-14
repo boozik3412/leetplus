@@ -1341,7 +1341,6 @@ describe('GuestBonusLedgerService', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           tenantId: user.tenantId,
-          storeId: 'store-1337',
           id: 'reward-1',
           AND: [
             {
@@ -1364,6 +1363,22 @@ describe('GuestBonusLedgerService', () => {
                     some: {
                       kind: 'REWARD',
                       status: { in: ['PROCESSING', 'FAILED'] },
+                    },
+                  },
+                },
+              ],
+            },
+            {
+              OR: [
+                { storeId: 'store-1337' },
+                {
+                  storeId: null,
+                  walletItems: {
+                    some: {
+                      tenantId: user.tenantId,
+                      storeId: 'store-1337',
+                      kind: 'REWARD',
+                      status: 'PROCESSING',
                     },
                   },
                 },
@@ -1829,7 +1844,7 @@ describe('GuestBonusLedgerService', () => {
         id: 'reward-balance-1',
         profileId: 'profile-1',
         guestId: 'guest-1',
-        storeId: null,
+        storeId: 'store-1',
         externalProvider: IntegrationProvider.LANGAME,
         externalDomain: 'club-1',
         guestExternalId: 'lg-guest-1',

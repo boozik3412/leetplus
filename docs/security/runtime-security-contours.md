@@ -763,6 +763,18 @@ disabled и удалены из systemd inventory. Помечать такой s
 
 ### Autonomous bonus-ledger worker
 
+Source successor14.09.2026 сохраняет domain-scoped `BALANCE_TOPUP` event и
+`GuestGameReward.storeId=NULL`, но fresh authenticated claim атомарно связывает
+клуб выплаты с кошельком. Допустим только revalidated same-tenant/domain клуб
+guest session либо единственный active Store этого domain. Ledger получает
+именно эту binding; перед provider write повторно сверяются Store/domain и
+точная wallet/profile/Store связка. `TENANT_STORE_SYSTEM` не ослабляется;
+старые уже принятые storeless claims восстанавливаются только по отдельному
+аудированному плану с проверкой права на сумму. Отображение миссий использует
+rule activation для покупок/пополнений и game activation для обычного gameplay.
+Это source contract, не заявление о новой production-выкладке. Подробности:
+[`bonus settlement and progress`](../support/bonus-settlement-and-topup-progress.md).
+
 Langame bonus accrual относится только к workers/control-plane contour. В
 production встроенный `GuestBonusLedgerSchedulerService` обязан оставаться
 выключенным в обоих одновременно активных blue/green API slot. Единственный

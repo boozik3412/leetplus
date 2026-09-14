@@ -11,7 +11,7 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "skillDir": "C:\\Users\\ALIENWARE\\.codex\\skills\\autopilot",
   "startedAt": "2026-09-14T15:05:31+05:00",
-  "updatedAt": "2026-09-14T16:18:45+05:00",
+  "updatedAt": "2026-09-14T17:05:21+05:00",
   "finishedAt": null,
   "stages": [
     {
@@ -91,7 +91,7 @@ window.STATE =
         "apps/api/src/common/assortment-health*",
         "apps/api/src/common/guest-session-store*"
       ],
-      "status": "review",
+      "status": "done",
       "retries": 0,
       "repairs": 1,
       "handoffs": 0,
@@ -108,7 +108,10 @@ window.STATE =
       "tests": {
         "passed": 10,
         "failed": 0
-      }
+      },
+      "finishedAt": "2026-09-14T16:20:00+05:00",
+      "commit": "fe061c62390bedcc490cd8adaa7bd492d293dd87",
+      "agent": "/root/health_foundation"
     },
     {
       "id": "02",
@@ -138,10 +141,12 @@ window.STATE =
         "apps/api/src/reports/",
         "apps/api/src/common/assortment-health-loader*"
       ],
-      "status": "pending",
+      "status": "in-progress",
       "retries": 0,
       "repairs": 0,
-      "handoffs": 0
+      "handoffs": 1,
+      "startedAt": "2026-09-14T16:20:00+05:00",
+      "agent": "/root/api_finish"
     },
     {
       "id": "03",
@@ -159,10 +164,16 @@ window.STATE =
         "apps/api/src/integrations/langame-daily-sync.service*",
         "apps/api/src/integrations/langame-sync.service*"
       ],
-      "status": "pending",
+      "status": "review",
       "retries": 0,
       "repairs": 0,
-      "handoffs": 0
+      "handoffs": 0,
+      "startedAt": "2026-09-14T16:20:00+05:00",
+      "tests": {
+        "passed": 54,
+        "failed": 0
+      },
+      "agent": "/root/source_import"
     },
     {
       "id": "04",
@@ -198,10 +209,10 @@ window.STATE =
   ],
   "singlePass": null,
   "tests": {
-    "passed": 3518,
+    "passed": 3540,
     "failed": 0,
     "todo": 2,
-    "suites": 190
+    "suites": 191
   },
   "debt": {
     "placeholders": [],
@@ -215,7 +226,9 @@ window.STATE =
     "deferred": 0,
     "result": "PASS"
   },
-  "concerns": [],
+  "concerns": [
+    "01 nonblocking: explicit permutation test of two valid configs recommended by Craft; selection code reviewed newest<=asOf"
+  ],
   "reviewers": {
     "manifestSpec": "/root/spec_coverage",
     "craft": "/root/craft_review"

@@ -41,6 +41,12 @@ R13.1: все новые числовые карточки кликабельн�
 
 ## Реализация и ограничения
 
+- D05 (доказано03→02,R01/R02/R16): идемпотентный inventory day key `snapshotDate=startOfUtcDay(now)` отличается от времени наблюдения. Loader передаёт `observedAt=InventorySnapshot.updatedAt`; engine проверяет оба значения<=asOf, а возраст/фактическую дату берёт из observedAt (fallback snapshotDate для старых adapters). Иначе nightlyUTC23:30 выглядит устаревшим уже через12.5ч при пороге36ч.
+
+- D04 (доказано при02,R04/R09/R15): цена продажи для денежного OOS-риска и оценка замороженного stock — разные величины. Valuation сначала использует per-club purchase configuration либо подтверждённую себестоимость/количество продаж. При отсутствии закупки допускается existing sale/history valuation только с явным basis «оценка по продажной цене», а не как себестоимость/вложенные деньги. Неизвестная цена — null; даты и partial coverage видны. Product.purchasePrice не единственный источник (в live он0).
+
+- D03 (доказано в02,R04/R05/R09): глобальный каталог×все клубы создаёт ложные missingstock строки и искажает покрытие. Loader передаёт engine явный набор `storeProductIds` по доказанной клубной конфигурации/остаткам/продажам в tenant/domain; rows вычисляются только для этих memberships. Shared product может иметь несколько подтверждённых клубов. Полный Cartesian product не является текущим ассортиментом.
+
 - D01 (обнаружено в подготовке01,R03): existing session import выбирает timezone через найденный Store. Новая inferredbinding должна быть отделена от date parsing, чтобы не сдвигать уже сохранённые времена; origin и timestamps остаются прежними. Новый timezone repair не является частью дашборда.
 - D02 (обнаружено01,R01/R05/R13/R16): endpoint goods отдаёт текущий склад. Для default dashboard full-day вчерашние продажи не должны отбрасывать сегодняшний реальный снимок. Engine принимает `asOf` для stock и отдельный `demandTo` (default performance `period.to`) для спроса/no-sales; API default использует актуальный stock cutoff, исторический явный `asOf` ограничивает будущее. Ссылки переносят оба якоря, возле KPI видна фактическая дата снимка.
 

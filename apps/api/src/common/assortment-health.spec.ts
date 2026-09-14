@@ -1,5 +1,37 @@
 import { buildAssortmentHealth } from './assortment-health';
 
+const valuationSummaryInput = (
+  overrides: Partial<Parameters<typeof buildAssortmentHealth>[0]> = {},
+): Parameters<typeof buildAssortmentHealth>[0] => ({
+  asOf: new Date('2026-09-14T00:00:00.000Z'),
+  period: {
+    from: new Date('2026-08-25T00:00:00.000Z'),
+    to: new Date('2026-09-14T00:00:00.000Z'),
+  },
+  stores: [
+    {
+      id: 'store-1',
+      tenantId: 'tenant-1',
+      externalDomain: 'club.example',
+      externalClubId: '1',
+      isActive: true,
+    },
+  ],
+  products: [],
+  inventorySnapshots: [],
+  sales: [],
+  salesCoverage: [
+    {
+      storeId: 'store-1',
+      from: new Date('2026-08-25T00:00:00.000Z'),
+      to: new Date('2026-09-14T00:00:00.000Z'),
+      status: 'CONFIRMED',
+    },
+  ],
+  writeOffCoverage: { status: 'CONFIRMED' },
+  ...overrides,
+});
+
 describe('buildAssortmentHealth', () => {
   it('keeps stock and actionability at the store-product grain', () => {
     const health = buildAssortmentHealth({
@@ -222,6 +254,7 @@ describe('buildAssortmentHealth', () => {
           externalDomain: 'club.example',
           externalClubId: '1',
           price: 100,
+          purchasePrice: 100,
           updatedAt: new Date('2026-09-14T00:00:00.000Z'),
         },
       ],
@@ -430,8 +463,16 @@ describe('buildAssortmentHealth', () => {
 
     expect(health.rows[0]).toMatchObject({
       price: { value: 100, state: 'STALE', source: 'CLUB_CONFIGURATION' },
-      frozenValue: { value: null, state: 'STALE' },
-      excessValue: { value: null, state: 'STALE' },
+      frozenValue: {
+        value: 500,
+        state: 'PARTIAL',
+        basis: 'SALE_PRICE_ESTIMATE',
+      },
+      excessValue: {
+        value: 500,
+        state: 'PARTIAL',
+        basis: 'SALE_PRICE_ESTIMATE',
+      },
     });
   });
 
@@ -548,6 +589,7 @@ describe('buildAssortmentHealth', () => {
           externalDomain: 'club.example',
           externalClubId: '1',
           price: 100,
+          purchasePrice: 100,
           updatedAt: new Date('2026-09-14T00:00:00.000Z'),
         },
       ],
@@ -633,6 +675,474 @@ describe('buildAssortmentHealth', () => {
       excessQuantity: { value: 21 },
       writeOffQuantity: { value: 0 },
       writeOffAmount: { value: 0 },
+    });
+  });
+
+  it('uses only proven store-product membership across unrelated domains', () => {
+    const health = buildAssortmentHealth({
+      asOf: new Date('2026-09-14T00:00:00.000Z'),
+      period: {
+        from: new Date('2026-08-25T00:00:00.000Z'),
+        to: new Date('2026-09-14T00:00:00.000Z'),
+      },
+      stores: [
+        {
+          id: 'alpha',
+          tenantId: 'tenant-1',
+          externalDomain: 'alpha.example',
+          externalClubId: '1',
+          isActive: true,
+        },
+        {
+          id: 'beta',
+          tenantId: 'tenant-1',
+          externalDomain: 'beta.example',
+          externalClubId: '2',
+          isActive: true,
+        },
+      ],
+      products: [
+        { id: 'shared', isActive: true },
+        { id: 'other', isActive: true },
+      ],
+      storeProductIds: [
+        { storeId: 'alpha', productId: 'shared' },
+        { storeId: 'beta', productId: 'shared' },
+        { storeId: 'alpha', productId: 'foreign-product' },
+        { storeId: 'foreign-store', productId: 'shared' },
+      ],
+      inventorySnapshots: [
+        {
+          storeId: 'alpha',
+          productId: 'shared',
+          snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+          quantity: 1,
+        },
+        {
+          storeId: 'beta',
+          productId: 'shared',
+          snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+          quantity: 1,
+        },
+      ],
+      sales: [],
+      salesCoverage: [
+        {
+          storeId: 'alpha',
+          from: new Date('2026-08-01T00:00:00.000Z'),
+          to: new Date('2026-09-14T00:00:00.000Z'),
+          status: 'CONFIRMED',
+        },
+        {
+          storeId: 'beta',
+          from: new Date('2026-08-01T00:00:00.000Z'),
+          to: new Date('2026-09-14T00:00:00.000Z'),
+          status: 'CONFIRMED',
+        },
+      ],
+      writeOffCoverage: { status: 'CONFIRMED' },
+    });
+
+    expect(health.rows.map((row) => `${row.storeId}:${row.productId}`)).toEqual(
+      ['alpha:shared', 'beta:shared'],
+    );
+  });
+
+  it('selects the newest valid configuration regardless of input order', () => {
+    const configurations = [
+      {
+        tenantId: 'tenant-1',
+        productId: 'product-1',
+        externalDomain: 'club.example',
+        externalClubId: '1',
+        price: 100,
+        purchasePrice: 40,
+        updatedAt: new Date('2026-09-12T00:00:00.000Z'),
+      },
+      {
+        tenantId: 'tenant-1',
+        productId: 'product-1',
+        externalDomain: 'club.example',
+        externalClubId: '1',
+        price: 120,
+        purchasePrice: 50,
+        updatedAt: new Date('2026-09-13T00:00:00.000Z'),
+      },
+    ];
+    const input = {
+      asOf: new Date('2026-09-14T00:00:00.000Z'),
+      period: {
+        from: new Date('2026-08-25T00:00:00.000Z'),
+        to: new Date('2026-09-14T00:00:00.000Z'),
+      },
+      stores: [
+        {
+          id: 'store-1',
+          tenantId: 'tenant-1',
+          externalDomain: 'club.example',
+          externalClubId: '1',
+          isActive: true,
+        },
+      ],
+      products: [{ id: 'product-1', isActive: true }],
+      inventorySnapshots: [
+        {
+          storeId: 'store-1',
+          productId: 'product-1',
+          snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+          quantity: 2,
+        },
+      ],
+      sales: [],
+      salesCoverage: [
+        {
+          storeId: 'store-1',
+          from: new Date('2026-08-01T00:00:00.000Z'),
+          to: new Date('2026-09-14T00:00:00.000Z'),
+          status: 'CONFIRMED' as const,
+        },
+      ],
+      writeOffCoverage: { status: 'CONFIRMED' as const },
+    };
+
+    expect(
+      buildAssortmentHealth({ ...input, priceConfigurations: configurations })
+        .rows[0],
+    ).toMatchObject({
+      price: { value: 120 },
+      frozenValue: { value: 100, basis: 'CLUB_PURCHASE_PRICE' },
+    });
+    expect(
+      buildAssortmentHealth({
+        ...input,
+        priceConfigurations: [...configurations].reverse(),
+      }).rows[0],
+    ).toMatchObject({
+      price: { value: 120 },
+      frozenValue: { value: 100, basis: 'CLUB_PURCHASE_PRICE' },
+    });
+  });
+
+  it('keeps the purchase-cost valuation distinct from the OOS sale price', () => {
+    const health = buildAssortmentHealth({
+      asOf: new Date('2026-09-14T00:00:00.000Z'),
+      period: {
+        from: new Date('2026-08-25T00:00:00.000Z'),
+        to: new Date('2026-09-14T00:00:00.000Z'),
+      },
+      stores: [
+        {
+          id: 'store-1',
+          tenantId: 'tenant-1',
+          externalDomain: 'club.example',
+          externalClubId: '1',
+          isActive: true,
+        },
+      ],
+      products: [{ id: 'product-1', isActive: true, purchasePrice: 30 }],
+      inventorySnapshots: [
+        {
+          storeId: 'store-1',
+          productId: 'product-1',
+          snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+          quantity: 2,
+        },
+      ],
+      sales: [],
+      salesCoverage: [
+        {
+          storeId: 'store-1',
+          from: new Date('2026-08-01T00:00:00.000Z'),
+          to: new Date('2026-09-14T00:00:00.000Z'),
+          status: 'CONFIRMED',
+        },
+      ],
+      priceConfigurations: [
+        {
+          tenantId: 'tenant-1',
+          productId: 'product-1',
+          externalDomain: 'club.example',
+          externalClubId: '1',
+          price: 100,
+          updatedAt: new Date('2026-09-14T00:00:00.000Z'),
+        },
+      ],
+      writeOffCoverage: { status: 'CONFIRMED' },
+    });
+
+    expect(health.rows[0]).toMatchObject({
+      price: { value: 100, source: 'CLUB_CONFIGURATION' },
+      frozenValue: {
+        value: 60,
+        basis: 'PRODUCT_PURCHASE_PRICE',
+        state: 'PARTIAL',
+      },
+    });
+  });
+
+  it('publishes the purchase-cost basis on cost-only valuation summaries', () => {
+    const health = buildAssortmentHealth({
+      asOf: new Date('2026-09-14T00:00:00.000Z'),
+      period: {
+        from: new Date('2026-08-25T00:00:00.000Z'),
+        to: new Date('2026-09-14T00:00:00.000Z'),
+      },
+      stores: [
+        {
+          id: 'store-1',
+          tenantId: 'tenant-1',
+          externalDomain: 'club.example',
+          externalClubId: '1',
+          isActive: true,
+        },
+      ],
+      products: [
+        { id: 'frozen', isActive: true },
+        { id: 'excess', isActive: true },
+      ],
+      inventorySnapshots: [
+        {
+          storeId: 'store-1',
+          productId: 'frozen',
+          snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+          quantity: 4,
+        },
+        {
+          storeId: 'store-1',
+          productId: 'excess',
+          snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+          quantity: 40,
+        },
+      ],
+      sales: [
+        {
+          storeId: 'store-1',
+          productId: 'excess',
+          saleDate: new Date('2026-09-01T00:00:00.000Z'),
+          quantity: 1,
+          revenue: 20,
+        },
+      ],
+      salesCoverage: [
+        {
+          storeId: 'store-1',
+          from: new Date('2026-08-25T00:00:00.000Z'),
+          to: new Date('2026-09-14T00:00:00.000Z'),
+          status: 'CONFIRMED',
+        },
+      ],
+      priceConfigurations: [
+        {
+          tenantId: 'tenant-1',
+          productId: 'frozen',
+          externalDomain: 'club.example',
+          externalClubId: '1',
+          price: 20,
+          purchasePrice: 10,
+          updatedAt: new Date('2026-09-14T00:00:00.000Z'),
+        },
+        {
+          tenantId: 'tenant-1',
+          productId: 'excess',
+          externalDomain: 'club.example',
+          externalClubId: '1',
+          price: 20,
+          purchasePrice: 10,
+          updatedAt: new Date('2026-09-14T00:00:00.000Z'),
+        },
+      ],
+      writeOffCoverage: { status: 'CONFIRMED' },
+    });
+
+    expect(health.summary.frozenValue).toMatchObject({
+      value: 40,
+      basis: 'CLUB_PURCHASE_PRICE',
+    });
+    expect(health.summary.excessValue).toMatchObject({
+      basis: 'CLUB_PURCHASE_PRICE',
+    });
+  });
+
+  it('labels sale-only valuation summaries as sale-price estimates', () => {
+    const health = buildAssortmentHealth(
+      valuationSummaryInput({
+        products: [{ id: 'estimate', isActive: true }],
+        inventorySnapshots: [
+          {
+            storeId: 'store-1',
+            productId: 'estimate',
+            snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+            quantity: 4,
+          },
+        ],
+        priceConfigurations: [
+          {
+            tenantId: 'tenant-1',
+            productId: 'estimate',
+            externalDomain: 'club.example',
+            externalClubId: '1',
+            price: 20,
+            updatedAt: new Date('2026-09-14T00:00:00.000Z'),
+          },
+        ],
+      }),
+    );
+
+    expect(health.summary.frozenValue).toMatchObject({
+      value: 80,
+      state: 'PARTIAL',
+      basis: 'SALE_PRICE_ESTIMATE',
+      coverage: { covered: 0, total: 1 },
+      asOf: '2026-09-14',
+    });
+    expect(health.summary.excessValue).toMatchObject({
+      value: 80,
+      state: 'PARTIAL',
+      basis: 'SALE_PRICE_ESTIMATE',
+    });
+  });
+
+  it('marks mixed cost and sale-estimate valuation summaries as mixed', () => {
+    const health = buildAssortmentHealth(
+      valuationSummaryInput({
+        products: [
+          { id: 'cost', isActive: true },
+          { id: 'estimate', isActive: true },
+        ],
+        inventorySnapshots: [
+          {
+            storeId: 'store-1',
+            productId: 'cost',
+            snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+            quantity: 4,
+          },
+          {
+            storeId: 'store-1',
+            productId: 'estimate',
+            snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+            quantity: 4,
+          },
+        ],
+        priceConfigurations: [
+          {
+            tenantId: 'tenant-1',
+            productId: 'cost',
+            externalDomain: 'club.example',
+            externalClubId: '1',
+            price: 20,
+            purchasePrice: 10,
+            updatedAt: new Date('2026-09-14T00:00:00.000Z'),
+          },
+          {
+            tenantId: 'tenant-1',
+            productId: 'estimate',
+            externalDomain: 'club.example',
+            externalClubId: '1',
+            price: 20,
+            updatedAt: new Date('2026-09-14T00:00:00.000Z'),
+          },
+        ],
+      }),
+    );
+
+    expect(health.summary.frozenValue).toMatchObject({
+      value: 120,
+      state: 'PARTIAL',
+      basis: 'MIXED',
+      coverage: { covered: 1, total: 2 },
+    });
+    expect(health.summary.excessValue).toMatchObject({
+      value: 120,
+      state: 'PARTIAL',
+      basis: 'MIXED',
+    });
+  });
+
+  it('keeps unknown and stale valuation summaries null with their coverage and date', () => {
+    const health = buildAssortmentHealth(
+      valuationSummaryInput({
+        products: [{ id: 'unknown', isActive: true }],
+        inventorySnapshots: [
+          {
+            storeId: 'store-1',
+            productId: 'unknown',
+            snapshotDate: new Date('2026-09-12T00:00:00.000Z'),
+            quantity: 4,
+          },
+        ],
+      }),
+    );
+
+    expect(health.summary.frozenValue).toMatchObject({
+      value: null,
+      state: 'UNKNOWN',
+      basis: 'UNKNOWN',
+      coverage: { covered: 0, total: 1 },
+      asOf: null,
+    });
+    expect(health.summary.excessValue).toMatchObject({
+      value: null,
+      state: 'STALE',
+      basis: 'UNKNOWN',
+      coverage: { covered: 0, total: 1 },
+      asOf: '2026-09-12',
+    });
+  });
+
+  it('keeps a recent inventory observation fresh when its idempotent day marker is old', () => {
+    const health = buildAssortmentHealth(
+      valuationSummaryInput({
+        asOf: new Date('2026-09-15T13:00:00.000Z'),
+        period: {
+          from: new Date('2026-08-26T00:00:00.000Z'),
+          to: new Date('2026-09-15T13:00:00.000Z'),
+        },
+        products: [{ id: 'observed', isActive: true }],
+        inventorySnapshots: [
+          {
+            storeId: 'store-1',
+            productId: 'observed',
+            snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+            observedAt: new Date('2026-09-14T23:30:00.000Z'),
+            quantity: 4,
+          },
+        ],
+      }),
+    );
+
+    expect(health.rows[0].inventory).toMatchObject({
+      value: 4,
+      state: 'AVAILABLE',
+      asOf: '2026-09-14',
+    });
+  });
+
+  it('does not use an inventory observation that occurs after the snapshot cutoff', () => {
+    const health = buildAssortmentHealth(
+      valuationSummaryInput({
+        asOf: new Date('2026-09-14T12:00:00.000Z'),
+        period: {
+          from: new Date('2026-08-25T00:00:00.000Z'),
+          to: new Date('2026-09-14T12:00:00.000Z'),
+        },
+        products: [{ id: 'future-observation', isActive: true }],
+        inventorySnapshots: [
+          {
+            storeId: 'store-1',
+            productId: 'future-observation',
+            snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+            observedAt: new Date('2026-09-14T13:00:00.000Z'),
+            quantity: 4,
+          },
+        ],
+      }),
+    );
+
+    expect(health.rows[0].inventory).toMatchObject({
+      value: null,
+      state: 'MISSING',
+      coverage: { covered: 0, total: 1 },
+      asOf: null,
     });
   });
 });

@@ -42,6 +42,25 @@ export type AssortmentPriceMetric = AssortmentMetric<number> & {
   source: AssortmentPriceSource;
 };
 
+export type AssortmentValuationBasis =
+  | 'CLUB_PURCHASE_PRICE'
+  | 'SALES_UNIT_COST'
+  | 'PRODUCT_PURCHASE_PRICE'
+  | 'SALE_PRICE_ESTIMATE'
+  | 'UNKNOWN';
+
+export type AssortmentValuationMetric = AssortmentMetric<number> & {
+  basis: AssortmentValuationBasis;
+};
+
+export type AssortmentSummaryValuationBasis =
+  | AssortmentValuationBasis
+  | 'MIXED';
+
+export type AssortmentValuationSummaryMetric = AssortmentMetric<number> & {
+  basis: AssortmentSummaryValuationBasis;
+};
+
 export type AssortmentHealthStore = {
   id: string;
   tenantId: string;
@@ -54,12 +73,19 @@ export type AssortmentHealthProduct = {
   id: string;
   isActive: boolean;
   orderMultiplicity?: number | null;
+  purchasePrice?: number | null;
+};
+
+export type AssortmentStoreProductId = {
+  storeId: string;
+  productId: string;
 };
 
 export type AssortmentInventorySnapshot = {
   storeId: string;
   productId: string;
   snapshotDate: Date;
+  observedAt?: Date;
   quantity: number;
 };
 
@@ -69,6 +95,7 @@ export type AssortmentSale = {
   saleDate: Date;
   quantity: number;
   revenue: number;
+  cost?: number | null;
 };
 
 export type AssortmentSalesCoverage = {
@@ -84,6 +111,7 @@ export type AssortmentPriceConfiguration = {
   externalDomain: string;
   externalClubId: string;
   price: number;
+  purchasePrice?: number | null;
   updatedAt: Date;
 };
 
@@ -110,6 +138,7 @@ export type AssortmentHealthInput = {
   period: { from: Date; to: Date };
   stores: AssortmentHealthStore[];
   products: AssortmentHealthProduct[];
+  storeProductIds?: Iterable<AssortmentStoreProductId>;
   inventorySnapshots: AssortmentInventorySnapshot[];
   sales: AssortmentSale[];
   salesCoverage: AssortmentSalesCoverage[];
@@ -131,11 +160,11 @@ export type AssortmentHealthRow = {
   demand21d: AssortmentMetric<number>;
   price: AssortmentPriceMetric;
   noSales: Record<AssortmentNoSalesWindow, boolean | null>;
-  frozenValue: AssortmentMetric<number>;
+  frozenValue: AssortmentValuationMetric;
   turnoverDays: AssortmentMetric<number>;
   turnoverRate: AssortmentMetric<number>;
   excessQuantity: AssortmentMetric<number>;
-  excessValue: AssortmentMetric<number>;
+  excessValue: AssortmentValuationMetric;
   writeOffQuantity: AssortmentMetric<number>;
   writeOffAmount: AssortmentMetric<number>;
   risk: AssortmentRisk;
@@ -158,10 +187,10 @@ export type AssortmentHealth = {
     outOfStock: AssortmentMetric<number>;
     lowStock: AssortmentMetric<number>;
     noSales: Record<AssortmentNoSalesWindow, AssortmentMetric<number>>;
-    frozenValue: AssortmentMetric<number>;
+    frozenValue: AssortmentValuationSummaryMetric;
     turnoverDays: AssortmentMetric<number>;
     excessQuantity: AssortmentMetric<number>;
-    excessValue: AssortmentMetric<number>;
+    excessValue: AssortmentValuationSummaryMetric;
     writeOffQuantity: AssortmentMetric<number>;
     writeOffAmount: AssortmentMetric<number>;
   };
@@ -192,18 +221,25 @@ export function buildAssortmentHealth(
     input.inventorySnapshots,
     input.asOf,
   );
-  const rows = activeStores.flatMap((store) =>
-    activeProducts.map((product) =>
-      buildRow({
-        input,
-        store,
-        product,
-        excludedProductIds,
-        incomingKeys,
-        snapshotsByGrain,
-        staleAfterMs,
-      }),
-    ),
+  const storesById = new Map(activeStores.map((store) => [store.id, store]));
+  const productsById = new Map(
+    activeProducts.map((product) => [product.id, product]),
+  );
+  const memberships = input.storeProductIds
+    ? provenMemberships(input.storeProductIds, storesById, productsById)
+    : activeStores.flatMap((store) =>
+        activeProducts.map((product) => ({ store, product })),
+      );
+  const rows = memberships.map(({ store, product }) =>
+    buildRow({
+      input,
+      store,
+      product,
+      excludedProductIds,
+      incomingKeys,
+      snapshotsByGrain,
+      staleAfterMs,
+    }),
   );
 
   return { rows, summary: buildSummary(rows) };
@@ -269,9 +305,11 @@ function buildRow(context: {
     },
     {} as Record<AssortmentNoSalesWindow, boolean | null>,
   );
-  const frozenValue = valueMetric(
+  const frozenValue = valuationMetric(
+    input,
+    store,
+    product,
     noSales[21] === true ? inventory.value : null,
-    price,
     noSales[21] === null
       ? 'Для окна без продаж нет полного покрытия продаж или актуального остатка.'
       : null,
@@ -281,7 +319,9 @@ function buildRow(context: {
   const excess = excessMetrics(
     inventory,
     demand21d,
-    price,
+    input,
+    store,
+    product,
     input.asOf,
     input.excessStockDays ?? DEFAULT_EXCESS_STOCK_DAYS,
   );
@@ -335,6 +375,31 @@ function buildRow(context: {
   };
 }
 
+function provenMemberships(
+  storeProductIds: Iterable<AssortmentStoreProductId>,
+  storesById: Map<string, AssortmentHealthStore>,
+  productsById: Map<string, AssortmentHealthProduct>,
+) {
+  const seen = new Set<string>();
+  const memberships: Array<{
+    store: AssortmentHealthStore;
+    product: AssortmentHealthProduct;
+  }> = [];
+
+  for (const item of storeProductIds) {
+    const store = storesById.get(item.storeId);
+    const product = productsById.get(item.productId);
+    const key = grainKey(item.storeId, item.productId);
+
+    if (!store || !product || seen.has(key)) continue;
+
+    seen.add(key);
+    memberships.push({ store, product });
+  }
+
+  return memberships;
+}
+
 function buildSummary(
   rows: AssortmentHealthRow[],
 ): AssortmentHealth['summary'] {
@@ -373,7 +438,7 @@ function buildSummary(
     },
     {} as Record<AssortmentNoSalesWindow, AssortmentMetric<number>>,
   );
-  const frozenValue = aggregateRows(
+  const frozenValue = aggregateValuationRows(
     policyRows.filter((row) => row.noSales[21] !== false),
     (row) => row.frozenValue,
     (row) => row.frozenValue.value ?? 0,
@@ -384,7 +449,7 @@ function buildSummary(
     (row) => row.excessQuantity,
     (row) => row.excessQuantity.value ?? 0,
   );
-  const excessValue = aggregateRows(
+  const excessValue = aggregateValuationRows(
     policyRows,
     (row) => row.excessValue,
     (row) => row.excessValue.value ?? 0,
@@ -420,7 +485,11 @@ function latestSnapshotsAt(
 ) {
   const result = new Map<string, AssortmentInventorySnapshot>();
   snapshots.forEach((snapshot) => {
-    if (snapshot.snapshotDate > asOf) return;
+    if (
+      snapshot.snapshotDate > asOf ||
+      (snapshot.observedAt && snapshot.observedAt > asOf)
+    )
+      return;
     const key = grainKey(snapshot.storeId, snapshot.productId);
     const current = result.get(key);
     if (!current || current.snapshotDate < snapshot.snapshotDate)
@@ -443,8 +512,9 @@ function inventoryMetric(
       null,
     );
   }
+  const observedAt = snapshot.observedAt ?? snapshot.snapshotDate;
   const state =
-    asOf.getTime() - snapshot.snapshotDate.getTime() > staleAfterMs
+    asOf.getTime() - observedAt.getTime() > staleAfterMs
       ? 'STALE'
       : 'AVAILABLE';
   return metric(
@@ -452,7 +522,7 @@ function inventoryMetric(
     state,
     coverage(1, 1),
     state === 'STALE' ? 'Снимок остатка устарел.' : null,
-    dateValue(snapshot.snapshotDate),
+    dateValue(observedAt),
   );
 }
 
@@ -524,26 +594,8 @@ function priceMetric(
   store: AssortmentHealthStore,
   productId: string,
 ): AssortmentPriceMetric {
-  const config = (input.priceConfigurations ?? [])
-    .filter(
-      (item) =>
-        item.tenantId === store.tenantId &&
-        item.productId === productId &&
-        item.externalDomain === store.externalDomain &&
-        item.externalClubId === store.externalClubId &&
-        item.updatedAt <= input.asOf,
-    )
-    .sort(
-      (left, right) => right.updatedAt.getTime() - left.updatedAt.getTime(),
-    )[0];
-  const staleAfterMs =
-    (input.priceConfigurationStaleAfterHours ??
-      DEFAULT_PRICE_CONFIGURATION_STALE_AFTER_HOURS) *
-    60 *
-    60 *
-    1000;
-  const isFreshConfig =
-    config && input.asOf.getTime() - config.updatedAt.getTime() <= staleAfterMs;
+  const config = latestConfiguration(input, store, productId);
+  const isFreshConfig = isFreshConfiguration(config, input);
   if (
     config &&
     isFreshConfig &&
@@ -640,6 +692,43 @@ function priceMetric(
   };
 }
 
+function latestConfiguration(
+  input: AssortmentHealthInput,
+  store: AssortmentHealthStore,
+  productId: string,
+) {
+  return (input.priceConfigurations ?? [])
+    .filter(
+      (item) =>
+        item.tenantId === store.tenantId &&
+        item.productId === productId &&
+        item.externalDomain === store.externalDomain &&
+        item.externalClubId === store.externalClubId &&
+        item.updatedAt <= input.asOf,
+    )
+    .sort(
+      (left, right) => right.updatedAt.getTime() - left.updatedAt.getTime(),
+    )[0];
+}
+
+function isFreshConfiguration(
+  configuration: AssortmentPriceConfiguration | undefined,
+  input: AssortmentHealthInput,
+) {
+  if (!configuration) return false;
+
+  const staleAfterMs =
+    (input.priceConfigurationStaleAfterHours ??
+      DEFAULT_PRICE_CONFIGURATION_STALE_AFTER_HOURS) *
+    60 *
+    60 *
+    1000;
+
+  return (
+    input.asOf.getTime() - configuration.updatedAt.getTime() <= staleAfterMs
+  );
+}
+
 function turnoverMetrics(
   inventory: AssortmentMetric<number>,
   input: AssortmentHealthInput,
@@ -724,7 +813,9 @@ function turnoverMetrics(
 function excessMetrics(
   inventory: AssortmentMetric<number>,
   demand: AssortmentMetric<number>,
-  price: AssortmentPriceMetric,
+  input: AssortmentHealthInput,
+  store: AssortmentHealthStore,
+  product: AssortmentHealthProduct,
   asOf: Date,
   excessStockDays: number,
 ) {
@@ -737,7 +828,19 @@ function excessMetrics(
       source.reason,
       source.asOf,
     );
-    return { quantity: unavailable, value: unavailable };
+    const valuationState =
+      source.state === 'AVAILABLE' || source.state === 'PARTIAL'
+        ? 'UNKNOWN'
+        : source.state;
+    return {
+      quantity: unavailable,
+      value: valuationUnavailable(
+        valuationState,
+        source.coverage,
+        source.reason,
+        source.asOf,
+      ),
+    };
   }
   const quantity = Math.max(
     0,
@@ -752,7 +855,7 @@ function excessMetrics(
   );
   return {
     quantity: quantityMetric,
-    value: valueMetric(quantity, price, null, asOf),
+    value: valuationMetric(input, store, product, quantity, null, asOf),
   };
 }
 
@@ -802,46 +905,133 @@ function writeOffMetrics(
   };
 }
 
-function valueMetric(
+function valuationMetric(
+  input: AssortmentHealthInput,
+  store: AssortmentHealthStore,
+  product: AssortmentHealthProduct,
   quantity: number | null,
-  price: AssortmentPriceMetric,
   unavailableReason: string | null,
   asOf: Date,
-): AssortmentMetric<number> {
+): AssortmentValuationMetric {
   if (quantity === null) {
-    return metric<number>(
-      null,
+    return valuationUnavailable(
       'UNKNOWN',
       coverage(0, 1),
       unavailableReason ?? 'Стоимость не применима к этому товару.',
       null,
     );
   }
-  if (price.value === null) {
-    return metric<number>(
-      null,
-      'UNKNOWN',
-      coverage(0, 1),
-      'Нет подтвержденной цены для оценки остатка.',
-      null,
+  const config = latestConfiguration(input, store, product.id);
+  const configPurchasePrice = config?.purchasePrice;
+  if (isKnownMoney(configPurchasePrice)) {
+    const fresh = isFreshConfiguration(config, input);
+    return valuationFromUnitPrice(
+      quantity,
+      configPurchasePrice,
+      fresh ? 'AVAILABLE' : 'PARTIAL',
+      'CLUB_PURCHASE_PRICE',
+      coverage(1, 1),
+      fresh ? null : 'Оценка по устаревшей закупочной цене конфигурации клуба.',
+      dateValue(config.updatedAt),
     );
   }
-  if (price.state !== 'AVAILABLE') {
-    return metric<number>(
-      null,
-      price.state,
-      price.coverage,
-      price.reason ?? 'Цена недостаточно свежа для точной оценки остатка.',
-      price.asOf,
-    );
-  }
-  return metric(
-    quantity * price.value,
-    'AVAILABLE',
-    coverage(1, 1),
-    null,
-    dateValue(asOf),
+  const periodTo = boundedTo(input.period.to, input.asOf);
+  const salesCoverage = salesCoverageMetric(
+    input.salesCoverage,
+    store.id,
+    input.period.from,
+    periodTo,
   );
+  const costSales = salesInWindow(
+    input.sales,
+    store.id,
+    product.id,
+    input.period.from,
+    periodTo,
+  );
+  const costQuantity = sum(costSales.map((sale) => sale.quantity));
+  const cost = sum(
+    costSales.map((sale) =>
+      typeof sale.cost === 'number' && Number.isFinite(sale.cost)
+        ? sale.cost
+        : Number.NaN,
+    ),
+  );
+  if (
+    salesCoverage.state === 'AVAILABLE' &&
+    costQuantity > 0 &&
+    Number.isFinite(cost)
+  ) {
+    return valuationFromUnitPrice(
+      quantity,
+      cost / costQuantity,
+      'PARTIAL',
+      'SALES_UNIT_COST',
+      salesCoverage.coverage,
+      'Оценка по подтвержденной себестоимости продаж за период.',
+      dateValue(periodTo),
+    );
+  }
+  if (isKnownMoney(product.purchasePrice)) {
+    return valuationFromUnitPrice(
+      quantity,
+      product.purchasePrice,
+      'PARTIAL',
+      'PRODUCT_PURCHASE_PRICE',
+      coverage(1, 1),
+      'Оценка по закупочной цене каталога товара.',
+      dateValue(asOf),
+    );
+  }
+  const salePrice = priceMetric(input, store, product.id);
+  if (salePrice.value !== null) {
+    return valuationFromUnitPrice(
+      quantity,
+      salePrice.value,
+      'PARTIAL',
+      'SALE_PRICE_ESTIMATE',
+      salePrice.coverage,
+      'Оценка по цене продажи; это не себестоимость и не вложенные деньги.',
+      salePrice.asOf,
+    );
+  }
+  return valuationUnavailable(
+    'UNKNOWN',
+    coverage(0, 1),
+    'Нет подтвержденной цены для оценки остатка.',
+    null,
+  );
+}
+
+function valuationFromUnitPrice(
+  quantity: number,
+  unitPrice: number,
+  state: Extract<AssortmentMetricState, 'AVAILABLE' | 'PARTIAL'>,
+  basis: Exclude<AssortmentValuationBasis, 'UNKNOWN'>,
+  metricCoverage: AssortmentCoverage,
+  reason: string | null,
+  asOf: string | null,
+): AssortmentValuationMetric {
+  return {
+    ...metric(quantity * unitPrice, state, metricCoverage, reason, asOf),
+    basis,
+  };
+}
+
+function valuationUnavailable(
+  state: Exclude<AssortmentMetricState, 'AVAILABLE' | 'PARTIAL'>,
+  metricCoverage: AssortmentCoverage,
+  reason: string | null,
+  asOf: string | null,
+): AssortmentValuationMetric {
+  return {
+    ...metric<number>(null, state, metricCoverage, reason, asOf),
+    basis: 'UNKNOWN',
+  };
+}
+
+function isKnownMoney(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
 function recommendation(
@@ -885,6 +1075,24 @@ function aggregateRows(
     aggregateReason(state),
     oldestKnownAsOf(rows.map((row) => selectMetric(row).asOf)),
   );
+}
+
+function aggregateValuationRows(
+  rows: AssortmentHealthRow[],
+  selectMetric: (row: AssortmentHealthRow) => AssortmentValuationMetric,
+  selectValue: (row: AssortmentHealthRow) => number,
+): AssortmentValuationSummaryMetric {
+  const aggregate = aggregateRows(rows, selectMetric, selectValue);
+  const bases = new Set(
+    rows
+      .map(selectMetric)
+      .filter((item) => item.value !== null)
+      .map((item) => item.basis),
+  );
+  const basis =
+    bases.size === 0 ? 'UNKNOWN' : bases.size === 1 ? [...bases][0] : 'MIXED';
+
+  return { ...aggregate, basis };
 }
 
 function averageRows(

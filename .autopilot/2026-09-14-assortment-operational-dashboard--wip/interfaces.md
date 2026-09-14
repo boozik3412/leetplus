@@ -16,6 +16,12 @@ R13.1: все новые числовые карточки кликабельн�
 
 ## Правила исполнения
 
+- D05: `AssortmentInventorySnapshot.observedAt?: Date` получает InventorySnapshot.updatedAt; snapshotDate остаётся дневным ключом. Cutoff проверяет обе даты, freshness/asOf metadata — observedAt??snapshotDate. Это предотвращает будущие наблюдения и ложное stale посленочногозапуска.
+
+- D04: OOS использует sale price, frozen/excess — отдельную valuationPrice с basis. Loader передаёт config.purchasePrice и SalesFact.cost; fallback sale valuation ясно помечен как оценка, не себестоимость. Product.purchasePrice0 не делает прочие cost sources недоступными.
+
+- D03: API loader передаёт engine явный `storeProductIds` из подтверждённых config/inventory/sales. Общий каталог не размножается на все клубы. Engine01 получает additive поле, форма согласуется health_foundation→api_integration.
+
 - D01: session Store resolution не меняет historical timestamps/date parserTZ. D02: stock `asOf` отдельно от `demandTo` (default performance `period.to`); defaultсклад актуальный, demandзакрытыйпериод. ReportlinkscarryasOf+from/to.
 
 - Рабочий repo: C:/Users/ALIENWARE/Documents/New project/leetplus-assortment-action-center, branch codex/assortment-operational-dashboard-20260914, source base1907930c. Все агенты используют этот checkout; свои ветки/worktrees не создавать.
@@ -27,7 +33,7 @@ R13.1: все новые числовые карточки кликабельн�
 - Тесты и код выполняют агенты; root ведёт состояние/контракты/проверки/коммиты. Не коммитить самостоятельно. Не трогать .autopilot/AGENTS/global package manifests вне своей зоны; сообщать новые интерфейсы root.
 - Отсутствующие source факты остаются unknown; не присваивать multi-club store наугад. Товарные операции не чеки.
 
-## Из01 — общий engine (на review)
+## Из01 — общий engine (review PASS, committed)
 
 - `apps/api/src/common/assortment-health.ts`: `buildAssortmentHealth(input: AssortmentHealthInput): AssortmentHealth`.
 - Input: `asOf; demandTo?; period; stores; products; inventorySnapshots; sales; salesCoverage; priceConfigurations; exclusions; writeOffs`.
@@ -40,3 +46,20 @@ R13.1: все новые числовые карточки кликабельн�
 - Пользователь явно разрешил локальный Chromium через Playwright дляdesktop/narrow QA после CUA auth-token blocker. Existing npx @playwright/cli0.1.19 and installed Chromium доступны; новые browserdeps не нужны.
 
 -01 repair: `excessStockDays?: number` defaultexisting30; `asOf` bounds allfactwindows,raw transactionprice requires confirmed salescoverage; config newest<=asOf; aggregate staleremainsstale,unknownnosales retainedinvaluationcoverage. Tests9+1,lint,tscPASS.
+
+##02 — согласование API (ещё реализуется)
+
+- Dashboard query: `asOf=YYYY-MM-DD` отдельно от performance period; выбранное noSalesDays7/14/21/30 согласуется с summary.
+- Existing report API routes: operations, inventory-turnover. Query supports repeated `storeIds`/legacy`storeId`, repeated`categoryIds`/legacy`categoryId`, `from,to,asOf`, `noSalesDays=7|14|21|30`, `stockStatus=OUT_OF_STOCK|LOW_STOCK`, `excess=true|false`.
+- Response сохраняет legacy storeId и добавляет storeIds/categoryIds/asOf/noSalesDays и компактную assortmentHealth summary. Rows остаются в отчётах, не дублируются массово в dashboard.
+- Daily sales coverage legacy `summary.domains[]` содержит domain/status, sourceCounts источников. Новая03форма сохраняет quick/inventory раздельно; SUCCESS QUICK не доказывает inventory/movements.
+
+##03 — загрузка источников (на review)
+
+- BUSINESS_FACTS legacy summary.domains/top-level counts остаются QUICK; additive summary.quick/inventory и sourceCounts.quick/inventory.
+- Current ordinary INTERNAL daily обновляет INVENTORY, только если не подтверждены свежие successful AUTO INVENTORY jobs всех active source domains за36ч. Уже завершённый QUICK не перезаписывается при inventory-only run; failure виден в IntegrationSyncJob и результате daily.
+- Explicit date canary не выдаёт live goods за исторический stock. После rollout нужен обычный bounded native run для фактического current inventory.
+- Session binding через общий resolver, полный source topology; parserTZ берётся только из explicit club как раньше. Inferred binding не меняет timestamps.
+- Targeted3suites54PASS, lintPASS; общий tsc ждёт завершения concurrent common/loader изменения.
+
+- D04/D05 common final: summary frozenValue/excessValue имеют basis (включая MIXED); InventorySnapshot observedAt optional bounded<=asOf и определяет freshness/asOf. Common18tests+lintPASS; общийAPI191suites3540tests+2todoPASS, build-tscPASS перед handoff02.

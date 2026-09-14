@@ -1,20 +1,21 @@
-# LeetPlus open beta — текущее состояние на 11.09.2026
+# LeetPlus open beta — текущее состояние на 14.09.2026
 
-Source successor14.09 готовит устранение storeless bonus delivery и расхождения
+Deployed successor14.09 устраняет storeless bonus delivery и расхождение
 прогресса накопительной карты. Fresh guest claim связывает wallet/ledger с
 проверенным клубом выплаты, сохраняя domain-scoped source event/reward; worker
 повторно проверяет binding. Для покупок/пополнений отображение учитывает ту же
-историю после rule activation, что и квалификация. Runtime/schema/worker grants
-ниже остаются фактической production baseline до отдельного admitted rollout.
-Инцидентные выплаты требуют точной сверки существующих записей и отдельного
-учёта согласованной компенсации: [контракт](../support/bonus-settlement-and-topup-progress.md).
+историю после rule activation, что и квалификация. Подтверждены 14 существующих
+выплат девяти гостям на 4 200 бонусов, включая отдельно согласованные 2 500
+компенсации. Новых наград/XP и повторных выплат нет.
+[Контракт](../support/bonus-settlement-and-topup-progress.md),
+[production evidence](../deployment/bonus-topup-recovery-2026-09-14.md).
 
 Сайт перенесён на1337 (`192.168.1.137` / public `188.234.220.76`). Exact
-`bcb0a4d37e5791b04cc4707aa65c35680385836e` обслуживается active blue,
-green399876 сохранён hot rollback; accepted Compose generation3. Data/control399876
+`05cad9cd1611c014453603475e8e1ba4c953f839` обслуживается active green,
+bluebcb сохранён hot rollback; accepted Compose generation4. Data/control399876
 не заменялись при app rollout. Source VDS6097 теперь
 HTTPS proxy с persistently masked БД/приложениями и disabled worker timers.
-DNS root/www/api подтверждён на master/NS5/NS6/Google/Cloudflare в12:16:23UTC.
+DNS root/www/api подтверждён на master/NS5/NS6/Google/Cloudflare 11.09 в12:16:23UTC.
 
 Это инфраструктурный перенос существующих tenant/data и прежних полномочий.
 Он не создаёт внешний beta GO, не расширяет INTERNAL worker scope и не включает
@@ -25,11 +26,11 @@ dormant split runtime. Данные внешнего пилота и ключ е
 | Поле               | Состояние                                                                                                                       |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision   | Прежние отдельные gates массового открытого запуска сохраняются; controlled onboarding доступен в разрешённых pilot tenant      |
-| Production runtime | Exactbcb0a4d3, active blue + healthy green399876, generation3 на1337                                                            |
-| Release authority  | Fast34604304891/Full34604305010 SUCCESS, Docker admission79ea27d3…, ordinary app operation722bf10f… terminal                    |
+| Production runtime | Exact05cad9cd, active green + hot rollback bluebcb, generation4 на1337                                                            |
+| Release authority  | Fast34820536009/Full34820536006 SUCCESS, Docker admission3f35e5ab…, ordinary app operationb3f388e2… terminal                    |
 | Prisma schema      | CURRENT191, `20260908180000_external_langame_simple_onboarding`, unfinished0; bridgeOFF/reportingLIVE                           |
-| Workers            | Оба native canary PASS и новые TIMER grants exactbcb/generation3/INTERNALdemo; API schedulers OFF                               |
-| User acceptance    | Новый вход Telegram, профиль и привычный кабинет подтверждены владельцем; corporate/guest и cross-token acceptance PASS         |
+| Workers            | Оба native CANARY PASS; TIMER grants exact05/generation4/INTERNALdemo enabled/active; исходные profiles восстановлены, API schedulers OFF |
+| User acceptance    | Natural Telegram canary подтверждён11.09; на14.09 corporate и operator guest diagnostic/cross-token PASS, не новый natural login |
 | Tenant acceptance  | Native acceptance exact4 demo Store; customer tenant/store ownership не менялся                                                 |
 | Platform admin     | `/administration` → явный подписанный tenant context; role-aware landing сохраняется                                            |
 | External Langame   | MANUAL partial sync deployed:1171 импорт466/423active, категории/конфигурация отмечены недоступными; exact Store scope сохранён |

@@ -51,3 +51,9 @@ If a change alters any route ownership, identity, secret, process, database
 role, scheduler placement, provider egress or rollout state, update
 `docs/security/runtime-security-contours.md` and the current open-beta status in
 the same change.
+
+<!-- autopilot:start -->
+## Ассортимент: текущая работа
+
+Исправление источников, расчётов и интерфейса ассортиментного дашборда ведётся по требованиям в `.autopilot/2026-09-14-assortment-operational-dashboard--wip/manifest.md`. Состояние — `.autopilot/state.js`. Проверки и ошибки — в отдельном `deploy-evidence/assortment-operational-20260914/ERROR_LOG.md`.
+<!-- autopilot:end -->

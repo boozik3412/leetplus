@@ -1,5 +1,10 @@
 import type { ConfigService } from '@nestjs/config';
-import { TenantCustomerStage, TenantModule } from '@prisma/client';
+import {
+  DailyDataCoverageScope,
+  DailyDataCoverageStatus,
+  TenantCustomerStage,
+  TenantModule,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import type { BusinessSnapshotService } from './business-snapshot.service';
@@ -30,6 +35,12 @@ describe('LangameDailySyncService tenant execution admission', () => {
       dailyDataCoverage: {
         findUnique: jest.fn(),
         upsert: jest.fn(),
+      },
+      integrationSyncJob: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      integrationSource: {
+        findMany: jest.fn().mockResolvedValue([{ domain: 'club.example' }]),
       },
     };
     const langameSyncService = {
@@ -157,6 +168,7 @@ describe('LangameDailySyncService tenant execution admission', () => {
       businessDate: new Date('2026-07-27T00:00:00.000Z'),
       dateInput: '2026-07-27',
       force: false,
+      includeCurrentInventory: false,
     });
   });
 
@@ -297,5 +309,268 @@ describe('LangameDailySyncService tenant execution admission', () => {
     expect(
       subject.businessSnapshotService.runSnapshotsForTenant,
     ).not.toHaveBeenCalled();
+  });
+
+  it('adds an actual-date inventory read before closing the daily QUICK facts coverage', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-09-14T09:00:00.000Z'));
+
+    try {
+      const subject = createSubject();
+      subject.prisma.tenant.findMany.mockResolvedValue([
+        { id: 'tenant-internal', slug: 'internal' },
+      ]);
+      subject.admissionService.evaluate.mockResolvedValue({
+        allowed: true,
+        tenantId: 'tenant-internal',
+        reasonCode: 'ALLOWED',
+        failedRequirement: null,
+        customerStage: TenantCustomerStage.INTERNAL,
+      });
+      subject.langameSyncService.syncTenantById
+        .mockResolvedValueOnce({ failedSources: 0, partialSources: 0 })
+        .mockResolvedValueOnce({ failedSources: 0, partialSources: 0 });
+      subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
+        sources: 0,
+        failedSources: 0,
+        sourceResults: [],
+      });
+      subject.businessSnapshotService.runSnapshotsForTenant.mockResolvedValue({
+        runs: [],
+      });
+
+      await subject.service.runDailySync();
+
+      expect(subject.langameSyncService.syncTenantById).toHaveBeenNthCalledWith(
+        1,
+        'tenant-internal',
+        {
+          dateFrom: '2026-09-13',
+          dateTo: '2026-09-13',
+          mode: 'QUICK',
+          trigger: 'AUTO',
+        },
+        'LANGAME_DAILY_SYNC',
+      );
+      expect(subject.langameSyncService.syncTenantById).toHaveBeenNthCalledWith(
+        2,
+        'tenant-internal',
+        {
+          mode: 'INVENTORY',
+          trigger: 'AUTO',
+        },
+        'LANGAME_DAILY_SYNC',
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('refreshes current inventory after legacy QUICK coverage closes without rewriting sales coverage', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-09-14T09:00:00.000Z'));
+
+    try {
+      const subject = createSubject();
+      subject.prisma.tenant.findMany.mockResolvedValue([
+        { id: 'tenant-internal', slug: 'internal' },
+      ]);
+      subject.prisma.dailyDataCoverage.findUnique.mockResolvedValue({
+        status: 'SUCCESS',
+      });
+      subject.prisma.integrationSyncJob.findMany.mockResolvedValue([]);
+      subject.admissionService.evaluate.mockResolvedValue({
+        allowed: true,
+        tenantId: 'tenant-internal',
+        reasonCode: 'ALLOWED',
+        failedRequirement: null,
+        customerStage: TenantCustomerStage.INTERNAL,
+      });
+      subject.langameSyncService.syncTenantById.mockResolvedValue({
+        failedSources: 0,
+        partialSources: 0,
+      });
+
+      await subject.service.runDailySync();
+
+      expect(subject.langameSyncService.syncTenantById).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(subject.langameSyncService.syncTenantById).toHaveBeenCalledWith(
+        'tenant-internal',
+        {
+          mode: 'INVENTORY',
+          trigger: 'AUTO',
+        },
+        'LANGAME_DAILY_SYNC',
+      );
+      expect(subject.prisma.dailyDataCoverage.upsert).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps successful QUICK domain evidence when the current inventory source fails', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-09-14T09:00:00.000Z'));
+
+    try {
+      const subject = createSubject();
+      subject.prisma.tenant.findMany.mockResolvedValue([
+        { id: 'tenant-internal', slug: 'internal' },
+      ]);
+      subject.admissionService.evaluate.mockResolvedValue({
+        allowed: true,
+        tenantId: 'tenant-internal',
+        reasonCode: 'ALLOWED',
+        failedRequirement: null,
+        customerStage: TenantCustomerStage.INTERNAL,
+      });
+      subject.langameSyncService.syncTenantById
+        .mockResolvedValueOnce({
+          sources: 1,
+          failedSources: 0,
+          partialSources: 0,
+          sourceResults: [
+            {
+              domain: 'club.example',
+              status: 'SUCCESS',
+              discrepancyLogStatus: 'NOT_REQUIRED',
+              discrepancyLogError: null,
+              errorMessage: null,
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          sources: 1,
+          failedSources: 1,
+          partialSources: 0,
+          sourceResults: [
+            {
+              domain: 'club.example',
+              status: 'FAILED',
+              discrepancyLogStatus: 'NOT_REQUIRED',
+              discrepancyLogError: null,
+              errorMessage: 'inventory unavailable',
+            },
+          ],
+        });
+      subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
+        sources: 0,
+        failedSources: 0,
+        sourceResults: [],
+      });
+
+      const result = await subject.service.runDailySync();
+
+      expect(result.results[0]?.scopes).toContainEqual(
+        expect.objectContaining({
+          scope: DailyDataCoverageScope.BUSINESS_FACTS,
+          status: DailyDataCoverageStatus.FAILED,
+          skipped: false,
+          errorMessage: 'Langame daily facts source is incomplete',
+        }) as unknown,
+      );
+      const failedCoverage = subject.prisma.dailyDataCoverage.upsert.mock.calls
+        .map(
+          ([call]: [
+            {
+              create: Record<string, unknown>;
+              update: Record<string, unknown>;
+            },
+          ]) => call.update ?? call.create,
+        )
+        .find((data: Record<string, unknown>) => data.status === 'FAILED');
+      expect(failedCoverage).toMatchObject({
+        summary: {
+          domains: [expect.objectContaining({ domain: 'club.example' })],
+          quick: {
+            domains: [expect.objectContaining({ domain: 'club.example' })],
+          },
+          inventory: {
+            domains: [
+              expect.objectContaining({
+                domain: 'club.example',
+                status: 'FAILED',
+              }),
+            ],
+          },
+        },
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('requests inventory for a stale active domain and skips it only when every domain is fresh', async () => {
+    jest.useFakeTimers();
+    const now = new Date('2026-09-14T09:00:00.000Z');
+    jest.setSystemTime(now);
+
+    try {
+      const subject = createSubject();
+      subject.prisma.tenant.findMany.mockResolvedValue([
+        { id: 'tenant-internal', slug: 'internal' },
+      ]);
+      subject.prisma.dailyDataCoverage.findUnique.mockResolvedValue({
+        status: 'SUCCESS',
+      });
+      subject.prisma.integrationSource.findMany.mockResolvedValue([
+        { domain: 'first.example' },
+        { domain: 'second.example' },
+      ]);
+      const successfulInventoryJobs = [
+        {
+          domain: 'first.example',
+          finishedAt: new Date(now.getTime() - 36 * 60 * 60 * 1000 - 1),
+        },
+        {
+          domain: 'second.example',
+          finishedAt: new Date(now.getTime() - 35 * 60 * 60 * 1000),
+        },
+      ];
+      subject.prisma.integrationSyncJob.findMany.mockImplementation(
+        ({ where }: { where: { finishedAt: { gte: Date } } }) =>
+          Promise.resolve(
+            successfulInventoryJobs
+              .filter((job) => job.finishedAt >= where.finishedAt.gte)
+              .map(({ domain }) => ({ domain })),
+          ),
+      );
+      subject.admissionService.evaluate.mockResolvedValue({
+        allowed: true,
+        tenantId: 'tenant-internal',
+        reasonCode: 'ALLOWED',
+        failedRequirement: null,
+        customerStage: TenantCustomerStage.INTERNAL,
+      });
+      subject.langameSyncService.syncTenantById.mockResolvedValue({
+        failedSources: 0,
+        partialSources: 0,
+      });
+
+      const stale = await subject.service.runDailySync();
+      const staleTenant = stale.results[0] as unknown as {
+        inventoryRequested: boolean;
+      };
+      expect(staleTenant.inventoryRequested).toBe(true);
+      expect(subject.langameSyncService.syncTenantById).toHaveBeenCalledTimes(
+        1,
+      );
+
+      successfulInventoryJobs[0].finishedAt = new Date(
+        now.getTime() - 35 * 60 * 60 * 1000,
+      );
+      const fresh = await subject.service.runDailySync();
+      const freshTenant = fresh.results[0] as unknown as {
+        inventoryRequested: boolean;
+      };
+      expect(freshTenant.inventoryRequested).toBe(false);
+      expect(subject.langameSyncService.syncTenantById).toHaveBeenCalledTimes(
+        1,
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

@@ -290,6 +290,9 @@ export class LangameSyncService {
     );
     const shouldSyncSales = ['QUICK', 'BACKFILL', 'FULL'].includes(mode);
     const shouldSyncClubRevenue = shouldSyncSales;
+    // Goods are a live provider read, so their date marker must describe the
+    // observation day instead of the requested sales/backfill period.
+    const inventorySnapshotDate = this.startOfUtcDay(new Date());
 
     for (const source of sources) {
       const externalSourceScope = externalSourceScopes?.get(source.id) ?? null;
@@ -523,7 +526,7 @@ export class LangameSyncService {
                   String(club.id),
                   productsByExternalId,
                   goods,
-                  period.toDate,
+                  inventorySnapshotDate,
                   discrepancies,
                 );
                 result.inventorySnapshots += inventorySnapshots;

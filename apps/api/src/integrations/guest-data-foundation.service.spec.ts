@@ -201,6 +201,7 @@ describe('GuestDataFoundationService', () => {
     },
     guestSession: {
       upsert: jest.fn(),
+      findUnique: jest.fn(),
     },
     guestLog: {
       upsert: jest.fn(),
@@ -336,6 +337,7 @@ describe('GuestDataFoundationService', () => {
     prisma.guestStaffIdentityMapping.findMany.mockResolvedValue([]);
     prisma.guestBonusBalanceCurrent.findMany.mockResolvedValue([]);
     prisma.guestBonusBalanceCurrent.upsert.mockResolvedValue({});
+    prisma.guestSession.findUnique.mockResolvedValue(null);
     prisma.langameStaffUser.upsert.mockResolvedValue({});
 
     langameClient.listGuestGroups.mockResolvedValue([
@@ -983,5 +985,147 @@ describe('GuestDataFoundationService', () => {
     expect(status.running).toBe(false);
     expect(status.status).toBe('FAILED');
     expect(status.latestRun?.errorMessage).toContain('2 часов');
+  });
+
+  it('binds a missing-club session only to its unique domain store and rejects a foreign-domain club', async () => {
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-domain',
+        tenantId: 'tenant-1',
+        externalDomain: 'club.example',
+        externalClubId: '10',
+        isActive: true,
+        timeZone: 'Europe/Moscow',
+      },
+      {
+        id: 'store-other-domain',
+        tenantId: 'tenant-1',
+        externalDomain: 'other.example',
+        externalClubId: '200',
+        isActive: true,
+        timeZone: 'Europe/Moscow',
+      },
+    ]);
+    langameClient.listGuestSessions.mockResolvedValue([
+      {
+        id: 101,
+        guest_id: 42,
+        date_start: '2026-05-01 10:00:00',
+        date_stop: '2026-05-01 12:00:00',
+      },
+      {
+        id: 102,
+        guest_id: 42,
+        club_id: 200,
+        date_start: '2026-05-01 10:00:00',
+        date_stop: '2026-05-01 12:00:00',
+      },
+    ]);
+
+    await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    const sessionUpserts = prisma.guestSession.upsert.mock.calls as Array<
+      [
+        {
+          create: { externalSessionId: string; storeId: string | null };
+          update: { storeId: string | null };
+        },
+      ]
+    >;
+    expect(sessionUpserts).toEqual(
+      expect.arrayContaining([
+        [
+          expect.objectContaining({
+            create: expect.objectContaining({
+              externalSessionId: '101',
+              storeId: 'store-domain',
+            }) as unknown,
+            update: expect.objectContaining({
+              storeId: 'store-domain',
+            }) as unknown,
+          }) as unknown,
+        ],
+        [
+          expect.objectContaining({
+            create: expect.objectContaining({
+              externalSessionId: '102',
+              storeId: null,
+            }) as unknown,
+            update: expect.objectContaining({ storeId: null }) as unknown,
+          }) as unknown,
+        ],
+      ]),
+    );
+  });
+
+  it('retains a valid ambiguous-domain binding on rerun without shifting session timestamps', async () => {
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-existing',
+        tenantId: 'tenant-1',
+        externalDomain: 'club.example',
+        externalClubId: '10',
+        isActive: true,
+        timeZone: 'Europe/Moscow',
+      },
+      {
+        id: 'store-shared-domain',
+        tenantId: 'tenant-1',
+        externalDomain: 'club.example',
+        externalClubId: '11',
+        isActive: true,
+        timeZone: 'Europe/Moscow',
+      },
+    ]);
+    prisma.guestSession.findUnique.mockResolvedValue({
+      storeId: 'store-existing',
+    });
+    langameClient.listGuestSessions.mockResolvedValue([
+      {
+        id: 103,
+        guest_id: 42,
+        date_start: '2026-05-01 10:00:00',
+        date_stop: '2026-05-01 12:00:00',
+      },
+    ]);
+
+    await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+    await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    const sessionUpserts = prisma.guestSession.upsert.mock.calls as Array<
+      [
+        {
+          create: {
+            externalSessionId: string;
+            storeId: string | null;
+            startedAt: Date | null;
+          };
+          update: { storeId: string | null; startedAt: Date | null };
+        },
+      ]
+    >;
+    const rerunSessions = sessionUpserts.filter(
+      ([call]) => call.create.externalSessionId === '103',
+    );
+    expect(rerunSessions).toHaveLength(2);
+    for (const [session] of rerunSessions) {
+      expect(session.create.storeId).toBe('store-existing');
+      expect(session.update.storeId).toBe('store-existing');
+      expect(session.create.startedAt).toEqual(
+        new Date('2026-05-01T10:00:00.000Z'),
+      );
+      expect(session.update.startedAt).toEqual(
+        new Date('2026-05-01T10:00:00.000Z'),
+      );
+    }
   });
 });

@@ -19,6 +19,10 @@ import {
   randomBytes,
 } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import {
+  resolveGuestSessionStore,
+  type GuestSessionStoreCandidate,
+} from '../common/guest-session-store';
 import { resolveSecuritySecret } from '../config/environment-validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -915,6 +919,8 @@ export class GuestDataFoundationService {
     const now = new Date();
     const snapshotDate = this.startOfUtcDay(now);
     const storesByExternalClubId = await this.loadStoreLookup(tenantId, domain);
+    const sessionStoreCandidates =
+      await this.loadSessionStoreCandidates(tenantId);
     const langamePeriod = this.toLangameDatePeriod(period);
 
     const pcTypesInClubs = await this.captureEndpoint(
@@ -1047,6 +1053,7 @@ export class GuestDataFoundationService {
       sessions,
       guestsByExternalId,
       storesByExternalClubId,
+      sessionStoreCandidates,
       profile,
       tariffTypeGroups,
     );
@@ -1795,6 +1802,7 @@ export class GuestDataFoundationService {
     rows: LangameGuestSession[],
     guestsByExternalId: Map<string, GuestRef>,
     storesByExternalClubId: Map<string, StoreRef>,
+    sessionStoreCandidates: GuestSessionStoreCandidate[],
     profile: SourceProfile,
     tariffTypeGroups: LangameTariffTypeGroupIndex,
   ) {
@@ -1810,6 +1818,28 @@ export class GuestDataFoundationService {
       const storeRef = externalClubId
         ? storesByExternalClubId.get(externalClubId)
         : null;
+      const sessionWhere = {
+        tenantId_externalProvider_externalDomain_externalSessionId: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          externalSessionId,
+        },
+      };
+      const storeResolution = resolveGuestSessionStore({
+        tenantId,
+        externalDomain: domain,
+        externalClubId,
+        stores: sessionStoreCandidates,
+      });
+      const retainedStoreId = externalClubId
+        ? null
+        : await this.findRetainedSessionStoreId(
+            sessionWhere,
+            domain,
+            sessionStoreCandidates,
+          );
+      const storeId = storeResolution.storeId ?? retainedStoreId;
       const startedAt = this.parseLangameDate(
         this.toNullableString(row.date_start),
         storeRef?.timeZone,
@@ -1832,20 +1862,13 @@ export class GuestDataFoundationService {
         (row.date_start && !startedAt) || (row.date_stop && !stoppedAt) ? 1 : 0;
 
       await this.prisma.guestSession.upsert({
-        where: {
-          tenantId_externalProvider_externalDomain_externalSessionId: {
-            tenantId,
-            externalProvider: IntegrationProvider.LANGAME,
-            externalDomain: domain,
-            externalSessionId,
-          },
-        },
+        where: sessionWhere,
         create: {
           tenantId,
           guestId: externalGuestId
             ? (guestsByExternalId.get(externalGuestId)?.id ?? null)
             : null,
-          storeId: storeRef?.id ?? null,
+          storeId,
           externalProvider: IntegrationProvider.LANGAME,
           externalDomain: domain,
           externalSessionId,
@@ -1865,7 +1888,7 @@ export class GuestDataFoundationService {
           guestId: externalGuestId
             ? (guestsByExternalId.get(externalGuestId)?.id ?? null)
             : null,
-          storeId: storeRef?.id ?? null,
+          storeId,
           externalGuestId,
           externalClubId,
           externalUuid: this.toNullableString(row.UUID),
@@ -2438,6 +2461,46 @@ export class GuestDataFoundationService {
           { id: store.id, timeZone: store.timeZone },
         ]),
     );
+  }
+
+  private async loadSessionStoreCandidates(tenantId: string) {
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        externalDomain: true,
+        externalClubId: true,
+        isActive: true,
+      },
+    });
+
+    return stores;
+  }
+
+  private async findRetainedSessionStoreId(
+    where: Prisma.GuestSessionWhereUniqueInput,
+    domain: string,
+    storeCandidates: GuestSessionStoreCandidate[],
+  ) {
+    const existing = await this.prisma.guestSession.findUnique({
+      where,
+      select: { storeId: true },
+    });
+    if (!existing?.storeId) {
+      return null;
+    }
+
+    return storeCandidates.some(
+      (store) =>
+        store.id === existing.storeId && store.externalDomain === domain,
+    )
+      ? existing.storeId
+      : null;
   }
 
   private async paginate<T>(fetchPage: (page: number) => Promise<T[]>) {

@@ -10,6 +10,9 @@ import {
   DailyDataCoverageScope,
   DailyDataCoverageStatus,
   IntegrationProvider,
+  IntegrationSyncMode,
+  IntegrationSyncStatus,
+  IntegrationSyncTrigger,
   Prisma,
   TenantModule,
 } from '@prisma/client';
@@ -41,6 +44,7 @@ import {
 const DEFAULT_DAILY_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 const DEFAULT_DAILY_SYNC_LOCAL_TIME = '04:30';
 const DEFAULT_UTC_OFFSET_MINUTES = 5 * 60;
+const INVENTORY_FRESHNESS_MS = 36 * 60 * 60 * 1000;
 const DAILY_SYNC_OUTBOUND_REQUIREMENTS = [
   { module: TenantModule.INTEGRATIONS, action: 'OUTBOUND' },
   { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
@@ -58,6 +62,7 @@ type DailySyncScopeResult = {
   scope: DailyDataCoverageScope;
   status: DailyDataCoverageStatus;
   skipped: boolean;
+  inventoryRequested?: boolean;
   errorMessage: string | null;
 };
 
@@ -74,8 +79,19 @@ type DailySyncTenantResult = {
   failedRequirement:
     | TenantExecutionAdmissionDecision['failedRequirement']
     | null;
+  inventoryRequested: boolean;
   scopes: DailySyncScopeResult[];
 };
+
+class IncompleteDailyFactsScopeError extends Error {
+  constructor(
+    message: string,
+    readonly sourceCounts: Record<string, unknown>,
+    readonly summary: Record<string, unknown>,
+  ) {
+    super(message);
+  }
+}
 
 export type DailySyncResult = {
   date: string;
@@ -132,6 +148,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       : this.previousBusinessDate(new Date());
     const dateInput = this.toDateInputValue(businessDate);
     const force = Boolean(input.force);
+    const includeCurrentInventory = !input.date;
     const tenantSlug = input.tenantSlug?.trim();
     if (tenantSlug && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(tenantSlug)) {
       throw new BadRequestException('tenantSlug must be a lowercase slug');
@@ -179,6 +196,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
           businessDate,
           dateInput,
           force,
+          includeCurrentInventory,
         }),
       );
     }
@@ -228,6 +246,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     businessDate: Date;
     dateInput: string;
     force: boolean;
+    includeCurrentInventory: boolean;
   }): Promise<DailySyncTenantResult> {
     const scopes: DailySyncScopeResult[] = [];
     let sourceFailed = false;
@@ -259,6 +278,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       skipped: scopes.every((scope) => scope.skipped),
       reasonCode: null,
       failedRequirement: null,
+      inventoryRequested: businessFactsResult.inventoryRequested === true,
       scopes,
     };
   }
@@ -290,6 +310,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       skipped: true,
       reasonCode: input.admission.reasonCode,
       failedRequirement: input.admission.failedRequirement,
+      inventoryRequested: false,
       scopes,
     };
   }
@@ -320,6 +341,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       skipped: true,
       reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
       failedRequirement: null,
+      inventoryRequested: false,
       scopes,
     };
   }
@@ -329,15 +351,31 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     businessDate: Date;
     dateInput: string;
     force: boolean;
+    includeCurrentInventory: boolean;
   }) {
     const scope = DailyDataCoverageScope.BUSINESS_FACTS;
+    const shouldRunQuick = await this.shouldRunScope(input, scope);
+    const shouldRunInventory =
+      input.includeCurrentInventory &&
+      (await this.shouldRunCurrentInventory(input.tenantId));
 
-    if (!(await this.shouldRunScope(input, scope))) {
-      return this.skippedScope(scope);
+    if (!shouldRunQuick) {
+      if (shouldRunInventory) {
+        return this.runCurrentInventoryWithoutChangingQuickCoverage(
+          input.tenantId,
+          scope,
+        );
+      }
+      return this.skippedScope(
+        scope,
+        input.includeCurrentInventory
+          ? null
+          : 'Current inventory is not loaded for an explicit historical canary date.',
+      );
     }
 
-    return this.runScope(input, scope, async () => {
-      const result = await this.langameSyncService.syncTenantById(
+    const quickScope = await this.runScope(input, scope, async () => {
+      const quick = await this.langameSyncService.syncTenantById(
         input.tenantId,
         {
           dateFrom: input.dateInput,
@@ -348,17 +386,122 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
         'LANGAME_DAILY_SYNC',
       );
 
-      if (result.failedSources > 0) {
-        throw new Error(
-          `Langame facts sync failed for ${result.failedSources} source(s)`,
+      const inventory = shouldRunInventory
+        ? await this.syncCurrentInventory(input.tenantId)
+        : null;
+      const sourceCounts = {
+        ...this.langameSourceCounts(quick),
+        quick: this.langameSourceCounts(quick),
+        inventory: inventory ? this.langameSourceCounts(inventory) : null,
+      };
+      const summary = {
+        ...this.langameSummary(quick),
+        quick: this.langameSummary(quick),
+        inventory: inventory
+          ? this.langameSummary(inventory)
+          : {
+              status: 'SKIPPED',
+              reason: input.includeCurrentInventory
+                ? 'RECENT_AUTO_INVENTORY_JOB'
+                : 'EXPLICIT_HISTORICAL_DATE',
+            },
+      };
+
+      const incomplete = [quick, inventory].some(
+        (result) =>
+          result !== null &&
+          (result.failedSources > 0 || result.partialSources > 0),
+      );
+      if (incomplete) {
+        throw new IncompleteDailyFactsScopeError(
+          'Langame daily facts source is incomplete',
+          sourceCounts,
+          summary,
         );
       }
 
-      return {
-        sourceCounts: this.langameSourceCounts(result),
-        summary: this.langameSummary(result),
-      };
+      return { sourceCounts, summary };
     });
+
+    return {
+      ...quickScope,
+      inventoryRequested: shouldRunInventory,
+    };
+  }
+
+  private async runCurrentInventoryWithoutChangingQuickCoverage(
+    tenantId: string,
+    scope: DailyDataCoverageScope,
+  ) {
+    try {
+      const inventory = await this.syncCurrentInventory(tenantId);
+      this.assertCompleteLangameSources(inventory, 'Langame current inventory');
+      return this.finishedScope(
+        scope,
+        DailyDataCoverageStatus.SUCCESS,
+        null,
+        true,
+      );
+    } catch (error) {
+      return this.finishedScope(
+        scope,
+        DailyDataCoverageStatus.FAILED,
+        this.errorMessage(error),
+        true,
+      );
+    }
+  }
+
+  private syncCurrentInventory(tenantId: string) {
+    return this.langameSyncService.syncTenantById(
+      tenantId,
+      {
+        mode: 'INVENTORY',
+        trigger: 'AUTO',
+      },
+      'LANGAME_DAILY_SYNC',
+    );
+  }
+
+  private assertCompleteLangameSources(
+    result: LangameSyncResult,
+    label: string,
+  ) {
+    if (result.failedSources === 0 && result.partialSources === 0) {
+      return;
+    }
+
+    throw new Error(
+      `${label} sync incomplete: failed=${result.failedSources}, partial=${result.partialSources}`,
+    );
+  }
+
+  private async shouldRunCurrentInventory(tenantId: string) {
+    const freshnessCutoff = new Date(Date.now() - INVENTORY_FRESHNESS_MS);
+    const [sources, successfulJobs] = await Promise.all([
+      this.prisma.integrationSource.findMany({
+        where: {
+          tenantId,
+          provider: IntegrationProvider.LANGAME,
+          isActive: true,
+        },
+        select: { domain: true },
+      }),
+      this.prisma.integrationSyncJob.findMany({
+        where: {
+          tenantId,
+          provider: IntegrationProvider.LANGAME,
+          mode: IntegrationSyncMode.INVENTORY,
+          trigger: IntegrationSyncTrigger.AUTO,
+          status: IntegrationSyncStatus.SUCCESS,
+          finishedAt: { gte: freshnessCutoff },
+        },
+        select: { domain: true },
+      }),
+    ]);
+    const freshDomains = new Set(successfulJobs.map((job) => job.domain));
+
+    return sources.some((source) => !freshDomains.has(source.domain));
   }
 
   private async runGuestAndStaffScopes(input: {
@@ -539,8 +682,16 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       return this.finishedScope(scope, DailyDataCoverageStatus.SUCCESS);
     } catch (error) {
       const errorMessage = this.errorMessage(error);
+      const incomplete =
+        error instanceof IncompleteDailyFactsScopeError ? error : null;
       await this.markCoverageFinished(input, scope, {
         status: DailyDataCoverageStatus.FAILED,
+        ...(incomplete
+          ? {
+              sourceCounts: incomplete.sourceCounts,
+              summary: incomplete.summary,
+            }
+          : {}),
         errorMessage,
       });
 
@@ -788,12 +939,16 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     return `${year}-${month}-${day}`;
   }
 
-  private skippedScope(scope: DailyDataCoverageScope): DailySyncScopeResult {
+  private skippedScope(
+    scope: DailyDataCoverageScope,
+    errorMessage: string | null = null,
+  ): DailySyncScopeResult {
     return {
       scope,
       status: DailyDataCoverageStatus.SUCCESS,
       skipped: true,
-      errorMessage: null,
+      inventoryRequested: false,
+      errorMessage,
     };
   }
 
@@ -801,11 +956,13 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     scope: DailyDataCoverageScope,
     status: DailyDataCoverageStatus,
     errorMessage: string | null = null,
+    inventoryRequested = false,
   ): DailySyncScopeResult {
     return {
       scope,
       status,
       skipped: false,
+      inventoryRequested,
       errorMessage,
     };
   }

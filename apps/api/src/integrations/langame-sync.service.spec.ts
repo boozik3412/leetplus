@@ -914,6 +914,39 @@ describe('LangameSyncService', () => {
       expect(prisma.integrationSource.update).toHaveBeenCalledTimes(1);
     });
 
+    it('persists an implicit current inventory snapshot no later than its observation time', async () => {
+      jest.useFakeTimers();
+      const observedAt = new Date('2026-09-14T10:15:00.000Z');
+      jest.setSystemTime(observedAt);
+
+      try {
+        prisma.product.findMany.mockResolvedValue([
+          { id: 'product-1', name: 'Cola', externalProductId: '10' },
+        ]);
+        await service.syncTenant(user, {
+          mode: 'INVENTORY',
+          trigger: 'AUTO',
+        });
+
+        const [inventoryUpsert] = prisma.inventorySnapshot.upsert.mock
+          .calls[0] as [
+          {
+            create: { snapshotDate: Date };
+            update: { snapshotDate?: Date };
+          },
+        ];
+        expect(inventoryUpsert.create.snapshotDate).toEqual(
+          new Date('2026-09-14T00:00:00.000Z'),
+        );
+        expect(
+          inventoryUpsert.create.snapshotDate.getTime(),
+        ).toBeLessThanOrEqual(observedAt.getTime());
+        expect(inventoryUpsert.update.snapshotDate).toBeUndefined();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('reports all unavailable data sections and never invents success from club discovery alone', async () => {
       for (const [name, method] of Object.entries(client)) {
         if (name !== 'listClubs')

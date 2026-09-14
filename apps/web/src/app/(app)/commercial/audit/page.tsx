@@ -30,7 +30,11 @@ function lastFullDaysRange(days: number) {
   };
 }
 
-function formatMoney(value: number) {
+function formatMoney(value: number | null) {
+  if (value === null) {
+    return "нет полной оценки";
+  }
+
   return `${new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 0,
   }).format(Math.round(value))} руб`;
@@ -103,6 +107,8 @@ export default async function CommercialAuditPage() {
   const assortmentRisk = buildAssortmentRiskSummary({
     oosRows: operationalReport.outOfStockRiskProducts,
     noSalesRows: operationalReport.productsWithoutSales,
+    oosState: operationalReport.assortmentHealth?.outOfStock.state,
+    noSalesState: operationalReport.assortmentHealth?.noSales[21].state,
   });
   const activeRecommendations = operationalReport.recommendations
     .filter(isActiveRecommendation)
@@ -139,9 +145,8 @@ export default async function CommercialAuditPage() {
               Коммерческий аудит сети
             </h1>
             <p className="text-base leading-7 text-zinc-600 dark:text-zinc-300">
-              Сводка показывает, где сейчас лежат деньги: дефицит,
-              замороженный остаток, потенциал действий и качество
-              ассортиментной матрицы.
+              Сводка показывает, где сейчас лежат деньги: дефицит, замороженный
+              остаток, потенциал действий и качество ассортиментной матрицы.
             </p>
           </div>
           <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
@@ -273,8 +278,14 @@ export default async function CommercialAuditPage() {
                   "Здоровые ячейки",
                   formatNumber(matrixReport.summary.healthyCells),
                 ],
-                ["Нет остатка", formatNumber(matrixReport.summary.noStockCells)],
-                ["Не заведено", formatNumber(matrixReport.summary.missingCells)],
+                [
+                  "Нет остатка",
+                  formatNumber(matrixReport.summary.noStockCells),
+                ],
+                [
+                  "Не заведено",
+                  formatNumber(matrixReport.summary.missingCells),
+                ],
               ]}
             />
           </AuditPanel>
@@ -285,7 +296,10 @@ export default async function CommercialAuditPage() {
             summary={`${formatMoney(
               turnoverReport.totalFrozenStockAmount,
             )} денег лежит в замороженных позициях.`}
-            actionHref={reportHref("/reports/inventory-turnover/table", filters)}
+            actionHref={reportHref(
+              "/reports/inventory-turnover/table",
+              filters,
+            )}
             actionLabel="Проверить оборачиваемость"
           >
             <CompactStats
@@ -318,10 +332,7 @@ export default async function CommercialAuditPage() {
                   "Выручка за период",
                   formatMoney(operationalReport.totalRevenue),
                 ],
-                [
-                  "Валовая прибыль",
-                  formatMoney(operationalReport.grossProfit),
-                ],
+                ["Валовая прибыль", formatMoney(operationalReport.grossProfit)],
                 ["Маржа", formatPercent(operationalReport.marginPercent)],
               ]}
             />

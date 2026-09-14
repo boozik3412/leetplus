@@ -37,6 +37,29 @@ dormant split runtime. Данные внешнего пилота и ключ е
 | HTTPS и backup     | Новый cert до10.12.2026, renew dry-run PASS; backup06:00 и Windows07:00/logon                                                   |
 | История            | Runtime6097/generation55 и PREPARED_NOT_SERVING ae0d — завершённые предыдущие checkpoints                                       |
 
+## PR #203 assortment operational dashboard — source-only (14.09.2026)
+
+Это не production deployment и не внешний beta GO. Dated read-only baseline на
+14.09.2026 16:30:52 UTC: active green exact
+`05cad9cd1611c014453603475e8e1ba4c953f839`, generation4, data/control
+`399876`, pending0. Локальные API `191/3564 PASS + 2 todo`, Web build и
+47 synthetic UI checks/G4 PASS подтверждают только candidate, не provider или
+production runtime.
+
+Код сохраняет полный выбранный scope: период, клубы, категории и cutoff.
+Обычный INTERNAL daily обновляет inventory отдельно от QUICK в каждом daily
+run; только недавний successful AUTO всех active domains подавляет update на
+1h, а 36h — отдельный stale threshold. Inventory/CATALOG не продвигают sales
+cursor. Proven session Store binding сохраняет historical timestamps; UI не
+подменяет UNKNOWN/PARTIAL и показывает OOS profit только при confirmed cost.
+Нет schema/control/network/worker placement/role/provider-egress changes, historical backfill,
+reward/event replay или external-tenant GO; contract:
+[assortment metric contract](../assortment-dashboard-metric-contract.md).
+
+Перед runtime effect нужны отдельные exact-main Fast и Full gates, native plan,
+backup/rehearsal и worker acceptance; текущий PR head не является deployment
+admission.
+
 Actual release, контрольные суммы, final backup/restore, DNS и границы возврата:
 [отчёт переноса](../deployment/docker-migration-completion-2026-09-11.md).
 Физическое разделение corporate/guest процессов остаётся отдельным проектом.

@@ -58,6 +58,10 @@ type FreshStoreScopeMock = {
   resolveRequestedStoreIds: jest.Mock;
 };
 
+type AssortmentHealthLoaderMock = {
+  load: jest.Mock;
+};
+
 type SalesFactFindManyCall = [
   {
     where: {
@@ -178,6 +182,7 @@ function createPrismaMock(): DashboardPrismaMock {
 describe('DashboardService', () => {
   let prisma: DashboardPrismaMock;
   let freshStoreScope: FreshStoreScopeMock;
+  let assortmentHealthLoader: AssortmentHealthLoaderMock;
   let service: DashboardService;
   const user = {
     id: 'user-1',
@@ -205,6 +210,9 @@ describe('DashboardService', () => {
             }),
         ),
     };
+    assortmentHealthLoader = {
+      load: jest.fn().mockResolvedValue({ health: { rows: [], summary: {} } }),
+    };
     prisma.tenant.findUnique.mockResolvedValue({
       name: 'Demo Cyber Club',
     });
@@ -224,6 +232,7 @@ describe('DashboardService', () => {
     service = new DashboardService(
       prisma as unknown as PrismaService,
       freshStoreScope as unknown as FreshStoreScopeService,
+      assortmentHealthLoader as never,
     );
   });
 
@@ -237,6 +246,57 @@ describe('DashboardService', () => {
     prisma.inventorySnapshot.findMany.mockResolvedValue([]);
     prisma.stockMovement.findMany.mockResolvedValue([]);
   }
+
+  it('adds compact assortment health to the existing summary contract', async () => {
+    mockEmptyDashboardData();
+
+    const summary = await service.getSummary(user, {
+      period: 'day',
+    });
+
+    expect(
+      (summary as unknown as { assortmentHealth?: unknown }).assortmentHealth,
+    ).toBeDefined();
+  });
+
+  it('publishes the exact requested assortment cutoff separately from inventory evidence', async () => {
+    mockEmptyDashboardData();
+
+    const summary = await service.getSummary(user, {
+      asOf: '2026-09-14T11:23:45.000Z',
+    });
+
+    expect(summary.selectedAssortmentAsOf).toBe('2026-09-14T11:23:45.000Z');
+    expect(assortmentHealthLoader.load).toHaveBeenCalledWith(
+      expect.objectContaining({ asOf: new Date('2026-09-14T11:23:45.000Z') }),
+    );
+  });
+
+  it('validates date-only and canonical ISO assortment cutoffs at the public boundary', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-09-14T12:00:00.000Z'));
+    try {
+      mockEmptyDashboardData();
+      const today = await service.getSummary(user, { asOf: '2026-09-14' });
+      expect(today.selectedAssortmentAsOf).toBe('2026-09-14T12:00:00.000Z');
+
+      mockEmptyDashboardData();
+      const past = await service.getSummary(user, { asOf: '2026-09-13' });
+      expect(past.selectedAssortmentAsOf).toBe('2026-09-13T23:59:59.999Z');
+
+      await expect(
+        service.getSummary(user, { asOf: '2026-09-15' }),
+      ).rejects.toThrow('asOf must not be in the future');
+      await expect(
+        service.getSummary(user, { asOf: '2026-02-30' }),
+      ).rejects.toThrow('asOf must be a valid YYYY-MM-DD date');
+      await expect(
+        service.getSummary(user, { asOf: '2026-09-14T12:00:00Z' }),
+      ).rejects.toThrow('canonical ISO timestamp');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 
   it('returns summary calculated for resolved tenant', async () => {
     prisma.product.count.mockResolvedValueOnce(2);
@@ -593,6 +653,129 @@ describe('DashboardService', () => {
       state: 'NO_DATA',
       note: 'Положительная себестоимость есть у 0% товарных операций.',
     });
+    expect(summary.marginCoverage).toEqual({
+      state: 'UNKNOWN',
+      fullMarginPercent: null,
+      fullGrossProfit: null,
+      partialMarginPercent: null,
+      partialGrossProfit: null,
+      coveredRevenue: 0,
+      coveredOperations: 0,
+      totalRevenue: 100,
+      totalOperations: 1,
+    });
+    expect(summary.grossProfit).toBeNull();
+    expect(summary.marginPercent).toBeNull();
+  });
+
+  it('keeps stale inventory stale when a newer QUICK sync exists', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-09-14T12:00:00.000Z'));
+
+    try {
+      mockEmptyDashboardData();
+      prisma.inventorySnapshot.findMany.mockResolvedValue([
+        {
+          storeId: 'store-1',
+          productId: 'product-1',
+          snapshotDate: new Date('2026-09-10T00:00:00.000Z'),
+          updatedAt: new Date('2026-09-10T00:00:00.000Z'),
+          quantity: new Prisma.Decimal(5),
+        },
+      ]);
+      prisma.integrationSyncJob.findFirst.mockResolvedValue({
+        status: 'SUCCESS',
+        startedAt: new Date('2026-09-14T11:00:00.000Z'),
+        finishedAt: new Date('2026-09-14T11:05:00.000Z'),
+        salesCount: 1,
+        inventoryCount: 0,
+        errorMessage: null,
+      });
+
+      const summary = await service.getSummary(user);
+      const inventory = summary.assortmentGrowth.sources.find(
+        (source) => source.key === 'inventory',
+      );
+
+      expect(inventory?.state).toBe('STALE');
+      expect(inventory?.lastImportedAt).toBe('2026-09-10T00:00:00.000Z');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps a failed sales domain partial without failing fresh inventory', async () => {
+    mockEmptyDashboardData();
+    prisma.inventorySnapshot.findMany.mockResolvedValue([
+      {
+        storeId: 'store-1',
+        productId: 'product-1',
+        snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+        updatedAt: new Date('2026-09-14T11:00:00.000Z'),
+        quantity: new Prisma.Decimal(2),
+      },
+    ]);
+    assortmentHealthLoader.load.mockResolvedValueOnce({
+      health: { rows: [], summary: {} },
+      salesDayEvidence: [],
+      sourceHealthEvidence: {
+        sales: {
+          totalDomains: 2,
+          confirmedDomains: 1,
+          failedDomains: 1,
+          missingDomains: 0,
+        },
+        inventory: {
+          totalDomains: 2,
+          confirmedDomains: 2,
+          failedDomains: 0,
+          missingDomains: 0,
+        },
+      },
+    });
+
+    const summary = await service.getSummary(user);
+
+    expect(summary.assortmentGrowth.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'sales', state: 'PARTIAL' }),
+        expect.objectContaining({ key: 'inventory', state: 'FRESH' }),
+      ]),
+    );
+  });
+
+  it('uses confirmed zero-sales days in the forecast history', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-09-14T12:00:00.000Z'));
+
+    try {
+      mockEmptyDashboardData();
+      assortmentHealthLoader.load.mockResolvedValueOnce({
+        health: { rows: [], summary: {} },
+        salesDayEvidence: [
+          {
+            storeId: 'store-1',
+            date: new Date('2026-09-01T00:00:00.000Z'),
+            status: 'CONFIRMED',
+          },
+          {
+            storeId: 'store-1',
+            date: new Date('2026-09-02T00:00:00.000Z'),
+            status: 'CONFIRMED',
+          },
+        ],
+      });
+
+      const summary = await service.getSummary(user, { period: 'day' });
+
+      expect(summary.assortmentGrowth.forecast).toMatchObject({
+        historyDays: 2,
+        revenue: 0,
+        state: 'PARTIAL_COVERAGE',
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('uses the fresh club-owner allow-list and never reads network snapshots', async () => {
@@ -619,6 +802,98 @@ describe('DashboardService', () => {
       expect(query.where.storeId).toEqual({ in: ['store-1'] });
     }
     expect(prisma.businessSnapshotRun.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('does not count an unresolved shared-domain session for a restricted club scope', async () => {
+    mockEmptyDashboardData();
+    freshStoreScope.resolveRequestedStoreIds.mockResolvedValueOnce({
+      userId: 'user-1',
+      tenantId: 'tenant-demo',
+      tenantSlug: 'demo',
+      mode: 'STORES',
+      allowedStoreIds: ['store-1'],
+      effectiveStoreIds: ['store-1'],
+    });
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-1',
+        name: 'Club A',
+        tenantId: 'tenant-demo',
+        externalDomain: 'shared.example',
+        externalClubId: '1',
+        isActive: true,
+      },
+      {
+        id: 'store-2',
+        name: 'Club B',
+        tenantId: 'tenant-demo',
+        externalDomain: 'shared.example',
+        externalClubId: '2',
+        isActive: true,
+      },
+    ]);
+    prisma.guestSession.findMany.mockResolvedValue([
+      {
+        storeId: null,
+        externalDomain: 'shared.example',
+        externalClubId: null,
+        externalSessionId: 'ambiguous-session',
+        guestId: null,
+        externalGuestId: null,
+        startedAt: new Date('2026-09-14T10:00:00.000Z'),
+        updatedAt: new Date('2026-09-14T10:00:00.000Z'),
+      },
+    ]);
+
+    const summary = await service.getSummary(user, { storeIds: ['store-1'] });
+
+    expect(summary.visitBinding).toMatchObject({
+      state: 'MISSING',
+      observedVisitCount: 0,
+      coverage: { covered: 0, total: 0, percent: null },
+    });
+  });
+
+  it('does not count an unresolved session from an unknown inactive domain', async () => {
+    mockEmptyDashboardData();
+    freshStoreScope.resolveRequestedStoreIds.mockResolvedValueOnce({
+      userId: 'user-1',
+      tenantId: 'tenant-demo',
+      tenantSlug: 'demo',
+      mode: 'STORES',
+      allowedStoreIds: ['store-1'],
+      effectiveStoreIds: ['store-1'],
+    });
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-1',
+        name: 'Club A',
+        tenantId: 'tenant-demo',
+        externalDomain: 'known.example',
+        externalClubId: '1',
+        isActive: true,
+      },
+    ]);
+    prisma.guestSession.findMany.mockResolvedValue([
+      {
+        storeId: null,
+        externalDomain: 'inactive.example',
+        externalClubId: null,
+        externalSessionId: 'unknown-domain',
+        guestId: null,
+        externalGuestId: null,
+        startedAt: new Date('2026-09-14T10:00:00.000Z'),
+        updatedAt: new Date('2026-09-14T10:00:00.000Z'),
+      },
+    ]);
+
+    const summary = await service.getSummary(user, { storeIds: ['store-1'] });
+
+    expect(summary.visitBinding).toMatchObject({
+      state: 'MISSING',
+      observedVisitCount: 0,
+      coverage: { covered: 0, total: 0, percent: null },
+    });
   });
 
   it('applies selected categories to every assortment fact query', async () => {

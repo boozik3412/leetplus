@@ -1,4 +1,8 @@
 import { getApiUrl, getAuthHeaders } from "./api";
+import type {
+  DashboardAssortmentHealthSummary,
+  DashboardMetric,
+} from "./dashboard-summary";
 import type { ProductAssortmentRole } from "./products";
 
 export type ReportGroup = {
@@ -38,6 +42,12 @@ export type OperationalReportFilters = {
   from?: string;
   to?: string;
   storeId?: string;
+  storeIds?: string[];
+  categoryIds?: string[];
+  asOf?: string;
+  noSalesDays?: 7 | 14 | 21 | 30;
+  stockStatus?: "OUT_OF_STOCK" | "LOW_STOCK";
+  excess?: boolean;
 };
 
 export type ProductOosExclusionType = "SERVICE" | "OOS_EXCLUDED";
@@ -68,10 +78,22 @@ export type OutOfStockRiskProduct = {
   supplierName: string | null;
   stockQuantity: number;
   averageDailySales: number;
-  revenueAtRiskPerDay: number;
-  grossProfitAtRiskPerDay: number;
-  grossProfitAtRiskForPeriod: number;
-  stockDays: number;
+  revenueAtRiskPerDay: number | null;
+  grossProfitAtRiskPerDay: number | null;
+  grossProfitAtRiskForPeriod: number | null;
+  grossProfitAtRisk?: GrossProfitAtRisk;
+  stockDays: number | null;
+};
+
+export type GrossProfitAtRisk = {
+  perDay: DashboardMetric<number>;
+  forPeriod: DashboardMetric<number>;
+  costBasis:
+    | "CLUB_PURCHASE_PRICE"
+    | "SALES_UNIT_COST"
+    | "PRODUCT_PURCHASE_PRICE"
+    | "SALE_PRICE_ESTIMATE"
+    | "UNKNOWN";
 };
 
 export type ProductWithoutSales = {
@@ -83,9 +105,9 @@ export type ProductWithoutSales = {
   isCanonical: boolean;
   canonicalProductName: string | null;
   stockQuantity: number;
-  frozenStockUnitValue: number;
+  frozenStockUnitValue: number | null;
   frozenStockValuation: FrozenStockValuation;
-  frozenStockAmount: number;
+  frozenStockAmount: number | null;
   lastSaleDate: string | null;
   daysWithoutSales: number | null;
   categoryName: string | null;
@@ -95,6 +117,10 @@ export type FrozenStockValuation =
   | "PURCHASE_PRICE"
   | "SALE_PRICE"
   | "HISTORICAL_REVENUE"
+  | "CLUB_PURCHASE_PRICE"
+  | "SALES_UNIT_COST"
+  | "PRODUCT_PURCHASE_PRICE"
+  | "SALE_PRICE_ESTIMATE"
   | "UNKNOWN";
 
 export type RecommendationStatus =
@@ -141,15 +167,30 @@ export type OperationalReport = {
   from: string;
   to: string;
   storeId: string | null;
+  storeIds: string[];
+  categoryIds: string[];
+  asOf: string;
+  noSalesDays: 7 | 14 | 21 | 30;
   totalRevenue: number;
   totalCost: number;
-  grossProfit: number;
-  adjustedGrossProfit: number;
-  marginPercent: number;
-  adjustedMarginPercent: number;
+  grossProfit: number | null;
+  adjustedGrossProfit: number | null;
+  marginPercent: number | null;
+  adjustedMarginPercent: number | null;
+  marginCoverage: {
+    state: "READY" | "PARTIAL" | "UNKNOWN";
+    fullMarginPercent: number | null;
+    fullGrossProfit: number | null;
+    partialMarginPercent: number | null;
+    partialGrossProfit: number | null;
+    coveredRevenue: number;
+    coveredOperations: number;
+    totalRevenue: number;
+    totalOperations: number;
+  };
   soldQuantity: number;
-  writeOffQuantity: number;
-  writeOffAmount: number;
+  writeOffQuantity: number | null;
+  writeOffAmount: number | null;
   returnQuantity: number;
   returnAmount: number;
   averageDailyRevenue: number;
@@ -158,6 +199,37 @@ export type OperationalReport = {
   recommendations: ReportRecommendation[];
   outOfStockRiskProducts: OutOfStockRiskProduct[];
   productsWithoutSales: ProductWithoutSales[];
+  assortmentRows?: {
+    writeOffs: Array<{
+      storeId: string;
+      productId: string;
+      writeOffQuantity: {
+        value: number | null;
+        state: string;
+        reason: string | null;
+        coverage: { covered: number; total: number; percent: number | null };
+      };
+      writeOffAmount: {
+        value: number | null;
+        state: string;
+        reason: string | null;
+        coverage: { covered: number; total: number; percent: number | null };
+      };
+    }>;
+  };
+  writeOffMovements?: Array<{
+    id: string;
+    movementDate: string;
+    storeId: string;
+    storeName: string;
+    productId: string;
+    article: string;
+    productName: string;
+    categoryName: string | null;
+    quantity: number;
+    amount: number;
+  }>;
+  assortmentHealth?: DashboardAssortmentHealthSummary;
 };
 
 export type SalesDetailRow = {
@@ -177,7 +249,7 @@ export type SalesDetailRow = {
   cost: number;
   unitSalePrice: number;
   unitCost: number;
-  grossProfit: number;
+  grossProfit: number | null;
   marginPercent: number;
   markupPercent: number;
   purchasePrice: number;
@@ -277,7 +349,7 @@ export type SupplierPerformanceRow = {
   oosSkuCount: number;
   slowSkuCount: number;
   frozenSkuCount: number;
-  frozenStockAmount: number;
+  frozenStockAmount: number | null;
   problemCategoryName: string | null;
   deliveryQualityStatus: "TERMS_CONFIGURED" | "NO_DELIVERY_FACTS";
   deliveryQualityNote: string;
@@ -326,9 +398,20 @@ export type ReplenishmentReport = {
   from: string;
   to: string;
   storeId: string | null;
+  storeIds: string[];
+  categoryIds: string[];
+  asOf: string;
   totalStockQuantity: number;
   totalDailyNeed: number;
   totalRecommendedOrder: number;
+  assortmentHealth: DashboardAssortmentHealthSummary;
+  coverage: {
+    state: "AVAILABLE" | "PARTIAL" | "STALE" | "MISSING" | "FAILED" | "UNKNOWN";
+    reason: string | null;
+    covered: number;
+    total: number;
+    percent: number | null;
+  };
   rows: ReplenishmentRow[];
 };
 
@@ -360,11 +443,7 @@ export type NewProductsReport = {
 
 export type LflPeriod = "day" | "week" | "month";
 export type LflGroupLevel = "network" | "store" | "category" | "product";
-export type PlanFactGroupLevel =
-  | "network"
-  | "store"
-  | "category"
-  | "supplier";
+export type PlanFactGroupLevel = "network" | "store" | "category" | "supplier";
 
 export type InventoryTurnoverStatus = "OK" | "SLOW" | "FROZEN";
 
@@ -400,12 +479,16 @@ export type InventoryTurnoverReport = {
   from: string;
   to: string;
   storeId: string | null;
+  storeIds: string[];
+  categoryIds: string[];
+  asOf: string;
   periodDays: number;
   totalStockQuantity: number;
   totalFrozenStockAmount: number;
   averageStockDays: number | null;
   slowSkuCount: number;
   frozenSkuCount: number;
+  assortmentHealth?: DashboardAssortmentHealthSummary;
   rows: InventoryTurnoverRow[];
 };
 
@@ -580,6 +663,17 @@ export async function getOperationalReport(
     params.set("storeId", filters.storeId);
   }
 
+  filters.storeIds?.forEach((storeId) => params.append("storeIds", storeId));
+  filters.categoryIds?.forEach((categoryId) =>
+    params.append("categoryIds", categoryId),
+  );
+  if (filters.asOf) params.set("asOf", filters.asOf);
+  if (filters.noSalesDays)
+    params.set("noSalesDays", String(filters.noSalesDays));
+  if (filters.stockStatus) params.set("stockStatus", filters.stockStatus);
+  if (filters.excess !== undefined)
+    params.set("excess", String(filters.excess));
+
   const query = params.toString();
   const response = await fetch(
     `${getApiUrl()}/reports/operations${query ? `?${query}` : ""}`,
@@ -612,6 +706,17 @@ export async function getInventoryTurnoverReport(
   if (filters.storeId) {
     params.set("storeId", filters.storeId);
   }
+
+  filters.storeIds?.forEach((storeId) => params.append("storeIds", storeId));
+  filters.categoryIds?.forEach((categoryId) =>
+    params.append("categoryIds", categoryId),
+  );
+  if (filters.asOf) params.set("asOf", filters.asOf);
+  if (filters.noSalesDays)
+    params.set("noSalesDays", String(filters.noSalesDays));
+  if (filters.stockStatus) params.set("stockStatus", filters.stockStatus);
+  if (filters.excess !== undefined)
+    params.set("excess", String(filters.excess));
 
   const query = params.toString();
   const response = await fetch(
@@ -811,6 +916,12 @@ export async function getReplenishmentReport(
     params.set("storeId", filters.storeId);
   }
 
+  filters.storeIds?.forEach((storeId) => params.append("storeIds", storeId));
+  filters.categoryIds?.forEach((categoryId) =>
+    params.append("categoryIds", categoryId),
+  );
+  if (filters.asOf) params.set("asOf", filters.asOf);
+
   const query = params.toString();
   const response = await fetch(
     `${getApiUrl()}/reports/replenishment${query ? `?${query}` : ""}`,
@@ -837,10 +948,13 @@ export async function getNewProductsReport(
   }
 
   const query = params.toString();
-  const response = await fetch(`${getApiUrl()}/reports/new-products${query ? `?${query}` : ""}`, {
-    cache: "no-store",
-    headers: await getAuthHeaders(),
-  });
+  const response = await fetch(
+    `${getApiUrl()}/reports/new-products${query ? `?${query}` : ""}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
 
   if (!response.ok) {
     throw new Error("Failed to fetch new products report");
@@ -849,9 +963,7 @@ export async function getNewProductsReport(
   return response.json() as Promise<NewProductsReport>;
 }
 
-export async function getLflReport(
-  period: LflPeriod,
-): Promise<LflReport> {
+export async function getLflReport(period: LflPeriod): Promise<LflReport> {
   const params = new URLSearchParams({ period });
   const response = await fetch(`${getApiUrl()}/reports/lfl?${params}`, {
     cache: "no-store",

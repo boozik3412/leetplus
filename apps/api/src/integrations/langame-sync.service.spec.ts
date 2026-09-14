@@ -581,6 +581,100 @@ describe('LangameSyncService', () => {
     expect(syncJobUpdate.data.discrepancyCount).toBe(0);
   });
 
+  it('does not advance the sales cursor after an inventory-only sync', async () => {
+    const priorSalesCursor = new Date('2026-04-20T00:00:00.000Z');
+    prisma.product.findMany.mockResolvedValue([
+      { id: 'product-1', name: 'Cola', externalProductId: '10' },
+    ]);
+    settings.resolveTenantAccess.mockResolvedValueOnce({
+      apiKey: 'test-key',
+      sources: [
+        {
+          id: 'source-1',
+          domain: '443.langame.ru',
+          baseUrl: 'https://443.langame.ru/public_api',
+          lastSyncedDate: priorSalesCursor,
+        },
+      ],
+    });
+
+    await service.syncTenant(user, {
+      mode: 'INVENTORY',
+      dateFrom: '2026-04-29',
+      dateTo: '2026-04-29',
+    });
+
+    const [sourceUpdate] = prisma.integrationSource.update.mock
+      .calls[0] as IntegrationSourceUpdateCall;
+    expect(sourceUpdate.data.lastSyncedAt).toBeInstanceOf(Date);
+    expect(sourceUpdate.data.lastSyncedDate).toBeUndefined();
+  });
+
+  it('advances the sales cursor after a fully successful QUICK sync', async () => {
+    prisma.product.findMany.mockResolvedValue([
+      { id: 'product-1', name: 'Cola', externalProductId: '10' },
+    ]);
+
+    await service.syncTenant(user, {
+      mode: 'QUICK',
+      dateFrom: '2026-04-29',
+      dateTo: '2026-04-29',
+    });
+
+    const [sourceUpdate] = prisma.integrationSource.update.mock
+      .calls[0] as IntegrationSourceUpdateCall;
+    expect(sourceUpdate.data.lastSyncedDate).toEqual(
+      new Date('2026-04-29T00:00:00.000Z'),
+    );
+  });
+
+  it('starts catch-up from the retained sales cursor after an inventory-only sync', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-29T12:00:00.000Z'));
+    let salesCursor = new Date('2026-04-20T00:00:00.000Z');
+    prisma.product.findMany.mockResolvedValue([
+      { id: 'product-1', name: 'Cola', externalProductId: '10' },
+    ]);
+    settings.resolveTenantAccess.mockImplementation(() =>
+      Promise.resolve({
+        apiKey: 'test-key',
+        sources: [
+          {
+            id: 'source-1',
+            domain: '443.langame.ru',
+            baseUrl: 'https://443.langame.ru/public_api',
+            lastSyncedDate: salesCursor,
+          },
+        ],
+      }),
+    );
+    prisma.integrationSource.update.mockImplementation((input) => {
+      const data = (input as IntegrationSourceUpdateCall[0]).data;
+      if (data.lastSyncedDate) salesCursor = data.lastSyncedDate;
+    });
+
+    try {
+      await service.syncTenant(user, {
+        mode: 'INVENTORY',
+        dateFrom: '2026-04-29',
+        dateTo: '2026-04-29',
+      });
+      await service.syncTenant(user, { mode: 'BACKFILL', catchUp: true });
+    } finally {
+      jest.useRealTimers();
+    }
+
+    expect(client.listProductExpenses).toHaveBeenCalledWith(
+      'https://443.langame.ru/public_api',
+      'test-key',
+      {
+        page: 1,
+        pageLimit: 200,
+        dateFrom: '2026-04-20',
+        dateTo: '2026-04-29',
+      },
+    );
+  });
+
   it('uses configured purchase cost and preserves a hashed receipt identity when the expense omits cost', async () => {
     prisma.langameClubProductConfiguration.findMany.mockResolvedValueOnce([
       {
@@ -914,6 +1008,39 @@ describe('LangameSyncService', () => {
       expect(prisma.integrationSource.update).toHaveBeenCalledTimes(1);
     });
 
+    it('persists an implicit current inventory snapshot no later than its observation time', async () => {
+      jest.useFakeTimers();
+      const observedAt = new Date('2026-09-14T10:15:00.000Z');
+      jest.setSystemTime(observedAt);
+
+      try {
+        prisma.product.findMany.mockResolvedValue([
+          { id: 'product-1', name: 'Cola', externalProductId: '10' },
+        ]);
+        await service.syncTenant(user, {
+          mode: 'INVENTORY',
+          trigger: 'AUTO',
+        });
+
+        const [inventoryUpsert] = prisma.inventorySnapshot.upsert.mock
+          .calls[0] as [
+          {
+            create: { snapshotDate: Date };
+            update: { snapshotDate?: Date };
+          },
+        ];
+        expect(inventoryUpsert.create.snapshotDate).toEqual(
+          new Date('2026-09-14T00:00:00.000Z'),
+        );
+        expect(
+          inventoryUpsert.create.snapshotDate.getTime(),
+        ).toBeLessThanOrEqual(observedAt.getTime());
+        expect(inventoryUpsert.update.snapshotDate).toBeUndefined();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('reports all unavailable data sections and never invents success from club discovery alone', async () => {
       for (const [name, method] of Object.entries(client)) {
         if (name !== 'listClubs')
@@ -1019,7 +1146,18 @@ describe('LangameSyncService', () => {
       expect(client.listGoods).not.toHaveBeenCalled();
     });
 
-    it('counts already persisted sales after a later page fails and still loads revenue', async () => {
+    it('does not advance the sales cursor when a later sales page fails', async () => {
+      settings.resolveTenantAccess.mockResolvedValueOnce({
+        apiKey: 'test-key',
+        sources: [
+          {
+            id: 'source-1',
+            domain: '443.langame.ru',
+            baseUrl: 'https://443.langame.ru/public_api',
+            lastSyncedDate: new Date('2026-04-20T00:00:00.000Z'),
+          },
+        ],
+      });
       client.listProductExpenses
         .mockReset()
         .mockResolvedValueOnce(

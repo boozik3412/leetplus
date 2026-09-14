@@ -12,3 +12,4 @@ logs
 __pycache__/
 *.py[cod]
 *.lpbackup
+.autopilot/serve.*

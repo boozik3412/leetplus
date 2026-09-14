@@ -73,6 +73,10 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function searchParamsArray(value: string | string[] | undefined) {
+  return value ? (Array.isArray(value) ? value : [value]) : [];
+}
+
 function resolveLflPeriod(value: string | string[] | undefined): LflPeriod {
   const period = searchParam(value);
 
@@ -176,19 +180,36 @@ export default async function ReportsPage({
     from: searchParam(params.from),
     to: searchParam(params.to),
     storeId: searchParam(params.storeId),
+    storeIds: searchParamsArray(params.storeIds),
+    categoryIds: searchParamsArray(params.categoryIds),
+    asOf: searchParam(params.asOf),
+    noSalesDays: ([7, 14, 21, 30] as const).includes(
+      Number(searchParam(params.noSalesDays)) as 7 | 14 | 21 | 30,
+    )
+      ? (Number(searchParam(params.noSalesDays)) as 7 | 14 | 21 | 30)
+      : undefined,
   };
   const lflPeriod = resolveLflPeriod(params.lflPeriod);
+  const defaultNoSales7 = lastFullDaysRange(7);
+  const defaultNoSales14 = lastFullDaysRange(14);
+  const defaultNoSales21 = lastFullDaysRange(21);
   const noSalesFilters = {
-    storeId: filters.storeId,
-    ...lastFullDaysRange(7),
+    ...filters,
+    from: filters.from ?? defaultNoSales7.from,
+    to: filters.to ?? defaultNoSales7.to,
+    noSalesDays: 7 as const,
   };
   const noSalesFilters14 = {
-    storeId: filters.storeId,
-    ...lastFullDaysRange(14),
+    ...filters,
+    from: filters.from ?? defaultNoSales14.from,
+    to: filters.to ?? defaultNoSales14.to,
+    noSalesDays: 14 as const,
   };
   const noSalesFilters21 = {
-    storeId: filters.storeId,
-    ...lastFullDaysRange(21),
+    ...filters,
+    from: filters.from ?? defaultNoSales21.from,
+    to: filters.to ?? defaultNoSales21.to,
+    noSalesDays: 21 as const,
   };
   // Report endpoints fan out to several PostgreSQL queries each. Keep useful
   // parallelism without letting one SSR render exhaust the shared pool.
@@ -219,6 +240,8 @@ export default async function ReportsPage({
   const assortmentRisk = buildAssortmentRiskSummary({
     oosRows: operationalReport.outOfStockRiskProducts,
     noSalesRows: noSalesReport21.productsWithoutSales,
+    oosState: operationalReport.assortmentHealth?.outOfStock.state,
+    noSalesState: noSalesReport21.assortmentHealth?.noSales[21].state,
   });
 
   return (
@@ -390,6 +413,9 @@ export default async function ReportsPage({
               from={operationalReport.from}
               to={operationalReport.to}
               storeId={operationalReport.storeId}
+              storeIds={operationalReport.storeIds}
+              categoryIds={operationalReport.categoryIds}
+              asOf={operationalReport.asOf}
             />
           </ReportDisclosure>
 
@@ -404,6 +430,13 @@ export default async function ReportsPage({
                 21: noSalesReport21.productsWithoutSales,
               }}
               networkBadge={<NetworkSkuBadge />}
+              scope={{
+                from: noSalesReport21.from,
+                to: noSalesReport21.to,
+                asOf: noSalesReport21.asOf,
+                storeIds: noSalesReport21.storeIds,
+                categoryIds: noSalesReport21.categoryIds,
+              }}
             />
           </ReportDisclosure>
 
@@ -416,6 +449,9 @@ export default async function ReportsPage({
               from={replenishmentReport.from}
               to={replenishmentReport.to}
               storeId={replenishmentReport.storeId}
+              storeIds={replenishmentReport.storeIds}
+              categoryIds={replenishmentReport.categoryIds}
+              asOf={replenishmentReport.asOf}
             />
           </ReportDisclosure>
 
@@ -601,9 +637,9 @@ function AssortmentRiskPanel({
   frozenStockAmount,
   rows,
 }: {
-  totalRiskAmount: number;
-  oosProfitAtRisk: number;
-  frozenStockAmount: number;
+  totalRiskAmount: number | null;
+  oosProfitAtRisk: number | null;
+  frozenStockAmount: number | null;
   rows: AssortmentRiskRow[];
 }) {
   return (
@@ -624,9 +660,28 @@ function AssortmentRiskPanel({
         </ReportLoadingLink>
       </div>
       <div className="grid gap-px bg-zinc-200 sm:grid-cols-3">
-        <Metric label="Всего в риске" value={formatMoney(totalRiskAmount)} />
-        <Metric label="Прибыль OOS" value={formatMoney(oosProfitAtRisk)} />
-        <Metric label="Заморожено" value={formatMoney(frozenStockAmount)} />
+        <Metric
+          label="Всего в риске"
+          value={
+            totalRiskAmount === null ? "Частично" : formatMoney(totalRiskAmount)
+          }
+        />
+        <Metric
+          label="Прибыль OOS"
+          value={
+            oosProfitAtRisk === null
+              ? "Нет данных"
+              : formatMoney(oosProfitAtRisk)
+          }
+        />
+        <Metric
+          label="Заморожено"
+          value={
+            frozenStockAmount === null
+              ? "Нет оценки"
+              : formatMoney(frozenStockAmount)
+          }
+        />
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1040px] text-left text-sm">
@@ -651,7 +706,9 @@ function AssortmentRiskPanel({
                   {row.name}
                 </td>
                 <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                  {formatMoney(row.profitAtRiskForPeriod)}
+                  {row.profitAtRiskForPeriod === null
+                    ? "Нет данных"
+                    : formatMoney(row.profitAtRiskForPeriod)}
                 </td>
                 <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                   {row.frozenStockUnitValue === null
@@ -662,10 +719,14 @@ function AssortmentRiskPanel({
                   {frozenStockValuationLabel(row.frozenStockValuation)}
                 </td>
                 <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                  {formatMoney(row.frozenStockAmount)}
+                  {row.frozenStockAmount === null
+                    ? "Нет оценки"
+                    : formatMoney(row.frozenStockAmount)}
                 </td>
                 <td className="px-5 py-4 text-right tabular-nums font-semibold text-zinc-950">
-                  {formatMoney(row.totalRiskAmount)}
+                  {row.totalRiskAmount === null
+                    ? "Частично"
+                    : formatMoney(row.totalRiskAmount)}
                 </td>
               </tr>
             ))}
@@ -1028,12 +1089,18 @@ function reportTableParams(report: {
   from: string;
   to: string;
   storeId: string | null;
+  storeIds?: string[];
+  categoryIds?: string[];
+  asOf?: string;
 }) {
   const params = new URLSearchParams({ from: report.from, to: report.to });
 
   if (report.storeId) {
     params.set("storeId", report.storeId);
   }
+  report.storeIds?.forEach((id) => params.append("storeIds", id));
+  report.categoryIds?.forEach((id) => params.append("categoryIds", id));
+  if (report.asOf) params.set("asOf", report.asOf);
 
   return params.toString();
 }
@@ -1066,7 +1133,6 @@ function RecommendationsPanel({
   if (storeId) {
     params.set("storeId", storeId);
   }
-
   return (
     <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
       <div className="border-b border-zinc-200 px-5 py-4">
@@ -1205,11 +1271,17 @@ function RiskTable({
   from,
   to,
   storeId,
+  storeIds,
+  categoryIds,
+  asOf,
 }: {
   rows: OutOfStockRiskProduct[];
   from: string;
   to: string;
   storeId: string | null;
+  storeIds: string[];
+  categoryIds: string[];
+  asOf: string;
 }) {
   const compactRows = topOutOfStockRowsByStore(rows);
   const hasOverflow = rows.length > compactRows.length;
@@ -1218,6 +1290,9 @@ function RiskTable({
   if (storeId) {
     params.set("storeId", storeId);
   }
+  storeIds.forEach((id) => params.append("storeIds", id));
+  categoryIds.forEach((id) => params.append("categoryIds", id));
+  if (asOf) params.set("asOf", asOf);
   return (
     <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
       <div className="flex flex-col gap-2 border-b border-zinc-200 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
@@ -1283,16 +1358,24 @@ function RiskTable({
                     {formatQuantity(row.averageDailySales)}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatMoney(row.revenueAtRiskPerDay)}
+                    {row.revenueAtRiskPerDay === null
+                      ? "Нет данных"
+                      : formatMoney(row.revenueAtRiskPerDay)}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatMoney(row.grossProfitAtRiskPerDay)}
+                    {row.grossProfitAtRiskPerDay === null
+                      ? "Нет данных"
+                      : formatMoney(row.grossProfitAtRiskPerDay)}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatMoney(row.grossProfitAtRiskForPeriod)}
+                    {row.grossProfitAtRiskForPeriod === null
+                      ? "Нет данных"
+                      : formatMoney(row.grossProfitAtRiskForPeriod)}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-red-700">
-                    {formatQuantity(row.stockDays)}
+                    {row.stockDays === null
+                      ? "Нет данных"
+                      : formatQuantity(row.stockDays)}
                   </td>
                 </tr>
               ))}
@@ -1313,11 +1396,17 @@ function ReplenishmentTable({
   from,
   to,
   storeId,
+  storeIds,
+  categoryIds,
+  asOf,
 }: {
   rows: ReplenishmentRow[];
   from: string;
   to: string;
   storeId: string | null;
+  storeIds: string[];
+  categoryIds: string[];
+  asOf: string;
 }) {
   const compactRows = topReplenishmentRowsByStore(rows);
   const params = new URLSearchParams({ from, to });
@@ -1325,6 +1414,9 @@ function ReplenishmentTable({
   if (storeId) {
     params.set("storeId", storeId);
   }
+  storeIds.forEach((id) => params.append("storeIds", id));
+  categoryIds.forEach((id) => params.append("categoryIds", id));
+  if (asOf) params.set("asOf", asOf);
 
   return (
     <section
@@ -1691,7 +1783,9 @@ function TopSuppliersTable({
                     {row.frozenSkuCount}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatMoney(row.frozenStockAmount)}
+                    {row.frozenStockAmount === null
+                      ? "Нет оценки"
+                      : formatMoney(row.frozenStockAmount)}
                   </td>
                   <td className="px-5 py-4 text-zinc-700">
                     {row.problemCategoryName ?? "—"}

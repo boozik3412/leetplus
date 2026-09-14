@@ -18,6 +18,7 @@ import {
   type GuestsSummary,
 } from "@/lib/guests";
 import { getOperationalReport, type OperationalReport } from "@/lib/reports";
+import { buildAssortmentReportHref } from "@/lib/assortment-report-query";
 import { getStores } from "@/lib/stores";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -36,6 +37,14 @@ function searchParamsArray(value: string | string[] | undefined) {
   }
 
   return Array.isArray(value) ? value : [value];
+}
+
+function noSalesDaysParam(value: string | string[] | undefined) {
+  const days = Number(searchParam(value));
+
+  return ([7, 14, 21, 30] as const).includes(days as 7 | 14 | 21 | 30)
+    ? (days as 7 | 14 | 21 | 30)
+    : undefined;
 }
 
 type DashboardRevenueView = "summary" | "stores";
@@ -157,20 +166,6 @@ function ratioPercent(value: number, total: number) {
   return total > 0 ? (value / total) * 100 : null;
 }
 
-function lastFullDaysRange(days: number) {
-  const now = new Date();
-  const toDate = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
-  );
-  const fromDate = new Date(toDate);
-  fromDate.setUTCDate(fromDate.getUTCDate() - (days - 1));
-
-  return {
-    from: fromDate.toISOString().slice(0, 10),
-    to: toDate.toISOString().slice(0, 10),
-  };
-}
-
 function formatDashboardPeriodLabel(from: string, to: string) {
   const fromDate = parseDateInput(from);
   const toDate = parseDateInput(to);
@@ -247,7 +242,7 @@ type DashboardCrmTaskReport = Pick<GuestCrmTaskReport, "summary">;
 
 type DashboardOperationalReport = Pick<
   OperationalReport,
-  "outOfStockRiskProducts" | "productsWithoutSales"
+  "outOfStockRiskProducts" | "productsWithoutSales" | "assortmentHealth"
 >;
 
 const emptyGuestsSummary: DashboardGuestsSummary = {
@@ -325,6 +320,19 @@ function scopedHref(
   return `${path}${query ? `?${query}` : ""}`;
 }
 
+function assortmentScope(
+  summary: Awaited<ReturnType<typeof getDashboardSummary>>,
+) {
+  return {
+    from: summary.periodFrom,
+    to: summary.periodTo,
+    asOf: summary.selectedAssortmentAsOf,
+    storeIds: summary.selectedStoreIds,
+    categoryIds: summary.selectedCategoryIds,
+    noSalesDays: summary.selectedNoSalesDays,
+  };
+}
+
 function buildBusinessSignalGroups({
   summary,
   guestsSummary,
@@ -338,7 +346,7 @@ function buildBusinessSignalGroups({
   guestsSummary: DashboardGuestsSummary;
   crmTaskReport: DashboardCrmTaskReport;
   latestTrend: { noSalesSkuCount14: number } | null;
-  assortmentRiskAmount: number;
+  assortmentRiskAmount: number | null;
   assortmentRiskSkuCount: number;
   productRevenueShare: number | null;
 }) {
@@ -396,7 +404,7 @@ function buildBusinessSignalGroups({
       subtitle:
         "Найти товарные потери: OOS, замороженные остатки и позиции без продаж.",
       routeLabel: "Открыть ассортимент",
-      href: "/assortment/dashboard",
+      href: buildAssortmentReportHref(assortmentScope(summary), "dashboard"),
       signals: [
         {
           title: "OOS риск",
@@ -406,20 +414,31 @@ function buildBusinessSignalGroups({
               ? "Позиции могут потерять продажи из-за короткого запаса."
               : "Критичного OOS риска сейчас не видно.",
           actionLabel: "Закрыть риск",
-          href: "/reports/oos/table",
+          href: buildAssortmentReportHref(assortmentScope(summary), "oos-risk"),
           tone: summary.outOfStockRiskCount > 0 ? "danger" : "good",
         },
         {
           title: "Деньги в риске",
-          value: formatRubles(assortmentRiskAmount),
+          value:
+            assortmentRiskAmount === null
+              ? "Частично"
+              : formatRubles(assortmentRiskAmount),
           description: `${formatQuantity(assortmentRiskSkuCount)} SKU: OOS плюс замороженный остаток без продаж${
             noSalesSkuCount > 0
               ? `; ${formatQuantity(noSalesSkuCount)} SKU без продаж 14 дней.`
               : "."
           }`,
           actionLabel: "Открыть разбор",
-          href: "/reports/assortment-risk/table",
-          tone: assortmentRiskAmount > 0 ? "danger" : "good",
+          href: buildAssortmentReportHref(
+            assortmentScope(summary),
+            "assortment-risk",
+          ),
+          tone:
+            assortmentRiskAmount === null
+              ? "warning"
+              : assortmentRiskAmount > 0
+                ? "danger"
+                : "good",
         },
       ],
     },
@@ -447,7 +466,11 @@ function buildBusinessSignalGroups({
             pageSize: "50",
           }),
           tone:
-            loadPercent === null ? "neutral" : loadPercent < 35 ? "warning" : "good",
+            loadPercent === null
+              ? "neutral"
+              : loadPercent < 35
+                ? "warning"
+                : "good",
         },
         {
           title: "Доля бара",
@@ -485,6 +508,9 @@ export default async function DashboardPage({
     dateFrom: searchParam(params.dateFrom),
     dateTo: searchParam(params.dateTo),
     storeIds: searchParamsArray(params.storeIds),
+    categoryIds: searchParamsArray(params.categoryIds),
+    asOf: searchParam(params.asOf),
+    noSalesDays: noSalesDaysParam(params.noSalesDays),
   } as const;
   const revenueView: DashboardRevenueView =
     searchParam(params.revenueView) === "stores" ? "stores" : "summary";
@@ -537,8 +563,8 @@ export default async function DashboardPage({
                   {highlightedPeriod}
                 </span>
                 . Первый экран соединяет деньги, гостей, ассортимент и игровую
-                загрузку, чтобы быстро понять, где сеть зарабатывает и где теряет
-                потенциал.
+                загрузку, чтобы быстро понять, где сеть зарабатывает и где
+                теряет потенциал.
               </p>
             </div>
 
@@ -552,6 +578,7 @@ export default async function DashboardPage({
               adjustedGrossProfit={summary.adjustedGrossProfit}
               grossProfit={summary.grossProfit}
               adjustedMarginPercent={summary.adjustedMarginPercent}
+              marginCoverage={summary.marginCoverage}
               fullDayRevenueDate={summary.fullDayRevenueDate}
               fullDayRevenue={summary.fullDayRevenue}
               fullDayRevenueToAveragePercent={
@@ -592,24 +619,22 @@ async function DashboardSecondaryPanels({
     summary.selectedStoreIds.length === 1
       ? summary.selectedStoreIds[0]
       : undefined;
+  const reportScope = assortmentScope(summary);
   const [
     periodOperationalReport,
-    noSalesReport21,
+    noSalesReport,
     guestsSummary,
     crmTaskReport,
   ] = await Promise.all([
     safeDashboardValue(
       getOperationalReport({
-        from: summary.periodFrom,
-        to: summary.periodTo,
-        storeId: operationalStoreId,
+        ...reportScope,
       }),
       emptyOperationalReport,
     ),
     safeDashboardValue(
       getOperationalReport({
-        ...lastFullDaysRange(21),
-        storeId: operationalStoreId,
+        ...reportScope,
       }),
       emptyOperationalReport,
     ),
@@ -633,7 +658,12 @@ async function DashboardSecondaryPanels({
   ]);
   const assortmentRisk = buildAssortmentRiskSummary({
     oosRows: periodOperationalReport.outOfStockRiskProducts,
-    noSalesRows: noSalesReport21.productsWithoutSales,
+    noSalesRows: noSalesReport.productsWithoutSales,
+    oosState:
+      periodOperationalReport.assortmentHealth?.outOfStock.state ?? "UNKNOWN",
+    noSalesState:
+      noSalesReport.assortmentHealth?.noSales[summary.selectedNoSalesDays]
+        .state ?? "UNKNOWN",
   });
   const latestTrend = summary.salesTrend.at(-1) ?? null;
   const productRevenueShare = ratioPercent(
@@ -713,7 +743,7 @@ function ExecutiveOverviewPanel({
 }: {
   summary: Awaited<ReturnType<typeof getDashboardSummary>>;
   guestsSummary: DashboardGuestsSummary;
-  assortmentRiskAmount: number;
+  assortmentRiskAmount: number | null;
   assortmentRiskSkuCount: number;
   productRevenueShare: number | null;
 }) {
@@ -724,7 +754,11 @@ function ExecutiveOverviewPanel({
         value={`${formatQuantity(guestsSummary.totalGuests)} гостей`}
         description={`Новые: ${formatQuantity(guestsSummary.newGuests)}, повторные: ${formatQuantity(guestsSummary.repeatGuests)}, в риске: ${formatQuantity(guestsSummary.riskGuests)}.`}
         href="/guests/crm"
-        tone={guestsSummary.riskGuests > guestsSummary.newGuests ? "warning" : "good"}
+        tone={
+          guestsSummary.riskGuests > guestsSummary.newGuests
+            ? "warning"
+            : "good"
+        }
       />
       <ExecutiveMetricCard
         label="Маркетинг и загрузка"
@@ -751,9 +785,15 @@ function ExecutiveOverviewPanel({
       <ExecutiveMetricCard
         label="Управление ассортиментом"
         value={`${formatQuantity(summary.activeSku)} активных SKU`}
-        description={`OOS: ${formatQuantity(summary.outOfStockRiskCount)} SKU. Деньги в риске: ${formatRubles(assortmentRiskAmount)} по ${formatQuantity(assortmentRiskSkuCount)} SKU.`}
-        href="/assortment/dashboard"
-        tone={assortmentRiskAmount > 0 ? "danger" : "good"}
+        description={`OOS: ${formatQuantity(summary.outOfStockRiskCount)} SKU. Деньги в риске: ${assortmentRiskAmount === null ? "частично подтверждены" : formatRubles(assortmentRiskAmount)} по ${formatQuantity(assortmentRiskSkuCount)} SKU.`}
+        href={buildAssortmentReportHref(assortmentScope(summary), "dashboard")}
+        tone={
+          assortmentRiskAmount === null
+            ? "warning"
+            : assortmentRiskAmount > 0
+              ? "danger"
+              : "good"
+        }
       />
     </section>
   );

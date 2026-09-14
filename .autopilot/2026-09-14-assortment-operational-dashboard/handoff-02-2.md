@@ -1,0 +1,12 @@
+СДЕЛАНО: D05 сохраняется; review 02.1 stale inventory не маскируется свежим QUICK; 02.2 долгий period идёт в loader; 02.3 cost-only config даёт CLUB_PURCHASE_PRICE; 02.4 положительные write-offs PARTIAL; 02.7 confirmed zero-sales дни входят в forecast; 02.8 ambiguous shared-domain scoped visits не считаются.
+ФАЙЛЫ: apps/api/src/common/assortment-health-loader.service.ts и .spec.ts готовы; loader internal result содержит salesDayEvidence; apps/api/src/common/assortment-health.ts расширен nullable config price/PARTIAL write-off coverage; apps/api/src/dashboard/dashboard.service.ts и .spec.ts готовы для source/security/forecast части.
+ФАЙЛЫ: apps/api/src/reports/reports.service.ts и .spec.ts остаются в предыдущем integration-состоянии и требуют целевой переработки legacy read paths, не менялись в review repair.
+РЕШЕНИЯ: source health больше не использует IntegrationSyncJob как глобальный freshness/failure proxy; он берёт selected-scope source facts, поэтому fresh QUICK не может освежить old inventory.
+РЕШЕНИЯ: unresolved session domain допустим в aggregate только когда selected scope содержит все active stores этого domain; empty/partial binding возвращает generic scope reason.
+РЕШЕНИЯ: write-off partial показывает только matching positive facts; unmatched goods остаются null PARTIAL, так как отсутствие строки не доказывает 0.
+ТУПИКИ: Reports legacy operational/turnover totals, rows and recommendations всё ещё independently query historical sales/inventory; engine summary недостаточен для total revenue/cost parity без переноса aggregate contract.
+ТУПИКИ: Dashboard top-level grossProfit/margin остаются legacy number fields and treat zero cost as a numeric cost; existing growth metric exposes coverage but does not supply required full-unknown/partial aggregate contract.
+ДАЛЬШЕ: сначала write red report parity test categoryIds+asOf against legacy totals/rows/recommendations, then replace report historical reads with loader/engine row adapters or a shared aggregate boundary.
+ДАЛЬШЕ: make top-level margin nullable with coveredRevenue/coveredOperations and explicit PARTIAL/UNKNOWN state; preserve legacy consumer compatibility only through additive fields if required.
+ДАЛЬШЕ: for source-health review add per-domain failure evidence only if a dedicated bounded job/coverage query is chosen; global IntegrationSyncJob must not be restored.
+GATES: task02-ceiling-targeted = 4 suites/53 PASS; task02-ceiling-eslint-retry = PASS; task02-ceiling-tsc = PASS; no full suite rerun.

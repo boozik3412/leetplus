@@ -4,6 +4,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { receiptIdentityFromSourceHash } from '../common/receipt-source-identity';
+import { resolveGuestSessionStore } from '../common/guest-session-store';
+import {
+  AssortmentHealthLoaderService,
+  type AssortmentSourceHealthEvidence,
+} from '../common/assortment-health-loader.service';
+import type {
+  AssortmentHealth,
+  AssortmentNoSalesWindow,
+} from '../common/assortment-health';
 
 export type DashboardPeriod =
   | 'day'
@@ -26,6 +35,8 @@ export type DashboardQuery = {
   storeIds?: string | string[];
   categoryIds?: string | string[];
   skuGrouping?: DashboardSkuGrouping;
+  asOf?: string;
+  noSalesDays?: AssortmentNoSalesWindow | string;
 };
 
 export type DashboardTopSku = {
@@ -300,6 +311,26 @@ export type DashboardAssortmentGrowth = {
   };
 };
 
+export type DashboardVisitBinding = {
+  state: 'AVAILABLE' | 'PARTIAL' | 'MISSING';
+  observedVisitCount: number;
+  usableVisitCount: number | null;
+  coverage: { covered: number; total: number; percent: number | null };
+  reason: string | null;
+};
+
+export type DashboardMarginCoverage = {
+  state: 'READY' | 'PARTIAL' | 'UNKNOWN';
+  fullMarginPercent: number | null;
+  fullGrossProfit: number | null;
+  partialMarginPercent: number | null;
+  partialGrossProfit: number | null;
+  coveredRevenue: number;
+  coveredOperations: number;
+  totalRevenue: number;
+  totalOperations: number;
+};
+
 export type DashboardSummary = {
   tenantId: string;
   tenantSlug: string;
@@ -308,6 +339,9 @@ export type DashboardSummary = {
   skuGrouping: DashboardSkuGrouping;
   selectedStoreIds: string[];
   selectedCategoryIds: string[];
+  selectedNoSalesDays: AssortmentNoSalesWindow;
+  selectedAssortmentAsOf: string;
+  visitBinding: DashboardVisitBinding;
   periodFrom: string;
   periodTo: string;
   totalSku: number;
@@ -329,12 +363,13 @@ export type DashboardSummary = {
   writeOffRevenuePercent: number | null;
   previousWriteOffRevenuePercent: number | null;
   writeOffRevenuePercentDelta: number | null;
-  previousAdjustedGrossProfit: number;
+  previousAdjustedGrossProfit: number | null;
   adjustedGrossProfitToPreviousPercent: number | null;
-  grossProfit: number;
-  adjustedGrossProfit: number;
-  marginPercent: number;
-  adjustedMarginPercent: number;
+  grossProfit: number | null;
+  adjustedGrossProfit: number | null;
+  marginPercent: number | null;
+  adjustedMarginPercent: number | null;
+  marginCoverage: DashboardMarginCoverage;
   soldQuantity: number;
   writeOffAmount: number;
   returnAmount: number;
@@ -346,6 +381,7 @@ export type DashboardSummary = {
   salesTrend: DashboardSalesTrendSegment[];
   categoryAnalytics: DashboardCategoryMetric[];
   topSkuByRevenue: DashboardTopSku[];
+  assortmentHealth?: AssortmentHealth['summary'];
 };
 
 export type DashboardRevenueDiagnosticsTypeBreakdown = {
@@ -445,6 +481,7 @@ export class DashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly freshStoreScopeService: FreshStoreScopeService,
+    private readonly assortmentHealthLoader: AssortmentHealthLoaderService,
   ) {}
 
   async getSummary(
@@ -459,6 +496,8 @@ export class DashboardService {
         requestedStoreIds,
       );
     const period = this.resolvePeriod(query);
+    const assortmentAsOf = this.resolveAssortmentAsOf(query.asOf);
+    const selectedNoSalesDays = this.resolveNoSalesDays(query.noSalesDays);
     const selectedStoreIds = effectiveStoreIds ? [...effectiveStoreIds] : [];
     const selectedCategoryIds = requestedCategoryIds
       ? [...requestedCategoryIds]
@@ -487,6 +526,27 @@ export class DashboardService {
     const forecastHistoryPeriod = this.resolveForecastHistoryPeriod(
       period.toDate,
     );
+    const assortmentHealthPromise = this.assortmentHealthLoader.load({
+      tenantId,
+      storeIds: effectiveStoreIds,
+      categoryIds: requestedCategoryIds ?? null,
+      period: { from: period.fromDate, to: period.toDate },
+      asOf: assortmentAsOf,
+      coveragePeriod: {
+        from: forecastHistoryPeriod.fromDate,
+        to: forecastHistoryPeriod.toDate,
+      },
+    });
+    const tenantStoreTopologyPromise = this.prisma.store.findMany({
+      where: { tenantId, isActive: true },
+      select: {
+        id: true,
+        tenantId: true,
+        externalDomain: true,
+        externalClubId: true,
+        isActive: true,
+      },
+    });
 
     const [
       tenant,
@@ -502,9 +562,9 @@ export class DashboardService {
       inventorySnapshots,
       currentInventorySnapshots,
       stockMovements,
-      periodGuestSessions,
-      trendGuestSessions,
-      previousGuestSessions,
+      rawPeriodGuestSessions,
+      rawTrendGuestSessions,
+      rawPreviousGuestSessions,
       periodGuestTransactions,
       periodGuestOperationLogs,
       fullDayRevenueFacts,
@@ -688,6 +748,7 @@ export class DashboardService {
           snapshotDate: {
             lte: period.toDate,
           },
+          updatedAt: { lte: assortmentAsOf },
         },
         select: {
           storeId: true,
@@ -708,6 +769,7 @@ export class DashboardService {
           snapshotDate: {
             lte: activeSkuPeriod.toDate,
           },
+          updatedAt: { lte: assortmentAsOf },
         },
         select: {
           storeId: true,
@@ -738,7 +800,6 @@ export class DashboardService {
       this.prisma.guestSession.findMany({
         where: {
           tenantId,
-          ...storeFilter,
           startedAt: { gte: period.fromDate, lte: period.toDate },
         },
         select: {
@@ -757,7 +818,6 @@ export class DashboardService {
       this.prisma.guestSession.findMany({
         where: {
           tenantId,
-          ...storeFilter,
           startedAt: {
             gte: period.trendFromDate,
             lte: period.trendToDate,
@@ -765,8 +825,10 @@ export class DashboardService {
         },
         select: {
           id: true,
+          storeId: true,
           externalProvider: true,
           externalDomain: true,
+          externalClubId: true,
           externalSessionId: true,
           startedAt: true,
         },
@@ -774,7 +836,6 @@ export class DashboardService {
       this.prisma.guestSession.findMany({
         where: {
           tenantId,
-          ...storeFilter,
           startedAt: {
             gte: previousPeriod.fromDate,
             lte: previousPeriod.toDate,
@@ -782,8 +843,10 @@ export class DashboardService {
         },
         select: {
           id: true,
+          storeId: true,
           externalProvider: true,
           externalDomain: true,
+          externalClubId: true,
           externalSessionId: true,
         },
       }),
@@ -884,11 +947,33 @@ export class DashboardService {
       }),
     ]);
 
+    const tenantStoreTopology = await tenantStoreTopologyPromise;
+    const periodVisits = this.resolveScopedGuestSessions(
+      rawPeriodGuestSessions,
+      tenantId,
+      tenantStoreTopology,
+      effectiveStoreIds,
+    );
+    const trendVisits = this.resolveScopedGuestSessions(
+      rawTrendGuestSessions,
+      tenantId,
+      tenantStoreTopology,
+      effectiveStoreIds,
+    );
+    const previousVisits = this.resolveScopedGuestSessions(
+      rawPreviousGuestSessions,
+      tenantId,
+      tenantStoreTopology,
+      effectiveStoreIds,
+    );
+    const periodGuestSessions = periodVisits.sessions;
+    const trendGuestSessions = trendVisits.sessions;
+    const previousGuestSessions = previousVisits.sessions;
+
     const [
       periodGuestWorkingShifts,
       exactRevenueSnapshot,
       latestRevenueSnapshot,
-      latestIntegrationSync,
     ] = await Promise.all([
       this.prisma.guestWorkingShift.findMany({
         where: {
@@ -942,18 +1027,6 @@ export class DashboardService {
             },
           })
         : Promise.resolve(null),
-      this.prisma.integrationSyncJob.findFirst({
-        where: { tenantId },
-        orderBy: { startedAt: 'desc' },
-        select: {
-          status: true,
-          startedAt: true,
-          finishedAt: true,
-          salesCount: true,
-          inventoryCount: true,
-          errorMessage: true,
-        },
-      }),
     ]);
 
     let averageMarginPercent = 0;
@@ -1032,6 +1105,12 @@ export class DashboardService {
 
     const movementImpact = this.stockMovementImpact(stockMovements);
     const grossProfit = totalRevenue - totalCost;
+    const marginCoverage = this.buildMarginCoverage(
+      salesFacts.map((fact) => ({
+        revenue: fact.revenue.toNumber(),
+        cost: fact.cost.toNumber(),
+      })),
+    );
     const adjustedGrossProfit =
       grossProfit - movementImpact.writeOffAmount - movementImpact.returnAmount;
     const stockByProduct = this.latestStockByProduct(inventorySnapshots);
@@ -1148,6 +1227,12 @@ export class DashboardService {
       previousGrossProfit -
       previousMovementImpact.writeOffAmount -
       previousMovementImpact.returnAmount;
+    const previousMarginCoverage = this.buildMarginCoverage(
+      previousSalesFacts.map((fact) => ({
+        revenue: fact.revenue.toNumber(),
+        cost: fact.cost.toNumber(),
+      })),
+    );
     const writeOffRevenuePercent = this.ratioPercent(
       movementImpact.writeOffAmount,
       totalRevenue,
@@ -1198,11 +1283,14 @@ export class DashboardService {
           )
         : null;
     const receiptMetrics = this.buildReceiptMetrics(salesFacts);
+    const assortmentHealth = await assortmentHealthPromise;
     const sources = this.buildAssortmentSourceHealth({
       salesFacts,
       guestSessions: periodGuestSessions,
       inventorySnapshots: currentInventorySnapshots,
       products: productsForAverages,
+      asOf: assortmentAsOf,
+      sourceHealthEvidence: assortmentHealth.sourceHealthEvidence,
       saleOperationCount: salesFacts.length,
       visitCount: currentVisitStats.visits,
       costCoveragePercent:
@@ -1211,11 +1299,13 @@ export class DashboardService {
           : null,
       stockCoveragePercent,
       categoryCoveragePercent,
-      latestSync: latestIntegrationSync,
     });
     const forecast = this.buildAssortmentForecast({
       history: forecastSalesFacts,
       historyTo: forecastHistoryPeriod.toDate,
+      confirmedSalesDays: this.confirmedSalesDays(
+        assortmentHealth.salesDayEvidence,
+      ),
       demand,
       salesSource: sources.find((source) => source.key === 'sales') ?? null,
       inventorySource:
@@ -1243,7 +1333,6 @@ export class DashboardService {
       receiptMetrics,
       forecast,
     });
-
     return {
       tenantId,
       tenantSlug,
@@ -1252,6 +1341,9 @@ export class DashboardService {
       skuGrouping,
       selectedStoreIds,
       selectedCategoryIds,
+      selectedNoSalesDays,
+      selectedAssortmentAsOf: assortmentAsOf.toISOString(),
+      visitBinding: periodVisits.binding,
       periodFrom: this.toDateInputValue(period.fromDate),
       periodTo: this.toDateInputValue(period.toDate),
       totalSku,
@@ -1284,18 +1376,30 @@ export class DashboardService {
         previousWriteOffRevenuePercent !== null
           ? this.round(writeOffRevenuePercent - previousWriteOffRevenuePercent)
           : null,
-      previousAdjustedGrossProfit: this.round(previousAdjustedGrossProfit),
+      previousAdjustedGrossProfit:
+        previousMarginCoverage.fullGrossProfit === null
+          ? null
+          : this.round(previousAdjustedGrossProfit),
       adjustedGrossProfitToPreviousPercent: this.changePercent(
-        adjustedGrossProfit,
-        previousAdjustedGrossProfit,
+        marginCoverage.fullGrossProfit === null ? null : adjustedGrossProfit,
+        previousMarginCoverage.fullGrossProfit === null
+          ? null
+          : previousAdjustedGrossProfit,
       ),
-      grossProfit: this.round(grossProfit),
-      adjustedGrossProfit: this.round(adjustedGrossProfit),
-      marginPercent: this.marginPercent(totalCost, totalRevenue),
-      adjustedMarginPercent: this.marginPercent(
-        totalRevenue - adjustedGrossProfit,
-        totalRevenue,
-      ),
+      grossProfit: marginCoverage.fullGrossProfit,
+      adjustedGrossProfit:
+        marginCoverage.fullGrossProfit === null
+          ? null
+          : this.round(adjustedGrossProfit),
+      marginPercent: marginCoverage.fullMarginPercent,
+      adjustedMarginPercent:
+        marginCoverage.fullGrossProfit === null
+          ? null
+          : this.marginPercent(
+              totalRevenue - adjustedGrossProfit,
+              totalRevenue,
+            ),
+      marginCoverage,
       soldQuantity: this.round(soldQuantity),
       writeOffAmount: this.round(movementImpact.writeOffAmount),
       returnAmount: this.round(movementImpact.returnAmount),
@@ -1322,6 +1426,7 @@ export class DashboardService {
           grossProfit: this.round(item.grossProfit),
           soldQuantity: this.round(item.soldQuantity),
         })),
+      assortmentHealth: assortmentHealth.health.summary,
     };
   }
 
@@ -1973,8 +2078,8 @@ export class DashboardService {
     return this.round((value / total) * 100);
   }
 
-  private changePercent(current: number, previous: number) {
-    if (previous <= 0) {
+  private changePercent(current: number | null, previous: number | null) {
+    if (current === null || previous === null || previous <= 0) {
       return null;
     }
 
@@ -2501,24 +2606,18 @@ export class DashboardService {
     products: Array<{
       updatedAt: Date;
     }>;
-    latestSync: {
-      status: string;
-      startedAt: Date;
-      finishedAt: Date | null;
-    } | null;
+    asOf: Date;
+    sourceHealthEvidence?: AssortmentSourceHealthEvidence;
     saleOperationCount: number;
     visitCount: number;
     costCoveragePercent: number | null;
     stockCoveragePercent: number | null;
     categoryCoveragePercent: number | null;
   }): DashboardAssortmentSourceHealth[] {
-    const latestSyncAt =
-      input.latestSync?.finishedAt ?? input.latestSync?.startedAt;
-    const syncFailed = input.latestSync?.status === 'FAILED';
-    const staleThreshold = Date.now() - 36 * 60 * 60 * 1000;
-    const isStale = (lastImportedAt: Date | null) => {
-      const reference = latestSyncAt ?? lastImportedAt;
-      return reference ? reference.getTime() < staleThreshold : false;
+    const isInventoryStale = (lastImportedAt: Date | null) => {
+      return lastImportedAt
+        ? lastImportedAt.getTime() < input.asOf.getTime() - 36 * 60 * 60 * 1000
+        : false;
     };
     const latest = <T>(rows: T[], pick: (row: T) => Date | null) =>
       rows.reduce<Date | null>((result, row) => {
@@ -2543,22 +2642,42 @@ export class DashboardService {
     const productsImportedAt = latest(input.products, (row) => row.updatedAt);
     const rawState = (
       hasData: boolean,
-      importedAt: Date | null,
     ): DashboardAssortmentSourceHealth['state'] => {
-      if (syncFailed) {
-        return 'FAILED';
-      }
       if (!hasData) {
         return 'MISSING';
       }
-      return isStale(importedAt) ? 'STALE' : 'FRESH';
+      return 'FRESH';
     };
-    const salesState = rawState(input.saleOperationCount > 0, salesImportedAt);
-    const visitsState = rawState(input.visitCount > 0, visitsImportedAt);
-    const inventoryBaseState = rawState(
-      input.inventorySnapshots.length > 0,
-      inventoryImportedAt,
+    const moduleEvidenceState = (
+      baseState: DashboardAssortmentSourceHealth['state'],
+      evidence: AssortmentSourceHealthEvidence['sales'] | undefined,
+      confirmedEmptyIsFresh: boolean,
+    ): DashboardAssortmentSourceHealth['state'] => {
+      if (!evidence || evidence.totalDomains === 0) return baseState;
+      if (evidence.failedDomains === evidence.totalDomains) return 'FAILED';
+      if (evidence.failedDomains > 0 || evidence.missingDomains > 0) {
+        return evidence.confirmedDomains > 0 || baseState === 'FRESH'
+          ? 'PARTIAL'
+          : evidence.failedDomains > 0
+            ? 'FAILED'
+            : baseState;
+      }
+      return baseState === 'MISSING' && confirmedEmptyIsFresh
+        ? 'FRESH'
+        : baseState;
+    };
+    const salesState = moduleEvidenceState(
+      rawState(input.saleOperationCount > 0),
+      input.sourceHealthEvidence?.sales,
+      true,
     );
+    const visitsState = rawState(input.visitCount > 0);
+    const inventoryBaseState: DashboardAssortmentSourceHealth['state'] =
+      input.inventorySnapshots.length === 0
+        ? 'MISSING'
+        : isInventoryStale(inventoryImportedAt)
+          ? 'STALE'
+          : 'FRESH';
     const coverageState = (
       baseState: DashboardAssortmentSourceHealth['state'],
       coveragePercent: number | null,
@@ -2570,14 +2689,18 @@ export class DashboardService {
       salesState,
       input.costCoveragePercent,
     );
-    const categoryBaseState = rawState(
-      input.products.length > 0,
-      productsImportedAt,
-    );
+    const categoryBaseState = rawState(input.products.length > 0);
     const categoryState: DashboardAssortmentSourceHealth['state'] =
       coverageState(categoryBaseState, input.categoryCoveragePercent);
     const inventoryState: DashboardAssortmentSourceHealth['state'] =
-      coverageState(inventoryBaseState, input.stockCoveragePercent);
+      coverageState(
+        moduleEvidenceState(
+          inventoryBaseState,
+          input.sourceHealthEvidence?.inventory,
+          false,
+        ),
+        input.stockCoveragePercent,
+      );
     const rawDetail = (
       state: DashboardAssortmentSourceHealth['state'],
       label: string,
@@ -2592,6 +2715,16 @@ export class DashboardService {
         return `${label} для выбранного периода отсутствуют.`;
       }
       return `${label} загружены и пригодны для расчёта.`;
+    };
+    const sourceDetail = (
+      state: DashboardAssortmentSourceHealth['state'],
+      label: string,
+      evidence: AssortmentSourceHealthEvidence['sales'] | undefined,
+    ) => {
+      if (state === 'PARTIAL' && evidence && evidence.totalDomains > 0) {
+        return `${label} подтверждены для ${evidence.confirmedDomains} из ${evidence.totalDomains} доменов.`;
+      }
+      return rawDetail(state, label);
     };
 
     return [
@@ -2614,7 +2747,11 @@ export class DashboardService {
         lastFactAt: salesFactAt?.toISOString() ?? null,
         lastImportedAt: salesImportedAt?.toISOString() ?? null,
         coveragePercent: null,
-        detail: rawDetail(salesState, 'Продажи'),
+        detail: sourceDetail(
+          salesState,
+          'Продажи',
+          input.sourceHealthEvidence?.sales,
+        ),
       },
       {
         key: 'inventory',
@@ -2626,7 +2763,11 @@ export class DashboardService {
         detail:
           inventoryState === 'PARTIAL'
             ? `Остатки есть у ${input.stockCoveragePercent}% активных SKU.`
-            : rawDetail(inventoryState, 'Остатки'),
+            : sourceDetail(
+                inventoryState,
+                'Остатки',
+                input.sourceHealthEvidence?.inventory,
+              ),
       },
       {
         key: 'costs',
@@ -2661,6 +2802,7 @@ export class DashboardService {
       revenue: { toNumber: () => number };
     }>;
     historyTo: Date;
+    confirmedSalesDays?: Date[];
     demand: Array<{
       hasStockSnapshot: boolean;
       averageDailySales: number;
@@ -2680,9 +2822,14 @@ export class DashboardService {
         (revenueByDay.get(key) ?? 0) + fact.revenue.toNumber(),
       );
     });
-    const observedDays = [...revenueByDay.entries()].map(([date, revenue]) => ({
+    const observedDayKeys = input.confirmedSalesDays
+      ? new Set(
+          input.confirmedSalesDays.map((date) => this.toDateInputValue(date)),
+        )
+      : new Set(revenueByDay.keys());
+    const observedDays = [...observedDayKeys].map((date) => ({
       date: new Date(`${date}T00:00:00.000Z`),
-      revenue,
+      revenue: revenueByDay.get(date) ?? 0,
     }));
     const fallbackAverage =
       observedDays.length > 0
@@ -2794,6 +2941,27 @@ export class DashboardService {
             ? `Прогноз предварительный: ${historyDays} дней с продажами или неполное покрытие источников.`
             : 'Прогноз рассчитан по подтверждённым дням продаж в 28-дневном окне с поправкой на день недели.',
     };
+  }
+
+  private confirmedSalesDays(
+    evidence?: Array<{
+      date: Date;
+      status: 'CONFIRMED' | 'MISSING' | 'FAILED';
+    }>,
+  ) {
+    if (!evidence || evidence.length === 0) return undefined;
+    const statusesByDate = new Map<string, string[]>();
+    evidence.forEach((item) => {
+      const date = this.toDateInputValue(item.date);
+      const statuses = statusesByDate.get(date) ?? [];
+      statuses.push(item.status);
+      statusesByDate.set(date, statuses);
+    });
+    return [...statusesByDate].flatMap(([date, statuses]) =>
+      statuses.every((status) => status === 'CONFIRMED')
+        ? [new Date(`${date}T00:00:00.000Z`)]
+        : [],
+    );
   }
 
   private buildAssortmentActions(input: {
@@ -3231,6 +3399,97 @@ export class DashboardService {
       visits: sessionGuests.size,
       identifiedVisits: [...sessionGuests.values()].filter(Boolean).length,
       identifiedGuests: identifiedGuestIds.size,
+    };
+  }
+
+  private resolveScopedGuestSessions<
+    T extends {
+      storeId: string | null;
+      externalDomain: string | null;
+      externalClubId: string | null;
+    },
+  >(
+    sessions: T[],
+    tenantId: string,
+    topology: Array<{
+      id: string;
+      tenantId: string;
+      externalDomain: string | null;
+      externalClubId: string | null;
+      isActive: boolean;
+    }>,
+    selectedStoreIds: readonly string[] | null,
+  ): { sessions: T[]; binding: DashboardVisitBinding } {
+    const selected = selectedStoreIds ? new Set(selectedStoreIds) : null;
+    const topologyStoreIds = new Set(topology.map((store) => store.id));
+    const isWholeDomainInScope = (domain: string) => {
+      const activeDomainStores = topology.filter(
+        (store) => store.isActive && store.externalDomain === domain,
+      );
+      return (
+        selected !== null &&
+        activeDomainStores.length > 0 &&
+        activeDomainStores.every((store) => selected.has(store.id))
+      );
+    };
+    const resolved: T[] = [];
+    let observed = 0;
+    let covered = 0;
+
+    sessions.forEach((session) => {
+      const resolvedStoreId =
+        session.storeId && topologyStoreIds.has(session.storeId)
+          ? session.storeId
+          : resolveGuestSessionStore({
+              tenantId,
+              externalDomain: session.externalDomain,
+              externalClubId: session.externalClubId,
+              stores: topology,
+            }).storeId;
+      const isRelevant = selected
+        ? resolvedStoreId
+          ? selected.has(resolvedStoreId)
+          : session.externalDomain !== null &&
+            isWholeDomainInScope(session.externalDomain)
+        : true;
+
+      if (!isRelevant) return;
+      observed += 1;
+
+      if (!resolvedStoreId || (selected && !selected.has(resolvedStoreId))) {
+        return;
+      }
+
+      covered += 1;
+      resolved.push(
+        resolvedStoreId === session.storeId
+          ? session
+          : { ...session, storeId: resolvedStoreId },
+      );
+    });
+
+    const coveragePercent =
+      observed > 0 ? this.round((covered / observed) * 100) : null;
+    const state: DashboardVisitBinding['state'] =
+      observed === 0
+        ? 'MISSING'
+        : covered === observed
+          ? 'AVAILABLE'
+          : 'PARTIAL';
+    return {
+      sessions: resolved,
+      binding: {
+        state,
+        observedVisitCount: observed,
+        usableVisitCount: state === 'AVAILABLE' ? covered : null,
+        coverage: { covered, total: observed, percent: coveragePercent },
+        reason:
+          state === 'PARTIAL'
+            ? 'Не все исторические сессии можно доказуемо привязать к выбранным клубам.'
+            : state === 'MISSING'
+              ? 'В выбранном периоде нет сессий с подтвержденной областью.'
+              : null,
+      },
     };
   }
 
@@ -5130,6 +5389,60 @@ export class DashboardService {
     );
   }
 
+  private resolveAssortmentAsOf(value?: string) {
+    const now = new Date();
+    if (!value) return now;
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (dateOnly) {
+      const asOf = new Date(
+        Date.UTC(
+          Number(dateOnly[1]),
+          Number(dateOnly[2]) - 1,
+          Number(dateOnly[3]),
+        ),
+      );
+      if (
+        asOf.getUTCFullYear() !== Number(dateOnly[1]) ||
+        asOf.getUTCMonth() !== Number(dateOnly[2]) - 1 ||
+        asOf.getUTCDate() !== Number(dateOnly[3])
+      ) {
+        throw new BadRequestException('asOf must be a valid YYYY-MM-DD date');
+      }
+      if (asOf.toISOString().slice(0, 10) === now.toISOString().slice(0, 10)) {
+        return now;
+      }
+      asOf.setUTCHours(23, 59, 59, 999);
+      if (asOf > now) {
+        throw new BadRequestException('asOf must not be in the future');
+      }
+      return asOf;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
+      throw new BadRequestException(
+        'asOf must be a canonical ISO timestamp or YYYY-MM-DD',
+      );
+    }
+    const asOf = new Date(value);
+    if (Number.isNaN(asOf.getTime()) || asOf.toISOString() !== value) {
+      throw new BadRequestException(
+        'asOf must be a canonical ISO timestamp or YYYY-MM-DD',
+      );
+    }
+    if (asOf > now) {
+      throw new BadRequestException('asOf must not be in the future');
+    }
+    return asOf;
+  }
+
+  private resolveNoSalesDays(value: DashboardQuery['noSalesDays']) {
+    if (value === undefined) return 21 as AssortmentNoSalesWindow;
+    const days = Number(value);
+    if (days === 7 || days === 14 || days === 21 || days === 30) {
+      return days;
+    }
+    throw new BadRequestException('noSalesDays must be 7, 14, 21 or 30');
+  }
+
   private resolveNetworkSkuKey(
     name: string,
     article: string,
@@ -5384,6 +5697,42 @@ export class DashboardService {
     }
 
     return Math.ceil(dailyNeed / orderMultiplicity) * orderMultiplicity;
+  }
+
+  private buildMarginCoverage(
+    rows: Array<{ revenue: number; cost: number }>,
+  ): DashboardMarginCoverage {
+    const totalRevenue = rows.reduce((sum, row) => sum + row.revenue, 0);
+    const coveredRows = rows.filter((row) => row.revenue <= 0 || row.cost > 0);
+    const coveredRevenue = coveredRows.reduce(
+      (sum, row) => sum + row.revenue,
+      0,
+    );
+    const coveredCost = coveredRows.reduce((sum, row) => sum + row.cost, 0);
+    const partialGrossProfit = coveredRevenue - coveredCost;
+    const fullyCovered = rows.length > 0 && coveredRows.length === rows.length;
+
+    return {
+      state: fullyCovered
+        ? 'READY'
+        : coveredRows.length > 0
+          ? 'PARTIAL'
+          : 'UNKNOWN',
+      fullMarginPercent: fullyCovered
+        ? this.marginPercent(coveredCost, coveredRevenue)
+        : null,
+      fullGrossProfit: fullyCovered ? this.round(partialGrossProfit) : null,
+      partialMarginPercent:
+        coveredRows.length > 0
+          ? this.marginPercent(coveredCost, coveredRevenue)
+          : null,
+      partialGrossProfit:
+        coveredRows.length > 0 ? this.round(partialGrossProfit) : null,
+      coveredRevenue: this.round(coveredRevenue),
+      coveredOperations: coveredRows.length,
+      totalRevenue: this.round(totalRevenue),
+      totalOperations: rows.length,
+    };
   }
 
   private marginPercent(cost: number, revenue: number) {

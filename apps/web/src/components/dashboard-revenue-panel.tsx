@@ -19,9 +19,16 @@ type DashboardRevenuePanelProps = {
   revenueBreakdown: DashboardRevenueBreakdown;
   revenueSnapshot: DashboardRevenueSnapshot;
   revenueDataQuality: DashboardRevenueDataQuality;
-  adjustedGrossProfit: number;
-  grossProfit: number;
-  adjustedMarginPercent: number;
+  adjustedGrossProfit: number | null;
+  grossProfit: number | null;
+  adjustedMarginPercent: number | null;
+  marginCoverage: {
+    state: "READY" | "PARTIAL" | "UNKNOWN";
+    partialGrossProfit: number | null;
+    partialMarginPercent: number | null;
+    coveredRevenue: number;
+    totalRevenue: number;
+  };
   fullDayRevenueDate: string;
   fullDayRevenue: number;
   fullDayRevenueToAveragePercent: number | null;
@@ -32,11 +39,15 @@ type DashboardRevenuePanelProps = {
   diagnosticsHref: string;
 };
 
-function formatPercent(value: number) {
-  return `${value.toFixed(1)}%`;
+function formatPercent(value: number | null) {
+  return value === null ? "нет данных" : `${value.toFixed(1)}%`;
 }
 
-function formatMoney(value: number) {
+function formatMoney(value: number | null) {
+  if (value === null) {
+    return "Нет данных";
+  }
+
   return new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 0,
   }).format(value);
@@ -60,6 +71,7 @@ export function DashboardRevenuePanel({
   adjustedGrossProfit,
   grossProfit,
   adjustedMarginPercent,
+  marginCoverage,
   fullDayRevenueDate,
   fullDayRevenue,
   fullDayRevenueToAveragePercent,
@@ -70,6 +82,7 @@ export function DashboardRevenuePanel({
   diagnosticsHref,
 }: DashboardRevenuePanelProps) {
   const [view, setView] = useState<DashboardRevenueView>(initialView);
+  const hasAdjustedProfit = adjustedGrossProfit !== null;
 
   return (
     <div className="space-y-3">
@@ -104,10 +117,25 @@ export function DashboardRevenuePanel({
             <UnallocatedTopupRevenue revenue={unallocatedTopupRevenue} />
           </HeroMetric>
           <HeroMetric
-            label="Товарная прибыль после потерь"
-            value={formatMoney(adjustedGrossProfit)}
-            caption={`товары и бар · маржа ${formatPercent(adjustedMarginPercent)}`}
-            tone={adjustedGrossProfit < grossProfit ? "warning" : "good"}
+            label={
+              hasAdjustedProfit
+                ? "Товарная прибыль после потерь"
+                : "Частичная товарная прибыль до списаний"
+            }
+            value={formatMoney(
+              adjustedGrossProfit ?? marginCoverage.partialGrossProfit,
+            )}
+            caption={
+              !hasAdjustedProfit
+                ? `частичное покрытие ${coveragePercent(marginCoverage)} · маржа ${formatPercent(marginCoverage.partialMarginPercent)}`
+                : `товары и бар · маржа ${formatPercent(adjustedMarginPercent)}`
+            }
+            tone={
+              !hasAdjustedProfit ||
+              (grossProfit !== null && adjustedGrossProfit < grossProfit)
+                ? "warning"
+                : "good"
+            }
           >
             <WriteOffRevenueShare
               percent={writeOffRevenuePercent}
@@ -118,6 +146,14 @@ export function DashboardRevenuePanel({
       )}
     </div>
   );
+}
+
+function coveragePercent(value: DashboardRevenuePanelProps["marginCoverage"]) {
+  if (value.totalRevenue === 0) {
+    return "неизвестно";
+  }
+
+  return `${Math.round((value.coveredRevenue / value.totalRevenue) * 100)}%`;
 }
 
 function DashboardRevenueViewToggle({
@@ -500,7 +536,10 @@ function RevenueBreakdownDetails({
   return (
     <div className="mt-3 grid gap-2 rounded-2xl border border-zinc-200/70 p-3 text-xs dark:border-zinc-800/80">
       {rows.map((row) => (
-        <div key={row.label} className="flex items-center justify-between gap-3">
+        <div
+          key={row.label}
+          className="flex items-center justify-between gap-3"
+        >
           <span className="text-zinc-500 dark:text-zinc-400">{row.label}</span>
           <span className="font-semibold tabular-nums">
             {formatMoney(row.value)}
@@ -535,7 +574,9 @@ function RevenueBreakdownDetails({
   );
 }
 
-function revenueSourceLabel(source: DashboardRevenueBreakdown["primarySource"]) {
+function revenueSourceLabel(
+  source: DashboardRevenueBreakdown["primarySource"],
+) {
   if (source === "SNAPSHOT") {
     return "snapshot";
   }
@@ -574,9 +615,7 @@ function UnallocatedTopupRevenue({ revenue }: { revenue: number }) {
       <span className="text-zinc-500 dark:text-zinc-400">
         Онлайн-пополнения без клуба
       </span>
-      <span className="font-semibold tabular-nums">
-        {formatMoney(revenue)}
-      </span>
+      <span className="font-semibold tabular-nums">{formatMoney(revenue)}</span>
     </div>
   );
 }

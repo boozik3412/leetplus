@@ -41,6 +41,7 @@ import type {
   DashboardSalesTrendSegment,
   DashboardSummary,
 } from "@/lib/dashboard-summary";
+import { AssortmentHealthCards } from "@/components/assortment-health-cards";
 
 type MetricTone = "emerald" | "blue" | "amber" | "zinc";
 
@@ -72,8 +73,16 @@ const metricTones: Record<
 
 export function AssortmentGrowthDashboard({
   summary,
+  dashboardQuery,
 }: {
   summary: DashboardSummary;
+  dashboardQuery: {
+    period: string;
+    dateFrom?: string;
+    dateTo?: string;
+    skuGrouping: "club" | "network";
+    asOf?: string;
+  };
 }) {
   const growth = summary.assortmentGrowth;
   const drivers = growth.drivers;
@@ -90,9 +99,7 @@ export function AssortmentGrowthDashboard({
   const freshSources = growth.sources.filter(
     (source) => source.state === "FRESH",
   ).length;
-  const sourceAlert = growth.sources.some((source) =>
-    ["FAILED", "MISSING"].includes(source.state),
-  );
+  const sourceAlert = growth.sources.some((source) => source.state !== "FRESH");
 
   return (
     <div className="space-y-5">
@@ -128,7 +135,7 @@ export function AssortmentGrowthDashboard({
           </div>
         </div>
         <span
-          className="shrink-0 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm dark:bg-zinc-950 dark:text-emerald-300"
+          className={`shrink-0 rounded-full bg-white px-3 py-1.5 text-xs font-semibold shadow-sm dark:bg-zinc-950 ${sourceAlert ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}
           title={
             calculationCaveats > 0
               ? `${calculationCaveats} с неполным покрытием; подробности есть в методике расчёта.`
@@ -139,6 +146,13 @@ export function AssortmentGrowthDashboard({
           внимания
         </span>
       </section>
+
+      <AssortmentHealthCards
+        summary={summary}
+        dashboardQuery={dashboardQuery}
+      />
+
+      <GrowthKpiStrip growth={growth} visitBinding={summary.visitBinding} />
 
       <SourceHealthPanel sources={growth.sources} />
 
@@ -184,56 +198,6 @@ export function AssortmentGrowthDashboard({
           ))}
         </div>
       </details>
-
-      <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="grid sm:grid-cols-2 xl:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1.18fr]">
-          <GrowthMetric
-            label="Визиты"
-            value={formatInteger(growth.visits.value)}
-            detail="игровых сессий"
-            delta={growth.visits.deltaPercent}
-            tone="emerald"
-            info="Количество игровых сессий, начавшихся в выбранном периоде."
-            className="border-b border-zinc-100 dark:border-zinc-800 sm:border-r xl:border-0"
-          />
-          <EquationSign icon="arrow" />
-          <GrowthMetric
-            label="Товарные операции"
-            value={formatInteger(growth.saleOperations.value)}
-            detail={
-              growth.saleOperations.per100Visits === null
-                ? "нет данных о визитах"
-                : `${formatDecimal(growth.saleOperations.per100Visits)} на 100 визитов`
-            }
-            delta={growth.saleOperations.deltaPercent}
-            tone="emerald"
-            info="Количество строк продажи из products/expense. Одна строка — операция по одному товару, а не целый чек."
-            className="border-b border-zinc-100 dark:border-zinc-800 xl:border-0"
-          />
-          <EquationSign icon="multiply" />
-          <GrowthMetric
-            label="Средняя сумма операции"
-            value={formatOptionalRubles(
-              growth.averageSaleOperationAmount.value,
-            )}
-            detail="выручка на товарную операцию"
-            delta={growth.averageSaleOperationAmount.deltaPercent}
-            tone="emerald"
-            info="Товарная выручка, делённая на точное количество товарных операций источника."
-            className="border-b border-zinc-100 dark:border-zinc-800 sm:border-b-0 sm:border-r xl:border-0"
-          />
-          <EquationSign icon="equals" />
-          <GrowthMetric
-            label="Товарная выручка"
-            value={formatRubles(growth.revenue.value)}
-            detail="за выбранный период"
-            delta={growth.revenue.deltaPercent}
-            tone="emerald"
-            info="Выручка выбранных клубов и категорий только по товарам."
-            emphasized
-          />
-        </div>
-      </section>
 
       <ReceiptMetricsPanel summary={summary} />
 
@@ -460,7 +424,10 @@ function SourceHealthPanel({
         </Link>
       </div>
       {isOpen ? (
-        <div id="source-health-details" className="border-t border-zinc-100 dark:border-zinc-800">
+        <div
+          id="source-health-details"
+          className="border-t border-zinc-100 dark:border-zinc-800"
+        >
           <p className="px-4 py-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400 sm:px-5">
             Каждый источник проверяется отдельно до расчёта производных метрик.
           </p>
@@ -585,6 +552,75 @@ function ReceiptMetricsPanel({ summary }: { summary: DashboardSummary }) {
   const available =
     receipts.state === "READY" || receipts.state === "PARTIAL_COVERAGE";
 
+  const content = (
+    <div className="grid sm:grid-cols-2 xl:grid-cols-4">
+      <CompactMetric
+        label="Покупки"
+        value={
+          available && receipts.purchaseCount !== null
+            ? formatInteger(receipts.purchaseCount)
+            : "Ожидает ID чека"
+        }
+        hint={
+          receipts.coveragePercent === null
+            ? "нет операций"
+            : `${formatPercent(receipts.coveragePercent)} операций с ID`
+        }
+      />
+      <CompactMetric
+        label="Средний чек"
+        value={
+          available ? formatOptionalRubles(receipts.averageCheck) : "Нет данных"
+        }
+        hint="выручка на подтверждённый чек"
+      />
+      <CompactMetric
+        label="Товаров в чеке"
+        value={
+          available && receipts.itemsPerCheck !== null
+            ? `${formatDecimal(receipts.itemsPerCheck)} шт`
+            : "Нет данных"
+        }
+        hint="по строкам с ID чека"
+      />
+      <CompactMetric
+        label="Частая пара"
+        value={
+          receipts.topBasketPair
+            ? `${receipts.topBasketPair.receiptsCount} чек.`
+            : "Нет данных"
+        }
+        hint={
+          receipts.topBasketPair
+            ? `${receipts.topBasketPair.firstProductName} + ${receipts.topBasketPair.secondProductName}`
+            : "появится при двух товарах в чеке"
+        }
+        last
+      />
+    </div>
+  );
+
+  if (!available) {
+    return (
+      <details className="group rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500 dark:text-zinc-200 sm:px-5">
+          <span>Покупки и средний чек: недоступно</span>
+          <CaretDown
+            className="h-4 w-4 text-zinc-500 transition group-open:rotate-180"
+            weight="bold"
+            aria-hidden="true"
+          />
+        </summary>
+        <div className="border-t border-zinc-100 dark:border-zinc-800">
+          <p className="px-4 py-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            {receipts.reason}
+          </p>
+          {content}
+        </div>
+      </details>
+    );
+  }
+
   return (
     <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-col gap-3 border-b border-zinc-100 px-4 py-4 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between sm:px-5">
@@ -611,53 +647,7 @@ function ReceiptMetricsPanel({ summary }: { summary: DashboardSummary }) {
           <ArrowRight className="h-4 w-4" weight="bold" aria-hidden="true" />
         </Link>
       </div>
-      <div className="grid sm:grid-cols-2 xl:grid-cols-4">
-        <CompactMetric
-          label="Покупки"
-          value={
-            available && receipts.purchaseCount !== null
-              ? formatInteger(receipts.purchaseCount)
-              : "Ожидает ID чека"
-          }
-          hint={
-            receipts.coveragePercent === null
-              ? "нет операций"
-              : `${formatPercent(receipts.coveragePercent)} операций с ID`
-          }
-        />
-        <CompactMetric
-          label="Средний чек"
-          value={
-            available
-              ? formatOptionalRubles(receipts.averageCheck)
-              : "Нет данных"
-          }
-          hint="выручка на подтверждённый чек"
-        />
-        <CompactMetric
-          label="Товаров в чеке"
-          value={
-            available && receipts.itemsPerCheck !== null
-              ? `${formatDecimal(receipts.itemsPerCheck)} шт`
-              : "Нет данных"
-          }
-          hint="по строкам с ID чека"
-        />
-        <CompactMetric
-          label="Частая пара"
-          value={
-            receipts.topBasketPair
-              ? `${receipts.topBasketPair.receiptsCount} чек.`
-              : "Нет данных"
-          }
-          hint={
-            receipts.topBasketPair
-              ? `${receipts.topBasketPair.firstProductName} + ${receipts.topBasketPair.secondProductName}`
-              : "появится при двух товарах в чеке"
-          }
-          last
-        />
-      </div>
+      {content}
     </section>
   );
 }
@@ -931,6 +921,7 @@ function GrowthMetric({
   delta,
   tone,
   info,
+  qualification,
   emphasized = false,
   className = "",
 }: {
@@ -940,6 +931,7 @@ function GrowthMetric({
   delta: number | null;
   tone: MetricTone;
   info: string;
+  qualification?: string;
   emphasized?: boolean;
   className?: string;
 }) {
@@ -965,8 +957,85 @@ function GrowthMetric({
       <p className="mt-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">
         {detail}
       </p>
+      {qualification ? (
+        <p className="mt-1 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+          {qualification}
+        </p>
+      ) : null}
       <DeltaValue value={delta} />
     </article>
+  );
+}
+
+function GrowthKpiStrip({
+  growth,
+  visitBinding,
+}: {
+  growth: DashboardSummary["assortmentGrowth"];
+  visitBinding: DashboardSummary["visitBinding"];
+}) {
+  const usableVisitCount = visitBinding.usableVisitCount;
+  const hasUsableVisits = usableVisitCount !== null;
+  const visitCoverage =
+    visitBinding.coverage.percent === null
+      ? "покрытие неизвестно"
+      : `${formatPercent(visitBinding.coverage.percent)} покрытия`;
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="grid sm:grid-cols-2 xl:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1.18fr]">
+        <GrowthMetric
+          label="Визиты"
+          value={
+            hasUsableVisits ? formatInteger(usableVisitCount) : "Нет данных"
+          }
+          detail={
+            hasUsableVisits
+              ? "игровых сессий"
+              : (visitBinding.reason ?? "нет подтверждённой привязки")
+          }
+          qualification={visitCoverage}
+          delta={hasUsableVisits ? growth.visits.deltaPercent : null}
+          tone={hasUsableVisits ? "emerald" : "zinc"}
+          info="Количество игровых сессий с подтверждённой привязкой к выбранным клубам."
+          className="border-b border-zinc-100 dark:border-zinc-800 sm:border-r xl:border-0"
+        />
+        <EquationSign icon="arrow" />
+        <GrowthMetric
+          label="Товарные операции"
+          value={formatInteger(growth.saleOperations.value)}
+          detail={
+            growth.saleOperations.per100Visits === null
+              ? "нет данных о визитах"
+              : `${formatDecimal(growth.saleOperations.per100Visits)} на 100 визитов`
+          }
+          delta={growth.saleOperations.deltaPercent}
+          tone="emerald"
+          info="Количество строк продажи из products/expense. Одна строка — операция по одному товару, а не целый чек."
+          className="border-b border-zinc-100 dark:border-zinc-800 xl:border-0"
+        />
+        <EquationSign icon="multiply" />
+        <GrowthMetric
+          label="Средняя сумма операции"
+          value={formatOptionalRubles(growth.averageSaleOperationAmount.value)}
+          detail="выручка на товарную операцию"
+          delta={growth.averageSaleOperationAmount.deltaPercent}
+          tone="emerald"
+          info="Товарная выручка, делённая на точное количество товарных операций источника."
+          className="border-b border-zinc-100 dark:border-zinc-800 sm:border-b-0 sm:border-r xl:border-0"
+        />
+        <EquationSign icon="equals" />
+        <GrowthMetric
+          label="Товарная выручка"
+          value={formatRubles(growth.revenue.value)}
+          detail="за выбранный период"
+          delta={growth.revenue.deltaPercent}
+          tone="emerald"
+          info="Выручка выбранных клубов и категорий только по товарам."
+          emphasized
+        />
+      </div>
+    </section>
   );
 }
 

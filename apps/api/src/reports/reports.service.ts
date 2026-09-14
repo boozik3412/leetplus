@@ -16,6 +16,18 @@ import {
   type ProductCostBasis,
 } from './stock-cost-basis';
 import type { UpdateRecommendationStateDto } from './reports.dto';
+import {
+  AssortmentHealthLoaderService,
+  type AssortmentHealthLoaderResult,
+} from '../common/assortment-health-loader.service';
+import type {
+  AssortmentHealth,
+  AssortmentHealthRow,
+  AssortmentMetric,
+  AssortmentMetricState,
+  AssortmentNoSalesWindow,
+  AssortmentValuationBasis,
+} from '../common/assortment-health';
 
 export type ReportGroup = {
   id: string | null;
@@ -54,6 +66,13 @@ export type OperationalReportQuery = {
   from?: string;
   to?: string;
   storeId?: string;
+  storeIds?: string | string[];
+  categoryId?: string;
+  categoryIds?: string | string[];
+  asOf?: string;
+  noSalesDays?: AssortmentNoSalesWindow | string;
+  stockStatus?: 'OUT_OF_STOCK' | 'LOW_STOCK';
+  excess?: boolean | 'true' | 'false';
 };
 
 export type ProductOosExclusionDto = {
@@ -87,10 +106,17 @@ export type OutOfStockRiskProduct = {
   supplierName: string | null;
   stockQuantity: number;
   averageDailySales: number;
-  revenueAtRiskPerDay: number;
-  grossProfitAtRiskPerDay: number;
-  grossProfitAtRiskForPeriod: number;
-  stockDays: number;
+  revenueAtRiskPerDay: number | null;
+  grossProfitAtRiskPerDay: number | null;
+  grossProfitAtRiskForPeriod: number | null;
+  grossProfitAtRisk?: {
+    perDay: AssortmentMetric<number>;
+    forPeriod: AssortmentMetric<number>;
+    costBasis: AssortmentValuationBasis;
+  };
+  stockDays: number | null;
+  state?: AssortmentHealthRow['risk'];
+  reason?: string | null;
 };
 
 export type ProductWithoutSales = {
@@ -102,18 +128,24 @@ export type ProductWithoutSales = {
   isCanonical: boolean;
   canonicalProductName: string | null;
   stockQuantity: number;
-  frozenStockUnitValue: number;
+  frozenStockUnitValue: number | null;
   frozenStockValuation: FrozenStockValuation;
-  frozenStockAmount: number;
+  frozenStockAmount: number | null;
   lastSaleDate: string | null;
   daysWithoutSales: number | null;
   categoryName: string | null;
   supplierName: string | null;
+  state?: AssortmentHealthRow['risk'];
+  reason?: string | null;
 };
 export type FrozenStockValuation =
   | 'PURCHASE_PRICE'
   | 'SALE_PRICE'
   | 'HISTORICAL_REVENUE'
+  | 'CLUB_PURCHASE_PRICE'
+  | 'SALES_UNIT_COST'
+  | 'PRODUCT_PURCHASE_PRICE'
+  | 'SALE_PRICE_ESTIMATE'
   | 'UNKNOWN';
 
 export type ReportRecommendation = {
@@ -147,15 +179,20 @@ export type OperationalReport = {
   from: string;
   to: string;
   storeId: string | null;
+  storeIds: string[];
+  categoryIds: string[];
+  asOf: string;
+  noSalesDays: AssortmentNoSalesWindow;
   totalRevenue: number;
   totalCost: number;
-  grossProfit: number;
-  adjustedGrossProfit: number;
-  marginPercent: number;
-  adjustedMarginPercent: number;
+  grossProfit: number | null;
+  adjustedGrossProfit: number | null;
+  marginPercent: number | null;
+  adjustedMarginPercent: number | null;
+  marginCoverage: ReportMarginCoverage;
   soldQuantity: number;
-  writeOffQuantity: number;
-  writeOffAmount: number;
+  writeOffQuantity: number | null;
+  writeOffAmount: number | null;
   returnQuantity: number;
   returnAmount: number;
   averageDailyRevenue: number;
@@ -164,6 +201,38 @@ export type OperationalReport = {
   recommendations: ReportRecommendation[];
   outOfStockRiskProducts: OutOfStockRiskProduct[];
   productsWithoutSales: ProductWithoutSales[];
+  writeOffMovements?: WriteOffMovementRow[];
+  assortmentHealth?: AssortmentHealth['summary'];
+  assortmentRows?: {
+    outOfStock: AssortmentHealthRow[];
+    noSales: AssortmentHealthRow[];
+    writeOffs: AssortmentHealthRow[];
+  };
+};
+
+export type WriteOffMovementRow = {
+  id: string;
+  movementDate: string;
+  storeId: string;
+  storeName: string;
+  productId: string;
+  article: string;
+  productName: string;
+  categoryName: string | null;
+  quantity: number;
+  amount: number;
+};
+
+export type ReportMarginCoverage = {
+  state: 'READY' | 'PARTIAL' | 'UNKNOWN';
+  fullMarginPercent: number | null;
+  fullGrossProfit: number | null;
+  partialMarginPercent: number | null;
+  partialGrossProfit: number | null;
+  coveredRevenue: number;
+  coveredOperations: number;
+  totalRevenue: number;
+  totalOperations: number;
 };
 
 export type SalesDetailRow = {
@@ -422,16 +491,29 @@ export type ReplenishmentRow = {
   risk: ReplenishmentRisk;
 };
 
+export type ReplenishmentCoverage = {
+  state: AssortmentMetricState;
+  reason: string | null;
+  covered: number;
+  total: number;
+  percent: number | null;
+};
+
 export type ReplenishmentReport = {
   tenantId: string;
   tenantSlug: string;
   from: string;
   to: string;
   storeId: string | null;
+  storeIds: string[];
+  categoryIds: string[];
+  asOf: string;
   totalStockQuantity: number;
   totalDailyNeed: number;
   totalRecommendedOrder: number;
   rows: ReplenishmentRow[];
+  assortmentHealth: AssortmentHealth['summary'];
+  coverage: ReplenishmentCoverage;
 };
 
 export type InventoryTurnoverStatus = 'OK' | 'SLOW' | 'FROZEN';
@@ -454,9 +536,9 @@ export type InventoryTurnoverRow = {
   averageDailySales: number;
   stockDays: number | null;
   turnoverRate: number;
-  frozenStockUnitValue: number;
+  frozenStockUnitValue: number | null;
   frozenStockValuation: FrozenStockValuation;
-  frozenStockAmount: number;
+  frozenStockAmount: number | null;
   lastSaleDate: string | null;
   daysWithoutSales: number | null;
   status: InventoryTurnoverStatus;
@@ -468,6 +550,9 @@ export type InventoryTurnoverReport = {
   from: string;
   to: string;
   storeId: string | null;
+  storeIds: string[];
+  categoryIds: string[];
+  asOf: string;
   periodDays: number;
   totalStockQuantity: number;
   totalFrozenStockAmount: number;
@@ -475,6 +560,8 @@ export type InventoryTurnoverReport = {
   slowSkuCount: number;
   frozenSkuCount: number;
   rows: InventoryTurnoverRow[];
+  assortmentHealth?: AssortmentHealth['summary'];
+  assortmentRows?: AssortmentHealthRow[];
 };
 
 export type AssortmentMatrixStatus =
@@ -721,6 +808,7 @@ export class ReportsService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly freshStoreScopeService: FreshStoreScopeService,
+    private readonly assortmentHealthLoader: AssortmentHealthLoaderService,
   ) {}
 
   async getAssortmentReport(
@@ -833,27 +921,34 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: OperationalReportQuery,
   ): Promise<OperationalReport> {
-    const { tenantId, tenantSlug, storeFilter } =
-      await this.resolveStoreReadScope(user, query.storeId);
+    const requestedStoreIds = this.resolveRequestedStoreIds(query);
+    const requestedCategoryIds = this.resolveRequestedCategoryIds(query);
+    const scope = await this.resolveStoreReadScope(user, requestedStoreIds);
+    const { tenantId, tenantSlug, storeFilter } = scope;
     const period = this.resolvePeriod(query);
-    const demandPeriod = this.resolveDemandPeriod();
-
-    const [
-      salesFacts,
-      demandSalesFacts,
-      lastSalesFacts,
-      inventorySnapshots,
-      stockMovements,
-      oosExclusions,
-    ] = await Promise.all([
+    const asOf = this.resolveAssortmentAsOf(query.asOf);
+    const relatedProductCategoryFilter: Prisma.SalesFactWhereInput =
+      requestedCategoryIds?.length
+        ? { product: { categoryId: { in: [...requestedCategoryIds] } } }
+        : {};
+    const reportTo = period.toDate > asOf ? asOf : period.toDate;
+    const assortmentHealthPromise = this.assortmentHealthLoader.load({
+      tenantId,
+      storeIds: scope.effectiveStoreIds,
+      categoryIds: requestedCategoryIds ?? null,
+      period: { from: period.fromDate, to: period.toDate },
+      asOf,
+    });
+    const [salesFacts, inventorySnapshots, stockMovements] = await Promise.all([
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
           isCanceled: false,
           ...storeFilter,
+          ...relatedProductCategoryFilter,
           saleDate: {
             gte: period.fromDate,
-            lte: period.toDate,
+            lte: reportTo,
           },
         },
         include: {
@@ -881,70 +976,17 @@ export class ReportsService {
           },
         },
       }),
-      this.prisma.salesFact.findMany({
-        where: {
-          tenantId,
-          isCanceled: false,
-          ...storeFilter,
-          saleDate: {
-            gte: demandPeriod.fromDate,
-            lte: demandPeriod.toDate,
-          },
-        },
-        include: {
-          product: {
-            select: {
-              id: true,
-              article: true,
-              name: true,
-              purchasePrice: true,
-              salePrice: true,
-              canonicalProduct: {
-                select: { name: true },
-              },
-              category: {
-                select: { name: true },
-              },
-              supplier: {
-                select: { name: true },
-              },
-            },
-          },
-          store: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-      }),
-      this.prisma.salesFact.findMany({
-        where: {
-          tenantId,
-          isCanceled: false,
-          ...storeFilter,
-          saleDate: {
-            lte: period.toDate,
-          },
-        },
-        select: {
-          storeId: true,
-          productId: true,
-          saleDate: true,
-          quantity: true,
-          revenue: true,
-        },
-        orderBy: {
-          saleDate: 'desc',
-        },
-      }),
       this.prisma.inventorySnapshot.findMany({
         where: {
           tenantId,
           ...storeFilter,
+          ...(requestedCategoryIds?.length
+            ? { product: { categoryId: { in: [...requestedCategoryIds] } } }
+            : {}),
           snapshotDate: {
-            lte: period.toDate,
+            lte: asOf,
           },
+          updatedAt: { lte: asOf },
         },
         include: {
           product: {
@@ -979,9 +1021,12 @@ export class ReportsService {
         where: {
           tenantId,
           ...storeFilter,
+          ...(requestedCategoryIds?.length
+            ? { product: { categoryId: { in: [...requestedCategoryIds] } } }
+            : {}),
           movementDate: {
             gte: period.fromDate,
-            lte: period.toDate,
+            lte: reportTo,
           },
         },
         select: {
@@ -990,14 +1035,7 @@ export class ReportsService {
           amount: true,
         },
       }),
-      this.prisma.productOosExclusion.findMany({
-        where: { tenantId },
-        select: { productId: true },
-      }),
     ]);
-    const excludedProductIds = new Set(
-      oosExclusions.map((exclusion) => exclusion.productId),
-    );
     const costBasisByProduct = buildProductCostBasis([], inventorySnapshots);
 
     const productSales = new Map<string, ProductSales>();
@@ -1041,44 +1079,39 @@ export class ReportsService {
     });
 
     const stockByProduct = this.latestStockByProduct(inventorySnapshots);
-    const stockByStoreProduct =
-      this.latestStockByStoreProduct(inventorySnapshots);
-    const demandProductSales =
-      this.productSalesByStoreProduct(demandSalesFacts);
-    const periodProductSalesByStoreProduct =
-      this.productSalesByStoreProduct(salesFacts);
-    const lastSaleByStoreProduct = this.lastSaleByStoreProduct(lastSalesFacts);
-    const historicalUnitRevenueByStoreProduct =
-      this.unitRevenueByStoreProduct(lastSalesFacts);
-    const incomingStockByStoreProduct = this.incomingStockByStoreProduct(
-      inventorySnapshots,
-      period.fromDate,
-      period.toDate,
-    );
     const stockQuantity = [...stockByProduct.values()].reduce(
       (sum, quantity) => sum + quantity,
       0,
     );
     const grossProfit = totalRevenue - totalCost;
+    const marginCoverage = this.buildMarginCoverage(
+      salesFacts.map((fact) => ({
+        revenue: fact.revenue.toNumber(),
+        cost: fact.cost.toNumber(),
+      })),
+    );
     const movementImpact = this.stockMovementImpact(stockMovements);
     const adjustedGrossProfit =
       grossProfit - movementImpact.writeOffAmount - movementImpact.returnAmount;
     const periodDays = this.periodDays(period.fromDate, period.toDate);
-    const outOfStockRiskProducts = this.outOfStockRiskProducts(
-      demandProductSales,
-      stockByStoreProduct,
-      DEMAND_PERIOD_DAYS,
-      periodDays,
-      excludedProductIds,
+    const assortmentHealth = await assortmentHealthPromise;
+    const healthWriteOffQuantity =
+      assortmentHealth.health.summary.writeOffQuantity?.value ?? null;
+    const healthWriteOffAmount =
+      assortmentHealth.health.summary.writeOffAmount?.value ?? null;
+    const noSalesDays = this.resolveNoSalesDays(query.noSalesDays);
+    const assortmentRows = this.operationalAssortmentRows(
+      assortmentHealth.health.rows,
+      query.stockStatus,
+      noSalesDays,
     );
-    const productsWithoutSales = this.productsWithoutSales(
-      stockByStoreProduct,
-      periodProductSalesByStoreProduct,
-      excludedProductIds,
-      lastSaleByStoreProduct,
-      historicalUnitRevenueByStoreProduct,
-      incomingStockByStoreProduct,
-      period.toDate,
+    const outOfStockRiskProducts = this.toOutOfStockRiskProducts(
+      assortmentRows.outOfStock,
+      assortmentHealth,
+    );
+    const productsWithoutSales = this.toProductsWithoutSales(
+      assortmentRows.noSales,
+      assortmentHealth,
     );
     const recommendations = await this.applyRecommendationWorkflowState(
       tenantId,
@@ -1095,18 +1128,29 @@ export class ReportsService {
       from: this.toDateInputValue(period.fromDate),
       to: this.toDateInputValue(period.toDate),
       storeId: query.storeId ?? null,
+      storeIds: scope.effectiveStoreIds ? [...scope.effectiveStoreIds] : [],
+      categoryIds: requestedCategoryIds ? [...requestedCategoryIds] : [],
+      asOf: asOf.toISOString(),
+      noSalesDays,
       totalRevenue: this.round(totalRevenue),
       totalCost: this.round(totalCost),
-      grossProfit: this.round(grossProfit),
-      adjustedGrossProfit: this.round(adjustedGrossProfit),
-      marginPercent: this.marginPercent(totalCost, totalRevenue),
-      adjustedMarginPercent: this.marginPercent(
-        totalRevenue - adjustedGrossProfit,
-        totalRevenue,
-      ),
+      grossProfit: marginCoverage.fullGrossProfit,
+      adjustedGrossProfit:
+        marginCoverage.fullGrossProfit === null || healthWriteOffAmount === null
+          ? null
+          : this.round(adjustedGrossProfit),
+      marginPercent: marginCoverage.fullMarginPercent,
+      adjustedMarginPercent:
+        marginCoverage.fullGrossProfit === null || healthWriteOffAmount === null
+          ? null
+          : this.marginPercent(
+              totalRevenue - adjustedGrossProfit,
+              totalRevenue,
+            ),
+      marginCoverage,
       soldQuantity: this.round(soldQuantity),
-      writeOffQuantity: this.round(movementImpact.writeOffQuantity),
-      writeOffAmount: this.round(movementImpact.writeOffAmount),
+      writeOffQuantity: healthWriteOffQuantity,
+      writeOffAmount: healthWriteOffAmount,
       returnQuantity: this.round(movementImpact.returnQuantity),
       returnAmount: this.round(movementImpact.returnAmount),
       averageDailyRevenue: this.round(totalRevenue / periodDays),
@@ -1118,6 +1162,13 @@ export class ReportsService {
       recommendations,
       outOfStockRiskProducts,
       productsWithoutSales,
+      writeOffMovements: this.toWriteOffMovements(
+        assortmentHealth,
+        period,
+        asOf,
+      ),
+      assortmentHealth: assortmentHealth.health.summary,
+      assortmentRows,
     };
   }
 
@@ -1125,114 +1176,45 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: OperationalReportQuery,
   ): Promise<InventoryTurnoverReport> {
-    const { tenantId, tenantSlug, storeFilter } =
-      await this.resolveStoreReadScope(user, query.storeId);
+    const requestedStoreIds = this.resolveRequestedStoreIds(query);
+    const requestedCategoryIds = this.resolveRequestedCategoryIds(query);
+    const scope = await this.resolveStoreReadScope(user, requestedStoreIds);
+    const { tenantId, tenantSlug } = scope;
     const period = this.resolvePeriod(query);
-
-    const [salesFacts, inventorySnapshots, lastSalesFacts] = await Promise.all([
-      this.prisma.salesFact.findMany({
-        where: {
-          tenantId,
-          isCanceled: false,
-          ...storeFilter,
-          saleDate: {
-            gte: period.fromDate,
-            lte: period.toDate,
-          },
-        },
-        include: {
-          store: { select: { id: true, name: true } },
-          product: {
-            select: {
-              article: true,
-              name: true,
-              supplierId: true,
-              canonicalProduct: { select: { name: true } },
-              supplier: { select: { name: true } },
-            },
-          },
-        },
-      }),
-      this.prisma.inventorySnapshot.findMany({
-        where: {
-          tenantId,
-          ...storeFilter,
-          snapshotDate: {
-            lte: period.toDate,
-          },
-        },
-        include: {
-          product: {
-            select: {
-              id: true,
-              article: true,
-              name: true,
-              purchasePrice: true,
-              salePrice: true,
-              canonicalProduct: { select: { name: true } },
-              categoryId: true,
-              category: { select: { name: true } },
-              supplierId: true,
-              supplier: { select: { id: true, name: true } },
-            },
-          },
-          store: { select: { name: true } },
-        },
-        orderBy: { snapshotDate: 'desc' },
-      }),
-      this.prisma.salesFact.findMany({
-        where: {
-          tenantId,
-          isCanceled: false,
-          ...storeFilter,
-          saleDate: {
-            lte: period.toDate,
-          },
-        },
-        select: {
-          storeId: true,
-          productId: true,
-          saleDate: true,
-          quantity: true,
-          revenue: true,
-        },
-        orderBy: { saleDate: 'desc' },
-      }),
-    ]);
+    const asOf = this.resolveAssortmentAsOf(query.asOf);
+    const assortmentHealth = await this.assortmentHealthLoader.load({
+      tenantId,
+      storeIds: scope.effectiveStoreIds,
+      categoryIds: requestedCategoryIds ?? null,
+      period: { from: period.fromDate, to: period.toDate },
+      asOf,
+    });
     const periodDays = this.periodDays(period.fromDate, period.toDate);
-    const stockByStoreProduct =
-      this.latestStockByStoreProduct(inventorySnapshots);
-    const productSalesByStoreProduct =
-      this.productSalesByStoreProduct(salesFacts);
-    const lastSaleByStoreProduct = this.lastSaleByStoreProduct(lastSalesFacts);
-    const historicalUnitRevenueByStoreProduct =
-      this.unitRevenueByStoreProduct(lastSalesFacts);
-    const rows = this.inventoryTurnoverRows(
-      stockByStoreProduct,
-      productSalesByStoreProduct,
-      lastSaleByStoreProduct,
-      historicalUnitRevenueByStoreProduct,
-      periodDays,
-      period.toDate,
+    const assortmentRows = this.turnoverAssortmentRows(
+      assortmentHealth.health.rows,
+      query.excess,
     );
+    const rows = this.toInventoryTurnoverRows(assortmentRows, assortmentHealth);
     const stockDayRows = rows.filter((row) => row.stockDays !== null);
     const stockDaysSum = stockDayRows.reduce(
       (sum, row) => sum + (row.stockDays ?? 0),
       0,
     );
-
     return {
       tenantId,
       tenantSlug,
       from: this.toDateInputValue(period.fromDate),
       to: this.toDateInputValue(period.toDate),
       storeId: query.storeId ?? null,
+      storeIds: scope.effectiveStoreIds ? [...scope.effectiveStoreIds] : [],
+      categoryIds: requestedCategoryIds ? [...requestedCategoryIds] : [],
+      asOf: asOf.toISOString(),
       periodDays,
       totalStockQuantity: this.round(
         rows.reduce((sum, row) => sum + row.stockQuantity, 0),
       ),
       totalFrozenStockAmount: this.round(
-        rows.reduce((sum, row) => sum + row.frozenStockAmount, 0),
+        rows.reduce((sum, row) => sum + (row.frozenStockAmount ?? 0), 0),
       ),
       averageStockDays:
         stockDayRows.length > 0
@@ -1241,6 +1223,8 @@ export class ReportsService {
       slowSkuCount: rows.filter((row) => row.status === 'SLOW').length,
       frozenSkuCount: rows.filter((row) => row.status === 'FROZEN').length,
       rows,
+      assortmentHealth: assortmentHealth.health.summary,
+      assortmentRows,
     };
   }
 
@@ -2179,7 +2163,11 @@ export class ReportsService {
       });
 
       current.oosSkuCount += 1;
-      addProblemCategory(key, row.categoryName, row.grossProfitAtRiskForPeriod);
+      addProblemCategory(
+        key,
+        row.categoryName,
+        row.grossProfitAtRiskForPeriod ?? 0,
+      );
     });
 
     turnoverRows.forEach((row) => {
@@ -2199,8 +2187,8 @@ export class ReportsService {
         current.frozenSkuCount += 1;
       }
 
-      current.frozenStockAmount += row.frozenStockAmount;
-      addProblemCategory(key, row.categoryName, row.frozenStockAmount);
+      current.frozenStockAmount += row.frozenStockAmount ?? 0;
+      addProblemCategory(key, row.categoryName, row.frozenStockAmount ?? 0);
     });
 
     const rows = [...rowsBySupplier.values()]
@@ -2262,163 +2250,23 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: OperationalReportQuery,
   ): Promise<ReplenishmentReport> {
-    const { tenantId, tenantSlug, storeFilter, productVisibility } =
-      await this.resolveStoreReadScope(user, query.storeId);
+    const requestedStoreIds = this.resolveRequestedStoreIds(query);
+    const requestedCategoryIds = this.resolveRequestedCategoryIds(query);
+    const scope = await this.resolveStoreReadScope(user, requestedStoreIds);
+    const { tenantId, tenantSlug } = scope;
     const period = this.resolvePeriod(query);
-    const demandPeriod = this.resolveDemandPeriod();
-
-    const [activeProducts, inventorySnapshots, salesFacts, oosExclusions] =
-      await Promise.all([
-        this.prisma.product.findMany({
-          where: { tenantId, isActive: true, ...productVisibility },
-          select: {
-            id: true,
-            article: true,
-            name: true,
-            canonicalProduct: {
-              select: { name: true },
-            },
-            category: {
-              select: { name: true },
-            },
-            supplier: {
-              select: {
-                name: true,
-                orderMultiplicity: true,
-              },
-            },
-          },
-          orderBy: { name: 'asc' },
-        }),
-        this.prisma.inventorySnapshot.findMany({
-          where: {
-            tenantId,
-            ...storeFilter,
-            snapshotDate: {
-              lte: period.toDate,
-            },
-          },
-          include: {
-            store: {
-              select: { name: true },
-            },
-            product: {
-              select: {
-                article: true,
-                name: true,
-                purchasePrice: true,
-                salePrice: true,
-                canonicalProduct: {
-                  select: { name: true },
-                },
-                category: {
-                  select: { name: true },
-                },
-                supplier: {
-                  select: { name: true },
-                },
-              },
-            },
-          },
-          orderBy: {
-            snapshotDate: 'desc',
-          },
-        }),
-        this.prisma.salesFact.findMany({
-          where: {
-            tenantId,
-            isCanceled: false,
-            ...storeFilter,
-            saleDate: {
-              gte: demandPeriod.fromDate,
-              lte: demandPeriod.toDate,
-            },
-          },
-          select: {
-            storeId: true,
-            productId: true,
-            quantity: true,
-          },
-        }),
-        this.prisma.productOosExclusion.findMany({
-          where: { tenantId },
-          select: { productId: true },
-        }),
-      ]);
-    const excludedProductIds = new Set(
-      oosExclusions.map((exclusion) => exclusion.productId),
-    );
-
-    const stockByStoreProduct =
-      this.latestStockByStoreProduct(inventorySnapshots);
-    const soldByProduct = new Map<string, number>();
-
-    salesFacts.forEach((fact) => {
-      const key = `${fact.storeId}:${fact.productId}`;
-      soldByProduct.set(
-        key,
-        (soldByProduct.get(key) ?? 0) + fact.quantity.toNumber(),
-      );
+    const asOf = this.resolveAssortmentAsOf(query.asOf);
+    const assortmentHealth = await this.assortmentHealthLoader.load({
+      tenantId,
+      storeIds: scope.effectiveStoreIds,
+      categoryIds: requestedCategoryIds ?? null,
+      period: { from: period.fromDate, to: period.toDate },
+      asOf,
     });
-
-    let totalStockQuantity = 0;
-    let totalDailyNeed = 0;
-    let totalRecommendedOrder = 0;
-
-    const productsById = new Map(
-      activeProducts.map((product) => [product.id, product]),
-    );
-    const rows = [...stockByStoreProduct.values()]
-      .filter((item) => !excludedProductIds.has(item.productId))
-      .map((item) => {
-        const product = productsById.get(item.productId);
-        const stockQuantity = this.round(item.stockQuantity);
-        const soldQuantity = this.round(
-          soldByProduct.get(`${item.storeId}:${item.productId}`) ?? 0,
-        );
-        const averageDailySales = this.round(soldQuantity / DEMAND_PERIOD_DAYS);
-        const stockDays =
-          averageDailySales > 0
-            ? this.round(stockQuantity / averageDailySales)
-            : null;
-        const dailyNeed = this.round(
-          Math.max(0, averageDailySales * 7 - stockQuantity),
-        );
-        const orderMultiplicity = product?.supplier?.orderMultiplicity ?? null;
-        const recommendedOrder = this.recommendedOrder(
-          dailyNeed,
-          orderMultiplicity,
-        );
-        const row = {
-          productId: item.productId,
-          storeId: item.storeId,
-          storeName: item.storeName,
-          article: item.article,
-          name: item.name,
-          isCanonical: item.isCanonical,
-          canonicalProductName: item.canonicalProductName,
-          categoryName: item.categoryName,
-          supplierName: item.supplierName,
-          stockQuantity,
-          soldQuantity,
-          averageDailySales,
-          stockDays,
-          dailyNeed,
-          recommendedOrder,
-          orderMultiplicity,
-          risk: this.replenishmentRisk(
-            stockQuantity,
-            averageDailySales,
-            stockDays,
-          ),
-        };
-
-        totalStockQuantity += stockQuantity;
-        totalDailyNeed += dailyNeed;
-        totalRecommendedOrder += recommendedOrder;
-
-        return row;
-      });
+    const replenishmentRows = this.toReplenishmentRows(assortmentHealth);
+    const rows = query.stockStatus
+      ? replenishmentRows.rows.filter((row) => row.risk === query.stockStatus)
+      : replenishmentRows.rows;
 
     return {
       tenantId,
@@ -2426,9 +2274,18 @@ export class ReportsService {
       from: this.toDateInputValue(period.fromDate),
       to: this.toDateInputValue(period.toDate),
       storeId: query.storeId ?? null,
-      totalStockQuantity: this.round(totalStockQuantity),
-      totalDailyNeed: this.round(totalDailyNeed),
-      totalRecommendedOrder: this.round(totalRecommendedOrder),
+      storeIds: scope.effectiveStoreIds ? [...scope.effectiveStoreIds] : [],
+      categoryIds: requestedCategoryIds ? [...requestedCategoryIds] : [],
+      asOf: asOf.toISOString(),
+      totalStockQuantity: this.round(
+        rows.reduce((sum, row) => sum + row.stockQuantity, 0),
+      ),
+      totalDailyNeed: this.round(
+        rows.reduce((sum, row) => sum + row.dailyNeed, 0),
+      ),
+      totalRecommendedOrder: this.round(
+        rows.reduce((sum, row) => sum + row.recommendedOrder, 0),
+      ),
       rows: rows.sort(
         (a, b) =>
           this.replenishmentRiskRank(a.risk) -
@@ -2436,6 +2293,8 @@ export class ReportsService {
           b.recommendedOrder - a.recommendedOrder ||
           a.name.localeCompare(b.name),
       ),
+      assortmentHealth: assortmentHealth.health.summary,
+      coverage: replenishmentRows.coverage,
     };
   }
 
@@ -2753,7 +2612,7 @@ export class ReportsService {
     dto: ProductOosExclusionDto,
   ) {
     await this.freshStoreScopeService.assertNetwork(user);
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
 
     if (!Object.values(ProductOosExclusionType).includes(dto.type)) {
       throw new BadRequestException('Invalid exclusion type');
@@ -2788,7 +2647,7 @@ export class ReportsService {
 
   async deleteOosExclusion(user: AuthenticatedUser, id: string) {
     await this.freshStoreScopeService.assertNetwork(user);
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
     const row = await this.prisma.productOosExclusion.findFirst({
       where: { id, tenantId },
       select: { id: true },
@@ -2807,7 +2666,7 @@ export class ReportsService {
     dto: UpdateRecommendationStateDto,
   ) {
     await this.freshStoreScopeService.assertNetwork(user);
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
     const status = this.parseRecommendationStatus(dto.status);
     const role = dto.role ? this.parseRecommendationRole(dto.role) : undefined;
     const note =
@@ -2851,11 +2710,15 @@ export class ReportsService {
 
   private async resolveStoreReadScope(
     user: AuthenticatedUser,
-    requestedStoreId?: string,
+    requestedStoreIds?: string | readonly string[],
   ) {
+    const requested =
+      typeof requestedStoreIds === 'string'
+        ? [requestedStoreIds]
+        : requestedStoreIds;
     const scope = await this.freshStoreScopeService.resolveRequestedStoreIds(
       user,
-      requestedStoreId === undefined ? undefined : [requestedStoreId],
+      requested,
     );
     const storeFilter = scope.effectiveStoreIds
       ? { storeId: { in: [...scope.effectiveStoreIds] } }
@@ -2890,6 +2753,7 @@ export class ReportsService {
     return {
       tenantId: scope.tenantId,
       tenantSlug: scope.tenantSlug,
+      effectiveStoreIds: scope.effectiveStoreIds,
       storeFilter,
       productVisibility,
       storeWhere: {
@@ -4031,57 +3895,80 @@ export class ReportsService {
     productsWithoutSales: ProductWithoutSales[],
   ): ReportRecommendation[] {
     const recommendations: ReportRecommendation[] = [
-      ...outOfStockRiskProducts.map((product) => ({
-        id: `stock:${product.storeId}:${product.productId}`,
-        kind: 'REPLENISH_STOCK' as const,
-        severity:
-          product.stockDays <= 1 ? ('HIGH' as const) : ('MEDIUM' as const),
-        role: RecommendationRole.BUYER,
-        status: RecommendationStatus.NEW,
-        statusNote: null,
-        statusChangedAt: null,
-        effectType: 'PROFIT_PROTECTION' as const,
-        effectLabel: 'Прибыль в риске',
-        effectAmount: this.round(product.grossProfitAtRiskForPeriod),
-        effectUnit: 'RUB' as const,
-        effectDescription: `Если не пополнить запас, валовая прибыль в риске за период составит ${this.round(product.grossProfitAtRiskForPeriod)} руб.`,
-        title: `Пополнить запас: ${product.name}`,
-        description: `Текущего остатка хватит примерно на ${product.stockDays} дн. при среднем спросе ${product.averageDailySales} шт/день.`,
-        action: 'Проверить поставщика и ближайший заказ.',
-        productId: product.productId,
-        storeId: product.storeId,
-        storeName: product.storeName,
-        article: product.article,
-        productName: product.name,
-        metricLabel: 'Дней запаса',
-        metricValue: String(product.stockDays),
-      })),
-      ...productsWithoutSales
-        .filter((product) => product.stockQuantity > 0)
-        .map((product) => ({
-          id: `no-sales:${product.storeId}:${product.productId}`,
-          kind: 'NO_SALES' as const,
-          severity: 'LOW' as const,
-          role: RecommendationRole.CLUB_MANAGER,
-          status: RecommendationStatus.NEW,
-          statusNote: null,
-          statusChangedAt: null,
-          effectType: 'STOCK_RELEASE' as const,
-          effectLabel: 'Деньги в остатке',
-          effectAmount: this.round(product.frozenStockAmount),
-          effectUnit: 'RUB' as const,
-          effectDescription: `В товаре без продаж заморожено ${this.round(product.frozenStockAmount)} руб.`,
-          title: `Разобрать товар без продаж: ${product.name}`,
-          description: `В выбранном периоде продаж нет, но на остатке ${product.stockQuantity} шт.`,
-          action: 'Проверить цену, выкладку или необходимость архивации.',
-          productId: product.productId,
-          storeId: product.storeId,
-          storeName: product.storeName,
-          article: product.article,
-          productName: product.name,
-          metricLabel: 'Остаток',
-          metricValue: String(product.stockQuantity),
-        })),
+      ...outOfStockRiskProducts.flatMap((product) => {
+        if (product.stockDays === null) {
+          return [];
+        }
+        const effectAmount =
+          product.grossProfitAtRiskForPeriod ??
+          product.revenueAtRiskPerDay ??
+          0;
+        const effectLabel =
+          product.grossProfitAtRiskForPeriod === null
+            ? 'Выручка под угрозой'
+            : 'Прибыль в риске';
+        return [
+          {
+            id: `stock:${product.storeId}:${product.productId}`,
+            kind: 'REPLENISH_STOCK' as const,
+            severity:
+              product.stockDays <= 1 ? ('HIGH' as const) : ('MEDIUM' as const),
+            role: RecommendationRole.BUYER,
+            status: RecommendationStatus.NEW,
+            statusNote: null,
+            statusChangedAt: null,
+            effectType: 'PROFIT_PROTECTION' as const,
+            effectLabel,
+            effectAmount: this.round(effectAmount),
+            effectUnit: 'RUB' as const,
+            effectDescription:
+              product.grossProfitAtRiskForPeriod === null
+                ? `Если не пополнить запас, выручка под угрозой составит ${this.round(effectAmount)} руб. в день.`
+                : `Если не пополнить запас, валовая прибыль в риске за период составит ${this.round(effectAmount)} руб.`,
+            title: `Пополнить запас: ${product.name}`,
+            description: `Текущего остатка хватит примерно на ${product.stockDays} дн. при среднем спросе ${product.averageDailySales} шт/день.`,
+            action: 'Проверить поставщика и ближайший заказ.',
+            productId: product.productId,
+            storeId: product.storeId,
+            storeName: product.storeName,
+            article: product.article,
+            productName: product.name,
+            metricLabel: 'Дней запаса',
+            metricValue: String(product.stockDays),
+          },
+        ];
+      }),
+      ...productsWithoutSales.flatMap((product) => {
+        if (product.stockQuantity <= 0 || product.frozenStockAmount === null) {
+          return [];
+        }
+        return [
+          {
+            id: `no-sales:${product.storeId}:${product.productId}`,
+            kind: 'NO_SALES' as const,
+            severity: 'LOW' as const,
+            role: RecommendationRole.CLUB_MANAGER,
+            status: RecommendationStatus.NEW,
+            statusNote: null,
+            statusChangedAt: null,
+            effectType: 'STOCK_RELEASE' as const,
+            effectLabel: 'Деньги в остатке',
+            effectAmount: this.round(product.frozenStockAmount),
+            effectUnit: 'RUB' as const,
+            effectDescription: `В товаре без продаж заморожено ${this.round(product.frozenStockAmount)} руб.`,
+            title: `Разобрать товар без продаж: ${product.name}`,
+            description: `В выбранном периоде продаж нет, но на остатке ${product.stockQuantity} шт.`,
+            action: 'Проверить цену, выкладку или необходимость архивации.',
+            productId: product.productId,
+            storeId: product.storeId,
+            storeName: product.storeName,
+            article: product.article,
+            productName: product.name,
+            metricLabel: 'Остаток',
+            metricValue: String(product.stockQuantity),
+          },
+        ];
+      }),
       ...[...productSales.values()]
         .filter((sale) => sale.revenue > 0)
         .map((sale) => ({
@@ -4482,6 +4369,413 @@ export class ReportsService {
     return { fromDate, toDate };
   }
 
+  private resolveRequestedStoreIds(
+    query: OperationalReportQuery,
+  ): readonly string[] | undefined {
+    const raw = query.storeIds ?? query.storeId;
+    if (raw === undefined) return undefined;
+    const values = Array.isArray(raw) ? raw : raw.split(',');
+    return values.map((value) => value.trim());
+  }
+
+  private resolveRequestedCategoryIds(
+    query: OperationalReportQuery,
+  ): readonly string[] | undefined {
+    const raw = query.categoryIds ?? query.categoryId;
+    if (raw === undefined) return undefined;
+    const values = Array.isArray(raw) ? raw : raw.split(',');
+    return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+  }
+
+  private resolveNoSalesDays(value: OperationalReportQuery['noSalesDays']) {
+    if (value === undefined) return 21 as AssortmentNoSalesWindow;
+    const days = Number(value);
+    if (days === 7 || days === 14 || days === 21 || days === 30) {
+      return days;
+    }
+    throw new BadRequestException('noSalesDays must be 7, 14, 21 or 30');
+  }
+
+  private operationalAssortmentRows(
+    rows: AssortmentHealthRow[],
+    stockStatus: OperationalReportQuery['stockStatus'],
+    noSalesDays: AssortmentNoSalesWindow,
+  ) {
+    const allowedRisks: ReadonlySet<string> = stockStatus
+      ? new Set([stockStatus])
+      : new Set(['OUT_OF_STOCK', 'LOW_STOCK'] as const);
+    return {
+      outOfStock: rows.filter((row) => allowedRisks.has(row.risk)),
+      noSales: rows.filter((row) => row.noSales?.[noSalesDays] === true),
+      writeOffs: rows.filter(
+        (row) =>
+          row.writeOffQuantity?.value !== null ||
+          row.writeOffAmount?.value !== null,
+      ),
+    };
+  }
+
+  private toOutOfStockRiskProducts(
+    rows: AssortmentHealthRow[],
+    loaded: AssortmentHealthLoaderResult,
+  ): OutOfStockRiskProduct[] {
+    return rows.flatMap((row) => {
+      const product = loaded.productsById.get(row.productId);
+      const store = loaded.storesById.get(row.storeId);
+      if (!product || !store || row.inventory.value === null) return [];
+      const salePrice = row.price.value;
+      const demand = row.demand21d.value;
+      if (demand === null) return [];
+      const revenueAtRiskPerDay =
+        salePrice === null || demand === null
+          ? null
+          : this.round(salePrice * demand);
+      return [
+        {
+          productId: product.id,
+          storeId: store.id,
+          storeName: store.name,
+          article: product.article,
+          name: product.name,
+          isCanonical: false,
+          canonicalProductName: null,
+          categoryName: product.categoryName,
+          supplierId: null,
+          supplierName: product.supplierName,
+          stockQuantity: this.round(row.inventory.value),
+          averageDailySales: this.round(demand),
+          revenueAtRiskPerDay,
+          grossProfitAtRiskPerDay: row.grossProfitAtRisk?.perDay.value ?? null,
+          grossProfitAtRiskForPeriod:
+            row.grossProfitAtRisk?.forPeriod.value ?? null,
+          grossProfitAtRisk: row.grossProfitAtRisk,
+          stockDays: row.turnoverDays.value,
+          state: row.risk,
+          reason:
+            row.price.reason ?? row.demand21d.reason ?? row.inventory.reason,
+        },
+      ];
+    });
+  }
+
+  private toProductsWithoutSales(
+    rows: AssortmentHealthRow[],
+    loaded: AssortmentHealthLoaderResult,
+  ): ProductWithoutSales[] {
+    return rows.flatMap((row) => {
+      const product = loaded.productsById.get(row.productId);
+      const store = loaded.storesById.get(row.storeId);
+      if (!product || !store || row.inventory.value === null) return [];
+      const frozenStockAmount = row.frozenValue.value;
+      return [
+        {
+          productId: product.id,
+          storeId: store.id,
+          storeName: store.name,
+          article: product.article,
+          name: product.name,
+          isCanonical: false,
+          canonicalProductName: null,
+          stockQuantity: this.round(row.inventory.value),
+          frozenStockUnitValue:
+            frozenStockAmount === null || row.inventory.value <= 0
+              ? null
+              : this.round(frozenStockAmount / row.inventory.value),
+          frozenStockValuation: row.frozenValue.basis,
+          frozenStockAmount,
+          lastSaleDate: null,
+          daysWithoutSales: null,
+          categoryName: product.categoryName,
+          supplierName: product.supplierName,
+          state: row.risk,
+          reason: row.frozenValue.reason ?? row.inventory.reason,
+        },
+      ];
+    });
+  }
+
+  private turnoverAssortmentRows(
+    rows: AssortmentHealthRow[],
+    excess: OperationalReportQuery['excess'],
+  ) {
+    const wantsExcess = excess === true || excess === 'true';
+    return rows.filter(
+      (row) =>
+        (row.turnoverDays.value !== null || row.noSales?.[21] === true) &&
+        (!wantsExcess || (row.excessQuantity.value ?? 0) > 0),
+    );
+  }
+
+  private toInventoryTurnoverRows(
+    rows: AssortmentHealthRow[],
+    loaded: AssortmentHealthLoaderResult,
+  ): InventoryTurnoverRow[] {
+    const statusRank: Record<InventoryTurnoverStatus, number> = {
+      FROZEN: 0,
+      SLOW: 1,
+      OK: 2,
+    };
+
+    return rows
+      .flatMap((row) => {
+        const product = loaded.productsById.get(row.productId);
+        const store = loaded.storesById.get(row.storeId);
+        const stockQuantity = row.inventory.value;
+        if (
+          !product ||
+          !store ||
+          stockQuantity === null ||
+          stockQuantity <= 0
+        ) {
+          return [];
+        }
+        const averageDailySales = row.demand21d.value ?? 0;
+        const frozenStockAmount = row.frozenValue.value;
+        const frozenStockUnitValue =
+          frozenStockAmount === null
+            ? null
+            : this.round(frozenStockAmount / stockQuantity);
+        const status: InventoryTurnoverStatus =
+          averageDailySales <= 0
+            ? 'FROZEN'
+            : (row.turnoverDays.value ?? 0) >= 30
+              ? 'SLOW'
+              : 'OK';
+        return [
+          {
+            productId: product.id,
+            storeId: store.id,
+            storeName: store.name,
+            article: product.article,
+            name: product.name,
+            isCanonical: false,
+            canonicalProductName: null,
+            categoryName: product.categoryName,
+            supplierId: null,
+            supplierName: product.supplierName,
+            stockQuantity: this.round(stockQuantity),
+            soldQuantity: this.round(averageDailySales * 21),
+            revenue: 0,
+            grossProfit: 0,
+            averageDailySales: this.round(averageDailySales),
+            stockDays: row.turnoverDays.value,
+            turnoverRate:
+              stockQuantity > 0
+                ? this.round((averageDailySales * 21) / stockQuantity)
+                : 0,
+            frozenStockUnitValue,
+            frozenStockValuation: row.frozenValue.basis,
+            frozenStockAmount,
+            lastSaleDate: null,
+            daysWithoutSales: null,
+            status,
+          },
+        ];
+      })
+      .sort(
+        (a, b) =>
+          statusRank[a.status] - statusRank[b.status] ||
+          (b.frozenStockAmount ?? -Infinity) -
+            (a.frozenStockAmount ?? -Infinity) ||
+          a.storeName.localeCompare(b.storeName, 'ru') ||
+          a.name.localeCompare(b.name, 'ru'),
+      );
+  }
+
+  private toWriteOffMovements(
+    loaded: AssortmentHealthLoaderResult,
+    period: { fromDate: Date; toDate: Date },
+    asOf: Date,
+  ): WriteOffMovementRow[] {
+    const reportTo = period.toDate > asOf ? asOf : period.toDate;
+    const eligibleGrains = new Set(
+      loaded.health.rows
+        .filter(
+          (row) =>
+            !row.excluded &&
+            ((row.writeOffQuantity?.value ?? null) !== null ||
+              (row.writeOffAmount?.value ?? null) !== null),
+        )
+        .map((row) => `${row.storeId}:${row.productId}`),
+    );
+
+    return (loaded.writeOffMovements ?? []).flatMap((movement) => {
+      if (
+        !eligibleGrains.has(`${movement.storeId}:${movement.productId}`) ||
+        movement.movementDate < period.fromDate ||
+        movement.movementDate > reportTo
+      ) {
+        return [];
+      }
+      const product = loaded.productsById.get(movement.productId);
+      const store = loaded.storesById.get(movement.storeId);
+      if (!product || !store) return [];
+      return [
+        {
+          id: movement.id,
+          movementDate: movement.movementDate.toISOString(),
+          storeId: store.id,
+          storeName: store.name,
+          productId: product.id,
+          article: product.article,
+          productName: product.name,
+          categoryName: product.categoryName,
+          quantity: movement.quantity,
+          amount: movement.amount,
+        },
+      ];
+    });
+  }
+
+  private toReplenishmentRows(loaded: AssortmentHealthLoaderResult): {
+    rows: ReplenishmentRow[];
+    coverage: ReplenishmentCoverage;
+  } {
+    const policyRows = loaded.health.rows.filter((row) => !row.excluded);
+    const sourceRows = policyRows.filter(
+      (row) =>
+        row.inventory.state === 'AVAILABLE' &&
+        row.inventory.value !== null &&
+        row.demand21d.state === 'AVAILABLE' &&
+        row.demand21d.value !== null,
+    );
+    const rows = sourceRows.flatMap((row) => {
+      const product = loaded.productsById.get(row.productId);
+      const store = loaded.storesById.get(row.storeId);
+      const stockQuantity = row.inventory.value;
+      const averageDailySales = row.demand21d.value;
+      if (
+        !product ||
+        !store ||
+        stockQuantity === null ||
+        averageDailySales === null
+      ) {
+        return [];
+      }
+      const dailyNeed = this.round(
+        Math.max(0, averageDailySales * 7 - stockQuantity),
+      );
+      return [
+        {
+          productId: product.id,
+          storeId: store.id,
+          storeName: store.name,
+          article: product.article,
+          name: product.name,
+          isCanonical: false,
+          canonicalProductName: null,
+          categoryName: product.categoryName,
+          supplierName: product.supplierName,
+          stockQuantity: this.round(stockQuantity),
+          soldQuantity: this.round(averageDailySales * DEMAND_PERIOD_DAYS),
+          averageDailySales: this.round(averageDailySales),
+          stockDays: row.turnoverDays.value,
+          dailyNeed,
+          recommendedOrder: row.recommendedOrderQuantity ?? 0,
+          orderMultiplicity: product.orderMultiplicity,
+          risk: this.replenishmentRiskFromAssortmentRow(row),
+        },
+      ];
+    });
+    const covered = rows.length;
+    const state: AssortmentMetricState =
+      policyRows.length === 0 || covered === 0
+        ? this.replenishmentCoverageState(policyRows)
+        : covered === policyRows.length
+          ? 'AVAILABLE'
+          : 'PARTIAL';
+    const excludedReasons = policyRows
+      .filter((row) => !sourceRows.includes(row))
+      .map((row) => row.inventory.reason ?? row.demand21d.reason)
+      .filter((reason): reason is string => Boolean(reason));
+
+    return {
+      rows,
+      coverage: {
+        state,
+        reason:
+          state === 'AVAILABLE'
+            ? null
+            : (excludedReasons[0] ??
+              'Не все позиции имеют свежий остаток и подтвержденный спрос.'),
+        covered,
+        total: policyRows.length,
+        percent:
+          policyRows.length === 0
+            ? null
+            : this.round((covered / policyRows.length) * 100),
+      },
+    };
+  }
+
+  private replenishmentCoverageState(
+    rows: AssortmentHealthRow[],
+  ): AssortmentMetricState {
+    if (rows.length === 0) return 'MISSING';
+    if (rows.some((row) => row.inventory.state === 'STALE')) return 'STALE';
+    if (rows.some((row) => row.demand21d.state === 'FAILED')) return 'FAILED';
+    if (rows.some((row) => row.demand21d.state === 'STALE')) return 'STALE';
+    if (rows.some((row) => row.demand21d.state === 'PARTIAL')) {
+      return 'PARTIAL';
+    }
+    if (rows.some((row) => row.inventory.state === 'MISSING')) return 'MISSING';
+    return 'UNKNOWN';
+  }
+
+  private replenishmentRiskFromAssortmentRow(
+    row: AssortmentHealthRow,
+  ): ReplenishmentRisk {
+    if (row.risk === 'OUT_OF_STOCK') return 'OUT_OF_STOCK';
+    if (row.risk === 'LOW_STOCK') return 'LOW_STOCK';
+    if (row.risk === 'NO_DEMAND') return 'NO_SALES';
+    return 'OK';
+  }
+
+  private resolveAssortmentAsOf(value?: string) {
+    const now = new Date();
+    if (!value) return now;
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (dateOnly) {
+      const asOf = new Date(
+        Date.UTC(
+          Number(dateOnly[1]),
+          Number(dateOnly[2]) - 1,
+          Number(dateOnly[3]),
+        ),
+      );
+      if (
+        asOf.getUTCFullYear() !== Number(dateOnly[1]) ||
+        asOf.getUTCMonth() !== Number(dateOnly[2]) - 1 ||
+        asOf.getUTCDate() !== Number(dateOnly[3])
+      ) {
+        throw new BadRequestException('asOf must be a valid YYYY-MM-DD date');
+      }
+      if (asOf.toISOString().slice(0, 10) === now.toISOString().slice(0, 10)) {
+        return now;
+      }
+      asOf.setUTCHours(23, 59, 59, 999);
+      if (asOf > now) {
+        throw new BadRequestException('asOf must not be in the future');
+      }
+      return asOf;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
+      throw new BadRequestException(
+        'asOf must be a canonical ISO timestamp or YYYY-MM-DD',
+      );
+    }
+    const asOf = new Date(value);
+    if (Number.isNaN(asOf.getTime()) || asOf.toISOString() !== value) {
+      throw new BadRequestException(
+        'asOf must be a canonical ISO timestamp or YYYY-MM-DD',
+      );
+    }
+    if (asOf > now) {
+      throw new BadRequestException('asOf must not be in the future');
+    }
+    return asOf;
+  }
+
   private resolvePreviousPlanPeriod(period: { fromDate: Date; toDate: Date }) {
     const periodDays = this.periodDays(period.fromDate, period.toDate);
     const toDate = new Date(period.fromDate);
@@ -4637,6 +4931,42 @@ export class ReportsService {
         (a, b) =>
           b.productsCount - a.productsCount || a.name.localeCompare(b.name),
       );
+  }
+
+  private buildMarginCoverage(
+    rows: Array<{ revenue: number; cost: number }>,
+  ): ReportMarginCoverage {
+    const totalRevenue = rows.reduce((sum, row) => sum + row.revenue, 0);
+    const coveredRows = rows.filter((row) => row.revenue <= 0 || row.cost > 0);
+    const coveredRevenue = coveredRows.reduce(
+      (sum, row) => sum + row.revenue,
+      0,
+    );
+    const coveredCost = coveredRows.reduce((sum, row) => sum + row.cost, 0);
+    const partialGrossProfit = coveredRevenue - coveredCost;
+    const fullyCovered = rows.length > 0 && coveredRows.length === rows.length;
+
+    return {
+      state: fullyCovered
+        ? 'READY'
+        : coveredRows.length > 0
+          ? 'PARTIAL'
+          : 'UNKNOWN',
+      fullMarginPercent: fullyCovered
+        ? this.marginPercent(coveredCost, coveredRevenue)
+        : null,
+      fullGrossProfit: fullyCovered ? this.round(partialGrossProfit) : null,
+      partialMarginPercent:
+        coveredRows.length > 0
+          ? this.marginPercent(coveredCost, coveredRevenue)
+          : null,
+      partialGrossProfit:
+        coveredRows.length > 0 ? this.round(partialGrossProfit) : null,
+      coveredRevenue: this.round(coveredRevenue),
+      coveredOperations: coveredRows.length,
+      totalRevenue: this.round(totalRevenue),
+      totalOperations: rows.length,
+    };
   }
 
   private marginPercent(purchasePrice: number, salePrice: number) {

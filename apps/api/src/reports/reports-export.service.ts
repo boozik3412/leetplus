@@ -1645,6 +1645,10 @@ export class ReportsExportService {
       PURCHASE_PRICE: 'Закупочная цена',
       SALE_PRICE: 'Цена продажи',
       HISTORICAL_REVENUE: 'Историческая цена продажи',
+      CLUB_PURCHASE_PRICE: 'Закупочная цена клуба',
+      SALES_UNIT_COST: 'Себестоимость продаж',
+      PRODUCT_PURCHASE_PRICE: 'Закупочная цена товара',
+      SALE_PRICE_ESTIMATE: 'Оценка по цене продажи',
       UNKNOWN: 'Нет оценки',
     };
 

@@ -4,7 +4,7 @@
 
 | ID | Из брифа | Статус | Основание | Где |
 |---|---|---|---|---|
-| R01 | обновление остатков | in-ticket | Согласованный план, вопросов нет | spec.md → 03 |
+| R01 | обновление остатков | done | Согласованный план, вопросов нет | spec.md → 03 |
 | R02 | контроль их свежести | in-ticket | Согласованный план, вопросов нет | spec.md → 02 |
 | R03 | привязку визитов | in-ticket | Согласованный план, вопросов нет | spec.md → 01,02,03 |
 | R04 | выбор цен | in-ticket | Согласованный план, вопросов нет | spec.md → 01,02 |
@@ -21,8 +21,9 @@
 | R15 | покрытие частичных расчётов | in-ticket | Согласованный план, вопросов нет | spec.md → 01,02,04 |
 | R16 | дату остатков | in-ticket | Согласованный план, вопросов нет | spec.md → 01,02,04 |
 | R17 | Существующие показатели роста продаж сохранить | in-ticket | Согласованный план, вопросов нет | spec.md → 02,04 |
-| D01 | Обнаружено: inferred Store влияет на выбор timezone существующего parser | in-ticket | Сохранить время фактов,R03 | spec.md D01 → 03 |
+| D01 | Обнаружено: inferred Store влияет на выбор timezone существующего parser | done | Сохранить время фактов,R03 | spec.md D01 → 03 |
 | D02 | Обнаружено: yesterday performance cutoff скрывает свежий today goods snapshot | in-ticket | Разделить stock asOf и demandTo,R01/R05/R13/R16 | spec.md D02 → 01,02,03,04 |
 | D03 | Обнаружено02: engine всехproducts×stores добавляет чужой ассортимент | in-ticket | Явное подтверждённое store-product membership,R04/R05/R09 | spec.md D03 → 01,02 |
 | D04 | Обнаружено02: sale price нельзя выдавать за закупочную оценку stock | in-ticket | Отдельная valuation basis из club purchase/history cost,R04/R09/R15 | spec.md D04 → 01,02,04 |
 | D05 | Обнаружено03→02: day key и actual inventory observation имеют разное время | in-ticket | freshness и historical bounds поobservedAt,R01/R02/R16 | spec.md D05 → 01,02,03 |
+| D06 | Обнаружено после03: inventory-only продвигает используемый catchUp sales cursor | done | Не пропускать недогруженные sales,R01/R02 | spec.md D06 → 03 |

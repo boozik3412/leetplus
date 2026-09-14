@@ -41,6 +41,8 @@ R13.1: все новые числовые карточки кликабельн�
 
 ## Реализация и ограничения
 
+- D06 (доказано после03,R01/R02): существующий IntegrationSource.lastSyncedDate используется catchUp для начала продаж. Успех INVENTORY/CATALOG не должен двигать этот sales cursor; его продвигают только полностью успешные режимы с продажами (QUICK/BACKFILL/FULL). Последняя активность lastSyncedAt не становится доказательством полноты всех разделов.
+
 - D05 (доказано03→02,R01/R02/R16): идемпотентный inventory day key `snapshotDate=startOfUtcDay(now)` отличается от времени наблюдения. Loader передаёт `observedAt=InventorySnapshot.updatedAt`; engine проверяет оба значения<=asOf, а возраст/фактическую дату берёт из observedAt (fallback snapshotDate для старых adapters). Иначе nightlyUTC23:30 выглядит устаревшим уже через12.5ч при пороге36ч.
 
 - D04 (доказано при02,R04/R09/R15): цена продажи для денежного OOS-риска и оценка замороженного stock — разные величины. Valuation сначала использует per-club purchase configuration либо подтверждённую себестоимость/количество продаж. При отсутствии закупки допускается existing sale/history valuation только с явным basis «оценка по продажной цене», а не как себестоимость/вложенные деньги. Неизвестная цена — null; даты и partial coverage видны. Product.purchasePrice не единственный источник (в live он0).

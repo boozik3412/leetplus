@@ -110,7 +110,7 @@ export type AssortmentPriceConfiguration = {
   productId: string;
   externalDomain: string;
   externalClubId: string;
-  price: number;
+  price: number | null;
   purchasePrice?: number | null;
   updatedAt: Date;
 };
@@ -129,7 +129,7 @@ export type AssortmentWriteOff = {
 };
 
 export type AssortmentSourceCoverage = {
-  status: 'CONFIRMED' | 'MISSING' | 'FAILED';
+  status: 'CONFIRMED' | 'PARTIAL' | 'MISSING' | 'FAILED';
 };
 
 export type AssortmentHealthInput = {
@@ -599,6 +599,7 @@ function priceMetric(
   if (
     config &&
     isFreshConfig &&
+    config.price !== null &&
     Number.isFinite(config.price) &&
     config.price >= 0
   ) {
@@ -668,7 +669,12 @@ function priceMetric(
       source: 'HISTORICAL_SALES',
     };
   }
-  if (config && Number.isFinite(config.price) && config.price >= 0) {
+  if (
+    config &&
+    config.price !== null &&
+    Number.isFinite(config.price) &&
+    config.price >= 0
+  ) {
     return {
       ...metric(
         config.price,
@@ -865,7 +871,7 @@ function writeOffMetrics(
   productId: string,
 ) {
   const source = input.writeOffCoverage ?? { status: 'MISSING' as const };
-  if (source.status !== 'CONFIRMED') {
+  if (source.status !== 'CONFIRMED' && source.status !== 'PARTIAL') {
     const state = source.status === 'FAILED' ? 'FAILED' : 'MISSING';
     const reason =
       source.status === 'FAILED'
@@ -887,19 +893,34 @@ function writeOffMetrics(
       item.movementDate >= input.period.from &&
       item.movementDate <= boundedTo(input.period.to, input.asOf),
   );
+  if (source.status === 'PARTIAL' && rows.length === 0) {
+    const unavailable = metric<number>(
+      null,
+      'PARTIAL',
+      coverage(0, 1),
+      'Источник списаний неполный; для товара нет подтвержденных списаний.',
+      null,
+    );
+    return { quantity: unavailable, amount: unavailable };
+  }
+  const state = source.status === 'PARTIAL' ? 'PARTIAL' : 'AVAILABLE';
+  const reason =
+    state === 'PARTIAL'
+      ? 'Есть подтвержденные списания, но покрытие источника неполное.'
+      : null;
   return {
     quantity: metric(
       sum(rows.map((row) => row.quantity)),
-      'AVAILABLE',
+      state,
       coverage(1, 1),
-      null,
+      reason,
       dateValue(boundedTo(input.period.to, input.asOf)),
     ),
     amount: metric(
       sum(rows.map((row) => row.amount)),
-      'AVAILABLE',
+      state,
       coverage(1, 1),
-      null,
+      reason,
       dateValue(boundedTo(input.period.to, input.asOf)),
     ),
   };

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { AssortmentHealthLoaderService } from '../common/assortment-health-loader.service';
 import { MailModule } from '../mail/mail.module';
 import { ReportsDigestScheduledController } from './reports-digest-scheduled.controller';
 import { ReportsDigestService } from './reports-digest.service';
@@ -18,6 +19,7 @@ import { ReportsService } from './reports.service';
     ReportsEmailService,
     ReportsDigestService,
     ReportsDigestSchedulerService,
+    AssortmentHealthLoaderService,
   ],
 })
 export class ReportsModule {}

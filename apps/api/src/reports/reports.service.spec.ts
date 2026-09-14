@@ -2,7 +2,6 @@ import { ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { ReportsService } from './reports.service';
 
@@ -42,6 +41,14 @@ type FreshStoreScopeMock = {
   assertNetwork: jest.Mock;
   resolveRequestedStoreIds: jest.Mock;
 };
+
+type AssortmentHealthLoaderMock = {
+  load: jest.Mock;
+};
+
+function reportHealthRow(value: object) {
+  return value as unknown as import('../common/assortment-health').AssortmentHealthRow;
+}
 
 type RecommendationStateUpsertArgs = {
   create: {
@@ -114,6 +121,7 @@ describe('ReportsService', () => {
   let prisma: ReportsPrismaMock;
   let tenantContext: TenantContextMock;
   let freshStoreScope: FreshStoreScopeMock;
+  let assortmentHealthLoader: AssortmentHealthLoaderMock;
   let service: ReportsService;
 
   beforeEach(() => {
@@ -146,11 +154,33 @@ describe('ReportsService', () => {
             }),
         ),
     };
+    assortmentHealthLoader = {
+      load: jest.fn().mockResolvedValue({
+        health: { rows: [], summary: {} },
+        productsById: new Map(),
+        storesById: new Map(),
+      }),
+    };
     service = new ReportsService(
       prisma as unknown as PrismaService,
-      tenantContext as unknown as TenantContextService,
+      tenantContext,
       freshStoreScope as unknown as FreshStoreScopeService,
+      assortmentHealthLoader as never,
     );
+  });
+
+  it('adds compact assortment health to the operational report contract', async () => {
+    prisma.salesFact.findMany.mockResolvedValue([]);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([]);
+    prisma.stockMovement.findMany.mockResolvedValue([]);
+    prisma.productOosExclusion.findMany.mockResolvedValue([]);
+
+    const report = await service.getOperationalReport(user, {
+      from: '2026-04-01',
+      to: '2026-04-10',
+    });
+
+    expect(report.assortmentHealth).toBeDefined();
   });
 
   it('builds assortment report for resolved tenant', async () => {
@@ -181,6 +211,39 @@ describe('ReportsService', () => {
         supplier: null,
       },
     ]);
+    assortmentHealthLoader.load.mockResolvedValueOnce({
+      health: {
+        rows: [
+          reportHealthRow({
+            storeId: 'store-1',
+            productId: 'product-1',
+            risk: 'LOW_STOCK',
+            inventory: { value: 2, reason: null },
+            demand21d: { value: 1, reason: null },
+            price: { value: 100, reason: null },
+            turnoverDays: { value: 2 },
+          }),
+        ],
+        summary: {
+          writeOffQuantity: { value: 1 },
+          writeOffAmount: { value: 80 },
+        },
+      },
+      productsById: new Map([
+        [
+          'product-1',
+          {
+            id: 'product-1',
+            article: 'DRK-001',
+            name: 'Adrenaline Rush',
+            categoryId: null,
+            categoryName: null,
+            supplierName: null,
+          },
+        ],
+      ]),
+      storesById: new Map([['store-1', { id: 'store-1', name: 'Club A' }]]),
+    });
     prisma.inventorySnapshot.findMany.mockResolvedValue([
       {
         storeId: 'store-1',
@@ -367,6 +430,43 @@ describe('ReportsService', () => {
       },
     ]);
 
+    assortmentHealthLoader.load.mockResolvedValue({
+      health: {
+        rows: [
+          reportHealthRow({
+            storeId: 'store-1',
+            productId: 'product-1',
+            risk: 'LOW_STOCK',
+            inventory: { value: 2, reason: null },
+            demand21d: { value: 1, reason: null },
+            price: { value: 100, reason: null },
+            turnoverDays: { value: 2 },
+            noSales: { 7: false, 14: false, 21: false, 30: false },
+            writeOffQuantity: { value: null },
+            writeOffAmount: { value: null },
+          }),
+        ],
+        summary: {
+          writeOffQuantity: { value: 1 },
+          writeOffAmount: { value: 80 },
+        },
+      },
+      productsById: new Map([
+        [
+          'product-1',
+          {
+            id: 'product-1',
+            article: 'DRK-001',
+            name: 'Adrenaline Rush',
+            categoryId: null,
+            categoryName: null,
+            supplierName: null,
+          },
+        ],
+      ]),
+      storesById: new Map([['store-1', { id: 'store-1', name: 'Club A' }]]),
+    });
+
     const report = await service.getOperationalReport(user, {
       from: '2026-04-01',
       to: '2026-04-10',
@@ -419,12 +519,25 @@ describe('ReportsService', () => {
         stockQuantity: 2,
         averageDailySales: 1,
         revenueAtRiskPerDay: 100,
-        grossProfitAtRiskPerDay: 19,
-        grossProfitAtRiskForPeriod: 190.5,
+        grossProfitAtRiskPerDay: null,
+        grossProfitAtRiskForPeriod: null,
         stockDays: 2,
+        state: 'LOW_STOCK',
+        reason: null,
       },
     ]);
     expect(report.productsWithoutSales).toEqual([]);
+    expect(report.marginCoverage).toEqual({
+      state: 'READY',
+      fullMarginPercent: 15,
+      fullGrossProfit: 150,
+      partialMarginPercent: 15,
+      partialGrossProfit: 150,
+      coveredRevenue: 1000,
+      coveredOperations: 1,
+      totalRevenue: 1000,
+      totalOperations: 1,
+    });
   });
 
   it('excludes zero stock and period arrivals from products without sales', async () => {
@@ -469,6 +582,39 @@ describe('ReportsService', () => {
     ]);
     prisma.stockMovement.findMany.mockResolvedValue([]);
     prisma.productOosExclusion.findMany.mockResolvedValue([]);
+    assortmentHealthLoader.load.mockResolvedValueOnce({
+      health: {
+        rows: [
+          reportHealthRow({
+            storeId: 'store-1',
+            productId: 'product-keep',
+            risk: 'NO_DEMAND',
+            inventory: { value: 4, reason: null },
+            noSales: { 7: true, 14: true, 21: true, 30: true },
+            frozenValue: {
+              value: 480,
+              basis: 'SALE_PRICE_ESTIMATE',
+              reason: null,
+            },
+          }),
+        ],
+        summary: {},
+      },
+      productsById: new Map([
+        [
+          'product-keep',
+          {
+            id: 'product-keep',
+            article: 'product-keep',
+            name: 'Stable stock',
+            categoryId: null,
+            categoryName: null,
+            supplierName: null,
+          },
+        ],
+      ]),
+      storesById: new Map([['store-1', { id: 'store-1', name: 'Club A' }]]),
+    });
 
     const report = await service.getOperationalReport(user, {
       from: '2026-04-01',
@@ -481,10 +627,110 @@ describe('ReportsService', () => {
         productId: 'product-keep',
         stockQuantity: 4,
         frozenStockUnitValue: 120,
-        frozenStockValuation: 'SALE_PRICE',
+        frozenStockValuation: 'SALE_PRICE_ESTIMATE',
         frozenStockAmount: 480,
       }),
     ]);
+  });
+
+  it('keeps category and as-of scope identical for legacy operations and engine rows', async () => {
+    prisma.salesFact.findMany.mockResolvedValue([]);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([]);
+    prisma.stockMovement.findMany.mockResolvedValue([]);
+    assortmentHealthLoader.load.mockResolvedValueOnce({
+      health: {
+        rows: [
+          reportHealthRow({
+            storeId: 'store-1',
+            productId: 'product-oos',
+            risk: 'OUT_OF_STOCK',
+            inventory: { value: 0 },
+            demand21d: { value: 2 },
+            price: { value: 100 },
+            turnoverDays: { value: 0 },
+          }),
+          reportHealthRow({
+            storeId: 'store-1',
+            productId: 'product-frozen',
+            risk: 'NO_DEMAND',
+            inventory: { value: 4 },
+            noSales: { 7: false, 14: true, 21: true, 30: true },
+            frozenValue: { value: 480, basis: 'SALE_PRICE_ESTIMATE' },
+          }),
+        ],
+        summary: {},
+      },
+      productsById: new Map([
+        [
+          'product-oos',
+          {
+            id: 'product-oos',
+            article: 'OOS-1',
+            name: 'OOS item',
+            categoryId: 'category-1',
+            categoryName: 'Drinks',
+            supplierName: null,
+          },
+        ],
+        [
+          'product-frozen',
+          {
+            id: 'product-frozen',
+            article: 'FRZ-1',
+            name: 'Frozen item',
+            categoryId: 'category-1',
+            categoryName: 'Drinks',
+            supplierName: null,
+          },
+        ],
+      ]),
+      storesById: new Map([['store-1', { id: 'store-1', name: 'Club A' }]]),
+    });
+
+    const report = await service.getOperationalReport(user, {
+      from: '2026-04-01',
+      to: '2026-04-10',
+      categoryIds: ['category-1'],
+      asOf: '2026-04-05',
+      noSalesDays: 14,
+    });
+
+    expect(report.categoryIds).toEqual(['category-1']);
+    expect(report.asOf).toBe('2026-04-05');
+    expect(report.outOfStockRiskProducts.map((row) => row.productId)).toEqual([
+      'product-oos',
+    ]);
+    expect(report.productsWithoutSales.map((row) => row.productId)).toEqual([
+      'product-frozen',
+    ]);
+    expect(report.recommendations.map((item) => item.id)).toEqual([
+      'stock:store-1:product-oos',
+      'no-sales:store-1:product-frozen',
+    ]);
+    expect(assortmentHealthLoader.load).toHaveBeenCalledWith(
+      expect.objectContaining({
+        categoryIds: ['category-1'],
+        asOf: new Date('2026-04-05T23:59:59.999Z'),
+      }),
+    );
+    const salesQuery = (
+      prisma.salesFact.findMany.mock.calls as unknown as Array<
+        [
+          {
+            where: {
+              product: { categoryId: { in: string[] } };
+              saleDate: { lte: Date };
+            };
+          },
+        ]
+      >
+    )[0]?.[0];
+    expect(salesQuery).toBeDefined();
+    if (!salesQuery) throw new Error('Expected scoped sales query');
+    expect(salesQuery.where.product.categoryId.in).toEqual(['category-1']);
+    expect(salesQuery.where.saleDate.lte).toEqual(
+      new Date('2026-04-05T23:59:59.999Z'),
+    );
   });
 
   it('rejects unknown store filter for operational report', async () => {
@@ -571,6 +817,55 @@ describe('ReportsService', () => {
         snapshotDate: new Date('2026-04-10T00:00:00.000Z'),
       },
     ]);
+    assortmentHealthLoader.load.mockResolvedValueOnce({
+      health: {
+        rows: [
+          reportHealthRow({
+            storeId: 'store-1',
+            productId: 'product-slow',
+            inventory: { value: 100 },
+            demand21d: { value: 0.2 },
+            turnoverDays: { value: 500 },
+            frozenValue: { value: 1000, basis: 'PURCHASE_PRICE' },
+          }),
+          reportHealthRow({
+            storeId: 'store-1',
+            productId: 'product-frozen',
+            inventory: { value: 5 },
+            demand21d: { value: 0 },
+            turnoverDays: { value: null },
+            noSales: { 7: true, 14: true, 21: true, 30: true },
+            frozenValue: { value: 250, basis: 'SALE_PRICE' },
+          }),
+        ],
+        summary: {},
+      },
+      productsById: new Map([
+        [
+          'product-slow',
+          {
+            id: 'product-slow',
+            article: 'DRK-001',
+            name: 'Energy Drink',
+            categoryId: 'category-1',
+            categoryName: 'Напитки',
+            supplierName: 'Supplier A',
+          },
+        ],
+        [
+          'product-frozen',
+          {
+            id: 'product-frozen',
+            article: 'SNK-001',
+            name: 'Chips',
+            categoryId: 'category-2',
+            categoryName: 'Снеки',
+            supplierName: null,
+          },
+        ],
+      ]),
+      storesById: new Map([['store-1', { id: 'store-1', name: 'Club A' }]]),
+    });
 
     const report = await service.getInventoryTurnoverReport(user, {
       from: '2026-04-01',
@@ -597,6 +892,53 @@ describe('ReportsService', () => {
       turnoverRate: 0,
       frozenStockAmount: 1000,
     });
+  });
+
+  it('preserves an unknown frozen-stock valuation in turnover rows', async () => {
+    assortmentHealthLoader.load.mockResolvedValueOnce({
+      health: {
+        rows: [
+          reportHealthRow({
+            storeId: 'store-1',
+            productId: 'product-unknown',
+            inventory: { value: 3 },
+            demand21d: { value: 0 },
+            turnoverDays: { value: null },
+            noSales: { 7: true, 14: true, 21: true, 30: true },
+            frozenValue: { value: null, basis: 'UNKNOWN' },
+          }),
+        ],
+        summary: {},
+      },
+      productsById: new Map([
+        [
+          'product-unknown',
+          {
+            id: 'product-unknown',
+            article: 'UNK-1',
+            name: 'Unknown value',
+            categoryId: null,
+            categoryName: null,
+            supplierName: null,
+          },
+        ],
+      ]),
+      storesById: new Map([['store-1', { id: 'store-1', name: 'Club A' }]]),
+    });
+
+    const report = await service.getInventoryTurnoverReport(user, {
+      from: '2026-04-01',
+      to: '2026-04-10',
+    });
+
+    expect(report.rows).toEqual([
+      expect.objectContaining({
+        productId: 'product-unknown',
+        frozenStockValuation: 'UNKNOWN',
+        frozenStockUnitValue: null,
+        frozenStockAmount: null,
+      }),
+    ]);
   });
 
   it('builds plan fact report by network, store, category and supplier', async () => {

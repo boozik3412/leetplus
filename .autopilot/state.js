@@ -11,7 +11,7 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "skillDir": "C:\\Users\\ALIENWARE\\.codex\\skills\\autopilot",
   "startedAt": "2026-09-14T15:05:31+05:00",
-  "updatedAt": "2026-09-14T17:05:21+05:00",
+  "updatedAt": "2026-09-14T18:11:03+05:00",
   "finishedAt": null,
   "stages": [
     {
@@ -61,8 +61,8 @@ window.STATE =
   ],
   "requirements": {
     "total": 17,
-    "done": 0,
-    "inTicket": 17,
+    "done": 1,
+    "inTicket": 16,
     "inSpec": 0,
     "placeholder": 0,
     "deferred": 0,
@@ -141,12 +141,26 @@ window.STATE =
         "apps/api/src/reports/",
         "apps/api/src/common/assortment-health-loader*"
       ],
-      "status": "in-progress",
+      "status": "review",
       "retries": 0,
-      "repairs": 0,
-      "handoffs": 1,
+      "repairs": 1,
+      "handoffs": 2,
       "startedAt": "2026-09-14T16:20:00+05:00",
-      "agent": "/root/api_finish"
+      "agent": "/root/api_parity",
+      "tests": {
+        "passed": 37,
+        "failed": 0
+      },
+      "repairFindings": [
+        "Replace remaining global source freshness",
+        "Long period loader coverage",
+        "Cost-only configuration valuation",
+        "Known write-offs partial vs false zero",
+        "Legacy report row/filter parity and no duplicate history",
+        "Covered margin instead of missing cost zero",
+        "Confirmed zero-day forecast",
+        "Restricted shared-domain visit counts must not leak"
+      ]
     },
     {
       "id": "03",
@@ -164,16 +178,19 @@ window.STATE =
         "apps/api/src/integrations/langame-daily-sync.service*",
         "apps/api/src/integrations/langame-sync.service*"
       ],
-      "status": "review",
+      "status": "done",
       "retries": 0,
       "repairs": 0,
       "handoffs": 0,
       "startedAt": "2026-09-14T16:20:00+05:00",
       "tests": {
-        "passed": 54,
+        "passed": 56,
         "failed": 0
       },
-      "agent": "/root/source_import"
+      "agent": "/root/source_cursor",
+      "finishedAt": "2026-09-14T17:35:13+05:00",
+      "commit": "0697a67c779af6388c310e6828f100c77e3ced93",
+      "note": "D06: inventory-only не продвигает sales cursor"
     },
     {
       "id": "04",
@@ -209,7 +226,7 @@ window.STATE =
   ],
   "singlePass": null,
   "tests": {
-    "passed": 3540,
+    "passed": 3548,
     "failed": 0,
     "todo": 2,
     "suites": 191
@@ -226,9 +243,7 @@ window.STATE =
     "deferred": 0,
     "result": "PASS"
   },
-  "concerns": [
-    "01 nonblocking: explicit permutation test of two valid configs recommended by Craft; selection code reviewed newest<=asOf"
-  ],
+  "concerns": [],
   "reviewers": {
     "manifestSpec": "/root/spec_coverage",
     "craft": "/root/craft_review"

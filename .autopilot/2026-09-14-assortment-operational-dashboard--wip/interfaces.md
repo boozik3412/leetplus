@@ -63,3 +63,33 @@ R13.1: все новые числовые карточки кликабельн�
 - Targeted3suites54PASS, lintPASS; общий tsc ждёт завершения concurrent common/loader изменения.
 
 - D04/D05 common final: summary frozenValue/excessValue имеют basis (включая MIXED); InventorySnapshot observedAt optional bounded<=asOf и определяет freshness/asOf. Common18tests+lintPASS; общийAPI191suites3540tests+2todoPASS, build-tscPASS перед handoff02.
+
+##02 — итоговый API contract (на review)
+
+- Dashboard `selectedNoSalesDays:7|14|21|30`; `assortmentHealth?: AssortmentHealth['summary']` — ВАЖНО это сама summary, без повторной вложенности `.summary`.
+- Dashboard `visitBinding={state:'AVAILABLE'|'PARTIAL'|'MISSING',observedVisitCount:number,usableVisitCount:number|null,coverage:{covered,total,percent:number|null},reason:string|null}`. UI использует usable/status для scoped visits, не legacyzero.
+- Operations/turnover: `storeIds,categoryIds,asOf`, `assortmentHealth?:summary`, operations `assortmentRows:{outOfStock,noSales,writeOffs}`, turnover `assortmentRows:AssortmentHealthRow[]`. Optional DTO guard нужен для старых consumers.
+- Legacy arrays теперь адаптируются из тех же engine rowsets. OOS risk money andstockDays nullable; no-sales frozenStockUnitValue/Amount nullable, frozenStockValuation non-null basis union. Web types/formatters должны учитывать null вместо0.
+- D05 loader передаётupdatedAt→observedAt;31 targetedtests,scopedlint,buildtsc PASS.
+
+-03/D06 final: fully successful QUICK/BACKFILL/FULL alone advance sales lastSyncedDate; INVENTORY/CATALOG only update activity timestamp. 36 targeted sync tests and both reviews PASS; no dropped sales catch-up.
+
+##02 repair: передача завершающему контексту
+
+- Доказано: per-module freshness больше не зависит отglobal latestIntegrationSync; cost-onlyconfiguration сохраняется; longperiodloader horizon; knownwriteoffs PARTIAL, emptyunknownnull; restricted shared-domain no countsleak.
+- `load(query.coveragePeriod?)` внутренне возвращает `salesDayEvidence:{storeId,date,status:CONFIRMED|MISSING|FAILED}[]` дляforecast; подтверждённые0дни включены, сырыеevidence не идут вHTTP.
+- Осталось: per-domain failure/partial evidence дляsourcehealth; category/asOf parity всехlegacyreport totals/rows/recommendations иудаление duplicate fullhistory; full margin nullable с coveredRevenue/operations+partialmargin.
+- ПолныйAPI191suites3548PASS+tsc; финальные targeted4suites53PASS+lint+tsc. Ничегоredнепередано. Handoff02-1 и02-2 хранятсделанное/оставшееся.
+
+##02: final margin DTO согласован
+
+`marginCoverage` в DashboardSummary и OperationalReport:
+`{state:'READY'|'PARTIAL'|'UNKNOWN',fullMarginPercent:number|null,fullGrossProfit:number|null,partialMarginPercent:number|null,partialGrossProfit:number|null,coveredRevenue:number,coveredOperations:number,totalRevenue:number,totalOperations:number}`.
+Legacy grossProfit/adjustedGrossProfit/marginPercent/adjustedMarginPercent (и dashboard previous adjustedprofit) nullable при неполном cost. Web04 переводит соответствующие formatters/types наnull guard и показывает partial* с coverage; не подменятьnullнулём.
+
+##02 final candidate (на приёмке)
+
+-37 targeted loader/dashboard/reports tests, buildtsc+eslint PASS. Operations filterparity and turnover/recommendations use engine rows; duplicateunboundedhistorical rawqueries removed.
+- `sourceHealthEvidence.{sales,inventory}` только внутренне: scoped domain confirmed/failed/missing counts. Source modules isolated, historical sales/visits не stale простоиз-заold updatedAt.
+- `marginCoverage` implements agreed full/partial DTO; full legacy valuesnullable; reports-digest явно labels partial values.
+- Turnover legacy revenue/grossProfit ещёnumericcompatibilityfields; UI04 должен показывать state/reason/partial qualification изauthoritativeengine/report metadata и не выдавать cost gap за точную прибыль.

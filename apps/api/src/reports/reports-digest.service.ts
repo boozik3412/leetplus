@@ -658,7 +658,7 @@ export class ReportsDigestService {
     if (!previousReport) {
       return `Выручка сети за период: ${this.formatMoney(
         currentReport.totalRevenue,
-      )}, маржа ${this.formatPercent(currentReport.marginPercent)}.`;
+      )}, маржа ${this.formatReportMargin(currentReport)}.`;
     }
 
     return `Выручка сети: ${this.formatMoney(
@@ -694,16 +694,22 @@ export class ReportsDigestService {
       },
       {
         label: 'Валовая прибыль',
-        value: this.formatMoney(currentReport.grossProfit),
+        value: this.formatReportGrossProfit(currentReport),
         delta: previous
-          ? this.formatDelta(currentReport.grossProfit, previous.grossProfit)
+          ? this.formatNullableDelta(
+              currentReport.grossProfit,
+              previous.grossProfit,
+            )
           : null,
       },
       {
         label: 'Маржа',
-        value: this.formatPercent(currentReport.marginPercent),
+        value: this.formatReportMargin(currentReport),
         delta: previous
-          ? this.formatPointDelta(currentReport.marginPercent, previous.margin)
+          ? this.formatNullablePointDelta(
+              currentReport.marginPercent,
+              previous.margin,
+            )
           : null,
       },
       {
@@ -718,9 +724,15 @@ export class ReportsDigestService {
       },
       {
         label: 'Списания',
-        value: this.formatMoney(currentReport.writeOffAmount),
+        value:
+          currentReport.writeOffAmount === null
+            ? 'н/д'
+            : this.formatMoney(currentReport.writeOffAmount),
         delta: previous
-          ? this.formatDelta(currentReport.writeOffAmount, previous.writeOffs)
+          ? this.formatNullableDelta(
+              currentReport.writeOffAmount,
+              previous.writeOffs,
+            )
           : null,
       },
       {
@@ -859,6 +871,40 @@ export class ReportsDigestService {
 
   private formatMoney(value: number) {
     return `${this.formatNumber(value)} руб`;
+  }
+
+  private formatReportGrossProfit(report: OperationalReport) {
+    if (report.grossProfit !== null)
+      return this.formatMoney(report.grossProfit);
+    if (report.marginCoverage.partialGrossProfit !== null) {
+      return `частично: ${this.formatMoney(report.marginCoverage.partialGrossProfit)}`;
+    }
+    return 'н/д';
+  }
+
+  private formatReportMargin(report: OperationalReport) {
+    if (report.marginPercent !== null) {
+      return this.formatPercent(report.marginPercent);
+    }
+    if (report.marginCoverage.partialMarginPercent !== null) {
+      return `частично: ${this.formatPercent(report.marginCoverage.partialMarginPercent)}`;
+    }
+    return 'н/д';
+  }
+
+  private formatNullableDelta(current: number | null, previous: number | null) {
+    return current === null || previous === null
+      ? null
+      : this.formatDelta(current, previous);
+  }
+
+  private formatNullablePointDelta(
+    current: number | null,
+    previous: number | null,
+  ) {
+    return current === null || previous === null
+      ? null
+      : this.formatPointDelta(current, previous);
   }
 
   private formatCount(value: number) {

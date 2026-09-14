@@ -11,6 +11,8 @@ import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import {
+  DailyDataCoverageScope,
+  DailyDataCoverageStatus,
   PrismaClient,
   ProductOosExclusionType,
   RecommendationRole,
@@ -31,6 +33,7 @@ import { resolveUserCapabilities } from '../src/auth/capabilities';
 import { JwtAuthGuard } from '../src/auth/jwt-auth.guard';
 import { RolesGuard } from '../src/auth/roles.guard';
 import { CategoriesService } from '../src/categories/categories.service';
+import { AssortmentHealthLoaderService } from '../src/common/assortment-health-loader.service';
 import { FactCsvImportService } from '../src/imports/fact-csv-import.service';
 import { ProductCsvImportService } from '../src/imports/product-csv-import.service';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -1070,7 +1073,7 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
       const storeA1Evidence = JSON.stringify(storeA1Response.body);
       expect(storeA1Report).toEqual(
         expect.objectContaining({
-          stockQuantity: 11,
+          stockQuantity: 5,
           tenantId: fixture.tenantAId,
           totalRevenue: 20,
         }),
@@ -1291,6 +1294,7 @@ function buildReportsService(prisma: PrismaService) {
     prisma,
     new TenantContextService(),
     freshStoreScopeService,
+    new AssortmentHealthLoaderService(prisma),
   );
 }
 
@@ -1335,6 +1339,11 @@ async function seedReportFacts(prisma: PrismaClient, fixture: Fixture) {
   currentDate.setUTCHours(0, 0, 0, 0);
   const previousDate = new Date(currentDate);
   previousDate.setUTCFullYear(previousDate.getUTCFullYear() - 1);
+  const coverageDates = Array.from({ length: 30 }, (_, index) => {
+    const date = new Date(currentDate);
+    date.setUTCDate(date.getUTCDate() - index);
+    return date;
+  });
 
   await prisma.$transaction([
     prisma.inventorySnapshot.createMany({
@@ -1398,6 +1407,28 @@ async function seedReportFacts(prisma: PrismaClient, fixture: Fixture) {
           storeNameAtSale: 'B1',
         })),
       ],
+    }),
+    prisma.dailyDataCoverage.createMany({
+      data: coverageDates.flatMap((businessDate) => [
+        {
+          tenantId: fixture.tenantAId,
+          businessDate,
+          scope: DailyDataCoverageScope.BUSINESS_FACTS,
+          status: DailyDataCoverageStatus.SUCCESS,
+          summary: {
+            domains: [{ domain: fixture.tenantASlug, status: 'SUCCESS' }],
+          },
+        },
+        {
+          tenantId: fixture.tenantBId,
+          businessDate,
+          scope: DailyDataCoverageScope.BUSINESS_FACTS,
+          status: DailyDataCoverageStatus.SUCCESS,
+          summary: {
+            domains: [{ domain: fixture.tenantBSlug, status: 'SUCCESS' }],
+          },
+        },
+      ]),
     }),
   ]);
 
@@ -1530,16 +1561,19 @@ async function createFixture(prisma: PrismaClient): Promise<Fixture> {
           id: fixture.storeA1Id,
           tenantId: fixture.tenantAId,
           name: 'A1',
+          externalDomain: fixture.tenantASlug,
         },
         {
           id: fixture.storeA2Id,
           tenantId: fixture.tenantAId,
           name: 'A2',
+          externalDomain: fixture.tenantASlug,
         },
         {
           id: fixture.storeB1Id,
           tenantId: fixture.tenantBId,
           name: 'B1',
+          externalDomain: fixture.tenantBSlug,
         },
       ],
     });
@@ -1679,6 +1713,7 @@ async function cleanupFixture(prisma: PrismaClient, tenantId: string) {
     prisma.inventorySnapshot.deleteMany({ where: { tenantId } }),
     prisma.salesFact.deleteMany({ where: { tenantId } }),
     prisma.stockMovement.deleteMany({ where: { tenantId } }),
+    prisma.dailyDataCoverage.deleteMany({ where: { tenantId } }),
     prisma.importJob.deleteMany({ where: { tenantId } }),
     prisma.productOosExclusion.deleteMany({ where: { tenantId } }),
     prisma.recommendationState.deleteMany({ where: { tenantId } }),

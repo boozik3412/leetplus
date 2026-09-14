@@ -31,6 +31,7 @@ import { resolveUserCapabilities } from '../src/auth/capabilities';
 import { JwtAuthGuard } from '../src/auth/jwt-auth.guard';
 import { RolesGuard } from '../src/auth/roles.guard';
 import { CategoriesService } from '../src/categories/categories.service';
+import { AssortmentHealthLoaderService } from '../src/common/assortment-health-loader.service';
 import { FactCsvImportService } from '../src/imports/fact-csv-import.service';
 import { ProductCsvImportService } from '../src/imports/product-csv-import.service';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -1291,6 +1292,7 @@ function buildReportsService(prisma: PrismaService) {
     prisma,
     new TenantContextService(),
     freshStoreScopeService,
+    new AssortmentHealthLoaderService(prisma),
   );
 }
 

@@ -1,9 +1,9 @@
 # Bonus settlement and cumulative-card progress
 
-Source repair prepared 14.09.2026 for LP-BUG-3B291153, LP-BUG-E84BBCA0 and the
-Holmogorova guest report about an800 RUB top-up. This document describes the
-new source contract; the serving release remains the separately recorded
-production baseline until admitted rollout and postcheck.
+Repair deployed 14.09.2026 for LP-BUG-3B291153, LP-BUG-E84BBCA0 and the
+Holmogorova guest report about an800 RUB top-up. Serving release is exact
+05cad9cd1611c014453603475e8e1ba4c953f839, active green/generation4.
+[Production recovery and verification](../deployment/bonus-topup-recovery-2026-09-14.md).
 
 ## Domain facts and payment routing
 
@@ -57,8 +57,11 @@ entries for9 profiles. Its nominal4200 is not automatically the amount due.
 An independent cycle audit established nine unambiguous entries totalling1700
 (eight Battle Pass150 and one valid ten-top-up card500). Five restored card
 entries for Novikov total2500 and overlap historical canceled reward cycles.
-They require the owner's explicit decision on the previously agreed one-time
-compensation, rather than automatic payout or cancellation as ordinary cards.
+The owner explicitly retained the previously agreed2500 one-time compensation;
+it is not represented as five newly proven ten-top-up cycles. All14 existing
+claims/4200 were subsequently confirmed exactly once, with rewardPAID and
+walletCLAIMED. Earlier paid100, two opened cases and eight excluded canceled
+rows were not replayed or restored.
 
 Recovery must have a fresh exact inventory, backup/off-host/restored-copy proof
 and an audited plan. For each accepted item verify tenant/profile/source domain,

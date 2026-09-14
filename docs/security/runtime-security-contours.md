@@ -1,35 +1,37 @@
 # Runtime и security-контуры LeetPlus
 
-Статус: **канонический current-state contract**, актуально на **11.09.2026**.
+Статус: **канонический current-state contract**, актуально на **14.09.2026**.
 
 Фактический перенос на сервер1337 выполнен по отдельному разрешению владельца.
-Новый узел `192.168.1.137`, public `188.234.220.76`, после обновления приложения11.09.2026
-обслуживает exact `bcb0a4d37e5791b04cc4707aa65c35680385836e`: active blue,
-hot rollback green399876, accepted Compose generation3. Installed control и
+Новый узел `192.168.1.137`, public `188.234.220.76`, после обновления приложения 14.09.2026
+обслуживает exact `05cad9cd1611c014453603475e8e1ba4c953f839`: active green,
+hot rollback blue `bcb0a4d3…`, accepted Compose generation4. Installed control и
 dataRelease PG/Redis остаются399876. PostgreSQL16.13 на новом узле — единственный
 primary; физическая схема и оба API — `CURRENT_191/191`, bridge `OFF`, reporting
 `LIVE`. Старый VDS `168.222.143.243` работает только как HTTPS proxy;
 PostgreSQL и четыре старых API/Web unit остановлены и persistently masked,
 оба старых worker timer disabled. Source runtime6097/generation55 — история.
 
-В 12:16:23UTC master, NS5, NS6 и два публичных resolver подтвердили новый IP
+11.09.2026 в 12:16:23UTC master, NS5, NS6 и два публичных resolver подтвердили новый IP
 у root/www/api с TTL300. Сайт восстановлен в11:53:58.865UTC; консервативная
 пауза по maintenance intent —763секунды. Владелец подтвердил новый Telegram
 вход, профиль и личный кабинет. Полные receipts и эксплуатационные ограничения:
 [отчёт переноса](../deployment/docker-migration-completion-2026-09-11.md).
 Последующий выпуск частичной Langame-синхронизации, реальный импорт466 товаров1171
 и новые worker grants: [production checkpoint](../deployment/langame-partial-sync-production-2026-09-11.md).
+Последующий ремонт выплат и прогресса, 14 подтверждённых выплат на 4 200 бонусов:
+[production checkpoint 14.09](../deployment/bonus-topup-recovery-2026-09-14.md).
 
 | Область              | Фактическое состояние                                                                                                                               |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime и admission  | Exactbcb0a4d3; Fast34604304891 и Full34604305010 SUCCESS; app operation722bf10f… terminal, generation3                                              |
+| Runtime и admission  | Exact05cad9cd; Fast34820536009 и Full34820536006 SUCCESS; app operationb3f388e2… terminal, generation4                                              |
 | Процессы             | Docker COMBINED blue/green API/Web, localhost ports; public/corporate guards и worker authority сохраняют разные границы                            |
 | База                 | Единственный PG16.13 primary на1337, CURRENT191; прежние owners и restricted runtime grants сохранены                                               |
 | Data baseline        | Отдельные `dataRelease`/`dataAdmissionSha256`; app rollout не заменяет PG/Redis images                                                              |
 | Сеть                 | Per-slot loopback ingress, internal data bridge, V2 firewall и exact provider policy; Web не получает API/worker egress                             |
 | Часы и ресурсы       | PG/API/Web Europe/Moscow, workers UTC; PG en_US.UTF-8/English search; API4GiB, Web1GiB; daily45min, bonus16min                                      |
-| Workers              | Оба native CANARY PASS, новые TIMER grants на exactbcb/generation3/INTERNALdemo; daily04:30 Yekaterinburg, bonus singleton +30s; API schedulers OFF |
-| Telegram             | Тот же единственный poller/state, свежий heartbeat, empty webhook, monotonic offset и новый user canary PASS                                        |
+| Workers              | Оба native CANARY PASS, новые TIMER grants на exact05/generation4/INTERNALdemo enabled/active; исходные profile bytes восстановлены; API schedulers OFF |
+| Telegram             | Тот же единственный poller/state; natural user canary PASS от11.09. На14.09 новый естественный вход не проверялся; operator diagnostic не заменяет его |
 | HTTPS                | Root/www/api Certbot webroot на1337, сертификат до10.12.2026; native renew dry-run PASS; scoped copy/reload hook                                    |
 | Резервирование       | Ежедневный encrypted backup06:00 Yekaterinburg, Windows pull07:00 и logon; финальная копия и restore evidence указаны в отчёте                      |
 | Host rollback        | После target writes только reverse transfer актуальных данных; старую БД нельзя просто запустить                                                    |
@@ -763,7 +765,7 @@ disabled и удалены из systemd inventory. Помечать такой s
 
 ### Autonomous bonus-ledger worker
 
-Source successor14.09.2026 сохраняет domain-scoped `BALANCE_TOPUP` event и
+Deployed successor14.09.2026 (`05cad9cd…`, generation4) сохраняет domain-scoped `BALANCE_TOPUP` event и
 `GuestGameReward.storeId=NULL`, но fresh authenticated claim атомарно связывает
 клуб выплаты с кошельком. Допустим только revalidated same-tenant/domain клуб
 guest session либо единственный active Store этого domain. Ledger получает
@@ -772,7 +774,7 @@ guest session либо единственный active Store этого domain. 
 старые уже принятые storeless claims восстанавливаются только по отдельному
 аудированному плану с проверкой права на сумму. Отображение миссий использует
 rule activation для покупок/пополнений и game activation для обычного gameplay.
-Это source contract, не заявление о новой production-выкладке. Подробности:
+Native rollout завершён; 14 существующих заявок восстановлены без новых наград/XP. Подробности:
 [`bonus settlement and progress`](../support/bonus-settlement-and-topup-progress.md).
 
 Langame bonus accrual относится только к workers/control-plane contour. В

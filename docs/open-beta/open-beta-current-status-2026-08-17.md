@@ -1,7 +1,7 @@
-# LeetPlus open beta — текущее состояние на 14.09.2026
+# LeetPlus open beta — текущее состояние на 15.09.2026
 
-Deployed successor14.09 устраняет storeless bonus delivery и расхождение
-прогресса накопительной карты. Fresh guest claim связывает wallet/ledger с
+Выпуск 15.09 сохраняет исправления storeless bonus delivery и прогресса
+накопительной карты. Fresh guest claim связывает wallet/ledger с
 проверенным клубом выплаты, сохраняя domain-scoped source event/reward; worker
 повторно проверяет binding. Для покупок/пополнений отображение учитывает ту же
 историю после rule activation, что и квалификация. Подтверждены 14 существующих
@@ -11,8 +11,8 @@ Deployed successor14.09 устраняет storeless bonus delivery и расх�
 [production evidence](../deployment/bonus-topup-recovery-2026-09-14.md).
 
 Сайт перенесён на1337 (`192.168.1.137` / public `188.234.220.76`). Exact
-`05cad9cd1611c014453603475e8e1ba4c953f839` обслуживается active green,
-bluebcb сохранён hot rollback; accepted Compose generation4. Data/control399876
+`b5c03360941e1e5d59fe83f334b8dc29c2eced3b` обслуживается active blue,
+green `05cad9cd1611c014453603475e8e1ba4c953f839` сохранён hot rollback; accepted Compose generation5. Data/control399876
 не заменялись при app rollout. Source VDS6097 теперь
 HTTPS proxy с persistently masked БД/приложениями и disabled worker timers.
 DNS root/www/api подтверждён на master/NS5/NS6/Google/Cloudflare 11.09 в12:16:23UTC.
@@ -26,10 +26,10 @@ dormant split runtime. Данные внешнего пилота и ключ е
 | Поле               | Состояние                                                                                                                       |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision   | Прежние отдельные gates массового открытого запуска сохраняются; controlled onboarding доступен в разрешённых pilot tenant      |
-| Production runtime | Exact05cad9cd, active green + hot rollback bluebcb, generation4 на1337                                                            |
-| Release authority  | Fast34820536009/Full34820536006 SUCCESS, Docker admission3f35e5ab…, ordinary app operationb3f388e2… terminal                    |
+| Production runtime | Exactb5c033, active blue + hot rollback green05cad9cd, generation5 на1337                                                       |
+| Release authority  | Fast34878469493/Full34878469338 PASS, native operation9f793938… all five phases complete and postcheck PASS                     |
 | Prisma schema      | CURRENT191, `20260908180000_external_langame_simple_onboarding`, unfinished0; bridgeOFF/reportingLIVE                           |
-| Workers            | Оба native CANARY PASS; TIMER grants exact05/generation4/INTERNALdemo enabled/active; исходные profiles восстановлены, API schedulers OFF |
+| Workers            | Daily and bonus native CANARY PASS; original profiles restored, daily/bonus TIMER grants enabled on gen5/b5; final off-host backup PASS, deployment closed |
 | User acceptance    | Natural Telegram canary подтверждён11.09; на14.09 corporate и operator guest diagnostic/cross-token PASS, не новый natural login |
 | Tenant acceptance  | Native acceptance exact4 demo Store; customer tenant/store ownership не менялся                                                 |
 | Platform admin     | `/administration` → явный подписанный tenant context; role-aware landing сохраняется                                            |
@@ -37,16 +37,16 @@ dormant split runtime. Данные внешнего пилота и ключ е
 | HTTPS и backup     | Новый cert до10.12.2026, renew dry-run PASS; backup06:00 и Windows07:00/logon                                                   |
 | История            | Runtime6097/generation55 и PREPARED_NOT_SERVING ae0d — завершённые предыдущие checkpoints                                       |
 
-## PR #203 assortment operational dashboard — source-only (14.09.2026)
+## PR #203/#204 assortment operational dashboard — actual rollout (15.09 local / 14.09 UTC)
 
-Это не production deployment и не внешний beta GO. Dated read-only baseline на
-14.09.2026 16:30:52 UTC: active green exact
-`05cad9cd1611c014453603475e8e1ba4c953f839`, generation4, data/control
-`399876`, pending0. Локальные API `191/3564 PASS + 2 todo`, Web build и
-47 synthetic UI checks/G4 PASS подтверждают только candidate, не provider или
-production runtime.
+Фактически введённый runtime — active blue exact
+`b5c03360941e1e5d59fe83f334b8dc29c2eced3b`, generation5; rollback green —
+`05cad9cd1611c014453603475e8e1ba4c953f839`, data/control `399876` сохранены.
+Native operation `9f793938-e989-40a6-abec-b7f2e890192e` / plan `274a3a…`
+завершила пять фаз, postcheck PASS; exact-main Fast `34878469493` и Full
+`34878469338` PASS. Последующий docs/source commit не меняет этот runtime.
 
-Код сохраняет полный выбранный scope: период, клубы, категории и cutoff.
+Runtime сохраняет полный выбранный scope: период, клубы, категории и cutoff.
 Обычный INTERNAL daily обновляет inventory отдельно от QUICK в каждом daily
 run; только недавний successful AUTO всех active domains подавляет update на
 1h, а 36h — отдельный stale threshold. Inventory/CATALOG не продвигают sales
@@ -56,9 +56,41 @@ cursor. Proven session Store binding сохраняет historical timestamps; U
 reward/event replay или external-tenant GO; contract:
 [assortment metric contract](../assortment-dashboard-metric-contract.md).
 
-Перед runtime effect нужны отдельные exact-main Fast и Full gates, native plan,
-backup/rehearsal и worker acceptance; текущий PR head не является deployment
-admission.
+Локальные API `3564 PASS + 2 todo`, PG15 и UI47 дополняются restored-copy API/Web
+и scoped assortment parity PASS обоих slots для 30-day scope 15.08–13.09 с fixed
+stock cutoff. Daily CANARY `247537d8…` PASS 14.09 20:34:04 UTC: 3 AUTO INVENTORY
+jobs, 3 domains, 4 Stores, 2117 observations, salesCount0; `DailyDataCoverage` и
+`BusinessSnapshot` не менялись, source cursors остались 13.09. UTC offset0 был
+временно выбран для уже подтверждённого 13.09 во время локальной полуночи оператора;
+original c82 profile restored and gen5 daily TIMER enabled.
+
+Незакрытый риск надёжности: неблокирующий exclusive lock для network refresh
+может быть вытеснен worker shared lock; ipset TTL3600 истёк в 19:43 UTC, а refresh
+в 19:58 UTC восстановил policy. Причина убедительно подтверждена, но raw errno нет;
+после fence PASS сохранены только acknowledged bonus failed metadata, без worker
+replay или network-policy change. Bonus CANARY PASS 14.09 20:43:32 UTC:
+grant `4fd965f3-4d77-4eca-bb97-f5777f2cc654`, receipt
+`5a6baf75641319ad134bc932421855cda4595503fb992d3fae546b962bcffda3`; original
+bonus profile SHA `ecb5e36cf40a990225cb5cfcbbf6b50cb198f1d8ccec25ddd791e35fafee6a19`
+restored, bonus TIMER grant `b3850ae9-8348-4cb5-9d12-0b88b6459339` enabled on
+gen5/b5 alongside daily TIMER `5b607ca5-034a-4de4-8c6c-9147730b9f5f`.
+Bonus TIMER actual receipts PASS 20:50:20, 20:51:30 and 20:52:44 UTC; last receipt
+`84032600-ce3d-4941-9c43-4ac2df60c7c4` has SHA
+`eda9e56237595d1dcbe7efff8875c8d3b97b79cc2e00aae644e43ab2fe22cb73`.
+`final-runtime-01` read-only PASS 20:53:56 UTC подтвердил primary CURRENT191,
+unfinished0, 4 demo Stores, 6 healthy production containers и exact blue gen5/b5.
+Disposable rehearsal остановил 6 exact containers в 20:55:28 UTC; data/evidence
+сохранены, production IDs и active runtime не менялись. Native final backup PASS:
+`backup-20260914T205648Z.lpbackup` создан 2026-09-14T20:56:48.501168+00:00,
+размер `4016497355` bytes, encrypted SHA
+`c2f8f7afdb583466b317641a709d2f9825fcd84b4e96764a170a8dd35da3ac95`, plaintext SHA
+`a4c40cd1842b18a0cc834813eb05dff94bbaa5d7838f240ad6deecfb1b6ba807`.
+Final off-host backup PASS 21:02:00.729 UTC в `final-offhost-backup.json`:
+backup `c2f8f7af…`, `4016497355` bytes, captured 20:56:48 UTC; source blue b5/gen5,
+rollback green05, data399 и original daily/bonus profiles authenticated. Dump
+`2391931050` bytes SHA `7fe9df167bde073d84634cd91e394cb4b2d15ed3a6ef2ff828e7ba859bddd0b1`;
+globals `2745` bytes SHA `5322bf3b9e780ec4e6532736738a564337ccaa4cec94ce5c7f5332866b3a5a20`.
+Retention и repeat restore не выполнялись; deployment fully closed.
 
 Actual release, контрольные суммы, final backup/restore, DNS и границы возврата:
 [отчёт переноса](../deployment/docker-migration-completion-2026-09-11.md).

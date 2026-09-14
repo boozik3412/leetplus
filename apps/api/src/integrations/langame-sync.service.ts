@@ -646,14 +646,14 @@ export class LangameSyncService {
             where: { id: source.id },
             data: {
               lastSyncedAt: new Date(),
-              ...(mode === IntegrationSyncMode.CATEGORIES
-                ? {}
-                : {
+              ...(shouldSyncSales
+                ? {
                     lastSyncedDate: this.maxSyncedDate(
                       source.lastSyncedDate ?? null,
                       period.toDate,
                     ),
-                  }),
+                  }
+                : {}),
             },
           });
         await this.prisma.integrationSyncJob.update({

@@ -21,3 +21,5 @@
 | R15 | покрытие частичных расчётов | in-ticket | Согласованный план, вопросов нет | spec.md → 01,02,04 |
 | R16 | дату остатков | in-ticket | Согласованный план, вопросов нет | spec.md → 01,02,04 |
 | R17 | Существующие показатели роста продаж сохранить | in-ticket | Согласованный план, вопросов нет | spec.md → 02,04 |
+| D01 | Обнаружено: inferred Store влияет на выбор timezone существующего parser | in-ticket | Сохранить время фактов,R03 | spec.md D01 → 03 |
+| D02 | Обнаружено: yesterday performance cutoff скрывает свежий today goods snapshot | in-ticket | Разделить stock asOf и demandTo,R01/R05/R13/R16 | spec.md D02 → 01,02,03,04 |

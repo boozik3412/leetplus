@@ -16,6 +16,8 @@ R13.1: все новые числовые карточки кликабельн�
 
 ## Правила исполнения
 
+- D01: session Store resolution не меняет historical timestamps/date parserTZ. D02: stock `asOf` отдельно от `demandTo` (default performance `period.to`); defaultсклад актуальный, demandзакрытыйпериод. ReportlinkscarryasOf+from/to.
+
 - Рабочий repo: C:/Users/ALIENWARE/Documents/New project/leetplus-assortment-action-center, branch codex/assortment-operational-dashboard-20260914, source base1907930c. Все агенты используют этот checkout; свои ветки/worktrees не создавать.
 - Stack Nest11/Prisma6/Next16.2.4/React19.2.4/pnpm10.33.2. Существующие зависимости установлены. Ничего не устанавливать без сообщения root.
 - Корневой AGENTS.md и scoped apps/web/AGENTS.md обязательны. Для integrations полностью читать docs/security/runtime-security-contours.md.
@@ -24,3 +26,17 @@ R13.1: все новые числовые карточки кликабельн�
 - Не менять production, runtime-control, schema/grants, auth/guest game/ledger. Никаких секретов в выводе/файлах. Только root/согласованная задача выполняют production handoff.
 - Тесты и код выполняют агенты; root ведёт состояние/контракты/проверки/коммиты. Не коммитить самостоятельно. Не трогать .autopilot/AGENTS/global package manifests вне своей зоны; сообщать новые интерфейсы root.
 - Отсутствующие source факты остаются unknown; не присваивать multi-club store наугад. Товарные операции не чеки.
+
+## Из01 — общий engine (на review)
+
+- `apps/api/src/common/assortment-health.ts`: `buildAssortmentHealth(input: AssortmentHealthInput): AssortmentHealth`.
+- Input: `asOf; demandTo?; period; stores; products; inventorySnapshots; sales; salesCoverage; priceConfigurations; exclusions; writeOffs`.
+- `AssortmentHealthRow`: inventory,demand21d,price,noSales,frozenValue,turnoverDays,excessQuantity,writeOff*,risk,actionable.
+- `AssortmentMetric<T>`: value,state,reason,coverage,asOf. Точные types читать измодуля; WebDTO совместим с JSON serialization.
+- `apps/api/src/common/guest-session-store.ts`: `resolveGuestSessionStore(input: ResolveGuestSessionStoreInput): GuestSessionStoreResolution`. Принимать полный tenant active topology, затемфильтроватьpermissions; missingclub shared-domain остаётсяambiguous.
+- `asOf` inventory отдельно от `demandTo` (default period.to). Price configuration требуетtenant/domain/club+updatedAt; staleprice не точные деньги.
+- Targeted helpers:6+1tests PASS, API build-tsconfig typecheck PASS. Root full suite/reviews выполняютсяпередcommit.
+
+- Пользователь явно разрешил локальный Chromium через Playwright дляdesktop/narrow QA после CUA auth-token blocker. Existing npx @playwright/cli0.1.19 and installed Chromium доступны; новые browserdeps не нужны.
+
+-01 repair: `excessStockDays?: number` defaultexisting30; `asOf` bounds allfactwindows,raw transactionprice requires confirmed salescoverage; config newest<=asOf; aggregate staleremainsstale,unknownnosales retainedinvaluationcoverage. Tests9+1,lint,tscPASS.

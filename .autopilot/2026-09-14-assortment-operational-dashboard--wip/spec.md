@@ -41,6 +41,9 @@ R13.1: все новые числовые карточки кликабельн�
 
 ## Реализация и ограничения
 
+- D01 (обнаружено в подготовке01,R03): existing session import выбирает timezone через найденный Store. Новая inferredbinding должна быть отделена от date parsing, чтобы не сдвигать уже сохранённые времена; origin и timestamps остаются прежними. Новый timezone repair не является частью дашборда.
+- D02 (обнаружено01,R01/R05/R13/R16): endpoint goods отдаёт текущий склад. Для default dashboard full-day вчерашние продажи не должны отбрасывать сегодняшний реальный снимок. Engine принимает `asOf` для stock и отдельный `demandTo` (default performance `period.to`) для спроса/no-sales; API default использует актуальный stock cutoff, исторический явный `asOf` ограничивает будущее. Ссылки переносят оба якоря, возле KPI видна фактическая дата снимка.
+
 - Existing NestJS/Prisma/Next16/React19; существующие Phosphor, Tailwind и стили дашборда. Не строим новый дизайн/прототип.
 - UI проверяется на desktop и узком экране, в пустом/partial/stale/полном состояниях. Keyboard/focus и раскрытия доступны. При tool blocker проверка не объявляется завершённой.
 - Одна свежая конфигурация не заменяет старые цены всех остальных клубов. Область pricing всегда tenant+domain+club+product.

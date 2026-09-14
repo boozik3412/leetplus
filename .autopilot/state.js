@@ -11,7 +11,7 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "skillDir": "C:\\Users\\ALIENWARE\\.codex\\skills\\autopilot",
   "startedAt": "2026-09-14T15:05:31+05:00",
-  "updatedAt": "2026-09-14T15:15:18+05:00",
+  "updatedAt": "2026-09-14T16:18:45+05:00",
   "finishedAt": null,
   "stages": [
     {
@@ -51,7 +51,8 @@ window.STATE =
     },
     {
       "id": "review",
-      "status": "pending"
+      "status": "active",
+      "startedAt": "2026-09-14T15:38:08+05:00"
     },
     {
       "id": "final",
@@ -90,11 +91,24 @@ window.STATE =
         "apps/api/src/common/assortment-health*",
         "apps/api/src/common/guest-session-store*"
       ],
-      "status": "in-progress",
+      "status": "review",
       "retries": 0,
-      "repairs": 0,
+      "repairs": 1,
       "handoffs": 0,
-      "startedAt": "2026-09-14T15:15:18+05:00"
+      "startedAt": "2026-09-14T15:15:18+05:00",
+      "repairFindings": [
+        "transaction price requires confirmed coverage",
+        "stale inventory cannot aggregate AVAILABLE",
+        "unknown no-sales retained in valuation coverage",
+        "explicit excess threshold",
+        "all historical facts bounded by asOf",
+        "latest valid configuration selection",
+        "targeted lint"
+      ],
+      "tests": {
+        "passed": 10,
+        "failed": 0
+      }
     },
     {
       "id": "02",
@@ -183,7 +197,12 @@ window.STATE =
     }
   ],
   "singlePass": null,
-  "tests": null,
+  "tests": {
+    "passed": 3518,
+    "failed": 0,
+    "todo": 2,
+    "suites": 190
+  },
   "debt": {
     "placeholders": [],
     "assumptions": [],
@@ -198,8 +217,8 @@ window.STATE =
   },
   "concerns": [],
   "reviewers": {
-    "manifestSpec": null,
-    "craft": null
+    "manifestSpec": "/root/spec_coverage",
+    "craft": "/root/craft_review"
   },
   "blind": null
 }

@@ -1,6 +1,34 @@
 # Операционный дашборд ассортимента
 
-Документ описывает исходный кандидат от 14 сентября 2026 года. Он не подтверждает состояние production и не заменяет отдельный rollout handoff.
+Документ описывает контракт, фактически развёрнутый 15 сентября 2026 года local time
+(14 сентября UTC), и не заменяет отдельный rollout handoff. Runtime fact — active blue
+`b5c03360941e1e5d59fe83f334b8dc29c2eced3b`, generation5, с rollback green
+`05cad9cd1611c014453603475e8e1ba4c953f839`; data/control `399876` retained.
+Последующий source/docs commit не меняет этот runtime.
+
+## Подтверждённое состояние rollout
+
+Native operation `9f793938-e989-40a6-abec-b7f2e890192e` / plan `274a3a…` завершила
+все пять phases и native postcheck PASS; exact-main Fast `34878469493` и Full
+`34878469338` PASS. Local API `3564 PASS + 2 todo`, PG15 и UI47 дополняются
+restored-copy API/Web и scoped assortment parity PASS обоих slots для периода
+15.08–13.09 с fixed stock cutoff.
+
+Daily CANARY `247537d8…` PASS 14.09 20:34:04 UTC: 3 AUTO INVENTORY jobs для
+3 domains/4 Stores дали 2117 observations, salesCount0, без изменений
+`DailyDataCoverage`/`BusinessSnapshot`; source cursors остались 13.09. Временный
+UTC offset0 выбрал уже подтверждённый 13.09 during operator local midnight;
+original c82 profile restored and gen5 daily TIMER enabled. Bonus canary не
+входит в этот metric contract: он PASS 14.09 20:43:32 UTC. Final off-host backup
+PASS 21:02:00.729 UTC подтвердил source blue b5/gen5, rollback green05, data399
+и original daily/bonus profiles; deployment fully closed.
+
+Production UI `16/16 PASS` на ширинах 390/944/1440 с screenshots: OOS `91`,
+LOW `14`, no-sales `195` при coverage `97.1%` и выбранном no-sales window 21 days;
+write-offs недоступны и так отображены, без подмены нулём. Money card `203771` и
+excess `535839` имеют coverage `0%` для current freshness и historical cost на
+03.09: они не являются подтверждёнными текущими valuations и должны оставаться
+явно qualified в UI.
 
 ## Область расчёта
 

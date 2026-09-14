@@ -2,7 +2,7 @@ window.STATE =
 {
   "slug": "assortment-operational-dashboard",
   "dir": "2026-09-14-assortment-operational-dashboard",
-  "title": "Дашборд ассортимента: исходники приняты",
+  "title": "Дашборд ассортимента: опубликован на production",
   "mode": "semi",
   "depth": "normal",
   "polish": null,
@@ -11,7 +11,7 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "skillDir": "C:\\Users\\ALIENWARE\\.codex\\skills\\autopilot",
   "startedAt": "2026-09-14T15:05:31+05:00",
-  "updatedAt": "2026-09-14T21:21:56+05:00",
+  "updatedAt": "2026-09-15T02:03:49.529501+05:00",
   "finishedAt": "2026-09-14T21:21:56+05:00",
   "stages": [
     {
@@ -344,5 +344,17 @@ window.STATE =
     "uiChecks": 47,
     "productionVerified": false
   },
-  "scope": "source implementation and local acceptance; production uses separate release controls"
-}
+  "scope": "source implementation and local acceptance; production uses separate release controls",
+  "production": {
+    "status": "deployed",
+    "releaseSha": "b5c03360941e1e5d59fe83f334b8dc29c2eced3b",
+    "activeSlot": "blue",
+    "generation": 5,
+    "operationId": "9f793938-e989-40a6-abec-b7f2e890192e",
+    "browserChecks": "16/16 PASS",
+    "inventoryObservations": 2117,
+    "stores": 4,
+    "finalOffhostBackup": "PASS",
+    "acceptedAt": "2026-09-15T02:02:00+05:00"
+  }
+};

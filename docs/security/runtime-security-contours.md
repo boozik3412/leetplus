@@ -1,12 +1,12 @@
 # Runtime и security-контуры LeetPlus
 
-Статус: **канонический current-state contract**, актуально на **14.09.2026**.
+Статус: **канонический current-state contract**, актуально на **15.09.2026**.
 
 Фактический перенос на сервер1337 выполнен по отдельному разрешению владельца.
-Новый узел `192.168.1.137`, public `188.234.220.76`, после обновления приложения 14.09.2026
-обслуживает exact `05cad9cd1611c014453603475e8e1ba4c953f839`: active green,
-hot rollback blue `bcb0a4d3…`, accepted Compose generation4. Installed control и
-dataRelease PG/Redis остаются399876. PostgreSQL16.13 на новом узле — единственный
+Новый узел `192.168.1.137`, public `188.234.220.76`, после rollout 15.09.2026
+обслуживает exact `b5c03360941e1e5d59fe83f334b8dc29c2eced3b`: active blue,
+hot rollback green `05cad9cd1611c014453603475e8e1ba4c953f839`, accepted Compose
+generation5. Installed control и dataRelease PG/Redis остаются399876. PostgreSQL16.13 на новом узле — единственный
 primary; физическая схема и оба API — `CURRENT_191/191`, bridge `OFF`, reporting
 `LIVE`. Старый VDS `168.222.143.243` работает только как HTTPS proxy;
 PostgreSQL и четыре старых API/Web unit остановлены и persistently masked,
@@ -24,28 +24,29 @@ PostgreSQL и четыре старых API/Web unit остановлены и p
 
 | Область              | Фактическое состояние                                                                                                                               |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime и admission  | Exact05cad9cd; Fast34820536009 и Full34820536006 SUCCESS; app operationb3f388e2… terminal, generation4                                              |
+| Runtime и admission  | Exactb5c033; Fast34878469493 и Full34878469338 PASS; operation9f793938… complete all five phases, native postcheck PASS, generation5               |
 | Процессы             | Docker COMBINED blue/green API/Web, localhost ports; public/corporate guards и worker authority сохраняют разные границы                            |
 | База                 | Единственный PG16.13 primary на1337, CURRENT191; прежние owners и restricted runtime grants сохранены                                               |
 | Data baseline        | Отдельные `dataRelease`/`dataAdmissionSha256`; app rollout не заменяет PG/Redis images                                                              |
 | Сеть                 | Per-slot loopback ingress, internal data bridge, V2 firewall и exact provider policy; Web не получает API/worker egress                             |
 | Часы и ресурсы       | PG/API/Web Europe/Moscow, workers UTC; PG en_US.UTF-8/English search; API4GiB, Web1GiB; daily45min, bonus16min                                      |
-| Workers              | Оба native CANARY PASS, новые TIMER grants на exact05/generation4/INTERNALdemo enabled/active; исходные profile bytes восстановлены; API schedulers OFF |
+| Workers              | Daily and bonus native CANARY PASS; original profiles restored, daily/bonus TIMER grants enabled on gen5/b5; final off-host backup PASS, deployment closed |
 | Telegram             | Тот же единственный poller/state; natural user canary PASS от11.09. На14.09 новый естественный вход не проверялся; operator diagnostic не заменяет его |
 | HTTPS                | Root/www/api Certbot webroot на1337, сертификат до10.12.2026; native renew dry-run PASS; scoped copy/reload hook                                    |
 | Резервирование       | Ежедневный encrypted backup06:00 Yekaterinburg, Windows pull07:00 и logon; финальная копия и restore evidence указаны в отчёте                      |
 | Host rollback        | После target writes только reverse transfer актуальных данных; старую БД нельзя просто запустить                                                    |
 | Внешний beta и split | Миграция не выдаёт внешний beta GO и не активирует dormant physical split; отдельные tenant/provider gates сохраняются                              |
 
-### PR #203 assortment operational dashboard — source-only, 14.09.2026
+### PR #203/#204 assortment operational dashboard — actual rollout, 15.09.2026 local / 14.09.2026 UTC
 
-Это source candidate, а не deployment admission: read-only baseline на
-14.09.2026 16:30:52 UTC — active green exact
-`05cad9cd1611c014453603475e8e1ba4c953f839`, generation4, data/control
-`399876`, pending0. Локальные API `191/3564 PASS + 2 todo`, Web build и
-47 synthetic UI checks/G4 PASS не являются provider или production evidence.
+Фактически введённый runtime — active blue exact
+`b5c03360941e1e5d59fe83f334b8dc29c2eced3b`, generation5; rollback green —
+`05cad9cd1611c014453603475e8e1ba4c953f839`, data/control `399876` retained.
+Native operation `9f793938-e989-40a6-abec-b7f2e890192e` с plan `274a3a…`
+завершила все пять phases и native postcheck PASS; exact-main Fast `34878469493`
+и Full `34878469338` PASS. Следующий source/docs commit не меняет этот runtime.
 
-Candidate сохраняет полный выбранный scope: период, клубы, категории и cutoff.
+Runtime сохраняет полный выбранный scope: период, клубы, категории и cutoff.
 Обычный INTERNAL daily обновляет inventory отдельно от QUICK в каждом daily
 run; только недавний successful AUTO всех active domains подавляет update на
 1h, а 36h — отдельный stale threshold. Inventory/CATALOG не двигают sales
@@ -56,9 +57,41 @@ worker placement, role или provider-egress effects; нет historical backfil
 reward/event replay либо external-tenant GO. Метрики и границы DTO:
 [assortment metric contract](../assortment-dashboard-metric-contract.md).
 
-Перед любым runtime effect требуются отдельные exact-main Fast и Full gates,
-native plan, backup/rehearsal и worker acceptance; текущий PR head не служит
-deployment proof.
+Локальные API `3564 PASS + 2 todo`, PG15 и UI47 дополняются restored-copy API/Web
+и scoped assortment parity PASS на обоих slots для 30-day scope
+15.08–13.09 с fixed stock cutoff. Native daily CANARY `247537d8…` PASS
+14.09 20:34:04 UTC: 3 AUTO INVENTORY jobs, 3 domains, 4 Stores, 2117 observations,
+salesCount0, без изменений `DailyDataCoverage`/`BusinessSnapshot`; source cursors
+остались 13.09. Временный UTC offset0 выбрал уже подтверждённый 13.09 во время
+локальной полуночи оператора, после чего восстановлен original c82 profile и enabled gen5 daily TIMER.
+
+Незакрытый риск надёжности: nonblocking exclusive network-refresh lock может
+быть вытеснен worker shared lock; ipset TTL3600 истёк в 19:43 UTC, а refresh
+в 19:58 UTC восстановил policy. Причина убедительно подтверждена, raw errno не
+зафиксирован; после fence PASS сохранены только acknowledged bonus failed metadata,
+без worker replay или network-policy change. Bonus CANARY PASS 14.09 20:43:32 UTC:
+grant `4fd965f3-4d77-4eca-bb97-f5777f2cc654`, receipt
+`5a6baf75641319ad134bc932421855cda4595503fb992d3fae546b962bcffda3`; original
+bonus profile SHA `ecb5e36cf40a990225cb5cfcbbf6b50cb198f1d8ccec25ddd791e35fafee6a19`
+restored, bonus TIMER grant `b3850ae9-8348-4cb5-9d12-0b88b6459339` enabled on
+gen5/b5 alongside daily TIMER `5b607ca5-034a-4de4-8c6c-9147730b9f5f`.
+Bonus TIMER actual receipts PASS 20:50:20, 20:51:30 and 20:52:44 UTC; last receipt
+`84032600-ce3d-4941-9c43-4ac2df60c7c4` has SHA
+`eda9e56237595d1dcbe7efff8875c8d3b97b79cc2e00aae644e43ab2fe22cb73`.
+`final-runtime-01` read-only PASS 20:53:56 UTC подтвердил primary CURRENT191,
+unfinished0, 4 demo Stores, 6 healthy production containers и exact blue gen5/b5.
+Disposable rehearsal остановил 6 exact containers в 20:55:28 UTC; data/evidence
+сохранены, production IDs и active runtime не менялись. Native final backup PASS:
+`backup-20260914T205648Z.lpbackup` создан 2026-09-14T20:56:48.501168+00:00,
+размер `4016497355` bytes, encrypted SHA
+`c2f8f7afdb583466b317641a709d2f9825fcd84b4e96764a170a8dd35da3ac95`, plaintext SHA
+`a4c40cd1842b18a0cc834813eb05dff94bbaa5d7838f240ad6deecfb1b6ba807`.
+Final off-host backup PASS 21:02:00.729 UTC в `final-offhost-backup.json`:
+backup `c2f8f7af…`, `4016497355` bytes, captured 20:56:48 UTC; source blue b5/gen5,
+rollback green05, data399 и original daily/bonus profiles authenticated. Dump
+`2391931050` bytes SHA `7fe9df167bde073d84634cd91e394cb4b2d15ed3a6ef2ff828e7ba859bddd0b1`;
+globals `2745` bytes SHA `5322bf3b9e780ec4e6532736738a564337ccaa4cec94ce5c7f5332866b3a5a20`.
+Retention и repeat restore не выполнялись; deployment fully closed.
 
 TLS использует существующий Nginx webroot `/srv/leetplus/acme`. Для доступа
 только Nginx группа `www-data` получает traverse на `/srv/leetplus`

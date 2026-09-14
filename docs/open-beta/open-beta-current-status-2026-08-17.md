@@ -1,5 +1,14 @@
 # LeetPlus open beta — текущее состояние на 11.09.2026
 
+Source successor14.09 готовит устранение storeless bonus delivery и расхождения
+прогресса накопительной карты. Fresh guest claim связывает wallet/ledger с
+проверенным клубом выплаты, сохраняя domain-scoped source event/reward; worker
+повторно проверяет binding. Для покупок/пополнений отображение учитывает ту же
+историю после rule activation, что и квалификация. Runtime/schema/worker grants
+ниже остаются фактической production baseline до отдельного admitted rollout.
+Инцидентные выплаты требуют точной сверки существующих записей и отдельного
+учёта согласованной компенсации: [контракт](../support/bonus-settlement-and-topup-progress.md).
+
 Сайт перенесён на1337 (`192.168.1.137` / public `188.234.220.76`). Exact
 `bcb0a4d37e5791b04cc4707aa65c35680385836e` обслуживается active blue,
 green399876 сохранён hot rollback; accepted Compose generation3. Data/control399876

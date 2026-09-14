@@ -50,6 +50,10 @@ import {
   guestGameRewardIsBattlePassCompletionMarker,
 } from '../guest-gamification/guest-reward-wallet-rules';
 import { acquireGuestGameLootBoxRuleLock } from '../guest-gamification/guest-game-loot-box-lock';
+import {
+  GUEST_BONUS_SETTLEMENT_BINDING,
+  resolveBonusSettlementStore,
+} from '../guest-gamification/guest-bonus-settlement';
 import { SecretEncryptionService } from '../integrations/secret-encryption.service';
 import { GuestIdentityResolverService } from '../integrations/guest-identity-resolver.service';
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
@@ -4623,6 +4627,7 @@ export class GuestPortalService {
       payload.tenantId,
       profileId,
       walletItemId,
+      payload.storeId,
     );
     if (!accepted.rewardId || !accepted.materialize) {
       return;
@@ -4711,6 +4716,7 @@ export class GuestPortalService {
     tenantId: string,
     profileId: string,
     walletItemId: string,
+    claimStoreId: string | null = null,
   ): Promise<{ rewardId: string | null; materialize: boolean }> {
     const maxAttempts = 4;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -4733,12 +4739,15 @@ export class GuestPortalService {
                 eventId: true,
                 claimXpDelta: true,
                 expiresAt: true,
+                storeId: true,
                 reward: {
                   select: {
                     id: true,
                     status: true,
                     rewardType: true,
                     rewardAmount: true,
+                    storeId: true,
+                    externalDomain: true,
                     claimRequired: true,
                     deliveryRequestedAt: true,
                     claimExpiresAt: true,
@@ -4817,6 +4826,25 @@ export class GuestPortalService {
               const requestedAt = firstClaim
                 ? now
                 : reward.deliveryRequestedAt!;
+              const needsDelivery =
+                Number(reward.rewardAmount) > 0 &&
+                guestGameRewardUsesBonusLedger(reward.rewardType);
+              const needsSettlement = needsDelivery && reward.storeId === null;
+              // Only a fresh authenticated claim may establish routing. Old
+              // unbound accepted claims require an audited incident repair.
+              if (needsSettlement && !firstClaim && !item.storeId) {
+                throw new BadRequestException(
+                  'Для этой ранее запрошенной награды требуется восстановить клуб начисления. Обратитесь в поддержку.',
+                );
+              }
+              const settlementStoreId = needsSettlement
+                ? await resolveBonusSettlementStore(tx, {
+                    tenantId,
+                    externalDomain: reward.externalDomain,
+                    claimStoreId,
+                    existingStoreId: item.storeId,
+                  })
+                : null;
               const lockedReward = await tx.guestGameReward.updateMany({
                 where: {
                   id: reward.id,
@@ -4837,9 +4865,6 @@ export class GuestPortalService {
                 );
               }
 
-              const needsDelivery =
-                Number(reward.rewardAmount) > 0 &&
-                guestGameRewardUsesBonusLedger(reward.rewardType);
               if (needsDelivery) {
                 await this.prepareRewardWalletDeliveryClaim(
                   tx,
@@ -4858,16 +4883,45 @@ export class GuestPortalService {
                     kind: 'REWARD',
                     entitlementId: null,
                     rewardId: reward.id,
+                    ...(needsSettlement ? { storeId: item.storeId } : {}),
                     ...(firstClaim ? { expiresAt: { gt: now } } : {}),
                   },
                   data: needsDelivery
-                    ? { status: 'PROCESSING', claimedAt: null }
+                    ? {
+                        status: 'PROCESSING',
+                        claimedAt: null,
+                        ...(settlementStoreId
+                          ? { storeId: settlementStoreId }
+                          : {}),
+                      }
                     : { status: 'CLAIMED', claimedAt: now },
                 });
               if (walletUpdated.count !== 1) {
                 throw new NotFoundException(
                   'Состояние награды изменилось. Обновите игровой модуль.',
                 );
+              }
+              if (settlementStoreId && firstClaim) {
+                await tx.guestGameAuditEvent.create({
+                  data: {
+                    tenantId,
+                    profileId,
+                    storeId: settlementStoreId,
+                    entityType: 'REWARD_WALLET_ITEM',
+                    entityId: item.id,
+                    action: 'BONUS_SETTLEMENT_BOUND',
+                    status: 'SUCCESS',
+                    reasonCode: 'DOMAIN_SCOPED_REWARD',
+                    happenedAt: now,
+                    payload: {
+                      rewardId: reward.id,
+                      externalDomain: reward.externalDomain,
+                      claimStoreId,
+                      settlementStoreId,
+                      settlementBinding: GUEST_BONUS_SETTLEMENT_BINDING,
+                    },
+                  },
+                });
               }
 
               await tx.guestGameRewardEffect.updateMany({
@@ -13564,6 +13618,18 @@ export class GuestPortalService {
       missions.map((mission) => [mission.id, mission]),
     );
     const missionIds = [...missionById.keys()];
+    const missionHistoryStarts = missions.map(
+      (mission) =>
+        [
+          mission.id,
+          missionProgressHistoryStart(mission, activatedAt),
+        ] as const,
+    );
+    const missionHistoryStartById = new Map(missionHistoryStarts);
+    const earliestMissionHistoryStart = missionHistoryStarts.reduce(
+      (earliest, [, value]) => (value < earliest ? value : earliest),
+      missionHistoryStarts[0][1],
+    );
     const eventScope: Prisma.GuestGameEventWhereInput[] = [
       ...(guest ? [{ guestId: guest.id }] : []),
       ...(profile ? [{ profileId: profile.id }] : []),
@@ -13577,7 +13643,7 @@ export class GuestPortalService {
       this.prisma.guestGameEvent.findMany({
         where: {
           tenantId,
-          occurredAt: { gte: activatedAt },
+          occurredAt: { gte: earliestMissionHistoryStart },
           OR: eventScope,
         },
         select: {
@@ -13593,7 +13659,7 @@ export class GuestPortalService {
         where: {
           tenantId,
           missionId: { in: missionIds },
-          qualifiedAt: { gte: activatedAt },
+          qualifiedAt: { gte: earliestMissionHistoryStart },
           OR: rewardScope,
           status: { not: 'CANCELED' },
         },
@@ -13614,7 +13680,13 @@ export class GuestPortalService {
       }
 
       const mission = missionById.get(row.missionId);
-      if (!mission || !dateWithinMission(row.qualifiedAt, mission)) {
+      const historyStart = missionHistoryStartById.get(row.missionId);
+      if (
+        !mission ||
+        !historyStart ||
+        row.qualifiedAt < historyStart ||
+        !dateWithinMission(row.qualifiedAt, mission)
+      ) {
         return;
       }
 
@@ -13633,6 +13705,7 @@ export class GuestPortalService {
     missions.forEach((mission) => {
       const target = guestPortalMissionProgressTarget(mission);
       const reward = jsonRecord(jsonRecord(mission.conditions).reward);
+      const historyStart = missionHistoryStartById.get(mission.id)!;
       const metricProgress = evaluateGuestGameProgress(
         {
           triggerKind: mission.triggerKind,
@@ -13650,7 +13723,7 @@ export class GuestPortalService {
           repeatCompletedAt: latestRewardAt.get(mission.id) ?? null,
         },
         null,
-        progressEvents,
+        progressEvents.filter((event) => event.occurredAt >= historyStart),
       );
       const current = metricProgress.repeatCycleReset
         ? metricProgress.applicable
@@ -23762,6 +23835,34 @@ function portalMissionProgressStart(mission: {
   return mission.periodFrom && mission.periodFrom > safeActivatedAt
     ? mission.periodFrom
     : safeActivatedAt;
+}
+
+function missionProgressHistoryStart(
+  mission: {
+    createdAt: Date;
+    definitionVersion: number;
+    triggerKind: string;
+    conditions: Prisma.JsonValue;
+    periodFrom: Date | null;
+  },
+  gameActivatedAt: Date,
+) {
+  const ruleActivatedAt =
+    portalMissionProgressStart(mission) ?? mission.createdAt;
+  const taskType =
+    missionTaskTypeFromConditions(
+      jsonRecord(mission.conditions),
+      mission.triggerKind,
+    ) ?? mission.triggerKind;
+  const permitsPreGameHistory = [
+    'PRODUCT_PURCHASE',
+    'BALANCE_TOPUP',
+    'BALANCE_TOP_UP',
+  ].includes(taskType.toUpperCase());
+
+  return permitsPreGameHistory || ruleActivatedAt >= gameActivatedAt
+    ? ruleActivatedAt
+    : gameActivatedAt;
 }
 
 function guestGameDebugJson(payload: Record<string, unknown>) {

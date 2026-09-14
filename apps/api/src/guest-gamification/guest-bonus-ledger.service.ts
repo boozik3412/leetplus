@@ -30,6 +30,11 @@ import {
   evaluateLegacyGuestGameDeliveryProtocolGate,
   isLegacyGuestGameProviderDeliveryChannel,
 } from './guest-game-delivery-protocol-gate';
+import {
+  GUEST_BONUS_SETTLEMENT_BINDING,
+  bonusSettlementStoreMatches,
+  bonusSettlementStoreSelect,
+} from './guest-bonus-settlement';
 
 const langameBalancePhonePath = '/guests/balance/phone';
 const langameBalancePhoneMasterPath = `/master_api${langameBalancePhonePath}`;
@@ -409,7 +414,6 @@ export class GuestBonusLedgerService {
       where: {
         tenantId: user.tenantId,
         status: 'APPROVED',
-        ...(storeId ? { storeId } : {}),
         ...(rewardId ? { id: rewardId } : {}),
         rewardAmount: { gt: 0 },
         OR: rewardTypes.map((type) => ({
@@ -420,6 +424,26 @@ export class GuestBonusLedgerService {
             now,
             this.prisma.guestGameReward.fields.claimExpiresAt,
           ),
+          ...(storeId
+            ? [
+                {
+                  OR: [
+                    { storeId },
+                    {
+                      storeId: null,
+                      walletItems: {
+                        some: {
+                          tenantId: user.tenantId,
+                          storeId,
+                          kind: 'REWARD',
+                          status: 'PROCESSING',
+                        },
+                      },
+                    },
+                  ],
+                },
+              ]
+            : []),
         ],
         bonusLedgerEntries: {
           none: {
@@ -440,6 +464,21 @@ export class GuestBonusLedgerService {
         rewardAmount: true,
         rewardLabel: true,
         rewardCode: true,
+        walletItems: {
+          where: {
+            tenantId: user.tenantId,
+            kind: 'REWARD',
+            status: 'PROCESSING',
+          },
+          select: {
+            id: true,
+            tenantId: true,
+            profileId: true,
+            storeId: true,
+            store: { select: bonusSettlementStoreSelect },
+          },
+          take: 2,
+        },
         guest: {
           select: {
             externalProvider: true,
@@ -492,6 +531,34 @@ export class GuestBonusLedgerService {
         this.resolveEncryptedPhone(reward.guest) ??
         this.resolveEncryptedPhone(reward.profile);
       const balanceType = langameBalanceTypeForRewardType(reward.rewardType);
+      const settlementWallets = (reward.walletItems ?? []).filter(
+        (wallet) =>
+          wallet.tenantId === user.tenantId &&
+          wallet.profileId === reward.profileId &&
+          wallet.storeId === wallet.store?.id &&
+          bonusSettlementStoreMatches(
+            wallet.store,
+            user.tenantId,
+            externalDomain,
+          ),
+      );
+      const settlementWallet =
+        !reward.storeId && settlementWallets.length === 1
+          ? settlementWallets[0]
+          : null;
+      const settlementStoreId = reward.storeId ?? settlementWallet?.storeId;
+      if (reward.storeId === null && !settlementStoreId) {
+        items.push({
+          rewardId: reward.id,
+          status: 'SKIPPED',
+          reason:
+            'Для начисления требуется подтверждённый клуб получения награды.',
+          externalDomain,
+          externalGuestId,
+          amount,
+        });
+        continue;
+      }
       const staffTestReason = reward.profile?.isStaffTest
         ? (reward.profile.staffTestReason ?? staffTestProfileReasons.staffPhone)
         : phone
@@ -528,7 +595,7 @@ export class GuestBonusLedgerService {
         guestId: reward.guestId,
         profileId: reward.profileId,
         rewardId: reward.id,
-        storeId: reward.storeId,
+        storeId: settlementStoreId,
         createdByUserId: ledgerActorUserId(user),
         externalProvider,
         externalDomain,
@@ -545,6 +612,13 @@ export class GuestBonusLedgerService {
           rewardLabel: reward.rewardLabel,
           rewardCode: reward.rewardCode,
           phoneMasked: phone.masked,
+          ...(settlementWallet
+            ? {
+                settlementBinding: GUEST_BONUS_SETTLEMENT_BINDING,
+                settlementWalletItemId: settlementWallet.id,
+                settlementStoreId,
+              }
+            : {}),
           ...(staffTestReason
             ? {
                 staffTestReason,
@@ -1995,8 +2069,32 @@ export class GuestBonusLedgerService {
 
     const now = new Date();
     const rewardId = entry.rewardId;
+    const settlement = jsonRecord(entry.metadata);
+    const boundSettlement =
+      settlement.settlementBinding === GUEST_BONUS_SETTLEMENT_BINDING;
+    const settlementWalletWhere = boundSettlement
+      ? {
+          id: nullableString(settlement.settlementWalletItemId) ?? '',
+          profileId: entry.profileId ?? '',
+          storeId: entry.storeId ?? '',
+        }
+      : {};
 
     return this.prisma.$transaction(async (tx) => {
+      const settlementStore = boundSettlement
+        ? await tx.store.findFirst({
+            where: { id: entry.storeId ?? '', tenantId: entry.tenantId },
+            select: bonusSettlementStoreSelect,
+          })
+        : null;
+      const settlementReady =
+        !boundSettlement ||
+        (settlement.settlementStoreId === entry.storeId &&
+          bonusSettlementStoreMatches(
+            settlementStore,
+            entry.tenantId,
+            entry.externalDomain,
+          ));
       const readyReward = await tx.guestGameReward.findFirst({
         where: {
           id: rewardId,
@@ -2019,6 +2117,7 @@ export class GuestBonusLedgerService {
 
       if (
         readyReward &&
+        settlementReady &&
         acceptedRewardClaimBeforeDeadline(readyReward) &&
         !readyReward.claimRequired
       ) {
@@ -2031,6 +2130,7 @@ export class GuestBonusLedgerService {
 
       if (
         readyReward &&
+        settlementReady &&
         acceptedRewardClaimBeforeDeadline(readyReward) &&
         readyReward.claimRequired
       ) {
@@ -2040,6 +2140,7 @@ export class GuestBonusLedgerService {
             rewardId,
             kind: 'REWARD',
             status: { in: ['PROCESSING', 'FAILED'] },
+            ...settlementWalletWhere,
           },
           data: {
             status: 'PROCESSING',
@@ -2080,8 +2181,9 @@ export class GuestBonusLedgerService {
       const status =
         waitsForClaim || blockedByWalletState ? 'PENDING' : 'CANCELED';
       const itemStatus = status === 'PENDING' ? 'BLOCKED' : 'CANCELED';
-      const note =
-        status === 'PENDING'
+      const note = boundSettlement
+        ? 'Клуб получения награды или его привязка изменились. Начисление остановлено до проверки.'
+        : status === 'PENDING'
           ? 'Внешнее начисление ожидает подтвержденного получения награды в кошельке.'
           : 'Внешнее начисление отменено: награда отменена, просрочена или не была получена до срока.';
 
@@ -2101,8 +2203,9 @@ export class GuestBonusLedgerService {
           lockedAt: null,
           nextAttemptAt: null,
           canceledAt: status === 'CANCELED' ? now : null,
-          errorCode:
-            status === 'PENDING'
+          errorCode: boundSettlement
+            ? 'BONUS_SETTLEMENT_MISMATCH'
+            : status === 'PENDING'
               ? 'WAITING_REWARD_CLAIM'
               : 'REWARD_NOT_DELIVERABLE',
           errorMessage: note,
@@ -2175,6 +2278,17 @@ export class GuestBonusLedgerService {
               rewardId: entry.rewardId,
               kind: 'REWARD',
               status: 'PROCESSING',
+              ...(jsonRecord(entry.metadata).settlementBinding ===
+              GUEST_BONUS_SETTLEMENT_BINDING
+                ? {
+                    id:
+                      nullableString(
+                        jsonRecord(entry.metadata).settlementWalletItemId,
+                      ) ?? '',
+                    profileId: entry.profileId ?? '',
+                    storeId: entry.storeId ?? '',
+                  }
+                : {}),
             },
             select: { id: true },
           });

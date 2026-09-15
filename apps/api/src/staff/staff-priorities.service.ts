@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { hasCapability } from '../auth/capabilities';
 import { PrismaService } from '../prisma/prisma.service';
@@ -373,7 +374,9 @@ export class StaffPrioritiesService {
       throw new BadRequestException('Invalid page limit');
     const scope = await this.scope(user, query);
     const now = new Date();
-    const cursorScope = JSON.stringify([user.tenantId, user.id, kind, scope]);
+    const cursorScope = createHash('sha256')
+      .update(JSON.stringify([user.tenantId, user.id, kind, scope]))
+      .digest('hex');
     let afterId = '';
     if (query.cursor !== undefined) {
       try {

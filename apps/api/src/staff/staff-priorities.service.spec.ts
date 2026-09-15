@@ -282,6 +282,23 @@ describe('current staff priorities', () => {
     });
     expect(first.items).toHaveLength(1);
     expect(first.page.hasMore).toBe(true);
+    const manyStores = Array.from(
+      { length: 300 },
+      (_, index) => `store-${index}-${'x'.repeat(30)}`,
+    );
+    const largeScopePage = await service.getItems(user, {
+      storeIds: manyStores,
+      kind: 'TASKS_OVERDUE',
+      limit: '1',
+    });
+    expect(largeScopePage.page.nextCursor!.length).toBeLessThan(512);
+    await expect(
+      service.getItems(user, {
+        storeIds: manyStores,
+        kind: 'TASKS_OVERDUE',
+        cursor: largeScopePage.page.nextCursor!,
+      }),
+    ).resolves.toMatchObject({ kind: 'TASKS_OVERDUE' });
     await expect(
       service.getItems(user, {
         storeIds: 'b',
@@ -294,12 +311,14 @@ describe('current staff priorities', () => {
       kind: 'TASKS_OVERDUE',
       cursor: first.page.nextCursor!,
     });
-    expect(prisma.staffTask.findMany.mock.calls[1][0].where).toMatchObject({
-      tenantId: 'tenant-a',
-      OR: [{ storeId: { in: ['a'] } }],
-      id: { gt: '01' },
-      status: { notIn: ['DONE', 'CANCELED'] },
-    });
+    expect(prisma.staffTask.findMany.mock.calls.at(-1)![0].where).toMatchObject(
+      {
+        tenantId: 'tenant-a',
+        OR: [{ storeId: { in: ['a'] } }],
+        id: { gt: '01' },
+        status: { notIn: ['DONE', 'CANCELED'] },
+      },
+    );
     await expect(
       service.getItems(user, { kind: 'TASKS_OVERDUE', limit: '1000' }),
     ).rejects.toThrow('Invalid page limit');

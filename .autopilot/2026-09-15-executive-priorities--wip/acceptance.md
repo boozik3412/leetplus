@@ -20,6 +20,7 @@ All receipts below reside in the parent workspace `deploy-evidence/executive-pri
 - Web typecheck, build and changed-file ESLint PASS; native Node rules suite3 PASS.
 - Chromium fixture matrix14 checks PASS: separate financial declines, staff and stock actions, 3/default and expand, keyboard scroll, 1440/390 widths, light/dark, correct receipt/profile details, partial/missing/zero/failure, foreign response scope rejection, one-club URL parity, comparison switch, slow staff streaming and authenticated read-only requests. No page errors or non-loopback requests.
 - Captures wait for theme transitions and fonts. Main uses native viewport sizing to include nested scrolling content; no masking CSS.
+- Final paging hardening hashes the accepted cursor scope instead of embedding the complete Store list. A 300-Store fixture produces a cursor below512 characters and successfully reads the next page. Staff9 tests, API compile and narrow lint are repeated for this isolated change; UI and formulas are unchanged.
 
 ## Independent review
 

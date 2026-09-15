@@ -38,7 +38,7 @@
 ## Персонал: текущее состояние и доступ
 
 - `GET /staff/operations-dashboard/priorities` возвращает текущие счётчики и `evaluatedAt`.
-- `GET /staff/operations-dashboard/priorities/items?kind=...` возвращает список того же kind/scope, страницы по 20, максимум 100. Cursor связан с tenant, пользователем, kind и принятой выборкой клубов; смена выборки требует новой первой страницы.
+- `GET /staff/operations-dashboard/priorities/items?kind=...` возвращает список того же kind/scope, страницы по 20, максимум 100. Cursor связан с tenant, пользователем, kind и принятой выборкой клубов через компактный SHA-256 fingerprint; длинная выборка не раздувает cursor. Смена выборки требует новой первой страницы.
 - Financial `dateFrom/dateTo/asOf` не применяются к персоналу. `evaluatedAt` задаёт сервер, клиент не переносит часы проверки в прошлое.
 - Сохраняются corporate JWT, RolesGuard и transitional `FreshNetworkScopeGuard`. В reader дополнительно проверяется fresh scope и каждый запрошенный Store. STORES-доступ не превращается в NETWORK ради сводки.
 - Нужен `view_staff_control` и право исходного раздела: задачи — `view_staff_tasks`, чек-листы — `view_staff_standards`. Межсотрудниковые учебные показатели требуют `view_staff_training` + `manage_staff_training`; регламенты дополнительно требуют стандартов. Self-only профиль не используется вместо сетевого отчёта.

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CaretDown, CaretRight } from "@phosphor-icons/react";
+import { CaretDown, CaretRight, Info } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import type {
   ExecutiveMetric,
@@ -55,14 +55,50 @@ function evidence(metric: ExecutiveMetric) {
     state,
     metric.reason,
     coverage,
-    metric.factAsOf ? `Факты на ${metric.factAsOf.slice(0, 10)}` : null,
+    metric.factAsOf ? `Данные на ${factDate(metric.factAsOf)}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
 }
 
+function factDate(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(value));
+}
+
+function MetricNote({
+  metric,
+  expanded,
+}: {
+  metric: ExecutiveMetric;
+  expanded: boolean;
+}) {
+  if (!expanded && metric.state === "AVAILABLE") return null;
+  const note = expanded
+    ? evidence(metric)
+    : {
+        AVAILABLE: "",
+        PARTIAL: "Неполные данные",
+        MISSING: "Нет данных",
+        STALE: `Устарели${metric.factAsOf ? ` · ${factDate(metric.factAsOf)}` : ""}`,
+        FAILED: "Ошибка загрузки",
+      }[metric.state];
+  return (
+    <span
+      className={`mt-1 block text-xs leading-5 ${!expanded && (metric.state === "PARTIAL" || metric.state === "STALE") ? "text-amber-800 dark:text-amber-300" : "text-zinc-500 dark:text-zinc-400"}`}
+    >
+      {note}
+    </span>
+  );
+}
+
 export function ExecutiveClubTable({ summary }: { summary: ExecutiveSummary }) {
   const [sort, setSort] = useState<SortKey>("revenue");
+  const [showEvidence, setShowEvidence] = useState(false);
   const rows = useMemo(
     () =>
       [...summary.clubs].toSorted((left, right) => {
@@ -78,21 +114,25 @@ export function ExecutiveClubTable({ summary }: { summary: ExecutiveSummary }) {
 
   return (
     <section className="min-w-0 rounded-2xl border border-[var(--border-soft)] bg-[var(--surface)] p-5 shadow-sm">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-[var(--foreground)]">
-            Результаты по клубам
-          </h2>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-            Одна выборка и методика для каждой строки.
-          </p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold text-[var(--foreground)]">
+          Результаты по клубам
+        </h2>
+        <button
+          type="button"
+          aria-pressed={showEvidence}
+          onClick={() => setShowEvidence((visible) => !visible)}
+          className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 ${showEvidence ? "bg-[var(--surface-muted)] text-[var(--foreground)]" : "text-zinc-600 hover:bg-[var(--surface-muted)] dark:text-zinc-300"}`}
+        >
+          <Info className="h-4 w-4" aria-hidden="true" />
+          <span className="sr-only sm:not-sr-only">Пояснения</span>
+        </button>
         <label className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[var(--border-soft)] bg-[var(--surface-muted)] px-3 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
           Сортировка
           <select
             value={sort}
             onChange={(event) => setSort(event.target.value as SortKey)}
-            className="min-w-0 bg-transparent outline-none"
+            className="min-w-0 rounded-sm bg-transparent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
           >
             <option value="revenue">по выручке</option>
             <option value="visits">по визитам</option>
@@ -128,9 +168,7 @@ export function ExecutiveClubTable({ summary }: { summary: ExecutiveSummary }) {
                     <span className="block">
                       {display(revenue.value, revenue.unit)}
                     </span>
-                    <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                      {evidence(revenue)}
-                    </span>
+                    <MetricNote metric={revenue} expanded={showEvidence} />
                   </td>
                   <td className="px-2 py-4 text-right tabular-nums">
                     <span className="block">
@@ -139,17 +177,19 @@ export function ExecutiveClubTable({ summary }: { summary: ExecutiveSummary }) {
                         row.metrics.visits.unit,
                       )}
                     </span>
-                    <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                      {evidence(row.metrics.visits)}
-                    </span>
+                    <MetricNote
+                      metric={row.metrics.visits}
+                      expanded={showEvidence}
+                    />
                   </td>
                   <td className="px-2 py-4 text-right tabular-nums">
                     <span className="block">
                       {display(row.metrics.load.value, row.metrics.load.unit)}
                     </span>
-                    <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                      {evidence(row.metrics.load)}
-                    </span>
+                    <MetricNote
+                      metric={row.metrics.load}
+                      expanded={showEvidence}
+                    />
                   </td>
                   <td className="px-2 py-4 text-right">
                     <Link

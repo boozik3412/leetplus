@@ -1,13 +1,19 @@
+"use client";
+
 import Link from "next/link";
+import { useId, useState } from "react";
 import {
   ArrowRight,
-  ArrowUpRight,
+  ChartLine,
   ChartLineDown,
   Info,
   Package,
 } from "@phosphor-icons/react/dist/ssr";
 import { ExecutiveClubTable } from "@/components/executive-club-table";
-import { ExecutiveTrendChart } from "@/components/executive-trend-chart";
+import {
+  ExecutiveTrendChart,
+  type ExecutiveTrendMetric,
+} from "@/components/executive-trend-chart";
 import { buildAssortmentReportHref } from "@/lib/assortment-report-query";
 import type { DashboardMetric } from "@/lib/dashboard-summary";
 import type {
@@ -196,6 +202,9 @@ function MetricCard({
   summary,
   metricKey,
   primary = false,
+  selected,
+  chartId,
+  onSelect,
 }: {
   summary: ExecutiveSummary;
   metricKey: Exclude<
@@ -203,6 +212,9 @@ function MetricCard({
     "serviceRevenue" | "topups" | "productRevenueShare"
   >;
   primary?: boolean;
+  selected: boolean;
+  chartId: string;
+  onSelect: () => void;
 }) {
   const metric = summary.metrics[metricKey];
   const statusBorder =
@@ -219,14 +231,19 @@ function MetricCard({
       : "text-emerald-700 dark:text-emerald-300"
     : "text-zinc-500 dark:text-zinc-400";
   return (
-    <Link
-      href={detailHref(summary, metricKey)}
-      className={`group flex min-w-0 flex-col rounded-2xl border bg-[var(--surface)] p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${statusBorder} ${primary ? "min-h-[184px] sm:p-5" : "min-h-[174px]"}`}
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      aria-controls={chartId}
+      aria-label={`${labels[metricKey]}: ${formatMetric(metric)}. Показать динамику`}
+      className={`group flex w-full min-w-0 cursor-pointer flex-col rounded-2xl border bg-[var(--surface)] p-4 text-left shadow-sm transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--background)] ${selected ? "ring-2 ring-emerald-600 dark:ring-emerald-400" : ""} ${statusBorder} ${primary ? "min-h-[184px] sm:p-5" : "min-h-[174px]"}`}
     >
       <span className="flex items-start justify-between gap-3 text-sm text-zinc-600 dark:text-zinc-300">
         <span>{labels[metricKey]}</span>
-        <ArrowUpRight
-          className="h-4 w-4 shrink-0 text-zinc-400 transition group-hover:text-emerald-600 dark:group-hover:text-emerald-300"
+        <ChartLine
+          weight={selected ? "bold" : "regular"}
+          className={`h-4 w-4 shrink-0 ${selected ? "text-emerald-700 dark:text-emerald-300" : "text-zinc-400"}`}
           aria-hidden="true"
         />
       </span>
@@ -256,12 +273,8 @@ function MetricCard({
           {metricEvidence(metric)}
         </span>
       ) : null}
-    </Link>
+    </button>
   );
-}
-
-function Trend({ summary }: { summary: ExecutiveSummary }) {
-  return <ExecutiveTrendChart summary={summary} />;
 }
 
 function Priorities({
@@ -521,6 +534,21 @@ export function ExecutiveDashboard({
   summary: ExecutiveSummary;
   operations: ExecutiveOperations | null;
 }) {
+  const [trendMetric, setTrendMetric] =
+    useState<ExecutiveTrendMetric>("revenue");
+  const chartId = useId();
+  function selectTrend(metricKey: ExecutiveTrendMetric) {
+    setTrendMetric(metricKey);
+    const chart = document.getElementById(chartId);
+    if (chart && chart.getBoundingClientRect().top > window.innerHeight - 100) {
+      chart.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+        block: "start",
+      });
+    }
+  }
   const service = summary.metrics.serviceRevenue;
   const topups = summary.metrics.topups;
   return (
@@ -536,14 +564,37 @@ export function ExecutiveDashboard({
               : "клубов"}
         </span>
       </div>
-      <section className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-5">
-        <div className="col-span-2 xl:col-span-1">
-          <MetricCard summary={summary} metricKey="revenue" primary />
-        </div>
-        <MetricCard summary={summary} metricKey="visits" />
-        <MetricCard summary={summary} metricKey="revenuePerVisit" />
-        <MetricCard summary={summary} metricKey="load" />
-        <MetricCard summary={summary} metricKey="productRevenue" />
+      <section
+        className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-5"
+        aria-label="Выбор показателя динамики"
+      >
+        {(
+          [
+            "revenue",
+            "visits",
+            "revenuePerVisit",
+            "load",
+            "productRevenue",
+          ] as const
+        ).map((metricKey) => (
+          <div
+            key={metricKey}
+            className={
+              metricKey === "revenue"
+                ? "col-span-2 grid xl:col-span-1"
+                : "grid min-w-0"
+            }
+          >
+            <MetricCard
+              summary={summary}
+              metricKey={metricKey}
+              primary={metricKey === "revenue"}
+              selected={trendMetric === metricKey}
+              chartId={chartId}
+              onSelect={() => selectTrend(metricKey)}
+            />
+          </div>
+        ))}
       </section>
       <section className="mt-3 grid gap-3 lg:grid-cols-2">
         <div className="rounded-xl border border-[var(--border-soft)] bg-[var(--surface-muted)] px-4 py-3 text-sm leading-6 text-zinc-700 dark:text-zinc-200">
@@ -565,7 +616,13 @@ export function ExecutiveDashboard({
       </section>
       <MetricSources summary={summary} />
       <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,0.85fr)]">
-        <Trend summary={summary} />
+        <ExecutiveTrendChart
+          summary={summary}
+          metricKey={trendMetric}
+          label={labels[trendMetric]}
+          id={chartId}
+          detailsHref={detailHref(summary, trendMetric)}
+        />
         <Priorities summary={summary} operations={operations} />
       </section>
       <section className="mt-5 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,0.85fr)]">

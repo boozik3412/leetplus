@@ -5,6 +5,24 @@ verified application is blueb5c033/generation5, rollbackgreen05cad9cd;
 dataRelease and installed controller are399876 until actual handoff acceptance.
 USER_CALL/executive application code is not implicitly deployed by this operation.
 
+### Snapshot ordering repair, 16.09.2026 (source only)
+
+The prepared d7d799dd controller has not been activated. Read-only production
+inspection exposed nondeterministic Docker `Mounts` ordering: unchanged
+containers produced different configuration hashes. The successor fingerprint
+sorts this unordered collection by unique canonical absolute POSIX `Destination`
+and sorts JSON object keys, retaining every configuration and mount field.
+Duplicate/malformed destinations fail closed. Other arrays (including `Env`,
+`Cmd` and `HostConfig.Binds`) remain order-sensitive; PID/start/image/grant checks
+are unchanged. Never retry until a random old fingerprint happens to match.
+
+The signed-plan/receipt JSON serializer is unchanged. Previously prepared plans
+are not rewritten or reinterpreted with the new fingerprint: this fix requires
+new exact-main admission, a new native plan and separate exact-plan GO. No source
+file may be patched into an already installed controller. Before signing, verify
+the operator/host time basis; do not backdate approvals, enlarge their lifetime
+or change machine clocks as an implicit deployment step.
+
 ## Reliability boundary
 
 Only exact `network --operation refresh` shares the global controller lock with

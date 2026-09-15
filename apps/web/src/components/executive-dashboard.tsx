@@ -1,7 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useState } from "react";
+import {
+  hasConfirmedDecline,
+  priorityCount,
+} from "@/lib/executive-priority-rules";
+import { useId, useState, type ReactNode } from "react";
+import {
+  staffPriorityKinds,
+  staffPriorityLabels,
+  staffPriorityHref,
+  type StaffPriorityLoad,
+} from "@/lib/staff-priorities-types";
 import {
   ArrowRight,
   ChartLine,
@@ -19,6 +29,7 @@ import type { DashboardMetric } from "@/lib/dashboard-summary";
 import type {
   ExecutiveMetric,
   ExecutiveMetricKey,
+  ExecutiveDetailMetricKey,
   ExecutiveOperations,
   ExecutiveSummary,
 } from "@/lib/dashboard-executive";
@@ -172,7 +183,10 @@ function hasCurrentAssortmentPriorityEvidence(
   );
 }
 
-function detailHref(summary: ExecutiveSummary, metric: ExecutiveMetricKey) {
+function detailHref(
+  summary: ExecutiveSummary,
+  metric: ExecutiveDetailMetricKey,
+) {
   const params = new URLSearchParams({
     metric,
     period: "custom",
@@ -277,13 +291,18 @@ function MetricCard({
   );
 }
 
-function Priorities({
+export function ExecutivePriorities({
   summary,
   operations,
+  staff = { data: null, error: "Персонал ещё не проверен." },
+  staffLoading = false,
 }: {
   summary: ExecutiveSummary;
   operations: ExecutiveOperations | null;
+  staff?: StaffPriorityLoad;
+  staffLoading?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const assortment = operations?.assortment;
   const health = assortment?.data;
   const outOfStockMetric = health?.outOfStock;
@@ -295,7 +314,7 @@ function Priorities({
     outOfStock > 0
       ? {
           title: "Пополнить позиции без остатка",
-          caption: `${formatProductPositions(outOfStock)} в клубах`,
+          caption: `${outOfStockMetric?.state === "PARTIAL" ? "Не менее " : ""}${formatProductPositions(outOfStock)} в клубах`,
           href: buildAssortmentReportHref(
             assortmentScope(summary),
             "out-of-stock",
@@ -326,14 +345,79 @@ function Priorities({
           icon: Info,
         }
       : null,
-  ]
-    .filter(Boolean)
-    .slice(0, 3) as Array<{
+  ].filter(Boolean) as Array<{
     title: string;
     caption: string;
     href: string;
     icon: typeof Package;
   }>;
+  // Add independently comparable money metrics, never an operation average.
+  for (const [key, title] of [
+    ["averageProductCheck", "Разобрать снижение среднего чека"],
+    ["revenuePerVisit", "Разобрать снижение дохода на визит"],
+  ] as const) {
+    const metric = summary.metrics[key];
+    if (metric && hasConfirmedDecline(metric)) {
+      items.push({
+        title,
+        caption: `${key === "averageProductCheck" ? "Товарные чеки" : "Услуги и товары на визит"} · ${formatDelta(metric)}`,
+        href: detailHref(summary, key),
+        icon: ChartLineDown,
+      });
+    }
+  }
+  for (const [metric, subset, title] of [
+    [health?.lowStock, "low-stock", "Пополнить запас на ближайшие 3 дня"],
+    [health?.noSales[21], "no-sales", "Разобрать товары без продаж 21 день"],
+  ] as const) {
+    if (
+      hasCurrentAssortmentPriorityEvidence(assortment, metric) &&
+      metric?.value != null &&
+      metric.value > 0
+    )
+      items.push({
+        title,
+        caption: `${metric.state === "PARTIAL" ? "Не менее " : ""}${formatProductPositions(metric.value)}`,
+        href: buildAssortmentReportHref(assortmentScope(summary), subset),
+        icon: Package,
+      });
+  }
+  for (const kind of staffPriorityKinds) {
+    const metric = staff.data?.metrics[kind];
+    if (
+      metric &&
+      ["AVAILABLE", "PARTIAL"].includes(metric.state) &&
+      metric.value !== null &&
+      metric.value > 0
+    ) {
+      const caption = `${metric.state === "PARTIAL" ? "Не менее " : ""}${priorityCount(metric.value, metric.unit)}${kind === "CHECKLISTS_REVIEW" ? " · Сданы, ожидают проверки после планового срока" : ""}`;
+      const item = {
+        title: staffPriorityLabels[kind],
+        caption,
+        href: staffPriorityHref(summary.scope.storeIds, kind),
+        icon: Info,
+      };
+      if (kind === "TASKS_OVERDUE" || kind === "CHECKLISTS_OVERDUE")
+        items.unshift(item);
+      else items.push(item);
+    }
+  }
+  const rank = (item: (typeof items)[number]) =>
+    item.title.includes("просроченные") ||
+    item.title === "Пополнить позиции без остатка"
+      ? 0
+      : item.icon === ChartLineDown
+        ? 1
+        : item.title === "Проверить полноту выручки"
+          ? 3
+          : 2;
+  items.sort((left, right) => rank(left) - rank(right));
+  const limited =
+    !staff.data ||
+    staffPriorityKinds.some(
+      (kind) => staff.data?.metrics[kind]?.state !== "AVAILABLE",
+    );
+  const shown = expanded ? items : items.slice(0, 3);
   return (
     <section className="rounded-2xl border border-[var(--border-soft)] bg-[var(--surface)] p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -350,13 +434,18 @@ function Priorities({
         </span>
       </div>
       {items.length ? (
-        <div className="mt-4 divide-y divide-[var(--border-soft)]">
-          {items.map((item) => {
+        <div
+          tabIndex={expanded ? 0 : undefined}
+          aria-label="Список приоритетов"
+          className={`mt-4 divide-y divide-[var(--border-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${expanded ? "max-h-[420px] overflow-y-auto overscroll-contain pr-1" : ""}`}
+        >
+          {shown.map((item) => {
             const Icon = item.icon;
             return (
               <Link
                 key={item.title}
                 href={item.href}
+                prefetch={false}
                 className="group flex gap-3 py-4 first:pt-0 last:pb-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
               >
                 <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
@@ -382,9 +471,76 @@ function Priorities({
           Нет подтверждённых приоритетов для этой выборки.
         </p>
       )}
-      <p className="mt-4 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-        Выбрано по подтверждённым фактам и качеству данных.
-      </p>
+      {items.length > 3 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+          className="mt-4 min-h-10 text-sm font-semibold text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
+        >
+          {expanded ? "Свернуть" : `Все приоритеты (${items.length})`}
+        </button>
+      ) : null}
+      <details className="mt-4 border-t border-[var(--border-soft)] pt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+        <summary className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+          {staffLoading
+            ? "Проверяем персонал…"
+            : limited
+              ? "Проверка персонала ограничена"
+              : "Персонал проверен"}{" "}
+          · Источники
+        </summary>
+        <p className="mt-2">
+          Персонал — текущие обязательства; финансовые изменения — за выбранный
+          период.
+        </p>
+        {staffLoading ? (
+          <p role="status">Загружаем текущие задачи и обучение.</p>
+        ) : staff.error ? (
+          <p>{staff.error}</p>
+        ) : null}
+        {staff.data ? (
+          <>
+            <p>
+              Проверено:{" "}
+              {new Intl.DateTimeFormat("ru-RU", {
+                dateStyle: "short",
+                timeStyle: "short",
+                timeZone: "Asia/Yekaterinburg",
+              }).format(new Date(staff.data.evaluatedAt))}{" "}
+              (Екатеринбург).{" "}
+              {staff.data.scope.includesNetworkAssignments
+                ? "Включены общесетевые обязательства."
+                : "Общесетевые обязательства не отнесены к выбранным клубам."}
+            </p>
+            {staffPriorityKinds.map((kind) => (
+              <p key={kind}>
+                {staffPriorityLabels[kind]}:{" "}
+                {staff.data!.metrics[kind]?.reason ??
+                  `${staff.data!.metrics[kind]?.value ?? "—"}`}
+              </p>
+            ))}
+          </>
+        ) : null}
+        {(["averageProductCheck", "revenuePerVisit"] as const).map((key) => {
+          const metric = summary.metrics[key];
+          return (
+            <p key={key} className="mt-1">
+              {key === "averageProductCheck"
+                ? "Средний товарный чек"
+                : "Доход на визит"}
+              :{" "}
+              {metric?.state === "AVAILABLE"
+                ? metric.comparison
+                  ? "Сравнение рассчитано."
+                  : summary.scope.comparison
+                    ? "Нет сопоставимого прошлого периода."
+                    : "Сравнение периодов отключено."
+                : (metric?.reason ?? "Источник пока не подтверждён.")}
+            </p>
+          );
+        })}
+      </details>
     </section>
   );
 }
@@ -530,9 +686,11 @@ function MetricSources({ summary }: { summary: ExecutiveSummary }) {
 export function ExecutiveDashboard({
   summary,
   operations,
+  priorities,
 }: {
   summary: ExecutiveSummary;
   operations: ExecutiveOperations | null;
+  priorities?: ReactNode;
 }) {
   const [trendMetric, setTrendMetric] =
     useState<ExecutiveTrendMetric>("revenue");
@@ -615,7 +773,7 @@ export function ExecutiveDashboard({
         </div>
       </section>
       <MetricSources summary={summary} />
-      <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,0.85fr)]">
+      <section className="mt-5 grid items-start gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,0.85fr)]">
         <ExecutiveTrendChart
           summary={summary}
           metricKey={trendMetric}
@@ -623,7 +781,9 @@ export function ExecutiveDashboard({
           id={chartId}
           detailsHref={detailHref(summary, trendMetric)}
         />
-        <Priorities summary={summary} operations={operations} />
+        {priorities ?? (
+          <ExecutivePriorities summary={summary} operations={operations} />
+        )}
       </section>
       <section className="mt-5 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,0.85fr)]">
         <ExecutiveClubTable summary={summary} />

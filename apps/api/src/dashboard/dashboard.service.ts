@@ -3,7 +3,11 @@ import { Prisma, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
-import { receiptIdentityFromSourceHash } from '../common/receipt-source-identity';
+import {
+  ambiguousReceiptKeys,
+  createReceiptMetricProjection,
+  groupReceiptFacts,
+} from '../common/receipt-metrics';
 import { resolveGuestSessionStore } from '../common/guest-session-store';
 import {
   AssortmentHealthLoaderService,
@@ -798,10 +802,13 @@ export class DashboardService {
   ): Promise<DashboardExecutiveSummary> {
     const product = await this.getExecutiveProductRevenue(user, query);
     const now = new Date().toISOString();
+    const receiptValidationPrevious = this.executivePreviousPeriod(
+      product.scope.period,
+    );
     const comparisonPeriod =
       query.comparison === false || query.comparison === 'false'
         ? null
-        : this.executivePreviousPeriod(product.scope.period);
+        : receiptValidationPrevious;
     const previousProduct = comparisonPeriod
       ? await this.getExecutiveProductRevenue(user, {
           period: 'custom',
@@ -874,6 +881,7 @@ export class DashboardService {
     const metricsFor = (
       productMetric: ExecutiveMetric,
       visitsMetric: ExecutiveMetric,
+      receiptMetric: ExecutiveMetric,
     ): ExecutiveMetrics => {
       const services = this.executiveUnavailableMetric(
         'serviceRevenue',
@@ -951,6 +959,7 @@ export class DashboardService {
           },
         ),
         productRevenue: productMetric,
+        averageProductCheck: receiptMetric,
         productRevenueShare: this.executiveUnavailableMetric(
           'productRevenueShare',
           'PERCENT',
@@ -1007,19 +1016,30 @@ export class DashboardService {
           previous?.productRevenue,
         ),
       },
+      averageProductCheck: {
+        ...current.averageProductCheck,
+        comparison:
+          current.averageProductCheck.state === 'AVAILABLE' &&
+          previous?.averageProductCheck.state === 'AVAILABLE'
+            ? comparisonFor(
+                current.averageProductCheck,
+                previous.averageProductCheck,
+              )
+            : null,
+      },
+      revenuePerVisit: {
+        ...current.revenuePerVisit,
+        comparison:
+          current.revenuePerVisit.state === 'AVAILABLE' &&
+          previous?.revenuePerVisit.state === 'AVAILABLE'
+            ? comparisonFor(current.revenuePerVisit, previous.revenuePerVisit)
+            : null,
+      },
     });
-    const currentMetrics = metricsFor(
-      product.metric,
-      visitsFor(product.scope.period),
-    );
-    const previousMetrics =
-      previousProduct && comparisonPeriod
-        ? metricsFor(previousProduct.metric, visitsFor(comparisonPeriod))
-        : null;
-    const comparedMetrics = withComparisons(currentMetrics, previousMetrics);
-    const allMetricDays = comparisonPeriod
-      ? { from: comparisonPeriod.from, to: product.scope.period.to }
-      : product.scope.period;
+    const allMetricDays = {
+      from: receiptValidationPrevious.from,
+      to: product.scope.period.to,
+    };
     const [daySalesFacts, daySalesCoverage] = await Promise.all([
       this.prisma.salesFact.findMany({
         where: {
@@ -1036,6 +1056,9 @@ export class DashboardService {
           revenue: true,
           saleDate: true,
           isCanceled: true,
+          sourcePayloadHash: true,
+          externalProvider: true,
+          externalDomain: true,
         },
       }),
       this.assortmentHealthLoader.loadSalesCoverage({
@@ -1047,6 +1070,37 @@ export class DashboardService {
         },
       }),
     ]);
+    const receiptProjection = createReceiptMetricProjection({
+      facts: daySalesFacts.map((fact) => ({
+        ...fact,
+        revenue: fact.revenue.toNumber(),
+      })),
+      storeIds,
+      salesDayEvidence: daySalesCoverage.salesDayEvidence,
+      calculatedAt: now,
+    });
+    const averageCheckFor = (
+      period: { from: string; to: string },
+      storeId?: string,
+    ) =>
+      receiptProjection.getMetric(
+        period,
+        storeId === undefined ? storeIds : [storeId],
+      );
+    const currentMetrics = metricsFor(
+      product.metric,
+      visitsFor(product.scope.period),
+      averageCheckFor(product.scope.period),
+    );
+    const previousMetrics =
+      previousProduct && comparisonPeriod
+        ? metricsFor(
+            previousProduct.metric,
+            visitsFor(comparisonPeriod),
+            averageCheckFor(comparisonPeriod),
+          )
+        : null;
+    const comparedMetrics = withComparisons(currentMetrics, previousMetrics);
     const currentDates = this.executiveDaysInclusive(
       new Date(`${product.scope.period.from}T00:00:00.000Z`),
       new Date(`${product.scope.period.to}T23:59:59.999Z`),
@@ -1072,11 +1126,13 @@ export class DashboardService {
             metricsFor(
               row.metric,
               visitsFor(product.scope.period, row.storeId),
+              averageCheckFor(product.scope.period, row.storeId),
             ),
             previousRow && comparisonPeriod
               ? metricsFor(
                   previousRow.metric,
                   visitsFor(comparisonPeriod, row.storeId),
+                  averageCheckFor(comparisonPeriod, row.storeId),
                 )
               : null,
           ),
@@ -1104,11 +1160,19 @@ export class DashboardService {
         return {
           date,
           metrics: withComparisons(
-            metricsFor(dayProduct, visitsFor({ from: date, to: date })),
+            metricsFor(
+              dayProduct,
+              visitsFor({ from: date, to: date }),
+              averageCheckFor({ from: date, to: date }),
+            ),
             previousDayProduct && comparisonPeriod
               ? metricsFor(
                   previousDayProduct,
                   visitsFor({
+                    from: previousDates[index],
+                    to: previousDates[index],
+                  }),
+                  averageCheckFor({
                     from: previousDates[index],
                     to: previousDates[index],
                   }),
@@ -1890,6 +1954,11 @@ export class DashboardService {
           },
         },
         select: {
+          storeId: true,
+          saleDate: true,
+          externalProvider: true,
+          externalDomain: true,
+          sourcePayloadHash: true,
           revenue: true,
           cost: true,
         },
@@ -2262,7 +2331,15 @@ export class DashboardService {
               100,
           )
         : null;
-    const receiptMetrics = this.buildReceiptMetrics(salesFacts);
+    const receiptMetrics = this.buildReceiptMetrics(
+      salesFacts,
+      ambiguousReceiptKeys(
+        [...salesFacts, ...previousSalesFacts].map((fact) => ({
+          ...fact,
+          revenue: fact.revenue.toNumber(),
+        })),
+      ),
+    );
     const assortmentHealth = await assortmentHealthPromise;
     const sources = this.buildAssortmentSourceHealth({
       salesFacts,
@@ -4227,10 +4304,12 @@ export class DashboardService {
       externalProvider?: string | null;
       externalDomain?: string | null;
       sourcePayloadHash?: string | null;
+      saleDate?: Date;
       quantity: { toNumber: () => number };
       revenue: { toNumber: () => number };
       product: { name: string };
     }>,
+    ambiguousIdentities?: ReadonlySet<string>,
   ): DashboardReceiptMetrics {
     if (salesFacts.length === 0) {
       return {
@@ -4246,26 +4325,31 @@ export class DashboardService {
       };
     }
 
-    const coveredFacts = salesFacts
-      .map((fact) => ({
-        fact,
-        receiptIdentity: receiptIdentityFromSourceHash(fact.sourcePayloadHash),
-      }))
-      .filter(
-        (
-          item,
-        ): item is {
-          fact: (typeof salesFacts)[number];
-          receiptIdentity: string;
-        } => Boolean(item.receiptIdentity),
-      );
+    const {
+      coveredFacts,
+      receipts,
+      coveredRevenue,
+      totalRevenue,
+      averageCheck,
+      ambiguousIdentityCount,
+    } = groupReceiptFacts(
+      salesFacts.map((fact) => ({
+        ...fact,
+        revenue: fact.revenue.toNumber(),
+        quantity: fact.quantity.toNumber(),
+        productName: fact.product.name,
+      })),
+      ambiguousIdentities,
+    );
 
     if (coveredFacts.length === 0) {
       return {
         state: 'SOURCE_UNAVAILABLE',
         requiredField: 'RECEIPT_OR_ORDER_ID',
         reason:
-          'Источник ещё не передал идентификатор чека или заказа. Его можно загрузить колонкой «Чек» в CSV продаж; товарные операции не подменяют покупки.',
+          ambiguousIdentityCount > 0
+            ? 'Идентификатор чека повторяется в разные даты; по неоднозначным записям средний чек не рассчитан.'
+            : 'Источник ещё не передал идентификатор чека или заказа. Его можно загрузить колонкой «Чек» в CSV продаж; товарные операции не подменяют покупки.',
         coveragePercent: 0,
         coveredRevenuePercent: 0,
         purchaseCount: null,
@@ -4274,37 +4358,6 @@ export class DashboardService {
         topBasketPair: null,
       };
     }
-
-    const receipts = new Map<
-      string,
-      { revenue: number; quantity: number; products: Set<string> }
-    >();
-    let coveredRevenue = 0;
-    let totalRevenue = 0;
-
-    salesFacts.forEach((fact) => {
-      totalRevenue += fact.revenue.toNumber();
-    });
-    coveredFacts.forEach(({ fact, receiptIdentity }) => {
-      const key = [
-        fact.externalProvider ?? 'manual',
-        fact.externalDomain ?? 'local',
-        fact.storeId,
-        receiptIdentity,
-      ].join(':');
-      const receipt = receipts.get(key) ?? {
-        revenue: 0,
-        quantity: 0,
-        products: new Set<string>(),
-      };
-      const revenue = fact.revenue.toNumber();
-
-      receipt.revenue += revenue;
-      receipt.quantity += fact.quantity.toNumber();
-      receipt.products.add(fact.product.name);
-      receipts.set(key, receipt);
-      coveredRevenue += revenue;
-    });
 
     const pairCounts = new Map<string, number>();
     receipts.forEach((receipt) => {
@@ -4333,13 +4386,12 @@ export class DashboardService {
       requiredField: 'RECEIPT_OR_ORDER_ID',
       reason:
         state === 'READY'
-          ? 'Идентификатор чека есть у всех товарных операций периода.'
-          : `Идентификатор чека есть у ${coveragePercent}% товарных операций; чековые показатели рассчитаны только по покрытой части.`,
+          ? 'Однозначный идентификатор чека есть у всех товарных операций периода.'
+          : `Однозначный идентификатор чека есть у ${coveragePercent}% товарных операций; чековые показатели рассчитаны только по покрытой части.${ambiguousIdentityCount > 0 ? ' Повторяющиеся в разные даты идентификаторы исключены.' : ''}`,
       coveragePercent,
       coveredRevenuePercent: this.ratioPercent(coveredRevenue, totalRevenue),
       purchaseCount: receipts.size,
-      averageCheck:
-        receipts.size > 0 ? this.round(coveredRevenue / receipts.size) : null,
+      averageCheck,
       itemsPerCheck:
         receipts.size > 0
           ? this.round(

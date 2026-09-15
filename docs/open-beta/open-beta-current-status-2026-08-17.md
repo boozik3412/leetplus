@@ -104,8 +104,8 @@ Actual release, контрольные суммы, final backup/restore, DNS и 
 ## Executive dashboard — source-only candidate, 15.09.2026
 
 Corporate `/dashboard` source содержит отдельные read-only executive summary и
-operations projections. Это не deployed release и не external-beta GO: accepted
-production state остаётся exact `b5c033…`/generation5, а source-only кандидат
+operations projections. Это не deployed release и не external-beta GO: актуальные
+serving SHA/control generation подтверждает владелец production; source-only кандидат
 не меняет Prisma schema, DB roles, tenant authority, worker permits, provider
 calls, network policy, rewards или data baseline.
 
@@ -123,6 +123,14 @@ saved-data proof.
 для UI behaviour, scope, comparison и error isolation; это не ordinary user
 login, не real-session acceptance и не production evidence. Release admission,
 fresh real-user canary и отдельный GO для future deployment сохраняются.
+
+Дополнение приоритетов15.09 также source-only: отдельные сигналы среднего
+товарного чека и дохода на визит, текущие задачи/чек-листы/обучение/регламенты,
+low-stock и товары без продаж. Два новых staff read route сохраняют NETWORK и
+feature admission; сведения об обучении при ограниченном покрытии не становятся
+точным нулём. Schema/provider/worker/controller effects отсутствуют. Serving
+controller нельзя вывести из staged плана или из смены source HEAD.
+[Контракт, обзор блоков и локальная проверка](../executive-dashboard-priorities.md).
 
 ## История подготовки до завершения CURRENT191
 

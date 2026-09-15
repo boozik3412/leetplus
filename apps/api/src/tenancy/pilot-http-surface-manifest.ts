@@ -806,7 +806,7 @@ function staffDefinitions(): readonly ControllerDefinition[] {
       'staff-operations-dashboard.controller.ts',
       'operations-dashboard',
       'NETWORK_VERIFIED',
-      [['GET', ['']]],
+      [['GET', ['', 'priorities', 'priorities/items']]],
     ),
     staffController(
       'staff-readiness-report.controller.ts',

@@ -50,6 +50,12 @@ import { SuppliersService } from '../src/suppliers/suppliers.service';
 import { AccessScopeService } from '../src/tenancy/access-scope.service';
 import { FreshStoreScopeService } from '../src/tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../src/tenancy/tenant-context.service';
+import { StaffOperationsDashboardController } from '../src/staff/staff-operations-dashboard.controller';
+import { StaffOperationsDashboardService } from '../src/staff/staff-operations-dashboard.service';
+import { StaffPrioritiesService } from '../src/staff/staff-priorities.service';
+import { StaffTrainingProfilesService } from '../src/staff/staff-training-profiles.service';
+import { StaffTrainingAccessPolicyService } from '../src/staff/staff-training-access-policy.service';
+import { StaffReadinessReportService } from '../src/staff/staff-readiness-report.service';
 
 const integrationConfirmation =
   'run-pilot-assortment-store-scope-postgres-fixtures';
@@ -147,6 +153,167 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
     await expect(
       service.getCatalog({ storeId: fixture.storeA1Id }, userBNetwork),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('serves current staff priorities with real PostgreSQL scope, unfinished statuses, learning and keyset details', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    let currentUser = buildUser(fixture, 'A_NETWORK');
+    const app = await buildStaffPrioritiesHttpApp(prisma, () => currentUser);
+    const server = app.getHttpServer() as App;
+    const overdue = new Date(Date.now() - 86400000);
+    try {
+      await prisma.staffTask.createMany({
+        data: [
+          ...['OPEN', 'ON_REVIEW', 'DONE', 'CANCELED'].map((status) => ({
+            tenantId: fixture.tenantAId,
+            storeId: fixture.storeA1Id,
+            title: `A1 ${status}`,
+            status,
+            dueAt: overdue,
+          })),
+          {
+            tenantId: fixture.tenantAId,
+            storeId: fixture.storeA2Id,
+            title: 'A2',
+            status: 'OPEN',
+            dueAt: overdue,
+          },
+          {
+            tenantId: fixture.tenantAId,
+            storeId: null,
+            title: 'Network',
+            status: 'OPEN',
+            dueAt: overdue,
+          },
+          {
+            tenantId: fixture.tenantBId,
+            storeId: fixture.storeB1Id,
+            title: 'FOREIGN',
+            status: 'OPEN',
+            dueAt: overdue,
+          },
+        ],
+      });
+      await prisma.staffChecklistRun.createMany({
+        data: [
+          'OPEN',
+          'IN_PROGRESS',
+          'RETURNED',
+          'ESCALATED',
+          'ON_REVIEW',
+          'ACCEPTED',
+          'CANCELED',
+        ].map((status) => ({
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA1Id,
+          title: status,
+          status,
+          scheduledAt: overdue,
+          sectionsSnapshot: [],
+          answers: {},
+        })),
+      });
+      const course = await prisma.staffTrainingCourse.create({
+        data: {
+          tenantId: fixture.tenantAId,
+          title: 'Required current course',
+          status: 'ACTIVE',
+          required: true,
+          steps: [],
+          roleScope: 'ALL_STAFF',
+        },
+      });
+      const read = await request(server)
+        .get('/staff/operations-dashboard/priorities')
+        .query({ storeIds: fixture.storeA1Id, dateFrom: '1999-01-01' })
+        .expect(200);
+      expect(read.body.metrics.TASKS_OVERDUE).toMatchObject({
+        state: 'AVAILABLE',
+        value: 2,
+      });
+      expect(read.body.metrics.CHECKLISTS_OVERDUE.value).toBe(4);
+      expect(read.body.metrics.CHECKLISTS_REVIEW.value).toBe(1);
+      expect(read.body.metrics.TRAINING_INCOMPLETE).toMatchObject({
+        state: 'AVAILABLE',
+        value: 1,
+      });
+      expect(read.body.scope).toEqual({
+        storeIds: [fixture.storeA1Id],
+        includesNetworkAssignments: false,
+      });
+      const details = await request(server)
+        .get('/staff/operations-dashboard/priorities/items')
+        .query({ storeIds: fixture.storeA1Id, kind: 'TASKS_OVERDUE', limit: 1 })
+        .expect(200);
+      expect(details.body.items).toHaveLength(1);
+      const second = await request(server)
+        .get('/staff/operations-dashboard/priorities/items')
+        .query({
+          storeIds: fixture.storeA1Id,
+          kind: 'TASKS_OVERDUE',
+          limit: 1,
+          cursor: details.body.page.nextCursor,
+        })
+        .expect(200);
+      expect(second.body.items).toHaveLength(1);
+      expect(second.body.items[0].id).not.toBe(details.body.items[0].id);
+      expect(second.body.page.hasMore).toBe(false);
+      const profile = await request(server)
+        .get('/staff/operations-dashboard/priorities/items')
+        .query({ storeIds: fixture.storeA1Id, kind: 'TRAINING_INCOMPLETE' })
+        .expect(200);
+      expect(profile.body.items[0]).toMatchObject({
+        id: fixture.userA1Id,
+        missingCourses: [{ id: course.id, title: course.title }],
+      });
+      expect(
+        await prisma.staffTrainingProgress.count({
+          where: { tenantId: fixture.tenantAId },
+        }),
+      ).toBe(0);
+      const all = await request(server)
+        .get('/staff/operations-dashboard/priorities')
+        .expect(200);
+      expect(all.body.metrics.TASKS_OVERDUE.value).toBe(4);
+      expect(all.body.metrics.TRAINING_INCOMPLETE.value).toBe(2);
+      await request(server)
+        .get('/staff/operations-dashboard/priorities')
+        .query({ storeIds: fixture.storeB1Id })
+        .expect(403);
+      await request(server)
+        .get('/staff/operations-dashboard/priorities/items')
+        .query({
+          storeIds: fixture.storeA2Id,
+          kind: 'TASKS_OVERDUE',
+          cursor: details.body.page.nextCursor,
+        })
+        .expect(400);
+      currentUser = buildUser(fixture, 'A1');
+      await request(server)
+        .get('/staff/operations-dashboard/priorities')
+        .expect(403);
+      currentUser = buildUser(fixture, 'A_NETWORK');
+      await prisma.user.update({
+        where: { id: fixture.userANetworkId },
+        data: { isActive: false },
+      });
+      await request(server)
+        .get('/staff/operations-dashboard/priorities')
+        .expect(401);
+    } finally {
+      await app.close();
+      await prisma.staffChecklistRun.deleteMany({
+        where: { tenantId: { in: [fixture.tenantAId, fixture.tenantBId] } },
+      });
+      await prisma.staffTask.deleteMany({
+        where: { tenantId: { in: [fixture.tenantAId, fixture.tenantBId] } },
+      });
+      await prisma.staffTrainingCourse.deleteMany({
+        where: { tenantId: fixture.tenantAId },
+      });
+    }
   });
 
   it('allows fresh NETWORK writes but rejects store-only, cross-tenant and stale subjects', async () => {
@@ -1211,7 +1378,9 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
 
       currentUser = buildUser(fixture, 'A1');
       const storeOnly = await request(httpServer)
-        .get('/dashboard/executive-summary?period=custom&dateFrom=2026-09-07&dateTo=2026-09-08')
+        .get(
+          '/dashboard/executive-summary?period=custom&dateFrom=2026-09-07&dateTo=2026-09-08',
+        )
         .expect(200);
       expect(storeOnly.body.scope.storeIds).toEqual([fixture.storeA1Id]);
       expect(JSON.stringify(storeOnly.body)).not.toContain(fixture.storeA2Id);
@@ -1504,6 +1673,48 @@ async function buildDashboardHttpApp(
   return app;
 }
 
+async function buildStaffPrioritiesHttpApp(
+  prisma: PrismaService,
+  getUser: () => AuthenticatedUser,
+): Promise<INestApplication> {
+  const fresh = new FreshStoreScopeService(prisma, new AccessScopeService());
+  const profiles = new StaffTrainingProfilesService(
+    prisma,
+    new StaffTrainingAccessPolicyService(fresh),
+  );
+  const readiness = new StaffReadinessReportService(prisma, profiles);
+  const module = await Test.createTestingModule({
+    controllers: [StaffOperationsDashboardController],
+    providers: [
+      { provide: StaffOperationsDashboardService, useValue: {} },
+      { provide: FreshStoreScopeService, useValue: fresh },
+      {
+        provide: StaffPrioritiesService,
+        useValue: new StaffPrioritiesService(
+          prisma,
+          fresh,
+          profiles,
+          readiness,
+        ),
+      },
+    ],
+  })
+    .overrideGuard(JwtAuthGuard)
+    .useValue({
+      canActivate(context: ExecutionContext) {
+        context.switchToHttp().getRequest<AuthenticatedRequest>().user =
+          getUser();
+        return true;
+      },
+    })
+    .overrideGuard(RolesGuard)
+    .useValue(new RolesGuard(new Reflector()))
+    .compile();
+  const app = module.createNestApplication();
+  await app.init();
+  return app;
+}
+
 async function seedExecutiveFacts(prisma: PrismaClient, fixture: Fixture) {
   const firstDay = new Date('2026-09-07T00:00:00.000Z');
   const secondDay = new Date('2026-09-08T00:00:00.000Z');
@@ -1557,9 +1768,7 @@ async function seedExecutiveFacts(prisma: PrismaClient, fixture: Fixture) {
         scope: DailyDataCoverageScope.BUSINESS_FACTS,
         status: DailyDataCoverageStatus.SUCCESS,
         summary: {
-          domains: [
-            { domain: fixture.tenantASlug, status: 'SUCCESS' },
-          ],
+          domains: [{ domain: fixture.tenantASlug, status: 'SUCCESS' }],
         },
       })),
     }),

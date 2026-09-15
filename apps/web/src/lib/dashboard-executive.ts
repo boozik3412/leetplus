@@ -50,6 +50,12 @@ export type ExecutiveMetric<T = number> = {
     compatible: boolean;
   } | null;
   destination?: "CLUBS" | "ASSORTMENT";
+  receiptEvidence?: {
+    receiptCount: number | null;
+    operations: { covered: number; total: number; percent: number | null };
+    revenue: { covered: number; total: number; percent: number | null };
+    ambiguousIdentityCount: number;
+  };
 };
 export type ExecutiveMetricKey =
   | "revenue"
@@ -60,7 +66,12 @@ export type ExecutiveMetricKey =
   | "load"
   | "productRevenue"
   | "productRevenueShare";
-export type ExecutiveMetrics = Record<ExecutiveMetricKey, ExecutiveMetric>;
+export type ExecutiveDetailMetricKey =
+  | ExecutiveMetricKey
+  | "averageProductCheck";
+export type ExecutiveMetrics = Record<ExecutiveMetricKey, ExecutiveMetric> & {
+  averageProductCheck?: ExecutiveMetric;
+};
 export type ExecutiveSummary = {
   scope: ExecutiveAppliedScope;
   metrics: ExecutiveMetrics;

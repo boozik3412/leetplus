@@ -74,7 +74,11 @@ const CONTROLLER_BOUNDARIES: readonly ControllerBoundary[] = [
   {
     source: 'staff/staff-operations-dashboard.controller.ts',
     className: 'StaffOperationsDashboardController',
-    routeIds: ['GET /staff/operations-dashboard'],
+    routeIds: [
+      'GET /staff/operations-dashboard',
+      'GET /staff/operations-dashboard/priorities',
+      'GET /staff/operations-dashboard/priorities/items',
+    ],
   },
 ] as const;
 
@@ -431,7 +435,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       allRouteIds.push(...boundary.routeIds);
     }
 
-    expect(allRouteIds).toHaveLength(18);
+    expect(allRouteIds).toHaveLength(20);
     expect(new Set(allRouteIds).size).toBe(allRouteIds.length);
     expect(allRouteIds.some((id) => id.includes('/scheduled/'))).toBe(false);
   });
@@ -473,7 +477,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       ...STAFF_CONTROL_METHOD_BOUNDARIES.map(({ routeId }) => routeId),
     ];
 
-    expect(selected).toHaveLength(28);
+    expect(selected).toHaveLength(30);
     expect(
       selected.every(
         (id) =>

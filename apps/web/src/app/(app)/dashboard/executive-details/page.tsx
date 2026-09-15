@@ -3,14 +3,16 @@ import { ArrowLeft } from "@phosphor-icons/react/dist/ssr";
 import { requireTenantWorkspaceUser } from "@/lib/auth";
 import {
   getExecutiveSummary,
-  type ExecutiveMetricKey,
+  type ExecutiveDetailMetricKey,
+  type ExecutiveMetric,
   type ExecutiveQuery,
 } from "@/lib/dashboard-executive";
 import { dashboardWorkspaceHref, getDefaultLandingPath } from "@/lib/landing";
 import { redirect } from "next/navigation";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-const metricKeys = new Set<ExecutiveMetricKey>([
+const metricKeys = new Set<ExecutiveDetailMetricKey>([
+  "averageProductCheck",
   "revenue",
   "serviceRevenue",
   "topups",
@@ -42,12 +44,12 @@ function render(value: number | null, unit: string) {
 }
 
 function renderRatioOperand(
-  metricKey: ExecutiveMetricKey,
+  metricKey: ExecutiveDetailMetricKey,
   value: number | null,
   side: "numerator" | "denominator",
 ) {
   if (value === null) return "—";
-  if (metricKey === "revenuePerVisit") {
+  if (metricKey === "revenuePerVisit" || metricKey === "averageProductCheck") {
     return side === "numerator" ? render(value, "RUB") : render(value, "COUNT");
   }
   if (metricKey === "productRevenueShare") return render(value, "RUB");
@@ -59,11 +61,7 @@ function renderRatioOperand(
   );
 }
 
-function evidence(
-  metric: Awaited<
-    ReturnType<typeof getExecutiveSummary>
-  >["metrics"][ExecutiveMetricKey],
-) {
+function evidence(metric: ExecutiveMetric) {
   const state = {
     AVAILABLE: "Подтверждено",
     PARTIAL: "Частично подтверждено",
@@ -96,9 +94,9 @@ export default async function ExecutiveDetailsPage({
   const landingPath = getDefaultLandingPath(user);
   if (landingPath !== dashboardWorkspaceHref) redirect(landingPath);
   const candidate = first(params.metric);
-  const metricKey: ExecutiveMetricKey =
-    candidate && metricKeys.has(candidate as ExecutiveMetricKey)
-      ? (candidate as ExecutiveMetricKey)
+  const metricKey: ExecutiveDetailMetricKey =
+    candidate && metricKeys.has(candidate as ExecutiveDetailMetricKey)
+      ? (candidate as ExecutiveDetailMetricKey)
       : "revenue";
   const query: ExecutiveQuery = {
     period: first(params.period) ?? "custom",
@@ -110,6 +108,18 @@ export default async function ExecutiveDetailsPage({
   };
   const summary = await getExecutiveSummary(query);
   const metric = summary.metrics[metricKey];
+  if (!metric)
+    return (
+      <main className="p-6">
+        <Link href="/dashboard">Вернуться к сводке</Link>
+        <h1 className="mt-5 text-2xl font-semibold">
+          Средний товарный чек пока недоступен
+        </h1>
+        <p className="mt-3">
+          Источник ещё не передаёт подтверждённые данные о чеках.
+        </p>
+      </main>
+    );
   const back = new URLSearchParams({
     period: "custom",
     dateFrom: summary.scope.period.from,
@@ -173,6 +183,28 @@ export default async function ExecutiveDetailsPage({
               {metric.reason}
             </p>
           ) : null}
+          {metric.receiptEvidence ? (
+            <div className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              <p>
+                Чеков с однозначным идентификатором:{" "}
+                {metric.receiptEvidence.receiptCount ?? "—"}. Операций с
+                подтверждённым чеком:{" "}
+                {metric.receiptEvidence.operations.covered} из{" "}
+                {metric.receiptEvidence.operations.total}.
+              </p>
+              <p>
+                Выручка подтверждённых чеков:{" "}
+                {render(metric.receiptEvidence.revenue.covered, "RUB")} из{" "}
+                {render(metric.receiptEvidence.revenue.total, "RUB")}.
+                Неоднозначных идентификаторов:{" "}
+                {metric.receiptEvidence.ambiguousIdentityCount}.
+              </p>
+              <p>
+                Средний чек периода считается по всем подтверждённым чекам, а не
+                как среднее дневных средних.
+              </p>
+            </div>
+          ) : null}
         </header>
         <section className="mt-5 grid gap-5 lg:grid-cols-2">
           <DetailTable
@@ -202,9 +234,7 @@ function DetailTable({
   title: string;
   rows: Array<{
     label: string;
-    metric: Awaited<
-      ReturnType<typeof getExecutiveSummary>
-    >["metrics"][ExecutiveMetricKey];
+    metric: ExecutiveMetric | undefined;
   }>;
 }) {
   return (
@@ -226,7 +256,7 @@ function DetailTable({
               >
                 <td className="py-3">
                   <span className="font-medium">{row.label}</span>
-                  {row.metric.reason ? (
+                  {row.metric?.reason ? (
                     <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
                       {row.metric.reason}
                     </span>
@@ -234,10 +264,14 @@ function DetailTable({
                 </td>
                 <td className="py-3 text-right font-semibold tabular-nums">
                   <span className="block">
-                    {render(row.metric.value, row.metric.unit)}
+                    {row.metric
+                      ? render(row.metric.value, row.metric.unit)
+                      : "—"}
                   </span>
                   <span className="mt-1 block text-xs font-normal leading-5 text-zinc-500 dark:text-zinc-400">
-                    {evidence(row.metric)}
+                    {row.metric
+                      ? evidence(row.metric)
+                      : "Источник пока не передаёт показатель"}
                   </span>
                 </td>
               </tr>

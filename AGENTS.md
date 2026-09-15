@@ -86,6 +86,10 @@ the same change.
 
 ## Проверенные локальные gates и среда
 
+- Source follow-up15.09: `averageProductCheck` дополняет executive contract; receipt grouping в `common/receipt-metrics.ts` проверяет namespace, fiscal-day ambiguity и отдельное покрытие операций/выручки. Web tolerates old API without that metric; five top cards remain unchanged.
+- Staff priorities live in existing StaffModule (`staff-priorities.service.ts`), retain fresh NETWORK and source-feature permissions, read current server-time obligations, and expose exact paged details. Training caps produce lower bounds/unknown, not false zero. Independent Web Suspense slot does not delay primary dashboard. Contract and cross-module audit: `docs/executive-dashboard-priorities.md`.
+- Latest source-only priority acceptance: API194 suites/3588 tests +2 prior TODO; local PG17 scenarios. Receipts are under parent `deploy-evidence/executive-priorities-20260915`; these results do not authorize production.
+
 - Executive dashboard changes are source-only until an exact release is admitted; source HEAD and runtime state must be checked independently.
 - Passed receipt: cached pnpm `10.33.2`, root API `pnpm --filter api exec jest --runInBand` — 192 suites / 3571 tests; не повторять без изменения кода. Focused API file: `pnpm.cmd --filter api exec jest --runInBand --runTestsByPath src/dashboard/dashboard.service.spec.ts`.
 - Web `pnpm --filter web typecheck` and `pnpm --filter web build` passed. ESLint was run only on changed files through direct `node.exe` from `apps/web`; this is not a claim that an unrestricted full-project lint passed. App Router paths containing parentheses must be literal; filtered pnpm changes cwd, so root-relative glob patterns are invalid there.

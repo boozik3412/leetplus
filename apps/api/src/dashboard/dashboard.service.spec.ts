@@ -600,6 +600,88 @@ describe('DashboardService', () => {
     ).toBeUndefined();
   });
 
+  it('projects receipt averages and their decline without substituting visits or sale lines', async () => {
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-a',
+        name: 'Клуб A',
+        tenantId: 'tenant-demo',
+        externalDomain: 'domain-a',
+        externalClubId: 'a',
+        timeZone: 'Asia/Yekaterinburg',
+        isActive: true,
+      },
+    ]);
+    const receiptSale = (id: string, revenue: number, date: string) => ({
+      storeId: 'store-a',
+      revenue: new Prisma.Decimal(revenue),
+      saleDate: new Date(`${date}T00:00:00.000Z`),
+      externalProvider: 'CSV',
+      externalDomain: 'fixture',
+      sourcePayloadHash: bindReceiptIdentityToSourceHash(id, null),
+    });
+    prisma.salesFact.findMany.mockResolvedValue([
+      receiptSale('current-one', 300, '2026-09-07'),
+      receiptSale('current-one', 300, '2026-09-07'),
+      receiptSale('current-two', 600, '2026-09-08'),
+      receiptSale('previous-one', 500, '2026-09-05'),
+      receiptSale('previous-one', 500, '2026-09-05'),
+      receiptSale('previous-two', 500, '2026-09-06'),
+    ]);
+    assortmentHealthLoader.loadSalesCoverage.mockImplementation(
+      ({ period }: { period: { from: Date; to: Date } }) => {
+        const salesDayEvidence: Array<{
+          storeId: string;
+          date: Date;
+          status: 'CONFIRMED';
+        }> = [];
+        for (
+          const date = new Date(period.from);
+          date <= period.to;
+          date.setUTCDate(date.getUTCDate() + 1)
+        )
+          salesDayEvidence.push({
+            storeId: 'store-a',
+            date: new Date(date),
+            status: 'CONFIRMED',
+          });
+        return Promise.resolve({ salesDayEvidence });
+      },
+    );
+    const query = {
+      period: 'custom' as const,
+      dateFrom: '2026-09-07',
+      dateTo: '2026-09-08',
+      comparison: true,
+    };
+    const result = await service.getExecutiveSummary(user, query);
+    expect(result.metrics.averageProductCheck.value).toBe(600);
+    expect(result.metrics.averageProductCheck.state).toBe('AVAILABLE');
+    expect(
+      result.metrics.averageProductCheck.receiptEvidence?.receiptCount,
+    ).toBe(2);
+    expect(result.metrics.averageProductCheck.comparison).toEqual({
+      previousValue: 750,
+      absoluteDelta: -150,
+      percentDelta: -20,
+      pointsDelta: null,
+    });
+    expect(result.clubs[0].metrics.averageProductCheck.value).toBe(600);
+    expect(
+      result.days.map((row) => row.metrics.averageProductCheck.value),
+    ).toEqual([600, 600]);
+    expect(result.metrics.revenuePerVisit.state).toBe('MISSING');
+    const withoutComparison = await service.getExecutiveSummary(user, {
+      ...query,
+      comparison: false,
+    });
+    expect(withoutComparison.metrics.averageProductCheck.value).toBe(600);
+    expect(
+      withoutComparison.metrics.averageProductCheck.receiptEvidence,
+    ).toEqual(result.metrics.averageProductCheck.receiptEvidence);
+    expect(withoutComparison.metrics.averageProductCheck.comparison).toBeNull();
+  });
+
   it('projects real per-club and local-day executive subsets with comparable previous facts', async () => {
     prisma.store.findMany.mockResolvedValue([
       {

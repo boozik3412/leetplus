@@ -1,5 +1,10 @@
 import { DashboardFilters } from "@/components/dashboard-filters";
-import { ExecutiveDashboard } from "@/components/executive-dashboard";
+import {
+  ExecutiveDashboard,
+  ExecutivePriorities,
+} from "@/components/executive-dashboard";
+import { Suspense } from "react";
+import { getStaffPriorities } from "@/lib/staff-priorities";
 import { requireTenantWorkspaceUser } from "@/lib/auth";
 import {
   ExecutiveDashboardRequestError,
@@ -13,6 +18,24 @@ import { getStores } from "@/lib/stores";
 import { redirect } from "next/navigation";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+async function StaffPrioritiesSlot({
+  summary,
+  operations,
+  request,
+}: {
+  summary: Awaited<ReturnType<typeof getExecutiveSummary>>;
+  operations: ExecutiveOperations | null;
+  request: ReturnType<typeof getStaffPriorities>;
+}) {
+  return (
+    <ExecutivePriorities
+      summary={summary}
+      operations={operations}
+      staff={await request}
+    />
+  );
+}
 
 function first(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -123,6 +146,7 @@ export default async function DashboardPage({
   }
 
   const summary = summaryResult.value;
+  const staffRequest = getStaffPriorities(summary.scope.storeIds);
   const operations = await loadOperations(query, summary);
   return (
     <main className="min-h-screen bg-[var(--background)] px-4 py-6 text-[var(--foreground)] sm:px-6 lg:px-8">
@@ -150,7 +174,28 @@ export default async function DashboardPage({
             />
           </div>
         </header>
-        <ExecutiveDashboard summary={summary} operations={operations} />
+        <ExecutiveDashboard
+          summary={summary}
+          operations={operations}
+          priorities={
+            <Suspense
+              key={JSON.stringify(summary.scope)}
+              fallback={
+                <ExecutivePriorities
+                  summary={summary}
+                  operations={operations}
+                  staffLoading
+                />
+              }
+            >
+              <StaffPrioritiesSlot
+                summary={summary}
+                operations={operations}
+                request={staffRequest}
+              />
+            </Suspense>
+          }
+        />
       </div>
     </main>
   );

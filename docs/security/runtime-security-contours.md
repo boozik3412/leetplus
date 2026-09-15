@@ -827,6 +827,12 @@ contract.
 
 ### Production USER_CALL continuity
 
+Source-only UI follow-up15.09 добавляет countdown/errors/terminal actions в
+USER_CALL modal и переход к уже READY Telegram. Просроченный номер скрывается;
+повтор start требует нажатия, поздний ответ старой попытки не подменяет новый
+выбор. Серверное phone proof, TTL, HttpOnly cookie, provider и три execution
+contours не меняются. Это не новый production release; [контракт UI](../support/user-call-auth-feedback.md).
+
 Публичный вход по SMS.ru Callcheck — пользовательский request path, а не worker.
 Для текущего `COMBINED` blue/green runtime он включается только API-only файлом
 `/etc/leetplus/guest-user-call-live.env`, установленным и проверенным exact

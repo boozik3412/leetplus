@@ -1,5 +1,10 @@
 # LeetPlus open beta — текущее состояние на 15.09.2026
 
+Source-only USER_CALL modal follow-up15.09: видимые countdown/error/expiry,
+явный retry и переход к READY Telegram. Backend phone proof/provider/TTL,
+cookie и worker scope неизменны; новая production-выкладка этим описанием
+не объявляется. [Поведение и проверки](../support/user-call-auth-feedback.md).
+
 Выпуск 15.09 сохраняет исправления storeless bonus delivery и прогресса
 накопительной карты. Fresh guest claim связывает wallet/ledger с
 проверенным клубом выплаты, сохраняя domain-scoped source event/reward; worker

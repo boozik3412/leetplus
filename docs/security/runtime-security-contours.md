@@ -2,6 +2,23 @@
 
 Статус: **канонический current-state contract**, актуально на **15.09.2026**.
 
+### Source candidate15.09: надёжное обновление provider network
+
+Ещё не deployed: exact refresh получает shared control lock и отдельный
+exclusive singleton, сохраняя public-IP allowlist, TTL3600 и atomic swaps.
+Подготовлен signed serving-controller-only handoff: отдельный staged root,
+один atomic core pointer, только retry-параметры refresh unit, без остановки
+API/Web/PG или таймеров. Active app/data/grant/config/process identities
+не меняются; source/CI не заменяют exact admission и production GO.
+Accepted и provisional signed-intent lifecycle authority различаются;
+pending handoff не разрешает новый app deployment. Manual rollback требует
+отдельного receipt-bound approval. Истёкший незавершённый forward intent
+разрешает только возврат собственных effects, не новую активацию; pending network
+install разрешён лишь прежнему boot unit по kernel cgroup и signed app history.
+Последнее фактическое состояние ниже
+остаётся b5/gen5, data/control399876 до реального handoff и postcheck.
+[Контракт, rollback и acceptance](../deployment/network-refresh-control-handoff.md).
+
 Фактический перенос на сервер1337 выполнен по отдельному разрешению владельца.
 Новый узел `192.168.1.137`, public `188.234.220.76`, после rollout 15.09.2026
 обслуживает exact `b5c03360941e1e5d59fe83f334b8dc29c2eced3b`: active blue,

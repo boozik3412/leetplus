@@ -5,6 +5,7 @@ changes bounded provider IP sets; verify is read-only. The reviewed provider
 file belongs to the host control plane, not an application container.
 """
 import argparse
+import datetime
 import ipaddress
 import json
 import os
@@ -12,7 +13,10 @@ import re
 import shlex
 import socket
 import subprocess
+import sys
 from pathlib import Path
+sys.dont_write_bytecode = True
+from network_observation import capture_provider_sets, classify_freshness, read_observation, write_observation
 
 SUBNET = '172.31.40.0/22'
 EGRESS = '172.31.43.0/24'
@@ -157,9 +161,9 @@ def rehearsal_fence(install=False):
             raise ValueError('Rehearsal fence must precede other matching rules')
 
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['install', 'refresh', 'verify', 'install-rehearsal', 'verify-rehearsal'])
+    parser.add_argument('command', choices=['install', 'refresh', 'verify', 'status', 'install-rehearsal', 'verify-rehearsal'])
     args = parser.parse_args()
     if os.getuid() != 0:
         raise SystemExit('Root control plane required')
@@ -167,16 +171,40 @@ if __name__ == '__main__':
         rehearsal_fence(args.command == 'install-rehearsal')
         print(json.dumps({'decision': 'PASS', 'contract': 'LEETPLUS_REHEARSAL_NETWORK_V2', 'providerEgress': 'DENIED', 'hostServices': 'DENIED'}))
         raise SystemExit(0)
-    config = provider_config()
-    if args.command != 'verify':
-        refresh(config)
-    if args.command == 'install':
-        install_chain(CHAIN, RULES, 'DOCKER-USER')
-        install_chain(HOST_CHAIN, HOST_RULES, 'INPUT')
-    verify_chain(CHAIN, RULES, 'DOCKER-USER')
-    verify_chain(HOST_CHAIN, HOST_RULES, 'INPUT')
-    for name in ['lp_leetplus_https', 'lp_leetplus_smtp']:
-        value = call(['/usr/sbin/ipset', 'list', name]).stdout
-        if 'Type: hash:ip' not in value or not re.search(r'Number of entries: [1-9]', value):
-            raise ValueError('Provider set is missing or expired')
+    if args.command == 'status':
+        previous = read_observation()
+        sets = capture_provider_sets(call)
+        failed = previous and previous['reasonCode'] != 'REFRESH_OK'
+        print(json.dumps({'decision': 'OBSERVED_NOT_AUTHORITY', 'sets': sets, 'state': classify_freshness(sets, 'FAILED' if failed else None), 'lastObservation': previous}))
+        return 0
+    try:
+        config = provider_config()
+        if args.command != 'verify':
+            refresh(config)
+        if args.command == 'install':
+            install_chain(CHAIN, RULES, 'DOCKER-USER')
+            install_chain(HOST_CHAIN, HOST_RULES, 'INPUT')
+        verify_chain(CHAIN, RULES, 'DOCKER-USER')
+        verify_chain(HOST_CHAIN, HOST_RULES, 'INPUT')
+        for name in ['lp_leetplus_https', 'lp_leetplus_smtp']:
+            value = call(['/usr/sbin/ipset', 'list', name]).stdout
+            if 'Type: hash:ip' not in value or not re.search(r'Number of entries: [1-9]', value):
+                raise ValueError('Provider set is missing or expired')
+    except Exception as error:
+        if args.command != 'refresh':
+            raise
+        reason = 'NETWORK_REFRESH_DNS_FAILED' if isinstance(error, socket.gaierror) else 'NETWORK_REFRESH_REJECTED'
+        sets = capture_provider_sets(call)
+        observed = {'time': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'), 'result': classify_freshness(sets, 'FAILED'), 'reasonCode': reason, 'sets': sets}
+        write_observation(observed)
+        print(json.dumps({'decision': 'FAIL', 'reasonCode': reason, 'observation': observed}))
+        return 1
+    if args.command == 'refresh':
+        sets = capture_provider_sets(call)
+        write_observation({'time': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'), 'result': classify_freshness(sets), 'reasonCode': 'REFRESH_OK', 'sets': sets})
     print(json.dumps({'decision': 'PASS', 'contract': 'LEETPLUS_COMPOSE_NETWORK_V1'}))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

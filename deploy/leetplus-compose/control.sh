@@ -10,9 +10,11 @@ control_root=$(dirname -- "$(readlink -f -- "$0")")
 [[ $(stat -c '%u:%g:%a' /var/lib/leetplus-compose) == '0:0:700' ]]
 lock_mode=--exclusive
 extra_lock=()
+control_wait=(--nonblock)
 case "${1:-}" in
-  status|boot) lock_mode=--shared ;;
+  status|boot) [[ $# == 1 ]]; lock_mode=--shared ;;
   backup)
+    [[ $# == 1 ]]
     lock_mode=--shared
     extra_lock=(/usr/bin/flock --exclusive --nonblock /var/lib/leetplus-compose/backup.lock)
     ;;
@@ -22,7 +24,19 @@ case "${1:-}" in
     lock_mode=--shared
     extra_lock=(/usr/bin/flock --exclusive --nonblock "/var/lib/leetplus-compose/$3.lock")
     ;;
+  network)
+    [[ $# == 3 && "$2" == --operation ]]
+    if [[ "$3" == refresh ]]; then
+      lock_mode=--shared
+      # Different workers continue while DNS/IP sets are renewed. A deploy or
+      # handoff still fences us; wait briefly, then let bounded systemd retry.
+      control_wait=(--wait 20 --conflict-exit-code 75)
+      extra_lock=(/usr/bin/flock --exclusive --nonblock --conflict-exit-code 75 /var/lib/leetplus-compose/network-refresh.lock)
+    elif [[ "$3" == status ]]; then
+      lock_mode=--shared
+    fi
+    ;;
 esac
 exec /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
-  "${extra_lock[@]}" /usr/bin/flock "$lock_mode" --nonblock /var/lib/leetplus-compose/control.lock \
+  "${extra_lock[@]}" /usr/bin/flock "$lock_mode" "${control_wait[@]}" /var/lib/leetplus-compose/control.lock \
   /usr/bin/env LEETPLUS_COMPOSE_LOCKED=1 /usr/bin/node "$control_root/control.mjs" "$@"

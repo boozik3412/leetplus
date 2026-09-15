@@ -19,6 +19,16 @@ install разрешён лишь прежнему boot unit по kernel cgroup 
 остаётся b5/gen5, data/control399876 до реального handoff и postcheck.
 [Контракт, rollback и acceptance](../deployment/network-refresh-control-handoff.md).
 
+Source repair16.09: preflight обнаружил ложный drift из-за меняющегося порядка
+Docker `Mounts`; переключение d7d799dd не запускалось. Fingerprint конфигурации
+сортирует только этот неупорядоченный список по unique canonical POSIX Destination
+и ключи JSON objects, сохраняя все поля и порядок остальных массивов. Дубликаты
+и некорректные пути отвергаются; PID/start/image/grant проверки не ослабляются.
+Signed canonical records не меняются: нужны новый admitted artifact и новый
+native plan, а не переписывание старого snapshot или retry до случайного PASS.
+Расхождение часов проверяется до подписи, без backdating и расширения TTL approval.
+Это пока source-only; appb5/gen5, serving control/data399876 не изменены.
+
 Фактический перенос на сервер1337 выполнен по отдельному разрешению владельца.
 Новый узел `192.168.1.137`, public `188.234.220.76`, после rollout 15.09.2026
 обслуживает exact `b5c03360941e1e5d59fe83f334b8dc29c2eced3b`: active blue,

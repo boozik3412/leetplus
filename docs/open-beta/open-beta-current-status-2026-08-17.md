@@ -9,6 +9,13 @@ Interrupted/expired handoff сохраняет только доказанное
 pending network install доступен лишь штатному boot unit с signed app history.
 [Порядок переключения и проверки](../deployment/network-refresh-control-handoff.md).
 
+Source repair16.09: подготовленный controller d7d799dd не активирован — preflight
+выявил случайный порядок Docker Mounts в configuration fingerprint. Исправление
+стабилизирует только порядок mount collection/ключей objects и сохраняет все
+поля, остальные массивы и проверки реальных изменений. Старый plan не правится;
+нужны новый exact-main admission и native plan с отдельным GO. Время оператора
+и сервера проверяется до подписи; runtime/control/data остаются прежними.
+
 Source-only USER_CALL modal follow-up15.09: видимые countdown/error/expiry,
 явный retry и переход к READY Telegram. Backend phone proof/provider/TTL,
 cookie и worker scope неизменны; новая production-выкладка этим описанием

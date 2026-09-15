@@ -2,7 +2,7 @@ window.STATE =
 {
   "slug": "executive-dashboard",
   "dir": "2026-09-15-executive-dashboard--wip",
-  "title": "Сводный дашборд: реализация варианта1",
+  "title": "Сводный дашборд — пауза по запросу пользователя",
   "mode": "semi",
   "depth": "normal",
   "polish": null,
@@ -11,7 +11,7 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "skillDir": "C:\\Users\\ALIENWARE\\.codex\\skills\\autopilot",
   "startedAt": "2026-09-15T10:27:25.425605+05:00",
-  "updatedAt": "2026-09-15T11:28:39.532933+05:00",
+  "updatedAt": "2026-09-15T10:49:55.805274+05:00",
   "finishedAt": null,
   "stages": [
     {
@@ -37,21 +37,19 @@ window.STATE =
       "id": "spec",
       "status": "done",
       "startedAt": "2026-09-15T10:41:30.814570+05:00",
-      "finishedAt": "2026-09-15T10:48:23.259190+05:00",
-      "note": "Спецификация v2 пересмотрена по четырём навыкам; G2 PASS"
+      "finishedAt": "2026-09-15T10:48:23.259190+05:00"
     },
     {
       "id": "plan",
       "status": "done",
       "startedAt": "2026-09-15T10:48:23.259190+05:00",
       "finishedAt": "2026-09-15T10:48:23.259190+05:00",
-      "note": "План v2: сквозной пилот → API/UI → приёмка; 4 задачи, 3 волны"
+      "note": "T2 · 4 задачи · 3 волны"
     },
     {
       "id": "build",
-      "status": "active",
-      "note": "Сквозной пилот на товарной выручке",
-      "startedAt": "2026-09-15T11:28:39.532933+05:00"
+      "status": "pending",
+      "note": "Пауза до обновления навыков и задачи; реализация ещё не начата"
     },
     {
       "id": "review",
@@ -74,35 +72,33 @@ window.STATE =
   "tickets": [
     {
       "id": "01",
-      "title": "Сквозной пилот: товарная выручка, фильтр и объяснение",
+      "title": "Общий контракт и чистые расчёты сводки",
       "requirements": [
         "R02",
         "R03",
+        "R04",
         "R05",
-        "R06",
-        "R12",
-        "R17",
-        "R19",
+        "R07",
+        "R08",
+        "R09",
+        "R11",
+        "R13",
         "R20"
       ],
       "blockedBy": [],
       "wave": 1,
       "zone": [
-        "shared executive contract/product-revenue service slice",
-        "apps/web/src/components/metric-*",
-        "apps/web/src/lib/metric-presentation*",
-        "apps/web/src/components/dashboard-filters.tsx"
+        "apps/api/src/common/executive-*"
       ],
-      "status": "in-progress",
+      "status": "pending",
       "retries": 0,
       "repairs": 0,
       "handoffs": 0,
-      "planRevision": 2,
-      "startedAt": "2026-09-15T11:28:39.532933+05:00"
+      "note": "Исполнитель не запускался до паузы"
     },
     {
       "id": "02",
-      "title": "Единые оперативные расчёты и реальные источники",
+      "title": "Рабочая оперативная API сводка из сохранённых данных",
       "requirements": [
         "R02",
         "R03",
@@ -114,7 +110,6 @@ window.STATE =
         "R09",
         "R10",
         "R11",
-        "R13",
         "R15",
         "R16",
         "R18",
@@ -125,18 +120,16 @@ window.STATE =
       ],
       "wave": 2,
       "zone": [
-        "apps/api/src/dashboard/",
-        "apps/api/src/common/executive-* business calculations"
+        "apps/api/src/dashboard/"
       ],
       "status": "pending",
       "retries": 0,
       "repairs": 0,
-      "handoffs": 0,
-      "planRevision": 2
+      "handoffs": 0
     },
     {
       "id": "03",
-      "title": "Полный вариант1 и устойчивые пользовательские переходы",
+      "title": "Первый визуальный вариант и согласованные переходы",
       "requirements": [
         "R01",
         "R02",
@@ -164,17 +157,17 @@ window.STATE =
         "apps/web/src/components/executive-*",
         "apps/web/src/lib/dashboard-executive*",
         "apps/web/src/lib/assortment-report-query*",
-        "apps/web/src/app/(app)/assortment/dashboard/page.tsx"
+        "apps/web/src/app/(app)/assortment/dashboard/page.tsx",
+        "apps/web/src/components/dashboard-filters.tsx"
       ],
       "status": "pending",
       "retries": 0,
       "repairs": 0,
-      "handoffs": 0,
-      "planRevision": 2
+      "handoffs": 0
     },
     {
       "id": "04",
-      "title": "Приёмка по ожидаемым данным и документация",
+      "title": "Сквозная приёмка и документация реализации",
       "requirements": [
         "R01",
         "R02",
@@ -210,8 +203,7 @@ window.STATE =
       "status": "pending",
       "retries": 0,
       "repairs": 0,
-      "handoffs": 0,
-      "planRevision": 2
+      "handoffs": 0
     }
   ],
   "singlePass": null,
@@ -223,16 +215,14 @@ window.STATE =
   },
   "additions": [],
   "coverage": {
-    "revision": 2,
-    "verdict": "PASS",
-    "found": 1,
-    "fixed": 1,
+    "found": 2,
+    "fixed": 2,
     "deferred": 0,
     "notes": [
-      "Восстановлено явное правило R10: MISSING/FAILED movements не0 и не0% во всех связанных представлениях"
+      "Привязаны точные visual target пути",
+      "Документация/релизныеусловияобозначеныкакобязательное сопровождение R03/R05/R07, неавтодеплой"
     ],
-    "reviewer": "/root/executive_spec_review",
-    "reviewedAt": "2026-09-15T11:24:31.954361+05:00"
+    "verdict": "PASS"
   },
   "concerns": [],
   "reviewers": {
@@ -240,43 +230,10 @@ window.STATE =
     "craft": null
   },
   "blind": null,
-  "planRevision": 2,
-  "planningUpdate": {
-    "startedAt": "2026-09-15T11:11:23.930037+05:00",
-    "status": "complete",
-    "reason": "Новые четыре навыка LeetPlus; пересмотр задания по просьбе пользователя",
-    "implementationResumed": true,
-    "finishedAt": "2026-09-15T11:24:31.954361+05:00",
-    "review": "G2 PASS; 20 requirements retained; G3 mapping and disjoint wave2 zones verified"
-  },
-  "coverageHistory": [
-    {
-      "found": 2,
-      "fixed": 2,
-      "deferred": 0,
-      "notes": [
-        "Привязаны точные visual target пути",
-        "Документация/релизныеусловияобозначеныкакобязательное сопровождение R03/R05/R07, неавтодеплой"
-      ],
-      "verdict": "PASS"
-    }
-  ],
-  "appliedSkills": [
-    "leetplus-dashboard-ux",
-    "leetplus-ux-writing",
-    "leetplus-ui-quality",
-    "leetplus-design-system"
-  ],
-  "pauseHistory": [
-    {
-      "at": "2026-09-15T10:49:55.805274+05:00",
-      "reason": "user_requested",
-      "message": "поставь выполнение на паузу, сейчас  интегрируем новые скиллы и обновим текущую задачу после этого",
-      "resumeOnlyOnUserInstruction": true,
-      "planningRevision": 2,
-      "resumedAt": "2026-09-15T11:28:39.532933+05:00",
-      "resumeMessage": "ок, реализуй"
-    }
-  ],
-  "resumedAt": "2026-09-15T11:28:39.532933+05:00"
+  "pause": {
+    "at": "2026-09-15T10:49:55.805274+05:00",
+    "reason": "user_requested",
+    "message": "поставь выполнение на паузу, сейчас  интегрируем новые скиллы и обновим текущую задачу после этого",
+    "resumeOnlyOnUserInstruction": true
+  }
 }

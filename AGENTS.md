@@ -70,4 +70,10 @@ the same change.
 - Один API test file: `pnpm.cmd --filter api exec jest --runInBand --runTestsByPath src/common/assortment-health.spec.ts`.
 - Синтетическая UI QA использует fixture `localhost:4311` и Next `localhost:4312` через `API_URL` и `PORT` с `pnpm --filter web start`; это не обычный dev или production запуск.
 - Источник и production proof определяются canonical deployment documentation, а не веткой или наличием исходного кода.
+
+## Сводный дашборд: текущая работа
+
+- Выбран HTML-вариант1 «Главное за минуту»; рабочий прогон `.autopilot/2026-09-15-executive-dashboard--wip`.
+- Макеты и демоданные находятся отдельно в `output/summary-dashboard-concepts-20260915` родительского workspace и не являются источником production значений.
+- Согласованный аудит требует одинаковых периодов/мультиклубных фильтров, согласованных денежных итогов, явных ограничений данных и безопасных переходов. Существующие CRM-сегменты за3месяца не переопределять как оперативную сводку.
 <!-- autopilot:end -->

@@ -71,9 +71,28 @@ the same change.
 - Синтетическая UI QA использует fixture `localhost:4311` и Next `localhost:4312` через `API_URL` и `PORT` с `pnpm --filter web start`; это не обычный dev или production запуск.
 - Источник и production proof определяются canonical deployment documentation, а не веткой или наличием исходного кода.
 
-## Сводный дашборд: текущая работа
+## Сводный дашборд: исходный код
 
-- Выбран HTML-вариант1 «Главное за минуту»; рабочий прогон `.autopilot/2026-09-15-executive-dashboard--wip`.
-- Макеты и демоданные находятся отдельно в `output/summary-dashboard-concepts-20260915` родительского workspace и не являются источником production значений.
-- Согласованный аудит требует одинаковых периодов/мультиклубных фильтров, согласованных денежных итогов, явных ограничений данных и безопасных переходов. Существующие CRM-сегменты за3месяца не переопределять как оперативную сводку.
+- Исходное состояние на 15.09.2026: `apps/api/src/dashboard/dashboard.controller.ts` даёт corporate JWT+role-guarded read-only `GET /dashboard/executive-summary`, `executive-operations` и `executive-product-revenue`; `DashboardService` нормализует scope через `FreshStoreScopeService`.
+- Общий wire contract: API `apps/api/src/common/executive-contract.ts`, Web `apps/web/src/lib/dashboard-executive.ts`. `ExecutiveAppliedScope` возвращает принятые inclusive `YYYY-MM-DD` period, concrete `storeIds`, `storeTimeZones`, optional comparison и отдельный ISO `asOf`; `PER_STORE` — label mixed-zone scope, не IANA-зона для `Intl`.
+- `ExecutiveMetric` всегда несёт `value|null`, state, reason, coverage, independent `factAsOf`, `lastCalculatedAt`, comparison и `ratio`; `MISSING`/`FAILED` не заменять нулём. Club/day details — агрегаты той же accepted scope, не чеки или отдельные сессии.
+- Product revenue читает saved non-cancelled `SalesFact` только для подтверждённых store-days через `AssortmentHealthLoaderService.loadSalesCoverage`; fiscal-date labels сопоставляются без повторного timezone shift. `AVAILABLE` допускает доказанный ноль, `PARTIAL` — только подтверждённую часть.
+- Сохранённые `GuestSession` дают лишь доказуемо привязанные visits и сейчас `PARTIAL` при наблюдениях: независимого store-day completeness proof нет, поэтому visit comparisons подавлены. Services, реальные topups и historical capacity/load не доказаны: остаются `MISSING`; revenue может показать лишь partial product component, а ARPV/product share/load не объявлять реальными ratio.
+- `getExecutiveOperations` читает assortment отдельно; failure не ломает primary summary. Web `apps/web/src/app/(app)/dashboard/page.tsx` loads summary first, requests operations against accepted scope and discards scope mismatch; UI shows evidence/reason/coverage and builds only role-safe internal detail/report links.
+- Entry UI: `/dashboard` uses shared `DashboardFilters`; `ExecutiveDashboard`, `executive-trend-chart.tsx` and `executive-club-table.tsx` render summary; `/dashboard/executive-details` re-queries the same scope and labels output as club/day aggregates. Transport accepts abort signal and throws `ExecutiveDashboardRequestError` for non-OK responses.
+- Product pilot aliases (`tenantId`, `tenantSlug`, period fields and `selectedStoreIds`) remain compatibility data; new UI consumes `scope`. Legacy `/dashboard/summary` and assortment surfaces stay separate.
+
+## Проверенные локальные gates и среда
+
+- Executive dashboard changes are source-only until an exact release is admitted; source HEAD and runtime state must be checked independently.
+- Passed receipt: cached pnpm `10.33.2`, root API `pnpm --filter api exec jest --runInBand` — 192 suites / 3571 tests; не повторять без изменения кода. Focused API file: `pnpm.cmd --filter api exec jest --runInBand --runTestsByPath src/dashboard/dashboard.service.spec.ts`.
+- Web `pnpm --filter web typecheck` and `pnpm --filter web build` passed. ESLint was run only on changed files through direct `node.exe` from `apps/web`; this is not a claim that an unrestricted full-project lint passed. App Router paths containing parentheses must be literal; filtered pnpm changes cwd, so root-relative glob patterns are invalid there.
+- Local PG fixture is PostgreSQL 16.13 on `127.0.0.1:55495`, baseline 15/15 passed with CLI `testTimeout=30000`; it is not production DB. Use `DATABASE_URL` only by name and never record its value.
+- Full UI QA bootstrap uses separate local services on `4321/4322`; synthetic control data and `API_URL`/`PORT` overrides are test-only, not production authentication. CUA auth is unavailable; user permitted local Chromium.
+- Do not install dependencies merely to repeat these gates. `pnpm` is pinned to `10.33.2`; use `pnpm dev`, `pnpm --filter api start:dev`, or `pnpm --filter web dev` only when an actual local run is needed.
+
+## Границы следующей сессии
+
+- Макеты и demo data in parent `output/summary-dashboard-concepts-20260915` are presentation references only, never production values. Current run record is `.autopilot/2026-09-15-executive-dashboard--wip`; do not treat its plan/spec/tickets as source of truth over code.
+- No auth, provider, import, backfill, schema or production effect follows from this dashboard. Keep saved-data reads, canonical fresh scope and the public/corporate/worker contours from `docs/security/runtime-security-contours.md` separate.
 <!-- autopilot:end -->

@@ -34,6 +34,8 @@ import { JwtAuthGuard } from '../src/auth/jwt-auth.guard';
 import { RolesGuard } from '../src/auth/roles.guard';
 import { CategoriesService } from '../src/categories/categories.service';
 import { AssortmentHealthLoaderService } from '../src/common/assortment-health-loader.service';
+import { DashboardController } from '../src/dashboard/dashboard.controller';
+import { DashboardService } from '../src/dashboard/dashboard.service';
 import { FactCsvImportService } from '../src/imports/fact-csv-import.service';
 import { ProductCsvImportService } from '../src/imports/product-csv-import.service';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -1085,6 +1087,144 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
     }
   });
 
+  it('keeps executive GETs scoped and labels partial, missing and source-limited metrics without false zeroes', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    await seedExecutiveFacts(prisma, fixture);
+    let currentUser = buildUser(fixture, 'A_NETWORK');
+    const app = await buildDashboardHttpApp(prisma, () => currentUser);
+    const httpServer = app.getHttpServer() as App;
+    const currentQuery = new URLSearchParams({
+      period: 'custom',
+      dateFrom: '2026-09-07',
+      dateTo: '2026-09-08',
+      storeIds: fixture.storeA1Id,
+      asOf: '2026-09-08T23:59:59.999Z',
+      comparison: 'true',
+    });
+    currentQuery.append('storeIds', fixture.storeA2Id);
+
+    try {
+      const summary = await request(httpServer)
+        .get(`/dashboard/executive-summary?${currentQuery}`)
+        .expect(200);
+      expect(summary.body.scope.storeIds).toEqual([
+        fixture.storeA1Id,
+        fixture.storeA2Id,
+      ]);
+      expect(summary.body.scope.storeIds).not.toContain(fixture.storeB1Id);
+      expect(summary.body.metrics.productRevenue).toMatchObject({
+        value: 10,
+        state: 'PARTIAL',
+        coverage: {
+          covered: 2,
+          total: 4,
+          percent: 50,
+          basis: 'STORE_DAYS',
+        },
+      });
+      expect(summary.body.clubs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            storeId: fixture.storeA1Id,
+            metrics: expect.objectContaining({
+              productRevenue: expect.objectContaining({ value: 10 }),
+            }),
+          }),
+          expect.objectContaining({
+            storeId: fixture.storeA2Id,
+            metrics: expect.objectContaining({
+              productRevenue: expect.objectContaining({
+                value: null,
+                state: 'MISSING',
+              }),
+            }),
+          }),
+        ]),
+      );
+      expect(summary.body.metrics.visits).toMatchObject({
+        value: 1,
+        state: 'PARTIAL',
+        coverage: {
+          covered: 1,
+          total: null,
+          percent: null,
+          basis: 'STORE_SESSIONS',
+        },
+      });
+      expect(summary.body.metrics).toMatchObject({
+        serviceRevenue: { value: null, state: 'MISSING' },
+        topups: { value: null, state: 'MISSING' },
+        load: { value: null, state: 'MISSING' },
+      });
+      await expect(
+        prisma.stockMovement.count({
+          where: {
+            tenantId: fixture.tenantAId,
+            storeId: { in: [fixture.storeA1Id, fixture.storeA2Id] },
+            movementDate: {
+              gte: new Date('2026-09-07T00:00:00.000Z'),
+              lte: new Date('2026-09-08T23:59:59.999Z'),
+            },
+          },
+        }),
+      ).resolves.toBe(0);
+
+      const operations = await request(httpServer)
+        .get(`/dashboard/executive-operations?${currentQuery}`)
+        .expect(200);
+      expect(operations.body.scope).toEqual(summary.body.scope);
+      expect(operations.body.assortment).toEqual(
+        expect.objectContaining({
+          state: expect.any(String),
+          data: expect.objectContaining({
+            summary: expect.objectContaining({
+              writeOffQuantity: expect.objectContaining({
+                value: null,
+                state: 'MISSING',
+              }),
+              writeOffAmount: expect.objectContaining({
+                value: null,
+                state: 'MISSING',
+              }),
+            }),
+          }),
+        }),
+      );
+
+      const empty = await request(httpServer)
+        .get(
+          `/dashboard/executive-summary?period=custom&dateFrom=2026-09-09&dateTo=2026-09-09&storeIds=${fixture.storeA1Id}&asOf=2026-09-09T23%3A59%3A59.999Z`,
+        )
+        .expect(200);
+      expect(empty.body.metrics.productRevenue).toMatchObject({
+        value: null,
+        state: 'MISSING',
+      });
+
+      await request(httpServer)
+        .get(
+          `/dashboard/executive-summary?period=custom&dateFrom=2026-09-07&dateTo=2026-09-08&storeIds=${fixture.storeB1Id}`,
+        )
+        .expect(403);
+
+      currentUser = buildUser(fixture, 'A1');
+      const storeOnly = await request(httpServer)
+        .get('/dashboard/executive-summary?period=custom&dateFrom=2026-09-07&dateTo=2026-09-08')
+        .expect(200);
+      expect(storeOnly.body.scope.storeIds).toEqual([fixture.storeA1Id]);
+      expect(JSON.stringify(storeOnly.body)).not.toContain(fixture.storeA2Id);
+      await request(httpServer)
+        .get(
+          `/dashboard/executive-summary?period=custom&dateFrom=2026-09-07&dateTo=2026-09-08&storeIds=${fixture.storeA2Id}`,
+        )
+        .expect(403);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('keeps real report HTTP exports and mutations inside tenant authority', async () => {
     const fixture = await createFixture(prisma);
     fixtureTenantIds.add(fixture.tenantAId);
@@ -1331,6 +1471,109 @@ async function buildReportsHttpApp(
   const app = testingModule.createNestApplication();
   await app.init();
   return app;
+}
+
+async function buildDashboardHttpApp(
+  prisma: PrismaService,
+  getUser: () => AuthenticatedUser,
+): Promise<INestApplication> {
+  const dashboardService = new DashboardService(
+    prisma,
+    new FreshStoreScopeService(prisma, new AccessScopeService()),
+    new AssortmentHealthLoaderService(prisma),
+  );
+  const testingModule = await Test.createTestingModule({
+    controllers: [DashboardController],
+    providers: [{ provide: DashboardService, useValue: dashboardService }],
+  })
+    .overrideGuard(JwtAuthGuard)
+    .useValue({
+      canActivate(context: ExecutionContext) {
+        const authenticatedRequest = context
+          .switchToHttp()
+          .getRequest<AuthenticatedRequest>();
+        authenticatedRequest.user = getUser();
+        return true;
+      },
+    })
+    .overrideGuard(RolesGuard)
+    .useValue(new RolesGuard(new Reflector()))
+    .compile();
+  const app = testingModule.createNestApplication();
+  await app.init();
+  return app;
+}
+
+async function seedExecutiveFacts(prisma: PrismaClient, fixture: Fixture) {
+  const firstDay = new Date('2026-09-07T00:00:00.000Z');
+  const secondDay = new Date('2026-09-08T00:00:00.000Z');
+  const secondDomain = `${fixture.tenantASlug}-missing`;
+  await prisma.store.update({
+    where: { id: fixture.storeA2Id },
+    data: { externalDomain: secondDomain },
+  });
+  await prisma.$transaction([
+    prisma.salesFact.createMany({
+      data: [
+        {
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA1Id,
+          productId: fixture.productA1Id,
+          saleDate: firstDay,
+          quantity: 1,
+          revenue: 10,
+          cost: 5,
+          productNameAtSale: 'A1 executive product',
+          storeNameAtSale: 'A1',
+        },
+        {
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA2Id,
+          productId: fixture.productA2Id,
+          saleDate: firstDay,
+          quantity: 1,
+          revenue: 900,
+          cost: 450,
+          productNameAtSale: 'A2 unconfirmed executive product',
+          storeNameAtSale: 'A2',
+        },
+        {
+          tenantId: fixture.tenantBId,
+          storeId: fixture.storeB1Id,
+          productId: fixture.productB1Id,
+          saleDate: firstDay,
+          quantity: 1,
+          revenue: 999,
+          cost: 500,
+          productNameAtSale: 'B1 foreign executive product',
+          storeNameAtSale: 'B1',
+        },
+      ],
+    }),
+    prisma.dailyDataCoverage.createMany({
+      data: [firstDay, secondDay].map((businessDate) => ({
+        tenantId: fixture.tenantAId,
+        businessDate,
+        scope: DailyDataCoverageScope.BUSINESS_FACTS,
+        status: DailyDataCoverageStatus.SUCCESS,
+        summary: {
+          domains: [
+            { domain: fixture.tenantASlug, status: 'SUCCESS' },
+          ],
+        },
+      })),
+    }),
+    prisma.guestSession.create({
+      data: {
+        tenantId: fixture.tenantAId,
+        storeId: fixture.storeA1Id,
+        externalProvider: 'LANGAME',
+        externalDomain: fixture.tenantASlug,
+        externalSessionId: `executive-${fixture.storeA1Id}`,
+        startedAt: new Date('2026-09-07T12:00:00.000Z'),
+      },
+    }),
+  ]);
 }
 
 async function seedReportFacts(prisma: PrismaClient, fixture: Fixture) {
@@ -1710,6 +1953,7 @@ async function createFixture(prisma: PrismaClient): Promise<Fixture> {
 
 async function cleanupFixture(prisma: PrismaClient, tenantId: string) {
   await prisma.$transaction([
+    prisma.guestSession.deleteMany({ where: { tenantId } }),
     prisma.inventorySnapshot.deleteMany({ where: { tenantId } }),
     prisma.salesFact.deleteMany({ where: { tenantId } }),
     prisma.stockMovement.deleteMany({ where: { tenantId } }),

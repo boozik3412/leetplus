@@ -105,6 +105,28 @@ access scope, публичного игрового входа, управлен
 background jobs и production deployment. Он сохраняет независимость public
 guest, corporate tenant и worker/control-plane субъектов.
 
+### Executive dashboard source-only candidate, 15.09.2026
+
+Corporate `/dashboard` source добавляет guarded read-only executive summary и
+independent operations projection. Это не runtime change: active production
+остаётся `b5c033…`/generation5, а source-only работа не меняет route owner,
+JWT/role policy, database role/schema, worker placement, secret, provider
+egress или deployment authority.
+
+Каждый executive GET заново применяет fresh tenant/store scope и возвращает
+только accepted stores. Product sales имеют доказуемое store-day coverage;
+нет coverage означает `MISSING`/`null`, а не ноль. Observed sessions остаются
+`PARTIAL` без independent session completeness proof. Services, real topups,
+historical capacity и dependent exact ratios остаются `MISSING`. Operations
+может отказать независимо от primary summary; `STALE`, `MISSING` или `FAILED`
+wrapper либо child metric не подтверждает текущий assortment signal и не может
+породить priority action.
+
+Loopback-only synthetic UI fixture применяет short-lived process-local JWT и
+условные service/capacity values исключительно для presentation/formula QA.
+Она не является ordinary corporate login, production canary или основанием для
+deployment/GO.
+
 ### Canonical simple safe external Langame onboarding
 
 Deployed bcb0a4d3 ручной синхронизации изолирует отказы provider по разделам:

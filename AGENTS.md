@@ -87,7 +87,7 @@ the same change.
 - Executive dashboard changes are source-only until an exact release is admitted; source HEAD and runtime state must be checked independently.
 - Passed receipt: cached pnpm `10.33.2`, root API `pnpm --filter api exec jest --runInBand` — 192 suites / 3571 tests; не повторять без изменения кода. Focused API file: `pnpm.cmd --filter api exec jest --runInBand --runTestsByPath src/dashboard/dashboard.service.spec.ts`.
 - Web `pnpm --filter web typecheck` and `pnpm --filter web build` passed. ESLint was run only on changed files through direct `node.exe` from `apps/web`; this is not a claim that an unrestricted full-project lint passed. App Router paths containing parentheses must be literal; filtered pnpm changes cwd, so root-relative glob patterns are invalid there.
-- Local PG fixture is PostgreSQL 16.13 on `127.0.0.1:55495`, baseline 15/15 passed with CLI `testTimeout=30000`; it is not production DB. Use `DATABASE_URL` only by name and never record its value.
+- Local PG fixture is PostgreSQL 16.13 on `127.0.0.1:55495`, baseline 15/15 and final scoped HTTP acceptance 16/16 passed with CLI `testTimeout=30000`; the fixture was stopped after acceptance and is not production DB. Use `DATABASE_URL` only by name and never record its value.
 - Full UI QA bootstrap uses separate local services on `4321/4322`; synthetic control data and `API_URL`/`PORT` overrides are test-only, not production authentication. CUA auth is unavailable; user permitted local Chromium.
 - Do not install dependencies merely to repeat these gates. `pnpm` is pinned to `10.33.2`; use `pnpm dev`, `pnpm --filter api start:dev`, or `pnpm --filter web dev` only when an actual local run is needed.
 

@@ -77,7 +77,7 @@ export function ExecutiveClubTable({ summary }: { summary: ExecutiveSummary }) {
   );
 
   return (
-    <section className="rounded-2xl border border-[var(--border-soft)] bg-[var(--surface)] p-5 shadow-sm">
+    <section className="min-w-0 rounded-2xl border border-[var(--border-soft)] bg-[var(--surface)] p-5 shadow-sm">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-[var(--foreground)]">
@@ -101,7 +101,7 @@ export function ExecutiveClubTable({ summary }: { summary: ExecutiveSummary }) {
           <CaretDown className="h-3.5 w-3.5" aria-hidden="true" />
         </label>
       </div>
-      <div className="mt-4 overflow-x-auto">
+      <div className="mt-4 w-full overflow-x-auto">
         <table className="min-w-[680px] w-full text-left text-sm">
           <thead className="border-b border-[var(--border-soft)] text-xs font-medium text-zinc-500 dark:text-zinc-400">
             <tr>

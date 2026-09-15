@@ -568,7 +568,7 @@ export function ExecutiveDashboard({
         <Trend summary={summary} />
         <Priorities summary={summary} operations={operations} />
       </section>
-      <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,0.85fr)]">
+      <section className="mt-5 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,0.85fr)]">
         <ExecutiveClubTable summary={summary} />
         <AssortmentBrief summary={summary} operations={operations} />
       </section>

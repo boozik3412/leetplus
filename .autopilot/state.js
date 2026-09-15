@@ -2,7 +2,7 @@ window.STATE =
 {
   "slug": "executive-dashboard",
   "dir": "2026-09-15-executive-dashboard",
-  "title": "Сводный дашборд: исходники и локальная приёмка готовы",
+  "title": "Сводный дашборд: реализован и проверен локально",
   "mode": "semi",
   "depth": "normal",
   "polish": null,
@@ -11,8 +11,8 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "skillDir": "C:\\Users\\ALIENWARE\\.codex\\skills\\autopilot",
   "startedAt": "2026-09-15T10:27:25.425605+05:00",
-  "updatedAt": "2026-09-15T17:04:28.6749097+05:00",
-  "finishedAt": "2026-09-15T17:01:01.5359591+05:00",
+  "updatedAt": "2026-09-15T17:41:31.5490556+05:00",
+  "finishedAt": "2026-09-15T17:41:31.5490556+05:00",
   "stages": [
     {
       "id": "preflight",
@@ -50,22 +50,23 @@ window.STATE =
     {
       "id": "build",
       "status": "done",
-      "note": "02/03 committed;04 acceptance/docs and05 stale-source safeguard",
       "startedAt": "2026-09-15T11:28:39.532933+05:00",
-      "finishedAt": "2026-09-15T17:01:01.5353828+05:00"
+      "finishedAt": "2026-09-15T17:41:31.5490556+05:00",
+      "note": "Локальная реализация и приёмка завершены; ограничения источников явно зафиксированы. GitHub CI и production имеют отдельные статусы."
     },
     {
       "id": "review",
       "status": "done",
       "startedAt": "2026-09-15T11:54:14.5178883+05:00",
-      "note": "Проверка стабильной API части01; Web завершается",
-      "finishedAt": "2026-09-15T17:01:01.5356962+05:00"
+      "finishedAt": "2026-09-15T17:41:31.5490556+05:00",
+      "note": "Локальная реализация и приёмка завершены; ограничения источников явно зафиксированы. GitHub CI и production имеют отдельные статусы."
     },
     {
       "id": "final",
       "status": "done",
       "startedAt": "2026-09-15T16:36:18.0024748+05:00",
-      "finishedAt": "2026-09-15T17:01:01.5358217+05:00"
+      "finishedAt": "2026-09-15T17:41:31.5490556+05:00",
+      "note": "Локальная реализация и приёмка завершены; ограничения источников явно зафиксированы. GitHub CI и production имеют отдельные статусы."
     }
   ],
   "requirements": {
@@ -364,7 +365,7 @@ window.STATE =
         "webBuild": "PASS",
         "webLint": "PASS",
         "webTypecheck": "PASS",
-        "runtime": "04 rerun pending"
+        "runtime": "PASS actual Next stale and child-stale fixtures in04"
       }
     },
     {
@@ -399,6 +400,42 @@ window.STATE =
         "webBuild": "PASS"
       },
       "commit": "57f9c51a83da6a20e1006090f414fbf2b47eaedc"
+    },
+    {
+      "id": "07",
+      "title": "Мобильная ширина нижних блоков",
+      "requirements": [
+        "R01",
+        "R16",
+        "R19"
+      ],
+      "blockedBy": [
+        "03"
+      ],
+      "wave": 4,
+      "zone": [
+        "executive-dashboard.tsx",
+        "executive-club-table.tsx"
+      ],
+      "status": "done",
+      "executor": "/root/executive_mobile_width",
+      "startedAt": "2026-09-15T17:16:55.1475931+05:00",
+      "repairs": 0,
+      "retries": 0,
+      "handoffs": 0,
+      "review": {
+        "manifest": "PASS",
+        "spec": "PASS",
+        "craft": "PASS"
+      },
+      "tests": {
+        "webTypecheck": "PASS",
+        "webScopedLint": "PASS",
+        "webBuild": "PASS",
+        "browser": "PASS actual390: host375/375; 3 stockcards within host; table301/680 with own working horizontal scroll; desktop790/790"
+      },
+      "finishedAt": "2026-09-15T17:41:31.5490556+05:00",
+      "evidence": "deploy-evidence/executive-dashboard-20260915/delivery-preview/mobile-scroll-host-result.json"
     }
   ],
   "singlePass": null,
@@ -498,13 +535,12 @@ window.STATE =
   },
   "uiQa": {
     "agent": "/root/executive_browser_fixture",
-    "scope": "01 actual component fixture",
-    "status": "Actual Next smoke PASS; visual refinements and full04 matrix pending",
-    "evidence": "deploy-evidence/executive-dashboard-20260915/pilot-ui-qa",
+    "scope": "Full executive dashboard; source limits recorded; final07 host width validation",
+    "status": "PASS Q01–Q18 at stated evidence levels;07 internal scroll-host correction verified",
+    "evidence": "deploy-evidence/executive-dashboard-20260915/full-acceptance/README.md",
     "limits": [
-      "Title/background contrast only; full palette acceptance remains04",
-      "Legacy drill link is removed during repair2; inline details stay",
-      "Timezone America/Los_Angeles recheck after fiscal label fix"
+      "Synthetic UI figures are not production data; source-limited requirements remain partial",
+      "Contrast is a bounded rendered sample, not a full WCAG claim"
     ]
   },
   "postgresFixture": {
@@ -541,8 +577,10 @@ window.STATE =
     "R11"
   ],
   "ci": {
-    "status": "External GitHub checks; inspect current PR head",
+    "status": "Current PR207 head is checked independently; final result retained in external final-source-ci.json receipt",
     "production": false,
-    "pr": 207
-  }
+    "pr": 207,
+    "receipt": "deploy-evidence/executive-dashboard-20260915/ci/final-source-ci.json"
+  },
+  "lateAcceptanceFinding": "Closed07: original document-only Q17 missed internal host overflow; actual390 host375/375, all3cards withinbounds and table-local301/680 scroll verified; original finding retained in Q17 addendum"
 }

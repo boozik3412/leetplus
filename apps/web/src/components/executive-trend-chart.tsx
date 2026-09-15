@@ -135,7 +135,7 @@ export function ExecutiveTrendChart({
                 type="monotone"
                 dataKey={previousKey}
                 name="Предыдущий период"
-                stroke="#a1a1aa"
+                stroke="#71717a"
                 strokeDasharray="5 5"
                 strokeWidth={2}
                 dot={false}

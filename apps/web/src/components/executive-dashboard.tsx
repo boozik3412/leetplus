@@ -64,6 +64,14 @@ function formatMetric(metric: ExecutiveMetric) {
   return formatNumber(metric.value);
 }
 
+function formatPreviousValue(metric: ExecutiveMetric, value: number) {
+  if (metric.unit === "RUB" || metric.unit === "RUB_PER_VISIT")
+    return formatMoney(value);
+  if (metric.unit === "PERCENT") return `${formatNumber(value, 1)}%`;
+  if (metric.key === "visits") return `${formatNumber(value)} визитов`;
+  return formatNumber(value);
+}
+
 function formatDay(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   return match ? `${match[3]}.${match[2]}` : value;
@@ -85,9 +93,12 @@ function formatDelta(metric: ExecutiveMetric) {
       : metric.unit === "PERCENT"
         ? `${sign}${formatNumber(comparison.pointsDelta ?? comparison.absoluteDelta, 1)} п.п.`
         : `${sign}${formatNumber(comparison.absoluteDelta)}`;
-  return comparison.percentDelta === null
-    ? `${absolute} к прошлому периоду`
-    : `${comparison.percentDelta > 0 ? "+" : ""}${formatNumber(comparison.percentDelta, 1)}% · ${absolute}`;
+  if (comparison.percentDelta === null) {
+    return comparison.previousValue === 0
+      ? `${absolute} · Было ${formatPreviousValue(metric, comparison.previousValue)} · Процент не рассчитывается`
+      : `${absolute} к прошлому периоду`;
+  }
+  return `${comparison.percentDelta > 0 ? "+" : ""}${formatNumber(comparison.percentDelta, 1)}% · ${absolute}`;
 }
 
 function coverage(metric: ExecutiveMetric) {

@@ -78,7 +78,7 @@ def prepared_predecessor(sha):
     return root
 
 
-def install(inbox, expected, previous_sha=None):
+def install(inbox, expected, previous_sha=None, stage_only=False):
     if os.getuid() != 0 or not re.fullmatch(r'/srv/leetplus/inbox/[a-f0-9]{40}', str(inbox)):
         raise ValueError('Exact root inbox required')
     raw = secure_file(inbox / 'docker-admission.json', 65536)
@@ -86,6 +86,8 @@ def install(inbox, expected, previous_sha=None):
         raise ValueError('Admission digest mismatch')
     admission = json.loads(raw)
     sha = inbox.name
+    if stage_only and previous_sha:
+        raise ValueError('Staging cannot replace a preparation predecessor')
     previous = prepared_predecessor(previous_sha) if previous_sha else None
     if previous_sha == sha:
         raise ValueError('Replacement must have a different exact SHA')
@@ -122,6 +124,9 @@ def install(inbox, expected, previous_sha=None):
     manifest = {'contract': 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_INSTALL', 'releaseSha': sha,
                 'admissionSha256': expected, 'files': {name: digest(payload[name]) for name in sorted(payload)}}
     publish(target / 'install-manifest.json', canonical(manifest), 0o400)
+    if stage_only:
+        print(json.dumps({'decision': 'CONTROL_STAGED_NOT_ACTIVATED', 'controlRoot': str(target), 'controlSha256': digest(canonical(manifest)), 'releaseSha': sha}))
+        return
     for name in ['/etc/leetplus-compose', '/var/lib/leetplus-compose', '/var/lib/leetplus-compose/operations', '/etc/leetplus-compose/docker-cli']:
         mkdir(Path(name))
     publish(Path('/etc/leetplus-compose/docker-cli/config.json'), b'{}\n', 0o400)
@@ -147,5 +152,6 @@ if __name__ == '__main__':
     parser.add_argument('--inbox', type=Path, required=True)
     parser.add_argument('--admission-sha256', required=True)
     parser.add_argument('--previous-prepared-control-sha')
+    parser.add_argument('--stage-only', action='store_true')
     args = parser.parse_args()
-    install(args.inbox, args.admission_sha256, args.previous_prepared_control_sha)
+    install(args.inbox, args.admission_sha256, args.previous_prepared_control_sha, args.stage_only)

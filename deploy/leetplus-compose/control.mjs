@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { CONTRACT, SCHEMA, PORTS, canonical, demand, digest, release, renderCompose, verifyContainer } from './contract.mjs';
 import { PHASES, execute, validateApproval, validateChain, validatePlan } from './orchestrator.mjs';
 import { validateWorkerGrant } from './worker-authority.mjs';
+import { controlLockPolicy, verifyKernelControlLocks } from './control-locks.mjs';
+import { validateControlHandoffAuthority, validatePendingControlHandoffAuthority } from './control-handoff-authority.mjs';
 
 const STATE = '/var/lib/leetplus-compose';
 const ROOT = '/srv/leetplus';
@@ -61,6 +63,15 @@ function run(binary, argv, { timeout = 120000, input, json = false } = {}) {
   const result = spawnSync(binary, argv, { encoding: 'utf8', env: CLEAN_ENV, timeout, maxBuffer: 16 * 1024 * 1024, input });
   if (result.status !== 0) {
     const error = { time: new Date().toISOString(), executable: path.basename(binary), exitCode: result.status, signal: result.signal, reason: result.error?.code ?? 'COMMAND_FAILED' };
+    if (binary === '/usr/bin/python3' && argv[0] === `${CONTROL}/network-fence.py`) {
+      try {
+        const diagnostic = JSON.parse(result.stdout);
+        if (diagnostic.decision === 'FAIL' && /^[A-Z_]{1,64}$/.test(diagnostic.reasonCode ?? '')) {
+          error.reason = diagnostic.reasonCode;
+          console.error(JSON.stringify({ ...error, providerSetState: diagnostic.observation?.result ?? 'UNKNOWN' }));
+        }
+      } catch { /* Never copy arbitrary child output or provider details. */ }
+    }
     fs.appendFileSync(`${STATE}/command-errors.jsonl`, `${JSON.stringify(error)}\n`, { mode: 0o600 });
     throw new Error(`${error.executable}: ${error.reason} (exit ${error.exitCode})`);
   }
@@ -99,6 +110,42 @@ function installedDigest() {
 }
 function hostIdentity() { return digest(safeFile('/etc/machine-id').toString().trim()); }
 function active() { return fs.existsSync(`${STATE}/active.json`) ? readJSON(`${STATE}/active.json`) : null; }
+function assertControllerContinuity() {
+  demand(fs.realpathSync('/usr/local/sbin/leetplus-compose') === `${CONTROL}/control.sh`, 'Use the currently serving controller');
+  const current = active();
+  if (!current) return;
+  const plan = readJSON(`${operation(current.operationId)}/plan.json`, { immutable: true });
+  demand(current.planSha256 === digest(plan), 'Active application plan drift');
+  const controlSha256 = installedDigest();
+  if (plan.controlSha256 === controlSha256) return;
+  const context = { controlSha256, hostIdentitySha256: hostIdentity(), activeSha256: digest(safeFile(`${STATE}/active.json`)) };
+  const publicKey = safeFile('/etc/leetplus-compose/approval-root.pem');
+  const acceptPointer = pointer => {
+    demand(/^[a-f0-9-]{36}$/.test(pointer.operationId ?? ''), 'Invalid control handoff pointer');
+    const directory = `${STATE}/control-handoffs/${pointer.operationId}`;
+    demand(!fs.existsSync(`${directory}/rolled-back.json`), 'Controller handoff was rolled back');
+    validateControlHandoffAuthority({ plan: readJSON(`${directory}/plan.json`, { immutable: true }), approvalEnvelope: readJSON(`${directory}/approval.json`, { immutable: true }), receipt: readJSON(`${directory}/receipt.json`, { immutable: true }), pointer }, publicKey, context);
+  };
+  try { acceptPointer(readJSON(`${STATE}/control-handoffs/active.json`)); return; } catch {
+    // A crash after the atomic core switch must not brick ordinary accepted
+    // lifecycle/boot. This is explicit provisional authority, not a fabricated
+    // completion receipt; operational deployment stays fenced while pending.
+    const pending = readJSON(`${STATE}/control-handoff.pending.json`);
+    demand(/^[a-f0-9-]{36}$/.test(pending.operationId ?? ''), 'Invalid pending handoff');
+    const directory = `${STATE}/control-handoffs/${pending.operationId}`;
+    const pendingPlan = readJSON(`${directory}/plan.json`, { immutable: true });
+    if (pendingPlan.oldControlSha256 === controlSha256 && pendingPlan.oldMainTarget === `${CONTROL}/control.sh` && pendingPlan.previousPointer) {
+      // During an interrupted reverse switch, only the independently signed
+      // previous controller authority can restore ordinary lifecycle rights.
+      demand(typeof pendingPlan.previousPointer === 'string' && pendingPlan.previousPointer.length <= 8192, 'Invalid previous control pointer');
+      acceptPointer(JSON.parse(Buffer.from(pendingPlan.previousPointer, 'base64').toString('utf8')));
+      return;
+    }
+    demand(!fs.existsSync(`${directory}/rolled-back.json`), 'Pending control was rolled back');
+    validatePendingControlHandoffAuthority({ plan: pendingPlan, approvalEnvelope: readJSON(`${directory}/approval.json`, { immutable: true }), intent: readJSON(`${directory}/apply-main.intent.json`, { immutable: true }), pending }, publicKey,
+      { ...context, mainTarget: fs.realpathSync('/usr/local/sbin/leetplus-compose'), unitSha256: digest(safeFile('/etc/systemd/system/leetplus-compose-network-refresh.service')) });
+  }
+}
 function operation(id) { demand(/^[a-f0-9-]{36}$/.test(id ?? ''), 'Invalid operation ID'); return `${STATE}/operations/${id}`; }
 function storeFor(dir) {
   const read = async () => {
@@ -298,21 +345,21 @@ if (command === 'help' || !command) {
   demand(process.platform === 'linux' && process.getuid() === 0 && process.versions.node.split('.')[0] === '22', 'Linux root and Node 22 required');
   demand(process.env.LEETPLUS_COMPOSE_LOCKED === '1', 'Use the installed flock bootstrap');
   const lockInfo = fs.lstatSync(`${STATE}/control.lock`);
-  demand(lockInfo.isFile() && !lockInfo.isSymbolicLink() && lockInfo.uid === 0 && lockInfo.nlink === 1 && !(lockInfo.mode & 0o077), 'Untrusted control lock');
   const locks = fs.readFileSync('/proc/locks', 'utf8').split('\n');
-  const lockMode = ['status', 'boot', 'backup', 'worker-run'].includes(command) ? 'READ' : 'WRITE';
-  demand(locks.some(line => { const fields = line.trim().split(/\s+/); return fields[1] === 'FLOCK' && fields[3] === lockMode && fields[4] === String(process.ppid) && fields[5]?.split(':').at(-1) === String(lockInfo.ino); }), 'Parent does not hold the kernel control lock');
-  if (command === 'backup' || command === 'worker-run') {
-    const name = command === 'backup' ? 'backup' : options.name;
-    demand(['backup', 'bonus-ledger-worker', 'langame-daily-worker'].includes(name), 'Unknown singleton lock');
-    const singleton = fs.lstatSync(`${STATE}/${name}.lock`);
-    demand(singleton.isFile() && !singleton.isSymbolicLink() && singleton.uid === 0 && singleton.nlink === 1 && !(singleton.mode & 0o077), 'Invalid singleton lock file');
-    const parentStatus = fs.readFileSync(`/proc/${process.ppid}/status`, 'utf8');
-    const outerPid = parentStatus.match(/^PPid:\s+(\d+)$/m)?.[1];
-    demand(locks.some(line => { const fields = line.trim().split(/\s+/); return fields[1] === 'FLOCK' && fields[3] === 'WRITE' && fields[4] === outerPid && fields[5]?.split(':').at(-1) === String(singleton.ino); }), 'Singleton kernel lock is not held');
-  }
+  const lockPolicy = controlLockPolicy(command, options);
+  const parentStatus = lockPolicy.singleton ? fs.readFileSync(`/proc/${process.ppid}/status`, 'utf8') : '';
+  verifyKernelControlLocks(lockPolicy, { globalLock: lockInfo, singletonLock: lockPolicy.singleton ? fs.lstatSync(`${STATE}/${lockPolicy.singleton}.lock`) : undefined, locks, parentPid: process.ppid, outerPid: parentStatus.match(/^PPid:\s+(\d+)$/m)?.[1] });
   directory(STATE); directory(`${STATE}/operations`);
   installedDigest();
+  const observational = command === 'status' || (command === 'network' && ['refresh', 'status', 'verify', 'verify-rehearsal'].includes(options.operation));
+  if (!observational) {
+    if (['prepare', 'apply', 'resume'].includes(command) || (command === 'network' && options.operation !== 'install')) demand(!fs.existsSync(`${STATE}/control-handoff.pending.json`), 'Controller handoff must be reconciled before other control effects');
+    assertControllerContinuity();
+  } else if (command === 'network' && options.operation === 'refresh') {
+    // A pending handoff must not let provider addresses expire, but a queued
+    // obsolete controller may not act after a newer atomic pointer switch.
+    demand(fs.realpathSync('/usr/local/sbin/leetplus-compose') === `${CONTROL}/control.sh`, 'Refresh must use the currently serving controller');
+  }
   if (command === 'status') {
     const operations = [];
     for (const id of fs.readdirSync(`${STATE}/operations`)) {
@@ -320,9 +367,10 @@ if (command === 'help' || !command) {
       validatePlan(plan); validateChain(plan, state.records);
       operations.push({ operationId: id, targetSlot: plan.targetSlot, completed: Boolean(state.final), rolledBack: Boolean(state.rolledBack), phases: Object.keys(state.records) });
     }
-    console.log(canonical({ active: active(), operations }));
+    console.log(canonical({ active: active(), operations, controller: { releaseSha: path.basename(CONTROL), manifestSha256: installedDigest(), isServing: fs.realpathSync('/usr/local/sbin/leetplus-compose') === `${CONTROL}/control.sh`, handoffPending: fs.existsSync(`${STATE}/control-handoff.pending.json`) } }));
   } else if (command === 'network') {
-    demand(['install', 'refresh', 'verify', 'install-rehearsal', 'verify-rehearsal'].includes(options.operation), 'Unknown network operation');
+    demand(Object.keys(options).length === 1 && Object.hasOwn(options, 'operation'), 'Exact network operation required');
+    demand(['install', 'refresh', 'verify', 'status', 'install-rehearsal', 'verify-rehearsal'].includes(options.operation), 'Unknown network operation');
     console.log(run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, options.operation]));
   } else if (command === 'backup') {
     console.log(run('/usr/bin/python3', [`${CONTROL}/daily-backup.py`], { timeout: 3600000 }));

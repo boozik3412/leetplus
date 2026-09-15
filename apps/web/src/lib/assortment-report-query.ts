@@ -38,6 +38,9 @@ export function buildAssortmentReportHref(
   );
 
   if (subset === "dashboard") {
+    params.set("period", "custom");
+    params.set("dateFrom", scope.from);
+    params.set("dateTo", scope.to);
     params.set("noSalesDays", String(scope.noSalesDays));
     return `/assortment/dashboard?${params}`;
   }

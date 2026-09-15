@@ -6,6 +6,11 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { UserRole } from '@prisma/client';
 import {
+  type DashboardExecutiveProductRevenue,
+  type DashboardExecutiveProductRevenueQuery,
+  type DashboardExecutiveOperations,
+  type DashboardExecutiveQuery,
+  type DashboardExecutiveSummary,
   type DashboardRevenueDiagnostics,
   DashboardService,
   type DashboardQuery,
@@ -24,6 +29,30 @@ export class DashboardController {
     @Query() query?: DashboardQuery,
   ): Promise<DashboardSummary> {
     return this.dashboardService.getSummary(user, query);
+  }
+
+  @Get('executive-product-revenue')
+  getExecutiveProductRevenue(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query?: DashboardExecutiveProductRevenueQuery,
+  ): Promise<DashboardExecutiveProductRevenue> {
+    return this.dashboardService.getExecutiveProductRevenue(user, query);
+  }
+
+  @Get('executive-summary')
+  getExecutiveSummary(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query?: DashboardExecutiveQuery,
+  ): Promise<DashboardExecutiveSummary> {
+    return this.dashboardService.getExecutiveSummary(user, query);
+  }
+
+  @Get('executive-operations')
+  getExecutiveOperations(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query?: DashboardExecutiveQuery,
+  ): Promise<DashboardExecutiveOperations> {
+    return this.dashboardService.getExecutiveOperations(user, query);
   }
 
   @Get('revenue-diagnostics')

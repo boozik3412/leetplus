@@ -1,4 +1,5 @@
 import { getApiUrl, getAuthHeaders } from "./api";
+export type { DashboardExecutiveProductRevenue } from "./dashboard-executive";
 
 export type DashboardTopSku = {
   productId: string;

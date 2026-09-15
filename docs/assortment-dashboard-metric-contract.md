@@ -30,6 +30,51 @@ excess `535839` имеют coverage `0%` для current freshness и historical 
 03.09: они не являются подтверждёнными текущими valuations и должны оставаться
 явно qualified в UI.
 
+## Executive summary — source-only candidate, 15.09.2026
+
+Исходный код добавляет корпоративные read-only `GET /dashboard/executive-summary`
+и `GET /dashboard/executive-operations` для экрана `/dashboard`. Это отдельный
+source-only кандидат, а не часть уже принятого assortment rollout выше: он не
+меняет active blue `b5c033…`, generation5, data/control `399876`, схему,
+роли, worker, provider egress или production admission.
+
+Оба GET заново применяют `FreshStoreScope`, возвращают фактически принятую
+область (period, конкретные allowed storeIds, store time zones, comparison и
+asOf) и читают только сохранённые данные. Primary summary не ждёт независимый
+assortment source; failure operations не удаляет уже полученные primary KPI.
+Operations не является подтверждённым текущим inventory, если его wrapper или
+дочерняя метрика имеют `STALE`/`MISSING`/`FAILED`: UI показывает состояние и
+причину, а business priority допускается только для подтверждённого текущего
+сигнала.
+
+Текущая доказуемая семантика primary ограничена товарными продажами и
+сохранёнными доказуемо привязанными game sessions. Sales store-days дают
+`AVAILABLE`/`PARTIAL`/`MISSING` по фактическому coverage; подтверждённый ноль
+остаётся нулём, а отсутствие coverage — `null`, не ноль. Непустые visits
+остаются `PARTIAL` с `covered=observed`, `total=null`, `percent=null`, потому
+что независимого store-day completeness proof для GuestSession нет; пустая
+выборка visits остаётся `MISSING`. Услуги, реальные пополнения, исторические
+capacity hours и зависимые точные ratios остаются `MISSING`, пока для них нет
+independent saved-data proof.
+
+Локальная browser fixture с 40 000 ₽, 14 000 ₽, 320 visits, 125 ₽/visit,
+35% и 20.8% служит только проверкой presentation/formula на условных
+service/capacity facts. Она не доказывает доступность этих service/capacity
+значений в source, не использует real JWT и не является production canary.
+
+В сводном дашборде выбор одной из пяти KPI-карточек переключает дневной график:
+выручка, визиты, доход на визит, загрузка или товарная выручка. Активная карточка
+выделена и имеет `aria-pressed`; отдельного селектора внутри графика нет.
+График читает готовые значения выбранной метрики из `days`, сохраняет пропуски,
+подтверждённые нули и правила сопоставимости предыдущего периода. Отношения
+не пересчитываются на клиенте. При отсутствии дневных значений показана причина.
+Ссылка «Подробнее» у графика открывает выбранную метрику с теми же фильтрами.
+
+В таблице «Результаты по клубам» обычные значения показаны без повторяющихся
+примечаний. Кнопка «Пояснения» раскрывает состояние, причину, покрытие и дату
+у каждого числа. Короткие отметки неполноты, устаревания, отсутствия данных
+или ошибки остаются видимыми и при свёрнутых пояснениях.
+
 ## Область расчёта
 
 `GET /dashboard/summary` возвращает выбранный период продаж, массивы `selectedStoreIds` и `selectedCategoryIds`, выбранное окно `selectedNoSalesDays` (7, 14, 21 или 30; по умолчанию 21), а также `selectedAssortmentAsOf`. Последнее — точный ISO cutoff ассортимента. Это единственный cutoff, который UI переносит в переходы к ассортиментным отчётам.

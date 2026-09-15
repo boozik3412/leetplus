@@ -60,12 +60,14 @@ type FreshStoreScopeMock = {
 
 type AssortmentHealthLoaderMock = {
   load: jest.Mock;
+  loadSalesCoverage: jest.Mock;
 };
 
 type SalesFactFindManyCall = [
   {
     where: {
       storeId?: unknown;
+      isCanceled?: boolean;
       saleDate: {
         gte: Date;
         lte: Date;
@@ -212,6 +214,7 @@ describe('DashboardService', () => {
     };
     assortmentHealthLoader = {
       load: jest.fn().mockResolvedValue({ health: { rows: [], summary: {} } }),
+      loadSalesCoverage: jest.fn().mockResolvedValue({ salesDayEvidence: [] }),
     };
     prisma.tenant.findUnique.mockResolvedValue({
       name: 'Demo Cyber Club',
@@ -246,6 +249,770 @@ describe('DashboardService', () => {
     prisma.inventorySnapshot.findMany.mockResolvedValue([]);
     prisma.stockMovement.findMany.mockResolvedValue([]);
   }
+
+  it('projects confirmed product revenue for the resolved clubs and excludes cancelled sales', async () => {
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-a',
+        name: 'Клуб A',
+        externalClubId: 'a',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+      {
+        id: 'store-b',
+        name: 'Клуб B',
+        externalClubId: 'b',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+    ]);
+    prisma.salesFact.findMany.mockResolvedValue([
+      {
+        storeId: 'store-a',
+        revenue: new Prisma.Decimal(2000),
+        saleDate: new Date('2026-09-07T12:00:00.000Z'),
+      },
+      {
+        storeId: 'store-b',
+        revenue: new Prisma.Decimal(12000),
+        saleDate: new Date('2026-09-08T12:00:00.000Z'),
+      },
+    ]);
+    assortmentHealthLoader.loadSalesCoverage.mockResolvedValue({
+      health: { rows: [], summary: {} },
+      salesDayEvidence: Array.from({ length: 14 }, (_, index) => ({
+        storeId: index % 2 === 0 ? 'store-a' : 'store-b',
+        date: new Date(
+          `2026-09-${String(7 + Math.floor(index / 2)).padStart(2, '0')}T00:00:00.000Z`,
+        ),
+        status: 'CONFIRMED',
+      })),
+      sourceHealthEvidence: {
+        sales: {
+          totalDomains: 2,
+          confirmedDomains: 2,
+          failedDomains: 0,
+          missingDomains: 0,
+        },
+        inventory: {
+          totalDomains: 0,
+          confirmedDomains: 0,
+          failedDomains: 0,
+          missingDomains: 0,
+        },
+      },
+    });
+
+    const projection = await service.getExecutiveProductRevenue(user, {
+      period: 'custom',
+      dateFrom: '2026-09-07',
+      dateTo: '2026-09-13',
+      storeIds: ['store-a', 'store-b'],
+    });
+
+    expect(projection.metric).toMatchObject({
+      value: 14000,
+      state: 'AVAILABLE',
+      unit: 'RUB',
+      grain: 'PRODUCT_SALE_OPERATION',
+    });
+    expect(
+      projection.rows.map((row) => ({
+        storeId: row.storeId,
+        storeName: row.storeName,
+        revenue: row.revenue,
+        saleOperationCount: row.saleOperationCount,
+        metricValue: row.metric.value,
+        metricState: row.metric.state,
+      })),
+    ).toEqual([
+      {
+        storeId: 'store-b',
+        storeName: 'Клуб B',
+        revenue: 12000,
+        saleOperationCount: 1,
+        metricValue: 12000,
+        metricState: 'AVAILABLE',
+      },
+      {
+        storeId: 'store-a',
+        storeName: 'Клуб A',
+        revenue: 2000,
+        saleOperationCount: 1,
+        metricValue: 2000,
+        metricState: 'AVAILABLE',
+      },
+    ]);
+  });
+
+  it('keeps product revenue and club rows inside the confirmed active store-day universe', async () => {
+    prisma.store.findMany.mockResolvedValue([
+      { id: 'store-a', name: 'Клуб A', timeZone: 'Asia/Yekaterinburg' },
+      { id: 'store-b', name: 'Клуб B', timeZone: 'Asia/Yekaterinburg' },
+      { id: 'store-c', name: 'Клуб C', timeZone: 'Europe/Moscow' },
+    ]);
+    prisma.salesFact.findMany.mockResolvedValue([
+      {
+        storeId: 'store-a',
+        revenue: new Prisma.Decimal(2000),
+        saleDate: new Date('2026-09-07T12:00:00.000Z'),
+      },
+      {
+        storeId: 'store-b',
+        revenue: new Prisma.Decimal(12000),
+        saleDate: new Date('2026-09-07T12:00:00.000Z'),
+      },
+      {
+        storeId: 'store-b',
+        revenue: new Prisma.Decimal(3000),
+        saleDate: new Date('2026-09-08T12:00:00.000Z'),
+      },
+      {
+        storeId: 'store-c',
+        revenue: new Prisma.Decimal(9000),
+        saleDate: new Date('2026-09-08T12:00:00.000Z'),
+      },
+    ]);
+    assortmentHealthLoader.loadSalesCoverage.mockResolvedValue({
+      health: { rows: [], summary: {} },
+      salesDayEvidence: [
+        {
+          storeId: 'store-a',
+          date: new Date('2026-09-07T00:00:00.000Z'),
+          status: 'CONFIRMED',
+        },
+        {
+          storeId: 'store-a',
+          date: new Date('2026-09-08T00:00:00.000Z'),
+          status: 'MISSING',
+        },
+        {
+          storeId: 'store-b',
+          date: new Date('2026-09-07T00:00:00.000Z'),
+          status: 'MISSING',
+        },
+        {
+          storeId: 'store-b',
+          date: new Date('2026-09-08T00:00:00.000Z'),
+          status: 'CONFIRMED',
+        },
+        {
+          storeId: 'store-c',
+          date: new Date('2026-09-07T00:00:00.000Z'),
+          status: 'MISSING',
+        },
+        {
+          storeId: 'store-c',
+          date: new Date('2026-09-08T00:00:00.000Z'),
+          status: 'MISSING',
+        },
+      ],
+    });
+
+    const projection = await service.getExecutiveProductRevenue(user, {
+      period: 'custom',
+      dateFrom: '2026-09-07',
+      dateTo: '2026-09-08',
+      asOf: '2026-09-08T20:00:00.000Z',
+    });
+
+    expect(projection.scope).toEqual({
+      period: {
+        from: '2026-09-07',
+        to: '2026-09-08',
+        timezone: 'PER_STORE',
+      },
+      storeIds: ['store-a', 'store-b', 'store-c'],
+      storeTimeZones: {
+        'store-a': 'Asia/Yekaterinburg',
+        'store-b': 'Asia/Yekaterinburg',
+        'store-c': 'Europe/Moscow',
+      },
+      comparison: null,
+      asOf: '2026-09-08T20:00:00.000Z',
+    });
+    expect(projection.metric).toMatchObject({
+      value: 5000,
+      state: 'PARTIAL',
+      coverage: { covered: 2, total: 6, basis: 'STORE_DAYS' },
+    });
+    expect(
+      projection.rows.map((row) => ({
+        storeId: row.storeId,
+        revenue: row.revenue,
+        saleOperationCount: row.saleOperationCount,
+        metricValue: row.metric.value,
+        metricState: row.metric.state,
+      })),
+    ).toEqual([
+      {
+        storeId: 'store-b',
+        revenue: 3000,
+        saleOperationCount: 1,
+        metricValue: 3000,
+        metricState: 'PARTIAL',
+      },
+      {
+        storeId: 'store-a',
+        revenue: 2000,
+        saleOperationCount: 1,
+        metricValue: 2000,
+        metricState: 'PARTIAL',
+      },
+      {
+        storeId: 'store-c',
+        revenue: null,
+        saleOperationCount: null,
+        metricValue: null,
+        metricState: 'MISSING',
+      },
+    ]);
+  });
+
+  it('distinguishes confirmed zero, missing and failed club rows without admitting inactive facts', async () => {
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-zero',
+        name: 'Нулевой клуб',
+        timeZone: 'Asia/Yekaterinburg',
+        isActive: true,
+      },
+      {
+        id: 'store-missing',
+        name: 'Клуб без покрытия',
+        timeZone: 'Asia/Yekaterinburg',
+        isActive: true,
+      },
+      {
+        id: 'store-failed',
+        name: 'Клуб со сбоем',
+        timeZone: 'Asia/Yekaterinburg',
+        isActive: true,
+      },
+      {
+        id: 'store-inactive',
+        name: 'Неактивный клуб',
+        timeZone: 'Asia/Yekaterinburg',
+        isActive: false,
+      },
+    ]);
+    prisma.salesFact.findMany.mockResolvedValue([
+      {
+        storeId: 'store-zero',
+        revenue: new Prisma.Decimal(100),
+        saleDate: new Date('2026-09-07T12:00:00.000Z'),
+        isCanceled: true,
+      },
+      {
+        storeId: 'store-missing',
+        revenue: new Prisma.Decimal(50),
+        saleDate: new Date('2026-09-07T12:00:00.000Z'),
+      },
+      {
+        storeId: 'store-failed',
+        revenue: new Prisma.Decimal(60),
+        saleDate: new Date('2026-09-07T12:00:00.000Z'),
+      },
+      {
+        storeId: 'store-inactive',
+        revenue: new Prisma.Decimal(70),
+        saleDate: new Date('2026-09-07T12:00:00.000Z'),
+      },
+      {
+        storeId: 'foreign-store',
+        revenue: new Prisma.Decimal(80),
+        saleDate: new Date('2026-09-07T12:00:00.000Z'),
+      },
+    ]);
+    assortmentHealthLoader.loadSalesCoverage.mockResolvedValue({
+      health: { rows: [], summary: {} },
+      salesDayEvidence: [
+        {
+          storeId: 'store-zero',
+          date: new Date('2026-09-07T00:00:00.000Z'),
+          status: 'CONFIRMED',
+        },
+        {
+          storeId: 'store-missing',
+          date: new Date('2026-09-07T00:00:00.000Z'),
+          status: 'MISSING',
+        },
+        {
+          storeId: 'store-failed',
+          date: new Date('2026-09-07T00:00:00.000Z'),
+          status: 'FAILED',
+        },
+      ],
+    });
+
+    const projection = await service.getExecutiveProductRevenue(user, {
+      period: 'custom',
+      dateFrom: '2026-09-07',
+      dateTo: '2026-09-07',
+      asOf: '2026-09-07T20:00:00.000Z',
+    });
+
+    expect(projection.metric).toMatchObject({
+      value: 0,
+      state: 'PARTIAL',
+      coverage: { covered: 1, total: 3, basis: 'STORE_DAYS' },
+    });
+    expect(projection.scope.storeIds).toEqual([
+      'store-zero',
+      'store-missing',
+      'store-failed',
+    ]);
+    expect(
+      projection.rows.map((row) => ({
+        storeId: row.storeId,
+        revenue: row.revenue,
+        saleOperationCount: row.saleOperationCount,
+        metricValue: row.metric.value,
+        metricState: row.metric.state,
+      })),
+    ).toEqual([
+      {
+        storeId: 'store-zero',
+        revenue: 0,
+        saleOperationCount: 0,
+        metricValue: 0,
+        metricState: 'AVAILABLE',
+      },
+      {
+        storeId: 'store-missing',
+        revenue: null,
+        saleOperationCount: null,
+        metricValue: null,
+        metricState: 'MISSING',
+      },
+      {
+        storeId: 'store-failed',
+        revenue: null,
+        saleOperationCount: null,
+        metricValue: null,
+        metricState: 'FAILED',
+      },
+    ]);
+    expect(
+      projection.rows.find((row) => row.storeId === 'store-inactive'),
+    ).toBeUndefined();
+    expect(
+      projection.rows.find((row) => row.storeId === 'foreign-store'),
+    ).toBeUndefined();
+  });
+
+  it('projects receipt averages and their decline without substituting visits or sale lines', async () => {
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-a',
+        name: 'Клуб A',
+        tenantId: 'tenant-demo',
+        externalDomain: 'domain-a',
+        externalClubId: 'a',
+        timeZone: 'Asia/Yekaterinburg',
+        isActive: true,
+      },
+    ]);
+    const receiptSale = (id: string, revenue: number, date: string) => ({
+      storeId: 'store-a',
+      revenue: new Prisma.Decimal(revenue),
+      saleDate: new Date(`${date}T00:00:00.000Z`),
+      externalProvider: 'CSV',
+      externalDomain: 'fixture',
+      sourcePayloadHash: bindReceiptIdentityToSourceHash(id, null),
+    });
+    prisma.salesFact.findMany.mockResolvedValue([
+      receiptSale('current-one', 300, '2026-09-07'),
+      receiptSale('current-one', 300, '2026-09-07'),
+      receiptSale('current-two', 600, '2026-09-08'),
+      receiptSale('previous-one', 500, '2026-09-05'),
+      receiptSale('previous-one', 500, '2026-09-05'),
+      receiptSale('previous-two', 500, '2026-09-06'),
+    ]);
+    assortmentHealthLoader.loadSalesCoverage.mockImplementation(
+      ({ period }: { period: { from: Date; to: Date } }) => {
+        const salesDayEvidence: Array<{
+          storeId: string;
+          date: Date;
+          status: 'CONFIRMED';
+        }> = [];
+        for (
+          const date = new Date(period.from);
+          date <= period.to;
+          date.setUTCDate(date.getUTCDate() + 1)
+        )
+          salesDayEvidence.push({
+            storeId: 'store-a',
+            date: new Date(date),
+            status: 'CONFIRMED',
+          });
+        return Promise.resolve({ salesDayEvidence });
+      },
+    );
+    const query = {
+      period: 'custom' as const,
+      dateFrom: '2026-09-07',
+      dateTo: '2026-09-08',
+      comparison: true,
+    };
+    const result = await service.getExecutiveSummary(user, query);
+    expect(result.metrics.averageProductCheck.value).toBe(600);
+    expect(result.metrics.averageProductCheck.state).toBe('AVAILABLE');
+    expect(
+      result.metrics.averageProductCheck.receiptEvidence?.receiptCount,
+    ).toBe(2);
+    expect(result.metrics.averageProductCheck.comparison).toEqual({
+      previousValue: 750,
+      absoluteDelta: -150,
+      percentDelta: -20,
+      pointsDelta: null,
+    });
+    expect(result.clubs[0].metrics.averageProductCheck.value).toBe(600);
+    expect(
+      result.days.map((row) => row.metrics.averageProductCheck.value),
+    ).toEqual([600, 600]);
+    expect(result.metrics.revenuePerVisit.state).toBe('MISSING');
+    const withoutComparison = await service.getExecutiveSummary(user, {
+      ...query,
+      comparison: false,
+    });
+    expect(withoutComparison.metrics.averageProductCheck.value).toBe(600);
+    expect(
+      withoutComparison.metrics.averageProductCheck.receiptEvidence,
+    ).toEqual(result.metrics.averageProductCheck.receiptEvidence);
+    expect(withoutComparison.metrics.averageProductCheck.comparison).toBeNull();
+  });
+
+  it('projects real per-club and local-day executive subsets with comparable previous facts', async () => {
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-a',
+        name: 'Клуб A',
+        tenantId: 'tenant-demo',
+        externalDomain: 'domain-a',
+        externalClubId: 'a',
+        timeZone: 'Asia/Yekaterinburg',
+        isActive: true,
+      },
+      {
+        id: 'store-b',
+        name: 'Клуб B',
+        tenantId: 'tenant-demo',
+        externalDomain: 'domain-b',
+        externalClubId: 'b',
+        timeZone: 'Europe/Moscow',
+        isActive: true,
+      },
+      {
+        id: 'store-failed',
+        name: 'Клуб со сбоем источника',
+        tenantId: 'tenant-demo',
+        externalDomain: 'domain-failed',
+        externalClubId: 'failed',
+        timeZone: 'Europe/Moscow',
+        isActive: true,
+      },
+      {
+        id: 'store-inactive',
+        name: 'Неактивный клуб',
+        tenantId: 'tenant-demo',
+        externalDomain: 'domain-inactive',
+        externalClubId: 'inactive',
+        timeZone: 'Asia/Yekaterinburg',
+        isActive: false,
+      },
+    ]);
+    prisma.salesFact.findMany.mockResolvedValue([
+      {
+        storeId: 'store-a',
+        revenue: new Prisma.Decimal(20),
+        saleDate: new Date('2026-09-07T00:00:00.000Z'),
+      },
+      {
+        storeId: 'store-b',
+        revenue: new Prisma.Decimal(30),
+        saleDate: new Date('2026-09-08T00:00:00.000Z'),
+      },
+      {
+        storeId: 'store-b',
+        revenue: new Prisma.Decimal(10),
+        saleDate: new Date('2026-09-06T00:00:00.000Z'),
+      },
+      {
+        storeId: 'store-a',
+        revenue: new Prisma.Decimal(999),
+        saleDate: new Date('2026-09-07T00:00:00.000Z'),
+        isCanceled: true,
+      },
+      {
+        storeId: 'store-failed',
+        revenue: new Prisma.Decimal(500),
+        saleDate: new Date('2026-09-07T00:00:00.000Z'),
+      },
+      {
+        storeId: 'store-inactive',
+        revenue: new Prisma.Decimal(700),
+        saleDate: new Date('2026-09-07T00:00:00.000Z'),
+      },
+      {
+        storeId: 'foreign-store',
+        revenue: new Prisma.Decimal(800),
+        saleDate: new Date('2026-09-07T00:00:00.000Z'),
+      },
+    ]);
+    assortmentHealthLoader.loadSalesCoverage.mockImplementation(
+      ({ period }: { period: { from: Date; to: Date } }) => {
+        const days = [] as string[];
+        for (
+          let date = new Date(period.from);
+          date <= period.to;
+          date.setUTCDate(date.getUTCDate() + 1)
+        ) {
+          days.push(date.toISOString().slice(0, 10));
+        }
+        return Promise.resolve({
+          salesDayEvidence: days.flatMap((date) => [
+            {
+              storeId: 'store-a',
+              date: new Date(`${date}T00:00:00.000Z`),
+              status: 'CONFIRMED' as const,
+            },
+            {
+              storeId: 'store-b',
+              date: new Date(`${date}T00:00:00.000Z`),
+              status: 'CONFIRMED' as const,
+            },
+            {
+              storeId: 'store-failed',
+              date: new Date(`${date}T00:00:00.000Z`),
+              status: 'FAILED' as const,
+            },
+          ]),
+        });
+      },
+    );
+    prisma.guestSession.findMany.mockResolvedValue([
+      {
+        id: 'a-7',
+        storeId: 'store-a',
+        externalDomain: 'domain-a',
+        externalClubId: 'a',
+        externalSessionId: 'a-7',
+        startedAt: new Date('2026-09-07T18:00:00.000Z'),
+      },
+      {
+        id: 'a-8',
+        storeId: 'store-a',
+        externalDomain: 'domain-a',
+        externalClubId: 'a',
+        externalSessionId: 'a-8',
+        startedAt: new Date('2026-09-08T01:00:00.000Z'),
+      },
+      {
+        id: 'b-7',
+        storeId: null,
+        externalDomain: 'domain-b',
+        externalClubId: 'b',
+        externalSessionId: 'b-7',
+        startedAt: new Date('2026-09-06T22:30:00.000Z'),
+      },
+      {
+        id: 'b-8',
+        storeId: 'store-b',
+        externalDomain: 'domain-b',
+        externalClubId: 'b',
+        externalSessionId: 'b-8',
+        startedAt: new Date('2026-09-08T20:00:00.000Z'),
+      },
+      {
+        id: 'b-prev',
+        storeId: 'store-b',
+        externalDomain: 'domain-b',
+        externalClubId: 'b',
+        externalSessionId: 'b-prev',
+        startedAt: new Date('2026-09-06T10:00:00.000Z'),
+      },
+      {
+        id: 'foreign',
+        storeId: 'foreign-store',
+        externalDomain: 'foreign',
+        externalClubId: 'foreign',
+        externalSessionId: 'foreign',
+        startedAt: new Date('2026-09-07T10:00:00.000Z'),
+      },
+      {
+        id: 'inactive',
+        storeId: 'store-inactive',
+        externalDomain: 'domain-inactive',
+        externalClubId: 'inactive',
+        externalSessionId: 'inactive',
+        startedAt: new Date('2026-09-07T10:00:00.000Z'),
+      },
+      {
+        id: 'lost-binding',
+        storeId: null,
+        externalDomain: 'domain-b',
+        externalClubId: 'unknown-club',
+        externalSessionId: 'lost-binding',
+        startedAt: new Date('2026-09-07T10:00:00.000Z'),
+      },
+    ]);
+    assortmentHealthLoader.load.mockRejectedValue(
+      new Error('inventory source failed'),
+    );
+
+    const query = {
+      period: 'custom' as const,
+      dateFrom: '2026-09-07',
+      dateTo: '2026-09-08',
+      asOf: '2026-09-08T20:00:00.000Z',
+      comparison: true,
+    };
+    const summary = await service.getExecutiveSummary(user, query);
+    const operations = await service.getExecutiveOperations(user, query);
+
+    expect(summary.scope).toEqual({
+      period: { from: '2026-09-07', to: '2026-09-08', timezone: 'PER_STORE' },
+      storeIds: ['store-a', 'store-b', 'store-failed'],
+      storeTimeZones: {
+        'store-a': 'Asia/Yekaterinburg',
+        'store-b': 'Europe/Moscow',
+        'store-failed': 'Europe/Moscow',
+      },
+      comparison: { from: '2026-09-05', to: '2026-09-06' },
+      asOf: '2026-09-08T20:00:00.000Z',
+    });
+    expect(operations.scope).toEqual(summary.scope);
+    expect(operations.assortment).toMatchObject({
+      state: 'FAILED',
+      data: null,
+    });
+    expect(summary.metrics.productRevenue).toMatchObject({
+      value: 50,
+      state: 'PARTIAL',
+      comparison: { previousValue: 10, absoluteDelta: 40, percentDelta: 400 },
+    });
+    expect(summary.metrics.visits).toMatchObject({
+      value: 4,
+      state: 'PARTIAL',
+      coverage: {
+        covered: 4,
+        total: null,
+        percent: null,
+        basis: 'STORE_SESSIONS',
+      },
+      comparison: null,
+    });
+    expect(
+      summary.clubs.map((club) => ({
+        storeId: club.storeId,
+        productRevenue: club.metrics.productRevenue.value,
+        visits: club.metrics.visits.value,
+        visitsState: club.metrics.visits.state,
+        previousProductRevenue:
+          club.metrics.productRevenue.comparison?.previousValue,
+      })),
+    ).toEqual([
+      {
+        storeId: 'store-b',
+        productRevenue: 30,
+        visits: 2,
+        visitsState: 'PARTIAL',
+        previousProductRevenue: 10,
+      },
+      {
+        storeId: 'store-a',
+        productRevenue: 20,
+        visits: 2,
+        visitsState: 'PARTIAL',
+        previousProductRevenue: 0,
+      },
+      {
+        storeId: 'store-failed',
+        productRevenue: null,
+        visits: null,
+        visitsState: 'MISSING',
+        previousProductRevenue: undefined,
+      },
+    ]);
+    expect(
+      summary.days.map((day) => ({
+        date: day.date,
+        productRevenue: day.metrics.productRevenue.value,
+        visits: day.metrics.visits.value,
+        visitsState: day.metrics.visits.state,
+        previousProductRevenue:
+          day.metrics.productRevenue.comparison?.previousValue,
+        productRevenuePercentDelta:
+          day.metrics.productRevenue.comparison?.percentDelta,
+      })),
+    ).toEqual([
+      {
+        date: '2026-09-07',
+        productRevenue: 20,
+        visits: 2,
+        visitsState: 'PARTIAL',
+        previousProductRevenue: 0,
+        productRevenuePercentDelta: null,
+      },
+      {
+        date: '2026-09-08',
+        productRevenue: 30,
+        visits: 2,
+        visitsState: 'PARTIAL',
+        previousProductRevenue: 10,
+        productRevenuePercentDelta: 200,
+      },
+    ]);
+  });
+
+  it('keeps the accepted HTTP comparison=false scope and metrics without a previous interval', async () => {
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-a',
+        name: 'Клуб A',
+        tenantId: 'tenant-demo',
+        externalDomain: 'domain-a',
+        externalClubId: 'a',
+        timeZone: 'Asia/Yekaterinburg',
+        isActive: true,
+      },
+    ]);
+    assortmentHealthLoader.loadSalesCoverage.mockResolvedValue({
+      salesDayEvidence: [
+        {
+          storeId: 'store-a',
+          date: new Date('2026-09-07T00:00:00.000Z'),
+          status: 'CONFIRMED',
+        },
+      ],
+    });
+    prisma.salesFact.findMany.mockResolvedValue([]);
+
+    const query = {
+      period: 'custom' as const,
+      dateFrom: '2026-09-07',
+      dateTo: '2026-09-07',
+      asOf: '2026-09-07T20:00:00.000Z',
+      comparison: 'false',
+    };
+    const summary = await service.getExecutiveSummary(user, query);
+    const operations = await service.getExecutiveOperations(user, query);
+
+    expect(summary.scope.comparison).toBeNull();
+    expect(summary.metrics.productRevenue.comparison).toBeNull();
+    expect(summary.metrics.visits).toMatchObject({
+      value: null,
+      state: 'MISSING',
+      coverage: {
+        covered: 0,
+        total: null,
+        percent: null,
+        basis: 'STORE_SESSIONS',
+      },
+      comparison: null,
+    });
+    expect(operations.scope).toEqual(summary.scope);
+  });
 
   it('adds compact assortment health to the existing summary contract', async () => {
     mockEmptyDashboardData();

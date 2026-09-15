@@ -32,6 +32,7 @@ import { StaffOnboardingPlansController } from './staff-onboarding-plans.control
 import { StaffOnboardingPlansService } from './staff-onboarding-plans.service';
 import { StaffOperationsDashboardController } from './staff-operations-dashboard.controller';
 import { StaffOperationsDashboardService } from './staff-operations-dashboard.service';
+import { StaffPrioritiesService } from './staff-priorities.service';
 import { StaffReadinessReportController } from './staff-readiness-report.controller';
 import { StaffReadinessReportService } from './staff-readiness-report.service';
 import { StaffSalaryController } from './staff-salary.controller';
@@ -104,6 +105,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffTrainingProfilesService,
     StaffReadinessReportService,
     StaffOperationsDashboardService,
+    StaffPrioritiesService,
     StaffOnboardingPlansService,
     StaffAssessmentsService,
     StaffAttachmentBindingsService,

@@ -1,0 +1,13 @@
+СДЕЛАНО: Добавлены guarded GET `/dashboard/executive-summary` и `/dashboard/executive-operations`, manifest rows, pure non-overlapping revenue/ratio/zero-base helpers и `AssortmentHealthLoaderService.loadSalesCoverage`.
+СДЕЛАНО: `loadSalesCoverage({ tenantId, storeIds, period })` читает только active Store + DailyDataCoverage BUSINESS_FACTS и переиспользует canonical `salesDayEvidence`; `load` и legacy consumers не менялись.
+ФАЙЛЫ: API work: `apps/api/src/common/executive-metrics.{ts,spec.ts}`, `assortment-health-loader.service.{ts,spec.ts}`, `dashboard/dashboard.{service,controller}.ts`, `tenancy/pilot-http-surface-manifest.{ts,spec.ts}`.
+ФАЙЛЫ: Handoff source is dirty/shared; do not alter Web or unrelated `.autopilot` files. Evidence journal: `deploy-evidence/executive-dashboard-20260915/ERROR_LOG.md` includes task02 retries.
+РЕШЕНИЯ: services and topups remain MISSING: no verified semantic dictionary/classification; ClubRevenueFact plus and broad negative/positive balance operations are not services or confirmed topups.
+РЕШЕНИЯ: load remains MISSING with null ratio operands because Store.computerCount/current mode does not prove historical capacity; do not cap or infer 24/7.
+РЕШЕНИЯ: primary product revenue now calls narrow `loadSalesCoverage`, not full assortment loader; operations calls full `load` separately and catches its failure.
+ТУПИКИ: Current `getExecutiveSummary` day rows enumerate selected dates but incorrectly repeat aggregate metrics; these are invalid and must be replaced, not accepted as graph data.
+ТУПИКИ: Current comparison only reaches product/revenue; visits comparison is null and all computed club/day metric comparisons are incomplete. No public `getExecutiveSummary` boundary test exists.
+ДАЛЬШЕ: Build one public service test first: A/B/current+equal previous/local per-store session dates, confirmed0/previous0, expected day/club/global values; prove no inventory/CRM/provider access from main without asserting private Prisma shape.
+ДАЛЬШЕ: Refactor summary around reusable saved-fact subsets so day rows use their own fiscal-date SalesFact coverage and local-date GuestSession subsets; compare product/revenue/visits and every compatible club/day metric.
+ДАЛЬШЕ: Preserve `ExecutiveMetric` state/reason/coverage/ratio and null unavailable metrics; only after targeted tests run API tsc/lint and report actual exit receipts.
+ДАЛЬШЕ: Last receipts: `pnpm.cmd --filter api exec jest --runInBand --runTestsByPath src/common/assortment-health-loader.service.spec.ts` → 4 passed; metric 1 passed; dashboard legacy 27 passed; manifest 13 passed; `pnpm.cmd --filter api exec tsc --noEmit -p tsconfig.build.json; Write-Output "EXIT=$LASTEXITCODE"` → EXIT=0.

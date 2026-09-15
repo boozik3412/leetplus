@@ -121,7 +121,18 @@ const definitions: readonly ControllerDefinition[] = [
     prefix: '/dashboard',
     module: 'ASSORTMENT',
     profile: 'STORES_VERIFIED',
-    routes: [['GET', ['summary', 'revenue-diagnostics']]],
+    routes: [
+      [
+        'GET',
+        [
+          'summary',
+          'executive-product-revenue',
+          'executive-summary',
+          'executive-operations',
+          'revenue-diagnostics',
+        ],
+      ],
+    ],
   },
   {
     source: 'src/products/products.controller.ts',
@@ -795,7 +806,7 @@ function staffDefinitions(): readonly ControllerDefinition[] {
       'staff-operations-dashboard.controller.ts',
       'operations-dashboard',
       'NETWORK_VERIFIED',
-      [['GET', ['']]],
+      [['GET', ['', 'priorities', 'priorities/items']]],
     ),
     staffController(
       'staff-readiness-report.controller.ts',

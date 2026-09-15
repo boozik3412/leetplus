@@ -68,6 +68,7 @@ export type StaffTrainingProgressDto = {
 };
 
 export type StaffTrainingProfileReport = {
+  priorityCoverage?: { employeesComplete: boolean; coursesComplete: boolean };
   accessScope: 'NETWORK' | 'STORES';
   filters: {
     userId: string | null;
@@ -99,6 +100,7 @@ export type StaffTrainingProfileReport = {
 };
 
 export type StaffTrainingProfileUser = {
+  accessScope?: string | null;
   id: string;
   email: string;
   fullName: string | null;
@@ -323,6 +325,10 @@ export class StaffTrainingProfilesService {
       summary: this.buildSummary(rows),
       canManageTraining,
       rows,
+      priorityCoverage: {
+        employeesComplete: users.length < 300,
+        coursesComplete: courses.length < 400,
+      },
       users: users.map((row) => this.toUser(row, access)),
       stores,
     };
@@ -1053,6 +1059,7 @@ export class StaffTrainingProfilesService {
       id: user.id,
       email: user.email,
       fullName: user.fullName,
+      accessScope: user.accessScope,
       role: user.role,
       isActive: user.isActive,
       stores: this.accessPolicy

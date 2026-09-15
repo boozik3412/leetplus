@@ -122,6 +122,38 @@ access scope, публичного игрового входа, управлен
 background jobs и production deployment. Он сохраняет независимость public
 guest, corporate tenant и worker/control-plane субъектов.
 
+### Executive dashboard source-only candidate, 15.09.2026
+
+Corporate `/dashboard` source добавляет guarded read-only executive summary и
+independent operations projection. Это не runtime change: текущие serving SHA и
+generation подтверждает владелец production, а source-only работа не меняет route owner,
+JWT/role policy, database role/schema, worker placement, secret, provider
+egress или deployment authority.
+
+Каждый executive GET заново применяет fresh tenant/store scope и возвращает
+только accepted stores. Product sales имеют доказуемое store-day coverage;
+нет coverage означает `MISSING`/`null`, а не ноль. Observed sessions остаются
+`PARTIAL` без independent session completeness proof. Services, real topups,
+historical capacity и dependent exact ratios остаются `MISSING`. Operations
+может отказать независимо от primary summary; `STALE`, `MISSING` или `FAILED`
+wrapper либо child metric не подтверждает текущий assortment signal и не может
+породить priority action.
+
+Loopback-only synthetic UI fixture применяет short-lived process-local JWT и
+условные service/capacity values исключительно для presentation/formula QA.
+Она не является ordinary corporate login, production canary или основанием для
+deployment/GO.
+
+Source follow-up15.09 добавляет два read-only staff GET внутри существующего
+`/staff/operations-dashboard`: `priorities` и `priorities/items`. Сохраняются
+corporate JWT, `view_staff_control`, FreshNetworkScopeGuard и дополнительное право
+каждого исходного раздела. Scope проверяется заново, детали сохраняют точный
+Store subset; общесетевые назначения не приписываются отдельному клубу.
+Межсотрудниковое обучение требует management capability. GET не создаёт задания,
+не меняет прогресс и не запускает providers/workers. Новый средний товарный чек
+использует только подтверждённые receipt/store-day facts; он не подменяет ARPV.
+[Контракт приоритетов и ограничения](../executive-dashboard-priorities.md).
+
 ### Canonical simple safe external Langame onboarding
 
 Deployed bcb0a4d3 ручной синхронизации изолирует отказы provider по разделам:

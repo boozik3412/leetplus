@@ -287,6 +287,8 @@ const STAFF_NETWORK_ROUTE_IDS = [
   'GET /staff/discipline',
   'GET /staff/discipline/export',
   'GET /staff/operations-dashboard',
+  'GET /staff/operations-dashboard/priorities',
+  'GET /staff/operations-dashboard/priorities/items',
   'GET /staff/readiness-report',
   'GET /staff/salary',
   'PATCH /staff/assessments/:id',
@@ -614,8 +616,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(303);
-    expect(allowed).toHaveLength(246);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(308);
+    expect(allowed).toHaveLength(251);
     expect(blocked).toHaveLength(57);
     expect(outbound).toHaveLength(21);
     expect(
@@ -644,6 +646,9 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       'DELETE /suppliers/:id',
       'GET /categories',
       'GET /categories/langame/overview',
+      'GET /dashboard/executive-operations',
+      'GET /dashboard/executive-product-revenue',
+      'GET /dashboard/executive-summary',
       'GET /dashboard/revenue-diagnostics',
       'GET /dashboard/summary',
       'GET /imports',
@@ -764,8 +769,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.minimumScope === 'NETWORK',
     );
 
-    expect(staff).toHaveLength(84);
-    expect(allowed).toHaveLength(83);
+    expect(staff).toHaveLength(86);
+    expect(allowed).toHaveLength(85);
     expect(networkAllowed.map(({ id }) => id).sort()).toEqual(
       [...STAFF_NETWORK_ROUTE_IDS].sort(),
     );

@@ -3,7 +3,11 @@ import { Prisma, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
-import { receiptIdentityFromSourceHash } from '../common/receipt-source-identity';
+import {
+  ambiguousReceiptKeys,
+  createReceiptMetricProjection,
+  groupReceiptFacts,
+} from '../common/receipt-metrics';
 import { resolveGuestSessionStore } from '../common/guest-session-store';
 import {
   AssortmentHealthLoaderService,
@@ -13,6 +17,15 @@ import type {
   AssortmentHealth,
   AssortmentNoSalesWindow,
 } from '../common/assortment-health';
+import type {
+  ExecutiveAppliedScope,
+  ExecutiveMetric,
+  ExecutiveMetrics,
+} from '../common/executive-contract';
+import {
+  aggregateExecutiveRevenue,
+  compareExecutiveValues,
+} from '../common/executive-metrics';
 
 export type DashboardPeriod =
   | 'day'
@@ -37,6 +50,65 @@ export type DashboardQuery = {
   skuGrouping?: DashboardSkuGrouping;
   asOf?: string;
   noSalesDays?: AssortmentNoSalesWindow | string;
+};
+
+export type DashboardExecutiveProductRevenueQuery = Pick<
+  DashboardQuery,
+  'period' | 'dateFrom' | 'dateTo' | 'storeIds' | 'asOf'
+>;
+
+export type DashboardExecutiveQuery = DashboardExecutiveProductRevenueQuery & {
+  comparison?: boolean | string;
+};
+
+export type DashboardExecutiveSummary = {
+  scope: ExecutiveAppliedScope;
+  metrics: ExecutiveMetrics;
+  clubs: Array<{
+    storeId: string;
+    storeName: string;
+    metrics: ExecutiveMetrics;
+  }>;
+  days: Array<{ date: string; metrics: ExecutiveMetrics }>;
+};
+
+export type DashboardExecutiveOperations = {
+  scope: ExecutiveAppliedScope;
+  assortment: {
+    state: 'AVAILABLE' | 'PARTIAL' | 'MISSING' | 'STALE' | 'FAILED';
+    reason: string | null;
+    data: AssortmentHealth | null;
+  };
+};
+
+export type DashboardExecutiveProductRevenue = {
+  scope: ExecutiveAppliedScope;
+  grain: 'CLUB';
+  tenantId: string;
+  tenantSlug: string;
+  periodFrom: string;
+  periodTo: string;
+  selectedStoreIds: string[];
+  metric: ExecutiveMetric<number> & {
+    key: 'productRevenue';
+    label: 'Товарная выручка';
+    unit: 'RUB';
+    grain: 'PRODUCT_SALE_OPERATION';
+    destination: 'CLUBS';
+  };
+  rows: Array<{
+    storeId: string;
+    storeName: string;
+    revenue: number | null;
+    saleOperationCount: number | null;
+    metric: ExecutiveMetric<number> & {
+      key: 'productRevenue';
+      label: 'Товарная выручка';
+      unit: 'RUB';
+      grain: 'PRODUCT_SALE_OPERATION';
+      destination: 'CLUBS';
+    };
+  }>;
 };
 
 export type DashboardTopSku = {
@@ -484,6 +556,978 @@ export class DashboardService {
     private readonly assortmentHealthLoader: AssortmentHealthLoaderService,
   ) {}
 
+  async getExecutiveProductRevenue(
+    user: AuthenticatedUser,
+    query: DashboardExecutiveProductRevenueQuery = {},
+  ): Promise<DashboardExecutiveProductRevenue> {
+    const requestedStoreIds = this.resolveStoreIds(query.storeIds);
+    const { tenantId, tenantSlug, effectiveStoreIds } =
+      await this.freshStoreScopeService.resolveRequestedStoreIds(
+        user,
+        requestedStoreIds,
+      );
+    const period = this.resolvePeriod(query);
+    const candidateStoreFilter = effectiveStoreIds
+      ? { id: { in: [...effectiveStoreIds] } }
+      : {};
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId,
+        isActive: true,
+        ...candidateStoreFilter,
+      },
+      select: { id: true, name: true, timeZone: true, isActive: true },
+      orderBy: { name: 'asc' },
+    });
+    const activeStores = stores.filter((store) => store.isActive !== false);
+    const selectedStoreIds = activeStores.map((store) => store.id);
+    const storeTimeZones = Object.fromEntries(
+      activeStores.map((store) => [store.id, store.timeZone?.trim() || 'UTC']),
+    );
+    const timeZones = [...new Set(Object.values(storeTimeZones))];
+    const scopeTimeZone = timeZones.length === 1 ? timeZones[0] : 'PER_STORE';
+    const asOf = this.resolveAssortmentAsOf(query.asOf);
+    const [salesFacts, salesCoverage] = await Promise.all([
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          isCanceled: false,
+          storeId: { in: selectedStoreIds },
+          saleDate: { gte: period.fromDate, lte: period.toDate },
+        },
+        select: {
+          storeId: true,
+          revenue: true,
+          saleDate: true,
+          isCanceled: true,
+        },
+      }),
+      this.assortmentHealthLoader.loadSalesCoverage({
+        tenantId,
+        storeIds: selectedStoreIds,
+        period: { from: period.fromDate, to: period.toDate },
+      }),
+    ]);
+    const businessDays = this.executiveDaysInclusive(
+      period.fromDate,
+      period.toDate,
+    ).map((date) => this.toDateInputValue(date));
+    const evidenceByStoreDay = new Map(
+      salesCoverage.salesDayEvidence.map((item) => [
+        `${item.storeId}:${this.toDateInputValue(item.date)}`,
+        item.status,
+      ]),
+    );
+    const scopedEvidence = activeStores.flatMap((store) =>
+      businessDays.map((date) => {
+        const status = evidenceByStoreDay.get(`${store.id}:${date}`);
+        return {
+          storeId: store.id,
+          date,
+          status: status ?? ('MISSING' as const),
+        };
+      }),
+    );
+    const coverageFor = (evidence: typeof scopedEvidence) => {
+      const covered = evidence.filter(
+        (item) => item.status === 'CONFIRMED',
+      ).length;
+      const total = evidence.length;
+      return {
+        covered,
+        total,
+        percent: total > 0 ? this.round((covered / total) * 100) : null,
+        basis: 'STORE_DAYS' as const,
+      };
+    };
+    const stateFor = (
+      coverage: ReturnType<typeof coverageFor>,
+      evidence: typeof scopedEvidence,
+    ) => {
+      if (coverage.total === 0) return 'MISSING' as const;
+      if (coverage.covered === coverage.total) return 'AVAILABLE' as const;
+      if (coverage.covered > 0) return 'PARTIAL' as const;
+      return evidence.some((item) => item.status === 'FAILED')
+        ? ('FAILED' as const)
+        : ('MISSING' as const);
+    };
+    const coverage = coverageFor(scopedEvidence);
+    const state = stateFor(coverage, scopedEvidence);
+    const confirmedStoreDays = new Set(
+      scopedEvidence
+        .filter((item) => item.status === 'CONFIRMED')
+        .map((item) => `${item.storeId}:${item.date}`),
+    );
+    const revenueByStore = new Map<
+      string,
+      { revenue: number; count: number }
+    >();
+
+    const selectedStoreIdSet = new Set(selectedStoreIds);
+    const confirmedSalesFacts = salesFacts.filter(
+      (fact) =>
+        !fact.isCanceled &&
+        selectedStoreIdSet.has(fact.storeId) &&
+        confirmedStoreDays.has(
+          `${fact.storeId}:${this.toDateInputValue(fact.saleDate)}`,
+        ),
+    );
+    confirmedSalesFacts.forEach((fact) => {
+      const current = revenueByStore.get(fact.storeId) ?? {
+        revenue: 0,
+        count: 0,
+      };
+      current.revenue += fact.revenue.toNumber();
+      current.count += 1;
+      revenueByStore.set(fact.storeId, current);
+    });
+
+    const hasVisibleValue = state === 'AVAILABLE' || state === 'PARTIAL';
+    const totalRevenue = this.round(
+      [...revenueByStore.values()].reduce(
+        (total, row) => total + row.revenue,
+        0,
+      ),
+    );
+    const latestFactAt = confirmedSalesFacts.reduce<Date | null>(
+      (latest, fact) =>
+        !latest || fact.saleDate > latest ? fact.saleDate : latest,
+      null,
+    );
+    const productMetric = (input: {
+      value: number | null;
+      state: typeof state;
+      coverage: typeof coverage;
+      factAsOf: string | null;
+    }): DashboardExecutiveProductRevenue['metric'] => ({
+      key: 'productRevenue',
+      label: 'Товарная выручка',
+      unit: 'RUB',
+      definition:
+        'Сумма подтверждённых товарных продаж выбранных клубов и периода; отмены исключены.',
+      grain: 'PRODUCT_SALE_OPERATION',
+      value: input.value,
+      state: input.state,
+      reason:
+        input.state === 'FAILED'
+          ? 'Продажи за выбранный период недоступны: синхронизация источника завершилась ошибкой.'
+          : input.state === 'MISSING'
+            ? 'Нет подтверждённого покрытия продаж за выбранный период.'
+            : input.state === 'PARTIAL'
+              ? `Продажи подтверждены для ${input.coverage.covered} из ${input.coverage.total} клубо-дней.`
+              : input.value === 0
+                ? 'За выбранный период подтверждённых товарных продаж не было.'
+                : null,
+      coverage: input.coverage,
+      factAsOf: input.factAsOf,
+      lastCalculatedAt: new Date().toISOString(),
+      comparison: null,
+      ratio: null,
+      destination: 'CLUBS',
+    });
+
+    return {
+      scope: {
+        period: {
+          from: this.toDateInputValue(period.fromDate),
+          to: this.toDateInputValue(period.toDate),
+          timezone: scopeTimeZone,
+        },
+        storeIds: selectedStoreIds,
+        storeTimeZones,
+        comparison: null,
+        asOf: asOf.toISOString(),
+      },
+      grain: 'CLUB',
+      tenantId,
+      tenantSlug,
+      periodFrom: period.fromDate.toISOString(),
+      periodTo: period.toDate.toISOString(),
+      selectedStoreIds,
+      metric: productMetric({
+        value: hasVisibleValue ? totalRevenue : null,
+        state,
+        coverage,
+        factAsOf: latestFactAt?.toISOString() ?? null,
+      }),
+      rows: activeStores
+        .map((store) => {
+          const rowEvidence = scopedEvidence.filter(
+            (item) => item.storeId === store.id,
+          );
+          const rowCoverage = coverageFor(rowEvidence);
+          const rowState = stateFor(rowCoverage, rowEvidence);
+          const rowValue = revenueByStore.get(store.id) ?? {
+            revenue: 0,
+            count: 0,
+          };
+          const rowFacts = confirmedSalesFacts.filter(
+            (fact) => fact.storeId === store.id,
+          );
+          const rowHasVisibleValue =
+            rowState === 'AVAILABLE' || rowState === 'PARTIAL';
+          return {
+            storeId: store.id,
+            storeName: store.name,
+            revenue: rowHasVisibleValue ? this.round(rowValue.revenue) : null,
+            saleOperationCount: rowHasVisibleValue ? rowValue.count : null,
+            metric: productMetric({
+              value: rowHasVisibleValue ? this.round(rowValue.revenue) : null,
+              state: rowState,
+              coverage: rowCoverage,
+              factAsOf:
+                rowFacts
+                  .reduce<Date | null>(
+                    (latest, fact) =>
+                      !latest || fact.saleDate > latest
+                        ? fact.saleDate
+                        : latest,
+                    null,
+                  )
+                  ?.toISOString() ?? null,
+            }),
+          };
+        })
+        .sort(
+          (first, second) =>
+            (second.revenue ?? -1) - (first.revenue ?? -1) ||
+            first.storeName.localeCompare(second.storeName, 'ru'),
+        ),
+    };
+  }
+
+  async getExecutiveSummary(
+    user: AuthenticatedUser,
+    query: DashboardExecutiveQuery = {},
+  ): Promise<DashboardExecutiveSummary> {
+    const product = await this.getExecutiveProductRevenue(user, query);
+    const now = new Date().toISOString();
+    const receiptValidationPrevious = this.executivePreviousPeriod(
+      product.scope.period,
+    );
+    const comparisonPeriod =
+      query.comparison === false || query.comparison === 'false'
+        ? null
+        : receiptValidationPrevious;
+    const previousProduct = comparisonPeriod
+      ? await this.getExecutiveProductRevenue(user, {
+          period: 'custom',
+          dateFrom: comparisonPeriod.from,
+          dateTo: comparisonPeriod.to,
+          storeIds: product.scope.storeIds,
+          asOf: query.asOf,
+        })
+      : null;
+    const storeIds = product.scope.storeIds;
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId: product.tenantId,
+        id: { in: storeIds },
+        isActive: true,
+      },
+      select: {
+        id: true,
+        name: true,
+        tenantId: true,
+        externalDomain: true,
+        externalClubId: true,
+        timeZone: true,
+        isActive: true,
+      },
+    });
+    const sessionFrom = new Date(
+      `${comparisonPeriod?.from ?? product.scope.period.from}T00:00:00.000Z`,
+    );
+    sessionFrom.setUTCHours(sessionFrom.getUTCHours() - 14);
+    const sessionTo = new Date(`${product.scope.period.to}T23:59:59.999Z`);
+    sessionTo.setUTCHours(sessionTo.getUTCHours() + 14);
+    const sessions = await this.prisma.guestSession.findMany({
+      where: {
+        tenantId: product.tenantId,
+        startedAt: {
+          gte: sessionFrom,
+          lte: sessionTo,
+        },
+      },
+      select: {
+        id: true,
+        storeId: true,
+        externalProvider: true,
+        externalDomain: true,
+        externalClubId: true,
+        externalSessionId: true,
+        guestId: true,
+        externalGuestId: true,
+        startedAt: true,
+      },
+    });
+    const sessionsWithStartedAt = sessions.filter(
+      (session): session is typeof session & { startedAt: Date } =>
+        session.startedAt !== null,
+    );
+    const visitsFor = (
+      period: { from: string; to: string },
+      storeId?: string,
+    ) =>
+      this.executiveVisitsMetricForScope({
+        sessions: sessionsWithStartedAt,
+        tenantId: product.tenantId,
+        topology: stores,
+        selectedStoreIds: storeId === undefined ? storeIds : [storeId],
+        storeTimeZones: product.scope.storeTimeZones,
+        period,
+        now,
+      });
+    const metricsFor = (
+      productMetric: ExecutiveMetric,
+      visitsMetric: ExecutiveMetric,
+      receiptMetric: ExecutiveMetric,
+    ): ExecutiveMetrics => {
+      const services = this.executiveUnavailableMetric(
+        'serviceRevenue',
+        'RUB',
+        'Оказанные услуги, классифицированные доказанным непересекающимся источником.',
+        'SERVICE_OPERATION',
+        'Нет подтверждённого словаря сохранённых операций для классификации оказанных услуг.',
+        now,
+      );
+      const topups = this.executiveUnavailableMetric(
+        'topups',
+        'RUB',
+        'Пополнения, отдельно от выручки.',
+        'TOPUP_OPERATION',
+        'Нет подтверждённого непересекающегося источника пополнений для выбранной выборки.',
+        now,
+      );
+      const combined = aggregateExecutiveRevenue([
+        {
+          kind: 'PRODUCT',
+          value: productMetric.value,
+          state: productMetric.state,
+        },
+        { kind: 'SERVICE', value: services.value, state: services.state },
+      ]);
+      const revenue = this.executiveMetric({
+        key: 'revenue',
+        unit: 'RUB',
+        definition:
+          'Непересекающиеся подтверждённые услуги и товарные продажи; пополнения отдельно.',
+        grain: 'REVENUE_COMPONENT',
+        value: combined.value,
+        state: combined.state,
+        reason:
+          combined.state === 'PARTIAL'
+            ? 'Показана подтверждённая товарная составляющая; услуги не классифицированы доказанным источником.'
+            : 'Нет подтверждённой непересекающейся выручки за выбранный период.',
+        coverage: productMetric.coverage,
+        factAsOf: productMetric.factAsOf,
+        lastCalculatedAt: now,
+      });
+      return {
+        revenue,
+        serviceRevenue: services,
+        topups,
+        visits: visitsMetric,
+        revenuePerVisit: this.executiveUnavailableMetric(
+          'revenuePerVisit',
+          'RUB_PER_VISIT',
+          'Суммарная совместимая выручка / суммарные визиты той же выборки.',
+          'NETWORK_RATIO',
+          'Доход на визит недоступен: общая выручка пока содержит только подтверждённую товарную часть.',
+          now,
+          {
+            numeratorValue: revenue.value,
+            denominatorValue: visitsMetric.value,
+            numeratorLabel: 'Выручка',
+            denominatorLabel: 'Визиты',
+            compatible: false,
+          },
+        ),
+        load: this.executiveUnavailableMetric(
+          'load',
+          'PERCENT',
+          'Занятые часы / доступные часы тех же клубов и интервала.',
+          'CAPACITY_HOURS',
+          'Загрузка недоступна: исторические мощность и режим работы не подтверждены источником.',
+          now,
+          {
+            numeratorValue: null,
+            denominatorValue: null,
+            numeratorLabel: 'Занятые часы',
+            denominatorLabel: 'Доступные часы',
+            compatible: false,
+          },
+        ),
+        productRevenue: productMetric,
+        averageProductCheck: receiptMetric,
+        productRevenueShare: this.executiveUnavailableMetric(
+          'productRevenueShare',
+          'PERCENT',
+          'Товарная выручка / общая совместимая выручка.',
+          'NETWORK_RATIO',
+          'Доля товара недоступна: общая выручка пока содержит только подтверждённую товарную часть.',
+          now,
+          {
+            numeratorValue: productMetric.value,
+            denominatorValue: revenue.value,
+            numeratorLabel: 'Товарная выручка',
+            denominatorLabel: 'Выручка',
+            compatible: false,
+          },
+        ),
+      };
+    };
+    const comparisonFor = (
+      metric: ExecutiveMetric,
+      previousMetric: ExecutiveMetric | undefined,
+    ) => {
+      if (
+        !comparisonPeriod ||
+        !previousMetric ||
+        !this.executiveMetricsComparable(metric, previousMetric)
+      ) {
+        return null;
+      }
+      const delta = compareExecutiveValues(metric.value, previousMetric.value);
+      return {
+        previousValue: previousMetric.value,
+        absoluteDelta: delta.absoluteDelta,
+        percentDelta: delta.percentDelta,
+        pointsDelta: null,
+      };
+    };
+    const withComparisons = (
+      current: ExecutiveMetrics,
+      previous: ExecutiveMetrics | null,
+    ): ExecutiveMetrics => ({
+      ...current,
+      revenue: {
+        ...current.revenue,
+        comparison: comparisonFor(current.revenue, previous?.revenue),
+      },
+      visits: {
+        ...current.visits,
+        comparison: comparisonFor(current.visits, previous?.visits),
+      },
+      productRevenue: {
+        ...current.productRevenue,
+        comparison: comparisonFor(
+          current.productRevenue,
+          previous?.productRevenue,
+        ),
+      },
+      averageProductCheck: {
+        ...current.averageProductCheck,
+        comparison:
+          current.averageProductCheck.state === 'AVAILABLE' &&
+          previous?.averageProductCheck.state === 'AVAILABLE'
+            ? comparisonFor(
+                current.averageProductCheck,
+                previous.averageProductCheck,
+              )
+            : null,
+      },
+      revenuePerVisit: {
+        ...current.revenuePerVisit,
+        comparison:
+          current.revenuePerVisit.state === 'AVAILABLE' &&
+          previous?.revenuePerVisit.state === 'AVAILABLE'
+            ? comparisonFor(current.revenuePerVisit, previous.revenuePerVisit)
+            : null,
+      },
+    });
+    const allMetricDays = {
+      from: receiptValidationPrevious.from,
+      to: product.scope.period.to,
+    };
+    const [daySalesFacts, daySalesCoverage] = await Promise.all([
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId: product.tenantId,
+          isCanceled: false,
+          storeId: { in: storeIds },
+          saleDate: {
+            gte: new Date(`${allMetricDays.from}T00:00:00.000Z`),
+            lte: new Date(`${allMetricDays.to}T23:59:59.999Z`),
+          },
+        },
+        select: {
+          storeId: true,
+          revenue: true,
+          saleDate: true,
+          isCanceled: true,
+          sourcePayloadHash: true,
+          externalProvider: true,
+          externalDomain: true,
+        },
+      }),
+      this.assortmentHealthLoader.loadSalesCoverage({
+        tenantId: product.tenantId,
+        storeIds,
+        period: {
+          from: new Date(`${allMetricDays.from}T00:00:00.000Z`),
+          to: new Date(`${allMetricDays.to}T23:59:59.999Z`),
+        },
+      }),
+    ]);
+    const receiptProjection = createReceiptMetricProjection({
+      facts: daySalesFacts.map((fact) => ({
+        ...fact,
+        revenue: fact.revenue.toNumber(),
+      })),
+      storeIds,
+      salesDayEvidence: daySalesCoverage.salesDayEvidence,
+      calculatedAt: now,
+    });
+    const averageCheckFor = (
+      period: { from: string; to: string },
+      storeId?: string,
+    ) =>
+      receiptProjection.getMetric(
+        period,
+        storeId === undefined ? storeIds : [storeId],
+      );
+    const currentMetrics = metricsFor(
+      product.metric,
+      visitsFor(product.scope.period),
+      averageCheckFor(product.scope.period),
+    );
+    const previousMetrics =
+      previousProduct && comparisonPeriod
+        ? metricsFor(
+            previousProduct.metric,
+            visitsFor(comparisonPeriod),
+            averageCheckFor(comparisonPeriod),
+          )
+        : null;
+    const comparedMetrics = withComparisons(currentMetrics, previousMetrics);
+    const currentDates = this.executiveDaysInclusive(
+      new Date(`${product.scope.period.from}T00:00:00.000Z`),
+      new Date(`${product.scope.period.to}T23:59:59.999Z`),
+    ).map((date) => this.toDateInputValue(date));
+    const previousDates = comparisonPeriod
+      ? this.executiveDaysInclusive(
+          new Date(`${comparisonPeriod.from}T00:00:00.000Z`),
+          new Date(`${comparisonPeriod.to}T23:59:59.999Z`),
+        ).map((date) => this.toDateInputValue(date))
+      : [];
+
+    return {
+      scope: { ...product.scope, comparison: comparisonPeriod },
+      metrics: comparedMetrics,
+      clubs: product.rows.map((row) => {
+        const previousRow = previousProduct?.rows.find(
+          (item) => item.storeId === row.storeId,
+        );
+        return {
+          storeId: row.storeId,
+          storeName: row.storeName,
+          metrics: withComparisons(
+            metricsFor(
+              row.metric,
+              visitsFor(product.scope.period, row.storeId),
+              averageCheckFor(product.scope.period, row.storeId),
+            ),
+            previousRow && comparisonPeriod
+              ? metricsFor(
+                  previousRow.metric,
+                  visitsFor(comparisonPeriod, row.storeId),
+                  averageCheckFor(comparisonPeriod, row.storeId),
+                )
+              : null,
+          ),
+        };
+      }),
+      days: currentDates.map((date, index) => {
+        const dayProduct = this.executiveProductMetricForDay({
+          template: product.metric,
+          stores: product.rows,
+          storeIds,
+          date,
+          salesFacts: daySalesFacts,
+          salesDayEvidence: daySalesCoverage.salesDayEvidence,
+        });
+        const previousDayProduct = comparisonPeriod
+          ? this.executiveProductMetricForDay({
+              template: previousProduct!.metric,
+              stores: previousProduct!.rows,
+              storeIds,
+              date: previousDates[index],
+              salesFacts: daySalesFacts,
+              salesDayEvidence: daySalesCoverage.salesDayEvidence,
+            })
+          : null;
+        return {
+          date,
+          metrics: withComparisons(
+            metricsFor(
+              dayProduct,
+              visitsFor({ from: date, to: date }),
+              averageCheckFor({ from: date, to: date }),
+            ),
+            previousDayProduct && comparisonPeriod
+              ? metricsFor(
+                  previousDayProduct,
+                  visitsFor({
+                    from: previousDates[index],
+                    to: previousDates[index],
+                  }),
+                  averageCheckFor({
+                    from: previousDates[index],
+                    to: previousDates[index],
+                  }),
+                )
+              : null,
+          ),
+        };
+      }),
+    };
+  }
+
+  async getExecutiveOperations(
+    user: AuthenticatedUser,
+    query: DashboardExecutiveQuery = {},
+  ): Promise<DashboardExecutiveOperations> {
+    const product = await this.getExecutiveProductRevenue(user, query);
+    const comparison =
+      query.comparison === false || query.comparison === 'false'
+        ? null
+        : this.executivePreviousPeriod(product.scope.period);
+    try {
+      const data = await this.assortmentHealthLoader.load({
+        tenantId: product.tenantId,
+        storeIds: product.scope.storeIds,
+        categoryIds: null,
+        period: {
+          from: new Date(`${product.scope.period.from}T00:00:00.000Z`),
+          to: new Date(`${product.scope.period.to}T23:59:59.999Z`),
+        },
+        asOf: new Date(product.scope.asOf),
+      });
+      return {
+        scope: { ...product.scope, comparison },
+        assortment: { state: 'AVAILABLE', reason: null, data: data.health },
+      };
+    } catch {
+      return {
+        scope: { ...product.scope, comparison },
+        assortment: {
+          state: 'FAILED',
+          reason:
+            'Не удалось прочитать ассортиментные сигналы для выбранной выборки.',
+          data: null,
+        },
+      };
+    }
+  }
+
+  private executiveVisitsMetricForScope(input: {
+    sessions: Array<{
+      id?: string;
+      storeId: string | null;
+      externalProvider?: string | null;
+      externalDomain: string | null;
+      externalClubId: string | null;
+      externalSessionId: string;
+      guestId?: string | null;
+      externalGuestId?: string | null;
+      startedAt: Date;
+    }>;
+    tenantId: string;
+    topology: Array<{
+      id: string;
+      tenantId: string;
+      externalDomain: string | null;
+      externalClubId: string | null;
+      isActive: boolean;
+    }>;
+    selectedStoreIds: readonly string[];
+    storeTimeZones: Record<string, string>;
+    period: { from: string; to: string };
+    now: string;
+  }): ExecutiveMetric {
+    const selectedStoreIds = new Set(input.selectedStoreIds);
+    const topologyStoreIds = new Set(input.topology.map((store) => store.id));
+    const sessions: typeof input.sessions = [];
+    let hasUnresolvedBinding = false;
+
+    input.sessions.forEach((session) => {
+      const resolvedStoreId =
+        session.storeId && topologyStoreIds.has(session.storeId)
+          ? session.storeId
+          : resolveGuestSessionStore({
+              tenantId: input.tenantId,
+              externalDomain: session.externalDomain,
+              externalClubId: session.externalClubId,
+              stores: input.topology,
+            }).storeId;
+      if (resolvedStoreId && selectedStoreIds.has(resolvedStoreId)) {
+        const localDate = this.executiveLocalDate(
+          session.startedAt,
+          input.storeTimeZones[resolvedStoreId] ?? 'UTC',
+        );
+        if (localDate >= input.period.from && localDate <= input.period.to) {
+          sessions.push({ ...session, storeId: resolvedStoreId });
+        }
+        return;
+      }
+
+      const canBelongToSelectedStore = input.topology.some(
+        (store) =>
+          selectedStoreIds.has(store.id) &&
+          store.externalDomain !== null &&
+          store.externalDomain === session.externalDomain,
+      );
+      if (
+        canBelongToSelectedStore &&
+        this.executiveTimestampMayBelongToPeriod(
+          session.startedAt,
+          input.period,
+        )
+      ) {
+        hasUnresolvedBinding = true;
+      }
+    });
+
+    const visitCount = this.sessionIdentityStats(sessions).visits;
+    const state: ExecutiveMetric['state'] =
+      visitCount > 0 ? 'PARTIAL' : 'MISSING';
+    return this.executiveMetric({
+      key: 'visits',
+      unit: 'COUNT',
+      definition:
+        'Уникальные сохранённые игровые сессии, начавшиеся в выбранных локальных днях клуба.',
+      grain: 'GUEST_SESSION',
+      value: visitCount > 0 ? visitCount : null,
+      state,
+      reason:
+        state === 'MISSING'
+          ? hasUnresolvedBinding
+            ? 'Есть сохранённые сессии без доказуемой привязки к выбранным клубам; визиты за период неизвестны.'
+            : 'Нет сохранённых сессий с подтверждённой привязкой к выбранным клубам.'
+          : hasUnresolvedBinding
+            ? 'Показаны доказуемо привязанные сессии; часть записей не удалось отнести к выбранным клубам, а полнота источника за клубо-дни не подтверждена.'
+            : 'Показаны сохранённые сессии с доказуемой привязкой; полнота источника за выбранные клубо-дни не подтверждена.',
+      coverage: {
+        covered: visitCount,
+        total: null,
+        percent: null,
+        basis: 'STORE_SESSIONS',
+      },
+      factAsOf:
+        sessions
+          .reduce<Date | null>(
+            (latest, session) =>
+              !latest || session.startedAt > latest
+                ? session.startedAt
+                : latest,
+            null,
+          )
+          ?.toISOString() ?? null,
+      lastCalculatedAt: input.now,
+    });
+  }
+
+  private executiveTimestampMayBelongToPeriod(
+    timestamp: Date,
+    period: { from: string; to: string },
+  ) {
+    const from = new Date(`${period.from}T00:00:00.000Z`);
+    from.setUTCHours(from.getUTCHours() - 14);
+    const to = new Date(`${period.to}T23:59:59.999Z`);
+    to.setUTCHours(to.getUTCHours() + 14);
+    return timestamp >= from && timestamp <= to;
+  }
+
+  private executiveMetricsComparable(
+    current: ExecutiveMetric,
+    previous: ExecutiveMetric,
+  ) {
+    if (current.value === null || previous.value === null) return false;
+    if (!['AVAILABLE', 'PARTIAL'].includes(current.state)) return false;
+    if (!['AVAILABLE', 'PARTIAL'].includes(previous.state)) return false;
+    if (current.coverage === null || previous.coverage === null) {
+      return current.coverage === previous.coverage;
+    }
+    if (
+      current.coverage.total === null ||
+      previous.coverage.total === null ||
+      current.coverage.percent === null ||
+      previous.coverage.percent === null
+    ) {
+      return false;
+    }
+    return (
+      current.coverage.basis === previous.coverage.basis &&
+      current.coverage.covered === previous.coverage.covered &&
+      current.coverage.total === previous.coverage.total
+    );
+  }
+
+  private executiveProductMetricForDay(input: {
+    template: DashboardExecutiveProductRevenue['metric'];
+    stores: DashboardExecutiveProductRevenue['rows'];
+    storeIds: readonly string[];
+    date: string;
+    salesFacts: Array<{
+      storeId: string;
+      revenue: { toNumber: () => number };
+      saleDate: Date;
+      isCanceled?: boolean;
+    }>;
+    salesDayEvidence: Array<{
+      storeId: string;
+      date: Date;
+      status: 'CONFIRMED' | 'MISSING' | 'FAILED';
+    }>;
+  }): DashboardExecutiveProductRevenue['metric'] {
+    const statuses = input.stores.map(
+      (store) =>
+        input.salesDayEvidence.find(
+          (item) =>
+            item.storeId === store.storeId &&
+            this.toDateInputValue(item.date) === input.date,
+        )?.status ?? 'MISSING',
+    );
+    const covered = statuses.filter((status) => status === 'CONFIRMED').length;
+    const coverage = {
+      covered,
+      total: statuses.length,
+      percent:
+        statuses.length > 0
+          ? this.round((covered / statuses.length) * 100)
+          : null,
+      basis: 'STORE_DAYS' as const,
+    };
+    const state =
+      coverage.total === 0
+        ? 'MISSING'
+        : coverage.covered === coverage.total
+          ? 'AVAILABLE'
+          : coverage.covered > 0
+            ? 'PARTIAL'
+            : statuses.includes('FAILED')
+              ? 'FAILED'
+              : 'MISSING';
+    const confirmedStoreIds = new Set(
+      input.stores
+        .filter((_, index) => statuses[index] === 'CONFIRMED')
+        .map((store) => store.storeId),
+    );
+    const facts = input.salesFacts.filter(
+      (fact) =>
+        !fact.isCanceled &&
+        input.storeIds.includes(fact.storeId) &&
+        confirmedStoreIds.has(fact.storeId) &&
+        this.toDateInputValue(fact.saleDate) === input.date,
+    );
+    const visible = state === 'AVAILABLE' || state === 'PARTIAL';
+    const value = visible
+      ? this.round(
+          facts.reduce((total, fact) => total + fact.revenue.toNumber(), 0),
+        )
+      : null;
+    const factAsOf = facts.reduce<Date | null>(
+      (latest, fact) =>
+        !latest || fact.saleDate > latest ? fact.saleDate : latest,
+      null,
+    );
+    return {
+      ...input.template,
+      value,
+      state,
+      reason:
+        state === 'FAILED'
+          ? 'Продажи за выбранный период недоступны: синхронизация источника завершилась ошибкой.'
+          : state === 'MISSING'
+            ? 'Нет подтверждённого покрытия продаж за выбранный период.'
+            : state === 'PARTIAL'
+              ? `Продажи подтверждены для ${coverage.covered} из ${coverage.total} клубо-дней.`
+              : value === 0
+                ? 'За выбранный период подтверждённых товарных продаж не было.'
+                : null,
+      coverage,
+      factAsOf: factAsOf?.toISOString() ?? null,
+      comparison: null,
+    };
+  }
+
+  private executiveMetric(input: {
+    key: ExecutiveMetric['key'];
+    unit: ExecutiveMetric['unit'];
+    definition: string;
+    grain: string;
+    value: number | null;
+    state: ExecutiveMetric['state'];
+    reason: string | null;
+    coverage: ExecutiveMetric['coverage'];
+    factAsOf: string | null;
+    lastCalculatedAt: string;
+    ratio?: ExecutiveMetric['ratio'];
+    destination?: ExecutiveMetric['destination'];
+  }): ExecutiveMetric {
+    return {
+      ...input,
+      comparison: null,
+      ratio: input.ratio ?? null,
+    };
+  }
+
+  private executiveUnavailableMetric(
+    key: ExecutiveMetric['key'],
+    unit: ExecutiveMetric['unit'],
+    definition: string,
+    grain: string,
+    reason: string,
+    lastCalculatedAt: string,
+    ratio: ExecutiveMetric['ratio'] = null,
+  ): ExecutiveMetric {
+    return this.executiveMetric({
+      key,
+      unit,
+      definition,
+      grain,
+      value: null,
+      state: 'MISSING',
+      reason,
+      coverage: null,
+      factAsOf: null,
+      lastCalculatedAt,
+      ratio,
+    });
+  }
+
+  private executiveLocalDate(value: Date, timeZone: string) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(value);
+    const values = Object.fromEntries(
+      parts
+        .filter((part) => part.type !== 'literal')
+        .map((part) => [part.type, part.value]),
+    );
+    return `${values.year}-${values.month}-${values.day}`;
+  }
+
+  private executivePreviousPeriod(period: { from: string; to: string }) {
+    const from = new Date(`${period.from}T00:00:00.000Z`);
+    const to = new Date(`${period.to}T00:00:00.000Z`);
+    const durationDays = Math.round(
+      (to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000),
+    );
+    const previousTo = new Date(from);
+    previousTo.setUTCDate(previousTo.getUTCDate() - 1);
+    const previousFrom = new Date(previousTo);
+    previousFrom.setUTCDate(previousFrom.getUTCDate() - durationDays);
+    return {
+      from: this.toDateInputValue(previousFrom),
+      to: this.toDateInputValue(previousTo),
+    };
+  }
+
   async getSummary(
     user: AuthenticatedUser,
     query: DashboardQuery = {},
@@ -910,6 +1954,11 @@ export class DashboardService {
           },
         },
         select: {
+          storeId: true,
+          saleDate: true,
+          externalProvider: true,
+          externalDomain: true,
+          sourcePayloadHash: true,
           revenue: true,
           cost: true,
         },
@@ -1282,7 +2331,15 @@ export class DashboardService {
               100,
           )
         : null;
-    const receiptMetrics = this.buildReceiptMetrics(salesFacts);
+    const receiptMetrics = this.buildReceiptMetrics(
+      salesFacts,
+      ambiguousReceiptKeys(
+        [...salesFacts, ...previousSalesFacts].map((fact) => ({
+          ...fact,
+          revenue: fact.revenue.toNumber(),
+        })),
+      ),
+    );
     const assortmentHealth = await assortmentHealthPromise;
     const sources = this.buildAssortmentSourceHealth({
       salesFacts,
@@ -1761,6 +2818,21 @@ export class DashboardService {
       labelGranularity: this.resolveTrendLabelGranularityByPeriod(trendPeriod),
       trendMode: this.resolveTrendModeByPeriod(trendPeriod),
     };
+  }
+
+  private executiveDaysInclusive(from: Date, to: Date) {
+    const days: Date[] = [];
+    const cursor = new Date(from);
+    cursor.setUTCHours(0, 0, 0, 0);
+    const last = new Date(to);
+    last.setUTCHours(0, 0, 0, 0);
+
+    while (cursor <= last) {
+      days.push(new Date(cursor));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    return days;
   }
 
   private resolveBasePeriod(period: DashboardPeriod): DashboardPeriod {
@@ -3232,10 +4304,12 @@ export class DashboardService {
       externalProvider?: string | null;
       externalDomain?: string | null;
       sourcePayloadHash?: string | null;
+      saleDate?: Date;
       quantity: { toNumber: () => number };
       revenue: { toNumber: () => number };
       product: { name: string };
     }>,
+    ambiguousIdentities?: ReadonlySet<string>,
   ): DashboardReceiptMetrics {
     if (salesFacts.length === 0) {
       return {
@@ -3251,26 +4325,31 @@ export class DashboardService {
       };
     }
 
-    const coveredFacts = salesFacts
-      .map((fact) => ({
-        fact,
-        receiptIdentity: receiptIdentityFromSourceHash(fact.sourcePayloadHash),
-      }))
-      .filter(
-        (
-          item,
-        ): item is {
-          fact: (typeof salesFacts)[number];
-          receiptIdentity: string;
-        } => Boolean(item.receiptIdentity),
-      );
+    const {
+      coveredFacts,
+      receipts,
+      coveredRevenue,
+      totalRevenue,
+      averageCheck,
+      ambiguousIdentityCount,
+    } = groupReceiptFacts(
+      salesFacts.map((fact) => ({
+        ...fact,
+        revenue: fact.revenue.toNumber(),
+        quantity: fact.quantity.toNumber(),
+        productName: fact.product.name,
+      })),
+      ambiguousIdentities,
+    );
 
     if (coveredFacts.length === 0) {
       return {
         state: 'SOURCE_UNAVAILABLE',
         requiredField: 'RECEIPT_OR_ORDER_ID',
         reason:
-          'Источник ещё не передал идентификатор чека или заказа. Его можно загрузить колонкой «Чек» в CSV продаж; товарные операции не подменяют покупки.',
+          ambiguousIdentityCount > 0
+            ? 'Идентификатор чека повторяется в разные даты; по неоднозначным записям средний чек не рассчитан.'
+            : 'Источник ещё не передал идентификатор чека или заказа. Его можно загрузить колонкой «Чек» в CSV продаж; товарные операции не подменяют покупки.',
         coveragePercent: 0,
         coveredRevenuePercent: 0,
         purchaseCount: null,
@@ -3279,37 +4358,6 @@ export class DashboardService {
         topBasketPair: null,
       };
     }
-
-    const receipts = new Map<
-      string,
-      { revenue: number; quantity: number; products: Set<string> }
-    >();
-    let coveredRevenue = 0;
-    let totalRevenue = 0;
-
-    salesFacts.forEach((fact) => {
-      totalRevenue += fact.revenue.toNumber();
-    });
-    coveredFacts.forEach(({ fact, receiptIdentity }) => {
-      const key = [
-        fact.externalProvider ?? 'manual',
-        fact.externalDomain ?? 'local',
-        fact.storeId,
-        receiptIdentity,
-      ].join(':');
-      const receipt = receipts.get(key) ?? {
-        revenue: 0,
-        quantity: 0,
-        products: new Set<string>(),
-      };
-      const revenue = fact.revenue.toNumber();
-
-      receipt.revenue += revenue;
-      receipt.quantity += fact.quantity.toNumber();
-      receipt.products.add(fact.product.name);
-      receipts.set(key, receipt);
-      coveredRevenue += revenue;
-    });
 
     const pairCounts = new Map<string, number>();
     receipts.forEach((receipt) => {
@@ -3338,13 +4386,12 @@ export class DashboardService {
       requiredField: 'RECEIPT_OR_ORDER_ID',
       reason:
         state === 'READY'
-          ? 'Идентификатор чека есть у всех товарных операций периода.'
-          : `Идентификатор чека есть у ${coveragePercent}% товарных операций; чековые показатели рассчитаны только по покрытой части.`,
+          ? 'Однозначный идентификатор чека есть у всех товарных операций периода.'
+          : `Однозначный идентификатор чека есть у ${coveragePercent}% товарных операций; чековые показатели рассчитаны только по покрытой части.${ambiguousIdentityCount > 0 ? ' Повторяющиеся в разные даты идентификаторы исключены.' : ''}`,
       coveragePercent,
       coveredRevenuePercent: this.ratioPercent(coveredRevenue, totalRevenue),
       purchaseCount: receipts.size,
-      averageCheck:
-        receipts.size > 0 ? this.round(coveredRevenue / receipts.size) : null,
+      averageCheck,
       itemsPerCheck:
         receipts.size > 0
           ? this.round(

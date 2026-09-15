@@ -13,6 +13,8 @@ import type {
   AssortmentHealth,
   AssortmentNoSalesWindow,
 } from '../common/assortment-health';
+import type { ExecutiveMetric } from '../common/executive-contract';
+import type { ExecutiveAppliedScope } from '../common/executive-contract';
 
 export type DashboardPeriod =
   | 'day'
@@ -37,6 +39,41 @@ export type DashboardQuery = {
   skuGrouping?: DashboardSkuGrouping;
   asOf?: string;
   noSalesDays?: AssortmentNoSalesWindow | string;
+};
+
+export type DashboardExecutiveProductRevenueQuery = Pick<
+  DashboardQuery,
+  'period' | 'dateFrom' | 'dateTo' | 'storeIds' | 'asOf'
+>;
+
+export type DashboardExecutiveProductRevenue = {
+  scope: ExecutiveAppliedScope;
+  grain: 'CLUB';
+  tenantId: string;
+  tenantSlug: string;
+  periodFrom: string;
+  periodTo: string;
+  selectedStoreIds: string[];
+  metric: ExecutiveMetric<number> & {
+    key: 'productRevenue';
+    label: 'Товарная выручка';
+    unit: 'RUB';
+    grain: 'PRODUCT_SALE_OPERATION';
+    destination: 'CLUBS';
+  };
+  rows: Array<{
+    storeId: string;
+    storeName: string;
+    revenue: number | null;
+    saleOperationCount: number | null;
+    metric: ExecutiveMetric<number> & {
+      key: 'productRevenue';
+      label: 'Товарная выручка';
+      unit: 'RUB';
+      grain: 'PRODUCT_SALE_OPERATION';
+      destination: 'CLUBS';
+    };
+  }>;
 };
 
 export type DashboardTopSku = {
@@ -483,6 +520,248 @@ export class DashboardService {
     private readonly freshStoreScopeService: FreshStoreScopeService,
     private readonly assortmentHealthLoader: AssortmentHealthLoaderService,
   ) {}
+
+  async getExecutiveProductRevenue(
+    user: AuthenticatedUser,
+    query: DashboardExecutiveProductRevenueQuery = {},
+  ): Promise<DashboardExecutiveProductRevenue> {
+    const requestedStoreIds = this.resolveStoreIds(query.storeIds);
+    const { tenantId, tenantSlug, effectiveStoreIds } =
+      await this.freshStoreScopeService.resolveRequestedStoreIds(
+        user,
+        requestedStoreIds,
+      );
+    const period = this.resolvePeriod(query);
+    const candidateStoreFilter = effectiveStoreIds
+      ? { id: { in: [...effectiveStoreIds] } }
+      : {};
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId,
+        isActive: true,
+        ...candidateStoreFilter,
+      },
+      select: { id: true, name: true, timeZone: true, isActive: true },
+      orderBy: { name: 'asc' },
+    });
+    const activeStores = stores.filter((store) => store.isActive !== false);
+    const selectedStoreIds = activeStores.map((store) => store.id);
+    const storeTimeZones = Object.fromEntries(
+      activeStores.map((store) => [store.id, store.timeZone?.trim() || 'UTC']),
+    );
+    const timeZones = [...new Set(Object.values(storeTimeZones))];
+    const scopeTimeZone = timeZones.length === 1 ? timeZones[0] : 'PER_STORE';
+    const asOf = this.resolveAssortmentAsOf(query.asOf);
+    const [salesFacts, assortmentHealth] = await Promise.all([
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          isCanceled: false,
+          storeId: { in: selectedStoreIds },
+          saleDate: { gte: period.fromDate, lte: period.toDate },
+        },
+        select: {
+          storeId: true,
+          revenue: true,
+          saleDate: true,
+          isCanceled: true,
+        },
+      }),
+      this.assortmentHealthLoader.load({
+        tenantId,
+        storeIds: selectedStoreIds,
+        categoryIds: null,
+        period: { from: period.fromDate, to: period.toDate },
+        asOf,
+      }),
+    ]);
+    const businessDays = this.executiveDaysInclusive(
+      period.fromDate,
+      period.toDate,
+    ).map((date) => this.toDateInputValue(date));
+    const evidenceByStoreDay = new Map(
+      assortmentHealth.salesDayEvidence.map((item) => [
+        `${item.storeId}:${this.toDateInputValue(item.date)}`,
+        item.status,
+      ]),
+    );
+    const scopedEvidence = activeStores.flatMap((store) =>
+      businessDays.map((date) => {
+        const status = evidenceByStoreDay.get(`${store.id}:${date}`);
+        return {
+          storeId: store.id,
+          date,
+          status: status ?? ('MISSING' as const),
+        };
+      }),
+    );
+    const coverageFor = (evidence: typeof scopedEvidence) => {
+      const covered = evidence.filter(
+        (item) => item.status === 'CONFIRMED',
+      ).length;
+      const total = evidence.length;
+      return {
+        covered,
+        total,
+        percent: total > 0 ? this.round((covered / total) * 100) : null,
+        basis: 'STORE_DAYS' as const,
+      };
+    };
+    const stateFor = (
+      coverage: ReturnType<typeof coverageFor>,
+      evidence: typeof scopedEvidence,
+    ) => {
+      if (coverage.total === 0) return 'MISSING' as const;
+      if (coverage.covered === coverage.total) return 'AVAILABLE' as const;
+      if (coverage.covered > 0) return 'PARTIAL' as const;
+      return evidence.some((item) => item.status === 'FAILED')
+        ? ('FAILED' as const)
+        : ('MISSING' as const);
+    };
+    const coverage = coverageFor(scopedEvidence);
+    const state = stateFor(coverage, scopedEvidence);
+    const confirmedStoreDays = new Set(
+      scopedEvidence
+        .filter((item) => item.status === 'CONFIRMED')
+        .map((item) => `${item.storeId}:${item.date}`),
+    );
+    const revenueByStore = new Map<
+      string,
+      { revenue: number; count: number }
+    >();
+
+    const selectedStoreIdSet = new Set(selectedStoreIds);
+    const confirmedSalesFacts = salesFacts.filter(
+      (fact) =>
+        !fact.isCanceled &&
+        selectedStoreIdSet.has(fact.storeId) &&
+        confirmedStoreDays.has(
+          `${fact.storeId}:${this.toDateInputValue(fact.saleDate)}`,
+        ),
+    );
+    confirmedSalesFacts.forEach((fact) => {
+      const current = revenueByStore.get(fact.storeId) ?? {
+        revenue: 0,
+        count: 0,
+      };
+      current.revenue += fact.revenue.toNumber();
+      current.count += 1;
+      revenueByStore.set(fact.storeId, current);
+    });
+
+    const hasVisibleValue = state === 'AVAILABLE' || state === 'PARTIAL';
+    const totalRevenue = this.round(
+      [...revenueByStore.values()].reduce(
+        (total, row) => total + row.revenue,
+        0,
+      ),
+    );
+    const latestFactAt = confirmedSalesFacts.reduce<Date | null>(
+      (latest, fact) =>
+        !latest || fact.saleDate > latest ? fact.saleDate : latest,
+      null,
+    );
+    const productMetric = (input: {
+      value: number | null;
+      state: typeof state;
+      coverage: typeof coverage;
+      factAsOf: string | null;
+    }): DashboardExecutiveProductRevenue['metric'] => ({
+      key: 'productRevenue',
+      label: 'Товарная выручка',
+      unit: 'RUB',
+      definition:
+        'Сумма подтверждённых товарных продаж выбранных клубов и периода; отмены исключены.',
+      grain: 'PRODUCT_SALE_OPERATION',
+      value: input.value,
+      state: input.state,
+      reason:
+        input.state === 'FAILED'
+          ? 'Продажи за выбранный период недоступны: синхронизация источника завершилась ошибкой.'
+          : input.state === 'MISSING'
+            ? 'Нет подтверждённого покрытия продаж за выбранный период.'
+            : input.state === 'PARTIAL'
+              ? `Продажи подтверждены для ${input.coverage.covered} из ${input.coverage.total} клубо-дней.`
+              : input.value === 0
+                ? 'За выбранный период подтверждённых товарных продаж не было.'
+                : null,
+      coverage: input.coverage,
+      factAsOf: input.factAsOf,
+      lastCalculatedAt: new Date().toISOString(),
+      comparison: null,
+      ratio: null,
+      destination: 'CLUBS',
+    });
+
+    return {
+      scope: {
+        period: {
+          from: this.toDateInputValue(period.fromDate),
+          to: this.toDateInputValue(period.toDate),
+          timezone: scopeTimeZone,
+        },
+        storeIds: selectedStoreIds,
+        storeTimeZones,
+        comparison: null,
+        asOf: asOf.toISOString(),
+      },
+      grain: 'CLUB',
+      tenantId,
+      tenantSlug,
+      periodFrom: period.fromDate.toISOString(),
+      periodTo: period.toDate.toISOString(),
+      selectedStoreIds,
+      metric: productMetric({
+        value: hasVisibleValue ? totalRevenue : null,
+        state,
+        coverage,
+        factAsOf: latestFactAt?.toISOString() ?? null,
+      }),
+      rows: activeStores
+        .map((store) => {
+          const rowEvidence = scopedEvidence.filter(
+            (item) => item.storeId === store.id,
+          );
+          const rowCoverage = coverageFor(rowEvidence);
+          const rowState = stateFor(rowCoverage, rowEvidence);
+          const rowValue = revenueByStore.get(store.id) ?? {
+            revenue: 0,
+            count: 0,
+          };
+          const rowFacts = confirmedSalesFacts.filter(
+            (fact) => fact.storeId === store.id,
+          );
+          const rowHasVisibleValue =
+            rowState === 'AVAILABLE' || rowState === 'PARTIAL';
+          return {
+            storeId: store.id,
+            storeName: store.name,
+            revenue: rowHasVisibleValue ? this.round(rowValue.revenue) : null,
+            saleOperationCount: rowHasVisibleValue ? rowValue.count : null,
+            metric: productMetric({
+              value: rowHasVisibleValue ? this.round(rowValue.revenue) : null,
+              state: rowState,
+              coverage: rowCoverage,
+              factAsOf:
+                rowFacts
+                  .reduce<Date | null>(
+                    (latest, fact) =>
+                      !latest || fact.saleDate > latest
+                        ? fact.saleDate
+                        : latest,
+                    null,
+                  )
+                  ?.toISOString() ?? null,
+            }),
+          };
+        })
+        .sort(
+          (first, second) =>
+            (second.revenue ?? -1) - (first.revenue ?? -1) ||
+            first.storeName.localeCompare(second.storeName, 'ru'),
+        ),
+    };
+  }
 
   async getSummary(
     user: AuthenticatedUser,
@@ -1761,6 +2040,21 @@ export class DashboardService {
       labelGranularity: this.resolveTrendLabelGranularityByPeriod(trendPeriod),
       trendMode: this.resolveTrendModeByPeriod(trendPeriod),
     };
+  }
+
+  private executiveDaysInclusive(from: Date, to: Date) {
+    const days: Date[] = [];
+    const cursor = new Date(from);
+    cursor.setUTCHours(0, 0, 0, 0);
+    const last = new Date(to);
+    last.setUTCHours(0, 0, 0, 0);
+
+    while (cursor <= last) {
+      days.push(new Date(cursor));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    return days;
   }
 
   private resolveBasePeriod(period: DashboardPeriod): DashboardPeriod {

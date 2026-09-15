@@ -121,7 +121,9 @@ const definitions: readonly ControllerDefinition[] = [
     prefix: '/dashboard',
     module: 'ASSORTMENT',
     profile: 'STORES_VERIFIED',
-    routes: [['GET', ['summary', 'revenue-diagnostics']]],
+    routes: [
+      ['GET', ['summary', 'executive-product-revenue', 'revenue-diagnostics']],
+    ],
   },
   {
     source: 'src/products/products.controller.ts',

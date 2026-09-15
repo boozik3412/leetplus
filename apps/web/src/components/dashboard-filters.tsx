@@ -121,7 +121,30 @@ const periodOptionGroups: {
   { current: "year", full: "full-year" },
 ];
 
-export function DashboardFilters({
+export function DashboardFilters(props: {
+  period: string;
+  dateFrom: string;
+  dateTo: string;
+  skuGrouping?: DashboardSkuGrouping;
+  stores: Store[];
+  selectedStoreIds: string[];
+  categories?: DashboardCategoryFilterOption[];
+  selectedCategoryIds?: string[];
+  showComparison?: boolean;
+}) {
+  const key = [
+    props.period,
+    props.dateFrom,
+    props.dateTo,
+    props.skuGrouping ?? "",
+    props.selectedStoreIds.join(","),
+    (props.selectedCategoryIds ?? []).join(","),
+  ].join("|");
+
+  return <DashboardFiltersContent key={key} {...props} />;
+}
+
+function DashboardFiltersContent({
   period,
   dateFrom,
   dateTo,
@@ -160,7 +183,7 @@ export function DashboardFilters({
   const selectedGrouping = shouldPersistSkuGrouping ? skuGrouping : undefined;
   const selectedStoresLabel =
     selectedStores.length === 0
-      ? "Вся сеть"
+      ? "Все доступные клубы"
       : stores
           .filter((store) => selectedStores.includes(store.id))
           .map((store) => store.name)

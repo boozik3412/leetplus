@@ -11,7 +11,7 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "skillDir": "C:\\Users\\ALIENWARE\\.codex\\skills\\autopilot",
   "startedAt": "2026-09-15T10:27:25.425605+05:00",
-  "updatedAt": "2026-09-15T11:28:39.532933+05:00",
+  "updatedAt": "2026-09-15T12:49:00.6793083+05:00",
   "finishedAt": null,
   "stages": [
     {
@@ -24,38 +24,40 @@ window.STATE =
       "id": "manifest",
       "status": "done",
       "startedAt": "2026-09-15T10:29:24.943765+05:00",
-      "finishedAt": "2026-09-15T10:41:30.814570+05:00"
+      "finishedAt": "2026-09-15T10:41:30.81457+05:00"
     },
     {
       "id": "briefing",
       "status": "done",
-      "startedAt": "2026-09-15T10:41:30.814570+05:00",
-      "finishedAt": "2026-09-15T10:41:30.814570+05:00",
+      "startedAt": "2026-09-15T10:41:30.81457+05:00",
+      "finishedAt": "2026-09-15T10:41:30.81457+05:00",
       "note": "Определение выручки подтверждено"
     },
     {
       "id": "spec",
       "status": "done",
-      "startedAt": "2026-09-15T10:41:30.814570+05:00",
-      "finishedAt": "2026-09-15T10:48:23.259190+05:00",
+      "startedAt": "2026-09-15T10:41:30.81457+05:00",
+      "finishedAt": "2026-09-15T10:48:23.25919+05:00",
       "note": "Спецификация v2 пересмотрена по четырём навыкам; G2 PASS"
     },
     {
       "id": "plan",
       "status": "done",
-      "startedAt": "2026-09-15T10:48:23.259190+05:00",
-      "finishedAt": "2026-09-15T10:48:23.259190+05:00",
+      "startedAt": "2026-09-15T10:48:23.25919+05:00",
+      "finishedAt": "2026-09-15T10:48:23.25919+05:00",
       "note": "План v2: сквозной пилот → API/UI → приёмка; 4 задачи, 3 волны"
     },
     {
       "id": "build",
       "status": "active",
-      "note": "Сквозной пилот на товарной выручке",
+      "note": "Пилот: API и компоненты собраны; приёмка пограничных данных",
       "startedAt": "2026-09-15T11:28:39.532933+05:00"
     },
     {
       "id": "review",
-      "status": "pending"
+      "status": "active",
+      "startedAt": "2026-09-15T11:54:14.5178883+05:00",
+      "note": "Проверка стабильной API части01; Web завершается"
     },
     {
       "id": "final",
@@ -91,14 +93,60 @@ window.STATE =
         "shared executive contract/product-revenue service slice",
         "apps/web/src/components/metric-*",
         "apps/web/src/lib/metric-presentation*",
-        "apps/web/src/components/dashboard-filters.tsx"
+        "apps/web/src/components/dashboard-filters.tsx",
+        "apps/api/src/dashboard/dashboard.service.ts (pilot projection only)",
+        "apps/api/src/dashboard/dashboard.controller.ts (pilot route only)",
+        "apps/web/src/lib/dashboard-summary.ts (pilot transport only)"
       ],
-      "status": "in-progress",
+      "status": "done",
       "retries": 0,
-      "repairs": 0,
-      "handoffs": 0,
+      "repairs": 2,
+      "handoffs": 1,
       "planRevision": 2,
-      "startedAt": "2026-09-15T11:28:39.532933+05:00"
+      "startedAt": "2026-09-15T11:28:39.532933+05:00",
+      "executor": "/root/executive_pilot_repair",
+      "repairFindings": [
+        "Confirmed store-day partial sums and nullable row state; no false0 for unknown clubs",
+        "One actual store universe for facts/rows/scope incl. inactive consistency; explicit scope IDs",
+        "Actual accepted business timezone/asOf for pilot",
+        "Public-boundary cancellation/zero/missing/partial/failed/inactive evidence",
+        "Repair2: preserve authorized mixed-timezone selection via per-store business dates, not400",
+        "Repair2: assert service outputs, remove privatePrisma queryshape assertions/typecast",
+        "Repair2 Web: remove mismatched legacy drill route, isolate product request failure, preserve per-row explanation/date/coverage, stable fiscal-date labels"
+      ],
+      "handoffFiles": [
+        ".autopilot/2026-09-15-executive-dashboard--wip/handoff-01-1.md"
+      ],
+      "files": [
+        "apps/api/src/common/executive-contract.ts",
+        "apps/api/src/dashboard/dashboard.controller.ts",
+        "apps/api/src/dashboard/dashboard.service.spec.ts",
+        "apps/api/src/dashboard/dashboard.service.ts",
+        "apps/api/src/tenancy/pilot-http-surface-manifest.spec.ts",
+        "apps/api/src/tenancy/pilot-http-surface-manifest.ts",
+        "apps/web/src/app/(app)/dashboard/page.tsx",
+        "apps/web/src/components/dashboard-filters.tsx",
+        "apps/web/src/components/metric-product-revenue-card.tsx",
+        "apps/web/src/lib/dashboard-executive.ts",
+        "apps/web/src/lib/dashboard-summary.ts",
+        "apps/web/src/lib/metric-presentation.ts"
+      ],
+      "tests": {
+        "targetedApi": 27,
+        "apiTypecheck": "PASS",
+        "webBuild": "PASS",
+        "webScopedLint": "PASS",
+        "browser": "PASS synthetic actual components; final copy-only update",
+        "webTypecheck": "PASS",
+        "apiScopedLint": "PASS"
+      },
+      "review": {
+        "apiFull": "PASS:191 suites,3567 tests,2 existing todo",
+        "craftBlocking": "none",
+        "spec": "PASS",
+        "manifest": "PASS"
+      },
+      "finishedAt": "2026-09-15T12:49:00.6858794+05:00"
     },
     {
       "id": "02",
@@ -215,7 +263,14 @@ window.STATE =
     }
   ],
   "singlePass": null,
-  "tests": null,
+  "tests": {
+    "todo": 2,
+    "gate": "pilot-final-api-full",
+    "suitesPassed": 191,
+    "passed": 3567,
+    "failed": 0,
+    "at": "2026-09-15T12:47:36.0666056+05:00"
+  },
   "debt": {
     "placeholders": [],
     "assumptions": [],
@@ -234,10 +289,14 @@ window.STATE =
     "reviewer": "/root/executive_spec_review",
     "reviewedAt": "2026-09-15T11:24:31.954361+05:00"
   },
-  "concerns": [],
+  "concerns": [
+    "03: dashboard-filters.tsx duplicate wrapper/content props -> shared DashboardFiltersProps during mobile-label adaptation",
+    "03: 390px preset label truncates; keep meaningful compact labels",
+    "04: pilot contrast coverage is title/surface smoke only; full changed palette/focus still required"
+  ],
   "reviewers": {
     "manifestSpec": "/root/executive_spec_review",
-    "craft": null
+    "craft": "/root/executive_craft_review"
   },
   "blind": null,
   "planRevision": 2,
@@ -278,5 +337,22 @@ window.STATE =
       "resumeMessage": "ок, реализуй"
     }
   ],
-  "resumedAt": "2026-09-15T11:28:39.532933+05:00"
+  "resumedAt": "2026-09-15T11:28:39.532933+05:00",
+  "contractReview": {
+    "reviewedAt": "2026-09-15T11:50:06.1916123+05:00",
+    "reviewer": "/root/executive_spec_review",
+    "findingsFixed": 4,
+    "status": "PASS"
+  },
+  "uiQa": {
+    "agent": "/root/executive_browser_fixture",
+    "scope": "01 actual component fixture",
+    "status": "PASS pilot; limited palette smoke",
+    "evidence": "deploy-evidence/executive-dashboard-20260915/pilot-ui-qa",
+    "limits": [
+      "Title/background contrast only; full palette acceptance remains04",
+      "Legacy drill link is removed during repair2; inline details stay",
+      "Timezone America/Los_Angeles recheck after fiscal label fix"
+    ]
+  }
 }

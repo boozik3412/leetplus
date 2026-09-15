@@ -5,7 +5,7 @@
 **Blocked by:** —
 **Волна:** 1
 **Зона:** shared executive contract/product-revenue service slice, apps/web/src/components/metric-*, apps/web/src/lib/metric-presentation*, apps/web/src/components/dashboard-filters.tsx
-**Статус:** ready — пауза снята пользователем
+**Статус:** done — source, static gates, independent review and bounded actual-component QA passed
 
 ## Из брифа
 

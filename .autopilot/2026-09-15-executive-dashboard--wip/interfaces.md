@@ -1,6 +1,6 @@
 # Интерфейсы и правила v2
 
-План обновлён по новым навыкам. Реализация на паузе. Этот файл заменяет прежнюю схему чисто серверного первого шага.
+План обновлён по новым навыкам. Реализация возобновлена 15.09.2026 по указанию пользователя. Этот файл заменяет прежнюю схему чисто серверного первого шага.
 
 ## Обязательные навыки по зонам
 
@@ -46,7 +46,71 @@ Primary/secondary остаются логическими частями для 
 - Оперативная сводка не подменяется полным трёхмесячным CRM; legacy CRM сохраняет смысл.
 - Не писать .autopilot/interfaces/state самостоятельно: root обновляет контракты по возвращённому INTERFACES-блоку. Не менять соседние zones.
 - Evidence: C:/Users/ALIENWARE/Documents/New project/deploy-evidence/executive-dashboard-20260915. Полный ERROR_LOG читать перед retry/production-командой; append cause/changed condition; каждый gate имеет отдельные stdout/stderr/exit.
-- Агентам не выполнять production/auth/sync. Старые JWT/окна CANARY не переиспользовать. Кодовые агенты сейчас не запущены.
+- Агентам не выполнять production/auth/sync. Старые JWT/окна CANARY не переиспользовать. Активный исполнитель01: /root/executive_pilot; остальные зоны выдаются после закрепления границы01.
 - API test: pnpm.cmd --filter api exec jest --runInBand --runTestsByPath src/<file>.spec.ts; API typecheck: pnpm.cmd --filter api exec tsc --noEmit -p tsconfig.build.json.
 - Web: pnpm.cmd --filter web typecheck; pnpm.cmd --filter web build; scoped lint через pnpm.cmd --filter api/web exec eslint <paths>.
 - Browser выбирается действующим процессом; ранее пользователь явно разрешил локальный Chromium. Новый рендер/стенд проверять заново, не считать старый порт или55проверокHTML доказательством продукта.
+
+## Допуск зоны01 — 15.09.2026
+
+Для сквозного подключения пилота дополнительно разрешены apps/api/src/dashboard/dashboard.service.ts, при необходимости dashboard.controller.ts, и apps/web/src/lib/dashboard-summary.ts. Сохранять legacy потребителей ассортимента; предпочтительна узкая additive projection с явным контрактом запроса. DashboardFilters расширяется совместимо. Полные KPI и оптимизация остаются02. Эти файлы пока принадлежат только01; сигнатуры закрепляются до02/03.
+
+## Закреплённая граница сводки — после согласования01
+
+Общие типы01: apps/api/src/common/executive-contract.ts; зеркальный Web contract/transport apps/web/src/lib/dashboard-executive.ts. Это дополнение зоны01 до начала02/03. После01 API-модуль принадлежит02, Web-модуль03; изменения wire shape согласуются root и передаются обоим.
+
+- Query: period, dateFrom, dateTo, repeated storeIds; comparison:boolean (default true), asOf?:ISO cutoff. Server resolves default closed-day period and fresh allowed stores; invalid scope is rejected/limited by canonical FreshStoreScope, not client assertions.
+- ExecutiveAppliedScope={period:{from:string,to:string,timezone:string},storeIds:string[],storeTimeZones:Record<string,string>,comparison:{from:string,to:string}|null,asOf:string}. asOf is one requested/resolved calculation cutoff; source fact dates remain independent. Response scope is the accepted context.
+- ExecutiveCoverage={covered:number,total:number|null,percent:number|null,basis:'STORE_DAYS'|'STORE_OPERATIONS'|'STORE_SESSIONS'|'CAPACITY_HOURS'}. Unknown total is null, not a invented denominator. Metric reason/definition names what is covered. Not merely integration presence.
+- ExecutiveMetric={key:string,unit:'RUB'|'COUNT'|'PERCENT'|'RUB_PER_VISIT',definition:string,grain:string,value:number|null,state:'AVAILABLE'|'PARTIAL'|'MISSING'|'STALE'|'FAILED',reason:string|null,coverage:ExecutiveCoverage|null,factAsOf:string|null,lastCalculatedAt:string,comparison:{previousValue:number|null,absoluteDelta:number|null,percentDelta:number|null,pointsDelta:number|null}|null,destination?:'CLUBS'|'ASSORTMENT'}.
+- ExecutiveMetrics has exact keys revenue, serviceRevenue, topups, visits, revenuePerVisit, load, productRevenue, productRevenueShare. Main UI uses five cards and productRevenueShare next to goods; service/topups are disclosed without double counting.
+- GET /dashboard/executive-summary → ExecutiveSummary={scope:ExecutiveAppliedScope,metrics:ExecutiveMetrics,clubs:Array<{storeId:string,storeName:string,metrics:ExecutiveMetrics}>,days:Array<{date:string,metrics:ExecutiveMetrics}>}. Club/day details reuse this accepted generation, explicitly labelled as aggregates by club/day; no claim of individual receipts. Comparisons cover each metric, zero base leaves percentDelta null.
+- GET /dashboard/executive-operations → ExecutiveOperations={scope:ExecutiveAppliedScope,assortment:{state:'AVAILABLE'|'PARTIAL'|'MISSING'|'STALE'|'FAILED',reason:string|null,data:AssortmentHealth|null}}. Reuse existing canonical AssortmentHealth type; if summary-only projection needed, name exact existing DTO alias before changes. No invented CRM payload. This source may fail independently of primary.
+- Both routes stay corporate guarded, use same scope normalization, make only saved-data reads. Web transport exposes getExecutiveSummary(query,{signal?}) and getExecutiveOperations(query,{signal?}); abort/latest-request guard belongs to03. Naming can follow current transport conventions if exact exports are reported before02/03.
+- Product pilot remains GET /dashboard/executive-product-revenue with metric/rows public seam; its metric should conform to generic states/proof. Existing /dashboard/summary remains compatible for assortment consumers.
+
+No full-formula completion is implied by these types.01 proves product revenue only;02 implements complete main/operations;03 wires selected variant1.
+
+Pilot UI mount:01 разрешено минимальное подключение карточки/пилота в apps/web/src/app/(app)/dashboard/page.tsx. Полная композиция страницы остаётся03; до завершения01 другие авторы её не меняют. Period.from/to и comparison.from/to — YYYY-MM-DD включительно в возвращённой business timezone; asOf — отдельный ISOinstant cutoff.
+
+
+### Уточнения общей границы после независимой проверки
+
+- Параметры периода: явная пара dateFrom+dateTo используется для custom периода; отсутствие одного края, неверные даты и from>to — 400. period без пары использует существующий supported preset. Если валидная пара присутствует вместе с period, явные даты имеют приоритет и ответ возвращает фактический интервал. Web после apply сериализует канонический URL; legacy from/to нормализует принимающий Web-адаптер, а API не угадывает unsupported aliases.
+- Product-pilot ответ: {scope:ExecutiveAppliedScope,metric:ExecutiveMetric,rows:Array<{storeId:string,storeName:string,revenue:number|null,saleOperationCount:number|null,metric:ExecutiveMetric}>,grain:'CLUB'}. Существующие tenantId/tenantSlug/periodFrom/periodTo/selectedStoreIds поля пилота допустимы как совместимые aliases, но actual UI читает scope. Общая метрика имеет исходный PRODUCT_SALE_OPERATION grain; rows явно клубные агрегаты, не чеки.
+- Secondary запрашивается с принятыми main.scope.period/from/to, scope.storeIds и scope.asOf; server валидирует этот scope заново. UI принимает operations только для текущего request generation и полного совпадения scope; смена фильтра немедленно делает прошлый secondary непригодным к новой выборке. asOf — cutoff, а не обещание общего DB snapshot двух HTTP. Даты inventory/facts показываются отдельно; UI не вычисляет отношения между main и independently-read operations.
+- Приоритеты03 строит по уже полученным фактам: ограничение main metrics (по конкретной причине), canonical assortmentHealth OOS/lowStock/noSales и подтверждённое сравнение visits. Действия максимум3, один сигнал одной проблемы, доступность переходов по текущей роли. Нет отдельного fabricated CRM/priority endpoint. При operationsFAILED его состояние видно, а отсутствие данных не сообщает «задач нет».
+- MISSING означает нет доказанного значения/источника/совместимого знаменателя, всегда value=null. FAILED — источник не удалось прочитать; value=null. AVAILABLE0 допустим лишь при доказанной полноте. PARTIAL допускает только полезную подтверждённую сумму по явному правилу метрики; STALE может содержать прошлое значение с factAsOf/reason. Нельзя общий mapper по совпадающим словам enum старого API.
+- ExecutiveMetric дополнен ratio:{numeratorValue:number|null,denominatorValue:number|null,numeratorLabel:string,denominatorLabel:string,compatible:boolean}|null. Для revenuePerVisit/productRevenueShare/load он обязателен, включая отсутствующие основания; для остальных null. UI показывает эти основания и reason, не реконструирует их из других nullable карточек. Для load основания — занятые и доступные часы; для ARPV — согласованная выручка и визиты; для доли — товары и общая выручка той же популяции.
+
+### Подтверждение источников для02 (координация15.09)
+
+Задача «Спланировать открытый тест» независимо проверила локальные документы и source: подтверждённого dictionary source/form/name для gaming services НЕТ. docs/LANGAME_PUBLIC_API.md перечисляет поля AllOperationsLogListResponseDTO, но не enum/semantics. Импорт переносит rawname/source/form без normalized service kind. ClubRevenueFact = typeplus; existing broad negative/expense helpers — это списания баланса, не доказанные услуги. Их нельзя переименовывать или складывать с SalesFact как непересекающиеся услуги.
+
+02 должен проверить доступные сохранённые источники/контракты; если нового доказательства нет, serviceRevenue=null/MISSING с точной причиной. Общая выручка может показать подтверждённую товарную составляющую только как PARTIAL по явному определению, а зависимые отношения не становятся точными. Synthetic classified service facts проверяют формулу, но не доказывают production availability. Не добавлять постоянный hardcoded mock/fake classified source. Новые provider calls/backfill/schema вне этого scope.
+
+Route inventory extension:01 может добавить точную запись новой guarded GET /dashboard/executive-product-revenue в существующий pilot HTTP surface manifest. Не менять exhaustive manifest assertion, существующие permissions или controllers.02 добавляет собственные2routes тем же образом после передачи зоны.
+
+
+### Repair01 contract clarification
+
+Pilot row.metric carries per-club value/state/reason/coverage; revenue is a nullable compatible alias of row.metric.value, not an invented0. saleOperationCount remains null when its observation population is unknown. Confirmed partial sums only include confirmed store-days; incomplete/missing club rows show their limitation. Query accepts explicit asOf and actual business-period normalization. Response scope.storeIds always lists the concrete accepted store universe used by both facts and rows (never [] as an ambiguous alias for populated whole-network results). Header comparison scope and cutoff have the same business timezone as the actual query. This is repair1 of pilot, before02/03 start.
+Windows tools: App Router paths with parentheses must bypass pnpm.cmd/cmd.exe when linting/formatting. Call node.exe directly with the absolute installed Prettier/ESLint JS entrypoint and literal PowerShell path arguments. pnpm filtered exec also changes cwd to its package, so root-relative patterns are invalid there. Do not repeat either known invocation failure or install a second formatter.
+
+
+### Repair2: несколько часовых поясов
+
+Разрешённый выбор A+B не отклоняется только потому, что часовые пояса клубов различаются. Scope содержит storeTimeZones:Record<string,string> для принятых клубов; period.timezone равен общему IANA timezone для однородной выборки либо PER_STORE для смешанной. Для товарного пилота UI показывает «Продажи показаны по учётным датам источника»; у timestamp-метрик02 применимы локальные календарные границы. PER_STORE не передаётся в Intl как имя зоны.
+
+Проверено по существующим источникам: импорт Langame SalesFact сохраняет fiscal-date строки через Date.UTC без пересчёта зоны; DailyDataCoverage.businessDate также нормализована через Date.UTC, а loader сопоставляет её по sameUtcDay. Эти учётные даты нельзя повторно смещать по store.timeZone. Для товарного пилота выбранные YYYY-MM-DD сопоставляются с теми же UTC fiscal-date labels. CSV date может содержать время; его действующая семантика сохраняется и не объявляется точным временем отдельного чека.
+
+Настоящие timestamp-популяции (например GuestSession) в02 ограничиваются локальными границами выбранных календарных дней каждого клуба. asOf остаётся принятым ISO cutoff для источников, к которым он применим, и передаётся вместе с selection; это не обещание intraday-разделения дневных SalesFact или общего DB snapshot. Даты источников и lastCalculatedAt остаются отдельными. Не выдавать плюс/минус-баланс за подтверждённые услуги.
+
+Проверка смешанной сети обязательна: два разрешённых клуба с разными зонами сохраняют оба ID/строки и сумму; в ответе нет400 из-за самого факта смешанной выборки. Из тестов01 удаляются assertions формы приватного Prisma запроса и лишний cast; проверяются результаты публичного сервиса на независимых fixtures.
+## Принимаемый результат01
+
+- Public product seam и Web transport согласованы; строка имеет nullable revenue/count и собственный ExecutiveMetric. Последняя версия включает storeTimeZones/PER_STORE, источник fiscal-date labels, локальный request error и только inline детали того же результата.
+- Неблокирующие задачи переходят03/04: компактные мобильные подписи DashboardFilters, один общий DashboardFiltersProps вместо двойного объявления; полная проверка палитры/фокуса. Для03 разрешены dashboard-filters.tsx и metric-presentation.ts в рамках этих адаптаций и общей презентации метрик.01 больше их не меняет после commit.
+- Web summary contract/transport apps/web/src/lib/dashboard-executive.ts теперь принадлежит03. API common/executive-contract.ts и dashboard/* принадлежат02. Wire-shape меняется только через root и уведомление обоих; остаётся одна согласованная схема.
+-02 получает также точное дополнение apps/api/src/tenancy/pilot-http-surface-manifest.ts/.spec.ts для регистрации двух своих read endpoints, без смены exhaustive assertions/guards/profiles. Подключение новых routes требует актуальной source-only документации в04.
+- Windows gate helper .autopilot/run-executive-gate.ps1 использует проверенный cached pnpm10.33.2 через node.exe, чтобы обойти Corepack shim. Для Prettier/ESLint App Router paths вызывать direct node entrypoint из правильного package cwd; Web ESLint config находится в apps/web. Это не смена версии или установка зависимости.

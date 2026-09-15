@@ -1,8 +1,13 @@
 import { getDashboardSummary } from "@/lib/dashboard-summary";
+import {
+  ExecutiveDashboardRequestError,
+  getExecutiveProductRevenue,
+} from "@/lib/dashboard-executive";
 import { buildAssortmentRiskSummary } from "@/lib/assortment-risk";
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
 import { DashboardRevenuePanel } from "@/components/dashboard-revenue-panel";
+import { MetricProductRevenueCard } from "@/components/metric-product-revenue-card";
 import { RevenueSnapshotGate } from "@/components/revenue-snapshot-gate";
 import { TenantOnboardingNotice } from "@/components/tenant-onboarding-notice";
 import { requireTenantWorkspaceUser } from "@/lib/auth";
@@ -287,6 +292,23 @@ async function safeDashboardValue<T>(
   }
 }
 
+async function loadExecutiveProductRevenue(
+  query: Parameters<typeof getExecutiveProductRevenue>[0],
+) {
+  try {
+    return await getExecutiveProductRevenue(query);
+  } catch (error) {
+    if (
+      error instanceof ExecutiveDashboardRequestError &&
+      (error.status === 401 || error.status === 403)
+    ) {
+      throw error;
+    }
+
+    return null;
+  }
+}
+
 function dashboardScopedParams(
   summary: Awaited<ReturnType<typeof getDashboardSummary>>,
 ) {
@@ -514,10 +536,21 @@ export default async function DashboardPage({
   } as const;
   const revenueView: DashboardRevenueView =
     searchParam(params.revenueView) === "stores" ? "stores" : "summary";
+  const executiveProductRevenueFilters = {
+    period: filters.period,
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    storeIds: filters.storeIds,
+    asOf: filters.asOf,
+  } as const;
+  const productRevenuePromise = loadExecutiveProductRevenue(
+    executiveProductRevenueFilters,
+  );
   const [summary, stores] = await Promise.all([
     getDashboardSummary(filters),
     getStores(),
   ]);
+  const productRevenue = await productRevenuePromise;
   const highlightedPeriod = formatDashboardPeriodLabel(
     summary.periodFrom,
     summary.periodTo,
@@ -595,6 +628,8 @@ export default async function DashboardPage({
           </div>
         </section>
 
+        <MetricProductRevenueCard projection={productRevenue} />
+
         <RevenueSnapshotGate
           snapshot={summary.revenueSnapshot}
           periodFrom={summary.periodFrom}
@@ -620,42 +655,38 @@ async function DashboardSecondaryPanels({
       ? summary.selectedStoreIds[0]
       : undefined;
   const reportScope = assortmentScope(summary);
-  const [
-    periodOperationalReport,
-    noSalesReport,
-    guestsSummary,
-    crmTaskReport,
-  ] = await Promise.all([
-    safeDashboardValue(
-      getOperationalReport({
-        ...reportScope,
-      }),
-      emptyOperationalReport,
-    ),
-    safeDashboardValue(
-      getOperationalReport({
-        ...reportScope,
-      }),
-      emptyOperationalReport,
-    ),
-    safeDashboardValue(
-      getGuestsSummary({
-        dateFrom: summary.periodFrom,
-        dateTo: summary.periodTo,
-        storeId: operationalStoreId,
-      }),
-      emptyGuestsSummary,
-    ),
-    safeDashboardValue(
-      getGuestCrmTaskReport({
-        status: "all",
-        sort: "dueAt",
-        direction: "asc",
-        pageSize: "50",
-      }),
-      emptyCrmTaskReport,
-    ),
-  ]);
+  const [periodOperationalReport, noSalesReport, guestsSummary, crmTaskReport] =
+    await Promise.all([
+      safeDashboardValue(
+        getOperationalReport({
+          ...reportScope,
+        }),
+        emptyOperationalReport,
+      ),
+      safeDashboardValue(
+        getOperationalReport({
+          ...reportScope,
+        }),
+        emptyOperationalReport,
+      ),
+      safeDashboardValue(
+        getGuestsSummary({
+          dateFrom: summary.periodFrom,
+          dateTo: summary.periodTo,
+          storeId: operationalStoreId,
+        }),
+        emptyGuestsSummary,
+      ),
+      safeDashboardValue(
+        getGuestCrmTaskReport({
+          status: "all",
+          sort: "dueAt",
+          direction: "asc",
+          pageSize: "50",
+        }),
+        emptyCrmTaskReport,
+      ),
+    ]);
   const assortmentRisk = buildAssortmentRiskSummary({
     oosRows: periodOperationalReport.outOfStockRiskProducts,
     noSalesRows: noSalesReport.productsWithoutSales,

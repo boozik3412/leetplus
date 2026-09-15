@@ -3,6 +3,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tarfile
@@ -12,6 +13,15 @@ from backup_crypto import encrypt
 
 ROOT = Path('/srv/leetplus')
 EXPORT = ROOT / 'backups/export'
+
+
+def backup_member_filter(member):
+    # Refresh is now allowed alongside backup. Its atomic diagnostic record is
+    # not authority and is deliberately excluded to avoid stat/open size races.
+    prefix = 'system/var/lib/leetplus-compose/'
+    if member.name == prefix + 'network-refresh.json' or re.fullmatch(re.escape(prefix) + r'\.network-refresh\.json\.[0-9]+\.[a-f0-9]{24}\.tmp', member.name):
+        return None
+    return member
 
 
 def file_hash(path):
@@ -64,7 +74,7 @@ def run():
         for leaf in ['leetplus.dump', 'globals.sql', 'manifest.json']:
             archive.add(work / leaf, arcname=leaf, recursive=False)
         for source in [ROOT / 'secrets', ROOT / 'data/langame-sync', Path('/etc/leetplus-compose'), Path('/var/lib/leetplus-compose')]:
-            archive.add(source, arcname='system/' + str(source).lstrip('/'))
+            archive.add(source, arcname='system/' + str(source).lstrip('/'), filter=backup_member_filter)
         state = Path('/var/lib/leetplus-compose/active.json')
         if state.exists():
             active = json.loads(state.read_text())

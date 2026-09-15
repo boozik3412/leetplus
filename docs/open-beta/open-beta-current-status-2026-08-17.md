@@ -1,5 +1,14 @@
 # LeetPlus open beta — текущее состояние на 15.09.2026
 
+Source candidate15.09: постоянный ремонт provider network refresh и отдельное
+подписанное переключение serving controller, без app/data rollout и без
+остановки таймеров. Установленным он пока не считается; runtimeb5/gen5 и
+data/control399876 ниже остаются последним подтверждённым состоянием.
+Внешний beta GO, tenant/provider scope, guest identity и награды не меняются.
+Interrupted/expired handoff сохраняет только доказанное право на undo;
+pending network install доступен лишь штатному boot unit с signed app history.
+[Порядок переключения и проверки](../deployment/network-refresh-control-handoff.md).
+
 Source-only USER_CALL modal follow-up15.09: видимые countdown/error/expiry,
 явный retry и переход к READY Telegram. Backend phone proof/provider/TTL,
 cookie и worker scope неизменны; новая production-выкладка этим описанием

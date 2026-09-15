@@ -11,7 +11,7 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "skillDir": "C:\\Users\\ALIENWARE\\.codex\\skills\\autopilot",
   "startedAt": "2026-09-15T10:27:25.425605+05:00",
-  "updatedAt": "2026-09-15T12:49:00.6793083+05:00",
+  "updatedAt": "2026-09-15T15:37:39.9784021+05:00",
   "finishedAt": null,
   "stages": [
     {
@@ -50,7 +50,7 @@ window.STATE =
     {
       "id": "build",
       "status": "active",
-      "note": "Пилот: API и компоненты собраны; приёмка пограничных данных",
+      "note": "01 принято; параллельно02 расчёты и03 полный интерфейс",
       "startedAt": "2026-09-15T11:28:39.532933+05:00"
     },
     {
@@ -146,7 +146,8 @@ window.STATE =
         "spec": "PASS",
         "manifest": "PASS"
       },
-      "finishedAt": "2026-09-15T12:49:00.6858794+05:00"
+      "finishedAt": "2026-09-15T12:49:00.6858794+05:00",
+      "commit": "5b8bc20609e9f44e7c81c71733654ba85f4d41eb"
     },
     {
       "id": "02",
@@ -176,11 +177,34 @@ window.STATE =
         "apps/api/src/dashboard/",
         "apps/api/src/common/executive-* business calculations"
       ],
-      "status": "pending",
-      "retries": 0,
-      "repairs": 0,
-      "handoffs": 0,
-      "planRevision": 2
+      "status": "done",
+      "retries": 1,
+      "repairs": 1,
+      "handoffs": 1,
+      "planRevision": 2,
+      "startedAt": "2026-09-15T12:53:40.8735473+05:00",
+      "executor": "/root/executive_api_finish",
+      "handoffFiles": [
+        ".autopilot/2026-09-15-executive-dashboard--wip/handoff-02-1.md"
+      ],
+      "repairFindings": [
+        "Source-specific per-slice session completeness cannot be inferred from padded binding; missing proof stays partial/missing",
+        "Remove unused arithmetic demo tests or test a real named public metric engine used by service"
+      ],
+      "review": {
+        "craftBlocking": "none",
+        "manifest": "PASS repaired conditions",
+        "apiFull": "PASS192suites3571tests2TODO",
+        "spec": "PASS repaired conditions"
+      },
+      "finishedAt": "2026-09-15T15:37:39.9846498+05:00",
+      "tests": {
+        "fullApi": 3571,
+        "sourceCompleteness": "honest scoped partial/missing",
+        "apiTypecheck": "PASS",
+        "apiLint": "PASS",
+        "targeted": 47
+      }
     },
     {
       "id": "03",
@@ -214,11 +238,31 @@ window.STATE =
         "apps/web/src/lib/assortment-report-query*",
         "apps/web/src/app/(app)/assortment/dashboard/page.tsx"
       ],
-      "status": "pending",
+      "status": "review",
       "retries": 0,
-      "repairs": 0,
+      "repairs": 2,
       "handoffs": 0,
-      "planRevision": 2
+      "planRevision": 2,
+      "startedAt": "2026-09-15T12:53:40.8740336+05:00",
+      "executor": "/root/executive_ui",
+      "repairFindings": [
+        "Preserve asOf/comparison and make comparison toggle real",
+        "Compare complete AppliedScope including timezone maps/comparison",
+        "Break chart lines on null points",
+        "Per-row state/reason/coverage/date and proper ratio units",
+        "Visit-decline priority requires compatible AVAILABLE comparison",
+        "Details retain accepted generation or explicitly mark recalculation",
+        "Visual repair2: compact ready KPI row; ready metadata folded, visible partial reasons preserved",
+        "Visual repair2: actual390 labels and Russian user-facing units/dates/plurals; neutral missing comparison",
+        "Visual repair2: useful revenue/visits chart with Y values, tooltip/accessible values, comparable previous line, proper dots"
+      ],
+      "review": {
+        "craftBlocking": "none",
+        "manifest": "PASS",
+        "visual": "root accepted frozen1440/390 smoke",
+        "webBuild": "PASS",
+        "spec": "PASS"
+      }
     },
     {
       "id": "04",
@@ -252,24 +296,26 @@ window.STATE =
       "wave": 3,
       "zone": [
         "docs/",
-        "apps/api/src/tenancy/gate-1mt.postgres.spec.ts",
+        "apps/api/test/pilot-assortment-store-scope.pg.integration-spec.ts",
         "external evidence browser fixtures"
       ],
-      "status": "pending",
+      "status": "in-progress",
       "retries": 0,
       "repairs": 0,
       "handoffs": 0,
-      "planRevision": 2
+      "planRevision": 2,
+      "executor": "/root/executive_acceptance",
+      "startedAt": "2026-09-15T15:33:24.8360205+05:00"
     }
   ],
   "singlePass": null,
   "tests": {
     "todo": 2,
-    "gate": "pilot-final-api-full",
-    "suitesPassed": 191,
-    "passed": 3567,
     "failed": 0,
-    "at": "2026-09-15T12:47:36.0666056+05:00"
+    "at": "2026-09-15T15:34:09.6525304+05:00",
+    "gate": "task02-repair1-final-api-full",
+    "suitesPassed": 192,
+    "passed": 3571
   },
   "debt": {
     "placeholders": [],
@@ -290,9 +336,10 @@ window.STATE =
     "reviewedAt": "2026-09-15T11:24:31.954361+05:00"
   },
   "concerns": [
-    "03: dashboard-filters.tsx duplicate wrapper/content props -> shared DashboardFiltersProps during mobile-label adaptation",
-    "03: 390px preset label truncates; keep meaningful compact labels",
-    "04: pilot contrast coverage is title/surface smoke only; full changed palette/focus still required"
+    "API narrow/full coverage read duplication remains; shared evidence semantics unchanged",
+    "No saved session completeness proof: observed visits partial, zeros and visit comparison unavailable",
+    "Service revenue, true topups, historical capacity and dependent exact ratios unavailable in current sources",
+    "04 full accessibility/role/edge-state and API-backed acceptance still pending"
   ],
   "reviewers": {
     "manifestSpec": "/root/executive_spec_review",
@@ -347,12 +394,24 @@ window.STATE =
   "uiQa": {
     "agent": "/root/executive_browser_fixture",
     "scope": "01 actual component fixture",
-    "status": "PASS pilot; limited palette smoke",
+    "status": "Actual Next smoke PASS; visual refinements and full04 matrix pending",
     "evidence": "deploy-evidence/executive-dashboard-20260915/pilot-ui-qa",
     "limits": [
       "Title/background contrast only; full palette acceptance remains04",
       "Legacy drill link is removed during repair2; inline details stay",
       "Timezone America/Los_Angeles recheck after fiscal label fix"
     ]
+  },
+  "postgresFixture": {
+    "port": 55495,
+    "data": "C:/Users/ALIENWARE/Documents/New project/deploy-evidence/executive-dashboard-20260915/pg-fixture/data",
+    "version": "16.13",
+    "startupSession": null,
+    "host": "127.0.0.1",
+    "schema": "canonical applied",
+    "needsStopAfterAcceptance": true,
+    "database": "leetplus_ci",
+    "pid": 6296,
+    "baseline": "15/15 PASS with CLI testTimeout30000;20260915T101727583Z"
   }
 }

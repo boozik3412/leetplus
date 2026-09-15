@@ -122,7 +122,16 @@ const definitions: readonly ControllerDefinition[] = [
     module: 'ASSORTMENT',
     profile: 'STORES_VERIFIED',
     routes: [
-      ['GET', ['summary', 'executive-product-revenue', 'revenue-diagnostics']],
+      [
+        'GET',
+        [
+          'summary',
+          'executive-product-revenue',
+          'executive-summary',
+          'executive-operations',
+          'revenue-diagnostics',
+        ],
+      ],
     ],
   },
   {

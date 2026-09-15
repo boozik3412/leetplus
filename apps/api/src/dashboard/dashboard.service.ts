@@ -13,8 +13,15 @@ import type {
   AssortmentHealth,
   AssortmentNoSalesWindow,
 } from '../common/assortment-health';
-import type { ExecutiveMetric } from '../common/executive-contract';
-import type { ExecutiveAppliedScope } from '../common/executive-contract';
+import type {
+  ExecutiveAppliedScope,
+  ExecutiveMetric,
+  ExecutiveMetrics,
+} from '../common/executive-contract';
+import {
+  aggregateExecutiveRevenue,
+  compareExecutiveValues,
+} from '../common/executive-metrics';
 
 export type DashboardPeriod =
   | 'day'
@@ -45,6 +52,30 @@ export type DashboardExecutiveProductRevenueQuery = Pick<
   DashboardQuery,
   'period' | 'dateFrom' | 'dateTo' | 'storeIds' | 'asOf'
 >;
+
+export type DashboardExecutiveQuery = DashboardExecutiveProductRevenueQuery & {
+  comparison?: boolean | string;
+};
+
+export type DashboardExecutiveSummary = {
+  scope: ExecutiveAppliedScope;
+  metrics: ExecutiveMetrics;
+  clubs: Array<{
+    storeId: string;
+    storeName: string;
+    metrics: ExecutiveMetrics;
+  }>;
+  days: Array<{ date: string; metrics: ExecutiveMetrics }>;
+};
+
+export type DashboardExecutiveOperations = {
+  scope: ExecutiveAppliedScope;
+  assortment: {
+    state: 'AVAILABLE' | 'PARTIAL' | 'MISSING' | 'STALE' | 'FAILED';
+    reason: string | null;
+    data: AssortmentHealth | null;
+  };
+};
 
 export type DashboardExecutiveProductRevenue = {
   scope: ExecutiveAppliedScope;
@@ -552,7 +583,7 @@ export class DashboardService {
     const timeZones = [...new Set(Object.values(storeTimeZones))];
     const scopeTimeZone = timeZones.length === 1 ? timeZones[0] : 'PER_STORE';
     const asOf = this.resolveAssortmentAsOf(query.asOf);
-    const [salesFacts, assortmentHealth] = await Promise.all([
+    const [salesFacts, salesCoverage] = await Promise.all([
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
@@ -567,12 +598,10 @@ export class DashboardService {
           isCanceled: true,
         },
       }),
-      this.assortmentHealthLoader.load({
+      this.assortmentHealthLoader.loadSalesCoverage({
         tenantId,
         storeIds: selectedStoreIds,
-        categoryIds: null,
         period: { from: period.fromDate, to: period.toDate },
-        asOf,
       }),
     ]);
     const businessDays = this.executiveDaysInclusive(
@@ -580,7 +609,7 @@ export class DashboardService {
       period.toDate,
     ).map((date) => this.toDateInputValue(date));
     const evidenceByStoreDay = new Map(
-      assortmentHealth.salesDayEvidence.map((item) => [
+      salesCoverage.salesDayEvidence.map((item) => [
         `${item.storeId}:${this.toDateInputValue(item.date)}`,
         item.status,
       ]),
@@ -760,6 +789,678 @@ export class DashboardService {
             (second.revenue ?? -1) - (first.revenue ?? -1) ||
             first.storeName.localeCompare(second.storeName, 'ru'),
         ),
+    };
+  }
+
+  async getExecutiveSummary(
+    user: AuthenticatedUser,
+    query: DashboardExecutiveQuery = {},
+  ): Promise<DashboardExecutiveSummary> {
+    const product = await this.getExecutiveProductRevenue(user, query);
+    const now = new Date().toISOString();
+    const comparisonPeriod =
+      query.comparison === false || query.comparison === 'false'
+        ? null
+        : this.executivePreviousPeriod(product.scope.period);
+    const previousProduct = comparisonPeriod
+      ? await this.getExecutiveProductRevenue(user, {
+          period: 'custom',
+          dateFrom: comparisonPeriod.from,
+          dateTo: comparisonPeriod.to,
+          storeIds: product.scope.storeIds,
+          asOf: query.asOf,
+        })
+      : null;
+    const storeIds = product.scope.storeIds;
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId: product.tenantId,
+        id: { in: storeIds },
+        isActive: true,
+      },
+      select: {
+        id: true,
+        name: true,
+        tenantId: true,
+        externalDomain: true,
+        externalClubId: true,
+        timeZone: true,
+        isActive: true,
+      },
+    });
+    const sessionFrom = new Date(
+      `${comparisonPeriod?.from ?? product.scope.period.from}T00:00:00.000Z`,
+    );
+    sessionFrom.setUTCHours(sessionFrom.getUTCHours() - 14);
+    const sessionTo = new Date(`${product.scope.period.to}T23:59:59.999Z`);
+    sessionTo.setUTCHours(sessionTo.getUTCHours() + 14);
+    const sessions = await this.prisma.guestSession.findMany({
+      where: {
+        tenantId: product.tenantId,
+        startedAt: {
+          gte: sessionFrom,
+          lte: sessionTo,
+        },
+      },
+      select: {
+        id: true,
+        storeId: true,
+        externalProvider: true,
+        externalDomain: true,
+        externalClubId: true,
+        externalSessionId: true,
+        guestId: true,
+        externalGuestId: true,
+        startedAt: true,
+      },
+    });
+    const sessionsWithStartedAt = sessions.filter(
+      (session): session is typeof session & { startedAt: Date } =>
+        session.startedAt !== null,
+    );
+    const visitsFor = (
+      period: { from: string; to: string },
+      storeId?: string,
+    ) =>
+      this.executiveVisitsMetricForScope({
+        sessions: sessionsWithStartedAt,
+        tenantId: product.tenantId,
+        topology: stores,
+        selectedStoreIds: storeId === undefined ? storeIds : [storeId],
+        storeTimeZones: product.scope.storeTimeZones,
+        period,
+        now,
+      });
+    const metricsFor = (
+      productMetric: ExecutiveMetric,
+      visitsMetric: ExecutiveMetric,
+    ): ExecutiveMetrics => {
+      const services = this.executiveUnavailableMetric(
+        'serviceRevenue',
+        'RUB',
+        'Оказанные услуги, классифицированные доказанным непересекающимся источником.',
+        'SERVICE_OPERATION',
+        'Нет подтверждённого словаря сохранённых операций для классификации оказанных услуг.',
+        now,
+      );
+      const topups = this.executiveUnavailableMetric(
+        'topups',
+        'RUB',
+        'Пополнения, отдельно от выручки.',
+        'TOPUP_OPERATION',
+        'Нет подтверждённого непересекающегося источника пополнений для выбранной выборки.',
+        now,
+      );
+      const combined = aggregateExecutiveRevenue([
+        {
+          kind: 'PRODUCT',
+          value: productMetric.value,
+          state: productMetric.state,
+        },
+        { kind: 'SERVICE', value: services.value, state: services.state },
+      ]);
+      const revenue = this.executiveMetric({
+        key: 'revenue',
+        unit: 'RUB',
+        definition:
+          'Непересекающиеся подтверждённые услуги и товарные продажи; пополнения отдельно.',
+        grain: 'REVENUE_COMPONENT',
+        value: combined.value,
+        state: combined.state,
+        reason:
+          combined.state === 'PARTIAL'
+            ? 'Показана подтверждённая товарная составляющая; услуги не классифицированы доказанным источником.'
+            : 'Нет подтверждённой непересекающейся выручки за выбранный период.',
+        coverage: productMetric.coverage,
+        factAsOf: productMetric.factAsOf,
+        lastCalculatedAt: now,
+      });
+      return {
+        revenue,
+        serviceRevenue: services,
+        topups,
+        visits: visitsMetric,
+        revenuePerVisit: this.executiveUnavailableMetric(
+          'revenuePerVisit',
+          'RUB_PER_VISIT',
+          'Суммарная совместимая выручка / суммарные визиты той же выборки.',
+          'NETWORK_RATIO',
+          'Доход на визит недоступен: общая выручка пока содержит только подтверждённую товарную часть.',
+          now,
+          {
+            numeratorValue: revenue.value,
+            denominatorValue: visitsMetric.value,
+            numeratorLabel: 'Выручка',
+            denominatorLabel: 'Визиты',
+            compatible: false,
+          },
+        ),
+        load: this.executiveUnavailableMetric(
+          'load',
+          'PERCENT',
+          'Занятые часы / доступные часы тех же клубов и интервала.',
+          'CAPACITY_HOURS',
+          'Загрузка недоступна: исторические мощность и режим работы не подтверждены источником.',
+          now,
+          {
+            numeratorValue: null,
+            denominatorValue: null,
+            numeratorLabel: 'Занятые часы',
+            denominatorLabel: 'Доступные часы',
+            compatible: false,
+          },
+        ),
+        productRevenue: productMetric,
+        productRevenueShare: this.executiveUnavailableMetric(
+          'productRevenueShare',
+          'PERCENT',
+          'Товарная выручка / общая совместимая выручка.',
+          'NETWORK_RATIO',
+          'Доля товара недоступна: общая выручка пока содержит только подтверждённую товарную часть.',
+          now,
+          {
+            numeratorValue: productMetric.value,
+            denominatorValue: revenue.value,
+            numeratorLabel: 'Товарная выручка',
+            denominatorLabel: 'Выручка',
+            compatible: false,
+          },
+        ),
+      };
+    };
+    const comparisonFor = (
+      metric: ExecutiveMetric,
+      previousMetric: ExecutiveMetric | undefined,
+    ) => {
+      if (
+        !comparisonPeriod ||
+        !previousMetric ||
+        !this.executiveMetricsComparable(metric, previousMetric)
+      ) {
+        return null;
+      }
+      const delta = compareExecutiveValues(metric.value, previousMetric.value);
+      return {
+        previousValue: previousMetric.value,
+        absoluteDelta: delta.absoluteDelta,
+        percentDelta: delta.percentDelta,
+        pointsDelta: null,
+      };
+    };
+    const withComparisons = (
+      current: ExecutiveMetrics,
+      previous: ExecutiveMetrics | null,
+    ): ExecutiveMetrics => ({
+      ...current,
+      revenue: {
+        ...current.revenue,
+        comparison: comparisonFor(current.revenue, previous?.revenue),
+      },
+      visits: {
+        ...current.visits,
+        comparison: comparisonFor(current.visits, previous?.visits),
+      },
+      productRevenue: {
+        ...current.productRevenue,
+        comparison: comparisonFor(
+          current.productRevenue,
+          previous?.productRevenue,
+        ),
+      },
+    });
+    const currentMetrics = metricsFor(
+      product.metric,
+      visitsFor(product.scope.period),
+    );
+    const previousMetrics =
+      previousProduct && comparisonPeriod
+        ? metricsFor(previousProduct.metric, visitsFor(comparisonPeriod))
+        : null;
+    const comparedMetrics = withComparisons(currentMetrics, previousMetrics);
+    const allMetricDays = comparisonPeriod
+      ? { from: comparisonPeriod.from, to: product.scope.period.to }
+      : product.scope.period;
+    const [daySalesFacts, daySalesCoverage] = await Promise.all([
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId: product.tenantId,
+          isCanceled: false,
+          storeId: { in: storeIds },
+          saleDate: {
+            gte: new Date(`${allMetricDays.from}T00:00:00.000Z`),
+            lte: new Date(`${allMetricDays.to}T23:59:59.999Z`),
+          },
+        },
+        select: {
+          storeId: true,
+          revenue: true,
+          saleDate: true,
+          isCanceled: true,
+        },
+      }),
+      this.assortmentHealthLoader.loadSalesCoverage({
+        tenantId: product.tenantId,
+        storeIds,
+        period: {
+          from: new Date(`${allMetricDays.from}T00:00:00.000Z`),
+          to: new Date(`${allMetricDays.to}T23:59:59.999Z`),
+        },
+      }),
+    ]);
+    const currentDates = this.executiveDaysInclusive(
+      new Date(`${product.scope.period.from}T00:00:00.000Z`),
+      new Date(`${product.scope.period.to}T23:59:59.999Z`),
+    ).map((date) => this.toDateInputValue(date));
+    const previousDates = comparisonPeriod
+      ? this.executiveDaysInclusive(
+          new Date(`${comparisonPeriod.from}T00:00:00.000Z`),
+          new Date(`${comparisonPeriod.to}T23:59:59.999Z`),
+        ).map((date) => this.toDateInputValue(date))
+      : [];
+
+    return {
+      scope: { ...product.scope, comparison: comparisonPeriod },
+      metrics: comparedMetrics,
+      clubs: product.rows.map((row) => {
+        const previousRow = previousProduct?.rows.find(
+          (item) => item.storeId === row.storeId,
+        );
+        return {
+          storeId: row.storeId,
+          storeName: row.storeName,
+          metrics: withComparisons(
+            metricsFor(
+              row.metric,
+              visitsFor(product.scope.period, row.storeId),
+            ),
+            previousRow && comparisonPeriod
+              ? metricsFor(
+                  previousRow.metric,
+                  visitsFor(comparisonPeriod, row.storeId),
+                )
+              : null,
+          ),
+        };
+      }),
+      days: currentDates.map((date, index) => {
+        const dayProduct = this.executiveProductMetricForDay({
+          template: product.metric,
+          stores: product.rows,
+          storeIds,
+          date,
+          salesFacts: daySalesFacts,
+          salesDayEvidence: daySalesCoverage.salesDayEvidence,
+        });
+        const previousDayProduct = comparisonPeriod
+          ? this.executiveProductMetricForDay({
+              template: previousProduct!.metric,
+              stores: previousProduct!.rows,
+              storeIds,
+              date: previousDates[index],
+              salesFacts: daySalesFacts,
+              salesDayEvidence: daySalesCoverage.salesDayEvidence,
+            })
+          : null;
+        return {
+          date,
+          metrics: withComparisons(
+            metricsFor(dayProduct, visitsFor({ from: date, to: date })),
+            previousDayProduct && comparisonPeriod
+              ? metricsFor(
+                  previousDayProduct,
+                  visitsFor({
+                    from: previousDates[index],
+                    to: previousDates[index],
+                  }),
+                )
+              : null,
+          ),
+        };
+      }),
+    };
+  }
+
+  async getExecutiveOperations(
+    user: AuthenticatedUser,
+    query: DashboardExecutiveQuery = {},
+  ): Promise<DashboardExecutiveOperations> {
+    const product = await this.getExecutiveProductRevenue(user, query);
+    const comparison =
+      query.comparison === false || query.comparison === 'false'
+        ? null
+        : this.executivePreviousPeriod(product.scope.period);
+    try {
+      const data = await this.assortmentHealthLoader.load({
+        tenantId: product.tenantId,
+        storeIds: product.scope.storeIds,
+        categoryIds: null,
+        period: {
+          from: new Date(`${product.scope.period.from}T00:00:00.000Z`),
+          to: new Date(`${product.scope.period.to}T23:59:59.999Z`),
+        },
+        asOf: new Date(product.scope.asOf),
+      });
+      return {
+        scope: { ...product.scope, comparison },
+        assortment: { state: 'AVAILABLE', reason: null, data: data.health },
+      };
+    } catch {
+      return {
+        scope: { ...product.scope, comparison },
+        assortment: {
+          state: 'FAILED',
+          reason:
+            'Не удалось прочитать ассортиментные сигналы для выбранной выборки.',
+          data: null,
+        },
+      };
+    }
+  }
+
+  private executiveVisitsMetricForScope(input: {
+    sessions: Array<{
+      id?: string;
+      storeId: string | null;
+      externalProvider?: string | null;
+      externalDomain: string | null;
+      externalClubId: string | null;
+      externalSessionId: string;
+      guestId?: string | null;
+      externalGuestId?: string | null;
+      startedAt: Date;
+    }>;
+    tenantId: string;
+    topology: Array<{
+      id: string;
+      tenantId: string;
+      externalDomain: string | null;
+      externalClubId: string | null;
+      isActive: boolean;
+    }>;
+    selectedStoreIds: readonly string[];
+    storeTimeZones: Record<string, string>;
+    period: { from: string; to: string };
+    now: string;
+  }): ExecutiveMetric {
+    const selectedStoreIds = new Set(input.selectedStoreIds);
+    const topologyStoreIds = new Set(input.topology.map((store) => store.id));
+    const sessions: typeof input.sessions = [];
+    let hasUnresolvedBinding = false;
+
+    input.sessions.forEach((session) => {
+      const resolvedStoreId =
+        session.storeId && topologyStoreIds.has(session.storeId)
+          ? session.storeId
+          : resolveGuestSessionStore({
+              tenantId: input.tenantId,
+              externalDomain: session.externalDomain,
+              externalClubId: session.externalClubId,
+              stores: input.topology,
+            }).storeId;
+      if (resolvedStoreId && selectedStoreIds.has(resolvedStoreId)) {
+        const localDate = this.executiveLocalDate(
+          session.startedAt,
+          input.storeTimeZones[resolvedStoreId] ?? 'UTC',
+        );
+        if (localDate >= input.period.from && localDate <= input.period.to) {
+          sessions.push({ ...session, storeId: resolvedStoreId });
+        }
+        return;
+      }
+
+      const canBelongToSelectedStore = input.topology.some(
+        (store) =>
+          selectedStoreIds.has(store.id) &&
+          store.externalDomain !== null &&
+          store.externalDomain === session.externalDomain,
+      );
+      if (
+        canBelongToSelectedStore &&
+        this.executiveTimestampMayBelongToPeriod(
+          session.startedAt,
+          input.period,
+        )
+      ) {
+        hasUnresolvedBinding = true;
+      }
+    });
+
+    const visitCount = this.sessionIdentityStats(sessions).visits;
+    const state: ExecutiveMetric['state'] =
+      visitCount > 0 ? 'PARTIAL' : 'MISSING';
+    return this.executiveMetric({
+      key: 'visits',
+      unit: 'COUNT',
+      definition:
+        'Уникальные сохранённые игровые сессии, начавшиеся в выбранных локальных днях клуба.',
+      grain: 'GUEST_SESSION',
+      value: visitCount > 0 ? visitCount : null,
+      state,
+      reason:
+        state === 'MISSING'
+          ? hasUnresolvedBinding
+            ? 'Есть сохранённые сессии без доказуемой привязки к выбранным клубам; визиты за период неизвестны.'
+            : 'Нет сохранённых сессий с подтверждённой привязкой к выбранным клубам.'
+          : hasUnresolvedBinding
+            ? 'Показаны доказуемо привязанные сессии; часть записей не удалось отнести к выбранным клубам, а полнота источника за клубо-дни не подтверждена.'
+            : 'Показаны сохранённые сессии с доказуемой привязкой; полнота источника за выбранные клубо-дни не подтверждена.',
+      coverage: {
+        covered: visitCount,
+        total: null,
+        percent: null,
+        basis: 'STORE_SESSIONS',
+      },
+      factAsOf:
+        sessions
+          .reduce<Date | null>(
+            (latest, session) =>
+              !latest || session.startedAt > latest
+                ? session.startedAt
+                : latest,
+            null,
+          )
+          ?.toISOString() ?? null,
+      lastCalculatedAt: input.now,
+    });
+  }
+
+  private executiveTimestampMayBelongToPeriod(
+    timestamp: Date,
+    period: { from: string; to: string },
+  ) {
+    const from = new Date(`${period.from}T00:00:00.000Z`);
+    from.setUTCHours(from.getUTCHours() - 14);
+    const to = new Date(`${period.to}T23:59:59.999Z`);
+    to.setUTCHours(to.getUTCHours() + 14);
+    return timestamp >= from && timestamp <= to;
+  }
+
+  private executiveMetricsComparable(
+    current: ExecutiveMetric,
+    previous: ExecutiveMetric,
+  ) {
+    if (current.value === null || previous.value === null) return false;
+    if (!['AVAILABLE', 'PARTIAL'].includes(current.state)) return false;
+    if (!['AVAILABLE', 'PARTIAL'].includes(previous.state)) return false;
+    if (current.coverage === null || previous.coverage === null) {
+      return current.coverage === previous.coverage;
+    }
+    if (
+      current.coverage.total === null ||
+      previous.coverage.total === null ||
+      current.coverage.percent === null ||
+      previous.coverage.percent === null
+    ) {
+      return false;
+    }
+    return (
+      current.coverage.basis === previous.coverage.basis &&
+      current.coverage.covered === previous.coverage.covered &&
+      current.coverage.total === previous.coverage.total
+    );
+  }
+
+  private executiveProductMetricForDay(input: {
+    template: DashboardExecutiveProductRevenue['metric'];
+    stores: DashboardExecutiveProductRevenue['rows'];
+    storeIds: readonly string[];
+    date: string;
+    salesFacts: Array<{
+      storeId: string;
+      revenue: { toNumber: () => number };
+      saleDate: Date;
+      isCanceled?: boolean;
+    }>;
+    salesDayEvidence: Array<{
+      storeId: string;
+      date: Date;
+      status: 'CONFIRMED' | 'MISSING' | 'FAILED';
+    }>;
+  }): DashboardExecutiveProductRevenue['metric'] {
+    const statuses = input.stores.map(
+      (store) =>
+        input.salesDayEvidence.find(
+          (item) =>
+            item.storeId === store.storeId &&
+            this.toDateInputValue(item.date) === input.date,
+        )?.status ?? 'MISSING',
+    );
+    const covered = statuses.filter((status) => status === 'CONFIRMED').length;
+    const coverage = {
+      covered,
+      total: statuses.length,
+      percent:
+        statuses.length > 0
+          ? this.round((covered / statuses.length) * 100)
+          : null,
+      basis: 'STORE_DAYS' as const,
+    };
+    const state =
+      coverage.total === 0
+        ? 'MISSING'
+        : coverage.covered === coverage.total
+          ? 'AVAILABLE'
+          : coverage.covered > 0
+            ? 'PARTIAL'
+            : statuses.includes('FAILED')
+              ? 'FAILED'
+              : 'MISSING';
+    const confirmedStoreIds = new Set(
+      input.stores
+        .filter((_, index) => statuses[index] === 'CONFIRMED')
+        .map((store) => store.storeId),
+    );
+    const facts = input.salesFacts.filter(
+      (fact) =>
+        !fact.isCanceled &&
+        input.storeIds.includes(fact.storeId) &&
+        confirmedStoreIds.has(fact.storeId) &&
+        this.toDateInputValue(fact.saleDate) === input.date,
+    );
+    const visible = state === 'AVAILABLE' || state === 'PARTIAL';
+    const value = visible
+      ? this.round(
+          facts.reduce((total, fact) => total + fact.revenue.toNumber(), 0),
+        )
+      : null;
+    const factAsOf = facts.reduce<Date | null>(
+      (latest, fact) =>
+        !latest || fact.saleDate > latest ? fact.saleDate : latest,
+      null,
+    );
+    return {
+      ...input.template,
+      value,
+      state,
+      reason:
+        state === 'FAILED'
+          ? 'Продажи за выбранный период недоступны: синхронизация источника завершилась ошибкой.'
+          : state === 'MISSING'
+            ? 'Нет подтверждённого покрытия продаж за выбранный период.'
+            : state === 'PARTIAL'
+              ? `Продажи подтверждены для ${coverage.covered} из ${coverage.total} клубо-дней.`
+              : value === 0
+                ? 'За выбранный период подтверждённых товарных продаж не было.'
+                : null,
+      coverage,
+      factAsOf: factAsOf?.toISOString() ?? null,
+      comparison: null,
+    };
+  }
+
+  private executiveMetric(input: {
+    key: ExecutiveMetric['key'];
+    unit: ExecutiveMetric['unit'];
+    definition: string;
+    grain: string;
+    value: number | null;
+    state: ExecutiveMetric['state'];
+    reason: string | null;
+    coverage: ExecutiveMetric['coverage'];
+    factAsOf: string | null;
+    lastCalculatedAt: string;
+    ratio?: ExecutiveMetric['ratio'];
+    destination?: ExecutiveMetric['destination'];
+  }): ExecutiveMetric {
+    return {
+      ...input,
+      comparison: null,
+      ratio: input.ratio ?? null,
+    };
+  }
+
+  private executiveUnavailableMetric(
+    key: ExecutiveMetric['key'],
+    unit: ExecutiveMetric['unit'],
+    definition: string,
+    grain: string,
+    reason: string,
+    lastCalculatedAt: string,
+    ratio: ExecutiveMetric['ratio'] = null,
+  ): ExecutiveMetric {
+    return this.executiveMetric({
+      key,
+      unit,
+      definition,
+      grain,
+      value: null,
+      state: 'MISSING',
+      reason,
+      coverage: null,
+      factAsOf: null,
+      lastCalculatedAt,
+      ratio,
+    });
+  }
+
+  private executiveLocalDate(value: Date, timeZone: string) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(value);
+    const values = Object.fromEntries(
+      parts
+        .filter((part) => part.type !== 'literal')
+        .map((part) => [part.type, part.value]),
+    );
+    return `${values.year}-${values.month}-${values.day}`;
+  }
+
+  private executivePreviousPeriod(period: { from: string; to: string }) {
+    const from = new Date(`${period.from}T00:00:00.000Z`);
+    const to = new Date(`${period.to}T00:00:00.000Z`);
+    const durationDays = Math.round(
+      (to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000),
+    );
+    const previousTo = new Date(from);
+    previousTo.setUTCDate(previousTo.getUTCDate() - 1);
+    const previousFrom = new Date(previousTo);
+    previousFrom.setUTCDate(previousFrom.getUTCDate() - durationDays);
+    return {
+      from: this.toDateInputValue(previousFrom),
+      to: this.toDateInputValue(previousTo),
     };
   }
 

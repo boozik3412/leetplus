@@ -5,7 +5,7 @@
 **Blocked by:** 01
 **Волна:** 2
 **Зона:** apps/api/src/dashboard/, apps/api/src/common/executive-* business calculations
-**Статус:** ready — пауза снята пользователем
+**Статус:** done — scoped calculations and source limitations reviewed; regression passed
 
 ## Из брифа
 

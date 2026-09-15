@@ -11,7 +11,7 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "skillDir": "C:\\Users\\ALIENWARE\\.codex\\skills\\autopilot",
   "startedAt": "2026-09-15T10:27:25.425605+05:00",
-  "updatedAt": "2026-09-15T15:38:24.6163933+05:00",
+  "updatedAt": "2026-09-15T16:07:54.9204336+05:00",
   "finishedAt": null,
   "stages": [
     {
@@ -50,7 +50,7 @@ window.STATE =
     {
       "id": "build",
       "status": "active",
-      "note": "01 принято; параллельно02 расчёты и03 полный интерфейс",
+      "note": "02/03 committed;04 acceptance/docs and05 stale-source safeguard",
       "startedAt": "2026-09-15T11:28:39.532933+05:00"
     },
     {
@@ -270,7 +270,8 @@ window.STATE =
         "webLint": "PASS",
         "webTypecheck": "PASS",
         "browserSmoke": "actual Next1440/390 PASS; synthetic comparable data"
-      }
+      },
+      "commit": "ab2073429feafcc01c2f6ee1b452292f56987aec"
     },
     {
       "id": "04",
@@ -310,10 +311,48 @@ window.STATE =
       "status": "in-progress",
       "retries": 0,
       "repairs": 0,
-      "handoffs": 0,
+      "handoffs": 1,
       "planRevision": 2,
-      "executor": "/root/executive_acceptance",
-      "startedAt": "2026-09-15T15:33:24.8360205+05:00"
+      "executor": "/root/executive_acceptance_finish",
+      "startedAt": "2026-09-15T15:33:24.8360205+05:00",
+      "handoffFiles": [
+        ".autopilot/2026-09-15-executive-dashboard--wip/handoff-04-1.md"
+      ]
+    },
+    {
+      "id": "05",
+      "title": "Устаревшие остатки и приоритеты",
+      "requirements": [
+        "R05",
+        "R06",
+        "R15",
+        "R16",
+        "R19"
+      ],
+      "blockedBy": [
+        "03"
+      ],
+      "wave": 3,
+      "zone": [
+        "apps/web/src/components/executive-dashboard.tsx"
+      ],
+      "status": "done",
+      "executor": "/root/executive_stale_fix",
+      "startedAt": "2026-09-15T16:03:50.017756+05:00",
+      "repairs": 1,
+      "retries": 0,
+      "handoffs": 0,
+      "repairFindings": [
+        "Restock predicate must check child outOfStock state as well as wrapper"
+      ],
+      "finishedAt": "2026-09-15T16:07:54.9313087+05:00",
+      "tests": {
+        "review": "PASS wrapper+childstate",
+        "webBuild": "PASS",
+        "webLint": "PASS",
+        "webTypecheck": "PASS",
+        "runtime": "04 rerun pending"
+      }
     }
   ],
   "singlePass": null,

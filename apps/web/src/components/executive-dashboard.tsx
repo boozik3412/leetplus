@@ -9,6 +9,7 @@ import {
 import { ExecutiveClubTable } from "@/components/executive-club-table";
 import { ExecutiveTrendChart } from "@/components/executive-trend-chart";
 import { buildAssortmentReportHref } from "@/lib/assortment-report-query";
+import type { DashboardMetric } from "@/lib/dashboard-summary";
 import type {
   ExecutiveMetric,
   ExecutiveMetricKey,
@@ -38,6 +39,21 @@ function formatNumber(value: number, digits = 0) {
 
 function formatMoney(value: number) {
   return `${formatNumber(value)} ₽`;
+}
+
+function formatProductPositions(value: number) {
+  const absolute = Math.abs(value);
+  const lastTwoDigits = absolute % 100;
+  const lastDigit = absolute % 10;
+  const label =
+    lastTwoDigits >= 11 && lastTwoDigits <= 14
+      ? "товарных позиций"
+      : lastDigit === 1
+        ? "товарная позиция"
+        : lastDigit >= 2 && lastDigit <= 4
+          ? "товарные позиции"
+          : "товарных позиций";
+  return `${formatNumber(value)} ${label}`;
 }
 
 function formatMetric(metric: ExecutiveMetric) {
@@ -104,6 +120,39 @@ function metricEvidence(metric: ExecutiveMetric) {
     metric.factAsOf ? `Факты на ${metric.factAsOf.slice(0, 10)}` : null,
   ].filter(Boolean);
   return details.join(" · ");
+}
+
+function assortmentEvidence(assortment: ExecutiveOperations["assortment"]) {
+  const state = {
+    AVAILABLE: "Подтверждено",
+    PARTIAL: "Частично подтверждено",
+    MISSING: "Нет данных",
+    STALE: "Данные устарели",
+    FAILED: "Источник недоступен",
+  }[assortment.state];
+  return [state, assortment.reason].filter(Boolean).join(" · ");
+}
+
+function healthMetricEvidence(metric: DashboardMetric<number> | undefined) {
+  if (!metric || metric.state === "AVAILABLE") return null;
+  const state = {
+    PARTIAL: "Частично подтверждено",
+    STALE: "Данные устарели",
+    MISSING: "Нет данных",
+    FAILED: "Источник недоступен",
+    UNKNOWN: "Состояние неизвестно",
+  }[metric.state];
+  return [state, metric.reason].filter(Boolean).join(" · ");
+}
+
+function hasCurrentAssortmentPriorityEvidence(
+  assortment: ExecutiveOperations["assortment"] | undefined,
+  metric: DashboardMetric<number> | undefined,
+) {
+  return (
+    (assortment?.state === "AVAILABLE" || assortment?.state === "PARTIAL") &&
+    (metric?.state === "AVAILABLE" || metric?.state === "PARTIAL")
+  );
 }
 
 function detailHref(summary: ExecutiveSummary, metric: ExecutiveMetricKey) {
@@ -211,12 +260,18 @@ function Priorities({
   summary: ExecutiveSummary;
   operations: ExecutiveOperations | null;
 }) {
-  const health = operations?.assortment.data;
+  const assortment = operations?.assortment;
+  const health = assortment?.data;
+  const outOfStockMetric = health?.outOfStock;
+  const outOfStock = health?.outOfStock.value;
   const items = [
-    health?.outOfStock.value && health.outOfStock.value > 0
+    hasCurrentAssortmentPriorityEvidence(assortment, outOfStockMetric) &&
+    outOfStock !== null &&
+    outOfStock !== undefined &&
+    outOfStock > 0
       ? {
           title: "Пополнить позиции без остатка",
-          caption: `${formatNumber(health.outOfStock.value)} товарных позиций в клубах`,
+          caption: `${formatProductPositions(outOfStock)} в клубах`,
           href: buildAssortmentReportHref(
             assortmentScope(summary),
             "out-of-stock",
@@ -320,6 +375,12 @@ function AssortmentBrief({
   const assortment = operations?.assortment;
   const health = assortment?.data;
   const scope = assortmentScope(summary);
+  const showAssortmentState =
+    assortment !== undefined && assortment.state !== "AVAILABLE";
+  const assortmentStateClass =
+    assortment?.state === "FAILED"
+      ? "border-red-200 bg-red-50 text-red-900 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-100"
+      : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100";
   const items = [
     {
       label: "Нет в наличии",
@@ -362,25 +423,40 @@ function AssortmentBrief({
         </p>
       ) : (
         <>
+          {showAssortmentState ? (
+            <p
+              className={`mt-5 rounded-xl border px-3 py-3 text-sm leading-6 ${assortmentStateClass}`}
+            >
+              {assortmentEvidence(assortment)}
+            </p>
+          ) : null}
           <div className="mt-5 grid grid-cols-3 gap-3">
-            {items.map((item) => (
-              <Link
-                key={item.label}
-                href={item.href}
-                className="min-w-0 rounded-xl bg-[var(--surface-muted)] p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-              >
-                <span className="block h-1 w-6 rounded-full bg-amber-400" />
-                <strong className="mt-4 block break-words text-2xl font-semibold tabular-nums text-[var(--foreground)]">
-                  {item.metric?.value === null ||
-                  item.metric?.value === undefined
-                    ? "—"
-                    : formatNumber(item.metric.value)}
-                </strong>
-                <span className="mt-2 block text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-                  {item.label}
-                </span>
-              </Link>
-            ))}
+            {items.map((item) => {
+              const evidence = healthMetricEvidence(item.metric);
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  className="min-w-0 rounded-xl bg-[var(--surface-muted)] p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                >
+                  <span className="block h-1 w-6 rounded-full bg-amber-400" />
+                  <strong className="mt-4 block break-words text-2xl font-semibold tabular-nums text-[var(--foreground)]">
+                    {item.metric?.value === null ||
+                    item.metric?.value === undefined
+                      ? "—"
+                      : formatNumber(item.metric.value)}
+                  </strong>
+                  <span className="mt-2 block text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                    {item.label}
+                  </span>
+                  {evidence ? (
+                    <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                      {evidence}
+                    </span>
+                  ) : null}
+                </Link>
+              );
+            })}
           </div>
           <p className="mt-4 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
             {health.inventory.asOf

@@ -1,8 +1,8 @@
 window.STATE =
 {
   "slug": "executive-dashboard",
-  "dir": "2026-09-15-executive-dashboard--wip",
-  "title": "Сводный дашборд: реализация варианта1",
+  "dir": "2026-09-15-executive-dashboard",
+  "title": "Сводный дашборд: исходники и локальная приёмка готовы",
   "mode": "semi",
   "depth": "normal",
   "polish": null,
@@ -11,8 +11,8 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "skillDir": "C:\\Users\\ALIENWARE\\.codex\\skills\\autopilot",
   "startedAt": "2026-09-15T10:27:25.425605+05:00",
-  "updatedAt": "2026-09-15T16:52:16.4792785+05:00",
-  "finishedAt": null,
+  "updatedAt": "2026-09-15T17:04:28.6749097+05:00",
+  "finishedAt": "2026-09-15T17:01:01.5359591+05:00",
   "stages": [
     {
       "id": "preflight",
@@ -49,30 +49,33 @@ window.STATE =
     },
     {
       "id": "build",
-      "status": "active",
+      "status": "done",
       "note": "02/03 committed;04 acceptance/docs and05 stale-source safeguard",
-      "startedAt": "2026-09-15T11:28:39.532933+05:00"
+      "startedAt": "2026-09-15T11:28:39.532933+05:00",
+      "finishedAt": "2026-09-15T17:01:01.5353828+05:00"
     },
     {
       "id": "review",
-      "status": "active",
+      "status": "done",
       "startedAt": "2026-09-15T11:54:14.5178883+05:00",
-      "note": "Проверка стабильной API части01; Web завершается"
+      "note": "Проверка стабильной API части01; Web завершается",
+      "finishedAt": "2026-09-15T17:01:01.5356962+05:00"
     },
     {
       "id": "final",
-      "status": "pending",
-      "startedAt": "2026-09-15T16:36:18.0024748+05:00"
+      "status": "done",
+      "startedAt": "2026-09-15T16:36:18.0024748+05:00",
+      "finishedAt": "2026-09-15T17:01:01.5358217+05:00"
     }
   ],
   "requirements": {
-    "total": 20,
-    "done": 0,
-    "inTicket": 20,
-    "inSpec": 0,
-    "placeholder": 0,
     "deferred": 0,
-    "dropped": 0
+    "inSpec": 0,
+    "total": 20,
+    "placeholder": 5,
+    "dropped": 0,
+    "done": 15,
+    "inTicket": 0
   },
   "tickets": [
     {
@@ -116,7 +119,7 @@ window.STATE =
         "Repair2 Web: remove mismatched legacy drill route, isolate product request failure, preserve per-row explanation/date/coverage, stable fiscal-date labels"
       ],
       "handoffFiles": [
-        ".autopilot/2026-09-15-executive-dashboard--wip/handoff-01-1.md"
+        ".autopilot/2026-09-15-executive-dashboard/handoff-01-1.md"
       ],
       "files": [
         "apps/api/src/common/executive-contract.ts",
@@ -186,7 +189,7 @@ window.STATE =
       "startedAt": "2026-09-15T12:53:40.8735473+05:00",
       "executor": "/root/executive_api_finish",
       "handoffFiles": [
-        ".autopilot/2026-09-15-executive-dashboard--wip/handoff-02-1.md"
+        ".autopilot/2026-09-15-executive-dashboard/handoff-02-1.md"
       ],
       "repairFindings": [
         "Source-specific per-slice session completeness cannot be inferred from padded binding; missing proof stays partial/missing",
@@ -309,7 +312,7 @@ window.STATE =
         "apps/api/test/pilot-assortment-store-scope.pg.integration-spec.ts",
         "external evidence browser fixtures"
       ],
-      "status": "in-progress",
+      "status": "done",
       "retries": 0,
       "repairs": 0,
       "handoffs": 2,
@@ -317,9 +320,17 @@ window.STATE =
       "executor": "/root/executive_acceptance_close",
       "startedAt": "2026-09-15T15:33:24.8360205+05:00",
       "handoffFiles": [
-        ".autopilot/2026-09-15-executive-dashboard--wip/handoff-04-1.md",
-        ".autopilot/2026-09-15-executive-dashboard--wip/handoff-04-2.md"
-      ]
+        ".autopilot/2026-09-15-executive-dashboard/handoff-04-1.md",
+        ".autopilot/2026-09-15-executive-dashboard/handoff-04-2.md"
+      ],
+      "finishedAt": "2026-09-15T17:01:01.3692163+05:00",
+      "tests": {
+        "pg": 16,
+        "docs": "reviewed",
+        "sourceLimits": "explicit",
+        "Q": "18/18 bounded evidence"
+      },
+      "commit": "074b5296d3f654b766f9a1f0a6ac96b3cfa776b7"
     },
     {
       "id": "05",
@@ -386,7 +397,8 @@ window.STATE =
         "Q08": "actual NextPASS",
         "webTypecheck": "PASS",
         "webBuild": "PASS"
-      }
+      },
+      "commit": "57f9c51a83da6a20e1006090f414fbf2b47eaedc"
     }
   ],
   "singlePass": null,
@@ -417,10 +429,8 @@ window.STATE =
     "reviewedAt": "2026-09-15T11:24:31.954361+05:00"
   },
   "concerns": [
-    "API narrow/full coverage read duplication remains; shared evidence semantics unchanged",
-    "No saved session completeness proof: observed visits partial, zeros and visit comparison unavailable",
-    "Service revenue, true topups, historical capacity and dependent exact ratios unavailable in current sources",
-    "04 full accessibility/role/edge-state and API-backed acceptance still pending"
+    "Report: no independent session completeness or verified services/topups/capacity; source-dependent metrics remain partial/missing",
+    "Report technical maintenance: narrow/full sales coverage reads duplicate queries but share evidence semantics"
   ],
   "reviewers": {
     "manifestSpec": "/root/executive_spec_review",
@@ -504,10 +514,11 @@ window.STATE =
     "startupSession": null,
     "host": "127.0.0.1",
     "schema": "canonical applied",
-    "needsStopAfterAcceptance": true,
+    "needsStopAfterAcceptance": false,
     "database": "leetplus_ci",
     "pid": 6296,
-    "baseline": "15/15 PASS with CLI testTimeout30000;20260915T101727583Z"
+    "baseline": "15/15 PASS with CLI testTimeout30000;20260915T101727583Z",
+    "finalStatus": "Stopped exact detached fixture;55495 has0listeners;data/evidence retained"
   },
   "finalAgents": {
     "contrast": "/root/executive_contrast",
@@ -519,7 +530,19 @@ window.STATE =
     "main": "f07005b5ea4bc1067674fb751b3d7575ef230e98",
     "webTypecheck": "PASS",
     "userCallRegression": "12/12PASS",
-    "webBuild": "running",
+    "webBuild": "PASS20260915T115116202Z",
     "merge": "65bb215e8fd318388c72d0fabe27dbbf870c8f8a"
+  },
+  "sourceLimitedRequirements": [
+    "R02",
+    "R07",
+    "R08",
+    "R09",
+    "R11"
+  ],
+  "ci": {
+    "status": "External GitHub checks; inspect current PR head",
+    "production": false,
+    "pr": 207
   }
 }

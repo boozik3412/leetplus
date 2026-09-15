@@ -5,7 +5,7 @@
 **Blocked by:** 02, 03
 **Волна:** 3
 **Зона:** docs/, apps/api/test/pilot-assortment-store-scope.pg.integration-spec.ts, external evidence browser fixtures
-**Статус:** ready — пауза снята пользователем
+**Статус:** done — PG16/16, docs and Q01–Q18 evidence completed with source limits
 
 ## Из брифа
 

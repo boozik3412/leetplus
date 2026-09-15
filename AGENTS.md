@@ -93,6 +93,6 @@ the same change.
 
 ## Границы следующей сессии
 
-- Макеты и demo data in parent `output/summary-dashboard-concepts-20260915` are presentation references only, never production values. Current run record is `.autopilot/2026-09-15-executive-dashboard--wip`; do not treat its plan/spec/tickets as source of truth over code.
+- Макеты и demo data in parent `output/summary-dashboard-concepts-20260915` are presentation references only, never production values. Current run record is `.autopilot/2026-09-15-executive-dashboard`; do not treat its plan/spec/tickets as source of truth over code.
 - No auth, provider, import, backfill, schema or production effect follows from this dashboard. Keep saved-data reads, canonical fresh scope and the public/corporate/worker contours from `docs/security/runtime-security-contours.md` separate.
 <!-- autopilot:end -->

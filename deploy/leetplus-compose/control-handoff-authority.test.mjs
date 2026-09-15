@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
 import { canonical, digest } from './contract.mjs';
-import { validateControlHandoffAuthority, validateControlRollbackApproval, validatePendingControlHandoffAuthority } from './control-handoff-authority.mjs';
+import { validateControlHandoffAuthority, validateControlRollbackApproval, validatePendingControlHandoffAuthority, validateControlHandoffRecoveryAuthority } from './control-handoff-authority.mjs';
 
 const CONTRACT = 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1';
 const NOW = Date.parse('2026-09-15T10:00:00.000Z');
@@ -15,7 +15,7 @@ function authority({ issuedAt = NOW - 60000, expiresAt = NOW + 60000, acceptedAt
     contract: `${CONTRACT}_PLAN`, operationId: crypto.randomUUID(), action: 'CONTROL_HANDOFF',
     hostIdentitySha256: hash('a'), newControlSha256: hash('b'), snapshot: { activeSha256: hash('c') },
     oldMainTarget: '/usr/local/lib/leetplus-compose/old/control.sh', newMainTarget: '/usr/local/lib/leetplus-compose/new/control.sh',
-    oldUnitSha256: hash('d'), newUnitSha256: hash('e'), applicationRestartAllowed: false,
+    oldUnitSha256: hash('d'), newUnitSha256: hash('e'), applicationRestartAllowed: false, rollbackAllowed: true,
   };
   const approval = {
     contract: `${CONTRACT}_APPROVAL`, operationId: plan.operationId, action: plan.action,
@@ -58,6 +58,10 @@ function pendingAuthority(value, authorizedAt = NOW - 1000) {
 
 function validatePending(value, { intent, pending }, now = NOW) {
   return validatePendingControlHandoffAuthority({ plan: value.plan, approvalEnvelope: value.approvalEnvelope, intent, pending }, value.publicKey, value.context, now);
+}
+
+function validateRecovery(value, intent, now = NOW) {
+  return validateControlHandoffRecoveryAuthority({ plan: value.plan, approvalEnvelope: value.approvalEnvelope, intent }, value.publicKey, value.context, now);
 }
 
 test('accepts an exact signed, receipted control handoff and its ongoing authority', () => {
@@ -156,4 +160,29 @@ test('rejects stale postimages, unbound intent, missing pending marker, and futu
 
   const futureDate = authority();
   assert.throws(() => validatePending(futureDate, pendingAuthority(futureDate, NOW + 30001)));
+});
+
+test('permits only timely unfinished recovery after the forward approval expires', () => {
+  const value = authority({ issuedAt: NOW - 5 * 3600000, expiresAt: NOW - 3600000, acceptedAt: NOW - 2 * 3600000 });
+  const { intent } = pendingAuthority(value, NOW - 2 * 3600000);
+  assert.deepEqual(validateRecovery(value, intent), { plan: value.plan, expired: true });
+});
+
+test('rejects unsigned or foreign recovery authority', () => {
+  const badSignature = authority();
+  badSignature.approvalEnvelope.signature = crypto.sign(null, Buffer.from(canonical(badSignature.approvalEnvelope.approval)), crypto.generateKeyPairSync('ed25519').privateKey).toString('base64');
+  assert.throws(() => validateRecovery(badSignature, pendingAuthority(badSignature).intent));
+
+  const foreign = authority();
+  foreign.context.activeSha256 = hash('f');
+  assert.throws(() => validateRecovery(foreign, pendingAuthority(foreign).intent));
+});
+
+test('rejects untimely recovery intent and handoffs without rollback authority', () => {
+  const untimely = authority();
+  assert.throws(() => validateRecovery(untimely, pendingAuthority(untimely, NOW + 30001).intent));
+
+  const noRollback = authority();
+  noRollback.plan.rollbackAllowed = false;
+  assert.throws(() => validateRecovery(noRollback, pendingAuthority(noRollback).intent));
 });

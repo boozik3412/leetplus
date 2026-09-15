@@ -83,3 +83,14 @@ export function validateAcceptedApplicationSnapshot({ histories, active, publicK
   demand(activePlan, 'Active operation is absent from application history');
   return { controlSha256: activePlan.controlSha256 };
 }
+
+/**
+ * Narrow boot-only authority for a pending handoff. The caller must be the
+ * existing systemd network service's kernel cgroup, never a manual shell or
+ * another systemd unit. Application authority remains independently pinned.
+ */
+export function validatePendingNetworkBootAuthority({ cgroup, histories, active, publicKey } = {}) {
+  const expected = '0::/system.slice/leetplus-compose-network.service';
+  demand(cgroup === expected || cgroup === `${expected}\n`, 'Pending network boot requires the exact systemd service cgroup');
+  return validateAcceptedApplicationSnapshot({ histories, active, publicKey });
+}

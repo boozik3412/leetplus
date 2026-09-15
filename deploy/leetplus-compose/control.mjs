@@ -9,6 +9,7 @@ import { PHASES, execute, validateApproval, validateChain, validatePlan } from '
 import { validateWorkerGrant } from './worker-authority.mjs';
 import { controlLockPolicy, verifyKernelControlLocks } from './control-locks.mjs';
 import { validateControlHandoffAuthority, validatePendingControlHandoffAuthority } from './control-handoff-authority.mjs';
+import { validatePendingNetworkBootAuthority } from './control-handoff-runtime.mjs';
 
 const STATE = '/var/lib/leetplus-compose';
 const ROOT = '/srv/leetplus';
@@ -353,7 +354,18 @@ if (command === 'help' || !command) {
   installedDigest();
   const observational = command === 'status' || (command === 'network' && ['refresh', 'status', 'verify', 'verify-rehearsal'].includes(options.operation));
   if (!observational) {
-    if (['prepare', 'apply', 'resume'].includes(command) || (command === 'network' && options.operation !== 'install')) demand(!fs.existsSync(`${STATE}/control-handoff.pending.json`), 'Controller handoff must be reconciled before other control effects');
+    const handoffPending = fs.existsSync(`${STATE}/control-handoff.pending.json`);
+    if (handoffPending && (['prepare', 'apply', 'resume'].includes(command) || command === 'network')) {
+      demand(command === 'network' && options.operation === 'install', 'Controller handoff must be reconciled before other control effects');
+      // Only the existing systemd boot unit may restore its accepted firewall
+      // during provisional lifecycle. A manual CLI has no such network grant.
+      const current = active();
+      demand(current, 'Pending network boot requires an accepted application');
+      const dir = operation(current.operationId);
+      validatePendingNetworkBootAuthority({ cgroup: fs.readFileSync('/proc/self/cgroup', 'utf8'), active: current,
+        publicKey: safeFile('/etc/leetplus-compose/approval-root.pem'),
+        histories: [{ plan: readJSON(`${dir}/plan.json`, { immutable: true }), approval: readJSON(`${dir}/approval.json`, { immutable: true }), ...await storeFor(dir).read() }] });
+    }
     assertControllerContinuity();
   } else if (command === 'network' && options.operation === 'refresh') {
     // A pending handoff must not let provider addresses expire, but a queued

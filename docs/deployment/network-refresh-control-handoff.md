@@ -74,6 +74,12 @@ measured; source tests alone are not a zero-downtime claim.
 Every effect has a prior root-owned immutable intent. First apply requires exact
 old preimages; a resumed step can recognize its exact afterimage only when that
 intent already exists. Unknown pointer/unit/config drift stops without adoption.
+If the process stops after the initial apply intent but before the pending marker,
+retry may recreate that marker only with exact untouched preimages and no phase
+intents. Once an unfinished forward approval expires, its timely signed intent
+permits only owned-effect undo/abort, never forward activation or a backdated
+receipt. The operation terminates `ROLLED_BACK / EXPIRED_BEFORE_ACCEPTANCE`;
+a new activation requires a fresh plan and GO.
 Accepted terminal replay performs no old effect, even after newer legitimate
 application history; a pending accepted receipt completes its pointer/marker only.
 
@@ -82,7 +88,10 @@ bound to that controller or a signed, receipted controller handoff. Between the
 atomic main switch and final receipt, a timely signed switch intent plus the
 actual new main/unit postimages provides explicitly **provisional** lifecycle
 authority. This is not a fabricated completion receipt. Operational app deployment
-stays fenced until reconciliation. A changed app/PID/config snapshot requires
+stays fenced until reconciliation. Pending network installation is allowed only
+from the existing network boot unit's actual kernel cgroup, with independently
+validated signed application history; a manual CLI receives no such permission.
+A changed app/PID/config snapshot requires
 operator investigation; never rewrite it to manufacture unchanged-process proof.
 
 Before acceptance, a failed postcheck reverses only this operation's proven
@@ -110,7 +119,8 @@ included. This avoids a new archive stat/open race during concurrent refresh.
 - Run `node --test deploy/leetplus-compose/*.test.mjs`; the GitHub Linux gate
   executes the real root FLOCK fixture, while Windows records its explicit skip.
 - Rehearse signature/active-chain drift, unsafe files, first-apply/replay,
-  crash-after-unit/main, owned undo and separate manual rollback.
+  crash-before-pending/after-unit/main, expired-intent undo, boot-only network
+  authority, owned undo and separate manual rollback.
 - Verify public API/Web, both slot identities and unchanged container process
   identities while switching; probe provider HTTPS without creating paid calls.
 - Observe multiple actual automatic refreshes while an ordinary worker runs,

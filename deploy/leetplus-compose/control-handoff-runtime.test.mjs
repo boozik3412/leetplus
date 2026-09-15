@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import test from 'node:test';
 import { CONTRACT, SCHEMA, canonical, digest, renderCompose } from './contract.mjs';
 import { PHASES } from './orchestrator.mjs';
-import { validateAcceptedApplicationSnapshot } from './control-handoff-runtime.mjs';
+import { validateAcceptedApplicationSnapshot, validatePendingNetworkBootAuthority } from './control-handoff-runtime.mjs';
 
 const key = crypto.generateKeyPairSync('ed25519');
 const publicKey = key.publicKey.export({ type: 'spki', format: 'pem' });
@@ -102,4 +102,34 @@ test('rejects wrong active slot, data baseline, invalid approval, and rollback m
   const badRollback = rollbackHistory();
   badRollback.history.rolledBack.active.generation += 1;
   assert.throws(() => validate(badRollback.history, badRollback.active), /Rollback terminal/i);
+});
+
+test('permits pending network boot only from its exact kernel service cgroup', () => {
+  const { history, active } = forwardHistory();
+  const input = { histories: [history], active, publicKey };
+  assert.deepEqual(
+    validatePendingNetworkBootAuthority({ ...input, cgroup: '0::/system.slice/leetplus-compose-network.service\n' }),
+    { controlSha256: history.plan.controlSha256 },
+  );
+  assert.deepEqual(
+    validatePendingNetworkBootAuthority({ ...input, cgroup: '0::/system.slice/leetplus-compose-network.service' }),
+    { controlSha256: history.plan.controlSha256 },
+  );
+  for (const cgroup of [
+    '0::/user.slice/user-1000.slice/session-1.scope\n',
+    '0::/system.slice/leetplus-compose-network.service\n0::/system.slice/other.service\n',
+    '0::/system.slice/leetplus-compose-network.service \n',
+  ]) {
+    assert.throws(() => validatePendingNetworkBootAuthority({ ...input, cgroup }), /exact systemd service cgroup/i);
+  }
+});
+
+test('pending network boot rejects forged application authority and wrong active state', () => {
+  const forged = forwardHistory();
+  forged.history.approval.signature = crypto.sign(null, Buffer.from(canonical(forged.history.approval.approval)), crypto.generateKeyPairSync('ed25519').privateKey).toString('base64');
+  assert.throws(() => validatePendingNetworkBootAuthority({ histories: [forged.history], active: forged.active, publicKey, cgroup: '0::/system.slice/leetplus-compose-network.service\n' }), /signature/i);
+
+  const wrongActive = forwardHistory();
+  wrongActive.active.generation += 1;
+  assert.throws(() => validatePendingNetworkBootAuthority({ histories: [wrongActive.history], active: wrongActive.active, publicKey, cgroup: '0::/system.slice/leetplus-compose-network.service\n' }), /Active state/i);
 });

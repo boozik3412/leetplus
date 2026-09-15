@@ -78,3 +78,24 @@ export function validatePendingControlHandoffAuthority({ plan, approvalEnvelope,
   demand(pending?.operationId === plan.operationId, 'Pending handoff marker does not bind the operation');
   return plan;
 }
+
+export function validateControlHandoffRecoveryAuthority({ plan, approvalEnvelope, intent } = {}, publicKey, context, now = Date.now()) {
+  demand(plan?.contract === `${CONTRACT}_PLAN` && UUID.test(plan.operationId ?? '') && plan.action === 'CONTROL_HANDOFF' && plan.rollbackAllowed === true, 'Invalid rollback-authorized control handoff plan');
+  demand(HASH.test(plan.hostIdentitySha256 ?? '') && HASH.test(plan.newControlSha256 ?? '') && HASH.test(plan.snapshot?.activeSha256 ?? ''), 'Control handoff plan is missing exact identities');
+  demand(context && plan.newControlSha256 === context.controlSha256 && plan.hostIdentitySha256 === context.hostIdentitySha256 && plan.snapshot.activeSha256 === context.activeSha256, 'Control recovery target or live identity changed');
+
+  const { approval, signature } = approvalEnvelope ?? {};
+  demand(approval?.contract === `${CONTRACT}_APPROVAL` && approval.operationId === plan.operationId && approval.action === plan.action &&
+    approval.hostIdentitySha256 === plan.hostIdentitySha256 && approval.planSha256 === digest(plan), 'Approval does not bind the exact control handoff plan');
+  demand(typeof signature === 'string' && SIGNATURE.test(signature), 'Invalid control handoff signature encoding');
+  demand(crypto.createPublicKey(publicKey).asymmetricKeyType === 'ed25519' &&
+    crypto.verify(null, Buffer.from(canonical(approval)), publicKey, Buffer.from(signature, 'base64')), 'Control handoff signature verification failed');
+  const issuedAt = timestamp(approval.issuedAt, 'approval issue time');
+  const expiresAt = timestamp(approval.expiresAt, 'approval expiry time');
+  demand(expiresAt > issuedAt && expiresAt - issuedAt <= 4 * 3600000, 'Approval is not in its bounded validity window');
+
+  demand(intent?.operationId === plan.operationId && intent.planSha256 === digest(plan) && intent.approvalSha256 === digest(approvalEnvelope), 'Recovery intent does not bind the approved handoff');
+  const authorizedAt = timestamp(intent.authorizedAt, 'recovery authorization time');
+  demand(authorizedAt >= issuedAt && authorizedAt <= expiresAt && authorizedAt <= now + 30000, 'Recovery authorization is outside its authority window');
+  return { plan, expired: now > expiresAt };
+}

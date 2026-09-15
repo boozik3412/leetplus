@@ -1,6 +1,6 @@
 # Provider network reliability and zero-planned-app-downtime controller update
 
-Status: implementation/local checks; not deployed. Base f07005b5; serving application b5/gen5, data/controller399876 until verified handoff. Switching waits for the actual exclusive lock without stopping any timer.
+Status: PR208 initial Fast/Compose CI PASS; final interrupted/expired-handoff recovery regressions added, follow-up CI pending; not deployed. Base f07005b5; serving application b5/gen5, data/controller399876 until verified handoff. Switching waits for the actual exclusive lock without stopping any timer.
 
 1. Implement an exact refresh-only shared control lock plus separate exclusive refresh singleton; attest both real kernel locks and reject mixed/unknown options.
 2. Preserve approved host policy, public-IP filtering,3600s TTL and atomic set swaps. Add bounded service retries and machine-readable remaining TTL/last result before expiry; no external notification credentials.

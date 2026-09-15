@@ -159,6 +159,7 @@ class ActivateHarness:
         self.snapshot_sequence = []
         self.raise_on_run = None
         self.raise_on_switch = False
+        self.recovery_expired = False
 
     def close(self):
         self.temp.cleanup()
@@ -256,6 +257,19 @@ class ActivateHarness:
         receipt = saved_receipt or {"decision": "PASS", "operationId": self.identity}
         return receipt, {"operationId": self.identity, "receiptSha256": handoff.digest(handoff.canonical(receipt))}
 
+    def validate_recovery(self, plan, envelope, intent, control):
+        self.events.append(("recovery-validator", intent["operationId"]))
+        return {"plan": plan, "expired": self.recovery_expired}
+
+    def apply_intent(self, authorized_at=None):
+        value = authorized_at or datetime.datetime.now(datetime.timezone.utc)
+        return {
+            "operationId": self.identity,
+            "planSha256": handoff.digest(handoff.canonical(self.plan)),
+            "approvalSha256": handoff.digest(handoff.canonical(self.envelope)),
+            "authorizedAt": value.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        }
+
     def finish_pending(self, identity):
         self.events.append(("finish", identity))
         self.records.pop(self._key(self.pending), None)
@@ -285,6 +299,7 @@ class ActivateHarness:
             mock.patch.object(handoff, "run", side_effect=self.run),
             mock.patch.object(handoff, "verify_current_controller_authority"),
             mock.patch.object(handoff, "validate_authority", side_effect=self.validate_authority),
+            mock.patch.object(handoff, "validate_recovery", side_effect=self.validate_recovery, create=True),
             mock.patch.object(handoff, "validate_rollback", side_effect=validator),
             mock.patch.object(handoff, "finish_pending", side_effect=self.finish_pending),
             mock.patch.object(handoff, "restore_pointer", side_effect=self.restore_pointer),
@@ -424,6 +439,77 @@ class ActivateTests(unittest.TestCase):
         self.assertTrue(self.harness.pointer.exists())
         self.assertFalse(self.harness.pending.exists())
         self.assertFalse(any(event[0] in ("unit", "main", "run") for event in self.harness.events))
+
+    def test_expired_timely_durable_intent_recovers_only_owned_effects_without_network_refresh(self):
+        now = datetime.datetime.now(datetime.timezone.utc)
+        self.harness.envelope["approval"] = {
+            "issuedAt": (now - datetime.timedelta(hours=2)).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "expiresAt": (now - datetime.timedelta(minutes=1)).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        }
+        intent = self.harness.apply_intent(now - datetime.timedelta(minutes=30))
+        self.harness.recovery_expired = True
+        self.harness.put(self.harness.directory / "apply.intent.json", intent)
+        self.harness.put(self.harness.directory / "apply-unit.intent.json", intent)
+        self.harness.put(self.harness.directory / "apply-main.intent.json", intent)
+        self.harness.put(self.harness.pending, {"operationId": self.harness.identity})
+        self.harness.state["unit"] = self.harness.new_unit
+        self.harness.state["main"] = "new-control"
+        with activated_harness(self.harness):
+            result = handoff.activate(self.harness.identity, self.harness.approval_path)
+        self.assertEqual(result["decision"], "ROLLED_BACK")
+        self.assertEqual(self.harness.state["unit"], self.harness.old_unit)
+        self.assertEqual(self.harness.state["main"], "old-control")
+        terminal = self.harness.read_json(self.harness.directory / "rolled-back.json")
+        self.assertEqual(terminal["reason"], "EXPIRED_BEFORE_ACCEPTANCE")
+        self.assertFalse(self.harness.pending.exists())
+        self.assertFalse(any("network-fence.py" in event[1] for event in self.harness.events if event[0] == "run"))
+
+    def test_missing_pending_after_durable_intent_reconstructs_and_resumes_within_window(self):
+        self.harness.recovery_expired = False
+        self.harness.put(self.harness.directory / "apply.intent.json", self.harness.apply_intent())
+        with activated_harness(self.harness):
+            result = handoff.activate(self.harness.identity, self.harness.approval_path)
+        self.assertEqual(result["decision"], "CONTROL_HANDOFF_ACCEPTED")
+        self.assertEqual(self.harness.state["unit"], self.harness.new_unit)
+        self.assertEqual(self.harness.state["main"], "new-control")
+        self.assertFalse(self.harness.pending.exists())
+        self.assertTrue(any(event[0] == "recovery-validator" for event in self.harness.events))
+
+    def test_missing_pending_with_phase_intent_or_foreign_postimage_is_denied(self):
+        for phase, postimage in (("apply-unit.intent.json", False), (None, True)):
+            with self.subTest(phase=phase, postimage=postimage):
+                harness = ActivateHarness()
+                try:
+                    harness.put(harness.directory / "apply.intent.json", harness.apply_intent())
+                    if phase:
+                        harness.put(harness.directory / phase, harness.apply_intent())
+                    if postimage:
+                        harness.state["unit"] = harness.new_unit
+                    with activated_harness(harness):
+                        with self.assertRaises(ValueError):
+                            handoff.activate(harness.identity, harness.approval_path)
+                    self.assertEqual(harness.state["main"], "old-control")
+                    self.assertFalse(any(event[0] == "run" for event in harness.events))
+                finally:
+                    harness.close()
+
+    def test_expiry_before_any_effect_aborts_metadata_without_unit_main_or_network_effects(self):
+        now = datetime.datetime.now(datetime.timezone.utc)
+        self.harness.envelope["approval"] = {
+            "issuedAt": (now - datetime.timedelta(hours=2)).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "expiresAt": (now - datetime.timedelta(minutes=1)).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        }
+        self.harness.recovery_expired = True
+        self.harness.put(self.harness.directory / "apply.intent.json", self.harness.apply_intent(now - datetime.timedelta(minutes=30)))
+        with activated_harness(self.harness):
+            result = handoff.activate(self.harness.identity, self.harness.approval_path)
+        self.assertEqual(result["decision"], "ROLLED_BACK")
+        self.assertEqual(self.harness.state["unit"], self.harness.old_unit)
+        self.assertEqual(self.harness.state["main"], "old-control")
+        self.assertFalse(self.harness.pending.exists())
+        self.assertFalse(any(event[0] in ("unit", "main", "run") for event in self.harness.events))
+        terminal = self.harness.read_json(self.harness.directory / "rolled-back.json")
+        self.assertEqual(terminal["reason"], "EXPIRED_BEFORE_ACCEPTANCE")
 
     def test_rollback_requires_a_separate_validator_before_any_effect(self):
         receipt = {"decision": "PASS", "operationId": self.harness.identity}

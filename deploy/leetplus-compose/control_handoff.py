@@ -333,6 +333,17 @@ def validate_rollback(plan, receipt, envelope, control):
     require(run(['/usr/bin/node', '--input-type=module', '-e', script], canonical(value)) == b'PASS', 'Separate receipt-bound rollback approval required')
 
 
+def validate_recovery(plan, envelope, intent, control):
+    # A timely immutable intent may authorize undo after expiry, never forward
+    # activation or an invented/backdated accepted receipt.
+    script = "import fs from 'node:fs';import {validateControlHandoffRecoveryAuthority} from '" + (control / 'control-handoff-authority.mjs').as_uri() + "';const v=JSON.parse(fs.readFileSync(0,'utf8'));console.log(JSON.stringify(validateControlHandoffRecoveryAuthority(v.bundle,v.publicKey,v.context)));"
+    value = {'bundle': {'plan': plan, 'approvalEnvelope': envelope, 'intent': intent}, 'publicKey': secure(Path('/etc/leetplus-compose/approval-root.pem')).decode(),
+             'context': {'controlSha256': plan['newControlSha256'], 'hostIdentitySha256': digest(secure(Path('/etc/machine-id')).strip()), 'activeSha256': digest(secure(STATE / 'active.json'))}}
+    result = json.loads(run(['/usr/bin/node', '--input-type=module', '-e', script], canonical(value)))
+    require(result.get('plan') == plan and isinstance(result.get('expired'), bool), 'Signed recovery authority rejected')
+    return result
+
+
 def phase_effect(directory, name, binding, current, before, after, effect):
     intent = directory / (name + '.intent.json')
     existed = intent.exists()
@@ -365,9 +376,13 @@ def validate_plan_bindings(plan, old, new):
 
 
 def restore_pointer(plan):
+    current = secure(POINTER) if POINTER.exists() else None
+    previous = base64.b64decode(plan['previousPointer'], validate=True) if plan['previousPointer'] is not None else None
+    if current is not None and current != previous:
+        receipt_path = operation_path(plan['operationId']) / 'receipt.json'
+        require(receipt_path.exists() and json.loads(current) == {'operationId': plan['operationId'], 'receiptSha256': digest(secure(receipt_path))}, 'Refuse to replace a foreign control pointer')
     if plan['previousPointer'] is not None:
-        previous = base64.b64decode(plan['previousPointer'], validate=True)
-        atomic_bytes(POINTER, previous, 0o600, digest(secure(POINTER)) if POINTER.exists() else None)
+        atomic_bytes(POINTER, previous, 0o600, digest(current) if current is not None else None)
     elif POINTER.exists():
         require(read_json(POINTER).get('operationId') == plan['operationId'], 'Refuse to remove a different control pointer')
         POINTER.unlink()
@@ -379,6 +394,41 @@ def finish_pending(identity):
         require(read_json(PENDING).get('operationId') == identity, 'Foreign pending marker')
         PENDING.unlink()
         sync_dir(PENDING.parent)
+
+
+def recover_expired_apply(directory, plan, envelope, old, new):
+    binding = read_json(directory / 'apply.intent.json')
+    require(validate_recovery(plan, envelope, binding, new['root'])['expired'], 'Expiry recovery is authority-decreasing only')
+    require(not (directory / 'receipt.json').exists(), 'Accepted handoff requires separate rollback authority')
+    if PENDING.exists():
+        require(read_json(PENDING) == {'operationId': plan['operationId']}, 'Foreign pending marker')
+    main, unit = main_target(), digest(secure(UNIT))
+    require(main in (plan['oldMainTarget'], plan['newMainTarget']) and unit in (plan['oldUnitSha256'], plan['newUnitSha256']), 'Foreign expiry recovery preimage')
+    for name, observed, before in [('main', main, plan['oldMainTarget']), ('unit', unit, plan['oldUnitSha256'])]:
+        intent = directory / ('apply-' + name + '.intent.json')
+        if intent.exists():
+            require(read_json(intent) == binding, 'Expiry recovery effect intent drift')
+        else:
+            require(observed == before, 'Expiry recovery cannot adopt an unaudited effect')
+    # These are exclusively this operation's control effects. A new app or a
+    # changed worker/config snapshot must not be adopted as handoff continuity.
+    effect_intended = any((directory / ('apply-' + name + '.intent.json')).exists() for name in ('main', 'unit'))
+    if effect_intended:
+        require(PENDING.exists() and snapshot(new['root']) == plan['snapshot'], 'Changed live state forbids expiry undo')
+        verify_timers(plan)
+        if main == plan['newMainTarget']:
+            switch_main(plan['newMainTarget'], plan['oldMainTarget'])
+        if unit == plan['newUnitSha256']:
+            atomic_bytes(UNIT, secure(old['root'] / UNIT.name), plan['oldUnitMode'], plan['newUnitSha256'])
+        # Reconcile the loaded unit even if an earlier undo restored its file
+        # but crashed before daemon-reload. No service is restarted.
+        run(['/usr/bin/systemctl', 'daemon-reload'])
+        require(snapshot(new['root']) == plan['snapshot'], 'Live state changed during expiry undo')
+        verify_timers(plan)
+    restore_pointer(plan)
+    publish(directory / 'rolled-back.json', {**binding, 'decision': 'ROLLED_BACK', 'reason': 'EXPIRED_BEFORE_ACCEPTANCE', 'applicationRestartCommandIssued': False})
+    finish_pending(plan['operationId'])
+    return {'decision': 'ROLLED_BACK', 'reason': 'EXPIRED_BEFORE_ACCEPTANCE', 'operationId': plan['operationId'], 'applicationRestartCommandIssued': False, 'timersStopped': False}
 
 
 def activate(identity, approval_path, rollback=False):
@@ -408,11 +458,18 @@ def activate(identity, approval_path, rollback=False):
         require(forward is not None, 'No accepted handoff to roll back')
         validate_rollback(plan, forward, envelope, new['root'])
     elif not forward:
-        validate_authority(plan, envelope, new['root'])
+        prior_intent = directory / 'apply.intent.json'
+        if prior_intent.exists():
+            validate_recovery(plan, envelope, read_json(prior_intent), new['root'])
+        else:
+            validate_authority(plan, envelope, new['root'])
 
     # Wait without disabling timers or killing work. Nothing is published until
     # the actual exclusive lock is held. A busy worker/backup is a safe timeout.
     with control_lock(True, plan['maxLockWaitSeconds']):
+        if not forward and not rollback and (directory / 'apply.intent.json').exists():
+            if validate_recovery(plan, envelope, read_json(directory / 'apply.intent.json'), new['root'])['expired']:
+                return recover_expired_apply(directory, plan, envelope, old, new)
         require(snapshot(new['root']) == plan['snapshot'], 'Live app/data/grant state changed')
         verify_timers(plan)
         if PENDING.exists():
@@ -438,7 +495,11 @@ def activate(identity, approval_path, rollback=False):
         if first_attempt:
             require(main_target() == before_main and digest(secure(UNIT)) == before_unit, 'First apply/rollback requires the exact unchanged preimage')
         else:
-            require(read_json(intent) == binding and own_pending, 'Unfinished effect lacks its exact pending intent')
+            require(read_json(intent) == binding, 'Unfinished effect authority drift')
+            if not PENDING.exists():
+                require(main_target() == before_main and digest(secure(UNIT)) == before_unit and
+                        not any((directory / (action + '-' + phase + '.intent.json')).exists() for phase in ('unit', 'main')),
+                        'Unfinished effect lacks its exact pending intent')
         if rollback:
             validate_rollback(plan, forward, envelope, new['root'])
         else:
@@ -476,7 +537,7 @@ def activate(identity, approval_path, rollback=False):
                 if main_target() == plan['oldMainTarget'] and digest(secure(UNIT)) == plan['oldUnitSha256']:
                     run(['/usr/bin/systemctl', 'daemon-reload'])
                     restore_pointer(plan)
-                    publish(directory / 'rolled-back.json', {**binding, 'decision': 'ROLLED_BACK', 'reason': 'HANDOFF_POSTCHECK_FAILED', 'applicationRestarted': False})
+                    publish(directory / 'rolled-back.json', {**binding, 'decision': 'ROLLED_BACK', 'reason': 'HANDOFF_POSTCHECK_FAILED', 'applicationRestartCommandIssued': False, 'applicationContinuityConfirmed': False})
                     finish_pending(identity)
             raise
     return {'decision': 'ROLLED_BACK' if rollback else 'CONTROL_HANDOFF_ACCEPTED', 'operationId': identity, 'controlReleaseSha': plan['oldReleaseSha'] if rollback else plan['newReleaseSha'], 'applicationRestarted': False, 'timersStopped': False}

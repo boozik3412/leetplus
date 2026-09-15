@@ -5,6 +5,8 @@ Source candidate15.09: постоянный ремонт provider network refres
 остановки таймеров. Установленным он пока не считается; runtimeb5/gen5 и
 data/control399876 ниже остаются последним подтверждённым состоянием.
 Внешний beta GO, tenant/provider scope, guest identity и награды не меняются.
+Interrupted/expired handoff сохраняет только доказанное право на undo;
+pending network install доступен лишь штатному boot unit с signed app history.
 [Порядок переключения и проверки](../deployment/network-refresh-control-handoff.md).
 
 Source-only USER_CALL modal follow-up15.09: видимые countdown/error/expiry,

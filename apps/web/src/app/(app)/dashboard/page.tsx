@@ -1,510 +1,70 @@
-import { getDashboardSummary } from "@/lib/dashboard-summary";
-import {
-  ExecutiveDashboardRequestError,
-  getExecutiveProductRevenue,
-} from "@/lib/dashboard-executive";
-import { buildAssortmentRiskSummary } from "@/lib/assortment-risk";
 import { DashboardFilters } from "@/components/dashboard-filters";
-import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
-import { DashboardRevenuePanel } from "@/components/dashboard-revenue-panel";
-import { MetricProductRevenueCard } from "@/components/metric-product-revenue-card";
-import { RevenueSnapshotGate } from "@/components/revenue-snapshot-gate";
-import { TenantOnboardingNotice } from "@/components/tenant-onboarding-notice";
+import { ExecutiveDashboard } from "@/components/executive-dashboard";
 import { requireTenantWorkspaceUser } from "@/lib/auth";
 import {
-  dashboardWorkspaceHref,
-  getDefaultLandingPath,
-  shouldShowTenantOnboardingNotice,
-} from "@/lib/landing";
-import {
-  getGuestCrmTaskReport,
-  getGuestsSummary,
-  type GuestCrmTaskReport,
-  type GuestsSummary,
-} from "@/lib/guests";
-import { getOperationalReport, type OperationalReport } from "@/lib/reports";
-import { buildAssortmentReportHref } from "@/lib/assortment-report-query";
+  ExecutiveDashboardRequestError,
+  getExecutiveOperations,
+  getExecutiveSummary,
+  type ExecutiveOperations,
+  type ExecutiveQuery,
+} from "@/lib/dashboard-executive";
+import { dashboardWorkspaceHref, getDefaultLandingPath } from "@/lib/landing";
 import { getStores } from "@/lib/stores";
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Suspense } from "react";
-import { PendingNavigationLink } from "./pending-navigation-link";
 
-type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
-function searchParam(value: string | string[] | undefined) {
+function first(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function searchParamsArray(value: string | string[] | undefined) {
-  if (!value) {
-    return [];
-  }
-
-  return Array.isArray(value) ? value : [value];
+function values(value: string | string[] | undefined) {
+  return value ? (Array.isArray(value) ? value : [value]) : [];
 }
 
-function noSalesDaysParam(value: string | string[] | undefined) {
-  const days = Number(searchParam(value));
-
-  return ([7, 14, 21, 30] as const).includes(days as 7 | 14 | 21 | 30)
-    ? (days as 7 | 14 | 21 | 30)
-    : undefined;
+function scopeMatches(
+  summary: Awaited<ReturnType<typeof getExecutiveSummary>>["scope"],
+  operations: ExecutiveOperations["scope"],
+) {
+  const sameIds = (left: readonly string[], right: readonly string[]) =>
+    [...left].toSorted().join("\u0000") ===
+    [...right].toSorted().join("\u0000");
+  const sameComparison =
+    summary.comparison === null
+      ? operations.comparison === null
+      : operations.comparison !== null &&
+        summary.comparison.from === operations.comparison.from &&
+        summary.comparison.to === operations.comparison.to;
+  const sameTimeZones =
+    JSON.stringify(Object.entries(summary.storeTimeZones).toSorted()) ===
+    JSON.stringify(Object.entries(operations.storeTimeZones).toSorted());
+  return (
+    summary.period.from === operations.period.from &&
+    summary.period.to === operations.period.to &&
+    summary.period.timezone === operations.period.timezone &&
+    summary.asOf === operations.asOf &&
+    sameComparison &&
+    sameIds(summary.storeIds, operations.storeIds) &&
+    sameTimeZones
+  );
 }
 
-type DashboardRevenueView = "summary" | "stores";
-
-type DashboardHrefFilters = {
-  period: string;
-  dateFrom?: string;
-  dateTo?: string;
-  storeIds: readonly string[];
-};
-
-function dashboardQuery(filters: DashboardHrefFilters) {
-  const params = new URLSearchParams();
-
-  params.set("period", filters.period);
-
-  if (filters.period === "custom") {
-    if (filters.dateFrom) {
-      params.set("dateFrom", filters.dateFrom);
-    }
-
-    if (filters.dateTo) {
-      params.set("dateTo", filters.dateTo);
-    }
-  }
-
-  filters.storeIds.forEach((storeId) => {
-    params.append("storeIds", storeId);
-  });
-
-  return params;
-}
-
-function dashboardRevenueByClubHref(filters: DashboardHrefFilters) {
-  const params = dashboardQuery(filters);
-  const query = params.toString();
-
-  return `/dashboard/revenue-by-club${query ? `?${query}` : ""}`;
-}
-
-function dashboardRevenueDiagnosticsHref(filters: DashboardHrefFilters) {
-  const params = dashboardQuery(filters);
-  const query = params.toString();
-
-  return `/dashboard/revenue-diagnostics${query ? `?${query}` : ""}`;
-}
-
-function dashboardCanonicalHref(params: {
-  period?: string | string[];
-  dateFrom?: string | string[];
-  dateTo?: string | string[];
-  revenueView?: string | string[];
-  storeIds?: string | string[];
-}) {
-  const canonicalParams = new URLSearchParams();
-  const period = searchParam(params.period);
-
-  if (period) {
-    canonicalParams.set("period", period);
-  }
-
-  if (period === "custom") {
-    const dateFrom = searchParam(params.dateFrom);
-    const dateTo = searchParam(params.dateTo);
-
-    if (dateFrom) {
-      canonicalParams.set("dateFrom", dateFrom);
-    }
-
-    if (dateTo) {
-      canonicalParams.set("dateTo", dateTo);
-    }
-  }
-
-  const revenueView = searchParam(params.revenueView);
-
-  if (revenueView) {
-    canonicalParams.set("revenueView", revenueView);
-  }
-
-  searchParamsArray(params.storeIds).forEach((storeId) => {
-    canonicalParams.append("storeIds", storeId);
-  });
-
-  const query = canonicalParams.toString();
-
-  return `/dashboard${query ? `?${query}` : ""}`;
-}
-
-function formatPercent(value: number) {
-  return `${value.toFixed(1)}%`;
-}
-
-function formatMoney(value: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
-function formatRubles(value: number) {
-  return `${formatMoney(value)} руб`;
-}
-
-function formatHours(value: number) {
-  return `${formatQuantity(value)} ч`;
-}
-
-function formatQuantity(value: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    maximumFractionDigits: 1,
-  }).format(value);
-}
-
-function formatRatioPercent(value: number | null) {
-  return value === null ? "нет данных" : formatPercent(value);
-}
-
-function ratioPercent(value: number, total: number) {
-  return total > 0 ? (value / total) * 100 : null;
-}
-
-function formatDashboardPeriodLabel(from: string, to: string) {
-  const fromDate = parseDateInput(from);
-  const toDate = parseDateInput(to);
-
-  if (!fromDate || !toDate) {
-    return `${from} - ${to}`;
-  }
-
-  if (
-    fromDate.getUTCFullYear() === toDate.getUTCFullYear() &&
-    fromDate.getUTCMonth() === toDate.getUTCMonth() &&
-    fromDate.getUTCDate() === toDate.getUTCDate()
-  ) {
-    return formatFullDate(fromDate);
-  }
-
-  return `${formatFullDate(fromDate)} - ${formatFullDate(toDate)}`;
-}
-
-function parseDateInput(value: string) {
-  const [year, month, day] = value.split("-").map(Number);
-
-  if (!year || !month || !day) {
-    return null;
-  }
-
-  return new Date(Date.UTC(year, month - 1, day));
-}
-
-function formatFullDate(value: Date) {
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(value);
-}
-
-type BusinessSignalTone = "neutral" | "good" | "warning" | "danger";
-
-type BusinessSignal = {
-  title: string;
-  value: string;
-  description: string;
-  actionLabel: string;
-  href: string;
-  tone?: BusinessSignalTone;
-};
-
-type BusinessSignalGroup = {
-  title: string;
-  subtitle: string;
-  routeLabel: string;
-  href: string;
-  signals: BusinessSignal[];
-};
-
-type DashboardGuestsSummary = Pick<
-  GuestsSummary,
-  | "totalGuests"
-  | "activeGuests"
-  | "newGuests"
-  | "repeatGuests"
-  | "riskGuests"
-  | "playHours"
-  | "computerCount"
-  | "playCapacityHours"
-  | "loadPercent"
-  | "transactionAmount"
-  | "barRevenue"
->;
-
-type DashboardCrmTaskReport = Pick<GuestCrmTaskReport, "summary">;
-
-type DashboardOperationalReport = Pick<
-  OperationalReport,
-  "outOfStockRiskProducts" | "productsWithoutSales" | "assortmentHealth"
->;
-
-const emptyGuestsSummary: DashboardGuestsSummary = {
-  totalGuests: 0,
-  activeGuests: 0,
-  newGuests: 0,
-  repeatGuests: 0,
-  riskGuests: 0,
-  playHours: 0,
-  computerCount: null,
-  playCapacityHours: null,
-  loadPercent: null,
-  transactionAmount: 0,
-  barRevenue: 0,
-};
-
-const emptyCrmTaskReport: DashboardCrmTaskReport = {
-  summary: {
-    open: 0,
-    inProgress: 0,
-    done: 0,
-    canceled: 0,
-    overdue: 0,
-    withAssignee: 0,
-    withoutAssignee: 0,
-  },
-};
-
-const emptyOperationalReport: DashboardOperationalReport = {
-  outOfStockRiskProducts: [],
-  productsWithoutSales: [],
-};
-
-async function safeDashboardValue<T>(
-  promise: Promise<T>,
-  fallback: T,
-): Promise<T> {
+async function loadOperations(
+  query: ExecutiveQuery,
+  summary: Awaited<ReturnType<typeof getExecutiveSummary>>,
+) {
   try {
-    return await promise;
+    const operations = await getExecutiveOperations({
+      ...query,
+      dateFrom: summary.scope.period.from,
+      dateTo: summary.scope.period.to,
+      storeIds: summary.scope.storeIds,
+      asOf: summary.scope.asOf,
+    });
+    return scopeMatches(summary.scope, operations.scope) ? operations : null;
   } catch {
-    return fallback;
-  }
-}
-
-async function loadExecutiveProductRevenue(
-  query: Parameters<typeof getExecutiveProductRevenue>[0],
-) {
-  try {
-    return await getExecutiveProductRevenue(query);
-  } catch (error) {
-    if (
-      error instanceof ExecutiveDashboardRequestError &&
-      (error.status === 401 || error.status === 403)
-    ) {
-      throw error;
-    }
-
     return null;
   }
-}
-
-function dashboardScopedParams(
-  summary: Awaited<ReturnType<typeof getDashboardSummary>>,
-) {
-  const params = new URLSearchParams({
-    dateFrom: summary.periodFrom,
-    dateTo: summary.periodTo,
-  });
-
-  if (summary.selectedStoreIds.length === 1) {
-    params.set("storeId", summary.selectedStoreIds[0]);
-  }
-
-  return params;
-}
-
-function scopedHref(
-  path: string,
-  summary: Awaited<ReturnType<typeof getDashboardSummary>>,
-  extra: Record<string, string | undefined> = {},
-) {
-  const params = dashboardScopedParams(summary);
-
-  Object.entries(extra).forEach(([key, value]) => {
-    if (value) {
-      params.set(key, value);
-    }
-  });
-
-  const query = params.toString();
-
-  return `${path}${query ? `?${query}` : ""}`;
-}
-
-function assortmentScope(
-  summary: Awaited<ReturnType<typeof getDashboardSummary>>,
-) {
-  return {
-    from: summary.periodFrom,
-    to: summary.periodTo,
-    asOf: summary.selectedAssortmentAsOf,
-    storeIds: summary.selectedStoreIds,
-    categoryIds: summary.selectedCategoryIds,
-    noSalesDays: summary.selectedNoSalesDays,
-  };
-}
-
-function buildBusinessSignalGroups({
-  summary,
-  guestsSummary,
-  crmTaskReport,
-  latestTrend,
-  assortmentRiskAmount,
-  assortmentRiskSkuCount,
-  productRevenueShare,
-}: {
-  summary: Awaited<ReturnType<typeof getDashboardSummary>>;
-  guestsSummary: DashboardGuestsSummary;
-  crmTaskReport: DashboardCrmTaskReport;
-  latestTrend: { noSalesSkuCount14: number } | null;
-  assortmentRiskAmount: number | null;
-  assortmentRiskSkuCount: number;
-  productRevenueShare: number | null;
-}) {
-  const guestMoney = guestsSummary.transactionAmount + guestsSummary.barRevenue;
-  const barShare = ratioPercent(guestsSummary.barRevenue, guestMoney);
-  const activeCrmTasks =
-    crmTaskReport.summary.open + crmTaskReport.summary.inProgress;
-  const loadPercent = guestsSummary.loadPercent;
-  const noSalesSkuCount = latestTrend?.noSalesSkuCount14 ?? 0;
-
-  return [
-    {
-      title: "Гости и CRM",
-      subtitle:
-        "Понять, с кем работать сегодня: риск оттока, новые гости и задачи контакта.",
-      routeLabel: "Открыть CRM",
-      href: "/guests/crm",
-      signals: [
-        {
-          title: "Гости в риске",
-          value: `${formatQuantity(guestsSummary.riskGuests)} гостей`,
-          description:
-            guestsSummary.riskGuests > guestsSummary.newGuests
-              ? `Риск выше притока: новых ${formatQuantity(guestsSummary.newGuests)}. Нужна реактивация.`
-              : `Новых гостей ${formatQuantity(guestsSummary.newGuests)}, риск контролируемый.`,
-          actionLabel: "Разобрать группу",
-          href: scopedHref("/guests/report", summary, {
-            segment: "risk",
-            page: "1",
-            pageSize: "50",
-          }),
-          tone:
-            guestsSummary.riskGuests > guestsSummary.newGuests
-              ? "warning"
-              : "good",
-        },
-        {
-          title: "CRM задачи",
-          value:
-            crmTaskReport.summary.overdue > 0
-              ? `${formatQuantity(crmTaskReport.summary.overdue)} просрочено`
-              : `${formatQuantity(activeCrmTasks)} в работе`,
-          description:
-            crmTaskReport.summary.overdue > 0
-              ? "Есть контакты без своевременного follow-up."
-              : "Просроченных задач нет, можно идти к плановым контактам.",
-          actionLabel: "Открыть задачи",
-          href: "/guests/crm/tasks?status=all&sort=dueAt&direction=asc",
-          tone: crmTaskReport.summary.overdue > 0 ? "danger" : "good",
-        },
-      ],
-    },
-    {
-      title: "Управление ассортиментом",
-      subtitle:
-        "Найти товарные потери: OOS, замороженные остатки и позиции без продаж.",
-      routeLabel: "Открыть ассортимент",
-      href: buildAssortmentReportHref(assortmentScope(summary), "dashboard"),
-      signals: [
-        {
-          title: "OOS риск",
-          value: `${formatQuantity(summary.outOfStockRiskCount)} SKU`,
-          description:
-            summary.outOfStockRiskCount > 0
-              ? "Позиции могут потерять продажи из-за короткого запаса."
-              : "Критичного OOS риска сейчас не видно.",
-          actionLabel: "Закрыть риск",
-          href: buildAssortmentReportHref(assortmentScope(summary), "oos-risk"),
-          tone: summary.outOfStockRiskCount > 0 ? "danger" : "good",
-        },
-        {
-          title: "Деньги в риске",
-          value:
-            assortmentRiskAmount === null
-              ? "Частично"
-              : formatRubles(assortmentRiskAmount),
-          description: `${formatQuantity(assortmentRiskSkuCount)} SKU: OOS плюс замороженный остаток без продаж${
-            noSalesSkuCount > 0
-              ? `; ${formatQuantity(noSalesSkuCount)} SKU без продаж 14 дней.`
-              : "."
-          }`,
-          actionLabel: "Открыть разбор",
-          href: buildAssortmentReportHref(
-            assortmentScope(summary),
-            "assortment-risk",
-          ),
-          tone:
-            assortmentRiskAmount === null
-              ? "warning"
-              : assortmentRiskAmount > 0
-                ? "danger"
-                : "good",
-        },
-      ],
-    },
-    {
-      title: "Маркетинг",
-      subtitle:
-        "Выбрать цель кампании: загрузить тихие часы, усилить бар или вернуть гостей.",
-      routeLabel: "Подготовить кампанию",
-      href: "/marketing",
-      signals: [
-        {
-          title: "Игровая загрузка",
-          value:
-            loadPercent === null ? "нет данных" : formatPercent(loadPercent),
-          description:
-            loadPercent === null
-              ? "Для промо по слабым часам нужно обновить данные по ПК и сессиям."
-              : loadPercent < 35
-                ? "Есть свободная емкость для промо, событий или офферов на тихие часы."
-                : "Загрузка заметная, промо лучше привязывать к удержанию и среднему чеку.",
-          actionLabel: "Найти группу",
-          href: scopedHref("/guests/report", summary, {
-            segment: "quiet",
-            page: "1",
-            pageSize: "50",
-          }),
-          tone:
-            loadPercent === null
-              ? "neutral"
-              : loadPercent < 35
-                ? "warning"
-                : "good",
-        },
-        {
-          title: "Доля бара",
-          value: formatRatioPercent(barShare),
-          description: `Товары и бар занимают ${formatRatioPercent(productRevenueShare)} общей выручки. Можно искать гостей с низким баром.`,
-          actionLabel: "Собрать оффер",
-          href: "/marketing",
-          tone: barShare !== null && barShare < 25 ? "warning" : "neutral",
-        },
-      ],
-    },
-  ] satisfies BusinessSignalGroup[];
 }
 
 export default async function DashboardPage({
@@ -513,454 +73,85 @@ export default async function DashboardPage({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
-
-  if (params.skuGrouping !== undefined) {
-    redirect(dashboardCanonicalHref(params));
-  }
-
   const user = await requireTenantWorkspaceUser();
   const landingPath = getDefaultLandingPath(user);
+  if (landingPath !== dashboardWorkspaceHref) redirect(landingPath);
 
-  if (landingPath !== dashboardWorkspaceHref) {
-    redirect(landingPath);
+  const query: ExecutiveQuery = {
+    period: first(params.period) ?? "full-week",
+    dateFrom: first(params.dateFrom),
+    dateTo: first(params.dateTo),
+    storeIds: values(params.storeIds),
+    comparison: first(params.comparison) !== "false",
+    asOf: first(params.asOf),
+  };
+  const [storesResult, summaryResult] = await Promise.allSettled([
+    getStores(),
+    getExecutiveSummary(query),
+  ]);
+  const stores = storesResult.status === "fulfilled" ? storesResult.value : [];
+
+  if (summaryResult.status === "rejected") {
+    const status =
+      summaryResult.reason instanceof ExecutiveDashboardRequestError
+        ? summaryResult.reason.status
+        : null;
+    return (
+      <main className="min-h-screen bg-[var(--background)] px-4 py-6 text-[var(--foreground)] sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-[1480px]">
+          <DashboardFilters
+            period={query.period ?? "full-week"}
+            dateFrom={query.dateFrom ?? ""}
+            dateTo={query.dateTo ?? ""}
+            stores={stores}
+            selectedStoreIds={query.storeIds ?? []}
+            showComparison
+            comparison={query.comparison}
+            asOf={query.asOf}
+          />
+          <section className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-900 shadow-sm dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-100">
+            <h1 className="text-xl font-semibold">Сводка пока недоступна</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6">
+              Не удалось прочитать сохранённые данные для этой выборки
+              {status ? ` (код ${status})` : ""}. Измените фильтры или обновите
+              страницу; запрос не запускает синхронизацию.
+            </p>
+          </section>
+        </div>
+      </main>
+    );
   }
 
-  const filters = {
-    period: searchParam(params.period) ?? "full-day",
-    dateFrom: searchParam(params.dateFrom),
-    dateTo: searchParam(params.dateTo),
-    storeIds: searchParamsArray(params.storeIds),
-    categoryIds: searchParamsArray(params.categoryIds),
-    asOf: searchParam(params.asOf),
-    noSalesDays: noSalesDaysParam(params.noSalesDays),
-  } as const;
-  const revenueView: DashboardRevenueView =
-    searchParam(params.revenueView) === "stores" ? "stores" : "summary";
-  const executiveProductRevenueFilters = {
-    period: filters.period,
-    dateFrom: filters.dateFrom,
-    dateTo: filters.dateTo,
-    storeIds: filters.storeIds,
-    asOf: filters.asOf,
-  } as const;
-  const productRevenuePromise = loadExecutiveProductRevenue(
-    executiveProductRevenueFilters,
-  );
-  const [summary, stores] = await Promise.all([
-    getDashboardSummary(filters),
-    getStores(),
-  ]);
-  const productRevenue = await productRevenuePromise;
-  const highlightedPeriod = formatDashboardPeriodLabel(
-    summary.periodFrom,
-    summary.periodTo,
-  );
-  const totalClubRevenue = summary.clubRevenue;
-  const revenueByClubHref = dashboardRevenueByClubHref({
-    ...filters,
-    dateFrom: summary.periodFrom,
-    dateTo: summary.periodTo,
-  });
-  const revenueDiagnosticsHref = dashboardRevenueDiagnosticsHref({
-    ...filters,
-    dateFrom: summary.periodFrom,
-    dateTo: summary.periodTo,
-  });
-
+  const summary = summaryResult.value;
+  const operations = await loadOperations(query, summary);
   return (
-    <main className="px-4 py-5 text-zinc-950 sm:px-6 sm:py-8 dark:text-zinc-100">
-      <div className="mx-auto max-w-7xl">
-        {shouldShowTenantOnboardingNotice(user) ? (
-          <TenantOnboardingNotice />
-        ) : null}
-
-        <section className="overflow-visible rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="grid min-w-0 gap-5 p-4 min-[1250px]:grid-cols-[1.1fr_0.9fr] sm:p-5 lg:p-8">
-            <div className="min-w-0">
-              <div className="flex flex-col items-stretch gap-2 lg:flex-row lg:flex-wrap lg:items-center">
-                <DashboardFilters
-                  period={filters.period}
-                  dateFrom={summary.periodFrom}
-                  dateTo={summary.periodTo}
-                  stores={stores}
-                  selectedStoreIds={summary.selectedStoreIds}
-                />
-                <DashboardQuickSyncButton />
-              </div>
-              <h1 className="mt-4 max-w-3xl text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 min-[1250px]:text-4xl">
-                {summary.tenantName}: сводный дашборд сети
-              </h1>
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                Период -{" "}
-                <span className="font-semibold text-zinc-950 dark:text-zinc-50">
-                  {highlightedPeriod}
-                </span>
-                . Первый экран соединяет деньги, гостей, ассортимент и игровую
-                загрузку, чтобы быстро понять, где сеть зарабатывает и где
-                теряет потенциал.
-              </p>
-            </div>
-
-            <DashboardRevenuePanel
-              initialView={revenueView}
-              totalClubRevenue={totalClubRevenue}
-              unallocatedTopupRevenue={summary.unallocatedTopupRevenue}
-              revenueBreakdown={summary.revenueBreakdown}
-              revenueSnapshot={summary.revenueSnapshot}
-              revenueDataQuality={summary.revenueDataQuality}
-              adjustedGrossProfit={summary.adjustedGrossProfit}
-              grossProfit={summary.grossProfit}
-              adjustedMarginPercent={summary.adjustedMarginPercent}
-              marginCoverage={summary.marginCoverage}
-              fullDayRevenueDate={summary.fullDayRevenueDate}
-              fullDayRevenue={summary.fullDayRevenue}
-              fullDayRevenueToAveragePercent={
-                summary.fullDayRevenueToAveragePercent
-              }
-              writeOffRevenuePercent={summary.writeOffRevenuePercent}
-              adjustedGrossProfitToPreviousPercent={
-                summary.adjustedGrossProfitToPreviousPercent
-              }
-              storeRevenueBreakdown={summary.storeRevenueBreakdown}
-              fullReportHref={revenueByClubHref}
-              diagnosticsHref={revenueDiagnosticsHref}
+    <main className="min-h-screen bg-[var(--background)] px-4 py-6 text-[var(--foreground)] sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1480px]">
+        <header>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-300">
+            Обзор сети
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+            Сводка сети
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            Результат, изменения и следующие действия по выбранным клубам.
+          </p>
+          <div className="mt-5">
+            <DashboardFilters
+              period={query.period ?? "full-week"}
+              dateFrom={summary.scope.period.from}
+              dateTo={summary.scope.period.to}
+              stores={stores}
+              selectedStoreIds={summary.scope.storeIds}
+              showComparison
+              comparison={query.comparison}
+              asOf={summary.scope.asOf}
             />
           </div>
-        </section>
-
-        <MetricProductRevenueCard projection={productRevenue} />
-
-        <RevenueSnapshotGate
-          snapshot={summary.revenueSnapshot}
-          periodFrom={summary.periodFrom}
-          periodTo={summary.periodTo}
-          selectedStoreIds={summary.selectedStoreIds}
-        />
-
-        <Suspense fallback={<DashboardSecondaryPanelsSkeleton />}>
-          <DashboardSecondaryPanels summary={summary} />
-        </Suspense>
+        </header>
+        <ExecutiveDashboard summary={summary} operations={operations} />
       </div>
     </main>
-  );
-}
-
-async function DashboardSecondaryPanels({
-  summary,
-}: {
-  summary: Awaited<ReturnType<typeof getDashboardSummary>>;
-}) {
-  const operationalStoreId =
-    summary.selectedStoreIds.length === 1
-      ? summary.selectedStoreIds[0]
-      : undefined;
-  const reportScope = assortmentScope(summary);
-  const [periodOperationalReport, noSalesReport, guestsSummary, crmTaskReport] =
-    await Promise.all([
-      safeDashboardValue(
-        getOperationalReport({
-          ...reportScope,
-        }),
-        emptyOperationalReport,
-      ),
-      safeDashboardValue(
-        getOperationalReport({
-          ...reportScope,
-        }),
-        emptyOperationalReport,
-      ),
-      safeDashboardValue(
-        getGuestsSummary({
-          dateFrom: summary.periodFrom,
-          dateTo: summary.periodTo,
-          storeId: operationalStoreId,
-        }),
-        emptyGuestsSummary,
-      ),
-      safeDashboardValue(
-        getGuestCrmTaskReport({
-          status: "all",
-          sort: "dueAt",
-          direction: "asc",
-          pageSize: "50",
-        }),
-        emptyCrmTaskReport,
-      ),
-    ]);
-  const assortmentRisk = buildAssortmentRiskSummary({
-    oosRows: periodOperationalReport.outOfStockRiskProducts,
-    noSalesRows: noSalesReport.productsWithoutSales,
-    oosState:
-      periodOperationalReport.assortmentHealth?.outOfStock.state ?? "UNKNOWN",
-    noSalesState:
-      noSalesReport.assortmentHealth?.noSales[summary.selectedNoSalesDays]
-        .state ?? "UNKNOWN",
-  });
-  const latestTrend = summary.salesTrend.at(-1) ?? null;
-  const productRevenueShare = ratioPercent(
-    summary.totalRevenue,
-    summary.clubRevenue,
-  );
-  const businessSignalGroups = buildBusinessSignalGroups({
-    summary,
-    guestsSummary,
-    crmTaskReport,
-    latestTrend,
-    assortmentRiskAmount: assortmentRisk.totalRiskAmount,
-    assortmentRiskSkuCount:
-      assortmentRisk.oosSkuCount + assortmentRisk.noSalesSkuCount,
-    productRevenueShare,
-  });
-
-  return (
-    <>
-      <ExecutiveOverviewPanel
-        summary={summary}
-        guestsSummary={guestsSummary}
-        assortmentRiskAmount={assortmentRisk.totalRiskAmount}
-        assortmentRiskSkuCount={
-          assortmentRisk.oosSkuCount + assortmentRisk.noSalesSkuCount
-        }
-        productRevenueShare={productRevenueShare}
-      />
-
-      <BusinessSignalPanel groups={businessSignalGroups} />
-    </>
-  );
-}
-
-function DashboardSecondaryPanelsSkeleton() {
-  return (
-    <>
-      <section className="mt-6 grid auto-rows-fr items-stretch gap-4 lg:grid-cols-3">
-        {["Клиентская база", "Маркетинг и загрузка", "Ассортимент"].map(
-          (label) => (
-            <div
-              key={label}
-              className="min-h-[172px] rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
-            >
-              <p className="text-xs font-semibold uppercase text-zinc-500">
-                {label}
-              </p>
-              <div className="mt-5 h-8 w-28 rounded-full bg-zinc-100 dark:bg-zinc-900" />
-              <div className="mt-8 h-4 w-full max-w-xs rounded-full bg-zinc-100 dark:bg-zinc-900" />
-            </div>
-          ),
-        )}
-      </section>
-      <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
-          Рабочие сценарии
-        </p>
-        <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          {[1, 2, 3].map((item) => (
-            <div
-              key={item}
-              className="h-44 rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40"
-            />
-          ))}
-        </div>
-      </section>
-    </>
-  );
-}
-
-function ExecutiveOverviewPanel({
-  summary,
-  guestsSummary,
-  assortmentRiskAmount,
-  assortmentRiskSkuCount,
-  productRevenueShare,
-}: {
-  summary: Awaited<ReturnType<typeof getDashboardSummary>>;
-  guestsSummary: DashboardGuestsSummary;
-  assortmentRiskAmount: number | null;
-  assortmentRiskSkuCount: number;
-  productRevenueShare: number | null;
-}) {
-  return (
-    <section className="mt-6 grid auto-rows-fr items-stretch gap-4 lg:grid-cols-3">
-      <ExecutiveMetricCard
-        label="Клиентская база"
-        value={`${formatQuantity(guestsSummary.totalGuests)} гостей`}
-        description={`Новые: ${formatQuantity(guestsSummary.newGuests)}, повторные: ${formatQuantity(guestsSummary.repeatGuests)}, в риске: ${formatQuantity(guestsSummary.riskGuests)}.`}
-        href="/guests/crm"
-        tone={
-          guestsSummary.riskGuests > guestsSummary.newGuests
-            ? "warning"
-            : "good"
-        }
-      />
-      <ExecutiveMetricCard
-        label="Маркетинг и загрузка"
-        value={
-          guestsSummary.loadPercent !== null
-            ? formatPercent(guestsSummary.loadPercent)
-            : "нет данных"
-        }
-        description={
-          guestsSummary.playCapacityHours !== null &&
-          guestsSummary.computerCount !== null
-            ? `${formatHours(guestsSummary.playHours)} из ${formatHours(guestsSummary.playCapacityHours)} возможных. Товары и бар: ${formatRatioPercent(productRevenueShare)} выручки.`
-            : `${formatHours(guestsSummary.playHours)} отыграно. Для процента нужна синхронизация количества ПК.`
-        }
-        href="/guests/crm"
-        tone={
-          guestsSummary.loadPercent === null
-            ? "neutral"
-            : guestsSummary.loadPercent >= 35
-              ? "good"
-              : "warning"
-        }
-      />
-      <ExecutiveMetricCard
-        label="Управление ассортиментом"
-        value={`${formatQuantity(summary.activeSku)} активных SKU`}
-        description={`OOS: ${formatQuantity(summary.outOfStockRiskCount)} SKU. Деньги в риске: ${assortmentRiskAmount === null ? "частично подтверждены" : formatRubles(assortmentRiskAmount)} по ${formatQuantity(assortmentRiskSkuCount)} SKU.`}
-        href={buildAssortmentReportHref(assortmentScope(summary), "dashboard")}
-        tone={
-          assortmentRiskAmount === null
-            ? "warning"
-            : assortmentRiskAmount > 0
-              ? "danger"
-              : "good"
-        }
-      />
-    </section>
-  );
-}
-
-function ExecutiveMetricCard({
-  label,
-  value,
-  description,
-  href,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  description: string;
-  href: string;
-  tone?: "neutral" | "good" | "warning" | "danger";
-}) {
-  return (
-    <Link
-      href={href}
-      className={[
-        "flex h-full flex-col rounded-lg border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:bg-zinc-950",
-        tone === "good"
-          ? "border-emerald-200 dark:border-emerald-900/70"
-          : tone === "warning"
-            ? "border-amber-200 dark:border-amber-900/70"
-            : tone === "danger"
-              ? "border-red-200 dark:border-red-900/70"
-              : "border-zinc-200 dark:border-zinc-800",
-      ].join(" ")}
-    >
-      <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
-      <p className="mt-3 min-h-[64px] text-2xl font-semibold leading-tight tabular-nums text-zinc-950 dark:text-zinc-50">
-        {value}
-      </p>
-      <p className="mt-auto pt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-        {description}
-      </p>
-    </Link>
-  );
-}
-
-function BusinessSignalPanel({ groups }: { groups: BusinessSignalGroup[] }) {
-  return (
-    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
-          Рабочие сценарии
-        </p>
-        <h2 className="mt-1 text-xl font-semibold text-zinc-950 dark:text-zinc-50">
-          Что требует внимания
-        </h2>
-        <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-          Три рабочих маршрута: гости и CRM, управление ассортиментом и
-          маркетинг. Внутри каждого блока - главный сигнал и следующий шаг.
-        </p>
-      </div>
-
-      <div className="grid items-stretch gap-4 p-4 lg:grid-cols-3">
-        {groups.map((group) => (
-          <article
-            key={group.title}
-            className="flex h-full min-h-full flex-col overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-900/40"
-          >
-            <div className="flex min-h-[174px] flex-col border-b border-zinc-200 bg-white/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
-              <h3 className="text-sm font-semibold leading-5 text-zinc-950 dark:text-zinc-50">
-                {group.title}
-              </h3>
-              <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                {group.subtitle}
-              </p>
-              <PendingNavigationLink
-                href={group.href}
-                pendingLabel={`Открываем: ${group.title.toLowerCase()}`}
-                mode="inline"
-                className="relative mt-auto inline-flex w-fit max-w-full items-center justify-center overflow-hidden rounded-full border border-zinc-200 px-3 py-1 text-left text-xs font-semibold leading-4 text-zinc-600 transition hover:border-emerald-300 hover:text-emerald-700 data-[pending=true]:border-zinc-950 data-[pending=true]:pr-9 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-emerald-900 dark:hover:text-emerald-300 dark:data-[pending=true]:border-white"
-              >
-                {group.routeLabel}
-              </PendingNavigationLink>
-            </div>
-
-            <div className="grid flex-1 auto-rows-fr gap-3 p-4">
-              {group.signals.map((signal) => (
-                <BusinessSignalCard key={signal.title} signal={signal} />
-              ))}
-            </div>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function BusinessSignalCard({ signal }: { signal: BusinessSignal }) {
-  return (
-    <PendingNavigationLink
-      href={signal.href}
-      pendingLabel={`Открываем: ${signal.title.toLowerCase()}`}
-      className={[
-        "group relative flex h-full min-h-[210px] flex-col overflow-hidden rounded-lg border bg-white p-4 transition hover:-translate-y-0.5 hover:shadow-sm data-[pending=true]:translate-y-0 data-[pending=true]:shadow-sm dark:bg-zinc-950",
-        signal.tone === "danger"
-          ? "border-red-200 dark:border-red-900/70"
-          : signal.tone === "warning"
-            ? "border-amber-200 dark:border-amber-900/70"
-            : signal.tone === "good"
-              ? "border-emerald-200 dark:border-emerald-900/70"
-              : "border-zinc-200 dark:border-zinc-800",
-      ].join(" ")}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
-          {signal.title}
-        </p>
-        <span
-          className={[
-            "h-2 w-2 rounded-full",
-            signal.tone === "danger"
-              ? "bg-red-400"
-              : signal.tone === "warning"
-                ? "bg-amber-400"
-                : signal.tone === "good"
-                  ? "bg-emerald-400"
-                  : "bg-zinc-400",
-          ].join(" ")}
-        />
-      </div>
-      <p className="mt-3 text-2xl font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
-        {signal.value}
-      </p>
-      <p className="mt-2 flex-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-        {signal.description}
-      </p>
-      <span className="mt-3 text-sm font-semibold text-emerald-700 transition group-hover:text-emerald-600 dark:text-emerald-300">
-        {signal.actionLabel}
-      </span>
-    </PendingNavigationLink>
   );
 }

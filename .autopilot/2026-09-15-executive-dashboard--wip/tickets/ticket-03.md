@@ -5,7 +5,7 @@
 **Blocked by:** 01
 **Волна:** 2
 **Зона:** apps/web/src/app/(app)/dashboard/, apps/web/src/components/executive-*, apps/web/src/lib/dashboard-executive*, apps/web/src/lib/assortment-report-query*, apps/web/src/app/(app)/assortment/dashboard/page.tsx
-**Статус:** ready — пауза снята пользователем
+**Статус:** done — variant1 UI, scoped transitions and bounded actual-Next smoke reviewed
 
 ## Из брифа
 

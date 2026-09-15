@@ -121,7 +121,7 @@ const periodOptionGroups: {
   { current: "year", full: "full-year" },
 ];
 
-export function DashboardFilters(props: {
+export type DashboardFiltersProps = {
   period: string;
   dateFrom: string;
   dateTo: string;
@@ -131,7 +131,11 @@ export function DashboardFilters(props: {
   categories?: DashboardCategoryFilterOption[];
   selectedCategoryIds?: string[];
   showComparison?: boolean;
-}) {
+  comparison?: boolean;
+  asOf?: string;
+};
+
+export function DashboardFilters(props: DashboardFiltersProps) {
   const key = [
     props.period,
     props.dateFrom,
@@ -139,6 +143,8 @@ export function DashboardFilters(props: {
     props.skuGrouping ?? "",
     props.selectedStoreIds.join(","),
     (props.selectedCategoryIds ?? []).join(","),
+    String(props.comparison ?? true),
+    props.asOf ?? "",
   ].join("|");
 
   return <DashboardFiltersContent key={key} {...props} />;
@@ -154,17 +160,9 @@ function DashboardFiltersContent({
   categories,
   selectedCategoryIds = [],
   showComparison = false,
-}: {
-  period: string;
-  dateFrom: string;
-  dateTo: string;
-  skuGrouping?: DashboardSkuGrouping;
-  stores: Store[];
-  selectedStoreIds: string[];
-  categories?: DashboardCategoryFilterOption[];
-  selectedCategoryIds?: string[];
-  showComparison?: boolean;
-}) {
+  comparison = true,
+  asOf,
+}: DashboardFiltersProps) {
   const router = useRouter();
   const pathname = usePathname();
   const rootRef = useRef<HTMLElement | null>(null);
@@ -178,6 +176,7 @@ function DashboardFiltersContent({
   const [selectedStores, setSelectedStores] = useState(selectedStoreIds);
   const [selectedCategories, setSelectedCategories] =
     useState(selectedCategoryIds);
+  const [comparisonEnabled, setComparisonEnabled] = useState(comparison);
   const shouldPersistSkuGrouping =
     Boolean(skuGrouping) && isAssortmentPath(pathname);
   const selectedGrouping = shouldPersistSkuGrouping ? skuGrouping : undefined;
@@ -188,10 +187,24 @@ function DashboardFiltersContent({
           .filter((store) => selectedStores.includes(store.id))
           .map((store) => store.name)
           .join(", ");
+  const compactStoresLabel =
+    selectedStores.length === 0
+      ? "Все клубы"
+      : `${selectedStores.length} ${selectedStores.length === 1 ? "клуб" : selectedStores.length >= 2 && selectedStores.length <= 4 ? "клуба" : "клубов"}`;
   const selectedPeriodLabel =
     selectedPeriod === "custom"
       ? formatCustomPeriodLabel(customFrom, customTo)
       : periodLabels[selectedPeriod];
+  const compactPeriodLabel =
+    selectedPeriod === "full-week" || selectedPeriod === "week"
+      ? "Неделя"
+      : selectedPeriod === "full-month" || selectedPeriod === "month"
+        ? "Месяц"
+        : selectedPeriod === "full-day" || selectedPeriod === "day"
+          ? "День"
+          : selectedPeriod === "custom"
+            ? "Период"
+            : selectedPeriodLabel;
   const selectedCategoriesLabel =
     selectedCategories.length === 0
       ? "Все категории"
@@ -255,6 +268,7 @@ function DashboardFiltersContent({
       categoryIds: string[];
       dateFrom: string;
       dateTo: string;
+      comparison: boolean;
     }> = {},
     options: { closePanel?: boolean } = {},
   ) {
@@ -267,6 +281,7 @@ function DashboardFiltersContent({
     const nextCategories = overrides.categoryIds ?? selectedCategories;
     const nextDateFrom = overrides.dateFrom ?? customFrom;
     const nextDateTo = overrides.dateTo ?? customTo;
+    const nextComparison = overrides.comparison ?? comparisonEnabled;
     const closePanel = options.closePanel ?? true;
 
     params.set("period", nextPeriod);
@@ -278,6 +293,11 @@ function DashboardFiltersContent({
     if (nextPeriod === "custom") {
       params.set("dateFrom", nextDateFrom);
       params.set("dateTo", nextDateTo);
+    }
+
+    params.set("comparison", String(nextComparison));
+    if (asOf) {
+      params.set("asOf", asOf);
     }
 
     nextStores.forEach((storeId) => {
@@ -312,6 +332,7 @@ function DashboardFiltersContent({
         <FilterButton
           label="Период"
           value={selectedPeriodLabel}
+          compactValue={compactPeriodLabel}
           icon={<CalendarBlank aria-hidden="true" weight="duotone" />}
           isOpen={openPanel === "period"}
           onClick={() => setOpenPanel(openPanel === "period" ? null : "period")}
@@ -319,6 +340,7 @@ function DashboardFiltersContent({
         <FilterButton
           label="Клубы"
           value={selectedStoresLabel}
+          compactValue={compactStoresLabel}
           icon={<UsersThree aria-hidden="true" weight="duotone" />}
           isOpen={openPanel === "clubs"}
           onClick={() => setOpenPanel(openPanel === "clubs" ? null : "clubs")}
@@ -335,10 +357,17 @@ function DashboardFiltersContent({
           />
         ) : null}
         {showComparison ? (
-          <span className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+          <button
+            type="button"
+            aria-pressed={comparisonEnabled}
+            onClick={() => setComparisonEnabled((current) => !current)}
+            className={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold shadow-sm transition ${comparisonEnabled ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-100" : "border-zinc-200 bg-white text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"}`}
+          >
             <TrendUp className="h-4 w-4 text-emerald-600" aria-hidden="true" />
-            <span>К прошлому периоду</span>
-          </span>
+            <span>
+              {comparisonEnabled ? "К прошлому периоду" : "Без сравнения"}
+            </span>
+          </button>
         ) : null}
         <button
           type="button"
@@ -531,12 +560,14 @@ function DashboardFiltersContent({
 function FilterButton({
   label,
   value,
+  compactValue,
   icon,
   isOpen,
   onClick,
 }: {
   label: string;
   value: string;
+  compactValue?: string;
   icon?: React.ReactNode;
   isOpen: boolean;
   onClick: () => void;
@@ -557,8 +588,11 @@ function FilterButton({
         {icon ? (
           <span className="h-4 w-4 shrink-0 opacity-70">{icon}</span>
         ) : null}
-        <span className="inline-block max-w-[190px] truncate align-bottom font-semibold">
+        <span className="hidden min-w-0 max-w-[190px] truncate align-bottom font-semibold sm:inline">
           {value}
+        </span>
+        <span className="inline min-w-0 max-w-[124px] truncate align-bottom font-semibold sm:hidden">
+          {compactValue ?? value}
         </span>
       </span>
       <CaretDown

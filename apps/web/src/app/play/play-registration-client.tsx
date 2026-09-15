@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { UserCallInstructionModal } from "./user-call-instruction-modal";
 import { LegalEntityInfo } from "@/components/legal-entity-info";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 import type {
@@ -232,6 +233,9 @@ export function PlayRegistrationClient({
     useState<GuestPortalUserCallAuthStartResponse | null>(null);
   const [userCallAuthStatus, setUserCallAuthStatus] =
     useState<GuestPortalUserCallAuthStatusResponse | null>(null);
+  const [userCallError, setUserCallError] = useState<string | null>(null);
+  const userCallGeneration = useRef(0);
+  const userCallStartInFlight = useRef(false);
   const [isUserCallInstructionOpen, setUserCallInstructionOpen] =
     useState(false);
   const [incomingCallLast4, setIncomingCallLast4] =
@@ -341,6 +345,24 @@ export function PlayRegistrationClient({
     : resolveInitialVerificationChannel(visibleVerification);
   const normalizedPhone = normalizeGuestPhoneForSubmit(phone);
   const canUsePhoneAuth = Boolean(normalizedPhone);
+  const telegramReady = visibleVerification.options.some(
+    (option) => option.channel === "TELEGRAM_BOT" && option.status === "READY",
+  );
+  const userCallTerminal = userCallAuthStatus?.status === "EXPIRED" ||
+    userCallAuthStatus?.status === "FAILED";
+
+  const selectVerificationChannel = useCallback((channel: GuestPortalVerificationChannel) => {
+    if (channel !== "USER_CALL") {
+      userCallGeneration.current += 1;
+      setUserCallAuth(null);
+      setUserCallAuthStatus(null);
+      setUserCallError(null);
+      setUserCallInstructionOpen(false);
+      setPollingUserCallAuth(false);
+    }
+    setActiveVerificationChannel(channel);
+    setMessage(null);
+  }, []);
 
   const switchFromTelegramToFallback = useCallback(() => {
     const fallback =
@@ -436,6 +458,9 @@ export function PlayRegistrationClient({
   }
 
   function resetClubBoundAuthState() {
+    userCallGeneration.current += 1;
+    setUserCallError(null);
+    setUserCallInstructionOpen(false);
     setChallenge(null);
     setTelegramAuth(null);
     setTelegramAuthStatus(null);
@@ -578,6 +603,15 @@ export function PlayRegistrationClient({
   }
 
   function handlePhoneChange(value: string) {
+    if (normalizeGuestPhoneForSubmit(value) !== normalizeGuestPhoneForSubmit(phone) &&
+        (userCallAuth || isStartingUserCallAuth)) {
+      userCallGeneration.current += 1;
+      setUserCallAuth(null);
+      setUserCallAuthStatus(null);
+      setUserCallError(null);
+      setUserCallInstructionOpen(false);
+      setPollingUserCallAuth(false);
+    }
     setPhone(formatGuestPhoneInputValue(value));
   }
 
@@ -635,16 +669,30 @@ export function PlayRegistrationClient({
   }, [ensurePhoneForSubmit]);
 
   useEffect(() => {
-    if (!authenticationContextClub || !userCallAuth || portal) {
+    if (!authenticationContextClub || !userCallAuth || portal ||
+        activeVerificationChannel !== "USER_CALL" || userCallTerminal) {
       return;
     }
 
     let isActive = true;
     let intervalId: ReturnType<typeof setInterval> | null = null;
     let pollInFlight = false;
+    let controller: AbortController | null = null;
+    const generation = userCallGeneration.current;
+    const deadline = Date.parse(userCallAuth.expiresAt);
+    const isCurrent = () => isActive && generation === userCallGeneration.current;
+    const expire = () => {
+      if (!isCurrent()) return;
+      setUserCallAuthStatus({
+        status: "EXPIRED", profileId: null, phoneMasked: userCallAuth.phoneMasked,
+        message: "Срок ожидания звонка истёк. Начните новую попытку или выберите Telegram.",
+      });
+      setUserCallError(null);
+      if (intervalId) clearInterval(intervalId);
+    };
 
     async function pollUserCallAuth() {
-      if (!authenticationContextClub || !userCallAuth) {
+      if (!authenticationContextClub || !userCallAuth || !isCurrent()) {
         return;
       }
 
@@ -653,6 +701,8 @@ export function PlayRegistrationClient({
       }
 
       pollInFlight = true;
+      controller = new AbortController();
+      const requestTimeout = setTimeout(() => controller?.abort(), 12_000);
 
       setPollingUserCallAuth(true);
 
@@ -661,6 +711,7 @@ export function PlayRegistrationClient({
           `${clubApiPath(authenticationContextClub)}/user-call-auth/status`,
           {
             method: "POST",
+            signal: controller.signal,
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               challengeId: userCallAuth.challengeId,
@@ -669,7 +720,7 @@ export function PlayRegistrationClient({
           },
         );
 
-        if (!isActive) {
+        if (!isCurrent()) {
           return;
         }
 
@@ -679,34 +730,40 @@ export function PlayRegistrationClient({
 
         const data =
           (await response.json()) as GuestPortalUserCallAuthStatusResponse;
+        if (!isCurrent()) return;
+        if (!["PENDING", "CONFIRMED", "EXPIRED", "FAILED"].includes(data.status) ||
+            (data.status === "CONFIRMED" && !data.portal)) {
+          throw new Error("Unexpected call status response");
+        }
         setUserCallAuthStatus(data);
+        setUserCallError(null);
         setMessage(data.message);
 
         if (data.status === "CONFIRMED" && data.portal) {
           setPortal(data.portal);
           setLocalGameMatch(data.match ?? null);
           setUserCallAuth(null);
+          setUserCallInstructionOpen(false);
           setLangameMatch(null);
           await checkLangameMatch();
-          openClubSelectionAfterAuth();
+          if (generation === userCallGeneration.current) openClubSelectionAfterAuth();
         }
 
         if (data.status === "EXPIRED" || data.status === "FAILED") {
-          setUserCallAuth(null);
+          if (intervalId) clearInterval(intervalId);
+        } else if (data.status === "PENDING" && Date.now() >= deadline) {
+          expire();
         }
-      } catch (error) {
-        if (!isActive) {
+      } catch {
+        if (!isCurrent()) {
           return;
         }
-
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : "Не удалось проверить вход по звонку.",
-        );
+        if (Date.now() >= deadline) expire();
+        else setUserCallError("Не удалось проверить звонок. Проверка повторится автоматически; можно выбрать Telegram.");
       } finally {
+        clearTimeout(requestTimeout);
         pollInFlight = false;
-        if (isActive) {
+        if (isCurrent()) {
           setPollingUserCallAuth(false);
         }
       }
@@ -714,9 +771,13 @@ export function PlayRegistrationClient({
 
     void pollUserCallAuth();
     intervalId = setInterval(() => void pollUserCallAuth(), 3000);
+    // One final bounded check also accepts confirmation already received by the server.
+    const deadlineTimeout = setTimeout(() => void pollUserCallAuth(), Math.max(0, deadline - Date.now()));
 
     return () => {
       isActive = false;
+      controller?.abort();
+      clearTimeout(deadlineTimeout);
 
       if (intervalId) {
         clearInterval(intervalId);
@@ -729,6 +790,8 @@ export function PlayRegistrationClient({
     portal,
     referralCode,
     userCallAuth,
+    activeVerificationChannel,
+    userCallTerminal,
   ]);
 
   async function refreshDirectoryByLocation(
@@ -857,6 +920,9 @@ export function PlayRegistrationClient({
     }
 
     setStartingTelegramAuth(true);
+    userCallGeneration.current += 1;
+    setUserCallError(null);
+    setUserCallInstructionOpen(false);
     setMessage(null);
     setChallenge(null);
     setTelegramAuth(null);
@@ -906,6 +972,11 @@ export function PlayRegistrationClient({
   }
 
   async function startUserCallAuth() {
+    if (userCallStartInFlight.current) return;
+    if (!gameConsentAccepted) {
+      setMessage("Подтвердите согласие, чтобы начать вход по звонку.");
+      return;
+    }
     if (!authenticationContextClub) {
       setMessage("Сейчас нет клубов с активной геймификацией.");
       return;
@@ -917,13 +988,14 @@ export function PlayRegistrationClient({
       return;
     }
 
+    userCallStartInFlight.current = true;
+    const generation = ++userCallGeneration.current;
     setStartingUserCallAuth(true);
+    setUserCallError(null);
     setMessage(null);
     setChallenge(null);
     setTelegramAuth(null);
     setTelegramAuthStatus(null);
-    setUserCallAuth(null);
-    setUserCallAuthStatus(null);
     setIncomingCallLast4(null);
     setIncomingCallLast4Code("");
     setCode("");
@@ -931,11 +1003,14 @@ export function PlayRegistrationClient({
     setLangameMatch(null);
     setLocalGameMatch(null);
 
+    const startController = new AbortController();
+    const startTimeout = setTimeout(() => startController.abort(), 15_000);
     try {
       const response = await fetch(
         `${clubApiPath(authenticationContextClub)}/user-call-auth/start`,
         {
           method: "POST",
+          signal: startController.signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ phone: phoneValue, gameConsentAccepted }),
         },
@@ -947,6 +1022,10 @@ export function PlayRegistrationClient({
 
       const data =
         (await response.json()) as GuestPortalUserCallAuthStartResponse;
+      if (generation !== userCallGeneration.current) return;
+      if (!Number.isFinite(Date.parse(data.expiresAt))) {
+        throw new Error("Не удалось получить срок проверки звонка. Повторите попытку.");
+      }
       setUserCallAuth(data);
       setUserCallAuthStatus({
         status: "PENDING",
@@ -957,12 +1036,20 @@ export function PlayRegistrationClient({
       setMessage(data.message);
       setUserCallInstructionOpen(true);
     } catch (error) {
+      if (generation !== userCallGeneration.current) return;
       setMessage(
         error instanceof Error
           ? error.message
           : "Не удалось создать вход по звонку.",
       );
+      setUserCallError("Не удалось начать новую попытку. Повторите запрос или выберите Telegram.");
+      if (userCallAuth) setUserCallAuthStatus({
+        status: "FAILED", profileId: null, phoneMasked: userCallAuth.phoneMasked,
+        message: "Не удалось начать новую попытку. Повторите запрос или выберите Telegram.",
+      });
     } finally {
+      clearTimeout(startTimeout);
+      userCallStartInFlight.current = false;
       setStartingUserCallAuth(false);
     }
   }
@@ -1429,7 +1516,7 @@ export function PlayRegistrationClient({
                     <VerificationPlanPanel
                       activeChannel={activeVerificationChannel}
                       eyebrow={isGameAuth ? "Авторизация" : undefined}
-                      onSelect={setActiveVerificationChannel}
+                      onSelect={selectVerificationChannel}
                       title={isGameAuth ? "Способ входа" : undefined}
                       variant={isGameAuth ? "game-auth" : "default"}
                       verification={visibleVerification}
@@ -1497,6 +1584,7 @@ export function PlayRegistrationClient({
                             isPolling={isPollingUserCallAuth}
                             isStarting={isStartingUserCallAuth}
                             onStart={startUserCallAuth}
+                            onShowInstructions={() => setUserCallInstructionOpen(true)}
                             userCallAuth={userCallAuth}
                             userCallAuthStatus={userCallAuthStatus}
                             verification={visibleVerification}
@@ -1661,15 +1749,25 @@ export function PlayRegistrationClient({
           <LegalEntityInfo compact className="lp-game-auth-legal" />
         ) : null}
       </div>
-      {userCallAuth &&
-      isUserCallInstructionOpen &&
-      (!userCallAuthStatus || userCallAuthStatus.status === "PENDING") ? (
+      {userCallAuth && isUserCallInstructionOpen && activeVerificationChannel === "USER_CALL" ? (
         <UserCallInstructionModal
+          key={userCallAuth.challengeId}
           callHref={userCallAuth.callHref}
           callNumber={userCallAuth.callNumber}
           freeCall={userCallAuth.freeCall}
           onClose={() => setUserCallInstructionOpen(false)}
           phoneMasked={userCallAuth.phoneMasked}
+          expiresAt={userCallAuth.expiresAt}
+          status={userCallAuthStatus?.status ?? "PENDING"}
+          statusMessage={userCallAuthStatus?.message}
+          pollError={userCallError}
+          isStarting={isStartingUserCallAuth}
+          canRetry={gameConsentAccepted && canUsePhoneAuth}
+          onRetry={() => void startUserCallAuth()}
+          onUseTelegram={telegramReady && gameConsentAccepted ? () => {
+            selectVerificationChannel("TELEGRAM_BOT");
+            void startTelegramAuth();
+          } : undefined}
         />
       ) : null}
       {isGameAuth ? <style>{gameAuthCss}</style> : null}
@@ -2243,6 +2341,7 @@ function UserCallAuthPanel({
   isStarting,
   isPolling,
   onStart,
+  onShowInstructions,
 }: {
   verification: GuestPortalGamificationClubDirectory["verification"];
   userCallAuth: GuestPortalUserCallAuthStartResponse | null;
@@ -2251,6 +2350,7 @@ function UserCallAuthPanel({
   isStarting: boolean;
   isPolling: boolean;
   onStart: () => void;
+  onShowInstructions: () => void;
 }) {
   const userCallOption = verification.options.find(
     (option) => option.channel === "USER_CALL",
@@ -2285,13 +2385,14 @@ function UserCallAuthPanel({
       ) : null}
 
       <div className="lp-game-auth-channel-actions mt-3">
-        {userCallAuth?.callHref ? (
-          <a
+        {userCallAuth?.callHref && userCallAuthStatus?.status === "PENDING" ? (
+          <button
             className="lp-game-auth-call-action lp-game-auth-channel-primary flex min-h-11 w-full items-center justify-center rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
-            href={userCallAuth.callHref}
+            type="button"
+            onClick={onShowInstructions}
           >
-            Открыть номер для входа: {userCallAuth.callNumber}
-          </a>
+            Показать номер для входа
+          </button>
         ) : (
           <button
             className="lp-game-auth-channel-primary min-h-11 w-full rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
@@ -2326,100 +2427,6 @@ function UserCallAuthPanel({
           попробуйте другой доступный способ или повторите позже.
         </p>
       ) : null}
-    </div>
-  );
-}
-
-function UserCallInstructionModal({
-  callHref,
-  callNumber,
-  freeCall,
-  phoneMasked,
-  onClose,
-}: {
-  callHref: string;
-  callNumber: string;
-  freeCall: boolean;
-  phoneMasked: string;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  const numberLabel = freeCall ? "Номер для звонка" : "Номер для входа";
-  const title = freeCall
-    ? "Звони на бесплатный номер"
-    : "Звони на номер для входа";
-  const description = freeCall
-    ? "Для авторизации нужно совершить звонок на бесплатный номер с указанного телефона. После проверки звонок будет сброшен. Никаких цифр вводить не нужно, вход будет произведен автоматически."
-    : "Для авторизации нужно совершить звонок на указанный номер с выбранного телефона. После проверки звонок будет сброшен. Никаких цифр вводить не нужно, вход будет произведен автоматически.";
-
-  return (
-    <div
-      aria-describedby="user-call-auth-description"
-      aria-labelledby="user-call-auth-title"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 py-6 backdrop-blur-sm"
-      onClick={onClose}
-      role="dialog"
-    >
-      <div
-        className="relative w-full max-w-[560px] border border-cyan-300/10 bg-[#050c0e] px-5 py-6 text-white shadow-2xl shadow-black/50 sm:px-7 sm:py-7"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <button
-          aria-label="Закрыть окно"
-          className="absolute right-4 top-4 flex size-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-xl font-bold text-slate-300 transition hover:border-cyan-300/40 hover:text-white"
-          onClick={onClose}
-          type="button"
-        >
-          ×
-        </button>
-
-        <p className="pr-12 text-xs font-black uppercase tracking-[0.18em] text-cyan-200">
-          Вход по звонку
-        </p>
-        <h2
-          className="mt-3 pr-12 text-3xl font-black leading-tight text-white sm:text-[32px]"
-          id="user-call-auth-title"
-        >
-          {title}
-        </h2>
-
-        <p
-          className="mt-9 max-w-[480px] text-base font-bold leading-5 text-white"
-          id="user-call-auth-description"
-        >
-          {description}
-        </p>
-
-        <dl className="mt-7 grid grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-3 text-base">
-          <dt className="font-black text-slate-600">{numberLabel}</dt>
-          <dd className="text-right font-black text-white">{callNumber}</dd>
-          <dt className="font-black text-slate-600">Ваш телефон</dt>
-          <dd className="text-right font-black text-white">{phoneMasked}</dd>
-        </dl>
-
-        <p className="mt-8 text-center text-[clamp(34px,9vw,52px)] font-black leading-none text-cyan-300">
-          {callNumber}
-        </p>
-
-        <a
-          className="mt-6 flex min-h-12 w-full items-center justify-center rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200 sm:hidden"
-          href={callHref}
-          onClick={onClose}
-        >
-          Позвонить сейчас
-        </a>
-      </div>
     </div>
   );
 }

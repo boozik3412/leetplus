@@ -7,11 +7,13 @@ publishes the combined receipt only after guard cleanup succeeds.
 import concurrent.futures
 import datetime as dt
 import hashlib
+import http.client
 import json
 import math
 import os
 import re
 import secrets
+import socket
 import subprocess
 import threading
 import time
@@ -104,12 +106,34 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+class CorpusRequestFailure(RuntimeError):
+    def __init__(self, code, phase, label):
+        self.code, self.phase, self.label = code, phase, label
+        super().__init__(f'Clone corpus HTTP failure: {code} at {phase}: {label}')
+
+
+def request_failure_code(error):
+    cause = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(cause, (TimeoutError, socket.timeout)):
+        return 'TIMEOUT'
+    if isinstance(cause, (http.client.RemoteDisconnected, ConnectionResetError, BrokenPipeError)):
+        return 'CONNECTION_CLOSED'
+    if isinstance(cause, UnicodeDecodeError):
+        return 'INVALID_ENCODING'
+    if isinstance(cause, json.JSONDecodeError):
+        return 'INVALID_JSON'
+    if isinstance(cause, (ConnectionError, urllib.error.URLError, OSError)) or isinstance(error, urllib.error.URLError):
+        return 'CONNECTION_FAILED'
+    return 'UNCLASSIFIED_REQUEST_FAILURE'
+
+
 class Corpus:
     def __init__(self, guard, native):
         self.guard, self.native = guard, native
         self.requests = []
         self.lock = threading.Lock()
         self.database_id = None
+        self.context_validated = False
 
     def command(self, args, data=None):
         self.guard.check()
@@ -163,6 +187,27 @@ class Corpus:
                 demand(limits['Memory'] == 6 * 1024 ** 3 and limits['MemorySwap'] == 8 * 1024 ** 3 and
                        limits['NanoCpus'] == 2_000_000_000 and limits['PidsLimit'] == 256,
                        'API6GiB resource profile differs')
+        self.context_validated = True
+
+    def publish_failure(self, error):
+        demand(self.context_validated, 'Only a validated clone may publish failure evidence')
+        directory = ROOT / 'evidence'
+        info = directory.lstat()
+        demand(directory.resolve() == directory and directory.is_dir() and info.st_uid == 0 and
+               not info.st_mode & 0o022, 'Untrusted clone evidence directory')
+        # Never serialize exception text, URLs, headers, SQL or response bodies.
+        evidence = {'decision': 'FAIL', 'contract': 'LEETPLUS_RESOURCE_CORPUS_FAILURE_V1',
+                    'releaseSha': self.native['releaseSha'], 'sourceDumpSha256': self.native['sourceDumpSha256'],
+                    'failureCode': error.code if isinstance(error, CorpusRequestFailure) else 'CORPUS_OR_GUARD_FAILED',
+                    'requestFailure': {'code': error.code, 'phase': error.phase, 'label': error.label}
+                    if isinstance(error, CorpusRequestFailure) else None,
+                    'requests': self.requests, 'requestCount': len(self.requests)}
+        path = directory / ('corpus-failure-' + uuid.uuid4().hex + '.json')
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write((json.dumps(evidence, indent=2) + '\n').encode())
+            stream.flush()
+            os.fsync(stream.fileno())
 
     def request(self, port, route, label, token=None, body=None, web=False):
         self.guard.check()
@@ -179,29 +224,42 @@ class Corpus:
                                      data=None if body is None else json.dumps(body).encode())
         started = time.monotonic()
         status, size = None, 0
+        phase, failure_code = 'OPEN_HEADERS', None
         try:
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
             with opener.open(req, timeout=20) as response:
+                status = response.status
+                phase = 'READ_BODY'
                 raw = response.read(MAX_RESPONSE_BYTES + 1)
-                size, status = len(raw), response.status
-                demand(size <= MAX_RESPONSE_BYTES, 'Oversized corpus response')
+                size = len(raw)
+                phase = 'CHECK_SIZE'
+                if size > MAX_RESPONSE_BYTES:
+                    raise CorpusRequestFailure('RESPONSE_TOO_LARGE', phase, label)
+                phase = 'DECODE_TEXT' if web else 'DECODE_JSON'
                 value = raw.decode('utf-8') if web else json.loads(raw)
+                phase = 'COMPLETE'
                 return status, value
         except urllib.error.HTTPError as error:
             status = error.code
             error.close()
             return status, None
-        except Exception:
-            raise RuntimeError('Clone corpus HTTP request failed: ' + label) from None
+        except CorpusRequestFailure as error:
+            failure_code = error.code
+            raise
+        except Exception as error:
+            failure_code = request_failure_code(error)
+            raise CorpusRequestFailure(failure_code, phase, label) from None
         finally:
             with self.lock:
                 self.requests.append({'label': label, 'port': port, 'status': status,
-                                      'responseBytes': size, 'durationMs': round((time.monotonic() - started) * 1000)})
+                                      'responseBytes': size, 'durationMs': round((time.monotonic() - started) * 1000),
+                                      'phase': phase, 'failureCode': failure_code, 'socketTimeoutSeconds': 20})
             self.guard.check()
 
     def ok(self, port, route, label, token=None, web=False):
         status, value = self.request(port, route, label, token, web=web)
-        demand(status == 200, 'Corpus expected200: ' + label)
+        if status != 200:
+            raise CorpusRequestFailure('UNEXPECTED_HTTP_STATUS', 'STATUS', label)
         return value
 
     def readiness(self, port, label):
@@ -258,6 +316,14 @@ def encoded_query(stores, start, end, cutoff):
 def run_corpus(guard, native_result):
     corpus = Corpus(guard, native_result)
     corpus.validate_context()
+    try:
+        return _run_corpus(guard, native_result, corpus)
+    except Exception as error:
+        corpus.publish_failure(error)
+        raise
+
+
+def _run_corpus(guard, native_result, corpus):
     guard.mark('executive-fixture')
     before = json.loads(corpus.sql(COUNTS))
     actor = json.loads(corpus.sql('SELECT row_to_json(x) FROM (SELECT u.id,u.email,u."tenantId" '

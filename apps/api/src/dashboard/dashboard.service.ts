@@ -865,6 +865,14 @@ export class DashboardService {
       (session): session is typeof session & { startedAt: Date } =>
         session.startedAt !== null,
     );
+    // The network, club and day projections share the same request scope.
+    // Resolve each observed session and its club-local day once, without
+    // retaining identities or time-zone formatters across requests/tenants.
+    const visitProjection = new WeakMap<
+      object,
+      { storeId: string | null; localDate?: string }
+    >();
+    const visitDateFormatters = new Map<string, Intl.DateTimeFormat>();
     const visitsFor = (
       period: { from: string; to: string },
       storeId?: string,
@@ -877,6 +885,8 @@ export class DashboardService {
         storeTimeZones: product.scope.storeTimeZones,
         period,
         now,
+        projection: visitProjection,
+        dateFormatters: visitDateFormatters,
       });
     const metricsFor = (
       productMetric: ExecutiveMetric,
@@ -1245,6 +1255,8 @@ export class DashboardService {
     storeTimeZones: Record<string, string>;
     period: { from: string; to: string };
     now: string;
+    projection: WeakMap<object, { storeId: string | null; localDate?: string }>;
+    dateFormatters: Map<string, Intl.DateTimeFormat>;
   }): ExecutiveMetric {
     const selectedStoreIds = new Set(input.selectedStoreIds);
     const topologyStoreIds = new Set(input.topology.map((store) => store.id));
@@ -1252,20 +1264,30 @@ export class DashboardService {
     let hasUnresolvedBinding = false;
 
     input.sessions.forEach((session) => {
-      const resolvedStoreId =
-        session.storeId && topologyStoreIds.has(session.storeId)
-          ? session.storeId
-          : resolveGuestSessionStore({
-              tenantId: input.tenantId,
-              externalDomain: session.externalDomain,
-              externalClubId: session.externalClubId,
-              stores: input.topology,
-            }).storeId;
+      let projected = input.projection.get(session);
+      if (!projected) {
+        projected = {
+          storeId:
+            session.storeId && topologyStoreIds.has(session.storeId)
+              ? session.storeId
+              : resolveGuestSessionStore({
+                  tenantId: input.tenantId,
+                  externalDomain: session.externalDomain,
+                  externalClubId: session.externalClubId,
+                  stores: input.topology,
+                }).storeId,
+        };
+        input.projection.set(session, projected);
+      }
+      const resolvedStoreId = projected.storeId;
       if (resolvedStoreId && selectedStoreIds.has(resolvedStoreId)) {
-        const localDate = this.executiveLocalDate(
-          session.startedAt,
-          input.storeTimeZones[resolvedStoreId] ?? 'UTC',
-        );
+        const localDate =
+          projected.localDate ??
+          (projected.localDate = this.executiveLocalDate(
+            session.startedAt,
+            input.storeTimeZones[resolvedStoreId] ?? 'UTC',
+            input.dateFormatters,
+          ));
         if (localDate >= input.period.from && localDate <= input.period.to) {
           sessions.push({ ...session, storeId: resolvedStoreId });
         }
@@ -1497,13 +1519,22 @@ export class DashboardService {
     });
   }
 
-  private executiveLocalDate(value: Date, timeZone: string) {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(value);
+  private executiveLocalDate(
+    value: Date,
+    timeZone: string,
+    formatters: Map<string, Intl.DateTimeFormat>,
+  ) {
+    let formatter = formatters.get(timeZone);
+    if (!formatter) {
+      formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      formatters.set(timeZone, formatter);
+    }
+    const parts = formatter.formatToParts(value);
     const values = Object.fromEntries(
       parts
         .filter((part) => part.type !== 'literal')

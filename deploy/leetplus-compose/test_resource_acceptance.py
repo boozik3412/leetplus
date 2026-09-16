@@ -24,6 +24,19 @@ wrapper = load('resource_wrapper_test', 'run-resource-rehearsal.py')
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_guarded_cold_start_waits_for_web_as_well_as_api(self):
+        clock = [0]
+        guard = types.SimpleNamespace(check=mock.Mock())
+        sha = 'a' * 40
+        ready = (200, {'ok': True, 'release': {'sha': sha}})
+        responses = [ready, ConnectionRefusedError(), ready, (200, {'release': {'sha': sha}})]
+        with mock.patch.object(acceptance, 'request', side_effect=responses) as request, \
+             mock.patch.object(acceptance.time, 'monotonic', side_effect=lambda: clock[0]), \
+             mock.patch.object(acceptance.time, 'sleep', side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)):
+            acceptance.wait_slot_ready(24100, 23100, sha, guard)
+        self.assertEqual(request.call_count, 4)
+        self.assertEqual(clock[0], 1)
+
     def exercise(self, fail=False, cgroup=None):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

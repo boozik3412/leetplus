@@ -60,6 +60,29 @@ def jwt(payload, key):
     return (body + b'.' + base64.urlsafe_b64encode(hmac.new(key.encode(), body, hashlib.sha256).digest()).rstrip(b'=')).decode()
 
 
+def wait_slot_ready(api_port, web_port, release_sha, memory_guard=None):
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        if memory_guard:
+            memory_guard.check()
+        try:
+            status, ready = request(api_port, '/health/ready')
+            if status == 200 and ready.get('ok') and ready['release']['sha'] == release_sha:
+                # The guarded window owns cold start, including Next.js. An
+                # already-ready API does not establish Web readiness.
+                if memory_guard:
+                    web_status, identity = request(web_port, '/api/release-identity')
+                    if web_status != 200 or identity['release']['sha'] != release_sha:
+                        time.sleep(1)
+                        continue
+                    memory_guard.check()
+                return
+        except Exception:
+            pass
+        time.sleep(1)
+    raise ValueError('Rehearsal API/Web did not become ready')
+
+
 def accept(memory_guard=None):
     if os.getuid() != 0 or not json.loads((ROOT / 'preparation.json').read_text()).get('rehearsal'):
         raise ValueError('Isolated rehearsal preparation required')
@@ -98,19 +121,7 @@ def accept(memory_guard=None):
     for slot, api_port, web_port in [('blue', 24100, 23100), ('green', 24200, 23200)]:
         if memory_guard:
             memory_guard.check()
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            if memory_guard:
-                memory_guard.check()
-            try:
-                status, ready = request(api_port, '/health/ready')
-                if status == 200 and ready.get('ok') and ready['release']['sha'] == restore['releaseSha']:
-                    break
-            except Exception:
-                pass
-            time.sleep(1)
-        else:
-            raise ValueError('Rehearsal API did not become ready')
+        wait_slot_ready(api_port, web_port, restore['releaseSha'], memory_guard)
         status, identity = request(web_port, '/api/release-identity')
         if status != 200 or identity['release']['sha'] != restore['releaseSha']:
             raise ValueError('Rehearsal Web identity mismatch')

@@ -4,6 +4,7 @@ import importlib.util
 import json
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -101,9 +102,71 @@ class BoundaryTests(unittest.TestCase):
         opener = mock.Mock()
         opener.open.return_value = Response(b'PRIVATE' * 10)
         with mock.patch.object(corpus, 'MAX_RESPONSE_BYTES', 8), mock.patch.object(corpus.urllib.request, 'build_opener', return_value=opener):
-            with self.assertRaisesRegex(RuntimeError, 'Clone corpus HTTP request failed: oversized'):
+            with self.assertRaisesRegex(RuntimeError, 'RESPONSE_TOO_LARGE at CHECK_SIZE: oversized'):
                 runner.request(24100, '/health/ready', 'oversized')
         self.assertNotIn('PRIVATE', json.dumps(runner.requests))
+
+    def test_http_failures_keep_safe_phase_and_status_without_exception_text(self):
+        cases = [
+            ('open', TimeoutError('sensitive-private-value'), 'TIMEOUT', 'OPEN_HEADERS', None),
+            ('read', TimeoutError('sensitive-private-value'), 'TIMEOUT', 'READ_BODY', 200),
+            ('open', corpus.urllib.error.URLError(TimeoutError('sensitive-private-value')), 'TIMEOUT', 'OPEN_HEADERS', None),
+            ('read', ConnectionResetError('sensitive-private-value'), 'CONNECTION_CLOSED', 'READ_BODY', 200),
+            ('json', None, 'INVALID_JSON', 'DECODE_JSON', 200),
+        ]
+        for location, error, code, phase, expected_status in cases:
+            runner = corpus.Corpus(Guard(), native())
+            opener = mock.Mock()
+            response = Response(b'{invalid-sensitive-private-value')
+            if location == 'open':
+                opener.open.side_effect = error
+            else:
+                opener.open.return_value = response
+                if location == 'read':
+                    response.read = mock.Mock(side_effect=error)
+            with self.subTest(location=location, code=code), mock.patch.object(corpus.urllib.request, 'build_opener', return_value=opener):
+                with self.assertRaises(corpus.CorpusRequestFailure) as caught:
+                    runner.request(24100, '/health/ready', 'probe', 'sensitive-private-value')
+            self.assertEqual((caught.exception.code, caught.exception.phase), (code, phase))
+            self.assertEqual(runner.requests[-1]['status'], expected_status)
+            self.assertEqual(runner.requests[-1]['failureCode'], code)
+            self.assertEqual(runner.requests[-1]['socketTimeoutSeconds'], 20)
+            self.assertNotIn('sensitive-private-value', str(caught.exception) + json.dumps(runner.requests))
+
+    def test_expected_auth_denials_are_not_transport_failures(self):
+        for status in [401, 403]:
+            runner = corpus.Corpus(Guard(), native())
+            opener = mock.Mock()
+            opener.open.side_effect = corpus.urllib.error.HTTPError('http://private.invalid', status, 'denied', {}, None)
+            with mock.patch.object(corpus.urllib.request, 'build_opener', return_value=opener):
+                self.assertEqual(runner.request(24100, '/dashboard/executive-summary', 'denial'), (status, None))
+            self.assertIsNone(runner.requests[-1]['failureCode'])
+            self.assertNotIn('private.invalid', json.dumps(runner.requests))
+
+    def test_failure_evidence_is_exclusive_private_and_only_for_a_validated_clone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            evidence = root / 'evidence'
+            evidence.mkdir()
+            runner = corpus.Corpus(Guard(), native())
+            runner.requests = [{'label': 'summary', 'status': 200, 'failureCode': 'TIMEOUT'}]
+            original_lstat = Path.lstat
+            def trusted_fixture_stat(path, *args, **kwargs):
+                return SimpleNamespace(st_uid=0, st_mode=0o40700) if path == evidence else original_lstat(path, *args, **kwargs)
+            with mock.patch.object(corpus, 'ROOT', root), mock.patch.object(Path, 'lstat', autospec=True, side_effect=trusted_fixture_stat):
+                with self.assertRaisesRegex(ValueError, 'validated clone'):
+                    runner.publish_failure(corpus.CorpusRequestFailure('TIMEOUT', 'READ_BODY', 'summary'))
+                runner.context_validated = True
+                # Windows does not expose O_NOFOLLOW; the actual native caller
+                # is Linux. The file-content/no-secret check is portable.
+                with mock.patch.object(corpus.os, 'O_NOFOLLOW', getattr(corpus.os, 'O_NOFOLLOW', 0), create=True):
+                    runner.publish_failure(corpus.CorpusRequestFailure('TIMEOUT', 'READ_BODY', 'summary'))
+            files = list(evidence.glob('corpus-failure-*.json'))
+            self.assertEqual(len(files), 1)
+            result = json.loads(files[0].read_text())
+            self.assertEqual(result['failureCode'], 'TIMEOUT')
+            self.assertEqual(result['releaseSha'], SHA)
+            self.assertEqual(result['requestCount'], 1)
 
     def test_null_partial_and_comparison_arithmetic(self):
         valid = metrics()

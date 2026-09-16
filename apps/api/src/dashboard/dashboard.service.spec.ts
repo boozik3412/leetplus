@@ -5,6 +5,8 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { bindReceiptIdentityToSourceHash } from '../common/receipt-source-identity';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 
+const nativeDateTimeFormat = Intl.DateTimeFormat;
+
 type DashboardPrismaMock = {
   tenant: {
     findUnique: jest.Mock;
@@ -971,6 +973,94 @@ describe('DashboardService', () => {
         productRevenuePercentDelta: 200,
       },
     ]);
+  });
+
+  it('formats each observed session day once for a monthly chart and recalculates changed zones on the next request', async () => {
+    jest.setSystemTime(new Date('2026-09-16T12:00:00.000Z'));
+    const stores = [
+      {
+        id: 'store-a',
+        name: 'Клуб A',
+        tenantId: 'tenant-demo',
+        externalDomain: 'domain-a',
+        externalClubId: 'a',
+        timeZone: 'Europe/Moscow',
+        isActive: true,
+      },
+      {
+        id: 'store-b',
+        name: 'Клуб B',
+        tenantId: 'tenant-demo',
+        externalDomain: 'domain-b',
+        externalClubId: 'b',
+        timeZone: 'UTC',
+        isActive: true,
+      },
+    ];
+    prisma.store.findMany.mockResolvedValue(stores);
+    prisma.salesFact.findMany.mockResolvedValue([]);
+    prisma.guestSession.findMany.mockResolvedValue([
+      {
+        id: 'a-first',
+        storeId: 'store-a',
+        externalDomain: 'domain-a',
+        externalClubId: 'a',
+        externalSessionId: 'a-first',
+        startedAt: new Date('2026-08-17T21:30:00.000Z'),
+      },
+      {
+        id: 'a-last',
+        storeId: 'store-a',
+        externalDomain: 'domain-a',
+        externalClubId: 'a',
+        externalSessionId: 'a-last',
+        startedAt: new Date('2026-09-15T21:30:00.000Z'),
+      },
+      {
+        id: 'b-last',
+        storeId: 'store-b',
+        externalDomain: 'domain-b',
+        externalClubId: 'b',
+        externalSessionId: 'b-last',
+        startedAt: new Date('2026-09-15T21:30:00.000Z'),
+      },
+    ]);
+    const query = {
+      period: 'custom' as const,
+      dateFrom: '2026-08-17',
+      dateTo: '2026-09-15',
+      asOf: '2026-09-16T00:00:00.000Z',
+      comparison: true,
+    };
+    // Fake timers return plain wrapper objects. Observe the native formatter
+    // prototype captured before fake timers were installed for this test.
+    const formats = jest.spyOn(nativeDateTimeFormat.prototype, 'formatToParts');
+    try {
+      const first = await service.getExecutiveSummary(user, query);
+      expect(first.days).toHaveLength(30);
+      expect(first.metrics.visits).toMatchObject({
+        value: 2,
+        state: 'PARTIAL',
+      });
+      expect(first.days[0].metrics.visits).toMatchObject({
+        value: null,
+        state: 'MISSING',
+      });
+      expect(first.days[1].metrics.visits.value).toBe(1);
+      expect(formats).toHaveBeenCalledTimes(3);
+
+      // The mock reuses the same session objects across separate requests.
+      // Neither their old local days nor the old formatter may leak across them.
+      stores[0].timeZone = 'UTC';
+      formats.mockClear();
+      const next = await service.getExecutiveSummary(user, query);
+      expect(next.metrics.visits).toMatchObject({ value: 3, state: 'PARTIAL' });
+      expect(next.days[0].metrics.visits.value).toBe(1);
+      expect(next.days[29].metrics.visits.value).toBe(2);
+      expect(formats).toHaveBeenCalledTimes(3);
+    } finally {
+      formats.mockRestore();
+    }
   });
 
   it('keeps the accepted HTTP comparison=false scope and metrics without a previous interval', async () => {

@@ -19,6 +19,12 @@ export type AssortmentHealthLoaderQuery = {
   coveragePeriod?: { from: Date; to: Date };
 };
 
+export type AssortmentSalesCoverageQuery = {
+  tenantId: string;
+  storeIds: readonly string[];
+  period: { from: Date; to: Date };
+};
+
 export type AssortmentSalesDayEvidence = {
   storeId: string;
   date: Date;
@@ -73,6 +79,43 @@ export type AssortmentHealthLoaderResult = {
 @Injectable()
 export class AssortmentHealthLoaderService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async loadSalesCoverage(
+    query: AssortmentSalesCoverageQuery,
+  ): Promise<{ salesDayEvidence: AssortmentSalesDayEvidence[] }> {
+    const [stores, records] = await Promise.all([
+      this.prisma.store.findMany({
+        where: {
+          tenantId: query.tenantId,
+          isActive: true,
+          id: { in: [...query.storeIds] },
+        },
+        select: { id: true, externalDomain: true },
+      }),
+      this.prisma.dailyDataCoverage.findMany({
+        where: {
+          tenantId: query.tenantId,
+          scope: DailyDataCoverageScope.BUSINESS_FACTS,
+          businessDate: { gte: query.period.from, lte: query.period.to },
+        },
+        select: {
+          businessDate: true,
+          status: true,
+          sourceCounts: true,
+          summary: true,
+        },
+      }),
+    ]);
+
+    return {
+      salesDayEvidence: this.salesDayEvidence({
+        stores,
+        records,
+        from: query.period.from,
+        to: query.period.to,
+      }),
+    };
+  }
 
   async load(
     query: AssortmentHealthLoaderQuery,

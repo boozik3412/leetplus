@@ -53,6 +53,11 @@ export type StaffReadinessReportQuery = {
 };
 
 export type StaffReadinessReport = {
+  priorityCoverage?: {
+    employeesComplete: boolean;
+    coursesComplete: boolean;
+    regulationsComplete: boolean;
+  };
   filters: Omit<StaffTrainingProfileReport['filters'], 'status'> & {
     status: StaffReadinessStatusFilter;
   };
@@ -194,6 +199,13 @@ export class StaffReadinessReportService {
       },
       summary: this.buildSummary(rows),
       canManageReadiness: profileReport.canManageTraining,
+      priorityCoverage: {
+        employeesComplete:
+          profileReport.priorityCoverage?.employeesComplete === true,
+        coursesComplete:
+          profileReport.priorityCoverage?.coursesComplete === true,
+        regulationsComplete: regulations.length < 400,
+      },
       rows,
       users: profileReport.users,
       stores: profileReport.stores,

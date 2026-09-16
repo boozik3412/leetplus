@@ -9,6 +9,13 @@ Interrupted/expired handoff сохраняет только доказанное
 pending network install доступен лишь штатному boot unit с signed app history.
 [Порядок переключения и проверки](../deployment/network-refresh-control-handoff.md).
 
+Source repair16.09: подготовленный controller d7d799dd не активирован — preflight
+выявил случайный порядок Docker Mounts в configuration fingerprint. Исправление
+стабилизирует только порядок mount collection/ключей objects и сохраняет все
+поля, остальные массивы и проверки реальных изменений. Старый plan не правится;
+нужны новый exact-main admission и native plan с отдельным GO. Время оператора
+и сервера проверяется до подписи; runtime/control/data остаются прежними.
+
 Source-only USER_CALL modal follow-up15.09: видимые countdown/error/expiry,
 явный retry и переход к READY Telegram. Backend phone proof/provider/TTL,
 cookie и worker scope неизменны; новая production-выкладка этим описанием
@@ -109,6 +116,37 @@ Retention и repeat restore не выполнялись; deployment fully closed
 Actual release, контрольные суммы, final backup/restore, DNS и границы возврата:
 [отчёт переноса](../deployment/docker-migration-completion-2026-09-11.md).
 Физическое разделение corporate/guest процессов остаётся отдельным проектом.
+
+## Executive dashboard — source-only candidate, 15.09.2026
+
+Corporate `/dashboard` source содержит отдельные read-only executive summary и
+operations projections. Это не deployed release и не external-beta GO: актуальные
+serving SHA/control generation подтверждает владелец production; source-only кандидат
+не меняет Prisma schema, DB roles, tenant authority, worker permits, provider
+calls, network policy, rewards или data baseline.
+
+Для каждого GET сервер заново ограничивает tenant/store scope; response несёт
+только accepted store universe и period/cutoff, а tampered or foreign store
+selection остаётся forbidden. Primary товарные продажи имеют explicit
+store-day coverage. Sessions могут показать только observed, доказуемо
+привязанные visits как `PARTIAL`; отсутствие таких сессий не становится
+подтверждённым нулём. Сервисная выручка, реальные topups, capacity и точные
+dependent ratios намеренно остаются `MISSING`, пока для них нет independent
+saved-data proof.
+
+Локальный Chromium fixture использует short-lived process-local synthetic JWT
+и loopback-only API. Его условные 40 000 ₽/14 000 ₽/320/125/35%/20.8% нужны
+для UI behaviour, scope, comparison и error isolation; это не ordinary user
+login, не real-session acceptance и не production evidence. Release admission,
+fresh real-user canary и отдельный GO для future deployment сохраняются.
+
+Дополнение приоритетов15.09 также source-only: отдельные сигналы среднего
+товарного чека и дохода на визит, текущие задачи/чек-листы/обучение/регламенты,
+low-stock и товары без продаж. Два новых staff read route сохраняют NETWORK и
+feature admission; сведения об обучении при ограниченном покрытии не становятся
+точным нулём. Schema/provider/worker/controller effects отсутствуют. Serving
+controller нельзя вывести из staged плана или из смены source HEAD.
+[Контракт, обзор блоков и локальная проверка](../executive-dashboard-priorities.md).
 
 ## История подготовки до завершения CURRENT191
 

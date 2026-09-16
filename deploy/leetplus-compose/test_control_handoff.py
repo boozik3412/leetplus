@@ -3,6 +3,7 @@
 import contextlib
 import datetime
 import importlib.util
+import itertools
 import json
 import os
 import stat
@@ -71,6 +72,141 @@ class SecureFileTests(unittest.TestCase):
              mock.patch.object(handoff.os, "close"):
             with self.assertRaisesRegex(ValueError, "Untrusted file"):
                 handoff.secure(subject)
+
+
+class ContainerConfigurationFingerprintTests(unittest.TestCase):
+    def item(self, mounts, *, config=None, host_config=None):
+        return {
+            "Config": config if config is not None else {"Labels": {"tier": "api"}},
+            "HostConfig": host_config if host_config is not None else {"NetworkMode": "bridge"},
+            "Mounts": mounts,
+        }
+
+    def test_mount_permutations_and_mapping_key_order_have_one_fingerprint(self):
+        mounts = [
+            {"Destination": "/app/config", "Source": "/srv/config", "Type": "bind", "RW": False},
+            {"Destination": "/app/data", "Source": "data-volume", "Type": "volume", "RW": True},
+            {"Destination": "/run/secrets", "Source": "/srv/secrets", "Type": "bind", "Propagation": "rprivate"},
+        ]
+        reordered_mapping = [
+            {"RW": False, "Type": "bind", "Source": "/srv/config", "Destination": "/app/config"},
+            {"RW": True, "Type": "volume", "Destination": "/app/data", "Source": "data-volume"},
+            {"Propagation": "rprivate", "Source": "/srv/secrets", "Destination": "/run/secrets", "Type": "bind"},
+        ]
+        fingerprints = {
+            handoff.container_configuration_sha256(self.item(list(permutation)))
+            for permutation in itertools.permutations(mounts)
+        }
+        fingerprints.add(handoff.container_configuration_sha256(self.item(reordered_mapping)))
+        self.assertEqual(len(fingerprints), 1)
+
+    def test_actual_mount_configuration_changes_change_fingerprint(self):
+        baseline_mounts = [{
+            "Destination": "/app/data", "Source": "/srv/data", "Type": "bind",
+            "RW": True, "Propagation": "rprivate", "NewField": "present",
+        }]
+        baseline = handoff.container_configuration_sha256(self.item(baseline_mounts))
+        variants = [
+            [{**baseline_mounts[0], "Source": "/srv/other"}],
+            [{**baseline_mounts[0], "Type": "volume"}],
+            [{**baseline_mounts[0], "RW": False}],
+            [{**baseline_mounts[0], "Propagation": "rshared"}],
+            [{key: value for key, value in baseline_mounts[0].items() if key != "NewField"}],
+            [{**baseline_mounts[0], "NewField": "changed"}],
+        ]
+        for mounts in variants:
+            with self.subTest(mounts=mounts):
+                self.assertNotEqual(baseline, handoff.container_configuration_sha256(self.item(mounts)))
+
+    def test_config_and_hostconfig_changes_change_fingerprint(self):
+        mounts = [{"Destination": "/app/data", "Source": "/srv/data", "Type": "bind"}]
+        baseline = handoff.container_configuration_sha256(self.item(mounts))
+        self.assertNotEqual(baseline, handoff.container_configuration_sha256(
+            self.item(mounts, config={"Labels": {"tier": "worker"}})))
+        self.assertNotEqual(baseline, handoff.container_configuration_sha256(
+            self.item(mounts, host_config={"NetworkMode": "host"})))
+
+    def test_non_mount_array_order_is_preserved(self):
+        mounts = [{"Destination": "/app/data", "Source": "/srv/data", "Type": "bind"}]
+        baseline = handoff.container_configuration_sha256(self.item(
+            mounts,
+            config={"Env": ["A=1", "B=2"], "Cmd": ["serve", "--port", "3000"]},
+            host_config={"Binds": ["/one:/one", "/two:/two"]},
+        ))
+        variants = [
+            self.item(mounts, config={"Env": ["B=2", "A=1"], "Cmd": ["serve", "--port", "3000"]}, host_config={"Binds": ["/one:/one", "/two:/two"]}),
+            self.item(mounts, config={"Env": ["A=1", "B=2"], "Cmd": ["--port", "3000", "serve"]}, host_config={"Binds": ["/one:/one", "/two:/two"]}),
+            self.item(mounts, config={"Env": ["A=1", "B=2"], "Cmd": ["serve", "--port", "3000"]}, host_config={"Binds": ["/two:/two", "/one:/one"]}),
+        ]
+        for item in variants:
+            with self.subTest(item=item):
+                self.assertNotEqual(baseline, handoff.container_configuration_sha256(item))
+
+    def test_malformed_or_duplicate_mount_destinations_are_rejected(self):
+        self.assertIsInstance(handoff.container_configuration_sha256(self.item([{"Destination": "/"}])), str)
+        invalid_destinations = ("", "relative", "//double", "/trailing/", "/dot/./path", "/parent/../path", "/nul\x00path")
+        for destination in invalid_destinations:
+            with self.subTest(destination=repr(destination)):
+                with self.assertRaisesRegex(ValueError, "Invalid mount destination"):
+                    handoff.container_configuration_sha256(self.item([{"Destination": destination}]))
+        with self.assertRaisesRegex(ValueError, "Invalid container mount"):
+            handoff.container_configuration_sha256(self.item(["not-a-mapping"]))
+        with self.assertRaisesRegex(ValueError, "Duplicate mount destination"):
+            handoff.container_configuration_sha256(self.item([
+                {"Destination": "/same", "Source": "/one"},
+                {"Destination": "/same", "Source": "/two"},
+            ]))
+
+
+class SnapshotFingerprintIntegrationTests(unittest.TestCase):
+    def test_snapshot_delegates_each_container_fingerprint_to_helper(self):
+        identity = "11111111-1111-4111-8111-111111111111"
+        active = {
+            "operationId": identity,
+            "dataRelease": {"images": {"postgres": "postgres-image", "redis": "redis-image"}},
+            "blue": {"images": {"api": "api-blue-image", "web": "web-blue-image"}},
+            "green": {"images": {"api": "api-green-image", "web": "web-green-image"}},
+        }
+        expected_images = {
+            "leetplus-api-blue": "api-blue-image", "leetplus-web-blue": "web-blue-image",
+            "leetplus-api-green": "api-green-image", "leetplus-web-green": "web-green-image",
+            "leetplus-postgres": "postgres-image", "leetplus-redis": "redis-image",
+        }
+        active_raw = json.dumps(active).encode()
+
+        def fake_run(args, data=None, timeout=25):
+            if args[0] == "/usr/bin/node":
+                return b'{"controlSha256":"accepted-control"}'
+            if args[0] == "/usr/bin/docker":
+                name = args[-1]
+                return json.dumps([{
+                    "Id": name + "-id", "Image": expected_images[name], "RestartCount": 0,
+                    "State": {"Running": True, "Pid": 1234, "StartedAt": "2026-09-16T00:00:00Z"},
+                    "Config": {}, "HostConfig": {}, "Mounts": [],
+                }]).encode()
+            if args[0] == "/usr/sbin/iptables":
+                return b"-N test\n"
+            raise AssertionError("unexpected command: " + repr(args))
+
+        fake_nginx = SimpleNamespace(is_symlink=lambda: True, lstat=lambda: SimpleNamespace(st_uid=0))
+        real_path = Path
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary) / "state"
+            operation = state / "operations" / identity
+            operation.mkdir(parents=True)
+            (operation / "final.json").write_text("{}\n", encoding="utf-8")
+            with mock.patch.object(handoff, "STATE", state), \
+                 mock.patch.object(handoff, "secure", side_effect=lambda path: active_raw if Path(path) == state / "active.json" else b"protected"), \
+                 mock.patch.object(handoff, "read_json", return_value={}), \
+                 mock.patch.object(handoff, "run", side_effect=fake_run), \
+                 mock.patch.object(handoff, "container_configuration_sha256", return_value="fingerprint") as fingerprint, \
+                 mock.patch.object(handoff, "Path", side_effect=lambda value: fake_nginx if str(value) == "/etc/nginx/leetplus-compose/active.conf" else real_path(value)), \
+                 mock.patch.object(handoff.os, "readlink", return_value="/etc/nginx/leetplus-compose/blue.conf"):
+                result = handoff.snapshot(Path(temporary).resolve() / "control")
+
+        self.assertEqual(fingerprint.call_count, len(expected_images))
+        self.assertTrue(all(call.args[0]["Mounts"] == [] for call in fingerprint.call_args_list))
+        self.assertEqual({entry["configurationSha256"] for entry in result["containers"].values()}, {"fingerprint"})
 
 
 class PhaseEffectTests(unittest.TestCase):

@@ -22,7 +22,7 @@ import sys
 import tarfile
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 sys.dont_write_bytecode = True
 CONTRACT = 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1'
@@ -207,6 +207,27 @@ def systemd(unit):
     return values
 
 
+def container_configuration_sha256(item):
+    # Docker's Mounts is an unordered collection, unlike Env/Cmd/Binds arrays.
+    # Normalize only its order, retaining every mount/config field in the hash.
+    mounts = item['Mounts']
+    require(isinstance(mounts, list), 'Invalid container mounts')
+    destinations = set()
+    for mount in mounts:
+        require(isinstance(mount, dict), 'Invalid container mount')
+        destination = mount.get('Destination')
+        require(isinstance(destination, str) and destination.startswith('/') and
+                not destination.startswith('//') and '\x00' not in destination and
+                '..' not in destination.split('/') and str(PurePosixPath(destination)) == destination,
+                'Invalid mount destination')
+        require(destination not in destinations, 'Duplicate mount destination')
+        destinations.add(destination)
+    configuration = {'config': item['Config'], 'host': item['HostConfig'],
+                     'mounts': sorted(mounts, key=lambda mount: mount['Destination'])}
+    # Do not change canonical() used for existing signed plans and receipts.
+    return digest((json.dumps(configuration, indent=2, ensure_ascii=False, sort_keys=True) + '\n').encode())
+
+
 def snapshot(control):
     active_raw = secure(STATE / 'active.json')
     active = json.loads(active_raw)
@@ -236,7 +257,7 @@ def snapshot(control):
         role = name.removeprefix('leetplus-')
         expected_image = active['dataRelease']['images'][role] if role in ('postgres', 'redis') else active[role.split('-')[1]]['images'][role.split('-')[0]]
         require(item['Image'] == expected_image, 'Running image differs from accepted release')
-        containers[name] = {'id': item['Id'], 'image': item['Image'], 'pid': item['State']['Pid'], 'startedAt': item['State']['StartedAt'], 'restartCount': item['RestartCount'], 'configurationSha256': digest(canonical({'config': item['Config'], 'host': item['HostConfig'], 'mounts': item['Mounts']}))}
+        containers[name] = {'id': item['Id'], 'image': item['Image'], 'pid': item['State']['Pid'], 'startedAt': item['State']['StartedAt'], 'restartCount': item['RestartCount'], 'configurationSha256': container_configuration_sha256(item)}
     nginx = Path('/etc/nginx/leetplus-compose/active.conf')
     require(nginx.is_symlink() and nginx.lstat().st_uid == 0, 'Untrusted nginx link')
     firewall = {chain: digest(run(['/usr/sbin/iptables', '-w', '5', '-S', chain])) for chain in ('LP_LEETPLUS_EGRESS_V2', 'LP_LEETPLUS_HOST_V2', 'DOCKER-USER', 'INPUT')}

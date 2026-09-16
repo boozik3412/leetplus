@@ -1,0 +1,38 @@
+{
+  "reviewedAt": "2026-09-15T11:24:31.954361+05:00",
+  "purpose": "planning revision2 only; application UI not retested",
+  "files": [
+    {
+      "path": "C:/Users/ALIENWARE/.codex/skills/leetplus-dashboard-ux/SKILL.md",
+      "sha256": "ea4e4f309486ec1d33292a2f3552b6d34760c6b4173dbd9af738e47fe6ad37c8"
+    },
+    {
+      "path": "C:/Users/ALIENWARE/.codex/skills/leetplus-dashboard-ux/references/metric-contracts.md",
+      "sha256": "d95385adafb95ea14abb59e8a1989c43e4c9bd34bcfb4ba226fd4e45e2d69ecb"
+    },
+    {
+      "path": "C:/Users/ALIENWARE/.codex/skills/leetplus-ux-writing/SKILL.md",
+      "sha256": "e00e147574e3f7d1852d392e396be35ddabfb22e4e633cfaa6021bbd7e333d28"
+    },
+    {
+      "path": "C:/Users/ALIENWARE/.codex/skills/leetplus-ux-writing/references/copy-and-states.md",
+      "sha256": "cec8bd258fe5be54dd8fa7310da17d4f2a9cf1ef6294ace9ae15efc1beac196a"
+    },
+    {
+      "path": "C:/Users/ALIENWARE/.codex/skills/leetplus-ui-quality/SKILL.md",
+      "sha256": "df6333267c45caef55b59ebbaba365a9efcc38cf8c4ba1cb486c287cd1580bfb"
+    },
+    {
+      "path": "C:/Users/ALIENWARE/.codex/skills/leetplus-ui-quality/references/acceptance-matrix.md",
+      "sha256": "817c636c85fed352775c67550a8bc00745556dddc04f9658a26183ae72766ba9"
+    },
+    {
+      "path": "C:/Users/ALIENWARE/.codex/skills/leetplus-design-system/SKILL.md",
+      "sha256": "27ddf4296727db5ff9b41d62fb501b8b2f25692c51b2f47860a74f9804d3bdba"
+    },
+    {
+      "path": "C:/Users/ALIENWARE/.codex/skills/leetplus-design-system/references/theme-and-components.md",
+      "sha256": "b85f0a52e1a936609a37ca0040a86817f1225ce734b8d68be6550ca786d0d423"
+    }
+  ]
+}

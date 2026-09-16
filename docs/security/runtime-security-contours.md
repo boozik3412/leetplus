@@ -19,6 +19,16 @@ install разрешён лишь прежнему boot unit по kernel cgroup 
 остаётся b5/gen5, data/control399876 до реального handoff и postcheck.
 [Контракт, rollback и acceptance](../deployment/network-refresh-control-handoff.md).
 
+Source repair16.09: preflight обнаружил ложный drift из-за меняющегося порядка
+Docker `Mounts`; переключение d7d799dd не запускалось. Fingerprint конфигурации
+сортирует только этот неупорядоченный список по unique canonical POSIX Destination
+и ключи JSON objects, сохраняя все поля и порядок остальных массивов. Дубликаты
+и некорректные пути отвергаются; PID/start/image/grant проверки не ослабляются.
+Signed canonical records не меняются: нужны новый admitted artifact и новый
+native plan, а не переписывание старого snapshot или retry до случайного PASS.
+Расхождение часов проверяется до подписи, без backdating и расширения TTL approval.
+Это пока source-only; appb5/gen5, serving control/data399876 не изменены.
+
 Фактический перенос на сервер1337 выполнен по отдельному разрешению владельца.
 Новый узел `192.168.1.137`, public `188.234.220.76`, после rollout 15.09.2026
 обслуживает exact `b5c03360941e1e5d59fe83f334b8dc29c2eced3b`: active blue,
@@ -121,6 +131,38 @@ TLS использует существующий Nginx webroot `/srv/leetplus/a
 access scope, публичного игрового входа, управления геймификацией, интеграций,
 background jobs и production deployment. Он сохраняет независимость public
 guest, corporate tenant и worker/control-plane субъектов.
+
+### Executive dashboard source-only candidate, 15.09.2026
+
+Corporate `/dashboard` source добавляет guarded read-only executive summary и
+independent operations projection. Это не runtime change: текущие serving SHA и
+generation подтверждает владелец production, а source-only работа не меняет route owner,
+JWT/role policy, database role/schema, worker placement, secret, provider
+egress или deployment authority.
+
+Каждый executive GET заново применяет fresh tenant/store scope и возвращает
+только accepted stores. Product sales имеют доказуемое store-day coverage;
+нет coverage означает `MISSING`/`null`, а не ноль. Observed sessions остаются
+`PARTIAL` без independent session completeness proof. Services, real topups,
+historical capacity и dependent exact ratios остаются `MISSING`. Operations
+может отказать независимо от primary summary; `STALE`, `MISSING` или `FAILED`
+wrapper либо child metric не подтверждает текущий assortment signal и не может
+породить priority action.
+
+Loopback-only synthetic UI fixture применяет short-lived process-local JWT и
+условные service/capacity values исключительно для presentation/formula QA.
+Она не является ordinary corporate login, production canary или основанием для
+deployment/GO.
+
+Source follow-up15.09 добавляет два read-only staff GET внутри существующего
+`/staff/operations-dashboard`: `priorities` и `priorities/items`. Сохраняются
+corporate JWT, `view_staff_control`, FreshNetworkScopeGuard и дополнительное право
+каждого исходного раздела. Scope проверяется заново, детали сохраняют точный
+Store subset; общесетевые назначения не приписываются отдельному клубу.
+Межсотрудниковое обучение требует management capability. GET не создаёт задания,
+не меняет прогресс и не запускает providers/workers. Новый средний товарный чек
+использует только подтверждённые receipt/store-day facts; он не подменяет ARPV.
+[Контракт приоритетов и ограничения](../executive-dashboard-priorities.md).
 
 ### Canonical simple safe external Langame onboarding
 

@@ -3,6 +3,52 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AssortmentHealthLoaderService } from './assortment-health-loader.service';
 
 describe('AssortmentHealthLoaderService', () => {
+  it('reads confirmed sales coverage without loading inventory or CRM facts', async () => {
+    const prisma = {
+      store: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'store-a',
+            externalDomain: 'a.example',
+            isActive: true,
+          },
+        ]),
+      },
+      dailyDataCoverage: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            businessDate: new Date('2026-09-07T00:00:00.000Z'),
+            status: 'SUCCESS',
+            sourceCounts: {},
+            summary: { domains: [{ domain: 'a.example', status: 'SUCCESS' }] },
+          },
+        ]),
+      },
+    };
+    const service = new AssortmentHealthLoaderService(
+      prisma as unknown as PrismaService,
+    );
+
+    await expect(
+      service.loadSalesCoverage({
+        tenantId: 'tenant-1',
+        storeIds: ['store-a'],
+        period: {
+          from: new Date('2026-09-07T00:00:00.000Z'),
+          to: new Date('2026-09-07T23:59:59.999Z'),
+        },
+      }),
+    ).resolves.toEqual({
+      salesDayEvidence: [
+        {
+          storeId: 'store-a',
+          date: new Date('2026-09-07T00:00:00.000Z'),
+          status: 'CONFIRMED',
+        },
+      ],
+    });
+  });
+
   it('keeps the daily snapshot key while using its observed time and excluding a future observation', async () => {
     const prisma = {
       store: {

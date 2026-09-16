@@ -1,360 +1,281 @@
 window.STATE =
 {
-  "slug": "assortment-operational-dashboard",
-  "dir": "2026-09-14-assortment-operational-dashboard",
-  "title": "Дашборд ассортимента: опубликован на production",
+  "slug": "executive-priorities",
+  "dir": "2026-09-15-executive-priorities--wip",
+  "title": "Приоритеты сводки: реализованы, локальная приёмка пройдена",
   "mode": "semi",
   "depth": "normal",
   "polish": null,
   "tier": "T2",
-  "briefFile": "2026-09-14-brief.md",
+  "briefFile": "2026-09-15-brief.md",
   "memoryFile": "AGENTS.md",
-  "skillDir": "C:\\Users\\ALIENWARE\\.codex\\skills\\autopilot",
-  "startedAt": "2026-09-14T15:05:31+05:00",
-  "updatedAt": "2026-09-15T02:03:49.529501+05:00",
-  "finishedAt": "2026-09-14T21:21:56+05:00",
+  "skillDir": "C:/Users/ALIENWARE/.codex/skills/autopilot",
+  "startedAt": "2026-09-15T19:25:29.759577+05:00",
+  "updatedAt": "2026-09-15T22:21:43.948877+05:00",
+  "finishedAt": "2026-09-15T22:21:43.948877+05:00",
   "stages": [
     {
+      "finishedAt": "2026-09-15T19:25:29.759577+05:00",
+      "startedAt": "2026-09-15T19:25:29.759577+05:00",
       "id": "preflight",
-      "status": "done",
-      "startedAt": "2026-09-14T15:05:31+05:00",
-      "finishedAt": "2026-09-14T15:06:42+05:00"
+      "status": "done"
     },
     {
+      "finishedAt": "2026-09-15T19:25:29.759577+05:00",
+      "startedAt": "2026-09-15T19:25:29.759577+05:00",
       "id": "manifest",
-      "status": "done",
-      "startedAt": "2026-09-14T15:06:42+05:00",
-      "finishedAt": "2026-09-14T15:09:56+05:00"
+      "status": "done"
     },
     {
+      "startedAt": "2026-09-15T19:25:29.759577+05:00",
       "id": "briefing",
-      "status": "skipped",
-      "note": "План согласован, вопросов не потребовалось"
+      "status": "done",
+      "finishedAt": "2026-09-15T20:01:18.7430179+05:00"
     },
     {
+      "status": "done",
       "id": "spec",
-      "status": "done",
-      "startedAt": "2026-09-14T15:09:56+05:00",
-      "finishedAt": "2026-09-14T15:15:18+05:00"
+      "startedAt": "2026-09-15T20:01:18.7430179+05:00",
+      "finishedAt": "2026-09-15T20:25:02.5085669+05:00"
     },
     {
+      "status": "done",
       "id": "plan",
-      "status": "done",
-      "startedAt": "2026-09-14T15:15:18+05:00",
-      "finishedAt": "2026-09-14T15:15:18+05:00",
-      "note": "4таска,3волны,T2"
+      "startedAt": "2026-09-15T20:25:02.5085669+05:00",
+      "finishedAt": "2026-09-15T20:43:03.556088+05:00"
     },
     {
+      "status": "done",
       "id": "build",
-      "status": "done",
-      "startedAt": "2026-09-14T15:15:18+05:00",
-      "finishedAt": "2026-09-14T21:21:56+05:00"
+      "startedAt": "2026-09-15T20:43:03.556088+05:00",
+      "finishedAt": "2026-09-15T22:21:43.948877+05:00"
     },
     {
+      "status": "done",
       "id": "review",
-      "status": "done",
-      "startedAt": "2026-09-14T15:38:08+05:00",
-      "finishedAt": "2026-09-14T21:21:56+05:00"
+      "finishedAt": "2026-09-15T22:21:43.948877+05:00"
     },
     {
-      "id": "final",
       "status": "done",
-      "finishedAt": "2026-09-14T21:21:56+05:00",
-      "note": "G4 PASS, API 191/3564, Web build and 47 synthetic UI checks PASS. Production state remains in canonical deployment documentation."
+      "id": "final",
+      "startedAt": "2026-09-15T22:19:45.847918+05:00",
+      "finishedAt": "2026-09-15T22:21:43.948877+05:00"
     }
   ],
   "requirements": {
-    "total": 17,
-    "done": 17,
-    "inTicket": 0,
-    "inSpec": 0,
     "placeholder": 0,
+    "inSpec": 0,
+    "total": 8,
     "deferred": 0,
-    "dropped": 0
+    "dropped": 0,
+    "inTicket": 0,
+    "done": 8
   },
   "tickets": [
     {
+      "title": "Финансовые сигналы и средний товарный чек",
+      "requirements": [
+        "R01",
+        "R02",
+        "R06"
+      ],
+      "retries": 0,
+      "repairs": 0,
+      "handoffs": 0,
+      "wave": 1,
+      "blockedBy": [],
+      "zone": [
+        "API executive/receipt",
+        "Web executive metric/details/financial priorities"
+      ],
+      "status": "done",
       "id": "01",
-      "title": "Общие правила состояния запасов и привязки визитов",
+      "startedAt": "2026-09-15T20:43:03.556088+05:00",
+      "executor": "/root",
+      "blockedAttempt": "Delegated executor lacked filesystem; no edits or tests from that attempt",
+      "finishedAt": "2026-09-15T22:21:43.948877+05:00"
+    },
+    {
+      "title": "Обязательства персонала и рабочая детализация",
       "requirements": [
         "R03",
         "R04",
         "R05",
-        "R08",
-        "R09",
-        "R10",
-        "R11",
-        "R12",
-        "R14",
-        "R15",
-        "R16"
+        "R06",
+        "A01",
+        "A02"
       ],
-      "blockedBy": [],
+      "retries": 0,
+      "repairs": 0,
+      "handoffs": 0,
       "wave": 1,
+      "blockedBy": [],
       "zone": [
-        "apps/api/src/common/assortment-health*",
-        "apps/api/src/common/guest-session-store*"
+        "API staff priority",
+        "Web staff-priorities and dashboard/priorities"
       ],
       "status": "done",
-      "retries": 0,
-      "repairs": 1,
-      "handoffs": 0,
-      "startedAt": "2026-09-14T15:15:18+05:00",
-      "repairFindings": [
-        "transaction price requires confirmed coverage",
-        "stale inventory cannot aggregate AVAILABLE",
-        "unknown no-sales retained in valuation coverage",
-        "explicit excess threshold",
-        "all historical facts bounded by asOf",
-        "latest valid configuration selection",
-        "targeted lint"
-      ],
-      "tests": {
-        "passed": 10,
-        "failed": 0
-      },
-      "finishedAt": "2026-09-14T16:20:00+05:00",
-      "commit": "fe061c62390bedcc490cd8adaa7bd492d293dd87",
-      "agent": "/root/health_foundation"
+      "id": "02",
+      "startedAt": "2026-09-15T20:43:03.556088+05:00",
+      "executor": "/root",
+      "blockedAttempt": "Delegated executor lacked filesystem; no edits or tests from that attempt",
+      "finishedAt": "2026-09-15T22:21:43.948877+05:00"
     },
     {
-      "id": "02",
-      "title": "Подключить единые метрики к API дашборда и отчётам",
+      "title": "Общий список приоритетов и дополнительные риски",
       "requirements": [
+        "R01",
         "R02",
         "R03",
         "R04",
         "R05",
+        "R06",
         "R08",
-        "R09",
-        "R10",
-        "R11",
-        "R12",
-        "R13",
-        "R14",
-        "R15",
-        "R16",
-        "R17"
+        "A01",
+        "A02",
+        "A03",
+        "A04"
       ],
-      "blockedBy": [
-        "01"
-      ],
-      "wave": 2,
-      "zone": [
-        "apps/api/src/dashboard/",
-        "apps/api/src/reports/",
-        "apps/api/src/common/assortment-health-loader*"
-      ],
-      "status": "done",
-      "retries": 0,
-      "repairs": 1,
-      "handoffs": 2,
-      "startedAt": "2026-09-14T16:20:00+05:00",
-      "agent": "/root/api_parity",
-      "tests": {
-        "passed": 37,
-        "failed": 0
-      },
-      "repairFindings": [
-        "Replace remaining global source freshness",
-        "Long period loader coverage",
-        "Cost-only configuration valuation",
-        "Known write-offs partial vs false zero",
-        "Legacy report row/filter parity and no duplicate history",
-        "Covered margin instead of missing cost zero",
-        "Confirmed zero-day forecast",
-        "Restricted shared-domain visit counts must not leak"
-      ],
-      "finishedAt": "2026-09-14T18:29:22+05:00",
-      "commit": "c7aa73695138e77e10fafc15bfeafa17e11e23b5"
-    },
-    {
-      "id": "03",
-      "title": "Обновлять остатки и сохранять доказуемую привязку сессий",
-      "requirements": [
-        "R01",
-        "R03"
-      ],
-      "blockedBy": [
-        "01"
-      ],
-      "wave": 2,
-      "zone": [
-        "apps/api/src/integrations/guest-data-foundation.service*",
-        "apps/api/src/integrations/langame-daily-sync.service*",
-        "apps/api/src/integrations/langame-sync.service*"
-      ],
-      "status": "done",
       "retries": 0,
       "repairs": 0,
       "handoffs": 0,
-      "startedAt": "2026-09-14T16:20:00+05:00",
-      "tests": {
-        "passed": 56,
-        "failed": 0
-      },
-      "agent": "/root/source_cursor",
-      "finishedAt": "2026-09-14T17:35:13+05:00",
-      "commit": "0697a67c779af6388c310e6828f100c77e3ced93",
-      "note": "D06: inventory-only не продвигает sales cursor"
+      "wave": 2,
+      "blockedBy": [
+        "01",
+        "02"
+      ],
+      "zone": [
+        "Web executive priority main composition"
+      ],
+      "status": "done",
+      "id": "03",
+      "finishedAt": "2026-09-15T22:21:43.948877+05:00",
+      "executor": "/root"
     },
     {
-      "id": "04",
-      "title": "Показать оперативные показатели и проверить полный сценарий",
+      "title": "Приёмка, аудит и документация",
       "requirements": [
+        "R01",
+        "R02",
+        "R03",
+        "R04",
+        "R05",
         "R06",
         "R07",
         "R08",
-        "R09",
-        "R10",
-        "R11",
-        "R12",
-        "R13",
-        "R14",
-        "R15",
-        "R16",
-        "R17"
+        "A01",
+        "A02",
+        "A03",
+        "A04"
       ],
+      "retries": 0,
+      "repairs": 0,
+      "handoffs": 0,
+      "wave": 2,
       "blockedBy": [
-        "02",
-        "03"
+        "01",
+        "02"
       ],
-      "wave": 3,
+      "note": "API/doc prep parallel03; browser waits03 freeze",
       "zone": [
-        "apps/web/",
-        "docs/assortment-dashboard-metric-contract.md"
+        "API PG tests",
+        "external UI evidence",
+        "docs"
       ],
       "status": "done",
-      "retries": 0,
-      "repairs": 1,
-      "handoffs": 2,
-      "startedAt": "2026-09-14T18:29:22+05:00",
-      "agent": "/root/browser_qa",
-      "note": "Web build PASS exit0; real Next4312 + syntheticAPI4311 QA running. Final decimal movement precision and partial-source labels repair in progress.",
-      "finishedAt": "2026-09-14T21:21:56+05:00"
-    },
-    {
-      "id": "05",
-      "title": "Сохранить область ассортимента на главном дашборде",
-      "requirements": [
-        "R13"
-      ],
-      "blockedBy": [],
-      "wave": 4,
-      "zone": [
-        "apps/web/src/app/(app)/dashboard/page.tsx",
-        "apps/web/src/app/reports/assortment-risk/table/page.tsx",
-        "apps/web/src/lib/assortment-report-query*"
-      ],
-      "status": "done",
-      "retries": 0,
-      "repairs": 0,
-      "handoffs": 0,
-      "startedAt": "2026-09-14T19:47:56+05:00",
-      "agent": "/root/web_scope_finish",
-      "finishedAt": "2026-09-14T21:21:56+05:00"
-    },
-    {
-      "id": "06",
-      "title": "Отделить повтор загрузки от свежести остатков",
-      "requirements": [
-        "R01",
-        "R02"
-      ],
-      "blockedBy": [],
-      "wave": 5,
-      "zone": [
-        "apps/api/src/integrations/langame-daily-sync.service*"
-      ],
-      "status": "done",
-      "retries": 0,
-      "repairs": 0,
-      "handoffs": 0,
-      "finishedAt": "2026-09-14T21:21:56+05:00",
-      "agent": "/root/inventory_cadence",
-      "tests": {
-        "passed": 11,
-        "failed": 0
-      }
-    },
-    {
-      "id": "07",
-      "title": "Сохранить вычислимую прибыль OOS",
-      "requirements": [
-        "R04",
-        "R05",
-        "R14",
-        "R15"
-      ],
-      "blockedBy": [],
-      "wave": 5,
-      "zone": [
-        "apps/api/src/common/assortment-health*",
-        "apps/api/src/reports/reports.service*",
-        "apps/web/src/app/reports/oos/table/page.tsx"
-      ],
-      "status": "done",
-      "retries": 0,
-      "repairs": 0,
-      "handoffs": 0,
-      "finishedAt": "2026-09-14T21:21:56+05:00",
-      "agent": "/root/profit_risk_restore",
-      "tests": {
-        "passed": 40,
-        "failed": 0
-      }
+      "id": "04",
+      "finishedAt": "2026-09-15T22:21:43.948877+05:00",
+      "executor": "/root"
     }
   ],
   "singlePass": null,
   "tests": {
-    "passed": 3564,
-    "failed": 0,
-    "todo": 2,
-    "suites": 191
+    "api": "194 suites / 3588 PASS + 2 previous TODO",
+    "apiFinalFocused": "46 PASS",
+    "postgres": "17 PASS, loopback55495",
+    "web": "typecheck/build/scoped lint PASS",
+    "webRules": "3 PASS",
+    "browser": "14 checks PASS; 1440/390; light/dark; no page errors",
+    "remoteCI": "Tracked separately against the exact PR207 head; not asserted by this source-tree record"
   },
   "debt": {
     "placeholders": [],
-    "assumptions": [],
-    "emptyEnv": []
+    "emptyEnv": [],
+    "assumptions": []
   },
-  "additions": [],
-  "coverage": {
-    "found": 3,
-    "fixed": 3,
-    "deferred": 0,
-    "result": "PASS"
-  },
-  "concerns": [
+  "additions": [
     {
-      "source": "final source review",
-      "finding": "Legacy homepage assortment widget widens multi-club selection and drops report filters",
-      "decision": "fix now",
-      "ticket": "05",
-      "resolution": "fixed and independently accepted"
+      "parent": "R04",
+      "id": "A01",
+      "title": "Очередь проверки чек-листов"
+    },
+    {
+      "parent": "R05",
+      "id": "A02",
+      "title": "Обязательные регламенты текущей версии"
+    },
+    {
+      "parent": "R08",
+      "id": "A03",
+      "title": "Риск дефицита за3дня"
+    },
+    {
+      "parent": "R08",
+      "id": "A04",
+      "title": "Без продаж21день"
     }
   ],
+  "coverage": {
+    "reviewer": "/root/priority_spec_review",
+    "notes": [
+      "Явно добавлена координация с задачей Спланировать открытый тест",
+      "Четыре дополнительные возможности размечены A01–A04 с родителями и правилом precedence"
+    ],
+    "status": "PASS",
+    "fixed": 5,
+    "delivery": "G2 text-only harness: delivered exact complete brief/spec text, no other files",
+    "found": 5,
+    "reviewedAt": "2026-09-15T20:25:02.5085669+05:00"
+  },
+  "concerns": [],
   "reviewers": {
-    "manifestSpec": "/root/spec_coverage",
-    "craft": "/root/craft_review"
+    "manifestSpec": null,
+    "craft": {
+      "status": "PASS",
+      "mode": "Independent text review; root filesystem and rendered validation",
+      "reviewer": "/root/priority_spec_review",
+      "remainingP0P1P2": 0
+    }
   },
-  "blind": {
-    "result": "PASS_LOCAL",
-    "drift": [],
-    "apiFocusedTests": 51,
-    "uiChecks": 47,
-    "productionVerified": false
+  "blind": null,
+  "sourceBase": "f526aa10f60c5f7c0f68eb5520e86b23f65f4351",
+  "pr": 207,
+  "productionEffects": false,
+  "clarification": {
+    "answer": "Оба отдельно",
+    "question": "Средний чек товарных покупок или доход на один визит?",
+    "status": "answered"
   },
-  "scope": "source implementation and local acceptance; production uses separate release controls",
-  "production": {
-    "status": "deployed",
-    "releaseSha": "b5c03360941e1e5d59fe83f334b8dc29c2eced3b",
-    "activeSlot": "blue",
-    "generation": 5,
-    "operationId": "9f793938-e989-40a6-abec-b7f2e890192e",
-    "browserChecks": "16/16 PASS",
-    "inventoryObservations": 2117,
-    "stores": 4,
-    "finalOffhostBackup": "PASS",
-    "acceptedAt": "2026-09-15T02:02:00+05:00"
+  "scouts": {
+    "status": "completed",
+    "receipts": "/root/priority_receipts_audit",
+    "modules": "/root/priority_modules_audit",
+    "staff": "/root/priority_staff_audit"
+  },
+  "plan": {
+    "note": "01/02 independent existing-subsystem vertical slices, not a new shared shell; wire fixed before either starts",
+    "waves": 2,
+    "mergePass": "4 dense slices; no tiny checklist tickets",
+    "G3": "PASS8requirements mapped, disjoint same-wave zones",
+    "calibratedRules": [
+      "01 is an independent financial vertical slice on the existing shell;02 has disjoint staff zones and no dependency on01, so both fly together",
+      "Independent local/CI gates are batched with separate receipts; no repeated unchanged full suite solely because two commits record the same tested tree"
+    ]
+  },
+  "executionStrategy": "Root implementation: delegated executor harness exposes only CUA, no filesystem/terminal; user-authorized work continues under higher-priority autonomy instructions. Text-only independent review remains available.",
+  "delivery": {
+    "pr": 207,
+    "state": "SOURCE_IMPLEMENTED_LOCAL_ACCEPTANCE_PASSED",
+    "notes": "Remote checks attach to the exact published head. No merge or deploy. Serving app and staged controller authority remain with the production owner."
   }
-};
+}

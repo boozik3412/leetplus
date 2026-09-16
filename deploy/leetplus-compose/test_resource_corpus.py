@@ -60,6 +60,24 @@ class Response:
 
 
 class BoundaryTests(unittest.TestCase):
+    def test_operations_accepts_compact_evidence_and_rejects_deployed_engine_wrapper(self):
+        metric = {'value': None, 'state': 'MISSING', 'reason': 'No stock observation',
+                  'coverage': {'covered': 0, 'total': 1, 'percent': 0}, 'asOf': None}
+        health = {'inventory': metric, 'outOfStock': metric, 'lowStock': metric,
+                  'noSales': {str(days): metric for days in [7, 14, 21, 30]}}
+        scope = {'storeIds': [STORE]}
+        valid = {'scope': scope, 'assortment': {'state': 'AVAILABLE', 'reason': None, 'data': health}}
+        corpus.operations_valid(valid, scope)
+        for change in [{'rows': [{'storeId': STORE}], 'summary': health}, {},
+                       {**health, 'outOfStock': {**metric, 'value': 0}},
+                       {**health, 'noSales': {'21': metric}},
+                       {**health, 'lowStock': {**metric, 'reason': None}}]:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                corpus.operations_valid({**valid, 'assortment': {**valid['assortment'], 'data': change}}, scope)
+        with self.assertRaisesRegex(ValueError, 'scope'):
+            corpus.operations_valid(valid, {'storeIds': []})
+        corpus.operations_valid({'scope': scope, 'assortment': {'state': 'FAILED', 'reason': 'Unavailable', 'data': None}}, scope)
+
     def test_guard_failure_prevents_any_http(self):
         guard = Guard()
         guard.check = mock.Mock(side_effect=RuntimeError('pressure abort'))

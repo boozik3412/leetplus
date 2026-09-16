@@ -77,7 +77,7 @@ export type DashboardExecutiveOperations = {
   assortment: {
     state: 'AVAILABLE' | 'PARTIAL' | 'MISSING' | 'STALE' | 'FAILED';
     reason: string | null;
-    data: AssortmentHealth | null;
+    data: AssortmentHealth['summary'] | null;
   };
 };
 
@@ -1216,7 +1216,11 @@ export class DashboardService {
       });
       return {
         scope: { ...product.scope, comparison },
-        assortment: { state: 'AVAILABLE', reason: null, data: data.health },
+        assortment: {
+          state: 'AVAILABLE',
+          reason: null,
+          data: data.health.summary,
+        },
       };
     } catch {
       return {

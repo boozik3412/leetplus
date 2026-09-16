@@ -1,4 +1,10 @@
-# API 6 GiB resource profile — source preparation, not deployed
+# API 6 GiB resource profile
+
+Update 16 September, 15:00 UTC: controller bootstrap463 and application617 are
+accepted. Active GREEN02 uses6GiB RAM/8GiB total; rollback BLUEb5 stays4GiB.
+This does not establish full UI acceptance: the executive operations projection
+defect is recorded in [the application checkpoint](executive-auth-production-2026-09-16.md).
+The preparation notes below describe the state before these two operations.
 
 Status 16 September 2026: source preparation includes the profile, narrowly
 signed renderer transition, production budget gate and monitored rehearsal.

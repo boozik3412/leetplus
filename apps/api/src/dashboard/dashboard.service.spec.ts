@@ -196,6 +196,10 @@ describe('DashboardService', () => {
   } as AuthenticatedUser;
 
   beforeEach(() => {
+    // Fixture observations below are dated14September. Calendar and freshness
+    // assertions must not depend on the operator or CI runner's wall clock.
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-09-14T12:00:00.000Z'));
     prisma = createPrismaMock();
     freshStoreScope = {
       resolveRequestedStoreIds: jest
@@ -237,6 +241,10 @@ describe('DashboardService', () => {
       freshStoreScope as unknown as FreshStoreScopeService,
       assortmentHealthLoader as never,
     );
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   function mockEmptyDashboardData() {
@@ -1471,45 +1479,52 @@ describe('DashboardService', () => {
     }
   });
 
-  it('keeps a failed sales domain partial without failing fresh inventory', async () => {
-    mockEmptyDashboardData();
-    prisma.inventorySnapshot.findMany.mockResolvedValue([
-      {
-        storeId: 'store-1',
-        productId: 'product-1',
-        snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
-        updatedAt: new Date('2026-09-14T11:00:00.000Z'),
-        quantity: new Prisma.Decimal(2),
-      },
-    ]);
-    assortmentHealthLoader.load.mockResolvedValueOnce({
-      health: { rows: [], summary: {} },
-      salesDayEvidence: [],
-      sourceHealthEvidence: {
-        sales: {
-          totalDomains: 2,
-          confirmedDomains: 1,
-          failedDomains: 1,
-          missingDomains: 0,
+  it.each([
+    { now: '2026-09-14T12:00:00.000Z', inventoryState: 'FRESH' },
+    { now: '2026-09-16T12:00:00.000Z', inventoryState: 'STALE' },
+  ])(
+    'keeps failed sales partial and inventory $inventoryState at $now',
+    async ({ now, inventoryState }) => {
+      jest.setSystemTime(new Date(now));
+      mockEmptyDashboardData();
+      prisma.inventorySnapshot.findMany.mockResolvedValue([
+        {
+          storeId: 'store-1',
+          productId: 'product-1',
+          snapshotDate: new Date('2026-09-14T00:00:00.000Z'),
+          updatedAt: new Date('2026-09-14T11:00:00.000Z'),
+          quantity: new Prisma.Decimal(2),
         },
-        inventory: {
-          totalDomains: 2,
-          confirmedDomains: 2,
-          failedDomains: 0,
-          missingDomains: 0,
+      ]);
+      assortmentHealthLoader.load.mockResolvedValueOnce({
+        health: { rows: [], summary: {} },
+        salesDayEvidence: [],
+        sourceHealthEvidence: {
+          sales: {
+            totalDomains: 2,
+            confirmedDomains: 1,
+            failedDomains: 1,
+            missingDomains: 0,
+          },
+          inventory: {
+            totalDomains: 2,
+            confirmedDomains: 2,
+            failedDomains: 0,
+            missingDomains: 0,
+          },
         },
-      },
-    });
+      });
 
-    const summary = await service.getSummary(user);
+      const summary = await service.getSummary(user);
 
-    expect(summary.assortmentGrowth.sources).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ key: 'sales', state: 'PARTIAL' }),
-        expect.objectContaining({ key: 'inventory', state: 'FRESH' }),
-      ]),
-    );
-  });
+      expect(summary.assortmentGrowth.sources).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ key: 'sales', state: 'PARTIAL' }),
+          expect.objectContaining({ key: 'inventory', state: inventoryState }),
+        ]),
+      );
+    },
+  );
 
   it('uses confirmed zero-sales days in the forecast history', async () => {
     jest.useFakeTimers();

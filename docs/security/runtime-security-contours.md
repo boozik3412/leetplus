@@ -2,12 +2,13 @@
 
 Статус: **канонический current-state contract**, актуально на **16.09.2026**.
 
-**Оперативное обновление 16.09, 15:00 UTC:** active GREEN `02acca…`, generation6,
-API6GiB/total8GiB; rollback BLUE `b5c033…`/API4GiB; data399/CURRENT191 unchanged.
-Serving controller02 принят отдельно. Native617 завершён, original timers
-восстановлены с gen6 grants, ordinary bonus receipts PASS. **Rendered `/dashboard`
-FAIL** из-за несовпадения структуры `assortment.data`; исправление projection
-подготовлено в source, ещё не выпущено. Текущие факты и ограничения выше имеют
+**Оперативное обновление 16.09, 16:44 UTC:** после отдельно согласованного возврата
+native0caaf active **BLUE `b5c033…`, generation7, API4GiB**. GREEN02/API6 сохранён
+с известным дефектом нового дашборда; data399/CURRENT191 и serving controller02
+не менялись. Real public browser desktop/390px PASS, оба исходных timer включены
+с валидными gen7 grants, ordinary bonus receipt PASS16:43:23. Новые dashboard и
+USER_CALL UI временно отсутствуют; исправление source6957 не прошло Full admission
+из-за устаревшего PG test expectation и ещё не выпущено. Текущие факты выше имеют
 приоритет над историческими checkpoint ниже.
 [Точные receipts, дефект и следующий gate](../deployment/executive-auth-production-2026-09-16.md).
 

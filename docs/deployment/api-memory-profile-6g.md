@@ -1,9 +1,10 @@
 # API 6 GiB resource profile
 
-Update 16 September, 15:00 UTC: controller bootstrap463 and application617 are
-accepted. Active GREEN02 uses6GiB RAM/8GiB total; rollback BLUEb5 stays4GiB.
-This does not establish full UI acceptance: the executive operations projection
-defect is recorded in [the application checkpoint](executive-auth-production-2026-09-16.md).
+Update 16 September, 16:44UTC: controller bootstrap463 is accepted. After the
+executive UI defect in application617, approved emergency0caaf restored active
+BLUEb5/API4GiB, generation7. Inactive GREEN02 retains6GiB RAM/8GiB total and its
+known UI defect. Controller02/data399 are unchanged; this is not a resource-profile
+rollback. [Actual recovery evidence](executive-auth-production-2026-09-16.md).
 The preparation notes below describe the state before these two operations.
 
 Status 16 September 2026: source preparation includes the profile, narrowly

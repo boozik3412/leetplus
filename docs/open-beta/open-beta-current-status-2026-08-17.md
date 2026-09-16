@@ -1,12 +1,12 @@
 # LeetPlus open beta — текущее состояние на 16.09.2026
 
-**Checkpoint 15:00 UTC:** GREEN02acca/gen6/API6GiB принят native617; rollback
-BLUEb5/API4GiB, data399/CURRENT191 и tenant/provider boundaries сохранены.
-Controller02 принят отдельно; original worker timers restored, ordinary gen6
-bonus receipts PASS. Реальный браузер выявил падение сводного дашборда из-за
-API/Web shape mismatch, поэтому полная UI-приёмка **FAIL**, исправление пока
-source-only. USER_CALL feedback присутствует в Web image; нового естественного
-phone/Telegram login proof нет. Внешний beta GO не выдавался.
+**Checkpoint 16:44 UTC:** отдельный human GO0caaf вернул рабочий **BLUEb5/gen7/API4GiB**.
+Data399/CURRENT191, controller02 и tenant/provider boundaries сохранены.
+Real public dashboard desktop/390px PASS; original worker timers включены,
+ordinary gen7 bonus receipt PASS16:43:23. GREEN02/API6 сохранён с известным UI-дефектом.
+Новый dashboard и USER_CALL feedback временно отсутствуют в публичной версии.
+Source fix6957 ещё не admitted: Full CI выявил устаревший PG assertion.
+Нового естественного phone/Telegram login proof и внешнего beta GO нет.
 [Текущее состояние и evidence](../deployment/executive-auth-production-2026-09-16.md).
 
 ## История до application rollout617

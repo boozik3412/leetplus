@@ -90,6 +90,32 @@ def metrics_valid(metrics):
     demand(0 <= receipt['operations']['covered'] <= receipt['operations']['total'], 'Invalid receipt coverage')
 
 
+def operations_valid(operations, scope):
+    demand(operations.get('scope') == scope, 'Operations scope differs')
+    assortment = operations.get('assortment')
+    demand(isinstance(assortment, dict), 'Operations assortment missing')
+    health = assortment.get('data')
+    if assortment.get('state') in ['FAILED', 'MISSING']:
+        demand(health is None and bool(assortment.get('reason')), 'Unavailable operations have no evidence')
+        return
+    demand(isinstance(health, dict) and not {'rows', 'summary'} & set(health),
+           'Operations must expose compact summary, not engine rows')
+    demand({'inventory', 'outOfStock', 'lowStock', 'noSales'} <= set(health),
+           'Operations summary metrics missing')
+    demand(isinstance(health['noSales'], dict) and {'7', '14', '21', '30'} <= set(health['noSales']),
+           'Operations no-sales windows missing')
+    for metric in [health['inventory'], health['outOfStock'], health['lowStock'], *health['noSales'].values()]:
+        demand(isinstance(metric, dict) and {'value', 'state', 'reason', 'coverage', 'asOf'} <= set(metric),
+               'Operations metric evidence missing')
+        demand(metric['state'] in ['AVAILABLE', 'PARTIAL', 'MISSING', 'STALE', 'FAILED', 'UNKNOWN'],
+               'Operations metric state invalid')
+        demand(metric['value'] is None or number(metric['value']), 'Operations value invalid')
+        if metric['value'] is None:
+            demand(bool(metric['reason']), 'Unknown operations metric has no reason')
+        if metric['state'] in ['MISSING', 'FAILED', 'UNKNOWN']:
+            demand(metric['value'] is None, 'Unknown operations metric became zero')
+
+
 def summary_valid(summary, stores, start, end):
     demand(sorted(summary['scope']['storeIds']) == sorted(stores), 'Executive scope differs')
     demand(summary['scope']['period']['from'] == start and summary['scope']['period']['to'] == end,
@@ -272,8 +298,7 @@ class Corpus:
         summary = self.ok(port, '/dashboard/executive-summary?' + query, label + '-summary', token)
         summary_valid(summary, stores, start, end)
         operations = self.ok(port, '/dashboard/executive-operations?' + query, label + '-operations', token)
-        demand(operations['scope'] == summary['scope'] and isinstance(operations.get('assortment'), dict),
-               'Operations scope differs')
+        operations_valid(operations, summary['scope'])
         assortment = self.ok(port, '/dashboard/summary?' + query + '&noSalesDays=21&skuGrouping=network',
                              label + '-assortment', token)
         demand(sorted(assortment['selectedStoreIds']) == sorted(stores) and

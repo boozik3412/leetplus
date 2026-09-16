@@ -1,11 +1,14 @@
 # Provider refresh and serving-controller handoff
 
-Status15.09.2026: **source candidate, not production deployment**. The last
-verified application is blueb5c033/generation5, rollbackgreen05cad9cd;
-dataRelease and installed controller are399876 until actual handoff acceptance.
+Status16.09.2026: **controller-only handoff accepted on892b25b9**, operation
+`b3da9232-4dcf-4acd-8f94-d00141dedc53`, receipt `f99487e1…`, accepted08:15:02.621UTC.
+The verified application remains blueb5c033/generation5, rollbackgreen05cad9cd;
+dataRelease remains399876. The previous399 controller root is historical,
+non-serving and retained only for recovery; it is distinct from the current dataRelease.
 USER_CALL/executive application code is not implicitly deployed by this operation.
+[Measured acceptance and remaining limits](network-refresh-controller-production-2026-09-16.md).
 
-### Snapshot ordering repair, 16.09.2026 (source only)
+### Snapshot ordering repair, 16.09.2026 (included in accepted892b controller)
 
 The prepared d7d799dd controller has not been activated. Read-only production
 inspection exposed nondeterministic Docker `Mounts` ordering: unchanged

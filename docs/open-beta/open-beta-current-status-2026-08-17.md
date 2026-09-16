@@ -1,20 +1,23 @@
-# LeetPlus open beta — текущее состояние на 15.09.2026
+# LeetPlus open beta — текущее состояние на 16.09.2026
 
-Source candidate15.09: постоянный ремонт provider network refresh и отдельное
-подписанное переключение serving controller, без app/data rollout и без
-остановки таймеров. Установленным он пока не считается; runtimeb5/gen5 и
-data/control399876 ниже остаются последним подтверждённым состоянием.
+Serving controller `892b25b9…` принят 16.09 в08:15:02.621UTC по отдельному
+signed handoff `b3da9232…`, receipt `f99487e1…`. Это controller-only переход:
+приложение остаётся blueb5/gen5, rollbackgreen05; dataRelease399876. Full approved
+snapshot не изменился, плановых рестартов API/Web/PG и остановки таймеров не было.
 Внешний beta GO, tenant/provider scope, guest identity и награды не меняются.
 Interrupted/expired handoff сохраняет только доказанное право на undo;
 pending network install доступен лишь штатному boot unit с signed app history.
 [Порядок переключения и проверки](../deployment/network-refresh-control-handoff.md).
+[Actual acceptance и backup](../deployment/network-refresh-controller-production-2026-09-16.md).
 
-Source repair16.09: подготовленный controller d7d799dd не активирован — preflight
+Выпущенный controller repair16.09: подготовленный d7d799dd не активировался — preflight
 выявил случайный порядок Docker Mounts в configuration fingerprint. Исправление
 стабилизирует только порядок mount collection/ключей objects и сохраняет все
 поля, остальные массивы и проверки реальных изменений. Старый plan не правится;
-нужны новый exact-main admission и native plan с отдельным GO. Время оператора
-и сервера проверяется до подписи; runtime/control/data остаются прежними.
+для892b получены новый exact-main admission, native plan и отдельный GO. Время
+оператора исправлено штатным NTP и проверено до подписи. Независимый pre-handoff
+OOM/restart api-blue07:04:54UTC учтён в новом snapshot, а не скрыт как unchanged;
+лимиты памяти не менялись. Новый executive/USER_CALL app rollout этим не выполнен.
 
 Source-only USER_CALL modal follow-up15.09: видимые countdown/error/expiry,
 явный retry и переход к READY Telegram. Backend phone proof/provider/TTL,
@@ -33,8 +36,8 @@ cookie и worker scope неизменны; новая production-выкладк�
 
 Сайт перенесён на1337 (`192.168.1.137` / public `188.234.220.76`). Exact
 `b5c03360941e1e5d59fe83f334b8dc29c2eced3b` обслуживается active blue,
-green `05cad9cd1611c014453603475e8e1ba4c953f839` сохранён hot rollback; accepted Compose generation5. Data/control399876
-не заменялись при app rollout. Source VDS6097 теперь
+green `05cad9cd1611c014453603475e8e1ba4c953f839` сохранён hot rollback; accepted Compose generation5. Data399876
+не заменялась; controller отдельно обновлён на892b16.09. Source VDS6097 теперь
 HTTPS proxy с persistently masked БД/приложениями и disabled worker timers.
 DNS root/www/api подтверждён на master/NS5/NS6/Google/Cloudflare 11.09 в12:16:23UTC.
 
@@ -48,9 +51,10 @@ dormant split runtime. Данные внешнего пилота и ключ е
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision   | Прежние отдельные gates массового открытого запуска сохраняются; controlled onboarding доступен в разрешённых pilot tenant      |
 | Production runtime | Exactb5c033, active blue + hot rollback green05cad9cd, generation5 на1337                                                       |
+| Serving controller | Exact892b25b9; native signed handoff accepted16.09, app/data/grants unchanged; отдельный16.09 checkpoint                        |
 | Release authority  | Fast34878469493/Full34878469338 PASS, native operation9f793938… all five phases complete and postcheck PASS                     |
 | Prisma schema      | CURRENT191, `20260908180000_external_langame_simple_onboarding`, unfinished0; bridgeOFF/reportingLIVE                           |
-| Workers            | Daily and bonus native CANARY PASS; original profiles restored, daily/bonus TIMER grants enabled on gen5/b5; final off-host backup PASS, deployment closed |
+| Workers            | Daily/bonus grants enabled on gen5/b5; app rollout14.09 and its historical backup closed; current controller/backup acceptance is in16.09 checkpoint |
 | User acceptance    | Natural Telegram canary подтверждён11.09; на14.09 corporate и operator guest diagnostic/cross-token PASS, не новый natural login |
 | Tenant acceptance  | Native acceptance exact4 demo Store; customer tenant/store ownership не менялся                                                 |
 | Platform admin     | `/administration` → явный подписанный tenant context; role-aware landing сохраняется                                            |

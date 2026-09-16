@@ -1,25 +1,29 @@
 # Runtime и security-контуры LeetPlus
 
-Статус: **канонический current-state contract**, актуально на **15.09.2026**.
+Статус: **канонический current-state contract**, актуально на **16.09.2026**.
 
-### Source candidate15.09: надёжное обновление provider network
+### Serving controller обновлён 16.09.2026; приложение не переключалось
 
-Ещё не deployed: exact refresh получает shared control lock и отдельный
-exclusive singleton, сохраняя public-IP allowlist, TTL3600 и atomic swaps.
-Подготовлен signed serving-controller-only handoff: отдельный staged root,
-один atomic core pointer, только retry-параметры refresh unit, без остановки
-API/Web/PG или таймеров. Active app/data/grant/config/process identities
-не меняются; source/CI не заменяют exact admission и production GO.
+В 08:15:02.621 UTC принят signed controller-only handoff на exact
+`892b25b9fe5ebc8d0c20a7874a77ac312b7a0978`: operation `b3da9232…`, receipt
+`f99487e1…`. Independent postcheck подтвердил serving pointer, подпись,
+отсутствие pending и неизменность полного approved snapshot. Приложение осталось
+blue `b5c033…`, generation5, rollback green `05cad9cd…`; dataRelease PG/Redis —
+`399876…`. API/Web/PG и таймеры этой операцией не перезапускались.
+Exact refresh теперь получает shared control lock и отдельный exclusive singleton,
+сохраняя public-IP allowlist, TTL3600, atomic swaps и default-deny. Из unit изменены
+только согласованные retry-параметры refresh service; worker grants не менялись.
 Accepted и provisional signed-intent lifecycle authority различаются;
 pending handoff не разрешает новый app deployment. Manual rollback требует
 отдельного receipt-bound approval. Истёкший незавершённый forward intent
 разрешает только возврат собственных effects, не новую активацию; pending network
 install разрешён лишь прежнему boot unit по kernel cgroup и signed app history.
-Последнее фактическое состояние ниже
-остаётся b5/gen5, data/control399876 до реального handoff и postcheck.
+Наблюдение ordinary refresh cycles и post-handoff backup фиксируется отдельно:
+[production checkpoint 16.09](../deployment/network-refresh-controller-production-2026-09-16.md).
+Контроллер `892b` не означает выпуск содержащегося в том же source нового приложения.
 [Контракт, rollback и acceptance](../deployment/network-refresh-control-handoff.md).
 
-Source repair16.09: preflight обнаружил ложный drift из-за меняющегося порядка
+Вошедший в serving892b repair16.09: preflight обнаружил ложный drift из-за меняющегося порядка
 Docker `Mounts`; переключение d7d799dd не запускалось. Fingerprint конфигурации
 сортирует только этот неупорядоченный список по unique canonical POSIX Destination
 и ключи JSON objects, сохраняя все поля и порядок остальных массивов. Дубликаты
@@ -27,13 +31,16 @@ Docker `Mounts`; переключение d7d799dd не запускалось. 
 Signed canonical records не меняются: нужны новый admitted artifact и новый
 native plan, а не переписывание старого snapshot или retry до случайного PASS.
 Расхождение часов проверяется до подписи, без backdating и расширения TTL approval.
-Это пока source-only; appb5/gen5, serving control/data399876 не изменены.
+Новый native plan закрепил post-OOM baseline: независимый automatic restart
+api-blue в 07:04:54 UTC произошёл до handoff. Это не эффект переключения;
+лимит API4GiB не менялся, причина конкретного OOM-triggering запроса не установлена.
+Windows clock исправлен штатным NTP после отдельного разрешения, без backdating.
 
 Фактический перенос на сервер1337 выполнен по отдельному разрешению владельца.
 Новый узел `192.168.1.137`, public `188.234.220.76`, после rollout 15.09.2026
 обслуживает exact `b5c03360941e1e5d59fe83f334b8dc29c2eced3b`: active blue,
 hot rollback green `05cad9cd1611c014453603475e8e1ba4c953f839`, accepted Compose
-generation5. Installed control и dataRelease PG/Redis остаются399876. PostgreSQL16.13 на новом узле — единственный
+generation5. Serving control —892b после отдельного handoff16.09; dataRelease PG/Redis остаётся399876. PostgreSQL16.13 на новом узле — единственный
 primary; физическая схема и оба API — `CURRENT_191/191`, bridge `OFF`, reporting
 `LIVE`. Старый VDS `168.222.143.243` работает только как HTTPS proxy;
 PostgreSQL и четыре старых API/Web unit остановлены и persistently masked,
@@ -52,12 +59,13 @@ PostgreSQL и четыре старых API/Web unit остановлены и p
 | Область              | Фактическое состояние                                                                                                                               |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Runtime и admission  | Exactb5c033; Fast34878469493 и Full34878469338 PASS; operation9f793938… complete all five phases, native postcheck PASS, generation5               |
+| Serving controller   | Exact892b25b9; Fast35068523966 и Full35068524012 PASS; signed handoffb3da9232, receiptf99487e1, app/data/grants unchanged; details in16.09 checkpoint |
 | Процессы             | Docker COMBINED blue/green API/Web, localhost ports; public/corporate guards и worker authority сохраняют разные границы                            |
 | База                 | Единственный PG16.13 primary на1337, CURRENT191; прежние owners и restricted runtime grants сохранены                                               |
 | Data baseline        | Отдельные `dataRelease`/`dataAdmissionSha256`; app rollout не заменяет PG/Redis images                                                              |
 | Сеть                 | Per-slot loopback ingress, internal data bridge, V2 firewall и exact provider policy; Web не получает API/worker egress                             |
 | Часы и ресурсы       | PG/API/Web Europe/Moscow, workers UTC; PG en_US.UTF-8/English search; API4GiB, Web1GiB; daily45min, bonus16min                                      |
-| Workers              | Daily and bonus native CANARY PASS; original profiles restored, daily/bonus TIMER grants enabled on gen5/b5; final off-host backup PASS, deployment closed |
+| Workers              | Daily/bonus grants enabled on gen5/b5; app rollout14.09 and its historical backup closed; current controller/backup acceptance is in16.09 checkpoint |
 | Telegram             | Тот же единственный poller/state; natural user canary PASS от11.09. На14.09 новый естественный вход не проверялся; operator diagnostic не заменяет его |
 | HTTPS                | Root/www/api Certbot webroot на1337, сертификат до10.12.2026; native renew dry-run PASS; scoped copy/reload hook                                    |
 | Резервирование       | Ежедневный encrypted backup06:00 Yekaterinburg, Windows pull07:00 и logon; финальная копия и restore evidence указаны в отчёте                      |

@@ -35,7 +35,15 @@ import { RolesGuard } from '../src/auth/roles.guard';
 import { CategoriesService } from '../src/categories/categories.service';
 import { AssortmentHealthLoaderService } from '../src/common/assortment-health-loader.service';
 import { DashboardController } from '../src/dashboard/dashboard.controller';
-import { DashboardService } from '../src/dashboard/dashboard.service';
+import {
+  DashboardService,
+  type DashboardExecutiveSummary,
+  type DashboardExecutiveOperations,
+} from '../src/dashboard/dashboard.service';
+import type {
+  StaffPrioritySummary,
+  StaffPriorityDetails,
+} from '../src/staff/staff-priorities.contract';
 import { FactCsvImportService } from '../src/imports/fact-csv-import.service';
 import { ProductCsvImportService } from '../src/imports/product-csv-import.service';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -229,17 +237,18 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
         .get('/staff/operations-dashboard/priorities')
         .query({ storeIds: fixture.storeA1Id, dateFrom: '1999-01-01' })
         .expect(200);
-      expect(read.body.metrics.TASKS_OVERDUE).toMatchObject({
+      const readBody = JSON.parse(read.text) as StaffPrioritySummary;
+      expect(readBody.metrics.TASKS_OVERDUE).toMatchObject({
         state: 'AVAILABLE',
         value: 2,
       });
-      expect(read.body.metrics.CHECKLISTS_OVERDUE.value).toBe(4);
-      expect(read.body.metrics.CHECKLISTS_REVIEW.value).toBe(1);
-      expect(read.body.metrics.TRAINING_INCOMPLETE).toMatchObject({
+      expect(readBody.metrics.CHECKLISTS_OVERDUE.value).toBe(4);
+      expect(readBody.metrics.CHECKLISTS_REVIEW.value).toBe(1);
+      expect(readBody.metrics.TRAINING_INCOMPLETE).toMatchObject({
         state: 'AVAILABLE',
         value: 1,
       });
-      expect(read.body.scope).toEqual({
+      expect(readBody.scope).toEqual({
         storeIds: [fixture.storeA1Id],
         includesNetworkAssignments: false,
       });
@@ -247,24 +256,28 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
         .get('/staff/operations-dashboard/priorities/items')
         .query({ storeIds: fixture.storeA1Id, kind: 'TASKS_OVERDUE', limit: 1 })
         .expect(200);
-      expect(details.body.items).toHaveLength(1);
+      const detailsBody = JSON.parse(details.text) as StaffPriorityDetails;
+      expect(detailsBody.items).toHaveLength(1);
+      expect(typeof detailsBody.page.nextCursor).toBe('string');
       const second = await request(server)
         .get('/staff/operations-dashboard/priorities/items')
         .query({
           storeIds: fixture.storeA1Id,
           kind: 'TASKS_OVERDUE',
           limit: 1,
-          cursor: details.body.page.nextCursor,
+          cursor: detailsBody.page.nextCursor,
         })
         .expect(200);
-      expect(second.body.items).toHaveLength(1);
-      expect(second.body.items[0].id).not.toBe(details.body.items[0].id);
-      expect(second.body.page.hasMore).toBe(false);
+      const secondBody = JSON.parse(second.text) as StaffPriorityDetails;
+      expect(secondBody.items).toHaveLength(1);
+      expect(secondBody.items[0].id).not.toBe(detailsBody.items[0].id);
+      expect(secondBody.page.hasMore).toBe(false);
       const profile = await request(server)
         .get('/staff/operations-dashboard/priorities/items')
         .query({ storeIds: fixture.storeA1Id, kind: 'TRAINING_INCOMPLETE' })
         .expect(200);
-      expect(profile.body.items[0]).toMatchObject({
+      const profileBody = JSON.parse(profile.text) as StaffPriorityDetails;
+      expect(profileBody.items[0]).toMatchObject({
         id: fixture.userA1Id,
         missingCourses: [{ id: course.id, title: course.title }],
       });
@@ -276,8 +289,9 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
       const all = await request(server)
         .get('/staff/operations-dashboard/priorities')
         .expect(200);
-      expect(all.body.metrics.TASKS_OVERDUE.value).toBe(4);
-      expect(all.body.metrics.TRAINING_INCOMPLETE.value).toBe(2);
+      const allBody = JSON.parse(all.text) as StaffPrioritySummary;
+      expect(allBody.metrics.TASKS_OVERDUE.value).toBe(4);
+      expect(allBody.metrics.TRAINING_INCOMPLETE.value).toBe(2);
       await request(server)
         .get('/staff/operations-dashboard/priorities')
         .query({ storeIds: fixture.storeB1Id })
@@ -287,7 +301,7 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
         .query({
           storeIds: fixture.storeA2Id,
           kind: 'TASKS_OVERDUE',
-          cursor: details.body.page.nextCursor,
+          cursor: detailsBody.page.nextCursor,
         })
         .expect(400);
       currentUser = buildUser(fixture, 'A1');
@@ -1276,12 +1290,13 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
       const summary = await request(httpServer)
         .get(`/dashboard/executive-summary?${currentQuery}`)
         .expect(200);
-      expect(summary.body.scope.storeIds).toEqual([
+      const summaryBody = JSON.parse(summary.text) as DashboardExecutiveSummary;
+      expect(summaryBody.scope.storeIds).toEqual([
         fixture.storeA1Id,
         fixture.storeA2Id,
       ]);
-      expect(summary.body.scope.storeIds).not.toContain(fixture.storeB1Id);
-      expect(summary.body.metrics.productRevenue).toMatchObject({
+      expect(summaryBody.scope.storeIds).not.toContain(fixture.storeB1Id);
+      expect(summaryBody.metrics.productRevenue).toMatchObject({
         value: 10,
         state: 'PARTIAL',
         coverage: {
@@ -1291,26 +1306,20 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
           basis: 'STORE_DAYS',
         },
       });
-      expect(summary.body.clubs).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            storeId: fixture.storeA1Id,
-            metrics: expect.objectContaining({
-              productRevenue: expect.objectContaining({ value: 10 }),
-            }),
-          }),
-          expect.objectContaining({
-            storeId: fixture.storeA2Id,
-            metrics: expect.objectContaining({
-              productRevenue: expect.objectContaining({
-                value: null,
-                state: 'MISSING',
-              }),
-            }),
-          }),
-        ]),
-      );
-      expect(summary.body.metrics.visits).toMatchObject({
+      expect(summaryBody.clubs).toHaveLength(2);
+      expect(
+        summaryBody.clubs.find((club) => club.storeId === fixture.storeA1Id),
+      ).toMatchObject({
+        storeId: fixture.storeA1Id,
+        metrics: { productRevenue: { value: 10 } },
+      });
+      expect(
+        summaryBody.clubs.find((club) => club.storeId === fixture.storeA2Id),
+      ).toMatchObject({
+        storeId: fixture.storeA2Id,
+        metrics: { productRevenue: { value: null, state: 'MISSING' } },
+      });
+      expect(summaryBody.metrics.visits).toMatchObject({
         value: 1,
         state: 'PARTIAL',
         coverage: {
@@ -1320,7 +1329,7 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
           basis: 'STORE_SESSIONS',
         },
       });
-      expect(summary.body.metrics).toMatchObject({
+      expect(summaryBody.metrics).toMatchObject({
         serviceRevenue: { value: null, state: 'MISSING' },
         topups: { value: null, state: 'MISSING' },
         load: { value: null, state: 'MISSING' },
@@ -1341,31 +1350,27 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
       const operations = await request(httpServer)
         .get(`/dashboard/executive-operations?${currentQuery}`)
         .expect(200);
-      expect(operations.body.scope).toEqual(summary.body.scope);
-      expect(operations.body.assortment).toEqual(
-        expect.objectContaining({
-          state: expect.any(String),
-          data: expect.objectContaining({
-            summary: expect.objectContaining({
-              writeOffQuantity: expect.objectContaining({
-                value: null,
-                state: 'MISSING',
-              }),
-              writeOffAmount: expect.objectContaining({
-                value: null,
-                state: 'MISSING',
-              }),
-            }),
-          }),
-        }),
-      );
+      const operationsBody = JSON.parse(
+        operations.text,
+      ) as DashboardExecutiveOperations;
+      expect(operationsBody.scope).toEqual(summaryBody.scope);
+      expect(typeof operationsBody.assortment.state).toBe('string');
+      expect(operationsBody.assortment).toMatchObject({
+        data: {
+          summary: {
+            writeOffQuantity: { value: null, state: 'MISSING' },
+            writeOffAmount: { value: null, state: 'MISSING' },
+          },
+        },
+      });
 
       const empty = await request(httpServer)
         .get(
           `/dashboard/executive-summary?period=custom&dateFrom=2026-09-09&dateTo=2026-09-09&storeIds=${fixture.storeA1Id}&asOf=2026-09-09T23%3A59%3A59.999Z`,
         )
         .expect(200);
-      expect(empty.body.metrics.productRevenue).toMatchObject({
+      const emptyBody = JSON.parse(empty.text) as DashboardExecutiveSummary;
+      expect(emptyBody.metrics.productRevenue).toMatchObject({
         value: null,
         state: 'MISSING',
       });
@@ -1382,8 +1387,11 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
           '/dashboard/executive-summary?period=custom&dateFrom=2026-09-07&dateTo=2026-09-08',
         )
         .expect(200);
-      expect(storeOnly.body.scope.storeIds).toEqual([fixture.storeA1Id]);
-      expect(JSON.stringify(storeOnly.body)).not.toContain(fixture.storeA2Id);
+      const storeOnlyBody = JSON.parse(
+        storeOnly.text,
+      ) as DashboardExecutiveSummary;
+      expect(storeOnlyBody.scope.storeIds).toEqual([fixture.storeA1Id]);
+      expect(JSON.stringify(storeOnlyBody)).not.toContain(fixture.storeA2Id);
       await request(httpServer)
         .get(
           `/dashboard/executive-summary?period=custom&dateFrom=2026-09-07&dateTo=2026-09-08&storeIds=${fixture.storeA2Id}`,

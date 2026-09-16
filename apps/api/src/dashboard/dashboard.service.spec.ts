@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { bindReceiptIdentityToSourceHash } from '../common/receipt-source-identity';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
+import { buildAssortmentHealth } from '../common/assortment-health';
 
 const nativeDateTimeFormat = Intl.DateTimeFormat;
 
@@ -1110,6 +1111,40 @@ describe('DashboardService', () => {
       comparison: null,
     });
     expect(operations.scope).toEqual(summary.scope);
+  });
+
+  it('serializes executive operations as the compact Web health contract, not engine rows', async () => {
+    mockEmptyDashboardData();
+    const health = buildAssortmentHealth({
+      asOf: new Date('2026-09-14T12:00:00.000Z'),
+      period: {
+        from: new Date('2026-08-15T00:00:00.000Z'),
+        to: new Date('2026-09-14T12:00:00.000Z'),
+      },
+      stores: [{ id: 'store-1', tenantId: 'tenant-demo', isActive: true }],
+      products: [{ id: 'cola', isActive: true, orderMultiplicity: 1 }],
+      inventorySnapshots: [],
+      sales: [],
+      salesCoverage: [],
+    });
+    expect(health.rows).toHaveLength(1);
+    assortmentHealthLoader.load.mockResolvedValue({ health });
+    const operations = await service.getExecutiveOperations(user, {
+      period: 'full-day',
+    });
+    const wire = JSON.parse(JSON.stringify(operations)) as {
+      assortment: { data: Record<string, unknown> };
+    };
+    expect(wire.assortment.data).toEqual(health.summary);
+    expect(wire.assortment.data).not.toHaveProperty('rows');
+    expect(wire.assortment.data).not.toHaveProperty('summary');
+    expect(wire.assortment.data.outOfStock).toMatchObject({
+      value: null,
+      state: 'MISSING',
+      reason: expect.any(String),
+      coverage: expect.any(Object),
+    });
+    expect(wire.assortment.data.noSales).toEqual(health.summary.noSales);
   });
 
   it('adds compact assortment health to the existing summary contract', async () => {

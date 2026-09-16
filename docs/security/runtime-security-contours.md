@@ -2,6 +2,17 @@
 
 Статус: **канонический current-state contract**, актуально на **16.09.2026**.
 
+**Оперативное обновление 16.09, 15:00 UTC:** active GREEN `02acca…`, generation6,
+API6GiB/total8GiB; rollback BLUE `b5c033…`/API4GiB; data399/CURRENT191 unchanged.
+Serving controller02 принят отдельно. Native617 завершён, original timers
+восстановлены с gen6 grants, ordinary bonus receipts PASS. **Rendered `/dashboard`
+FAIL** из-за несовпадения структуры `assortment.data`; исправление projection
+подготовлено в source, ещё не выпущено. Текущие факты и ограничения выше имеют
+приоритет над историческими checkpoint ниже.
+[Точные receipts, дефект и следующий gate](../deployment/executive-auth-production-2026-09-16.md).
+
+### История до application rollout617
+
 Source-only memory candidate16.09: подготовлен release-bound `API_6G_V1` для API
 6GiB с total RAM+swap8GiB; отсутствие профиля сохраняет исторические4GiB Compose
 bytes. CPU/heap/другие роли не меняются. Production лимиты ещё4GiB. Native

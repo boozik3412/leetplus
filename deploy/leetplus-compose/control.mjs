@@ -10,6 +10,8 @@ import { validateWorkerGrant } from './worker-authority.mjs';
 import { controlLockPolicy, verifyKernelControlLocks } from './control-locks.mjs';
 import { validateControlHandoffAuthority, validatePendingControlHandoffAuthority } from './control-handoff-authority.mjs';
 import { validatePendingNetworkBootAuthority } from './control-handoff-runtime.mjs';
+import { requireResourceBudget, verifyResourceAcceptance } from './resource-budget.mjs';
+import { reconcileBoundEvidence } from './bind-reconcile.mjs';
 
 const STATE = '/var/lib/leetplus-compose';
 const ROOT = '/srv/leetplus';
@@ -254,6 +256,9 @@ function driverFor(dir) {
         demand(digest(receipt) === hash, `${name} evidence changed`);
         const value = JSON.parse(receipt);
         demand(value.decision === 'PASS' && value.releaseSha === p[p.targetSlot].releaseSha, `${name} did not accept this release`);
+        if (name === 'rehearsal' && p[p.targetSlot].apiResourceProfile) {
+          verifyResourceAcceptance(value, p[p.targetSlot]);
+        }
         if (name === 'migration') demand(value.sourceFenced === true && value.targetPromoted === true && value.finalLsnReplayed === true, 'Migration does not establish a single writer');
       }
     },
@@ -270,14 +275,16 @@ function driverFor(dir) {
         return { ...bound, images: p[p.targetSlot].images };
       }
       if (phase === 'BIND') {
+        const resourceBudget = p[p.targetSlot].apiResourceProfile ? requireResourceBudget(spec, docker) : null;
         publish(`${dir}/target-fence.json`, { planSha256: digest(p), slot: p.targetSlot });
         if (fs.existsSync(`${ROOT}/compose.json`)) compose(['stop', `api-${p.targetSlot}`, `web-${p.targetSlot}`]);
         replace(`${ROOT}/compose.json`, canonical(spec));
         compose(['up', '--no-start', '--no-deps', '--force-recreate', `api-${p.targetSlot}`, `web-${p.targetSlot}`]);
         for (const role of ['api', 'web']) demand(docker(['inspect', '--format', '{{.State.Running}}', `leetplus-${role}-${p.targetSlot}`]) === 'false', 'Target did not stop');
-        return { ...bound, composeSha256: digest(spec), slot: p.targetSlot };
+        return { ...bound, composeSha256: digest(spec), slot: p.targetSlot, ...(resourceBudget ? { resourceBudget } : {}) };
       }
       if (phase === 'SMOKE') {
+        const resourceBudget = p[p.targetSlot].apiResourceProfile ? requireResourceBudget(spec, docker) : null;
         compose(['up', '--detach', '--no-deps', `api-${p.targetSlot}`, `web-${p.targetSlot}`]);
         const deadline = Date.now() + 120000;
         let observed;
@@ -285,7 +292,7 @@ function driverFor(dir) {
           try { observed = probeSlot(p, p.targetSlot); break; } catch { await new Promise(resolve => setTimeout(resolve, 1500)); }
         } while (Date.now() < deadline);
         demand(observed, 'Target did not become healthy before deadline');
-        return { ...bound, observed, authenticated: authenticatedSmoke(p.targetSlot) };
+        return { ...bound, observed, authenticated: authenticatedSmoke(p.targetSlot), ...(resourceBudget ? { resourceBudget } : {}) };
       }
       if (phase === 'CUTOVER') {
         probeSlot(p, p.targetSlot); authenticatedSmoke(p.targetSlot);
@@ -320,6 +327,21 @@ function driverFor(dir) {
       if (phase === 'CUTOVER' && active()?.operationId === p.operationId) {
         demand(acceptedLink(p.targetSlot), 'Committed cutover link drift'); probeSlot(p, p.targetSlot);
         return { phase, planSha256: digest(p), generation: p.generation + 1, slot: p.targetSlot };
+      }
+      if (phase === 'BIND') {
+        const record = await storeFor(dir).read();
+        if (record.records.BIND?.evidence) {
+          const spec = renderCompose({ blue: p.blue, green: p.green, dataRelease: p.dataRelease, activeSlot: p.targetSlot });
+          if (p[p.targetSlot].apiResourceProfile) requireResourceBudget(spec, docker);
+          return reconcileBoundEvidence({ plan: p, spec, evidence: record.records.BIND.evidence,
+            composeSha256: digest(safeFile(`${ROOT}/compose.json`)), fence: readJSON(`${dir}/target-fence.json`, { immutable: true }),
+            assertStoppedConfiguration: name => {
+              const service = spec.services[name], item = docker(['inspect', service.container_name], { json: true })[0];
+              demand(item.State.Running === false, 'BIND target unexpectedly running before its receipt');
+              const imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
+              verifyContainer(item, service, name, { imageEnvironment, configurationOnly: true });
+            } });
+        }
       }
       if (phase === 'SMOKE') {
         const record = await storeFor(dir).read();
@@ -397,7 +419,9 @@ if (command === 'help' || !command) {
     plan.secretDigests = Object.fromEntries(['acceptance.json', 'api-blue.json', 'api-green.json', 'db-ca.pem'].map(leaf => [leaf, digest(safeFile(`${ROOT}/secrets/${leaf}`))]));
     plan.networkPolicySha256 = digest(safeFile('/etc/leetplus-compose/providers.json'));
     plan.databaseIdentitySha256 = digest(databaseIdentity());
-    plan.composeSha256 = digest(renderCompose({ blue: plan.blue, green: plan.green, dataRelease: plan.dataRelease, activeSlot: plan.targetSlot }));
+    const plannedCompose = renderCompose({ blue: plan.blue, green: plan.green, dataRelease: plan.dataRelease, activeSlot: plan.targetSlot });
+    plan.composeSha256 = digest(plannedCompose);
+    if (plan[plan.targetSlot].apiResourceProfile) plan.resourceBudget = requireResourceBudget(plannedCompose, docker);
     validatePlan(plan);
     const dir = operation(id); directory(dir); publish(`${dir}/plan.json`, plan);
     console.log(canonical({ decision: 'PREPARED_NOT_AUTHORIZATION', operationId: id, planSha256: digest(plan), planPath: `${dir}/plan.json` }));

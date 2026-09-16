@@ -2,13 +2,16 @@
 import argparse
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from backup_crypto import dpapi, write_exclusive
 import base64
+
+CONTROL_HANDOFF_CONTRACT = 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1'
+RESOURCE_PROFILE_BOOTSTRAP = 'RESOURCE_PROFILE_BOOTSTRAP'
+PREDECESSOR_CONTROL_SHA = '892b25b9fe5ebc8d0c20a7874a77ac312b7a0978'
+PREDECESSOR_CONTRACT_SHA256 = 'bba588a506cee3dc6c03a0b93f25291a4dd5f36c1d05fb79d83128bf0276f79d'
 
 
 def canonical(value):
@@ -17,6 +20,18 @@ def canonical(value):
 
 def iso(value):
     return value.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+
+
+def validate_control_handoff_plan(value):
+    if value.get('contract') != CONTROL_HANDOFF_CONTRACT + '_PLAN' or value.get('applicationRestartAllowed') is not False or value.get('timersMayBeStopped') is not False or value.get('rollbackAllowed') is not True:
+        raise SystemExit('Unsupported serving-controller-only plan')
+    action = value.get('action')
+    if action == 'CONTROL_HANDOFF':
+        return action
+    new_release = value.get('newReleaseSha')
+    if action != RESOURCE_PROFILE_BOOTSTRAP or value.get('oldReleaseSha') != PREDECESSOR_CONTROL_SHA or not isinstance(new_release, str) or not re.fullmatch('[a-f0-9]{40}', new_release) or new_release == PREDECESSOR_CONTROL_SHA or value.get('predecessorControlSha') != PREDECESSOR_CONTROL_SHA or value.get('predecessorContractSha256') != PREDECESSOR_CONTRACT_SHA256 or value.get('legacyProfile') != 'LEGACY_4G' or value.get('targetProfile') != 'API_6G_V1' or value.get('historicalComposeIdentityVerified') is not True or value.get('resourceLimitMutationAllowed') is not False:
+        raise SystemExit('Unsupported resource-profile bootstrap plan')
+    return action
 
 
 parser = argparse.ArgumentParser()
@@ -29,6 +44,9 @@ parser.add_argument('--confirm')
 parser.add_argument('--receipt')
 args = parser.parse_args()
 if args.command == 'keygen':
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from backup_crypto import dpapi, write_exclusive
     if Path(args.private).exists() or Path(args.public).exists():
         raise SystemExit('Existing signing keys must not be overwritten')
     key = Ed25519PrivateKey.generate()
@@ -43,6 +61,7 @@ else:
     if raw != canonical(value):
         raise SystemExit('Only canonical LF JSON may be signed')
     fingerprint = hashlib.sha256(raw).hexdigest()
+    control_action = validate_control_handoff_plan(value) if args.command in ['sign-control-handoff', 'sign-control-rollback'] else None
     identity = value.get('operationId') if args.command in ['sign-plan', 'sign-control-handoff', 'sign-control-rollback'] else value.get('id')
     expected_confirmation = f'GO {identity} {fingerprint}'
     rollback_receipt_sha = None
@@ -57,17 +76,20 @@ else:
         expected_confirmation = f'ROLLBACK {identity} {fingerprint} {rollback_receipt_sha}'
     if args.confirm != expected_confirmation:
         raise SystemExit('Exact operation/id and digest confirmation required after production GO')
+    # Scope rejection has no cryptography/runtime dependency and occurs before
+    # private-key access; pure CI negatives need neither keys nor DPAPI.
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from backup_crypto import dpapi, write_exclusive
     key = serialization.load_pem_private_key(dpapi(Path(args.private).read_bytes(), decrypt=True), password=None)
     if not isinstance(key, Ed25519PrivateKey):
         raise SystemExit('Expected dedicated Ed25519 deployment key')
     if args.command in ['sign-control-handoff', 'sign-control-rollback']:
-        base = 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1'
-        if value.get('contract') != base + '_PLAN' or value.get('action') != 'CONTROL_HANDOFF' or value.get('applicationRestartAllowed') is not False or value.get('timersMayBeStopped') is not False or value.get('rollbackAllowed') is not True:
-            raise SystemExit('Unsupported serving-controller-only plan')
+        base = CONTROL_HANDOFF_CONTRACT
         now = datetime.now(timezone.utc)
         reverse = args.command == 'sign-control-rollback'
         approval = {'contract': base + ('_ROLLBACK_APPROVAL' if reverse else '_APPROVAL'), 'operationId': identity,
-                    'action': 'CONTROL_ROLLBACK' if reverse else 'CONTROL_HANDOFF', 'hostIdentitySha256': value['hostIdentitySha256'],
+                    'action': 'CONTROL_ROLLBACK' if reverse else control_action, 'hostIdentitySha256': value['hostIdentitySha256'],
                     'planSha256': fingerprint, 'issuedAt': iso(now), 'expiresAt': iso(now + timedelta(hours=4))}
         if reverse:
             approval['receiptSha256'] = rollback_receipt_sha

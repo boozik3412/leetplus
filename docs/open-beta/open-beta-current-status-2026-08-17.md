@@ -1,5 +1,14 @@
 # LeetPlus open beta — текущее состояние на 16.09.2026
 
+Source-only candidate API6GiB: профиль, narrow signed renderer transition,
+production budget gate и bounded-monitored rehearsal подготовлены; production
+остаётся4GiB. По делегированному выбору ресурсного окна тест планируется на
+существующем сервере с независимым watchdog/clone-only cleanup, без остановки
+чужих проектов. Это не worst-case memory guarantee. До exact admission,
+actual6GiB acceptance и отдельного signed GO изменение не разворачивается.
+Внешний beta GO этим не выдаётся.
+[Контракт, расчёт и незавершённые этапы](../deployment/api-memory-profile-6g.md).
+
 Serving controller `892b25b9…` принят 16.09 в08:15:02.621UTC по отдельному
 signed handoff `b3da9232…`, receipt `f99487e1…`. Это controller-only переход:
 приложение остаётся blueb5/gen5, rollbackgreen05; dataRelease399876. Full approved

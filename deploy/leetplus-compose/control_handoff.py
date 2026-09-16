@@ -38,6 +38,11 @@ TIMERS = ('leetplus-compose-bonus.timer', 'leetplus-compose-daily.timer')
 CONTAINERS = ('leetplus-api-blue', 'leetplus-web-blue', 'leetplus-api-green', 'leetplus-web-green', 'leetplus-postgres', 'leetplus-redis')
 COMPATIBLE = ('contract.mjs', 'orchestrator.mjs', 'worker-authority.mjs', 'runtime-entry.cjs', 'network.sh', 'backup.sh', 'postgres-entry.sh')
 CLEAN = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8', 'TZ': 'UTC'}
+RESOURCE_PROFILE_BOOTSTRAP = 'RESOURCE_PROFILE_BOOTSTRAP'
+RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_SHA = '892b25b9fe5ebc8d0c20a7874a77ac312b7a0978'
+RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_CONTRACT_SHA256 = 'bba588a506cee3dc6c03a0b93f25291a4dd5f36c1d05fb79d83128bf0276f79d'
+RESOURCE_PROFILE_BOOTSTRAP_LEGACY = 'LEGACY_4G'
+RESOURCE_PROFILE_BOOTSTRAP_TARGET = 'API_6G_V1'
 
 
 def canonical(value):
@@ -165,7 +170,8 @@ def installed(sha, executor=False):
     admission = json.loads(admission_raw)
     require(digest(admission_raw) == manifest['admissionSha256'] and admission['contract'] == 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_ADMISSION' and admission['decision'] == 'PASS' and admission['releaseSha'] == sha and admission['repository'] == 'boozik3412/leetplus' and admission['ref'] == 'refs/heads/main' and admission['event'] == 'push', 'Controller is not exact-main admitted')
     release_raw = secure(ROOT / 'inbox' / sha / 'release.json')
-    require(digest(release_raw) == admission['releaseManifestSha256'] and json.loads(release_raw)['releaseSha'] == sha, 'Release manifest is not bound to admission')
+    release = json.loads(release_raw)
+    require(digest(release_raw) == admission['releaseManifestSha256'] and release['releaseSha'] == sha, 'Release manifest is not bound to admission')
     archive = secure(ROOT / 'inbox' / sha / 'control.tar.gz', 16 * 1024 * 1024)
     require(digest(archive) == admission['controlArchiveSha256'], 'Controller archive changed')
     archived = {}
@@ -179,7 +185,7 @@ def installed(sha, executor=False):
             require(re.fullmatch('[a-zA-Z0-9_.@-]+', leaf) and leaf not in archived and leaf not in ('.', '..', 'install-manifest.json'), 'Invalid controller archive leaf')
             archived[leaf] = digest(source.extractfile(member).read())
     require(archived == manifest['files'], 'Installed manifest is not the admitted archive')
-    return {'root': root, 'manifest': manifest, 'digest': digest(raw), 'admission': admission, 'admissionRaw': admission_raw, 'archive': archive}
+    return {'root': root, 'manifest': manifest, 'digest': digest(raw), 'admission': admission, 'admissionRaw': admission_raw, 'archive': archive, 'release': release}
 
 
 def main_target():
@@ -264,8 +270,26 @@ def snapshot(control):
     return {'activeSha256': digest(active_raw), 'active': active, 'activePlanControlSha256': authority['controlSha256'], 'files': {str(p): digest(secure(p)) for p in protected}, 'containers': containers, 'nginxTarget': os.readlink(nginx), 'firewall': firewall}
 
 
-def assert_compatible(old, new):
+def assert_resource_profile_bootstrap_identity(old, new):
+    require(old['manifest']['releaseSha'] == RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_SHA, 'Resource-profile bootstrap has the wrong predecessor controller')
+    require(old['manifest']['files'].get('contract.mjs') == RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_CONTRACT_SHA256, 'Resource-profile bootstrap predecessor contract is not exact')
+    require(new['release'].get('apiResourceProfile') == RESOURCE_PROFILE_BOOTSTRAP_TARGET, 'Target admitted release lacks the exact API resource profile')
+
+
+def assert_legacy_active_releases(snapshot_value):
+    active = snapshot_value.get('active') if isinstance(snapshot_value, dict) else None
+    require(isinstance(active, dict), 'Accepted application snapshot is missing active releases')
+    for name in ('blue', 'green', 'dataRelease'):
+        release = active.get(name)
+        require(isinstance(release, dict) and 'apiResourceProfile' not in release, 'Resource-profile bootstrap cannot adopt an already profiled active release')
+
+
+def assert_compatible(old, new, resource_profile_bootstrap=False):
+    if resource_profile_bootstrap:
+        assert_resource_profile_bootstrap_identity(old, new)
     for leaf in COMPATIBLE:
+        if resource_profile_bootstrap and leaf == 'contract.mjs':
+            continue
         require(old['manifest']['files'][leaf] == new['manifest']['files'][leaf], 'Runtime/worker contract change is not a controller-only handoff: ' + leaf)
     for leaf, expected in old['manifest']['files'].items():
         if leaf.startswith('leetplus-compose-') and leaf.endswith(('.service', '.timer')) and leaf != UNIT.name:
@@ -287,7 +311,7 @@ def operation_path(identity):
     return HANDOFFS / identity
 
 
-def prepare(old_sha, new_sha, admission_sha, evidence_path):
+def prepare(old_sha, new_sha, admission_sha, evidence_path, resource_profile_bootstrap=False):
     old, new = installed(old_sha), installed(new_sha, executor=True)
     require(old_sha != new_sha and new['manifest']['admissionSha256'] == admission_sha, 'Wrong target admission')
     evidence_raw = secure(evidence_path)
@@ -295,10 +319,15 @@ def prepare(old_sha, new_sha, admission_sha, evidence_path):
     require(evidence_raw == canonical(evidence), 'Evidence must be canonical LF JSON')
     require(evidence.get('decision') == 'PASS' and evidence.get('releaseSha') == new_sha and re.fullmatch('[a-f0-9]{64}', evidence.get('backupSha256', '')) and re.fullmatch('[a-f0-9]{64}', evidence.get('rehearsalSha256', '')), 'Exact backup/rehearsal evidence required')
     with control_lock(False, 20):
-        assert_compatible(old, new)
+        assert_compatible(old, new, resource_profile_bootstrap)
         require(main_target() == str(old['root'] / 'control.sh'), 'Predecessor is not serving')
         require(not PENDING.exists(), 'Another handoff is pending')
+        # snapshot invokes the target renderer's immutable-history validator. A
+        # bootstrap therefore proves every historical compose digest still
+        # renders as legacy 4 GiB; the plan boolean below is only an audit fact.
         current = snapshot(new['root'])
+        if resource_profile_bootstrap:
+            assert_legacy_active_releases(current)
         verify_current_controller_authority(current, old, new['root'])
         require(digest(secure(UNIT)) == old['manifest']['files'][UNIT.name], 'Original refresh unit drift')
         timers = {unit: systemd(unit) for unit in TIMERS}
@@ -307,13 +336,20 @@ def prepare(old_sha, new_sha, admission_sha, evidence_path):
         identity = str(uuid.uuid4())
         directory = operation_path(identity)
         private_dir(directory)
-        plan = {'contract': CONTRACT + '_PLAN', 'operationId': identity, 'action': 'CONTROL_HANDOFF', 'hostIdentitySha256': digest(secure(Path('/etc/machine-id')).strip()),
+        plan = {'contract': CONTRACT + '_PLAN', 'operationId': identity, 'action': RESOURCE_PROFILE_BOOTSTRAP if resource_profile_bootstrap else 'CONTROL_HANDOFF', 'hostIdentitySha256': digest(secure(Path('/etc/machine-id')).strip()),
                 'oldReleaseSha': old_sha, 'newReleaseSha': new_sha, 'oldControlSha256': old['digest'], 'newControlSha256': new['digest'],
                 'oldMainTarget': str(old['root'] / 'control.sh'), 'newMainTarget': str(new['root'] / 'control.sh'), 'snapshot': current, 'timers': timers,
                 'oldUnitSha256': digest(secure(UNIT)), 'oldUnitMode': stat.S_IMODE(UNIT.stat().st_mode), 'newUnitSha256': new['manifest']['files'][UNIT.name],
                 'previousPointer': base64.b64encode(secure(POINTER)).decode() if POINTER.exists() else None, 'evidenceSha256': digest(evidence_raw),
                 'refreshScope': {'operation': 'refresh', 'setNames': ['lp_leetplus_https', 'lp_leetplus_smtp'], 'ttlSeconds': 3600, 'publicAddressesOnly': True, 'policySha256': current['files']['/etc/leetplus-compose/providers.json']},
                 'applicationRestartAllowed': False, 'timersMayBeStopped': False, 'rollbackAllowed': True, 'maxLockWaitSeconds': 120}
+        if resource_profile_bootstrap:
+            plan.update({'predecessorControlSha': RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_SHA,
+                         'predecessorContractSha256': RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_CONTRACT_SHA256,
+                         'legacyProfile': RESOURCE_PROFILE_BOOTSTRAP_LEGACY,
+                         'targetProfile': RESOURCE_PROFILE_BOOTSTRAP_TARGET,
+                         'historicalComposeIdentityVerified': True,
+                         'resourceLimitMutationAllowed': False})
         for name, value in [('plan.json', plan), ('evidence.json', evidence)]:
             publish(directory / name, value)
         # Existing encrypted backup includes this state subtree, so recovery of
@@ -387,13 +423,35 @@ def verify_timers(plan):
 
 
 def validate_plan_bindings(plan, old, new):
-    require(plan['contract'] == CONTRACT + '_PLAN' and plan['action'] == 'CONTROL_HANDOFF' and plan['applicationRestartAllowed'] is False and plan['timersMayBeStopped'] is False and plan['rollbackAllowed'] is True and plan['maxLockWaitSeconds'] == 120, 'Invalid handoff scope')
+    action = plan.get('action')
+    require(plan['contract'] == CONTRACT + '_PLAN' and action in ('CONTROL_HANDOFF', RESOURCE_PROFILE_BOOTSTRAP) and plan['applicationRestartAllowed'] is False and plan['timersMayBeStopped'] is False and plan['rollbackAllowed'] is True and plan['maxLockWaitSeconds'] == 120, 'Invalid handoff scope')
+    resource_profile_bootstrap = action == RESOURCE_PROFILE_BOOTSTRAP
+    profile_keys = {'predecessorControlSha', 'predecessorContractSha256', 'legacyProfile', 'targetProfile', 'historicalComposeIdentityVerified', 'resourceLimitMutationAllowed'}
+    if resource_profile_bootstrap:
+        require(plan['oldReleaseSha'] == RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_SHA and plan['oldReleaseSha'] != plan['newReleaseSha'], 'Resource-profile bootstrap release lineage is not exact')
+        require({key: plan.get(key) for key in profile_keys} == {
+            'predecessorControlSha': RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_SHA,
+            'predecessorContractSha256': RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_CONTRACT_SHA256,
+            'legacyProfile': RESOURCE_PROFILE_BOOTSTRAP_LEGACY,
+            'targetProfile': RESOURCE_PROFILE_BOOTSTRAP_TARGET,
+            'historicalComposeIdentityVerified': True,
+            'resourceLimitMutationAllowed': False,
+        }, 'Invalid resource-profile bootstrap scope')
+    else:
+        require(not (profile_keys & set(plan)), 'Ordinary controller handoff cannot carry a resource-profile transition')
     require(old['digest'] == plan['oldControlSha256'] and new['digest'] == plan['newControlSha256'], 'Controller manifest drift')
     require(plan['oldMainTarget'] == str(old['root'] / 'control.sh') and plan['newMainTarget'] == str(new['root'] / 'control.sh'), 'Unexpected main-pointer target')
     require(plan['oldUnitSha256'] == old['manifest']['files'][UNIT.name] and plan['newUnitSha256'] == new['manifest']['files'][UNIT.name] and plan['oldUnitMode'] in (0o400, 0o600, 0o644), 'Unexpected unit effect')
     expected_scope = {'operation': 'refresh', 'setNames': ['lp_leetplus_https', 'lp_leetplus_smtp'], 'ttlSeconds': 3600, 'publicAddressesOnly': True, 'policySha256': plan['snapshot']['files']['/etc/leetplus-compose/providers.json']}
     require(plan['refreshScope'] == expected_scope, 'Unexpected provider refresh scope')
-    assert_compatible(old, new)
+    assert_compatible(old, new, resource_profile_bootstrap)
+
+
+def validate_live_profile_bootstrap(plan, snapshot_value):
+    if plan.get('action') == RESOURCE_PROFILE_BOOTSTRAP:
+        # Do not trust historicalComposeIdentityVerified: snapshot has just
+        # revalidated all immutable terminal histories under the target renderer.
+        assert_legacy_active_releases(snapshot_value)
 
 
 def restore_pointer(plan):
@@ -434,8 +492,14 @@ def recover_expired_apply(directory, plan, envelope, old, new):
     # These are exclusively this operation's control effects. A new app or a
     # changed worker/config snapshot must not be adopted as handoff continuity.
     effect_intended = any((directory / ('apply-' + name + '.intent.json')).exists() for name in ('main', 'unit'))
+    if plan.get('action') == RESOURCE_PROFILE_BOOTSTRAP:
+        current = snapshot(new['root'])
+        validate_live_profile_bootstrap(plan, current)
+        require(current == plan['snapshot'], 'Changed live state forbids resource-profile bootstrap expiry recovery')
     if effect_intended:
-        require(PENDING.exists() and snapshot(new['root']) == plan['snapshot'], 'Changed live state forbids expiry undo')
+        current = snapshot(new['root'])
+        validate_live_profile_bootstrap(plan, current)
+        require(PENDING.exists() and current == plan['snapshot'], 'Changed live state forbids expiry undo')
         verify_timers(plan)
         if main == plan['newMainTarget']:
             switch_main(plan['newMainTarget'], plan['oldMainTarget'])
@@ -444,7 +508,9 @@ def recover_expired_apply(directory, plan, envelope, old, new):
         # Reconcile the loaded unit even if an earlier undo restored its file
         # but crashed before daemon-reload. No service is restarted.
         run(['/usr/bin/systemctl', 'daemon-reload'])
-        require(snapshot(new['root']) == plan['snapshot'], 'Live state changed during expiry undo')
+        current = snapshot(new['root'])
+        validate_live_profile_bootstrap(plan, current)
+        require(current == plan['snapshot'], 'Live state changed during expiry undo')
         verify_timers(plan)
     restore_pointer(plan)
     publish(directory / 'rolled-back.json', {**binding, 'decision': 'ROLLED_BACK', 'reason': 'EXPIRED_BEFORE_ACCEPTANCE', 'applicationRestartCommandIssued': False})
@@ -469,7 +535,9 @@ def activate(identity, approval_path, rollback=False):
         require(terminal.get('decision') == 'ROLLED_BACK' and terminal.get('operationId') == identity and terminal.get('planSha256') == digest(canonical(plan)), 'Rollback terminal binding mismatch')
         if own_pending:
             with control_lock(True, plan['maxLockWaitSeconds']):
-                require(main_target() == plan['oldMainTarget'] and digest(secure(UNIT)) == plan['oldUnitSha256'] and snapshot(new['root']) == plan['snapshot'], 'Completed rollback state changed before cleanup')
+                current = snapshot(new['root'])
+                validate_live_profile_bootstrap(plan, current)
+                require(main_target() == plan['oldMainTarget'] and digest(secure(UNIT)) == plan['oldUnitSha256'] and current == plan['snapshot'], 'Completed rollback state changed before cleanup')
                 finish_pending(identity)
             return {'decision': 'ROLLBACK_CLEANUP_RECONCILED', 'operationId': identity, 'applicationRestarted': False}
         return {'decision': 'ALREADY_ROLLED_BACK', 'operationId': identity, 'historical': True, 'effectsPerformed': False}
@@ -491,7 +559,9 @@ def activate(identity, approval_path, rollback=False):
         if not forward and not rollback and (directory / 'apply.intent.json').exists():
             if validate_recovery(plan, envelope, read_json(directory / 'apply.intent.json'), new['root'])['expired']:
                 return recover_expired_apply(directory, plan, envelope, old, new)
-        require(snapshot(new['root']) == plan['snapshot'], 'Live app/data/grant state changed')
+        current = snapshot(new['root'])
+        validate_live_profile_bootstrap(plan, current)
+        require(current == plan['snapshot'], 'Live app/data/grant state changed')
         verify_timers(plan)
         if PENDING.exists():
             require(read_json(PENDING).get('operationId') == identity, 'Another handoff is pending')
@@ -537,7 +607,9 @@ def activate(identity, approval_path, rollback=False):
             run(['/usr/bin/systemctl', 'daemon-reload'])
             if not rollback:
                 run(['/usr/bin/python3', str(new['root'] / 'network-fence.py'), 'refresh'], timeout=90)
-            require(snapshot(new['root']) == plan['snapshot'], 'Application/data/firewall changed during controller switch')
+            current = snapshot(new['root'])
+            validate_live_profile_bootstrap(plan, current)
+            require(current == plan['snapshot'], 'Application/data/firewall changed during controller switch')
             verify_timers(plan)
             if rollback:
                 restore_pointer(plan)
@@ -561,7 +633,7 @@ def activate(identity, approval_path, rollback=False):
                     publish(directory / 'rolled-back.json', {**binding, 'decision': 'ROLLED_BACK', 'reason': 'HANDOFF_POSTCHECK_FAILED', 'applicationRestartCommandIssued': False, 'applicationContinuityConfirmed': False})
                     finish_pending(identity)
             raise
-    return {'decision': 'ROLLED_BACK' if rollback else 'CONTROL_HANDOFF_ACCEPTED', 'operationId': identity, 'controlReleaseSha': plan['oldReleaseSha'] if rollback else plan['newReleaseSha'], 'applicationRestarted': False, 'timersStopped': False}
+    return {'decision': 'ROLLED_BACK' if rollback else ('RESOURCE_PROFILE_BOOTSTRAP_ACCEPTED' if plan.get('action') == RESOURCE_PROFILE_BOOTSTRAP else 'CONTROL_HANDOFF_ACCEPTED'), 'operationId': identity, 'controlReleaseSha': plan['oldReleaseSha'] if rollback else plan['newReleaseSha'], 'applicationRestarted': False, 'timersStopped': False}
 
 
 def main():
@@ -575,6 +647,7 @@ def main():
     plan.add_argument('--new-sha', required=True)
     plan.add_argument('--admission-sha256', required=True)
     plan.add_argument('--evidence', type=Path, required=True)
+    plan.add_argument('--resource-profile-bootstrap', action='store_true')
     for name in ('apply', 'rollback'):
         child = sub.add_parser(name)
         child.add_argument('--operation', required=True)
@@ -584,7 +657,7 @@ def main():
     require(current.parent == CONTROLS and installed(current.name, executor=True)['root'] == current, 'Run only the staged admitted controller')
     if args.command == 'plan':
         require(current.name == args.new_sha, 'Planner must be the target controller')
-        result = prepare(args.old_sha, args.new_sha, args.admission_sha256, args.evidence)
+        result = prepare(args.old_sha, args.new_sha, args.admission_sha256, args.evidence, args.resource_profile_bootstrap)
     else:
         require(read_json(operation_path(args.operation) / 'plan.json')['newReleaseSha'] == current.name, 'Executor must be the admitted target controller')
         result = activate(args.operation, args.approval, args.command == 'rollback')

@@ -209,6 +209,163 @@ class SnapshotFingerprintIntegrationTests(unittest.TestCase):
         self.assertEqual({entry["configurationSha256"] for entry in result["containers"].values()}, {"fingerprint"})
 
 
+class ResourceProfileBootstrapTests(unittest.TestCase):
+    def controls(self):
+        files = {leaf: (str(index) * 64) for index, leaf in enumerate(handoff.COMPATIBLE, 1)}
+        files["contract.mjs"] = handoff.RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_CONTRACT_SHA256
+        old = {
+            "root": Path("/old-control"),
+            "digest": "a" * 64,
+            "manifest": {"releaseSha": handoff.RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_SHA, "files": files},
+            "release": {"releaseSha": handoff.RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_SHA},
+        }
+        new_files = {**files, "contract.mjs": "f" * 64}
+        new = {
+            "root": Path("/new-control"),
+            "digest": "b" * 64,
+            "manifest": {"releaseSha": "c" * 40, "files": new_files},
+            "release": {"releaseSha": "c" * 40, "apiResourceProfile": handoff.RESOURCE_PROFILE_BOOTSTRAP_TARGET},
+        }
+        return old, new
+
+    def plan(self, old, new):
+        snapshot = {"files": {"/etc/leetplus-compose/providers.json": "d" * 64}}
+        return {
+            "contract": handoff.CONTRACT + "_PLAN",
+            "action": handoff.RESOURCE_PROFILE_BOOTSTRAP,
+            "applicationRestartAllowed": False,
+            "timersMayBeStopped": False,
+            "rollbackAllowed": True,
+            "maxLockWaitSeconds": 120,
+            "oldReleaseSha": handoff.RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_SHA,
+            "newReleaseSha": new["manifest"]["releaseSha"],
+            "oldControlSha256": old["digest"],
+            "newControlSha256": new["digest"],
+            "oldMainTarget": str(old["root"] / "control.sh"),
+            "newMainTarget": str(new["root"] / "control.sh"),
+            "oldUnitSha256": "e" * 64,
+            "newUnitSha256": "f" * 64,
+            "oldUnitMode": 0o600,
+            "snapshot": snapshot,
+            "refreshScope": {"operation": "refresh", "setNames": ["lp_leetplus_https", "lp_leetplus_smtp"], "ttlSeconds": 3600, "publicAddressesOnly": True, "policySha256": "d" * 64},
+            "predecessorControlSha": handoff.RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_SHA,
+            "predecessorContractSha256": handoff.RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_CONTRACT_SHA256,
+            "legacyProfile": handoff.RESOURCE_PROFILE_BOOTSTRAP_LEGACY,
+            "targetProfile": handoff.RESOURCE_PROFILE_BOOTSTRAP_TARGET,
+            "historicalComposeIdentityVerified": True,
+            "resourceLimitMutationAllowed": False,
+        }
+
+    def test_identity_is_pinned_to_892b_legacy_contract_and_admitted_api6_profile(self):
+        old, new = self.controls()
+        handoff.assert_resource_profile_bootstrap_identity(old, new)
+        for mutate, message in [
+            (lambda value: value["manifest"].update(releaseSha="0" * 40), "wrong predecessor"),
+            (lambda value: value["manifest"]["files"].update({"contract.mjs": "0" * 64}), "predecessor contract"),
+            (lambda value: value["release"].pop("apiResourceProfile"), "Target admitted release"),
+            (lambda value: value["release"].update(apiResourceProfile="ARBITRARY"), "Target admitted release"),
+        ]:
+            with self.subTest(message=message):
+                before, after = self.controls()
+                mutate(before if "predecessor" in message or "wrong" in message else after)
+                with self.assertRaisesRegex(ValueError, message):
+                    handoff.assert_resource_profile_bootstrap_identity(before, after)
+
+    def test_bootstrap_allows_only_contract_mjs_to_differ_among_compatible_leaves(self):
+        old, new = self.controls()
+        new["manifest"]["files"]["worker-authority.mjs"] = "9" * 64
+        with self.assertRaisesRegex(ValueError, "worker contract"):
+            handoff.assert_compatible(old, new, True)
+
+    def test_active_releases_must_be_unprofiled_and_boolean_does_not_authorize_them(self):
+        clean = {"active": {"blue": {}, "green": {}, "dataRelease": {}}}
+        handoff.assert_legacy_active_releases(clean)
+        for name in ("blue", "green", "dataRelease"):
+            with self.subTest(name=name):
+                bad = {"active": {"blue": {}, "green": {}, "dataRelease": {}}}
+                bad["active"][name]["apiResourceProfile"] = handoff.RESOURCE_PROFILE_BOOTSTRAP_LEGACY
+                with self.assertRaisesRegex(ValueError, "already profiled"):
+                    handoff.assert_legacy_active_releases(bad)
+
+    def test_plan_rejects_wrong_profile_fields_and_ordinary_handoff_cannot_smuggle_them(self):
+        old, new = self.controls()
+        old["manifest"]["files"][handoff.UNIT.name] = "e" * 64
+        new["manifest"]["files"][handoff.UNIT.name] = "f" * 64
+        plan = self.plan(old, new)
+        with mock.patch.object(handoff, "assert_compatible") as compatible:
+            handoff.validate_plan_bindings(plan, old, new)
+            compatible.assert_called_once_with(old, new, True)
+        for key, value in [("historicalComposeIdentityVerified", False), ("resourceLimitMutationAllowed", True), ("targetProfile", "ARBITRARY"), ("oldReleaseSha", "0" * 40)]:
+            with self.subTest(key=key):
+                bad = {**plan, key: value}
+                with self.assertRaisesRegex(ValueError, "[Rr]esource-profile bootstrap (scope|release lineage)"):
+                    handoff.validate_plan_bindings(bad, old, new)
+        ordinary = {**plan, "action": "CONTROL_HANDOFF"}
+        with self.assertRaisesRegex(ValueError, "Ordinary controller handoff"):
+            handoff.validate_plan_bindings(ordinary, old, new)
+
+
+class ResourceProfileBootstrapPrepareTests(unittest.TestCase):
+    def test_prepare_revalidates_the_target_renderer_and_records_only_the_exact_profile_scope(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            handoffs = root / "handoffs"
+            unit = root / "network-refresh.service"
+            unit.write_bytes(b"unit\n")
+            evidence_path = root / "evidence.json"
+            evidence = {"decision": "PASS", "releaseSha": "b" * 40, "backupSha256": "1" * 64, "rehearsalSha256": "2" * 64}
+            evidence_path.write_bytes(handoff.canonical(evidence))
+            old_root, new_root = root / "old", root / "new"
+            old_root.mkdir()
+            new_root.mkdir()
+            old = {"root": old_root, "digest": "a" * 64, "archive": b"old", "admissionRaw": b"old-admission",
+                   "manifest": {"admissionSha256": "0" * 64, "files": {unit.name: handoff.digest(unit.read_bytes())}}}
+            new = {"root": new_root, "digest": "b" * 64, "archive": b"new", "admissionRaw": b"new-admission",
+                   "manifest": {"admissionSha256": "3" * 64, "files": {unit.name: handoff.digest(unit.read_bytes())}}}
+            snapshot_value = {"active": {"blue": {}, "green": {}, "dataRelease": {}}, "files": {"/etc/leetplus-compose/providers.json": "4" * 64}}
+            records = {}
+
+            @contextlib.contextmanager
+            def lock(exclusive, seconds=120):
+                yield
+
+            def publish(path, value):
+                records[Path(path).name] = value
+
+            def secure(path, limit=2 * 1024 * 1024):
+                if Path(path) == evidence_path:
+                    return handoff.canonical(evidence)
+                if Path(path) == unit:
+                    return unit.read_bytes()
+                if Path(path).name == "machine-id":
+                    return b"machine\n"
+                raise AssertionError("unexpected secure: " + str(path))
+
+            with mock.patch.object(handoff, "HANDOFFS", handoffs), \
+                 mock.patch.object(handoff, "UNIT", unit), \
+                 mock.patch.object(handoff, "PENDING", root / "pending.json"), \
+                 mock.patch.object(handoff, "POINTER", root / "pointer.json"), \
+                 mock.patch.object(handoff, "installed", side_effect=lambda sha, executor=False: old if sha == "a" * 40 else new), \
+                 mock.patch.object(handoff, "secure", side_effect=secure), \
+                 mock.patch.object(handoff, "control_lock", side_effect=lock), \
+                 mock.patch.object(handoff, "assert_compatible") as compatible, \
+                 mock.patch.object(handoff, "main_target", return_value=str(old_root / "control.sh")), \
+                 mock.patch.object(handoff, "snapshot", return_value=snapshot_value) as snapshot, \
+                 mock.patch.object(handoff, "verify_current_controller_authority"), \
+                 mock.patch.object(handoff, "systemd", return_value={"ActiveState": "active", "UnitFileState": "enabled"}), \
+                 mock.patch.object(handoff, "private_dir", side_effect=lambda path: Path(path).mkdir(parents=True, exist_ok=True)), \
+                 mock.patch.object(handoff, "publish", side_effect=publish), \
+                 mock.patch.object(handoff, "atomic_bytes"):
+                handoff.prepare("a" * 40, "b" * 40, "3" * 64, evidence_path, True)
+
+            snapshot.assert_called_once_with(new_root)
+            compatible.assert_called_once_with(old, new, True)
+            plan = records["plan.json"]
+            self.assertEqual(plan["action"], handoff.RESOURCE_PROFILE_BOOTSTRAP)
+            self.assertEqual(plan["predecessorControlSha"], handoff.RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_SHA)
+            self.assertFalse(plan["resourceLimitMutationAllowed"])
+
+
 class PhaseEffectTests(unittest.TestCase):
     def test_new_state_without_prior_intent_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

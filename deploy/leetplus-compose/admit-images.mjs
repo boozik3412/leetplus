@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { CONTRACT, canonical, demand, digest, release } from './contract.mjs';
+import { API_RESOURCE_PROFILE, CONTRACT, canonical, demand, digest, release, renderCompose } from './contract.mjs';
 
 const [imagesRoot, parentRoot, output] = process.argv.slice(2);
 demand(imagesRoot && parentRoot && output, 'Expected images directory, parent admission directory and output');
@@ -14,6 +14,7 @@ const parent = JSON.parse(parentRaw);
 demand(parent.admission === 'PASS' && parent.schemaVersion === 2 && parent.releaseSha === sha && parent.repository === process.env.GITHUB_REPOSITORY && parent.runId === process.env.GITHUB_RUN_ID && parent.workflowSha === sha && parent.workflowRef === `boozik3412/leetplus/.github/workflows/ci.yml@refs/heads/main`, 'Parent admission identity mismatch');
 const r = release(JSON.parse(fs.readFileSync(path.join(imagesRoot, 'release.json'))));
 demand(r.releaseSha === sha, 'Images do not belong to admitted source');
+demand(r.apiResourceProfile === API_RESOURCE_PROFILE, 'New image admissions require the API_6G_V1 resource profile');
 async function fileHash(file) {
   const hash = crypto.createHash('sha256');
   for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
@@ -25,6 +26,8 @@ const sums = new Map(fs.readFileSync(path.join(imagesRoot, 'SHA256SUMS'), 'utf8'
 for (const name of ['images.tar.gz', 'release.json', 'control.tar.gz', 'compose.rehearsal.json', 'transport-validation.json', 'archive-roundtrip.json', 'network-validation.json']) {
   demand(sums.has(name) && sums.get(name) === await fileHash(path.join(imagesRoot, name)), 'Image handoff checksum mismatch');
 }
+const rehearsal = JSON.parse(fs.readFileSync(path.join(imagesRoot, 'compose.rehearsal.json')));
+demand(canonical(rehearsal) === canonical(renderCompose({ blue: r, green: r, rehearsal: true })), 'Rehearsal Compose bytes are not derived from the admitted release');
 const transport = JSON.parse(fs.readFileSync(path.join(imagesRoot, 'transport-validation.json')));
 demand(transport.decision === 'PASS' && transport.tlsRequired === true && transport.badCaRejected === true && transport.badHostnameRejected === true, 'Real Prisma TLS negative matrix did not pass');
 demand(transport.nativeWorkerProfileAccepted === true, 'The exact API image must accept its strict Compose worker profile');

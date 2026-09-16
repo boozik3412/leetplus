@@ -3,6 +3,7 @@ import path from 'node:path';
 
 export const CONTRACT = 'LEETPLUS_COMPOSE_BLUE_GREEN_V1';
 export const SCHEMA = { migrationCount: 191, migration: '20260908180000_external_langame_simple_onboarding' };
+export const API_RESOURCE_PROFILE = 'API_6G_V1';
 export const SLOTS = ['blue', 'green'];
 export const PORTS = { blue: { web: 13100, api: 14100 }, green: { web: 13200, api: 14200 } };
 export const USERS = { 'api-blue': 12010, 'api-green': 12011, 'web-blue': 12020, 'web-green': 12021, postgres: 12030, redis: 12031, 'bonus-ledger-worker': 12040, 'langame-daily-worker': 12041 };
@@ -25,6 +26,7 @@ export function release(value) {
   demand(value?.contract === CONTRACT && /^[a-f0-9]{40}$/.test(value.releaseSha ?? ''), 'Invalid release identity');
   demand(value.migrationCount === SCHEMA.migrationCount && value.migration === SCHEMA.migration, 'Only CURRENT191 is admitted');
   demand(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(value.builtAt ?? '') && Number.isFinite(Date.parse(value.builtAt)), 'Invalid build time');
+  if (Object.hasOwn(value, 'apiResourceProfile')) demand(value.apiResourceProfile === API_RESOURCE_PROFILE, 'Invalid API resource profile');
   for (const role of ['api', 'web', 'postgres', 'redis']) imageId(value.images?.[role]);
   return value;
 }
@@ -60,7 +62,8 @@ export function renderCompose({ blue, green, dataRelease, activeSlot = 'blue', r
   for (const slot of SLOTS) {
     const r = slot === 'blue' ? blue : green;
     const api = `api-${slot}`, web = `web-${slot}`;
-    const apiBase = base(api, r.images.api, r, '4g', '2.0');
+    const apiProfile = Object.hasOwn(r, 'apiResourceProfile');
+    const apiBase = { ...base(api, r.images.api, r, apiProfile ? '6g' : '4g', '2.0'), ...(apiProfile ? { memswap_limit: '8g' } : {}) };
     services[api] = { ...apiBase, entrypoint: ['node', '/opt/leetplus/runtime-entry.cjs'], command: ['api'], environment: { ...SAFE_API, ...metadata(r) },
       ports: [{ target: 4000, published: String(PORTS[slot].api + (rehearsal ? 10000 : 0)), host_ip: '127.0.0.1', protocol: 'tcp' }],
       networks: { ...network(slot, 2), ...network('data', slot === 'blue' ? 10 : 11), ...(!rehearsal ? network('egress', slot === 'blue' ? 10 : 11) : {}) },
@@ -138,7 +141,16 @@ export function verifyContainer(observed, service, name, { beforeStart = false, 
     Object.assign(expected, service.environment ?? {});
     demand(JSON.stringify([...c.Env].sort()) === JSON.stringify(Object.entries(expected).map(([k, v]) => `${k}=${v}`).sort()), `${name}: unexpected process environment`);
   }
-  demand(h.Memory > 0 && h.NanoCpus > 0 && h.PidsLimit === service.pids_limit, `${name}: resource bounds missing`);
+  const bytes = value => {
+    const match = /^(\d+)([kmg])$/.exec(value ?? '');
+    demand(match, `${name}: invalid rendered memory limit`);
+    const result = Number(match[1]) * ({ k: 1024, m: 1024 ** 2, g: 1024 ** 3 })[match[2]];
+    demand(Number.isSafeInteger(result) && result > 0, `${name}: invalid rendered memory limit`);
+    return result;
+  };
+  const nanoCpus = Number(service.cpus) * 1_000_000_000;
+  demand(Number.isSafeInteger(nanoCpus) && nanoCpus > 0 && h.Memory === bytes(service.mem_limit) && h.NanoCpus === nanoCpus && h.PidsLimit === service.pids_limit, `${name}: resource bounds drift`);
+  if (Object.hasOwn(service, 'memswap_limit')) demand(h.MemorySwap === bytes(service.memswap_limit), `${name}: memory+swap bound drift`);
   if (!configurationOnly) demand(beforeStart ? observed.State.Status === 'created' && !observed.State.Running && observed.State.Pid === 0 : observed.State.Running && (!service.healthcheck || observed.State.Health?.Status === 'healthy'), `${name}: unexpected runtime state`);
   return { name, id: observed.Id, image: observed.Image, startedAt: observed.State.StartedAt, liveStateVerified: !configurationOnly };
 }

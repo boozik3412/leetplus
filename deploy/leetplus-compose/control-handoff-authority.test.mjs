@@ -5,18 +5,27 @@ import { canonical, digest } from './contract.mjs';
 import { validateControlHandoffAuthority, validateControlRollbackApproval, validatePendingControlHandoffAuthority, validateControlHandoffRecoveryAuthority } from './control-handoff-authority.mjs';
 
 const CONTRACT = 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1';
+const RESOURCE_PROFILE_BOOTSTRAP = 'RESOURCE_PROFILE_BOOTSTRAP';
+const PREDECESSOR_CONTROL_SHA = '892b25b9fe5ebc8d0c20a7874a77ac312b7a0978';
+const PREDECESSOR_CONTRACT_SHA256 = 'bba588a506cee3dc6c03a0b93f25291a4dd5f36c1d05fb79d83128bf0276f79d';
 const NOW = Date.parse('2026-09-15T10:00:00.000Z');
 const hash = value => String(value).repeat(64);
+const sha = value => String(value).repeat(40);
 
-function authority({ issuedAt = NOW - 60000, expiresAt = NOW + 60000, acceptedAt = NOW - 1000 } = {}) {
+function authority({ action = 'CONTROL_HANDOFF', issuedAt = NOW - 60000, expiresAt = NOW + 60000, acceptedAt = NOW - 1000 } = {}) {
   const keys = crypto.generateKeyPairSync('ed25519');
   const publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' });
   const plan = {
-    contract: `${CONTRACT}_PLAN`, operationId: crypto.randomUUID(), action: 'CONTROL_HANDOFF',
+    contract: `${CONTRACT}_PLAN`, operationId: crypto.randomUUID(), action,
     hostIdentitySha256: hash('a'), newControlSha256: hash('b'), snapshot: { activeSha256: hash('c') },
     oldMainTarget: '/usr/local/lib/leetplus-compose/old/control.sh', newMainTarget: '/usr/local/lib/leetplus-compose/new/control.sh',
     oldUnitSha256: hash('d'), newUnitSha256: hash('e'), applicationRestartAllowed: false, rollbackAllowed: true,
   };
+  if (action === RESOURCE_PROFILE_BOOTSTRAP) Object.assign(plan, {
+    oldReleaseSha: PREDECESSOR_CONTROL_SHA, newReleaseSha: sha('f'), predecessorControlSha: PREDECESSOR_CONTROL_SHA,
+    predecessorContractSha256: PREDECESSOR_CONTRACT_SHA256, legacyProfile: 'LEGACY_4G', targetProfile: 'API_6G_V1',
+    historicalComposeIdentityVerified: true, resourceLimitMutationAllowed: false, timersMayBeStopped: false,
+  });
   const approval = {
     contract: `${CONTRACT}_APPROVAL`, operationId: plan.operationId, action: plan.action,
     hostIdentitySha256: plan.hostIdentitySha256, planSha256: digest(plan),
@@ -30,6 +39,15 @@ function authority({ issuedAt = NOW - 60000, expiresAt = NOW + 60000, acceptedAt
   const pointer = { operationId: plan.operationId, receiptSha256: digest(receipt) };
   const context = { controlSha256: plan.newControlSha256, hostIdentitySha256: plan.hostIdentitySha256, activeSha256: plan.snapshot.activeSha256, mainTarget: plan.newMainTarget, unitSha256: plan.newUnitSha256 };
   return { keys, publicKey, plan, approvalEnvelope, receipt, pointer, context };
+}
+
+function rebindForward(value) {
+  value.approvalEnvelope.approval.action = value.plan.action;
+  value.approvalEnvelope.approval.planSha256 = digest(value.plan);
+  value.approvalEnvelope.signature = crypto.sign(null, Buffer.from(canonical(value.approvalEnvelope.approval)), value.keys.privateKey).toString('base64');
+  value.receipt.planSha256 = digest(value.plan);
+  value.receipt.approvalSha256 = digest(value.approvalEnvelope);
+  value.pointer.receiptSha256 = digest(value.receipt);
 }
 
 function validate(value, now = NOW) {
@@ -185,4 +203,36 @@ test('rejects untimely recovery intent and handoffs without rollback authority',
   const noRollback = authority();
   noRollback.plan.rollbackAllowed = false;
   assert.throws(() => validateRecovery(noRollback, pendingAuthority(noRollback).intent));
+});
+
+test('resource-profile bootstrap requires its immutable source-only scope in every authority path', () => {
+  const valid = authority({ action: RESOURCE_PROFILE_BOOTSTRAP });
+  const pending = pendingAuthority(valid);
+  assert.equal(validate(valid), valid.plan);
+  assert.equal(validateRollback(valid, rollbackEnvelope(valid)), valid.plan);
+  assert.equal(validatePending(valid, pending), valid.plan);
+  assert.deepEqual(validateRecovery(valid, pending.intent), { plan: valid.plan, expired: false });
+
+  for (const mutate of [
+    plan => plan.oldReleaseSha = sha('e'),
+    plan => plan.newReleaseSha = PREDECESSOR_CONTROL_SHA,
+    plan => plan.predecessorControlSha = sha('e'),
+    plan => plan.predecessorContractSha256 = hash('e'),
+    plan => plan.legacyProfile = 'API_4G_V1',
+    plan => plan.targetProfile = 'API_12G_V1',
+    plan => plan.historicalComposeIdentityVerified = false,
+    plan => plan.resourceLimitMutationAllowed = true,
+    plan => plan.applicationRestartAllowed = true,
+    plan => plan.timersMayBeStopped = true,
+    plan => plan.rollbackAllowed = false,
+  ]) {
+    const invalid = authority({ action: RESOURCE_PROFILE_BOOTSTRAP });
+    mutate(invalid.plan);
+    rebindForward(invalid);
+    const invalidPending = pendingAuthority(invalid);
+    assert.throws(() => validate(invalid));
+    assert.throws(() => validateRollback(invalid, rollbackEnvelope(invalid)));
+    assert.throws(() => validatePending(invalid, invalidPending));
+    assert.throws(() => validateRecovery(invalid, invalidPending.intent));
+  }
 });

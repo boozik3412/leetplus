@@ -2,6 +2,14 @@
 
 Статус: **канонический current-state contract**, актуально на **16.09.2026**.
 
+Source-only memory candidate16.09: подготовлен release-bound `API_6G_V1` для API
+6GiB с total RAM+swap8GiB; отсутствие профиля сохраняет исторические4GiB Compose
+bytes. CPU/heap/другие роли не меняются. Production лимиты ещё4GiB. Native
+renderer-bootstrap, budget admission и реальные6GiB resource checks пока не
+реализованы/не приняты; shared-host расчёт не допускает одновременный полный
+rehearsal без отдельного решения о ресурсах. Не ослаблять обычный CONTROL_HANDOFF
+и не менять чужие контейнеры. [Границы и оставшаяся работа](../deployment/api-memory-profile-6g.md).
+
 ### Serving controller обновлён 16.09.2026; приложение не переключалось
 
 В 08:15:02.621 UTC принят signed controller-only handoff на exact

@@ -30,9 +30,9 @@ redis_id=$(docker image inspect --format '{{.Id}}' "leetplus-redis:$sha")
 docker run --rm --network none --entrypoint node "$api_id" -e 'const m=require("/app/release.json");if(m.migrationCount!==191)process.exit(1);console.log(JSON.stringify(m))' > "$output/image-release.json"
 node --input-type=module - "$output" "$api_id" "$web_id" "$pg_id" "$redis_id" <<'NODE'
 import fs from 'node:fs';
-import { canonical, release, renderCompose } from './deploy/leetplus-compose/contract.mjs';
+import { API_RESOURCE_PROFILE, canonical, release, renderCompose } from './deploy/leetplus-compose/contract.mjs';
 const [output, api, web, postgres, redis] = process.argv.slice(2);
-const result = release({ ...JSON.parse(fs.readFileSync(`${output}/image-release.json`)), images: { api, web, postgres, redis } });
+const result = release({ ...JSON.parse(fs.readFileSync(`${output}/image-release.json`)), apiResourceProfile: API_RESOURCE_PROFILE, images: { api, web, postgres, redis } });
 fs.writeFileSync(`${output}/release.json`, canonical(result), { flag: 'wx' });
 fs.writeFileSync(`${output}/compose.rehearsal.json`, canonical(renderCompose({ blue: result, green: result, rehearsal: true })), { flag: 'wx' });
 NODE

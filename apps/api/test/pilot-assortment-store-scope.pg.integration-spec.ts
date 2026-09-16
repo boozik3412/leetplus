@@ -1361,9 +1361,9 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
           writeOffAmount: { value: null, state: 'MISSING' },
           outOfStock: { value: null, state: 'MISSING' },
           lowStock: { value: null, state: 'MISSING' },
-          noSales: expect.objectContaining({
-            21: expect.objectContaining({ value: null, state: 'MISSING' }),
-          }),
+          noSales: {
+            21: { value: null, state: 'MISSING' },
+          },
         },
       });
       expect(operationsBody.assortment.data).not.toHaveProperty('rows');

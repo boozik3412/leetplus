@@ -1,11 +1,11 @@
 # API 6 GiB resource profile
 
-Update 16 September, 16:44UTC: controller bootstrap463 is accepted. After the
-executive UI defect in application617, approved emergency0caaf restored active
-BLUEb5/API4GiB, generation7. Inactive GREEN02 retains6GiB RAM/8GiB total and its
-known UI defect. Controller02/data399 are unchanged; this is not a resource-profile
-rollback. [Actual recovery evidence](executive-auth-production-2026-09-16.md).
-The preparation notes below describe the state before these two operations.
+Update 17 September, 06:40 UTC: approved application762a is accepted as active
+GREEN7ead/generation8, API 6 GiB RAM and 8 GiB total RAM+swap. Healthy BLUEb5/API4
+is retained. Serving controller02/data399 did not change. Actual restored-copy
+UI/resource/cooldown and public UI/worker acceptance passed.
+[Production evidence](executive-production-2026-09-17.md).
+The preparation notes below describe the earlier state before these operations.
 
 Status 16 September 2026: source preparation includes the profile, narrowly
 signed renderer transition, production budget gate and monitored rehearsal.

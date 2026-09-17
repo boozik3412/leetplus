@@ -1,5 +1,14 @@
 # LeetPlus repository context
 
+Production checkpoint 17.09.2026: active GREEN exact `7eadfd3e4468182730dbded4798fe5f0df8c9236`,
+generation8/API6GiB; healthy BLUEb5/API4 retained. Serving controller02 and
+data399/CURRENT191 are separate, unchanged identities. Approved native762a,
+actual public UI and ordinary gen8 workers passed; the executive dashboard and
+USER_CALL feedback UI are deployed. Natural phone/Telegram login is not proven
+by the operator guest diagnostic. Older source-only notes below are historical;
+use `docs/deployment/executive-production-2026-09-17.md` and live status before
+any new effect. A later docs-only commit is not a new production release.
+
 Before changing authentication, landing/redirects, access scope, the public
 game, gamification administration, integrations, background jobs or deployment,
 read `docs/security/runtime-security-contours.md` completely. It is the

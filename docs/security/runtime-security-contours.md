@@ -1,16 +1,16 @@
 # Runtime и security-контуры LeetPlus
 
-Статус: **канонический current-state contract**, актуально на **16.09.2026**.
+Статус: **канонический current-state contract**, актуально на **17.09.2026**.
 
-**Оперативное обновление 16.09, 16:44 UTC:** после отдельно согласованного возврата
-native0caaf active **BLUE `b5c033…`, generation7, API4GiB**. GREEN02/API6 сохранён
-с известным дефектом нового дашборда; data399/CURRENT191 и serving controller02
-не менялись. Real public browser desktop/390px PASS, оба исходных timer включены
-с валидными gen7 grants, ordinary bonus receipt PASS16:43:23. Новые dashboard и
-USER_CALL UI временно отсутствуют; исправление source6957 не прошло Full admission
-из-за устаревшего PG test expectation и ещё не выпущено. Текущие факты выше имеют
+**Оперативное обновление 17.09, 06:40 UTC:** отдельно согласованный native762a
+выпустил **GREEN `7eadfd3e…`, generation8, API6GiB/total8GiB**; рабочий BLUEb5/API4
+сохранён резервом. Data399/CURRENT191, PG/Redis identities и serving controller02
+не менялись. Реальный public browser 1440/390px, 17 live API reads и финальный
+runtime/worker postcheck PASS. Оба исходных timer включены с проверенными gen8
+grants; три обычных bonus-запуска PASS. Новый дашборд и USER_CALL UI опубликованы;
+естественный phone/Telegram canary не выполнялся. Текущие факты выше имеют
 приоритет над историческими checkpoint ниже.
-[Точные receipts, дефект и следующий gate](../deployment/executive-auth-production-2026-09-16.md).
+[Точные receipts, проверки и ограничения](../deployment/executive-production-2026-09-17.md).
 
 ### История до application rollout617
 

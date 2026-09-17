@@ -1,5 +1,7 @@
 "use client";
 
+import type { ExecutiveHistory } from "@/lib/executive-history";
+
 import Link from "next/link";
 import {
   hasConfirmedDecline,
@@ -687,10 +689,12 @@ export function ExecutiveDashboard({
   summary,
   operations,
   priorities,
+  history,
 }: {
   summary: ExecutiveSummary;
   operations: ExecutiveOperations | null;
   priorities?: ReactNode;
+  history?: ExecutiveHistory;
 }) {
   const [trendMetric, setTrendMetric] =
     useState<ExecutiveTrendMetric>("revenue");
@@ -776,10 +780,15 @@ export function ExecutiveDashboard({
       <section className="mt-5 grid items-start gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,0.85fr)]">
         <ExecutiveTrendChart
           summary={summary}
+          history={history}
           metricKey={trendMetric}
           label={labels[trendMetric]}
           id={chartId}
-          detailsHref={detailHref(summary, trendMetric)}
+          detailsHref={
+            history?.data
+              ? `${detailHref(history.data, trendMetric)}&returnPeriod=full-day`
+              : detailHref(summary, trendMetric)
+          }
         />
         {priorities ?? (
           <ExecutivePriorities summary={summary} operations={operations} />

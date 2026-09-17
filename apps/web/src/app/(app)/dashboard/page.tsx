@@ -16,6 +16,10 @@ import {
 import { dashboardWorkspaceHref, getDefaultLandingPath } from "@/lib/landing";
 import { getStores } from "@/lib/stores";
 import { redirect } from "next/navigation";
+import {
+  executiveScopeMatches,
+  loadExecutiveHistory,
+} from "@/lib/executive-history";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -45,33 +49,6 @@ function values(value: string | string[] | undefined) {
   return value ? (Array.isArray(value) ? value : [value]) : [];
 }
 
-function scopeMatches(
-  summary: Awaited<ReturnType<typeof getExecutiveSummary>>["scope"],
-  operations: ExecutiveOperations["scope"],
-) {
-  const sameIds = (left: readonly string[], right: readonly string[]) =>
-    [...left].toSorted().join("\u0000") ===
-    [...right].toSorted().join("\u0000");
-  const sameComparison =
-    summary.comparison === null
-      ? operations.comparison === null
-      : operations.comparison !== null &&
-        summary.comparison.from === operations.comparison.from &&
-        summary.comparison.to === operations.comparison.to;
-  const sameTimeZones =
-    JSON.stringify(Object.entries(summary.storeTimeZones).toSorted()) ===
-    JSON.stringify(Object.entries(operations.storeTimeZones).toSorted());
-  return (
-    summary.period.from === operations.period.from &&
-    summary.period.to === operations.period.to &&
-    summary.period.timezone === operations.period.timezone &&
-    summary.asOf === operations.asOf &&
-    sameComparison &&
-    sameIds(summary.storeIds, operations.storeIds) &&
-    sameTimeZones
-  );
-}
-
 async function loadOperations(
   query: ExecutiveQuery,
   summary: Awaited<ReturnType<typeof getExecutiveSummary>>,
@@ -84,7 +61,9 @@ async function loadOperations(
       storeIds: summary.scope.storeIds,
       asOf: summary.scope.asOf,
     });
-    return scopeMatches(summary.scope, operations.scope) ? operations : null;
+    return executiveScopeMatches(summary.scope, operations.scope)
+      ? operations
+      : null;
   } catch {
     return null;
   }
@@ -147,7 +126,14 @@ export default async function DashboardPage({
 
   const summary = summaryResult.value;
   const staffRequest = getStaffPriorities(summary.scope.storeIds);
-  const operations = await loadOperations(query, summary);
+  const [operations, history] = await Promise.all([
+    loadOperations(query, summary),
+    loadExecutiveHistory(query.period, summary, (historyQuery) =>
+      getExecutiveSummary(historyQuery, {
+        signal: AbortSignal.timeout(15_000),
+      }),
+    ),
+  ]);
   return (
     <main className="min-h-screen bg-[var(--background)] px-4 py-6 text-[var(--foreground)] sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1480px]">
@@ -177,6 +163,7 @@ export default async function DashboardPage({
         <ExecutiveDashboard
           summary={summary}
           operations={operations}
+          history={history}
           priorities={
             <Suspense
               key={JSON.stringify(summary.scope)}

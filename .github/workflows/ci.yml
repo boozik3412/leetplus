@@ -1027,6 +1027,9 @@ jobs:
       - name: Test guest session HttpOnly transport boundary
         run: pnpm --filter web test:guest-session-transport
 
+      - name: Test executive dashboard history and priority scope
+        run: pnpm --filter web test:executive-dashboard
+
       - name: Test dormant CURRENT190 Web BFF cutover candidate
         run: pnpm --filter web test:guest-session-current190-bff-candidate
 

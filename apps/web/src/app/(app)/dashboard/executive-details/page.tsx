@@ -121,8 +121,11 @@ export default async function ExecutiveDetailsPage({
       </main>
     );
   const back = new URLSearchParams({
-    period: "custom",
-    dateFrom: summary.scope.period.from,
+    period: first(params.returnPeriod) === "full-day" ? "full-day" : "custom",
+    dateFrom:
+      first(params.returnPeriod) === "full-day"
+        ? summary.scope.period.to
+        : summary.scope.period.from,
     dateTo: summary.scope.period.to,
     asOf: summary.scope.asOf,
     comparison: String(query.comparison ?? true),

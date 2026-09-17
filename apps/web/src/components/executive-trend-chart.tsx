@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import type { ExecutiveSummary } from "@/lib/dashboard-executive";
+import type { ExecutiveHistory } from "@/lib/executive-history";
 
 export type ExecutiveTrendMetric =
   | "revenue"
@@ -38,51 +39,55 @@ export function ExecutiveTrendChart({
   label,
   id,
   detailsHref,
+  history,
 }: {
   summary: ExecutiveSummary;
   metricKey: ExecutiveTrendMetric;
   label: string;
   id: string;
   detailsHref: string;
+  history?: ExecutiveHistory;
 }) {
+  const chartSummary = history ? history.data : summary;
+  const chartScope = history?.scope ?? summary.scope;
   const rows = useMemo(
     () =>
-      summary.days.map((row) => ({
+      (chartSummary?.days ?? []).map((row) => ({
         date: day(row.date),
         value: row.metrics[metricKey].value,
         previous: row.metrics[metricKey].comparison?.previousValue ?? null,
         state: row.metrics[metricKey].state,
       })),
-    [summary.days, metricKey],
+    [chartSummary?.days, metricKey],
   );
-  const metric = summary.metrics[metricKey];
+  const metric = chartSummary?.metrics[metricKey];
+  const metricUnit = summary.metrics[metricKey].unit;
   const unit = {
     RUB: "₽",
     COUNT: "визитов",
     RUB_PER_VISIT: "₽ / визит",
     PERCENT: "%",
-  }[metric.unit];
+  }[metricUnit];
   const hasPrevious =
-    summary.scope.comparison !== null &&
-    rows.some((row) => row.previous !== null);
+    chartScope.comparison !== null && rows.some((row) => row.previous !== null);
   const hasCurrent = rows.some((row) => row.value !== null);
   const hasPartial =
-    metric.state === "PARTIAL" || rows.some((row) => row.state === "PARTIAL");
+    metric?.state === "PARTIAL" || rows.some((row) => row.state === "PARTIAL");
   const hasStale =
-    metric.state === "STALE" || rows.some((row) => row.state === "STALE");
+    metric?.state === "STALE" || rows.some((row) => row.state === "STALE");
   const hasGaps = rows.some((row) => row.value === null);
   const formatValue = (value: number) => {
-    if (metric.unit === "PERCENT") return `${number(value, 1)}%`;
-    if (metric.unit === "RUB_PER_VISIT") return `${number(value)} ₽ / визит`;
-    return metric.unit === "RUB" ? `${number(value)} ₽` : number(value);
+    if (metricUnit === "PERCENT") return `${number(value, 1)}%`;
+    if (metricUnit === "RUB_PER_VISIT") return `${number(value)} ₽ / визит`;
+    return metricUnit === "RUB" ? `${number(value)} ₽` : number(value);
   };
   const formatTick = (value: number) => {
-    if (metric.unit === "PERCENT") return `${number(value, 1)}%`;
+    if (metricUnit === "PERCENT") return `${number(value, 1)}%`;
     const short =
       Math.abs(value) >= 1000
         ? `${number(value / 1000, 1)} тыс.`
         : number(value);
-    return metric.unit === "COUNT" ? short : `${short} ₽`;
+    return metricUnit === "COUNT" ? short : `${short} ₽`;
   };
 
   return (
@@ -97,24 +102,34 @@ export function ExecutiveTrendChart({
             id={`${id}-title`}
             className="text-lg font-semibold text-[var(--foreground)]"
           >
-            Динамика периода
+            {history ? "Динамика за 21 день" : "Динамика периода"}
           </h2>
           <p
             className="mt-1 text-sm text-zinc-600 dark:text-zinc-300"
             aria-live="polite"
             aria-atomic="true"
           >
-            {label} · по дням выбранного периода
+            {label} ·{" "}
+            {history
+              ? `${day(chartScope.period.from)}–${day(chartScope.period.to)}`
+              : "по дням выбранного периода"}
           </p>
+          {history ? (
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              Карточки и итоги — за {day(summary.scope.period.to)}.
+            </p>
+          ) : null}
         </div>
-        <Link
-          href={detailsHref}
-          prefetch={false}
-          aria-label={`Подробнее: ${label}`}
-          className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-emerald-700 hover:bg-[var(--surface-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 dark:text-emerald-300"
-        >
-          Подробнее <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-        </Link>
+        {chartSummary ? (
+          <Link
+            href={detailsHref}
+            prefetch={false}
+            aria-label={`Подробнее: ${label}`}
+            className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-emerald-700 hover:bg-[var(--surface-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 dark:text-emerald-300"
+          >
+            Подробнее <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        ) : null}
       </div>
       <div
         className="mt-4 h-60 w-full"
@@ -194,11 +209,15 @@ export function ExecutiveTrendChart({
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl bg-[var(--surface-muted)] px-6 text-center">
             <p className="text-sm font-medium text-[var(--foreground)]">
-              Нет данных для графика
+              {history && !chartSummary
+                ? "Не удалось загрузить динамику за 21 день"
+                : "Нет данных для графика"}
             </p>
             <p className="max-w-md text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-              {metric.reason ??
-                "Для этого показателя пока нет значений по дням выбранного периода."}
+              {history && !chartSummary
+                ? "Показатели за выбранные сутки доступны выше. Обновите страницу, чтобы повторить загрузку графика."
+                : (metric?.reason ??
+                  "Для этого показателя пока нет значений по дням выбранного периода.")}
             </p>
           </div>
         )}
@@ -217,7 +236,9 @@ export function ExecutiveTrendChart({
           ) : null}
           <p className="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
             {hasPrevious
-              ? "Сплошная линия — выбранный период, пунктир — предыдущий сопоставимый период."
+              ? history && chartScope.comparison
+                ? `Сплошная линия — ${day(chartScope.period.from)}–${day(chartScope.period.to)}, пунктир — ${day(chartScope.comparison.from)}–${day(chartScope.comparison.to)}.`
+                : "Сплошная линия — выбранный период, пунктир — предыдущий сопоставимый период."
               : "Нет сопоставимого предыдущего периода."}
           </p>
         </>

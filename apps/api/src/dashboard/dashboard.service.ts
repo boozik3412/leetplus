@@ -2759,12 +2759,11 @@ export class DashboardService {
       fromDate.setUTCDate(fromDate.getUTCDate() - mondayOffset);
       label = 'Текущая неделя';
     } else if (period === 'full-week') {
-      const dayOfWeek = toDate.getUTCDay();
-      const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      toDate.setUTCDate(toDate.getUTCDate() - mondayOffset - 1);
+      // Seven completed days, ending yesterday, regardless of weekday.
+      toDate.setUTCDate(toDate.getUTCDate() - 1);
       fromDate = new Date(toDate);
       fromDate.setUTCDate(fromDate.getUTCDate() - 6);
-      label = 'Полная неделя';
+      label = 'Последние 7 дней';
     } else if (period === 'quarter') {
       const quarterStartMonth = Math.floor(toDate.getUTCMonth() / 3) * 3;
       fromDate = new Date(

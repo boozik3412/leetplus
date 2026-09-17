@@ -38,7 +38,7 @@ const periodLabels: Record<DashboardPeriod, string> = {
   day: "Текущие сутки",
   "full-day": "Полные сутки",
   week: "Текущая неделя",
-  "full-week": "Полная неделя",
+  "full-week": "Последние 7 дней",
   month: "Текущий месяц",
   "full-month": "Полный месяц",
   quarter: "Текущий квартал",
@@ -64,13 +64,13 @@ const periodHints: Record<
   week: {
     period: "Текущая календарная неделя с понедельника до текущего дня.",
     comparison:
-      "Динамика сравнивает каждый отрезок с предыдущим аналогичным; для строгой оценки используйте полную неделю.",
+      "Динамика сравнивает каждый отрезок с предыдущим аналогичным; для сравнения завершённых дней выберите последние 7 дней.",
   },
   "full-week": {
     period:
-      "Последняя завершенная календарная неделя с понедельника по воскресенье.",
+      "Семь последних завершённых суток, по вчерашний день включительно. Сегодняшний день не входит.",
     comparison:
-      "Сравнение период к периоду: полная неделя к предыдущей полной неделе.",
+      "Сравнение с предыдущими семью завершёнными сутками без пересечения периодов.",
   },
   month: {
     period: "Текущий календарный месяц с 1 числа до текущего дня.",
@@ -196,15 +196,17 @@ function DashboardFiltersContent({
       ? formatCustomPeriodLabel(customFrom, customTo)
       : periodLabels[selectedPeriod];
   const compactPeriodLabel =
-    selectedPeriod === "full-week" || selectedPeriod === "week"
-      ? "Неделя"
-      : selectedPeriod === "full-month" || selectedPeriod === "month"
-        ? "Месяц"
-        : selectedPeriod === "full-day" || selectedPeriod === "day"
-          ? "День"
-          : selectedPeriod === "custom"
-            ? "Период"
-            : selectedPeriodLabel;
+    selectedPeriod === "full-week"
+      ? "7 дней"
+      : selectedPeriod === "week"
+        ? "Неделя"
+        : selectedPeriod === "full-month" || selectedPeriod === "month"
+          ? "Месяц"
+          : selectedPeriod === "full-day" || selectedPeriod === "day"
+            ? "День"
+            : selectedPeriod === "custom"
+              ? "Период"
+              : selectedPeriodLabel;
   const selectedCategoriesLabel =
     selectedCategories.length === 0
       ? "Все категории"

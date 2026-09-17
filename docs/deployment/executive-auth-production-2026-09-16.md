@@ -1,6 +1,9 @@
 # Executive dashboard and USER_CALL Web release, 16 September 2026
 
-## Current checkpoint: previous working version restored at 16:39 UTC
+Historical incident/recovery record. The corrected release was accepted on
+17 September; [current production checkpoint](executive-production-2026-09-17.md).
+
+## Checkpoint on16September: previous working version restored at16:39UTC
 
 Explicitly approved emergency operation `0caaf0e3-2572-4918-8e69-a985ee46ed61`
 completed all five native phases. Active production is **BLUE

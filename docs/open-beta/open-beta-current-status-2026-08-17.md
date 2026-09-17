@@ -1,13 +1,13 @@
-# LeetPlus open beta — текущее состояние на 16.09.2026
+# LeetPlus open beta — текущее состояние на 17.09.2026
 
-**Checkpoint 16:44 UTC:** отдельный human GO0caaf вернул рабочий **BLUEb5/gen7/API4GiB**.
-Data399/CURRENT191, controller02 и tenant/provider boundaries сохранены.
-Real public dashboard desktop/390px PASS; original worker timers включены,
-ordinary gen7 bonus receipt PASS16:43:23. GREEN02/API6 сохранён с известным UI-дефектом.
-Новый dashboard и USER_CALL feedback временно отсутствуют в публичной версии.
-Source fix6957 ещё не admitted: Full CI выявил устаревший PG assertion.
+**Checkpoint 06:40 UTC:** новый дашборд и USER_CALL feedback выпущены по отдельному
+human GO762a: **GREEN7ead/gen8/API6GiB**, рабочий BLUEb5/API4 сохранён резервом.
+Data399/CURRENT191, serving controller02 и tenant/provider boundaries сохранены.
+Полный exact-main CI, изолированные UI/68 API/resource checks и реальный public
+dashboard 1440/390px PASS; оба исходных worker timer восстановлены, три обычных
+gen8 bonus-запуска PASS. Недоказанные метрики остаются явно неполными/недоступными.
 Нового естественного phone/Telegram login proof и внешнего beta GO нет.
-[Текущее состояние и evidence](../deployment/executive-auth-production-2026-09-16.md).
+[Текущее состояние и evidence](../deployment/executive-production-2026-09-17.md).
 
 ## История до application rollout617
 

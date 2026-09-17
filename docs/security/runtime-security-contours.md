@@ -2,7 +2,14 @@
 
 Статус: **канонический current-state contract**, актуально на **17.09.2026**.
 
-**Оперативное обновление 17.09, 06:40 UTC:** отдельно согласованный native762a
+**Оперативное обновление 17.09, 11:02 UTC:** nativeed4 выпустил **BLUE3c3/gen9,
+API6GiB/total8GiB** с последними семью завершёнными днями и отдельной историей21
+при суточных итогах. GREEN7ead, PG/Redis/data399/CURRENT191 и serving controller02
+сохранены; их прежние process identities подтверждены. Public UI1440/390 и live
+API PASS, исходные расписания включены с gen9 grants, обычный bonus receipt PASS.
+[Текущий runtime и evidence](../deployment/dashboard-periods-production-2026-09-17.md).
+
+**Утренний checkpoint 17.09, 06:40 UTC:** отдельно согласованный native762a
 выпустил **GREEN `7eadfd3e…`, generation8, API6GiB/total8GiB**; рабочий BLUEb5/API4
 сохранён резервом. Data399/CURRENT191, PG/Redis identities и serving controller02
 не менялись. Реальный public browser 1440/390px, 17 live API reads и финальный

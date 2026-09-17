@@ -1,6 +1,12 @@
 # LeetPlus open beta — текущее состояние на 17.09.2026
 
-**Checkpoint 06:40 UTC:** новый дашборд и USER_CALL feedback выпущены по отдельному
+**Текущий checkpoint 11:02 UTC:** отдельный nativeed4 выпустил **BLUE3c3/gen9/API6GiB**,
+резерв GREEN7ead сохранён. Выпущены последние семь завершённых суток и график21
+при суточных итогах. Live API/public UI1440/390 и обычный gen9 bonus PASS,
+оба исходных расписания включены. Data399/CURRENT191/controller02 и tenant/provider
+boundaries сохранены. [Текущее состояние](../deployment/dashboard-periods-production-2026-09-17.md).
+
+**Исторический checkpoint 06:40 UTC:** новый дашборд и USER_CALL feedback выпущены по отдельному
 human GO762a: **GREEN7ead/gen8/API6GiB**, рабочий BLUEb5/API4 сохранён резервом.
 Data399/CURRENT191, serving controller02 и tenant/provider boundaries сохранены.
 Полный exact-main CI, изолированные UI/68 API/resource checks и реальный public

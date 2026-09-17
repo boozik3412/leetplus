@@ -1,6 +1,12 @@
 # API 6 GiB resource profile
 
-Update 17 September, 06:40 UTC: approved application762a is accepted as active
+Update 17 September, 11:02 UTC: approved applicationed4 is accepted as active
+BLUE3c3/generation9. Both BLUE3c3 and retained GREEN7ead APIs use 6 GiB RAM,
+8 GiB total RAM+swap and 2 CPU. GREEN/data process identities are unchanged.
+Exact-candidate resource/cooldown and actual public UI/worker checks passed.
+[Current production evidence](dashboard-periods-production-2026-09-17.md).
+
+Historical update 17 September, 06:40 UTC: approved application762a was accepted as active
 GREEN7ead/generation8, API 6 GiB RAM and 8 GiB total RAM+swap. Healthy BLUEb5/API4
 is retained. Serving controller02/data399 did not change. Actual restored-copy
 UI/resource/cooldown and public UI/worker acceptance passed.

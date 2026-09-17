@@ -1,12 +1,12 @@
 # LeetPlus repository context
 
-Production checkpoint 17.09.2026: active GREEN exact `7eadfd3e4468182730dbded4798fe5f0df8c9236`,
-generation8/API6GiB; healthy BLUEb5/API4 retained. Serving controller02 and
-data399/CURRENT191 are separate, unchanged identities. Approved native762a,
-actual public UI and ordinary gen8 workers passed; the executive dashboard and
+Production checkpoint 17.09.2026, 11:02 UTC: active BLUE exact `3c3dc4ac4d1a73fdf9a1a6da5427212adfa9af80`,
+generation9/API6GiB; healthy GREEN7ead/API6 retained with unchanged process identities. Serving controller02 and
+data399/CURRENT191 are separate, unchanged identities. Approved nativeed4,
+actual public UI and ordinary gen9 worker passed; rolling7, daily21 history, the executive dashboard and
 USER_CALL feedback UI are deployed. Natural phone/Telegram login is not proven
 by the operator guest diagnostic. Older source-only notes below are historical;
-use `docs/deployment/executive-production-2026-09-17.md` and live status before
+use `docs/deployment/dashboard-periods-production-2026-09-17.md` and live status before
 any new effect. A later docs-only commit is not a new production release.
 
 Before changing authentication, landing/redirects, access scope, the public
@@ -90,7 +90,7 @@ the same change.
 - `getExecutiveOperations` читает assortment отдельно; failure не ломает primary summary. Web `apps/web/src/app/(app)/dashboard/page.tsx` loads summary first, requests operations against accepted scope and discards scope mismatch; UI shows evidence/reason/coverage and builds only role-safe internal detail/report links.
 - Entry UI: `/dashboard` uses shared `DashboardFilters`; `ExecutiveDashboard`, `executive-trend-chart.tsx` and `executive-club-table.tsx` render summary; `/dashboard/executive-details` re-queries the same scope and labels output as club/day aggregates. Transport accepts abort signal and throws `ExecutiveDashboardRequestError` for non-OK responses.
 - ExecutiveDashboard is a client presentation boundary: its five KPI buttons choose the daily metric without a data request. The chart reads the corresponding saved `days[].metrics` values; ratio math stays on the API. Its «Подробнее» link preserves selected metric/scope and does not prefetch on each selection. The server page still authenticates and fetches scoped data.
-- Source follow-up17.09 (not yet production): `full-week` is the last seven completed days, ending yesterday. For `full-day`, keep one-day KPI/club/priority totals but load a separate 21-day chart via the existing custom executive-summary reader. `lib/executive-history.ts` preserves accepted clubs/timezones/asOf, checks exact scope and 21 ordered dates, and rejects failed/mismatched history without substituting the daily point. Chart details use the history range; `returnPeriod=full-day` restores the daily filter. The chart labels its own comparison range; KPI comparisons remain daily.
+- Production follow-up17.09 (BLUE3c3/gen9): `full-week` is the last seven completed days, ending yesterday. For `full-day`, keep one-day KPI/club/priority totals but load a separate 21-day chart via the existing custom executive-summary reader. `lib/executive-history.ts` preserves accepted clubs/timezones/asOf, checks exact scope and 21 ordered dates, and rejects failed/mismatched history without substituting the daily point. Chart details use the history range; `returnPeriod=full-day` restores the daily filter. The chart labels its own comparison range; KPI comparisons remain daily.
 - Club table notes are collapsed by default behind «Пояснения»; short partial/missing/stale/failed labels stay visible. Confirmed values and zero have no repeated evidence footers in the compact view.
 - Product pilot aliases (`tenantId`, `tenantSlug`, period fields and `selectedStoreIds`) remain compatibility data; new UI consumes `scope`. Legacy `/dashboard/summary` and assortment surfaces stay separate.
 

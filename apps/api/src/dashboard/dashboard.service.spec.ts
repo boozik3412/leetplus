@@ -261,6 +261,136 @@ describe('DashboardService', () => {
     prisma.stockMovement.findMany.mockResolvedValue([]);
   }
 
+  it.each([
+    ['2026-09-17', '2026-09-10', '2026-09-16', '2026-09-03', '2026-09-09'],
+    ['2026-09-20', '2026-09-13', '2026-09-19', '2026-09-06', '2026-09-12'],
+    ['2026-09-21', '2026-09-14', '2026-09-20', '2026-09-07', '2026-09-13'],
+    ['2026-10-01', '2026-09-24', '2026-09-30', '2026-09-17', '2026-09-23'],
+    ['2027-01-04', '2026-12-28', '2027-01-03', '2026-12-21', '2026-12-27'],
+    ['2028-03-02', '2028-02-24', '2028-03-01', '2028-02-17', '2028-02-23'],
+  ])(
+    'resolves full-week at %s as seven completed days shared by all dashboard projections',
+    async (today, from, to, previousFrom, previousTo) => {
+      jest.setSystemTime(new Date(`${today}T12:00:00.000Z`));
+      mockEmptyDashboardData();
+      const query = {
+        period: 'full-week' as const,
+        storeIds: ['store-1'],
+        asOf: `${today}T11:00:00.000Z`,
+      };
+
+      const summary = await service.getExecutiveSummary(user, query);
+      expect(summary.scope).toMatchObject({
+        period: { from, to },
+        comparison: { from: previousFrom, to: previousTo },
+        storeIds: ['store-1'],
+        asOf: query.asOf,
+      });
+      const dates = summary.days.map((day) => day.date);
+      expect(dates).toHaveLength(7);
+      expect(new Set(dates).size).toBe(7);
+      expect(dates[0]).toBe(from);
+      expect(dates[6]).toBe(to);
+      expect(dates).not.toContain(today);
+      for (let index = 1; index < dates.length; index += 1) {
+        expect(Date.parse(dates[index]) - Date.parse(dates[index - 1])).toBe(
+          86_400_000,
+        );
+      }
+      // Missing days stay in the chart as unknown, never shifted to older facts.
+      expect(
+        summary.days.every((day) => day.metrics.productRevenue.value === null),
+      ).toBe(true);
+      const operations = await service.getExecutiveOperations(user, query);
+      expect(operations.scope).toEqual(summary.scope);
+      const assortment = await service.getSummary(user, query);
+      expect(assortment.periodFrom).toBe(from);
+      expect(assortment.periodTo).toBe(to);
+    },
+  );
+
+  it('compares seven daily values with the preceding seven days and excludes today', async () => {
+    jest.setSystemTime(new Date('2026-09-17T12:00:00.000Z'));
+    mockEmptyDashboardData();
+    const dates = [
+      '2026-09-02',
+      '2026-09-03',
+      '2026-09-04',
+      '2026-09-05',
+      '2026-09-06',
+      '2026-09-07',
+      '2026-09-08',
+      '2026-09-09',
+      '2026-09-10',
+      '2026-09-11',
+      '2026-09-12',
+      '2026-09-13',
+      '2026-09-14',
+      '2026-09-15',
+      '2026-09-16',
+      '2026-09-17',
+    ];
+    prisma.salesFact.findMany.mockResolvedValue(
+      dates.map((date, index) => ({
+        storeId: 'store-1',
+        saleDate: new Date(`${date}T12:00:00.000Z`),
+        revenue: new Prisma.Decimal(
+          index === 0 || index === 15 ? 999999 : index * 100,
+        ),
+      })),
+    );
+    assortmentHealthLoader.loadSalesCoverage.mockResolvedValue({
+      salesDayEvidence: dates.map((date) => ({
+        storeId: 'store-1',
+        date: new Date(`${date}T00:00:00.000Z`),
+        status: 'CONFIRMED',
+      })),
+    });
+
+    const summary = await service.getExecutiveSummary(user, {
+      period: 'full-week',
+    });
+    expect(
+      summary.days.map((day) => ({
+        date: day.date,
+        value: day.metrics.productRevenue.value,
+        previous: day.metrics.productRevenue.comparison?.previousValue,
+      })),
+    ).toEqual([
+      { date: '2026-09-10', value: 800, previous: 100 },
+      { date: '2026-09-11', value: 900, previous: 200 },
+      { date: '2026-09-12', value: 1000, previous: 300 },
+      { date: '2026-09-13', value: 1100, previous: 400 },
+      { date: '2026-09-14', value: 1200, previous: 500 },
+      { date: '2026-09-15', value: 1300, previous: 600 },
+      { date: '2026-09-16', value: 1400, previous: 700 },
+    ]);
+    expect(summary.metrics.productRevenue).toMatchObject({
+      value: 7700,
+      state: 'AVAILABLE',
+      coverage: { covered: 7, total: 7, percent: 100 },
+      comparison: {
+        previousValue: 2800,
+        absoluteDelta: 4900,
+        percentDelta: 175,
+      },
+    });
+    const withoutComparison = await service.getExecutiveSummary(user, {
+      period: 'full-week',
+      comparison: false,
+    });
+    expect(withoutComparison.scope.comparison).toBeNull();
+    expect(withoutComparison.metrics.productRevenue.value).toBe(7700);
+    expect(withoutComparison.days.map((day) => day.date)).toEqual(
+      summary.days.map((day) => day.date),
+    );
+    expect(
+      withoutComparison.days.every(
+        (day) => day.metrics.productRevenue.comparison === null,
+      ),
+    ).toBe(true);
+  });
+
   it('projects confirmed product revenue for the resolved clubs and excludes cancelled sales', async () => {
     prisma.store.findMany.mockResolvedValue([
       {
@@ -1141,9 +1271,15 @@ describe('DashboardService', () => {
     expect(wire.assortment.data.outOfStock).toMatchObject({
       value: null,
       state: 'MISSING',
-      reason: expect.any(String),
-      coverage: expect.any(Object),
     });
+    expect(wire.assortment.data.outOfStock).toHaveProperty(
+      'reason',
+      expect.any(String),
+    );
+    expect(wire.assortment.data.outOfStock).toHaveProperty(
+      'coverage',
+      expect.any(Object),
+    );
     expect(wire.assortment.data.noSales).toEqual(health.summary.noSales);
   });
 

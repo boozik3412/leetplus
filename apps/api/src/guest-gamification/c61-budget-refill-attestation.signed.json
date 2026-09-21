@@ -1,0 +1,32 @@
+{
+  "approval": {
+    "status": "APPROVED",
+    "ownerEvidenceDigest": "sha256:5a7a2d31454b5acd309e5bb40e85ff1f7d237a4bd0ce5f85897217a7b792dc61",
+    "ownerEvidenceAt": "2026-09-21T05:20:00.000Z",
+    "ticketId": "c3e8aebc-b627-46fd-827e-cd250cc0a07f",
+    "ticketNumber": "LP-BUG-C61EE785",
+    "frontEndExcludedTicketId": "277ab57b-ef2f-4dc6-9272-18a8f8f48af3",
+    "profileId": "43387ec4-1211-4edf-b109-863377cff32f",
+    "guestId": "0bd62930-7132-4bae-af35-44e2573023d3",
+    "storeId": "cd4fe6d9-8678-4f1b-bf5b-ad1f16dbf8a5",
+    "factId": "c68b1912-9a94-46c7-948c-47c1e3738bee",
+    "eventId": "076daeb3-65e1-4e9a-8c83-d4777a60b10d",
+    "ruleId": "0ce6f7e3-99ea-4aa2-b6e2-68e8dbd1bb12",
+    "sourceLocalDate": "2026-09-20",
+    "sessionExternalId": "553209",
+    "rewardLabel": "КЕЙС «WEEKEND»",
+    "reason": "OWNER_APPROVED_WEEKEND_BUDGET_REFILL",
+    "blockedDecisionIds": [
+      "b3592923-6483-45a8-99e2-761b1cdedd8b"
+    ],
+    "approval": "BUDGET_REFILL_ONLY_NO_XP_NO_BONUS",
+    "approvalEnvelope": {
+      "keyId": "platform-recovery-owner-v1",
+      "algorithm": "Ed25519",
+      "artifactDigest": "bbad4b51b5e3343d5dc406fcf8c5c7bd7b16a690e5407b840b6479ca1a75d6ed",
+      "signatureBase64": ""
+    }
+  },
+  "signature": "PPGz8DPusEm+1LNvMxsLmg490ZSpHBdan9aVxMgtNLu0wujFWcrDm5vXwbXFcFwQGb91X4BfETneel1zvQsACg==",
+  "publicKeySha256": "a49227c157fdb02193a6c97bbd5666969432b221b393bee7e7b09bd4c8255f5e"
+}

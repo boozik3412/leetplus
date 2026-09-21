@@ -14006,6 +14006,17 @@ export class GuestGamificationService {
       try {
         return await this.prisma.$transaction(
           async (tx) => {
+            const localDay = new Intl.DateTimeFormat('en-CA', {
+              timeZone: input.timeZone,
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit',
+            }).format(input.qualifiedAt);
+            // Every ordinary and exceptional entitlement issuance serializes on
+            // the same profile/rule/local-day key before inspecting limits.
+            await tx.$executeRaw(
+              Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`guest-lootbox-day:${input.tenantId}:${input.profileId}:${input.rule.id}:${localDay}`}))`,
+            );
             await acquireGuestGameLootBoxRuleLock(
               tx,
               input.tenantId,

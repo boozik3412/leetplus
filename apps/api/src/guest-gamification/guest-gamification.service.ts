@@ -2820,6 +2820,14 @@ type GuestGameProcessEventOptions = {
     sourceFactUpdatedAt: Date;
     seasonUpdatedAt: Date;
     confirmationHash: string;
+    supportTicketAuthority?: {
+      ticketId: string;
+      ticketNumber: string;
+      profileId: string;
+      guestId: string | null;
+      factId: string;
+      historicalConditionHash: string;
+    };
   };
   /**
    * Bounded recovery for an exact canonical physical event that was created
@@ -18777,7 +18785,7 @@ export class GuestGamificationService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const [lockedFacts, lockedSeasons] = await Promise.all([
+      const [lockedFacts, lockedSeasons, lockedTickets] = await Promise.all([
         tx.$queryRaw<Array<{ id: string; updatedAt: Date }>>(Prisma.sql`
           SELECT "id", "updatedAt"
           FROM "GuestActivityFact"
@@ -18796,6 +18804,24 @@ export class GuestGamificationService {
             AND "status" = 'ACTIVE'
           FOR SHARE
         `),
+        scope.supportTicketAuthority
+          ? tx.$queryRaw<
+              Array<{
+                id: string;
+                profileId: string;
+                guestId: string | null;
+              }>
+            >(Prisma.sql`
+              SELECT "id", "profileId", "guestId"
+              FROM "GuestSupportTicket"
+              WHERE "id" = ${scope.supportTicketAuthority.ticketId}
+                AND "tenantId" = ${user.tenantId}
+                AND "ticketNumber" = ${scope.supportTicketAuthority.ticketNumber}
+                AND "profileId" = ${scope.supportTicketAuthority.profileId}
+                AND "status" IN ('NEW', 'IN_PROGRESS')
+              FOR UPDATE
+            `)
+          : Promise.resolve([]),
       ]);
       const factVersion = lockedFacts[0]?.updatedAt;
       const seasonVersion = lockedSeasons[0]?.updatedAt;
@@ -18810,6 +18836,22 @@ export class GuestGamificationService {
         throw new ConflictException(
           'Факт или сезон изменились после preview; rule-scoped intent не создан.',
         );
+      }
+      if (scope.supportTicketAuthority) {
+        const authority = scope.supportTicketAuthority;
+        const ticket = lockedTickets[0];
+        if (
+          authority.factId !== scope.sourceFactId ||
+          authority.profileId !== profileId ||
+          !/^[a-f0-9]{64}$/u.test(authority.historicalConditionHash) ||
+          lockedTickets.length !== 1 ||
+          !ticket ||
+          ticket.guestId !== authority.guestId
+        ) {
+          throw new ConflictException(
+            'Exact support-ticket authority changed or does not bind this replay intent.',
+          );
+        }
       }
       const intentIds: string[] = [];
       for (const plan of plans) {

@@ -28,12 +28,19 @@ import {
   guestGameBattlePassStepEvaluationPolicy,
   guestGamePolicyAllowsEvaluation,
 } from './guest-game-source-policy';
+import { exactBalanceTopupReplayAttestation } from './battlepass-topup-replay-attestations';
 
 const replayFactTypes = new Set([
   'SESSION_PLAY_TIME_ACCUMULATED',
   'HOURLY_PLAY_TIME_ACCUMULATED',
   'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
 ]);
+const balanceTopupReplayFactType = 'BALANCE_TOPUP';
+const battlePassReplayFactTypes = new Set([
+  ...replayFactTypes,
+  balanceTopupReplayFactType,
+]);
+const balanceTopupReplaySupportTicketNumber = 'LP-BUG-571075E9';
 const replayReceiptStatuses = new Set(['PROCESSED', 'LIVE_PROCESSED']);
 const canonicalizationTerminalReceiptStatuses = new Set([
   'PROCESSED',
@@ -65,6 +72,8 @@ export type GuestGameBattlePassReplayPreviewDto = {
   seasonId?: string | null;
   stepId?: string | null;
   stepSequence?: number | string | null;
+  /** Required only for the narrow, owner-attested BALANCE_TOPUP recovery. */
+  supportTicketNumber?: string | null;
 };
 
 export type GuestGameBattlePassReplayApplyDto =
@@ -208,7 +217,8 @@ export type GuestGameExactPlayTimeCanonicalizationResult = {
     profileId: string;
     factType: string;
     happenedAt: string;
-    durationMinutes: number;
+    durationMinutes: number | null;
+    amount: number | null;
     confidence: string;
   };
   canonical: {
@@ -244,13 +254,23 @@ export type GuestGameBattlePassReplayResult = {
   confirmationHash: string;
   expectedFactUpdatedAt: string;
   expectedSeasonUpdatedAt: string;
-  fact: {
-    id: string;
-    factType: string;
-    happenedAt: string;
-    durationMinutes: number;
-    confidence: string;
-  };
+  fact:
+    | {
+        id: string;
+        factType: 'BALANCE_TOPUP';
+        happenedAt: string;
+        durationMinutes: null;
+        amount: number;
+        confidence: string;
+      }
+    | {
+        id: string;
+        factType: string;
+        happenedAt: string;
+        durationMinutes: number;
+        amount: null;
+        confidence: string;
+      };
   target: {
     seasonId: string;
     seasonName: string;
@@ -298,12 +318,13 @@ type PreparedReplay = {
     storeId: string | null;
     factType: string;
     happenedAt: Date;
-    durationMinutes: number;
+    durationMinutes: number | null;
+    amount: number | null;
     confidence: string;
     externalProvider: string;
     externalDomain: string;
     sourceKind: string;
-    sessionExternalId: string;
+    sessionExternalId: string | null;
     stableExternalId: string;
     updatedAt: Date;
   };
@@ -318,7 +339,7 @@ type PreparedReplay = {
     title: string | null;
   };
   rule: GuestGameDryRunRule;
-  processDto: PhysicalPlayTimeProcessEventDto;
+  processDto: GuestGameProcessEventDto;
   ruleDomainTimeZones: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
   ruleExternalDomains: ReadonlyMap<string, readonly string[]>;
   originKey: string;
@@ -327,6 +348,8 @@ type PreparedReplay = {
   slotKey: string;
   claimKey: string;
   confirmationHash: string;
+  historicalConditionHash: string | null;
+  supportTicketId: string | null;
   existingIntent: {
     id: string;
     eventId: string;
@@ -1502,7 +1525,10 @@ export class GuestGameRuleReplayService {
       { ...prepared.processDto, activeRulesOnly: true },
       {
         allowedRuleIds: [prepared.season.id],
-        evaluationMode: 'LIVE_LEDGER_FALLBACK',
+        evaluationMode:
+          prepared.fact.factType === balanceTopupReplayFactType
+            ? 'LIVE_SUPPLEMENTAL'
+            : 'LIVE_LEDGER_FALLBACK',
         evaluatorVersion: 'ledger-rule-replay-v1',
         originKey: prepared.originKey,
         suppressLedgerShadow: true,
@@ -1517,6 +1543,18 @@ export class GuestGameRuleReplayService {
           sourceFactUpdatedAt: prepared.fact.updatedAt,
           seasonUpdatedAt: prepared.season.updatedAt,
           confirmationHash: prepared.confirmationHash,
+          ...(prepared.supportTicketId && prepared.historicalConditionHash
+            ? {
+                supportTicketAuthority: {
+                  ticketId: prepared.supportTicketId,
+                  ticketNumber: balanceTopupReplaySupportTicketNumber,
+                  profileId: prepared.fact.profileId,
+                  guestId: prepared.fact.guestId,
+                  factId: prepared.fact.id,
+                  historicalConditionHash: prepared.historicalConditionHash,
+                },
+              }
+            : {}),
         },
       },
     );
@@ -3453,6 +3491,7 @@ export class GuestGameRuleReplayService {
         factType: prepared.fact.factType,
         happenedAt: prepared.fact.happenedAt.toISOString(),
         durationMinutes: prepared.fact.durationMinutes,
+        amount: null,
         confidence: prepared.fact.confidence,
       },
       canonical: {
@@ -3506,14 +3545,20 @@ export class GuestGameRuleReplayService {
         'Replay разрешён только для ACTIVE, EXACT и не superseded факта.',
       );
     }
-    if (!replayFactTypes.has(factRow.factType)) {
+    const isBalanceTopup = factRow.factType === balanceTopupReplayFactType;
+    if (!battlePassReplayFactTypes.has(factRow.factType)) {
       throw new BadRequestException(
-        'Первый безопасный replay поддерживает только факты игрового времени.',
+        'Replay поддерживает только разрешённые exact play-time facts и один owner-attested BALANCE_TOPUP path.',
       );
     }
-    if (!factRow.profileId || !factRow.happenedAt || !factRow.durationMinutes) {
+    if (
+      !factRow.profileId ||
+      !factRow.happenedAt ||
+      (!isBalanceTopup && !factRow.durationMinutes) ||
+      (isBalanceTopup && nullableNumber(factRow.amount) === null)
+    ) {
       throw new ConflictException(
-        'Факт не содержит profileId, happenedAt или durationMinutes.',
+        'Факт не содержит exact profile/time и требуемое значение прогресса.',
       );
     }
     if (factRow.profileId !== profileId) {
@@ -3522,13 +3567,14 @@ export class GuestGameRuleReplayService {
       );
     }
     if (
-      await hasSessionFactsPendingHourlyReplay(this.prisma, {
+      !isBalanceTopup &&
+      (await hasSessionFactsPendingHourlyReplay(this.prisma, {
         tenantId: user.tenantId,
         factId: factRow.id,
         factTypes: [factRow.factType],
         profileId: factRow.profileId,
         happenedAtGte: factRow.happenedAt,
-      })
+      }))
     ) {
       throw new ConflictException(
         'The selected session fact predates the hourly-session source replay. Synchronize its source and retry preview.',
@@ -3541,16 +3587,24 @@ export class GuestGameRuleReplayService {
     }
 
     const sessionExternalId = normalizedString(factRow.sessionExternalId);
-    if (!sessionExternalId) {
-      throw new ConflictException('У факта нет стабильного sessionExternalId.');
+    const stableExternalId = normalizedString(
+      isBalanceTopup ? factRow.sourceExternalId : sessionExternalId,
+    );
+    if (!stableExternalId) {
+      throw new ConflictException(
+        isBalanceTopup
+          ? 'BALANCE_TOPUP fact does not have a stable sourceExternalId.'
+          : 'У факта нет стабильного sessionExternalId.',
+      );
     }
-    const stableExternalId = sessionExternalId;
-    const originKeys = exactPlayTimeOriginKeys({
-      externalProvider: factRow.externalProvider,
-      externalDomain: factRow.externalDomain,
-      sourceKind: factRow.sourceKind,
-      sessionExternalId,
-    });
+    const originKeys = isBalanceTopup
+      ? null
+      : exactPlayTimeOriginKeys({
+          externalProvider: factRow.externalProvider,
+          externalDomain: factRow.externalDomain,
+          sourceKind: factRow.sourceKind,
+          sessionExternalId: stableExternalId,
+        });
     const steps = canonicalSteps(seasonRow.levels);
     const step = steps.find((item) => item.id === stepId);
     if (!step) {
@@ -3565,17 +3619,20 @@ export class GuestGameRuleReplayService {
     if (
       numberValue(activationRules.schemaVersion, 1) !== 2 ||
       normalizedString(activationRules.taskType)?.toUpperCase() !==
-        'PLAY_TIME' ||
+        (isBalanceTopup ? 'BALANCE_TOPUP' : 'PLAY_TIME') ||
       !guestGamePolicyAllowsEvaluation(
         guestGameBattlePassStepEvaluationPolicy(activationRules),
-        'LIVE_LEDGER_FALLBACK',
+        isBalanceTopup ? 'LIVE_SUPPLEMENTAL' : 'LIVE_LEDGER_FALLBACK',
       )
     ) {
       throw new ConflictException(
-        'Replay разрешён только для v2 PLAY_TIME шага с LIVE_WITH_LEDGER_FALLBACK.',
+        isBalanceTopup
+          ? 'BALANCE_TOPUP replay requires a v2 LEDGER_SUPPLEMENTAL Battle Pass step.'
+          : 'Replay разрешён только для v2 PLAY_TIME шага с LIVE_WITH_LEDGER_FALLBACK.',
       );
     }
     if (
+      !isBalanceTopup &&
       factRow.factType === 'SESSION_PLAY_TIME_ACCUMULATED' &&
       normalizedString(activationRules.sessionType)?.toUpperCase() !== 'ANY'
     ) {
@@ -3600,39 +3657,116 @@ export class GuestGameRuleReplayService {
       selectedStoreIds,
       selectedStores,
     );
+    if (isBalanceTopup) {
+      this.assertBalanceTopupCandidate(
+        factRow.amount,
+        factRow.externalDomain,
+        activationRules,
+        seasonRow.id,
+        ruleRouting,
+      );
+    }
 
-    const processDto: PhysicalPlayTimeProcessEventDto = {
-      profileId: factRow.profileId,
-      guestId: factRow.guestId,
-      storeId: factRow.storeId,
-      eventType: 'PLAY_HOUR',
-      occurredAt: factRow.happenedAt.toISOString(),
-      sessionMinutes: factRow.durationMinutes,
-      sessionType: replaySessionTypeFromFactType(factRow.factType),
-      sessionPacket: replaySessionPacket(
-        replaySessionTypeFromFactType(factRow.factType),
-      ),
-      sourceFactId: factRow.id,
-      sourceFactKind: 'GUEST_SESSION',
-      externalProvider: factRow.externalProvider,
-      externalDomain: factRow.externalDomain,
-      externalId: stableExternalId,
-      sourceKind: factRow.sourceKind,
-      sessionExternalId,
-      suppressLootBoxRewards: true,
-      payload: {
-        replay: true,
-        factType: factRow.factType,
-        confidence: factRow.confidence,
-        sourceKind: factRow.sourceKind,
-        sessionExternalId,
-      },
-    };
-    const originReceiptBinding = await this.findReplayOriginReceipt(
-      user.tenantId,
-      originKeys,
-    );
-    const originKey = originReceiptBinding?.originKey ?? originKeys.canonical;
+    const supportTicket = isBalanceTopup
+      ? await this.assertExactBalanceTopupSupportTicket(
+          user,
+          dto.supportTicketNumber,
+          factRow.profileId,
+          factRow.guestId,
+        )
+      : null;
+    const topupAttestation = isBalanceTopup
+      ? exactBalanceTopupReplayAttestation({
+          ticketNumber: dto.supportTicketNumber?.trim() ?? '',
+          profileId: factRow.profileId,
+          guestId: factRow.guestId,
+          factId: factRow.id,
+          seasonId: seasonRow.id,
+          stepId: step.id,
+          stepSequence: step.sequence,
+        })
+      : null;
+    if (isBalanceTopup && !topupAttestation) {
+      throw new ConflictException(
+        'No admitted historical-condition attestation matches this exact top-up replay scope.',
+      );
+    }
+    if (topupAttestation) {
+      this.assertBalanceTopupAttestedDefinition(
+        activationRules,
+        step.raw,
+        topupAttestation,
+      );
+    }
+    const historicalConditionHash = topupAttestation?.digest ?? null;
+
+    const processDto: GuestGameProcessEventDto = isBalanceTopup
+      ? {
+          profileId: factRow.profileId,
+          guestId: factRow.guestId,
+          storeId: factRow.storeId,
+          eventType: 'BALANCE_TOPUP',
+          occurredAt: factRow.happenedAt.toISOString(),
+          spendAmount: nullableNumber(factRow.amount) ?? 0,
+          sourceFactId: factRow.id,
+          sourceFactKind: 'SUPPLEMENTAL_BALANCE_TOPUP',
+          externalProvider: factRow.externalProvider,
+          externalDomain: factRow.externalDomain,
+          externalId: stableExternalId,
+          sourceKind: factRow.sourceKind,
+          payload: {
+            replay: true,
+            factType: factRow.factType,
+            confidence: factRow.confidence,
+            sourceKind: factRow.sourceKind,
+            historicalConditionHash,
+          },
+        }
+      : {
+          profileId: factRow.profileId,
+          guestId: factRow.guestId,
+          storeId: factRow.storeId,
+          eventType: 'PLAY_HOUR',
+          occurredAt: factRow.happenedAt.toISOString(),
+          sessionMinutes: factRow.durationMinutes,
+          sessionType: replaySessionTypeFromFactType(factRow.factType),
+          sessionPacket: replaySessionPacket(
+            replaySessionTypeFromFactType(factRow.factType),
+          ),
+          sourceFactId: factRow.id,
+          sourceFactKind: 'GUEST_SESSION',
+          externalProvider: factRow.externalProvider,
+          externalDomain: factRow.externalDomain,
+          externalId: stableExternalId,
+          sourceKind: factRow.sourceKind,
+          sessionExternalId,
+          suppressLootBoxRewards: true,
+          payload: {
+            replay: true,
+            factType: factRow.factType,
+            confidence: factRow.confidence,
+            sourceKind: factRow.sourceKind,
+            sessionExternalId,
+          },
+        };
+    const originReceiptBinding = originKeys
+      ? await this.findReplayOriginReceipt(user.tenantId, originKeys)
+      : null;
+    const topupEvent = isBalanceTopup
+      ? await this.findCanonicalBalanceTopupEvent(
+          user.tenantId,
+          factRow.profileId,
+          factRow.id,
+        )
+      : null;
+    const originKey = isBalanceTopup
+      ? normalizedString(topupEvent?.originKey)
+      : (originReceiptBinding?.originKey ?? originKeys?.canonical ?? null);
+    if (!originKey) {
+      throw new ConflictException(
+        'BALANCE_TOPUP replay requires the exact existing canonical event and origin key.',
+      );
+    }
 
     const claimKey = `season:${seasonRow.id}:profile:${factRow.profileId}:step:${step.sequence}`;
     const [dryRun, event, existingIntent] = await Promise.all([
@@ -3670,12 +3804,23 @@ export class GuestGameRuleReplayService {
         'Выбранный шаг не является текущим единственным шагом Battle Pass для гостя.',
       );
     }
+    if (
+      topupAttestation &&
+      (rule.rewardType !== topupAttestation.rewardType ||
+        rule.rewardAmount !== topupAttestation.rewardAmount ||
+        rule.xpDelta !== 0)
+    ) {
+      throw new ConflictException(
+        'Effective Battle Pass reward plan differs from the admitted top-up attestation.',
+      );
+    }
     const slotKey = `${step.sequence}:${rule.rewardType ?? 'reward'}`;
     if (
-      !originReceipt ||
-      originReceipt.factId !== factRow.id ||
-      originReceipt.eventType !== 'PLAY_HOUR' ||
-      !replayReceiptStatuses.has(originReceipt.status)
+      !isBalanceTopup &&
+      (!originReceipt ||
+        originReceipt.factId !== factRow.id ||
+        originReceipt.eventType !== 'PLAY_HOUR' ||
+        !replayReceiptStatuses.has(originReceipt.status))
     ) {
       throw new ConflictException(
         'Для факта нет согласованного terminal origin receipt, пригодного для rule-scoped replay.',
@@ -3683,7 +3828,8 @@ export class GuestGameRuleReplayService {
     }
     if (
       event &&
-      (!originReceipt.eventId || event.id !== originReceipt.eventId)
+      !isBalanceTopup &&
+      (!originReceipt?.eventId || event.id !== originReceipt.eventId)
     ) {
       throw new ConflictException(
         'Origin receipt и каноническое событие расходятся; replay остановлен без записи.',
@@ -3691,7 +3837,8 @@ export class GuestGameRuleReplayService {
     }
     if (
       event &&
-      (event.profileId !== factRow.profileId || event.eventType !== 'PLAY_HOUR')
+      (event.profileId !== factRow.profileId ||
+        event.eventType !== (isBalanceTopup ? 'BALANCE_TOPUP' : 'PLAY_HOUR'))
     ) {
       throw new ConflictException(
         'Каноническое событие связано с другим профилем или типом события.',
@@ -3704,6 +3851,7 @@ export class GuestGameRuleReplayService {
       factType: factRow.factType,
       happenedAt: factRow.happenedAt.toISOString(),
       durationMinutes: factRow.durationMinutes,
+      amount: nullableNumber(factRow.amount),
       profileId: factRow.profileId,
       originKey,
       eventId,
@@ -3723,6 +3871,7 @@ export class GuestGameRuleReplayService {
       reasons: rule.reasons,
       blockers: rule.blockers,
       progress: rule.progress,
+      historicalConditionHash,
     };
 
     return {
@@ -3735,6 +3884,7 @@ export class GuestGameRuleReplayService {
         factType: factRow.factType,
         happenedAt: factRow.happenedAt,
         durationMinutes: factRow.durationMinutes,
+        amount: nullableNumber(factRow.amount),
         confidence: factRow.confidence,
         externalProvider: factRow.externalProvider,
         externalDomain: factRow.externalDomain,
@@ -3759,6 +3909,8 @@ export class GuestGameRuleReplayService {
       slotKey,
       claimKey,
       confirmationHash: sha256(preparedForHash),
+      historicalConditionHash,
+      supportTicketId: supportTicket?.id ?? null,
       existingIntent,
     };
   }
@@ -3804,6 +3956,110 @@ export class GuestGameRuleReplayService {
     return matches[0] ?? null;
   }
 
+  private async findCanonicalBalanceTopupEvent(
+    tenantId: string,
+    profileId: string,
+    factId: string,
+  ) {
+    return this.prisma.guestGameEvent.findFirst({
+      where: {
+        tenantId,
+        profileId,
+        eventType: 'BALANCE_TOPUP',
+        payload: { path: ['sourceFactId'], equals: factId },
+      },
+      select: { id: true, profileId: true, eventType: true, originKey: true },
+    });
+  }
+
+  private async assertExactBalanceTopupSupportTicket(
+    user: AuthenticatedUser,
+    ticketNumberValue: unknown,
+    profileId: string,
+    guestId: string | null,
+  ) {
+    const ticketNumber = normalizedString(ticketNumberValue);
+    if (ticketNumber !== balanceTopupReplaySupportTicketNumber) {
+      throw new ForbiddenException(
+        'BALANCE_TOPUP replay is restricted to its exact support-ticket authority.',
+      );
+    }
+    const ticket = await this.prisma.guestSupportTicket.findFirst({
+      where: {
+        ticketNumber,
+        tenantId: user.tenantId,
+        profileId,
+        ...(guestId ? { guestId } : {}),
+        status: { in: ['NEW', 'IN_PROGRESS'] },
+      },
+      select: { id: true },
+    });
+    if (!ticket) {
+      throw new ConflictException(
+        'BALANCE_TOPUP replay requires the exact open support ticket/profile binding.',
+      );
+    }
+    return ticket;
+  }
+
+  private assertBalanceTopupCandidate(
+    amountValue: unknown,
+    externalDomain: string,
+    activationRules: Record<string, unknown>,
+    seasonId: string,
+    routing: {
+      ruleExternalDomains: ReadonlyMap<string, readonly string[]>;
+    },
+  ) {
+    const amount = nullableNumber(amountValue);
+    const metric = jsonRecord(activationRules.metric);
+    const threshold =
+      nullableNumber(metric.minSpendAmount) ?? nullableNumber(metric.amount);
+    if (amount === null || threshold === null || amount < threshold) {
+      throw new ConflictException(
+        'BALANCE_TOPUP fact does not meet the exact Battle Pass threshold.',
+      );
+    }
+    const allowedDomains = routing.ruleExternalDomains.get(seasonId) ?? [];
+    if (!allowedDomains.includes(externalDomain)) {
+      throw new ConflictException(
+        'BALANCE_TOPUP fact domain is outside the selected Battle Pass scope.',
+      );
+    }
+  }
+
+  private assertBalanceTopupAttestedDefinition(
+    activationRules: Record<string, unknown>,
+    step: Record<string, unknown>,
+    attestation: NonNullable<
+      ReturnType<typeof exactBalanceTopupReplayAttestation>
+    >,
+  ) {
+    const metric = jsonRecord(activationRules.metric);
+    const reward = jsonRecord(step.freeRewardDetails);
+    const hours = Array.isArray(metric.hours) ? metric.hours : [];
+    const domains = Array.isArray(activationRules.externalDomains)
+      ? activationRules.externalDomains
+      : [];
+    if (
+      nullableNumber(metric.minSpendAmount) !==
+        attestation.condition.minSpendAmount ||
+      normalizedString(metric.amountComparison) !==
+        attestation.condition.amountComparison ||
+      normalizedString(metric.topupMode) !== attestation.condition.topupMode ||
+      nullableNumber(metric.windowDays) !== attestation.condition.windowDays ||
+      hours.length !== 0 ||
+      activationRules.domainScoped !== attestation.condition.domainScoped ||
+      !domains.includes('46.langamepro.ru') ||
+      normalizedString(reward.type) !== attestation.rewardType ||
+      nullableNumber(reward.amount) !== attestation.rewardAmount
+    ) {
+      throw new ConflictException(
+        'Effective Battle Pass step definition differs from the admitted historical top-up attestation.',
+      );
+    }
+  }
+
   private async findCanonicalEvent(
     tenantId: string,
     originKey: string,
@@ -3846,6 +4102,10 @@ export class GuestGameRuleReplayService {
     const rewardType = normalizedString(rule.rewardType);
     const rewardAmount = nullableNumber(rule.rewardAmount);
     const rewardLabel = normalizedString(rule.rewardLabel);
+    const expectedEventType =
+      prepared.fact.factType === balanceTopupReplayFactType
+        ? 'BALANCE_TOPUP'
+        : 'PLAY_HOUR';
     const expectedSlotKey = `${prepared.step.sequence}:${rewardType ?? 'reward'}`;
     if (
       numberValue(plan.schemaVersion, -1) !== 1 ||
@@ -3864,7 +4124,7 @@ export class GuestGameRuleReplayService {
       intent.slotKey !== prepared.slotKey ||
       intent.claimKey !== prepared.claimKey ||
       intent.event.profileId !== prepared.fact.profileId ||
-      intent.event.eventType !== 'PLAY_HOUR' ||
+      intent.event.eventType !== expectedEventType ||
       (intent.rewardId &&
         (!intent.reward ||
           intent.reward.tenantId !== prepared.tenantId ||
@@ -3942,13 +4202,24 @@ export class GuestGameRuleReplayService {
       confirmationHash: prepared.confirmationHash,
       expectedFactUpdatedAt: prepared.fact.updatedAt.toISOString(),
       expectedSeasonUpdatedAt: prepared.season.updatedAt.toISOString(),
-      fact: {
-        id: prepared.fact.id,
-        factType: prepared.fact.factType,
-        happenedAt: prepared.fact.happenedAt.toISOString(),
-        durationMinutes: prepared.fact.durationMinutes,
-        confidence: prepared.fact.confidence,
-      },
+      fact:
+        prepared.fact.factType === balanceTopupReplayFactType
+          ? {
+              id: prepared.fact.id,
+              factType: balanceTopupReplayFactType,
+              happenedAt: prepared.fact.happenedAt.toISOString(),
+              durationMinutes: null,
+              amount: prepared.fact.amount ?? 0,
+              confidence: prepared.fact.confidence,
+            }
+          : {
+              id: prepared.fact.id,
+              factType: prepared.fact.factType,
+              happenedAt: prepared.fact.happenedAt.toISOString(),
+              durationMinutes: prepared.fact.durationMinutes ?? 0,
+              amount: null,
+              confidence: prepared.fact.confidence,
+            },
       target: {
         seasonId: prepared.season.id,
         seasonName: prepared.season.name,

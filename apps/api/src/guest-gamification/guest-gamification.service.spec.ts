@@ -17682,6 +17682,56 @@ describe('GuestGamificationService', () => {
       ).not.toHaveBeenCalled();
     });
 
+    it('fails closed before intent upsert when the exact support ticket closes during replay', async () => {
+      const { service, prisma } = createService();
+      const transactionClient = {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([{ id: 'fact-270', updatedAt: now }])
+          .mockResolvedValueOnce([{ id: 'season-1', updatedAt: now }])
+          .mockResolvedValueOnce([]),
+        guestGameRewardIntent: { upsert: jest.fn() },
+        guestGameAuditEvent: { create: jest.fn() },
+      };
+      prisma.$transaction.mockImplementationOnce((operation) =>
+        operation(transactionClient),
+      );
+
+      await expect(
+        (service as any).persistReplayRewardIntent(
+          user,
+          battlePassDryRun(),
+          'event-existing',
+          'profile-1',
+          'origin-replay',
+          {
+            ruleKind: 'SEASON',
+            ruleId: 'season-1',
+            battlePassStep: 2,
+            stepId: 'step-2',
+            sourceFactId: 'fact-270',
+            sourceFactUpdatedAt: now,
+            seasonUpdatedAt: now,
+            confirmationHash: 'confirmation-hash',
+            supportTicketAuthority: {
+              ticketId: 'ticket-571',
+              ticketNumber: 'LP-BUG-571075E9',
+              profileId: 'profile-1',
+              guestId: 'guest-1',
+              factId: 'fact-270',
+              historicalConditionHash: 'a'.repeat(64),
+            },
+          },
+        ),
+      ).rejects.toThrow('Exact support-ticket authority changed');
+      expect(
+        transactionClient.guestGameRewardIntent.upsert,
+      ).not.toHaveBeenCalled();
+      expect(
+        transactionClient.guestGameAuditEvent.create,
+      ).not.toHaveBeenCalled();
+    });
+
     it('fails closed before materialization when the atomic replay audit write fails', async () => {
       const { service, prisma } = createService();
       const profile = profileFixture();

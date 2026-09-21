@@ -490,7 +490,17 @@ const definitions: readonly ControllerDefinition[] = [
     prefix: '/admin/guest-gamification/support-reward-recovery',
     module: 'GAMIFICATION',
     profile: 'PLATFORM_ADMIN_ONLY',
-    routes: [['POST', ['preview', 'apply']]],
+    routes: [
+      [
+        'POST',
+        [
+          'preview',
+          'apply',
+          'c61-budget-refill/preview',
+          'c61-budget-refill/apply',
+        ],
+      ],
+    ],
   },
   {
     source: 'src/guest-gamification/guest-gamification-scheduled.controller.ts',

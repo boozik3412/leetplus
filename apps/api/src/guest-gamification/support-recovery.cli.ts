@@ -108,7 +108,10 @@ export async function verifiedPlanActor(
       id: '8a84f807-53c1-4f74-8028-ba184662b93a',
       ticketNumber: 'LP-BUG-AD120ECF',
     },
-    { id: 'b072ee9d-6de9-404a-a6b0-9fbc558c9a75', ticketNumber: 'LP-BUG-CB' },
+    {
+      id: 'b072ee9d-6de9-404a-a6b0-9fbc558c9a75',
+      ticketNumber: 'LP-BUG-CB2114CE',
+    },
     {
       id: '70b685c7-aabe-46db-85be-59aaa13202ae',
       ticketNumber: 'LP-BUG-79714142',

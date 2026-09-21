@@ -50,6 +50,12 @@ const runtime = (): SupportRecoveryRuntime => ({
   },
 });
 const actorUserId = '11111111-1111-4111-8111-111111111111';
+const actorMarkers = [
+  ['508fbd17-6283-4b34-be5d-811075676097', 'LP-BUG-73CC9DFC'],
+  ['8a84f807-53c1-4f74-8028-ba184662b93a', 'LP-BUG-AD120ECF'],
+  ['b072ee9d-6de9-404a-a6b0-9fbc558c9a75', 'LP-BUG-CB'],
+  ['70b685c7-aabe-46db-85be-59aaa13202ae', 'LP-BUG-79714142'],
+] as const;
 const profileInput = (
   profile: Record<string, unknown>,
   overrides: Partial<{
@@ -95,7 +101,7 @@ const actorDb = (
     auditTicketIds?: string[];
   } = {},
 ) => {
-  const ticketIds = ['t-da', 't-c61', 't-lp', 't-close'];
+  const ticketIds = actorMarkers.map(([id]) => id);
   const tenantId = options.tenant ?? 'tenant-1';
   return {
     user: {
@@ -110,7 +116,13 @@ const actorDb = (
     guestSupportTicket: {
       findMany: jest
         .fn()
-        .mockResolvedValue(ticketIds.map((id) => ({ id, tenantId }))),
+        .mockResolvedValue(
+          actorMarkers.map(([id, ticketNumber]) => ({
+            id,
+            tenantId,
+            ticketNumber,
+          })),
+        ),
     },
     guestSupportTicketAuditEvent: {
       findMany: jest.fn().mockResolvedValue(
@@ -390,7 +402,7 @@ describe('support recovery CLI runtime router', () => {
     ['non-admin', actorDb({ platform: false })],
     [
       'missing comment marker',
-      actorDb({ auditTicketIds: ['t-da', 't-c61', 't-lp'] }),
+      actorDb({ auditTicketIds: actorMarkers.slice(0, 3).map(([id]) => id) }),
     ],
   ])('rejects %s plan actor authority', async (_name, db) => {
     await expect(verifiedPlanActor(db as never, actorUserId)).rejects.toThrow();

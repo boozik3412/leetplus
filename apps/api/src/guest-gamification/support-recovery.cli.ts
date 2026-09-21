@@ -100,11 +100,20 @@ export async function verifiedPlanActor(
   actorUserId: string,
 ) {
   const markers = [
-    'LP-BUG-DA592E20',
-    'LP-BUG-C61EE785',
-    'LP-BUG-571075E9',
-    'LP-BUG-73CC9DFC',
-  ];
+    {
+      id: '508fbd17-6283-4b34-be5d-811075676097',
+      ticketNumber: 'LP-BUG-73CC9DFC',
+    },
+    {
+      id: '8a84f807-53c1-4f74-8028-ba184662b93a',
+      ticketNumber: 'LP-BUG-AD120ECF',
+    },
+    { id: 'b072ee9d-6de9-404a-a6b0-9fbc558c9a75', ticketNumber: 'LP-BUG-CB' },
+    {
+      id: '70b685c7-aabe-46db-85be-59aaa13202ae',
+      ticketNumber: 'LP-BUG-79714142',
+    },
+  ] as const;
   const [actor, tickets] = await Promise.all([
     prisma.user.findUnique({
       where: { id: actorUserId },
@@ -117,14 +126,25 @@ export async function verifiedPlanActor(
       },
     }),
     prisma.guestSupportTicket.findMany({
-      where: { ticketNumber: { in: markers } },
-      select: { id: true, tenantId: true },
+      where: {
+        id: { in: markers.map((marker) => marker.id) },
+        status: 'CLOSED',
+      },
+      select: { id: true, tenantId: true, ticketNumber: true },
     }),
   ]);
   if (!actor || !actor.isActive || !actor.isPlatformAdmin)
     throw new Error('Plan actor is not an active platform admin.');
   if (
     tickets.length !== markers.length ||
+    markers.some(
+      (marker) =>
+        !tickets.some(
+          (ticket) =>
+            ticket.id === marker.id &&
+            ticket.ticketNumber === marker.ticketNumber,
+        ),
+    ) ||
     new Set(tickets.map((ticket) => ticket.tenantId)).size !== 1 ||
     tickets[0]?.tenantId !== actor.tenantId
   )

@@ -28,7 +28,10 @@ import {
   guestGameBattlePassStepEvaluationPolicy,
   guestGamePolicyAllowsEvaluation,
 } from './guest-game-source-policy';
-import { exactBalanceTopupReplayAttestation } from './battlepass-topup-replay-attestations';
+import {
+  exactBalanceTopupReplayAttestation,
+  type BalanceTopupReplayHistoricalStepOverride,
+} from './battlepass-topup-replay-attestations';
 
 const replayFactTypes = new Set([
   'SESSION_PLAY_TIME_ACCUMULATED',
@@ -349,6 +352,7 @@ type PreparedReplay = {
   claimKey: string;
   confirmationHash: string;
   historicalConditionHash: string | null;
+  historicalStepOverride: BalanceTopupReplayHistoricalStepOverride | null;
   supportTicketId: string | null;
   existingIntent: {
     id: string;
@@ -3778,6 +3782,16 @@ export class GuestGameRuleReplayService {
         },
         ruleDomainTimeZones: ruleRouting.ruleDomainTimeZones,
         ruleExternalDomains: ruleRouting.ruleExternalDomains,
+        ...(topupAttestation
+          ? {
+              historicalSeasonStepOverride: {
+                seasonId: seasonRow.id,
+                stepId: step.id,
+                stepSequence: step.sequence,
+                definition: topupAttestation.historicalStepOverride,
+              },
+            }
+          : {}),
       }),
       this.findCanonicalEvent(
         user.tenantId,
@@ -3806,8 +3820,8 @@ export class GuestGameRuleReplayService {
     }
     if (
       topupAttestation &&
-      (rule.rewardType !== topupAttestation.rewardType ||
-        rule.rewardAmount !== topupAttestation.rewardAmount ||
+      (rule.rewardType !== topupAttestation.emittedRuleReward.type ||
+        rule.rewardAmount !== topupAttestation.emittedRuleReward.amount ||
         rule.xpDelta !== 0)
     ) {
       throw new ConflictException(
@@ -3910,6 +3924,7 @@ export class GuestGameRuleReplayService {
       claimKey,
       confirmationHash: sha256(preparedForHash),
       historicalConditionHash,
+      historicalStepOverride: topupAttestation?.historicalStepOverride ?? null,
       supportTicketId: supportTicket?.id ?? null,
       existingIntent,
     };
@@ -4037,7 +4052,7 @@ export class GuestGameRuleReplayService {
   ) {
     const metric = jsonRecord(activationRules.metric);
     const reward = jsonRecord(step.freeRewardDetails);
-    const hours = Array.isArray(metric.hours) ? metric.hours : [];
+    const hours = replayJsonStringArray(metric.hours);
     const domains = Array.isArray(activationRules.externalDomains)
       ? activationRules.externalDomains
       : [];
@@ -4048,11 +4063,18 @@ export class GuestGameRuleReplayService {
         attestation.condition.amountComparison ||
       normalizedString(metric.topupMode) !== attestation.condition.topupMode ||
       nullableNumber(metric.windowDays) !== attestation.condition.windowDays ||
-      hours.length !== 0 ||
+      ![
+        attestation.condition.hours,
+        attestation.permittedEffectiveHoursDrift,
+      ].some(
+        (allowedHours) =>
+          hours.length === allowedHours.length &&
+          hours.every((hour, index) => hour === allowedHours[index]),
+      ) ||
       activationRules.domainScoped !== attestation.condition.domainScoped ||
       !domains.includes('46.langamepro.ru') ||
-      normalizedString(reward.type) !== attestation.rewardType ||
-      nullableNumber(reward.amount) !== attestation.rewardAmount
+      normalizedString(reward.type) !== attestation.configuredStepReward.type ||
+      nullableNumber(reward.amount) !== attestation.configuredStepReward.amount
     ) {
       throw new ConflictException(
         'Effective Battle Pass step definition differs from the admitted historical top-up attestation.',
@@ -4200,6 +4222,9 @@ export class GuestGameRuleReplayService {
       mode,
       outcome,
       confirmationHash: prepared.confirmationHash,
+      ...(prepared.historicalStepOverride
+        ? { historicalStepOverride: prepared.historicalStepOverride }
+        : {}),
       expectedFactUpdatedAt: prepared.fact.updatedAt.toISOString(),
       expectedSeasonUpdatedAt: prepared.season.updatedAt.toISOString(),
       fact:

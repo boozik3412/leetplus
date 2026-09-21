@@ -1,5 +1,29 @@
 import { createHash } from 'node:crypto';
 
+export type BalanceTopupReplayHistoricalStepOverride = Readonly<{
+  activationRules: Readonly<{
+    schemaVersion: 2;
+    taskType: 'BALANCE_TOPUP';
+    triggerKind: 'BALANCE_TOPUP';
+    evaluationPolicy: 'LEDGER_SUPPLEMENTAL';
+    domainScoped: true;
+    externalDomains: readonly ['46.langamepro.ru'];
+    metric: Readonly<{
+      minSpendAmount: 500;
+      amountComparison: 'AT_LEAST';
+      topupMode: 'SINGLE';
+      windowDays: 300;
+      hours: readonly [];
+      eventTypes: readonly ['BALANCE_TOPUP'];
+    }>;
+  }>;
+  freeRewardDetails: Readonly<{
+    type: 'BONUS_BALANCE';
+    amount: 150;
+    delivery: 'AUTO';
+  }>;
+}>;
+
 type BalanceTopupReplayAttestation = {
   ticketNumber: string;
   profileId: string;
@@ -8,8 +32,14 @@ type BalanceTopupReplayAttestation = {
   seasonId: string;
   stepId: string;
   stepSequence: number;
-  rewardType: 'BATTLE_PASS_REWARD';
-  rewardAmount: number;
+  configuredStepReward: {
+    type: 'BONUS_BALANCE';
+    amount: number;
+  };
+  emittedRuleReward: {
+    type: 'BATTLE_PASS_REWARD';
+    amount: number;
+  };
   condition: {
     taskType: 'BALANCE_TOPUP';
     amountComparison: 'AT_LEAST';
@@ -19,6 +49,8 @@ type BalanceTopupReplayAttestation = {
     windowDays: number;
     hours: readonly [];
   };
+  permittedEffectiveHoursDrift: readonly ['09:00-21:00'];
+  historicalStepOverride: BalanceTopupReplayHistoricalStepOverride;
 };
 
 const exact571Attestation = {
@@ -29,8 +61,14 @@ const exact571Attestation = {
   seasonId: '90e8eb75-2727-4f8d-808c-42a3ff981ce2',
   stepId: 'level-3',
   stepSequence: 3,
-  rewardType: 'BATTLE_PASS_REWARD',
-  rewardAmount: 150,
+  configuredStepReward: {
+    type: 'BONUS_BALANCE',
+    amount: 150,
+  },
+  emittedRuleReward: {
+    type: 'BATTLE_PASS_REWARD',
+    amount: 150,
+  },
   condition: {
     taskType: 'BALANCE_TOPUP',
     amountComparison: 'AT_LEAST',
@@ -39,6 +77,33 @@ const exact571Attestation = {
     domainScoped: true,
     windowDays: 300,
     hours: [],
+  },
+  // The owner-attested historical step had no time-of-day gate. The later
+  // active definition's exact 09:00-21:00 value is tolerated only as this
+  // pinned, ticket-specific drift; all other definition changes fail closed.
+  permittedEffectiveHoursDrift: ['09:00-21:00'],
+  historicalStepOverride: {
+    activationRules: {
+      schemaVersion: 2,
+      taskType: 'BALANCE_TOPUP',
+      triggerKind: 'BALANCE_TOPUP',
+      evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
+      domainScoped: true,
+      externalDomains: ['46.langamepro.ru'],
+      metric: {
+        minSpendAmount: 500,
+        amountComparison: 'AT_LEAST',
+        topupMode: 'SINGLE',
+        windowDays: 300,
+        hours: [],
+        eventTypes: ['BALANCE_TOPUP'],
+      },
+    },
+    freeRewardDetails: {
+      type: 'BONUS_BALANCE',
+      amount: 150,
+      delivery: 'AUTO',
+    },
   },
 } as const satisfies BalanceTopupReplayAttestation;
 

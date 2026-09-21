@@ -470,7 +470,11 @@ const topupTarget = {
   supportTicketNumber: 'LP-BUG-571075E9',
 };
 
-function topupFact(amount = 777, externalDomain = '46.langamepro.ru') {
+function topupFact(
+  amount = 777,
+  externalDomain = '46.langamepro.ru',
+  happenedAt = factUpdatedAt,
+) {
   return {
     ...fact(),
     id: topupFactId,
@@ -483,10 +487,22 @@ function topupFact(amount = 777, externalDomain = '46.langamepro.ru') {
     sourceKind: 'LANGAME_BALANCE_TOPUP',
     sourceExternalId: 'topup-571',
     sessionExternalId: null,
+    happenedAt,
   };
 }
 
-function topupSeason() {
+function topupSeason(
+  options: {
+    configuredRewardType?: string;
+    configuredRewardAmount?: number;
+    minSpendAmount?: number;
+    amountComparison?: string;
+    topupMode?: string;
+    windowDays?: number;
+    hours?: unknown;
+    domainScoped?: boolean;
+  } = {},
+) {
   const value = season();
   return {
     ...value,
@@ -498,8 +514,8 @@ function topupSeason() {
             id: 'level-3',
             title: 'Balance top-up',
             freeRewardDetails: {
-              type: 'BATTLE_PASS_REWARD',
-              amount: 150,
+              type: options.configuredRewardType ?? 'BONUS_BALANCE',
+              amount: options.configuredRewardAmount ?? 150,
             },
             activationRules: {
               schemaVersion: 2,
@@ -507,13 +523,16 @@ function topupSeason() {
               evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
               metric: {
                 amount: 500,
-                minSpendAmount: 500,
-                topupMode: 'SINGLE',
-                amountComparison: 'AT_LEAST',
-                windowDays: 300,
+                minSpendAmount: options.minSpendAmount ?? 500,
+                topupMode: options.topupMode ?? 'SINGLE',
+                amountComparison: options.amountComparison ?? 'AT_LEAST',
+                windowDays: options.windowDays ?? 300,
                 eventTypes: ['BALANCE_TOPUP'],
+                ...(options.hours === undefined
+                  ? {}
+                  : { hours: options.hours }),
               },
-              domainScoped: true,
+              domainScoped: options.domainScoped ?? true,
               externalDomains: ['46.langamepro.ru'],
             },
           }
@@ -522,13 +541,19 @@ function topupSeason() {
   };
 }
 
-function topupRule(eligible = true, xpDelta = 0) {
+function topupRule(
+  eligible = true,
+  xpDelta = 0,
+  rewardType = 'BATTLE_PASS_REWARD',
+  rewardAmount = 150,
+) {
   return {
     ...rule(eligible, 3),
     id: topupSeasonId,
     triggerKind: 'BALANCE_TOPUP',
     evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
-    rewardAmount: 150,
+    rewardType,
+    rewardAmount,
     rewardLabel: '150 bonuses',
     selectedRewardLabel: '150 bonuses',
     xpDelta,
@@ -543,10 +568,26 @@ function createBalanceTopupService(
     externalDomain?: string;
     eligible?: boolean;
     xpDelta?: number;
+    configuredRewardType?: string;
+    configuredRewardAmount?: number;
+    minSpendAmount?: number;
+    amountComparison?: string;
+    topupMode?: string;
+    windowDays?: number;
+    hours?: unknown;
+    domainScoped?: boolean;
+    emittedRewardType?: string;
+    emittedRewardAmount?: number;
+    happenedAt?: Date;
+    normalCurrentHoursBlock?: boolean;
     concurrentIntent?: boolean;
   } = {},
 ) {
-  const factRow = topupFact(options.amount, options.externalDomain);
+  const factRow = topupFact(
+    options.amount,
+    options.externalDomain,
+    options.happenedAt,
+  );
   const event = {
     id: 'event-topup-571',
     profileId: topupProfileId,
@@ -566,7 +607,9 @@ function createBalanceTopupService(
   };
   const prisma = {
     guestActivityFact: { findFirst: jest.fn().mockResolvedValue(factRow) },
-    guestGameSeason: { findFirst: jest.fn().mockResolvedValue(topupSeason()) },
+    guestGameSeason: {
+      findFirst: jest.fn().mockResolvedValue(topupSeason(options)),
+    },
     store: {
       findMany: jest.fn().mockResolvedValue([
         {
@@ -631,14 +674,38 @@ function createBalanceTopupService(
     eventType: 'BALANCE_TOPUP',
     occurredAt: factRow.happenedAt.toISOString(),
     input: { spendAmount: factRow.amount, sessionMinutes: null },
-    rules: [topupRule(options.eligible ?? true, options.xpDelta ?? 0)],
+    rules: [
+      topupRule(
+        options.eligible ?? true,
+        options.xpDelta ?? 0,
+        options.emittedRewardType,
+        options.emittedRewardAmount,
+      ),
+    ],
   };
   const gamification = {
-    dryRun: jest.fn().mockResolvedValue(topupDryRun),
+    dryRun: jest
+      .fn()
+      .mockImplementation(
+        (
+          _user: unknown,
+          _dto: unknown,
+          dryRunOptions: { historicalSeasonStepOverride?: unknown } | undefined,
+        ) =>
+          Promise.resolve(
+            options.normalCurrentHoursBlock &&
+              !dryRunOptions?.historicalSeasonStepOverride
+              ? {
+                  ...topupDryRun,
+                  rules: [topupRule(false)],
+                }
+              : topupDryRun,
+          ),
+      ),
     processEvent: jest.fn().mockResolvedValue({
       event: { id: event.id },
       rewards: [{ id: 'reward-150' }],
-      summary: { createdRewards: 1, idempotent: false },
+      summary: { appliedXpDelta: 0, createdRewards: 1, idempotent: false },
     }),
   };
   return {
@@ -674,10 +741,81 @@ describe('GuestGameRuleReplayService', () => {
     const injected = await service.previewBattlePass(user, {
       ...topupTarget,
       historicalConditionHash: 'f'.repeat(64),
+      historicalStepOverride: {
+        activationRules: { metric: { hours: ['00:00-23:59'] } },
+        freeRewardDetails: { type: 'LOOT_BOX', amount: 1 },
+      },
     } as never);
 
     expect(injected.confirmationHash).toBe(canonical.confirmationHash);
   });
+
+  it('permits only the pinned later hours drift for the exact historical step', async () => {
+    const { service, gamification } = createBalanceTopupService({
+      hours: ['09:00-21:00'],
+    });
+
+    await expect(
+      service.previewBattlePass(user, topupTarget),
+    ).resolves.toMatchObject({
+      outcome: 'READY',
+      decision: {
+        rewardType: 'BATTLE_PASS_REWARD',
+        rewardAmount: 150,
+        xpDelta: 0,
+      },
+    });
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('uses the immutable no-hours step at 22:55 while current hours would block', async () => {
+    const { service, gamification } = createBalanceTopupService({
+      hours: ['09:00-21:00'],
+      happenedAt: new Date('2026-09-15T22:55:00.000Z'),
+      normalCurrentHoursBlock: true,
+    });
+
+    await expect(
+      service.previewBattlePass(user, topupTarget),
+    ).resolves.toMatchObject({
+      outcome: 'READY',
+      decision: { rewardType: 'BATTLE_PASS_REWARD', rewardAmount: 150 },
+    });
+    expect(gamification.dryRun).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['different hours', { hours: ['08:00-20:00'] }],
+    ['threshold', { minSpendAmount: 501 }],
+    ['comparison', { amountComparison: 'GREATER_THAN' }],
+    ['top-up mode', { topupMode: 'ACCUMULATED' }],
+    ['window', { windowDays: 301 }],
+    ['domain scope', { domainScoped: false }],
+    ['configured reward type', { configuredRewardType: 'LOOT_BOX' }],
+    ['configured reward amount', { configuredRewardAmount: 151 }],
+  ])('rejects any non-attested effective %s drift', async (_name, options) => {
+    const { service, gamification } = createBalanceTopupService(options);
+
+    await expect(service.previewBattlePass(user, topupTarget)).rejects.toThrow(
+      'Effective Battle Pass step definition differs',
+    );
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['type', { emittedRewardType: 'BONUS_BALANCE' }],
+    ['amount', { emittedRewardAmount: 151 }],
+  ])(
+    'rejects a non-canonical emitted Battle Pass reward %s',
+    async (_name, options) => {
+      const { service, gamification } = createBalanceTopupService(options);
+
+      await expect(
+        service.previewBattlePass(user, topupTarget),
+      ).rejects.toThrow('Effective Battle Pass reward plan differs');
+      expect(gamification.processEvent).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects another otherwise eligible top-up fact without an admitted attestation', async () => {
     const { service, prisma } = createBalanceTopupService();
@@ -730,6 +868,12 @@ describe('GuestGameRuleReplayService', () => {
         }),
       }),
     );
+    await expect(
+      gamification.processEvent.mock.results[0]?.value,
+    ).resolves.toMatchObject({
+      rewards: [{ id: 'reward-150' }],
+      summary: { appliedXpDelta: 0, createdRewards: 1 },
+    });
   });
 
   it.each([

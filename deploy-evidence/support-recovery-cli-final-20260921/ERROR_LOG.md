@@ -25,3 +25,24 @@
 - No database or runtime effect occurred. Changed condition: spy only on
   `readFileSync` and `statSync` from the real module, preserving the remaining
   Node fs API for Prisma initialization.
+
+## E04 — committed marker used a truncated ticket number
+
+- Independent review of commit `284caf30` found that the exact UUID for
+  `LP-BUG-CB2114CE` was paired with the truncated string `LP-BUG-CB` in both
+  source and fixture. The production query would therefore return the row by
+  UUID, then reject the mismatched ticket number before any recovery effect.
+- No database, ticket, reward, provider, clone, worker, or production effect
+  occurred. Changed condition: bind the UUID to the full canonical ticket
+  number and add assertions for exact CLOSED-ticket query shape, exact
+  COMMENT_ADDED audit query shape, and ticket-number mismatch rejection before
+  rerunning the local gates.
+
+## E05 — new query-shape fixture was not formatted
+
+- Targeted ESLint reached the two changed TypeScript files and reported ten
+  Prettier-only errors in the newly expanded `guestSupportTicket.findMany`
+  fixture. It reported no semantic lint error.
+- No runtime or external effect occurred. Changed condition: run the pinned
+  repository Prettier writer on only the two changed TypeScript files, then
+  rerun targeted ESLint, Prettier check, and whitespace verification.

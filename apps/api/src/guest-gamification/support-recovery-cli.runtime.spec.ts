@@ -50,6 +50,12 @@ const runtime = (): SupportRecoveryRuntime => ({
   },
 });
 const actorUserId = '11111111-1111-4111-8111-111111111111';
+const actorMarkers = [
+  ['508fbd17-6283-4b34-be5d-811075676097', 'LP-BUG-73CC9DFC'],
+  ['8a84f807-53c1-4f74-8028-ba184662b93a', 'LP-BUG-AD120ECF'],
+  ['b072ee9d-6de9-404a-a6b0-9fbc558c9a75', 'LP-BUG-CB2114CE'],
+  ['70b685c7-aabe-46db-85be-59aaa13202ae', 'LP-BUG-79714142'],
+] as const;
 const profileInput = (
   profile: Record<string, unknown>,
   overrides: Partial<{
@@ -93,9 +99,10 @@ const actorDb = (
     platform?: boolean;
     tenant?: string;
     auditTicketIds?: string[];
+    ticketNumberOverride?: string;
   } = {},
 ) => {
-  const ticketIds = ['t-da', 't-c61', 't-lp', 't-close'];
+  const ticketIds = actorMarkers.map(([id]) => id);
   const tenantId = options.tenant ?? 'tenant-1';
   return {
     user: {
@@ -108,9 +115,16 @@ const actorDb = (
       }),
     },
     guestSupportTicket: {
-      findMany: jest
-        .fn()
-        .mockResolvedValue(ticketIds.map((id) => ({ id, tenantId }))),
+      findMany: jest.fn().mockResolvedValue(
+        actorMarkers.map(([id, ticketNumber], index) => ({
+          id,
+          tenantId,
+          ticketNumber:
+            index === 0 && options.ticketNumberOverride
+              ? options.ticketNumberOverride
+              : ticketNumber,
+        })),
+      ),
     },
     guestSupportTicketAuditEvent: {
       findMany: jest.fn().mockResolvedValue(
@@ -375,13 +389,29 @@ describe('support recovery CLI runtime router', () => {
   });
 
   it('binds the real active platform actor to every exact comment marker', async () => {
+    const db = actorDb();
     await expect(
-      verifiedPlanActor(actorDb() as never, actorUserId),
+      verifiedPlanActor(db as never, actorUserId),
     ).resolves.toMatchObject({
       id: actorUserId,
       tenantId: 'tenant-1',
       isPlatformAdmin: true,
       platformTenantContext: true,
+    });
+    expect(db.guestSupportTicket.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: actorMarkers.map(([id]) => id) },
+        status: 'CLOSED',
+      },
+      select: { id: true, tenantId: true, ticketNumber: true },
+    });
+    expect(db.guestSupportTicketAuditEvent.findMany).toHaveBeenCalledWith({
+      where: {
+        actorUserId,
+        action: 'COMMENT_ADDED',
+        ticketId: { in: actorMarkers.map(([id]) => id) },
+      },
+      select: { ticketId: true },
     });
   });
 
@@ -390,8 +420,9 @@ describe('support recovery CLI runtime router', () => {
     ['non-admin', actorDb({ platform: false })],
     [
       'missing comment marker',
-      actorDb({ auditTicketIds: ['t-da', 't-c61', 't-lp'] }),
+      actorDb({ auditTicketIds: actorMarkers.slice(0, 3).map(([id]) => id) }),
     ],
+    ['ticket number mismatch', actorDb({ ticketNumberOverride: 'LP-BUG-CB' })],
   ])('rejects %s plan actor authority', async (_name, db) => {
     await expect(verifiedPlanActor(db as never, actorUserId)).rejects.toThrow();
   });

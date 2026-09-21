@@ -135,6 +135,10 @@ import {
   type GuestGameEvaluationMode,
 } from './guest-game-source-policy';
 import { GuestGameMediaService } from './guest-game-media.service';
+import {
+  exactBalanceTopupReplayAttestation,
+  type BalanceTopupReplayHistoricalStepOverride,
+} from './battlepass-topup-replay-attestations';
 
 const statusValues = [
   'DRAFT',
@@ -2820,6 +2824,7 @@ type GuestGameProcessEventOptions = {
     sourceFactUpdatedAt: Date;
     seasonUpdatedAt: Date;
     confirmationHash: string;
+    historicalStepOverride?: BalanceTopupReplayHistoricalStepOverride;
     supportTicketAuthority?: {
       ticketId: string;
       ticketNumber: string;
@@ -2874,7 +2879,48 @@ type GuestGameDryRunOptions = {
     profileId: string;
     guestId: string | null;
   };
+  historicalSeasonStepOverride?: {
+    seasonId: string;
+    stepId: string;
+    stepSequence: number;
+    definition: BalanceTopupReplayHistoricalStepOverride;
+  };
 };
+
+function historicalSeasonStepOverrideForReplayScope(
+  scope: NonNullable<GuestGameProcessEventOptions['replayRewardScope']>,
+) {
+  if (!scope.historicalStepOverride) return null;
+  const authority = scope.supportTicketAuthority;
+  const attestation = authority
+    ? exactBalanceTopupReplayAttestation({
+        ticketNumber: authority.ticketNumber,
+        profileId: authority.profileId,
+        guestId: authority.guestId,
+        factId: authority.factId,
+        seasonId: scope.ruleId,
+        stepId: scope.stepId,
+        stepSequence: scope.battlePassStep,
+      })
+    : null;
+  if (
+    !attestation ||
+    authority?.historicalConditionHash !== attestation.digest ||
+    scope.sourceFactId !== authority.factId ||
+    JSON.stringify(scope.historicalStepOverride) !==
+      JSON.stringify(attestation.historicalStepOverride)
+  ) {
+    throw new ConflictException(
+      'Historical Battle Pass override is not bound to the admitted exact support attestation.',
+    );
+  }
+  return {
+    seasonId: scope.ruleId,
+    stepId: scope.stepId,
+    stepSequence: scope.battlePassStep,
+    definition: attestation.historicalStepOverride,
+  };
+}
 
 export type GuestGameCheckInDto = {
   guestId?: string | null;
@@ -13551,6 +13597,12 @@ export class GuestGamificationService {
       throw new NotFoundException('Лутбокс не найден');
     }
 
+    const effectiveSeasons = options.historicalSeasonStepOverride
+      ? dryRunSeasonsWithHistoricalStepOverride(
+          seasons,
+          options.historicalSeasonStepOverride,
+        )
+      : seasons;
     const rules = [
       ...targetLootBoxes.map((item) => evaluateLootBoxDryRun(item, context)),
       ...(lootBoxId
@@ -13558,7 +13610,7 @@ export class GuestGamificationService {
         : missions.map((item) => evaluateMissionDryRun(item, context))),
       ...(lootBoxId
         ? []
-        : seasons.map((item) => evaluateSeasonDryRun(item, context))),
+        : effectiveSeasons.map((item) => evaluateSeasonDryRun(item, context))),
     ];
     const eligibleRules = rules.filter((rule) => rule.eligible);
 
@@ -15235,6 +15287,17 @@ export class GuestGamificationService {
         'Support recovery canonicalization requires explicit platform authority and exact existing owners before evaluation.',
       );
     }
+    const historicalSeasonStepOverride = options.replayRewardScope
+      ? historicalSeasonStepOverrideForReplayScope(options.replayRewardScope)
+      : null;
+    if (
+      historicalSeasonStepOverride &&
+      options.evaluationMode !== 'LIVE_SUPPLEMENTAL'
+    ) {
+      throw new BadRequestException(
+        'Historical Battle Pass override is restricted to exact LIVE_SUPPLEMENTAL replay.',
+      );
+    }
     const { profile, profileCreated } = await this.ensureProcessProfile(
       user,
       dto,
@@ -15303,11 +15366,15 @@ export class GuestGamificationService {
       ruleDomainTimeZones ||
       ruleExternalDomains ||
       options.replayRewardScope ||
+      historicalSeasonStepOverride ||
       options.prequalifiedLootBoxOpen
         ? {
             ruleDomainTimeZones,
             ruleExternalDomains,
             prequalifiedLootBoxOpen: options.prequalifiedLootBoxOpen,
+            ...(historicalSeasonStepOverride
+              ? { historicalSeasonStepOverride }
+              : {}),
             ...(options.replayRewardScope
               ? {
                   rewardScope: {
@@ -15613,6 +15680,11 @@ export class GuestGamificationService {
             stepId: options.replayRewardScope.stepId,
             stepSequence: options.replayRewardScope.battlePassStep,
             confirmationHash: options.replayRewardScope.confirmationHash,
+            historicalConditionHash:
+              options.replayRewardScope.supportTicketAuthority
+                ?.historicalConditionHash ?? null,
+            historicalStepOverride:
+              options.replayRewardScope.historicalStepOverride ?? null,
             intentIds: replayIntentIds,
             deliveryStatus: 'INTENT_PERSISTED',
           },
@@ -18779,11 +18851,23 @@ export class GuestGamificationService {
       );
     }
 
+    const historicalReplay = scope.historicalStepOverride
+      ? historicalSeasonStepOverrideForReplayScope(scope)
+      : null;
     const plans = matchingRules
       .filter(shouldQueueProcessReward)
-      .map((rule) =>
-        processRewardIntentPlan(rule, dryRun.occurredAt, profileId),
-      );
+      .map((rule) => ({
+        ...processRewardIntentPlan(rule, dryRun.occurredAt, profileId),
+        ...(historicalReplay
+          ? {
+              historicalReplay: {
+                attestationDigest:
+                  scope.supportTicketAuthority?.historicalConditionHash,
+                stepOverride: historicalReplay.definition,
+              },
+            }
+          : {}),
+      }));
     if (plans.length !== 1) {
       throw new ConflictException(
         'Для выбранного шага Battle Pass не сформирован единственный план награды.',
@@ -18863,6 +18947,9 @@ export class GuestGamificationService {
             'Exact support-ticket authority changed or does not bind this replay intent.',
           );
         }
+      }
+      if (scope.historicalStepOverride) {
+        historicalSeasonStepOverrideForReplayScope(scope);
       }
       const intentIds: string[] = [];
       for (const plan of plans) {
@@ -35323,6 +35410,76 @@ function dryRunSeasonLevels(value: unknown): DryRunSeasonLevel[] {
     .filter((item): item is DryRunSeasonLevel => Boolean(item))
     .sort((left, right) => left.level - right.level)
     .map((level, index) => ({ ...level, sequence: index + 1 }));
+}
+
+function dryRunSeasonsWithHistoricalStepOverride(
+  seasons: GuestGameSeason[],
+  override: NonNullable<GuestGameDryRunOptions['historicalSeasonStepOverride']>,
+): GuestGameSeason[] {
+  const historicalActivationRules = cleanJsonRecord({
+    schemaVersion: override.definition.activationRules.schemaVersion,
+    taskType: override.definition.activationRules.taskType,
+    triggerKind: override.definition.activationRules.triggerKind,
+    evaluationPolicy: override.definition.activationRules.evaluationPolicy,
+    domainScoped: override.definition.activationRules.domainScoped,
+    externalDomains: [...override.definition.activationRules.externalDomains],
+    metric: {
+      minSpendAmount: override.definition.activationRules.metric.minSpendAmount,
+      amountComparison:
+        override.definition.activationRules.metric.amountComparison,
+      topupMode: override.definition.activationRules.metric.topupMode,
+      windowDays: override.definition.activationRules.metric.windowDays,
+      hours: [...override.definition.activationRules.metric.hours],
+      eventTypes: [...override.definition.activationRules.metric.eventTypes],
+    },
+  });
+  const historicalFreeRewardDetails = cleanJsonRecord({
+    type: override.definition.freeRewardDetails.type,
+    amount: override.definition.freeRewardDetails.amount,
+    delivery: override.definition.freeRewardDetails.delivery,
+  });
+  let replaced = false;
+  const overridden = seasons.map((season) => {
+    if (season.id !== override.seasonId) return season;
+    const levels = Array.isArray(season.levels) ? season.levels : [];
+    const matchingIndexes = levels
+      .map((value, index) => ({
+        id: dryRunString(dryRunRecord(value).id),
+        index,
+      }))
+      .filter((item) => item.id === override.stepId);
+    if (matchingIndexes.length !== 1) {
+      throw new ConflictException(
+        'Historical Battle Pass override does not resolve to one exact current step.',
+      );
+    }
+    const replacementIndex = matchingIndexes[0]?.index;
+    const nextLevels = levels.map((value, index) =>
+      index === replacementIndex
+        ? {
+            ...dryRunRecord(value),
+            activationRules: historicalActivationRules,
+            freeRewardDetails: historicalFreeRewardDetails,
+          }
+        : value,
+    );
+    const overriddenStep = dryRunSeasonLevels(nextLevels).find(
+      (step) => step.id === override.stepId,
+    );
+    if (overriddenStep?.sequence !== override.stepSequence) {
+      throw new ConflictException(
+        'Historical Battle Pass override no longer matches the attested step sequence.',
+      );
+    }
+    replaced = true;
+    return { ...season, levels: nextLevels as Prisma.JsonValue };
+  });
+  if (!replaced) {
+    throw new ConflictException(
+      'Historical Battle Pass override no longer matches the attested season.',
+    );
+  }
+  return overridden;
 }
 
 function appendDryRunSeasonStepActivationCheck(

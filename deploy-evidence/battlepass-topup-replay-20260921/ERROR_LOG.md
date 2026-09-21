@@ -120,3 +120,50 @@
   No runtime, fixture, provider, or production effect occurred.
 - Changed condition: remove the unused helper, then rerun changed-service lint
   and whitespace checks before amending the local commit.
+
+## E11 — successor API typecheck was interrupted before producing a result
+
+- The local `pnpm --filter api typecheck` process was externally interrupted
+  after a few seconds, with no compiler diagnostic or pass result. This did
+  not change source, a database, a provider, or production.
+- Changed condition: rerun the unchanged repository-owned API typecheck once
+  as a bounded local gate, retaining its terminal output before proceeding to
+  broader test gates.
+
+## B02 — successor changed-file lint has no findings in this change
+
+- Targeted ESLint reports 35 strict findings in the pre-existing large replay
+  spec. The reported lines are outside every zero-context diff hunk from the
+  current `origin/main` base `db7ee1c8`; both changed production files are
+  clean and the added fixture/test lines produce no lint finding.
+- `git diff --check` is clean. Preserve this baseline debt rather than
+  refactoring unrelated test code; remaining gates are explicit Prettier check,
+  focused/broader tests, typecheck and final whitespace verification.
+
+## E12 — historical override type threading needs nullable and JSON normalization
+
+- API typecheck rejected the first server-only override threading: the
+  `processEvent` dry-run options included `null`, and the readonly attestation
+  snapshot was assigned directly to Prisma JSON values.
+- No runtime, database, provider, or production state changed. Changed
+  condition: omit the override option when absent and clone the attested
+  snapshot through the existing JSON-safe record conversion before replacing a
+  season level; retain the exact attestation comparison.
+
+## E13 — rebase restored repository line-ending formatting drift
+
+- After rebase onto `origin/main` `9d1c139b`, Prettier check reported style
+  drift in the four scoped TypeScript files. This is a local formatting gate
+  failure only; focused, typecheck and broader suites already passed on the
+  rebased source.
+- Changed condition: run repository-owned Prettier write only on those four
+  scoped files, then rerun format, lint, whitespace and relevant tests before
+  publication.
+
+## E14 — new 22:55 fixture accessed an untyped Jest mock option
+
+- Targeted lint found one new unsafe member access in the added 22:55 replay
+  fixture; the other 39 findings are pre-existing large-spec debt outside the
+  changed hunks.
+- Changed condition: type the mock's internal dry-run options narrowly before
+  inspecting the historical override, then rerun the focused lint gate.

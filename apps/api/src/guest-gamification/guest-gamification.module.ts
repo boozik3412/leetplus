@@ -29,6 +29,11 @@ import { GuestGamificationStatisticsService } from './guest-gamification-statist
 import { GuestGamificationController } from './guest-gamification.controller';
 import { GuestGamificationService } from './guest-gamification.service';
 import { PlatformGuestGameSupportRecoveryController } from './platform-guest-game-support-recovery.controller';
+import {
+  C61_BUDGET_REFILL_ATTESTATION_AUTHORITY,
+  C61BudgetRefillExceptionService,
+  ServerC61BudgetRefillAttestationAuthority,
+} from './c61-budget-refill-exception.service';
 
 export const GUEST_GAMIFICATION_PROVIDERS = [
   GuestGamificationService,
@@ -51,6 +56,11 @@ export const GUEST_GAMIFICATION_PROVIDERS = [
   GuestGameRuleReplayService,
   GuestBonusLedgerService,
   GuestBonusLedgerSchedulerService,
+  C61BudgetRefillExceptionService,
+  {
+    provide: C61_BUDGET_REFILL_ATTESTATION_AUTHORITY,
+    useClass: ServerC61BudgetRefillAttestationAuthority,
+  },
 ] as const;
 
 export const GUEST_GAMIFICATION_EXPORTS = [

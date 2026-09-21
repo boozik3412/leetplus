@@ -9,11 +9,33 @@ import {
   type GuestGameSupportRewardRecoveryPreviewDto,
   type GuestGameSupportRewardRecoveryResult,
 } from './guest-game-rule-replay.service';
+import {
+  C61BudgetRefillExceptionService,
+  type C61BudgetRefillPreview,
+} from './c61-budget-refill-exception.service';
 
 @Controller('admin/guest-gamification/support-reward-recovery')
 @UseGuards(JwtAuthGuard, PlatformAdminGuard)
 export class PlatformGuestGameSupportRecoveryController {
-  constructor(private readonly replayService: GuestGameRuleReplayService) {}
+  constructor(
+    private readonly replayService: GuestGameRuleReplayService,
+    private readonly c61Exception: C61BudgetRefillExceptionService,
+  ) {}
+
+  @Post('c61-budget-refill/preview')
+  previewC61(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<C61BudgetRefillPreview> {
+    return this.c61Exception.preview(user);
+  }
+
+  @Post('c61-budget-refill/apply')
+  applyC61(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: { expectedDigest?: string; confirmation?: string },
+  ): Promise<C61BudgetRefillPreview> {
+    return this.c61Exception.apply(user, dto);
+  }
 
   @Post('preview')
   preview(

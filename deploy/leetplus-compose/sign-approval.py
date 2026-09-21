@@ -35,7 +35,7 @@ def validate_control_handoff_plan(value):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('command', choices=['keygen', 'sign-plan', 'sign-worker', 'sign-control-handoff', 'sign-control-rollback'])
+parser.add_argument('command', choices=['keygen', 'sign-plan', 'sign-worker', 'sign-control-handoff', 'sign-control-rollback', 'sign-c61-owner-approval'])
 parser.add_argument('--private', required=True)
 parser.add_argument('--public')
 parser.add_argument('--input')
@@ -58,12 +58,18 @@ if args.command == 'keygen':
 else:
     raw = Path(args.input).read_bytes()
     value = json.loads(raw)
+    if args.command == 'sign-c61-owner-approval':
+        raw = canonical(value)
     if raw != canonical(value):
         raise SystemExit('Only canonical LF JSON may be signed')
     fingerprint = hashlib.sha256(raw).hexdigest()
     control_action = validate_control_handoff_plan(value) if args.command in ['sign-control-handoff', 'sign-control-rollback'] else None
     identity = value.get('operationId') if args.command in ['sign-plan', 'sign-control-handoff', 'sign-control-rollback'] else value.get('id')
-    expected_confirmation = f'GO {identity} {fingerprint}'
+    if args.command == 'sign-c61-owner-approval':
+        if value.get('ticketNumber') != 'LP-BUG-C61EE785' or value.get('approval') != 'BUDGET_REFILL_ONLY_NO_XP_NO_BONUS' or not isinstance(value.get('blockedDecisionIds'), list) or not value.get('ownerEvidenceDigest'):
+            raise SystemExit('Unsupported C61 owner approval envelope')
+        identity = value['ticketNumber']
+    expected_confirmation = f'APPROVE C61 {identity} {fingerprint}' if args.command == 'sign-c61-owner-approval' else f'GO {identity} {fingerprint}'
     rollback_receipt_sha = None
     if args.command == 'sign-control-rollback':
         if not args.receipt:
@@ -94,6 +100,16 @@ else:
         if reverse:
             approval['receiptSha256'] = rollback_receipt_sha
         result = {'approval': approval, 'signature': base64.b64encode(key.sign(canonical(approval))).decode()}
+    elif args.command == 'sign-c61-owner-approval':
+        public = key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+        if not args.public:
+            raise SystemExit('C61 signing requires an explicit public-root output path')
+        public_path = Path(args.public)
+        if public_path.exists() and public_path.read_bytes() != public:
+            raise SystemExit('C61 public root path already has different bytes')
+        if not public_path.exists():
+            write_exclusive(public_path, public)
+        result = {'approval': value, 'signature': base64.b64encode(key.sign(raw)).decode(), 'publicKeySha256': hashlib.sha256(public).hexdigest()}
     elif args.command == 'sign-plan':
         if value.get('contract') != 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_PLAN' or value.get('action') not in ['BOOTSTRAP', 'ROLLOUT']:
             raise SystemExit('Unsupported plan contract')

@@ -456,7 +456,335 @@ const target = {
   stepSequence: 2,
 };
 
+const topupProfileId = '25fc121f-c69a-4050-9bda-6def1424f45d';
+const topupGuestId = '87daa389-5254-4a2b-bc23-c47ad3a5e951';
+const topupSeasonId = '90e8eb75-2727-4f8d-808c-42a3ff981ce2';
+const topupFactId = 'cdd5e66f-d27a-42b8-b2df-2f2cad70940c';
+
+const topupTarget = {
+  factId: topupFactId,
+  profileId: topupProfileId,
+  seasonId: topupSeasonId,
+  stepId: 'level-3',
+  stepSequence: 3,
+  supportTicketNumber: 'LP-BUG-571075E9',
+};
+
+function topupFact(amount = 777, externalDomain = '46.langamepro.ru') {
+  return {
+    ...fact(),
+    id: topupFactId,
+    profileId: topupProfileId,
+    guestId: topupGuestId,
+    factType: 'BALANCE_TOPUP',
+    durationMinutes: null,
+    amount,
+    externalDomain,
+    sourceKind: 'LANGAME_BALANCE_TOPUP',
+    sourceExternalId: 'topup-571',
+    sessionExternalId: null,
+  };
+}
+
+function topupSeason() {
+  const value = season();
+  return {
+    ...value,
+    id: topupSeasonId,
+    levels: value.levels.map((level) =>
+      level.id === 'step-3'
+        ? {
+            ...level,
+            id: 'level-3',
+            title: 'Balance top-up',
+            freeRewardDetails: {
+              type: 'BATTLE_PASS_REWARD',
+              amount: 150,
+            },
+            activationRules: {
+              schemaVersion: 2,
+              taskType: 'BALANCE_TOPUP',
+              evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
+              metric: {
+                amount: 500,
+                minSpendAmount: 500,
+                topupMode: 'SINGLE',
+                amountComparison: 'AT_LEAST',
+                windowDays: 300,
+                eventTypes: ['BALANCE_TOPUP'],
+              },
+              domainScoped: true,
+              externalDomains: ['46.langamepro.ru'],
+            },
+          }
+        : level,
+    ),
+  };
+}
+
+function topupRule(eligible = true, xpDelta = 0) {
+  return {
+    ...rule(eligible, 3),
+    id: topupSeasonId,
+    triggerKind: 'BALANCE_TOPUP',
+    evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
+    rewardAmount: 150,
+    rewardLabel: '150 bonuses',
+    selectedRewardLabel: '150 bonuses',
+    xpDelta,
+    reasons: eligible ? ['one exact top-up >= 500'] : [],
+    blockers: eligible ? [] : ['threshold not met'],
+  };
+}
+
+function createBalanceTopupService(
+  options: {
+    amount?: number;
+    externalDomain?: string;
+    eligible?: boolean;
+    xpDelta?: number;
+    concurrentIntent?: boolean;
+  } = {},
+) {
+  const factRow = topupFact(options.amount, options.externalDomain);
+  const event = {
+    id: 'event-topup-571',
+    profileId: topupProfileId,
+    eventType: 'BALANCE_TOPUP',
+    originKey: 'ggo:topup:571',
+  };
+  const concurrentIntent = options.concurrentIntent
+    ? { id: 'intent-race' }
+    : null;
+  const transaction = {
+    guestSupportTicket: {
+      findFirst: jest.fn().mockResolvedValue({ id: 'ticket-571' }),
+    },
+    guestGameRewardIntent: {
+      findUnique: jest.fn().mockResolvedValue(concurrentIntent),
+    },
+  };
+  const prisma = {
+    guestActivityFact: { findFirst: jest.fn().mockResolvedValue(factRow) },
+    guestGameSeason: { findFirst: jest.fn().mockResolvedValue(topupSeason()) },
+    store: {
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'store-1',
+          externalDomain: '46.langamepro.ru',
+          timeZone: 'Asia/Yekaterinburg',
+        },
+      ]),
+    },
+    guestSupportTicket: {
+      findFirst: jest.fn().mockResolvedValue({ id: 'ticket-571' }),
+    },
+    guestGameEvent: { findFirst: jest.fn().mockResolvedValue(event) },
+    guestGameRewardIntent: {
+      findUnique: jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue({
+          id: 'intent-topup-571',
+          eventId: event.id,
+          profileId: topupProfileId,
+          rewardId: 'reward-150',
+          originKey: event.originKey,
+          ruleType: 'SEASON',
+          ruleId: topupSeasonId,
+          effectKind: 'REWARD',
+          status: 'APPLIED',
+          slotKey: '3:BATTLE_PASS_REWARD',
+          claimKey: `season:${topupSeasonId}:profile:${topupProfileId}:step:3`,
+          plan: {
+            schemaVersion: 1,
+            slotKey: '3:BATTLE_PASS_REWARD',
+            claimKey: `season:${topupSeasonId}:profile:${topupProfileId}:step:3`,
+            rule: {
+              ...topupRule(true),
+              kind: 'SEASON',
+              id: topupSeasonId,
+              battlePassStep: 3,
+            },
+          },
+          event: { profileId: topupProfileId, eventType: 'BALANCE_TOPUP' },
+          reward: {
+            tenantId: 'tenant-1',
+            profileId: topupProfileId,
+            seasonId: topupSeasonId,
+            rewardType: 'BATTLE_PASS_REWARD',
+            rewardAmount: 150,
+            rewardLabel: '150 bonuses',
+          },
+        }),
+    },
+    $transaction: jest
+      .fn()
+      .mockImplementation(
+        (callback: (client: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      ),
+  };
+  const topupDryRun = {
+    ...dryRun(options.eligible ?? true, 3),
+    eventType: 'BALANCE_TOPUP',
+    occurredAt: factRow.happenedAt.toISOString(),
+    input: { spendAmount: factRow.amount, sessionMinutes: null },
+    rules: [topupRule(options.eligible ?? true, options.xpDelta ?? 0)],
+  };
+  const gamification = {
+    dryRun: jest.fn().mockResolvedValue(topupDryRun),
+    processEvent: jest.fn().mockResolvedValue({
+      event: { id: event.id },
+      rewards: [{ id: 'reward-150' }],
+      summary: { createdRewards: 1, idempotent: false },
+    }),
+  };
+  return {
+    service: new GuestGameRuleReplayService(
+      prisma as never,
+      gamification as never,
+    ),
+    prisma,
+    gamification,
+  };
+}
+
 describe('GuestGameRuleReplayService', () => {
+  it('previews the exact owner-attested BALANCE_TOPUP step without writes', async () => {
+    const { service, gamification } = createBalanceTopupService();
+
+    const preview = await service.previewBattlePass(user, topupTarget);
+
+    expect(preview).toMatchObject({
+      mode: 'PREVIEW',
+      outcome: 'READY',
+      fact: { id: topupFactId, factType: 'BALANCE_TOPUP', amount: 777 },
+      target: { stepId: 'level-3', stepSequence: 3 },
+      decision: { rewardAmount: 150, xpDelta: 0, eligible: true },
+    });
+    expect(preview.confirmationHash).toHaveLength(64);
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not accept a caller-supplied historical-condition hash', async () => {
+    const { service } = createBalanceTopupService();
+    const canonical = await service.previewBattlePass(user, topupTarget);
+    const injected = await service.previewBattlePass(user, {
+      ...topupTarget,
+      historicalConditionHash: 'f'.repeat(64),
+    } as never);
+
+    expect(injected.confirmationHash).toBe(canonical.confirmationHash);
+  });
+
+  it('rejects another otherwise eligible top-up fact without an admitted attestation', async () => {
+    const { service, prisma } = createBalanceTopupService();
+    prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...topupFact(),
+      id: 'another-topup-fact',
+    });
+
+    await expect(
+      service.previewBattlePass(user, {
+        ...topupTarget,
+        factId: 'another-topup-fact',
+      }),
+    ).rejects.toThrow('No admitted historical-condition attestation');
+  });
+
+  it('applies one top-up reward through the canonical existing event only', async () => {
+    const { service, prisma, gamification } = createBalanceTopupService();
+    const preview = await service.previewBattlePass(user, topupTarget);
+
+    await expect(
+      service.applyBattlePass(user, {
+        ...topupTarget,
+        expectedFactUpdatedAt: preview.expectedFactUpdatedAt,
+        expectedSeasonUpdatedAt: preview.expectedSeasonUpdatedAt,
+        confirmationHash: preview.confirmationHash,
+        confirmation: 'APPLY_RULE_REPLAY',
+      }),
+    ).resolves.toMatchObject({ outcome: 'APPLIED', createdRewards: 1 });
+
+    expect(gamification.processEvent).toHaveBeenCalledWith(
+      user,
+      expect.objectContaining({
+        eventType: 'BALANCE_TOPUP',
+        spendAmount: 777,
+        sourceFactId: topupFactId,
+        payload: expect.objectContaining({
+          historicalConditionHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        }),
+      }),
+      expect.objectContaining({
+        evaluationMode: 'LIVE_SUPPLEMENTAL',
+        allowedRuleIds: [topupSeasonId],
+        suppressLedgerShadow: true,
+        replayRewardScope: expect.objectContaining({
+          supportTicketAuthority: expect.objectContaining({
+            ticketId: 'ticket-571',
+            factId: topupFactId,
+          }),
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    ['threshold', { amount: 499 }],
+    ['domain', { externalDomain: 'other.langamepro.ru' }],
+  ])(
+    'rejects a top-up outside the exact %s boundary',
+    async (_name, options) => {
+      const { service, gamification } = createBalanceTopupService(options);
+
+      await expect(
+        service.previewBattlePass(user, topupTarget),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(gamification.processEvent).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects top-up replay when the selected Battle Pass step has XP', async () => {
+    const { service, gamification } = createBalanceTopupService({ xpDelta: 1 });
+    await expect(service.previewBattlePass(user, topupTarget)).rejects.toThrow(
+      'Effective Battle Pass reward plan differs',
+    );
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('binds exact support authority into duplicate-safe top-up apply', async () => {
+    const { service, gamification } = createBalanceTopupService({
+      concurrentIntent: true,
+    });
+    const preview = await service.previewBattlePass(user, topupTarget);
+
+    await expect(
+      service.applyBattlePass(user, {
+        ...topupTarget,
+        expectedFactUpdatedAt: preview.expectedFactUpdatedAt,
+        expectedSeasonUpdatedAt: preview.expectedSeasonUpdatedAt,
+        confirmationHash: preview.confirmationHash,
+        confirmation: 'APPLY_RULE_REPLAY',
+      }),
+    ).resolves.toMatchObject({ outcome: 'APPLIED' });
+    expect(gamification.processEvent).toHaveBeenCalledWith(
+      user,
+      expect.any(Object),
+      expect.objectContaining({
+        replayRewardScope: expect.objectContaining({
+          supportTicketAuthority: expect.objectContaining({
+            ticketNumber: 'LP-BUG-571075E9',
+            profileId: topupProfileId,
+            guestId: topupGuestId,
+          }),
+        }),
+      }),
+    );
+  });
+
   it('previews a selected eligible BP step without writes', async () => {
     const { service, gamification } = createService();
 

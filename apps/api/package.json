@@ -17,6 +17,7 @@
     "identity-mail:worker": "node dist/identity-mail-worker/identity-mail-worker.cli",
     "guest-game:bot-consumer": "node dist/guest-gamification/guest-game-delivery-bot-consumer.cli",
     "guest-game:bonus-ledger-worker": "node dist/guest-gamification/guest-bonus-ledger-worker.cli",
+    "guest-game:support-recovery": "node dist/guest-gamification/support-recovery.cli",
     "guest-game:telegram-edge": "node dist/guest-portal/telegram-edge-adapter.cli",
     "guest-game:telegram-poller": "node dist/guest-portal/telegram-edge-poller.cli",
     "guest-game:telegram-poller-health": "node dist/guest-portal/telegram-edge-poller-health.cli",

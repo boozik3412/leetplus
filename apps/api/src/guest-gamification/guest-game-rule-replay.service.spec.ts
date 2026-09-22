@@ -861,6 +861,29 @@ describe('GuestGameRuleReplayService', () => {
         allowedRuleIds: [topupSeasonId],
         suppressLedgerShadow: true,
         replayRewardScope: expect.objectContaining({
+          historicalStepOverride: {
+            activationRules: {
+              schemaVersion: 2,
+              taskType: 'BALANCE_TOPUP',
+              triggerKind: 'BALANCE_TOPUP',
+              evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
+              domainScoped: true,
+              externalDomains: ['46.langamepro.ru'],
+              metric: {
+                minSpendAmount: 500,
+                amountComparison: 'AT_LEAST',
+                topupMode: 'SINGLE',
+                windowDays: 300,
+                hours: [],
+                eventTypes: ['BALANCE_TOPUP'],
+              },
+            },
+            freeRewardDetails: {
+              type: 'BONUS_BALANCE',
+              amount: 150,
+              delivery: 'AUTO',
+            },
+          },
           supportTicketAuthority: expect.objectContaining({
             ticketId: 'ticket-571',
             factId: topupFactId,

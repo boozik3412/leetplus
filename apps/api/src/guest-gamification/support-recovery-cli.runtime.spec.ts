@@ -388,6 +388,11 @@ describe('support recovery CLI runtime router', () => {
     expect(sql).toContain('d."tenantId"=r."tenantId"');
     expect(sql).toContain('d."profileId"=n."profileId"');
     expect(sql).toContain('d."ruleId"=?');
+    expect(sql).toContain('w."eventId" IS NULL');
+    expect(sql).not.toContain('w."eventId"=n."eventId"');
+    expect(
+      (queryRaw.mock.calls[0]?.[0] as { values?: unknown[] }).values,
+    ).toContain('553209');
   });
 
   it.each([

@@ -70,7 +70,7 @@ function client(
         tenantId: 'tenant',
         profileId: 'profile',
         guestId: 'guest',
-        externalId: '553209',
+        externalId: 'guest-game:GUEST_SESSION:SESSION_START:553209',
         eventType: 'SESSION_START',
       });
     if (where.id === 'rule')
@@ -136,6 +136,17 @@ describe('C61BudgetRefillExceptionService', () => {
     await expect(service.preview(user)).resolves.toMatchObject({
       mode: 'PREVIEW',
       outcome: 'READY',
+    });
+    expect(db.guestGameRuleDecision.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['decision'] },
+        tenantId: 'tenant',
+        profileId: 'profile',
+        ruleId: 'rule',
+        sourceFactId: '553209',
+        status: 'BLOCKED',
+      },
+      select: { id: true },
     });
     expect(db.guestGameEntitlement.create).not.toHaveBeenCalled();
     await expect(

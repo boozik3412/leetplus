@@ -50,6 +50,19 @@ const runtime = (): SupportRecoveryRuntime => ({
   },
 });
 const actorUserId = '11111111-1111-4111-8111-111111111111';
+
+function renderedSql(value: unknown) {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('strings' in value) ||
+    !Array.isArray(value.strings) ||
+    !value.strings.every((part) => typeof part === 'string')
+  )
+    throw new Error('Expected a Prisma SQL query.');
+  return value.strings.join('?');
+}
+
 const actorMarkers = [
   ['508fbd17-6283-4b34-be5d-811075676097', 'LP-BUG-73CC9DFC'],
   ['8a84f807-53c1-4f74-8028-ba184662b93a', 'LP-BUG-AD120ECF'],
@@ -314,6 +327,81 @@ describe('support recovery CLI runtime router', () => {
     ],
   ])(
     'rejects partial or conflicting %s terminal chains',
+    async (_name, reconcile, row) => {
+      await expect(
+        reconcile({ $queryRaw: jest.fn().mockResolvedValue([row]) }),
+      ).rejects.toThrow('partial or conflicting');
+    },
+  );
+
+  it.each([
+    ['DA', reconcileDaSupportRecovery],
+    ['C61', reconcileC61SupportRecovery],
+  ])(
+    'uses schema-backed reward links for %s reconcile rather than GuestGameReward.eventId',
+    async (_name, reconcile) => {
+      const queryRaw = jest.fn<Promise<never[]>, [unknown]>(() =>
+        Promise.resolve([]),
+      );
+      const db = { $queryRaw: queryRaw };
+      await expect(reconcile(db)).rejects.toThrow(
+        'partial or conflicting terminal chain',
+      );
+
+      const sql = renderedSql(queryRaw.mock.calls[0]?.[0]);
+      expect(sql).not.toContain('g."eventId"');
+      expect(sql).toContain('g."tenantId"=');
+      expect(sql).toContain('g."originKey"=');
+      expect(sql).toContain('"GuestGameRewardIntent" i');
+    },
+  );
+
+  it('keeps C61 reconcile bound to the admitted blocked decision', async () => {
+    const queryRaw = jest.fn<Promise<never[]>, [unknown]>(() =>
+      Promise.resolve([]),
+    );
+    const db = { $queryRaw: queryRaw };
+    await expect(reconcileC61SupportRecovery(db)).rejects.toThrow(
+      'partial or conflicting terminal chain',
+    );
+
+    const sql = renderedSql(queryRaw.mock.calls[0]?.[0]);
+    expect(sql).toContain('d.id=?');
+    expect(sql).toContain('d."tenantId"=r."tenantId"');
+    expect(sql).toContain('d."profileId"=n."profileId"');
+    expect(sql).toContain('d."ruleId"=?');
+  });
+
+  it.each([
+    [
+      'DA',
+      reconcileDaSupportRecovery,
+      {
+        events: 1n,
+        receipts: 1n,
+        entitlements: 1n,
+        wallets: 1n,
+        rewards: 0n,
+        intents: 1n,
+        xp: 0n,
+      },
+    ],
+    [
+      'C61',
+      reconcileC61SupportRecovery,
+      {
+        receipts: 1n,
+        entitlements: 1n,
+        wallets: 1n,
+        audits: 1n,
+        blocked: 1n,
+        rewards: 0n,
+        intents: 1n,
+        xp: 0n,
+      },
+    ],
+  ])(
+    'rejects %s chains with an unexpected reward intent',
     async (_name, reconcile, row) => {
       await expect(
         reconcile({ $queryRaw: jest.fn().mockResolvedValue([row]) }),

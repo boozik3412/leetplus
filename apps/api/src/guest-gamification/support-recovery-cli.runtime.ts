@@ -332,17 +332,20 @@ export async function reconcileDaSupportRecovery(db: RecoveryQueryDb) {
       entitlements: bigint;
       wallets: bigint;
       rewards: bigint;
+      intents: bigint;
       xp: bigint;
     }>
   >(Prisma.sql`
     SELECT count(DISTINCT e.id) AS events, count(DISTINCT r.id) AS receipts,
       count(DISTINCT n.id) AS entitlements, count(DISTINCT w.id) AS wallets,
-      count(DISTINCT g.id) AS rewards, count(DISTINCT x.id) AS xp
+      count(DISTINCT g.id) AS rewards, count(DISTINCT i.id) AS intents,
+      count(DISTINCT x.id) AS xp
     FROM "GuestGameEvent" e
-    LEFT JOIN "GuestGameOriginReceipt" r ON r."eventId"=e.id AND r."factId"=${'ccffb7ba-f93d-4c4d-958f-de3db4c533fe'}
-    LEFT JOIN "GuestGameEntitlement" n ON n."eventId"=e.id AND n."ruleId"=${'0ce6f7e3-99ea-4aa2-b6e2-68e8dbd1bb12'}
-    LEFT JOIN "GuestGameRewardWalletItem" w ON w."entitlementId"=n.id
-    LEFT JOIN "GuestGameReward" g ON g."eventId"=e.id
+    LEFT JOIN "GuestGameOriginReceipt" r ON r."tenantId"=e."tenantId" AND r."eventId"=e.id AND r."factId"=${'ccffb7ba-f93d-4c4d-958f-de3db4c533fe'} AND r.policy='EXACT_OPERATOR_CANONICALIZATION' AND r.status='PROCESSED' AND r."claimedSource" IN ('EXACT_CANONICALIZATION', 'EXACT_OPERATOR_CANONICALIZATION')
+    LEFT JOIN "GuestGameEntitlement" n ON n."tenantId"=e."tenantId" AND n."eventId"=e.id AND n."originKey"=e."originKey" AND n."ruleType"='LOOT_BOX' AND n."ruleId"=${'0ce6f7e3-99ea-4aa2-b6e2-68e8dbd1bb12'} AND n."sourceFactId"=${'ccffb7ba-f93d-4c4d-958f-de3db4c533fe'} AND n.status='AVAILABLE' AND n."consumedAt" IS NULL AND n."canceledAt" IS NULL
+    LEFT JOIN "GuestGameRewardWalletItem" w ON w."tenantId"=n."tenantId" AND w."entitlementId"=n.id AND w.kind='LOOT_BOX_ENTITLEMENT' AND w.status='PENDING' AND w."rewardId" IS NULL AND w."eventId" IS NULL
+    LEFT JOIN "GuestGameRewardIntent" i ON i."tenantId"=e."tenantId" AND (i."eventId"=e.id OR i."originKey"=e."originKey")
+    LEFT JOIN "GuestGameReward" g ON g."tenantId"=e."tenantId" AND g."originKey"=e."originKey"
     LEFT JOIN "GuestGameXpPosting" x ON x."eventId"=e.id
     WHERE e.payload->>'sourceFactId'=${'ccffb7ba-f93d-4c4d-958f-de3db4c533fe'}
   `);
@@ -360,20 +363,23 @@ export async function reconcileC61SupportRecovery(db: RecoveryQueryDb) {
       audits: bigint;
       blocked: bigint;
       rewards: bigint;
+      intents: bigint;
       xp: bigint;
     }>
   >(Prisma.sql`
     SELECT count(DISTINCT r.id) AS receipts, count(DISTINCT n.id) AS entitlements,
       count(DISTINCT w.id) AS wallets, count(DISTINCT a.id) AS audits,
-      count(DISTINCT d.id) AS blocked, count(DISTINCT g.id) AS rewards, count(DISTINCT x.id) AS xp
+      count(DISTINCT d.id) AS blocked, count(DISTINCT g.id) AS rewards,
+      count(DISTINCT i.id) AS intents, count(DISTINCT x.id) AS xp
     FROM "GuestGameOriginReceipt" r
-    LEFT JOIN "GuestGameEntitlement" n ON n."originKey"=r."originKey"
-    LEFT JOIN "GuestGameRewardWalletItem" w ON w."entitlementId"=n.id
-    LEFT JOIN "GuestGameAuditEvent" a ON a."entityId"=n.id AND a.action='SUPPORT_C61_BUDGET_REFILL_EXCEPTION_APPLIED'
-    LEFT JOIN "GuestGameRuleDecision" d ON d."sourceFactId"=${'c68b1912-9a94-46c7-948c-47c1e3738bee'} AND d.status='BLOCKED'
-    LEFT JOIN "GuestGameReward" g ON g."eventId"=n."eventId"
+    LEFT JOIN "GuestGameEntitlement" n ON n."tenantId"=r."tenantId" AND n."originKey"=r."originKey" AND n."eventId"=r."eventId" AND n."idempotencyKey"=r."originKey" AND n."ruleType"='LOOT_BOX' AND n."ruleId"=${'0ce6f7e3-99ea-4aa2-b6e2-68e8dbd1bb12'} AND n."sourceFactId"=${'c68b1912-9a94-46c7-948c-47c1e3738bee'} AND n.status='AVAILABLE' AND n."consumedAt" IS NULL AND n."canceledAt" IS NULL
+    LEFT JOIN "GuestGameRewardWalletItem" w ON w."tenantId"=n."tenantId" AND w."entitlementId"=n.id AND w."eventId"=n."eventId" AND w.kind='LOOT_BOX_ENTITLEMENT' AND w.status='PENDING' AND w."rewardId" IS NULL
+    LEFT JOIN "GuestGameAuditEvent" a ON a."tenantId"=n."tenantId" AND a."entityId"=n.id AND a.action='SUPPORT_C61_BUDGET_REFILL_EXCEPTION_APPLIED' AND a.status='PROCESSED'
+    LEFT JOIN "GuestGameRuleDecision" d ON d.id=${'b3592923-6483-45a8-99e2-761b1cdedd8b'} AND d."tenantId"=r."tenantId" AND d."profileId"=n."profileId" AND d."sourceFactId"=${'c68b1912-9a94-46c7-948c-47c1e3738bee'} AND d."ruleId"=${'0ce6f7e3-99ea-4aa2-b6e2-68e8dbd1bb12'} AND d.status='BLOCKED'
+    LEFT JOIN "GuestGameRewardIntent" i ON i."tenantId"=r."tenantId" AND i."originKey"=r."originKey"
+    LEFT JOIN "GuestGameReward" g ON g."tenantId"=r."tenantId" AND g."originKey"=r."originKey"
     LEFT JOIN "GuestGameXpPosting" x ON x."eventId"=n."eventId"
-    WHERE r."originKey"=${origin} AND r.status='PROCESSED'
+    WHERE r."originKey"=${origin} AND r."factId"=${'c68b1912-9a94-46c7-948c-47c1e3738bee'} AND r."eventType"='SESSION_START' AND r.policy='SUPPORT_BUDGET_REFILL_EXCEPTION_V1' AND r.status='PROCESSED' AND r."claimedSource"='SERVER_APPROVED_C61_EXCEPTION'
   `);
   return assertTerminalChain('C61', rows[0], true);
 }
@@ -426,6 +432,7 @@ function assertTerminalChain(
     Number(row.entitlements) !== 1 ||
     Number(row.wallets) !== 1 ||
     Number(row.rewards) !== 0 ||
+    Number(row.intents ?? 0) !== 0 ||
     Number(row.xp) !== 0 ||
     (requireAudit && (Number(row.audits) !== 1 || Number(row.blocked) < 1))
   )

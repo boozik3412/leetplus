@@ -251,7 +251,6 @@ export class C61BudgetRefillExceptionService {
             profileId: a.profileId,
             storeId: a.storeId,
             entitlementId: entitlement.id,
-            eventId: a.eventId,
             kind: 'LOOT_BOX_ENTITLEMENT',
             sourceKind: 'SUPPORT_BUDGET_REFILL_EXCEPTION',
             sourceId: a.ruleId,

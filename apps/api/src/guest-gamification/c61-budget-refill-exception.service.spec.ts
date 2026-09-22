@@ -180,6 +180,12 @@ describe('C61BudgetRefillExceptionService', () => {
     });
     expect(tx.guestGameEntitlement.create).toHaveBeenCalledTimes(1);
     expect(tx.guestGameRewardWalletItem.create).toHaveBeenCalledTimes(1);
+    const walletCreate = tx.guestGameRewardWalletItem.create.mock.calls[0][0];
+    expect(walletCreate.data).toMatchObject({
+      entitlementId: 'entitlement',
+      kind: 'LOOT_BOX_ENTITLEMENT',
+    });
+    expect(walletCreate.data).not.toHaveProperty('eventId');
     expect(tx.guestGameAuditEvent.create).toHaveBeenCalledTimes(1);
     expect((tx as any).guestGameReward).toBeUndefined();
     expect((tx as any).guestGameXpPosting).toBeUndefined();

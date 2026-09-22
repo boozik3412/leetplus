@@ -252,7 +252,7 @@ export class C61BudgetRefillExceptionService {
             storeId: a.storeId,
             entitlementId: entitlement.id,
             kind: 'LOOT_BOX_ENTITLEMENT',
-            sourceKind: 'SUPPORT_BUDGET_REFILL_EXCEPTION',
+            sourceKind: 'LOOT_BOX',
             sourceId: a.ruleId,
             title: a.rewardLabel,
             rewardLabel: '1 попытка открытия',

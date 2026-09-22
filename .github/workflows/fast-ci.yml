@@ -66,6 +66,7 @@ jobs:
           node --check scripts/ci/propose-required-checks.test.mjs
           node --check deploy/leetplus-compose/release-observer.mjs
           node --check deploy/leetplus-compose/release-observer.test.mjs
+          node --check deploy/leetplus-compose/download-admitted-bundle.mjs
           node .github/scripts/test-release-impact-classifier.mjs
           node .github/scripts/test-release-impact-ci.mjs
           node .github/scripts/test-release-impact-workflow.mjs
@@ -74,6 +75,7 @@ jobs:
           node --test scripts/ci/release-critical.test.mjs
           node --test scripts/ci/propose-required-checks.test.mjs
           node --test deploy/leetplus-compose/release-observer.test.mjs
+          node --test deploy/leetplus-compose/download-admitted-bundle.test.mjs
           receipt="$RUNNER_TEMP/leetplus-release-impact-$CI_RELEASE_SHA.json"
           test ! -e "$receipt"
           node .github/scripts/classify-release-impact-ci.mjs \

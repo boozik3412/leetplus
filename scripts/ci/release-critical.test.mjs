@@ -28,6 +28,7 @@ test("the command contract pins the late-failure gates", () => {
   assert.deepEqual(
     RELEASE_CRITICAL_COMMANDS.application.map(formatCommand),
     [
+      "pnpm --filter database db:generate",
       "pnpm --filter api lint:ci:pilot-http-surface",
       "pnpm --filter api test:ci:pilot-http-surface",
     ],
@@ -64,12 +65,12 @@ test("application aggregates failures and writes one receipt per independent com
     const exitCode = runReleaseCriticalContract("application", {
       executor: () => {
         calls += 1;
-        return { status: calls === 1 ? 7 : 0, signal: null, stdout: `stdout-${calls}\n`, stderr: "" };
+        return { status: calls === 2 ? 7 : 0, signal: null, stdout: `stdout-${calls}\n`, stderr: "" };
       },
     });
     assert.equal(exitCode, 1);
-    assert.equal(calls, 2);
-    assert.equal(fs.readdirSync(logDirectory).filter((name) => name.endsWith(".exit.json")).length, 2);
+    assert.equal(calls, 3);
+    assert.equal(fs.readdirSync(logDirectory).filter((name) => name.endsWith(".exit.json")).length, 3);
     assert.equal(JSON.parse(fs.readFileSync(path.join(logDirectory, "summary.json"), "utf8")).failures.length, 1);
   } finally {
     if (previous === undefined) delete process.env.RELEASE_CRITICAL_LOG_DIR;
@@ -78,13 +79,13 @@ test("application aggregates failures and writes one receipt per independent com
   }
 });
 
-test("PostgreSQL setup stops after a failed dependency", () => {
+for (const contract of ["application", "postgresql-assortment"]) test(`${contract} setup stops after a failed dependency`, () => {
   const logDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "release-critical-postgresql-"));
   const previous = process.env.RELEASE_CRITICAL_LOG_DIR;
   process.env.RELEASE_CRITICAL_LOG_DIR = logDirectory;
   let calls = 0;
   try {
-    const exitCode = runReleaseCriticalContract("postgresql-assortment", {
+    const exitCode = runReleaseCriticalContract(contract, {
       executor: () => {
         calls += 1;
         return { status: 5, signal: null, stdout: "", stderr: "dependency failed\n" };

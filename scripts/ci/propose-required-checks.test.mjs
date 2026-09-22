@@ -25,6 +25,8 @@ for (const [name, mutate] of [
   ['wrong app', x => { x.checkRuns.check_runs[0].app.id = 99; }],
   ['skipped', x => { x.checkRuns.check_runs[0].conclusion = 'skipped'; }],
   ['partial pagination', x => { x.checkRuns.total_count++; }],
+  ['strict disabled', x => { x.protection.required_status_checks.strict = false; }],
+  ['admin enforcement disabled', x => { x.protection.enforce_admins.enabled = false; }],
   ['missing existing binding', x => { x.protection.required_status_checks.checks = []; }],
 ]) test(`reject ${name}`, () => { const input = fixture(); mutate(input); assert.throws(() => propose(input)); });
 test('already present requirements are preserved and not duplicated', () => {

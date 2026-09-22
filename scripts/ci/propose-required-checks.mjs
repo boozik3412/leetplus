@@ -12,6 +12,7 @@ export function propose({ protection, checkRuns, headSha, additions }) {
   assert(/^[a-f0-9]{40}$/.test(headSha ?? ''), 'Exact verified head SHA required');
   const current = protection?.required_status_checks;
   assert(current && typeof current.strict === 'boolean' && Array.isArray(current.contexts) && Array.isArray(current.checks), 'Complete protection GET response required');
+  assert(current.strict === true && protection.enforce_admins?.enabled === true, 'Strict checks and administrator enforcement must remain enabled');
   assert(Array.isArray(additions) && additions.length > 0 && new Set(additions).size === additions.length && additions.every(x => typeof x === 'string' && x.trim() === x && x.length > 0), 'Unique exact check names required');
   assert(Array.isArray(checkRuns?.check_runs) && checkRuns.total_count === checkRuns.check_runs.length, 'Complete check-run response required (collect all pages)');
   // Retain the app identity of every existing context, including unbound -1.

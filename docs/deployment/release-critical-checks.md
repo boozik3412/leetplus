@@ -18,6 +18,7 @@ the sole workflow owner of these commands:
 
 ```text
 application
+  pnpm --filter database db:generate
   pnpm --filter api lint:ci:pilot-http-surface
   pnpm --filter api test:ci:pilot-http-surface
 
@@ -34,6 +35,12 @@ existing `PILOT_ASSORTMENT_SCOPE_PG_CONFIRM` acknowledgement and bounded
 PostgreSQL lock and statement timeouts. Full `migration-smoke` retains every
 other migration, ACL, role and Gate 1MT PostgreSQL check; only this exact
 assortment command moves to the parallel job.
+
+The application job generates the Prisma client before type-aware ESLint and
+Jest. This prerequisite was previously inherited from the larger Full job;
+installing dependencies alone does not generate it. Its failure blocks both
+dependent checks, while a lint failure still permits the HTTP test to run and
+report its own result.
 
 The two application commands are independent. The helper runs both in one
 bounded batch and reports every failure from that pass. PostgreSQL setup stays

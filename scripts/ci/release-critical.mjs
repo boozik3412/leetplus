@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 export const RELEASE_CRITICAL_COMMANDS = Object.freeze({
   application: Object.freeze([
+    Object.freeze(["--filter", "database", "db:generate"]),
     Object.freeze(["--filter", "api", "lint:ci:pilot-http-surface"]),
     Object.freeze(["--filter", "api", "test:ci:pilot-http-surface"]),
   ]),
@@ -93,7 +94,7 @@ export function runReleaseCriticalContract(
     if (exitCode !== 0) {
       failures.push({ command, exitCode });
       process.stderr.write(`RELEASE_CRITICAL_FAILURE=${contract} command=${command} exit=${exitCode}\n`);
-      if (contract === "postgresql-assortment") break;
+      if (contract === "postgresql-assortment" || args.at(-1) === "db:generate") break;
     }
   }
 

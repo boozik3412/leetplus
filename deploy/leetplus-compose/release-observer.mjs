@@ -6,10 +6,11 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONTRACT, demand, digest, canonical } from './contract.mjs';
 import { PHASES, validatePlan, validateApproval, validateChain } from './orchestrator.mjs';
+import { validateAcceptedApplicationSnapshot } from './control-handoff-runtime.mjs';
 
 export function inspectNative({ plan, records, final, rolledBack, approval, publicKey, packet }, now = Date.now()) {
   validatePlan(plan);
-  demand(packet?.decision === 'PREPARED_NOT_AUTHORIZATION' && packet.nativePlanSha256 === digest(plan) && packet.nativeOperationId === plan.operationId, 'GO packet does not bind native plan');
+  demand(packet?.contract === 'LEETPLUS_RELEASE_PREPARATION_V1_GO_PACKET' && packet.decision === 'PREPARED_NOT_AUTHORIZATION' && packet.nativePlanSha256 === digest(plan) && packet.nativeOperationId === plan.operationId, 'GO packet does not bind native plan');
   demand(plan.workerContinuation && canonical(packet.workerContinuation) === canonical(plan.workerContinuation), 'Worker continuation policy is not bound by native plan');
   validateChain(plan, records);
   const completedPhases = PHASES.filter(phase => records[phase]?.receipt);
@@ -19,6 +20,15 @@ export function inspectNative({ plan, records, final, rolledBack, approval, publ
     status = 'GO'; waitReason = 'NATIVE_RECEIPT_PENDING';
   }
   if (completedPhases.length) demand(approval, 'Native effects without approval evidence');
+  if (final || rolledBack) {
+    const accepted = rolledBack?.active ?? {
+      operationId: plan.operationId, generation: plan.generation + 1,
+      activeSlot: plan.targetSlot, blue: plan.blue, green: plan.green,
+      dataRelease: plan.dataRelease, dataAdmissionSha256: plan.dataAdmissionSha256,
+      planSha256: digest(plan),
+    };
+    validateAcceptedApplicationSnapshot({ histories: [{ plan, approval, records, final: final ?? null, rolledBack: rolledBack ?? null }], active: accepted, publicKey });
+  }
   if (final) {
     demand(approval && completedPhases.length === PHASES.length && final.contract === `${CONTRACT}_COMPLETED` && final.planSha256 === digest(plan) && final.operationId === plan.operationId && final.lastReceiptSha256 === digest(records.POSTCHECK.receipt), 'Invalid native terminal receipt');
     status = 'APPLIED'; waitReason = 'INDEPENDENT_BROWSER_API_WORKER_ACCEPTANCE_PENDING';
@@ -30,14 +40,28 @@ export function inspectNative({ plan, records, final, rolledBack, approval, publ
   return { status, waitReason, operationId: plan.operationId, planSha256: digest(plan), completedPhases };
 }
 
-function read(file, optional = false) {
-  let stat;
-  try { stat = fs.lstatSync(file); } catch (error) { if (optional && error.code === 'ENOENT') return null; throw error; }
-  demand(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 && stat.size <= 16 * 1024 * 1024, 'Invalid observation file');
-  return { value: JSON.parse(fs.readFileSync(file, 'utf8')), mtime: stat.mtime.toISOString() };
+function trustedBytes(file, { optional = false, immutable = true } = {}) {
+  demand(process.platform === 'linux' && path.isAbsolute(file) && path.normalize(file) === file, 'Native observation requires canonical Linux paths');
+  for (let parent = path.dirname(file); ; parent = path.dirname(parent)) {
+    const stat = fs.lstatSync(parent);
+    demand(stat.isDirectory() && !stat.isSymbolicLink() && stat.uid === 0 && !(stat.mode & 0o022), 'Untrusted observation ancestor');
+    if (parent === '/') break;
+  }
+  let fd;
+  try { fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW); }
+  catch (error) { if (optional && error.code === 'ENOENT') return null; throw error; }
+  try {
+    const stat = fs.fstatSync(fd);
+    demand(stat.isFile() && stat.uid === 0 && stat.nlink === 1 && !(stat.mode & 0o022) && stat.size <= 16 * 1024 * 1024 && (!immutable || (stat.mode & 0o777) === 0o400), 'Untrusted native observation file');
+    return { bytes: fs.readFileSync(fd), mtime: stat.mtime.toISOString() };
+  } finally { fs.closeSync(fd); }
 }
+function read(file, optional = false) { const item = trustedBytes(file, { optional }); return item && { value: JSON.parse(item.bytes), mtime: item.mtime }; }
 
 export function readNative(directory, packetPath, publicKeyPath) {
+  demand(/^\/var\/lib\/leetplus-compose\/operations\/[a-f0-9-]{36}$/.test(directory), 'Canonical native operation directory required');
+  const plan = read(path.join(directory, 'plan.json')).value;
+  demand(path.basename(directory) === plan.operationId, 'Native plan does not match operation directory');
   // Read terminal records first and each phase in reverse publication order.
   // Native publication is monotonic: observing a receipt then its prerequisites
   // cannot pair a newly published receipt with an earlier missing evidence read.
@@ -53,10 +77,10 @@ export function readNative(directory, packetPath, publicKeyPath) {
     if (Object.keys(record).length) records[phase] = record;
   }
   return {
-    plan: read(path.join(directory, 'plan.json')).value, records,
+    plan, records,
     final: final?.value, rolledBack: rollback?.value,
     approval: read(path.join(directory, 'approval.json'), true)?.value,
-    publicKey: fs.readFileSync(publicKeyPath), packet: read(packetPath).value,
+    publicKey: trustedBytes(publicKeyPath, { immutable: false }).bytes, packet: read(packetPath).value,
     phasePublicationTimes,
     nativeCompletionPublishedAt: final?.mtime ?? rollback?.mtime ?? null,
     completionTimeBasis: 'FILESYSTEM_MTIME_PUBLICATION_PROXY',

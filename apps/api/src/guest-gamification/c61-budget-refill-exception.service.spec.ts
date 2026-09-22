@@ -184,6 +184,8 @@ describe('C61BudgetRefillExceptionService', () => {
     expect(walletCreate.data).toMatchObject({
       entitlementId: 'entitlement',
       kind: 'LOOT_BOX_ENTITLEMENT',
+      sourceKind: 'LOOT_BOX',
+      sourceId: 'rule',
     });
     expect(walletCreate.data).not.toHaveProperty('eventId');
     expect(tx.guestGameAuditEvent.create).toHaveBeenCalledTimes(1);

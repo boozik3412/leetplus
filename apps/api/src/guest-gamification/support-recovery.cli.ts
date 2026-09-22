@@ -31,14 +31,36 @@ import {
   reconcileLp571SupportRecovery,
 } from './support-recovery-cli.runtime';
 
-const inertOutbound = new Proxy(
-  {},
-  {
-    get: () => () => {
-      throw new Error('Outbound dependency is inert in support recovery CLI.');
+const nestLifecycleProperties = new Set<PropertyKey>([
+  'then',
+  'onModuleInit',
+  'onApplicationBootstrap',
+  'beforeApplicationShutdown',
+  'onModuleDestroy',
+  'onApplicationShutdown',
+]);
+
+type InertOutbound = Record<
+  PropertyKey,
+  ((...args: unknown[]) => never) | undefined
+>;
+
+export function createInertOutbound(): InertOutbound {
+  const target: InertOutbound = {};
+  return new Proxy(target, {
+    get: (_target, property) => {
+      if (typeof property === 'symbol' || nestLifecycleProperties.has(property))
+        return undefined;
+      return () => {
+        throw new Error(
+          'Outbound dependency is inert in support recovery CLI.',
+        );
+      };
     },
-  },
-);
+  });
+}
+
+const inertOutbound = createInertOutbound();
 const disabledScheduler = {
   requestRun: () => undefined,
   getRuntimeStatus: () => ({

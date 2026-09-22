@@ -56,6 +56,36 @@ test('tampered receipt or skipped phase stops before any effect', async () => {
   await assert.rejects(execute(plan, envelope(), pub, store, { preflight: () => assert.fail('must not execute') }), /gap/);
 });
 
+function preparedPlan() {
+  const p = { ...structuredClone(plan), action: 'ROLLOUT', generation: 1, targetSlot: 'green', previous: { activeSlot: 'blue', generation: 1, blue: r, green: r, dataRelease: r, dataAdmissionSha256: plan.dataAdmissionSha256 } };
+  p.composeSha256 = digest(renderCompose({ ...p, activeSlot: 'green' }));
+  p.preparationGuard = { contract: 'LEETPLUS_PREPARATION_GUARD_V1', hostIdentitySha256: p.hostIdentitySha256, controllerManifestSha256: p.controlSha256, generation: 1, activeSlot: 'blue', activeSha256: digest(p.previous) };
+  p.preparationEvidenceExpiresAt = new Date(Date.now() + 60000).toISOString();
+  return p;
+}
+test('new approvals cannot extend the original prepared evidence validity', () => {
+  const p = preparedPlan(); validatePlan(p);
+  assert.throws(() => validateApproval(p, envelope(p), pub), /cannot extend/);
+  const e = envelope(p); e.approval.expiresAt = p.preparationEvidenceExpiresAt;
+  e.signature = crypto.sign(null, Buffer.from(canonical(e.approval)), key.privateKey).toString('base64');
+  validateApproval(p, e, pub);
+  assert.throws(() => validateApproval(p, e, pub, { now: Date.parse(p.preparationEvidenceExpiresAt) + 1 }));
+  validateApproval(p, e, pub, { now: Date.parse(p.preparationEvidenceExpiresAt) + 1, allowExpired: true });
+  const missing = { ...p }; delete missing.preparationEvidenceExpiresAt;
+  assert.throws(() => validatePlan(missing), /immutable UTC expiry/);
+});
+test('approval is rechecked after a long preflight before any next native effect', async t => {
+  const p = preparedPlan(), e = envelope(p), store = memoryStore();
+  e.approval.expiresAt = p.preparationEvidenceExpiresAt;
+  e.signature = crypto.sign(null, Buffer.from(canonical(e.approval)), key.privateKey).toString('base64');
+  let time = Date.now(); t.mock.method(Date, 'now', () => time);
+  await assert.rejects(execute(p, e, pub, store, {
+    preflight: async (_plan, phase) => { if (phase) time = Date.parse(p.preparationEvidenceExpiresAt) + 1; },
+    run: async () => assert.fail('expired evidence cannot authorize an effect'),
+    reconcile: async () => assert.fail('expired evidence cannot authorize a reconcile effect'),
+  }), /validity window/);
+});
+
 test('application successors retain separately admitted data images in either slot', () => {
   const successor={...r,releaseSha:'b'.repeat(40),images:{...r.images,api:`sha256:${'7'.repeat(64)}`,postgres:`sha256:${'8'.repeat(64)}`,redis:`sha256:${'9'.repeat(64)}`}};
   const previous={activeSlot:'blue',generation:1,blue:r,green:r,dataRelease:r,dataAdmissionSha256:plan.dataAdmissionSha256};

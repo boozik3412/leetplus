@@ -11,7 +11,15 @@ const REPO = 'boozik3412/leetplus';
 export const DOWNLOAD_CONTRACT = 'LEETPLUS_RELEASE_DOWNLOAD_V1';
 const FILES = { 'release.json': 'releaseManifestSha256', 'images.tar.gz': 'archiveSha256', 'control.tar.gz': 'controlArchiveSha256', 'transport-validation.json': 'transportValidationSha256', 'archive-roundtrip.json': 'archiveRoundtripSha256', 'network-validation.json': 'networkValidationSha256' };
 const sha256 = value => /^[a-f0-9]{64}$/.test(value ?? '');
-function read(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+function read(file) {
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+  try {
+    const stat = fs.fstatSync(fd);
+    demand(stat.isFile() && stat.nlink === 1 && stat.size <= 16 * 1024 * 1024 && !fs.lstatSync(file).isSymbolicLink(), 'Invalid download state file');
+    demand(process.platform === 'win32' || (stat.uid === process.getuid() && !(stat.mode & 0o022)), 'Untrusted download state owner/mode');
+    return JSON.parse(fs.readFileSync(fd, 'utf8'));
+  } finally { fs.closeSync(fd); }
+}
 function syncDirectory(dir) { if (process.platform === 'win32') return; const fd = fs.openSync(dir, 'r'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } }
 function publish(file, value) {
   const raw = canonical(value), temporary = `${file}.${crypto.randomUUID()}.tmp`;
@@ -49,6 +57,7 @@ export function validateRemote(input, run, artifact) {
 }
 export function verifyDownloadedBundle(input, directory) {
   validateDownloadInput(input);
+  demand(fs.realpathSync(directory) === path.resolve(directory) && !fs.lstatSync(directory).isSymbolicLink(), 'Untrusted bundle directory');
   const files = { 'docker-admission.json': hashFile(path.join(directory, 'docker-admission.json'), true) };
   demand(files['docker-admission.json'].sha256 === input.admissionSha256, 'Admission digest mismatch');
   const admission = read(path.join(directory, 'docker-admission.json'));
@@ -67,13 +76,16 @@ export function verifyDownloadedBundle(input, directory) {
 export function acquire(input, directory, { execute = spawnSync, clock = () => new Date().toISOString() } = {}) {
   validateDownloadInput(input); directory = path.resolve(directory);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  demand(!fs.lstatSync(directory).isSymbolicLink(), 'Symlink destination forbidden');
+  const directoryStat = fs.lstatSync(directory);
+  demand(!directoryStat.isSymbolicLink() && fs.realpathSync(directory) === directory, 'Symlink destination/ancestor forbidden');
+  demand(process.platform === 'win32' || (directoryStat.uid === process.getuid() && !(directoryStat.mode & 0o077)), 'Private download directory required');
+  const bundle = path.join(directory, 'bundle');
   const inputFile = path.join(directory, 'download-input.json'), intentFile = path.join(directory, 'download-intent.json'), receiptFile = path.join(directory, 'download-receipt.json');
   if (fs.existsSync(inputFile)) demand(canonical(read(inputFile)) === canonical(input), 'Download input drift');
   else { demand(fs.readdirSync(directory).length === 0, 'New download needs an empty directory'); publish(inputFile, input); }
   if (fs.existsSync(receiptFile)) {
-    const receipt = read(receiptFile), files = verifyDownloadedBundle(input, directory);
-    demand(receipt.contract === DOWNLOAD_CONTRACT && receipt.decision === 'PASS' && receipt.inputSha256 === digest(input) && canonical(receipt.files) === canonical(files), 'Download receipt drift');
+    const receipt = read(receiptFile), files = verifyDownloadedBundle(input, bundle), evidence = validateEvidence();
+    demand(receipt.contract === DOWNLOAD_CONTRACT && receipt.decision === 'PASS' && receipt.inputSha256 === digest(input) && canonical(receipt.files) === canonical(files) && receipt.releaseSha === input.releaseSha && receipt.runId === String(input.runId) && receipt.runAttempt === String(input.runAttempt) && receipt.artifactId === String(input.artifactId) && Number.isFinite(Date.parse(receipt.completedAt)) && receipt.intentSha256 === evidence.intentSha256 && receipt.remoteSha256 === evidence.remoteSha256, 'Download receipt drift');
     return receipt;
   }
   function command(label, args) {
@@ -93,13 +105,18 @@ export function acquire(input, directory, { execute = spawnSync, clock = () => n
     const artifact = JSON.parse(command('artifact-metadata', ['api', `repos/${REPO}/actions/artifacts/${input.artifactId}`]));
     const name = validateRemote(input, run, artifact);
     publish(path.join(directory, 'verified-remote.json'), { inputSha256: digest(input), run, artifact });
-    command('download', ['run', 'download', String(input.runId), '--repo', REPO, '--name', name, '--dir', directory]);
+    fs.mkdirSync(bundle, { mode: 0o700 });
+    command('download', ['run', 'download', String(input.runId), '--repo', REPO, '--name', name, '--dir', bundle]);
   }
-  demand(fs.existsSync(path.join(directory, 'verified-remote.json')), 'Unresolved intent: metadata not verified; no automatic retry');
-  const remote = read(path.join(directory, 'verified-remote.json'));
-  demand(remote.inputSha256 === digest(input), 'Remote receipt input drift'); validateRemote(input, remote.run, remote.artifact);
-  const files = verifyDownloadedBundle(input, directory);
-  const receipt = { contract: DOWNLOAD_CONTRACT, decision: 'PASS', inputSha256: digest(input), releaseSha: input.releaseSha, runId: String(input.runId), runAttempt: String(input.runAttempt), artifactId: String(input.artifactId), completedAt: clock(), files };
+  function validateEvidence() {
+    demand(fs.existsSync(intentFile) && fs.existsSync(path.join(directory, 'verified-remote.json')), 'Unresolved intent: metadata not verified; no automatic retry');
+    const intent = read(intentFile), remote = read(path.join(directory, 'verified-remote.json'));
+    demand(intent.inputSha256 === digest(input) && Number.isFinite(Date.parse(intent.startedAt)) && remote.inputSha256 === digest(input), 'Remote receipt input drift');
+    validateRemote(input, remote.run, remote.artifact);
+    return { intentSha256: hashFile(intentFile).sha256, remoteSha256: hashFile(path.join(directory, 'verified-remote.json')).sha256 };
+  }
+  const evidence = validateEvidence(), files = verifyDownloadedBundle(input, bundle);
+  const receipt = { contract: DOWNLOAD_CONTRACT, decision: 'PASS', inputSha256: digest(input), releaseSha: input.releaseSha, runId: String(input.runId), runAttempt: String(input.runAttempt), artifactId: String(input.artifactId), completedAt: clock(), ...evidence, files };
   publish(receiptFile, receipt);
   return receipt;
 }

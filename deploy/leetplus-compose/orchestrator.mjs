@@ -27,6 +27,13 @@ export function validatePlan(plan) {
   }
   const compose = renderCompose({ blue: plan.blue, green: plan.green, dataRelease: plan.dataRelease, activeSlot: plan.targetSlot });
   demand(digest(compose) === plan.composeSha256, 'Compose bytes are not bound to the plan');
+  if (Object.hasOwn(plan, 'preparationGuard') || Object.hasOwn(plan, 'preparationEvidenceExpiresAt')) {
+    const guard = plan.preparationGuard;
+    demand(guard?.contract === 'LEETPLUS_PREPARATION_GUARD_V1' && plan.previous &&
+      guard.hostIdentitySha256 === plan.hostIdentitySha256 && guard.controllerManifestSha256 === plan.controlSha256 &&
+      guard.generation === plan.generation && guard.activeSlot === plan.previous.activeSlot && guard.activeSha256 === digest(plan.previous), 'Preparation guard does not bind the native baseline');
+    demand(typeof plan.preparationEvidenceExpiresAt === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(plan.preparationEvidenceExpiresAt) && Number.isFinite(Date.parse(plan.preparationEvidenceExpiresAt)), 'Preparation evidence requires an immutable UTC expiry');
+  }
   return plan;
 }
 export function validateApproval(plan, envelope, trustedPublicKey, { now = Date.now(), allowExpired = false } = {}) {
@@ -40,6 +47,10 @@ export function validateApproval(plan, envelope, trustedPublicKey, { now = Date.
   demand(crypto.verify(null, Buffer.from(canonical(approval)), trustedPublicKey, Buffer.from(signature, 'base64')), 'Approval signature verification failed');
   const start = Date.parse(approval.issuedAt), end = Date.parse(approval.expiresAt);
   demand(Number.isFinite(start) && Number.isFinite(end) && end > start && end - start <= 4 * 3600000 && start <= now + 30000 && (allowExpired || end >= now), 'Approval is not in its bounded validity window');
+  if (plan.preparationEvidenceExpiresAt) {
+    const evidenceExpiry = Date.parse(plan.preparationEvidenceExpiresAt);
+    demand(end <= evidenceExpiry && (allowExpired || now <= evidenceExpiry), 'Approval cannot extend expired preparation evidence');
+  }
   return approval;
 }
 export function validateChain(plan, records) {
@@ -90,6 +101,9 @@ export async function execute(plan, envelope, publicKey, store, driver) {
     const intent = { phase, planSha256: digest(plan), previousReceiptSha256 };
     if (!existing) await store.publish(phase, 'intent', intent);
     await driver.preflight(plan, phase);
+    // Preflight may perform bounded reads for long enough to cross expiry.
+    // Check again immediately before the next native effect/reconciliation.
+    validateApproval(plan, envelope, publicKey);
     const evidence = existing ? await driver.reconcile(phase, plan) : await driver.run(phase, plan);
     demand(evidence && evidence.phase === phase && evidence.planSha256 === digest(plan), 'Driver returned unbound evidence');
     await store.publish(phase, 'evidence', evidence);

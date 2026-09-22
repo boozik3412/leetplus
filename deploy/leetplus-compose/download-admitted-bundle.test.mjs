@@ -25,7 +25,7 @@ function fixture(t) {
       if (args[0] === 'api') code = `process.stdout.write(${JSON.stringify(JSON.stringify(args[1].includes('/artifacts/') ? artifact : run))})`;
       else {
         downloads++;
-        code = `import fs from 'node:fs';import path from 'node:path';for(const [name,data] of Object.entries(${JSON.stringify(files)}))fs.writeFileSync(path.join(${JSON.stringify(root)},name),data);process.exit(${loseResponse ? 7 : 0});`;
+        code = `import fs from 'node:fs';import path from 'node:path';for(const [name,data] of Object.entries(${JSON.stringify(files)}))fs.writeFileSync(path.join(${JSON.stringify(path.join(root, 'bundle'))},name),data);process.exit(${loseResponse ? 7 : 0});`;
       }
       return spawnSync(process.execPath, ['--input-type=module', '-e', code], options);
     };
@@ -46,12 +46,12 @@ test('lost response after child wrote complete bytes reconciles without repeatin
 test('accepted receipt does not hide modified files or changed input', t => {
   const f = fixture(t); acquire(f.input, f.root, { execute: f.executor() });
   assert.throws(() => acquire({ ...f.input, artifactId: '457' }, f.root), /input drift/);
-  fs.writeFileSync(path.join(f.root, 'images.tar.gz'), 'changed');
+  fs.writeFileSync(path.join(f.root, 'bundle/images.tar.gz'), 'changed');
   assert.throws(() => acquire(f.input, f.root), /digest mismatch/);
 });
 test('partial transfer remains unresolved and never calls downloader again', t => {
   const f = fixture(t); assert.throws(() => acquire(f.input, f.root, { execute: f.executor({ loseResponse: true }) }));
-  fs.unlinkSync(path.join(f.root, 'images.tar.gz'));
+  fs.unlinkSync(path.join(f.root, 'bundle/images.tar.gz'));
   assert.throws(() => acquire(f.input, f.root, { execute: () => assert.fail('must not execute') }), /ENOENT/);
 });
 test('remote release identity is exact main/push/Full/attempt/artifact', t => {
@@ -61,7 +61,16 @@ test('remote release identity is exact main/push/Full/attempt/artifact', t => {
 });
 test('manifest mismatch is rejected and hashing handles a multi-chunk file', t => {
   const f = fixture(t); acquire(f.input, f.root, { execute: f.executor() });
-  fs.writeFileSync(path.join(f.root, 'release.json'), '{}'); assert.throws(() => verifyDownloadedBundle(f.input, f.root), /digest mismatch/);
+  fs.writeFileSync(path.join(f.root, 'bundle/release.json'), '{}'); assert.throws(() => verifyDownloadedBundle(f.input, path.join(f.root, 'bundle')), /digest mismatch/);
   const large = Buffer.alloc(3 * 1024 * 1024 + 123, 42), target = path.join(f.root, 'large'); fs.writeFileSync(target, large);
   assert.deepEqual(hashFile(target), { sha256: digest(large), bytes: large.length });
+});
+test('terminal replay requires the original intent and remote metadata and all identity fields', t => {
+  const f = fixture(t); const receipt = acquire(f.input, f.root, { execute: f.executor() });
+  const receiptPath = path.join(f.root, 'download-receipt.json'); fs.chmodSync(receiptPath, 0o600);
+  fs.writeFileSync(receiptPath, canonical({ ...receipt, artifactId: '999' }));
+  assert.throws(() => acquire(f.input, f.root), /receipt drift/);
+  fs.writeFileSync(receiptPath, canonical(receipt));
+  fs.unlinkSync(path.join(f.root, 'verified-remote.json'));
+  assert.throws(() => acquire(f.input, f.root), /metadata not verified/);
 });

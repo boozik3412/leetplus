@@ -67,6 +67,8 @@ jobs:
           node --check scripts/ci/release-critical.test.mjs
           node --check scripts/ci/propose-required-checks.mjs
           node --check scripts/ci/propose-required-checks.test.mjs
+          node --check deploy/leetplus-compose/preparation-runner.mjs
+          node --check deploy/leetplus-compose/preparation-runner.test.mjs
           node --check deploy/leetplus-compose/release-observer.mjs
           node --check deploy/leetplus-compose/release-observer.test.mjs
           node --check deploy/leetplus-compose/download-admitted-bundle.mjs
@@ -77,8 +79,11 @@ jobs:
           node .github/scripts/test-release-candidate-workflow.mjs
           node --test scripts/ci/release-critical.test.mjs
           node --test scripts/ci/propose-required-checks.test.mjs
+          node --test deploy/leetplus-compose/preparation-runner.test.mjs
           node --test deploy/leetplus-compose/release-observer.test.mjs
           node --test deploy/leetplus-compose/download-admitted-bundle.test.mjs
+          python3 -m unittest discover -s deploy/leetplus-compose -p test_derive_rehearsal_inputs.py
+          python3 -m unittest discover -s deploy/leetplus-compose -p test_approval_window.py
           receipt="$RUNNER_TEMP/leetplus-release-impact-$CI_RELEASE_SHA.json"
           candidate_receipt="$RUNNER_TEMP/leetplus-release-candidate-$CI_RELEASE_SHA.json"
           test ! -e "$receipt"

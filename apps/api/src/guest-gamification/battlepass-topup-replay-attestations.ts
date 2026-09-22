@@ -37,7 +37,7 @@ type BalanceTopupReplayAttestation = {
     amount: number;
   };
   emittedRuleReward: {
-    type: 'BATTLE_PASS_REWARD';
+    type: 'BONUS_BALANCE';
     amount: number;
   };
   condition: {
@@ -66,7 +66,7 @@ const exact571Attestation = {
     amount: 150,
   },
   emittedRuleReward: {
-    type: 'BATTLE_PASS_REWARD',
+    type: 'BONUS_BALANCE',
     amount: 150,
   },
   condition: {

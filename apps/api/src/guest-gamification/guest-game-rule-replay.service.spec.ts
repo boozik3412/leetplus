@@ -544,7 +544,7 @@ function topupSeason(
 function topupRule(
   eligible = true,
   xpDelta = 0,
-  rewardType = 'BATTLE_PASS_REWARD',
+  rewardType = 'BONUS_BALANCE',
   rewardAmount = 150,
 ) {
   return {
@@ -638,11 +638,11 @@ function createBalanceTopupService(
           ruleId: topupSeasonId,
           effectKind: 'REWARD',
           status: 'APPLIED',
-          slotKey: '3:BATTLE_PASS_REWARD',
+          slotKey: '3:BONUS_BALANCE',
           claimKey: `season:${topupSeasonId}:profile:${topupProfileId}:step:3`,
           plan: {
             schemaVersion: 1,
-            slotKey: '3:BATTLE_PASS_REWARD',
+            slotKey: '3:BONUS_BALANCE',
             claimKey: `season:${topupSeasonId}:profile:${topupProfileId}:step:3`,
             rule: {
               ...topupRule(true),
@@ -656,7 +656,7 @@ function createBalanceTopupService(
             tenantId: 'tenant-1',
             profileId: topupProfileId,
             seasonId: topupSeasonId,
-            rewardType: 'BATTLE_PASS_REWARD',
+            rewardType: 'BONUS_BALANCE',
             rewardAmount: 150,
             rewardLabel: '150 bonuses',
           },
@@ -760,7 +760,7 @@ describe('GuestGameRuleReplayService', () => {
     ).resolves.toMatchObject({
       outcome: 'READY',
       decision: {
-        rewardType: 'BATTLE_PASS_REWARD',
+        rewardType: 'BONUS_BALANCE',
         rewardAmount: 150,
         xpDelta: 0,
       },
@@ -779,7 +779,7 @@ describe('GuestGameRuleReplayService', () => {
       service.previewBattlePass(user, topupTarget),
     ).resolves.toMatchObject({
       outcome: 'READY',
-      decision: { rewardType: 'BATTLE_PASS_REWARD', rewardAmount: 150 },
+      decision: { rewardType: 'BONUS_BALANCE', rewardAmount: 150 },
     });
     expect(gamification.dryRun).toHaveBeenCalledTimes(1);
   });
@@ -803,7 +803,7 @@ describe('GuestGameRuleReplayService', () => {
   });
 
   it.each([
-    ['type', { emittedRewardType: 'BONUS_BALANCE' }],
+    ['type', { emittedRewardType: 'BATTLE_PASS_REWARD' }],
     ['amount', { emittedRewardAmount: 151 }],
   ])(
     'rejects a non-canonical emitted Battle Pass reward %s',

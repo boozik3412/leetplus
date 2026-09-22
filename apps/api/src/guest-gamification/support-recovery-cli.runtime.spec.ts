@@ -476,6 +476,64 @@ describe('support recovery CLI runtime router', () => {
     expect(() => loadSupportRecoveryPlan(path, input.fileSystem)).toThrow();
   });
 
+  it('loads an exact root-owned API-group-readable support plan', () => {
+    const payload = {
+      operation: 'DA_SUPPORT_RECOVERY' as const,
+      mode: 'preview' as const,
+      actorUserId,
+      runtimeProfileSha256: 'a'.repeat(64),
+    };
+    const input = profileInput(payload);
+    expect(
+      loadSupportRecoveryPlan(
+        '/run/support-recovery/plan.json',
+        input.fileSystem,
+      ),
+    ).toEqual(payload);
+  });
+
+  it.each([
+    ['wrong owner', { uid: 12010 }],
+    ['wrong group', { gid: 12011 }],
+    ['old root-only mode', { mode: 0o100600 }],
+    ['group-writable mode', { mode: 0o100640 }],
+    ['multiple links', { nlink: 2 }],
+  ])('rejects invalid support plan metadata: %s', (_name, overrides) => {
+    const payload = {
+      operation: 'DA_SUPPORT_RECOVERY' as const,
+      mode: 'preview' as const,
+      actorUserId,
+      runtimeProfileSha256: 'a'.repeat(64),
+    };
+    const input = profileInput(payload, overrides);
+    expect(() =>
+      loadSupportRecoveryPlan(
+        '/run/support-recovery/plan.json',
+        input.fileSystem,
+      ),
+    ).toThrow();
+  });
+
+  it('rejects a support plan whose mode changes after open', () => {
+    const payload = {
+      operation: 'DA_SUPPORT_RECOVERY' as const,
+      mode: 'preview' as const,
+      actorUserId,
+      runtimeProfileSha256: 'a'.repeat(64),
+    };
+    const input = profileInput(payload);
+    const fileSystem = {
+      ...input.fileSystem,
+      fstat: (fd: number) => ({
+        ...input.fileSystem.fstat(fd),
+        mode: 0o100400,
+      }),
+    };
+    expect(() =>
+      loadSupportRecoveryPlan('/run/support-recovery/plan.json', fileSystem),
+    ).toThrow('changed after lstat');
+  });
+
   it('binds the real active platform actor to every exact comment marker', async () => {
     const db = actorDb();
     await expect(

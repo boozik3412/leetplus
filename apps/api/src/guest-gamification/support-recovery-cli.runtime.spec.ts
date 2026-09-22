@@ -1,6 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { verifiedPlanActor } from './support-recovery.cli';
+import { createInertOutbound, verifiedPlanActor } from './support-recovery.cli';
 import {
   executeSupportRecoveryPlan,
   loadSupportRecoveryRuntimeProfile,
@@ -158,6 +158,24 @@ describe('support recovery CLI runtime router', () => {
     if (previous === undefined)
       delete process.env.LEETPLUS_SUPPORT_RECOVERY_CLI;
     else process.env.LEETPLUS_SUPPORT_RECOVERY_CLI = previous;
+  });
+
+  it('keeps the inert outbound outside Nest lifecycle discovery', () => {
+    const outbound = createInertOutbound();
+    expect(outbound.then).toBeUndefined();
+    expect(outbound.onModuleInit).toBeUndefined();
+    expect(outbound.onApplicationBootstrap).toBeUndefined();
+    expect(outbound.beforeApplicationShutdown).toBeUndefined();
+    expect(outbound.onModuleDestroy).toBeUndefined();
+    expect(outbound.onApplicationShutdown).toBeUndefined();
+    expect(outbound[Symbol.iterator]).toBeUndefined();
+  });
+
+  it('fails closed if recovery code reaches the inert outbound', () => {
+    const outbound = createInertOutbound();
+    expect(() => outbound.searchGuests?.()).toThrow(
+      'Outbound dependency is inert in support recovery CLI.',
+    );
   });
 
   it('defaults DA to preview and emits only allowlisted fields', async () => {

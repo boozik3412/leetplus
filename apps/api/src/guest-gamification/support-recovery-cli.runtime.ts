@@ -173,17 +173,19 @@ export function loadSupportRecoveryPlan(
     );
   }
   const metadata = fileSystem.lstat(resolved);
+  const expectedGid = process.getgid?.();
   if (
     metadata.isSymbolicLink() ||
     !metadata.isFile() ||
     metadata.uid !== 0 ||
-    (metadata.mode & 0o077) !== 0 ||
+    metadata.gid !== expectedGid ||
+    (metadata.mode & 0o777) !== 0o440 ||
     metadata.nlink !== 1 ||
     metadata.size <= 0 ||
     metadata.size > 1_048_576
   )
     throw new ForbiddenException(
-      'Support plan must be a private root-owned regular file.',
+      'Support plan must be a root-owned group-readable private regular file.',
     );
   const fd = fileSystem.open(resolved);
   let bytes: Buffer;
@@ -193,6 +195,7 @@ export function loadSupportRecoveryPlan(
       !opened.isFile() ||
       opened.uid !== metadata.uid ||
       opened.gid !== metadata.gid ||
+      (opened.mode & 0o777) !== 0o440 ||
       opened.nlink !== 1 ||
       opened.size !== metadata.size
     )

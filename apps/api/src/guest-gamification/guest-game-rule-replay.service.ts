@@ -1547,6 +1547,9 @@ export class GuestGameRuleReplayService {
           sourceFactUpdatedAt: prepared.fact.updatedAt,
           seasonUpdatedAt: prepared.season.updatedAt,
           confirmationHash: prepared.confirmationHash,
+          ...(prepared.historicalStepOverride
+            ? { historicalStepOverride: prepared.historicalStepOverride }
+            : {}),
           ...(prepared.supportTicketId && prepared.historicalConditionHash
             ? {
                 supportTicketAuthority: {

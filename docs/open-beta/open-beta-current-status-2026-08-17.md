@@ -11,6 +11,13 @@ canary и фактический claim не подтверждены. Это н�
 расширение tenant/provider scope.
 [Квитанции и границы](../deployment/support-recovery-production-2026-09-23.md).
 
+**Source tooling22.09:** variant A автоматизирует существующий release order
+и выравнивает critical PR/Full checks. Он не выдаёт внешний beta/tenant GO,
+не меняет public/corporate/worker boundaries и не доказывает новый production
+release. Включение repository checks, установка контроллера и конкретный
+rollout имеют отдельные проверяемые результаты и план активации:
+[release preparation A](../deployment/release-preparation-a-activation.md).
+
 **Текущий checkpoint 11:02 UTC:** отдельный nativeed4 выпустил **BLUE3c3/gen9/API6GiB**,
 резерв GREEN7ead сохранён. Выпущены последние семь завершённых суток и график21
 при суточных итогах. Live API/public UI1440/390 и обычный gen9 bonus PASS,

@@ -82,6 +82,12 @@ else:
         expected_confirmation = f'ROLLBACK {identity} {fingerprint} {rollback_receipt_sha}'
     if args.confirm != expected_confirmation:
         raise SystemExit('Exact operation/id and digest confirmation required after production GO')
+    if args.command == 'sign-plan':
+        from approval_window import plan_expiration
+        try:
+            plan_expiration(value, datetime.now(timezone.utc))
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
     # Scope rejection has no cryptography/runtime dependency and occurs before
     # private-key access; pure CI negatives need neither keys nor DPAPI.
     from cryptography.hazmat.primitives import serialization
@@ -116,7 +122,7 @@ else:
         now = datetime.now(timezone.utc)
         approval = {'contract': 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_APPROVAL', 'operationId': identity,
                     'action': value['action'], 'hostIdentitySha256': value['hostIdentitySha256'],
-                    'planSha256': fingerprint, 'issuedAt': iso(now), 'expiresAt': iso(now + timedelta(hours=4))}
+                    'planSha256': fingerprint, 'issuedAt': iso(now), 'expiresAt': iso(plan_expiration(value, now))}
         result = {'approval': approval, 'signature': base64.b64encode(key.sign(canonical(approval))).decode()}
     else:
         if value.get('contract') != 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_WORKER_GRANT':

@@ -624,6 +624,20 @@ repair не считается deployed.
 
 ### Guardrail ускорения release pipeline
 
+Source candidate22.09 добавляет variant A: общий critical PR/Full contract,
+durable подготовку и read-only наблюдение за native receipts. Это tooling
+worker/control-plane, не новый public/corporate субъект. Подготовка заканчивается
+`PREPARED_NOT_AUTHORIZATION`; только native `apply/resume` владеют пятью
+production phases. Exact plan digest связывает worker continuation policy;
+новый plan требует своего GO. Backup/off-host/restored-copy, auth/network,
+resource/cooldown и hot rollback сохраняются. Source/fixture/PR не означают
+установку контроллера, включение branch protection или production acceptance.
+Для нового preparation plan immutable `preparationEvidenceExpiresAt` ограничивает
+сам native approval и проверяется снова после preflight перед каждой фазой:
+поздняя новая подпись не продлевает старое evidence. Старый serving controller
+без этой capability не допускается к variant A; его установка остаётся отдельным GO.
+[План активации и сравнительный пилот](../deployment/release-preparation-a-activation.md).
+
 [`production-topology-contract.json`](../deployment/production-artifact/production-topology-contract.json)
 фиксирует source topology COMBINED blue/green/N−1, runtime identities,
 EnvironmentFiles, transient rehearsal membership и per-slot receipts.

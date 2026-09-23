@@ -60,11 +60,27 @@ jobs:
           node --check .github/scripts/classify-release-candidate.mjs
           node --check .github/scripts/test-release-candidate-classifier.mjs
           node --check .github/scripts/test-release-candidate-workflow.mjs
+          node --check scripts/ci/release-critical.mjs
+          node --check scripts/ci/release-critical.test.mjs
+          node --check scripts/ci/propose-required-checks.mjs
+          node --check scripts/ci/propose-required-checks.test.mjs
+          node --check deploy/leetplus-compose/preparation-runner.mjs
+          node --check deploy/leetplus-compose/preparation-runner.test.mjs
+          node --check deploy/leetplus-compose/release-observer.mjs
+          node --check deploy/leetplus-compose/release-observer.test.mjs
+          node --check deploy/leetplus-compose/download-admitted-bundle.mjs
           node .github/scripts/test-release-impact-classifier.mjs
           node .github/scripts/test-release-impact-ci.mjs
           node .github/scripts/test-release-impact-workflow.mjs
           node .github/scripts/test-release-candidate-classifier.mjs
           node .github/scripts/test-release-candidate-workflow.mjs
+          node --test scripts/ci/release-critical.test.mjs
+          node --test scripts/ci/propose-required-checks.test.mjs
+          node --test deploy/leetplus-compose/preparation-runner.test.mjs
+          node --test deploy/leetplus-compose/release-observer.test.mjs
+          node --test deploy/leetplus-compose/download-admitted-bundle.test.mjs
+          python3 -m unittest discover -s deploy/leetplus-compose -p test_derive_rehearsal_inputs.py
+          python3 -m unittest discover -s deploy/leetplus-compose -p test_approval_window.py
           receipt="$RUNNER_TEMP/leetplus-release-impact-$CI_RELEASE_SHA.json"
           test ! -e "$receipt"
           node .github/scripts/classify-release-impact-ci.mjs \
@@ -425,6 +441,163 @@ jobs:
           --check-parent
           --confirm
           verify-langame-current198-bootstrap-root-transition
+
+  release-critical-application:
+    name: Release critical pilot HTTP and fresh store scope
+    needs: release_impact
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out exact release-critical source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact release-critical checkout
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+
+      - name: Initialize release-critical application receipts
+        shell: bash
+        run: |
+          RELEASE_CRITICAL_LOG_DIR="$RUNNER_TEMP/release-critical-application"
+          echo "RELEASE_CRITICAL_LOG_DIR=$RELEASE_CRITICAL_LOG_DIR" >> "$GITHUB_ENV"
+          install -d -m 0700 "$RELEASE_CRITICAL_LOG_DIR"
+          printf '%s\n' '{"contract":"application","state":"INITIALIZED"}' \
+            > "$RELEASE_CRITICAL_LOG_DIR/initialized.json"
+
+      - name: Pass docs-only release-critical application gate
+        if: needs.release_impact.outputs.effective_lane == 'L0_DOCS'
+        shell: bash
+        run: |
+          install -d -m 0700 "$RELEASE_CRITICAL_LOG_DIR"
+          printf '%s\n' '{"contract":"application","result":"L0_DOCS_PASS"}' \
+            > "$RELEASE_CRITICAL_LOG_DIR/summary.json"
+          printf 'RELEASE_CRITICAL_APPLICATION=L0_DOCS_PASS\n'
+
+      - name: Install pnpm
+        if: needs.release_impact.outputs.effective_lane != 'L0_DOCS'
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.33.2
+          run_install: false
+
+      - name: Set up Node.js
+        if: needs.release_impact.outputs.effective_lane != 'L0_DOCS'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install exact dependencies
+        if: needs.release_impact.outputs.effective_lane != 'L0_DOCS'
+        run: pnpm install --frozen-lockfile
+
+      - name: Run shared pilot HTTP and fresh store-scope contract
+        if: needs.release_impact.outputs.effective_lane != 'L0_DOCS'
+        run: node scripts/ci/release-critical.mjs application
+
+      - name: Upload release-critical application receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-critical-application-${{ github.workflow }}-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.RELEASE_CRITICAL_LOG_DIR }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  release-critical-postgresql-assortment:
+    name: Release critical PostgreSQL assortment isolation
+    needs: release_impact
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PGOPTIONS: -c lock_timeout=5000 -c statement_timeout=120000
+
+    services:
+      postgres:
+        image: postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: leetplus_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d leetplus_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Check out exact release-critical source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact release-critical checkout
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+
+      - name: Initialize release-critical PostgreSQL receipts
+        shell: bash
+        run: |
+          RELEASE_CRITICAL_LOG_DIR="$RUNNER_TEMP/release-critical-postgresql-assortment"
+          echo "RELEASE_CRITICAL_LOG_DIR=$RELEASE_CRITICAL_LOG_DIR" >> "$GITHUB_ENV"
+          install -d -m 0700 "$RELEASE_CRITICAL_LOG_DIR"
+          printf '%s\n' '{"contract":"postgresql-assortment","state":"INITIALIZED"}' \
+            > "$RELEASE_CRITICAL_LOG_DIR/initialized.json"
+
+      - name: Pass docs-only release-critical PostgreSQL gate
+        if: needs.release_impact.outputs.effective_lane == 'L0_DOCS'
+        shell: bash
+        run: |
+          install -d -m 0700 "$RELEASE_CRITICAL_LOG_DIR"
+          printf '%s\n' '{"contract":"postgresql-assortment","result":"L0_DOCS_PASS"}' \
+            > "$RELEASE_CRITICAL_LOG_DIR/summary.json"
+          printf 'RELEASE_CRITICAL_POSTGRESQL_ASSORTMENT=L0_DOCS_PASS\n'
+
+      - name: Install pnpm
+        if: needs.release_impact.outputs.effective_lane != 'L0_DOCS'
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.33.2
+          run_install: false
+
+      - name: Set up Node.js
+        if: needs.release_impact.outputs.effective_lane != 'L0_DOCS'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install exact dependencies
+        if: needs.release_impact.outputs.effective_lane != 'L0_DOCS'
+        run: pnpm install --frozen-lockfile
+
+      - name: Run shared PostgreSQL assortment isolation contract
+        if: needs.release_impact.outputs.effective_lane != 'L0_DOCS'
+        env:
+          PILOT_ASSORTMENT_SCOPE_PG_CONFIRM: run-pilot-assortment-store-scope-postgres-fixtures
+        run: node scripts/ci/release-critical.mjs postgresql-assortment
+
+      - name: Upload release-critical PostgreSQL receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-critical-postgresql-assortment-${{ github.workflow }}-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.RELEASE_CRITICAL_LOG_DIR }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
   application:
     name: Fast application checks

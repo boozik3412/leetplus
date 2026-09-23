@@ -401,7 +401,7 @@ if (command === 'help' || !command) {
       validatePlan(plan); validateChain(plan, state.records);
       operations.push({ operationId: id, targetSlot: plan.targetSlot, completed: Boolean(state.final), rolledBack: Boolean(state.rolledBack), phases: Object.keys(state.records) });
     }
-    console.log(canonical({ active: active(), operations, controller: { releaseSha: path.basename(CONTROL), manifestSha256: installedDigest(), isServing: fs.realpathSync('/usr/local/sbin/leetplus-compose') === `${CONTROL}/control.sh`, handoffPending: fs.existsSync(`${STATE}/control-handoff.pending.json`) } }));
+    console.log(canonical({ active: active(), operations, controller: { releaseSha: path.basename(CONTROL), manifestSha256: installedDigest(), isServing: fs.realpathSync('/usr/local/sbin/leetplus-compose') === `${CONTROL}/control.sh`, handoffPending: fs.existsSync(`${STATE}/control-handoff.pending.json`), preparationEvidenceExpiryEnforced: true } }));
   } else if (command === 'network') {
     demand(Object.keys(options).length === 1 && Object.hasOwn(options, 'operation'), 'Exact network operation required');
     demand(['install', 'refresh', 'verify', 'status', 'install-rehearsal', 'verify-rehearsal'].includes(options.operation), 'Unknown network operation');

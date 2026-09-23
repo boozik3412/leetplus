@@ -1,6 +1,18 @@
 # Runtime и security-контуры LeetPlus
 
-Статус: **канонический current-state contract**, актуально на **17.09.2026**.
+Статус: **канонический current-state contract**, оперативный checkpoint **23.09.2026**.
+
+**Оперативное обновление 23.09:** по отдельному exact-plan GO активен
+**GREEN f97/gen10, API6GiB**; BLUE3c3 оставлен rollback, data399/CURRENT191
+и serving controller02 не менялись. Исходные daily/bonus timers включены с
+подписанными gen10 grants, обычный bonus worker PASS. Точечный support CLI
+работал только через internal data network без provider egress: выданы два
+`AVAILABLE` кейса (DA, C61) и одна `APPROVED` награда LP571 на 150 бонусов
+с `claimRequired=true` и `PENDING` wallet; FE не затронут. Это не доказывает
+гостевой claim или выплату Langame, естественный guest canary ещё нужен.
+Все четыре тикета остаются `NEW`. C61 public key был доступен только
+изолированному однократному CLI, обычный API runtime не расширялся.
+[Точные эффекты и ограничения](../deployment/support-recovery-production-2026-09-23.md).
 
 **Оперативное обновление 17.09, 11:02 UTC:** nativeed4 выпустил **BLUE3c3/gen9,
 API6GiB/total8GiB** с последними семью завершёнными днями и отдельной историей21

@@ -9,10 +9,40 @@ const SIGNATURE = /^[A-Za-z0-9+/]{86}==$/;
 const RESOURCE_PROFILE_BOOTSTRAP = 'RESOURCE_PROFILE_BOOTSTRAP';
 const PREDECESSOR_CONTROL_SHA = '892b25b9fe5ebc8d0c20a7874a77ac312b7a0978';
 const PREDECESSOR_CONTRACT_SHA256 = 'bba588a506cee3dc6c03a0b93f25291a4dd5f36c1d05fb79d83128bf0276f79d';
+const VARIANT_A_PREDECESSOR_SHA = '02acca249783cf47c0a24897203d51a206e1c5b2';
+const VARIANT_A_PREDECESSOR_MANIFEST_SHA256 = '5ee7133885692b4c6e86ab680b4040770c985cee4c3381fb372302041232fcad';
+const VARIANT_A_OLD_ORCHESTRATOR_SHA256 = 'c6fd054d39175266ac0603759423f4fe039294c2a42b03f0b8bd12a8f280aa58';
+const VARIANT_A_NEW_ORCHESTRATOR_SHA256 = 'c4d13a76d1f97f41dc575d37c5da588b9ba3634b1a053f6b194a86623e8861c4';
+const VARIANT_A_NEW_CONTROL_SHA256 = '4e39b9e8a75ede6bc474fe0ef8b0b5fea60b46edd7c1ed8172744288625ea49f';
+const VARIANT_A_NEW_RUNNER_SHA256 = '9b02c697d6995b0ff9d4cc085d1249d6e83d96d0cb2848a1e6a139acf3f1eb29';
 
-function validatePlanScope(plan) {
+export function validatePlanScope(plan) {
   demand(plan?.contract === `${CONTRACT}_PLAN` && UUID.test(plan.operationId ?? ''), 'Invalid control handoff plan');
-  if (plan.action === 'CONTROL_HANDOFF') return;
+  if (plan.action === 'CONTROL_HANDOFF') {
+    if (!Object.hasOwn(plan, 'orchestratorTransition')) return;
+    const transition = plan.orchestratorTransition;
+    const keys = ['contract', 'oldReleaseSha', 'newReleaseSha', 'oldControlSha256', 'newControlSha256',
+      'oldOrchestratorSha256', 'newOrchestratorSha256', 'newControlEntrySha256', 'newPreparationRunnerSha256'];
+    demand(transition && typeof transition === 'object' && !Array.isArray(transition) &&
+      JSON.stringify(Object.keys(transition).sort()) === JSON.stringify(keys.sort()) &&
+      transition.contract === 'LEETPLUS_VARIANT_A_ORCHESTRATOR_HANDOFF_V1' &&
+      plan.oldReleaseSha === VARIANT_A_PREDECESSOR_SHA && plan.oldControlSha256 === VARIANT_A_PREDECESSOR_MANIFEST_SHA256 &&
+      SHA.test(plan.newReleaseSha ?? '') && plan.newReleaseSha !== plan.oldReleaseSha && HASH.test(plan.newControlSha256 ?? '') &&
+      plan.newControlSha256 !== plan.oldControlSha256 &&
+      plan.applicationRestartAllowed === false && plan.timersMayBeStopped === false &&
+      plan.rollbackAllowed === true && plan.maxLockWaitSeconds === 120 &&
+      !['predecessorControlSha', 'predecessorContractSha256', 'legacyProfile', 'targetProfile',
+        'historicalComposeIdentityVerified', 'resourceLimitMutationAllowed'].some(key => Object.hasOwn(plan, key)) &&
+      transition.oldReleaseSha === plan.oldReleaseSha && transition.newReleaseSha === plan.newReleaseSha &&
+      transition.oldControlSha256 === plan.oldControlSha256 && transition.newControlSha256 === plan.newControlSha256 &&
+      transition.oldOrchestratorSha256 === VARIANT_A_OLD_ORCHESTRATOR_SHA256 &&
+      transition.newOrchestratorSha256 === VARIANT_A_NEW_ORCHESTRATOR_SHA256 &&
+      transition.newControlEntrySha256 === VARIANT_A_NEW_CONTROL_SHA256 &&
+      transition.newPreparationRunnerSha256 === VARIANT_A_NEW_RUNNER_SHA256,
+    'Invalid variant A orchestrator transition');
+    return;
+  }
+  demand(!Object.hasOwn(plan, 'orchestratorTransition'), 'Resource bootstrap cannot include variant A orchestrator transition');
   demand(plan.action === RESOURCE_PROFILE_BOOTSTRAP && plan.oldReleaseSha === PREDECESSOR_CONTROL_SHA &&
     SHA.test(plan.newReleaseSha ?? '') && plan.newReleaseSha !== plan.oldReleaseSha &&
     plan.predecessorControlSha === PREDECESSOR_CONTROL_SHA && plan.predecessorContractSha256 === PREDECESSOR_CONTRACT_SHA256 &&

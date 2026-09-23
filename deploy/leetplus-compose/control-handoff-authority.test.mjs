@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
 import { canonical, digest } from './contract.mjs';
-import { validateControlHandoffAuthority, validateControlRollbackApproval, validatePendingControlHandoffAuthority, validateControlHandoffRecoveryAuthority } from './control-handoff-authority.mjs';
+import { validatePlanScope, validateControlHandoffAuthority, validateControlRollbackApproval, validatePendingControlHandoffAuthority, validateControlHandoffRecoveryAuthority } from './control-handoff-authority.mjs';
 
 const CONTRACT = 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1';
 const RESOURCE_PROFILE_BOOTSTRAP = 'RESOURCE_PROFILE_BOOTSTRAP';
@@ -81,6 +81,56 @@ function validatePending(value, { intent, pending }, now = NOW) {
 function validateRecovery(value, intent, now = NOW) {
   return validateControlHandoffRecoveryAuthority({ plan: value.plan, approvalEnvelope: value.approvalEnvelope, intent }, value.publicKey, value.context, now);
 }
+
+function variantA(value) {
+  const plan = value.plan;
+  plan.timersMayBeStopped = false;
+  plan.maxLockWaitSeconds = 120;
+  plan.oldReleaseSha = '02acca249783cf47c0a24897203d51a206e1c5b2';
+  plan.newReleaseSha = sha('f');
+  plan.oldControlSha256 = '5ee7133885692b4c6e86ab680b4040770c985cee4c3381fb372302041232fcad';
+  plan.orchestratorTransition = {
+    contract: 'LEETPLUS_VARIANT_A_ORCHESTRATOR_HANDOFF_V1',
+    oldReleaseSha: plan.oldReleaseSha, newReleaseSha: plan.newReleaseSha,
+    oldControlSha256: plan.oldControlSha256, newControlSha256: plan.newControlSha256,
+    oldOrchestratorSha256: 'c6fd054d39175266ac0603759423f4fe039294c2a42b03f0b8bd12a8f280aa58',
+    newOrchestratorSha256: 'c4d13a76d1f97f41dc575d37c5da588b9ba3634b1a053f6b194a86623e8861c4',
+    newControlEntrySha256: '4e39b9e8a75ede6bc474fe0ef8b0b5fea60b46edd7c1ed8172744288625ea49f',
+    newPreparationRunnerSha256: '9b02c697d6995b0ff9d4cc085d1249d6e83d96d0cb2848a1e6a139acf3f1eb29',
+  };
+  rebindForward(value);
+  return value;
+}
+
+test('variant A ordinary handoff binds the exact old/new controller and orchestrator transition', () => {
+  const exact = variantA(authority());
+  validatePlanScope(exact.plan);
+  validate(exact);
+  for (const [label, mutate] of [
+    ['old release', p => { p.oldReleaseSha = sha('0'); }],
+    ['old manifest', p => { p.oldControlSha256 = hash('0'); }],
+    ['new release binding', p => { p.orchestratorTransition.newReleaseSha = sha('0'); }],
+    ['new manifest binding', p => { p.orchestratorTransition.newControlSha256 = hash('0'); }],
+    ['same control manifest', p => { p.newControlSha256 = p.oldControlSha256; p.orchestratorTransition.newControlSha256 = p.oldControlSha256; }],
+    ['orchestrator bytes', p => { p.orchestratorTransition.newOrchestratorSha256 = hash('0'); }],
+    ['entrypoint bytes', p => { p.orchestratorTransition.newControlEntrySha256 = hash('0'); }],
+    ['runner bytes', p => { p.orchestratorTransition.newPreparationRunnerSha256 = hash('0'); }],
+    ['unexpected field', p => { p.orchestratorTransition.extra = true; }],
+    ['app restart', p => { p.applicationRestartAllowed = true; }],
+    ['timer change', p => { p.timersMayBeStopped = true; }],
+    ['rollback disabled', p => { p.rollbackAllowed = false; }],
+    ['unbounded lock wait', p => { p.maxLockWaitSeconds = 121; }],
+    ['resource scope smuggled', p => { p.targetProfile = 'API_6G_V1'; }],
+  ]) {
+    const changed = variantA(authority());
+    mutate(changed.plan);
+    rebindForward(changed); // A valid signature cannot bless an invalid scope.
+    assert.throws(() => validate(changed), /variant A orchestrator transition/, label);
+  }
+  const bootstrap = authority({ action: RESOURCE_PROFILE_BOOTSTRAP });
+  bootstrap.plan.orchestratorTransition = exact.plan.orchestratorTransition;
+  assert.throws(() => validatePlanScope(bootstrap.plan), /cannot include variant A/);
+});
 
 test('accepts an exact signed, receipted control handoff and its ongoing authority', () => {
   const current = authority();

@@ -277,6 +277,7 @@ class ResourceProfileBootstrapTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "worker contract"):
             handoff.assert_compatible(old, new, True)
 
+
     def test_active_releases_must_be_unprofiled_and_boolean_does_not_authorize_them(self):
         clean = {"active": {"blue": {}, "green": {}, "dataRelease": {}}}
         handoff.assert_legacy_active_releases(clean)
@@ -303,6 +304,93 @@ class ResourceProfileBootstrapTests(unittest.TestCase):
         ordinary = {**plan, "action": "CONTROL_HANDOFF"}
         with self.assertRaisesRegex(ValueError, "Ordinary controller handoff"):
             handoff.validate_plan_bindings(ordinary, old, new)
+
+
+class VariantAOrchestratorHandoffTests(unittest.TestCase):
+    def controls(self):
+        files = {leaf: str(index + 1) * 64 for index, leaf in enumerate(handoff.COMPATIBLE)}
+        files['orchestrator.mjs'] = handoff.VARIANT_A_OLD_ORCHESTRATOR_SHA256
+        files['control.mjs'] = handoff.VARIANT_A_OLD_CONTROL_SHA256
+        old = {'manifest': {'releaseSha': handoff.VARIANT_A_PREDECESSOR_SHA, 'files': files}, 'digest': handoff.VARIANT_A_PREDECESSOR_MANIFEST_SHA256,
+               'root': Path('/old-control')}
+        new_files = {**files, 'orchestrator.mjs': handoff.VARIANT_A_NEW_ORCHESTRATOR_SHA256,
+                     'control.mjs': handoff.VARIANT_A_NEW_CONTROL_SHA256,
+                     'preparation-runner.mjs': handoff.VARIANT_A_NEW_RUNNER_SHA256}
+        new = {'manifest': {'releaseSha': 'b' * 40, 'files': new_files}, 'digest': 'b' * 64,
+               'root': Path('/new-control')}
+        return old, new
+
+    def test_exact_reviewed_transition_is_bound_to_the_manifest(self):
+        old, new = self.controls()
+        self.assertEqual(handoff.assert_runtime_contract_compatible(old, new),
+                         {**handoff.VARIANT_A_TRANSITION, 'oldReleaseSha': old['manifest']['releaseSha'],
+                          'newReleaseSha': new['manifest']['releaseSha'],
+                          'oldControlSha256': old['digest'], 'newControlSha256': new['digest']})
+        root = Path(__file__).parent
+        for leaf, expected in [('orchestrator.mjs', handoff.VARIANT_A_NEW_ORCHESTRATOR_SHA256),
+                               ('control.mjs', handoff.VARIANT_A_NEW_CONTROL_SHA256),
+                               ('preparation-runner.mjs', handoff.VARIANT_A_NEW_RUNNER_SHA256)]:
+            self.assertEqual(handoff.digest((root / leaf).read_bytes()), expected)
+
+    def test_wrong_old_or_new_bytes_and_other_runtime_changes_fail(self):
+        for side, leaf, wrong in [
+            ('old', 'releaseSha', 'c' * 40),
+            ('old', 'control.mjs', '6' * 64),
+            ('old', 'orchestrator.mjs', '1' * 64),
+            ('new', 'orchestrator.mjs', '2' * 64),
+            ('new', 'control.mjs', '3' * 64),
+            ('new', 'preparation-runner.mjs', '4' * 64),
+            ('new', 'worker-authority.mjs', '5' * 64),
+        ]:
+            with self.subTest(side=side, leaf=leaf):
+                old, new = self.controls()
+                target = old if side == 'old' else new
+                if leaf == 'releaseSha':
+                    target['manifest'][leaf] = wrong
+                else:
+                    target['manifest']['files'][leaf] = wrong
+                with self.assertRaises(ValueError):
+                    handoff.assert_runtime_contract_compatible(old, new)
+
+    def test_profile_bootstrap_cannot_combine_with_variant_a_transition(self):
+        old, new = self.controls()
+        with self.assertRaisesRegex(ValueError, 'cannot also change'):
+            handoff.assert_runtime_contract_compatible(old, new, True)
+
+    def test_ordinary_same_byte_handoff_keeps_the_existing_contract(self):
+        old, new = self.controls()
+        old['manifest']['releaseSha'] = 'c' * 40
+        old['manifest']['files'] = new['manifest']['files'].copy()
+        self.assertIsNone(handoff.assert_runtime_contract_compatible(old, new))
+
+    def test_signed_plan_must_name_exact_orchestrator_transition(self):
+        old, new = self.controls()
+        old['manifest']['files'][handoff.UNIT.name] = '7' * 64
+        new['manifest']['files'][handoff.UNIT.name] = '7' * 64
+        scope = {'operation': 'refresh', 'setNames': ['lp_leetplus_https', 'lp_leetplus_smtp'],
+                 'ttlSeconds': 3600, 'publicAddressesOnly': True, 'policySha256': '8' * 64}
+        plan = {
+            'contract': handoff.CONTRACT + '_PLAN', 'action': 'CONTROL_HANDOFF',
+            'applicationRestartAllowed': False, 'timersMayBeStopped': False,
+            'rollbackAllowed': True, 'maxLockWaitSeconds': 120,
+            'oldReleaseSha': old['manifest']['releaseSha'],
+            'newReleaseSha': new['manifest']['releaseSha'],
+            'oldControlSha256': old['digest'], 'newControlSha256': new['digest'],
+            'oldMainTarget': str(old['root'] / 'control.sh'),
+            'newMainTarget': str(new['root'] / 'control.sh'),
+            'oldUnitSha256': '7' * 64, 'newUnitSha256': '7' * 64,
+            'oldUnitMode': 0o644,
+            'snapshot': {'files': {'/etc/leetplus-compose/providers.json': '8' * 64}},
+            'refreshScope': scope,
+            'orchestratorTransition': handoff.variant_a_orchestrator_transition(old, new),
+        }
+        with mock.patch.object(handoff, 'assert_compatible'):
+            handoff.validate_plan_bindings(plan, old, new)
+            for change in ({'orchestratorTransition': None},
+                           {'orchestratorTransition': {'contract': 'UNSCOPED'}},
+                           {'oldControlSha256': '0' * 64}):
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    handoff.validate_plan_bindings({**plan, **change}, old, new)
 
 
 class ResourceProfileBootstrapPrepareTests(unittest.TestCase):

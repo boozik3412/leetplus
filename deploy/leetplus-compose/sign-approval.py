@@ -12,6 +12,12 @@ CONTROL_HANDOFF_CONTRACT = 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1'
 RESOURCE_PROFILE_BOOTSTRAP = 'RESOURCE_PROFILE_BOOTSTRAP'
 PREDECESSOR_CONTROL_SHA = '892b25b9fe5ebc8d0c20a7874a77ac312b7a0978'
 PREDECESSOR_CONTRACT_SHA256 = 'bba588a506cee3dc6c03a0b93f25291a4dd5f36c1d05fb79d83128bf0276f79d'
+VARIANT_A_PREDECESSOR_SHA = '02acca249783cf47c0a24897203d51a206e1c5b2'
+VARIANT_A_PREDECESSOR_MANIFEST_SHA256 = '5ee7133885692b4c6e86ab680b4040770c985cee4c3381fb372302041232fcad'
+VARIANT_A_OLD_ORCHESTRATOR_SHA256 = 'c6fd054d39175266ac0603759423f4fe039294c2a42b03f0b8bd12a8f280aa58'
+VARIANT_A_NEW_ORCHESTRATOR_SHA256 = 'c4d13a76d1f97f41dc575d37c5da588b9ba3634b1a053f6b194a86623e8861c4'
+VARIANT_A_NEW_CONTROL_SHA256 = '4e39b9e8a75ede6bc474fe0ef8b0b5fea60b46edd7c1ed8172744288625ea49f'
+VARIANT_A_NEW_RUNNER_SHA256 = '9b02c697d6995b0ff9d4cc085d1249d6e83d96d0cb2848a1e6a139acf3f1eb29'
 
 
 def canonical(value):
@@ -27,7 +33,28 @@ def validate_control_handoff_plan(value):
         raise SystemExit('Unsupported serving-controller-only plan')
     action = value.get('action')
     if action == 'CONTROL_HANDOFF':
+        if 'orchestratorTransition' in value:
+            transition = value['orchestratorTransition']
+            expected = {'contract': 'LEETPLUS_VARIANT_A_ORCHESTRATOR_HANDOFF_V1',
+                        'oldReleaseSha': value.get('oldReleaseSha'), 'newReleaseSha': value.get('newReleaseSha'),
+                        'oldControlSha256': value.get('oldControlSha256'), 'newControlSha256': value.get('newControlSha256'),
+                        'oldOrchestratorSha256': VARIANT_A_OLD_ORCHESTRATOR_SHA256,
+                        'newOrchestratorSha256': VARIANT_A_NEW_ORCHESTRATOR_SHA256,
+                        'newControlEntrySha256': VARIANT_A_NEW_CONTROL_SHA256,
+                        'newPreparationRunnerSha256': VARIANT_A_NEW_RUNNER_SHA256}
+            if (not isinstance(transition, dict) or transition != expected or
+                    value.get('oldReleaseSha') != VARIANT_A_PREDECESSOR_SHA or
+                    value.get('oldControlSha256') != VARIANT_A_PREDECESSOR_MANIFEST_SHA256 or
+                    not isinstance(value.get('newReleaseSha'), str) or not re.fullmatch('[a-f0-9]{40}', value['newReleaseSha']) or
+                    value['newReleaseSha'] == value['oldReleaseSha'] or
+                    not isinstance(value.get('newControlSha256'), str) or not re.fullmatch('[a-f0-9]{64}', value['newControlSha256']) or
+                    value['newControlSha256'] == value['oldControlSha256'] or value.get('maxLockWaitSeconds') != 120 or
+                    any(key in value for key in ('predecessorControlSha', 'predecessorContractSha256', 'legacyProfile', 'targetProfile',
+                                                'historicalComposeIdentityVerified', 'resourceLimitMutationAllowed'))):
+                raise SystemExit('Unsupported Variant A orchestrator transition')
         return action
+    if 'orchestratorTransition' in value:
+        raise SystemExit('Resource-profile bootstrap cannot include Variant A orchestrator transition')
     new_release = value.get('newReleaseSha')
     if action != RESOURCE_PROFILE_BOOTSTRAP or value.get('oldReleaseSha') != PREDECESSOR_CONTROL_SHA or not isinstance(new_release, str) or not re.fullmatch('[a-f0-9]{40}', new_release) or new_release == PREDECESSOR_CONTROL_SHA or value.get('predecessorControlSha') != PREDECESSOR_CONTROL_SHA or value.get('predecessorContractSha256') != PREDECESSOR_CONTRACT_SHA256 or value.get('legacyProfile') != 'LEGACY_4G' or value.get('targetProfile') != 'API_6G_V1' or value.get('historicalComposeIdentityVerified') is not True or value.get('resourceLimitMutationAllowed') is not False:
         raise SystemExit('Unsupported resource-profile bootstrap plan')

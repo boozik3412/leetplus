@@ -66,6 +66,31 @@ function validate(history, active) {
   return validateAcceptedApplicationSnapshot({ histories: [history], active, publicKey });
 }
 
+test('new controller accepts exact guarded terminal history but not approval beyond its evidence expiry', () => {
+  const value = plan({ rollback: true });
+  value.preparationGuard = {
+    contract: 'LEETPLUS_PREPARATION_GUARD_V1',
+    hostIdentitySha256: value.hostIdentitySha256,
+    controllerManifestSha256: value.controlSha256,
+    activeSha256: digest(value.previous),
+    generation: value.generation,
+    activeSlot: value.previous.activeSlot,
+  };
+  value.preparationEvidenceExpiresAt = '2026-09-15T10:00:00.000Z';
+  const chain = records(value);
+  const final = { contract: `${CONTRACT}_COMPLETED`, operationId: value.operationId,
+    planSha256: digest(value), lastReceiptSha256: digest(chain.POSTCHECK.receipt) };
+  const active = { operationId: value.operationId, generation: value.generation + 1,
+    activeSlot: value.targetSlot, blue: value.blue, green: value.green,
+    dataRelease: value.dataRelease, dataAdmissionSha256: value.dataAdmissionSha256,
+    planSha256: digest(value) };
+  const history = { plan: value, approval: approval(value), records: chain, final, rolledBack: null };
+  validate(history, active);
+  history.approval.approval.expiresAt = '2026-09-15T10:01:00.000Z';
+  history.approval.signature = crypto.sign(null, Buffer.from(canonical(history.approval.approval)), key.privateKey).toString('base64');
+  assert.throws(() => validate(history, active), /cannot extend expired preparation evidence/);
+});
+
 test('accepts a complete forward terminal chain and returns its control digest', () => {
   const { history, active } = forwardHistory();
   assert.deepEqual(validate(history, active), { controlSha256: history.plan.controlSha256 });

@@ -11,6 +11,16 @@ canary и фактический claim не подтверждены. Это н�
 расширение tenant/provider scope.
 [Квитанции и границы](../deployment/support-recovery-production-2026-09-23.md).
 
+**Source follow-up23.09:** PR226 внёс вариант A в `main` как `6def91d4…`;
+production продолжает обслуживать прежний controller `02acca…` и GREENf97.
+После exact-main Fast/Full два новых critical checks стали обязательными в
+branch protection (`strict=true`, прежние три checks сохранены).
+Новый узкий controller-handoff successor допускает только exact reviewed
+изменение orchestrator expiry guard, не устанавливает controller и не запускает
+application, providers, workers или timers. Для реального handoff нужны новый
+exact-main admission, backup/restored-copy evidence и отдельный GO по
+конкретному плану. [Контракт и активация](../deployment/release-preparation-a-controller-handoff.md).
+
 **Source tooling22.09:** variant A автоматизирует существующий release order
 и выравнивает critical PR/Full checks. Он не выдаёт внешний beta/tenant GO,
 не меняет public/corporate/worker boundaries и не доказывает новый production

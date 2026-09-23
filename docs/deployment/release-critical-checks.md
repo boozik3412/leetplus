@@ -1,9 +1,10 @@
 # Release-critical checks for Variant A
 
-Status: source-only CI contract at base revision
-`4136da468183c20e504ac8fdcf88edd9547f0ca5`. This document does not claim a
-GitHub run, branch-protection update, admission, preparation, or production
-change.
+Status 23.09.2026: PR #226 merged as main `6def91d4…`; exact-main Fast
+`35846137369` and Full `35846137362` passed. Main branch protection now
+requires all five checks below, with GitHub Actions app binding, `strict=true`
+and administrator enforcement unchanged. This is source/CI enablement;
+production still serves the prior controller and application release.
 
 Variant A moves the three observed late-failure classes into identical Fast
 and Full jobs. Pull requests receive them through `Fast CI`; the exact main
@@ -67,22 +68,24 @@ runtime and production-control handoff`; no critical failure can publish an
 exact-main handoff. Existing `Release impact classification`, authority,
 application, migration and artifact dependencies remain unchanged.
 
-## Branch-protection proposal
+## Branch-protection state and proposal helper
 
-Do not remove or rename the current requirements:
+Do not remove or rename the required checks:
 
 - `Release impact classification`
 - `Fast authority root trust`
 - `Fast application checks`
+- `Release critical pilot HTTP and fresh store scope`
+- `Release critical PostgreSQL assortment isolation`
 
-After a fresh pull-request run has produced successful checks at its exact head
-SHA, add the two stable names above as GitHub Actions app-bound required checks.
-Keep strict mode and administrator enforcement enabled and preserve every
-existing context, app binding, review rule, push restriction and repository
-ruleset.
+The last two names were added at 10:27 UTC after both passed on the exact
+merge SHA in Fast and Full. The PATCH changed only
+`required_status_checks`; the readback retained the original three checks,
+strict mode, administrator enforcement, review rules, push restrictions and
+repository rulesets.
 
 The offline proposal helper accepts complete, freshly read protection and
-check-run responses and writes a reviewable proposal only:
+check-run responses and writes a reviewable proposal for a future change:
 
 ```text
 node scripts/ci/propose-required-checks.mjs input.json new-proposal.json

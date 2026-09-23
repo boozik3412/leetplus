@@ -624,14 +624,32 @@ repair не считается deployed.
 
 ### Guardrail ускорения release pipeline
 
-Source candidate22.09 добавляет variant A: общий critical PR/Full contract,
+Source follow-up23.09 для варианта A разрешает только один узкий
+controller-only successor от установленного `02acca2497…`: прежний
+`orchestrator.mjs` `c6fd054d…` переходит к reviewed expiry-guard bytes
+`c4d13a76…` при точных manifest/controller/runner digests. Переход явно
+входит в подписываемый handoff plan; Python controller, независимый JS
+authority verifier и offline signer отвергают иной predecessor, новые
+непроверенные bytes или совмещение с resource-profile bootstrap. Все другие
+runtime/worker contracts и unit остаются byte-strict. Handoff не меняет
+application/data, не перезапускает процессы и не останавливает timers. Это
+source/CI contract, а не установленный controller или production GO.
+[Exact handoff boundary](../deployment/release-preparation-a-controller-handoff.md).
+
+Source PR226 принят в `main6def91d4…`: exact-main Fast/Full прошли, и
+23.09 в10:27UTC branch protection дополнился двумя app-bound critical checks,
+сохранив три прежних, strict mode и прочие правила. Это включает PR-контроль,
+но не меняет фактический GREENf97/gen10/controller02 и не даёт production GO.
+
+Merged source23.09 (main `6def91d4…`) содержит variant A: общий critical PR/Full contract,
 durable подготовку и read-only наблюдение за native receipts. Это tooling
 worker/control-plane, не новый public/corporate субъект. Подготовка заканчивается
 `PREPARED_NOT_AUTHORIZATION`; только native `apply/resume` владеют пятью
 production phases. Exact plan digest связывает worker continuation policy;
 новый plan требует своего GO. Backup/off-host/restored-copy, auth/network,
-resource/cooldown и hot rollback сохраняются. Source/fixture/PR не означают
-установку контроллера, включение branch protection или production acceptance.
+resource/cooldown и hot rollback сохраняются. Source/fixture/PR сами по себе
+не означают установку контроллера или production acceptance; состояние
+branch protection подтверждается отдельно ниже.
 Для нового preparation plan immutable `preparationEvidenceExpiresAt` ограничивает
 сам native approval и проверяется снова после preflight перед каждой фазой:
 поздняя новая подпись не продлевает старое evidence. Старый serving controller

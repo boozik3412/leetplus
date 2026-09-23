@@ -37,6 +37,24 @@ PENDING = STATE / 'control-handoff.pending.json'
 TIMERS = ('leetplus-compose-bonus.timer', 'leetplus-compose-daily.timer')
 CONTAINERS = ('leetplus-api-blue', 'leetplus-web-blue', 'leetplus-api-green', 'leetplus-web-green', 'leetplus-postgres', 'leetplus-redis')
 COMPATIBLE = ('contract.mjs', 'orchestrator.mjs', 'worker-authority.mjs', 'runtime-entry.cjs', 'network.sh', 'backup.sh', 'postgres-entry.sh')
+# Variant A adds a bounded preparation-evidence expiry guard to the native
+# five-phase engine. This is the only reviewed orchestrator byte transition
+# allowed through a controller-only handoff from the serving 02acca release.
+# It cannot adopt an arbitrary later engine, runner, or control entrypoint.
+VARIANT_A_PREDECESSOR_SHA = '02acca249783cf47c0a24897203d51a206e1c5b2'
+VARIANT_A_PREDECESSOR_MANIFEST_SHA256 = '5ee7133885692b4c6e86ab680b4040770c985cee4c3381fb372302041232fcad'
+VARIANT_A_OLD_CONTROL_SHA256 = '136d7c01613af7c874c3652534cc1262ff43ed8598c8454c87e78923a8a11512'
+VARIANT_A_OLD_ORCHESTRATOR_SHA256 = 'c6fd054d39175266ac0603759423f4fe039294c2a42b03f0b8bd12a8f280aa58'
+VARIANT_A_NEW_ORCHESTRATOR_SHA256 = 'c4d13a76d1f97f41dc575d37c5da588b9ba3634b1a053f6b194a86623e8861c4'
+VARIANT_A_NEW_CONTROL_SHA256 = '4e39b9e8a75ede6bc474fe0ef8b0b5fea60b46edd7c1ed8172744288625ea49f'
+VARIANT_A_NEW_RUNNER_SHA256 = '9b02c697d6995b0ff9d4cc085d1249d6e83d96d0cb2848a1e6a139acf3f1eb29'
+VARIANT_A_TRANSITION = {
+    'contract': 'LEETPLUS_VARIANT_A_ORCHESTRATOR_HANDOFF_V1',
+    'oldOrchestratorSha256': VARIANT_A_OLD_ORCHESTRATOR_SHA256,
+    'newOrchestratorSha256': VARIANT_A_NEW_ORCHESTRATOR_SHA256,
+    'newControlEntrySha256': VARIANT_A_NEW_CONTROL_SHA256,
+    'newPreparationRunnerSha256': VARIANT_A_NEW_RUNNER_SHA256,
+}
 CLEAN = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8', 'TZ': 'UTC'}
 RESOURCE_PROFILE_BOOTSTRAP = 'RESOURCE_PROFILE_BOOTSTRAP'
 RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_SHA = '892b25b9fe5ebc8d0c20a7874a77ac312b7a0978'
@@ -284,13 +302,41 @@ def assert_legacy_active_releases(snapshot_value):
         require(isinstance(release, dict) and 'apiResourceProfile' not in release, 'Resource-profile bootstrap cannot adopt an already profiled active release')
 
 
-def assert_compatible(old, new, resource_profile_bootstrap=False):
-    if resource_profile_bootstrap:
-        assert_resource_profile_bootstrap_identity(old, new)
+def variant_a_orchestrator_transition(old, new):
+    old_files, new_files = old['manifest']['files'], new['manifest']['files']
+    if old_files.get('orchestrator.mjs') == new_files.get('orchestrator.mjs'):
+        return None
+    require(old['manifest']['releaseSha'] == VARIANT_A_PREDECESSOR_SHA and
+            old['digest'] == VARIANT_A_PREDECESSOR_MANIFEST_SHA256 and
+            old_files.get('control.mjs') == VARIANT_A_OLD_CONTROL_SHA256 and
+            old_files.get('orchestrator.mjs') == VARIANT_A_OLD_ORCHESTRATOR_SHA256 and
+            new_files.get('orchestrator.mjs') == VARIANT_A_NEW_ORCHESTRATOR_SHA256 and
+            new_files.get('control.mjs') == VARIANT_A_NEW_CONTROL_SHA256 and
+            new_files.get('preparation-runner.mjs') == VARIANT_A_NEW_RUNNER_SHA256,
+            'Unreviewed orchestrator transition cannot use controller-only handoff')
+    return {**VARIANT_A_TRANSITION,
+            'oldReleaseSha': old['manifest']['releaseSha'],
+            'newReleaseSha': new['manifest']['releaseSha'],
+            'oldControlSha256': old['digest'],
+            'newControlSha256': new['digest']}
+
+
+def assert_runtime_contract_compatible(old, new, resource_profile_bootstrap=False):
+    transition = variant_a_orchestrator_transition(old, new)
+    require(not (resource_profile_bootstrap and transition), 'Resource-profile bootstrap cannot also change the orchestrator')
     for leaf in COMPATIBLE:
         if resource_profile_bootstrap and leaf == 'contract.mjs':
             continue
+        if leaf == 'orchestrator.mjs' and transition:
+            continue
         require(old['manifest']['files'][leaf] == new['manifest']['files'][leaf], 'Runtime/worker contract change is not a controller-only handoff: ' + leaf)
+    return transition
+
+
+def assert_compatible(old, new, resource_profile_bootstrap=False):
+    if resource_profile_bootstrap:
+        assert_resource_profile_bootstrap_identity(old, new)
+    assert_runtime_contract_compatible(old, new, resource_profile_bootstrap)
     for leaf, expected in old['manifest']['files'].items():
         if leaf.startswith('leetplus-compose-') and leaf.endswith(('.service', '.timer')) and leaf != UNIT.name:
             require(new['manifest']['files'].get(leaf) == expected, 'Other unit changes require a separate rollout')
@@ -343,6 +389,9 @@ def prepare(old_sha, new_sha, admission_sha, evidence_path, resource_profile_boo
                 'previousPointer': base64.b64encode(secure(POINTER)).decode() if POINTER.exists() else None, 'evidenceSha256': digest(evidence_raw),
                 'refreshScope': {'operation': 'refresh', 'setNames': ['lp_leetplus_https', 'lp_leetplus_smtp'], 'ttlSeconds': 3600, 'publicAddressesOnly': True, 'policySha256': current['files']['/etc/leetplus-compose/providers.json']},
                 'applicationRestartAllowed': False, 'timersMayBeStopped': False, 'rollbackAllowed': True, 'maxLockWaitSeconds': 120}
+        transition = variant_a_orchestrator_transition(old, new)
+        if transition:
+            plan['orchestratorTransition'] = transition
         if resource_profile_bootstrap:
             plan.update({'predecessorControlSha': RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_SHA,
                          'predecessorContractSha256': RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_CONTRACT_SHA256,
@@ -439,6 +488,9 @@ def validate_plan_bindings(plan, old, new):
         }, 'Invalid resource-profile bootstrap scope')
     else:
         require(not (profile_keys & set(plan)), 'Ordinary controller handoff cannot carry a resource-profile transition')
+    transition = variant_a_orchestrator_transition(old, new)
+    require(plan.get('orchestratorTransition') == transition and (transition is not None or 'orchestratorTransition' not in plan),
+            'Signed orchestrator transition does not match the installed controller bytes')
     require(old['digest'] == plan['oldControlSha256'] and new['digest'] == plan['newControlSha256'], 'Controller manifest drift')
     require(plan['oldMainTarget'] == str(old['root'] / 'control.sh') and plan['newMainTarget'] == str(new['root'] / 'control.sh'), 'Unexpected main-pointer target')
     require(plan['oldUnitSha256'] == old['manifest']['files'][UNIT.name] and plan['newUnitSha256'] == new['manifest']['files'][UNIT.name] and plan['oldUnitMode'] in (0o400, 0o600, 0o644), 'Unexpected unit effect')

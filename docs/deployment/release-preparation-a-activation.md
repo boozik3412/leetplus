@@ -1,5 +1,13 @@
 # Variant A: activation and comparative pilot
 
+Checkpoint 23.09.2026: source PR #226 merged as main `6def91d4…`; exact-main
+Fast `35846137369` and Full `35846137362` passed. Main protection now requires
+the original three checks plus the pilot HTTP/fresh-scope and PostgreSQL
+assortment checks, all GitHub Actions app-bound with `strict=true`. The
+serving production controller remains `02acca…`; this source/CI activation
+does not install it or start a release. The narrow controller successor is
+documented in [the handoff contract](release-preparation-a-controller-handoff.md).
+
 This change automates the existing release order. Source implementation, local
 checks, GitHub enablement, controller installation and production acceptance
 are separate outcomes. Neither a PR nor a successful fixture authorizes a
@@ -86,6 +94,11 @@ to GitHub or ordinary task evidence.
 2. Build a concrete controller installation or handoff plan from the exact
    admitted artifact. Review immutable old/new control manifests, unchanged
    runtime/data/network/timer identities and the existing rollback procedure.
+   The current serving `02acca` controller has a byte-strict orchestrator
+   compatibility gate. [The Variant A handoff successor](release-preparation-a-controller-handoff.md)
+   permits only the pinned expiry-guard orchestrator transition and binds it
+   into the signed plan. Do not force a generic handoff when it rejects a
+   different transition.
    Obtain the specific production GO before controller installation. Keep
    the serving controller until its canonical handoff succeeds.
    The accepted controller must advertise `preparationEvidenceExpiryEnforced`:

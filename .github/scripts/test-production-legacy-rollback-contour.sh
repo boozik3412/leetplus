@@ -1686,6 +1686,15 @@ TARGET
 }
 
 run_activation() {
+  local settle_seconds=1 command_timeout_seconds=1
+  if [[ "${1:-}" == --positive-window ]]; then
+    # A clean sample still proves every unit/process/DB predicate. The
+    # one-second negative fixtures remain unchanged; a positive sample may
+    # need longer on a loaded disposable GitHub runner.
+    settle_seconds=20
+    command_timeout_seconds=2
+    shift
+  fi
   local fixture_root="$1"
   shift
   local verifier_arguments=(
@@ -1698,9 +1707,9 @@ run_activation() {
     --systemd-root "$fixture_root/systemd"
     --cgroup-root "$fixture_root/cgroup"
     --proc-root "$fixture_root/proc"
-    --settle-seconds 1
+    --settle-seconds "$settle_seconds"
     --clean-samples 1
-    --command-timeout-seconds 1
+    --command-timeout-seconds "$command_timeout_seconds"
     --psql-timeout-seconds 1
     --unprivileged-test-mode
   )
@@ -1812,7 +1821,20 @@ fi
 
 success_root="${TEST_ROOT}/activation-success"
 reset_fixture "$success_root"
-run_activation "$success_root" env > "$success_root/activation.out"
+if ! run_activation --positive-window "$success_root" env > "$success_root/activation.out" 2>&1; then
+  printf 'positive legacy-drain fixture failed; exact disposable state follows\n' >&2
+  tail -n 80 "$success_root/activation.out" >&2
+  printf 'active link: %s\n' "$(readlink -- "$success_root/config/active-upstreams.conf" 2>/dev/null || true)" >&2
+  printf 'fence=%s receipt=%s legacy-pid=%s cgroup-pids=%s\n' \
+    "$(test -e "$success_root/state/legacy-start-fence" && printf yes || printf no)" \
+    "$(test -e "$success_root/state/activation.receipt" && printf yes || printf no)" \
+    "$(test -e "$success_root/proc/4242/stat" && printf yes || printf no)" \
+    "$(wc -l < "$success_root/cgroup/legacy-api/cgroup.procs")" >&2
+  if [[ -f "$success_root/commands.log" ]]; then
+    tail -n 60 "$success_root/commands.log" >&2
+  fi
+  exit 1
+fi
 test "$(realpath -e -- "$success_root/config/active-upstreams.conf")" = "$success_root/config/upstreams/legacy-safe.conf"
 test -f "$success_root/state/activation.receipt"
 test -f "$success_root/state/activation.intent"

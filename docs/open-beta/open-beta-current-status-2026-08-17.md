@@ -1,4 +1,15 @@
-# LeetPlus open beta — текущее состояние на 17.09.2026
+# LeetPlus open beta — текущее состояние на 23.09.2026
+
+**Текущий production checkpoint 23.09:** exact f97 опубликован на GREEN/gen10;
+BLUE3c3 сохранён rollback, data399/CURRENT191/controller02 неизменны.
+Оба исходных worker timer активны с signed gen10 grants, обычный bonus PASS;
+новый daily run после rollout ещё не наблюдался. Точечные тикеты DA и C61
+получили по одному доступному кейсу, FE — ноль отдельных наград, LP571 —
+одну pending reward на 150 бонусов без XP и без выплаты в Langame до
+действия гостя «Получить». Все четыре тикета пока `NEW`, естественный guest
+canary и фактический claim не подтверждены. Это не внешний beta GO и не
+расширение tenant/provider scope.
+[Квитанции и границы](../deployment/support-recovery-production-2026-09-23.md).
 
 **Source tooling22.09:** variant A автоматизирует существующий release order
 и выравнивает critical PR/Full checks. Он не выдаёт внешний beta/tenant GO,

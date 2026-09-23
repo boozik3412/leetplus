@@ -1,5 +1,19 @@
 # LeetPlus Project State
 
+## Current production checkpoint (23.09.2026)
+
+Текущий фактически обслуживающий release — GREEN
+`f97af35d1f0b54a67f915a37a095336e4f9334f9`, generation 10.
+BLUE `3c3dc4ac4d1a73fdf9a1a6da5427212adfa9af80` сохранён rollback;
+data399/CURRENT191 и controller02 неизменны. Daily и bonus timers активны
+с signed gen10 grants; обычный bonus run PASS. По support recovery выданы
+два доступных кейса (DA/C61) и одна pending награда LP571 на 150 бонусов;
+FE без отдельной выдачи. Claim LP571 и фактическая выплата в Langame не
+выполнены, тикеты остаются NEW до гостевого подтверждения.
+[Подробный production checkpoint](docs/deployment/support-recovery-production-2026-09-23.md).
+
+Нижеследующий baseline 08.09 — исторический, не текущий.
+
 ## Canonical current-state guardrail (08.09.2026)
 
 Перед задачами по auth, landing, access scope, игровому модулю, integrations,

@@ -1,6 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { verifiedPlanActor } from './support-recovery.cli';
+import { createInertOutbound, verifiedPlanActor } from './support-recovery.cli';
 import {
   executeSupportRecoveryPlan,
   loadSupportRecoveryRuntimeProfile,
@@ -158,6 +158,24 @@ describe('support recovery CLI runtime router', () => {
     if (previous === undefined)
       delete process.env.LEETPLUS_SUPPORT_RECOVERY_CLI;
     else process.env.LEETPLUS_SUPPORT_RECOVERY_CLI = previous;
+  });
+
+  it('keeps the inert outbound outside Nest lifecycle discovery', () => {
+    const outbound = createInertOutbound();
+    expect(outbound.then).toBeUndefined();
+    expect(outbound.onModuleInit).toBeUndefined();
+    expect(outbound.onApplicationBootstrap).toBeUndefined();
+    expect(outbound.beforeApplicationShutdown).toBeUndefined();
+    expect(outbound.onModuleDestroy).toBeUndefined();
+    expect(outbound.onApplicationShutdown).toBeUndefined();
+    expect(outbound[Symbol.iterator]).toBeUndefined();
+  });
+
+  it('fails closed if recovery code reaches the inert outbound', () => {
+    const outbound = createInertOutbound();
+    expect(() => outbound.searchGuests?.()).toThrow(
+      'Outbound dependency is inert in support recovery CLI.',
+    );
   });
 
   it('defaults DA to preview and emits only allowlisted fields', async () => {
@@ -370,6 +388,11 @@ describe('support recovery CLI runtime router', () => {
     expect(sql).toContain('d."tenantId"=r."tenantId"');
     expect(sql).toContain('d."profileId"=n."profileId"');
     expect(sql).toContain('d."ruleId"=?');
+    expect(sql).toContain('w."eventId" IS NULL');
+    expect(sql).not.toContain('w."eventId"=n."eventId"');
+    expect(
+      (queryRaw.mock.calls[0]?.[0] as { values?: unknown[] }).values,
+    ).toContain('553209');
   });
 
   it.each([
@@ -474,6 +497,64 @@ describe('support recovery CLI runtime router', () => {
     };
     const input = profileInput(payload, overrides);
     expect(() => loadSupportRecoveryPlan(path, input.fileSystem)).toThrow();
+  });
+
+  it('loads an exact root-owned API-group-readable support plan', () => {
+    const payload = {
+      operation: 'DA_SUPPORT_RECOVERY' as const,
+      mode: 'preview' as const,
+      actorUserId,
+      runtimeProfileSha256: 'a'.repeat(64),
+    };
+    const input = profileInput(payload);
+    expect(
+      loadSupportRecoveryPlan(
+        '/run/support-recovery/plan.json',
+        input.fileSystem,
+      ),
+    ).toEqual(payload);
+  });
+
+  it.each([
+    ['wrong owner', { uid: 12010 }],
+    ['wrong group', { gid: 12011 }],
+    ['old root-only mode', { mode: 0o100600 }],
+    ['group-writable mode', { mode: 0o100640 }],
+    ['multiple links', { nlink: 2 }],
+  ])('rejects invalid support plan metadata: %s', (_name, overrides) => {
+    const payload = {
+      operation: 'DA_SUPPORT_RECOVERY' as const,
+      mode: 'preview' as const,
+      actorUserId,
+      runtimeProfileSha256: 'a'.repeat(64),
+    };
+    const input = profileInput(payload, overrides);
+    expect(() =>
+      loadSupportRecoveryPlan(
+        '/run/support-recovery/plan.json',
+        input.fileSystem,
+      ),
+    ).toThrow();
+  });
+
+  it('rejects a support plan whose mode changes after open', () => {
+    const payload = {
+      operation: 'DA_SUPPORT_RECOVERY' as const,
+      mode: 'preview' as const,
+      actorUserId,
+      runtimeProfileSha256: 'a'.repeat(64),
+    };
+    const input = profileInput(payload);
+    const fileSystem = {
+      ...input.fileSystem,
+      fstat: (fd: number) => ({
+        ...input.fileSystem.fstat(fd),
+        mode: 0o100400,
+      }),
+    };
+    expect(() =>
+      loadSupportRecoveryPlan('/run/support-recovery/plan.json', fileSystem),
+    ).toThrow('changed after lstat');
   });
 
   it('binds the real active platform actor to every exact comment marker', async () => {

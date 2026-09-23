@@ -251,9 +251,8 @@ export class C61BudgetRefillExceptionService {
             profileId: a.profileId,
             storeId: a.storeId,
             entitlementId: entitlement.id,
-            eventId: a.eventId,
             kind: 'LOOT_BOX_ENTITLEMENT',
-            sourceKind: 'SUPPORT_BUDGET_REFILL_EXCEPTION',
+            sourceKind: 'LOOT_BOX',
             sourceId: a.ruleId,
             title: a.rewardLabel,
             rewardLabel: '1 попытка открытия',
@@ -384,7 +383,7 @@ export class C61BudgetRefillExceptionService {
             tenantId,
             profileId: a.profileId,
             ruleId: a.ruleId,
-            sourceFactId: a.factId,
+            sourceFactId: a.sessionExternalId,
             status: 'BLOCKED',
           },
           select: { id: true },
@@ -412,7 +411,8 @@ export class C61BudgetRefillExceptionService {
       event.profileId !== a.profileId ||
       event.guestId !== a.guestId ||
       event.eventType !== 'SESSION_START' ||
-      event.externalId !== a.sessionExternalId ||
+      event.externalId !==
+        `guest-game:GUEST_SESSION:SESSION_START:${a.sessionExternalId}` ||
       !rule ||
       rule.tenantId !== tenantId ||
       rule.status !== 'ACTIVE' ||

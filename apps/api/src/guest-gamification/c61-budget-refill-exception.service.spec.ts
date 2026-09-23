@@ -70,7 +70,7 @@ function client(
         tenantId: 'tenant',
         profileId: 'profile',
         guestId: 'guest',
-        externalId: '553209',
+        externalId: 'guest-game:GUEST_SESSION:SESSION_START:553209',
         eventType: 'SESSION_START',
       });
     if (where.id === 'rule')
@@ -137,6 +137,17 @@ describe('C61BudgetRefillExceptionService', () => {
       mode: 'PREVIEW',
       outcome: 'READY',
     });
+    expect(db.guestGameRuleDecision.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['decision'] },
+        tenantId: 'tenant',
+        profileId: 'profile',
+        ruleId: 'rule',
+        sourceFactId: '553209',
+        status: 'BLOCKED',
+      },
+      select: { id: true },
+    });
     expect(db.guestGameEntitlement.create).not.toHaveBeenCalled();
     await expect(
       new C61BudgetRefillExceptionService(
@@ -169,6 +180,14 @@ describe('C61BudgetRefillExceptionService', () => {
     });
     expect(tx.guestGameEntitlement.create).toHaveBeenCalledTimes(1);
     expect(tx.guestGameRewardWalletItem.create).toHaveBeenCalledTimes(1);
+    const walletCreate = tx.guestGameRewardWalletItem.create.mock.calls[0][0];
+    expect(walletCreate.data).toMatchObject({
+      entitlementId: 'entitlement',
+      kind: 'LOOT_BOX_ENTITLEMENT',
+      sourceKind: 'LOOT_BOX',
+      sourceId: 'rule',
+    });
+    expect(walletCreate.data).not.toHaveProperty('eventId');
     expect(tx.guestGameAuditEvent.create).toHaveBeenCalledTimes(1);
     expect((tx as any).guestGameReward).toBeUndefined();
     expect((tx as any).guestGameXpPosting).toBeUndefined();

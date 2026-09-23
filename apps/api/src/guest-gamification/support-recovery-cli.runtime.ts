@@ -173,17 +173,19 @@ export function loadSupportRecoveryPlan(
     );
   }
   const metadata = fileSystem.lstat(resolved);
+  const expectedGid = process.getgid?.();
   if (
     metadata.isSymbolicLink() ||
     !metadata.isFile() ||
     metadata.uid !== 0 ||
-    (metadata.mode & 0o077) !== 0 ||
+    metadata.gid !== expectedGid ||
+    (metadata.mode & 0o777) !== 0o440 ||
     metadata.nlink !== 1 ||
     metadata.size <= 0 ||
     metadata.size > 1_048_576
   )
     throw new ForbiddenException(
-      'Support plan must be a private root-owned regular file.',
+      'Support plan must be a root-owned group-readable private regular file.',
     );
   const fd = fileSystem.open(resolved);
   let bytes: Buffer;
@@ -193,6 +195,7 @@ export function loadSupportRecoveryPlan(
       !opened.isFile() ||
       opened.uid !== metadata.uid ||
       opened.gid !== metadata.gid ||
+      (opened.mode & 0o777) !== 0o440 ||
       opened.nlink !== 1 ||
       opened.size !== metadata.size
     )
@@ -373,9 +376,9 @@ export async function reconcileC61SupportRecovery(db: RecoveryQueryDb) {
       count(DISTINCT i.id) AS intents, count(DISTINCT x.id) AS xp
     FROM "GuestGameOriginReceipt" r
     LEFT JOIN "GuestGameEntitlement" n ON n."tenantId"=r."tenantId" AND n."originKey"=r."originKey" AND n."eventId"=r."eventId" AND n."idempotencyKey"=r."originKey" AND n."ruleType"='LOOT_BOX' AND n."ruleId"=${'0ce6f7e3-99ea-4aa2-b6e2-68e8dbd1bb12'} AND n."sourceFactId"=${'c68b1912-9a94-46c7-948c-47c1e3738bee'} AND n.status='AVAILABLE' AND n."consumedAt" IS NULL AND n."canceledAt" IS NULL
-    LEFT JOIN "GuestGameRewardWalletItem" w ON w."tenantId"=n."tenantId" AND w."entitlementId"=n.id AND w."eventId"=n."eventId" AND w.kind='LOOT_BOX_ENTITLEMENT' AND w.status='PENDING' AND w."rewardId" IS NULL
+    LEFT JOIN "GuestGameRewardWalletItem" w ON w."tenantId"=n."tenantId" AND w."entitlementId"=n.id AND w."eventId" IS NULL AND w.kind='LOOT_BOX_ENTITLEMENT' AND w.status='PENDING' AND w."rewardId" IS NULL
     LEFT JOIN "GuestGameAuditEvent" a ON a."tenantId"=n."tenantId" AND a."entityId"=n.id AND a.action='SUPPORT_C61_BUDGET_REFILL_EXCEPTION_APPLIED' AND a.status='PROCESSED'
-    LEFT JOIN "GuestGameRuleDecision" d ON d.id=${'b3592923-6483-45a8-99e2-761b1cdedd8b'} AND d."tenantId"=r."tenantId" AND d."profileId"=n."profileId" AND d."sourceFactId"=${'c68b1912-9a94-46c7-948c-47c1e3738bee'} AND d."ruleId"=${'0ce6f7e3-99ea-4aa2-b6e2-68e8dbd1bb12'} AND d.status='BLOCKED'
+    LEFT JOIN "GuestGameRuleDecision" d ON d.id=${'b3592923-6483-45a8-99e2-761b1cdedd8b'} AND d."tenantId"=r."tenantId" AND d."profileId"=n."profileId" AND d."sourceFactId"=${'553209'} AND d."ruleId"=${'0ce6f7e3-99ea-4aa2-b6e2-68e8dbd1bb12'} AND d.status='BLOCKED'
     LEFT JOIN "GuestGameRewardIntent" i ON i."tenantId"=r."tenantId" AND i."originKey"=r."originKey"
     LEFT JOIN "GuestGameReward" g ON g."tenantId"=r."tenantId" AND g."originKey"=r."originKey"
     LEFT JOIN "GuestGameXpPosting" x ON x."eventId"=n."eventId"

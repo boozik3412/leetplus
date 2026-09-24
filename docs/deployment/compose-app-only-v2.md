@@ -56,6 +56,16 @@ runner still stops at `PREPARED_NOT_AUTHORIZATION`. A separate, exact-plan GO
 and native apply/resume are required, with worker continuation in the same
 approved operation. V1 plans remain valid under their original contract.
 
+The read-only installed certifier checks the V2 downloader receipt, root-owned
+app bundle/admission bytes, installed controller leaf manifest and candidate
+`control.tar.gz` leaf map. It reads the existing V1 data admission and active
+state, observes exact live API/PG/Redis image IDs, PostgreSQL system identifier
+and all 191 completed migration names/checksums, then compares the active API
+source schema/migration bytes. Primary database role/ACL flags and active API
+health must pass before it returns a certification *candidate*. The controller
+must hold its kernel lock, revalidate the observations and publish the candidate
+immutably. This helper does not publish or authorize a plan by itself.
+
 ## Checks and recovery policy
 
 The B path must preserve current-schema compatibility, migration manifest,

@@ -136,7 +136,7 @@ const nonce = crypto.randomBytes(10).toString('hex');
 const prefix = `leetplus-app-api-runtime-${nonce}`;
 const network = `${prefix}-network`;
 const postgres = `${prefix}-postgres`;
-const volume = `${prefix}-secret`;
+  const volume = `${prefix}-secret`;
 const containers = [];
 let temporaryRoot = null;
 
@@ -157,18 +157,22 @@ try {
   docker(['network', 'create', '--internal', network]);
   docker(['volume', 'create', volume]);
   createFixtureCertificate(volume);
+  const fixtureCidr = docker(['network', 'inspect', '--format', '{{(index .IPAM.Config 0).Subnet}}', network]);
+  if (!/^[0-9./]+$/.test(fixtureCidr)) throw new Error('Fixture network CIDR is invalid');
 
   // The fixture is created inside its own network and is removed in finally.
   // No production DSN, image tag, network, or persisted data path is accepted.
   docker([
     'run', '--detach', '--name', postgres, '--network', network, '--network-alias', 'postgres',
     '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '12030:12030',
-    '--tmpfs', '/tmp:rw,nosuid,nodev,size=536870912,mode=1777', '--mount', `type=volume,src=${volume},dst=/tls,readonly`, '--entrypoint', '/bin/bash', postgresImage,
+    '--tmpfs', '/tmp:rw,nosuid,nodev,size=536870912,mode=1777', '--mount', `type=volume,src=${volume},dst=/tls,readonly`,
+    '-e', `FIXTURE_CIDR=${fixtureCidr}`, '--entrypoint', '/bin/bash', postgresImage,
     '-ec', [
       'set -e',
       'export PATH=/usr/lib/postgresql/16/bin:$PATH',
       'initdb -D /tmp/pg -U postgres --locale=en_US.UTF-8 -A trust >/tmp/init.log',
-      'printf "hostssl all all all trust\\n" >> /tmp/pg/pg_hba.conf',
+      'printf "hostssl all all %s trust\\n" "$FIXTURE_CIDR" >> /tmp/pg/pg_hba.conf',
+      'test "$(stat -c %a /tmp/pg)" = 700',
       'pg_ctl -D /tmp/pg -o "-h 0.0.0.0 -k /tmp -c ssl=on -c ssl_cert_file=/tls/db-ca.pem -c ssl_key_file=/tls/db-key.pem" -l /tmp/pg.log -w start',
       'createdb -h /tmp -U postgres leetplus',
       'psql -h /tmp -U postgres -d leetplus -v ON_ERROR_STOP=1 -c "CREATE ROLE leetplus_runtime LOGIN"',

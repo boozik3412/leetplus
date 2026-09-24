@@ -240,10 +240,12 @@ test('Docker29 OCI Config paths still bind only the admitted API/Web image IDs',
     const manifestPath = path.join(unpacked, 'manifest.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     fs.mkdirSync(path.join(unpacked, 'blobs', 'sha256'), { recursive: true });
-    for (const item of manifest) {
+    for (const [index, item] of manifest.entries()) {
       const old = item.Config;
-      item.Config = `blobs/sha256/${old.slice(0, -5)}`;
-      fs.renameSync(path.join(unpacked, old), path.join(unpacked, item.Config));
+      const bytes = Buffer.from(JSON.stringify({ role: index ? 'web' : 'api' }));
+      item.Config = `blobs/sha256/${digest(bytes)}`;
+      fs.writeFileSync(path.join(unpacked, item.Config), bytes);
+      fs.rmSync(path.join(unpacked, old));
     }
     fs.writeFileSync(manifestPath, JSON.stringify(manifest));
     assert.equal(spawnSync('tar', ['-czf', archive, '-C', unpacked, 'manifest.json',

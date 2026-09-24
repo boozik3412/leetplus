@@ -133,10 +133,18 @@ function archiveManifest(file, bundle) {
       item.RepoTags[0] === `docker.io/library/${tag}`);
     demand(selected.length === 1, `Docker archive lacks one exact ${role} tag`);
     const id = bundle.appImages[role].slice(7), config = selected[0].Config;
-    demand(config === `${id}.json` || config === `blobs/sha256/${id}` || config === `blobs/sha256/${id}.json`,
-      `Docker archive ${role} Config path does not encode admitted ID: ${JSON.stringify(config).slice(0, 150)}`);
+    const classic = config === `${id}.json`;
+    const oci = /^blobs\/sha256\/[a-f0-9]{64}$/.test(config ?? '');
+    demand(classic || oci, `Docker archive ${role} Config path is not an exact classic/OCI digest: ${JSON.stringify(config).slice(0, 150)}`);
     demand(members.includes(config) || members.includes(`./${config}`),
       `Docker archive ${role} Config member is absent: ${JSON.stringify(config).slice(0, 150)}`);
+    if (oci) {
+      const content = spawnSync('tar', ['-xOzf', file, config], { encoding: null, timeout: 60_000,
+        maxBuffer: 4 * 1024 * 1024, windowsHide: true });
+      demand(!content.error && content.signal === null && content.status === 0 && Buffer.isBuffer(content.stdout) &&
+        digest(content.stdout) === config.slice('blobs/sha256/'.length),
+      `Docker archive ${role} OCI Config blob is not content-addressed`);
+    }
   }
 }
 

@@ -115,10 +115,10 @@ NODE
 
 docker save "leetplus-api:$sha" "leetplus-web:$sha" | gzip -1 > "$output/app-images.tar.gz"
 ln -s "$output/app-images.tar.gz" "$tmp/images.tar.gz"
-node --input-type=module - "$tmp/release.json" "$api_id" "$web_id" <<'NODE'
+node --input-type=module - "$tmp/release.json" "$sha" "$api_id" "$web_id" <<'NODE'
 import fs from 'node:fs';
-const [file, api, web] = process.argv.slice(2);
-fs.writeFileSync(file, `${JSON.stringify({ images: { api, web } }, null, 2)}\n`);
+const [file, releaseSha, api, web] = process.argv.slice(2);
+fs.writeFileSync(file, `${JSON.stringify({ releaseSha, images: { api, web } }, null, 2)}\n`);
 NODE
 bash deploy/leetplus-compose/test-app-image-roundtrip.sh "$tmp"
 cp "$tmp/archive-roundtrip.json" "$output/archive-roundtrip.json"

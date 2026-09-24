@@ -23,6 +23,10 @@ for attempt in $(seq 1 60); do
 done
 if [[ "$ready" != true ]]; then cat "$root/daemon.log" >&2; exit 1; fi
 test "$(sudo "$docker_bin" --host "$socket" version --format '{{.Server.Version}}')" = 29.1.3
+data_root=$(sudo "$docker_bin" --host "$socket" info --format '{{.DockerRootDir}}')
+test "$(realpath -m "$data_root")" = "$(realpath -m "$root/data")"
+before_tags=$(sudo "$docker_bin" --host "$socket" image ls --all --format '{{.Repository}}:{{.Tag}}' | grep -v '^<none>:<none>$' || true)
+if [[ -n "$before_tags" ]]; then printf 'Fresh isolated daemon already has tagged images: %s\n' "$before_tags" >&2; exit 1; fi
 sudo "$docker_bin" --host "$socket" image load --input "$output/images.tar.gz"
 mapfile -t loaded_tags < <(sudo "$docker_bin" --host "$socket" image ls --all --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -v '^<none>:<none> ' | LC_ALL=C sort)
 mapfile -t wanted_tags < <(node - "$output/release.json" <<'NODE'
@@ -33,6 +37,7 @@ NODE
 )
 if [[ ${#loaded_tags[@]} != 2 || "${loaded_tags[0]}" != "${wanted_tags[0]}" || "${loaded_tags[1]}" != "${wanted_tags[1]}" ]]; then
   printf 'Isolated daemon tag inventory mismatch\nobserved=%s\nexpected=%s\n' "${loaded_tags[*]}" "${wanted_tags[*]}" >&2
+  tar -xOzf "$output/images.tar.gz" manifest.json >&2 || true
   exit 1
 fi
 node - "$output/release.json" <<'NODE' > "$root/ids"

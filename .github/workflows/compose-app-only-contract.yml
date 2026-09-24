@@ -46,6 +46,16 @@ jobs:
             deploy/leetplus-compose/app-only-installed-certifier.test.mjs \
             deploy/leetplus-compose/download-admitted-app-bundle.test.mjs
           node .github/scripts/test-app-only-workflow.mjs
+      - name: Verify V2 restored-copy and signing boundaries
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            deploy/leetplus-compose/prepare-files.py \
+            deploy/leetplus-compose/approval_window.py \
+            deploy/leetplus-compose/sign-approval.py
+          python3 -m unittest discover -s deploy/leetplus-compose -p test_app_only_prepare_files.py
+          python3 -m unittest discover -s deploy/leetplus-compose -p test_preparation_modes.py
+          python3 -m unittest discover -s deploy/leetplus-compose -p test_approval_window.py
 
   image-shadow:
     name: B app-only Docker image shadow

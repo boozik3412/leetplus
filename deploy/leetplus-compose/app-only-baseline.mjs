@@ -70,7 +70,7 @@ export function synthesizeRelease(bundle, certifiedDataRelease) {
       postgres: certifiedDataRelease.images.postgres, redis: certifiedDataRelease.images.redis } });
 }
 export function validateCertifiedBaseline(cert, { bundle, admission, previous, hostIdentitySha256,
-  controllerManifestSha256, databaseIdentitySha256, readinessReceiptSha256, now = Date.now() }) {
+  controllerManifestSha256, databaseIdentitySha256, readinessReceiptSha256, now = Date.now(), allowExpired = false }) {
   validateBundle(bundle);
   validateAppAdmission(admission);
   exactKeys(admission, ['schemaVersion', 'contract', 'decision', 'releaseLane', 'releaseSha', 'repository', 'ref', 'event',
@@ -123,13 +123,13 @@ export function validateCertifiedBaseline(cert, { bundle, admission, previous, h
     cert.observedSchema.migrationsInventorySha256 === bundle.schemaRequirement.migrationsInventorySha256,
   'Live schema or migration inputs differ from candidate');
   hash(cert.observedSchema.aclSha256, 'database ACL');
-  demand(utc(cert.capturedAt) && utc(cert.expiresAt) && Date.parse(cert.capturedAt) <= now + 30_000 &&
-    Date.parse(cert.expiresAt) > now && Date.parse(cert.expiresAt) > Date.parse(cert.capturedAt) &&
+  demand(utc(cert.capturedAt) && utc(cert.expiresAt) && (allowExpired || Date.parse(cert.capturedAt) <= now + 30_000) &&
+    (allowExpired || Date.parse(cert.expiresAt) > now) && Date.parse(cert.expiresAt) > Date.parse(cert.capturedAt) &&
     Date.parse(cert.expiresAt) - Date.parse(cert.capturedAt) <= 4 * 3_600_000,
   'Baseline certification is stale or outside the existing four-hour preparation window');
   return cert;
 }
-export function validateAppOnlyPlan(plan, { bundle, admission, certification, readinessReceiptSha256, now = Date.now() }) {
+export function validateAppOnlyPlan(plan, { bundle, admission, certification, readinessReceiptSha256, now = Date.now(), allowExpired = false }) {
   demand(plan?.contract === PLAN_CONTRACT && plan.releaseLane === 'L1_APP_ONLY' && plan.action === 'ROLLOUT' && plan.previous,
     'V2 app-only plan must roll out over an existing active state');
   demand(plan.workerContinuation?.contract === WORKER_CONTINUATION_V2,
@@ -137,7 +137,7 @@ export function validateAppOnlyPlan(plan, { bundle, admission, certification, re
   validateWorkerContinuationPolicy(plan.workerContinuation);
   const cert = validateCertifiedBaseline(certification, { bundle, admission, previous: plan.previous,
     hostIdentitySha256: plan.hostIdentitySha256, controllerManifestSha256: plan.controlSha256,
-    databaseIdentitySha256: plan.databaseIdentitySha256, readinessReceiptSha256, now });
+    databaseIdentitySha256: plan.databaseIdentitySha256, readinessReceiptSha256, now, allowExpired });
   hash(plan.appAdmissionSha256, 'plan app admission'); hash(plan.appArchiveSha256, 'plan app archive');
   hash(plan.dataBaselineCertificationSha256, 'plan baseline');
   demand(plan.appAdmissionSha256 === digest(admission) && plan.admissionSha256 === plan.appAdmissionSha256 &&

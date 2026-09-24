@@ -4,13 +4,46 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { CONTRACT, GO_PACKET_CONTRACT, PHASES, PreparationRunner, ensurePrivateTree, fileDigest, validateAdmission } from './preparation-runner.mjs';
+import { APP_ONLY_CONTRACT, CONTRACT, GO_PACKET_CONTRACT, PHASES, PreparationRunner, assertInstalledAppOnlyDownloadPaths, ensurePrivateTree, fileDigest, validateAdmission, validateAppOnlyInput } from './preparation-runner.mjs';
 import { canonical, digest, renderCompose } from './contract.mjs';
 import { deriveWorkerContinuation } from './worker-continuation.mjs';
 
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const OPERATION = '12345678-1234-4123-8123-123456789abc';
 const WORKER_IDS = ['22345678-1234-4123-8123-123456789abc', '32345678-1234-4123-8123-123456789abc'];
+
+function appOnlyFixture() {
+  const f = fixture({ resource: false });
+  const hash = digit => digit.repeat(64);
+  const bundle = {
+    schemaVersion: 2, contract: 'LEETPLUS_COMPOSE_APP_BUNDLE_V2', releaseLane: 'L1_APP_ONLY', releaseSha: f.release.releaseSha, builtAt: '2026-09-22T00:00:00.000Z', apiResourceProfile: 'API_6G_V1',
+    sourceImpact: { baseSha: 'c'.repeat(40), headSha: f.release.releaseSha, classifierId: 'LEETPLUS_RELEASE_IMPACT_V1', rulesSha256: hash('1'), impactReceiptSha256: hash('2') },
+    appImages: { api: f.release.images.api, web: f.release.images.web },
+    schemaRequirement: { migrationCount: 191, migration: '20260908180000_external_langame_simple_onboarding', prismaSchemaSha256: hash('3'), migrationsInventorySha256: hash('4') },
+    compatibilityRequirements: { policySha256: hash('5'), composeRuntimeContractSha256: hash('6'), controllerCapability: 'APP_ONLY_V2_BASELINE_CERTIFICATION', dataContract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1' },
+    runtimeEvidence: { transportValidationSha256: hash('7'), apiRuntimeValidationSha256: hash('8'), archiveRoundtripSha256: hash('9'), networkValidationSha256: hash('a'), runtimeValidationSha256: hash('b') },
+  };
+  const appBundle = f.write('app/app-bundle.json', bundle, true);
+  const appImagesArchive = f.write('app/app-images.tar.gz', 'app-images');
+  const admission = {
+    schemaVersion: 2, contract: 'LEETPLUS_COMPOSE_APP_ADMISSION_V2', decision: 'PASS', releaseLane: 'L1_APP_ONLY', releaseSha: f.release.releaseSha, repository: 'boozik3412/leetplus', ref: 'refs/heads/main', event: 'push', runId: '1', runAttempt: '1', workflowRef: 'boozik3412/leetplus/.github/workflows/ci.yml@refs/heads/main', workflowSha: f.release.releaseSha,
+    parentCandidateReceiptSha256: hash('c'), parentImpactReceiptSha256: hash('d'), requiredGateReceiptSha256: hash('e'), gateReceiptSha256: { authorityRootTrust: hash('1'), application: hash('2'), postgresqlAssortment: hash('3'), migrationSmoke: hash('4'), appImageRuntime: hash('5') },
+    appArtifact: { name: `leetplus-compose-app-${f.release.releaseSha}-1-1`, id: '2', transportDigest: hash('f') }, bundleManifestSha256: fileDigest(appBundle), appArchiveSha256: fileDigest(appImagesArchive), transportValidationSha256: hash('7'), apiRuntimeValidationSha256: hash('8'), archiveRoundtripSha256: hash('9'), networkValidationSha256: hash('a'), runtimeValidationSha256: hash('b'), appImages: bundle.appImages, schemaRequirementSha256: hash('c'), compatibilityRequirementsSha256: hash('d'),
+  };
+  const appAdmission = f.write('app/app-admission.json', admission, true);
+  const appDownloadReceipt = f.write('app/download.json', { contract: 'LEETPLUS_COMPOSE_APP_DOWNLOAD_V2', decision: 'PASS', releaseSha: f.release.releaseSha, appAdmissionSha256: fileDigest(appAdmission), files: { 'app-bundle.json': { sha256: fileDigest(appBundle) }, 'app-images.tar.gz': { sha256: fileDigest(appImagesArchive) } } }, true);
+  const input = { contract: APP_ONLY_CONTRACT, appBundle, appAdmission, appImagesArchive, appDownloadReceipt, offhostReceipt: f.input.offhostReceipt, backupVerificationReceipt: f.input.backupVerificationReceipt, restoreImportReceipt: f.input.restoreImportReceipt, browserReceipt: f.input.browserReceipt, targetSlot: 'green', wait: f.input.wait, nativeRequest: { preparationGuard: f.guard, workerContinuation: f.input.nativeRequest.workerContinuation } };
+  const execute = async (command, args, options) => {
+    const result = await f.execute(command, args, options);
+    if (args[0] === 'status') {
+      const status = JSON.parse(result.stdout);
+      status.controller.appOnlyV2BaselineCertification = true;
+      result.stdout = canonical(status);
+    }
+    return result;
+  };
+  return { ...f, input, appBundle, appAdmission, appImagesArchive, appDownloadReceipt, execute };
+}
 
 function fixture({ resource = true, deadline = '2026-09-22T03:00:00.000Z' } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'prep-runner-'));
@@ -139,6 +172,121 @@ test('runs exact admitted bundle through fresh backup, restored acceptance and n
       assert.equal(receipt.producerCompletionTimeBasis, 'RECEIPT_PUBLICATION_MTIME_PROXY');
     }
   }
+});
+
+test('V2 admits only exact app artifacts and derives application images over the guarded active data baseline', async () => {
+  const f = appOnlyFixture();
+  validateAppOnlyInput(f.input);
+  const runner = new PreparationRunner(f.input, path.join(f.root, 'v2-state'), { execute: f.execute, paths: f.paths, clock: f.clock, workerBusy: async () => false });
+  const admitted = await runner.initializeAppOnly();
+  const derived = JSON.parse(fs.readFileSync(runner.input.releaseJson));
+  const baseline = JSON.parse(fs.readFileSync(runner.v2.dataReleaseJson));
+  assert.equal(admitted.releaseSha, f.release.releaseSha);
+  assert.deepEqual(derived.images, { ...f.oldRelease.images, api: f.release.images.api, web: f.release.images.web });
+  assert.deepEqual(baseline.dataRelease, f.active.dataRelease);
+  assert.equal(baseline.activeStateSha256, f.guard.activeSha256);
+  assert.equal(f.calls.filter(call => call[1] === 'status').length, 1);
+  const request = { contract: 'LEETPLUS_COMPOSE_APP_PREPARATION_V2', releaseSha: admitted.releaseSha,
+    targetSlot: 'green', preparationGuard: f.guard,
+    workerContinuation: f.input.nativeRequest.workerContinuation,
+    backupReceiptSha256: 'a'.repeat(64), rehearsalReceiptSha256: 'b'.repeat(64),
+    preparationEvidenceExpiresAt: '2026-09-22T00:20:00Z' };
+  const plan = { contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V2_PLAN', operationId: OPERATION,
+    previous: f.active, generation: f.active.generation, action: 'ROLLOUT',
+    hostIdentitySha256: f.guard.hostIdentitySha256, controlSha256: f.guard.controllerManifestSha256,
+    dataRelease: f.active.dataRelease, dataAdmissionSha256: f.active.dataAdmissionSha256,
+    admissionSha256: admitted.admissionSha256, archiveSha256: admitted.archiveSha256,
+    appAdmissionSha256: admitted.admissionSha256, appArchiveSha256: admitted.archiveSha256,
+    dataBaselineCertificationSha256: 'c'.repeat(64), dataBaselineExpiresAt: '2026-09-22T00:25:00Z',
+    releaseLane: 'L1_APP_ONLY', blue: f.active.blue, green: derived,
+    targetSlot: request.targetSlot, workerContinuation: request.workerContinuation,
+    backupReceiptSha256: request.backupReceiptSha256, rehearsalReceiptSha256: request.rehearsalReceiptSha256,
+    preparationGuard: request.preparationGuard, preparationEvidenceExpiresAt: request.preparationEvidenceExpiresAt };
+  assert.equal(runner.planMatches(plan, request), true, 'full V2 plan must reconcile one exact native request');
+  assert.equal(runner.planMatches({ ...plan, appAdmissionSha256: 'd'.repeat(64) }, request), false);
+});
+
+test('V2 checkpoints use the versioned receipt chain and GO packet contract', async () => {
+  const f = appOnlyFixture();
+  const directory = path.join(f.root, 'v2-checkpoints');
+  const runner = new PreparationRunner(f.input, directory, { execute: f.execute, paths: f.paths,
+    clock: f.clock, workerBusy: async () => false });
+  const start = JSON.parse(fs.readFileSync(path.join(directory, 'operation-start.json')));
+  assert.equal(start.contract, 'LEETPLUS_RELEASE_PREPARATION_V2_START');
+  await runner.phase('ADMISSION', async () => runner.initializeAppOnly(), async () => null);
+  const receipt = runner.readPhase('ADMISSION');
+  assert.equal(receipt.contract, 'LEETPLUS_RELEASE_PREPARATION_V2_RECEIPT');
+  assert.equal(receipt.result.releaseSha, f.release.releaseSha);
+  runner.nativeRequest = () => ({ preparationEvidenceExpiresAt: '2026-09-24T03:00:00Z' });
+  runner.readPhase = name => name === 'NATIVE_PREPARE' ? { completedAt: f.clock() } : receipt;
+  assert.equal(runner.goPacket({ operationId: OPERATION, planSha256: 'a'.repeat(64) }).contract,
+    'LEETPLUS_RELEASE_PREPARATION_V2_GO_PACKET');
+});
+
+test('V2 production download paths are exact and cannot select another root or artifact', () => {
+  const sha = 'a'.repeat(40), root = `/var/lib/leetplus-compose/app-downloads/${sha}`;
+  const input = { appBundle: `${root}/bundle/app-bundle.json`, appAdmission: `${root}/app-admission.json`,
+    appImagesArchive: `${root}/bundle/app-images.tar.gz`, appDownloadReceipt: `${root}/download-receipt.json` };
+  assert.equal(assertInstalledAppOnlyDownloadPaths(input, sha), root);
+  for (const field of Object.keys(input)) {
+    assert.throws(() => assertInstalledAppOnlyDownloadPaths({ ...input, [field]: `${root}/other.json` }, sha),
+      /exact installed download root/);
+  }
+  assert.throws(() => assertInstalledAppOnlyDownloadPaths(input, 'b'.repeat(40)), /exact installed download root/);
+});
+
+test('V2 refuses receipt drift, active-generation drift, and a controller without the installed baseline capability', async t => {
+  await t.test('app admission bytes', async () => {
+    const f = appOnlyFixture();
+    const admission = JSON.parse(fs.readFileSync(f.appAdmission)); admission.appArchiveSha256 = '0'.repeat(64); fs.writeFileSync(f.appAdmission, canonical(admission));
+    const runner = new PreparationRunner(f.input, path.join(f.root, 'v2-state'), { execute: f.execute, paths: f.paths, clock: f.clock });
+    await assert.rejects(runner.initializeAppOnly(), /bundle\/admission bytes drift/);
+  });
+  await t.test('guarded active state', async () => {
+    const f = appOnlyFixture();
+    const execute = async (command, args, options) => {
+      const result = await f.execute(command, args, options);
+      if (args[0] === 'status') { const status = JSON.parse(result.stdout); status.active.generation++; result.stdout = canonical(status); }
+      return result;
+    };
+    const runner = new PreparationRunner(f.input, path.join(f.root, 'v2-state'), { execute, paths: f.paths, clock: f.clock });
+    await assert.rejects(runner.initializeAppOnly(), /active generation drift/);
+  });
+  await t.test('installed controller capability', async () => {
+    const f = appOnlyFixture();
+    const execute = async (command, args, options) => {
+      const result = await f.execute(command, args, options);
+      if (args[0] === 'status') { const status = JSON.parse(result.stdout); status.controller.appOnlyV2BaselineCertification = false; result.stdout = canonical(status); }
+      return result;
+    };
+    const runner = new PreparationRunner(f.input, path.join(f.root, 'v2-state'), { execute, paths: f.paths, clock: f.clock });
+    await assert.rejects(runner.initializeAppOnly(), /lacks app-only V2 capability/);
+  });
+});
+
+test('V2 preparation passes the frozen data baseline to the installed controller', () => {
+  const source = fs.readFileSync(new URL('./preparation-runner.mjs', import.meta.url), 'utf8');
+  assert.match(source, /'--data-baseline', this\.v2\.dataReleaseJson/);
+  assert.doesNotMatch(source, /'--data-release-json'/);
+  assert.match(source, /appOnlyEvidence/);
+});
+
+test('V2 preparation rejects a tampered app-only evidence binding', async () => {
+  const f = appOnlyFixture();
+  const runner = new PreparationRunner(f.input, path.join(f.root, 'v2-state'), { execute: f.execute, paths: f.paths, clock: f.clock });
+  const admitted = await runner.initializeAppOnly();
+  const imported = { sourceCapsuleSha256: fileDigest(path.join(f.root, 'external/rehearsal-source-capsule.tar')) };
+  runner.readPhase = name => name === 'ADMISSION' ? { result: admitted } : (name === 'OFFHOST_IMPORT' ? { result: imported } : null);
+  const evidence = {
+    appBundleSha256: fileDigest(f.appBundle), appAdmissionSha256: admitted.admissionSha256,
+    appDownloadReceiptSha256: fileDigest(f.appDownloadReceipt), activeDataBaselineSha256: fileDigest(runner.v2.dataReleaseJson),
+    dataAdmissionSha256: f.active.dataAdmissionSha256, derivedReleaseSha256: fileDigest(runner.input.releaseJson),
+  };
+  fs.writeFileSync(f.paths.preparation, canonical({ contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_PREPARATION', decision: 'PREPARED_NOT_SERVING', rehearsal: true, releaseSha: admitted.releaseSha, sourceConfigurationSha256: imported.sourceCapsuleSha256, createdAt: f.clock(), appOnlyEvidence: evidence }));
+  assert.ok(runner.validatePreparation());
+  evidence.derivedReleaseSha256 = '0'.repeat(64);
+  fs.writeFileSync(f.paths.preparation, canonical({ contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_PREPARATION', decision: 'PREPARED_NOT_SERVING', rehearsal: true, releaseSha: admitted.releaseSha, sourceConfigurationSha256: imported.sourceCapsuleSha256, createdAt: f.clock(), appOnlyEvidence: evidence }));
+  assert.throws(() => runner.validatePreparation(), /does not bind exact app\/data inputs/);
 });
 
 test('restart and an existing complete plan never replay accepted effects', async () => {

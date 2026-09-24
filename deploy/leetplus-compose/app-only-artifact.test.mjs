@@ -231,3 +231,29 @@ test('artifact payload rejects tampering and data-image claims', () => {
     fs.rmSync(unpacked, { recursive: true, force: true });
   }
 });
+
+test('Docker29 OCI Config paths still bind only the admitted API/Web image IDs', () => {
+  const root = writeArtifactFixture(), unpacked = fs.mkdtempSync(path.join(os.tmpdir(), 'leetplus-oci-config-'));
+  try {
+    const archive = path.join(root, 'app-images.tar.gz');
+    assert.equal(spawnSync('tar', ['-xzf', archive, '-C', unpacked]).status, 0);
+    const manifestPath = path.join(unpacked, 'manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    fs.mkdirSync(path.join(unpacked, 'blobs', 'sha256'), { recursive: true });
+    for (const item of manifest) {
+      const old = item.Config;
+      item.Config = `blobs/sha256/${old.slice(0, -5)}`;
+      fs.renameSync(path.join(unpacked, old), path.join(unpacked, item.Config));
+    }
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+    assert.equal(spawnSync('tar', ['-czf', archive, '-C', unpacked, 'manifest.json',
+      'blobs', 'layer.tar']).status, 0);
+    const sums = path.join(root, 'SHA256SUMS');
+    fs.writeFileSync(sums, fs.readFileSync(sums, 'utf8').split('\n').map(line =>
+      line.endsWith('  app-images.tar.gz') ? `${digest(fs.readFileSync(archive))}  app-images.tar.gz` : line).join('\n'));
+    assert.equal(validateArtifactPayload(root).bundle.appImages.api, `sha256:${'3'.repeat(64)}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(unpacked, { recursive: true, force: true });
+  }
+});

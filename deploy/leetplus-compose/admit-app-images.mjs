@@ -122,15 +122,20 @@ function archiveManifest(file, bundle) {
   demand(!extracted.error && extracted.signal === null && extracted.status === 0, 'Cannot read Docker archive manifest');
   const manifest = JSON.parse(extracted.stdout);
   demand(Array.isArray(manifest) && manifest.length === 2, 'App archive contains an extra or missing image');
-  const tags = new Map(manifest.map(item => {
+  for (const item of manifest) {
     demand(item && Array.isArray(item.RepoTags) && item.RepoTags.length === 1 &&
       typeof item.Config === 'string' && Array.isArray(item.Layers) && item.Layers.length > 0,
     'Invalid Docker image manifest entry');
-    return [item.RepoTags[0], item.Config];
-  }));
-  demand(tags.size === 2 && tags.get(`leetplus-api:${bundle.releaseSha}`) === `${bundle.appImages.api.slice(7)}.json` &&
-    tags.get(`leetplus-web:${bundle.releaseSha}`) === `${bundle.appImages.web.slice(7)}.json`,
-  'Docker archive tags/config IDs differ from admitted API/Web');
+  }
+  for (const role of ['api', 'web']) {
+    const tag = `leetplus-${role}:${bundle.releaseSha}`;
+    const selected = manifest.filter(item => item.RepoTags[0] === tag ||
+      item.RepoTags[0] === `docker.io/library/${tag}`);
+    demand(selected.length === 1, `Docker archive lacks one exact ${role} tag`);
+    const id = bundle.appImages[role].slice(7), config = selected[0].Config;
+    demand((config === `${id}.json` || config === `blobs/sha256/${id}`) && members.includes(config),
+      `Docker archive ${role} config differs from admitted image ID`);
+  }
 }
 
 export function validateArtifactPayload(root) {

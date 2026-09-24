@@ -58,3 +58,21 @@ test('rejects recovery DB, elevated ACL and unhealthy active API before certific
     } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
   }
 });
+test('archive replacement during leaf parsing cannot mint a mixed certification', () => {
+  const f = fixture();
+  try {
+    const original = f.options.execute;
+    f.options.execute = (binary, args, options) => {
+      if (binary.endsWith('python3')) {
+        assert.equal(Buffer.isBuffer(options.input), true);
+        const archive = path.join(f.options.paths.state, 'app-downloads', releaseSha, 'bundle', 'control.tar.gz');
+        fs.chmodSync(archive, 0o600);
+        fs.writeFileSync(archive, 'replacement archive');
+        fs.chmodSync(archive, 0o400);
+      }
+      return original(binary, args, options);
+    };
+    assert.throws(() => collectInstalledCertificationCandidateForTest(f.value, f.options),
+      /Control archive changed/);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});

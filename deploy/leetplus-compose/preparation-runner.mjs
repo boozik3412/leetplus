@@ -14,9 +14,13 @@ import { execFile as childExecFile, spawnSync } from 'node:child_process';
 import { canonical, digest, release as validateRelease } from './contract.mjs';
 import { verifyResourceAcceptance } from './resource-budget.mjs';
 import { validateCurrentWorkerContinuation, validateWorkerContinuationPolicy } from './worker-continuation.mjs';
+import { validateAppAdmission, validateAppBundle } from './app-only-artifact.mjs';
+import { verifyDownloadedBundle } from './download-admitted-app-bundle.mjs';
 
 export const CONTRACT = 'LEETPLUS_RELEASE_PREPARATION_V1';
+export const APP_ONLY_CONTRACT = 'LEETPLUS_RELEASE_PREPARATION_V2';
 export const GO_PACKET_CONTRACT = `${CONTRACT}_GO_PACKET`;
+export const APP_ONLY_GO_PACKET_CONTRACT = `${APP_ONLY_CONTRACT}_GO_PACKET`;
 export const PHASES = ['ADMISSION', 'CONTROL_STAGE', 'IMAGE_STAGE', 'BACKUP', 'OFFHOST_IMPORT', 'PREPARE_FILES', 'RESTORE', 'BROWSER', 'ACCEPT', 'RESOURCE', 'NATIVE_PREPARE'];
 const SHA = /^[a-f0-9]{64}$/;
 const RELEASE = /^[a-f0-9]{40}$/;
@@ -119,6 +123,7 @@ function executor(command, args, options) {
 }
 
 export function validateInput(input) {
+  if (input?.contract === APP_ONLY_CONTRACT) return validateAppOnlyInput(input);
   demand(input?.contract === CONTRACT, 'Invalid preparation contract');
   const paths = ['releaseJson', 'admissionJson', 'imagesArchive', 'controlArchive', 'transportValidation', 'archiveRoundtrip', 'networkValidation', 'downloadReceipt', 'offhostReceipt', 'backupVerificationReceipt', 'restoreImportReceipt', 'browserReceipt'];
   for (const key of paths) demand(typeof input[key] === 'string' && path.isAbsolute(input[key]) && path.normalize(input[key]) === input[key], `Missing canonical absolute ${key}`);
@@ -136,6 +141,50 @@ export function validateInput(input) {
   validateWorkerContinuationPolicy(policy);
   demand(policy.forward.generation === guard.generation + 1 && policy.forward.releaseSha === input.nativeRequest[input.targetSlot].releaseSha && policy.rollback.generation === guard.generation + 2 && policy.rollback.releaseSha === input.nativeRequest[guard.activeSlot].releaseSha, 'Worker continuation target/rollback generation or release drift');
   return input;
+}
+
+/* V2 deliberately has no caller supplied full release.json.  PG/Redis and the
+ * data admission are read from the guarded active state immediately before we
+ * construct the rehearsal release. */
+export function validateAppOnlyInput(input) {
+  const paths = ['appBundle', 'appAdmission', 'appImagesArchive', 'appDownloadReceipt', 'offhostReceipt', 'backupVerificationReceipt', 'restoreImportReceipt', 'browserReceipt'];
+  for (const key of paths) demand(typeof input[key] === 'string' && path.isAbsolute(input[key]) && path.normalize(input[key]) === input[key], `Missing canonical absolute ${key}`);
+  demand(['blue', 'green'].includes(input.targetSlot), 'Invalid target slot');
+  demand(input.wait?.pollIntervalMs >= 5000 && input.wait.pollIntervalMs <= 10000 && Number.isFinite(Date.parse(input.wait.deadline)), 'Wait polling must be 5-10 seconds with an exact deadline');
+  demand(input.nativeRequest && typeof input.nativeRequest === 'object' && !Array.isArray(input.nativeRequest), 'Missing native request');
+  exactKeys(input.nativeRequest, ['preparationGuard', 'workerContinuation'], 'app-only native request');
+  const guard = input.nativeRequest.preparationGuard;
+  exactKeys(guard, ['contract', 'hostIdentitySha256', 'controllerManifestSha256', 'activeSha256', 'generation', 'activeSlot'], 'preparation guard');
+  demand(guard.contract === 'LEETPLUS_PREPARATION_GUARD_V1' && [guard.hostIdentitySha256, guard.controllerManifestSha256, guard.activeSha256].every(x => SHA.test(x)) && Number.isSafeInteger(guard.generation) && ['blue', 'green'].includes(guard.activeSlot) && guard.activeSlot !== input.targetSlot, 'Invalid fresh host/generation guard');
+  validateWorkerContinuationPolicy(input.nativeRequest.workerContinuation);
+  demand(!['approval', 'approvalTtlExtension', 'expiresAt', 'releaseJson', 'admissionJson', 'imagesArchive', 'controlArchive'].some(key => Object.hasOwn(input, key)), 'App-only preparation accepts no V1 authority or deployment authorization');
+  return input;
+}
+
+export function assertInstalledAppOnlyDownloadPaths(input, releaseSha) {
+  demand(RELEASE.test(releaseSha ?? ''), 'Exact app-only release SHA required for installed paths');
+  const root = `/var/lib/leetplus-compose/app-downloads/${releaseSha}`;
+  demand(input.appBundle === `${root}/bundle/app-bundle.json` &&
+    input.appAdmission === `${root}/app-admission.json` &&
+    input.appImagesArchive === `${root}/bundle/app-images.tar.gz` &&
+    input.appDownloadReceipt === `${root}/download-receipt.json`,
+  'App-only input must use the exact installed download root');
+  return root;
+}
+
+function validateAppOnlyAdmission(input) {
+  const bundle = validateAppBundle(readJson(input.appBundle));
+  const admission = validateAppAdmission(readJson(input.appAdmission));
+  if (process.platform === 'linux' && process.getuid?.() === 0 && process.env.LEETPLUS_PREPARATION_LOCKED === '1') {
+    const root = assertInstalledAppOnlyDownloadPaths(input, bundle.releaseSha);
+    const downloadInput = readJson(path.join(root, 'download-input.json'));
+    verifyDownloadedBundle(downloadInput, path.join(root, 'bundle'), input.appAdmission);
+  }
+  demand(bundle.releaseSha === admission.releaseSha && admission.bundleManifestSha256 === fileDigest(input.appBundle) && admission.appArchiveSha256 === fileDigest(input.appImagesArchive), 'App-only bundle/admission bytes drift');
+  const receipt = readJson(input.appDownloadReceipt);
+  demand(receipt.contract === 'LEETPLUS_COMPOSE_APP_DOWNLOAD_V2' && receipt.decision === 'PASS' && receipt.releaseSha === bundle.releaseSha && receipt.appAdmissionSha256 === fileDigest(input.appAdmission), 'App-only download receipt is not exact PASS');
+  demand(receipt.files?.['app-bundle.json']?.sha256 === fileDigest(input.appBundle) && receipt.files?.['app-images.tar.gz']?.sha256 === fileDigest(input.appImagesArchive), 'App-only download file receipt drift');
+  return { releaseSha: bundle.releaseSha, admissionSha256: fileDigest(input.appAdmission), archiveSha256: fileDigest(input.appImagesArchive), bundle, admission, downloadReceiptSha256: fileDigest(input.appDownloadReceipt) };
 }
 
 export function validateAdmission(input) {
@@ -166,7 +215,7 @@ export function validateAdmission(input) {
 
 function phaseEnvelope(runner, name, intent, result) {
   const completedAt = runner.clock(), detectedAt = result.detectedAt ?? completedAt;
-  return { contract: `${CONTRACT}_RECEIPT`, phase: name, decision: 'PASS', inputSha256: runner.inputDigest, intentSha256: fileDigest(intent), previousReceiptSha256: runner.previousReceiptDigest(name), completedAt, detectedAt,
+  return { contract: `${runner.phaseContract}_RECEIPT`, phase: name, decision: 'PASS', inputSha256: runner.inputDigest, intentSha256: fileDigest(intent), previousReceiptSha256: runner.previousReceiptDigest(name), completedAt, detectedAt,
     producerCompletedAt: result.actualCompletedAt ?? null,
     producerPublicationTimeProxy: result.publicationTimeProxy ?? null,
     producerCompletionTimeBasis: result.completionTimeBasis ?? (result.actualCompletedAt ? 'PRODUCER_TIMESTAMP' : 'UNAVAILABLE'), result };
@@ -181,11 +230,13 @@ export class PreparationRunner {
     const state = fs.lstatSync(this.stateDir);
     demand(state.isDirectory() && !state.isSymbolicLink() && (process.platform !== 'linux' || process.getuid?.() !== 0 || (state.uid === 0 && !(state.mode & 0o077))), 'Root-private preparation state directory required');
     this.inputDigest = digest(input);
+    this.appOnly = input.contract === APP_ONLY_CONTRACT;
+    this.phaseContract = this.appOnly ? APP_ONLY_CONTRACT : CONTRACT;
     publishJson(path.join(this.stateDir, 'input.json'), input);
     const startPath = path.join(this.stateDir, 'operation-start.json');
-    if (!fs.existsSync(startPath)) publishJson(startPath, { contract: `${CONTRACT}_START`, inputSha256: this.inputDigest, startedAt: this.clock(), deadline: this.input.wait.deadline });
+    if (!fs.existsSync(startPath)) publishJson(startPath, { contract: `${this.phaseContract}_START`, inputSha256: this.inputDigest, startedAt: this.clock(), deadline: this.input.wait.deadline });
     const start = readJson(startPath), startedAt = parseTime(start.startedAt, 'operation start'), deadline = parseTime(start.deadline, 'wait deadline');
-    demand(start.contract === `${CONTRACT}_START` && start.inputSha256 === this.inputDigest && start.deadline === this.input.wait.deadline && deadline > startedAt && deadline - startedAt <= 4 * 3600_000, 'Preparation deadline must be one immutable bounded window of at most four hours');
+    demand(start.contract === `${this.phaseContract}_START` && start.inputSha256 === this.inputDigest && start.deadline === this.input.wait.deadline && deadline > startedAt && deadline - startedAt <= 4 * 3600_000, 'Preparation deadline must be one immutable bounded window of at most four hours');
     this.validateDurableChain();
   }
   phasePath(name) { return path.join(this.stateDir, `${String(PHASES.indexOf(name) + 1).padStart(2, '0')}-${name}.receipt.json`); }
@@ -199,7 +250,7 @@ export class PreparationRunner {
       if (!fs.existsSync(file)) { gap = true; continue; }
       demand(!gap, `Durable receipt ${phase} has a phase-order gap`);
       const receipt = readJson(file);
-      demand(receipt.contract === `${CONTRACT}_RECEIPT` && receipt.phase === phase && receipt.decision === 'PASS' && receipt.inputSha256 === this.inputDigest && receipt.previousReceiptSha256 === prior && SHA.test(receipt.intentSha256 ?? ''), `Invalid immutable receipt chain at ${phase}`);
+      demand(receipt.contract === `${this.phaseContract}_RECEIPT` && receipt.phase === phase && receipt.decision === 'PASS' && receipt.inputSha256 === this.inputDigest && receipt.previousReceiptSha256 === prior && SHA.test(receipt.intentSha256 ?? ''), `Invalid immutable receipt chain at ${phase}`);
       demand(fs.existsSync(this.intentPath(phase)) && fileDigest(this.intentPath(phase)) === receipt.intentSha256, `Intent binding drift at ${phase}`);
       prior = fileDigest(file);
     }
@@ -244,10 +295,10 @@ export class PreparationRunner {
     const file = this.intentPath(name);
     if (fs.existsSync(file)) {
       const value = readJson(file);
-      demand(value.contract === `${CONTRACT}_INTENT` && value.phase === name && value.inputSha256 === this.inputDigest && value.previousReceiptSha256 === this.previousReceiptDigest(name), `Immutable intent drift at ${name}`);
+      demand(value.contract === `${this.phaseContract}_INTENT` && value.phase === name && value.inputSha256 === this.inputDigest && value.previousReceiptSha256 === this.previousReceiptDigest(name), `Immutable intent drift at ${name}`);
       return file;
     }
-    publishJson(file, { contract: `${CONTRACT}_INTENT`, phase: name, inputSha256: this.inputDigest, previousReceiptSha256: this.previousReceiptDigest(name), startedAt: this.clock() });
+    publishJson(file, { contract: `${this.phaseContract}_INTENT`, phase: name, inputSha256: this.inputDigest, previousReceiptSha256: this.previousReceiptDigest(name), startedAt: this.clock() });
     return file;
   }
   async phase(name, effect, reconcile) {
@@ -274,10 +325,45 @@ export class PreparationRunner {
     return this.readPhase(name);
   }
   readAdmission() { const value = this.readPhase('ADMISSION')?.result; demand(value?.releaseSha, 'Missing admitted release receipt'); return value; }
+  async initializeAppOnly() {
+    const admitted = validateAppOnlyAdmission(this.input);
+    const status = JSON.parse(await this.command('app-only-admission-status', this.paths.controlCommand, ['status']));
+    const guard = this.input.nativeRequest.preparationGuard, active = status.active;
+    demand(active && digest(active) === guard.activeSha256 && active.generation === guard.generation && active.activeSlot === guard.activeSlot, 'App-only active generation drift');
+    demand(status.controller?.manifestSha256 === guard.controllerManifestSha256 && status.controller?.isServing === true && status.controller?.handoffPending === false && status.controller?.preparationEvidenceExpiryEnforced === true && status.controller?.appOnlyV2BaselineCertification === true, 'Serving controller lacks app-only V2 capability');
+    const activeRelease = active.dataRelease;
+    validateRelease(activeRelease);
+    const release = { ...activeRelease, releaseSha: admitted.releaseSha, images: { ...activeRelease.images, api: admitted.bundle.appImages.api, web: admitted.bundle.appImages.web }, apiResourceProfile: admitted.bundle.apiResourceProfile };
+    validateRelease(release);
+    const releaseJson = path.join(this.stateDir, 'derived-v1-release.json');
+    publishJson(releaseJson, release);
+    const dataReleaseJson = path.join(this.stateDir, 'active-data-baseline.json');
+    const dataBaseline = { contract: 'LEETPLUS_PREPARATION_ACTIVE_DATA_V2', activeStateSha256: guard.activeSha256, dataRelease: activeRelease, dataAdmissionSha256: active.dataAdmissionSha256 };
+    publishJson(dataReleaseJson, dataBaseline);
+    // These aliases exist only after the active state was observed. They are
+    // never accepted as V2 input and are used solely by the rehearsal helpers.
+    this.input.releaseJson = releaseJson;
+    this.input.nativeRequest = { ...this.input.nativeRequest, blue: active.blue, green: active.green };
+    this.input.nativeRequest[this.input.targetSlot] = release;
+    this.v2 = { ...admitted, active, releaseJson, dataReleaseJson };
+    return { releaseSha: admitted.releaseSha, admissionSha256: admitted.admissionSha256, archiveSha256: admitted.archiveSha256, activeDataReleaseSha256: digest(activeRelease), activeDataBaselineSha256: fileDigest(dataReleaseJson), derivedReleaseSha256: fileDigest(releaseJson) };
+  }
   validatePreparation() {
     if (!fs.existsSync(this.paths.preparation)) return null;
     const value = readJson(this.paths.preparation), admitted = this.readAdmission(), imported = this.readPhase('OFFHOST_IMPORT').result;
     demand(value.contract === 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_PREPARATION' && value.decision === 'PREPARED_NOT_SERVING' && value.rehearsal === true && value.releaseSha === admitted.releaseSha && value.sourceConfigurationSha256 === imported.sourceCapsuleSha256, 'Preparation controller receipt drift');
+    if (this.appOnly) {
+      const evidence = value.appOnlyEvidence;
+      exactKeys(evidence, ['appBundleSha256', 'appAdmissionSha256', 'appDownloadReceiptSha256',
+        'activeDataBaselineSha256', 'dataAdmissionSha256', 'derivedReleaseSha256'], 'app-only preparation evidence');
+      demand(evidence.appBundleSha256 === fileDigest(this.input.appBundle) &&
+        evidence.appAdmissionSha256 === admitted.admissionSha256 &&
+        evidence.appDownloadReceiptSha256 === fileDigest(this.input.appDownloadReceipt) &&
+        evidence.activeDataBaselineSha256 === fileDigest(this.v2.dataReleaseJson) &&
+        evidence.dataAdmissionSha256 === this.v2.active.dataAdmissionSha256 &&
+        evidence.derivedReleaseSha256 === fileDigest(this.input.releaseJson),
+      'App-only preparation receipt does not bind exact app/data inputs');
+    } else demand(!Object.hasOwn(value, 'appOnlyEvidence'), 'V1 preparation cannot carry app-only evidence');
     return { releaseSha: admitted.releaseSha, preparationSha256: fileDigest(this.paths.preparation), actualCompletedAt: value.createdAt };
   }
   validateBackup(intent) {
@@ -399,12 +485,14 @@ export class PreparationRunner {
   }
   async reconcileStage() {
     const release = readJson(this.input.releaseJson);
-    for (const image of Object.values(release.images)) {
+    const images = this.appOnly ? [release.images.api, release.images.web] : Object.values(release.images);
+    for (const image of images) {
       let inspected;
       try { inspected = JSON.parse(await this.command('image-inspect', '/usr/bin/docker', ['--host', 'unix:///var/run/docker.sock', '--config', '/etc/leetplus-compose/docker-cli', 'image', 'inspect', image])); }
       catch { return null; }
       if (!Array.isArray(inspected) || inspected.length !== 1 || inspected[0].Id !== image) return null;
     }
+    if (this.appOnly) return { releaseSha: release.releaseSha, archiveSha256: this.readAdmission().archiveSha256, installedControllerManifestSha256: this.input.nativeRequest.preparationGuard.controllerManifestSha256, reconciledFromExactImages: true, actualCompletedAt: null, observedAt: this.clock(), completionTimeBasis: 'EXACT_STATE_OBSERVED_COMPLETION_TIME_UNKNOWN' };
     const control = this.attestCandidateControl();
     return { releaseSha: release.releaseSha, archiveSha256: this.readAdmission().archiveSha256, candidateControlSha256: control.installManifestSha256, reconciledFromExactImages: true, actualCompletedAt: null, observedAt: this.clock(), completionTimeBasis: 'EXACT_STATE_OBSERVED_COMPLETION_TIME_UNKNOWN' };
   }
@@ -421,15 +509,24 @@ export class PreparationRunner {
     const admission = this.readAdmission(), backupEvidence = this.boundBackupEvidence(), rehearsalEvidence = this.boundRehearsalEvidence();
     const verification = readJson(this.input.backupVerificationReceipt);
     const preparationEvidenceExpiresAt = new Date(Math.min(parseTime(this.input.wait.deadline, 'wait deadline'), parseTime(verification.effectiveExpiresAt, 'authenticated backup expiry'))).toISOString();
+    if (this.appOnly) return { contract: 'LEETPLUS_COMPOSE_APP_PREPARATION_V2', releaseSha: admission.releaseSha, targetSlot: this.input.targetSlot, preparationGuard: this.input.nativeRequest.preparationGuard, workerContinuation: this.input.nativeRequest.workerContinuation, backupReceiptSha256: digest(backupEvidence), rehearsalReceiptSha256: digest(rehearsalEvidence), preparationEvidenceExpiresAt };
     return { ...this.input.nativeRequest, targetSlot: this.input.targetSlot, admissionSha256: admission.admissionSha256, archiveSha256: admission.archiveSha256, backupReceiptSha256: digest(backupEvidence), rehearsalReceiptSha256: digest(rehearsalEvidence), preparationEvidenceExpiresAt };
   }
   planMatches(plan, request, operationId = plan?.operationId) {
-    if (!plan || !UUID.test(operationId ?? '') || plan.operationId !== operationId || plan.contract !== 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_PLAN') return false;
+    if (!plan || !UUID.test(operationId ?? '') || plan.operationId !== operationId || plan.contract !== (this.appOnly ? 'LEETPLUS_COMPOSE_BLUE_GREEN_V2_PLAN' : 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_PLAN')) return false;
     const guard = request.preparationGuard;
     if (plan.hostIdentitySha256 !== guard.hostIdentitySha256 || plan.controlSha256 !== guard.controllerManifestSha256 || digest(plan.previous) !== guard.activeSha256 || plan.generation !== guard.generation || plan.action !== 'ROLLOUT') return false;
+    if (this.appOnly) {
+      if (plan[plan.targetSlot]?.releaseSha !== request.releaseSha || plan.releaseLane !== 'L1_APP_ONLY' || plan.appAdmissionSha256 !== this.v2.admissionSha256 || plan.appArchiveSha256 !== this.v2.archiveSha256 || plan.admissionSha256 !== this.v2.admissionSha256 || plan.archiveSha256 !== this.v2.archiveSha256 || plan.dataAdmissionSha256 !== this.v2.active.dataAdmissionSha256 || canonical(plan.dataRelease) !== canonical(this.v2.active.dataRelease)) return false;
+      if (!SHA.test(plan.dataBaselineCertificationSha256 ?? '') || !Number.isFinite(Date.parse(plan.dataBaselineExpiresAt)) || Date.parse(request.preparationEvidenceExpiresAt) > Date.parse(plan.dataBaselineExpiresAt)) return false;
+    }
     const dynamic = new Set(['contract', 'operationId', 'hostIdentitySha256', 'controlSha256', 'previous', 'generation', 'action', 'dataRelease', 'dataAdmissionSha256', 'secretDigests', 'networkPolicySha256', 'databaseIdentitySha256', 'composeSha256', 'resourceBudget']);
+    if (this.appOnly) for (const key of ['blue', 'green', 'releaseLane', 'admissionSha256', 'archiveSha256', 'appAdmissionSha256', 'appArchiveSha256', 'dataBaselineCertificationSha256', 'dataBaselineExpiresAt']) dynamic.add(key);
     const base = Object.fromEntries(Object.entries(plan).filter(([key]) => !dynamic.has(key)));
-    return canonical(base) === canonical(request);
+    const expected = this.appOnly ? Object.fromEntries(Object.entries(request).filter(([key]) => !['contract', 'releaseSha'].includes(key))) : request;
+    if (this.appOnly) return Object.keys(base).sort().join(',') === Object.keys(expected).sort().join(',') &&
+      Object.entries(expected).every(([key, value]) => canonical(base[key]) === canonical(value));
+    return canonical(base) === canonical(expected);
   }
   findNativePlan(request) {
     if (!fs.existsSync(this.paths.nativeOperations)) return null;
@@ -451,6 +548,13 @@ export class PreparationRunner {
       demand(fileDigest(profilePath) === binding.profileSha256,
         `Native immutable worker profile snapshot is absent or drifted: ${binding.worker}`);
     }
+    if (this.appOnly) {
+      for (const leaf of ['app-bundle.json', 'app-admission.json', 'data-baseline-certification.json']) {
+        const file = path.join(directory, leaf);
+        demand((safeRegular(file).mode & 0o777) === 0o400, `App-only operation leaf is not immutable: ${leaf}`);
+      }
+      demand(fileDigest(path.join(directory, 'app-bundle.json')) === this.v2.admission.bundleManifestSha256 && fileDigest(path.join(directory, 'app-admission.json')) === this.v2.admissionSha256 && fileDigest(path.join(directory, 'data-baseline-certification.json')) === match.plan.dataBaselineCertificationSha256, 'App-only operation evidence leaf drift');
+    }
     demand(digest(backup) === request.backupReceiptSha256 && digest(rehearsal) === request.rehearsalReceiptSha256, 'Native evidence digest construction drift');
     publishJson(path.join(directory, 'backup.json'), backup, 0o400);
     publishJson(path.join(directory, 'rehearsal.json'), rehearsal, 0o400);
@@ -461,7 +565,7 @@ export class PreparationRunner {
     const request = this.nativeRequest(), requestPath = path.join(this.stateDir, 'native-request.json');
     publishJson(requestPath, request);
     const existing = this.findNativePlan(request); if (existing) return this.publishNativeEvidence(existing, request);
-    const output = JSON.parse(await this.command('native-prepare', this.paths.controlCommand, ['prepare', '--request', requestPath]));
+    const output = JSON.parse(await this.command('native-prepare', this.paths.controlCommand, [this.appOnly ? 'prepare-app-only' : 'prepare', '--request', requestPath]));
     demand(output.decision === 'PREPARED_NOT_AUTHORIZATION' && UUID.test(output.operationId ?? '') && SHA.test(output.planSha256 ?? ''), 'Native prepare output invalid');
     const planPath = path.join(this.paths.nativeOperations, output.operationId, 'plan.json');
     demand(fs.existsSync(planPath), 'Native plan output has no immutable plan');
@@ -471,10 +575,10 @@ export class PreparationRunner {
   }
   async validateReady() {
     demand(Date.parse(this.clock()) <= parseTime(this.input.wait.deadline, 'wait deadline'), 'Prepared evidence expired before READY; no TTL extension is allowed');
-    const admitted = validateAdmission(this.input);
+    const admitted = this.appOnly ? validateAppOnlyAdmission(this.input) : validateAdmission(this.input);
     demand(admitted.admissionSha256 === this.readAdmission().admissionSha256 && admitted.archiveSha256 === this.readAdmission().archiveSha256, 'Accepted download/admission bytes changed');
     demand(await this.reconcileStage(), 'Exact staged image identities changed');
-    this.attestCandidateControl();
+    if (!this.appOnly) this.attestCandidateControl();
     demand(this.validateBackup(this.intentPath('BACKUP'))?.exportReceiptSha256 === this.readPhase('BACKUP').result.exportReceiptSha256, 'Accepted backup bytes changed');
     const imported = this.validateOffhostImport();
     demand(imported && imported.offhostSha256 === this.readPhase('OFFHOST_IMPORT').result.offhostSha256 && imported.verificationSha256 === this.readPhase('OFFHOST_IMPORT').result.verificationSha256 && imported.importSha256 === this.readPhase('OFFHOST_IMPORT').result.importSha256, 'Accepted off-host/import bytes changed');
@@ -495,16 +599,23 @@ export class PreparationRunner {
   async run() {
     const releaseLock = this.acquireLock();
     try {
-      await this.phase('ADMISSION', async () => this.waitFor('admitted bundle download', async () => fs.existsSync(this.input.downloadReceipt) ? validateAdmission(this.input) : null), async () => fs.existsSync(this.input.downloadReceipt) ? validateAdmission(this.input) : null);
-      await this.phase('CONTROL_STAGE', async () => { const installer = this.attestServingInstaller(), admitted = this.readAdmission(); await this.command('control-stage', '/usr/bin/python3', [installer, '--inbox', path.dirname(this.input.releaseJson), '--admission-sha256', admitted.admissionSha256, '--stage-only'], 300_000); return demand(this.stageCandidateControl(), 'Candidate controller staging receipt is incomplete'); }, async () => this.stageCandidateControl());
-      await this.phase('IMAGE_STAGE', async () => { await this.command('docker-load', '/usr/bin/docker', ['--host', 'unix:///var/run/docker.sock', '--config', '/etc/leetplus-compose/docker-cli', 'load', '--input', this.input.imagesArchive], 3_600_000); return demand(await this.reconcileStage(), 'Loaded images do not match the admitted release'); }, async () => this.reconcileStage());
+      const admissionPhase = await this.phase('ADMISSION', async () => this.appOnly ? this.waitFor('admitted app-only bundle download', async () => fs.existsSync(this.input.appDownloadReceipt) ? this.initializeAppOnly() : null) : this.waitFor('admitted bundle download', async () => fs.existsSync(this.input.downloadReceipt) ? validateAdmission(this.input) : null), async () => this.appOnly ? (fs.existsSync(this.input.appDownloadReceipt) ? this.initializeAppOnly() : null) : (fs.existsSync(this.input.downloadReceipt) ? validateAdmission(this.input) : null));
+      if (this.appOnly) {
+        const reconstructed = await this.initializeAppOnly();
+        demand(canonical(reconstructed) === canonical(admissionPhase.result), 'V2 derived admission state drift on resume');
+      }
+      await this.phase('CONTROL_STAGE', async () => {
+        if (this.appOnly) return { releaseSha: this.readAdmission().releaseSha, decision: 'INSTALLED_CONTROLLER_RECHECK_PASS', controllerManifestSha256: this.input.nativeRequest.preparationGuard.controllerManifestSha256 };
+        const installer = this.attestServingInstaller(), admitted = this.readAdmission(); await this.command('control-stage', '/usr/bin/python3', [installer, '--inbox', path.dirname(this.input.releaseJson), '--admission-sha256', admitted.admissionSha256, '--stage-only'], 300_000); return demand(this.stageCandidateControl(), 'Candidate controller staging receipt is incomplete');
+      }, async () => this.appOnly ? { releaseSha: this.readAdmission().releaseSha, decision: 'INSTALLED_CONTROLLER_RECHECK_PASS', controllerManifestSha256: this.input.nativeRequest.preparationGuard.controllerManifestSha256 } : this.stageCandidateControl());
+      await this.phase('IMAGE_STAGE', async () => { await this.command('docker-load', '/usr/bin/docker', ['--host', 'unix:///var/run/docker.sock', '--config', '/etc/leetplus-compose/docker-cli', 'load', '--input', this.appOnly ? this.input.appImagesArchive : this.input.imagesArchive], 3_600_000); return demand(await this.reconcileStage(), 'Loaded images do not match the admitted release'); }, async () => this.reconcileStage());
       if (!this.readPhase('BACKUP') && !fs.existsSync(path.join(this.stateDir, '.attempted-BACKUP'))) await this.statusAndGuard('backup-preflight');
       await this.phase('BACKUP', async () => { await this.command('backup', this.paths.controlCommand, ['backup'], 3_600_000); return demand(this.validateBackup(this.intentPath('BACKUP')), 'Fresh backup receipt missing'); }, async () => this.validateBackup(this.intentPath('BACKUP')));
       await this.phase('OFFHOST_IMPORT', async () => this.waitFor('off-host authentication/import', async () => this.validateOffhostImport()), async () => this.waitFor('off-host authentication/import', async () => this.validateOffhostImport()));
-      await this.phase('PREPARE_FILES', async () => { const imported = this.readPhase('OFFHOST_IMPORT').result, controllerDir = this.attestCandidateControl().root; await this.command('prepare-files', '/usr/bin/python3', [path.join(controllerDir, 'prepare-files.py'), '--release-json', this.input.releaseJson, '--source-capsule', imported.sourceCapsulePath, '--rehearsal'], 600_000); return demand(this.validatePreparation(), 'Preparation receipt missing'); }, async () => this.validatePreparation());
-      await this.phase('RESTORE', async () => { const imported = this.readPhase('OFFHOST_IMPORT').result, controllerDir = this.attestCandidateControl().root; await this.command('restore-rehearsal', '/usr/bin/python3', [path.join(controllerDir, 'restore-rehearsal.py'), '--release-json', this.input.releaseJson, '--dump', imported.dumpPath, '--globals', imported.globalsPath, '--manifest', imported.manifestPath], 1_800_000); return demand(this.validateRestore(), 'Restore receipt missing'); }, async () => this.validateRestore());
+      await this.phase('PREPARE_FILES', async () => { const imported = this.readPhase('OFFHOST_IMPORT').result, controllerDir = this.appOnly ? (this.paths.servingControlRoot ?? path.dirname(fs.realpathSync(this.paths.controlCommand))) : this.attestCandidateControl().root; const args = this.appOnly ? ['--release-json', this.input.releaseJson, '--app-bundle', this.input.appBundle, '--app-admission', this.input.appAdmission, '--app-download-receipt', this.input.appDownloadReceipt, '--data-baseline', this.v2.dataReleaseJson, '--data-admission', `/srv/leetplus/inbox/${this.v2.active.dataRelease.releaseSha}/docker-admission.json`, '--source-capsule', imported.sourceCapsulePath, '--rehearsal'] : ['--release-json', this.input.releaseJson, '--source-capsule', imported.sourceCapsulePath, '--rehearsal']; await this.command('prepare-files', '/usr/bin/python3', [path.join(controllerDir, 'prepare-files.py'), ...args], 600_000); return demand(this.validatePreparation(), 'Preparation receipt missing'); }, async () => this.validatePreparation());
+      await this.phase('RESTORE', async () => { const imported = this.readPhase('OFFHOST_IMPORT').result, controllerDir = this.appOnly ? (this.paths.servingControlRoot ?? path.dirname(fs.realpathSync(this.paths.controlCommand))) : this.attestCandidateControl().root; await this.command('restore-rehearsal', '/usr/bin/python3', [path.join(controllerDir, 'restore-rehearsal.py'), '--release-json', this.input.releaseJson, '--dump', imported.dumpPath, '--globals', imported.globalsPath, '--manifest', imported.manifestPath], 1_800_000); return demand(this.validateRestore(), 'Restore receipt missing'); }, async () => this.validateRestore());
       await this.phase('BROWSER', async () => this.waitFor('rehearsal browser/API acceptance', async () => this.validateBrowser()), async () => this.waitFor('rehearsal browser/API acceptance', async () => this.validateBrowser()));
-      await this.phase('ACCEPT', async () => { const release = readJson(this.input.releaseJson), controllerDir = this.attestCandidateControl().root; const script = release.apiResourceProfile ? 'run-resource-rehearsal.py' : 'accept-rehearsal.py'; await this.command('accept-rehearsal', '/usr/bin/python3', [path.join(controllerDir, script)], release.apiResourceProfile ? 1_100_000 : 1_200_000); return demand(this.validateAcceptance(), 'Acceptance receipt missing'); }, async () => this.validateAcceptance());
+      await this.phase('ACCEPT', async () => { const release = readJson(this.input.releaseJson), controllerDir = this.appOnly ? (this.paths.servingControlRoot ?? path.dirname(fs.realpathSync(this.paths.controlCommand))) : this.attestCandidateControl().root; const script = release.apiResourceProfile ? 'run-resource-rehearsal.py' : 'accept-rehearsal.py'; await this.command('accept-rehearsal', '/usr/bin/python3', [path.join(controllerDir, script)], release.apiResourceProfile ? 1_100_000 : 1_200_000); return demand(this.validateAcceptance(), 'Acceptance receipt missing'); }, async () => this.validateAcceptance());
       await this.phase('RESOURCE', async () => this.validateResource(), async () => this.validateResource());
       if (!this.readPhase('NATIVE_PREPARE') && !fs.existsSync(path.join(this.stateDir, '.attempted-NATIVE_PREPARE'))) await this.statusAndGuard('native-preflight');
       await this.phase('NATIVE_PREPARE', async () => this.nativePrepare(), async () => { const request = this.nativeRequest(), found = this.findNativePlan(request); return found ? this.publishNativeEvidence(found, request) : null; });
@@ -514,7 +625,7 @@ export class PreparationRunner {
     } finally { releaseLock(); }
   }
   goPacket(native) {
-    return { contract: GO_PACKET_CONTRACT, decision: 'PREPARED_NOT_AUTHORIZATION', inputSha256: this.inputDigest, nativePlanSha256: native.planSha256, nativeOperationId: native.operationId, workerContinuation: this.input.nativeRequest.workerContinuation, preparationEvidenceExpiresAt: this.nativeRequest().preparationEvidenceExpiresAt, preparedAt: this.readPhase('NATIVE_PREPARE').completedAt };
+    return { contract: this.appOnly ? APP_ONLY_GO_PACKET_CONTRACT : GO_PACKET_CONTRACT, decision: 'PREPARED_NOT_AUTHORIZATION', inputSha256: this.inputDigest, nativePlanSha256: native.planSha256, nativeOperationId: native.operationId, workerContinuation: this.input.nativeRequest.workerContinuation, preparationEvidenceExpiresAt: this.nativeRequest().preparationEvidenceExpiresAt, preparedAt: this.readPhase('NATIVE_PREPARE').completedAt };
   }
 }
 

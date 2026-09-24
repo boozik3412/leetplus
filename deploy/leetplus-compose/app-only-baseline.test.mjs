@@ -4,6 +4,7 @@ import test from 'node:test';
 import { canonical, CONTRACT, digest, renderCompose, SCHEMA } from './contract.mjs';
 import { BASELINE_CONTRACT, PLAN_CONTRACT, migrationInventoryDigest, synthesizeRelease, validateAppOnlyPlan, validateCertifiedBaseline } from './app-only-baseline.mjs';
 import { deriveWorkerContinuation } from './worker-continuation.mjs';
+import { validatePlan } from './orchestrator.mjs';
 
 const h = 'a'.repeat(64), other = 'b'.repeat(64), sha = 'c'.repeat(40), dataSha = 'd'.repeat(40);
 const image = letter => `sha256:${letter.repeat(64)}`;
@@ -109,6 +110,8 @@ test('V2 plan binds certified baseline and exact synthesized target while retain
     dataRelease: plan.dataRelease, activeSlot: plan.targetSlot }));
   assert.equal(validateAppOnlyPlan(plan, { bundle, admission, certification: cert,
     readinessReceiptSha256: opts.readinessReceiptSha256, now: opts.now }), plan);
+  assert.equal(validatePlan(plan), plan);
+  assert.throws(() => validatePlan({ ...plan, contract: `${CONTRACT}_PLAN` }), /V1 plan cannot carry V2-only/);
   plan.dataBaselineCertificationSha256 = other;
   assert.throws(() => validateAppOnlyPlan(plan, { bundle, admission, certification: cert,
     readinessReceiptSha256: opts.readinessReceiptSha256, now: opts.now }), /immutable app\/data evidence/);

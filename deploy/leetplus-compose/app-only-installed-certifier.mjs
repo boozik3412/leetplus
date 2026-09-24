@@ -24,9 +24,10 @@ const CONTROL_LEAVES = Object.freeze([
   'contract.mjs', 'control.mjs', 'orchestrator.mjs',
 ]);
 const ARCHIVE_LEAVES_SCRIPT = String.raw`import hashlib,io,json,re,sys,tarfile
-archive=sys.argv[1]
+archive=sys.stdin.buffer.read(16*1024*1024+1)
+if len(archive)>16*1024*1024: raise ValueError('control archive is too large')
 leaves={}
-with tarfile.open(archive,mode='r:gz') as tar:
+with tarfile.open(fileobj=io.BytesIO(archive),mode='r:gz') as tar:
  for item in tar:
   if item.isdir() and item.name.rstrip('/') in ('deploy','deploy/leetplus-compose'):
    continue
@@ -89,7 +90,10 @@ function installedManifest(fsApi, control) {
 
 function candidateControlLeaves(fsApi, execute, archive) {
   const archiveBytes = safeFile(fsApi, archive, { limit: 16 * 1024 * 1024 });
-  const leaves = JSON.parse(fixedRun(execute, PYTHON, ['-I', '-S', '-E', '-c', ARCHIVE_LEAVES_SCRIPT, archive], { timeout: 60_000 }));
+  const leaves = JSON.parse(fixedRun(execute, PYTHON, ['-I', '-S', '-E', '-c', ARCHIVE_LEAVES_SCRIPT],
+    { timeout: 60_000, input: archiveBytes }));
+  demand(safeFile(fsApi, archive, { limit: 16 * 1024 * 1024 }).equals(archiveBytes),
+    'Control archive changed while deriving its installed-compatible leaves');
   demand(leaves && typeof leaves === 'object' && !Array.isArray(leaves) &&
     Object.keys(leaves).length >= CONTROL_LEAVES.length && Object.values(leaves).every(value => HASH.test(value)),
   'Candidate control archive leaf map is invalid');

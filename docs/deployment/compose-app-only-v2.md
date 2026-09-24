@@ -6,6 +6,16 @@ four-image handoff. Their presence in Git or CI does not enable a production
 rollout. The current V1 path remains the fallback for all releases that do not
 prove this contract.
 
+The integrated source now contains V2 `prepare-app-only`, installed data
+certification, versioned runner checkpoints/GO packet, V2 plan validation and
+read-only observation. The controller reuses A's signed V1 approval and
+HYDRATE→POSTCHECK/worker continuation machinery. The B-capable controller is
+**not installed** and current controller handoff authority accepts only pinned
+A transitions. A separate exact-byte B controller-handoff transition must be
+reviewed, admitted and approved before this source can run on the server. PR
+#240 remains a draft; its new Compose-native admission job has not yet produced
+an exact-main V2 artifact.
+
 The artifact slice includes a disposable Docker test that starts both API slots
 against a migrated CURRENT191 fixture and checks readiness, release identity,
 public guest and negative corporate/worker boundaries. This test still needs a
@@ -84,6 +94,18 @@ installed-controller capability and dual validation, tampered/stale/mismatched
 fixtures, lost-response/resume and busy-worker tests, then one controlled L1
 pilot with hot rollback and final worker/postcheck receipts. The dispatcher is
 the single production effect owner; A and B activations are serial.
+
+The first B L1 pilot also requires `AppBundle.sourceImpact.baseSha` to equal
+the active accepted application SHA. The current GREEN f97 active application
+is older than this source branch. If that remains true after A's repairs, a
+full V1 application release must first establish the intended base. B cannot
+claim L1 authority by comparing only the last main push while older
+unreleased changes remain in the candidate.
+
+The exact activation and comparative-pilot sequence is in
+[Variant B activation](compose-app-only-v2-activation.md). It names the
+controller-handoff source transition that remains to be implemented after the
+A predecessor is accepted and its installed manifest can be pinned.
 
 ## Measurement
 

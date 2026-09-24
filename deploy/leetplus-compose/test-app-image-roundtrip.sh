@@ -24,16 +24,17 @@ done
 if [[ "$ready" != true ]]; then cat "$root/daemon.log" >&2; exit 1; fi
 test "$(sudo "$docker_bin" --host "$socket" version --format '{{.Server.Version}}')" = 29.1.3
 sudo "$docker_bin" --host "$socket" image load --input "$output/images.tar.gz"
-mapfile -t loaded_ids < <(sudo "$docker_bin" --host "$socket" image ls --all --no-trunc --format '{{.ID}}' | LC_ALL=C sort -u)
-mapfile -t wanted_ids < <(node - "$output/release.json" <<'NODE'
+mapfile -t loaded_tags < <(sudo "$docker_bin" --host "$socket" image ls --all --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -v '^<none>:<none> ' | LC_ALL=C sort)
+mapfile -t wanted_tags < <(node - "$output/release.json" <<'NODE'
 const r=JSON.parse(require('fs').readFileSync(process.argv[2]));
 if(Object.keys(r.images).sort().join(',')!=='api,web')process.exit(1);
-for(const id of Object.values(r.images).sort())console.log(id);
+for(const [role,id] of Object.entries(r.images).sort(([a],[b])=>a.localeCompare(b)))console.log(`leetplus-${role}:${r.releaseSha} ${id}`);
 NODE
 )
-test "${#loaded_ids[@]}" = 2
-test "${loaded_ids[0]}" = "${wanted_ids[0]}"
-test "${loaded_ids[1]}" = "${wanted_ids[1]}"
+if [[ ${#loaded_tags[@]} != 2 || "${loaded_tags[0]}" != "${wanted_tags[0]}" || "${loaded_tags[1]}" != "${wanted_tags[1]}" ]]; then
+  printf 'Isolated daemon tag inventory mismatch\nobserved=%s\nexpected=%s\n' "${loaded_tags[*]}" "${wanted_tags[*]}" >&2
+  exit 1
+fi
 node - "$output/release.json" <<'NODE' > "$root/ids"
 const r=JSON.parse(require('fs').readFileSync(process.argv[2]));
 for(const [role,id] of Object.entries(r.images))console.log(`${role} ${id}`);

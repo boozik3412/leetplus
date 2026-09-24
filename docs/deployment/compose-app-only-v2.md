@@ -12,14 +12,16 @@ read-only observation. The controller reuses A's signed V1 approval and
 HYDRATE→POSTCHECK/worker continuation machinery. The B-capable controller is
 **not installed** and current controller handoff authority accepts only pinned
 A transitions. A separate exact-byte B controller-handoff transition must be
-reviewed, admitted and approved before this source can run on the server. PR
+authorized by a predecessor-side signed target permit or an admitted bridge,
+then reviewed and approved before this source can run on the server. PR
 #240 remains a draft; its new Compose-native admission job has not yet produced
 an exact-main V2 artifact.
 
 The artifact slice includes a disposable Docker test that starts both API slots
 against a migrated CURRENT191 fixture and checks readiness, release identity,
-public guest and negative corporate/worker boundaries. This test still needs a
-successful Linux/Docker CI run. Native/restored-copy readiness against the
+public guest and negative corporate/worker boundaries. The PR Docker shadow
+passed on prior exact heads; repeat it after every source change.
+Native/restored-copy readiness against the
 actual certified data baseline, installed-controller certification and V2
 plan/apply integration are required before any B release.
 

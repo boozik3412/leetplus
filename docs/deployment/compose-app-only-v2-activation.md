@@ -8,11 +8,12 @@ after A is accepted. It is not a GO packet or permission to run a server effect.
 
 1. Accept A documentation PR #239 and repair PR #241 on exact main with Fast,
    required PR checks and Full admission. Independently finish A's separate
-   controller-only production handoff and installed-path acceptance. The A
-   repair source at `6c4428cd…` is review-ready but was not main or installed
-   when this B plan was written.
-2. Rebase B PR #240 on that accepted main and run exact combined-SHA tests and
-   CI. Review the A/V1 and B/V2 job graphs: unknown, mixed and L2 candidates
+   controller-only production handoff and installed-path acceptance. A repair
+   merged as `b0cbf3a4f302b299762fa055f3bffe0376a91182` and exact-main
+   Full run `35997208370` passed. Its production controller installation is
+   a separate operation and must be verified before B activation.
+2. B PR #240 is rebased on that accepted main. Run exact combined-SHA tests and
+   CI for every new B head. Review the A/V1 and B/V2 job graphs: unknown, mixed and L2 candidates
    must retain the complete original V1 path. A successful B source test or
    draft PR does not establish an admitted app artifact.
 3. Assign the production dispatcher as the one effect owner. Before any server

@@ -196,7 +196,8 @@ try {
   docker([
     'run', '--rm', '--network', network, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
     '--tmpfs', '/tmp:rw,nosuid,nodev,size=134217728,mode=1777', '--mount', `type=volume,src=${volume},dst=/run/secrets,readonly`, '-e', `DATABASE_URL=${migrationUrl}`,
-    '--entrypoint', 'node', apiImage, '/app/packages/database/scripts/canonical-prisma-deploy.mjs',
+    '--entrypoint', 'node', apiImage, '-e',
+    "const {spawnSync}=require('node:child_process');const cli=require.resolve('prisma/build/index.js',{paths:['/app/packages/database']});const result=spawnSync(process.execPath,[cli,'migrate','deploy','--schema','/app/packages/database/prisma/schema.prisma'],{stdio:'inherit'});process.exit(result.status??1)",
   ]);
   docker([
     'exec', postgres, '/usr/lib/postgresql/16/bin/psql', '-h', '/tmp', '-U', 'postgres', '-d', 'leetplus', '-v', 'ON_ERROR_STOP=1', '-c',

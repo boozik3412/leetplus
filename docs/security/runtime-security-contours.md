@@ -2,6 +2,19 @@
 
 Статус: **канонический current-state contract**, оперативный checkpoint **24.09.2026**.
 
+**Source-only support follow-up 24.09:** в corporate contour подготовлены два
+узких маршрута без production effect: platform-admin
+`POST /admin/support-tickets/:id/close-with-comment` атомарно закрывает ровно
+одно `NEW` обращение с одним комментарием и audit по tenant/profile/ticket,
+`updatedAt` и MD5 описания; tenant-authenticated
+`PATCH /guests/gamification/seasons/:id/steps/by-sequence/:sequence/copy`
+меняет только две строки одного шага при полном `levels::text` digest и
+CAS. Оба принимают idempotency request ID, отклоняют drift без частичной
+записи и не дают полномочий public guest или worker. Схема, DB role, secret,
+provider egress, таймеры и game-rule evaluation не меняются. Исходники,
+локальные тесты и PR не означают deployment: GREEN f97/gen10 обслуживает
+старые маршруты до отдельного exact release/GO и postcheck.
+
 **Оперативное обновление 24.09, 06:59 UTC:** после отдельного GO на native
 plan digest принят controller-only handoff `63b58306-a711-4a0c-ba8c-07b3d9979e9c`:
 serving controller — exact `88010292246249c94ba66ecbab64e4d51ad84d8c`,

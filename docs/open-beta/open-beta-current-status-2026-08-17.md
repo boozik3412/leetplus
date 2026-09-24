@@ -1,5 +1,14 @@
 # LeetPlus open beta — текущее состояние на 23.09.2026
 
+**Source-only support candidate 24.09:** подготовлены atomic guarded routes
+для точечного закрытия одного тикета с комментарием и для замены двух строк
+одного шага Battle Pass. Это не production rollout и не закрытие тикетов;
+фактический GREEN f97/gen10 и результаты его worker timers не менялись.
+Нужны отдельные code review/CI, exact admission, production plan/GO и
+после применения свежая проверка ticket/season postimages. Seven other NEW
+tickets analysed separately; two Weekend жалобы остаются read-only VALIDATING
+без начисления. Подробности — в support triage evidence, не в runtime claim.
+
 **Текущий production checkpoint 23.09:** exact f97 опубликован на GREEN/gen10;
 BLUE3c3 сохранён rollback, data399/CURRENT191/controller02 неизменны.
 Оба исходных worker timer активны с signed gen10 grants, обычный bonus PASS;

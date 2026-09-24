@@ -451,6 +451,7 @@ const definitions: readonly ControllerDefinition[] = [
           'missions/:id',
           'seasons/:id',
           'seasons/:id/steps/by-sequence/:sequence/evaluation-policy',
+          'seasons/:id/steps/by-sequence/:sequence/copy',
           'promo-cards/:id',
           'visual-editor/draft',
           'rewards/:id',

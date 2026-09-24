@@ -21,6 +21,10 @@ import { StrictRoles } from '../auth/strict-roles.decorator';
 import { StrictRolesGuard } from '../auth/strict-roles.guard';
 import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
 import {
+  SeasonStepCopyService,
+  type SeasonStepCopyDto,
+} from './season-step-copy.service';
+import {
   GuestBonusLedgerService,
   type GuestGameBonusLedgerCancelDto,
   type GuestGameBonusLedgerDispatchDto,
@@ -149,6 +153,7 @@ export class GuestGamificationController {
     private readonly rewardMaterializerScheduler: GuestGameRewardMaterializerSchedulerService,
     private readonly ledgerFallbackScheduler: GuestGameLedgerFallbackSchedulerService,
     private readonly ruleReplayService: GuestGameRuleReplayService,
+    private readonly seasonStepCopyService: SeasonStepCopyService,
   ) {}
 
   @Get('statistics')
@@ -668,6 +673,17 @@ export class GuestGamificationController {
       sequence,
       dto,
     );
+  }
+
+  @Patch('seasons/:id/steps/by-sequence/:sequence/copy')
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  updateBattlePassStepCopy(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('sequence') sequence: string,
+    @Body() dto: SeasonStepCopyDto,
+  ) {
+    return this.seasonStepCopyService.updateCopy(user, id, sequence, dto);
   }
 
   @Delete('seasons/:id')

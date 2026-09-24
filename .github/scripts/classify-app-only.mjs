@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 export const CONTRACT = 'LEETPLUS_APP_ONLY_IMPACT_V2';
@@ -19,9 +20,7 @@ export const ALLOWLIST = Object.freeze([
   'apps/web/src/components/no-sales-trend-chart.tsx',
   'apps/web/src/components/no-sales-period-table.tsx',
   'apps/web/src/components/executive-club-table.tsx',
-  'apps/web/src/components/metric-product-revenue-card.tsx',
   'apps/web/src/components/simple-report-table.tsx',
-  'apps/web/src/components/report-loading-screen.tsx',
 ]);
 const ALLOWED = new Set(ALLOWLIST);
 const canonical = value => `${JSON.stringify(value, null, 2)}\n`;
@@ -45,6 +44,44 @@ function verifyScript(script, args, root) {
     env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(GIT_|LD_|DYLD_)/i.test(key) && !['NODE_OPTIONS', 'NODE_PATH'].includes(key))),
   });
   demand(!result.error && result.status === 0 && result.signal === null, `${script} verification failed: ${(result.stderr ?? '').trim().slice(0, 500)}`);
+}
+function gitSource(root, sha, file) {
+  const result = spawnSync('git', ['show', `${sha}:${file}`], {
+    cwd: root, encoding: 'utf8', timeout: 30_000, maxBuffer: 1024 * 1024,
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(GIT_|LD_|DYLD_)/i.test(key))),
+  });
+  demand(!result.error && result.status === 0 && result.signal === null, `cannot read exact source: ${file}`);
+  return result.stdout;
+}
+function displayShape(source, ts) {
+  const parsed = ts.createSourceFile('display.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  demand(parsed.parseDiagnostics.length === 0, 'invalid display component syntax');
+  const statements = parsed.statements;
+  demand(statements[0] && ts.isExpressionStatement(statements[0]) &&
+    ts.isStringLiteral(statements[0].expression) && statements[0].expression.text === 'use client',
+  'app-only component must remain client rendered');
+  function visit(node) {
+    if (ts.isJsxText(node)) return ['jsx-text'];
+    if (ts.isJsxAttribute(node) && node.initializer && ts.isStringLiteral(node.initializer) &&
+      /^(className|aria-label|title|alt)$/.test(node.name.text)) {
+      return ['safe-jsx-attribute', node.name.text];
+    }
+    const children = [];
+    ts.forEachChild(node, child => { children.push(visit(child)); });
+    return children.length ? [node.kind, children] : [node.kind, node.getText(parsed)];
+  }
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.JSX, source);
+  const comments = [];
+  for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
+    if (kind === ts.SyntaxKind.SingleLineCommentTrivia || kind === ts.SyntaxKind.MultiLineCommentTrivia) {
+      comments.push(scanner.getTokenText());
+    }
+  }
+  return JSON.stringify([visit(parsed), comments]);
+}
+export function verifyDisplayOnlyChange(before, after, ts) {
+  demand(displayShape(before, ts) === displayShape(after, ts),
+    'component changed behavior, imports or executable structure');
 }
 export function classify(impact, candidate, { impactSha256, candidateSha256 }) {
   demand(impact?.schemaVersion === 1 && impact.receiptType === 'LEETPLUS_RELEASE_IMPACT_RECEIPT_V1' &&
@@ -85,9 +122,16 @@ export function verifyAndClassify({ root, impactFile, candidateFile }) {
     '--event-before-sha', candidate.value.eventBeforeSha, '--repository', candidate.value.repository,
     '--workflow-ref', candidate.value.workflowRef, '--workflow-sha', candidate.value.workflowSha,
     '--impact-receipt', impactFile, '--verify-receipt', candidateFile], root);
-  return classify(impact.value, candidate.value, {
+  const result = classify(impact.value, candidate.value, {
     impactSha256: sha256(impact.raw), candidateSha256: sha256(candidate.raw),
   });
+  const requireFromWeb = createRequire(path.join(root, 'apps/web/package.json'));
+  const ts = requireFromWeb('typescript');
+  for (const file of impact.value.files) {
+    verifyDisplayOnlyChange(gitSource(root, impact.value.baseSha, file.path),
+      gitSource(root, impact.value.headSha, file.path), ts);
+  }
+  return result;
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {

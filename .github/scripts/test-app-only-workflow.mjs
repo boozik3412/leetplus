@@ -12,16 +12,20 @@ function job(id) {
   return match[0];
 }
 const impact = job('app-only-impact');
+assert.match(impact, /continue-on-error: true/u, 'A B classifier failure must preserve successful V1 Full admission');
 assert.match(impact, /needs: release_impact/u);
 assert.match(impact, /deployable_candidate == 'true'.*effective_lane == 'L1_RUNTIME'/u);
 assert.match(impact, /node \.github\/scripts\/classify-app-only\.mjs/u);
 assert.match(impact, /eligible=false/u);
+assert.match(impact, /pnpm install --frozen-lockfile --filter web\.\.\./u);
 const images = job('compose-app-images');
+assert.match(images, /continue-on-error: true/u, 'A B image failure must preserve successful V1 Full admission');
 assert.match(images, /needs: app-only-impact/u);
 assert.match(images, /needs\.app-only-impact\.outputs\.eligible == 'true'/u);
 assert.match(images, /build-app-images\.sh/u);
 assert.match(images, /artifact_digest: \$\{\{ steps\.upload\.outputs\.artifact-digest \}\}/u);
 const admission = job('compose-app-admission');
+assert.match(admission, /continue-on-error: true/u, 'A B admission failure must preserve successful V1 Full admission');
 for (const required of ['release_impact', 'app-only-impact', 'compose-app-images', 'authority-root-trust',
   'release-critical-application', 'release-critical-postgresql-assortment', 'migration-smoke', 'application']) {
   assert.match(admission, new RegExp(`- ${required}(?:\n|\r?\n)`, 'u'), `B admission missing ${required}`);

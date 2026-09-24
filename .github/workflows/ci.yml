@@ -3068,6 +3068,7 @@ jobs:
     if: needs.release_impact.outputs.deployable_candidate == 'true' && needs.release_impact.outputs.effective_lane == 'L1_RUNTIME'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    continue-on-error: true
     outputs:
       eligible: ${{ steps.classify.outputs.eligible }}
     steps:
@@ -3079,6 +3080,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.33.2
+      - name: Install locked web syntax parser
+        run: pnpm install --frozen-lockfile --filter web...
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
         with:
           name: leetplus-release-candidate-authority-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}
@@ -3115,6 +3121,7 @@ jobs:
     if: needs.app-only-impact.outputs.eligible == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    continue-on-error: true
     outputs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
       artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
@@ -3176,6 +3183,7 @@ jobs:
     if: needs.app-only-impact.outputs.eligible == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    continue-on-error: true
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

@@ -60,7 +60,9 @@ B speed pilot.
 For a later exact display-only change:
 
 1. Reverify the main-push impact and candidate receipts; require every changed
-   file to be a modification in the B exact allowlist. Any unknown, auth,
+   file to be a modification in the B exact allowlist and preserve its parsed
+   client-component structure except JSX text and inert display attributes.
+   Any unknown, auth,
    scope, schema, ACL, control, worker, provider, dependency or mixed change
    returns to full L2/V1. The CI AppBundle and admission must bind API/Web
    image IDs, current schema inputs, real both-slot API/guest/corporate/worker

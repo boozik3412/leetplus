@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ALLOWLIST, classify } from './classify-app-only.mjs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { ALLOWLIST, classify, verifyDisplayOnlyChange } from './classify-app-only.mjs';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const ts = createRequire(path.join(root, 'apps/web/package.json'))('typescript');
 
 const a = 'a'.repeat(40), b = 'b'.repeat(40), h = 'f'.repeat(64);
 const file = { path: ALLOWLIST[0], status: 'M', ruleId: 'ORDINARY_RUNTIME', lane: 'L1_RUNTIME', reason: 'fixture' };
@@ -23,6 +29,21 @@ test('one exact reviewed display component has an app-only receipt', () => {
   const result = classify(impact, candidate, hashes);
   assert.equal(result.releaseLane, 'L1_APP_ONLY');
   assert.deepEqual(result.changedPaths, [ALLOWLIST[0]]);
+});
+test('only JSX display text and inert attributes can change in a client component', () => {
+  const before = '"use client";\nexport function Card(){return <div className="old" aria-label="Old">Hello</div>}';
+  assert.doesNotThrow(() => verifyDisplayOnlyChange(before,
+    '"use client";\nexport function Card(){return <div className="new" aria-label="New">Привет</div>}', ts));
+  for (const after of [
+    'export function Card(){return <div className="old">Hello</div>}',
+    '"use client";\nimport { cookies } from "next/headers"; export function Card(){return <div className="old">Hello</div>}',
+    '"use client";\nexport function Card(){fetch("/api/mutate");return <div className="old">Hello</div>}',
+    '"use client";\nexport function Card(){return <div className={process.env.SECRET}>Hello</div>}',
+    '"use client";\nexport function Card(){return <div onClick={() => fetch("/api/mutate")}>Hello</div>}',
+    '"use client";\nexport function Card(){return <a href="https://provider.example">Hello</a>}',
+    '"use client";\nexport async function Card(){"use server";return <div className="old">Hello</div>}',
+    '/* @jsxRuntime classic */\n"use client";\nexport function Card(){return <div className="old">Hello</div>}',
+  ]) assert.throws(() => verifyDisplayOnlyChange(before, after, ts), /component changed behavior|client rendered/);
 });
 test('unknown, mixed, auth, schema, worker, dependency and renamed changes fail closed', () => {
   const blocked = [

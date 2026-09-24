@@ -29,10 +29,17 @@ plan/apply integration are required before any B release.
 release-candidate receipts. The source impact must be exactly one unmixed
 `L1_RUNTIME` lane, with a trusted main-push base/head, and every changed file
 must be a modification of one exact display-component path in
-`.github/scripts/classify-app-only.mjs`. The B receipt binds both parent receipt
+`.github/scripts/classify-app-only.mjs`. Each candidate must retain its client
+directive and the same parsed TSX structure as the accepted base; only JSX
+text and inert `className`, `aria-label`, `title`, or `alt` string attributes may
+change. Imports, comments, executable expressions, server actions and provider
+calls therefore fail the B decision and use V1. The B receipt binds both parent receipt
 digests and the allowlist digest. New files, removals, renames, docs mixed with
 runtime, changed dependencies, and all other paths go through the full
 `L2_SCHEMA_SECURITY` route. Diff size conveys no authority.
+The optional B jobs cannot invalidate a successful full V1 admission when B
+classification, image construction or admission fails; no B admitted artifact
+is published from a failed B job.
 
 The app bundle contains only exact API and Web image IDs and an archive of those
 images. The manifest binds the source-impact receipt, build time, CURRENT191

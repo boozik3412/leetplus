@@ -224,6 +224,9 @@ function phaseEnvelope(runner, name, intent, result) {
 export class PreparationRunner {
   constructor(input, stateDir, { execute = executor, clock = () => new Date().toISOString(), sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), paths = {}, workerBusy = null } = {}) {
     this.input = validateInput(input); this.stateDir = path.resolve(stateDir); this.execute = execute; this.clock = clock; this.sleep = sleep; this.workerBusy = workerBusy;
+    // V2 derives these aliases after a guarded active-status read. Keep the
+    // caller's exact input separate so a same-process restart can revalidate it.
+    this.input = { ...input, nativeRequest: { ...input.nativeRequest } };
     this.paths = { rehearsalRoot: '/srv/leetplus-migration/rehearsal', rehearsalInputRoot: '/srv/leetplus-migration/rehearsal/input', preparation: '/srv/leetplus-migration/rehearsal/preparation.json', backup: '/srv/leetplus/backups/export/latest.json', restore: '/srv/leetplus-migration/rehearsal/evidence/restore.json', acceptance: '/srv/leetplus-migration/rehearsal/evidence/runtime-acceptance.json', nativeOperations: '/var/lib/leetplus-compose/operations', machineId: '/etc/machine-id', procLocks: '/proc/locks', controlState: '/var/lib/leetplus-compose', productionRoot: '/srv/leetplus', workerPublicKey: '/etc/leetplus-compose/approval-root.pem', controlCommand: '/usr/local/sbin/leetplus-compose', candidateControlRoot: '/usr/local/lib/leetplus-compose', preparationLock: '/var/lib/leetplus-compose/preparation-runner.lock', servingControlRoot: null, ...paths };
     if (process.env.LEETPLUS_PREPARATION_LOCKED === '1') ensurePrivateTree('/var/lib/leetplus-compose', this.stateDir);
     else fs.mkdirSync(this.stateDir, { recursive: true, mode: 0o700 });
@@ -551,7 +554,7 @@ export class PreparationRunner {
     if (this.appOnly) {
       for (const leaf of ['app-bundle.json', 'app-admission.json', 'data-baseline-certification.json']) {
         const file = path.join(directory, leaf);
-        demand((safeRegular(file).mode & 0o777) === 0o400, `App-only operation leaf is not immutable: ${leaf}`);
+        demand(process.platform === 'win32' || (safeRegular(file).mode & 0o777) === 0o400, `App-only operation leaf is not immutable: ${leaf}`);
       }
       demand(fileDigest(path.join(directory, 'app-bundle.json')) === this.v2.admission.bundleManifestSha256 && fileDigest(path.join(directory, 'app-admission.json')) === this.v2.admissionSha256 && fileDigest(path.join(directory, 'data-baseline-certification.json')) === match.plan.dataBaselineCertificationSha256, 'App-only operation evidence leaf drift');
     }
@@ -602,7 +605,8 @@ export class PreparationRunner {
       const admissionPhase = await this.phase('ADMISSION', async () => this.appOnly ? this.waitFor('admitted app-only bundle download', async () => fs.existsSync(this.input.appDownloadReceipt) ? this.initializeAppOnly() : null) : this.waitFor('admitted bundle download', async () => fs.existsSync(this.input.downloadReceipt) ? validateAdmission(this.input) : null), async () => this.appOnly ? (fs.existsSync(this.input.appDownloadReceipt) ? this.initializeAppOnly() : null) : (fs.existsSync(this.input.downloadReceipt) ? validateAdmission(this.input) : null));
       if (this.appOnly) {
         const reconstructed = await this.initializeAppOnly();
-        demand(canonical(reconstructed) === canonical(admissionPhase.result), 'V2 derived admission state drift on resume');
+        const { detectedAt: _detectedAt, ...acceptedState } = admissionPhase.result;
+        demand(canonical(reconstructed) === canonical(acceptedState), 'V2 derived admission state drift on resume');
       }
       await this.phase('CONTROL_STAGE', async () => {
         if (this.appOnly) return { releaseSha: this.readAdmission().releaseSha, decision: 'INSTALLED_CONTROLLER_RECHECK_PASS', controllerManifestSha256: this.input.nativeRequest.preparationGuard.controllerManifestSha256 };

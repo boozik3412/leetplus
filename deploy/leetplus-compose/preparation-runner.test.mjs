@@ -13,7 +13,7 @@ const OPERATION = '12345678-1234-4123-8123-123456789abc';
 const WORKER_IDS = ['22345678-1234-4123-8123-123456789abc', '32345678-1234-4123-8123-123456789abc'];
 
 function appOnlyFixture() {
-  const f = fixture({ resource: false });
+  const f = fixture();
   const hash = digit => digit.repeat(64);
   const bundle = {
     schemaVersion: 2, contract: 'LEETPLUS_COMPOSE_APP_BUNDLE_V2', releaseLane: 'L1_APP_ONLY', releaseSha: f.release.releaseSha, builtAt: '2026-09-22T00:00:00.000Z', apiResourceProfile: 'API_6G_V1',
@@ -33,8 +33,62 @@ function appOnlyFixture() {
   const appAdmission = f.write('app/app-admission.json', admission, true);
   const appDownloadReceipt = f.write('app/download.json', { contract: 'LEETPLUS_COMPOSE_APP_DOWNLOAD_V2', decision: 'PASS', releaseSha: f.release.releaseSha, appAdmissionSha256: fileDigest(appAdmission), files: { 'app-bundle.json': { sha256: fileDigest(appBundle) }, 'app-images.tar.gz': { sha256: fileDigest(appImagesArchive) } } }, true);
   const input = { contract: APP_ONLY_CONTRACT, appBundle, appAdmission, appImagesArchive, appDownloadReceipt, offhostReceipt: f.input.offhostReceipt, backupVerificationReceipt: f.input.backupVerificationReceipt, restoreImportReceipt: f.input.restoreImportReceipt, browserReceipt: f.input.browserReceipt, targetSlot: 'green', wait: f.input.wait, nativeRequest: { preparationGuard: f.guard, workerContinuation: f.input.nativeRequest.workerContinuation } };
+  const v2InputDigest = digest(input);
+  let lostPrepareResponse = false;
   const execute = async (command, args, options) => {
+    if (args[0] === 'prepare-app-only') {
+      f.calls.push([path.basename(command), ...args]);
+      const request = JSON.parse(fs.readFileSync(args[2]));
+      const target = { ...f.oldRelease, releaseSha: f.release.releaseSha,
+        images: { ...f.oldRelease.images, api: f.release.images.api, web: f.release.images.web } };
+      const certification = { contract: 'LEETPLUS_COMPOSE_APP_DATA_BASELINE_V2', decision: 'CERTIFIED', releaseSha: target.releaseSha };
+      const plan = {
+        contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V2_PLAN', operationId: OPERATION,
+        hostIdentitySha256: f.guard.hostIdentitySha256, controlSha256: f.guard.controllerManifestSha256,
+        previous: f.active, generation: f.active.generation, action: 'ROLLOUT', targetSlot: request.targetSlot,
+        blue: f.active.blue, green: target, dataRelease: f.active.dataRelease,
+        dataAdmissionSha256: f.active.dataAdmissionSha256, admissionSha256: fileDigest(appAdmission), archiveSha256: fileDigest(appImagesArchive),
+        appAdmissionSha256: fileDigest(appAdmission), appArchiveSha256: fileDigest(appImagesArchive),
+        dataBaselineCertificationSha256: digest(certification), dataBaselineExpiresAt: '2026-09-22T02:30:00Z',
+        releaseLane: 'L1_APP_ONLY', workerContinuation: request.workerContinuation,
+        backupReceiptSha256: request.backupReceiptSha256, rehearsalReceiptSha256: request.rehearsalReceiptSha256,
+        preparationGuard: request.preparationGuard, preparationEvidenceExpiresAt: request.preparationEvidenceExpiresAt,
+      };
+      const operation = path.join(f.paths.nativeOperations, OPERATION); fs.mkdirSync(operation, { recursive: true });
+      fs.writeFileSync(path.join(operation, 'plan.json'), canonical(plan));
+      for (const binding of plan.workerContinuation.profileBindings) fs.copyFileSync(
+        path.join(f.paths.productionRoot, 'secrets', `${binding.worker}.json`), path.join(operation, `worker-profile-${binding.worker}.json`));
+      for (const [leaf, value] of [['app-bundle.json', bundle], ['app-admission.json', admission], ['data-baseline-certification.json', certification]]) {
+        const file = path.join(operation, leaf); fs.writeFileSync(file, canonical(value)); fs.chmodSync(file, 0o400);
+      }
+      const result = { exitCode: 0, stdout: canonical({ decision: 'PREPARED_NOT_AUTHORIZATION', operationId: OPERATION, planSha256: digest(plan) }), stderr: '' };
+      if (!lostPrepareResponse) { lostPrepareResponse = true; const error = new Error('response lost after durable app-only native plan'); error.code = 'ECONNRESET'; error.stdout = result.stdout; error.stderr = result.stderr; throw error; }
+      return result;
+    }
     const result = await f.execute(command, args, options);
+    if (args[0]?.endsWith('run-resource-rehearsal.py')) {
+      const accepted = JSON.parse(fs.readFileSync(f.paths.acceptance));
+      const target = JSON.parse(fs.readFileSync(path.join(f.root, 'v2-state/derived-v1-release.json')));
+      const composeSha256 = digest(renderCompose({ blue: target, green: target, rehearsal: true }));
+      accepted.resourceAcceptance.composeSha256 = composeSha256;
+      accepted.resourceAcceptance.guard.composeSha256 = composeSha256;
+      accepted.resourceAcceptance.corpus.releaseSha = target.releaseSha;
+      fs.writeFileSync(f.paths.acceptance, canonical(accepted));
+    }
+    if (args[0] === 'backup') {
+      const imported = JSON.parse(fs.readFileSync(input.restoreImportReceipt));
+      imported.derivationIdentity.preparationInputSha256 = v2InputDigest;
+      imported.derivationInputSha256 = digest(imported.derivationIdentity);
+      fs.writeFileSync(input.restoreImportReceipt, canonical(imported));
+    }
+    if (args[0]?.endsWith('prepare-files.py')) {
+      const admitted = { admissionSha256: fileDigest(appAdmission) };
+      const releasePath = args[args.indexOf('--release-json') + 1];
+      const baselinePath = args[args.indexOf('--data-baseline') + 1];
+      fs.writeFileSync(f.paths.preparation, canonical({ contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_PREPARATION', decision: 'PREPARED_NOT_SERVING', rehearsal: true, releaseSha: f.release.releaseSha, sourceConfigurationSha256: fileDigest(path.join(f.root, 'external/rehearsal-source-capsule.tar')), createdAt: f.clock(), appOnlyEvidence: {
+        appBundleSha256: fileDigest(appBundle), appAdmissionSha256: admitted.admissionSha256, appDownloadReceiptSha256: fileDigest(appDownloadReceipt), activeDataBaselineSha256: fileDigest(baselinePath), dataAdmissionSha256: f.active.dataAdmissionSha256, derivedReleaseSha256: fileDigest(releasePath),
+      } }));
+    }
     if (args[0] === 'status') {
       const status = JSON.parse(result.stdout);
       status.controller.appOnlyV2BaselineCertification = true;
@@ -287,6 +341,21 @@ test('V2 preparation rejects a tampered app-only evidence binding', async () => 
   evidence.derivedReleaseSha256 = '0'.repeat(64);
   fs.writeFileSync(f.paths.preparation, canonical({ contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_PREPARATION', decision: 'PREPARED_NOT_SERVING', rehearsal: true, releaseSha: admitted.releaseSha, sourceConfigurationSha256: imported.sourceCapsuleSha256, createdAt: f.clock(), appOnlyEvidence: evidence }));
   assert.throws(() => runner.validatePreparation(), /does not bind exact app\/data inputs/);
+});
+
+test('V2 native prepare reconciles a lost durable response and restart without replaying the app-only effect', async () => {
+  const f = appOnlyFixture(), state = path.join(f.root, 'v2-state');
+  const options = { execute: f.execute, paths: f.paths, clock: f.clock, workerBusy: async () => false };
+  const packet = await new PreparationRunner(f.input, state, options).run();
+  assert.equal(packet.decision, 'PREPARED_NOT_AUTHORIZATION');
+  assert.equal(packet.contract, 'LEETPLUS_RELEASE_PREPARATION_V2_GO_PACKET');
+  const prepares = () => f.calls.filter(call => call[1] === 'prepare-app-only');
+  assert.equal(prepares().length, 1, 'lost native response must reconcile the durable V2 plan without a second prepare effect');
+  for (const leaf of ['app-bundle.json', 'app-admission.json', 'data-baseline-certification.json', 'backup.json', 'rehearsal.json']) {
+    assert.ok(fs.existsSync(path.join(f.paths.nativeOperations, OPERATION, leaf)), `native operation must retain ${leaf}`);
+  }
+  await new PreparationRunner(f.input, state, options).run();
+  assert.equal(prepares().length, 1, 'restart must reuse the exact durable V2 operation');
 });
 
 test('restart and an existing complete plan never replay accepted effects', async () => {

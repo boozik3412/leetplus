@@ -9,7 +9,6 @@ from pathlib import Path
 
 COMPOSE = Path(__file__).resolve().parents[2] / 'deploy' / 'leetplus-compose'
 sys.path.insert(0, str(COMPOSE))
-from backup_crypto import dpapi, write_exclusive  # noqa: E402
 
 PLAN_CONTRACT = 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V2_PLAN'
 ACTION = 'CONTROL_HANDOFF_EXACT_TARGET'
@@ -117,6 +116,7 @@ def main():
     # Private material is opened only after all shape/scope/confirmation checks.
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from backup_crypto import dpapi, write_exclusive
     key = serialization.load_pem_private_key(dpapi(Path(args.private).read_bytes(), decrypt=True), password=None)
     if not isinstance(key, Ed25519PrivateKey):
         raise SystemExit('Expected dedicated Ed25519 deployment key')

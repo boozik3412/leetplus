@@ -63,7 +63,7 @@ function displayShape(source, ts) {
   function visit(node) {
     if (ts.isJsxText(node)) return ['jsx-text'];
     if (ts.isJsxAttribute(node) && node.initializer && ts.isStringLiteral(node.initializer) &&
-      /^(className|aria-label|title|alt)$/.test(node.name.text)) {
+      /^(aria-label|title|alt)$/.test(node.name.text)) {
       return ['safe-jsx-attribute', node.name.text];
     }
     const children = [];

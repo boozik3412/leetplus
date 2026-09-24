@@ -31,7 +31,7 @@ release-candidate receipts. The source impact must be exactly one unmixed
 must be a modification of one exact display-component path in
 `.github/scripts/classify-app-only.mjs`. Each candidate must retain its client
 directive and the same parsed TSX structure as the accepted base; only JSX
-text and inert `className`, `aria-label`, `title`, or `alt` string attributes may
+text and inert `aria-label`, `title`, or `alt` string attributes may
 change. Imports, comments, executable expressions, server actions and provider
 calls therefore fail the B decision and use V1. The B receipt binds both parent receipt
 digests and the allowlist digest. New files, removals, renames, docs mixed with

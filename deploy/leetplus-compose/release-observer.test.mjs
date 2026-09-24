@@ -21,7 +21,8 @@ function complete(s) {
   let previousReceiptSha256 = null;
   for (const phase of PHASES) {
     const intent = { phase, planSha256: digest(s.plan), previousReceiptSha256 };
-    const evidence = { phase, planSha256: digest(s.plan) };
+    const evidence = { phase, planSha256: digest(s.plan),
+      ...(phase === 'POSTCHECK' && s.workerContinuationReceipt ? { workerContinuationReceiptSha256: digest(s.workerContinuationReceipt) } : {}) };
     const receipt = { phase, planSha256: digest(s.plan), intentSha256: digest(intent), evidenceSha256: digest(evidence), previousReceiptSha256 };
     s.records[phase] = { intent, evidence, receipt }; previousReceiptSha256 = digest(receipt);
   }

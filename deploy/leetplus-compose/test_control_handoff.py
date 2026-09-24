@@ -326,11 +326,12 @@ class VariantAOrchestratorHandoffTests(unittest.TestCase):
                          {**handoff.VARIANT_A_TRANSITION, 'oldReleaseSha': old['manifest']['releaseSha'],
                           'newReleaseSha': new['manifest']['releaseSha'],
                           'oldControlSha256': old['digest'], 'newControlSha256': new['digest']})
-        root = Path(__file__).parent
-        for leaf, expected in [('orchestrator.mjs', handoff.VARIANT_A_NEW_ORCHESTRATOR_SHA256),
-                               ('control.mjs', handoff.VARIANT_A_NEW_CONTROL_SHA256),
-                               ('preparation-runner.mjs', handoff.VARIANT_A_NEW_RUNNER_SHA256)]:
-            self.assertEqual(handoff.digest((root / leaf).read_bytes()), expected)
+        self.assertEqual(handoff.VARIANT_A_NEW_ORCHESTRATOR_SHA256,
+                         'c4d13a76d1f97f41dc575d37c5da588b9ba3634b1a053f6b194a86623e8861c4')
+        self.assertEqual(handoff.VARIANT_A_NEW_CONTROL_SHA256,
+                         '4e39b9e8a75ede6bc474fe0ef8b0b5fea60b46edd7c1ed8172744288625ea49f')
+        self.assertEqual(handoff.VARIANT_A_NEW_RUNNER_SHA256,
+                         '9b02c697d6995b0ff9d4cc085d1249d6e83d96d0cb2848a1e6a139acf3f1eb29')
 
     def test_wrong_old_or_new_bytes_and_other_runtime_changes_fail(self):
         for side, leaf, wrong in [
@@ -391,6 +392,82 @@ class VariantAOrchestratorHandoffTests(unittest.TestCase):
                            {'oldControlSha256': '0' * 64}):
                 with self.subTest(change=change), self.assertRaises(ValueError):
                     handoff.validate_plan_bindings({**plan, **change}, old, new)
+
+
+class VariantAControllerRepairHandoffTests(unittest.TestCase):
+    def controls(self):
+        files = {leaf: str(index + 1) * 64 for index, leaf in enumerate(handoff.COMPATIBLE)}
+        files.update(handoff.VARIANT_A_REPAIR_OLD_FILES)
+        old = {'manifest': {'releaseSha': handoff.VARIANT_A_REPAIR_PREDECESSOR_SHA, 'files': files},
+               'digest': handoff.VARIANT_A_REPAIR_PREDECESSOR_MANIFEST_SHA256, 'root': Path('/old-control')}
+        new_files = {**files, **handoff.VARIANT_A_REPAIR_NEW_FILES}
+        new = {'manifest': {'releaseSha': 'd' * 40, 'files': new_files}, 'digest': 'd' * 64,
+               'root': Path('/new-control')}
+        return old, new
+
+    def test_exact_repair_transition_binds_both_manifests_and_every_changed_leaf(self):
+        old, new = self.controls()
+        transition = handoff.assert_runtime_contract_compatible(old, new)
+        self.assertEqual(transition, {
+            'contract': handoff.VARIANT_A_REPAIR_TRANSITION_CONTRACT,
+            'oldReleaseSha': old['manifest']['releaseSha'], 'newReleaseSha': new['manifest']['releaseSha'],
+            'oldControlSha256': old['digest'], 'newControlSha256': new['digest'],
+            'oldRuntimeFilesSha256': handoff.VARIANT_A_REPAIR_OLD_FILES,
+            'newRuntimeFilesSha256': handoff.VARIANT_A_REPAIR_NEW_FILES,
+        })
+        root = Path(__file__).parent
+        for leaf, expected in handoff.VARIANT_A_REPAIR_NEW_FILES.items():
+            self.assertEqual(handoff.digest((root / leaf).read_bytes()), expected, leaf)
+
+    def test_exact_repair_transition_structure_binds_both_manifests_and_file_maps(self):
+        old, new = self.controls()
+        transition = handoff.assert_runtime_contract_compatible(old, new)
+        self.assertEqual(set(transition), {'contract', 'oldReleaseSha', 'newReleaseSha',
+                         'oldControlSha256', 'newControlSha256', 'oldRuntimeFilesSha256',
+                         'newRuntimeFilesSha256'})
+        self.assertEqual(set(transition['oldRuntimeFilesSha256']), set(handoff.VARIANT_A_REPAIR_OLD_FILES))
+        self.assertEqual(set(transition['newRuntimeFilesSha256']), set(handoff.VARIANT_A_REPAIR_NEW_FILES))
+
+    def test_repair_transition_rejects_every_old_new_leaf_and_nested_field_drift(self):
+        for side, leaves in [('old', handoff.VARIANT_A_REPAIR_OLD_FILES),
+                             ('new', handoff.VARIANT_A_REPAIR_NEW_FILES)]:
+            for leaf in leaves:
+                with self.subTest(side=side, leaf=leaf):
+                    old, new = self.controls()
+                    target = old if side == 'old' else new
+                    target['manifest']['files'][leaf] = '0' * 64
+                    with self.assertRaisesRegex(ValueError, 'Unreviewed orchestrator transition'):
+                        handoff.assert_runtime_contract_compatible(old, new)
+        old, new = self.controls()
+        old['manifest']['files'][handoff.UNIT.name] = '7' * 64
+        new['manifest']['files'][handoff.UNIT.name] = '7' * 64
+        transition = handoff.variant_a_orchestrator_transition(old, new)
+        plan = {
+            'contract': handoff.CONTRACT + '_PLAN', 'action': 'CONTROL_HANDOFF',
+            'applicationRestartAllowed': False, 'timersMayBeStopped': False,
+            'rollbackAllowed': True, 'maxLockWaitSeconds': 120,
+            'oldReleaseSha': old['manifest']['releaseSha'], 'newReleaseSha': new['manifest']['releaseSha'],
+            'oldControlSha256': old['digest'], 'newControlSha256': new['digest'],
+            'oldMainTarget': str(old['root'] / 'control.sh'), 'newMainTarget': str(new['root'] / 'control.sh'),
+            'oldUnitSha256': '7' * 64, 'newUnitSha256': '7' * 64, 'oldUnitMode': 0o644,
+            'snapshot': {'files': {'/etc/leetplus-compose/providers.json': '8' * 64}},
+            'refreshScope': {'operation': 'refresh', 'setNames': ['lp_leetplus_https', 'lp_leetplus_smtp'],
+                             'ttlSeconds': 3600, 'publicAddressesOnly': True, 'policySha256': '8' * 64},
+            'orchestratorTransition': transition,
+        }
+        for mutate in [
+            lambda value: value.update(contract='LEETPLUS_VARIANT_A_ORCHESTRATOR_HANDOFF_V1'),
+            lambda value: value['oldRuntimeFilesSha256'].update({'extra.mjs': '0' * 64}),
+            lambda value: value['newRuntimeFilesSha256'].pop('install-control.py'),
+            lambda value: value.update(oldControlSha256='0' * 64),
+            lambda value: value.update(newControlSha256='0' * 64),
+        ]:
+            with self.subTest(mutate=mutate):
+                changed = json.loads(json.dumps(transition))
+                mutate(changed)
+                with mock.patch.object(handoff, 'assert_compatible'):
+                    with self.assertRaises(ValueError):
+                        handoff.validate_plan_bindings({**plan, 'orchestratorTransition': changed}, old, new)
 
 
 class ResourceProfileBootstrapPrepareTests(unittest.TestCase):

@@ -12,6 +12,12 @@ import { validateControlHandoffAuthority, validatePendingControlHandoffAuthority
 import { validatePendingNetworkBootAuthority } from './control-handoff-runtime.mjs';
 import { requireResourceBudget, verifyResourceAcceptance } from './resource-budget.mjs';
 import { reconcileBoundEvidence } from './bind-reconcile.mjs';
+import { createReadOnlyPhaseReconciler } from './control-reconcile.mjs';
+import { CONTRACT as WORKER_CONTINUATION_V2, WORKERS, TIMER_UNITS,
+  validateCurrentWorkerContinuation, validateForwardWorkerContinuation } from './worker-continuation.mjs';
+import { beginWorkerContinuation, bindForwardWorkerContinuation, completeWorkerContinuation,
+  abortUncommittedWorkerContinuation, rollbackWorkerContinuation,
+  preflightWorkerContinuation, validateWorkerContinuationReceipt } from './worker-continuation-runtime.mjs';
 
 const STATE = '/var/lib/leetplus-compose';
 const ROOT = '/srv/leetplus';
@@ -55,6 +61,18 @@ function publish(p, value) {
   demand(!fs.existsSync(p), 'Concurrent immutable publication outside control lock');
   fs.renameSync(tmp, p);
   syncDir(path.dirname(p));
+}
+function publishPrivateBytes(p, bytes) {
+  if (fs.existsSync(p)) { demand(safeFile(p, { immutable: true }).equals(bytes), 'Immutable private byte conflict'); return; }
+  const tmp = `${p}.publishing-${crypto.randomUUID()}`;
+  const fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o400);
+  try { fs.writeFileSync(fd, bytes); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  try {
+    demand(!fs.existsSync(p), 'Concurrent immutable private publication outside control lock');
+    fs.renameSync(tmp, p);
+    syncDir(path.dirname(p));
+  } finally { if (fs.existsSync(tmp)) { fs.unlinkSync(tmp); syncDir(path.dirname(p)); } }
+  demand(safeFile(p, { immutable: true }).equals(bytes), 'Published private bytes changed');
 }
 function replace(p, bytes, mode = 0o600) {
   const tmp = `${p}.next-${crypto.randomUUID()}`;
@@ -108,7 +126,10 @@ function installedDigest() {
     demand(/^[a-zA-Z0-9_.@-]+$/.test(name) && !['.', '..'].includes(name) && /^[a-f0-9]{64}$/.test(hash), 'Invalid installed file record');
     demand(digest(safeFile(`${CONTROL}/${name}`)) === hash, 'Installed control digest mismatch');
   }
-  for (const name of ['control.mjs', 'orchestrator.mjs', 'contract.mjs', 'control.sh']) demand(manifest.files[name], 'Required control file is not attested');
+  for (const name of ['control.mjs', 'orchestrator.mjs', 'contract.mjs', 'control.sh',
+    'control-reconcile.mjs', 'worker-continuation.mjs', 'worker-continuation-runtime.mjs']) {
+    demand(manifest.files[name], 'Required control file is not attested');
+  }
   return digest(manifest);
 }
 function hostIdentity() { return digest(safeFile('/etc/machine-id').toString().trim()); }
@@ -164,6 +185,71 @@ function storeFor(dir) {
     return { records, final: fs.existsSync(`${dir}/final.json`) ? readJSON(`${dir}/final.json`, { immutable: true }) : null, rolledBack: fs.existsSync(`${dir}/rolled-back.json`) ? readJSON(`${dir}/rolled-back.json`, { immutable: true }) : null };
   };
   return { read, publish: async (phase, type, value) => publish(`${dir}/${PHASES.indexOf(phase) + 1}-${phase}.${type}.json`, value), finalize: async value => publish(`${dir}/final.json`, value) };
+}
+function canonicalPrivateJSON(file) {
+  const bytes = safeFile(file, { immutable: true });
+  const value = JSON.parse(bytes);
+  demand(bytes.equals(Buffer.from(canonical(value))), 'Worker continuation JSON bytes are not canonical');
+  return value;
+}
+function workerTimer(unit) {
+  demand(Object.values(TIMER_UNITS).includes(unit), 'Unknown worker continuation timer');
+  const raw = run('/usr/bin/systemctl', ['show', unit, '--property=LoadState,ActiveState,UnitFileState,SubState']);
+  const fields = Object.fromEntries(raw.split('\n').filter(Boolean).map(line => line.split('=', 2)));
+  demand(fields.LoadState === 'loaded' && ['enabled', 'disabled'].includes(fields.UnitFileState) &&
+    ['active', 'inactive'].includes(fields.ActiveState) && ['waiting', 'dead'].includes(fields.SubState),
+  'Untrusted worker timer observation');
+  return { unit, loadState: fields.LoadState, enabled: fields.UnitFileState === 'enabled',
+    active: fields.ActiveState === 'active', subState: fields.SubState };
+}
+function workerContinuationAdapters(dir) {
+  const statePath = worker => { demand(WORKERS.includes(worker), 'Unknown worker grant'); return `${STATE}/worker-grants/${worker}.json`; };
+  const lifecyclePaths = { intent: `${dir}/worker-continuation.intent.json`, receipt: `${dir}/worker-continuation.receipt.json`,
+    abortReceipt: `${dir}/worker-continuation.abort.json`, rollbackIntent: `${dir}/worker-continuation-rollback.intent.json`,
+    rollbackReceipt: `${dir}/worker-continuation-rollback.receipt.json` };
+  return {
+    readGrant: async worker => canonicalPrivateJSON(statePath(worker)),
+    writeGrantAtomic: async (worker, envelope) => replace(statePath(worker), Buffer.from(canonical(envelope)), 0o400),
+    readTimer: async unit => workerTimer(unit),
+    systemctl: async (action, unit) => {
+      demand(['stop', 'start', 'enable', 'disable'].includes(action) && Object.values(TIMER_UNITS).includes(unit), 'Unscoped worker timer command');
+      run('/usr/bin/systemctl', [action, unit]);
+    },
+    readLifecycle: async () => Object.fromEntries(Object.entries(lifecyclePaths)
+      .filter(([, file]) => fs.existsSync(file)).map(([type, file]) => [type, canonicalPrivateJSON(file)])),
+    publish: async (type, value) => { demand(Object.hasOwn(lifecyclePaths, type), 'Unknown worker continuation record'); publish(lifecyclePaths[type], value); },
+    assertExclusiveLock: async () => verifyKernelControlLocks({ mode: 'WRITE', singleton: null }, {
+      globalLock: fs.lstatSync(`${STATE}/control.lock`), locks: fs.readFileSync('/proc/locks', 'utf8'), parentPid: process.ppid,
+    }),
+  };
+}
+function workerContinuationArguments(plan, dir, current = active()) {
+  demand(plan.workerContinuation?.contract === WORKER_CONTINUATION_V2, 'Executable worker continuation is required');
+  const forwardEnvelopes = WORKERS.map(worker => canonicalPrivateJSON(`${dir}/worker-forward-${worker}.json`));
+  const rollbackEnvelopes = WORKERS.map(worker => canonicalPrivateJSON(`${dir}/worker-rollback-${worker}.json`));
+  const profiles = Object.fromEntries(WORKERS.map(worker => [worker, safeFile(`${ROOT}/secrets/${worker}.json`)]));
+  for (const binding of plan.workerContinuation.profileBindings) {
+    demand(digest(safeFile(`${dir}/worker-profile-${binding.worker}.json`, { immutable: true })) === binding.profileSha256 &&
+      digest(profiles[binding.worker]) === binding.profileSha256, 'Worker profile snapshot or live bytes drift');
+  }
+  return { plan, forwardEnvelopes, rollbackEnvelopes,
+    context: { publicKey: safeFile('/etc/leetplus-compose/approval-root.pem'), hostIdentitySha256: hostIdentity(),
+      profiles, now: Date.now(), current }, adapters: workerContinuationAdapters(dir) };
+}
+async function workerContinuationPostimage(args) {
+  return { current: args.context.current,
+    grantEnvelopes: await Promise.all(WORKERS.map(worker => args.adapters.readGrant(worker))),
+    timers: await Promise.all(WORKERS.map(async worker => ({ worker, ...(await args.adapters.readTimer(TIMER_UNITS[worker])) }))) };
+}
+async function acceptedWorkerContinuation(args, mode) {
+  const lifecycle = await args.adapters.readLifecycle();
+  const receipt = mode === 'ROLLBACK' ? lifecycle.rollbackReceipt : lifecycle.receipt;
+  demand(receipt, 'Accepted application lacks worker continuation receipt');
+  validateWorkerContinuationReceipt({ plan: args.plan, receipt,
+    postimage: await workerContinuationPostimage(args),
+    context: { ...args.context, intent: lifecycle.intent, rollbackIntent: lifecycle.rollbackIntent,
+      forwardEnvelopes: args.forwardEnvelopes, rollbackEnvelopes: args.rollbackEnvelopes } });
+  return receipt;
 }
 function assertNoPending(except) {
   for (const id of fs.readdirSync(`${STATE}/operations`)) {
@@ -221,19 +307,83 @@ function switchLink(slot) {
   fs.symlinkSync(`${slot}.conf`, tmp);
   fs.renameSync(tmp, `${NGINX}/active.conf`); syncDir(NGINX);
 }
-function rollbackAfterPostcheck(p, dir) {
+async function finishRollbackWorkerContinuation(p, dir, current) {
+  const continuation = p.workerContinuation?.contract === WORKER_CONTINUATION_V2 ? workerContinuationArguments(p, dir, current) : null;
+  const workerReceipt = continuation ? await rollbackWorkerContinuation(continuation) : null;
+  publish(`${dir}/rolled-back.json`, { contract: `${CONTRACT}_ROLLED_BACK`, planSha256: digest(p), reason: 'POSTCHECK_FAILED', active: current,
+    ...(workerReceipt ? { workerContinuationReceiptSha256: digest(workerReceipt) } : {}) });
+  return workerReceipt;
+}
+function rollbackActive(p) {
+  return { operationId: p.operationId, generation: p.generation + 2, activeSlot: p.previous.activeSlot,
+    blue: p.blue, green: p.green, dataRelease: p.dataRelease,
+    dataAdmissionSha256: p.dataAdmissionSha256, planSha256: digest(p), outcome: 'ROLLED_BACK' };
+}
+function rollbackIntent(p) {
+  return { planSha256: digest(p), fromGeneration: p.generation + 1, targetSlot: p.previous.activeSlot };
+}
+async function resumeRollbackAfterPostcheck(p, dir, { effectsAllowed }) {
+  const intent = canonicalPrivateJSON(`${dir}/rollback.intent.json`);
+  demand(canonical(intent) === canonical(rollbackIntent(p)), 'Rollback intent does not bind the exact plan');
+  const current = active(), expected = rollbackActive(p);
+  if (canonical(current) === canonical(expected)) {
+    demand(acceptedLink(p.previous.activeSlot), 'Rollback active state has a different nginx link');
+    probeSlot(p, p.previous.activeSlot);
+    const live = JSON.parse(http('https://api.leetplus.ru/health/ready', { resolve: 'api.leetplus.ru:443:127.0.0.1' }));
+    demand(live.release?.sha === p.previous[p.previous.activeSlot].releaseSha,
+      'Rollback active state is not the public serving release');
+    if (effectsAllowed) await finishRollbackWorkerContinuation(p, dir, current);
+    const terminal = await storeFor(dir).read();
+    demand(terminal.rolledBack?.workerContinuationReceiptSha256,
+      'Rollback is not terminally accepted after authorization expiry');
+    return terminal.rolledBack;
+  }
+  demand(current?.operationId === p.operationId && current.generation === p.generation + 1 &&
+    current.activeSlot === p.targetSlot, 'Rollback recovery has ambiguous active state');
+  demand(effectsAllowed, 'Rollback routing is unfinished after authorization expiry');
+  probeSlot(p, p.previous.activeSlot);
+  authenticatedSmoke(p.previous.activeSlot);
+  const publicRelease = () => {
+    try {
+      const ready = JSON.parse(http('https://api.leetplus.ru/health/ready', { resolve: 'api.leetplus.ru:443:127.0.0.1' }));
+      const web = JSON.parse(http('https://leetplus.ru/api/release-identity', { resolve: 'leetplus.ru:443:127.0.0.1' }));
+      return ready.release?.sha === web.release?.sha ? ready.release.sha : null;
+    } catch { return null; }
+  };
+  const linkWasPrevious = acceptedLink(p.previous.activeSlot);
+  if (!linkWasPrevious) {
+    demand(acceptedLink(p.targetSlot), 'Rollback routing link is ambiguous');
+    switchLink(p.previous.activeSlot);
+  }
+  const served = publicRelease();
+  if (!linkWasPrevious && served === p.previous[p.previous.activeSlot].releaseSha) {
+    demand(false, 'Rollback link changed without a provable nginx generation; manual recovery required');
+  }
+  if (served !== p.previous[p.previous.activeSlot].releaseSha) {
+    demand(served === p[p.targetSlot].releaseSha && acceptedLink(p.previous.activeSlot),
+      'Rollback public routing is ambiguous before nginx reload');
+    run('/usr/sbin/nginx', ['-t']); run('/usr/bin/systemctl', ['reload', 'nginx']);
+  }
+  demand(publicRelease() === p.previous[p.previous.activeSlot].releaseSha,
+    'Rollback public routing did not reach the previous release');
+  probeSlot(p, p.previous.activeSlot);
+  replace(`${STATE}/active.json`, canonical(expected));
+  await finishRollbackWorkerContinuation(p, dir, expected);
+  return (await storeFor(dir).read()).rolledBack;
+}
+async function rollbackAfterPostcheck(p, dir) {
   demand(p.previous, 'Bootstrap has no local predecessor to roll back to');
   probeSlot(p, p.previous.activeSlot); authenticatedSmoke(p.previous.activeSlot);
-  publish(`${dir}/rollback.intent.json`, { planSha256: digest(p), fromGeneration: p.generation + 1, targetSlot: p.previous.activeSlot });
+  publish(`${dir}/rollback.intent.json`, rollbackIntent(p));
   switchLink(p.previous.activeSlot);
   run('/usr/sbin/nginx', ['-t']); run('/usr/bin/systemctl', ['reload', 'nginx']);
   probeSlot(p, p.previous.activeSlot);
-  const current = { operationId: p.operationId, generation: p.generation + 2, activeSlot: p.previous.activeSlot, blue: p.blue, green: p.green, dataRelease: p.dataRelease, dataAdmissionSha256: p.dataAdmissionSha256, planSha256: digest(p), outcome: 'ROLLED_BACK' };
+  const current = rollbackActive(p);
   replace(`${STATE}/active.json`, canonical(current));
-  publish(`${dir}/rolled-back.json`, { contract: `${CONTRACT}_ROLLED_BACK`, planSha256: digest(p), reason: 'POSTCHECK_FAILED', active: current });
+  await finishRollbackWorkerContinuation(p, dir, current);
 }
 function driverFor(dir) {
-  return {
+  const driver = {
     preflight: async (p) => {
       demand(hostIdentity() === p.hostIdentitySha256 && installedDigest() === p.controlSha256, 'Host/control identity drift');
       for (const [leaf, hash] of Object.entries(p.secretDigests)) demand(digest(safeFile(`${ROOT}/secrets/${leaf}`)) === hash, 'Runtime secret-file binding drift');
@@ -246,7 +396,23 @@ function driverFor(dir) {
       for (const name of ['postgres', 'redis']) verifyContainer(docker(['inspect', `leetplus-${name}`], { json: true })[0], dataSpec.services[name], name);
       assertNoPending(p.operationId);
       const current = active();
-      demand(canonical(current) === canonical(p.previous) || (current?.operationId === p.operationId && current.generation === p.generation + 1 && current.activeSlot === p.targetSlot), 'Active generation drift');
+      demand(canonical(current) === canonical(p.previous) ||
+        (current?.operationId === p.operationId &&
+          ((current.generation === p.generation + 1 && current.activeSlot === p.targetSlot) ||
+            (current.generation === p.generation + 2 && current.activeSlot === p.previous?.activeSlot && current.outcome === 'ROLLED_BACK'))),
+      'Active generation drift');
+      if (p.workerContinuation?.contract === WORKER_CONTINUATION_V2) {
+        const continuation = workerContinuationArguments(p, dir, current);
+        const phaseState = await storeFor(dir).read();
+        const interruptedCutover = phaseState.records.CUTOVER?.intent && !phaseState.records.CUTOVER?.receipt;
+        const interruptedPostcheck = phaseState.records.POSTCHECK?.intent && !phaseState.records.POSTCHECK?.receipt;
+        if (canonical(current) === canonical(p.previous) && !interruptedCutover) await preflightWorkerContinuation(continuation);
+        else if (interruptedCutover) demand(fs.existsSync(`${dir}/worker-continuation.intent.json`),
+          'Interrupted cutover lacks worker continuation intent');
+        else if (interruptedPostcheck || phaseState.records.POSTCHECK?.receipt || fs.existsSync(`${dir}/rollback.intent.json`)) {
+          demand(fs.existsSync(`${dir}/worker-continuation.intent.json`), 'Accepted cutover lacks worker continuation intent');
+        } else demand(false, 'Worker continuation state is not tied to a native phase');
+      }
       const inbox = `${ROOT}/inbox/${p[p.targetSlot].releaseSha}`;
       demand(digest(safeFile(`${inbox}/docker-admission.json`)) === p.admissionSha256, 'Admission drift');
       const a = readJSON(`${inbox}/docker-admission.json`);
@@ -297,17 +463,36 @@ function driverFor(dir) {
       if (phase === 'CUTOVER') {
         probeSlot(p, p.targetSlot); authenticatedSmoke(p.targetSlot);
         if (p.previous) { demand(acceptedLink(p.previous.activeSlot) || acceptedLink(p.targetSlot), 'Unexpected nginx link'); probeSlot(p, p.previous.activeSlot); }
-        switchLink(p.targetSlot);
+        const continuation = p.workerContinuation?.contract === WORKER_CONTINUATION_V2 ? workerContinuationArguments(p, dir) : null;
+        if (continuation) {
+          try {
+            const begun = await beginWorkerContinuation(continuation);
+            demand(begun.decision === 'WORKER_CONTINUATION_BEGUN', 'Worker continuation is already terminal before CUTOVER');
+          } catch (error) {
+            const lifecycle = await continuation.adapters.readLifecycle();
+            if (lifecycle.intent && !lifecycle.abortReceipt && acceptedLink(p.previous.activeSlot) &&
+              canonical(active()) === canonical(p.previous)) {
+              await abortUncommittedWorkerContinuation(workerContinuationArguments(p, dir));
+            }
+            throw error;
+          }
+        }
         try {
+          switchLink(p.targetSlot);
           run('/usr/sbin/nginx', ['-t']); run('/usr/bin/systemctl', ['reload', 'nginx']);
           for (let sample = 0; sample < 3; sample++) { probeSlot(p, p.targetSlot); await new Promise(resolve => setTimeout(resolve, 1000)); }
         } catch (error) {
-          if (p.previous) { switchLink(p.previous.activeSlot); run('/usr/sbin/nginx', ['-t']); run('/usr/bin/systemctl', ['reload', 'nginx']); }
+          if (p.previous) {
+            switchLink(p.previous.activeSlot); run('/usr/sbin/nginx', ['-t']); run('/usr/bin/systemctl', ['reload', 'nginx']);
+            if (continuation) await abortUncommittedWorkerContinuation(workerContinuationArguments(p, dir));
+          }
           throw error;
         }
         const current = { operationId: p.operationId, generation: p.generation + 1, activeSlot: p.targetSlot, blue: p.blue, green: p.green, dataRelease: p.dataRelease, dataAdmissionSha256: p.dataAdmissionSha256, planSha256: digest(p) };
         replace(`${STATE}/active.json`, canonical(current));
-        return { ...bound, generation: current.generation, slot: current.activeSlot };
+        if (continuation) await bindForwardWorkerContinuation(workerContinuationArguments(p, dir, current));
+        return { ...bound, generation: current.generation, slot: current.activeSlot,
+          ...(continuation ? { workerContinuationIntentSha256: digest((await continuation.adapters.readLifecycle()).intent) } : {}) };
       }
       demand(phase === 'POSTCHECK', 'Unknown phase');
       demand(acceptedLink(p.targetSlot) && active()?.operationId === p.operationId, 'Cutover is not accepted');
@@ -315,51 +500,186 @@ function driverFor(dir) {
         const ready = JSON.parse(http('https://api.leetplus.ru/health/ready', { resolve: 'api.leetplus.ru:443:127.0.0.1' }));
         const web = JSON.parse(http('https://leetplus.ru/api/release-identity', { resolve: 'leetplus.ru:443:127.0.0.1' }));
         demand(ready.release?.sha === p[p.targetSlot].releaseSha && web.release?.sha === p[p.targetSlot].releaseSha, 'Nginx TLS/SNI readiness mismatch');
-        return { ...bound, slot: p.targetSlot, generation: p.generation + 1, authenticated: authenticatedSmoke(p.targetSlot) };
+        const authenticated = authenticatedSmoke(p.targetSlot);
+        const continuation = p.workerContinuation?.contract === WORKER_CONTINUATION_V2 ? workerContinuationArguments(p, dir) : null;
+        const workerReceipt = continuation ? await completeWorkerContinuation(continuation) : null;
+        return { ...bound, slot: p.targetSlot, generation: p.generation + 1, authenticated,
+          ...(workerReceipt ? { workerContinuationReceiptSha256: digest(workerReceipt) } : {}) };
       } catch (error) {
-        if (p.previous) rollbackAfterPostcheck(p, dir);
+        if (p.previous) await rollbackAfterPostcheck(p, dir);
         throw error;
       }
     },
-    reconcile: async function (phase, p) {
-      // Each fixed phase is idempotent at its own boundary. Completed phases
-      // are immutable and never re-applied by the orchestrator.
-      if (phase === 'CUTOVER' && active()?.operationId === p.operationId) {
-        demand(acceptedLink(p.targetSlot), 'Committed cutover link drift'); probeSlot(p, p.targetSlot);
-        return { phase, planSha256: digest(p), generation: p.generation + 1, slot: p.targetSlot };
-      }
-      if (phase === 'BIND') {
-        const record = await storeFor(dir).read();
-        if (record.records.BIND?.evidence) {
-          const spec = renderCompose({ blue: p.blue, green: p.green, dataRelease: p.dataRelease, activeSlot: p.targetSlot });
-          if (p[p.targetSlot].apiResourceProfile) requireResourceBudget(spec, docker);
-          return reconcileBoundEvidence({ plan: p, spec, evidence: record.records.BIND.evidence,
-            composeSha256: digest(safeFile(`${ROOT}/compose.json`)), fence: readJSON(`${dir}/target-fence.json`, { immutable: true }),
-            assertStoppedConfiguration: name => {
-              const service = spec.services[name], item = docker(['inspect', service.container_name], { json: true })[0];
-              demand(item.State.Running === false, 'BIND target unexpectedly running before its receipt');
-              const imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
-              verifyContainer(item, service, name, { imageEnvironment, configurationOnly: true });
-            } });
-        }
-      }
-      if (phase === 'SMOKE') {
-        const record = await storeFor(dir).read();
-        if (record.records.SMOKE?.evidence) {
-          const observed = probeSlot(p, p.targetSlot);
-          demand(canonical(observed) === canonical(record.records.SMOKE.evidence.observed), 'Smoke identity changed after evidence publication');
-          authenticatedSmoke(p.targetSlot);
-          return record.records.SMOKE.evidence;
-        }
-      }
-      if (phase === 'POSTCHECK') {
-        const record = await storeFor(dir).read();
-        await this.run(phase, p);
-        if (record.records.POSTCHECK?.evidence) return record.records.POSTCHECK.evidence;
-      }
-      return this.run(phase, p);
-    },
   };
+  const bound = p => ({ phase: 'BIND', planSha256: digest(p) });
+  const stoppedTarget = (p, spec, name) => {
+    const service = spec.services[name], item = docker(['inspect', service.container_name], { json: true })[0];
+    demand(item.State.Running === false, 'BIND target unexpectedly running before its receipt');
+    const imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
+    verifyContainer(item, service, name, { imageEnvironment, configurationOnly: true });
+  };
+  const observePhase = createReadOnlyPhaseReconciler({
+    readState: () => storeFor(dir).read(),
+    observers: {
+      HYDRATE: async (p, evidence) => {
+        const images = p[p.targetSlot].images;
+        for (const image of Object.values(images)) demand(docker(['image', 'inspect', '--format', '{{.Id}}', image]) === image, 'Hydrated image ID mismatch');
+        if (evidence) {
+          demand(canonical(evidence.images) === canonical(images), 'HYDRATE evidence image drift');
+          return evidence;
+        }
+        return { phase: 'HYDRATE', planSha256: digest(p), images };
+      },
+      BIND: async (p, evidence) => {
+        const spec = renderCompose({ blue: p.blue, green: p.green, dataRelease: p.dataRelease, activeSlot: p.targetSlot });
+        const live = {
+          plan: p,
+          spec,
+          evidence: evidence ?? { ...bound(p), composeSha256: digest(spec), slot: p.targetSlot },
+          composeSha256: digest(safeFile(`${ROOT}/compose.json`)),
+          fence: readJSON(`${dir}/target-fence.json`, { immutable: true }),
+          assertStoppedConfiguration: name => stoppedTarget(p, spec, name),
+        };
+        if (!evidence) demand(!p[p.targetSlot].apiResourceProfile, 'BIND intent without durable resource evidence is ambiguous');
+        return reconcileBoundEvidence(live);
+      },
+      SMOKE: async (p, evidence) => {
+        demand(evidence, 'SMOKE intent without durable evidence is ambiguous');
+        const observed = probeSlot(p, p.targetSlot);
+        demand(canonical(observed) === canonical(evidence.observed), 'Smoke identity changed after evidence publication');
+        return evidence;
+      },
+      CUTOVER: async (p, evidence) => {
+        const current = active();
+        demand(current?.operationId === p.operationId && current.planSha256 === digest(p) &&
+          current.generation === p.generation + 1 && current.activeSlot === p.targetSlot,
+        'CUTOVER intent does not have an accepted active postimage');
+        demand(acceptedLink(p.targetSlot), 'Committed cutover link drift');
+        probeSlot(p, p.targetSlot);
+        let workerIntentSha256;
+        if (p.workerContinuation?.contract === WORKER_CONTINUATION_V2) {
+          const args = workerContinuationArguments(p, dir, current);
+          const lifecycle = await args.adapters.readLifecycle();
+          demand(lifecycle.intent?.operationId === p.operationId && lifecycle.intent.planSha256 === digest(p) &&
+            lifecycle.intent.policySha256 === digest(p.workerContinuation) && !lifecycle.abortReceipt,
+          'CUTOVER worker continuation intent is absent or drifted');
+          validateForwardWorkerContinuation(p.workerContinuation,
+            await Promise.all(WORKERS.map(worker => args.adapters.readGrant(worker))), args.context);
+          for (const binding of p.workerContinuation.originalTimers) {
+            const timer = await args.adapters.readTimer(binding.unit);
+            demand(!timer.active && timer.enabled === binding.enabled, 'CUTOVER worker timer postimage drift');
+          }
+          workerIntentSha256 = digest(lifecycle.intent);
+        }
+        const observed = { phase: 'CUTOVER', planSha256: digest(p), generation: current.generation, slot: current.activeSlot,
+          ...(workerIntentSha256 ? { workerContinuationIntentSha256: workerIntentSha256 } : {}) };
+        if (evidence) {
+          demand(canonical(evidence) === canonical(observed), 'CUTOVER evidence drift');
+          return evidence;
+        }
+        return observed;
+      },
+      POSTCHECK: async (p, evidence) => {
+        demand(evidence, 'POSTCHECK intent without durable evidence is ambiguous');
+        const current = active();
+        if (current?.operationId === p.operationId && current.generation === p.generation + 2 &&
+          current.activeSlot === p.previous?.activeSlot && current.outcome === 'ROLLED_BACK') {
+          const terminal = await storeFor(dir).read();
+          demand(terminal.rolledBack?.workerContinuationReceiptSha256,
+            'POSTCHECK rollback has no terminal worker continuation receipt');
+          return evidence;
+        }
+        demand(acceptedLink(p.targetSlot) && current?.operationId === p.operationId && current.planSha256 === digest(p) &&
+          current.generation === p.generation + 1 && current.activeSlot === p.targetSlot,
+        'POSTCHECK intent does not have an accepted cutover postimage');
+        const ready = JSON.parse(http('https://api.leetplus.ru/health/ready', { resolve: 'api.leetplus.ru:443:127.0.0.1' }));
+        const web = JSON.parse(http('https://leetplus.ru/api/release-identity', { resolve: 'leetplus.ru:443:127.0.0.1' }));
+        demand(ready.release?.sha === p[p.targetSlot].releaseSha && web.release?.sha === p[p.targetSlot].releaseSha, 'Nginx TLS/SNI readiness mismatch');
+        demand(evidence.slot === p.targetSlot && evidence.generation === p.generation + 1, 'POSTCHECK evidence drift');
+        if (p.workerContinuation?.contract === WORKER_CONTINUATION_V2) {
+          const receipt = await acceptedWorkerContinuation(workerContinuationArguments(p, dir, current), 'FORWARD');
+          demand(evidence.workerContinuationReceiptSha256 === digest(receipt), 'POSTCHECK worker continuation receipt drift');
+        }
+        return evidence;
+      },
+    },
+  });
+  driver.reconcile = async (phase, plan, { effectsAllowed = false } = {}) => {
+    if (plan.workerContinuation?.contract !== WORKER_CONTINUATION_V2 || !['CUTOVER', 'POSTCHECK'].includes(phase)) {
+      return observePhase(phase, plan);
+    }
+    const current = active(), state = await storeFor(dir).read();
+    demand(state.records[phase]?.intent && !state.records[phase]?.receipt,
+      `${phase} reconciliation requires an unfinished exact intent`);
+    if (phase === 'POSTCHECK') {
+      if (fs.existsSync(`${dir}/rollback.intent.json`)) {
+        const terminal = await resumeRollbackAfterPostcheck(plan, dir, { effectsAllowed });
+        demand(terminal?.workerContinuationReceiptSha256, 'Rollback continuation is not terminal');
+        return { phase, planSha256: digest(plan), rolledBack: true };
+      }
+      if (current?.operationId === plan.operationId && current.generation === plan.generation + 2 &&
+        current.activeSlot === plan.previous.activeSlot && current.outcome === 'ROLLED_BACK') {
+        if (effectsAllowed) await finishRollbackWorkerContinuation(plan, dir, current);
+        const after = await storeFor(dir).read();
+        demand(after.rolledBack?.workerContinuationReceiptSha256, 'Pending rollback is not terminally accepted');
+        return { phase, planSha256: digest(plan), rolledBack: true };
+      }
+      demand(current?.operationId === plan.operationId && current.generation === plan.generation + 1 &&
+        current.activeSlot === plan.targetSlot, 'POSTCHECK active state is ambiguous');
+      demand(acceptedLink(plan.targetSlot), 'POSTCHECK routing link differs from target before worker recovery');
+      probeSlot(plan, plan.targetSlot);
+      const preReady = JSON.parse(http('https://api.leetplus.ru/health/ready', { resolve: 'api.leetplus.ru:443:127.0.0.1' }));
+      const preWeb = JSON.parse(http('https://leetplus.ru/api/release-identity', { resolve: 'leetplus.ru:443:127.0.0.1' }));
+      demand(preReady.release?.sha === plan[plan.targetSlot].releaseSha &&
+        preWeb.release?.sha === plan[plan.targetSlot].releaseSha,
+      'POSTCHECK public identity differs from target before worker recovery');
+      if (effectsAllowed) {
+        const args = workerContinuationArguments(plan, dir, current), lifecycle = await args.adapters.readLifecycle();
+        if (!lifecycle.receipt && !lifecycle.rollbackIntent) await completeWorkerContinuation(args);
+      }
+      const args = workerContinuationArguments(plan, dir, current);
+      const receipt = await acceptedWorkerContinuation(args, 'FORWARD');
+      const ready = JSON.parse(http('https://api.leetplus.ru/health/ready', { resolve: 'api.leetplus.ru:443:127.0.0.1' }));
+      const web = JSON.parse(http('https://leetplus.ru/api/release-identity', { resolve: 'leetplus.ru:443:127.0.0.1' }));
+      demand(ready.release?.sha === plan[plan.targetSlot].releaseSha && web.release?.sha === plan[plan.targetSlot].releaseSha,
+        'POSTCHECK public identity drift during reconciliation');
+      const evidence = state.records.POSTCHECK.evidence;
+      if (!evidence) {
+        demand(effectsAllowed, 'POSTCHECK acceptance evidence is absent after authorization expiry');
+        const authenticated = authenticatedSmoke(plan.targetSlot);
+        return { phase, planSha256: digest(plan), slot: plan.targetSlot, generation: plan.generation + 1,
+          authenticated, workerContinuationReceiptSha256: digest(receipt),
+          reconciliationBasis: 'FRESH_BOUNDED_AUTHENTICATED_READ_AFTER_LOST_RESPONSE' };
+      }
+      demand(evidence.workerContinuationReceiptSha256 === digest(receipt), 'POSTCHECK worker evidence drift');
+      return observePhase(phase, plan);
+    }
+    if (canonical(current) === canonical(plan.previous)) {
+      if (effectsAllowed) {
+        const args = workerContinuationArguments(plan, dir, current), lifecycle = await args.adapters.readLifecycle();
+        demand(acceptedLink(plan.previous.activeSlot),
+          'Partial CUTOVER routing differs from active state; manual incident recovery required');
+        if (lifecycle.intent && !lifecycle.abortReceipt) await abortUncommittedWorkerContinuation(args);
+      }
+      demand(false, 'CUTOVER was not committed; original timer state must be reviewed before a new plan');
+    }
+    demand(current?.operationId === plan.operationId && current.generation === plan.generation + 1 &&
+      current.activeSlot === plan.targetSlot, 'CUTOVER active state is ambiguous');
+    demand(acceptedLink(plan.targetSlot), 'CUTOVER routing link differs from target before worker recovery');
+    probeSlot(plan, plan.targetSlot);
+    const preReady = JSON.parse(http('https://api.leetplus.ru/health/ready', { resolve: 'api.leetplus.ru:443:127.0.0.1' }));
+    const preWeb = JSON.parse(http('https://leetplus.ru/api/release-identity', { resolve: 'leetplus.ru:443:127.0.0.1' }));
+    demand(preReady.release?.sha === plan[plan.targetSlot].releaseSha &&
+      preWeb.release?.sha === plan[plan.targetSlot].releaseSha,
+    'CUTOVER public identity differs from target before worker recovery');
+    if (effectsAllowed) {
+      const args = workerContinuationArguments(plan, dir, current);
+      const lifecycle = await args.adapters.readLifecycle();
+      if (!lifecycle.receipt) await bindForwardWorkerContinuation(args);
+    }
+    return observePhase(phase, plan);
+  };
+  return driver;
 }
 
 if (command === 'help' || !command) {
@@ -422,8 +742,37 @@ if (command === 'help' || !command) {
     const plannedCompose = renderCompose({ blue: plan.blue, green: plan.green, dataRelease: plan.dataRelease, activeSlot: plan.targetSlot });
     plan.composeSha256 = digest(plannedCompose);
     if (plan[plan.targetSlot].apiResourceProfile) plan.resourceBudget = requireResourceBudget(plannedCompose, docker);
+    if (plan.action === 'ROLLOUT') {
+      demand(plan.workerContinuation?.contract === WORKER_CONTINUATION_V2,
+        'New application preparation requires executable V2 worker continuation');
+      const policy = plan.workerContinuation;
+      const profiles = Object.fromEntries(WORKERS.map(worker => [worker, safeFile(`${ROOT}/secrets/${worker}.json`)]));
+      validateCurrentWorkerContinuation(policy, WORKERS.map(worker => canonicalPrivateJSON(`${STATE}/worker-grants/${worker}.json`)), {
+        publicKey: safeFile('/etc/leetplus-compose/approval-root.pem'), current: previous,
+        hostIdentitySha256: plan.hostIdentitySha256, profiles, now: Date.now(),
+      });
+      for (const binding of policy.originalTimers) {
+        const timer = workerTimer(binding.unit);
+        demand(timer.enabled === binding.enabled && timer.active === binding.active,
+          'Original worker timer state changed before native preparation');
+      }
+    }
     validatePlan(plan);
-    const dir = operation(id); directory(dir); publish(`${dir}/plan.json`, plan);
+    const dir = operation(id);
+    directory(`${STATE}/preparation-staging`);
+    const stagedDir = `${STATE}/preparation-staging/${id}`;
+    demand(!fs.existsSync(dir) && !fs.existsSync(stagedDir), 'Native preparation operation ID is not fresh');
+    directory(stagedDir);
+    if (plan.workerContinuation?.contract === WORKER_CONTINUATION_V2) {
+      for (const binding of plan.workerContinuation.profileBindings) {
+        const bytes = safeFile(`${ROOT}/secrets/${binding.worker}.json`);
+        demand(digest(bytes) === binding.profileSha256, 'Worker profile drift during native preparation');
+        publishPrivateBytes(`${stagedDir}/worker-profile-${binding.worker}.json`, bytes);
+      }
+    }
+    publish(`${stagedDir}/plan.json`, plan);
+    fs.renameSync(stagedDir, dir);
+    syncDir(`${STATE}/preparation-staging`); syncDir(`${STATE}/operations`);
     console.log(canonical({ decision: 'PREPARED_NOT_AUTHORIZATION', operationId: id, planSha256: digest(plan), planPath: `${dir}/plan.json` }));
   } else if (command === 'boot') {
     const current = active();
@@ -468,6 +817,16 @@ if (command === 'help' || !command) {
     demand(current, 'No accepted active release');
     const activePlan = readJSON(`${operation(current.operationId)}/plan.json`, { immutable: true });
     demand(current.planSha256 === digest(activePlan), 'Worker active plan drift');
+    if (activePlan.workerContinuation?.contract === WORKER_CONTINUATION_V2) {
+      const dir = operation(current.operationId), history = await storeFor(dir).read();
+      const mode = current.outcome === 'ROLLED_BACK' ? 'ROLLBACK' : 'FORWARD';
+      demand(mode === 'ROLLBACK' ? Boolean(history.rolledBack) : Boolean(history.final && history.records.POSTCHECK?.receipt),
+        'Worker continuation has no accepted native terminal history');
+      const receipt = await acceptedWorkerContinuation(workerContinuationArguments(activePlan, dir, current), mode);
+      const boundSha256 = mode === 'ROLLBACK' ? history.rolledBack.workerContinuationReceiptSha256
+        : history.records.POSTCHECK.evidence.workerContinuationReceiptSha256;
+      demand(boundSha256 === digest(receipt), 'Worker continuation is not bound to the accepted native receipt');
+    }
     demand(canonical(current.dataRelease) === canonical(activePlan.dataRelease) && current.dataAdmissionSha256 === activePlan.dataAdmissionSha256, 'Worker data baseline drift');
     attestAdmittedRelease(activePlan.dataRelease, activePlan.dataAdmissionSha256);
     assertPrimaryDatabase(activePlan.databaseIdentitySha256);

@@ -1,0 +1,34 @@
+{
+  "contract": "LEETPLUS_RELEASE_A_APPLICATION_PILOT_RECORD_V1",
+  "candidate": {
+    "issue": "",
+    "lane": "L1_RUNTIME",
+    "exactMainSha": "",
+    "fastRunId": "",
+    "fullRunId": "",
+    "fullRunAttempt": null,
+    "composeArtifactId": "",
+    "nativeOperationId": "",
+    "nativePlanSha256": "",
+    "goApprovalSha256": "",
+    "nativeFinalReceiptSha256": ""
+  },
+  "stages": {
+    "request": { "at": "", "basis": "", "evidence": "", "producerAt": "", "publishedAt": "", "detectedAt": "" },
+    "codeReady": { "at": "", "basis": "", "evidence": "", "producerAt": "", "publishedAt": "", "detectedAt": "" },
+    "prReady": { "at": "", "basis": "", "evidence": "", "producerAt": "", "publishedAt": "", "detectedAt": "" },
+    "merged": { "at": "", "basis": "", "evidence": "", "producerAt": "", "publishedAt": "", "detectedAt": "" },
+    "admitted": { "at": "", "basis": "", "evidence": "", "producerAt": "", "publishedAt": "", "detectedAt": "" },
+    "prepared": { "at": "", "basis": "", "evidence": "", "producerAt": "", "publishedAt": "", "detectedAt": "" },
+    "go": { "at": "", "basis": "", "evidence": "", "producerAt": "", "publishedAt": "", "detectedAt": "" },
+    "applied": { "at": "", "basis": "", "evidence": "", "producerAt": "", "publishedAt": "", "detectedAt": "" },
+    "verified": { "at": "", "basis": "", "evidence": "", "producerAt": "", "publishedAt": "", "detectedAt": "" }
+  },
+  "waits": [],
+  "outcome": "NOT_STARTED",
+  "independentAcceptanceEvidence": "",
+  "replayedAcceptedEffects": null,
+  "lateCriticalFailureClasses": null,
+  "workerContinuationEvidence": "",
+  "notes": ""
+}

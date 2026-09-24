@@ -7,8 +7,38 @@ import { pathToFileURL } from 'node:url';
 import { CONTRACT, demand, digest, canonical } from './contract.mjs';
 import { PHASES, validatePlan, validateApproval, validateChain } from './orchestrator.mjs';
 import { validateAcceptedApplicationSnapshot } from './control-handoff-runtime.mjs';
+import { validateWorkerContinuationReceipt } from './worker-continuation-runtime.mjs';
+import { WORKERS, TIMER_UNITS } from './worker-continuation.mjs';
 
-export function inspectNative({ plan, records, final, rolledBack, approval, publicKey, packet }, now = Date.now()) {
+function verifyContinuation(plan, mode, snapshot, publicKey) {
+  const receipt = mode === 'FORWARD' ? snapshot.workerContinuationReceipt : snapshot.workerContinuationRollbackReceipt;
+  const intent = snapshot.workerContinuationIntent;
+  const rollbackIntent = snapshot.workerContinuationRollbackIntent;
+  demand(receipt && intent, 'Native terminal lacks worker continuation records');
+  const staged = mode === 'FORWARD' ? snapshot.forwardWorkerEnvelopes : snapshot.rollbackWorkerEnvelopes;
+  demand(Array.isArray(staged) && staged.length === WORKERS.length &&
+    Array.isArray(snapshot.forwardWorkerEnvelopes) && snapshot.forwardWorkerEnvelopes.length === WORKERS.length &&
+    Array.isArray(snapshot.rollbackWorkerEnvelopes) && snapshot.rollbackWorkerEnvelopes.length === WORKERS.length,
+  'Native continuation lacks staged signed grants');
+  const activeSlot = mode === 'FORWARD' ? plan.targetSlot : plan.previous.activeSlot;
+  const generation = mode === 'FORWARD' ? plan.generation + 1 : plan.generation + 2;
+  const current = { activeSlot, generation, [activeSlot]: { releaseSha: plan[activeSlot].releaseSha } };
+  const profiles = Object.fromEntries(WORKERS.map(worker => [worker, snapshot.workerProfiles?.[worker]]));
+  demand(WORKERS.every(worker => Buffer.isBuffer(profiles[worker]) &&
+    digest(profiles[worker]) === plan.workerContinuation.profileBindings.find(binding => binding.worker === worker)?.profileSha256),
+  'Native continuation lacks exact immutable worker profiles');
+  const postimage = { current, grantEnvelopes: staged,
+    timers: plan.workerContinuation.originalTimers.map(binding => ({ worker: binding.worker, unit: TIMER_UNITS[binding.worker],
+      enabled: binding.enabled, active: binding.active })) };
+  validateWorkerContinuationReceipt({ plan, receipt, postimage,
+    context: { publicKey, hostIdentitySha256: plan.hostIdentitySha256, profiles, allowExpired: true,
+      intent, rollbackIntent, forwardEnvelopes: snapshot.forwardWorkerEnvelopes,
+      rollbackEnvelopes: snapshot.rollbackWorkerEnvelopes } });
+  return receipt;
+}
+
+export function inspectNative(snapshot, now = Date.now()) {
+  const { plan, records, final, rolledBack, approval, publicKey, packet } = snapshot;
   validatePlan(plan);
   demand(packet?.contract === 'LEETPLUS_RELEASE_PREPARATION_V1_GO_PACKET' && packet.decision === 'PREPARED_NOT_AUTHORIZATION' && packet.nativePlanSha256 === digest(plan) && packet.nativeOperationId === plan.operationId, 'GO packet does not bind native plan');
   demand(plan.workerContinuation && canonical(packet.workerContinuation) === canonical(plan.workerContinuation), 'Worker continuation policy is not bound by native plan');
@@ -31,10 +61,20 @@ export function inspectNative({ plan, records, final, rolledBack, approval, publ
   }
   if (final) {
     demand(approval && completedPhases.length === PHASES.length && final.contract === `${CONTRACT}_COMPLETED` && final.planSha256 === digest(plan) && final.operationId === plan.operationId && final.lastReceiptSha256 === digest(records.POSTCHECK.receipt), 'Invalid native terminal receipt');
+    if (plan.workerContinuation?.contract === 'LEETPLUS_WORKER_CONTINUATION_V2') {
+      const receipt = verifyContinuation(plan, 'FORWARD', snapshot, publicKey);
+      demand(records.POSTCHECK.evidence.workerContinuationReceiptSha256 === digest(receipt),
+        'Native final lacks plan-bound worker continuation receipt');
+    }
     status = 'APPLIED'; waitReason = 'INDEPENDENT_BROWSER_API_WORKER_ACCEPTANCE_PENDING';
   }
   if (rolledBack) {
     demand(approval && rolledBack.contract === `${CONTRACT}_ROLLED_BACK` && rolledBack.planSha256 === digest(plan) && plan.previous && rolledBack.active?.generation === plan.generation + 2 && rolledBack.active?.activeSlot === plan.previous.activeSlot, 'Invalid native rollback receipt');
+    if (plan.workerContinuation?.contract === 'LEETPLUS_WORKER_CONTINUATION_V2') {
+      const receipt = verifyContinuation(plan, 'ROLLBACK', snapshot, publicKey);
+      demand(rolledBack.workerContinuationReceiptSha256 === digest(receipt),
+        'Native rollback lacks plan-bound worker continuation receipt');
+    }
     status = 'ROLLED_BACK'; waitReason = 'ROLLBACK_ACCEPTANCE_PENDING';
   }
   return { status, waitReason, operationId: plan.operationId, planSha256: digest(plan), completedPhases };
@@ -80,9 +120,19 @@ export function readNative(directory, packetPath, publicKeyPath) {
     plan, records,
     final: final?.value, rolledBack: rollback?.value,
     approval: read(path.join(directory, 'approval.json'), true)?.value,
+    workerContinuationReceipt: read(path.join(directory, 'worker-continuation.receipt.json'), true)?.value,
+    workerContinuationRollbackReceipt: read(path.join(directory, 'worker-continuation-rollback.receipt.json'), true)?.value,
+    workerContinuationIntent: read(path.join(directory, 'worker-continuation.intent.json'), true)?.value,
+    workerContinuationRollbackIntent: read(path.join(directory, 'worker-continuation-rollback.intent.json'), true)?.value,
+    forwardWorkerEnvelopes: WORKERS.map(worker => read(path.join(directory, `worker-forward-${worker}.json`), true)?.value),
+    rollbackWorkerEnvelopes: WORKERS.map(worker => read(path.join(directory, `worker-rollback-${worker}.json`), true)?.value),
+    workerProfiles: plan.workerContinuation?.contract === 'LEETPLUS_WORKER_CONTINUATION_V2'
+      ? Object.fromEntries(WORKERS.map(worker => [worker,
+        trustedBytes(path.join(directory, `worker-profile-${worker}.json`)).bytes])) : null,
     publicKey: trustedBytes(publicKeyPath, { immutable: false }).bytes, packet: read(packetPath).value,
     phasePublicationTimes,
     nativeCompletionPublishedAt: final?.mtime ?? rollback?.mtime ?? null,
+    rollbackCompletionPublishedAt: rollback?.mtime ?? null,
     completionTimeBasis: 'FILESYSTEM_MTIME_PUBLICATION_PROXY',
   };
 }

@@ -9,6 +9,12 @@ data399/CURRENT191. The historical source-only description below explains why
 the narrow transition was needed; it is not the current production status.
 [Exact production evidence and remaining speed pilot](release-preparation-a-production-2026-09-24.md).
 
+Later source audit identified unsafe resume replay and an inert V1 worker
+continuation for future application releases on this serving controller.
+Controller 880 remains the accepted control-plane runtime, but its A
+application rollout path is on HOLD. The narrowly pinned V2 source repair has
+not been installed; it needs a fresh exact-plan handoff and separate GO.
+
 Historical source checkpoint, 23.09.2026: this successor contract was not yet
 an installed controller, a production approval, or an application release.
 

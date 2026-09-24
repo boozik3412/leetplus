@@ -1,10 +1,20 @@
 # Release-critical checks for Variant A
 
-Status 23.09.2026: PR #226 merged as main `6def91d4…`; exact-main Fast
-`35846137369` and Full `35846137362` passed. Main branch protection now
-requires all five checks below, with GitHub Actions app binding, `strict=true`
-and administrator enforcement unchanged. This is source/CI enablement;
-production still serves the prior controller and application release.
+Status 24.09.2026: PR #226 merged as main `6def91d4…`; exact-main Fast
+`35846137369` and Full `35846137362` passed. Main branch protection requires
+all five checks below, with GitHub Actions app binding, `strict=true` and
+administrator enforcement unchanged. A separately approved native handoff later
+activated serving controller `88010292246249c94ba66ecbab64e4d51ad84d8c`.
+The application stayed GREEN `f97af35d1f0b54a67f915a37a095336e4f9334f9`
+at generation 10, with BLUE `3c3dc4ac4d1a73fdf9a1a6da5427212adfa9af80`
+as rollback and data `399876b560b4ac611eae35ee425d99422fb140b9`.
+The controller handoff did not measure a new application release. Its dated
+production checkpoint is recorded in [PR #239](https://github.com/boozik3412/leetplus/pull/239),
+which was still open at the 24.09 07:08 UTC status check.
+An audit of that serving controller found replay on ambiguous native resume and
+an inert plan-bound worker continuation. Application rollouts using this A path
+remain on HOLD until a repaired controller has its own admission, handoff and
+installed-path acceptance; the five required CI checks remain in force.
 
 Variant A moves the three observed late-failure classes into identical Fast
 and Full jobs. Pull requests receive them through `Fast CI`; the exact main

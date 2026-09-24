@@ -7,6 +7,11 @@ The application remains GREEN f97/gen10; no application rollout or comparative
 checkpoint and activation instructions below describe how the controller was
 reached and the gates for any future application release.
 [Verified controller operation and current limits](release-preparation-a-production-2026-09-24.md).
+Subsequent review found two source defects in that controller's application
+path: ambiguous native resume replay and V1 worker continuation without an
+executor. Its application rollout path is on HOLD until the V2 source repair
+has exact-main admission, a separately approved controller handoff and
+installed-path acceptance. The controller-only acceptance above remains valid.
 
 Checkpoint 23.09.2026: source PR #226 merged as main `6def91d4…`; exact-main
 Fast `35846137369` and Full `35846137362` passed. Main protection now requires
@@ -125,14 +130,23 @@ to GitHub or ordinary task evidence.
    controller work remains blocked for reconciliation. Do not replace a
    controller receipt with an operator-written PASS.
 5. Review the immutable `PREPARED_NOT_AUTHORIZATION` GO packet. Its exact native
-   plan digest includes worker continuation. Obtain that exact GO and sign
+   plan digest must include executable V2 worker continuation with frozen
+   forward N+1 and rollback N+2 grant bodies. The serving 880 controller's V1
+   policy has no native continuation and is on HOLD for application rollouts.
+   Use only a separately admitted and accepted repair controller for a new
+   application plan. Obtain that exact GO and sign
    within the existing validity window. Neither copying a packet nor elapsed
    time grants authority. A new plan digest needs its own GO; unchanged status
    text on the same authorized scope does not require another question.
-6. Execute the native apply/resume sequence under its existing locks and
-   authorization. Do not build a second production phase executor. Restore
-   the original schedules through their existing exact worker-grant process
-   and verify ordinary execution in the same operation.
+6. After GO, have the existing offline root sign the four exact plan-bound
+   worker grant bodies and stage their immutable envelopes under the native
+   operation. Preflight verifies their signatures, tenant/profile/expiry and
+   original timer states before any phase effect. Execute only native
+   apply/resume under its existing lock; CUTOVER and POSTCHECK own grant/timer
+   continuation and publish a plan-bound continuation receipt. Keep worker
+   runs fenced until terminal native and continuation receipts agree. Verify
+   ordinary execution in the same operation; do not build a second phase
+   executor or manually replay a worker.
 7. Collect independent public browser, authenticated API, auth/network
    negatives, active/rollback/data continuity and ordinary worker evidence.
    Only then mark the release VERIFIED and production-accepted.

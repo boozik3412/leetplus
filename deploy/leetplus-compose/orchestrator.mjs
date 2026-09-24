@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { CONTRACT, canonical, demand, digest, release, renderCompose, SLOTS } from './contract.mjs';
+import { CONTRACT as WORKER_CONTINUATION_V2, validateWorkerContinuationPolicy } from './worker-continuation.mjs';
 
 export const PHASES = ['HYDRATE', 'BIND', 'SMOKE', 'CUTOVER', 'POSTCHECK'];
 export function validatePlan(plan) {
@@ -33,6 +34,18 @@ export function validatePlan(plan) {
       guard.hostIdentitySha256 === plan.hostIdentitySha256 && guard.controllerManifestSha256 === plan.controlSha256 &&
       guard.generation === plan.generation && guard.activeSlot === plan.previous.activeSlot && guard.activeSha256 === digest(plan.previous), 'Preparation guard does not bind the native baseline');
     demand(typeof plan.preparationEvidenceExpiresAt === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(plan.preparationEvidenceExpiresAt) && Number.isFinite(Date.parse(plan.preparationEvidenceExpiresAt)), 'Preparation evidence requires an immutable UTC expiry');
+  }
+  if (plan.workerContinuation?.contract === WORKER_CONTINUATION_V2) {
+    const policy = validateWorkerContinuationPolicy(plan.workerContinuation);
+    demand(plan.action === 'ROLLOUT' && plan.previous &&
+      policy.forward.generation === plan.generation + 1 && policy.forward.releaseSha === plan[plan.targetSlot].releaseSha &&
+      policy.rollback.generation === plan.generation + 2 && policy.rollback.releaseSha === plan.previous[plan.previous.activeSlot].releaseSha &&
+      policy.originalGrantEnvelopes.every(envelope => envelope.grant.generation === plan.generation && envelope.grant.releaseSha === policy.rollback.releaseSha && envelope.grant.hostIdentitySha256 === plan.hostIdentitySha256),
+    'Worker continuation does not bind the exact application generation and releases');
+    if (plan.preparationEvidenceExpiresAt) demand(
+      policy.originalGrantEnvelopes.every(envelope => Date.parse(envelope.grant.expiresAt) >= Date.parse(plan.preparationEvidenceExpiresAt)),
+      'Worker grants expire before prepared evidence',
+    );
   }
   return plan;
 }
@@ -68,6 +81,10 @@ export function validateChain(plan, records) {
     demand(record.evidence && record.receipt.planSha256 === digest(plan) && record.receipt.phase === phase &&
       record.receipt.intentSha256 === digest(record.intent) && record.receipt.evidenceSha256 === digest(record.evidence) &&
       record.receipt.previousReceiptSha256 === previousReceiptSha256, 'Receipt/evidence digest mismatch');
+    if (phase === 'POSTCHECK' && plan.workerContinuation?.contract === WORKER_CONTINUATION_V2) {
+      demand(/^[a-f0-9]{64}$/.test(record.evidence.workerContinuationReceiptSha256 ?? ''),
+        'V2 postcheck receipt must bind worker continuation');
+    }
     previousReceiptSha256 = digest(record.receipt);
   }
   return previousReceiptSha256;
@@ -81,7 +98,8 @@ export async function execute(plan, envelope, publicKey, store, driver) {
   validatePlan(plan);
   const initial = await store.read();
   validateChain(plan, initial.records);
-  validateApproval(plan, envelope, publicKey, { allowExpired: Boolean(initial.final || initial.rolledBack) });
+  const pendingIntent = PHASES.some(phase => initial.records[phase]?.intent && !initial.records[phase]?.receipt);
+  validateApproval(plan, envelope, publicKey, { allowExpired: Boolean(initial.final || initial.rolledBack || pendingIntent) });
   if (initial.rolledBack) {
     demand(initial.rolledBack.planSha256 === digest(plan) && initial.rolledBack.contract === `${CONTRACT}_ROLLED_BACK` && plan.previous && initial.rolledBack.active.activeSlot === plan.previous.activeSlot && initial.rolledBack.active.generation === plan.generation + 2, 'Invalid terminal rollback');
     return initial.rolledBack;
@@ -90,6 +108,13 @@ export async function execute(plan, envelope, publicKey, store, driver) {
     demand(initial.final.planSha256 === digest(plan) && initial.final.lastReceiptSha256 === digest(initial.records.POSTCHECK?.receipt), 'Final record mismatch');
     return initial.final;
   }
+  // Legacy terminal histories remain readable, but starting or resuming an
+  // application rollout without executable worker continuation can strand the
+  // original timers on grants for the previous generation.
+  if (plan.action === 'ROLLOUT') {
+    demand(plan.workerContinuation?.contract === WORKER_CONTINUATION_V2,
+      'Application rollout requires executable V2 worker continuation');
+  }
   await driver.preflight(plan);
   let previousReceiptSha256 = null;
   for (const phase of PHASES) {
@@ -97,14 +122,30 @@ export async function execute(plan, envelope, publicKey, store, driver) {
     validateChain(plan, state.records);
     const existing = state.records[phase];
     if (existing?.receipt) { previousReceiptSha256 = digest(existing.receipt); continue; }
-    validateApproval(plan, envelope, publicKey);
+    if (state.rolledBack) {
+      demand(state.rolledBack.planSha256 === digest(plan) && state.rolledBack.contract === `${CONTRACT}_ROLLED_BACK` &&
+        plan.previous && state.rolledBack.active?.activeSlot === plan.previous.activeSlot &&
+        state.rolledBack.active?.generation === plan.generation + 2, 'Invalid terminal rollback');
+      return state.rolledBack;
+    }
+    validateApproval(plan, envelope, publicKey, { allowExpired: Boolean(existing?.intent) });
     const intent = { phase, planSha256: digest(plan), previousReceiptSha256 };
-    if (!existing) await store.publish(phase, 'intent', intent);
     await driver.preflight(plan, phase);
     // Preflight may perform bounded reads for long enough to cross expiry.
     // Check again immediately before the next native effect/reconciliation.
-    validateApproval(plan, envelope, publicKey);
-    const evidence = existing ? await driver.reconcile(phase, plan) : await driver.run(phase, plan);
+    validateApproval(plan, envelope, publicKey, { allowExpired: Boolean(existing?.intent) });
+    if (!existing) await store.publish(phase, 'intent', intent);
+    const effectDeadline = Math.min(Date.parse(envelope.approval.expiresAt),
+      plan.preparationEvidenceExpiresAt ? Date.parse(plan.preparationEvidenceExpiresAt) : Infinity);
+    const evidence = existing ? await driver.reconcile(phase, plan, { effectsAllowed: Date.now() <= effectDeadline })
+      : await driver.run(phase, plan);
+    const afterDriver = await store.read();
+    if (afterDriver.rolledBack) {
+      demand(afterDriver.rolledBack.planSha256 === digest(plan) && afterDriver.rolledBack.contract === `${CONTRACT}_ROLLED_BACK` &&
+        plan.previous && afterDriver.rolledBack.active?.activeSlot === plan.previous.activeSlot &&
+        afterDriver.rolledBack.active?.generation === plan.generation + 2, 'Invalid terminal rollback');
+      return afterDriver.rolledBack;
+    }
     demand(evidence && evidence.phase === phase && evidence.planSha256 === digest(plan), 'Driver returned unbound evidence');
     await store.publish(phase, 'evidence', evidence);
     const receipt = { phase, planSha256: digest(plan), intentSha256: digest(intent), evidenceSha256: digest(evidence), previousReceiptSha256 };

@@ -102,6 +102,44 @@ function variantA(value) {
   return value;
 }
 
+const repairOldFiles = {
+  'control.mjs': '4e39b9e8a75ede6bc474fe0ef8b0b5fea60b46edd7c1ed8172744288625ea49f',
+  'orchestrator.mjs': 'c4d13a76d1f97f41dc575d37c5da588b9ba3634b1a053f6b194a86623e8861c4',
+  'preparation-runner.mjs': '9b02c697d6995b0ff9d4cc085d1249d6e83d96d0cb2848a1e6a139acf3f1eb29',
+  'worker-authority.mjs': '4c615c56795a025b2c58662c0b9fea5f4dfa7b55d62dae867a77a86dffe0dcf6',
+};
+const repairNewFiles = {
+  'control.mjs': '1496d809e6401cc0f9b9fba983a135ba0ca6cd445ada7ce337f5f94be2714a97',
+  'orchestrator.mjs': 'f3c9d239e4fbe5572fdd258bb20e2be0c3ab935105d25308d325babbcba32e45',
+  'preparation-runner.mjs': 'd183f55cb804f472a92baf315a206a4ace1dcbe4644956d0b7b707023013f341',
+  'control-reconcile.mjs': '1005a02279bfd72b8462c3cf9d151cbd51cb364fb7829d9db2722a1e9c436cf9',
+  'worker-continuation.mjs': 'b8c3fdbce90c3254ff147dfdf4f7e0fb20b44c17576294c6695bb69a5f91bef3',
+  'worker-continuation-runtime.mjs': 'e89df0e9a8ad6e5346fed82f21b4379965bee5935d899aafc65ff68a74212d54',
+  'release-observer.mjs': 'b6841a6047f76e3714751b59b3185bb35db5b66545c260ecb4f1f9aa9f53f4ad',
+  'control-handoff-runtime.mjs': '7c60d2105f48d0c435f96077c317bd6636cab2d648fdceda8bdc80df3108242a',
+  'install-control.py': 'c41144f91a1cfdba3dc184a0afda5c6917fa512a9873b143b8c271edb433b9b4',
+  'worker-authority.mjs': '57d19d442e8708cd9215b2e5bbc055e5e3cfcca64417ec5a7e27f5e7e1dd8e71',
+  'derive-rehearsal-inputs.py': 'b928a987234c57fe9e319145e090edebe22719518ae804122e417e128eb23acb',
+};
+
+function variantARepair(value) {
+  const plan = value.plan;
+  plan.timersMayBeStopped = false;
+  plan.maxLockWaitSeconds = 120;
+  plan.oldReleaseSha = '88010292246249c94ba66ecbab64e4d51ad84d8c';
+  plan.newReleaseSha = sha('d');
+  plan.oldControlSha256 = '237cbcba1fbfcc9e58e78aede7b57f599b206f8c02253c43006dd308c04e9c85';
+  plan.orchestratorTransition = {
+    contract: 'LEETPLUS_VARIANT_A_CONTROLLER_REPAIR_HANDOFF_V2',
+    oldReleaseSha: plan.oldReleaseSha, newReleaseSha: plan.newReleaseSha,
+    oldControlSha256: plan.oldControlSha256, newControlSha256: plan.newControlSha256,
+    oldRuntimeFilesSha256: structuredClone(repairOldFiles),
+    newRuntimeFilesSha256: structuredClone(repairNewFiles),
+  };
+  rebindForward(value);
+  return value;
+}
+
 test('variant A ordinary handoff binds the exact old/new controller and orchestrator transition', () => {
   const exact = variantA(authority());
   validatePlanScope(exact.plan);
@@ -130,6 +168,30 @@ test('variant A ordinary handoff binds the exact old/new controller and orchestr
   const bootstrap = authority({ action: RESOURCE_PROFILE_BOOTSTRAP });
   bootstrap.plan.orchestratorTransition = exact.plan.orchestratorTransition;
   assert.throws(() => validatePlanScope(bootstrap.plan), /cannot include variant A/);
+});
+
+test('variant A repair handoff binds both manifests and every reviewed runtime leaf', () => {
+  validate(variantARepair(authority()));
+  const mutations = [
+    ['old release', p => { p.oldReleaseSha = sha('0'); }],
+    ['old manifest', p => { p.oldControlSha256 = hash('0'); }],
+    ['contract confusion', p => { p.orchestratorTransition.contract = 'LEETPLUS_VARIANT_A_ORCHESTRATOR_HANDOFF_V1'; }],
+    ['unknown transition field', p => { p.orchestratorTransition.extra = true; }],
+    ['unknown old leaf', p => { p.orchestratorTransition.oldRuntimeFilesSha256['extra.mjs'] = hash('0'); }],
+    ['missing new leaf', p => { delete p.orchestratorTransition.newRuntimeFilesSha256['install-control.py']; }],
+  ];
+  for (const [leaf] of Object.entries(repairOldFiles)) {
+    mutations.push([`old leaf ${leaf}`, p => { p.orchestratorTransition.oldRuntimeFilesSha256[leaf] = hash('0'); }]);
+  }
+  for (const [leaf] of Object.entries(repairNewFiles)) {
+    mutations.push([`new leaf ${leaf}`, p => { p.orchestratorTransition.newRuntimeFilesSha256[leaf] = hash('0'); }]);
+  }
+  for (const [label, mutate] of mutations) {
+    const changed = variantARepair(authority());
+    mutate(changed.plan);
+    rebindForward(changed);
+    assert.throws(() => validate(changed), /variant A orchestrator transition/, label);
+  }
 });
 
 test('accepts an exact signed, receipted control handoff and its ongoing authority', () => {

@@ -20,4 +20,9 @@ test('worker grant is bound to host, active generation, exact tenant, secret pro
   assert.throws(() => validateWorkerGrant(sign({ ...grant, mode: 'CANARY' }), pub, active, host, bytes));
   const bad = Buffer.from(canonical({ ...profile, DATABASE_URL: profile.DATABASE_URL.replace('connection_limit=2', 'connection_limit=20') }));
   assert.throws(() => validateWorkerGrant(sign({ ...grant, secretSha256: digest(bad) }), pub, active, host, bad));
+  const afterExpiry = Date.parse(grant.expiresAt) + 1;
+  assert.throws(() => validateWorkerGrant(sign(grant), pub, active, host, bytes, afterExpiry));
+  validateWorkerGrant(sign(grant), pub, active, host, bytes, afterExpiry, { allowExpired: true });
+  assert.throws(() => validateWorkerGrant(sign({ ...grant, tenantSlug: 'another' }), pub, active, host, bytes,
+    afterExpiry, { allowExpired: true }));
 });

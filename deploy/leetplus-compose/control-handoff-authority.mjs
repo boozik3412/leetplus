@@ -15,18 +15,45 @@ const VARIANT_A_OLD_ORCHESTRATOR_SHA256 = 'c6fd054d39175266ac0603759423f4fe03929
 const VARIANT_A_NEW_ORCHESTRATOR_SHA256 = 'c4d13a76d1f97f41dc575d37c5da588b9ba3634b1a053f6b194a86623e8861c4';
 const VARIANT_A_NEW_CONTROL_SHA256 = '4e39b9e8a75ede6bc474fe0ef8b0b5fea60b46edd7c1ed8172744288625ea49f';
 const VARIANT_A_NEW_RUNNER_SHA256 = '9b02c697d6995b0ff9d4cc085d1249d6e83d96d0cb2848a1e6a139acf3f1eb29';
+const VARIANT_A_REPAIR_PREDECESSOR_SHA = '88010292246249c94ba66ecbab64e4d51ad84d8c';
+const VARIANT_A_REPAIR_PREDECESSOR_MANIFEST_SHA256 = '237cbcba1fbfcc9e58e78aede7b57f599b206f8c02253c43006dd308c04e9c85';
+const VARIANT_A_REPAIR_CONTRACT = 'LEETPLUS_VARIANT_A_CONTROLLER_REPAIR_HANDOFF_V2';
+const VARIANT_A_REPAIR_OLD_FILES = Object.freeze({
+  'control.mjs': VARIANT_A_NEW_CONTROL_SHA256,
+  'orchestrator.mjs': VARIANT_A_NEW_ORCHESTRATOR_SHA256,
+  'preparation-runner.mjs': VARIANT_A_NEW_RUNNER_SHA256,
+  'worker-authority.mjs': '4c615c56795a025b2c58662c0b9fea5f4dfa7b55d62dae867a77a86dffe0dcf6',
+});
+const VARIANT_A_REPAIR_NEW_FILES = Object.freeze({
+  'control.mjs': '1496d809e6401cc0f9b9fba983a135ba0ca6cd445ada7ce337f5f94be2714a97',
+  'orchestrator.mjs': 'f3c9d239e4fbe5572fdd258bb20e2be0c3ab935105d25308d325babbcba32e45',
+  'preparation-runner.mjs': 'd183f55cb804f472a92baf315a206a4ace1dcbe4644956d0b7b707023013f341',
+  'control-reconcile.mjs': '1005a02279bfd72b8462c3cf9d151cbd51cb364fb7829d9db2722a1e9c436cf9',
+  'worker-continuation.mjs': 'b8c3fdbce90c3254ff147dfdf4f7e0fb20b44c17576294c6695bb69a5f91bef3',
+  'worker-continuation-runtime.mjs': 'e89df0e9a8ad6e5346fed82f21b4379965bee5935d899aafc65ff68a74212d54',
+  'release-observer.mjs': 'b6841a6047f76e3714751b59b3185bb35db5b66545c260ecb4f1f9aa9f53f4ad',
+  'control-handoff-runtime.mjs': '7c60d2105f48d0c435f96077c317bd6636cab2d648fdceda8bdc80df3108242a',
+  'install-control.py': 'c41144f91a1cfdba3dc184a0afda5c6917fa512a9873b143b8c271edb433b9b4',
+  'worker-authority.mjs': '57d19d442e8708cd9215b2e5bbc055e5e3cfcca64417ec5a7e27f5e7e1dd8e71',
+  'derive-rehearsal-inputs.py': 'b928a987234c57fe9e319145e090edebe22719518ae804122e417e128eb23acb',
+});
+
+function exactFileMap(value, expected) {
+  return value && typeof value === 'object' && !Array.isArray(value) &&
+    JSON.stringify(Object.keys(value).sort()) === JSON.stringify(Object.keys(expected).sort()) &&
+    Object.entries(expected).every(([leaf, hash]) => value[leaf] === hash);
+}
 
 export function validatePlanScope(plan) {
   demand(plan?.contract === `${CONTRACT}_PLAN` && UUID.test(plan.operationId ?? ''), 'Invalid control handoff plan');
   if (plan.action === 'CONTROL_HANDOFF') {
     if (!Object.hasOwn(plan, 'orchestratorTransition')) return;
     const transition = plan.orchestratorTransition;
-    const keys = ['contract', 'oldReleaseSha', 'newReleaseSha', 'oldControlSha256', 'newControlSha256',
+    const v1Keys = ['contract', 'oldReleaseSha', 'newReleaseSha', 'oldControlSha256', 'newControlSha256',
       'oldOrchestratorSha256', 'newOrchestratorSha256', 'newControlEntrySha256', 'newPreparationRunnerSha256'];
-    demand(transition && typeof transition === 'object' && !Array.isArray(transition) &&
-      JSON.stringify(Object.keys(transition).sort()) === JSON.stringify(keys.sort()) &&
-      transition.contract === 'LEETPLUS_VARIANT_A_ORCHESTRATOR_HANDOFF_V1' &&
-      plan.oldReleaseSha === VARIANT_A_PREDECESSOR_SHA && plan.oldControlSha256 === VARIANT_A_PREDECESSOR_MANIFEST_SHA256 &&
+    const v2Keys = ['contract', 'oldReleaseSha', 'newReleaseSha', 'oldControlSha256', 'newControlSha256',
+      'oldRuntimeFilesSha256', 'newRuntimeFilesSha256'];
+    const common = transition && typeof transition === 'object' && !Array.isArray(transition) &&
       SHA.test(plan.newReleaseSha ?? '') && plan.newReleaseSha !== plan.oldReleaseSha && HASH.test(plan.newControlSha256 ?? '') &&
       plan.newControlSha256 !== plan.oldControlSha256 &&
       plan.applicationRestartAllowed === false && plan.timersMayBeStopped === false &&
@@ -34,11 +61,21 @@ export function validatePlanScope(plan) {
       !['predecessorControlSha', 'predecessorContractSha256', 'legacyProfile', 'targetProfile',
         'historicalComposeIdentityVerified', 'resourceLimitMutationAllowed'].some(key => Object.hasOwn(plan, key)) &&
       transition.oldReleaseSha === plan.oldReleaseSha && transition.newReleaseSha === plan.newReleaseSha &&
-      transition.oldControlSha256 === plan.oldControlSha256 && transition.newControlSha256 === plan.newControlSha256 &&
+      transition.oldControlSha256 === plan.oldControlSha256 && transition.newControlSha256 === plan.newControlSha256;
+    const v1 = common && JSON.stringify(Object.keys(transition).sort()) === JSON.stringify(v1Keys.sort()) &&
+      transition.contract === 'LEETPLUS_VARIANT_A_ORCHESTRATOR_HANDOFF_V1' &&
+      plan.oldReleaseSha === VARIANT_A_PREDECESSOR_SHA && plan.oldControlSha256 === VARIANT_A_PREDECESSOR_MANIFEST_SHA256 &&
       transition.oldOrchestratorSha256 === VARIANT_A_OLD_ORCHESTRATOR_SHA256 &&
       transition.newOrchestratorSha256 === VARIANT_A_NEW_ORCHESTRATOR_SHA256 &&
       transition.newControlEntrySha256 === VARIANT_A_NEW_CONTROL_SHA256 &&
-      transition.newPreparationRunnerSha256 === VARIANT_A_NEW_RUNNER_SHA256,
+      transition.newPreparationRunnerSha256 === VARIANT_A_NEW_RUNNER_SHA256;
+    const v2 = common && JSON.stringify(Object.keys(transition).sort()) === JSON.stringify(v2Keys.sort()) &&
+      transition.contract === VARIANT_A_REPAIR_CONTRACT &&
+      plan.oldReleaseSha === VARIANT_A_REPAIR_PREDECESSOR_SHA &&
+      plan.oldControlSha256 === VARIANT_A_REPAIR_PREDECESSOR_MANIFEST_SHA256 &&
+      exactFileMap(transition.oldRuntimeFilesSha256, VARIANT_A_REPAIR_OLD_FILES) &&
+      exactFileMap(transition.newRuntimeFilesSha256, VARIANT_A_REPAIR_NEW_FILES);
+    demand(v1 || v2,
     'Invalid variant A orchestrator transition');
     return;
   }

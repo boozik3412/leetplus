@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { CONTRACT, canonical, demand, digest } from './contract.mjs';
 
-export function validateWorkerGrant(envelope, publicKey, active, hostIdentitySha256, secretBytes, now = Date.now()) {
+export function validateWorkerGrant(envelope, publicKey, active, hostIdentitySha256, secretBytes, now = Date.now(), { allowExpired = false } = {}) {
   const { grant, signature } = envelope ?? {};
   demand(grant?.contract === `${CONTRACT}_WORKER_GRANT`, 'Invalid worker grant');
   demand(['bonus-ledger-worker', 'langame-daily-worker'].includes(grant.worker) && ['CANARY', 'TIMER'].includes(grant.mode), 'Invalid worker/mode');
@@ -9,7 +9,9 @@ export function validateWorkerGrant(envelope, publicKey, active, hostIdentitySha
   demand(typeof signature === 'string' && /^[A-Za-z0-9+/]{86}==$/.test(signature) &&
     crypto.verify(null, Buffer.from(canonical(grant)), publicKey, Buffer.from(signature, 'base64')), 'Invalid worker signature');
   const start = Date.parse(grant.issuedAt), end = Date.parse(grant.expiresAt);
-  demand(Number.isFinite(start) && Number.isFinite(end) && start <= now + 30000 && end > now && end - start <= 90 * 86400000, 'Worker grant expired or unbounded');
+  demand(Number.isFinite(start) && Number.isFinite(end) && (allowExpired || start <= now + 30000) &&
+    (allowExpired || end > now) && end > start && end - start <= 90 * 86400000,
+  'Worker grant expired or unbounded');
   demand(/^[a-f0-9-]{36}$/.test(grant.id ?? '') && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(grant.tenantSlug ?? ''), 'Missing exact worker identity');
   demand(digest(secretBytes) === grant.secretSha256, 'Worker secret profile changed');
   const profile = JSON.parse(secretBytes);

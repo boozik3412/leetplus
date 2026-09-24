@@ -11,6 +11,15 @@ matrix и обычные worker/network циклы PASS. Это **не** вне�
 отдельно согласованный контрольный выпуск с новым admission/native plan/GO.
 [Production evidence и точные границы](./docs/deployment/release-preparation-a-production-2026-09-24.md).
 
+**Source-only repair после проверки 24.09:** у принятого controller 880 обнаружены
+повтор native effects при неоднозначном resume и отсутствие исполнителя
+`workerContinuation` для нового приложения. Подготовлены V2 worker grants,
+fail-closed reconciliation и отдельный протокол измерения выпуска; их локальные
+fixtures не являются installed-path или production acceptance. Будущие A app
+rollouts остаются HOLD до exact-main admission repair SHA, отдельного GO на
+controller handoff и нового app plan/GO. Текущий GREEN f97/gen10, data399,
+grants/timers и решение `NO-GO` для внешнего beta этим не изменены.
+
 - Дата актуализации: 24.08.2026
 - Версия: 3.59
 - Статус документа: активный launch backlog

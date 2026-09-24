@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { CONTRACT, GO_PACKET_CONTRACT, PHASES, PreparationRunner, ensurePrivateTree, fileDigest, validateAdmission } from './preparation-runner.mjs';
 import { canonical, digest, renderCompose } from './contract.mjs';
+import { deriveWorkerContinuation } from './worker-continuation.mjs';
 
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const OPERATION = '12345678-1234-4123-8123-123456789abc';
@@ -49,11 +50,12 @@ function fixture({ resource = true, deadline = '2026-09-22T03:00:00.000Z' } = {}
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519'), workerPublicKey = write('approval-root.pem', publicKey.export({ type: 'spki', format: 'pem' }));
   const profileHashes = workers.map(worker => { const prefix = worker === 'bonus-ledger-worker' ? 'GUEST_BONUS_LEDGER_WORKER' : 'LANGAME_DAILY_WORKER'; const profile = { [`${prefix}_TENANT_SLUG`]: 'tenant', [`${prefix}_CANARY`]: 'false', LANGAME_DAILY_SYNC_SCHEDULER_ENABLED: 'false', LANGAME_SCHEDULED_HTTP_ENABLED: 'false', GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED: 'false', DATABASE_URL: 'postgresql://leetplus_runtime:secret@postgres/leetplus?schema=public&connection_limit=2&pool_timeout=5&connect_timeout=5&sslmode=require&sslcert=%2Frun%2Fsecrets%2Fdb-ca.pem&sslaccept=strict' }; const file = path.join(productionRoot, 'secrets', `${worker}.json`); fs.writeFileSync(file, canonical(profile)); return fileDigest(file); });
   const grantHashes = workers.map((worker, index) => { const profilePath = path.join(productionRoot, 'secrets', `${worker}.json`), grant = { contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_WORKER_GRANT', worker, mode: 'TIMER', releaseSha: oldRelease.releaseSha, generation: 8, hostIdentitySha256, issuedAt: '2026-09-21T23:00:00Z', expiresAt: '2026-09-23T00:00:00Z', id: WORKER_IDS[index], tenantSlug: 'tenant', secretSha256: fileDigest(profilePath) }; const envelope = { grant, signature: crypto.sign(null, Buffer.from(canonical(grant)), privateKey).toString('base64') }; const file = path.join(controlState, 'worker-grants', `${worker}.json`); fs.writeFileSync(file, canonical(envelope)); return fileDigest(file); });
-  const workerContinuation = { contract: 'LEETPLUS_WORKER_CONTINUATION_V1', owner: 'NATIVE_WORKER_CONTROLLER', noNewWorker: true, preserveGrantExpiry: true, preserveTenantScope: true,
+  const originalGrantEnvelopes = workers.map(worker => JSON.parse(fs.readFileSync(path.join(controlState, 'worker-grants', `${worker}.json`))));
+  const workerContinuation = deriveWorkerContinuation({
     originalTimers: workers.map(worker => ({ worker, unit: worker === 'bonus-ledger-worker' ? 'leetplus-compose-bonus.timer' : 'leetplus-compose-daily.timer', enabled: true, active: true })),
-    grantBindings: workers.map((worker, index) => ({ worker, grantId: WORKER_IDS[index], grantSha256: grantHashes[index], releaseSha: oldRelease.releaseSha, generation: 8 })),
-    profileBindings: workers.map((worker, index) => ({ worker, profileSha256: profileHashes[index] })),
-    allowedSteps: ['CHECK_ORIGINAL_STATE', 'VERIFY_EXISTING_GRANT', 'RENEW_EXISTING_GRANT', 'RETURN_ORIGINAL_TIMER', 'CHECK_FINAL_STATE'] };
+    originalGrantEnvelopes, profileBindings: workers.map((worker, index) => ({ worker, profileSha256: profileHashes[index] })),
+    targetReleaseSha: release.releaseSha, currentGeneration: 8, previousReleaseSha: oldRelease.releaseSha,
+    forwardGrantIds: ['42345678-1234-4123-8123-123456789abc', '52345678-1234-4123-8123-123456789abc'], rollbackGrantIds: ['62345678-1234-4123-8123-123456789abc', '72345678-1234-4123-8123-123456789abc'] });
   const external = { offhostReceipt: path.join(root, 'external/offhost.json'), backupVerificationReceipt: path.join(root, 'external/backup-verification.json'), restoreImportReceipt: path.join(root, 'external/import.json'), browserReceipt: path.join(root, 'external/browser.json') };
   const paths = { rehearsalInputRoot: path.join(root, 'external'), preparation: path.join(root, 'rehearsal/preparation.json'), backup: path.join(root, 'production/latest.json'), restore: path.join(root, 'rehearsal/evidence/restore.json'), acceptance: path.join(root, 'rehearsal/evidence/runtime-acceptance.json'), nativeOperations: path.join(root, 'operations'), machineId, procLocks: path.join(root, 'proc-locks'), controlState, productionRoot, workerPublicKey, controlCommand: path.resolve(root, 'control'), servingControlRoot, candidateControlRoot: path.resolve(root, 'controllers'), preparationLock: path.join(root, 'global-preparation.lock') };
   fs.mkdirSync(path.dirname(paths.preparation), { recursive: true }); fs.mkdirSync(path.dirname(paths.backup), { recursive: true }); fs.mkdirSync(path.dirname(paths.restore), { recursive: true }); fs.mkdirSync(paths.nativeOperations); write('proc-locks', '');
@@ -76,7 +78,10 @@ function fixture({ resource = true, deadline = '2026-09-22T03:00:00.000Z' } = {}
   const writePlan = requestPath => {
     const request = JSON.parse(fs.readFileSync(requestPath));
     const plan = { ...request, contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_PLAN', operationId: OPERATION, hostIdentitySha256, controlSha256: guard.controllerManifestSha256, previous: active, generation: 8, action: 'ROLLOUT', dataRelease: active.dataRelease, dataAdmissionSha256: active.dataAdmissionSha256, secretDigests: { 'acceptance.json': '1'.repeat(64), 'api-blue.json': '2'.repeat(64), 'api-green.json': '3'.repeat(64), 'db-ca.pem': '4'.repeat(64) }, networkPolicySha256: '5'.repeat(64), databaseIdentitySha256: '6'.repeat(64), composeSha256: '7'.repeat(64), ...(resource ? { resourceBudget: { decision: 'OBSERVED_ENVELOPE_PASS' } } : {}) };
-    const operation = path.join(paths.nativeOperations, OPERATION); fs.mkdirSync(operation, { recursive: true }); fs.writeFileSync(path.join(operation, 'plan.json'), canonical(plan)); return plan;
+    const operation = path.join(paths.nativeOperations, OPERATION); fs.mkdirSync(operation, { recursive: true }); fs.writeFileSync(path.join(operation, 'plan.json'), canonical(plan));
+    for (const binding of plan.workerContinuation.profileBindings) fs.copyFileSync(
+      path.join(productionRoot, 'secrets', `${binding.worker}.json`), path.join(operation, `worker-profile-${binding.worker}.json`));
+    return plan;
   };
   const execute = async (command, args) => {
     calls.push([path.basename(command), ...args]);
@@ -208,7 +213,7 @@ test('invalid manifests, phase order and subset native-plan reuse fail closed', 
   fs.writeFileSync(path.join(state, '04-BACKUP.receipt.json'), '{}');
   assert.throws(() => new PreparationRunner(f2.input, state, { execute: f2.execute, paths: f2.paths, clock: f2.clock }), /phase-order gap/);
   const f3 = fixture(); const request = { ...f3.input.nativeRequest, targetSlot: 'green', admissionSha256: fileDigest(f3.input.admissionJson), archiveSha256: fileDigest(f3.input.imagesArchive), backupReceiptSha256: '1'.repeat(64), rehearsalReceiptSha256: '2'.repeat(64) }; const requestPath = path.join(f3.root, 'request.json'); fs.writeFileSync(requestPath, canonical(request)); const plan = f3.writePlan(requestPath);
-  plan.workerContinuation = { ...plan.workerContinuation, noNewWorker: false }; fs.writeFileSync(path.join(f3.paths.nativeOperations, OPERATION, 'plan.json'), canonical(plan));
+  plan.workerContinuation = { ...plan.workerContinuation, owner: 'NOT_NATIVE' }; fs.writeFileSync(path.join(f3.paths.nativeOperations, OPERATION, 'plan.json'), canonical(plan));
   const runner = new PreparationRunner(f3.input, path.join(f3.root, 'state3'), { execute: f3.execute, paths: f3.paths, clock: f3.clock, workerBusy: async () => false });
   assert.equal(runner.findNativePlan(request), null);
 });
@@ -237,7 +242,7 @@ test('grant and profile drift after native prepare block READY', async t => {
       }
       return result;
     };
-    await assert.rejects(new PreparationRunner(f.input, path.join(f.root, 'state'), { execute, paths: f.paths, clock: f.clock, workerBusy: async () => false }).run(), kind === 'grant' ? /Worker grant drift/ : /profile drift|secret profile/);
+    await assert.rejects(new PreparationRunner(f.input, path.join(f.root, 'state'), { execute, paths: f.paths, clock: f.clock, workerBusy: async () => false }).run(), kind === 'grant' ? /signed current worker grant|frozen original/ : /profile drift|secret profile/);
   });
 });
 

@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import test from 'node:test';
 import { CONTRACT, SCHEMA, digest, canonical, renderCompose } from './contract.mjs';
 import { execute, PHASES, validateApproval, validateChain, validatePlan } from './orchestrator.mjs';
+import { deriveWorkerContinuation } from './worker-continuation.mjs';
 
 const key = crypto.generateKeyPairSync('ed25519');
 const pub = key.publicKey.export({ type: 'spki', format: 'pem' });
@@ -51,6 +52,48 @@ for (const interrupted of PHASES) test(`lost response at ${interrupted} reconcil
   await execute(plan, envelope(), pub, store, driver);
   assert.deepEqual(effects, PHASES);
 });
+test('expired approval permits read-only reconciliation but no new native phase', async t => {
+  const store = memoryStore(), e = envelope(), effects = [], reconciled = [];
+  let time = Date.now(); t.mock.method(Date, 'now', () => time);
+  const driver = { preflight: async () => {},
+    run: async phase => { effects.push(phase); throw new Error('lost effect response'); },
+    reconcile: async phase => { reconciled.push(phase); return { phase, planSha256: digest(plan) }; } };
+  await assert.rejects(execute(plan, e, pub, store, driver), /lost effect response/);
+  time = Date.parse(e.approval.expiresAt) + 1;
+  await assert.rejects(execute(plan, e, pub, store, driver), /validity window/);
+  assert.deepEqual(effects, ['HYDRATE']);
+  assert.deepEqual(reconciled, ['HYDRATE']);
+  assert.ok(store.data.records.HYDRATE.receipt);
+  assert.equal(store.data.records.BIND, undefined);
+});
+for (const interrupted of PHASES) test(`lost receipt after ${interrupted} evidence never repeats the phase effect`, async () => {
+  const store = memoryStore(), effects = [], reconciled = [];
+  const publish = store.publish;
+  let loseReceipt = true;
+  store.publish = async (phase, type, value) => {
+    if (phase === interrupted && type === 'receipt' && loseReceipt) {
+      loseReceipt = false;
+      throw new Error('lost before receipt publication');
+    }
+    await publish(phase, type, value);
+  };
+  const driver = {
+    preflight: async () => {},
+    run: async phase => {
+      effects.push(phase);
+      return { phase, planSha256: digest(plan), observed: phase };
+    },
+    reconcile: async phase => {
+      reconciled.push(phase);
+      return structuredClone(store.data.records[phase].evidence);
+    },
+  };
+  await assert.rejects(execute(plan, envelope(), pub, store, driver), /lost before receipt publication/);
+  await execute(plan, envelope(), pub, store, driver);
+  assert.deepEqual(effects, PHASES);
+  assert.deepEqual(reconciled, [interrupted]);
+  assert.equal(store.data.final.lastReceiptSha256, validateChain(plan, store.data.records));
+});
 test('tampered receipt or skipped phase stops before any effect', async () => {
   const store = memoryStore(); store.data.records.SMOKE = { intent: { planSha256: digest(plan), phase: 'SMOKE', previousReceiptSha256: null } };
   await assert.rejects(execute(plan, envelope(), pub, store, { preflight: () => assert.fail('must not execute') }), /gap/);
@@ -63,6 +106,24 @@ function preparedPlan() {
   p.preparationEvidenceExpiresAt = new Date(Date.now() + 60000).toISOString();
   return p;
 }
+function preparedWorkerPolicy(p) {
+  const workers = ['bonus-ledger-worker', 'langame-daily-worker'];
+  const originals = workers.map((worker, index) => ({
+    grant: { contract: `${CONTRACT}_WORKER_GRANT`, worker, mode: 'TIMER',
+      id: `${index + 1}2345678-1234-4123-8123-123456789abc`, hostIdentitySha256: p.hostIdentitySha256,
+      releaseSha: p.previous[p.previous.activeSlot].releaseSha, generation: p.generation,
+      tenantSlug: 'tenant', secretSha256: '7'.repeat(64), issuedAt: '2026-09-24T00:00:00Z',
+      expiresAt: new Date(Date.now() + 86400000).toISOString() }, signature: `${'A'.repeat(86)}==` }));
+  return deriveWorkerContinuation({
+    originalTimers: workers.map((worker, index) => ({ worker, unit: index === 0 ? 'leetplus-compose-bonus.timer' : 'leetplus-compose-daily.timer', enabled: true, active: true })),
+    originalGrantEnvelopes: originals,
+    profileBindings: workers.map(worker => ({ worker, profileSha256: '7'.repeat(64) })),
+    targetReleaseSha: p[p.targetSlot].releaseSha, currentGeneration: p.generation,
+    previousReleaseSha: p.previous[p.previous.activeSlot].releaseSha,
+    forwardGrantIds: ['42345678-1234-4123-8123-123456789abc', '52345678-1234-4123-8123-123456789abc'],
+    rollbackGrantIds: ['62345678-1234-4123-8123-123456789abc', '72345678-1234-4123-8123-123456789abc'],
+  });
+}
 test('new approvals cannot extend the original prepared evidence validity', () => {
   const p = preparedPlan(); validatePlan(p);
   assert.throws(() => validateApproval(p, envelope(p), pub), /cannot extend/);
@@ -74,8 +135,20 @@ test('new approvals cannot extend the original prepared evidence validity', () =
   const missing = { ...p }; delete missing.preparationEvidenceExpiresAt;
   assert.throws(() => validatePlan(missing), /immutable UTC expiry/);
 });
-test('approval is rechecked after a long preflight before any next native effect', async t => {
+test('an unfinished application rollout cannot execute with inert V1 worker policy', async () => {
   const p = preparedPlan(), e = envelope(p), store = memoryStore();
+  p.workerContinuation = { contract: 'LEETPLUS_WORKER_CONTINUATION_V1' };
+  e.approval.planSha256 = digest(p);
+  e.approval.expiresAt = p.preparationEvidenceExpiresAt;
+  e.signature = crypto.sign(null, Buffer.from(canonical(e.approval)), key.privateKey).toString('base64');
+  await assert.rejects(execute(p, e, pub, store, {
+    preflight: () => assert.fail('V1 plan must stop before native preflight or effect'),
+  }), /requires executable V2 worker continuation/);
+});
+test('approval is rechecked after a long preflight before any next native effect', async t => {
+  const p = preparedPlan(), store = memoryStore();
+  p.workerContinuation = preparedWorkerPolicy(p);
+  const e = envelope(p);
   e.approval.expiresAt = p.preparationEvidenceExpiresAt;
   e.signature = crypto.sign(null, Buffer.from(canonical(e.approval)), key.privateKey).toString('base64');
   let time = Date.now(); t.mock.method(Date, 'now', () => time);
@@ -84,6 +157,7 @@ test('approval is rechecked after a long preflight before any next native effect
     run: async () => assert.fail('expired evidence cannot authorize an effect'),
     reconcile: async () => assert.fail('expired evidence cannot authorize a reconcile effect'),
   }), /validity window/);
+  assert.deepEqual(store.data.records, {}, 'a failed preflight must not create an ambiguous effect intent');
 });
 
 test('application successors retain separately admitted data images in either slot', () => {

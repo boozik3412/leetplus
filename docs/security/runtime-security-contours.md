@@ -14,6 +14,20 @@ GREEN `f97af35d…`/gen10 с BLUE `3c3dc4ac…` rollback и data399/CURRENT191.
 Новый app rollout и измерение 45–60 минут требуют отдельного admission/plan/GO.
 [Точный план, receipt и независимая приёмка](../deployment/release-preparation-a-production-2026-09-24.md).
 
+**Source repair 24.09, после контрольной проверки:** у serving controller 880
+найдены два дефекта для *будущего* application rollout: неоднозначный native
+resume мог повторить phase effect; подписанный V1 `workerContinuation` не имел
+исполнителя и после CUTOVER оставлял grants на прежней generation. В source
+подготовлены read-only reconcile без общего повторного executor и V2 policy:
+точные подписанные forward N+1/rollback N+2 TIMER grants с сохранением tenant,
+profile, host и expiry; native CUTOVER/POSTCHECK под существующим exclusive
+control lock; receipt-bound worker-run gate. Public guest, corporate и worker
+контуры, dataRelease, provider egress и serving application не расширены.
+Serving 880 **не обновлён** этим source change; A application rollout остаётся
+на HOLD до нового exact-main admission, отдельно разрешённого controller-only
+handoff и installed-path приёмки. Предыдущий GO операции63b58306 исчерпан.
+[Repair runbook и границы пилота](../deployment/release-preparation-a-application-pilot.md).
+
 **Оперативное обновление 23.09:** по отдельному exact-plan GO активен
 **GREEN f97/gen10, API6GiB**; BLUE3c3 оставлен rollback, data399/CURRENT191
 и serving controller02 не менялись. Исходные daily/bonus timers включены с

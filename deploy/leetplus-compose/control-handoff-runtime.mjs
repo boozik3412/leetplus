@@ -50,6 +50,10 @@ function acceptedRollback(plan, history) {
   demand(rollback?.contract === `${CONTRACT}_ROLLED_BACK` && rollback.planSha256 === digest(plan) &&
     typeof rollback.reason === 'string' && canonical(rollback.active) === canonical(expected),
   'Rollback terminal receipt mismatch');
+  if (plan.workerContinuation?.contract === 'LEETPLUS_WORKER_CONTINUATION_V2') {
+    demand(/^[a-f0-9]{64}$/.test(rollback.workerContinuationReceiptSha256 ?? ''),
+      'Rollback must bind the worker continuation receipt');
+  }
   return expected;
 }
 

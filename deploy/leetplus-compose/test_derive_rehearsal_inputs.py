@@ -28,11 +28,16 @@ class DerivationTests(unittest.TestCase):
         self.members.update({mod.SECRETS + name: mod.canonical(value) for name, value in profiles.items()})
         self.verification = {'decision': 'AUTHENTICATED_APPLICATION_BACKUP_PASS', 'privateAclVerified': True, 'privateDirectory': str(self.root), 'backupSha256': 'b' * 64, 'sourceAppSha': 'a' * 40, 'generation': 9, 'sourceApplicationFinalSha256': hashlib.sha256(mod.canonical(final)).hexdigest(), 'profileHashes': {name: hashlib.sha256(mod.canonical(value)).hexdigest() for name, value in profiles.items()}, 'workerEnvelopeHashes': {}}
         self.request = {'nativeRequest': {'preparationGuard': {'activeSha256': hashlib.sha256(mod.canonical(self.active)).hexdigest(), 'generation': 9, 'activeSlot': 'blue', 'hostIdentitySha256': 'c' * 64, 'controllerManifestSha256': 'd' * 64}}}
+        original_envelopes = []
         for worker in ['bonus-ledger-worker', 'langame-daily-worker']:
-            raw = mod.canonical({'worker': worker, 'generation': 9})
+            envelope = {'grant': {'worker': worker, 'generation': 9}, 'signature': 'fixture'}
+            raw = mod.canonical(envelope)
             self.members[mod.STATE + 'worker-grants/' + worker + '.json'] = raw
             self.verification['workerEnvelopeHashes'][worker] = hashlib.sha256(raw).hexdigest()
-        self.request['nativeRequest']['workerContinuation'] = {'grantBindings': [{'worker': w, 'grantSha256': h} for w, h in self.verification['workerEnvelopeHashes'].items()], 'profileBindings': [{'worker': w, 'profileSha256': self.verification['profileHashes'][w + '.json']} for w in self.verification['workerEnvelopeHashes']]}
+            original_envelopes.append(envelope)
+        self.request['nativeRequest']['workerContinuation'] = {'contract': 'LEETPLUS_WORKER_CONTINUATION_V2',
+            'originalGrantEnvelopes': original_envelopes,
+            'profileBindings': [{'worker': w, 'profileSha256': self.verification['profileHashes'][w + '.json']} for w in self.verification['workerEnvelopeHashes']]}
         self.pack()
 
     def pack(self, duplicate=None, unsafe=None):

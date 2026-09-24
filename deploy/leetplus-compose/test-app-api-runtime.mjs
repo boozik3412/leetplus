@@ -128,7 +128,7 @@ function createFixtureCertificate(volume) {
   docker([
     'run', '--rm', '--user', '0:0', '--mount', `type=volume,src=${volume},dst=/run/secrets`,
     '--entrypoint', 'node', apiImage, '-e',
-    "const fs=require('node:fs');fs.chownSync('/run/secrets/db-key.pem',12030,12030);fs.chmodSync('/run/secrets/db-key.pem',0o600);fs.chownSync('/run/secrets/db-ca.pem',12010,12050);fs.chmodSync('/run/secrets/db-ca.pem',0o640);",
+    "const fs=require('node:fs');fs.chownSync('/run/secrets/db-key.pem',12030,12030);fs.chmodSync('/run/secrets/db-key.pem',0o600);fs.chownSync('/run/secrets/db-ca.pem',12010,12050);fs.chmodSync('/run/secrets/db-ca.pem',0o644);",
   ]);
 }
 
@@ -181,7 +181,8 @@ try {
     if (spawnSync('docker', ['exec', postgres, '/usr/lib/postgresql/16/bin/pg_isready', '-h', '/tmp', '-U', 'postgres']).status === 0) break;
     if (attempt === 29) {
       const state = docker(['inspect', '--format', '{{json .State}}', postgres]);
-      throw new Error(`PostgreSQL fixture did not start: state=${state.slice(-1600)}; logs=${docker(['logs', postgres]).slice(-4000)}`);
+      const logs = spawnSync('docker', ['logs', postgres], { encoding: 'utf8', timeout: 10_000, maxBuffer: 1024 * 1024 });
+      throw new Error(`PostgreSQL fixture did not start: state=${state.slice(-1600)}; logs=${String(logs.stdout ?? '').slice(-2000)}${String(logs.stderr ?? '').slice(-2000)}`);
     }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
   }

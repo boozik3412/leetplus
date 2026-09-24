@@ -105,7 +105,10 @@ function createRuntimeSecret(volume, databaseUrl) {
     APP_ENCRYPTION_KEY: randomSecret(),
     INTEGRATION_ENCRYPTION_KEY: randomSecret(),
     IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY: randomSecret(),
+    IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION: 'v1',
     IDENTITY_MAIL_ENCRYPTION_KEY: crypto.randomBytes(32).toString('base64url'),
+    IDENTITY_MAIL_ENCRYPTION_KEY_VERSION: 'v1',
+    IDENTITY_MAIL_AAD_ENVIRONMENT: 'ci-app-only',
     SYNC_SERVICE_TOKEN: randomSecret(),
   };
   const source = `const fs=require('node:fs');const value=${JSON.stringify(secret)};fs.writeFileSync('/run/secrets/runtime.json',JSON.stringify(value));fs.chownSync('/run/secrets/runtime.json',12010,12050);fs.chmodSync('/run/secrets/runtime.json',0o640);`;
@@ -162,6 +165,7 @@ try {
     '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '12030:12030',
     '--tmpfs', '/tmp:rw,nosuid,nodev,size=536870912,mode=1777', '--mount', `type=volume,src=${volume},dst=/tls,readonly`, '--entrypoint', '/bin/bash', postgresImage,
     '-ec', [
+      'set -e',
       'export PATH=/usr/lib/postgresql/16/bin:$PATH',
       'initdb -D /tmp/pg -U postgres --locale=en_US.UTF-8 -A trust >/tmp/init.log',
       'printf "hostssl all all all trust\\n" >> /tmp/pg/pg_hba.conf',
@@ -174,7 +178,11 @@ try {
   ]);
   for (let attempt = 0; attempt < 30; attempt += 1) {
     if (spawnSync('docker', ['exec', postgres, 'test', '-f', '/tmp/ready']).status === 0) break;
-    if (attempt === 29) throw new Error(`PostgreSQL fixture did not start: ${docker(['logs', postgres])}`);
+    if (attempt === 29) {
+      let pgLog = 'unavailable';
+      try { pgLog = docker(['exec', postgres, '/bin/cat', '/tmp/pg.log']); } catch { /* Container may have already exited. */ }
+      throw new Error(`PostgreSQL fixture did not start: ${docker(['logs', postgres]).slice(-3000)}; pg.log=${pgLog.slice(-3000)}`);
+    }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
   }
 
@@ -219,7 +227,7 @@ try {
     if (publicDirectory.status !== 200 || !Array.isArray(publicDirectory.json?.clubs)) {
       throw new Error(`${slot} public guest directory was not anonymously available`);
     }
-    const corporateDenied = request(container, '/guests/gamification', { headers: { authorization: 'Bearer invalid-runtime-fixture-token' } });
+    const corporateDenied = request(container, '/guests/gamification/workspace', { headers: { authorization: 'Bearer invalid-runtime-fixture-token' } });
     if (corporateDenied.status !== 401) {
       throw new Error(`${slot} tenant gamification boundary accepted an invalid corporate token`);
     }

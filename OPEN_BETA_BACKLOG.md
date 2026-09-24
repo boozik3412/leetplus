@@ -1,5 +1,25 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
+**Оперативный checkpoint 24.09.2026, 06:59 UTC:** Variant A release
+preparation admitted на exact `88010292246249c94ba66ecbab64e4d51ad84d8c`;
+после отдельного exact-plan GO serving controller-only handoff принят и
+независимо проверен. Приложение остаётся GREEN `f97af35d…`/gen10 с BLUE
+`3c3dc4ac…` rollback и data399/CURRENT191; исходные контейнеры, таймеры и
+worker grants сохранены. Public API/Web, свежая staff-fixture corporate/guest
+matrix и обычные worker/network циклы PASS. Это **не** внешний beta GO и не
+новый application rollout. Целевые 45–60 минут пока не измерены: нужен
+отдельно согласованный контрольный выпуск с новым admission/native plan/GO.
+[Production evidence и точные границы](./docs/deployment/release-preparation-a-production-2026-09-24.md).
+
+**Source-only repair после проверки 24.09:** у принятого controller 880 обнаружены
+повтор native effects при неоднозначном resume и отсутствие исполнителя
+`workerContinuation` для нового приложения. Подготовлены V2 worker grants,
+fail-closed reconciliation и отдельный протокол измерения выпуска; их локальные
+fixtures не являются installed-path или production acceptance. Будущие A app
+rollouts остаются HOLD до exact-main admission repair SHA, отдельного GO на
+controller handoff и нового app plan/GO. Текущий GREEN f97/gen10, data399,
+grants/timers и решение `NO-GO` для внешнего beta этим не изменены.
+
 - Дата актуализации: 24.08.2026
 - Версия: 3.59
 - Статус документа: активный launch backlog

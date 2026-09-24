@@ -1,13 +1,8 @@
 # LeetPlus repository context
 
-Production checkpoint 17.09.2026, 11:02 UTC: active BLUE exact `3c3dc4ac4d1a73fdf9a1a6da5427212adfa9af80`,
-generation9/API6GiB; healthy GREEN7ead/API6 retained with unchanged process identities. Serving controller02 and
-data399/CURRENT191 are separate, unchanged identities. Approved nativeed4,
-actual public UI and ordinary gen9 worker passed; rolling7, daily21 history, the executive dashboard and
-USER_CALL feedback UI are deployed. Natural phone/Telegram login is not proven
-by the operator guest diagnostic. Older source-only notes below are historical;
-use `docs/deployment/dashboard-periods-production-2026-09-17.md` and live status before
-any new effect. A later docs-only commit is not a new production release.
+`apps/api` is the Nest API; `apps/web` is the Next.js UI. Confirm this checkout's
+branch, changes and applicable package/CI commands before editing. Historical
+release notes do not establish current production state.
 
 Before changing authentication, landing/redirects, access scope, the public
 game, gamification administration, integrations, background jobs or deployment,
@@ -61,54 +56,15 @@ role, scheduler placement, provider egress or rollout state, update
 `docs/security/runtime-security-contours.md` and the current open-beta status in
 the same change.
 
-<!-- autopilot:start -->
-## Ассортимент: готовое состояние исходного кода
+## Read for the affected area
 
-- Входы — защищённые CSV imports товаров, остатков, продаж и движений, а также сохранённые интеграционные факты; они заполняют каталог, `InventorySnapshot`, `SalesFact`, `StockMovement`, покрытие и конфигурации цен.
-- Обычный INTERNAL daily обновляет inventory ежедневно даже при закрытом QUICK; только недавний повтор подавляется при success AUTO INVENTORY всех активных доменов за 1 час. Это не порог качества данных: freshness остаётся 36 часов. Inventory-only run не двигает sales cursor.
-- `resolveGuestSessionStore` доказывает Store по полной топологии tenant; вызывающий код затем применяет permissions. Inferred binding не меняет historical timestamps или parser timezone.
-- Общие точки реализации — `apps/api/src/common/assortment-health.ts`, `assortment-health-loader.service.ts` и `guest-session-store.ts`; loader строит доказанные store×product grains и передаёт факты в pure `buildAssortmentHealth`.
-- Устойчивые границы engine: `AssortmentHealth`/`AssortmentHealthRow` и `AssortmentMetric<T>` с `value|null`, `state`, `reason`, `coverage`, `asOf`; денежные оценки дополнительно несут `basis`.
-- Отсутствующие данные остаются `null`/`UNKNOWN`, известный ноль остаётся нулём, а `PARTIAL` не становится точным итогом; Web показывает причину и coverage у конкретной карточки.
-- Cutoff запроса — `selectedAssortmentAsOf`/report `asOf`; `inventory.asOf` — отдельная дата наблюдения остатка и не переносится как cutoff.
-- `DashboardService` добавляет summary в `GET /dashboard/summary`, а `ReportsService` использует те же row sets для `operations`, `inventory-turnover` и `replenishment` вместе с scoped rows и write-off details.
-- Web transport находится в `apps/web/src/lib/dashboard-summary.ts` и `apps/web/src/lib/reports.ts`; `/assortment/dashboard`, `/reports` и table pages сохраняют `from`, `to`, repeated `storeIds`/`categoryIds`, `asOf`, `noSalesDays` и subset URL.
-- Карточки ассортимента кликабельны: OOS/low-stock/no-sales ведут в отчёты, turnover/excess — в inventory-turnover, а списания — в movement table с `subset=write-offs`.
-- OOS `grossProfitAtRisk` хранит дневную/периодную оценку и cost basis: известная себестоимость позволяет расчёт, sale-price valuation не становится cost, отсутствие подтверждения остаётся null.
-- Команды из package: `pnpm dev`, `pnpm --filter api start:dev`, `pnpm --filter web dev`, API `tsc --noEmit -p tsconfig.build.json` и Web `typecheck`/`build` через соответствующий filter.
-- Один API test file: `pnpm.cmd --filter api exec jest --runInBand --runTestsByPath src/common/assortment-health.spec.ts`.
-- Синтетическая UI QA использует fixture `localhost:4311` и Next `localhost:4312` через `API_URL` и `PORT` с `pnpm --filter web start`; это не обычный dev или production запуск.
-- Источник и production proof определяются canonical deployment documentation, а не веткой или наличием исходного кода.
+- Assortment, inventory, stock movements or reports: [assortment guide](docs/agent-context/assortment.md) and [metric contract](docs/assortment-dashboard-metric-contract.md).
+- Executive dashboard, periods, revenue or priorities: [executive guide](docs/agent-context/executive-dashboard.md) and the relevant [priority contract](docs/executive-dashboard-priorities.md).
+- Code changes and local QA: [commands and verification](docs/agent-context/verification.md); preserve the current required CI/admission gates.
+- Deployment/release work: the complete security contract above, the relevant runbook under `docs/deployment/`, and current live receipts/status. [Historical context](docs/agent-context/history-2026-09-17.md) is only for tracing earlier decisions or checks, not automatic startup reading.
 
-## Сводный дашборд: исходный код
+## Keep work focused
 
-- Исходное состояние на 15.09.2026: `apps/api/src/dashboard/dashboard.controller.ts` даёт corporate JWT+role-guarded read-only `GET /dashboard/executive-summary`, `executive-operations` и `executive-product-revenue`; `DashboardService` нормализует scope через `FreshStoreScopeService`.
-- Общий wire contract: API `apps/api/src/common/executive-contract.ts`, Web `apps/web/src/lib/dashboard-executive.ts`. `ExecutiveAppliedScope` возвращает принятые inclusive `YYYY-MM-DD` period, concrete `storeIds`, `storeTimeZones`, optional comparison и отдельный ISO `asOf`; `PER_STORE` — label mixed-zone scope, не IANA-зона для `Intl`.
-- `ExecutiveMetric` всегда несёт `value|null`, state, reason, coverage, independent `factAsOf`, `lastCalculatedAt`, comparison и `ratio`; `MISSING`/`FAILED` не заменять нулём. Club/day details — агрегаты той же accepted scope, не чеки или отдельные сессии.
-- Product revenue читает saved non-cancelled `SalesFact` только для подтверждённых store-days через `AssortmentHealthLoaderService.loadSalesCoverage`; fiscal-date labels сопоставляются без повторного timezone shift. `AVAILABLE` допускает доказанный ноль, `PARTIAL` — только подтверждённую часть.
-- Сохранённые `GuestSession` дают лишь доказуемо привязанные visits и сейчас `PARTIAL` при наблюдениях: независимого store-day completeness proof нет, поэтому visit comparisons подавлены. Services, реальные topups и historical capacity/load не доказаны: остаются `MISSING`; revenue может показать лишь partial product component, а ARPV/product share/load не объявлять реальными ratio.
-- `getExecutiveOperations` читает assortment отдельно; failure не ломает primary summary. Web `apps/web/src/app/(app)/dashboard/page.tsx` loads summary first, requests operations against accepted scope and discards scope mismatch; UI shows evidence/reason/coverage and builds only role-safe internal detail/report links.
-- Entry UI: `/dashboard` uses shared `DashboardFilters`; `ExecutiveDashboard`, `executive-trend-chart.tsx` and `executive-club-table.tsx` render summary; `/dashboard/executive-details` re-queries the same scope and labels output as club/day aggregates. Transport accepts abort signal and throws `ExecutiveDashboardRequestError` for non-OK responses.
-- ExecutiveDashboard is a client presentation boundary: its five KPI buttons choose the daily metric without a data request. The chart reads the corresponding saved `days[].metrics` values; ratio math stays on the API. Its «Подробнее» link preserves selected metric/scope and does not prefetch on each selection. The server page still authenticates and fetches scoped data.
-- Production follow-up17.09 (BLUE3c3/gen9): `full-week` is the last seven completed days, ending yesterday. For `full-day`, keep one-day KPI/club/priority totals but load a separate 21-day chart via the existing custom executive-summary reader. `lib/executive-history.ts` preserves accepted clubs/timezones/asOf, checks exact scope and 21 ordered dates, and rejects failed/mismatched history without substituting the daily point. Chart details use the history range; `returnPeriod=full-day` restores the daily filter. The chart labels its own comparison range; KPI comparisons remain daily.
-- Club table notes are collapsed by default behind «Пояснения»; short partial/missing/stale/failed labels stay visible. Confirmed values and zero have no repeated evidence footers in the compact view.
-- Product pilot aliases (`tenantId`, `tenantSlug`, period fields and `selectedStoreIds`) remain compatibility data; new UI consumes `scope`. Legacy `/dashboard/summary` and assortment surfaces stay separate.
-
-## Проверенные локальные gates и среда
-
-- Source follow-up15.09: `averageProductCheck` дополняет executive contract; receipt grouping в `common/receipt-metrics.ts` проверяет namespace, fiscal-day ambiguity и отдельное покрытие операций/выручки. Web tolerates old API without that metric; five top cards remain unchanged.
-- Staff priorities live in existing StaffModule (`staff-priorities.service.ts`), retain fresh NETWORK and source-feature permissions, read current server-time obligations, and expose exact paged details. Training caps produce lower bounds/unknown, not false zero. Independent Web Suspense slot does not delay primary dashboard. Contract and cross-module audit: `docs/executive-dashboard-priorities.md`.
-- Latest source-only priority acceptance: API194 suites/3588 tests +2 prior TODO; local PG17 scenarios. Receipts are under parent `deploy-evidence/executive-priorities-20260915`; these results do not authorize production.
-
-- Executive dashboard changes are source-only until an exact release is admitted; source HEAD and runtime state must be checked independently.
-- Passed receipt: cached pnpm `10.33.2`, root API `pnpm --filter api exec jest --runInBand` — 192 suites / 3571 tests; не повторять без изменения кода. Focused API file: `pnpm.cmd --filter api exec jest --runInBand --runTestsByPath src/dashboard/dashboard.service.spec.ts`.
-- Web `pnpm --filter web typecheck` and `pnpm --filter web build` passed. ESLint was run only on changed files through direct `node.exe` from `apps/web`; this is not a claim that an unrestricted full-project lint passed. App Router paths containing parentheses must be literal; filtered pnpm changes cwd, so root-relative glob patterns are invalid there.
-- Local PG fixture is PostgreSQL 16.13 on `127.0.0.1:55495`, baseline 15/15 and final scoped HTTP acceptance 16/16 passed with CLI `testTimeout=30000`; the fixture was stopped after acceptance and is not production DB. Use `DATABASE_URL` only by name and never record its value.
-- Full UI QA bootstrap uses separate local services on `4321/4322`; synthetic control data and `API_URL`/`PORT` overrides are test-only, not production authentication. CUA auth is unavailable; user permitted local Chromium.
-- Do not install dependencies merely to repeat these gates. `pnpm` is pinned to `10.33.2`; use `pnpm dev`, `pnpm --filter api start:dev`, or `pnpm --filter web dev` only when an actual local run is needed.
-
-## Границы следующей сессии
-
-- Макеты и demo data in parent `output/summary-dashboard-concepts-20260915` are presentation references only, never production values. Current run record is `.autopilot/2026-09-15-executive-dashboard`; do not treat its plan/spec/tickets as source of truth over code.
-- No auth, provider, import, backfill, schema or production effect follows from this dashboard. Keep saved-data reads, canonical fresh scope and the public/corporate/worker contours from `docs/security/runtime-security-contours.md` separate.
-<!-- autopilot:end -->
+- Use one implementer for a small change; independent review follows the task's risk. Search the affected module and read relevant sections before widening scope. Do not load every linked document; the mandatory security-contract read above remains unchanged.
+- Keep current rules here and module details in their guide. Store dated checkpoints and test receipts in task/deployment evidence, not as permanent startup instructions.
+- Reuse passed checks only while code, dependencies, environment, fixtures, command and checked scope remain applicable. Keep full logs; report the outcome, exit code and relevant error. The required error-log and changed-condition rules above still apply.

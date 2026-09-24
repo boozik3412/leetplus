@@ -9,6 +9,7 @@ import { PHASES, execute, validateApproval, validateChain, validatePlan } from '
 import { validateWorkerGrant } from './worker-authority.mjs';
 import { controlLockPolicy, verifyKernelControlLocks } from './control-locks.mjs';
 import { validateControlHandoffAuthority, validatePendingControlHandoffAuthority } from './control-handoff-authority.mjs';
+import { validateAcceptedExactTargetHandoff, validatePendingExactTargetHandoff } from './exact-target-handoff-authority.mjs';
 import { validatePendingNetworkBootAuthority } from './control-handoff-runtime.mjs';
 import { requireResourceBudget, verifyResourceAcceptance } from './resource-budget.mjs';
 import { reconcileBoundEvidence } from './bind-reconcile.mjs';
@@ -154,6 +155,7 @@ function installedDigest() {
   }
   for (const name of ['control.mjs', 'orchestrator.mjs', 'contract.mjs', 'control.sh',
     'control-reconcile.mjs', 'worker-continuation.mjs', 'worker-continuation-runtime.mjs',
+    'exact-target-handoff-authority.mjs',
     'app-only-artifact.mjs', 'app-only-baseline.mjs', 'app-only-live-certification.mjs',
     'app-only-installed-certifier.mjs']) {
     demand(manifest.files[name], 'Required control file is not attested');
@@ -170,13 +172,24 @@ function assertControllerContinuity() {
   demand(current.planSha256 === digest(plan), 'Active application plan drift');
   const controlSha256 = installedDigest();
   if (plan.controlSha256 === controlSha256) return;
-  const context = { controlSha256, hostIdentitySha256: hostIdentity(), activeSha256: digest(safeFile(`${STATE}/active.json`)) };
+  const context = { controlSha256, hostIdentitySha256: hostIdentity(),
+    activeSha256: digest(safeFile(`${STATE}/active.json`)),
+    mainTarget: fs.realpathSync('/usr/local/sbin/leetplus-compose'),
+    unitSha256: digest(safeFile('/etc/systemd/system/leetplus-compose-network-refresh.service')) };
   const publicKey = safeFile('/etc/leetplus-compose/approval-root.pem');
   const acceptPointer = pointer => {
     demand(/^[a-f0-9-]{36}$/.test(pointer.operationId ?? ''), 'Invalid control handoff pointer');
     const directory = `${STATE}/control-handoffs/${pointer.operationId}`;
     demand(!fs.existsSync(`${directory}/rolled-back.json`), 'Controller handoff was rolled back');
-    validateControlHandoffAuthority({ plan: readJSON(`${directory}/plan.json`, { immutable: true }), approvalEnvelope: readJSON(`${directory}/approval.json`, { immutable: true }), receipt: readJSON(`${directory}/receipt.json`, { immutable: true }), pointer }, publicKey, context);
+    const handoffPlan = readJSON(`${directory}/plan.json`, { immutable: true });
+    if (handoffPlan.contract === 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V2_PLAN') {
+      validateAcceptedExactTargetHandoff({ plan: handoffPlan,
+        permitEnvelope: readJSON(`${directory}/permit.json`, { immutable: true }),
+        receipt: readJSON(`${directory}/receipt.json`, { immutable: true }), pointer },
+      publicKey, context);
+    } else validateControlHandoffAuthority({ plan: handoffPlan,
+      approvalEnvelope: readJSON(`${directory}/approval.json`, { immutable: true }),
+      receipt: readJSON(`${directory}/receipt.json`, { immutable: true }), pointer }, publicKey, context);
   };
   try { acceptPointer(readJSON(`${STATE}/control-handoffs/active.json`)); return; } catch {
     // A crash after the atomic core switch must not brick ordinary accepted
@@ -194,8 +207,14 @@ function assertControllerContinuity() {
       return;
     }
     demand(!fs.existsSync(`${directory}/rolled-back.json`), 'Pending control was rolled back');
-    validatePendingControlHandoffAuthority({ plan: pendingPlan, approvalEnvelope: readJSON(`${directory}/approval.json`, { immutable: true }), intent: readJSON(`${directory}/apply-main.intent.json`, { immutable: true }), pending }, publicKey,
-      { ...context, mainTarget: fs.realpathSync('/usr/local/sbin/leetplus-compose'), unitSha256: digest(safeFile('/etc/systemd/system/leetplus-compose-network-refresh.service')) });
+    if (pendingPlan.contract === 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V2_PLAN') {
+      validatePendingExactTargetHandoff({ plan: pendingPlan,
+        permitEnvelope: readJSON(`${directory}/permit.json`, { immutable: true }),
+        intent: readJSON(`${directory}/bridge-apply.intent.json`, { immutable: true }), pending },
+      publicKey, context);
+    } else validatePendingControlHandoffAuthority({ plan: pendingPlan,
+      approvalEnvelope: readJSON(`${directory}/approval.json`, { immutable: true }),
+      intent: readJSON(`${directory}/apply-main.intent.json`, { immutable: true }), pending }, publicKey, context);
   }
 }
 function operation(id) { demand(/^[a-f0-9-]{36}$/.test(id ?? ''), 'Invalid operation ID'); return `${STATE}/operations/${id}`; }

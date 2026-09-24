@@ -753,6 +753,7 @@ jobs:
           pnpm --filter api exec eslint src/config/production-network-profile.ts src/config/production-network-profile.spec.ts
           pnpm --filter api exec jest src/config/production-network-profile.spec.ts --runInBand
           node --test deploy/leetplus-compose/*.test.mjs
+          python3 -m unittest discover -s deploy/leetplus-compose -p test_control_handoff.py
 
       - name: Type-check and build API
         run: |

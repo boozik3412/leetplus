@@ -306,6 +306,64 @@ class ResourceProfileBootstrapTests(unittest.TestCase):
             handoff.validate_plan_bindings(ordinary, old, new)
 
 
+class ExactTargetPermitTests(unittest.TestCase):
+    def controls(self):
+        old_files = {'control_handoff.py': '1' * 64}
+        target_files = {leaf: str((index % 9) + 1) * 64 for index, leaf in enumerate(handoff.EXACT_TARGET_CRITICAL_LEAVES)}
+        old = {'manifest': {'releaseSha': 'a' * 40, 'files': old_files}, 'digest': 'b' * 64, 'root': Path('/bridge').resolve()}
+        target = {'manifest': {'releaseSha': 'c' * 40, 'admissionSha256': 'd' * 64, 'files': target_files}, 'digest': 'e' * 64, 'archive': b'target-archive'}
+        plan = {'operationId': '12345678-1234-4123-8123-123456789abc'}
+        active_sha = 'f' * 64
+        predecessor = {'releaseSha': old['manifest']['releaseSha'], 'manifestSha256': old['digest'], 'verifierSha256': old_files['control_handoff.py']}
+        critical = {leaf: target_files[leaf] for leaf in handoff.EXACT_TARGET_CRITICAL_LEAVES}
+        target_identity = {'releaseSha': target['manifest']['releaseSha'], 'manifestSha256': target['digest'], 'admissionSha256': target['manifest']['admissionSha256'], 'controlArchiveSha256': handoff.digest(target['archive']), 'filesSha256': handoff.canonical_digest(target_files), 'criticalFilesSha256': handoff.canonical_digest(critical)}
+        permit = {'contract': handoff.EXACT_TARGET_PERMIT_CONTRACT, 'operationId': plan['operationId'], 'action': handoff.EXACT_TARGET_ACTION, 'hostIdentitySha256': '9' * 64, 'planSha256': handoff.canonical_digest(plan), 'activeSha256': active_sha, 'predecessor': predecessor, 'target': target_identity, 'issuedAt': '2026-09-24T00:00:00Z', 'expiresAt': '2026-09-24T01:00:00Z'}
+        return old, target, plan, active_sha, permit
+
+    def test_permit_binds_complete_target_and_bridge_predecessor(self):
+        old, target, plan, active_sha, permit = self.controls()
+        machine = Path('/etc/machine-id')
+        def secure(path, *args):
+            if Path(path) == machine:
+                return b'machine\n'
+            if str(path).endswith('approval-root.pem'):
+                return b'public-key'
+            raise AssertionError(path)
+        permit['hostIdentitySha256'] = handoff.digest(b'machine')
+        envelope = {'permit': permit, 'signature': 'A' * 86 + '=='}
+        now = datetime.datetime(2026, 9, 24, 0, 30, tzinfo=datetime.timezone.utc)
+        with mock.patch.object(handoff, 'secure', side_effect=secure), mock.patch.object(handoff, 'run', return_value=b'') as verify:
+            self.assertEqual(handoff.exact_target_permit(envelope, plan, old, target, active_sha, now), permit)
+        self.assertIn('validateExactTargetPermit', verify.call_args.args[0][-1])
+        self.assertIn((old['root'] / 'exact-target-handoff-authority.mjs').as_uri(), verify.call_args.args[0][-1])
+        for mutate, message in [
+            (lambda p: p['target'].update(filesSha256='0' * 64), 'target identity'),
+            (lambda p: p['predecessor'].update(verifierSha256='0' * 64), 'predecessor identity'),
+            (lambda p: p.update(planSha256='0' * 64), 'host/snapshot/plan'),
+        ]:
+            with self.subTest(message=message):
+                _, _, retry_plan, retry_active, retry = self.controls(); retry['hostIdentitySha256'] = handoff.digest(b'machine'); mutate(retry)
+                with mock.patch.object(handoff, 'secure', side_effect=secure):
+                    with self.assertRaisesRegex(ValueError, message): handoff.exact_target_permit({'permit': retry, 'signature': 'A' * 86 + '=='}, retry_plan, old, target, retry_active, now)
+
+    def test_bridge_scope_keeps_launcher_units_and_worker_contract_unchanged(self):
+        old, target, _, _, _ = self.controls()
+        old_files = old['manifest']['files']
+        new_files = target['manifest']['files']
+        old_files['exact-target-handoff-authority.mjs'] = 'a' * 64
+        for leaf in handoff.COMPATIBLE:
+            old_files[leaf] = 'b' * 64
+            new_files[leaf] = 'c' * 64 if leaf == 'orchestrator.mjs' else 'b' * 64
+        old_files['control.sh'] = new_files['control.sh'] = 'd' * 64
+        old_files['leetplus-compose-daily.timer'] = new_files['leetplus-compose-daily.timer'] = 'e' * 64
+        self.assertEqual(set(handoff.assert_exact_target_bridge_scope(old, target)), set(handoff.EXACT_TARGET_CRITICAL_LEAVES))
+        for leaf in ['control.sh', 'leetplus-compose-daily.timer', 'worker-authority.mjs', 'contract.mjs']:
+            with self.subTest(leaf=leaf):
+                changed = {'manifest': {'releaseSha': target['manifest']['releaseSha'],
+                             'files': {**new_files, leaf: '0' * 64}}}
+                with self.assertRaises(ValueError): handoff.assert_exact_target_bridge_scope(old, changed)
+
+
 class VariantAOrchestratorHandoffTests(unittest.TestCase):
     def controls(self):
         files = {leaf: str(index + 1) * 64 for index, leaf in enumerate(handoff.COMPATIBLE)}

@@ -727,7 +727,25 @@ class VariantAControllerRepairHandoffTests(unittest.TestCase):
         })
         root = Path(__file__).parent
         for leaf, expected in handoff.VARIANT_A_REPAIR_NEW_FILES.items():
-            self.assertEqual(handoff.digest((root / leaf).read_bytes()), expected, leaf)
+            current = handoff.digest((root / leaf).read_bytes())
+            if current != expected:
+                # A's transition still pins the frozen A bytes. A successor
+                # source may differ, but it must remain ineligible for this
+                # handoff until a separate exact B transition is reviewed.
+                self.assertIn(leaf, {'control.mjs', 'orchestrator.mjs',
+                                     'preparation-runner.mjs', 'release-observer.mjs'}, leaf)
+
+    def test_b_source_cannot_reuse_frozen_a_repair_transition(self):
+        old, new = self.controls()
+        root = Path(__file__).parent
+        changed = {leaf: handoff.digest((root / leaf).read_bytes()) for leaf in
+                   ('control.mjs', 'orchestrator.mjs', 'preparation-runner.mjs',
+                    'release-observer.mjs')}
+        self.assertTrue(any(changed[leaf] != handoff.VARIANT_A_REPAIR_NEW_FILES.get(leaf)
+                            for leaf in changed))
+        new['manifest']['files'].update(changed)
+        with self.assertRaisesRegex(ValueError, 'Unreviewed orchestrator transition'):
+            handoff.assert_runtime_contract_compatible(old, new)
 
     def test_exact_repair_transition_structure_binds_both_manifests_and_file_maps(self):
         old, new = self.controls()

@@ -10,6 +10,20 @@ from approval_window import plan_expiration
 
 
 class ApprovalWindowTests(unittest.TestCase):
+    def test_v2_caps_approval_to_certified_data_expiry(self):
+        now = datetime(2026, 9, 24, tzinfo=timezone.utc)
+        plan = {'contract': 'LEETPLUS_COMPOSE_BLUE_GREEN_V2_PLAN',
+                'preparationGuard': {'contract': 'LEETPLUS_PREPARATION_GUARD_V1'},
+                'preparationEvidenceExpiresAt': '2026-09-24T02:00:00.000Z',
+                'dataBaselineExpiresAt': '2026-09-24T01:00:00.000Z'}
+        self.assertEqual(plan_expiration(plan, now), now + timedelta(hours=1))
+        with self.assertRaisesRegex(ValueError, 'Certified data baseline expired'):
+            plan_expiration(plan, now + timedelta(hours=2))
+        with self.assertRaisesRegex(ValueError, 'certified-baseline expiry'):
+            plan_expiration({**plan, 'dataBaselineExpiresAt': None}, now)
+        with self.assertRaisesRegex(ValueError, 'bounded preparation evidence'):
+            plan_expiration({'contract': plan['contract'], 'dataBaselineExpiresAt': plan['dataBaselineExpiresAt']}, now)
+
     def test_caps_approval_to_original_evidence_expiry(self):
         now = datetime(2026, 9, 22, tzinfo=timezone.utc)
         plan = {'preparationGuard': {'contract': 'LEETPLUS_PREPARATION_GUARD_V1'}, 'preparationEvidenceExpiresAt': '2026-09-22T01:00:00.000Z'}
@@ -32,6 +46,28 @@ class ApprovalWindowTests(unittest.TestCase):
             result = subprocess.run([sys.executable, str(Path(__file__).with_name('sign-approval.py')), 'sign-plan', '--input', str(source), '--private', str(root / 'missing-private-key'), '--output', str(root / 'approval.json'), '--confirm', 'GO ' + plan['operationId'] + ' ' + hashlib.sha256(raw).hexdigest()], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('evidence expired', result.stderr)
+            self.assertNotIn('missing-private-key', result.stderr)
+
+    def test_invalid_v2_lane_is_rejected_before_private_key_access(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            now = datetime.now(timezone.utc)
+            plan = {'contract': 'LEETPLUS_COMPOSE_BLUE_GREEN_V2_PLAN',
+                    'operationId': '11111111-1111-4111-8111-111111111111',
+                    'action': 'ROLLOUT', 'releaseLane': 'L2_SCHEMA_SECURITY',
+                    'preparationGuard': {'contract': 'LEETPLUS_PREPARATION_GUARD_V1'},
+                    'preparationEvidenceExpiresAt': (now + timedelta(minutes=30)).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
+                    'dataBaselineExpiresAt': (now + timedelta(minutes=25)).isoformat(timespec='milliseconds').replace('+00:00', 'Z')}
+            raw = (json.dumps(plan, indent=2) + '\n').encode()
+            source = root / 'plan.json'
+            source.write_bytes(raw)
+            result = subprocess.run([sys.executable, str(Path(__file__).with_name('sign-approval.py')),
+                                     'sign-plan', '--input', str(source), '--private', str(root / 'missing-private-key'),
+                                     '--output', str(root / 'approval.json'),
+                                     '--confirm', 'GO ' + plan['operationId'] + ' ' + hashlib.sha256(raw).hexdigest()],
+                                     capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Unsupported V2 app-only plan authority', result.stderr)
             self.assertNotIn('missing-private-key', result.stderr)
 
 

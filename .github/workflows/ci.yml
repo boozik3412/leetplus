@@ -3061,3 +3061,183 @@ jobs:
           path: ${{ runner.temp }}/leetplus-compose/
           compression-level: 0
           retention-days: 30
+
+  app-only-impact:
+    name: App-only exact-diff decision
+    needs: release_impact
+    if: needs.release_impact.outputs.deployable_candidate == 'true' && needs.release_impact.outputs.effective_lane == 'L1_RUNTIME'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    continue-on-error: true
+    outputs:
+      eligible: ${{ steps.classify.outputs.eligible }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.33.2
+      - name: Install locked web syntax parser
+        run: pnpm install --frozen-lockfile --filter web...
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        with:
+          name: leetplus-release-candidate-authority-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/app-only-authority
+      - name: Reverify source receipts and classify closed app-only allowlist
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+          impact="$RUNNER_TEMP/app-only-authority/leetplus-release-impact-$CI_RELEASE_SHA.json"
+          candidate="$RUNNER_TEMP/app-only-authority/leetplus-release-candidate-$CI_RELEASE_SHA.json"
+          output="$RUNNER_TEMP/app-only-impact-$CI_RELEASE_SHA.json"
+          if node .github/scripts/classify-app-only.mjs "$GITHUB_WORKSPACE" "$impact" "$candidate" "$output"; then
+            echo 'eligible=true' >> "$GITHUB_OUTPUT"
+          else
+            test ! -e "$output"
+            echo 'eligible=false' >> "$GITHUB_OUTPUT"
+            echo 'APP_ONLY=INELIGIBLE_USE_FULL_V1_PATH'
+          fi
+      - name: Upload nonauthorizing exact app-only decision
+        if: steps.classify.outputs.eligible == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: leetplus-app-only-impact-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/app-only-impact-${{ env.CI_RELEASE_SHA }}.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  compose-app-images:
+    name: Compose app-only immutable image candidate
+    needs: app-only-impact
+    if: needs.app-only-impact.outputs.eligible == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    continue-on-error: true
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288ca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - uses: docker/setup-docker-action@77e84dbf09b47d1e29270283c22f16145aa85ca1 # v4
+        with:
+          version: v29.1.3
+          set-host: true
+          daemon-config: '{"features":{"containerd-snapshotter":true}}'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        with:
+          name: leetplus-release-candidate-authority-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/app-only-authority
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        with:
+          name: leetplus-app-only-impact-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/app-only-impact
+      - name: Build and validate real API/Web-only images
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash deploy/leetplus-compose/build-app-images.sh \
+            "$RUNNER_TEMP/leetplus-compose-app" \
+            "$RUNNER_TEMP/app-only-authority/leetplus-release-impact-$CI_RELEASE_SHA.json" \
+            "$RUNNER_TEMP/app-only-impact/app-only-impact-$CI_RELEASE_SHA.json"
+          node --input-type=module - "$RUNNER_TEMP/leetplus-compose-app" <<'NODE'
+          import { validateArtifactPayload } from './deploy/leetplus-compose/admit-app-images.mjs';
+          validateArtifactPayload(process.argv[2]);
+          NODE
+      - name: Upload nondeployable app image candidate
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: leetplus-compose-app-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/leetplus-compose-app/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  compose-app-admission:
+    name: Admitted Compose app-only V2 handoff
+    needs:
+      - release_impact
+      - app-only-impact
+      - compose-app-images
+      - authority-root-trust
+      - release-critical-application
+      - release-critical-postgresql-assortment
+      - migration-smoke
+      - application
+    if: needs.app-only-impact.outputs.eligible == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288ca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        with:
+          name: leetplus-release-candidate-authority-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/app-only-authority
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        with:
+          name: leetplus-app-only-impact-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/app-only-impact
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        with:
+          name: leetplus-compose-app-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/leetplus-compose-app
+      - name: Bind exact successful Full jobs and real app image candidate
+        shell: bash
+        env:
+          CI_GATE_RESULTS: '{"AUTHORITY_ROOT_TRUST":"${{ needs.authority-root-trust.result }}","RELEASE_CRITICAL_APPLICATION":"${{ needs.release-critical-application.result }}","RELEASE_CRITICAL_POSTGRESQL_ASSORTMENT":"${{ needs.release-critical-postgresql-assortment.result }}","MIGRATION_SMOKE":"${{ needs.migration-smoke.result }}","COMPOSE_APP_RUNTIME":"${{ needs.compose-app-images.result }}"}'
+          APP_ARTIFACT_ID: ${{ needs.compose-app-images.outputs.artifact_id }}
+          APP_ARTIFACT_DIGEST: ${{ needs.compose-app-images.outputs.artifact_digest }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+          test "${{ needs.application.result }}" = success
+          [[ "$APP_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$APP_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          impact="$RUNNER_TEMP/app-only-authority/leetplus-release-impact-$CI_RELEASE_SHA.json"
+          candidate="$RUNNER_TEMP/app-only-authority/leetplus-release-candidate-$CI_RELEASE_SHA.json"
+          app_only="$RUNNER_TEMP/app-only-impact/app-only-impact-$CI_RELEASE_SHA.json"
+          gates="$RUNNER_TEMP/app-only-required-gates-$CI_RELEASE_SHA.json"
+          admission="$RUNNER_TEMP/app-only-admission-$CI_RELEASE_SHA.json"
+          node .github/scripts/create-app-only-gates.mjs "$candidate" "$app_only" "$gates"
+          node deploy/leetplus-compose/admit-app-images.mjs \
+            "$RUNNER_TEMP/leetplus-compose-app" "$impact" "$candidate" "$app_only" \
+            "$gates" "$admission" \
+            "leetplus-compose-app-$CI_RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            "$APP_ARTIFACT_ID" "$APP_ARTIFACT_DIGEST"
+          node --input-type=module - "$admission" <<'NODE'
+          import fs from 'node:fs';
+          import { validateAppAdmission } from './deploy/leetplus-compose/app-only-artifact.mjs';
+          validateAppAdmission(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')));
+          NODE
+      - name: Publish separately admitted exact app-only V2 receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: leetplus-compose-app-admitted-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/app-only-admission-${{ env.CI_RELEASE_SHA }}.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

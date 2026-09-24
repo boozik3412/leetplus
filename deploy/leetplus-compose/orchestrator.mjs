@@ -4,7 +4,26 @@ import { CONTRACT as WORKER_CONTINUATION_V2, validateWorkerContinuationPolicy } 
 
 export const PHASES = ['HYDRATE', 'BIND', 'SMOKE', 'CUTOVER', 'POSTCHECK'];
 export function validatePlan(plan) {
+  if (plan?.contract === 'LEETPLUS_COMPOSE_BLUE_GREEN_V2_PLAN') {
+    const extension = ['releaseLane', 'appAdmissionSha256', 'appArchiveSha256',
+      'dataBaselineCertificationSha256', 'dataBaselineExpiresAt'];
+    demand(plan.releaseLane === 'L1_APP_ONLY' &&
+      [plan.appAdmissionSha256, plan.appArchiveSha256, plan.dataBaselineCertificationSha256].every(value => /^[a-f0-9]{64}$/.test(value ?? '')) &&
+      plan.admissionSha256 === plan.appAdmissionSha256 && plan.archiveSha256 === plan.appArchiveSha256 &&
+      typeof plan.dataBaselineExpiresAt === 'string' && Number.isFinite(Date.parse(plan.dataBaselineExpiresAt)) &&
+      plan.preparationEvidenceExpiresAt && Date.parse(plan.preparationEvidenceExpiresAt) <= Date.parse(plan.dataBaselineExpiresAt) &&
+      plan.workerContinuation?.contract === WORKER_CONTINUATION_V2,
+    'Invalid V2 app-only plan extension');
+    const legacy = { ...plan, contract: `${CONTRACT}_PLAN` };
+    for (const field of extension) delete legacy[field];
+    validatePlan(legacy);
+    return plan;
+  }
   demand(plan?.contract === `${CONTRACT}_PLAN`, 'Invalid plan contract');
+  for (const field of ['releaseLane', 'appAdmissionSha256', 'appArchiveSha256',
+    'dataBaselineCertificationSha256', 'dataBaselineExpiresAt']) {
+    demand(!Object.hasOwn(plan, field), 'V1 plan cannot carry V2-only authority fields');
+  }
   demand(/^[a-f0-9-]{36}$/.test(plan.operationId ?? '') && /^[a-f0-9]{64}$/.test(plan.hostIdentitySha256 ?? ''), 'Invalid operation/host');
   demand(SLOTS.includes(plan.targetSlot) && ['BOOTSTRAP', 'ROLLOUT'].includes(plan.action), 'Invalid deployment action');
   demand(Number.isSafeInteger(plan.generation) && plan.generation >= 0, 'Invalid generation');

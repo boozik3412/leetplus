@@ -173,22 +173,20 @@ try {
       'initdb -D /tmp/pg -U postgres --locale=en_US.UTF-8 -A trust >/tmp/init.log',
       'printf "hostssl all all %s trust\\n" "$FIXTURE_CIDR" >> /tmp/pg/pg_hba.conf',
       'test "$(stat -c %a /tmp/pg)" = 700',
-      'pg_ctl -D /tmp/pg -o "-h 0.0.0.0 -k /tmp -c ssl=on -c ssl_cert_file=/tls/db-ca.pem -c ssl_key_file=/tls/db-key.pem" -l /tmp/pg.log -w start',
-      'createdb -h /tmp -U postgres leetplus',
-      'psql -h /tmp -U postgres -d leetplus -v ON_ERROR_STOP=1 -c "CREATE ROLE leetplus_runtime LOGIN"',
-      'touch /tmp/ready',
-      'exec tail -f /dev/null',
+      'exec /usr/lib/postgresql/16/bin/postgres -D /tmp/pg -h 0.0.0.0 -k /tmp -c ssl=on -c ssl_cert_file=/tls/db-ca.pem -c ssl_key_file=/tls/db-key.pem',
     ].join('; '),
   ]);
   for (let attempt = 0; attempt < 30; attempt += 1) {
-    if (spawnSync('docker', ['exec', postgres, 'test', '-f', '/tmp/ready']).status === 0) break;
+    if (spawnSync('docker', ['exec', postgres, '/usr/lib/postgresql/16/bin/pg_isready', '-h', '/tmp', '-U', 'postgres']).status === 0) break;
     if (attempt === 29) {
-      let pgLog = 'unavailable';
-      try { pgLog = docker(['exec', postgres, '/bin/cat', '/tmp/pg.log']); } catch { /* Container may have already exited. */ }
-      throw new Error(`PostgreSQL fixture did not start: ${docker(['logs', postgres]).slice(-3000)}; pg.log=${pgLog.slice(-3000)}`);
+      throw new Error(`PostgreSQL fixture did not start: ${docker(['logs', postgres]).slice(-4000)}`);
     }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
   }
+
+  docker(['exec', postgres, '/usr/lib/postgresql/16/bin/createdb', '-h', '/tmp', '-U', 'postgres', 'leetplus']);
+  docker(['exec', postgres, '/usr/lib/postgresql/16/bin/psql', '-h', '/tmp', '-U', 'postgres', '-d', 'leetplus',
+    '-v', 'ON_ERROR_STOP=1', '-c', 'CREATE ROLE leetplus_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;']);
 
   const databaseUrl = 'postgresql://leetplus_runtime:fixture@postgres:5432/leetplus?schema=public&connection_limit=4&pool_timeout=5&connect_timeout=5&sslmode=require&sslcert=/run/secrets/db-ca.pem&sslaccept=strict';
   const migrationUrl = 'postgresql://postgres@postgres:5432/leetplus?schema=public&connection_limit=4&pool_timeout=5&connect_timeout=5&sslmode=require&sslcert=/run/secrets/db-ca.pem&sslaccept=strict';

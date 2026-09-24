@@ -24,11 +24,12 @@ function fixture(t) {
     appImages: { api: image('3'), web: image('4') },
     schemaRequirement: { migrationCount: SCHEMA.migrationCount, migration: SCHEMA.migration, prismaSchemaSha256: hash('5'), migrationsInventorySha256: hash('6') },
     compatibilityRequirements: { policySha256: hash('7'), composeRuntimeContractSha256: hash('8'), controllerCapability: 'APP_ONLY_V2_BASELINE_CERTIFICATION', dataContract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1' },
-    runtimeEvidence: { transportValidationSha256: hash('9'), archiveRoundtripSha256: hash('a'), networkValidationSha256: hash('b'), runtimeValidationSha256: hash('c') },
+    runtimeEvidence: { transportValidationSha256: hash('9'), apiRuntimeValidationSha256: hash('d'), archiveRoundtripSha256: hash('a'), networkValidationSha256: hash('b'), runtimeValidationSha256: hash('c') },
   };
   const files = {
     'app-bundle.json': canonical(bundle), 'app-images.tar.gz': 'api-web-image-archive', 'control.tar.gz': 'control-archive',
     'transport-validation.json': canonical({ decision: 'PASS' }), 'archive-roundtrip.json': canonical({ decision: 'PASS' }),
+    'app-api-runtime-validation.json': canonical({ decision: 'PASS' }),
     'network-validation.json': canonical({ decision: 'PASS' }), 'runtime-validation.json': canonical({ decision: 'PASS' }),
   };
   files.SHA256SUMS = Object.keys(files).sort().map(name => `${fileHash(files[name])}  ${name}`).join('\n') + '\n';
@@ -40,7 +41,7 @@ function fixture(t) {
     gateReceiptSha256: { authorityRootTrust: hash('1'), application: hash('2'), postgresqlAssortment: hash('3'), migrationSmoke: hash('4'), appImageRuntime: hash('5') },
     appArtifact: { name: `leetplus-compose-app-${sha}-123-1`, id: '456', transportDigest: hash('6') },
     bundleManifestSha256: fileHash(files['app-bundle.json']), appArchiveSha256: fileHash(files['app-images.tar.gz']),
-    transportValidationSha256: fileHash(files['transport-validation.json']), archiveRoundtripSha256: fileHash(files['archive-roundtrip.json']),
+    transportValidationSha256: fileHash(files['transport-validation.json']), apiRuntimeValidationSha256: fileHash(files['app-api-runtime-validation.json']), archiveRoundtripSha256: fileHash(files['archive-roundtrip.json']),
     networkValidationSha256: fileHash(files['network-validation.json']), runtimeValidationSha256: fileHash(files['runtime-validation.json']),
     appImages: bundle.appImages, schemaRequirementSha256: digest(bundle.schemaRequirement), compatibilityRequirementsSha256: digest(bundle.compatibilityRequirements),
   };
@@ -63,7 +64,7 @@ function fixture(t) {
 test('downloads the exact admitted API/Web artifact and reuses verified bytes', t => {
   const f = fixture(t); const destination = path.join(f.root, 'download');
   const receipt = acquire(f.input, destination, { admissionFile: f.admissionFile, execute: f.executor() });
-  assert.equal(receipt.decision, 'PASS'); assert.equal(Object.keys(receipt.files).length, 8);
+  assert.equal(receipt.decision, 'PASS'); assert.equal(Object.keys(receipt.files).length, 9);
   assert.deepEqual(acquire(f.input, destination, { admissionFile: f.admissionFile, execute: () => assert.fail('no second transfer') }), receipt);
   assert.equal(f.downloads(), 1);
 });

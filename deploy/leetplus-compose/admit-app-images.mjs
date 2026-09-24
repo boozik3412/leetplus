@@ -31,6 +31,7 @@ const FILES = Object.freeze([
   'app-images.tar.gz',
   'control.tar.gz',
   'transport-validation.json',
+  'app-api-runtime-validation.json',
   'archive-roundtrip.json',
   'network-validation.json',
   'runtime-validation.json',
@@ -149,6 +150,33 @@ export function validateArtifactPayload(root) {
   exactKeys(transport, ['decision', 'driver', 'tlsRequired', 'badCaRejected', 'badHostnameRejected', 'nativeWorkerProfileAccepted'], 'transport validation');
   demand(transport.decision === 'PASS' && transport.tlsRequired === true && transport.badCaRejected === true && transport.badHostnameRejected === true && transport.nativeWorkerProfileAccepted === true, 'Real Prisma TLS matrix did not pass');
 
+  const apiRuntime = readCanonicalJson(path.join(root, 'app-api-runtime-validation.json'), 'API runtime validation').value;
+  exactKeys(apiRuntime, ['contract', 'decision', 'releaseSha', 'apiImage', 'postgresImage', 'schema', 'fixture', 'slots'], 'API runtime validation');
+  demand(apiRuntime.contract === 'LEETPLUS_COMPOSE_APP_API_RUNTIME_VALIDATION_V1' && apiRuntime.decision === 'PASS' &&
+    apiRuntime.releaseSha === bundle.releaseSha && apiRuntime.apiImage === bundle.appImages.api &&
+    /^sha256:[a-f0-9]{64}$/.test(apiRuntime.postgresImage ?? ''), 'Real API image runtime identity mismatch');
+  exactKeys(apiRuntime.schema, ['migration', 'migrationCount'], 'API runtime schema');
+  demand(apiRuntime.schema.migration === bundle.schemaRequirement.migration &&
+    apiRuntime.schema.migrationCount === bundle.schemaRequirement.migrationCount, 'Real API runtime schema mismatch');
+  exactKeys(apiRuntime.fixture, ['disposable', 'internalNetwork', 'productionCalls'], 'API runtime fixture');
+  demand(apiRuntime.fixture.disposable === true && apiRuntime.fixture.internalNetwork === true &&
+    apiRuntime.fixture.productionCalls === false, 'API runtime fixture is not isolated');
+  demand(Array.isArray(apiRuntime.slots) && apiRuntime.slots.length === 2 &&
+    apiRuntime.slots[0].slot === 'blue' && apiRuntime.slots[1].slot === 'green', 'Both API slots must be exercised');
+  for (const slot of apiRuntime.slots) {
+    exactKeys(slot, ['slot', 'uid', 'readiness', 'probes', 'apiEntrypointOnly', 'schedulerFencesExact'], 'API slot');
+    demand(slot.uid === (slot.slot === 'blue' ? 12010 : 12011) && slot.apiEntrypointOnly === true &&
+      slot.schedulerFencesExact === true, 'API slot authority drift');
+    exactKeys(slot.readiness, ['migration', 'migrationCount', 'releaseSha'], 'API slot readiness');
+    demand(slot.readiness.migration === bundle.schemaRequirement.migration &&
+      slot.readiness.migrationCount === bundle.schemaRequirement.migrationCount &&
+      slot.readiness.releaseSha === bundle.releaseSha, 'API slot is not CURRENT191 ready');
+    exactKeys(slot.probes, ['version', 'publicGuestDirectory', 'invalidCorporateToken', 'invalidWorkerToken'], 'API slot probes');
+    demand(slot.probes.version === 200 && slot.probes.publicGuestDirectory === 200 &&
+      slot.probes.invalidCorporateToken === 401 && slot.probes.invalidWorkerToken === 401,
+    'API contour matrix did not pass');
+  }
+
   const roundtrip = readCanonicalJson(path.join(root, 'archive-roundtrip.json'), 'archive roundtrip').value;
   exactKeys(roundtrip, ['decision', 'engine', 'store', 'isolatedDaemon', 'images', 'loadedImageIds'], 'archive roundtrip');
   demand(roundtrip.decision === 'PASS' && roundtrip.engine === '29.1.3' && roundtrip.store === 'containerd' && roundtrip.isolatedDaemon === true, 'Fresh daemon archive roundtrip did not pass');
@@ -176,6 +204,7 @@ export function validateArtifactPayload(root) {
 
   const evidence = {
     transportValidationSha256: sums.get('transport-validation.json'),
+    apiRuntimeValidationSha256: sums.get('app-api-runtime-validation.json'),
     archiveRoundtripSha256: sums.get('archive-roundtrip.json'),
     networkValidationSha256: sums.get('network-validation.json'),
     runtimeValidationSha256: sums.get('runtime-validation.json'),
@@ -271,6 +300,7 @@ export function createAdmission({ artifactRoot, impactFile, candidateFile, appOn
     bundleManifestSha256: sums.get('app-bundle.json'),
     appArchiveSha256: sums.get('app-images.tar.gz'),
     transportValidationSha256: sums.get('transport-validation.json'),
+    apiRuntimeValidationSha256: sums.get('app-api-runtime-validation.json'),
     archiveRoundtripSha256: sums.get('archive-roundtrip.json'),
     networkValidationSha256: sums.get('network-validation.json'),
     runtimeValidationSha256: sums.get('runtime-validation.json'),

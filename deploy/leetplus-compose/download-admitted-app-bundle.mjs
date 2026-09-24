@@ -18,6 +18,7 @@ const FILES = Object.freeze({
   'app-images.tar.gz': 'appArchiveSha256',
   'control.tar.gz': null,
   'transport-validation.json': 'transportValidationSha256',
+  'app-api-runtime-validation.json': 'apiRuntimeValidationSha256',
   'archive-roundtrip.json': 'archiveRoundtripSha256',
   'network-validation.json': 'networkValidationSha256',
   'runtime-validation.json': 'runtimeValidationSha256',

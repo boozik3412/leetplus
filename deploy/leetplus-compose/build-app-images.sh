@@ -50,6 +50,7 @@ docker run --rm --network none --entrypoint node "$api_id" -e 'const m=require("
 docker build --platform linux/amd64 --provenance=false --file deploy/leetplus-compose/Postgres.Dockerfile --tag "$pg_tag" .
 pg_id=$(docker image inspect --format '{{.Id}}' "$pg_tag")
 bash deploy/leetplus-compose/test-prisma-tls.sh "$api_id" "$pg_id" "$output/transport-validation.json"
+node deploy/leetplus-compose/test-app-api-runtime.mjs "$api_id" "$pg_id" "$output/app-api-runtime-validation.json"
 node --input-type=module - "$output/transport-validation.json" <<'NODE'
 import fs from 'node:fs';
 import { canonical } from './deploy/leetplus-compose/app-only-artifact.mjs';
@@ -162,6 +163,7 @@ const bundle = {
   },
   runtimeEvidence: {
     transportValidationSha256: fileDigest(path.join(output, 'transport-validation.json')),
+    apiRuntimeValidationSha256: fileDigest(path.join(output, 'app-api-runtime-validation.json')),
     archiveRoundtripSha256: fileDigest(path.join(output, 'archive-roundtrip.json')),
     networkValidationSha256: fileDigest(path.join(output, 'network-validation.json')),
     runtimeValidationSha256: fileDigest(path.join(output, 'runtime-validation.json')),
@@ -173,6 +175,6 @@ NODE
 
 (
   cd "$output"
-  sha256sum app-bundle.json app-images.tar.gz control.tar.gz transport-validation.json archive-roundtrip.json network-validation.json runtime-validation.json > SHA256SUMS
+  sha256sum app-bundle.json app-images.tar.gz control.tar.gz transport-validation.json app-api-runtime-validation.json archive-roundtrip.json network-validation.json runtime-validation.json > SHA256SUMS
   sha256sum --check --strict SHA256SUMS
 )

@@ -56,6 +56,7 @@ function bundle() {
     },
     runtimeEvidence: {
       transportValidationSha256: hash('9'),
+      apiRuntimeValidationSha256: hash('d'),
       archiveRoundtripSha256: hash('a'),
       networkValidationSha256: hash('b'),
       runtimeValidationSha256: hash('c'),
@@ -121,7 +122,7 @@ test('AppAdmission V2 rejects wrong lane, PostgreSQL image and gate hash drift',
     parentCandidateReceiptSha256: hash('1'), parentImpactReceiptSha256: hash('2'), requiredGateReceiptSha256: hash('3'),
     gateReceiptSha256: { authorityRootTrust: hash('4'), application: hash('5'), postgresqlAssortment: hash('6'), migrationSmoke: hash('7'), appImageRuntime: hash('8') },
     appArtifact: { name: `leetplus-compose-app-${sha}-12-1`, id: '123', transportDigest: hash('9') },
-    bundleManifestSha256: hash('a'), appArchiveSha256: hash('b'), transportValidationSha256: hash('c'),
+    bundleManifestSha256: hash('a'), appArchiveSha256: hash('b'), transportValidationSha256: hash('c'), apiRuntimeValidationSha256: hash('d'),
     archiveRoundtripSha256: hash('d'), networkValidationSha256: hash('e'), runtimeValidationSha256: hash('f'),
     appImages: { api: image('1'), web: image('2') }, schemaRequirementSha256: hash('3'), compatibilityRequirementsSha256: hash('4'),
   };
@@ -141,6 +142,13 @@ function writeArtifactFixture() {
   const control = Buffer.from('exact-git-control-fixture');
   const values = {
     'transport-validation.json': { decision: 'PASS', driver: 'Prisma6', tlsRequired: true, badCaRejected: true, badHostnameRejected: true, nativeWorkerProfileAccepted: true },
+    'app-api-runtime-validation.json': { contract: 'LEETPLUS_COMPOSE_APP_API_RUNTIME_VALIDATION_V1', decision: 'PASS', releaseSha: sha,
+      apiImage: b.appImages.api, postgresImage: image('e'), schema: { migration: b.schemaRequirement.migration,
+        migrationCount: b.schemaRequirement.migrationCount }, fixture: { disposable: true, internalNetwork: true,
+        productionCalls: false }, slots: ['blue', 'green'].map((slot, index) => ({ slot, uid: index ? 12011 : 12010,
+          readiness: { migration: b.schemaRequirement.migration, migrationCount: b.schemaRequirement.migrationCount,
+            releaseSha: sha }, probes: { version: 200, publicGuestDirectory: 200, invalidCorporateToken: 401,
+            invalidWorkerToken: 401 }, apiEntrypointOnly: true, schedulerFencesExact: true })) },
     'archive-roundtrip.json': { decision: 'PASS', engine: '29.1.3', store: 'containerd', isolatedDaemon: true,
       images: b.appImages, loadedImageIds: Object.values(b.appImages).sort() },
     'network-validation.json': { decision: 'PASS', stoppedCreation: true, loopbackHttp: true, webToApi: true, apiToData: true, webDataDenied: true, hostProxyDenied: true, externalDenied: true },
@@ -167,12 +175,13 @@ function writeArtifactFixture() {
   fs.writeFileSync(path.join(root, 'runtime-validation.json'), canonical(runtime));
   b.runtimeEvidence = {
     transportValidationSha256: digest(canonical(values['transport-validation.json'])),
+    apiRuntimeValidationSha256: digest(canonical(values['app-api-runtime-validation.json'])),
     archiveRoundtripSha256: digest(canonical(values['archive-roundtrip.json'])),
     networkValidationSha256: digest(canonical(values['network-validation.json'])),
     runtimeValidationSha256: digest(canonical(runtime)),
   };
   fs.writeFileSync(path.join(root, 'app-bundle.json'), canonical(b));
-  const files = ['app-bundle.json', 'app-images.tar.gz', 'control.tar.gz', 'transport-validation.json', 'archive-roundtrip.json', 'network-validation.json', 'runtime-validation.json'];
+  const files = ['app-bundle.json', 'app-images.tar.gz', 'control.tar.gz', 'transport-validation.json', 'app-api-runtime-validation.json', 'archive-roundtrip.json', 'network-validation.json', 'runtime-validation.json'];
   fs.writeFileSync(path.join(root, 'SHA256SUMS'), files.map(name => `${digest(fs.readFileSync(path.join(root, name)))}  ${name}`).join('\n') + '\n');
   return root;
 }

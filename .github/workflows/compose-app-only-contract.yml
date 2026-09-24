@@ -28,6 +28,8 @@ jobs:
           node --check deploy/leetplus-compose/app-only-artifact.mjs
           node --check deploy/leetplus-compose/admit-app-images.mjs
           node --check deploy/leetplus-compose/app-only-baseline.mjs
+          node --check deploy/leetplus-compose/app-only-live-certification.mjs
+          node --check deploy/leetplus-compose/test-app-api-runtime.mjs
           node --check deploy/leetplus-compose/download-admitted-app-bundle.mjs
           bash -n deploy/leetplus-compose/build-app-images.sh
       - name: Run fail-closed B contract fixtures
@@ -38,4 +40,55 @@ jobs:
             .github/scripts/create-app-only-gates.test.mjs \
             deploy/leetplus-compose/app-only-artifact.test.mjs \
             deploy/leetplus-compose/app-only-baseline.test.mjs \
+            deploy/leetplus-compose/app-only-live-certification.test.mjs \
             deploy/leetplus-compose/download-admitted-app-bundle.test.mjs
+
+  image-shadow:
+    name: B app-only Docker image shadow
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CI_RELEASE_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - uses: docker/setup-docker-action@77e84dbf09b47d1e29270283c22f16145aa85ca1 # v4
+        with:
+          version: v29.1.3
+          set-host: true
+          daemon-config: '{"features":{"containerd-snapshotter":true}}'
+      - name: Build and inspect nondeployable API/Web-only image candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+          # These fixtures exercise the image path only. The admission script
+          # re-verifies real main-push receipts and is deliberately not called.
+          node --input-type=module - "$RUNNER_TEMP" "$CI_RELEASE_SHA" <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { ALLOWLIST } from './.github/scripts/classify-app-only.mjs';
+          import { canonical, digest } from './deploy/leetplus-compose/app-only-artifact.mjs';
+          const [root, sha] = process.argv.slice(2);
+          const impact = { baseSha: sha, headSha: sha, classifierId: 'LEETPLUS_RELEASE_IMPACT_V1', rulesSha256: 'a'.repeat(64) };
+          const appOnly = { allowlistSha256: digest(canonical(ALLOWLIST)) };
+          fs.writeFileSync(path.join(root, 'shadow-impact.json'), canonical(impact), { flag: 'wx' });
+          fs.writeFileSync(path.join(root, 'shadow-app-only.json'), canonical(appOnly), { flag: 'wx' });
+          NODE
+          bash deploy/leetplus-compose/build-app-images.sh \
+            "$RUNNER_TEMP/leetplus-compose-app-shadow" \
+            "$RUNNER_TEMP/shadow-impact.json" \
+            "$RUNNER_TEMP/shadow-app-only.json"
+          node --input-type=module - "$RUNNER_TEMP/leetplus-compose-app-shadow" <<'NODE'
+          import { validateArtifactPayload } from './deploy/leetplus-compose/admit-app-images.mjs';
+          const { bundle } = validateArtifactPayload(process.argv[2]);
+          if (Object.keys(bundle.appImages).sort().join(',') !== 'api,web') throw new Error('Shadow image inventory is not app-only');
+          console.log('NONDEPLOYABLE_APP_IMAGE_SHADOW=PASS');
+          NODE

@@ -6,10 +6,12 @@ four-image handoff. Their presence in Git or CI does not enable a production
 rollout. The current V1 path remains the fallback for all releases that do not
 prove this contract.
 
-The current artifact slice checks API container construction and Web health in
-both slots. It does **not** yet start both API slot processes against a restored
-CURRENT191 database. Native/restored-copy API readiness, installed-controller
-certification and V2 plan/apply integration are required before any B release.
+The artifact slice includes a disposable Docker test that starts both API slots
+against a migrated CURRENT191 fixture and checks readiness, release identity,
+public guest and negative corporate/worker boundaries. This test still needs a
+successful Linux/Docker CI run. Native/restored-copy readiness against the
+actual certified data baseline, installed-controller certification and V2
+plan/apply integration are required before any B release.
 
 ## Identity and lane
 

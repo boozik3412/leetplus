@@ -52,7 +52,7 @@ function validateBundle(bundle) {
   hash(bundle.compatibilityRequirements.composeRuntimeContractSha256, 'Compose contract');
   demand(bundle.compatibilityRequirements.controllerCapability === 'APP_ONLY_V2_BASELINE_CERTIFICATION' &&
     bundle.compatibilityRequirements.dataContract === V1, 'Unsupported controller/data contract');
-  exactKeys(bundle.runtimeEvidence, ['transportValidationSha256', 'archiveRoundtripSha256',
+  exactKeys(bundle.runtimeEvidence, ['transportValidationSha256', 'apiRuntimeValidationSha256', 'archiveRoundtripSha256',
     'networkValidationSha256', 'runtimeValidationSha256'], 'runtime evidence');
   for (const [name, value] of Object.entries(bundle.runtimeEvidence)) hash(value, name);
   return bundle;
@@ -75,7 +75,7 @@ export function validateCertifiedBaseline(cert, { bundle, admission, previous, h
   exactKeys(admission, ['schemaVersion', 'contract', 'decision', 'releaseLane', 'releaseSha', 'repository', 'ref', 'event',
     'runId', 'runAttempt', 'workflowRef', 'workflowSha', 'parentCandidateReceiptSha256', 'parentImpactReceiptSha256',
     'requiredGateReceiptSha256', 'gateReceiptSha256', 'appArtifact', 'bundleManifestSha256', 'appArchiveSha256',
-    'transportValidationSha256', 'archiveRoundtripSha256', 'networkValidationSha256', 'runtimeValidationSha256',
+    'transportValidationSha256', 'apiRuntimeValidationSha256', 'archiveRoundtripSha256', 'networkValidationSha256', 'runtimeValidationSha256',
     'appImages', 'schemaRequirementSha256', 'compatibilityRequirementsSha256'], 'app admission');
   demand(admission.schemaVersion === 2 && admission.contract === APP_ADMISSION && admission.decision === 'PASS' &&
     admission.releaseLane === 'L1_APP_ONLY' && admission.releaseSha === bundle.releaseSha &&
@@ -87,6 +87,7 @@ export function validateCertifiedBaseline(cert, { bundle, admission, previous, h
     admission.schemaRequirementSha256 === digest(bundle.schemaRequirement) &&
     admission.compatibilityRequirementsSha256 === digest(bundle.compatibilityRequirements) &&
     admission.transportValidationSha256 === bundle.runtimeEvidence.transportValidationSha256 &&
+    admission.apiRuntimeValidationSha256 === bundle.runtimeEvidence.apiRuntimeValidationSha256 &&
     admission.archiveRoundtripSha256 === bundle.runtimeEvidence.archiveRoundtripSha256 &&
     admission.networkValidationSha256 === bundle.runtimeEvidence.networkValidationSha256 &&
     admission.runtimeValidationSha256 === bundle.runtimeEvidence.runtimeValidationSha256,

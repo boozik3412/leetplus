@@ -107,7 +107,7 @@ export function validateAppBundle(value) {
   demand(value.compatibilityRequirements.dataContract === DATA_CONTRACT, 'Unsupported data contract');
 
   exactKeys(value.runtimeEvidence, [
-    'transportValidationSha256', 'archiveRoundtripSha256', 'networkValidationSha256', 'runtimeValidationSha256',
+    'transportValidationSha256', 'apiRuntimeValidationSha256', 'archiveRoundtripSha256', 'networkValidationSha256', 'runtimeValidationSha256',
   ], 'runtime evidence');
   for (const hash of Object.values(value.runtimeEvidence)) demand(HASH.test(hash ?? ''), 'Invalid runtime evidence hash');
   return value;
@@ -139,7 +139,7 @@ export function validateAppAdmission(value) {
     'schemaVersion', 'contract', 'decision', 'releaseLane', 'releaseSha', 'repository', 'ref', 'event',
     'runId', 'runAttempt', 'workflowRef', 'workflowSha', 'parentCandidateReceiptSha256',
     'parentImpactReceiptSha256', 'requiredGateReceiptSha256', 'gateReceiptSha256', 'appArtifact',
-    'bundleManifestSha256', 'appArchiveSha256', 'transportValidationSha256',
+    'bundleManifestSha256', 'appArchiveSha256', 'transportValidationSha256', 'apiRuntimeValidationSha256',
     'archiveRoundtripSha256', 'networkValidationSha256', 'runtimeValidationSha256',
     'appImages', 'schemaRequirementSha256', 'compatibilityRequirementsSha256',
   ], 'app admission');
@@ -150,7 +150,7 @@ export function validateAppAdmission(value) {
   demand(value.workflowRef === 'boozik3412/leetplus/.github/workflows/ci.yml@refs/heads/main' && value.workflowSha === value.releaseSha, 'Invalid app admission workflow identity');
   for (const key of [
     'parentCandidateReceiptSha256', 'parentImpactReceiptSha256', 'requiredGateReceiptSha256',
-    'bundleManifestSha256', 'appArchiveSha256', 'transportValidationSha256',
+    'bundleManifestSha256', 'appArchiveSha256', 'transportValidationSha256', 'apiRuntimeValidationSha256',
     'archiveRoundtripSha256', 'networkValidationSha256', 'runtimeValidationSha256',
     'schemaRequirementSha256', 'compatibilityRequirementsSha256',
   ]) demand(HASH.test(value[key] ?? ''), `Invalid app admission ${key}`);

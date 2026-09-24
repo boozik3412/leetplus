@@ -17,7 +17,7 @@ function fixtures() {
       prismaSchemaSha256: h, migrationsInventorySha256: other },
     compatibilityRequirements: { policySha256: h, composeRuntimeContractSha256: other,
       controllerCapability: 'APP_ONLY_V2_BASELINE_CERTIFICATION', dataContract: CONTRACT },
-    runtimeEvidence: { transportValidationSha256: h, archiveRoundtripSha256: h,
+    runtimeEvidence: { transportValidationSha256: h, apiRuntimeValidationSha256: h, archiveRoundtripSha256: h,
       networkValidationSha256: h, runtimeValidationSha256: h } };
   const admission = { schemaVersion: 2, contract: 'LEETPLUS_COMPOSE_APP_ADMISSION_V2', decision: 'PASS',
     releaseLane: 'L1_APP_ONLY', releaseSha: sha, repository: 'boozik3412/leetplus', ref: 'refs/heads/main', event: 'push',
@@ -26,7 +26,7 @@ function fixtures() {
     gateReceiptSha256: { authorityRootTrust: h, application: h, postgresqlAssortment: h,
       migrationSmoke: h, appImageRuntime: h },
     appArtifact: { name: `leetplus-compose-app-${sha}-1-1`, id: '1', transportDigest: h },
-    bundleManifestSha256: digest(bundle), appArchiveSha256: h, transportValidationSha256: h, archiveRoundtripSha256: h,
+    bundleManifestSha256: digest(bundle), appArchiveSha256: h, transportValidationSha256: h, apiRuntimeValidationSha256: h, archiveRoundtripSha256: h,
     networkValidationSha256: h, runtimeValidationSha256: h, appImages: bundle.appImages,
     schemaRequirementSha256: digest(bundle.schemaRequirement), compatibilityRequirementsSha256: digest(bundle.compatibilityRequirements) };
   const previous = { activeSlot: 'blue', generation: 10, dataRelease, dataAdmissionSha256: h, blue: dataRelease, green: dataRelease };

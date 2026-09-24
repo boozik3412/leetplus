@@ -173,13 +173,15 @@ try {
       'initdb -D /tmp/pg -U postgres --locale=en_US.UTF-8 -A trust >/tmp/init.log',
       'printf "hostssl all all %s trust\\n" "$FIXTURE_CIDR" >> /tmp/pg/pg_hba.conf',
       'test "$(stat -c %a /tmp/pg)" = 700',
+      'echo fixture-postgres-exec >&2',
       'exec /usr/lib/postgresql/16/bin/postgres -D /tmp/pg -h 0.0.0.0 -k /tmp -c ssl=on -c ssl_cert_file=/tls/db-ca.pem -c ssl_key_file=/tls/db-key.pem',
     ].join('; '),
   ]);
   for (let attempt = 0; attempt < 30; attempt += 1) {
     if (spawnSync('docker', ['exec', postgres, '/usr/lib/postgresql/16/bin/pg_isready', '-h', '/tmp', '-U', 'postgres']).status === 0) break;
     if (attempt === 29) {
-      throw new Error(`PostgreSQL fixture did not start: ${docker(['logs', postgres]).slice(-4000)}`);
+      const state = docker(['inspect', '--format', '{{json .State}}', postgres]);
+      throw new Error(`PostgreSQL fixture did not start: state=${state.slice(-1600)}; logs=${docker(['logs', postgres]).slice(-4000)}`);
     }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
   }

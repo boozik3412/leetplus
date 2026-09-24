@@ -45,8 +45,8 @@ must bind:
 Negative fixtures must reject each altered digest, wrong predecessor, pending
 handoff, legacy fallback, forged approval and replay, including simultaneous
 top-level and nested target changes and changed authority leaves. After
-exact-main Fast and
-Full success, stage only through the installed A controller, review the native
+exact-main Fast and Full success, stage only through the installed A controller,
+review the native
 handoff plan and fresh backup/restored-copy evidence, then obtain a *new*
 exact-plan GO. The GO consumed for the A handoff cannot be reused. Confirm
 the serving pointer, six existing container IDs/PIDs, PG/Redis/dataRelease,

@@ -148,7 +148,10 @@ def derive(verification_path, capsule, preparation_input, output):
         workers = {'bonus-ledger-worker', 'langame-daily-worker'}
         require(set(verification['workerEnvelopeHashes']) == workers and {'api-' + active['activeSlot'] + '.json', *(w + '.json' for w in workers)} <= set(verification['profileHashes']), 'Incomplete authenticated worker/profile bindings')
         policy = request['nativeRequest']['workerContinuation']
-        require({x['worker']: x['grantSha256'] for x in policy['grantBindings']} == verification['workerEnvelopeHashes'], 'Worker grants differ from frozen policy')
+        require(policy.get('contract') == 'LEETPLUS_WORKER_CONTINUATION_V2' and
+                isinstance(policy.get('originalGrantEnvelopes'), list) and
+                {x['grant']['worker']: hashlib.sha256(canonical(x)).hexdigest() for x in policy['originalGrantEnvelopes']} == verification['workerEnvelopeHashes'],
+                'Worker grants differ from frozen V2 policy')
         require({x['worker']: x['profileSha256'] for x in policy['profileBindings']} == {w: verification['profileHashes'][w + '.json'] for w in workers}, 'Worker profiles differ from frozen policy')
         for leaf, expected in verification['profileHashes'].items():
             require(re.fullmatch(r'[A-Za-z0-9_.-]+', leaf) and hashlib.sha256(read(SECRETS + leaf)).hexdigest() == expected, 'Authenticated profile drift')

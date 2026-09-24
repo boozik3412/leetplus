@@ -110,7 +110,9 @@ def install(inbox, expected, previous_sha=None, stage_only=False):
             if not re.fullmatch(r'[a-zA-Z0-9_.@-]+', name) or name in ['.', '..', 'install-manifest.json'] or name in payload or item.size > 2 * 1024 * 1024:
                 raise ValueError('Invalid control leaf')
             payload[name] = tar.extractfile(item).read()
-    for name in ['control.sh', 'control.mjs', 'orchestrator.mjs', 'contract.mjs', 'network-fence.py']:
+    for name in ['control.sh', 'control.mjs', 'orchestrator.mjs', 'contract.mjs',
+                 'control-reconcile.mjs', 'worker-continuation.mjs',
+                 'worker-continuation-runtime.mjs', 'network-fence.py']:
         if name not in payload:
             raise ValueError('Required control implementation missing')
     parent = Path('/usr/local/lib/leetplus-compose')

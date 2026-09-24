@@ -27,6 +27,9 @@ class StageOnlyInstallTests(unittest.TestCase):
             "control.mjs": b"export {};\n",
             "orchestrator.mjs": b"export {};\n",
             "contract.mjs": b"export {};\n",
+            "control-reconcile.mjs": b"export {};\n",
+            "worker-continuation.mjs": b"export {};\n",
+            "worker-continuation-runtime.mjs": b"export {};\n",
             "network-fence.py": b"print('fixture')\n",
             "leetplus-compose-network-refresh.service": b"[Service]\n",
         }

@@ -6,9 +6,10 @@ only owners of HYDRATE, BIND, SMOKE, CUTOVER and POSTCHECK. Existing worker
 authority remains the owner of grant/timer continuation under the exact policy
 bound into the plan; preparation never performs those effects.
 
-This source is a runnable candidate, not an enabled production service. It has
-no timer, unit, automatic GO, approval signer or production installation in
-this change.
+The serving controller accepted on 24.09 uses the earlier V1 worker policy.
+The V2 repair described here is a source candidate until a new exact-main
+admission, separately approved controller handoff and installed-path checks.
+The runner has no timer, unit, automatic GO or approval signer.
 
 ## Sequence and ownership
 
@@ -140,13 +141,15 @@ objects plus these two signed-plan payloads:
 - `preparationGuard`: contract `LEETPLUS_PREPARATION_GUARD_V1`, machine-ID
   digest, installed controller-manifest digest, full active-state digest,
   generation and active slot;
-- `workerContinuation`: contract `LEETPLUS_WORKER_CONTINUATION_V1`, owner
-  `NATIVE_WORKER_CONTROLLER`, `noNewWorker: true`, exact original timer states,
-  both existing grant IDs/digests/release/generation bindings, both profile
-  digests, `preserveGrantExpiry: true`, `preserveTenantScope: true`, and the
-  exact ordered scope `CHECK_ORIGINAL_STATE`,
-  `VERIFY_EXISTING_GRANT`, `RENEW_EXISTING_GRANT`, `RETURN_ORIGINAL_TIMER`,
-  `CHECK_FINAL_STATE`.
+- `workerContinuation`: contract `LEETPLUS_WORKER_CONTINUATION_V2`, owner
+  `NATIVE_WORKER_CONTROLLER`, exact original states of the two timers, both
+  signed original TIMER grant envelopes and both profile digests. It freezes
+  unsigned forward grant bodies for the target release/generation N+1 and
+  rollback grant bodies for the previous release/generation N+2. Four new grant
+  IDs are allocated in the immutable input before preparation; a restart cannot
+  generate different IDs. Mode, host, tenant, secret profile, issuedAt and
+  expiry remain identical to the original grant. V1 is rejected for a new
+  application preparation.
 
 The exact timers are `leetplus-compose-bonus.timer` and
 `leetplus-compose-daily.timer`. Each preflight validates the signed envelope
@@ -154,6 +157,24 @@ through the canonical worker authority against current active state, host,
 public key and current profile bytes, then checks timer active/substate and
 unit-file state. Renewal may only change the release/generation binding while
 preserving the original tenant, profile and expiry.
+Native prepare also stores the two exact worker profile files as immutable
+root-private `0400` operation evidence bound to the plan's profile digests.
+The observer reads those snapshots for historical APPLIED/ROLLED_BACK records;
+later legitimate profile rotation must not rewrite past evidence.
+
+After a separate exact-plan GO, the existing offline root signs only those
+four plan-bound grant bodies with `sign-worker`. The operator stages the signed
+envelopes as root-owned immutable `0400` files named
+`worker-forward-<worker>.json` and `worker-rollback-<worker>.json` inside the
+native operation directory. Native preflight verifies every signature and
+exact body before the first application effect. The exclusive native control
+lock excludes worker runs during CUTOVER/POSTCHECK. CUTOVER stops only the two
+original timers, switches the application and binds forward grants; POSTCHECK
+restores the original timer states and publishes a plan-bound continuation
+receipt. Worker runs remain fenced until terminal native history and this
+receipt agree. An accepted N+2 rollback uses only the frozen rollback grants.
+Ambiguous partial effects stop for reconciliation; no old grant is silently
+reused after generation changes.
 
 The off-host chain is accepted only when all three receipts bind the fresh
 encrypted SHA/size/capture timestamp and plaintext SHA. The authenticated

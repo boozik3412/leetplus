@@ -55,6 +55,31 @@ VARIANT_A_TRANSITION = {
     'newControlEntrySha256': VARIANT_A_NEW_CONTROL_SHA256,
     'newPreparationRunnerSha256': VARIANT_A_NEW_RUNNER_SHA256,
 }
+# Second reviewed transition: serving Variant A controller -> the bounded
+# application-pilot repair. The target release/manifest remain plan-bound;
+# every changed privileged/runtime leaf is pinned here after independent review.
+VARIANT_A_REPAIR_PREDECESSOR_SHA = '88010292246249c94ba66ecbab64e4d51ad84d8c'
+VARIANT_A_REPAIR_PREDECESSOR_MANIFEST_SHA256 = '237cbcba1fbfcc9e58e78aede7b57f599b206f8c02253c43006dd308c04e9c85'
+VARIANT_A_REPAIR_OLD_FILES = {
+    'control.mjs': VARIANT_A_NEW_CONTROL_SHA256,
+    'orchestrator.mjs': VARIANT_A_NEW_ORCHESTRATOR_SHA256,
+    'preparation-runner.mjs': VARIANT_A_NEW_RUNNER_SHA256,
+    'worker-authority.mjs': '4c615c56795a025b2c58662c0b9fea5f4dfa7b55d62dae867a77a86dffe0dcf6',
+}
+VARIANT_A_REPAIR_NEW_FILES = {
+    'control.mjs': '1496d809e6401cc0f9b9fba983a135ba0ca6cd445ada7ce337f5f94be2714a97',
+    'orchestrator.mjs': 'f3c9d239e4fbe5572fdd258bb20e2be0c3ab935105d25308d325babbcba32e45',
+    'preparation-runner.mjs': 'd183f55cb804f472a92baf315a206a4ace1dcbe4644956d0b7b707023013f341',
+    'control-reconcile.mjs': '1005a02279bfd72b8462c3cf9d151cbd51cb364fb7829d9db2722a1e9c436cf9',
+    'worker-continuation.mjs': 'b8c3fdbce90c3254ff147dfdf4f7e0fb20b44c17576294c6695bb69a5f91bef3',
+    'worker-continuation-runtime.mjs': 'e89df0e9a8ad6e5346fed82f21b4379965bee5935d899aafc65ff68a74212d54',
+    'release-observer.mjs': 'b6841a6047f76e3714751b59b3185bb35db5b66545c260ecb4f1f9aa9f53f4ad',
+    'control-handoff-runtime.mjs': '7c60d2105f48d0c435f96077c317bd6636cab2d648fdceda8bdc80df3108242a',
+    'install-control.py': 'c41144f91a1cfdba3dc184a0afda5c6917fa512a9873b143b8c271edb433b9b4',
+    'worker-authority.mjs': '57d19d442e8708cd9215b2e5bbc055e5e3cfcca64417ec5a7e27f5e7e1dd8e71',
+    'derive-rehearsal-inputs.py': 'b928a987234c57fe9e319145e090edebe22719518ae804122e417e128eb23acb',
+}
+VARIANT_A_REPAIR_TRANSITION_CONTRACT = 'LEETPLUS_VARIANT_A_CONTROLLER_REPAIR_HANDOFF_V2'
 CLEAN = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8', 'TZ': 'UTC'}
 RESOURCE_PROFILE_BOOTSTRAP = 'RESOURCE_PROFILE_BOOTSTRAP'
 RESOURCE_PROFILE_BOOTSTRAP_PREDECESSOR_SHA = '892b25b9fe5ebc8d0c20a7874a77ac312b7a0978'
@@ -306,19 +331,30 @@ def variant_a_orchestrator_transition(old, new):
     old_files, new_files = old['manifest']['files'], new['manifest']['files']
     if old_files.get('orchestrator.mjs') == new_files.get('orchestrator.mjs'):
         return None
-    require(old['manifest']['releaseSha'] == VARIANT_A_PREDECESSOR_SHA and
+    if (old['manifest']['releaseSha'] == VARIANT_A_PREDECESSOR_SHA and
             old['digest'] == VARIANT_A_PREDECESSOR_MANIFEST_SHA256 and
             old_files.get('control.mjs') == VARIANT_A_OLD_CONTROL_SHA256 and
             old_files.get('orchestrator.mjs') == VARIANT_A_OLD_ORCHESTRATOR_SHA256 and
             new_files.get('orchestrator.mjs') == VARIANT_A_NEW_ORCHESTRATOR_SHA256 and
             new_files.get('control.mjs') == VARIANT_A_NEW_CONTROL_SHA256 and
-            new_files.get('preparation-runner.mjs') == VARIANT_A_NEW_RUNNER_SHA256,
-            'Unreviewed orchestrator transition cannot use controller-only handoff')
-    return {**VARIANT_A_TRANSITION,
-            'oldReleaseSha': old['manifest']['releaseSha'],
-            'newReleaseSha': new['manifest']['releaseSha'],
-            'oldControlSha256': old['digest'],
-            'newControlSha256': new['digest']}
+            new_files.get('preparation-runner.mjs') == VARIANT_A_NEW_RUNNER_SHA256):
+        return {**VARIANT_A_TRANSITION,
+                'oldReleaseSha': old['manifest']['releaseSha'],
+                'newReleaseSha': new['manifest']['releaseSha'],
+                'oldControlSha256': old['digest'],
+                'newControlSha256': new['digest']}
+    if (old['manifest']['releaseSha'] == VARIANT_A_REPAIR_PREDECESSOR_SHA and
+            old['digest'] == VARIANT_A_REPAIR_PREDECESSOR_MANIFEST_SHA256 and
+            all(old_files.get(leaf) == expected for leaf, expected in VARIANT_A_REPAIR_OLD_FILES.items()) and
+            all(new_files.get(leaf) == expected for leaf, expected in VARIANT_A_REPAIR_NEW_FILES.items())):
+        return {'contract': VARIANT_A_REPAIR_TRANSITION_CONTRACT,
+                'oldReleaseSha': old['manifest']['releaseSha'],
+                'newReleaseSha': new['manifest']['releaseSha'],
+                'oldControlSha256': old['digest'],
+                'newControlSha256': new['digest'],
+                'oldRuntimeFilesSha256': dict(VARIANT_A_REPAIR_OLD_FILES),
+                'newRuntimeFilesSha256': dict(VARIANT_A_REPAIR_NEW_FILES)}
+    require(False, 'Unreviewed orchestrator transition cannot use controller-only handoff')
 
 
 def assert_runtime_contract_compatible(old, new, resource_profile_bootstrap=False):
@@ -328,6 +364,8 @@ def assert_runtime_contract_compatible(old, new, resource_profile_bootstrap=Fals
         if resource_profile_bootstrap and leaf == 'contract.mjs':
             continue
         if leaf == 'orchestrator.mjs' and transition:
+            continue
+        if leaf == 'worker-authority.mjs' and transition and transition.get('contract') == VARIANT_A_REPAIR_TRANSITION_CONTRACT:
             continue
         require(old['manifest']['files'][leaf] == new['manifest']['files'][leaf], 'Runtime/worker contract change is not a controller-only handoff: ' + leaf)
     return transition

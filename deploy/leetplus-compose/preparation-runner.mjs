@@ -13,7 +13,7 @@ import path from 'node:path';
 import { execFile as childExecFile, spawnSync } from 'node:child_process';
 import { canonical, digest, release as validateRelease } from './contract.mjs';
 import { verifyResourceAcceptance } from './resource-budget.mjs';
-import { validateWorkerGrant } from './worker-authority.mjs';
+import { validateCurrentWorkerContinuation, validateWorkerContinuationPolicy } from './worker-continuation.mjs';
 
 export const CONTRACT = 'LEETPLUS_RELEASE_PREPARATION_V1';
 export const GO_PACKET_CONTRACT = `${CONTRACT}_GO_PACKET`;
@@ -22,7 +22,6 @@ const SHA = /^[a-f0-9]{64}$/;
 const RELEASE = /^[a-f0-9]{40}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const WORKERS = ['bonus-ledger-worker', 'langame-daily-worker'];
-const ALLOWED_WORKER_STEPS = ['CHECK_ORIGINAL_STATE', 'VERIFY_EXISTING_GRANT', 'RENEW_EXISTING_GRANT', 'RETURN_ORIGINAL_TIMER', 'CHECK_FINAL_STATE'];
 const demand = (value, message) => { if (!value) throw new Error(message); return value; };
 
 function jsonBytes(value) { return Buffer.from(canonical(value)); }
@@ -134,18 +133,8 @@ export function validateInput(input) {
   demand(guard.contract === 'LEETPLUS_PREPARATION_GUARD_V1' && [guard.hostIdentitySha256, guard.controllerManifestSha256, guard.activeSha256].every(x => SHA.test(x)) && Number.isSafeInteger(guard.generation) && guard.generation >= 0 && ['blue', 'green'].includes(guard.activeSlot), 'Invalid fresh host/generation guard');
   demand(guard.activeSlot !== input.targetSlot, 'Target must be the inactive slot from the guarded generation');
   const policy = input.nativeRequest.workerContinuation;
-  exactKeys(policy, ['contract', 'owner', 'noNewWorker', 'preserveGrantExpiry', 'preserveTenantScope', 'originalTimers', 'grantBindings', 'profileBindings', 'allowedSteps'], 'worker continuation');
-  demand(policy.contract === 'LEETPLUS_WORKER_CONTINUATION_V1' && policy.owner === 'NATIVE_WORKER_CONTROLLER' && policy.noNewWorker === true && policy.preserveGrantExpiry === true && policy.preserveTenantScope === true, 'Invalid worker continuation owner/scope preservation');
-  for (const value of policy.originalTimers ?? []) exactKeys(value, ['worker', 'unit', 'enabled', 'active'], 'original timer binding');
-  for (const value of policy.grantBindings ?? []) exactKeys(value, ['worker', 'grantId', 'grantSha256', 'releaseSha', 'generation'], 'grant binding');
-  for (const value of policy.profileBindings ?? []) exactKeys(value, ['worker', 'profileSha256'], 'profile binding');
-  const timerUnits = { 'bonus-ledger-worker': 'leetplus-compose-bonus.timer', 'langame-daily-worker': 'leetplus-compose-daily.timer' };
-  demand(Array.isArray(policy.originalTimers) && policy.originalTimers.length === WORKERS.length && policy.originalTimers.every(x => WORKERS.includes(x.worker) && x.unit === timerUnits[x.worker] && typeof x.enabled === 'boolean' && typeof x.active === 'boolean'), 'Invalid original timer bindings');
-  demand(Array.isArray(policy.grantBindings) && policy.grantBindings.length === WORKERS.length && policy.grantBindings.every(x => WORKERS.includes(x.worker) && UUID.test(x.grantId ?? '') && SHA.test(x.grantSha256 ?? '') && RELEASE.test(x.releaseSha ?? '') && Number.isSafeInteger(x.generation) && x.generation === guard.generation), 'Invalid exact worker grant bindings');
-  demand(Array.isArray(policy.profileBindings) && policy.profileBindings.length === WORKERS.length && policy.profileBindings.every(x => WORKERS.includes(x.worker) && SHA.test(x.profileSha256 ?? '')), 'Invalid worker profile bindings');
-  demand(canonical(policy.allowedSteps) === canonical(ALLOWED_WORKER_STEPS), 'Worker check/renew/return scope is incomplete or reordered');
-  for (const list of [policy.originalTimers, policy.grantBindings, policy.profileBindings]) demand(new Set(list.map(x => x.worker)).size === WORKERS.length, 'Duplicate or missing worker binding');
-  for (const list of [policy.originalTimers, policy.grantBindings, policy.profileBindings]) demand(canonical(list.map(x => x.worker)) === canonical(WORKERS), 'Worker bindings must use the fixed native order');
+  validateWorkerContinuationPolicy(policy);
+  demand(policy.forward.generation === guard.generation + 1 && policy.forward.releaseSha === input.nativeRequest[input.targetSlot].releaseSha && policy.rollback.generation === guard.generation + 2 && policy.rollback.releaseSha === input.nativeRequest[guard.activeSlot].releaseSha, 'Worker continuation target/rollback generation or release drift');
   return input;
 }
 
@@ -399,13 +388,9 @@ export class PreparationRunner {
   stageCandidateControl() { try { return this.attestCandidateControl(); } catch { return null; } }
   async verifyWorkerBindings(active) {
     const policy = this.input.nativeRequest.workerContinuation, guard = this.input.nativeRequest.preparationGuard, publicKey = readBytes(this.paths.workerPublicKey);
-    for (const binding of policy.grantBindings) {
-      const grantPath = path.join(this.paths.controlState, 'worker-grants', `${binding.worker}.json`), profilePath = path.join(this.paths.productionRoot, 'secrets', `${binding.worker}.json`), profile = readBytes(profilePath);
-      demand(fileDigest(grantPath) === binding.grantSha256, `Worker grant drift: ${binding.worker}`);
-      const grant = validateWorkerGrant(readJson(grantPath), publicKey, active, guard.hostIdentitySha256, profile, Date.parse(this.clock()));
-      demand(grant.id === binding.grantId && grant.worker === binding.worker && grant.releaseSha === binding.releaseSha && grant.generation === binding.generation, `Worker grant policy drift: ${binding.worker}`);
-    }
-    for (const binding of policy.profileBindings) demand(fileDigest(path.join(this.paths.productionRoot, 'secrets', `${binding.worker}.json`)) === binding.profileSha256, `Worker profile drift: ${binding.worker}`);
+    const profiles = Object.fromEntries(policy.profileBindings.map(binding => { const profile = readBytes(path.join(this.paths.productionRoot, 'secrets', `${binding.worker}.json`)); demand(fileDigest(path.join(this.paths.productionRoot, 'secrets', `${binding.worker}.json`)) === binding.profileSha256, `Worker profile drift: ${binding.worker}`); return [binding.worker, profile]; }));
+    const envelopes = WORKERS.map(worker => readJson(path.join(this.paths.controlState, 'worker-grants', `${worker}.json`)));
+    validateCurrentWorkerContinuation(policy, envelopes, { publicKey, current: active, hostIdentitySha256: guard.hostIdentitySha256, profiles, now: Date.parse(this.clock()) });
     for (const timer of policy.originalTimers) {
       const raw = await this.command(`timer-${timer.worker}`, '/usr/bin/systemctl', ['show', timer.unit, '--property=LoadState,ActiveState,UnitFileState,SubState']);
       const state = Object.fromEntries(raw.split('\n').filter(Boolean).map(line => line.split('=', 2)));
@@ -461,6 +446,11 @@ export class PreparationRunner {
   }
   publishNativeEvidence(match, request) {
     const directory = path.dirname(match.planPath), backup = this.boundBackupEvidence(), rehearsal = this.boundRehearsalEvidence();
+    for (const binding of request.workerContinuation.profileBindings) {
+      const profilePath = path.join(directory, `worker-profile-${binding.worker}.json`);
+      demand(fileDigest(profilePath) === binding.profileSha256,
+        `Native immutable worker profile snapshot is absent or drifted: ${binding.worker}`);
+    }
     demand(digest(backup) === request.backupReceiptSha256 && digest(rehearsal) === request.rehearsalReceiptSha256, 'Native evidence digest construction drift');
     publishJson(path.join(directory, 'backup.json'), backup, 0o400);
     publishJson(path.join(directory, 'rehearsal.json'), rehearsal, 0o400);

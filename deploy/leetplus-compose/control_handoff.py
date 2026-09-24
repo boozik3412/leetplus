@@ -110,7 +110,7 @@ def canonical_digest(value):
     return digest(canonical(value))
 
 
-def exact_target_permit(envelope, plan, old, new, active_sha, now=None):
+def exact_target_permit(envelope, plan, old, new, active_sha, now=None, allow_expired=False):
     """Validate the external B permit without importing target controller code."""
     require(isinstance(envelope, dict) and set(envelope) == {'permit', 'signature'}, 'Exact-target permit envelope fields are invalid')
     permit, signature = envelope['permit'], envelope['signature']
@@ -127,14 +127,18 @@ def exact_target_permit(envelope, plan, old, new, active_sha, now=None):
     require(target == {'releaseSha': new['manifest']['releaseSha'], 'manifestSha256': new['digest'], 'admissionSha256': new['manifest']['admissionSha256'], 'controlArchiveSha256': digest(new['archive']), 'filesSha256': canonical_digest(new['manifest']['files']), 'criticalFilesSha256': canonical_digest(critical)}, 'Exact-target target identity drift')
     issued, expires = (datetime.datetime.fromisoformat(permit[key].replace('Z', '+00:00')) for key in ('issuedAt', 'expiresAt'))
     current = now or datetime.datetime.now(datetime.timezone.utc)
-    require(issued.tzinfo and expires.tzinfo and issued <= current <= expires and expires - issued <= datetime.timedelta(hours=4), 'Exact-target permit is expired or unbounded')
-    script = "import fs from 'node:fs';import {validateExactTargetPermit} from '" + (old['root'] / 'exact-target-handoff-authority.mjs').as_uri() + "';const v=JSON.parse(fs.readFileSync(0,'utf8'));validateExactTargetPermit(v.envelope,v.publicKey,v.expected);"
-    value = {'envelope': envelope, 'publicKey': secure(Path('/etc/leetplus-compose/approval-root.pem')).decode(), 'expected': {key: permit[key] for key in ('operationId', 'action', 'hostIdentitySha256', 'planSha256', 'activeSha256', 'predecessor', 'target')}}
+    require(issued.tzinfo and expires.tzinfo and issued <= current and
+            (allow_expired or current <= expires) and
+            expires - issued <= datetime.timedelta(hours=4), 'Exact-target permit is expired or unbounded')
+    script = "import fs from 'node:fs';import {validateExactTargetPermit} from '" + (old['root'] / 'exact-target-handoff-authority.mjs').as_uri() + "';const v=JSON.parse(fs.readFileSync(0,'utf8'));validateExactTargetPermit(v.envelope,v.publicKey,v.expected,{allowExpired:v.allowExpired});"
+    value = {'envelope': envelope, 'publicKey': secure(Path('/etc/leetplus-compose/approval-root.pem')).decode(),
+             'expected': {key: permit[key] for key in ('operationId', 'action', 'hostIdentitySha256', 'planSha256', 'activeSha256', 'predecessor', 'target')},
+             'allowExpired': allow_expired}
     require(run(['/usr/bin/node', '--input-type=module', '-e', script], canonical(value)) == b'', 'Exact-target permit signature rejected')
     return permit
 
 
-def exact_target_rollback_permit(envelope, plan, receipt, old, new, active_sha):
+def exact_target_rollback_permit(envelope, plan, receipt, old, new, active_sha, allow_expired=False):
     require(isinstance(envelope, dict) and set(envelope) == {'permit', 'signature'}, 'Exact-target rollback envelope fields are invalid')
     permit = envelope['permit']
     fields = {'contract', 'operationId', 'action', 'hostIdentitySha256', 'planSha256', 'receiptSha256', 'activeSha256', 'predecessor', 'target', 'issuedAt', 'expiresAt'}
@@ -142,9 +146,13 @@ def exact_target_rollback_permit(envelope, plan, receipt, old, new, active_sha):
     require(permit['operationId'] == plan['operationId'] and permit['hostIdentitySha256'] == plan['hostIdentitySha256'] and permit['planSha256'] == canonical_digest(plan) and permit['receiptSha256'] == canonical_digest(receipt) and permit['activeSha256'] == active_sha and permit['predecessor'] == plan['predecessor'] and permit['target'] == plan['target'], 'Exact-target rollback permit binding drift')
     issued, expires = (datetime.datetime.fromisoformat(permit[key].replace('Z', '+00:00')) for key in ('issuedAt', 'expiresAt'))
     current = datetime.datetime.now(datetime.timezone.utc)
-    require(issued.tzinfo and expires.tzinfo and issued <= current <= expires and expires - issued <= datetime.timedelta(hours=4), 'Exact-target rollback permit is expired or unbounded')
-    script = "import fs from 'node:fs';import {validateExactTargetRollbackPermit} from '" + (old['root'] / 'exact-target-handoff-authority.mjs').as_uri() + "';const v=JSON.parse(fs.readFileSync(0,'utf8'));validateExactTargetRollbackPermit(v.envelope,v.publicKey,v.expected);"
-    value = {'envelope': envelope, 'publicKey': secure(Path('/etc/leetplus-compose/approval-root.pem')).decode(), 'expected': {key: permit[key] for key in ('operationId', 'action', 'hostIdentitySha256', 'planSha256', 'receiptSha256', 'activeSha256', 'predecessor', 'target')}}
+    require(issued.tzinfo and expires.tzinfo and issued <= current and
+            (allow_expired or current <= expires) and
+            expires - issued <= datetime.timedelta(hours=4), 'Exact-target rollback permit is expired or unbounded')
+    script = "import fs from 'node:fs';import {validateExactTargetRollbackPermit} from '" + (old['root'] / 'exact-target-handoff-authority.mjs').as_uri() + "';const v=JSON.parse(fs.readFileSync(0,'utf8'));validateExactTargetRollbackPermit(v.envelope,v.publicKey,v.expected,{allowExpired:v.allowExpired});"
+    value = {'envelope': envelope, 'publicKey': secure(Path('/etc/leetplus-compose/approval-root.pem')).decode(),
+             'expected': {key: permit[key] for key in ('operationId', 'action', 'hostIdentitySha256', 'planSha256', 'receiptSha256', 'activeSha256', 'predecessor', 'target')},
+             'allowExpired': allow_expired}
     require(run(['/usr/bin/node', '--input-type=module', '-e', script], canonical(value)) == b'', 'Exact-target rollback permit signature rejected')
     return permit
 
@@ -586,18 +594,28 @@ def bridge_activate(identity, permit_path):
     old, target = installed(plan['oldReleaseSha'], executor=True), installed(plan['newReleaseSha'])
     validate_exact_target_plan_bindings(plan, old, target)
     require(digest(secure(directory / 'evidence.json')) == plan['evidenceSha256'], 'Rehearsal evidence drift')
-    receipt_path, intent_path, rollback_path = directory / 'receipt.json', directory / 'bridge-apply.intent.json', directory / 'rolled-back.json'
-    if receipt_path.exists():
-        receipt = read_json(receipt_path)
-        require(receipt.get('contract') == EXACT_TARGET_PERMIT_CONTRACT + '_RECEIPT' and receipt.get('decision') == 'PASS' and receipt.get('planSha256') == canonical_digest(plan), 'Exact-target terminal receipt drift')
-        return {'decision': 'ALREADY_APPLIED', 'operationId': identity, 'historical': True, 'effectsPerformed': False}
+    receipt_path, intent_path, rollback_path, prepared_path = directory / 'receipt.json', directory / 'bridge-apply.intent.json', directory / 'rolled-back.json', directory / 'bridge-final-prepared.json'
     if rollback_path.exists():
-        require(read_json(rollback_path).get('decision') == 'ROLLED_BACK', 'Exact-target rollback terminal drift')
-        return {'decision': 'ALREADY_ROLLED_BACK', 'operationId': identity, 'historical': True, 'effectsPerformed': False}
-    # A process crash after durable intent has an unknown effect boundary. The
-    # bridge has no target executor/reconciler before terminal acceptance, so
-    # it must not repeat or "helpfully" undo on a later client retry.
-    require(not intent_path.exists(), 'Exact-target bridge has an uncertain prior effect; BLOCKED without replay')
+        terminal = read_json(rollback_path)
+        require(terminal.get('decision') == 'ROLLED_BACK' and
+                terminal.get('operationId') == identity and
+                terminal.get('planSha256') == canonical_digest(plan),
+                'Exact-target rollback terminal drift')
+        if receipt_path.exists():
+            require(terminal.get('contract') == EXACT_TARGET_ROLLBACK_PERMIT_CONTRACT + '_RECEIPT' and
+                    terminal.get('receiptSha256') == digest(secure(receipt_path)),
+                    'Conflicting exact-target forward and rollback terminals')
+        else:
+            require(terminal.get('reason') in ('EXPIRED_BEFORE_ACCEPTANCE', 'BRIDGE_POSTCHECK_FAILED'),
+                    'Unsigned exact-target rollback terminal')
+        with control_lock(True, plan['maxLockWaitSeconds']):
+            require(snapshot(old['root']) == plan['snapshot'] and
+                    main_target() == plan['oldMainTarget'] and
+                    digest(secure(UNIT)) == plan['oldUnitSha256'],
+                    'Exact-target rollback terminal postimage drift')
+            restore_pointer(plan); finish_pending(identity)
+        return {'decision': 'ROLLBACK_CLEANUP_RECONCILED', 'operationId': identity,
+                'historical': True, 'effectsPerformed': False}
     with control_lock(True, plan['maxLockWaitSeconds']):
         # The staged target is re-opened and re-hashed while the global lock is
         # held. A pre-plan archive observation alone is never effect authority.
@@ -606,29 +624,107 @@ def bridge_activate(identity, permit_path):
         require(old['digest'] == plan['oldControlSha256'] and target['digest'] == plan['newControlSha256'] and
                 target['manifest']['admissionSha256'] == plan['target']['admissionSha256'], 'Exact-target staged bytes drift before effect')
         current = snapshot(old['root'])
-        require(current == plan['snapshot'] and main_target() == plan['oldMainTarget'] and digest(secure(UNIT)) == plan['oldUnitSha256'], 'Bridge live preimage drift')
+        require(current == plan['snapshot'], 'Bridge live snapshot drift')
         verify_timers(plan)
+        if receipt_path.exists():
+            receipt = read_json(receipt_path)
+            expected_pointer = {'operationId': identity, 'receiptSha256': canonical_digest(receipt)}
+            require(receipt.get('contract') == EXACT_TARGET_PERMIT_CONTRACT + '_RECEIPT' and receipt.get('decision') == 'PASS' and receipt.get('planSha256') == canonical_digest(plan) and main_target() == plan['newMainTarget'] and digest(secure(UNIT)) == plan['newUnitSha256'] and read_json(POINTER) == expected_pointer, 'Exact-target terminal postimage drift')
+            finish_pending(identity)
+            return {'decision': 'ACCEPTED_HANDOFF_RECONCILED', 'operationId': identity, 'applicationRestarted': False}
+        main, unit = main_target(), digest(secure(UNIT))
+        require(main in (plan['oldMainTarget'], plan['newMainTarget']) and unit in (plan['oldUnitSha256'], plan['newUnitSha256']), 'Bridge live effect state drift')
+        if prepared_path.exists() and POINTER.exists():
+            prepared = read_json(prepared_path)
+            expected_pointer = {'operationId': identity, 'receiptSha256': canonical_digest(prepared)}
+            if read_json(POINTER) == expected_pointer:
+                require(main == plan['newMainTarget'] and unit == plan['newUnitSha256'] and intent_path.exists(),
+                        'Committed exact-target pointer has an incomplete controller postimage')
+                permit_file = directory / plan['permitPath']
+                permit_raw = secure(permit_file); immutable_envelope = json.loads(permit_raw)
+                require(permit_raw == canonical(immutable_envelope), 'Immutable exact-target permit drift')
+                permit = exact_target_permit(immutable_envelope, plan, old, target,
+                                             current['activeSha256'], allow_expired=True)
+                binding = read_json(intent_path)
+                require(prepared.get('contract') == EXACT_TARGET_PERMIT_CONTRACT + '_RECEIPT' and
+                        prepared.get('decision') == 'PASS' and
+                        prepared.get('operationId') == identity and
+                        prepared.get('planSha256') == canonical_digest(plan) and
+                        prepared.get('permitSha256') == digest(permit_raw) and
+                        prepared.get('permitPath') == plan['permitPath'] and
+                        prepared.get('authorizedAt') == binding.get('authorizedAt') and
+                        datetime.datetime.fromisoformat(prepared['authorizedAt'].replace('Z', '+00:00')) >=
+                        datetime.datetime.fromisoformat(permit['issuedAt'].replace('Z', '+00:00')) and
+                        datetime.datetime.fromisoformat(prepared['acceptedAt'].replace('Z', '+00:00')) >=
+                        datetime.datetime.fromisoformat(prepared['authorizedAt'].replace('Z', '+00:00')) and
+                        datetime.datetime.fromisoformat(prepared['acceptedAt'].replace('Z', '+00:00')) <=
+                        datetime.datetime.fromisoformat(permit['expiresAt'].replace('Z', '+00:00')),
+                        'Frozen exact-target receipt is not timely signed authority')
+                publish(receipt_path, prepared); finish_pending(identity)
+                return {'decision': 'ACCEPTED_HANDOFF_RECONCILED', 'operationId': identity,
+                        'applicationRestarted': False}
+        if intent_path.exists() and (main == plan['newMainTarget'] or
+                                     (directory / 'bridge-apply-unit.intent.json').exists() or
+                                     (directory / 'bridge-apply-main.intent.json').exists()):
+            require(prepared_path.exists(), 'Exact-target effect lacks its frozen terminal receipt')
+        require(main == plan['oldMainTarget'] and unit == plan['oldUnitSha256'] or intent_path.exists(), 'Bridge live preimage drift')
         permit_raw = secure(permit_path); permit_envelope = json.loads(permit_raw)
         require(permit_raw == canonical(permit_envelope), 'Exact-target permit must be canonical LF JSON')
-        permit = exact_target_permit(permit_envelope, plan, old, target, current['activeSha256'])
         permit_file = directory / plan['permitPath']; atomic_bytes(permit_file, permit_raw, 0o400)
-        binding = {'operationId': identity, 'planSha256': canonical_digest(plan),
-                   'permitSha256': digest(permit_raw), 'permitPath': plan['permitPath'],
-                   'authorizedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')}
-        publish(directory / 'bridge-apply.intent.json', binding); atomic_bytes(PENDING, canonical({'operationId': identity}), 0o600)
+        if intent_path.exists():
+            binding = read_json(intent_path)
+            require(binding.get('operationId') == identity and binding.get('planSha256') == canonical_digest(plan) and binding.get('permitSha256') == digest(secure(permit_file)) and binding.get('permitPath') == plan['permitPath'] and isinstance(binding.get('authorizedAt'), str), 'Exact-target forward intent drift')
+        else:
+            exact_target_permit(permit_envelope, plan, old, target, current['activeSha256'])
+            binding = {'operationId': identity, 'planSha256': canonical_digest(plan),
+                       'permitSha256': digest(permit_raw), 'permitPath': plan['permitPath'],
+                       'authorizedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')}
+            publish(intent_path, binding)
+        immutable_envelope = json.loads(secure(permit_file))
         try:
+            exact_target_permit(immutable_envelope, plan, old, target, current['activeSha256'])
+        except ValueError:
+            expires = datetime.datetime.fromisoformat(immutable_envelope.get('permit', {}).get('expiresAt', '').replace('Z', '+00:00'))
+            require(expires.tzinfo and datetime.datetime.now(datetime.timezone.utc) > expires, 'Exact-target immutable permit is invalid before expiry')
+            exact_target_permit(immutable_envelope, plan, old, target, current['activeSha256'], allow_expired=True)
+            main, unit = main_target(), digest(secure(UNIT))
+            require(main in (plan['oldMainTarget'], plan['newMainTarget']) and unit in (plan['oldUnitSha256'], plan['newUnitSha256']), 'Exact-target expiry recovery preimage drift')
+            if main == plan['newMainTarget']: switch_main(plan['newMainTarget'], plan['oldMainTarget'])
+            if unit == plan['newUnitSha256']: atomic_bytes(UNIT, secure(old['root'] / UNIT.name), plan['oldUnitMode'], plan['newUnitSha256'])
+            run(['/usr/bin/systemctl', 'daemon-reload']); restore_pointer(plan)
+            require(snapshot(old['root']) == plan['snapshot'] and main_target() == plan['oldMainTarget'] and digest(secure(UNIT)) == plan['oldUnitSha256'], 'Exact-target expiry undo drift')
+            publish(rollback_path, {**binding, 'decision': 'ROLLED_BACK', 'reason': 'EXPIRED_BEFORE_ACCEPTANCE'}); finish_pending(identity)
+            return {'decision': 'ROLLED_BACK', 'reason': 'EXPIRED_BEFORE_ACCEPTANCE', 'operationId': identity, 'applicationRestarted': False}
+        atomic_bytes(PENDING, canonical({'operationId': identity}), 0o600)
+        try:
+            if prepared_path.exists():
+                receipt = read_json(prepared_path)
+                require(receipt.get('contract') == EXACT_TARGET_PERMIT_CONTRACT + '_RECEIPT' and receipt.get('planSha256') == canonical_digest(plan) and receipt.get('permitSha256') == binding['permitSha256'], 'Exact-target prepared receipt drift')
+            else:
+                receipt = {**binding, 'contract': EXACT_TARGET_PERMIT_CONTRACT + '_RECEIPT', 'decision': 'PASS', 'acceptedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')}
+                publish(prepared_path, receipt)
             phase_effect(directory, 'bridge-apply-unit', binding, lambda: digest(secure(UNIT)), plan['oldUnitSha256'], plan['newUnitSha256'], lambda: atomic_bytes(UNIT, secure(target['root'] / UNIT.name), plan['oldUnitMode'], plan['oldUnitSha256']))
             phase_effect(directory, 'bridge-apply-main', binding, main_target, plan['oldMainTarget'], plan['newMainTarget'], lambda: switch_main(plan['oldMainTarget'], plan['newMainTarget']))
             run(['/usr/bin/systemctl', 'daemon-reload'])
             require(snapshot(old['root']) == plan['snapshot'], 'Application/data state changed during exact-target bridge')
             verify_timers(plan)
             require(digest(secure(permit_file)) == binding['permitSha256'], 'Exact-target immutable permit drift')
-            receipt = {**binding, 'contract': EXACT_TARGET_PERMIT_CONTRACT + '_RECEIPT', 'decision': 'PASS', 'acceptedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')}
-            publish(directory / 'receipt.json', receipt); atomic_bytes(POINTER, canonical({'operationId': identity, 'receiptSha256': canonical_digest(receipt)}), 0o600, digest(secure(POINTER)) if POINTER.exists() else None); finish_pending(identity)
+            next_pointer = canonical({'operationId': identity, 'receiptSha256': canonical_digest(receipt)})
+            previous_pointer = base64.b64decode(plan['previousPointer'], validate=True) if plan['previousPointer'] is not None else None
+            current_pointer = secure(POINTER) if POINTER.exists() else None
+            require(current_pointer in (previous_pointer, next_pointer), 'Refuse foreign exact-target active pointer')
+            atomic_bytes(POINTER, next_pointer, 0o600, digest(current_pointer) if current_pointer is not None else None)
+            publish(directory / 'receipt.json', receipt); finish_pending(identity)
         except Exception:
-            if (directory / 'bridge-apply-main.intent.json').exists() and main_target() == plan['newMainTarget']: switch_main(plan['newMainTarget'], plan['oldMainTarget'])
-            if (directory / 'bridge-apply-unit.intent.json').exists() and digest(secure(UNIT)) == plan['newUnitSha256']: atomic_bytes(UNIT, secure(old['root'] / UNIT.name), plan['oldUnitMode'], plan['newUnitSha256'])
-            if main_target() == plan['oldMainTarget'] and digest(secure(UNIT)) == plan['oldUnitSha256']:
+            if (prepared_path.exists() and POINTER.exists() and
+                    read_json(POINTER) == {'operationId': identity,
+                                          'receiptSha256': canonical_digest(read_json(prepared_path))}):
+                # Pointer publication is the commit boundary. A missing final
+                # receipt is reconciled from frozen bytes, never auto-undone.
+                raise
+            if not receipt_path.exists() and (directory / 'bridge-apply-main.intent.json').exists() and main_target() == plan['newMainTarget']: switch_main(plan['newMainTarget'], plan['oldMainTarget'])
+            if not receipt_path.exists() and (directory / 'bridge-apply-unit.intent.json').exists() and digest(secure(UNIT)) == plan['newUnitSha256']: atomic_bytes(UNIT, secure(old['root'] / UNIT.name), plan['oldUnitMode'], plan['newUnitSha256'])
+            if not receipt_path.exists() and main_target() == plan['oldMainTarget'] and digest(secure(UNIT)) == plan['oldUnitSha256']:
                 run(['/usr/bin/systemctl', 'daemon-reload']); restore_pointer(plan); publish(directory / 'rolled-back.json', {**binding, 'decision': 'ROLLED_BACK', 'reason': 'BRIDGE_POSTCHECK_FAILED'}); finish_pending(identity)
             raise
     return {'decision': 'EXACT_TARGET_CONTROL_HANDOFF_ACCEPTED', 'operationId': identity, 'controlReleaseSha': target['manifest']['releaseSha'], 'applicationRestarted': False, 'timersStopped': False}
@@ -641,28 +737,69 @@ def bridge_rollback(identity, permit_path):
     validate_exact_target_plan_bindings(plan, old, target)
     receipt = read_json(directory / 'receipt.json')
     require(receipt.get('contract') == EXACT_TARGET_PERMIT_CONTRACT + '_RECEIPT' and receipt.get('decision') == 'PASS' and receipt.get('planSha256') == canonical_digest(plan), 'Exact-target forward receipt drift')
-    rollback_receipt = directory / 'rolled-back.json'
-    if rollback_receipt.exists(): return {'decision': 'ALREADY_ROLLED_BACK', 'operationId': identity, 'historical': True, 'effectsPerformed': False}
+    rollback_receipt, rollback_intent = directory / 'rolled-back.json', directory / 'bridge-rollback.intent.json'
+    if rollback_receipt.exists():
+        terminal = read_json(rollback_receipt)
+        require(terminal.get('decision') == 'ROLLED_BACK' and terminal.get('planSha256') == canonical_digest(plan), 'Exact-target rollback terminal drift')
+        with control_lock(True, plan['maxLockWaitSeconds']):
+            require(snapshot(old['root']) == plan['snapshot'] and main_target() == plan['oldMainTarget'] and digest(secure(UNIT)) == plan['oldUnitSha256'], 'Exact-target rollback terminal postimage drift')
+            restore_pointer(plan); finish_pending(identity)
+        return {'decision': 'ROLLBACK_CLEANUP_RECONCILED', 'operationId': identity, 'applicationRestarted': False}
     with control_lock(True, plan['maxLockWaitSeconds']):
         old, target = installed(plan['oldReleaseSha'], executor=True), installed(plan['newReleaseSha'])
         validate_exact_target_plan_bindings(plan, old, target)
         require(old['digest'] == plan['oldControlSha256'] and target['digest'] == plan['newControlSha256'], 'Exact-target staged bytes drift before rollback')
         current = snapshot(old['root'])
-        require(current == plan['snapshot'] and main_target() == plan['newMainTarget'] and digest(secure(UNIT)) == plan['newUnitSha256'], 'Exact-target rollback preimage drift')
+        require(current == plan['snapshot'], 'Exact-target rollback snapshot drift')
+        main, unit = main_target(), digest(secure(UNIT))
+        require(main in (plan['oldMainTarget'], plan['newMainTarget']) and unit in (plan['oldUnitSha256'], plan['newUnitSha256']), 'Exact-target rollback effect state drift')
+        require((main == plan['newMainTarget'] and unit == plan['newUnitSha256']) or rollback_intent.exists(), 'Exact-target rollback preimage drift')
         verify_timers(plan)
-        permit_raw = secure(permit_path); envelope = json.loads(permit_raw)
-        require(permit_raw == canonical(envelope), 'Exact-target rollback permit must be canonical LF JSON')
-        exact_target_rollback_permit(envelope, plan, receipt, old, target, current['activeSha256'])
-        permit_file = directory / 'rollback-permit.json'; atomic_bytes(permit_file, permit_raw, 0o400)
-        binding = {'operationId': identity, 'planSha256': canonical_digest(plan), 'receiptSha256': canonical_digest(receipt), 'rollbackPermitSha256': digest(permit_raw), 'rollbackPermitPath': 'rollback-permit.json'}
-        publish(directory / 'bridge-rollback.intent.json', binding); atomic_bytes(PENDING, canonical({'operationId': identity}), 0o600)
+        permit_file = directory / 'rollback-permit.json'
+        if rollback_intent.exists():
+            binding = read_json(rollback_intent)
+            require(isinstance(binding, dict) and
+                    set(binding) == {'operationId', 'planSha256', 'receiptSha256',
+                                     'rollbackPermitSha256', 'rollbackPermitPath', 'authorizedAt'} and
+                    binding['operationId'] == identity and
+                    binding['planSha256'] == canonical_digest(plan) and
+                    binding['receiptSha256'] == canonical_digest(receipt) and
+                    binding['rollbackPermitPath'] == 'rollback-permit.json',
+                    'Exact-target rollback intent drift')
+            permit_raw = secure(permit_file)
+            require(digest(permit_raw) == binding['rollbackPermitSha256'] and
+                    secure(permit_path) == permit_raw,
+                    'Rollback retry must use the original immutable permit')
+            envelope = json.loads(permit_raw)
+            require(permit_raw == canonical(envelope), 'Immutable rollback permit is not canonical')
+            permit = exact_target_rollback_permit(envelope, plan, receipt, old, target,
+                                                  current['activeSha256'], allow_expired=True)
+            authorized_at = datetime.datetime.fromisoformat(binding['authorizedAt'].replace('Z', '+00:00'))
+            issued_at = datetime.datetime.fromisoformat(permit['issuedAt'].replace('Z', '+00:00'))
+            expires_at = datetime.datetime.fromisoformat(permit['expiresAt'].replace('Z', '+00:00'))
+            require(issued_at <= authorized_at <= expires_at,
+                    'Rollback intent was not authorized inside its original permit window')
+        else:
+            permit_raw = secure(permit_path); envelope = json.loads(permit_raw)
+            require(permit_raw == canonical(envelope), 'Exact-target rollback permit must be canonical LF JSON')
+            exact_target_rollback_permit(envelope, plan, receipt, old, target, current['activeSha256'])
+            atomic_bytes(permit_file, permit_raw, 0o400)
+            binding = {'operationId': identity, 'planSha256': canonical_digest(plan),
+                       'receiptSha256': canonical_digest(receipt),
+                       'rollbackPermitSha256': digest(permit_raw),
+                       'rollbackPermitPath': 'rollback-permit.json',
+                       'authorizedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')}
+            publish(rollback_intent, binding)
+        atomic_bytes(PENDING, canonical({'operationId': identity}), 0o600)
         try:
             phase_effect(directory, 'bridge-rollback-main', binding, main_target, plan['newMainTarget'], plan['oldMainTarget'], lambda: switch_main(plan['newMainTarget'], plan['oldMainTarget']))
             phase_effect(directory, 'bridge-rollback-unit', binding, lambda: digest(secure(UNIT)), plan['newUnitSha256'], plan['oldUnitSha256'], lambda: atomic_bytes(UNIT, secure(old['root'] / UNIT.name), plan['oldUnitMode'], plan['newUnitSha256']))
             run(['/usr/bin/systemctl', 'daemon-reload'])
             require(snapshot(old['root']) == plan['snapshot'], 'Application/data state changed during exact-target rollback')
             verify_timers(plan); require(digest(secure(permit_file)) == binding['rollbackPermitSha256'], 'Immutable rollback permit drift')
-            publish(rollback_receipt, {**binding, 'contract': EXACT_TARGET_ROLLBACK_PERMIT_CONTRACT + '_RECEIPT', 'decision': 'ROLLED_BACK', 'acceptedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')}); restore_pointer(plan); finish_pending(identity)
+            restore_pointer(plan)
+            publish(rollback_receipt, {**binding, 'contract': EXACT_TARGET_ROLLBACK_PERMIT_CONTRACT + '_RECEIPT', 'decision': 'ROLLED_BACK', 'acceptedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')})
+            finish_pending(identity)
         except Exception:
             # Do not repeat a partially observed rollback on a later client retry.
             raise
@@ -770,7 +907,15 @@ def restore_pointer(plan):
     previous = base64.b64decode(plan['previousPointer'], validate=True) if plan['previousPointer'] is not None else None
     if current is not None and current != previous:
         receipt_path = operation_path(plan['operationId']) / 'receipt.json'
-        require(receipt_path.exists() and json.loads(current) == {'operationId': plan['operationId'], 'receiptSha256': digest(secure(receipt_path))}, 'Refuse to replace a foreign control pointer')
+        prepared_path = operation_path(plan['operationId']) / 'bridge-final-prepared.json'
+        accepted = (receipt_path.exists() and
+                    json.loads(current) == {'operationId': plan['operationId'],
+                                            'receiptSha256': digest(secure(receipt_path))})
+        prepared = (plan.get('contract') == 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V2_PLAN' and
+                    prepared_path.exists() and
+                    json.loads(current) == {'operationId': plan['operationId'],
+                                            'receiptSha256': digest(secure(prepared_path))})
+        require(accepted or prepared, 'Refuse to replace a foreign control pointer')
     if plan['previousPointer'] is not None:
         atomic_bytes(POINTER, previous, 0o600, digest(current) if current is not None else None)
     elif POINTER.exists():

@@ -67,7 +67,7 @@ export function validateExactTargetPermit(envelope, publicKey, expected, {
 }
 
 export function validateExactTargetRollbackPermit(envelope, publicKey, expected, {
-  now = Date.now(),
+  now = Date.now(), allowExpired = false,
 } = {}) {
   exactKeys(envelope, ['permit', 'signature'], 'exact-target rollback envelope');
   const { permit, signature } = envelope;
@@ -88,7 +88,7 @@ export function validateExactTargetRollbackPermit(envelope, publicKey, expected,
   const issuedAt = time(permit.issuedAt, 'rollback permit issue time');
   const expiresAt = time(permit.expiresAt, 'rollback permit expiry time');
   demand(expiresAt > issuedAt && expiresAt - issuedAt <= 4 * 3600_000 &&
-    issuedAt <= now + 30_000 && expiresAt > now,
+    issuedAt <= now + 30_000 && (allowExpired || expiresAt > now),
   'Exact-target rollback permit is outside its bounded validity window');
   exactKeys(expected, ['operationId', 'action', 'hostIdentitySha256', 'planSha256',
     'receiptSha256', 'activeSha256', 'predecessor', 'target'], 'expected rollback authority');

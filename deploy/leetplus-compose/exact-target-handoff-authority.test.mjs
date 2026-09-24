@@ -76,6 +76,10 @@ test('rollback needs a distinct permit bound to the accepted forward receipt', (
     issuedAt: '2026-09-24T14:59:00.000Z', expiresAt: '2026-09-24T16:00:00.000Z' };
   const envelope = { permit, signature: crypto.sign(null, Buffer.from(canonical(permit)), keys.privateKey).toString('base64') };
   assert.doesNotThrow(() => validateExactTargetRollbackPermit(envelope, trustedPublicKey, rollbackExpected, { now }));
+  assert.throws(() => validateExactTargetRollbackPermit(envelope, trustedPublicKey, rollbackExpected,
+    { now: Date.parse('2026-09-24T16:00:00.000Z') }), /validity window/);
+  assert.doesNotThrow(() => validateExactTargetRollbackPermit(envelope, trustedPublicKey, rollbackExpected,
+    { now: Date.parse('2026-09-24T16:00:00.000Z'), allowExpired: true }));
   assert.throws(() => validateExactTargetRollbackPermit(forward, trustedPublicKey, rollbackExpected, { now }), /rollback permit|rollback identity/);
   const wrongReceipt = { ...rollbackExpected, receiptSha256: hash('e') };
   assert.throws(() => validateExactTargetRollbackPermit(envelope, trustedPublicKey, wrongReceipt, { now }), /accepted forward receipt/);

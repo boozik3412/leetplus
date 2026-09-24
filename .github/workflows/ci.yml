@@ -3012,6 +3012,7 @@ jobs:
         run: |
           node --test deploy/leetplus-compose/*.test.mjs
           python3 -m unittest discover -s deploy/leetplus-compose -p test_control_handoff.py
+          python3 -m unittest discover -s .github/scripts -p test_sign_exact_target_permit.py
       - name: Build pinned images from exact source
         run: bash deploy/leetplus-compose/build-images.sh "$RUNNER_TEMP/leetplus-compose"
       - name: Upload non-deployable image candidate

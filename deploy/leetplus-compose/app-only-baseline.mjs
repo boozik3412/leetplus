@@ -4,6 +4,7 @@
 import { API_RESOURCE_PROFILE, CONTRACT as V1, SCHEMA, canonical, demand, digest, imageId, release } from './contract.mjs';
 import { validatePlan as validateV1Plan } from './orchestrator.mjs';
 import { validateAppAdmission, validateAppBundle } from './app-only-artifact.mjs';
+import { CONTRACT as WORKER_CONTINUATION_V2, validateWorkerContinuationPolicy } from './worker-continuation.mjs';
 
 export const BASELINE_CONTRACT = 'LEETPLUS_COMPOSE_DATA_BASELINE_CERTIFICATION_V1';
 export const PLAN_CONTRACT = 'LEETPLUS_COMPOSE_BLUE_GREEN_V2_PLAN';
@@ -131,6 +132,9 @@ export function validateCertifiedBaseline(cert, { bundle, admission, previous, h
 export function validateAppOnlyPlan(plan, { bundle, admission, certification, readinessReceiptSha256, now = Date.now() }) {
   demand(plan?.contract === PLAN_CONTRACT && plan.releaseLane === 'L1_APP_ONLY' && plan.action === 'ROLLOUT' && plan.previous,
     'V2 app-only plan must roll out over an existing active state');
+  demand(plan.workerContinuation?.contract === WORKER_CONTINUATION_V2,
+    'V2 app-only plan requires executable worker continuation');
+  validateWorkerContinuationPolicy(plan.workerContinuation);
   const cert = validateCertifiedBaseline(certification, { bundle, admission, previous: plan.previous,
     hostIdentitySha256: plan.hostIdentitySha256, controllerManifestSha256: plan.controlSha256,
     databaseIdentitySha256: plan.databaseIdentitySha256, readinessReceiptSha256, now });

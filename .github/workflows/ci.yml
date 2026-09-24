@@ -3208,7 +3208,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
           test "${{ needs.application.result }}" = success
           [[ "$APP_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$APP_ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$APP_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
           impact="$RUNNER_TEMP/app-only-authority/leetplus-release-impact-$CI_RELEASE_SHA.json"
           candidate="$RUNNER_TEMP/app-only-authority/leetplus-release-candidate-$CI_RELEASE_SHA.json"
           app_only="$RUNNER_TEMP/app-only-impact/app-only-impact-$CI_RELEASE_SHA.json"
@@ -3219,7 +3219,7 @@ jobs:
             "$RUNNER_TEMP/leetplus-compose-app" "$impact" "$candidate" "$app_only" \
             "$gates" "$admission" \
             "leetplus-compose-app-$CI_RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            "$APP_ARTIFACT_ID" "${APP_ARTIFACT_DIGEST#sha256:}"
+            "$APP_ARTIFACT_ID" "$APP_ARTIFACT_DIGEST"
           node --input-type=module - "$admission" <<'NODE'
           import fs from 'node:fs';
           import { validateAppAdmission } from './deploy/leetplus-compose/app-only-artifact.mjs';

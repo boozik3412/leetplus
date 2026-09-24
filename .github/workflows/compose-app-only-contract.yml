@@ -25,6 +25,7 @@ jobs:
           set -euo pipefail
           node --check .github/scripts/classify-app-only.mjs
           node --check .github/scripts/create-app-only-gates.mjs
+          node --check .github/scripts/test-app-only-workflow.mjs
           node --check deploy/leetplus-compose/app-only-artifact.mjs
           node --check deploy/leetplus-compose/admit-app-images.mjs
           node --check deploy/leetplus-compose/app-only-baseline.mjs
@@ -44,6 +45,7 @@ jobs:
             deploy/leetplus-compose/app-only-live-certification.test.mjs \
             deploy/leetplus-compose/app-only-installed-certifier.test.mjs \
             deploy/leetplus-compose/download-admitted-app-bundle.test.mjs
+          node .github/scripts/test-app-only-workflow.mjs
 
   image-shadow:
     name: B app-only Docker image shadow

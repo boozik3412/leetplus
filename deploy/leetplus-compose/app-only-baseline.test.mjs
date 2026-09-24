@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import test from 'node:test';
 import { canonical, CONTRACT, digest, renderCompose, SCHEMA } from './contract.mjs';
 import { BASELINE_CONTRACT, PLAN_CONTRACT, migrationInventoryDigest, synthesizeRelease, validateAppOnlyPlan, validateCertifiedBaseline } from './app-only-baseline.mjs';
+import { deriveWorkerContinuation } from './worker-continuation.mjs';
 
 const h = 'a'.repeat(64), other = 'b'.repeat(64), sha = 'c'.repeat(40), dataSha = 'd'.repeat(40);
 const image = letter => `sha256:${letter.repeat(64)}`;
@@ -86,6 +88,23 @@ test('V2 plan binds certified baseline and exact synthesized target while retain
       controllerManifestSha256: opts.controllerManifestSha256, activeSha256: digest(previous),
       generation: previous.generation, activeSlot: previous.activeSlot },
     preparationEvidenceExpiresAt: '2026-09-24T02:30:00Z' };
+  const workers = ['bonus-ledger-worker', 'langame-daily-worker'];
+  const key = crypto.generateKeyPairSync('ed25519');
+  const originalGrantEnvelopes = workers.map((worker, index) => {
+    const grant = { contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_WORKER_GRANT', worker, mode: 'TIMER',
+      id: `${index + 1}1111111-1111-4111-8111-111111111111`, hostIdentitySha256: plan.hostIdentitySha256,
+      releaseSha: previous.blue.releaseSha, generation: previous.generation, tenantSlug: 'fixture',
+      secretSha256: h, issuedAt: '2026-09-24T00:00:00Z', expiresAt: '2026-09-25T00:00:00Z' };
+    return { grant, signature: crypto.sign(null, Buffer.from(canonical(grant)), key.privateKey).toString('base64') };
+  });
+  plan.workerContinuation = deriveWorkerContinuation({
+    originalTimers: workers.map((worker, index) => ({ worker, unit: index ? 'leetplus-compose-daily.timer' : 'leetplus-compose-bonus.timer', enabled: true, active: true })),
+    originalGrantEnvelopes, profileBindings: workers.map(worker => ({ worker, profileSha256: h })),
+    targetReleaseSha: target.releaseSha, currentGeneration: previous.generation,
+    previousReleaseSha: previous.blue.releaseSha,
+    forwardGrantIds: ['31111111-1111-4111-8111-111111111111', '41111111-1111-4111-8111-111111111111'],
+    rollbackGrantIds: ['51111111-1111-4111-8111-111111111111', '61111111-1111-4111-8111-111111111111'],
+  });
   plan.composeSha256 = digest(renderCompose({ blue: plan.blue, green: plan.green,
     dataRelease: plan.dataRelease, activeSlot: plan.targetSlot }));
   assert.equal(validateAppOnlyPlan(plan, { bundle, admission, certification: cert,

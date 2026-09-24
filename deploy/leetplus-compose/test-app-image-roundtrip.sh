@@ -7,13 +7,27 @@ socket="unix://$root/docker.sock"
 printf '%s\n' '{"features":{"containerd-snapshotter":true}}' > "$root/daemon.json"
 dockerd_bin=$(command -v dockerd)
 docker_bin=$(command -v docker)
+containerd_bin=$(command -v containerd)
+test -x "$containerd_bin"
+sudo env PATH="$PATH" "$containerd_bin" --root "$root/containerd-root" --state "$root/containerd-state" \
+  --address "$root/containerd.sock" > "$root/containerd.log" 2>&1 &
+containerd_launcher=$!
+containerd_ready=false
+for attempt in $(seq 1 60); do
+  if test -S "$root/containerd.sock"; then containerd_ready=true; break; fi
+  sleep 1
+done
+if [[ "$containerd_ready" != true ]]; then cat "$root/containerd.log" >&2; exit 1; fi
 sudo env PATH="$PATH" "$dockerd_bin" --config-file "$root/daemon.json" --data-root "$root/data" --exec-root "$root/exec" \
-  --pidfile "$root/docker.pid" --host "$socket" --bridge none --iptables=false --ip6tables=false \
+  --pidfile "$root/docker.pid" --host "$socket" --containerd "$root/containerd.sock" \
+  --bridge none --iptables=false --ip6tables=false \
   --ip-forward=false --ip-masq=false > "$root/daemon.log" 2>&1 &
 launcher=$!
 cleanup() {
   if [[ -s "$root/docker.pid" ]]; then sudo kill -TERM "$(cat "$root/docker.pid")" || true; fi
   wait "$launcher" || true
+  sudo kill -TERM "$containerd_launcher" || true
+  wait "$containerd_launcher" || true
 }
 trap cleanup EXIT
 ready=false

@@ -1,6 +1,18 @@
 # Runtime и security-контуры LeetPlus
 
-Статус: **канонический current-state contract**, оперативный checkpoint **23.09.2026**.
+Статус: **канонический current-state contract**, оперативный checkpoint **24.09.2026**.
+
+**Оперативное обновление 24.09, 06:59 UTC:** после отдельного GO на native
+plan digest принят controller-only handoff `63b58306-a711-4a0c-ba8c-07b3d9979e9c`:
+serving controller — exact `88010292246249c94ba66ecbab64e4d51ad84d8c`,
+installed manifest `237cbcba…`, expiry guard активен. Приложение осталось
+GREEN `f97af35d…`/gen10 с BLUE `3c3dc4ac…` rollback и data399/CURRENT191.
+Шесть исходных container identities и PIDs, четыре таймера, два gen10 grants
+не менялись; public API/Web, свежий corporate/guest staff-fixture contour,
+обычный bonus worker и первый автоматический network refresh после handoff
+прошли. Естественный phone/Telegram guest login этой операцией не проверялся.
+Новый app rollout и измерение 45–60 минут требуют отдельного admission/plan/GO.
+[Точный план, receipt и независимая приёмка](../deployment/release-preparation-a-production-2026-09-24.md).
 
 **Оперативное обновление 23.09:** по отдельному exact-plan GO активен
 **GREEN f97/gen10, API6GiB**; BLUE3c3 оставлен rollback, data399/CURRENT191

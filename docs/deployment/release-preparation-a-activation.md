@@ -1,5 +1,13 @@
 # Variant A: activation and comparative pilot
 
+Production checkpoint 24.09.2026: exact controller target `88010292246249c94ba66ecbab64e4d51ad84d8c`
+is serving after the signed native handoff and independent runtime acceptance.
+The application remains GREEN f97/gen10; no application rollout or comparative
+45–60 minute measurement occurred in that handoff. The historical 23.09 source
+checkpoint and activation instructions below describe how the controller was
+reached and the gates for any future application release.
+[Verified controller operation and current limits](release-preparation-a-production-2026-09-24.md).
+
 Checkpoint 23.09.2026: source PR #226 merged as main `6def91d4…`; exact-main
 Fast `35846137369` and Full `35846137362` passed. Main protection now requires
 the original three checks plus the pilot HTTP/fresh-scope and PostgreSQL

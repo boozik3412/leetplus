@@ -1,11 +1,13 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
-**Variant B source candidate 24.09:** draft PR #240 adds a versioned
+**Variant B source checkpoint 24.09:** merged PR #240 adds a versioned
 Compose app-only admission, exact-diff `L1_APP_ONLY` allowlist, API/Web-only
 images and installed-controller certification of the already accepted
-PG/Redis/CURRENT191 data baseline. It is not merged, installed or an external
-beta GO. The A repair PR #241 and its later exact-main/installed acceptance
-remain dependencies; production application rollout and B pilot remain HOLD.
+PG/Redis/CURRENT191 data baseline. Bridge PR #243 also merged source; both
+passed exact-main Full. Neither bridge nor B is accepted as installed or is an
+external beta GO. A repair's installed acceptance, separate A→bridge and
+bridge→B plans/GOs, and a full V1 active-app base release remain dependencies;
+production application rollout and B pilot remain HOLD.
 Fresh backup/off-host restore, native signed five-phase rollout, worker
 continuation and hot rollback are unchanged. The current `NO-GO` decision for
 external access is unchanged. [B contract](./docs/deployment/compose-app-only-v2.md).

@@ -1,6 +1,8 @@
 # Compose app-only release, B contract
 
-Status: source candidate. `LEETPLUS_COMPOSE_APP_BUNDLE_V2` and
+Status: **source merged, production activation HOLD**. B merged as
+`df4d00261987ade9ca8e0d90529cdd3867718b67`; exact-main Fast
+`36037819135` and Full `36037819225` passed. `LEETPLUS_COMPOSE_APP_BUNDLE_V2` and
 `LEETPLUS_COMPOSE_APP_ADMISSION_V2` are separate from the accepted V1
 four-image handoff. Their presence in Git or CI does not enable a production
 rollout. The current V1 path remains the fallback for all releases that do not
@@ -10,17 +12,19 @@ The integrated source now contains V2 `prepare-app-only`, installed data
 certification, versioned runner checkpoints/GO packet, V2 plan validation and
 read-only observation. The controller reuses A's signed V1 approval and
 HYDRATE→POSTCHECK/worker continuation machinery. The B-capable controller is
-**not installed** and current controller handoff authority accepts only pinned
-A transitions. A separate exact-byte B controller-handoff transition must be
-authorized by a predecessor-side signed target permit or an admitted bridge,
-then reviewed and approved before this source can run on the server. PR
-#240 remains a draft; its new Compose-native admission job has not yet produced
-an exact-main V2 artifact.
+**not accepted as installed**. The predecessor bridge source merged as
+`bebeb41354da0dd04b218495cbbf5d75ba9f0a85` and passed exact-main Full,
+but A→bridge and bridge→B each require a separate installed-path check,
+signed exact plan and GO. The bridge issues B's signed exact-target permit
+from its own serving root; B validates the predecessor's accepted receipt.
+The app-only decision and V2 handoff were correctly skipped for the B merge's
+controller/security source change. A future eligible display-only main push
+must produce its own exact-main V2 admission.
 
 The artifact slice includes a disposable Docker test that starts both API slots
 against a migrated CURRENT191 fixture and checks readiness, release identity,
 public guest and negative corporate/worker boundaries. The PR Docker shadow
-passed on prior exact heads; repeat it after every source change.
+passed on the merged source head; repeat it after every source change.
 Native/restored-copy readiness against the
 actual certified data baseline, installed-controller certification and V2
 plan/apply integration are required before any B release.

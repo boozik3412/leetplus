@@ -1,6 +1,6 @@
 # Variant B activation and comparative pilot
 
-Status: **HOLD — source candidate, no production activation**. This document
+Status: **HOLD — source merged, no production activation**. This document
 describes the exact evidence and ownership needed to activate the B controller
 after A is accepted. It is not a GO packet or permission to run a server effect.
 
@@ -12,10 +12,13 @@ after A is accepted. It is not a GO packet or permission to run a server effect.
    merged as `b0cbf3a4f302b299762fa055f3bffe0376a91182` and exact-main
    Full run `35997208370` passed. Its production controller installation is
    a separate operation and must be verified before B activation.
-2. B PR #240 is rebased on that accepted main. Run exact combined-SHA tests and
-   CI for every new B head. Review the A/V1 and B/V2 job graphs: unknown, mixed and L2 candidates
-   must retain the complete original V1 path. A successful B source test or
-   draft PR does not establish an admitted app artifact.
+2. The predecessor bridge merged as `bebeb41354da0dd04b218495cbbf5d75ba9f0a85`
+   and B merged as `df4d00261987ade9ca8e0d90529cdd3867718b67`.
+   Both passed exact-main Fast and Full admission. Review the A/V1 and B/V2
+   graphs: unknown, mixed and L2 candidates retain V1. The B merge's
+   controller/security change did not qualify for `L1_APP_ONLY`; its V2
+   admission job was skipped. A later eligible app change needs its own V2
+   admission and an installed bridge/B controller.
 3. Assign the production dispatcher as the one effect owner. Before any server
    command, read the complete `deploy-evidence/<operation>/ERROR_LOG.md`, check
    all current operations, timers and worker singleton locks, and freeze exact
@@ -25,15 +28,15 @@ after A is accepted. It is not a GO packet or permission to run a server effect.
 
 ## Required controller handoff before B can run
 
-The currently reviewed handoff authority recognizes only pinned A transitions.
+The last confirmed installed handoff authority recognizes only pinned A transitions.
 It rejects B's changed control/orchestrator/runner/observer files. A B-only
 controller source cannot authorize its own installation: its final release and
 install-manifest hashes would depend on the authorization code itself. An
 independent review reproduced this self-authorization gap and rejected a
-local B v3 patch before publication. Prepare a predecessor-side signed
-exact-target transition permit, or a separately admitted and installed bridge
-controller, whose authority is fixed before B target bytes are accepted. It
-must bind:
+local B v3 patch before publication. The separately admitted predecessor
+bridge source provides the signed exact-target path, but it is not accepted
+as installed. After A's own acceptance, install the bridge under a separate
+plan/GO, then have that serving predecessor bind:
 
 - exact installed A predecessor release and manifest SHA;
 - every old and new privileged/runtime leaf digest that changes in B;
@@ -45,10 +48,10 @@ must bind:
 Negative fixtures must reject each altered digest, wrong predecessor, pending
 handoff, legacy fallback, forged approval and replay, including simultaneous
 top-level and nested target changes and changed authority leaves. After
-exact-main Fast and Full success, stage only through the installed A controller,
-review the native
-handoff plan and fresh backup/restored-copy evidence, then obtain a *new*
-exact-plan GO. The GO consumed for the A handoff cannot be reused. Confirm
+exact-main Fast and Full success, stage bridge only after accepted A, and stage
+B only after accepted bridge. Review each native handoff plan and fresh
+backup/restored-copy evidence, then obtain a *new* exact-plan GO for each.
+The GO consumed for the A handoff cannot be reused. Confirm
 the serving pointer, six existing container IDs/PIDs, PG/Redis/dataRelease,
 current generation, both grants and four timers remain unchanged. B's
 `appOnlyV2BaselineCertification` capability may be trusted only after that

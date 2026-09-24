@@ -87,7 +87,7 @@ function waitReady(container, releaseMetadata) {
 function inspectReleaseMetadata() {
   const value = JSON.parse(docker([
     'run', '--rm', '--network', 'none', '--entrypoint', 'node', apiImage,
-    '-e', 'process.stdout.write(require("/app/release.json"))',
+    '-e', 'process.stdout.write(JSON.stringify(require("/app/release.json")))',
   ]));
   release({ ...value, images: { api: apiImage, web: postgresImage, postgres: postgresImage, redis: postgresImage } });
   if (value.contract !== CONTRACT || !SHA.test(value.releaseSha ?? '')) {

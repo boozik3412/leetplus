@@ -1,0 +1,41 @@
+name: Compose app-only contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: B app-only contracts and negative fixtures
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Check source syntax
+        run: |
+          set -euo pipefail
+          node --check .github/scripts/classify-app-only.mjs
+          node --check .github/scripts/create-app-only-gates.mjs
+          node --check deploy/leetplus-compose/app-only-artifact.mjs
+          node --check deploy/leetplus-compose/admit-app-images.mjs
+          node --check deploy/leetplus-compose/app-only-baseline.mjs
+          node --check deploy/leetplus-compose/download-admitted-app-bundle.mjs
+          bash -n deploy/leetplus-compose/build-app-images.sh
+      - name: Run fail-closed B contract fixtures
+        run: |
+          set -euo pipefail
+          node --test \
+            .github/scripts/classify-app-only.test.mjs \
+            .github/scripts/create-app-only-gates.test.mjs \
+            deploy/leetplus-compose/app-only-artifact.test.mjs \
+            deploy/leetplus-compose/app-only-baseline.test.mjs \
+            deploy/leetplus-compose/download-admitted-app-bundle.test.mjs

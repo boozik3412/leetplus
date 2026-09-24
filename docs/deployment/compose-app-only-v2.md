@@ -111,7 +111,7 @@ unreleased changes remain in the candidate.
 
 The exact activation and comparative-pilot sequence is in
 [Variant B activation](compose-app-only-v2-activation.md). It names the
-controller-handoff source transition that remains to be implemented after the
+predecessor-side signed transition or bridge controller that remains to be implemented after the
 A predecessor is accepted and its installed manifest can be pinned.
 
 ## Measurement

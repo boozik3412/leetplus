@@ -25,9 +25,14 @@ after A is accepted. It is not a GO packet or permission to run a server effect.
 ## Required controller handoff before B can run
 
 The currently reviewed handoff authority recognizes only pinned A transitions.
-It rejects B's changed control/orchestrator/runner/observer files. Prepare a
-separate reviewable source transition in the Python handoff controller,
-independent JS authority verifier and offline signer that pins:
+It rejects B's changed control/orchestrator/runner/observer files. A B-only
+controller source cannot authorize its own installation: its final release and
+install-manifest hashes would depend on the authorization code itself. An
+independent review reproduced this self-authorization gap and rejected a
+local B v3 patch before publication. Prepare a predecessor-side signed
+exact-target transition permit, or a separately admitted and installed bridge
+controller, whose authority is fixed before B target bytes are accepted. It
+must bind:
 
 - exact installed A predecessor release and manifest SHA;
 - every old and new privileged/runtime leaf digest that changes in B;
@@ -37,7 +42,9 @@ independent JS authority verifier and offline signer that pins:
   `timersMayBeStopped=false`, and rollback bound to the accepted receipt.
 
 Negative fixtures must reject each altered digest, wrong predecessor, pending
-handoff, legacy fallback, forged approval and replay. After exact-main Fast and
+handoff, legacy fallback, forged approval and replay, including simultaneous
+top-level and nested target changes and changed authority leaves. After
+exact-main Fast and
 Full success, stage only through the installed A controller, review the native
 handoff plan and fresh backup/restored-copy evidence, then obtain a *new*
 exact-plan GO. The GO consumed for the A handoff cannot be reused. Confirm

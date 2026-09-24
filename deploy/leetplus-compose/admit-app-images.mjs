@@ -133,8 +133,10 @@ function archiveManifest(file, bundle) {
       item.RepoTags[0] === `docker.io/library/${tag}`);
     demand(selected.length === 1, `Docker archive lacks one exact ${role} tag`);
     const id = bundle.appImages[role].slice(7), config = selected[0].Config;
-    demand((config === `${id}.json` || config === `blobs/sha256/${id}`) && members.includes(config),
-      `Docker archive ${role} config differs from admitted image ID`);
+    demand(config === `${id}.json` || config === `blobs/sha256/${id}` || config === `blobs/sha256/${id}.json`,
+      `Docker archive ${role} Config path does not encode admitted ID: ${JSON.stringify(config).slice(0, 150)}`);
+    demand(members.includes(config) || members.includes(`./${config}`),
+      `Docker archive ${role} Config member is absent: ${JSON.stringify(config).slice(0, 150)}`);
   }
 }
 

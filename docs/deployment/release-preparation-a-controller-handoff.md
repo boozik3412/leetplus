@@ -1,7 +1,16 @@
 # Variant A serving-controller handoff
 
-Status: source-only successor, 23.09.2026. This contract is not an installed
-controller, a production approval, or an application release.
+Production checkpoint 24.09.2026: target `88010292246249c94ba66ecbab64e4d51ad84d8c`
+is the **serving controller** after separately approved native operation
+`63b58306-a711-4a0c-ba8c-07b3d9979e9c`; independent signed-authority,
+process-continuity, public/API/Web, contour and ordinary worker/network checks
+passed. The application remains GREEN f97/gen10 with BLUE3c3 rollback and
+data399/CURRENT191. The historical source-only description below explains why
+the narrow transition was needed; it is not the current production status.
+[Exact production evidence and remaining speed pilot](release-preparation-a-production-2026-09-24.md).
+
+Historical source checkpoint, 23.09.2026: this successor contract was not yet
+an installed controller, a production approval, or an application release.
 
 PR #226 merged the Variant A preparation code as exact main `6def91d4…`.
 Read-only production inventory at 10:13 UTC still observed the serving

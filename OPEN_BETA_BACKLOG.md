@@ -1,5 +1,13 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
+**Source-only backup storage repair 25.09:** the Windows backup pull source
+uses the existing pinned backup identity through public `188.234.220.76` and
+cleans only its own temporary `.incoming` directory. The installed task still
+uses the failing LAN route until a separate reviewed installation. Server
+backup and historical clone retention are not enabled by this change; exact
+off-host proof, restore check and separate dispatcher-owned GO remain required.
+External beta stays `NO-GO`. [Storage contract](./docs/deployment/storage-retention-2026-09-25.md).
+
 **Variant B source checkpoint 24.09:** merged PR #240 adds a versioned
 Compose app-only admission, exact-diff `L1_APP_ONLY` allowlist, API/Web-only
 images and installed-controller certification of the already accepted

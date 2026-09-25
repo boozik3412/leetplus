@@ -7,11 +7,15 @@ separate A→bridge preparation. No storage cleanup may overlap that operation.
 
 ## Recovery copies
 
-The owner has asked to retain two recovery copies. The two possible meanings
-are still being clarified: one current encrypted capsule on `1337s` plus one
-verified off-host copy, or two recent generations at each location. The
-read-only `scripts/storage/plan_backup_exports.py` therefore requires an
-explicit `--keep-generations 1|2` and never chooses a count by default. A
+The owner has asked to retain two recovery copies. The working interpretation
+for planning is **one current encrypted generation on `1337s` and one matching,
+verified generation off host**: two physical copies in separate failure
+domains. This is an assumption until the owner confirms the copy semantics;
+no deletion is authorized by it. The read-only
+`scripts/storage/plan_backup_exports.py` requires an explicit
+`--keep-generations 1|2` and never chooses a count by default. If the owner
+means two historical generations at each location, the plan must use `2`
+instead of `1` and be reviewed again. A
 server export is not removable merely because it is old. Every retained
 generation must have a matching off-host SHA-256/size verification receipt, and
 the server `latest.json` must name the newest export. The future effect plan

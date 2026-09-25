@@ -1,8 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { GuestSupportTicketStatus, Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -37,6 +39,16 @@ export type SupportTicketUpdateDto = {
 };
 
 export type SupportTicketCommentDto = { body?: string };
+
+export type SupportTicketCloseWithCommentDto = {
+  tenantId?: string;
+  profileId?: string;
+  ticketNumber?: string;
+  expectedUpdatedAt?: string;
+  expectedDescriptionMd5?: string;
+  requestId?: string;
+  body?: string;
+};
 
 type TicketScope =
   | { kind: 'TENANT'; tenantId: string }
@@ -114,6 +126,177 @@ export class SupportTicketsService {
   ) {
     this.assertSupportSchemaReady();
     return this.addComment(user, { kind: 'PLATFORM', tenantId: null }, id, dto);
+  }
+
+  async closePlatformTicketWithComment(
+    user: AuthenticatedUser,
+    id: string,
+    dto: SupportTicketCloseWithCommentDto,
+  ) {
+    this.assertSupportSchemaReady();
+    const tenantId = requiredUuid(dto.tenantId, 'tenantId');
+    const profileId = requiredUuid(dto.profileId, 'profileId');
+    const requestId = requiredUuid(dto.requestId, 'requestId');
+    const ticketId = requiredUuid(id, 'id');
+    const ticketNumber = dto.ticketNumber?.trim() ?? '';
+    const body = dto.body?.trim() ?? '';
+    const expectedUpdatedAt = parseExpectedDate(dto.expectedUpdatedAt);
+    const descriptionMd5 = dto.expectedDescriptionMd5?.toLowerCase() ?? '';
+    if (!/^LP-BUG-[0-9A-F]{8}$/.test(ticketNumber)) {
+      throw new BadRequestException('Укажите точный номер обращения.');
+    }
+    if (!/^[0-9a-f]{32}$/.test(descriptionMd5)) {
+      throw new BadRequestException(
+        'Укажите MD5 исходного описания обращения.',
+      );
+    }
+    if (!body || body.length > 2000) {
+      throw new BadRequestException(
+        'Комментарий должен содержать от 1 до 2000 символов.',
+      );
+    }
+    const bodySha256 = createHash('sha256').update(body).digest('hex');
+    const auditId = operationUuid('support-close-audit', ticketId, requestId);
+    const commentId = operationUuid(
+      'support-close-comment',
+      ticketId,
+      requestId,
+    );
+
+    return this.prisma.$transaction(async (tx) => {
+      const previousAudit = await tx.guestSupportTicketAuditEvent.findUnique({
+        where: { id: auditId },
+        select: {
+          tenantId: true,
+          ticketId: true,
+          actorUserId: true,
+          action: true,
+          metadata: true,
+        },
+      });
+      if (previousAudit) {
+        const metadata = previousAudit.metadata as Record<
+          string,
+          unknown
+        > | null;
+        const comment = await tx.guestSupportTicketComment.findUnique({
+          where: { id: commentId },
+          select: {
+            tenantId: true,
+            ticketId: true,
+            authorUserId: true,
+            body: true,
+          },
+        });
+        const ticket = await tx.guestSupportTicket.findFirst({
+          where: {
+            id: ticketId,
+            tenantId,
+            profileId,
+            ticketNumber,
+            status: 'CLOSED',
+          },
+          select: {
+            id: true,
+            ticketNumber: true,
+            status: true,
+            updatedAt: true,
+          },
+        });
+        if (
+          previousAudit.tenantId === tenantId &&
+          previousAudit.ticketId === ticketId &&
+          previousAudit.actorUserId === user.id &&
+          previousAudit.action === 'CLOSED_WITH_COMMENT' &&
+          metadata?.requestId === requestId &&
+          metadata?.expectedUpdatedAt === expectedUpdatedAt.toISOString() &&
+          metadata?.expectedDescriptionMd5 === descriptionMd5 &&
+          metadata?.bodySha256 === bodySha256 &&
+          comment?.tenantId === tenantId &&
+          comment.ticketId === ticketId &&
+          comment.authorUserId === user.id &&
+          comment.body === body &&
+          ticket
+        ) {
+          return { ...ticket, commentId, auditId, replayed: true };
+        }
+        throw new ConflictException(
+          'Повтор операции не совпадает с сохранённым результатом.',
+        );
+      }
+
+      const ticket = await tx.guestSupportTicket.findFirst({
+        where: { id: ticketId, tenantId, profileId, ticketNumber },
+        select: { id: true, description: true, status: true, updatedAt: true },
+      });
+      if (!ticket) throw new NotFoundException('Обращение не найдено.');
+      if (
+        ticket.status !== 'NEW' ||
+        ticket.updatedAt.getTime() !== expectedUpdatedAt.getTime() ||
+        createHash('md5').update(ticket.description).digest('hex') !==
+          descriptionMd5
+      ) {
+        throw new ConflictException(
+          'Обращение изменилось после проверки. Обновите данные.',
+        );
+      }
+
+      const now = new Date();
+      const updated = await tx.guestSupportTicket.updateMany({
+        where: {
+          id: ticketId,
+          tenantId,
+          profileId,
+          ticketNumber,
+          status: 'NEW',
+          updatedAt: expectedUpdatedAt,
+        },
+        data: {
+          status: 'CLOSED',
+          resolvedAt: null,
+          closedAt: now,
+          lastActivityAt: now,
+        },
+      });
+      if (updated.count !== 1) {
+        throw new ConflictException(
+          'Обращение изменилось одновременно с закрытием.',
+        );
+      }
+      await tx.guestSupportTicketComment.create({
+        data: {
+          id: commentId,
+          tenantId,
+          ticketId,
+          authorUserId: user.id,
+          body,
+        },
+      });
+      await tx.guestSupportTicketAuditEvent.create({
+        data: {
+          id: auditId,
+          tenantId,
+          ticketId,
+          actorUserId: user.id,
+          action: 'CLOSED_WITH_COMMENT',
+          metadata: {
+            requestId,
+            expectedUpdatedAt: expectedUpdatedAt.toISOString(),
+            expectedDescriptionMd5: descriptionMd5,
+            bodySha256,
+            previousStatus: 'NEW',
+            status: 'CLOSED',
+            platformScope: true,
+            commentId,
+          },
+        },
+      });
+      const result = await tx.guestSupportTicket.findFirstOrThrow({
+        where: { id: ticketId, tenantId, profileId, status: 'CLOSED' },
+        select: { id: true, ticketNumber: true, status: true, updatedAt: true },
+      });
+      return { ...result, commentId, auditId, replayed: false };
+    });
   }
 
   getTenantAttachment(
@@ -658,6 +841,30 @@ function normalizeOptionalUuid(value: string | undefined, label: string) {
     throw new BadRequestException(`Некорректный параметр ${label}.`);
   }
   return normalized;
+}
+
+function requiredUuid(value: string | undefined, label: string) {
+  const uuid = normalizeOptionalUuid(value, label);
+  if (!uuid) throw new BadRequestException(`Укажите параметр ${label}.`);
+  return uuid;
+}
+
+function parseExpectedDate(value: string | undefined) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
+    throw new BadRequestException('Укажите точный expectedUpdatedAt в UTC.');
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime()) || date.toISOString() !== value) {
+    throw new BadRequestException('Некорректный expectedUpdatedAt.');
+  }
+  return date;
+}
+
+function operationUuid(kind: string, resourceId: string, requestId: string) {
+  const hex = createHash('sha256')
+    .update(`${kind}:${resourceId}:${requestId}`)
+    .digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 function statusTimestamps(status: GuestSupportTicketStatus, now: Date) {

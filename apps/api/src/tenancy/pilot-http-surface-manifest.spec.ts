@@ -616,8 +616,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(310);
-    expect(allowed).toHaveLength(251);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(311);
+    expect(allowed).toHaveLength(252);
     expect(blocked).toHaveLength(59);
     expect(outbound).toHaveLength(21);
     expect(
@@ -847,7 +847,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
     );
     const allowed = gamification.filter((entry) => entry.decision === 'ALLOW');
 
-    expect(allowed).toHaveLength(78);
+    expect(allowed).toHaveLength(79);
     expect(
       allowed.every(
         (entry) =>

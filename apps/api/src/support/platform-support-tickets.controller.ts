@@ -20,6 +20,7 @@ import {
   type SupportTicketCommentDto,
   type SupportTicketsQuery,
   type SupportTicketUpdateDto,
+  type SupportTicketCloseWithCommentDto,
 } from './support-tickets.service';
 import { setAttachmentHeaders } from './support-tickets.controller';
 
@@ -49,6 +50,15 @@ export class PlatformSupportTicketsController {
     @Body() dto: SupportTicketCommentDto,
   ) {
     return this.service.addPlatformComment(user, id, dto);
+  }
+
+  @Post(':id/close-with-comment')
+  closeWithComment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: SupportTicketCloseWithCommentDto,
+  ) {
+    return this.service.closePlatformTicketWithComment(user, id, dto);
   }
 
   @Get(':id/attachments/:attachmentId')

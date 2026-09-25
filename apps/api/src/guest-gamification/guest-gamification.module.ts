@@ -28,6 +28,7 @@ import { GuestGamificationScheduledController } from './guest-gamification-sched
 import { GuestGamificationStatisticsService } from './guest-gamification-statistics.service';
 import { GuestGamificationController } from './guest-gamification.controller';
 import { GuestGamificationService } from './guest-gamification.service';
+import { SeasonStepCopyService } from './season-step-copy.service';
 import { PlatformGuestGameSupportRecoveryController } from './platform-guest-game-support-recovery.controller';
 import {
   C61_BUDGET_REFILL_ATTESTATION_AUTHORITY,
@@ -37,6 +38,7 @@ import {
 
 export const GUEST_GAMIFICATION_PROVIDERS = [
   GuestGamificationService,
+  SeasonStepCopyService,
   GuestGamificationStatisticsService,
   GuestGamificationPipelineSchedulerService,
   GuestGamificationSupplementalPipelineSchedulerService,

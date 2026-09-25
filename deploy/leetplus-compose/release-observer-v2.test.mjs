@@ -5,6 +5,7 @@ import { CONTRACT, SCHEMA, canonical, digest, renderCompose } from './contract.m
 import { PHASES } from './orchestrator.mjs';
 import { inspectNative } from './release-observer.mjs';
 import { deriveWorkerContinuation, WORKERS, TIMER_UNITS } from './worker-continuation.mjs';
+import { synthesizeRelease } from './app-only-baseline.mjs';
 
 const key = crypto.generateKeyPairSync('ed25519');
 const publicKey = key.publicKey.export({ type: 'spki', format: 'pem' });
@@ -100,4 +101,69 @@ test('V2 observer requires full signed continuation and keeps historical APPLIED
   const alteredSignature = { ...snapshot, forwardWorkerEnvelopes: snapshot.forwardWorkerEnvelopes.map((envelope, index) =>
     index === 0 ? { ...envelope, signature: `${'A'.repeat(86)}==` } : envelope) };
   assert.throws(() => inspectNative(alteredSignature, clock));
+});
+
+test('actual app-only V2 prepared observation binds operation-owned app/data evidence and packet', () => {
+  const { snapshot, clock } = fixture();
+  const previous = snapshot.plan.previous;
+  const target = { ...previous.green, apiResourceProfile: 'API_6G_V1' };
+  const bundle = { schemaVersion: 2, contract: 'LEETPLUS_COMPOSE_APP_BUNDLE_V2', releaseLane: 'L1_APP_ONLY',
+    releaseSha: target.releaseSha, builtAt: target.builtAt, apiResourceProfile: 'API_6G_V1',
+    sourceImpact: { baseSha: previous.green.releaseSha, headSha: target.releaseSha,
+      classifierId: 'LEETPLUS_RELEASE_IMPACT_V1', rulesSha256: 'a'.repeat(64), impactReceiptSha256: 'b'.repeat(64) },
+    appImages: { api: target.images.api, web: target.images.web },
+    schemaRequirement: { migrationCount: SCHEMA.migrationCount, migration: SCHEMA.migration,
+      prismaSchemaSha256: 'c'.repeat(64), migrationsInventorySha256: 'd'.repeat(64) },
+    compatibilityRequirements: { policySha256: 'e'.repeat(64), composeRuntimeContractSha256: 'f'.repeat(64),
+      controllerCapability: 'APP_ONLY_V2_BASELINE_CERTIFICATION', dataContract: CONTRACT },
+    runtimeEvidence: { transportValidationSha256: '1'.repeat(64), apiRuntimeValidationSha256: '2'.repeat(64),
+      archiveRoundtripSha256: '3'.repeat(64), networkValidationSha256: '4'.repeat(64), runtimeValidationSha256: '5'.repeat(64) } };
+  const admission = { schemaVersion: 2, contract: 'LEETPLUS_COMPOSE_APP_ADMISSION_V2', decision: 'PASS',
+    releaseLane: 'L1_APP_ONLY', releaseSha: target.releaseSha, repository: 'boozik3412/leetplus',
+    ref: 'refs/heads/main', event: 'push', runId: '1', runAttempt: '1',
+    workflowRef: 'boozik3412/leetplus/.github/workflows/ci.yml@refs/heads/main', workflowSha: target.releaseSha,
+    parentCandidateReceiptSha256: '6'.repeat(64), parentImpactReceiptSha256: bundle.sourceImpact.impactReceiptSha256,
+    requiredGateReceiptSha256: '7'.repeat(64), gateReceiptSha256: {
+      authorityRootTrust: '1'.repeat(64), application: '2'.repeat(64), postgresqlAssortment: '3'.repeat(64),
+      migrationSmoke: '4'.repeat(64), appImageRuntime: '5'.repeat(64) },
+    appArtifact: { name: `leetplus-compose-app-${target.releaseSha}-1-1`, id: '1', transportDigest: '8'.repeat(64) },
+    bundleManifestSha256: digest(bundle), appArchiveSha256: '9'.repeat(64),
+    ...bundle.runtimeEvidence, appImages: bundle.appImages,
+    schemaRequirementSha256: digest(bundle.schemaRequirement),
+    compatibilityRequirementsSha256: digest(bundle.compatibilityRequirements) };
+  const certification = { contract: 'LEETPLUS_COMPOSE_DATA_BASELINE_CERTIFICATION_V1', decision: 'CERTIFIED',
+    appAdmissionSha256: digest(admission), releaseSha: target.releaseSha, releaseLane: 'L1_APP_ONLY',
+    hostIdentitySha256: snapshot.plan.hostIdentitySha256, controllerManifestSha256: snapshot.plan.controlSha256,
+    activeStateSha256: digest(previous), generation: previous.generation, activeSlot: previous.activeSlot,
+    dataRelease: previous.dataRelease, dataAdmissionSha256: previous.dataAdmissionSha256,
+    databaseIdentitySha256: snapshot.plan.databaseIdentitySha256,
+    observedSchema: { ...bundle.schemaRequirement, aclSha256: 'a'.repeat(64) },
+    compatibilityRequirementsSha256: digest(bundle.compatibilityRequirements),
+    dataConfigurationSha256: 'b'.repeat(64), readinessReceiptSha256: 'c'.repeat(64),
+    capturedAt: '2026-09-24T07:59:00Z', expiresAt: '2026-09-24T09:00:00Z' };
+  snapshot.plan.contract = 'LEETPLUS_COMPOSE_BLUE_GREEN_V2_PLAN';
+  snapshot.plan.blue = synthesizeRelease(bundle, previous.dataRelease);
+  snapshot.plan.composeSha256 = digest(renderCompose({ blue: snapshot.plan.blue, green: snapshot.plan.green,
+    dataRelease: snapshot.plan.dataRelease, activeSlot: snapshot.plan.targetSlot }));
+  snapshot.plan.releaseLane = 'L1_APP_ONLY';
+  snapshot.plan.appAdmissionSha256 = snapshot.plan.admissionSha256 = digest(admission);
+  snapshot.plan.appArchiveSha256 = snapshot.plan.archiveSha256 = admission.appArchiveSha256;
+  snapshot.plan.dataBaselineCertificationSha256 = digest(certification);
+  snapshot.plan.dataBaselineExpiresAt = certification.expiresAt;
+  snapshot.plan.preparationGuard = { contract: 'LEETPLUS_PREPARATION_GUARD_V1',
+    hostIdentitySha256: snapshot.plan.hostIdentitySha256,
+    controllerManifestSha256: snapshot.plan.controlSha256, activeSha256: digest(previous),
+    generation: previous.generation, activeSlot: previous.activeSlot };
+  snapshot.plan.preparationEvidenceExpiresAt = '2026-09-24T08:45:00Z';
+  snapshot.appBundle = bundle; snapshot.appAdmission = admission;
+  snapshot.dataBaselineCertification = certification;
+  snapshot.records = {}; snapshot.final = null; snapshot.rolledBack = null; snapshot.approval = null;
+  snapshot.packet = { contract: 'LEETPLUS_RELEASE_PREPARATION_V2_GO_PACKET',
+    decision: 'PREPARED_NOT_AUTHORIZATION', nativePlanSha256: digest(snapshot.plan),
+    nativeOperationId: snapshot.plan.operationId, workerContinuation: snapshot.plan.workerContinuation };
+  assert.equal(inspectNative(snapshot, clock).status, 'PREPARED');
+  assert.throws(() => inspectNative({ ...snapshot, dataBaselineCertification: {
+    ...certification, dataAdmissionSha256: 'f'.repeat(64) } }, clock), /Baseline is not bound/);
+  assert.throws(() => inspectNative({ ...snapshot, packet: { ...snapshot.packet,
+    contract: 'LEETPLUS_RELEASE_PREPARATION_V1_GO_PACKET' } }, clock), /GO packet/);
 });

@@ -15,6 +15,22 @@ provider egress, таймеры и game-rule evaluation не меняются. �
 локальные тесты и PR не означают deployment: GREEN f97/gen10 обслуживает
 старые маршруты до отдельного exact release/GO и postcheck.
 
+**Variant B source candidate 24.09:** draft PR #240 вводит отдельный
+`L1_APP_ONLY` только для exact allowlist обычных display components поверх
+повторно проверенного main-push impact receipt. Compose AppBundle V2 содержит
+только API/Web image identities и реальные TLS/network/API обеих slot проверки;
+PG/Redis берутся из отдельного принятого dataRelease. Installed controller
+должен read-only подтвердить ту же primary DB identity, CURRENT191/191,
+migration checksums/ACL, active state, worker bindings и свой exact control
+manifest до V2 plan. Fresh backup, off-host authenticated restore, browser/API
+acceptance, signed GO, HYDRATE→POSTCHECK, worker continuation и hot rollback
+остаются обязательны. Unknown/mixed/auth/scope/schema/worker/provider/control
+diff идёт полным L2/V1 путём. Source/PR/CI не устанавливают V2 controller и не
+разрешают production apply; для нового control handoff нужен отдельный exact
+transition и GO после принятия A repair. Serving 880, GREEN f97/gen10,
+data399/CURRENT191 и external beta `NO-GO` этим source-кандидатом не меняются.
+[B source contract](../deployment/compose-app-only-v2.md).
+
 **Оперативное обновление 24.09, 06:59 UTC:** после отдельного GO на native
 plan digest принят controller-only handoff `63b58306-a711-4a0c-ba8c-07b3d9979e9c`:
 serving controller — exact `88010292246249c94ba66ecbab64e4d51ad84d8c`,

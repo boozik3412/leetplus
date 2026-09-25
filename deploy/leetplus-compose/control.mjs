@@ -9,9 +9,13 @@ import { PHASES, execute, validateApproval, validateChain, validatePlan } from '
 import { validateWorkerGrant } from './worker-authority.mjs';
 import { controlLockPolicy, verifyKernelControlLocks } from './control-locks.mjs';
 import { validateControlHandoffAuthority, validatePendingControlHandoffAuthority } from './control-handoff-authority.mjs';
+import { validateAcceptedExactTargetHandoff, validatePendingExactTargetHandoff } from './exact-target-handoff-authority.mjs';
 import { validatePendingNetworkBootAuthority } from './control-handoff-runtime.mjs';
 import { requireResourceBudget, verifyResourceAcceptance } from './resource-budget.mjs';
 import { reconcileBoundEvidence } from './bind-reconcile.mjs';
+import { PLAN_CONTRACT as APP_ONLY_PLAN, synthesizeRelease, validateAppOnlyPlan } from './app-only-baseline.mjs';
+import { validateAppAdmission, validateAppBundle } from './app-only-artifact.mjs';
+import { collectInstalledCertificationCandidate } from './app-only-installed-certifier.mjs';
 import { createReadOnlyPhaseReconciler } from './control-reconcile.mjs';
 import { CONTRACT as WORKER_CONTINUATION_V2, WORKERS, TIMER_UNITS,
   validateCurrentWorkerContinuation, validateForwardWorkerContinuation } from './worker-continuation.mjs';
@@ -114,6 +118,29 @@ function attestAdmittedRelease(value, expectedAdmissionSha256) {
   demand(digest(manifest) === admission.releaseManifestSha256 && canonical(JSON.parse(manifest)) === canonical(value) && canonical(admission.images) === canonical(value.images), 'Release images do not match the admitted manifest');
   return digest(raw);
 }
+function appOnlyRoot(releaseSha) {
+  demand(/^[a-f0-9]{40}$/.test(releaseSha ?? ''), 'Invalid app-only release identity');
+  return `${STATE}/app-downloads/${releaseSha}`;
+}
+function attestAppOnlyOperation(plan, dir, { allowExpired = false } = {}) {
+  demand(plan.contract === APP_ONLY_PLAN, 'Not an app-only plan');
+  const root = appOnlyRoot(plan[plan.targetSlot].releaseSha), bundlePath = `${root}/bundle/app-bundle.json`;
+  const admissionPath = `${root}/app-admission.json`, archivePath = `${root}/bundle/app-images.tar.gz`;
+  const bundleRaw = safeFile(`${dir}/app-bundle.json`, { immutable: true });
+  const admissionRaw = safeFile(`${dir}/app-admission.json`, { immutable: true });
+  const certRaw = safeFile(`${dir}/data-baseline-certification.json`, { immutable: true });
+  demand(bundleRaw.equals(safeFile(bundlePath)) && admissionRaw.equals(safeFile(admissionPath, { immutable: true })),
+    'Operation-owned app admission differs from downloaded bytes');
+  const bundle = validateAppBundle(JSON.parse(bundleRaw)), admission = validateAppAdmission(JSON.parse(admissionRaw));
+  const certification = JSON.parse(certRaw);
+  demand(digest(admissionRaw) === plan.appAdmissionSha256 && digest(certRaw) === plan.dataBaselineCertificationSha256 &&
+    admission.bundleManifestSha256 === digest(bundleRaw) &&
+    run('/usr/bin/sha256sum', ['--', archivePath]).split(/\s/)[0] === plan.appArchiveSha256,
+  'App-only immutable artifact/operation digest drift');
+  validateAppOnlyPlan(plan, { bundle, admission, certification,
+    readinessReceiptSha256: certification.readinessReceiptSha256, allowExpired });
+  return { bundle, admission, certification, archivePath };
+}
 function assertPrimaryDatabase(expectedIdentity) {
   demand(digest(databaseIdentity()) === expectedIdentity, 'Database system identity changed');
   const facts = docker(['exec', 'leetplus-postgres', '/usr/lib/postgresql/16/bin/psql', '-XAt', '-h', '/tmp', '-U', 'postgres', '-d', 'leetplus', '-c', "SELECT pg_is_in_recovery(),rolsuper,rolcreatedb,rolcreaterole,rolinherit,rolreplication,rolbypassrls,has_schema_privilege('leetplus_runtime','public','CREATE') FROM pg_roles WHERE rolname='leetplus_runtime';"]);
@@ -127,7 +154,10 @@ function installedDigest() {
     demand(digest(safeFile(`${CONTROL}/${name}`)) === hash, 'Installed control digest mismatch');
   }
   for (const name of ['control.mjs', 'orchestrator.mjs', 'contract.mjs', 'control.sh',
-    'control-reconcile.mjs', 'worker-continuation.mjs', 'worker-continuation-runtime.mjs']) {
+    'control-reconcile.mjs', 'worker-continuation.mjs', 'worker-continuation-runtime.mjs',
+    'exact-target-handoff-authority.mjs',
+    'app-only-artifact.mjs', 'app-only-baseline.mjs', 'app-only-live-certification.mjs',
+    'app-only-installed-certifier.mjs']) {
     demand(manifest.files[name], 'Required control file is not attested');
   }
   return digest(manifest);
@@ -142,13 +172,24 @@ function assertControllerContinuity() {
   demand(current.planSha256 === digest(plan), 'Active application plan drift');
   const controlSha256 = installedDigest();
   if (plan.controlSha256 === controlSha256) return;
-  const context = { controlSha256, hostIdentitySha256: hostIdentity(), activeSha256: digest(safeFile(`${STATE}/active.json`)) };
+  const context = { controlSha256, hostIdentitySha256: hostIdentity(),
+    activeSha256: digest(safeFile(`${STATE}/active.json`)),
+    mainTarget: fs.realpathSync('/usr/local/sbin/leetplus-compose'),
+    unitSha256: digest(safeFile('/etc/systemd/system/leetplus-compose-network-refresh.service')) };
   const publicKey = safeFile('/etc/leetplus-compose/approval-root.pem');
   const acceptPointer = pointer => {
     demand(/^[a-f0-9-]{36}$/.test(pointer.operationId ?? ''), 'Invalid control handoff pointer');
     const directory = `${STATE}/control-handoffs/${pointer.operationId}`;
     demand(!fs.existsSync(`${directory}/rolled-back.json`), 'Controller handoff was rolled back');
-    validateControlHandoffAuthority({ plan: readJSON(`${directory}/plan.json`, { immutable: true }), approvalEnvelope: readJSON(`${directory}/approval.json`, { immutable: true }), receipt: readJSON(`${directory}/receipt.json`, { immutable: true }), pointer }, publicKey, context);
+    const handoffPlan = readJSON(`${directory}/plan.json`, { immutable: true });
+    if (handoffPlan.contract === 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V2_PLAN') {
+      validateAcceptedExactTargetHandoff({ plan: handoffPlan,
+        permitEnvelope: readJSON(`${directory}/permit.json`, { immutable: true }),
+        receipt: readJSON(`${directory}/receipt.json`, { immutable: true }), pointer },
+      publicKey, context);
+    } else validateControlHandoffAuthority({ plan: handoffPlan,
+      approvalEnvelope: readJSON(`${directory}/approval.json`, { immutable: true }),
+      receipt: readJSON(`${directory}/receipt.json`, { immutable: true }), pointer }, publicKey, context);
   };
   try { acceptPointer(readJSON(`${STATE}/control-handoffs/active.json`)); return; } catch {
     // A crash after the atomic core switch must not brick ordinary accepted
@@ -166,8 +207,14 @@ function assertControllerContinuity() {
       return;
     }
     demand(!fs.existsSync(`${directory}/rolled-back.json`), 'Pending control was rolled back');
-    validatePendingControlHandoffAuthority({ plan: pendingPlan, approvalEnvelope: readJSON(`${directory}/approval.json`, { immutable: true }), intent: readJSON(`${directory}/apply-main.intent.json`, { immutable: true }), pending }, publicKey,
-      { ...context, mainTarget: fs.realpathSync('/usr/local/sbin/leetplus-compose'), unitSha256: digest(safeFile('/etc/systemd/system/leetplus-compose-network-refresh.service')) });
+    if (pendingPlan.contract === 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V2_PLAN') {
+      validatePendingExactTargetHandoff({ plan: pendingPlan,
+        permitEnvelope: readJSON(`${directory}/permit.json`, { immutable: true }),
+        intent: readJSON(`${directory}/bridge-apply.intent.json`, { immutable: true }), pending },
+      publicKey, context);
+    } else validatePendingControlHandoffAuthority({ plan: pendingPlan,
+      approvalEnvelope: readJSON(`${directory}/approval.json`, { immutable: true }),
+      intent: readJSON(`${directory}/apply-main.intent.json`, { immutable: true }), pending }, publicKey, context);
   }
 }
 function operation(id) { demand(/^[a-f0-9-]{36}$/.test(id ?? ''), 'Invalid operation ID'); return `${STATE}/operations/${id}`; }
@@ -390,7 +437,11 @@ function driverFor(dir) {
       demand(digest(safeFile('/etc/leetplus-compose/providers.json')) === p.networkPolicySha256, 'Provider policy binding drift');
       run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, 'verify']);
       assertPrimaryDatabase(p.databaseIdentitySha256);
-      attestAdmittedRelease(p[p.targetSlot], p.admissionSha256);
+      if (p.contract === APP_ONLY_PLAN) {
+        const phaseState = await storeFor(dir).read();
+        const pendingIntent = PHASES.some(phase => phaseState.records[phase]?.intent && !phaseState.records[phase]?.receipt);
+        attestAppOnlyOperation(p, dir, { allowExpired: pendingIntent });
+      } else attestAdmittedRelease(p[p.targetSlot], p.admissionSha256);
       attestAdmittedRelease(p.dataRelease, p.dataAdmissionSha256);
       const dataSpec = renderCompose({ blue: p.blue, green: p.green, dataRelease: p.dataRelease, activeSlot: p.targetSlot });
       for (const name of ['postgres', 'redis']) verifyContainer(docker(['inspect', `leetplus-${name}`], { json: true })[0], dataSpec.services[name], name);
@@ -413,10 +464,12 @@ function driverFor(dir) {
           demand(fs.existsSync(`${dir}/worker-continuation.intent.json`), 'Accepted cutover lacks worker continuation intent');
         } else demand(false, 'Worker continuation state is not tied to a native phase');
       }
-      const inbox = `${ROOT}/inbox/${p[p.targetSlot].releaseSha}`;
-      demand(digest(safeFile(`${inbox}/docker-admission.json`)) === p.admissionSha256, 'Admission drift');
-      const a = readJSON(`${inbox}/docker-admission.json`);
-      demand(a.contract === `${CONTRACT}_ADMISSION` && a.decision === 'PASS' && a.releaseSha === p[p.targetSlot].releaseSha && a.archiveSha256 === p.archiveSha256 && a.repository === 'boozik3412/leetplus' && a.ref === 'refs/heads/main' && a.event === 'push', 'Artifact is not a deployable exact-main handoff');
+      if (p.contract !== APP_ONLY_PLAN) {
+        const inbox = `${ROOT}/inbox/${p[p.targetSlot].releaseSha}`;
+        demand(digest(safeFile(`${inbox}/docker-admission.json`)) === p.admissionSha256, 'Admission drift');
+        const a = readJSON(`${inbox}/docker-admission.json`);
+        demand(a.contract === `${CONTRACT}_ADMISSION` && a.decision === 'PASS' && a.releaseSha === p[p.targetSlot].releaseSha && a.archiveSha256 === p.archiveSha256 && a.repository === 'boozik3412/leetplus' && a.ref === 'refs/heads/main' && a.event === 'push', 'Artifact is not a deployable exact-main handoff');
+      }
       for (const [name, hash] of [['backup', p.backupReceiptSha256], ['rehearsal', p.rehearsalReceiptSha256], ...(p.action === 'BOOTSTRAP' ? [['migration', p.migrationReceiptSha256]] : [])]) {
         const receipt = safeFile(`${dir}/${name}.json`, { immutable: true });
         demand(digest(receipt) === hash, `${name} evidence changed`);
@@ -432,7 +485,9 @@ function driverFor(dir) {
       const bound = { phase, planSha256: digest(p) };
       const spec = renderCompose({ blue: p.blue, green: p.green, dataRelease: p.dataRelease, activeSlot: p.targetSlot });
       if (phase === 'HYDRATE') {
-        const archive = `${ROOT}/inbox/${p[p.targetSlot].releaseSha}/images.tar.gz`;
+        const archive = p.contract === APP_ONLY_PLAN
+          ? `${appOnlyRoot(p[p.targetSlot].releaseSha)}/bundle/app-images.tar.gz`
+          : `${ROOT}/inbox/${p[p.targetSlot].releaseSha}/images.tar.gz`;
         // A bounded stream hash avoids loading the image archive into Node RAM.
         const hash = run('/usr/bin/sha256sum', ['--', archive]).split(/\s/)[0];
         demand(hash === p.archiveSha256, 'Image archive checksum mismatch');
@@ -683,7 +738,7 @@ function driverFor(dir) {
 }
 
 if (command === 'help' || !command) {
-  console.log('leetplus-compose status | prepare --request <root-owned.json> | apply|resume --operation <uuid> --approval <root-owned.json>');
+  console.log('leetplus-compose status | prepare|prepare-app-only --request <root-owned.json> | apply|resume --operation <uuid> --approval <root-owned.json>');
 } else {
   demand(process.platform === 'linux' && process.getuid() === 0 && process.versions.node.split('.')[0] === '22', 'Linux root and Node 22 required');
   demand(process.env.LEETPLUS_COMPOSE_LOCKED === '1', 'Use the installed flock bootstrap');
@@ -697,7 +752,7 @@ if (command === 'help' || !command) {
   const observational = command === 'status' || (command === 'network' && ['refresh', 'status', 'verify', 'verify-rehearsal'].includes(options.operation));
   if (!observational) {
     const handoffPending = fs.existsSync(`${STATE}/control-handoff.pending.json`);
-    if (handoffPending && (['prepare', 'apply', 'resume'].includes(command) || command === 'network')) {
+    if (handoffPending && (['prepare', 'prepare-app-only', 'apply', 'resume'].includes(command) || command === 'network')) {
       demand(command === 'network' && options.operation === 'install', 'Controller handoff must be reconciled before other control effects');
       // Only the existing systemd boot unit may restore its accepted firewall
       // during provisional lifecycle. A manual CLI has no such network grant.
@@ -721,13 +776,98 @@ if (command === 'help' || !command) {
       validatePlan(plan); validateChain(plan, state.records);
       operations.push({ operationId: id, targetSlot: plan.targetSlot, completed: Boolean(state.final), rolledBack: Boolean(state.rolledBack), phases: Object.keys(state.records) });
     }
-    console.log(canonical({ active: active(), operations, controller: { releaseSha: path.basename(CONTROL), manifestSha256: installedDigest(), isServing: fs.realpathSync('/usr/local/sbin/leetplus-compose') === `${CONTROL}/control.sh`, handoffPending: fs.existsSync(`${STATE}/control-handoff.pending.json`), preparationEvidenceExpiryEnforced: true } }));
+    console.log(canonical({ active: active(), operations, controller: { releaseSha: path.basename(CONTROL), manifestSha256: installedDigest(), isServing: fs.realpathSync('/usr/local/sbin/leetplus-compose') === `${CONTROL}/control.sh`, handoffPending: fs.existsSync(`${STATE}/control-handoff.pending.json`), preparationEvidenceExpiryEnforced: true, appOnlyV2BaselineCertification: true } }));
   } else if (command === 'network') {
     demand(Object.keys(options).length === 1 && Object.hasOwn(options, 'operation'), 'Exact network operation required');
     demand(['install', 'refresh', 'verify', 'status', 'install-rehearsal', 'verify-rehearsal'].includes(options.operation), 'Unknown network operation');
     console.log(run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, options.operation]));
   } else if (command === 'backup') {
     console.log(run('/usr/bin/python3', [`${CONTROL}/daily-backup.py`], { timeout: 3600000 }));
+  } else if (command === 'prepare-app-only') {
+    demand(Object.keys(options).sort().join(',') === 'request', 'Exact app-only preparation request required');
+    assertNoPending();
+    const request = readJSON(options.request);
+    demand(request?.contract === 'LEETPLUS_COMPOSE_APP_PREPARATION_V2' &&
+      Object.keys(request).sort().join(',') === ['contract', 'releaseSha', 'targetSlot', 'preparationGuard',
+        'workerContinuation', 'backupReceiptSha256', 'rehearsalReceiptSha256',
+        'preparationEvidenceExpiresAt'].sort().join(','), 'App-only request fields are not exact');
+    demand(/^[a-f0-9]{40}$/.test(request.releaseSha ?? '') && ['blue', 'green'].includes(request.targetSlot) &&
+      [request.backupReceiptSha256, request.rehearsalReceiptSha256].every(value => /^[a-f0-9]{64}$/.test(value ?? '')),
+    'Invalid app-only request release/evidence binding');
+    const previous = active(), now = Date.now();
+    demand(previous && previous.activeSlot !== request.targetSlot &&
+      Number.isFinite(Date.parse(request.preparationEvidenceExpiresAt)) &&
+      Date.parse(request.preparationEvidenceExpiresAt) > now,
+    'App-only preparation needs an existing active slot and fresh evidence window');
+    const controlSha256 = installedDigest(), hostIdentitySha256 = hostIdentity();
+    const guard = request.preparationGuard;
+    demand(guard?.contract === 'LEETPLUS_PREPARATION_GUARD_V1' &&
+      guard.hostIdentitySha256 === hostIdentitySha256 && guard.controllerManifestSha256 === controlSha256 &&
+      guard.activeSha256 === digest(previous) && guard.generation === previous.generation &&
+      guard.activeSlot === previous.activeSlot, 'App-only preparation guard drift');
+    const root = appOnlyRoot(request.releaseSha);
+    const bundleRaw = safeFile(`${root}/bundle/app-bundle.json`);
+    const admissionRaw = safeFile(`${root}/app-admission.json`, { immutable: true });
+    const bundle = validateAppBundle(JSON.parse(bundleRaw));
+    const admission = validateAppAdmission(JSON.parse(admissionRaw));
+    demand(bundle.releaseSha === request.releaseSha && admission.releaseSha === request.releaseSha &&
+      admission.bundleManifestSha256 === digest(bundleRaw), 'App-only downloaded source/admission mismatch');
+    const cert = collectInstalledCertificationCandidate({ bundle, admission, previous, now,
+      ttlMs: Math.min(4 * 3600000, Date.parse(request.preparationEvidenceExpiresAt) - now) });
+    demand(Date.parse(request.preparationEvidenceExpiresAt) <= Date.parse(cert.expiresAt),
+      'Preparation cannot extend certified data baseline');
+    const target = synthesizeRelease(bundle, cert.dataRelease), id = crypto.randomUUID();
+    const plan = {
+      contract: APP_ONLY_PLAN, operationId: id, action: 'ROLLOUT', generation: previous.generation,
+      hostIdentitySha256, controlSha256, previous, targetSlot: request.targetSlot,
+      blue: request.targetSlot === 'blue' ? target : previous.blue,
+      green: request.targetSlot === 'green' ? target : previous.green,
+      dataRelease: previous.dataRelease, dataAdmissionSha256: attestAdmittedRelease(previous.dataRelease, previous.dataAdmissionSha256),
+      admissionSha256: digest(admissionRaw), archiveSha256: admission.appArchiveSha256,
+      appAdmissionSha256: digest(admissionRaw), appArchiveSha256: admission.appArchiveSha256,
+      dataBaselineCertificationSha256: digest(cert), dataBaselineExpiresAt: cert.expiresAt,
+      releaseLane: 'L1_APP_ONLY', backupReceiptSha256: request.backupReceiptSha256,
+      rehearsalReceiptSha256: request.rehearsalReceiptSha256,
+      preparationGuard: guard, preparationEvidenceExpiresAt: request.preparationEvidenceExpiresAt,
+      workerContinuation: request.workerContinuation,
+      secretDigests: Object.fromEntries(['acceptance.json', 'api-blue.json', 'api-green.json', 'db-ca.pem'].map(leaf => [leaf, digest(safeFile(`${ROOT}/secrets/${leaf}`))])),
+      networkPolicySha256: digest(safeFile('/etc/leetplus-compose/providers.json')),
+      databaseIdentitySha256: digest(databaseIdentity()),
+    };
+    const plannedCompose = renderCompose({ blue: plan.blue, green: plan.green, dataRelease: plan.dataRelease, activeSlot: plan.targetSlot });
+    plan.composeSha256 = digest(plannedCompose);
+    plan.resourceBudget = requireResourceBudget(plannedCompose, docker);
+    validateAppOnlyPlan(plan, { bundle, admission, certification: cert,
+      readinessReceiptSha256: cert.readinessReceiptSha256, now });
+    const policy = plan.workerContinuation;
+    const profiles = Object.fromEntries(WORKERS.map(worker => [worker, safeFile(`${ROOT}/secrets/${worker}.json`)]));
+    validateCurrentWorkerContinuation(policy, WORKERS.map(worker => canonicalPrivateJSON(`${STATE}/worker-grants/${worker}.json`)), {
+      publicKey: safeFile('/etc/leetplus-compose/approval-root.pem'), current: previous,
+      hostIdentitySha256, profiles, now,
+    });
+    for (const binding of policy.originalTimers) {
+      const timer = workerTimer(binding.unit);
+      demand(timer.enabled === binding.enabled && timer.active === binding.active,
+        'Original worker timer state changed before app-only preparation');
+    }
+    const dir = operation(id);
+    directory(`${STATE}/preparation-staging`);
+    const stagedDir = `${STATE}/preparation-staging/${id}`;
+    demand(!fs.existsSync(dir) && !fs.existsSync(stagedDir), 'App-only operation ID is not fresh');
+    directory(stagedDir);
+    publish(`${stagedDir}/app-bundle.json`, bundle);
+    publish(`${stagedDir}/app-admission.json`, admission);
+    publish(`${stagedDir}/data-baseline-certification.json`, cert);
+    for (const binding of policy.profileBindings) {
+      const bytes = safeFile(`${ROOT}/secrets/${binding.worker}.json`);
+      demand(digest(bytes) === binding.profileSha256, 'Worker profile drift during app-only preparation');
+      publishPrivateBytes(`${stagedDir}/worker-profile-${binding.worker}.json`, bytes);
+    }
+    publish(`${stagedDir}/plan.json`, plan);
+    fs.renameSync(stagedDir, dir);
+    syncDir(`${STATE}/preparation-staging`); syncDir(`${STATE}/operations`);
+    console.log(canonical({ decision: 'PREPARED_NOT_AUTHORIZATION', operationId: id,
+      planSha256: digest(plan), planPath: `${dir}/plan.json` }));
   } else if (command === 'prepare') {
     assertNoPending();
     const request = readJSON(options.request);

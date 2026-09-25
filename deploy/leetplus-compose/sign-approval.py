@@ -144,6 +144,15 @@ else:
             plan_expiration(value, datetime.now(timezone.utc))
         except ValueError as error:
             raise SystemExit(str(error)) from error
+        if value.get('contract') == 'LEETPLUS_COMPOSE_BLUE_GREEN_V2_PLAN':
+            if (value.get('action') != 'ROLLOUT' or value.get('releaseLane') != 'L1_APP_ONLY' or
+                    not isinstance(value.get('workerContinuation'), dict) or
+                    value['workerContinuation'].get('contract') != 'LEETPLUS_WORKER_CONTINUATION_V2' or
+                    any(not isinstance(value.get(name), str) or not re.fullmatch('[a-f0-9]{64}', value[name]) for name in
+                        ['appAdmissionSha256', 'appArchiveSha256', 'dataBaselineCertificationSha256']) or
+                    value.get('admissionSha256') != value.get('appAdmissionSha256') or
+                    value.get('archiveSha256') != value.get('appArchiveSha256')):
+                raise SystemExit('Unsupported V2 app-only plan authority')
     # Scope rejection has no cryptography/runtime dependency and occurs before
     # private-key access; pure CI negatives need neither keys nor DPAPI.
     from cryptography.hazmat.primitives import serialization
@@ -173,8 +182,16 @@ else:
             write_exclusive(public_path, public)
         result = {'approval': value, 'signature': base64.b64encode(key.sign(raw)).decode(), 'publicKeySha256': hashlib.sha256(public).hexdigest()}
     elif args.command == 'sign-plan':
-        if value.get('contract') != 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_PLAN' or value.get('action') not in ['BOOTSTRAP', 'ROLLOUT']:
+        if value.get('contract') not in ['LEETPLUS_COMPOSE_BLUE_GREEN_V1_PLAN', 'LEETPLUS_COMPOSE_BLUE_GREEN_V2_PLAN'] or value.get('action') not in ['BOOTSTRAP', 'ROLLOUT']:
             raise SystemExit('Unsupported plan contract')
+        if value['contract'] == 'LEETPLUS_COMPOSE_BLUE_GREEN_V2_PLAN':
+            if (value['action'] != 'ROLLOUT' or value.get('releaseLane') != 'L1_APP_ONLY' or
+                    value.get('workerContinuation', {}).get('contract') != 'LEETPLUS_WORKER_CONTINUATION_V2' or
+                    any(not isinstance(value.get(name), str) or not re.fullmatch('[a-f0-9]{64}', value[name]) for name in
+                        ['appAdmissionSha256', 'appArchiveSha256', 'dataBaselineCertificationSha256']) or
+                    value.get('admissionSha256') != value.get('appAdmissionSha256') or
+                    value.get('archiveSha256') != value.get('appArchiveSha256')):
+                raise SystemExit('Unsupported V2 app-only plan authority')
         now = datetime.now(timezone.utc)
         approval = {'contract': 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_APPROVAL', 'operationId': identity,
                     'action': value['action'], 'hostIdentitySha256': value['hostIdentitySha256'],

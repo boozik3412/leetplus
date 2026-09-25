@@ -306,6 +306,316 @@ class ResourceProfileBootstrapTests(unittest.TestCase):
             handoff.validate_plan_bindings(ordinary, old, new)
 
 
+class ExactTargetPermitTests(unittest.TestCase):
+    def controls(self):
+        old_files = {'control_handoff.py': '1' * 64}
+        target_files = {leaf: str((index % 9) + 1) * 64 for index, leaf in enumerate(handoff.EXACT_TARGET_CRITICAL_LEAVES)}
+        old = {'manifest': {'releaseSha': 'a' * 40, 'files': old_files}, 'digest': 'b' * 64, 'root': Path('/bridge').resolve()}
+        target = {'manifest': {'releaseSha': 'c' * 40, 'admissionSha256': 'd' * 64, 'files': target_files}, 'digest': 'e' * 64, 'archive': b'target-archive'}
+        plan = {'operationId': '12345678-1234-4123-8123-123456789abc'}
+        active_sha = 'f' * 64
+        predecessor = {'releaseSha': old['manifest']['releaseSha'], 'manifestSha256': old['digest'], 'verifierSha256': old_files['control_handoff.py']}
+        critical = {leaf: target_files[leaf] for leaf in handoff.EXACT_TARGET_CRITICAL_LEAVES}
+        target_identity = {'releaseSha': target['manifest']['releaseSha'], 'manifestSha256': target['digest'], 'admissionSha256': target['manifest']['admissionSha256'], 'controlArchiveSha256': handoff.digest(target['archive']), 'filesSha256': handoff.canonical_digest(target_files), 'criticalFilesSha256': handoff.canonical_digest(critical)}
+        permit = {'contract': handoff.EXACT_TARGET_PERMIT_CONTRACT, 'operationId': plan['operationId'], 'action': handoff.EXACT_TARGET_ACTION, 'hostIdentitySha256': '9' * 64, 'planSha256': handoff.canonical_digest(plan), 'activeSha256': active_sha, 'predecessor': predecessor, 'target': target_identity, 'issuedAt': '2026-09-24T00:00:00Z', 'expiresAt': '2026-09-24T01:00:00Z'}
+        return old, target, plan, active_sha, permit
+
+    def test_permit_binds_complete_target_and_bridge_predecessor(self):
+        old, target, plan, active_sha, permit = self.controls()
+        machine = Path('/etc/machine-id')
+        def secure(path, *args):
+            if Path(path) == machine:
+                return b'machine\n'
+            if str(path).endswith('approval-root.pem'):
+                return b'public-key'
+            raise AssertionError(path)
+        permit['hostIdentitySha256'] = handoff.digest(b'machine')
+        envelope = {'permit': permit, 'signature': 'A' * 86 + '=='}
+        now = datetime.datetime(2026, 9, 24, 0, 30, tzinfo=datetime.timezone.utc)
+        with mock.patch.object(handoff, 'secure', side_effect=secure), mock.patch.object(handoff, 'run', return_value=b'') as verify:
+            self.assertEqual(handoff.exact_target_permit(envelope, plan, old, target, active_sha, now), permit)
+        self.assertIn('validateExactTargetPermit', verify.call_args.args[0][-1])
+        self.assertIn((old['root'] / 'exact-target-handoff-authority.mjs').as_uri(), verify.call_args.args[0][-1])
+        for mutate, message in [
+            (lambda p: p['target'].update(filesSha256='0' * 64), 'target identity'),
+            (lambda p: p['predecessor'].update(verifierSha256='0' * 64), 'predecessor identity'),
+            (lambda p: p.update(planSha256='0' * 64), 'host/snapshot/plan'),
+        ]:
+            with self.subTest(message=message):
+                _, _, retry_plan, retry_active, retry = self.controls(); retry['hostIdentitySha256'] = handoff.digest(b'machine'); mutate(retry)
+                with mock.patch.object(handoff, 'secure', side_effect=secure):
+                    with self.assertRaisesRegex(ValueError, message): handoff.exact_target_permit({'permit': retry, 'signature': 'A' * 86 + '=='}, retry_plan, old, target, retry_active, now)
+
+    def test_bridge_scope_keeps_launcher_units_and_worker_contract_unchanged(self):
+        old, target, _, _, _ = self.controls()
+        old_files = old['manifest']['files']
+        new_files = target['manifest']['files']
+        old_files['exact-target-handoff-authority.mjs'] = 'a' * 64
+        for leaf in handoff.COMPATIBLE:
+            old_files[leaf] = 'b' * 64
+            new_files[leaf] = 'c' * 64 if leaf == 'orchestrator.mjs' else 'b' * 64
+        old_files['control.sh'] = new_files['control.sh'] = 'd' * 64
+        old_files['leetplus-compose-daily.timer'] = new_files['leetplus-compose-daily.timer'] = 'e' * 64
+        self.assertEqual(set(handoff.assert_exact_target_bridge_scope(old, target)), set(handoff.EXACT_TARGET_CRITICAL_LEAVES))
+        for leaf in ['control.sh', 'leetplus-compose-daily.timer', 'worker-authority.mjs', 'contract.mjs']:
+            with self.subTest(leaf=leaf):
+                changed = {'manifest': {'releaseSha': target['manifest']['releaseSha'],
+                             'files': {**new_files, leaf: '0' * 64}}}
+                with self.assertRaises(ValueError): handoff.assert_exact_target_bridge_scope(old, changed)
+
+
+class ExactTargetBridgeRecoveryTests(unittest.TestCase):
+    def fixture(self, root, stack):
+        directory = root / 'operation'; directory.mkdir()
+        old_root = root / 'old'; new_root = root / 'new'
+        old_root.mkdir(); new_root.mkdir()
+        unit = root / handoff.UNIT.name
+        unit.write_bytes(b'unchanged-unit\n')
+        (old_root / unit.name).write_bytes(b'unchanged-unit\n')
+        (new_root / unit.name).write_bytes(b'unchanged-unit\n')
+        pointer = root / 'active-pointer.json'; pending = root / 'pending.json'
+        previous = handoff.canonical({'operationId': 'prior', 'receiptSha256': 'a' * 64})
+        pointer.write_bytes(previous)
+        operation_id = '12345678-1234-4123-8123-123456789abc'
+        state = {'main': str(old_root / 'control.sh'), 'switches': 0,
+                 'fail_receipt': True, 'fail_finish': False,
+                 'fail_pointer': False, 'fail_rollback_terminal': False,
+                 'receipt_exception': 'systemexit', 'fail_rollback_switch': False}
+        snapshot = {'activeSha256': 'b' * 64}
+        old = {'root': old_root, 'digest': 'c' * 64,
+               'manifest': {'releaseSha': '1' * 40, 'admissionSha256': 'd' * 64, 'files': {unit.name: handoff.digest(unit.read_bytes())}}}
+        target = {'root': new_root, 'digest': 'e' * 64,
+                  'manifest': {'releaseSha': '2' * 40, 'admissionSha256': 'f' * 64, 'files': {unit.name: handoff.digest(unit.read_bytes())}}}
+        evidence = handoff.canonical({'decision': 'PASS'})
+        (directory / 'evidence.json').write_bytes(evidence)
+        permit_path = root / 'operator-permit.json'
+        permit_path.write_bytes(handoff.canonical({'permit': {'issuedAt': '2026-09-24T00:00:00Z',
+                                                               'expiresAt': '2099-01-01T00:00:00Z'}, 'signature': 'A'}))
+        plan = {'contract': 'LEETPLUS_COMPOSE_CONTROL_HANDOFF_V2_PLAN',
+                'operationId': operation_id, 'action': handoff.EXACT_TARGET_ACTION,
+                'oldReleaseSha': old['manifest']['releaseSha'], 'newReleaseSha': target['manifest']['releaseSha'],
+                'oldControlSha256': old['digest'], 'newControlSha256': target['digest'],
+                'oldMainTarget': state['main'], 'newMainTarget': str(new_root / 'control.sh'),
+                'oldUnitSha256': handoff.digest(unit.read_bytes()), 'newUnitSha256': handoff.digest(unit.read_bytes()),
+                'oldUnitMode': 0o644, 'evidenceSha256': handoff.digest(evidence),
+                'target': {'admissionSha256': target['manifest']['admissionSha256']},
+                'previousPointer': __import__('base64').b64encode(previous).decode(),
+                'snapshot': snapshot, 'timers': {}, 'permitPath': 'permit.json',
+                'rollbackAllowed': True, 'maxLockWaitSeconds': 120}
+        (directory / 'plan.json').write_bytes(handoff.canonical(plan))
+
+        def atomic(path, value, mode=0o400, expected=None):
+            path = Path(path)
+            if path == pointer and state['fail_pointer'] and value != previous:
+                state['fail_pointer'] = False
+                raise SystemExit('lost response before pointer publication')
+            if path.exists():
+                current = path.read_bytes()
+                if current == value:
+                    return
+                if expected is None or handoff.digest(current) != expected:
+                    raise ValueError('Publication/preimage mismatch')
+            elif expected is not None:
+                raise ValueError('Expected existing file disappeared')
+            path.write_bytes(value)
+
+        def switch(before, after):
+            self.assertEqual(state['main'], before)
+            if state['fail_rollback_switch'] and before == str(new_root / 'control.sh'):
+                state['fail_rollback_switch'] = False
+                raise SystemExit('lost response after rollback intent')
+            state['main'] = after
+            state['switches'] += 1
+
+        def finish(identity):
+            if state['fail_finish']:
+                state['fail_finish'] = False
+                raise SystemExit('lost response after terminal receipt')
+            if pending.exists():
+                self.assertEqual(handoff.read_json(pending)['operationId'], identity)
+                pending.unlink()
+
+        actual_publish = handoff.publish
+        def publish(path, value):
+            if Path(path).name == 'receipt.json' and state['fail_receipt']:
+                state['fail_receipt'] = False
+                if state['receipt_exception'] == 'oserror':
+                    raise OSError('receipt publication failed after pointer CAS')
+                raise SystemExit('lost response after pointer publication')
+            if Path(path).name == 'rolled-back.json' and state['fail_rollback_terminal']:
+                state['fail_rollback_terminal'] = False
+                raise SystemExit('lost response after rollback pointer restore')
+            return actual_publish(path, value)
+
+        for name, value in [
+            ('operation_path', lambda identity: directory), ('installed', lambda sha, executor=False: old if sha == old['manifest']['releaseSha'] else target),
+            ('validate_exact_target_plan_bindings', lambda plan, old, target: plan),
+            ('secure', lambda path, limit=2 * 1024 * 1024: Path(path).read_bytes()),
+            ('snapshot', lambda control: snapshot), ('verify_timers', lambda plan: None),
+            ('control_lock', lambda exclusive, wait: contextlib.nullcontext()),
+            ('main_target', lambda: state['main']), ('switch_main', switch),
+            ('exact_target_permit', lambda envelope, *args, **kwargs: envelope['permit']),
+            ('exact_target_rollback_permit', lambda envelope, *args, **kwargs: envelope['permit']),
+            ('atomic_bytes', atomic), ('sync_dir', lambda path: None),
+            ('run', lambda *args, **kwargs: b''), ('publish', publish),
+            ('finish_pending', finish), ('POINTER', pointer), ('PENDING', pending), ('UNIT', unit),
+        ]:
+            stack.enter_context(mock.patch.object(handoff, name, value))
+        return directory, permit_path, operation_id, state, pointer, pending
+
+    def test_lost_response_after_pointer_and_after_terminal_receipt_reconciles_without_replay(self):
+        with tempfile.TemporaryDirectory() as temporary, contextlib.ExitStack() as stack:
+            directory, permit_path, identity, state, pointer, pending = self.fixture(Path(temporary), stack)
+            with self.assertRaisesRegex(SystemExit, 'pointer publication'):
+                handoff.bridge_activate(identity, permit_path)
+            self.assertFalse((directory / 'receipt.json').exists())
+            self.assertTrue((directory / 'bridge-final-prepared.json').exists())
+            self.assertTrue(pending.exists())
+            self.assertEqual(state['switches'], 1)
+            state['fail_finish'] = True
+            with self.assertRaisesRegex(SystemExit, 'terminal receipt'):
+                handoff.bridge_activate(identity, permit_path)
+            self.assertTrue((directory / 'receipt.json').exists())
+            self.assertEqual(state['switches'], 1)
+            result = handoff.bridge_activate(identity, permit_path)
+            self.assertEqual(result['decision'], 'ACCEPTED_HANDOFF_RECONCILED')
+            self.assertFalse(pending.exists())
+            self.assertEqual(state['switches'], 1)
+            self.assertFalse((directory / 'rolled-back.json').exists())
+
+    def test_crash_before_pointer_publication_reuses_frozen_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary, contextlib.ExitStack() as stack:
+            directory, permit_path, identity, state, pointer, pending = self.fixture(Path(temporary), stack)
+            state['fail_receipt'] = False
+            state['fail_pointer'] = True
+            with self.assertRaisesRegex(SystemExit, 'before pointer publication'):
+                handoff.bridge_activate(identity, permit_path)
+            frozen = (directory / 'bridge-final-prepared.json').read_bytes()
+            self.assertEqual(state['switches'], 1)
+            self.assertTrue(pending.exists())
+            result = handoff.bridge_activate(identity, permit_path)
+            self.assertEqual(result['decision'], 'EXACT_TARGET_CONTROL_HANDOFF_ACCEPTED')
+            self.assertEqual((directory / 'receipt.json').read_bytes(), frozen)
+            self.assertEqual(state['switches'], 1)
+            self.assertFalse(pending.exists())
+
+    def test_ordinary_receipt_error_keeps_committed_pointer_for_safe_reconcile(self):
+        with tempfile.TemporaryDirectory() as temporary, contextlib.ExitStack() as stack:
+            directory, permit_path, identity, state, pointer, pending = self.fixture(Path(temporary), stack)
+            state['receipt_exception'] = 'oserror'
+            with self.assertRaisesRegex(OSError, 'receipt publication failed'):
+                handoff.bridge_activate(identity, permit_path)
+            self.assertEqual(state['switches'], 1)
+            self.assertTrue(pending.exists())
+            self.assertFalse((directory / 'receipt.json').exists())
+            self.assertFalse((directory / 'rolled-back.json').exists())
+            self.assertEqual(handoff.bridge_activate(identity, permit_path)['decision'],
+                             'ACCEPTED_HANDOFF_RECONCILED')
+            self.assertEqual(state['switches'], 1)
+            self.assertFalse(pending.exists())
+
+    def test_expired_permit_after_pointer_commit_only_completes_frozen_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary, contextlib.ExitStack() as stack:
+            directory, permit_path, identity, state, pointer, pending = self.fixture(Path(temporary), stack)
+            expiry = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=1)).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+            permit_path.write_bytes(handoff.canonical({'permit': {'issuedAt': '2026-09-24T00:00:00Z',
+                                                                   'expiresAt': expiry}, 'signature': 'A'}))
+            with self.assertRaisesRegex(SystemExit, 'pointer publication'):
+                handoff.bridge_activate(identity, permit_path)
+            __import__('time').sleep(1.1)
+            self.assertEqual(handoff.bridge_activate(identity, permit_path)['decision'],
+                             'ACCEPTED_HANDOFF_RECONCILED')
+            self.assertEqual(state['switches'], 1)
+            self.assertFalse(pending.exists())
+            self.assertFalse((directory / 'rolled-back.json').exists())
+
+    def test_rollback_terminal_crash_reconciles_old_pointer_without_replay(self):
+        with tempfile.TemporaryDirectory() as temporary, contextlib.ExitStack() as stack:
+            directory, permit_path, identity, state, pointer, pending = self.fixture(Path(temporary), stack)
+            state['fail_receipt'] = False
+            self.assertEqual(handoff.bridge_activate(identity, permit_path)['decision'], 'EXACT_TARGET_CONTROL_HANDOFF_ACCEPTED')
+            state['fail_rollback_terminal'] = True
+            with self.assertRaisesRegex(SystemExit, 'rollback pointer restore'):
+                handoff.bridge_rollback(identity, permit_path)
+            self.assertTrue(pending.exists())
+            self.assertEqual(state['switches'], 2)
+            result = handoff.bridge_rollback(identity, permit_path)
+            self.assertEqual(result['decision'], 'EXACT_TARGET_CONTROL_HANDOFF_ROLLED_BACK')
+            self.assertEqual(state['switches'], 2)
+            self.assertFalse(pending.exists())
+
+    def test_rollback_terminal_cleanup_reconciles_after_lost_finish_response(self):
+        with tempfile.TemporaryDirectory() as temporary, contextlib.ExitStack() as stack:
+            directory, permit_path, identity, state, pointer, pending = self.fixture(Path(temporary), stack)
+            state['fail_receipt'] = False
+            handoff.bridge_activate(identity, permit_path)
+            state['fail_finish'] = True
+            with self.assertRaisesRegex(SystemExit, 'terminal receipt'):
+                handoff.bridge_rollback(identity, permit_path)
+            self.assertTrue((directory / 'rolled-back.json').exists())
+            self.assertTrue(pending.exists())
+            self.assertEqual(handoff.bridge_rollback(identity, permit_path)['decision'],
+                             'ROLLBACK_CLEANUP_RECONCILED')
+            self.assertEqual(state['switches'], 2)
+            self.assertFalse(pending.exists())
+
+    def test_expired_owned_intent_undoes_partial_switch_without_forward_replay(self):
+        with tempfile.TemporaryDirectory() as temporary, contextlib.ExitStack() as stack:
+            directory, permit_path, identity, state, pointer, pending = self.fixture(Path(temporary), stack)
+            expiry = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=1)).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+            permit_path.write_bytes(handoff.canonical({'permit': {'expiresAt': expiry}, 'signature': 'A'}))
+            state['fail_receipt'] = False
+            state['fail_pointer'] = True
+            with self.assertRaisesRegex(SystemExit, 'before pointer publication'):
+                handoff.bridge_activate(identity, permit_path)
+            self.assertEqual(state['switches'], 1)
+            __import__('time').sleep(1.1)
+            def expiry_check(*args, allow_expired=False, **kwargs):
+                if not allow_expired:
+                    raise ValueError('expired')
+                return args[0]['permit']
+            with mock.patch.object(handoff, 'exact_target_permit', side_effect=expiry_check):
+                result = handoff.bridge_activate(identity, permit_path)
+            self.assertEqual(result['decision'], 'ROLLED_BACK')
+            self.assertEqual(result['reason'], 'EXPIRED_BEFORE_ACCEPTANCE')
+            self.assertEqual(state['switches'], 2)
+            self.assertFalse(pending.exists())
+            self.assertFalse((directory / 'receipt.json').exists())
+            self.assertTrue((directory / 'rolled-back.json').exists())
+
+    def test_expired_rollback_permit_recovers_original_timely_intent(self):
+        for fault in ('before-main', 'before-terminal'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary, contextlib.ExitStack() as stack:
+                directory, permit_path, identity, state, pointer, pending = self.fixture(Path(temporary), stack)
+                state['fail_receipt'] = False
+                handoff.bridge_activate(identity, permit_path)
+                expiry = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=1)).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+                rollback_permit = Path(temporary) / 'rollback-operator.json'
+                rollback_permit.write_bytes(handoff.canonical({'permit': {
+                    'issuedAt': '2026-09-24T00:00:00Z', 'expiresAt': expiry}, 'signature': 'A'}))
+                if fault == 'before-main':
+                    state['fail_rollback_switch'] = True
+                    expected = 'rollback intent'
+                else:
+                    state['fail_rollback_terminal'] = True
+                    expected = 'rollback pointer restore'
+                with self.assertRaisesRegex(SystemExit, expected):
+                    handoff.bridge_rollback(identity, rollback_permit)
+                self.assertTrue((directory / 'bridge-rollback.intent.json').exists())
+                self.assertTrue(pending.exists())
+                __import__('time').sleep(1.1)
+                def expiry_check(envelope, *args, allow_expired=False, **kwargs):
+                    if not allow_expired:
+                        raise ValueError('expired')
+                    return envelope['permit']
+                with mock.patch.object(handoff, 'exact_target_rollback_permit', side_effect=expiry_check):
+                    result = handoff.bridge_rollback(identity, rollback_permit)
+                self.assertEqual(result['decision'], 'EXACT_TARGET_CONTROL_HANDOFF_ROLLED_BACK')
+                self.assertFalse(pending.exists())
+                self.assertTrue((directory / 'rolled-back.json').exists())
+                self.assertEqual(state['switches'], 2)
+
+
 class VariantAOrchestratorHandoffTests(unittest.TestCase):
     def controls(self):
         files = {leaf: str(index + 1) * 64 for index, leaf in enumerate(handoff.COMPATIBLE)}
@@ -417,7 +727,25 @@ class VariantAControllerRepairHandoffTests(unittest.TestCase):
         })
         root = Path(__file__).parent
         for leaf, expected in handoff.VARIANT_A_REPAIR_NEW_FILES.items():
-            self.assertEqual(handoff.digest((root / leaf).read_bytes()), expected, leaf)
+            current = handoff.digest((root / leaf).read_bytes())
+            if current != expected:
+                # A's transition still pins the frozen A bytes. A successor
+                # source may differ, but it must remain ineligible for this
+                # handoff until a separate exact B transition is reviewed.
+                self.assertIn(leaf, {'control.mjs', 'orchestrator.mjs',
+                                     'preparation-runner.mjs', 'release-observer.mjs'}, leaf)
+
+    def test_b_source_cannot_reuse_frozen_a_repair_transition(self):
+        old, new = self.controls()
+        root = Path(__file__).parent
+        changed = {leaf: handoff.digest((root / leaf).read_bytes()) for leaf in
+                   ('control.mjs', 'orchestrator.mjs', 'preparation-runner.mjs',
+                    'release-observer.mjs')}
+        self.assertTrue(any(changed[leaf] != handoff.VARIANT_A_REPAIR_NEW_FILES.get(leaf)
+                            for leaf in changed))
+        new['manifest']['files'].update(changed)
+        with self.assertRaisesRegex(ValueError, 'Unreviewed orchestrator transition'):
+            handoff.assert_runtime_contract_compatible(old, new)
 
     def test_exact_repair_transition_structure_binds_both_manifests_and_file_maps(self):
         old, new = self.controls()

@@ -9,6 +9,7 @@ import { PHASES, validatePlan, validateApproval, validateChain } from './orchest
 import { validateAcceptedApplicationSnapshot } from './control-handoff-runtime.mjs';
 import { validateWorkerContinuationReceipt } from './worker-continuation-runtime.mjs';
 import { WORKERS, TIMER_UNITS } from './worker-continuation.mjs';
+import { PLAN_CONTRACT as APP_ONLY_PLAN, validateAppOnlyPlan } from './app-only-baseline.mjs';
 
 function verifyContinuation(plan, mode, snapshot, publicKey) {
   const receipt = mode === 'FORWARD' ? snapshot.workerContinuationReceipt : snapshot.workerContinuationRollbackReceipt;
@@ -40,7 +41,18 @@ function verifyContinuation(plan, mode, snapshot, publicKey) {
 export function inspectNative(snapshot, now = Date.now()) {
   const { plan, records, final, rolledBack, approval, publicKey, packet } = snapshot;
   validatePlan(plan);
-  demand(packet?.contract === 'LEETPLUS_RELEASE_PREPARATION_V1_GO_PACKET' && packet.decision === 'PREPARED_NOT_AUTHORIZATION' && packet.nativePlanSha256 === digest(plan) && packet.nativeOperationId === plan.operationId, 'GO packet does not bind native plan');
+  if (plan.contract === APP_ONLY_PLAN) {
+    demand(snapshot.appBundle && snapshot.appAdmission && snapshot.dataBaselineCertification,
+      'V2 native operation lacks immutable app/data evidence');
+    validateAppOnlyPlan(plan, { bundle: snapshot.appBundle, admission: snapshot.appAdmission,
+      certification: snapshot.dataBaselineCertification,
+      readinessReceiptSha256: snapshot.dataBaselineCertification.readinessReceiptSha256,
+      now, allowExpired: true });
+  }
+  const packetContract = plan.contract === APP_ONLY_PLAN
+    ? 'LEETPLUS_RELEASE_PREPARATION_V2_GO_PACKET'
+    : 'LEETPLUS_RELEASE_PREPARATION_V1_GO_PACKET';
+  demand(packet?.contract === packetContract && packet.decision === 'PREPARED_NOT_AUTHORIZATION' && packet.nativePlanSha256 === digest(plan) && packet.nativeOperationId === plan.operationId, 'GO packet does not bind native plan');
   demand(plan.workerContinuation && canonical(packet.workerContinuation) === canonical(plan.workerContinuation), 'Worker continuation policy is not bound by native plan');
   validateChain(plan, records);
   const completedPhases = PHASES.filter(phase => records[phase]?.receipt);
@@ -106,6 +118,14 @@ export function readNative(directory, packetPath, publicKeyPath) {
   // Native publication is monotonic: observing a receipt then its prerequisites
   // cannot pair a newly published receipt with an earlier missing evidence read.
   const final = read(path.join(directory, 'final.json'), true), rollback = read(path.join(directory, 'rolled-back.json'), true);
+  const appEvidence = plan.contract === APP_ONLY_PLAN
+    ? Object.fromEntries([['appBundle', 'app-bundle.json'], ['appAdmission', 'app-admission.json'],
+      ['dataBaselineCertification', 'data-baseline-certification.json']].map(([key, leaf]) => {
+        const item = trustedBytes(path.join(directory, leaf));
+        const value = JSON.parse(item.bytes);
+        demand(item.bytes.equals(Buffer.from(canonical(value))), `Noncanonical V2 operation evidence: ${leaf}`);
+        return [key, value];
+      })) : {};
   const records = {};
   const phasePublicationTimes = {};
   for (const [index, phase] of [...PHASES.entries()].reverse()) {
@@ -117,7 +137,7 @@ export function readNative(directory, packetPath, publicKeyPath) {
     if (Object.keys(record).length) records[phase] = record;
   }
   return {
-    plan, records,
+    plan, records, ...appEvidence,
     final: final?.value, rolledBack: rollback?.value,
     approval: read(path.join(directory, 'approval.json'), true)?.value,
     workerContinuationReceipt: read(path.join(directory, 'worker-continuation.receipt.json'), true)?.value,

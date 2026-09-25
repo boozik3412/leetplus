@@ -160,6 +160,34 @@ test('approval is rechecked after a long preflight before any next native effect
   assert.deepEqual(store.data.records, {}, 'a failed preflight must not create an ambiguous effect intent');
 });
 
+test('V2 app-only plan retains V1 approval and five phases while baseline expiry blocks new effects', async t => {
+  const p = preparedPlan();
+  p.workerContinuation = preparedWorkerPolicy(p);
+  p.contract = 'LEETPLUS_COMPOSE_BLUE_GREEN_V2_PLAN';
+  p.releaseLane = 'L1_APP_ONLY';
+  p.appAdmissionSha256 = p.admissionSha256;
+  p.appArchiveSha256 = p.archiveSha256;
+  p.dataBaselineCertificationSha256 = '8'.repeat(64);
+  p.dataBaselineExpiresAt = new Date(Date.now() + 60_000).toISOString();
+  p.preparationEvidenceExpiresAt = new Date(Date.now() + 120_000).toISOString();
+  assert.throws(() => validatePlan(p), /V2 app-only plan extension/);
+  p.preparationEvidenceExpiresAt = new Date(Date.now() + 30_000).toISOString();
+  validatePlan(p);
+  const e = envelope(p);
+  e.approval.expiresAt = p.preparationEvidenceExpiresAt;
+  e.signature = crypto.sign(null, Buffer.from(canonical(e.approval)), key.privateKey).toString('base64');
+  validateApproval(p, e, pub);
+  const store = memoryStore(), effects = [];
+  const driver = { preflight: async () => {}, run: async phase => {
+    effects.push(phase); return { phase, planSha256: digest(p) };
+  }, reconcile: async () => assert.fail('no response was lost') };
+  await execute(p, e, pub, store, driver);
+  assert.deepEqual(effects, PHASES);
+  assert.equal(store.data.final.contract, `${CONTRACT}_COMPLETED`);
+  const changed = { ...p, appAdmissionSha256: '9'.repeat(64) };
+  assert.throws(() => validateApproval(changed, e, pub));
+});
+
 test('application successors retain separately admitted data images in either slot', () => {
   const successor={...r,releaseSha:'b'.repeat(40),images:{...r.images,api:`sha256:${'7'.repeat(64)}`,postgres:`sha256:${'8'.repeat(64)}`,redis:`sha256:${'9'.repeat(64)}`}};
   const previous={activeSlot:'blue',generation:1,blue:r,green:r,dataRelease:r,dataAdmissionSha256:plan.dataAdmissionSha256};

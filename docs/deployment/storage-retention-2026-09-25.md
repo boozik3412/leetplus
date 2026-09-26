@@ -44,12 +44,15 @@ decrypt during transfer, or alter API/Web/worker egress.
 The source also removes only the current pull's UUID `.incoming` directory
 after the SCP child has exited. It first rejects a symlink, foreign path or
 unexpected child; an abnormal directory is preserved for investigation.
-Existing old `.incoming` directories are not swept by the scheduled task.
+Existing old `.incoming` directories are not swept by the scheduled task. The
+automatic `retain(root)` routine is removed in source: a successful pull no
+longer deletes historical top-level backup files. This is a fail-closed interim
+policy until the owner's two-copy rule, protected historical backups and a
+separate controlled retirement command have been agreed and installed.
 After a separate reviewed installation, verify the exact installed script,
 Windows task principal/ACL, a full authenticated ciphertext pull, fresh
-`backup-status.json`, and one restored-copy check. The existing retention
-routine must not be made more aggressive until the copy-count choice and
-protected backup set are frozen in that installation plan.
+`backup-status.json`, and one restored-copy check. A future retention routine
+must use the frozen copy-count choice and protected backup set.
 
 ## Restored-copy and operation payloads
 

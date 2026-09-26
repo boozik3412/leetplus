@@ -2,7 +2,9 @@
 
 **Source-only backup storage repair 25.09:** the Windows backup pull source
 uses the existing pinned backup identity through public `188.234.220.76` and
-cleans only its own temporary `.incoming` directory. The installed task still
+cleans only its own temporary `.incoming` directory. The source disables
+automatic deletion of historical top-level backups pending a separately
+approved retention plan. The installed task still
 uses the failing LAN route until a separate reviewed installation. Server
 backup and historical clone retention are not enabled by this change; exact
 off-host proof, restore check and separate dispatcher-owned GO remain required.

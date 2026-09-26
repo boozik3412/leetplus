@@ -37,28 +37,6 @@ def fetch(remote, local, config):
         raise RuntimeError('SFTP backup pull failed')
 
 
-def retain(root):
-    candidates = []
-    for path in root.glob('backup-*.receipt.json'):
-        value = json.loads(path.read_text())
-        name = value.get('filename', '')
-        if re.fullmatch(r'backup-\d{8}T\d{6}Z\.lpbackup', name) and value.get('verified') is True:
-            candidates.append((datetime.datetime.fromisoformat(value['capturedAt']), root / name, path))
-    candidates.sort(reverse=True)
-    keep, daily, weekly, monthly = set(), set(), set(), set()
-    for index, (date, path, _) in enumerate(candidates):
-        day, week, month = date.date(), date.isocalendar()[:2], (date.year, date.month)
-        if index < 2 or (day not in daily and len(daily) < 7) or (week not in weekly and len(weekly) < 4) or (month not in monthly and len(monthly) < 3):
-            keep.add(path)
-        daily.add(day)
-        weekly.add(week)
-        monthly.add(month)
-    for _, path, receipt in candidates:
-        if path not in keep and path.is_file() and not path.is_symlink() and path.parent == root:
-            path.unlink()
-            receipt.unlink()
-
-
 def cleanup_incoming(root, incoming):
     """Remove only this run's temporary files after the SCP child has exited."""
     staging = root / INCOMING_NAME
@@ -117,7 +95,8 @@ def run(config_path):
         (root / 'backup-status.json').write_text(json.dumps(status, indent=2))
         if status['decision'] != 'PASS':
             raise RuntimeError('Off-host backup is older than the daily freshness allowance')
-        retain(root)
+        # Backup retirement is a separate owner-approved operation. A
+        # successful transport run never deletes prior exports.
         print(json.dumps(status))
     finally:
         cleanup_incoming(root, incoming)

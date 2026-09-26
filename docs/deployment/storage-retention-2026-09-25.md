@@ -41,6 +41,16 @@ successfully through `188.234.220.76`. The source `pull-backup.py` now uses that
 public route. This does not weaken host-key checking, change the backup user,
 decrypt during transfer, or alter API/Web/worker egress.
 
+**Observed after source preparation, 26.09:** a complete Sep26 ciphertext
+transfer over that public SCP route returned nonzero before writing bytes.
+Pinned SFTP stat and small serial reads of the same file succeeded, while a
+64 MiB pipelined read ended with a connection reset. Server `sshd` does not
+configure a client-alive deadline. The exact large-stream failure cause is
+unresolved. The source now emits an allowlisted transport error category, but
+this has not established a successful full transfer. Keep installation and
+backup deletion on HOLD until a complete SHA-verified pull and restored-copy
+check pass through a reviewed transport. Small manifest reads are insufficient.
+
 The source also removes only the current pull's UUID `.incoming` directory
 after the SCP child has exited. It first rejects a symlink, foreign path or
 unexpected child; an abnormal directory is preserved for investigation.

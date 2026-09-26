@@ -34,7 +34,18 @@ def fetch(remote, local, config):
             'leetplus-backup@' + BACKUP_HOST + ':' + remote, str(local)]
     result = subprocess.run(args, capture_output=True, timeout=1800, creationflags=0x08000000)
     if result.returncode:
-        raise RuntimeError('SFTP backup pull failed')
+        message = result.stderr.decode('utf-8', errors='replace').lower()
+        if 'kex_exchange_identification' in message:
+            category = 'KEY_EXCHANGE_CLOSED'
+        elif 'connection closed' in message or 'connection reset' in message:
+            category = 'CONNECTION_CLOSED'
+        elif 'permission denied' in message:
+            category = 'ACCESS_DENIED'
+        else:
+            category = 'UNKNOWN_TRANSPORT_FAILURE'
+        # Do not log the child stderr: it may contain paths, usernames or
+        # transport implementation details outside the operator allowlist.
+        raise RuntimeError(f'SFTP backup pull failed: {category} (exit={result.returncode})')
 
 
 def cleanup_incoming(root, incoming):

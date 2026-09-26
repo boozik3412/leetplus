@@ -21,6 +21,13 @@ class BackupPull(unittest.TestCase):
         self.assertIn('leetplus-backup@188.234.220.76:/latest.json', args)
         self.assertNotIn('leetplus-backup@192.168.1.137:/latest.json', args)
 
+    def test_transport_failure_reports_only_allowlisted_category(self):
+        failure = subprocess.CompletedProcess([], 255, stderr=b'Connection closed by host with internal path /secret/file')
+        with patch.object(module.subprocess, 'run', return_value=failure):
+            with self.assertRaisesRegex(RuntimeError, 'CONNECTION_CLOSED \\(exit=255\\)') as error:
+                module.fetch('/latest.json', Path('latest.json'), {'knownHosts': 'known_hosts', 'key': 'key'})
+        self.assertNotIn('/secret/file', str(error.exception))
+
     def test_owned_staging_files_are_removed(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

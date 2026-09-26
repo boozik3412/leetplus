@@ -8,6 +8,8 @@ approved retention plan. The installed task still
 uses the failing LAN route until a separate reviewed installation. Server
 backup and historical clone retention are not enabled by this change; exact
 off-host proof, restore check and separate dispatcher-owned GO remain required.
+The public route passes small reads but a full Sep26 encrypted transfer is
+still failing; installation remains HOLD pending transport repair.
 External beta stays `NO-GO`. [Storage contract](./docs/deployment/storage-retention-2026-09-25.md).
 
 **Variant B source checkpoint 24.09:** merged PR #240 adds a versioned

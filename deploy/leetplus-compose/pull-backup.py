@@ -9,6 +9,13 @@ import subprocess
 import uuid
 from pathlib import Path
 
+BACKUP_HOST = '188.234.220.76'
+INCOMING_NAME = '.incoming'
+
+
+def unsafe_link(path):
+    return path.is_symlink() or (hasattr(path, 'is_junction') and path.is_junction())
+
 
 def file_hash(path):
     result = hashlib.sha256()
@@ -24,32 +31,37 @@ def fetch(remote, local, config):
     args = [r'C:\Windows\System32\OpenSSH\scp.exe', '-q', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
             '-o', 'HostKeyAlias=188.234.220.76', '-o', 'ConnectTimeout=10', '-o', 'ConnectionAttempts=1',
             '-o', 'UserKnownHostsFile=' + config['knownHosts'], '-i', config['key'],
-            'leetplus-backup@192.168.1.137:' + remote, str(local)]
+            'leetplus-backup@' + BACKUP_HOST + ':' + remote, str(local)]
     result = subprocess.run(args, capture_output=True, timeout=1800, creationflags=0x08000000)
     if result.returncode:
-        raise RuntimeError('SFTP backup pull failed')
+        message = result.stderr.decode('utf-8', errors='replace').lower()
+        if 'kex_exchange_identification' in message:
+            category = 'KEY_EXCHANGE_CLOSED'
+        elif 'connection closed' in message or 'connection reset' in message:
+            category = 'CONNECTION_CLOSED'
+        elif 'permission denied' in message:
+            category = 'ACCESS_DENIED'
+        else:
+            category = 'UNKNOWN_TRANSPORT_FAILURE'
+        # Do not log the child stderr: it may contain paths, usernames or
+        # transport implementation details outside the operator allowlist.
+        raise RuntimeError(f'SFTP backup pull failed: {category} (exit={result.returncode})')
 
 
-def retain(root):
-    candidates = []
-    for path in root.glob('backup-*.receipt.json'):
-        value = json.loads(path.read_text())
-        name = value.get('filename', '')
-        if re.fullmatch(r'backup-\d{8}T\d{6}Z\.lpbackup', name) and value.get('verified') is True:
-            candidates.append((datetime.datetime.fromisoformat(value['capturedAt']), root / name, path))
-    candidates.sort(reverse=True)
-    keep, daily, weekly, monthly = set(), set(), set(), set()
-    for index, (date, path, _) in enumerate(candidates):
-        day, week, month = date.date(), date.isocalendar()[:2], (date.year, date.month)
-        if index < 2 or (day not in daily and len(daily) < 7) or (week not in weekly and len(weekly) < 4) or (month not in monthly and len(monthly) < 3):
-            keep.add(path)
-        daily.add(day)
-        weekly.add(week)
-        monthly.add(month)
-    for _, path, receipt in candidates:
-        if path not in keep and path.is_file() and not path.is_symlink() and path.parent == root:
-            path.unlink()
-            receipt.unlink()
+def cleanup_incoming(root, incoming):
+    """Remove only this run's temporary files after the SCP child has exited."""
+    staging = root / INCOMING_NAME
+    if incoming.parent != staging or not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', incoming.name):
+        raise ValueError('Unexpected backup staging path')
+    if unsafe_link(staging) or not staging.is_dir() or unsafe_link(incoming) or not incoming.is_dir():
+        raise ValueError('Unsafe backup staging directory')
+    children = list(incoming.iterdir())
+    for child in children:
+        if unsafe_link(child) or not child.is_file() or (child.name != 'latest.json' and not re.fullmatch(r'backup-\d{8}T\d{6}Z\.lpbackup', child.name)):
+            raise ValueError('Unexpected backup staging file')
+    for child in children:
+        child.unlink()
+    incoming.rmdir()
 
 
 def run(config_path):
@@ -59,36 +71,46 @@ def run(config_path):
     root = Path(config['destination']).resolve()
     if root != Path(r'C:\LeetPlusBackups'):
         raise ValueError('Unexpected backup destination')
-    incoming = root / '.incoming' / str(uuid.uuid4())
-    incoming.mkdir(parents=True)
-    fetch('/latest.json', incoming / 'latest.json', config)
-    manifest = json.loads((incoming / 'latest.json').read_text())
-    if manifest.get('contract') != 'LEETPLUS_BACKUP_EXPORT_V1' or not re.fullmatch(r'[a-f0-9]{64}', manifest.get('sha256', '')):
-        raise ValueError('Invalid export manifest')
-    name = manifest['filename']
-    if not re.fullmatch(r'backup-\d{8}T\d{6}Z\.lpbackup', name):
-        raise ValueError('Unsafe export filename')
-    destination = root / name
-    if not destination.exists():
-        temporary = incoming / name
-        fetch('/' + name, temporary, config)
-        if temporary.stat().st_size != manifest['bytes'] or file_hash(temporary) != manifest['sha256']:
-            raise ValueError('Downloaded backup failed checksum/size verification')
-        os.rename(temporary, destination)
-    elif file_hash(destination) != manifest['sha256']:
-        raise ValueError('Existing backup has different bytes')
-    manifest['verified'] = True
-    manifest['verifiedAt'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    receipt = root / (name.removesuffix('.lpbackup') + '.receipt.json')
-    receipt.write_text(json.dumps(manifest, indent=2))
-    captured = datetime.datetime.fromisoformat(manifest['capturedAt'])
-    age = (datetime.datetime.now(datetime.timezone.utc) - captured).total_seconds()
-    status = {'decision': 'PASS' if age <= 26 * 3600 else 'BACKUP_STALE', 'lastBackup': name, 'ageSeconds': int(age), 'checkedAt': manifest['verifiedAt']}
-    (root / 'backup-status.json').write_text(json.dumps(status, indent=2))
-    if status['decision'] != 'PASS':
-        raise RuntimeError('Off-host backup is older than the daily freshness allowance')
-    retain(root)
-    print(json.dumps(status))
+    staging = root / INCOMING_NAME
+    if unsafe_link(staging) or (staging.exists() and not staging.is_dir()):
+        raise ValueError('Unsafe backup staging root')
+    staging.mkdir(exist_ok=True)
+    if unsafe_link(staging) or not staging.is_dir():
+        raise ValueError('Unsafe backup staging root')
+    incoming = staging / str(uuid.uuid4())
+    incoming.mkdir(exist_ok=False)
+    try:
+        fetch('/latest.json', incoming / 'latest.json', config)
+        manifest = json.loads((incoming / 'latest.json').read_text())
+        if manifest.get('contract') != 'LEETPLUS_BACKUP_EXPORT_V1' or not re.fullmatch(r'[a-f0-9]{64}', manifest.get('sha256', '')):
+            raise ValueError('Invalid export manifest')
+        name = manifest['filename']
+        if not re.fullmatch(r'backup-\d{8}T\d{6}Z\.lpbackup', name):
+            raise ValueError('Unsafe export filename')
+        destination = root / name
+        if not destination.exists():
+            temporary = incoming / name
+            fetch('/' + name, temporary, config)
+            if temporary.stat().st_size != manifest['bytes'] or file_hash(temporary) != manifest['sha256']:
+                raise ValueError('Downloaded backup failed checksum/size verification')
+            os.rename(temporary, destination)
+        elif file_hash(destination) != manifest['sha256']:
+            raise ValueError('Existing backup has different bytes')
+        manifest['verified'] = True
+        manifest['verifiedAt'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        receipt = root / (name.removesuffix('.lpbackup') + '.receipt.json')
+        receipt.write_text(json.dumps(manifest, indent=2))
+        captured = datetime.datetime.fromisoformat(manifest['capturedAt'])
+        age = (datetime.datetime.now(datetime.timezone.utc) - captured).total_seconds()
+        status = {'decision': 'PASS' if age <= 26 * 3600 else 'BACKUP_STALE', 'lastBackup': name, 'ageSeconds': int(age), 'checkedAt': manifest['verifiedAt']}
+        (root / 'backup-status.json').write_text(json.dumps(status, indent=2))
+        if status['decision'] != 'PASS':
+            raise RuntimeError('Off-host backup is older than the daily freshness allowance')
+        # Backup retirement is a separate owner-approved operation. A
+        # successful transport run never deletes prior exports.
+        print(json.dumps(status))
+    finally:
+        cleanup_incoming(root, incoming)
 
 
 if __name__ == '__main__':

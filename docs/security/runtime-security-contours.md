@@ -2,6 +2,17 @@
 
 Статус: **канонический current-state contract**, оперативный checkpoint **24.09.2026**.
 
+**Source-only backup transport repair 25.09:** Windows `pull-backup.py` is
+prepared to use the existing pinned backup-only SSH identity over public
+`188.234.220.76` because its installed LAN `192.168.1.137` route currently
+closes before key exchange. The same strict known-hosts pin and
+`HostKeyAlias=188.234.220.76` remain. The source also removes only its own
+validated temporary `.incoming` files after SCP exits and disables automatic
+backup retention pending a separate exact plan. No installed task,
+API/Web/worker egress, secret, controller or server backup has changed from
+this source edit. Backup-export and clone-payload retention remain separate
+plan/GO effects; see [storage retention](../deployment/storage-retention-2026-09-25.md).
+
 **Source-only support follow-up 24.09:** в corporate contour подготовлены два
 узких маршрута без production effect: platform-admin
 `POST /admin/support-tickets/:id/close-with-comment` атомарно закрывает ровно

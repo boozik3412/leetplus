@@ -6,6 +6,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   IntegrationProvider,
+  IntegrationSyncMode,
   Prisma,
   TenantCustomerStage,
   type IntegrationCredential,
@@ -17,6 +18,7 @@ import { AccessScopeService } from '../tenancy/access-scope.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { LangameClient } from './langame.client';
+import { EZ_GAME_LANGAME_SCOPE } from './langame-external-pilot-authority';
 import {
   LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX,
   LANGAME_SYNC_PARTIAL_PREFIX,
@@ -389,6 +391,13 @@ export class LangameSettingsService {
           tenantId,
           provider: IntegrationProvider.LANGAME,
           status: 'SUCCESS',
+          ...(tenantId === EZ_GAME_LANGAME_SCOPE.tenantId
+            ? {
+                mode: {
+                  in: [IntegrationSyncMode.FULL, IntegrationSyncMode.BACKFILL],
+                },
+              }
+            : {}),
         },
         orderBy: { startedAt: 'desc' },
       }),

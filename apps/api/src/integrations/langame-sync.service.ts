@@ -729,7 +729,7 @@ export class LangameSyncService {
         }
         // A partial read is not evidence that this source/period is complete.
         // Retain the full-success cursor, including after a later-page failure.
-        if (unavailable.length === 0)
+        if (unavailable.length === 0 && !externalPilot)
           await this.prisma.integrationSource.update({
             where: { id: source.id },
             data: {

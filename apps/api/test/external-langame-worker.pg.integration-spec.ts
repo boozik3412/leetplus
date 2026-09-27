@@ -24,6 +24,14 @@ import {
 } from '../src/integrations/langame-external-daily-worker';
 import { externalLangameDataRequirements } from '../src/integrations/langame-external-pilot-authority';
 import { LangameExternalRunLeaseService } from '../src/integrations/langame-external-run-lease.service';
+import { LangameSyncService } from '../src/integrations/langame-sync.service';
+import { LangameDailySyncService } from '../src/integrations/langame-daily-sync.service';
+import type { LangameClient } from '../src/integrations/langame.client';
+import type { LangameSettingsService } from '../src/integrations/langame-settings.service';
+import type { GuestDataFoundationService } from '../src/integrations/guest-data-foundation.service';
+import type { BusinessSnapshotService } from '../src/integrations/business-snapshot.service';
+import type { TenantContextService } from '../src/tenancy/tenant-context.service';
+import { createLangameExternalPilotAuthority } from '../src/integrations/langame-external-pilot-authority';
 import {
   assertExactExternalImportLockHeld,
   withExactExternalImportLock,
@@ -176,6 +184,12 @@ describePostgres(
 
     afterAll(async () => {
       if (tenantCreated) {
+        await prisma.integrationSyncJob.deleteMany({
+          where: { tenantId: scope.tenantId },
+        });
+        await prisma.dailyDataCoverage.deleteMany({
+          where: { tenantId: scope.tenantId },
+        });
         await prisma.platformAdminAuditEvent.deleteMany({
           where: { tenantId: scope.tenantId },
         });
@@ -551,6 +565,162 @@ describePostgres(
           Promise.resolve('next-import'),
         ),
       ).resolves.toBe('next-import');
+    });
+
+    it('keeps the full source cursor and latest status PARTIAL after successful child reads', async () => {
+      const tenant = await prisma.tenant.findUniqueOrThrow({
+        where: { id: scope.tenantId },
+      });
+      const store = await prisma.store.findUniqueOrThrow({
+        where: { id: scope.storeId },
+      });
+      const authority = createLangameExternalPilotAuthority({
+        tenantId: scope.tenantId,
+        tenantSlug: scope.tenantSlug,
+        sourceId: scope.sourceId,
+        storeId: scope.storeId,
+        externalDomain: scope.domain,
+        externalClubId: scope.clubId,
+        profileRevision: tenant.entitlementProfileRevision,
+        executionRevision: tenant.executionRevision,
+        storeRevision: store.executionRevision,
+        customerStage: 'LIVE',
+      });
+      const oldDate = new Date('2026-09-20T00:00:00.000Z');
+      await prisma.integrationSource.update({
+        where: { id: scope.sourceId },
+        data: { lastSyncedDate: oldDate, lastSyncedAt: oldDate },
+      });
+      const client = {
+        listClubs: jest
+          .fn()
+          .mockResolvedValue([
+            { id: 1, active: 1, name: 'Synthetic Store', address: null },
+          ]),
+        listProducts: jest.fn().mockResolvedValue([]),
+        listActiveProductGroups: jest
+          .fn()
+          .mockRejectedValue(new Error('Langame 403 no permissions')),
+        listClubProductConfiguration: jest
+          .fn()
+          .mockRejectedValue(new Error('Langame 403 no permissions')),
+        listGoods: jest.fn().mockResolvedValue([]),
+        listProductExpenses: jest.fn().mockResolvedValue([]),
+        listAllOperationsLog: jest.fn().mockResolvedValue([]),
+      };
+      const settings = {
+        resolveTenantAccess: jest.fn(async () => ({
+          apiKey: 'fixture-unused',
+          sources: await prisma.integrationSource.findMany({
+            where: { tenantId: scope.tenantId, isActive: true },
+          }),
+        })),
+      };
+      const config = { get: () => undefined } as unknown as ConfigService;
+      const admission = new TenantExecutionAdmissionService(
+        prisma,
+        new TenantExecutionPolicyService(),
+      );
+      const sync = new LangameSyncService(
+        prisma,
+        {} as TenantContextService,
+        client as unknown as LangameClient,
+        settings as unknown as LangameSettingsService,
+        admission,
+        config,
+      );
+      const foundation = {
+        syncTenantById: jest.fn().mockResolvedValue({
+          sources: 1,
+          failedSources: 0,
+          partialSources: 0,
+          sourceResults: [],
+        }),
+      };
+      const snapshots = {
+        runSnapshotsForTenant: jest.fn().mockResolvedValue({ runs: [] }),
+      };
+      const daily = new LangameDailySyncService(
+        config,
+        prisma,
+        sync,
+        foundation as unknown as GuestDataFoundationService,
+        snapshots as unknown as BusinessSnapshotService,
+        admission,
+      );
+
+      const partial = await daily.runDailySync({
+        tenantSlug: scope.tenantSlug,
+        externalBusinessDate: '2026-09-26',
+        externalPilot: authority,
+      });
+      expect(partial.results[0].scopes[0]).toMatchObject({
+        status: 'FAILED',
+        partial: true,
+      });
+      const unchanged = await prisma.integrationSource.findUniqueOrThrow({
+        where: { id: scope.sourceId },
+      });
+      expect(unchanged.lastSyncedDate).toEqual(oldDate);
+      expect(unchanged.lastSyncedAt).toEqual(oldDate);
+      await prisma.integrationSyncJob.updateMany({
+        where: {
+          tenantId: scope.tenantId,
+          mode: { in: ['CATALOG', 'QUICK', 'INVENTORY'] },
+        },
+        data: { startedAt: new Date(Date.now() - 60_000) },
+      });
+      const latest = await prisma.integrationSyncJob.findFirstOrThrow({
+        where: { tenantId: scope.tenantId },
+        orderBy: { startedAt: 'desc' },
+      });
+      expect(latest).toMatchObject({ mode: 'FULL', status: 'FAILED' });
+      expect(latest.errorMessage).toContain('LANGAME_SYNC_PARTIAL:');
+      expect(
+        await prisma.integrationSyncJob.count({
+          where: {
+            tenantId: scope.tenantId,
+            mode: { in: ['QUICK', 'INVENTORY'] },
+            status: 'SUCCESS',
+          },
+        }),
+      ).toBe(2);
+
+      client.listActiveProductGroups.mockResolvedValue([]);
+      client.listClubProductConfiguration.mockResolvedValue([]);
+      await prisma.integrationSyncJob.updateMany({
+        where: { tenantId: scope.tenantId, mode: 'INVENTORY' },
+        data: { finishedAt: new Date(Date.now() - 2 * 60 * 60_000) },
+      });
+      const full = await daily.runDailySync({
+        tenantSlug: scope.tenantSlug,
+        externalBusinessDate: '2026-09-27',
+        externalPilot: authority,
+      });
+      expect(full.results[0].scopes[0]).toMatchObject({ status: 'SUCCESS' });
+      expect(
+        (
+          await prisma.integrationSource.findUniqueOrThrow({
+            where: { id: scope.sourceId },
+          })
+        ).lastSyncedDate,
+      ).toEqual(new Date('2026-09-27T00:00:00.000Z'));
+      await prisma.integrationSyncJob.updateMany({
+        where: {
+          tenantId: scope.tenantId,
+          mode: { in: ['CATALOG', 'QUICK', 'INVENTORY'] },
+        },
+        data: { startedAt: new Date(Date.now() - 60_000) },
+      });
+      const latestFull = await prisma.integrationSyncJob.findFirstOrThrow({
+        where: { tenantId: scope.tenantId },
+        orderBy: { startedAt: 'desc' },
+      });
+      expect(latestFull).toMatchObject({
+        mode: 'FULL',
+        status: 'SUCCESS',
+        errorMessage: null,
+      });
     });
 
     it('revokes only data OUTBOUND and invalidates the worker execution revision', async () => {

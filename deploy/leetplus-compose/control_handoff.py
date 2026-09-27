@@ -248,6 +248,10 @@ def control_lock(exclusive, seconds=120):
             except BlockingIOError:
                 require(time.monotonic() < deadline, 'Existing worker did not drain before the bounded handoff deadline')
                 time.sleep(1)
+        if exclusive:
+            external = run(['/usr/bin/docker', '--host', 'unix:///var/run/docker.sock', 'ps',
+                            '--filter', 'name=^/leetplus-langame-external-daily-worker$', '--format', '{{.ID}}'])
+            require(not external, 'Running external worker container forbids a controller handoff effect')
         yield
     finally:
         os.close(fd)

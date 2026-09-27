@@ -37,6 +37,13 @@ or server state is changed by this source packet.
   emits one compact JSON terminal line. A durable ambiguous intent forbids a
   blind provider retry. An already completed run replays with exit 75 and
   `NO_NEW_EFFECT`; that is not counted as another success.
+- Every native run freezes its exact Docker container ID before provider work.
+  Attached timeouts stop that ID; systemd `ExecStopPost` independently holds
+  the external singleton and can stop it even when a global writer wins after
+  the parent is killed. Global writers and handoff reject a running orphan.
+  The external process has a 300-second setup budget, 2700-second attached run,
+  a separate 600-second stop window and immutable cleanup receipts. Foreign
+  IDs, ambiguous intents or daemon cleanup failures require reconciliation.
 
 ## Rollout and rollback
 
@@ -94,7 +101,7 @@ flock/systemd, PostgreSQL advisory-lock contention or a real Langame call.
 Those are release gates for the combined exact source and must precede any
 operational plan.
 
-At this source checkpoint, the Windows Node suite passed 217 tests with two
-platform skips; the Python suite passed 153 with three platform skips. Shell
+At this source checkpoint, the Windows Node suite passed 221 tests with two
+platform skips; the Python suite passed 154 with four platform skips. Shell
 syntax passed under Git Bash. These numbers are local source checks, not a
 combined exact-main CI or an installed runtime receipt.

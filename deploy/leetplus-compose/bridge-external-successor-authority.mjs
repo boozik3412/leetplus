@@ -28,6 +28,7 @@ export const CRITICAL_LEAVES = Object.freeze([
   'worker-continuation-runtime.mjs',
   'external-worker-contract.mjs',
   'external-worker-runtime.mjs',
+  'external-worker-cleanup.mjs',
   'external-worker-enrollment.mjs',
   'external-worker-enrollment-runtime.mjs',
   'worker-set-v3.mjs',

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { CONTRACT, SCHEMA, PORTS, canonical, demand, digest, release, renderCompose, verifyContainer } from './contract.mjs';
 import { PHASES, execute, validateApproval, validateChain, validatePlan } from './orchestrator.mjs';
 import { validateWorkerGrant } from './worker-authority.mjs';
-import { controlLockPolicy, verifyKernelControlLocks } from './control-locks.mjs';
+import { controlLockPolicy, verifyKernelControlLocks, verifyExternalCleanupSingletonLock } from './control-locks.mjs';
 import { validateControlHandoffAuthority, validatePendingControlHandoffAuthority } from './control-handoff-authority.mjs';
 import { validateAcceptedExactTargetHandoff, validatePendingExactTargetHandoff } from './exact-target-handoff-authority.mjs';
 import { validatePendingNetworkBootAuthority } from './control-handoff-runtime.mjs';
@@ -24,7 +24,8 @@ import { beginWorkerContinuation as beginLegacyWorkers, bindForwardWorkerContinu
   rollbackWorkerContinuation as rollbackLegacyWorkers, preflightWorkerContinuation as preflightLegacyWorkers,
   validateWorkerContinuationReceipt } from './worker-continuation-runtime.mjs';
 import { validateWorkerSetV3, validateWorkerSetEnvelopes } from './worker-set-v3.mjs';
-import { runExternalWorker, validateExternalRunReceipt } from './external-worker-runtime.mjs';
+import { runExternalWorker, validateExternalRunReceipt, validateFrozenExternalContainer } from './external-worker-runtime.mjs';
+import { cleanupExternalWorker, EXTERNAL_CLEANUP_CONTRACT } from './external-worker-cleanup.mjs';
 import { ENROLLMENT_CONTRACT, validateExternalEnrollmentPlan, validateExternalEnrollmentApproval, validateExternalEnrollmentReceipt } from './external-worker-enrollment.mjs';
 import { applyExternalEnrollment } from './external-worker-enrollment-runtime.mjs';
 import { validateExternalNetworkObservation } from './external-network-policy.mjs';
@@ -179,7 +180,7 @@ function installedDigest() {
     'app-only-artifact.mjs', 'app-only-baseline.mjs', 'app-only-live-certification.mjs',
     'app-only-installed-certifier.mjs', 'external-worker-contract.mjs', 'external-worker-runtime.mjs',
     'external-worker-continuation-runtime.mjs', 'external-worker-enrollment.mjs', 'external-worker-enrollment-runtime.mjs',
-    'external-worker-public-root.mjs', 'external-tenant-public-root.mjs', 'external-worker-image-capability.mjs',
+    'external-worker-public-root.mjs', 'external-worker-cleanup.mjs', 'external-tenant-public-root.mjs', 'external-worker-image-capability.mjs',
     'external-network-policy.mjs', 'worker-set-v3.mjs',
     'external-network-fence.py', 'leetplus-compose-external-daily.service',
     'leetplus-compose-external-daily.timer']) {
@@ -497,6 +498,8 @@ async function externalContinuationEvidence(plan, dir, mode = 'FORWARD') {
   return { externalWorkerContinuationReceiptSha256: digest(receipt) };
 }
 function assertNoPending(except) {
+  const externalRunning = docker(['ps', '--filter', 'name=^/leetplus-langame-external-daily-worker$', '--format', '{{.ID}}']);
+  demand(!externalRunning, 'An external worker container survived its native controller; reconcile and stop it before any new control effect');
   for (const id of fs.readdirSync(`${STATE}/operations`)) {
     if (id === except) continue;
     const dir = operation(id);
@@ -950,9 +953,15 @@ if (command === 'help' || !command) {
   const locks = fs.readFileSync('/proc/locks', 'utf8').split('\n');
   const lockPolicy = controlLockPolicy(command, options);
   const parentStatus = lockPolicy.singleton ? fs.readFileSync(`/proc/${process.ppid}/status`, 'utf8') : '';
-  verifyKernelControlLocks(lockPolicy, { globalLock: lockInfo, singletonLock: lockPolicy.singleton ? fs.lstatSync(`${STATE}/${lockPolicy.singleton}.lock`) : undefined, locks, parentPid: process.ppid, outerPid: parentStatus.match(/^PPid:\s+(\d+)$/m)?.[1] });
+  if (command === 'external-worker-cleanup') verifyExternalCleanupSingletonLock({
+    singletonLock: fs.lstatSync(`${STATE}/langame-external-daily-worker.lock`), locks, parentPid: process.ppid });
+  else verifyKernelControlLocks(lockPolicy, { globalLock: lockInfo, singletonLock: lockPolicy.singleton ? fs.lstatSync(`${STATE}/${lockPolicy.singleton}.lock`) : undefined, locks, parentPid: process.ppid, outerPid: parentStatus.match(/^PPid:\s+(\d+)$/m)?.[1] });
   directory(STATE); directory(`${STATE}/operations`);
   installedDigest();
+  if (lockPolicy.mode === 'WRITE' && command !== 'external-worker-cleanup') {
+    const externalRunning = docker(['ps', '--filter', 'name=^/leetplus-langame-external-daily-worker$', '--format', '{{.ID}}']);
+    demand(!externalRunning, 'A running external container must be cleaned before any global control writer effect');
+  }
   const observational = command === 'status' || (command === 'network' && ['refresh', 'status', 'verify', 'verify-rehearsal'].includes(options.operation));
   if (!observational) {
     const handoffPending = fs.existsSync(`${STATE}/control-handoff.pending.json`);
@@ -967,7 +976,7 @@ if (command === 'help' || !command) {
         publicKey: safeFile('/etc/leetplus-compose/approval-root.pem'),
         histories: [{ plan: readJSON(`${dir}/plan.json`, { immutable: true }), approval: readJSON(`${dir}/approval.json`, { immutable: true }), ...await storeFor(dir).read() }] });
     }
-    assertControllerContinuity();
+    if (command !== 'external-worker-cleanup') assertControllerContinuity();
   } else if (command === 'network' && options.operation === 'refresh') {
     // A pending handoff must not let provider addresses expire, but a queued
     // obsolete controller may not act after a newer atomic pointer switch.
@@ -1483,6 +1492,7 @@ if (command === 'help' || !command) {
   } else if (command === 'external-worker-run') {
     demand(Object.keys(options).length === 0, 'External worker run takes no caller-supplied scope');
     const name = 'langame-external-daily-worker', runRoot = `${STATE}/external-worker-runs`;
+    const tickStarted = Date.now();
     const externalGrantPath = `${STATE}/worker-grants/${name}.json`, externalSecretPath = `${ROOT}/secrets/${name}.json`;
     const authority = async () => {
       const current = active(); demand(current, 'No accepted external worker application');
@@ -1522,15 +1532,14 @@ if (command === 'help' || !command) {
         validateExternalNetworkObservation(output);
       },
       readPriorRun: async identity => fs.existsSync(`${runRoot}/${identity}.intent.json`) ? canonicalPrivateJSON(`${runRoot}/${identity}.intent.json`) : null,
-      assertNoAmbiguousDate: async ({ mode, businessDate }) => {
+      assertNoAmbiguousDate: async () => {
         if (!fs.existsSync(runRoot)) return;
         for (const leaf of fs.readdirSync(runRoot).filter(leaf => leaf.endsWith('.intent.json'))) {
           demand(/^[a-f0-9-]{36}\.intent\.json$/.test(leaf), 'Untrusted external run intent name');
           const prior = canonicalPrivateJSON(`${runRoot}/${leaf}`);
-          if (prior.mode === mode && prior.businessDate === businessDate) {
-            const identity = leaf.slice(0, -'.intent.json'.length);
-            demand(fs.existsSync(`${runRoot}/${identity}.receipt.json`), 'Prior external run intent has no terminal; no blind provider retry');
-          }
+          demand(prior?.contract === 'LEETPLUS_LANGAME_EXTERNAL_NATIVE_RUN_V1_INTENT', 'Unknown external run intent contract');
+          const identity = leaf.slice(0, -'.intent.json'.length);
+          demand(fs.existsSync(`${runRoot}/${identity}.receipt.json`), 'Prior external run intent has no terminal; no blind provider retry');
         }
       },
       publishRun: async (identity, type, value) => {
@@ -1551,18 +1560,72 @@ if (command === 'help' || !command) {
         const service = spec.services[name], imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
         verifyContainer(docker(['inspect', service.container_name], { json: true })[0], service, name, { beforeStart: true, imageEnvironment });
       },
-      startAttached: async containerName => {
-        const result = spawnSync('/usr/bin/docker', ['--host', 'unix:///var/run/docker.sock', '--config', '/etc/leetplus-compose/docker-cli',
-          'start', '--attach', containerName], { encoding: 'utf8', env: CLEAN_ENV, timeout: 2700000, maxBuffer: 4 * 1024 * 1024 });
-        demand(!result.error && result.signal === null && [0, 1, 75].includes(result.status), 'External worker Docker start is ambiguous; reconcile without retry');
-        return { exitCode: result.status, stdout: result.stdout };
+      freezeContainer: async (spec, intent) => {
+        demand(Date.now() - tickStarted < 300000, 'External worker pre-start budget exhausted before provider effect');
+        const service = spec.services[name], item = docker(['inspect', service.container_name], { json: true })[0];
+        const imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
+        verifyContainer(item, service, name, { beforeStart: true, imageEnvironment });
+        const record = { contract: `${EXTERNAL_CLEANUP_CONTRACT}_CONTAINER`, identity: intent.identity,
+          intentSha256: digest(intent), composeSha256: digest(spec), containerId: item.Id,
+          image: service.image, name: service.container_name };
+        publish(`${runRoot}/${intent.identity}.container.json`, record);
+        replace(`${runRoot}/active.json`, Buffer.from(canonical({ contract: `${EXTERNAL_CLEANUP_CONTRACT}_POINTER`,
+          identity: intent.identity, containerRecordSha256: digest(record) })), 0o400);
+        return item.Id;
       },
-      inspectStopped: async containerName => {
-        const item = docker(['inspect', containerName], { json: true })[0];
+      startAttached: async (frozenId, intent) => {
+        demand(Date.now() - tickStarted < 300000, 'External worker pre-start budget exhausted before attached provider effect');
+        const original = docker(['inspect', frozenId], { json: true })[0];
+        const frozen = canonicalPrivateJSON(`${runRoot}/${intent.identity}.container.json`);
+        validateFrozenExternalContainer(frozen, intent, original, frozenId);
+        demand(!original.State.Running && original.State.Pid === 0 &&
+          original.Config.Labels?.['ru.leetplus.contract'] === CONTRACT &&
+          original.Config.Labels?.['com.docker.compose.project'] === 'leetplus', 'External run container preimage drift');
+        const result = spawnSync('/usr/bin/docker', ['--host', 'unix:///var/run/docker.sock', '--config', '/etc/leetplus-compose/docker-cli',
+          'start', '--attach', original.Id], { encoding: 'utf8', env: CLEAN_ENV, timeout: 2700000, maxBuffer: 4 * 1024 * 1024 });
+        if (result.error || result.signal !== null || ![0, 1, 75].includes(result.status)) {
+          docker(['stop', '--time', '120', original.Id], { timeout: 180000 });
+          const after = docker(['inspect', original.Id], { json: true })[0];
+          demand(!after.State.Running && after.State.Pid === 0, 'Ambiguous external worker did not stop; control effects remain fenced');
+          demand(false, 'External worker outcome is ambiguous; owned container stopped, preserve intent and reconcile without retry');
+        }
+        return { exitCode: result.status, stdout: result.stdout, containerId: frozenId };
+      },
+      inspectStopped: async frozenId => {
+        const item = docker(['inspect', frozenId], { json: true })[0];
+        demand(item.Id === frozenId, 'External stopped container ID drift');
         return { running: item.State.Running, pid: item.State.Pid, exitCode: item.State.ExitCode, containerId: item.Id };
       },
     };
     console.log(canonical(await runExternalWorker({ adapters })));
+  } else if (command === 'external-worker-cleanup') {
+    demand(Object.keys(options).length === 0, 'External worker cleanup takes no caller scope');
+    const runRoot = `${STATE}/external-worker-runs`, name = 'langame-external-daily-worker';
+    const read = (identity, type) => canonicalPrivateJSON(`${runRoot}/${identity}.${type}.json`);
+    const adapters = {
+      assertWorkerLocks: async () => verifyExternalCleanupSingletonLock({
+        singletonLock: fs.lstatSync(`${STATE}/${name}.lock`),
+        locks: fs.readFileSync('/proc/locks', 'utf8'), parentPid: process.ppid }),
+      readPointer: async () => fs.existsSync(`${runRoot}/active.json`) ? canonicalPrivateJSON(`${runRoot}/active.json`) : null,
+      readIntent: async id => read(id, 'intent'), readCompose: async id => read(id, 'compose'),
+      readContainerRecord: async id => read(id, 'container'),
+      inspectById: async id => {
+        const item = docker(['inspect', id], { json: true })[0];
+        return { raw: item, id: item.Id, name: item.Name.slice(1), image: item.Image,
+          running: item.State.Running, pid: item.State.Pid };
+      },
+      verifyOwned: async (observed, record, spec) => {
+        demand(observed.id === record.containerId && observed.name === record.name && observed.image === record.image &&
+          observed.raw.Config.Labels?.['ru.leetplus.contract'] === CONTRACT &&
+          observed.raw.Config.Labels?.['com.docker.compose.project'] === 'leetplus', 'Foreign container cannot be stopped by external cleanup');
+        const service = spec.services[name], imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
+        verifyContainer(observed.raw, service, name, { configurationOnly: true, imageEnvironment });
+      },
+      stopById: async id => { docker(['stop', '--time', '120', id], { timeout: 180000 }); },
+      readCleanupReceipt: async id => fs.existsSync(`${runRoot}/${id}.cleanup.json`) ? read(id, 'cleanup') : null,
+      publishCleanupReceipt: async (id, value) => publish(`${runRoot}/${id}.cleanup.json`, value),
+    };
+    console.log(canonical(await cleanupExternalWorker(adapters)));
   } else {
     demand(['apply', 'resume'].includes(command), 'Unknown command');
     const dir = operation(options.operation), plan = readJSON(`${dir}/plan.json`, { immutable: true });

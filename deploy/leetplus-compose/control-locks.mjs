@@ -11,6 +11,7 @@ export function controlLockPolicy(command, options = {}) {
     return { mode: 'READ', singleton: options.name };
   }
   if (command === 'external-worker-run' && keys.length === 0) return { mode: 'READ', singleton: 'langame-external-daily-worker' };
+  if (command === 'external-worker-cleanup' && keys.length === 0) return { mode: 'READ', singleton: 'langame-external-daily-worker' };
   if (command === 'network' && keys.length === 1 && keys[0] === 'operation' && options.operation === 'refresh') {
     return { mode: 'READ', singleton: 'network-refresh' };
   }
@@ -28,4 +29,14 @@ export function verifyKernelControlLocks(policy, { globalLock, singletonLock, lo
     demand(lockLines.some(line => { const fields = line.trim().split(/\s+/); return fields[1] === 'FLOCK' && fields[3] === 'WRITE' && fields[4] === String(outerPid) && fields[5]?.split(':').at(-1) === String(singletonLock.ino); }), 'Singleton kernel lock is not held');
   }
   return policy;
+}
+
+export function verifyExternalCleanupSingletonLock({ singletonLock, locks, parentPid } = {}) {
+  demand(singletonLock?.isFile?.() && !singletonLock.isSymbolicLink?.() && singletonLock.uid === 0 &&
+    singletonLock.nlink === 1 && !(singletonLock.mode & 0o077), 'Invalid external cleanup singleton file');
+  const lines = Array.isArray(locks) ? locks : String(locks ?? '').split('\n');
+  demand(lines.some(line => { const fields = line.trim().split(/\s+/); return fields[1] === 'FLOCK' &&
+    fields[3] === 'WRITE' && fields[4] === String(parentPid) && fields[5]?.split(':').at(-1) === String(singletonLock.ino); }),
+  'External cleanup singleton kernel flock is not held');
+  return true;
 }

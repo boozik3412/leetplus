@@ -5,6 +5,15 @@ import { EXTERNAL_WORKER_IDENTITY, parseExternalWorkerResult, validateExternalWo
 export const EXTERNAL_RUN_CONTRACT = 'LEETPLUS_LANGAME_EXTERNAL_NATIVE_RUN_V1';
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
+export function validateFrozenExternalContainer(record, intent, observed, frozenId) {
+  demand(record?.containerId === frozenId && observed?.Id === frozenId &&
+    record.identity === intent?.identity && record.intentSha256 === digest(intent) &&
+    observed.Image === record.image && observed.Name === `/${record.name}` &&
+    !observed.State?.Running && observed.State?.Pid === 0,
+  'External container was replaced or started after immutable freeze');
+  return frozenId;
+}
+
 export function previousExternalBusinessDate(now = Date.now()) {
   demand(Number.isFinite(now), 'Invalid external worker clock');
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Yekaterinburg', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
@@ -17,7 +26,7 @@ export function previousExternalBusinessDate(now = Date.now()) {
  * state machine may create a container. No retry after ambiguous provider work.
  */
 export async function runExternalWorker({ adapters, now = Date.now(), runId = crypto.randomUUID() }) {
-  for (const method of ['assertLocks', 'attestAccepted', 'attestEnrollment', 'verifyNetwork', 'readPriorRun', 'assertNoAmbiguousDate', 'publishRun', 'createStopped', 'verifyStopped', 'startAttached', 'inspectStopped']) {
+  for (const method of ['assertLocks', 'attestAccepted', 'attestEnrollment', 'verifyNetwork', 'readPriorRun', 'assertNoAmbiguousDate', 'publishRun', 'createStopped', 'verifyStopped', 'freezeContainer', 'startAttached', 'inspectStopped']) {
     demand(typeof adapters?.[method] === 'function', `Missing external worker native adapter: ${method}`);
   }
   demand(UUID.test(runId), 'Native external run ID must be UUID');
@@ -46,12 +55,15 @@ export async function runExternalWorker({ adapters, now = Date.now(), runId = cr
   await adapters.publishRun(identity, 'intent', intent);
   await adapters.createStopped(spec, intent);
   await adapters.verifyStopped(spec, intent);
+  const frozenContainerId = await adapters.freezeContainer(spec, intent);
+  demand(/^[a-f0-9]{64}$/.test(frozenContainerId ?? ''), 'External worker container was not frozen by exact ID');
   // Authority may expire while Docker creates the stopped container.
   validateExternalWorkerGrant(grantEnvelope, publicKey, current, hostIdentitySha256, secretBytes, adapters.now?.() ?? Date.now());
   await adapters.verifyNetwork();
-  const execution = await adapters.startAttached(service.container_name, intent);
-  const stopped = await adapters.inspectStopped(service.container_name);
+  const execution = await adapters.startAttached(frozenContainerId, intent);
+  const stopped = await adapters.inspectStopped(frozenContainerId);
   demand(stopped?.running === false && stopped.pid === 0 && execution && typeof execution.stdout === 'string', 'External worker outcome is ambiguous; reconcile without provider retry');
+  demand(stopped.containerId === frozenContainerId, 'External worker terminal container ID changed after freeze');
   const result = parseExternalWorkerResult(execution.stdout, { runId, grant, businessDate, allowReplayed: execution.exitCode === 75 });
   demand(stopped.exitCode === execution.exitCode && (result.replayed ? execution.exitCode === 75 : result.decision === 'FAILED' ? execution.exitCode === 1 : execution.exitCode === 0), 'External worker result/exit-code mismatch');
   const receipt = { contract: `${EXTERNAL_RUN_CONTRACT}_RECEIPT`, decision: result.replayed ? 'NO_NEW_EFFECT' : result.decision,

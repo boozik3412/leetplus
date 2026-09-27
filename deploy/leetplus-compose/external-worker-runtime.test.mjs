@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { canonical, CONTRACT, digest, EXTERNAL_WORKER_CAPABILITY, SCHEMA } from './contract.mjs';
 import { EXTERNAL_WORKER_GRANT_CONTRACT, EXTERNAL_WORKER_IDENTITY, EXTERNAL_WORKER_RESULT_CONTRACT } from './external-worker-contract.mjs';
-import { previousExternalBusinessDate, runExternalWorker } from './external-worker-runtime.mjs';
+import { previousExternalBusinessDate, runExternalWorker, validateFrozenExternalContainer } from './external-worker-runtime.mjs';
 
 function fixture(mode = 'TIMER') {
   const now = Date.parse('2026-09-27T19:00:00Z'), runId = crypto.randomUUID(), keys = crypto.generateKeyPairSync('ed25519');
@@ -40,7 +40,8 @@ function fixture(mode = 'TIMER') {
     publishRun: async (id, type, value) => { records[id] ??= {}; assert.equal(records[id][type], undefined); records[id][type] = value; calls.push(type); },
     createStopped: async (spec, intent) => { calls.push('create'); assert.equal(spec.services[identity.worker].environment.LANGAME_EXTERNAL_WORKER_BUSINESS_DATE, intent.businessDate); },
     verifyStopped: async () => calls.push('verify'), startAttached: async () => { calls.push('start'); return execution; },
-    inspectStopped: async () => ({ running: false, pid: 0, exitCode: execution.exitCode, containerId: 'b'.repeat(64) }),
+    freezeContainer: async () => { calls.push('freeze-container'); return 'b'.repeat(64); },
+    inspectStopped: async id => ({ running: false, pid: 0, exitCode: execution.exitCode, containerId: id }),
   };
   return { now, runId, grant, authority, result, execution, records, calls, adapters, wire };
 }
@@ -49,11 +50,23 @@ test('business date uses the previous completed Yekaterinburg day at midnight an
   assert.equal(previousExternalBusinessDate(Date.parse('2026-09-27T19:00:00Z')), '2026-09-27');
   assert.equal(previousExternalBusinessDate(Date.parse('2026-12-31T19:00:00Z')), '2026-12-31');
 });
+test('replacement after freeze cannot reach provider start under a different container ID', () => {
+  const frozenId = 'a'.repeat(64), replacementId = 'b'.repeat(64), intent = { identity: crypto.randomUUID() };
+  const record = { identity: intent.identity, intentSha256: digest(intent), containerId: frozenId,
+    image: `sha256:${'c'.repeat(64)}`, name: 'leetplus-langame-external-daily-worker' };
+  const stopped = { Id: frozenId, Image: record.image, Name: `/${record.name}`, State: { Running: false, Pid: 0 } };
+  assert.equal(validateFrozenExternalContainer(record, intent, stopped, frozenId), frozenId);
+  assert.throws(() => validateFrozenExternalContainer(record, intent,
+    { ...stopped, Id: replacementId }, frozenId), /replaced/);
+  assert.throws(() => validateFrozenExternalContainer(record, intent,
+    { ...stopped, State: { Running: true, Pid: 777 } }, frozenId), /started/);
+});
 test('fresh native run freezes date and authority before stopped creation and records exact result', async () => {
   const f = fixture(), receipt = await runExternalWorker(f);
   assert.equal(receipt.decision, 'SUCCESS'); assert.equal(receipt.businessDate, '2026-09-27');
   assert.ok(f.calls.indexOf('intent') < f.calls.indexOf('create'));
   assert.ok(f.calls.indexOf('enrollment') < f.calls.indexOf('start'));
+  assert.ok(f.calls.indexOf('freeze-container') < f.calls.indexOf('start'));
 });
 test('a consumed canary or rejected enrollment never starts a container', async () => {
   const f = fixture('CANARY'); await runExternalWorker(f);

@@ -67,9 +67,9 @@ jobs:
             printf '%s\n' 'NETLINK_CAPTURE_STDERR_END'
           fi
           if test -f "$evidence/result.json"; then
-            printf '%s\n' 'NETLINK_CAPTURE_RECEIPT_BEGIN'
-            cat "$evidence/result.json"
-            printf '%s\n' 'NETLINK_CAPTURE_RECEIPT_END'
+            printf '%s\n' 'NETLINK_CAPTURE_RECEIPT_GZIP_BASE64_BEGIN'
+            gzip -n -9 -c "$evidence/result.json" | base64 -w 76
+            printf '\n%s\n' 'NETLINK_CAPTURE_RECEIPT_GZIP_BASE64_END'
           fi
           cat "$RUNNER_TEMP/netlink-capture-linux-evidence-SHA256SUMS"
           exit "$code"

@@ -188,6 +188,21 @@ describe('external Langame pilot worker', () => {
     expect(logger.log.mock.calls.join(' ')).toContain('decision=PARTIAL');
   });
 
+  it('passes the native CANARY date but still demands actual-date inventory coverage', async () => {
+    const canaryEnv = {
+      ...env(),
+      LANGAME_EXTERNAL_WORKER_MODE: 'CANARY',
+      LANGAME_EXTERNAL_WORKER_DATE: '2026-09-26',
+    };
+    const service = { runDailySync: jest.fn().mockResolvedValue(result()) };
+    await expect(
+      runLangameExternalWorkerOnce(service, canaryEnv, { log: jest.fn() }),
+    ).resolves.toMatchObject({ processedTenants: 1 });
+    expect(service.runDailySync).toHaveBeenCalledWith(
+      expect.objectContaining({ date: '2026-09-26' }),
+    );
+  });
+
   it('refuses a fabricated complete tick with a missing daily scope', async () => {
     const incomplete = result();
     incomplete.results[0].scopes.pop();

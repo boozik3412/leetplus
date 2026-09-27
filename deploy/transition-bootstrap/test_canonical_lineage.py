@@ -30,14 +30,14 @@ def iso(value):
 
 def generate_key():
     script = "import crypto from 'node:crypto'; const v=crypto.generateKeyPairSync('ed25519'); process.stdout.write(JSON.stringify({privateKey:v.privateKey.export({format:'pem',type:'pkcs8'}),publicKey:v.publicKey.export({format:'pem',type:'spki'})}));"
-    return json.loads(subprocess.check_output([TEST_NODE, '-e', script]))
+    return json.loads(subprocess.check_output([TEST_NODE, '--input-type=module', '-e', script]))
 
 
 def sign(value, key):
     script = "import crypto from 'node:crypto';import fs from 'node:fs';const v=JSON.parse(fs.readFileSync(0,'utf8'));process.stdout.write(crypto.sign(null,Buffer.from(v.message,'base64'),v.key).toString('base64'));"
     raw = json.dumps({'message': base64.b64encode(canonical(value)).decode(),
                       'key': key['privateKey']}).encode()
-    return subprocess.check_output([TEST_NODE, '-e', script], input=raw).decode()
+    return subprocess.check_output([TEST_NODE, '--input-type=module', '-e', script], input=raw).decode()
 
 
 @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'getuid') and os.getuid() == 0,

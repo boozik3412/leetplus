@@ -118,6 +118,13 @@ function fixture(mode = MODES.BRIDGE_TO_EXTERNAL) {
       assert.equal(state.observed.pointer, expectedPointer);
       state.calls.push('recover-pointer-temp');
     },
+    prepareCanonicalForward: async () => state.calls.push('canonical:prepare-forward'),
+    finalizeCanonicalForward: async () => state.calls.push('canonical:finalize-forward'),
+    reconcileCanonicalForward: async () => state.calls.push('canonical:reconcile-forward'),
+    prepareCanonicalRollback: async () => state.calls.push('canonical:prepare-rollback'),
+    finalizeCanonicalRollback: async () => state.calls.push('canonical:finalize-rollback'),
+    reconcileCanonicalRollback: async () => state.calls.push('canonical:reconcile-rollback'),
+    closeCanonicalNoEffect: async () => state.calls.push('canonical:close-no-effect'),
   };
   const evidence = { backupReceiptSha256: hash('7'), restoredCopyReceiptSha256: hash('8'),
     hostBaselineSha256: hash('9') };
@@ -144,7 +151,8 @@ test('both independently observed predecessor transitions prepare and apply only
     const receipt = await apply({ plan, permitEnvelope: value.permitEnvelope, permitRoot: value.permitKey.publicKey,
       executionEnvelope, executionRoot: value.executionKey.publicKey, host: value.host, now: NOW });
     assert.equal(receipt.decision, 'PASS');
-    assert.deepEqual(value.state.calls, ['publish:intent', 'CAS', 'publish:receipt']);
+    assert.deepEqual(value.state.calls, ['publish:intent', 'canonical:prepare-forward', 'CAS',
+      'canonical:finalize-forward', 'publish:receipt']);
     assert.deepEqual(value.state.locks, ['READ', 'WRITE']);
     assert.equal(value.state.observed.pointer, plan.newPointer);
   }
@@ -178,7 +186,8 @@ test('lost response after pointer CAS reconciles the same intent without a secon
     permitRoot: value.permitKey.publicKey, executionEnvelope,
     executionRoot: value.executionKey.publicKey, host: value.host });
   assert.equal(result.decision, 'RECONCILED_ACCEPTED');
-  assert.deepEqual(value.state.calls, ['publish:intent', 'CAS', 'publish:receipt']);
+  assert.deepEqual(value.state.calls, ['publish:intent', 'canonical:prepare-forward', 'CAS',
+    'canonical:reconcile-forward', 'publish:receipt']);
 });
 
 test('lost response before pointer CAS records no effect and forbids blind retry', async () => {
@@ -189,7 +198,7 @@ test('lost response before pointer CAS records no effect and forbids blind retry
   assert.equal((await reconcile({ plan, permitEnvelope: value.permitEnvelope,
     permitRoot: value.permitKey.publicKey, executionEnvelope,
     executionRoot: value.executionKey.publicKey, host: value.host })).decision, 'NO_EFFECT_RECORDED_NO_RETRY');
-  assert.deepEqual(value.state.calls, ['publish:intent', 'CAS']);
+  assert.deepEqual(value.state.calls, ['publish:intent', 'canonical:prepare-forward', 'CAS']);
 });
 
 test('rollback needs a new receipt-bound signature and unchanged protected state', async () => {
@@ -236,7 +245,8 @@ test('fresh signed zero-effect command closes a crashed forward intent without a
   await assert.rejects(terminalizeNoEffect({ ...args, recoveryEnvelope: wrong }));
   const receipt = await terminalizeNoEffect(args);
   assert.equal(receipt.decision, 'CANCELED_NO_EFFECT');
-  assert.deepEqual(value.state.calls, ['publish:intent', 'CAS', 'recover-pointer-temp', 'publish:terminalNoEffect']);
+  assert.deepEqual(value.state.calls, ['publish:intent', 'canonical:prepare-forward', 'CAS',
+    'recover-pointer-temp', 'canonical:close-no-effect', 'publish:terminalNoEffect']);
   assert.deepEqual(await terminalizeNoEffect({ ...args, now: NOW + 60 * 60_000 }), receipt);
   assert.equal(value.state.calls.filter(name => name === 'CAS').length, 1);
 });

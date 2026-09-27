@@ -99,7 +99,10 @@ function validateObservation(mode, observed, envelope, permitRoot, now) {
 
 function ensureHost(host) {
   exactKeys(host, ['withLocks', 'observe', 'readPointer', 'readProtectedState', 'readOperation',
-    'publishExclusive', 'compareAndSwapPointer', 'recoverPointerTemporary'], 'predecessor host adapter');
+    'publishExclusive', 'compareAndSwapPointer', 'recoverPointerTemporary',
+    'prepareCanonicalForward', 'finalizeCanonicalForward', 'reconcileCanonicalForward',
+    'prepareCanonicalRollback', 'finalizeCanonicalRollback', 'reconcileCanonicalRollback',
+    'closeCanonicalNoEffect'], 'predecessor host adapter');
   for (const value of Object.values(host)) demand(typeof value === 'function', 'Host adapter callback missing');
 }
 
@@ -198,6 +201,7 @@ export async function apply({ plan, permitEnvelope, permitRoot, executionEnvelop
       oldPointer: plan.oldPointer, newPointer: plan.newPointer, authorizedAt: new Date(authorizedAt).toISOString(),
     };
     await host.publishExclusive(plan.operationId, 'intent', intent);
+    await host.prepareCanonicalForward(plan, intent);
     validatePermit(plan.mode, permitEnvelope, permitRoot, plan.expected, now ?? Date.now());
     validateExecution(executionEnvelope, executionRoot, plan, now ?? Date.now());
     assertProtected(plan, await host.readProtectedState());
@@ -205,6 +209,7 @@ export async function apply({ plan, permitEnvelope, permitRoot, executionEnvelop
     await host.compareAndSwapPointer(plan.oldPointer, plan.newPointer);
     demand(await host.readPointer() === plan.newPointer, 'Pointer postimage differs');
     assertProtected(plan, await host.readProtectedState());
+    await host.finalizeCanonicalForward(plan, intent);
     const receipt = {
       contract: `${PLAN_CONTRACT}_RECEIPT`, ...Object.fromEntries(Object.entries(intent).filter(([key]) => key !== 'contract')),
       intentSha256: digest(intent), acceptedAt: new Date(now ?? Date.now()).toISOString(), decision: 'PASS',
@@ -233,6 +238,7 @@ export async function reconcile({ plan, permitEnvelope, permitRoot, executionEnv
     if (pointer === plan.oldPointer) return { decision: 'NO_EFFECT_RECORDED_NO_RETRY' };
     demand(pointer === plan.newPointer, 'Ambiguous transition pointer requires operator reconciliation');
     assertProtected(plan, await host.readProtectedState());
+    await host.reconcileCanonicalForward(plan, record.intent);
     const receipt = {
       contract: `${PLAN_CONTRACT}_RECEIPT`,
       ...Object.fromEntries(Object.entries(record.intent).filter(([key]) => key !== 'contract')),
@@ -270,11 +276,13 @@ export async function rollback({ plan, permitEnvelope, executionEnvelope, rollba
       newPointer: plan.oldPointer, authorizedAt: new Date(authorizedAt).toISOString(),
     };
     await host.publishExclusive(plan.operationId, 'rollbackIntent', intent);
+    await host.prepareCanonicalRollback(plan, intent, record.receipt);
     validateRollback(rollbackEnvelope, rollbackRoot, plan, record.receipt, now ?? Date.now());
     assertProtected(plan, await host.readProtectedState());
     await host.compareAndSwapPointer(plan.newPointer, plan.oldPointer);
     demand(await host.readPointer() === plan.oldPointer, 'Rollback pointer postimage differs');
     assertProtected(plan, await host.readProtectedState());
+    await host.finalizeCanonicalRollback(plan, intent, record.receipt);
     const receipt = { ...intent, contract: `${PLAN_CONTRACT}_ROLLBACK_RECEIPT`,
       intentSha256: digest(intent), acceptedAt: new Date(now ?? Date.now()).toISOString(), decision: 'PASS' };
     await host.publishExclusive(plan.operationId, 'rollbackReceipt', receipt);
@@ -313,6 +321,7 @@ export async function reconcileRollback({ plan, permitEnvelope, permitRoot, exec
     if (pointer === plan.newPointer) return { decision: 'ROLLBACK_NO_EFFECT_NO_RETRY' };
     demand(pointer === plan.oldPointer, 'Ambiguous rollback pointer requires operator reconciliation');
     assertProtected(plan, await host.readProtectedState());
+    await host.reconcileCanonicalRollback(plan, intent, record.receipt);
     const receipt = { ...intent, contract: `${PLAN_CONTRACT}_ROLLBACK_RECEIPT`,
       intentSha256: digest(intent), acceptedAt: new Date().toISOString(), decision: 'PASS' };
     await host.publishExclusive(plan.operationId, 'rollbackReceipt', receipt);
@@ -373,6 +382,7 @@ export async function terminalizeNoEffect({ plan, permitEnvelope, permitRoot, ex
     // The native adapter may remove only the unpublished exact root symlink.
     await host.recoverPointerTemporary(expectedPointer,
       phase === 'FORWARD' ? plan.newPointer : plan.oldPointer);
+    await host.closeCanonicalNoEffect(plan, phase, intent);
     demand(await host.readPointer() === expectedPointer, 'Zero-effect pointer changed during residue recovery');
     assertProtected(plan, await host.readProtectedState());
     const receipt = {

@@ -34,15 +34,26 @@ jobs:
           evidence="$RUNNER_TEMP/predecessor-bootstrap-source"
           mkdir -p "$evidence"
           set +e
-          node --test deploy/transition-bootstrap/protocol.test.mjs >"$evidence/protocol.stdout" 2>"$evidence/protocol.stderr"
+          node --test deploy/transition-bootstrap/*.test.mjs >"$evidence/protocol.stdout" 2>"$evidence/protocol.stderr"
           protocol_exit=$?
           printf '%s\n' "$protocol_exit" >"$evidence/protocol.exit"
           sudo python3 -B deploy/transition-bootstrap/test_native_boundary.py >"$evidence/native.stdout" 2>"$evidence/native.stderr"
           native_exit=$?
           printf '%s\n' "$native_exit" >"$evidence/native.exit"
-          printf 'protocol exit=%s; native exit=%s\n' "$protocol_exit" "$native_exit"
-          cat "$evidence/protocol.stdout" "$evidence/protocol.stderr" "$evidence/native.stdout" "$evidence/native.stderr"
-          test "$protocol_exit" -eq 0 && test "$native_exit" -eq 0
+          sudo python3 -B deploy/transition-bootstrap/test_inventory.py >"$evidence/inventory.stdout" 2>"$evidence/inventory.stderr"
+          inventory_exit=$?
+          printf '%s\n' "$inventory_exit" >"$evidence/inventory.exit"
+          sudo python3 -B deploy/transition-bootstrap/test_canonical_lineage.py >"$evidence/lineage.stdout" 2>"$evidence/lineage.stderr"
+          lineage_exit=$?
+          printf '%s\n' "$lineage_exit" >"$evidence/lineage.exit"
+          sudo python3 -B deploy/transition-bootstrap/test_bundle_installer.py >"$evidence/installer.stdout" 2>"$evidence/installer.stderr"
+          installer_exit=$?
+          printf '%s\n' "$installer_exit" >"$evidence/installer.exit"
+          printf 'protocol=%s native=%s inventory=%s lineage=%s installer=%s\n' \
+            "$protocol_exit" "$native_exit" "$inventory_exit" "$lineage_exit" "$installer_exit"
+          cat "$evidence/"*.stdout "$evidence/"*.stderr
+          test "$protocol_exit" -eq 0 && test "$native_exit" -eq 0 && \
+            test "$inventory_exit" -eq 0 && test "$lineage_exit" -eq 0 && test "$installer_exit" -eq 0
       - name: Preserve source logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

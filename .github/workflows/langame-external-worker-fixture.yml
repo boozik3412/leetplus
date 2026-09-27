@@ -1,0 +1,80 @@
+name: External Langame worker PostgreSQL gate
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/langame-external-worker-fixture.yml"
+      - "apps/api/src/admin/external-langame-worker-tenant*"
+      - "apps/api/src/integrations/langame-external-*"
+      - "apps/api/src/integrations/langame-sync.service*"
+      - "apps/api/src/integrations/langame-daily-sync.service*"
+      - "apps/api/src/integrations/guest-data-foundation.service*"
+      - "apps/api/test/external-langame-worker.pg.integration-spec.ts"
+      - "packages/database/prisma/**"
+      - "apps/api/package.json"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-langame-worker-pg-${{ github.event_name }}-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  CI_RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/leetplus_ci?schema=public
+  NODE_ENV: test
+
+jobs:
+  external-langame-worker-postgres:
+    name: External Langame worker PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXTERNAL_LANGAME_WORKER_PG_CONFIRM: run-external-langame-worker-disposable-ci-fixture
+      PGOPTIONS: -c lock_timeout=5000 -c statement_timeout=120000
+    services:
+      postgres:
+        image: postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: leetplus_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify source identity
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.33.2
+          run_install: false
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm --filter database db:generate
+      - name: Apply canonical migrations to disposable database
+        run: pnpm --filter database db:deploy
+      - name: Verify LIVE CAS and atomic manual/worker exclusion
+        run: pnpm --filter api test:integration:external-langame-worker:pg

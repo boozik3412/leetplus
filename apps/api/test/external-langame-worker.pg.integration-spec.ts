@@ -234,6 +234,9 @@ describePostgres(
         connectionString: process.env.DATABASE_URL,
       });
       await blocker.connect();
+      const blockerPid = (
+        await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      ).rows[0].pid;
       const racePlan = await writer.prepare(
         actor,
         scope.tenantId,
@@ -261,12 +264,13 @@ describePostgres(
         racingApply = writer.apply(actor, scope.tenantId, raceRequest);
         // Observe the competing activation blocked on its exact row lock.
         let waiting = false;
-        const deadline = Date.now() + 2_000;
+        const deadline = Date.now() + 4_000;
         while (Date.now() < deadline && !waiting) {
+          await blocker.query('SELECT pg_stat_clear_snapshot()');
           const proof = await blocker.query<{ waiting: boolean }>(
             `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-             WHERE wait_event_type='Lock' AND query LIKE '%FOR UPDATE%'
-               AND query LIKE '%Store%') AS waiting`,
+             WHERE $1::integer = ANY(pg_blocking_pids(pid))) AS waiting`,
+            [blockerPid],
           );
           waiting = proof.rows[0].waiting;
           if (!waiting) await new Promise((resolve) => setTimeout(resolve, 20));
@@ -303,6 +307,11 @@ describePostgres(
         connectionString: process.env.DATABASE_URL,
       });
       await sourceBlocker.connect();
+      const sourceBlockerPid = (
+        await sourceBlocker.query<{ pid: number }>(
+          'SELECT pg_backend_pid() AS pid',
+        )
+      ).rows[0].pid;
       const sourcePlan = await writer.prepare(
         actor,
         scope.tenantId,
@@ -329,12 +338,13 @@ describePostgres(
         );
         sourceApply = writer.apply(actor, scope.tenantId, sourceRequest);
         let waiting = false;
-        const deadline = Date.now() + 2_000;
+        const deadline = Date.now() + 4_000;
         while (Date.now() < deadline && !waiting) {
+          await sourceBlocker.query('SELECT pg_stat_clear_snapshot()');
           const proof = await sourceBlocker.query<{ waiting: boolean }>(
             `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-             WHERE wait_event_type='Lock' AND query LIKE '%FOR UPDATE%'
-               AND query LIKE '%IntegrationSource%') AS waiting`,
+             WHERE $1::integer = ANY(pg_blocking_pids(pid))) AS waiting`,
+            [sourceBlockerPid],
           );
           waiting = proof.rows[0].waiting;
           if (!waiting) await new Promise((resolve) => setTimeout(resolve, 20));

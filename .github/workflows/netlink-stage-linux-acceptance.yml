@@ -1,0 +1,75 @@
+name: Disposable netlink stage Linux acceptance
+
+on:
+  push:
+    branches: [codex/netlink-linux-ci-20260927]
+    paths:
+      - '.github/workflows/netlink-stage-linux-acceptance.yml'
+      - 'scripts/ci/netlink-stage-acceptance/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: netlink-stage-linux-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  disposable-posix:
+    if: github.repository == 'boozik3412/leetplus' && github.ref == 'refs/heads/codex/netlink-linux-ci-20260927'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact CI candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Verify immutable fixture snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$GITHUB_REF" = refs/heads/codex/netlink-linux-ci-20260927
+          cd scripts/ci/netlink-stage-acceptance
+          sha256sum --check --strict SHA256SUMS
+          /usr/bin/python3 -I -B -c 'from pathlib import Path; [compile(p.read_bytes(), str(p), "exec") for p in Path(".").glob("*.py")]'
+      - name: Run isolated root fixture without repository credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/netlink-stage-linux-evidence"
+          mkdir -m 0700 "$evidence"
+          result_nonce="$(/usr/bin/python3 -I -B -c 'import secrets; print(secrets.token_hex(16))')"
+          result_dir="/tmp/leetplus-stage-acceptance-results-$result_nonce"
+          sudo -n /usr/bin/mkdir -m 0700 "$result_dir"
+          result="$result_dir/linux-stage-acceptance-result.json"
+          set +e
+          sudo -n /usr/bin/env -i PATH=/usr/bin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
+            /usr/bin/timeout --signal=TERM --kill-after=5s 90s \
+            /usr/bin/python3 -I -B scripts/ci/netlink-stage-acceptance/run_linux_stage_acceptance.py \
+            --output "$result" >"$evidence/stdout.log" 2>"$evidence/stderr.log"
+          code=$?
+          set -e
+          printf '%s\n' "$code" >"$evidence/exit-code.txt"
+          if sudo -n /usr/bin/test -f "$result"; then
+            sudo -n /bin/cat "$result" >"$evidence/result.json"
+            chmod 0600 "$evidence/result.json"
+          fi
+          sha256sum "$evidence"/* >"$RUNNER_TEMP/netlink-stage-linux-evidence-SHA256SUMS"
+          printf '%s\n' 'NETLINK_LINUX_ACCEPTANCE_STDOUT_BEGIN'
+          cat "$evidence/stdout.log"
+          printf '%s\n' 'NETLINK_LINUX_ACCEPTANCE_STDOUT_END'
+          if test -s "$evidence/stderr.log"; then
+            printf '%s\n' 'NETLINK_LINUX_ACCEPTANCE_STDERR_BEGIN'
+            cat "$evidence/stderr.log"
+            printf '%s\n' 'NETLINK_LINUX_ACCEPTANCE_STDERR_END'
+          fi
+          if test -f "$evidence/result.json"; then
+            printf '%s\n' 'NETLINK_LINUX_ACCEPTANCE_RECEIPT_BEGIN'
+            cat "$evidence/result.json"
+            printf '%s\n' 'NETLINK_LINUX_ACCEPTANCE_RECEIPT_END'
+          fi
+          cat "$RUNNER_TEMP/netlink-stage-linux-evidence-SHA256SUMS"
+          exit "$code"

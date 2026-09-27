@@ -2,6 +2,20 @@
 
 Статус: **канонический current-state contract**, оперативный checkpoint **24.09.2026**.
 
+**Source-only Langame follow-up 27.09:** ограниченные права provider считаются
+рабочим режимом ручного импорта: доступные разделы продолжают загружаться.
+Гостевые denial-, multi-club- и pagination-сценарии закрепляют сохранение
+независимых данных и ранее полученных страниц.
+Web наблюдает существующий долгий run после локального ожидания, сохраняет
+историю при ошибке GET и показывает endpoint limitations как PARTIAL.
+Guest foundation записывает явный PARTIAL без продвижения полного cursor;
+полный отказ provider reads остаётся FAILED. Daily coverage не объявляет
+этот partial полным успехом и сохраняет существующий gate зависимых snapshots.
+Это не расширяет route/tenant/Store authority, secrets, egress, schema или
+worker placement; external scheduled `EXTERNAL_DENY` и собственные ошибки
+admission/сохранения остаются прежними. Source/local fixture не является
+production deployment. [Поведение и пределы](../integrations/langame-partial-sync.md).
+
 **Source-only support follow-up 24.09:** в corporate contour подготовлены два
 узких маршрута без production effect: platform-admin
 `POST /admin/support-tickets/:id/close-with-comment` атомарно закрывает ровно
@@ -274,8 +288,10 @@ Store subset; общесетевые назначения не приписыв�
 
 Deployed bcb0a4d3 ручной синхронизации изолирует отказы provider по разделам:
 доступные товары можно сохранить без недоступных категорий. Это не обход scope:
-tenant/exact Store admission и DB ошибки остаются fail-closed, AUTO semantics
-не меняются. Неполный provider job хранится FAILED с явным partial marker,
+tenant/exact Store admission и DB ошибки остаются fail-closed. Следующий
+source-only follow-up позволяет AUTO продолжить независимые provider reads
+при известном permission denial; complete coverage и зависимые snapshots
+по-прежнему fail-closed. Неполный provider job хранится FAILED с явным partial marker,
 settings/UI показывает PARTIAL и комментарии; full-source freshness/cursor не
 продвигаются. Схема/ACL/egress/worker scope не расширены. Выпуск на server1337
 завершён по отдельному GO, без запуска старого VDS. Для1171 подтверждены466 товаров,

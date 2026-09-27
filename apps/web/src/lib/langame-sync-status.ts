@@ -44,6 +44,10 @@ export function langameSyncStatusLabel(status: string) {
     return "Выполняется";
   }
 
+  if (status === "UNKNOWN") {
+    return "Статус уточняется";
+  }
+
   return status;
 }
 

@@ -869,7 +869,7 @@ describe('LangameSyncService', () => {
                 component: 'CATEGORIES',
                 status: 'FAILED',
                 message: expect.stringContaining(
-                  'не разрешил доступ',
+                  'не предоставил доступ',
                 ) as unknown,
               }),
               expect.objectContaining({
@@ -1133,9 +1133,30 @@ describe('LangameSyncService', () => {
       expect(prisma.integrationSource.update).not.toHaveBeenCalled();
     });
 
-    it('retains the automatic category denial contract', async () => {
+    it('continues permitted automatic sections without claiming complete coverage', async () => {
       client.listActiveProductGroups.mockRejectedValue(
         new Error('No permissions'),
+      );
+      const result = await service.syncTenant(user, {
+        ...period,
+        trigger: 'AUTO',
+      });
+      expect(result).toMatchObject({
+        failedSources: 0,
+        partialSources: 1,
+        products: 1,
+        inventorySnapshots: 1,
+        salesFacts: 1,
+        clubRevenueFacts: 2,
+      });
+      expect(prisma.product.upsert).toHaveBeenCalled();
+      expect(client.listGoods).toHaveBeenCalled();
+      expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+    });
+
+    it('retains automatic transport failure instead of treating it as a permission limit', async () => {
+      client.listActiveProductGroups.mockRejectedValue(
+        new Error('Network timeout'),
       );
       const result = await service.syncTenant(user, {
         ...period,

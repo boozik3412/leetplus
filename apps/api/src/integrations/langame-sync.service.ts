@@ -357,18 +357,21 @@ export class LangameSyncService {
         try {
           return await request();
         } catch (error) {
-          if (trigger !== IntegrationSyncTrigger.MANUAL) throw error;
           const denied =
             error instanceof Error &&
             /no permissions|forbidden|unauthorized|\b40[13]\b/i.test(
               error.message,
             );
+          // A known provider permission limit affects only this read. AUTO
+          // still fails closed on transport/unknown errors and never advances
+          // complete coverage for a partial import.
+          if (trigger !== IntegrationSyncTrigger.MANUAL && !denied) throw error;
           steps.push({
             component,
             status: 'FAILED',
             message: `${SYNC_COMPONENT_LABELS[component]}: ${
               denied
-                ? 'Langame не разрешил доступ. Проверьте права подключения на этот раздел.'
+                ? 'Langame не предоставил доступ к этому разделу. Другие разделы проверяются независимо.'
                 : 'не удалось полностью получить данные от Langame. Повторите загрузку после устранения ошибки источника.'
             }`,
             ...(clubId ? { clubId } : {}),

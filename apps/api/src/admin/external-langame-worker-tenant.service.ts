@@ -240,6 +240,23 @@ export class ExternalLangameWorkerTenantService {
               'Active platform administrator required',
             );
           }
+          // Acquire row locks before the signed preimage read. A concurrent
+          // deactivation or rebind is ordered before or after this exact CAS,
+          // never between the scope read and activation commit.
+          await tx.$queryRaw(Prisma.sql`
+            SELECT "id" FROM "Tenant"
+            WHERE "id" = ${tenantId} FOR UPDATE
+          `);
+          await tx.$queryRaw(Prisma.sql`
+            SELECT "id" FROM "IntegrationSource"
+            WHERE "id" = ${EZ_GAME_WORKER_SCOPE.sourceId}
+              AND "tenantId" = ${tenantId} FOR UPDATE
+          `);
+          await tx.$queryRaw(Prisma.sql`
+            SELECT "id" FROM "Store"
+            WHERE "id" = ${EZ_GAME_WORKER_SCOPE.storeId}
+              AND "tenantId" = ${tenantId} FOR UPDATE
+          `);
           const snapshot = await this.loadSnapshot(tx, tenantId, action);
           const plan = this.buildPlan(snapshot, action);
           if (this.digest(plan) !== planSha256) {
@@ -247,6 +264,13 @@ export class ExternalLangameWorkerTenantService {
               'External worker tenant plan has drifted',
             );
           }
+          this.assertApproval(input.approval, {
+            tenantId,
+            action,
+            planSha256,
+            requestId,
+            reasonSha256: this.digest(reason),
+          });
           const now = new Date();
           const claimed = await tx.tenant.updateMany({
             where: {

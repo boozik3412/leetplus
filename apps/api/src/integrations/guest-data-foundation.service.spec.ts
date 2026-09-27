@@ -12,6 +12,12 @@ import {
 import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
 import { createLangameExternalPilotAuthority } from './langame-external-pilot-authority';
 
+jest.mock('./langame-external-import-lock', () => ({
+  withExactExternalImportLock: <T>(_tenantId: string, work: () => Promise<T>) =>
+    work(),
+  assertExactExternalImportLockHeld: () => Promise.resolve(),
+}));
+
 const user = {
   id: 'user-1',
   email: 'owner@example.com',
@@ -976,6 +982,67 @@ describe('GuestDataFoundationService', () => {
     for (const method of Object.values(langameClient)) {
       expect(method).not.toHaveBeenCalled();
     }
+  });
+
+  it('updates computer counts only through the exact active worker Store CAS', async () => {
+    const authority = createLangameExternalPilotAuthority({
+      tenantId: '8cc79086-ed43-44fa-83d3-20207ec48758',
+      tenantSlug: 'set-1',
+      sourceId: '94a3842b-847e-4c4d-89b0-7cb8976a9f17',
+      storeId: 'ecee16ef-f0cb-4307-b079-e2f0303c3a16',
+      externalDomain: '1171.langame.ru',
+      externalClubId: '1',
+      profileRevision: 2,
+      executionRevision: 3,
+      storeRevision: 0,
+      customerStage: TenantCustomerStage.LIVE,
+    });
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: authority.storeId,
+        integrationSourceId: authority.sourceId,
+        externalDomain: authority.externalDomain,
+        externalClubId: authority.externalClubId,
+        executionRevision: 0,
+      },
+    ]);
+    const runnable = service as unknown as {
+      syncStoreComputerCounts: (...args: unknown[]) => Promise<number>;
+    };
+    await runnable.syncStoreComputerCounts(
+      authority.tenantId,
+      authority.externalDomain,
+      [
+        { id: 1, club_id: 1, count: 10 },
+        { id: 2, club_id: 2, count: 99 },
+      ],
+      [],
+      new Date(),
+      authority,
+    );
+    expect(prisma.store.updateMany).toHaveBeenCalledTimes(1);
+    const calls = prisma.store.updateMany.mock.calls as unknown as Array<
+      [
+        {
+          where: {
+            id: string;
+            integrationSourceId: string;
+            isActive: boolean;
+            executionRevision: number;
+            externalClubId: string;
+          };
+          data: { computerCount: number };
+        },
+      ]
+    >;
+    expect(calls[0][0].where).toMatchObject({
+      id: authority.storeId,
+      integrationSourceId: authority.sourceId,
+      isActive: true,
+      executionRevision: 0,
+      externalClubId: '1',
+    });
+    expect(calls[0][0].data.computerCount).toBe(10);
   });
 
   it('reconciles a complete guest snapshot through the identity resolver', async () => {

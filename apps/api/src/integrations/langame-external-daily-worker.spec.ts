@@ -117,6 +117,14 @@ describe('external Langame pilot worker', () => {
         LANGAME_EXTERNAL_WORKER_DATE: '2026-09-25',
       }),
     ).toThrow('business date');
+    expect(() =>
+      loadLangameExternalWorkerConfig({
+        ...env(),
+        NODE_ENV: 'production',
+        DATABASE_URL:
+          'postgresql://leetplus_runtime:fixture@postgres/leetplus?connection_limit=2',
+      }),
+    ).toThrow('Prisma pool1');
   });
 
   it('runs exactly the granted tenant and reports aggregate-only output', async () => {

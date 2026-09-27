@@ -10,6 +10,7 @@ import { LangameClient } from './langame.client';
 import { LangameDailySyncService } from './langame-daily-sync.service';
 import type { DailySyncResult } from './langame-daily-sync.service';
 import { LangameExternalRunLeaseService } from './langame-external-run-lease.service';
+import { withExactExternalImportLock } from './langame-external-import-lock';
 import { LangameSettingsService } from './langame-settings.service';
 import { LangameSyncService } from './langame-sync.service';
 import { SecretEncryptionService } from './secret-encryption.service';
@@ -44,49 +45,58 @@ import {
 export class LangameExternalWorkerModule {}
 
 async function main() {
+  if (process.env.LANGAME_EXTERNAL_WORKER_ENABLED !== 'true') {
+    console.error('EXTERNAL_WORKER_DISABLED_PROFILE');
+    process.exitCode = 1;
+    return;
+  }
   const config = loadLangameExternalWorkerConfig();
   const businessDate = externalWorkerBusinessDate(config);
   const app = await NestFactory.createApplicationContext(
     LangameExternalWorkerModule,
-    { logger: ['error', 'warn'] },
+    // Nest ConsoleLogger.warn writes to stdout. This process reserves stdout
+    // exclusively for the one compact terminal JSON; progress is explicit stderr.
+    { logger: false },
   );
   try {
-    const lease = app.get(LangameExternalRunLeaseService);
-    const acquisition = await lease.acquire(config, businessDate);
-    if (acquisition.status === 'REPLAY') {
-      process.stdout.write(`${JSON.stringify(acquisition.terminal)}\n`);
-      // Native control must reconcile the original receipt, never publish a
-      // second PASS for this day from a replayed application result.
-      process.exitCode = 75;
-      return;
-    }
-    let syncResult: DailySyncResult | undefined;
-    let syncError: unknown;
-    try {
-      syncResult = await runLangameExternalWorkerOnce(
-        app.get(LangameDailySyncService),
-        process.env,
-        { log: (message) => console.error(message) },
+    await withExactExternalImportLock(config.authority.tenantId, async () => {
+      const lease = app.get(LangameExternalRunLeaseService);
+      const acquisition = await lease.acquire(config, businessDate);
+      if (acquisition.status === 'REPLAY') {
+        process.stdout.write(`${JSON.stringify(acquisition.terminal)}\n`);
+        // Native control must reconcile the original receipt, never publish a
+        // second PASS for this day from a replayed application result.
+        process.exitCode = 75;
+        return;
+      }
+      let syncResult: DailySyncResult | undefined;
+      let syncError: unknown;
+      try {
+        syncResult = await runLangameExternalWorkerOnce(
+          app.get(LangameDailySyncService),
+          process.env,
+          { log: (message) => console.error(message) },
+        );
+      } catch (error) {
+        syncError = error;
+      }
+      const terminal = externalWorkerTerminal(
+        config,
+        businessDate,
+        syncResult ??
+          (syncError instanceof ExternalWorkerIncompleteError
+            ? syncError.result
+            : undefined),
       );
-    } catch (error) {
-      syncError = error;
-    }
-    const terminal = externalWorkerTerminal(
-      config,
-      businessDate,
-      syncResult ??
-        (syncError instanceof ExternalWorkerIncompleteError
-          ? syncError.result
-          : undefined),
-    );
-    await lease.complete(config, businessDate, terminal);
-    process.stdout.write(`${JSON.stringify(terminal)}\n`);
-    if (syncError || terminal.decision === 'FAILED') {
-      console.error(
-        `External Langame worker failed: ${syncError instanceof ExternalWorkerIncompleteError ? syncError.message : 'unexpected execution error'}`,
-      );
-      process.exitCode = 1;
-    }
+      await lease.complete(config, businessDate, terminal);
+      process.stdout.write(`${JSON.stringify(terminal)}\n`);
+      if (syncError || terminal.decision === 'FAILED') {
+        console.error(
+          `External Langame worker failed: ${syncError instanceof ExternalWorkerIncompleteError ? syncError.message : 'unexpected execution error'}`,
+        );
+        process.exitCode = 1;
+      }
+    });
   } finally {
     await app.close();
   }

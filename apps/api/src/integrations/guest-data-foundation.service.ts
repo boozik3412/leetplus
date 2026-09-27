@@ -39,6 +39,10 @@ import {
 } from './guest-identity-resolver.service';
 import { LangameClient } from './langame.client';
 import {
+  assertExactExternalImportLockHeld,
+  withExactExternalImportLock,
+} from './langame-external-import-lock';
+import {
   externalLangamePilotAllows,
   externalLangameDataRequirements,
   isLangameExternalPilotAuthority,
@@ -422,6 +426,17 @@ export class GuestDataFoundationService {
     executionAction: TenantExecutionAction = 'WRITE',
     externalPilot?: LangameExternalPilotAuthority,
   ): Promise<GuestDataFoundationSyncResult> {
+    return withExactExternalImportLock(tenantId, () =>
+      this.syncTenantByIdOwned(tenantId, query, executionAction, externalPilot),
+    );
+  }
+
+  private async syncTenantByIdOwned(
+    tenantId: string,
+    query: GuestDataFoundationSyncQuery,
+    executionAction: TenantExecutionAction,
+    externalPilot?: LangameExternalPilotAuthority,
+  ): Promise<GuestDataFoundationSyncResult> {
     const admission = await this.assertExecutionAllowed(
       tenantId,
       executionAction,
@@ -760,6 +775,12 @@ export class GuestDataFoundationService {
   }
 
   async syncComputerCountsForTenant(tenantId: string) {
+    return withExactExternalImportLock(tenantId, () =>
+      this.syncComputerCountsForTenantOwned(tenantId),
+    );
+  }
+
+  private async syncComputerCountsForTenantOwned(tenantId: string) {
     await this.tenantExecutionAdmissionService.assertAllowed(tenantId, [
       { module: TenantModule.INTEGRATIONS, action: 'WRITE' },
       { module: TenantModule.ASSORTMENT, action: 'WRITE' },
@@ -1073,6 +1094,7 @@ export class GuestDataFoundationService {
       pcTypesInClubs,
       pcTypeLinks,
       now,
+      externalPilot,
     );
     const tariffTypeGroups = buildLangameTariffTypeGroupIndex(
       await this.captureEndpoint(profile, 'tariffs/types_groups/list', () =>
@@ -1413,6 +1435,7 @@ export class GuestDataFoundationService {
     pcTypesInClubs: LangamePcTypeInClub[],
     pcTypeLinks: LangamePcTypeLink[],
     syncedAt: Date,
+    authority?: LangameExternalPilotAuthority,
   ) {
     const typeToClub = new Map<string, string>();
     const countByClub = new Map<string, number>();
@@ -1530,20 +1553,47 @@ export class GuestDataFoundationService {
     }
 
     const updates = await Promise.all(
-      Array.from(countByClub.entries()).map(([externalClubId, count]) =>
-        this.prisma.store.updateMany({
+      Array.from(countByClub.entries()).map(async ([externalClubId, count]) => {
+        if (authority && externalClubId !== authority.externalClubId) {
+          return { count: 0 };
+        }
+        if (authority) {
+          await assertExactExternalImportLockHeld();
+          await this.assertExactExternalStore(authority);
+        }
+        const updated = await this.prisma.store.updateMany({
           where: {
             tenantId,
             externalProvider: IntegrationProvider.LANGAME,
             externalDomain: domain,
             externalClubId,
+            ...(authority
+              ? {
+                  id: authority.storeId,
+                  integrationSourceId: authority.sourceId,
+                  isActive: true,
+                  executionRevision: authority.storeRevision,
+                  tenant: {
+                    is: {
+                      customerStage: authority.customerStage,
+                      executionRevision: authority.executionRevision,
+                      entitlementProfileRevision: authority.profileRevision,
+                      status: 'ACTIVE' as const,
+                    },
+                  },
+                }
+              : {}),
           },
           data: {
             computerCount: count,
             computerCountSyncedAt: syncedAt,
           },
-        }),
-      ),
+        });
+        if (authority && updated.count !== 1) {
+          throw new ExternalGuestDataFenceError();
+        }
+        return updated;
+      }),
     );
 
     return updates.reduce((sum, update) => sum + update.count, 0);
@@ -2756,6 +2806,7 @@ export class GuestDataFoundationService {
   private async assertExternalProfileCurrent(profile: SourceProfile) {
     const authority = this.externalProfileAuthorities.get(profile);
     if (!authority) return;
+    await assertExactExternalImportLockHeld();
     try {
       const admission = await this.assertExecutionAllowed(
         authority.tenantId,

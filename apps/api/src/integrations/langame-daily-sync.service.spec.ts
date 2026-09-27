@@ -14,6 +14,12 @@ import type { LangameSyncService } from './langame-sync.service';
 import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
 import { createLangameExternalPilotAuthority } from './langame-external-pilot-authority';
 
+jest.mock('./langame-external-import-lock', () => ({
+  withExactExternalImportLock: <T>(_tenantId: string, work: () => Promise<T>) =>
+    work(),
+  assertExactExternalImportLockHeld: () => Promise.resolve(),
+}));
+
 type RunnableDailySyncService = {
   runTenantDailySync(input: {
     tenantId: string;

@@ -35,6 +35,13 @@ workers are not part of this pilot.
    owns the exact tenant/source/Store/business-day, followed by one terminal
    result. Intent-only is ambiguous and forbids retry; a replayed terminal
    returns NO_NEW_EFFECT (exit75) with its original run ID. No TTL or blind retry.
+   The same tenant/source/Store session-scoped PostgreSQL advisory lock is
+   acquired before this intent and surrounds the entire worker tick. Manual
+   business and guest import paths acquire that identical lock. Nested daily
+   child calls inherit it; another process fails before provider work. The
+   lock holds one verified TLS DB session without holding a transaction over
+   provider calls. External worker Prisma pool is one connection, plus this
+   lock session: total two. A lost session fails current authority checks.
 3. Before and during each data scope, tenant execution admission is evaluated
    against current profile/execution revisions. Only `INTEGRATIONS`,
    `ASSORTMENT` and `STAFF` require `OUTBOUND`; `GAMIFICATION` requires `WRITE`
@@ -43,6 +50,10 @@ workers are not part of this pilot.
    source/Store bindings. Fresh Langame club discovery must still validate
    those bindings; a failed scope check stops before provider data writes.
    Source/Store ownership is never inferred from the INTERNAL `demo` tenant.
+   Langame club discovery and source/Store mutations also recheck the exact
+   authority. Computer count writes require the exact active Store/source/
+   revision and ignore foreign club IDs. The signed tenant transition locks
+   tenant, source and Store rows before checking the plan preimage.
 4. Each tenant result is isolated. The worker records terminal SUCCESS,
    PARTIAL or FAILED per scope/day. It keeps provider and DB errors separate,
    never advances full-source cursors on a partial read, and never marks a

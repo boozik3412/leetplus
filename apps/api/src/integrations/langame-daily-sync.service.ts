@@ -35,6 +35,7 @@ import {
   type GuestDataFoundationSyncResult,
 } from './guest-data-foundation.service';
 import { LangameSyncService } from './langame-sync.service';
+import { withExactExternalImportLock } from './langame-external-import-lock';
 import {
   externalLangamePilotAllows,
   externalLangameDataRequirements,
@@ -153,6 +154,15 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   async runDailySync(input: DailySyncInput = {}): Promise<DailySyncResult> {
+    return withExactExternalImportLock(
+      input.externalPilot?.tenantId ?? '',
+      () => this.runDailySyncOwned(input),
+    );
+  }
+
+  private async runDailySyncOwned(
+    input: DailySyncInput,
+  ): Promise<DailySyncResult> {
     if (input.externalBusinessDate && !input.externalPilot) {
       throw new BadRequestException(
         'External business date requires worker authority',

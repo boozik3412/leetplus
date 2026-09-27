@@ -36,6 +36,12 @@ import {
   type LangameSyncResult,
 } from './langame.types';
 
+jest.mock('./langame-external-import-lock', () => ({
+  withExactExternalImportLock: <T>(_tenantId: string, work: () => Promise<T>) =>
+    work(),
+  assertExactExternalImportLockHeld: () => Promise.resolve(),
+}));
+
 type PrismaMock = {
   tenant: {
     findMany: jest.Mock;
@@ -72,6 +78,7 @@ type PrismaMock = {
     update: jest.Mock;
     findMany: jest.Mock;
     findUnique: jest.Mock;
+    updateMany: jest.Mock;
   };
   inventorySnapshot: {
     findUnique: jest.Mock;
@@ -281,6 +288,7 @@ function createPrismaMock(): PrismaMock {
       update: jest.fn().mockResolvedValue({ id: 'store-1' }),
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     inventorySnapshot: {
       findUnique: jest.fn(),
@@ -1476,6 +1484,25 @@ describe('LangameSyncService', () => {
       executionRevision: 7,
       customerStage: TenantCustomerStage.LIVE,
     });
+    admission.assertAllowed.mockResolvedValue({
+      customerStage: TenantCustomerStage.LIVE,
+      entitlementProfileRevision: 1,
+      executionRevision: 7,
+    });
+    prisma.integrationSource.findUnique.mockResolvedValue({
+      tenantId: externalPilot.tenantId,
+      domain: externalPilot.externalDomain,
+      isActive: true,
+    });
+    prisma.store.findUnique.mockResolvedValue({
+      tenantId: externalPilot.tenantId,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: externalPilot.externalDomain,
+      externalClubId: externalPilot.externalClubId,
+      integrationSourceId: externalPilot.sourceId,
+      isActive: true,
+      executionRevision: 0,
+    });
     settings.resolveTenantAccess.mockResolvedValue({
       apiKey: 'pilot-key',
       sources: [
@@ -1511,6 +1538,17 @@ describe('LangameSyncService', () => {
       service.assertExternalPilotBindings(externalPilot),
     ).rejects.toThrow('single confirmed active club');
     expect(prisma.integrationSyncJob.create).not.toHaveBeenCalled();
+
+    client.listClubs.mockClear();
+    admission.assertAllowed.mockResolvedValueOnce({
+      customerStage: TenantCustomerStage.LIVE,
+      entitlementProfileRevision: 1,
+      executionRevision: 8,
+    });
+    await expect(
+      service.assertExternalPilotBindings(externalPilot),
+    ).rejects.toThrow('admission changed');
+    expect(client.listClubs).not.toHaveBeenCalled();
   });
 
   it('rechecks the exact Store execution revision between external provider reads', async () => {

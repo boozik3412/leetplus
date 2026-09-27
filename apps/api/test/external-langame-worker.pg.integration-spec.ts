@@ -1,5 +1,6 @@
 import { IntegrationProvider, TenantModule, UserRole } from '@prisma/client';
 import type { ConfigService } from '@nestjs/config';
+import { Client } from 'pg';
 import {
   createHash,
   generateKeyPairSync,
@@ -23,6 +24,10 @@ import {
 } from '../src/integrations/langame-external-daily-worker';
 import { externalLangameDataRequirements } from '../src/integrations/langame-external-pilot-authority';
 import { LangameExternalRunLeaseService } from '../src/integrations/langame-external-run-lease.service';
+import {
+  assertExactExternalImportLockHeld,
+  withExactExternalImportLock,
+} from '../src/integrations/langame-external-import-lock';
 
 const confirmation = 'run-external-langame-worker-disposable-ci-fixture';
 const describePostgres =
@@ -223,6 +228,140 @@ describePostgres(
       });
       expect(before.customerStage).toBe('PILOT');
       expect(before.entitlementProfileRevision).toBe(1);
+      // A real competing row update races the signed activation after it has
+      // begun. The writer must lock before reading the signed Store preimage.
+      const blocker = new Client({
+        connectionString: process.env.DATABASE_URL,
+      });
+      await blocker.connect();
+      const racePlan = await writer.prepare(
+        actor,
+        scope.tenantId,
+        'ACTIVATE_LIVE',
+      );
+      const raceId = randomUUID();
+      const raceRequest = {
+        ...input,
+        planSha256: racePlan.planSha256,
+        requestId: raceId,
+        approval: approval(
+          'ACTIVATE_LIVE',
+          racePlan.planSha256,
+          raceId,
+          reason,
+        ),
+      };
+      let racingApply: Promise<unknown> | undefined;
+      try {
+        await blocker.query('BEGIN');
+        await blocker.query(
+          'SELECT "id" FROM "Store" WHERE "id"=$1 FOR UPDATE',
+          [scope.storeId],
+        );
+        racingApply = writer.apply(actor, scope.tenantId, raceRequest);
+        // Observe the competing activation blocked on its exact row lock.
+        let waiting = false;
+        const deadline = Date.now() + 2_000;
+        while (Date.now() < deadline && !waiting) {
+          const proof = await blocker.query<{ waiting: boolean }>(
+            `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+             WHERE wait_event_type='Lock' AND query LIKE '%FOR UPDATE%'
+               AND query LIKE '%Store%') AS waiting`,
+          );
+          waiting = proof.rows[0].waiting;
+          if (!waiting) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(waiting).toBe(true);
+        await blocker.query(
+          'UPDATE "Store" SET "externalClubId"=$1 WHERE "id"=$2',
+          ['2', scope.storeId],
+        );
+        await blocker.query('COMMIT');
+        await expect(racingApply).rejects.toThrow();
+        expect(
+          (
+            await prisma.tenant.findUniqueOrThrow({
+              where: { id: scope.tenantId },
+            })
+          ).customerStage,
+        ).toBe('PILOT');
+        expect(
+          await prisma.tenantModuleEntitlement.count({
+            where: { tenantId: scope.tenantId, outboundEnabled: true },
+          }),
+        ).toBe(0);
+      } finally {
+        await blocker.query('ROLLBACK').catch(() => undefined);
+        await blocker.end();
+        await racingApply?.catch(() => undefined);
+      }
+      await prisma.store.update({
+        where: { id: scope.storeId },
+        data: { externalClubId: '1' },
+      });
+      const sourceBlocker = new Client({
+        connectionString: process.env.DATABASE_URL,
+      });
+      await sourceBlocker.connect();
+      const sourcePlan = await writer.prepare(
+        actor,
+        scope.tenantId,
+        'ACTIVATE_LIVE',
+      );
+      const sourceRequestId = randomUUID();
+      const sourceRequest = {
+        ...input,
+        requestId: sourceRequestId,
+        planSha256: sourcePlan.planSha256,
+        approval: approval(
+          'ACTIVATE_LIVE',
+          sourcePlan.planSha256,
+          sourceRequestId,
+          reason,
+        ),
+      };
+      let sourceApply: Promise<unknown> | undefined;
+      try {
+        await sourceBlocker.query('BEGIN');
+        await sourceBlocker.query(
+          'SELECT "id" FROM "IntegrationSource" WHERE "id"=$1 FOR UPDATE',
+          [scope.sourceId],
+        );
+        sourceApply = writer.apply(actor, scope.tenantId, sourceRequest);
+        let waiting = false;
+        const deadline = Date.now() + 2_000;
+        while (Date.now() < deadline && !waiting) {
+          const proof = await sourceBlocker.query<{ waiting: boolean }>(
+            `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+             WHERE wait_event_type='Lock' AND query LIKE '%FOR UPDATE%'
+               AND query LIKE '%IntegrationSource%') AS waiting`,
+          );
+          waiting = proof.rows[0].waiting;
+          if (!waiting) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(waiting).toBe(true);
+        await sourceBlocker.query(
+          'UPDATE "IntegrationSource" SET "isActive"=false WHERE "id"=$1',
+          [scope.sourceId],
+        );
+        await sourceBlocker.query('COMMIT');
+        await expect(sourceApply).rejects.toThrow();
+        expect(
+          (
+            await prisma.tenant.findUniqueOrThrow({
+              where: { id: scope.tenantId },
+            })
+          ).customerStage,
+        ).toBe('PILOT');
+      } finally {
+        await sourceBlocker.query('ROLLBACK').catch(() => undefined);
+        await sourceBlocker.end();
+        await sourceApply?.catch(() => undefined);
+      }
+      await prisma.integrationSource.update({
+        where: { id: scope.sourceId },
+        data: { isActive: true },
+      });
       const fresh = await writer.prepare(
         actor,
         scope.tenantId,
@@ -305,7 +444,13 @@ describePostgres(
         LANGAME_EXTERNAL_WORKER_EXECUTION_REVISION: String(
           tenant.executionRevision,
         ),
-        LANGAME_EXTERNAL_WORKER_STORE_REVISION: '0',
+        LANGAME_EXTERNAL_WORKER_STORE_REVISION: String(
+          (
+            await prisma.store.findUniqueOrThrow({
+              where: { id: scope.storeId },
+            })
+          ).executionRevision,
+        ),
         LANGAME_EXTERNAL_WORKER_RUN_ID: randomUUID(),
         LANGAME_EXTERNAL_WORKER_BUSINESS_DATE: '2026-09-26',
         LANGAME_DAILY_SYNC_SCHEDULER_ENABLED: 'false',
@@ -334,6 +479,68 @@ describePostgres(
         status: 'REPLAY',
         terminal: { replayed: true, originalRunId: config.runId },
       });
+    });
+
+    it('atomically excludes manual, guest and worker imports on one non-transactional session lock', async () => {
+      let release: () => void = () => undefined;
+      let entered: () => void = () => undefined;
+      const enteredPromise = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const releasePromise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const manual = withExactExternalImportLock(scope.tenantId, async () => {
+        await assertExactExternalImportLockHeld();
+        await expect(
+          withExactExternalImportLock(scope.tenantId, () =>
+            Promise.resolve('nested-worker-child'),
+          ),
+        ).resolves.toBe('nested-worker-child');
+        await expect(
+          withExactExternalImportLock('another-tenant', () =>
+            Promise.resolve('forbidden-cross-tenant'),
+          ),
+        ).rejects.toThrow('another tenant');
+        const sessions = await prisma.$queryRaw<
+          Array<{ xact_start: Date | null; count: bigint }>
+        >`
+          SELECT min(xact_start) AS xact_start, count(*) AS count
+          FROM pg_stat_activity
+          WHERE application_name='leetplus-external-langame-import-lock'
+        `;
+        expect(sessions[0].xact_start).toBeNull();
+        expect(sessions[0].count).toBe(1n);
+        entered();
+        await releasePromise;
+        return 'manual-finished';
+      });
+      await enteredPromise;
+      try {
+        const guestWork = jest.fn(() => Promise.resolve('guest-import'));
+        const workerWork = jest.fn(() => Promise.resolve('worker-import'));
+        await expect(
+          withExactExternalImportLock(scope.tenantId, guestWork),
+        ).rejects.toThrow('already active');
+        await expect(
+          withExactExternalImportLock(scope.tenantId, workerWork),
+        ).rejects.toThrow('already active');
+        expect(guestWork).not.toHaveBeenCalled();
+        expect(workerWork).not.toHaveBeenCalled();
+        await expect(
+          withExactExternalImportLock('another-tenant', () =>
+            Promise.resolve('parallel'),
+          ),
+        ).resolves.toBe('parallel');
+      } finally {
+        release();
+        await manual;
+      }
+      await expect(
+        withExactExternalImportLock(scope.tenantId, () =>
+          Promise.resolve('next-import'),
+        ),
+      ).resolves.toBe('next-import');
     });
 
     it('revokes only data OUTBOUND and invalidates the worker execution revision', async () => {

@@ -88,6 +88,19 @@ export function loadLangameExternalWorkerConfig(
   requiredBoolean(env, 'LANGAME_DAILY_SYNC_SCHEDULER_ENABLED', 'false');
   requiredBoolean(env, 'LANGAME_SCHEDULED_HTTP_ENABLED', 'false');
   requiredBoolean(env, 'GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED', 'false');
+  if (env.NODE_ENV === 'production') {
+    let databaseUrl: URL;
+    try {
+      databaseUrl = new URL(requireValue(env, 'DATABASE_URL'));
+    } catch {
+      throw new Error('External worker database profile is invalid');
+    }
+    if (databaseUrl.searchParams.get('connection_limit') !== '1') {
+      throw new Error(
+        'External worker requires Prisma pool1 plus one lock session',
+      );
+    }
+  }
   // This worker has no reward, activity recovery, retention or guest-game effect.
   for (const key of [
     'LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED',

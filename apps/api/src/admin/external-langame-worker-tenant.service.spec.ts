@@ -72,6 +72,7 @@ function fixture() {
     updatedAt: date,
   };
   const db = {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     tenant: {
       findUnique: jest.fn().mockImplementation(() => Promise.resolve(tenant)),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),

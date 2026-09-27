@@ -44,6 +44,7 @@ import {
 } from './langame-external-pilot-authority';
 import {
   BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+  LANGAME_SYNC_PARTIAL_PREFIX,
   type BackgroundExecutionFencePendingReasonCode,
   type LangameSyncResult,
 } from './langame.types';
@@ -508,75 +509,105 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     const quickScope = await this.runScope(input, scope, async () => {
-      // Refresh product identities before resolving dated sales and stock.
-      // Category/club-price permission denials leave the goods that succeeded.
-      const catalog = input.externalPilot
-        ? await this.langameSyncService.syncTenantById(
-            input.tenantId,
-            { mode: 'CATALOG', trigger: 'AUTO' },
-            'LANGAME_DAILY_SYNC',
-            input.externalPilot,
-          )
-        : null;
-      const quickQuery = {
-        dateFrom: input.dateInput,
-        dateTo: input.dateInput,
-        mode: 'QUICK',
-        trigger: 'AUTO',
-      } as const;
-      const quick = input.externalPilot
-        ? await this.langameSyncService.syncTenantById(
-            input.tenantId,
-            quickQuery,
-            'LANGAME_DAILY_SYNC',
-            input.externalPilot,
-          )
-        : await this.langameSyncService.syncTenantById(
-            input.tenantId,
-            quickQuery,
-            'LANGAME_DAILY_SYNC',
-          );
+      let finalized = false;
+      let catalog: LangameSyncResult | null = null;
+      let quick: LangameSyncResult | null = null;
+      let inventory: LangameSyncResult | null = null;
+      try {
+        // Refresh product identities before resolving dated sales and stock.
+        // Category/club-price permission denials leave the goods that succeeded.
+        catalog = input.externalPilot
+          ? await this.langameSyncService.syncTenantById(
+              input.tenantId,
+              { mode: 'CATALOG', trigger: 'AUTO' },
+              'LANGAME_DAILY_SYNC',
+              input.externalPilot,
+            )
+          : null;
+        const quickQuery = {
+          dateFrom: input.dateInput,
+          dateTo: input.dateInput,
+          mode: 'QUICK',
+          trigger: 'AUTO',
+        } as const;
+        quick = input.externalPilot
+          ? await this.langameSyncService.syncTenantById(
+              input.tenantId,
+              quickQuery,
+              'LANGAME_DAILY_SYNC',
+              input.externalPilot,
+            )
+          : await this.langameSyncService.syncTenantById(
+              input.tenantId,
+              quickQuery,
+              'LANGAME_DAILY_SYNC',
+            );
 
-      const inventory = shouldRunInventory
-        ? await this.syncCurrentInventory(input.tenantId, input.externalPilot)
-        : null;
-      const sourceCounts = {
-        ...this.langameSourceCounts(quick),
-        quick: this.langameSourceCounts(quick),
-        catalog: catalog ? this.langameSourceCounts(catalog) : null,
-        inventory: inventory ? this.langameSourceCounts(inventory) : null,
-      };
-      const summary = {
-        ...this.langameSummary(quick),
-        quick: this.langameSummary(quick),
-        catalog: catalog ? this.langameSummary(catalog) : null,
-        inventory: inventory
-          ? this.langameSummary(inventory)
-          : {
-              status: 'SKIPPED',
-              reason: input.includeCurrentInventory
-                ? 'RECENT_AUTO_INVENTORY_JOB'
-                : 'EXPLICIT_HISTORICAL_DATE',
-            },
-      };
+        inventory = shouldRunInventory
+          ? await this.syncCurrentInventory(input.tenantId, input.externalPilot)
+          : null;
+        const sourceCounts = {
+          ...this.langameSourceCounts(quick),
+          quick: this.langameSourceCounts(quick),
+          catalog: catalog ? this.langameSourceCounts(catalog) : null,
+          inventory: inventory ? this.langameSourceCounts(inventory) : null,
+        };
+        const summary = {
+          ...this.langameSummary(quick),
+          quick: this.langameSummary(quick),
+          catalog: catalog ? this.langameSummary(catalog) : null,
+          inventory: inventory
+            ? this.langameSummary(inventory)
+            : {
+                status: 'SKIPPED',
+                reason: input.includeCurrentInventory
+                  ? 'RECENT_AUTO_INVENTORY_JOB'
+                  : 'EXPLICIT_HISTORICAL_DATE',
+              },
+        };
 
-      const incomplete = [quick, catalog, inventory].some(
-        (result) =>
-          result !== null &&
-          (result.failedSources > 0 || result.partialSources > 0),
-      );
-      if (incomplete) {
-        throw new IncompleteDailyFactsScopeError(
-          'Langame daily facts source is incomplete',
-          sourceCounts,
-          summary,
-          [quick, catalog, inventory].every(
-            (result) => result === null || result.failedSources === 0,
-          ),
+        const incomplete = [quick, catalog, inventory].some(
+          (result) =>
+            result !== null &&
+            (result.failedSources > 0 || result.partialSources > 0),
         );
-      }
+        if (input.externalPilot) {
+          await this.finalizeExternalBusinessSource(
+            input.externalPilot,
+            input.businessDate,
+            { quick, catalog, inventory },
+            incomplete,
+          );
+          finalized = true;
+        }
+        if (incomplete) {
+          throw new IncompleteDailyFactsScopeError(
+            'Langame daily facts source is incomplete',
+            sourceCounts,
+            summary,
+            [quick, catalog, inventory].every(
+              (result) => result === null || result.failedSources === 0,
+            ),
+          );
+        }
 
-      return { sourceCounts, summary };
+        return { sourceCounts, summary };
+      } catch (error) {
+        if (input.externalPilot && !finalized) {
+          await this.finalizeExternalBusinessSource(
+            input.externalPilot,
+            input.businessDate,
+            {
+              catalog,
+              quick: quick ?? this.emptyExternalFacts(input.tenantId),
+              inventory,
+            },
+            true,
+            true,
+          );
+        }
+        throw error;
+      }
     });
 
     return {
@@ -613,6 +644,129 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
         true,
       );
     }
+  }
+
+  private async finalizeExternalBusinessSource(
+    authority: LangameExternalPilotAuthority,
+    businessDate: Date,
+    results: {
+      quick: LangameSyncResult;
+      catalog: LangameSyncResult | null;
+      inventory: LangameSyncResult | null;
+    },
+    incomplete: boolean,
+    forcedFailure = false,
+  ) {
+    await this.assertExternalPilotCurrent(authority);
+    const reads = [results.catalog, results.quick, results.inventory].filter(
+      (result): result is LangameSyncResult => result !== null,
+    );
+    const failed =
+      forcedFailure || reads.some((result) => result.failedSources > 0);
+    const full =
+      !incomplete && results.catalog !== null && results.inventory !== null;
+    const errors = reads.flatMap((result) =>
+      result.sourceResults.flatMap((source) =>
+        source.errorMessage ? [source.errorMessage] : [],
+      ),
+    );
+    if (!results.inventory) {
+      errors.push('Текущие остатки в этом запуске не загружались.');
+    }
+    const errorMessage = full
+      ? null
+      : `${failed ? 'LANGAME_DAILY_SOURCE_FAILED' : LANGAME_SYNC_PARTIAL_PREFIX}: ${errors.join(' ')}`.slice(
+          0,
+          4_000,
+        );
+    await this.prisma.$transaction(async (tx) => {
+      const source = await tx.integrationSource.findUnique({
+        where: { id: authority.sourceId },
+        select: { lastSyncedDate: true },
+      });
+      if (!source) {
+        throw new BadRequestException('External worker source disappeared');
+      }
+      if (full) {
+        const lastSyncedDate =
+          source.lastSyncedDate && source.lastSyncedDate > businessDate
+            ? source.lastSyncedDate
+            : businessDate;
+        const updated = await tx.integrationSource.updateMany({
+          where: {
+            id: authority.sourceId,
+            tenantId: authority.tenantId,
+            domain: authority.externalDomain,
+            isActive: true,
+            lastSyncedDate: source.lastSyncedDate,
+            stores: {
+              some: {
+                id: authority.storeId,
+                isActive: true,
+                executionRevision: authority.storeRevision,
+                externalDomain: authority.externalDomain,
+                externalClubId: authority.externalClubId,
+              },
+            },
+            tenant: {
+              is: {
+                status: 'ACTIVE',
+                customerStage: authority.customerStage,
+                executionRevision: authority.executionRevision,
+                entitlementProfileRevision: authority.profileRevision,
+              },
+            },
+          },
+          data: { lastSyncedAt: new Date(), lastSyncedDate },
+        });
+        if (updated.count !== 1) {
+          throw new BadRequestException(
+            'External worker source cursor CAS changed',
+          );
+        }
+      }
+      await tx.integrationSyncJob.create({
+        data: {
+          tenantId: authority.tenantId,
+          integrationSourceId: authority.sourceId,
+          provider: IntegrationProvider.LANGAME,
+          domain: authority.externalDomain,
+          mode: IntegrationSyncMode.FULL,
+          trigger: IntegrationSyncTrigger.AUTO,
+          status: full
+            ? IntegrationSyncStatus.SUCCESS
+            : IntegrationSyncStatus.FAILED,
+          finishedAt: new Date(),
+          storesCount: Math.max(...reads.map((result) => result.stores ?? 0)),
+          productsCount: results.catalog?.products ?? 0,
+          inventoryCount: results.inventory?.inventorySnapshots ?? 0,
+          salesCount: results.quick.salesFacts ?? 0,
+          discrepancyCount: reads.reduce(
+            (sum, result) => sum + (result.discrepancies ?? 0),
+            0,
+          ),
+          errorMessage,
+        },
+      });
+    });
+  }
+
+  private emptyExternalFacts(tenantId: string): LangameSyncResult {
+    return {
+      tenantId,
+      sources: 1,
+      failedSources: 1,
+      partialSources: 0,
+      stores: 0,
+      products: 0,
+      productGroups: 0,
+      productConfigurations: 0,
+      inventorySnapshots: 0,
+      salesFacts: 0,
+      clubRevenueFacts: 0,
+      discrepancies: 0,
+      sourceResults: [],
+    };
   }
 
   private syncCurrentInventory(

@@ -11,6 +11,12 @@ scheduler to make the external run happen.
 
 The candidate updates permitted Langame business facts, catalog goods, current inventory and
 guest foundation for the exact tenant and its persisted Store bindings.
+The external child CATALOG/QUICK/INVENTORY jobs never advance the shared
+IntegrationSource full cursor. One final daily FULL job summarizes all three:
+its status is PARTIAL/FAILED if any component is unavailable, and it is
+SUCCESS with one cursor advance only when all required reads are complete.
+The settings projection excludes child QUICK/INVENTORY from EZ GAME's latest
+fully successful source status.
 Categories and club product configuration remain unavailable. A permission
 denial on an individual data endpoint leaves other reads running; it is
 reported as PARTIAL, not an empty SUCCESS. Unavailable data cannot certify

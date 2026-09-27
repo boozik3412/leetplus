@@ -490,6 +490,13 @@ describe('LangameDailySyncService tenant execution admission', () => {
         failedSources: 0,
         partialSources: 0,
         sourceResults: [],
+      })
+      .mockResolvedValueOnce({
+        sources: 1,
+        failedSources: 0,
+        partialSources: 0,
+        inventorySnapshots: 464,
+        sourceResults: [],
       });
     subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
       sources: 1,
@@ -644,6 +651,90 @@ describe('LangameDailySyncService tenant execution admission', () => {
       mode: 'FULL',
       status: 'SUCCESS',
       errorMessage: null,
+    });
+  });
+
+  it('requires current inventory in an exact external CANARY despite an explicit historical sales date', async () => {
+    const subject = createSubject();
+    const authority = createLangameExternalPilotAuthority({
+      tenantId: '8cc79086-ed43-44fa-83d3-20207ec48758',
+      tenantSlug: 'set-1',
+      sourceId: '94a3842b-847e-4c4d-89b0-7cb8976a9f17',
+      storeId: 'ecee16ef-f0cb-4307-b079-e2f0303c3a16',
+      externalDomain: '1171.langame.ru',
+      externalClubId: '1',
+      profileRevision: 2,
+      storeRevision: 0,
+      executionRevision: 3,
+      customerStage: TenantCustomerStage.LIVE,
+    });
+    subject.prisma.tenant.findMany.mockResolvedValue([
+      { id: authority.tenantId, slug: authority.tenantSlug },
+    ]);
+    subject.admissionService.evaluate.mockResolvedValue({
+      allowed: true,
+      tenantId: authority.tenantId,
+      customerStage: TenantCustomerStage.LIVE,
+      entitlementProfileRevision: 2,
+      executionRevision: 3,
+    });
+    subject.admissionService.assertAllowed.mockResolvedValue({
+      customerStage: TenantCustomerStage.LIVE,
+      entitlementProfileRevision: 2,
+      executionRevision: 3,
+    });
+    const source = {
+      tenantId: authority.tenantId,
+      sources: 1,
+      failedSources: 0,
+      partialSources: 0,
+      stores: 1,
+      products: 470,
+      productGroups: 5,
+      productConfigurations: 5,
+      inventorySnapshots: 464,
+      salesFacts: 2704,
+      clubRevenueFacts: 30,
+      discrepancies: 0,
+      sourceResults: [],
+    };
+    subject.langameSyncService.syncTenantById.mockResolvedValue(source);
+    subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
+      sources: 1,
+      failedSources: 0,
+      partialSources: 0,
+      sourceResults: [],
+    });
+    subject.businessSnapshotService.runSnapshotsForTenant.mockResolvedValue({
+      runs: [],
+    });
+
+    const result = await subject.service.runDailySync({
+      tenantSlug: authority.tenantSlug,
+      date: '2026-09-21',
+      externalPilot: authority,
+    });
+
+    expect(result.results[0].scopes[0].status).toBe(
+      DailyDataCoverageStatus.SUCCESS,
+    );
+    expect(result.results[0].inventoryRequested).toBe(true);
+    expect(subject.langameSyncService.syncTenantById).toHaveBeenNthCalledWith(
+      3,
+      authority.tenantId,
+      { mode: 'INVENTORY', trigger: 'AUTO' },
+      'LANGAME_DAILY_SYNC',
+      authority,
+    );
+    const aggregateCreates = subject.prisma.integrationSyncJob
+      .create as jest.Mock<
+      unknown,
+      [{ data: { mode: string; status: string; inventoryCount: number } }]
+    >;
+    expect(aggregateCreates.mock.calls[0][0].data).toMatchObject({
+      mode: 'FULL',
+      status: 'SUCCESS',
+      inventoryCount: 464,
     });
   });
 

@@ -184,7 +184,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       : this.previousBusinessDate(new Date());
     const dateInput = this.toDateInputValue(businessDate);
     const force = Boolean(input.force);
-    const includeCurrentInventory = !input.date;
+    const includeCurrentInventory = Boolean(input.externalPilot) || !input.date;
     const tenantSlug = input.tenantSlug?.trim();
     if (tenantSlug && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(tenantSlug)) {
       throw new BadRequestException('tenantSlug must be a lowercase slug');
@@ -487,10 +487,13 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     externalPilot?: LangameExternalPilotAuthority;
   }) {
     const scope = DailyDataCoverageScope.BUSINESS_FACTS;
-    const shouldRunQuick = await this.shouldRunScope(input, scope);
+    const shouldRunQuick = input.externalPilot
+      ? true
+      : await this.shouldRunScope(input, scope);
     const shouldRunInventory =
       input.includeCurrentInventory &&
-      (await this.shouldRunCurrentInventory(input.tenantId));
+      (Boolean(input.externalPilot) ||
+        (await this.shouldRunCurrentInventory(input.tenantId)));
 
     if (!shouldRunQuick) {
       if (shouldRunInventory) {

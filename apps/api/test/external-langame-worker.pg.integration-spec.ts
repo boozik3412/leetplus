@@ -721,6 +721,64 @@ describePostgres(
         status: 'SUCCESS',
         errorMessage: null,
       });
+
+      client.listActiveProductGroups.mockRejectedValue(
+        new Error('Langame 403 no permissions'),
+      );
+      const canaryPartial = await daily.runDailySync({
+        tenantSlug: scope.tenantSlug,
+        date: '2026-09-23',
+        externalPilot: authority,
+      });
+      expect(canaryPartial.results[0]).toMatchObject({
+        inventoryRequested: true,
+      });
+      expect(canaryPartial.results[0].scopes[0]).toMatchObject({
+        status: 'FAILED',
+        partial: true,
+        inventoryRequested: true,
+      });
+      expect(
+        (
+          await prisma.integrationSource.findUniqueOrThrow({
+            where: { id: scope.sourceId },
+          })
+        ).lastSyncedDate,
+      ).toEqual(new Date('2026-09-27T00:00:00.000Z'));
+      const canaryAggregate = await prisma.integrationSyncJob.findFirstOrThrow({
+        where: { tenantId: scope.tenantId, mode: 'FULL' },
+        orderBy: { startedAt: 'desc' },
+      });
+      expect(canaryAggregate).toMatchObject({ status: 'FAILED' });
+      expect(canaryAggregate.errorMessage).toContain('LANGAME_SYNC_PARTIAL:');
+      client.listActiveProductGroups.mockResolvedValue([]);
+      const canaryFull = await daily.runDailySync({
+        tenantSlug: scope.tenantSlug,
+        date: '2026-09-24',
+        externalPilot: authority,
+      });
+      expect(canaryFull.results[0]).toMatchObject({
+        inventoryRequested: true,
+      });
+      expect(canaryFull.results[0].scopes[0]).toMatchObject({
+        status: 'SUCCESS',
+        inventoryRequested: true,
+      });
+      expect(
+        (
+          await prisma.integrationSource.findUniqueOrThrow({
+            where: { id: scope.sourceId },
+          })
+        ).lastSyncedDate,
+      ).toEqual(new Date('2026-09-27T00:00:00.000Z'));
+      const canarySuccess = await prisma.integrationSyncJob.findFirstOrThrow({
+        where: { tenantId: scope.tenantId, mode: 'FULL' },
+        orderBy: { startedAt: 'desc' },
+      });
+      expect(canarySuccess).toMatchObject({
+        status: 'SUCCESS',
+        errorMessage: null,
+      });
     });
 
     it('revokes only data OUTBOUND and invalidates the worker execution revision', async () => {

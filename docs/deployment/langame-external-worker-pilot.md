@@ -35,7 +35,11 @@ workers are not part of this pilot.
    needed after application cutover. No
    wildcard tenant, all-active scan or shared service token is accepted.
 2. A `CANARY` uses one explicit business date and never runs reward, activity
-   recovery, retention or other game maintenance. `TIMER` uses the previous
+   recovery, retention or other game maintenance. That date limits dated sales,
+   revenue and guest events; catalog, balances and inventory are current
+   observations in both CANARY and TIMER. External inventory is always read
+   under the once-only day intent, so a historical date cannot omit it and
+   contradict the daily FULL aggregate/terminal. `TIMER` uses the previous
    completed business day, has bounded time and does not keep an explicit date
    in the static profile. A durable unique intent in the tenant audit table
    owns the exact tenant/source/Store/business-day, followed by one terminal

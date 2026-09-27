@@ -1,5 +1,14 @@
 # LeetPlus open beta: пакет запуска
 
+Source-only follow-up 27.09: для EZ GAME выбран `LIVE`, подготовлены отдельный
+Langame daily worker CLI и узкий platform-admin prepare/apply/revoke с exact
+tenant/Store scope. Provider denial оставляет доступные чтения; минимальный
+OUTBOUND разрешается только `INTEGRATIONS/ASSORTMENT/STAFF`, а
+`GAMIFICATION` остаётся без outbound, чтобы не открыть bonus-ledger path.
+Внешний timer/grant/Compose service и production установка нового workflow
+отсутствуют; действующий tenant и INTERNAL worker не менялись.
+[Границы кандидата](../deployment/langame-external-worker-pilot.md).
+
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |

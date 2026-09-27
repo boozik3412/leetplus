@@ -24,6 +24,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import { LangameClient } from './langame.client';
+import { createLangameExternalPilotAuthority } from './langame-external-pilot-authority';
 import { LangameSettingsService } from './langame-settings.service';
 import {
   EXTERNAL_LANGAME_BINDING_REQUIRED_REASON_CODE,
@@ -1435,6 +1436,7 @@ describe('LangameSyncService', () => {
       integrationSourceId: true,
       externalDomain: true,
       externalClubId: true,
+      executionRevision: true,
     });
     expect(client.listClubs).toHaveBeenCalledTimes(1);
     expect(client.listClubProductConfiguration).toHaveBeenCalledWith(
@@ -1455,6 +1457,56 @@ describe('LangameSyncService', () => {
       isActive: true,
       integrationSourceId: 'source-1',
     });
+  });
+
+  it('requires the external pilot sole active club before a worker write', async () => {
+    const externalPilot = createLangameExternalPilotAuthority({
+      tenantId: '8cc79086-ed43-44fa-83d3-20207ec48758',
+      tenantSlug: 'set-1',
+      sourceId: '94a3842b-847e-4c4d-89b0-7cb8976a9f17',
+      storeId: 'ecee16ef-f0cb-4307-b079-e2f0303c3a16',
+      externalDomain: '1171.langame.ru',
+      externalClubId: '1',
+      profileRevision: 1,
+      storeRevision: 0,
+      executionRevision: 7,
+      customerStage: TenantCustomerStage.LIVE,
+    });
+    settings.resolveTenantAccess.mockResolvedValue({
+      apiKey: 'pilot-key',
+      sources: [
+        {
+          id: externalPilot.sourceId,
+          domain: externalPilot.externalDomain,
+          baseUrl: 'https://1171.langame.ru/public_api',
+        },
+      ],
+    });
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: externalPilot.storeId,
+        name: 'EZ GAME',
+        executionRevision: 0,
+        integrationSourceId: externalPilot.sourceId,
+        externalDomain: externalPilot.externalDomain,
+        externalClubId: '1',
+      },
+    ]);
+    client.listClubs.mockResolvedValue([
+      { id: 1, name: 'EZ GAME', address: '', active: 1 },
+    ]);
+    await expect(
+      service.assertExternalPilotBindings(externalPilot),
+    ).resolves.toBeUndefined();
+
+    client.listClubs.mockResolvedValueOnce([
+      { id: 1, name: 'EZ GAME', address: '', active: 1 },
+      { id: 2, name: 'Foreign', address: '', active: 1 },
+    ]);
+    await expect(
+      service.assertExternalPilotBindings(externalPilot),
+    ).rejects.toThrow('single confirmed active club');
+    expect(prisma.integrationSyncJob.create).not.toHaveBeenCalled();
   });
 
   it('keeps the current day in catch-up sync when a source was already synced today', async () => {

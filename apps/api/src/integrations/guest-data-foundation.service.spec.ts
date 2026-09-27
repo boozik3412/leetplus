@@ -10,6 +10,7 @@ import {
   type GuestDataFoundationSyncResult,
 } from './guest-data-foundation.service';
 import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
+import { createLangameExternalPilotAuthority } from './langame-external-pilot-authority';
 
 const user = {
   id: 'user-1',
@@ -812,6 +813,119 @@ describe('GuestDataFoundationService', () => {
     expect(langameSettingsService.resolveTenantAccess).toHaveBeenCalledWith(
       'tenant-pilot',
     );
+  });
+
+  it('rejects a foreign active Store before stale-run mutation or provider access', async () => {
+    const authority = createLangameExternalPilotAuthority({
+      tenantId: '8cc79086-ed43-44fa-83d3-20207ec48758',
+      tenantSlug: 'set-1',
+      sourceId: '94a3842b-847e-4c4d-89b0-7cb8976a9f17',
+      storeId: 'ecee16ef-f0cb-4307-b079-e2f0303c3a16',
+      externalDomain: '1171.langame.ru',
+      externalClubId: '1',
+      profileRevision: 2,
+      executionRevision: 3,
+      storeRevision: 0,
+      customerStage: TenantCustomerStage.LIVE,
+    });
+    tenantExecutionAdmissionService.assertAllowed.mockResolvedValueOnce({
+      allowed: true,
+      tenantId: authority.tenantId,
+      customerStage: TenantCustomerStage.LIVE,
+      entitlementProfileRevision: 2,
+      executionRevision: 3,
+    });
+    prisma.store.findMany.mockResolvedValueOnce([
+      {
+        id: 'foreign-store',
+        integrationSourceId: authority.sourceId,
+        externalDomain: authority.externalDomain,
+        externalClubId: authority.externalClubId,
+        executionRevision: 0,
+      },
+    ]);
+    await expect(
+      service.syncTenantById(
+        authority.tenantId,
+        { dateFrom: '2026-09-26', dateTo: '2026-09-26' },
+        'OUTBOUND',
+        authority,
+      ),
+    ).rejects.toThrow('Store binding changed');
+    expect(tenantExecutionAdmissionService.assertAllowed).toHaveBeenCalledWith(
+      authority.tenantId,
+      [
+        { module: TenantModule.INTEGRATIONS, action: 'OUTBOUND' },
+        { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
+        { module: TenantModule.GAMIFICATION, action: 'WRITE' },
+        { module: TenantModule.STAFF, action: 'OUTBOUND' },
+      ],
+    );
+    expect(prisma.guestDataProfileRun.updateMany).not.toHaveBeenCalled();
+    expect(prisma.guestDataProfileRun.create).not.toHaveBeenCalled();
+    for (const method of Object.values(langameClient)) {
+      expect(method).not.toHaveBeenCalled();
+    }
+  });
+
+  it('keeps a fresh worker admission denial out of optional endpoint errors', async () => {
+    const authority = createLangameExternalPilotAuthority({
+      tenantId: '8cc79086-ed43-44fa-83d3-20207ec48758',
+      tenantSlug: 'set-1',
+      sourceId: '94a3842b-847e-4c4d-89b0-7cb8976a9f17',
+      storeId: 'ecee16ef-f0cb-4307-b079-e2f0303c3a16',
+      externalDomain: '1171.langame.ru',
+      externalClubId: '1',
+      profileRevision: 2,
+      executionRevision: 3,
+      storeRevision: 0,
+      customerStage: TenantCustomerStage.LIVE,
+    });
+    tenantExecutionAdmissionService.assertAllowed
+      .mockResolvedValueOnce({
+        allowed: true,
+        tenantId: authority.tenantId,
+        customerStage: TenantCustomerStage.LIVE,
+        entitlementProfileRevision: 2,
+        executionRevision: 3,
+      })
+      .mockRejectedValueOnce(new Error('TENANT_EXECUTION_REVISION_CHANGED'));
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: authority.storeId,
+        integrationSourceId: authority.sourceId,
+        externalDomain: authority.externalDomain,
+        externalClubId: authority.externalClubId,
+        executionRevision: 0,
+        isActive: true,
+        timeZone: null,
+      },
+    ]);
+    langameSettingsService.resolveTenantAccess.mockResolvedValueOnce({
+      apiKey: 'fixture-unused',
+      sources: [
+        {
+          id: authority.sourceId,
+          domain: authority.externalDomain,
+          baseUrl: 'https://1171.langame.ru/public_api',
+        },
+      ],
+    });
+    const result = await service.syncTenantById(
+      authority.tenantId,
+      { dateFrom: '2026-09-26', dateTo: '2026-09-26' },
+      'OUTBOUND',
+      authority,
+    );
+    expect(result).toMatchObject({ failedSources: 1, partialSources: 0 });
+    expect(result.sourceResults[0].endpointErrors).toEqual({});
+    expect(result.sourceResults[0].errorMessage).toContain(
+      'admission or Store binding changed',
+    );
+    expect(prisma.guest.upsert).not.toHaveBeenCalled();
+    for (const method of Object.values(langameClient)) {
+      expect(method).not.toHaveBeenCalled();
+    }
   });
 
   it('reconciles a complete guest snapshot through the identity resolver', async () => {

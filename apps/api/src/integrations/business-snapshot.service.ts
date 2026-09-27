@@ -10,6 +10,11 @@ import {
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import type { TenantExecutionAction } from '../tenancy/tenant-execution-policy.service';
 import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
+import {
+  externalLangamePilotAllows,
+  externalLangameDataRequirements,
+  type LangameExternalPilotAuthority,
+} from './langame-external-pilot-authority';
 
 export type BusinessSnapshotType =
   | 'REVENUE'
@@ -173,17 +178,43 @@ export class BusinessSnapshotService {
     tenantId: string,
     query: BusinessSnapshotRunQuery,
     executionAction: TenantExecutionAction = 'WRITE',
+    externalPilot?: LangameExternalPilotAuthority,
   ): Promise<BusinessSnapshotRunResult> {
     const admission = await this.assertExecutionAllowed(
       tenantId,
       executionAction,
+      externalPilot,
     );
+    if (
+      externalPilot &&
+      (executionAction !== 'OUTBOUND' ||
+        !externalLangamePilotAllows(externalPilot, {
+          tenantId,
+          customerStage: admission.customerStage,
+          profileRevision: admission.entitlementProfileRevision,
+          executionRevision: admission.executionRevision,
+          jobKind: 'LANGAME_BUSINESS_SNAPSHOT',
+        }))
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame pilot admission changed',
+      );
+    }
     if (executionAction === 'OUTBOUND') {
       const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
         stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
         jobKind: 'LANGAME_BUSINESS_SNAPSHOT',
       });
-      if (!backgroundExecution.allowed) {
+      if (
+        !backgroundExecution.allowed &&
+        !externalLangamePilotAllows(externalPilot, {
+          tenantId,
+          customerStage: admission.customerStage,
+          profileRevision: admission.entitlementProfileRevision,
+          executionRevision: admission.executionRevision,
+          jobKind: 'LANGAME_BUSINESS_SNAPSHOT',
+        })
+      ) {
         throw new ServiceUnavailableException({
           reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
           message: tenantBackgroundExecutionNote(backgroundExecution),
@@ -212,10 +243,13 @@ export class BusinessSnapshotService {
   private assertExecutionAllowed(
     tenantId: string,
     action: TenantExecutionAction,
+    externalPilot?: LangameExternalPilotAuthority,
   ) {
     return this.tenantExecutionAdmissionService.assertAllowed(
       tenantId,
-      BUSINESS_SNAPSHOT_MODULES.map((module) => ({ module, action })),
+      action === 'OUTBOUND' && externalPilot
+        ? externalLangameDataRequirements(BUSINESS_SNAPSHOT_MODULES)
+        : BUSINESS_SNAPSHOT_MODULES.map((module) => ({ module, action })),
     );
   }
 

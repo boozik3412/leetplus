@@ -12,6 +12,7 @@ import type { GuestDataFoundationService } from './guest-data-foundation.service
 import { LangameDailySyncService } from './langame-daily-sync.service';
 import type { LangameSyncService } from './langame-sync.service';
 import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
+import { createLangameExternalPilotAuthority } from './langame-external-pilot-authority';
 
 type RunnableDailySyncService = {
   runTenantDailySync(input: {
@@ -45,6 +46,7 @@ describe('LangameDailySyncService tenant execution admission', () => {
     };
     const langameSyncService = {
       syncTenantById: jest.fn(),
+      assertExternalPilotBindings: jest.fn(),
     };
     const guestDataFoundationService = {
       syncTenantById: jest.fn(),
@@ -54,6 +56,7 @@ describe('LangameDailySyncService tenant execution admission', () => {
     };
     const admissionService = {
       evaluate: jest.fn(),
+      assertAllowed: jest.fn(),
     };
     const service = new LangameDailySyncService(
       configService as unknown as ConfigService,
@@ -311,6 +314,211 @@ describe('LangameDailySyncService tenant execution admission', () => {
     ).not.toHaveBeenCalled();
   });
 
+  it('admits only the exact revision-bound external pilot before data scopes', async () => {
+    const subject = createSubject();
+    const externalPilot = createLangameExternalPilotAuthority({
+      tenantId: '8cc79086-ed43-44fa-83d3-20207ec48758',
+      tenantSlug: 'set-1',
+      sourceId: '94a3842b-847e-4c4d-89b0-7cb8976a9f17',
+      storeId: 'ecee16ef-f0cb-4307-b079-e2f0303c3a16',
+      externalDomain: '1171.langame.ru',
+      externalClubId: '1',
+      profileRevision: 1,
+      storeRevision: 0,
+      executionRevision: 7,
+      customerStage: TenantCustomerStage.LIVE,
+    });
+    subject.prisma.tenant.findMany.mockResolvedValue([
+      { id: externalPilot.tenantId, slug: externalPilot.tenantSlug },
+    ]);
+    subject.admissionService.evaluate.mockResolvedValue({
+      allowed: true,
+      tenantId: externalPilot.tenantId,
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      customerStage: TenantCustomerStage.LIVE,
+      entitlementProfileRevision: 1,
+      executionRevision: 7,
+    });
+    subject.admissionService.assertAllowed.mockResolvedValue({
+      customerStage: TenantCustomerStage.LIVE,
+      entitlementProfileRevision: 1,
+      executionRevision: 7,
+    });
+    const runTenantDailySync = jest
+      .spyOn(
+        subject.service as unknown as RunnableDailySyncService,
+        'runTenantDailySync',
+      )
+      .mockResolvedValue({
+        tenantId: externalPilot.tenantId,
+        slug: externalPilot.tenantSlug,
+        date: '2026-09-26',
+        status: 'PROCESSED',
+        skipped: false,
+        reasonCode: null,
+        failedRequirement: null,
+        scopes: [],
+      });
+
+    const result = await subject.service.runDailySync({
+      tenantSlug: 'set-1',
+      date: '2026-09-26',
+      externalPilot,
+    });
+
+    expect(result).toMatchObject({ tenants: 1, processedTenants: 1 });
+    expect(
+      subject.langameSyncService.assertExternalPilotBindings,
+    ).toHaveBeenCalledWith(externalPilot);
+    expect(runTenantDailySync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: externalPilot.tenantId,
+        externalPilot,
+      }),
+    );
+    expect(subject.admissionService.evaluate).toHaveBeenCalledWith(
+      externalPilot.tenantId,
+      expect.any(Array),
+    );
+
+    subject.admissionService.evaluate.mockResolvedValueOnce({
+      allowed: true,
+      tenantId: externalPilot.tenantId,
+      customerStage: TenantCustomerStage.LIVE,
+      entitlementProfileRevision: 1,
+      executionRevision: 8,
+    });
+    await expect(
+      subject.service.runDailySync({
+        tenantSlug: 'set-1',
+        date: '2026-09-26',
+        externalPilot,
+      }),
+    ).resolves.toMatchObject({ processedTenants: 0, skippedTenants: 1 });
+    expect(runTenantDailySync).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a pilot context with a different slug before provider or coverage access', async () => {
+    const subject = createSubject();
+    const externalPilot = createLangameExternalPilotAuthority({
+      tenantId: '8cc79086-ed43-44fa-83d3-20207ec48758',
+      tenantSlug: 'set-1',
+      sourceId: '94a3842b-847e-4c4d-89b0-7cb8976a9f17',
+      storeId: 'ecee16ef-f0cb-4307-b079-e2f0303c3a16',
+      externalDomain: '1171.langame.ru',
+      externalClubId: '1',
+      profileRevision: 1,
+      storeRevision: 0,
+      executionRevision: 7,
+      customerStage: TenantCustomerStage.LIVE,
+    });
+    await expect(
+      subject.service.runDailySync({
+        tenantSlug: 'demo',
+        externalPilot,
+      }),
+    ).rejects.toThrow('tenant scope is invalid');
+    expect(subject.prisma.tenant.findMany).not.toHaveBeenCalled();
+  });
+
+  it('continues external guest reads after denied catalog sections while retaining the goods result', async () => {
+    const subject = createSubject();
+    const externalPilot = createLangameExternalPilotAuthority({
+      tenantId: '8cc79086-ed43-44fa-83d3-20207ec48758',
+      tenantSlug: 'set-1',
+      sourceId: '94a3842b-847e-4c4d-89b0-7cb8976a9f17',
+      storeId: 'ecee16ef-f0cb-4307-b079-e2f0303c3a16',
+      externalDomain: '1171.langame.ru',
+      externalClubId: '1',
+      profileRevision: 1,
+      storeRevision: 0,
+      executionRevision: 7,
+      customerStage: TenantCustomerStage.LIVE,
+    });
+    subject.prisma.tenant.findMany.mockResolvedValue([
+      { id: externalPilot.tenantId, slug: externalPilot.tenantSlug },
+    ]);
+    subject.admissionService.evaluate.mockResolvedValue({
+      allowed: true,
+      tenantId: externalPilot.tenantId,
+      customerStage: TenantCustomerStage.LIVE,
+      entitlementProfileRevision: 1,
+      executionRevision: 7,
+    });
+    subject.admissionService.assertAllowed.mockResolvedValue({
+      customerStage: TenantCustomerStage.LIVE,
+      entitlementProfileRevision: 1,
+      executionRevision: 7,
+    });
+    subject.langameSyncService.syncTenantById
+      .mockResolvedValueOnce({
+        sources: 1,
+        failedSources: 0,
+        partialSources: 1,
+        products: 470,
+        sourceResults: [{ domain: '1171.langame.ru', status: 'PARTIAL' }],
+      })
+      .mockResolvedValueOnce({
+        sources: 1,
+        failedSources: 0,
+        partialSources: 0,
+        sourceResults: [],
+      });
+    subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
+      sources: 1,
+      failedSources: 0,
+      partialSources: 0,
+      sourceResults: [],
+    });
+
+    const result = await subject.service.runDailySync({
+      tenantSlug: 'set-1',
+      date: '2026-09-26',
+      externalPilot,
+    });
+
+    expect(subject.langameSyncService.syncTenantById).toHaveBeenNthCalledWith(
+      1,
+      externalPilot.tenantId,
+      { mode: 'CATALOG', trigger: 'AUTO' },
+      'LANGAME_DAILY_SYNC',
+      externalPilot,
+    );
+    expect(
+      subject.guestDataFoundationService.syncTenantById,
+    ).toHaveBeenCalledTimes(1);
+    expect(result.results[0].scopes).toContainEqual(
+      expect.objectContaining({
+        scope: DailyDataCoverageScope.BUSINESS_FACTS,
+        status: DailyDataCoverageStatus.FAILED,
+        partial: true,
+      }),
+    );
+    expect(result.results[0].scopes).toContainEqual(
+      expect.objectContaining({
+        scope: DailyDataCoverageScope.GUEST_FOUNDATION,
+        status: DailyDataCoverageStatus.SUCCESS,
+      }),
+    );
+    expect(
+      subject.businessSnapshotService.runSnapshotsForTenant,
+    ).not.toHaveBeenCalled();
+    const upsert = subject.prisma.dailyDataCoverage.upsert as jest.Mock<
+      unknown,
+      [
+        {
+          update?: { sourceCounts?: { catalog?: { products?: number } } };
+        },
+      ]
+    >;
+    expect(
+      upsert.mock.calls.some(
+        ([call]) => call.update?.sourceCounts?.catalog?.products === 470,
+      ),
+    ).toBe(true);
+  });
+
   it('adds an actual-date inventory read before closing the daily QUICK facts coverage', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-09-14T09:00:00.000Z'));
@@ -404,6 +612,69 @@ describe('LangameDailySyncService tenant execution admission', () => {
     expect(
       subject.businessSnapshotService.runSnapshotsForTenant,
     ).not.toHaveBeenCalled();
+  });
+
+  it('identifies permission-only guest degradation without hiding source failure', async () => {
+    const subject = createSubject();
+    subject.prisma.tenant.findMany.mockResolvedValue([
+      { id: 'tenant-internal', slug: 'internal' },
+    ]);
+    subject.admissionService.evaluate.mockResolvedValue({
+      allowed: true,
+      tenantId: 'tenant-internal',
+      customerStage: TenantCustomerStage.INTERNAL,
+    });
+    subject.langameSyncService.syncTenantById.mockResolvedValue({
+      sources: 1,
+      failedSources: 0,
+      partialSources: 0,
+      sourceResults: [],
+    });
+    subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
+      sources: 1,
+      failedSources: 0,
+      partialSources: 1,
+      sourceResults: [
+        {
+          domain: '1171.langame.ru',
+          status: 'PARTIAL',
+          endpointErrors: {
+            'guest/groups': 'Langame не предоставил доступ к этому разделу.',
+          },
+        },
+      ],
+    });
+
+    const partial = await subject.service.runDailySync({ date: '2026-09-20' });
+    expect(partial.results[0].scopes).toContainEqual(
+      expect.objectContaining({
+        scope: DailyDataCoverageScope.GUEST_FOUNDATION,
+        status: DailyDataCoverageStatus.FAILED,
+        partial: true,
+      }),
+    );
+    subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
+      sources: 1,
+      failedSources: 0,
+      partialSources: 1,
+      sourceResults: [
+        {
+          domain: '1171.langame.ru',
+          status: 'PARTIAL',
+          endpointErrors: {
+            'guest/groups': 'Не удалось получить данные этого раздела Langame.',
+          },
+        },
+      ],
+    });
+    const unknown = await subject.service.runDailySync({ date: '2026-09-20' });
+    expect(unknown.results[0].scopes).toContainEqual(
+      expect.objectContaining({
+        scope: DailyDataCoverageScope.GUEST_FOUNDATION,
+        status: DailyDataCoverageStatus.FAILED,
+        partial: false,
+      }),
+    );
   });
 
   it('refreshes current inventory after legacy QUICK coverage closes without rewriting sales coverage', async () => {

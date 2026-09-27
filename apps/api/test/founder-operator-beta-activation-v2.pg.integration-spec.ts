@@ -9,6 +9,7 @@ import path from 'node:path';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AdminController } from '../src/admin/admin.controller';
+import { ExternalLangameWorkerTenantService } from '../src/admin/external-langame-worker-tenant.service';
 import { AdminService } from '../src/admin/admin.service';
 import type { AuthenticatedUser } from '../src/auth/auth.types';
 import { AuthService } from '../src/auth/auth.service';
@@ -1239,6 +1240,7 @@ async function activateThroughHttp(input: {
     providers: [
       { provide: AdminService, useValue: {} },
       { provide: TenantEntitlementProfileService, useValue: {} },
+      { provide: ExternalLangameWorkerTenantService, useValue: {} },
       {
         provide: SharedTenantProvisioningService,
         useValue: input.provisioning,

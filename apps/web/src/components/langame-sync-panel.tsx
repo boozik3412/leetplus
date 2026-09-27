@@ -10,6 +10,11 @@ import {
   langameSyncStatusLabel,
   type LangameSyncSourceResult,
 } from "@/lib/langame-sync-status";
+import {
+  guestSyncCompletionMessage,
+  guestSyncDisplayStatus,
+  observeGuestSync,
+} from "@/lib/guest-sync-observation";
 
 type SyncPeriod = "today" | "last7" | "last30" | "custom";
 
@@ -27,7 +32,7 @@ type SyncResult = {
 };
 
 type GuestSyncStatus = {
-  status: "IDLE" | "RUNNING" | "SUCCESS" | "FAILED";
+  status: "IDLE" | "RUNNING" | "SUCCESS" | "PARTIAL" | "FAILED";
   running: boolean;
   latestRun: GuestSyncRun | null;
   recentRuns: GuestSyncRun[];
@@ -35,7 +40,7 @@ type GuestSyncStatus = {
 };
 
 type GuestSyncFreshness = {
-  status: "EMPTY" | "RUNNING" | "FRESH" | "STALE" | "FAILED";
+  status: "EMPTY" | "RUNNING" | "FRESH" | "STALE" | "PARTIAL" | "FAILED";
   checkedAt: string;
   staleAfterHours: number;
   latestSuccessfulFinishedAt: string | null;
@@ -1005,6 +1010,7 @@ export function LangameSyncPanel({
   const [syncResult, setSyncResult] = useState<CombinedSyncResult | null>(null);
   const [latestGuestStatus, setLatestGuestStatus] =
     useState<GuestSyncStatus | null>(null);
+  const [guestStatusError, setGuestStatusError] = useState<string | null>(null);
   const [assortmentStatus, setAssortmentStatus] =
     useState<SyncStepStatus>("idle");
   const [guestStatus, setGuestStatus] = useState<SyncStepStatus>("idle");
@@ -1071,12 +1077,24 @@ export function LangameSyncPanel({
 
     async function loadGuestStatus() {
       const [status, snapshotStatus] = await Promise.all([
-        fetchGuestSyncStatus(),
+        fetchGuestSyncStatus().catch((error: unknown) => {
+          if (!ignore) {
+            setGuestStatusError(
+              error instanceof Error
+                ? error.message
+                : "Не удалось получить статус гостей.",
+            );
+          }
+          return null;
+        }),
         fetchBusinessSnapshotStatus(),
       ]);
 
       if (!ignore) {
-        setLatestGuestStatus(status);
+        if (status) {
+          setLatestGuestStatus(status);
+          setGuestStatusError(null);
+        }
         setBusinessSnapshots(snapshotStatus);
       }
     }
@@ -1087,6 +1105,42 @@ export function LangameSyncPanel({
       ignore = true;
     };
   }, []);
+
+  // A local wait deadline does not cancel the server import. Keep observing
+  // the existing run without sending another start request.
+  useEffect(() => {
+    if (isSyncing || !latestGuestStatus?.running) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    async function refreshGuestStatus() {
+      try {
+        const status = await fetchGuestSyncStatus(controller.signal);
+        if (!controller.signal.aborted) {
+          setLatestGuestStatus(status);
+          setGuestStatusError(null);
+          setSyncResult((previous) =>
+            previous ? { ...previous, guests: status } : previous,
+          );
+          if (!status.running) return;
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setGuestStatusError(
+          error instanceof Error
+            ? error.message
+            : "Не удалось получить статус гостей.",
+        );
+      }
+      if (!controller.signal.aborted) {
+        timer = setTimeout(() => void refreshGuestStatus(), 10_000);
+      }
+    }
+    timer = setTimeout(() => void refreshGuestStatus(), 10_000);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [isSyncing, latestGuestStatus?.running]);
 
   function selectSyncPeriod(period: SyncPeriod) {
     setSyncPeriod(period);
@@ -1159,9 +1213,18 @@ export function LangameSyncPanel({
           syncDateFrom,
           syncDateTo,
           includeGuestLogs,
+          (status) => {
+            setLatestGuestStatus(status);
+            setGuestStatusError(null);
+          },
         );
       } catch (error) {
         guestError = error;
+        setGuestStatusError(
+          error instanceof Error
+            ? error.message
+            : "Не удалось получить статус гостей.",
+        );
       }
 
       const result = {
@@ -1169,10 +1232,17 @@ export function LangameSyncPanel({
         guests,
       };
       setSyncResult(result);
-      setLatestGuestStatus(guests);
+      if (guests) {
+        setLatestGuestStatus(guests);
+        setGuestStatusError(null);
+      }
 
       if (guests?.status === "FAILED" || !guests) {
         setGuestStatus("error");
+      } else if (guests.running) {
+        setGuestStatus("running");
+      } else if (guestSyncDisplayStatus(guests) === "PARTIAL") {
+        setGuestStatus("partial");
       } else {
         setGuestStatus("success");
       }
@@ -1198,7 +1268,7 @@ export function LangameSyncPanel({
         );
       } else if (assortmentCompletionMessage) {
         setWarning(assortmentCompletionMessage);
-      } else {
+      } else if (!guests.running && !guestSyncCompletionMessage(guests)) {
         setSuccess("Общая синхронизация Langame завершена.");
       }
 
@@ -1663,10 +1733,19 @@ export function LangameSyncPanel({
             {warning}
           </p>
         ) : null}
+        {guestSyncCompletionMessage(latestGuestStatus) ? (
+          <p
+            className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200"
+            role="status"
+          >
+            {guestSyncCompletionMessage(latestGuestStatus)}
+          </p>
+        ) : null}
       </div>
 
       <SyncHealthSummary
         latestGuestStatus={latestGuestStatus}
+        guestStatusError={guestStatusError}
         settings={settings}
       />
       <BusinessSnapshotPanel
@@ -1943,9 +2022,11 @@ function SyncSourceResults({
 function SyncHealthSummary({
   settings,
   latestGuestStatus,
+  guestStatusError,
 }: {
   settings: LangameSettings;
   latestGuestStatus: GuestSyncStatus | null;
+  guestStatusError: string | null;
 }) {
   const sourceRows = getSourceSyncHealth(settings);
   const activeSourcesCount = settings.sources.filter(
@@ -1965,7 +2046,7 @@ function SyncHealthSummary({
     ? getSyncJobTime(latestSuccess)
     : null;
   const guestRun = latestGuestStatus?.latestRun ?? null;
-  const guestStatus = guestRun?.status ?? latestGuestStatus?.status ?? "IDLE";
+  const guestStatus = guestSyncDisplayStatus(latestGuestStatus);
   const guestEndpointErrors = Object.entries(
     guestRun?.diagnostics.endpointErrors ?? {},
   );
@@ -2118,6 +2199,18 @@ function SyncHealthSummary({
             </span>
           </div>
 
+          {guestStatusError ? (
+            <p
+              className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200"
+              role="status"
+            >
+              {guestStatusError}
+              {guestRun
+                ? " Последние полученные сведения сохранены на экране."
+                : ""}
+            </p>
+          ) : null}
+
           {guestRun ? (
             <div className="mt-3 space-y-3 text-sm">
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
@@ -2160,7 +2253,9 @@ function SyncHealthSummary({
             </div>
           ) : (
             <p className="mt-3 rounded-md border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
-              Гостевых запусков пока не было.
+              {latestGuestStatus
+                ? "Гостевых запусков пока не было."
+                : "Статус гостевой загрузки ещё не получен."}
             </p>
           )}
         </div>
@@ -3948,17 +4043,8 @@ function LatestGuestDiagnostics({
             {formatDateTime(latestRun.startedAt)}.
           </p>
         </div>
-        <span
-          className={[
-            "rounded-full px-2.5 py-1 text-xs font-medium",
-            latestRun.status === "SUCCESS"
-              ? "bg-emerald-50 text-emerald-700"
-              : latestRun.status === "FAILED"
-                ? "bg-red-50 text-red-700"
-                : "bg-amber-50 text-amber-700",
-          ].join(" ")}
-        >
-          {syncStatusLabel(latestRun.status)}
+        <span className={statusBadgeClass(guestSyncDisplayStatus(status))}>
+          {syncStatusLabel(guestSyncDisplayStatus(status))}
         </span>
       </div>
       {status?.freshness ? (
@@ -4221,6 +4307,11 @@ function GuestSyncHistory({ status }: { status: GuestSyncStatus | null }) {
       {runs.length > 0 ? (
         <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
           {runs.map((run) => {
+            const displayedStatus = guestSyncDisplayStatus({
+              status: run.status,
+              running: run.status === "RUNNING",
+              latestRun: run,
+            });
             const endpointErrorCount = Object.keys(
               run.diagnostics.endpointErrors,
             ).length;
@@ -4242,8 +4333,8 @@ function GuestSyncHistory({ status }: { status: GuestSyncStatus | null }) {
                         : ""}
                     </p>
                   </div>
-                  <span className={statusBadgeClass(run.status)}>
-                    {syncStatusLabel(run.status)}
+                  <span className={statusBadgeClass(displayedStatus)}>
+                    {syncStatusLabel(displayedStatus)}
                   </span>
                 </div>
 
@@ -4851,7 +4942,7 @@ function SyncHealthMetric({
   return (
     <div
       className={[
-        "rounded-md border bg-zinc-50 px-3 py-2 dark:bg-zinc-900/50",
+        "min-w-0 rounded-md border bg-zinc-50 px-3 py-2 dark:bg-zinc-900/50",
         tone === "danger"
           ? "border-red-200 dark:border-red-900/70"
           : tone === "warning"
@@ -4915,22 +5006,6 @@ function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
-async function waitForGuestSyncCompletion() {
-  await sleep(guestSyncPollIntervalMs);
-
-  for (let attempt = 0; attempt < guestSyncPollAttempts; attempt += 1) {
-    const syncStatus = await fetchGuestSyncStatus();
-
-    if (syncStatus && !syncStatus.running) {
-      return syncStatus;
-    }
-
-    await sleep(guestSyncPollIntervalMs);
-  }
-
-  return null;
-}
-
 async function syncAssortmentData(dateFrom: string, dateTo: string) {
   const response = await fetch("/api/integrations/langame/sync", {
     method: "POST",
@@ -4956,6 +5031,7 @@ async function syncGuestFoundation(
   dateFrom: string,
   dateTo: string,
   includeGuestLogs: boolean,
+  onStatus: (status: GuestSyncStatus) => void,
 ) {
   const response = await fetch(
     "/api/integrations/langame/guests/foundation/sync/start",
@@ -4977,17 +5053,24 @@ async function syncGuestFoundation(
     throw new Error(getErrorMessage(data));
   }
 
-  return waitForGuestSyncCompletion();
+  return observeGuestSync({
+    fetchStatus: fetchGuestSyncStatus,
+    wait: () => sleep(guestSyncPollIntervalMs),
+    attempts: guestSyncPollAttempts,
+    onStatus,
+  });
 }
 
-async function fetchGuestSyncStatus() {
+async function fetchGuestSyncStatus(signal?: AbortSignal) {
   const response = await fetch(
     "/api/integrations/langame/guests/foundation/sync/status",
-    { cache: "no-store" },
+    { cache: "no-store", signal },
   );
 
   if (!response.ok) {
-    return null;
+    throw new Error(
+      "Не удалось получить статус загрузки гостей. Обновите страницу, чтобы проверить результат.",
+    );
   }
 
   return response.json() as Promise<GuestSyncStatus>;
@@ -5007,7 +5090,7 @@ async function fetchBusinessSnapshotStatus() {
 }
 
 function sleep(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
 function syncStepLabel(value: SyncStepStatus) {
@@ -5047,6 +5130,10 @@ function syncFreshnessLabel(value: GuestSyncFreshness["status"]) {
     return "обновляется";
   }
 
+  if (value === "PARTIAL") {
+    return "частично загружен";
+  }
+
   if (value === "FAILED") {
     return "ошибка";
   }
@@ -5059,7 +5146,7 @@ function syncFreshnessTone(value: GuestSyncFreshness["status"]) {
     return "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200";
   }
 
-  if (value === "RUNNING" || value === "STALE") {
+  if (value === "RUNNING" || value === "STALE" || value === "PARTIAL") {
     return "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-200";
   }
 

@@ -38,6 +38,16 @@ import {
   type GuestIdentitySnapshotCandidate,
 } from './guest-identity-resolver.service';
 import { LangameClient } from './langame.client';
+import {
+  assertExactExternalImportLockHeld,
+  withExactExternalImportLock,
+} from './langame-external-import-lock';
+import {
+  externalLangamePilotAllows,
+  externalLangameDataRequirements,
+  isLangameExternalPilotAuthority,
+  type LangameExternalPilotAuthority,
+} from './langame-external-pilot-authority';
 import { parseLangameDate as parseLangameDateValue } from './langame-date';
 import {
   buildLangameTariffTypeGroupIndex,
@@ -90,6 +100,7 @@ export type GuestDataFoundationSyncResult = {
   tenantId: string;
   sources: number;
   failedSources: number;
+  partialSources: number;
   sourceResults: GuestDataFoundationSourceResult[];
 };
 
@@ -114,10 +125,11 @@ export type GuestDataFoundationFreshnessStatus =
   | 'RUNNING'
   | 'FRESH'
   | 'STALE'
+  | 'PARTIAL'
   | 'FAILED';
 
 export type GuestDataFoundationStatusResult = {
-  status: 'IDLE' | 'RUNNING' | 'SUCCESS' | 'FAILED';
+  status: 'IDLE' | 'RUNNING' | 'SUCCESS' | 'PARTIAL' | 'FAILED';
   running: boolean;
   nextRun: {
     dateFrom: string;
@@ -200,7 +212,7 @@ type GuestDataFoundationRunStatusSource = {
 
 export type GuestDataFoundationSourceResult = {
   domain: string;
-  status: 'SUCCESS' | 'FAILED';
+  status: 'SUCCESS' | 'PARTIAL' | 'FAILED';
   profileRunId: string;
   guests: number;
   groups: number;
@@ -317,12 +329,24 @@ type SourceProfile = {
     sumBonusBalance: string;
   };
   endpointErrors: Record<string, string>;
+  providerReadsAttempted: number;
+  providerReadsSucceeded: number;
 };
+
+class ExternalGuestDataFenceError extends ServiceUnavailableException {
+  constructor() {
+    super('External Langame guest worker admission or Store binding changed');
+  }
+}
 
 @Injectable()
 export class GuestDataFoundationService {
   private readonly logger = new Logger(GuestDataFoundationService.name);
   private readonly activeBackgroundTenantSyncs = new Set<string>();
+  private readonly externalProfileAuthorities = new WeakMap<
+    SourceProfile,
+    LangameExternalPilotAuthority
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -400,17 +424,54 @@ export class GuestDataFoundationService {
     tenantId: string,
     query: GuestDataFoundationSyncQuery,
     executionAction: TenantExecutionAction = 'WRITE',
+    externalPilot?: LangameExternalPilotAuthority,
+  ): Promise<GuestDataFoundationSyncResult> {
+    return withExactExternalImportLock(tenantId, () =>
+      this.syncTenantByIdOwned(tenantId, query, executionAction, externalPilot),
+    );
+  }
+
+  private async syncTenantByIdOwned(
+    tenantId: string,
+    query: GuestDataFoundationSyncQuery,
+    executionAction: TenantExecutionAction,
+    externalPilot?: LangameExternalPilotAuthority,
   ): Promise<GuestDataFoundationSyncResult> {
     const admission = await this.assertExecutionAllowed(
       tenantId,
       executionAction,
+      externalPilot,
     );
+    if (
+      externalPilot &&
+      (executionAction !== 'OUTBOUND' ||
+        !externalLangamePilotAllows(externalPilot, {
+          tenantId,
+          customerStage: admission.customerStage,
+          profileRevision: admission.entitlementProfileRevision,
+          executionRevision: admission.executionRevision,
+          jobKind: 'LANGAME_GUEST_DATA_FOUNDATION',
+        }))
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame pilot admission changed',
+      );
+    }
     if (executionAction === 'OUTBOUND') {
       const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
         stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
         jobKind: 'LANGAME_GUEST_DATA_FOUNDATION',
       });
-      if (!backgroundExecution.allowed) {
+      if (
+        !backgroundExecution.allowed &&
+        !externalLangamePilotAllows(externalPilot, {
+          tenantId,
+          customerStage: admission.customerStage,
+          profileRevision: admission.entitlementProfileRevision,
+          executionRevision: admission.executionRevision,
+          jobKind: 'LANGAME_GUEST_DATA_FOUNDATION',
+        })
+      ) {
         throw new ServiceUnavailableException({
           reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
           message: tenantBackgroundExecutionNote(backgroundExecution),
@@ -418,14 +479,37 @@ export class GuestDataFoundationService {
       }
     }
 
-    await this.failStaleRunningRuns(tenantId);
+    if (externalPilot) await this.assertExactExternalStore(externalPilot);
+    if (!externalPilot) await this.failStaleRunningRuns(tenantId);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
+    if (
+      externalPilot &&
+      (!isLangameExternalPilotAuthority(externalPilot, tenantId) ||
+        sources.length !== 1 ||
+        sources[0].id !== externalPilot.sourceId ||
+        sources[0].domain !== externalPilot.externalDomain)
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame pilot source changed',
+      );
+    }
+    if (externalPilot) await this.failStaleRunningRuns(tenantId);
+    if (
+      externalPilot &&
+      (this.activeBackgroundTenantSyncs.has(tenantId) ||
+        (await this.findRunningRun(tenantId)))
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame guest worker cannot overlap an active guest import',
+      );
+    }
     const period = await this.resolvePeriod(tenantId, query);
     const result: GuestDataFoundationSyncResult = {
       tenantId,
       sources: sources.length,
       failedSources: 0,
+      partialSources: 0,
       sourceResults: [],
     };
 
@@ -470,26 +554,50 @@ export class GuestDataFoundationService {
           apiKey,
           period,
           query,
+          externalPilot,
         });
 
-        Object.assign(sourceResult, syncResult, { status: 'SUCCESS' });
+        const hasEndpointErrors =
+          Object.keys(syncResult.endpointErrors).length > 0;
+        const status = !hasEndpointErrors
+          ? 'SUCCESS'
+          : syncResult.providerReadsSucceeded > 0
+            ? 'PARTIAL'
+            : 'FAILED';
+        const message = hasEndpointErrors
+          ? `${status === 'FAILED' ? 'Не загружены' : 'Не полностью загружены'} разделы Langame: ${Object.keys(syncResult.endpointErrors).join(', ')}. ${status === 'FAILED' ? 'Данные этого запуска не подтверждены.' : 'Доступные разделы сохранены.'}`
+          : null;
 
         await this.prisma.guestDataProfileRun.update({
           where: { id: run.id },
           data: {
-            status: 'SUCCESS',
+            status,
             finishedAt: new Date(),
             guestsCount: syncResult.guests,
             sessionsCount: syncResult.sessions,
             transactionsCount: syncResult.transactions,
             productSalesLinked: syncResult.productSalesLinked,
             profile: syncResult.profile,
+            errorMessage: message,
           },
         });
+        Object.assign(sourceResult, syncResult, {
+          status,
+          errorMessage: message,
+        });
+        if (status === 'PARTIAL') result.partialSources += 1;
+        if (status === 'FAILED') result.failedSources += 1;
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : 'Guest sync failed';
+          error instanceof ExternalGuestDataFenceError
+            ? error.message
+            : externalPilot
+              ? 'External Langame guest source failed; inspect the worker receipt.'
+              : error instanceof Error
+                ? error.message
+                : 'Guest sync failed';
         result.failedSources += 1;
+        sourceResult.status = 'FAILED';
         sourceResult.errorMessage = message;
 
         await this.prisma.guestDataProfileRun.update({
@@ -632,7 +740,9 @@ export class GuestDataFoundationService {
           ? 'SUCCESS'
           : run.status === 'FAILED'
             ? 'FAILED'
-            : 'IDLE',
+            : run.status === 'PARTIAL'
+              ? 'PARTIAL'
+              : 'IDLE',
       running: Boolean(runningRun),
       nextRun: {
         dateFrom: nextPeriod.from,
@@ -665,6 +775,12 @@ export class GuestDataFoundationService {
   }
 
   async syncComputerCountsForTenant(tenantId: string) {
+    return withExactExternalImportLock(tenantId, () =>
+      this.syncComputerCountsForTenantOwned(tenantId),
+    );
+  }
+
+  private async syncComputerCountsForTenantOwned(tenantId: string) {
     await this.tenantExecutionAdmissionService.assertAllowed(tenantId, [
       { module: TenantModule.INTEGRATIONS, action: 'WRITE' },
       { module: TenantModule.ASSORTMENT, action: 'WRITE' },
@@ -703,10 +819,13 @@ export class GuestDataFoundationService {
   private assertExecutionAllowed(
     tenantId: string,
     action: TenantExecutionAction,
+    externalPilot?: LangameExternalPilotAuthority,
   ) {
     return this.tenantExecutionAdmissionService.assertAllowed(
       tenantId,
-      GUEST_FOUNDATION_MODULES.map((module) => ({ module, action })),
+      action === 'OUTBOUND' && externalPilot
+        ? externalLangameDataRequirements(GUEST_FOUNDATION_MODULES)
+        : GUEST_FOUNDATION_MODULES.map((module) => ({ module, action })),
     );
   }
 
@@ -795,7 +914,7 @@ export class GuestDataFoundationService {
       ? checkedAt.getTime() - successfulFinishedAt.getTime()
       : null;
     const endpointErrors =
-      latestSuccessfulRun?.profile ?? latestRun?.profile ?? null;
+      latestRun?.profile ?? latestSuccessfulRun?.profile ?? null;
     const endpointErrorsCount = Object.keys(
       this.statusDiagnosticsFromProfile(endpointErrors).endpointErrors,
     ).length;
@@ -803,17 +922,19 @@ export class GuestDataFoundationService {
       ? 'RUNNING'
       : !latestRun
         ? 'EMPTY'
-        : latestRun.status === 'FAILED' && !latestSuccessfulRun
+        : latestRun.status === 'FAILED'
           ? 'FAILED'
-          : successfulFinishedAt &&
-              ageMs !== null &&
-              ageMs <= FRESH_GUEST_SYNC_MS
-            ? 'FRESH'
-            : successfulFinishedAt
-              ? 'STALE'
-              : latestRun.status === 'FAILED'
-                ? 'FAILED'
-                : 'EMPTY';
+          : latestRun.status === 'PARTIAL' || endpointErrorsCount > 0
+            ? 'PARTIAL'
+            : successfulFinishedAt &&
+                ageMs !== null &&
+                ageMs <= FRESH_GUEST_SYNC_MS
+              ? 'FRESH'
+              : successfulFinishedAt
+                ? 'STALE'
+                : latestRun.status === 'FAILED'
+                  ? 'FAILED'
+                  : 'EMPTY';
 
     return {
       status,
@@ -825,10 +946,18 @@ export class GuestDataFoundationService {
       lastStatus: latestRun?.status ?? null,
       lastErrorMessage: latestRun?.errorMessage ?? null,
       counts: {
-        guests: latestSuccessfulRun?.guestsCount ?? 0,
-        sessions: latestSuccessfulRun?.sessionsCount ?? 0,
-        transactions: latestSuccessfulRun?.transactionsCount ?? 0,
-        productSalesLinked: latestSuccessfulRun?.productSalesLinked ?? 0,
+        guests:
+          (status === 'PARTIAL' ? latestRun : latestSuccessfulRun)
+            ?.guestsCount ?? 0,
+        sessions:
+          (status === 'PARTIAL' ? latestRun : latestSuccessfulRun)
+            ?.sessionsCount ?? 0,
+        transactions:
+          (status === 'PARTIAL' ? latestRun : latestSuccessfulRun)
+            ?.transactionsCount ?? 0,
+        productSalesLinked:
+          (status === 'PARTIAL' ? latestRun : latestSuccessfulRun)
+            ?.productSalesLinked ?? 0,
       },
       endpointErrorsCount,
       nextAction: this.guestFreshnessNextAction(status),
@@ -846,6 +975,10 @@ export class GuestDataFoundationService {
 
     if (status === 'STALE') {
       return 'Обновите гостей через /sync перед запуском точных CRM и игровых сценариев.';
+    }
+
+    if (status === 'PARTIAL') {
+      return 'Доступные гостевые разделы сохранены. Недоступные разделы и ограничения показаны ниже.';
     }
 
     if (status === 'FAILED') {
@@ -913,14 +1046,34 @@ export class GuestDataFoundationService {
     apiKey: string;
     period: ResolvedPeriod;
     query: GuestDataFoundationSyncQuery;
+    externalPilot?: LangameExternalPilotAuthority;
   }) {
-    const { tenantId, baseUrl, domain, apiKey, period, query } = params;
+    const { tenantId, baseUrl, domain, apiKey, period, query, externalPilot } =
+      params;
     const profile = this.createEmptyProfile(period);
+    if (externalPilot)
+      this.externalProfileAuthorities.set(profile, externalPilot);
     const now = new Date();
     const snapshotDate = this.startOfUtcDay(now);
-    const storesByExternalClubId = await this.loadStoreLookup(tenantId, domain);
+    const storesByExternalClubId = await this.loadStoreLookup(
+      tenantId,
+      domain,
+      externalPilot,
+    );
     const sessionStoreCandidates =
       await this.loadSessionStoreCandidates(tenantId);
+    if (
+      externalPilot &&
+      (storesByExternalClubId.size !== 1 ||
+        storesByExternalClubId.get(externalPilot.externalClubId)?.id !==
+          externalPilot.storeId ||
+        sessionStoreCandidates.length !== 1 ||
+        sessionStoreCandidates[0].id !== externalPilot.storeId)
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame guest Store binding changed',
+      );
+    }
     const langamePeriod = this.toLangameDatePeriod(period);
 
     const pcTypesInClubs = await this.captureEndpoint(
@@ -941,6 +1094,7 @@ export class GuestDataFoundationService {
       pcTypesInClubs,
       pcTypeLinks,
       now,
+      externalPilot,
     );
     const tariffTypeGroups = buildLangameTariffTypeGroupIndex(
       await this.captureEndpoint(profile, 'tariffs/types_groups/list', () =>
@@ -987,22 +1141,28 @@ export class GuestDataFoundationService {
     }
 
     const guests = await this.captureEndpoint(profile, 'guests/list', () =>
-      this.paginate((page) =>
-        this.langameClient.listGuests(baseUrl, apiKey, {
-          page,
-          pageLimit: DEFAULT_PAGE_LIMIT,
-        }),
+      this.paginate(
+        (page) =>
+          this.langameClient.listGuests(baseUrl, apiKey, {
+            page,
+            pageLimit: DEFAULT_PAGE_LIMIT,
+          }),
+        profile,
+        'guests/list',
       ),
     );
     await this.syncGuests(tenantId, domain, guests, profile, now);
     const guestsByExternalId = await this.loadGuestLookup(tenantId, domain);
 
     const balances = await this.captureEndpoint(profile, 'guests/balance', () =>
-      this.paginate((page) =>
-        this.langameClient.listGuestBalances(baseUrl, apiKey, {
-          page,
-          pageLimit: DEFAULT_PAGE_LIMIT,
-        }),
+      this.paginate(
+        (page) =>
+          this.langameClient.listGuestBalances(baseUrl, apiKey, {
+            page,
+            pageLimit: DEFAULT_PAGE_LIMIT,
+          }),
+        profile,
+        'guests/balance',
       ),
     );
     await this.syncBalances(
@@ -1018,11 +1178,14 @@ export class GuestDataFoundationService {
       profile,
       'guests/bonus_balance',
       () =>
-        this.paginate((page) =>
-          this.langameClient.listGuestBonusBalances(baseUrl, apiKey, {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-          }),
+        this.paginate(
+          (page) =>
+            this.langameClient.listGuestBonusBalances(baseUrl, apiKey, {
+              page,
+              pageLimit: DEFAULT_PAGE_LIMIT,
+            }),
+          profile,
+          'guests/bonus_balance',
         ),
     );
     await this.syncBonusBalances(
@@ -1038,13 +1201,16 @@ export class GuestDataFoundationService {
       profile,
       'guests/sessions',
       () =>
-        this.paginate((page) =>
-          this.langameClient.listGuestSessions(baseUrl, apiKey, {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom: langamePeriod.from,
-            dateTo: langamePeriod.to,
-          }),
+        this.paginate(
+          (page) =>
+            this.langameClient.listGuestSessions(baseUrl, apiKey, {
+              page,
+              pageLimit: DEFAULT_PAGE_LIMIT,
+              dateFrom: langamePeriod.from,
+              dateTo: langamePeriod.to,
+            }),
+          profile,
+          'guests/sessions',
         ),
     );
     await this.syncSessions(
@@ -1062,13 +1228,16 @@ export class GuestDataFoundationService {
       profile,
       'transactions/list',
       () =>
-        this.paginate((page) =>
-          this.langameClient.listTransactions(baseUrl, apiKey, {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom: langamePeriod.from,
-            dateTo: langamePeriod.to,
-          }),
+        this.paginate(
+          (page) =>
+            this.langameClient.listTransactions(baseUrl, apiKey, {
+              page,
+              pageLimit: DEFAULT_PAGE_LIMIT,
+              dateFrom: langamePeriod.from,
+              dateTo: langamePeriod.to,
+            }),
+          profile,
+          'transactions/list',
         ),
     );
     await this.syncTransactions(
@@ -1083,13 +1252,16 @@ export class GuestDataFoundationService {
     let guestLogs: LangameGuestLog[] = [];
     if (query.includeGuestLogs ?? false) {
       guestLogs = await this.captureEndpoint(profile, 'guests/logs', () =>
-        this.paginate((page) =>
-          this.langameClient.listGuestLogs(baseUrl, apiKey, {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom: langamePeriod.from,
-            dateTo: langamePeriod.to,
-          }),
+        this.paginate(
+          (page) =>
+            this.langameClient.listGuestLogs(baseUrl, apiKey, {
+              page,
+              pageLimit: DEFAULT_PAGE_LIMIT,
+              dateFrom: langamePeriod.from,
+              dateTo: langamePeriod.to,
+            }),
+          profile,
+          'guests/logs',
         ),
       );
       await this.syncGuestLogs(
@@ -1103,47 +1275,33 @@ export class GuestDataFoundationService {
 
     let operationLogs: LangameOperationLog[] = [];
     if (query.includeOperationLog ?? true) {
-      operationLogs = await this.captureEndpoint(
+      operationLogs = await this.syncOperationLogs(
+        tenantId,
+        baseUrl,
+        domain,
+        apiKey,
+        period,
+        storesByExternalClubId,
         profile,
-        'all_operations_log/list',
-        () =>
-          this.syncOperationLogs(
-            tenantId,
-            baseUrl,
-            domain,
-            apiKey,
-            period,
-            storesByExternalClubId,
-            profile,
-          ),
       );
     }
 
-    let cashTransactions: LangameCashTransaction[] = [];
+    const cashTransactions: LangameCashTransaction[] = [];
     if (query.includeCashTransactions ?? true) {
-      cashTransactions = await this.captureEndpoint(
-        profile,
-        'log_cash_transaction/list',
-        async () => {
-          const rows: LangameCashTransaction[] = [];
-
-          for (const externalClubId of storesByExternalClubId.keys()) {
-            rows.push(
-              ...(await this.langameClient.listCashTransactions(
-                baseUrl,
-                apiKey,
-                {
-                  clubId: externalClubId,
-                  dateFrom: langamePeriod.from,
-                  dateTo: langamePeriod.to,
-                },
-              )),
-            );
-          }
-
-          return rows;
-        },
-      );
+      for (const externalClubId of storesByExternalClubId.keys()) {
+        cashTransactions.push(
+          ...(await this.captureEndpoint(
+            profile,
+            'log_cash_transaction/list',
+            () =>
+              this.langameClient.listCashTransactions(baseUrl, apiKey, {
+                clubId: externalClubId,
+                dateFrom: langamePeriod.from,
+                dateTo: langamePeriod.to,
+              }),
+          )),
+        );
+      }
       this.profileRows(profile.cashTransactions, cashTransactions);
       cashTransactions.forEach((row) =>
         this.profileOperatorHints(profile.operatorHints.cashTransactions, row),
@@ -1151,11 +1309,14 @@ export class GuestDataFoundationService {
     }
 
     const langameUsers = await this.captureEndpoint(profile, 'users/list', () =>
-      this.paginate((page) =>
-        this.langameClient.listUsers(baseUrl, apiKey, {
-          page,
-          pageLimit: DEFAULT_PAGE_LIMIT,
-        }),
+      this.paginate(
+        (page) =>
+          this.langameClient.listUsers(baseUrl, apiKey, {
+            page,
+            pageLimit: DEFAULT_PAGE_LIMIT,
+          }),
+        profile,
+        'users/list',
       ),
     );
     this.profileRows(profile.langameUsers, langameUsers);
@@ -1167,13 +1328,16 @@ export class GuestDataFoundationService {
         profile,
         'working_shifts/list',
         () =>
-          this.paginate((page) =>
-            this.langameClient.listWorkingShifts(baseUrl, apiKey, {
-              page,
-              pageLimit: DEFAULT_PAGE_LIMIT,
-              dateFrom: langamePeriod.from,
-              dateTo: langamePeriod.to,
-            }),
+          this.paginate(
+            (page) =>
+              this.langameClient.listWorkingShifts(baseUrl, apiKey, {
+                page,
+                pageLimit: DEFAULT_PAGE_LIMIT,
+                dateFrom: langamePeriod.from,
+                dateTo: langamePeriod.to,
+              }),
+            profile,
+            'working_shifts/list',
           ),
       );
       this.profileRows(profile.workingShifts, workingShifts);
@@ -1193,13 +1357,16 @@ export class GuestDataFoundationService {
       profile,
       'products/expense',
       () =>
-        this.paginate((page) =>
-          this.langameClient.listProductExpenses(baseUrl, apiKey, {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom: period.from,
-            dateTo: period.to,
-          }),
+        this.paginate(
+          (page) =>
+            this.langameClient.listProductExpenses(baseUrl, apiKey, {
+              page,
+              pageLimit: DEFAULT_PAGE_LIMIT,
+              dateFrom: period.from,
+              dateTo: period.to,
+            }),
+          profile,
+          'products/expense',
         ),
     );
     const productSalesLinked = await this.linkProductSalesToGuests(
@@ -1224,6 +1391,8 @@ export class GuestDataFoundationService {
       workingShifts: workingShifts.length,
       productSalesLinked,
       endpointErrors: profile.endpointErrors,
+      providerReadsAttempted: profile.providerReadsAttempted,
+      providerReadsSucceeded: profile.providerReadsSucceeded,
       profile,
     };
   }
@@ -1233,13 +1402,31 @@ export class GuestDataFoundationService {
     endpoint: string,
     load: () => Promise<T[]>,
   ) {
+    await this.assertExternalProfileCurrent(profile);
+    profile.providerReadsAttempted += 1;
+    let rows: T[];
     try {
-      return await load();
+      rows = await load();
+      profile.providerReadsSucceeded += 1;
     } catch (error) {
-      profile.endpointErrors[endpoint] =
-        error instanceof Error ? error.message : 'Endpoint failed';
+      if (error instanceof ExternalGuestDataFenceError) throw error;
+      this.recordEndpointError(profile, endpoint, error);
       return [];
     }
+    await this.assertExternalProfileCurrent(profile);
+    return rows;
+  }
+
+  private recordEndpointError(
+    profile: SourceProfile,
+    endpoint: string,
+    error: unknown,
+  ) {
+    const message = error instanceof Error ? error.message : '';
+    profile.endpointErrors[endpoint] =
+      /no permissions|forbidden|unauthorized|\b40[13]\b/i.test(message)
+        ? 'Langame не предоставил доступ к этому разделу.'
+        : 'Не удалось получить данные этого раздела Langame.';
   }
 
   private async syncStoreComputerCounts(
@@ -1248,6 +1435,7 @@ export class GuestDataFoundationService {
     pcTypesInClubs: LangamePcTypeInClub[],
     pcTypeLinks: LangamePcTypeLink[],
     syncedAt: Date,
+    authority?: LangameExternalPilotAuthority,
   ) {
     const typeToClub = new Map<string, string>();
     const countByClub = new Map<string, number>();
@@ -1365,20 +1553,47 @@ export class GuestDataFoundationService {
     }
 
     const updates = await Promise.all(
-      Array.from(countByClub.entries()).map(([externalClubId, count]) =>
-        this.prisma.store.updateMany({
+      Array.from(countByClub.entries()).map(async ([externalClubId, count]) => {
+        if (authority && externalClubId !== authority.externalClubId) {
+          return { count: 0 };
+        }
+        if (authority) {
+          await assertExactExternalImportLockHeld();
+          await this.assertExactExternalStore(authority);
+        }
+        const updated = await this.prisma.store.updateMany({
           where: {
             tenantId,
             externalProvider: IntegrationProvider.LANGAME,
             externalDomain: domain,
             externalClubId,
+            ...(authority
+              ? {
+                  id: authority.storeId,
+                  integrationSourceId: authority.sourceId,
+                  isActive: true,
+                  executionRevision: authority.storeRevision,
+                  tenant: {
+                    is: {
+                      customerStage: authority.customerStage,
+                      executionRevision: authority.executionRevision,
+                      entitlementProfileRevision: authority.profileRevision,
+                      status: 'ACTIVE' as const,
+                    },
+                  },
+                }
+              : {}),
           },
           data: {
             computerCount: count,
             computerCountSyncedAt: syncedAt,
           },
-        }),
-      ),
+        });
+        if (authority && updated.count !== 1) {
+          throw new ExternalGuestDataFenceError();
+        }
+        return updated;
+      }),
     );
 
     return updates.reduce((sum, update) => sum + update.count, 0);
@@ -1396,8 +1611,12 @@ export class GuestDataFoundationService {
     const seenEmailHashes = new Set<string>();
     const duplicateEmailHashes = new Set<string>();
     const identityCandidates: GuestIdentitySnapshotCandidate[] = [];
+    let externalWriteCount = 0;
 
     for (const row of rows) {
+      if (externalWriteCount++ % DEFAULT_PAGE_LIMIT === 0) {
+        await this.assertExternalProfileCurrent(profile);
+      }
       const externalGuestId = this.toNullableString(row.guest_id);
       if (!externalGuestId) {
         continue;
@@ -1518,6 +1737,7 @@ export class GuestDataFoundationService {
       }
     }
 
+    await this.assertExternalProfileCurrent(profile);
     await this.guestIdentityResolver.reconcileDomainSnapshot({
       tenantId,
       externalProvider: IntegrationProvider.LANGAME,
@@ -2084,11 +2304,16 @@ export class GuestDataFoundationService {
       period,
       MAX_OPERATION_LOG_PERIOD_DAYS,
     )) {
-      const rows = await this.loadOperationLogChunk(
-        baseUrl,
-        apiKey,
-        chunk,
-        operationTypeFilters,
+      const rows = await this.captureEndpoint(
+        profile,
+        'all_operations_log/list',
+        () =>
+          this.loadOperationLogChunk(
+            baseUrl,
+            apiKey,
+            chunk,
+            operationTypeFilters,
+          ),
       );
       allRows.push(...rows);
 
@@ -2439,12 +2664,22 @@ export class GuestDataFoundationService {
     );
   }
 
-  private async loadStoreLookup(tenantId: string, domain: string) {
+  private async loadStoreLookup(
+    tenantId: string,
+    domain: string,
+    externalPilot?: LangameExternalPilotAuthority,
+  ) {
     const stores = await this.prisma.store.findMany({
       where: {
         tenantId,
         externalProvider: IntegrationProvider.LANGAME,
         externalDomain: domain,
+        ...(externalPilot
+          ? {
+              isActive: true,
+              integrationSourceId: externalPilot.sourceId,
+            }
+          : {}),
       },
       select: {
         id: true,
@@ -2461,6 +2696,37 @@ export class GuestDataFoundationService {
           { id: store.id, timeZone: store.timeZone },
         ]),
     );
+  }
+
+  private async assertExactExternalStore(
+    authority: LangameExternalPilotAuthority,
+  ) {
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId: authority.tenantId,
+        isActive: true,
+        externalProvider: IntegrationProvider.LANGAME,
+      },
+      select: {
+        id: true,
+        integrationSourceId: true,
+        externalDomain: true,
+        externalClubId: true,
+        executionRevision: true,
+      },
+    });
+    if (
+      stores.length !== 1 ||
+      stores[0].id !== authority.storeId ||
+      stores[0].integrationSourceId !== authority.sourceId ||
+      stores[0].externalDomain !== authority.externalDomain ||
+      stores[0].externalClubId !== authority.externalClubId ||
+      stores[0].executionRevision !== authority.storeRevision
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame guest Store binding changed',
+      );
+    }
   }
 
   private async loadSessionStoreCandidates(tenantId: string) {
@@ -2503,12 +2769,28 @@ export class GuestDataFoundationService {
       : null;
   }
 
-  private async paginate<T>(fetchPage: (page: number) => Promise<T[]>) {
+  private async paginate<T>(
+    fetchPage: (page: number) => Promise<T[]>,
+    profile?: SourceProfile,
+    endpoint?: string,
+  ) {
     const rows: T[] = [];
     let page = 1;
 
     while (true) {
-      const pageRows = await fetchPage(page);
+      if (profile) await this.assertExternalProfileCurrent(profile);
+      let pageRows: T[];
+      try {
+        pageRows = await fetchPage(page);
+      } catch (error) {
+        if (error instanceof ExternalGuestDataFenceError) throw error;
+        // Earlier pages remain usable, but this endpoint is not complete.
+        // A first-page failure still belongs to captureEndpoint.
+        if (rows.length === 0 || !profile || !endpoint) throw error;
+        this.recordEndpointError(profile, endpoint, error);
+        break;
+      }
+      if (profile) await this.assertExternalProfileCurrent(profile);
       rows.push(...pageRows);
 
       if (pageRows.length < DEFAULT_PAGE_LIMIT) {
@@ -2519,6 +2801,32 @@ export class GuestDataFoundationService {
     }
 
     return rows;
+  }
+
+  private async assertExternalProfileCurrent(profile: SourceProfile) {
+    const authority = this.externalProfileAuthorities.get(profile);
+    if (!authority) return;
+    await assertExactExternalImportLockHeld();
+    try {
+      const admission = await this.assertExecutionAllowed(
+        authority.tenantId,
+        'OUTBOUND',
+        authority,
+      );
+      if (
+        !externalLangamePilotAllows(authority, {
+          tenantId: authority.tenantId,
+          customerStage: admission.customerStage,
+          profileRevision: admission.entitlementProfileRevision,
+          executionRevision: admission.executionRevision,
+          jobKind: 'LANGAME_GUEST_DATA_FOUNDATION',
+        })
+      )
+        throw new Error('External guest worker revision drift');
+      await this.assertExactExternalStore(authority);
+    } catch {
+      throw new ExternalGuestDataFenceError();
+    }
   }
 
   private async resolvePeriod(
@@ -3288,6 +3596,8 @@ export class GuestDataFoundationService {
         sumBonusBalance: '0.00',
       },
       endpointErrors: {},
+      providerReadsAttempted: 0,
+      providerReadsSucceeded: 0,
     };
   }
 }

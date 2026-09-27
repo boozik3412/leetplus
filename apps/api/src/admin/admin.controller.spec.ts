@@ -2,6 +2,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import type { TenantEntitlementProfileService } from '../tenancy/tenant-entitlement-profile.service';
 import { AdminController } from './admin.controller';
 import type { AdminService } from './admin.service';
+import type { ExternalLangameWorkerTenantService } from './external-langame-worker-tenant.service';
 import type { FounderOperatorBetaActivationService } from './founder-operator-beta-activation.service';
 import type { FounderOperatorBetaGoService } from './founder-operator-beta-go.service';
 import type { FounderOwnerInviteLifecycleService } from './founder-owner-invite-lifecycle.service';
@@ -11,6 +12,10 @@ describe('AdminController shared beta provisioning boundary', () => {
   function controller() {
     const adminService = {
       setStoreBackgroundExecution: jest.fn(),
+    };
+    const externalLangameWorkerTenantService = {
+      prepare: jest.fn(),
+      apply: jest.fn(),
     };
     const sharedTenantProvisioningService = {
       provision: jest.fn(),
@@ -34,6 +39,7 @@ describe('AdminController shared beta provisioning boundary', () => {
       controller: new AdminController(
         adminService as unknown as AdminService,
         {} as TenantEntitlementProfileService,
+        externalLangameWorkerTenantService as unknown as ExternalLangameWorkerTenantService,
         sharedTenantProvisioningService as unknown as SharedTenantProvisioningService,
         founderOperatorBetaGoService as unknown as FounderOperatorBetaGoService,
         founderOperatorBetaActivationService as unknown as FounderOperatorBetaActivationService,
@@ -44,6 +50,7 @@ describe('AdminController shared beta provisioning boundary', () => {
       founderOperatorBetaActivationService,
       founderOwnerInviteLifecycleService,
       adminService,
+      externalLangameWorkerTenantService,
     };
   }
 
@@ -68,6 +75,41 @@ describe('AdminController shared beta provisioning boundary', () => {
       'tenant-id',
       'store-id',
       { action: 'ENABLE' },
+    );
+  });
+
+  it('keeps external worker LIVE preparation and apply on platform administration routes', async () => {
+    const { controller: adminController, externalLangameWorkerTenantService } =
+      controller();
+    const user = {
+      id: 'platform-admin',
+      isPlatformAdmin: true,
+    } as AuthenticatedUser;
+    externalLangameWorkerTenantService.prepare.mockResolvedValue({
+      planSha256: 'digest',
+    });
+    externalLangameWorkerTenantService.apply.mockResolvedValue({
+      action: 'ACTIVATE_LIVE',
+    });
+    await expect(
+      adminController.prepareExternalLangameWorkerTenant(user, 'tenant-id', {
+        action: 'ACTIVATE_LIVE',
+      }),
+    ).resolves.toEqual({ planSha256: 'digest' });
+    await expect(
+      adminController.applyExternalLangameWorkerTenant(user, 'tenant-id', {
+        action: 'ACTIVATE_LIVE',
+      }),
+    ).resolves.toEqual({ action: 'ACTIVATE_LIVE' });
+    expect(externalLangameWorkerTenantService.prepare).toHaveBeenCalledWith(
+      user,
+      'tenant-id',
+      'ACTIVATE_LIVE',
+    );
+    expect(externalLangameWorkerTenantService.apply).toHaveBeenCalledWith(
+      user,
+      'tenant-id',
+      { action: 'ACTIVATE_LIVE' },
     );
   });
 

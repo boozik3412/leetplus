@@ -13,4 +13,9 @@ const migrations = fs.readdirSync(root).filter(name => /^\d{14}_/.test(name) && 
 if (migrations.length !== 191 || migrations.at(-1) !== '20260908180000_external_langame_simple_onboarding') {
   throw new Error('Compose V1 requires reviewed CURRENT191');
 }
-fs.writeFileSync(output, `${JSON.stringify({ contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1', releaseSha: sha, builtAt, migrationCount: migrations.length, migration: migrations.at(-1) }, null, 2)}\n`, { flag: 'wx' });
+const externalCli = path.resolve('apps/api/src/integrations/langame-external-daily-worker.cli.ts');
+const externalWorkerCapability = fs.existsSync(externalCli) && fs.statSync(externalCli).isFile()
+  ? 'LANGAME_EXTERNAL_SET1_V1' : null;
+fs.writeFileSync(output, `${JSON.stringify({ contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1', releaseSha: sha, builtAt,
+  migrationCount: migrations.length, migration: migrations.at(-1),
+  ...(externalWorkerCapability ? { externalWorkerCapability } : {}) }, null, 2)}\n`, { flag: 'wx' });

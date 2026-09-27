@@ -16,6 +16,7 @@ import { verifyResourceAcceptance } from './resource-budget.mjs';
 import { validateCurrentWorkerContinuation, validateWorkerContinuationPolicy } from './worker-continuation.mjs';
 import { validateAppAdmission, validateAppBundle } from './app-only-artifact.mjs';
 import { verifyDownloadedBundle } from './download-admitted-app-bundle.mjs';
+import { validateWorkerSetV3 } from './worker-set-v3.mjs';
 
 export const CONTRACT = 'LEETPLUS_RELEASE_PREPARATION_V1';
 export const APP_ONLY_CONTRACT = 'LEETPLUS_RELEASE_PREPARATION_V2';
@@ -152,11 +153,13 @@ export function validateAppOnlyInput(input) {
   demand(['blue', 'green'].includes(input.targetSlot), 'Invalid target slot');
   demand(input.wait?.pollIntervalMs >= 5000 && input.wait.pollIntervalMs <= 10000 && Number.isFinite(Date.parse(input.wait.deadline)), 'Wait polling must be 5-10 seconds with an exact deadline');
   demand(input.nativeRequest && typeof input.nativeRequest === 'object' && !Array.isArray(input.nativeRequest), 'Missing native request');
-  exactKeys(input.nativeRequest, ['preparationGuard', 'workerContinuation'], 'app-only native request');
+  exactKeys(input.nativeRequest, ['preparationGuard', 'workerContinuation',
+    ...(Object.hasOwn(input.nativeRequest, 'workerSetV3') ? ['workerSetV3'] : [])], 'app-only native request');
   const guard = input.nativeRequest.preparationGuard;
   exactKeys(guard, ['contract', 'hostIdentitySha256', 'controllerManifestSha256', 'activeSha256', 'generation', 'activeSlot'], 'preparation guard');
   demand(guard.contract === 'LEETPLUS_PREPARATION_GUARD_V1' && [guard.hostIdentitySha256, guard.controllerManifestSha256, guard.activeSha256].every(x => SHA.test(x)) && Number.isSafeInteger(guard.generation) && ['blue', 'green'].includes(guard.activeSlot) && guard.activeSlot !== input.targetSlot, 'Invalid fresh host/generation guard');
   validateWorkerContinuationPolicy(input.nativeRequest.workerContinuation);
+  if (input.nativeRequest.workerSetV3) demand(canonical(input.nativeRequest.workerSetV3.legacy) === canonical(input.nativeRequest.workerContinuation), 'Worker set V3 must retain exact V2 continuation');
   demand(!['approval', 'approvalTtlExtension', 'expiresAt', 'releaseJson', 'admissionJson', 'imagesArchive', 'controlArchive'].some(key => Object.hasOwn(input, key)), 'App-only preparation accepts no V1 authority or deployment authorization');
   return input;
 }
@@ -336,7 +339,8 @@ export class PreparationRunner {
     demand(status.controller?.manifestSha256 === guard.controllerManifestSha256 && status.controller?.isServing === true && status.controller?.handoffPending === false && status.controller?.preparationEvidenceExpiryEnforced === true && status.controller?.appOnlyV2BaselineCertification === true, 'Serving controller lacks app-only V2 capability');
     const activeRelease = active.dataRelease;
     validateRelease(activeRelease);
-    const release = { ...activeRelease, releaseSha: admitted.releaseSha, images: { ...activeRelease.images, api: admitted.bundle.appImages.api, web: admitted.bundle.appImages.web }, apiResourceProfile: admitted.bundle.apiResourceProfile };
+    const release = { ...activeRelease, releaseSha: admitted.releaseSha, images: { ...activeRelease.images, api: admitted.bundle.appImages.api, web: admitted.bundle.appImages.web }, apiResourceProfile: admitted.bundle.apiResourceProfile,
+      ...(Object.hasOwn(admitted.bundle, 'externalWorkerCapability') ? { externalWorkerCapability: admitted.bundle.externalWorkerCapability } : {}) };
     validateRelease(release);
     const releaseJson = path.join(this.stateDir, 'derived-v1-release.json');
     publishJson(releaseJson, release);
@@ -348,6 +352,7 @@ export class PreparationRunner {
     this.input.releaseJson = releaseJson;
     this.input.nativeRequest = { ...this.input.nativeRequest, blue: active.blue, green: active.green };
     this.input.nativeRequest[this.input.targetSlot] = release;
+    if (this.input.nativeRequest.workerSetV3) validateWorkerSetV3(this.input.nativeRequest.workerSetV3, { targetSlot: this.input.targetSlot, [this.input.targetSlot]: release, previous: active, generation: guard.generation });
     this.v2 = { ...admitted, active, releaseJson, dataReleaseJson };
     return { releaseSha: admitted.releaseSha, admissionSha256: admitted.admissionSha256, archiveSha256: admitted.archiveSha256, activeDataReleaseSha256: digest(activeRelease), activeDataBaselineSha256: fileDigest(dataReleaseJson), derivedReleaseSha256: fileDigest(releaseJson) };
   }
@@ -512,7 +517,8 @@ export class PreparationRunner {
     const admission = this.readAdmission(), backupEvidence = this.boundBackupEvidence(), rehearsalEvidence = this.boundRehearsalEvidence();
     const verification = readJson(this.input.backupVerificationReceipt);
     const preparationEvidenceExpiresAt = new Date(Math.min(parseTime(this.input.wait.deadline, 'wait deadline'), parseTime(verification.effectiveExpiresAt, 'authenticated backup expiry'))).toISOString();
-    if (this.appOnly) return { contract: 'LEETPLUS_COMPOSE_APP_PREPARATION_V2', releaseSha: admission.releaseSha, targetSlot: this.input.targetSlot, preparationGuard: this.input.nativeRequest.preparationGuard, workerContinuation: this.input.nativeRequest.workerContinuation, backupReceiptSha256: digest(backupEvidence), rehearsalReceiptSha256: digest(rehearsalEvidence), preparationEvidenceExpiresAt };
+    if (this.appOnly) return { contract: 'LEETPLUS_COMPOSE_APP_PREPARATION_V2', releaseSha: admission.releaseSha, targetSlot: this.input.targetSlot, preparationGuard: this.input.nativeRequest.preparationGuard, workerContinuation: this.input.nativeRequest.workerContinuation,
+      ...(this.input.nativeRequest.workerSetV3 ? { workerSetV3: this.input.nativeRequest.workerSetV3 } : {}), backupReceiptSha256: digest(backupEvidence), rehearsalReceiptSha256: digest(rehearsalEvidence), preparationEvidenceExpiresAt };
     return { ...this.input.nativeRequest, targetSlot: this.input.targetSlot, admissionSha256: admission.admissionSha256, archiveSha256: admission.archiveSha256, backupReceiptSha256: digest(backupEvidence), rehearsalReceiptSha256: digest(rehearsalEvidence), preparationEvidenceExpiresAt };
   }
   planMatches(plan, request, operationId = plan?.operationId) {
@@ -550,6 +556,11 @@ export class PreparationRunner {
       const profilePath = path.join(directory, `worker-profile-${binding.worker}.json`);
       demand(fileDigest(profilePath) === binding.profileSha256,
         `Native immutable worker profile snapshot is absent or drifted: ${binding.worker}`);
+    }
+    if (request.workerSetV3?.external.preimage === 'PRESENT') {
+      const externalProfile = path.join(directory, 'worker-profile-langame-external-daily-worker.json');
+      demand(fileDigest(externalProfile) === request.workerSetV3.external.profileSha256, 'Native immutable external worker profile snapshot is absent or drifted');
+      demand(digest(match.plan.workerSetV3) === digest(request.workerSetV3), 'Native worker set V3 drift');
     }
     if (this.appOnly) {
       for (const leaf of ['app-bundle.json', 'app-admission.json', 'data-baseline-certification.json']) {
@@ -629,7 +640,8 @@ export class PreparationRunner {
     } finally { releaseLock(); }
   }
   goPacket(native) {
-    return { contract: this.appOnly ? APP_ONLY_GO_PACKET_CONTRACT : GO_PACKET_CONTRACT, decision: 'PREPARED_NOT_AUTHORIZATION', inputSha256: this.inputDigest, nativePlanSha256: native.planSha256, nativeOperationId: native.operationId, workerContinuation: this.input.nativeRequest.workerContinuation, preparationEvidenceExpiresAt: this.nativeRequest().preparationEvidenceExpiresAt, preparedAt: this.readPhase('NATIVE_PREPARE').completedAt };
+    return { contract: this.appOnly ? APP_ONLY_GO_PACKET_CONTRACT : GO_PACKET_CONTRACT, decision: 'PREPARED_NOT_AUTHORIZATION', inputSha256: this.inputDigest, nativePlanSha256: native.planSha256, nativeOperationId: native.operationId, workerContinuation: this.input.nativeRequest.workerContinuation,
+      ...(this.input.nativeRequest.workerSetV3 ? { workerSetV3: this.input.nativeRequest.workerSetV3 } : {}), preparationEvidenceExpiresAt: this.nativeRequest().preparationEvidenceExpiresAt, preparedAt: this.readPhase('NATIVE_PREPARE').completedAt };
   }
 }
 

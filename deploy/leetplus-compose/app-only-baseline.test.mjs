@@ -53,6 +53,20 @@ test('app release borrows only certified PostgreSQL/Redis identities', () => {
     postgres: cert.dataRelease.images.postgres, redis: cert.dataRelease.images.redis });
   assert.notEqual(canonical(release), canonical(cert.dataRelease));
 });
+test('optional external worker capability survives admitted app synthesis and stays dormant', () => {
+  const { bundle, cert } = fixtures();
+  const legacy = synthesizeRelease(bundle, cert.dataRelease);
+  assert.equal(Object.hasOwn(legacy, 'externalWorkerCapability'), false);
+  assert.equal(renderCompose({ blue: legacy, green: legacy }).services['langame-external-daily-worker'], undefined);
+  bundle.externalWorkerCapability = 'LANGAME_EXTERNAL_SET1_V1';
+  const capable = synthesizeRelease(bundle, cert.dataRelease);
+  assert.equal(capable.externalWorkerCapability, bundle.externalWorkerCapability);
+  const spec = renderCompose({ blue: legacy, green: capable, activeSlot: 'green' });
+  assert.deepEqual(spec.services['langame-external-daily-worker'].profiles, ['external-workers']);
+  assert.equal(renderCompose({ blue: legacy, green: capable, activeSlot: 'blue' }).services['langame-external-daily-worker'], undefined);
+  bundle.externalWorkerCapability = 'LANGAME_EXTERNAL_ALL_TENANTS';
+  assert.throws(() => synthesizeRelease(bundle, cert.dataRelease), /external worker capability/);
+});
 test('drift, stale evidence and incompatible inputs are rejected', () => {
   for (const change of [
     ({ cert }) => { cert.activeStateSha256 = other; },

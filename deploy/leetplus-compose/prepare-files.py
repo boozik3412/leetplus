@@ -51,6 +51,17 @@ APP_DOWNLOAD_ADMISSION_FIELDS = {
     'network-validation.json': 'networkValidationSha256',
     'runtime-validation.json': 'runtimeValidationSha256',
 }
+EXTERNAL_WORKER_CAPABILITY = 'LANGAME_EXTERNAL_SET1_V1'
+
+
+def app_bundle_keys(bundle):
+    keys = {'schemaVersion', 'contract', 'releaseLane', 'releaseSha', 'builtAt', 'apiResourceProfile',
+            'sourceImpact', 'appImages', 'schemaRequirement', 'compatibilityRequirements', 'runtimeEvidence'}
+    if 'externalWorkerCapability' in bundle:
+        if bundle['externalWorkerCapability'] != EXTERNAL_WORKER_CAPABILITY:
+            raise ValueError('Invalid AppBundle external worker capability')
+        keys.add('externalWorkerCapability')
+    return keys
 
 
 def write(path, value, uid=0, gid=0, mode=0o400):
@@ -173,7 +184,8 @@ def trusted_json(path, label, *, immutable=False, require_root=True):
 
 def validate_release(value, label):
     required = {'contract', 'releaseSha', 'builtAt', 'migrationCount', 'migration', 'images'}
-    if set(value) not in (required, required | {'apiResourceProfile'}):
+    optional = {'apiResourceProfile', 'externalWorkerCapability'}
+    if not required <= set(value) or not set(value) <= required | optional:
         raise ValueError(f'{label} keys are not exact')
     if (value.get('contract') != MODE or not SHA.fullmatch(value.get('releaseSha', '')) or
             value.get('migrationCount') != 191 or value.get('migration') != CURRENT_MIGRATION or
@@ -181,6 +193,8 @@ def validate_release(value, label):
         raise ValueError(f'{label} is not an exact CURRENT191 release')
     if 'apiResourceProfile' in value and value['apiResourceProfile'] != 'API_6G_V1':
         raise ValueError(f'{label} has an unsupported API resource profile')
+    if 'externalWorkerCapability' in value and value['externalWorkerCapability'] != EXTERNAL_WORKER_CAPABILITY:
+        raise ValueError(f'{label} has an unsupported external worker capability')
     exact_keys(value.get('images'), {'api', 'web', 'postgres', 'redis'}, f'{label} images')
     if not all(IMAGE.fullmatch(image) for image in value['images'].values()):
         raise ValueError(f'{label} has a mutable image reference')
@@ -265,8 +279,7 @@ def validate_app_only_authority(manifest_path, source, app_bundle_path, app_admi
     admission_raw, admission = trusted_json(app_admission_path, 'AppAdmission V2', immutable=True, require_root=require_root)
     receipt_raw, receipt = trusted_json(app_download_receipt_path, 'app download receipt', immutable=True, require_root=require_root)
 
-    exact_keys(bundle, {'schemaVersion', 'contract', 'releaseLane', 'releaseSha', 'builtAt', 'apiResourceProfile',
-                        'sourceImpact', 'appImages', 'schemaRequirement', 'compatibilityRequirements', 'runtimeEvidence'}, 'AppBundle V2')
+    exact_keys(bundle, app_bundle_keys(bundle), 'AppBundle V2')
     if (bundle.get('schemaVersion') != 2 or bundle.get('contract') != APP_BUNDLE or bundle.get('releaseLane') != APP_LANE or
             bundle.get('releaseSha') != release['releaseSha'] or bundle.get('apiResourceProfile') != 'API_6G_V1' or
             not valid_utc(bundle.get('builtAt'))):
@@ -387,6 +400,8 @@ def validate_app_only_authority(manifest_path, source, app_bundle_path, app_admi
                      'apiResourceProfile': bundle['apiResourceProfile'],
                      'images': {'api': bundle['appImages']['api'], 'web': bundle['appImages']['web'],
                                 'postgres': data_release['images']['postgres'], 'redis': data_release['images']['redis']}})
+    if 'externalWorkerCapability' in bundle:
+        expected['externalWorkerCapability'] = bundle['externalWorkerCapability']
     if release != expected or derived_raw != canonical(expected):
         raise ValueError('Derived release is not the exact admitted app/data composition')
     validate_source_capsule(source, require_root=require_root)
@@ -524,6 +539,16 @@ hot_standby_feedback=off
                 profile['GUEST_BONUS_LEDGER_WORKER_DRY_RUN'] = 'true'
                 profile['LANGAME_DAILY_WORKER_LIVE'] = 'false'
             write(root / f'secrets/{name}.json', profile, gid=gid, mode=0o440)
+        external_member = 'system/etc/leetplus/langame-external-daily-worker.env'
+        external_present = external_member in archive.getnames()
+        if external_present and release.get('externalWorkerCapability') != 'LANGAME_EXTERNAL_SET1_V1':
+            raise ValueError('External worker profile requires the exact admitted capability')
+        if release.get('externalWorkerCapability') == 'LANGAME_EXTERNAL_SET1_V1' and external_present:
+            profile = read_env(archive, 'langame-external-daily-worker.env')
+            profile['DATABASE_URL'] = database_url(profile['DATABASE_URL'], 1)
+            if rehearsal:
+                profile['LANGAME_EXTERNAL_WORKER_LIVE'] = 'false'
+            write(root / 'secrets/langame-external-daily-worker.json', profile, gid=12042, mode=0o440)
         prefix = 'system/var/lib/leetplus/langame-sync/'
         for member in archive.getmembers():
             if not member.name.startswith(prefix) or member.isdir():

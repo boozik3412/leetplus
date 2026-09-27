@@ -29,7 +29,7 @@ FROM node:22.22.2-bookworm-slim@sha256:868499d55378719bffa87b0ed1f099591823c029b
 ARG RELEASE_SHA
 LABEL org.opencontainers.image.revision=$RELEASE_SHA ru.leetplus.contract=LEETPLUS_COMPOSE_BLUE_GREEN_V1
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl && rm -rf /var/lib/apt/lists/*
-RUN for pair in api-blue:12010 api-green:12011 web-blue:12020 web-green:12021 bonus-worker:12040 daily-worker:12041; do name=${pair%:*}; uid=${pair#*:}; groupadd -g "$uid" "$name"; useradd --no-log-init -u "$uid" -g "$uid" -M -s /usr/sbin/nologin "$name"; done \
+RUN for pair in api-blue:12010 api-green:12011 web-blue:12020 web-green:12021 bonus-worker:12040 daily-worker:12041 external-worker:12042; do name=${pair%:*}; uid=${pair#*:}; groupadd -g "$uid" "$name"; useradd --no-log-init -u "$uid" -g "$uid" -M -s /usr/sbin/nologin "$name"; done \
     && groupadd -g 12050 leetplus-audit
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app

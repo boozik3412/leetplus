@@ -24,6 +24,11 @@ case "${1:-}" in
     lock_mode=--shared
     extra_lock=(/usr/bin/flock --exclusive --nonblock "/var/lib/leetplus-compose/$3.lock")
     ;;
+  external-worker-run)
+    [[ $# == 1 ]]
+    lock_mode=--shared
+    extra_lock=(/usr/bin/flock --exclusive --nonblock /var/lib/leetplus-compose/langame-external-daily-worker.lock)
+    ;;
   network)
     [[ $# == 3 && "$2" == --operation ]]
     if [[ "$3" == refresh ]]; then

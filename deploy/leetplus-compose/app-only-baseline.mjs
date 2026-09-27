@@ -1,7 +1,7 @@
 // Runtime-only B baseline contract. The certificate must be produced and read
 // by the installed controller from its immutable root-owned operation state.
 // This module validates its contents; it does not turn caller JSON into trust.
-import { API_RESOURCE_PROFILE, CONTRACT as V1, SCHEMA, canonical, demand, digest, imageId, release } from './contract.mjs';
+import { API_RESOURCE_PROFILE, CONTRACT as V1, EXTERNAL_WORKER_CAPABILITY, SCHEMA, canonical, demand, digest, imageId, release } from './contract.mjs';
 import { validatePlan as validateV1Plan } from './orchestrator.mjs';
 import { validateAppAdmission, validateAppBundle } from './app-only-artifact.mjs';
 import { CONTRACT as WORKER_CONTINUATION_V2, validateWorkerContinuationPolicy } from './worker-continuation.mjs';
@@ -33,10 +33,12 @@ export function migrationInventoryDigest(rows) {
 function validateBundle(bundle) {
   validateAppBundle(bundle);
   exactKeys(bundle, ['schemaVersion', 'contract', 'releaseLane', 'releaseSha', 'builtAt', 'apiResourceProfile',
-    'sourceImpact', 'appImages', 'schemaRequirement', 'compatibilityRequirements', 'runtimeEvidence'], 'AppBundle');
+    'sourceImpact', 'appImages', 'schemaRequirement', 'compatibilityRequirements', 'runtimeEvidence',
+    ...(Object.hasOwn(bundle ?? {}, 'externalWorkerCapability') ? ['externalWorkerCapability'] : [])], 'AppBundle');
   demand(bundle.schemaVersion === 2 && bundle.contract === APP_BUNDLE && bundle.releaseLane === 'L1_APP_ONLY' &&
     SHA.test(bundle.releaseSha ?? '') && utc(bundle.builtAt) && bundle.apiResourceProfile === API_RESOURCE_PROFILE,
   'Invalid app bundle identity');
+  if (Object.hasOwn(bundle, 'externalWorkerCapability')) demand(bundle.externalWorkerCapability === EXTERNAL_WORKER_CAPABILITY, 'Invalid external worker app capability');
   exactKeys(bundle.sourceImpact, ['baseSha', 'headSha', 'classifierId', 'rulesSha256', 'impactReceiptSha256'], 'source impact');
   demand(SHA.test(bundle.sourceImpact.baseSha ?? '') && bundle.sourceImpact.headSha === bundle.releaseSha &&
     bundle.sourceImpact.classifierId === 'LEETPLUS_RELEASE_IMPACT_V1', 'Invalid source-impact range');
@@ -66,6 +68,7 @@ export function synthesizeRelease(bundle, certifiedDataRelease) {
   return release({ contract: V1, releaseSha: bundle.releaseSha, builtAt: bundle.builtAt,
     migrationCount: bundle.schemaRequirement.migrationCount, migration: bundle.schemaRequirement.migration,
     apiResourceProfile: bundle.apiResourceProfile,
+    ...(Object.hasOwn(bundle, 'externalWorkerCapability') ? { externalWorkerCapability: bundle.externalWorkerCapability } : {}),
     images: { api: bundle.appImages.api, web: bundle.appImages.web,
       postgres: certifiedDataRelease.images.postgres, redis: certifiedDataRelease.images.redis } });
 }

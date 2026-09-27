@@ -44,6 +44,22 @@ api_id=$(docker image inspect --format '{{.Id}}' "leetplus-api:$sha")
 web_id=$(docker image inspect --format '{{.Id}}' "leetplus-web:$sha")
 [[ "$api_id" =~ ^sha256:[a-f0-9]{64}$ && "$web_id" =~ ^sha256:[a-f0-9]{64}$ && "$api_id" != "$web_id" ]]
 docker run --rm --network none --entrypoint node "$api_id" -e 'const m=require("/app/release.json");if(m.migrationCount!==191)process.exit(1);console.log(JSON.stringify(m))' > "$tmp/image-release.json"
+external_worker_capability=''
+if git cat-file -e "$sha:apps/api/src/integrations/langame-external-daily-worker.cli.ts" 2>/dev/null; then
+  docker run --rm --network none --entrypoint node "$api_id" -e '
+    const fs=require("node:fs");
+    const entry=fs.statSync("/app/apps/api/dist/integrations/langame-external-daily-worker.cli.js");
+    if(!entry.isFile()||entry.size===0)process.exit(1);
+  '
+  external_worker_capability='LANGAME_EXTERNAL_SET1_V1'
+  bash deploy/leetplus-compose/test-external-worker-image.sh "$api_id" "$sha" "$build_time" "$tmp/external-worker-image-validation.json"
+fi
+export LEETPLUS_EXTERNAL_WORKER_CAPABILITY="$external_worker_capability"
+if [[ -n "$external_worker_capability" ]]; then
+  export LEETPLUS_EXTERNAL_WORKER_IMAGE_VALIDATION="$tmp/external-worker-image-validation.json"
+else
+  unset LEETPLUS_EXTERNAL_WORKER_IMAGE_VALIDATION
+fi
 
 # PostgreSQL is a disposable certified TLS fixture. It is never saved into the
 # app archive or named in the AppBundle.
@@ -89,12 +105,13 @@ done
 # exactly API and Web.
 node --input-type=module - "$tmp" "$sha" "$build_time" "$api_id" "$web_id" "$pg_id" <<'NODE'
 import fs from 'node:fs';
-import { canonical } from './deploy/leetplus-compose/contract.mjs';
+import { canonical, EXTERNAL_WORKER_CAPABILITY } from './deploy/leetplus-compose/contract.mjs';
 const [root, releaseSha, builtAt, api, web, postgres] = process.argv.slice(2);
 fs.writeFileSync(`${root}/release.json`, canonical({
   contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1', releaseSha, builtAt,
   migrationCount: 191, migration: '20260908180000_external_langame_simple_onboarding',
   apiResourceProfile: 'API_6G_V1', images: { api, web, postgres, redis: api },
+  ...(process.env.LEETPLUS_EXTERNAL_WORKER_CAPABILITY ? { externalWorkerCapability: EXTERNAL_WORKER_CAPABILITY } : {}),
 }), { flag: 'wx' });
 NODE
 node deploy/leetplus-compose/test-network-runtime.mjs "$tmp"
@@ -110,6 +127,7 @@ fs.writeFileSync(file, canonical({
   decision: 'PASS', releaseSha, dualSlotConstructionVerified: true,
   apiBlueCreated: true, apiGreenCreated: true, webBlueReady: true, webGreenReady: true,
   noDataImages: true, controlArchiveSha256, appImages: { api, web },
+  ...(process.env.LEETPLUS_EXTERNAL_WORKER_IMAGE_VALIDATION ? { externalWorkerEntrypoint: JSON.parse(fs.readFileSync(process.env.LEETPLUS_EXTERNAL_WORKER_IMAGE_VALIDATION)) } : {}),
 }), { flag: 'wx' });
 NODE
 
@@ -131,11 +149,12 @@ import {
   APP_BUNDLE_CONTRACT, CONTROLLER_CAPABILITY, DATA_CONTRACT, RELEASE_LANE,
   canonical, digest, fileDigest, readCanonicalJson, validateAppBundle,
 } from './deploy/leetplus-compose/app-only-artifact.mjs';
-import { API_RESOURCE_PROFILE } from './deploy/leetplus-compose/contract.mjs';
+import { API_RESOURCE_PROFILE, EXTERNAL_WORKER_CAPABILITY } from './deploy/leetplus-compose/contract.mjs';
 const [output, impactFile, appOnlyFile, imageReleaseFile, api, web] = process.argv.slice(2);
 const impact = readCanonicalJson(impactFile, 'impact receipt');
 const appOnly = readCanonicalJson(appOnlyFile, 'app-only receipt');
 const imageRelease = JSON.parse(fs.readFileSync(imageReleaseFile, 'utf8'));
+if ((imageRelease.externalWorkerCapability ?? '') !== process.env.LEETPLUS_EXTERNAL_WORKER_CAPABILITY) throw new Error('External image/compiled CLI capability drift');
 const gitBlob = file => execFileSync('git', ['show', `${imageRelease.releaseSha}:${file}`]);
 const migrationRoot = 'packages/database/prisma/migrations';
 const paths = execFileSync('git', ['ls-tree', '-r', '--name-only', imageRelease.releaseSha, '--', migrationRoot], { encoding: 'utf8' })
@@ -145,6 +164,7 @@ const inventory = paths.map(file => ({ migration_name: path.posix.basename(path.
 const bundle = {
   schemaVersion: 2, contract: APP_BUNDLE_CONTRACT, releaseLane: RELEASE_LANE,
   releaseSha: imageRelease.releaseSha, builtAt: imageRelease.builtAt, apiResourceProfile: API_RESOURCE_PROFILE,
+  ...(process.env.LEETPLUS_EXTERNAL_WORKER_CAPABILITY ? { externalWorkerCapability: EXTERNAL_WORKER_CAPABILITY } : {}),
   sourceImpact: {
     baseSha: impact.value.baseSha, headSha: impact.value.headSha,
     classifierId: impact.value.classifierId, rulesSha256: impact.value.rulesSha256,

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { CONTRACT, canonical, demand, digest, release, renderCompose, SLOTS } from './contract.mjs';
 import { CONTRACT as WORKER_CONTINUATION_V2, validateWorkerContinuationPolicy } from './worker-continuation.mjs';
+import { validateWorkerSetV3 } from './worker-set-v3.mjs';
 
 export const PHASES = ['HYDRATE', 'BIND', 'SMOKE', 'CUTOVER', 'POSTCHECK'];
 export function validatePlan(plan) {
@@ -66,6 +67,14 @@ export function validatePlan(plan) {
       'Worker grants expire before prepared evidence',
     );
   }
+  if (Object.hasOwn(plan, 'workerSetV3')) {
+    const set = validateWorkerSetV3(plan.workerSetV3, plan);
+    demand(plan.action === 'ROLLOUT' && canonical(set.legacy) === canonical(plan.workerContinuation),
+      'V3 must preserve the exact executable V2 continuation');
+    if (set.external.originalGrantEnvelope) demand(set.external.originalGrantEnvelope.grant.generation === plan.generation &&
+      set.external.originalGrantEnvelope.grant.releaseSha === plan.previous[plan.previous.activeSlot].releaseSha &&
+      set.external.originalGrantEnvelope.grant.hostIdentitySha256 === plan.hostIdentitySha256, 'V3 external original authority does not bind the native baseline');
+  }
   return plan;
 }
 export function validateApproval(plan, envelope, trustedPublicKey, { now = Date.now(), allowExpired = false } = {}) {
@@ -104,6 +113,7 @@ export function validateChain(plan, records) {
       demand(/^[a-f0-9]{64}$/.test(record.evidence.workerContinuationReceiptSha256 ?? ''),
         'V2 postcheck receipt must bind worker continuation');
     }
+    if (phase === 'POSTCHECK' && plan.workerSetV3) demand(/^[a-f0-9]{64}$/.test(record.evidence.externalWorkerContinuationReceiptSha256 ?? ''), 'V3 postcheck must bind external worker continuation');
     previousReceiptSha256 = digest(record.receipt);
   }
   return previousReceiptSha256;
@@ -133,6 +143,9 @@ export async function execute(plan, envelope, publicKey, store, driver) {
   if (plan.action === 'ROLLOUT') {
     demand(plan.workerContinuation?.contract === WORKER_CONTINUATION_V2,
       'Application rollout requires executable V2 worker continuation');
+    if (plan[plan.targetSlot].externalWorkerCapability || plan.previous[plan.previous.activeSlot].externalWorkerCapability) {
+      demand(plan.workerSetV3, 'Capable application rollout requires executable V3 worker set');
+    }
   }
   await driver.preflight(plan);
   let previousReceiptSha256 = null;

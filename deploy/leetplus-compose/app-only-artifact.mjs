@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
-import { API_RESOURCE_PROFILE, SCHEMA } from './contract.mjs';
+import { API_RESOURCE_PROFILE, EXTERNAL_WORKER_CAPABILITY, SCHEMA } from './contract.mjs';
 
 export const APP_BUNDLE_CONTRACT = 'LEETPLUS_COMPOSE_APP_BUNDLE_V2';
 export const APP_ADMISSION_CONTRACT = 'LEETPLUS_COMPOSE_APP_ADMISSION_V2';
@@ -81,12 +81,14 @@ export function validateAppBundle(value) {
   exactKeys(value, [
     'schemaVersion', 'contract', 'releaseLane', 'releaseSha', 'builtAt', 'apiResourceProfile',
     'sourceImpact', 'appImages', 'schemaRequirement', 'compatibilityRequirements', 'runtimeEvidence',
+    ...(Object.hasOwn(value ?? {}, 'externalWorkerCapability') ? ['externalWorkerCapability'] : []),
   ], 'app bundle');
   demand(value.schemaVersion === 2 && value.contract === APP_BUNDLE_CONTRACT, 'Invalid app bundle contract');
   demand(value.releaseLane === RELEASE_LANE, 'Invalid app bundle release lane');
   demand(SHA.test(value.releaseSha ?? ''), 'Invalid app bundle release SHA');
   demand(UTC.test(value.builtAt ?? '') && Number.isFinite(Date.parse(value.builtAt)), 'Invalid app bundle build time');
   demand(value.apiResourceProfile === API_RESOURCE_PROFILE, 'Invalid app bundle API resource profile');
+  if (Object.hasOwn(value, 'externalWorkerCapability')) demand(value.externalWorkerCapability === EXTERNAL_WORKER_CAPABILITY, 'Invalid app bundle external worker capability');
 
   exactKeys(value.sourceImpact, ['baseSha', 'headSha', 'classifierId', 'rulesSha256', 'impactReceiptSha256'], 'source impact');
   demand(SHA.test(value.sourceImpact.baseSha ?? '') && value.sourceImpact.headSha === value.releaseSha, 'Source impact identity mismatch');

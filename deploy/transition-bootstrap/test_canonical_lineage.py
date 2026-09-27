@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 from canonical_lineage import build_v1_plan, freeze_v1_receipt, active_pointer
+import authority
 from canonical_lineage_native import CanonicalLineageNative
 from inventory import digest
 from native_boundary import NativeBoundary, canonical, secure_read
@@ -19,6 +20,8 @@ NEW_SHA = 'b' * 40
 OLD_POINTER = f'/usr/local/lib/leetplus-compose/{OLD_SHA}/control.sh'
 NEW_POINTER = f'/usr/local/lib/leetplus-compose/{NEW_SHA}/control.sh'
 NOW = datetime(2026, 9, 27, 12, 0, 0, tzinfo=timezone.utc)
+TEST_NODE = os.environ.get('BOOTSTRAP_TEST_NODE', '/usr/bin/node')
+authority.NODE_BINARY = TEST_NODE
 
 
 def iso(value):
@@ -27,14 +30,14 @@ def iso(value):
 
 def generate_key():
     script = "import crypto from 'node:crypto'; const v=crypto.generateKeyPairSync('ed25519'); process.stdout.write(JSON.stringify({privateKey:v.privateKey.export({format:'pem',type:'pkcs8'}),publicKey:v.publicKey.export({format:'pem',type:'spki'})}));"
-    return json.loads(subprocess.check_output(['/usr/bin/node', '-e', script]))
+    return json.loads(subprocess.check_output([TEST_NODE, '-e', script]))
 
 
 def sign(value, key):
     script = "import crypto from 'node:crypto';import fs from 'node:fs';const v=JSON.parse(fs.readFileSync(0,'utf8'));process.stdout.write(crypto.sign(null,Buffer.from(v.message,'base64'),v.key).toString('base64'));"
     raw = json.dumps({'message': base64.b64encode(canonical(value)).decode(),
                       'key': key['privateKey']}).encode()
-    return subprocess.check_output(['/usr/bin/node', '-e', script], input=raw).decode()
+    return subprocess.check_output([TEST_NODE, '-e', script], input=raw).decode()
 
 
 @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'getuid') and os.getuid() == 0,

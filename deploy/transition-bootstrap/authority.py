@@ -17,9 +17,10 @@ const v=JSON.parse(fs.readFileSync(0,'utf8'));const k=crypto.createPublicKey(v.p
 if(k.asymmetricKeyType!=='ed25519'||v.publicKey.includes('PRIVATE'))process.exit(1);
 process.stdout.write('PASS:'+crypto.createHash('sha256').update(k.export({format:'der',type:'spki'})).digest('hex'));"""
 SIGNATURE = re.compile(r'[A-Za-z0-9+/]{86}==\Z')
+NODE_BINARY = '/usr/bin/node'
 
 
-def node_public_check(public_key, payload=None, signature=None, *, executable='/usr/bin/node'):
+def node_public_check(public_key, payload=None, signature=None, *, executable=None):
     require(isinstance(public_key, str) and len(public_key) <= 4096 and 'PRIVATE' not in public_key and
             public_key.startswith('-----BEGIN PUBLIC KEY-----\n') and
             public_key.endswith('-----END PUBLIC KEY-----\n'), 'Public-only Ed25519 PEM required')
@@ -27,7 +28,7 @@ def node_public_check(public_key, payload=None, signature=None, *, executable='/
     if payload is not None:
         require(isinstance(signature, str) and SIGNATURE.fullmatch(signature), 'Invalid signature encoding')
         value.update({'message': base64.b64encode(canonical(payload)).decode(), 'signature': signature})
-    result = subprocess.run([executable, '--input-type=module', '-e',
+    result = subprocess.run([executable or NODE_BINARY, '--input-type=module', '-e',
                             VERIFY_SCRIPT if payload is not None else PUBLIC_SCRIPT],
         input=canonical(value), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=CLEAN, timeout=15, check=False)

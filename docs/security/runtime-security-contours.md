@@ -2,6 +2,17 @@
 
 Статус: **канонический current-state contract**, оперативный checkpoint **24.09.2026**.
 
+**Source-only predecessor bootstrap 27.09:** отдельная ветка после frozen
+controller PR248 содержит proposal ordered merges246→247→248 и изолированные
+protocol/native primitives для b0→bridge и bridge→external successor. Они
+проверяют exact permit/plan signature до pointer effect, durable intent,
+lost-response reconcile без повторного CAS, receipt-bound rollback и native
+install→control→transition locks. Complete live observer, independently admitted
+adapter/root installer и installed-path acceptance остаются отсутствующими.
+Это не установленная host authority и не production GO; generic handoff не
+расширен, provider/tenant/timer/grant/application/data effects не выполнены.
+[Source boundaries and remaining gates](../deployment/predecessor-transition-bootstrap-source.md).
+
 **External Langame worker source candidate 27.09:** владелец выбрал для EZ GAME
 стадию `LIVE`. В исходниках подготовлены отдельный CLI с exact tenant/source/Store
 и profile/execution/Store revisions, а также platform-admin prepare/apply/revoke

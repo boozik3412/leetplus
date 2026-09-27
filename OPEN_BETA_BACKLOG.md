@@ -1,5 +1,13 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
+**Source-only bootstrap checkpoint 27.09:** ordered source integration proposal
+for frozen draft PR246→247→248 and separate predecessor transition primitives
+are prepared outside the controller payload. No main merge or production effect
+is performed. The complete independently admitted host observer, adapter/root
+installer, installed-path acceptance, exact-main artifact receipts and fresh
+dispatcher operation GO remain prerequisites. External beta remains NO-GO.
+[Bootstrap source packet](./docs/deployment/predecessor-transition-bootstrap-source.md).
+
 **Variant B source checkpoint 24.09:** merged PR #240 adds a versioned
 Compose app-only admission, exact-diff `L1_APP_ONLY` allowlist, API/Web-only
 images and installed-controller certification of the already accepted

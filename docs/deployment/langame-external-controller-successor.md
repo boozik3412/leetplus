@@ -52,8 +52,12 @@ third worker dormant. A later signed native enrollment installs only the
 external service, timer, secret, grant and exact source-IP fence. CANARY keeps
 the timer disabled. TIMER requires the accepted CANARY enrollment plus the
 same tenant/source/Store/revision's native canary intent, result and receipt;
-permission-partial results with no failed scope can be accepted. The approved
-timer is enabled last, after signed profile/grant and network postimages.
+  permission-partial results with no failed scope can be accepted. The approved
+  timer is enabled last, after signed profile/grant and network postimages.
+  A dated CANARY still observes the current catalog and inventory; the frozen
+  business date bounds dated sales, revenue and guest events. TIMER uses the
+  same four-scope FULL aggregate contract. A missing current inventory scope
+  cannot be counted as a successful canary for enrollment.
 
 Future capable-to-capable app rollouts keep all three workers under one
 exclusive controller window. V3 stages signed N+1/N+2 grants. Rollback to an
@@ -102,6 +106,6 @@ Those are release gates for the combined exact source and must precede any
 operational plan.
 
 At this source checkpoint, the Windows Node suite passed 221 tests with two
-platform skips; the Python suite passed 154 with four platform skips. Shell
+platform skips; Python ran 154 tests with 150 passing and four platform skips. Shell
 syntax passed under Git Bash. These numbers are local source checks, not a
 combined exact-main CI or an installed runtime receipt.

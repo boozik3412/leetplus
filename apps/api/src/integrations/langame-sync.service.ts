@@ -734,8 +734,11 @@ export class LangameSyncService {
         if (sourceResult.status === 'PARTIAL') result.partialSources += 1;
         if (sourceResult.status === 'FAILED') result.failedSources += 1;
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown Langame sync error';
+        const errorMessage = externalPilot
+          ? 'External Langame source failed; inspect the worker receipt.'
+          : error instanceof Error
+            ? error.message
+            : 'Unknown Langame sync error';
         result.failedSources += 1;
         sourceResult.status = 'FAILED';
         sourceResult.errorMessage = errorMessage;
@@ -930,6 +933,40 @@ export class LangameSyncService {
     ) {
       throw new ServiceUnavailableException(
         'External Langame worker admission changed',
+      );
+    }
+    const [source, store] = await Promise.all([
+      this.prisma.integrationSource.findUnique({
+        where: { id: authority.sourceId },
+        select: { tenantId: true, domain: true, isActive: true },
+      }),
+      this.prisma.store.findUnique({
+        where: { id: authority.storeId },
+        select: {
+          tenantId: true,
+          isActive: true,
+          externalProvider: true,
+          externalDomain: true,
+          externalClubId: true,
+          integrationSourceId: true,
+          executionRevision: true,
+        },
+      }),
+    ]);
+    if (
+      source?.tenantId !== authority.tenantId ||
+      source.domain !== authority.externalDomain ||
+      !source.isActive ||
+      store?.tenantId !== authority.tenantId ||
+      !store.isActive ||
+      store.externalProvider !== IntegrationProvider.LANGAME ||
+      store.externalDomain !== authority.externalDomain ||
+      store.externalClubId !== authority.externalClubId ||
+      store.integrationSourceId !== authority.sourceId ||
+      store.executionRevision !== authority.storeRevision
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame worker source or Store binding changed',
       );
     }
   }

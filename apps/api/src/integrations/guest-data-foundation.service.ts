@@ -480,6 +480,15 @@ export class GuestDataFoundationService {
       );
     }
     if (externalPilot) await this.failStaleRunningRuns(tenantId);
+    if (
+      externalPilot &&
+      (this.activeBackgroundTenantSyncs.has(tenantId) ||
+        (await this.findRunningRun(tenantId)))
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame guest worker cannot overlap an active guest import',
+      );
+    }
     const period = await this.resolvePeriod(tenantId, query);
     const result: GuestDataFoundationSyncResult = {
       tenantId,
@@ -565,7 +574,13 @@ export class GuestDataFoundationService {
         if (status === 'FAILED') result.failedSources += 1;
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : 'Guest sync failed';
+          error instanceof ExternalGuestDataFenceError
+            ? error.message
+            : externalPilot
+              ? 'External Langame guest source failed; inspect the worker receipt.'
+              : error instanceof Error
+                ? error.message
+                : 'Guest sync failed';
         result.failedSources += 1;
         sourceResult.status = 'FAILED';
         sourceResult.errorMessage = message;

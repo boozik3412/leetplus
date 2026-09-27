@@ -46,6 +46,7 @@ type PrismaMock = {
   integrationSource: {
     upsert: jest.Mock;
     update: jest.Mock;
+    findUnique: jest.Mock;
   };
   integrationSyncJob: {
     create: jest.Mock;
@@ -70,6 +71,7 @@ type PrismaMock = {
     upsert: jest.Mock;
     update: jest.Mock;
     findMany: jest.Mock;
+    findUnique: jest.Mock;
   };
   inventorySnapshot: {
     findUnique: jest.Mock;
@@ -253,6 +255,7 @@ function createPrismaMock(): PrismaMock {
     integrationSource: {
       upsert: jest.fn(),
       update: jest.fn(),
+      findUnique: jest.fn(),
     },
     integrationSyncJob: {
       create: jest.fn(),
@@ -277,6 +280,7 @@ function createPrismaMock(): PrismaMock {
       upsert: jest.fn(),
       update: jest.fn().mockResolvedValue({ id: 'store-1' }),
       findMany: jest.fn(),
+      findUnique: jest.fn(),
     },
     inventorySnapshot: {
       findUnique: jest.fn(),
@@ -1507,6 +1511,59 @@ describe('LangameSyncService', () => {
       service.assertExternalPilotBindings(externalPilot),
     ).rejects.toThrow('single confirmed active club');
     expect(prisma.integrationSyncJob.create).not.toHaveBeenCalled();
+  });
+
+  it('rechecks the exact Store execution revision between external provider reads', async () => {
+    const authority = createLangameExternalPilotAuthority({
+      tenantId: '8cc79086-ed43-44fa-83d3-20207ec48758',
+      tenantSlug: 'set-1',
+      sourceId: '94a3842b-847e-4c4d-89b0-7cb8976a9f17',
+      storeId: 'ecee16ef-f0cb-4307-b079-e2f0303c3a16',
+      externalDomain: '1171.langame.ru',
+      externalClubId: '1',
+      profileRevision: 2,
+      executionRevision: 3,
+      storeRevision: 0,
+      customerStage: TenantCustomerStage.LIVE,
+    });
+    const runnable = service as unknown as {
+      assertExternalExecutionCurrent: (
+        value: typeof authority,
+      ) => Promise<void>;
+    };
+    const check = (value: typeof authority) =>
+      runnable.assertExternalExecutionCurrent(value);
+    admission.assertAllowed.mockResolvedValue({
+      customerStage: TenantCustomerStage.LIVE,
+      entitlementProfileRevision: 2,
+      executionRevision: 3,
+    });
+    prisma.integrationSource.findUnique.mockResolvedValue({
+      tenantId: authority.tenantId,
+      domain: authority.externalDomain,
+      isActive: true,
+    });
+    prisma.store.findUnique.mockResolvedValue({
+      tenantId: authority.tenantId,
+      isActive: true,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: authority.externalDomain,
+      externalClubId: authority.externalClubId,
+      integrationSourceId: authority.sourceId,
+      executionRevision: 0,
+    });
+    await expect(check(authority)).resolves.toBeUndefined();
+    prisma.store.findUnique.mockResolvedValueOnce({
+      tenantId: authority.tenantId,
+      isActive: true,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: authority.externalDomain,
+      externalClubId: authority.externalClubId,
+      integrationSourceId: authority.sourceId,
+      executionRevision: 1,
+    });
+    await expect(check(authority)).rejects.toThrow('binding changed');
+    expect(client.listProducts).not.toHaveBeenCalled();
   });
 
   it('keeps the current day in catch-up sync when a source was already synced today', async () => {

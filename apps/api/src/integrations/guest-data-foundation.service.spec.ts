@@ -928,6 +928,56 @@ describe('GuestDataFoundationService', () => {
     }
   });
 
+  it('stops the external guest scope when a manual import is already running', async () => {
+    const authority = createLangameExternalPilotAuthority({
+      tenantId: '8cc79086-ed43-44fa-83d3-20207ec48758',
+      tenantSlug: 'set-1',
+      sourceId: '94a3842b-847e-4c4d-89b0-7cb8976a9f17',
+      storeId: 'ecee16ef-f0cb-4307-b079-e2f0303c3a16',
+      externalDomain: '1171.langame.ru',
+      externalClubId: '1',
+      profileRevision: 2,
+      executionRevision: 3,
+      storeRevision: 0,
+      customerStage: TenantCustomerStage.LIVE,
+    });
+    tenantExecutionAdmissionService.assertAllowed.mockResolvedValueOnce({
+      allowed: true,
+      tenantId: authority.tenantId,
+      customerStage: TenantCustomerStage.LIVE,
+      entitlementProfileRevision: 2,
+      executionRevision: 3,
+    });
+    prisma.store.findMany.mockResolvedValueOnce([
+      {
+        id: authority.storeId,
+        integrationSourceId: authority.sourceId,
+        externalDomain: authority.externalDomain,
+        externalClubId: authority.externalClubId,
+        executionRevision: 0,
+      },
+    ]);
+    langameSettingsService.resolveTenantAccess.mockResolvedValueOnce({
+      apiKey: 'fixture-unused',
+      sources: [{ id: authority.sourceId, domain: authority.externalDomain }],
+    });
+    prisma.guestDataProfileRun.findFirst.mockResolvedValueOnce({
+      status: 'RUNNING',
+    });
+    await expect(
+      service.syncTenantById(
+        authority.tenantId,
+        { dateFrom: '2026-09-26', dateTo: '2026-09-26' },
+        'OUTBOUND',
+        authority,
+      ),
+    ).rejects.toThrow('cannot overlap');
+    expect(prisma.guestDataProfileRun.create).not.toHaveBeenCalled();
+    for (const method of Object.values(langameClient)) {
+      expect(method).not.toHaveBeenCalled();
+    }
+  });
+
   it('reconciles a complete guest snapshot through the identity resolver', async () => {
     const hashPhone = (value: string) =>
       createHmac('sha256', 'local-secret').update(value).digest('hex');

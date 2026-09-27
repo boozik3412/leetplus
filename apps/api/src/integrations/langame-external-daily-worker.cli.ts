@@ -83,7 +83,7 @@ async function main() {
     process.stdout.write(`${JSON.stringify(terminal)}\n`);
     if (syncError || terminal.decision === 'FAILED') {
       console.error(
-        `External Langame worker failed: ${syncError instanceof Error ? syncError.message : 'unknown error'}`,
+        `External Langame worker failed: ${syncError instanceof ExternalWorkerIncompleteError ? syncError.message : 'unexpected execution error'}`,
       );
       process.exitCode = 1;
     }
@@ -95,7 +95,7 @@ async function main() {
 if (require.main === module) {
   void main().catch((error: unknown) => {
     console.error(
-      `External Langame worker failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      `External Langame worker failed: ${error instanceof ExternalWorkerIncompleteError ? error.message : 'unexpected startup or receipt error'}`,
     );
     process.exitCode = 1;
   });

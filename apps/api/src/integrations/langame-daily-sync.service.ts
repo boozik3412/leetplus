@@ -254,6 +254,19 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (externalPilot) {
+        const activeSync = await this.prisma.integrationSyncJob.findFirst({
+          where: {
+            tenantId: tenant.id,
+            provider: IntegrationProvider.LANGAME,
+            finishedAt: null,
+          },
+          select: { id: true },
+        });
+        if (activeSync) {
+          throw new BadRequestException(
+            'External worker cannot overlap an active Langame import',
+          );
+        }
         if (
           admission.customerStage !== externalPilot.customerStage ||
           !admission.allowed
@@ -580,10 +593,13 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
         true,
       );
     } catch (error) {
+      const errorMessage = externalPilot
+        ? 'External Langame inventory is incomplete; inspect the source receipt.'
+        : this.errorMessage(error);
       return this.finishedScope(
         scope,
         DailyDataCoverageStatus.FAILED,
-        this.errorMessage(error),
+        errorMessage,
         true,
       );
     }
@@ -733,9 +749,12 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
         this.finishedScope(staffScope, DailyDataCoverageStatus.SUCCESS),
       ];
     } catch (error) {
-      const errorMessage = this.errorMessage(error);
       const incomplete =
         error instanceof IncompleteDailyFactsScopeError ? error : null;
+      const errorMessage =
+        input.externalPilot && !incomplete
+          ? 'External Langame guest foundation failed; inspect the source receipt.'
+          : this.errorMessage(error);
 
       await Promise.all([
         this.markCoverageFinished(input, guestScope, {
@@ -864,6 +883,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       businessDate: Date;
       dateInput: string;
       force: boolean;
+      externalPilot?: LangameExternalPilotAuthority;
     },
     scope: DailyDataCoverageScope,
     task: () => Promise<{
@@ -883,9 +903,12 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
 
       return this.finishedScope(scope, DailyDataCoverageStatus.SUCCESS);
     } catch (error) {
-      const errorMessage = this.errorMessage(error);
       const incomplete =
         error instanceof IncompleteDailyFactsScopeError ? error : null;
+      const errorMessage =
+        input.externalPilot && !incomplete
+          ? 'External Langame daily scope failed; inspect the source receipt.'
+          : this.errorMessage(error);
       await this.markCoverageFinished(input, scope, {
         status: DailyDataCoverageStatus.FAILED,
         ...(incomplete

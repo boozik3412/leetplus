@@ -38,6 +38,7 @@ describe('LangameDailySyncService tenant execution admission', () => {
         upsert: jest.fn(),
       },
       integrationSyncJob: {
+        findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn().mockResolvedValue([]),
       },
       integrationSource: {
@@ -381,6 +382,18 @@ describe('LangameDailySyncService tenant execution admission', () => {
       externalPilot.tenantId,
       expect.any(Array),
     );
+
+    subject.prisma.integrationSyncJob.findFirst.mockResolvedValueOnce({
+      id: 'manual-running',
+    });
+    await expect(
+      subject.service.runDailySync({
+        tenantSlug: 'set-1',
+        date: '2026-09-26',
+        externalPilot,
+      }),
+    ).rejects.toThrow('cannot overlap');
+    expect(runTenantDailySync).toHaveBeenCalledTimes(1);
 
     subject.admissionService.evaluate.mockResolvedValueOnce({
       allowed: true,

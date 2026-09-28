@@ -1,5 +1,6 @@
 """Disposable Linux root fixture for all-or-nothing public bundle enrollment."""
 import io
+import importlib.util
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -15,7 +16,7 @@ from bundle_installer import StandaloneBundleInstaller
 from enrollment import INSTALL_EFFECTS, INSTALL_PLAN, INSTALL_APPROVAL, REQUIRED_BUNDLE_FILES, validate_enrollment_chain
 from inventory import digest
 from native_boundary import canonical, secure_read
-from test_canonical_lineage import generate_key, sign, iso
+from test_canonical_lineage import generate_key, sign, iso, TEST_NODE
 
 
 @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'getuid') and os.getuid() == 0,
@@ -27,10 +28,13 @@ class BundleInstallerTests(unittest.TestCase):
         self.root.chmod(0o700)
         self.controls = self.root / 'controls'
         self.inbox = self.root / 'inbox'
-        self.source = self.root / 'source-inbox'
+        self.source_root = self.root / 'source-inbox'
+        self.source_sha = 'd' * 40
+        self.source = self.source_root / self.source_sha
         self.installed = self.root / 'installed'
         self.state = self.root / 'state'
-        for directory in (self.controls, self.inbox, self.source, self.installed, self.state):
+        for directory in (self.controls, self.inbox, self.source_root, self.source,
+                          self.installed, self.state):
             directory.mkdir(mode=0o700)
         self.machine = self.root / 'machine-id'
         self.machine.write_bytes(b'fixture-host-id\n')
@@ -58,7 +62,6 @@ class BundleInstallerTests(unittest.TestCase):
                 item.mode = 0o400
                 tar.addfile(item, io.BytesIO(raw))
         self.archive = stream.getvalue()
-        self.source_sha = 'd' * 40
         source_admission = {'contract': 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_ADMISSION',
             'decision': 'PASS', 'releaseSha': self.source_sha,
             'repository': 'boozik3412/leetplus', 'event': 'push', 'ref': 'refs/heads/main'}
@@ -178,6 +181,26 @@ class BundleInstallerTests(unittest.TestCase):
         enrollment = rewrite_lineage(alternate, 'execution')
         with self.assertRaisesRegex(ValueError, 'key domains collapse'):
             validate_enrollment_chain(enrollment_root, enrollment, self.deployment['publicKey'])
+
+    def test_separately_sourced_launcher_validates_full_chain_before_candidate_import(self):
+        launcher_path = Path(__file__).resolve().parents[2] / 'docs' / 'deployment' / 'production-artifact' / \
+            'trusted_predecessor_bootstrap_launcher.py'
+        spec = importlib.util.spec_from_file_location('trusted_predecessor_launcher_fixture', launcher_path)
+        launcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(launcher)
+        with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old):
+            self.installer.apply(self.plan, self.approval, self.roots, self.archive)
+        final = self.installed / self.plan['bundleSha256']
+        result = launcher.verify_installed_bundle(final,
+            deployment_root=self.deployment_path, machine_id=self.machine,
+            source_inbox=self.source_root, node=TEST_NODE)
+        self.assertEqual(result['bundleSha256'], self.plan['bundleSha256'])
+        target = final / 'bundle' / 'deploy' / 'transition-bootstrap' / 'rpc_host.py'
+        target.write_bytes(b'foreign code\n')
+        with self.assertRaisesRegex(ValueError, 'module byte changed'):
+            launcher.verify_installed_bundle(final,
+                deployment_root=self.deployment_path, machine_id=self.machine,
+                source_inbox=self.source_root, node=TEST_NODE)
 
         enrollment = rewrite_lineage(self.deployment['publicKey'].encode(), 'execution')
         with self.assertRaisesRegex(ValueError, 'key domains collapse'):

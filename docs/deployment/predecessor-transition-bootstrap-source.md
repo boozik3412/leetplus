@@ -144,10 +144,20 @@ pointer effect. Reverse CAS needs a separate deployment-root receipt-bound
 rollback approval and restores the exact prior V1 pointer. Root/Linux fixtures
 exercise ordinary, lost-response and reverse lineage in disposable `/run`.
 
-The native adapter is not yet wired to an installed CLI or accepted by the
-dispatcher. The independently admitted installer source has no CLI, and a
-reviewed offline signer plus install/recovery/rollback host rehearsals are
-still required. The installer can stage one closed bundle+enrollment tree and
+The next source layer adds `rpc_host.py` and `cli.mjs` to bind the pure Node
+protocol to native root-only observations and effects over bounded, single-child
+JSON RPC. The host owns ordered locks for the entire callback window and reads
+public roots from the verified enrollment. Requests are canonical root-owned
+files scoped to one exact UUID; only the admitted bundle's Node/Python files
+may be launched. `offline_sign.py` prepares one exact, domain-separated
+signature from Windows DPAPI custody after public-key match, linked plan or
+receipt checks and an exact dispatcher confirmation phrase. This phrase is
+not proof of message origin; the dispatcher must retain the direct user GO.
+
+Neither CLI nor installer is installed or accepted by the dispatcher. Exact
+Linux installed-path tests, native storage provisioning, signer provenance and
+install/recovery/rollback host rehearsals are still required. The installer can
+stage one closed bundle+enrollment tree and
 atomically rename it into a protected final path; incomplete staging is HOLD
 for separately signed recovery. It cannot install itself or infer a direct GO
 from source review. No production effect is authorized by this follow-up.
@@ -166,3 +176,17 @@ mutation/foreign-host/lost-response/lock gates; then prepare a fresh exact
 production plan with backup/restored-copy/rollback and direct dispatcher GO.
 These files supply reusable protocol and native primitives, not a completed
 host authority. No old A, bridge, application or forwarded GO applies.
+
+The separately admitted launcher candidate
+`docs/deployment/production-artifact/trusted_predecessor_bootstrap_launcher.py`
+resides outside the candidate bundle. It verifies the deployment-root-signed
+installer plan, timely intent, terminal receipt, exact-main source admission,
+closed full file map and four distinct public key identities before importing
+any candidate Python module. The root host independently rechecks plan-bound
+pointer direction and exact permit/execution/rollback/zero-effect schema before
+CAS or pointer-temporary recovery. It durably records request, bounded RPC
+stdout/stderr, exit and cleanup status. A separate process-group watchdog kills
+both Python lock owner and Node child on hard timeout or abnormal parent death;
+normal authority rejection closes the watchdog with an explicit completion
+byte. These are source contracts and disposable fixtures, not an installed
+launcher, enrolled key or accepted host transition.

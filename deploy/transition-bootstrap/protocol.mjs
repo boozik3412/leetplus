@@ -257,6 +257,60 @@ function validateRollback(envelope, root, plan, forwardReceipt, now) {
   'Rollback approval differs from accepted forward receipt');
 }
 
+function validateNoEffect(envelope, root, plan, intent, phase, forwardReceipt, now) {
+  const command = verifySignedCommand(envelope, root, NO_EFFECT_CONTRACT,
+    ['contract', 'operationId', 'planSha256', 'phase', 'intentSha256', 'forwardReceiptSha256',
+      'effect', 'issuedAt', 'expiresAt'], now);
+  demand(command.operationId === plan.operationId && command.planSha256 === digest(plan) &&
+    command.phase === phase && command.intentSha256 === digest(intent) &&
+    command.forwardReceiptSha256 === (phase === 'FORWARD' ? null : digest(forwardReceipt)) &&
+    command.effect === 'TERMINAL_RECORD_ONLY',
+  'Zero-effect approval differs from exact pending intent and receipt');
+  return command;
+}
+
+/** Independent Python host calls this pure validator immediately before CAS. */
+export function validateNativePointerAuthority(value, { now = Date.now() } = {}) {
+  exactKeys(value, ['phase', 'recovery', 'plan', 'permitEnvelope', 'permitRoot',
+    'executionEnvelope', 'executionRoot', 'intent', 'forwardReceipt', 'rollbackIntent',
+    'rollbackEnvelope', 'rollbackRoot', 'recoveryEnvelope', 'recoveryRoot'],
+  'native pointer authority');
+  const { phase, recovery, plan, permitEnvelope, permitRoot, executionEnvelope,
+    executionRoot, intent, forwardReceipt, rollbackIntent, rollbackEnvelope,
+    rollbackRoot, recoveryEnvelope, recoveryRoot } = value;
+  demand(phase === 'FORWARD' || phase === 'ROLLBACK', 'Unknown native pointer phase');
+  demand(typeof recovery === 'boolean', 'Invalid native pointer recovery flag');
+  recordIdentity(intent, `${PLAN_CONTRACT}_INTENT`, plan, permitEnvelope, executionEnvelope);
+  historicalAuthority(plan, permitEnvelope, permitRoot, executionEnvelope, executionRoot,
+    intent.authorizedAt);
+  if (phase === 'FORWARD') {
+    demand(forwardReceipt === null && rollbackIntent === null && rollbackEnvelope === null,
+      'Forward pointer cannot inherit rollback authority');
+    if (!recovery) {
+      validatePermit(plan.mode, permitEnvelope, permitRoot, plan.expected, now);
+      validateExecution(executionEnvelope, executionRoot, plan, now);
+    } else {
+      validateNoEffect(recoveryEnvelope, recoveryRoot, plan, intent, phase, null, now);
+    }
+  } else {
+    recordIdentity(forwardReceipt, `${PLAN_CONTRACT}_RECEIPT`, plan, permitEnvelope, executionEnvelope);
+    demand(forwardReceipt.intentSha256 === digest(intent) && forwardReceipt.decision === 'PASS',
+      'Native rollback lacks accepted standalone forward receipt');
+    demand(rollbackIntent?.contract === `${PLAN_CONTRACT}_ROLLBACK_INTENT` &&
+      rollbackIntent.operationId === plan.operationId && rollbackIntent.planSha256 === digest(plan) &&
+      rollbackIntent.forwardReceiptSha256 === digest(forwardReceipt) &&
+      rollbackIntent.rollbackEnvelopeSha256 === digest(rollbackEnvelope) &&
+      rollbackIntent.oldPointer === plan.newPointer && rollbackIntent.newPointer === plan.oldPointer,
+    'Native rollback intent differs from receipt-bound approval');
+    validateRollback(rollbackEnvelope, rollbackRoot, plan, forwardReceipt,
+      instant(rollbackIntent.authorizedAt, 'rollback authorization time'));
+    if (!recovery) validateRollback(rollbackEnvelope, rollbackRoot, plan, forwardReceipt, now);
+    else validateNoEffect(recoveryEnvelope, recoveryRoot, plan, rollbackIntent, phase,
+      forwardReceipt, now);
+  }
+  return true;
+}
+
 export async function rollback({ plan, permitEnvelope, executionEnvelope, rollbackEnvelope, rollbackRoot, host, now }) {
   ensureHost(host);
   return host.withLocks('WRITE', async () => {
@@ -359,14 +413,9 @@ export async function terminalizeNoEffect({ plan, permitEnvelope, permitRoot, ex
     }
     const name = phase === 'FORWARD' ? 'terminalNoEffect' : 'rollbackNoEffect';
     const existing = record[name];
-    const command = verifySignedCommand(recoveryEnvelope, recoveryRoot, NO_EFFECT_CONTRACT,
-      ['contract', 'operationId', 'planSha256', 'phase', 'intentSha256', 'forwardReceiptSha256',
-        'effect', 'issuedAt', 'expiresAt'], existing ? instant(existing.acceptedAt, 'zero-effect acceptance') : now);
-    demand(command.operationId === plan.operationId && command.planSha256 === digest(plan) &&
-      command.phase === phase && command.intentSha256 === digest(intent) &&
-      command.forwardReceiptSha256 === (phase === 'FORWARD' ? null : digest(record.receipt)) &&
-      command.effect === 'TERMINAL_RECORD_ONLY',
-    'Zero-effect approval differs from pending authority');
+    validateNoEffect(recoveryEnvelope, recoveryRoot, plan, intent, phase,
+      phase === 'FORWARD' ? null : record.receipt,
+      existing ? instant(existing.acceptedAt, 'zero-effect acceptance') : now);
     if (existing) {
       demand(existing.contract === `${PLAN_CONTRACT}_NO_EFFECT_RECEIPT` &&
         existing.operationId === plan.operationId && existing.planSha256 === digest(plan) &&

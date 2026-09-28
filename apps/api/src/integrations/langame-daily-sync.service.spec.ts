@@ -333,6 +333,7 @@ describe('LangameDailySyncService tenant execution admission', () => {
       subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
         sources: 0,
         failedSources: 0,
+        partialSources: 0,
         sourceResults: [],
       });
       subject.businessSnapshotService.runSnapshotsForTenant.mockResolvedValue({
@@ -364,6 +365,45 @@ describe('LangameDailySyncService tenant execution admission', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('keeps an incomplete guest import out of complete daily coverage and dependent snapshots', async () => {
+    const subject = createSubject();
+    subject.prisma.tenant.findMany.mockResolvedValue([
+      { id: 'tenant-internal', slug: 'internal' },
+    ]);
+    subject.admissionService.evaluate.mockResolvedValue({
+      allowed: true,
+      tenantId: 'tenant-internal',
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      customerStage: TenantCustomerStage.INTERNAL,
+    });
+    subject.langameSyncService.syncTenantById.mockResolvedValue({
+      failedSources: 0,
+      partialSources: 0,
+    });
+    subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
+      sources: 1,
+      failedSources: 0,
+      partialSources: 1,
+      sourceResults: [],
+    });
+    subject.businessSnapshotService.runSnapshotsForTenant.mockResolvedValue({
+      runs: [],
+    });
+
+    const result = await subject.service.runDailySync({ date: '2026-09-20' });
+
+    expect(result.results[0]?.scopes).toContainEqual(
+      expect.objectContaining({
+        scope: DailyDataCoverageScope.GUEST_FOUNDATION,
+        status: DailyDataCoverageStatus.FAILED,
+      }),
+    );
+    expect(
+      subject.businessSnapshotService.runSnapshotsForTenant,
+    ).not.toHaveBeenCalled();
   });
 
   it('refreshes current inventory after legacy QUICK coverage closes without rewriting sales coverage', async () => {
@@ -458,6 +498,7 @@ describe('LangameDailySyncService tenant execution admission', () => {
       subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
         sources: 0,
         failedSources: 0,
+        partialSources: 0,
         sourceResults: [],
       });
 
@@ -541,6 +582,7 @@ describe('LangameDailySyncService tenant execution admission', () => {
       subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
         sources: 0,
         failedSources: 0,
+        partialSources: 0,
         sourceResults: [],
       });
       subject.businessSnapshotService.runSnapshotsForTenant.mockResolvedValue({

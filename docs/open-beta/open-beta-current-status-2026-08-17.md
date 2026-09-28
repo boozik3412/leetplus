@@ -1,5 +1,16 @@
 # LeetPlus open beta — текущее состояние на 23.09.2026
 
+**Source-only Langame follow-up 27.09:** при отсутствии прав на категории и
+клубную конфигурацию ручной импорт продолжает все доступные разделы.
+Гостевые denial/pagination/multi-club сценарии и длительный status polling
+проверены локально; внутренний AUTO при известном permission denial также
+читает остальные provider sections, сохраняя неполный coverage;
+интерфейс больше не выдаёт ошибку статуса или истёкшее ожидание за первый
+`IDLE`, а показывает наблюдаемый PARTIAL/RUNNING. External background sync
+остается `EXTERNAL_DENY`; source, тесты и локальная fixture не означают
+изменений serving GREEN f97/gen10. Контракт:
+[Langame partial sync](../integrations/langame-partial-sync.md).
+
 **Source-only support candidate 24.09:** подготовлены atomic guarded routes
 для точечного закрытия одного тикета с комментарием и для замены двух строк
 одного шага Battle Pass. Это не production rollout и не закрытие тикетов;

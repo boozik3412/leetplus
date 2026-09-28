@@ -90,6 +90,7 @@ export type GuestDataFoundationSyncResult = {
   tenantId: string;
   sources: number;
   failedSources: number;
+  partialSources: number;
   sourceResults: GuestDataFoundationSourceResult[];
 };
 
@@ -114,10 +115,11 @@ export type GuestDataFoundationFreshnessStatus =
   | 'RUNNING'
   | 'FRESH'
   | 'STALE'
+  | 'PARTIAL'
   | 'FAILED';
 
 export type GuestDataFoundationStatusResult = {
-  status: 'IDLE' | 'RUNNING' | 'SUCCESS' | 'FAILED';
+  status: 'IDLE' | 'RUNNING' | 'SUCCESS' | 'PARTIAL' | 'FAILED';
   running: boolean;
   nextRun: {
     dateFrom: string;
@@ -200,7 +202,7 @@ type GuestDataFoundationRunStatusSource = {
 
 export type GuestDataFoundationSourceResult = {
   domain: string;
-  status: 'SUCCESS' | 'FAILED';
+  status: 'SUCCESS' | 'PARTIAL' | 'FAILED';
   profileRunId: string;
   guests: number;
   groups: number;
@@ -317,6 +319,8 @@ type SourceProfile = {
     sumBonusBalance: string;
   };
   endpointErrors: Record<string, string>;
+  providerReadsAttempted: number;
+  providerReadsSucceeded: number;
 };
 
 @Injectable()
@@ -426,6 +430,7 @@ export class GuestDataFoundationService {
       tenantId,
       sources: sources.length,
       failedSources: 0,
+      partialSources: 0,
       sourceResults: [],
     };
 
@@ -472,24 +477,41 @@ export class GuestDataFoundationService {
           query,
         });
 
-        Object.assign(sourceResult, syncResult, { status: 'SUCCESS' });
+        const hasEndpointErrors =
+          Object.keys(syncResult.endpointErrors).length > 0;
+        const status = !hasEndpointErrors
+          ? 'SUCCESS'
+          : syncResult.providerReadsSucceeded > 0
+            ? 'PARTIAL'
+            : 'FAILED';
+        const message = hasEndpointErrors
+          ? `${status === 'FAILED' ? 'Не загружены' : 'Не полностью загружены'} разделы Langame: ${Object.keys(syncResult.endpointErrors).join(', ')}. ${status === 'FAILED' ? 'Данные этого запуска не подтверждены.' : 'Доступные разделы сохранены.'}`
+          : null;
 
         await this.prisma.guestDataProfileRun.update({
           where: { id: run.id },
           data: {
-            status: 'SUCCESS',
+            status,
             finishedAt: new Date(),
             guestsCount: syncResult.guests,
             sessionsCount: syncResult.sessions,
             transactionsCount: syncResult.transactions,
             productSalesLinked: syncResult.productSalesLinked,
             profile: syncResult.profile,
+            errorMessage: message,
           },
         });
+        Object.assign(sourceResult, syncResult, {
+          status,
+          errorMessage: message,
+        });
+        if (status === 'PARTIAL') result.partialSources += 1;
+        if (status === 'FAILED') result.failedSources += 1;
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'Guest sync failed';
         result.failedSources += 1;
+        sourceResult.status = 'FAILED';
         sourceResult.errorMessage = message;
 
         await this.prisma.guestDataProfileRun.update({
@@ -632,7 +654,9 @@ export class GuestDataFoundationService {
           ? 'SUCCESS'
           : run.status === 'FAILED'
             ? 'FAILED'
-            : 'IDLE',
+            : run.status === 'PARTIAL'
+              ? 'PARTIAL'
+              : 'IDLE',
       running: Boolean(runningRun),
       nextRun: {
         dateFrom: nextPeriod.from,
@@ -795,7 +819,7 @@ export class GuestDataFoundationService {
       ? checkedAt.getTime() - successfulFinishedAt.getTime()
       : null;
     const endpointErrors =
-      latestSuccessfulRun?.profile ?? latestRun?.profile ?? null;
+      latestRun?.profile ?? latestSuccessfulRun?.profile ?? null;
     const endpointErrorsCount = Object.keys(
       this.statusDiagnosticsFromProfile(endpointErrors).endpointErrors,
     ).length;
@@ -803,17 +827,19 @@ export class GuestDataFoundationService {
       ? 'RUNNING'
       : !latestRun
         ? 'EMPTY'
-        : latestRun.status === 'FAILED' && !latestSuccessfulRun
+        : latestRun.status === 'FAILED'
           ? 'FAILED'
-          : successfulFinishedAt &&
-              ageMs !== null &&
-              ageMs <= FRESH_GUEST_SYNC_MS
-            ? 'FRESH'
-            : successfulFinishedAt
-              ? 'STALE'
-              : latestRun.status === 'FAILED'
-                ? 'FAILED'
-                : 'EMPTY';
+          : latestRun.status === 'PARTIAL' || endpointErrorsCount > 0
+            ? 'PARTIAL'
+            : successfulFinishedAt &&
+                ageMs !== null &&
+                ageMs <= FRESH_GUEST_SYNC_MS
+              ? 'FRESH'
+              : successfulFinishedAt
+                ? 'STALE'
+                : latestRun.status === 'FAILED'
+                  ? 'FAILED'
+                  : 'EMPTY';
 
     return {
       status,
@@ -825,10 +851,18 @@ export class GuestDataFoundationService {
       lastStatus: latestRun?.status ?? null,
       lastErrorMessage: latestRun?.errorMessage ?? null,
       counts: {
-        guests: latestSuccessfulRun?.guestsCount ?? 0,
-        sessions: latestSuccessfulRun?.sessionsCount ?? 0,
-        transactions: latestSuccessfulRun?.transactionsCount ?? 0,
-        productSalesLinked: latestSuccessfulRun?.productSalesLinked ?? 0,
+        guests:
+          (status === 'PARTIAL' ? latestRun : latestSuccessfulRun)
+            ?.guestsCount ?? 0,
+        sessions:
+          (status === 'PARTIAL' ? latestRun : latestSuccessfulRun)
+            ?.sessionsCount ?? 0,
+        transactions:
+          (status === 'PARTIAL' ? latestRun : latestSuccessfulRun)
+            ?.transactionsCount ?? 0,
+        productSalesLinked:
+          (status === 'PARTIAL' ? latestRun : latestSuccessfulRun)
+            ?.productSalesLinked ?? 0,
       },
       endpointErrorsCount,
       nextAction: this.guestFreshnessNextAction(status),
@@ -846,6 +880,10 @@ export class GuestDataFoundationService {
 
     if (status === 'STALE') {
       return 'Обновите гостей через /sync перед запуском точных CRM и игровых сценариев.';
+    }
+
+    if (status === 'PARTIAL') {
+      return 'Доступные гостевые разделы сохранены. Недоступные разделы и ограничения показаны ниже.';
     }
 
     if (status === 'FAILED') {
@@ -987,22 +1025,28 @@ export class GuestDataFoundationService {
     }
 
     const guests = await this.captureEndpoint(profile, 'guests/list', () =>
-      this.paginate((page) =>
-        this.langameClient.listGuests(baseUrl, apiKey, {
-          page,
-          pageLimit: DEFAULT_PAGE_LIMIT,
-        }),
+      this.paginate(
+        (page) =>
+          this.langameClient.listGuests(baseUrl, apiKey, {
+            page,
+            pageLimit: DEFAULT_PAGE_LIMIT,
+          }),
+        profile,
+        'guests/list',
       ),
     );
     await this.syncGuests(tenantId, domain, guests, profile, now);
     const guestsByExternalId = await this.loadGuestLookup(tenantId, domain);
 
     const balances = await this.captureEndpoint(profile, 'guests/balance', () =>
-      this.paginate((page) =>
-        this.langameClient.listGuestBalances(baseUrl, apiKey, {
-          page,
-          pageLimit: DEFAULT_PAGE_LIMIT,
-        }),
+      this.paginate(
+        (page) =>
+          this.langameClient.listGuestBalances(baseUrl, apiKey, {
+            page,
+            pageLimit: DEFAULT_PAGE_LIMIT,
+          }),
+        profile,
+        'guests/balance',
       ),
     );
     await this.syncBalances(
@@ -1018,11 +1062,14 @@ export class GuestDataFoundationService {
       profile,
       'guests/bonus_balance',
       () =>
-        this.paginate((page) =>
-          this.langameClient.listGuestBonusBalances(baseUrl, apiKey, {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-          }),
+        this.paginate(
+          (page) =>
+            this.langameClient.listGuestBonusBalances(baseUrl, apiKey, {
+              page,
+              pageLimit: DEFAULT_PAGE_LIMIT,
+            }),
+          profile,
+          'guests/bonus_balance',
         ),
     );
     await this.syncBonusBalances(
@@ -1038,13 +1085,16 @@ export class GuestDataFoundationService {
       profile,
       'guests/sessions',
       () =>
-        this.paginate((page) =>
-          this.langameClient.listGuestSessions(baseUrl, apiKey, {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom: langamePeriod.from,
-            dateTo: langamePeriod.to,
-          }),
+        this.paginate(
+          (page) =>
+            this.langameClient.listGuestSessions(baseUrl, apiKey, {
+              page,
+              pageLimit: DEFAULT_PAGE_LIMIT,
+              dateFrom: langamePeriod.from,
+              dateTo: langamePeriod.to,
+            }),
+          profile,
+          'guests/sessions',
         ),
     );
     await this.syncSessions(
@@ -1062,13 +1112,16 @@ export class GuestDataFoundationService {
       profile,
       'transactions/list',
       () =>
-        this.paginate((page) =>
-          this.langameClient.listTransactions(baseUrl, apiKey, {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom: langamePeriod.from,
-            dateTo: langamePeriod.to,
-          }),
+        this.paginate(
+          (page) =>
+            this.langameClient.listTransactions(baseUrl, apiKey, {
+              page,
+              pageLimit: DEFAULT_PAGE_LIMIT,
+              dateFrom: langamePeriod.from,
+              dateTo: langamePeriod.to,
+            }),
+          profile,
+          'transactions/list',
         ),
     );
     await this.syncTransactions(
@@ -1083,13 +1136,16 @@ export class GuestDataFoundationService {
     let guestLogs: LangameGuestLog[] = [];
     if (query.includeGuestLogs ?? false) {
       guestLogs = await this.captureEndpoint(profile, 'guests/logs', () =>
-        this.paginate((page) =>
-          this.langameClient.listGuestLogs(baseUrl, apiKey, {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom: langamePeriod.from,
-            dateTo: langamePeriod.to,
-          }),
+        this.paginate(
+          (page) =>
+            this.langameClient.listGuestLogs(baseUrl, apiKey, {
+              page,
+              pageLimit: DEFAULT_PAGE_LIMIT,
+              dateFrom: langamePeriod.from,
+              dateTo: langamePeriod.to,
+            }),
+          profile,
+          'guests/logs',
         ),
       );
       await this.syncGuestLogs(
@@ -1103,47 +1159,33 @@ export class GuestDataFoundationService {
 
     let operationLogs: LangameOperationLog[] = [];
     if (query.includeOperationLog ?? true) {
-      operationLogs = await this.captureEndpoint(
+      operationLogs = await this.syncOperationLogs(
+        tenantId,
+        baseUrl,
+        domain,
+        apiKey,
+        period,
+        storesByExternalClubId,
         profile,
-        'all_operations_log/list',
-        () =>
-          this.syncOperationLogs(
-            tenantId,
-            baseUrl,
-            domain,
-            apiKey,
-            period,
-            storesByExternalClubId,
-            profile,
-          ),
       );
     }
 
-    let cashTransactions: LangameCashTransaction[] = [];
+    const cashTransactions: LangameCashTransaction[] = [];
     if (query.includeCashTransactions ?? true) {
-      cashTransactions = await this.captureEndpoint(
-        profile,
-        'log_cash_transaction/list',
-        async () => {
-          const rows: LangameCashTransaction[] = [];
-
-          for (const externalClubId of storesByExternalClubId.keys()) {
-            rows.push(
-              ...(await this.langameClient.listCashTransactions(
-                baseUrl,
-                apiKey,
-                {
-                  clubId: externalClubId,
-                  dateFrom: langamePeriod.from,
-                  dateTo: langamePeriod.to,
-                },
-              )),
-            );
-          }
-
-          return rows;
-        },
-      );
+      for (const externalClubId of storesByExternalClubId.keys()) {
+        cashTransactions.push(
+          ...(await this.captureEndpoint(
+            profile,
+            'log_cash_transaction/list',
+            () =>
+              this.langameClient.listCashTransactions(baseUrl, apiKey, {
+                clubId: externalClubId,
+                dateFrom: langamePeriod.from,
+                dateTo: langamePeriod.to,
+              }),
+          )),
+        );
+      }
       this.profileRows(profile.cashTransactions, cashTransactions);
       cashTransactions.forEach((row) =>
         this.profileOperatorHints(profile.operatorHints.cashTransactions, row),
@@ -1151,11 +1193,14 @@ export class GuestDataFoundationService {
     }
 
     const langameUsers = await this.captureEndpoint(profile, 'users/list', () =>
-      this.paginate((page) =>
-        this.langameClient.listUsers(baseUrl, apiKey, {
-          page,
-          pageLimit: DEFAULT_PAGE_LIMIT,
-        }),
+      this.paginate(
+        (page) =>
+          this.langameClient.listUsers(baseUrl, apiKey, {
+            page,
+            pageLimit: DEFAULT_PAGE_LIMIT,
+          }),
+        profile,
+        'users/list',
       ),
     );
     this.profileRows(profile.langameUsers, langameUsers);
@@ -1167,13 +1212,16 @@ export class GuestDataFoundationService {
         profile,
         'working_shifts/list',
         () =>
-          this.paginate((page) =>
-            this.langameClient.listWorkingShifts(baseUrl, apiKey, {
-              page,
-              pageLimit: DEFAULT_PAGE_LIMIT,
-              dateFrom: langamePeriod.from,
-              dateTo: langamePeriod.to,
-            }),
+          this.paginate(
+            (page) =>
+              this.langameClient.listWorkingShifts(baseUrl, apiKey, {
+                page,
+                pageLimit: DEFAULT_PAGE_LIMIT,
+                dateFrom: langamePeriod.from,
+                dateTo: langamePeriod.to,
+              }),
+            profile,
+            'working_shifts/list',
           ),
       );
       this.profileRows(profile.workingShifts, workingShifts);
@@ -1193,13 +1241,16 @@ export class GuestDataFoundationService {
       profile,
       'products/expense',
       () =>
-        this.paginate((page) =>
-          this.langameClient.listProductExpenses(baseUrl, apiKey, {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom: period.from,
-            dateTo: period.to,
-          }),
+        this.paginate(
+          (page) =>
+            this.langameClient.listProductExpenses(baseUrl, apiKey, {
+              page,
+              pageLimit: DEFAULT_PAGE_LIMIT,
+              dateFrom: period.from,
+              dateTo: period.to,
+            }),
+          profile,
+          'products/expense',
         ),
     );
     const productSalesLinked = await this.linkProductSalesToGuests(
@@ -1224,6 +1275,8 @@ export class GuestDataFoundationService {
       workingShifts: workingShifts.length,
       productSalesLinked,
       endpointErrors: profile.endpointErrors,
+      providerReadsAttempted: profile.providerReadsAttempted,
+      providerReadsSucceeded: profile.providerReadsSucceeded,
       profile,
     };
   }
@@ -1233,13 +1286,27 @@ export class GuestDataFoundationService {
     endpoint: string,
     load: () => Promise<T[]>,
   ) {
+    profile.providerReadsAttempted += 1;
     try {
-      return await load();
+      const rows = await load();
+      profile.providerReadsSucceeded += 1;
+      return rows;
     } catch (error) {
-      profile.endpointErrors[endpoint] =
-        error instanceof Error ? error.message : 'Endpoint failed';
+      this.recordEndpointError(profile, endpoint, error);
       return [];
     }
+  }
+
+  private recordEndpointError(
+    profile: SourceProfile,
+    endpoint: string,
+    error: unknown,
+  ) {
+    const message = error instanceof Error ? error.message : '';
+    profile.endpointErrors[endpoint] =
+      /no permissions|forbidden|unauthorized|\b40[13]\b/i.test(message)
+        ? 'Langame не предоставил доступ к этому разделу.'
+        : 'Не удалось получить данные этого раздела Langame.';
   }
 
   private async syncStoreComputerCounts(
@@ -2084,11 +2151,16 @@ export class GuestDataFoundationService {
       period,
       MAX_OPERATION_LOG_PERIOD_DAYS,
     )) {
-      const rows = await this.loadOperationLogChunk(
-        baseUrl,
-        apiKey,
-        chunk,
-        operationTypeFilters,
+      const rows = await this.captureEndpoint(
+        profile,
+        'all_operations_log/list',
+        () =>
+          this.loadOperationLogChunk(
+            baseUrl,
+            apiKey,
+            chunk,
+            operationTypeFilters,
+          ),
       );
       allRows.push(...rows);
 
@@ -2503,12 +2575,25 @@ export class GuestDataFoundationService {
       : null;
   }
 
-  private async paginate<T>(fetchPage: (page: number) => Promise<T[]>) {
+  private async paginate<T>(
+    fetchPage: (page: number) => Promise<T[]>,
+    profile?: SourceProfile,
+    endpoint?: string,
+  ) {
     const rows: T[] = [];
     let page = 1;
 
     while (true) {
-      const pageRows = await fetchPage(page);
+      let pageRows: T[];
+      try {
+        pageRows = await fetchPage(page);
+      } catch (error) {
+        // Earlier pages remain usable, but this endpoint is not complete.
+        // A first-page failure still belongs to captureEndpoint.
+        if (rows.length === 0 || !profile || !endpoint) throw error;
+        this.recordEndpointError(profile, endpoint, error);
+        break;
+      }
       rows.push(...pageRows);
 
       if (pageRows.length < DEFAULT_PAGE_LIMIT) {
@@ -3288,6 +3373,8 @@ export class GuestDataFoundationService {
         sumBonusBalance: '0.00',
       },
       endpointErrors: {},
+      providerReadsAttempted: 0,
+      providerReadsSucceeded: 0,
     };
   }
 }

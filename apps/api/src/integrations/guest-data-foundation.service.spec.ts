@@ -251,6 +251,7 @@ describe('GuestDataFoundationService', () => {
     listPcTypesInClubs: jest.fn(),
     listPcTypeLinks: jest.fn(),
     listProductExpenses: jest.fn(),
+    listUsers: jest.fn(),
   };
   const langameSettingsService = {
     resolveTenantAccess: jest.fn(),
@@ -269,6 +270,7 @@ describe('GuestDataFoundationService', () => {
 
   beforeEach(() => {
     langameClient.listTariffTypeGroups.mockResolvedValue([]);
+    langameClient.listUsers.mockResolvedValue([]);
     jest.clearAllMocks();
 
     tenantContextService.resolve.mockResolvedValue({
@@ -738,6 +740,7 @@ describe('GuestDataFoundationService', () => {
       tenantId: 'tenant-internal',
       sources: 1,
       failedSources: 0,
+      partialSources: 0,
       sourceResults: [],
     };
     const syncTenantById = jest
@@ -875,6 +878,58 @@ describe('GuestDataFoundationService', () => {
     expect(prisma.guestLog.upsert).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ['listGuestGroups', 'guests/groups'],
+    ['listGuests', 'guests/list'],
+    ['listGuestBalances', 'guests/balance'],
+    ['listGuestBonusBalances', 'guests/bonus_balance'],
+    ['listGuestSessions', 'guests/sessions'],
+    ['listTransactions', 'transactions/list'],
+    ['listGuestLogs', 'guests/logs'],
+    ['listAllOperationsLog', 'all_operations_log/list'],
+    ['listCashTransactions', 'log_cash_transaction/list'],
+    ['listWorkingShifts', 'working_shifts/list'],
+    ['listUsers', 'users/list'],
+    ['listPcTypesInClubs', 'global/types_of_pc_in_clubs/list'],
+    ['listPcTypeLinks', 'global/linking_pc_by_type/list'],
+  ] as const)(
+    'continues independent guest sections when %s denies access',
+    async (method, endpoint) => {
+      langameClient[method].mockRejectedValueOnce(new Error('No permissions'));
+
+      const result = await service.syncTenant(user, {
+        dateFrom: '2026-05-01',
+        dateTo: '2026-05-01',
+        includeGuestLogs: true,
+      });
+
+      expect(result.failedSources).toBe(0);
+      expect(result.partialSources).toBe(1);
+      expect(result.sourceResults[0].status).toBe('PARTIAL');
+      expect(result.sourceResults[0].endpointErrors).toEqual({
+        [endpoint]: 'Langame не предоставил доступ к этому разделу.',
+      });
+      // This is the last independent read; it must remain reachable after any
+      // earlier permission denial, and permitted sections must still persist.
+      expect(langameClient.listProductExpenses).toHaveBeenCalled();
+      if (method !== 'listGuests') {
+        expect(prisma.guest.upsert).toHaveBeenCalled();
+      }
+      if (method !== 'listGuestSessions') {
+        expect(prisma.guestSession.upsert).toHaveBeenCalled();
+      }
+      if (method !== 'listTransactions') {
+        expect(prisma.guestTransaction.upsert).toHaveBeenCalled();
+      }
+      const updates = prisma.guestDataProfileRun.update.mock.calls as Array<
+        [{ data: { profile: { endpointErrors: Record<string, string> } } }]
+      >;
+      expect(updates[0]?.[0].data.profile.endpointErrors).toEqual({
+        [endpoint]: 'Langame не предоставил доступ к этому разделу.',
+      });
+    },
+  );
+
   it('returns guest log diagnostics in sync status', async () => {
     const latestRun = {
       domain: 'club.example',
@@ -928,6 +983,146 @@ describe('GuestDataFoundationService', () => {
         bonus: 1,
       },
     });
+  });
+
+  it('records all denied guest reads as failed while retaining the endpoint diagnostics', async () => {
+    for (const method of Object.values(langameClient)) {
+      method.mockRejectedValueOnce(
+        new Error('No permissions; key=fixture-secret'),
+      );
+    }
+
+    const result = await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+      includeGuestLogs: true,
+    });
+
+    expect(result.failedSources).toBe(1);
+    expect(result.partialSources).toBe(0);
+    expect(result.sourceResults[0].status).toBe('FAILED');
+    expect(prisma.guest.upsert).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain('fixture-secret');
+    const updates = prisma.guestDataProfileRun.update.mock.calls as Array<
+      [{ data: { status: string } }]
+    >;
+    expect(updates[0]?.[0].data.status).toBe('FAILED');
+  });
+
+  it('keeps an available guest page when the next page is denied and continues sessions', async () => {
+    langameClient.listGuests
+      .mockResolvedValueOnce(
+        Array.from({ length: 200 }, (_, index) => ({
+          guest_id: 1000 + index,
+          fio: 'Synthetic guest',
+        })),
+      )
+      .mockRejectedValueOnce(new Error('No permissions on the second page'));
+
+    const result = await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    expect(result.sourceResults[0].guests).toBe(200);
+    expect(result.sourceResults[0].status).toBe('PARTIAL');
+    expect(prisma.guest.upsert).toHaveBeenCalledTimes(200);
+    expect(prisma.guestSession.upsert).toHaveBeenCalled();
+    expect(guestIdentityResolver.reconcileDomainSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ complete: false }),
+    );
+  });
+
+  it('continues cash transactions for another bound club after a club denial', async () => {
+    prisma.store.findMany.mockResolvedValue([
+      { id: 'store-1', externalClubId: '10', timeZone: null },
+      { id: 'store-2', externalClubId: '11', timeZone: null },
+    ]);
+    langameClient.listCashTransactions
+      .mockRejectedValueOnce(new Error('No permissions'))
+      .mockResolvedValueOnce([
+        { admin_id: 5, sum: '1000', date: '2026-05-01 09:00:00' },
+      ]);
+
+    const result = await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    expect(langameClient.listCashTransactions).toHaveBeenCalledTimes(2);
+    expect(result.sourceResults[0].cashTransactions).toBe(1);
+    expect(result.sourceResults[0].status).toBe('PARTIAL');
+    expect(result.sourceResults[0].endpointErrors).toHaveProperty(
+      'log_cash_transaction/list',
+    );
+  });
+
+  it('does not turn an operation-log persistence failure into an optional provider denial', async () => {
+    prisma.guestOperationLog.upsert.mockRejectedValueOnce(
+      new Error('database failed'),
+    );
+
+    const result = await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    expect(result.failedSources).toBe(1);
+    expect(result.partialSources).toBe(0);
+    expect(result.sourceResults[0].status).toBe('FAILED');
+    expect(langameClient.listCashTransactions).not.toHaveBeenCalled();
+  });
+
+  it('reports partial guest freshness and retains the prior complete-success cursor', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-22T10:10:00Z'));
+    try {
+      const partial = {
+        domain: 'club.example',
+        status: 'PARTIAL',
+        startedAt: new Date('2026-05-22T10:00:00Z'),
+        finishedAt: new Date('2026-05-22T10:06:00Z'),
+        dateFrom: new Date('2026-05-01T00:00:00Z'),
+        dateTo: new Date('2026-05-22T23:59:59Z'),
+        guestsCount: 10,
+        sessionsCount: 20,
+        transactionsCount: 30,
+        productSalesLinked: 4,
+        errorMessage: 'Недоступен бонусный баланс.',
+        profile: { endpointErrors: { 'guests/bonus_balance': 'Нет доступа.' } },
+      };
+      const full = {
+        ...partial,
+        status: 'SUCCESS',
+        guestsCount: 5,
+        finishedAt: new Date('2026-05-20T10:06:00Z'),
+        profile: { endpointErrors: {} },
+        errorMessage: null,
+      };
+      prisma.guestDataProfileRun.findFirst.mockImplementation(
+        ({ where }: { where: { status?: string } }) =>
+          Promise.resolve(
+            where.status === 'RUNNING'
+              ? null
+              : where.status === 'SUCCESS'
+                ? full
+                : partial,
+          ),
+      );
+      prisma.guestDataProfileRun.findMany.mockResolvedValue([partial, full]);
+
+      const status = await service.getTenantSyncStatus(user);
+
+      expect(status.status).toBe('PARTIAL');
+      expect(status.freshness.status).toBe('PARTIAL');
+      expect(status.freshness.counts.guests).toBe(10);
+      expect(status.freshness.endpointErrorsCount).toBe(1);
+      expect(status.nextRun.basedOnFinishedAt).toBe(
+        full.finishedAt.toISOString(),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('rejects profiling periods longer than ninety days', async () => {

@@ -540,9 +540,9 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
         'OUTBOUND',
       );
 
-      if (result.failedSources > 0) {
+      if (result.failedSources > 0 || result.partialSources > 0) {
         throw new Error(
-          `Langame guest foundation sync failed for ${result.failedSources} source(s)`,
+          `Langame guest foundation sync incomplete: failed=${result.failedSources}, partial=${result.partialSources}`,
         );
       }
 
@@ -1016,6 +1016,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     return {
       sources: result.sources,
       failedSources: result.failedSources,
+      partialSources: result.partialSources,
       domains: result.sourceResults.map((source) => ({
         domain: source.domain,
         status: source.status,

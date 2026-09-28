@@ -1,0 +1,52 @@
+name: Predecessor bootstrap source validation
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/transition-bootstrap/**'
+      - 'deploy/leetplus-compose/a-bridge-bootstrap-authority*'
+      - 'deploy/leetplus-compose/bridge-external-successor-authority*'
+      - '.github/workflows/transition-bootstrap-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: transition-bootstrap-source-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-boundary:
+    name: Predecessor bootstrap protocol and native locks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Bounded source gates with separate receipts
+        run: |
+          evidence="$RUNNER_TEMP/predecessor-bootstrap-source"
+          mkdir -p "$evidence"
+          set +e
+          node --test deploy/transition-bootstrap/protocol.test.mjs >"$evidence/protocol.stdout" 2>"$evidence/protocol.stderr"
+          protocol_exit=$?
+          printf '%s\n' "$protocol_exit" >"$evidence/protocol.exit"
+          sudo python3 -B deploy/transition-bootstrap/test_native_boundary.py >"$evidence/native.stdout" 2>"$evidence/native.stderr"
+          native_exit=$?
+          printf '%s\n' "$native_exit" >"$evidence/native.exit"
+          printf 'protocol exit=%s; native exit=%s\n' "$protocol_exit" "$native_exit"
+          cat "$evidence/protocol.stdout" "$evidence/protocol.stderr" "$evidence/native.stdout" "$evidence/native.stderr"
+          test "$protocol_exit" -eq 0 && test "$native_exit" -eq 0
+      - name: Preserve source logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: predecessor-bootstrap-source-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/predecessor-bootstrap-source
+          if-no-files-found: error

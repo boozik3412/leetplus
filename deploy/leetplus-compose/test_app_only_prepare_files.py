@@ -180,6 +180,27 @@ class AppOnlyPreparationAuthority(unittest.TestCase):
         self.assertEqual(release['images']['postgres'], self.fixture.data_release['images']['postgres'])
         self.assertEqual(evidence['dataAdmissionSha256'], digest(self.fixture.data_admission))
 
+    def test_optional_marker_synthesizes_exact_capability_and_absent_capsule_creates_no_profile(self):
+        self.fixture.bundle['externalWorkerCapability'] = 'LANGAME_EXTERNAL_SET1_V1'
+        self.fixture.release['externalWorkerCapability'] = 'LANGAME_EXTERNAL_SET1_V1'
+        self.fixture.admission['bundleManifestSha256'] = digest(self.fixture.bundle)
+        self.fixture.write_json(self.fixture.bundle_path, self.fixture.bundle)
+        self.fixture.write_json(self.fixture.release_path, self.fixture.release)
+        self.fixture.write_json(self.fixture.admission_path, self.fixture.admission)
+        self.fixture.receipt['appAdmissionSha256'] = digest(self.fixture.admission)
+        self.fixture.receipt['files']['app-bundle.json'] = {'sha256': digest(self.fixture.bundle), 'bytes': len(prepare_files.canonical(self.fixture.bundle))}
+        self.fixture.write_json(self.fixture.receipt_path, self.fixture.receipt)
+        release, _ = self.fixture.validate()
+        self.assertEqual(release['externalWorkerCapability'], 'LANGAME_EXTERNAL_SET1_V1')
+        with tarfile.open(self.fixture.source) as capsule:
+            self.assertNotIn('system/etc/leetplus/langame-external-daily-worker.env', capsule.getnames())
+
+    def test_unknown_external_marker_is_rejected(self):
+        self.fixture.bundle['externalWorkerCapability'] = 'LANGAME_EXTERNAL_ALL_TENANTS'
+        self.fixture.write_json(self.fixture.bundle_path, self.fixture.bundle)
+        with self.assertRaisesRegex(ValueError, 'external worker capability'):
+            self.fixture.validate()
+
     def test_historical_v1_admission_mode_0440_is_accepted_but_writable_or_v2_mode_is_not(self):
         v1 = types.SimpleNamespace(st_uid=0, st_mode=0o100440)
         writable = types.SimpleNamespace(st_uid=0, st_mode=0o100460)

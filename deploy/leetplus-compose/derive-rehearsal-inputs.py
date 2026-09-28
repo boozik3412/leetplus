@@ -146,17 +146,30 @@ def derive(verification_path, capsule, preparation_input, output):
             require(handoff['newControlSha256'] == control_digest, 'Control manifest is not bound to handoff')
         require(control_digest == guard['controllerManifestSha256'], 'Backup controller differs from preparation guard')
         workers = {'bonus-ledger-worker', 'langame-daily-worker'}
-        require(set(verification['workerEnvelopeHashes']) == workers and {'api-' + active['activeSlot'] + '.json', *(w + '.json' for w in workers)} <= set(verification['profileHashes']), 'Incomplete authenticated worker/profile bindings')
         policy = request['nativeRequest']['workerContinuation']
+        worker_set = request['nativeRequest'].get('workerSetV3')
+        external = worker_set.get('external', {}) if worker_set else None
+        if external and external.get('preimage') == 'PRESENT':
+            workers.add('langame-external-daily-worker')
+        require(set(verification['workerEnvelopeHashes']) == workers and {'api-' + active['activeSlot'] + '.json', *(w + '.json' for w in workers)} <= set(verification['profileHashes']), 'Incomplete authenticated worker/profile bindings')
+        legacy_hashes = {worker: verification['workerEnvelopeHashes'][worker] for worker in ['bonus-ledger-worker', 'langame-daily-worker']}
         require(policy.get('contract') == 'LEETPLUS_WORKER_CONTINUATION_V2' and
                 isinstance(policy.get('originalGrantEnvelopes'), list) and
-                {x['grant']['worker']: hashlib.sha256(canonical(x)).hexdigest() for x in policy['originalGrantEnvelopes']} == verification['workerEnvelopeHashes'],
+                {x['grant']['worker']: hashlib.sha256(canonical(x)).hexdigest() for x in policy['originalGrantEnvelopes']} == legacy_hashes,
                 'Worker grants differ from frozen V2 policy')
-        require({x['worker']: x['profileSha256'] for x in policy['profileBindings']} == {w: verification['profileHashes'][w + '.json'] for w in workers}, 'Worker profiles differ from frozen policy')
+        require({x['worker']: x['profileSha256'] for x in policy['profileBindings']} == {w: verification['profileHashes'][w + '.json'] for w in ['bonus-ledger-worker', 'langame-daily-worker']}, 'Worker profiles differ from frozen policy')
+        if worker_set:
+            require(worker_set.get('legacy') == policy, 'Worker set V3 must retain exact V2 policy')
+            if external.get('preimage') == 'PRESENT':
+                name = 'langame-external-daily-worker'
+                require(verification['workerEnvelopeHashes'].get(name) == hashlib.sha256(canonical(external['originalGrantEnvelope'])).hexdigest(), 'External worker grant differs from V3 snapshot')
+                require(verification['profileHashes'].get(name + '.json') == external.get('profileSha256'), 'External worker profile differs from V3 snapshot')
+            else:
+                require(external.get('preimage') == 'ABSENT_AUTHORITY' and 'langame-external-daily-worker' not in verification['workerEnvelopeHashes'] and 'langame-external-daily-worker.json' not in verification['profileHashes'], 'Absent external authority may not create snapshot authority')
         for leaf, expected in verification['profileHashes'].items():
             require(re.fullmatch(r'[A-Za-z0-9_.-]+', leaf) and hashlib.sha256(read(SECRETS + leaf)).hexdigest() == expected, 'Authenticated profile drift')
         for worker, expected in verification['workerEnvelopeHashes'].items():
-            require(worker in ['bonus-ledger-worker', 'langame-daily-worker'] and hashlib.sha256(read(STATE + 'worker-grants/' + worker + '.json')).hexdigest() == expected, 'Authenticated worker envelope drift')
+            require(worker in workers and hashlib.sha256(read(STATE + 'worker-grants/' + worker + '.json')).hexdigest() == expected, 'Authenticated worker envelope drift')
         manifest = json.loads(read('manifest.json'))
         require(manifest['contract'] == 'LEETPLUS_DAILY_BACKUP_V1' and manifest['dataSource']['inRecovery'] is False, 'Expected primary daily backup manifest')
         manifest['sourceReleaseSha'] = app_sha
@@ -184,6 +197,8 @@ def derive(verification_path, capsule, preparation_input, output):
             total_config_bytes += len(data)
             capsule_members[name] = data
         mapping = {'runtime.env': 'api-' + active['activeSlot'] + '.json', 'bonus-ledger-worker.env': 'bonus-ledger-worker.json', 'langame-daily-worker.env': 'langame-daily-worker.json'}
+        if worker_set and worker_set['external']['preimage'] == 'PRESENT':
+            mapping['langame-external-daily-worker.env'] = 'langame-external-daily-worker.json'
         for dest, src in mapping.items():
             add_config('system/etc/leetplus/' + dest, env_bytes(read(SECRETS + src)))
         for dest in ['slots/green.env', 'canary-safe.env', 'guest-user-call-live.env']:

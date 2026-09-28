@@ -24,6 +24,22 @@ case "${1:-}" in
     lock_mode=--shared
     extra_lock=(/usr/bin/flock --exclusive --nonblock "/var/lib/leetplus-compose/$3.lock")
     ;;
+  external-worker-run)
+    [[ $# == 1 ]]
+    lock_mode=--shared
+    extra_lock=(/usr/bin/flock --exclusive --nonblock /var/lib/leetplus-compose/langame-external-daily-worker.lock)
+    ;;
+  external-worker-cleanup)
+    [[ $# == 1 ]]
+    cleanup_lock=/var/lib/leetplus-compose/langame-external-daily-worker.lock
+    [[ -f "$cleanup_lock" && ! -L "$cleanup_lock" ]]
+    [[ $(stat -c '%u:%g:%a:%h' "$cleanup_lock") == '0:0:400:1' || $(stat -c '%u:%g:%a:%h' "$cleanup_lock") == '0:0:600:1' ]]
+    # Emergency stop owns only the exact external singleton. It must remain
+    # runnable when a queued global writer wins after ExecStart is killed.
+    exec /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
+      /usr/bin/flock --exclusive --wait 300 --conflict-exit-code 75 "$cleanup_lock" \
+      /usr/bin/env LEETPLUS_COMPOSE_LOCKED=1 /usr/bin/node "$control_root/control.mjs" "$@"
+    ;;
   network)
     [[ $# == 3 && "$2" == --operation ]]
     if [[ "$3" == refresh ]]; then

@@ -206,6 +206,7 @@ test('runs exact admitted bundle through fresh backup, restored acceptance and n
   const f = fixture();
   const packet = await new PreparationRunner(f.input, path.join(f.root, 'state'), { execute: f.execute, paths: f.paths, clock: f.clock, workerBusy: async () => false }).run();
   assert.equal(packet.contract, GO_PACKET_CONTRACT); assert.equal(packet.decision, 'PREPARED_NOT_AUTHORIZATION'); assert.equal(packet.nativeOperationId, OPERATION);
+  assert.equal(Object.hasOwn(packet, 'workerSetV3'), false, 'historical preparation bytes stay V2-only');
   assert.equal(f.calls.filter(call => call.some(part => String(part).endsWith('run-resource-rehearsal.py'))).length, 1, '6G controller must run exactly once');
   assert.equal(f.calls.filter(call => call.some(part => String(part).endsWith('accept-rehearsal.py'))).length, 0);
   for (const leaf of ['backup.json', 'rehearsal.json']) { const file = path.join(f.paths.nativeOperations, OPERATION, leaf); assert.ok(fs.existsSync(file)); if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o400); }
@@ -275,6 +276,12 @@ test('V2 checkpoints use the versioned receipt chain and GO packet contract', as
   runner.readPhase = name => name === 'NATIVE_PREPARE' ? { completedAt: f.clock() } : receipt;
   assert.equal(runner.goPacket({ operationId: OPERATION, planSha256: 'a'.repeat(64) }).contract,
     'LEETPLUS_RELEASE_PREPARATION_V2_GO_PACKET');
+});
+
+test('V2 worker set is additive and must retain exact legacy continuation', () => {
+  const f = appOnlyFixture();
+  f.input.nativeRequest.workerSetV3 = { legacy: { ...f.input.nativeRequest.workerContinuation, owner: 'DRIFT' } };
+  assert.throws(() => validateAppOnlyInput(f.input), /retain exact V2 continuation/);
 });
 
 test('V2 production download paths are exact and cannot select another root or artifact', () => {

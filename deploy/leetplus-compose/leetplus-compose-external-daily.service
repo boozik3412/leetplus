@@ -1,0 +1,13 @@
+[Unit]
+Description=LeetPlus signed external Langame set-1 worker
+Requires=docker.service leetplus-compose-network.service
+After=docker.service leetplus-compose-network.service
+ConditionPathExists=/var/lib/leetplus-compose/external-worker/enrollment.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/leetplus-compose external-worker-run
+ExecStopPost=/usr/local/sbin/leetplus-compose external-worker-cleanup
+TimeoutStartSec=3600
+TimeoutStopSec=600
+UMask=0077

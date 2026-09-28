@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { API_RESOURCE_PROFILE, CONTRACT, canonical, demand, digest, release, renderCompose } from './contract.mjs';
+import { validateExternalImageCapability } from './external-worker-image-capability.mjs';
 
 const [imagesRoot, parentRoot, output] = process.argv.slice(2);
 demand(imagesRoot && parentRoot && output, 'Expected images directory, parent admission directory and output');
@@ -34,6 +35,7 @@ demand(transport.nativeWorkerProfileAccepted === true, 'The exact API image must
 const roundtrip = JSON.parse(fs.readFileSync(path.join(imagesRoot, 'archive-roundtrip.json')));
 demand(roundtrip.decision === 'PASS' && roundtrip.engine === '29.1.3' && roundtrip.store === 'containerd' && roundtrip.isolatedDaemon === true && canonical(roundtrip.images) === canonical(r.images), 'A fresh target-compatible daemon must load and run all four exact images');
 const network = JSON.parse(fs.readFileSync(path.join(imagesRoot, 'network-validation.json')));
+validateExternalImageCapability(r, network.externalWorkerEntrypoint);
 demand(network.decision === 'PASS' && ['stoppedCreation','loopbackHttp','webToApi','apiToData','webDataDenied','hostProxyDenied','externalDenied'].every(key => network[key] === true), 'Actual loopback publication and negative network matrix must pass');
 const admission = { contract: `${CONTRACT}_ADMISSION`, decision: 'PASS', releaseSha: sha,
   repository: process.env.GITHUB_REPOSITORY, ref: process.env.GITHUB_REF, event: process.env.GITHUB_EVENT_NAME,

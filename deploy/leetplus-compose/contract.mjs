@@ -4,9 +4,10 @@ import path from 'node:path';
 export const CONTRACT = 'LEETPLUS_COMPOSE_BLUE_GREEN_V1';
 export const SCHEMA = { migrationCount: 191, migration: '20260908180000_external_langame_simple_onboarding' };
 export const API_RESOURCE_PROFILE = 'API_6G_V1';
+export const EXTERNAL_WORKER_CAPABILITY = 'LANGAME_EXTERNAL_SET1_V1';
 export const SLOTS = ['blue', 'green'];
 export const PORTS = { blue: { web: 13100, api: 14100 }, green: { web: 13200, api: 14200 } };
-export const USERS = { 'api-blue': 12010, 'api-green': 12011, 'web-blue': 12020, 'web-green': 12021, postgres: 12030, redis: 12031, 'bonus-ledger-worker': 12040, 'langame-daily-worker': 12041 };
+export const USERS = { 'api-blue': 12010, 'api-green': 12011, 'web-blue': 12020, 'web-green': 12021, postgres: 12030, redis: 12031, 'bonus-ledger-worker': 12040, 'langame-daily-worker': 12041, 'langame-external-daily-worker': 12042 };
 export const SAFE_API = Object.freeze({
   NODE_ENV: 'production', TZ: 'Europe/Moscow', API_RUNTIME_ROLE: 'COMBINED', API_BIND_HOST: '0.0.0.0', PORT: '4000',
   PRODUCTION_NETWORK_PROFILE: 'DOCKER_BRIDGE', COMPOSE_RUNTIME_CONTRACT: CONTRACT,
@@ -27,6 +28,7 @@ export function release(value) {
   demand(value.migrationCount === SCHEMA.migrationCount && value.migration === SCHEMA.migration, 'Only CURRENT191 is admitted');
   demand(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(value.builtAt ?? '') && Number.isFinite(Date.parse(value.builtAt)), 'Invalid build time');
   if (Object.hasOwn(value, 'apiResourceProfile')) demand(value.apiResourceProfile === API_RESOURCE_PROFILE, 'Invalid API resource profile');
+  if (Object.hasOwn(value, 'externalWorkerCapability')) demand(value.externalWorkerCapability === EXTERNAL_WORKER_CAPABILITY, 'Invalid external worker capability');
   for (const role of ['api', 'web', 'postgres', 'redis']) imageId(value.images?.[role]);
   return value;
 }
@@ -95,6 +97,21 @@ export function renderCompose({ blue, green, dataRelease, activeSlot = 'blue', r
       networks: { ...network('data', 20 + index), ...(!rehearsal ? network('egress', 20 + index) : {}) },
       volumes: [bind(`secrets/${name}.json`, '/run/secrets/runtime.json'), bind('secrets/db-ca.pem', '/run/secrets/db-ca.pem'), ...(index === 1 ? [bind('data/langame-sync', '/var/lib/leetplus/langame-sync', false)] : [])],
       group_add: index === 1 ? ['12050'] : [], stop_grace_period: '900s',
+    };
+  }
+  // Capability describes image ABI only. The native enrollment/grant owns
+  // activation; the dormant profile never starts with ordinary app compose up.
+  if (Object.hasOwn(active, 'externalWorkerCapability')) {
+    const name = 'langame-external-daily-worker';
+    services[name] = { ...base(name, active.images.api, active, '1g', '2.0'),
+      entrypoint: ['node', '/opt/leetplus/runtime-entry.cjs'], command: [name],
+      restart: 'no', profiles: ['external-workers'], memswap_limit: '1g',
+      environment: { ...metadata(active), NODE_ENV: 'production', TZ: 'UTC' },
+      networks: { ...network('data', 22), ...(!rehearsal ? network('egress', 22) : {}) },
+      volumes: [bind(`secrets/${name}.json`, '/run/secrets/runtime.json'),
+        bind('secrets/db-ca.pem', '/run/secrets/db-ca.pem'),
+        bind('data/langame-sync', '/var/lib/leetplus/langame-sync', false)],
+      group_add: ['12050'], stop_grace_period: '120s',
     };
   }
   const networks = {};

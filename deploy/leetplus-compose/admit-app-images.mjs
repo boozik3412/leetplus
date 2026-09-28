@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { classify as classifyAppOnly } from '../../.github/scripts/classify-app-only.mjs';
+import { validateExternalImageCapability } from './external-worker-image-capability.mjs';
 
 import {
   APP_ADMISSION_CONTRACT,
@@ -211,7 +212,9 @@ export function validateArtifactPayload(root) {
   exactKeys(runtime, [
     'decision', 'releaseSha', 'dualSlotConstructionVerified', 'apiBlueCreated', 'apiGreenCreated',
     'webBlueReady', 'webGreenReady', 'noDataImages', 'controlArchiveSha256', 'appImages',
+    ...(Object.hasOwn(bundle, 'externalWorkerCapability') ? ['externalWorkerEntrypoint'] : []),
   ], 'runtime validation');
+  validateExternalImageCapability(bundle, runtime.externalWorkerEntrypoint);
   demand(runtime.decision === 'PASS' && runtime.releaseSha === bundle.releaseSha && runtime.dualSlotConstructionVerified === true && runtime.apiBlueCreated === true && runtime.apiGreenCreated === true && runtime.webBlueReady === true && runtime.webGreenReady === true && runtime.noDataImages === true, 'Dual-slot app construction evidence did not pass');
   demand(HASH.test(runtime.controlArchiveSha256 ?? '') && runtime.controlArchiveSha256 === sums.get('control.tar.gz'), 'Runtime evidence does not bind the exact Git control archive');
   exactKeys(runtime.appImages, ['api', 'web'], 'runtime app images');
@@ -270,6 +273,12 @@ export function createAdmission({ artifactRoot, impactFile, candidateFile, appOn
   verifySourceReceipts(impactFile, candidateFile, parents.impact, parents.candidate);
   const { bundle, sums } = validateArtifactPayload(artifactRoot);
   demand(bundle.contract === APP_BUNDLE_CONTRACT && bundle.releaseSha === parents.appOnly.releaseSha, 'Bundle source does not match app-only authority');
+  const externalCli = spawnSync('git', ['cat-file', '-e', `${bundle.releaseSha}:apps/api/src/integrations/langame-external-daily-worker.cli.ts`], {
+    cwd: ROOT, env: cleanEnvironment(), timeout: 60_000, windowsHide: true,
+  });
+  demand(!externalCli.error && externalCli.signal === null && [0, 1].includes(externalCli.status), 'External worker source identity could not be checked');
+  demand(Object.hasOwn(bundle, 'externalWorkerCapability') === (externalCli.status === 0),
+    'External worker bundle marker differs from exact source');
   demand(bundle.sourceImpact.baseSha === parents.impact.baseSha && bundle.sourceImpact.headSha === parents.impact.headSha && bundle.sourceImpact.classifierId === parents.impact.classifierId && bundle.sourceImpact.rulesSha256 === parents.impact.rulesSha256 && bundle.sourceImpact.impactReceiptSha256 === digest(impactRecord.raw), 'Bundle source impact mismatch');
   demand(bundle.compatibilityRequirements.policySha256 === parents.appOnly.allowlistSha256, 'Bundle policy does not match app-only allowlist');
   demand(sums.get('control.tar.gz') === exactControlArchiveDigest(bundle.releaseSha), 'Control archive is not the exact Git source archive');

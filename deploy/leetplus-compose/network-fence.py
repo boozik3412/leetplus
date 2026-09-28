@@ -6,6 +6,7 @@ file belongs to the host control plane, not an application container.
 """
 import argparse
 import datetime
+import importlib.util
 import ipaddress
 import json
 import os
@@ -91,6 +92,26 @@ def verify_chain(name, rules, parent):
     if not rule_exists(parent, ['-s', SUBNET, '-j', name]):
         raise ValueError('Firewall hook missing')
     parent_rules = [line for line in call(['/usr/sbin/iptables', '-w', '5', '-S', parent]).stdout.splitlines() if line.startswith('-A ')]
+    if name == CHAIN and parent == 'DOCKER-USER':
+        exact_external = [
+            ['-s', '172.31.42.22/32', '-j', 'LP_LEETPLUS_LANGAME_EXT_V1'],
+            ['-s', '172.31.43.22/32', '-j', 'LP_LEETPLUS_LANGAME_EXT_V1'],
+        ]
+        observed = [shlex.split(line)[2:] for line in parent_rules]
+        if observed[:2] == exact_external:
+            source = Path(__file__).with_name('external-network-fence.py')
+            spec = importlib.util.spec_from_file_location('external_network_fence', source)
+            if spec is None or spec.loader is None:
+                raise ValueError('External network verifier is missing')
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            # Empty expired external sets deny external traffic and must not
+            # strand the original workers on an unrelated renewal failure.
+            # The dedicated runner separately requires a nonempty live set.
+            module.ExternalNetworkFence().verify(allow_expired=True)
+            parent_rules = parent_rules[2:]
+        elif any('LP_LEETPLUS_LANGAME_EXT_V1' in line for line in parent_rules):
+            raise ValueError('Partial or reordered external worker source hooks')
     if not parent_rules or shlex.split(parent_rules[0])[2:] != ['-s', SUBNET, '-j', name]:
         raise ValueError('Project fence must precede other parent-chain rules')
 
@@ -181,6 +202,21 @@ def main():
         config = provider_config()
         if args.command != 'verify':
             refresh(config)
+            if args.command in ('refresh', 'install'):
+                parent_rules = [shlex.split(line)[2:] for line in
+                                call(['/usr/sbin/iptables', '-w', '5', '-S', 'DOCKER-USER']).stdout.splitlines()
+                                if line.startswith('-A ')]
+                external_hooks = [
+                    ['-s', '172.31.42.22/32', '-j', 'LP_LEETPLUS_LANGAME_EXT_V1'],
+                    ['-s', '172.31.43.22/32', '-j', 'LP_LEETPLUS_LANGAME_EXT_V1'],
+                ]
+                if parent_rules[:2] == external_hooks:
+                    spec = importlib.util.spec_from_file_location('external_network_fence', Path(__file__).with_name('external-network-fence.py'))
+                    if spec is None or spec.loader is None:
+                        raise ValueError('External network verifier is missing')
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    module.ExternalNetworkFence().refresh()
         if args.command == 'install':
             install_chain(CHAIN, RULES, 'DOCKER-USER')
             install_chain(HOST_CHAIN, HOST_RULES, 'INPUT')

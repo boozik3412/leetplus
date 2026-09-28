@@ -28,11 +28,29 @@ web_id=$(docker image inspect --format '{{.Id}}' "leetplus-web:$sha")
 pg_id=$(docker image inspect --format '{{.Id}}' "leetplus-postgres:$sha")
 redis_id=$(docker image inspect --format '{{.Id}}' "leetplus-redis:$sha")
 docker run --rm --network none --entrypoint node "$api_id" -e 'const m=require("/app/release.json");if(m.migrationCount!==191)process.exit(1);console.log(JSON.stringify(m))' > "$output/image-release.json"
+external_worker_capability=''
+if git cat-file -e "$sha:apps/api/src/integrations/langame-external-daily-worker.cli.ts" 2>/dev/null; then
+  # A source-only CLI is insufficient: the exact admitted API image must carry
+  # the dedicated compiled entrypoint before release.json advertises support.
+  docker run --rm --network none --entrypoint node "$api_id" -e '
+    const fs=require("node:fs");
+    const path="/app/apps/api/dist/integrations/langame-external-daily-worker.cli.js";
+    const entry=fs.statSync(path);if(!entry.isFile()||entry.size===0)process.exit(1);
+  '
+  external_worker_capability='LANGAME_EXTERNAL_SET1_V1'
+  bash deploy/leetplus-compose/test-external-worker-image.sh "$api_id" "$sha" "$build_time" "$output/external-worker-image-validation.json"
+fi
+export LEETPLUS_EXTERNAL_WORKER_CAPABILITY="$external_worker_capability"
 node --input-type=module - "$output" "$api_id" "$web_id" "$pg_id" "$redis_id" <<'NODE'
 import fs from 'node:fs';
-import { API_RESOURCE_PROFILE, canonical, release, renderCompose } from './deploy/leetplus-compose/contract.mjs';
+import { API_RESOURCE_PROFILE, EXTERNAL_WORKER_CAPABILITY, canonical, release, renderCompose } from './deploy/leetplus-compose/contract.mjs';
 const [output, api, web, postgres, redis] = process.argv.slice(2);
-const result = release({ ...JSON.parse(fs.readFileSync(`${output}/image-release.json`)), apiResourceProfile: API_RESOURCE_PROFILE, images: { api, web, postgres, redis } });
+const capability = process.env.LEETPLUS_EXTERNAL_WORKER_CAPABILITY;
+if (capability && capability !== EXTERNAL_WORKER_CAPABILITY) throw new Error('Unsupported external worker image capability');
+const imageRelease = JSON.parse(fs.readFileSync(`${output}/image-release.json`));
+if ((imageRelease.externalWorkerCapability ?? '') !== capability) throw new Error('External image/compiled CLI capability drift');
+const result = release({ ...imageRelease, apiResourceProfile: API_RESOURCE_PROFILE,
+  ...(capability ? { externalWorkerCapability: capability } : {}), images: { api, web, postgres, redis } });
 fs.writeFileSync(`${output}/release.json`, canonical(result), { flag: 'wx' });
 fs.writeFileSync(`${output}/compose.rehearsal.json`, canonical(renderCompose({ blue: result, green: result, rehearsal: true })), { flag: 'wx' });
 NODE
@@ -66,6 +84,16 @@ docker rm --force "$web_name" >/dev/null
 trap - EXIT
 bash deploy/leetplus-compose/test-prisma-tls.sh "$api_id" "$pg_id" "$output/transport-validation.json"
 node deploy/leetplus-compose/test-network-runtime.mjs "$output"
+if [[ -n "$external_worker_capability" ]]; then
+  node --input-type=module - "$output" <<'NODE'
+import fs from 'node:fs';
+import { canonical } from './deploy/leetplus-compose/contract.mjs';
+const root = process.argv[2];
+const network = JSON.parse(fs.readFileSync(`${root}/network-validation.json`));
+network.externalWorkerEntrypoint = JSON.parse(fs.readFileSync(`${root}/external-worker-image-validation.json`));
+fs.writeFileSync(`${root}/network-validation.json`, canonical(network));
+NODE
+fi
 docker save "leetplus-api:$sha" "leetplus-web:$sha" "leetplus-postgres:$sha" "leetplus-redis:$sha" | gzip -1 > "$output/images.tar.gz"
 bash deploy/leetplus-compose/test-image-roundtrip.sh "$output"
 git archive --format=tar.gz --output="$output/control.tar.gz" "$sha" deploy/leetplus-compose

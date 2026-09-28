@@ -9,6 +9,7 @@ import { PHASES, validatePlan, validateApproval, validateChain } from './orchest
 import { validateAcceptedApplicationSnapshot } from './control-handoff-runtime.mjs';
 import { validateWorkerContinuationReceipt } from './worker-continuation-runtime.mjs';
 import { WORKERS, TIMER_UNITS } from './worker-continuation.mjs';
+import { validateExternalWorkerContinuationReceipt } from './external-worker-continuation-runtime.mjs';
 import { PLAN_CONTRACT as APP_ONLY_PLAN, validateAppOnlyPlan } from './app-only-baseline.mjs';
 
 function verifyContinuation(plan, mode, snapshot, publicKey) {
@@ -37,6 +38,27 @@ function verifyContinuation(plan, mode, snapshot, publicKey) {
       rollbackEnvelopes: snapshot.rollbackWorkerEnvelopes } });
   return receipt;
 }
+function verifyExternalContinuation(plan, mode, snapshot) {
+  const external = plan.workerSetV3.external, forward = mode === 'FORWARD', stage = forward ? external.forward : external.rollback;
+  const receipt = forward ? snapshot.externalWorkerContinuationReceipt : snapshot.externalWorkerContinuationRollbackReceipt;
+  const activeSlot = forward ? plan.targetSlot : plan.previous.activeSlot;
+  const current = { activeSlot, generation: plan.generation + (forward ? 1 : 2),
+    [activeSlot]: { releaseSha: plan[activeSlot].releaseSha } };
+  const profile = external.preimage === 'PRESENT' ? snapshot.externalWorkerProfile : null;
+  const publicKey = snapshot.externalWorkerPublicKey;
+  if (external.preimage === 'PRESENT') demand(publicKey && !Buffer.from(publicKey).equals(Buffer.from(snapshot.publicKey)),
+    'External worker observer requires a separate public root');
+  demand(external.preimage !== 'PRESENT' || Buffer.isBuffer(profile) && digest(profile) === external.profileSha256,
+    'External worker profile snapshot is missing or drifted');
+  const timer = stage.state === 'ACTIVE' ? external.originalTimer : { ...external.originalTimer, enabled: false, active: false, subState: 'dead' };
+  validateExternalWorkerContinuationReceipt({ plan, receipt,
+    context: { publicKey, hostIdentitySha256: plan.hostIdentitySha256, externalProfile: profile,
+      forwardEnvelope: snapshot.externalForwardEnvelope, rollbackEnvelope: snapshot.externalRollbackEnvelope,
+      current, intent: snapshot.externalWorkerContinuationIntent, allowExpired: true },
+    postimage: { grant: stage.state === 'ACTIVE' ? (forward ? snapshot.externalForwardEnvelope : snapshot.externalRollbackEnvelope) : null,
+      timer } });
+  return receipt;
+}
 
 export function inspectNative(snapshot, now = Date.now()) {
   const { plan, records, final, rolledBack, approval, publicKey, packet } = snapshot;
@@ -54,6 +76,7 @@ export function inspectNative(snapshot, now = Date.now()) {
     : 'LEETPLUS_RELEASE_PREPARATION_V1_GO_PACKET';
   demand(packet?.contract === packetContract && packet.decision === 'PREPARED_NOT_AUTHORIZATION' && packet.nativePlanSha256 === digest(plan) && packet.nativeOperationId === plan.operationId, 'GO packet does not bind native plan');
   demand(plan.workerContinuation && canonical(packet.workerContinuation) === canonical(plan.workerContinuation), 'Worker continuation policy is not bound by native plan');
+  if (plan.workerSetV3) demand(canonical(packet.workerSetV3) === canonical(plan.workerSetV3), 'External worker set is not bound by native GO packet');
   validateChain(plan, records);
   const completedPhases = PHASES.filter(phase => records[phase]?.receipt);
   let status = 'PREPARED', waitReason = 'EXACT_GO_REQUIRED';
@@ -78,6 +101,8 @@ export function inspectNative(snapshot, now = Date.now()) {
       demand(records.POSTCHECK.evidence.workerContinuationReceiptSha256 === digest(receipt),
         'Native final lacks plan-bound worker continuation receipt');
     }
+    if (plan.workerSetV3) demand(records.POSTCHECK.evidence.externalWorkerContinuationReceiptSha256 ===
+      digest(verifyExternalContinuation(plan, 'FORWARD', snapshot)), 'Native final lacks bound external worker receipt');
     status = 'APPLIED'; waitReason = 'INDEPENDENT_BROWSER_API_WORKER_ACCEPTANCE_PENDING';
   }
   if (rolledBack) {
@@ -87,6 +112,8 @@ export function inspectNative(snapshot, now = Date.now()) {
       demand(rolledBack.workerContinuationReceiptSha256 === digest(receipt),
         'Native rollback lacks plan-bound worker continuation receipt');
     }
+    if (plan.workerSetV3) demand(rolledBack.externalWorkerContinuationReceiptSha256 ===
+      digest(verifyExternalContinuation(plan, 'ROLLBACK', snapshot)), 'Native rollback lacks bound external worker receipt');
     status = 'ROLLED_BACK'; waitReason = 'ROLLBACK_ACCEPTANCE_PENDING';
   }
   return { status, waitReason, operationId: plan.operationId, planSha256: digest(plan), completedPhases };
@@ -144,6 +171,15 @@ export function readNative(directory, packetPath, publicKeyPath) {
     workerContinuationRollbackReceipt: read(path.join(directory, 'worker-continuation-rollback.receipt.json'), true)?.value,
     workerContinuationIntent: read(path.join(directory, 'worker-continuation.intent.json'), true)?.value,
     workerContinuationRollbackIntent: read(path.join(directory, 'worker-continuation-rollback.intent.json'), true)?.value,
+    externalWorkerContinuationIntent: read(path.join(directory, 'external-worker-intent.json'), true)?.value,
+    externalWorkerContinuationReceipt: read(path.join(directory, 'external-worker-complete.json'), true)?.value,
+    externalWorkerContinuationRollbackReceipt: read(path.join(directory, 'external-worker-rollback.json'), true)?.value,
+    externalForwardEnvelope: read(path.join(directory, 'worker-forward-langame-external-daily-worker.json'), true)?.value,
+    externalRollbackEnvelope: read(path.join(directory, 'worker-rollback-langame-external-daily-worker.json'), true)?.value,
+    externalWorkerProfile: plan.workerSetV3?.external.preimage === 'PRESENT'
+      ? trustedBytes(path.join(directory, 'worker-profile-langame-external-daily-worker.json')).bytes : null,
+    externalWorkerPublicKey: plan.workerSetV3?.external.preimage === 'PRESENT'
+      ? trustedBytes('/etc/leetplus-compose/external-worker-root.pem', { immutable: false }).bytes : null,
     forwardWorkerEnvelopes: WORKERS.map(worker => read(path.join(directory, `worker-forward-${worker}.json`), true)?.value),
     rollbackWorkerEnvelopes: WORKERS.map(worker => read(path.join(directory, `worker-rollback-${worker}.json`), true)?.value),
     workerProfiles: plan.workerContinuation?.contract === 'LEETPLUS_WORKER_CONTINUATION_V2'

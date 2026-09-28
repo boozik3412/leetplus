@@ -3005,6 +3005,7 @@ jobs:
         with:
           ref: ${{ env.CI_RELEASE_SHA }}
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
@@ -3018,6 +3019,7 @@ jobs:
         run: |
           node --test deploy/leetplus-compose/*.test.mjs
           python3 -m unittest discover -s deploy/leetplus-compose -p test_control_handoff.py
+          python3 -m unittest discover -s deploy/leetplus-compose -p test_external_cleanup_locks.py
           python3 -m unittest discover -s .github/scripts -p test_sign_exact_target_permit.py
       - name: Build pinned images from exact source
         run: bash deploy/leetplus-compose/build-images.sh "$RUNNER_TEMP/leetplus-compose"

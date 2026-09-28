@@ -1,0 +1,10 @@
+[Unit]
+Description=LeetPlus external Langame set-1 daily worker (requires signed enrollment)
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 Asia/Yekaterinburg
+Persistent=false
+Unit=leetplus-compose-external-daily.service
+
+[Install]
+WantedBy=timers.target

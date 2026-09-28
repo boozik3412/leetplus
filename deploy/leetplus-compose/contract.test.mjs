@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
-import { API_RESOURCE_PROFILE, CONTRACT, SCHEMA, renderCompose, verifyContainer, digest } from './contract.mjs';
+import { API_RESOURCE_PROFILE, EXTERNAL_WORKER_CAPABILITY, CONTRACT, SCHEMA, renderCompose, verifyContainer, digest } from './contract.mjs';
 
 const r = { contract: CONTRACT, ...SCHEMA, releaseSha: 'a'.repeat(40), builtAt: '2026-09-10T12:00:00Z', images: Object.fromEntries(['api', 'web', 'postgres', 'redis'].map((x, i) => [x, `sha256:${String(i + 1).repeat(64)}`])) };
 const clone = v => structuredClone(v);
@@ -53,6 +53,30 @@ test('release-bound API resource profiles preserve legacy bytes and isolate 6GiB
   }
   const inherited = Object.assign(Object.create({ apiResourceProfile: API_RESOURCE_PROFILE }), r);
   assert.equal(digest(renderCompose({ blue: inherited, green: r })), digest(renderCompose({ blue: r, green: r })));
+});
+test('external image capability is dormant, exact and does not alter legacy active render', () => {
+  const external = { ...r, externalWorkerCapability: EXTERNAL_WORKER_CAPABILITY };
+  const legacy = renderCompose({ blue: r, green: r });
+  assert.deepEqual(renderCompose({ blue: r, green: external, activeSlot: 'blue' }), legacy);
+  for (const rehearsal of [false, true]) {
+    const composed = renderCompose({ blue: r, green: external, activeSlot: 'green', rehearsal });
+    const name = 'langame-external-daily-worker', service = composed.services[name];
+    assert.deepEqual(service.profiles, ['external-workers']);
+    assert.equal(service.user, '12042:12042');
+    assert.equal(service.restart, 'no'); assert.equal(service.ports, undefined);
+    assert.equal(service.networks.data.ipv4_address, rehearsal ? '172.31.52.22' : '172.31.42.22');
+    assert.equal(Boolean(service.networks.egress), !rehearsal);
+    assert.equal(service.memswap_limit, '1g');
+    for (const worker of ['bonus-ledger-worker', 'langame-daily-worker']) {
+      assert.deepEqual(composed.services[worker], renderCompose({ blue: r, green: r, activeSlot: 'green', rehearsal }).services[worker]);
+    }
+    assert.equal(verifyContainer(observed(service), service, name).image, service.image);
+  }
+  for (const value of [null, undefined, false, 'LANGAME_EXTERNAL_ALL_V1']) {
+    assert.throws(() => renderCompose({ blue: { ...r, externalWorkerCapability: value }, green: r }));
+  }
+  const inherited = Object.assign(Object.create({ externalWorkerCapability: EXTERNAL_WORKER_CAPABILITY }), r);
+  assert.deepEqual(renderCompose({ blue: inherited, green: r }), legacy);
 });
 test('rehearsal has no egress network or production ports/directories', () => {
   const c = renderCompose({ blue: r, green: r, rehearsal: true });

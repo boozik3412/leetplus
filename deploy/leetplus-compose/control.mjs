@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { CONTRACT, SCHEMA, PORTS, canonical, demand, digest, release, renderCompose, verifyContainer } from './contract.mjs';
 import { PHASES, execute, validateApproval, validateChain, validatePlan } from './orchestrator.mjs';
 import { validateWorkerGrant } from './worker-authority.mjs';
-import { controlLockPolicy, verifyKernelControlLocks } from './control-locks.mjs';
+import { controlLockPolicy, verifyKernelControlLocks, verifyExternalCleanupSingletonLock } from './control-locks.mjs';
 import { validateControlHandoffAuthority, validatePendingControlHandoffAuthority } from './control-handoff-authority.mjs';
 import { validateAcceptedExactTargetHandoff, validatePendingExactTargetHandoff } from './exact-target-handoff-authority.mjs';
 import { validatePendingNetworkBootAuthority } from './control-handoff-runtime.mjs';
@@ -19,9 +19,22 @@ import { collectInstalledCertificationCandidate } from './app-only-installed-cer
 import { createReadOnlyPhaseReconciler } from './control-reconcile.mjs';
 import { CONTRACT as WORKER_CONTINUATION_V2, WORKERS, TIMER_UNITS,
   validateCurrentWorkerContinuation, validateForwardWorkerContinuation } from './worker-continuation.mjs';
-import { beginWorkerContinuation, bindForwardWorkerContinuation, completeWorkerContinuation,
-  abortUncommittedWorkerContinuation, rollbackWorkerContinuation,
-  preflightWorkerContinuation, validateWorkerContinuationReceipt } from './worker-continuation-runtime.mjs';
+import { beginWorkerContinuation as beginLegacyWorkers, bindForwardWorkerContinuation as bindLegacyWorkers,
+  completeWorkerContinuation as completeLegacyWorkers, abortUncommittedWorkerContinuation as abortLegacyWorkers,
+  rollbackWorkerContinuation as rollbackLegacyWorkers, preflightWorkerContinuation as preflightLegacyWorkers,
+  validateWorkerContinuationReceipt } from './worker-continuation-runtime.mjs';
+import { validateWorkerSetV3, validateWorkerSetEnvelopes } from './worker-set-v3.mjs';
+import { runExternalWorker, validateExternalRunReceipt, validateFrozenExternalContainer } from './external-worker-runtime.mjs';
+import { cleanupExternalWorker, EXTERNAL_CLEANUP_CONTRACT } from './external-worker-cleanup.mjs';
+import { ENROLLMENT_CONTRACT, validateExternalEnrollmentPlan, validateExternalEnrollmentApproval, validateExternalEnrollmentReceipt } from './external-worker-enrollment.mjs';
+import { applyExternalEnrollment } from './external-worker-enrollment-runtime.mjs';
+import { validateExternalNetworkObservation } from './external-network-policy.mjs';
+import { EXTERNAL_WORKER_PUBLIC_ROOT_PATH, EXTERNAL_WORKER_ROOT_CONTRACT,
+  externalWorkerRootIntent, externalWorkerRootDer, validateExternalWorkerRootEnrollment,
+  validateExternalWorkerRootRecovery, validateExternalWorkerRootAuthority, validateExternalWorkerRootRetirement } from './external-worker-public-root.mjs';
+import { beginExternalWorkerContinuation, bindForwardExternalWorkerContinuation, completeExternalWorkerContinuation,
+  abortExternalWorkerContinuation, rollbackExternalWorkerContinuation, preflightExternalWorkerContinuation,
+  validateExternalWorkerContinuationReceipt } from './external-worker-continuation-runtime.mjs';
 
 const STATE = '/var/lib/leetplus-compose';
 const ROOT = '/srv/leetplus';
@@ -83,6 +96,14 @@ function replace(p, bytes, mode = 0o600) {
   const fd = fs.openSync(tmp, 'wx', mode);
   try { fs.writeFileSync(fd, bytes); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
   fs.renameSync(tmp, p); syncDir(path.dirname(p));
+}
+function replaceOwned(p, bytes, { mode, gid }) {
+  const tmp = `${p}.next-${crypto.randomUUID()}`;
+  const fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, mode);
+  try { fs.fchownSync(fd, 0, gid); fs.fchmodSync(fd, mode); fs.writeFileSync(fd, bytes); fs.fsyncSync(fd); }
+  finally { fs.closeSync(fd); }
+  try { fs.renameSync(tmp, p); syncDir(path.dirname(p)); }
+  finally { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); }
 }
 function run(binary, argv, { timeout = 120000, input, json = false } = {}) {
   const result = spawnSync(binary, argv, { encoding: 'utf8', env: CLEAN_ENV, timeout, maxBuffer: 16 * 1024 * 1024, input });
@@ -157,7 +178,12 @@ function installedDigest() {
     'control-reconcile.mjs', 'worker-continuation.mjs', 'worker-continuation-runtime.mjs',
     'exact-target-handoff-authority.mjs',
     'app-only-artifact.mjs', 'app-only-baseline.mjs', 'app-only-live-certification.mjs',
-    'app-only-installed-certifier.mjs']) {
+    'app-only-installed-certifier.mjs', 'external-worker-contract.mjs', 'external-worker-runtime.mjs',
+    'external-worker-continuation-runtime.mjs', 'external-worker-enrollment.mjs', 'external-worker-enrollment-runtime.mjs',
+    'external-worker-public-root.mjs', 'external-worker-cleanup.mjs', 'external-tenant-public-root.mjs', 'external-worker-image-capability.mjs',
+    'external-network-policy.mjs', 'worker-set-v3.mjs',
+    'external-network-fence.py', 'leetplus-compose-external-daily.service',
+    'leetplus-compose-external-daily.timer']) {
     demand(manifest.files[name], 'Required control file is not attested');
   }
   return digest(manifest);
@@ -239,6 +265,15 @@ function canonicalPrivateJSON(file) {
   demand(bytes.equals(Buffer.from(canonical(value))), 'Worker continuation JSON bytes are not canonical');
   return value;
 }
+function externalWorkerPublicKey() {
+  const publicPem = safeFile(EXTERNAL_WORKER_PUBLIC_ROOT_PATH);
+  const root = `${STATE}/external-worker-root`;
+  const receipt = canonicalPrivateJSON(`${root}/receipt.json`);
+  return validateExternalWorkerRootAuthority({ envelope: canonicalPrivateJSON(`${root}/approval.json`),
+    receipt, publicPem, intent: canonicalPrivateJSON(`${root}/intent.json`),
+    recoveryEnvelope: receipt.recoveryEnvelopeSha256 ? canonicalPrivateJSON(`${root}/recovery-${receipt.recoveryOperationId}.json`) : null,
+    deploymentPublicPem: safeFile('/etc/leetplus-compose/approval-root.pem'), hostIdentitySha256: hostIdentity() });
+}
 function workerTimer(unit) {
   demand(Object.values(TIMER_UNITS).includes(unit), 'Unknown worker continuation timer');
   const raw = run('/usr/bin/systemctl', ['show', unit, '--property=LoadState,ActiveState,UnitFileState,SubState']);
@@ -279,10 +314,158 @@ function workerContinuationArguments(plan, dir, current = active()) {
     demand(digest(safeFile(`${dir}/worker-profile-${binding.worker}.json`, { immutable: true })) === binding.profileSha256 &&
       digest(profiles[binding.worker]) === binding.profileSha256, 'Worker profile snapshot or live bytes drift');
   }
-  return { plan, forwardEnvelopes, rollbackEnvelopes,
+  return { plan, forwardEnvelopes, rollbackEnvelopes, external: plan.workerSetV3 ? externalContinuationArguments(plan, dir, current) : null,
     context: { publicKey: safeFile('/etc/leetplus-compose/approval-root.pem'), hostIdentitySha256: hostIdentity(),
       profiles, now: Date.now(), current }, adapters: workerContinuationAdapters(dir) };
 }
+function externalTimer() {
+  const unit = 'leetplus-compose-external-daily.timer';
+  const raw = run('/usr/bin/systemctl', ['show', unit, '--property=LoadState,ActiveState,UnitFileState,SubState,DropInPaths']);
+  const fields = Object.fromEntries(raw.split('\n').filter(Boolean).map(line => line.split('=', 2)));
+  demand(!fields.DropInPaths, 'External timer has unreviewed drop-ins');
+  if (fields.LoadState === 'not-found') return { unit, loadState: 'not-found', enabled: false, active: false, subState: 'dead' };
+  demand(fields.LoadState === 'loaded' && ['enabled', 'disabled'].includes(fields.UnitFileState) &&
+    ['active', 'inactive'].includes(fields.ActiveState) && ['waiting', 'dead'].includes(fields.SubState), 'External timer state ambiguous');
+  return { unit, loadState: 'loaded', enabled: fields.UnitFileState === 'enabled', active: fields.ActiveState === 'active', subState: fields.SubState };
+}
+function validateExternalPreimage(plan, previous, profiles, now = Date.now()) {
+  if (!plan.workerSetV3) {
+    demand(!plan[plan.targetSlot].externalWorkerCapability && !previous?.[previous.activeSlot]?.externalWorkerCapability,
+      'Capable rollout requires V3 external worker continuation');
+    return null;
+  }
+  const policy = validateWorkerSetV3(plan.workerSetV3, plan), external = policy.external;
+  demand(canonical(policy.legacy) === canonical(plan.workerContinuation), 'V3 does not preserve the native V2 policy');
+  demand(canonical(externalTimer()) === canonical(external.originalTimer), 'External timer differs from plan preimage');
+  const grantPath = `${STATE}/worker-grants/${external.worker}.json`, secretPath = `${ROOT}/secrets/${external.worker}.json`;
+  const grantEnvelope = fs.existsSync(grantPath) ? canonicalPrivateJSON(grantPath) : null;
+  const profile = external.preimage === 'PRESENT' ? safeFile(secretPath) : null;
+  if (external.preimage === 'PRESENT') {
+    const pointer = readJSON(`${STATE}/external-worker/enrollment.json`, { immutable: true });
+    demand(pointer?.contract === 'LEETPLUS_LANGAME_EXTERNAL_WORKER_ENROLLMENT_V1_POINTER' &&
+      /^[a-f0-9-]{36}$/.test(pointer.operationId ?? '') &&
+      digest(safeFile(`${STATE}/external-worker/enrollments/${pointer.operationId}/receipt.json`, { immutable: true })) === external.enrollmentReceiptSha256 &&
+      pointer.receiptSha256 === external.enrollmentReceiptSha256 && digest(profile) === external.profileSha256,
+    'External profile/enrollment receipt is not exact');
+  }
+  validateWorkerSetEnvelopes(policy, { plan, stage: 'CURRENT', legacyEnvelopes: policy.legacy.originalGrantEnvelopes,
+    externalEnvelope: grantEnvelope, publicKey: safeFile('/etc/leetplus-compose/approval-root.pem'), active: previous,
+    externalPublicKey: external.preimage === 'PRESENT' ? externalWorkerPublicKey() : undefined,
+    hostIdentitySha256: plan.hostIdentitySha256, profiles, externalProfile: profile, now });
+  return profile;
+}
+function enrolledCanaryEvidence(plan, serviceUnitBytes, timerUnitBytes, publicKey) {
+  if (plan.mode !== 'TIMER') return null;
+  const root = `${STATE}/external-worker/enrollments`, matches = fs.readdirSync(root).filter(id =>
+    /^[a-f0-9-]{36}$/.test(id) && fs.existsSync(`${root}/${id}/receipt.json`) &&
+    digest(safeFile(`${root}/${id}/receipt.json`, { immutable: true })) === plan.previousEnrollmentReceiptSha256);
+  demand(matches.length === 1, 'TIMER enrollment lacks one exact CANARY enrollment receipt');
+  const prior = `${root}/${matches[0]}`;
+  const enrollmentPlan = canonicalPrivateJSON(`${prior}/plan.json`), enrollmentReceipt = canonicalPrivateJSON(`${prior}/receipt.json`);
+  const approval = canonicalPrivateJSON(`${prior}/approval.json`), grantEnvelope = canonicalPrivateJSON(`${prior}/grant.json`);
+  const secretBytes = safeFile(`${prior}/secret.json`, { immutable: true }), priorActive = canonicalPrivateJSON(`${prior}/active.json`);
+  const priorController = canonicalPrivateJSON(`${prior}/controller.json`);
+  demand(priorController.contract === `${CONTRACT}_INSTALL` && digest(priorController) === enrollmentPlan.controllerManifestSha256 &&
+    safeFile(`/usr/local/lib/leetplus-compose/${priorController.releaseSha}/install-manifest.json`, { immutable: true })
+      .equals(Buffer.from(canonical(priorController))), 'CANARY enrollment original controller manifest drift');
+  const networkReceiptSha256 = digest(safeFile(`${prior}/network.json`, { immutable: true }));
+  const timerState = canonicalPrivateJSON(`${prior}/timer-state.json`);
+  demand(enrollmentPlan.mode === 'CANARY' && enrollmentPlan.action === 'ENROLL_CANARY', 'External predecessor was not a CANARY enrollment');
+  validateExternalEnrollmentPlan(enrollmentPlan, { current: priorActive, controllerManifestSha256: digest(priorController),
+    hostIdentitySha256: hostIdentity(), secretBytes, grantEnvelope, serviceUnitBytes, timerUnitBytes,
+    networkPolicySha256: digest(safeFile(`${CONTROL}/external-network-fence.py`)),
+    previousEnrollmentReceiptSha256: null, canaryReceiptSha256: null, publicKey, allowExpired: true });
+  validateExternalEnrollmentApproval(enrollmentPlan, approval, publicKey, Date.now(), { allowExpired: true });
+  validateExternalEnrollmentReceipt(enrollmentReceipt, { plan: enrollmentPlan, approvalEnvelope: approval,
+    current: priorActive, secretBytes, grantEnvelope, serviceUnitBytes, timerUnitBytes,
+    networkReceiptSha256, timerState });
+  const runRoot = `${STATE}/external-worker-runs`, runs = fs.readdirSync(runRoot).filter(leaf =>
+    /^[a-f0-9-]{36}\.receipt\.json$/.test(leaf) &&
+    digest(safeFile(`${runRoot}/${leaf}`, { immutable: true })) === plan.canaryReceiptSha256);
+  demand(runs.length === 1, 'TIMER enrollment lacks one exact terminal CANARY run receipt');
+  const identity = runs[0].slice(0, -'.receipt.json'.length);
+  const runIntent = canonicalPrivateJSON(`${runRoot}/${identity}.intent.json`),
+    runResult = canonicalPrivateJSON(`${runRoot}/${identity}.result.json`),
+    runReceipt = canonicalPrivateJSON(`${runRoot}/${identity}.receipt.json`);
+  validateExternalRunReceipt(runReceipt, { intent: runIntent, result: runResult,
+    output: `${JSON.stringify(runResult)}\n`, grantEnvelope, current: priorActive });
+  return { enrollmentPlan, enrollmentReceipt, grantEnvelope, secretBytes, active: priorActive,
+    runIntent, runResult, runReceipt };
+}
+function acceptedExternalEnrollment() {
+  const pointer = readJSON(`${STATE}/external-worker/enrollment.json`, { immutable: true });
+  demand(pointer?.contract === 'LEETPLUS_LANGAME_EXTERNAL_WORKER_ENROLLMENT_V1_POINTER' &&
+    /^[a-f0-9-]{36}$/.test(pointer.operationId ?? '') && /^[a-f0-9]{64}$/.test(pointer.receiptSha256 ?? ''),
+  'External enrollment pointer is not exact');
+  const dir = `${STATE}/external-worker/enrollments/${pointer.operationId}`;
+  const plan = canonicalPrivateJSON(`${dir}/plan.json`), approvalEnvelope = canonicalPrivateJSON(`${dir}/approval.json`);
+  const receipt = canonicalPrivateJSON(`${dir}/receipt.json`), originalCurrent = canonicalPrivateJSON(`${dir}/active.json`);
+  const originalSecret = safeFile(`${dir}/secret.json`, { immutable: true });
+  const originalGrant = canonicalPrivateJSON(`${dir}/grant.json`);
+  const networkRaw = safeFile(`${dir}/network.json`, { immutable: true });
+  const networkReceiptSha256 = digest(networkRaw);
+  validateExternalNetworkObservation(JSON.parse(networkRaw));
+  const originalTimer = canonicalPrivateJSON(`${dir}/timer-state.json`);
+  const serviceUnitBytes = safeFile(`${dir}/service.unit`, { immutable: true });
+  const timerUnitBytes = safeFile(`${dir}/timer.unit`, { immutable: true });
+  const canaryEvidence = enrolledCanaryEvidence(plan, serviceUnitBytes, timerUnitBytes, externalWorkerPublicKey());
+  demand(pointer.receiptSha256 === digest(receipt), 'External enrollment pointer/receipt digest drift');
+  if (plan.previousEnrollmentReceiptSha256) {
+    const previous = fs.readdirSync(`${STATE}/external-worker/enrollments`).filter(id => /^[a-f0-9-]{36}$/.test(id) &&
+      id !== pointer.operationId && fs.existsSync(`${STATE}/external-worker/enrollments/${id}/receipt.json`) &&
+      digest(safeFile(`${STATE}/external-worker/enrollments/${id}/receipt.json`, { immutable: true })) === plan.previousEnrollmentReceiptSha256);
+    demand(previous.length === 1, 'External enrollment predecessor receipt lineage is ambiguous');
+  }
+  const controller = canonicalPrivateJSON(`${dir}/controller.json`);
+  demand(controller.contract === `${CONTRACT}_INSTALL` && digest(controller) === plan.controllerManifestSha256 &&
+    /^[a-f0-9]{40}$/.test(controller.releaseSha ?? ''), 'Historical external enrollment controller identity drift');
+  const historicalRoot = `/usr/local/lib/leetplus-compose/${controller.releaseSha}`;
+  demand(safeFile(`${historicalRoot}/install-manifest.json`, { immutable: true }).equals(Buffer.from(canonical(controller))),
+    'External enrollment original controller manifest is missing');
+  for (const [leaf, hash] of Object.entries(controller.files)) {
+    demand(/^[a-zA-Z0-9_.@-]+$/.test(leaf) && !['.', '..'].includes(leaf) &&
+      digest(safeFile(`${historicalRoot}/${leaf}`)) === hash, 'External enrollment original controller file drift');
+  }
+  validateExternalEnrollmentPlan(plan, { current: originalCurrent, controllerManifestSha256: digest(controller),
+    hostIdentitySha256: hostIdentity(), secretBytes: originalSecret, grantEnvelope: originalGrant,
+    serviceUnitBytes, timerUnitBytes, networkPolicySha256: digest(safeFile(`${CONTROL}/external-network-fence.py`)),
+    previousEnrollmentReceiptSha256: plan.previousEnrollmentReceiptSha256,
+    canaryReceiptSha256: plan.canaryReceiptSha256,
+    canaryEvidence,
+    publicKey: externalWorkerPublicKey(), allowExpired: true });
+  validateExternalEnrollmentApproval(plan, approvalEnvelope, externalWorkerPublicKey(), Date.now(), { allowExpired: true });
+  validateExternalEnrollmentReceipt(receipt, { plan, approvalEnvelope, current: originalCurrent,
+    secretBytes: originalSecret, grantEnvelope: originalGrant, serviceUnitBytes, timerUnitBytes,
+    networkReceiptSha256, timerState: originalTimer });
+  return { pointer, plan, receipt, originalCurrent, originalSecret, originalGrant };
+}
+function externalContinuationArguments(plan, dir, current) {
+  const policy = validateWorkerSetV3(plan.workerSetV3, plan), name = policy.external.worker;
+  const grantPath = `${STATE}/worker-grants/${name}.json`;
+  const readGrant = () => fs.existsSync(grantPath) ? canonicalPrivateJSON(grantPath) : null;
+  const paths = ['intent', 'forward', 'complete', 'abort', 'rollback'].map(type => `external-worker-${type}.json`);
+  const readLifecycle = leaf => { demand(paths.includes(leaf), 'Unknown external continuation leaf'); return fs.existsSync(`${dir}/${leaf}`) ? canonicalPrivateJSON(`${dir}/${leaf}`) : null; };
+  const profile = policy.external.preimage === 'PRESENT' ? safeFile(`${ROOT}/secrets/${name}.json`) : null;
+  if (profile) demand(digest(profile) === policy.external.profileSha256 &&
+    digest(safeFile(`${dir}/worker-profile-${name}.json`, { immutable: true })) === policy.external.profileSha256,
+  'External worker profile snapshot/live drift');
+  return { plan, context: { current, publicKey: policy.external.preimage === 'PRESENT' ? externalWorkerPublicKey() : null,
+    hostIdentitySha256: hostIdentity(), externalProfile: profile, now: Date.now(),
+    forwardEnvelope: policy.external.forward.state === 'ACTIVE' ? canonicalPrivateJSON(`${dir}/worker-forward-${name}.json`) : null,
+    rollbackEnvelope: policy.external.rollback.state === 'ACTIVE' ? canonicalPrivateJSON(`${dir}/worker-rollback-${name}.json`) : null },
+  adapters: { readExternalGrant: async () => readGrant(), readExternalTimer: async () => externalTimer(), readLifecycle: async leaf => readLifecycle(leaf),
+    publish: async (leaf, value) => { demand(paths.includes(leaf), 'Unknown external continuation publication'); publish(`${dir}/${leaf}`, value); },
+    writeExternalGrantCAS: async (expected, desired) => { demand(canonical(readGrant()) === canonical(expected), 'External grant CAS preimage drift'); replace(grantPath, Buffer.from(canonical(desired)), 0o400); },
+    removeExternalGrantCAS: async expected => { demand(canonical(readGrant()) === canonical(expected), 'External grant removal preimage drift'); if (expected) { fs.unlinkSync(grantPath); syncDir(path.dirname(grantPath)); } },
+    systemctl: async (action, unit) => { demand(['stop', 'start', 'enable', 'disable'].includes(action) && unit === 'leetplus-compose-external-daily.timer', 'External timer command scope drift'); run('/usr/bin/systemctl', [action, unit]); },
+    assertExclusiveLock: async () => verifyKernelControlLocks({ mode: 'WRITE', singleton: null }, { globalLock: fs.lstatSync(`${STATE}/control.lock`), locks: fs.readFileSync('/proc/locks', 'utf8'), parentPid: process.ppid }) } };
+}
+async function preflightWorkerContinuation(args) { await preflightLegacyWorkers(args); if (args.external) await preflightExternalWorkerContinuation(args.external); }
+async function beginWorkerContinuation(args) { const value = await beginLegacyWorkers(args); if (args.external) await beginExternalWorkerContinuation(args.external); return value; }
+async function bindForwardWorkerContinuation(args) { const value = await bindLegacyWorkers(args); if (args.external) await bindForwardExternalWorkerContinuation(args.external); return value; }
+async function completeWorkerContinuation(args) { const value = await completeLegacyWorkers(args); if (args.external) await completeExternalWorkerContinuation(args.external); return value; }
+async function abortUncommittedWorkerContinuation(args) { if (args.external && await args.external.adapters.readLifecycle('external-worker-intent.json')) await abortExternalWorkerContinuation(args.external); return abortLegacyWorkers(args); }
+async function rollbackWorkerContinuation(args) { const value = await rollbackLegacyWorkers(args); if (args.external) await rollbackExternalWorkerContinuation(args.external); return value; }
 async function workerContinuationPostimage(args) {
   return { current: args.context.current,
     grantEnvelopes: await Promise.all(WORKERS.map(worker => args.adapters.readGrant(worker))),
@@ -296,9 +479,27 @@ async function acceptedWorkerContinuation(args, mode) {
     postimage: await workerContinuationPostimage(args),
     context: { ...args.context, intent: lifecycle.intent, rollbackIntent: lifecycle.rollbackIntent,
       forwardEnvelopes: args.forwardEnvelopes, rollbackEnvelopes: args.rollbackEnvelopes } });
+  if (args.external) {
+    const ext = args.external, leaf = mode === 'ROLLBACK' ? 'external-worker-rollback.json' : 'external-worker-complete.json';
+    const stage = args.plan.workerSetV3.external[mode === 'ROLLBACK' ? 'rollback' : 'forward'];
+    const originalTimer = args.plan.workerSetV3.external.originalTimer;
+    const historicalTimer = stage.state === 'ACTIVE' ? originalTimer : { ...originalTimer, enabled: false, active: false, subState: 'dead' };
+    validateExternalWorkerContinuationReceipt({ plan: args.plan, receipt: await ext.adapters.readLifecycle(leaf),
+      context: { ...ext.context, allowExpired: true, intent: await ext.adapters.readLifecycle('external-worker-intent.json') },
+      postimage: { grant: stage.state === 'ACTIVE' ? (mode === 'ROLLBACK' ? ext.context.rollbackEnvelope : ext.context.forwardEnvelope) : null,
+        timer: historicalTimer } });
+  }
   return receipt;
 }
+async function externalContinuationEvidence(plan, dir, mode = 'FORWARD') {
+  if (!plan.workerSetV3) return {};
+  const leaf = mode === 'ROLLBACK' ? 'external-worker-rollback.json' : 'external-worker-complete.json';
+  const receipt = canonicalPrivateJSON(`${dir}/${leaf}`);
+  return { externalWorkerContinuationReceiptSha256: digest(receipt) };
+}
 function assertNoPending(except) {
+  const externalRunning = docker(['ps', '--filter', 'name=^/leetplus-langame-external-daily-worker$', '--format', '{{.ID}}']);
+  demand(!externalRunning, 'An external worker container survived its native controller; reconcile and stop it before any new control effect');
   for (const id of fs.readdirSync(`${STATE}/operations`)) {
     if (id === except) continue;
     const dir = operation(id);
@@ -358,7 +559,8 @@ async function finishRollbackWorkerContinuation(p, dir, current) {
   const continuation = p.workerContinuation?.contract === WORKER_CONTINUATION_V2 ? workerContinuationArguments(p, dir, current) : null;
   const workerReceipt = continuation ? await rollbackWorkerContinuation(continuation) : null;
   publish(`${dir}/rolled-back.json`, { contract: `${CONTRACT}_ROLLED_BACK`, planSha256: digest(p), reason: 'POSTCHECK_FAILED', active: current,
-    ...(workerReceipt ? { workerContinuationReceiptSha256: digest(workerReceipt) } : {}) });
+    ...(workerReceipt ? { workerContinuationReceiptSha256: digest(workerReceipt) } : {}),
+    ...await externalContinuationEvidence(p, dir, 'ROLLBACK') });
   return workerReceipt;
 }
 function rollbackActive(p) {
@@ -559,7 +761,8 @@ function driverFor(dir) {
         const continuation = p.workerContinuation?.contract === WORKER_CONTINUATION_V2 ? workerContinuationArguments(p, dir) : null;
         const workerReceipt = continuation ? await completeWorkerContinuation(continuation) : null;
         return { ...bound, slot: p.targetSlot, generation: p.generation + 1, authenticated,
-          ...(workerReceipt ? { workerContinuationReceiptSha256: digest(workerReceipt) } : {}) };
+          ...(workerReceipt ? { workerContinuationReceiptSha256: digest(workerReceipt) } : {}),
+          ...await externalContinuationEvidence(p, dir) };
       } catch (error) {
         if (p.previous) await rollbackAfterPostcheck(p, dir);
         throw error;
@@ -690,7 +893,8 @@ function driverFor(dir) {
       'POSTCHECK public identity differs from target before worker recovery');
       if (effectsAllowed) {
         const args = workerContinuationArguments(plan, dir, current), lifecycle = await args.adapters.readLifecycle();
-        if (!lifecycle.receipt && !lifecycle.rollbackIntent) await completeWorkerContinuation(args);
+        const externalMissing = args.external && !await args.external.adapters.readLifecycle('external-worker-complete.json');
+        if ((!lifecycle.receipt || externalMissing) && !lifecycle.rollbackIntent) await completeWorkerContinuation(args);
       }
       const args = workerContinuationArguments(plan, dir, current);
       const receipt = await acceptedWorkerContinuation(args, 'FORWARD');
@@ -704,9 +908,12 @@ function driverFor(dir) {
         const authenticated = authenticatedSmoke(plan.targetSlot);
         return { phase, planSha256: digest(plan), slot: plan.targetSlot, generation: plan.generation + 1,
           authenticated, workerContinuationReceiptSha256: digest(receipt),
+          ...await externalContinuationEvidence(plan, dir),
           reconciliationBasis: 'FRESH_BOUNDED_AUTHENTICATED_READ_AFTER_LOST_RESPONSE' };
       }
       demand(evidence.workerContinuationReceiptSha256 === digest(receipt), 'POSTCHECK worker evidence drift');
+      if (plan.workerSetV3) demand(evidence.externalWorkerContinuationReceiptSha256 === (await externalContinuationEvidence(plan, dir)).externalWorkerContinuationReceiptSha256,
+        'POSTCHECK external worker evidence drift');
       return observePhase(phase, plan);
     }
     if (canonical(current) === canonical(plan.previous)) {
@@ -746,9 +953,15 @@ if (command === 'help' || !command) {
   const locks = fs.readFileSync('/proc/locks', 'utf8').split('\n');
   const lockPolicy = controlLockPolicy(command, options);
   const parentStatus = lockPolicy.singleton ? fs.readFileSync(`/proc/${process.ppid}/status`, 'utf8') : '';
-  verifyKernelControlLocks(lockPolicy, { globalLock: lockInfo, singletonLock: lockPolicy.singleton ? fs.lstatSync(`${STATE}/${lockPolicy.singleton}.lock`) : undefined, locks, parentPid: process.ppid, outerPid: parentStatus.match(/^PPid:\s+(\d+)$/m)?.[1] });
+  if (command === 'external-worker-cleanup') verifyExternalCleanupSingletonLock({
+    singletonLock: fs.lstatSync(`${STATE}/langame-external-daily-worker.lock`), locks, parentPid: process.ppid });
+  else verifyKernelControlLocks(lockPolicy, { globalLock: lockInfo, singletonLock: lockPolicy.singleton ? fs.lstatSync(`${STATE}/${lockPolicy.singleton}.lock`) : undefined, locks, parentPid: process.ppid, outerPid: parentStatus.match(/^PPid:\s+(\d+)$/m)?.[1] });
   directory(STATE); directory(`${STATE}/operations`);
   installedDigest();
+  if (lockPolicy.mode === 'WRITE' && command !== 'external-worker-cleanup') {
+    const externalRunning = docker(['ps', '--filter', 'name=^/leetplus-langame-external-daily-worker$', '--format', '{{.ID}}']);
+    demand(!externalRunning, 'A running external container must be cleaned before any global control writer effect');
+  }
   const observational = command === 'status' || (command === 'network' && ['refresh', 'status', 'verify', 'verify-rehearsal'].includes(options.operation));
   if (!observational) {
     const handoffPending = fs.existsSync(`${STATE}/control-handoff.pending.json`);
@@ -763,7 +976,7 @@ if (command === 'help' || !command) {
         publicKey: safeFile('/etc/leetplus-compose/approval-root.pem'),
         histories: [{ plan: readJSON(`${dir}/plan.json`, { immutable: true }), approval: readJSON(`${dir}/approval.json`, { immutable: true }), ...await storeFor(dir).read() }] });
     }
-    assertControllerContinuity();
+    if (command !== 'external-worker-cleanup') assertControllerContinuity();
   } else if (command === 'network' && options.operation === 'refresh') {
     // A pending handoff must not let provider addresses expire, but a queued
     // obsolete controller may not act after a newer atomic pointer switch.
@@ -783,6 +996,274 @@ if (command === 'help' || !command) {
     console.log(run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, options.operation]));
   } else if (command === 'backup') {
     console.log(run('/usr/bin/python3', [`${CONTROL}/daily-backup.py`], { timeout: 3600000 }));
+  } else if (command === 'external-worker-root-enroll') {
+    demand(Object.keys(options).sort().join(',') === ['approval', 'public'].join(','), 'Exact external worker public-root enrollment inputs required');
+    assertNoPending();
+    const publicPem = safeFile(options.public, { limit: 65536 }), envelope = readJSON(options.approval);
+    const deploymentPublicPem = safeFile('/etc/leetplus-compose/approval-root.pem');
+    const observed = { envelope, publicPem, deploymentPublicPem, hostIdentitySha256: hostIdentity() };
+    const root = `${STATE}/external-worker-root`;
+    if (fs.existsSync(`${root}/receipt.json`)) {
+      const receipt = canonicalPrivateJSON(`${root}/receipt.json`);
+      demand(fs.existsSync(EXTERNAL_WORKER_PUBLIC_ROOT_PATH) &&
+        safeFile(EXTERNAL_WORKER_PUBLIC_ROOT_PATH).equals(publicPem), 'External root terminal postimage drift');
+      validateExternalWorkerRootAuthority({ ...observed, receipt,
+        intent: canonicalPrivateJSON(`${root}/intent.json`),
+        recoveryEnvelope: receipt.recoveryEnvelopeSha256 ? canonicalPrivateJSON(`${root}/recovery-${receipt.recoveryOperationId}.json`) : null });
+      console.log(canonical(receipt));
+    } else {
+      validateExternalWorkerRootEnrollment(observed);
+      let publicationRoot = root;
+      if (fs.existsSync(root)) {
+        demand(fs.readdirSync(root).every(leaf => ['approval.json', 'public.pem', 'intent.json'].includes(leaf)),
+          'External root enrollment has an unknown partial record');
+        if (fs.existsSync(`${root}/approval.json`)) demand(canonical(canonicalPrivateJSON(`${root}/approval.json`)) === canonical(envelope), 'External root approval intent drift');
+        if (fs.existsSync(`${root}/public.pem`)) demand(safeFile(`${root}/public.pem`, { immutable: true }).equals(publicPem), 'External root public intent drift');
+      } else {
+        demand(!fs.existsSync(EXTERNAL_WORKER_PUBLIC_ROOT_PATH), 'External root origin is occupied');
+        const retirementRoot = `${STATE}/external-worker-root-retirements`;
+        if (fs.existsSync(retirementRoot)) for (const id of fs.readdirSync(retirementRoot)) {
+          demand(/^[a-f0-9-]{36}$/.test(id) && fs.existsSync(`${retirementRoot}/${id}/retirement.json`),
+            'Unfinished external public-root retirement blocks new enrollment');
+        }
+        publicationRoot = `${STATE}/external-worker-root-staging-${envelope.statement.operationId}`;
+        directory(publicationRoot);
+      }
+      publish(`${publicationRoot}/approval.json`, envelope);
+      publishPrivateBytes(`${publicationRoot}/public.pem`, publicPem);
+      publish(`${publicationRoot}/intent.json`, externalWorkerRootIntent(observed));
+      if (publicationRoot !== root) {
+        demand(!fs.existsSync(root) && fs.readdirSync(publicationRoot).sort().join(',') ===
+          ['approval.json', 'intent.json', 'public.pem'].sort().join(','), 'Public-root staged intent inventory drift');
+        fs.renameSync(publicationRoot, root); syncDir(STATE);
+      }
+      validateExternalWorkerRootEnrollment(observed);
+      if (fs.existsSync(EXTERNAL_WORKER_PUBLIC_ROOT_PATH)) demand(safeFile(EXTERNAL_WORKER_PUBLIC_ROOT_PATH).equals(publicPem), 'External public-root CAS postimage drift');
+      else replaceOwned(EXTERNAL_WORKER_PUBLIC_ROOT_PATH, publicPem, { mode: 0o444, gid: 0 });
+      demand(safeFile(EXTERNAL_WORKER_PUBLIC_ROOT_PATH).equals(publicPem), 'External public root did not reach exact postimage');
+      const installed = fs.lstatSync(EXTERNAL_WORKER_PUBLIC_ROOT_PATH);
+      demand(installed.isFile() && !installed.isSymbolicLink() && installed.uid === 0 && installed.nlink === 1 &&
+        (installed.mode & 0o777) === 0o444, 'External public root file identity drift');
+      validateExternalWorkerRootEnrollment(observed);
+      const receipt = { contract: `${EXTERNAL_WORKER_ROOT_CONTRACT}_RECEIPT`, decision: 'PUBLIC_ONLY_ENROLLED',
+        operationId: envelope.statement.operationId, envelopeSha256: digest(envelope),
+        publicDerSha256: digest(externalWorkerRootDer(publicPem)), acceptedAt: new Date().toISOString() };
+      validateExternalWorkerRootAuthority({ ...observed, receipt, intent: externalWorkerRootIntent(observed) });
+      publish(`${root}/receipt.json`, receipt);
+      console.log(canonical(receipt));
+    }
+  } else if (command === 'external-worker-root-recover') {
+    demand(Object.keys(options).sort().join(',') === 'approval', 'Exact public-root recovery approval path required');
+    const root = `${STATE}/external-worker-root`;
+    const recoveryEnvelope = readJSON(options.approval);
+    const retirementRoot = `${STATE}/external-worker-root-retirements`;
+    const deploymentPublicPem = safeFile('/etc/leetplus-compose/approval-root.pem');
+    const installedCurrent = fs.existsSync(EXTERNAL_WORKER_PUBLIC_ROOT_PATH) ? safeFile(EXTERNAL_WORKER_PUBLIC_ROOT_PATH) : null;
+    if (fs.existsSync(`${root}/receipt.json`)) {
+      const originalEnvelope = canonicalPrivateJSON(`${root}/approval.json`),
+        originalIntent = canonicalPrivateJSON(`${root}/intent.json`),
+        publicPem = safeFile(`${root}/public.pem`, { immutable: true }),
+        receipt = canonicalPrivateJSON(`${root}/receipt.json`);
+      demand(installedCurrent?.equals(publicPem) && receipt.recoveryEnvelopeSha256,
+        'Recovered root terminal is missing exact installed bytes/permit');
+      const recordedPermit = canonicalPrivateJSON(`${root}/recovery-${receipt.recoveryOperationId}.json`);
+      validateExternalWorkerRootAuthority({ envelope: originalEnvelope, receipt, intent: originalIntent,
+        recoveryEnvelope: recordedPermit, publicPem, deploymentPublicPem, hostIdentitySha256: hostIdentity() });
+      if (digest(recoveryEnvelope) !== digest(recordedPermit))
+        validateExternalWorkerRootRecovery({ originalEnvelope, recoveryEnvelope, intent: originalIntent,
+          publicPem, deploymentPublicPem, hostIdentitySha256: hostIdentity(), installedPublicBytes: installedCurrent });
+      console.log(canonical(receipt));
+    } else {
+    const retiredTerminals = !fs.existsSync(root) && fs.existsSync(retirementRoot) ? fs.readdirSync(retirementRoot).filter(id =>
+      /^[a-f0-9-]{36}$/.test(id) && fs.existsSync(`${retirementRoot}/${id}/retirement.json`) &&
+      fs.existsSync(`${retirementRoot}/${id}/approval.json`) &&
+      canonicalPrivateJSON(`${retirementRoot}/${id}/approval.json`).statement.operationId === recoveryEnvelope?.statement?.originalOperationId) : [];
+    demand(retiredTerminals.length <= 1, 'Conflicting external root retirement terminals');
+    if (retiredTerminals.length === 1) {
+      const retired = `${retirementRoot}/${retiredTerminals[0]}`,
+        originalEnvelope = canonicalPrivateJSON(`${retired}/approval.json`),
+        originalIntent = canonicalPrivateJSON(`${retired}/intent.json`),
+        publicPem = safeFile(`${retired}/public.pem`, { immutable: true }),
+        terminal = canonicalPrivateJSON(`${retired}/retirement.json`);
+      demand(!installedCurrent && terminal.contract === `${EXTERNAL_WORKER_ROOT_CONTRACT}_RETIREMENT` &&
+        terminal.decision === 'RETIRED_ABSENT' && terminal.originalOperationId === originalEnvelope.statement.operationId &&
+        terminal.intentSha256 === digest(originalIntent) && /^[a-f0-9-]{36}$/.test(terminal.operationId ?? ''),
+      'External root retirement terminal/postimage drift');
+      const recordedPermit = canonicalPrivateJSON(`${retired}/recovery-${terminal.operationId}.json`);
+      validateExternalWorkerRootRetirement({ envelope: originalEnvelope, intent: originalIntent,
+        retirement: terminal, recoveryEnvelope: recordedPermit, publicPem, deploymentPublicPem,
+        hostIdentitySha256: hostIdentity(), installedPublicBytes: null });
+      if (digest(recoveryEnvelope) !== digest(recordedPermit))
+        validateExternalWorkerRootRecovery({ originalEnvelope, recoveryEnvelope, intent: originalIntent,
+          publicPem, deploymentPublicPem, hostIdentitySha256: hostIdentity(), installedPublicBytes: null });
+      console.log(canonical(terminal));
+    } else {
+    let source = root, alreadyRetired = false;
+    if (!fs.existsSync(root)) {
+      const candidates = fs.existsSync(retirementRoot) ? fs.readdirSync(retirementRoot).filter(id =>
+        /^[a-f0-9-]{36}$/.test(id) && fs.existsSync(`${retirementRoot}/${id}/approval.json`) &&
+        !fs.existsSync(`${retirementRoot}/${id}/retirement.json`) &&
+        canonicalPrivateJSON(`${retirementRoot}/${id}/approval.json`).statement.operationId === recoveryEnvelope?.statement?.originalOperationId) : [];
+      demand(candidates.length === 1, 'External root retirement origin is absent or ambiguous');
+      source = `${retirementRoot}/${candidates[0]}`; alreadyRetired = true;
+    }
+    demand(!fs.existsSync(`${source}/receipt.json`), 'External public root is not an unreceipted partial enrollment');
+    const envelope = canonicalPrivateJSON(`${source}/approval.json`), intent = canonicalPrivateJSON(`${source}/intent.json`);
+    const publicPem = safeFile(`${source}/public.pem`, { immutable: true });
+    const installed = installedCurrent;
+    demand(!installed || installed.equals(publicPem), 'Foreign external public root cannot be recovered');
+    const recovery = validateExternalWorkerRootRecovery({ originalEnvelope: envelope, recoveryEnvelope, intent,
+      publicPem, deploymentPublicPem, hostIdentitySha256: hostIdentity(), installedPublicBytes: installed });
+    if (recovery.statement.action === 'RECOVER_INSTALLED') {
+      demand(!alreadyRetired, 'Installed root cannot recover from a retired directory');
+      demand(fs.readdirSync(root).every(leaf => ['approval.json', 'public.pem', 'intent.json'].includes(leaf) ||
+        /^recovery-[a-f0-9-]{36}\.json$/.test(leaf)),
+        'External root recovery has unknown state');
+      publish(`${root}/recovery-${recovery.statement.operationId}.json`, recoveryEnvelope);
+      const receipt = { contract: `${EXTERNAL_WORKER_ROOT_CONTRACT}_RECEIPT`, decision: 'PUBLIC_ONLY_ENROLLED',
+        operationId: envelope.statement.operationId, envelopeSha256: digest(envelope),
+        publicDerSha256: digest(externalWorkerRootDer(publicPem)),
+        recoveryEnvelopeSha256: digest(recoveryEnvelope), recoveryOperationId: recovery.statement.operationId,
+        acceptedAt: new Date().toISOString() };
+      validateExternalWorkerRootAuthority({ envelope, receipt, intent, recoveryEnvelope, publicPem,
+        deploymentPublicPem, hostIdentitySha256: hostIdentity() });
+      publish(`${root}/receipt.json`, receipt);
+      console.log(canonical(receipt));
+    } else {
+      demand(!installed, 'RETIRE_ABSENT cannot remove an installed public root');
+      directory(retirementRoot);
+      const retirementDir = alreadyRetired ? source : `${retirementRoot}/${recovery.statement.operationId}`;
+      if (!alreadyRetired) {
+        demand(fs.readdirSync(root).sort().join(',') === ['approval.json', 'intent.json', 'public.pem'].sort().join(','),
+          'External root partial record changed before atomic retirement');
+        demand(!fs.existsSync(retirementDir), 'External root retirement operation already exists');
+        fs.renameSync(root, retirementDir); syncDir(STATE); syncDir(retirementRoot);
+      }
+      demand(fs.readdirSync(retirementDir).every(leaf => ['approval.json', 'public.pem', 'intent.json'].includes(leaf) ||
+        /^recovery-[a-f0-9-]{36}\.json$/.test(leaf)), 'Retired external root contains foreign files');
+      publish(`${retirementDir}/recovery-${recovery.statement.operationId}.json`, recoveryEnvelope);
+      const retirement = { contract: `${EXTERNAL_WORKER_ROOT_CONTRACT}_RETIREMENT`, decision: 'RETIRED_ABSENT',
+        operationId: recovery.statement.operationId, originalOperationId: envelope.statement.operationId,
+        recoveryEnvelopeSha256: digest(recoveryEnvelope), intentSha256: digest(intent), retiredAt: new Date().toISOString() };
+      validateExternalWorkerRootRetirement({ envelope, intent, retirement, recoveryEnvelope, publicPem,
+        deploymentPublicPem, hostIdentitySha256: hostIdentity(), installedPublicBytes: null });
+      publish(`${retirementDir}/retirement.json`, retirement);
+      console.log(canonical(retirement));
+    }
+    }
+    }
+  } else if (command === 'external-worker-enroll') {
+    demand(Object.keys(options).sort().join(',') === 'request', 'Exact root-owned external enrollment request required');
+    assertNoPending();
+    const request = readJSON(options.request);
+    demand(request && Object.keys(request).sort().join(',') === ['plan', 'approvalEnvelope', 'grantEnvelope', 'secretFile'].sort().join(','),
+      'External enrollment request fields are not exact');
+    const plan = request.plan, current = active();
+    demand(current && /^[a-f0-9-]{36}$/.test(plan?.operationId ?? ''), 'External enrollment needs an accepted native application');
+    const activeDir = operation(current.operationId), activePlan = canonicalPrivateJSON(`${activeDir}/plan.json`);
+    const history = await storeFor(activeDir).read();
+    demand(current.planSha256 === digest(activePlan) &&
+      (current.outcome === 'ROLLED_BACK' ? Boolean(history.rolledBack) : Boolean(history.final && history.records.POSTCHECK?.receipt)),
+      'External enrollment cannot precede native app POSTCHECK');
+    validateApproval(activePlan, canonicalPrivateJSON(`${activeDir}/approval.json`), safeFile('/etc/leetplus-compose/approval-root.pem'), { allowExpired: true });
+    validateChain(activePlan, history.records);
+    demand(activePlan.workerContinuation?.contract === WORKER_CONTINUATION_V2, 'External enrollment needs executable native worker history');
+    await acceptedWorkerContinuation(workerContinuationArguments(activePlan, activeDir, current), current.outcome === 'ROLLED_BACK' ? 'ROLLBACK' : 'FORWARD');
+    const root = `${STATE}/external-worker`, enrollmentRoot = `${root}/enrollments`, dir = `${enrollmentRoot}/${plan.operationId}`;
+    const historicalIntent = fs.existsSync(`${dir}/intent.json`);
+    const historicalReceipt = fs.existsSync(`${dir}/receipt.json`);
+    const secretBytes = safeFile(request.secretFile, { limit: 65536 }), publicKey = externalWorkerPublicKey();
+    const serviceUnitBytes = safeFile(`${CONTROL}/leetplus-compose-external-daily.service`), timerUnitBytes = safeFile(`${CONTROL}/leetplus-compose-external-daily.timer`);
+    const networkPolicySha256 = digest(safeFile(`${CONTROL}/external-network-fence.py`));
+    const canaryEvidence = enrolledCanaryEvidence(plan, serviceUnitBytes, timerUnitBytes, publicKey);
+    const previous = plan.previousEnrollmentReceiptSha256 ? { pointer: { receiptSha256: digest(canaryEvidence.enrollmentReceipt) } } : null;
+    const currentPointer = fs.existsSync(`${root}/enrollment.json`) ? canonicalPrivateJSON(`${root}/enrollment.json`) : null;
+    demand(currentPointer?.receiptSha256 === plan.previousEnrollmentReceiptSha256 ||
+      currentPointer === null && plan.previousEnrollmentReceiptSha256 === null ||
+      historicalReceipt && currentPointer?.operationId === plan.operationId &&
+        currentPointer.receiptSha256 === digest(safeFile(`${dir}/receipt.json`, { immutable: true })),
+    'External enrollment previous/current pointer is not exact');
+    const name = 'langame-external-daily-worker', secretPath = `${ROOT}/secrets/${name}.json`, grantPath = `${STATE}/worker-grants/${name}.json`,
+      lockPath = `${STATE}/${name}.lock`, servicePath = '/etc/systemd/system/leetplus-compose-external-daily.service',
+      timerPath = '/etc/systemd/system/leetplus-compose-external-daily.timer';
+    const optionalDigest = file => fs.existsSync(file) ? digest(safeFile(file)) : null;
+    const readNetworkState = () => {
+      const file = `${STATE}/external-network-fence.json`;
+      if (!fs.existsSync(file)) return 'ABSENT';
+      const value = readJSON(file);
+      demand(value.contract === 'LEETPLUS_LANGAME_EXTERNAL_NETWORK_V1' && ['INSTALLING', 'ACTIVE'].includes(value.state), 'External network lineage invalid');
+      return value.state;
+    };
+    const readState = () => {
+      if (fs.existsSync(lockPath)) {
+        const stat = fs.lstatSync(lockPath);
+        demand(stat.isFile() && !stat.isSymbolicLink() && stat.uid === 0 && stat.nlink === 1 && !(stat.mode & 0o077), 'External worker singleton lock drift');
+      }
+      return { lockPresent: fs.existsSync(lockPath), serviceUnitSha256: optionalDigest(servicePath), timerUnitSha256: optionalDigest(timerPath),
+        networkState: readNetworkState(), secretSha256: optionalDigest(secretPath), grantEnvelopeSha256: optionalDigest(grantPath), timer: externalTimer() };
+    };
+    const preimageFile = `${dir}/preimage.json`, intentFile = `${dir}/intent.json`;
+    const preimage = fs.existsSync(intentFile) ? canonicalPrivateJSON(preimageFile) : readState();
+    if (!previous && !fs.existsSync(intentFile)) demand(!preimage.lockPresent && preimage.secretSha256 === null &&
+      preimage.grantEnvelopeSha256 === null && preimage.serviceUnitSha256 === null && preimage.timerUnitSha256 === null &&
+      preimage.networkState === 'ABSENT' && preimage.timer.loadState === 'not-found', 'External first enrollment origin is occupied');
+    const context = { current, controllerManifestSha256: installedDigest(), hostIdentitySha256: hostIdentity(),
+      secretBytes, grantEnvelope: request.grantEnvelope, serviceUnitBytes, timerUnitBytes, networkPolicySha256,
+      previousEnrollmentReceiptSha256: previous?.pointer.receiptSha256 ?? null, canaryReceiptSha256: plan.canaryReceiptSha256,
+      canaryEvidence, publicKey, now: Date.now(), preimage };
+    validateExternalEnrollmentPlan(plan, { ...context, allowExpired: historicalIntent || historicalReceipt });
+    validateExternalEnrollmentApproval(plan, request.approvalEnvelope, publicKey, Date.now(), { allowExpired: historicalIntent || historicalReceipt });
+    directory(root); directory(enrollmentRoot); directory(dir);
+    for (const [leaf, value] of [['plan.json', plan], ['approval.json', request.approvalEnvelope], ['grant.json', request.grantEnvelope],
+      ['active.json', current], ['preimage.json', preimage], ['controller.json', canonicalPrivateJSON(`${CONTROL}/install-manifest.json`)]]) publish(`${dir}/${leaf}`, value);
+    publishPrivateBytes(`${dir}/secret.json`, secretBytes);
+    publishPrivateBytes(`${dir}/service.unit`, serviceUnitBytes);
+    publishPrivateBytes(`${dir}/timer.unit`, timerUnitBytes);
+    const opNames = { intent: 'intent.json', network: 'network.json', receipt: 'receipt.json' };
+    const adapters = {
+      now: Date.now,
+      assertExclusiveLock: async () => verifyKernelControlLocks({ mode: 'WRITE', singleton: null }, {
+        globalLock: fs.lstatSync(`${STATE}/control.lock`), locks: fs.readFileSync('/proc/locks', 'utf8'), parentPid: process.ppid }),
+      readState: async () => readState(),
+      readOp: async type => { demand(Object.hasOwn(opNames, type), 'Unknown enrollment read'); return fs.existsSync(`${dir}/${opNames[type]}`) ? canonicalPrivateJSON(`${dir}/${opNames[type]}`) : null; },
+      publishOp: async (type, value) => { demand(Object.hasOwn(opNames, type), 'Unknown enrollment publication');
+        if (type === 'receipt') publish(`${dir}/timer-state.json`, externalTimer()); publish(`${dir}/${opNames[type]}`, value); },
+      installLockCAS: async expected => { demand(fs.existsSync(lockPath) === expected, 'External lock origin drift'); publishPrivateBytes(lockPath, Buffer.alloc(0)); },
+      installUnitsCAS: async (before, after) => {
+        demand(optionalDigest(servicePath) === before.service && optionalDigest(timerPath) === before.timer &&
+          digest(serviceUnitBytes) === after.service && digest(timerUnitBytes) === after.timer, 'External unit CAS drift');
+        if (!fs.existsSync(servicePath)) replaceOwned(servicePath, serviceUnitBytes, { mode: 0o644, gid: 0 });
+        if (!fs.existsSync(timerPath)) replaceOwned(timerPath, timerUnitBytes, { mode: 0o644, gid: 0 });
+        run('/usr/bin/systemctl', ['daemon-reload']);
+      },
+      installNetwork: async hash => {
+        demand(networkPolicySha256 === hash, 'External network source changed');
+        const output = run('/usr/bin/python3', [`${CONTROL}/external-network-fence.py`, 'install'], { json: true });
+        validateExternalNetworkObservation(output); publish(`${dir}/network.json`, output);
+      },
+      writeSecretCAS: async (before, bytes) => { demand(optionalDigest(secretPath) === before && digest(bytes) === plan.secretSha256, 'External secret CAS drift');
+        replaceOwned(secretPath, bytes, { mode: 0o440, gid: 12042 }); },
+      writeGrantCAS: async (before, envelope) => { demand(optionalDigest(grantPath) === before && digest(envelope) === plan.grantEnvelopeSha256, 'External grant CAS drift');
+        replace(grantPath, Buffer.from(canonical(envelope)), 0o400); },
+      setTimer: async (before, after) => {
+        demand(canonical(externalTimer()) === canonical(before), 'External enrollment timer origin drift');
+        validateExternalEnrollmentApproval(plan, request.approvalEnvelope, publicKey);
+        if (before.active && !after.active) run('/usr/bin/systemctl', ['stop', after.unit]);
+        validateExternalEnrollmentApproval(plan, request.approvalEnvelope, publicKey);
+        if (before.enabled !== after.enabled) run('/usr/bin/systemctl', [after.enabled ? 'enable' : 'disable', after.unit]);
+        validateExternalEnrollmentApproval(plan, request.approvalEnvelope, publicKey);
+        if (externalTimer().active !== after.active) run('/usr/bin/systemctl', [after.active ? 'start' : 'stop', after.unit]);
+        demand(canonical(externalTimer()) === canonical(after), 'External enrollment timer effect did not persist');
+      },
+      publishPointer: async (id, receiptSha256) => {
+        const pointer = { contract: `${ENROLLMENT_CONTRACT}_POINTER`, operationId: id, receiptSha256 };
+        const file = `${root}/enrollment.json`, old = fs.existsSync(file) ? canonicalPrivateJSON(file) : null;
+        demand(old === null && plan.previousEnrollmentReceiptSha256 === null || canonical(old) === canonical(pointer) ||
+          old?.receiptSha256 === plan.previousEnrollmentReceiptSha256, 'External enrollment pointer CAS drift');
+        replace(file, Buffer.from(canonical(pointer)), 0o400);
+      },
+    };
+    console.log(canonical(await applyExternalEnrollment({ plan, approvalEnvelope: request.approvalEnvelope, context, adapters })));
   } else if (command === 'prepare-app-only') {
     demand(Object.keys(options).sort().join(',') === 'request', 'Exact app-only preparation request required');
     assertNoPending();
@@ -790,7 +1271,7 @@ if (command === 'help' || !command) {
     demand(request?.contract === 'LEETPLUS_COMPOSE_APP_PREPARATION_V2' &&
       Object.keys(request).sort().join(',') === ['contract', 'releaseSha', 'targetSlot', 'preparationGuard',
         'workerContinuation', 'backupReceiptSha256', 'rehearsalReceiptSha256',
-        'preparationEvidenceExpiresAt'].sort().join(','), 'App-only request fields are not exact');
+        'preparationEvidenceExpiresAt', ...(Object.hasOwn(request ?? {}, 'workerSetV3') ? ['workerSetV3'] : [])].sort().join(','), 'App-only request fields are not exact');
     demand(/^[a-f0-9]{40}$/.test(request.releaseSha ?? '') && ['blue', 'green'].includes(request.targetSlot) &&
       [request.backupReceiptSha256, request.rehearsalReceiptSha256].every(value => /^[a-f0-9]{64}$/.test(value ?? '')),
     'Invalid app-only request release/evidence binding');
@@ -830,6 +1311,7 @@ if (command === 'help' || !command) {
       rehearsalReceiptSha256: request.rehearsalReceiptSha256,
       preparationGuard: guard, preparationEvidenceExpiresAt: request.preparationEvidenceExpiresAt,
       workerContinuation: request.workerContinuation,
+      ...(Object.hasOwn(request, 'workerSetV3') ? { workerSetV3: request.workerSetV3 } : {}),
       secretDigests: Object.fromEntries(['acceptance.json', 'api-blue.json', 'api-green.json', 'db-ca.pem'].map(leaf => [leaf, digest(safeFile(`${ROOT}/secrets/${leaf}`))])),
       networkPolicySha256: digest(safeFile('/etc/leetplus-compose/providers.json')),
       databaseIdentitySha256: digest(databaseIdentity()),
@@ -845,6 +1327,7 @@ if (command === 'help' || !command) {
       publicKey: safeFile('/etc/leetplus-compose/approval-root.pem'), current: previous,
       hostIdentitySha256, profiles, now,
     });
+    const externalProfile = validateExternalPreimage(plan, previous, profiles, now);
     for (const binding of policy.originalTimers) {
       const timer = workerTimer(binding.unit);
       demand(timer.enabled === binding.enabled && timer.active === binding.active,
@@ -863,6 +1346,7 @@ if (command === 'help' || !command) {
       demand(digest(bytes) === binding.profileSha256, 'Worker profile drift during app-only preparation');
       publishPrivateBytes(`${stagedDir}/worker-profile-${binding.worker}.json`, bytes);
     }
+    if (externalProfile) publishPrivateBytes(`${stagedDir}/worker-profile-${plan.workerSetV3.external.worker}.json`, externalProfile);
     publish(`${stagedDir}/plan.json`, plan);
     fs.renameSync(stagedDir, dir);
     syncDir(`${STATE}/preparation-staging`); syncDir(`${STATE}/operations`);
@@ -891,6 +1375,7 @@ if (command === 'help' || !command) {
         publicKey: safeFile('/etc/leetplus-compose/approval-root.pem'), current: previous,
         hostIdentitySha256: plan.hostIdentitySha256, profiles, now: Date.now(),
       });
+      validateExternalPreimage(plan, previous, profiles);
       for (const binding of policy.originalTimers) {
         const timer = workerTimer(binding.unit);
         demand(timer.enabled === binding.enabled && timer.active === binding.active,
@@ -909,6 +1394,12 @@ if (command === 'help' || !command) {
         demand(digest(bytes) === binding.profileSha256, 'Worker profile drift during native preparation');
         publishPrivateBytes(`${stagedDir}/worker-profile-${binding.worker}.json`, bytes);
       }
+    }
+    if (plan.workerSetV3?.external.preimage === 'PRESENT') {
+      const external = plan.workerSetV3.external;
+      const bytes = safeFile(`${ROOT}/secrets/${external.worker}.json`);
+      demand(digest(bytes) === external.profileSha256, 'External worker profile changed before native preparation');
+      publishPrivateBytes(`${stagedDir}/worker-profile-${external.worker}.json`, bytes);
     }
     publish(`${stagedDir}/plan.json`, plan);
     fs.renameSync(stagedDir, dir);
@@ -998,6 +1489,143 @@ if (command === 'help' || !command) {
     const receipt = { grantId: grant.id, activeGeneration: current.generation, releaseSha: grant.releaseSha, worker: name, completedAt: new Date().toISOString(), containerId: observed.Id, outputSha256: digest(output), decision: 'PASS' };
     publish(`${dir}/${key}.receipt.json`, receipt);
     console.log(canonical(receipt));
+  } else if (command === 'external-worker-run') {
+    demand(Object.keys(options).length === 0, 'External worker run takes no caller-supplied scope');
+    const name = 'langame-external-daily-worker', runRoot = `${STATE}/external-worker-runs`;
+    const tickStarted = Date.now();
+    const externalGrantPath = `${STATE}/worker-grants/${name}.json`, externalSecretPath = `${ROOT}/secrets/${name}.json`;
+    const authority = async () => {
+      const current = active(); demand(current, 'No accepted external worker application');
+      const dir = operation(current.operationId), plan = readJSON(`${dir}/plan.json`, { immutable: true });
+      demand(current.planSha256 === digest(plan) && current[current.activeSlot]?.externalWorkerCapability === 'LANGAME_EXTERNAL_SET1_V1',
+        'External worker active release/plan is not capable');
+      const history = await storeFor(dir).read();
+      demand(current.outcome === 'ROLLED_BACK' ? Boolean(history.rolledBack) : Boolean(history.final && history.records.POSTCHECK?.receipt),
+        'External worker application lacks accepted native terminal');
+      if (plan.workerContinuation?.contract === WORKER_CONTINUATION_V2) await acceptedWorkerContinuation(workerContinuationArguments(plan, dir, current),
+        current.outcome === 'ROLLED_BACK' ? 'ROLLBACK' : 'FORWARD');
+      attestAdmittedRelease(current.dataRelease, current.dataAdmissionSha256);
+      assertPrimaryDatabase(plan.databaseIdentitySha256);
+      return { current, publicKey: externalWorkerPublicKey(), hostIdentitySha256: hostIdentity(),
+        secretBytes: safeFile(externalSecretPath), grantEnvelope: canonicalPrivateJSON(externalGrantPath) };
+    };
+    const adapters = {
+      assertLocks: async () => verifyKernelControlLocks({ mode: 'READ', singleton: name }, {
+        globalLock: fs.lstatSync(`${STATE}/control.lock`), singletonLock: fs.lstatSync(`${STATE}/${name}.lock`),
+        locks: fs.readFileSync('/proc/locks', 'utf8'), parentPid: process.ppid,
+        outerPid: fs.readFileSync(`/proc/${process.ppid}/status`, 'utf8').match(/^PPid:\s+(\d+)$/m)?.[1] }),
+      attestAccepted: authority,
+      attestEnrollment: async ({ current, secretBytes, grantEnvelope }) => {
+        const enrollment = acceptedExternalEnrollment();
+        demand(enrollment.plan.worker === name && enrollment.originalSecret.equals(secretBytes) &&
+          enrollment.plan.mode === grantEnvelope.grant.mode,
+        'External worker enrollment/profile/mode drift');
+        const timer = externalTimer();
+        demand(timer.loadState === 'loaded' &&
+          (grantEnvelope.grant.mode === 'TIMER' ? timer.enabled && timer.active : !timer.enabled && !timer.active),
+        'External worker timer is not in an accepted enrolled state');
+        demand(current[current.activeSlot].externalWorkerCapability === 'LANGAME_EXTERNAL_SET1_V1', 'External worker image capability disappeared');
+      },
+      verifyNetwork: async () => {
+        run('/usr/bin/python3', [`${CONTROL}/network-fence.py`, 'verify']);
+        const output = run('/usr/bin/python3', [`${CONTROL}/external-network-fence.py`, 'verify'], { json: true });
+        validateExternalNetworkObservation(output);
+      },
+      readPriorRun: async identity => fs.existsSync(`${runRoot}/${identity}.intent.json`) ? canonicalPrivateJSON(`${runRoot}/${identity}.intent.json`) : null,
+      assertNoAmbiguousDate: async () => {
+        if (!fs.existsSync(runRoot)) return;
+        for (const leaf of fs.readdirSync(runRoot).filter(leaf => leaf.endsWith('.intent.json'))) {
+          demand(/^[a-f0-9-]{36}\.intent\.json$/.test(leaf), 'Untrusted external run intent name');
+          const prior = canonicalPrivateJSON(`${runRoot}/${leaf}`);
+          demand(prior?.contract === 'LEETPLUS_LANGAME_EXTERNAL_NATIVE_RUN_V1_INTENT', 'Unknown external run intent contract');
+          const identity = leaf.slice(0, -'.intent.json'.length);
+          demand(fs.existsSync(`${runRoot}/${identity}.receipt.json`), 'Prior external run intent has no terminal; no blind provider retry');
+        }
+      },
+      publishRun: async (identity, type, value) => {
+        demand(/^[a-f0-9-]{36}$/.test(identity) && ['compose', 'intent', 'result', 'receipt'].includes(type), 'External run publication escaped scope');
+        directory(runRoot); publish(`${runRoot}/${identity}.${type}.json`, value);
+      },
+      createStopped: async (spec, intent) => {
+        const existing = docker(['ps', '--all', '--filter', `name=^/leetplus-${name}$`, '--format', '{{.ID}}']);
+        if (existing) {
+          const prior = docker(['inspect', `leetplus-${name}`], { json: true })[0];
+          demand(prior.Config.Labels?.['ru.leetplus.contract'] === CONTRACT && prior.Config.Labels?.['com.docker.compose.project'] === 'leetplus' &&
+            !prior.State.Running && prior.State.Pid === 0, 'Existing external worker container is not a stopped owned instance');
+        }
+        docker(['compose', '--project-name', 'leetplus', '--file', `${runRoot}/${intent.identity}.compose.json`, '--profile', 'external-workers',
+          'up', '--no-start', '--no-deps', '--force-recreate', name]);
+      },
+      verifyStopped: async spec => {
+        const service = spec.services[name], imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
+        verifyContainer(docker(['inspect', service.container_name], { json: true })[0], service, name, { beforeStart: true, imageEnvironment });
+      },
+      freezeContainer: async (spec, intent) => {
+        demand(Date.now() - tickStarted < 300000, 'External worker pre-start budget exhausted before provider effect');
+        const service = spec.services[name], item = docker(['inspect', service.container_name], { json: true })[0];
+        const imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
+        verifyContainer(item, service, name, { beforeStart: true, imageEnvironment });
+        const record = { contract: `${EXTERNAL_CLEANUP_CONTRACT}_CONTAINER`, identity: intent.identity,
+          intentSha256: digest(intent), composeSha256: digest(spec), containerId: item.Id,
+          image: service.image, name: service.container_name };
+        publish(`${runRoot}/${intent.identity}.container.json`, record);
+        replace(`${runRoot}/active.json`, Buffer.from(canonical({ contract: `${EXTERNAL_CLEANUP_CONTRACT}_POINTER`,
+          identity: intent.identity, containerRecordSha256: digest(record) })), 0o400);
+        return item.Id;
+      },
+      startAttached: async (frozenId, intent) => {
+        demand(Date.now() - tickStarted < 300000, 'External worker pre-start budget exhausted before attached provider effect');
+        const original = docker(['inspect', frozenId], { json: true })[0];
+        const frozen = canonicalPrivateJSON(`${runRoot}/${intent.identity}.container.json`);
+        validateFrozenExternalContainer(frozen, intent, original, frozenId);
+        demand(!original.State.Running && original.State.Pid === 0 &&
+          original.Config.Labels?.['ru.leetplus.contract'] === CONTRACT &&
+          original.Config.Labels?.['com.docker.compose.project'] === 'leetplus', 'External run container preimage drift');
+        const result = spawnSync('/usr/bin/docker', ['--host', 'unix:///var/run/docker.sock', '--config', '/etc/leetplus-compose/docker-cli',
+          'start', '--attach', original.Id], { encoding: 'utf8', env: CLEAN_ENV, timeout: 2700000, maxBuffer: 4 * 1024 * 1024 });
+        if (result.error || result.signal !== null || ![0, 1, 75].includes(result.status)) {
+          docker(['stop', '--time', '120', original.Id], { timeout: 180000 });
+          const after = docker(['inspect', original.Id], { json: true })[0];
+          demand(!after.State.Running && after.State.Pid === 0, 'Ambiguous external worker did not stop; control effects remain fenced');
+          demand(false, 'External worker outcome is ambiguous; owned container stopped, preserve intent and reconcile without retry');
+        }
+        return { exitCode: result.status, stdout: result.stdout, containerId: frozenId };
+      },
+      inspectStopped: async frozenId => {
+        const item = docker(['inspect', frozenId], { json: true })[0];
+        demand(item.Id === frozenId, 'External stopped container ID drift');
+        return { running: item.State.Running, pid: item.State.Pid, exitCode: item.State.ExitCode, containerId: item.Id };
+      },
+    };
+    console.log(canonical(await runExternalWorker({ adapters })));
+  } else if (command === 'external-worker-cleanup') {
+    demand(Object.keys(options).length === 0, 'External worker cleanup takes no caller scope');
+    const runRoot = `${STATE}/external-worker-runs`, name = 'langame-external-daily-worker';
+    const read = (identity, type) => canonicalPrivateJSON(`${runRoot}/${identity}.${type}.json`);
+    const adapters = {
+      assertWorkerLocks: async () => verifyExternalCleanupSingletonLock({
+        singletonLock: fs.lstatSync(`${STATE}/${name}.lock`),
+        locks: fs.readFileSync('/proc/locks', 'utf8'), parentPid: process.ppid }),
+      readPointer: async () => fs.existsSync(`${runRoot}/active.json`) ? canonicalPrivateJSON(`${runRoot}/active.json`) : null,
+      readIntent: async id => read(id, 'intent'), readCompose: async id => read(id, 'compose'),
+      readContainerRecord: async id => read(id, 'container'),
+      inspectById: async id => {
+        const item = docker(['inspect', id], { json: true })[0];
+        return { raw: item, id: item.Id, name: item.Name.slice(1), image: item.Image,
+          running: item.State.Running, pid: item.State.Pid };
+      },
+      verifyOwned: async (observed, record, spec) => {
+        demand(observed.id === record.containerId && observed.name === record.name && observed.image === record.image &&
+          observed.raw.Config.Labels?.['ru.leetplus.contract'] === CONTRACT &&
+          observed.raw.Config.Labels?.['com.docker.compose.project'] === 'leetplus', 'Foreign container cannot be stopped by external cleanup');
+        const service = spec.services[name], imageEnvironment = docker(['image', 'inspect', service.image], { json: true })[0].Config.Env;
+        verifyContainer(observed.raw, service, name, { configurationOnly: true, imageEnvironment });
+      },
+      stopById: async id => { docker(['stop', '--time', '120', id], { timeout: 180000 }); },
+      readCleanupReceipt: async id => fs.existsSync(`${runRoot}/${id}.cleanup.json`) ? read(id, 'cleanup') : null,
+      publishCleanupReceipt: async (id, value) => publish(`${runRoot}/${id}.cleanup.json`, value),
+    };
+    console.log(canonical(await cleanupExternalWorker(adapters)));
   } else {
     demand(['apply', 'resume'].includes(command), 'Unknown command');
     const dir = operation(options.operation), plan = readJSON(`${dir}/plan.json`, { immutable: true });

@@ -50,6 +50,7 @@ with hard_deadline(0.8,root,python=sys.executable):
                 shutil.rmtree(root)
 
     def test_hanging_node_child_dies_with_host_process_group(self):
+        import fcntl
         root = Path(tempfile.mkdtemp(prefix='leetplus-deadline-child-', dir='/tmp')).resolve()
         lock = root / 'control.lock'
         lock.touch(mode=0o600)

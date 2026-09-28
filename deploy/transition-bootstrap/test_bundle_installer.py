@@ -182,6 +182,10 @@ class BundleInstallerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'key domains collapse'):
             validate_enrollment_chain(enrollment_root, enrollment, self.deployment['publicKey'])
 
+        enrollment = rewrite_lineage(self.deployment['publicKey'].encode(), 'execution')
+        with self.assertRaisesRegex(ValueError, 'key domains collapse'):
+            validate_enrollment_chain(enrollment_root, enrollment, self.deployment['publicKey'])
+
     def test_separately_sourced_launcher_validates_full_chain_before_candidate_import(self):
         launcher_path = Path(__file__).resolve().parents[2] / 'docs' / 'deployment' / 'production-artifact' / \
             'trusted_predecessor_bootstrap_launcher.py'
@@ -201,11 +205,6 @@ class BundleInstallerTests(unittest.TestCase):
             launcher.verify_installed_bundle(final,
                 deployment_root=self.deployment_path, machine_id=self.machine,
                 source_inbox=self.source_root, node=TEST_NODE)
-
-        enrollment = rewrite_lineage(self.deployment['publicKey'].encode(), 'execution')
-        with self.assertRaisesRegex(ValueError, 'key domains collapse'):
-            validate_enrollment_chain(enrollment_root, enrollment, self.deployment['publicKey'])
-
 
 if __name__ == '__main__':
     unittest.main()

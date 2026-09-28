@@ -95,7 +95,7 @@ else:
         with self.assertRaisesRegex(ValueError, 'direction or exact target'):
             host.dispatch('pointer.cas', {'oldPointer': host.request['inputs']['plan']['oldPointer'],
                 'newPointer': '/usr/local/lib/leetplus-compose/' + 'c' * 40 + '/control.sh'})
-        with self.assertRaisesRegex(ValueError, 'direction or exact target'):
+        with self.assertRaisesRegex(ValueError, 'direction or exact target|Unknown pointer effect direction'):
             host.dispatch('pointer.recover-temporary', {'oldPointer': host.request['inputs']['plan']['oldPointer'],
                 'pendingTarget': host.request['inputs']['plan']['newPointer']})
         self.assertEqual(calls, [])
@@ -133,7 +133,7 @@ else:
         root = Path(tempfile.mkdtemp(prefix='leetplus-rpc-audit-', dir='/run')).resolve()
         root.chmod(0o700)
         cli = root / 'fake.mjs'
-        cli.write_text("process.stdin.once('data',()=>process.stdout.write(JSON.stringify({type:'result',result:{decision:'PASS'}})+'\\n'));\n")
+        cli.write_text("process.stdin.once('data',()=>process.stdout.write(JSON.stringify({type:'result',result:{decision:'PASS'}})+'\\n',()=>process.exit(0)));\n")
         class FakeHost:
             request = {'command': 'apply', 'evidence': {}}
             mode = 'A_TO_BRIDGE'

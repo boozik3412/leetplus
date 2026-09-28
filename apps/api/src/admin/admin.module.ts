@@ -5,6 +5,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
+import { ExternalLangameWorkerTenantService } from './external-langame-worker-tenant.service';
 import { FounderOperatorBetaActivationDatabaseService } from './founder-operator-beta-activation.database';
 import { FounderOperatorBetaActivationService } from './founder-operator-beta-activation.service';
 import { FounderOperatorBetaGoService } from './founder-operator-beta-go.service';
@@ -16,6 +17,7 @@ import { SharedTenantProvisioningService } from './shared-tenant-provisioning.se
   controllers: [AdminController],
   providers: [
     AdminService,
+    ExternalLangameWorkerTenantService,
     SharedTenantProvisioningService,
     FounderOperatorBetaGoService,
     FounderOperatorBetaActivationDatabaseService,

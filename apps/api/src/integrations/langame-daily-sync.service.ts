@@ -35,8 +35,16 @@ import {
   type GuestDataFoundationSyncResult,
 } from './guest-data-foundation.service';
 import { LangameSyncService } from './langame-sync.service';
+import { withExactExternalImportLock } from './langame-external-import-lock';
+import {
+  externalLangamePilotAllows,
+  externalLangameDataRequirements,
+  isLangameExternalPilotAuthority,
+  type LangameExternalPilotAuthority,
+} from './langame-external-pilot-authority';
 import {
   BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+  LANGAME_SYNC_PARTIAL_PREFIX,
   type BackgroundExecutionFencePendingReasonCode,
   type LangameSyncResult,
 } from './langame.types';
@@ -56,6 +64,8 @@ export type DailySyncInput = {
   date?: string;
   force?: boolean;
   tenantSlug?: string;
+  externalPilot?: LangameExternalPilotAuthority;
+  externalBusinessDate?: string;
 };
 
 type DailySyncScopeResult = {
@@ -63,6 +73,7 @@ type DailySyncScopeResult = {
   status: DailyDataCoverageStatus;
   skipped: boolean;
   inventoryRequested?: boolean;
+  partial?: boolean;
   errorMessage: string | null;
 };
 
@@ -88,6 +99,7 @@ class IncompleteDailyFactsScopeError extends Error {
     message: string,
     readonly sourceCounts: Record<string, unknown>,
     readonly summary: Record<string, unknown>,
+    readonly partial = false,
   ) {
     super(message);
   }
@@ -143,23 +155,77 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   async runDailySync(input: DailySyncInput = {}): Promise<DailySyncResult> {
-    const businessDate = input.date
-      ? this.parseBusinessDateInput(input.date)
+    return withExactExternalImportLock(
+      input.externalPilot?.tenantId ?? '',
+      () => this.runDailySyncOwned(input),
+    );
+  }
+
+  private async runDailySyncOwned(
+    input: DailySyncInput,
+  ): Promise<DailySyncResult> {
+    if (input.externalBusinessDate && !input.externalPilot) {
+      throw new BadRequestException(
+        'External business date requires worker authority',
+      );
+    }
+    if (
+      input.externalBusinessDate &&
+      input.date &&
+      input.externalBusinessDate !== input.date
+    ) {
+      throw new BadRequestException(
+        'External business date conflicts with canary date',
+      );
+    }
+    const requestedDate = input.externalBusinessDate ?? input.date;
+    const businessDate = requestedDate
+      ? this.parseBusinessDateInput(requestedDate)
       : this.previousBusinessDate(new Date());
     const dateInput = this.toDateInputValue(businessDate);
     const force = Boolean(input.force);
-    const includeCurrentInventory = !input.date;
+    const includeCurrentInventory = Boolean(input.externalPilot) || !input.date;
     const tenantSlug = input.tenantSlug?.trim();
     if (tenantSlug && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(tenantSlug)) {
       throw new BadRequestException('tenantSlug must be a lowercase slug');
     }
+    const externalPilot = input.externalPilot;
+    if (externalPilot && input.force) {
+      throw new BadRequestException(
+        'External worker cannot force or replay a daily effect',
+      );
+    }
+    if (
+      externalPilot &&
+      (!isLangameExternalPilotAuthority(
+        externalPilot,
+        externalPilot.tenantId,
+      ) ||
+        tenantSlug !== externalPilot.tenantSlug)
+    ) {
+      throw new BadRequestException(
+        'External Langame pilot tenant scope is invalid',
+      );
+    }
     const tenants = await this.findConfiguredTenants(tenantSlug);
+    if (
+      externalPilot &&
+      (tenants.length !== 1 || tenants[0].id !== externalPilot.tenantId)
+    ) {
+      throw new BadRequestException(
+        'External Langame pilot tenant is unavailable',
+      );
+    }
     const results: DailySyncTenantResult[] = [];
 
     for (const tenant of tenants) {
       const admission = await this.tenantExecutionAdmissionService.evaluate(
         tenant.id,
-        DAILY_SYNC_OUTBOUND_REQUIREMENTS,
+        externalPilot
+          ? externalLangameDataRequirements(
+              DAILY_SYNC_OUTBOUND_REQUIREMENTS.map(({ module }) => module),
+            )
+          : DAILY_SYNC_OUTBOUND_REQUIREMENTS,
       );
       if (!admission.allowed) {
         results.push(
@@ -177,7 +243,16 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
         stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
         jobKind: 'LANGAME_DAILY_SYNC',
       });
-      if (!backgroundExecution.allowed) {
+      if (
+        !backgroundExecution.allowed &&
+        !externalLangamePilotAllows(externalPilot, {
+          tenantId: tenant.id,
+          customerStage: admission.customerStage,
+          profileRevision: admission.entitlementProfileRevision,
+          executionRevision: admission.executionRevision,
+          jobKind: 'LANGAME_DAILY_SYNC',
+        })
+      ) {
         results.push(
           this.backgroundExecutionSkippedTenant({
             tenantId: tenant.id,
@@ -189,6 +264,33 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
+      if (externalPilot) {
+        const activeSync = await this.prisma.integrationSyncJob.findFirst({
+          where: {
+            tenantId: tenant.id,
+            provider: IntegrationProvider.LANGAME,
+            finishedAt: null,
+          },
+          select: { id: true },
+        });
+        if (activeSync) {
+          throw new BadRequestException(
+            'External worker cannot overlap an active Langame import',
+          );
+        }
+        if (
+          admission.customerStage !== externalPilot.customerStage ||
+          !admission.allowed
+        ) {
+          throw new BadRequestException(
+            'External Langame pilot admission changed',
+          );
+        }
+        await this.langameSyncService.assertExternalPilotBindings(
+          externalPilot,
+        );
+      }
+
       results.push(
         await this.runTenantDailySync({
           tenantId: tenant.id,
@@ -197,6 +299,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
           dateInput,
           force,
           includeCurrentInventory,
+          externalPilot,
         }),
       );
     }
@@ -247,15 +350,20 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     dateInput: string;
     force: boolean;
     includeCurrentInventory: boolean;
+    externalPilot?: LangameExternalPilotAuthority;
   }): Promise<DailySyncTenantResult> {
     const scopes: DailySyncScopeResult[] = [];
     let sourceFailed = false;
+
+    await this.assertExternalPilotCurrent(input.externalPilot);
 
     const businessFactsResult = await this.runBusinessFactsScope(input);
     scopes.push(businessFactsResult);
     sourceFailed =
       sourceFailed ||
       businessFactsResult.status === DailyDataCoverageStatus.FAILED;
+
+    await this.assertExternalPilotCurrent(input.externalPilot);
 
     const guestStaffResults = await this.runGuestAndStaffScopes(input);
     scopes.push(...guestStaffResults);
@@ -264,6 +372,8 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       guestStaffResults.some(
         (result) => result.status === DailyDataCoverageStatus.FAILED,
       );
+
+    await this.assertExternalPilotCurrent(input.externalPilot);
 
     const snapshotsResult = sourceFailed
       ? await this.skipBlockedSnapshotsScope(input)
@@ -281,6 +391,28 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       inventoryRequested: businessFactsResult.inventoryRequested === true,
       scopes,
     };
+  }
+
+  private async assertExternalPilotCurrent(
+    authority?: LangameExternalPilotAuthority,
+  ) {
+    if (!authority) return;
+    const admission = await this.tenantExecutionAdmissionService.assertAllowed(
+      authority.tenantId,
+      externalLangameDataRequirements(
+        DAILY_SYNC_OUTBOUND_REQUIREMENTS.map(({ module }) => module),
+      ),
+    );
+    if (
+      admission.customerStage !== authority.customerStage ||
+      admission.entitlementProfileRevision !== authority.profileRevision ||
+      admission.executionRevision !== authority.executionRevision
+    ) {
+      throw new BadRequestException(
+        'External Langame pilot execution revision changed',
+      );
+    }
+    await this.langameSyncService.assertExternalPilotBindings(authority);
   }
 
   private admissionSkippedTenant(input: {
@@ -352,18 +484,23 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     dateInput: string;
     force: boolean;
     includeCurrentInventory: boolean;
+    externalPilot?: LangameExternalPilotAuthority;
   }) {
     const scope = DailyDataCoverageScope.BUSINESS_FACTS;
-    const shouldRunQuick = await this.shouldRunScope(input, scope);
+    const shouldRunQuick = input.externalPilot
+      ? true
+      : await this.shouldRunScope(input, scope);
     const shouldRunInventory =
       input.includeCurrentInventory &&
-      (await this.shouldRunCurrentInventory(input.tenantId));
+      (Boolean(input.externalPilot) ||
+        (await this.shouldRunCurrentInventory(input.tenantId)));
 
     if (!shouldRunQuick) {
       if (shouldRunInventory) {
         return this.runCurrentInventoryWithoutChangingQuickCoverage(
           input.tenantId,
           scope,
+          input.externalPilot,
         );
       }
       return this.skippedScope(
@@ -375,52 +512,105 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     const quickScope = await this.runScope(input, scope, async () => {
-      const quick = await this.langameSyncService.syncTenantById(
-        input.tenantId,
-        {
+      let finalized = false;
+      let catalog: LangameSyncResult | null = null;
+      let quick: LangameSyncResult | null = null;
+      let inventory: LangameSyncResult | null = null;
+      try {
+        // Refresh product identities before resolving dated sales and stock.
+        // Category/club-price permission denials leave the goods that succeeded.
+        catalog = input.externalPilot
+          ? await this.langameSyncService.syncTenantById(
+              input.tenantId,
+              { mode: 'CATALOG', trigger: 'AUTO' },
+              'LANGAME_DAILY_SYNC',
+              input.externalPilot,
+            )
+          : null;
+        const quickQuery = {
           dateFrom: input.dateInput,
           dateTo: input.dateInput,
           mode: 'QUICK',
           trigger: 'AUTO',
-        },
-        'LANGAME_DAILY_SYNC',
-      );
+        } as const;
+        quick = input.externalPilot
+          ? await this.langameSyncService.syncTenantById(
+              input.tenantId,
+              quickQuery,
+              'LANGAME_DAILY_SYNC',
+              input.externalPilot,
+            )
+          : await this.langameSyncService.syncTenantById(
+              input.tenantId,
+              quickQuery,
+              'LANGAME_DAILY_SYNC',
+            );
 
-      const inventory = shouldRunInventory
-        ? await this.syncCurrentInventory(input.tenantId)
-        : null;
-      const sourceCounts = {
-        ...this.langameSourceCounts(quick),
-        quick: this.langameSourceCounts(quick),
-        inventory: inventory ? this.langameSourceCounts(inventory) : null,
-      };
-      const summary = {
-        ...this.langameSummary(quick),
-        quick: this.langameSummary(quick),
-        inventory: inventory
-          ? this.langameSummary(inventory)
-          : {
-              status: 'SKIPPED',
-              reason: input.includeCurrentInventory
-                ? 'RECENT_AUTO_INVENTORY_JOB'
-                : 'EXPLICIT_HISTORICAL_DATE',
-            },
-      };
+        inventory = shouldRunInventory
+          ? await this.syncCurrentInventory(input.tenantId, input.externalPilot)
+          : null;
+        const sourceCounts = {
+          ...this.langameSourceCounts(quick),
+          quick: this.langameSourceCounts(quick),
+          catalog: catalog ? this.langameSourceCounts(catalog) : null,
+          inventory: inventory ? this.langameSourceCounts(inventory) : null,
+        };
+        const summary = {
+          ...this.langameSummary(quick),
+          quick: this.langameSummary(quick),
+          catalog: catalog ? this.langameSummary(catalog) : null,
+          inventory: inventory
+            ? this.langameSummary(inventory)
+            : {
+                status: 'SKIPPED',
+                reason: input.includeCurrentInventory
+                  ? 'RECENT_AUTO_INVENTORY_JOB'
+                  : 'EXPLICIT_HISTORICAL_DATE',
+              },
+        };
 
-      const incomplete = [quick, inventory].some(
-        (result) =>
-          result !== null &&
-          (result.failedSources > 0 || result.partialSources > 0),
-      );
-      if (incomplete) {
-        throw new IncompleteDailyFactsScopeError(
-          'Langame daily facts source is incomplete',
-          sourceCounts,
-          summary,
+        const incomplete = [quick, catalog, inventory].some(
+          (result) =>
+            result !== null &&
+            (result.failedSources > 0 || result.partialSources > 0),
         );
-      }
+        if (input.externalPilot) {
+          await this.finalizeExternalBusinessSource(
+            input.externalPilot,
+            input.businessDate,
+            { quick, catalog, inventory },
+            incomplete,
+          );
+          finalized = true;
+        }
+        if (incomplete) {
+          throw new IncompleteDailyFactsScopeError(
+            'Langame daily facts source is incomplete',
+            sourceCounts,
+            summary,
+            [quick, catalog, inventory].every(
+              (result) => result === null || result.failedSources === 0,
+            ),
+          );
+        }
 
-      return { sourceCounts, summary };
+        return { sourceCounts, summary };
+      } catch (error) {
+        if (input.externalPilot && !finalized) {
+          await this.finalizeExternalBusinessSource(
+            input.externalPilot,
+            input.businessDate,
+            {
+              catalog,
+              quick: quick ?? this.emptyExternalFacts(input.tenantId),
+              inventory,
+            },
+            true,
+            true,
+          );
+        }
+        throw error;
+      }
     });
 
     return {
@@ -432,9 +622,13 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
   private async runCurrentInventoryWithoutChangingQuickCoverage(
     tenantId: string,
     scope: DailyDataCoverageScope,
+    externalPilot?: LangameExternalPilotAuthority,
   ) {
     try {
-      const inventory = await this.syncCurrentInventory(tenantId);
+      const inventory = await this.syncCurrentInventory(
+        tenantId,
+        externalPilot,
+      );
       this.assertCompleteLangameSources(inventory, 'Langame current inventory');
       return this.finishedScope(
         scope,
@@ -443,24 +637,158 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
         true,
       );
     } catch (error) {
+      const errorMessage = externalPilot
+        ? 'External Langame inventory is incomplete; inspect the source receipt.'
+        : this.errorMessage(error);
       return this.finishedScope(
         scope,
         DailyDataCoverageStatus.FAILED,
-        this.errorMessage(error),
+        errorMessage,
         true,
       );
     }
   }
 
-  private syncCurrentInventory(tenantId: string) {
-    return this.langameSyncService.syncTenantById(
-      tenantId,
-      {
-        mode: 'INVENTORY',
-        trigger: 'AUTO',
-      },
-      'LANGAME_DAILY_SYNC',
+  private async finalizeExternalBusinessSource(
+    authority: LangameExternalPilotAuthority,
+    businessDate: Date,
+    results: {
+      quick: LangameSyncResult;
+      catalog: LangameSyncResult | null;
+      inventory: LangameSyncResult | null;
+    },
+    incomplete: boolean,
+    forcedFailure = false,
+  ) {
+    await this.assertExternalPilotCurrent(authority);
+    const reads = [results.catalog, results.quick, results.inventory].filter(
+      (result): result is LangameSyncResult => result !== null,
     );
+    const failed =
+      forcedFailure || reads.some((result) => result.failedSources > 0);
+    const full =
+      !incomplete && results.catalog !== null && results.inventory !== null;
+    const errors = reads.flatMap((result) =>
+      result.sourceResults.flatMap((source) =>
+        source.errorMessage ? [source.errorMessage] : [],
+      ),
+    );
+    if (!results.inventory) {
+      errors.push('Текущие остатки в этом запуске не загружались.');
+    }
+    const errorMessage = full
+      ? null
+      : `${failed ? 'LANGAME_DAILY_SOURCE_FAILED' : LANGAME_SYNC_PARTIAL_PREFIX}: ${errors.join(' ')}`.slice(
+          0,
+          4_000,
+        );
+    await this.prisma.$transaction(async (tx) => {
+      const source = await tx.integrationSource.findUnique({
+        where: { id: authority.sourceId },
+        select: { lastSyncedDate: true },
+      });
+      if (!source) {
+        throw new BadRequestException('External worker source disappeared');
+      }
+      if (full) {
+        const lastSyncedDate =
+          source.lastSyncedDate && source.lastSyncedDate > businessDate
+            ? source.lastSyncedDate
+            : businessDate;
+        const updated = await tx.integrationSource.updateMany({
+          where: {
+            id: authority.sourceId,
+            tenantId: authority.tenantId,
+            domain: authority.externalDomain,
+            isActive: true,
+            lastSyncedDate: source.lastSyncedDate,
+            stores: {
+              some: {
+                id: authority.storeId,
+                isActive: true,
+                executionRevision: authority.storeRevision,
+                externalDomain: authority.externalDomain,
+                externalClubId: authority.externalClubId,
+              },
+            },
+            tenant: {
+              is: {
+                status: 'ACTIVE',
+                customerStage: authority.customerStage,
+                executionRevision: authority.executionRevision,
+                entitlementProfileRevision: authority.profileRevision,
+              },
+            },
+          },
+          data: { lastSyncedAt: new Date(), lastSyncedDate },
+        });
+        if (updated.count !== 1) {
+          throw new BadRequestException(
+            'External worker source cursor CAS changed',
+          );
+        }
+      }
+      await tx.integrationSyncJob.create({
+        data: {
+          tenantId: authority.tenantId,
+          integrationSourceId: authority.sourceId,
+          provider: IntegrationProvider.LANGAME,
+          domain: authority.externalDomain,
+          mode: IntegrationSyncMode.FULL,
+          trigger: IntegrationSyncTrigger.AUTO,
+          status: full
+            ? IntegrationSyncStatus.SUCCESS
+            : IntegrationSyncStatus.FAILED,
+          finishedAt: new Date(),
+          storesCount: Math.max(...reads.map((result) => result.stores ?? 0)),
+          productsCount: results.catalog?.products ?? 0,
+          inventoryCount: results.inventory?.inventorySnapshots ?? 0,
+          salesCount: results.quick.salesFacts ?? 0,
+          discrepancyCount: reads.reduce(
+            (sum, result) => sum + (result.discrepancies ?? 0),
+            0,
+          ),
+          errorMessage,
+        },
+      });
+    });
+  }
+
+  private emptyExternalFacts(tenantId: string): LangameSyncResult {
+    return {
+      tenantId,
+      sources: 1,
+      failedSources: 1,
+      partialSources: 0,
+      stores: 0,
+      products: 0,
+      productGroups: 0,
+      productConfigurations: 0,
+      inventorySnapshots: 0,
+      salesFacts: 0,
+      clubRevenueFacts: 0,
+      discrepancies: 0,
+      sourceResults: [],
+    };
+  }
+
+  private syncCurrentInventory(
+    tenantId: string,
+    externalPilot?: LangameExternalPilotAuthority,
+  ) {
+    const query = { mode: 'INVENTORY', trigger: 'AUTO' } as const;
+    return externalPilot
+      ? this.langameSyncService.syncTenantById(
+          tenantId,
+          query,
+          'LANGAME_DAILY_SYNC',
+          externalPilot,
+        )
+      : this.langameSyncService.syncTenantById(
+          tenantId,
+          query,
+          'LANGAME_DAILY_SYNC',
+        );
   }
 
   private assertCompleteLangameSources(
@@ -511,6 +839,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     businessDate: Date;
     dateInput: string;
     force: boolean;
+    externalPilot?: LangameExternalPilotAuthority;
   }): Promise<DailySyncScopeResult[]> {
     const guestScope = DailyDataCoverageScope.GUEST_FOUNDATION;
     const staffScope = DailyDataCoverageScope.STAFF_SHIFTS;
@@ -527,22 +856,45 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     ]);
 
     try {
-      const result = await this.guestDataFoundationService.syncTenantById(
-        input.tenantId,
-        {
-          dateFrom: input.dateInput,
-          dateTo: input.dateInput,
-          includeGuestLogs: true,
-          includeOperationLog: true,
-          includeCashTransactions: true,
-          includeWorkingShifts: true,
-        },
-        'OUTBOUND',
-      );
+      const guestQuery = {
+        dateFrom: input.dateInput,
+        dateTo: input.dateInput,
+        includeGuestLogs: true,
+        includeOperationLog: true,
+        includeCashTransactions: true,
+        includeWorkingShifts: true,
+      };
+      const result = input.externalPilot
+        ? await this.guestDataFoundationService.syncTenantById(
+            input.tenantId,
+            guestQuery,
+            'OUTBOUND',
+            input.externalPilot,
+          )
+        : await this.guestDataFoundationService.syncTenantById(
+            input.tenantId,
+            guestQuery,
+            'OUTBOUND',
+          );
 
       if (result.failedSources > 0 || result.partialSources > 0) {
-        throw new Error(
+        throw new IncompleteDailyFactsScopeError(
           `Langame guest foundation sync incomplete: failed=${result.failedSources}, partial=${result.partialSources}`,
+          this.guestFoundationCounts(result),
+          this.guestFoundationSummary(result),
+          result.failedSources === 0 &&
+            result.sourceResults.length === result.sources &&
+            result.sourceResults.every(
+              (source) =>
+                source.status === 'SUCCESS' ||
+                (source.status === 'PARTIAL' &&
+                  Object.keys(source.endpointErrors).length > 0 &&
+                  Object.values(source.endpointErrors).every(
+                    (message) =>
+                      message ===
+                      'Langame не предоставил доступ к этому разделу.',
+                  )),
+            ),
         );
       }
 
@@ -564,30 +916,55 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
         this.finishedScope(staffScope, DailyDataCoverageStatus.SUCCESS),
       ];
     } catch (error) {
-      const errorMessage = this.errorMessage(error);
+      const incomplete =
+        error instanceof IncompleteDailyFactsScopeError ? error : null;
+      const errorMessage =
+        input.externalPilot && !incomplete
+          ? 'External Langame guest foundation failed; inspect the source receipt.'
+          : this.errorMessage(error);
 
       await Promise.all([
         this.markCoverageFinished(input, guestScope, {
           status: DailyDataCoverageStatus.FAILED,
+          ...(incomplete
+            ? {
+                sourceCounts: incomplete.sourceCounts,
+                summary: {
+                  ...incomplete.summary,
+                  partial: incomplete.partial,
+                },
+              }
+            : {}),
           errorMessage,
         }),
         this.markCoverageFinished(input, staffScope, {
           status: DailyDataCoverageStatus.FAILED,
+          ...(incomplete
+            ? {
+                summary: { ...incomplete.summary, partial: incomplete.partial },
+              }
+            : {}),
           errorMessage,
         }),
       ]);
 
       return [
-        this.finishedScope(
-          guestScope,
-          DailyDataCoverageStatus.FAILED,
-          errorMessage,
-        ),
-        this.finishedScope(
-          staffScope,
-          DailyDataCoverageStatus.FAILED,
-          errorMessage,
-        ),
+        {
+          ...this.finishedScope(
+            guestScope,
+            DailyDataCoverageStatus.FAILED,
+            errorMessage,
+          ),
+          partial: incomplete?.partial ?? false,
+        },
+        {
+          ...this.finishedScope(
+            staffScope,
+            DailyDataCoverageStatus.FAILED,
+            errorMessage,
+          ),
+          partial: incomplete?.partial ?? false,
+        },
       ];
     }
   }
@@ -597,6 +974,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     businessDate: Date;
     dateInput: string;
     force: boolean;
+    externalPilot?: LangameExternalPilotAuthority;
   }) {
     const scope = DailyDataCoverageScope.BUSINESS_SNAPSHOTS;
 
@@ -605,15 +983,23 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     return this.runScope(input, scope, async () => {
-      const result = await this.businessSnapshotService.runSnapshotsForTenant(
-        input.tenantId,
-        {
-          type: 'ALL',
-          dateFrom: input.dateInput,
-          dateTo: input.dateInput,
-        },
-        'OUTBOUND',
-      );
+      const snapshotQuery = {
+        type: 'ALL' as const,
+        dateFrom: input.dateInput,
+        dateTo: input.dateInput,
+      };
+      const result = input.externalPilot
+        ? await this.businessSnapshotService.runSnapshotsForTenant(
+            input.tenantId,
+            snapshotQuery,
+            'OUTBOUND',
+            input.externalPilot,
+          )
+        : await this.businessSnapshotService.runSnapshotsForTenant(
+            input.tenantId,
+            snapshotQuery,
+            'OUTBOUND',
+          );
       const failedRuns = result.runs.filter((run) => run.status === 'FAILED');
 
       if (failedRuns.length > 0) {
@@ -664,6 +1050,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       businessDate: Date;
       dateInput: string;
       force: boolean;
+      externalPilot?: LangameExternalPilotAuthority;
     },
     scope: DailyDataCoverageScope,
     task: () => Promise<{
@@ -683,25 +1070,31 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
 
       return this.finishedScope(scope, DailyDataCoverageStatus.SUCCESS);
     } catch (error) {
-      const errorMessage = this.errorMessage(error);
       const incomplete =
         error instanceof IncompleteDailyFactsScopeError ? error : null;
+      const errorMessage =
+        input.externalPilot && !incomplete
+          ? 'External Langame daily scope failed; inspect the source receipt.'
+          : this.errorMessage(error);
       await this.markCoverageFinished(input, scope, {
         status: DailyDataCoverageStatus.FAILED,
         ...(incomplete
           ? {
               sourceCounts: incomplete.sourceCounts,
-              summary: incomplete.summary,
+              summary: { ...incomplete.summary, partial: incomplete.partial },
             }
           : {}),
         errorMessage,
       });
 
-      return this.finishedScope(
-        scope,
-        DailyDataCoverageStatus.FAILED,
-        errorMessage,
-      );
+      return {
+        ...this.finishedScope(
+          scope,
+          DailyDataCoverageStatus.FAILED,
+          errorMessage,
+        ),
+        partial: incomplete?.partial ?? false,
+      };
     }
   }
 

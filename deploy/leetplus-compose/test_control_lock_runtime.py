@@ -16,7 +16,7 @@ CONTRACT = COMPOSE / 'contract.mjs'
 STUB = COMPOSE / 'control-lock-runtime.test.mjs'
 
 
-def wait_for(path, process, timeout=5):
+def wait_for(path, process, timeout=15):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if path.exists():

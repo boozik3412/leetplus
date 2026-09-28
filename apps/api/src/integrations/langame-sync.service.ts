@@ -29,6 +29,15 @@ import {
 } from '../tenancy/tenant-background-execution-policy';
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import { LangameClient } from './langame.client';
+import {
+  assertExactExternalImportLockHeld,
+  withExactExternalImportLock,
+} from './langame-external-import-lock';
+import {
+  externalLangamePilotAllows,
+  isLangameExternalPilotAuthority,
+  type LangameExternalPilotAuthority,
+} from './langame-external-pilot-authority';
 import { LangameSettingsService } from './langame-settings.service';
 import {
   BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
@@ -87,6 +96,7 @@ type ProductSyncRef = {
 type StoreSyncRef = {
   id: string;
   name: string;
+  executionRevision?: number;
 };
 
 type ResolvedSyncPeriod = {
@@ -232,6 +242,23 @@ export class LangameSyncService {
     backgroundJobKind:
       | 'LANGAME_SCHEDULED_SYNC'
       | 'LANGAME_DAILY_SYNC' = 'LANGAME_SCHEDULED_SYNC',
+    externalPilot?: LangameExternalPilotAuthority,
+  ): Promise<LangameSyncResult> {
+    return withExactExternalImportLock(tenantId, () =>
+      this.syncTenantByIdOwned(
+        tenantId,
+        query,
+        backgroundJobKind,
+        externalPilot,
+      ),
+    );
+  }
+
+  private async syncTenantByIdOwned(
+    tenantId: string,
+    query: LangameSyncQuery,
+    backgroundJobKind: 'LANGAME_SCHEDULED_SYNC' | 'LANGAME_DAILY_SYNC',
+    externalPilot?: LangameExternalPilotAuthority,
   ): Promise<LangameSyncResult> {
     const executionAction =
       query.trigger === 'AUTO' ? ('OUTBOUND' as const) : ('WRITE' as const);
@@ -242,12 +269,36 @@ export class LangameSyncService {
         action: executionAction,
       })),
     );
+    if (
+      externalPilot &&
+      (executionAction !== 'OUTBOUND' ||
+        !externalLangamePilotAllows(externalPilot, {
+          tenantId,
+          customerStage: admission.customerStage,
+          profileRevision: admission.entitlementProfileRevision,
+          executionRevision: admission.executionRevision,
+          jobKind: backgroundJobKind,
+        }))
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame pilot admission changed',
+      );
+    }
     if (executionAction === 'OUTBOUND') {
       const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
         stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
         jobKind: backgroundJobKind,
       });
-      if (!backgroundExecution.allowed) {
+      if (
+        !backgroundExecution.allowed &&
+        !externalLangamePilotAllows(externalPilot, {
+          tenantId,
+          customerStage: admission.customerStage,
+          profileRevision: admission.entitlementProfileRevision,
+          executionRevision: admission.executionRevision,
+          jobKind: backgroundJobKind,
+        })
+      ) {
         throw new ServiceUnavailableException({
           reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
           message: tenantBackgroundExecutionNote(backgroundExecution),
@@ -257,10 +308,30 @@ export class LangameSyncService {
     const requestedPeriod = this.resolvePeriod(query);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
+    if (externalPilot) {
+      if (
+        !isLangameExternalPilotAuthority(externalPilot, tenantId) ||
+        sources.length !== 1 ||
+        sources[0].id !== externalPilot.sourceId ||
+        sources[0].domain !== externalPilot.externalDomain
+      ) {
+        throw new ServiceUnavailableException(
+          'External Langame pilot source changed',
+        );
+      }
+    }
     const externalSourceScopes =
       admission.customerStage === TenantCustomerStage.INTERNAL
         ? null
-        : await this.resolveExternalSourceScopes(tenantId, sources, apiKey);
+        : await this.resolveExternalSourceScopes(
+            tenantId,
+            sources,
+            apiKey,
+            externalPilot,
+          );
+    if (externalPilot) {
+      this.assertExactPilotScope(externalSourceScopes, externalPilot);
+    }
     const result: LangameSyncResult = {
       tenantId,
       sources: sources.length,
@@ -354,8 +425,10 @@ export class LangameSyncService {
       // Only the provider read belongs in this catch. Persistence and tenant
       // admission must never be reclassified as an optional provider failure.
       const readSection: SectionReader = async (component, request, clubId) => {
+        await this.assertExternalExecutionCurrent(externalPilot);
+        let rows: Awaited<ReturnType<typeof request>>;
         try {
-          return await request();
+          rows = await request();
         } catch (error) {
           const denied =
             error instanceof Error &&
@@ -379,6 +452,8 @@ export class LangameSyncService {
           // No raw provider response, key, URL parameters or payload in comments.
           return undefined;
         }
+        await this.assertExternalExecutionCurrent(externalPilot);
+        return rows;
       };
 
       try {
@@ -441,43 +516,53 @@ export class LangameSyncService {
             const externalStore = externalSourceScope?.storesByClubId.get(
               String(club.id),
             );
-            const store = externalStore
-              ? await this.prisma.store.update({
-                  where: { id: externalStore.id },
-                  data: {
-                    name: club.name,
-                    address: club.address,
-                    isActive: true,
-                    integrationSourceId: source.id,
-                  },
-                })
-              : await this.prisma.store.upsert({
-                  where: {
-                    tenantId_externalProvider_externalDomain_externalClubId: {
-                      tenantId,
-                      externalProvider: IntegrationProvider.LANGAME,
-                      externalDomain: source.domain,
-                      externalClubId: String(club.id),
-                    },
-                  },
-                  create: {
-                    tenantId,
-                    name: club.name,
-                    address:
-                      this.knownAddress(source.domain, club.id) ?? club.address,
-                    isActive: club.active === 1,
-                    externalProvider: IntegrationProvider.LANGAME,
-                    externalDomain: source.domain,
-                    externalClubId: String(club.id),
-                    integrationSourceId: source.id,
-                  },
-                  update: {
-                    address:
-                      this.knownAddress(source.domain, club.id) ?? club.address,
-                    isActive: club.active === 1,
-                    integrationSourceId: source.id,
-                  },
-                });
+            const store =
+              externalStore && externalPilot
+                ? await this.updateExternalWorkerStore(
+                    externalPilot,
+                    club.name,
+                    club.address,
+                  )
+                : externalStore
+                  ? await this.prisma.store.update({
+                      where: { id: externalStore.id },
+                      data: {
+                        name: club.name,
+                        address: club.address,
+                        isActive: true,
+                        integrationSourceId: source.id,
+                      },
+                    })
+                  : await this.prisma.store.upsert({
+                      where: {
+                        tenantId_externalProvider_externalDomain_externalClubId:
+                          {
+                            tenantId,
+                            externalProvider: IntegrationProvider.LANGAME,
+                            externalDomain: source.domain,
+                            externalClubId: String(club.id),
+                          },
+                      },
+                      create: {
+                        tenantId,
+                        name: club.name,
+                        address:
+                          this.knownAddress(source.domain, club.id) ??
+                          club.address,
+                        isActive: club.active === 1,
+                        externalProvider: IntegrationProvider.LANGAME,
+                        externalDomain: source.domain,
+                        externalClubId: String(club.id),
+                        integrationSourceId: source.id,
+                      },
+                      update: {
+                        address:
+                          this.knownAddress(source.domain, club.id) ??
+                          club.address,
+                        isActive: club.active === 1,
+                        integrationSourceId: source.id,
+                      },
+                    });
 
             result.stores += 1;
             sourceResult.stores += 1;
@@ -644,7 +729,7 @@ export class LangameSyncService {
         }
         // A partial read is not evidence that this source/period is complete.
         // Retain the full-success cursor, including after a later-page failure.
-        if (unavailable.length === 0)
+        if (unavailable.length === 0 && !externalPilot)
           await this.prisma.integrationSource.update({
             where: { id: source.id },
             data: {
@@ -679,8 +764,11 @@ export class LangameSyncService {
         if (sourceResult.status === 'PARTIAL') result.partialSources += 1;
         if (sourceResult.status === 'FAILED') result.failedSources += 1;
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown Langame sync error';
+        const errorMessage = externalPilot
+          ? 'External Langame source failed; inspect the worker receipt.'
+          : error instanceof Error
+            ? error.message
+            : 'Unknown Langame sync error';
         result.failedSources += 1;
         sourceResult.status = 'FAILED';
         sourceResult.errorMessage = errorMessage;
@@ -709,6 +797,7 @@ export class LangameSyncService {
     tenantId: string,
     sources: IntegrationSource[],
     apiKey: string,
+    externalPilot?: LangameExternalPilotAuthority,
   ): Promise<Map<string, ExternalSourceScope>> {
     const sourceIds = sources.map(({ id }) => id);
     const bindings = await this.prisma.store.findMany({
@@ -726,6 +815,7 @@ export class LangameSyncService {
         integrationSourceId: true,
         externalDomain: true,
         externalClubId: true,
+        executionRevision: true,
       },
     });
     const bindingsBySource = new Map<string, Map<string, StoreSyncRef>>();
@@ -751,6 +841,7 @@ export class LangameSyncService {
       storesByClubId.set(binding.externalClubId, {
         id: binding.id,
         name: binding.name,
+        executionRevision: binding.executionRevision,
       });
       bindingsBySource.set(source.id, storesByClubId);
     }
@@ -769,8 +860,25 @@ export class LangameSyncService {
         const storesByClubId = bindingsBySource.get(source.id)!;
         const allowedClubIds = new Set(storesByClubId.keys());
         const availableClubs = this.normalizeExternalClubs(
-          await this.langameClient.listClubs(source.baseUrl, apiKey),
+          await this.listClubsWithExternalFence(
+            source.baseUrl,
+            apiKey,
+            externalPilot,
+          ),
         );
+        if (
+          externalPilot &&
+          (availableClubs.filter((club) => club.active === 1).length !== 1 ||
+            !availableClubs.some(
+              (club) =>
+                club.active === 1 &&
+                String(club.id) === externalPilot.externalClubId,
+            ))
+        ) {
+          throw new ServiceUnavailableException(
+            'External Langame pilot requires the single confirmed active club',
+          );
+        }
         const selectedClubs: LangameClub[] = [];
         const seenClubIds = new Set<string>();
 
@@ -812,6 +920,165 @@ export class LangameSyncService {
     );
 
     return new Map(sourceScopes);
+  }
+
+  async assertExternalPilotBindings(authority: LangameExternalPilotAuthority) {
+    return withExactExternalImportLock(authority.tenantId, () =>
+      this.assertExternalPilotBindingsOwned(authority),
+    );
+  }
+
+  private async assertExternalPilotBindingsOwned(
+    authority: LangameExternalPilotAuthority,
+  ) {
+    if (!isLangameExternalPilotAuthority(authority, authority.tenantId)) {
+      throw new ServiceUnavailableException(
+        'External Langame pilot authority is missing',
+      );
+    }
+    const { apiKey, sources } =
+      await this.langameSettingsService.resolveTenantAccess(authority.tenantId);
+    if (
+      sources.length !== 1 ||
+      sources[0].id !== authority.sourceId ||
+      sources[0].domain !== authority.externalDomain
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame pilot source changed',
+      );
+    }
+    const scopes = await this.resolveExternalSourceScopes(
+      authority.tenantId,
+      sources,
+      apiKey,
+      authority,
+    );
+    this.assertExactPilotScope(scopes, authority);
+  }
+
+  private async listClubsWithExternalFence(
+    baseUrl: string,
+    apiKey: string,
+    authority?: LangameExternalPilotAuthority,
+  ) {
+    await this.assertExternalExecutionCurrent(authority);
+    const clubs = await this.langameClient.listClubs(baseUrl, apiKey);
+    await this.assertExternalExecutionCurrent(authority);
+    return clubs;
+  }
+
+  private async assertExternalExecutionCurrent(
+    authority?: LangameExternalPilotAuthority,
+  ) {
+    if (!authority) return;
+    await assertExactExternalImportLockHeld();
+    const admission = await this.tenantExecutionAdmissionService.assertAllowed(
+      authority.tenantId,
+      LANGAME_SYNC_MODULES.map((module) => ({ module, action: 'OUTBOUND' })),
+    );
+    if (
+      !externalLangamePilotAllows(authority, {
+        tenantId: authority.tenantId,
+        customerStage: admission.customerStage,
+        profileRevision: admission.entitlementProfileRevision,
+        executionRevision: admission.executionRevision,
+        jobKind: 'LANGAME_DAILY_SYNC',
+      })
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame worker admission changed',
+      );
+    }
+    const [source, store] = await Promise.all([
+      this.prisma.integrationSource.findUnique({
+        where: { id: authority.sourceId },
+        select: { tenantId: true, domain: true, isActive: true },
+      }),
+      this.prisma.store.findUnique({
+        where: { id: authority.storeId },
+        select: {
+          tenantId: true,
+          isActive: true,
+          externalProvider: true,
+          externalDomain: true,
+          externalClubId: true,
+          integrationSourceId: true,
+          executionRevision: true,
+        },
+      }),
+    ]);
+    if (
+      source?.tenantId !== authority.tenantId ||
+      source.domain !== authority.externalDomain ||
+      !source.isActive ||
+      store?.tenantId !== authority.tenantId ||
+      !store.isActive ||
+      store.externalProvider !== IntegrationProvider.LANGAME ||
+      store.externalDomain !== authority.externalDomain ||
+      store.externalClubId !== authority.externalClubId ||
+      store.integrationSourceId !== authority.sourceId ||
+      store.executionRevision !== authority.storeRevision
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame worker source or Store binding changed',
+      );
+    }
+  }
+
+  private async updateExternalWorkerStore(
+    authority: LangameExternalPilotAuthority,
+    name: string,
+    address: string | null,
+  ) {
+    await this.assertExternalExecutionCurrent(authority);
+    const updated = await this.prisma.store.updateMany({
+      where: {
+        id: authority.storeId,
+        tenantId: authority.tenantId,
+        isActive: true,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: authority.externalDomain,
+        externalClubId: authority.externalClubId,
+        integrationSourceId: authority.sourceId,
+        executionRevision: authority.storeRevision,
+        tenant: {
+          is: {
+            customerStage: authority.customerStage,
+            executionRevision: authority.executionRevision,
+            entitlementProfileRevision: authority.profileRevision,
+            status: 'ACTIVE',
+          },
+        },
+      },
+      data: { name, address },
+    });
+    if (updated.count !== 1) {
+      throw new ServiceUnavailableException(
+        'External worker Store CAS changed',
+      );
+    }
+    return { id: authority.storeId };
+  }
+
+  private assertExactPilotScope(
+    scopes: ReadonlyMap<string, ExternalSourceScope> | null,
+    authority: LangameExternalPilotAuthority,
+  ) {
+    const scope = scopes?.get(authority.sourceId);
+    if (
+      scopes?.size !== 1 ||
+      !scope ||
+      scope.allowedClubIds.size !== 1 ||
+      !scope.allowedClubIds.has(authority.externalClubId) ||
+      scope.storesByClubId.get(authority.externalClubId)?.id !==
+        authority.storeId ||
+      scope.storesByClubId.get(authority.externalClubId)?.executionRevision !==
+        authority.storeRevision
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame pilot Store binding changed',
+      );
+    }
   }
 
   private normalizeExternalClubs(payload: unknown): LangameClub[] {

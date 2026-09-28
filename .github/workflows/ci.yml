@@ -2273,6 +2273,12 @@ jobs:
         env:
           DESIGN_PARTNER_RUNTIME_ROLE_SMOKE_CONFIRM: run-design-partner-runtime-role-smoke
 
+      - name: Verify external Langame LIVE CAS and once-only worker ownership
+        run: pnpm --filter api test:integration:external-langame-worker:pg
+        env:
+          NODE_ENV: test
+          EXTERNAL_LANGAME_WORKER_PG_CONFIRM: run-external-langame-worker-disposable-ci-fixture
+
       - name: Verify AccessScope database invariants
         run: pnpm --filter database db:smoke:access-scope
         env:

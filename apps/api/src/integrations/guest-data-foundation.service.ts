@@ -38,6 +38,16 @@ import {
   type GuestIdentitySnapshotCandidate,
 } from './guest-identity-resolver.service';
 import { LangameClient } from './langame.client';
+import {
+  assertExactExternalImportLockHeld,
+  withExactExternalImportLock,
+} from './langame-external-import-lock';
+import {
+  externalLangamePilotAllows,
+  externalLangameDataRequirements,
+  isLangameExternalPilotAuthority,
+  type LangameExternalPilotAuthority,
+} from './langame-external-pilot-authority';
 import { parseLangameDate as parseLangameDateValue } from './langame-date';
 import {
   buildLangameTariffTypeGroupIndex,
@@ -323,10 +333,20 @@ type SourceProfile = {
   providerReadsSucceeded: number;
 };
 
+class ExternalGuestDataFenceError extends ServiceUnavailableException {
+  constructor() {
+    super('External Langame guest worker admission or Store binding changed');
+  }
+}
+
 @Injectable()
 export class GuestDataFoundationService {
   private readonly logger = new Logger(GuestDataFoundationService.name);
   private readonly activeBackgroundTenantSyncs = new Set<string>();
+  private readonly externalProfileAuthorities = new WeakMap<
+    SourceProfile,
+    LangameExternalPilotAuthority
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -404,17 +424,54 @@ export class GuestDataFoundationService {
     tenantId: string,
     query: GuestDataFoundationSyncQuery,
     executionAction: TenantExecutionAction = 'WRITE',
+    externalPilot?: LangameExternalPilotAuthority,
+  ): Promise<GuestDataFoundationSyncResult> {
+    return withExactExternalImportLock(tenantId, () =>
+      this.syncTenantByIdOwned(tenantId, query, executionAction, externalPilot),
+    );
+  }
+
+  private async syncTenantByIdOwned(
+    tenantId: string,
+    query: GuestDataFoundationSyncQuery,
+    executionAction: TenantExecutionAction,
+    externalPilot?: LangameExternalPilotAuthority,
   ): Promise<GuestDataFoundationSyncResult> {
     const admission = await this.assertExecutionAllowed(
       tenantId,
       executionAction,
+      externalPilot,
     );
+    if (
+      externalPilot &&
+      (executionAction !== 'OUTBOUND' ||
+        !externalLangamePilotAllows(externalPilot, {
+          tenantId,
+          customerStage: admission.customerStage,
+          profileRevision: admission.entitlementProfileRevision,
+          executionRevision: admission.executionRevision,
+          jobKind: 'LANGAME_GUEST_DATA_FOUNDATION',
+        }))
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame pilot admission changed',
+      );
+    }
     if (executionAction === 'OUTBOUND') {
       const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
         stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
         jobKind: 'LANGAME_GUEST_DATA_FOUNDATION',
       });
-      if (!backgroundExecution.allowed) {
+      if (
+        !backgroundExecution.allowed &&
+        !externalLangamePilotAllows(externalPilot, {
+          tenantId,
+          customerStage: admission.customerStage,
+          profileRevision: admission.entitlementProfileRevision,
+          executionRevision: admission.executionRevision,
+          jobKind: 'LANGAME_GUEST_DATA_FOUNDATION',
+        })
+      ) {
         throw new ServiceUnavailableException({
           reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
           message: tenantBackgroundExecutionNote(backgroundExecution),
@@ -422,9 +479,31 @@ export class GuestDataFoundationService {
       }
     }
 
-    await this.failStaleRunningRuns(tenantId);
+    if (externalPilot) await this.assertExactExternalStore(externalPilot);
+    if (!externalPilot) await this.failStaleRunningRuns(tenantId);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
+    if (
+      externalPilot &&
+      (!isLangameExternalPilotAuthority(externalPilot, tenantId) ||
+        sources.length !== 1 ||
+        sources[0].id !== externalPilot.sourceId ||
+        sources[0].domain !== externalPilot.externalDomain)
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame pilot source changed',
+      );
+    }
+    if (externalPilot) await this.failStaleRunningRuns(tenantId);
+    if (
+      externalPilot &&
+      (this.activeBackgroundTenantSyncs.has(tenantId) ||
+        (await this.findRunningRun(tenantId)))
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame guest worker cannot overlap an active guest import',
+      );
+    }
     const period = await this.resolvePeriod(tenantId, query);
     const result: GuestDataFoundationSyncResult = {
       tenantId,
@@ -475,6 +554,7 @@ export class GuestDataFoundationService {
           apiKey,
           period,
           query,
+          externalPilot,
         });
 
         const hasEndpointErrors =
@@ -509,7 +589,13 @@ export class GuestDataFoundationService {
         if (status === 'FAILED') result.failedSources += 1;
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : 'Guest sync failed';
+          error instanceof ExternalGuestDataFenceError
+            ? error.message
+            : externalPilot
+              ? 'External Langame guest source failed; inspect the worker receipt.'
+              : error instanceof Error
+                ? error.message
+                : 'Guest sync failed';
         result.failedSources += 1;
         sourceResult.status = 'FAILED';
         sourceResult.errorMessage = message;
@@ -689,6 +775,12 @@ export class GuestDataFoundationService {
   }
 
   async syncComputerCountsForTenant(tenantId: string) {
+    return withExactExternalImportLock(tenantId, () =>
+      this.syncComputerCountsForTenantOwned(tenantId),
+    );
+  }
+
+  private async syncComputerCountsForTenantOwned(tenantId: string) {
     await this.tenantExecutionAdmissionService.assertAllowed(tenantId, [
       { module: TenantModule.INTEGRATIONS, action: 'WRITE' },
       { module: TenantModule.ASSORTMENT, action: 'WRITE' },
@@ -727,10 +819,13 @@ export class GuestDataFoundationService {
   private assertExecutionAllowed(
     tenantId: string,
     action: TenantExecutionAction,
+    externalPilot?: LangameExternalPilotAuthority,
   ) {
     return this.tenantExecutionAdmissionService.assertAllowed(
       tenantId,
-      GUEST_FOUNDATION_MODULES.map((module) => ({ module, action })),
+      action === 'OUTBOUND' && externalPilot
+        ? externalLangameDataRequirements(GUEST_FOUNDATION_MODULES)
+        : GUEST_FOUNDATION_MODULES.map((module) => ({ module, action })),
     );
   }
 
@@ -951,14 +1046,34 @@ export class GuestDataFoundationService {
     apiKey: string;
     period: ResolvedPeriod;
     query: GuestDataFoundationSyncQuery;
+    externalPilot?: LangameExternalPilotAuthority;
   }) {
-    const { tenantId, baseUrl, domain, apiKey, period, query } = params;
+    const { tenantId, baseUrl, domain, apiKey, period, query, externalPilot } =
+      params;
     const profile = this.createEmptyProfile(period);
+    if (externalPilot)
+      this.externalProfileAuthorities.set(profile, externalPilot);
     const now = new Date();
     const snapshotDate = this.startOfUtcDay(now);
-    const storesByExternalClubId = await this.loadStoreLookup(tenantId, domain);
+    const storesByExternalClubId = await this.loadStoreLookup(
+      tenantId,
+      domain,
+      externalPilot,
+    );
     const sessionStoreCandidates =
       await this.loadSessionStoreCandidates(tenantId);
+    if (
+      externalPilot &&
+      (storesByExternalClubId.size !== 1 ||
+        storesByExternalClubId.get(externalPilot.externalClubId)?.id !==
+          externalPilot.storeId ||
+        sessionStoreCandidates.length !== 1 ||
+        sessionStoreCandidates[0].id !== externalPilot.storeId)
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame guest Store binding changed',
+      );
+    }
     const langamePeriod = this.toLangameDatePeriod(period);
 
     const pcTypesInClubs = await this.captureEndpoint(
@@ -979,6 +1094,7 @@ export class GuestDataFoundationService {
       pcTypesInClubs,
       pcTypeLinks,
       now,
+      externalPilot,
     );
     const tariffTypeGroups = buildLangameTariffTypeGroupIndex(
       await this.captureEndpoint(profile, 'tariffs/types_groups/list', () =>
@@ -1286,15 +1402,19 @@ export class GuestDataFoundationService {
     endpoint: string,
     load: () => Promise<T[]>,
   ) {
+    await this.assertExternalProfileCurrent(profile);
     profile.providerReadsAttempted += 1;
+    let rows: T[];
     try {
-      const rows = await load();
+      rows = await load();
       profile.providerReadsSucceeded += 1;
-      return rows;
     } catch (error) {
+      if (error instanceof ExternalGuestDataFenceError) throw error;
       this.recordEndpointError(profile, endpoint, error);
       return [];
     }
+    await this.assertExternalProfileCurrent(profile);
+    return rows;
   }
 
   private recordEndpointError(
@@ -1315,6 +1435,7 @@ export class GuestDataFoundationService {
     pcTypesInClubs: LangamePcTypeInClub[],
     pcTypeLinks: LangamePcTypeLink[],
     syncedAt: Date,
+    authority?: LangameExternalPilotAuthority,
   ) {
     const typeToClub = new Map<string, string>();
     const countByClub = new Map<string, number>();
@@ -1432,20 +1553,47 @@ export class GuestDataFoundationService {
     }
 
     const updates = await Promise.all(
-      Array.from(countByClub.entries()).map(([externalClubId, count]) =>
-        this.prisma.store.updateMany({
+      Array.from(countByClub.entries()).map(async ([externalClubId, count]) => {
+        if (authority && externalClubId !== authority.externalClubId) {
+          return { count: 0 };
+        }
+        if (authority) {
+          await assertExactExternalImportLockHeld();
+          await this.assertExactExternalStore(authority);
+        }
+        const updated = await this.prisma.store.updateMany({
           where: {
             tenantId,
             externalProvider: IntegrationProvider.LANGAME,
             externalDomain: domain,
             externalClubId,
+            ...(authority
+              ? {
+                  id: authority.storeId,
+                  integrationSourceId: authority.sourceId,
+                  isActive: true,
+                  executionRevision: authority.storeRevision,
+                  tenant: {
+                    is: {
+                      customerStage: authority.customerStage,
+                      executionRevision: authority.executionRevision,
+                      entitlementProfileRevision: authority.profileRevision,
+                      status: 'ACTIVE' as const,
+                    },
+                  },
+                }
+              : {}),
           },
           data: {
             computerCount: count,
             computerCountSyncedAt: syncedAt,
           },
-        }),
-      ),
+        });
+        if (authority && updated.count !== 1) {
+          throw new ExternalGuestDataFenceError();
+        }
+        return updated;
+      }),
     );
 
     return updates.reduce((sum, update) => sum + update.count, 0);
@@ -1463,8 +1611,12 @@ export class GuestDataFoundationService {
     const seenEmailHashes = new Set<string>();
     const duplicateEmailHashes = new Set<string>();
     const identityCandidates: GuestIdentitySnapshotCandidate[] = [];
+    let externalWriteCount = 0;
 
     for (const row of rows) {
+      if (externalWriteCount++ % DEFAULT_PAGE_LIMIT === 0) {
+        await this.assertExternalProfileCurrent(profile);
+      }
       const externalGuestId = this.toNullableString(row.guest_id);
       if (!externalGuestId) {
         continue;
@@ -1585,6 +1737,7 @@ export class GuestDataFoundationService {
       }
     }
 
+    await this.assertExternalProfileCurrent(profile);
     await this.guestIdentityResolver.reconcileDomainSnapshot({
       tenantId,
       externalProvider: IntegrationProvider.LANGAME,
@@ -2511,12 +2664,22 @@ export class GuestDataFoundationService {
     );
   }
 
-  private async loadStoreLookup(tenantId: string, domain: string) {
+  private async loadStoreLookup(
+    tenantId: string,
+    domain: string,
+    externalPilot?: LangameExternalPilotAuthority,
+  ) {
     const stores = await this.prisma.store.findMany({
       where: {
         tenantId,
         externalProvider: IntegrationProvider.LANGAME,
         externalDomain: domain,
+        ...(externalPilot
+          ? {
+              isActive: true,
+              integrationSourceId: externalPilot.sourceId,
+            }
+          : {}),
       },
       select: {
         id: true,
@@ -2533,6 +2696,37 @@ export class GuestDataFoundationService {
           { id: store.id, timeZone: store.timeZone },
         ]),
     );
+  }
+
+  private async assertExactExternalStore(
+    authority: LangameExternalPilotAuthority,
+  ) {
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId: authority.tenantId,
+        isActive: true,
+        externalProvider: IntegrationProvider.LANGAME,
+      },
+      select: {
+        id: true,
+        integrationSourceId: true,
+        externalDomain: true,
+        externalClubId: true,
+        executionRevision: true,
+      },
+    });
+    if (
+      stores.length !== 1 ||
+      stores[0].id !== authority.storeId ||
+      stores[0].integrationSourceId !== authority.sourceId ||
+      stores[0].externalDomain !== authority.externalDomain ||
+      stores[0].externalClubId !== authority.externalClubId ||
+      stores[0].executionRevision !== authority.storeRevision
+    ) {
+      throw new ServiceUnavailableException(
+        'External Langame guest Store binding changed',
+      );
+    }
   }
 
   private async loadSessionStoreCandidates(tenantId: string) {
@@ -2584,16 +2778,19 @@ export class GuestDataFoundationService {
     let page = 1;
 
     while (true) {
+      if (profile) await this.assertExternalProfileCurrent(profile);
       let pageRows: T[];
       try {
         pageRows = await fetchPage(page);
       } catch (error) {
+        if (error instanceof ExternalGuestDataFenceError) throw error;
         // Earlier pages remain usable, but this endpoint is not complete.
         // A first-page failure still belongs to captureEndpoint.
         if (rows.length === 0 || !profile || !endpoint) throw error;
         this.recordEndpointError(profile, endpoint, error);
         break;
       }
+      if (profile) await this.assertExternalProfileCurrent(profile);
       rows.push(...pageRows);
 
       if (pageRows.length < DEFAULT_PAGE_LIMIT) {
@@ -2604,6 +2801,32 @@ export class GuestDataFoundationService {
     }
 
     return rows;
+  }
+
+  private async assertExternalProfileCurrent(profile: SourceProfile) {
+    const authority = this.externalProfileAuthorities.get(profile);
+    if (!authority) return;
+    await assertExactExternalImportLockHeld();
+    try {
+      const admission = await this.assertExecutionAllowed(
+        authority.tenantId,
+        'OUTBOUND',
+        authority,
+      );
+      if (
+        !externalLangamePilotAllows(authority, {
+          tenantId: authority.tenantId,
+          customerStage: admission.customerStage,
+          profileRevision: admission.entitlementProfileRevision,
+          executionRevision: admission.executionRevision,
+          jobKind: 'LANGAME_GUEST_DATA_FOUNDATION',
+        })
+      )
+        throw new Error('External guest worker revision drift');
+      await this.assertExactExternalStore(authority);
+    } catch {
+      throw new ExternalGuestDataFenceError();
+    }
   }
 
   private async resolvePeriod(

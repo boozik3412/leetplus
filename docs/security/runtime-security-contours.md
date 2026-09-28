@@ -2,6 +2,32 @@
 
 Статус: **канонический current-state contract**, оперативный checkpoint **24.09.2026**.
 
+**External Langame worker source candidate 27.09:** владелец выбрал для EZ GAME
+стадию `LIVE`. В исходниках подготовлены отдельный CLI с exact tenant/source/Store
+и profile/execution/Store revisions, а также platform-admin prepare/apply/revoke
+для LIVE и минимального outbound. CLI не регистрирует HTTP controllers,
+reward/retention или общий
+external background grant. Ежедневное чтение включает товары, остатки,
+продажи, выручку и гостевые данные; отказ отдельного provider endpoint не
+обрывает независимые чтения. Это **не установленный worker**: generic
+entitlement endpoint отклоняет stage/outbound mutation, а действующий Compose
+controller знает только два worker grants и не имеет внешнего таймера.
+Фактический tenant остаётся `PILOT`, trial истёк, outbound выключен.
+Новый workflow в production не установлен; для LIVE/outbound нужны его приёмка,
+accepted controller successor,
+fresh production plan и direct GO через диспетчера. [Кандидат и ограничения](../deployment/langame-external-worker-pilot.md).
+
+Source repair после независимого review: один exact set-1/source/Store
+PostgreSQL advisory lock на отдельной session соединяет ручной business/guest
+import и новый worker до provider вызова. Вложенные worker scopes наследуют
+владение через async context; чужой tenant из этого контекста отклоняется.
+Транзакция БД не держится во время Langame HTTP. Для внешнего worker
+Prisma pool1 + lock session1 = два соединения, исходный INTERNAL worker pool2
+не меняется. Перед club discovery и между provider reads проверяются tenant,
+source/Store revisions; computer count пишет только exact активный Store по
+CAS. Signed LIVE workflow берёт row locks tenant/source/Store до проверки
+preimage. Это пока только source/CI candidate, не установленный runtime.
+
 **Source-only Langame follow-up 27.09:** ограниченные права provider считаются
 рабочим режимом ручного импорта: доступные разделы продолжают загружаться.
 Гостевые denial-, multi-club- и pagination-сценарии закрепляют сохранение

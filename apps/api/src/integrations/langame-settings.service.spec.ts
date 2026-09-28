@@ -1,6 +1,7 @@
 import type { ConfigService } from '@nestjs/config';
 import {
   IntegrationProvider,
+  IntegrationSyncMode,
   TenantCustomerStage,
   UserRole,
 } from '@prisma/client';
@@ -12,6 +13,7 @@ import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
 import { LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX } from './langame.types';
 import { SecretEncryptionService } from './secret-encryption.service';
+import { EZ_GAME_LANGAME_SCOPE } from './langame-external-pilot-authority';
 
 type PrismaMock = {
   tenant: {
@@ -405,6 +407,48 @@ describe('LangameSettingsService', () => {
         where: expect.objectContaining({ status: 'SUCCESS' }) as unknown,
       }),
     );
+  });
+
+  it('keeps the EZ GAME latest overall PARTIAL while later child scopes cannot certify full success', async () => {
+    tenantContext.resolve.mockReturnValue({
+      tenantId: EZ_GAME_LANGAME_SCOPE.tenantId,
+    });
+    const now = new Date();
+    prisma.integrationSyncJob.findMany.mockResolvedValue([
+      {
+        id: 'daily-full-aggregate',
+        domain: '1171.langame.ru',
+        status: 'FAILED',
+        mode: IntegrationSyncMode.FULL,
+        startedAt: now,
+        finishedAt: now,
+        errorMessage: 'LANGAME_SYNC_PARTIAL: Категории недоступны.',
+        discrepancyLogPath: null,
+      },
+      {
+        id: 'inventory-child',
+        domain: '1171.langame.ru',
+        status: 'SUCCESS',
+        mode: IntegrationSyncMode.INVENTORY,
+        startedAt: now,
+        finishedAt: now,
+        errorMessage: null,
+        discrepancyLogPath: null,
+      },
+    ]);
+    prisma.integrationSyncJob.findFirst.mockResolvedValue(null);
+    const result = await service.getSettings(user);
+    expect(result.syncJobs[0].status).toBe('PARTIAL');
+    expect(result.latestSuccessfulSyncJob).toBeNull();
+    expect(prisma.integrationSyncJob.findFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: EZ_GAME_LANGAME_SCOPE.tenantId,
+        provider: IntegrationProvider.LANGAME,
+        status: 'SUCCESS',
+        mode: { in: [IntegrationSyncMode.FULL, IntegrationSyncMode.BACKFILL] },
+      },
+      orderBy: { startedAt: 'desc' },
+    });
   });
 
   it('does not project an unmarked provider failure as partial success', async () => {

@@ -17,6 +17,7 @@ import {
   AdminService,
   type PlatformAdminAuditEventQuery,
 } from './admin.service';
+import { ExternalLangameWorkerTenantService } from './external-langame-worker-tenant.service';
 import { FounderOperatorBetaActivationService } from './founder-operator-beta-activation.service';
 import { FounderOperatorBetaGoService } from './founder-operator-beta-go.service';
 import { FounderOwnerInviteLifecycleService } from './founder-owner-invite-lifecycle.service';
@@ -28,6 +29,7 @@ export class AdminController {
   constructor(
     private readonly adminService: AdminService,
     private readonly tenantEntitlementProfileService: TenantEntitlementProfileService,
+    private readonly externalLangameWorkerTenantService: ExternalLangameWorkerTenantService,
     private readonly sharedTenantProvisioningService: SharedTenantProvisioningService,
     private readonly founderOperatorBetaGoService: FounderOperatorBetaGoService,
     private readonly founderOperatorBetaActivationService: FounderOperatorBetaActivationService,
@@ -165,6 +167,32 @@ export class AdminController {
     @Body() body: unknown,
   ) {
     return this.tenantEntitlementProfileService.replaceProfile(
+      user,
+      tenantId,
+      body ?? {},
+    );
+  }
+
+  @Post('tenants/:tenantId/external-langame-worker/prepare')
+  prepareExternalLangameWorkerTenant(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Body() body: { action?: unknown } | null,
+  ) {
+    return this.externalLangameWorkerTenantService.prepare(
+      user,
+      tenantId,
+      body?.action,
+    );
+  }
+
+  @Post('tenants/:tenantId/external-langame-worker/apply')
+  applyExternalLangameWorkerTenant(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Body() body: unknown,
+  ) {
+    return this.externalLangameWorkerTenantService.apply(
       user,
       tenantId,
       body ?? {},

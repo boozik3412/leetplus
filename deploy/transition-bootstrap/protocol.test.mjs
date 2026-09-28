@@ -17,6 +17,7 @@ import {
 import {
   MODES, EXECUTION_CONTRACT, ROLLBACK_CONTRACT, NO_EFFECT_CONTRACT, canonical, digest,
   prepare, apply, reconcile, rollback, reconcileRollback, terminalizeNoEffect,
+  validateNativePointerAuthority,
 } from './protocol.mjs';
 
 const NOW = Date.parse('2026-09-27T12:00:00.000Z');
@@ -286,4 +287,49 @@ test('historical reconciliation rejects forged intent, signature and foreign roo
   value.state.records.intent.authorizedAt = new Date(NOW + 3600_000).toISOString();
   await assert.rejects(reconcile(args), /expired/);
   assert.equal(value.state.records.receipt, undefined);
+});
+
+test('Python pointer fence uses exact permit/command schemas and bounded windows', async () => {
+  const value = fixture(), plan = await prepared(value), executionEnvelope = execution(value, plan);
+  const intent = { contract: 'LEETPLUS_PREDECESSOR_TRANSITION_BOOTSTRAP_V1_PLAN_INTENT',
+    operationId: plan.operationId, planSha256: digest(plan),
+    permitEnvelopeSha256: digest(value.permitEnvelope),
+    executionEnvelopeSha256: digest(executionEnvelope), oldPointer: plan.oldPointer,
+    newPointer: plan.newPointer, authorizedAt: new Date(NOW).toISOString() };
+  const request = { phase: 'FORWARD', recovery: false, plan,
+    permitEnvelope: value.permitEnvelope, permitRoot: value.permitKey.publicKey,
+    executionEnvelope, executionRoot: value.executionKey.publicKey,
+    intent, forwardReceipt: null, rollbackIntent: null,
+    rollbackEnvelope: null, rollbackRoot: keyPair().publicKey,
+    recoveryEnvelope: null, recoveryRoot: keyPair().publicKey };
+  assert.equal(validateNativePointerAuthority(request, { now: NOW }), true);
+  const wrongPermit = structuredClone(request);
+  wrongPermit.permitEnvelope.permit.contract = 'FOREIGN_PERMIT';
+  wrongPermit.permitEnvelope.signature = crypto.sign(null,
+    Buffer.from(canonical(wrongPermit.permitEnvelope.permit)),
+    value.permitKey.privateKey).toString('base64');
+  assert.throws(() => validateNativePointerAuthority(wrongPermit, { now: NOW }));
+  const wrongExecution = structuredClone(request);
+  wrongExecution.executionEnvelope.command.contract = 'FOREIGN_EXECUTION';
+  wrongExecution.executionEnvelope.signature = crypto.sign(null,
+    Buffer.from(canonical(wrongExecution.executionEnvelope.command)),
+    value.executionKey.privateKey).toString('base64');
+  assert.throws(() => validateNativePointerAuthority(wrongExecution, { now: NOW }));
+  const unbounded = structuredClone(request);
+  unbounded.executionEnvelope.command.expiresAt = new Date(NOW + 5 * 3600_000).toISOString();
+  unbounded.executionEnvelope.signature = crypto.sign(null,
+    Buffer.from(canonical(unbounded.executionEnvelope.command)),
+    value.executionKey.privateKey).toString('base64');
+  unbounded.intent.executionEnvelopeSha256 = digest(unbounded.executionEnvelope);
+  assert.throws(() => validateNativePointerAuthority(unbounded, { now: NOW }), /unbounded/);
+  const noEffectKey = keyPair();
+  const expiredRecovery = structuredClone(request);
+  expiredRecovery.recovery = true;
+  expiredRecovery.recoveryRoot = noEffectKey.publicKey;
+  expiredRecovery.recoveryEnvelope = sign({ contract: NO_EFFECT_CONTRACT,
+    operationId: plan.operationId, planSha256: digest(plan), phase: 'FORWARD',
+    intentSha256: digest(intent), forwardReceiptSha256: null,
+    effect: 'TERMINAL_RECORD_ONLY', issuedAt: new Date(NOW - 20_000).toISOString(),
+    expiresAt: new Date(NOW - 1).toISOString() }, noEffectKey);
+  assert.throws(() => validateNativePointerAuthority(expiredRecovery, { now: NOW }), /expired/);
 });

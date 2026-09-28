@@ -23,6 +23,23 @@ candidate: живой CLI/signer, установка, принятие на host
 по-прежнему отсутствуют; source не изменяет public guest/corporate/worker
 runtime и не даёт GO.
 
+**Source-only bootstrap CLI/signing follow-up 27.09:** дополнительная source
+ветка описывает только ограниченную RPC-связку Node protocol с native adapter
+под уже существующими locks и offline подпись через Windows DPAPI. Подписи
+permit/execution/rollback/zero-effect/install/V1 разделены по контрактам и
+ссылаются на exact plan/receipt. Код, пакет, root и CLI не установлены на
+production; токены/ключи не создавались и не переносились; external worker и
+V1 serving state не активировались. Перед effect всё ещё нужны независимая
+установка, восстановленная копия, доказанная совместимость native lineage и
+новый прямой GO в задаче диспетчера.
+
+Независимый source launcher находится вне candidate bundle и требует
+deployment-root installer receipt + закрытую file map до Python imports.
+Дополнительный native pointer fence проверяет подписанные plan/permit/command
+и pending lineage в двух слоях; bounded watchdog ограничивает весь lock-owner
+process group, включая Node child. Это требует реального Linux root gate и
+отдельной installed-path приёмки; фактический serving state не меняется.
+
 **External Langame worker source candidate 27.09:** владелец выбрал для EZ GAME
 стадию `LIVE`. В исходниках подготовлены отдельный CLI с exact tenant/source/Store
 и profile/execution/Store revisions, а также platform-admin prepare/apply/revoke

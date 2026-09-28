@@ -16,6 +16,16 @@ Linux root fixtures and independent review must accept this new branch before
 it can be considered a source candidate. Native CLI/signers, trusted installed
 bundle and direct operation GO remain HOLD; external beta is unchanged.
 
+**Bootstrap CLI source follow-up 27.09:** Windows offline signer and bounded
+Python/Node host RPC source have been added for review. No signing key, trusted
+bundle, root, CLI or provider action is installed or used. Source/local CI does
+not convert this into a production bridge plan or external beta permission.
+
+The separate bootstrap launcher is only source. It must be installed from an
+independently admitted production-control artifact and accepted under its own
+exact GO before a candidate bundle can run. Root/Linux process-group, native
+lineage and locked receipt fixtures are source gates, not production proof.
+
 **Variant B source checkpoint 24.09:** merged PR #240 adds a versioned
 Compose app-only admission, exact-diff `L1_APP_ONLY` allowlist, API/Web-only
 images and installed-controller certification of the already accepted

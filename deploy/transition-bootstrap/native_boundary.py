@@ -83,6 +83,36 @@ def verify_flat_inventory(root, expected):
     return True
 
 
+def verify_bundle_inventory(root, expected):
+    """Closed relative-path bundle layout; targets still use flat inventories."""
+    root = secure_directory(root)
+    require(isinstance(expected, dict) and 0 < len(expected) <= 128,
+            'Invalid independently admitted bundle inventory')
+    directories = set()
+    for relative, expected_digest in expected.items():
+        require(isinstance(relative, str) and not relative.startswith('/') and '\\' not in relative and
+                all(re.fullmatch(r'[A-Za-z0-9_.@-]+', part) and part not in ('.', '..')
+                    for part in relative.split('/')) and re.fullmatch(r'[a-f0-9]{64}', expected_digest),
+                'Invalid independently admitted bundle path')
+        for parent in Path(relative).parents:
+            if str(parent) != '.':
+                directories.add(parent.as_posix())
+        require(hashlib.sha256(secure_read(root / relative, 2 * 1024 * 1024)).hexdigest() == expected_digest,
+                'Admitted bootstrap bundle byte changed')
+    observed_files, observed_directories = set(), set()
+    for current, names, files in os.walk(root, followlinks=False):
+        secure_directory(current)
+        for name in names:
+            child = Path(current) / name
+            secure_directory(child)
+            observed_directories.add(child.relative_to(root).as_posix())
+        for name in files:
+            observed_files.add((Path(current) / name).relative_to(root).as_posix())
+    require(observed_files == set(expected) and observed_directories == directories,
+            'Admitted bootstrap bundle has an unexpected leaf or directory')
+    return True
+
+
 class NativeBoundary:
     """Lock and durable-CAS primitives only; no complete observation authority."""
 

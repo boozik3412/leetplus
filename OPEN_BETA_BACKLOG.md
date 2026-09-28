@@ -8,6 +8,14 @@ installer, installed-path acceptance, exact-main artifact receipts and fresh
 dispatcher operation GO remain prerequisites. External beta remains NO-GO.
 [Bootstrap source packet](./docs/deployment/predecessor-transition-bootstrap-source.md).
 
+**Standalone adapter source follow-up 27.09:** accepted controller continuity
+needs canonical native V1 handoff lineage in addition to standalone permit.
+Separate source code now sketches exact installed inventory, host observations,
+public-only enrollment and receipt-bound V1 pending/forward/rollback records.
+Linux root fixtures and independent review must accept this new branch before
+it can be considered a source candidate. Native CLI/signers, trusted installed
+bundle and direct operation GO remain HOLD; external beta is unchanged.
+
 **Variant B source checkpoint 24.09:** merged PR #240 adds a versioned
 Compose app-only admission, exact-diff `L1_APP_ONLY` allowlist, API/Web-only
 images and installed-controller certification of the already accepted

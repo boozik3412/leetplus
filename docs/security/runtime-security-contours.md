@@ -13,6 +13,16 @@ adapter/root installer и installed-path acceptance остаются отсут�
 расширен, provider/tenant/timer/grant/application/data effects не выполнены.
 [Source boundaries and remaining gates](../deployment/predecessor-transition-bootstrap-source.md).
 
+**Source-only successor adapter follow-up 27.09:** review выявил, что
+отдельный standalone receipt не принимается старым и новым контроллером как
+authority serving pointer. В новой stacked source-ветке готовятся exact
+installed-inventory reader, публичное enrollment с проверкой deployment-root
+installer lineage и совместимый native V1 handoff plan/pending/receipt/active
+pointer, связанный с узким самостоятельным permit. Это отдельный source
+candidate: живой CLI/signer, установка, принятие на host, rollout и provider
+по-прежнему отсутствуют; source не изменяет public guest/corporate/worker
+runtime и не даёт GO.
+
 **External Langame worker source candidate 27.09:** владелец выбрал для EZ GAME
 стадию `LIVE`. В исходниках подготовлены отдельный CLI с exact tenant/source/Store
 и profile/execution/Store revisions, а также platform-admin prepare/apply/revoke

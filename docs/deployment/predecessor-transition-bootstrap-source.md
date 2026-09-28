@@ -118,6 +118,40 @@ effect starts with fresh installed/root/source/host observations.
 
 ## Source evidence and remaining installation work
 
+### Follow-up adapter source after PR249
+
+The next stacked source branch adds `inventory.py`, `host_observer.py`,
+`authority.py`, `enrollment.py`, `bundle_installer.py`,
+`canonical_lineage.py` and `canonical_lineage_native.py`. This is still a
+candidate, not an installed host adapter. Full flat target leaves, immutable
+manifest, exact-main admission and archive are read independently before any
+target import. The only controller module the live observer may load is the
+fully attested serving b0 or bridge predecessor, for its accepted application
+history snapshot. Protected-state fields bind its active record, application,
+data, nginx, grants, timers, provider policy, six containers, refresh unit and
+firewall. The separate bundle enrollment verifier requires a deployment-root
+signed installer plan, timely intent, receipt, exact bundle file map, four
+distinct public-only roots and exact host identity.
+
+The frozen controllers' continuity guard accepts only its canonical V1 handoff
+lineage. A standalone pointer receipt is insufficient. The adapter source now
+builds a V1 `CONTROL_HANDOFF` plan with a signed cross-link to the standalone
+plan. Before core pointer CAS it must durably publish that plan, deployment-root
+approval, global pending marker, `apply-main.intent.json` and a frozen V1
+receipt. After CAS it can publish the V1 receipt and CAS the handoff active
+pointer; an interrupted target can use the V1 pending lineage without a second
+pointer effect. Reverse CAS needs a separate deployment-root receipt-bound
+rollback approval and restores the exact prior V1 pointer. Root/Linux fixtures
+exercise ordinary, lost-response and reverse lineage in disposable `/run`.
+
+The native adapter is not yet wired to an installed CLI or accepted by the
+dispatcher. The independently admitted installer source has no CLI, and a
+reviewed offline signer plus install/recovery/rollback host rehearsals are
+still required. The installer can stage one closed bundle+enrollment tree and
+atomically rename it into a protected final path; incomplete staging is HOLD
+for separately signed recovery. It cannot install itself or infer a direct GO
+from source review. No production effect is authorized by this follow-up.
+
 JS fixtures cover both exact predecessor paths, mutated privileged leaves,
 foreign host, signatures/expiry, durable intent ordering, lost responses before
 and after CAS, protected timer drift and receipt-bound rollback. Native root

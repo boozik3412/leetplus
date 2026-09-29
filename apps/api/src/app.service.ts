@@ -37,11 +37,18 @@ export class AppService {
   async getReadiness() {
     try {
       await this.prisma.$queryRaw`SELECT 1`;
+      const expectedMigration = this.optionalConfig(
+        'EXPECTED_DATABASE_MIGRATION',
+      );
+      const expectedMigrationCount = this.optionalPositiveInt(
+        'EXPECTED_DATABASE_MIGRATION_COUNT',
+      );
       const migrations = await this.prisma.$queryRaw<
         Array<{
           migration_name: string | null;
           completed_count: number;
           unfinished_count: number;
+          expected_applied?: boolean;
         }>
       >`
         SELECT
@@ -60,24 +67,34 @@ export class AppService {
           COUNT(*) FILTER (
             WHERE finished_at IS NULL
               AND rolled_back_at IS NULL
-          )::int AS unfinished_count
+          )::int AS unfinished_count,
+          COUNT(*) FILTER (
+            WHERE migration_name = ${expectedMigration}
+              AND finished_at IS NOT NULL
+              AND rolled_back_at IS NULL
+          ) > 0 AS expected_applied
         FROM "_prisma_migrations"
       `;
       const databaseMigration = migrations[0]?.migration_name ?? null;
       const completedMigrations = migrations[0]?.completed_count ?? 0;
       const unfinishedMigrations = migrations[0]?.unfinished_count ?? 0;
-      const expectedMigration = this.optionalConfig(
-        'EXPECTED_DATABASE_MIGRATION',
-      );
-      const expectedMigrationCount = this.optionalPositiveInt(
-        'EXPECTED_DATABASE_MIGRATION_COUNT',
-      );
       const schemaBridgeAccepted = this.schemaBridgeAccepted({
         completedMigrations,
         databaseMigration,
         expectedMigration,
         expectedMigrationCount,
       });
+      // Backward-compatible migrations are applied before the new release is
+      // switched on, so the previous release keeps serving (and stays a valid
+      // rollback target) on a database that is ahead of it.
+      const databaseAhead = Boolean(
+        expectedMigration &&
+        expectedMigrationCount &&
+        migrations[0]?.expected_applied === true &&
+        databaseMigration &&
+        databaseMigration > expectedMigration &&
+        completedMigrations > expectedMigrationCount,
+      );
 
       if (!databaseMigration) {
         throw new ReadinessFailure('NO_COMPLETED_MIGRATIONS');
@@ -90,7 +107,8 @@ export class AppService {
       if (
         expectedMigration &&
         databaseMigration !== expectedMigration &&
-        !schemaBridgeAccepted
+        !schemaBridgeAccepted &&
+        !databaseAhead
       ) {
         throw new ReadinessFailure('MIGRATION_REVISION_MISMATCH');
       }
@@ -98,7 +116,8 @@ export class AppService {
       if (
         expectedMigrationCount &&
         completedMigrations !== expectedMigrationCount &&
-        !schemaBridgeAccepted
+        !schemaBridgeAccepted &&
+        !databaseAhead
       ) {
         throw new ReadinessFailure('MIGRATION_COUNT_MISMATCH');
       }
@@ -122,7 +141,15 @@ export class AppService {
                       schemaBridgeAccepted.target.migrationCount,
                   },
                 }
-              : {}),
+              : databaseAhead
+                ? {
+                    compatibility: {
+                      mode: 'DATABASE_AHEAD',
+                      releaseMigration: expectedMigration,
+                      releaseMigrationCount: expectedMigrationCount,
+                    },
+                  }
+                : {}),
           },
         },
       };

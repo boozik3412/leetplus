@@ -56,6 +56,9 @@ deployment gates without the user's explicit request.
   split-runtime candidate must not be installed.
 - Database migrations must be backward compatible with the release that is
   still serving (expand → deploy → contract), so `lp rollback` stays safe.
+  `lp` applies each migration in one transaction: grant every new table to
+  `leetplus_runtime` explicitly (or mark it `-- lp:no-runtime-access "Table"`),
+  and do not use `CONCURRENTLY` or your own `BEGIN`/`COMMIT`.
 - Run independent local verification gates together and report all failures
   from that pass at once, rather than stopping at the first one.
 

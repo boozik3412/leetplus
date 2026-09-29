@@ -142,6 +142,84 @@ describe('AppController', () => {
     }
   });
 
+  describe('database ahead of the release', () => {
+    const releaseConfig = new ConfigService({
+      EXPECTED_DATABASE_MIGRATION: '20260908180000_release_head',
+      EXPECTED_DATABASE_MIGRATION_COUNT: '191',
+    });
+    const readinessWith = (row: Record<string, unknown>) => {
+      prisma.$queryRaw
+        .mockReset()
+        .mockResolvedValueOnce([{ ok: 1 }])
+        .mockResolvedValueOnce([{ unfinished_count: 0, ...row }]);
+      return new AppService(
+        releaseConfig,
+        prisma as unknown as PrismaService,
+      ).getReadiness();
+    };
+    const failureReason = async (promise: Promise<unknown>) => {
+      try {
+        await promise;
+      } catch (error) {
+        expect(error).toBeInstanceOf(ServiceUnavailableException);
+        return (
+          (error as ServiceUnavailableException).getResponse() as {
+            dependencies: { database: { reason: string } };
+          }
+        ).dependencies.database.reason;
+      }
+      throw new Error('Expected readiness to fail');
+    };
+
+    it('stays ready when later migrations were applied on top of its own', async () => {
+      await expect(
+        readinessWith({
+          migration_name: '20261001090000_next_expand',
+          completed_count: 192,
+          expected_applied: true,
+        }),
+      ).resolves.toMatchObject({
+        ok: true,
+        dependencies: {
+          database: {
+            ok: true,
+            migration: '20261001090000_next_expand',
+            migrationCount: 192,
+            compatibility: {
+              mode: 'DATABASE_AHEAD',
+              releaseMigration: '20260908180000_release_head',
+              releaseMigrationCount: 191,
+            },
+          },
+        },
+      });
+    });
+
+    it('fails when the database is ahead but lacks the release migration', async () => {
+      await expect(
+        failureReason(
+          readinessWith({
+            migration_name: '20261001090000_next_expand',
+            completed_count: 192,
+            expected_applied: false,
+          }),
+        ),
+      ).resolves.toBe('MIGRATION_REVISION_MISMATCH');
+    });
+
+    it('fails when the database is behind the release', async () => {
+      await expect(
+        failureReason(
+          readinessWith({
+            migration_name: '20260901000000_older',
+            completed_count: 190,
+            expected_applied: false,
+          }),
+        ),
+      ).resolves.toBe('MIGRATION_REVISION_MISMATCH');
+    });
+  });
+
   it('admits the exact CURRENT_187 bridge only while guest bug reporting is off', async () => {
     prisma.$queryRaw
       .mockReset()

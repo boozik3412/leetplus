@@ -10,9 +10,9 @@ if (!/^[a-f0-9]{40}$/.test(sha ?? '') || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\
 }
 const root = path.resolve('packages/database/prisma/migrations');
 const migrations = fs.readdirSync(root).filter(name => /^\d{14}_/.test(name) && fs.statSync(path.join(root, name)).isDirectory()).sort();
-if (migrations.length !== 191 || migrations.at(-1) !== '20260908180000_external_langame_simple_onboarding') {
-  throw new Error('Compose V1 requires reviewed CURRENT191');
-}
+// The schema head is whatever the release contains; `lp` applies pending
+// migrations before the release starts and verifies checksums of applied ones.
+if (migrations.length === 0) throw new Error('No Prisma migrations found');
 const externalCli = path.resolve('apps/api/src/integrations/langame-external-daily-worker.cli.ts');
 const externalWorkerCapability = fs.existsSync(externalCli) && fs.statSync(externalCli).isFile()
   ? 'LANGAME_EXTERNAL_SET1_V1' : null;

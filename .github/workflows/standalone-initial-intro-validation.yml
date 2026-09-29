@@ -5,6 +5,7 @@ on:
     branches:
       - codex/standalone-initial-intro-20260929
       - codex/standalone-first-transport-20260929
+      - codex/standalone-transport-recovery-20260929
     paths:
       - deploy/leetplus-compose/standalone-initial-intro*.mjs
       - deploy/leetplus-compose/standalone-initial-intro.py

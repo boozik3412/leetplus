@@ -314,9 +314,10 @@ def validate_plan(plan):
                 value['gid'] >= 0 and value['mode'] > 0 and not value['mode'] & 0o022,
                 'Existing trusted anchor identity differs')
     lock = plan['nativeControlLockIdentity']
-    require(isinstance(lock, dict) and set(lock) == {'path', 'device', 'inode', 'uid', 'gid', 'mode'} and
+    require(isinstance(lock, dict) and set(lock) == {'path', 'device', 'inode', 'uid', 'gid', 'mode', 'ctimeNs'} and
             lock['path'] == CONTROL_LOCK and all(type(lock[key]) is int for key in
                 ('device', 'inode', 'uid', 'gid', 'mode')) and lock['inode'] > 0 and
+            isinstance(lock['ctimeNs'], str) and re.fullmatch(r'[1-9][0-9]{0,19}', lock['ctimeNs']) and
             lock['uid'] == lock['gid'] == 0 and lock['mode'] == 0o600,
             'Native control lock identity differs')
     return plan
@@ -554,7 +555,8 @@ class InitialIntro:
             expected = plan['nativeControlLockIdentity']
             require(stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and
                     (st.st_dev, st.st_ino, st.st_uid, st.st_gid, stat.S_IMODE(st.st_mode)) ==
-                    (expected['device'], expected['inode'], 0, 0, 0o600),
+                    (expected['device'], expected['inode'], 0, 0, 0o600) and
+                    str(st.st_ctime_ns) == expected['ctimeNs'],
                     'Native lock preimage differs')
             deadline = time.monotonic()+120
             while True:
@@ -565,7 +567,8 @@ class InitialIntro:
                     require(time.monotonic() < deadline, 'Native lock wait timed out')
                     time.sleep(0.01)
             latest = f.p(CONTROL_LOCK).lstat()
-            require((latest.st_dev, latest.st_ino) == (st.st_dev, st.st_ino),
+            require((latest.st_dev, latest.st_ino, latest.st_ctime_ns) ==
+                    (st.st_dev, st.st_ino, st.st_ctime_ns),
                     'Native lock origin changed')
             yield
         finally:

@@ -70,7 +70,8 @@ class NativeIntroduction(unittest.TestCase):
         self.plan['oldActiveRecordSha256'] = intro.sha(self.files.read(intro.ACTIVE))
         self.plan['oldHandoffPointerSha256'] = intro.sha(self.files.read(intro.HANDOFF))
         lock = self.files.p(intro.CONTROL_LOCK).stat()
-        self.plan['nativeControlLockIdentity'].update({'device': lock.st_dev, 'inode': lock.st_ino})
+        self.plan['nativeControlLockIdentity'].update({'device': lock.st_dev, 'inode': lock.st_ino,
+                                                      'ctimeNs': str(lock.st_ctime_ns)})
         self.plan['anchorDirectories'] = {name: self.identity(name) for name in intro.ANCHOR_DIRS}
         for name, mode in intro.PARENT_MODES.items():
             if self.files.absent(name):
@@ -270,7 +271,11 @@ process.argv=['/usr/bin/node',{json.dumps(intro.VERIFIER)},'--source-release',{j
             result=subprocess.run([os.sys.executable,'-c',probe,str(self.files.p(intro.CONTROL_LOCK))],capture_output=True)
             self.assertEqual(result.returncode,23)
         finally:os.close(fd)
-        self.files.p(intro.CONTROL_LOCK).unlink();self.write(intro.CONTROL_LOCK,b'',0o600)
+        old_lock = self.files.p(intro.CONTROL_LOCK)
+        retained = old_lock.with_name(old_lock.name + '.retained-original')
+        old_lock.rename(retained)
+        self.write(intro.CONTROL_LOCK,b'',0o600)
+        self.assertNotEqual(retained.stat().st_ino, old_lock.stat().st_ino)
         with self.assertRaises(ValueError):
             with self.engine.control_lock(self.plan):self.fail('Replaced lock reached effect')
 

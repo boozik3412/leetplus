@@ -1,0 +1,9 @@
+{
+  "contract": "LEETPLUS_BOOTSTRAP_INSTALL_LAYOUT_V1",
+  "installedParent": "/usr/local/libexec/leetplus-transition-bootstrap",
+  "operationStateRoot": "/var/lib/leetplus-compose",
+  "pendingStateRoot": "/var/lib/leetplus-compose",
+  "requestPrefix": "/srv/leetplus/production-control-inbox/bootstrap-install-",
+  "controllerPointerMutation": false,
+  "privateKeysOnHost": false
+}

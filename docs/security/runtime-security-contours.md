@@ -2,6 +2,41 @@
 
 Статус: **канонический current-state contract**, оперативный checkpoint **24.09.2026**.
 
+**Source-only bootstrap transport proposal 29.09:** V2 public-only install
+entrypoint принимает только fixed initial inert generation + подписанный
+deployment-root exact plan, который связывает helper/verifier/generation
+receipt+manifest и полный source import closure до Python compile/import.
+Новый request staging получает ровно семь captured leaves через stdin под
+тем же V2 plan/approval, проверяет подпись/байты до первого write, пишет
+flat intent до private pending directory и публикует request атомарно.
+`prepare` принимает только staged request с exact intent/receipt; install
+`apply` пишет собственный flat intent до audit directory, а `reconcile`
+отличает intent-only, partial pending и foreign/dangling postimage.
+Последующий launcher/RPC исполняет захваченные verified bundle bytes через
+sealed memory и linked Node data URLs; predecessor executor также компилируется
+из captured inventory buffer вместе с полным JS snapshot/authority import
+closure, без hash-then-path-import.
+После установки bundle отдельный deployment-root signed runtime provision
+с flat prewrite intent создаёт только private transition state dirs/lock и
+exact request по captured input; это отдельный GO диспетчера. RPC read-only
+observe/plan/prepare не создают attempt files, а effectful переходы по-прежнему
+требуют нативный подписанный intent и locks.
+Offline signer имеет отдельные typed transport/INTRO V2/transport-finalize/
+INTRO-finalize domains с
+frozen source validators и exact deployment-root provenance до DPAPI;
+INTRO подписывается только после полной timely transport receipt lineage.
+V2 сохраняет своевременный marker будущего receipt до последнего dormant leaf;
+отдельный root-signed finalize копирует только его неизменённые байты после
+полного postimage без повторной установки или подмены acceptedAt.
+A отвечает за отдельный INITIAL_INERT_ONLY predecessor route без broad
+production-control install/unit reload. Layout marker создаёт защищённый
+parent, не устанавливает bundle и не меняет serving pointer. `prepare`
+остаётся без записи; `apply` требует нового direct exact GO, fresh
+host/control/backup state, signed plan и receipts. Это source/CI candidate,
+не установленный bootstrap runtime; ключи, provider/grants/timers и
+приложение не затронуты.
+[Transport and install boundary](../deployment/predecessor-transition-bootstrap-source.md).
+
 **Source-only predecessor bootstrap 27.09:** отдельная ветка после frozen
 controller PR248 содержит proposal ordered merges246→247→248 и изолированные
 protocol/native primitives для b0→bridge и bridge→external successor. Они

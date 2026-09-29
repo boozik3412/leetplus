@@ -6,6 +6,141 @@ under `deploy/transition-bootstrap`, outside `control.tar.gz`. It is not wired
 into either generic controller handoff. No production installer, CLI, key
 enrollment or complete live observer is provided by these source primitives.
 
+## 29 September independent initial trust and V2 public-only installer
+
+Fresh dispatcher read-only inventory found the fixed production-control
+installer/verifier/generation/receipt paths absent. A broad production-control
+install would publish operational files and reload systemd; it is outside an
+inert bootstrap scope. The separate A-owned INITIAL_INERT_ONLY predecessor
+route is therefore the proposed first trust step. It must install only an
+immutable source generation and its minimal verifier, two dormant bootstrap
+entrypoints, layout marker and exact lock/audit records under its own signed
+plan, receipts and direct dispatcher GO. This is still source design, not
+installed authority.
+
+The new `install_predecessor_bootstrap.py` consumes that first step through a
+fixed minimal verifier at
+`/usr/local/libexec/leetplus/verify-installed-standalone-intro.mjs`.
+Its `stage-request` action first receives a closed canonical seven-leaf request
+as bounded captured stdin (plan, approval, archive and four public roots),
+checks the deployment-root V2 signature and full admitted generation, then
+publishes a flat intent before any request directory write. The root-private
+request is staged with no-overwrite atomic rename and an exact external receipt.
+`reconcile-request` classifies intent-only and partial publication, and can
+publish only a missing receipt after verifying a complete exact postimage under
+its own recovery scope. `prepare`/`apply` require this staged intent and receipt;
+no operator-prewritten request is accepted as an independent authority.
+The wrapper then verifies the
+deployment-root-signed **V2** public-only plan/approval with existing host
+Node and the bound host identity, then hashes the verifier bytes against the
+signed `installerAuthority`. Verifier stdout must be one bounded canonical
+JSON object binding exact source release, intro plan/receipt, immutable full
+generation manifest/receipt and verifier hash. The wrapper independently
+opens these protected receipts and full manifest by same-fd bounded reads,
+rehashes its own installed entry and the complete 14-leaf source bundle plus
+privileged helper, and compiles six import modules only after those checks.
+`installerAuthority` is a closed six-SHA object in the V2 signed plan; V1
+approval/receipt/enrollment bytes cannot substitute.
+
+The existing bundle installer then checks source admission, accepted A or
+bridge predecessor, host/core/native pending/locks, deployment signature and
+exact plan before any public-only bundle staging. Its first install write is a
+flat, no-overwrite intent in trusted persistent state; the audit directory and
+copies follow. Reconciliation distinguishes intent-only, partial audit,
+pending staging, foreign/dangling final and exact installed postimage without
+replaying apply. A missing audit receipt may be published only after full
+installed enrollment verification under a separately scoped recovery action.
+The immutable intent and installed receipt remain the authority for lost-response reconciliation.
+Installer audit UUID roots use the existing trusted Compose state, separate
+from the intro audit namespace. No private key is read by the host installer,
+no controller pointer changes and no candidate code may install itself.
+
+The historical broad production-control 75/63 source artifact and any future
+expanded map are distinct from this inert introduction. Full installed-path
+negative tests, independent review, exact artifact transport and an actual
+approved intro effect are prerequisites before V2 bundle install may be
+planned. Source CI and bundle bytes are not installed-path proof.
+
+### Closed source producer
+
+`build-standalone-intro-source.py` reads only regular blobs from the exact
+checked-out Git commit. The separate artifact
+`leetplus-standalone-intro-source-<SHA>-<RUN>-<ATTEMPT>` contains
+`source.tar.gz`, `source-receipt.json` and outer `SHA256SUMS`. The deterministic
+USTAR/gzip archive contains exactly the 19 source leaves needed by the inert
+generation plus its own root SHA256SUMS; it keeps original repository-relative
+paths without a payload prefix. Owner/group/mtime are zero and transport modes
+are 0400. The root manifest closes every other archive leaf and is sorted by
+UTF-8 byte order; directories are derived from those paths on installation.
+
+The receipt contract is `LEETPLUS_STANDALONE_INITIAL_SOURCE_V1`, with decision
+`SOURCE_BYTES_ONLY_NOT_AUTHORIZATION`. It binds fixed repository, source Git
+commit and tree SHA, workflow/event/ref, run/attempt, archive/raw manifest/source-map hashes
+and the complete 19-file map. Even a main-push source receipt cannot replace
+the final Full admission or Compose admission: the signed INTRO plan must bind
+their exact raw bytes, artifact IDs, parent run/attempt and the source archive
+transport independently. The initial-intro primitive is a separately bound
+Compose leaf, not a generation import or a hidden archive entry.
+
+The dormant standalone installer and later RPC use the introduced persistent
+`/var/lib/leetplus-compose/standalone-install.lock` followed by the existing
+native control lock. This avoids silently losing installer serialization on
+reboot; no fallback to a volatile `/run` lock or lock creation by prepare is
+permitted. The initial signed intro operation owns the first lock creation.
+Accepted A and broad production-control lock contracts are unchanged.
+
+The trusted launcher captures all 14 admitted bundle leaves by same-fd reads
+after verifying enrollment, sends the exact bytes through a sealed memory fd,
+and starts isolated Python with a fixed in-memory loader. The RPC host compiles
+its eight effect-capable Python dependencies from that capture in dependency
+order. Its Node CLI, protocol and two authority modules are linked from
+captured bytes as data URLs; no child executes an installed source pathname.
+Accepted predecessor inventory likewise captures `control_handoff.py` and the
+six JavaScript leaves reachable from its snapshot and authority routines:
+`control-handoff-runtime.mjs`, `orchestrator.mjs`,
+`worker-continuation.mjs`, `worker-authority.mjs`,
+`control-handoff-authority.mjs` and `contract.mjs`. The observer compiles the
+Python buffer, links each fixed JS import from captured data URLs, and injects
+a narrow stdin-preserving Node callback for runtime, forward, rollback and
+recovery validation. A filename hash
+followed by another pathname import is not source authority. This is a source
+candidate and needs the complete Linux fixture and installed-path acceptance.
+
+After public-only bundle installation, a separate signed runtime-provision
+action on the installed launcher consumes one canonical request from stdin.
+Its deployment-root approval binds the exact host, bundle/installer receipt,
+request command and bytes, fresh fixed path preimages and native lock inodes.
+A flat intent in existing Compose state precedes creation of the private
+transition state root, requests/operations/attempts directories, persistent
+transition lock and immutable request; a terminal receipt binds their postimage.
+Every request placement has a fresh placement UUID and signed plan. A new
+operation request cannot appear as an unsigned file. Read-only reconciliation
+classifies intent-only, partial, torn and exact postimages; explicit recovery
+can publish only a missing terminal receipt after the complete exact postimage.
+
+The RPC host verifies the terminal signed placement lineage before handling a
+request. `observe`, `plan-v1` and `prepare` write no persistent attempt state.
+Its watchdog and child stderr use process pipes/anonymous memory. The
+dispatcher captures command stdout/stderr/exit externally; effectful native
+actions still rely on their own signed intent, locks and receipts. Runtime
+provisioning is a distinct future dispatcher effect/GO; this source change
+performs no host operation.
+
+The offline signer now has separate deployment-root kinds `transport`,
+`initial-intro`, `transport-finalize` and `initial-intro-finalize`. It reads the pure A schema validator
+from an exact Git blob and compares an independently frozen source hash before
+executing that validator or accessing DPAPI. Transport/finalize bind the
+accepted deployment public bytes; INTRO additionally verifies the prior
+transport signature, timely intent and complete plan/approval/flat-intent/
+execution receipt hashes. INTRO V2 persists the genuine timely
+`receipt.pending.json` bytes before the last dormant destination. Its separate
+finalize action copies those original bytes into a missing terminal audit
+receipt only after validating the complete immutable postimage; it never
+invents a later acceptedAt or repeats installation. Each signature needs its own exact confirmation
+with domain, operation UUID, statement SHA and root DER. Finalize is limited
+to its frozen two-write scope and cannot repeat transport or cleanup. Tests
+use ephemeral keys; no production key is read by this source work.
+
 ## Trust and independent packaging
 
 The accepted b0 controller has no verifier capable of admitting the bridge's
@@ -64,7 +199,7 @@ containers, network-refresh unit and firewall; absent evidence cannot be zero.
 
 Acquire existing regular root-owned locks in this fixed order:
 
-1. `/run/leetplus-production-control/install.lock`;
+1. `/var/lib/leetplus-compose/standalone-install.lock` (introduced persistent standalone lock; accepted A/production-control locks are unchanged);
 2. `/var/lib/leetplus-compose/control.lock`;
 3. independently installed standalone transition singleton.
 

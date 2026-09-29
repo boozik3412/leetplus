@@ -1,0 +1,1402 @@
+"""Signed inert initial introduction, never a controller/worker activation.
+
+The separately reviewed operator first-execution fence MUST authenticate this
+exact captured program before invoking it. This file has only stdlib imports;
+it never imports the source archive's bootstrap modules or runs its installers.
+Transport and the direct dispatcher GO are separate prerequisites.
+"""
+import argparse
+import base64
+import contextlib
+import ctypes
+import datetime
+import gzip
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import stat
+import subprocess
+import sys
+import tarfile
+import time
+
+PLAN = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_PLAN'
+APPROVAL = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_APPROVAL'
+INTENT = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_INTENT'
+GENERATION = 'LEETPLUS_STANDALONE_INERT_GENERATION_V1_RECEIPT'
+RECEIPT = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_RECEIPT'
+FINALIZE_PLAN = 'LEETPLUS_STANDALONE_INITIAL_INTRO_FINALIZE_V1_PLAN'
+FINALIZE_APPROVAL = 'LEETPLUS_STANDALONE_INITIAL_INTRO_FINALIZE_V1_APPROVAL'
+FINALIZE_INTENT = 'LEETPLUS_STANDALONE_INITIAL_INTRO_FINALIZE_V1_INTENT'
+FINALIZE_ACTION = 'FINALIZE_EXACT_INITIAL_INTRO_AUDIT_RECEIPT_ONLY'
+FINALIZE_LOADER = "import ctypes,hashlib,os,signal,sys; parent=int(sys.argv.pop(1)); assert ctypes.CDLL(None,use_errno=True).prctl(1,signal.SIGKILL,0,0,0)==0 and os.getppid()==parent; size=int.from_bytes(sys.stdin.buffer.read(4),'big'); assert 0<size<=131072; source=sys.stdin.buffer.read(size); expected=sys.argv.pop(1); assert len(source)==size and hashlib.sha256(source).hexdigest()==expected; sys.argv[0]='captured-intro-finalize'; exec(compile(source,'captured-intro-finalize','exec'),{'__name__':'__main__'})"
+FINALIZE_FIELDS = {'contract','operationId','originalOperationId','action','hostIdentitySha256','bootId',
+    'originalPlanSha256','originalApprovalSha256','originalIntentSha256','markerSha256',
+    'postimageSha256','execution','effects'}
+FINALIZE_EFFECTS = {'introAuditReceiptFinalizeOnly':True,'sourceMutation':False,
+    'dormantEntryMutation':False,'targetExecution':False,'controllerPointerMutation':False,
+    'applicationRestart':False,'systemdUnitMutation':False,'daemonReload':False,'dataMutation':False,
+    'workerGrantMutation':False,'timerMutation':False,'providerEffect':False,'privateKeyTransport':False}
+SOURCE_RECEIPT = 'LEETPLUS_STANDALONE_INITIAL_SOURCE_V1'
+TRANSPORT = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_RECEIPT'
+TRANSPORT_PLAN = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_PLAN'
+TRANSPORT_APPROVAL = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_APPROVAL'
+TRANSPORT_INTENT = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_INTENT'
+REPO = 'boozik3412/leetplus'
+STATE = '/var/lib/leetplus-compose'
+AUDITS = STATE + '/standalone-introductions'
+TRANSPORTS = STATE + '/standalone-intro-transports'
+GENERATIONS = '/srv/leetplus/production-control-generations'
+REQUESTS = '/srv/leetplus/production-control-inbox/bootstrap-intro-'
+CONTROL_LOCK = STATE + '/control.lock'
+CORE = '/usr/local/sbin/leetplus-compose'
+ACTIVE = STATE + '/active.json'
+HANDOFF = STATE + '/control-handoffs/active.json'
+PENDING = STATE + '/control-handoff.pending.json'
+ROOT_PEM = '/etc/leetplus-compose/approval-root.pem'
+VERIFIER = '/usr/local/libexec/leetplus/verify-installed-standalone-intro.mjs'
+WRAPPER = '/usr/local/sbin/leetplus-install-predecessor-bootstrap'
+LAUNCHER = '/usr/local/sbin/leetplus-trusted-predecessor-bootstrap'
+LAYOUT = '/usr/local/libexec/leetplus-transition-bootstrap/bootstrap-install-layout.json'
+INSTALL_LOCK = STATE + '/standalone-install.lock'
+NODE = '/usr/bin/node'
+CLEAN = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8', 'TZ': 'UTC'}
+HASH = re.compile(r'[a-f0-9]{64}\Z')
+RELEASE = re.compile(r'[a-f0-9]{40}\Z')
+UUID = re.compile(r'[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\Z')
+MAX_LEAF = 2 * 1024 * 1024
+MAX_ARCHIVE = 16 * 1024 * 1024
+MAX_EXPANDED = 64 * 1024 * 1024
+B0_RELEASE = 'b0cbf3a4f302b299762fa055f3bffe0376a91182'
+B0_MANIFEST = 'f9bd049e7cc4c03f206c99c2bad92ae54b34deb28b4b6980abb1bc44432dfb75'
+B0_EXECUTOR = '48aa00c4f6d3148ee210901cd572c6b5a3b3600ad4d20e3551e326ee18fcda18'
+B0_INSTALLER = 'c41144f91a1cfdba3dc184a0afda5c6917fa512a9873b143b8c271edb433b9b4'
+SOURCE_FILES = (
+    'deploy/leetplus-compose/a-bridge-bootstrap-authority.mjs',
+    'deploy/leetplus-compose/bridge-external-successor-authority.mjs',
+    'deploy/leetplus-compose/control-handoff-authority.mjs',
+    'deploy/transition-bootstrap/authority.py',
+    'deploy/transition-bootstrap/bundle_installer.py',
+    'deploy/transition-bootstrap/canonical_lineage.py',
+    'deploy/transition-bootstrap/canonical_lineage_native.py',
+    'deploy/transition-bootstrap/cli.mjs',
+    'deploy/transition-bootstrap/enrollment.py',
+    'deploy/transition-bootstrap/hard_deadline.py',
+    'deploy/transition-bootstrap/host_observer.py',
+    'deploy/transition-bootstrap/inventory.py',
+    'deploy/transition-bootstrap/native_boundary.py',
+    'deploy/transition-bootstrap/protocol.mjs',
+    'deploy/transition-bootstrap/rpc_host.py',
+    'docs/deployment/production-artifact/bootstrap-install-layout.json',
+    'docs/deployment/production-artifact/install_predecessor_bootstrap.py',
+    'docs/deployment/production-artifact/trusted_predecessor_bootstrap_launcher.py',
+    'docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs',
+)
+DEST_SOURCES = {
+    VERIFIER: 'docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs',
+    WRAPPER: 'docs/deployment/production-artifact/install_predecessor_bootstrap.py',
+    LAUNCHER: 'docs/deployment/production-artifact/trusted_predecessor_bootstrap_launcher.py',
+    LAYOUT: 'docs/deployment/production-artifact/bootstrap-install-layout.json',
+    INSTALL_LOCK: None,
+}
+MODES = {VERIFIER: 0o555, WRAPPER: 0o500, LAUNCHER: 0o500, LAYOUT: 0o400, INSTALL_LOCK: 0o600}
+PARENT_MODES = {
+    GENERATIONS: 0o700,
+    AUDITS: 0o700,
+    '/usr/local/libexec': 0o755,
+    '/usr/local/libexec/leetplus': 0o755,
+    '/usr/local/libexec/leetplus-transition-bootstrap': 0o755,
+}
+ANCHOR_DIRS = (
+    '/usr/local', '/usr/local/sbin', '/usr/local/lib/leetplus-compose',
+    '/srv/leetplus', '/srv/leetplus/production-control-inbox',
+    STATE, '/etc/leetplus-compose',
+)
+EFFECTS = {
+    'inertGenerationOnly': True, 'dormantEntryPointsOnly': True,
+    'controllerPointerMutation': False, 'applicationRestart': False,
+    'systemdUnitMutation': False, 'daemonReload': False, 'dataMutation': False,
+    'workerGrantMutation': False, 'timerMutation': False, 'providerEffect': False,
+    'privateKeyTransport': False,
+}
+PLAN_FIELDS = {
+    'contract', 'operationId', 'action', 'hostIdentitySha256', 'bootId',
+    'predecessorReleaseSha', 'predecessorManifestSha256', 'predecessorExecutorSha256',
+    'predecessorInstallerSha256', 'oldCorePointer', 'oldActiveRecordSha256',
+    'oldHandoffPointerSha256', 'pendingHandoffAbsent', 'sourceRelease', 'sourceTreeSha',
+    'fullRunId', 'fullRunAttempt', 'impactReceiptSha256', 'finalAdmissionSha256',
+    'composeAdmissionSha256', 'sourceArtifactId', 'sourceProducerRunId',
+    'sourceProducerRunAttempt', 'sourceTransportSha256', 'sourceReceiptSha256',
+    'sourceArchiveSha256', 'sourceRootManifestSha256', 'productionControlArtifactId',
+    'productionControlTransportSha256', 'productionControlArchiveSha256',
+    'composeArtifactId', 'composeTransportSha256', 'composeControlArchiveSha256',
+    'introTransportOperationId', 'introTransportReceiptSha256',
+    'introEntrySha256', 'introProgramSha256',
+    'generationRootManifestSha256', 'generationSourceMapSha256',
+    'generationDestination', 'dormantDestinations', 'destinationPreimages',
+    'directoryPreimages', 'anchorDirectories',
+    'nativeControlLockIdentity', 'effects',
+}
+VERIFY_SIGNATURE = """import crypto from 'node:crypto';import fs from 'node:fs';
+const v=JSON.parse(fs.readFileSync(0,'utf8'));const k=crypto.createPublicKey(v.publicKey);
+if(k.asymmetricKeyType!=='ed25519'||v.publicKey.includes('PRIVATE')||!crypto.verify(null,
+Buffer.from(v.message,'base64'),k,Buffer.from(v.signature,'base64')))process.exit(1);
+process.stdout.write('PASS');"""
+TRANSPORT_LINK_FIELDS = (
+    'hostIdentitySha256', 'sourceRelease', 'sourceArtifactId', 'sourceProducerRunId',
+    'sourceProducerRunAttempt', 'sourceTransportSha256', 'sourceReceiptSha256',
+    'sourceArchiveSha256', 'sourceRootManifestSha256', 'composeArtifactId',
+    'composeTransportSha256', 'composeControlArchiveSha256', 'composeAdmissionSha256',
+    'introEntrySha256', 'introProgramSha256',
+)
+TRANSPORT_RECEIPT_FIELDS = {'contract', 'decision', 'operationId', 'planSha256',
+    'approvalSha256', 'intentSha256', *TRANSPORT_LINK_FIELDS, 'snapshotPath',
+    'snapshotDevice', 'snapshotInode', 'snapshotSize', 'snapshotMode',
+    'snapshotUid', 'snapshotGid', 'entrySnapshotPath', 'entrySnapshotDevice',
+    'entrySnapshotInode', 'entrySnapshotSize', 'entrySnapshotMode',
+    'entrySnapshotUid', 'entrySnapshotGid', 'executionSha256', 'flatIntentSha256',
+    'fullPostimageSha256', 'parentPostimageSha256', 'predecessorPostimageSha256',
+    'acceptedAt'}
+TRANSPORT_PLAN_FIELDS = {'contract', 'operationId', 'action', *TRANSPORT_LINK_FIELDS,
+    'snapshotPath', 'snapshotSize', 'snapshotMode', 'entrySnapshotPath',
+    'entrySnapshotSize', 'entrySnapshotMode', 'effects', 'execution'}
+TRANSPORT_EFFECTS = {'sourceSnapshotOnly': True, 'targetExecution': False,
+                    'controllerPointerMutation': False, 'applicationRestart': False,
+                    'systemdUnitMutation': False, 'daemonReload': False, 'dataMutation': False,
+                    'timerMutation': False, 'workerGrantMutation': False,
+                    'providerEffect': False, 'privateKeyTransport': False}
+
+
+def require(test, message):
+    if not test:
+        raise ValueError(message)
+
+
+def canonical(value):
+    return (json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + '\n').encode('utf8')
+
+
+def sha(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result, 'Duplicate JSON key')
+        result[key] = value
+    return result
+
+
+def exact_json(raw, maximum=65536):
+    require(isinstance(raw, bytes) and 0 < len(raw) <= maximum, 'Canonical JSON size differs')
+    value = json.loads(raw.decode('utf8'), object_pairs_hook=_pairs,
+                       parse_constant=lambda value: require(False, 'Nonfinite JSON number'))
+    require(raw == canonical(value), 'Noncanonical JSON record')
+    return value
+
+
+def instant(value):
+    require(isinstance(value, str) and re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z', value),
+            'Canonical millisecond UTC required')
+    result = datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
+    require(result.isoformat(timespec='milliseconds').replace('+00:00', 'Z') == value,
+            'Invalid UTC instant')
+    return result
+
+
+def utc_now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+
+
+def safe_relative(value):
+    require(isinstance(value, str) and len(value) <= 4096 and
+            re.fullmatch(r'[A-Za-z0-9_.@+/-]+', value) and
+            all(part not in ('', '.', '..') for part in value.split('/')),
+            'Unsafe source path')
+    return value
+
+
+def parse_manifest(raw):
+    text = raw.decode('utf8')
+    require(text.endswith('\n') and not text.endswith('\n\n'), 'Noncanonical source manifest ending')
+    entries = {}
+    prior = None
+    for line in text[:-1].split('\n'):
+        match = re.fullmatch(r'([a-f0-9]{64})  \./(.+)', line)
+        require(match is not None, 'Noncanonical source manifest row')
+        name = safe_relative(match.group(2))
+        require(name != 'SHA256SUMS' and name not in entries and
+                (prior is None or prior.encode() < name.encode()), 'Unsorted/duplicate source manifest')
+        entries[name] = match.group(1)
+        prior = name
+    require(set(entries) == set(SOURCE_FILES), 'Closed 19-leaf source manifest required')
+    return entries
+
+
+def source_archive(raw):
+    require(0 < len(raw) <= MAX_ARCHIVE, 'Source archive exceeds bound')
+    members = {}
+    expanded = 0
+    with tarfile.open(fileobj=io.BytesIO(raw), mode='r:gz') as archive:
+        for info in archive:
+            require(info.isfile() and not info.islnk() and not info.issym() and
+                    info.name not in members and not info.pax_headers and
+                    info.mode == 0o400 and info.uid == info.gid == info.mtime == 0 and
+                    info.uname == info.gname == '' and 0 < info.size <= MAX_LEAF,
+                    'Noncanonical source tar member')
+            safe_relative(info.name)
+            reader = archive.extractfile(info)
+            require(reader is not None, 'Unreadable source tar member')
+            value = reader.read(MAX_LEAF + 1)
+            require(len(value) == info.size, 'Short source tar member')
+            members[info.name] = value
+            expanded += len(value)
+            require(len(members) <= 20 and expanded <= MAX_EXPANDED,
+                    'Source tar cumulative bound exceeded')
+    require(set(members) == set(SOURCE_FILES) | {'SHA256SUMS'}, 'Unexpected source tar closure')
+    files = parse_manifest(members['SHA256SUMS'])
+    require(all(sha(members[name]) == expected for name, expected in files.items()),
+            'Source tar manifest hash mismatch')
+    return members, files
+
+
+def validate_plan(plan):
+    require(isinstance(plan, dict) and set(plan) == PLAN_FIELDS and
+            plan['contract'] == PLAN and plan['action'] == 'INTRODUCE_INERT_STANDALONE_TRUST' and
+            UUID.fullmatch(plan['operationId']) and UUID.fullmatch(plan['bootId']) and
+            UUID.fullmatch(plan['introTransportOperationId']) and
+            RELEASE.fullmatch(plan['sourceRelease']) and RELEASE.fullmatch(plan['sourceTreeSha']) and
+            plan['predecessorReleaseSha'] == B0_RELEASE and
+            plan['predecessorManifestSha256'] == B0_MANIFEST and
+            plan['predecessorExecutorSha256'] == B0_EXECUTOR and
+            plan['predecessorInstallerSha256'] == B0_INSTALLER and
+            plan['oldCorePointer'] == f'/usr/local/lib/leetplus-compose/{B0_RELEASE}/control.sh' and
+            plan['pendingHandoffAbsent'] is True and plan['effects'] == EFFECTS and
+            isinstance(plan['effects'], dict) and all(type(value) is bool for value in plan['effects'].values()) and
+            plan['operationId'] != '9afc7218-4757-4f44-87e1-6096706bad44',
+            'Initial intro plan identity/effect scope differs')
+    for field in PLAN_FIELDS:
+        if field.endswith('Sha256'):
+            require(isinstance(plan[field], str) and HASH.fullmatch(plan[field]), 'Invalid intro plan digest')
+    for field in ('fullRunId', 'fullRunAttempt', 'sourceArtifactId', 'sourceProducerRunId',
+                  'sourceProducerRunAttempt', 'productionControlArtifactId', 'composeArtifactId'):
+        require(type(plan[field]) is int and 0 < plan[field] <= 9007199254740991,
+                'Invalid exact producer identity')
+    require(plan['generationDestination'] == GENERATIONS + '/' + plan['sourceRelease'] and
+            plan['sourceRootManifestSha256'] == plan['generationRootManifestSha256'] and
+            isinstance(plan['dormantDestinations'], dict) and
+            set(plan['dormantDestinations']) == set(DEST_SOURCES), 'Intro destination scope differs')
+    for name, record in plan['dormantDestinations'].items():
+        require(isinstance(record, dict) and set(record) == {'sha256', 'mode', 'uid', 'gid'} and
+                HASH.fullmatch(record['sha256']) and type(record['mode']) is int and record['mode'] == MODES[name] and
+                type(record['uid']) is int and record['uid'] == 0 and
+                type(record['gid']) is int and record['gid'] == 0, 'Dormant destination identity differs')
+    require(plan['dormantDestinations'][INSTALL_LOCK]['sha256'] == sha(b''),
+            'Initial install lock must be empty')
+    expected_absent = set(DEST_SOURCES) | {plan['generationDestination'], AUDITS + '/' + plan['operationId'],
+                                          STATE + '/' + plan['operationId'] + '.standalone-intro.intent.json',
+                                          GENERATIONS+'/.intro-'+plan['operationId']+'.pending',
+                                          AUDITS+'/'+plan['operationId']+'/receipt.pending.json'}
+    require(plan['destinationPreimages'] == {name: 'ABSENT' for name in sorted(expected_absent)},
+            'First introduction requires exact absent destination preimages')
+    require(isinstance(plan['directoryPreimages'], dict) and
+            set(plan['directoryPreimages']) == set(PARENT_MODES),
+            'Unreviewed initial intro parent directory preimage')
+    for name, value in plan['directoryPreimages'].items():
+        require(isinstance(value, dict) and
+                set(value) == {'state', 'device', 'inode', 'uid', 'gid', 'mode'} and
+                value['state'] in ('ABSENT', 'EXACT') and
+                type(value['uid']) is int and value['uid'] == 0 and
+                type(value['gid']) is int and value['gid'] == 0 and
+                type(value['mode']) is int and value['mode'] == PARENT_MODES[name] and
+                ((value['state'] == 'ABSENT' and value['device'] is None and value['inode'] is None) or
+                 (value['state'] == 'EXACT' and type(value['device']) is int and value['device'] > 0 and
+                  type(value['inode']) is int and value['inode'] > 0)),
+                'Signed initial intro parent identity differs')
+    require(isinstance(plan['anchorDirectories'], dict) and
+            set(plan['anchorDirectories']) == set(ANCHOR_DIRS),
+            'Intro plan omits an existing trusted anchor directory')
+    for name, value in plan['anchorDirectories'].items():
+        require(isinstance(value, dict) and
+                set(value) == {'device', 'inode', 'uid', 'gid', 'mode'} and
+                all(type(value[field]) is int for field in value) and
+                value['device'] > 0 and value['inode'] > 0 and value['uid'] == 0 and
+                value['gid'] >= 0 and value['mode'] > 0 and not value['mode'] & 0o022,
+                'Existing trusted anchor identity differs')
+    lock = plan['nativeControlLockIdentity']
+    require(isinstance(lock, dict) and set(lock) == {'path', 'device', 'inode', 'uid', 'gid', 'mode', 'ctimeNs'} and
+            lock['path'] == CONTROL_LOCK and all(type(lock[key]) is int for key in
+                ('device', 'inode', 'uid', 'gid', 'mode')) and lock['inode'] > 0 and
+            isinstance(lock['ctimeNs'], str) and re.fullmatch(r'[1-9][0-9]{0,19}', lock['ctimeNs']) and
+            lock['uid'] == lock['gid'] == 0 and lock['mode'] == 0o600,
+            'Native control lock identity differs')
+    return plan
+
+
+def validate_finalize_plan(plan):
+    require(isinstance(plan,dict) and set(plan)==FINALIZE_FIELDS and plan['contract']==FINALIZE_PLAN and
+        plan['action']==FINALIZE_ACTION and UUID.fullmatch(plan['operationId']) and
+        UUID.fullmatch(plan['originalOperationId']) and plan['operationId']!=plan['originalOperationId'] and
+        '9afc7218-4757-4f44-87e1-6096706bad44' not in (plan['operationId'],plan['originalOperationId']) and
+        UUID.fullmatch(plan['bootId']), 'Closed INTRO finalize identity differs')
+    require(all(isinstance(plan[k],str) and HASH.fullmatch(plan[k]) for k in FINALIZE_FIELDS
+                if k.endswith('Sha256')), 'INTRO finalize digest differs')
+    e=plan['execution']
+    require(isinstance(e,dict) and set(e)=={'code','invocation','host','nativeControlLockIdentity',
+        'trustRoot','auditDirectoryIdentity','markerIdentity','destinations','limits','effects'} and
+        plan['effects']==e['effects']==FINALIZE_EFFECTS and
+        e['host']=={'hostIdentitySha256':plan['hostIdentitySha256'],'bootId':plan['bootId']} and
+        e['invocation']=={'interpreter':'/usr/bin/python3','flags':['-I','-B','-c'],
+                         'mode':'captured-code-and-packet-stdin','action':'finalize'} and
+        e['limits']=={'programBytes':131072,'packetBytes':131072,'lockWaitSeconds':120,'totalSeconds':180},
+        'INTRO finalize execution scope differs')
+    code=e['code']
+    require(isinstance(code,dict) and set(code)=={'introFinalizeEntrySha256','introProgramSha256',
+        'pythonLoaderSha256','nodeExecutableSha256','nodeRealpath','pythonExecutableSha256','pythonRealpath'} and
+        all(isinstance(code[k],str) and HASH.fullmatch(code[k]) for k in code if k.endswith('Sha256')) and
+        code['pythonLoaderSha256']==sha(FINALIZE_LOADER.encode()) and
+        code['nodeRealpath'].startswith('/usr/bin/node') and code['pythonRealpath'].startswith('/usr/bin/python3'),
+        'INTRO finalize captured code/tool closure differs')
+    require(e['trustRoot']=={'path':ROOT_PEM,'rawSha256':e['trustRoot'].get('rawSha256')} and
+        HASH.fullmatch(e['trustRoot']['rawSha256']), 'INTRO finalize inherited public root differs')
+    lock=e['nativeControlLockIdentity']
+    require(isinstance(lock,dict) and set(lock)=={'path','device','inode','uid','gid','mode','ctimeNs'} and
+        lock['path']==CONTROL_LOCK and lock['uid']==lock['gid']==0 and lock['mode']==0o600 and
+        type(lock['device']) is int and type(lock['inode']) is int and lock['inode']>0 and
+        isinstance(lock['ctimeNs'],str) and re.fullmatch(r'[1-9][0-9]{0,19}',lock['ctimeNs']),
+        'INTRO finalize existing native lock identity differs')
+    directory=e['auditDirectoryIdentity'];marker=e['markerIdentity']
+    require(isinstance(directory,dict) and set(directory)=={'device','inode','uid','gid','mode'} and
+        all(type(v) is int for v in directory.values()) and directory['uid']==directory['gid']==0 and
+        directory['mode']==0o700 and directory['device']>0 and directory['inode']>0 and
+        isinstance(marker,dict) and set(marker)=={'device','inode','bytes','uid','gid','mode','ctimeNs'} and
+        all(type(marker[k]) is int for k in ('device','inode','bytes','uid','gid','mode')) and
+        marker['uid']==marker['gid']==0 and marker['mode']==0o400 and marker['device']>0 and marker['inode']>0 and
+        0<marker['bytes']<=65536 and re.fullmatch(r'[1-9][0-9]{0,19}',marker['ctimeNs']),
+        'INTRO finalize exact directory/marker identity differs')
+    flat=STATE+'/'+plan['originalOperationId']+'.standalone-intro-finalize.intent.json'
+    receipt=AUDITS+'/'+plan['originalOperationId']+'/receipt.json'
+    require(e['destinations']=={flat:{'kind':'FLAT_FINALIZE_INTENT','preimage':'ABSENT','uid':0,'gid':0,'mode':0o400},
+        receipt:{'kind':'EXACT_MARKER_RECEIPT','preimage':'ABSENT','sha256':plan['markerSha256'],
+                 'bytes':marker['bytes'],'uid':0,'gid':0,'mode':0o400}},
+        'INTRO finalize two-write map differs')
+    return plan
+
+
+def require_approval_time(approval, at):
+    now = instant(at)
+    issued, expires = instant(approval['issuedAt']), instant(approval['expiresAt'])
+    require(issued <= now < expires and 0 < (expires-issued).total_seconds() <= 1800,
+            'Initial approval expired or unbounded')
+
+
+def validate_approval(plan, envelope, pem, *, at=None, node=NODE, finalize=False):
+    (validate_finalize_plan if finalize else validate_plan)(plan)
+    require(isinstance(envelope, dict) and set(envelope) == {'approval', 'signature'},
+            'Invalid initial intro approval envelope')
+    approval = envelope['approval']
+    require(isinstance(approval, dict) and set(approval) == {'contract', 'operationId',
+        'hostIdentitySha256', 'planSha256', 'action', 'issuedAt', 'expiresAt'} and
+        approval['contract'] == (FINALIZE_APPROVAL if finalize else APPROVAL) and approval['operationId'] == plan['operationId'] and
+        approval['hostIdentitySha256'] == plan['hostIdentitySha256'] and
+        approval['planSha256'] == sha(canonical(plan)) and approval['action'] == plan['action'],
+        'Initial approval does not bind exact plan')
+    require_approval_time(approval, at or utc_now())
+    require(isinstance(pem, bytes) and len(pem) <= 4096 and b'PRIVATE' not in pem and
+            re.fullmatch(r'[A-Za-z0-9+/]{86}==', envelope['signature']), 'Public root/signature differs')
+    value = {'publicKey': pem.decode('ascii'), 'message': base64.b64encode(canonical(approval)).decode(),
+             'signature': envelope['signature']}
+    check = subprocess.run([node, '--input-type=module', '-e', VERIFY_SIGNATURE],
+                           input=canonical(value), stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, env=CLEAN, timeout=15, check=False)
+    require(check.returncode == 0 and check.stdout == b'PASS' and not check.stderr,
+            'Initial deployment-root signature rejected')
+    return approval
+
+
+class NativeFiles:
+    """One closed filesystem-only backend. Fixture remapping is not a CLI option."""
+    def __init__(self, fixture_prefix=None):
+        self.fixture_prefix = Path(fixture_prefix) if fixture_prefix is not None else None
+
+    def p(self, value):
+        require(isinstance(value, str) and value.startswith('/') and
+                str(Path(value)) == value and '..' not in Path(value).parts,
+                'Canonical fixed absolute path required')
+        return self.fixture_prefix / value.lstrip('/') if self.fixture_prefix is not None else Path(value)
+
+    def ancestors(self, value):
+        path = self.p(value)
+        parents = list(reversed(path.parents))
+        if self.fixture_prefix is not None:
+            parents = [p for p in parents if p == self.fixture_prefix or self.fixture_prefix in p.parents]
+        for parent in parents:
+            info = parent.lstat()
+            require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and
+                    not info.st_mode & 0o022, 'Untrusted intro ancestor')
+
+    def read(self, value, limit=MAX_LEAF):
+        self.ancestors(value)
+        path = self.p(value)
+        before = path.lstat()
+        require(stat.S_ISREG(before.st_mode) and before.st_uid == before.st_gid == 0 and
+                before.st_nlink == 1 and not before.st_mode & 0o022 and
+                0 <= before.st_size <= limit, 'Untrusted intro input')
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            opened = os.fstat(descriptor)
+            identity = lambda st: (st.st_dev, st.st_ino, st.st_size, st.st_ctime_ns)
+            require(identity(before) == identity(opened), 'Intro input changed before open')
+            with os.fdopen(descriptor, 'rb', closefd=False) as stream:
+                raw = stream.read(limit+1)
+            after = os.fstat(descriptor)
+            require(len(raw) == opened.st_size and identity(opened) == identity(after) and
+                    identity(after) == identity(path.lstat()), 'Intro input changed during read')
+            return raw
+        finally:
+            os.close(descriptor)
+
+    def absent(self, value):
+        try:
+            self.p(value).lstat()
+        except FileNotFoundError:
+            return True
+        return False
+
+    def pending_ancestors(self, value):
+        """Check absent destinations without creating any ancestor."""
+        path = self.p(value)
+        parents = list(reversed(path.parents))
+        if self.fixture_prefix is not None:
+            parents = [p for p in parents if p == self.fixture_prefix or self.fixture_prefix in p.parents]
+        missing = False
+        for parent in parents:
+            try:
+                info = parent.lstat()
+            except FileNotFoundError:
+                missing = True
+                continue
+            require(not missing and stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and
+                    not info.st_mode & 0o022, 'Untrusted nearest intro ancestor')
+
+    def reject_mounts(self, roots):
+        content = self.p('/proc/self/mountinfo').read_bytes()
+        require(0 < len(content) <= 2*1024*1024 and content.endswith(b'\n'),
+                'Incomplete bounded mount inventory')
+        for line in content.decode('utf8').splitlines():
+            fields = line.split(' ')
+            require(len(fields) >= 7 and '-' in fields, 'Malformed mount inventory')
+            mount = fields[4]
+            for before, after in ((r'\040', ' '), (r'\011', '\t'), (r'\012', '\n'), (r'\134', '\\')):
+                mount = mount.replace(before, after)
+            require(not any(mount == root or mount.startswith(root+'/') for root in roots),
+                    'Exact or nested intro destination mount')
+
+    def sync(self, value):
+        descriptor = os.open(self.p(value), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try: os.fsync(descriptor)
+        finally: os.close(descriptor)
+
+    def make_directory(self, value, mode=0o700):
+        self.ancestors(value)
+        require(self.absent(value), 'Existing intro directory is not adopted')
+        os.mkdir(self.p(value), mode)
+        os.chown(self.p(value), 0, 0)
+        os.chmod(self.p(value), mode)
+        info = self.p(value).lstat()
+        require(stat.S_ISDIR(info.st_mode) and info.st_uid == info.st_gid == 0 and
+                stat.S_IMODE(info.st_mode) == mode,
+                'Published intro directory identity differs')
+        self.sync(value)
+        self.sync(str(Path(value).parent))
+
+    def ensure_parent(self, value):
+        parent = str(Path(value).parent)
+        self.ancestors(value)
+        st = self.p(parent).lstat()
+        require(stat.S_ISDIR(st.st_mode) and st.st_uid == 0 and not st.st_mode & 0o022,
+                'Untrusted intro parent')
+
+    def check_directory_preimages(self, plan):
+        for name in sorted(PARENT_MODES, key=lambda value: (value.count('/'), value)):
+            self.pending_ancestors(name)
+            expected = plan['directoryPreimages'][name]
+            if expected['state'] == 'ABSENT':
+                require(self.absent(name), 'Unexpected preexisting intro-owned parent')
+            else:
+                info = self.p(name).lstat()
+                require(stat.S_ISDIR(info.st_mode) and info.st_uid == info.st_gid == 0 and
+                        stat.S_IMODE(info.st_mode) == PARENT_MODES[name] and
+                        (info.st_dev, info.st_ino) == (expected['device'], expected['inode']),
+                        'Existing intro parent mode/owner differs')
+
+    def create_approved_directories(self, plan, before_write=None):
+        for name in sorted(PARENT_MODES, key=lambda value: (value.count('/'), value)):
+            if plan['directoryPreimages'][name]['state'] == 'ABSENT':
+                if before_write is not None: before_write()
+                self.make_directory(name, PARENT_MODES[name])
+            else:
+                info = self.p(name).lstat()
+                require(stat.S_ISDIR(info.st_mode) and info.st_uid == info.st_gid == 0 and
+                        stat.S_IMODE(info.st_mode) == PARENT_MODES[name] and
+                        (info.st_dev, info.st_ino) ==
+                        (plan['directoryPreimages'][name]['device'],
+                         plan['directoryPreimages'][name]['inode']),
+                        'Approved existing intro parent changed')
+
+    def installed_parent_map(self):
+        observed = {}
+        for name in sorted(PARENT_MODES, key=lambda value: value.encode()):
+            info = self.p(name).lstat()
+            require(stat.S_ISDIR(info.st_mode) and info.st_uid == info.st_gid == 0 and
+                    stat.S_IMODE(info.st_mode) == PARENT_MODES[name],
+                    'Installed parent directory drift')
+            observed[name] = {'device': info.st_dev, 'inode': info.st_ino,
+                              'uid': info.st_uid, 'gid': info.st_gid,
+                              'mode': stat.S_IMODE(info.st_mode)}
+        return observed
+
+    def installed_anchor_map(self, plan):
+        observed = {}
+        for name in sorted(ANCHOR_DIRS, key=lambda value: value.encode()):
+            info = self.p(name).lstat()
+            require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and
+                    not stat.S_ISLNK(info.st_mode) and not info.st_mode & 0o022,
+                    'Existing trusted anchor changed type or writability')
+            actual = {'device': info.st_dev, 'inode': info.st_ino,
+                      'uid': info.st_uid, 'gid': info.st_gid,
+                      'mode': stat.S_IMODE(info.st_mode)}
+            require(actual == plan['anchorDirectories'][name],
+                    'Existing trusted anchor identity drift')
+            observed[name] = actual
+        return observed
+
+    def publish(self, value, raw, mode):
+        self.ancestors(value)
+        require(self.absent(value), 'Intro publication cannot replace an existing entry')
+        descriptor = os.open(self.p(value), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
+        try:
+            os.fchown(descriptor, 0, 0)
+            os.fchmod(descriptor, mode)
+            offset = 0
+            while offset < len(raw):
+                count = os.write(descriptor, raw[offset:])
+                require(count > 0, 'Short intro write')
+                offset += count
+            os.fsync(descriptor)
+        finally: os.close(descriptor)
+        self.sync(str(Path(value).parent))
+        require(self.read(value, max(MAX_LEAF, len(raw))) == raw, 'Intro post-write bytes differ')
+
+    def rename_new(self, old, new):
+        self.ancestors(old); self.ancestors(new)
+        libc = ctypes.CDLL(None, use_errno=True)
+        rename = libc.renameat2
+        rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        rename.restype = ctypes.c_int
+        if rename(-100, os.fsencode(self.p(old)), -100, os.fsencode(self.p(new)), 1) != 0:
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error), str(self.p(new)))
+        self.sync(str(Path(new).parent))
+
+
+class InitialIntro:
+    def __init__(self, *, files=None, node=NODE, expected_plan_sha256=None,
+                 expected_approval_sha256=None, captured_plan=None,
+                 captured_approval=None):
+        require(os.name == 'posix' and os.getuid() == 0, 'Linux root introduction required')
+        self.files = files or NativeFiles()
+        self.node = node
+        self.expected_plan_sha256 = expected_plan_sha256
+        self.expected_approval_sha256 = expected_approval_sha256
+        require(isinstance(captured_plan, bytes) and isinstance(captured_approval, bytes) and
+                0 < len(captured_plan) <= 65536 and 0 < len(captured_approval) <= 65536,
+                'Protected same-buffer authorization bytes required')
+        require(sha(captured_plan) == expected_plan_sha256 and
+                sha(captured_approval) == expected_approval_sha256,
+                'Captured operator authorization digest differs')
+        exact_json(captured_plan); exact_json(captured_approval)
+        self.captured_plan = captured_plan
+        self.captured_approval = captured_approval
+
+    @contextlib.contextmanager
+    def control_lock(self, plan, shared=False):
+        import fcntl
+        f = self.files
+        f.ancestors(CONTROL_LOCK)
+        descriptor = os.open(f.p(CONTROL_LOCK), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            st = os.fstat(descriptor)
+            expected = plan['nativeControlLockIdentity']
+            require(stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and
+                    (st.st_dev, st.st_ino, st.st_uid, st.st_gid, stat.S_IMODE(st.st_mode)) ==
+                    (expected['device'], expected['inode'], 0, 0, 0o600) and
+                    str(st.st_ctime_ns) == expected['ctimeNs'],
+                    'Native lock preimage differs')
+            deadline = time.monotonic()+120
+            while True:
+                try:
+                    fcntl.flock(descriptor, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    require(time.monotonic() < deadline, 'Native lock wait timed out')
+                    time.sleep(0.01)
+            latest = f.p(CONTROL_LOCK).lstat()
+            require((latest.st_dev, latest.st_ino, latest.st_ctime_ns) ==
+                    (st.st_dev, st.st_ino, st.st_ctime_ns),
+                    'Native lock origin changed')
+            yield
+        finally:
+            os.close(descriptor)
+
+    def _inputs(self, operation, historical_at=None):
+        require(UUID.fullmatch(operation), 'Exact intro UUID required')
+        root = REQUESTS+operation
+        expected = {'source.tar.gz', 'source-receipt.json',
+                    'final-admission.json', 'docker-admission.json', 'intro-entry.mjs',
+                    'intro-program.py',
+                    'transport-receipt.json'}
+        require({p.name for p in self.files.p(root).iterdir()} == expected,
+                'Intro request input set differs')
+        raw = {name: self.files.read(root+'/'+name, MAX_ARCHIVE if name == 'source.tar.gz' else MAX_LEAF)
+               for name in expected}
+        raw['plan.json'] = self.captured_plan
+        raw['approval.json'] = self.captured_approval
+        plan = validate_plan(exact_json(raw['plan.json']))
+        envelope = exact_json(raw['approval.json'])
+        require(sha(raw['plan.json']) == self.expected_plan_sha256 and
+                sha(raw['approval.json']) == self.expected_approval_sha256,
+                'Intro request changed after protected first-execution gate')
+        require(plan['operationId'] == operation and sha(raw['intro-program.py']) == plan['introProgramSha256'],
+                'Intro request program/operation differs')
+        require(sha(raw['intro-entry.mjs']) == plan['introEntrySha256'],
+                'Protected operator entry differs from signed intro plan')
+        pem = self.files.read(ROOT_PEM, 4096)
+        validate_approval(plan, envelope, pem, at=historical_at, node=self.node)
+        require(sha(raw['source.tar.gz']) == plan['sourceArchiveSha256'] and
+                sha(raw['source-receipt.json']) == plan['sourceReceiptSha256'] and
+                sha(raw['final-admission.json']) == plan['finalAdmissionSha256'] and
+                sha(raw['docker-admission.json']) == plan['composeAdmissionSha256'] and
+                sha(raw['transport-receipt.json']) == plan['introTransportReceiptSha256'],
+                'Intro input differs from signed raw artifact/transport identities')
+        members, files = source_archive(raw['source.tar.gz'])
+        require(sha(members['SHA256SUMS']) == plan['generationRootManifestSha256'] and
+                sha(canonical(files)) == plan['generationSourceMapSha256'],
+                'Intro source closure differs from signed manifest/map')
+        source = exact_json(raw['source-receipt.json'])
+        require(source.get('contract') == SOURCE_RECEIPT and
+                source.get('decision') == 'SOURCE_BYTES_ONLY_NOT_AUTHORIZATION' and
+                source.get('repository') == REPO and source.get('sourceRelease') == plan['sourceRelease'] and
+                source.get('sourceTreeSha') == plan['sourceTreeSha'] and
+                source.get('workflow') == 'transition-bootstrap-validation.yml' and
+                source.get('event') == 'push' and source.get('ref') == 'refs/heads/main' and
+                source.get('runId') == str(plan['sourceProducerRunId']) and
+                source.get('runAttempt') == plan['sourceProducerRunAttempt'] and
+                source.get('sourceArchiveSha256') == plan['sourceArchiveSha256'] and
+                source.get('generationRootManifestSha256') == plan['generationRootManifestSha256'] and
+                source.get('generationSourceMapSha256') == plan['generationSourceMapSha256'] and
+                source.get('fileCount') == 19 and source.get('sourceFiles') == files,
+                'Standalone source receipt/producer differs')
+        final = exact_json(raw['final-admission.json'])
+        compose = exact_json(raw['docker-admission.json'])
+        require(final.get('schemaVersion') == 2 and final.get('admission') == 'PASS' and
+                final.get('releaseSha') == plan['sourceRelease'] and final.get('repository') == REPO and
+                final.get('runId') == str(plan['fullRunId']) and
+                final.get('runAttempt') == str(plan['fullRunAttempt']) and
+                final.get('workflowSha') == plan['sourceRelease'] and
+                final.get('workflowRef') == REPO+'/.github/workflows/ci.yml@refs/heads/main' and
+                final.get('effectiveLane') == 'L2_SCHEMA_SECURITY' and
+                final.get('impactReceiptSha256') == plan['impactReceiptSha256'] and
+                final.get('productionControlArtifactId') == str(plan['productionControlArtifactId']) and
+                final.get('productionControlArchiveSha256') == plan['productionControlArchiveSha256'] and
+                final.get('productionControlTransportDigest') == plan['productionControlTransportSha256'] and
+                compose.get('contract') == 'LEETPLUS_COMPOSE_BLUE_GREEN_V1_ADMISSION' and
+                compose.get('decision') == 'PASS' and compose.get('releaseSha') == plan['sourceRelease'] and
+                compose.get('repository') == REPO and compose.get('event') == 'push' and
+                compose.get('ref') == 'refs/heads/main' and
+                compose.get('runId') == str(plan['fullRunId']) and
+                compose.get('runAttempt') == str(plan['fullRunAttempt']) and
+                compose.get('parentAdmissionSha256') == plan['finalAdmissionSha256'] and
+                compose.get('parentRunAttempt') == str(plan['fullRunAttempt']) and
+                compose.get('effectiveLane') == 'L2_SCHEMA_SECURITY' and
+                compose.get('impactReceiptSha256') == plan['impactReceiptSha256'] and
+                compose.get('controlArchiveSha256') == plan['composeControlArchiveSha256'],
+                'Final/Compose exact-main admission lineage differs')
+        transport = exact_json(raw['transport-receipt.json'])
+        require(isinstance(transport, dict) and set(transport) == TRANSPORT_RECEIPT_FIELDS and
+                transport.get('contract') == TRANSPORT and transport.get('decision') == 'PASS' and
+                transport.get('operationId') == plan['introTransportOperationId'] and
+                transport.get('sourceRelease') == plan['sourceRelease'] and
+                all(transport[name] == plan[name] for name in TRANSPORT_LINK_FIELDS),
+                'Initial protected transport receipt differs')
+        self._transport_chain(plan, transport, raw['transport-receipt.json'], pem,
+                              raw['intro-program.py'], operation)
+        for destination, source_name in DEST_SOURCES.items():
+            wanted = sha(members[source_name]) if source_name else sha(b'')
+            require(plan['dormantDestinations'][destination]['sha256'] == wanted,
+                    'Dormant destination source differs from signed map')
+        return plan, envelope, pem, raw, members, files
+
+    def _transport_chain(self, plan, receipt, receipt_raw, pem, program, operation):
+        f = self.files
+        audit = TRANSPORTS+'/'+plan['introTransportOperationId']
+        require({p.name for p in f.p(audit).iterdir()} ==
+                {'plan.json', 'approval.json', 'intent.json', 'receipt.json'},
+                'Initial transport audit closure differs')
+        raw_plan = f.read(audit+'/plan.json', 65536)
+        raw_approval = f.read(audit+'/approval.json', 65536)
+        raw_intent = f.read(audit+'/intent.json', 65536)
+        require(f.read(audit+'/receipt.json', 65536) == receipt_raw,
+                'Transport receipt request differs from immutable audit')
+        original = exact_json(raw_plan)
+        envelope = exact_json(raw_approval)
+        intent = exact_json(raw_intent)
+        require(isinstance(original, dict) and set(original) == TRANSPORT_PLAN_FIELDS and
+                original['contract'] == TRANSPORT_PLAN and
+                original['action'] == 'STAGE_SIGNED_INITIAL_INTRO_SOURCE_ONLY' and
+                original['operationId'] == plan['introTransportOperationId'] and
+                all(original[name] == plan[name] for name in TRANSPORT_LINK_FIELDS) and
+                original['effects'] == TRANSPORT_EFFECTS and
+                all(type(v) is bool for v in original['effects'].values()),
+                'Initial transport plan/effect scope differs')
+        execution = original['execution']
+        require(isinstance(execution, dict) and set(execution) == {'code', 'invocation', 'host',
+            'predecessor', 'nativeControlLockIdentity', 'trustRoot', 'parentPreimages',
+            'leafPreimages', 'privateDirectories', 'destinations', 'generatedDestinations',
+            'limits', 'effects'} and execution['effects'] == TRANSPORT_EFFECTS and
+            execution['invocation'] == {'interpreter': '/usr/bin/python3',
+                'flags': ['-I','-B','-c'], 'mode': 'memory-captured-python-c', 'action': 'stage'} and
+            execution['limits'] == {'archiveBytes': MAX_ARCHIVE, 'leafBytes': MAX_LEAF,
+                'authorizationBytes': 131072, 'packetBytes': 48*1024*1024,
+                'transportProgramBytes': 65536, 'lockWaitSeconds': 120, 'totalSeconds': 180} and
+            execution['host'] == {'hostIdentitySha256': plan['hostIdentitySha256'],
+                                  'bootId': plan['bootId']} and
+            execution['nativeControlLockIdentity'] == plan['nativeControlLockIdentity'],
+            'Initial transport mandatory V2 execution scope differs')
+        code = execution['code']
+        require(isinstance(code, dict) and set(code) == {'transportEntrySha256',
+            'transportProgramSha256', 'pythonLoaderSha256', 'nodeExecutableSha256', 'nodeRealpath',
+            'pythonExecutableSha256', 'pythonRealpath'} and
+            all(isinstance(code[name], str) and HASH.fullmatch(code[name]) for name in
+                ('transportEntrySha256', 'transportProgramSha256', 'pythonLoaderSha256',
+                 'nodeExecutableSha256', 'pythonExecutableSha256')) and
+            code['pythonLoaderSha256'] == 'a44a7637f5d4a89f7ab7084fc1a300c35727fe20b78e44ad4491fbba91191bff' and
+            code['nodeRealpath'].startswith('/usr/bin/node') and
+            code['pythonRealpath'].startswith('/usr/bin/python3') and
+            execution['trustRoot'] == {'path': ROOT_PEM, 'rawSha256': sha(pem)},
+            'Initial transport signed code/deployment-root closure differs')
+        predecessor = execution['predecessor']
+        require(predecessor == {'releaseSha': B0_RELEASE, 'manifestSha256': B0_MANIFEST,
+            'executorSha256': B0_EXECUTOR, 'installerSha256': B0_INSTALLER,
+            'corePointer': plan['oldCorePointer'],
+            'activeRecordSha256': plan['oldActiveRecordSha256'],
+            'handoffPointerSha256': plan['oldHandoffPointerSha256'],
+            'pendingAbsent': True},
+            'Transport predecessor differs from signed INTRO preimage')
+        request = REQUESTS+operation
+        staging = '/srv/leetplus/production-control-inbox/.transport-'+plan['introTransportOperationId']+'.pending'
+        flat = STATE+'/'+plan['introTransportOperationId']+'.standalone-transport.intent.json'
+        parent_names = {STATE, '/srv/leetplus', '/srv/leetplus/production-control-inbox', TRANSPORTS}
+        require(set(execution['parentPreimages']) == parent_names and
+            execution['leafPreimages'] == {name: 'ABSENT' for name in
+                sorted((request, staging, audit, flat))} and
+            execution['privateDirectories'] == {name: {'mode': 0o700, 'uid': 0, 'gid': 0}
+                for name in sorted((request, staging, audit))} and
+            set(execution['destinations']) == {'source.tar.gz', 'source-receipt.json',
+                'final-admission.json', 'docker-admission.json',
+                'intro-entry.mjs', 'intro-program.py'},
+            'Transport complete destination/preimage map differs')
+        generated = {flat: 'FLAT_INTENT', audit+'/plan.json': 'AUDIT_PLAN',
+            audit+'/approval.json': 'AUDIT_APPROVAL', audit+'/intent.json': 'AUDIT_INTENT',
+            audit+'/receipt.json': 'AUDIT_RECEIPT', request+'/transport-receipt.json': 'REQUEST_RECEIPT'}
+        require(execution['generatedDestinations'] == {name:
+            {'kind': kind, 'mode': 0o400, 'uid': 0, 'gid': 0}
+            for name, kind in sorted(generated.items())},
+            'Transport generated destination map differs')
+        require(set(envelope) == {'approval', 'signature'} and isinstance(envelope['approval'], dict),
+                'Initial transport approval envelope differs')
+        approval = envelope['approval']
+        require(set(approval) == {'contract', 'operationId', 'hostIdentitySha256',
+                                 'planSha256', 'action', 'issuedAt', 'expiresAt'} and
+                approval['contract'] == TRANSPORT_APPROVAL and
+                approval['operationId'] == original['operationId'] and
+                approval['hostIdentitySha256'] == plan['hostIdentitySha256'] and
+                approval['planSha256'] == sha(raw_plan) and approval['action'] == original['action'],
+                'Initial transport approval does not bind exact plan')
+        require(set(intent) == {'contract', 'operationId', 'planSha256', 'approvalSha256', 'authorizedAt'} and
+                intent['contract'] == TRANSPORT_INTENT and intent['operationId'] == original['operationId'] and
+                intent['planSha256'] == sha(raw_plan) and intent['approvalSha256'] == sha(raw_approval) and
+                receipt['planSha256'] == sha(raw_plan) and receipt['approvalSha256'] == sha(raw_approval) and
+                receipt['intentSha256'] == sha(raw_intent), 'Initial transport intent/receipt lineage differs')
+        require(f.read(flat, 65536) == raw_intent and
+                receipt['flatIntentSha256'] == sha(raw_intent) and
+                receipt['executionSha256'] == sha(canonical(execution)),
+                'Pre-effect transport intent or signed execution digest differs')
+        issued, expires = instant(approval['issuedAt']), instant(approval['expiresAt'])
+        require(issued <= instant(intent['authorizedAt']) <= instant(receipt['acceptedAt']) < expires and
+                0 < (expires-issued).total_seconds() <= 1800,
+                'Initial transport acceptance was not timely')
+        value = {'publicKey': pem.decode('ascii'),
+                 'message': base64.b64encode(canonical(approval)).decode(),
+                 'signature': envelope['signature']}
+        result = subprocess.run([self.node, '--input-type=module', '-e', VERIFY_SIGNATURE],
+                                input=canonical(value), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=CLEAN, timeout=15, check=False)
+        require(result.returncode == 0 and result.stdout == b'PASS' and not result.stderr,
+                'Initial transport public signature rejected')
+        observed_parents = {}
+        for name in sorted(parent_names, key=lambda value: value.encode()):
+            identity = f.p(name).lstat()
+            require(stat.S_ISDIR(identity.st_mode) and identity.st_uid == 0 and
+                    not identity.st_mode & 0o022,
+                    'Historical transport parent directory differs')
+            expected = execution['parentPreimages'][name]
+            require(isinstance(expected, dict) and set(expected) == {'state','device','inode',
+                    'uid','gid','mode'} and expected['state'] in ('ABSENT','EXACT') and
+                    expected['uid'] == 0 and not expected['mode'] & 0o022 and
+                    (expected['state'] != 'EXACT' or
+                     (identity.st_dev, identity.st_ino) == (expected['device'], expected['inode'])),
+                    'Signed transport parent preimage changed')
+            observed_parents[name] = {'device': identity.st_dev, 'inode': identity.st_ino,
+                'uid': identity.st_uid, 'gid': identity.st_gid,
+                'mode': stat.S_IMODE(identity.st_mode)}
+        require(receipt['parentPostimageSha256'] == sha(canonical(observed_parents)) and
+                receipt['predecessorPostimageSha256'] == sha(canonical({
+                    'corePointer': plan['oldCorePointer'],
+                    'manifestSha256': plan['predecessorManifestSha256'],
+                    'activeRecordSha256': plan['oldActiveRecordSha256'],
+                    'handoffPointerSha256': plan['oldHandoffPointerSha256'],
+                    'pendingAbsent': True})),
+                'Transport parent/predecessor historical postimage differs')
+        postimage = {}
+        for name, expected in sorted(execution['destinations'].items()):
+            require(isinstance(expected, dict) and set(expected) == {'sha256','bytes','mode','uid','gid'} and
+                    expected['mode'] == 0o400 and expected['uid'] == expected['gid'] == 0,
+                    'Transport signed source destination differs')
+            data = f.read(request+'/'+name, MAX_ARCHIVE if name == 'source.tar.gz' else MAX_LEAF)
+            require(sha(data) == expected['sha256'] and len(data) == expected['bytes'],
+                    'Historical transport source bytes differ')
+            postimage[name] = {'sha256': sha(data), 'bytes': len(data),
+                               'mode': 0o400, 'uid': 0, 'gid': 0}
+        require(receipt['fullPostimageSha256'] == sha(canonical(postimage)),
+                'Transport complete source postimage differs')
+        snapshot = REQUESTS+operation+'/intro-program.py'
+        info = f.p(snapshot).lstat()
+        entry_snapshot = REQUESTS+operation+'/intro-entry.mjs'
+        entry_info = f.p(entry_snapshot).lstat()
+        require(receipt['snapshotPath'] == original['snapshotPath'] == snapshot and
+                receipt['snapshotSize'] == original['snapshotSize'] == len(program) and
+                receipt['snapshotMode'] == original['snapshotMode'] == 0o400 and
+                (info.st_dev, info.st_ino, info.st_size, info.st_uid, info.st_gid,
+                 stat.S_IMODE(info.st_mode)) ==
+                (receipt['snapshotDevice'], receipt['snapshotInode'], receipt['snapshotSize'],
+                 0, 0, 0o400) and receipt['snapshotUid'] == receipt['snapshotGid'] == 0 and
+                sha(program) == receipt['introProgramSha256'],
+                'Initial protected same-snapshot transport identity changed')
+        require(receipt['entrySnapshotPath'] == original['entrySnapshotPath'] == entry_snapshot and
+                receipt['entrySnapshotSize'] == original['entrySnapshotSize'] ==
+                len(f.read(entry_snapshot)) and
+                receipt['entrySnapshotMode'] == original['entrySnapshotMode'] == 0o400 and
+                (entry_info.st_dev, entry_info.st_ino, entry_info.st_size,
+                 entry_info.st_uid, entry_info.st_gid, stat.S_IMODE(entry_info.st_mode)) ==
+                (receipt['entrySnapshotDevice'], receipt['entrySnapshotInode'],
+                 receipt['entrySnapshotSize'], 0, 0, 0o400) and
+                receipt['entrySnapshotUid'] == receipt['entrySnapshotGid'] == 0 and
+                sha(f.read(entry_snapshot)) == receipt['introEntrySha256'],
+                'Protected Node entry snapshot identity changed')
+        self._transport_finalize_chain(original['operationId'], original, raw_plan,
+            raw_approval, raw_intent, receipt_raw, pem, request, audit)
+
+    def _transport_finalize_chain(self, operation, original, raw_plan, raw_approval,
+                                  raw_intent, receipt_raw, pem, request, audit):
+        f = self.files
+        flat = STATE+'/'+operation+'.standalone-transport-finalize.intent.json'
+        if f.absent(flat): return
+        body = exact_json(f.read(flat, 131072))
+        require(isinstance(body, dict) and set(body) == {'contract','operationId',
+            'originalOperationId','planSha256','approvalSha256','requestReceiptSha256',
+            'authorizedAt','plan','approvalEnvelope'} and
+            body['contract'] == 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_INTENT' and
+            body['originalOperationId'] == operation, 'Present finalization intent differs')
+        plan, envelope = body['plan'], body['approvalEnvelope']
+        require(isinstance(plan, dict) and set(plan) == {'contract','operationId','action',
+            'hostIdentitySha256','bootId','originalOperationId','originalPlanSha256',
+            'originalApprovalSha256','originalIntentSha256','requestReceiptSha256','execution','effects'} and
+            plan['contract'] == 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_PLAN' and
+            plan['action'] == 'FINALIZE_EXACT_INITIAL_TRANSPORT_AUDIT_RECEIPT_ONLY' and
+            UUID.fullmatch(plan['operationId']) and UUID.fullmatch(plan['bootId']) and
+            plan['operationId'] == body['operationId'] and plan['operationId'] != operation and
+            plan['operationId'] != '9afc7218-4757-4f44-87e1-6096706bad44' and
+            plan['originalOperationId'] == operation and
+            plan['hostIdentitySha256'] == original['hostIdentitySha256'] and
+            plan['originalPlanSha256'] == sha(raw_plan) and
+            plan['originalApprovalSha256'] == sha(raw_approval) and
+            plan['originalIntentSha256'] == sha(raw_intent) and
+            plan['requestReceiptSha256'] == body['requestReceiptSha256'] == sha(receipt_raw) and
+            body['planSha256'] == sha(canonical(plan)) and
+            body['approvalSha256'] == sha(canonical(envelope)),
+            'Present finalization original/new authority lineage differs')
+        effects = {'auditReceiptFinalizeOnly':True,'sourceSnapshotMutation':False,
+            'targetExecution':False,'controllerPointerMutation':False,'applicationRestart':False,
+            'systemdUnitMutation':False,'daemonReload':False,'dataMutation':False,
+            'timerMutation':False,'workerGrantMutation':False,'providerEffect':False,'privateKeyTransport':False}
+        execution = plan['execution']
+        require(isinstance(execution, dict) and set(execution) == {'code','invocation','host',
+            'nativeControlLockIdentity','trustRoot','auditDirectoryIdentity','requestDirectoryIdentity',
+            'destinations','limits','effects'} and plan['effects'] == execution['effects'] == effects and
+            execution['host'] == {'hostIdentitySha256':plan['hostIdentitySha256'],'bootId':plan['bootId']} and
+            execution['nativeControlLockIdentity'] == original['execution']['nativeControlLockIdentity'] and
+            execution['trustRoot'] == {'path':ROOT_PEM,'rawSha256':sha(pem)} and
+            execution['invocation'] == {'interpreter':'/usr/bin/python3','flags':['-I','-B','-c'],
+                'mode':'memory-captured-python-c','action':'finalize-reconcile'} and
+            execution['limits'] == {'archiveBytes':MAX_ARCHIVE,'leafBytes':MAX_LEAF,
+                'authorizationBytes':131072,'packetBytes':131072,'transportProgramBytes':65536,
+                'lockWaitSeconds':120,'totalSeconds':180}, 'Finalization closed effect/invocation map differs')
+        code = execution['code']
+        require(isinstance(code, dict) and set(code) == {'finalizeEntrySha256','transportProgramSha256',
+            'pythonLoaderSha256','nodeExecutableSha256','nodeRealpath','pythonExecutableSha256','pythonRealpath'} and
+            all(isinstance(code[k], str) and HASH.fullmatch(code[k]) for k in
+                ('finalizeEntrySha256','transportProgramSha256','pythonLoaderSha256',
+                 'nodeExecutableSha256','pythonExecutableSha256')) and
+            code['pythonLoaderSha256'] == 'a44a7637f5d4a89f7ab7084fc1a300c35727fe20b78e44ad4491fbba91191bff' and
+            code['nodeRealpath'].startswith('/usr/bin/node') and
+            code['pythonRealpath'].startswith('/usr/bin/python3'), 'Finalization code closure differs')
+        require(execution['destinations'] == {
+            flat:{'kind':'FLAT_FINALIZE_INTENT','preimage':'ABSENT','uid':0,'gid':0,'mode':0o400},
+            audit+'/receipt.json':{'kind':'ORIGINAL_AUDIT_RECEIPT','preimage':'ABSENT',
+                'sha256':sha(receipt_raw),'bytes':len(receipt_raw),'uid':0,'gid':0,'mode':0o400}},
+            'Finalization two-write destination map differs')
+        for path, key in ((audit,'auditDirectoryIdentity'),(request,'requestDirectoryIdentity')):
+            st = f.p(path).lstat()
+            expected = execution[key]
+            require(isinstance(expected, dict) and set(expected) == {'device','inode','uid','gid','mode'} and
+                expected['uid'] == expected['gid'] == 0 and expected['mode'] == 0o700 and
+                stat.S_ISDIR(st.st_mode) and
+                (st.st_dev,st.st_ino,st.st_uid,st.st_gid,stat.S_IMODE(st.st_mode)) ==
+                tuple(expected[k] for k in ('device','inode','uid','gid','mode')),
+                'Finalization retained private directory identity differs')
+        require(isinstance(envelope, dict) and set(envelope) == {'approval','signature'},
+                'Finalization approval envelope differs')
+        approval = envelope['approval']
+        require(isinstance(approval, dict) and set(approval) == {'contract','operationId',
+            'hostIdentitySha256','planSha256','action','issuedAt','expiresAt'} and
+            approval['contract'] == 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_APPROVAL' and
+            approval['operationId'] == plan['operationId'] and approval['action'] == plan['action'] and
+            approval['hostIdentitySha256'] == plan['hostIdentitySha256'] and
+            approval['planSha256'] == body['planSha256'] and
+            instant(exact_json(receipt_raw)['acceptedAt']) <= instant(body['authorizedAt']) and
+            re.fullmatch(r'[A-Za-z0-9+/]{86}==', envelope['signature']),
+            'Finalization approval/timestamp lineage differs')
+        require_approval_time(approval, body['authorizedAt'])
+        value = {'publicKey':pem.decode('ascii'),'message':base64.b64encode(canonical(approval)).decode(),
+                 'signature':envelope['signature']}
+        checked = subprocess.run([self.node,'--input-type=module','-e',VERIFY_SIGNATURE],
+            input=canonical(value), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=CLEAN, timeout=15, check=False)
+        require(checked.returncode == 0 and checked.stdout == b'PASS' and not checked.stderr and
+            f.read(audit+'/receipt.json',131072) == receipt_raw ==
+            f.read(request+'/transport-receipt.json',131072), 'Finalization public signature/postimage differs')
+
+    def _preimage(self, plan):
+        f = self.files
+        require(sha(f.read('/etc/machine-id', 65536).strip()) == plan['hostIdentitySha256'],
+                'Intro host identity drift')
+        boot = f.p('/proc/sys/kernel/random/boot_id').read_text().strip()
+        require(boot == plan['bootId'], 'Intro boot identity drift')
+        core = f.p(CORE)
+        require(core.is_symlink() and core.lstat().st_uid == 0 and
+                os.readlink(core) == plan['oldCorePointer'], 'Serving predecessor pointer drift')
+        old = f'/usr/local/lib/leetplus-compose/{B0_RELEASE}'
+        manifest_raw = f.read(old+'/install-manifest.json', 65536)
+        require(sha(manifest_raw) == B0_MANIFEST, 'Accepted b0 manifest drift')
+        manifest = exact_json(manifest_raw)
+        require(manifest.get('releaseSha') == B0_RELEASE and isinstance(manifest.get('files'), dict),
+                'Accepted b0 manifest identity differs')
+        for name, expected in manifest['files'].items():
+            require(re.fullmatch(r'[A-Za-z0-9_.@-]+', name) and HASH.fullmatch(expected) and
+                    sha(f.read(old+'/'+name)) == expected, 'Accepted predecessor full file map drift')
+        require(sha(f.read(old+'/control_handoff.py')) == B0_EXECUTOR and
+                sha(f.read(old+'/install-control.py')) == B0_INSTALLER and
+                sha(f.read(ACTIVE, 65536)) == plan['oldActiveRecordSha256'] and
+                sha(f.read(HANDOFF, 65536)) == plan['oldHandoffPointerSha256'] and
+                f.absent(PENDING), 'Native predecessor active/pending preimage drift')
+        return sha(canonical({'oldCorePointer': plan['oldCorePointer'],
+            'predecessorManifestSha256': plan['predecessorManifestSha256'],
+            'oldActiveRecordSha256': plan['oldActiveRecordSha256'],
+            'oldHandoffPointerSha256': plan['oldHandoffPointerSha256'],
+            'pendingHandoffAbsent': True}))
+
+    def prepare(self, operation):
+        plan, envelope, pem, raw, members, files = self._inputs(operation)
+        with self.control_lock(plan, shared=True):
+            self._preimage(plan)
+            self.files.installed_anchor_map(plan)
+            for destination in plan['destinationPreimages']:
+                self.files.pending_ancestors(destination)
+            self.files.check_directory_preimages(plan)
+            self.files.reject_mounts(set(plan['destinationPreimages']) | set(plan['directoryPreimages']))
+            require(all(self.files.absent(p) for p in plan['destinationPreimages']),
+                    'Initial intro destination already exists')
+        return {'decision': 'PREPARED_NOT_AUTHORIZATION', 'operationId': operation,
+                'planSha256': sha(raw['plan.json'])}
+
+    def apply(self, operation):
+        plan, envelope, pem, raw, members, files = self._inputs(operation)
+        f = self.files
+        with self.control_lock(plan):
+            preimage = self._preimage(plan)
+            f.installed_anchor_map(plan)
+            require(all(f.absent(p) for p in plan['destinationPreimages']),
+                    'Existing intro entry/intent requires read-only reconciliation')
+            for destination in plan['destinationPreimages']:
+                f.pending_ancestors(destination)
+            f.check_directory_preimages(plan)
+            f.reject_mounts(set(plan['destinationPreimages']) | set(plan['directoryPreimages']))
+            verified = validate_approval(plan, envelope, pem, node=self.node)
+            live = lambda: require_approval_time(verified, utc_now())
+            authorized = utc_now()
+            # No lock wait or crypto child follows this exact timestamp fence.
+            require_approval_time(verified, authorized)
+            intent = {'contract': INTENT, 'operationId': operation,
+                      'planSha256': sha(raw['plan.json']), 'approvalSha256': sha(raw['approval.json']),
+                      'authorizedAt': authorized}
+            # The native state root already exists; no new parent precedes this intent.
+            flat_intent = STATE+'/'+operation+'.standalone-intro.intent.json'
+            live()
+            f.publish(flat_intent, canonical(intent), 0o400)
+            f.create_approved_directories(plan, before_write=live)
+            audit = AUDITS+'/'+operation
+            f.ensure_parent(audit); live(); f.make_directory(audit)
+            for name, content in (('plan.json', raw['plan.json']), ('approval.json', raw['approval.json']),
+                                  ('intent.json', canonical(intent))):
+                live()
+                f.publish(audit+'/'+name, content, 0o400)
+            target = plan['generationDestination']
+            staging = GENERATIONS+'/.intro-'+operation+'.pending'
+            f.ensure_parent(staging); live(); f.make_directory(staging)
+            live(); f.make_directory(staging+'/payload')
+            directories = sorted({str(Path(name).parent) for name in members if '/' in name},
+                                 key=lambda value: (value.count('/'), value))
+            expanded = set()
+            for value in directories:
+                parts = Path(value).parts
+                for length in range(1, len(parts)+1):
+                    parent = '/'.join(parts[:length])
+                    if parent not in expanded:
+                        live()
+                        f.make_directory(staging+'/payload/'+parent)
+                        expanded.add(parent)
+            for name in sorted(members):
+                verified = validate_approval(plan, envelope, pem, node=self.node)
+                live()
+                f.publish(staging+'/payload/'+name, members[name], 0o400)
+            installed_at = utc_now()
+            generation = {'contract': GENERATION, 'decision': 'PASS', 'operationId': operation,
+                'sourceRelease': plan['sourceRelease'], 'sourceTreeSha': plan['sourceTreeSha'],
+                'sourceReceiptSha256': plan['sourceReceiptSha256'],
+                'introPlanSha256': sha(raw['plan.json']),
+                'introApprovalSha256': sha(raw['approval.json']), 'introIntentSha256': sha(canonical(intent)),
+                'generationRootManifestSha256': plan['generationRootManifestSha256'],
+                'generationSourceMapSha256': plan['generationSourceMapSha256'],
+                'finalAdmissionSha256': plan['finalAdmissionSha256'],
+                'composeAdmissionSha256': plan['composeAdmissionSha256'], 'installedAt': installed_at}
+            live(); f.publish(staging+'/receipt.json', canonical(generation), 0o400)
+            live(); f.publish(staging+'/source-receipt.json', raw['source-receipt.json'], 0o400)
+            verified = validate_approval(plan, envelope, pem, node=self.node)
+            require(self._preimage(plan) == preimage, 'Predecessor drift before generation publication')
+            live()
+            f.rename_new(staging, target)
+            for destination, source_name in list(DEST_SOURCES.items())[:-1]:
+                verified = validate_approval(plan, envelope, pem, node=self.node)
+                f.ensure_parent(destination)
+                live()
+                f.publish(destination, members[source_name] if source_name else b'', MODES[destination])
+            require(self._preimage(plan) == preimage, 'Serving predecessor changed during inert intro')
+            verified = validate_approval(plan, envelope, pem, node=self.node)
+            accepted_at = utc_now()
+            validate_approval(plan, envelope, pem, at=accepted_at, node=self.node)
+            parent_map_sha = sha(canonical(f.installed_parent_map()))
+            anchor_map_sha = sha(canonical(f.installed_anchor_map(plan)))
+            receipt = {'contract': RECEIPT, 'decision': 'PASS', 'operationId': operation,
+                'planSha256': sha(raw['plan.json']), 'approvalSha256': sha(raw['approval.json']),
+                'intentSha256': sha(canonical(intent)), 'generationReceiptSha256': sha(canonical(generation)),
+                'generationRootManifestSha256': plan['generationRootManifestSha256'],
+                'installedDestinationsSha256': sha(canonical({name: plan['dormantDestinations'][name]
+                    for name in sorted(plan['dormantDestinations'], key=lambda value: value.encode())})),
+                'installedParentDirectoriesSha256': parent_map_sha,
+                'installedAnchorDirectoriesSha256': anchor_map_sha,
+                'predecessorPostimageSha256': preimage, 'acceptedAt': accepted_at}
+            live()
+            f.publish(audit+'/receipt.pending.json', canonical(receipt), 0o400)
+            # Persist the timely exact terminal bytes before the last dormant
+            # leaf. A later recovery never invents an original acceptedAt.
+            last_destination, last_source = list(DEST_SOURCES.items())[-1]
+            verified = validate_approval(plan, envelope, pem, node=self.node)
+            f.ensure_parent(last_destination); live()
+            f.publish(last_destination, members[last_source] if last_source else b'', MODES[last_destination])
+            require(self._preimage(plan) == preimage, 'Predecessor changed after last dormant leaf')
+            self.pending_terminal(operation)
+            live()
+            f.publish(audit+'/receipt.json', canonical(receipt), 0o400)
+        return {'decision': 'INTRODUCED_INERT_ONLY_NOT_ACTIVE', 'operationId': operation,
+                'generationReceiptSha256': sha(canonical(generation)),
+                'introReceiptSha256': sha(canonical(receipt))}
+
+    def pending_terminal(self, operation, require_receipt=False, current_predecessor=True):
+        """Prove the original timely marker and the entire final postimage."""
+        f=self.files;audit=AUDITS+'/'+operation
+        intent_raw=f.read(audit+'/intent.json',65536);intent=exact_json(intent_raw)
+        require(intent=={'contract':INTENT,'operationId':operation,
+            'planSha256':self.expected_plan_sha256,'approvalSha256':self.expected_approval_sha256,
+            'authorizedAt':intent.get('authorizedAt')} and
+            f.read(STATE+'/'+operation+'.standalone-intro.intent.json',65536)==intent_raw,
+            'Original INTRO timely flat/audit intent differs')
+        plan,envelope,pem,raw,members,_files=self._inputs(operation,historical_at=intent['authorizedAt'])
+        marker_raw=f.read(audit+'/receipt.pending.json',65536);marker=exact_json(marker_raw)
+        names={'plan.json','approval.json','intent.json','receipt.pending.json'}|({'receipt.json'} if require_receipt else set())
+        require({p.name for p in f.p(audit).iterdir()}==names,
+                'INTRO terminal audit has foreign/partial receipt')
+        for name in names:
+            info=f.p(audit+'/'+name).lstat()
+            require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and
+                    (info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode))==(0,0,0o400),
+                    'INTRO audit leaf metadata differs')
+        target=plan['generationDestination']
+        require({p.name for p in f.p(target).iterdir()}=={'payload','receipt.json','source-receipt.json'} and
+            f.absent(GENERATIONS+'/.intro-'+operation+'.pending'), 'INTRO generation closure/staging differs')
+        observed={};directories=set()
+        for item in f.p(target+'/payload').rglob('*'):
+            rel=str(item.relative_to(f.p(target+'/payload'))).replace('\\','/')
+            info=item.lstat()
+            if stat.S_ISDIR(info.st_mode):
+                directories.add(rel)
+                require((info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode))==(0,0,0o700),
+                        'INTRO generation directory metadata differs')
+            else:
+                require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and
+                    (info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode))==(0,0,0o400),
+                    'INTRO generation foreign/special leaf')
+                observed[rel]=f.read(target+'/payload/'+rel)
+        expected_dirs={str(parent).replace('\\','/') for name in members for parent in Path(name).parents if str(parent)!='.'}
+        require(directories==expected_dirs and observed==members and f.read(target+'/source-receipt.json')==raw['source-receipt.json'],
+                'INTRO complete source19/manifest/source receipt differs')
+        for name in (audit,target,target+'/payload'):
+            st=f.p(name).lstat()
+            require(stat.S_ISDIR(st.st_mode) and (st.st_uid,st.st_gid,stat.S_IMODE(st.st_mode))==(0,0,0o700),
+                    'INTRO private terminal root metadata differs')
+        generation_raw=f.read(target+'/receipt.json',65536);generation=exact_json(generation_raw)
+        require(generation=={'contract':GENERATION,'decision':'PASS','operationId':operation,
+            'sourceRelease':plan['sourceRelease'],'sourceTreeSha':plan['sourceTreeSha'],
+            'sourceReceiptSha256':plan['sourceReceiptSha256'],'introPlanSha256':sha(raw['plan.json']),
+            'introApprovalSha256':sha(raw['approval.json']),'introIntentSha256':sha(intent_raw),
+            'generationRootManifestSha256':plan['generationRootManifestSha256'],
+            'generationSourceMapSha256':plan['generationSourceMapSha256'],
+            'finalAdmissionSha256':plan['finalAdmissionSha256'],'composeAdmissionSha256':plan['composeAdmissionSha256'],
+            'installedAt':generation.get('installedAt')}, 'INTRO generation receipt lineage differs')
+        parents=f.installed_parent_map();anchors=f.installed_anchor_map(plan)
+        destinations={}
+        for name,expected in plan['dormantDestinations'].items():
+            info=f.p(name).lstat();data=f.read(name)
+            require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and
+                (info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode))==(0,0,expected['mode']) and
+                sha(data)==expected['sha256'], 'INTRO dormant complete postimage differs')
+            destinations[name]=expected
+        predecessor=sha(canonical({'oldCorePointer':plan['oldCorePointer'],
+            'predecessorManifestSha256':plan['predecessorManifestSha256'],
+            'oldActiveRecordSha256':plan['oldActiveRecordSha256'],
+            'oldHandoffPointerSha256':plan['oldHandoffPointerSha256'],'pendingHandoffAbsent':True}))
+        expected={'contract':RECEIPT,'decision':'PASS','operationId':operation,
+            'planSha256':sha(raw['plan.json']),'approvalSha256':sha(raw['approval.json']),
+            'intentSha256':sha(intent_raw),'generationReceiptSha256':sha(generation_raw),
+            'generationRootManifestSha256':plan['generationRootManifestSha256'],
+            'installedDestinationsSha256':sha(canonical({k:destinations[k] for k in sorted(destinations,key=lambda k:k.encode())})),
+            'installedParentDirectoriesSha256':sha(canonical(parents)),
+            'installedAnchorDirectoriesSha256':sha(canonical(anchors)),
+            'predecessorPostimageSha256':predecessor,'acceptedAt':marker.get('acceptedAt')}
+        require(marker==expected and instant(intent['authorizedAt'])<=instant(generation['installedAt'])<=instant(marker['acceptedAt']),
+                'INTRO deterministic timely terminal marker differs')
+        validate_approval(plan,envelope,pem,at=marker['acceptedAt'],node=self.node)
+        if require_receipt:require(f.read(audit+'/receipt.json',65536)==marker_raw,
+                                  'INTRO terminal receipt is not the exact timely marker')
+        else:require(f.absent(audit+'/receipt.json'),'Existing/torn/foreign INTRO receipt cannot be finalized')
+        f.reject_mounts(set(plan['destinationPreimages'])|set(plan['directoryPreimages']))
+        if current_predecessor:require(self._preimage(plan)==predecessor,'INTRO current predecessor drift')
+        postimage={'generationReceiptSha256':sha(generation_raw),'sourceFiles':{k:sha(v) for k,v in sorted(observed.items())},
+            'destinations':{k:destinations[k] for k in sorted(destinations,key=lambda k:k.encode())},
+            'parents':parents,'anchors':anchors,'predecessorPostimageSha256':predecessor,'markerSha256':sha(marker_raw)}
+        return {'plan':plan,'envelope':envelope,'intentRaw':intent_raw,'markerRaw':marker_raw,
+                'postimage':postimage,'postimageSha256':sha(canonical(postimage)),
+                'originalPlanRaw':raw['plan.json'],'originalApprovalRaw':raw['approval.json']}
+
+    def finalize(self, packet, operation):
+        require(isinstance(packet,dict) and set(packet)=={'finalizePlan','finalizeApprovalEnvelope'},
+                'Closed INTRO finalize packet required')
+        plan=validate_finalize_plan(packet['finalizePlan']);envelope=packet['finalizeApprovalEnvelope']
+        require(plan['operationId']==operation,'Protected INTRO finalize UUID differs')
+        f=self.files;pem=f.read(ROOT_PEM,4096);e=plan['execution']
+        require(sha(pem)==e['trustRoot']['rawSha256'],'INTRO finalize inherited root differs')
+        for logical,path_field,hash_field in (('/usr/bin/node','nodeRealpath','nodeExecutableSha256'),
+            ('/usr/bin/python3','pythonRealpath','pythonExecutableSha256')):
+            real=os.path.realpath(f.p(logical))
+            actual='/'+str(Path(real).relative_to(f.fixture_prefix)).replace('\\','/') if f.fixture_prefix is not None else real
+            require(actual==e['code'][path_field] and sha(f.read(actual,128*1024*1024))==e['code'][hash_field],
+                    'INTRO finalize fixed interpreter bytes differ')
+        validate_approval(plan,envelope,pem,node=self.node,finalize=True)
+        with self.control_lock({'nativeControlLockIdentity':e['nativeControlLockIdentity']}):
+            require(sha(f.read('/etc/machine-id',65536).strip())==plan['hostIdentitySha256'] and
+                f.p('/proc/sys/kernel/random/boot_id').read_text().strip()==plan['bootId'],
+                'INTRO finalize host/boot differs')
+            original=plan['originalOperationId'];audit=AUDITS+'/'+original
+            state=self.pending_terminal(original)
+            self.match_finalize_state(plan,state)
+            flat=STATE+'/'+original+'.standalone-intro-finalize.intent.json'
+            require(f.absent(flat),'Existing INTRO finalize intent requires read-only recovery')
+            verified=validate_approval(plan,envelope,pem,node=self.node,finalize=True)
+            authorized=utc_now();require_approval_time(verified,authorized)
+            intent={'contract':FINALIZE_INTENT,'operationId':operation,'originalOperationId':original,
+                'planSha256':sha(canonical(plan)),'approvalSha256':sha(canonical(envelope)),
+                'markerSha256':plan['markerSha256'],'authorizedAt':authorized,
+                'plan':plan,'approvalEnvelope':envelope}
+            require_approval_time(verified,utc_now());f.publish(flat,canonical(intent),0o400)
+            self.match_finalize_state(plan,self.pending_terminal(original))
+            verified=validate_approval(plan,envelope,pem,node=self.node,finalize=True)
+            require_approval_time(verified,utc_now());f.publish(audit+'/receipt.json',state['markerRaw'],0o400)
+            self.pending_terminal(original,require_receipt=True)
+            return {'decision':'INTRO_AUDIT_RECEIPT_FINALIZED_ONLY','operationId':operation,
+                'originalOperationId':original,'finalizePlanSha256':sha(canonical(plan)),
+                'finalizeApprovalSha256':sha(canonical(envelope)),'finalizeIntentSha256':sha(canonical(intent)),
+                'markerSha256':sha(state['markerRaw']),'introReceiptSha256':sha(f.read(audit+'/receipt.json')),
+                'acceptedAt':utc_now()}
+
+    def match_finalize_state(self, plan, state):
+        e=plan['execution'];original=plan['originalOperationId'];f=self.files
+        require(plan['originalPlanSha256']==sha(state['originalPlanRaw']) and
+            plan['originalApprovalSha256']==sha(state['originalApprovalRaw']) and
+            plan['originalIntentSha256']==sha(state['intentRaw']) and plan['markerSha256']==sha(state['markerRaw']) and
+            plan['postimageSha256']==state['postimageSha256'] and
+            e['nativeControlLockIdentity']==state['plan']['nativeControlLockIdentity'],
+            'INTRO finalize complete original/postimage binding differs')
+        info=f.p(AUDITS+'/'+original).lstat();marker=f.p(AUDITS+'/'+original+'/receipt.pending.json').lstat()
+        require(e['auditDirectoryIdentity']=={'device':info.st_dev,'inode':info.st_ino,'uid':info.st_uid,
+            'gid':info.st_gid,'mode':stat.S_IMODE(info.st_mode)} and
+            e['markerIdentity']=={'device':marker.st_dev,'inode':marker.st_ino,'bytes':marker.st_size,
+                'uid':marker.st_uid,'gid':marker.st_gid,'mode':stat.S_IMODE(marker.st_mode),'ctimeNs':str(marker.st_ctime_ns)},
+            'INTRO finalize exact directory/marker preimage differs')
+
+    def reconcile_finalize(self, original):
+        f=self.files;flat=STATE+'/'+original+'.standalone-intro-finalize.intent.json'
+        if f.absent(flat):return {'decision':'NO_INTRO_FINALIZE_INTENT','operationId':original}
+        try:
+            raw=f.read(flat,131072);intent=exact_json(raw);plan=validate_finalize_plan(intent['plan'])
+            envelope=intent['approvalEnvelope'];pem=f.read(ROOT_PEM,4096)
+            require(intent=={'contract':FINALIZE_INTENT,'operationId':plan['operationId'],'originalOperationId':original,
+                'planSha256':sha(canonical(plan)),'approvalSha256':sha(canonical(envelope)),
+                'markerSha256':plan['markerSha256'],'authorizedAt':intent.get('authorizedAt'),
+                'plan':plan,'approvalEnvelope':envelope} and plan['originalOperationId']==original and
+                sha(pem)==plan['execution']['trustRoot']['rawSha256'], 'INTRO finalize historical intent differs')
+            validate_approval(plan,envelope,pem,at=intent['authorizedAt'],node=self.node,finalize=True)
+            present=not f.absent(AUDITS+'/'+original+'/receipt.json')
+            state=self.pending_terminal(original,require_receipt=present,current_predecessor=False)
+            self.match_finalize_state(plan,state)
+            require(instant(exact_json(state['markerRaw'])['acceptedAt'])<=instant(intent['authorizedAt']),
+                    'INTRO finalize predates original timely marker')
+            return {'decision':('EXACT_INTRO_FINALIZE_TERMINAL' if present else 'INTRO_FINALIZE_INTENT_ONLY_HOLD'),
+                'operationId':plan['operationId'],'originalOperationId':original,'finalizeIntentSha256':sha(raw)}
+        except (ValueError,OSError,KeyError,TypeError) as error:
+            return {'decision':'INTRO_FINALIZE_CONTRADICTORY_HOLD','operationId':original,'reason':str(error)[:200]}
+
+    def reconcile(self, operation):
+        require(UUID.fullmatch(operation), 'Exact existing intro UUID required')
+        f = self.files
+        audit = AUDITS+'/'+operation
+        if f.absent(audit+'/receipt.json'):
+            if f.absent(audit+'/receipt.pending.json'):
+                return {'decision':'INTRO_INTENT_OR_PARTIAL_HOLD','operationId':operation}
+            try:self.pending_terminal(operation)
+            except (ValueError,OSError,KeyError,TypeError) as error:
+                return {'decision':'INTRO_PARTIAL_OR_CONTRADICTORY_HOLD','operationId':operation,'reason':str(error)[:200]}
+            return {'decision':'EXACT_INTRO_POSTIMAGE_REQUIRES_SEPARATE_FINALIZE','operationId':operation}
+        try:self.pending_terminal(operation,require_receipt=True,current_predecessor=False)
+        except (ValueError,OSError,KeyError,TypeError) as error:
+            return {'decision':'INTRO_PARTIAL_OR_CONTRADICTORY_HOLD','operationId':operation,'reason':str(error)[:200]}
+        if not f.absent(STATE+'/'+operation+'.standalone-intro-finalize.intent.json'):
+            checked=self.reconcile_finalize(operation)
+            if checked['decision']!='EXACT_INTRO_FINALIZE_TERMINAL':return checked
+        raw = f.read(audit+'/plan.json', 65536)
+        plan = validate_plan(exact_json(raw))
+        require(sha(raw) == self.expected_plan_sha256 and
+                sha(f.read(audit+'/approval.json', 65536)) == self.expected_approval_sha256,
+                'Historical intro request changed after protected gate')
+        receipt_raw = f.read(audit+'/receipt.json', 65536)
+        receipt = exact_json(receipt_raw)
+        require(plan['operationId'] == operation and receipt.get('operationId') == operation and
+                receipt.get('planSha256') == sha(raw), 'Existing intro lineage differs')
+        # No writes and no fresh preimage/approval extension. The narrow verifier
+        # validates the original timely intent and complete installed postimage.
+        return {'decision': 'EXISTING_RECEIPT_REQUIRES_INDEPENDENT_VERIFIER',
+                'operationId': operation, 'sourceRelease': plan['sourceRelease'],
+                'introReceiptSha256': sha(receipt_raw)}
+
+
+def main():
+    require(os.name == 'posix' and os.getuid() == 0, 'Fixed Linux root initial intro invocation required')
+    require(set(os.environ) <= set(CLEAN), 'Initial intro requires a fixed clean environment')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', choices=('prepare', 'apply', 'reconcile','finalize','reconcile-finalize'), required=True)
+    parser.add_argument('--operation-id', required=True)
+    parser.add_argument('--expected-plan-sha256')
+    parser.add_argument('--expected-approval-sha256')
+    parser.add_argument('--captured-plan-base64')
+    parser.add_argument('--captured-approval-base64')
+    parser.add_argument('--captured-program-sha256')
+    args = parser.parse_args()
+    # A hard parent/runtime timeout is additionally part of the protected
+    # operator first-execution transcript; this in-process bound is fail-closed.
+    def expired(signum, frame):
+        raise TimeoutError('Initial introduction deadline exceeded; reconcile only')
+    signal.signal(signal.SIGALRM, expired)
+    signal.alarm(180)
+    try:
+        if args.mode in ('finalize','reconcile-finalize'):
+            require(HASH.fullmatch(args.captured_program_sha256 or ''),'Protected finalize captured source digest required')
+            raw=sys.stdin.buffer.read(131073);require(len(raw)<=131072,'INTRO finalize packet exceeds bound')
+            packet=exact_json(raw,131072)
+            require(isinstance(packet,dict) and set(packet)=={'finalizePlan','finalizeApprovalEnvelope'},
+                    'Closed INTRO finalize packet required')
+            plan=validate_finalize_plan(packet['finalizePlan']);envelope=packet['finalizeApprovalEnvelope']
+            require(plan['execution']['code']['introProgramSha256']==args.captured_program_sha256,
+                    'Captured INTRO finalize source differs from signed code')
+            original=plan['originalOperationId'];f=NativeFiles()
+            original_plan=f.read(AUDITS+'/'+original+'/plan.json',65536)
+            original_approval=f.read(AUDITS+'/'+original+'/approval.json',65536)
+            engine=InitialIntro(files=f,expected_plan_sha256=sha(original_plan),
+                expected_approval_sha256=sha(original_approval),captured_plan=original_plan,captured_approval=original_approval)
+            if args.mode=='finalize':value=engine.finalize(packet,args.operation_id)
+            else:
+                require(args.operation_id==original,'Read-only original INTRO UUID differs')
+                value=engine.reconcile_finalize(original)
+            sys.stdout.buffer.write(canonical(value));return
+        require(HASH.fullmatch(args.expected_plan_sha256) and
+                HASH.fullmatch(args.expected_approval_sha256), 'Expected captured request digest required')
+        require(len(args.captured_plan_base64) <= 87384 and
+                len(args.captured_approval_base64) <= 87384,
+                'Captured operator authorization encoding exceeds bound')
+        captured_plan = base64.b64decode(args.captured_plan_base64, validate=True)
+        captured_approval = base64.b64decode(args.captured_approval_base64, validate=True)
+        result = getattr(InitialIntro(expected_plan_sha256=args.expected_plan_sha256,
+                                      expected_approval_sha256=args.expected_approval_sha256,
+                                      captured_plan=captured_plan,
+                                      captured_approval=captured_approval),
+                         args.mode)(args.operation_id)
+        sys.stdout.buffer.write(canonical(result))
+    finally:
+        signal.alarm(0)
+
+
+if __name__ == '__main__':
+    main()

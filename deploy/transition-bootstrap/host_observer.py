@@ -4,7 +4,8 @@ The enrolled bundle and root paths must be fixed by a separately admitted
 installer. This module never imports or executes staged target code. The only
 controller import is the already accepted, byte-attested serving predecessor.
 """
-import importlib.util
+import types
+import base64
 import json
 import os
 import re
@@ -14,6 +15,69 @@ from pathlib import Path
 from inventory import admitted_control, digest
 from enrollment import validate_enrollment_chain
 from native_boundary import canonical, require, secure_read, secure_directory, verify_bundle_inventory
+
+
+def captured_predecessor(old, name):
+    raw = old.get('capturedExecutor')
+    require(isinstance(raw, bytes) and digest(raw) == old['files'].get('control_handoff.py'),
+            'Exact captured predecessor executor required')
+    module = types.ModuleType(name)
+    module.__file__ = str(old['root'] / 'control_handoff.py')
+    fields = {'control-handoff-authority.mjs': 'capturedAuthority',
+              'contract.mjs': 'capturedContract', 'control-handoff-runtime.mjs': 'capturedRuntime',
+              'orchestrator.mjs': 'capturedOrchestrator',
+              'worker-continuation.mjs': 'capturedWorkerContinuation',
+              'worker-authority.mjs': 'capturedWorkerAuthority'}
+    sources = {leaf: old.get(field) for leaf, field in fields.items()}
+    require(all(isinstance(value, bytes) and digest(value) == old['files'].get(leaf)
+                for leaf, value in sources.items()),
+            'Captured predecessor Node runtime closure required')
+    urls = {}
+
+    def link(leaf, visiting=()):
+        require(leaf in sources and leaf not in visiting, 'Unknown or cyclic captured predecessor import')
+        if leaf in urls:
+            return urls[leaf]
+        source = sources[leaf]
+        for quote, relative in re.findall(rb"\bfrom\s+(['\"])(\./[A-Za-z0-9_.-]+)\1", source):
+            dependency = relative[2:].decode('ascii')
+            marker = quote + relative + quote
+            source = source.replace(marker, quote + link(dependency, (*visiting, leaf)).encode() + quote)
+        require(not re.search(rb"(?:from\s+|import\s*\()['\"]\.{1,2}/", source),
+                'Unlinked predecessor relative import')
+        url = 'data:text/javascript;base64,' + base64.b64encode(source).decode('ascii')
+        require(len(url) <= 16 * 1024 * 1024, 'Captured predecessor Node closure exceeds bound')
+        urls[leaf] = url
+        return url
+
+    roots = {leaf: link(leaf) for leaf in ('control-handoff-authority.mjs', 'control-handoff-runtime.mjs')}
+    exec(compile(raw, module.__file__, 'exec'), module.__dict__)
+    original_run = module.run
+
+    def captured_run(args, data=None, timeout=25):
+        if args[:3] == ['/usr/bin/node', '--input-type=module', '-e']:
+            require(len(args) == 4 and isinstance(args[3], str) and isinstance(data, bytes),
+                    'Unknown predecessor Node code invocation')
+            matches = [(leaf, url) for leaf, url in roots.items()
+                       if args[3].count("'" + (old['root'] / leaf).as_uri() + "'") == 1]
+            require(len(matches) == 1, 'Unknown predecessor Node code import')
+            leaf, url = matches[0]
+            script = args[3].replace("'" + (old['root'] / leaf).as_uri() + "'", "'" + url + "'")
+            marker = "fs.readFileSync(0,'utf8')"
+            require(script.count(marker) == 1, 'Unknown predecessor Node input ABI')
+            script = script.replace(marker, 'globalThis.__leetplusCapturedInputRaw')
+            packet = canonical({'programUrl': 'data:text/javascript;base64,' +
+                                base64.b64encode(script.encode()).decode('ascii'),
+                                'inputBase64': base64.b64encode(data).decode('ascii')})
+            require(len(packet) <= 24 * 1024 * 1024, 'Captured predecessor execution packet exceeds bound')
+            loader = ("import fs from 'node:fs';const p=JSON.parse(fs.readFileSync(0,'utf8'));"
+                      "globalThis.__leetplusCapturedInputRaw=Buffer.from(p.inputBase64,'base64').toString('utf8');"
+                      "await import(p.programUrl);")
+            return original_run([*args[:3], loader], packet, timeout)
+        return original_run(args, data, timeout)
+
+    module.run = captured_run
+    return module
 
 A_RELEASE = 'b0cbf3a4f302b299762fa055f3bffe0376a91182'
 A_MANIFEST = 'f9bd049e7cc4c03f206c99c2bad92ae54b34deb28b4b6980abb1bc44432dfb75'
@@ -154,7 +218,7 @@ class EnrolledObserver:
         require(receipt_raw == canonical(receipt) and
                 set(receipt) == {'contract', 'decision', 'hostIdentitySha256', 'bundleFiles',
                                  'bundleSha256', 'publicRoots', 'installerReceiptSha256'} and
-                receipt['contract'] == 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V1' and
+                receipt['contract'] == 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V2' and
                 receipt['decision'] == 'ACCEPTED' and
                 all(HASH.fullmatch(value) for value in (receipt['bundleSha256'],
                     receipt['installerReceiptSha256'], receipt['hostIdentitySha256'])) and
@@ -190,15 +254,11 @@ class EnrolledObserver:
                                   release_sha=target_release)
         # Import only the accepted and fully attested predecessor. The staged
         # target remains data until after the standalone permit check.
-        verifier = old['root'] / 'control_handoff.py'
         require(old['manifestSha256'] == (A_MANIFEST if mode == 'A_TO_BRIDGE' else BRIDGE_MANIFEST) and
                 old['files']['control_handoff.py'] ==
                 (A_EXECUTOR if mode == 'A_TO_BRIDGE' else BRIDGE_EXECUTOR),
                 'Unexpected predecessor executor source')
-        spec = importlib.util.spec_from_file_location('accepted_predecessor_handoff', verifier)
-        require(spec is not None and spec.loader is not None, 'Accepted predecessor loader missing')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = captured_predecessor(old, 'accepted_predecessor_handoff')
         current = module.snapshot(old['root'])
         module.verify_current_controller_authority(current, module.installed(old_sha, executor=True), old['root'])
         require(not module.PENDING.exists(), 'Pending controller transition forbids bootstrap')
@@ -227,10 +287,7 @@ class EnrolledObserver:
         require(old['manifestSha256'] == (A_MANIFEST if mode == 'A_TO_BRIDGE' else BRIDGE_MANIFEST) and
                 old['files']['control_handoff.py'] == (A_EXECUTOR if mode == 'A_TO_BRIDGE' else BRIDGE_EXECUTOR),
                 'Predecessor bytes changed before postimage observation')
-        spec = importlib.util.spec_from_file_location('accepted_postimage_handoff', old['root'] / 'control_handoff.py')
-        require(spec is not None and spec.loader is not None, 'Pinned predecessor loader missing')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = captured_predecessor(old, 'accepted_postimage_handoff')
         current = module.snapshot(old['root'])
         timers = {unit: module.systemd(unit) for unit in module.TIMERS}
         return protected_from_accepted_snapshot(current, timers,
@@ -245,14 +302,14 @@ class EnrolledObserver:
         target = admitted_control(controls_root=self.controls_root, inbox_root=self.inbox_root, release_sha=target_release)
         require(old['manifestSha256'] == (A_MANIFEST if mode == 'A_TO_BRIDGE' else BRIDGE_MANIFEST),
                 'Predecessor manifest changed before native context')
-        spec = importlib.util.spec_from_file_location('accepted_native_context', old['root'] / 'control_handoff.py')
-        require(spec is not None and spec.loader is not None, 'Pinned predecessor loader missing')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = captured_predecessor(old, 'accepted_native_context')
         snapshot = module.snapshot(old['root'])
         previous = secure_read(module.POINTER, 8192) if module.POINTER.exists() or module.POINTER.is_symlink() else None
-        return {'old': {key: value for key, value in old.items() if key != 'root'},
-                'target': {key: value for key, value in target.items() if key != 'root'},
+        internal = {'root', 'capturedExecutor', 'capturedAuthority', 'capturedContract',
+                    'capturedRuntime', 'capturedOrchestrator', 'capturedWorkerContinuation',
+                    'capturedWorkerAuthority'}
+        return {'old': {key: value for key, value in old.items() if key not in internal},
+                'target': {key: value for key, value in target.items() if key not in internal},
                 'snapshot': snapshot, 'timers': {unit: module.systemd(unit) for unit in module.TIMERS},
                 'hostSha': digest(secure_read('/etc/machine-id', 65536).strip()),
                 'networkUnitSha': digest(secure_read(module.UNIT, 2 * 1024 * 1024)),

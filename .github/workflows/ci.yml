@@ -3020,6 +3020,7 @@ jobs:
           node --test deploy/leetplus-compose/*.test.mjs
           node --test deploy/transition-bootstrap/*.test.mjs
           sudo python3 -B deploy/transition-bootstrap/test_native_boundary.py
+          python3 -B deploy/transition-bootstrap/test_install_entry.py
           python3 -m unittest discover -s deploy/leetplus-compose -p test_control_handoff.py
           python3 -m unittest discover -s deploy/leetplus-compose -p test_external_cleanup_locks.py
           python3 -m unittest discover -s .github/scripts -p test_sign_exact_target_permit.py

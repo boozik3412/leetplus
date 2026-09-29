@@ -6,19 +6,23 @@ from authority import instant, verify_bounded_envelope, node_public_check
 from inventory import digest
 from native_boundary import canonical, require, secure_read
 
-INSTALL_PLAN = 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_PLAN'
-INSTALL_APPROVAL = 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_APPROVAL'
-INSTALL_RECEIPT = 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_RECEIPT'
-ENROLLMENT = 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V1'
+INSTALL_PLAN = 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_PLAN'
+INSTALL_APPROVAL = 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_APPROVAL'
+INSTALL_RECEIPT = 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_RECEIPT'
+ENROLLMENT = 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V2'
 HASH = re.compile(r'[a-f0-9]{64}\Z')
 RELEASE = re.compile(r'[a-f0-9]{40}\Z')
 UUID = re.compile(r'[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\Z')
 ROOTS = {'permit', 'execution', 'rollback', 'noEffect'}
+INSTALLER_AUTHORITY_FIELDS = {'helperSourceSha256', 'verifierSourceSha256',
+                             'introPlanSha256', 'introReceiptSha256',
+                             'generationRootManifestSha256', 'generationReceiptSha256'}
 PLAN_FIELDS = {'contract', 'operationId', 'action', 'hostIdentitySha256', 'predecessorReleaseSha',
     'predecessorManifestSha256', 'oldCorePointer', 'sourceRelease', 'sourceAdmissionSha256',
-    'installerSourceSha256', 'bundleFiles', 'bundleSha256', 'bundleArchiveSha256',
+    'installerSourceSha256', 'installerAuthority', 'bundleFiles', 'bundleSha256', 'bundleArchiveSha256',
     'publicRoots', 'effects'}
 INSTALL_EFFECTS = {'bootstrapBundleOnly': True, 'publicRootsOnly': True,
+    'requestPlacement': True,
     'controllerPointerMutation': False, 'applicationRestart': False,
     'dataMutation': False, 'workerGrantMutation': False, 'timerMutation': False,
     'providerEffect': False}
@@ -49,6 +53,9 @@ def validate_install_plan(plan):
         all(HASH.fullmatch(plan[field]) for field in ('hostIdentitySha256', 'predecessorManifestSha256',
             'sourceAdmissionSha256', 'installerSourceSha256', 'bundleSha256',
             'bundleArchiveSha256')) and
+        isinstance(plan['installerAuthority'], dict) and
+        set(plan['installerAuthority']) == INSTALLER_AUTHORITY_FIELDS and
+        all(isinstance(v, str) and HASH.fullmatch(v) for v in plan['installerAuthority'].values()) and
         isinstance(plan['bundleFiles'], dict) and REQUIRED_BUNDLE_FILES <= set(plan['bundleFiles']) and
         len(plan['bundleFiles']) <= 128 and
         all(isinstance(name, str) and not name.startswith('/') and '\\' not in name and

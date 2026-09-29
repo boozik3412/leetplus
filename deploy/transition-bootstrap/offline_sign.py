@@ -15,27 +15,69 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
+import types
 
 from enrollment import validate_install_plan
 
 HASH = re.compile(r'[a-f0-9]{64}\Z')
 UUID = re.compile(r'[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\Z')
 CONTRACTS = {
+    'transport': ('LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_APPROVAL', 'approval', 30),
+    'initial-intro': ('LEETPLUS_STANDALONE_INITIAL_INTRO_V2_APPROVAL', 'approval', 30),
+    'transport-finalize': ('LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_APPROVAL', 'approval', 30),
+    'initial-intro-finalize': ('LEETPLUS_STANDALONE_INITIAL_INTRO_FINALIZE_V1_APPROVAL', 'approval', 30),
     'permit-a': ('LEETPLUS_A_BRIDGE_BOOTSTRAP_PERMIT_V1', 'permit', 30),
     'permit-bridge': ('LEETPLUS_BRIDGE_EXTERNAL_SUCCESSOR_PERMIT_V1', 'permit', 30),
     'execution': ('LEETPLUS_PREDECESSOR_TRANSITION_BOOTSTRAP_V1_EXECUTION', 'command', 30),
     'rollback': ('LEETPLUS_PREDECESSOR_TRANSITION_BOOTSTRAP_V1_ROLLBACK', 'command', 30),
     'no-effect': ('LEETPLUS_PREDECESSOR_TRANSITION_BOOTSTRAP_V1_NO_EFFECT', 'command', 30),
-    'install': ('LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_APPROVAL', 'approval', 30),
+    'install': ('LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_APPROVAL', 'approval', 30),
+    'runtime-provision': ('LEETPLUS_PREDECESSOR_BOOTSTRAP_RUNTIME_PROVISION_V1_APPROVAL', 'approval', 30),
     'v1-forward': ('LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1_APPROVAL', 'approval', 240),
     'v1-rollback': ('LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1_ROLLBACK_APPROVAL', 'approval', 240),
 }
 ROOT_DOMAIN = {
+    'transport': 'deployment', 'initial-intro': 'deployment', 'transport-finalize': 'deployment',
+    'initial-intro-finalize': 'deployment',
     'permit-a': 'permit', 'permit-bridge': 'permit',
     'execution': 'execution', 'rollback': 'rollback',
     'no-effect': 'noEffect', 'install': 'deployment',
+    'runtime-provision': 'deployment',
     'v1-forward': 'deployment', 'v1-rollback': 'deployment',
 }
+
+# Filled only from the reviewed frozen A code before source readiness. A
+# caller-supplied hash can never admit a replacement validator.
+INITIAL_VALIDATOR_PINS = {
+    'transport': ('deploy/leetplus-compose/standalone-intro-transport.py',
+                  'ca0078122e6b9f9bd433d51996e23a46fde89b591a970903991af3cf16df80ff'),
+    'initial-intro': ('deploy/leetplus-compose/standalone-initial-intro.py',
+                     '075739dfa9b727da43448d5daf56dac7a3b45a8bdbc9e9d062afc2217b381b8b'),
+    'transport-finalize': ('deploy/leetplus-compose/standalone-intro-transport.py',
+                          'ca0078122e6b9f9bd433d51996e23a46fde89b591a970903991af3cf16df80ff'),
+    'initial-intro-finalize': ('deploy/leetplus-compose/standalone-initial-intro.py',
+                              '075739dfa9b727da43448d5daf56dac7a3b45a8bdbc9e9d062afc2217b381b8b'),
+}
+
+
+def initial_shape_validator(kind, linked):
+    path, expected = INITIAL_VALIDATOR_PINS[kind]
+    source_release = linked.get('authoritySourceRelease')
+    if not isinstance(expected, str) or not HASH.fullmatch(expected) or \
+            not isinstance(source_release, str) or not re.fullmatch(r'[a-f0-9]{40}', source_release) or \
+            linked.get('authoritySourceSha256') != expected:
+        raise ValueError('Reviewed frozen initial authority validator is unavailable or differs')
+    result = subprocess.run(['git', '--no-replace-objects', 'cat-file', 'blob',
+                             source_release + ':' + path],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+    raw = result.stdout
+    if result.returncode != 0 or not 0 < len(raw) <= 2 * 1024 * 1024 or digest(raw) != expected:
+        raise ValueError('Initial authority validator source differs before private-key access')
+    module = types.ModuleType('leetplus_offline_initial_authority_shape')
+    module.__file__ = source_release + ':' + path
+    exec(compile(raw, module.__file__, 'exec'), module.__dict__)
+    return module
 
 
 def validate_linked_root(kind, linked, public_raw, public_der_sha256):
@@ -44,12 +86,67 @@ def validate_linked_root(kind, linked, public_raw, public_der_sha256):
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     domain = ROOT_DOMAIN[kind]
     evidence = linked.get('enrollmentEvidence')
-    if domain == 'deployment' and kind == 'install':
+    if domain == 'deployment' and kind in ('install', *INITIAL_VALIDATOR_PINS):
         # Root enrollment does not exist yet. The direct GO is still bound to
         # this exact DER and the reviewed installer plan/source.
         if not isinstance(linked.get('deploymentRootPem'), str) or \
                 linked['deploymentRootPem'].encode('ascii') != public_raw:
             raise ValueError('Deployment root differs from independently supplied source')
+        if kind in ('transport', 'transport-finalize', 'initial-intro-finalize'):
+            plan = linked.get('plan')
+            if not isinstance(plan, dict) or not isinstance(plan.get('execution'), dict) or \
+                    plan['execution'].get('trustRoot') != {
+                        'path': '/etc/leetplus-compose/approval-root.pem', 'rawSha256': digest(public_raw)}:
+                raise ValueError('Initial authority plan does not bind accepted deployment public bytes')
+        elif kind == 'initial-intro':
+            proof = linked.get('transportEvidence')
+            if not isinstance(proof, dict) or set(proof) != {'plan', 'approvalEnvelope', 'intent', 'receipt'}:
+                raise ValueError('Initial INTRO requires exact accepted transport lineage')
+            transport_validator = initial_shape_validator('transport', {
+                **linked, 'authoritySourceSha256': linked.get('transportAuthoritySourceSha256')})
+            transport_validator.validate_plan(proof['plan'])
+            transport_validator.validate_terminal_receipt(proof['receipt'], proof['plan'])
+            transport = proof['plan']
+            envelope = proof['approvalEnvelope']
+            if transport['execution']['trustRoot']['rawSha256'] != digest(public_raw) or \
+                    not isinstance(envelope, dict) or set(envelope) != {'approval', 'signature'}:
+                raise ValueError('Initial INTRO transport trust root differs')
+            approval = envelope['approval']
+            intent, receipt = proof['intent'], proof['receipt']
+            if not isinstance(approval, dict) or set(approval) != {'contract', 'operationId',
+                    'hostIdentitySha256', 'planSha256', 'action', 'issuedAt', 'expiresAt'} or \
+                    approval['contract'] != transport_validator.APPROVAL or \
+                    approval['operationId'] != transport['operationId'] or \
+                    approval['hostIdentitySha256'] != transport['hostIdentitySha256'] or \
+                    approval['planSha256'] != digest(canonical(transport)) or \
+                    approval['action'] != transport['action'] or \
+                    not isinstance(intent, dict) or set(intent) != {'contract', 'operationId',
+                        'planSha256', 'approvalSha256', 'authorizedAt'} or \
+                    intent['contract'] != transport_validator.INTENT or \
+                    intent['operationId'] != transport['operationId'] or \
+                    intent['planSha256'] != digest(canonical(transport)) or \
+                    intent['approvalSha256'] != digest(canonical(envelope)) or \
+                    receipt['intentSha256'] != digest(canonical(intent)) or \
+                    receipt['flatIntentSha256'] != digest(canonical(intent)) or \
+                    receipt['planSha256'] != digest(canonical(transport)) or \
+                    receipt['approvalSha256'] != digest(canonical(envelope)) or \
+                    receipt['executionSha256'] != digest(canonical(transport['execution'])):
+                raise ValueError('Initial INTRO transport authorization lineage differs')
+            key = serialization.load_pem_public_key(public_raw)
+            if not isinstance(key, Ed25519PublicKey):
+                raise ValueError('Initial INTRO deployment root is not Ed25519')
+            key.verify(base64.b64decode(envelope['signature'], validate=True), canonical(approval))
+            start, end = _instant(approval['issuedAt']), _instant(approval['expiresAt'])
+            if not start <= _instant(intent['authorizedAt']) <= _instant(receipt['acceptedAt']) < end or \
+                    not timedelta(0) < end - start <= timedelta(minutes=30):
+                raise ValueError('Initial INTRO transport was outside signed validity')
+            plan = linked.get('plan')
+            if not isinstance(plan, dict) or \
+                    plan.get('introTransportOperationId') != transport['operationId'] or \
+                    plan.get('introTransportReceiptSha256') != digest(canonical(receipt)) or \
+                    plan.get('hostIdentitySha256') != transport['hostIdentitySha256'] or \
+                    plan.get('sourceRelease') != transport['sourceRelease']:
+                raise ValueError('Initial INTRO plan differs from accepted transport receipt')
         return
     if not isinstance(evidence, dict) or set(evidence) != {
             'plan', 'approvalEnvelope', 'intent', 'receipt', 'record',
@@ -92,7 +189,7 @@ def validate_linked_root(kind, linked, public_raw, public_der_sha256):
     approval = envelope['approval']
     if not isinstance(approval, dict) or set(approval) != {'contract', 'operationId',
             'hostIdentitySha256', 'planSha256', 'action', 'issuedAt', 'expiresAt'} or \
-            approval['contract'] != 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_APPROVAL' or \
+            approval['contract'] != 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_APPROVAL' or \
             approval['operationId'] != plan['operationId'] or \
             approval['action'] != plan['action'] or \
             approval['hostIdentitySha256'] != plan['hostIdentitySha256'] or \
@@ -118,7 +215,7 @@ def validate_linked_root(kind, linked, public_raw, public_der_sha256):
     if not isinstance(receipt, dict) or set(receipt) != {'contract', 'decision',
             'operationId', 'planSha256', 'approvalSha256', 'intentSha256',
             'bundleSha256', 'publicRoots', 'hostIdentitySha256', 'acceptedAt'} or \
-            receipt['contract'] != 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_RECEIPT' or \
+            receipt['contract'] != 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_RECEIPT' or \
             receipt['decision'] != 'PASS' or receipt['operationId'] != plan['operationId'] or \
             receipt['planSha256'] != digest(canonical(plan)) or \
             receipt['approvalSha256'] != digest(canonical(envelope)) or \
@@ -128,7 +225,7 @@ def validate_linked_root(kind, linked, public_raw, public_der_sha256):
             receipt['hostIdentitySha256'] != plan['hostIdentitySha256'] or \
             _instant(receipt['acceptedAt']) != _instant(intent['authorizedAt']):
         raise ValueError('Installer receipt differs from signed timely intent')
-    expected_record = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V1',
+    expected_record = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V2',
         'decision': 'ACCEPTED', 'hostIdentitySha256': plan['hostIdentitySha256'],
         'bundleFiles': plan['bundleFiles'], 'bundleSha256': plan['bundleSha256'],
         'publicRoots': plan['publicRoots'],
@@ -193,7 +290,8 @@ def validate_statement(kind, statement, linked, expected_root_der, confirm, now=
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None or current.utcoffset() != timedelta(0):
         raise ValueError('Signer clock must be aware UTC')
-    if statement.get('contract') != contract or not UUID.fullmatch(statement.get('operationId', '')):
+    identity = statement.get('placementId') if kind == 'runtime-provision' else statement.get('operationId')
+    if statement.get('contract') != contract or not isinstance(identity, str) or not UUID.fullmatch(identity):
         raise ValueError('Signing contract or operation differs')
     issued, expires = _instant(statement.get('issuedAt')), _instant(statement.get('expiresAt'))
     if issued > current + timedelta(seconds=30) or expires <= current or \
@@ -277,6 +375,78 @@ def validate_statement(kind, statement, linked, expected_root_der, confirm, now=
                                                            digest(canonical(values['forwardReceipt']))) or \
                     statement['effect'] != 'TERMINAL_RECORD_ONLY':
                 raise ValueError('Zero-effect command differs from exact pending intent')
+    elif kind in INITIAL_VALIDATOR_PINS:
+        plan = values.get('plan')
+        validator = initial_shape_validator(kind, linked)
+        if kind in ('transport-finalize', 'initial-intro-finalize'):
+            validator.validate_finalize_plan(plan)
+            plan_contract, approval_contract = validator.FINALIZE_PLAN, validator.FINALIZE_APPROVAL
+        else:
+            validator.validate_plan(plan)
+            plan_contract, approval_contract = validator.PLAN, validator.APPROVAL
+        if plan.get('contract') != plan_contract or approval_contract != contract or \
+                set(statement) != {'contract', 'operationId', 'hostIdentitySha256',
+                                  'planSha256', 'action', 'issuedAt', 'expiresAt'} or \
+                statement['operationId'] != plan.get('operationId') or \
+                statement['hostIdentitySha256'] != plan.get('hostIdentitySha256') or \
+                statement['planSha256'] != digest(canonical(plan)) or \
+                statement['action'] != plan.get('action'):
+            raise ValueError('Initial authority approval differs from exact reviewed plan')
+    elif kind == 'runtime-provision':
+        plan = values.get('plan')
+        request = values.get('request')
+        evidence = values.get('enrollmentEvidence')
+        required = {'contract', 'placementId', 'operationId', 'attemptId', 'command',
+                    'hostIdentitySha256', 'bundleSha256', 'installerReceiptSha256',
+                    'requestSha256', 'preimages', 'nativeLocks', 'effects'}
+        effects = {'runtimeDirectoriesOnly': True, 'requestPlacementOnly': True,
+            'controllerPointerMutation': False, 'applicationRestart': False,
+            'systemdUnitMutation': False, 'dataMutation': False,
+            'grantMutation': False, 'timerMutation': False, 'providerEffect': False}
+        if not isinstance(plan, dict) or set(plan) != required or \
+                plan.get('contract') != 'LEETPLUS_PREDECESSOR_BOOTSTRAP_RUNTIME_PROVISION_V1_PLAN' or \
+                plan.get('effects') != effects or not isinstance(request, dict) or \
+                set(request) != {'contract', 'command', 'operationId', 'attemptId', 'mode',
+                                 'targetRelease', 'criticalNames', 'evidence', 'inputs'} or \
+                request.get('contract') != 'LEETPLUS_PREDECESSOR_BOOTSTRAP_RPC_V1' or \
+                plan['command'] not in ('observe', 'plan-v1', 'prepare', 'apply', 'reconcile',
+                    'rollback', 'reconcile-rollback', 'terminalize-no-effect') or \
+                any(request.get(field) != plan[field] for field in ('operationId', 'attemptId', 'command')) or \
+                any(not isinstance(plan[field], str) or not UUID.fullmatch(plan[field]) for field in
+                    ('placementId', 'operationId', 'attemptId')) or \
+                any(not isinstance(plan[field], str) or not HASH.fullmatch(plan[field]) for field in
+                    ('hostIdentitySha256', 'bundleSha256', 'installerReceiptSha256', 'requestSha256')) or \
+                plan['requestSha256'] != digest(canonical(request)) or not isinstance(evidence, dict) or \
+                plan['bundleSha256'] != evidence['record']['bundleSha256'] or \
+                plan['installerReceiptSha256'] != digest(canonical(evidence['receipt'])) or \
+                plan['hostIdentitySha256'] != evidence['plan']['hostIdentitySha256']:
+            raise ValueError('Runtime provision scope or exact enrollment/request differs')
+        state = '/var/lib/leetplus-transition-bootstrap'
+        compose = '/var/lib/leetplus-compose'
+        request_dir = state + '/requests/' + plan['placementId']
+        expected = {state, state + '/requests', state + '/operations', state + '/attempts',
+                    state + '/transition.lock', request_dir, request_dir + '/request.json',
+                    compose + '/' + plan['placementId'] + '.transition-provision.intent.json',
+                    compose + '/' + plan['placementId'] + '.transition-provision.receipt.json'}
+        locks = {compose + '/standalone-install.lock', compose + '/control.lock'}
+        if not isinstance(plan['preimages'], dict) or set(plan['preimages']) != expected or \
+                not isinstance(plan['nativeLocks'], dict) or set(plan['nativeLocks']) != locks or \
+                any(not isinstance(v, dict) or v.get('state') not in ('ABSENT', 'EXACT') or
+                    set(v) != ({'state'} if v['state'] == 'ABSENT' else
+                               {'state', 'device', 'inode', 'uid', 'gid', 'mode', 'ctimeNs'})
+                    for v in [*plan['preimages'].values(), *plan['nativeLocks'].values()]) or \
+                any(plan['preimages'][name] != {'state': 'ABSENT'} for name in
+                    (request_dir, request_dir + '/request.json',
+                     compose + '/' + plan['placementId'] + '.transition-provision.intent.json',
+                     compose + '/' + plan['placementId'] + '.transition-provision.receipt.json')) or \
+                any(v['state'] != 'EXACT' or v.get('mode') != 0o600 for v in plan['nativeLocks'].values()):
+            raise ValueError('Runtime provision fixed path/lock map differs')
+        if set(statement) != {'contract', 'placementId', 'hostIdentitySha256',
+                              'planSha256', 'issuedAt', 'expiresAt'} or \
+                statement['placementId'] != plan['placementId'] or \
+                statement['hostIdentitySha256'] != plan['hostIdentitySha256'] or \
+                statement['planSha256'] != digest(canonical(plan)):
+            raise ValueError('Runtime provision approval differs from exact plan')
     else:
         plan = values.get('plan')
         if not isinstance(plan, dict) or statement.get('planSha256') != digest(canonical(plan)) or \
@@ -312,7 +482,7 @@ def validate_statement(kind, statement, linked, expected_root_der, confirm, now=
                     statement['receiptSha256'] != digest(canonical(values['forwardReceipt'])):
                 raise ValueError('Native V1 rollback lacks accepted receipt')
     statement_sha = digest(canonical(statement))
-    if confirm != f'GO BOOTSTRAP-SIGN {kind} {statement["operationId"]} {statement_sha} {expected_root_der}':
+    if confirm != f'GO BOOTSTRAP-SIGN {kind} {identity} {statement_sha} {expected_root_der}':
         raise ValueError('Exact dispatcher confirmation phrase required')
     return statement_sha
 
@@ -385,7 +555,7 @@ def sign_exact(*, kind, statement_path, linked_path, public_path, expected_publi
     output = canonical({envelope_name: statement,
                         'signature': base64.b64encode(private.sign(raw)).decode()})
     _write_exclusive(output_path, output)
-    return {'kind': kind, 'operationId': statement['operationId'],
+    return {'kind': kind, 'operationId': statement.get('operationId', statement.get('placementId')),
             'statementSha256': statement_sha, 'envelopeSha256': digest(output),
             'publicDerSha256': digest(public_der), 'directDispatcherGoReceiptRequired': True}
 

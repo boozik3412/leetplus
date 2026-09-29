@@ -1,5 +1,31 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
+**Source-only independent bootstrap install proposal 29.09:** отдельный
+versioned V2 public-only installer требует подписанного полного byte closure
+helper/verifier/generation и проверяет fixed inert-intro receipt до импорта
+candidate code. A готовит отдельный INITIAL_INERT_ONLY route; broad
+production-control install/unit reload здесь не используется. Intro,
+launcher, generation и public roots не установлены, A→bridge и Variant B
+не serving. Fresh baseline, accepted initial transport/native locks,
+reviewed exact plan и отдельный direct GO обязательны. Open beta NO-GO.
+Draft PR #252 теперь содержит source-only V2 request staging по captured
+семи листьям и prewrite flat intent, плюс классификацию partial install.
+A intro in-memory authorization delta добавлен, но независимый signed
+initial transport и новый combined review/CI ещё ожидаются; PR остаётся HOLD.
+Полный исполняемый closure дополнен captured-byte launcher/RPC, Node module
+linking и predecessor observer; окончательные Linux/root проверки и обзор
+именно этих новых байтов ещё нужны. Installed/serving не подтверждены.
+Для последующего native RPC добавлен source-only signed runtime-provision
+contract: отдельный plan/GO для private state roots/transition.lock/exact
+request; read-only observe/plan/prepare больше не пишут attempt audit на host.
+Это ещё не installed state и не разрешение на A→bridge/Variant B serving.
+В общий candidate интегрирован frozen A9a31 expiry/recovery delta, typed
+offline signing для transport/INTRO/finalize и receipt-lineage negatives.
+Последний источник A INTRO V2/b8ba вводит своевременный receipt marker и
+отдельный signed finalize-only recovery для потерянного terminal response.
+Финальные combined review/CI, main admission и конкретные dispatcher GOs
+ещё требуются; source PASS не меняет installed/serving статус.
+
 **Source-only bootstrap checkpoint 27.09:** ordered source integration proposal
 for frozen draft PR246→247→248 and separate predecessor transition primitives
 are prepared outside the controller payload. No main merge or production effect

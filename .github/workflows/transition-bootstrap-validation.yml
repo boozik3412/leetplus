@@ -1,11 +1,48 @@
 name: Predecessor bootstrap source validation
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/transition-bootstrap/**'
+      - 'deploy/leetplus-compose/a-bridge-bootstrap-authority.mjs'
+      - 'deploy/leetplus-compose/bridge-external-successor-authority.mjs'
+      - 'deploy/leetplus-compose/control-handoff-authority.mjs'
+      - 'deploy/leetplus-compose/standalone-initial-intro.py'
+      - 'deploy/leetplus-compose/standalone-initial-intro-entry.mjs'
+      - 'deploy/leetplus-compose/standalone-intro-transport.py'
+      - 'deploy/leetplus-compose/standalone-intro-transport-entry.mjs'
+      - 'deploy/leetplus-compose/test_standalone_intro_transport.py'
+      - 'deploy/leetplus-compose/test_standalone_intro_transport_native.py'
+      - 'deploy/leetplus-compose/test_standalone_initial_intro.py'
+      - 'deploy/leetplus-compose/test_standalone_initial_intro_native.py'
+      - 'docs/deployment/production-artifact/install_predecessor_bootstrap.py'
+      - 'docs/deployment/production-artifact/trusted_predecessor_bootstrap_launcher.py'
+      - 'docs/deployment/production-artifact/bootstrap-install-layout.json'
+      - 'docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs'
+      - '.github/scripts/build-standalone-intro-source.py'
+      - '.github/scripts/test_standalone_intro_source.py'
+      - '.github/workflows/transition-bootstrap-validation.yml'
   pull_request:
     paths:
       - 'deploy/transition-bootstrap/**'
       - 'deploy/leetplus-compose/a-bridge-bootstrap-authority*'
       - 'deploy/leetplus-compose/bridge-external-successor-authority*'
+      - 'deploy/leetplus-compose/control-handoff-authority.mjs'
+      - 'deploy/leetplus-compose/standalone-initial-intro.py'
+      - 'deploy/leetplus-compose/standalone-initial-intro-entry.mjs'
+      - 'deploy/leetplus-compose/standalone-intro-transport.py'
+      - 'deploy/leetplus-compose/standalone-intro-transport-entry.mjs'
+      - 'deploy/leetplus-compose/test_standalone_intro_transport.py'
+      - 'deploy/leetplus-compose/test_standalone_intro_transport_native.py'
+      - 'deploy/leetplus-compose/test_standalone_initial_intro.py'
+      - 'deploy/leetplus-compose/test_standalone_initial_intro_native.py'
+      - 'docs/deployment/production-artifact/install_predecessor_bootstrap.py'
+      - 'docs/deployment/production-artifact/bootstrap-install-layout.json'
+      - 'docs/deployment/production-artifact/trusted_predecessor_bootstrap_launcher.py'
+      - 'docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs'
+      - '.github/scripts/build-standalone-intro-source.py'
+      - '.github/scripts/test_standalone_intro_source.py'
       - '.github/workflows/transition-bootstrap-validation.yml'
   workflow_dispatch:
 
@@ -41,7 +78,7 @@ jobs:
           sudo python3 -B deploy/transition-bootstrap/test_native_boundary.py >"$evidence/native.stdout" 2>"$evidence/native.stderr"
           native_exit=$?
           printf '%s\n' "$native_exit" >"$evidence/native.exit"
-          sudo python3 -B deploy/transition-bootstrap/test_inventory.py >"$evidence/inventory.stdout" 2>"$evidence/inventory.stderr"
+          sudo env BOOTSTRAP_TEST_NODE="$test_node" python3 -B deploy/transition-bootstrap/test_inventory.py >"$evidence/inventory.stdout" 2>"$evidence/inventory.stderr"
           inventory_exit=$?
           printf '%s\n' "$inventory_exit" >"$evidence/inventory.exit"
           sudo env BOOTSTRAP_TEST_NODE="$test_node" python3 -B deploy/transition-bootstrap/test_canonical_lineage.py >"$evidence/lineage.stdout" 2>"$evidence/lineage.stderr"
@@ -50,6 +87,24 @@ jobs:
           sudo env BOOTSTRAP_TEST_NODE="$test_node" python3 -B deploy/transition-bootstrap/test_bundle_installer.py >"$evidence/installer.stdout" 2>"$evidence/installer.stderr"
           installer_exit=$?
           printf '%s\n' "$installer_exit" >"$evidence/installer.exit"
+          python3 -B deploy/transition-bootstrap/test_install_entry.py >"$evidence/entry.stdout" 2>"$evidence/entry.stderr"
+          entry_exit=$?
+          printf '%s\n' "$entry_exit" >"$evidence/entry.exit"
+          python3 -B .github/scripts/test_standalone_intro_source.py >"$evidence/source-archive.stdout" 2>"$evidence/source-archive.stderr"
+          source_archive_exit=$?
+          printf '%s\n' "$source_archive_exit" >"$evidence/source-archive.exit"
+          python3 -B deploy/leetplus-compose/test_standalone_initial_intro.py >"$evidence/intro-pure.stdout" 2>"$evidence/intro-pure.stderr"
+          intro_pure_exit=$?
+          printf '%s\n' "$intro_pure_exit" >"$evidence/intro-pure.exit"
+          sudo env BOOTSTRAP_TEST_NODE="$test_node" python3 -B deploy/leetplus-compose/test_standalone_initial_intro_native.py >"$evidence/intro-native.stdout" 2>"$evidence/intro-native.stderr"
+          intro_native_exit=$?
+          printf '%s\n' "$intro_native_exit" >"$evidence/intro-native.exit"
+          node --check deploy/leetplus-compose/standalone-initial-intro-entry.mjs >"$evidence/intro-entry.stdout" 2>"$evidence/intro-entry.stderr"
+          intro_entry_exit=$?
+          printf '%s\n' "$intro_entry_exit" >"$evidence/intro-entry.exit"
+          node --check docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs >"$evidence/intro-verifier.stdout" 2>"$evidence/intro-verifier.stderr"
+          intro_verifier_exit=$?
+          printf '%s\n' "$intro_verifier_exit" >"$evidence/intro-verifier.exit"
           python3 -B deploy/transition-bootstrap/test_offline_sign.py >"$evidence/signer.stdout" 2>"$evidence/signer.stderr"
           signer_exit=$?
           printf '%s\n' "$signer_exit" >"$evidence/signer.exit"
@@ -59,12 +114,29 @@ jobs:
           sudo env BOOTSTRAP_TEST_NODE="$test_node" python3 -B deploy/transition-bootstrap/test_hard_deadline.py >"$evidence/deadline.stdout" 2>"$evidence/deadline.stderr"
           deadline_exit=$?
           printf '%s\n' "$deadline_exit" >"$evidence/deadline.exit"
-          printf 'protocol=%s native=%s inventory=%s lineage=%s installer=%s signer=%s rpc=%s deadline=%s\n' \
-            "$protocol_exit" "$native_exit" "$inventory_exit" "$lineage_exit" "$installer_exit" "$signer_exit" "$rpc_exit" "$deadline_exit"
+          printf 'protocol=%s native=%s inventory=%s lineage=%s installer=%s entry=%s source_archive=%s intro_pure=%s intro_native=%s intro_entry=%s intro_verifier=%s signer=%s rpc=%s deadline=%s\n' \
+            "$protocol_exit" "$native_exit" "$inventory_exit" "$lineage_exit" "$installer_exit" "$entry_exit" "$source_archive_exit" "$intro_pure_exit" "$intro_native_exit" "$intro_entry_exit" "$intro_verifier_exit" "$signer_exit" "$rpc_exit" "$deadline_exit"
           cat "$evidence/"*.stdout "$evidence/"*.stderr
           test "$protocol_exit" -eq 0 && test "$native_exit" -eq 0 && \
-            test "$inventory_exit" -eq 0 && test "$lineage_exit" -eq 0 && test "$installer_exit" -eq 0 && \
+            test "$inventory_exit" -eq 0 && test "$lineage_exit" -eq 0 && test "$installer_exit" -eq 0 && test "$entry_exit" -eq 0 && test "$source_archive_exit" -eq 0 && \
+            test "$intro_pure_exit" -eq 0 && test "$intro_native_exit" -eq 0 && test "$intro_entry_exit" -eq 0 && test "$intro_verifier_exit" -eq 0 && \
             test "$signer_exit" -eq 0 && test "$rpc_exit" -eq 0 && test "$deadline_exit" -eq 0
+      - name: Build exact closed source transport
+        env:
+          SOURCE_EVENT: ${{ github.event_name }}
+          SOURCE_REF: ${{ github.ref }}
+        run: |
+          python3 -B .github/scripts/build-standalone-intro-source.py \
+            --source-release "$GITHUB_SHA" \
+            --output-dir "$RUNNER_TEMP/standalone-intro-source" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --event "$SOURCE_EVENT" --ref "$SOURCE_REF"
+      - name: Preserve non-deployable standalone source transport
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: leetplus-standalone-intro-source-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/standalone-intro-source/
+          if-no-files-found: error
       - name: Preserve source logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

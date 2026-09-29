@@ -8,13 +8,8 @@ import {
   setDesktopNotices,
   useDesktopNoticeState,
 } from '@/components/support-queue-watch';
-import {
-  supportTicketTopicLabels as topicLabels,
-  type StaffSupportTicket,
-  type StaffSupportTicketsReport,
-  type SupportTicketStatus,
-  type TicketUser,
-} from '@/lib/staff-support-tickets';
+import type { StaffSupportTicket, StaffSupportTicketsReport, SupportTicketStatus, TicketUser } from '@/lib/staff-support-tickets';
+import { supportTicketTopicLabels as topicLabels } from '@/lib/support-ticket-labels';
 
 const statusLabels: Record<SupportTicketStatus, string> = {
   NEW: 'Новое',
@@ -107,7 +102,7 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
     <div className="space-y-5">
       <DesktopNoticeToggle />
 
-      <section className="grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         <Metric label="В очереди" value={formatCount(report.summary.active)} tone="cyan" href={filterHref({ status: 'active' })} selected={isFilter('active')} />
         <Metric label="Новые, не взяты" value={formatCount(report.summary.NEW)} tone="amber" href={filterHref({ status: 'NEW' })} selected={isFilter('NEW')} />
         <Metric label="Без ответственного" value={formatCount(report.summary.unassigned)} tone="amber" href={filterHref({ status: 'active', assignedToUserId: 'none' })} selected={isFilter('active', 'none')} />
@@ -268,10 +263,10 @@ function DesktopNoticeToggle() {
         ? 'Браузер запретил уведомления для LeetPlus. Разрешите их в настройках сайта, чтобы узнавать о новых обращениях.'
         : 'Включите уведомления браузера, чтобы узнавать о новых обращениях, пока LeetPlus открыт в любой вкладке.';
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
-      <p className="min-w-0 flex-1">{text}</p>
+    <div className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 sm:flex-row sm:items-center sm:justify-between">
+      <p className="min-w-0 sm:flex-1">{text}</p>
       {state === 'denied' ? null : (
-        <button type="button" onClick={() => void setDesktopNotices(state !== 'on')} className={state === 'on' ? 'h-9 rounded-lg border border-zinc-200 px-3 font-semibold hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900' : 'h-9 rounded-lg bg-cyan-600 px-3 font-semibold text-white hover:bg-cyan-500'}>
+        <button type="button" onClick={() => void setDesktopNotices(state !== 'on')} className={state === 'on' ? 'h-9 shrink-0 self-start rounded-lg border border-zinc-200 px-3 font-semibold hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900' : 'h-9 shrink-0 self-start rounded-lg bg-cyan-600 px-3 font-semibold text-white hover:bg-cyan-500 sm:self-auto'}>
           {state === 'on' ? 'Выключить' : 'Включить уведомления'}
         </button>
       )}
@@ -396,9 +391,9 @@ function FilterSelect({ name, label, defaultValue, options }: { name: string; la
 function Metric({ label, value, tone, href, selected }: { label: string; value: string; tone: 'cyan' | 'amber' | 'emerald' | 'red' | 'zinc'; href: string; selected: boolean }) {
   const tones = { cyan: 'text-cyan-600 dark:text-cyan-300', amber: 'text-amber-600 dark:text-amber-300', emerald: 'text-emerald-600 dark:text-emerald-300', red: 'text-red-600 dark:text-red-300', zinc: 'text-zinc-900 dark:text-zinc-100' };
   return (
-    <Link href={href} aria-current={selected ? 'true' : undefined} className={`rounded-2xl border bg-white p-4 transition hover:border-zinc-400 dark:bg-zinc-950 dark:hover:border-zinc-600 ${selected ? 'border-zinc-900 ring-1 ring-zinc-900 dark:border-emerald-400 dark:ring-emerald-400' : 'border-zinc-200 dark:border-zinc-800'}`}>
-      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">{label}</p>
-      <p className={`mt-2 text-3xl font-semibold ${tones[tone]}`}>{value}</p>
+    <Link href={href} aria-current={selected ? 'true' : undefined} className={`rounded-2xl border bg-white p-3 transition sm:p-4 hover:border-zinc-400 dark:bg-zinc-950 dark:hover:border-zinc-600 ${selected ? 'border-zinc-900 ring-1 ring-zinc-900 dark:border-emerald-400 dark:ring-emerald-400' : 'border-zinc-200 dark:border-zinc-800'}`}>
+      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 sm:text-xs">{label}</p>
+      <p className={`mt-1.5 text-2xl font-semibold sm:mt-2 sm:text-3xl ${tones[tone]}`}>{value}</p>
     </Link>
   );
 }

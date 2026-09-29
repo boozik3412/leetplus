@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import {
-  supportTicketTopicLabels,
-  type SupportQueueSummary,
-} from "@/lib/staff-support-tickets";
+import type { SupportQueueSummary } from "@/lib/staff-support-tickets";
+import { supportTicketTopicLabels } from "@/lib/support-ticket-labels";
 
 // Sidebar badges and optional browser notifications for the support queues.
 // The page polls a light summary endpoint; it works only while a LeetPlus tab

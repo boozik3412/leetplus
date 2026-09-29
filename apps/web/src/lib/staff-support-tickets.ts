@@ -112,16 +112,6 @@ export type SupportQueueSummary = {
   } | null;
 };
 
-export const supportTicketTopicLabels: Record<SupportTicketTopic, string> = {
-  GAME_MODULE: "Игровой модуль",
-  MISSIONS_AND_BATTLE_PASS: "Задания и боевой пропуск",
-  LOOT_BOXES_AND_REWARDS: "Лутбоксы и награды",
-  BALANCE_AND_PAYMENTS: "Баланс и платежи",
-  AUTH_AND_PROFILE: "Авторизация и профиль",
-  INTERFACE_AND_DISPLAY: "Интерфейс и отображение",
-  OTHER: "Другое",
-};
-
 export async function getStaffSupportTickets(
   filters: Record<string, string | undefined>,
   options: { platform?: boolean } = {},

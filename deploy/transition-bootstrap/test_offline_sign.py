@@ -1,10 +1,13 @@
 """Offline ephemeral-key signer fixture; never reads production private keys."""
 from datetime import datetime, timedelta, timezone
 import json
+import importlib.util
+import copy
 from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from offline_sign import canonical, digest, sign_exact, validate_statement
 from enrollment import INSTALL_EFFECTS, REQUIRED_BUNDLE_FILES
@@ -143,6 +146,70 @@ class OfflineSignerTests(unittest.TestCase):
             self.sign(private_loader=loader)
         self.assertEqual(calls, [])
 
+    def test_transport_finalize_signer_has_only_two_frozen_write_destinations(self):
+        import subprocess
+        from cryptography.hazmat.primitives import serialization
+        from offline_sign import INITIAL_VALIDATOR_PINS
+        repo = Path(__file__).resolve().parents[2]
+        spec = importlib.util.spec_from_file_location('offline_finalize_fixture',
+            repo / 'deploy' / 'leetplus-compose' / 'test_standalone_intro_transport.py')
+        fixture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixture)
+        transport = fixture.transport
+        original = fixture.plan_fixture()
+        old = original['operationId']
+        recovery = '44444444-4444-4444-8444-444444444444'
+        public = self.deployment.public_key().public_bytes(serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo)
+        der = self.deployment.public_key().public_bytes(serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo)
+        code = copy.deepcopy(original['execution']['code'])
+        code['finalizeEntrySha256'] = code.pop('transportEntrySha256')
+        plan = {'contract': transport.FINALIZE_PLAN, 'operationId': recovery,
+            'action': transport.FINALIZE_ACTION, 'hostIdentitySha256': original['hostIdentitySha256'],
+            'bootId': original['execution']['host']['bootId'], 'originalOperationId': old,
+            'originalPlanSha256': 'a' * 64, 'originalApprovalSha256': 'b' * 64,
+            'originalIntentSha256': 'c' * 64, 'requestReceiptSha256': 'd' * 64,
+            'effects': copy.deepcopy(transport.FINALIZE_EFFECTS),
+            'execution': {'code': code, 'invocation': {'interpreter': '/usr/bin/python3',
+                'flags': ['-I', '-B', '-c'], 'mode': 'memory-captured-python-c', 'action': 'finalize-reconcile'},
+                'host': original['execution']['host'],
+                'nativeControlLockIdentity': original['execution']['nativeControlLockIdentity'],
+                'trustRoot': {'path': '/etc/leetplus-compose/approval-root.pem', 'rawSha256': digest(public)},
+                'auditDirectoryIdentity': {'device': 1, 'inode': 11, 'uid': 0, 'gid': 0, 'mode': 0o700},
+                'requestDirectoryIdentity': {'device': 1, 'inode': 12, 'uid': 0, 'gid': 0, 'mode': 0o700},
+                'destinations': {
+                    transport.STATE + '/' + old + '.standalone-transport-finalize.intent.json':
+                        {'kind': 'FLAT_FINALIZE_INTENT', 'preimage': 'ABSENT', 'uid': 0, 'gid': 0, 'mode': 0o400},
+                    transport.AUDITS + '/' + old + '/receipt.json':
+                        {'kind': 'ORIGINAL_AUDIT_RECEIPT', 'preimage': 'ABSENT',
+                         'sha256': 'd' * 64, 'bytes': 123, 'uid': 0, 'gid': 0, 'mode': 0o400}},
+                'limits': copy.deepcopy(transport.FINALIZE_LIMITS),
+                'effects': copy.deepcopy(transport.FINALIZE_EFFECTS)}}
+        statement = {'contract': transport.FINALIZE_APPROVAL, 'operationId': recovery,
+            'hostIdentitySha256': plan['hostIdentitySha256'], 'planSha256': digest(canonical(plan)),
+            'action': plan['action'], 'issuedAt': iso(self.now - timedelta(seconds=10)),
+            'expiresAt': iso(self.now + timedelta(minutes=10))}
+        linked = {'plan': plan, 'deploymentRootPem': public.decode('ascii'),
+            'authoritySourceRelease': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo).decode().strip(),
+            'authoritySourceSha256': INITIAL_VALIDATOR_PINS['transport-finalize'][1]}
+        statement_path = self.root / 'finalize.statement.json'
+        linked_path = self.root / 'finalize.linked.json'
+        public_path = self.root / 'finalize.public.pem'
+        statement_path.write_bytes(canonical(statement))
+        linked_path.write_bytes(canonical(linked))
+        public_path.write_bytes(public)
+        confirm = f'GO BOOTSTRAP-SIGN transport-finalize {recovery} {digest(canonical(statement))} {digest(der)}'
+        result = sign_exact(kind='transport-finalize', statement_path=statement_path,
+            linked_path=linked_path, public_path=public_path, expected_public_der_sha256=digest(der),
+            private_path=self.root / 'unused.dpapi', output_path=self.root / 'finalize.envelope.json',
+            confirm=confirm, now=self.now, private_loader=lambda _path: self.deployment)
+        self.assertEqual(result['kind'], 'transport-finalize')
+        forged = copy.deepcopy(linked)
+        forged['plan']['execution']['destinations']['/etc/systemd/system/foreign.service'] = {}
+        with self.assertRaises(ValueError):
+            validate_statement('transport-finalize', statement, forged, digest(der), confirm, now=self.now)
+
     def test_widened_effect_and_expired_window_reject(self):
         changed = dict(self.statement)
         changed['effect'] = 'APPLICATION_RESTART'
@@ -240,6 +307,136 @@ class OfflineSignerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'request'):
             validate_statement('runtime-provision', approval, linked, digest(der),
                                confirmation, now=self.now)
+
+    def test_initial_domains_reject_unbound_validator_before_private_key(self):
+        from cryptography.hazmat.primitives import serialization
+        public = self.deployment.public_key().public_bytes(serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo)
+        der = self.deployment.public_key().public_bytes(serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo)
+        public_path = self.root / 'initial-public.pem'
+        public_path.write_bytes(public)
+        kinds = {
+            'transport': 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_APPROVAL',
+            'initial-intro': 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_APPROVAL',
+            'transport-finalize': 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_APPROVAL'}
+        calls = []
+        for kind, contract in kinds.items():
+            statement = {'contract': contract, 'operationId': self.plan['operationId'],
+                'hostIdentitySha256': '1' * 64, 'planSha256': '2' * 64, 'action': 'fixture',
+                'issuedAt': iso(self.now - timedelta(seconds=10)),
+                'expiresAt': iso(self.now + timedelta(minutes=10))}
+            linked = {'deploymentRootPem': public.decode('ascii'),
+                'authoritySourceRelease': 'a' * 40, 'authoritySourceSha256': '0' * 64,
+                'transportAuthoritySourceSha256': '0' * 64,
+                'plan': {'execution': {'trustRoot': {'path': '/etc/leetplus-compose/approval-root.pem',
+                                                   'rawSha256': digest(public)}}},
+                'transportEvidence': {'plan': {}, 'approvalEnvelope': {}, 'intent': {}, 'receipt': {}}}
+            statement_path = self.root / (kind + '.statement.json')
+            linked_path = self.root / (kind + '.linked.json')
+            statement_path.write_bytes(canonical(statement))
+            linked_path.write_bytes(canonical(linked))
+            confirmation = (f'GO BOOTSTRAP-SIGN {kind} {statement["operationId"]} '
+                            f'{digest(canonical(statement))} {digest(der)}')
+            with self.subTest(kind=kind), patch('offline_sign.subprocess.run') as git_read:
+                with self.assertRaisesRegex(ValueError, 'frozen.*unavailable|differs'):
+                    sign_exact(kind=kind, statement_path=statement_path, linked_path=linked_path,
+                        public_path=public_path, expected_public_der_sha256=digest(der),
+                        private_path=self.root / 'unused.dpapi', output_path=self.root / (kind + '.envelope.json'),
+                        confirm=confirmation, now=self.now,
+                        private_loader=lambda _path: calls.append('private'))
+                git_read.assert_not_called()
+        self.assertEqual(calls, [])
+
+    def test_initial_transport_and_intro_sign_only_complete_receipt_lineage(self):
+        import base64
+        import subprocess
+        from cryptography.hazmat.primitives import serialization
+        from offline_sign import INITIAL_VALIDATOR_PINS
+        repo = Path(__file__).resolve().parents[2]
+        source_release = subprocess.check_output(['git', '--no-replace-objects', 'rev-parse', 'HEAD'],
+                                                  cwd=repo).decode().strip()
+        modules = {}
+        for key, name in (('transport', 'test_standalone_intro_transport.py'),
+                          ('intro', 'test_standalone_initial_intro.py')):
+            spec = importlib.util.spec_from_file_location('offline_' + key + '_fixture',
+                repo / 'deploy' / 'leetplus-compose' / name)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            modules[key] = module
+        public = self.deployment.public_key().public_bytes(serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo)
+        der = self.deployment.public_key().public_bytes(serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo)
+        public_path = self.root / 'trusted-initial-public.pem'
+        public_path.write_bytes(public)
+        transport = modules['transport'].transport
+        plan = modules['transport'].plan_fixture()
+        plan['execution']['trustRoot']['rawSha256'] = digest(public)
+        approval = {'contract': transport.APPROVAL, 'operationId': plan['operationId'],
+            'hostIdentitySha256': plan['hostIdentitySha256'], 'planSha256': digest(canonical(plan)),
+            'action': plan['action'], 'issuedAt': iso(self.now - timedelta(seconds=10)),
+            'expiresAt': iso(self.now + timedelta(minutes=10))}
+        linked = {'plan': plan, 'deploymentRootPem': public.decode('ascii'),
+            'authoritySourceRelease': source_release,
+            'authoritySourceSha256': INITIAL_VALIDATOR_PINS['transport'][1]}
+
+        def sign_initial(kind, statement, values, output_name, private_loader=None):
+            statement_path = self.root / (output_name + '.statement.json')
+            linked_path = self.root / (output_name + '.linked.json')
+            statement_path.write_bytes(canonical(statement))
+            linked_path.write_bytes(canonical(values))
+            confirmation = (f'GO BOOTSTRAP-SIGN {kind} {statement["operationId"]} '
+                            f'{digest(canonical(statement))} {digest(der)}')
+            return sign_exact(kind=kind, statement_path=statement_path, linked_path=linked_path,
+                public_path=public_path, expected_public_der_sha256=digest(der),
+                private_path=self.root / 'unused.dpapi', output_path=self.root / (output_name + '.json'),
+                confirm=confirmation, now=self.now,
+                private_loader=private_loader or (lambda _path: self.deployment))
+
+        sign_initial('transport', approval, linked, 'transport-signed')
+        envelope = json.loads((self.root / 'transport-signed.json').read_bytes())
+        self.deployment.public_key().verify(base64.b64decode(envelope['signature']), canonical(approval))
+        intent = {'contract': transport.INTENT, 'operationId': plan['operationId'],
+            'planSha256': digest(canonical(plan)), 'approvalSha256': digest(canonical(envelope)),
+            'authorizedAt': iso(self.now)}
+        receipt = {'contract': transport.RECEIPT, 'decision': 'PASS',
+            'operationId': plan['operationId'], 'planSha256': digest(canonical(plan)),
+            'approvalSha256': digest(canonical(envelope)), 'intentSha256': digest(canonical(intent)),
+            **{name: plan[name] for name in transport.LINKS},
+            'snapshotPath': plan['snapshotPath'], 'snapshotDevice': 1, 'snapshotInode': 2,
+            'snapshotSize': plan['snapshotSize'], 'snapshotMode': 0o400, 'snapshotUid': 0, 'snapshotGid': 0,
+            'entrySnapshotPath': plan['entrySnapshotPath'], 'entrySnapshotDevice': 1, 'entrySnapshotInode': 3,
+            'entrySnapshotSize': plan['entrySnapshotSize'], 'entrySnapshotMode': 0o400,
+            'entrySnapshotUid': 0, 'entrySnapshotGid': 0,
+            'executionSha256': digest(canonical(plan['execution'])), 'fullPostimageSha256': 'e' * 64,
+            'flatIntentSha256': digest(canonical(intent)), 'parentPostimageSha256': 'f' * 64,
+            'predecessorPostimageSha256': '1' * 64, 'acceptedAt': iso(self.now)}
+        intro = modules['intro'].intro
+        intro_plan = modules['intro'].plan_fixture()
+        intro_plan.update({'introTransportOperationId': plan['operationId'],
+            'introTransportReceiptSha256': digest(canonical(receipt)),
+            'hostIdentitySha256': plan['hostIdentitySha256'], 'sourceRelease': plan['sourceRelease']})
+        intro_approval = {'contract': intro.APPROVAL, 'operationId': intro_plan['operationId'],
+            'hostIdentitySha256': intro_plan['hostIdentitySha256'],
+            'planSha256': digest(canonical(intro_plan)), 'action': intro_plan['action'],
+            'issuedAt': iso(self.now - timedelta(seconds=10)),
+            'expiresAt': iso(self.now + timedelta(minutes=10))}
+        intro_linked = {'plan': intro_plan, 'deploymentRootPem': public.decode('ascii'),
+            'authoritySourceRelease': source_release,
+            'authoritySourceSha256': INITIAL_VALIDATOR_PINS['initial-intro'][1],
+            'transportAuthoritySourceSha256': INITIAL_VALIDATOR_PINS['transport'][1],
+            'transportEvidence': {'plan': plan, 'approvalEnvelope': envelope,
+                                  'intent': intent, 'receipt': receipt}}
+        sign_initial('initial-intro', intro_approval, intro_linked, 'intro-signed')
+        calls = []
+        for field in ('planSha256', 'approvalSha256', 'flatIntentSha256', 'executionSha256'):
+            damaged = copy.deepcopy(intro_linked)
+            damaged['transportEvidence']['receipt'][field] = '0' * 64
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'lineage'):
+                sign_initial('initial-intro', intro_approval, damaged, 'bad-' + field,
+                             private_loader=lambda _path: calls.append('private'))
+        self.assertEqual(calls, [])
 
 
 if __name__ == '__main__':

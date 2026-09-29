@@ -126,6 +126,17 @@ actions still rely on their own signed intent, locks and receipts. Runtime
 provisioning is a distinct future dispatcher effect/GO; this source change
 performs no host operation.
 
+The offline signer now has separate deployment-root kinds `transport`,
+`initial-intro` and `transport-finalize`. It reads the pure A schema validator
+from an exact Git blob and compares an independently frozen source hash before
+executing that validator or accessing DPAPI. Transport/finalize bind the
+accepted deployment public bytes; INTRO additionally verifies the prior
+transport signature, timely intent and complete plan/approval/flat-intent/
+execution receipt hashes. Each signature needs its own exact confirmation
+with domain, operation UUID, statement SHA and root DER. Finalize is limited
+to its frozen two-write scope and cannot repeat transport or cleanup. Tests
+use ephemeral keys; no production key is read by this source work.
+
 ## Trust and independent packaging
 
 The accepted b0 controller has no verifier capable of admitting the bridge's

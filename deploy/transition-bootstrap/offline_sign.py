@@ -15,12 +15,17 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
+import types
 
 from enrollment import validate_install_plan
 
 HASH = re.compile(r'[a-f0-9]{64}\Z')
 UUID = re.compile(r'[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\Z')
 CONTRACTS = {
+    'transport': ('LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_APPROVAL', 'approval', 30),
+    'initial-intro': ('LEETPLUS_STANDALONE_INITIAL_INTRO_V1_APPROVAL', 'approval', 30),
+    'transport-finalize': ('LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_APPROVAL', 'approval', 30),
     'permit-a': ('LEETPLUS_A_BRIDGE_BOOTSTRAP_PERMIT_V1', 'permit', 30),
     'permit-bridge': ('LEETPLUS_BRIDGE_EXTERNAL_SUCCESSOR_PERMIT_V1', 'permit', 30),
     'execution': ('LEETPLUS_PREDECESSOR_TRANSITION_BOOTSTRAP_V1_EXECUTION', 'command', 30),
@@ -32,12 +37,43 @@ CONTRACTS = {
     'v1-rollback': ('LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1_ROLLBACK_APPROVAL', 'approval', 240),
 }
 ROOT_DOMAIN = {
+    'transport': 'deployment', 'initial-intro': 'deployment', 'transport-finalize': 'deployment',
     'permit-a': 'permit', 'permit-bridge': 'permit',
     'execution': 'execution', 'rollback': 'rollback',
     'no-effect': 'noEffect', 'install': 'deployment',
     'runtime-provision': 'deployment',
     'v1-forward': 'deployment', 'v1-rollback': 'deployment',
 }
+
+# Filled only from the reviewed frozen A code before source readiness. A
+# caller-supplied hash can never admit a replacement validator.
+INITIAL_VALIDATOR_PINS = {
+    'transport': ('deploy/leetplus-compose/standalone-intro-transport.py',
+                  'ca0078122e6b9f9bd433d51996e23a46fde89b591a970903991af3cf16df80ff'),
+    'initial-intro': ('deploy/leetplus-compose/standalone-initial-intro.py',
+                     'dfa3ad22c4964564dce63ce9cd3640831ec81530fa0b7b2a6a15c2c9a3a3cfbf'),
+    'transport-finalize': ('deploy/leetplus-compose/standalone-intro-transport.py',
+                          'ca0078122e6b9f9bd433d51996e23a46fde89b591a970903991af3cf16df80ff'),
+}
+
+
+def initial_shape_validator(kind, linked):
+    path, expected = INITIAL_VALIDATOR_PINS[kind]
+    source_release = linked.get('authoritySourceRelease')
+    if not isinstance(expected, str) or not HASH.fullmatch(expected) or \
+            not isinstance(source_release, str) or not re.fullmatch(r'[a-f0-9]{40}', source_release) or \
+            linked.get('authoritySourceSha256') != expected:
+        raise ValueError('Reviewed frozen initial authority validator is unavailable or differs')
+    result = subprocess.run(['git', '--no-replace-objects', 'cat-file', 'blob',
+                             source_release + ':' + path],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+    raw = result.stdout
+    if result.returncode != 0 or not 0 < len(raw) <= 2 * 1024 * 1024 or digest(raw) != expected:
+        raise ValueError('Initial authority validator source differs before private-key access')
+    module = types.ModuleType('leetplus_offline_initial_authority_shape')
+    module.__file__ = source_release + ':' + path
+    exec(compile(raw, module.__file__, 'exec'), module.__dict__)
+    return module
 
 
 def validate_linked_root(kind, linked, public_raw, public_der_sha256):
@@ -46,12 +82,67 @@ def validate_linked_root(kind, linked, public_raw, public_der_sha256):
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     domain = ROOT_DOMAIN[kind]
     evidence = linked.get('enrollmentEvidence')
-    if domain == 'deployment' and kind == 'install':
+    if domain == 'deployment' and kind in ('install', *INITIAL_VALIDATOR_PINS):
         # Root enrollment does not exist yet. The direct GO is still bound to
         # this exact DER and the reviewed installer plan/source.
         if not isinstance(linked.get('deploymentRootPem'), str) or \
                 linked['deploymentRootPem'].encode('ascii') != public_raw:
             raise ValueError('Deployment root differs from independently supplied source')
+        if kind in ('transport', 'transport-finalize'):
+            plan = linked.get('plan')
+            if not isinstance(plan, dict) or not isinstance(plan.get('execution'), dict) or \
+                    plan['execution'].get('trustRoot') != {
+                        'path': '/etc/leetplus-compose/approval-root.pem', 'rawSha256': digest(public_raw)}:
+                raise ValueError('Initial authority plan does not bind accepted deployment public bytes')
+        elif kind == 'initial-intro':
+            proof = linked.get('transportEvidence')
+            if not isinstance(proof, dict) or set(proof) != {'plan', 'approvalEnvelope', 'intent', 'receipt'}:
+                raise ValueError('Initial INTRO requires exact accepted transport lineage')
+            transport_validator = initial_shape_validator('transport', {
+                **linked, 'authoritySourceSha256': linked.get('transportAuthoritySourceSha256')})
+            transport_validator.validate_plan(proof['plan'])
+            transport_validator.validate_terminal_receipt(proof['receipt'], proof['plan'])
+            transport = proof['plan']
+            envelope = proof['approvalEnvelope']
+            if transport['execution']['trustRoot']['rawSha256'] != digest(public_raw) or \
+                    not isinstance(envelope, dict) or set(envelope) != {'approval', 'signature'}:
+                raise ValueError('Initial INTRO transport trust root differs')
+            approval = envelope['approval']
+            intent, receipt = proof['intent'], proof['receipt']
+            if not isinstance(approval, dict) or set(approval) != {'contract', 'operationId',
+                    'hostIdentitySha256', 'planSha256', 'action', 'issuedAt', 'expiresAt'} or \
+                    approval['contract'] != transport_validator.APPROVAL or \
+                    approval['operationId'] != transport['operationId'] or \
+                    approval['hostIdentitySha256'] != transport['hostIdentitySha256'] or \
+                    approval['planSha256'] != digest(canonical(transport)) or \
+                    approval['action'] != transport['action'] or \
+                    not isinstance(intent, dict) or set(intent) != {'contract', 'operationId',
+                        'planSha256', 'approvalSha256', 'authorizedAt'} or \
+                    intent['contract'] != transport_validator.INTENT or \
+                    intent['operationId'] != transport['operationId'] or \
+                    intent['planSha256'] != digest(canonical(transport)) or \
+                    intent['approvalSha256'] != digest(canonical(envelope)) or \
+                    receipt['intentSha256'] != digest(canonical(intent)) or \
+                    receipt['flatIntentSha256'] != digest(canonical(intent)) or \
+                    receipt['planSha256'] != digest(canonical(transport)) or \
+                    receipt['approvalSha256'] != digest(canonical(envelope)) or \
+                    receipt['executionSha256'] != digest(canonical(transport['execution'])):
+                raise ValueError('Initial INTRO transport authorization lineage differs')
+            key = serialization.load_pem_public_key(public_raw)
+            if not isinstance(key, Ed25519PublicKey):
+                raise ValueError('Initial INTRO deployment root is not Ed25519')
+            key.verify(base64.b64decode(envelope['signature'], validate=True), canonical(approval))
+            start, end = _instant(approval['issuedAt']), _instant(approval['expiresAt'])
+            if not start <= _instant(intent['authorizedAt']) <= _instant(receipt['acceptedAt']) < end or \
+                    not timedelta(0) < end - start <= timedelta(minutes=30):
+                raise ValueError('Initial INTRO transport was outside signed validity')
+            plan = linked.get('plan')
+            if not isinstance(plan, dict) or \
+                    plan.get('introTransportOperationId') != transport['operationId'] or \
+                    plan.get('introTransportReceiptSha256') != digest(canonical(receipt)) or \
+                    plan.get('hostIdentitySha256') != transport['hostIdentitySha256'] or \
+                    plan.get('sourceRelease') != transport['sourceRelease']:
+                raise ValueError('Initial INTRO plan differs from accepted transport receipt')
         return
     if not isinstance(evidence, dict) or set(evidence) != {
             'plan', 'approvalEnvelope', 'intent', 'receipt', 'record',
@@ -280,6 +371,23 @@ def validate_statement(kind, statement, linked, expected_root_der, confirm, now=
                                                            digest(canonical(values['forwardReceipt']))) or \
                     statement['effect'] != 'TERMINAL_RECORD_ONLY':
                 raise ValueError('Zero-effect command differs from exact pending intent')
+    elif kind in INITIAL_VALIDATOR_PINS:
+        plan = values.get('plan')
+        validator = initial_shape_validator(kind, linked)
+        if kind == 'transport-finalize':
+            validator.validate_finalize_plan(plan)
+            plan_contract, approval_contract = validator.FINALIZE_PLAN, validator.FINALIZE_APPROVAL
+        else:
+            validator.validate_plan(plan)
+            plan_contract, approval_contract = validator.PLAN, validator.APPROVAL
+        if plan.get('contract') != plan_contract or approval_contract != contract or \
+                set(statement) != {'contract', 'operationId', 'hostIdentitySha256',
+                                  'planSha256', 'action', 'issuedAt', 'expiresAt'} or \
+                statement['operationId'] != plan.get('operationId') or \
+                statement['hostIdentitySha256'] != plan.get('hostIdentitySha256') or \
+                statement['planSha256'] != digest(canonical(plan)) or \
+                statement['action'] != plan.get('action'):
+            raise ValueError('Initial authority approval differs from exact reviewed plan')
     elif kind == 'runtime-provision':
         plan = values.get('plan')
         request = values.get('request')

@@ -19,6 +19,10 @@ linking и predecessor observer; окончательные Linux/root пров�
 contract: отдельный plan/GO для private state roots/transition.lock/exact
 request; read-only observe/plan/prepare больше не пишут attempt audit на host.
 Это ещё не installed state и не разрешение на A→bridge/Variant B serving.
+В общий candidate интегрирован frozen A9a31 expiry/recovery delta, typed
+offline signing для transport/INTRO/finalize и receipt-lineage negatives.
+Финальные combined review/CI, main admission и конкретные dispatcher GOs
+ещё требуются; source PASS не меняет installed/serving статус.
 
 **Source-only bootstrap checkpoint 27.09:** ordered source integration proposal
 for frozen draft PR246→247→248 and separate predecessor transition primitives

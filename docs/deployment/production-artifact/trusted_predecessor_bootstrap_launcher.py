@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import stat
 import subprocess
 import sys
@@ -42,6 +43,7 @@ RUNTIME_PROVISION_PLAN = 'LEETPLUS_PREDECESSOR_BOOTSTRAP_RUNTIME_PROVISION_V1_PL
 RUNTIME_PROVISION_APPROVAL = 'LEETPLUS_PREDECESSOR_BOOTSTRAP_RUNTIME_PROVISION_V1_APPROVAL'
 RUNTIME_PROVISION_INTENT = 'LEETPLUS_PREDECESSOR_BOOTSTRAP_RUNTIME_PROVISION_V1_INTENT'
 RUNTIME_PROVISION_RECEIPT = 'LEETPLUS_PREDECESSOR_BOOTSTRAP_RUNTIME_PROVISION_V1_RECEIPT'
+RUNTIME_NODE = Path('/usr/bin/node')
 RUNTIME_PROVISION_EFFECTS = {'runtimeDirectoriesOnly': True, 'requestPlacementOnly': True,
     'controllerPointerMutation': False, 'applicationRestart': False,
     'systemdUnitMutation': False, 'dataMutation': False,
@@ -376,7 +378,7 @@ def validate_provision(plan, envelope, request_raw, installed, *, at=None, check
     payload = {'publicKey': root.decode('ascii'),
                'message': base64.b64encode(canonical(approval)).decode('ascii'),
                'signature': signature}
-    result = subprocess.run(['/usr/bin/node', '--input-type=module', '-e', RUNTIME_PROVISION_VERIFY],
+    result = subprocess.run([str(RUNTIME_NODE), '--input-type=module', '-e', RUNTIME_PROVISION_VERIFY],
         input=canonical(payload), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=CLEAN, timeout=15, check=False)
     require(result.returncode == 0 and result.stdout == b'PASS' and not result.stderr,
@@ -493,8 +495,11 @@ def runtime_receipt(plan, envelope, intent, postimage):
 def provision_runtime(plan, envelope, request_raw, installed):
     validate_provision(plan, envelope, request_raw, installed)
     with provision_locks():
+        validate_provision(plan, envelope, request_raw, installed)
         now = datetime.datetime.now(datetime.timezone.utc)
-        validate_provision(plan, envelope, request_raw, installed, at=now)
+        require(instant(envelope['approval']['issuedAt']) <= now <
+                instant(envelope['approval']['expiresAt']),
+                'Runtime provision approval expired before first write')
         authorized = now.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
         intent = {'contract': RUNTIME_PROVISION_INTENT, 'placementId': plan['placementId'],
                   'planSha256': digest(canonical(plan)),
@@ -643,10 +648,18 @@ def main(argv=None):
         require(plan.get('placementId') == args.request_id and
                 plan.get('operationId') == args.operation_id,
                 'Captured runtime plan differs from CLI identity')
-        result = (provision_runtime(plan, envelope, request_raw, verified)
-                  if args.action == 'provision' else
-                  reconcile_runtime(plan, envelope, request_raw, verified,
-                                    finalize=args.action == 'finalize-provision'))
+        prior = signal.getsignal(signal.SIGALRM)
+        prior_timer = signal.getitimer(signal.ITIMER_REAL)
+        signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError('Bounded runtime provision deadline')))
+        signal.setitimer(signal.ITIMER_REAL, 180)
+        try:
+            result = (provision_runtime(plan, envelope, request_raw, verified)
+                      if args.action == 'provision' else
+                      reconcile_runtime(plan, envelope, request_raw, verified,
+                                        finalize=args.action == 'finalize-provision'))
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, *prior_timer)
+            signal.signal(signal.SIGALRM, prior)
         print(json.dumps(result, sort_keys=True))
         return 0
     request, provision_receipt_sha = verify_runtime_request(

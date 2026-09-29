@@ -76,6 +76,7 @@ class RuntimeProvisionTests(unittest.TestCase):
             patch.object(self.launcher, 'TRANSITION_LOCK', self.runtime / 'transition.lock'),
             patch.object(self.launcher, 'APPROVAL_ROOT', self.root / 'approval-root.pem'),
             patch.object(self.launcher, 'MACHINE_ID', self.root / 'machine-id'),
+            patch.object(self.launcher, 'RUNTIME_NODE', Path(TEST_NODE)),
         ]
         for item in self.patches:
             item.start()

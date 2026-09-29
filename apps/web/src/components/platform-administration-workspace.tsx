@@ -4,6 +4,10 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
+import {
+  TenantAccessPanel,
+  tenantAccessBadge,
+} from "@/components/tenant-access-panel";
 import type {
   AdminAuditEvent,
   AdminAuditEventsResponse,
@@ -647,6 +651,11 @@ export function PlatformAdministrationWorkspace({
     startTransition(() => router.refresh());
   }
 
+  async function refreshAfterAccessChange() {
+    await loadAuditEvents();
+    startTransition(() => router.refresh());
+  }
+
   async function submitSupportNote(tenant: Tenant) {
     const form = forms[tenant.id] ?? initialFormState(tenant);
     updateForm(tenant.id, { error: null, message: null });
@@ -1122,6 +1131,14 @@ export function PlatformAdministrationWorkspace({
                         <span
                           className={[
                             "rounded-full border px-2.5 py-1 text-xs font-semibold",
+                            tenantAccessBadge(tenant.access).className,
+                          ].join(" ")}
+                        >
+                          {tenantAccessBadge(tenant.access).label}
+                        </span>
+                        <span
+                          className={[
+                            "rounded-full border px-2.5 py-1 text-xs font-semibold",
                             hasBusinessData
                               ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
                               : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200",
@@ -1195,6 +1212,10 @@ export function PlatformAdministrationWorkspace({
 
                   <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_420px]">
                     <div className="space-y-3 text-sm">
+                      <TenantAccessPanel
+                        tenant={tenant}
+                        onChanged={refreshAfterAccessChange}
+                      />
                       <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4 dark:bg-emerald-500/10">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>

@@ -11,6 +11,7 @@ import { FounderOperatorBetaActivationService } from './founder-operator-beta-ac
 import { FounderOperatorBetaGoService } from './founder-operator-beta-go.service';
 import { FounderOwnerInviteLifecycleService } from './founder-owner-invite-lifecycle.service';
 import { SharedTenantProvisioningService } from './shared-tenant-provisioning.service';
+import { TenantAccessWindowService } from './tenant-access-window.service';
 
 @Module({
   imports: [AuthModule, IntegrationsModule, PrismaModule, TenancyModule],
@@ -23,6 +24,7 @@ import { SharedTenantProvisioningService } from './shared-tenant-provisioning.se
     FounderOperatorBetaActivationDatabaseService,
     FounderOperatorBetaActivationService,
     FounderOwnerInviteLifecycleService,
+    TenantAccessWindowService,
   ],
 })
 export class AdminModule {}

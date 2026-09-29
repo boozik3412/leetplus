@@ -56,15 +56,16 @@ function read(pathname,maximum) {
 }
 require(process.platform==='linux'&&process.getuid()===0&&process.versions.node.split('.')[0]==='22',
   'Fixed Linux root Node22 transport gate required');
-require(process.argv.length===5&&process.argv[2]==='--operation-id'&&UUID.test(process.argv[3])&&
-  SHA.test(process.argv[4]),'Expected exact transport operation and protected Node source SHA');
-require(process.argv[3]!=='9afc7218-4757-4f44-87e1-6096706bad44','Historical operation cannot stage new source');
+const args=process.argv.slice(1);
+require(args.length===3&&args[0]==='--operation-id'&&UUID.test(args[1])&&
+  SHA.test(args[2]),'Expected exact `node -e -- --operation-id UUID SHA` invocation');
+require(args[1]!=='9afc7218-4757-4f44-87e1-6096706bad44','Historical operation cannot stage new source');
 for(const name of Object.keys(process.env)) {
   require(!/^(?:NODE_|LD_|DYLD_|PYTHON)/u.test(name)&&
     !['BASH_ENV','ENV','OPENSSL_CONF','OPENSSL_MODULES','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY'].includes(name),
   'Unsafe inherited transport gate environment');
 }
-const operation=process.argv[3], protectedEntrySha=process.argv[4];
+const operation=args[1], protectedEntrySha=args[2];
 const started=Date.now();
 let child=null, timedOut=false;
 const killGroup=()=>{if(child) {try{process.kill(-child.pid,'SIGKILL');}catch(error){if(error.code!=='ESRCH')throw error;}}};
@@ -82,7 +83,7 @@ require(plan?.contract===PLAN&&plan.operationId===operation&&
   plan.action==='STAGE_SIGNED_INITIAL_INTRO_SOURCE_ONLY','Wrong signed transport plan');
 const execution=plan.execution,code=execution?.code;
 require(code&&Object.keys(code).sort().join(',')===
-  ['transportEntrySha256','transportProgramSha256','nodeExecutableSha256','nodeRealpath',
+  ['transportEntrySha256','transportProgramSha256','pythonLoaderSha256','nodeExecutableSha256','nodeRealpath',
    'pythonExecutableSha256','pythonRealpath'].sort().join(',')&&
   code.transportEntrySha256===protectedEntrySha&&SHA.test(code.transportProgramSha256),
   'Signed transport execution code closure differs');
@@ -133,20 +134,24 @@ require(source.length>0&&source.length<=MAX_CODE&&source.toString('base64')===en
   digest(source)===code.transportProgramSha256,'Captured Python transport source differs from signed plan');
 const packetRaw=Buffer.from(canonical(packet));require(packetRaw.length<=MAX_PACKET,'Transport packet too large');
 // Fixed stdlib loader compiles the SAME captured approved source, never a path.
-const loader="import base64,sys; source=base64.b64decode(sys.argv.pop(1),validate=True); sys.argv[0]='captured-standalone-transport'; exec(compile(source,'captured-standalone-transport','exec'),{'__name__':'__main__'})";
-const remaining=180000-(Date.now()-started);require(remaining>0,'Transport gate deadline expired');
-child=spawn('/usr/bin/python3',['-I','-B','-c',loader,encoded,'--mode','stage',
+const loader="import base64,ctypes,os,signal,sys; expected_parent=int(sys.argv.pop(1)); libc=ctypes.CDLL(None,use_errno=True); assert libc.prctl(1,signal.SIGKILL,0,0,0)==0 and os.getppid()==expected_parent; source=base64.b64decode(sys.argv.pop(1),validate=True); sys.argv[0]='captured-standalone-transport'; exec(compile(source,'captured-standalone-transport','exec'),{'__name__':'__main__'})";
+require(code.pythonLoaderSha256===digest(Buffer.from(loader)),
+  'Fixed parent-death/same-buffer Python loader differs from signed execution');
+const remaining=180000-(Date.now()-started);require(!timedOut&&remaining>0,'Transport gate deadline expired');
+// Linux PDEATHSIG prevents the detached Python session surviving a killed gate.
+// The transport program sets the same fence on its bounded crypto children.
+child=spawn('/usr/bin/python3',['-I','-B','-c',loader,String(process.pid),encoded,'--mode','stage',
   '--operation-id',operation,'--captured-program-sha256',code.transportProgramSha256],
 {env:CLEAN,stdio:['pipe','pipe','pipe'],detached:true});
-let out=0,err=0;
+let out=0,err=0,stdinFailed=false;
 const onSignal=()=>{killGroup();};
 process.once('SIGINT',onSignal);process.once('SIGTERM',onSignal);
 child.stdout.on('data',chunk=>{out+=chunk.length;if(out>1024*1024)killGroup();else process.stdout.write(chunk);});
 child.stderr.on('data',chunk=>{err+=chunk.length;if(err>1024*1024)killGroup();else process.stderr.write(chunk);});
-child.stdin.on('error',()=>{killGroup();});
+child.stdin.on('error',()=>{stdinFailed=true;killGroup();});
 child.stdin.end(packetRaw);
 const result=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',(status,signal)=>resolve({status,signal}));});
 clearTimeout(deadline);process.removeListener('SIGINT',onSignal);process.removeListener('SIGTERM',onSignal);
-require(!timedOut&&!result.signal&&out<=1024*1024&&err<=1024*1024&&Number.isInteger(result.status),
+require(!timedOut&&!stdinFailed&&!result.signal&&out<=1024*1024&&err<=1024*1024&&Number.isInteger(result.status),
   'Transport execution outcome unknown; preserve receipts and reconcile without replay');
 process.exitCode=result.status;

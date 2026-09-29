@@ -40,6 +40,7 @@ MAX_PACKET = 48*1024*1024
 MAX_LEAF = 2*1024*1024
 MAX_ARCHIVE = 16*1024*1024
 MAX_PROGRAM = 65536
+LOADER_SHA256 = 'a44a7637f5d4a89f7ab7084fc1a300c35727fe20b78e44ad4491fbba91191bff'
 LINKS = ('hostIdentitySha256','sourceRelease','sourceArtifactId','sourceProducerRunId',
          'sourceProducerRunAttempt','sourceTransportSha256','sourceReceiptSha256',
          'sourceArchiveSha256','sourceRootManifestSha256','composeArtifactId',
@@ -115,6 +116,12 @@ def exact(raw,maximum=131072):
     value=json.loads(raw.decode('utf8'),object_pairs_hook=pairs,
                      parse_constant=lambda v:require(False,'Nonfinite JSON'))
     require(raw==canonical(value),'Noncanonical transport JSON');return value
+
+
+def child_parent_death(expected_parent):
+    """Called only in the single-threaded crypto child before exec."""
+    require(ctypes.CDLL(None,use_errno=True).prctl(1,signal.SIGKILL,0,0,0)==0 and
+            os.getppid()==expected_parent,'Crypto child parent-death fence failed')
 
 
 def safe_relative(name):
@@ -205,10 +212,11 @@ def validate_plan(plan):
     execution=plan['execution']
     require(isinstance(execution,dict) and set(execution)==EXECUTION_FIELDS,'Closed execution object required')
     code=execution['code']
-    require(isinstance(code,dict) and set(code)=={'transportEntrySha256','transportProgramSha256',
+    require(isinstance(code,dict) and set(code)=={'transportEntrySha256','transportProgramSha256','pythonLoaderSha256',
             'nodeExecutableSha256','nodeRealpath','pythonExecutableSha256','pythonRealpath'} and
             all(isinstance(code[name],str) and HASH.fullmatch(code[name]) for name in
-                ('transportEntrySha256','transportProgramSha256','nodeExecutableSha256','pythonExecutableSha256')) and
+                ('transportEntrySha256','transportProgramSha256','pythonLoaderSha256','nodeExecutableSha256','pythonExecutableSha256')) and
+            code['pythonLoaderSha256']==LOADER_SHA256 and
             code['pythonRealpath'].startswith('/usr/bin/python3') and
             code['nodeRealpath'].startswith('/usr/bin/node'),
             'Transport code/tool closure differs')
@@ -275,6 +283,31 @@ def validate_plan(plan):
     return request
 
 
+def validate_terminal_receipt(receipt,plan):
+    keys={'contract','decision','operationId','planSha256','approvalSha256','intentSha256',
+          *LINKS,'snapshotPath','snapshotDevice','snapshotInode','snapshotSize','snapshotMode',
+          'snapshotUid','snapshotGid','entrySnapshotPath','entrySnapshotDevice','entrySnapshotInode',
+          'entrySnapshotSize','entrySnapshotMode','entrySnapshotUid','entrySnapshotGid',
+          'executionSha256','fullPostimageSha256','flatIntentSha256','parentPostimageSha256',
+          'predecessorPostimageSha256','acceptedAt'}
+    require(isinstance(receipt,dict) and set(receipt)==keys and receipt['contract']==RECEIPT and
+            receipt['decision']=='PASS' and receipt['operationId']==plan['operationId'] and
+            all(receipt[name]==plan[name] for name in LINKS),
+            'Terminal V2 transport receipt key/identity differs')
+    for name in keys:
+        if name.endswith('Sha256'):require(isinstance(receipt[name],str) and HASH.fullmatch(receipt[name]),
+                                         'Terminal transport digest differs')
+    require(receipt['snapshotPath']==plan['snapshotPath'] and receipt['entrySnapshotPath']==plan['entrySnapshotPath'] and
+            receipt['snapshotSize']==plan['snapshotSize'] and receipt['entrySnapshotSize']==plan['entrySnapshotSize'] and
+            receipt['snapshotMode']==receipt['entrySnapshotMode']==0o400 and
+            receipt['snapshotUid']==receipt['snapshotGid']==receipt['entrySnapshotUid']==receipt['entrySnapshotGid']==0 and
+            all(type(receipt[name]) is int and receipt[name]>0 for name in
+                ('snapshotDevice','snapshotInode','entrySnapshotDevice','entrySnapshotInode')),
+            'Terminal transport snapshot identities differ')
+    instant(receipt['acceptedAt'])
+    return receipt
+
+
 def verify_approval(plan,envelope,pem,node='/usr/bin/node',at=None):
     validate_plan(plan)
     require(isinstance(envelope,dict) and set(envelope)=={'approval','signature'},'Transport approval envelope differs')
@@ -289,8 +322,10 @@ def verify_approval(plan,envelope,pem,node='/usr/bin/node',at=None):
             re.fullmatch(r'[A-Za-z0-9+/]{86}==',envelope['signature']),'Transport public root/signature differs')
     payload={'publicKey':pem.decode('ascii'),'message':base64.b64encode(canonical(value)).decode(),
              'signature':envelope['signature']}
+    parent_pid=os.getpid()
     result=subprocess.run([node,'--input-type=module','-e',VERIFY],input=canonical(payload),
-                          stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=CLEAN,timeout=15,check=False)
+                          stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=CLEAN,timeout=15,check=False,
+                          preexec_fn=(lambda:child_parent_death(parent_pid)) if os.name=='posix' else None)
     require(result.returncode==0 and result.stdout==b'PASS' and not result.stderr,'Transport signature rejected')
     return value
 
@@ -571,6 +606,7 @@ class Transport:
                 'parentPostimageSha256':sha(canonical(parent_postimage)),
                 'predecessorPostimageSha256':predecessor_sha,
                 'acceptedAt':accepted}
+            validate_terminal_receipt(receipt,plan)
             self.write(request+'/transport-receipt.json',canonical(receipt))
             require({p.name for p in self.p(request).iterdir()}==set(LEAVES),
                     'Terminal transport snapshot closure differs')
@@ -585,9 +621,52 @@ class Transport:
             return {'decision':'RECOVERY_REQUIRED','operationId':operation,'reason':'No terminal transport receipt; no replay'}
         raw=self.read(audit+'/receipt.json',131072);receipt=exact(raw)
         require(receipt.get('contract')==RECEIPT and receipt.get('operationId')==operation,'Transport receipt identity differs')
-        request=str(Path(receipt['snapshotPath']).parent)
+        raw_plan=self.read(audit+'/plan.json',131072)
+        raw_approval=self.read(audit+'/approval.json',131072)
+        raw_intent=self.read(audit+'/intent.json',131072)
+        plan=exact(raw_plan);envelope=exact(raw_approval);intent=exact(raw_intent)
+        request=validate_plan(plan)
+        validate_terminal_receipt(receipt,plan)
+        require(plan['operationId']==operation and receipt.get('decision')=='PASS' and
+                receipt.get('planSha256')==sha(raw_plan) and
+                receipt.get('approvalSha256')==sha(raw_approval) and
+                receipt.get('intentSha256')==sha(raw_intent) and
+                receipt.get('flatIntentSha256')==sha(raw_intent) and
+                self.read(STATE+'/'+operation+'.standalone-transport.intent.json',131072)==raw_intent and
+                intent=={'contract':INTENT,'operationId':operation,
+                    'planSha256':sha(raw_plan),'approvalSha256':sha(raw_approval),
+                    'authorizedAt':intent.get('authorizedAt')},
+                'Terminal transport historical lineage differs')
+        pem=self.read(ROOT_PEM,4096)
+        require(sha(pem)==plan['execution']['trustRoot']['rawSha256'],
+                'Historical transport deployment root differs')
+        verify_approval(plan,envelope,pem,node=self.node,at=intent['authorizedAt'])
+        verify_approval(plan,envelope,pem,node=self.node,at=receipt['acceptedAt'])
+        require(instant(intent['authorizedAt'])<=instant(receipt['acceptedAt']),
+                'Transport acceptance predates intent')
+        require(str(Path(receipt['snapshotPath']).parent)==request,
+                'Terminal transport request destination differs')
         require({p.name for p in self.p(request).iterdir()}==set(LEAVES) and
                 self.read(request+'/transport-receipt.json',131072)==raw,'Terminal snapshot/receipt differs')
+        require(self.absent(INBOX+'/.transport-'+operation+'.pending'),
+                'Terminal transport has contradictory staging residue')
+        postimage={}
+        for name,expected in sorted(plan['execution']['destinations'].items()):
+            data=self.read(request+'/'+name,MAX_ARCHIVE if name=='source.tar.gz' else MAX_LEAF)
+            info=self.p(request+'/'+name).lstat()
+            require(sha(data)==expected['sha256'] and len(data)==expected['bytes'] and
+                    stat.S_IMODE(info.st_mode)==0o400,
+                    'Terminal transport source bytes or mode differ')
+            postimage[name]={'sha256':sha(data),'bytes':len(data),'mode':0o400,'uid':0,'gid':0}
+        require(receipt.get('fullPostimageSha256')==sha(canonical(postimage)) and
+                receipt.get('executionSha256')==sha(canonical(plan['execution'])) and
+                receipt.get('parentPostimageSha256')==sha(canonical(self.parent_postimage(plan))),
+                'Terminal transport full postimage differs')
+        for prefix,name in (('snapshot','intro-program.py'),('entrySnapshot','intro-entry.mjs')):
+            info=self.p(request+'/'+name).lstat()
+            require((info.st_dev,info.st_ino,info.st_size,info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode))==
+                    (receipt[prefix+'Device'],receipt[prefix+'Inode'],receipt[prefix+'Size'],0,0,0o400),
+                    'Terminal transport protected snapshot inode differs')
         return {'decision':'EXACT_TERMINAL_TRANSPORT_REQUIRES_INDEPENDENT_VERIFICATION',
                 'operationId':operation,'transportReceiptSha256':sha(raw)}
 

@@ -11,10 +11,10 @@ const APPROVAL = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_APPROVAL';
 const INTENT = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_INTENT';
 const GENERATION = 'LEETPLUS_STANDALONE_INERT_GENERATION_V1_RECEIPT';
 const RECEIPT = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_RECEIPT';
-const TRANSPORT = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V1_RECEIPT';
-const TRANSPORT_PLAN = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V1_PLAN';
-const TRANSPORT_APPROVAL = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V1_APPROVAL';
-const TRANSPORT_INTENT = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V1_INTENT';
+const TRANSPORT = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_RECEIPT';
+const TRANSPORT_PLAN = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_PLAN';
+const TRANSPORT_APPROVAL = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_APPROVAL';
+const TRANSPORT_INTENT = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_INTENT';
 const VERIFIER = '/usr/local/libexec/leetplus/verify-installed-standalone-intro.mjs';
 const DEPLOYMENT_ROOT = '/etc/leetplus-compose/approval-root.pem';
 const GENERATIONS = '/srv/leetplus/production-control-generations';
@@ -96,13 +96,14 @@ const TRANSPORT_LINK_FIELDS = Object.freeze([
 const TRANSPORT_EFFECTS = Object.freeze({
   sourceSnapshotOnly: true, targetExecution: false, controllerPointerMutation: false,
   applicationRestart: false, systemdUnitMutation: false, daemonReload: false,
+  dataMutation: false,
   timerMutation: false, workerGrantMutation: false, providerEffect: false,
   privateKeyTransport: false,
 });
 const TRANSPORT_PLAN_KEYS = Object.freeze([
   'contract', 'operationId', 'action', ...TRANSPORT_LINK_FIELDS,
   'snapshotPath', 'snapshotSize', 'snapshotMode',
-  'entrySnapshotPath', 'entrySnapshotSize', 'entrySnapshotMode', 'effects',
+  'entrySnapshotPath', 'entrySnapshotSize', 'entrySnapshotMode', 'effects', 'execution',
 ]);
 const TRANSPORT_RECEIPT_KEYS = Object.freeze([
   'contract', 'decision', 'operationId', 'planSha256', 'approvalSha256',
@@ -110,7 +111,9 @@ const TRANSPORT_RECEIPT_KEYS = Object.freeze([
   'snapshotDevice', 'snapshotInode', 'snapshotSize', 'snapshotMode',
   'snapshotUid', 'snapshotGid', 'entrySnapshotPath',
   'entrySnapshotDevice', 'entrySnapshotInode', 'entrySnapshotSize',
-  'entrySnapshotMode', 'entrySnapshotUid', 'entrySnapshotGid', 'acceptedAt',
+  'entrySnapshotMode', 'entrySnapshotUid', 'entrySnapshotGid',
+  'executionSha256', 'flatIntentSha256', 'fullPostimageSha256',
+  'parentPostimageSha256', 'predecessorPostimageSha256', 'acceptedAt',
 ]);
 const DESTINATION_MODES = Object.freeze({
   [VERIFIER]: 0o555,
@@ -401,6 +404,59 @@ function verifyTransport(plan, rawReceipt, receipt) {
     Object.entries(TRANSPORT_EFFECTS).every(([name, value]) =>
       transportPlan.value.effects?.[name] === value),
   'Initial source transport plan/effects differ');
+  const execution = transportPlan.value.execution;
+  sameKeys(execution, ['code','invocation','host','predecessor','nativeControlLockIdentity',
+    'trustRoot','parentPreimages','leafPreimages','privateDirectories','destinations',
+    'generatedDestinations','limits','effects'], 'mandatory V2 transport execution');
+  sameKeys(execution.code, ['transportEntrySha256','transportProgramSha256',
+    'pythonLoaderSha256','nodeExecutableSha256','nodeRealpath','pythonExecutableSha256','pythonRealpath'],
+  'signed transport code closure');
+  require(['transportEntrySha256','transportProgramSha256','pythonLoaderSha256','nodeExecutableSha256',
+    'pythonExecutableSha256'].every((name)=>SHA.test(execution.code[name]??'')) &&
+    execution.code.nodeRealpath.startsWith('/usr/bin/node') &&
+    execution.code.pythonLoaderSha256==='a44a7637f5d4a89f7ab7084fc1a300c35727fe20b78e44ad4491fbba91191bff' &&
+    execution.code.pythonRealpath.startsWith('/usr/bin/python3') &&
+    JSON.stringify(execution.invocation)===JSON.stringify({interpreter:'/usr/bin/python3',
+      flags:['-I','-B','-c'],mode:'memory-captured-python-c',action:'stage'}) &&
+    execution.host?.hostIdentitySha256===plan.hostIdentitySha256 &&
+    execution.host?.bootId===plan.bootId &&
+    execution.trustRoot?.path===DEPLOYMENT_ROOT &&
+    Object.keys(execution.effects??{}).length===Object.keys(TRANSPORT_EFFECTS).length &&
+    Object.entries(TRANSPORT_EFFECTS).every(([name,value])=>execution.effects?.[name]===value) &&
+    JSON.stringify(execution.limits)===JSON.stringify({archiveBytes:16777216,
+      leafBytes:2097152,authorizationBytes:131072,packetBytes:50331648,
+      transportProgramBytes:65536,lockWaitSeconds:120,totalSeconds:180}) &&
+    JSON.stringify(execution.nativeControlLockIdentity)===JSON.stringify(plan.nativeControlLockIdentity) &&
+    JSON.stringify(execution.predecessor)===JSON.stringify({
+      releaseSha:PREDECESSOR.releaseSha,manifestSha256:PREDECESSOR.manifestSha256,
+      executorSha256:PREDECESSOR.executorSha256,installerSha256:PREDECESSOR.installerSha256,
+      corePointer:plan.oldCorePointer,activeRecordSha256:plan.oldActiveRecordSha256,
+      handoffPointerSha256:plan.oldHandoffPointerSha256,pendingAbsent:true}),
+  'Signed V2 transport code, host, predecessor or effect scope differs');
+  const request=`/srv/leetplus/production-control-inbox/bootstrap-intro-${plan.operationId}`;
+  const staging=`/srv/leetplus/production-control-inbox/.transport-${plan.introTransportOperationId}.pending`;
+  const flat=`/var/lib/leetplus-compose/${plan.introTransportOperationId}.standalone-transport.intent.json`;
+  const parents=['/var/lib/leetplus-compose','/srv/leetplus',
+    '/srv/leetplus/production-control-inbox',TRANSPORT_AUDITS];
+  sameKeys(execution.parentPreimages,parents,'transport parent preimages');
+  require(JSON.stringify(execution.leafPreimages)===JSON.stringify(Object.fromEntries(
+    [request,staging,audit,flat].sort(compareBytes).map(name=>[name,'ABSENT']))) &&
+    JSON.stringify(execution.privateDirectories)===JSON.stringify(Object.fromEntries(
+      [request,staging,audit].sort(compareBytes).map(name=>[name,{mode:0o700,uid:0,gid:0}]))) &&
+    Object.keys(execution.destinations??{}).sort(compareBytes).join('\0')===
+      ['source.tar.gz','source-receipt.json','final-admission.json',
+       'docker-admission.json','intro-entry.mjs','intro-program.py'].sort(compareBytes).join('\0'),
+  'V2 transport destination/preimage closure differs');
+  const generated={
+    [flat]:'FLAT_INTENT',[`${audit}/plan.json`]:'AUDIT_PLAN',
+    [`${audit}/approval.json`]:'AUDIT_APPROVAL',[`${audit}/intent.json`]:'AUDIT_INTENT',
+    [`${audit}/receipt.json`]:'AUDIT_RECEIPT',[`${request}/transport-receipt.json`]:'REQUEST_RECEIPT',
+  };
+  const generatedMap=Object.fromEntries(Object.entries(generated).sort(([a],[b])=>compareBytes(a,b))
+    .map(([name,kind])=>[name,{kind,mode:0o400,uid:0,gid:0}]));
+  require(JSON.stringify(execution.generatedDestinations)===JSON.stringify(generatedMap) &&
+    receipt.executionSha256===digest(Buffer.from(canonical(execution))),
+  'V2 generated destination or signed execution digest differs');
   sameKeys(envelope.value, ['approval', 'signature'], 'initial source transport approval envelope');
   const approval = envelope.value.approval;
   sameKeys(approval, ['contract', 'operationId', 'hostIdentitySha256',
@@ -421,6 +477,9 @@ function verifyTransport(plan, rawReceipt, receipt) {
     receipt.approvalSha256 === digest(envelope.raw) &&
     receipt.intentSha256 === digest(intent.raw),
   'Initial source transport intent/receipt lineage differs');
+  require(Buffer.compare(readRegular(flat,65536,0o400),intent.raw)===0 &&
+    receipt.flatIntentSha256===digest(intent.raw),
+  'Transport pre-effect flat intent differs from historical audit');
   const issued = canonicalTime(approval.issuedAt);
   const expires = canonicalTime(approval.expiresAt);
   const authorized = canonicalTime(intent.value.authorizedAt);
@@ -432,12 +491,45 @@ function verifyTransport(plan, rawReceipt, receipt) {
     /^[A-Za-z0-9+/]{86}==$/u.test(envelope.value.signature),
   'Initial source transport signature encoding differs');
   const pem = readRegular(DEPLOYMENT_ROOT, 4096);
-  require(!pem.includes(Buffer.from('PRIVATE')), 'Private material in deployment root');
+  require(!pem.includes(Buffer.from('PRIVATE')) &&
+    execution.trustRoot.rawSha256===digest(pem),
+  'Private or foreign material in deployment root');
   const key = crypto.createPublicKey(pem);
   require(key.asymmetricKeyType === 'ed25519' &&
     crypto.verify(null, Buffer.from(canonical(approval)), key,
       Buffer.from(envelope.value.signature, 'base64')),
   'Initial source transport signature differs');
+  const parentMap={};
+  for(const directory of parents.sort(compareBytes)) {
+    const pre=execution.parentPreimages[directory];
+    sameKeys(pre,['state','device','inode','uid','gid','mode'],'transport parent preimage');
+    const st=fs.lstatSync(directory,{bigint:true});
+    require(st.isDirectory()&&!st.isSymbolicLink()&&st.uid===0n&&
+      (st.mode&0o022n)===0n&&['ABSENT','EXACT'].includes(pre.state)&&
+      (pre.state!=='EXACT'||(st.dev===BigInt(pre.device)&&st.ino===BigInt(pre.inode))),
+    'Signed transport parent changed');
+    parentMap[directory]={device:Number(st.dev),inode:Number(st.ino),uid:Number(st.uid),
+      gid:Number(st.gid),mode:Number(st.mode&0o7777n)};
+  }
+  require(receipt.parentPostimageSha256===digest(Buffer.from(canonical(parentMap))) &&
+    receipt.predecessorPostimageSha256===digest(Buffer.from(canonical({
+      corePointer:plan.oldCorePointer,manifestSha256:plan.predecessorManifestSha256,
+      activeRecordSha256:plan.oldActiveRecordSha256,
+      handoffPointerSha256:plan.oldHandoffPointerSha256,pendingAbsent:true}))),
+  'Signed transport parent/predecessor postimage differs');
+  const postimage={};
+  for(const name of Object.keys(execution.destinations).sort(compareBytes)) {
+    const expected=execution.destinations[name];
+    sameKeys(expected,['sha256','bytes','mode','uid','gid'],'transport source destination');
+    require(expected.mode===0o400&&expected.uid===0&&expected.gid===0,
+      'Transport source destination mode/owner differs');
+    const raw=readRegular(`${request}/${name}`,name==='source.tar.gz'?16777216:2097152,0o400);
+    require(expected.sha256===digest(raw)&&expected.bytes===raw.length,
+      'Transport source destination bytes differ');
+    postimage[name]={sha256:digest(raw),bytes:raw.length,mode:0o400,uid:0,gid:0};
+  }
+  require(receipt.fullPostimageSha256===digest(Buffer.from(canonical(postimage))) &&
+    !fs.existsSync(staging), 'Terminal source postimage/staging differs');
   const snapshotPath = `/srv/leetplus/production-control-inbox/bootstrap-intro-${plan.operationId}/intro-program.py`;
   require(receipt.snapshotPath === snapshotPath &&
     transportPlan.value.snapshotPath === snapshotPath &&

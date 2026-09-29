@@ -28,6 +28,7 @@ def plan_fixture():
     execution = {
         'code': {'transportEntrySha256':'0'*64,
                  'transportProgramSha256': 'a'*64, 'nodeExecutableSha256': 'b'*64,
+                 'pythonLoaderSha256':transport.LOADER_SHA256,
                  'nodeRealpath': '/usr/bin/node', 'pythonExecutableSha256': 'c'*64,
                  'pythonRealpath': '/usr/bin/python3.12'},
         'invocation': {'interpreter': '/usr/bin/python3', 'flags': ['-I','-B','-c'],

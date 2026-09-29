@@ -147,9 +147,47 @@ class NativeIntroduction(unittest.TestCase):
             'snapshotMode': 0o400, 'entrySnapshotPath': self.request+'/intro-entry.mjs',
             'entrySnapshotSize': len(entry), 'entrySnapshotMode': 0o400,
             'effects': intro.TRANSPORT_EFFECTS}
+        transport_operation = self.plan['introTransportOperationId']
+        staging = '/srv/leetplus/production-control-inbox/.transport-'+transport_operation+'.pending'
+        flat = intro.STATE+'/'+transport_operation+'.standalone-transport.intent.json'
+        parent_names = (intro.STATE,'/srv/leetplus','/srv/leetplus/production-control-inbox',intro.TRANSPORTS)
+        raw_sources = {name:self.files.read(self.request+'/'+name, intro.MAX_ARCHIVE if name=='source.tar.gz' else intro.MAX_LEAF)
+                       for name in ('source.tar.gz','source-receipt.json','final-admission.json',
+                                    'docker-admission.json','intro-entry.mjs','intro-program.py')}
+        generated = {flat:'FLAT_INTENT',self.transport_audit+'/plan.json':'AUDIT_PLAN',
+            self.transport_audit+'/approval.json':'AUDIT_APPROVAL',
+            self.transport_audit+'/intent.json':'AUDIT_INTENT',
+            self.transport_audit+'/receipt.json':'AUDIT_RECEIPT',
+            self.request+'/transport-receipt.json':'REQUEST_RECEIPT'}
+        transport_plan['execution'] = {
+            'code': {'transportEntrySha256': 'a'*64, 'transportProgramSha256': 'b'*64,
+                'pythonLoaderSha256':'a44a7637f5d4a89f7ab7084fc1a300c35727fe20b78e44ad4491fbba91191bff',
+                'nodeExecutableSha256':'c'*64,'nodeRealpath':'/usr/bin/node',
+                'pythonExecutableSha256':'d'*64,'pythonRealpath':'/usr/bin/python3'},
+            'invocation': {'interpreter':'/usr/bin/python3','flags':['-I','-B','-c'],
+                           'mode':'memory-captured-python-c','action':'stage'},
+            'host': {'hostIdentitySha256':self.plan['hostIdentitySha256'],'bootId':self.plan['bootId']},
+            'predecessor': {'releaseSha':intro.B0_RELEASE,'manifestSha256':intro.B0_MANIFEST,
+                'executorSha256':intro.B0_EXECUTOR,'installerSha256':intro.B0_INSTALLER,
+                'corePointer':self.plan['oldCorePointer'],
+                'activeRecordSha256':self.plan['oldActiveRecordSha256'],
+                'handoffPointerSha256':self.plan['oldHandoffPointerSha256'],'pendingAbsent':True},
+            'nativeControlLockIdentity':copy.deepcopy(self.plan['nativeControlLockIdentity']),
+            'trustRoot': {'path':intro.ROOT_PEM,'rawSha256':'e'*64},
+            'parentPreimages': {name:{'state':'EXACT',**self.identity(name)} for name in parent_names},
+            'leafPreimages': {name:'ABSENT' for name in sorted((self.request,staging,self.transport_audit,flat))},
+            'privateDirectories': {name:{'mode':0o700,'uid':0,'gid':0}
+                for name in sorted((self.request,staging,self.transport_audit))},
+            'destinations': {name:{'sha256':intro.sha(raw),'bytes':len(raw),'mode':0o400,'uid':0,'gid':0}
+                for name,raw in raw_sources.items()},
+            'generatedDestinations': {name:{'kind':kind,'mode':0o400,'uid':0,'gid':0}
+                for name,kind in sorted(generated.items())},
+            'limits': {'archiveBytes':intro.MAX_ARCHIVE,'leafBytes':intro.MAX_LEAF,
+                'authorizationBytes':131072,'packetBytes':48*1024*1024,
+                'transportProgramBytes':65536,'lockWaitSeconds':120,'totalSeconds':180},
+            'effects':copy.deepcopy(intro.TRANSPORT_EFFECTS),
+        }
         self.transport_plan = transport_plan
-        transport_approval = self.approval(transport_plan, intro.TRANSPORT_APPROVAL)
-        intro_approval = self.approval(self.plan, intro.APPROVAL)
         # Sign both approvals with one ephemeral deployment root, without
         # persisting a private key or allowing it into source/log artifacts.
         script = """import crypto from 'node:crypto';import fs from 'node:fs';
@@ -166,10 +204,20 @@ rl.on('line',line=>{const v=JSON.parse(line);process.stdout.write(JSON.stringify
 """], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.public = json.loads(self.signer.stdout.readline())['publicPem'].encode()
         self.write(intro.ROOT_PEM, self.public)
+        transport_plan['execution']['trustRoot']['rawSha256']=intro.sha(self.public)
+        transport_approval = self.approval(transport_plan, intro.TRANSPORT_APPROVAL)
         env_transport = self.sign(transport_approval)
         transport_intent = {'contract': intro.TRANSPORT_INTENT, 'operationId': transport_plan['operationId'],
             'planSha256': intro.sha(intro.canonical(transport_plan)),
             'approvalSha256': intro.sha(intro.canonical(env_transport)), 'authorizedAt': intro.utc_now()}
+        self.write(flat,intro.canonical(transport_intent))
+        postimage={name:{'sha256':intro.sha(raw),'bytes':len(raw),'mode':0o400,'uid':0,'gid':0}
+                   for name,raw in sorted(raw_sources.items())}
+        parent_postimage={name:self.identity(name) for name in sorted(parent_names)}
+        predecessor_postimage={'corePointer':self.plan['oldCorePointer'],
+            'manifestSha256':self.plan['predecessorManifestSha256'],
+            'activeRecordSha256':self.plan['oldActiveRecordSha256'],
+            'handoffPointerSha256':self.plan['oldHandoffPointerSha256'],'pendingAbsent':True}
         transport_receipt = {'contract': intro.TRANSPORT, 'decision': 'PASS',
             'operationId': transport_plan['operationId'], 'planSha256': intro.sha(intro.canonical(transport_plan)),
             'approvalSha256': intro.sha(intro.canonical(env_transport)), 'intentSha256': intro.sha(intro.canonical(transport_intent)),
@@ -179,7 +227,13 @@ rl.on('line',line=>{const v=JSON.parse(line);process.stdout.write(JSON.stringify
             'snapshotUid': 0, 'snapshotGid': 0, 'entrySnapshotPath': self.request+'/intro-entry.mjs',
             'entrySnapshotDevice': entry_snapshot.st_dev, 'entrySnapshotInode': entry_snapshot.st_ino,
             'entrySnapshotSize': len(entry), 'entrySnapshotMode': 0o400,
-            'entrySnapshotUid': 0, 'entrySnapshotGid': 0, 'acceptedAt': intro.utc_now()}
+            'entrySnapshotUid': 0, 'entrySnapshotGid': 0,
+            'executionSha256':intro.sha(intro.canonical(transport_plan['execution'])),
+            'flatIntentSha256':intro.sha(intro.canonical(transport_intent)),
+            'fullPostimageSha256':intro.sha(intro.canonical(postimage)),
+            'parentPostimageSha256':intro.sha(intro.canonical(parent_postimage)),
+            'predecessorPostimageSha256':intro.sha(intro.canonical(predecessor_postimage)),
+            'acceptedAt': intro.utc_now()}
         for name, value in (('plan.json',transport_plan),('approval.json',env_transport),
                             ('intent.json',transport_intent),('receipt.json',transport_receipt)):
             self.write(self.transport_audit+'/'+name, intro.canonical(value))

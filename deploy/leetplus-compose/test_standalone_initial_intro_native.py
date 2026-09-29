@@ -186,8 +186,8 @@ rl.on('line',line=>{const v=JSON.parse(line);process.stdout.write(JSON.stringify
         self.write(self.request+'/transport-receipt.json', intro.canonical(transport_receipt))
         self.plan['introTransportReceiptSha256'] = intro.sha(intro.canonical(transport_receipt))
         self.envelope = self.sign(self.approval(self.plan, intro.APPROVAL))
-        self.write(self.request+'/plan.json', intro.canonical(self.plan))
-        self.write(self.request+'/approval.json', intro.canonical(self.envelope))
+        self.assertTrue(self.files.absent(self.request+'/plan.json'))
+        self.assertTrue(self.files.absent(self.request+'/approval.json'))
         self.engine = self.engine_for(self.files)
 
     def tearDown(self):
@@ -199,7 +199,9 @@ rl.on('line',line=>{const v=JSON.parse(line);process.stdout.write(JSON.stringify
     def engine_for(self, files):
         return FixtureIntro(files=files, node=self.node,
             expected_plan_sha256=intro.sha(intro.canonical(self.plan)),
-            expected_approval_sha256=intro.sha(intro.canonical(self.envelope)))
+            expected_approval_sha256=intro.sha(intro.canonical(self.envelope)),
+            captured_plan=intro.canonical(self.plan),
+            captured_approval=intro.canonical(self.envelope))
 
     def identity(self, logical):
         info = self.files.p(logical).stat()
@@ -238,8 +240,12 @@ process.argv=['/usr/bin/node',{json.dumps(intro.VERIFIER)},'--source-release',{j
 
     def test_prepare_is_read_only_then_inert_apply_verifies_historically(self):
         before=set(p.relative_to(self.base) for p in self.base.rglob('*'))
+        self.assertTrue(self.files.absent(self.request+'/plan.json'))
+        self.assertTrue(self.files.absent(self.request+'/approval.json'))
         self.assertEqual(self.engine.prepare(self.operation)['decision'],'PREPARED_NOT_AUTHORIZATION')
         self.assertEqual(before,set(p.relative_to(self.base) for p in self.base.rglob('*')))
+        self.assertTrue(self.files.absent(self.request+'/plan.json'))
+        self.assertTrue(self.files.absent(self.request+'/approval.json'))
         core=os.readlink(self.files.p(intro.CORE));active=self.files.read(intro.ACTIVE);handoff=self.files.read(intro.HANDOFF)
         result=self.engine.apply(self.operation)
         self.assertEqual(result['decision'],'INTRODUCED_INERT_ONLY_NOT_ACTIVE')
@@ -253,6 +259,19 @@ process.argv=['/usr/bin/node',{json.dumps(intro.VERIFIER)},'--source-release',{j
         # A later legitimate pointer is not an expired INTRO forward effect.
         self.files.p(intro.CORE).unlink();self.files.p(intro.CORE).symlink_to('/approved/later/bridge/control.sh')
         self.assertEqual(self.verify_snapshot().returncode,0)
+
+    def test_missing_or_swapped_in_memory_authorization_never_reaches_effect(self):
+        with self.assertRaises(ValueError):
+            FixtureIntro(files=self.files,node=self.node,
+                expected_plan_sha256=intro.sha(intro.canonical(self.plan)),
+                expected_approval_sha256=intro.sha(intro.canonical(self.envelope)))
+        changed=copy.deepcopy(self.plan);changed['sourceRelease']='f'*40
+        with self.assertRaises(ValueError):
+            FixtureIntro(files=self.files,node=self.node,
+                expected_plan_sha256=intro.sha(intro.canonical(self.plan)),
+                expected_approval_sha256=intro.sha(intro.canonical(self.envelope)),
+                captured_plan=intro.canonical(changed),captured_approval=intro.canonical(self.envelope))
+        self.assertTrue(self.files.absent(intro.STATE+'/'+self.operation+'.standalone-intro.intent.json'))
 
     def test_pending_dangling_symlink_and_existing_public_destination_block(self):
         self.files.p(intro.PENDING).symlink_to('/missing/entry')

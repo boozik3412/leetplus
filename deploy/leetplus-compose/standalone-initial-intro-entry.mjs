@@ -72,9 +72,26 @@ for (const name of Object.keys(process.env)) {
 const operation = process.argv[3];
 const mode = process.argv[5];
 const input = PREFIX + operation;
-const planRaw = read(`${input}/plan.json`, 65536);
-const plan = record(planRaw);
-const envelope = record(read(`${input}/approval.json`, 65536));
+const authorizationChunks = [];
+let authorizationSize = 0;
+while (true) {
+  const chunk = Buffer.alloc(16384);
+  const count = fs.readSync(0, chunk, 0, chunk.length, null);
+  if (!count) break;
+  authorizationSize += count;
+  require(authorizationSize <= 131072, 'Captured operator authorization exceeds bound');
+  authorizationChunks.push(chunk.subarray(0, count));
+}
+const authorizationRaw = Buffer.concat(authorizationChunks);
+const authorization = record(authorizationRaw);
+require(authorization && Object.keys(authorization).sort().join(',') === 'approvalEnvelope,plan',
+  'Expected one closed in-memory operator authorization');
+const plan = authorization.plan;
+const envelope = authorization.approvalEnvelope;
+const planRaw = Buffer.from(canonical(plan));
+const approvalRaw = Buffer.from(canonical(envelope));
+require(planRaw.length <= 65536 && approvalRaw.length <= 65536,
+  'Captured plan/approval exceeds bound');
 require(plan.contract === 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_PLAN' &&
   plan.operationId === operation && plan.action === 'INTRODUCE_INERT_STANDALONE_TRUST' &&
   SHA.test(plan.introEntrySha256) && SHA.test(plan.introProgramSha256),
@@ -127,7 +144,9 @@ require(digest(entry) === plan.introEntrySha256,
 // additionally owns a bounded process-group watchdog and output receipts.
 const result = spawnSync('/usr/bin/python3', ['-I', '-B', '-', '--mode', mode, '--operation-id', operation,
   '--expected-plan-sha256', digest(planRaw),
-  '--expected-approval-sha256', digest(Buffer.from(canonical(envelope)))], {
+  '--expected-approval-sha256', digest(approvalRaw),
+  '--captured-plan-base64', planRaw.toString('base64'),
+  '--captured-approval-base64', approvalRaw.toString('base64')], {
   input: program, env: CLEAN, timeout: 185000, maxBuffer: 1024 * 1024,
   encoding: 'buffer', killSignal: 'SIGKILL', windowsHide: true,
 });

@@ -537,12 +537,22 @@ class NativeFiles:
 
 class InitialIntro:
     def __init__(self, *, files=None, node=NODE, expected_plan_sha256=None,
-                 expected_approval_sha256=None):
+                 expected_approval_sha256=None, captured_plan=None,
+                 captured_approval=None):
         require(os.name == 'posix' and os.getuid() == 0, 'Linux root introduction required')
         self.files = files or NativeFiles()
         self.node = node
         self.expected_plan_sha256 = expected_plan_sha256
         self.expected_approval_sha256 = expected_approval_sha256
+        require(isinstance(captured_plan, bytes) and isinstance(captured_approval, bytes) and
+                0 < len(captured_plan) <= 65536 and 0 < len(captured_approval) <= 65536,
+                'Protected same-buffer authorization bytes required')
+        require(sha(captured_plan) == expected_plan_sha256 and
+                sha(captured_approval) == expected_approval_sha256,
+                'Captured operator authorization digest differs')
+        exact_json(captured_plan); exact_json(captured_approval)
+        self.captured_plan = captured_plan
+        self.captured_approval = captured_approval
 
     @contextlib.contextmanager
     def control_lock(self, plan, shared=False):
@@ -577,7 +587,7 @@ class InitialIntro:
     def _inputs(self, operation):
         require(UUID.fullmatch(operation), 'Exact intro UUID required')
         root = REQUESTS+operation
-        expected = {'plan.json', 'approval.json', 'source.tar.gz', 'source-receipt.json',
+        expected = {'source.tar.gz', 'source-receipt.json',
                     'final-admission.json', 'docker-admission.json', 'intro-entry.mjs',
                     'intro-program.py',
                     'transport-receipt.json'}
@@ -585,6 +595,8 @@ class InitialIntro:
                 'Intro request input set differs')
         raw = {name: self.files.read(root+'/'+name, MAX_ARCHIVE if name == 'source.tar.gz' else MAX_LEAF)
                for name in expected}
+        raw['plan.json'] = self.captured_plan
+        raw['approval.json'] = self.captured_approval
         plan = validate_plan(exact_json(raw['plan.json']))
         envelope = exact_json(raw['approval.json'])
         require(sha(raw['plan.json']) == self.expected_plan_sha256 and
@@ -890,6 +902,8 @@ def main():
     parser.add_argument('--operation-id', required=True)
     parser.add_argument('--expected-plan-sha256', required=True)
     parser.add_argument('--expected-approval-sha256', required=True)
+    parser.add_argument('--captured-plan-base64', required=True)
+    parser.add_argument('--captured-approval-base64', required=True)
     args = parser.parse_args()
     # A hard parent/runtime timeout is additionally part of the protected
     # operator first-execution transcript; this in-process bound is fail-closed.
@@ -900,8 +914,15 @@ def main():
     try:
         require(HASH.fullmatch(args.expected_plan_sha256) and
                 HASH.fullmatch(args.expected_approval_sha256), 'Expected captured request digest required')
+        require(len(args.captured_plan_base64) <= 87384 and
+                len(args.captured_approval_base64) <= 87384,
+                'Captured operator authorization encoding exceeds bound')
+        captured_plan = base64.b64decode(args.captured_plan_base64, validate=True)
+        captured_approval = base64.b64decode(args.captured_approval_base64, validate=True)
         result = getattr(InitialIntro(expected_plan_sha256=args.expected_plan_sha256,
-                                      expected_approval_sha256=args.expected_approval_sha256),
+                                      expected_approval_sha256=args.expected_approval_sha256,
+                                      captured_plan=captured_plan,
+                                      captured_approval=captured_approval),
                          args.mode)(args.operation_id)
         sys.stdout.buffer.write(canonical(result))
     finally:

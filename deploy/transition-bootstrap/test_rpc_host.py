@@ -8,8 +8,47 @@ import unittest
 import subprocess
 import sys
 
-from rpc_host import HostRPC, _run_child
+from rpc_host import HostRPC, _run_child, _node_data_url, captured_node_url
 TEST_NODE = os.environ.get('BOOTSTRAP_TEST_NODE') or shutil.which('node')
+
+
+def captured_cli_fixture():
+    root = Path(__file__).resolve().parents[2]
+    names = ('deploy/transition-bootstrap/cli.mjs',
+             'deploy/transition-bootstrap/protocol.mjs',
+             'deploy/leetplus-compose/a-bridge-bootstrap-authority.mjs',
+             'deploy/leetplus-compose/bridge-external-successor-authority.mjs')
+    return {name: (root / name).read_bytes() for name in names}
+
+
+@unittest.skipUnless(TEST_NODE, 'Captured Node fixture requires Node')
+class CapturedNodeSourceTests(unittest.TestCase):
+    def test_data_url_closes_protocol_and_authority_imports(self):
+        files = captured_cli_fixture()
+        original = captured_node_url(files, 'deploy/transition-bootstrap/protocol.mjs')
+        observed = subprocess.run([TEST_NODE, '--input-type=module', '-e',
+            'import fs from "node:fs";const m=await import(JSON.parse(fs.readFileSync(0,"utf8")));if(typeof m.validateNativePointerAuthority!=="function")process.exit(1)'],
+            input=json.dumps(original).encode(), capture_output=True, timeout=15)
+        self.assertEqual(observed.returncode, 0, observed.stderr.decode(errors='replace'))
+        files['deploy/transition-bootstrap/protocol.mjs'] = b'throw Error("swapped")\n'
+        self.assertNotIn(b'swapped', original.encode())
+        again = subprocess.run([TEST_NODE, '--input-type=module', '-e',
+            'import fs from "node:fs";const m=await import(JSON.parse(fs.readFileSync(0,"utf8")));if(typeof m.validateNativePointerAuthority!=="function")process.exit(1)'],
+            input=json.dumps(original).encode(), capture_output=True, timeout=15)
+        self.assertEqual(again.returncode, 0, again.stderr.decode(errors='replace'))
+
+    def test_cli_url_is_bounded_and_uses_captured_dependency(self):
+        url = captured_node_url(captured_cli_fixture(), 'deploy/transition-bootstrap/cli.mjs')
+        self.assertTrue(url.startswith('data:text/javascript;base64,'))
+        self.assertLessEqual(len(url), 120000)
+        with tempfile.TemporaryDirectory(prefix='leetplus-captured-cli-url-') as directory:
+            captured_url = Path(directory) / 'url.txt'
+            captured_url.write_text(url, encoding='utf-8')
+            child = subprocess.run([TEST_NODE, '--input-type=module', '-e',
+                'import fs from "node:fs";await import(fs.readFileSync(process.argv[1],"utf8"));',
+                str(captured_url)], input=b'{}\n', capture_output=True, timeout=15)
+        self.assertNotEqual(child.returncode, 0)
+        self.assertIn(b'Incomplete trusted native initialization', child.stderr)
 
 
 @unittest.skipUnless(os.name == 'posix' and TEST_NODE,
@@ -122,7 +161,8 @@ else:
         fake = FakeHost()
         cli = Path(__file__).with_name('cli.mjs')
         with self.assertRaisesRegex(ValueError, 'Bootstrap child rejected authority'):
-            _run_child(fake, cli,
+            _run_child(fake, captured_node_url(captured_cli_fixture(),
+                'deploy/transition-bootstrap/cli.mjs'),
                 {'permitEnvelope': {'permit': {}, 'signature': ''}},
                 node_binary=TEST_NODE)
         self.assertEqual(fake.calls, ['lock.acquire', 'observe', 'lock.release', 'close'])
@@ -142,7 +182,8 @@ else:
                 raise RuntimeError('test lock close failure')
         try:
             with self.assertRaisesRegex(RuntimeError, 'cleanup, lock release or audit'):
-                _run_child(FakeHost(), cli, {}, node_binary=TEST_NODE, audit_dir=root)
+                _run_child(FakeHost(), _node_data_url(cli.read_bytes()), {},
+                           node_binary=TEST_NODE, audit_dir=root)
             receipt = json.loads((root / 'rpc.exit.json').read_bytes())
             self.assertEqual(receipt['exitCode'], 0)
             self.assertFalse(receipt['lockReleaseSucceeded'])
@@ -167,7 +208,8 @@ else:
                 pass
         try:
             with self.assertRaisesRegex(ValueError, 'Closed or oversized'):
-                _run_child(FakeHost(), cli, {}, node_binary=TEST_NODE, audit_dir=root)
+                _run_child(FakeHost(), _node_data_url(cli.read_bytes()), {},
+                           node_binary=TEST_NODE, audit_dir=root)
             receipt = json.loads((root / 'rpc.exit.json').read_bytes())
             self.assertEqual(receipt['exitCode'], 2)
             self.assertTrue(receipt['lockReleaseSucceeded'])

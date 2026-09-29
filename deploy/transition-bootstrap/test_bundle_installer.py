@@ -1,11 +1,14 @@
 """Disposable Linux root fixture for all-or-nothing public bundle enrollment."""
 import io
+import base64
 import importlib.util
 from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -17,6 +20,37 @@ from enrollment import INSTALL_EFFECTS, INSTALL_PLAN, INSTALL_APPROVAL, REQUIRED
 from inventory import digest
 from native_boundary import canonical, secure_read
 from test_canonical_lineage import generate_key, sign, iso, TEST_NODE
+
+
+@unittest.skipUnless(os.name == 'posix' and hasattr(os, 'memfd_create'),
+                     'Sealed captured launcher source requires Linux')
+class CapturedLauncherTests(unittest.TestCase):
+    def test_sealed_source_executes_original_after_path_replacement(self):
+        launcher_path = Path(__file__).resolve().parents[2] / 'docs' / 'deployment' / \
+            'production-artifact' / 'trusted_predecessor_bootstrap_launcher.py'
+        spec = importlib.util.spec_from_file_location('captured_launcher_fixture', launcher_path)
+        launcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(launcher)
+        with tempfile.TemporaryDirectory(prefix='leetplus-sealed-launcher-') as directory:
+            entry = Path(directory) / 'rpc_host.py'
+            entry.write_bytes(b'raise RuntimeError("foreign path executed")\n')
+            trusted = b'print("CAPTURED_LAUNCHER_OK")\n'
+            packet = launcher.canonical({'deploy/transition-bootstrap/rpc_host.py':
+                                         base64.b64encode(trusted).decode('ascii')})
+            fd = os.memfd_create('leetplus-launcher-fixture', os.MFD_ALLOW_SEALING)
+            try:
+                import fcntl
+                os.write(fd, packet)
+                os.lseek(fd, 0, os.SEEK_SET)
+                fcntl.fcntl(fd, fcntl.F_ADD_SEALS, fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW |
+                            fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL)
+                child = subprocess.run([sys.executable, '-I', '-B', '-c', launcher.CAPTURED_LOADER,
+                                        str(fd), str(entry)], pass_fds=(fd,), capture_output=True,
+                                       timeout=10)
+                self.assertEqual(child.returncode, 0, child.stderr.decode(errors='replace'))
+                self.assertEqual(child.stdout, b'CAPTURED_LAUNCHER_OK\n')
+            finally:
+                os.close(fd)
 
 
 @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'getuid') and os.getuid() == 0,
@@ -415,7 +449,11 @@ class BundleInstallerTests(unittest.TestCase):
             source_inbox=self.source_root, node=TEST_NODE)
         self.assertEqual(result['bundleSha256'], self.plan['bundleSha256'])
         target = final / 'bundle' / 'deploy' / 'transition-bootstrap' / 'rpc_host.py'
+        self.assertEqual(result['capturedFiles']['deploy/transition-bootstrap/rpc_host.py'],
+                         self.members['deploy/transition-bootstrap/rpc_host.py'])
         target.write_bytes(b'foreign code\n')
+        self.assertEqual(result['capturedFiles']['deploy/transition-bootstrap/rpc_host.py'],
+                         self.members['deploy/transition-bootstrap/rpc_host.py'])
         with self.assertRaisesRegex(ValueError, 'module byte changed'):
             launcher.verify_installed_bundle(final,
                 deployment_root=self.deployment_path, machine_id=self.machine,

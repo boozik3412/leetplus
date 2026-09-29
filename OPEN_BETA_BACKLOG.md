@@ -12,6 +12,9 @@ Draft PR #252 теперь содержит source-only V2 request staging по 
 семи листьям и prewrite flat intent, плюс классификацию partial install.
 A intro in-memory authorization delta добавлен, но независимый signed
 initial transport и новый combined review/CI ещё ожидаются; PR остаётся HOLD.
+Полный исполняемый closure дополнен captured-byte launcher/RPC, Node module
+linking и predecessor observer; окончательные Linux/root проверки и обзор
+именно этих новых байтов ещё нужны. Installed/serving не подтверждены.
 
 **Source-only bootstrap checkpoint 27.09:** ordered source integration proposal
 for frozen draft PR246→247→248 and separate predecessor transition primitives

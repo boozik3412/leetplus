@@ -12,6 +12,9 @@ flat intent до private pending directory и публикует request ато�
 `prepare` принимает только staged request с exact intent/receipt; install
 `apply` пишет собственный flat intent до audit directory, а `reconcile`
 отличает intent-only, partial pending и foreign/dangling postimage.
+Последующий launcher/RPC исполняет захваченные verified bundle bytes через
+sealed memory и linked Node data URLs; predecessor executor также компилируется
+из captured inventory buffer, без hash-then-path-import.
 A отвечает за отдельный INITIAL_INERT_ONLY predecessor route без broad
 production-control install/unit reload. Layout marker создаёт защищённый
 parent, не устанавливает bundle и не меняет serving pointer. `prepare`

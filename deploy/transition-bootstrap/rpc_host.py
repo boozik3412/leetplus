@@ -5,6 +5,7 @@ invocation. No target controller implementation is imported before the narrow
 permit; live observations execute only the attested serving predecessor.
 """
 import argparse
+import base64
 import datetime
 import hashlib
 import json
@@ -17,8 +18,13 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 
 sys.dont_write_bytecode = True
+_CAPTURED = globals().get('__leetplus_captured_sources__')
+PYTHON_IMPORT_ORDER = ('native_boundary', 'inventory', 'authority', 'enrollment',
+                       'host_observer', 'canonical_lineage', 'canonical_lineage_native',
+                       'hard_deadline')
 
 
 def _early_source_gate():
@@ -54,16 +60,60 @@ def _early_source_gate():
     if not re.fullmatch(r'[a-f0-9]{64}', enrollment.get('installerReceiptSha256', '')) or \
             os.environ.get('LEETPLUS_BOOTSTRAP_INSTALL_RECEIPT_SHA256') != enrollment['installerReceiptSha256']:
         raise ValueError('Independent trusted launcher receipt is absent')
+    if not isinstance(_CAPTURED, dict) or set(_CAPTURED) != set(expected_files) or \
+            hashlib.sha256((json.dumps(expected_files, indent=2, ensure_ascii=False) + '\n').encode()).hexdigest() != args.bundle_sha256:
+        raise ValueError('Trusted launcher captured closure is absent or differs')
+    for relative, raw in _CAPTURED.items():
+        if not isinstance(raw, bytes) or not 0 < len(raw) <= 2 * 1024 * 1024 or \
+                hashlib.sha256(raw).hexdigest() != expected_files[relative]:
+            raise ValueError('Captured module differs from signed bundle')
     for leaf in required:
-        path = source / leaf
-        item = path.lstat()
         relative = 'deploy/transition-bootstrap/' + leaf
-        if not path.is_file() or path.is_symlink() or item.st_uid != 0 or item.st_nlink != 1 or \
-                item.st_mode & 0o022 or item.st_size > 2 * 1024 * 1024 or \
-                hashlib.sha256(path.read_bytes()).hexdigest() != expected_files.get(relative):
-            raise ValueError('Unadmitted effect-capable Python module')
-    current = os.getcwd()
-    sys.path = [str(source)] + [entry for entry in sys.path if entry not in ('', current, str(source))]
+        if relative not in _CAPTURED:
+            raise ValueError('Captured effect-capable Python module missing')
+    if set(PYTHON_IMPORT_ORDER) & set(sys.modules):
+        raise ValueError('Captured bootstrap module import collision')
+    for name in PYTHON_IMPORT_ORDER:
+        module = types.ModuleType(name)
+        module.__file__ = str(source / (name + '.py'))
+        sys.modules[name] = module
+        exec(compile(_CAPTURED['deploy/transition-bootstrap/' + name + '.py'],
+                     module.__file__, 'exec'), module.__dict__)
+
+
+def _node_data_url(raw):
+    if not isinstance(raw, bytes) or not 0 < len(raw) <= 2 * 1024 * 1024:
+        raise ValueError('Bounded captured Node source required')
+    return 'data:text/javascript;base64,' + base64.b64encode(raw).decode('ascii')
+
+
+def captured_node_url(files, entry):
+    """Link exactly captured Node ESM bytes without a file-URL import."""
+    if not isinstance(files, dict) or entry not in files:
+        raise ValueError('Closed captured Node source map required')
+    protocol_path = 'deploy/transition-bootstrap/protocol.mjs'
+    cli_path = 'deploy/transition-bootstrap/cli.mjs'
+    protocol = files.get(protocol_path)
+    if entry in (protocol_path, cli_path):
+        if not isinstance(protocol, bytes):
+            raise ValueError('Captured protocol is required')
+        for relative in ('a-bridge-bootstrap-authority.mjs',
+                         'bridge-external-successor-authority.mjs'):
+            source_path = 'deploy/leetplus-compose/' + relative
+            marker = ("'../leetplus-compose/" + relative + "'").encode()
+            source = files.get(source_path)
+            if not isinstance(source, bytes) or protocol.count(marker) != 1:
+                raise ValueError('Closed captured protocol dependency differs')
+            protocol = protocol.replace(marker, ("'" + _node_data_url(source) + "'").encode())
+    if entry == protocol_path:
+        return _node_data_url(protocol)
+    source = files[entry]
+    if entry == cli_path:
+        marker = b"'./protocol.mjs'"
+        if not isinstance(source, bytes) or source.count(marker) != 1:
+            raise ValueError('Closed captured CLI dependency differs')
+        source = source.replace(marker, ("'" + _node_data_url(protocol) + "'").encode())
+    return _node_data_url(source)
 
 
 if __name__ == '__main__':
@@ -300,8 +350,8 @@ class HostRPC:
                     (phase != 'FORWARD' or datetime.datetime.now(datetime.timezone.utc) <
                      instant(permit['permit']['expiresAt'])),
                     'Pointer effect signature window expired')
-        source = self.observer.bundle_root / 'deploy' / 'transition-bootstrap' / 'protocol.mjs'
-        require(digest(secure_read(source, 2 * 1024 * 1024)) ==
+        protocol = _CAPTURED.get('deploy/transition-bootstrap/protocol.mjs') if isinstance(_CAPTURED, dict) else None
+        require(isinstance(protocol, bytes) and digest(protocol) ==
                 self.receipt['bundleFiles']['deploy/transition-bootstrap/protocol.mjs'],
                 'Independent pointer validator source changed')
         validation = {'phase': phase, 'recovery': recovery, 'plan': plan,
@@ -313,10 +363,13 @@ class HostRPC:
             'rollbackRoot': self.roots['rollback'],
             'recoveryEnvelope': inputs.get('recoveryEnvelope') if recovery else None,
             'recoveryRoot': self.roots['noEffect']}
-        script = "import fs from 'node:fs';import {validateNativePointerAuthority} from '" + \
-            source.as_uri() + "';validateNativePointerAuthority(JSON.parse(fs.readFileSync(0,'utf8')));process.stdout.write('PASS');"
+        payload = {'validation': validation,
+                   'moduleUrl': captured_node_url(_CAPTURED, 'deploy/transition-bootstrap/protocol.mjs')}
+        script = ("import fs from 'node:fs';const v=JSON.parse(fs.readFileSync(0,'utf8'));"
+                  "const m=await import(v.moduleUrl);m.validateNativePointerAuthority(v.validation);"
+                  "process.stdout.write('PASS');")
         checked = subprocess.run(['/usr/bin/node', '--input-type=module', '-e', script],
-            input=canonical(validation), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            input=canonical(payload), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=CLEAN, timeout=20, check=False)
         require(checked.returncode == 0 and checked.stdout == b'PASS' and not checked.stderr,
                 'Exact independent pointer permit/command schema rejected')
@@ -413,6 +466,8 @@ def _read_only_command(host):
 
 
 def _run_child(host, cli_path, inputs, *, node_binary='/usr/bin/node', audit_dir=None):
+    require(isinstance(cli_path, str) and cli_path.startswith('data:text/javascript;base64,') and
+            len(cli_path) <= 120000, 'Captured bounded CLI module URL required')
     audit = secure_directory(audit_dir) if audit_dir is not None else None
     rpc_fd = None
     rpc_bytes = 0
@@ -423,7 +478,8 @@ def _run_child(host, cli_path, inputs, *, node_binary='/usr/bin/node', audit_dir
         import resource
         resource.setrlimit(resource.RLIMIT_FSIZE, (65536, 65536))
     try:
-        child = subprocess.Popen([node_binary, str(cli_path)],
+        child = subprocess.Popen([node_binary, '--input-type=module', '-e',
+            'await import(process.argv[1]);', cli_path],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr_file,
             env=CLEAN, cwd='/', start_new_session=False, text=True, bufsize=1,
             preexec_fn=limit_child_stderr if os.name == 'posix' else None)
@@ -574,11 +630,13 @@ def main(argv=None):
             else:
                 phase = 'EFFECT_CHILD'
                 inputs = request['inputs']
-                cli = bundle / 'deploy' / 'transition-bootstrap' / 'cli.mjs'
-                require(digest(secure_read(cli, 2 * 1024 * 1024)) ==
+                cli = _CAPTURED.get('deploy/transition-bootstrap/cli.mjs') if isinstance(_CAPTURED, dict) else None
+                require(isinstance(cli, bytes) and digest(cli) ==
                         host.receipt['bundleFiles']['deploy/transition-bootstrap/cli.mjs'],
                         'Admitted Node protocol CLI byte changed')
-                result = _run_child(host, cli, inputs, audit_dir=attempt)
+                result = _run_child(host,
+                    captured_node_url(_CAPTURED, 'deploy/transition-bootstrap/cli.mjs'),
+                    inputs, audit_dir=attempt)
         except Exception as error:
             failure_class = type(error).__name__
             if phase == 'READ_ONLY_OBSERVATION':

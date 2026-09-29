@@ -15,6 +15,16 @@ import re
 import stat
 import subprocess
 
+CAPTURED_LOADER = """import base64,json,os,sys
+fd=int(sys.argv[1]);entry=sys.argv[2]
+with os.fdopen(fd,'rb') as stream: raw=stream.read(48*1024*1024+1)
+if not 0<len(raw)<=48*1024*1024: raise ValueError('Captured closure bound differs')
+captured={k:base64.b64decode(v,validate=True) for k,v in json.loads(raw).items()}
+sys.argv=[entry]+sys.argv[3:]
+scope={'__name__':'__main__','__file__':entry,'__leetplus_captured_sources__':captured}
+exec(compile(captured['deploy/transition-bootstrap/rpc_host.py'],entry,'exec'),scope)
+"""
+
 ROOT = Path('/usr/local/libexec/leetplus-transition-bootstrap')
 APPROVAL_ROOT = Path('/etc/leetplus-compose/approval-root.pem')
 MACHINE_ID = Path('/etc/machine-id')
@@ -150,7 +160,7 @@ def verify_installed_bundle(final, deployment_root=APPROVAL_ROOT,
                 'generationRootManifestSha256', 'generationReceiptSha256'} and
             all(isinstance(value, str) and HASH.fullmatch(value) for value in plan['installerAuthority'].values()) and
             plan.get('bundleSha256') == final.name and
-            isinstance(plan.get('bundleFiles'), dict) and REQUIRED <= set(plan['bundleFiles']) and
+            isinstance(plan.get('bundleFiles'), dict) and REQUIRED == set(plan['bundleFiles']) and
             0 < len(plan['bundleFiles']) <= 128 and
             digest(canonical(plan['bundleFiles'])) == final.name and
             isinstance(plan.get('publicRoots'), dict) and
@@ -238,17 +248,21 @@ def verify_installed_bundle(final, deployment_root=APPROVAL_ROOT,
                      for parent in Path(name).parents if str(parent) != '.'}
     require(observed_files == set(plan['bundleFiles']) and observed_dirs == expected_dirs,
             'Unadmitted bundle file or directory')
+    captured = {}
     for name, expected in plan['bundleFiles'].items():
+        raw = secure_read(bundle / name, 2 * 1024 * 1024)
         require(re.fullmatch(r'[A-Za-z0-9_.@/-]+', name) and '..' not in name.split('/') and
-                HASH.fullmatch(expected) and digest(secure_read(bundle / name, 2 * 1024 * 1024)) == expected,
+                HASH.fullmatch(expected) and digest(raw) == expected,
                 'Admitted bootstrap module byte changed')
+        captured[name] = raw
     require({item.name for item in enrollment.iterdir()} ==
             {'enrollment.json', 'installer-plan.json', 'installer-approval.json',
              'installer-intent.json', 'installer-receipt.json',
              'permit-root.pem', 'execution-root.pem', 'rollback-root.pem', 'noEffect-root.pem'},
             'Enrollment has an unexpected leaf')
     return {'bundleSha256': final.name, 'installerReceiptSha256': digest(canonical(receipt)),
-            'entry': bundle / 'deploy' / 'transition-bootstrap' / 'rpc_host.py'}
+            'entry': bundle / 'deploy' / 'transition-bootstrap' / 'rpc_host.py',
+            'capturedFiles': captured}
 
 
 def main(argv=None):
@@ -263,8 +277,24 @@ def main(argv=None):
     secure_read(request, 2 * 1024 * 1024)
     environment = {**CLEAN,
         'LEETPLUS_BOOTSTRAP_INSTALL_RECEIPT_SHA256': verified['installerReceiptSha256']}
-    os.execve('/usr/bin/python3', ['/usr/bin/python3', '-I', '-B', str(verified['entry']),
+    import fcntl
+    packet = canonical({name: base64.b64encode(raw).decode('ascii')
+                        for name, raw in verified['capturedFiles'].items()})
+    require(len(packet) <= 48 * 1024 * 1024, 'Captured closure packet exceeds bound')
+    fd = os.memfd_create('leetplus-bootstrap-captured-source', os.MFD_ALLOW_SEALING)
+    try:
+        with os.fdopen(os.dup(fd), 'wb') as stream:
+            stream.write(packet)
+            stream.flush()
+        os.lseek(fd, 0, os.SEEK_SET)
+        fcntl.fcntl(fd, fcntl.F_ADD_SEALS, fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW |
+                    fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL)
+        os.set_inheritable(fd, True)
+        os.execve('/usr/bin/python3', ['/usr/bin/python3', '-I', '-B', '-c', CAPTURED_LOADER,
+        str(fd), str(verified['entry']),
         '--bundle-sha256', args.bundle_sha256, '--operation-id', args.operation_id], environment)
+    finally:
+        os.close(fd)
 
 
 if __name__ == '__main__':

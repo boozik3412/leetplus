@@ -10,9 +10,26 @@ import tempfile
 import unittest
 
 from inventory import admitted_control, digest
+from host_observer import captured_predecessor
 from native_boundary import canonical, verify_bundle_inventory
 
 SHA = 'a' * 40
+
+
+class CapturedPredecessorTests(unittest.TestCase):
+    def test_verified_executor_buffer_survives_path_replacement(self):
+        root = Path(tempfile.mkdtemp(prefix='leetplus-captured-predecessor-'))
+        try:
+            executor = root / 'control_handoff.py'
+            trusted = b'VALUE = "trusted"\n'
+            executor.write_bytes(trusted)
+            old = {'root': root, 'files': {'control_handoff.py': digest(trusted)},
+                   'capturedExecutor': trusted}
+            executor.write_bytes(b'raise RuntimeError("foreign source executed")\n')
+            module = captured_predecessor(old, 'trusted_predecessor_fixture')
+            self.assertEqual(module.VALUE, 'trusted')
+        finally:
+            shutil.rmtree(root)
 
 
 @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'getuid') and os.getuid() == 0,
@@ -60,6 +77,7 @@ class InstalledInventoryTests(unittest.TestCase):
     def test_reproduces_full_installed_archive_and_exact_main_provenance(self):
         value = self.observed()
         self.assertEqual(value['files'], self.files)
+        self.assertEqual(value['capturedExecutor'], self.leaves['control_handoff.py'])
         self.assertEqual(value['controlArchiveSha256'], digest(self.archive))
         self.assertEqual(value['admissionSha256'], digest(canonical(self.admission)))
 

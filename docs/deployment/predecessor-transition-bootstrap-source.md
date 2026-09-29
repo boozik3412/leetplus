@@ -89,6 +89,17 @@ reboot; no fallback to a volatile `/run` lock or lock creation by prepare is
 permitted. The initial signed intro operation owns the first lock creation.
 Accepted A and broad production-control lock contracts are unchanged.
 
+The trusted launcher captures all 14 admitted bundle leaves by same-fd reads
+after verifying enrollment, sends the exact bytes through a sealed memory fd,
+and starts isolated Python with a fixed in-memory loader. The RPC host compiles
+its eight effect-capable Python dependencies from that capture in dependency
+order. Its Node CLI, protocol and two authority modules are linked from
+captured bytes as data URLs; no child executes an installed source pathname.
+Accepted predecessor inventory likewise captures `control_handoff.py` and the
+observer compiles that buffer for all three read/plan paths. A filename hash
+followed by another pathname import is not source authority. This is a source
+candidate and needs the complete Linux fixture and installed-path acceptance.
+
 ## Trust and independent packaging
 
 The accepted b0 controller has no verifier capable of admitting the bridge's

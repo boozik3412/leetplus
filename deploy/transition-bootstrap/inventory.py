@@ -87,6 +87,9 @@ def admitted_control(*, controls_root, inbox_root, release_sha):
     require(digest(archive) == admission['controlArchiveSha256'] and
             archive_map(archive) == manifest['files'],
             'Installed privileged file map differs from admitted archive')
+    executor = secure_read(control / 'control_handoff.py', 2 * 1024 * 1024)
+    require(digest(executor) == manifest['files'].get('control_handoff.py'),
+            'Captured predecessor executor differs from admitted manifest')
     return {
         'releaseSha': release_sha,
         'manifestSha256': digest(manifest_raw),
@@ -96,4 +99,5 @@ def admitted_control(*, controls_root, inbox_root, release_sha):
         'fileCount': len(manifest['files']),
         'files': manifest['files'],
         'root': control,
+        'capturedExecutor': executor,
     }

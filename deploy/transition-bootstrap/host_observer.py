@@ -4,7 +4,7 @@ The enrolled bundle and root paths must be fixed by a separately admitted
 installer. This module never imports or executes staged target code. The only
 controller import is the already accepted, byte-attested serving predecessor.
 """
-import importlib.util
+import types
 import json
 import os
 import re
@@ -14,6 +14,16 @@ from pathlib import Path
 from inventory import admitted_control, digest
 from enrollment import validate_enrollment_chain
 from native_boundary import canonical, require, secure_read, secure_directory, verify_bundle_inventory
+
+
+def captured_predecessor(old, name):
+    raw = old.get('capturedExecutor')
+    require(isinstance(raw, bytes) and digest(raw) == old['files'].get('control_handoff.py'),
+            'Exact captured predecessor executor required')
+    module = types.ModuleType(name)
+    module.__file__ = str(old['root'] / 'control_handoff.py')
+    exec(compile(raw, module.__file__, 'exec'), module.__dict__)
+    return module
 
 A_RELEASE = 'b0cbf3a4f302b299762fa055f3bffe0376a91182'
 A_MANIFEST = 'f9bd049e7cc4c03f206c99c2bad92ae54b34deb28b4b6980abb1bc44432dfb75'
@@ -190,15 +200,11 @@ class EnrolledObserver:
                                   release_sha=target_release)
         # Import only the accepted and fully attested predecessor. The staged
         # target remains data until after the standalone permit check.
-        verifier = old['root'] / 'control_handoff.py'
         require(old['manifestSha256'] == (A_MANIFEST if mode == 'A_TO_BRIDGE' else BRIDGE_MANIFEST) and
                 old['files']['control_handoff.py'] ==
                 (A_EXECUTOR if mode == 'A_TO_BRIDGE' else BRIDGE_EXECUTOR),
                 'Unexpected predecessor executor source')
-        spec = importlib.util.spec_from_file_location('accepted_predecessor_handoff', verifier)
-        require(spec is not None and spec.loader is not None, 'Accepted predecessor loader missing')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = captured_predecessor(old, 'accepted_predecessor_handoff')
         current = module.snapshot(old['root'])
         module.verify_current_controller_authority(current, module.installed(old_sha, executor=True), old['root'])
         require(not module.PENDING.exists(), 'Pending controller transition forbids bootstrap')
@@ -227,10 +233,7 @@ class EnrolledObserver:
         require(old['manifestSha256'] == (A_MANIFEST if mode == 'A_TO_BRIDGE' else BRIDGE_MANIFEST) and
                 old['files']['control_handoff.py'] == (A_EXECUTOR if mode == 'A_TO_BRIDGE' else BRIDGE_EXECUTOR),
                 'Predecessor bytes changed before postimage observation')
-        spec = importlib.util.spec_from_file_location('accepted_postimage_handoff', old['root'] / 'control_handoff.py')
-        require(spec is not None and spec.loader is not None, 'Pinned predecessor loader missing')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = captured_predecessor(old, 'accepted_postimage_handoff')
         current = module.snapshot(old['root'])
         timers = {unit: module.systemd(unit) for unit in module.TIMERS}
         return protected_from_accepted_snapshot(current, timers,
@@ -245,14 +248,11 @@ class EnrolledObserver:
         target = admitted_control(controls_root=self.controls_root, inbox_root=self.inbox_root, release_sha=target_release)
         require(old['manifestSha256'] == (A_MANIFEST if mode == 'A_TO_BRIDGE' else BRIDGE_MANIFEST),
                 'Predecessor manifest changed before native context')
-        spec = importlib.util.spec_from_file_location('accepted_native_context', old['root'] / 'control_handoff.py')
-        require(spec is not None and spec.loader is not None, 'Pinned predecessor loader missing')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = captured_predecessor(old, 'accepted_native_context')
         snapshot = module.snapshot(old['root'])
         previous = secure_read(module.POINTER, 8192) if module.POINTER.exists() or module.POINTER.is_symlink() else None
-        return {'old': {key: value for key, value in old.items() if key != 'root'},
-                'target': {key: value for key, value in target.items() if key != 'root'},
+        return {'old': {key: value for key, value in old.items() if key not in ('root', 'capturedExecutor')},
+                'target': {key: value for key, value in target.items() if key not in ('root', 'capturedExecutor')},
                 'snapshot': snapshot, 'timers': {unit: module.systemd(unit) for unit in module.TIMERS},
                 'hostSha': digest(secure_read('/etc/machine-id', 65536).strip()),
                 'networkUnitSha': digest(secure_read(module.UNIT, 2 * 1024 * 1024)),

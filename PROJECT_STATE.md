@@ -1,6 +1,14 @@
 # LeetPlus Project State
 
-## Current production checkpoint (23.09.2026)
+## Production releases (29.09.2026)
+
+Production обновляется командой `lp` на хосте 1337
+([deploy/simple/README.md](deploy/simple/README.md)); что именно обслуживает
+трафик, показывает `lp status`, а не этот файл. Цепочка legacy-контроллеров
+(A → bridge → B, standalone intro/transport, transition bootstrap) остановлена
+и заморожена; её документы ниже и в `docs/deployment/` — история.
+
+## Production checkpoint (23.09.2026, исторический)
 
 Текущий фактически обслуживающий release — GREEN
 `f97af35d1f0b54a67f915a37a095336e4f9334f9`, generation 10.

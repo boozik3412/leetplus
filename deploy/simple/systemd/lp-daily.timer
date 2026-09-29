@@ -1,0 +1,10 @@
+[Unit]
+Description=LeetPlus Langame daily worker (lp)
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 Asia/Yekaterinburg
+Persistent=false
+Unit=lp-worker@langame-daily-worker.service
+
+[Install]
+WantedBy=timers.target

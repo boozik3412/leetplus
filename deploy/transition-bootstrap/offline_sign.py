@@ -27,6 +27,7 @@ CONTRACTS = {
     'rollback': ('LEETPLUS_PREDECESSOR_TRANSITION_BOOTSTRAP_V1_ROLLBACK', 'command', 30),
     'no-effect': ('LEETPLUS_PREDECESSOR_TRANSITION_BOOTSTRAP_V1_NO_EFFECT', 'command', 30),
     'install': ('LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_APPROVAL', 'approval', 30),
+    'runtime-provision': ('LEETPLUS_PREDECESSOR_BOOTSTRAP_RUNTIME_PROVISION_V1_APPROVAL', 'approval', 30),
     'v1-forward': ('LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1_APPROVAL', 'approval', 240),
     'v1-rollback': ('LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1_ROLLBACK_APPROVAL', 'approval', 240),
 }
@@ -34,6 +35,7 @@ ROOT_DOMAIN = {
     'permit-a': 'permit', 'permit-bridge': 'permit',
     'execution': 'execution', 'rollback': 'rollback',
     'no-effect': 'noEffect', 'install': 'deployment',
+    'runtime-provision': 'deployment',
     'v1-forward': 'deployment', 'v1-rollback': 'deployment',
 }
 
@@ -193,7 +195,8 @@ def validate_statement(kind, statement, linked, expected_root_der, confirm, now=
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None or current.utcoffset() != timedelta(0):
         raise ValueError('Signer clock must be aware UTC')
-    if statement.get('contract') != contract or not UUID.fullmatch(statement.get('operationId', '')):
+    identity = statement.get('placementId') if kind == 'runtime-provision' else statement.get('operationId')
+    if statement.get('contract') != contract or not isinstance(identity, str) or not UUID.fullmatch(identity):
         raise ValueError('Signing contract or operation differs')
     issued, expires = _instant(statement.get('issuedAt')), _instant(statement.get('expiresAt'))
     if issued > current + timedelta(seconds=30) or expires <= current or \
@@ -277,6 +280,61 @@ def validate_statement(kind, statement, linked, expected_root_der, confirm, now=
                                                            digest(canonical(values['forwardReceipt']))) or \
                     statement['effect'] != 'TERMINAL_RECORD_ONLY':
                 raise ValueError('Zero-effect command differs from exact pending intent')
+    elif kind == 'runtime-provision':
+        plan = values.get('plan')
+        request = values.get('request')
+        evidence = values.get('enrollmentEvidence')
+        required = {'contract', 'placementId', 'operationId', 'attemptId', 'command',
+                    'hostIdentitySha256', 'bundleSha256', 'installerReceiptSha256',
+                    'requestSha256', 'preimages', 'nativeLocks', 'effects'}
+        effects = {'runtimeDirectoriesOnly': True, 'requestPlacementOnly': True,
+            'controllerPointerMutation': False, 'applicationRestart': False,
+            'systemdUnitMutation': False, 'dataMutation': False,
+            'grantMutation': False, 'timerMutation': False, 'providerEffect': False}
+        if not isinstance(plan, dict) or set(plan) != required or \
+                plan.get('contract') != 'LEETPLUS_PREDECESSOR_BOOTSTRAP_RUNTIME_PROVISION_V1_PLAN' or \
+                plan.get('effects') != effects or not isinstance(request, dict) or \
+                set(request) != {'contract', 'command', 'operationId', 'attemptId', 'mode',
+                                 'targetRelease', 'criticalNames', 'evidence', 'inputs'} or \
+                request.get('contract') != 'LEETPLUS_PREDECESSOR_BOOTSTRAP_RPC_V1' or \
+                plan['command'] not in ('observe', 'plan-v1', 'prepare', 'apply', 'reconcile',
+                    'rollback', 'reconcile-rollback', 'terminalize-no-effect') or \
+                any(request.get(field) != plan[field] for field in ('operationId', 'attemptId', 'command')) or \
+                any(not isinstance(plan[field], str) or not UUID.fullmatch(plan[field]) for field in
+                    ('placementId', 'operationId', 'attemptId')) or \
+                any(not isinstance(plan[field], str) or not HASH.fullmatch(plan[field]) for field in
+                    ('hostIdentitySha256', 'bundleSha256', 'installerReceiptSha256', 'requestSha256')) or \
+                plan['requestSha256'] != digest(canonical(request)) or not isinstance(evidence, dict) or \
+                plan['bundleSha256'] != evidence['record']['bundleSha256'] or \
+                plan['installerReceiptSha256'] != digest(canonical(evidence['receipt'])) or \
+                plan['hostIdentitySha256'] != evidence['plan']['hostIdentitySha256']:
+            raise ValueError('Runtime provision scope or exact enrollment/request differs')
+        state = '/var/lib/leetplus-transition-bootstrap'
+        compose = '/var/lib/leetplus-compose'
+        request_dir = state + '/requests/' + plan['placementId']
+        expected = {state, state + '/requests', state + '/operations', state + '/attempts',
+                    state + '/transition.lock', request_dir, request_dir + '/request.json',
+                    compose + '/' + plan['placementId'] + '.transition-provision.intent.json',
+                    compose + '/' + plan['placementId'] + '.transition-provision.receipt.json'}
+        locks = {compose + '/standalone-install.lock', compose + '/control.lock'}
+        if not isinstance(plan['preimages'], dict) or set(plan['preimages']) != expected or \
+                not isinstance(plan['nativeLocks'], dict) or set(plan['nativeLocks']) != locks or \
+                any(not isinstance(v, dict) or v.get('state') not in ('ABSENT', 'EXACT') or
+                    set(v) != ({'state'} if v['state'] == 'ABSENT' else
+                               {'state', 'device', 'inode', 'uid', 'gid', 'mode', 'ctimeNs'})
+                    for v in [*plan['preimages'].values(), *plan['nativeLocks'].values()]) or \
+                any(plan['preimages'][name] != {'state': 'ABSENT'} for name in
+                    (request_dir, request_dir + '/request.json',
+                     compose + '/' + plan['placementId'] + '.transition-provision.intent.json',
+                     compose + '/' + plan['placementId'] + '.transition-provision.receipt.json')) or \
+                any(v['state'] != 'EXACT' or v.get('mode') != 0o600 for v in plan['nativeLocks'].values()):
+            raise ValueError('Runtime provision fixed path/lock map differs')
+        if set(statement) != {'contract', 'placementId', 'hostIdentitySha256',
+                              'planSha256', 'issuedAt', 'expiresAt'} or \
+                statement['placementId'] != plan['placementId'] or \
+                statement['hostIdentitySha256'] != plan['hostIdentitySha256'] or \
+                statement['planSha256'] != digest(canonical(plan)):
+            raise ValueError('Runtime provision approval differs from exact plan')
     else:
         plan = values.get('plan')
         if not isinstance(plan, dict) or statement.get('planSha256') != digest(canonical(plan)) or \
@@ -312,7 +370,7 @@ def validate_statement(kind, statement, linked, expected_root_der, confirm, now=
                     statement['receiptSha256'] != digest(canonical(values['forwardReceipt'])):
                 raise ValueError('Native V1 rollback lacks accepted receipt')
     statement_sha = digest(canonical(statement))
-    if confirm != f'GO BOOTSTRAP-SIGN {kind} {statement["operationId"]} {statement_sha} {expected_root_der}':
+    if confirm != f'GO BOOTSTRAP-SIGN {kind} {identity} {statement_sha} {expected_root_der}':
         raise ValueError('Exact dispatcher confirmation phrase required')
     return statement_sha
 
@@ -385,7 +443,7 @@ def sign_exact(*, kind, statement_path, linked_path, public_path, expected_publi
     output = canonical({envelope_name: statement,
                         'signature': base64.b64encode(private.sign(raw)).decode()})
     _write_exclusive(output_path, output)
-    return {'kind': kind, 'operationId': statement['operationId'],
+    return {'kind': kind, 'operationId': statement.get('operationId', statement.get('placementId')),
             'statementSha256': statement_sha, 'envelopeSha256': digest(output),
             'publicDerSha256': digest(public_der), 'directDispatcherGoReceiptRequired': True}
 

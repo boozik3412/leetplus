@@ -174,6 +174,73 @@ class OfflineSignerTests(unittest.TestCase):
             validate_statement('execution', changed, self.linked, digest(self.der),
                 self.confirm, now=self.now)
 
+    def test_runtime_provision_signs_only_exact_request_and_deployment_root(self):
+        from cryptography.hazmat.primitives import serialization
+        placement = '22222222-2222-4222-8222-222222222222'
+        operation = '33333333-3333-4333-8333-333333333333'
+        attempt = '44444444-4444-4444-8444-444444444444'
+        request = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_RPC_V1',
+                   'command': 'observe', 'operationId': operation, 'attemptId': attempt,
+                   'mode': 'A_TO_BRIDGE', 'targetRelease': 'a' * 40,
+                   'criticalNames': [], 'evidence': {}, 'inputs': {}}
+        compose = '/var/lib/leetplus-compose'
+        runtime = '/var/lib/leetplus-transition-bootstrap'
+        request_dir = runtime + '/requests/' + placement
+        path_names = {runtime, runtime + '/requests', runtime + '/operations',
+            runtime + '/attempts', runtime + '/transition.lock', request_dir,
+            request_dir + '/request.json',
+            compose + '/' + placement + '.transition-provision.intent.json',
+            compose + '/' + placement + '.transition-provision.receipt.json'}
+        plan = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_RUNTIME_PROVISION_V1_PLAN',
+            'placementId': placement, 'operationId': operation, 'attemptId': attempt,
+            'command': 'observe', 'hostIdentitySha256': '1' * 64,
+            'bundleSha256': self.linked['enrollmentEvidence']['record']['bundleSha256'],
+            'installerReceiptSha256': digest(canonical(self.linked['enrollmentEvidence']['receipt'])),
+            'requestSha256': digest(canonical(request)),
+            'preimages': {name: {'state': 'ABSENT'} for name in path_names},
+            'nativeLocks': {compose + '/' + name: {'state': 'EXACT', 'device': 1,
+                'inode': 1, 'uid': 0, 'gid': 0, 'mode': 0o600, 'ctimeNs': 1}
+                for name in ('control.lock', 'standalone-install.lock')},
+            'effects': {'runtimeDirectoriesOnly': True, 'requestPlacementOnly': True,
+                'controllerPointerMutation': False, 'applicationRestart': False,
+                'systemdUnitMutation': False, 'dataMutation': False,
+                'grantMutation': False, 'timerMutation': False, 'providerEffect': False}}
+        approval = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_RUNTIME_PROVISION_V1_APPROVAL',
+            'placementId': placement, 'hostIdentitySha256': plan['hostIdentitySha256'],
+            'planSha256': digest(canonical(plan)),
+            'issuedAt': iso(self.now - timedelta(seconds=10)),
+            'expiresAt': iso(self.now + timedelta(minutes=10))}
+        deployment = self.deployment
+        public = deployment.public_key().public_bytes(serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo)
+        der = deployment.public_key().public_bytes(serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo)
+        statement_path = self.root / 'runtime-statement.json'
+        linked_path = self.root / 'runtime-linked.json'
+        public_path = self.root / 'runtime-public.pem'
+        output = self.root / 'runtime-envelope.json'
+        statement_path.write_bytes(canonical(approval))
+        linked = {'plan': plan, 'request': request,
+                  'enrollmentEvidence': self.linked['enrollmentEvidence'],
+                  'deploymentRootPem': public.decode('ascii')}
+        linked_path.write_bytes(canonical(linked))
+        public_path.write_bytes(public)
+        confirmation = (f'GO BOOTSTRAP-SIGN runtime-provision {placement} '
+                        f'{digest(canonical(approval))} {digest(der)}')
+        result = sign_exact(kind='runtime-provision', statement_path=statement_path,
+            linked_path=linked_path, public_path=public_path,
+            expected_public_der_sha256=digest(der), private_path=self.root / 'unused.dpapi',
+            output_path=output, confirm=confirmation, now=self.now,
+            private_loader=lambda _path: deployment)
+        self.assertEqual(result['operationId'], placement)
+        self.assertEqual(json.loads(output.read_bytes())['approval'], approval)
+        changed = dict(plan)
+        changed['requestSha256'] = '0' * 64
+        linked['plan'] = changed
+        with self.assertRaisesRegex(ValueError, 'request'):
+            validate_statement('runtime-provision', approval, linked, digest(der),
+                               confirmation, now=self.now)
+
 
 if __name__ == '__main__':
     unittest.main()

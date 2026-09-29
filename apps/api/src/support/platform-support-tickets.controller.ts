@@ -30,8 +30,16 @@ export class PlatformSupportTicketsController {
   constructor(private readonly service: SupportTicketsService) {}
 
   @Get()
-  getTickets(@Query() query: SupportTicketsQuery) {
-    return this.service.getPlatformTickets(query);
+  getTickets(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: SupportTicketsQuery,
+  ) {
+    return this.service.getPlatformTickets(user, query);
+  }
+
+  @Get('summary')
+  getQueueSummary(@CurrentUser() user: AuthenticatedUser) {
+    return this.service.getPlatformQueueSummary(user);
   }
 
   @Patch(':id')

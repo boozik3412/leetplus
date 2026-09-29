@@ -119,6 +119,8 @@ test("keeps tenant and platform ticket mutations on separate private BFF routes"
     ["support", "bug-reports", "[id]", "comments", "route.ts"],
     ["admin", "support-tickets", "[id]", "route.ts"],
     ["admin", "support-tickets", "[id]", "comments", "route.ts"],
+    ["support", "bug-reports", "summary", "route.ts"],
+    ["admin", "support-tickets", "summary", "route.ts"],
   ];
 
   for (const segments of routes) {

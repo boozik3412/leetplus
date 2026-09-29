@@ -1,6 +1,7 @@
 import { getApiUrl, getAuthHeaders } from "./api";
 
 export type SupportTicketStatus = "NEW" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
+export type SupportTicketStatusFilter = SupportTicketStatus | "active" | "all";
 export type SupportTicketTopic =
   | "GAME_MODULE"
   | "MISSIONS_AND_BATTLE_PASS"
@@ -70,7 +71,7 @@ export type StaffSupportTicket = {
 export type StaffSupportTicketsReport = {
   scope: "TENANT" | "PLATFORM";
   filters: {
-    status: SupportTicketStatus | "all";
+    status: SupportTicketStatusFilter;
     topic: SupportTicketTopic | "all";
     tenantId: string | null;
     assignedToUserId: string | null;
@@ -82,10 +83,43 @@ export type StaffSupportTicketsReport = {
   summary: Record<SupportTicketStatus, number> & {
     active: number;
     total: number;
+    unassigned: number;
+    mine: number;
+    oldestActiveCreatedAt: string | null;
   };
   tenants: Array<{ id: string; name: string; slug: string }>;
   users: TicketUser[];
   rows: StaffSupportTicket[];
+  // Set by the Web loader: the moment waiting times on the page refer to.
+  generatedAt: string;
+};
+
+export type SupportQueueSummary = {
+  scope: "TENANT" | "PLATFORM";
+  NEW: number;
+  IN_PROGRESS: number;
+  active: number;
+  unassigned: number;
+  mine: number;
+  oldestActiveCreatedAt: string | null;
+  latestNew: {
+    id: string;
+    ticketNumber: string;
+    topic: SupportTicketTopic;
+    createdAt: string;
+    storeName: string;
+    tenantName: string;
+  } | null;
+};
+
+export const supportTicketTopicLabels: Record<SupportTicketTopic, string> = {
+  GAME_MODULE: "Игровой модуль",
+  MISSIONS_AND_BATTLE_PASS: "Задания и боевой пропуск",
+  LOOT_BOXES_AND_REWARDS: "Лутбоксы и награды",
+  BALANCE_AND_PAYMENTS: "Баланс и платежи",
+  AUTH_AND_PROFILE: "Авторизация и профиль",
+  INTERFACE_AND_DISPLAY: "Интерфейс и отображение",
+  OTHER: "Другое",
 };
 
 export async function getStaffSupportTickets(
@@ -107,5 +141,9 @@ export async function getStaffSupportTickets(
   if (!response.ok) {
     throw new Error("Failed to fetch support tickets");
   }
-  return response.json() as Promise<StaffSupportTicketsReport>;
+  const report = (await response.json()) as Omit<
+    StaffSupportTicketsReport,
+    "generatedAt"
+  >;
+  return { ...report, generatedAt: new Date().toISOString() };
 }

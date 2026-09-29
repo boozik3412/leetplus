@@ -8,7 +8,11 @@ import { createHash } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { GuestSupportTicketStatus, Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
-import { roleCapabilities, type AccessCapability } from '../auth/capabilities';
+import {
+  hasCapability,
+  resolveUserCapabilities,
+  type AccessCapability,
+} from '../auth/capabilities';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { GUEST_BUG_REPORT_TOPICS } from '../guest-portal/guest-support.service';
@@ -24,11 +28,23 @@ export const SUPPORT_TICKET_STATUSES = [
 export type SupportTicketStatus = (typeof SUPPORT_TICKET_STATUSES)[number];
 export type SupportTicketTopic = (typeof GUEST_BUG_REPORT_TOPICS)[number];
 
+// Tickets that still need a support action. The queue view lists them oldest
+// first, so the guest who has waited longest is handled first.
+export const SUPPORT_TICKET_ACTIVE_STATUSES = [
+  'NEW',
+  'IN_PROGRESS',
+] as const satisfies readonly SupportTicketStatus[];
+
+export type SupportTicketStatusFilter = SupportTicketStatus | 'active' | 'all';
+
+// Besides a user id, the assignee filter accepts `none` (unassigned) and `me`.
+export type SupportTicketAssigneeFilter = 'none' | 'me' | (string & {});
+
 export type SupportTicketsQuery = {
-  status?: SupportTicketStatus | 'all';
+  status?: SupportTicketStatusFilter;
   topic?: SupportTicketTopic | 'all';
   tenantId?: string;
-  assignedToUserId?: string;
+  assignedToUserId?: SupportTicketAssigneeFilter;
   search?: string;
   pageSize?: string;
 };
@@ -76,13 +92,24 @@ export class SupportTicketsService {
   getTenantTickets(user: AuthenticatedUser, query: SupportTicketsQuery) {
     this.assertSupportSchemaReady();
     const { tenantId } = this.tenantContextService.resolve(user);
-    return this.getTickets({ kind: 'TENANT', tenantId }, query);
+    return this.getTickets(user, { kind: 'TENANT', tenantId }, query);
   }
 
-  getPlatformTickets(query: SupportTicketsQuery) {
+  getPlatformTickets(user: AuthenticatedUser, query: SupportTicketsQuery) {
     this.assertSupportSchemaReady();
     const tenantId = normalizeOptionalUuid(query.tenantId, 'tenantId');
-    return this.getTickets({ kind: 'PLATFORM', tenantId }, query);
+    return this.getTickets(user, { kind: 'PLATFORM', tenantId }, query);
+  }
+
+  getTenantQueueSummary(user: AuthenticatedUser) {
+    this.assertSupportSchemaReady();
+    const { tenantId } = this.tenantContextService.resolve(user);
+    return this.getQueueSummary(user, { kind: 'TENANT', tenantId });
+  }
+
+  getPlatformQueueSummary(user: AuthenticatedUser) {
+    this.assertSupportSchemaReady();
+    return this.getQueueSummary(user, { kind: 'PLATFORM', tenantId: null });
   }
 
   updateTenantTicket(
@@ -333,17 +360,18 @@ export class SupportTicketsService {
     }
   }
 
-  private async getTickets(scope: TicketScope, query: SupportTicketsQuery) {
+  private async getTickets(
+    user: AuthenticatedUser,
+    scope: TicketScope,
+    query: SupportTicketsQuery,
+  ) {
     const filters = normalizeFilters(query);
-    const tenantId =
-      scope.kind === 'TENANT' ? scope.tenantId : (scope.tenantId ?? undefined);
+    const tenantId = scopeTenantId(scope);
     const where: Prisma.GuestSupportTicketWhereInput = {
       ...(tenantId ? { tenantId } : {}),
-      ...(filters.status === 'all' ? {} : { status: filters.status }),
+      ...statusWhere(filters.status),
       ...(filters.topic === 'all' ? {} : { topic: filters.topic }),
-      ...(filters.assignedToUserId
-        ? { assignedToUserId: filters.assignedToUserId }
-        : {}),
+      ...assigneeWhere(filters.assignedToUserId, user.id),
       ...(filters.search
         ? {
             OR: [
@@ -387,109 +415,226 @@ export class SupportTicketsService {
     const summaryWhere: Prisma.GuestSupportTicketWhereInput = tenantId
       ? { tenantId }
       : {};
-    const [rows, summaryRows, candidateUsers, roleOverrides, tenants] =
-      await Promise.all([
-        this.prisma.guestSupportTicket.findMany({
-          where,
-          orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }],
-          take: filters.pageSize,
-          include: {
-            tenant: { select: { id: true, name: true, slug: true } },
-            store: { select: { id: true, name: true } },
-            profile: {
-              select: {
-                id: true,
-                displayName: true,
-                contactMasked: true,
-                phoneEncrypted: true,
-                guest: {
-                  select: {
-                    fullNameMasked: true,
-                    fullNameEncrypted: true,
-                    phoneMasked: true,
-                    phoneEncrypted: true,
-                  },
-                },
-              },
-            },
-            guest: {
-              select: {
-                fullNameMasked: true,
-                fullNameEncrypted: true,
-                phoneMasked: true,
-                phoneEncrypted: true,
-              },
-            },
-            assignedTo: {
-              select: { id: true, fullName: true, email: true },
-            },
-            attachments: {
-              where: { state: 'AVAILABLE' },
-              orderBy: { createdAt: 'asc' },
-              select: {
-                id: true,
-                fileName: true,
-                contentType: true,
-                byteSize: true,
-              },
-            },
-            comments: {
-              orderBy: { createdAt: 'asc' },
-              select: {
-                id: true,
-                body: true,
-                createdAt: true,
-                authorUser: {
-                  select: { id: true, fullName: true, email: true },
-                },
-              },
-            },
-            auditEvents: {
-              orderBy: { createdAt: 'desc' },
-              take: 20,
-              select: {
-                id: true,
-                action: true,
-                metadata: true,
-                createdAt: true,
-                actorUser: {
-                  select: { id: true, fullName: true, email: true },
+    const [rows, summaryRows, queue, tenants] = await Promise.all([
+      this.prisma.guestSupportTicket.findMany({
+        where,
+        orderBy: isQueueView(filters.status)
+          ? [{ createdAt: 'asc' }, { id: 'asc' }]
+          : [{ lastActivityAt: 'desc' }, { id: 'desc' }],
+        take: filters.pageSize,
+        include: {
+          tenant: { select: { id: true, name: true, slug: true } },
+          store: { select: { id: true, name: true } },
+          profile: {
+            select: {
+              id: true,
+              displayName: true,
+              contactMasked: true,
+              phoneEncrypted: true,
+              guest: {
+                select: {
+                  fullNameMasked: true,
+                  fullNameEncrypted: true,
+                  phoneMasked: true,
+                  phoneEncrypted: true,
                 },
               },
             },
           },
-        }),
-        this.prisma.guestSupportTicket.groupBy({
-          by: ['status'],
-          where: summaryWhere,
-          _count: { _all: true },
-        }),
-        this.prisma.user.findMany({
-          where: {
-            isActive: true,
-            ...(scope.kind === 'TENANT'
-              ? { tenantId: scope.tenantId }
-              : {
-                  OR: [
-                    { isPlatformAdmin: true },
-                    ...(tenantId ? [{ tenantId }] : []),
-                  ],
-                }),
+          guest: {
+            select: {
+              fullNameMasked: true,
+              fullNameEncrypted: true,
+              phoneMasked: true,
+              phoneEncrypted: true,
+            },
           },
-          orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
-          select: assigneeSelection,
-        }),
-        this.prisma.userRoleOverride.findMany({
-          where: tenantId ? { tenantId } : undefined,
-          select: { tenantId: true, role: true, permissions: true },
-        }),
-        scope.kind === 'PLATFORM'
-          ? this.prisma.tenant.findMany({
-              orderBy: { name: 'asc' },
-              select: { id: true, name: true, slug: true },
-            })
-          : Promise.resolve([]),
-      ]);
+          assignedTo: {
+            select: { id: true, fullName: true, email: true },
+          },
+          attachments: {
+            where: { state: 'AVAILABLE' },
+            orderBy: { createdAt: 'asc' },
+            select: {
+              id: true,
+              fileName: true,
+              contentType: true,
+              byteSize: true,
+            },
+          },
+          comments: {
+            orderBy: { createdAt: 'asc' },
+            select: {
+              id: true,
+              body: true,
+              createdAt: true,
+              authorUser: {
+                select: { id: true, fullName: true, email: true },
+              },
+            },
+          },
+          auditEvents: {
+            orderBy: { createdAt: 'desc' },
+            take: 20,
+            select: {
+              id: true,
+              action: true,
+              metadata: true,
+              createdAt: true,
+              actorUser: {
+                select: { id: true, fullName: true, email: true },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.guestSupportTicket.groupBy({
+        by: ['status'],
+        where: summaryWhere,
+        _count: { _all: true },
+      }),
+      this.getActiveQueueFacts(summaryWhere, user.id),
+      scope.kind === 'PLATFORM'
+        ? this.prisma.tenant.findMany({
+            orderBy: { name: 'asc' },
+            select: { id: true, name: true, slug: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    // Without a network filter the platform view offers the specialists of
+    // every network on the page, so a ticket can go to its own club team.
+    const assigneeTenantIds =
+      scope.kind === 'TENANT'
+        ? [scope.tenantId]
+        : tenantId
+          ? [tenantId]
+          : [...new Set(rows.map((row) => row.tenantId))];
+    const users = await this.getAssigneeCandidates(scope, assigneeTenantIds);
+    const counts = countByStatus(summaryRows);
+
+    return {
+      scope: scope.kind,
+      filters,
+      statuses: SUPPORT_TICKET_STATUSES,
+      topics: GUEST_BUG_REPORT_TOPICS,
+      summary: {
+        ...counts,
+        active: counts.NEW + counts.IN_PROGRESS,
+        total: Object.values(counts).reduce((sum, value) => sum + value, 0),
+        unassigned: queue.unassigned,
+        mine: queue.mine,
+        oldestActiveCreatedAt: queue.oldestActiveCreatedAt,
+      },
+      tenants,
+      users,
+      rows: rows.map((row) => this.projectTicketContact(row)),
+    };
+  }
+
+  private async getQueueSummary(user: AuthenticatedUser, scope: TicketScope) {
+    const tenantId = scopeTenantId(scope);
+    const where: Prisma.GuestSupportTicketWhereInput = tenantId
+      ? { tenantId }
+      : {};
+    const [statusRows, queue, latestNew] = await Promise.all([
+      this.prisma.guestSupportTicket.groupBy({
+        by: ['status'],
+        where: {
+          ...where,
+          status: { in: [...SUPPORT_TICKET_ACTIVE_STATUSES] },
+        },
+        _count: { _all: true },
+      }),
+      this.getActiveQueueFacts(where, user.id),
+      this.prisma.guestSupportTicket.findFirst({
+        where: { ...where, status: 'NEW' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true,
+          ticketNumber: true,
+          topic: true,
+          createdAt: true,
+          store: { select: { name: true } },
+          tenant: { select: { name: true } },
+        },
+      }),
+    ]);
+    const counts = countByStatus(statusRows);
+
+    return {
+      scope: scope.kind,
+      NEW: counts.NEW,
+      IN_PROGRESS: counts.IN_PROGRESS,
+      active: counts.NEW + counts.IN_PROGRESS,
+      unassigned: queue.unassigned,
+      mine: queue.mine,
+      oldestActiveCreatedAt: queue.oldestActiveCreatedAt,
+      latestNew: latestNew
+        ? {
+            id: latestNew.id,
+            ticketNumber: latestNew.ticketNumber,
+            topic: latestNew.topic,
+            createdAt: latestNew.createdAt.toISOString(),
+            storeName: latestNew.store.name,
+            tenantName: latestNew.tenant.name,
+          }
+        : null,
+    };
+  }
+
+  private async getActiveQueueFacts(
+    where: Prisma.GuestSupportTicketWhereInput,
+    userId: string,
+  ) {
+    const active: Prisma.GuestSupportTicketWhereInput = {
+      ...where,
+      status: { in: [...SUPPORT_TICKET_ACTIVE_STATUSES] },
+    };
+    const [unassigned, mine, oldest] = await Promise.all([
+      this.prisma.guestSupportTicket.count({
+        where: { ...active, assignedToUserId: null },
+      }),
+      this.prisma.guestSupportTicket.count({
+        where: { ...active, assignedToUserId: userId },
+      }),
+      this.prisma.guestSupportTicket.findFirst({
+        where: active,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { createdAt: true },
+      }),
+    ]);
+    return {
+      unassigned,
+      mine,
+      oldestActiveCreatedAt: oldest?.createdAt.toISOString() ?? null,
+    };
+  }
+
+  private async getAssigneeCandidates(scope: TicketScope, tenantIds: string[]) {
+    const [candidateUsers, roleOverrides] = await Promise.all([
+      this.prisma.user.findMany({
+        where: {
+          isActive: true,
+          ...(scope.kind === 'TENANT'
+            ? { tenantId: scope.tenantId }
+            : {
+                OR: [
+                  { isPlatformAdmin: true },
+                  ...(tenantIds.length
+                    ? [{ tenantId: { in: tenantIds } }]
+                    : []),
+                ],
+              }),
+        },
+        orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+        select: assigneeSelection,
+      }),
+      this.prisma.userRoleOverride.findMany({
+        where: { tenantId: { in: tenantIds } },
+        select: { tenantId: true, role: true, permissions: true },
+      }),
+    ]);
 
     const overrideMap = new Map(
       roleOverrides.map((override) => [
@@ -497,7 +642,7 @@ export class SupportTicketsService {
         override.permissions,
       ]),
     );
-    const users = candidateUsers
+    return candidateUsers
       .filter((candidate) =>
         canManageSupportCandidate(
           candidate,
@@ -511,30 +656,6 @@ export class SupportTicketsService {
         email: candidate.email,
         isPlatformAdmin: candidate.isPlatformAdmin,
       }));
-
-    const counts = Object.fromEntries(
-      SUPPORT_TICKET_STATUSES.map((status) => [status, 0]),
-    ) as Record<SupportTicketStatus, number>;
-    for (const row of summaryRows) {
-      if (SUPPORT_TICKET_STATUSES.includes(row.status)) {
-        counts[row.status] = row._count._all;
-      }
-    }
-
-    return {
-      scope: scope.kind,
-      filters,
-      statuses: SUPPORT_TICKET_STATUSES,
-      topics: GUEST_BUG_REPORT_TOPICS,
-      summary: {
-        ...counts,
-        active: counts.NEW + counts.IN_PROGRESS,
-        total: Object.values(counts).reduce((sum, value) => sum + value, 0),
-      },
-      tenants,
-      users,
-      rows: rows.map((row) => this.projectTicketContact(row)),
-    };
   }
 
   private projectTicketContact<
@@ -613,6 +734,7 @@ export class SupportTicketsService {
         ticketNumber: true,
         status: true,
         assignedToUserId: true,
+        updatedAt: true,
       },
     });
     if (!ticket) {
@@ -621,7 +743,26 @@ export class SupportTicketsService {
 
     const status =
       dto.status === undefined ? undefined : normalizeStatus(dto.status);
-    if (dto.assignedToUserId !== undefined && dto.assignedToUserId !== null) {
+    if (status === undefined && dto.assignedToUserId === undefined) {
+      throw new BadRequestException('Не указаны изменения обращения.');
+    }
+
+    const statusChanged = status !== undefined && status !== ticket.status;
+    const assigneeChanged =
+      dto.assignedToUserId !== undefined &&
+      dto.assignedToUserId !== ticket.assignedToUserId;
+    if (!statusChanged && !assigneeChanged) {
+      // Re-selecting the current value must not reset resolvedAt/closedAt or
+      // add an empty audit event.
+      return {
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        status: ticket.status,
+        assignedToUserId: ticket.assignedToUserId,
+        updatedAt: ticket.updatedAt,
+      };
+    }
+    if (assigneeChanged && dto.assignedToUserId) {
       await this.assertValidAssignee(
         ticket.tenantId,
         dto.assignedToUserId,
@@ -629,21 +770,33 @@ export class SupportTicketsService {
       );
     }
 
-    if (status === undefined && dto.assignedToUserId === undefined) {
-      throw new BadRequestException('Не указаны изменения обращения.');
-    }
-
     const now = new Date();
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.guestSupportTicket.update({
-        where: { id: ticket.id },
+      // Compare-and-set against the values read above: when two specialists
+      // take the same ticket at once, the second one gets a conflict instead
+      // of silently overwriting the first.
+      const changed = await tx.guestSupportTicket.updateMany({
+        where: {
+          id: ticket.id,
+          tenantId: ticket.tenantId,
+          status: ticket.status,
+          assignedToUserId: ticket.assignedToUserId,
+        },
         data: {
-          ...(status ? statusTimestamps(status, now) : {}),
-          ...(dto.assignedToUserId !== undefined
+          ...(statusChanged && status ? statusTimestamps(status, now) : {}),
+          ...(assigneeChanged
             ? { assignedToUserId: dto.assignedToUserId }
             : {}),
           lastActivityAt: now,
         },
+      });
+      if (changed.count !== 1) {
+        throw new ConflictException(
+          'Обращение уже изменил другой сотрудник. Обновите страницу.',
+        );
+      }
+      const updated = await tx.guestSupportTicket.findUniqueOrThrow({
+        where: { id: ticket.id },
         select: {
           id: true,
           ticketNumber: true,
@@ -799,9 +952,11 @@ export class SupportTicketsService {
 }
 
 function normalizeFilters(query: SupportTicketsQuery) {
-  const status =
+  const status: SupportTicketStatusFilter =
     query.status &&
-    (query.status === 'all' || SUPPORT_TICKET_STATUSES.includes(query.status))
+    (query.status === 'all' ||
+      query.status === 'active' ||
+      SUPPORT_TICKET_STATUSES.includes(query.status))
       ? query.status
       : 'all';
   const topic =
@@ -821,6 +976,56 @@ function normalizeFilters(query: SupportTicketsQuery) {
     search: query.search?.trim().slice(0, 200) || null,
     pageSize,
   };
+}
+
+function scopeTenantId(scope: TicketScope) {
+  return scope.kind === 'TENANT'
+    ? scope.tenantId
+    : (scope.tenantId ?? undefined);
+}
+
+function statusWhere(
+  status: SupportTicketStatusFilter,
+): Prisma.GuestSupportTicketWhereInput {
+  if (status === 'all') return {};
+  if (status === 'active') {
+    return { status: { in: [...SUPPORT_TICKET_ACTIVE_STATUSES] } };
+  }
+  return { status };
+}
+
+function isQueueView(status: SupportTicketStatusFilter) {
+  return (
+    status === 'active' ||
+    SUPPORT_TICKET_ACTIVE_STATUSES.some((active) => active === status)
+  );
+}
+
+function assigneeWhere(
+  filter: string | null,
+  currentUserId: string,
+): Prisma.GuestSupportTicketWhereInput {
+  if (!filter) return {};
+  if (filter === 'none') return { assignedToUserId: null };
+  if (filter === 'me') return { assignedToUserId: currentUserId };
+  return { assignedToUserId: filter };
+}
+
+function countByStatus(
+  rows: ReadonlyArray<{
+    status: GuestSupportTicketStatus;
+    _count: { _all: number };
+  }>,
+) {
+  const counts = Object.fromEntries(
+    SUPPORT_TICKET_STATUSES.map((status) => [status, 0]),
+  ) as Record<SupportTicketStatus, number>;
+  for (const row of rows) {
+    if (SUPPORT_TICKET_STATUSES.includes(row.status)) {
+      counts[row.status] = row._count._all;
+    }
+  }
+  return counts;
 }
 
 function normalizeStatus(value: string): GuestSupportTicketStatus {
@@ -882,11 +1087,17 @@ function canManageSupportCandidate(
   roleOverridePermissions: readonly string[] | null,
 ) {
   if (candidate.isPlatformAdmin) return true;
-  const permissions =
-    candidate.customRole?.permissions ??
-    roleOverridePermissions ??
-    roleCapabilities[candidate.role];
-  return permissions.includes(
+  // Same resolution as the request guard: OWNER/ADMIN keep the support
+  // minimum even with a custom role or a tenant role override.
+  const permissions = resolveUserCapabilities({
+    role: candidate.role,
+    customRole: candidate.customRole,
+    roleOverride: roleOverridePermissions
+      ? { permissions: [...roleOverridePermissions] }
+      : null,
+  });
+  return hasCapability(
+    { permissions },
     'manage_support_tickets' satisfies AccessCapability,
   );
 }

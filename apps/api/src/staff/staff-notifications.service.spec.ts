@@ -14,6 +14,7 @@ type TestWhereInput = {
   OR?: TestWhereInput[];
   targetUserId?: string | null;
   storeId?: { in: string[] };
+  NOT?: Array<{ sourceType: string }>;
 };
 
 type FindManyArgs = {
@@ -113,6 +114,7 @@ function createHarness(options?: {
   summaryRows?: Array<{ status: string; severity: string }>;
   stores?: Array<{ id: string; name: string; isActive: boolean }>;
   directNotification?: ReturnType<typeof mutationSource> | null;
+  supportTickets?: Array<Record<string, unknown>>;
 }) {
   const rows = options?.rows ?? [];
   const summaryRows = options?.summaryRows ?? [];
@@ -166,6 +168,9 @@ function createHarness(options?: {
     },
     staffKnowledgeArticle: {
       findMany: jest.fn().mockResolvedValue([]),
+    },
+    guestSupportTicket: {
+      findMany: jest.fn().mockResolvedValue(options?.supportTickets ?? []),
     },
     store: {
       findMany: storeFindMany,
@@ -365,5 +370,110 @@ describe('StaffNotificationsService AccessScope', () => {
       await systemHarness.service.syncTenantSignalsForSystem(tenantId);
     expect(systemResult.activeSignals).toBe(0);
     expect(systemHarness.prisma.staffTask.findMany).toHaveBeenCalled();
+  });
+});
+
+describe('StaffNotificationsService support tickets', () => {
+  const supportActor = {
+    ...networkActor,
+    id: 'support-admin',
+    role: UserRole.ADMIN,
+    permissions: ['view_support_tickets', 'manage_support_tickets'],
+  } satisfies AuthenticatedUser;
+
+  it('turns a NEW guest ticket into a signal that escalates after a day', async () => {
+    const harness = createHarness({
+      directNotification: null,
+      supportTickets: [
+        {
+          id: 'ticket-old',
+          ticketNumber: 'LP-BUG-571075E9',
+          topic: 'LOOT_BOXES_AND_REWARDS',
+          description: 'Не дали кейс   за 100 минут',
+          storeId: 'a1',
+          createdAt: new Date(Date.now() - 30 * 3600000),
+          store: { name: 'A1' },
+        },
+        {
+          id: 'ticket-fresh',
+          ticketNumber: 'LP-BUG-01826E9C',
+          topic: 'GAME_MODULE',
+          description: 'Сбрасываются чекины',
+          storeId: 'a2',
+          createdAt: new Date(),
+          store: { name: 'A2' },
+        },
+      ],
+    });
+
+    const result = await harness.service.syncTenantSignalsForSystem(tenantId);
+
+    expect(result.activeSignals).toBe(2);
+    expect(harness.prisma.guestSupportTicket.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId, status: 'NEW' } }),
+    );
+    const created = harness.prisma.staffNotification.create.mock.calls.map(
+      ([args]: [{ data: Record<string, unknown> }]) => args.data,
+    );
+    expect(created).toEqual([
+      expect.objectContaining({
+        sourceType: 'SUPPORT_TICKET',
+        sourceId: 'ticket-old',
+        dedupeKey: 'support-ticket:ticket-old:new',
+        severity: 'CRITICAL',
+        storeId: 'a1',
+        targetUserId: null,
+        title: 'Новое обращение гостя LP-BUG-571075E9: Лутбоксы и награды',
+        message:
+          'Источник: Поддержка — A1\nСитуация: ждёт ответа 30 часов\nНе дали кейс за 100 минут',
+        actionLabel: 'Открыть обращение',
+        actionHref: '/support?status=active&search=LP-BUG-571075E9',
+      }),
+      expect.objectContaining({
+        sourceId: 'ticket-fresh',
+        severity: 'WARNING',
+        message:
+          'Источник: Поддержка — A2\nСитуация: обращение только что поступило\nСбрасываются чекины',
+      }),
+    ]);
+  });
+
+  it('shows support signals only to staff who can open the support queue', async () => {
+    const withoutCapability = createHarness();
+    await withoutCapability.service.getReport(networkActor);
+    expect(
+      withoutCapability.staffNotificationFindMany.mock.calls[0]?.[0].where?.NOT,
+    ).toEqual([{ sourceType: 'SUPPORT_TICKET' }]);
+    expect(
+      withoutCapability.staffNotificationFindMany.mock.calls[1]?.[0].where?.NOT,
+    ).toEqual([{ sourceType: 'SUPPORT_TICKET' }]);
+
+    const withCapability = createHarness();
+    await withCapability.service.getReport(supportActor);
+    expect(
+      withCapability.staffNotificationFindMany.mock.calls[0]?.[0].where,
+    ).not.toHaveProperty('NOT');
+
+    const storeScoped = createHarness();
+    await storeScoped.service.getReport({
+      ...storeActor,
+      permissions: ['view_support_tickets'],
+    });
+    expect(
+      storeScoped.staffNotificationFindMany.mock.calls[0]?.[0].where?.NOT,
+    ).toEqual([{ sourceType: 'SUPPORT_TICKET' }]);
+  });
+
+  it('keeps the support restriction on acknowledge writes', async () => {
+    const harness = createHarness();
+
+    await harness.service.acknowledge(networkActor, 'notification-a1');
+
+    expect(
+      harness.staffNotificationFindFirst.mock.calls[0]?.[0].where?.NOT,
+    ).toEqual([{ sourceType: 'SUPPORT_TICKET' }]);
+    expect(
+      harness.staffNotificationUpdate.mock.calls[0]?.[0].where?.NOT,
+    ).toEqual([{ sourceType: 'SUPPORT_TICKET' }]);
   });
 });

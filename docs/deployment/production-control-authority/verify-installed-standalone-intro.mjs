@@ -377,6 +377,90 @@ function verifyApproval(planRaw, plan, envelope, authorizedAt, acceptedAt) {
       Buffer.from(envelope.signature, 'base64')),
   'Intro deployment-root signature differs');
 }
+function verifyTransportFinalize(originalId, original, originalPlanRaw, originalApprovalRaw,
+  originalIntentRaw, rawReceipt, request, audit, pem) {
+  const flat=`/var/lib/leetplus-compose/${originalId}.standalone-transport-finalize.intent.json`;
+  try { fs.lstatSync(flat); } catch(error) { if(error.code==='ENOENT')return;throw error; }
+  const body=exactJson(readRegular(flat,131072,0o400),'finalization flat intent');
+  sameKeys(body,['contract','operationId','originalOperationId','planSha256','approvalSha256',
+    'requestReceiptSha256','authorizedAt','plan','approvalEnvelope'],'finalization intent');
+  const p=body.plan,e=p.execution,envelope=body.approvalEnvelope;
+  sameKeys(p,['contract','operationId','action','hostIdentitySha256','bootId',
+    'originalOperationId','originalPlanSha256','originalApprovalSha256','originalIntentSha256',
+    'requestReceiptSha256','execution','effects'],'finalization plan');
+  require(body.contract==='LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_INTENT'&&
+    p.contract==='LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_PLAN'&&
+    p.action==='FINALIZE_EXACT_INITIAL_TRANSPORT_AUDIT_RECEIPT_ONLY'&&
+    UUID.test(p.operationId)&&UUID.test(p.bootId)&&p.operationId===body.operationId&&
+    p.operationId!==originalId&&p.operationId!=='9afc7218-4757-4f44-87e1-6096706bad44'&&
+    body.originalOperationId===originalId&&p.originalOperationId===originalId&&
+    p.hostIdentitySha256===original.hostIdentitySha256&&
+    p.originalPlanSha256===digest(originalPlanRaw)&&p.originalApprovalSha256===digest(originalApprovalRaw)&&
+    p.originalIntentSha256===digest(originalIntentRaw)&&
+    p.requestReceiptSha256===body.requestReceiptSha256&&p.requestReceiptSha256===digest(rawReceipt)&&
+    body.planSha256===digest(Buffer.from(canonical(p)))&&
+    body.approvalSha256===digest(Buffer.from(canonical(envelope))),
+    'Finalization historical/new authority lineage differs');
+  sameKeys(e,['code','invocation','host','nativeControlLockIdentity','trustRoot',
+    'auditDirectoryIdentity','requestDirectoryIdentity','destinations','limits','effects'],
+    'finalization execution');
+  const effects={auditReceiptFinalizeOnly:true,sourceSnapshotMutation:false,targetExecution:false,
+    controllerPointerMutation:false,applicationRestart:false,systemdUnitMutation:false,
+    daemonReload:false,dataMutation:false,timerMutation:false,workerGrantMutation:false,
+    providerEffect:false,privateKeyTransport:false};
+  for(const value of [p.effects,e.effects]){
+    sameKeys(value,Object.keys(effects),'finalization effects');
+    require(Object.entries(effects).every(([k,v])=>value[k]===v),'Finalization effect scope differs');
+  }
+  sameKeys(e.host,['hostIdentitySha256','bootId'],'finalization host');
+  sameKeys(e.trustRoot,['path','rawSha256'],'finalization root');
+  require(e.host.hostIdentitySha256===p.hostIdentitySha256&&e.host.bootId===p.bootId&&
+    JSON.stringify(e.nativeControlLockIdentity)===JSON.stringify(original.execution.nativeControlLockIdentity)&&
+    e.trustRoot.path===DEPLOYMENT_ROOT&&e.trustRoot.rawSha256===digest(pem)&&
+    JSON.stringify(e.invocation)===JSON.stringify({interpreter:'/usr/bin/python3',flags:['-I','-B','-c'],
+      mode:'memory-captured-python-c',action:'finalize-reconcile'})&&
+    JSON.stringify(e.limits)===JSON.stringify({archiveBytes:16777216,leafBytes:2097152,
+      authorizationBytes:131072,packetBytes:131072,transportProgramBytes:65536,
+      lockWaitSeconds:120,totalSeconds:180}), 'Finalization root/invocation/limits differ');
+  sameKeys(e.code,['finalizeEntrySha256','transportProgramSha256','pythonLoaderSha256',
+    'nodeExecutableSha256','nodeRealpath','pythonExecutableSha256','pythonRealpath'],'finalize code');
+  require(['finalizeEntrySha256','transportProgramSha256','pythonLoaderSha256','nodeExecutableSha256',
+    'pythonExecutableSha256'].every(k=>SHA.test(e.code[k]??''))&&
+    e.code.pythonLoaderSha256==='a44a7637f5d4a89f7ab7084fc1a300c35727fe20b78e44ad4491fbba91191bff'&&
+    e.code.nodeRealpath.startsWith('/usr/bin/node')&&e.code.pythonRealpath.startsWith('/usr/bin/python3'),
+    'Finalization captured code closure differs');
+  const auditReceipt=`${audit}/receipt.json`;
+  sameKeys(e.destinations,[flat,auditReceipt],'two finalization destinations');
+  require(JSON.stringify(e.destinations[flat])===JSON.stringify({kind:'FLAT_FINALIZE_INTENT',
+    preimage:'ABSENT',uid:0,gid:0,mode:0o400})&&
+    JSON.stringify(e.destinations[auditReceipt])===JSON.stringify({kind:'ORIGINAL_AUDIT_RECEIPT',
+      preimage:'ABSENT',sha256:digest(rawReceipt),bytes:rawReceipt.length,uid:0,gid:0,mode:0o400}),
+    'Finalization two-write byte map differs');
+  for(const [name,key] of [[audit,'auditDirectoryIdentity'],[request,'requestDirectoryIdentity']]){
+    const expected=e[key],st=fs.lstatSync(name,{bigint:true});
+    sameKeys(expected,['device','inode','uid','gid','mode'],'finalization directory identity');
+    require(st.isDirectory()&&!st.isSymbolicLink()&&expected.uid===0&&expected.gid===0&&
+      expected.mode===0o700&&st.dev===BigInt(expected.device)&&st.ino===BigInt(expected.inode)&&
+      st.uid===0n&&st.gid===0n&&(st.mode&0o7777n)===0o700n,'Finalization directory identity differs');
+  }
+  sameKeys(envelope,['approval','signature'],'finalization envelope');
+  const a=envelope.approval;
+  sameKeys(a,['contract','operationId','hostIdentitySha256','planSha256','action','issuedAt','expiresAt'],
+    'finalization approval');
+  const issued=canonicalTime(a.issuedAt),expires=canonicalTime(a.expiresAt),authorized=canonicalTime(body.authorizedAt);
+  require(a.contract==='LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_APPROVAL'&&
+    a.operationId===p.operationId&&a.action===p.action&&a.hostIdentitySha256===p.hostIdentitySha256&&
+    a.planSha256===body.planSha256&&issued<=authorized&&authorized<expires&&
+    expires-issued>0&&expires-issued<=1800000&&
+    canonicalTime(exactJson(rawReceipt,'original transport receipt').acceptedAt)<=authorized&&
+    /^[A-Za-z0-9+/]{86}==$/u.test(envelope.signature), 'Finalization signed approval/time differs');
+  const key=crypto.createPublicKey(pem);
+  require(key.asymmetricKeyType==='ed25519'&&crypto.verify(null,Buffer.from(canonical(a)),key,
+    Buffer.from(envelope.signature,'base64'))&&
+    Buffer.compare(readRegular(auditReceipt,131072,0o400),rawReceipt)===0&&
+    Buffer.compare(readRegular(`${request}/transport-receipt.json`,131072,0o400),rawReceipt)===0,
+    'Finalization public signature or terminal postimage differs');
+}
 function verifyTransport(plan, rawReceipt, receipt) {
   sameKeys(receipt, TRANSPORT_RECEIPT_KEYS, 'initial source transport receipt');
   require(receipt.contract === TRANSPORT && receipt.decision === 'PASS' &&
@@ -561,6 +645,8 @@ function verifyTransport(plan, rawReceipt, receipt) {
     Number(entryStat.size) === transportPlan.value.entrySnapshotSize &&
     digest(readRegular(entryPath, 2 * 1024 * 1024, 0o400)) === plan.introEntrySha256,
   'Protected operator entry snapshot changed');
+  verifyTransportFinalize(plan.introTransportOperationId, transportPlan.value,
+    transportPlan.raw, envelope.raw, intent.raw, rawReceipt, request, audit, pem);
 }
 function verifyIntro(release) {
   require(RELEASE.test(release), 'Expected one exact source release');

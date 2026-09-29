@@ -472,9 +472,10 @@ class NativeFiles:
                         (info.st_dev, info.st_ino) == (expected['device'], expected['inode']),
                         'Existing intro parent mode/owner differs')
 
-    def create_approved_directories(self, plan):
+    def create_approved_directories(self, plan, before_write=None):
         for name in sorted(PARENT_MODES, key=lambda value: (value.count('/'), value)):
             if plan['directoryPreimages'][name]['state'] == 'ABSENT':
+                if before_write is not None: before_write()
                 self.make_directory(name, PARENT_MODES[name])
             else:
                 info = self.p(name).lstat()
@@ -845,6 +846,98 @@ class InitialIntro:
                 receipt['entrySnapshotUid'] == receipt['entrySnapshotGid'] == 0 and
                 sha(f.read(entry_snapshot)) == receipt['introEntrySha256'],
                 'Protected Node entry snapshot identity changed')
+        self._transport_finalize_chain(original['operationId'], original, raw_plan,
+            raw_approval, raw_intent, receipt_raw, pem, request, audit)
+
+    def _transport_finalize_chain(self, operation, original, raw_plan, raw_approval,
+                                  raw_intent, receipt_raw, pem, request, audit):
+        f = self.files
+        flat = STATE+'/'+operation+'.standalone-transport-finalize.intent.json'
+        if f.absent(flat): return
+        body = exact_json(f.read(flat, 131072))
+        require(isinstance(body, dict) and set(body) == {'contract','operationId',
+            'originalOperationId','planSha256','approvalSha256','requestReceiptSha256',
+            'authorizedAt','plan','approvalEnvelope'} and
+            body['contract'] == 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_INTENT' and
+            body['originalOperationId'] == operation, 'Present finalization intent differs')
+        plan, envelope = body['plan'], body['approvalEnvelope']
+        require(isinstance(plan, dict) and set(plan) == {'contract','operationId','action',
+            'hostIdentitySha256','bootId','originalOperationId','originalPlanSha256',
+            'originalApprovalSha256','originalIntentSha256','requestReceiptSha256','execution','effects'} and
+            plan['contract'] == 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_PLAN' and
+            plan['action'] == 'FINALIZE_EXACT_INITIAL_TRANSPORT_AUDIT_RECEIPT_ONLY' and
+            UUID.fullmatch(plan['operationId']) and UUID.fullmatch(plan['bootId']) and
+            plan['operationId'] == body['operationId'] and plan['operationId'] != operation and
+            plan['operationId'] != '9afc7218-4757-4f44-87e1-6096706bad44' and
+            plan['originalOperationId'] == operation and
+            plan['hostIdentitySha256'] == original['hostIdentitySha256'] and
+            plan['originalPlanSha256'] == sha(raw_plan) and
+            plan['originalApprovalSha256'] == sha(raw_approval) and
+            plan['originalIntentSha256'] == sha(raw_intent) and
+            plan['requestReceiptSha256'] == body['requestReceiptSha256'] == sha(receipt_raw) and
+            body['planSha256'] == sha(canonical(plan)) and
+            body['approvalSha256'] == sha(canonical(envelope)),
+            'Present finalization original/new authority lineage differs')
+        effects = {'auditReceiptFinalizeOnly':True,'sourceSnapshotMutation':False,
+            'targetExecution':False,'controllerPointerMutation':False,'applicationRestart':False,
+            'systemdUnitMutation':False,'daemonReload':False,'dataMutation':False,
+            'timerMutation':False,'workerGrantMutation':False,'providerEffect':False,'privateKeyTransport':False}
+        execution = plan['execution']
+        require(isinstance(execution, dict) and set(execution) == {'code','invocation','host',
+            'nativeControlLockIdentity','trustRoot','auditDirectoryIdentity','requestDirectoryIdentity',
+            'destinations','limits','effects'} and plan['effects'] == execution['effects'] == effects and
+            execution['host'] == {'hostIdentitySha256':plan['hostIdentitySha256'],'bootId':plan['bootId']} and
+            execution['nativeControlLockIdentity'] == original['execution']['nativeControlLockIdentity'] and
+            execution['trustRoot'] == {'path':ROOT_PEM,'rawSha256':sha(pem)} and
+            execution['invocation'] == {'interpreter':'/usr/bin/python3','flags':['-I','-B','-c'],
+                'mode':'memory-captured-python-c','action':'finalize-reconcile'} and
+            execution['limits'] == {'archiveBytes':MAX_ARCHIVE,'leafBytes':MAX_LEAF,
+                'authorizationBytes':131072,'packetBytes':131072,'transportProgramBytes':65536,
+                'lockWaitSeconds':120,'totalSeconds':180}, 'Finalization closed effect/invocation map differs')
+        code = execution['code']
+        require(isinstance(code, dict) and set(code) == {'finalizeEntrySha256','transportProgramSha256',
+            'pythonLoaderSha256','nodeExecutableSha256','nodeRealpath','pythonExecutableSha256','pythonRealpath'} and
+            all(isinstance(code[k], str) and HASH.fullmatch(code[k]) for k in
+                ('finalizeEntrySha256','transportProgramSha256','pythonLoaderSha256',
+                 'nodeExecutableSha256','pythonExecutableSha256')) and
+            code['pythonLoaderSha256'] == 'a44a7637f5d4a89f7ab7084fc1a300c35727fe20b78e44ad4491fbba91191bff' and
+            code['nodeRealpath'].startswith('/usr/bin/node') and
+            code['pythonRealpath'].startswith('/usr/bin/python3'), 'Finalization code closure differs')
+        require(execution['destinations'] == {
+            flat:{'kind':'FLAT_FINALIZE_INTENT','preimage':'ABSENT','uid':0,'gid':0,'mode':0o400},
+            audit+'/receipt.json':{'kind':'ORIGINAL_AUDIT_RECEIPT','preimage':'ABSENT',
+                'sha256':sha(receipt_raw),'bytes':len(receipt_raw),'uid':0,'gid':0,'mode':0o400}},
+            'Finalization two-write destination map differs')
+        for path, key in ((audit,'auditDirectoryIdentity'),(request,'requestDirectoryIdentity')):
+            st = f.p(path).lstat()
+            expected = execution[key]
+            require(isinstance(expected, dict) and set(expected) == {'device','inode','uid','gid','mode'} and
+                expected['uid'] == expected['gid'] == 0 and expected['mode'] == 0o700 and
+                stat.S_ISDIR(st.st_mode) and
+                (st.st_dev,st.st_ino,st.st_uid,st.st_gid,stat.S_IMODE(st.st_mode)) ==
+                tuple(expected[k] for k in ('device','inode','uid','gid','mode')),
+                'Finalization retained private directory identity differs')
+        require(isinstance(envelope, dict) and set(envelope) == {'approval','signature'},
+                'Finalization approval envelope differs')
+        approval = envelope['approval']
+        require(isinstance(approval, dict) and set(approval) == {'contract','operationId',
+            'hostIdentitySha256','planSha256','action','issuedAt','expiresAt'} and
+            approval['contract'] == 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_APPROVAL' and
+            approval['operationId'] == plan['operationId'] and approval['action'] == plan['action'] and
+            approval['hostIdentitySha256'] == plan['hostIdentitySha256'] and
+            approval['planSha256'] == body['planSha256'] and
+            instant(exact_json(receipt_raw)['acceptedAt']) <= instant(body['authorizedAt']) and
+            re.fullmatch(r'[A-Za-z0-9+/]{86}==', envelope['signature']),
+            'Finalization approval/timestamp lineage differs')
+        require_approval_time(approval, body['authorizedAt'])
+        value = {'publicKey':pem.decode('ascii'),'message':base64.b64encode(canonical(approval)).decode(),
+                 'signature':envelope['signature']}
+        checked = subprocess.run([self.node,'--input-type=module','-e',VERIFY_SIGNATURE],
+            input=canonical(value), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=CLEAN, timeout=15, check=False)
+        require(checked.returncode == 0 and checked.stdout == b'PASS' and not checked.stderr and
+            f.read(audit+'/receipt.json',131072) == receipt_raw ==
+            f.read(request+'/transport-receipt.json',131072), 'Finalization public signature/postimage differs')
 
     def _preimage(self, plan):
         f = self.files
@@ -902,6 +995,7 @@ class InitialIntro:
             f.check_directory_preimages(plan)
             f.reject_mounts(set(plan['destinationPreimages']) | set(plan['directoryPreimages']))
             verified = validate_approval(plan, envelope, pem, node=self.node)
+            live = lambda: require_approval_time(verified, utc_now())
             authorized = utc_now()
             # No lock wait or crypto child follows this exact timestamp fence.
             require_approval_time(verified, authorized)
@@ -910,17 +1004,19 @@ class InitialIntro:
                       'authorizedAt': authorized}
             # The native state root already exists; no new parent precedes this intent.
             flat_intent = STATE+'/'+operation+'.standalone-intro.intent.json'
+            live()
             f.publish(flat_intent, canonical(intent), 0o400)
-            f.create_approved_directories(plan)
+            f.create_approved_directories(plan, before_write=live)
             audit = AUDITS+'/'+operation
-            f.ensure_parent(audit); f.make_directory(audit)
+            f.ensure_parent(audit); live(); f.make_directory(audit)
             for name, content in (('plan.json', raw['plan.json']), ('approval.json', raw['approval.json']),
                                   ('intent.json', canonical(intent))):
+                live()
                 f.publish(audit+'/'+name, content, 0o400)
             target = plan['generationDestination']
             staging = GENERATIONS+'/.intro-'+operation+'.pending'
-            f.ensure_parent(staging); f.make_directory(staging)
-            f.make_directory(staging+'/payload')
+            f.ensure_parent(staging); live(); f.make_directory(staging)
+            live(); f.make_directory(staging+'/payload')
             directories = sorted({str(Path(name).parent) for name in members if '/' in name},
                                  key=lambda value: (value.count('/'), value))
             expanded = set()
@@ -929,10 +1025,12 @@ class InitialIntro:
                 for length in range(1, len(parts)+1):
                     parent = '/'.join(parts[:length])
                     if parent not in expanded:
+                        live()
                         f.make_directory(staging+'/payload/'+parent)
                         expanded.add(parent)
             for name in sorted(members):
-                validate_approval(plan, envelope, pem, node=self.node)
+                verified = validate_approval(plan, envelope, pem, node=self.node)
+                live()
                 f.publish(staging+'/payload/'+name, members[name], 0o400)
             installed_at = utc_now()
             generation = {'contract': GENERATION, 'decision': 'PASS', 'operationId': operation,
@@ -944,17 +1042,19 @@ class InitialIntro:
                 'generationSourceMapSha256': plan['generationSourceMapSha256'],
                 'finalAdmissionSha256': plan['finalAdmissionSha256'],
                 'composeAdmissionSha256': plan['composeAdmissionSha256'], 'installedAt': installed_at}
-            f.publish(staging+'/receipt.json', canonical(generation), 0o400)
-            f.publish(staging+'/source-receipt.json', raw['source-receipt.json'], 0o400)
-            validate_approval(plan, envelope, pem, node=self.node)
+            live(); f.publish(staging+'/receipt.json', canonical(generation), 0o400)
+            live(); f.publish(staging+'/source-receipt.json', raw['source-receipt.json'], 0o400)
+            verified = validate_approval(plan, envelope, pem, node=self.node)
             require(self._preimage(plan) == preimage, 'Predecessor drift before generation publication')
+            live()
             f.rename_new(staging, target)
             for destination, source_name in DEST_SOURCES.items():
-                validate_approval(plan, envelope, pem, node=self.node)
+                verified = validate_approval(plan, envelope, pem, node=self.node)
                 f.ensure_parent(destination)
+                live()
                 f.publish(destination, members[source_name] if source_name else b'', MODES[destination])
             require(self._preimage(plan) == preimage, 'Serving predecessor changed during inert intro')
-            validate_approval(plan, envelope, pem, node=self.node)
+            verified = validate_approval(plan, envelope, pem, node=self.node)
             accepted_at = utc_now()
             validate_approval(plan, envelope, pem, at=accepted_at, node=self.node)
             parent_map_sha = sha(canonical(f.installed_parent_map()))
@@ -968,6 +1068,7 @@ class InitialIntro:
                 'installedParentDirectoriesSha256': parent_map_sha,
                 'installedAnchorDirectoriesSha256': anchor_map_sha,
                 'predecessorPostimageSha256': preimage, 'acceptedAt': accepted_at}
+            live()
             f.publish(audit+'/receipt.json', canonical(receipt), 0o400)
         return {'decision': 'INTRODUCED_INERT_ONLY_NOT_ACTIVE', 'operationId': operation,
                 'generationReceiptSha256': sha(canonical(generation)),

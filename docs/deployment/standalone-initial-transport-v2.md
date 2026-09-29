@@ -121,7 +121,9 @@ entry/program inode/size/mode and complete source/parent/predecessor postimages.
 It is written to the request and then the audit root. An approval is checked
 again against the exact `authorizedAt` sampled after the lock wait and the last
 signature child, immediately before the first durable flat intent. INTRO has
-the same timestamp fence. Any loss before both exact terminal publications is
+the same timestamp fence. Every later directory, leaf, rename and receipt also
+has a pure current-time fence immediately after the last signature child and
+before its effect. Any loss before both exact terminal publications is
 classified by read-only reconciliation; original staging is never replayed.
 
 ## Failure and recovery
@@ -154,6 +156,16 @@ classified by read-only reconciliation; original staging is never replayed.
   before that first write and again before audit publication. Lost output or a
   crash after the new intent is classified with read-only `reconcile-finalize`,
   never by another finalize run.
+- The same independently authenticated captured finalize Node gate exposes
+  that read-only path with exactly `--reconcile-finalize <original UUID>
+  <protected gate SHA256>`. The canonical stdin packet contains the retained
+  finalize plan/approval and captured Python source. The gate validates the
+  original flat recovery intent and its historical signature/time, then compiles
+  the same approved buffer in `reconcile-finalize` mode. It performs no fresh
+  approval or effect. With no intent it returns a read-only no-intent result
+  without compiling Python. The existing INTRO and installed verifier both
+  validate a present finalize intent, its complete embedded plan/approval,
+  historical signature, original lineage and exact two-write map.
 - Any cleanup/quarantine/recovery is a new exact dispatcher operation with its
   own reviewed map, baseline and direct GO. The finalize operation also
   requires that separate direct GO. Historical UUID9afc is excluded.

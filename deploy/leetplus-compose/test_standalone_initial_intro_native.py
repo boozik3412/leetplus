@@ -293,6 +293,48 @@ process.argv=['/usr/bin/node',{json.dumps(intro.VERIFIER)},'--source-release',{j
         return subprocess.run([self.node,'--input-type=module','-'],input=prelude+raw,
                               capture_output=True,env=intro.CLEAN,timeout=20,check=False)
 
+    def finalized_transport_intent(self):
+        original=self.transport_plan;old=original['operationId']
+        raw_plan=self.files.read(self.transport_audit+'/plan.json',131072)
+        raw_approval=self.files.read(self.transport_audit+'/approval.json',131072)
+        raw_intent=self.files.read(self.transport_audit+'/intent.json',131072)
+        raw_receipt=self.files.read(self.request+'/transport-receipt.json',131072)
+        flat=intro.STATE+'/'+old+'.standalone-transport-finalize.intent.json'
+        code=copy.deepcopy(original['execution']['code'])
+        code['finalizeEntrySha256']=intro.sha((HERE/'standalone-intro-transport-finalize-entry.mjs').read_bytes())
+        code.pop('transportEntrySha256')
+        plan={'contract':'LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_PLAN',
+            'operationId':'44444444-4444-4444-8444-444444444444',
+            'action':'FINALIZE_EXACT_INITIAL_TRANSPORT_AUDIT_RECEIPT_ONLY',
+            'hostIdentitySha256':original['hostIdentitySha256'],'bootId':self.plan['bootId'],
+            'originalOperationId':old,'originalPlanSha256':intro.sha(raw_plan),
+            'originalApprovalSha256':intro.sha(raw_approval),'originalIntentSha256':intro.sha(raw_intent),
+            'requestReceiptSha256':intro.sha(raw_receipt),
+            'effects':{'auditReceiptFinalizeOnly':True,'sourceSnapshotMutation':False,
+                'targetExecution':False,'controllerPointerMutation':False,'applicationRestart':False,
+                'systemdUnitMutation':False,'daemonReload':False,'dataMutation':False,
+                'timerMutation':False,'workerGrantMutation':False,'providerEffect':False,'privateKeyTransport':False}}
+        plan['execution']={'code':code,'invocation':{'interpreter':'/usr/bin/python3','flags':['-I','-B','-c'],
+            'mode':'memory-captured-python-c','action':'finalize-reconcile'},
+            'host':{'hostIdentitySha256':plan['hostIdentitySha256'],'bootId':plan['bootId']},
+            'nativeControlLockIdentity':copy.deepcopy(original['execution']['nativeControlLockIdentity']),
+            'trustRoot':{'path':intro.ROOT_PEM,'rawSha256':intro.sha(self.public)},
+            'auditDirectoryIdentity':self.identity(self.transport_audit),
+            'requestDirectoryIdentity':self.identity(self.request),
+            'destinations':{flat:{'kind':'FLAT_FINALIZE_INTENT','preimage':'ABSENT','uid':0,'gid':0,'mode':0o400},
+                self.transport_audit+'/receipt.json':{'kind':'ORIGINAL_AUDIT_RECEIPT','preimage':'ABSENT',
+                    'sha256':intro.sha(raw_receipt),'bytes':len(raw_receipt),'uid':0,'gid':0,'mode':0o400}},
+            'limits':{'archiveBytes':intro.MAX_ARCHIVE,'leafBytes':intro.MAX_LEAF,
+                'authorizationBytes':131072,'packetBytes':131072,'transportProgramBytes':65536,
+                'lockWaitSeconds':120,'totalSeconds':180},'effects':copy.deepcopy(plan['effects'])}
+        envelope=self.sign(self.approval(plan,'LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_APPROVAL'))
+        intent={'contract':'LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_INTENT',
+            'operationId':plan['operationId'],'originalOperationId':old,
+            'planSha256':intro.sha(intro.canonical(plan)),'approvalSha256':intro.sha(intro.canonical(envelope)),
+            'requestReceiptSha256':intro.sha(raw_receipt),'authorizedAt':intro.utc_now(),
+            'plan':plan,'approvalEnvelope':envelope}
+        return flat,intent
+
     def test_prepare_is_read_only_then_inert_apply_verifies_historically(self):
         before=set(p.relative_to(self.base) for p in self.base.rglob('*'))
         self.assertTrue(self.files.absent(self.request+'/plan.json'))
@@ -355,7 +397,8 @@ process.argv=['/usr/bin/node',{json.dumps(intro.VERIFIER)},'--source-release',{j
 
     def test_failed_after_flat_intent_has_no_replay_or_receipt(self):
         class FailAfterIntent(intro.NativeFiles):
-            def create_approved_directories(self,plan):raise OSError('fixture crash after durable intent')
+            def create_approved_directories(self,plan,before_write=None):
+                raise OSError('fixture crash after durable intent')
         engine=self.engine_for(FailAfterIntent(self.base))
         with self.assertRaises(OSError):engine.apply(self.operation)
         self.assertFalse(self.files.absent(intro.STATE+'/'+self.operation+'.standalone-intro.intent.json'))
@@ -367,6 +410,41 @@ process.argv=['/usr/bin/node',{json.dumps(intro.VERIFIER)},'--source-release',{j
         with patch.object(intro,'utc_now',side_effect=lambda:next(calls)):
             with self.assertRaises(ValueError):self.engine.apply(self.operation)
         self.assertTrue(self.files.absent(intro.STATE+'/'+self.operation+'.standalone-intro.intent.json'))
+
+    def test_expiry_during_crypto_blocks_first_payload_leaf(self):
+        original=intro.validate_approval;valid=intro.utc_now();state={'calls':0,'expired':False}
+        def delayed(*args,**kwargs):
+            result=original(*args,**kwargs)
+            state['calls']+=1
+            if state['calls']==3:state['expired']=True
+            return result
+        with patch.object(intro,'validate_approval',side_effect=delayed),patch.object(intro,'utc_now',
+                side_effect=lambda:self.expires if state['expired'] else valid):
+            with self.assertRaises(ValueError):self.engine.apply(self.operation)
+        payload=self.files.p(intro.GENERATIONS+'/.intro-'+self.operation+'.pending/payload')
+        self.assertFalse(any(p.is_file() for p in payload.rglob('*')))
+
+    def test_present_malformed_finalize_authority_rejected_by_both_consumers(self):
+        flat=intro.STATE+'/'+self.plan['introTransportOperationId']+'.standalone-transport-finalize.intent.json'
+        self.write(flat,b'{}\n')
+        with self.assertRaises(ValueError):self.engine.prepare(self.operation)
+        self.files.p(flat).unlink()
+        self.engine.apply(self.operation)
+        self.write(flat,b'{}\n')
+        self.assertNotEqual(self.verify_snapshot().returncode,0)
+
+    def test_valid_finalize_lineage_then_wrong_signature_rejected_by_both_consumers(self):
+        flat,intent=self.finalized_transport_intent()
+        self.write(flat,intro.canonical(intent))
+        self.assertEqual(self.engine.prepare(self.operation)['decision'],'PREPARED_NOT_AUTHORIZATION')
+        self.engine.apply(self.operation)
+        verified=self.verify_snapshot()
+        self.assertEqual(verified.returncode,0,verified.stderr.decode())
+        intent['approvalEnvelope']['signature']='A'*86+'=='
+        intent['approvalSha256']=intro.sha(intro.canonical(intent['approvalEnvelope']))
+        self.files.p(flat).chmod(0o600);self.write(flat,intro.canonical(intent))
+        with self.assertRaises(ValueError):self.engine._inputs(self.operation)
+        self.assertNotEqual(self.verify_snapshot().returncode,0)
 
     def test_rename_noreplace_and_changed_helper_or_flat_intent_rejected(self):
         self.engine.apply(self.operation)

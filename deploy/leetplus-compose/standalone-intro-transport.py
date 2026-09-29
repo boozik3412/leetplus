@@ -1,9 +1,7 @@
-"""Independently authorized transactional first source snapshot transport.
+"""Captured stdlib-only source transport and separately authorized finalization.
 
-The dispatcher must authenticate this captured program and its fixed invocation
-before running it. It has stdlib imports only and executes no transported code.
-TRANSPORT_V2 authorizes source/audit filesystem writes only. INTRO authorization
-is deliberately absent from the resulting request and is supplied in memory.
+The dispatcher authenticates bytes/invocation before execution. No transported
+code is executed. INTRO authorization is supplied in memory after transport.
 """
 import argparse
 import base64
@@ -204,6 +202,17 @@ def parse_compose_control(raw,expected_archive):
     return found
 
 
+def validate_code(code,entry_field):
+    require(isinstance(code,dict) and set(code)=={entry_field,'transportProgramSha256','pythonLoaderSha256',
+            'nodeExecutableSha256','nodeRealpath','pythonExecutableSha256','pythonRealpath'} and
+            all(isinstance(code[name],str) and HASH.fullmatch(code[name]) for name in
+                (entry_field,'transportProgramSha256','pythonLoaderSha256',
+                 'nodeExecutableSha256','pythonExecutableSha256')) and
+            code['pythonLoaderSha256']==LOADER_SHA256 and
+            code['pythonRealpath'].startswith('/usr/bin/python3') and
+            code['nodeRealpath'].startswith('/usr/bin/node'),'Closed captured code/tool map differs')
+
+
 def validate_plan(plan):
     require(isinstance(plan,dict) and set(plan)==PLAN_FIELDS and plan['contract']==PLAN and
             plan['action']=='STAGE_SIGNED_INITIAL_INTRO_SOURCE_ONLY' and
@@ -226,15 +235,7 @@ def validate_plan(plan):
             'Transport snapshot/effect scope differs')
     execution=plan['execution']
     require(isinstance(execution,dict) and set(execution)==EXECUTION_FIELDS,'Closed execution object required')
-    code=execution['code']
-    require(isinstance(code,dict) and set(code)=={'transportEntrySha256','transportProgramSha256','pythonLoaderSha256',
-            'nodeExecutableSha256','nodeRealpath','pythonExecutableSha256','pythonRealpath'} and
-            all(isinstance(code[name],str) and HASH.fullmatch(code[name]) for name in
-                ('transportEntrySha256','transportProgramSha256','pythonLoaderSha256','nodeExecutableSha256','pythonExecutableSha256')) and
-            code['pythonLoaderSha256']==LOADER_SHA256 and
-            code['pythonRealpath'].startswith('/usr/bin/python3') and
-            code['nodeRealpath'].startswith('/usr/bin/node'),
-            'Transport code/tool closure differs')
+    validate_code(execution['code'],'transportEntrySha256')
     require(execution['invocation']=={'interpreter':'/usr/bin/python3','flags':['-I','-B','-c'],
                                      'mode':'memory-captured-python-c','action':'stage'},
             'Fixed transport invocation differs')
@@ -342,16 +343,7 @@ def validate_finalize_plan(plan):
             execution['invocation']=={'interpreter':'/usr/bin/python3','flags':['-I','-B','-c'],
                 'mode':'memory-captured-python-c','action':'finalize-reconcile'},
             'Closed finalization execution/effect scope differs')
-    code=execution['code']
-    require(isinstance(code,dict) and set(code)=={'finalizeEntrySha256','transportProgramSha256',
-            'pythonLoaderSha256','nodeExecutableSha256','nodeRealpath','pythonExecutableSha256','pythonRealpath'} and
-            all(isinstance(code[name],str) and HASH.fullmatch(code[name]) for name in
-                ('finalizeEntrySha256','transportProgramSha256','pythonLoaderSha256',
-                 'nodeExecutableSha256','pythonExecutableSha256')) and
-            code['pythonLoaderSha256']==LOADER_SHA256 and
-            code['nodeRealpath'].startswith('/usr/bin/node') and
-            code['pythonRealpath'].startswith('/usr/bin/python3'),
-            'Finalization captured code/tool closure differs')
+    validate_code(execution['code'],'finalizeEntrySha256')
     trust=execution['trustRoot']
     require(isinstance(trust,dict) and set(trust)=={'path','rawSha256'} and
             trust['path']==ROOT_PEM and HASH.fullmatch(trust['rawSha256']),
@@ -552,6 +544,18 @@ class Transport:
             result[name]={'device':st.st_dev,'inode':st.st_ino,'uid':st.st_uid,
                           'gid':st.st_gid,'mode':stat.S_IMODE(st.st_mode)}
         return result
+    def check_tools(self,code):
+        for logical,expected_realpath,expected_sha in (
+            ('/usr/bin/node',code['nodeRealpath'],code['nodeExecutableSha256']),
+            ('/usr/bin/python3',code['pythonRealpath'],code['pythonExecutableSha256'])):
+            real=os.path.realpath(self.p(logical))
+            if self.prefix is not None:
+                require(real.startswith(str(self.prefix)+'/'),'Fixture executable escaped private root')
+                actual='/'+str(Path(real).relative_to(self.prefix)).replace('\\','/')
+            else:actual=real
+            require(actual==expected_realpath and sha(self.read(actual,128*1024*1024))==expected_sha,
+                    'Signed fixed interpreter bytes differ')
+
     def stage(self,packet,expected_operation):
         require(isinstance(packet,dict) and set(packet)=={'plan','approvalEnvelope','files',
                 'composeControlArchiveBase64','sourceArtifactMetadata','composeArtifactMetadata'},
@@ -636,41 +640,37 @@ class Transport:
                     meta.get('workflow_run',{}).get('head_sha')==plan['sourceRelease'] and
                     meta.get('workflow_run',{}).get('head_branch')=='main',
                     f'Foreign {label} producer artifact metadata')
-        code=plan['execution']['code']
-        for logical,expected_realpath,expected_sha in (
-            ('/usr/bin/node',code['nodeRealpath'],code['nodeExecutableSha256']),
-            ('/usr/bin/python3',code['pythonRealpath'],code['pythonExecutableSha256'])):
-            real=os.path.realpath(self.p(logical))
-            if self.prefix is not None:
-                require(real.startswith(str(self.prefix)+'/'),'Fixture executable escaped private root')
-                actual_logical='/'+str(Path(real).relative_to(self.prefix)).replace('\\','/')
-            else:actual_logical=real
-            require(actual_logical==expected_realpath and sha(self.read(actual_logical,128*1024*1024))==expected_sha,
-                    'Signed fixed interpreter bytes differ')
+        self.check_tools(plan['execution']['code'])
         pem=self.read(ROOT_PEM,4096);verify_approval(plan,envelope,pem,node=self.node)
         require(sha(pem)==plan['execution']['trustRoot']['rawSha256'],
                 'Signed existing deployment-root raw bytes differ')
         with self.lock(plan['execution']['nativeControlLockIdentity']):
             predecessor_sha=self.preimage(plan)
             verified=verify_approval(plan,envelope,pem,node=self.node)
-            # Sample AFTER the last crypto child/lock wait, then perform only
-            # a pure time fence against this exact signed approval before intent.
+            # Exact time fence follows the last crypto child and lock wait.
             now=utc();require_approval_time(verified,now)
             intent={'contract':INTENT,'operationId':plan['operationId'],'planSha256':sha(canonical(plan)),
                              'approvalSha256':sha(canonical(envelope)),'authorizedAt':now}
+            require_approval_time(verified,utc())
             self.write(STATE+'/'+plan['operationId']+'.standalone-transport.intent.json',canonical(intent))
             for name,expected in sorted(plan['execution']['parentPreimages'].items(),key=lambda item:(item[0].count('/'),item[0])):
-                if expected['state']=='ABSENT':self.directory(name,expected['mode'])
-            audit=AUDITS+'/'+plan['operationId'];self.directory(audit,0o700)
+                if expected['state']=='ABSENT':
+                    require_approval_time(verified,utc());self.directory(name,expected['mode'])
+            audit=AUDITS+'/'+plan['operationId']
+            require_approval_time(verified,utc());self.directory(audit,0o700)
             for name,value in (('plan.json',plan),('approval.json',envelope),('intent.json',intent)):
+                require_approval_time(verified,utc())
                 self.write(audit+'/'+name,canonical(value))
-            staging=INBOX+'/.transport-'+plan['operationId']+'.pending';self.directory(staging,0o700)
+            staging=INBOX+'/.transport-'+plan['operationId']+'.pending'
+            require_approval_time(verified,utc());self.directory(staging,0o700)
             for name,raw in sorted(captured.items()):
-                verify_approval(plan,envelope,pem,node=self.node);self.write(staging+'/'+name,raw)
+                verified=verify_approval(plan,envelope,pem,node=self.node)
+                require_approval_time(verified,utc());self.write(staging+'/'+name,raw)
             program=self.p(staging+'/intro-program.py').stat();entry=self.p(staging+'/intro-entry.mjs').stat()
             require(self.predecessor_postimage(plan)==predecessor_sha,
                     'Predecessor changed before source publication')
-            verify_approval(plan,envelope,pem,node=self.node)
+            verified=verify_approval(plan,envelope,pem,node=self.node)
+            require_approval_time(verified,utc())
             self.rename(staging,request)
             require({p.name for p in self.p(request).iterdir()}==set(PAYLOAD_LEAVES),
                     'Published source snapshot closure differs')
@@ -679,7 +679,7 @@ class Transport:
                         'Published source snapshot drift')
             require(self.predecessor_postimage(plan)==predecessor_sha,
                     'Predecessor changed during source publication')
-            accepted=utc();verify_approval(plan,envelope,pem,node=self.node,at=accepted)
+            accepted=utc();verified=verify_approval(plan,envelope,pem,node=self.node,at=accepted)
             postimage={name:{'sha256':sha(raw),'bytes':len(raw),'mode':0o400,'uid':0,'gid':0}
                        for name,raw in sorted(captured.items())}
             parent_postimage=self.parent_postimage(plan)
@@ -696,10 +696,12 @@ class Transport:
                 'predecessorPostimageSha256':predecessor_sha,
                 'acceptedAt':accepted}
             validate_terminal_receipt(receipt,plan)
+            require_approval_time(verified,utc())
             self.write(request+'/transport-receipt.json',canonical(receipt))
             require({p.name for p in self.p(request).iterdir()}==set(LEAVES),
                     'Terminal transport snapshot closure differs')
-            verify_approval(plan,envelope,pem,node=self.node)
+            verified=verify_approval(plan,envelope,pem,node=self.node)
+            require_approval_time(verified,utc())
             self.write(audit+'/receipt.json',canonical(receipt))
             return {'decision':'SOURCE_SNAPSHOT_STAGED_NOT_EXECUTED','operationId':plan['operationId'],
                     'transportReceiptSha256':sha(canonical(receipt)),'requestPath':request}
@@ -712,6 +714,9 @@ class Transport:
         raw_intent=self.read(audit+'/intent.json',131072)
         plan=exact(raw_plan);envelope=exact(raw_approval);intent=exact(raw_intent)
         request=validate_plan(plan)
+        self.private_tree(audit,{'plan.json','approval.json','intent.json'}|
+                          ({'receipt.json'} if require_audit else set()))
+        self.private_tree(request,set(LEAVES))
         raw=self.read(request+'/transport-receipt.json',131072);receipt=exact(raw)
         validate_terminal_receipt(receipt,plan)
         require(plan['operationId']==operation and receipt.get('decision')=='PASS' and
@@ -755,6 +760,7 @@ class Transport:
                 receipt.get('parentPostimageSha256')==sha(canonical(self.parent_postimage(plan))) and
                 receipt.get('predecessorPostimageSha256')==expected_predecessor,
                 'Terminal transport full postimage differs')
+        parse_source_archive(self.read(request+'/source.tar.gz',MAX_ARCHIVE),plan['sourceRootManifestSha256'])
         if require_current_predecessor:
             require(self.predecessor_postimage(plan)==expected_predecessor,
                     'Current predecessor differs before separate finalization')
@@ -799,6 +805,16 @@ class Transport:
         require(plan.get('operationId')==operation,'Historical transport plan operation differs')
         return validate_plan(plan).rstrip('/')+'/transport-receipt.json'
 
+    def private_tree(self,name,names):
+        self.ancestors(name);st=self.p(name).lstat()
+        require(stat.S_ISDIR(st.st_mode) and (st.st_uid,st.st_gid,stat.S_IMODE(st.st_mode))==(0,0,0o700)
+                and {p.name for p in self.p(name).iterdir()}==names,'Private terminal directory closure differs')
+        for leaf in names:
+            info=self.p(name+'/'+leaf).lstat()
+            require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and
+                    (info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode))==(0,0,0o400),
+                    'Private terminal leaf metadata differs')
+
     def _private_identity(self,name,expected):
         self.ancestors(name)
         st=self.p(name).lstat()
@@ -815,17 +831,7 @@ class Transport:
         require(plan['operationId']==expected_operation and
                 self.captured_program_sha256==plan['execution']['code']['transportProgramSha256'],
                 'Protected finalization command/source differs')
-        execution=plan['execution'];code=execution['code']
-        for logical,expected_realpath,expected_sha in (
-            ('/usr/bin/node',code['nodeRealpath'],code['nodeExecutableSha256']),
-            ('/usr/bin/python3',code['pythonRealpath'],code['pythonExecutableSha256'])):
-            real=os.path.realpath(self.p(logical))
-            if self.prefix is not None:
-                require(real.startswith(str(self.prefix)+'/'),'Fixture executable escaped private root')
-                actual='/'+str(Path(real).relative_to(self.prefix)).replace('\\','/')
-            else:actual=real
-            require(actual==expected_realpath and sha(self.read(actual,128*1024*1024))==expected_sha,
-                    'Finalization fixed interpreter bytes differ')
+        execution=plan['execution'];self.check_tools(execution['code'])
         pem=self.read(ROOT_PEM,4096)
         require(sha(pem)==execution['trustRoot']['rawSha256'],
                 'Finalization inherited public root raw bytes differ')
@@ -848,10 +854,9 @@ class Transport:
                 'planSha256':sha(canonical(plan)),'approvalSha256':sha(canonical(envelope)),
                 'requestReceiptSha256':plan['requestReceiptSha256'],'authorizedAt':authorized,
                 'plan':plan,'approvalEnvelope':envelope}
+            require_approval_time(verified,utc())
             self.write(flat,canonical(intent))
-            # A lost response after this point is never a reason to run this
-            # action again. Re-evaluate all original evidence before the sole
-            # missing audit receipt is published with O_EXCL.
+            # Recheck original evidence; an interrupted intent cannot replay.
             terminal=self.historical_terminal(plan['originalOperationId'],require_audit=False,
                                               require_current_predecessor=True)
             self._match_finalize_lineage(plan,terminal)
@@ -878,7 +883,9 @@ class Transport:
                 plan['originalIntentSha256']==sha(terminal['intentRaw']) and
                 plan['requestReceiptSha256']==sha(terminal['receiptRaw']) and
                 plan['execution']['destinations'][terminal['auditPath']+'/receipt.json']['bytes']==
-                len(terminal['receiptRaw']),
+                len(terminal['receiptRaw']) and
+                plan['execution']['nativeControlLockIdentity']==
+                terminal['plan']['execution']['nativeControlLockIdentity'],
                 'Original timely signed transport/full terminal lineage differs')
 
     def reconcile_finalize(self,operation):
@@ -901,6 +908,8 @@ class Transport:
                 intent['approvalSha256']==sha(canonical(envelope)) and
                 intent['requestReceiptSha256']==plan['requestReceiptSha256'],
                 'Historical finalization plan/approval binding differs')
+            require(self.captured_program_sha256==plan['execution']['code']['transportProgramSha256'],
+                    'Read-only finalization captured source differs')
             pem=self.read(ROOT_PEM,4096)
             require(sha(pem)==plan['execution']['trustRoot']['rawSha256'],
                     'Historical finalization public root differs')
@@ -929,7 +938,7 @@ def main():
     def expired(signum,frame):raise TimeoutError('Transport deadline exceeded; reconcile only')
     signal.signal(signal.SIGALRM,expired);signal.alarm(180)
     try:
-        if args.mode in ('stage','finalize-reconcile'):
+        if args.mode in ('stage','finalize-reconcile','reconcile-finalize'):
             require(isinstance(args.captured_program_sha256,str) and HASH.fullmatch(args.captured_program_sha256),
                     'Protected captured transport source digest required')
         else:

@@ -8,6 +8,10 @@ production-control install/unit reload здесь не используется.
 launcher, generation и public roots не установлены, A→bridge и Variant B
 не serving. Fresh baseline, accepted initial transport/native locks,
 reviewed exact plan и отдельный direct GO обязательны. Open beta NO-GO.
+Draft PR #252 теперь содержит source-only V2 request staging по captured
+семи листьям и prewrite flat intent, плюс классификацию partial install.
+A intro in-memory authorization delta добавлен, но независимый signed
+initial transport и новый combined review/CI ещё ожидаются; PR остаётся HOLD.
 
 **Source-only bootstrap checkpoint 27.09:** ordered source integration proposal
 for frozen draft PR246→247→248 and separate predecessor transition primitives

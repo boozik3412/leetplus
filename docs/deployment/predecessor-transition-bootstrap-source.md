@@ -21,7 +21,16 @@ installed authority.
 The new `install_predecessor_bootstrap.py` consumes that first step through a
 fixed minimal verifier at
 `/usr/local/libexec/leetplus/verify-installed-standalone-intro.mjs`.
-It first reads a closed root-owned installer request, verifies the
+Its `stage-request` action first receives a closed canonical seven-leaf request
+as bounded captured stdin (plan, approval, archive and four public roots),
+checks the deployment-root V2 signature and full admitted generation, then
+publishes a flat intent before any request directory write. The root-private
+request is staged with no-overwrite atomic rename and an exact external receipt.
+`reconcile-request` classifies intent-only and partial publication, and can
+publish only a missing receipt after verifying a complete exact postimage under
+its own recovery scope. `prepare`/`apply` require this staged intent and receipt;
+no operator-prewritten request is accepted as an independent authority.
+The wrapper then verifies the
 deployment-root-signed **V2** public-only plan/approval with existing host
 Node and the bound host identity, then hashes the verifier bytes against the
 signed `installerAuthority`. Verifier stdout must be one bounded canonical
@@ -35,8 +44,13 @@ approval/receipt/enrollment bytes cannot substitute.
 
 The existing bundle installer then checks source admission, accepted A or
 bridge predecessor, host/core/native pending/locks, deployment signature and
-exact plan before any public-only bundle staging. Its immutable intent and
-installed receipt remain the authority for lost-response reconciliation.
+exact plan before any public-only bundle staging. Its first install write is a
+flat, no-overwrite intent in trusted persistent state; the audit directory and
+copies follow. Reconciliation distinguishes intent-only, partial audit,
+pending staging, foreign/dangling final and exact installed postimage without
+replaying apply. A missing audit receipt may be published only after full
+installed enrollment verification under a separately scoped recovery action.
+The immutable intent and installed receipt remain the authority for lost-response reconciliation.
 Installer audit UUID roots use the existing trusted Compose state, separate
 from the intro audit namespace. No private key is read by the host installer,
 no controller pointer changes and no candidate code may install itself.

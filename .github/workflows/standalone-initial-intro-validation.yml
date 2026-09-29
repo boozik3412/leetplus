@@ -6,6 +6,7 @@ on:
       - codex/standalone-initial-intro-20260929
       - codex/standalone-first-transport-20260929
       - codex/standalone-transport-recovery-20260929
+      - codex/standalone-intro-finalize-20260929
     paths:
       - deploy/leetplus-compose/standalone-initial-intro*.mjs
       - deploy/leetplus-compose/standalone-initial-intro.py
@@ -50,6 +51,7 @@ jobs:
           python3 -B deploy/leetplus-compose/test_standalone_initial_intro.py
           python3 -B deploy/leetplus-compose/test_standalone_intro_transport.py
           node --check deploy/leetplus-compose/standalone-initial-intro-entry.mjs
+          node --check deploy/leetplus-compose/standalone-initial-intro-finalize-entry.mjs
           node --check deploy/leetplus-compose/standalone-intro-transport-entry.mjs
           node --check deploy/leetplus-compose/standalone-intro-transport-finalize-entry.mjs
           node --check docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs

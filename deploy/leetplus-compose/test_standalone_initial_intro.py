@@ -50,6 +50,7 @@ def plan_fixture():
         intro.AUDITS+'/'+plan['operationId'],
         intro.STATE+'/'+plan['operationId']+'.standalone-intro.intent.json',
         intro.GENERATIONS+'/.intro-'+plan['operationId']+'.pending'}
+    absent.add(intro.AUDITS+'/'+plan['operationId']+'/receipt.pending.json')
     plan['destinationPreimages'] = {name: 'ABSENT' for name in sorted(absent)}
     return plan
 

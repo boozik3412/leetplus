@@ -286,7 +286,7 @@ rl.on('line',line=>{const v=JSON.parse(line);process.stdout.write(JSON.stringify
         # Test-only trusted FS mapping. The exact captured verifier remains
         # unchanged; only node:fs reads are redirected to the private fixture.
         prelude=f"""import fsFixture from 'node:fs';
-const fixtureRoot={json.dumps(str(self.base))};const remap=p=>typeof p==='string'&&p.startsWith('/')?fixtureRoot+p:p;
+const fixtureRoot={json.dumps(str(self.base))};const remap=p=>typeof p==='string'&&p.startsWith('/')&&!p.startsWith(fixtureRoot+'/')&&p!==fixtureRoot?fixtureRoot+p:p;
 for(const name of ['lstatSync','readdirSync','openSync','readFileSync']){{const orig=fsFixture[name];fsFixture[name]=function(p,...a){{return orig.call(this,remap(p),...a);}};}}
 process.argv=['/usr/bin/node',{json.dumps(intro.VERIFIER)},'--source-release',{json.dumps(self.plan['sourceRelease'])}];
 """.encode()

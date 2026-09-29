@@ -253,7 +253,7 @@ scope['main']()
         operation=self.operation if read_only else packet['finalizePlan']['operationId']
         argument='--reconcile-finalize' if read_only else '--operation-id'
         prelude=f"""import fsFixture from 'node:fs';
-const fixtureRoot={json.dumps(str(self.base))};const remap=p=>typeof p==='string'&&p.startsWith('/')?fixtureRoot+p:p;
+const fixtureRoot={json.dumps(str(self.base))};const remap=p=>typeof p==='string'&&p.startsWith('/')&&!p.startsWith(fixtureRoot+'/')&&p!==fixtureRoot?fixtureRoot+p:p;
 for(const name of ['lstatSync','openSync','readFileSync','readdirSync']){{const orig=fsFixture[name];fsFixture[name]=function(p,...a){{return orig.call(this,remap(p),...a);}};}}
 const originalRealpath=fsFixture.realpathSync.native;
 fsFixture.realpathSync.native=function(p,...a){{return originalRealpath.call(this,remap(p),...a).slice(fixtureRoot.length);}};

@@ -16,6 +16,10 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  TENANT_ACCESS_EXPIRY_WARNING_DAYS,
+  describeTenantAccess,
+} from '../tenancy/tenant-access-window';
 import { TenantExecutionPolicyService } from '../tenancy/tenant-execution-policy.service';
 
 type TenantLifecycleAction = 'ACTIVATE' | 'SUSPEND' | 'ARCHIVE';
@@ -314,9 +318,25 @@ export class AdminService {
       };
       const failedSyncJobs24h = failedCounts.get(tenant.id) ?? 0;
       const lastSyncJob = latestSyncByTenant.get(tenant.id) ?? null;
+      const access = describeTenantAccess(tenant);
+      const accessClosed =
+        access.state === 'EXPIRED' || access.state === 'NOT_STARTED';
+      const accessExpiringSoon =
+        access.state === 'ACTIVE_UNTIL' &&
+        access.daysLeft !== null &&
+        access.daysLeft <= TENANT_ACCESS_EXPIRY_WARNING_DAYS;
       const issues = [
         tenant.status !== TenantLifecycleStatus.ACTIVE
           ? 'tenant не активен'
+          : null,
+        access.state === 'EXPIRED'
+          ? 'срок доступа сети истёк — вход закрыт'
+          : null,
+        access.state === 'NOT_STARTED'
+          ? 'срок доступа сети ещё не начался — вход закрыт'
+          : null,
+        accessExpiringSoon
+          ? `срок доступа сети истекает через ${access.daysLeft} дн.`
           : null,
         activeSources.length === 0 ? 'нет активных Langame источников' : null,
         staleSources.length > 0
@@ -329,10 +349,11 @@ export class AdminService {
 
       const severity =
         tenant.status !== TenantLifecycleStatus.ACTIVE ||
+        accessClosed ||
         activeSources.length === 0 ||
         failedSyncJobs24h > 0
           ? 'CRITICAL'
-          : staleSources.length > 0
+          : staleSources.length > 0 || accessExpiringSoon
             ? 'WARNING'
             : 'OK';
 
@@ -341,6 +362,8 @@ export class AdminService {
         name: tenant.name,
         slug: tenant.slug,
         status: tenant.status,
+        customerStage: tenant.customerStage,
+        access,
         statusChangedAt: tenant.statusChangedAt?.toISOString() ?? null,
         statusReason: tenant.statusReason,
         usersCount: tenant._count.users,

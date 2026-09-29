@@ -94,7 +94,7 @@ const INVITE_ADMITTED_ONBOARDING_STATUSES = new Set<TenantOnboardingStatus>([
   TenantOnboardingStatus.ACTIVE,
 ]);
 
-const TRIAL_BOUND_STAGES = new Set<TenantCustomerStage>([
+export const TRIAL_BOUND_STAGES = new Set<TenantCustomerStage>([
   TenantCustomerStage.PILOT,
   TenantCustomerStage.BETA,
 ]);

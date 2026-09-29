@@ -85,7 +85,8 @@ external background grant. Ежедневное чтение включает т
 обрывает независимые чтения. Это **не установленный worker**: generic
 entitlement endpoint отклоняет stage/outbound mutation, а действующий Compose
 controller знает только два worker grants и не имеет внешнего таймера.
-Фактический tenant остаётся `PILOT`, trial истёк, outbound выключен.
+Фактический tenant остаётся `PILOT`, outbound выключен; 29.09.2026 по решению
+владельца срок доступа сделан бессрочным (см. «Срок доступа сети PILOT/BETA»).
 Новый workflow в production не установлен; для LIVE/outbound нужны его приёмка,
 accepted controller successor,
 fresh production plan и direct GO через диспетчера. [Кандидат и ограничения](../deployment/langame-external-worker-pilot.md).
@@ -1647,6 +1648,26 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   `CURRENT_189 → CURRENT_190` rollout bridge выключен после postcheck. Любое
   следующее schema изменение снова требует exact-SHA admission,
   restored-copy проверки и controlled rollout.
+
+### Срок доступа сети PILOT/BETA
+
+- Для стадий `PILOT`/`BETA` вход сотрудников сети ограничен окном
+  `Tenant.trialStartsAt..trialEndsAt`: после конца `TenantExecutionPolicy`
+  отказывает с `TRIAL_EXPIRED` и при login, и на каждом запросе. `INTERNAL` и
+  `LIVE` сроком не ограничены.
+- Окно меняет только Platform Admin через
+  `POST /admin/tenants/:tenantId/access-window` (`OPEN_ENDED` | `UNTIL` |
+  `CLOSE_NOW`) с подтверждением slug, причиной, `requestId`, CAS по
+  `executionRevision` и `PlatformAdminAuditEvent`
+  `TENANT_ACCESS_WINDOW_CHANGED`. Web — панель «Срок доступа сети» на
+  `/administration` через same-origin BFF.
+- «Бессрочно» хранится как `trialEndsAt = 9999-12-31T00:00:00.000Z`: это
+  сохраняет `Tenant_external_stage_trial_check` и неизменённую policy без
+  изменения схемы. Не заменять на `NULL` без миграции этого check.
+- Маршрут меняет только `trialEndsAt`: стадия, lifecycle, onboarding,
+  module entitlements, outbound, Store background execution и worker
+  `EXTERNAL_DENY` не затрагиваются; неактивированная shell-сеть остаётся за
+  activation workflow.
 
 ### Делегирование учётных записей сотрудникам
 

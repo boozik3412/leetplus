@@ -22,6 +22,7 @@ import { FounderOperatorBetaActivationService } from './founder-operator-beta-ac
 import { FounderOperatorBetaGoService } from './founder-operator-beta-go.service';
 import { FounderOwnerInviteLifecycleService } from './founder-owner-invite-lifecycle.service';
 import { SharedTenantProvisioningService } from './shared-tenant-provisioning.service';
+import { TenantAccessWindowService } from './tenant-access-window.service';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, PlatformAdminGuard)
@@ -34,6 +35,7 @@ export class AdminController {
     private readonly founderOperatorBetaGoService: FounderOperatorBetaGoService,
     private readonly founderOperatorBetaActivationService: FounderOperatorBetaActivationService,
     private readonly founderOwnerInviteLifecycleService: FounderOwnerInviteLifecycleService,
+    private readonly tenantAccessWindowService: TenantAccessWindowService,
   ) {}
 
   @Get('overview')
@@ -71,6 +73,15 @@ export class AdminController {
     @Body() body: unknown,
   ) {
     return this.adminService.updateTenantLifecycle(user, tenantId, body ?? {});
+  }
+
+  @Post('tenants/:tenantId/access-window')
+  updateTenantAccessWindow(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Body() body: unknown,
+  ) {
+    return this.tenantAccessWindowService.update(user, tenantId, body ?? {});
   }
 
   @Post('shared-beta/tenants/provision')

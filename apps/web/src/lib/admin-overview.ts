@@ -28,6 +28,23 @@ export type AdminAuditEventsResponse = {
   count: number;
 };
 
+export type TenantAccessState =
+  | "NOT_TIME_BOUND"
+  | "NOT_CONFIGURED"
+  | "NOT_STARTED"
+  | "OPEN_ENDED"
+  | "ACTIVE_UNTIL"
+  | "EXPIRED";
+
+export type TenantAccessSummary = {
+  state: TenantAccessState;
+  manageable: boolean;
+  startsAt: string | null;
+  endsAt: string | null;
+  daysLeft: number | null;
+  executionRevision: number;
+};
+
 export type AdminOverview = {
   totals: {
     tenants: number;
@@ -44,6 +61,8 @@ export type AdminOverview = {
     name: string;
     slug: string;
     status: "ACTIVE" | "SUSPENDED" | "ARCHIVED";
+    customerStage: "INTERNAL" | "PILOT" | "BETA" | "LIVE";
+    access: TenantAccessSummary;
     statusChangedAt: string | null;
     statusReason: string | null;
     usersCount: number;

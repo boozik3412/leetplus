@@ -9,6 +9,9 @@ on:
       - deploy/leetplus-compose/standalone-initial-intro*.mjs
       - deploy/leetplus-compose/standalone-initial-intro.py
       - deploy/leetplus-compose/test_standalone_initial_intro*.py
+      - deploy/leetplus-compose/standalone-intro-transport*.py
+      - deploy/leetplus-compose/standalone-intro-transport*.mjs
+      - deploy/leetplus-compose/test_standalone_intro_transport*.py
       - docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs
       - .github/workflows/standalone-initial-intro-validation.yml
   pull_request:
@@ -16,6 +19,9 @@ on:
       - deploy/leetplus-compose/standalone-initial-intro*.mjs
       - deploy/leetplus-compose/standalone-initial-intro.py
       - deploy/leetplus-compose/test_standalone_initial_intro*.py
+      - deploy/leetplus-compose/standalone-intro-transport*.py
+      - deploy/leetplus-compose/standalone-intro-transport*.mjs
+      - deploy/leetplus-compose/test_standalone_intro_transport*.py
       - docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs
       - .github/workflows/standalone-initial-intro-validation.yml
 
@@ -41,12 +47,15 @@ jobs:
       - name: Validate source schemas and public signatures
         run: |
           python3 -B deploy/leetplus-compose/test_standalone_initial_intro.py
+          python3 -B deploy/leetplus-compose/test_standalone_intro_transport.py
           node --check deploy/leetplus-compose/standalone-initial-intro-entry.mjs
+          node --check deploy/leetplus-compose/standalone-intro-transport-entry.mjs
           node --check docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs
       - name: Exercise remapped disposable Linux root effects
         run: |
           node_dir="$(dirname -- "$(command -v node)")"
           sudo /usr/bin/env -i PATH="$node_dir:/usr/sbin:/usr/bin:/sbin:/bin" LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC /usr/bin/python3 -B deploy/leetplus-compose/test_standalone_initial_intro_native.py
+          sudo /usr/bin/env -i PATH="$node_dir:/usr/sbin:/usr/bin:/sbin:/bin" LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC /usr/bin/python3 -B deploy/leetplus-compose/test_standalone_intro_transport_native.py
 
 # This workflow publishes no admission or deployable artifact and calls no
 # provider/server. All native fixture writes are confined to a new temp root.

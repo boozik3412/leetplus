@@ -26,6 +26,9 @@ if (metadata.contract !== 'LEETPLUS_COMPOSE_BLUE_GREEN_V1' || process.env.RELEAS
 if (mode === 'langame-external-daily-worker' && metadata.externalWorkerCapability !== 'LANGAME_EXTERNAL_SET1_V1') {
   throw new Error('External worker entrypoint requires the admitted application capability');
 }
+// Bonus-ledger and daily Langame workers decrypt integration credentials, so
+// INTEGRATION_ENCRYPTION_KEY belongs to their profile.
+const WORKER_SECRET_KEY = /^(DATABASE_URL|APP_ENCRYPTION_KEY|INTEGRATION_ENCRYPTION_KEY|LANGAME_|GUEST_)/;
 const unsafe = /^(?:NODE_(?:OPTIONS|PATH|EXTRA_CA_CERTS|DEBUG|USE_ENV_PROXY)|LD_|BASH_ENV$|ENV$|HTTP_PROXY$|HTTPS_PROXY$|ALL_PROXY$|NO_PROXY$|SSLKEYLOGFILE$|OPENSSL_CONF$|OPENSSL_MODULES$|GCONV_PATH$|LOCPATH$|PRISMA_.*ENGINE)/i;
 for (const key of Object.keys(process.env)) if (unsafe.test(key)) delete process.env[key];
 if (mode !== 'web') {
@@ -53,7 +56,7 @@ if (mode !== 'web') {
       if (!externalAllowed.has(key)) {
         throw new Error('External worker received a secret outside its dedicated profile');
       }
-    } else if (mode !== 'api' && !/^(DATABASE_URL|APP_ENCRYPTION_KEY|LANGAME_|GUEST_)/.test(key)) {
+    } else if (mode !== 'api' && !WORKER_SECRET_KEY.test(key)) {
       throw new Error('Worker received a secret outside its dedicated profile');
     }
     process.env[key] = value;
@@ -61,6 +64,12 @@ if (mode !== 'web') {
 }
 if (mode === 'web' && Object.keys(process.env).some(k => /SECRET|PASSWORD|DATABASE_URL|ENCRYPTION|TOKEN/.test(k))) {
   throw new Error('Web runtime must not receive API/database secrets');
+}
+// Deploy preflight: validate image metadata and the mounted secret profile
+// without starting the service.
+if (process.env.LEETPLUS_ENTRY_CHECK === '1') {
+  console.log(`runtime entry check passed: ${mode}`);
+  process.exit(0);
 }
 const child = spawn(process.execPath, commands[mode], {
   cwd: mode === 'web' ? '/app/apps/web' : '/app', stdio: 'inherit', env: process.env,

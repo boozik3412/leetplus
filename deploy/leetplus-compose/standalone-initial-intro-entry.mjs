@@ -92,7 +92,7 @@ const planRaw = Buffer.from(canonical(plan));
 const approvalRaw = Buffer.from(canonical(envelope));
 require(planRaw.length <= 65536 && approvalRaw.length <= 65536,
   'Captured plan/approval exceeds bound');
-require(plan.contract === 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_PLAN' &&
+require(plan.contract === 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_PLAN' &&
   plan.operationId === operation && plan.action === 'INTRODUCE_INERT_STANDALONE_TRUST' &&
   SHA.test(plan.introEntrySha256) && SHA.test(plan.introProgramSha256),
   'Wrong initial execution plan');
@@ -101,7 +101,7 @@ require(envelope && Object.keys(envelope).sort().join(',') === 'approval,signatu
 const approval = envelope.approval;
 require(approval && Object.keys(approval).sort().join(',') ===
   ['contract', 'operationId', 'hostIdentitySha256', 'planSha256', 'action', 'issuedAt', 'expiresAt'].sort().join(',') &&
-  approval.contract === 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_APPROVAL' &&
+  approval.contract === 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_APPROVAL' &&
   approval.operationId === operation && approval.hostIdentitySha256 === plan.hostIdentitySha256 &&
   approval.planSha256 === digest(planRaw) && approval.action === plan.action,
 'Initial approval does not bind exact captured plan');
@@ -119,7 +119,7 @@ if (mode !== 'reconcile') {
       Buffer.from(canonical(envelope))) === 0,
   'Historical initial execution lineage differs');
   const intent = record(read(`${audit}/intent.json`, 65536));
-  require(intent.contract === 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_INTENT' &&
+  require(intent.contract === 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_INTENT' &&
     intent.operationId === operation && intent.planSha256 === digest(planRaw) &&
     intent.approvalSha256 === digest(Buffer.from(canonical(envelope))),
   'Historical initial execution intent differs');

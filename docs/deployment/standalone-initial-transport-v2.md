@@ -128,6 +128,41 @@ classified by read-only reconciliation; original staging is never replayed.
 
 ## Failure and recovery
 
+### INTRO V2 terminal marker
+
+The original introduction domains are now `LEETPLUS_STANDALONE_INITIAL_INTRO_V2`
+with `_PLAN`, `_APPROVAL`, `_INTENT` and `_RECEIPT` suffixes. V1 is retained as
+source history and is rejected. The V2 absent map explicitly includes
+`/var/lib/leetplus-compose/standalone-introductions/<INTRO UUID>/receipt.pending.json`.
+After the first four dormant leaves, original apply persists exact canonical
+timely terminal receipt bytes at that marker before the final install-lock leaf.
+It checks the live original approval before the last leaf and final receipt.
+The accepted audit has exactly `plan.json`, `approval.json`, `intent.json`,
+`receipt.pending.json` and `receipt.json`; marker and receipt bytes must match.
+
+Read-only inspection distinguishes intent-only/partial state, contradictory or
+torn records, complete source19/generation/five-destination postimage with a
+timely marker, and exact accepted terminal state. A complete postimage without
+the terminal receipt may use separate `INITIAL_INTRO_FINALIZE_V1` plan, approval
+and intent domains with a new recovery UUID/direct GO. Its exact plan binds
+original plan/approval/intent, marker raw digest and identity, full postimage,
+current host/boot/native lock, audit identity and a closed two-write map. It
+publishes only a new original-UUID flat recovery intent and an O_EXCL copy of
+the marker to the missing audit receipt. It creates no parent or source,
+reinstalls no dormant leaf, and changes no serving state. Torn or foreign
+marker/receipt is HOLD and cannot be replaced.
+
+The independent `standalone-initial-intro-finalize-entry.mjs` authenticates the
+same captured INTRO program under the new root-signed authority before compile.
+The fixed parent-death loader receives a four-byte big-endian code length,
+exact captured code and canonical packet on stdin, with 128 KiB bounds for code
+and packet. Code is streamed and never reopened or passed in a large argv.
+The same gate exposes read-only `--reconcile-finalize <original INTRO UUID>
+<protected gate SHA256>` after lost output. The installed verifier checks a
+present new recovery intent, historical signature/time and complete postimage;
+its eight-key output ABI remains unchanged. Real signing and host execution
+remain separate dispatcher operations after current source/admission evidence.
+
 - Existing request, staging, audit operation or flat intent is not adopted.
 - No-replace publication cannot overwrite a foreign or partial destination.
 - Expired, wrong-domain, altered-code, wrong-root or wrong-preimage approval

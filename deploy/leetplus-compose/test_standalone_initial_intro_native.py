@@ -5,6 +5,7 @@ production path, provider, systemd, Docker or key is touched. Ephemeral Ed25519
 fixture signing remains in the local Node process; only public PEM/signature
 leave that process. Requires the dedicated CI root gate, honestly skips Windows.
 """
+import base64
 import copy
 import gzip
 import importlib.util
@@ -335,6 +336,125 @@ process.argv=['/usr/bin/node',{json.dumps(intro.VERIFIER)},'--source-release',{j
             'plan':plan,'approvalEnvelope':envelope}
         return flat,intent
 
+    def intro_finalize_packet(self):
+        state=self.engine.pending_terminal(self.operation)
+        marker=self.files.p(intro.AUDITS+'/'+self.operation+'/receipt.pending.json').lstat()
+        audit=intro.AUDITS+'/'+self.operation
+        flat=intro.STATE+'/'+self.operation+'.standalone-intro-finalize.intent.json'
+        plan={'contract':intro.FINALIZE_PLAN,'operationId':'55555555-5555-4555-8555-555555555555',
+            'originalOperationId':self.operation,'action':intro.FINALIZE_ACTION,
+            'hostIdentitySha256':self.plan['hostIdentitySha256'],'bootId':self.plan['bootId'],
+            'originalPlanSha256':intro.sha(state['originalPlanRaw']),
+            'originalApprovalSha256':intro.sha(state['originalApprovalRaw']),
+            'originalIntentSha256':intro.sha(state['intentRaw']),
+            'markerSha256':intro.sha(state['markerRaw']),'postimageSha256':state['postimageSha256'],
+            'effects':copy.deepcopy(intro.FINALIZE_EFFECTS)}
+        plan['execution']={'code':{'introFinalizeEntrySha256':intro.sha((HERE/'standalone-initial-intro-finalize-entry.mjs').read_bytes()),
+            'introProgramSha256':intro.sha((HERE/'standalone-initial-intro.py').read_bytes()),
+            'pythonLoaderSha256':intro.sha(intro.FINALIZE_LOADER.encode()),
+            'nodeExecutableSha256':'a'*64,'nodeRealpath':'/usr/bin/node',
+            'pythonExecutableSha256':'b'*64,'pythonRealpath':'/usr/bin/python3'},
+            'invocation':{'interpreter':'/usr/bin/python3','flags':['-I','-B','-c'],
+                'mode':'captured-code-and-packet-stdin','action':'finalize'},
+            'host':{'hostIdentitySha256':plan['hostIdentitySha256'],'bootId':plan['bootId']},
+            'nativeControlLockIdentity':copy.deepcopy(self.plan['nativeControlLockIdentity']),
+            'trustRoot':{'path':intro.ROOT_PEM,'rawSha256':intro.sha(self.public)},
+            'auditDirectoryIdentity':self.identity(audit),
+            'markerIdentity':{'device':marker.st_dev,'inode':marker.st_ino,'bytes':marker.st_size,
+                'uid':marker.st_uid,'gid':marker.st_gid,'mode':stat.S_IMODE(marker.st_mode),'ctimeNs':str(marker.st_ctime_ns)},
+            'destinations':{flat:{'kind':'FLAT_FINALIZE_INTENT','preimage':'ABSENT','uid':0,'gid':0,'mode':0o400},
+                audit+'/receipt.json':{'kind':'EXACT_MARKER_RECEIPT','preimage':'ABSENT',
+                    'sha256':plan['markerSha256'],'bytes':marker.st_size,'uid':0,'gid':0,'mode':0o400}},
+            'limits':{'programBytes':131072,'packetBytes':131072,'lockWaitSeconds':120,'totalSeconds':180},
+            'effects':copy.deepcopy(intro.FINALIZE_EFFECTS)}
+        self.write('/usr/bin/node',b'fixture node tool bytes')
+        self.write('/usr/bin/python3',b'fixture python tool bytes')
+        plan['execution']['code']['nodeExecutableSha256']=intro.sha(b'fixture node tool bytes')
+        plan['execution']['code']['pythonExecutableSha256']=intro.sha(b'fixture python tool bytes')
+        envelope=self.sign(self.approval(plan,intro.FINALIZE_APPROVAL))
+        return {'finalizePlan':plan,'finalizeApprovalEnvelope':envelope}
+
+    def complete_intro_without_receipt(self):
+        terminal=intro.AUDITS+'/'+self.operation+'/receipt.json'
+        class LoseReceipt(intro.NativeFiles):
+            def publish(self,value,raw,mode):
+                if value==terminal:raise OSError('fixture lost terminal INTRO response')
+                return super().publish(value,raw,mode)
+        with self.assertRaises(OSError):self.engine_for(LoseReceipt(self.base)).apply(self.operation)
+        self.assertTrue(self.files.absent(terminal))
+
+    def real_b0_for_gate(self):
+        release=intro.B0_RELEASE
+        inventory=subprocess.run(['git','--no-replace-objects','-C',str(REPO),'ls-tree','-r','--name-only',
+            release,'--','deploy/leetplus-compose'],capture_output=True,check=True).stdout.decode().splitlines()
+        self.assertEqual(len(inventory),99)
+        files={}
+        for name in inventory:
+            raw=subprocess.run(['git','--no-replace-objects','-C',str(REPO),'show',release+':'+name],
+                capture_output=True,check=True).stdout
+            leaf=name.removeprefix('deploy/leetplus-compose/')
+            files[leaf]=intro.sha(raw);self.write('/usr/local/lib/leetplus-compose/'+release+'/'+leaf,raw)
+        manifest={'contract':'LEETPLUS_COMPOSE_BLUE_GREEN_V1_INSTALL','releaseSha':release,
+            'admissionSha256':'8302b0e73e38aecf419f78c469018d7fd1a6f8ce89dde89291b4cca61adaa070','files':files}
+        self.assertEqual(intro.sha(intro.canonical(manifest)),intro.B0_MANIFEST)
+        self.write('/usr/local/lib/leetplus-compose/'+release+'/install-manifest.json',intro.canonical(manifest))
+
+    def intro_gate_loss_case(self,loss,expected):
+        self.real_b0_for_gate();self.complete_intro_without_receipt()
+        packet=self.intro_finalize_packet()
+        encoded=base64.b64encode(gzip.compress((HERE/'standalone-initial-intro.py').read_bytes(),mtime=0)).decode()
+        receipt=intro.AUDITS+'/'+self.operation+'/receipt.json'
+        wrapper=f"""import base64,gzip
+scope={{'__name__':'captured_intro_fixture'}}
+exec(compile(gzip.decompress(base64.b64decode({encoded!r})),'captured-intro-engine','exec'),scope)
+Files=scope['NativeFiles']
+class MappedFiles(Files):
+ def __init__(self):super().__init__({str(self.base)!r})
+ def publish(self,value,raw,mode):
+  if value=={receipt!r} and {loss!r}=='before-receipt':raise OSError('fixture after intent')
+  result=super().publish(value,raw,mode)
+  if value=={receipt!r} and {loss!r}=='after-receipt':raise OSError('fixture after receipt')
+  return result
+Engine=scope['InitialIntro']
+class MappedEngine(Engine):
+ def __init__(self,**kwargs):super().__init__(node={self.node!r},**kwargs)
+scope['NativeFiles']=MappedFiles
+scope['InitialIntro']=MappedEngine
+scope['main']()
+""".encode()
+        plan=packet['finalizePlan'];plan['execution']['code']['introProgramSha256']=intro.sha(wrapper)
+        packet['finalizeApprovalEnvelope']=self.sign(self.approval(plan,intro.FINALIZE_APPROVAL))
+        gate=(HERE/'standalone-initial-intro-finalize-entry.mjs').read_bytes()
+        def run(read_only):
+            argument='--reconcile-finalize' if read_only else '--operation-id'
+            operation=self.operation if read_only else plan['operationId']
+            prelude=f"""import fsFixture from 'node:fs';
+const fixtureRoot={json.dumps(str(self.base))};const remap=p=>typeof p==='string'&&p.startsWith('/')&&!p.startsWith(fixtureRoot+'/')&&p!==fixtureRoot?fixtureRoot+p:p;
+for(const name of ['lstatSync','openSync','readFileSync','readdirSync']){{const orig=fsFixture[name];fsFixture[name]=function(p,...a){{return orig.call(this,remap(p),...a);}};}}
+const originalRealpath=fsFixture.realpathSync.native;fsFixture.realpathSync.native=function(p,...a){{return originalRealpath.call(this,remap(p),...a).slice(fixtureRoot.length);}};
+process.argv=['/usr/bin/node',{json.dumps(argument)},{json.dumps(operation)},{json.dumps(intro.sha(gate))}];
+""".encode()
+            outer={'packet':packet,'introPythonSourceBase64':base64.b64encode(wrapper).decode()}
+            return subprocess.run([self.node,'--input-type=module','-e',(prelude+gate).decode()],
+                input=intro.canonical(outer),capture_output=True,env=intro.CLEAN,timeout=30,check=False)
+        effect=run(False)
+        self.assertNotEqual(effect.returncode,0)
+        self.assertFalse(self.files.absent(intro.STATE+'/'+self.operation+'.standalone-intro-finalize.intent.json'),
+                         effect.stderr.decode())
+        before={str(p.relative_to(self.base)):intro.sha(p.read_bytes()) for p in self.base.rglob('*')
+                if p.is_file() and not p.is_symlink()}
+        readonly=run(True);self.assertEqual(readonly.returncode,0,readonly.stderr.decode())
+        self.assertEqual(json.loads(readonly.stdout)['decision'],expected)
+        after={str(p.relative_to(self.base)):intro.sha(p.read_bytes()) for p in self.base.rglob('*')
+               if p.is_file() and not p.is_symlink()}
+        self.assertEqual(before,after)
+
+    def test_actual_intro_gate_loss_after_intent_is_read_only_hold(self):
+        self.intro_gate_loss_case('before-receipt','INTRO_FINALIZE_INTENT_ONLY_HOLD')
+
+    def test_actual_intro_gate_loss_after_receipt_is_read_only_terminal(self):
+        self.intro_gate_loss_case('after-receipt','EXACT_INTRO_FINALIZE_TERMINAL')
+
     def test_prepare_is_read_only_then_inert_apply_verifies_historically(self):
         before=set(p.relative_to(self.base) for p in self.base.rglob('*'))
         self.assertTrue(self.files.absent(self.request+'/plan.json'))
@@ -403,7 +523,44 @@ process.argv=['/usr/bin/node',{json.dumps(intro.VERIFIER)},'--source-release',{j
         with self.assertRaises(OSError):engine.apply(self.operation)
         self.assertFalse(self.files.absent(intro.STATE+'/'+self.operation+'.standalone-intro.intent.json'))
         with self.assertRaises(ValueError):self.engine.apply(self.operation)
-        self.assertEqual(self.engine.reconcile(self.operation)['decision'],'RECOVERY_REQUIRED')
+        self.assertEqual(self.engine.reconcile(self.operation)['decision'],'INTRO_INTENT_OR_PARTIAL_HOLD')
+
+    def test_loss_before_last_dormant_leaf_has_marker_but_cannot_finalize(self):
+        class LoseLastLeaf(intro.NativeFiles):
+            def publish(self,value,raw,mode):
+                if value==intro.INSTALL_LOCK:raise OSError('fixture last leaf lost')
+                return super().publish(value,raw,mode)
+        with self.assertRaises(OSError):self.engine_for(LoseLastLeaf(self.base)).apply(self.operation)
+        self.assertFalse(self.files.absent(intro.AUDITS+'/'+self.operation+'/receipt.pending.json'))
+        self.assertEqual(self.engine.reconcile(self.operation)['decision'],'INTRO_PARTIAL_OR_CONTRADICTORY_HOLD')
+        with self.assertRaises((ValueError,OSError)):self.intro_finalize_packet()
+
+    def test_complete_intro_missing_terminal_uses_new_finalize_and_verifies(self):
+        self.complete_intro_without_receipt()
+        self.assertEqual(self.engine.reconcile(self.operation)['decision'],
+            'EXACT_INTRO_POSTIMAGE_REQUIRES_SEPARATE_FINALIZE')
+        packet=self.intro_finalize_packet()
+        before={str(p.relative_to(self.base)):intro.sha(p.read_bytes())
+                for p in self.base.rglob('*') if p.is_file() and not p.is_symlink()}
+        result=self.engine.finalize(packet,packet['finalizePlan']['operationId'])
+        self.assertEqual(result['decision'],'INTRO_AUDIT_RECEIPT_FINALIZED_ONLY')
+        verified=self.verify_snapshot();self.assertEqual(verified.returncode,0,verified.stderr.decode())
+        self.assertEqual(self.engine.reconcile_finalize(self.operation)['decision'],'EXACT_INTRO_FINALIZE_TERMINAL')
+        self.assertEqual(len(set(str(p.relative_to(self.base)) for p in self.base.rglob('*')
+                                 if p.is_file() and not p.is_symlink())-set(before)),2)
+        for name,digest in before.items():self.assertEqual(intro.sha((self.base/name).read_bytes()),digest)
+
+    def test_torn_marker_or_foreign_receipt_has_no_finalize_write(self):
+        self.complete_intro_without_receipt();packet=self.intro_finalize_packet()
+        marker=intro.AUDITS+'/'+self.operation+'/receipt.pending.json'
+        old=self.files.read(marker)
+        self.files.p(marker).chmod(0o600);self.write(marker,b'{}\n')
+        with self.assertRaises(ValueError):self.engine.finalize(packet,packet['finalizePlan']['operationId'])
+        self.assertTrue(self.files.absent(intro.STATE+'/'+self.operation+'.standalone-intro-finalize.intent.json'))
+        self.files.p(marker).chmod(0o600);self.write(marker,old)
+        self.write(intro.AUDITS+'/'+self.operation+'/receipt.json',b'{}\n')
+        with self.assertRaises(ValueError):self.engine.finalize(packet,packet['finalizePlan']['operationId'])
+        self.assertTrue(self.files.absent(intro.STATE+'/'+self.operation+'.standalone-intro-finalize.intent.json'))
 
     def test_approval_expires_after_lock_before_first_intent(self):
         valid=intro.utc_now();calls=iter((valid,valid,self.expires))

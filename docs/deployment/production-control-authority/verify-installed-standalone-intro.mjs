@@ -6,11 +6,11 @@ import process from 'node:process';
 // This verifier is an independently admitted, read-only initial trust boundary.
 // It has no local imports so the V2 wrapper can execute captured verified bytes.
 const CONTRACT = 'LEETPLUS_STANDALONE_INITIAL_INTRO_VERIFICATION_V1';
-const PLAN = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_PLAN';
-const APPROVAL = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_APPROVAL';
-const INTENT = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_INTENT';
+const PLAN = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_PLAN';
+const APPROVAL = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_APPROVAL';
+const INTENT = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_INTENT';
 const GENERATION = 'LEETPLUS_STANDALONE_INERT_GENERATION_V1_RECEIPT';
-const RECEIPT = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_RECEIPT';
+const RECEIPT = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_RECEIPT';
 const TRANSPORT = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_RECEIPT';
 const TRANSPORT_PLAN = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_PLAN';
 const TRANSPORT_APPROVAL = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_APPROVAL';
@@ -648,6 +648,78 @@ function verifyTransport(plan, rawReceipt, receipt) {
   verifyTransportFinalize(plan.introTransportOperationId, transportPlan.value,
     transportPlan.raw, envelope.raw, intent.raw, rawReceipt, request, audit, pem);
 }
+function verifyIntroFinalize(original,originalRaw,approvalRaw,intentRaw,receiptRaw,postimage) {
+  const flat=`/var/lib/leetplus-compose/${original.operationId}.standalone-intro-finalize.intent.json`;
+  try{fs.lstatSync(flat);}catch(error){if(error.code==='ENOENT')return;throw error;}
+  const body=exactJson(readRegular(flat,131072,0o400),'INTRO finalize intent');
+  sameKeys(body,['contract','operationId','originalOperationId','planSha256','approvalSha256',
+    'markerSha256','authorizedAt','plan','approvalEnvelope'],'INTRO finalize intent');
+  const p=body.plan,e=p.execution,envelope=body.approvalEnvelope;
+  sameKeys(p,['contract','operationId','originalOperationId','action','hostIdentitySha256','bootId',
+    'originalPlanSha256','originalApprovalSha256','originalIntentSha256','markerSha256',
+    'postimageSha256','execution','effects'],'INTRO finalize plan');
+  require(body.contract==='LEETPLUS_STANDALONE_INITIAL_INTRO_FINALIZE_V1_INTENT'&&
+    p.contract==='LEETPLUS_STANDALONE_INITIAL_INTRO_FINALIZE_V1_PLAN'&&
+    p.action==='FINALIZE_EXACT_INITIAL_INTRO_AUDIT_RECEIPT_ONLY'&&
+    UUID.test(p.operationId)&&UUID.test(p.bootId)&&p.operationId===body.operationId&&
+    p.operationId!==original.operationId&&p.operationId!=='9afc7218-4757-4f44-87e1-6096706bad44'&&
+    p.originalOperationId===body.originalOperationId&&p.originalOperationId===original.operationId&&
+    p.hostIdentitySha256===original.hostIdentitySha256&&
+    p.originalPlanSha256===digest(originalRaw)&&p.originalApprovalSha256===digest(approvalRaw)&&
+    p.originalIntentSha256===digest(intentRaw)&&p.markerSha256===body.markerSha256&&
+    p.markerSha256===digest(receiptRaw)&&p.postimageSha256===digest(Buffer.from(canonical(postimage)))&&
+    body.planSha256===digest(Buffer.from(canonical(p)))&&body.approvalSha256===digest(Buffer.from(canonical(envelope))),
+    'INTRO finalize original/new/full postimage binding differs');
+  sameKeys(e,['code','invocation','host','nativeControlLockIdentity','trustRoot','auditDirectoryIdentity',
+    'markerIdentity','destinations','limits','effects'],'INTRO finalize execution');
+  const effects={introAuditReceiptFinalizeOnly:true,sourceMutation:false,dormantEntryMutation:false,
+    targetExecution:false,controllerPointerMutation:false,applicationRestart:false,systemdUnitMutation:false,
+    daemonReload:false,dataMutation:false,workerGrantMutation:false,timerMutation:false,providerEffect:false,
+    privateKeyTransport:false};
+  for(const value of [p.effects,e.effects]){sameKeys(value,Object.keys(effects),'INTRO finalize effects');
+    require(Object.entries(effects).every(([k,v])=>value[k]===v),'INTRO finalize effect differs');}
+  const pem=readRegular(DEPLOYMENT_ROOT,4096);
+  require(JSON.stringify(e.host)===JSON.stringify({hostIdentitySha256:p.hostIdentitySha256,bootId:p.bootId})&&
+    JSON.stringify(e.nativeControlLockIdentity)===JSON.stringify(original.nativeControlLockIdentity)&&
+    JSON.stringify(e.trustRoot)===JSON.stringify({path:DEPLOYMENT_ROOT,rawSha256:digest(pem)})&&
+    JSON.stringify(e.invocation)===JSON.stringify({interpreter:'/usr/bin/python3',flags:['-I','-B','-c'],
+      mode:'captured-code-and-packet-stdin',action:'finalize'})&&
+    JSON.stringify(e.limits)===JSON.stringify({programBytes:131072,packetBytes:131072,
+      lockWaitSeconds:120,totalSeconds:180}), 'INTRO finalize invocation/root/limits differ');
+  sameKeys(e.code,['introFinalizeEntrySha256','introProgramSha256','pythonLoaderSha256','nodeExecutableSha256',
+    'nodeRealpath','pythonExecutableSha256','pythonRealpath'],'INTRO finalize code');
+  const loader="import ctypes,hashlib,os,signal,sys; parent=int(sys.argv.pop(1)); assert ctypes.CDLL(None,use_errno=True).prctl(1,signal.SIGKILL,0,0,0)==0 and os.getppid()==parent; size=int.from_bytes(sys.stdin.buffer.read(4),'big'); assert 0<size<=131072; source=sys.stdin.buffer.read(size); expected=sys.argv.pop(1); assert len(source)==size and hashlib.sha256(source).hexdigest()==expected; sys.argv[0]='captured-intro-finalize'; exec(compile(source,'captured-intro-finalize','exec'),{'__name__':'__main__'})";
+  require(['introFinalizeEntrySha256','introProgramSha256','pythonLoaderSha256','nodeExecutableSha256',
+    'pythonExecutableSha256'].every(k=>SHA.test(e.code[k]??''))&&
+    e.code.pythonLoaderSha256===digest(Buffer.from(loader))&&e.code.nodeRealpath.startsWith('/usr/bin/node')&&
+    e.code.pythonRealpath.startsWith('/usr/bin/python3'),'INTRO finalize captured code closure differs');
+  const audit=`${AUDITS}/${original.operationId}`,marker=`${audit}/receipt.pending.json`,receipt=`${audit}/receipt.json`;
+  sameKeys(e.destinations,[flat,receipt],'INTRO finalize two-write destinations');
+  require(JSON.stringify(e.destinations[flat])===JSON.stringify({kind:'FLAT_FINALIZE_INTENT',preimage:'ABSENT',
+    uid:0,gid:0,mode:0o400})&&JSON.stringify(e.destinations[receipt])===JSON.stringify({kind:'EXACT_MARKER_RECEIPT',
+      preimage:'ABSENT',sha256:digest(receiptRaw),bytes:receiptRaw.length,uid:0,gid:0,mode:0o400}),
+      'INTRO finalize exact two-write map differs');
+  const dir=fs.lstatSync(audit,{bigint:true}),ms=fs.lstatSync(marker,{bigint:true});
+  require(JSON.stringify(e.auditDirectoryIdentity)===JSON.stringify({device:Number(dir.dev),inode:Number(dir.ino),
+    uid:Number(dir.uid),gid:Number(dir.gid),mode:Number(dir.mode&0o7777n)})&&
+    JSON.stringify(e.markerIdentity)===JSON.stringify({device:Number(ms.dev),inode:Number(ms.ino),bytes:Number(ms.size),
+      uid:Number(ms.uid),gid:Number(ms.gid),mode:Number(ms.mode&0o7777n),ctimeNs:String(ms.ctimeNs)})&&
+    Buffer.compare(readRegular(marker,65536,0o400),receiptRaw)===0,
+    'INTRO finalize exact retained marker/directory differs');
+  sameKeys(envelope,['approval','signature'],'INTRO finalize envelope');
+  const a=envelope.approval;
+  sameKeys(a,['contract','operationId','hostIdentitySha256','planSha256','action','issuedAt','expiresAt'],
+    'INTRO finalize approval');
+  const start=canonicalTime(a.issuedAt),end=canonicalTime(a.expiresAt),at=canonicalTime(body.authorizedAt);
+  require(a.contract==='LEETPLUS_STANDALONE_INITIAL_INTRO_FINALIZE_V1_APPROVAL'&&a.operationId===p.operationId&&
+    a.action===p.action&&a.hostIdentitySha256===p.hostIdentitySha256&&a.planSha256===body.planSha256&&
+    start<=at&&at<end&&end-start>0&&end-start<=1800000&&
+    canonicalTime(exactJson(receiptRaw,'INTRO marker').acceptedAt)<=at&&
+    /^[A-Za-z0-9+/]{86}==$/u.test(envelope.signature), 'INTRO finalize timely approval differs');
+  const key=crypto.createPublicKey(pem);
+  require(key.asymmetricKeyType==='ed25519'&&crypto.verify(null,Buffer.from(canonical(a)),key,
+    Buffer.from(envelope.signature,'base64')),'INTRO finalize public signature differs');
+}
 function verifyIntro(release) {
   require(RELEASE.test(release), 'Expected one exact source release');
   const generationRoot = `${GENERATIONS}/${release}`;
@@ -672,7 +744,7 @@ function verifyIntro(release) {
       target === value || target.startsWith(`${value}/`)), 'Nested installed authority mount');
   }
   const auditNames = fs.readdirSync(audit).sort(compareBytes);
-  require(auditNames.join('\0') === ['approval.json', 'intent.json', 'plan.json', 'receipt.json'].join('\0'),
+  require(auditNames.join('\0') === ['approval.json', 'intent.json', 'plan.json', 'receipt.json','receipt.pending.json'].join('\0'),
     'Intro audit directory has foreign entry');
   const plan = readRecord(`${audit}/plan.json`, 'intro plan');
   const envelope = readRecord(`${audit}/approval.json`, 'intro approval');
@@ -683,6 +755,8 @@ function verifyIntro(release) {
   require(Buffer.compare(preEffectIntent.raw, intent.raw) === 0,
     'Pre-effect intro intent differs from audit intent');
   const receipt = readRecord(`${audit}/receipt.json`, 'intro receipt');
+  require(Buffer.compare(receipt.raw,readRegular(`${audit}/receipt.pending.json`,65536,0o400))===0,
+    'Intro terminal receipt differs from timely durable marker');
   sameKeys(plan.value, PLAN_KEYS, 'intro plan');
   require(plan.value.contract === PLAN && plan.value.action === 'INTRODUCE_INERT_STANDALONE_TRUST' &&
     plan.value.sourceRelease === release && plan.value.operationId === generationPre.value.operationId &&
@@ -719,6 +793,12 @@ function verifyIntro(release) {
     [plan.value.fullRunAttempt, plan.value.sourceProducerRunAttempt].every((value) =>
       Number.isSafeInteger(value) && value > 0),
   'Intro plan producer/manifest/host identity differs');
+  const absent=[...EXPECTED_DESTINATIONS,generationRoot,audit,
+    `/var/lib/leetplus-compose/${plan.value.operationId}.standalone-intro.intent.json`,
+    `${GENERATIONS}/.intro-${plan.value.operationId}.pending`,`${audit}/receipt.pending.json`];
+  sameKeys(plan.value.destinationPreimages,absent,'signed INTRO V2 absent destinations');
+  require(absent.every(name=>plan.value.destinationPreimages[name]==='ABSENT'),
+    'INTRO V2 marker/effect preimage differs');
   sameKeys(plan.value.directoryPreimages, Object.keys(PARENT_MODES), 'signed parent directory preimages');
   const installedParents = {};
   for (const [directory, mode] of Object.entries(PARENT_MODES)) {
@@ -835,6 +915,12 @@ function verifyIntro(release) {
   const verifierSourceSha = digest(readRegular(VERIFIER, MAX_LEAF, 0o555));
   require(verifierSourceSha === generation.verifierSourceSha,
     'Running verifier source differs from signed generation');
+  const sourceFiles=Object.fromEntries([...SOURCE_FILES,'SHA256SUMS'].sort(compareBytes)
+    .map(name=>[name,digest(readRegular(`${generation.root}/payload/${name}`,MAX_LEAF,0o400))]));
+  verifyIntroFinalize(plan.value,plan.raw,envelope.raw,intent.raw,receipt.raw,{
+    generationReceiptSha256:digest(generation.generation.raw),sourceFiles,
+    destinations:sortedInstalled,parents:parentMap,anchors:anchorMap,
+    predecessorPostimageSha256:receipt.value.predecessorPostimageSha256,markerSha256:digest(receipt.raw)});
   return {
     contract: CONTRACT, decision: 'PASS', sourceRelease: release,
     introPlanSha256: digest(plan.raw), introReceiptSha256: digest(receipt.raw),

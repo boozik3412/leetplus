@@ -7,6 +7,7 @@ on:
       - codex/standalone-initial-intro-20260929
       - codex/standalone-first-transport-20260929
       - codex/standalone-transport-recovery-20260929
+      - codex/standalone-intro-finalize-20260929
     paths:
       - deploy/leetplus-compose/standalone-initial-intro*.mjs
       - deploy/leetplus-compose/standalone-initial-intro.py
@@ -58,6 +59,8 @@ jobs:
           printf '%s\n' "$?" >"$evidence/transport-pure.exit"
           node --check deploy/leetplus-compose/standalone-initial-intro-entry.mjs >"$evidence/intro-entry.stdout" 2>"$evidence/intro-entry.stderr"
           printf '%s\n' "$?" >"$evidence/intro-entry.exit"
+          node --check deploy/leetplus-compose/standalone-initial-intro-finalize-entry.mjs >"$evidence/intro-finalize-entry.stdout" 2>"$evidence/intro-finalize-entry.stderr"
+          printf '%s\n' "$?" >"$evidence/intro-finalize-entry.exit"
           node --check deploy/leetplus-compose/standalone-intro-transport-entry.mjs >"$evidence/transport-entry.stdout" 2>"$evidence/transport-entry.stderr"
           printf '%s\n' "$?" >"$evidence/transport-entry.exit"
           node --check deploy/leetplus-compose/standalone-intro-transport-finalize-entry.mjs >"$evidence/transport-finalize-entry.stdout" 2>"$evidence/transport-finalize-entry.stderr"

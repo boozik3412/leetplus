@@ -9,6 +9,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from inventory import admitted_control, digest
 from host_observer import captured_predecessor
@@ -51,13 +52,21 @@ class CapturedPredecessorTests(unittest.TestCase):
                 module = captured_predecessor(old, 'frozen_predecessor_fixture')
                 self.assertTrue(callable(module.snapshot))
                 self.assertTrue(callable(module.verify_current_controller_authority))
-                if os.name == 'posix' and Path('/usr/bin/node').is_file():
+                node = os.environ.get('BOOTSTRAP_TEST_NODE') or shutil.which('node')
+                if os.name == 'posix' and node:
                     runtime_url = (old['root'] / 'control-handoff-runtime.mjs').as_uri()
                     script = ("import fs from 'node:fs';import {validateAcceptedApplicationSnapshot} from '" +
                               runtime_url + "';JSON.parse(fs.readFileSync(0,'utf8'));" +
                               "console.log(typeof validateAcceptedApplicationSnapshot);")
-                    self.assertEqual(module.run(['/usr/bin/node', '--input-type=module', '-e', script],
-                                                b'{}\n'), b'function')
+                    original_popen = subprocess.Popen
+
+                    def fixture_popen(args, **kwargs):
+                        self.assertEqual(args[0], '/usr/bin/node')
+                        return original_popen([node, *args[1:]], **kwargs)
+
+                    with patch.object(module.subprocess, 'Popen', side_effect=fixture_popen):
+                        self.assertEqual(module.run(['/usr/bin/node', '--input-type=module', '-e', script],
+                                                    b'{}\n'), b'function')
 
     def test_verified_executor_buffer_survives_path_replacement(self):
         root = Path(tempfile.mkdtemp(prefix='leetplus-captured-predecessor-'))

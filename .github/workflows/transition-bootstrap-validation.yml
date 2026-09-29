@@ -78,7 +78,7 @@ jobs:
           sudo python3 -B deploy/transition-bootstrap/test_native_boundary.py >"$evidence/native.stdout" 2>"$evidence/native.stderr"
           native_exit=$?
           printf '%s\n' "$native_exit" >"$evidence/native.exit"
-          sudo python3 -B deploy/transition-bootstrap/test_inventory.py >"$evidence/inventory.stdout" 2>"$evidence/inventory.stderr"
+          sudo env BOOTSTRAP_TEST_NODE="$test_node" python3 -B deploy/transition-bootstrap/test_inventory.py >"$evidence/inventory.stdout" 2>"$evidence/inventory.stderr"
           inventory_exit=$?
           printf '%s\n' "$inventory_exit" >"$evidence/inventory.exit"
           sudo env BOOTSTRAP_TEST_NODE="$test_node" python3 -B deploy/transition-bootstrap/test_canonical_lineage.py >"$evidence/lineage.stdout" 2>"$evidence/lineage.stderr"

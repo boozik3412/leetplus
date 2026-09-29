@@ -19,6 +19,7 @@ import tarfile
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -360,6 +361,12 @@ process.argv=['/usr/bin/node',{json.dumps(intro.VERIFIER)},'--source-release',{j
         self.assertFalse(self.files.absent(intro.STATE+'/'+self.operation+'.standalone-intro.intent.json'))
         with self.assertRaises(ValueError):self.engine.apply(self.operation)
         self.assertEqual(self.engine.reconcile(self.operation)['decision'],'RECOVERY_REQUIRED')
+
+    def test_approval_expires_after_lock_before_first_intent(self):
+        valid=intro.utc_now();calls=iter((valid,valid,self.expires))
+        with patch.object(intro,'utc_now',side_effect=lambda:next(calls)):
+            with self.assertRaises(ValueError):self.engine.apply(self.operation)
+        self.assertTrue(self.files.absent(intro.STATE+'/'+self.operation+'.standalone-intro.intent.json'))
 
     def test_rename_noreplace_and_changed_helper_or_flat_intent_rejected(self):
         self.engine.apply(self.operation)

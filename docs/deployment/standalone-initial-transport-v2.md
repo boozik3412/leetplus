@@ -118,8 +118,11 @@ separate and unchanged.
 The terminal receipt binds raw plan/approval/intent, the pre-effect flat intent,
 entire signed execution object, source+Compose producer metadata, protected
 entry/program inode/size/mode and complete source/parent/predecessor postimages.
-It is written to the request and then the audit root. Any loss before both exact
-terminal publications is `RECOVERY_REQUIRED`; reconciliation is read-only.
+It is written to the request and then the audit root. An approval is checked
+again against the exact `authorizedAt` sampled after the lock wait and the last
+signature child, immediately before the first durable flat intent. INTRO has
+the same timestamp fence. Any loss before both exact terminal publications is
+classified by read-only reconciliation; original staging is never replayed.
 
 ## Failure and recovery
 
@@ -129,10 +132,31 @@ terminal publications is `RECOVERY_REQUIRED`; reconciliation is read-only.
   stops before intent.
 - Lost response, torn write, staging residue or one missing terminal receipt
   stops all further phases. Do not call stage again to discover status.
-- Read-only reconcile compares the original signed timely chain and every
-  retained postimage. It performs no receipt repair, deletion or forward effect.
+- Read-only reconcile distinguishes a partial request, contradictory bytes, a
+  complete request receipt with missing audit receipt, and two exact terminal
+  receipts. It compares the original signed timely chain and every retained
+  postimage. It performs no receipt repair, deletion or forward effect.
+- The complete-request/missing-audit case may use a **separate** approved
+  `TRANSPORT_FINALIZE_V1` operation with a new UUID and exact current code,
+  host/boot, root, native lock, request/audit directory identities and original
+  plan/approval/intent/request receipt digests. Its independent captured Node
+  gate is `standalone-intro-transport-finalize-entry.mjs`. That gate requires
+  pre-first-instruction dispatcher authentication, a new root signature and
+  fixed `node -e -- --operation-id <new UUID> <gate SHA256>` invocation. It
+  receives canonical `{ "packet": { "finalizePlan": ..., "finalizeApprovalEnvelope": ... },
+  "transportPythonSourceBase64": ... }` on stdin.
+- The finalize map permits exactly two no-replace writes: a durable root-private
+  flat `FINALIZE_V1_INTENT`, keyed by the **original** transport UUID so no
+  second recovery UUID can bypass an uncertain attempt, followed by the exact
+  original request receipt bytes at the one missing original audit path.
+  It creates no parent, request/source leaf, controller effect or replacement.
+  Its fresh approval is checked against the new `authorizedAt` immediately
+  before that first write and again before audit publication. Lost output or a
+  crash after the new intent is classified with read-only `reconcile-finalize`,
+  never by another finalize run.
 - Any cleanup/quarantine/recovery is a new exact dispatcher operation with its
-  own reviewed map, baseline and direct GO. Historical UUID9afc is excluded.
+  own reviewed map, baseline and direct GO. The finalize operation also
+  requires that separate direct GO. Historical UUID9afc is excluded.
 
 ## Verification and limits
 

@@ -120,6 +120,41 @@ class TransportPlan(unittest.TestCase):
     def test_unknown_preimage_or_request_path_rejected(self):
         plan=plan_fixture();plan['execution']['leafPreimages']['/etc/systemd/system/foreign.service']='ABSENT'
         with self.assertRaises(ValueError):transport.validate_plan(plan)
+
+    def test_finalize_has_distinct_closed_two_write_scope(self):
+        original=plan_fixture();old=original['operationId']
+        recovery='44444444-4444-4444-8444-444444444444'
+        request=str(Path(original['snapshotPath']).parent)
+        audit=transport.AUDITS+'/'+old
+        code=copy.deepcopy(original['execution']['code'])
+        code['finalizeEntrySha256']=code.pop('transportEntrySha256')
+        plan={'contract':transport.FINALIZE_PLAN,'operationId':recovery,
+            'action':transport.FINALIZE_ACTION,'hostIdentitySha256':original['hostIdentitySha256'],
+            'bootId':original['execution']['host']['bootId'],'originalOperationId':old,
+            'originalPlanSha256':'a'*64,'originalApprovalSha256':'b'*64,
+            'originalIntentSha256':'c'*64,'requestReceiptSha256':'d'*64,
+            'effects':copy.deepcopy(transport.FINALIZE_EFFECTS),
+            'execution':{'code':code,'invocation':{'interpreter':'/usr/bin/python3',
+                'flags':['-I','-B','-c'],'mode':'memory-captured-python-c','action':'finalize-reconcile'},
+                'host':copy.deepcopy(original['execution']['host']),
+                'nativeControlLockIdentity':copy.deepcopy(original['execution']['nativeControlLockIdentity']),
+                'trustRoot':copy.deepcopy(original['execution']['trustRoot']),
+                'auditDirectoryIdentity':{'device':1,'inode':11,'uid':0,'gid':0,'mode':0o700},
+                'requestDirectoryIdentity':{'device':1,'inode':12,'uid':0,'gid':0,'mode':0o700},
+                'destinations':{
+                    transport.STATE+'/'+old+'.standalone-transport-finalize.intent.json':
+                        {'kind':'FLAT_FINALIZE_INTENT','preimage':'ABSENT','uid':0,'gid':0,'mode':0o400},
+                    audit+'/receipt.json':{'kind':'ORIGINAL_AUDIT_RECEIPT','preimage':'ABSENT',
+                        'sha256':'d'*64,'bytes':123,'uid':0,'gid':0,'mode':0o400}},
+                'limits':copy.deepcopy(transport.FINALIZE_LIMITS),
+                'effects':copy.deepcopy(transport.FINALIZE_EFFECTS)}}
+        self.assertEqual(transport.validate_finalize_plan(plan),plan)
+        for change in (lambda p:p['execution']['destinations'].__setitem__(request+'/source.tar.gz',{}),
+                       lambda p:p['effects'].__setitem__('applicationRestart',True),
+                       lambda p:p['execution']['invocation'].__setitem__('action','stage'),
+                       lambda p:p['execution']['code'].__setitem__('transportEntrySha256','1'*64)):
+            forged=copy.deepcopy(plan);change(forged)
+            with self.assertRaises(ValueError):transport.validate_finalize_plan(forged)
         plan=plan_fixture();plan['snapshotPath']='/tmp/intro-program.py'
         with self.assertRaises(ValueError):transport.validate_plan(plan)
 

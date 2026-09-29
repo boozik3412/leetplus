@@ -1,0 +1,14 @@
+[Unit]
+Description=Start LeetPlus blue/green slots after the network fence (lp)
+Requires=docker.service leetplus-compose-network.service
+After=docker.service leetplus-compose-network.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lp boot
+RemainAfterExit=yes
+TimeoutStartSec=600
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

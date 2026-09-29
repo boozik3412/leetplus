@@ -1,0 +1,11 @@
+[Unit]
+Description=LeetPlus worker %i on the serving release (lp)
+Requires=docker.service leetplus-compose-network.service
+After=docker.service leetplus-compose-network.service
+
+[Service]
+Type=oneshot
+# Same lock file as the legacy controller, so old and new runners never overlap.
+ExecStart=/usr/bin/flock --exclusive --nonblock /var/lib/leetplus-compose/%i.lock /usr/local/sbin/lp worker %i
+TimeoutStartSec=2800
+UMask=0077

@@ -1,0 +1,10 @@
+[Unit]
+Description=LeetPlus bonus-ledger worker (lp)
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=30s
+Unit=lp-worker@bonus-ledger-worker.service
+
+[Install]
+WantedBy=timers.target

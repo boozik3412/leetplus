@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -21,15 +22,56 @@ class CapturedPredecessorTests(unittest.TestCase):
         root = Path(tempfile.mkdtemp(prefix='leetplus-captured-predecessor-'))
         try:
             executor = root / 'control_handoff.py'
-            trusted = b'VALUE = "trusted"\n'
+            trusted = b'VALUE = "trusted"\ndef run(args, data=None, timeout=25):\n    return args\n'
             executor.write_bytes(trusted)
-            old = {'root': root, 'files': {'control_handoff.py': digest(trusted)},
-                   'capturedExecutor': trusted}
+            authority = b"import {VALUE} from './contract.mjs';export {VALUE};\n"
+            contract = b'export const VALUE="trusted";\n'
+            old = {'root': root, 'files': {'control_handoff.py': digest(trusted),
+                   'control-handoff-authority.mjs': digest(authority), 'contract.mjs': digest(contract)},
+                   'capturedExecutor': trusted, 'capturedAuthority': authority, 'capturedContract': contract}
             executor.write_bytes(b'raise RuntimeError("foreign source executed")\n')
             module = captured_predecessor(old, 'trusted_predecessor_fixture')
             self.assertEqual(module.VALUE, 'trusted')
         finally:
             shutil.rmtree(root)
+
+    @unittest.skipUnless(shutil.which('node'), 'Captured authority fixture requires Node')
+    def test_nonfast_forward_rollback_recovery_use_captured_authority_closure(self):
+        with tempfile.TemporaryDirectory(prefix='leetplus-captured-authority-') as directory:
+            root = Path(directory).resolve()
+            node = shutil.which('node')
+            authority_url = (root / 'control-handoff-authority.mjs').as_uri()
+            trusted = ("import subprocess\n"
+                "def run(args, data=None, timeout=25):\n"
+                f"    result=subprocess.run([{node!r},*args[1:]],input=data,capture_output=True,timeout=timeout)\n"
+                "    if result.returncode: raise ValueError(result.stderr.decode())\n"
+                "    return result.stdout.strip()\n"
+                "def invoke(name):\n"
+                f"    script=\"import {{\"+name+\"}} from '{authority_url}';\"+name+\"();console.log('PASS');\"\n"
+                "    return run(['/usr/bin/node','--input-type=module','-e',script])\n"
+                "def validate_authority(): return invoke('validateControlHandoffAuthority')\n"
+                "def validate_rollback(): return invoke('validateControlRollbackApproval')\n"
+                "def validate_recovery(): return invoke('validateControlHandoffRecoveryAuthority')\n"
+                "def verify_current_controller_authority(current):\n"
+                "    if current['activePlanControlSha256'] != 'fast': return validate_authority()\n").encode()
+            authority = ("import {VALUE} from './contract.mjs';\n"
+                "const check=()=>{if(VALUE!=='captured')throw Error('foreign dependency');};\n"
+                "export const validateControlHandoffAuthority=check;\n"
+                "export const validateControlRollbackApproval=check;\n"
+                "export const validateControlHandoffRecoveryAuthority=check;\n").encode()
+            contract = b"export const VALUE='captured';\n"
+            files = {'control_handoff.py': trusted, 'control-handoff-authority.mjs': authority,
+                     'contract.mjs': contract}
+            old = {'root': root, 'files': {name: digest(raw) for name, raw in files.items()},
+                   'capturedExecutor': trusted, 'capturedAuthority': authority,
+                   'capturedContract': contract}
+            for name in files:
+                (root / name).write_bytes(b'raise Error("foreign source pathname")\n')
+            module = captured_predecessor(old, 'captured_authority_fixture')
+            self.assertEqual(module.verify_current_controller_authority(
+                {'activePlanControlSha256': 'nonfast'}), b'PASS')
+            self.assertEqual(module.validate_rollback(), b'PASS')
+            self.assertEqual(module.validate_recovery(), b'PASS')
 
 
 @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'getuid') and os.getuid() == 0,
@@ -42,7 +84,9 @@ class InstalledInventoryTests(unittest.TestCase):
         self.inbox = self.root / 'inbox'
         for directory in (self.controls, self.inbox, self.controls / SHA, self.inbox / SHA):
             directory.mkdir(mode=0o700)
-        self.leaves = {'control.sh': b'#!/bin/sh\n', 'control_handoff.py': b'print("source only")\n'}
+        self.leaves = {'control.sh': b'#!/bin/sh\n', 'control_handoff.py': b'print("source only")\n',
+                       'control-handoff-authority.mjs': b"import {VALUE} from './contract.mjs';\n",
+                       'contract.mjs': b'export const VALUE="fixture";\n'}
         stream = io.BytesIO()
         with tarfile.open(fileobj=stream, mode='w:gz') as archive:
             for name, data in self.leaves.items():

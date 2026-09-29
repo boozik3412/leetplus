@@ -5,6 +5,7 @@ installer. This module never imports or executes staged target code. The only
 controller import is the already accepted, byte-attested serving predecessor.
 """
 import types
+import base64
 import json
 import os
 import re
@@ -22,7 +23,32 @@ def captured_predecessor(old, name):
             'Exact captured predecessor executor required')
     module = types.ModuleType(name)
     module.__file__ = str(old['root'] / 'control_handoff.py')
+    authority = old.get('capturedAuthority')
+    contract = old.get('capturedContract')
+    require(isinstance(authority, bytes) and isinstance(contract, bytes) and
+            digest(authority) == old['files'].get('control-handoff-authority.mjs') and
+            digest(contract) == old['files'].get('contract.mjs'),
+            'Captured predecessor Node authority closure required')
+    marker = b"'./contract.mjs'"
+    require(authority.count(marker) == 1, 'Closed predecessor authority dependency differs')
+    contract_url = 'data:text/javascript;base64,' + base64.b64encode(contract).decode('ascii')
+    authority = authority.replace(marker, ("'" + contract_url + "'").encode())
+    authority_url = 'data:text/javascript;base64,' + base64.b64encode(authority).decode('ascii')
     exec(compile(raw, module.__file__, 'exec'), module.__dict__)
+    original_run = module.run
+    original_url = (old['root'] / 'control-handoff-authority.mjs').as_uri()
+
+    def captured_run(args, data=None, timeout=25):
+        if args[:3] == ['/usr/bin/node', '--input-type=module', '-e']:
+            require(len(args) == 4 and isinstance(args[3], str) and
+                    args[3].count("'" + original_url + "'") == 1,
+                    'Unknown predecessor Node code import')
+            script = args[3].replace("'" + original_url + "'", "'" + authority_url + "'")
+            require(len(script.encode()) <= 120000, 'Captured predecessor Node script exceeds argv bound')
+            args = [*args[:3], script]
+        return original_run(args, data, timeout)
+
+    module.run = captured_run
     return module
 
 A_RELEASE = 'b0cbf3a4f302b299762fa055f3bffe0376a91182'
@@ -251,8 +277,9 @@ class EnrolledObserver:
         module = captured_predecessor(old, 'accepted_native_context')
         snapshot = module.snapshot(old['root'])
         previous = secure_read(module.POINTER, 8192) if module.POINTER.exists() or module.POINTER.is_symlink() else None
-        return {'old': {key: value for key, value in old.items() if key not in ('root', 'capturedExecutor')},
-                'target': {key: value for key, value in target.items() if key not in ('root', 'capturedExecutor')},
+        internal = {'root', 'capturedExecutor', 'capturedAuthority', 'capturedContract'}
+        return {'old': {key: value for key, value in old.items() if key not in internal},
+                'target': {key: value for key, value in target.items() if key not in internal},
                 'snapshot': snapshot, 'timers': {unit: module.systemd(unit) for unit in module.TIMERS},
                 'hostSha': digest(secure_read('/etc/machine-id', 65536).strip()),
                 'networkUnitSha': digest(secure_read(module.UNIT, 2 * 1024 * 1024)),

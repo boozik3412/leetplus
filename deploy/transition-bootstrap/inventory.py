@@ -87,9 +87,12 @@ def admitted_control(*, controls_root, inbox_root, release_sha):
     require(digest(archive) == admission['controlArchiveSha256'] and
             archive_map(archive) == manifest['files'],
             'Installed privileged file map differs from admitted archive')
-    executor = secure_read(control / 'control_handoff.py', 2 * 1024 * 1024)
-    require(digest(executor) == manifest['files'].get('control_handoff.py'),
-            'Captured predecessor executor differs from admitted manifest')
+    captured = {}
+    for name in ('control_handoff.py', 'control-handoff-authority.mjs', 'contract.mjs'):
+        raw = secure_read(control / name, 2 * 1024 * 1024)
+        require(digest(raw) == manifest['files'].get(name),
+                'Captured predecessor closure differs from admitted manifest')
+        captured[name] = raw
     return {
         'releaseSha': release_sha,
         'manifestSha256': digest(manifest_raw),
@@ -99,5 +102,7 @@ def admitted_control(*, controls_root, inbox_root, release_sha):
         'fileCount': len(manifest['files']),
         'files': manifest['files'],
         'root': control,
-        'capturedExecutor': executor,
+        'capturedExecutor': captured['control_handoff.py'],
+        'capturedAuthority': captured['control-handoff-authority.mjs'],
+        'capturedContract': captured['contract.mjs'],
     }

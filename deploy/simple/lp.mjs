@@ -275,12 +275,12 @@ function supportsDatabaseAhead(image) {
   return docker(['run', '--rm', '--network', 'none', '--entrypoint', 'cat', image, '/opt/leetplus/health.cjs'], { allowFail: true }).out.includes('DATABASE_AHEAD');
 }
 
-function schemaGate(plan, image, { allowPending }) {
+function schemaGate(plan, image, { allowPending, quiet = false }) {
   const list = names => names.slice(0, 5).join(', ') + (names.length > 5 ? ` … (+${names.length - 5})` : '');
   if (plan.unfinished.length) fail(`Database has unfinished migration(s): ${list(plan.unfinished)}; resolve them first`);
   // Like `prisma migrate deploy`, an applied migration whose file was edited later is
   // not re-run; production has a few such historical edits, so this is a warning.
-  if (plan.mismatched.length) log(`note: ${plan.mismatched.length} applied migration(s) were edited after they ran: ${list(plan.mismatched)}`);
+  if (plan.mismatched.length && !quiet) log(`note: ${plan.mismatched.length} applied migration(s) were edited after they ran: ${list(plan.mismatched)}`);
   if (plan.ahead.length && plan.pending.length) fail(`Release and database diverged: database has ${list(plan.ahead)}, release has ${list(plan.pending)}`);
   if (plan.pending.length && !allowPending) fail(`Release needs migration(s) ${list(plan.pending)}; use lp stage/deploy to apply them`);
   if (plan.ahead.length && !supportsDatabaseAhead(image)) {
@@ -488,7 +488,7 @@ async function switchTo(target, { reason }) {
   if (!slotHealthy(info)) fail(`Slot ${target} is not healthy (api ${info.api.health}, web ${info.web.health}); not switching`);
   const sha = info.api.release;
   if (info.web.release !== sha) fail(`Slot ${target} runs mixed releases (api ${sha}, web ${info.web.release})`);
-  schemaGate(planSchema(imageMigrations(info.api.image), databaseMigrations()), info.api.image, { allowPending: false });
+  schemaGate(planSchema(imageMigrations(info.api.image), databaseMigrations()), info.api.image, { allowPending: false, quiet: true });
   await smokeSlot(target, sha);
 
   const flip = slot => {
@@ -604,8 +604,9 @@ function unitState(unit) { return `${systemd(['is-enabled', unit]).out || '?'}/$
 async function adopt({ yes }) {
   const spec = readJson(COMPOSE);
   for (const [name, svc] of Object.entries(spec.services)) {
+    if (Object.hasOwn(WORKERS, name)) continue; // one-shot containers, recreated every tick
     const live = inspect(svc.container_name);
-    if (live && live.Image !== svc.image) fail(`compose.json disagrees with running ${svc.container_name}; refusing to adopt`);
+    if (live?.State.Running && live.Image !== svc.image) fail(`compose.json disagrees with running ${svc.container_name}; refusing to adopt`);
   }
   for (const unit of [...LP_UNITS.timers, LP_UNITS.boot, 'lp-worker@.service']) {
     if (!fs.existsSync(`/etc/systemd/system/${unit}`)) fail(`${unit} is not installed; run install.sh first`);

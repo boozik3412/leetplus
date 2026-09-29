@@ -45,6 +45,38 @@ def _write_new(path, raw, mode=0o400):
     require(secure_read(path, MAX_ARCHIVE) == raw, 'Installer file postimage changed')
 
 
+def _flat_intent_path(state, operation_id):
+    return state / (operation_id + '.standalone-install.intent.json')
+
+
+def _lstat_or_none(path):
+    try:
+        return path.lstat()
+    except FileNotFoundError:
+        return None
+
+
+def _request_intent_path(state, operation_id):
+    return state / (operation_id + '.standalone-install-request.intent.json')
+
+
+def _request_receipt_path(state, operation_id):
+    return state / (operation_id + '.standalone-install-request.receipt.json')
+
+
+def _request_files(plan, approval, roots, archive):
+    return {'plan.json': canonical(plan), 'approval.json': canonical(approval),
+            'bundle.tar.gz': archive, **{name + '-root.pem': roots[name]
+                                         for name in ROOT_NAMES}}
+
+
+def _request_receipt(plan, approval, intent):
+    return {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_REQUEST_RECEIPT',
+            'decision': 'STAGED_ONLY_NOT_INSTALLED', 'operationId': plan['operationId'],
+            'planSha256': digest(canonical(plan)), 'approvalSha256': digest(canonical(approval)),
+            'intentSha256': digest(canonical(intent)), 'requestFiles': intent['requestFiles']}
+
+
 def _publish_new(directory, name, raw, mode=0o400):
     directory = secure_directory(directory)
     target = directory / name
@@ -148,7 +180,8 @@ class StandaloneBundleInstaller:
 
     def __init__(self, *, controls_root, inbox_root, source_inbox, installed_parent,
                  state_root, machine_id, core_pointer, deployment_root,
-                 install_lock, control_lock, installer_source_path, pending_state_root=None):
+                 install_lock, control_lock, installer_source_path, pending_state_root=None,
+                 request_parent=None):
         require(os.name == 'posix' and os.getuid() == 0, 'Root installer boundary required')
         self.controls = secure_directory(controls_root)
         self.inbox = secure_directory(inbox_root)
@@ -162,6 +195,100 @@ class StandaloneBundleInstaller:
         self.install_lock = Path(install_lock)
         self.control_lock = Path(control_lock)
         self.installer_source_path = Path(installer_source_path)
+        self.request_parent = Path(request_parent) if request_parent is not None else None
+
+    def stage_request(self, plan, approval, roots, archive):
+        """First placement from captured signed bytes, never from prewritten server files."""
+        require(self.request_parent is not None, 'Fixed request parent required')
+        with _install_locks(self.install_lock, self.control_lock):
+            deployment_root, _, _ = self._preflight(plan, approval, roots, archive)
+            validate_install_approval(plan, approval, deployment_root)
+            parent = secure_directory(self.request_parent)
+            final = parent / ('bootstrap-install-' + plan['operationId'])
+            temporary = parent / ('.bootstrap-install-' + plan['operationId'] + '.pending')
+            intent_path = _request_intent_path(self.state, plan['operationId'])
+            receipt_path = _request_receipt_path(self.state, plan['operationId'])
+            require(all(_lstat_or_none(path) is None for path in
+                        (final, temporary, intent_path, receipt_path)),
+                    'Existing request or request intent requires reconciliation')
+            files = _request_files(plan, approval, roots, archive)
+            now = datetime.datetime.now(datetime.timezone.utc)
+            authorized = now.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+            intent = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_REQUEST_INTENT',
+                      'operationId': plan['operationId'], 'planSha256': digest(canonical(plan)),
+                      'approvalSha256': digest(canonical(approval)), 'authorizedAt': authorized,
+                      'requestFiles': {name: digest(raw) for name, raw in sorted(files.items())}}
+            # The intent is the first write. A torn intent blocks all continuations.
+            _write_new(intent_path, canonical(intent))
+            sync_directory(self.state)
+            temporary.mkdir(mode=0o700)
+            sync_directory(parent)
+            for name, raw in sorted(files.items()):
+                _write_new(temporary / name, raw)
+            sync_directory(temporary)
+            libc = ctypes.CDLL(None, use_errno=True)
+            rename = libc.renameat2
+            rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+            rename.restype = ctypes.c_int
+            if rename(-100, os.fsencode(temporary), -100, os.fsencode(final), 1) != 0:
+                error = ctypes.get_errno()
+                raise OSError(error, os.strerror(error), str(final))
+            sync_directory(parent)
+            for name, raw in files.items():
+                require(secure_read(final / name, MAX_ARCHIVE) == raw,
+                        'Published request changed')
+            receipt = _request_receipt(plan, approval, intent)
+            _write_new(receipt_path, canonical(receipt))
+            sync_directory(self.state)
+            return {'decision': 'REQUEST_STAGED_ONLY_NOT_INSTALLED',
+                    'operationId': plan['operationId'], 'receiptSha256': digest(canonical(receipt))}
+
+    def reconcile_request(self, plan, approval, roots, archive):
+        require(self.request_parent is not None, 'Fixed request parent required')
+        with _install_locks(self.install_lock, self.control_lock):
+            validate_install_plan(plan)
+            intent_path = _request_intent_path(self.state, plan['operationId'])
+            intent_raw = secure_read(intent_path, 65536)
+            intent = json.loads(intent_raw)
+            files = _request_files(plan, approval, roots, archive)
+            require(intent_raw == canonical(intent) and
+                    set(intent) == {'contract', 'operationId', 'planSha256', 'approvalSha256',
+                                    'authorizedAt', 'requestFiles'} and
+                    intent['contract'] == 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_REQUEST_INTENT' and
+                    intent['operationId'] == plan['operationId'] and
+                    intent['planSha256'] == digest(canonical(plan)) and
+                    intent['approvalSha256'] == digest(canonical(approval)) and
+                    intent['requestFiles'] == {name: digest(raw) for name, raw in sorted(files.items())},
+                    'Exact historical request intent required')
+            deployment_root = secure_read(self.deployment_root, 4096).decode('ascii')
+            validate_install_approval(plan, approval, deployment_root, accepted_at=intent['authorizedAt'])
+            parent = secure_directory(self.request_parent)
+            final = parent / ('bootstrap-install-' + plan['operationId'])
+            temporary = parent / ('.bootstrap-install-' + plan['operationId'] + '.pending')
+            if _lstat_or_none(temporary) is not None:
+                return {'decision': 'PARTIAL_REQUEST_REQUIRES_SIGNED_RECOVERY'}
+            final_info = _lstat_or_none(final)
+            if final_info is None:
+                return {'decision': 'REQUEST_INTENT_ONLY_REQUIRES_SIGNED_RECOVERY'}
+            if not stat.S_ISDIR(final_info.st_mode):
+                return {'decision': 'FOREIGN_REQUEST_REQUIRES_SIGNED_RECOVERY'}
+            secure_directory(final)
+            if {item.name for item in final.iterdir()} != set(files):
+                return {'decision': 'PARTIAL_REQUEST_REQUIRES_SIGNED_RECOVERY'}
+            for name, raw in files.items():
+                require(secure_read(final / name, MAX_ARCHIVE) == raw,
+                        'Request postimage differs from signed bytes')
+            receipt = _request_receipt(plan, approval, intent)
+            receipt_path = _request_receipt_path(self.state, plan['operationId'])
+            if _lstat_or_none(receipt_path) is None:
+                _write_new(receipt_path, canonical(receipt))
+                sync_directory(self.state)
+                decision = 'RECONCILED_STAGED_REQUEST'
+            else:
+                require(secure_read(receipt_path, 65536) == canonical(receipt),
+                        'Request receipt changed')
+                decision = 'ALREADY_STAGED_REQUEST'
+            return {'decision': decision, 'receiptSha256': digest(canonical(receipt))}
 
     def _preflight(self, plan, approval, roots, archive):
         validate_install_plan(plan)
@@ -220,8 +347,11 @@ class StandaloneBundleInstaller:
         with _install_locks(self.install_lock, self.control_lock):
             deployment_root, members, directories = self._preflight(plan, approval, roots, archive)
             operation = self.state / plan['operationId']
+            flat_intent = _flat_intent_path(self.state, plan['operationId'])
             require(not operation.exists() and not operation.is_symlink(),
                     'Existing installer operation requires read-only reconciliation')
+            require(_lstat_or_none(flat_intent) is None,
+                    'Existing installer intent requires read-only reconciliation')
             final = self.installed_parent / plan['bundleSha256']
             temporary = self.installed_parent / ('.' + plan['bundleSha256'] + '.' + plan['operationId'] + '.pending')
             require(not final.exists() and not final.is_symlink() and
@@ -242,6 +372,10 @@ class StandaloneBundleInstaller:
                 'hostIdentitySha256': plan['hostIdentitySha256'], 'bundleFiles': plan['bundleFiles'],
                 'bundleSha256': plan['bundleSha256'], 'publicRoots': plan['publicRoots'],
                 'installerReceiptSha256': digest(canonical(receipt))}
+            # The first write is the durable, self-identifying intent itself.
+            # A failed/short intent remains an observable operation-owned residue.
+            _write_new(flat_intent, canonical(intent))
+            sync_directory(self.state)
             operation.mkdir(mode=0o700)
             sync_directory(self.state)
             _publish_new(operation, 'plan.json', canonical(plan))
@@ -273,19 +407,44 @@ class StandaloneBundleInstaller:
     def reconcile(self, plan, approval):
         with _install_locks(self.install_lock, self.control_lock):
             validate_install_plan(plan)
-            operation = secure_directory(self.state / plan['operationId'])
-            require(secure_read(operation / 'plan.json', 65536) == canonical(plan) and
-                    secure_read(operation / 'approval.json', 65536) == canonical(approval),
-                    'Installer operation lineage changed')
-            intent = json.loads(secure_read(operation / 'intent.json', 65536))
-            require(intent['planSha256'] == digest(canonical(plan)) and
+            flat_intent = _flat_intent_path(self.state, plan['operationId'])
+            intent_raw = secure_read(flat_intent, 65536)
+            intent = json.loads(intent_raw)
+            require(intent_raw == canonical(intent) and
+                    set(intent) == {'contract', 'operationId', 'planSha256', 'approvalSha256', 'authorizedAt'} and
+                    intent['contract'] == INSTALL_PLAN + '_INTENT' and
+                    intent['operationId'] == plan['operationId'] and
+                    intent['planSha256'] == digest(canonical(plan)) and
                     intent['approvalSha256'] == digest(canonical(approval)),
-                    'Installer intent differs from exact plan')
+                    'Flat installer intent differs from exact plan')
             deployment_root = secure_read(self.deployment_root, 4096).decode('ascii')
             validate_install_approval(plan, approval, deployment_root, accepted_at=intent['authorizedAt'])
+            operation_path = self.state / plan['operationId']
+            operation_info = _lstat_or_none(operation_path)
+            if operation_info is None:
+                return {'decision': 'INTENT_ONLY_REQUIRES_SIGNED_RECOVERY'}
+            require(stat.S_ISDIR(operation_info.st_mode), 'Foreign installer operation state')
+            operation = secure_directory(operation_path)
+            allowed = {'plan.json': canonical(plan), 'approval.json': canonical(approval),
+                       'intent.json': intent_raw}
+            observed_names = {item.name for item in operation.iterdir()}
+            require(observed_names <= set(allowed) | {'receipt.json'},
+                    'Foreign installer operation leaf')
+            for name, expected in allowed.items():
+                if name in observed_names:
+                    require(secure_read(operation / name, 65536) == expected,
+                            'Installer operation lineage changed')
+            if not set(allowed) <= observed_names:
+                return {'decision': 'PARTIAL_AUDIT_REQUIRES_SIGNED_RECOVERY'}
             final = self.installed_parent / plan['bundleSha256']
-            if not final.exists():
+            temporary = self.installed_parent / ('.' + plan['bundleSha256'] + '.' + plan['operationId'] + '.pending')
+            if _lstat_or_none(temporary) is not None:
+                return {'decision': 'PARTIAL_STAGING_REQUIRES_SIGNED_RECOVERY'}
+            final_info = _lstat_or_none(final)
+            if final_info is None:
                 return {'decision': 'NO_INSTALLED_EFFECT_REQUIRES_SIGNED_RECOVERY'}
+            if not stat.S_ISDIR(final_info.st_mode):
+                return {'decision': 'FOREIGN_FINAL_REQUIRES_SIGNED_RECOVERY'}
             secure_directory(final)
             enrollment_root = secure_directory(final / 'enrollment')
             receipt_raw = secure_read(enrollment_root / 'installer-receipt.json', 65536)
@@ -304,7 +463,7 @@ class StandaloneBundleInstaller:
             require({item.name for item in final.iterdir()} == {'bundle', 'enrollment'},
                     'Installed bundle root has a foreign leaf')
             existing = operation / 'receipt.json'
-            if existing.exists():
+            if _lstat_or_none(existing) is not None:
                 require(secure_read(existing, 65536) == receipt_raw,
                         'State receipt differs from installed enrollment')
                 return {'decision': 'ALREADY_INSTALLED_PUBLIC_ONLY',

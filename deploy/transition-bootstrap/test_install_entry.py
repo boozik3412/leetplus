@@ -2,6 +2,7 @@
 import base64
 import datetime as dt
 import importlib.util
+import io
 import json
 from pathlib import Path
 import shutil
@@ -74,7 +75,8 @@ class InstallEntryTests(unittest.TestCase):
     def test_invalid_bundle_map_stops_before_import_or_installer_effect(self):
         root, raw, manifest, read = self.fixture()
         checked = entry.verify_source_map(root, manifest, read=read)
-        plan = {'sourceRelease': 'a' * 40, 'bundleFiles': {},
+        plan = {'sourceRelease': 'a' * 40, 'operationId': '12345678-1234-4123-8123-123456789abc',
+                'bundleFiles': {},
                 'installerSourceSha256': entry.digest(checked[entry.SOURCE_PATH])}
         with patch.object(entry.os, 'name', 'posix'), \
              patch.object(entry.os, 'geteuid', return_value=0, create=True), \
@@ -82,6 +84,7 @@ class InstallEntryTests(unittest.TestCase):
              patch.object(entry.sys, 'dont_write_bytecode', True), \
              patch.object(entry, 'verify_generation', return_value=(root, checked)), \
              patch.object(entry, 'verify_signed_plan', return_value={}), \
+             patch.object(entry, 'verify_staged_request'), \
              patch.object(entry, 'read_request', return_value=(plan, {}, b'', {})), \
              patch.object(entry, 'load_installer') as imported:
             with self.assertRaisesRegex(ValueError, 'closed source bundle'):
@@ -277,7 +280,7 @@ class InstallEntryTests(unittest.TestCase):
                   'operationId': operation, 'planSha256': entry.digest(entry.canonical(plan)),
                   'approvalSha256': entry.digest(entry.canonical(approval)),
                   'authorizedAt': '2026-01-01T00:05:00.000Z'}
-        records = {'plan.json': plan, 'approval.json': approval, 'intent.json': intent}
+        records = {operation + '.standalone-install.intent.json': intent}
         def record(path, *_):
             value = records[path.name]
             return value, entry.canonical(value)
@@ -294,11 +297,64 @@ class InstallEntryTests(unittest.TestCase):
              patch.object(entry, 'read_request', return_value=(plan, approval, b'archive', {})), \
              patch.object(entry, 'exact_json', side_effect=record), \
              patch.object(entry, 'verify_signed_plan', return_value={}) as signature, \
+             patch.object(entry, 'verify_staged_request'), \
              patch.object(entry, 'verify_generation', return_value=(root, checked)), \
              patch.object(entry, 'load_installer', return_value=module):
             result = entry.run('reconcile', source, operation)
         self.assertEqual(result['decision'], 'RECONCILED_INSTALLED_PUBLIC_ONLY')
         self.assertEqual(signature.call_args.args[2], dt.datetime(2026, 1, 1, 0, 5, tzinfo=dt.timezone.utc))
+
+    def test_captured_request_requires_canonical_closed_bytes(self):
+        payload = {'plan': {'sourceRelease': 'a' * 40}, 'approvalEnvelope': {},
+                   'bundleTarGzBase64': base64.b64encode(b'archive').decode(),
+                   'publicRoots': {name: '-----BEGIN PUBLIC KEY-----\nfixture\n-----END PUBLIC KEY-----\n'
+                                   for name in ('permit', 'execution', 'rollback', 'noEffect')}}
+        with patch.object(entry.sys, 'stdin', types.SimpleNamespace(buffer=io.BytesIO(entry.canonical(payload)))):
+            plan, approval, archive, roots = entry.read_captured_request()
+        self.assertEqual(plan, payload['plan'])
+        self.assertEqual(approval, {})
+        self.assertEqual(archive, b'archive')
+        self.assertEqual(set(roots), set(payload['publicRoots']))
+        for bad in (json.dumps(payload).encode(), entry.canonical({**payload, 'foreign': True}),
+                    entry.canonical({**payload, 'bundleTarGzBase64': '!!!!'})):
+            with patch.object(entry.sys, 'stdin', types.SimpleNamespace(buffer=io.BytesIO(bad))):
+                with self.assertRaises((ValueError, base64.binascii.Error)):
+                    entry.read_captured_request()
+
+    def test_staged_request_receipt_binds_all_seven_captured_leaves(self):
+        operation = '12345678-1234-4123-8123-123456789abc'
+        plan = {'operationId': operation}
+        approval = {'approval': {'operationId': operation}}
+        roots = {name: ('public ' + name).encode() for name in
+                 ('permit', 'execution', 'rollback', 'noEffect')}
+        archive = b'archive'
+        files = {'plan.json': entry.canonical(plan), 'approval.json': entry.canonical(approval),
+                 'bundle.tar.gz': archive, **{name + '-root.pem': raw for name, raw in roots.items()}}
+        file_map = {name: entry.digest(raw) for name, raw in sorted(files.items())}
+        intent = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_REQUEST_INTENT',
+                  'operationId': operation, 'planSha256': entry.digest(entry.canonical(plan)),
+                  'approvalSha256': entry.digest(entry.canonical(approval)),
+                  'authorizedAt': '2026-01-01T00:00:00.000Z', 'requestFiles': file_map}
+        receipt = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_REQUEST_RECEIPT',
+                   'decision': 'STAGED_ONLY_NOT_INSTALLED', 'operationId': operation,
+                   'planSha256': intent['planSha256'], 'approvalSha256': intent['approvalSha256'],
+                   'intentSha256': entry.digest(entry.canonical(intent)), 'requestFiles': file_map}
+        records = {'intent': intent, 'receipt': receipt}
+
+        def exact(path, *_):
+            key = 'intent' if path.name.endswith('.intent.json') else 'receipt'
+            return records[key], entry.canonical(records[key])
+
+        with patch.object(entry, 'exact_json', side_effect=exact), \
+             patch.object(entry, 'validate_approval_fields') as historic:
+            entry.verify_staged_request(operation, plan, approval, archive, roots)
+            self.assertEqual(historic.call_args.args[2],
+                             dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc))
+            with self.assertRaisesRegex(ValueError, 'placement'):
+                entry.verify_staged_request(operation, plan, approval, archive + b'foreign', roots)
+            records['receipt'] = {**receipt, 'intentSha256': '0' * 64}
+            with self.assertRaisesRegex(ValueError, 'placement receipt'):
+                entry.verify_staged_request(operation, plan, approval, archive, roots)
 
 
 if __name__ == '__main__':

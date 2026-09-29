@@ -38,6 +38,7 @@ REQUIRED = {
     'deploy/leetplus-compose/control-handoff-authority.mjs',
 }
 EFFECTS = {'bootstrapBundleOnly': True, 'publicRootsOnly': True,
+           'requestPlacement': True,
            'controllerPointerMutation': False, 'applicationRestart': False,
            'dataMutation': False, 'workerGrantMutation': False,
            'timerMutation': False, 'providerEffect': False}

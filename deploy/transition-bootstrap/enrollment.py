@@ -22,6 +22,7 @@ PLAN_FIELDS = {'contract', 'operationId', 'action', 'hostIdentitySha256', 'prede
     'installerSourceSha256', 'installerAuthority', 'bundleFiles', 'bundleSha256', 'bundleArchiveSha256',
     'publicRoots', 'effects'}
 INSTALL_EFFECTS = {'bootstrapBundleOnly': True, 'publicRootsOnly': True,
+    'requestPlacement': True,
     'controllerPointerMutation': False, 'applicationRestart': False,
     'dataMutation': False, 'workerGrantMutation': False, 'timerMutation': False,
     'providerEffect': False}

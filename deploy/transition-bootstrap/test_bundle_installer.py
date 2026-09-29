@@ -32,9 +32,10 @@ class BundleInstallerTests(unittest.TestCase):
         self.source_sha = 'd' * 40
         self.source = self.source_root / self.source_sha
         self.installed = self.root / 'installed'
+        self.requests = self.root / 'requests'
         self.state = self.root / 'state'
         for directory in (self.controls, self.inbox, self.source_root, self.source,
-                          self.installed, self.state):
+                          self.installed, self.requests, self.state):
             directory.mkdir(mode=0o700)
         self.machine = self.root / 'machine-id'
         self.machine.write_bytes(b'fixture-host-id\n')
@@ -93,7 +94,7 @@ class BundleInstallerTests(unittest.TestCase):
             source_inbox=self.source, installed_parent=self.installed, state_root=self.state,
             machine_id=self.machine, core_pointer=self.core, deployment_root=self.deployment_path,
             install_lock=self.locks[0], control_lock=self.locks[1],
-            installer_source_path=self.installer_source)
+            installer_source_path=self.installer_source, request_parent=self.requests)
         self.fake_old = {'releaseSha': bundle_installer.A_RELEASE,
             'manifestSha256': bundle_installer.A_MANIFEST,
             'files': {'control_handoff.py': bundle_installer.A_EXECUTOR}}
@@ -171,6 +172,90 @@ class BundleInstallerTests(unittest.TestCase):
                              'RECONCILED_INSTALLED_PUBLIC_ONLY')
             self.assertEqual({item.name for item in self.installed.iterdir()},
                              {self.plan['bundleSha256']})
+
+    def test_intent_is_durable_before_first_operation_directory_write(self):
+        operation = self.state / self.plan['operationId']
+        flat = self.state / (self.plan['operationId'] + '.standalone-install.intent.json')
+        original = Path.mkdir
+
+        def fail_first_directory(path, *args, **kwargs):
+            if path == operation:
+                self.assertTrue(flat.is_file())
+                raise RuntimeError('fixture lost first directory response')
+            return original(path, *args, **kwargs)
+
+        with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old), \
+             patch.object(Path, 'mkdir', new=fail_first_directory):
+            with self.assertRaisesRegex(RuntimeError, 'first directory response'):
+                self.installer.apply(self.plan, self.approval, self.roots, self.archive)
+        self.assertEqual(self.installer.reconcile(self.plan, self.approval)['decision'],
+                         'INTENT_ONLY_REQUIRES_SIGNED_RECOVERY')
+        self.assertEqual(list(self.installed.iterdir()), [])
+
+    def test_signed_captured_request_is_staged_before_install(self):
+        with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old):
+            result = self.installer.stage_request(self.plan, self.approval, self.roots, self.archive)
+            self.assertEqual(result['decision'], 'REQUEST_STAGED_ONLY_NOT_INSTALLED')
+            self.assertEqual(self.installer.reconcile_request(
+                self.plan, self.approval, self.roots, self.archive)['decision'],
+                'ALREADY_STAGED_REQUEST')
+            request = self.requests / ('bootstrap-install-' + self.plan['operationId'])
+            self.assertEqual({path.name for path in request.iterdir()},
+                             {'plan.json', 'approval.json', 'bundle.tar.gz',
+                              'permit-root.pem', 'execution-root.pem',
+                              'rollback-root.pem', 'noEffect-root.pem'})
+            self.assertEqual(list(self.installed.iterdir()), [])
+            with self.assertRaisesRegex(ValueError, 'Existing request'):
+                self.installer.stage_request(self.plan, self.approval, self.roots, self.archive)
+
+    def test_partial_request_and_lost_receipt_require_exact_reconciliation(self):
+        original = bundle_installer._write_new
+
+        def fail_archive(path, raw, mode=0o400):
+            if path.name == 'bundle.tar.gz':
+                raise RuntimeError('fixture lost request archive write')
+            return original(path, raw, mode)
+
+        with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old), \
+             patch.object(bundle_installer, '_write_new', side_effect=fail_archive):
+            with self.assertRaisesRegex(RuntimeError, 'request archive write'):
+                self.installer.stage_request(self.plan, self.approval, self.roots, self.archive)
+        self.assertEqual(self.installer.reconcile_request(
+            self.plan, self.approval, self.roots, self.archive)['decision'],
+            'PARTIAL_REQUEST_REQUIRES_SIGNED_RECOVERY')
+        self.assertEqual(list(self.installed.iterdir()), [])
+
+    def test_partial_audit_and_staging_are_not_classified_as_no_effect(self):
+        original = bundle_installer._publish_new
+
+        def fail_approval(directory, name, raw, mode=0o400):
+            if name == 'approval.json':
+                raise RuntimeError('fixture lost approval response')
+            return original(directory, name, raw, mode)
+
+        with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old), \
+             patch.object(bundle_installer, '_publish_new', side_effect=fail_approval):
+            with self.assertRaisesRegex(RuntimeError, 'approval response'):
+                self.installer.apply(self.plan, self.approval, self.roots, self.archive)
+        self.assertEqual(self.installer.reconcile(self.plan, self.approval)['decision'],
+                         'PARTIAL_AUDIT_REQUIRES_SIGNED_RECOVERY')
+        operation = self.state / self.plan['operationId']
+        (operation / 'approval.json').write_bytes(canonical(self.approval))
+        (operation / 'intent.json').write_bytes(secure_read(self.state /
+            (self.plan['operationId'] + '.standalone-install.intent.json')))
+        temporary = self.installed / ('.' + self.plan['bundleSha256'] + '.' +
+                                      self.plan['operationId'] + '.pending')
+        temporary.mkdir(mode=0o700)
+        self.assertEqual(self.installer.reconcile(self.plan, self.approval)['decision'],
+                         'PARTIAL_STAGING_REQUIRES_SIGNED_RECOVERY')
+        temporary.rmdir()
+        final = self.installed / self.plan['bundleSha256']
+        final.symlink_to(self.installed / 'missing-generation')
+        self.assertEqual(self.installer.reconcile(self.plan, self.approval)['decision'],
+                         'FOREIGN_FINAL_REQUIRES_SIGNED_RECOVERY')
+        final.unlink()
+        self.assertEqual(self.installer.reconcile(self.plan, self.approval)['decision'],
+                         'NO_INSTALLED_EFFECT_REQUIRES_SIGNED_RECOVERY')
 
     def test_historical_enrollment_rejects_same_key_with_alternate_pem_and_deployment_root(self):
         with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old):

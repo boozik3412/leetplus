@@ -29,6 +29,9 @@ VERIFIER_SOURCE_PATH = 'docs/deployment/production-control-authority/verify-inst
 GENERATION = Path('/srv/leetplus/production-control-generations')
 INTRO_AUDIT = Path('/var/lib/leetplus-compose/standalone-introductions')
 REQUEST_PREFIX = '/srv/leetplus/production-control-inbox/bootstrap-install-'
+REQUEST_PARENT = Path('/srv/leetplus/production-control-inbox')
+REQUEST_LEAVES = {'plan.json', 'approval.json', 'bundle.tar.gz', 'permit-root.pem',
+                  'execution-root.pem', 'rollback-root.pem', 'noEffect-root.pem'}
 LAYOUT = {'contract': 'LEETPLUS_BOOTSTRAP_INSTALL_LAYOUT_V1',
           'installedParent': '/usr/local/libexec/leetplus-transition-bootstrap',
           'operationStateRoot': '/var/lib/leetplus-compose',
@@ -58,6 +61,7 @@ AUTHORITY_FIELDS = {'helperSourceSha256', 'verifierSourceSha256',
                     'generationRootManifestSha256', 'generationReceiptSha256'}
 APPROVAL_ROOT = Path('/etc/leetplus-compose/approval-root.pem')
 INSTALL_EFFECTS = {'bootstrapBundleOnly': True, 'publicRootsOnly': True,
+                  'requestPlacement': True,
                   'controllerPointerMutation': False, 'applicationRestart': False,
                   'dataMutation': False, 'workerGrantMutation': False,
                   'timerMutation': False, 'providerEffect': False}
@@ -280,14 +284,12 @@ def read_request(operation_id):
     info = root.lstat()
     require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and info.st_mode & 0o7777 == 0o700,
             'Root-private request directory required')
-    allowed = {'plan.json', 'approval.json', 'bundle.tar.gz', 'permit-root.pem',
-               'execution-root.pem', 'rollback-root.pem', 'noEffect-root.pem'}
     names = []
     with os.scandir(root) as entries:
         for entry in entries:
             names.append(entry.name)
             require(len(names) <= 7, 'Foreign installer request leaf')
-    require(set(names) == allowed, 'Closed installer request required')
+    require(set(names) == REQUEST_LEAVES, 'Closed installer request required')
     plan, _ = exact_json(root / 'plan.json')
     approval, _ = exact_json(root / 'approval.json')
     archive = secure_read(root / 'bundle.tar.gz', 16 * 1024 * 1024)
@@ -297,26 +299,89 @@ def read_request(operation_id):
     return plan, approval, archive, roots
 
 
+def read_captured_request():
+    # No server request bytes or candidate source file are needed for first placement.
+    raw = sys.stdin.buffer.read(23 * 1024 * 1024 + 1)
+    require(0 < len(raw) <= 23 * 1024 * 1024, 'Bounded captured request required')
+    value = json.loads(raw)
+    require(isinstance(value, dict) and set(value) ==
+            {'plan', 'approvalEnvelope', 'bundleTarGzBase64', 'publicRoots'} and
+            raw == canonical(value), 'Canonical closed captured request required')
+    plan, approval = value['plan'], value['approvalEnvelope']
+    encoded = value['bundleTarGzBase64']
+    require(isinstance(encoded, str) and len(encoded) <= 22 * 1024 * 1024,
+            'Bounded captured archive required')
+    archive = base64.b64decode(encoded, validate=True)
+    require(0 < len(archive) <= 16 * 1024 * 1024 and
+            base64.b64encode(archive).decode('ascii') == encoded,
+            'Canonical captured archive required')
+    public = value['publicRoots']
+    require(isinstance(public, dict) and set(public) ==
+            {'permit', 'execution', 'rollback', 'noEffect'},
+            'Four captured public roots required')
+    roots = {}
+    for name, pem in public.items():
+        require(isinstance(pem, str) and pem.isascii() and 'PRIVATE' not in pem and
+                0 < len(pem) <= 4096, 'Captured public root differs')
+        roots[name] = pem.encode('ascii')
+    return plan, approval, archive, roots
+
+
+def verify_staged_request(operation_id, plan, approval, archive, roots):
+    state = Path(LAYOUT['operationStateRoot'])
+    intent, intent_raw = exact_json(state / (operation_id + '.standalone-install-request.intent.json'))
+    receipt, _ = exact_json(state / (operation_id + '.standalone-install-request.receipt.json'))
+    files = {'plan.json': canonical(plan), 'approval.json': canonical(approval),
+             'bundle.tar.gz': archive, **{name + '-root.pem': roots[name] for name in roots}}
+    expected_map = {name: digest(raw) for name, raw in sorted(files.items())}
+    require(isinstance(intent, dict) and set(intent) ==
+            {'contract', 'operationId', 'planSha256', 'approvalSha256', 'authorizedAt', 'requestFiles'} and
+            intent['contract'] == 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_REQUEST_INTENT' and
+            intent['operationId'] == operation_id and
+            intent['planSha256'] == digest(canonical(plan)) and
+            intent['approvalSha256'] == digest(canonical(approval)) and
+            intent['requestFiles'] == expected_map,
+            'Installer request lacks original exact signed placement intent')
+    expected_receipt = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_REQUEST_RECEIPT',
+        'decision': 'STAGED_ONLY_NOT_INSTALLED', 'operationId': operation_id,
+        'planSha256': digest(canonical(plan)), 'approvalSha256': digest(canonical(approval)),
+        'intentSha256': digest(intent_raw), 'requestFiles': expected_map}
+    require(receipt == expected_receipt, 'Installer request lacks exact placement receipt')
+    authorized = datetime.datetime.fromisoformat(intent['authorizedAt'].replace('Z', '+00:00'))
+    require(authorized.isoformat(timespec='milliseconds').replace('+00:00', 'Z') == intent['authorizedAt'],
+            'Canonical original request authorization time required')
+    validate_approval_fields(plan, approval, authorized)
+
+
 def run(action, source_release, operation_id):
     require(os.name == 'posix' and os.geteuid() == 0 and sys.flags.isolated and sys.dont_write_bytecode,
             'Root isolated Python -I -B required')
-    plan, approval, archive, roots = read_request(operation_id)
+    captured = action in ('stage-request', 'reconcile-request')
+    plan, approval, archive, roots = (read_captured_request() if captured else read_request(operation_id))
     require(plan.get('sourceRelease') == source_release, 'Signed source release differs from CLI')
+    require(plan.get('operationId') == operation_id, 'Signed operation differs from CLI')
     historical_at = None
-    if action == 'reconcile':
-        operation = Path(LAYOUT['operationStateRoot']) / operation_id
-        original_plan, original_plan_raw = exact_json(operation / 'plan.json')
-        original_approval, original_approval_raw = exact_json(operation / 'approval.json')
-        intent, _ = exact_json(operation / 'intent.json')
-        require(original_plan_raw == canonical(plan) and original_approval_raw == canonical(approval) and
-                isinstance(intent, dict) and set(intent) == {'contract', 'operationId', 'planSha256', 'approvalSha256', 'authorizedAt'} and
-                intent['contract'] == 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_PLAN_INTENT' and
+    if action in ('reconcile', 'reconcile-request'):
+        suffix = ('.standalone-install-request.intent.json' if action == 'reconcile-request'
+                  else '.standalone-install.intent.json')
+        flat_intent = Path(LAYOUT['operationStateRoot']) / (operation_id + suffix)
+        intent, _ = exact_json(flat_intent)
+        expected_fields = {'contract', 'operationId', 'planSha256', 'approvalSha256', 'authorizedAt'}
+        if action == 'reconcile-request':
+            expected_fields.add('requestFiles')
+        expected_contract = ('LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_REQUEST_INTENT'
+                             if action == 'reconcile-request' else
+                             'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_PLAN_INTENT')
+        require(isinstance(intent, dict) and set(intent) == expected_fields and
+                intent['contract'] == expected_contract and
                 intent['operationId'] == operation_id and intent['planSha256'] == digest(canonical(plan)) and
-                intent['approvalSha256'] == digest(canonical(approval)), 'Exact historical installer lineage required')
+                intent['approvalSha256'] == digest(canonical(approval)), 'Exact flat historical installer intent required')
         historical_at = datetime.datetime.fromisoformat(intent['authorizedAt'].replace('Z', '+00:00'))
         require(historical_at.isoformat(timespec='milliseconds').replace('+00:00', 'Z') == intent['authorizedAt'],
                 'Canonical historical install UTC required')
     authority = verify_signed_plan(plan, approval, historical_at)
+    if not captured:
+        verify_staged_request(operation_id, plan, approval, archive, roots)
     generation_root, checked = verify_generation(source_release, authority)
     bundle_files = {path: digest(checked[path]) for path in BUNDLE_PATHS}
     require(plan.get('sourceRelease') == source_release and plan.get('bundleFiles') == bundle_files and
@@ -331,7 +396,12 @@ def run(action, source_release, operation_id):
         machine_id='/etc/machine-id', core_pointer='/usr/local/sbin/leetplus-compose',
         deployment_root='/etc/leetplus-compose/approval-root.pem',
         install_lock='/var/lib/leetplus-compose/standalone-install.lock',
-        control_lock='/var/lib/leetplus-compose/control.lock', installer_source_path=ENTRY)
+        control_lock='/var/lib/leetplus-compose/control.lock', installer_source_path=ENTRY,
+        request_parent=REQUEST_PARENT)
+    if action == 'stage-request':
+        return installer.stage_request(plan, approval, roots, archive)
+    if action == 'reconcile-request':
+        return installer.reconcile_request(plan, approval, roots, archive)
     if action == 'prepare':
         return installer.prepare(plan, approval, roots, archive)
     if action == 'apply':
@@ -342,7 +412,8 @@ def run(action, source_release, operation_id):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Independently admitted public-only bootstrap install')
-    parser.add_argument('action', choices=('prepare', 'apply', 'reconcile'))
+    parser.add_argument('action', choices=('stage-request', 'reconcile-request',
+                                           'prepare', 'apply', 'reconcile'))
     parser.add_argument('--source-release', required=True)
     parser.add_argument('--operation-id', required=True)
     args = parser.parse_args(argv)

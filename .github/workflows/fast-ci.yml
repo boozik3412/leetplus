@@ -88,6 +88,7 @@ jobs:
           node --test deploy/leetplus-compose/worker-continuation-runtime.test.mjs
           node --test deploy/leetplus-compose/release-observer.test.mjs
           node --test deploy/leetplus-compose/download-admitted-bundle.test.mjs
+          node --test deploy/simple/lp.test.mjs
           python3 -m unittest discover -s deploy/leetplus-compose -p test_derive_rehearsal_inputs.py
           python3 -m unittest discover -s deploy/leetplus-compose -p test_approval_window.py
           receipt="$RUNNER_TEMP/leetplus-release-impact-$CI_RELEASE_SHA.json"

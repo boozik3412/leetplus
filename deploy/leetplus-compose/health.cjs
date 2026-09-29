@@ -11,9 +11,13 @@ const request = http.get({ host: '127.0.0.1', port: web ? 3000 : 4000, path: rou
       const data = JSON.parse(body);
       const sha = data.release?.sha ?? data.sha ?? data.releaseSha;
       const expected = JSON.parse(fs.readFileSync('/app/release.json', 'utf8'));
-      if (response.statusCode !== 200 || sha !== expected.releaseSha || (!web &&
-          (data.ok !== true || data.dependencies?.database?.migrationCount !== expected.migrationCount ||
-           data.dependencies?.database?.migration !== expected.migration))) process.exitCode = 1;
+      const database = data.dependencies?.database;
+      // The API itself verifies that a database ahead of this release still
+      // contains the release's own migrations (backward-compatible rollout).
+      const schemaOk = (database?.migrationCount === expected.migrationCount && database?.migration === expected.migration) ||
+        (database?.compatibility?.mode === 'DATABASE_AHEAD' && database.compatibility.releaseMigration === expected.migration &&
+         database.compatibility.releaseMigrationCount === expected.migrationCount);
+      if (response.statusCode !== 200 || sha !== expected.releaseSha || (!web && (data.ok !== true || !schemaOk))) process.exitCode = 1;
     } catch { process.exitCode = 1; }
   });
 });

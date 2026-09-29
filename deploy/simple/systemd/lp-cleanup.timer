@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily LeetPlus retention after the nightly backup (lp)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+Unit=lp-cleanup.service
+
+[Install]
+WantedBy=timers.target

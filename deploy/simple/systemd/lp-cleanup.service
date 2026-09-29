@@ -1,0 +1,8 @@
+[Unit]
+Description=LeetPlus retention: backups, pre-migration dumps, images, logs (lp)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lp cleanup
+TimeoutStartSec=1800
+UMask=0077

@@ -325,6 +325,13 @@ def validate_plan(plan):
     return plan
 
 
+def require_approval_time(approval, at):
+    now = instant(at)
+    issued, expires = instant(approval['issuedAt']), instant(approval['expiresAt'])
+    require(issued <= now < expires and 0 < (expires-issued).total_seconds() <= 1800,
+            'Initial approval expired or unbounded')
+
+
 def validate_approval(plan, envelope, pem, *, at=None, node=NODE):
     validate_plan(plan)
     require(isinstance(envelope, dict) and set(envelope) == {'approval', 'signature'},
@@ -336,10 +343,7 @@ def validate_approval(plan, envelope, pem, *, at=None, node=NODE):
         approval['hostIdentitySha256'] == plan['hostIdentitySha256'] and
         approval['planSha256'] == sha(canonical(plan)) and approval['action'] == plan['action'],
         'Initial approval does not bind exact plan')
-    now = instant(at or utc_now())
-    issued, expires = instant(approval['issuedAt']), instant(approval['expiresAt'])
-    require(issued <= now < expires and 0 < (expires-issued).total_seconds() <= 1800,
-            'Initial approval expired or unbounded')
+    require_approval_time(approval, at or utc_now())
     require(isinstance(pem, bytes) and len(pem) <= 4096 and b'PRIVATE' not in pem and
             re.fullmatch(r'[A-Za-z0-9+/]{86}==', envelope['signature']), 'Public root/signature differs')
     value = {'publicKey': pem.decode('ascii'), 'message': base64.b64encode(canonical(approval)).decode(),
@@ -897,8 +901,10 @@ class InitialIntro:
                 f.pending_ancestors(destination)
             f.check_directory_preimages(plan)
             f.reject_mounts(set(plan['destinationPreimages']) | set(plan['directoryPreimages']))
-            validate_approval(plan, envelope, pem, node=self.node)
+            verified = validate_approval(plan, envelope, pem, node=self.node)
             authorized = utc_now()
+            # No lock wait or crypto child follows this exact timestamp fence.
+            require_approval_time(verified, authorized)
             intent = {'contract': INTENT, 'operationId': operation,
                       'planSha256': sha(raw['plan.json']), 'approvalSha256': sha(raw['approval.json']),
                       'authorizedAt': authorized}

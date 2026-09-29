@@ -59,6 +59,8 @@ jobs:
           printf '%s\n' "$?" >"$evidence/intro-entry.exit"
           node --check deploy/leetplus-compose/standalone-intro-transport-entry.mjs >"$evidence/transport-entry.stdout" 2>"$evidence/transport-entry.stderr"
           printf '%s\n' "$?" >"$evidence/transport-entry.exit"
+          node --check deploy/leetplus-compose/standalone-intro-transport-finalize-entry.mjs >"$evidence/transport-finalize-entry.stdout" 2>"$evidence/transport-finalize-entry.stderr"
+          printf '%s\n' "$?" >"$evidence/transport-finalize-entry.exit"
           node --check docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs >"$evidence/minimal-verifier.stdout" 2>"$evidence/minimal-verifier.stderr"
           printf '%s\n' "$?" >"$evidence/minimal-verifier.exit"
           sudo /usr/bin/env -i PATH="$node_dir:/usr/sbin:/usr/bin:/sbin:/bin" LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC /usr/bin/python3 -B deploy/leetplus-compose/test_standalone_initial_intro_native.py >"$evidence/intro-native.stdout" 2>"$evidence/intro-native.stderr"

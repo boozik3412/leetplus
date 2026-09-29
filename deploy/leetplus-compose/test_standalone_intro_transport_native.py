@@ -13,6 +13,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 HERE=Path(__file__).resolve().parent
 spec=importlib.util.spec_from_file_location('pure_transport_fixture',HERE/'test_standalone_intro_transport.py')
@@ -180,6 +181,43 @@ crypto.sign(null,Buffer.from(JSON.stringify(v,null,2)+'\\n'),k.privateKey).toStr
         p=self.fixture.p(logical);p.parent.mkdir(parents=True,exist_ok=True)
         p.write_bytes(raw);p.chmod(mode)
 
+    def finalize_packet(self,recovery='44444444-4444-4444-8444-444444444444'):
+        original=self.operation
+        audit=t.AUDITS+'/'+original
+        request=str(Path(self.plan['snapshotPath']).parent)
+        receipt=self.fixture.read(request+'/transport-receipt.json',131072)
+        info=lambda name:{'device':self.fixture.p(name).stat().st_dev,
+            'inode':self.fixture.p(name).stat().st_ino,'uid':0,'gid':0,'mode':0o700}
+        code=copy.deepcopy(self.plan['execution']['code'])
+        code['finalizeEntrySha256']=t.sha((HERE/'standalone-intro-transport-finalize-entry.mjs').read_bytes())
+        code.pop('transportEntrySha256')
+        destinations={t.STATE+'/'+original+'.standalone-transport-finalize.intent.json':
+            {'kind':'FLAT_FINALIZE_INTENT','preimage':'ABSENT','uid':0,'gid':0,'mode':0o400},
+            audit+'/receipt.json':{'kind':'ORIGINAL_AUDIT_RECEIPT','preimage':'ABSENT',
+                'sha256':t.sha(receipt),'bytes':len(receipt),'uid':0,'gid':0,'mode':0o400}}
+        plan={'contract':t.FINALIZE_PLAN,'operationId':recovery,'action':t.FINALIZE_ACTION,
+            'hostIdentitySha256':self.plan['hostIdentitySha256'],
+            'bootId':self.plan['execution']['host']['bootId'],'originalOperationId':original,
+            'originalPlanSha256':t.sha(self.fixture.read(audit+'/plan.json',131072)),
+            'originalApprovalSha256':t.sha(self.fixture.read(audit+'/approval.json',131072)),
+            'originalIntentSha256':t.sha(self.fixture.read(audit+'/intent.json',131072)),
+            'requestReceiptSha256':t.sha(receipt),'effects':copy.deepcopy(t.FINALIZE_EFFECTS),
+            'execution':{'code':code,'invocation':{'interpreter':'/usr/bin/python3',
+                'flags':['-I','-B','-c'],'mode':'memory-captured-python-c','action':'finalize-reconcile'},
+                'host':{'hostIdentitySha256':self.plan['hostIdentitySha256'],
+                        'bootId':self.plan['execution']['host']['bootId']},
+                'nativeControlLockIdentity':copy.deepcopy(self.plan['execution']['nativeControlLockIdentity']),
+                'trustRoot':{'path':t.ROOT_PEM,'rawSha256':t.sha(self.pem)},
+                'auditDirectoryIdentity':info(audit),'requestDirectoryIdentity':info(request),
+                'destinations':destinations,'limits':copy.deepcopy(t.FINALIZE_LIMITS),
+                'effects':copy.deepcopy(t.FINALIZE_EFFECTS)}}
+        approval={'contract':t.FINALIZE_APPROVAL,'operationId':recovery,
+            'hostIdentitySha256':plan['hostIdentitySha256'],'planSha256':t.sha(t.canonical(plan)),
+            'action':plan['action'],'issuedAt':self.issued,'expiresAt':self.expires}
+        self.signer.stdin.write(json.dumps(approval)+'\n');self.signer.stdin.flush()
+        envelope={'approval':approval,'signature':json.loads(self.signer.stdout.readline())['signature']}
+        return {'finalizePlan':plan,'finalizeApprovalEnvelope':envelope}
+
     def test_signed_source_snapshot_publishes_only_seven_private_leaves(self):
         pre=set(self.base.rglob('*'))
         result=self.fixture.stage(copy.deepcopy(self.packet),self.operation)
@@ -216,7 +254,68 @@ crypto.sign(null,Buffer.from(JSON.stringify(v,null,2)+'\\n'),k.privateKey).toStr
         with self.assertRaises(OSError):partial.stage(self.packet,self.operation)
         self.assertFalse(self.fixture.absent(t.STATE+'/'+self.operation+'.standalone-transport.intent.json'))
         with self.assertRaises(ValueError):self.fixture.stage(self.packet,self.operation)
-        self.assertEqual(self.fixture.reconcile(self.operation)['decision'],'RECOVERY_REQUIRED')
+        self.assertEqual(self.fixture.reconcile(self.operation)['decision'],'RECOVERY_REQUIRED_PARTIAL')
+
+    def test_approval_expires_after_lock_before_first_intent(self):
+        valid=t.utc();calls=iter((valid,valid,self.expires))
+        with patch.object(t,'utc',side_effect=lambda:next(calls)):
+            with self.assertRaises(ValueError):self.fixture.stage(self.packet,self.operation)
+        self.assertTrue(self.fixture.absent(t.STATE+'/'+self.operation+'.standalone-transport.intent.json'))
+
+    def test_exact_request_missing_audit_receipt_uses_separate_finalize(self):
+        self.fixture.stage(self.packet,self.operation)
+        audit=t.AUDITS+'/'+self.operation+'/receipt.json'
+        original=self.fixture.read(audit,131072)
+        self.fixture.p(audit).unlink()  # Simulate a crash between the two receipt writes.
+        self.assertEqual(self.fixture.reconcile(self.operation)['decision'],
+            'COMPLETE_REQUEST_MISSING_AUDIT_RECEIPT_REQUIRES_SEPARATE_FINALIZE')
+        packet=self.finalize_packet()
+        before=set(self.base.rglob('*'))
+        result=self.fixture.finalize_reconcile(packet,packet['finalizePlan']['operationId'])
+        self.assertEqual(result['decision'],'EXACT_AUDIT_RECEIPT_FINALIZED_NOT_FORWARD_EXECUTED')
+        self.assertEqual(self.fixture.read(audit,131072),original)
+        self.assertEqual(self.fixture.reconcile(self.operation)['decision'],
+            'EXACT_TERMINAL_TRANSPORT_REQUIRES_INDEPENDENT_VERIFICATION')
+        self.assertEqual(self.fixture.reconcile_finalize(self.operation)['decision'],
+            'EXACT_FINALIZATION_TERMINAL_REQUIRES_INDEPENDENT_VERIFICATION')
+        created=set(self.base.rglob('*'))-before
+        self.assertEqual(created,{self.fixture.p(audit),
+            self.fixture.p(t.STATE+'/'+self.operation+'.standalone-transport-finalize.intent.json')})
+
+    def test_lost_finalize_response_never_replays_or_adopts_other_uuid(self):
+        self.fixture.stage(self.packet,self.operation)
+        audit=t.AUDITS+'/'+self.operation+'/receipt.json'
+        self.fixture.p(audit).unlink()
+        packet=self.finalize_packet()
+        class LostAfterIntent(t.Transport):
+            def write(self,value,raw,mode=0o400):
+                if value==audit:raise OSError('fixture lost response after finalize intent')
+                return super().write(value,raw,mode)
+        target=LostAfterIntent(self.base,node=self.node,
+            captured_program_sha256=self.fixture.captured_program_sha256)
+        with self.assertRaises(OSError):target.finalize_reconcile(packet,packet['finalizePlan']['operationId'])
+        self.assertEqual(self.fixture.reconcile_finalize(self.operation)['decision'],
+            'RECOVERY_REQUIRED_FINALIZE_INTENT_WITHOUT_AUDIT_RECEIPT')
+        with self.assertRaises(ValueError):
+            self.fixture.finalize_reconcile(self.finalize_packet('55555555-5555-4555-8555-555555555555'),
+                                            '55555555-5555-4555-8555-555555555555')
+        self.assertTrue(self.fixture.absent(audit))
+
+    def test_torn_request_receipt_blocks_finalize_without_intent(self):
+        self.fixture.stage(self.packet,self.operation)
+        audit=t.AUDITS+'/'+self.operation+'/receipt.json'
+        self.fixture.p(audit).unlink()
+        packet=self.finalize_packet()
+        request=str(Path(self.plan['snapshotPath']).parent)
+        receipt=request+'/transport-receipt.json'
+        self.fixture.p(receipt).chmod(0o600)
+        self.fixture.p(receipt).write_bytes(b'{}\n')
+        self.fixture.p(receipt).chmod(0o400)
+        self.assertEqual(self.fixture.reconcile(self.operation)['decision'],
+            'RECOVERY_REQUIRED_CONTRADICTORY')
+        with self.assertRaises(ValueError):
+            self.fixture.finalize_reconcile(packet,packet['finalizePlan']['operationId'])
+        self.assertTrue(self.fixture.absent(t.STATE+'/'+self.operation+'.standalone-transport-finalize.intent.json'))
 
     def test_replaced_native_lock_or_parent_blocks_before_intent(self):
         original=self.fixture.p(t.CONTROL_LOCK)

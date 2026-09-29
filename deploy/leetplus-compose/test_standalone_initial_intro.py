@@ -41,7 +41,7 @@ def plan_fixture():
         'anchorDirectories': {name: {'device': 1, 'inode': i+2, 'uid': 0, 'gid': 0, 'mode': 0o755}
                               for i, name in enumerate(intro.ANCHOR_DIRS)},
         'nativeControlLockIdentity': {'path': intro.CONTROL_LOCK, 'device': 1, 'inode': 2,
-                                      'uid': 0, 'gid': 0, 'mode': 0o600},
+                                      'uid': 0, 'gid': 0, 'mode': 0o600, 'ctimeNs': '1'},
         'dormantDestinations': {name: {'sha256': intro.sha(b'') if name == intro.INSTALL_LOCK else 'b'*64,
                                       'mode': intro.MODES[name], 'uid': 0, 'gid': 0}
                                 for name in intro.DEST_SOURCES},

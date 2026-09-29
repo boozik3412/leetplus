@@ -23,29 +23,57 @@ def captured_predecessor(old, name):
             'Exact captured predecessor executor required')
     module = types.ModuleType(name)
     module.__file__ = str(old['root'] / 'control_handoff.py')
-    authority = old.get('capturedAuthority')
-    contract = old.get('capturedContract')
-    require(isinstance(authority, bytes) and isinstance(contract, bytes) and
-            digest(authority) == old['files'].get('control-handoff-authority.mjs') and
-            digest(contract) == old['files'].get('contract.mjs'),
-            'Captured predecessor Node authority closure required')
-    marker = b"'./contract.mjs'"
-    require(authority.count(marker) == 1, 'Closed predecessor authority dependency differs')
-    contract_url = 'data:text/javascript;base64,' + base64.b64encode(contract).decode('ascii')
-    authority = authority.replace(marker, ("'" + contract_url + "'").encode())
-    authority_url = 'data:text/javascript;base64,' + base64.b64encode(authority).decode('ascii')
+    fields = {'control-handoff-authority.mjs': 'capturedAuthority',
+              'contract.mjs': 'capturedContract', 'control-handoff-runtime.mjs': 'capturedRuntime',
+              'orchestrator.mjs': 'capturedOrchestrator',
+              'worker-continuation.mjs': 'capturedWorkerContinuation',
+              'worker-authority.mjs': 'capturedWorkerAuthority'}
+    sources = {leaf: old.get(field) for leaf, field in fields.items()}
+    require(all(isinstance(value, bytes) and digest(value) == old['files'].get(leaf)
+                for leaf, value in sources.items()),
+            'Captured predecessor Node runtime closure required')
+    urls = {}
+
+    def link(leaf, visiting=()):
+        require(leaf in sources and leaf not in visiting, 'Unknown or cyclic captured predecessor import')
+        if leaf in urls:
+            return urls[leaf]
+        source = sources[leaf]
+        for quote, relative in re.findall(rb"\bfrom\s+(['\"])(\./[A-Za-z0-9_.-]+)\1", source):
+            dependency = relative[2:].decode('ascii')
+            marker = quote + relative + quote
+            source = source.replace(marker, quote + link(dependency, (*visiting, leaf)).encode() + quote)
+        require(not re.search(rb"(?:from\s+|import\s*\()['\"]\.{1,2}/", source),
+                'Unlinked predecessor relative import')
+        url = 'data:text/javascript;base64,' + base64.b64encode(source).decode('ascii')
+        require(len(url) <= 16 * 1024 * 1024, 'Captured predecessor Node closure exceeds bound')
+        urls[leaf] = url
+        return url
+
+    roots = {leaf: link(leaf) for leaf in ('control-handoff-authority.mjs', 'control-handoff-runtime.mjs')}
     exec(compile(raw, module.__file__, 'exec'), module.__dict__)
     original_run = module.run
-    original_url = (old['root'] / 'control-handoff-authority.mjs').as_uri()
 
     def captured_run(args, data=None, timeout=25):
         if args[:3] == ['/usr/bin/node', '--input-type=module', '-e']:
-            require(len(args) == 4 and isinstance(args[3], str) and
-                    args[3].count("'" + original_url + "'") == 1,
-                    'Unknown predecessor Node code import')
-            script = args[3].replace("'" + original_url + "'", "'" + authority_url + "'")
-            require(len(script.encode()) <= 120000, 'Captured predecessor Node script exceeds argv bound')
-            args = [*args[:3], script]
+            require(len(args) == 4 and isinstance(args[3], str) and isinstance(data, bytes),
+                    'Unknown predecessor Node code invocation')
+            matches = [(leaf, url) for leaf, url in roots.items()
+                       if args[3].count("'" + (old['root'] / leaf).as_uri() + "'") == 1]
+            require(len(matches) == 1, 'Unknown predecessor Node code import')
+            leaf, url = matches[0]
+            script = args[3].replace("'" + (old['root'] / leaf).as_uri() + "'", "'" + url + "'")
+            marker = "fs.readFileSync(0,'utf8')"
+            require(script.count(marker) == 1, 'Unknown predecessor Node input ABI')
+            script = script.replace(marker, 'globalThis.__leetplusCapturedInputRaw')
+            packet = canonical({'programUrl': 'data:text/javascript;base64,' +
+                                base64.b64encode(script.encode()).decode('ascii'),
+                                'inputBase64': base64.b64encode(data).decode('ascii')})
+            require(len(packet) <= 24 * 1024 * 1024, 'Captured predecessor execution packet exceeds bound')
+            loader = ("import fs from 'node:fs';const p=JSON.parse(fs.readFileSync(0,'utf8'));"
+                      "globalThis.__leetplusCapturedInputRaw=Buffer.from(p.inputBase64,'base64').toString('utf8');"
+                      "await import(p.programUrl);")
+            return original_run([*args[:3], loader], packet, timeout)
         return original_run(args, data, timeout)
 
     module.run = captured_run
@@ -277,7 +305,9 @@ class EnrolledObserver:
         module = captured_predecessor(old, 'accepted_native_context')
         snapshot = module.snapshot(old['root'])
         previous = secure_read(module.POINTER, 8192) if module.POINTER.exists() or module.POINTER.is_symlink() else None
-        internal = {'root', 'capturedExecutor', 'capturedAuthority', 'capturedContract'}
+        internal = {'root', 'capturedExecutor', 'capturedAuthority', 'capturedContract',
+                    'capturedRuntime', 'capturedOrchestrator', 'capturedWorkerContinuation',
+                    'capturedWorkerAuthority'}
         return {'old': {key: value for key, value in old.items() if key not in internal},
                 'target': {key: value for key, value in target.items() if key not in internal},
                 'snapshot': snapshot, 'timers': {unit: module.systemd(unit) for unit in module.TIMERS},

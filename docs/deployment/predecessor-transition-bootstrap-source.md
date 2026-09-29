@@ -96,7 +96,13 @@ its eight effect-capable Python dependencies from that capture in dependency
 order. Its Node CLI, protocol and two authority modules are linked from
 captured bytes as data URLs; no child executes an installed source pathname.
 Accepted predecessor inventory likewise captures `control_handoff.py` and the
-observer compiles that buffer for all three read/plan paths. A filename hash
+six JavaScript leaves reachable from its snapshot and authority routines:
+`control-handoff-runtime.mjs`, `orchestrator.mjs`,
+`worker-continuation.mjs`, `worker-authority.mjs`,
+`control-handoff-authority.mjs` and `contract.mjs`. The observer compiles the
+Python buffer, links each fixed JS import from captured data URLs, and injects
+a narrow stdin-preserving Node callback for runtime, forward, rollback and
+recovery validation. A filename hash
 followed by another pathname import is not source authority. This is a source
 candidate and needs the complete Linux fixture and installed-path acceptance.
 

@@ -17,7 +17,48 @@ from native_boundary import canonical, verify_bundle_inventory
 SHA = 'a' * 40
 
 
+def complete_capture_fixture(old):
+    for leaf, field in (('control-handoff-runtime.mjs', 'capturedRuntime'),
+                        ('orchestrator.mjs', 'capturedOrchestrator'),
+                        ('worker-continuation.mjs', 'capturedWorkerContinuation'),
+                        ('worker-authority.mjs', 'capturedWorkerAuthority')):
+        raw = b'export const VALUE="captured";\n'
+        old[field] = raw
+        old['files'][leaf] = digest(raw)
+    return old
+
+
 class CapturedPredecessorTests(unittest.TestCase):
+    def test_frozen_a_and_bridge_snapshot_import_graph_is_closed(self):
+        names = {'control_handoff.py': 'capturedExecutor',
+                 'control-handoff-authority.mjs': 'capturedAuthority',
+                 'contract.mjs': 'capturedContract',
+                 'control-handoff-runtime.mjs': 'capturedRuntime',
+                 'orchestrator.mjs': 'capturedOrchestrator',
+                 'worker-continuation.mjs': 'capturedWorkerContinuation',
+                 'worker-authority.mjs': 'capturedWorkerAuthority'}
+        for release in ('b0cbf3a4f302b299762fa055f3bffe0376a91182',
+                        'bebeb41354da0dd04b218495cbbf5d75ba9f0a85'):
+            with self.subTest(release=release):
+                old = {'root': Path('/usr/local/lib/leetplus-compose') / release,
+                       'files': {}}
+                for leaf, field in names.items():
+                    raw = subprocess.run(['git', '--no-replace-objects', 'show',
+                        release + ':deploy/leetplus-compose/' + leaf],
+                        capture_output=True, check=True, timeout=10).stdout
+                    old[field] = raw
+                    old['files'][leaf] = digest(raw)
+                module = captured_predecessor(old, 'frozen_predecessor_fixture')
+                self.assertTrue(callable(module.snapshot))
+                self.assertTrue(callable(module.verify_current_controller_authority))
+                if os.name == 'posix' and Path('/usr/bin/node').is_file():
+                    runtime_url = (old['root'] / 'control-handoff-runtime.mjs').as_uri()
+                    script = ("import fs from 'node:fs';import {validateAcceptedApplicationSnapshot} from '" +
+                              runtime_url + "';JSON.parse(fs.readFileSync(0,'utf8'));" +
+                              "console.log(typeof validateAcceptedApplicationSnapshot);")
+                    self.assertEqual(module.run(['/usr/bin/node', '--input-type=module', '-e', script],
+                                                b'{}\n'), b'function')
+
     def test_verified_executor_buffer_survives_path_replacement(self):
         root = Path(tempfile.mkdtemp(prefix='leetplus-captured-predecessor-'))
         try:
@@ -30,7 +71,7 @@ class CapturedPredecessorTests(unittest.TestCase):
                    'control-handoff-authority.mjs': digest(authority), 'contract.mjs': digest(contract)},
                    'capturedExecutor': trusted, 'capturedAuthority': authority, 'capturedContract': contract}
             executor.write_bytes(b'raise RuntimeError("foreign source executed")\n')
-            module = captured_predecessor(old, 'trusted_predecessor_fixture')
+            module = captured_predecessor(complete_capture_fixture(old), 'trusted_predecessor_fixture')
             self.assertEqual(module.VALUE, 'trusted')
         finally:
             shutil.rmtree(root)
@@ -47,8 +88,8 @@ class CapturedPredecessorTests(unittest.TestCase):
                 "    if result.returncode: raise ValueError(result.stderr.decode())\n"
                 "    return result.stdout.strip()\n"
                 "def invoke(name):\n"
-                f"    script=\"import {{\"+name+\"}} from '{authority_url}';\"+name+\"();console.log('PASS');\"\n"
-                "    return run(['/usr/bin/node','--input-type=module','-e',script])\n"
+                f"    script=\"import fs from 'node:fs';import {{\"+name+\"}} from '{authority_url}';JSON.parse(fs.readFileSync(0,'utf8'));\"+name+\"();console.log('PASS');\"\n"
+                "    return run(['/usr/bin/node','--input-type=module','-e',script],b'{}')\n"
                 "def validate_authority(): return invoke('validateControlHandoffAuthority')\n"
                 "def validate_rollback(): return invoke('validateControlRollbackApproval')\n"
                 "def validate_recovery(): return invoke('validateControlHandoffRecoveryAuthority')\n"
@@ -67,7 +108,7 @@ class CapturedPredecessorTests(unittest.TestCase):
                    'capturedContract': contract}
             for name in files:
                 (root / name).write_bytes(b'raise Error("foreign source pathname")\n')
-            module = captured_predecessor(old, 'captured_authority_fixture')
+            module = captured_predecessor(complete_capture_fixture(old), 'captured_authority_fixture')
             self.assertEqual(module.verify_current_controller_authority(
                 {'activePlanControlSha256': 'nonfast'}), b'PASS')
             self.assertEqual(module.validate_rollback(), b'PASS')
@@ -86,7 +127,10 @@ class InstalledInventoryTests(unittest.TestCase):
             directory.mkdir(mode=0o700)
         self.leaves = {'control.sh': b'#!/bin/sh\n', 'control_handoff.py': b'print("source only")\n',
                        'control-handoff-authority.mjs': b"import {VALUE} from './contract.mjs';\n",
-                       'contract.mjs': b'export const VALUE="fixture";\n'}
+                       'contract.mjs': b'export const VALUE="fixture";\n',
+                       **{leaf: b'export const VALUE="fixture";\n' for leaf in
+                          ('control-handoff-runtime.mjs', 'orchestrator.mjs',
+                           'worker-continuation.mjs', 'worker-authority.mjs')}}
         stream = io.BytesIO()
         with tarfile.open(fileobj=stream, mode='w:gz') as archive:
             for name, data in self.leaves.items():

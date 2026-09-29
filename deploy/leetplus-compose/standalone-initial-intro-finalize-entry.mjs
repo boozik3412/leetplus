@@ -73,7 +73,7 @@ for await(const chunk of process.stdin){size+=chunk.length;
   require(size<=393216,'Finalize operator wrapper exceeds bound');chunks.push(chunk);}
 require(!timedOut,'Finalize input read exceeded total deadline');
 const outer=exact(Buffer.concat(chunks));
-require(outer&&Object.keys(outer).sort().join(',')==='packet,introPythonSourceBase64',
+require(outer&&Object.keys(outer).sort().join(',')==='introPythonSourceBase64,packet',
   'Closed captured finalization wrapper required');
 const packet=outer.packet;
 require(packet&&Object.keys(packet).sort().join(',')==='finalizeApprovalEnvelope,finalizePlan',

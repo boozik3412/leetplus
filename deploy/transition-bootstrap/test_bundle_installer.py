@@ -136,6 +136,28 @@ class RuntimeProvisionTests(unittest.TestCase):
         self.assertEqual(list((self.runtime / 'operations').iterdir()), [])
         self.assertEqual(list((self.runtime / 'attempts').iterdir()), [])
 
+    def test_installed_wrapper_observes_empty_native_locks_without_write(self):
+        entry_path = Path(__file__).resolve().parents[2] / 'docs' / 'deployment' / \
+            'production-artifact' / 'install_predecessor_bootstrap.py'
+        spec = importlib.util.spec_from_file_location('empty_lock_entry_fixture', entry_path)
+        entry = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(entry)
+        actual_path = Path
+
+        def remap(path):
+            value = str(path)
+            if value.startswith('/var/lib/leetplus-compose/'):
+                return self.compose / actual_path(value).name
+            return actual_path(path)
+
+        before = {path.name: path.read_bytes() for path in self.compose.iterdir()}
+        with patch.object(entry, 'Path', side_effect=remap):
+            value, classification = entry.historical_intent_or_classification(
+                self.compose / 'missing.intent.json')
+        self.assertIsNone(value)
+        self.assertEqual(classification['decision'], 'INSTALL_INTENT_ABSENT_REQUIRES_SIGNED_RECOVERY')
+        self.assertEqual(before, {path.name: path.read_bytes() for path in self.compose.iterdir()})
+
     def test_unsigned_placement_and_lost_receipt_fail_closed(self):
         forged = {'approval': self.envelope['approval'], 'signature': 'A' * 86 + '=='}
         with self.assertRaisesRegex(ValueError, 'signature rejected'):

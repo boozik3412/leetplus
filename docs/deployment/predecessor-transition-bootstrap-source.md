@@ -127,12 +127,16 @@ provisioning is a distinct future dispatcher effect/GO; this source change
 performs no host operation.
 
 The offline signer now has separate deployment-root kinds `transport`,
-`initial-intro` and `transport-finalize`. It reads the pure A schema validator
+`initial-intro`, `transport-finalize` and `initial-intro-finalize`. It reads the pure A schema validator
 from an exact Git blob and compares an independently frozen source hash before
 executing that validator or accessing DPAPI. Transport/finalize bind the
 accepted deployment public bytes; INTRO additionally verifies the prior
 transport signature, timely intent and complete plan/approval/flat-intent/
-execution receipt hashes. Each signature needs its own exact confirmation
+execution receipt hashes. INTRO V2 persists the genuine timely
+`receipt.pending.json` bytes before the last dormant destination. Its separate
+finalize action copies those original bytes into a missing terminal audit
+receipt only after validating the complete immutable postimage; it never
+invents a later acceptedAt or repeats installation. Each signature needs its own exact confirmation
 with domain, operation UUID, statement SHA and root DER. Finalize is limited
 to its frozen two-write scope and cannot repeat transport or cleanup. Tests
 use ephemeral keys; no production key is read by this source work.

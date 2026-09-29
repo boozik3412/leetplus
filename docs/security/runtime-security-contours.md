@@ -21,9 +21,13 @@ closure, без hash-then-path-import.
 exact request по captured input; это отдельный GO диспетчера. RPC read-only
 observe/plan/prepare не создают attempt files, а effectful переходы по-прежнему
 требуют нативный подписанный intent и locks.
-Offline signer имеет отдельные typed transport/INTRO/finalize domains с
+Offline signer имеет отдельные typed transport/INTRO V2/transport-finalize/
+INTRO-finalize domains с
 frozen source validators и exact deployment-root provenance до DPAPI;
 INTRO подписывается только после полной timely transport receipt lineage.
+V2 сохраняет своевременный marker будущего receipt до последнего dormant leaf;
+отдельный root-signed finalize копирует только его неизменённые байты после
+полного postimage без повторной установки или подмены acceptedAt.
 A отвечает за отдельный INITIAL_INERT_ONLY predecessor route без broad
 production-control install/unit reload. Layout marker создаёт защищённый
 parent, не устанавливает bundle и не меняет serving pointer. `prepare`

@@ -21,6 +21,8 @@ request; read-only observe/plan/prepare больше не пишут attempt aud
 Это ещё не installed state и не разрешение на A→bridge/Variant B serving.
 В общий candidate интегрирован frozen A9a31 expiry/recovery delta, typed
 offline signing для transport/INTRO/finalize и receipt-lineage negatives.
+Последний источник A INTRO V2/b8ba вводит своевременный receipt marker и
+отдельный signed finalize-only recovery для потерянного terminal response.
 Финальные combined review/CI, main admission и конкретные dispatcher GOs
 ещё требуются; source PASS не меняет installed/serving статус.
 

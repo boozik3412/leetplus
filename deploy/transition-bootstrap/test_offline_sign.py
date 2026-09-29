@@ -318,8 +318,9 @@ class OfflineSignerTests(unittest.TestCase):
         public_path.write_bytes(public)
         kinds = {
             'transport': 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_APPROVAL',
-            'initial-intro': 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_APPROVAL',
+            'initial-intro': 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_APPROVAL',
             'transport-finalize': 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_APPROVAL'}
+        kinds['initial-intro-finalize'] = 'LEETPLUS_STANDALONE_INITIAL_INTRO_FINALIZE_V1_APPROVAL'
         calls = []
         for kind, contract in kinds.items():
             statement = {'contract': contract, 'operationId': self.plan['operationId'],
@@ -437,6 +438,76 @@ class OfflineSignerTests(unittest.TestCase):
                 sign_initial('initial-intro', intro_approval, damaged, 'bad-' + field,
                              private_loader=lambda _path: calls.append('private'))
         self.assertEqual(calls, [])
+
+    def test_initial_intro_finalize_signs_only_marker_receipt_scope(self):
+        import subprocess
+        from cryptography.hazmat.primitives import serialization
+        from offline_sign import INITIAL_VALIDATOR_PINS
+        repo = Path(__file__).resolve().parents[2]
+        spec = importlib.util.spec_from_file_location('offline_intro_finalize_fixture',
+            repo / 'deploy' / 'leetplus-compose' / 'test_standalone_initial_intro.py')
+        fixture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixture)
+        intro = fixture.intro
+        original = fixture.plan_fixture()
+        old = original['operationId']
+        operation = '55555555-5555-4555-8555-555555555555'
+        public = self.deployment.public_key().public_bytes(serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo)
+        der = self.deployment.public_key().public_bytes(serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo)
+        plan = {'contract': intro.FINALIZE_PLAN, 'operationId': operation,
+            'originalOperationId': old, 'action': intro.FINALIZE_ACTION,
+            'hostIdentitySha256': original['hostIdentitySha256'], 'bootId': original['bootId'],
+            'originalPlanSha256': 'a' * 64, 'originalApprovalSha256': 'b' * 64,
+            'originalIntentSha256': 'c' * 64, 'markerSha256': 'd' * 64, 'postimageSha256': 'e' * 64,
+            'effects': copy.deepcopy(intro.FINALIZE_EFFECTS),
+            'execution': {'code': {'introFinalizeEntrySha256': '1' * 64,
+                'introProgramSha256': INITIAL_VALIDATOR_PINS['initial-intro-finalize'][1],
+                'pythonLoaderSha256': digest(intro.FINALIZE_LOADER.encode()),
+                'nodeExecutableSha256': '2' * 64, 'nodeRealpath': '/usr/bin/node',
+                'pythonExecutableSha256': '3' * 64, 'pythonRealpath': '/usr/bin/python3.12'},
+                'invocation': {'interpreter': '/usr/bin/python3', 'flags': ['-I', '-B', '-c'],
+                              'mode': 'captured-code-and-packet-stdin', 'action': 'finalize'},
+                'host': {'hostIdentitySha256': original['hostIdentitySha256'], 'bootId': original['bootId']},
+                'nativeControlLockIdentity': original['nativeControlLockIdentity'],
+                'trustRoot': {'path': '/etc/leetplus-compose/approval-root.pem', 'rawSha256': digest(public)},
+                'auditDirectoryIdentity': {'device': 1, 'inode': 2, 'uid': 0, 'gid': 0, 'mode': 0o700},
+                'markerIdentity': {'device': 1, 'inode': 3, 'bytes': 123,
+                                   'uid': 0, 'gid': 0, 'mode': 0o400, 'ctimeNs': '1'},
+                'destinations': {
+                    intro.STATE + '/' + old + '.standalone-intro-finalize.intent.json':
+                        {'kind': 'FLAT_FINALIZE_INTENT', 'preimage': 'ABSENT', 'uid': 0, 'gid': 0, 'mode': 0o400},
+                    intro.AUDITS + '/' + old + '/receipt.json':
+                        {'kind': 'EXACT_MARKER_RECEIPT', 'preimage': 'ABSENT', 'sha256': 'd' * 64,
+                         'bytes': 123, 'uid': 0, 'gid': 0, 'mode': 0o400}},
+                'limits': {'programBytes': 131072, 'packetBytes': 131072,
+                           'lockWaitSeconds': 120, 'totalSeconds': 180},
+                'effects': copy.deepcopy(intro.FINALIZE_EFFECTS)}}
+        statement = {'contract': intro.FINALIZE_APPROVAL, 'operationId': operation,
+            'hostIdentitySha256': plan['hostIdentitySha256'], 'planSha256': digest(canonical(plan)),
+            'action': plan['action'], 'issuedAt': iso(self.now - timedelta(seconds=10)),
+            'expiresAt': iso(self.now + timedelta(minutes=10))}
+        linked = {'plan': plan, 'deploymentRootPem': public.decode('ascii'),
+            'authoritySourceRelease': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo).decode().strip(),
+            'authoritySourceSha256': INITIAL_VALIDATOR_PINS['initial-intro-finalize'][1]}
+        statement_path = self.root / 'intro-finalize.statement.json'
+        linked_path = self.root / 'intro-finalize.linked.json'
+        public_path = self.root / 'intro-finalize.public.pem'
+        statement_path.write_bytes(canonical(statement))
+        linked_path.write_bytes(canonical(linked))
+        public_path.write_bytes(public)
+        confirmation = (f'GO BOOTSTRAP-SIGN initial-intro-finalize {operation} '
+                        f'{digest(canonical(statement))} {digest(der)}')
+        result = sign_exact(kind='initial-intro-finalize', statement_path=statement_path,
+            linked_path=linked_path, public_path=public_path, expected_public_der_sha256=digest(der),
+            private_path=self.root / 'unused.dpapi', output_path=self.root / 'intro-finalize.envelope.json',
+            confirm=confirmation, now=self.now, private_loader=lambda _path: self.deployment)
+        self.assertEqual(result['kind'], 'initial-intro-finalize')
+        forged = copy.deepcopy(linked)
+        forged['plan']['effects']['controllerPointerMutation'] = True
+        with self.assertRaises(ValueError):
+            validate_statement('initial-intro-finalize', statement, forged, digest(der), confirmation, now=self.now)
 
 
 if __name__ == '__main__':

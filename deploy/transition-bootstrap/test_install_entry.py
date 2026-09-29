@@ -141,7 +141,7 @@ class InstallEntryTests(unittest.TestCase):
                               'operationId': operation}
         generation_raw = entry.canonical(generation_receipt)
         authority['generationReceiptSha256'] = entry.digest(generation_raw)
-        intro_receipt = {'contract': 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_RECEIPT',
+        intro_receipt = {'contract': 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_RECEIPT',
                          'operationId': operation, 'planSha256': authority['introPlanSha256'],
                          'generationReceiptSha256': authority['generationReceiptSha256']}
         intro_raw = entry.canonical(intro_receipt)

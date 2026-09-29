@@ -24,8 +24,9 @@ HASH = re.compile(r'[a-f0-9]{64}\Z')
 UUID = re.compile(r'[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\Z')
 CONTRACTS = {
     'transport': ('LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_APPROVAL', 'approval', 30),
-    'initial-intro': ('LEETPLUS_STANDALONE_INITIAL_INTRO_V1_APPROVAL', 'approval', 30),
+    'initial-intro': ('LEETPLUS_STANDALONE_INITIAL_INTRO_V2_APPROVAL', 'approval', 30),
     'transport-finalize': ('LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_APPROVAL', 'approval', 30),
+    'initial-intro-finalize': ('LEETPLUS_STANDALONE_INITIAL_INTRO_FINALIZE_V1_APPROVAL', 'approval', 30),
     'permit-a': ('LEETPLUS_A_BRIDGE_BOOTSTRAP_PERMIT_V1', 'permit', 30),
     'permit-bridge': ('LEETPLUS_BRIDGE_EXTERNAL_SUCCESSOR_PERMIT_V1', 'permit', 30),
     'execution': ('LEETPLUS_PREDECESSOR_TRANSITION_BOOTSTRAP_V1_EXECUTION', 'command', 30),
@@ -38,6 +39,7 @@ CONTRACTS = {
 }
 ROOT_DOMAIN = {
     'transport': 'deployment', 'initial-intro': 'deployment', 'transport-finalize': 'deployment',
+    'initial-intro-finalize': 'deployment',
     'permit-a': 'permit', 'permit-bridge': 'permit',
     'execution': 'execution', 'rollback': 'rollback',
     'no-effect': 'noEffect', 'install': 'deployment',
@@ -51,9 +53,11 @@ INITIAL_VALIDATOR_PINS = {
     'transport': ('deploy/leetplus-compose/standalone-intro-transport.py',
                   'ca0078122e6b9f9bd433d51996e23a46fde89b591a970903991af3cf16df80ff'),
     'initial-intro': ('deploy/leetplus-compose/standalone-initial-intro.py',
-                     'dfa3ad22c4964564dce63ce9cd3640831ec81530fa0b7b2a6a15c2c9a3a3cfbf'),
+                     '075739dfa9b727da43448d5daf56dac7a3b45a8bdbc9e9d062afc2217b381b8b'),
     'transport-finalize': ('deploy/leetplus-compose/standalone-intro-transport.py',
                           'ca0078122e6b9f9bd433d51996e23a46fde89b591a970903991af3cf16df80ff'),
+    'initial-intro-finalize': ('deploy/leetplus-compose/standalone-initial-intro.py',
+                              '075739dfa9b727da43448d5daf56dac7a3b45a8bdbc9e9d062afc2217b381b8b'),
 }
 
 
@@ -88,7 +92,7 @@ def validate_linked_root(kind, linked, public_raw, public_der_sha256):
         if not isinstance(linked.get('deploymentRootPem'), str) or \
                 linked['deploymentRootPem'].encode('ascii') != public_raw:
             raise ValueError('Deployment root differs from independently supplied source')
-        if kind in ('transport', 'transport-finalize'):
+        if kind in ('transport', 'transport-finalize', 'initial-intro-finalize'):
             plan = linked.get('plan')
             if not isinstance(plan, dict) or not isinstance(plan.get('execution'), dict) or \
                     plan['execution'].get('trustRoot') != {
@@ -374,7 +378,7 @@ def validate_statement(kind, statement, linked, expected_root_der, confirm, now=
     elif kind in INITIAL_VALIDATOR_PINS:
         plan = values.get('plan')
         validator = initial_shape_validator(kind, linked)
-        if kind == 'transport-finalize':
+        if kind in ('transport-finalize', 'initial-intro-finalize'):
             validator.validate_finalize_plan(plan)
             plan_contract, approval_contract = validator.FINALIZE_PLAN, validator.FINALIZE_APPROVAL
         else:

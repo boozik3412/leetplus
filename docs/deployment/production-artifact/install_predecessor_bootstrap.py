@@ -132,7 +132,12 @@ def observation_locks():
     deadline = time.monotonic() + 120
     try:
         for path in paths:
-            secure_read(path, 65536)
+            # Introduced native locks are intentionally zero-byte files;
+            # check their protected metadata without the code-leaf size rule.
+            for parent in (*reversed(path.parent.parents), path.parent):
+                info = parent.lstat()
+                require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022,
+                        'Trusted observation lock ancestor changed')
             fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
             descriptors.append(fd)
             before = os.fstat(fd)
@@ -298,7 +303,7 @@ def verify_generation(source_release, authority):
             'Generation receipt lacks exact intro operation')
     intro_receipt, intro_raw = exact_json(INTRO_AUDIT / intro_operation / 'receipt.json', 65536)
     require(digest(intro_raw) == authority['introReceiptSha256'] and
-            intro_receipt.get('contract') == 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_RECEIPT' and
+            intro_receipt.get('contract') == 'LEETPLUS_STANDALONE_INITIAL_INTRO_V2_RECEIPT' and
             intro_receipt.get('operationId') == intro_operation and
             intro_receipt.get('planSha256') == authority['introPlanSha256'] and
             intro_receipt.get('generationReceiptSha256') == authority['generationReceiptSha256'],

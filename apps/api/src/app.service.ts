@@ -89,11 +89,11 @@ export class AppService {
       // rollback target) on a database that is ahead of it.
       const databaseAhead = Boolean(
         expectedMigration &&
-          expectedMigrationCount &&
-          migrations[0]?.expected_applied === true &&
-          databaseMigration &&
-          databaseMigration > expectedMigration &&
-          completedMigrations > expectedMigrationCount,
+        expectedMigrationCount &&
+        migrations[0]?.expected_applied === true &&
+        databaseMigration &&
+        databaseMigration > expectedMigration &&
+        completedMigrations > expectedMigrationCount,
       );
 
       if (!databaseMigration) {

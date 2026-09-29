@@ -2,6 +2,19 @@
 
 Статус: **канонический current-state contract**, оперативный checkpoint **24.09.2026**.
 
+**Source-only bootstrap transport proposal 29.09:** V2 public-only install
+entrypoint принимает только fixed initial inert generation + подписанный
+deployment-root exact plan, который связывает helper/verifier/generation
+receipt+manifest и полный source import closure до Python compile/import.
+A отвечает за отдельный INITIAL_INERT_ONLY predecessor route без broad
+production-control install/unit reload. Layout marker создаёт защищённый
+parent, не устанавливает bundle и не меняет serving pointer. `prepare`
+остаётся без записи; `apply` требует нового direct exact GO, fresh
+host/control/backup state, signed plan и receipts. Это source/CI candidate,
+не установленный bootstrap runtime; ключи, provider/grants/timers и
+приложение не затронуты.
+[Transport and install boundary](../deployment/predecessor-transition-bootstrap-source.md).
+
 **Source-only predecessor bootstrap 27.09:** отдельная ветка после frozen
 controller PR248 содержит proposal ordered merges246→247→248 и изолированные
 protocol/native primitives для b0→bridge и bridge→external successor. Они

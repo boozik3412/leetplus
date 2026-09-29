@@ -148,13 +148,14 @@ class StandaloneBundleInstaller:
 
     def __init__(self, *, controls_root, inbox_root, source_inbox, installed_parent,
                  state_root, machine_id, core_pointer, deployment_root,
-                 install_lock, control_lock, installer_source_path):
+                 install_lock, control_lock, installer_source_path, pending_state_root=None):
         require(os.name == 'posix' and os.getuid() == 0, 'Root installer boundary required')
         self.controls = secure_directory(controls_root)
         self.inbox = secure_directory(inbox_root)
         self.source_inbox = secure_directory(source_inbox)
         self.installed_parent = secure_directory(installed_parent)
         self.state = secure_directory(state_root)
+        self.pending_state = secure_directory(pending_state_root if pending_state_root is not None else state_root)
         self.machine_id = Path(machine_id)
         self.core = Path(core_pointer)
         self.deployment_root = Path(deployment_root)
@@ -185,9 +186,14 @@ class StandaloneBundleInstaller:
             'Only accepted A or bridge may enroll this standalone bundle')
         require(old['manifestSha256'] == plan['predecessorManifestSha256'],
                 'Signed predecessor manifest differs from installed evidence')
+        try:
+            (self.pending_state / 'control-handoff.pending.json').lstat()
+        except FileNotFoundError:
+            no_pending = True
+        else:
+            no_pending = False
         require(self.core.is_symlink() and self.core.lstat().st_uid == 0 and
-                os.readlink(self.core) == plan['oldCorePointer'] and
-                not (self.state / 'control-handoff.pending.json').exists(),
+                os.readlink(self.core) == plan['oldCorePointer'] and no_pending,
                 'Serving predecessor or pending handoff differs')
         require(digest(archive) == plan['bundleArchiveSha256'],
                 'Standalone archive differs from exact signed plan')

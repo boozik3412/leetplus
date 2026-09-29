@@ -43,7 +43,7 @@ class OfflineSignerTests(unittest.TestCase):
         deployment_pem = self.deployment.public_key().public_bytes(
             serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode('ascii')
         bundle_files = {name: digest(name.encode()) for name in sorted(REQUIRED_BUNDLE_FILES)}
-        install_plan = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_PLAN',
+        install_plan = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_PLAN',
             'operationId': '11111111-1111-4111-8111-111111111111',
             'action': 'INSTALL_INDEPENDENT_PUBLIC_ONLY_ADAPTER',
             'hostIdentitySha256': '1' * 64, 'predecessorReleaseSha': 'a' * 40,
@@ -51,10 +51,13 @@ class OfflineSignerTests(unittest.TestCase):
             'oldCorePointer': '/usr/local/lib/leetplus-compose/' + 'a' * 40 + '/control.sh',
             'sourceRelease': 'b' * 40, 'sourceAdmissionSha256': '3' * 64,
             'installerSourceSha256': '4' * 64, 'bundleFiles': bundle_files,
+            'installerAuthority': {'helperSourceSha256': '1' * 64, 'verifierSourceSha256': '2' * 64,
+                'introPlanSha256': '5' * 64, 'introReceiptSha256': '6' * 64,
+                'generationRootManifestSha256': '3' * 64, 'generationReceiptSha256': '4' * 64},
             'bundleSha256': digest(canonical(bundle_files)), 'bundleArchiveSha256': '5' * 64,
             'publicRoots': {name: digest(value.encode('ascii')) for name, value in public_roots.items()},
             'effects': INSTALL_EFFECTS.copy()}
-        install_approval = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_APPROVAL',
+        install_approval = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_APPROVAL',
             'operationId': install_plan['operationId'],
             'hostIdentitySha256': install_plan['hostIdentitySha256'],
             'planSha256': digest(canonical(install_plan)), 'action': install_plan['action'],
@@ -68,7 +71,7 @@ class OfflineSignerTests(unittest.TestCase):
             'planSha256': digest(canonical(install_plan)),
             'approvalSha256': digest(canonical(approval_envelope)),
             'authorizedAt': iso(self.now - timedelta(minutes=10))}
-        install_receipt = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_RECEIPT',
+        install_receipt = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_RECEIPT',
             'decision': 'PASS', 'operationId': install_plan['operationId'],
             'planSha256': digest(canonical(install_plan)),
             'approvalSha256': digest(canonical(approval_envelope)),
@@ -77,7 +80,7 @@ class OfflineSignerTests(unittest.TestCase):
             'publicRoots': install_plan['publicRoots'],
             'hostIdentitySha256': install_plan['hostIdentitySha256'],
             'acceptedAt': install_intent['authorizedAt']}
-        install_record = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V1',
+        install_record = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V2',
             'decision': 'ACCEPTED', 'hostIdentitySha256': install_plan['hostIdentitySha256'],
             'bundleFiles': bundle_files, 'bundleSha256': install_plan['bundleSha256'],
             'publicRoots': install_plan['publicRoots'],

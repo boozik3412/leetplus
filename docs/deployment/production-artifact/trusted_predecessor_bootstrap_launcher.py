@@ -128,10 +128,10 @@ def verify_installed_bundle(final, deployment_root=APPROVAL_ROOT,
          'installer-receipt.json', 'enrollment.json'))
     required_plan = {'contract', 'operationId', 'action', 'hostIdentitySha256',
         'predecessorReleaseSha', 'predecessorManifestSha256', 'oldCorePointer',
-        'sourceRelease', 'sourceAdmissionSha256', 'installerSourceSha256',
+        'sourceRelease', 'sourceAdmissionSha256', 'installerSourceSha256', 'installerAuthority',
         'bundleFiles', 'bundleSha256', 'bundleArchiveSha256', 'publicRoots', 'effects'}
     require(isinstance(plan, dict) and set(plan) == required_plan and plan.get('contract') ==
-            'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_PLAN' and
+            'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_PLAN' and
             plan.get('action') == 'INSTALL_INDEPENDENT_PUBLIC_ONLY_ADAPTER' and
             UUID.fullmatch(plan.get('operationId', '')) and
             plan.get('effects') == EFFECTS and
@@ -143,6 +143,11 @@ def verify_installed_bundle(final, deployment_root=APPROVAL_ROOT,
             all(HASH.fullmatch(plan.get(name, '')) for name in
                 ('predecessorManifestSha256', 'sourceAdmissionSha256',
                  'installerSourceSha256', 'bundleArchiveSha256')) and
+            isinstance(plan.get('installerAuthority'), dict) and
+            set(plan['installerAuthority']) == {'helperSourceSha256', 'verifierSourceSha256',
+                'introPlanSha256', 'introReceiptSha256',
+                'generationRootManifestSha256', 'generationReceiptSha256'} and
+            all(isinstance(value, str) and HASH.fullmatch(value) for value in plan['installerAuthority'].values()) and
             plan.get('bundleSha256') == final.name and
             isinstance(plan.get('bundleFiles'), dict) and REQUIRED <= set(plan['bundleFiles']) and
             0 < len(plan['bundleFiles']) <= 128 and
@@ -157,7 +162,7 @@ def verify_installed_bundle(final, deployment_root=APPROVAL_ROOT,
     require(isinstance(approval, dict) and set(approval) ==
             {'contract', 'operationId', 'hostIdentitySha256', 'planSha256',
              'action', 'issuedAt', 'expiresAt'} and
-            approval['contract'] == 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_APPROVAL' and
+            approval['contract'] == 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_APPROVAL' and
             approval['operationId'] == plan['operationId'] and
             approval['action'] == plan['action'] and
             approval['hostIdentitySha256'] == plan['hostIdentitySha256'] and
@@ -177,7 +182,7 @@ def verify_installed_bundle(final, deployment_root=APPROVAL_ROOT,
     require(isinstance(receipt, dict) and set(receipt) ==
             {'contract', 'decision', 'operationId', 'planSha256', 'approvalSha256',
              'intentSha256', 'bundleSha256', 'publicRoots', 'hostIdentitySha256', 'acceptedAt'} and
-            receipt['contract'] == 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_RECEIPT' and
+            receipt['contract'] == 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_RECEIPT' and
             receipt['decision'] == 'PASS' and receipt['operationId'] == plan['operationId'] and
             receipt['planSha256'] == digest(canonical(plan)) and
             receipt['approvalSha256'] == digest(canonical(approval_envelope)) and
@@ -187,7 +192,7 @@ def verify_installed_bundle(final, deployment_root=APPROVAL_ROOT,
             receipt['hostIdentitySha256'] == plan['hostIdentitySha256'] and
             instant(receipt['acceptedAt']) == authorized,
             'Installer terminal receipt differs from timely intent')
-    require(record == {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V1',
+    require(record == {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V2',
             'decision': 'ACCEPTED', 'hostIdentitySha256': plan['hostIdentitySha256'],
             'bundleFiles': plan['bundleFiles'], 'bundleSha256': final.name,
             'publicRoots': plan['publicRoots'],

@@ -1,5 +1,14 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
+**Source-only independent bootstrap install proposal 29.09:** отдельный
+versioned V2 public-only installer требует подписанного полного byte closure
+helper/verifier/generation и проверяет fixed inert-intro receipt до импорта
+candidate code. A готовит отдельный INITIAL_INERT_ONLY route; broad
+production-control install/unit reload здесь не используется. Intro,
+launcher, generation и public roots не установлены, A→bridge и Variant B
+не serving. Fresh baseline, accepted initial transport/native locks,
+reviewed exact plan и отдельный direct GO обязательны. Open beta NO-GO.
+
 **Source-only bootstrap checkpoint 27.09:** ordered source integration proposal
 for frozen draft PR246→247→248 and separate predecessor transition primitives
 are prepared outside the controller payload. No main merge or production effect

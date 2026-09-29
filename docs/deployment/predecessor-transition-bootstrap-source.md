@@ -6,6 +6,75 @@ under `deploy/transition-bootstrap`, outside `control.tar.gz`. It is not wired
 into either generic controller handoff. No production installer, CLI, key
 enrollment or complete live observer is provided by these source primitives.
 
+## 29 September independent initial trust and V2 public-only installer
+
+Fresh dispatcher read-only inventory found the fixed production-control
+installer/verifier/generation/receipt paths absent. A broad production-control
+install would publish operational files and reload systemd; it is outside an
+inert bootstrap scope. The separate A-owned INITIAL_INERT_ONLY predecessor
+route is therefore the proposed first trust step. It must install only an
+immutable source generation and its minimal verifier, two dormant bootstrap
+entrypoints, layout marker and exact lock/audit records under its own signed
+plan, receipts and direct dispatcher GO. This is still source design, not
+installed authority.
+
+The new `install_predecessor_bootstrap.py` consumes that first step through a
+fixed minimal verifier at
+`/usr/local/libexec/leetplus/verify-installed-standalone-intro.mjs`.
+It first reads a closed root-owned installer request, verifies the
+deployment-root-signed **V2** public-only plan/approval with existing host
+Node and the bound host identity, then hashes the verifier bytes against the
+signed `installerAuthority`. Verifier stdout must be one bounded canonical
+JSON object binding exact source release, intro plan/receipt, immutable full
+generation manifest/receipt and verifier hash. The wrapper independently
+opens these protected receipts and full manifest by same-fd bounded reads,
+rehashes its own installed entry and the complete 14-leaf source bundle plus
+privileged helper, and compiles six import modules only after those checks.
+`installerAuthority` is a closed six-SHA object in the V2 signed plan; V1
+approval/receipt/enrollment bytes cannot substitute.
+
+The existing bundle installer then checks source admission, accepted A or
+bridge predecessor, host/core/native pending/locks, deployment signature and
+exact plan before any public-only bundle staging. Its immutable intent and
+installed receipt remain the authority for lost-response reconciliation.
+Installer audit UUID roots use the existing trusted Compose state, separate
+from the intro audit namespace. No private key is read by the host installer,
+no controller pointer changes and no candidate code may install itself.
+
+The historical broad production-control 75/63 source artifact and any future
+expanded map are distinct from this inert introduction. Full installed-path
+negative tests, independent review, exact artifact transport and an actual
+approved intro effect are prerequisites before V2 bundle install may be
+planned. Source CI and bundle bytes are not installed-path proof.
+
+### Closed source producer
+
+`build-standalone-intro-source.py` reads only regular blobs from the exact
+checked-out Git commit. The separate artifact
+`leetplus-standalone-intro-source-<SHA>-<RUN>-<ATTEMPT>` contains
+`source.tar.gz`, `source-receipt.json` and outer `SHA256SUMS`. The deterministic
+USTAR/gzip archive contains exactly the 19 source leaves needed by the inert
+generation plus its own root SHA256SUMS; it keeps original repository-relative
+paths without a payload prefix. Owner/group/mtime are zero and transport modes
+are 0400. The root manifest closes every other archive leaf and is sorted by
+UTF-8 byte order; directories are derived from those paths on installation.
+
+The receipt contract is `LEETPLUS_STANDALONE_INITIAL_SOURCE_V1`, with decision
+`SOURCE_BYTES_ONLY_NOT_AUTHORIZATION`. It binds fixed repository, source Git
+commit and tree SHA, workflow/event/ref, run/attempt, archive/raw manifest/source-map hashes
+and the complete 19-file map. Even a main-push source receipt cannot replace
+the final Full admission or Compose admission: the signed INTRO plan must bind
+their exact raw bytes, artifact IDs, parent run/attempt and the source archive
+transport independently. The initial-intro primitive is a separately bound
+Compose leaf, not a generation import or a hidden archive entry.
+
+The dormant standalone installer and later RPC use the introduced persistent
+`/var/lib/leetplus-compose/standalone-install.lock` followed by the existing
+native control lock. This avoids silently losing installer serialization on
+reboot; no fallback to a volatile `/run` lock or lock creation by prepare is
+permitted. The initial signed intro operation owns the first lock creation.
+Accepted A and broad production-control lock contracts are unchanged.
+
 ## Trust and independent packaging
 
 The accepted b0 controller has no verifier capable of admitting the bridge's
@@ -64,7 +133,7 @@ containers, network-refresh unit and firewall; absent evidence cannot be zero.
 
 Acquire existing regular root-owned locks in this fixed order:
 
-1. `/run/leetplus-production-control/install.lock`;
+1. `/var/lib/leetplus-compose/standalone-install.lock` (introduced persistent standalone lock; accepted A/production-control locks are unchanged);
 2. `/var/lib/leetplus-compose/control.lock`;
 3. independently installed standalone transition singleton.
 

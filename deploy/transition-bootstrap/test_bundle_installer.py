@@ -75,6 +75,9 @@ class BundleInstallerTests(unittest.TestCase):
             'oldCorePointer': os.readlink(self.core), 'sourceRelease': self.source_sha,
             'sourceAdmissionSha256': digest(canonical(source_admission)),
             'installerSourceSha256': digest(self.installer_source.read_bytes()),
+            'installerAuthority': {'helperSourceSha256': '1' * 64, 'verifierSourceSha256': '2' * 64,
+                'introPlanSha256': '5' * 64, 'introReceiptSha256': '6' * 64,
+                'generationRootManifestSha256': '3' * 64, 'generationReceiptSha256': '4' * 64},
             'bundleFiles': {name: digest(raw) for name, raw in self.members.items()},
             'bundleSha256': digest(canonical({name: digest(raw) for name, raw in self.members.items()})),
             'bundleArchiveSha256': digest(self.archive),
@@ -111,6 +114,31 @@ class BundleInstallerTests(unittest.TestCase):
             self.assertTrue((final / 'enrollment' / 'enrollment.json').is_file())
             self.assertTrue((final / 'bundle' / 'deploy' / 'transition-bootstrap' / 'protocol.mjs').is_file())
             self.assertEqual({item.name for item in final.iterdir()}, {'bundle', 'enrollment'})
+
+    def test_separate_native_pending_and_dangling_entry_block_before_write(self):
+        native = self.root / 'native-state'
+        native.mkdir(mode=0o700)
+        self.installer.pending_state = native
+        pending = native / 'control-handoff.pending.json'
+        with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old):
+            pending.write_bytes(b'foreign native pending\n')
+            for action in (self.installer.prepare, self.installer.apply):
+                with self.assertRaisesRegex(ValueError, 'pending handoff'):
+                    action(self.plan, self.approval, self.roots, self.archive)
+            self.assertEqual(list(self.state.iterdir()), [])
+            self.assertEqual(list(self.installed.iterdir()), [])
+            pending.unlink()
+            pending.symlink_to(native / 'missing-target')
+            with self.assertRaisesRegex(ValueError, 'pending handoff'):
+                self.installer.apply(self.plan, self.approval, self.roots, self.archive)
+            self.assertEqual(list(self.state.iterdir()), [])
+            pending.unlink()
+            before = sorted(p.name for p in self.root.iterdir())
+            result = self.installer.prepare(self.plan, self.approval, self.roots, self.archive)
+            self.assertEqual(result['decision'], 'PREPARED_NOT_AUTHORIZATION')
+            self.assertEqual(before, sorted(p.name for p in self.root.iterdir()))
+            self.assertEqual(list(self.state.iterdir()), [])
+            self.assertEqual(list(self.installed.iterdir()), [])
 
     def test_mutated_archive_foreign_host_and_private_root_fail_before_intent(self):
         with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old):

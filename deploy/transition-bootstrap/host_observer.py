@@ -154,7 +154,7 @@ class EnrolledObserver:
         require(receipt_raw == canonical(receipt) and
                 set(receipt) == {'contract', 'decision', 'hostIdentitySha256', 'bundleFiles',
                                  'bundleSha256', 'publicRoots', 'installerReceiptSha256'} and
-                receipt['contract'] == 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V1' and
+                receipt['contract'] == 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V2' and
                 receipt['decision'] == 'ACCEPTED' and
                 all(HASH.fullmatch(value) for value in (receipt['bundleSha256'],
                     receipt['installerReceiptSha256'], receipt['hostIdentitySha256'])) and

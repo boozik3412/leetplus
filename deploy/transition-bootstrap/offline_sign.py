@@ -26,7 +26,7 @@ CONTRACTS = {
     'execution': ('LEETPLUS_PREDECESSOR_TRANSITION_BOOTSTRAP_V1_EXECUTION', 'command', 30),
     'rollback': ('LEETPLUS_PREDECESSOR_TRANSITION_BOOTSTRAP_V1_ROLLBACK', 'command', 30),
     'no-effect': ('LEETPLUS_PREDECESSOR_TRANSITION_BOOTSTRAP_V1_NO_EFFECT', 'command', 30),
-    'install': ('LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_APPROVAL', 'approval', 30),
+    'install': ('LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_APPROVAL', 'approval', 30),
     'v1-forward': ('LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1_APPROVAL', 'approval', 240),
     'v1-rollback': ('LEETPLUS_COMPOSE_CONTROL_HANDOFF_V1_ROLLBACK_APPROVAL', 'approval', 240),
 }
@@ -92,7 +92,7 @@ def validate_linked_root(kind, linked, public_raw, public_der_sha256):
     approval = envelope['approval']
     if not isinstance(approval, dict) or set(approval) != {'contract', 'operationId',
             'hostIdentitySha256', 'planSha256', 'action', 'issuedAt', 'expiresAt'} or \
-            approval['contract'] != 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_APPROVAL' or \
+            approval['contract'] != 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_APPROVAL' or \
             approval['operationId'] != plan['operationId'] or \
             approval['action'] != plan['action'] or \
             approval['hostIdentitySha256'] != plan['hostIdentitySha256'] or \
@@ -118,7 +118,7 @@ def validate_linked_root(kind, linked, public_raw, public_der_sha256):
     if not isinstance(receipt, dict) or set(receipt) != {'contract', 'decision',
             'operationId', 'planSha256', 'approvalSha256', 'intentSha256',
             'bundleSha256', 'publicRoots', 'hostIdentitySha256', 'acceptedAt'} or \
-            receipt['contract'] != 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V1_RECEIPT' or \
+            receipt['contract'] != 'LEETPLUS_PREDECESSOR_BOOTSTRAP_INSTALL_V2_RECEIPT' or \
             receipt['decision'] != 'PASS' or receipt['operationId'] != plan['operationId'] or \
             receipt['planSha256'] != digest(canonical(plan)) or \
             receipt['approvalSha256'] != digest(canonical(envelope)) or \
@@ -128,7 +128,7 @@ def validate_linked_root(kind, linked, public_raw, public_der_sha256):
             receipt['hostIdentitySha256'] != plan['hostIdentitySha256'] or \
             _instant(receipt['acceptedAt']) != _instant(intent['authorizedAt']):
         raise ValueError('Installer receipt differs from signed timely intent')
-    expected_record = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V1',
+    expected_record = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_ENROLLMENT_V2',
         'decision': 'ACCEPTED', 'hostIdentitySha256': plan['hostIdentitySha256'],
         'bundleFiles': plan['bundleFiles'], 'bundleSha256': plan['bundleSha256'],
         'publicRoots': plan['publicRoots'],

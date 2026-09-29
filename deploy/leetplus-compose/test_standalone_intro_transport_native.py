@@ -218,6 +218,80 @@ crypto.sign(null,Buffer.from(JSON.stringify(v,null,2)+'\\n'),k.privateKey).toStr
         envelope={'approval':approval,'signature':json.loads(self.signer.stdout.readline())['signature']}
         return {'finalizePlan':plan,'finalizeApprovalEnvelope':envelope}
 
+    def captured_gate_fixture(self,packet,loss):
+        # Test-only captured wrapper embeds the exact engine bytes and maps its
+        # factory to this private tree. The production Node gate below remains
+        # exact source; no target file is reopened or imported for Python code.
+        engine=base64.b64encode(gzip.compress((HERE/'standalone-intro-transport.py').read_bytes(),mtime=0)).decode()
+        audit=t.AUDITS+'/'+self.operation+'/receipt.json'
+        wrapper=f"""import base64,gzip
+scope={{'__name__':'captured_fixture_engine'}}
+exec(compile(gzip.decompress(base64.b64decode({engine!r})),'captured-fixture-engine','exec'),scope)
+Base=scope['Transport']
+class MappedTransport(Base):
+ def __init__(self,captured_program_sha256=None):
+  super().__init__(fixture_prefix={str(self.base)!r},node={self.node!r},captured_program_sha256=captured_program_sha256)
+ def write(self,value,raw,mode=0o400):
+  if value=={audit!r} and {loss!r}=='before-audit':raise OSError('fixture lost after intent')
+  result=super().write(value,raw,mode)
+  if value=={audit!r} and {loss!r}=='after-audit':raise OSError('fixture lost after audit')
+  return result
+scope['Transport']=MappedTransport
+scope['main']()
+""".encode()
+        self.assertLessEqual(len(wrapper),t.MAX_PROGRAM)
+        packet=copy.deepcopy(packet)
+        packet['finalizePlan']['execution']['code']['transportProgramSha256']=t.sha(wrapper)
+        approval=packet['finalizeApprovalEnvelope']['approval']
+        approval['planSha256']=t.sha(t.canonical(packet['finalizePlan']))
+        self.signer.stdin.write(json.dumps(approval)+'\n');self.signer.stdin.flush()
+        packet['finalizeApprovalEnvelope']['signature']=json.loads(self.signer.stdout.readline())['signature']
+        return packet,wrapper
+
+    def run_captured_gate(self,packet,wrapper,read_only=False):
+        gate=(HERE/'standalone-intro-transport-finalize-entry.mjs').read_bytes()
+        operation=self.operation if read_only else packet['finalizePlan']['operationId']
+        argument='--reconcile-finalize' if read_only else '--operation-id'
+        prelude=f"""import fsFixture from 'node:fs';
+const fixtureRoot={json.dumps(str(self.base))};const remap=p=>typeof p==='string'&&p.startsWith('/')?fixtureRoot+p:p;
+for(const name of ['lstatSync','openSync','readFileSync','readdirSync']){{const orig=fsFixture[name];fsFixture[name]=function(p,...a){{return orig.call(this,remap(p),...a);}};}}
+const originalRealpath=fsFixture.realpathSync.native;
+fsFixture.realpathSync.native=function(p,...a){{return originalRealpath.call(this,remap(p),...a).slice(fixtureRoot.length);}};
+process.argv=['/usr/bin/node',{json.dumps(argument)},{json.dumps(operation)},{json.dumps(t.sha(gate))}];
+""".encode()
+        outer={'packet':packet,'transportPythonSourceBase64':base64.b64encode(wrapper).decode()}
+        # Node stdin is the canonical packet, so exact captured JS is passed as
+        # -e argv with a separately trusted fixture FS prelude, just as verifier
+        # fixtures map node:fs before evaluating the unchanged production source.
+        return subprocess.run([self.node,'--input-type=module','-e',(prelude+gate).decode()],
+            input=t.canonical(outer),capture_output=True,env=t.CLEAN,timeout=30,check=False)
+
+    def gate_lost_response_case(self,loss,expected):
+        self.fixture.stage(self.packet,self.operation)
+        audit=t.AUDITS+'/'+self.operation+'/receipt.json'
+        self.fixture.p(audit).unlink()
+        packet,wrapper=self.captured_gate_fixture(self.finalize_packet(),loss)
+        result=self.run_captured_gate(packet,wrapper)
+        self.assertNotEqual(result.returncode,0)
+        flat=t.STATE+'/'+self.operation+'.standalone-transport-finalize.intent.json'
+        self.assertFalse(self.fixture.absent(flat),result.stderr.decode())
+        before={str(p.relative_to(self.base)):t.sha(p.read_bytes())
+                for p in self.base.rglob('*') if p.is_file() and not p.is_symlink()}
+        observed=self.run_captured_gate(packet,wrapper,read_only=True)
+        self.assertEqual(observed.returncode,0,observed.stderr.decode())
+        self.assertEqual(json.loads(observed.stdout)['decision'],expected)
+        after={str(p.relative_to(self.base)):t.sha(p.read_bytes())
+               for p in self.base.rglob('*') if p.is_file() and not p.is_symlink()}
+        self.assertEqual(before,after)
+
+    def test_actual_gate_lost_after_intent_has_authenticated_read_only_classifier(self):
+        self.gate_lost_response_case('before-audit',
+            'RECOVERY_REQUIRED_FINALIZE_INTENT_WITHOUT_AUDIT_RECEIPT')
+
+    def test_actual_gate_lost_after_audit_has_authenticated_read_only_terminal(self):
+        self.gate_lost_response_case('after-audit',
+            'EXACT_FINALIZATION_TERMINAL_REQUIRES_INDEPENDENT_VERIFICATION')
+
     def test_signed_source_snapshot_publishes_only_seven_private_leaves(self):
         pre=set(self.base.rglob('*'))
         result=self.fixture.stage(copy.deepcopy(self.packet),self.operation)
@@ -261,6 +335,38 @@ crypto.sign(null,Buffer.from(JSON.stringify(v,null,2)+'\\n'),k.privateKey).toStr
         with patch.object(t,'utc',side_effect=lambda:next(calls)):
             with self.assertRaises(ValueError):self.fixture.stage(self.packet,self.operation)
         self.assertTrue(self.fixture.absent(t.STATE+'/'+self.operation+'.standalone-transport.intent.json'))
+
+    def expiry_during_crypto(self,which):
+        original=t.verify_approval;valid=t.utc();state={'calls':0,'expired':False}
+        def delayed(*args,**kwargs):
+            result=original(*args,**kwargs)
+            state['calls']+=1
+            if state['calls']==which:state['expired']=True
+            return result
+        with patch.object(t,'verify_approval',side_effect=delayed),patch.object(t,'utc',
+                side_effect=lambda:self.expires if state['expired'] else valid):
+            with self.assertRaises(ValueError):self.fixture.stage(self.packet,self.operation)
+        self.assertTrue(state['expired'])
+
+    def test_expiry_during_crypto_blocks_staging_leaf(self):
+        self.expiry_during_crypto(3)
+        staging=t.INBOX+'/.transport-'+self.operation+'.pending'
+        self.assertEqual(list(self.fixture.p(staging).iterdir()),[])
+
+    def test_expiry_during_crypto_blocks_atomic_request_rename(self):
+        self.expiry_during_crypto(9)
+        self.assertTrue(self.fixture.absent(str(Path(self.plan['snapshotPath']).parent)))
+
+    def test_expiry_during_crypto_blocks_request_terminal_receipt(self):
+        self.expiry_during_crypto(10)
+        request=str(Path(self.plan['snapshotPath']).parent)
+        self.assertTrue(self.fixture.absent(request+'/transport-receipt.json'))
+
+    def test_expiry_during_crypto_blocks_audit_terminal_receipt(self):
+        self.expiry_during_crypto(11)
+        self.assertTrue(self.fixture.absent(t.AUDITS+'/'+self.operation+'/receipt.json'))
+        self.assertEqual(self.fixture.reconcile(self.operation)['decision'],
+            'COMPLETE_REQUEST_MISSING_AUDIT_RECEIPT_REQUIRES_SEPARATE_FINALIZE')
 
     def test_exact_request_missing_audit_receipt_uses_separate_finalize(self):
         self.fixture.stage(self.packet,self.operation)

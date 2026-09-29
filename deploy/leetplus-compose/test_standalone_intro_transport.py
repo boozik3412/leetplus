@@ -86,6 +86,13 @@ def archive(files):
 
 
 class TransportPlan(unittest.TestCase):
+    def test_exact_git_program_fits_frozen_captured_argv_budget(self):
+        raw=subprocess.run(['git','--no-replace-objects','-C',str(HERE.parents[1]),'show',
+            'HEAD:deploy/leetplus-compose/standalone-intro-transport.py'],
+            capture_output=True,check=True,timeout=15).stdout
+        self.assertLessEqual(len(raw),transport.MAX_PROGRAM)
+        self.assertLess(len(base64.b64encode(raw)),131072)
+
     def test_closed_signed_v2_plan(self):
         plan=plan_fixture()
         self.assertTrue(transport.validate_plan(plan).endswith('/bootstrap-intro-'+

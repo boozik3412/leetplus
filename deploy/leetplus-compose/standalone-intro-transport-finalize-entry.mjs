@@ -54,8 +54,10 @@ function read(name,maximum){
 require(process.platform==='linux'&&process.getuid()===0&&process.versions.node.split('.')[0]==='22',
   'Fixed Linux root Node22 finalize gate required');
 const args=process.argv.slice(1);
-require(args.length===3&&args[0]==='--operation-id'&&UUID.test(args[1])&&SHA.test(args[2]),
-  'Expected exact node -e -- --operation-id UUID SHA invocation');
+require(args.length===3&&['--operation-id','--reconcile-finalize'].includes(args[0])&&
+  UUID.test(args[1])&&SHA.test(args[2]),
+  'Expected closed effect or read-only finalize invocation');
+const readOnly=args[0]==='--reconcile-finalize';
 require(args[1]!=='9afc7218-4757-4f44-87e1-6096706bad44','Historical operation cannot finalize');
 for(const name of Object.keys(process.env)){
   require(!/^(?:NODE_|LD_|DYLD_|PYTHON)/u.test(name)&&
@@ -77,9 +79,11 @@ const packet=outer.packet;
 require(packet&&Object.keys(packet).sort().join(',')==='finalizeApprovalEnvelope,finalizePlan',
   'Closed signed finalization packet required');
 const plan=packet.finalizePlan,envelope=packet.finalizeApprovalEnvelope,execution=plan?.execution;
-const code=execution?.code,operation=args[1],protectedEntrySha=args[2];
-require(plan?.contract===PLAN&&plan?.action===ACTION&&plan.operationId===operation&&
-  UUID.test(plan.originalOperationId)&&plan.originalOperationId!==operation,
+const code=execution?.code,operation=plan?.operationId,protectedEntrySha=args[2];
+require(plan?.contract===PLAN&&plan?.action===ACTION&&UUID.test(operation)&&
+  (readOnly?plan.originalOperationId===args[1]:operation===args[1])&&
+  UUID.test(plan.originalOperationId)&&plan.originalOperationId!==operation&&
+  plan.originalOperationId!=='9afc7218-4757-4f44-87e1-6096706bad44',
   'Wrong separate finalization plan');
 require(code&&Object.keys(code).sort().join(',')===
   ['finalizeEntrySha256','transportProgramSha256','pythonLoaderSha256','nodeExecutableSha256',
@@ -102,9 +106,23 @@ require(approval&&Object.keys(approval).sort().join(',')===
   approval.planSha256===digest(Buffer.from(canonical(plan)))&&approval.action===ACTION,
   'Separate approval does not bind exact finalize plan');
 const issued=Date.parse(approval.issuedAt),expires=Date.parse(approval.expiresAt);
+const intentPath=`/var/lib/leetplus-compose/${plan.originalOperationId}.standalone-transport-finalize.intent.json`;
+let historicalIntent=null;
+if(readOnly){
+  try{historicalIntent=exact(read(intentPath,131072));}
+  catch(error){if(error.code!=='ENOENT')throw error;}
+  if(historicalIntent){require(historicalIntent.contract===
+    'LEETPLUS_STANDALONE_INTRO_TRANSPORT_FINALIZE_V1_INTENT'&&
+    historicalIntent.operationId===operation&&historicalIntent.originalOperationId===plan.originalOperationId&&
+    historicalIntent.planSha256===digest(Buffer.from(canonical(plan)))&&
+    historicalIntent.approvalSha256===digest(Buffer.from(canonical(envelope))),
+    'Read-only original-UUID finalize intent binding differs');}
+}
+const at=readOnly?(historicalIntent?Date.parse(historicalIntent.authorizedAt):issued):Date.now();
 require(Number.isFinite(issued)&&Number.isFinite(expires)&&
   new Date(issued).toISOString()===approval.issuedAt&&new Date(expires).toISOString()===approval.expiresAt&&
-  issued<=Date.now()&&Date.now()<expires&&expires-issued>0&&expires-issued<=1800000,
+  Number.isFinite(at)&&issued<=at&&at<expires&&expires-issued>0&&expires-issued<=1800000&&
+  (!readOnly||issued<=Date.now()),
   'Finalization approval expired or unbounded');
 const pem=read(ROOT,4096);
 require(!pem.includes(Buffer.from('PRIVATE'))&&digest(pem)===execution.trustRoot.rawSha256,
@@ -112,8 +130,9 @@ require(!pem.includes(Buffer.from('PRIVATE'))&&digest(pem)===execution.trustRoot
 const key=crypto.createPublicKey(pem);
 require(key.asymmetricKeyType==='ed25519'&&crypto.verify(null,Buffer.from(canonical(approval)),key,
   Buffer.from(envelope.signature,'base64')),'Finalization public signature rejected');
+const boot=fs.readFileSync('/proc/sys/kernel/random/boot_id');
 require(digest(read('/etc/machine-id',65536).toString('utf8').trim())===plan.hostIdentitySha256&&
-  read('/proc/sys/kernel/random/boot_id',128).toString('utf8').trim()===plan.bootId,
+  (readOnly||(boot.length<=128&&boot.toString('utf8').trim()===plan.bootId)),
   'Finalization host/boot differs');
 for(const [fixed,realpath,sha] of [
   ['/usr/bin/node',code.nodeRealpath,code.nodeExecutableSha256],
@@ -134,8 +153,14 @@ const loader="import base64,ctypes,os,signal,sys; expected_parent=int(sys.argv.p
 require(code.pythonLoaderSha256===digest(Buffer.from(loader)),
   'Fixed same-buffer parent-death Python loader differs');
 require(!timedOut&&180000-(Date.now()-started)>0,'Finalization gate deadline expired');
+if(readOnly&&!historicalIntent){
+  clearTimeout(deadline);
+  process.stdout.write(canonical({decision:'NO_FINALIZATION_INTENT',operationId:plan.originalOperationId}));
+  process.exit(0);
+}
 child=spawn('/usr/bin/python3',['-I','-B','-c',loader,String(process.pid),encoded,
-  '--mode','finalize-reconcile','--operation-id',operation,
+  '--mode',readOnly?'reconcile-finalize':'finalize-reconcile',
+  '--operation-id',readOnly?plan.originalOperationId:operation,
   '--captured-program-sha256',code.transportProgramSha256],
 {env:CLEAN,stdio:['pipe','pipe','pipe'],detached:true});
 let out=0,err=0,stdinFailed=false;

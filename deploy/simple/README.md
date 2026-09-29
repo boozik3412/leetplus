@@ -24,6 +24,7 @@ ssh root@192.168.1.137 lp deploy <sha>
 | Проверка | коммит есть в `main`, обязательные проверки GitHub зелёные |
 | Сборка | образы `leetplus-api:<sha>` и `leetplus-web:<sha>` собираются на сервере из исходников GitHub (лог: `/var/lib/leetplus-deploy/build-<sha>.log`) |
 | Схема БД | число и последняя миграция в образе совпадают с базой; иначе отказ |
+| Workers | entrypoint bonus/daily worker запускается на новом образе с их настоящими секретами в режиме самопроверки (`LEETPLUS_ENTRY_CHECK=1`, без сети, без работы); иначе отказ |
 | Stage | новая версия поднимается в **резервном** слоте; рабочий слот не трогается |
 | Проверка слота | Docker healthcheck + API `/health/ready` + Web `/api/release-identity` + главная страница |
 | Switch | nginx `active.conf` переключается на новый слот, `nginx -t`, reload |

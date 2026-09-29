@@ -260,6 +260,27 @@ function pointWorkersAt(spec, slot) {
   for (const name of Object.keys(WORKERS)) if (spec.services[name]) pointService(spec.services[name], api.image, release);
 }
 
+// Start each worker's entrypoint on the new image with its real secret profile
+// in check mode (LEETPLUS_ENTRY_CHECK=1): it validates and exits without work.
+function preflightWorkers(spec, apiImage, release) {
+  const entry = docker(['run', '--rm', '--network', 'none', '--entrypoint', 'cat', apiImage, '/opt/leetplus/runtime-entry.cjs']).out;
+  if (!entry.includes('LEETPLUS_ENTRY_CHECK')) { log('worker preflight skipped: this image has no entry check mode'); return; }
+  for (const name of Object.keys(WORKERS)) {
+    const svc = spec.services[name];
+    if (!svc) continue;
+    const args = ['run', '--rm', '--network', 'none', '--read-only', '--user', svc.user, '--entrypoint', 'node'];
+    for (const group of svc.group_add ?? []) args.push('--group-add', String(group));
+    for (const v of svc.volumes ?? []) if (v.type === 'bind') args.push('--mount', `type=bind,src=${v.source},dst=${v.target},readonly`);
+    for (const [key, value] of Object.entries({ ...svc.environment, ...metadataEnv(release), LEETPLUS_ENTRY_CHECK: '1' })) args.push('--env', `${key}=${value}`);
+    const r = docker([...args, apiImage, '/opt/leetplus/runtime-entry.cjs', name], { allowFail: true, timeout: 60_000 });
+    if (!r.ok) {
+      const reason = `${r.err}\n${r.out}`.split('\n').find(line => line.startsWith('Error')) ?? `${r.err}${r.out}`.slice(-300);
+      fail(`${name} would not start on ${release.releaseSha.slice(0, 8)}: ${reason}`);
+    }
+  }
+  log(`worker preflight: ${Object.keys(WORKERS).join(', ')} start on the new image`);
+}
+
 // ---------------------------------------------------------------- commands
 
 async function stage(sha, { force }) {
@@ -276,6 +297,7 @@ async function stage(sha, { force }) {
   assertSchemaMatches(releases.api);
 
   const spec = readJson(COMPOSE);
+  preflightWorkers(spec, images.api, releases.api);
   snapshotCompose(`stage-${target}-${sha.slice(0, 8)}`);
   for (const role of ['api', 'web']) {
     const svc = spec.services[`${role}-${target}`], ref = spec.services[`${role}-${active}`];

@@ -1,0 +1,24 @@
+name: Quarantine disposable verification only
+on:
+  push:
+    branches: [codex/quarantine-linux-fixtures-20260929]
+    paths:
+      - verification/b0-cache-quarantine/**
+      - .github/workflows/quarantine-disposable-validation.yml
+      - .gitattributes
+permissions:
+  contents: read
+jobs:
+  disposable-root:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Remapped kernel and captured gate cases
+        run: |
+          node_path="$(command -v node)"
+          sudo /usr/bin/env -i PATH="$(dirname "$node_path"):/usr/sbin:/usr/bin:/sbin:/bin" LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC /usr/bin/python3 -I -B verification/b0-cache-quarantine/test_disposable.py
+# No production host, root, key, signer or source-admission output is used.

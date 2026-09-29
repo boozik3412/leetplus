@@ -54,6 +54,112 @@ class CapturedLauncherTests(unittest.TestCase):
 
 
 @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'getuid') and os.getuid() == 0,
+                     'Signed runtime provision requires disposable Linux root')
+class RuntimeProvisionTests(unittest.TestCase):
+    def setUp(self):
+        launcher_path = Path(__file__).resolve().parents[2] / 'docs' / 'deployment' / \
+            'production-artifact' / 'trusted_predecessor_bootstrap_launcher.py'
+        spec = importlib.util.spec_from_file_location('runtime_provision_launcher_fixture', launcher_path)
+        self.launcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.launcher)
+        self.root = Path(tempfile.mkdtemp(prefix='leetplus-runtime-provision-', dir='/run'))
+        self.root.chmod(0o700)
+        self.compose = self.root / 'compose'
+        self.compose.mkdir(mode=0o700)
+        self.runtime = self.root / 'transition'
+        self.patches = [
+            patch.object(self.launcher, 'COMPOSE_STATE', self.compose),
+            patch.object(self.launcher, 'RUNTIME_STATE', self.runtime),
+            patch.object(self.launcher, 'RUNTIME_REQUESTS', self.runtime / 'requests'),
+            patch.object(self.launcher, 'RUNTIME_OPERATIONS', self.runtime / 'operations'),
+            patch.object(self.launcher, 'RUNTIME_ATTEMPTS', self.runtime / 'attempts'),
+            patch.object(self.launcher, 'TRANSITION_LOCK', self.runtime / 'transition.lock'),
+            patch.object(self.launcher, 'APPROVAL_ROOT', self.root / 'approval-root.pem'),
+            patch.object(self.launcher, 'MACHINE_ID', self.root / 'machine-id'),
+        ]
+        for item in self.patches:
+            item.start()
+        self.root.joinpath('machine-id').write_bytes(b'fixture-runtime-host\n')
+        self.key = generate_key()
+        self.root.joinpath('approval-root.pem').write_bytes(self.key['publicKey'].encode())
+        for name in ('standalone-install.lock', 'control.lock'):
+            (self.compose / name).touch(mode=0o600)
+        self.placement = '12345678-1234-4123-8123-123456789abc'
+        self.operation = '87654321-4321-4321-8321-abcdefabcdef'
+        self.attempt = '99999999-9999-4999-8999-999999999999'
+        self.installed = {'bundleSha256': 'a' * 64, 'installerReceiptSha256': 'b' * 64}
+        self.request = {'contract': 'LEETPLUS_PREDECESSOR_BOOTSTRAP_RPC_V1',
+                        'command': 'observe', 'operationId': self.operation,
+                        'attemptId': self.attempt, 'mode': 'A_TO_BRIDGE',
+                        'targetRelease': 'c' * 40, 'criticalNames': [],
+                        'evidence': {}, 'inputs': {}}
+        self.request_raw = canonical(self.request)
+        native = {str(self.compose / name): self.launcher.provision_preimage(self.compose / name)
+                  for name in ('standalone-install.lock', 'control.lock')}
+        preimages = {name: self.launcher.provision_preimage(path) for name, path in
+                     self.launcher.provision_paths(self.placement).items()}
+        self.plan = {'contract': self.launcher.RUNTIME_PROVISION_PLAN,
+                     'placementId': self.placement, 'operationId': self.operation,
+                     'attemptId': self.attempt, 'command': 'observe',
+                     'hostIdentitySha256': digest(b'fixture-runtime-host'),
+                     'bundleSha256': self.installed['bundleSha256'],
+                     'installerReceiptSha256': self.installed['installerReceiptSha256'],
+                     'requestSha256': digest(self.request_raw),
+                     'preimages': preimages, 'nativeLocks': native,
+                     'effects': self.launcher.RUNTIME_PROVISION_EFFECTS}
+        now = datetime.now(timezone.utc)
+        approval = {'contract': self.launcher.RUNTIME_PROVISION_APPROVAL,
+                    'placementId': self.placement,
+                    'hostIdentitySha256': self.plan['hostIdentitySha256'],
+                    'planSha256': digest(canonical(self.plan)),
+                    'issuedAt': iso(now - timedelta(seconds=10)),
+                    'expiresAt': iso(now + timedelta(minutes=20))}
+        self.envelope = {'approval': approval, 'signature': sign(approval, self.key)}
+
+    def tearDown(self):
+        for item in reversed(self.patches):
+            item.stop()
+        shutil.rmtree(self.root)
+
+    def test_signed_runtime_request_stages_without_controller_effect(self):
+        result = self.launcher.provision_runtime(self.plan, self.envelope,
+                                                  self.request_raw, self.installed)
+        self.assertEqual(result['decision'], 'REQUEST_STAGED_RUNTIME_DORMANT')
+        self.assertEqual(self.launcher.reconcile_runtime(self.plan, self.envelope,
+            self.request_raw, self.installed)['decision'], 'ALREADY_STAGED_RUNTIME_REQUEST')
+        request, receipt_sha = self.launcher.verify_runtime_request(
+            self.placement, self.operation, self.installed)
+        self.assertEqual(request.read_bytes(), self.request_raw)
+        self.assertEqual(receipt_sha, result['receiptSha256'])
+        self.assertTrue((self.runtime / 'transition.lock').is_file())
+        self.assertEqual(list((self.runtime / 'operations').iterdir()), [])
+        self.assertEqual(list((self.runtime / 'attempts').iterdir()), [])
+
+    def test_unsigned_placement_and_lost_receipt_fail_closed(self):
+        forged = {'approval': self.envelope['approval'], 'signature': 'A' * 86 + '=='}
+        with self.assertRaisesRegex(ValueError, 'signature rejected'):
+            self.launcher.provision_runtime(self.plan, forged, self.request_raw, self.installed)
+        self.assertFalse((self.compose / (self.placement + '.transition-provision.intent.json')).exists())
+        original = self.launcher.write_new
+
+        def lose_receipt(path, raw, mode):
+            if path.name.endswith('.transition-provision.receipt.json'):
+                raise RuntimeError('fixture lost runtime receipt')
+            return original(path, raw, mode)
+
+        with patch.object(self.launcher, 'write_new', side_effect=lose_receipt):
+            with self.assertRaisesRegex(RuntimeError, 'lost runtime receipt'):
+                self.launcher.provision_runtime(self.plan, self.envelope,
+                                                self.request_raw, self.installed)
+        self.assertEqual(self.launcher.reconcile_runtime(self.plan, self.envelope,
+            self.request_raw, self.installed)['decision'],
+            'COMPLETE_RUNTIME_POSTIMAGE_MISSING_RECEIPT_REQUIRES_SIGNED_RECOVERY')
+        self.assertEqual(self.launcher.reconcile_runtime(self.plan, self.envelope,
+            self.request_raw, self.installed, finalize=True)['decision'],
+            'RECONCILED_EXACT_RUNTIME_RECEIPT')
+
+
+@unittest.skipUnless(os.name == 'posix' and hasattr(os, 'getuid') and os.getuid() == 0,
                      'Public-only native install requires Linux root')
 class BundleInstallerTests(unittest.TestCase):
     def setUp(self):

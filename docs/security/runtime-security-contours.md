@@ -16,6 +16,11 @@ flat intent до private pending directory и публикует request ато�
 sealed memory и linked Node data URLs; predecessor executor также компилируется
 из captured inventory buffer вместе с полным JS snapshot/authority import
 closure, без hash-then-path-import.
+После установки bundle отдельный deployment-root signed runtime provision
+с flat prewrite intent создаёт только private transition state dirs/lock и
+exact request по captured input; это отдельный GO диспетчера. RPC read-only
+observe/plan/prepare не создают attempt files, а effectful переходы по-прежнему
+требуют нативный подписанный intent и locks.
 A отвечает за отдельный INITIAL_INERT_ONLY predecessor route без broad
 production-control install/unit reload. Layout marker создаёт защищённый
 parent, не устанавливает bundle и не меняет serving pointer. `prepare`

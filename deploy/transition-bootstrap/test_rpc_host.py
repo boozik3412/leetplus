@@ -56,7 +56,7 @@ class CapturedNodeSourceTests(unittest.TestCase):
 class RpcHostTests(unittest.TestCase):
     @unittest.skipUnless(hasattr(os, 'getuid') and os.getuid() == 0,
                          'Root-only outer attempt finalizer fixture')
-    def test_prechild_and_read_only_failures_publish_terminal_attempt(self):
+    def test_prechild_and_read_only_failures_leave_no_attempt_write(self):
         for phase in ('constructor', 'observation'):
             root = Path(tempfile.mkdtemp(prefix='leetplus-rpc-prechild-', dir='/run')).resolve()
             root.chmod(0o700)
@@ -80,29 +80,21 @@ root=pathlib.Path(sys.argv[1]);phase=sys.argv[2]
 rpc_host.ROOT=root/'installed';rpc_host.REQUESTS=root/'requests';rpc_host.ATTEMPTS=root/'attempts'
 sha='a'*64;op='12345678-1234-4123-8123-123456789abc'
 if phase=='constructor':
-    with patch.object(rpc_host,'HostRPC',side_effect=RuntimeError('fixture constructor')):
-        rpc_host.main(['--bundle-sha256',sha,'--operation-id',op])
+    with patch.object(rpc_host,'HostRPC',side_effect=RuntimeError('fixture constructor')),patch.object(rpc_host,'verify_runtime_provision_binding',return_value={}):
+        rpc_host.main(['--bundle-sha256',sha,'--operation-id',op,'--request-id',op])
 else:
     class Fake:
         receipt={'bundleSha256':sha}
-    with patch.object(rpc_host,'HostRPC',return_value=Fake()),patch.object(
+    with patch.object(rpc_host,'HostRPC',return_value=Fake()),patch.object(rpc_host,'verify_runtime_provision_binding',return_value={}),patch.object(
         rpc_host,'_read_only_command',side_effect=RuntimeError('fixture observer')):
-        rpc_host.main(['--bundle-sha256',sha,'--operation-id',op])
+        rpc_host.main(['--bundle-sha256',sha,'--operation-id',op,'--request-id',op])
 '''
             child = subprocess.Popen([sys.executable, '-B', '-c', code, str(root), phase],
                 cwd=Path(__file__).resolve().parent, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, text=True, start_new_session=True)
             try:
                 child.communicate(timeout=8)
-                receipt = json.loads((root / 'attempts' / attempt_id / 'attempt.exit.json').read_bytes())
-                self.assertEqual(receipt['exitCode'], 1)
-                self.assertEqual(receipt['phase'],
-                    'HOST_CONSTRUCTION' if phase == 'constructor' else 'READ_ONLY_OBSERVATION')
-                self.assertEqual(receipt['failureClass'], 'RuntimeError')
-                self.assertTrue((root / 'attempts' / attempt_id / 'request.sha256').is_file())
-                if phase == 'observation':
-                    self.assertEqual(json.loads((root / 'attempts' / attempt_id /
-                        'read.exit.json').read_bytes())['exitCode'], 1)
+                self.assertFalse((root / 'attempts' / attempt_id).exists())
             finally:
                 if child.poll() is None:
                     child.kill()

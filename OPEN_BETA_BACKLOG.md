@@ -15,6 +15,10 @@ initial transport и новый combined review/CI ещё ожидаются; PR
 Полный исполняемый closure дополнен captured-byte launcher/RPC, Node module
 linking и predecessor observer; окончательные Linux/root проверки и обзор
 именно этих новых байтов ещё нужны. Installed/serving не подтверждены.
+Для последующего native RPC добавлен source-only signed runtime-provision
+contract: отдельный plan/GO для private state roots/transition.lock/exact
+request; read-only observe/plan/prepare больше не пишут attempt audit на host.
+Это ещё не installed state и не разрешение на A→bridge/Variant B serving.
 
 **Source-only bootstrap checkpoint 27.09:** ordered source integration proposal
 for frozen draft PR246→247→248 and separate predecessor transition primitives

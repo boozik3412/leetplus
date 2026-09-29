@@ -106,6 +106,26 @@ recovery validation. A filename hash
 followed by another pathname import is not source authority. This is a source
 candidate and needs the complete Linux fixture and installed-path acceptance.
 
+After public-only bundle installation, a separate signed runtime-provision
+action on the installed launcher consumes one canonical request from stdin.
+Its deployment-root approval binds the exact host, bundle/installer receipt,
+request command and bytes, fresh fixed path preimages and native lock inodes.
+A flat intent in existing Compose state precedes creation of the private
+transition state root, requests/operations/attempts directories, persistent
+transition lock and immutable request; a terminal receipt binds their postimage.
+Every request placement has a fresh placement UUID and signed plan. A new
+operation request cannot appear as an unsigned file. Read-only reconciliation
+classifies intent-only, partial, torn and exact postimages; explicit recovery
+can publish only a missing terminal receipt after the complete exact postimage.
+
+The RPC host verifies the terminal signed placement lineage before handling a
+request. `observe`, `plan-v1` and `prepare` write no persistent attempt state.
+Its watchdog and child stderr use process pipes/anonymous memory. The
+dispatcher captures command stdout/stderr/exit externally; effectful native
+actions still rely on their own signed intent, locks and receipts. Runtime
+provisioning is a distinct future dispatcher effect/GO; this source change
+performs no host operation.
+
 ## Trust and independent packaging
 
 The accepted b0 controller has no verifier capable of admitting the bridge's

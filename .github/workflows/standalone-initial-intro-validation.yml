@@ -3,6 +3,7 @@ name: Standalone initial introduction source checks
 on:
   push:
     branches:
+      - main
       - codex/standalone-initial-intro-20260929
       - codex/standalone-first-transport-20260929
     paths:
@@ -44,18 +45,35 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(node -p 'process.versions.node.split(".")[0]')" = '22'
-      - name: Validate source schemas and public signatures
+      - name: Bounded schema, signature and remapped Linux root batch
         run: |
-          python3 -B deploy/leetplus-compose/test_standalone_initial_intro.py
-          python3 -B deploy/leetplus-compose/test_standalone_intro_transport.py
-          node --check deploy/leetplus-compose/standalone-initial-intro-entry.mjs
-          node --check deploy/leetplus-compose/standalone-intro-transport-entry.mjs
-          node --check docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs
-      - name: Exercise remapped disposable Linux root effects
-        run: |
+          evidence="$RUNNER_TEMP/standalone-initial-intro-source"
           node_dir="$(dirname -- "$(command -v node)")"
-          sudo /usr/bin/env -i PATH="$node_dir:/usr/sbin:/usr/bin:/sbin:/bin" LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC /usr/bin/python3 -B deploy/leetplus-compose/test_standalone_initial_intro_native.py
-          sudo /usr/bin/env -i PATH="$node_dir:/usr/sbin:/usr/bin:/sbin:/bin" LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC /usr/bin/python3 -B deploy/leetplus-compose/test_standalone_intro_transport_native.py
+          mkdir -p "$evidence"
+          set +e
+          python3 -B deploy/leetplus-compose/test_standalone_initial_intro.py >"$evidence/intro-pure.stdout" 2>"$evidence/intro-pure.stderr"
+          printf '%s\n' "$?" >"$evidence/intro-pure.exit"
+          python3 -B deploy/leetplus-compose/test_standalone_intro_transport.py >"$evidence/transport-pure.stdout" 2>"$evidence/transport-pure.stderr"
+          printf '%s\n' "$?" >"$evidence/transport-pure.exit"
+          node --check deploy/leetplus-compose/standalone-initial-intro-entry.mjs >"$evidence/intro-entry.stdout" 2>"$evidence/intro-entry.stderr"
+          printf '%s\n' "$?" >"$evidence/intro-entry.exit"
+          node --check deploy/leetplus-compose/standalone-intro-transport-entry.mjs >"$evidence/transport-entry.stdout" 2>"$evidence/transport-entry.stderr"
+          printf '%s\n' "$?" >"$evidence/transport-entry.exit"
+          node --check docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs >"$evidence/minimal-verifier.stdout" 2>"$evidence/minimal-verifier.stderr"
+          printf '%s\n' "$?" >"$evidence/minimal-verifier.exit"
+          sudo /usr/bin/env -i PATH="$node_dir:/usr/sbin:/usr/bin:/sbin:/bin" LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC /usr/bin/python3 -B deploy/leetplus-compose/test_standalone_initial_intro_native.py >"$evidence/intro-native.stdout" 2>"$evidence/intro-native.stderr"
+          printf '%s\n' "$?" >"$evidence/intro-native.exit"
+          sudo /usr/bin/env -i PATH="$node_dir:/usr/sbin:/usr/bin:/sbin:/bin" LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC /usr/bin/python3 -B deploy/leetplus-compose/test_standalone_intro_transport_native.py >"$evidence/transport-native.stdout" 2>"$evidence/transport-native.stderr"
+          printf '%s\n' "$?" >"$evidence/transport-native.exit"
+          cat "$evidence/"*.stdout "$evidence/"*.stderr
+          for exit_receipt in "$evidence/"*.exit; do test "$(cat "$exit_receipt")" = 0 || exit 1; done
+      - name: Preserve complete standalone source gate receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: standalone-initial-intro-source-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/standalone-initial-intro-source
+          if-no-files-found: error
 
 # This workflow publishes no admission or deployable artifact and calls no
 # provider/server. All native fixture writes are confined to a new temp root.

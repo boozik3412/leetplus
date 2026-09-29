@@ -44,6 +44,8 @@ class LogicalPath:
     """All Path syscalls map into one temp root; string identities stay logical."""
     def __init__(self,root,value):self.root=root;self.logical=PurePosixPath(str(value))
     def __str__(self):return str(self.logical)
+    def __eq__(self,other):return isinstance(other,LogicalPath) and self.root==other.root and self.logical==other.logical
+    def __hash__(self):return hash((self.root,self.logical))
     def __fspath__(self):return str(self.root/str(self.logical).lstrip('/'))
     def __truediv__(self,other):return LogicalPath(self.root,self.logical/other)
     @property
@@ -168,6 +170,8 @@ class KernelCases(unittest.TestCase):
                    hostIdentitySha256=self.plan['hostIdentitySha256'],bootId=self.plan['bootId'],
                    publicRootBase64=base64.b64encode(self.public).decode(),
                    publicRootSha256=sha(self.public),
+                   nodeRealpath=str(Path(self.node).resolve()),
+                   nodeSha256=sha(Path(self.node).resolve().read_bytes()),
                    pythonRealpath=str(Path('/usr/bin/python3').resolve()),
                    pythonSha256=sha(Path('/usr/bin/python3').resolve().read_bytes()),
                    planExpiresAt=self.plan['expiresAt'])

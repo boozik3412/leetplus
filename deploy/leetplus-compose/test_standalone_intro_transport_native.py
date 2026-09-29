@@ -20,20 +20,6 @@ pure=importlib.util.module_from_spec(spec);spec.loader.exec_module(pure)
 t=pure.transport
 
 
-class FixtureTransport(t.Transport):
-    def predecessor_postimage(self,plan):
-        old=plan['execution']['predecessor']
-        link=self.p('/usr/local/sbin/leetplus-compose')
-        t.require(link.is_symlink() and os.readlink(link)==old['corePointer'] and
-                  t.sha(self.read(t.STATE+'/active.json'))==old['activeRecordSha256'] and
-                  t.sha(self.read(t.STATE+'/control-handoffs/active.json'))==old['handoffPointerSha256'] and
-                  self.absent(t.STATE+'/control-handoff.pending.json'),
-                  'Synthetic predecessor changed')
-        return t.sha(t.canonical({'corePointer':old['corePointer'],
-            'manifestSha256':old['manifestSha256'],'activeRecordSha256':old['activeRecordSha256'],
-            'handoffPointerSha256':old['handoffPointerSha256'],'pendingAbsent':True}))
-
-
 @unittest.skipUnless(os.name=='posix' and hasattr(os,'getuid') and os.getuid()==0,
                      'Disposable Linux root fixture required')
 class NativeTransport(unittest.TestCase):
@@ -43,12 +29,31 @@ class NativeTransport(unittest.TestCase):
         self.node=shutil.which('node');self.assertIsNotNone(self.node)
         self.plan=pure.plan_fixture()
         self.operation=self.plan['operationId']
-        self.fixture=FixtureTransport(self.base,node=self.node,
+        self.fixture=t.Transport(self.base,node=self.node,
             captured_program_sha256=t.sha((HERE/'standalone-intro-transport.py').read_bytes()))
         for directory in (t.STATE,'/srv/leetplus','/etc/leetplus-compose','/usr/local/sbin',
+                          '/usr/local/lib/leetplus-compose/'+t.B0['releaseSha'],
                           '/proc/self','/proc/sys/kernel/random','/usr/bin',
                           t.STATE+'/control-handoffs'):
             self.directory(directory,0o700)
+        immutable='b0cbf3a4f302b299762fa055f3bffe0376a91182'
+        repo=HERE.parents[1]
+        inventory=subprocess.run(['git','--no-replace-objects','-C',str(repo),'ls-tree','-r','--name-only',
+            immutable,'--','deploy/leetplus-compose'],capture_output=True,check=True,timeout=30).stdout.decode().splitlines()
+        self.assertEqual(len(inventory),99)
+        filemap={}
+        for source in inventory:
+            raw=subprocess.run(['git','--no-replace-objects','-C',str(repo),'show',immutable+':'+source],
+                capture_output=True,check=True,timeout=30).stdout
+            leaf=source.removeprefix('deploy/leetplus-compose/')
+            filemap[leaf]=t.sha(raw)
+            self.write('/usr/local/lib/leetplus-compose/'+immutable+'/'+leaf,raw)
+        b0manifest={'contract':'LEETPLUS_COMPOSE_BLUE_GREEN_V1_INSTALL','releaseSha':immutable,
+            'admissionSha256':'8302b0e73e38aecf419f78c469018d7fd1a6f8ce89dde89291b4cca61adaa070',
+            'files':filemap}
+        self.assertEqual(t.sha(t.canonical(b0manifest)),t.B0['manifestSha256'])
+        self.write('/usr/local/lib/leetplus-compose/'+immutable+'/install-manifest.json',
+                   t.canonical(b0manifest))
         self.write('/etc/machine-id',b'fixture-machine\n')
         self.write('/proc/sys/kernel/random/boot_id',self.plan['execution']['host']['bootId'].encode()+b'\n')
         self.write('/proc/self/mountinfo',b'1 1 0:0 / / rw - ext4 /dev/fixture rw\n')
@@ -204,7 +209,7 @@ crypto.sign(null,Buffer.from(JSON.stringify(v,null,2)+'\\n'),k.privateKey).toStr
         self.assertTrue(self.fixture.absent(t.STATE+'/'+self.operation+'.standalone-transport.intent.json'))
 
     def test_partial_after_intent_requires_reconciliation_no_replay(self):
-        class FailAfterIntent(FixtureTransport):
+        class FailAfterIntent(t.Transport):
             def directory(self,value,mode):raise OSError('fixture crash after flat intent')
         partial=FailAfterIntent(self.base,node=self.node,
             captured_program_sha256=self.fixture.captured_program_sha256)
@@ -212,6 +217,19 @@ crypto.sign(null,Buffer.from(JSON.stringify(v,null,2)+'\\n'),k.privateKey).toStr
         self.assertFalse(self.fixture.absent(t.STATE+'/'+self.operation+'.standalone-transport.intent.json'))
         with self.assertRaises(ValueError):self.fixture.stage(self.packet,self.operation)
         self.assertEqual(self.fixture.reconcile(self.operation)['decision'],'RECOVERY_REQUIRED')
+
+    def test_replaced_native_lock_or_parent_blocks_before_intent(self):
+        original=self.fixture.p(t.CONTROL_LOCK)
+        retained=original.with_name(original.name+'.retained-original')
+        original.rename(retained);self.write(t.CONTROL_LOCK,b'',0o600)
+        self.assertNotEqual(retained.stat().st_ino,original.stat().st_ino)
+        with self.assertRaises(ValueError):self.fixture.stage(self.packet,self.operation)
+        self.assertTrue(self.fixture.absent(t.STATE+'/'+self.operation+'.standalone-transport.intent.json'))
+        original.unlink();retained.rename(original)
+        parent=self.fixture.p('/srv/leetplus')
+        parent.chmod(0o777)
+        with self.assertRaises(ValueError):self.fixture.stage(self.packet,self.operation)
+        self.assertTrue(self.fixture.absent(t.STATE+'/'+self.operation+'.standalone-transport.intent.json'))
 
 
 if __name__=='__main__':unittest.main()

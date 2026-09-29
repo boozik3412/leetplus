@@ -30,10 +30,10 @@ INTENT = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_INTENT'
 GENERATION = 'LEETPLUS_STANDALONE_INERT_GENERATION_V1_RECEIPT'
 RECEIPT = 'LEETPLUS_STANDALONE_INITIAL_INTRO_V1_RECEIPT'
 SOURCE_RECEIPT = 'LEETPLUS_STANDALONE_INITIAL_SOURCE_V1'
-TRANSPORT = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V1_RECEIPT'
-TRANSPORT_PLAN = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V1_PLAN'
-TRANSPORT_APPROVAL = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V1_APPROVAL'
-TRANSPORT_INTENT = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V1_INTENT'
+TRANSPORT = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_RECEIPT'
+TRANSPORT_PLAN = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_PLAN'
+TRANSPORT_APPROVAL = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_APPROVAL'
+TRANSPORT_INTENT = 'LEETPLUS_STANDALONE_INTRO_TRANSPORT_V2_INTENT'
 REPO = 'boozik3412/leetplus'
 STATE = '/var/lib/leetplus-compose'
 AUDITS = STATE + '/standalone-introductions'
@@ -146,13 +146,15 @@ TRANSPORT_RECEIPT_FIELDS = {'contract', 'decision', 'operationId', 'planSha256',
     'snapshotDevice', 'snapshotInode', 'snapshotSize', 'snapshotMode',
     'snapshotUid', 'snapshotGid', 'entrySnapshotPath', 'entrySnapshotDevice',
     'entrySnapshotInode', 'entrySnapshotSize', 'entrySnapshotMode',
-    'entrySnapshotUid', 'entrySnapshotGid', 'acceptedAt'}
+    'entrySnapshotUid', 'entrySnapshotGid', 'executionSha256', 'flatIntentSha256',
+    'fullPostimageSha256', 'parentPostimageSha256', 'predecessorPostimageSha256',
+    'acceptedAt'}
 TRANSPORT_PLAN_FIELDS = {'contract', 'operationId', 'action', *TRANSPORT_LINK_FIELDS,
     'snapshotPath', 'snapshotSize', 'snapshotMode', 'entrySnapshotPath',
-    'entrySnapshotSize', 'entrySnapshotMode', 'effects'}
+    'entrySnapshotSize', 'entrySnapshotMode', 'effects', 'execution'}
 TRANSPORT_EFFECTS = {'sourceSnapshotOnly': True, 'targetExecution': False,
                     'controllerPointerMutation': False, 'applicationRestart': False,
-                    'systemdUnitMutation': False, 'daemonReload': False,
+                    'systemdUnitMutation': False, 'daemonReload': False, 'dataMutation': False,
                     'timerMutation': False, 'workerGrantMutation': False,
                     'providerEffect': False, 'privateKeyTransport': False}
 
@@ -694,6 +696,60 @@ class InitialIntro:
                 original['effects'] == TRANSPORT_EFFECTS and
                 all(type(v) is bool for v in original['effects'].values()),
                 'Initial transport plan/effect scope differs')
+        execution = original['execution']
+        require(isinstance(execution, dict) and set(execution) == {'code', 'invocation', 'host',
+            'predecessor', 'nativeControlLockIdentity', 'trustRoot', 'parentPreimages',
+            'leafPreimages', 'privateDirectories', 'destinations', 'generatedDestinations',
+            'limits', 'effects'} and execution['effects'] == TRANSPORT_EFFECTS and
+            execution['invocation'] == {'interpreter': '/usr/bin/python3',
+                'flags': ['-I','-B','-c'], 'mode': 'memory-captured-python-c', 'action': 'stage'} and
+            execution['limits'] == {'archiveBytes': MAX_ARCHIVE, 'leafBytes': MAX_LEAF,
+                'authorizationBytes': 131072, 'packetBytes': 48*1024*1024,
+                'transportProgramBytes': 65536, 'lockWaitSeconds': 120, 'totalSeconds': 180} and
+            execution['host'] == {'hostIdentitySha256': plan['hostIdentitySha256'],
+                                  'bootId': plan['bootId']} and
+            execution['nativeControlLockIdentity'] == plan['nativeControlLockIdentity'],
+            'Initial transport mandatory V2 execution scope differs')
+        code = execution['code']
+        require(isinstance(code, dict) and set(code) == {'transportEntrySha256',
+            'transportProgramSha256', 'pythonLoaderSha256', 'nodeExecutableSha256', 'nodeRealpath',
+            'pythonExecutableSha256', 'pythonRealpath'} and
+            all(isinstance(code[name], str) and HASH.fullmatch(code[name]) for name in
+                ('transportEntrySha256', 'transportProgramSha256', 'pythonLoaderSha256',
+                 'nodeExecutableSha256', 'pythonExecutableSha256')) and
+            code['pythonLoaderSha256'] == 'a44a7637f5d4a89f7ab7084fc1a300c35727fe20b78e44ad4491fbba91191bff' and
+            code['nodeRealpath'].startswith('/usr/bin/node') and
+            code['pythonRealpath'].startswith('/usr/bin/python3') and
+            execution['trustRoot'] == {'path': ROOT_PEM, 'rawSha256': sha(pem)},
+            'Initial transport signed code/deployment-root closure differs')
+        predecessor = execution['predecessor']
+        require(predecessor == {'releaseSha': B0_RELEASE, 'manifestSha256': B0_MANIFEST,
+            'executorSha256': B0_EXECUTOR, 'installerSha256': B0_INSTALLER,
+            'corePointer': plan['oldCorePointer'],
+            'activeRecordSha256': plan['oldActiveRecordSha256'],
+            'handoffPointerSha256': plan['oldHandoffPointerSha256'],
+            'pendingAbsent': True},
+            'Transport predecessor differs from signed INTRO preimage')
+        request = REQUESTS+operation
+        staging = '/srv/leetplus/production-control-inbox/.transport-'+plan['introTransportOperationId']+'.pending'
+        flat = STATE+'/'+plan['introTransportOperationId']+'.standalone-transport.intent.json'
+        parent_names = {STATE, '/srv/leetplus', '/srv/leetplus/production-control-inbox', TRANSPORTS}
+        require(set(execution['parentPreimages']) == parent_names and
+            execution['leafPreimages'] == {name: 'ABSENT' for name in
+                sorted((request, staging, audit, flat))} and
+            execution['privateDirectories'] == {name: {'mode': 0o700, 'uid': 0, 'gid': 0}
+                for name in sorted((request, staging, audit))} and
+            set(execution['destinations']) == {'source.tar.gz', 'source-receipt.json',
+                'final-admission.json', 'docker-admission.json',
+                'intro-entry.mjs', 'intro-program.py'},
+            'Transport complete destination/preimage map differs')
+        generated = {flat: 'FLAT_INTENT', audit+'/plan.json': 'AUDIT_PLAN',
+            audit+'/approval.json': 'AUDIT_APPROVAL', audit+'/intent.json': 'AUDIT_INTENT',
+            audit+'/receipt.json': 'AUDIT_RECEIPT', request+'/transport-receipt.json': 'REQUEST_RECEIPT'}
+        require(execution['generatedDestinations'] == {name:
+            {'kind': kind, 'mode': 0o400, 'uid': 0, 'gid': 0}
+            for name, kind in sorted(generated.items())},
+            'Transport generated destination map differs')
         require(set(envelope) == {'approval', 'signature'} and isinstance(envelope['approval'], dict),
                 'Initial transport approval envelope differs')
         approval = envelope['approval']
@@ -709,6 +765,10 @@ class InitialIntro:
                 intent['planSha256'] == sha(raw_plan) and intent['approvalSha256'] == sha(raw_approval) and
                 receipt['planSha256'] == sha(raw_plan) and receipt['approvalSha256'] == sha(raw_approval) and
                 receipt['intentSha256'] == sha(raw_intent), 'Initial transport intent/receipt lineage differs')
+        require(f.read(flat, 65536) == raw_intent and
+                receipt['flatIntentSha256'] == sha(raw_intent) and
+                receipt['executionSha256'] == sha(canonical(execution)),
+                'Pre-effect transport intent or signed execution digest differs')
         issued, expires = instant(approval['issuedAt']), instant(approval['expiresAt'])
         require(issued <= instant(intent['authorizedAt']) <= instant(receipt['acceptedAt']) < expires and
                 0 < (expires-issued).total_seconds() <= 1800,
@@ -721,6 +781,42 @@ class InitialIntro:
                                 env=CLEAN, timeout=15, check=False)
         require(result.returncode == 0 and result.stdout == b'PASS' and not result.stderr,
                 'Initial transport public signature rejected')
+        observed_parents = {}
+        for name in sorted(parent_names, key=lambda value: value.encode()):
+            identity = f.p(name).lstat()
+            require(stat.S_ISDIR(identity.st_mode) and identity.st_uid == 0 and
+                    not identity.st_mode & 0o022,
+                    'Historical transport parent directory differs')
+            expected = execution['parentPreimages'][name]
+            require(isinstance(expected, dict) and set(expected) == {'state','device','inode',
+                    'uid','gid','mode'} and expected['state'] in ('ABSENT','EXACT') and
+                    expected['uid'] == 0 and not expected['mode'] & 0o022 and
+                    (expected['state'] != 'EXACT' or
+                     (identity.st_dev, identity.st_ino) == (expected['device'], expected['inode'])),
+                    'Signed transport parent preimage changed')
+            observed_parents[name] = {'device': identity.st_dev, 'inode': identity.st_ino,
+                'uid': identity.st_uid, 'gid': identity.st_gid,
+                'mode': stat.S_IMODE(identity.st_mode)}
+        require(receipt['parentPostimageSha256'] == sha(canonical(observed_parents)) and
+                receipt['predecessorPostimageSha256'] == sha(canonical({
+                    'corePointer': plan['oldCorePointer'],
+                    'manifestSha256': plan['predecessorManifestSha256'],
+                    'activeRecordSha256': plan['oldActiveRecordSha256'],
+                    'handoffPointerSha256': plan['oldHandoffPointerSha256'],
+                    'pendingAbsent': True})),
+                'Transport parent/predecessor historical postimage differs')
+        postimage = {}
+        for name, expected in sorted(execution['destinations'].items()):
+            require(isinstance(expected, dict) and set(expected) == {'sha256','bytes','mode','uid','gid'} and
+                    expected['mode'] == 0o400 and expected['uid'] == expected['gid'] == 0,
+                    'Transport signed source destination differs')
+            data = f.read(request+'/'+name, MAX_ARCHIVE if name == 'source.tar.gz' else MAX_LEAF)
+            require(sha(data) == expected['sha256'] and len(data) == expected['bytes'],
+                    'Historical transport source bytes differ')
+            postimage[name] = {'sha256': sha(data), 'bytes': len(data),
+                               'mode': 0o400, 'uid': 0, 'gid': 0}
+        require(receipt['fullPostimageSha256'] == sha(canonical(postimage)),
+                'Transport complete source postimage differs')
         snapshot = REQUESTS+operation+'/intro-program.py'
         info = f.p(snapshot).lstat()
         entry_snapshot = REQUESTS+operation+'/intro-entry.mjs'

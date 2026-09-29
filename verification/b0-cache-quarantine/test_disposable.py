@@ -153,7 +153,7 @@ class KernelCases(unittest.TestCase):
             'hostIdentitySha256':self.plan['hostIdentitySha256'],'bootId':self.plan['bootId'],
             'effectOwnerThreadId':self.plan['effectOwnerThreadId'],'directUserGoReceiptSha256':'b'*64,
             'authorizedAt':self.now.isoformat(timespec='milliseconds').replace('+00:00','Z'),
-            'expiresAt':self.plan['expiresAt']}
+            'expiresAt':(self.now+dt.timedelta(minutes=10)).isoformat(timespec='milliseconds').replace('+00:00','Z')}
         self.key.stdin.write(json.dumps(self.approval)+'\n');self.key.stdin.flush()
         signature=json.loads(self.key.stdout.readline())['signature']
         self.signed={'approval':self.approval,'signatureBase64':signature}

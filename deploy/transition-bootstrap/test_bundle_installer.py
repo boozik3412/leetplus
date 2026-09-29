@@ -225,6 +225,95 @@ class BundleInstallerTests(unittest.TestCase):
             'PARTIAL_REQUEST_REQUIRES_SIGNED_RECOVERY')
         self.assertEqual(list(self.installed.iterdir()), [])
 
+    def test_request_expiry_at_first_write_leaves_no_intent(self):
+        original = bundle_installer.validate_install_approval
+
+        def expire_at_intent(plan, approval, root, **kwargs):
+            if kwargs.get('accepted_at') is not None:
+                raise ValueError('fixture approval expired at first write')
+            return original(plan, approval, root, **kwargs)
+
+        with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old), \
+             patch.object(bundle_installer, 'validate_install_approval', side_effect=expire_at_intent):
+            with self.assertRaisesRegex(ValueError, 'expired at first write'):
+                self.installer.stage_request(self.plan, self.approval, self.roots, self.archive)
+        self.assertEqual(list(self.state.iterdir()), [])
+        self.assertEqual(list(self.requests.iterdir()), [])
+
+    def test_torn_request_intent_is_unknown_and_never_replayed(self):
+        original = bundle_installer._write_new
+
+        def tear_intent(path, raw, mode=0o400):
+            if path.name.endswith('.standalone-install-request.intent.json'):
+                path.write_bytes(raw[:8])
+                raise RuntimeError('fixture torn request intent')
+            return original(path, raw, mode)
+
+        with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old), \
+             patch.object(bundle_installer, '_write_new', side_effect=tear_intent):
+            with self.assertRaisesRegex(RuntimeError, 'torn request intent'):
+                self.installer.stage_request(self.plan, self.approval, self.roots, self.archive)
+        self.assertEqual(self.installer.reconcile_request(
+            self.plan, self.approval, self.roots, self.archive)['decision'],
+            'UNKNOWN_TORN_REQUEST_INTENT_REQUIRES_SIGNED_RECOVERY')
+        self.assertEqual(list(self.requests.iterdir()), [])
+
+    def test_torn_request_receipt_is_preserved_after_exact_publication(self):
+        original = bundle_installer._write_new
+
+        def tear_receipt(path, raw, mode=0o400):
+            if path.name.endswith('.standalone-install-request.receipt.json'):
+                path.write_bytes(raw[:8])
+                raise RuntimeError('fixture torn request receipt')
+            return original(path, raw, mode)
+
+        with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old), \
+             patch.object(bundle_installer, '_write_new', side_effect=tear_receipt):
+            with self.assertRaisesRegex(RuntimeError, 'torn request receipt'):
+                self.installer.stage_request(self.plan, self.approval, self.roots, self.archive)
+        receipt = self.state / (self.plan['operationId'] + '.standalone-install-request.receipt.json')
+        before = receipt.read_bytes()
+        self.assertEqual(self.installer.reconcile_request(
+            self.plan, self.approval, self.roots, self.archive)['decision'],
+            'PARTIAL_REQUEST_RECEIPT_REQUIRES_SIGNED_RECOVERY')
+        self.assertEqual(receipt.read_bytes(), before)
+
+    def test_torn_install_intent_is_unknown_without_candidate_staging(self):
+        original = bundle_installer._write_new
+
+        def tear_intent(path, raw, mode=0o400):
+            if path.name.endswith('.standalone-install.intent.json'):
+                path.write_bytes(raw[:8])
+                raise RuntimeError('fixture torn install intent')
+            return original(path, raw, mode)
+
+        with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old), \
+             patch.object(bundle_installer, '_write_new', side_effect=tear_intent):
+            with self.assertRaisesRegex(RuntimeError, 'torn install intent'):
+                self.installer.apply(self.plan, self.approval, self.roots, self.archive)
+        self.assertEqual(self.installer.reconcile(self.plan, self.approval)['decision'],
+                         'UNKNOWN_TORN_INSTALL_INTENT_REQUIRES_SIGNED_RECOVERY')
+        self.assertEqual(list(self.installed.iterdir()), [])
+
+    def test_pending_install_receipt_is_classified_without_overwrite(self):
+        original = bundle_installer._write_new
+
+        def tear_pending(path, raw, mode=0o400):
+            if path.name == '.receipt.json.pending':
+                path.write_bytes(raw[:8])
+                raise RuntimeError('fixture torn install receipt')
+            return original(path, raw, mode)
+
+        with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old), \
+             patch.object(bundle_installer, '_write_new', side_effect=tear_pending):
+            with self.assertRaisesRegex(RuntimeError, 'torn install receipt'):
+                self.installer.apply(self.plan, self.approval, self.roots, self.archive)
+        pending = self.state / self.plan['operationId'] / '.receipt.json.pending'
+        before = pending.read_bytes()
+        self.assertEqual(self.installer.reconcile(self.plan, self.approval)['decision'],
+                         'PARTIAL_INSTALL_RECEIPT_REQUIRES_SIGNED_RECOVERY')
+        self.assertEqual(pending.read_bytes(), before)
+
     def test_partial_audit_and_staging_are_not_classified_as_no_effect(self):
         original = bundle_installer._publish_new
 

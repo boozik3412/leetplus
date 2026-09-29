@@ -6,6 +6,7 @@ are verified. A separate exact dispatcher GO is required for apply/reconcile.
 """
 import argparse
 import base64
+import contextlib
 import datetime
 import hashlib
 import json
@@ -15,6 +16,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 import types
 
 RELEASE = re.compile(r'[a-f0-9]{40}\Z')
@@ -118,6 +120,55 @@ def exact_json(path, maximum=65536):
     value = json.loads(raw)
     require(raw == canonical(value), 'Canonical JSON required')
     return value, raw
+
+
+@contextlib.contextmanager
+def observation_locks():
+    """Stdlib-only recovery observation before any candidate import."""
+    import fcntl
+    paths = (Path('/var/lib/leetplus-compose/standalone-install.lock'),
+             Path('/var/lib/leetplus-compose/control.lock'))
+    descriptors = []
+    deadline = time.monotonic() + 120
+    try:
+        for path in paths:
+            secure_read(path, 65536)
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            descriptors.append(fd)
+            before = os.fstat(fd)
+            require(stat.S_ISREG(before.st_mode) and before.st_uid == 0 and
+                    before.st_nlink == 1 and not before.st_mode & 0o077,
+                    'Existing observation lock differs')
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    require(time.monotonic() < deadline, 'Recovery observation lock timed out')
+                    time.sleep(0.01)
+            after = path.lstat()
+            require((before.st_dev, before.st_ino) == (after.st_dev, after.st_ino),
+                    'Recovery observation lock origin changed')
+        yield
+    finally:
+        for fd in reversed(descriptors):
+            os.close(fd)
+
+
+def historical_intent_or_classification(path, request=False):
+    label = 'REQUEST' if request else 'INSTALL'
+    with observation_locks():
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return None, {'decision': label + '_INTENT_ABSENT_REQUIRES_SIGNED_RECOVERY'}
+        if not stat.S_ISREG(info.st_mode):
+            return None, {'decision': 'UNKNOWN_TORN_' + label + '_INTENT_REQUIRES_SIGNED_RECOVERY'}
+        try:
+            intent, _ = exact_json(path)
+        except (OSError, ValueError, UnicodeError):
+            return None, {'decision': 'UNKNOWN_TORN_' + label + '_INTENT_REQUIRES_SIGNED_RECOVERY'}
+        return intent, None
 
 
 def parse_manifest(raw):
@@ -365,7 +416,10 @@ def run(action, source_release, operation_id):
         suffix = ('.standalone-install-request.intent.json' if action == 'reconcile-request'
                   else '.standalone-install.intent.json')
         flat_intent = Path(LAYOUT['operationStateRoot']) / (operation_id + suffix)
-        intent, _ = exact_json(flat_intent)
+        intent, classification = historical_intent_or_classification(
+            flat_intent, request=action == 'reconcile-request')
+        if classification is not None:
+            return classification
         expected_fields = {'contract', 'operationId', 'planSha256', 'approvalSha256', 'authorizedAt'}
         if action == 'reconcile-request':
             expected_fields.add('requestFiles')

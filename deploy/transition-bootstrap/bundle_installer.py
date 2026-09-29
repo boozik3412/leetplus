@@ -219,6 +219,7 @@ class StandaloneBundleInstaller:
                       'approvalSha256': digest(canonical(approval)), 'authorizedAt': authorized,
                       'requestFiles': {name: digest(raw) for name, raw in sorted(files.items())}}
             # The intent is the first write. A torn intent blocks all continuations.
+            validate_install_approval(plan, approval, deployment_root, accepted_at=authorized)
             _write_new(intent_path, canonical(intent))
             sync_directory(self.state)
             temporary.mkdir(mode=0o700)
@@ -248,8 +249,14 @@ class StandaloneBundleInstaller:
         with _install_locks(self.install_lock, self.control_lock):
             validate_install_plan(plan)
             intent_path = _request_intent_path(self.state, plan['operationId'])
-            intent_raw = secure_read(intent_path, 65536)
-            intent = json.loads(intent_raw)
+            if _lstat_or_none(intent_path) is None:
+                return {'decision': 'REQUEST_INTENT_ABSENT_REQUIRES_SIGNED_RECOVERY'}
+            try:
+                intent_raw = secure_read(intent_path, 65536)
+                intent = json.loads(intent_raw)
+                require(intent_raw == canonical(intent), 'Canonical request intent required')
+            except (OSError, ValueError, UnicodeError):
+                return {'decision': 'UNKNOWN_TORN_REQUEST_INTENT_REQUIRES_SIGNED_RECOVERY'}
             files = _request_files(plan, approval, roots, archive)
             require(intent_raw == canonical(intent) and
                     set(intent) == {'contract', 'operationId', 'planSha256', 'approvalSha256',
@@ -285,8 +292,12 @@ class StandaloneBundleInstaller:
                 sync_directory(self.state)
                 decision = 'RECONCILED_STAGED_REQUEST'
             else:
-                require(secure_read(receipt_path, 65536) == canonical(receipt),
-                        'Request receipt changed')
+                try:
+                    receipt_raw = secure_read(receipt_path, 65536)
+                except (OSError, ValueError):
+                    return {'decision': 'PARTIAL_REQUEST_RECEIPT_REQUIRES_SIGNED_RECOVERY'}
+                if receipt_raw != canonical(receipt):
+                    return {'decision': 'PARTIAL_REQUEST_RECEIPT_REQUIRES_SIGNED_RECOVERY'}
                 decision = 'ALREADY_STAGED_REQUEST'
             return {'decision': decision, 'receiptSha256': digest(canonical(receipt))}
 
@@ -408,8 +419,14 @@ class StandaloneBundleInstaller:
         with _install_locks(self.install_lock, self.control_lock):
             validate_install_plan(plan)
             flat_intent = _flat_intent_path(self.state, plan['operationId'])
-            intent_raw = secure_read(flat_intent, 65536)
-            intent = json.loads(intent_raw)
+            if _lstat_or_none(flat_intent) is None:
+                return {'decision': 'INSTALL_INTENT_ABSENT_REQUIRES_SIGNED_RECOVERY'}
+            try:
+                intent_raw = secure_read(flat_intent, 65536)
+                intent = json.loads(intent_raw)
+                require(intent_raw == canonical(intent), 'Canonical installer intent required')
+            except (OSError, ValueError, UnicodeError):
+                return {'decision': 'UNKNOWN_TORN_INSTALL_INTENT_REQUIRES_SIGNED_RECOVERY'}
             require(intent_raw == canonical(intent) and
                     set(intent) == {'contract', 'operationId', 'planSha256', 'approvalSha256', 'authorizedAt'} and
                     intent['contract'] == INSTALL_PLAN + '_INTENT' and
@@ -428,6 +445,10 @@ class StandaloneBundleInstaller:
             allowed = {'plan.json': canonical(plan), 'approval.json': canonical(approval),
                        'intent.json': intent_raw}
             observed_names = {item.name for item in operation.iterdir()}
+            if '.receipt.json.pending' in observed_names:
+                return {'decision': 'PARTIAL_INSTALL_RECEIPT_REQUIRES_SIGNED_RECOVERY'}
+            if observed_names & {'.' + name + '.pending' for name in allowed}:
+                return {'decision': 'PARTIAL_AUDIT_REQUIRES_SIGNED_RECOVERY'}
             require(observed_names <= set(allowed) | {'receipt.json'},
                     'Foreign installer operation leaf')
             for name, expected in allowed.items():
@@ -464,8 +485,12 @@ class StandaloneBundleInstaller:
                     'Installed bundle root has a foreign leaf')
             existing = operation / 'receipt.json'
             if _lstat_or_none(existing) is not None:
-                require(secure_read(existing, 65536) == receipt_raw,
-                        'State receipt differs from installed enrollment')
+                try:
+                    state_receipt = secure_read(existing, 65536)
+                except (OSError, ValueError):
+                    return {'decision': 'PARTIAL_INSTALL_RECEIPT_REQUIRES_SIGNED_RECOVERY'}
+                if state_receipt != receipt_raw:
+                    return {'decision': 'PARTIAL_INSTALL_RECEIPT_REQUIRES_SIGNED_RECOVERY'}
                 return {'decision': 'ALREADY_INSTALLED_PUBLIC_ONLY',
                         'receiptSha256': digest(receipt_raw)}
             _publish_new(operation, 'receipt.json', receipt_raw)

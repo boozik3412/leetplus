@@ -296,6 +296,7 @@ class InstallEntryTests(unittest.TestCase):
              patch.object(entry, 'Path', PurePosixPath), \
              patch.object(entry, 'read_request', return_value=(plan, approval, b'archive', {})), \
              patch.object(entry, 'exact_json', side_effect=record), \
+             patch.object(entry, 'historical_intent_or_classification', return_value=(intent, None)), \
              patch.object(entry, 'verify_signed_plan', return_value={}) as signature, \
              patch.object(entry, 'verify_staged_request'), \
              patch.object(entry, 'verify_generation', return_value=(root, checked)), \
@@ -303,6 +304,27 @@ class InstallEntryTests(unittest.TestCase):
             result = entry.run('reconcile', source, operation)
         self.assertEqual(result['decision'], 'RECONCILED_INSTALLED_PUBLIC_ONLY')
         self.assertEqual(signature.call_args.args[2], dt.datetime(2026, 1, 1, 0, 5, tzinfo=dt.timezone.utc))
+
+    def test_torn_intent_is_classified_without_verifier_import_or_replay(self):
+        source = 'a' * 40
+        operation = '12345678-1234-4123-8123-123456789abc'
+        plan = {'sourceRelease': source, 'operationId': operation}
+        classification = {'decision': 'UNKNOWN_TORN_INSTALL_INTENT_REQUIRES_SIGNED_RECOVERY'}
+        from pathlib import PurePosixPath
+        with patch.object(entry.os, 'name', 'posix'), \
+             patch.object(entry.os, 'geteuid', return_value=0, create=True), \
+             patch.object(entry.sys, 'flags', types.SimpleNamespace(isolated=True)), \
+             patch.object(entry.sys, 'dont_write_bytecode', True), \
+             patch.object(entry, 'Path', PurePosixPath), \
+             patch.object(entry, 'read_request', return_value=(plan, {}, b'archive', {})), \
+             patch.object(entry, 'historical_intent_or_classification', return_value=(None, classification)), \
+             patch.object(entry, 'verify_signed_plan') as signature, \
+             patch.object(entry, 'verify_generation') as generation, \
+             patch.object(entry, 'load_installer') as imported:
+            self.assertEqual(entry.run('reconcile', source, operation), classification)
+        signature.assert_not_called()
+        generation.assert_not_called()
+        imported.assert_not_called()
 
     def test_captured_request_requires_canonical_closed_bytes(self):
         payload = {'plan': {'sourceRelease': 'a' * 40}, 'approvalEnvelope': {},

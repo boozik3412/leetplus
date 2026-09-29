@@ -314,6 +314,19 @@ class BundleInstallerTests(unittest.TestCase):
                          'PARTIAL_INSTALL_RECEIPT_REQUIRES_SIGNED_RECOVERY')
         self.assertEqual(pending.read_bytes(), before)
 
+    def test_terminal_receipt_with_lost_final_is_not_no_effect(self):
+        with patch.object(bundle_installer, 'admitted_control', return_value=self.fake_old):
+            self.installer.apply(self.plan, self.approval, self.roots, self.archive)
+        final = self.installed / self.plan['bundleSha256']
+        retained = self.installed / 'fixture-retained-postimage'
+        final.rename(retained)
+        self.assertEqual(self.installer.reconcile(self.plan, self.approval)['decision'],
+                         'INCONSISTENT_TERMINAL_RECEIPT_REQUIRES_SIGNED_RECOVERY')
+        final.mkdir(mode=0o700)
+        self.assertEqual(self.installer.reconcile(self.plan, self.approval)['decision'],
+                         'PARTIAL_FINAL_REQUIRES_SIGNED_RECOVERY')
+        self.assertTrue(retained.is_dir())
+
     def test_partial_audit_and_staging_are_not_classified_as_no_effect(self):
         original = bundle_installer._publish_new
 

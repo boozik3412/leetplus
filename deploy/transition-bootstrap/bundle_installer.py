@@ -463,26 +463,31 @@ class StandaloneBundleInstaller:
                 return {'decision': 'PARTIAL_STAGING_REQUIRES_SIGNED_RECOVERY'}
             final_info = _lstat_or_none(final)
             if final_info is None:
+                if 'receipt.json' in observed_names:
+                    return {'decision': 'INCONSISTENT_TERMINAL_RECEIPT_REQUIRES_SIGNED_RECOVERY'}
                 return {'decision': 'NO_INSTALLED_EFFECT_REQUIRES_SIGNED_RECOVERY'}
             if not stat.S_ISDIR(final_info.st_mode):
                 return {'decision': 'FOREIGN_FINAL_REQUIRES_SIGNED_RECOVERY'}
-            secure_directory(final)
-            enrollment_root = secure_directory(final / 'enrollment')
-            receipt_raw = secure_read(enrollment_root / 'installer-receipt.json', 65536)
-            receipt = json.loads(receipt_raw)
-            require(receipt_raw == canonical(receipt) and
-                    digest(canonical(intent)) == receipt['intentSha256'],
-                    'Installed receipt is not bound to the original timely intent')
-            validate_installer_receipt(plan, approval, receipt, deployment_root)
-            require(verify_bundle_inventory(final / 'bundle', plan['bundleFiles']),
-                    'Installed bundle changed')
-            enrollment_raw = secure_read(enrollment_root / 'enrollment.json', 65536)
-            enrollment = json.loads(enrollment_raw)
-            require(enrollment_raw == canonical(enrollment),
-                    'Installed enrollment is not canonical')
-            validate_enrollment_chain(enrollment_root, enrollment, deployment_root)
-            require({item.name for item in final.iterdir()} == {'bundle', 'enrollment'},
-                    'Installed bundle root has a foreign leaf')
+            try:
+                secure_directory(final)
+                enrollment_root = secure_directory(final / 'enrollment')
+                receipt_raw = secure_read(enrollment_root / 'installer-receipt.json', 65536)
+                receipt = json.loads(receipt_raw)
+                require(receipt_raw == canonical(receipt) and
+                        digest(canonical(intent)) == receipt['intentSha256'],
+                        'Installed receipt is not bound to the original timely intent')
+                validate_installer_receipt(plan, approval, receipt, deployment_root)
+                require(verify_bundle_inventory(final / 'bundle', plan['bundleFiles']),
+                        'Installed bundle changed')
+                enrollment_raw = secure_read(enrollment_root / 'enrollment.json', 65536)
+                enrollment = json.loads(enrollment_raw)
+                require(enrollment_raw == canonical(enrollment),
+                        'Installed enrollment is not canonical')
+                validate_enrollment_chain(enrollment_root, enrollment, deployment_root)
+                require({item.name for item in final.iterdir()} == {'bundle', 'enrollment'},
+                        'Installed bundle root has a foreign leaf')
+            except (OSError, ValueError, UnicodeError, KeyError, TypeError):
+                return {'decision': 'PARTIAL_FINAL_REQUIRES_SIGNED_RECOVERY'}
             existing = operation / 'receipt.json'
             if _lstat_or_none(existing) is not None:
                 try:

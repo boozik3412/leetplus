@@ -1,0 +1,51 @@
+name: Standalone initial introduction source checks
+
+on:
+  push:
+    branches:
+      - codex/standalone-initial-intro-20260929
+    paths:
+      - deploy/leetplus-compose/standalone-initial-intro*.mjs
+      - deploy/leetplus-compose/standalone-initial-intro.py
+      - deploy/leetplus-compose/test_standalone_initial_intro*.py
+      - docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs
+      - .github/workflows/standalone-initial-intro-validation.yml
+  pull_request:
+    paths:
+      - deploy/leetplus-compose/standalone-initial-intro*.mjs
+      - deploy/leetplus-compose/standalone-initial-intro.py
+      - deploy/leetplus-compose/test_standalone_initial_intro*.py
+      - docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs
+      - .github/workflows/standalone-initial-intro-validation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  source-root-fixture:
+    name: Initial intro disposable source root fixture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Verify exact source-only checkout
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(node -p 'process.versions.node.split(".")[0]')" = '22'
+      - name: Validate source schemas and public signatures
+        run: |
+          python3 -B deploy/leetplus-compose/test_standalone_initial_intro.py
+          node --check deploy/leetplus-compose/standalone-initial-intro-entry.mjs
+          node --check docs/deployment/production-control-authority/verify-installed-standalone-intro.mjs
+      - name: Exercise remapped disposable Linux root effects
+        run: |
+          node_dir="$(dirname -- "$(command -v node)")"
+          sudo /usr/bin/env -i PATH="$node_dir:/usr/sbin:/usr/bin:/sbin:/bin" LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC /usr/bin/python3 -B deploy/leetplus-compose/test_standalone_initial_intro_native.py
+
+# This workflow publishes no admission or deployable artifact and calls no
+# provider/server. All native fixture writes are confined to a new temp root.

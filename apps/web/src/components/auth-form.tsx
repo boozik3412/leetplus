@@ -131,6 +131,18 @@ function localizeAuthError(message: string) {
     return "Пароли не совпадают.";
   }
 
+  if (normalized.startsWith("tenant session is not admitted")) {
+    if (normalized.endsWith("trial_expired")) {
+      return "Срок доступа вашей сети к LeetPlus закончился. Обратитесь к администратору LeetPlus.";
+    }
+
+    if (normalized.endsWith("trial_not_started")) {
+      return "Доступ вашей сети к LeetPlus ещё не начался. Обратитесь к администратору LeetPlus.";
+    }
+
+    return "Доступ вашей сети к LeetPlus сейчас закрыт. Обратитесь к администратору LeetPlus.";
+  }
+
   return message;
 }
 

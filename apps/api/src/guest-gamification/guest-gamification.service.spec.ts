@@ -236,6 +236,7 @@ function createPrismaMock() {
       create: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
+      groupBy: jest.fn().mockResolvedValue([]),
       update: jest.fn(),
       updateMany: jest.fn(),
     },
@@ -25283,5 +25284,56 @@ describe('Battle Pass step rewards outside the tenant reward window', () => {
         seasonOwner: expect.objectContaining({ profileId: 'profile-1' }),
       }),
     );
+  });
+});
+
+describe('rule budget spent from the database', () => {
+  it('blocks a case whose budget was spent by rewards outside the reward window', async () => {
+    const { service, prisma } = createService();
+    jest
+      .spyOn(service as any, 'resolveDryRunProfile')
+      .mockResolvedValue(profileFixture());
+    jest
+      .spyOn(service, 'getLootBoxes')
+      .mockResolvedValue([
+        activeLootBox({ id: 'loot-weekend', budgetAmount: 5000 }),
+      ]);
+    jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+    jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+    jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+    prisma.guestGameReward.groupBy.mockImplementation(
+      ({ by }: { by: string[] }) =>
+        Promise.resolve(
+          by[0] === 'lootBoxId'
+            ? [
+                {
+                  lootBoxId: 'loot-weekend',
+                  _sum: { rewardAmount: new Prisma.Decimal(5000) },
+                },
+              ]
+            : [],
+        ),
+    );
+
+    const result = await service.dryRun(user, {
+      eventType: 'SESSION_START',
+      occurredAt: isoNow,
+    });
+
+    expect(prisma.guestGameReward.groupBy).toHaveBeenCalledWith({
+      by: ['lootBoxId'],
+      where: {
+        tenantId: user.tenantId,
+        status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+        lootBoxId: { in: ['loot-weekend'] },
+      },
+      _sum: { rewardAmount: true },
+    });
+    expect(result.rules[0]).toMatchObject({
+      id: 'loot-weekend',
+      eligible: false,
+    });
+    expect(result.rules[0]?.blockers).toContain('Бюджет правила уже исчерпан');
+    expect(result.rules[0]?.reasons).toContain('Бюджет: 5000/5000 руб');
   });
 });

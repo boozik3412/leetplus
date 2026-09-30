@@ -11,6 +11,7 @@ export type LangameDailyWorkerConfig = Readonly<{
   tenantSlug: string;
   date: string | null;
   canary: boolean;
+  externalTenants: boolean;
   activityRecoveryEnabled: boolean;
   activityRecoveryLimit: number;
   retentionEnabled: boolean;
@@ -88,11 +89,20 @@ export function loadLangameDailyWorkerConfig(
       'LANGAME_DAILY_WORKER_RETENTION_ENABLED=true is required for live retention',
     );
   }
+  // External networks follow the primary tenant on every live run; a canary
+  // stays limited to its one tenant and date.
+  const externalTenants =
+    parseBoolean(
+      env.LANGAME_DAILY_WORKER_EXTERNAL_TENANTS_ENABLED,
+      true,
+      'LANGAME_DAILY_WORKER_EXTERNAL_TENANTS_ENABLED',
+    ) && !canary;
 
   return {
     tenantSlug,
     date,
     canary,
+    externalTenants,
     activityRecoveryEnabled,
     activityRecoveryLimit: boundedPositiveInt(
       env.LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_LIMIT,
@@ -222,6 +232,71 @@ export async function runLangameDailyMaintenanceOnce(
     retention,
     skipped: false,
   };
+}
+
+export type LangameExternalTenantsDailyResult = {
+  processed: string[];
+  skipped: string[];
+  failed: string[];
+};
+
+/**
+ * Syncs every external network with a connected Langame after the primary
+ * tenant, one network at a time. A network that fails is reported and the
+ * next one still runs; maintenance (activity recovery, retention) stays with
+ * the primary tenant only.
+ */
+export async function runLangameExternalTenantsDailyOnce(
+  service: Pick<
+    LangameDailySyncService,
+    'runDailySync' | 'listExternalDailySyncTenantSlugs'
+  >,
+  env: NodeJS.ProcessEnv = process.env,
+  logger: LangameDailyWorkerLogger = console,
+): Promise<LangameExternalTenantsDailyResult> {
+  const config = loadLangameDailyWorkerConfig(env);
+  const outcome: LangameExternalTenantsDailyResult = {
+    processed: [],
+    skipped: [],
+    failed: [],
+  };
+  if (!config.externalTenants) return outcome;
+
+  const slugs = (await service.listExternalDailySyncTenantSlugs()).filter(
+    (slug) => slug !== config.tenantSlug,
+  );
+  for (const slug of slugs) {
+    try {
+      const result = await service.runDailySync({ tenantSlug: slug });
+      const tenant = result.results[0];
+      if (result.results.length !== 1 || !tenant || tenant.slug !== slug) {
+        throw new Error('tenant scope was not processed exactly once');
+      }
+      if (tenant.status === 'SKIPPED') {
+        outcome.skipped.push(slug);
+        logger.log(
+          `Langame daily worker skipped: date=${result.date} tenant=${slug} reason=${tenant.reasonCode ?? 'UNKNOWN'}`,
+        );
+        continue;
+      }
+      const failedScopes = tenant.scopes
+        .filter((scope) => scope.status === 'FAILED')
+        .map((scope) => scope.scope);
+      logger.log(
+        `Langame daily worker finished: date=${result.date} tenant=${slug} external=true failed=${failedScopes.join(',') || 'none'}`,
+      );
+      if (failedScopes.length > 0) {
+        outcome.failed.push(`${slug}(${failedScopes.join(',')})`);
+      } else {
+        outcome.processed.push(slug);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`Langame daily worker tenant ${slug} failed: ${message}`);
+      outcome.failed.push(slug);
+    }
+  }
+  return outcome;
 }
 
 function optional(value: string | undefined) {

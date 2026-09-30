@@ -1,12 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isLangameSyncLimitedMessage,
   langameSyncCompletionMessage,
   langameSyncComponentLabel,
   langameSyncMessage,
   langameSyncStepStatusLabel,
   langameSyncStatusLabel,
 } from "./langame-sync-status.ts";
+
+test("shows sections without API key access as a note on a complete import", () => {
+  const message =
+    "LANGAME_SYNC_LIMITED: Категории товаров: Langame не предоставил доступ к этому разделу.";
+  assert.equal(isLangameSyncLimitedMessage(message), true);
+  assert.equal(
+    isLangameSyncLimitedMessage("LANGAME_SYNC_PARTIAL: Остатки"),
+    false,
+  );
+  assert.equal(isLangameSyncLimitedMessage(null), false);
+  assert.equal(
+    langameSyncMessage(message),
+    "Категории товаров: Langame не предоставил доступ к этому разделу.",
+  );
+  assert.equal(
+    langameSyncStepStatusLabel({ status: "FAILED", count: 0, limited: true }),
+    "нет доступа по ключу API",
+  );
+});
 
 test("labels partial Langame sync without implying an audit-only failure", () => {
   assert.equal(langameSyncStatusLabel("PARTIAL"), "Частично");

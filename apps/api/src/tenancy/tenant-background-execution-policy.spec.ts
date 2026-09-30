@@ -46,12 +46,23 @@ describe('tenant background execution policy', () => {
         .filter(([, policy]) => policy === 'REVISION_FENCED')
         .map(([jobKind]) => jobKind)
         .sort(),
-    ).toEqual(['GUEST_BONUS_LEDGER_LANGAME', 'REPORT_DIGEST_SMTP']);
+    ).toEqual([
+      'GUEST_BONUS_LEDGER_LANGAME',
+      // Daily import of a network's own Langame data (fenced by execution
+      // revision between scopes in LangameDailySyncService).
+      'LANGAME_BUSINESS_SNAPSHOT',
+      'LANGAME_DAILY_SYNC',
+      'LANGAME_GUEST_DATA_FOUNDATION',
+      'REPORT_DIGEST_SMTP',
+    ]);
     expect(
       Object.values(TENANT_BACKGROUND_EXECUTION_REGISTRY).filter(
         (policy) => policy === 'EXTERNAL_DENY',
       ),
-    ).toHaveLength(TENANT_BACKGROUND_JOB_KINDS.length - 2);
+    ).toHaveLength(TENANT_BACKGROUND_JOB_KINDS.length - 5);
+    expect(TENANT_BACKGROUND_EXECUTION_REGISTRY.LANGAME_SCHEDULED_SYNC).toBe(
+      'EXTERNAL_DENY',
+    );
   });
 
   it('requires every registered job to declare a scoped system identity', () => {

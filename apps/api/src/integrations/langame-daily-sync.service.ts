@@ -14,6 +14,7 @@ import {
   IntegrationSyncStatus,
   IntegrationSyncTrigger,
   Prisma,
+  TenantCustomerStage,
   TenantModule,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -38,10 +39,13 @@ import { LangameSyncService } from './langame-sync.service';
 import { withExactExternalImportLock } from './langame-external-import-lock';
 import {
   externalLangamePilotAllows,
-  externalLangameDataRequirements,
   isLangameExternalPilotAuthority,
   type LangameExternalPilotAuthority,
 } from './langame-external-pilot-authority';
+import {
+  isLangameSectionLimitMessage,
+  langameImportRequirements,
+} from './langame-section-limits';
 import {
   BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
   LANGAME_SYNC_PARTIAL_PREFIX,
@@ -53,12 +57,17 @@ const DEFAULT_DAILY_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 const DEFAULT_DAILY_SYNC_LOCAL_TIME = '04:30';
 const DEFAULT_UTC_OFFSET_MINUTES = 5 * 60;
 const AUTO_INVENTORY_REPEAT_SUPPRESSION_MS = 60 * 60 * 1000;
-const DAILY_SYNC_OUTBOUND_REQUIREMENTS = [
-  { module: TenantModule.INTEGRATIONS, action: 'OUTBOUND' },
-  { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
-  { module: TenantModule.GAMIFICATION, action: 'OUTBOUND' },
-  { module: TenantModule.STAFF, action: 'OUTBOUND' },
-] as const;
+const DAILY_SYNC_REQUIREMENTS = langameImportRequirements([
+  TenantModule.INTEGRATIONS,
+  TenantModule.ASSORTMENT,
+  TenantModule.GAMIFICATION,
+  TenantModule.STAFF,
+]);
+const EXTERNAL_CUSTOMER_STAGES = [
+  TenantCustomerStage.PILOT,
+  TenantCustomerStage.BETA,
+  TenantCustomerStage.LIVE,
+];
 
 export type DailySyncInput = {
   date?: string;
@@ -221,11 +230,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     for (const tenant of tenants) {
       const admission = await this.tenantExecutionAdmissionService.evaluate(
         tenant.id,
-        externalPilot
-          ? externalLangameDataRequirements(
-              DAILY_SYNC_OUTBOUND_REQUIREMENTS.map(({ module }) => module),
-            )
-          : DAILY_SYNC_OUTBOUND_REQUIREMENTS,
+        DAILY_SYNC_REQUIREMENTS,
       );
       if (!admission.allowed) {
         results.push(
@@ -243,15 +248,16 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
         stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
         jobKind: 'LANGAME_DAILY_SYNC',
       });
+      const pilotAllowed = externalLangamePilotAllows(externalPilot, {
+        tenantId: tenant.id,
+        customerStage: admission.customerStage,
+        profileRevision: admission.entitlementProfileRevision,
+        executionRevision: admission.executionRevision,
+        jobKind: 'LANGAME_DAILY_SYNC',
+      });
       if (
-        !backgroundExecution.allowed &&
-        !externalLangamePilotAllows(externalPilot, {
-          tenantId: tenant.id,
-          customerStage: admission.customerStage,
-          profileRevision: admission.entitlementProfileRevision,
-          executionRevision: admission.executionRevision,
-          jobKind: 'LANGAME_DAILY_SYNC',
-        })
+        (externalPilot && !pilotAllowed) ||
+        (!backgroundExecution.allowed && !pilotAllowed)
       ) {
         results.push(
           this.backgroundExecutionSkippedTenant({
@@ -300,6 +306,8 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
           force,
           includeCurrentInventory,
           externalPilot,
+          customerStage: admission.customerStage,
+          executionRevision: admission.executionRevision,
         }),
       );
     }
@@ -351,11 +359,13 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     force: boolean;
     includeCurrentInventory: boolean;
     externalPilot?: LangameExternalPilotAuthority;
+    customerStage: TenantCustomerStage | null;
+    executionRevision: number | null;
   }): Promise<DailySyncTenantResult> {
     const scopes: DailySyncScopeResult[] = [];
     let sourceFailed = false;
 
-    await this.assertExternalPilotCurrent(input.externalPilot);
+    await this.assertTenantStillAdmitted(input);
 
     const businessFactsResult = await this.runBusinessFactsScope(input);
     scopes.push(businessFactsResult);
@@ -363,7 +373,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       sourceFailed ||
       businessFactsResult.status === DailyDataCoverageStatus.FAILED;
 
-    await this.assertExternalPilotCurrent(input.externalPilot);
+    await this.assertTenantStillAdmitted(input);
 
     const guestStaffResults = await this.runGuestAndStaffScopes(input);
     scopes.push(...guestStaffResults);
@@ -373,7 +383,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
         (result) => result.status === DailyDataCoverageStatus.FAILED,
       );
 
-    await this.assertExternalPilotCurrent(input.externalPilot);
+    await this.assertTenantStillAdmitted(input);
 
     const snapshotsResult = sourceFailed
       ? await this.skipBlockedSnapshotsScope(input)
@@ -393,15 +403,41 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  /**
+   * External networks run revision-fenced: the next scope starts only while
+   * the network is still admitted with the execution revision it started
+   * with, so closing its access window or changing its profile stops the
+   * run between provider reads.
+   */
+  private async assertTenantStillAdmitted(input: {
+    tenantId: string;
+    externalPilot?: LangameExternalPilotAuthority;
+    customerStage: TenantCustomerStage | null;
+    executionRevision: number | null;
+  }) {
+    if (input.externalPilot) {
+      await this.assertExternalPilotCurrent(input.externalPilot);
+      return;
+    }
+    if (input.customerStage === TenantCustomerStage.INTERNAL) return;
+    const admission = await this.tenantExecutionAdmissionService.assertAllowed(
+      input.tenantId,
+      DAILY_SYNC_REQUIREMENTS,
+    );
+    if (admission.executionRevision !== input.executionRevision) {
+      throw new BadRequestException(
+        'Tenant execution revision changed during the daily Langame sync',
+      );
+    }
+  }
+
   private async assertExternalPilotCurrent(
     authority?: LangameExternalPilotAuthority,
   ) {
     if (!authority) return;
     const admission = await this.tenantExecutionAdmissionService.assertAllowed(
       authority.tenantId,
-      externalLangameDataRequirements(
-        DAILY_SYNC_OUTBOUND_REQUIREMENTS.map(({ module }) => module),
-      ),
+      DAILY_SYNC_REQUIREMENTS,
     );
     if (
       admission.customerStage !== authority.customerStage ||
@@ -889,10 +925,8 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
                 source.status === 'SUCCESS' ||
                 (source.status === 'PARTIAL' &&
                   Object.keys(source.endpointErrors).length > 0 &&
-                  Object.values(source.endpointErrors).every(
-                    (message) =>
-                      message ===
-                      'Langame не предоставил доступ к этому разделу.',
+                  Object.values(source.endpointErrors).every((message) =>
+                    isLangameSectionLimitMessage(message),
                   )),
             ),
         );
@@ -1203,9 +1237,25 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async findConfiguredTenants(tenantSlug?: string) {
+  /**
+   * External networks (PILOT/BETA/LIVE) with a connected Langame key and
+   * source. The daily worker syncs each of them after its primary tenant;
+   * admission still decides per run whether a network is processed.
+   */
+  async listExternalDailySyncTenantSlugs() {
+    const tenants = await this.findConfiguredTenants(undefined, {
+      customerStage: { in: EXTERNAL_CUSTOMER_STAGES },
+    });
+    return tenants.map((tenant) => tenant.slug);
+  }
+
+  private async findConfiguredTenants(
+    tenantSlug?: string,
+    filter: Prisma.TenantWhereInput = {},
+  ) {
     return this.prisma.tenant.findMany({
       where: {
+        ...filter,
         ...(tenantSlug ? { slug: tenantSlug } : {}),
         integrationCredentials: {
           some: {

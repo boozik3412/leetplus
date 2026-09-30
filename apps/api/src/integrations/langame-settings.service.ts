@@ -436,7 +436,8 @@ export class LangameSettingsService {
       const auditPrefix = `${LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX}:`;
       const auditPosition = job.errorMessage?.lastIndexOf(auditPrefix) ?? -1;
       const discrepancyLogError =
-        (job.status === 'SUCCESS' && auditPosition === 0) ||
+        // A complete job may carry a LANGAME_SYNC_LIMITED note before it.
+        (job.status === 'SUCCESS' && auditPosition >= 0) ||
         (providerPartial && auditPosition > 0)
           ? (job.errorMessage?.slice(auditPosition) ?? null)
           : null;

@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { LangameSettings } from "@/lib/langame-settings";
 import {
+  isLangameSyncLimitedMessage,
   langameSyncCompletionMessage,
   langameSyncComponentLabel,
   langameSyncMessage,
@@ -1988,7 +1989,9 @@ function SyncSourceResults({
                         className={
                           step.status === "SUCCESS"
                             ? "text-emerald-700 dark:text-emerald-300"
-                            : "text-red-700 dark:text-red-300"
+                            : step.limited
+                              ? "text-amber-700 dark:text-amber-300"
+                              : "text-red-700 dark:text-red-300"
                         }
                       >
                         {langameSyncStepStatusLabel(step)}
@@ -4260,9 +4263,20 @@ function SyncHistory({ jobs }: { jobs: LangameSettings["syncJobs"] }) {
                 </span>
               </div>
               <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-                {langameSyncMessage(job.errorMessage) ??
-                  `Клубов: ${job.storesCount}, товаров: ${job.productsCount}, остатков: ${job.inventoryCount}, продаж: ${job.salesCount}, расхождений: ${job.discrepancyCount}`}
+                {isLangameSyncLimitedMessage(job.errorMessage)
+                  ? null
+                  : langameSyncMessage(job.errorMessage)}
+                {!job.errorMessage ||
+                isLangameSyncLimitedMessage(job.errorMessage)
+                  ? `Клубов: ${job.storesCount}, товаров: ${job.productsCount}, остатков: ${job.inventoryCount}, продаж: ${job.salesCount}, расхождений: ${job.discrepancyCount}`
+                  : null}
               </p>
+              {isLangameSyncLimitedMessage(job.errorMessage) ? (
+                <p className="mt-1 break-words text-xs text-amber-700 dark:text-amber-300">
+                  Нет доступа по ключу API:{" "}
+                  {langameSyncMessage(job.errorMessage)}
+                </p>
+              ) : null}
               {job.hasDiscrepancyLog ? (
                 <a
                   href={`/api/integrations/langame/sync-jobs/${job.id}/discrepancy-log`}

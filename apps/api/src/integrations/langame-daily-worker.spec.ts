@@ -3,6 +3,7 @@ import {
   loadLangameDailyWorkerConfig,
   runLangameDailyMaintenanceOnce,
   runLangameDailyWorkerOnce,
+  runLangameExternalTenantsDailyOnce,
 } from './langame-daily-worker';
 
 function baseEnv(): NodeJS.ProcessEnv {
@@ -206,5 +207,101 @@ describe('Langame daily worker', () => {
       services.activityLedger.enqueueDueRecoverySyncs,
     ).not.toHaveBeenCalled();
     expect(services.retention.runTenantMaintenance).not.toHaveBeenCalled();
+  });
+
+  describe('external networks', () => {
+    function externalResult(
+      slug: string,
+      status: 'PROCESSED' | 'SKIPPED' = 'PROCESSED',
+      scopeStatus: 'SUCCESS' | 'FAILED' = 'SUCCESS',
+    ) {
+      const value = result();
+      value.results[0].slug = slug;
+      value.results[0].status = status;
+      value.results[0].scopes[0].status = scopeStatus;
+      if (status === 'SKIPPED') {
+        value.results[0].reasonCode = 'TRIAL_EXPIRED';
+      }
+      return value;
+    }
+
+    it('syncs every connected external network after the primary tenant', async () => {
+      const service = {
+        listExternalDailySyncTenantSlugs: jest
+          .fn()
+          .mockResolvedValue(['demo', 'set-1', 'set-2']),
+        runDailySync: jest
+          .fn()
+          .mockImplementation(({ tenantSlug }: { tenantSlug: string }) =>
+            Promise.resolve(externalResult(tenantSlug)),
+          ),
+      };
+      const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+
+      await expect(
+        runLangameExternalTenantsDailyOnce(service, baseEnv(), logger),
+      ).resolves.toEqual({
+        processed: ['set-1', 'set-2'],
+        skipped: [],
+        failed: [],
+      });
+      // The primary tenant already ran with maintenance; never twice.
+      expect(service.runDailySync.mock.calls).toEqual([
+        [{ tenantSlug: 'set-1' }],
+        [{ tenantSlug: 'set-2' }],
+      ]);
+    });
+
+    it('keeps going after a failed network and reports it', async () => {
+      const service = {
+        listExternalDailySyncTenantSlugs: jest
+          .fn()
+          .mockResolvedValue(['set-1', 'set-2', 'set-3']),
+        runDailySync: jest
+          .fn()
+          .mockRejectedValueOnce(new Error('Langame timeout'))
+          .mockResolvedValueOnce(externalResult('set-2', 'PROCESSED', 'FAILED'))
+          .mockResolvedValueOnce(externalResult('set-3', 'SKIPPED')),
+      };
+      const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+
+      await expect(
+        runLangameExternalTenantsDailyOnce(service, baseEnv(), logger),
+      ).resolves.toEqual({
+        processed: [],
+        skipped: ['set-3'],
+        failed: ['set-1', 'set-2(BUSINESS_FACTS)'],
+      });
+      expect(service.runDailySync).toHaveBeenCalledTimes(3);
+      expect(logger.log).toHaveBeenCalledWith(
+        expect.stringContaining('tenant=set-3 reason=TRIAL_EXPIRED'),
+      );
+    });
+
+    it('stays off in canary mode and when switched off', async () => {
+      const service = {
+        listExternalDailySyncTenantSlugs: jest.fn(),
+        runDailySync: jest.fn(),
+      };
+      const canary = {
+        ...baseEnv(),
+        LANGAME_DAILY_WORKER_CANARY: 'true',
+        LANGAME_DAILY_WORKER_ACTIVITY_RECOVERY_ENABLED: 'false',
+        LANGAME_DAILY_WORKER_RETENTION_ENABLED: 'false',
+        LANGAME_DAILY_WORKER_DATE: '2026-09-02',
+      };
+      const off = {
+        ...baseEnv(),
+        LANGAME_DAILY_WORKER_EXTERNAL_TENANTS_ENABLED: 'false',
+      };
+
+      for (const env of [canary, off]) {
+        await expect(
+          runLangameExternalTenantsDailyOnce(service, env),
+        ).resolves.toEqual({ processed: [], skipped: [], failed: [] });
+      }
+      expect(service.listExternalDailySyncTenantSlugs).not.toHaveBeenCalled();
+      expect(service.runDailySync).not.toHaveBeenCalled();
+    });
   });
 });

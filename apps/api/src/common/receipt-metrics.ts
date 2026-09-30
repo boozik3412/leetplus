@@ -11,6 +11,18 @@ export type ReceiptFact = {
   revenue: number;
   quantity?: number;
   productName?: string;
+  /**
+   * Caller-provided purchase identity for sources without a receipt id.
+   * The executive summary passes guest + minute (owner decision 30.09.2026);
+   * legacy reports do not, so their receipts are unchanged.
+   */
+  derivedPurchaseKey?: string | null;
+  /**
+   * Club-local business day of the sale (YYYY-MM-DD). The executive summary
+   * passes it so that sales, visits and coverage share the club's day; without
+   * it the UTC date is used, as legacy reports always did.
+   */
+  businessDate?: string;
 };
 
 function round(value: number) {
@@ -21,16 +33,39 @@ function day(value: Date) {
   return value.toISOString().slice(0, 10);
 }
 
+function saleDay(fact: ReceiptFact & { saleDate: Date }) {
+  return fact.businessDate ?? day(fact.saleDate);
+}
+
 function identityKey(fact: ReceiptFact) {
   const identity = receiptIdentityFromSourceHash(fact.sourcePayloadHash);
-  return identity
+  if (identity)
+    return JSON.stringify([
+      fact.externalProvider ?? 'manual',
+      fact.externalDomain ?? 'local',
+      fact.storeId,
+      identity,
+    ]);
+  return fact.derivedPurchaseKey
     ? JSON.stringify([
         fact.externalProvider ?? 'manual',
         fact.externalDomain ?? 'local',
         fact.storeId,
-        identity,
+        'guest-minute',
+        fact.derivedPurchaseKey,
       ])
     : null;
+}
+
+/** Purchase key for sources without a receipt id: one guest, one minute. */
+export function guestMinutePurchaseKey(
+  guestKey: string | null | undefined,
+  saleDate: Date,
+) {
+  if (!guestKey) return null;
+  const minute = new Date(saleDate);
+  minute.setUTCSeconds(0, 0);
+  return `${guestKey}:${minute.toISOString()}`;
 }
 
 export function ambiguousReceiptKeys(facts: readonly ReceiptFact[]) {
@@ -39,7 +74,7 @@ export function ambiguousReceiptKeys(facts: readonly ReceiptFact[]) {
     const key = identityKey(fact);
     if (!key || !fact.saleDate || fact.isCanceled) continue;
     const values = dates.get(key) ?? new Set<string>();
-    values.add(day(fact.saleDate));
+    values.add(fact.businessDate ?? day(fact.saleDate));
     dates.set(key, values);
   }
   return new Set(
@@ -136,7 +171,7 @@ export function createReceiptMetricProjection(input: {
     const confirmed = facts.filter(
       (fact) =>
         stores.has(fact.storeId) &&
-        confirmedDays.has(`${fact.storeId}:${day(fact.saleDate)}`),
+        confirmedDays.has(`${fact.storeId}:${saleDay(fact)}`),
     );
     const grouped = groupReceiptFacts(confirmed, ambiguous);
     const covered = confirmedDays.size;
@@ -150,7 +185,7 @@ export function createReceiptMetricProjection(input: {
       );
     if (confirmed.some((fact) => !identityKey(fact)))
       reasons.push(
-        'Не у всех товарных операций передан идентификатор чека или заказа.',
+        'Не у всех товарных операций есть номер чека или гость; такие продажи не вошли в средний чек.',
       );
     if (grouped.ambiguousIdentityCount > 0)
       reasons.push(
@@ -182,7 +217,7 @@ export function createReceiptMetricProjection(input: {
       unit: 'RUB',
       grain: 'PRODUCT_RECEIPT',
       definition:
-        'Средний товарный чек: выручка подтверждённых чеков / количество этих чеков.',
+        'Средний чек бара: выручка подтверждённых покупок / число покупок. Покупка — чек источника, а если номера чека нет — продажи одному гостю в одну минуту.',
       value: grouped.averageCheck,
       state,
       reason: reasons.length ? reasons.join(' ') : null,

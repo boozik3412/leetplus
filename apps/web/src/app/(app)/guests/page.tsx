@@ -23,6 +23,7 @@ import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
 import { getDefaultLandingPath } from "@/lib/landing";
 import { can } from "@/lib/permissions";
 import {
+  formatDateTime,
   formatNumber,
   formatPercent,
   formatPeriodDate,
@@ -126,6 +127,12 @@ export default async function GuestsPage({
               <p className="text-zinc-500">Гостей в выборке</p>
               <p className="mt-1 text-2xl font-semibold tabular-nums">
                 {formatNumber(summary.totalGuests)}
+              </p>
+              <p
+                className="mt-1 text-xs text-zinc-500"
+                title="Расчёт по всей клиентской базе сохраняется на короткое время и обновляется в фоне; правки CRM обновляют его сразу."
+              >
+                Данные на {formatDateTime(summary.dataAsOf)}
               </p>
             </div>
           </div>

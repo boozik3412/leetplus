@@ -1330,6 +1330,175 @@ describe('DashboardService', () => {
       }
     });
 
+    it('builds revenue drivers: guest-minute purchases, whole-domain network visits and a domain group', async () => {
+      prisma.store.findMany.mockImplementation(
+        ({ where }: { where?: { id?: { in?: string[] } } } = {}) =>
+          Promise.resolve(
+            sharedDomainStores
+              .filter(
+                (store) => !where?.id?.in || where.id.in.includes(store.id),
+              )
+              .map((store) => ({ ...store, computerCount: 10 })),
+          ),
+      );
+      const sale = (
+        storeId: string,
+        guestId: string,
+        at: string,
+        revenue: number,
+      ) => ({
+        storeId,
+        guestId,
+        externalGuestId: null,
+        revenue: new Prisma.Decimal(revenue),
+        saleDate: new Date(at),
+        isCanceled: false,
+        sourcePayloadHash: `row-${storeId}-${at}`,
+        externalProvider: 'LANGAME',
+        externalDomain: '46.langamepro.ru',
+      });
+      prisma.salesFact.findMany.mockResolvedValue([
+        sale('store-pushkinskaya', 'g1', '2026-09-07T10:00:05.000Z', 100),
+        sale('store-pushkinskaya', 'g1', '2026-09-07T10:00:40.000Z', 50),
+        sale('store-pushkinskaya', 'g2', '2026-09-07T11:00:00.000Z', 200),
+        sale('store-kholmogorova', 'g3', '2026-09-07T12:00:00.000Z', 300),
+      ]);
+      assortmentHealthLoader.loadSalesCoverage.mockResolvedValue({
+        salesDayEvidence: ['store-pushkinskaya', 'store-kholmogorova'].flatMap(
+          (storeId) =>
+            ['2026-09-07', '2026-09-08'].map((date) => ({
+              storeId,
+              date: new Date(`${date}T00:00:00.000Z`),
+              status: 'CONFIRMED',
+            })),
+        ),
+      });
+      prisma.guestSession.findMany.mockResolvedValue(
+        ['g1', 'g1', 'g2'].map((guestId, index) => ({
+          id: `shared-${index}`,
+          storeId: null,
+          externalProvider: 'LANGAME',
+          externalDomain: '46.langamepro.ru',
+          externalClubId: null,
+          externalSessionId: `shared-${index}`,
+          guestId,
+          externalGuestId: null,
+          startedAt: new Date(`2026-09-07T1${index}:00:00.000Z`),
+          durationMinutes: 60,
+        })),
+      );
+
+      const summary = await service.getExecutiveSummary(user, {
+        ...query,
+        storeIds: ['store-pushkinskaya', 'store-kholmogorova'],
+      });
+      const [network, ...rest] = summary.drivers.rows;
+
+      expect(network).toMatchObject({
+        scope: 'NETWORK',
+        current: {
+          barRevenue: 650,
+          purchases: 3,
+          averagePurchase: 217,
+          visits: 3,
+          guests: 2,
+          purchasesPerVisit: 100,
+          playedHours: 3,
+          capacityHours: 2 * 10 * 24 * 2,
+          loadEstimate: 0.3,
+        },
+        previous: null,
+        contributions: null,
+      });
+      expect(rest.find((row) => row.scope === 'DOMAIN')).toMatchObject({
+        storeName: '1337-Пушкинская + 1337-Холмогорова',
+        current: { visits: 3, purchases: 3 },
+      });
+      const clubs = rest.filter((row) => row.scope === 'CLUB');
+      expect(clubs).toHaveLength(2);
+      clubs.forEach((club) => {
+        expect(club.current.visits).toBeNull();
+        expect(club.notes.join(' ')).toContain('Визиты не определены');
+      });
+      expect(
+        clubs.find((club) => club.storeId === 'store-pushkinskaya')?.current,
+      ).toMatchObject({ purchases: 2, barRevenue: 350 });
+      expect(summary.metrics.averageProductCheck.value).toBeCloseTo(216.667, 2);
+      expect(summary.drivers.days.map((day) => day.date)).toEqual([
+        '2026-09-07',
+        '2026-09-08',
+      ]);
+      expect(summary.drivers.days[0].current.purchases).toBe(3);
+    });
+
+    it('assigns sales to the club-local day, like visits and the daily coverage', async () => {
+      // 1337 Радищева, 30.09.2026: the next local night arrived before the
+      // guest-foundation run and was counted into the last day by UTC date.
+      const sale = (at: string, revenue: number, guestId: string | null) => ({
+        storeId: 'store-pushkinskaya',
+        guestId,
+        externalGuestId: null,
+        revenue: new Prisma.Decimal(revenue),
+        saleDate: new Date(at),
+        isCanceled: false,
+        sourcePayloadHash: `row-${at}`,
+        externalProvider: 'LANGAME',
+        externalDomain: '46.langamepro.ru',
+      });
+      prisma.salesFact.findMany.mockResolvedValue([
+        // 07.09 03:00 in Yekaterinburg; UTC would call it 06.09.
+        sale('2026-09-06T22:00:00.000Z', 100, 'g1'),
+        sale('2026-09-08T12:00:00.000Z', 200, 'g2'),
+        // 08.09 01:30 local; UTC would call it 07.09.
+        sale('2026-09-07T20:30:00.000Z', 400, 'g3'),
+        // 09.09 00:30 local, not linked to a guest yet: outside the period.
+        sale('2026-09-08T19:30:00.000Z', 999, null),
+      ]);
+      assortmentHealthLoader.loadSalesCoverage.mockResolvedValue({
+        salesDayEvidence: [
+          '2026-09-05',
+          '2026-09-06',
+          '2026-09-07',
+          '2026-09-08',
+          '2026-09-09',
+        ].map((date) => ({
+          storeId: 'store-pushkinskaya',
+          date: new Date(`${date}T00:00:00.000Z`),
+          status: 'CONFIRMED',
+        })),
+      });
+
+      const summary = await service.getExecutiveSummary(user, {
+        ...query,
+        storeIds: ['store-pushkinskaya'],
+      });
+
+      const [[productQuery]] = prisma.salesFact.findMany.mock
+        .calls as SalesFactFindManyCall[];
+      expect(productQuery.where.saleDate).toEqual({
+        gte: new Date('2026-09-06T10:00:00.000Z'),
+        lte: new Date('2026-09-09T13:59:59.999Z'),
+      });
+      expect(summary.metrics.productRevenue.value).toBe(700);
+      expect(
+        summary.days.map((day) => [day.date, day.metrics.productRevenue.value]),
+      ).toEqual([
+        ['2026-09-07', 100],
+        ['2026-09-08', 600],
+      ]);
+      expect(summary.metrics.averageProductCheck).toMatchObject({
+        state: 'AVAILABLE',
+        receiptEvidence: { receiptCount: 3 },
+      });
+      expect(summary.metrics.averageProductCheck.value).toBeCloseTo(233.333, 2);
+      expect(summary.drivers.days.map((day) => day.current.purchases)).toEqual([
+        1, 2,
+      ]);
+      expect(summary.drivers.rows[0].notes.join(' ')).not.toContain(
+        'без гостя',
+      );
+    });
+
     it('skips sessions provably bound to the unselected club of the domain', async () => {
       prisma.guestSession.findMany.mockResolvedValue([
         {

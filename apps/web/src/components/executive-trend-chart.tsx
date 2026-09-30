@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import type {
   ExecutiveMetric,
+  ExecutiveMetricUnit,
   ExecutiveSummary,
 } from "@/lib/dashboard-executive";
 import type { ExecutiveHistory } from "@/lib/executive-history";
@@ -31,6 +32,16 @@ export type ExecutiveTrendMetric =
   | "averageProductCheck"
   | "revenuePerVisit"
   | "load";
+
+/** A daily series computed outside summary.days (the revenue drivers). */
+export type ExecutiveTrendSeries = {
+  unit: ExecutiveMetricUnit;
+  rows: Array<{
+    date: string;
+    value: number | null;
+    previous: number | null;
+  }>;
+};
 
 function shiftDay(date: string, offset: number) {
   const shifted = new Date(`${date}T00:00:00.000Z`);
@@ -91,8 +102,10 @@ export function ExecutiveTrendChart({
   history,
   tabs,
   note,
+  series,
 }: {
   summary: ExecutiveSummary;
+  series?: ExecutiveTrendSeries;
   metricKey: ExecutiveTrendMetric;
   label: string;
   id: string;
@@ -105,7 +118,18 @@ export function ExecutiveTrendChart({
   const chartScope = history?.scope ?? summary.scope;
   const rows = useMemo<Row[]>(
     () =>
-      (chartSummary?.days ?? []).map((row, index) => {
+      series
+        ? series.rows.map((row, index) => ({
+            date: row.date,
+            label: formatWeekdayDay(row.date),
+            value: row.value,
+            previous: row.previous,
+            previousDate: chartScope.comparison
+              ? shiftDay(chartScope.comparison.from, index)
+              : null,
+            incomplete: false,
+          }))
+        : (chartSummary?.days ?? []).map((row, index) => {
         const metric = row.metrics[metricKey];
         return {
           date: row.date,
@@ -118,10 +142,11 @@ export function ExecutiveTrendChart({
           incomplete: incompleteDay(metric),
         };
       }),
-    [chartSummary?.days, chartScope.comparison, metricKey],
+    [chartSummary?.days, chartScope.comparison, metricKey, series],
   );
   const metric = chartSummary?.metrics[metricKey];
-  const metricUnit = summary.metrics[metricKey]?.unit ?? "RUB";
+  const metricUnit =
+    series?.unit ?? summary.metrics[metricKey]?.unit ?? "RUB";
   const hasPrevious =
     chartScope.comparison !== null && rows.some((row) => row.previous !== null);
   const hasCurrent = rows.some((row) => row.value !== null);

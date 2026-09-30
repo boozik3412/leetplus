@@ -24,7 +24,11 @@ export type ExecutiveDriverFactors = {
   loadEstimate: number | null;
 };
 
-export type ExecutiveDriverFactor = 'VISITS' | 'CONVERSION' | 'PURCHASES' | 'CHECK';
+export type ExecutiveDriverFactor =
+  | 'VISITS'
+  | 'CONVERSION'
+  | 'PURCHASES'
+  | 'CHECK';
 
 export type ExecutiveDriverContribution = {
   factor: ExecutiveDriverFactor;
@@ -33,7 +37,8 @@ export type ExecutiveDriverContribution = {
 };
 
 export type ExecutiveDriverRow = {
-  scope: 'NETWORK' | 'CLUB';
+  /** DOMAIN: clubs sharing one Langame domain, all selected (sessions are not split by club). */
+  scope: 'NETWORK' | 'DOMAIN' | 'CLUB';
   storeId: string | null;
   storeName: string;
   storeIds: string[];
@@ -50,7 +55,16 @@ export type ExecutiveDrivers = {
     load: string;
   };
   rows: ExecutiveDriverRow[];
+  /** Network factors per day, aligned with the comparison day by index; omitted for long periods. */
+  days: Array<{
+    date: string;
+    current: ExecutiveDriverFactors;
+    previous: ExecutiveDriverFactors | null;
+  }>;
 };
+
+/** Daily driver series are computed for periods up to this length. */
+export const EXECUTIVE_DRIVER_DAYS_LIMIT = 62;
 
 function round(value: number, digits = 0) {
   const scale = 10 ** digits;
@@ -112,7 +126,8 @@ export function decomposeBarRevenue(
   const r1 = current.barRevenue;
   const r0 = previous.barRevenue;
   if (!positive(r1) || !positive(r0)) return null;
-  if (!positive(current.purchases) || !positive(previous.purchases)) return null;
+  if (!positive(current.purchases) || !positive(previous.purchases))
+    return null;
   const withVisits = positive(current.visits) && positive(previous.visits);
   const factors: Array<[ExecutiveDriverFactor, number, number]> = withVisits
     ? [

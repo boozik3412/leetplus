@@ -73,8 +73,12 @@ describe('executive revenue drivers', () => {
   });
 
   it('does not invent a split for missing or zero periods', () => {
-    expect(decomposeBarRevenue(factors(0, 0, 10), factors(100, 2, 10))).toBeNull();
-    expect(decomposeBarRevenue(factors(100, 2, 10), factors(null, null, 10))).toBeNull();
+    expect(
+      decomposeBarRevenue(factors(0, 0, 10), factors(100, 2, 10)),
+    ).toBeNull();
+    expect(
+      decomposeBarRevenue(factors(100, 2, 10), factors(null, null, 10)),
+    ).toBeNull();
     expect(factors(null, null, null)).toMatchObject({
       averagePurchase: null,
       purchasesPerVisit: null,
@@ -88,9 +92,9 @@ describe('executive revenue drivers', () => {
       factors(1_000, 5, 50),
     );
 
+    expect(contributions!.reduce((sum, item) => sum + item.amount, 0)).toBe(0);
     expect(
-      contributions!.reduce((sum, item) => sum + item.amount, 0),
+      contributions!.find((item) => item.factor === 'CONVERSION')?.amount,
     ).toBe(0);
-    expect(contributions!.find((item) => item.factor === 'CONVERSION')?.amount).toBe(0);
   });
 });

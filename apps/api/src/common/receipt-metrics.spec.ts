@@ -44,7 +44,10 @@ describe('receipt metric projection', () => {
       storeId: 'A',
       revenue,
       saleDate: at(time),
-      sourcePayloadHash: bindReceiptIdentityToSourceHash(null, `row-${time}-${guest}`),
+      sourcePayloadHash: bindReceiptIdentityToSourceHash(
+        null,
+        `row-${time}-${guest}`,
+      ),
       externalProvider: 'LANGAME',
       externalDomain: 'club',
       derivedPurchaseKey: guestMinutePurchaseKey(guest, at(time)),

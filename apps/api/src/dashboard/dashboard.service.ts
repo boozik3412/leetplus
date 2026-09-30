@@ -12,6 +12,7 @@ import {
 import {
   decomposeBarRevenue,
   driverFactors,
+  EXECUTIVE_DRIVER_DAYS_LIMIT,
   type ExecutiveDriverRow,
   type ExecutiveDrivers,
 } from '../common/executive-drivers';
@@ -1222,6 +1223,47 @@ export class DashboardService {
         notes,
       };
     };
+    const clubNames = new Map(
+      product.rows.map((row) => [row.storeId, row.storeName]),
+    );
+    const selectedClubs = new Set(storeIds);
+    const domainClubs = new Map<string, string[]>();
+    tenantStoreTopology.forEach((store) => {
+      if (!store.externalDomain) return;
+      domainClubs.set(store.externalDomain, [
+        ...(domainClubs.get(store.externalDomain) ?? []),
+        store.id,
+      ]);
+    });
+    // A shared domain whose clubs are all selected: its sessions cannot be
+    // split by club, but together they are a comparable group.
+    const domainRows = [...domainClubs.values()]
+      .filter(
+        (ids) => ids.length > 1 && ids.every((id) => selectedClubs.has(id)),
+      )
+      .map((ids) =>
+        driverRow(
+          'DOMAIN',
+          null,
+          ids.map((id) => clubNames.get(id) ?? id).join(' + '),
+          ids,
+        ),
+      );
+    const driverDays =
+      currentDates.length <= EXECUTIVE_DRIVER_DAYS_LIMIT
+        ? currentDates.map((date, index) => ({
+            date,
+            current: driverFactorsFor({ from: date, to: date }, storeIds)
+              .factors,
+            previous:
+              comparisonPeriod && previousDates[index]
+                ? driverFactorsFor(
+                    { from: previousDates[index], to: previousDates[index] },
+                    storeIds,
+                  ).factors
+                : null,
+          }))
+        : [];
     const drivers: ExecutiveDrivers = {
       definitions: {
         purchase:
@@ -1232,10 +1274,12 @@ export class DashboardService {
       },
       rows: [
         driverRow('NETWORK', null, 'Сеть', storeIds),
+        ...domainRows,
         ...product.rows.map((row) =>
           driverRow('CLUB', row.storeId, row.storeName, [row.storeId]),
         ),
       ],
+      days: driverDays,
     };
 
     return {

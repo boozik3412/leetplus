@@ -71,6 +71,7 @@ release does not require a documentation change.
 
 - Assortment, inventory, stock movements or reports: [assortment guide](docs/agent-context/assortment.md) and [metric contract](docs/assortment-dashboard-metric-contract.md).
 - Executive dashboard, periods, revenue or priorities: [executive guide](docs/agent-context/executive-dashboard.md) and the relevant [priority contract](docs/executive-dashboard-priorities.md).
+- Guest dashboard, guest card, CRM signals or the guest ↔ game projection: [guests CRM guide](docs/agent-context/guests-crm-gamification.md).
 - Code changes and local QA: [commands and verification](docs/agent-context/verification.md); preserve the current required CI/admission gates.
 - Deployment/release work: [deploy/simple/README.md](deploy/simple/README.md). [Historical context](docs/agent-context/history-2026-09-17.md) and `docs/deployment/` are only for tracing earlier decisions, not startup reading.
 

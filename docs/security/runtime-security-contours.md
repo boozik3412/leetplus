@@ -1709,6 +1709,22 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
 - Worker endpoints остаются за service token, tenant execution admission,
   rollout flags, bounded batch/lease и отдельной observability.
 
+### Игровая проекция в контуре гостей (30.09.2026)
+
+- `GET /guests/summary`, `GET /guests`, `GET /guests/:id` и `GET /guests/export`
+  дополнительно отдают read-only проекцию игрового модуля по
+  `GuestGameProfile.guestId`. Её строит `GuestGameInsightsService`
+  (`apps/api/src/guests/guest-game-insights.service.ts`) — провайдер
+  `GuestsModule`, зависящий только от `PrismaService`; он не импортирует
+  `GuestGamificationModule`/`CorporateGuestGamificationModule`, не регистрирует
+  scheduler и не пишет в Langame. Граф модулей и public guest runtime не менялись.
+- Маршруты остаются под `view_guests`; игровые поля включаются только для
+  platform admin, OWNER или `view_guest_gamification`, иначе `gameProfile = null`
+  и `gamification.available = false`. Манифест pilot HTTP surface не менялся.
+- Проекция не раскрывает `phoneEncrypted`, `telegramIdentity`, `maxIdentity`,
+  Langame request/response и claim payload: только счётчики, статусы, суммы и
+  булевы флаги каналов. Контракт полей — `docs/agent-context/guests-crm-gamification.md`.
+
 ## Langame и outbound network boundary
 
 1. Web runtime остаётся localhost-only.

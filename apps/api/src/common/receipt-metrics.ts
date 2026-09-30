@@ -11,6 +11,12 @@ export type ReceiptFact = {
   revenue: number;
   quantity?: number;
   productName?: string;
+  /**
+   * Caller-provided purchase identity for sources without a receipt id.
+   * The executive summary passes guest + minute (owner decision 30.09.2026);
+   * legacy reports do not, so their receipts are unchanged.
+   */
+  derivedPurchaseKey?: string | null;
 };
 
 function round(value: number) {
@@ -23,14 +29,33 @@ function day(value: Date) {
 
 function identityKey(fact: ReceiptFact) {
   const identity = receiptIdentityFromSourceHash(fact.sourcePayloadHash);
-  return identity
+  if (identity)
+    return JSON.stringify([
+      fact.externalProvider ?? 'manual',
+      fact.externalDomain ?? 'local',
+      fact.storeId,
+      identity,
+    ]);
+  return fact.derivedPurchaseKey
     ? JSON.stringify([
         fact.externalProvider ?? 'manual',
         fact.externalDomain ?? 'local',
         fact.storeId,
-        identity,
+        'guest-minute',
+        fact.derivedPurchaseKey,
       ])
     : null;
+}
+
+/** Purchase key for sources without a receipt id: one guest, one minute. */
+export function guestMinutePurchaseKey(
+  guestKey: string | null | undefined,
+  saleDate: Date,
+) {
+  if (!guestKey) return null;
+  const minute = new Date(saleDate);
+  minute.setUTCSeconds(0, 0);
+  return `${guestKey}:${minute.toISOString()}`;
 }
 
 export function ambiguousReceiptKeys(facts: readonly ReceiptFact[]) {
@@ -150,7 +175,7 @@ export function createReceiptMetricProjection(input: {
       );
     if (confirmed.some((fact) => !identityKey(fact)))
       reasons.push(
-        'Не у всех товарных операций передан идентификатор чека или заказа.',
+        'Не у всех товарных операций есть номер чека или гость; такие продажи не вошли в средний чек.',
       );
     if (grouped.ambiguousIdentityCount > 0)
       reasons.push(
@@ -182,7 +207,7 @@ export function createReceiptMetricProjection(input: {
       unit: 'RUB',
       grain: 'PRODUCT_RECEIPT',
       definition:
-        'Средний товарный чек: выручка подтверждённых чеков / количество этих чеков.',
+        'Средний чек бара: выручка подтверждённых покупок / число покупок. Покупка — чек источника, а если номера чека нет — продажи одному гостю в одну минуту.',
       value: grouped.averageCheck,
       state,
       reason: reasons.length ? reasons.join(' ') : null,

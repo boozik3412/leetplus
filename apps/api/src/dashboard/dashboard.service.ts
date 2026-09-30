@@ -7,7 +7,15 @@ import {
   ambiguousReceiptKeys,
   createReceiptMetricProjection,
   groupReceiptFacts,
+  guestMinutePurchaseKey,
 } from '../common/receipt-metrics';
+import {
+  decomposeBarRevenue,
+  driverFactors,
+  EXECUTIVE_DRIVER_DAYS_LIMIT,
+  type ExecutiveDriverRow,
+  type ExecutiveDrivers,
+} from '../common/executive-drivers';
 import { resolveGuestSessionStore } from '../common/guest-session-store';
 import {
   AssortmentHealthLoaderService,
@@ -70,6 +78,7 @@ export type DashboardExecutiveSummary = {
     metrics: ExecutiveMetrics;
   }>;
   days: Array<{ date: string; metrics: ExecutiveMetrics }>;
+  drivers: ExecutiveDrivers;
 };
 
 export type DashboardExecutiveOperations = {
@@ -834,6 +843,7 @@ export class DashboardService {
         externalDomain: true,
         externalClubId: true,
         isActive: true,
+        computerCount: true,
       },
     });
     const sessionFrom = new Date(
@@ -860,6 +870,7 @@ export class DashboardService {
         guestId: true,
         externalGuestId: true,
         startedAt: true,
+        durationMinutes: true,
       },
     });
     const sessionsWithStartedAt = sessions.filter(
@@ -1070,6 +1081,8 @@ export class DashboardService {
           sourcePayloadHash: true,
           externalProvider: true,
           externalDomain: true,
+          guestId: true,
+          externalGuestId: true,
         },
       }),
       this.assortmentHealthLoader.loadSalesCoverage({
@@ -1085,6 +1098,12 @@ export class DashboardService {
       facts: daySalesFacts.map((fact) => ({
         ...fact,
         revenue: fact.revenue.toNumber(),
+        // Langame sales carry no receipt id: one guest within one minute is
+        // one purchase (owner decision 30.09.2026).
+        derivedPurchaseKey: guestMinutePurchaseKey(
+          this.guestIdentityKey(fact),
+          fact.saleDate,
+        ),
       })),
       storeIds,
       salesDayEvidence: daySalesCoverage.salesDayEvidence,
@@ -1123,8 +1142,149 @@ export class DashboardService {
         ).map((date) => this.toDateInputValue(date))
       : [];
 
+    const computerCounts = new Map(
+      tenantStoreTopology.map((store) => [store.id, store.computerCount]),
+    );
+    const driverFactorsFor = (
+      period: { from: string; to: string },
+      clubIds: readonly string[],
+    ) => {
+      const sales = receiptProjection.getMetric(period, clubIds);
+      const evidence = sales.receiptEvidence;
+      const purchases = evidence?.receiptCount ?? null;
+      const traffic = this.executiveDriverSessions({
+        sessions: sessionsWithStartedAt,
+        tenantId: product.tenantId,
+        topology: tenantStoreTopology,
+        selectedStoreIds: clubIds,
+        storeTimeZones: product.scope.storeTimeZones,
+        period,
+        projection: visitProjection,
+        dateFormatters: visitDateFormatters,
+      });
+      const pcs = clubIds.map((id) => computerCounts.get(id) ?? null);
+      const days = this.executiveDaysInclusive(
+        new Date(`${period.from}T00:00:00.000Z`),
+        new Date(`${period.to}T23:59:59.999Z`),
+      ).length;
+      const visits = traffic.visits > 0 ? traffic.visits : null;
+      return {
+        factors: driverFactors({
+          barRevenue:
+            purchases === null ? null : (evidence?.revenue.covered ?? null),
+          totalBarRevenue: evidence?.revenue.total ?? null,
+          purchases,
+          visits,
+          guests: visits === null ? null : traffic.guests,
+          playedHours: visits === null ? null : traffic.hours,
+          capacityHours:
+            visits !== null &&
+            pcs.every((count) => typeof count === 'number' && count > 0)
+              ? pcs.reduce<number>((sum, count) => sum + (count ?? 0), 0) *
+                24 *
+                days
+              : null,
+        }),
+        unresolvedVisits: visits === null && traffic.unresolved > 0,
+      };
+    };
+    const driverRow = (
+      scope: ExecutiveDriverRow['scope'],
+      storeId: string | null,
+      storeName: string,
+      clubIds: readonly string[],
+    ): ExecutiveDriverRow => {
+      const current = driverFactorsFor(product.scope.period, clubIds);
+      const previous = comparisonPeriod
+        ? driverFactorsFor(comparisonPeriod, clubIds)
+        : null;
+      const notes: string[] = [];
+      if (current.unresolvedVisits)
+        notes.push(
+          'Визиты не определены: сессии общего домена Langame не привязаны к клубу.',
+        );
+      const outside =
+        (current.factors.totalBarRevenue ?? 0) -
+        (current.factors.barRevenue ?? 0);
+      if (current.factors.barRevenue !== null && outside >= 1)
+        notes.push(
+          `${Math.round(outside)} ₽ продаж без гостя не вошли в покупки и разложение.`,
+        );
+      return {
+        scope,
+        storeId,
+        storeName,
+        storeIds: [...clubIds],
+        current: current.factors,
+        previous: previous?.factors ?? null,
+        contributions: previous
+          ? decomposeBarRevenue(current.factors, previous.factors)
+          : null,
+        notes,
+      };
+    };
+    const clubNames = new Map(
+      product.rows.map((row) => [row.storeId, row.storeName]),
+    );
+    const selectedClubs = new Set(storeIds);
+    const domainClubs = new Map<string, string[]>();
+    tenantStoreTopology.forEach((store) => {
+      if (!store.externalDomain) return;
+      domainClubs.set(store.externalDomain, [
+        ...(domainClubs.get(store.externalDomain) ?? []),
+        store.id,
+      ]);
+    });
+    // A shared domain whose clubs are all selected: its sessions cannot be
+    // split by club, but together they are a comparable group.
+    const domainRows = [...domainClubs.values()]
+      .filter(
+        (ids) => ids.length > 1 && ids.every((id) => selectedClubs.has(id)),
+      )
+      .map((ids) =>
+        driverRow(
+          'DOMAIN',
+          null,
+          ids.map((id) => clubNames.get(id) ?? id).join(' + '),
+          ids,
+        ),
+      );
+    const driverDays =
+      currentDates.length <= EXECUTIVE_DRIVER_DAYS_LIMIT
+        ? currentDates.map((date, index) => ({
+            date,
+            current: driverFactorsFor({ from: date, to: date }, storeIds)
+              .factors,
+            previous:
+              comparisonPeriod && previousDates[index]
+                ? driverFactorsFor(
+                    { from: previousDates[index], to: previousDates[index] },
+                    storeIds,
+                  ).factors
+                : null,
+          }))
+        : [];
+    const drivers: ExecutiveDrivers = {
+      definitions: {
+        purchase:
+          'Покупка — чек источника, а если номера чека нет — продажи одному гостю в одну минуту.',
+        visits:
+          'Визиты — сохранённые игровые сессии Langame, начавшиеся в выбранные дни; сессия общего домена без клуба учитывается, только когда выбраны все клубы домена. Полнота источника не подтверждена.',
+        load: 'Загрузка — оценка: сыгранные часы / (текущее число ПК × 24 ч × дни); клубы работают круглосуточно.',
+      },
+      rows: [
+        driverRow('NETWORK', null, 'Сеть', storeIds),
+        ...domainRows,
+        ...product.rows.map((row) =>
+          driverRow('CLUB', row.storeId, row.storeName, [row.storeId]),
+        ),
+      ],
+      days: driverDays,
+    };
+
     return {
       scope: { ...product.scope, comparison: comparisonPeriod },
+      drivers,
       metrics: comparedMetrics,
       clubs: product.rows.map((row) => {
         const previousRow = previousProduct?.rows.find(
@@ -1356,6 +1516,132 @@ export class DashboardService {
           ?.toISOString() ?? null,
       lastCalculatedAt: input.now,
     });
+  }
+
+  /**
+   * Visits, identified guests and played hours for the revenue drivers. A
+   * session counts when it is bound to a selected club, or when its external
+   * domain is fully selected (then it belongs to the selection even without a
+   * club). Uses the same per-request binding cache as the visits metric.
+   */
+  private executiveDriverSessions(input: {
+    sessions: Array<{
+      id?: string;
+      storeId: string | null;
+      externalProvider?: string | null;
+      externalDomain: string | null;
+      externalClubId: string | null;
+      externalSessionId: string;
+      guestId?: string | null;
+      externalGuestId?: string | null;
+      startedAt: Date;
+      durationMinutes?: number | null;
+    }>;
+    tenantId: string;
+    topology: Array<{
+      id: string;
+      tenantId: string;
+      externalDomain: string | null;
+      externalClubId: string | null;
+      isActive: boolean;
+    }>;
+    selectedStoreIds: readonly string[];
+    storeTimeZones: Record<string, string>;
+    period: { from: string; to: string };
+    projection: WeakMap<object, { storeId: string | null; localDate?: string }>;
+    dateFormatters: Map<string, Intl.DateTimeFormat>;
+  }) {
+    const selected = new Set(input.selectedStoreIds);
+    const topologyStoreIds = new Set(input.topology.map((store) => store.id));
+    const domainStores = new Map<string, string[]>();
+    input.topology.forEach((store) => {
+      if (!store.externalDomain) return;
+      domainStores.set(store.externalDomain, [
+        ...(domainStores.get(store.externalDomain) ?? []),
+        store.id,
+      ]);
+    });
+    const wholeDomainZone = new Map<string, string | null>();
+    domainStores.forEach((ids, domain) => {
+      if (!ids.every((id) => selected.has(id))) return;
+      const zones = new Set(ids.map((id) => input.storeTimeZones[id] ?? null));
+      wholeDomainZone.set(domain, zones.size === 1 ? [...zones][0] : null);
+    });
+    const counted: typeof input.sessions = [];
+    let unresolved = 0;
+    const inPeriod = (date: string) =>
+      date >= input.period.from && date <= input.period.to;
+    for (const session of input.sessions) {
+      let projected = input.projection.get(session);
+      if (!projected) {
+        projected = {
+          storeId:
+            session.storeId && topologyStoreIds.has(session.storeId)
+              ? session.storeId
+              : resolveGuestSessionStore({
+                  tenantId: input.tenantId,
+                  externalDomain: session.externalDomain,
+                  externalClubId: session.externalClubId,
+                  stores: input.topology,
+                }).storeId,
+        };
+        input.projection.set(session, projected);
+      }
+      if (projected.storeId) {
+        if (!selected.has(projected.storeId)) continue;
+        const localDate =
+          projected.localDate ??
+          (projected.localDate = this.executiveLocalDate(
+            session.startedAt,
+            input.storeTimeZones[projected.storeId] ?? 'UTC',
+            input.dateFormatters,
+          ));
+        if (inPeriod(localDate)) counted.push(session);
+        continue;
+      }
+      const zone = session.externalDomain
+        ? wholeDomainZone.get(session.externalDomain)
+        : undefined;
+      if (zone) {
+        if (
+          inPeriod(
+            this.executiveLocalDate(
+              session.startedAt,
+              zone,
+              input.dateFormatters,
+            ),
+          )
+        )
+          counted.push(session);
+      } else if (
+        session.externalDomain &&
+        (domainStores.get(session.externalDomain) ?? []).some((id) =>
+          selected.has(id),
+        ) &&
+        this.executiveTimestampMayBelongToPeriod(
+          session.startedAt,
+          input.period,
+        )
+      ) {
+        unresolved += 1;
+      }
+    }
+    const stats = this.sessionIdentityStats(counted);
+    const minutes = counted.reduce(
+      (sum, session) =>
+        sum +
+        (typeof session.durationMinutes === 'number' &&
+        session.durationMinutes > 0
+          ? session.durationMinutes
+          : 0),
+      0,
+    );
+    return {
+      visits: stats.visits,
+      guests: stats.identifiedGuests,
+      hours: minutes / 60,
+      unresolved,
+    };
   }
 
   private executiveTimestampMayBelongToPeriod(

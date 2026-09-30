@@ -185,6 +185,8 @@ export const priorityKinds = [
   "CHECKLISTS_OVERDUE",
   "CLUB_DROP",
   "OUT_OF_STOCK",
+  "CONVERSION_GAP",
+  "CHECK_DROP",
   "CHECKLISTS_REVIEW",
   "VISITS_DECLINE",
   "AVERAGE_CHECK_DECLINE",
@@ -192,6 +194,7 @@ export const priorityKinds = [
   "LOW_STOCK",
   "TRAINING_INCOMPLETE",
   "REGULATIONS_UNACKNOWLEDGED",
+  "SILENT_CLUB",
   "SALES_COVERAGE",
 ] as const;
 export type PriorityKind = (typeof priorityKinds)[number];

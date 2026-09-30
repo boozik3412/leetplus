@@ -1,0 +1,459 @@
+/*
+  Loading indicator: LP orbit, skeleton, route bar.
+  Tokens follow the app theme (.dark on <html>). Motion is indeterminate on
+  purpose: the server does not report progress, so nothing here shows a
+  percentage. Reduced motion: no rotation and no shimmer, the text stays.
+*/
+
+:root {
+  --lp-skeleton-base: #e8e8ec;
+  --lp-skeleton-shine: #f7f7f9;
+  --lp-mark-bg: #18181b;
+  --lp-mark-fg: #ffffff;
+  --lp-accent: #16a34a;
+  --lp-accent-bright: #22c55e;
+  --lp-warn: #b45309;
+  --lp-danger: #dc2626;
+}
+
+.dark {
+  --lp-skeleton-base: #1b2230;
+  --lp-skeleton-shine: #2a3548;
+  --lp-mark-bg: #34d399;
+  --lp-mark-fg: #06120b;
+  --lp-accent: #22c55e;
+  --lp-accent-bright: #86efac;
+  --lp-warn: #fbbf24;
+  --lp-danger: #f87171;
+}
+
+@keyframes lp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes lp-shimmer {
+  0% {
+    background-position: 130% 0;
+  }
+
+  100% {
+    background-position: -130% 0;
+  }
+}
+
+@keyframes lp-slide {
+  0% {
+    transform: translateX(-110%);
+  }
+
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+@keyframes lp-breathe {
+  0%,
+  100% {
+    transform: scale(0.9);
+    opacity: 0.12;
+  }
+
+  50% {
+    transform: scale(1.08);
+    opacity: 0.3;
+  }
+}
+
+@keyframes lp-mark {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.045);
+  }
+}
+
+@keyframes lp-blink {
+  0%,
+  100% {
+    background: var(--foreground);
+    opacity: 0.35;
+    box-shadow: 0 0 0 0 transparent;
+  }
+
+  30% {
+    background: var(--lp-accent);
+    opacity: 1;
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--lp-accent) 26%, transparent);
+  }
+}
+
+@keyframes lp-say {
+  0%,
+  2% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  8%,
+  30% {
+    opacity: 1;
+    transform: none;
+  }
+
+  36%,
+  100% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes lp-eq {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+  }
+
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes lp-draw {
+  0% {
+    stroke-dashoffset: 100;
+    opacity: 1;
+  }
+
+  55%,
+  80% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes lp-fill {
+  0% {
+    stroke-dasharray: 0 240;
+    opacity: 1;
+  }
+
+  55%,
+  80% {
+    stroke-dasharray: 118 240;
+    opacity: 1;
+  }
+
+  100% {
+    stroke-dasharray: 118 240;
+    opacity: 0;
+  }
+}
+
+@keyframes lp-pulse-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--lp-accent) 30%, transparent);
+  }
+}
+
+/* Skeleton block: same radius and size as the real block it stands for. */
+.lp-sk {
+  display: block;
+  max-width: 100%;
+  border-radius: 8px;
+  background: linear-gradient(
+    100deg,
+    var(--lp-skeleton-base) 30%,
+    var(--lp-skeleton-shine) 50%,
+    var(--lp-skeleton-base) 70%
+  );
+  background-size: 230% 100%;
+  animation: lp-shimmer 1.8s ease-in-out infinite;
+  animation-delay: var(--d, 0s);
+}
+
+/* LP mark with orbit. --lp-size sets the diameter. */
+.lp-orbit {
+  --lp-ring: max(2px, calc(var(--lp-size, 96px) * 0.042));
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--lp-size, 96px);
+  height: var(--lp-size, 96px);
+}
+
+.lp-orbit-glow {
+  position: absolute;
+  inset: calc(var(--lp-size, 96px) * -0.21);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--lp-accent) 0%, transparent 62%);
+  animation: lp-breathe 2.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.lp-orbit-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: var(--lp-ring) solid var(--border-soft);
+}
+
+.lp-orbit-arc {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 30%, var(--lp-accent) 100%);
+  -webkit-mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - var(--lp-ring)),
+    #000 calc(100% - var(--lp-ring) + 1px)
+  );
+  mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - var(--lp-ring)),
+    #000 calc(100% - var(--lp-ring) + 1px)
+  );
+  animation: lp-spin 1.5s linear infinite;
+}
+
+.lp-orbit-dot {
+  position: absolute;
+  inset: 0;
+  animation: lp-spin 1.5s linear infinite;
+}
+
+.lp-orbit-dot > i {
+  position: absolute;
+  top: calc(var(--lp-size, 96px) * -0.02);
+  left: 50%;
+  width: max(5px, calc(var(--lp-size, 96px) * 0.083));
+  height: max(5px, calc(var(--lp-size, 96px) * 0.083));
+  margin-left: calc(max(5px, calc(var(--lp-size, 96px) * 0.083)) / -2);
+  border-radius: 50%;
+  background: var(--lp-accent-bright);
+  box-shadow: 0 0 14px 3px var(--lp-accent);
+}
+
+.lp-orbit-mark {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--lp-size, 96px) * 0.604);
+  height: calc(var(--lp-size, 96px) * 0.604);
+  border-radius: calc(var(--lp-size, 96px) * 0.198);
+  background: var(--lp-mark-bg);
+  color: var(--lp-mark-fg);
+  font-size: calc(var(--lp-size, 96px) * 0.198);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  animation: lp-mark 2.6s ease-in-out infinite;
+}
+
+/* Four data sources: dots light up in turn ("опрашиваем"), never "готово". */
+.lp-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.lp-source > i,
+.lp-dot {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--foreground);
+  opacity: 0.35;
+  animation: lp-blink 1.8s ease-in-out infinite;
+  animation-delay: var(--d, 0s);
+}
+
+/* Rotating lines: three messages share one slot. */
+.lp-say {
+  position: relative;
+}
+
+.lp-say > span {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  text-align: center;
+  opacity: 0;
+  animation: lp-say var(--t, 7.2s) infinite backwards;
+}
+
+.lp-say > span:nth-child(2) {
+  animation-delay: calc(var(--t, 7.2s) / 3);
+}
+
+.lp-say > span:nth-child(3) {
+  animation-delay: calc(var(--t, 7.2s) * 2 / 3);
+}
+
+/* Route progress bar and pill. */
+.lp-bar {
+  position: relative;
+  height: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--lp-accent) 14%, transparent);
+}
+
+.lp-bar > b {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--lp-accent),
+    var(--lp-accent-bright)
+  );
+  box-shadow: 0 0 12px var(--lp-accent);
+  animation: lp-slide 1.3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.lp-spinner {
+  display: inline-block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, var(--lp-accent) 25%, transparent);
+  border-top-color: var(--lp-accent);
+  border-radius: 50%;
+  animation: lp-spin 0.8s linear infinite;
+}
+
+/* Skeleton pieces that stand for charts. */
+.lp-eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  height: 150px;
+}
+
+.lp-eq > b {
+  flex: 1;
+  border-radius: 8px 8px 4px 4px;
+  background: linear-gradient(
+    180deg,
+    var(--lp-skeleton-shine),
+    var(--lp-skeleton-base)
+  );
+  transform-origin: 50% 100%;
+  animation: lp-eq 1.7s ease-in-out infinite;
+  animation-delay: var(--d, 0s);
+}
+
+.lp-spark {
+  stroke-dasharray: 100;
+  animation: lp-draw 2.4s ease-in-out infinite;
+}
+
+.lp-ring-fill {
+  stroke-dasharray: 0 240;
+  animation: lp-fill 2.6s ease-in-out infinite;
+  animation-delay: var(--d, 0s);
+}
+
+.lp-tap {
+  animation: lp-pulse-ring 1.2s ease-in-out infinite;
+}
+
+/*
+  A filter change on the same page: the old numbers stay, dimmed, with a soft
+  sweep over them, so it is clear they are being refreshed. The regions opt in
+  with data-lp-veil-target; NavigationFeedback sets data-lp-veil on <html>.
+*/
+[data-lp-veil-target] {
+  position: relative;
+}
+
+[data-lp-veil-target] > * {
+  transition: opacity 0.15s ease;
+}
+
+html[data-lp-veil="on"] [data-lp-veil-target] > * {
+  opacity: 0.5;
+}
+
+html[data-lp-veil="on"] [data-lp-veil-target] {
+  pointer-events: none;
+}
+
+html[data-lp-veil="on"] [data-lp-veil-target]::after {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 35%,
+    color-mix(in srgb, var(--lp-accent) 14%, transparent) 50%,
+    transparent 65%
+  );
+  background-size: 260% 100%;
+  animation: lp-shimmer 1.9s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-lp-veil="on"] [data-lp-veil-target]::after {
+    animation: none;
+  }
+
+  .lp-sk,
+  .lp-orbit-glow,
+  .lp-orbit-arc,
+  .lp-orbit-dot,
+  .lp-orbit-mark,
+  .lp-source > i,
+  .lp-dot,
+  .lp-bar > b,
+  .lp-spinner,
+  .lp-eq > b,
+  .lp-spark,
+  .lp-ring-fill,
+  .lp-tap {
+    animation: none;
+  }
+
+  .lp-say > span:first-child {
+    opacity: 1;
+  }
+
+  .lp-spark {
+    stroke-dashoffset: 0;
+  }
+
+  .lp-ring-fill {
+    stroke-dasharray: 118 240;
+  }
+}

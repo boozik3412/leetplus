@@ -1243,6 +1243,135 @@ describe('DashboardService', () => {
     expect(operations.scope).toEqual(summary.scope);
   });
 
+  describe('visits of clubs sharing one external domain', () => {
+    const sharedDomainStores = [
+      {
+        id: 'store-pushkinskaya',
+        name: '1337-Пушкинская',
+        tenantId: 'tenant-demo',
+        externalDomain: '46.langamepro.ru',
+        externalClubId: '1',
+        timeZone: 'Asia/Yekaterinburg',
+        isActive: true,
+      },
+      {
+        id: 'store-kholmogorova',
+        name: '1337-Холмогорова',
+        tenantId: 'tenant-demo',
+        externalDomain: '46.langamepro.ru',
+        externalClubId: '2',
+        timeZone: 'Asia/Yekaterinburg',
+        isActive: true,
+      },
+    ];
+    const query = {
+      period: 'custom' as const,
+      dateFrom: '2026-09-07',
+      dateTo: '2026-09-08',
+      asOf: '2026-09-08T20:00:00.000Z',
+      comparison: 'false',
+    };
+
+    beforeEach(() => {
+      // Honour the requested club filter so a query for selected clubs cannot
+      // double as the tenant topology.
+      prisma.store.findMany.mockImplementation(
+        ({ where }: { where?: { id?: { in?: string[] } } } = {}) =>
+          Promise.resolve(
+            sharedDomainStores.filter(
+              (store) => !where?.id?.in || where.id.in.includes(store.id),
+            ),
+          ),
+      );
+      prisma.salesFact.findMany.mockResolvedValue([]);
+    });
+
+    it('does not attribute domain sessions without a club to the only selected club', async () => {
+      prisma.guestSession.findMany.mockResolvedValue(
+        ['2026-09-07T10:00:00.000Z', '2026-09-08T10:00:00.000Z'].map(
+          (startedAt, index) => ({
+            id: `shared-${index}`,
+            storeId: null,
+            externalProvider: 'LANGAME',
+            externalDomain: '46.langamepro.ru',
+            externalClubId: null,
+            externalSessionId: `shared-${index}`,
+            guestId: null,
+            externalGuestId: `guest-${index}`,
+            startedAt: new Date(startedAt),
+          }),
+        ),
+      );
+      const unresolved = {
+        value: null,
+        state: 'MISSING',
+        reason:
+          'Есть сохранённые сессии без доказуемой привязки к выбранным клубам; визиты за период неизвестны.',
+      };
+
+      for (const storeIds of [
+        ['store-pushkinskaya'],
+        ['store-kholmogorova'],
+        ['store-pushkinskaya', 'store-kholmogorova'],
+      ]) {
+        const summary = await service.getExecutiveSummary(user, {
+          ...query,
+          storeIds,
+        });
+
+        expect(summary.scope.storeIds).toEqual(storeIds);
+        expect(summary.metrics.visits).toMatchObject(unresolved);
+        summary.clubs.forEach((club) =>
+          expect(club.metrics.visits).toMatchObject(unresolved),
+        );
+        summary.days.forEach((day) =>
+          expect(day.metrics.visits).toMatchObject(unresolved),
+        );
+      }
+    });
+
+    it('skips sessions provably bound to the unselected club of the domain', async () => {
+      prisma.guestSession.findMany.mockResolvedValue([
+        {
+          id: 'pushkinskaya',
+          storeId: null,
+          externalDomain: '46.langamepro.ru',
+          externalClubId: '1',
+          externalSessionId: 'pushkinskaya',
+          startedAt: new Date('2026-09-07T10:00:00.000Z'),
+        },
+        {
+          id: 'kholmogorova-club',
+          storeId: null,
+          externalDomain: '46.langamepro.ru',
+          externalClubId: '2',
+          externalSessionId: 'kholmogorova-club',
+          startedAt: new Date('2026-09-07T11:00:00.000Z'),
+        },
+        {
+          id: 'kholmogorova-store',
+          storeId: 'store-kholmogorova',
+          externalDomain: '46.langamepro.ru',
+          externalClubId: null,
+          externalSessionId: 'kholmogorova-store',
+          startedAt: new Date('2026-09-07T12:00:00.000Z'),
+        },
+      ]);
+
+      const summary = await service.getExecutiveSummary(user, {
+        ...query,
+        storeIds: ['store-pushkinskaya'],
+      });
+
+      expect(summary.metrics.visits).toMatchObject({
+        value: 1,
+        state: 'PARTIAL',
+        reason:
+          'Показаны сохранённые сессии с доказуемой привязкой; полнота источника за выбранные клубо-дни не подтверждена.',
+      });
+    });
+  });
+
   it('serializes executive operations as the compact Web health contract, not engine rows', async () => {
     mockEmptyDashboardData();
     const health = buildAssortmentHealth({

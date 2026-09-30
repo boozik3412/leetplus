@@ -49,6 +49,10 @@ import {
 } from './langame-external-pilot-authority';
 import { parseLangameDate as parseLangameDateValue } from './langame-date';
 import {
+  LANGAME_TRANSIENT_RETRY_DELAYS_MS,
+  withLangameTransientRetry,
+} from './langame-transient-retry';
+import {
   isLangameSectionLimitMessage,
   langameImportRequirements,
   langameSectionLimitMessage,
@@ -346,6 +350,8 @@ class ExternalGuestDataFenceError extends ServiceUnavailableException {
 @Injectable()
 export class GuestDataFoundationService {
   private readonly logger = new Logger(GuestDataFoundationService.name);
+  // Overridable in tests; one gateway error must not leave a day incomplete.
+  private readonly transientRetryDelaysMs = LANGAME_TRANSIENT_RETRY_DELAYS_MS;
   private readonly activeBackgroundTenantSyncs = new Set<string>();
   private readonly externalProfileAuthorities = new WeakMap<
     SourceProfile,
@@ -1429,7 +1435,7 @@ export class GuestDataFoundationService {
     profile.providerReadsAttempted += 1;
     let rows: T[];
     try {
-      rows = await load();
+      rows = await withLangameTransientRetry(load, this.transientRetryDelaysMs);
       profile.providerReadsSucceeded += 1;
     } catch (error) {
       if (error instanceof ExternalGuestDataFenceError) throw error;
@@ -2803,7 +2809,14 @@ export class GuestDataFoundationService {
       if (profile) await this.assertExternalProfileCurrent(profile);
       let pageRows: T[];
       try {
-        pageRows = await fetchPage(page);
+        // Page 1 is retried by captureEndpoint together with the endpoint.
+        pageRows =
+          page === 1
+            ? await fetchPage(page)
+            : await withLangameTransientRetry(
+                () => fetchPage(page),
+                this.transientRetryDelaysMs,
+              );
       } catch (error) {
         if (error instanceof ExternalGuestDataFenceError) throw error;
         // Earlier pages remain usable, but this endpoint is not complete.

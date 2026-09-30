@@ -1503,6 +1503,13 @@ Support-функциональность следует тем же трём г�
 - tenant user работает только с `/support/bug-reports*` после corporate JWT,
   support capability и `FreshNetworkScopeGuard`;
 - platform-wide `/admin/support-tickets*` требует `PlatformAdminGuard`;
+- счётчик очереди (`GET /support/bug-reports/summary`,
+  `GET /admin/support-tickets/summary`) проходит те же guards, а браузерное
+  уведомление о новом обращении формирует Web из этого ответа внутри открытой
+  вкладки, без внешних провайдеров и новой egress;
+- сигнал `SUPPORT_TICKET` в центре уведомлений сотрудников создаётся только
+  для обращений `NEW` своего tenant и виден только пользователю с
+  `view_support_tickets` в NETWORK scope (как и сама очередь `/support`);
 - ФИО и телефон в карточке обращения являются read-time projection из
   канонических зашифрованных `Guest`/`GuestGameProfile`: расшифровка разрешена
   только после tenant/platform guard в corporate process, Prisma ciphertext и

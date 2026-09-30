@@ -135,6 +135,7 @@ import {
   type GuestGameEvaluationMode,
 } from './guest-game-source-policy';
 import { GuestGameMediaService } from './guest-game-media.service';
+import { loadGuestGameRuleBudgetSpent } from './guest-game-rule-budget';
 import {
   exactBalanceTopupReplayAttestation,
   type BalanceTopupReplayHistoricalStepOverride,
@@ -13444,6 +13445,11 @@ export class GuestGamificationService {
       this.getSeasons(user),
       dto.storeId ? this.assertStore(user, dto.storeId) : Promise.resolve(null),
     ]);
+    const budgetSpentByRuleId = await loadGuestGameRuleBudgetSpent(
+      this.prisma,
+      user.tenantId,
+      { lootBoxes, missions, seasons },
+    );
     const prequalifiedLootBoxOpen = options.prequalifiedLootBoxOpen;
     if (
       prequalifiedLootBoxOpen &&
@@ -13465,10 +13471,6 @@ export class GuestGamificationService {
       externalDomain: selectedExternalDomain,
     });
     const selectedIdentityGuestId = identityGuestIds[0] ?? null;
-    const rewards = await this.getDryRunRewards(user, {
-      ...options.rewardScope,
-      missionIds: missions.map((mission) => mission.id),
-    });
     const explicitGuestId = nullableId(dto.guestId);
     const explicitGuest = explicitGuestId
       ? dryRunGuestSummary(await this.getTenantGuest(user, explicitGuestId))
@@ -13487,6 +13489,17 @@ export class GuestGamificationService {
       : selectedExternalDomain
         ? null
         : (profile?.guest ?? null);
+    const rewards = await this.getDryRunRewards(user, {
+      ...options.rewardScope,
+      missionIds: missions.map((mission) => mission.id),
+      seasonOwner: {
+        profileId: profile?.id ?? null,
+        guestIds: uniqueStrings([
+          ...identityGuestIds,
+          ...(guest?.id ? [guest.id] : []),
+        ]),
+      },
+    });
     const gameActivatedAt = dryRunProfileGameActivatedAt(profile);
     const sessionMinutes = gameActivatedAt
       ? Math.min(
@@ -13588,6 +13601,7 @@ export class GuestGamificationService {
       ruleDomainTimeZones: options.ruleDomainTimeZones,
       ruleExternalDomains: options.ruleExternalDomains,
       prequalifiedLootBoxOpen,
+      budgetSpentByRuleId,
     };
     const targetLootBoxes = lootBoxId
       ? lootBoxes.filter((item) => item.id === lootBoxId)
@@ -19843,6 +19857,7 @@ export class GuestGamificationService {
       profileId?: string | null;
       guestId?: string | null;
       missionIds?: string[];
+      seasonOwner?: { profileId: string | null; guestIds: string[] };
     } = {},
   ): Promise<GuestGameReward[]> {
     const owners: Prisma.GuestGameRewardWhereInput[] = [
@@ -19850,7 +19865,19 @@ export class GuestGamificationService {
       ...(scope.guestId ? [{ guestId: scope.guestId }] : []),
     ];
     const missionIds = uniqueStrings(scope.missionIds ?? []);
-    const [rows, missionRows] = await Promise.all([
+    // Battle Pass progress is derived from the guest's own step rewards. The
+    // tenant-wide query below keeps only the newest 1000 rewards, so without
+    // this per-guest read early step rewards drop out and the guest falls back
+    // to step 1 ("already recorded") once the network issues enough rewards.
+    const seasonOwners: Prisma.GuestGameRewardWhereInput[] = [
+      ...(scope.seasonOwner?.profileId
+        ? [{ profileId: scope.seasonOwner.profileId }]
+        : []),
+      ...(scope.seasonOwner?.guestIds.length
+        ? [{ guestId: { in: uniqueStrings(scope.seasonOwner.guestIds) } }]
+        : []),
+    ];
+    const [rows, missionRows, seasonOwnerRows] = await Promise.all([
       this.prisma.guestGameReward.findMany({
         where: {
           tenantId: user.tenantId,
@@ -19873,9 +19900,23 @@ export class GuestGamificationService {
             orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
           })
         : Promise.resolve([]),
+      seasonOwners.length
+        ? this.prisma.guestGameReward.findMany({
+            where: {
+              tenantId: user.tenantId,
+              seasonId: { not: null },
+              status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+              OR: seasonOwners,
+            },
+            include: rewardInclude,
+            orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
+          })
+        : Promise.resolve([]),
     ]);
     const uniqueRows = new Map(
-      [...rows, ...missionRows].map((row) => [row.id, row] as const),
+      [...rows, ...missionRows, ...seasonOwnerRows].map(
+        (row) => [row.id, row] as const,
+      ),
     );
 
     return [...uniqueRows.values()].map(mapReward);
@@ -33636,6 +33677,9 @@ type DryRunContext = {
   ruleDomainTimeZones?: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
   ruleExternalDomains?: ReadonlyMap<string, readonly string[]>;
   prequalifiedLootBoxOpen?: GuestGamePrequalifiedLootBoxOpen;
+  // Exact per-rule spend from the database; context.rewards is only a
+  // bounded window and would undercount long-running budgets.
+  budgetSpentByRuleId?: ReadonlyMap<string, number>;
 };
 
 type DryRunMissionRewardEntitlement = {
@@ -33828,6 +33872,7 @@ function evaluateLootBoxDryRun(
       ruleRewards,
       blockers,
       reasons,
+      context.budgetSpentByRuleId?.get(rule.id),
     );
     if (scopedContext) {
       appendDryRunLootBoxLimits(
@@ -33929,6 +33974,7 @@ function evaluateMissionDryRun(
     ruleRewards,
     blockers,
     reasons,
+    context.budgetSpentByRuleId?.get(rule.id),
   );
   if (scopedContext) {
     appendDryRunMissionLimits(
@@ -34059,6 +34105,7 @@ function evaluateSeasonDryRun(
     ruleRewards,
     blockers,
     reasons,
+    context.budgetSpentByRuleId?.get(rule.id),
   );
 
   if (rule.premiumEnabled) {
@@ -34850,13 +34897,17 @@ function appendDryRunBudgetCheck(
   rewards: GuestGameReward[],
   blockers: string[],
   reasons: string[],
+  exactSpent?: number,
 ) {
   if (budgetAmount == null) {
     reasons.push('Бюджет не задан');
     return;
   }
 
-  const spent = sum(rewards.map((reward) => reward.rewardAmount));
+  const spent = Math.max(
+    sum(rewards.map((reward) => reward.rewardAmount)),
+    exactSpent ?? 0,
+  );
   const projected = spent + projectedAmount;
   reasons.push(`Бюджет: ${spent}/${budgetAmount} руб`);
 

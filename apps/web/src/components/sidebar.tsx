@@ -20,6 +20,7 @@ import { canAccessPath } from "@/lib/permissions";
 import { getRoleLabel } from "@/lib/roles";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
+import { useSupportQueueBadges } from "@/components/support-queue-watch";
 
 type NavItem = {
   href: string;
@@ -30,6 +31,7 @@ type NavItem = {
     exclude?: boolean;
   };
   onNavigate?: () => void;
+  badge?: number;
 };
 
 type NavGroup = {
@@ -181,6 +183,53 @@ const shiftWorkspaceNavHrefs = new Set([
 
 const compactSidebarIconClassName = "h-5 w-5 shrink-0";
 
+const supportQueueHrefs = new Set([
+  "/support",
+  "/administration/support-tickets",
+]);
+
+function groupBadgeTotal(items: NavItem[]) {
+  return items.reduce((sum, item) => sum + (item.badge ?? 0), 0);
+}
+
+function newTicketsLabel(count: number) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  const noun =
+    mod10 === 1 && mod100 !== 11
+      ? "новое обращение"
+      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
+        ? "новых обращения"
+        : "новых обращений";
+  return `${count} ${noun}`;
+}
+
+function NavBadge({
+  count,
+  variant = "inline",
+}: {
+  count: number;
+  variant?: "inline" | "corner";
+}) {
+  if (count <= 0) {
+    return null;
+  }
+  return (
+    <span
+      aria-label={newTicketsLabel(count)}
+      title={newTicketsLabel(count)}
+      className={[
+        "inline-flex min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-bold leading-5 text-zinc-950",
+        variant === "corner"
+          ? "absolute -right-1.5 -top-1.5 ring-2 ring-white dark:ring-zinc-950"
+          : "",
+      ].join(" ")}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
 function canShowNavItem(user: AuthUser | null, item: NavItem) {
   if (!canAccessPath(user, item.href)) {
     return false;
@@ -218,7 +267,7 @@ function resolveNavItemForUser(user: AuthUser | null, item: NavItem): NavItem {
   return item;
 }
 
-function NavLink({ href, label, activeQuery, onNavigate }: NavItem) {
+function NavLink({ href, label, activeQuery, onNavigate, badge }: NavItem) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isActive = isNavigationItemActive(
@@ -233,13 +282,14 @@ function NavLink({ href, label, activeQuery, onNavigate }: NavItem) {
       href={href}
       onClick={onNavigate}
       className={[
-        "block rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
+        "flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
         isActive
           ? "bg-zinc-950 text-white shadow-sm dark:bg-emerald-400 dark:text-zinc-950"
           : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100",
       ].join(" ")}
     >
-      {label}
+      <span className="min-w-0">{label}</span>
+      <NavBadge count={badge ?? 0} />
     </Link>
   );
 }
@@ -248,11 +298,13 @@ function NavSection({
   title,
   isOpen,
   onToggle,
+  badge = 0,
   children,
 }: {
   title: string;
   isOpen: boolean;
   onToggle: () => void;
+  badge?: number;
   children: ReactNode;
 }) {
   return (
@@ -263,7 +315,10 @@ function NavSection({
         onClick={onToggle}
         className="flex w-full items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-200 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
       >
-        <span>{title}</span>
+        <span className="flex items-center gap-2">
+          {title}
+          {isOpen ? null : <NavBadge count={badge} />}
+        </span>
         <span
           aria-hidden="true"
           className={[
@@ -354,17 +409,20 @@ function CompactNavSection({
     };
   }, [group.items.length, isOpen]);
 
+  const badge = groupBadgeTotal(group.items);
+
   if (group.items.length === 1) {
     return (
       <Link
         href={group.items[0].href}
-        title={group.title}
+        title={badge ? `${group.title}: ${newTicketsLabel(badge)}` : group.title}
         aria-label={group.title}
         aria-current={isActive ? "page" : undefined}
         onClick={onNavigate}
         className={compactGroupButtonClass({ isActive })}
       >
         <SectionIcon icon={group.icon} />
+        <NavBadge count={badge} variant="corner" />
       </Link>
     );
   }
@@ -407,6 +465,7 @@ function CompactNavSection({
       >
         <SectionIcon icon={group.icon} />
         <span className="sr-only">{group.title}</span>
+        <NavBadge count={badge} variant="corner" />
       </button>
       {isOpen ? (
         <div
@@ -785,7 +844,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   });
   const openNavGroups =
     openNavState.pathname === pathname ? openNavState.groups : {};
-  const allowedNavGroups = navGroups
+  const permittedNavGroups = navGroups
     .map((group) => ({
       ...group,
       items: group.items
@@ -793,6 +852,18 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         .filter((item) => canShowNavItem(user, item)),
     }))
     .filter((group) => group.items.length > 0);
+  const supportQueueBadges = useSupportQueueBadges(
+    permittedNavGroups
+      .flatMap((group) => group.items.map((item) => item.href))
+      .filter((href) => supportQueueHrefs.has(href)),
+  );
+  const allowedNavGroups = permittedNavGroups.map((group) => ({
+    ...group,
+    items: group.items.map((item) => ({
+      ...item,
+      badge: supportQueueBadges[item.href],
+    })),
+  }));
   const showHomeLink = Boolean(user);
   const homeHref = user ? getDefaultLandingPath(user) : "/dashboard";
   const homeLabel =
@@ -1016,6 +1087,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
                   title={group.title}
                   isOpen={Boolean(openNavGroups[group.title])}
                   onToggle={() => toggleNavGroup(group.title)}
+                  badge={groupBadgeTotal(group.items)}
                 >
                   {group.items.map((item) => (
                     <NavLink

@@ -5,6 +5,11 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { hasCapability } from '../auth/capabilities';
+import {
+  GUEST_BUG_REPORT_TOPIC_LABELS,
+  type GuestBugReportTopic,
+} from '../guest-portal/guest-support.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -22,7 +27,12 @@ const notificationSourceTypes = [
   'TEAM_CHAT',
   'KNOWLEDGE_BASE',
   'OPERATIONS_DASHBOARD',
+  'SUPPORT_TICKET',
 ] as const;
+// Support signals quote guest reports, so only staff who can open the
+// support queue (capability + network scope) may see them.
+const supportTicketSourceType = 'SUPPORT_TICKET';
+const supportTicketCriticalAfterHours = 24;
 const notificationStatusFilters = ['all', ...notificationStatuses] as const;
 const notificationSeverityFilters = ['all', ...notificationSeverities] as const;
 const notificationSourceTypeFilters = [
@@ -345,6 +355,7 @@ export class StaffNotificationsService {
       incidents,
       returnedArticles,
       operationsDashboardSignals,
+      newSupportTickets,
     ] = await Promise.all([
       this.prisma.staffTask.findMany({
         where: {
@@ -432,6 +443,20 @@ export class StaffNotificationsService {
       this.staffOperationsDashboardService.getCurrentStaffControlSignals(
         tenantId,
       ),
+      this.prisma.guestSupportTicket.findMany({
+        where: { tenantId, status: 'NEW' },
+        select: {
+          id: true,
+          ticketNumber: true,
+          topic: true,
+          description: true,
+          storeId: true,
+          createdAt: true,
+          store: { select: { name: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: 100,
+      }),
     ]);
 
     return [
@@ -623,7 +648,68 @@ export class StaffNotificationsService {
             operationsDashboardSignals.dateTo,
           ),
         ),
+      ...newSupportTickets.map((ticket) =>
+        this.toSupportTicketSignal(ticket, now),
+      ),
     ];
+  }
+
+  private toSupportTicketSignal(
+    ticket: {
+      id: string;
+      ticketNumber: string;
+      topic: string;
+      description: string;
+      storeId: string;
+      createdAt: Date;
+      store: { name: string };
+    },
+    now: Date,
+  ): SignalDraft {
+    const waitingHours = Math.max(
+      0,
+      Math.floor((now.getTime() - ticket.createdAt.getTime()) / 3600000),
+    );
+    const topicLabel =
+      GUEST_BUG_REPORT_TOPIC_LABELS[ticket.topic as GuestBugReportTopic] ??
+      'Другое';
+    const actionHref = `/support?status=active&search=${encodeURIComponent(
+      ticket.ticketNumber,
+    )}`;
+
+    return {
+      sourceType: supportTicketSourceType,
+      sourceId: ticket.id,
+      dedupeKey: `support-ticket:${ticket.id}:new`,
+      severity:
+        waitingHours >= supportTicketCriticalAfterHours
+          ? 'CRITICAL'
+          : 'WARNING',
+      title:
+        `Новое обращение гостя ${ticket.ticketNumber}: ${topicLabel}`.slice(
+          0,
+          240,
+        ),
+      message: this.notificationMessage([
+        `Источник: Поддержка — ${ticket.store.name}`,
+        `Ситуация: ${
+          waitingHours > 0
+            ? `ждёт ответа ${this.pluralizeRu(waitingHours, 'час', 'часа', 'часов')}`
+            : 'обращение только что поступило'
+        }`,
+        this.compactNotificationText(ticket.description),
+      ]),
+      storeId: ticket.storeId,
+      targetUserId: null,
+      actionLabel: 'Открыть обращение',
+      actionHref,
+      metadata: {
+        ticketNumber: ticket.ticketNumber,
+        topic: ticket.topic,
+        createdAt: ticket.createdAt.toISOString(),
+        waitingHours,
+      },
+    };
   }
 
   private notificationMessage(lines: Array<string | null | undefined>) {
@@ -975,7 +1061,20 @@ export class StaffNotificationsService {
     return {
       tenantId,
       AND: and,
+      ...this.supportSignalVisibility(user),
     };
+  }
+
+  private supportSignalVisibility(
+    user: AuthenticatedUser,
+  ): Pick<Prisma.StaffNotificationWhereInput, 'NOT'> {
+    const canOpenSupportQueue =
+      hasCapability(user, 'view_support_tickets') &&
+      this.accessScopeService.resolve(user).mode === 'NETWORK';
+
+    return canOpenSupportQueue
+      ? {}
+      : { NOT: [{ sourceType: supportTicketSourceType }] };
   }
 
   private buildScopedNotificationUniqueWhere(
@@ -989,6 +1088,7 @@ export class StaffNotificationsService {
       id,
       tenantId,
       AND: visibility.AND,
+      ...(visibility.NOT ? { NOT: visibility.NOT } : {}),
     };
   }
 

@@ -39,6 +39,11 @@ export class SupportTicketsController {
     return this.service.getTenantTickets(user, query);
   }
 
+  @Get('summary')
+  getQueueSummary(@CurrentUser() user: AuthenticatedUser) {
+    return this.service.getTenantQueueSummary(user);
+  }
+
   @Patch(':id')
   updateTicket(
     @CurrentUser() user: AuthenticatedUser,

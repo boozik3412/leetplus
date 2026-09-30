@@ -522,6 +522,7 @@ export type GuestFilterOptions = {
 export type GuestsSummary = {
   tenantId: string;
   tenantSlug: string;
+  dataAsOf: string;
   periodFrom: string;
   periodTo: string;
   storeId: string | null;

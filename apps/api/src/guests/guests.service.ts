@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
@@ -32,6 +33,7 @@ import { LangameSettingsService } from '../integrations/langame-settings.service
 import type { LangameGuestSession } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { GuestAnalyticsCache } from './guest-analytics-cache';
 import {
   GuestGameInsightsService,
   type GuestGameDetail,
@@ -84,6 +86,13 @@ export type {
 const GUEST_ANALYTICS_MIN_PERIOD_MONTHS = 3;
 const GUEST_BEHAVIOR_SAMPLE_DAYS = 90;
 const GUEST_DETAIL_CRM_ROWS = 20;
+/** Above this many guests, per-guest lookups are replaced by one tenant-wide read. */
+const GUEST_BULK_LOOKUP_THRESHOLD = 2_000;
+const GUEST_ANALYSIS_FRESH_MS = 2 * 60_000;
+const GUEST_ANALYSIS_STALE_MS = 60 * 60_000;
+const GUEST_ANALYSIS_MAX_ENTRIES = 2;
+const ISO_DAY_MS = 86_400_000;
+const ISO_DAY_CACHE = new Map<number, string>();
 
 export type GuestsSummaryQuery = {
   dateFrom?: string;
@@ -442,6 +451,8 @@ export type GuestFilterOptions = {
 export type GuestsSummary = {
   tenantId: string;
   tenantSlug: string;
+  /** ISO time of the analysis pass behind these numbers (results are reused for a while). */
+  dataAsOf: string;
   periodFrom: string;
   periodTo: string;
   storeId: string | null;
@@ -1024,7 +1035,7 @@ type GuestMetrics = {
   barSalesCount: number;
   lifetimeTransactionAmount: number;
   lifetimeBarRevenue: number;
-  lifetimeRevenueDays: Set<string>;
+  lifetimeRevenueDayCount: number;
   lifetimeFirstRevenueAt: Date | null;
   lifetimeLastRevenueAt: Date | null;
   bonusBalance: number;
@@ -1103,10 +1114,80 @@ type CsvCell = string | number | null;
 type BuiltGuestList = Omit<
   GuestListResponse,
   'page' | 'pageSize' | 'totalRows' | 'totalPages'
->;
+> & { baseById: Map<string, GuestBase> };
+
+type GuestSessionFact = {
+  guestId: string | null;
+  startedAt: Date | null;
+  stoppedAt: Date | null;
+  durationMinutes: number | null;
+};
+
+type GuestSaleFact = {
+  guestId: string | null;
+  saleDate: Date;
+  revenue: Prisma.Decimal;
+};
+
+type LifetimeRevenueRow = {
+  guestId: string;
+  transactionSum: Prisma.Decimal | null;
+  barSum: Prisma.Decimal | null;
+  revenueDays: number;
+  firstAt: Date | null;
+  lastAt: Date | null;
+};
+
+type LinkedBonusBalance = {
+  guestId: string | null;
+  snapshotDate: Date;
+  bonusBalance: Prisma.Decimal;
+};
+
+type GuestPeriodTotals = {
+  sessionsCount: number;
+  playMinutes: number;
+  transactionsCount: number;
+  transactionAmount: number;
+  barRevenue: number;
+  barSalesCount: number;
+};
+
+/** Everything the dashboard, the list and the export derive from one pass. */
+type GuestAnalysis = {
+  period: Period;
+  /** Rows carry masked names; use withPii() before returning them to a client. */
+  rows: GuestDashboardRow[];
+  baseById: Map<string, GuestBase>;
+  totals: GuestPeriodTotals;
+  retention: GuestRetentionSummary;
+  returnedGuests: number;
+  visitTrend: GuestsSummary['visitTrend'];
+  visitHeatmap: GuestVisitHeatmapSummary;
+  flowForecast: GuestFlowForecastSummary;
+  dataQuality: GuestsSummary['dataQuality'];
+  previousPeriod: Period;
+  previousTotals: Record<GuestsComparisonMetricKey, number>;
+  /** Epoch ms when the pass finished; shown to users as "data as of". */
+  computedAt: number;
+};
 
 @Injectable()
 export class GuestsService {
+  private readonly logger = new Logger(GuestsService.name);
+  private readonly analysisCache = new GuestAnalyticsCache<GuestAnalysis>({
+    freshMs: GUEST_ANALYSIS_FRESH_MS,
+    staleMs: GUEST_ANALYSIS_STALE_MS,
+    maxEntries: GUEST_ANALYSIS_MAX_ENTRIES,
+    onBackgroundError: (error, key) =>
+      this.logger.warn(
+        `Guest analysis refresh failed (${key.split('|')[0]}): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      ),
+  });
+  private piiKeyCache: Buffer | null = null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
@@ -1159,63 +1240,40 @@ export class GuestsService {
     const filters = await this.resolveGuestFilters(tenantId, query);
     const includeGame = this.canViewGameInsights(user);
     const now = new Date();
-    const { guests, metricsByGuestId, groupsByKey, gameFactsByGuestId } =
-      await this.buildGuestMetrics(tenantId, period, filters, undefined, {
-        includeGame,
-      });
-    const rows = guests.map((guest) =>
-      this.toDashboardRow(
-        guest,
-        metricsByGuestId.get(guest.id),
-        period,
-        groupsByKey,
-        gameFactsByGuestId.get(guest.id) ?? null,
-      ),
+    const analysis = await this.loadAnalysis(
+      tenantId,
+      period,
+      filters,
+      includeGame,
     );
+    const {
+      rows,
+      baseById,
+      totals: periodMetrics,
+      retention,
+      returnedGuests,
+      visitTrend,
+      visitHeatmap,
+      flowForecast,
+      dataQuality,
+      previousPeriod,
+      previousTotals,
+    } = analysis;
+    const hydrate = (list: GuestDashboardRow[]) =>
+      list.map((row) => this.withPii(row, baseById));
     const activeRows = rows.filter((row) => row.segment === 'active');
     const newRows = rows.filter((row) => row.segment === 'new');
     const repeatRows = rows.filter((row) => row.segment === 'repeat');
     const riskRows = rows.filter((row) => row.segment === 'risk');
     const lostRows = rows.filter((row) => row.segment === 'lost');
-    const periodMetrics = this.sumPeriodMetrics(metricsByGuestId);
     const periodRevenue = this.round(
       periodMetrics.transactionAmount + periodMetrics.barRevenue,
       2,
     );
     const bonusLoad = this.buildBonusLoadSummary(rows, periodRevenue);
     const playHours = this.round(periodMetrics.playMinutes / 60, 1);
-    const computerCount = await this.resolveComputerCount(
-      tenantId,
-      filters.storeId,
-    );
-    const playCapacityHours =
-      computerCount !== null
-        ? this.round(computerCount * this.periodDays(period) * 24, 1)
-        : null;
-    const loadPercent =
-      playCapacityHours && playCapacityHours > 0
-        ? this.round((playHours / playCapacityHours) * 100, 1)
-        : null;
-    const retention = this.buildRetentionSummary(
-      guests,
-      metricsByGuestId,
-      period,
-    );
-    const previousPeriod = this.previousPeriod(period);
-    const [
-      trend,
-      visitHeatmap,
-      flowForecast,
-      dataQuality,
-      previousTotals,
-      crmTasks,
-      unlinkedProfiles,
-    ] = await Promise.all([
-      this.buildVisitTrend(tenantId, period, filters),
-      this.buildVisitHeatmap(tenantId, period, filters),
-      this.buildFlowForecast(tenantId, period, filters),
-      this.getDataQuality(tenantId, period, filters),
-      this.buildPeriodTotals(tenantId, previousPeriod, filters),
+    const [computerCount, crmTasks, unlinkedProfiles] = await Promise.all([
+      this.resolveComputerCount(tenantId, filters.storeId),
       this.prisma.guestCrmTask.findMany({
         where: { tenantId, status: { in: ['OPEN', 'IN_PROGRESS'] } },
         select: { status: true, dueAt: true, assignedToUserId: true },
@@ -1224,13 +1282,15 @@ export class GuestsService {
         ? this.guestGameInsights.countUnlinkedProfiles(tenantId)
         : Promise.resolve(0),
     ]);
+    const playCapacityHours =
+      computerCount !== null
+        ? this.round(computerCount * this.periodDays(period) * 24, 1)
+        : null;
+    const loadPercent =
+      playCapacityHours && playCapacityHours > 0
+        ? this.round((playHours / playCapacityHours) * 100, 1)
+        : null;
     const activeGuests = activeRows.length + repeatRows.length + newRows.length;
-    const returnedGuests = countReturnedGuests(
-      guests.map((guest) =>
-        this.returnedGuestInput(metricsByGuestId.get(guest.id), period),
-      ),
-      period.fromDate,
-    );
     const kpi = buildGuestKpiSummary({
       rows,
       activeGuests,
@@ -1260,25 +1320,34 @@ export class GuestsService {
     );
     const health = buildGuestHealthSummary(rows);
     const crmQueue = buildCrmQueueSummary({ tasks: crmTasks, rows, now });
-    const gamification: GuestsGamificationSummary = includeGame
+    const gameSummary: GuestsGamificationSummary = includeGame
       ? buildGuestsGamificationSummary({ rows, unlinkedProfiles })
       : { available: false, reason: 'NO_CAPABILITY' };
+    const gamification: GuestsGamificationSummary = gameSummary.available
+      ? { ...gameSummary, topPlayers: hydrate(gameSummary.topPlayers) }
+      : gameSummary;
     const { attention, actions } = buildGuestSignals({
       rows,
       crmQueue,
       gamification,
       now,
       periodToDate: period.toDate,
+      nameOf: (row) => {
+        const base = baseById.get(row.id);
+
+        return base ? this.guestDisplayName(base, true) : row.displayName;
+      },
     });
 
     return {
       tenantId,
       tenantSlug,
+      dataAsOf: new Date(analysis.computedAt).toISOString(),
       periodFrom: period.from,
       periodTo: period.to,
       storeId: filters.storeId,
       guestGroupId: filters.guestGroupId,
-      totalGuests: guests.length,
+      totalGuests: rows.length,
       activeGuests,
       newGuests: newRows.length,
       repeatGuests: repeatRows.length,
@@ -1305,14 +1374,17 @@ export class GuestsService {
       visitHeatmap,
       flowForecast,
       dataQuality,
-      visitTrend: trend,
-      topGuests: this.sortRows(rows, 'revenue', 'desc').slice(0, 12),
-      riskGuestsRows: this.sortRows(riskRows, 'revenue', 'desc').slice(0, 12),
-      bonusLoadGuestsRows: this.sortRows(
-        rows.filter((row) => row.bonusLoad.currentBalance > 0),
-        'bonusLoad',
-        'desc',
-      ).slice(0, 12),
+      visitTrend,
+      topGuests: hydrate(this.topRows(rows, 'revenue', 'desc', 12)),
+      riskGuestsRows: hydrate(this.topRows(riskRows, 'revenue', 'desc', 12)),
+      bonusLoadGuestsRows: hydrate(
+        this.topRows(
+          rows.filter((row) => row.bonusLoad.currentBalance > 0),
+          'bonusLoad',
+          'desc',
+          12,
+        ),
+      ),
       comparison,
       kpi,
       health,
@@ -1320,6 +1392,140 @@ export class GuestsService {
       gamification,
       attention,
       actions,
+    };
+  }
+
+  private analysisCacheKey(
+    tenantId: string,
+    period: Period,
+    filters: ResolvedGuestFilters,
+    includeGame: boolean,
+  ) {
+    return [
+      tenantId,
+      period.from,
+      period.to,
+      filters.storeId ?? '',
+      filters.guestGroupId ?? '',
+      includeGame ? 'game' : 'plain',
+    ].join('|');
+  }
+
+  /**
+   * One pass over the tenant's guests feeds the dashboard, the list, the
+   * export and the audience snapshot. Identical requests share a single
+   * computation, results are reused for a short time and refreshed in the
+   * background, and any CRM write invalidates the tenant.
+   */
+  private async loadAnalysis(
+    tenantId: string,
+    period: Period,
+    filters: ResolvedGuestFilters,
+    includeGame: boolean,
+  ): Promise<GuestAnalysis> {
+    const compute = () =>
+      this.computeAnalysis(tenantId, period, filters, includeGame);
+
+    if (filters.search) {
+      // A search changes the guest set itself, so it is never cached.
+      return this.analysisCache.runUncached(compute);
+    }
+
+    const { value } = await this.analysisCache.get(
+      this.analysisCacheKey(tenantId, period, filters, includeGame),
+      tenantId,
+      compute,
+    );
+
+    return value;
+  }
+
+  private async computeAnalysis(
+    tenantId: string,
+    period: Period,
+    filters: ResolvedGuestFilters,
+    includeGame: boolean,
+  ): Promise<GuestAnalysis> {
+    const startedAt = Date.now();
+    const previousPeriod = this.previousPeriod(period);
+    const loadedGuests = await this.prisma.guest.findMany({
+      where: this.buildGuestWhere(tenantId, filters),
+      select: this.guestSelect(),
+    });
+    const [
+      {
+        guests,
+        metricsByGuestId,
+        groupsByKey,
+        gameFactsByGuestId,
+        sessions,
+        sales,
+      },
+      dataQuality,
+      previousTotals,
+    ] = await Promise.all([
+      this.buildGuestMetrics(tenantId, period, filters, undefined, {
+        includeGame,
+        guests: loadedGuests,
+      }),
+      this.getDataQuality(tenantId, period, filters),
+      this.buildPeriodTotals(tenantId, previousPeriod, filters, loadedGuests),
+    ]);
+    const rows: GuestDashboardRow[] = [];
+
+    for (const guest of guests) {
+      rows.push(
+        this.toDashboardRow(
+          guest,
+          metricsByGuestId.get(guest.id),
+          period,
+          groupsByKey,
+          gameFactsByGuestId.get(guest.id) ?? null,
+          { decryptPii: false },
+        ),
+      );
+
+      if (rows.length % 3_000 === 0) {
+        await this.yieldToEventLoop();
+      }
+    }
+
+    const totals = this.sumPeriodMetrics(metricsByGuestId);
+    const retention = this.buildRetentionSummary(
+      guests,
+      metricsByGuestId,
+      period,
+    );
+    const returnedGuests = countReturnedGuests(
+      guests.map((guest) =>
+        this.returnedGuestInput(metricsByGuestId.get(guest.id), period),
+      ),
+      period.fromDate,
+    );
+    const [visitTrend, visitHeatmap, flowForecast] = await Promise.all([
+      this.buildVisitTrend(period, sessions, sales),
+      this.buildVisitHeatmap(period, sessions),
+      this.buildFlowForecast(period, sessions),
+    ]);
+
+    this.logger.log(
+      `Guest analysis computed for tenant ${tenantId}: ${rows.length} guests, ${sessions.length} sessions in ${Date.now() - startedAt} ms`,
+    );
+
+    return {
+      period,
+      rows,
+      baseById: new Map(guests.map((guest) => [guest.id, guest] as const)),
+      totals,
+      retention,
+      returnedGuests,
+      visitTrend,
+      visitHeatmap,
+      flowForecast,
+      dataQuality,
+      previousPeriod,
+      previousTotals,
+      computedAt: Date.now(),
     };
   }
 
@@ -1350,7 +1556,9 @@ export class GuestsService {
       totalPages,
       sort: guestList.sort,
       direction: guestList.direction,
-      rows: guestList.rows.slice(offset, offset + pageSize),
+      rows: guestList.rows
+        .slice(offset, offset + pageSize)
+        .map((row) => this.withPii(row, guestList.baseById)),
     };
   }
 
@@ -1410,54 +1618,56 @@ export class GuestsService {
         'Наград к получению',
         'Игровая активность',
       ],
-      ...guestList.rows.map((row) => [
-        row.displayName,
-        row.externalGuestId,
-        row.primaryStoreName ?? row.externalDomain ?? 'Клуб не определен',
-        row.primaryStoreVisits,
-        row.contact,
-        row.guestGroupName ?? row.externalDomain ?? 'Без группы',
-        this.segmentExportLabel(row.segment),
-        this.crmStatusExportLabel(row.crmStatus),
-        row.sessionsCount,
-        row.visitsDays,
-        row.playHours,
-        row.recentSessionsCount,
-        row.recentVisitsDays,
-        row.recentPlayHours,
-        row.ltv.totalRevenue,
-        row.ltv.transactionRevenue,
-        row.ltv.barRevenue,
-        row.ltv.revenueDays,
-        this.formatExportDate(row.ltv.firstRevenueAt),
-        this.formatExportDate(row.ltv.lastRevenueAt),
-        row.bonusLoad.currentBalance,
-        this.bonusLoadExportLabel(row.bonusLoad.status),
-        row.bonusLoad.balanceToLtvPercent ?? '',
-        this.formatExportDate(row.bonusLoad.latestSnapshotAt),
-        row.transactionAmount + row.barRevenue,
-        row.barRevenue,
-        row.rfm.totalScore,
-        this.rfmSegmentExportLabel(row.rfm.segment),
-        row.rfm.recencyDays ?? '',
-        row.rfm.frequency,
-        row.rfm.monetary,
-        this.churnRiskExportLabel(row.churnRisk.level),
-        row.churnRisk.score,
-        row.churnRisk.daysSinceActivity ?? '',
-        row.churnRisk.expectedIntervalDays ?? '',
-        row.churnRisk.thresholdDays ?? '',
-        row.churnRisk.valueAtRisk,
-        this.formatExportDate(row.insertedAt),
-        this.formatExportDate(row.lastActivityAt),
-        row.recommendedAction.label,
-        this.formatExportDateTime(row.nextContactAt),
-        row.gameProfile ? 'Да' : 'Нет',
-        row.gameProfile?.level ?? '',
-        row.gameProfile?.xp ?? '',
-        row.gameProfile?.pendingRewards ?? '',
-        this.formatExportDate(row.gameProfile?.lastGameActivityAt ?? null),
-      ]),
+      ...guestList.rows
+        .map((listRow) => this.withPii(listRow, guestList.baseById))
+        .map((row) => [
+          row.displayName,
+          row.externalGuestId,
+          row.primaryStoreName ?? row.externalDomain ?? 'Клуб не определен',
+          row.primaryStoreVisits,
+          row.contact,
+          row.guestGroupName ?? row.externalDomain ?? 'Без группы',
+          this.segmentExportLabel(row.segment),
+          this.crmStatusExportLabel(row.crmStatus),
+          row.sessionsCount,
+          row.visitsDays,
+          row.playHours,
+          row.recentSessionsCount,
+          row.recentVisitsDays,
+          row.recentPlayHours,
+          row.ltv.totalRevenue,
+          row.ltv.transactionRevenue,
+          row.ltv.barRevenue,
+          row.ltv.revenueDays,
+          this.formatExportDate(row.ltv.firstRevenueAt),
+          this.formatExportDate(row.ltv.lastRevenueAt),
+          row.bonusLoad.currentBalance,
+          this.bonusLoadExportLabel(row.bonusLoad.status),
+          row.bonusLoad.balanceToLtvPercent ?? '',
+          this.formatExportDate(row.bonusLoad.latestSnapshotAt),
+          row.transactionAmount + row.barRevenue,
+          row.barRevenue,
+          row.rfm.totalScore,
+          this.rfmSegmentExportLabel(row.rfm.segment),
+          row.rfm.recencyDays ?? '',
+          row.rfm.frequency,
+          row.rfm.monetary,
+          this.churnRiskExportLabel(row.churnRisk.level),
+          row.churnRisk.score,
+          row.churnRisk.daysSinceActivity ?? '',
+          row.churnRisk.expectedIntervalDays ?? '',
+          row.churnRisk.thresholdDays ?? '',
+          row.churnRisk.valueAtRisk,
+          this.formatExportDate(row.insertedAt),
+          this.formatExportDate(row.lastActivityAt),
+          row.recommendedAction.label,
+          this.formatExportDateTime(row.nextContactAt),
+          row.gameProfile ? 'Да' : 'Нет',
+          row.gameProfile?.level ?? '',
+          row.gameProfile?.xp ?? '',
+          row.gameProfile?.pendingRewards ?? '',
+          this.formatExportDate(row.gameProfile?.lastGameActivityAt ?? null),
+        ]),
     ];
 
     return {
@@ -1710,6 +1920,8 @@ export class GuestsService {
       });
     }
 
+    this.analysisCache.invalidateTenant(tenantId);
+
     return this.toGuestCrmLead(row);
   }
 
@@ -1807,6 +2019,8 @@ export class GuestsService {
     if (!row) {
       throw new NotFoundException('CRM lead not found');
     }
+
+    this.analysisCache.invalidateTenant(tenantId);
 
     return this.toGuestCrmLead(row);
   }
@@ -2256,19 +2470,13 @@ export class GuestsService {
     const direction = this.resolveDirection(query.direction);
     const includeGame = this.canViewGameInsights(user);
     const now = new Date();
-    const { guests, metricsByGuestId, groupsByKey, gameFactsByGuestId } =
-      await this.buildGuestMetrics(tenantId, period, filters, undefined, {
-        includeGame,
-      });
-    let rows = guests.map((guest) =>
-      this.toDashboardRow(
-        guest,
-        metricsByGuestId.get(guest.id),
-        period,
-        groupsByKey,
-        gameFactsByGuestId.get(guest.id) ?? null,
-      ),
+    const analysis = await this.loadAnalysis(
+      tenantId,
+      period,
+      filters,
+      includeGame,
     );
+    let rows = analysis.rows;
 
     if (segment !== 'top') {
       rows = rows.filter((row) => row.segment === segment);
@@ -2309,6 +2517,7 @@ export class GuestsService {
       sort,
       direction,
       rows: this.sortRows(rows, sort, direction),
+      baseById: analysis.baseById,
     };
   }
 
@@ -3511,6 +3720,8 @@ export class GuestsService {
       }),
     ]);
 
+    this.analysisCache.invalidateTenant(tenantId);
+
     return this.getGuest(user, id);
   }
 
@@ -3946,76 +4157,93 @@ export class GuestsService {
     period: Period,
     filters: ResolvedGuestFilters,
     guestIds?: string[],
-    options: { includeGame?: boolean; lite?: boolean } = {},
+    options: {
+      includeGame?: boolean;
+      lite?: boolean;
+      /** Already loaded guests for the same filters; skips the guest query. */
+      guests?: GuestBase[];
+    } = {},
   ) {
     const guestWhere = this.buildGuestWhere(tenantId, filters, guestIds);
     const storeWhere = filters.storeId ? { storeId: filters.storeId } : {};
+    // Independent reads start together instead of one after another.
+    const windowFactsPromise = this.loadWindowFacts(
+      tenantId,
+      period,
+      guestWhere,
+      storeWhere,
+    );
+    const preloadedGuests = options.guests;
+    const wholeTenant = Boolean(
+      preloadedGuests &&
+      !options.lite &&
+      !guestIds &&
+      preloadedGuests.length > GUEST_BULK_LOOKUP_THRESHOLD,
+    );
+    const lifetimeRowsPromise = wholeTenant
+      ? this.loadLifetimeRevenueRows(tenantId, filters, null)
+      : null;
+    const linkedBonusPromise = wholeTenant
+      ? this.loadLinkedBonusBalances(tenantId)
+      : null;
+    // The whole bonus lookup (linked, external and snapshot fallbacks) does not
+    // depend on the session facts, so it runs while they are still loading.
+    const earlyBonusMetrics = new Map<string, GuestMetrics>();
+    const earlyBonusPromise =
+      wholeTenant && preloadedGuests
+        ? this.applyLatestBonusBalanceMetrics(
+            tenantId,
+            earlyBonusMetrics,
+            preloadedGuests,
+            linkedBonusPromise,
+          )
+        : null;
+    const earlyGameFactsPromise =
+      wholeTenant && options.includeGame && this.guestGameInsights
+        ? this.guestGameInsights.loadGuestGameFacts(
+            tenantId,
+            (preloadedGuests ?? []).map((guest) => guest.id),
+            period,
+            new Date(),
+          )
+        : null;
+    // A prefetch that fails after the function already threw must not become an
+    // unhandled rejection (the awaiting path still sees the error).
+    for (const prefetched of [
+      windowFactsPromise,
+      lifetimeRowsPromise,
+      linkedBonusPromise,
+      earlyGameFactsPromise,
+      earlyBonusPromise,
+    ]) {
+      prefetched?.catch(() => undefined);
+    }
+
     const [allGuests, groupsByKey, storesByExternalClubKey] = await Promise.all(
       [
-        this.prisma.guest.findMany({
-          where: guestWhere,
-          select: this.guestSelect(),
-        }),
+        options.guests
+          ? Promise.resolve(options.guests)
+          : this.prisma.guest.findMany({
+              where: guestWhere,
+              select: this.guestSelect(),
+            }),
         this.loadGuestGroups(tenantId),
         this.loadStoresByExternalClubKey(tenantId),
       ],
     );
-    const [sessions, transactions, sales] = await Promise.all([
-      this.prisma.guestSession.findMany({
-        where: {
-          tenantId,
-          guest: { is: guestWhere },
-          startedAt: { lte: period.toDate },
-          OR: [
-            { stoppedAt: null },
-            { stoppedAt: { gte: period.activityFromDate } },
-          ],
-          ...storeWhere,
-        },
-        select: {
-          guestId: true,
-          storeId: true,
-          externalDomain: true,
-          externalClubId: true,
-          startedAt: true,
-          stoppedAt: true,
-          durationMinutes: true,
-          store: { select: { name: true } },
-        },
-      }),
-      this.prisma.guestTransaction.findMany({
-        where: {
-          tenantId,
-          guest: { is: guestWhere },
-          happenedAt: { gte: period.activityFromDate, lte: period.toDate },
-          ...storeWhere,
-        },
-        select: {
-          guestId: true,
-          happenedAt: true,
-          amount: true,
-        },
-      }),
-      this.prisma.salesFact.findMany({
-        where: {
-          tenantId,
-          guest: { is: guestWhere },
-          saleDate: { gte: period.activityFromDate, lte: period.toDate },
-          isCanceled: false,
-          ...storeWhere,
-        },
-        select: {
-          guestId: true,
-          saleDate: true,
-          revenue: true,
-        },
-      }),
-    ]);
+    const { sessions, transactions, sales } = await windowFactsPromise;
     const metricsByGuestId = new Map<string, GuestMetrics>();
 
     const now = new Date();
+    let processedSessions = 0;
 
     for (const session of sessions) {
+      processedSessions += 1;
+
+      if (processedSessions % 4_000 === 0) {
+        await this.yieldToEventLoop();
+      }
+
       if (!session.guestId || !session.startedAt) {
         continue;
       }
@@ -4136,43 +4364,150 @@ export class GuestsService {
     let gameFactsByGuestId = new Map<string, GuestGameProfileBrief>();
 
     if (options.lite) {
-      return { guests, metricsByGuestId, groupsByKey, gameFactsByGuestId };
+      return {
+        guests,
+        allGuests,
+        metricsByGuestId,
+        groupsByKey,
+        gameFactsByGuestId,
+        sessions,
+        sales,
+      };
     }
 
     const gameFactsPromise =
-      options.includeGame && this.guestGameInsights
+      earlyGameFactsPromise ??
+      (options.includeGame && this.guestGameInsights
         ? this.guestGameInsights.loadGuestGameFacts(
             tenantId,
             selectedGuestIds,
             period,
             now,
           )
-        : null;
+        : null);
+
+    gameFactsPromise?.catch(() => undefined);
 
     await this.applyLifetimeRevenueMetrics(
       tenantId,
-      guestWhere,
       filters,
       metricsByGuestId,
       selectedGuestIds,
+      lifetimeRowsPromise,
     );
-    await this.applyLatestBonusBalanceMetrics(
-      tenantId,
-      metricsByGuestId,
-      guests,
-    );
+    if (earlyBonusPromise) {
+      await earlyBonusPromise;
+
+      for (const guest of guests) {
+        const bonus = earlyBonusMetrics.get(guest.id);
+
+        if (bonus) {
+          const metrics = this.ensureMetrics(metricsByGuestId, guest.id);
+          metrics.bonusBalance = bonus.bonusBalance;
+          metrics.bonusSnapshotAt = bonus.bonusSnapshotAt;
+        }
+      }
+    } else {
+      await this.applyLatestBonusBalanceMetrics(
+        tenantId,
+        metricsByGuestId,
+        guests,
+        linkedBonusPromise,
+      );
+    }
 
     if (gameFactsPromise) {
       gameFactsByGuestId = await gameFactsPromise;
     }
 
-    return { guests, metricsByGuestId, groupsByKey, gameFactsByGuestId };
+    return {
+      guests,
+      allGuests,
+      metricsByGuestId,
+      groupsByKey,
+      gameFactsByGuestId,
+      sessions,
+      sales,
+    };
+  }
+
+  private async loadWindowFacts(
+    tenantId: string,
+    period: Period,
+    guestWhere: Prisma.GuestWhereInput,
+    storeWhere: { storeId?: string },
+  ) {
+    const [sessions, transactions, sales] = await Promise.all([
+      this.prisma.guestSession.findMany({
+        where: {
+          tenantId,
+          guest: { is: guestWhere },
+          startedAt: { lte: period.toDate },
+          OR: [
+            { stoppedAt: null },
+            { stoppedAt: { gte: period.activityFromDate } },
+          ],
+          ...storeWhere,
+        },
+        select: {
+          guestId: true,
+          storeId: true,
+          externalDomain: true,
+          externalClubId: true,
+          startedAt: true,
+          stoppedAt: true,
+          durationMinutes: true,
+          store: { select: { name: true } },
+        },
+      }),
+      this.prisma.guestTransaction.findMany({
+        where: {
+          tenantId,
+          guest: { is: guestWhere },
+          happenedAt: { gte: period.activityFromDate, lte: period.toDate },
+          ...storeWhere,
+        },
+        select: {
+          guestId: true,
+          happenedAt: true,
+          amount: true,
+        },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          guest: { is: guestWhere },
+          saleDate: { gte: period.activityFromDate, lte: period.toDate },
+          isCanceled: false,
+          ...storeWhere,
+        },
+        select: {
+          guestId: true,
+          saleDate: true,
+          revenue: true,
+        },
+      }),
+    ]);
+
+    return { sessions, transactions, sales };
+  }
+
+  private loadLinkedBonusBalances(tenantId: string) {
+    return this.prisma.guestBonusBalanceCurrent.findMany({
+      where: { tenantId, guestId: { not: null } },
+      select: {
+        guestId: true,
+        snapshotDate: true,
+        bonusBalance: true,
+      },
+    });
   }
 
   private async applyLatestBonusBalanceMetrics(
     tenantId: string,
     metricsByGuestId: Map<string, GuestMetrics>,
     guests: GuestBase[],
+    prefetchedLinked: Promise<LinkedBonusBalance[]> | null = null,
   ) {
     const guestIds = guests.map((guest) => guest.id);
 
@@ -4186,20 +4521,33 @@ export class GuestsService {
       bonusBalance: Prisma.Decimal;
     }> = [];
 
-    for (const guestIdBatch of this.chunk(guestIds, 1_000)) {
-      currentBalances.push(
-        ...(await this.prisma.guestBonusBalanceCurrent.findMany({
-          where: {
-            tenantId,
-            guestId: { in: guestIdBatch },
-          },
-          select: {
-            guestId: true,
-            snapshotDate: true,
-            bonusBalance: true,
-          },
-        })),
-      );
+    if (guestIds.length > GUEST_BULK_LOOKUP_THRESHOLD) {
+      // One read of the tenant's linked balances instead of one query per 1000 ids.
+      const selectedGuestIds = new Set(guestIds);
+      const linkedBalances = await (prefetchedLinked ??
+        this.loadLinkedBonusBalances(tenantId));
+
+      for (const balance of linkedBalances) {
+        if (balance.guestId && selectedGuestIds.has(balance.guestId)) {
+          currentBalances.push(balance);
+        }
+      }
+    } else {
+      for (const guestIdBatch of this.chunk(guestIds, 1_000)) {
+        currentBalances.push(
+          ...(await this.prisma.guestBonusBalanceCurrent.findMany({
+            where: {
+              tenantId,
+              guestId: { in: guestIdBatch },
+            },
+            select: {
+              guestId: true,
+              snapshotDate: true,
+              bonusBalance: true,
+            },
+          })),
+        );
+      }
     }
 
     const resolvedGuestIds = new Set<string>();
@@ -4440,72 +4788,107 @@ export class GuestsService {
     }
   }
 
+  /**
+   * Lifetime revenue per guest, aggregated by the database. Only rows with a
+   * transaction date count (a NULL date never contributed), and the number of
+   * revenue days is the count of distinct UTC dates across transactions and
+   * bar sales, exactly as the in-memory version computed it.
+   */
   private async applyLifetimeRevenueMetrics(
     tenantId: string,
-    guestWhere: Prisma.GuestWhereInput,
     filters: ResolvedGuestFilters,
     metricsByGuestId: Map<string, GuestMetrics>,
     guestIds: string[],
+    prefetchedRows: Promise<LifetimeRevenueRow[]> | null = null,
   ) {
     if (guestIds.length === 0) {
       return;
     }
 
     const selectedGuestIds = new Set(guestIds);
-    const storeWhere = filters.storeId ? { storeId: filters.storeId } : {};
-    const [transactions, sales] = await Promise.all([
-      this.prisma.guestTransaction.findMany({
-        where: {
-          tenantId,
-          guest: { is: guestWhere },
-          ...storeWhere,
-        },
-        select: {
-          guestId: true,
-          happenedAt: true,
-          amount: true,
-        },
-      }),
-      this.prisma.salesFact.findMany({
-        where: {
-          tenantId,
-          guest: { is: guestWhere },
-          isCanceled: false,
-          ...storeWhere,
-        },
-        select: {
-          guestId: true,
-          saleDate: true,
-          revenue: true,
-        },
-      }),
-    ]);
+    const rows = await (prefetchedRows ??
+      this.loadLifetimeRevenueRows(
+        tenantId,
+        filters,
+        guestIds.length <= GUEST_BULK_LOOKUP_THRESHOLD ? guestIds : null,
+      ));
 
-    for (const transaction of transactions) {
-      if (
-        !transaction.guestId ||
-        !transaction.happenedAt ||
-        !selectedGuestIds.has(transaction.guestId)
-      ) {
+    for (const row of rows) {
+      if (!selectedGuestIds.has(row.guestId)) {
         continue;
       }
 
-      const metrics = this.ensureMetrics(metricsByGuestId, transaction.guestId);
-      metrics.lifetimeTransactionAmount += Math.abs(
-        this.decimalToNumber(transaction.amount) ?? 0,
-      );
-      this.applyLifetimeRevenueDate(metrics, transaction.happenedAt);
+      const metrics = this.ensureMetrics(metricsByGuestId, row.guestId);
+      metrics.lifetimeTransactionAmount = Number(row.transactionSum ?? 0);
+      metrics.lifetimeBarRevenue = Number(row.barSum ?? 0);
+      metrics.lifetimeRevenueDayCount = Number(row.revenueDays);
+      metrics.lifetimeFirstRevenueAt = row.firstAt;
+      metrics.lifetimeLastRevenueAt = row.lastAt;
     }
+  }
 
-    for (const sale of sales) {
-      if (!sale.guestId || !selectedGuestIds.has(sale.guestId)) {
-        continue;
-      }
+  /** `scopedGuestIds = null` reads the whole tenant. */
+  private async loadLifetimeRevenueRows(
+    tenantId: string,
+    filters: ResolvedGuestFilters,
+    scopedGuestIds: string[] | null,
+  ) {
+    const guestIds = scopedGuestIds ?? [];
+    const scopedToGuests = scopedGuestIds !== null;
+    const transactionStore = filters.storeId
+      ? Prisma.sql`AND t."storeId" = ${filters.storeId}`
+      : Prisma.empty;
+    const saleStore = filters.storeId
+      ? Prisma.sql`AND s."storeId" = ${filters.storeId}`
+      : Prisma.empty;
+    const transactionGuests = scopedToGuests
+      ? Prisma.sql`AND t."guestId" = ANY(${guestIds}::text[])`
+      : Prisma.empty;
+    const saleGuests = scopedToGuests
+      ? Prisma.sql`AND s."guestId" = ANY(${guestIds}::text[])`
+      : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<LifetimeRevenueRow[]>(Prisma.sql`
+      SELECT d."guestId" AS "guestId",
+             SUM(d.txn) AS "transactionSum",
+             SUM(d.bar) AS "barSum",
+             COUNT(*)::int AS "revenueDays",
+             MIN(d."firstAt") AS "firstAt",
+             MAX(d."lastAt") AS "lastAt"
+      FROM (
+       SELECT u."guestId" AS "guestId", u.day AS day,
+              SUM(u.txn) AS txn, SUM(u.bar) AS bar,
+              MIN(u.ts) AS "firstAt", MAX(u.ts) AS "lastAt"
+       FROM (
+        SELECT t."guestId" AS "guestId",
+               ABS(COALESCE(t.amount, 0)) AS txn,
+               0::numeric AS bar,
+               t."happenedAt" AS ts,
+               (t."happenedAt")::date AS day
+        FROM "GuestTransaction" t
+        WHERE t."tenantId" = ${tenantId}
+          AND t."guestId" IS NOT NULL
+          AND t."happenedAt" IS NOT NULL
+          ${transactionStore}
+          ${transactionGuests}
+        UNION ALL
+        SELECT s."guestId",
+               0::numeric,
+               s.revenue,
+               s."saleDate",
+               (s."saleDate")::date
+        FROM "SalesFact" s
+        WHERE s."tenantId" = ${tenantId}
+          AND s."guestId" IS NOT NULL
+          AND s."isCanceled" = false
+          ${saleStore}
+          ${saleGuests}
+       ) u
+       GROUP BY u."guestId", u.day
+      ) d
+      GROUP BY d."guestId"
+    `);
 
-      const metrics = this.ensureMetrics(metricsByGuestId, sale.guestId);
-      metrics.lifetimeBarRevenue += this.decimalToNumber(sale.revenue) ?? 0;
-      this.applyLifetimeRevenueDate(metrics, sale.saleDate);
-    }
+    return rows;
   }
 
   private buildGuestWhere(
@@ -4565,39 +4948,20 @@ export class GuestsService {
   }
 
   private async buildVisitTrend(
-    tenantId: string,
     period: Period,
-    filters: ResolvedGuestFilters,
+    allSessions: GuestSessionFact[],
+    allSales: GuestSaleFact[],
   ) {
-    const storeWhere = filters.storeId ? { storeId: filters.storeId } : {};
-    const guestWhere = this.buildGuestWhere(tenantId, filters);
-    const [sessions, sales] = await Promise.all([
-      this.prisma.guestSession.findMany({
-        where: {
-          tenantId,
-          guest: { is: guestWhere },
-          startedAt: { lte: period.toDate },
-          OR: [{ stoppedAt: null }, { stoppedAt: { gte: period.fromDate } }],
-          ...storeWhere,
-        },
-        select: {
-          guestId: true,
-          startedAt: true,
-          stoppedAt: true,
-          durationMinutes: true,
-        },
-      }),
-      this.prisma.salesFact.findMany({
-        where: {
-          tenantId,
-          guest: { is: guestWhere },
-          saleDate: { gte: period.fromDate, lte: period.toDate },
-          isCanceled: false,
-          ...storeWhere,
-        },
-        select: { saleDate: true, revenue: true },
-      }),
-    ]);
+    const sessions = allSessions.filter(
+      (session) =>
+        session.startedAt !== null &&
+        session.startedAt <= period.toDate &&
+        (session.stoppedAt === null || session.stoppedAt >= period.fromDate),
+    );
+    const sales = allSales.filter(
+      (sale) =>
+        sale.saleDate >= period.fromDate && sale.saleDate <= period.toDate,
+    );
     const trend = new Map<
       string,
       { sessionsCount: number; activeGuestIds: Set<string>; barRevenue: number }
@@ -4613,7 +4977,15 @@ export class GuestsService {
 
     const now = new Date();
 
+    let processedSessions = 0;
+
     for (const session of sessions) {
+      processedSessions += 1;
+
+      if (processedSessions % 4_000 === 0) {
+        await this.yieldToEventLoop();
+      }
+
       if (!session.startedAt || !session.guestId) {
         continue;
       }
@@ -4652,26 +5024,15 @@ export class GuestsService {
   }
 
   private async buildVisitHeatmap(
-    tenantId: string,
     period: Period,
-    filters: ResolvedGuestFilters,
+    allSessions: GuestSessionFact[],
   ): Promise<GuestVisitHeatmapSummary> {
-    const storeWhere = filters.storeId ? { storeId: filters.storeId } : {};
-    const guestWhere = this.buildGuestWhere(tenantId, filters);
-    const sessions = await this.prisma.guestSession.findMany({
-      where: {
-        tenantId,
-        guest: { is: guestWhere },
-        startedAt: { gte: period.fromDate, lte: period.toDate },
-        ...storeWhere,
-      },
-      select: {
-        guestId: true,
-        startedAt: true,
-        stoppedAt: true,
-        durationMinutes: true,
-      },
-    });
+    const sessions = allSessions.filter(
+      (session) =>
+        session.startedAt !== null &&
+        session.startedAt >= period.fromDate &&
+        session.startedAt <= period.toDate,
+    );
     const cells = new Map<
       string,
       {
@@ -4697,7 +5058,15 @@ export class GuestsService {
 
     const now = new Date();
 
+    let processedSessions = 0;
+
     for (const session of sessions) {
+      processedSessions += 1;
+
+      if (processedSessions % 4_000 === 0) {
+        await this.yieldToEventLoop();
+      }
+
       if (!session.guestId || !session.startedAt) {
         continue;
       }
@@ -4756,9 +5125,8 @@ export class GuestsService {
   }
 
   private async buildFlowForecast(
-    tenantId: string,
     period: Period,
-    filters: ResolvedGuestFilters,
+    allSessions: GuestSessionFact[],
   ): Promise<GuestFlowForecastSummary> {
     const horizonDays = 7;
     const baselineTo = new Date(period.toDate);
@@ -4785,26 +5153,22 @@ export class GuestsService {
       });
     }
 
-    const storeWhere = filters.storeId ? { storeId: filters.storeId } : {};
-    const guestWhere = this.buildGuestWhere(tenantId, filters);
-    const sessions = await this.prisma.guestSession.findMany({
-      where: {
-        tenantId,
-        guest: { is: guestWhere },
-        startedAt: { lte: baselineTo },
-        OR: [{ stoppedAt: null }, { stoppedAt: { gte: baselineFrom } }],
-        ...storeWhere,
-      },
-      select: {
-        guestId: true,
-        startedAt: true,
-        stoppedAt: true,
-        durationMinutes: true,
-      },
-    });
+    const sessions = allSessions.filter(
+      (session) =>
+        session.startedAt !== null &&
+        session.startedAt <= baselineTo &&
+        (session.stoppedAt === null || session.stoppedAt >= baselineFrom),
+    );
     const now = new Date();
+    let processedSessions = 0;
 
     for (const session of sessions) {
+      processedSessions += 1;
+
+      if (processedSessions % 2_000 === 0) {
+        await this.yieldToEventLoop();
+      }
+
       if (!session.guestId || !session.startedAt) {
         continue;
       }
@@ -6824,7 +7188,9 @@ export class GuestsService {
     period: Period,
     groupsByKey: GuestGroupsByKey,
     gameProfile: GuestGameProfileBrief | null = null,
+    options: { decryptPii?: boolean } = {},
   ): GuestDashboardRow {
+    const decryptPii = options.decryptPii ?? true;
     const latestActivityAt = this.maxDate(
       guest.lastActivityAt,
       metrics?.latestActivityAt ?? null,
@@ -6860,18 +7226,8 @@ export class GuestsService {
       primaryStoreName: primaryStore.name,
       primaryStoreVisits: primaryStore.visits,
       guestGroupName,
-      displayName:
-        this.decryptSensitiveValue(guest.fullNameEncrypted) ??
-        guest.fullNameMasked ??
-        guest.emailMasked ??
-        this.decryptSensitiveValue(guest.phoneEncrypted) ??
-        guest.phoneMasked ??
-        `Гость #${guest.externalGuestId}`,
-      contact:
-        this.decryptSensitiveValue(guest.phoneEncrypted) ??
-        guest.phoneMasked ??
-        guest.emailMasked ??
-        'нет контакта',
+      displayName: this.guestDisplayName(guest, decryptPii),
+      contact: this.guestContact(guest, decryptPii),
       insertedAt: this.toIsoDateTime(guest.insertedAt),
       lastActivityAt: this.toIsoDateTime(latestActivityAt),
       sessionsCount: metrics?.sessionsCount ?? 0,
@@ -6900,6 +7256,48 @@ export class GuestsService {
     row.recommendedAction = recommendGuestAction(row);
 
     return row;
+  }
+
+  private guestDisplayName(guest: GuestBase, decryptPii: boolean) {
+    return (
+      (decryptPii
+        ? this.decryptSensitiveValue(guest.fullNameEncrypted)
+        : null) ??
+      guest.fullNameMasked ??
+      guest.emailMasked ??
+      (decryptPii ? this.decryptSensitiveValue(guest.phoneEncrypted) : null) ??
+      guest.phoneMasked ??
+      `Гость #${guest.externalGuestId}`
+    );
+  }
+
+  private guestContact(guest: GuestBase, decryptPii: boolean) {
+    return (
+      (decryptPii ? this.decryptSensitiveValue(guest.phoneEncrypted) : null) ??
+      guest.phoneMasked ??
+      guest.emailMasked ??
+      'нет контакта'
+    );
+  }
+
+  /** Returns a copy of the row with the decrypted name and contact. */
+  private withPii(
+    row: GuestDashboardRow,
+    baseById: Map<string, GuestBase>,
+  ): GuestDashboardRow {
+    const base = baseById.get(row.id);
+
+    return base
+      ? {
+          ...row,
+          displayName: this.guestDisplayName(base, true),
+          contact: this.guestContact(base, true),
+        }
+      : row;
+  }
+
+  private yieldToEventLoop() {
+    return new Promise<void>((resolve) => setImmediate(resolve));
   }
 
   private segmentGuest(
@@ -6989,7 +7387,7 @@ export class GuestsService {
     );
     const barRevenue = this.round(metrics?.lifetimeBarRevenue ?? 0, 2);
     const totalRevenue = this.round(transactionRevenue + barRevenue, 2);
-    const revenueDays = metrics?.lifetimeRevenueDays.size ?? 0;
+    const revenueDays = metrics?.lifetimeRevenueDayCount ?? 0;
     const firstRevenueAt = metrics?.lifetimeFirstRevenueAt ?? null;
     const lastRevenueAt = metrics?.lifetimeLastRevenueAt ?? null;
     const calendarDays =
@@ -8148,13 +8546,14 @@ export class GuestsService {
     tenantId: string,
     period: Period,
     filters: ResolvedGuestFilters,
+    loadedGuests: GuestBase[],
   ): Promise<Record<GuestsComparisonMetricKey, number>> {
     const { guests, metricsByGuestId } = await this.buildGuestMetrics(
       tenantId,
       period,
       filters,
       undefined,
-      { lite: true },
+      { lite: true, guests: loadedGuests },
     );
     const counts = {
       activeGuests: 0,
@@ -8616,7 +9015,7 @@ export class GuestsService {
       barSalesCount: 0,
       lifetimeTransactionAmount: 0,
       lifetimeBarRevenue: 0,
-      lifetimeRevenueDays: new Set<string>(),
+      lifetimeRevenueDayCount: 0,
       lifetimeFirstRevenueAt: null,
       lifetimeLastRevenueAt: null,
       bonusBalance: 0,
@@ -8708,9 +9107,54 @@ export class GuestsService {
     sort: NonNullable<GuestListQuery['sort']>,
     direction: NonNullable<GuestListQuery['direction']>,
   ) {
+    return [...rows].sort(this.rowComparator(sort, direction));
+  }
+
+  /** Top `limit` rows in sort order without sorting the whole list. */
+  private topRows(
+    rows: GuestDashboardRow[],
+    sort: NonNullable<GuestListQuery['sort']>,
+    direction: NonNullable<GuestListQuery['direction']>,
+    limit: number,
+  ) {
+    const compare = this.rowComparator(sort, direction);
+    const top: GuestDashboardRow[] = [];
+
+    for (const row of rows) {
+      if (top.length === limit && compare(row, top[limit - 1]) >= 0) {
+        continue;
+      }
+
+      let low = 0;
+      let high = top.length;
+
+      while (low < high) {
+        const middle = (low + high) >> 1;
+
+        if (compare(row, top[middle]) < 0) {
+          high = middle;
+        } else {
+          low = middle + 1;
+        }
+      }
+
+      top.splice(low, 0, row);
+
+      if (top.length > limit) {
+        top.pop();
+      }
+    }
+
+    return top;
+  }
+
+  private rowComparator(
+    sort: NonNullable<GuestListQuery['sort']>,
+    direction: NonNullable<GuestListQuery['direction']>,
+  ) {
     const multiplier = direction === 'asc' ? 1 : -1;
 
-    return [...rows].sort((first, second) => {
+    return (first: GuestDashboardRow, second: GuestDashboardRow) => {
       const compare =
         sort === 'sessions'
           ? first.sessionsCount - second.sessionsCount
@@ -8759,8 +9203,12 @@ export class GuestsService {
         return tieBreaker * -1;
       }
 
-      return first.displayName.localeCompare(second.displayName);
-    });
+      if (first.displayName !== second.displayName) {
+        return first.displayName < second.displayName ? -1 : 1;
+      }
+
+      return first.id < second.id ? -1 : first.id > second.id ? 1 : 0;
+    };
   }
 
   private applyLatest(metrics: GuestMetrics, value: Date | null) {
@@ -8780,25 +9228,6 @@ export class GuestsService {
     if (day) {
       metrics.activityDays.add(day);
     }
-  }
-
-  private applyLifetimeRevenueDate(metrics: GuestMetrics, value: Date | null) {
-    if (!this.isValidDate(value)) {
-      return;
-    }
-
-    const day = this.toIsoDate(value);
-    if (day) {
-      metrics.lifetimeRevenueDays.add(day);
-    }
-    metrics.lifetimeFirstRevenueAt = this.minDate(
-      metrics.lifetimeFirstRevenueAt,
-      value,
-    );
-    metrics.lifetimeLastRevenueAt = this.maxDate(
-      metrics.lifetimeLastRevenueAt,
-      value,
-    );
   }
 
   private sessionActivityAt(
@@ -9031,9 +9460,7 @@ export class GuestsService {
       return new Date(0);
     }
 
-    return new Date(
-      Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()),
-    );
+    return new Date(Math.floor(value.getTime() / ISO_DAY_MS) * ISO_DAY_MS);
   }
 
   private endpointErrorsFromProfile(value: Prisma.JsonValue) {
@@ -9178,7 +9605,19 @@ export class GuestsService {
   }
 
   private toIsoDate(value: Date) {
-    return this.isValidDate(value) ? value.toISOString().slice(0, 10) : '';
+    if (!this.isValidDate(value)) {
+      return '';
+    }
+
+    const dayNumber = Math.floor(value.getTime() / ISO_DAY_MS);
+    let day = ISO_DAY_CACHE.get(dayNumber);
+
+    if (day === undefined) {
+      day = new Date(dayNumber * ISO_DAY_MS).toISOString().slice(0, 10);
+      ISO_DAY_CACHE.set(dayNumber, day);
+    }
+
+    return day;
   }
 
   private toIsoDateTime(value: Date | null) {
@@ -9354,7 +9793,9 @@ export class GuestsService {
   }
 
   private piiEncryptionKey() {
-    return createHash('sha256').update(this.piiSecret()).digest();
+    this.piiKeyCache ??= createHash('sha256').update(this.piiSecret()).digest();
+
+    return this.piiKeyCache;
   }
 
   private piiSecret() {

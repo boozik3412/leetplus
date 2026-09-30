@@ -1420,6 +1420,110 @@ describe('guest game progress trigger matching', () => {
     expect(result).toMatchObject({ current: 3, completed: true });
   });
 
+  it('builds a repeat streak from the days after the previous reward', () => {
+    const checkIn = (iso: string) => ({
+      eventType: 'CHECK_IN',
+      occurredAt: new Date(iso),
+    });
+    const rule = {
+      triggerKind: 'CHECK_IN',
+      progressTarget: 7,
+      timeZone: 'Asia/Yekaterinburg',
+      repeatPeriodicity: 'DAILY' as const,
+      repeatCompletedAt: new Date('2026-09-13T20:26:00.000Z'),
+      conditions: {
+        metric: {
+          aggregation: 'streak',
+          checkInMode: 'STREAK',
+          eventTypes: ['CHECK_IN'],
+          target: 7,
+        },
+      },
+    };
+    const history = [
+      checkIn('2026-09-13T17:26:00.000Z'),
+      checkIn('2026-09-14T08:34:00.000Z'),
+      checkIn('2026-09-24T01:23:00.000Z'),
+      checkIn('2026-09-25T08:22:00.000Z'),
+      checkIn('2026-09-26T17:19:00.000Z'),
+      checkIn('2026-09-27T00:13:00.000Z'),
+      checkIn('2026-09-27T21:10:00.000Z'),
+    ];
+
+    const sixDays = evaluateGuestGameProgress(
+      rule,
+      checkIn('2026-09-28T21:53:00.000Z'),
+      history,
+    );
+    const sevenDays = evaluateGuestGameProgress(
+      rule,
+      checkIn('2026-09-29T21:30:00.000Z'),
+      [...history, checkIn('2026-09-28T21:53:00.000Z')],
+    );
+
+    expect(sixDays).toMatchObject({ current: 6, completed: false });
+    expect(sevenDays).toMatchObject({ current: 7, completed: true });
+  });
+
+  it('does not reuse the days of an already rewarded streak', () => {
+    const checkIn = (day: number) => ({
+      eventType: 'CHECK_IN',
+      occurredAt: new Date(
+        `2026-09-${String(day).padStart(2, '0')}T10:00:00.000Z`,
+      ),
+    });
+
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'CHECK_IN',
+        progressTarget: 3,
+        timeZone: 'Asia/Yekaterinburg',
+        repeatPeriodicity: 'DAILY',
+        repeatCompletedAt: new Date('2026-09-12T10:00:01.000Z'),
+        conditions: {
+          metric: {
+            aggregation: 'streak',
+            eventTypes: ['CHECK_IN'],
+            target: 3,
+          },
+        },
+      },
+      checkIn(13),
+      [checkIn(10), checkIn(11), checkIn(12)],
+    );
+
+    expect(result).toMatchObject({ current: 1, completed: false });
+  });
+
+  it('still resets a daily play-time goal every club day after a reward', () => {
+    const play = (iso: string, minutes: number) => ({
+      eventType: 'SESSION_STOP',
+      occurredAt: new Date(iso),
+      sessionMinutes: minutes,
+    });
+
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PLAY_HOUR',
+        progressTarget: 100,
+        timeZone: 'Asia/Yekaterinburg',
+        repeatPeriodicity: 'DAILY',
+        repeatCompletedAt: new Date('2026-09-24T09:00:00.000Z'),
+        conditions: {
+          metric: {
+            aggregation: 'duration',
+            eventTypes: ['PLAY_HOUR', 'SESSION_STOP'],
+            target: 100,
+          },
+        },
+      },
+      play('2026-09-25T09:00:00.000Z', 30),
+      [play('2026-09-24T08:00:00.000Z', 150)],
+    );
+
+    expect(result).toMatchObject({ current: 30, completed: false });
+  });
+
   it('keeps a daily streak across a DST transition', () => {
     const result = evaluateGuestGameProgress(
       {

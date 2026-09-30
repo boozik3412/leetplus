@@ -79,6 +79,11 @@ type SalesFactFindManyCall = [
   },
 ];
 
+/** Queries read this margin around club-local days (UTC−12..UTC+14). */
+const CLUB_DAY_QUERY_MARGIN_MS = 14 * 60 * 60 * 1000;
+/** An instant inside the default `full-day` period: yesterday, UTC. */
+const inFullDay = () => new Date(Date.now() - 24 * 60 * 60 * 1000);
+
 const calendarTrendCases: {
   period: DashboardPeriod;
   labels: string[];
@@ -1722,10 +1727,12 @@ describe('DashboardService', () => {
     prisma.stockMovement.findMany.mockResolvedValue([
       {
         type: 'WRITEOFF',
+        movementDate: new Date(),
         amount: new Prisma.Decimal(50),
       },
       {
         type: 'RETURN',
+        movementDate: new Date(),
         amount: new Prisma.Decimal(20),
       },
     ]);
@@ -1899,7 +1906,7 @@ describe('DashboardService', () => {
           externalSessionId: 'external-session-1',
           guestId: 'guest-1',
           externalGuestId: '101',
-          startedAt: new Date(),
+          startedAt: inFullDay(),
         },
         {
           id: 'session-2',
@@ -1908,7 +1915,7 @@ describe('DashboardService', () => {
           externalSessionId: 'external-session-2',
           guestId: 'guest-1',
           externalGuestId: '101',
-          startedAt: new Date(),
+          startedAt: inFullDay(),
         },
         {
           id: 'session-3',
@@ -1917,7 +1924,7 @@ describe('DashboardService', () => {
           externalSessionId: 'external-session-3',
           guestId: null,
           externalGuestId: null,
-          startedAt: new Date(),
+          startedAt: inFullDay(),
         },
       ])
       .mockResolvedValueOnce([])
@@ -1957,7 +1964,7 @@ describe('DashboardService', () => {
       {
         productId: 'product-1',
         storeId: 'store-1',
-        saleDate: new Date(),
+        saleDate: inFullDay(),
         quantity: new Prisma.Decimal(1),
         revenue: new Prisma.Decimal(100),
         cost: new Prisma.Decimal(0),
@@ -2331,6 +2338,7 @@ describe('DashboardService', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
+          saleDate: inFullDay(),
           revenue: new Prisma.Decimal(800),
           cost: new Prisma.Decimal(500),
         },
@@ -2339,16 +2347,19 @@ describe('DashboardService', () => {
       .mockResolvedValueOnce([
         {
           type: 'WRITEOFF',
+          movementDate: new Date(),
           amount: new Prisma.Decimal(100),
         },
         {
           type: 'RETURN',
+          movementDate: new Date(),
           amount: new Prisma.Decimal(50),
         },
       ])
       .mockResolvedValueOnce([
         {
           type: 'WRITEOFF',
+          movementDate: inFullDay(),
           amount: new Prisma.Decimal(50),
         },
       ]);
@@ -2369,6 +2380,7 @@ describe('DashboardService', () => {
         type: 'plus',
         operationSource: 'Приложение',
         operationForm: null,
+        happenedAt: inFullDay(),
         amount: new Prisma.Decimal(50_000),
       },
       {
@@ -2377,6 +2389,7 @@ describe('DashboardService', () => {
         type: 'Списание',
         operationSource: null,
         operationForm: null,
+        happenedAt: inFullDay(),
         amount: new Prisma.Decimal(2_000),
       },
     ]);
@@ -2386,6 +2399,7 @@ describe('DashboardService', () => {
         externalClubId: '1',
         guestId: null,
         externalGuestId: null,
+        happenedAt: inFullDay(),
         type: 'plus',
         amount: new Prisma.Decimal(100_000),
       },
@@ -2394,6 +2408,7 @@ describe('DashboardService', () => {
         externalClubId: '1',
         guestId: null,
         externalGuestId: null,
+        happenedAt: inFullDay(),
         type: null,
         amount: new Prisma.Decimal(-3_000),
       },
@@ -2402,6 +2417,7 @@ describe('DashboardService', () => {
         externalClubId: '1',
         guestId: null,
         externalGuestId: null,
+        happenedAt: inFullDay(),
         type: '1',
         amount: new Prisma.Decimal(4_200),
       },
@@ -2441,7 +2457,7 @@ describe('DashboardService', () => {
       {
         productId: 'product-1',
         storeId: 'store-1',
-        saleDate: new Date(),
+        saleDate: inFullDay(),
         quantity: new Prisma.Decimal(1),
         revenue: new Prisma.Decimal(100),
         cost: new Prisma.Decimal(50),
@@ -2458,7 +2474,7 @@ describe('DashboardService', () => {
       {
         productId: 'product-2',
         storeId: 'store-2',
-        saleDate: new Date(),
+        saleDate: inFullDay(),
         quantity: new Prisma.Decimal(1),
         revenue: new Prisma.Decimal(400),
         cost: new Prisma.Decimal(200),
@@ -2475,7 +2491,7 @@ describe('DashboardService', () => {
       {
         productId: 'product-3',
         storeId: 'store-3',
-        saleDate: new Date(),
+        saleDate: inFullDay(),
         quantity: new Prisma.Decimal(1),
         revenue: new Prisma.Decimal(600),
         cost: new Prisma.Decimal(300),
@@ -2496,6 +2512,7 @@ describe('DashboardService', () => {
         externalClubId: '1',
         guestId: null,
         externalGuestId: null,
+        happenedAt: inFullDay(),
         type: '1',
         amount: new Prisma.Decimal(1000),
       },
@@ -2504,6 +2521,7 @@ describe('DashboardService', () => {
         externalClubId: '2',
         guestId: null,
         externalGuestId: null,
+        happenedAt: inFullDay(),
         type: '1',
         amount: new Prisma.Decimal(1000),
       },
@@ -2512,6 +2530,7 @@ describe('DashboardService', () => {
         externalClubId: '3',
         guestId: null,
         externalGuestId: null,
+        happenedAt: inFullDay(),
         type: '1',
         amount: new Prisma.Decimal(1000),
       },
@@ -2652,14 +2671,69 @@ describe('DashboardService', () => {
         );
         const [trendSalesFactFindMany] = prisma.salesFact.findMany.mock
           .calls[1] as SalesFactFindManyCall;
-        expect(trendSalesFactFindMany.where.saleDate.gte.toISOString()).toBe(
-          trendFrom,
-        );
+        expect(
+          new Date(
+            trendSalesFactFindMany.where.saleDate.gte.getTime() +
+              CLUB_DAY_QUERY_MARGIN_MS,
+          ).toISOString(),
+        ).toBe(trendFrom);
       } finally {
         jest.useRealTimers();
       }
     },
   );
+
+  it('counts assortment period sales and trend on the club-local day', async () => {
+    mockEmptyDashboardData();
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-1',
+        name: 'Club A',
+        tenantId: 'tenant-demo',
+        externalClubId: '1',
+        externalDomain: 'ekb',
+        timeZone: 'Asia/Yekaterinburg',
+        isActive: true,
+      },
+    ]);
+    const sale = (at: string, revenue: number) => ({
+      productId: 'product-1',
+      storeId: 'store-1',
+      saleDate: new Date(at),
+      quantity: new Prisma.Decimal(1),
+      revenue: new Prisma.Decimal(revenue),
+      cost: new Prisma.Decimal(0),
+      product: {
+        id: 'product-1',
+        article: 'A',
+        name: 'A',
+        categoryId: null,
+        category: null,
+        canonicalProduct: null,
+      },
+      store: { id: 'store-1', name: 'Club A' },
+    });
+    prisma.salesFact.findMany.mockResolvedValue([
+      // 29.09 01:00 in Yekaterinburg; the UTC calendar says 28.09.
+      sale('2026-09-28T20:00:00.000Z', 100),
+      sale('2026-09-29T12:00:00.000Z', 200),
+      // 30.09 01:00 local: the next club day.
+      sale('2026-09-29T20:00:00.000Z', 400),
+    ]);
+
+    const summary = await service.getSummary(user, {
+      period: 'custom',
+      dateFrom: '2026-09-29',
+      dateTo: '2026-09-29',
+    });
+
+    expect(summary.totalRevenue).toBe(300);
+    expect(summary.salesTrend[7]).toMatchObject({
+      from: '2026-09-29',
+      revenue: 300,
+    });
+    expect(summary.salesTrend[6].revenue).toBe(0);
+  });
 
   it('sums daily trend across all stores as separate days when network is selected', async () => {
     jest.useFakeTimers();
@@ -2760,11 +2834,12 @@ describe('DashboardService', () => {
         .calls[1] as SalesFactFindManyCall;
       expect(summarySalesFactFindMany.where.storeId).toBeUndefined();
       expect(trendSalesFactFindMany.where.storeId).toBeUndefined();
+      // Club-local days: the reads carry a margin for every time zone.
       expect(summarySalesFactFindMany.where.saleDate.gte.toISOString()).toBe(
-        '2026-04-29T00:00:00.000Z',
+        '2026-04-28T10:00:00.000Z',
       );
       expect(trendSalesFactFindMany.where.saleDate.gte.toISOString()).toBe(
-        '2026-04-02T00:00:00.000Z',
+        '2026-04-01T10:00:00.000Z',
       );
     } finally {
       jest.useRealTimers();

@@ -10,6 +10,11 @@ import {
   guestMinutePurchaseKey,
 } from '../common/receipt-metrics';
 import {
+  clubDayQueryWindow,
+  clubTimeZoneResolver,
+  onClubDays,
+} from '../common/club-time';
+import {
   decomposeBarRevenue,
   driverFactors,
   EXECUTIVE_DRIVER_DAYS_LIMIT,
@@ -1958,6 +1963,7 @@ export class DashboardService {
         externalDomain: true,
         externalClubId: true,
         isActive: true,
+        timeZone: true,
       },
     });
 
@@ -1968,22 +1974,22 @@ export class DashboardService {
       categoriesCount,
       suppliersCount,
       productsForAverages,
-      salesFacts,
-      trendSalesFacts,
+      rawSalesFacts,
+      rawTrendSalesFacts,
       demandSalesFacts,
       activeSkuSalesFacts,
       inventorySnapshots,
       currentInventorySnapshots,
-      stockMovements,
+      rawStockMovements,
       rawPeriodGuestSessions,
       rawTrendGuestSessions,
       rawPreviousGuestSessions,
-      periodGuestTransactions,
-      periodGuestOperationLogs,
-      fullDayRevenueFacts,
-      previousSalesFacts,
-      previousStockMovements,
-      forecastSalesFacts,
+      rawPeriodGuestTransactions,
+      rawPeriodGuestOperationLogs,
+      rawFullDayRevenueFacts,
+      rawPreviousSalesFacts,
+      rawPreviousStockMovements,
+      rawForecastSalesFacts,
     ] = await Promise.all([
       this.prisma.tenant.findUnique({
         where: { id: tenantId },
@@ -2000,6 +2006,8 @@ export class DashboardService {
           id: true,
           name: true,
           externalClubId: true,
+          externalDomain: true,
+          timeZone: true,
         },
         orderBy: {
           name: 'asc',
@@ -2069,10 +2077,7 @@ export class DashboardService {
           isCanceled: false,
           ...storeFilter,
           ...relatedProductCategoryFilter,
-          saleDate: {
-            gte: period.fromDate,
-            lte: period.toDate,
-          },
+          saleDate: clubDayQueryWindow(period.fromDate, period.toDate),
         },
         include: {
           product: {
@@ -2108,12 +2113,13 @@ export class DashboardService {
           isCanceled: false,
           ...storeFilter,
           ...relatedProductCategoryFilter,
-          saleDate: {
-            gte: this.noSalesTrendFromDate(period.trendFromDate),
-            lte: period.trendToDate,
-          },
+          saleDate: clubDayQueryWindow(
+            this.noSalesTrendFromDate(period.trendFromDate),
+            period.trendToDate,
+          ),
         },
         select: {
+          storeId: true,
           productId: true,
           saleDate: true,
           quantity: true,
@@ -2200,12 +2206,11 @@ export class DashboardService {
           tenantId,
           ...storeFilter,
           ...relatedProductCategoryFilter,
-          movementDate: {
-            gte: period.fromDate,
-            lte: period.toDate,
-          },
+          movementDate: clubDayQueryWindow(period.fromDate, period.toDate),
         },
         select: {
+          storeId: true,
+          movementDate: true,
           type: true,
           amount: true,
         },
@@ -2213,7 +2218,7 @@ export class DashboardService {
       this.prisma.guestSession.findMany({
         where: {
           tenantId,
-          startedAt: { gte: period.fromDate, lte: period.toDate },
+          startedAt: clubDayQueryWindow(period.fromDate, period.toDate),
         },
         select: {
           id: true,
@@ -2231,10 +2236,10 @@ export class DashboardService {
       this.prisma.guestSession.findMany({
         where: {
           tenantId,
-          startedAt: {
-            gte: period.trendFromDate,
-            lte: period.trendToDate,
-          },
+          startedAt: clubDayQueryWindow(
+            period.trendFromDate,
+            period.trendToDate,
+          ),
         },
         select: {
           id: true,
@@ -2249,10 +2254,10 @@ export class DashboardService {
       this.prisma.guestSession.findMany({
         where: {
           tenantId,
-          startedAt: {
-            gte: previousPeriod.fromDate,
-            lte: previousPeriod.toDate,
-          },
+          startedAt: clubDayQueryWindow(
+            previousPeriod.fromDate,
+            previousPeriod.toDate,
+          ),
         },
         select: {
           id: true,
@@ -2261,16 +2266,18 @@ export class DashboardService {
           externalDomain: true,
           externalClubId: true,
           externalSessionId: true,
+          startedAt: true,
         },
       }),
       this.prisma.guestTransaction.findMany({
         where: {
           tenantId,
           ...storeFilter,
-          happenedAt: { gte: period.fromDate, lte: period.toDate },
+          happenedAt: clubDayQueryWindow(period.fromDate, period.toDate),
         },
         select: {
           storeId: true,
+          happenedAt: true,
           externalProvider: true,
           externalDomain: true,
           externalClubId: true,
@@ -2284,10 +2291,11 @@ export class DashboardService {
         where: {
           tenantId,
           ...storeFilter,
-          happenedAt: { gte: period.fromDate, lte: period.toDate },
+          happenedAt: clubDayQueryWindow(period.fromDate, period.toDate),
         },
         select: {
           storeId: true,
+          happenedAt: true,
           externalClubId: true,
           type: true,
           operationSource: true,
@@ -2301,12 +2309,13 @@ export class DashboardService {
           isCanceled: false,
           ...storeFilter,
           ...relatedProductCategoryFilter,
-          saleDate: {
-            gte: fullDayPeriod.averageFromDate,
-            lte: fullDayPeriod.currentToDate,
-          },
+          saleDate: clubDayQueryWindow(
+            fullDayPeriod.averageFromDate,
+            fullDayPeriod.currentToDate,
+          ),
         },
         select: {
+          storeId: true,
           saleDate: true,
           revenue: true,
         },
@@ -2317,10 +2326,10 @@ export class DashboardService {
           isCanceled: false,
           ...storeFilter,
           ...relatedProductCategoryFilter,
-          saleDate: {
-            gte: previousPeriod.fromDate,
-            lte: previousPeriod.toDate,
-          },
+          saleDate: clubDayQueryWindow(
+            previousPeriod.fromDate,
+            previousPeriod.toDate,
+          ),
         },
         select: {
           storeId: true,
@@ -2337,12 +2346,14 @@ export class DashboardService {
           tenantId,
           ...storeFilter,
           ...relatedProductCategoryFilter,
-          movementDate: {
-            gte: previousPeriod.fromDate,
-            lte: previousPeriod.toDate,
-          },
+          movementDate: clubDayQueryWindow(
+            previousPeriod.fromDate,
+            previousPeriod.toDate,
+          ),
         },
         select: {
+          storeId: true,
+          movementDate: true,
           type: true,
           amount: true,
         },
@@ -2353,12 +2364,13 @@ export class DashboardService {
           isCanceled: false,
           ...storeFilter,
           ...relatedProductCategoryFilter,
-          saleDate: {
-            gte: forecastHistoryPeriod.fromDate,
-            lte: forecastHistoryPeriod.toDate,
-          },
+          saleDate: clubDayQueryWindow(
+            forecastHistoryPeriod.fromDate,
+            forecastHistoryPeriod.toDate,
+          ),
         },
         select: {
+          storeId: true,
           saleDate: true,
           revenue: true,
         },
@@ -2366,20 +2378,131 @@ export class DashboardService {
     ]);
 
     const tenantStoreTopology = await tenantStoreTopologyPromise;
-    const periodVisits = this.resolveScopedGuestSessions(
+    // Period facts belong to the club's calendar, like the executive summary:
+    // each timestamp moves to the club's wall-clock time and only the club's
+    // days of the window stay. Rolling "last N days" windows (demand, active
+    // SKU, assortment health) keep the UTC calendar.
+    const zoneOf = clubTimeZoneResolver([
+      ...tenantStoreTopology,
+      ...storesForRevenue,
+    ]);
+    const clocks = new Map<string, Intl.DateTimeFormat>();
+    const byStore = (row: { storeId: string | null }) => zoneOf(row.storeId);
+    const byClub = (row: {
+      storeId: string | null;
+      externalDomain?: string | null;
+    }) => zoneOf(row.storeId, row.externalDomain);
+    const periodDays = { from: period.fromDate, to: period.toDate };
+    const previousDays = {
+      from: previousPeriod.fromDate,
+      to: previousPeriod.toDate,
+    };
+    const periodSales = onClubDays(
+      rawSalesFacts,
+      'saleDate',
+      byStore,
+      periodDays,
+      clocks,
+    );
+    const salesFacts = periodSales.rows;
+    const trendSalesFacts = onClubDays(
+      rawTrendSalesFacts,
+      'saleDate',
+      byStore,
+      {
+        from: this.noSalesTrendFromDate(period.trendFromDate),
+        to: period.trendToDate,
+      },
+      clocks,
+    ).rows;
+    const stockMovements = onClubDays(
+      rawStockMovements,
+      'movementDate',
+      byStore,
+      periodDays,
+      clocks,
+    ).rows;
+    const periodSessions = onClubDays(
       rawPeriodGuestSessions,
+      'startedAt',
+      byClub,
+      periodDays,
+      clocks,
+    );
+    const periodGuestTransactions = onClubDays(
+      rawPeriodGuestTransactions,
+      'happenedAt',
+      byClub,
+      periodDays,
+      clocks,
+    ).rows;
+    const periodGuestOperationLogs = onClubDays(
+      rawPeriodGuestOperationLogs,
+      'happenedAt',
+      byStore,
+      periodDays,
+      clocks,
+    ).rows;
+    const fullDayRevenueFacts = onClubDays(
+      rawFullDayRevenueFacts,
+      'saleDate',
+      byStore,
+      {
+        from: fullDayPeriod.averageFromDate,
+        to: fullDayPeriod.currentToDate,
+      },
+      clocks,
+    ).rows;
+    const previousSalesFacts = onClubDays(
+      rawPreviousSalesFacts,
+      'saleDate',
+      byStore,
+      previousDays,
+      clocks,
+    ).rows;
+    const previousStockMovements = onClubDays(
+      rawPreviousStockMovements,
+      'movementDate',
+      byStore,
+      previousDays,
+      clocks,
+    ).rows;
+    const forecastSalesFacts = onClubDays(
+      rawForecastSalesFacts,
+      'saleDate',
+      byStore,
+      {
+        from: forecastHistoryPeriod.fromDate,
+        to: forecastHistoryPeriod.toDate,
+      },
+      clocks,
+    ).rows;
+    const periodVisits = this.resolveScopedGuestSessions(
+      periodSessions.rows,
       tenantId,
       tenantStoreTopology,
       effectiveStoreIds,
     );
     const trendVisits = this.resolveScopedGuestSessions(
-      rawTrendGuestSessions,
+      onClubDays(
+        rawTrendGuestSessions,
+        'startedAt',
+        byClub,
+        { from: period.trendFromDate, to: period.trendToDate },
+        clocks,
+      ).rows,
       tenantId,
       tenantStoreTopology,
       effectiveStoreIds,
     );
     const previousVisits = this.resolveScopedGuestSessions(
-      rawPreviousGuestSessions,
+      onClubDays(
+        rawPreviousGuestSessions,
+        'startedAt',
+        byClub,
+        previousDays,
+        clocks,
+      ).rows,
       tenantId,
       tenantStoreTopology,
       effectiveStoreIds,
@@ -2711,8 +2834,8 @@ export class DashboardService {
     );
     const assortmentHealth = await assortmentHealthPromise;
     const sources = this.buildAssortmentSourceHealth({
-      salesFacts,
-      guestSessions: periodGuestSessions,
+      salesFacts: salesFacts.map(periodSales.source),
+      guestSessions: periodGuestSessions.map(periodSessions.source),
       inventorySnapshots: currentInventorySnapshots,
       products: productsForAverages,
       asOf: assortmentAsOf,

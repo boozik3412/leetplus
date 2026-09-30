@@ -34,7 +34,13 @@ import {
   type ExecutiveTrendMetric,
   type ExecutiveTrendSeries,
 } from "@/components/executive-trend-chart";
-import { clubDetailHref } from "@/lib/executive-links";
+import {
+  clubDetailHref,
+  driverDetailHref,
+  taskDraftHref,
+  type DriverFocus,
+  type TaskDraft,
+} from "@/lib/executive-links";
 import {
   checkDrops,
   conversionGaps,
@@ -273,20 +279,30 @@ function Headline({
   const network = summary.drivers?.rows.find((row) => row.scope === "NETWORK");
   const driverTiles = network
     ? ([
-        ["Визиты", network.current.visits, network.previous?.visits, "COUNT"],
+        [
+          "Визиты",
+          network.current.visits,
+          network.previous?.visits,
+          "COUNT",
+          "visits",
+        ],
         [
           "Покупок в баре",
           network.current.purchases,
           network.previous?.purchases,
           "COUNT",
+          "purchases",
         ],
         [
           "Средний чек бара",
           network.current.averagePurchase,
           network.previous?.averagePurchase,
           "RUB",
+          "check",
         ],
-      ] as const)
+      ] as const satisfies ReadonlyArray<
+        readonly [string, number | null, number | null | undefined, string, DriverFocus]
+      >)
     : null;
   const secondary = (
     driverTiles
@@ -325,8 +341,16 @@ function Headline({
           <p className="mt-2 text-4xl font-semibold tracking-tight tabular-nums text-[var(--foreground)] sm:text-5xl">
             {formatMetric(metric)}
           </p>
-          <p className="mt-2">
+          <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
             <Delta metric={metric} against={against} />
+            <Link
+              href={clubDetailHref(summary, key)}
+              prefetch={false}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
+            >
+              По клубам и дням{" "}
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </Link>
           </p>
           <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
             {key === "revenue"
@@ -352,8 +376,8 @@ function Headline({
         ) : null}
       </div>
       {driverTiles ? (
-        <dl className="mt-5 grid grid-cols-3 gap-2 sm:gap-3">
-          {driverTiles.map(([label, current, previous, unit]) => {
+        <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3">
+          {driverTiles.map(([label, current, previous, unit, focus]) => {
             const change =
               current !== null &&
               previous !== null &&
@@ -362,31 +386,37 @@ function Headline({
                 ? ((current - previous) / previous) * 100
                 : null;
             return (
-              <div
+              <Link
                 key={label}
-                className="flex min-w-0 flex-col gap-1 rounded-xl bg-[var(--surface-muted)] px-3 py-3 sm:px-4"
+                href={driverDetailHref(summary, focus)}
+                prefetch={false}
+                className="group flex min-w-0 flex-col gap-1 rounded-xl border border-transparent bg-[var(--surface-muted)] px-3 py-3 transition-[border-color,box-shadow] hover:border-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 sm:px-4"
               >
-                <dt className="text-xs leading-4 text-zinc-600 dark:text-zinc-300">
+                <span className="flex items-start justify-between gap-1 text-xs leading-4 text-zinc-600 dark:text-zinc-300">
                   {label}
-                </dt>
-                <dd className="text-lg font-semibold tabular-nums text-[var(--foreground)] sm:text-xl">
+                  <ArrowRight
+                    aria-hidden="true"
+                    className="h-3.5 w-3.5 shrink-0 text-zinc-400 transition group-hover:translate-x-0.5 group-hover:text-emerald-600 dark:group-hover:text-emerald-400"
+                  />
+                </span>
+                <span className="text-lg font-semibold tabular-nums text-[var(--foreground)] sm:text-xl">
                   {current === null
                     ? "—"
                     : unit === "RUB"
                       ? formatMoney(current)
                       : formatNumber(current)}
-                </dd>
-                <dd
+                </span>
+                <span
                   className={`text-xs tabular-nums ${change === null ? "text-zinc-500 dark:text-zinc-400" : change < 0 ? "text-red-700 dark:text-red-300" : change > 0 ? "text-emerald-700 dark:text-emerald-300" : "text-zinc-500 dark:text-zinc-400"}`}
                 >
                   {change === null
                     ? "без сравнения"
                     : `${change < 0 ? "▼ " : change > 0 ? "▲ " : ""}${formatSigned(change, 1, "%")}`}
-                </dd>
-              </div>
+                </span>
+              </Link>
             );
           })}
-        </dl>
+        </div>
       ) : null}
       {secondary.length ? (
         <dl className="mt-5 grid gap-3 border-t border-[var(--border-soft)] pt-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -451,6 +481,8 @@ type PriorityItem = {
   title: string;
   caption: string;
   href: string;
+  /** «Поставить задачу»: the staff task form, filled from this signal. */
+  task?: TaskDraft;
 };
 
 const staffLevels: Record<StaffPriorityKind, PriorityLevel> = {
@@ -491,6 +523,9 @@ function buildPriorities(
     : "";
   const silent = silentClubs(summary);
   const silentIds = new Set(silent.map((club) => club.storeId));
+  const period = formatRange(summary.scope.period.from, summary.scope.period.to);
+  const onlyClub =
+    summary.scope.storeIds.length === 1 ? summary.scope.storeIds[0] : null;
   for (const club of silent)
     items.push({
       key: `silent:${club.storeId}`,
@@ -501,6 +536,12 @@ function buildPriorities(
       caption:
         "Клуб закрыт или данные не приходят; сигнал о падении продаж для него не показывается",
       href: clubDetailHref(summary, "productRevenue", [club.storeId]),
+      task: {
+        title: `Проверить клуб: нет продаж с ${formatDay(club.since)} · ${club.storeName}`,
+        description: `В LeetPlus нет продаж клуба «${club.storeName}» с ${formatDay(club.since)}. Проверить: клуб работает или закрыт, работает ли касса и синхронизация Langame.`,
+        storeId: club.storeId,
+        priority: "HIGH",
+      },
     });
   for (const gap of conversionGaps(summary.drivers).filter(
     (item) => !silentIds.has(item.storeId),
@@ -513,7 +554,13 @@ function buildPriorities(
       club: gap.storeName,
       title: "Поднять покупки в баре",
       caption: `${formatNumber(gap.value, 1)}% визитов с покупкой против ${formatNumber(gap.best, 1)}% в «${gap.bestStoreName}». Резерв ≈ ${formatSigned(gap.potential)} ₽ за такой же период`,
-      href: clubDetailHref(summary, "productRevenue", [gap.storeId]),
+      href: driverDetailHref(summary, "conversion", [gap.storeId]),
+      task: {
+        title: `Поднять покупки в баре · ${gap.storeName}`,
+        description: `${period}: ${formatNumber(gap.value, 1)}% визитов с покупкой против ${formatNumber(gap.best, 1)}% в «${gap.bestStoreName}». Резерв ≈ ${formatSigned(gap.potential)} ₽ за такой же период. Разобрать с администраторами: предложение бара при посадке и продлении, наличие ходовых позиций, выкладка.`,
+        storeId: gap.storeId,
+        priority: "HIGH",
+      },
     });
   for (const drop of checkDrops(summary.drivers, silentIds))
     items.push({
@@ -524,11 +571,17 @@ function buildPriorities(
       club: drop.storeId ? drop.storeName : undefined,
       title: "Средний чек бара упал",
       caption: `${formatMoney(drop.current)} против ${formatMoney(drop.previous)} (${formatSigned(drop.percent, 1, "%")})${drop.amount === null ? "" : ` · ${formatSigned(drop.amount)} ₽`}`,
-      href: clubDetailHref(
+      href: driverDetailHref(
         summary,
-        "averageProductCheck",
+        "check",
         drop.storeId ? [drop.storeId] : summary.scope.storeIds,
       ),
+      task: {
+        title: `Средний чек бара упал · ${drop.storeId ? drop.storeName : "сеть"}`,
+        description: `${period}: ${formatMoney(drop.current)} против ${formatMoney(drop.previous)} (${formatSigned(drop.percent, 1, "%")})${drop.amount === null ? "" : `, ${formatSigned(drop.amount)} ₽`}. Проверить: наличие дорогих ходовых позиций, допродажи и наборы, скидки.`,
+        storeId: drop.storeId ?? onlyClub,
+        priority: "HIGH",
+      },
     });
   for (const drop of clubDropSignals(summary).filter(
     (item) => !silentIds.has(item.storeId),
@@ -541,7 +594,13 @@ function buildPriorities(
       club: drop.storeName,
       title: "Разобрать падение продаж бара",
       caption: `${formatSigned(drop.percentDelta, 1, "%")} · ${formatSigned(drop.absoluteDelta)} ₽ к ${against} · ≈ ${formatSigned(drop.perDay)} ₽ в день`,
-      href: clubDetailHref(summary, "productRevenue", [drop.storeId]),
+      href: driverDetailHref(summary, "bar", [drop.storeId]),
+      task: {
+        title: `Разобрать падение продаж бара · ${drop.storeName}`,
+        description: `${period}: ${formatSigned(drop.percentDelta, 1, "%")}, ${formatSigned(drop.absoluteDelta)} ₽ к ${against}. Найти, что упало — визиты, конверсия или чек — и что изменилось в клубе.`,
+        storeId: drop.storeId,
+        priority: drop.level === "URGENT" ? "URGENT" : "HIGH",
+      },
     });
   const assortment = operations?.assortment;
   const health =
@@ -558,6 +617,12 @@ function buildPriorities(
       title: "Пополнить позиции без остатка",
       caption: `${health?.outOfStock.state === "PARTIAL" ? "Не менее " : ""}${formatProductPositions(outOfStock)}`,
       href: buildAssortmentReportHref(scope, "out-of-stock"),
+      task: {
+        title: "Пополнить позиции без остатка",
+        description: `${health?.outOfStock.state === "PARTIAL" ? "Не менее " : ""}${formatProductPositions(outOfStock)} без остатка. Список — в отчёте ассортимента «Без остатка».`,
+        storeId: onlyClub,
+        priority: "URGENT",
+      },
     });
   const lowStock = usableCount(health?.lowStock);
   if (lowStock !== null)
@@ -568,6 +633,12 @@ function buildPriorities(
       title: "Пополнить запас на ближайшие 3 дня",
       caption: `${health?.lowStock.state === "PARTIAL" ? "Не менее " : ""}${formatProductPositions(lowStock)}`,
       href: buildAssortmentReportHref(scope, "low-stock"),
+      task: {
+        title: "Пополнить запас на ближайшие 3 дня",
+        description: `${health?.lowStock.state === "PARTIAL" ? "Не менее " : ""}${formatProductPositions(lowStock)} закончатся в ближайшие 3 дня. Список — в отчёте ассортимента «Запас на 3 дня».`,
+        storeId: onlyClub,
+        priority: "HIGH",
+      },
     });
   const visits = summary.metrics.visits;
   if (hasConfirmedDecline(visits))
@@ -577,7 +648,13 @@ function buildPriorities(
       level: "TODAY",
       title: "Разобрать снижение визитов",
       caption: `${formatSigned(visits.comparison!.absoluteDelta!)} к ${against}`,
-      href: clubDetailHref(summary, "visits"),
+      href: driverDetailHref(summary, "visits"),
+      task: {
+        title: "Разобрать снижение визитов",
+        description: `${period}: ${formatSigned(visits.comparison!.absoluteDelta!)} визитов к ${against}. Проверить: какие дни и клубы просели, акции и события конкурентов.`,
+        storeId: onlyClub,
+        priority: "HIGH",
+      },
     });
   // The average check is covered by CHECK_DROP (from 10%) on the drivers.
   for (const [key, kind, title] of [
@@ -758,29 +835,45 @@ export function ExecutivePriorities({
           {visible.map((item) => {
             const style = levelStyles[item.level];
             return (
-              <li key={item.key}>
-                <Link
-                  href={item.href}
-                  prefetch={false}
-                  className="grid grid-cols-[4px_minmax(0,1fr)] gap-3 rounded-xl bg-[var(--surface-muted)] py-3 pr-3 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:hover:bg-zinc-800/80"
-                >
-                  <span
-                    aria-hidden="true"
-                    className={`rounded-full ${style.stripe}`}
-                  />
-                  <span className="min-w-0">
-                    <span className="flex flex-wrap gap-x-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500 dark:text-zinc-400">
+              <li
+                key={item.key}
+                className="grid grid-cols-[4px_minmax(0,1fr)] gap-3 rounded-xl bg-[var(--surface-muted)] py-3 pr-3"
+              >
+                <span
+                  aria-hidden="true"
+                  className={`rounded-full ${style.stripe}`}
+                />
+                <span className="min-w-0">
+                  <Link
+                    href={item.href}
+                    prefetch={false}
+                    className="group block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                  >
+                    <span className="flex flex-wrap items-center gap-x-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500 dark:text-zinc-400">
                       <span className={style.text}>{style.label}</span>
                       <span>{item.club ?? "Сеть"}</span>
+                      <ArrowRight
+                        aria-hidden="true"
+                        className="ml-auto h-3.5 w-3.5 text-zinc-400 transition group-hover:translate-x-0.5 group-hover:text-emerald-600 dark:group-hover:text-emerald-400"
+                      />
                     </span>
-                    <strong className="mt-0.5 block text-sm text-[var(--foreground)]">
+                    <strong className="mt-0.5 block text-sm text-[var(--foreground)] group-hover:underline">
                       {item.title}
                     </strong>
                     <span className="mt-0.5 block text-xs leading-5 tabular-nums text-zinc-600 dark:text-zinc-300">
                       {item.caption}
                     </span>
-                  </span>
-                </Link>
+                  </Link>
+                  {item.task ? (
+                    <Link
+                      href={taskDraftHref(item.task)}
+                      prefetch={false}
+                      className="mt-2 inline-flex min-h-8 items-center gap-1 rounded-md border border-[var(--border-soft)] bg-[var(--surface)] px-2.5 text-xs font-semibold text-emerald-700 hover:border-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
+                    >
+                      + Поставить задачу
+                    </Link>
+                  ) : null}
+                </span>
               </li>
             );
           })}
@@ -1044,9 +1137,16 @@ export function ExecutiveDashboard({
       : "visits"
     : (trendMetric as ExecutiveTrendMetric);
   const detailsSummary = history?.data ?? summary;
-  const historyDetails = history?.data
-    ? `${clubDetailHref(detailsSummary, chartMetric)}&returnPeriod=full-day`
-    : clubDetailHref(summary, chartMetric);
+  const driverFocus: Record<DriverTrend, DriverFocus> = {
+    driverVisits: "visits",
+    driverConversion: "conversion",
+    driverCheck: "check",
+  };
+  const historyDetails = isDriverTrend
+    ? driverDetailHref(summary, driverFocus[trendMetric as DriverTrend])
+    : history?.data
+      ? `${clubDetailHref(detailsSummary, chartMetric)}&returnPeriod=full-day`
+      : clubDetailHref(summary, chartMetric);
   return (
     <div className="mt-5 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
       <div className="min-w-0 xl:col-span-2 xl:row-start-1">

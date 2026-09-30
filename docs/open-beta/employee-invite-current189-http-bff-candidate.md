@@ -2,7 +2,7 @@
 
 ## Статус
 
-`DORMANT / NONCANONICAL / NOT MODULE-WIRED / LEGACY ROUTES STILL BLOCKED`.
+`DORMANT / NONCANONICAL / NOT MODULE-WIRED` (legacy routes открыты только для ссылок-приглашений).
 
 Этот slice связывает уже принятую CURRENT189 application policy с точным
 будущим HTTP/BFF transport, но намеренно не регистрирует его в production.
@@ -23,7 +23,10 @@ Controller имеет JWT/OWNER/Roles metadata, требует exact JSON, ог�
 authoritative tenant/role/scope повторно читаются из PostgreSQL.
 
 Controller отсутствует во всех Nest modules. Активный legacy
-`UsersController` не заменён, а три строки Gate 1MT остаются `BLOCKED`.
+`UsersController` не заменён. С 30.09.2026 три строки Gate 1MT открыты только
+для ссылок-приглашений без почтовой доставки (см.
+[runtime-security-contours.md](../security/runtime-security-contours.md)); сам
+кандидат по-прежнему не подключён к модулям.
 
 ## Web BFF candidate
 

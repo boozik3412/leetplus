@@ -43,6 +43,8 @@ export type UserInvite = {
   customRole: UserAccessRole | null;
   scope: "NETWORK" | "STORES";
   stores: UserAccountStore[];
+  /** LINK: shareable registration link. EMAIL: legacy mail-delivered invite. */
+  deliveryMode: "LINK" | "EMAIL";
   expiresAt: string;
   acceptedAt: string | null;
   createdAt: string;

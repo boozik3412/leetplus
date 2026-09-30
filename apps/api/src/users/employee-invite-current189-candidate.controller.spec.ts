@@ -399,7 +399,7 @@ describe('CURRENT189 candidate controller AST and production isolation', () => {
     expect(usersModule).not.toContain('CURRENT189');
   });
 
-  it('leaves legacy handlers active and all matching Gate 1MT rows blocked', () => {
+  it('leaves legacy handlers active and their Gate 1MT rows open for registration links only', () => {
     const legacy = readFileSync(
       join(sourceRoot, 'users/users.controller.ts'),
       'utf8',
@@ -416,8 +416,9 @@ describe('CURRENT189 candidate controller AST and production isolation', () => {
       expect(row).toMatchObject({
         module: 'USERS_ROLES',
         capability: 'manage_users',
-        minimumScope: 'NETWORK',
-        decision: 'BLOCKED',
+        minimumScope: 'STORES',
+        decision: 'ALLOW',
+        gaps: [],
       });
     }
   });

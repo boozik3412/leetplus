@@ -1729,6 +1729,45 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   `STANDARDS_MANAGER`, public guest contour, worker identities или схему БД и
   не считается deployed до exact-SHA admission и отдельного rollout.
 
+#### Ссылки-приглашения сотрудников (30.09.2026)
+
+Решение владельца: пока не настроены SMTP и verified-доставка, доступ
+сотрудникам выдаётся личной ссылкой регистрации, в том числе во внешних сетях
+(`PILOT/BETA/LIVE`). Это заменяет прежнее правило «внешние приглашения закрыты
+до verified email-delivery workflow» для приглашений со способом `LINK`.
+
+- `deliveryMode = LINK` — единственный доступный способ. Явный
+  `deliveryMode: 'EMAIL'` в `POST/PATCH /users/invites` отклоняется
+  (`INVITE_EMAIL_DELIVERY_UNAVAILABLE`) в любой стадии; Web показывает вариант
+  «Отправить на e-mail» неактивным. Письмо не отправляется и не имитируется.
+- Email в ссылке необязателен. Без email (`UserInvite.email = NULL`) сотрудник
+  сам указывает логин и имя при регистрации; адрес резервируется в
+  `IdentityEmailClaim` в той же tenant-транзакции, где создаётся `User`
+  (reserve → create User → transition `INVITE → USER`), поэтому пересечение с
+  существующим пользователем или чужим приглашением по-прежнему fail-closed
+  (`Пользователь с таким email уже существует`). Если email указан при создании,
+  ссылка привязана к нему и идёт прежним путём claim `INVITE`.
+- Ссылка — bearer-секрет: в БД хранится только SHA-256 токена, URL возвращается
+  один раз при создании или перевыпуске. Повторно показать ссылку нельзя:
+  `PATCH` выпускает новый токен и отзывает прежний (CAS по `updatedAt`),
+  `DELETE` отзывает ссылку. Открытая ссылка не получает email после выпуска
+  (`INVITE_EMAIL_CHANGE_WORKFLOW_REQUIRED`) и не расширяет scope при перевыпуске.
+- Регистрация по ссылке не доказывает владение почтовым ящиком, поэтому
+  `User.emailVerifiedAt = NULL`; штамп проставляется только приглашениям с
+  `deliveryMode = EMAIL` (историческим и initial-owner).
+- Fail-closed для внешних сетей сохраняется только для приглашений, выданных под
+  verified-доставку (`deliveryMode = EMAIL`, начальный OWNER): их перевыпуск и
+  отмена по-прежнему требуют verified email-delivery workflow. Существующие
+  строки не переписываются.
+- Кто выдаёт и кому — прежняя матрица (`OWNER`, `ADMIN`, `MANAGER`,
+  `STANDARDS_MANAGER`; Platform Admin с подписанным tenant-контекстом действует
+  как `OWNER`) и fresh scope. `OWNER`, `NETWORK` вне scope инициатора и чужой
+  клуб по-прежнему запрещены. Приём ссылки остаётся в corporate контуре и
+  проходит `TenantExecutionPolicy.assertInviteAllowed`.
+- Схема БД, роли, egress и worker placement не менялись: `deliveryMode` есть в
+  `CURRENT_190`, новых функций claim не добавлено. Строки `/users/invites*` в
+  pilot HTTP surface manifest переведены в `STORES_VERIFIED/ALLOW`.
+
 ## Game administration и background jobs
 
 - `CorporateGuestGamificationModule` сохраняет tenant-authenticated

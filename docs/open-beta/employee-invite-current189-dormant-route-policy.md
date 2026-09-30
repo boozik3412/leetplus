@@ -1,6 +1,6 @@
 # CURRENT189: dormant route policy приглашений сотрудников
 
-Статус: `ENGINEERING ONLY / NONCANONICAL / PRODUCTION ROUTES BLOCKED`.
+Статус: `ENGINEERING ONLY / NONCANONICAL / NOT WIRED` (почтовая доставка закрыта; ссылки-приглашения открыты с 30.09.2026).
 
 Дата фиксации: 05.08.2026.
 
@@ -61,9 +61,13 @@ invite/replaced id, status, expiry и replay semantics повторно свер
 
 AST gate отдельно подтверждает, что production `UsersController` всё ещё
 вызывает legacy методы `UsersService.createInvite/updateInvite/cancelInvite`,
-не импортирует CURRENT189 application/coordinator и что все три строки остаются
-`BLOCKED` в Gate 1MT manifest. Legacy response способен содержать PII и
-`registrationUrl`, поэтому частичное переключение запрещено.
+не импортирует CURRENT189 application/coordinator. С 30.09.2026 эти три строки
+в Gate 1MT manifest открыты (`STORES_VERIFIED/ALLOW`) только для ссылок-
+приглашений без почтовой доставки; см. «Ссылки-приглашения сотрудников» в
+[runtime-security-contours.md](../security/runtime-security-contours.md).
+CURRENT189 coordinator по-прежнему не подключён: доставка приглашения почтой
+остаётся закрытой, а legacy response с `registrationUrl` — это и есть ссылка для
+передачи сотруднику.
 
 Выключенный Nest/Web transport-кандидат и его evidence зафиксированы отдельно в
 [employee-invite-current189-http-bff-candidate.md](employee-invite-current189-http-bff-candidate.md).

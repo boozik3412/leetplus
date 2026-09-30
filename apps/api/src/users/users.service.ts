@@ -35,6 +35,9 @@ import {
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { lockUserRoleAuthority } from './user-role-authority-lock';
 
+const INVITE_DELIVERY_LINK = 'LINK';
+const INVITE_DELIVERY_EMAIL = 'EMAIL';
+
 const assignableRolesByActor: Record<UserRole, UserRole[]> = {
   [UserRole.OWNER]: [
     UserRole.OWNER,
@@ -264,6 +267,8 @@ export type UserRoleOption = {
   updatedAt: string | null;
 };
 
+export type UserInviteDeliveryMode = 'LINK' | 'EMAIL';
+
 export type UserInviteAccount = {
   id: string;
   email: string | null;
@@ -273,6 +278,7 @@ export type UserInviteAccount = {
   customRole: UserAccessRoleAccount | null;
   scope: AccessScopeMode;
   stores: UserAccountStore[];
+  deliveryMode: UserInviteDeliveryMode;
   expiresAt: string;
   acceptedAt: string | null;
   createdAt: string;
@@ -317,6 +323,8 @@ export type UserInviteDto = {
   scope?: AccessScopeMode;
   storeIds?: string[];
   expiresInDays?: number;
+  /** Only `LINK` is available until verified mail delivery is configured. */
+  deliveryMode?: UserInviteDeliveryMode;
 };
 
 @Injectable()
@@ -416,10 +424,7 @@ export class UsersService {
     dto: UserInviteDto,
   ): Promise<UserInviteAccount> {
     const { tenantId } = await this.freshStoreScopeService.resolve(actor);
-    await this.assertGenericIdentityMutationAllowed(
-      tenantId,
-      'invite delivery',
-    );
+    this.assertInviteDeliveryModeAvailable(dto.deliveryMode);
     const email = this.normalizeOptionalEmail(dto.email);
     const fullName = this.normalizeNullableText(dto.fullName);
     const customRoleId = this.normalizeOptionalId(dto.customRoleId);
@@ -429,11 +434,6 @@ export class UsersService {
     const expiresAt = this.resolveInviteExpiry(dto.expiresInDays);
     const scope = this.parseAccessScope(dto.scope);
 
-    if (!email) {
-      throw new BadRequestException(
-        'Invite must be bound to a valid email address',
-      );
-    }
     this.assertOwnerAssignmentUsesTransferWorkflow(role);
 
     const [storeIds, customRole, stores] = await Promise.all([
@@ -453,8 +453,40 @@ export class UsersService {
     });
 
     const rawToken = randomBytes(32).toString('base64url');
-    const reservationId = randomUUID();
     const inviteId = randomUUID();
+
+    if (!email) {
+      // An open link carries no mailbox: the invitee names their own login
+      // when registering, and the email claim is taken at that moment.
+      const openInvite = await this.prisma.userInvite.create({
+        data: {
+          id: inviteId,
+          tenantId,
+          email: null,
+          fullName,
+          role,
+          customRoleId: customRole?.id ?? null,
+          accessScope: scope,
+          storeIds,
+          tokenHash: this.hashInviteToken(rawToken),
+          expiresAt,
+          createdByUserId: actor.id,
+          identityClaimRevision: null,
+          deliveryMode: INVITE_DELIVERY_LINK,
+          revokedAt: null,
+          revokedByUserId: null,
+        },
+        include: userInviteInclude,
+      });
+
+      return this.toInvite(
+        openInvite,
+        this.createStoreMap(stores),
+        this.buildInviteUrl(rawToken),
+      );
+    }
+
+    const reservationId = randomUUID();
     const invite = await this.identityClaimBoundary.runTenantTransaction(
       this.prisma,
       tenantId,
@@ -495,6 +527,7 @@ export class UsersService {
             expiresAt,
             createdByUserId: actor.id,
             identityClaimRevision: null,
+            deliveryMode: INVITE_DELIVERY_LINK,
             revokedAt: null,
             revokedByUserId: null,
           },
@@ -531,10 +564,7 @@ export class UsersService {
     dto: UserInviteDto,
   ): Promise<UserInviteAccount> {
     const { tenantId } = await this.freshStoreScopeService.resolve(actor);
-    await this.assertGenericIdentityMutationAllowed(
-      tenantId,
-      'invite delivery',
-    );
+    this.assertInviteDeliveryModeAvailable(dto.deliveryMode);
     const existing = await this.prisma.userInvite.findFirst({
       where: { id, tenantId, revokedAt: null },
       include: userInviteInclude,
@@ -543,6 +573,8 @@ export class UsersService {
     if (!existing) {
       throw new NotFoundException('Invite not found');
     }
+
+    await this.assertInviteLifecycleMutationAllowed(tenantId, existing);
 
     if (existing.acceptedAt) {
       throw new BadRequestException('Invite is already used');
@@ -562,9 +594,10 @@ export class UsersService {
       existingStoreIds,
     );
 
-    const email =
+    const existingEmail = this.normalizeOptionalEmail(existing.email);
+    const requestedEmail =
       dto.email === undefined
-        ? existing.email
+        ? existingEmail
         : this.normalizeOptionalEmail(dto.email);
     const fullName =
       dto.fullName === undefined
@@ -596,24 +629,22 @@ export class UsersService {
         ? existing.expiresAt
         : this.resolveInviteExpiry(dto.expiresInDays);
 
-    if (!email) {
-      throw new BadRequestException(
-        'Invite must be bound to a valid email address',
-      );
-    }
-    const existingEmail = this.normalizeOptionalEmail(existing.email);
-    if (!existingEmail) {
-      throw this.identityInviteProvenanceRequired();
-    }
-    if (email !== existingEmail) {
+    if (requestedEmail !== existingEmail) {
       throw new ForbiddenException({
-        message: 'Invite email changes require the dedicated identity workflow',
+        message: existingEmail
+          ? 'Invite email changes require the dedicated identity workflow'
+          : 'Email нельзя добавить к готовой ссылке. Создайте новую ссылку.',
         reasonCode: 'INVITE_EMAIL_CHANGE_WORKFLOW_REQUIRED',
       });
     }
-    const identityClaimRevision = this.requireIdentityClaimRevision(
-      existing.identityClaimRevision,
-    );
+    const email = existingEmail;
+    const isOpenLink = !email && existing.deliveryMode === INVITE_DELIVERY_LINK;
+    if (!email && !isOpenLink) {
+      throw this.identityInviteProvenanceRequired();
+    }
+    const identityClaimRevision = isOpenLink
+      ? null
+      : this.requireIdentityClaimRevision(existing.identityClaimRevision);
     this.assertOwnerAssignmentUsesTransferWorkflow(role);
 
     await this.assertCanAssignAccountRole(actor, role, customRole, tenantId);
@@ -630,6 +661,58 @@ export class UsersService {
     const rawToken = randomBytes(32).toString('base64url');
     const reissuedInviteId = randomUUID();
     const revokedAt = new Date();
+
+    if (email === null || identityClaimRevision === null) {
+      // Open link: nothing is claimed, so reissue is just replace-and-revoke.
+      const reissued = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.userInvite.create({
+          data: {
+            id: reissuedInviteId,
+            tenantId,
+            email: null,
+            fullName,
+            role,
+            customRoleId: customRole?.id ?? null,
+            accessScope: scope,
+            storeIds,
+            tokenHash: this.hashInviteToken(rawToken),
+            expiresAt,
+            createdByUserId: actor.id,
+            identityClaimRevision: null,
+            deliveryMode: INVITE_DELIVERY_LINK,
+            revokedAt: null,
+            revokedByUserId: null,
+          },
+          include: userInviteInclude,
+        });
+        const revoked = await tx.userInvite.updateMany({
+          where: {
+            id: existing.id,
+            tenantId,
+            acceptedAt: null,
+            revokedAt: null,
+            expiresAt: { gt: revokedAt },
+            updatedAt: existing.updatedAt,
+          },
+          data: {
+            expiresAt: revokedAt,
+            revokedAt,
+            revokedByUserId: actor.id,
+          },
+        });
+        if (revoked.count !== 1) {
+          throw new ConflictException('Invite changed or was already accepted');
+        }
+        return created;
+      });
+
+      return this.toInvite(
+        reissued,
+        this.createStoreMap(await this.listTenantStores(tenantId)),
+        this.buildInviteUrl(rawToken),
+      );
+    }
+
     const updated = await this.identityClaimBoundary.runTenantTransaction(
       this.prisma,
       tenantId,
@@ -657,6 +740,7 @@ export class UsersService {
             expiresAt,
             createdByUserId: actor.id,
             identityClaimRevision: null,
+            deliveryMode: INVITE_DELIVERY_LINK,
             revokedAt: null,
             revokedByUserId: null,
           },
@@ -697,25 +781,16 @@ export class UsersService {
         });
       },
     );
-    const stores = await this.prisma.store.findMany({
-      where: { tenantId },
-      select: { id: true, name: true, isActive: true },
-      orderBy: { name: 'asc' },
-    });
 
     return this.toInvite(
       updated,
-      this.createStoreMap(stores),
+      this.createStoreMap(await this.listTenantStores(tenantId)),
       this.buildInviteUrl(rawToken),
     );
   }
 
   async cancelInvite(actor: AuthenticatedUser, id: string) {
     const { tenantId } = await this.freshStoreScopeService.resolve(actor);
-    await this.assertGenericIdentityMutationAllowed(
-      tenantId,
-      'invite delivery',
-    );
     const existing = await this.prisma.userInvite.findFirst({
       where: { id, tenantId, revokedAt: null },
       include: userInviteInclude,
@@ -724,6 +799,8 @@ export class UsersService {
     if (!existing) {
       throw new NotFoundException('Invite not found');
     }
+
+    await this.assertInviteLifecycleMutationAllowed(tenantId, existing);
 
     if (existing.acceptedAt) {
       throw new BadRequestException('Invite is already used');
@@ -742,17 +819,43 @@ export class UsersService {
     );
 
     const email = this.normalizeOptionalEmail(existing.email);
-    if (!email) {
+    const isOpenLink = !email && existing.deliveryMode === INVITE_DELIVERY_LINK;
+    if (!email && !isOpenLink) {
       throw this.identityInviteProvenanceRequired();
     }
-    const identityClaimRevision = this.requireIdentityClaimRevision(
-      existing.identityClaimRevision,
-    );
     const canceledAt = new Date();
     const terminalExpiresAt =
       existing.expiresAt.getTime() <= canceledAt.getTime()
         ? existing.expiresAt
         : canceledAt;
+    const revokeWhere = {
+      id: existing.id,
+      tenantId,
+      acceptedAt: null,
+      revokedAt: null,
+      updatedAt: existing.updatedAt,
+    };
+    const revokeData = {
+      expiresAt: terminalExpiresAt,
+      revokedAt: canceledAt,
+      revokedByUserId: actor.id,
+    };
+
+    if (email === null) {
+      // Open link: there is no identity claim to release.
+      const canceled = await this.prisma.userInvite.updateMany({
+        where: revokeWhere,
+        data: revokeData,
+      });
+      if (canceled.count !== 1) {
+        throw new ConflictException('Invite changed or was already accepted');
+      }
+      return { id: existing.id };
+    }
+
+    const identityClaimRevision = this.requireIdentityClaimRevision(
+      existing.identityClaimRevision,
+    );
     await this.identityClaimBoundary.runTenantTransaction(
       this.prisma,
       tenantId,
@@ -767,18 +870,8 @@ export class UsersService {
           },
         );
         const canceled = await tx.userInvite.updateMany({
-          where: {
-            id: existing.id,
-            tenantId,
-            acceptedAt: null,
-            revokedAt: null,
-            updatedAt: existing.updatedAt,
-          },
-          data: {
-            expiresAt: terminalExpiresAt,
-            revokedAt: canceledAt,
-            revokedByUserId: actor.id,
-          },
+          where: revokeWhere,
+          data: revokeData,
         });
         if (canceled.count !== 1) {
           throw new ConflictException('Invite changed or was already accepted');
@@ -966,6 +1059,58 @@ export class UsersService {
     }
 
     return this.toAccount(updated, await this.getRoleOverrideMap(tenantId));
+  }
+
+  /**
+   * Only a shareable registration link is offered today. Delivering the
+   * invitation by mail needs the verified email-delivery workflow, which is
+   * not configured yet, so an explicit EMAIL request is refused in every
+   * tenant instead of silently falling back to a link.
+   */
+  private assertInviteDeliveryModeAvailable(mode: unknown): void {
+    if (mode === undefined || mode === null || mode === INVITE_DELIVERY_LINK) {
+      return;
+    }
+
+    if (mode !== INVITE_DELIVERY_EMAIL) {
+      throw new BadRequestException({
+        message: 'Неизвестный способ доставки приглашения',
+        reasonCode: 'INVITE_DELIVERY_MODE_INVALID',
+      });
+    }
+
+    throw new BadRequestException({
+      message:
+        'Отправка приглашений на почту пока недоступна. Создайте ссылку-приглашение.',
+      reasonCode: 'INVITE_EMAIL_DELIVERY_UNAVAILABLE',
+    });
+  }
+
+  /**
+   * Registration links are managed in every tenant stage. Invites that were
+   * issued for verified mail delivery (initial owners, legacy rows) keep the
+   * original fail-closed boundary for external tenants.
+   */
+  private async assertInviteLifecycleMutationAllowed(
+    tenantId: string,
+    invite: { deliveryMode: string },
+  ): Promise<void> {
+    if (invite.deliveryMode === INVITE_DELIVERY_LINK) {
+      return;
+    }
+
+    await this.assertGenericIdentityMutationAllowed(
+      tenantId,
+      'invite delivery',
+    );
+  }
+
+  private listTenantStores(tenantId: string) {
+    return this.prisma.store.findMany({
+      where: { tenantId },
+      select: { id: true, name: true, isActive: true },
+      orderBy: { name: 'asc' },
+    });
   }
 
   private async assertGenericIdentityMutationAllowed(
@@ -1867,6 +2012,10 @@ export class UsersService {
         : null,
       scope: accessScope.mode,
       stores,
+      deliveryMode:
+        invite.deliveryMode === INVITE_DELIVERY_LINK
+          ? INVITE_DELIVERY_LINK
+          : INVITE_DELIVERY_EMAIL,
       expiresAt: invite.expiresAt.toISOString(),
       acceptedAt: invite.acceptedAt?.toISOString() ?? null,
       createdAt: invite.createdAt.toISOString(),

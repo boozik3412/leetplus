@@ -665,24 +665,6 @@ const definitions: readonly ControllerDefinition[] = [
         profile: 'NETWORK_GAP',
         extraGaps: ['ROUTE_INTENTIONALLY_DISABLED'],
       },
-      'POST /users/invites': {
-        profile: 'NETWORK_GAP',
-        extraGaps: [
-          'EXTERNAL_INVITE_DELIVERY_WORKFLOW_PENDING',
-          'RAW_INVITE_URL_RESPONSE_LEGACY',
-        ],
-      },
-      'PATCH /users/invites/:id': {
-        profile: 'NETWORK_GAP',
-        extraGaps: [
-          'EXTERNAL_INVITE_DELIVERY_WORKFLOW_PENDING',
-          'RAW_INVITE_URL_RESPONSE_LEGACY',
-        ],
-      },
-      'DELETE /users/invites/:id': {
-        profile: 'NETWORK_GAP',
-        extraGaps: ['EXTERNAL_INVITE_WORKFLOW_NOT_ATTESTED'],
-      },
       'POST /users/roles': { profile: 'NETWORK_VERIFIED' },
       'PATCH /users/roles/:id': { profile: 'NETWORK_VERIFIED' },
       'PATCH /users/system-roles/:role': { profile: 'NETWORK_VERIFIED' },

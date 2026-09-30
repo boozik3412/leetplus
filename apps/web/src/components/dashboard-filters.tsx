@@ -55,7 +55,7 @@ const periodHints: Record<
   day: {
     period: "С 00:00 текущих суток до текущего момента.",
     comparison:
-      "В блоке «Что изменилось» сравниваются последние полные сутки с предыдущими полными сутками.",
+      "Динамика сравнивает каждый отрезок с предыдущим аналогичным; для сравнения завершённых суток выберите полные сутки.",
   },
   "full-day": {
     period: "Последние завершенные сутки: вчера с 00:00 до 23:59.",
@@ -110,6 +110,27 @@ const periodHints: Record<
   },
 };
 
+// The executive summary always compares with the same number of days right
+// before the period; assortment reports keep their own segment hints above.
+const executiveComparisonHints: Record<DashboardPeriod, string> = {
+  day: "Сравнение с таким же отрезком предыдущих суток.",
+  "full-day":
+    "Сравнение с позавчерашними сутками. График показывает 21 день по выбранные сутки.",
+  week: "Сравнение с таким же числом дней непосредственно перед периодом.",
+  "full-week":
+    "Сравнение с предыдущими семью завершёнными сутками без пересечения периодов.",
+  month: "Сравнение с таким же числом дней непосредственно перед периодом.",
+  "full-month":
+    "Сравнение с таким же числом дней непосредственно перед месяцем; при разной длине месяцев это не календарный месяц.",
+  quarter: "Сравнение с таким же числом дней непосредственно перед периодом.",
+  "full-quarter":
+    "Сравнение с таким же числом дней непосредственно перед кварталом.",
+  year: "Сравнение с таким же числом дней непосредственно перед периодом.",
+  "full-year": "Сравнение с таким же числом дней непосредственно перед годом.",
+  custom:
+    "Сравнение с отрезком той же длины непосредственно перед выбранным диапазоном.",
+};
+
 const periodOptionGroups: {
   current: DashboardPeriod;
   full: DashboardPeriod;
@@ -133,6 +154,8 @@ export type DashboardFiltersProps = {
   showComparison?: boolean;
   comparison?: boolean;
   asOf?: string;
+  /** Executive summary: period applies on selection, clubs on «Готово». */
+  variant?: "executive";
 };
 
 export function DashboardFilters(props: DashboardFiltersProps) {
@@ -162,7 +185,9 @@ function DashboardFiltersContent({
   showComparison = false,
   comparison = true,
   asOf,
+  variant,
 }: DashboardFiltersProps) {
+  const executive = variant === "executive";
   const router = useRouter();
   const pathname = usePathname();
   const rootRef = useRef<HTMLElement | null>(null);
@@ -220,6 +245,14 @@ function DashboardFiltersContent({
       return;
     }
 
+    // An unapplied club choice must not leave a label that disagrees with the data.
+    function closeWithoutApplying() {
+      if (executive && openPanel === "clubs") {
+        setSelectedStores(selectedStoreIds);
+      }
+      setOpenPanel(null);
+    }
+
     function handlePointerDown(event: PointerEvent) {
       if (
         event.target instanceof Node &&
@@ -228,12 +261,12 @@ function DashboardFiltersContent({
         return;
       }
 
-      setOpenPanel(null);
+      closeWithoutApplying();
     }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setOpenPanel(null);
+        closeWithoutApplying();
       }
     }
 
@@ -244,7 +277,7 @@ function DashboardFiltersContent({
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [openPanel]);
+  }, [executive, openPanel, selectedStoreIds]);
 
   function toggleStore(storeId: string) {
     const nextStores = selectedStores.includes(storeId)
@@ -310,6 +343,14 @@ function DashboardFiltersContent({
       params.append("categoryIds", categoryId);
     });
 
+    // Keep the selected executive chart metric across filter changes.
+    const trend = executive
+      ? new URLSearchParams(window.location.search).get("trend")
+      : null;
+    if (trend) {
+      params.set("trend", trend);
+    }
+
     startNavigationFeedback();
     startTransition(() => {
       router.push(`${pathname}?${params.toString()}`);
@@ -321,7 +362,21 @@ function DashboardFiltersContent({
   }
 
   function selectPeriod(value: DashboardPeriod) {
+    if (isPending) {
+      return;
+    }
     setSelectedPeriod(value);
+    if (executive && value !== "custom") {
+      applyFilters({ period: value });
+    }
+  }
+
+  function toggleComparison() {
+    const next = !comparisonEnabled;
+    setComparisonEnabled(next);
+    if (executive) {
+      applyFilters({ comparison: next }, { closePanel: false });
+    }
   }
 
   return (
@@ -332,6 +387,7 @@ function DashboardFiltersContent({
     >
       <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
         <FilterButton
+          disabled={executive && isPending}
           label="Период"
           value={selectedPeriodLabel}
           compactValue={compactPeriodLabel}
@@ -340,6 +396,7 @@ function DashboardFiltersContent({
           onClick={() => setOpenPanel(openPanel === "period" ? null : "period")}
         />
         <FilterButton
+          disabled={executive && isPending}
           label="Клубы"
           value={selectedStoresLabel}
           compactValue={compactStoresLabel}
@@ -358,11 +415,11 @@ function DashboardFiltersContent({
             }
           />
         ) : null}
-        {showComparison ? (
+        {showComparison && !executive ? (
           <button
             type="button"
             aria-pressed={comparisonEnabled}
-            onClick={() => setComparisonEnabled((current) => !current)}
+            onClick={toggleComparison}
             className={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold shadow-sm transition ${comparisonEnabled ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-100" : "border-zinc-200 bg-white text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"}`}
           >
             <TrendUp className="h-4 w-4 text-emerald-600" aria-hidden="true" />
@@ -371,6 +428,7 @@ function DashboardFiltersContent({
             </span>
           </button>
         ) : null}
+        {executive && selectedPeriod !== "custom" ? null : (
         <button
           type="button"
           onClick={() => applyFilters()}
@@ -379,6 +437,7 @@ function DashboardFiltersContent({
         >
           Применить
         </button>
+        )}
         {isPending ? (
           <span
             aria-live="polite"
@@ -399,11 +458,19 @@ function DashboardFiltersContent({
                   value={group.current}
                   selectedPeriod={selectedPeriod}
                   onSelect={selectPeriod}
+                  comparisonHint={
+                    executive
+                      ? executiveComparisonHints[group.current]
+                      : undefined
+                  }
                 />
                 <PeriodOptionButton
                   value={group.full}
                   selectedPeriod={selectedPeriod}
                   onSelect={selectPeriod}
+                  comparisonHint={
+                    executive ? executiveComparisonHints[group.full] : undefined
+                  }
                 />
               </div>
             ))}
@@ -411,8 +478,30 @@ function DashboardFiltersContent({
               value="custom"
               selectedPeriod={selectedPeriod}
               onSelect={selectPeriod}
+              comparisonHint={
+                executive ? executiveComparisonHints.custom : undefined
+              }
             />
           </div>
+          {showComparison && executive ? (
+            <label className="mt-4 flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+              <span>
+                <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                  Сравнивать с прошлым периодом
+                </span>
+                <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                  Изменения, падение клубов и пунктир на графике
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                checked={comparisonEnabled}
+                disabled={isPending}
+                onChange={toggleComparison}
+                className="h-4 w-4 accent-emerald-600"
+              />
+            </label>
+          ) : null}
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className="text-sm">
               <span className="font-medium text-zinc-700 dark:text-zinc-300">
@@ -499,6 +588,16 @@ function DashboardFiltersContent({
               >
                 Очистить
               </button>
+              {executive ? (
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => applyFilters({ storeIds: selectedStores })}
+                  className="min-h-9 rounded-xl bg-zinc-950 px-3 text-sm font-semibold text-white disabled:opacity-50 dark:bg-emerald-400 dark:text-zinc-950"
+                >
+                  Готово
+                </button>
+              ) : null}
             </div>
           </div>
         </DropdownPanel>
@@ -566,7 +665,9 @@ function FilterButton({
   icon,
   isOpen,
   onClick,
+  disabled = false,
 }: {
+  disabled?: boolean;
   label: string;
   value: string;
   compactValue?: string;
@@ -578,9 +679,10 @@ function FilterButton({
     <button
       type="button"
       aria-label={`${label}: ${value}`}
+      disabled={disabled}
       onClick={onClick}
       className={[
-        "inline-flex min-h-11 w-full min-w-0 items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-sm shadow-sm transition-colors sm:w-auto",
+        "inline-flex min-h-11 w-full min-w-0 items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-sm shadow-sm transition-colors disabled:cursor-wait disabled:opacity-60 sm:w-auto",
         isOpen
           ? "border-zinc-950 bg-zinc-950 text-white dark:border-emerald-400 dark:bg-emerald-400 dark:text-zinc-950"
           : "border-zinc-200 bg-white text-zinc-950 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50 dark:hover:bg-zinc-900",
@@ -632,12 +734,17 @@ function PeriodOptionButton({
   value,
   selectedPeriod,
   onSelect,
+  comparisonHint,
 }: {
   value: DashboardPeriod;
   selectedPeriod: DashboardPeriod;
   onSelect: (value: DashboardPeriod) => void;
+  comparisonHint?: string;
 }) {
-  const hint = periodHints[value];
+  const hint = {
+    period: periodHints[value].period,
+    comparison: comparisonHint ?? periodHints[value].comparison,
+  };
   const title = `${periodLabels[value]}. ${hint.period} ${hint.comparison}`;
 
   return (

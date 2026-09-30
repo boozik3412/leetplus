@@ -398,6 +398,20 @@ export class GuestGameInsightsService {
   }
 
   private async loadProfilesByGuestIds(tenantId: string, guestIds: string[]) {
+    if (guestIds.length > CHUNK_SIZE) {
+      // Profiles are few compared with guests: one tenant read beats
+      // one query per 1000 guest ids.
+      const selected = new Set(guestIds);
+      const profiles = await this.prisma.guestGameProfile.findMany({
+        where: { tenantId, guestId: { not: null } },
+        select: profileSelect,
+      });
+
+      return profiles.filter(
+        (profile) => profile.guestId !== null && selected.has(profile.guestId),
+      );
+    }
+
     const rows = await Promise.all(
       chunk(guestIds, CHUNK_SIZE).map((ids) =>
         this.prisma.guestGameProfile.findMany({

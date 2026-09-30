@@ -860,16 +860,15 @@ export function buildGuestsGamificationSummary(input: {
       row.segment === 'repeat' ||
       row.segment === 'new',
   );
+  const clubGuestIds = new Set(guestsInClub.map((guest) => guest.id));
   const idle = registeredRows.filter(
-    (row) =>
-      row.gameProfile?.engagement === 'IDLE' &&
-      guestsInClub.some((guest) => guest.id === row.id),
+    (row) => row.gameProfile?.engagement === 'IDLE' && clubGuestIds.has(row.id),
   ).length;
   const notActivated = registeredRows.filter(
     (row) => row.gameProfile?.engagement === 'NOT_ACTIVATED',
   ).length;
   const registeredEffectRows = realRegisteredRows.filter((row) =>
-    guestsInClub.some((guest) => guest.id === row.id),
+    clubGuestIds.has(row.id),
   );
   const notRegisteredEffectRows = guestsInClub.filter(
     (row) => row.gameProfile === null,
@@ -946,12 +945,18 @@ export function buildGuestsGamificationSummary(input: {
   };
 }
 
-function signalGuest(
+function signalGuestBase(
   row: GuestDashboardRow,
   meta: string,
   amount: number | null = null,
+  nameOf?: (row: GuestDashboardRow) => string,
 ): GuestSignalGuest {
-  return { id: row.id, displayName: row.displayName, meta, amount };
+  return {
+    id: row.id,
+    displayName: nameOf ? nameOf(row) : row.displayName,
+    meta,
+    amount,
+  };
 }
 
 function topBy(
@@ -1051,8 +1056,15 @@ export function buildGuestSignals(input: {
   gamification: GuestsGamificationSummary | null;
   now: Date;
   periodToDate: Date;
+  /** Resolves the display name for signal guests (rows may carry masked names). */
+  nameOf?: (row: GuestDashboardRow) => string;
 }): { attention: GuestSignal[]; actions: GuestActionItem[] } {
   const { rows, crmQueue, gamification } = input;
+  const signalGuest = (
+    row: GuestDashboardRow,
+    meta: string,
+    amount: number | null = null,
+  ) => signalGuestBase(row, meta, amount, input.nameOf);
   const attention: GuestSignal[] = [];
   const gameAvailable = gamification?.available === true;
   const context: GuestSignalContext = {

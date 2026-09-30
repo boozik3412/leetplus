@@ -40,6 +40,10 @@ import {
 } from './langame-external-pilot-authority';
 import { LangameSettingsService } from './langame-settings.service';
 import {
+  LANGAME_TRANSIENT_RETRY_DELAYS_MS,
+  withLangameTransientRetry,
+} from './langame-transient-retry';
+import {
   LANGAME_SYNC_LIMITED_PREFIX,
   langameImportRequirements,
   langameSectionLimitMessage,
@@ -140,6 +144,9 @@ const LANGAME_SYNC_MODULES = [
 
 @Injectable()
 export class LangameSyncService {
+  // Overridable in tests; one gateway error must not leave a day incomplete.
+  private readonly transientRetryDelaysMs = LANGAME_TRANSIENT_RETRY_DELAYS_MS;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
@@ -434,7 +441,10 @@ export class LangameSyncService {
         const sectionKey = `${component}:${clubId ?? ''}`;
         let rows: Awaited<ReturnType<typeof request>>;
         try {
-          rows = await request();
+          rows = await withLangameTransientRetry(
+            request,
+            this.transientRetryDelaysMs,
+          );
         } catch (error) {
           const denied = langameSectionLimitMessage(error) !== null;
           // A section that already returned a page this run is accessible, so

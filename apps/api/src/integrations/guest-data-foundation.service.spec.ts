@@ -1106,8 +1106,9 @@ describe('GuestDataFoundationService', () => {
     });
   });
 
-  it('keeps a transport failure of one guest section partial', async () => {
-    langameClient.listGuestSessions.mockRejectedValueOnce(
+  it('keeps a persistent transport failure of one guest section partial', async () => {
+    Object.assign(service, { transientRetryDelaysMs: [0, 0] });
+    langameClient.listGuestSessions.mockRejectedValue(
       new Error('socket hang up'),
     );
 
@@ -1116,8 +1117,39 @@ describe('GuestDataFoundationService', () => {
       dateTo: '2026-05-01',
     });
 
+    expect(langameClient.listGuestSessions).toHaveBeenCalledTimes(3);
     expect(result).toMatchObject({ failedSources: 0, partialSources: 1 });
     expect(result.sourceResults[0].status).toBe('PARTIAL');
+  });
+
+  it('retries a gateway error on a later page and completes the section', async () => {
+    Object.assign(service, { transientRetryDelaysMs: [0, 0] });
+    const page = (offset: number, size: number) =>
+      Array.from({ length: size }, (_, index) => ({
+        id: offset + index,
+        guest_id: 42,
+        bonus_balance: '1.00',
+      }));
+    langameClient.listGuestBonusBalances
+      .mockReset()
+      .mockResolvedValueOnce(page(0, 200))
+      .mockRejectedValueOnce(
+        new Error('Langame /guests/bonus_balance failed: 502 Bad Gateway'),
+      )
+      .mockResolvedValueOnce(page(200, 1));
+
+    const result = await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    expect(langameClient.listGuestBonusBalances).toHaveBeenCalledTimes(3);
+    expect(result).toMatchObject({ failedSources: 0, partialSources: 0 });
+    expect(result.sourceResults[0]).toMatchObject({
+      status: 'SUCCESS',
+      bonusBalances: 201,
+      endpointErrors: {},
+    });
   });
 
   it('loads guest logs only when explicitly requested', async () => {

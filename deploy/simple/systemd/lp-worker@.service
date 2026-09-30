@@ -7,5 +7,6 @@ After=docker.service leetplus-compose-network.service
 Type=oneshot
 # Same lock file as the legacy controller, so old and new runners never overlap.
 ExecStart=/usr/bin/flock --exclusive --nonblock /var/lib/leetplus-compose/%i.lock /usr/local/sbin/lp worker %i
-TimeoutStartSec=2800
+# Above the longest worker bound in lp.mjs (daily: 100 min).
+TimeoutStartSec=6300
 UMask=0077

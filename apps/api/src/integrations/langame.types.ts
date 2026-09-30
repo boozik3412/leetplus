@@ -23,6 +23,8 @@ export type LangameSyncStepResult = {
   message: string;
   clubId?: string;
   count?: number;
+  /** The network's API key has no access to this section (not a failed read). */
+  limited?: true;
 };
 
 export type BackgroundExecutionFencePendingReasonCode =

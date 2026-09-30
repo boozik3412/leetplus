@@ -12,9 +12,9 @@ import type { TenantExecutionAction } from '../tenancy/tenant-execution-policy.s
 import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
 import {
   externalLangamePilotAllows,
-  externalLangameDataRequirements,
   type LangameExternalPilotAuthority,
 } from './langame-external-pilot-authority';
+import { langameImportRequirements } from './langame-section-limits';
 
 export type BusinessSnapshotType =
   | 'REVENUE'
@@ -183,7 +183,6 @@ export class BusinessSnapshotService {
     const admission = await this.assertExecutionAllowed(
       tenantId,
       executionAction,
-      externalPilot,
     );
     if (
       externalPilot &&
@@ -243,12 +242,11 @@ export class BusinessSnapshotService {
   private assertExecutionAllowed(
     tenantId: string,
     action: TenantExecutionAction,
-    externalPilot?: LangameExternalPilotAuthority,
   ) {
     return this.tenantExecutionAdmissionService.assertAllowed(
       tenantId,
-      action === 'OUTBOUND' && externalPilot
-        ? externalLangameDataRequirements(BUSINESS_SNAPSHOT_MODULES)
+      action === 'OUTBOUND'
+        ? langameImportRequirements(BUSINESS_SNAPSHOT_MODULES)
         : BUSINESS_SNAPSHOT_MODULES.map((module) => ({ module, action })),
     );
   }

@@ -16,6 +16,7 @@ import {
   loadLangameDailyWorkerConfig,
   runLangameDailyMaintenanceOnce,
   runLangameDailyWorkerOnce,
+  runLangameExternalTenantsDailyOnce,
 } from './langame-daily-worker';
 import { SecretEncryptionService } from './secret-encryption.service';
 
@@ -51,13 +52,33 @@ async function main() {
   );
 
   try {
-    const result = await runLangameDailyWorkerOnce(
-      application.get(LangameDailySyncService),
-    );
-    await runLangameDailyMaintenanceOnce(result, {
-      activityLedger: application.get(GuestActivityLedgerService),
-      retention: application.get(GuestGameDataRetentionService),
-    });
+    const dailySync = application.get(LangameDailySyncService);
+    // The primary tenant and its maintenance run first; external networks
+    // still sync when it fails, and the process then reports every failure.
+    let primaryError: unknown = null;
+    try {
+      const result = await runLangameDailyWorkerOnce(dailySync);
+      await runLangameDailyMaintenanceOnce(result, {
+        activityLedger: application.get(GuestActivityLedgerService),
+        retention: application.get(GuestGameDataRetentionService),
+      });
+    } catch (error) {
+      primaryError = error;
+    }
+    const external = await runLangameExternalTenantsDailyOnce(dailySync);
+    const failures = [
+      ...(primaryError
+        ? [
+            primaryError instanceof Error
+              ? primaryError.message
+              : 'primary tenant failed',
+          ]
+        : []),
+      ...(external.failed.length
+        ? [`External networks failed: ${external.failed.join(', ')}`]
+        : []),
+    ];
+    if (failures.length > 0) throw new Error(failures.join('; '));
   } finally {
     await application.close();
   }

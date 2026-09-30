@@ -1,5 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
-import { TenantCustomerStage, TenantModule } from '@prisma/client';
+import { TenantModule } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import { BusinessSnapshotService } from './business-snapshot.service';
@@ -51,10 +51,10 @@ describe('BusinessSnapshotService tenant execution admission', () => {
     expect(findMany).not.toHaveBeenCalled();
   });
 
-  it('requires every affected outbound module before a scheduled snapshot write', async () => {
+  it('requires write access to every affected module before a scheduled snapshot write', async () => {
     assertAllowed.mockRejectedValueOnce(
       new ForbiddenException({
-        reasonCode: 'ENTITLEMENT_OUTBOUND_DISABLED',
+        reasonCode: 'ENTITLEMENT_WRITE_DISABLED',
       }),
     );
 
@@ -62,26 +62,27 @@ describe('BusinessSnapshotService tenant execution admission', () => {
       service.runSnapshotsForTenant('tenant-a', { type: 'ALL' }, 'OUTBOUND'),
     ).rejects.toThrow(ForbiddenException);
 
+    // Snapshots are built from the network's own data; no OUTBOUND needed.
     expect(assertAllowed).toHaveBeenCalledWith(
       'tenant-a',
-      snapshotModules.map((module) => ({ module, action: 'OUTBOUND' })),
+      snapshotModules.map((module) => ({ module, action: 'WRITE' })),
     );
     expect(create).not.toHaveBeenCalled();
     expect(findMany).not.toHaveBeenCalled();
   });
 
-  it('fences an admitted external scheduled snapshot before creating a run', async () => {
+  it('fences a scheduled snapshot of a tenant without a known stage before creating a run', async () => {
     assertAllowed.mockResolvedValueOnce({
       allowed: true,
-      tenantId: 'tenant-pilot',
+      tenantId: 'tenant-unknown',
       reasonCode: 'ALLOWED',
       failedRequirement: null,
-      customerStage: TenantCustomerStage.PILOT,
+      customerStage: null,
     });
 
     await expect(
       service.runSnapshotsForTenant(
-        'tenant-pilot',
+        'tenant-unknown',
         { type: 'ALL' },
         'OUTBOUND',
       ),
@@ -90,7 +91,7 @@ describe('BusinessSnapshotService tenant execution admission', () => {
       response: {
         reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
         message: expect.stringContaining(
-          'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+          'BACKGROUND_EXECUTION_STAGE_REQUIRED',
         ) as string,
       },
     });

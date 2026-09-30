@@ -13,6 +13,8 @@ export type LangameSyncStep = {
   message: string;
   clubId?: string;
   count?: number;
+  /** The network's API key has no access to this section. */
+  limited?: true;
 };
 
 export type LangameSyncSourceResult = {
@@ -23,7 +25,15 @@ export type LangameSyncSourceResult = {
 };
 
 const providerPartialMessagePrefix =
-  /^(?:LANGAME_SYNC_PARTIAL|LANGAME_SYNC_UNAVAILABLE):\s*/u;
+  /^(?:LANGAME_SYNC_PARTIAL|LANGAME_SYNC_UNAVAILABLE|LANGAME_SYNC_LIMITED):\s*/u;
+const providerLimitedMessagePrefix = /^LANGAME_SYNC_LIMITED:\s*/u;
+
+/** A complete import that skipped sections the API key has no access to. */
+export function isLangameSyncLimitedMessage(
+  message: string | null | undefined,
+) {
+  return Boolean(message && providerLimitedMessagePrefix.test(message));
+}
 const discrepancyAuditMessagePrefix =
   /^LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED:\s*/u;
 
@@ -87,9 +97,14 @@ export function langameSyncMessage(message: string | null | undefined) {
 export function langameSyncStepStatusLabel({
   status,
   count,
-}: Pick<LangameSyncStep, "status" | "count">) {
+  limited,
+}: Pick<LangameSyncStep, "status" | "count" | "limited">) {
   if (status === "SUCCESS") {
     return "загружено";
+  }
+
+  if (limited) {
+    return "нет доступа по ключу API";
   }
 
   return typeof count === "number" && count > 0 ? "частично" : "не загружено";

@@ -40,6 +40,11 @@ import {
 } from './langame-external-pilot-authority';
 import { LangameSettingsService } from './langame-settings.service';
 import {
+  LANGAME_SYNC_LIMITED_PREFIX,
+  langameImportRequirements,
+  langameSectionLimitMessage,
+} from './langame-section-limits';
+import {
   BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
   LANGAME_DISCREPANCY_AUDIT_WRITE_FAILED_PREFIX,
   LANGAME_SYNC_PARTIAL_PREFIX,
@@ -260,14 +265,13 @@ export class LangameSyncService {
     backgroundJobKind: 'LANGAME_SCHEDULED_SYNC' | 'LANGAME_DAILY_SYNC',
     externalPilot?: LangameExternalPilotAuthority,
   ): Promise<LangameSyncResult> {
+    // AUTO is the unattended path (background policy below); manual and
+    // scheduled imports write the same local data and need the same WRITE.
     const executionAction =
       query.trigger === 'AUTO' ? ('OUTBOUND' as const) : ('WRITE' as const);
     const admission = await this.tenantExecutionAdmissionService.assertAllowed(
       tenantId,
-      LANGAME_SYNC_MODULES.map((module) => ({
-        module,
-        action: executionAction,
-      })),
+      langameImportRequirements(LANGAME_SYNC_MODULES),
     );
     if (
       externalPilot &&
@@ -424,34 +428,37 @@ export class LangameSyncService {
       };
       // Only the provider read belongs in this catch. Persistence and tenant
       // admission must never be reclassified as an optional provider failure.
+      const readSections = new Set<string>();
       const readSection: SectionReader = async (component, request, clubId) => {
         await this.assertExternalExecutionCurrent(externalPilot);
+        const sectionKey = `${component}:${clubId ?? ''}`;
         let rows: Awaited<ReturnType<typeof request>>;
         try {
           rows = await request();
         } catch (error) {
-          const denied =
-            error instanceof Error &&
-            /no permissions|forbidden|unauthorized|\b40[13]\b/i.test(
-              error.message,
-            );
-          // A known provider permission limit affects only this read. AUTO
-          // still fails closed on transport/unknown errors and never advances
-          // complete coverage for a partial import.
+          const denied = langameSectionLimitMessage(error) !== null;
+          // A section that already returned a page this run is accessible, so
+          // a later denial leaves it incomplete rather than unavailable.
+          const limited = denied && !readSections.has(sectionKey);
+          // A known provider limit affects only this read. AUTO still fails
+          // closed on transport/unknown errors and never advances complete
+          // coverage for a partial import.
           if (trigger !== IntegrationSyncTrigger.MANUAL && !denied) throw error;
           steps.push({
             component,
             status: 'FAILED',
             message: `${SYNC_COMPONENT_LABELS[component]}: ${
-              denied
-                ? 'Langame не предоставил доступ к этому разделу. Другие разделы проверяются независимо.'
+              limited
+                ? 'Langame не предоставил доступ к этому разделу. Другие разделы загружаются независимо.'
                 : 'не удалось полностью получить данные от Langame. Повторите загрузку после устранения ошибки источника.'
             }`,
             ...(clubId ? { clubId } : {}),
+            ...(limited ? { limited: true } : {}),
           });
           // No raw provider response, key, URL parameters or payload in comments.
           return undefined;
         }
+        readSections.add(sectionKey);
         await this.assertExternalExecutionCurrent(externalPilot);
         return rows;
       };
@@ -702,39 +709,57 @@ export class LangameSyncService {
           (step) => step.component === 'SALES',
         );
         if (incompleteSales) incompleteSales.count = sourceResult.salesFacts;
-        if (unavailable.length > 0) {
-          const saved =
-            steps.some((step) => step.status === 'SUCCESS') ||
-            sourceResult.salesFacts > 0 ||
-            sourceResult.inventorySnapshots > 0;
+        // Sections the key has no access to are reported, but they do not
+        // make the sections that were read incomplete.
+        const limited = unavailable.filter((step) => step.limited);
+        const saved =
+          steps.some((step) => step.status === 'SUCCESS') ||
+          sourceResult.salesFacts > 0 ||
+          sourceResult.inventorySnapshots > 0;
+        const incomplete =
+          unavailable.length > limited.length ||
+          (unavailable.length > 0 && !saved);
+        const stepMessages = (list: LangameSyncStepResult[]) => [
+          ...list
+            .slice(0, 50)
+            .map(
+              (step) =>
+                `${step.clubId ? `Клуб ${step.clubId}: ` : ''}${step.message}`,
+            ),
+          ...(list.length > 50 ? [`Ещё ошибок: ${list.length - 50}.`] : []),
+          ...(sourceResult.discrepancyLogError
+            ? [sourceResult.discrepancyLogError]
+            : []),
+        ];
+        if (unavailable.length > 0) sourceResult.steps = steps;
+        if (incomplete) {
           sourceResult.status = saved ? 'PARTIAL' : 'FAILED';
-          sourceResult.steps = steps;
           sourceResult.errorMessage = [
             `${saved ? LANGAME_SYNC_PARTIAL_PREFIX : 'LANGAME_SYNC_UNAVAILABLE'}:`,
-            ...unavailable
-              .slice(0, 50)
-              .map(
-                (step) =>
-                  `${step.clubId ? `Клуб ${step.clubId}: ` : ''}${step.message}`,
-              ),
-            ...(unavailable.length > 50
-              ? [`Ещё ошибок: ${unavailable.length - 50}.`]
-              : []),
-            ...(sourceResult.discrepancyLogError
-              ? [sourceResult.discrepancyLogError]
-              : []),
+            ...stepMessages(unavailable),
           ].join(' ');
-        } else if (sourceResult.status !== 'PARTIAL') {
-          sourceResult.status = 'SUCCESS';
+        } else {
+          if (sourceResult.status !== 'PARTIAL')
+            sourceResult.status = 'SUCCESS';
+          if (limited.length > 0) {
+            sourceResult.errorMessage = [
+              `${LANGAME_SYNC_LIMITED_PREFIX}:`,
+              ...stepMessages(limited),
+            ].join(' ');
+          }
         }
         // A partial read is not evidence that this source/period is complete.
         // Retain the full-success cursor, including after a later-page failure.
-        if (unavailable.length === 0 && !externalPilot)
+        // Sales without access keep the date cursor so a later grant reloads them.
+        const salesLimited = limited.some(
+          (step) => step.component === 'SALES' || step.component === 'REVENUE',
+        );
+        if (!incomplete && !externalPilot)
           await this.prisma.integrationSource.update({
             where: { id: source.id },
             data: {
               lastSyncedAt: new Date(),
-              ...(shouldSyncSales
+              ...(shouldSyncSales && !salesLimited
                 ? {
                     lastSyncedDate: this.maxSyncedDate(
                       source.lastSyncedDate ?? null,
@@ -747,10 +772,9 @@ export class LangameSyncService {
         await this.prisma.integrationSyncJob.update({
           where: { id: syncJob.id },
           data: {
-            status:
-              unavailable.length > 0
-                ? IntegrationSyncStatus.FAILED
-                : IntegrationSyncStatus.SUCCESS,
+            status: incomplete
+              ? IntegrationSyncStatus.FAILED
+              : IntegrationSyncStatus.SUCCESS,
             finishedAt: new Date(),
             storesCount: sourceResult.stores,
             productsCount: sourceResult.products,

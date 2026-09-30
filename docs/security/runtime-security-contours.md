@@ -102,6 +102,40 @@ source/Store revisions; computer count пишет только exact актив�
 CAS. Signed LIVE workflow берёт row locks tenant/source/Store до проверки
 preimage. Это пока только source/CI candidate, не установленный runtime.
 
+### Ежедневная синхронизация внешних сетей (30.09.2026)
+
+Решение владельца: сети вроде EZ GAME обновляются каждый день, как 1337, а
+недоступные по ключу API разделы не мешают остальным данным. Это заменяет
+прежнее правило «scheduled/daily external Langame и guest foundation —
+`EXTERNAL_DENY`» ниже.
+
+- Владелец расписания прежний: единственный `lp-daily.timer` →
+  `langame-daily-worker`. После основного INTERNAL tenant
+  (`LANGAME_DAILY_WORKER_TENANT_SLUG`, с recovery/retention) он по очереди
+  синхронизирует каждую сеть `PILOT/BETA/LIVE` с активными Langame-ключом и
+  источником. Сбой одной сети логируется и не останавливает остальные; процесс
+  завершается с ошибкой, если упала любая сеть. Canary и
+  `LANGAME_DAILY_WORKER_EXTERNAL_TENANTS_ENABLED=false` отключают этот проход.
+  API-слоты и scheduled HTTP по-прежнему не владеют расписанием.
+- `LANGAME_DAILY_SYNC`, `LANGAME_GUEST_DATA_FOUNDATION`,
+  `LANGAME_BUSINESS_SNAPSHOT` — `REVISION_FENCED`: доступ проверяется в начале,
+  а перед каждым следующим scope сеть должна быть всё ещё допущена с той же
+  `executionRevision` (закрытие срока доступа или смена профиля останавливают
+  проход). `LANGAME_SCHEDULED_SYNC` и все игровые/бонусные задачи внешних
+  сетей остаются `EXTERNAL_DENY`; bonus worker по-прежнему только для INTERNAL.
+- Фоновый импорт Langame пишет только данные самой сети, как ручная загрузка
+  из /sync, поэтому требует модульный `WRITE`
+  (INTEGRATIONS/ASSORTMENT/GAMIFICATION/STAFF), а не `OUTBOUND`. `OUTBOUND`
+  остаётся за внешними эффектами: начисление бонусов в Langame, сообщения
+  гостям, live-вызовы гостевого портала. Внешняя сеть читает только клубы
+  своих persisted exact Store bindings.
+- Отказ раздела по правам ключа или отказ Langame отдавать раздел списком
+  (`/guests/logs` требует `guest_id` с 29.09.2026) — ограничение, а не сбой:
+  импорт остальных разделов полный, курсоры и daily coverage продвигаются
+  ([правила](../integrations/langame-partial-sync.md)).
+- Egress, секреты, схема БД и роли не меняются: `1171.langame.ru` уже в
+  provider policy, worker использует прежний профиль.
+
 **Source-only Langame follow-up 27.09:** ограниченные права provider считаются
 рабочим режимом ручного импорта: доступные разделы продолжают загружаться.
 Гостевые denial-, multi-club- и pagination-сценарии закрепляют сохранение

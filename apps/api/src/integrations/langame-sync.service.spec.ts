@@ -857,21 +857,24 @@ describe('LangameSyncService', () => {
     const denied = () =>
       new Error('No permissions to access this route; secret=test-key');
 
-    it('keeps products, inventory and sales when categories and configuration are denied', async () => {
+    it('completes products, inventory and sales when the key has no access to categories and configuration', async () => {
       client.listActiveProductGroups.mockRejectedValue(denied());
       client.listClubProductConfiguration.mockRejectedValue(denied());
       const result = await service.syncTenant(user, period);
 
       expect(result).toMatchObject({
         failedSources: 0,
-        partialSources: 1,
+        partialSources: 0,
         products: 1,
         inventorySnapshots: 1,
         salesFacts: 1,
         clubRevenueFacts: 2,
         sourceResults: [
           {
-            status: 'PARTIAL',
+            status: 'SUCCESS',
+            errorMessage: expect.stringMatching(
+              /^LANGAME_SYNC_LIMITED:.*Категории товаров/,
+            ) as unknown,
             steps: expect.arrayContaining([
               expect.objectContaining({
                 component: 'PRODUCTS',
@@ -881,6 +884,7 @@ describe('LangameSyncService', () => {
               expect.objectContaining({
                 component: 'CATEGORIES',
                 status: 'FAILED',
+                limited: true,
                 message: expect.stringContaining(
                   'не предоставил доступ',
                 ) as unknown,
@@ -888,6 +892,7 @@ describe('LangameSyncService', () => {
               expect.objectContaining({
                 component: 'CONFIGURATION',
                 status: 'FAILED',
+                limited: true,
                 clubId: '1',
               }),
             ]) as unknown,
@@ -899,19 +904,58 @@ describe('LangameSyncService', () => {
       expect(
         prisma.langameClubProductConfiguration.updateMany,
       ).not.toHaveBeenCalled();
-      expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+      // The sections that were read are complete: the sales cursor advances.
+      expect(prisma.integrationSource.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            lastSyncedAt: expect.any(Date) as unknown,
+            lastSyncedDate: expect.any(Date) as unknown,
+          }) as unknown,
+        }),
+      );
       expect(prisma.integrationSyncJob.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            status: 'FAILED',
+            status: 'SUCCESS',
             productsCount: 1,
             errorMessage: expect.stringMatching(
-              /^LANGAME_SYNC_PARTIAL:/,
+              /^LANGAME_SYNC_LIMITED:/,
             ) as unknown,
           }) as unknown,
         }),
       );
       expect(JSON.stringify(result)).not.toContain('test-key');
+    });
+
+    it('keeps the sales cursor when the key has no access to sales', async () => {
+      client.listProductExpenses.mockReset().mockRejectedValue(denied());
+      const result = await service.syncTenant(user, period);
+
+      expect(result).toMatchObject({
+        failedSources: 0,
+        partialSources: 0,
+        products: 1,
+        salesFacts: 0,
+      });
+      expect(prisma.integrationSource.update).toHaveBeenCalledTimes(1);
+      const [update] = prisma.integrationSource.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(update.data.lastSyncedAt).toEqual(expect.any(Date));
+      expect(update.data).not.toHaveProperty('lastSyncedDate');
+    });
+
+    it('treats the guest_id requirement of /guests/logs style list routes as a section limit', async () => {
+      client.listActiveProductGroups.mockRejectedValue(
+        new Error(
+          'Langame /products/groups/active failed: 400 Bad Request - {"violations":[{"field":"guest_id","error":"required"}]}',
+        ),
+      );
+      const result = await service.syncTenant(user, {
+        ...period,
+        trigger: 'AUTO',
+      });
+      expect(result).toMatchObject({ failedSources: 0, partialSources: 0 });
     });
 
     it('continues categories without replacing old products when the catalog is unavailable', async () => {
@@ -923,12 +967,15 @@ describe('LangameSyncService', () => {
       expect(result).toMatchObject({
         products: 0,
         productGroups: 1,
-        partialSources: 1,
+        partialSources: 0,
         failedSources: 0,
       });
       expect(prisma.product.upsert).not.toHaveBeenCalled();
       expect(prisma.product.updateMany).not.toHaveBeenCalled();
-      expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+      const [update] = prisma.integrationSource.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(update.data).not.toHaveProperty('lastSyncedDate');
     });
 
     it('retains exact external club scope when categories are unavailable', async () => {
@@ -989,7 +1036,7 @@ describe('LangameSyncService', () => {
       ]);
       const result = await service.syncTenant(user, period);
       expect(result).toMatchObject({
-        partialSources: 1,
+        partialSources: 0,
         failedSources: 0,
         products: 1,
         stores: 1,
@@ -1004,7 +1051,7 @@ describe('LangameSyncService', () => {
         1,
       );
       expect(prisma.salesFact.upsert).toHaveBeenCalledTimes(1);
-      expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+      expect(prisma.integrationSource.update).toHaveBeenCalledTimes(1);
     });
 
     it('preserves automatic unmapped-inventory behavior without a new partial permission', async () => {
@@ -1092,7 +1139,7 @@ describe('LangameSyncService', () => {
         mode: 'INVENTORY',
       });
       expect(result).toMatchObject({
-        partialSources: 1,
+        partialSources: 0,
         failedSources: 0,
         inventorySnapshots: 1,
       });
@@ -1102,6 +1149,7 @@ describe('LangameSyncService', () => {
           expect.objectContaining({
             component: 'INVENTORY',
             status: 'FAILED',
+            limited: true,
             clubId: '1',
           }),
           expect.objectContaining({
@@ -1146,7 +1194,7 @@ describe('LangameSyncService', () => {
       expect(prisma.integrationSource.update).not.toHaveBeenCalled();
     });
 
-    it('continues permitted automatic sections without claiming complete coverage', async () => {
+    it('completes permitted automatic sections when the key has no access to categories', async () => {
       client.listActiveProductGroups.mockRejectedValue(
         new Error('No permissions'),
       );
@@ -1156,7 +1204,7 @@ describe('LangameSyncService', () => {
       });
       expect(result).toMatchObject({
         failedSources: 0,
-        partialSources: 1,
+        partialSources: 0,
         products: 1,
         inventorySnapshots: 1,
         salesFacts: 1,
@@ -1164,7 +1212,7 @@ describe('LangameSyncService', () => {
       });
       expect(prisma.product.upsert).toHaveBeenCalled();
       expect(client.listGoods).toHaveBeenCalled();
-      expect(prisma.integrationSource.update).not.toHaveBeenCalled();
+      expect(prisma.integrationSource.update).toHaveBeenCalledTimes(1);
     });
 
     it('retains automatic transport failure instead of treating it as a permission limit', async () => {
@@ -1255,7 +1303,7 @@ describe('LangameSyncService', () => {
       expect(prisma.integrationSource.update).not.toHaveBeenCalled();
     });
 
-    it('clears the partial result on a fully successful retry using the same product identity', async () => {
+    it('clears the limited-access note once access is granted, using the same product identity', async () => {
       client.listActiveProductGroups.mockRejectedValueOnce(denied());
       const first = await service.syncTenant(user, {
         ...period,
@@ -1265,13 +1313,23 @@ describe('LangameSyncService', () => {
         ...period,
         mode: 'CATALOG',
       });
-      expect(first.partialSources).toBe(1);
+      expect(first).toMatchObject({
+        partialSources: 0,
+        sourceResults: [
+          {
+            status: 'SUCCESS',
+            errorMessage: expect.stringMatching(
+              /^LANGAME_SYNC_LIMITED:/,
+            ) as unknown,
+          },
+        ],
+      });
       expect(second).toMatchObject({
         partialSources: 0,
         failedSources: 0,
         sourceResults: [{ status: 'SUCCESS', errorMessage: null }],
       });
-      expect(prisma.integrationSource.update).toHaveBeenCalledTimes(1);
+      expect(prisma.integrationSource.update).toHaveBeenCalledTimes(2);
       const calls = prisma.product.upsert.mock.calls as [{ where: unknown }][];
       expect(calls[0][0].where).toEqual(calls[1][0].where);
     });
@@ -1786,9 +1844,9 @@ describe('LangameSyncService', () => {
     }
   });
 
-  it('rechecks both outbound modules in the scheduled child before credentials and provider calls', async () => {
+  it('rechecks both import modules in the scheduled child before credentials and provider calls', async () => {
     admission.assertAllowed.mockRejectedValueOnce(
-      new Error('ENTITLEMENT_OUTBOUND_DISABLED'),
+      new Error('ENTITLEMENT_WRITE_DISABLED'),
     );
 
     await expect(
@@ -1796,11 +1854,12 @@ describe('LangameSyncService', () => {
         mode: 'FULL',
         trigger: 'AUTO',
       }),
-    ).rejects.toThrow('ENTITLEMENT_OUTBOUND_DISABLED');
+    ).rejects.toThrow('ENTITLEMENT_WRITE_DISABLED');
 
+    // Import writes local data only; OUTBOUND stays for provider effects.
     expect(admission.assertAllowed).toHaveBeenCalledWith('tenant-1', [
-      { module: TenantModule.INTEGRATIONS, action: 'OUTBOUND' },
-      { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
+      { module: TenantModule.INTEGRATIONS, action: 'WRITE' },
+      { module: TenantModule.ASSORTMENT, action: 'WRITE' },
     ]);
     expect(settings.resolveTenantAccess).not.toHaveBeenCalled();
     expect(prisma.integrationSyncJob.create).not.toHaveBeenCalled();

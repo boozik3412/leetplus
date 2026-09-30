@@ -9,7 +9,6 @@ import {
   GuestDataFoundationService,
   type GuestDataFoundationSyncResult,
 } from './guest-data-foundation.service';
-import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
 import { createLangameExternalPilotAuthority } from './langame-external-pilot-authority';
 
 jest.mock('./langame-external-import-lock', () => ({
@@ -668,9 +667,9 @@ describe('GuestDataFoundationService', () => {
     }
   });
 
-  it('requires outbound access to every affected module for a scheduled child sync', async () => {
+  it('requires write access to every affected module for a scheduled child sync', async () => {
     tenantExecutionAdmissionService.assertAllowed.mockRejectedValueOnce(
-      new Error('ENTITLEMENT_OUTBOUND_DISABLED'),
+      new Error('ENTITLEMENT_WRITE_DISABLED'),
     );
 
     await expect(
@@ -682,21 +681,22 @@ describe('GuestDataFoundationService', () => {
         },
         'OUTBOUND',
       ),
-    ).rejects.toThrow('ENTITLEMENT_OUTBOUND_DISABLED');
+    ).rejects.toThrow('ENTITLEMENT_WRITE_DISABLED');
 
+    // The import writes local data only; OUTBOUND stays for provider effects.
     expect(tenantExecutionAdmissionService.assertAllowed).toHaveBeenCalledWith(
       'tenant-1',
       [
-        { module: TenantModule.INTEGRATIONS, action: 'OUTBOUND' },
-        { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
-        { module: TenantModule.GAMIFICATION, action: 'OUTBOUND' },
-        { module: TenantModule.STAFF, action: 'OUTBOUND' },
+        { module: TenantModule.INTEGRATIONS, action: 'WRITE' },
+        { module: TenantModule.ASSORTMENT, action: 'WRITE' },
+        { module: TenantModule.GAMIFICATION, action: 'WRITE' },
+        { module: TenantModule.STAFF, action: 'WRITE' },
       ],
     );
     expect(langameSettingsService.resolveTenantAccess).not.toHaveBeenCalled();
   });
 
-  it('fences an admitted external scheduled child before stale-run, credential or provider access', async () => {
+  it('runs an admitted external scheduled child under the revision-fenced policy', async () => {
     tenantExecutionAdmissionService.assertAllowed.mockResolvedValueOnce({
       allowed: true,
       tenantId: 'tenant-pilot',
@@ -714,25 +714,17 @@ describe('GuestDataFoundationService', () => {
         },
         'OUTBOUND',
       ),
-    ).rejects.toMatchObject({
-      status: 503,
-      response: {
-        reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
-        message: expect.stringContaining(
-          'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
-        ) as string,
-      },
+    ).resolves.toMatchObject({
+      tenantId: 'tenant-pilot',
+      failedSources: 0,
+      partialSources: 0,
     });
-
-    expect(prisma.guestDataProfileRun.updateMany).not.toHaveBeenCalled();
-    expect(prisma.guestDataProfileRun.create).not.toHaveBeenCalled();
-    expect(langameSettingsService.resolveTenantAccess).not.toHaveBeenCalled();
-    for (const method of Object.values(langameClient)) {
-      expect(method).not.toHaveBeenCalled();
-    }
+    expect(langameSettingsService.resolveTenantAccess).toHaveBeenCalledWith(
+      'tenant-pilot',
+    );
   });
 
-  it('skips external configured tenants without aborting the following internal sync', async () => {
+  it('syncs external configured tenants next to the internal one', async () => {
     prisma.tenant.findMany.mockResolvedValueOnce([
       {
         id: 'tenant-pilot',
@@ -743,15 +735,20 @@ describe('GuestDataFoundationService', () => {
         customerStage: TenantCustomerStage.INTERNAL,
       },
     ]);
-    const internalResult: GuestDataFoundationSyncResult = {
-      tenantId: 'tenant-internal',
+    const pilotResult: GuestDataFoundationSyncResult = {
+      tenantId: 'tenant-pilot',
       sources: 1,
       failedSources: 0,
       partialSources: 0,
       sourceResults: [],
     };
+    const internalResult: GuestDataFoundationSyncResult = {
+      ...pilotResult,
+      tenantId: 'tenant-internal',
+    };
     const syncTenantById = jest
       .spyOn(service, 'syncTenantById')
+      .mockResolvedValueOnce(pilotResult)
       .mockResolvedValueOnce(internalResult);
 
     await expect(
@@ -761,21 +758,12 @@ describe('GuestDataFoundationService', () => {
       }),
     ).resolves.toEqual({
       tenants: 2,
-      results: [internalResult],
-      skipped: 1,
-      skips: [
-        expect.objectContaining({
-          status: 'SKIPPED',
-          tenantId: 'tenant-pilot',
-          reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
-          note: expect.stringContaining(
-            'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
-          ) as string,
-        }),
-      ],
+      results: [pilotResult, internalResult],
+      skipped: 0,
+      skips: [],
     });
 
-    expect(syncTenantById).toHaveBeenCalledTimes(1);
+    expect(syncTenantById).toHaveBeenCalledTimes(2);
     expect(syncTenantById).toHaveBeenCalledWith(
       'tenant-internal',
       {
@@ -861,10 +849,10 @@ describe('GuestDataFoundationService', () => {
     expect(tenantExecutionAdmissionService.assertAllowed).toHaveBeenCalledWith(
       authority.tenantId,
       [
-        { module: TenantModule.INTEGRATIONS, action: 'OUTBOUND' },
-        { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
+        { module: TenantModule.INTEGRATIONS, action: 'WRITE' },
+        { module: TenantModule.ASSORTMENT, action: 'WRITE' },
         { module: TenantModule.GAMIFICATION, action: 'WRITE' },
-        { module: TenantModule.STAFF, action: 'OUTBOUND' },
+        { module: TenantModule.STAFF, action: 'WRITE' },
       ],
     );
     expect(prisma.guestDataProfileRun.updateMany).not.toHaveBeenCalled();
@@ -1095,6 +1083,43 @@ describe('GuestDataFoundationService', () => {
     );
   });
 
+  it('completes the import when Langame requires guest_id for the network-wide guest log', async () => {
+    langameClient.listGuestLogs.mockRejectedValueOnce(
+      new Error(
+        'Langame /guests/logs failed: 400 Bad Request - {"title":"An error occurred","status":400,"detail":"Validation failed","violations":[{"field":"guest_id","error":"Значение не должно быть пустым."}]}',
+      ),
+    );
+
+    const result = await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+      includeGuestLogs: true,
+    });
+
+    expect(result).toMatchObject({ failedSources: 0, partialSources: 0 });
+    expect(result.sourceResults[0]).toMatchObject({
+      status: 'SUCCESS',
+      endpointErrors: {
+        'guests/logs':
+          'Langame больше не отдаёт этот раздел списком по всей сети.',
+      },
+    });
+  });
+
+  it('keeps a transport failure of one guest section partial', async () => {
+    langameClient.listGuestSessions.mockRejectedValueOnce(
+      new Error('socket hang up'),
+    );
+
+    const result = await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    expect(result).toMatchObject({ failedSources: 0, partialSources: 1 });
+    expect(result.sourceResults[0].status).toBe('PARTIAL');
+  });
+
   it('loads guest logs only when explicitly requested', async () => {
     await service.syncTenant(user, {
       dateFrom: '2026-05-01',
@@ -1124,7 +1149,7 @@ describe('GuestDataFoundationService', () => {
     ['listPcTypesInClubs', 'global/types_of_pc_in_clubs/list'],
     ['listPcTypeLinks', 'global/linking_pc_by_type/list'],
   ] as const)(
-    'continues independent guest sections when %s denies access',
+    'completes independent guest sections when %s denies access',
     async (method, endpoint) => {
       langameClient[method].mockRejectedValueOnce(new Error('No permissions'));
 
@@ -1134,9 +1159,11 @@ describe('GuestDataFoundationService', () => {
         includeGuestLogs: true,
       });
 
+      // A section the key has no access to is reported, not a failed read.
       expect(result.failedSources).toBe(0);
-      expect(result.partialSources).toBe(1);
-      expect(result.sourceResults[0].status).toBe('PARTIAL');
+      expect(result.partialSources).toBe(0);
+      expect(result.sourceResults[0].status).toBe('SUCCESS');
+      expect(result.sourceResults[0].errorMessage).toContain(endpoint);
       expect(result.sourceResults[0].endpointErrors).toEqual({
         [endpoint]: 'Langame не предоставил доступ к этому разделу.',
       });
@@ -1282,7 +1309,8 @@ describe('GuestDataFoundationService', () => {
 
     expect(langameClient.listCashTransactions).toHaveBeenCalledTimes(2);
     expect(result.sourceResults[0].cashTransactions).toBe(1);
-    expect(result.sourceResults[0].status).toBe('PARTIAL');
+    // One club without access is a reported limit, not an incomplete import.
+    expect(result.sourceResults[0].status).toBe('SUCCESS');
     expect(result.sourceResults[0].endpointErrors).toHaveProperty(
       'log_cash_transaction/list',
     );

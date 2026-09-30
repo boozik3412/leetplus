@@ -11,7 +11,6 @@ import type { BusinessSnapshotService } from './business-snapshot.service';
 import type { GuestDataFoundationService } from './guest-data-foundation.service';
 import { LangameDailySyncService } from './langame-daily-sync.service';
 import type { LangameSyncService } from './langame-sync.service';
-import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
 import { createLangameExternalPilotAuthority } from './langame-external-pilot-authority';
 
 jest.mock('./langame-external-import-lock', () => ({
@@ -169,14 +168,15 @@ describe('LangameDailySyncService tenant execution admission', () => {
       ],
     });
     expect(runTenantDailySync).toHaveBeenCalledTimes(1);
+    // The daily import writes the network's own data: WRITE, not OUTBOUND.
     expect(subject.admissionService.evaluate).toHaveBeenNthCalledWith(
       1,
       'tenant-denied',
       [
-        { module: TenantModule.INTEGRATIONS, action: 'OUTBOUND' },
-        { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
-        { module: TenantModule.GAMIFICATION, action: 'OUTBOUND' },
-        { module: TenantModule.STAFF, action: 'OUTBOUND' },
+        { module: TenantModule.INTEGRATIONS, action: 'WRITE' },
+        { module: TenantModule.ASSORTMENT, action: 'WRITE' },
+        { module: TenantModule.GAMIFICATION, action: 'WRITE' },
+        { module: TenantModule.STAFF, action: 'WRITE' },
       ],
     );
     expect(runTenantDailySync).toHaveBeenCalledWith({
@@ -186,6 +186,8 @@ describe('LangameDailySyncService tenant execution admission', () => {
       dateInput: '2026-07-27',
       force: false,
       includeCurrentInventory: false,
+      customerStage: TenantCustomerStage.INTERNAL,
+      executionRevision: undefined,
     });
   });
 
@@ -273,7 +275,7 @@ describe('LangameDailySyncService tenant execution admission', () => {
     });
   });
 
-  it('skips an admitted external tenant before any daily scope or coverage mutation', async () => {
+  it('runs an admitted external tenant and stops it when its execution revision changes', async () => {
     const subject = createSubject();
     subject.prisma.tenant.findMany.mockResolvedValue([
       { id: 'tenant-pilot', slug: 'pilot' },
@@ -284,48 +286,67 @@ describe('LangameDailySyncService tenant execution admission', () => {
       reasonCode: 'ALLOWED',
       failedRequirement: null,
       customerStage: TenantCustomerStage.PILOT,
+      executionRevision: 3,
     });
-    const runTenantDailySync = jest.spyOn(
-      subject.service as unknown as RunnableDailySyncService,
-      'runTenantDailySync',
-    );
-
-    const result = await subject.service.runDailySync({ date: '2026-07-27' });
-
-    expect(result).toMatchObject({
-      tenants: 1,
-      processedTenants: 0,
-      skippedTenants: 1,
-      results: [
-        {
-          tenantId: 'tenant-pilot',
-          status: 'SKIPPED',
-          skipped: true,
-          reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
-          failedRequirement: null,
-        },
-      ],
-    });
-    expect(result.results[0]?.scopes).toHaveLength(4);
-    for (const scope of result.results[0]?.scopes ?? []) {
-      expect(scope).toMatchObject({
-        status: 'SKIPPED',
-        skipped: true,
-        errorMessage: expect.stringContaining(
-          'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
-        ) as string,
+    subject.admissionService.assertAllowed
+      .mockResolvedValueOnce({ executionRevision: 3 })
+      .mockResolvedValueOnce({ executionRevision: 4 });
+    const scopes = subject.service as unknown as {
+      runBusinessFactsScope: () => Promise<unknown>;
+      runGuestAndStaffScopes: () => Promise<unknown>;
+    };
+    const businessFacts = jest
+      .spyOn(scopes, 'runBusinessFactsScope')
+      .mockResolvedValue({
+        scope: 'BUSINESS_FACTS',
+        status: 'SUCCESS',
+        skipped: false,
+        errorMessage: null,
       });
-    }
+    const guestAndStaff = jest.spyOn(scopes, 'runGuestAndStaffScopes');
 
-    expect(runTenantDailySync).not.toHaveBeenCalled();
-    expect(subject.prisma.dailyDataCoverage.upsert).not.toHaveBeenCalled();
-    expect(subject.langameSyncService.syncTenantById).not.toHaveBeenCalled();
-    expect(
-      subject.guestDataFoundationService.syncTenantById,
-    ).not.toHaveBeenCalled();
-    expect(
-      subject.businessSnapshotService.runSnapshotsForTenant,
-    ).not.toHaveBeenCalled();
+    await expect(
+      subject.service.runDailySync({ tenantSlug: 'pilot', date: '2026-07-27' }),
+    ).rejects.toThrow('execution revision changed');
+
+    expect(businessFacts).toHaveBeenCalledTimes(1);
+    expect(guestAndStaff).not.toHaveBeenCalled();
+    expect(subject.admissionService.assertAllowed).toHaveBeenCalledWith(
+      'tenant-pilot',
+      [
+        { module: TenantModule.INTEGRATIONS, action: 'WRITE' },
+        { module: TenantModule.ASSORTMENT, action: 'WRITE' },
+        { module: TenantModule.GAMIFICATION, action: 'WRITE' },
+        { module: TenantModule.STAFF, action: 'WRITE' },
+      ],
+    );
+  });
+
+  it('lists only external networks with a connected Langame for the daily worker', async () => {
+    const subject = createSubject();
+    subject.prisma.tenant.findMany.mockResolvedValue([
+      { id: 't', slug: 'set-1' },
+    ]);
+
+    await expect(
+      subject.service.listExternalDailySyncTenantSlugs(),
+    ).resolves.toEqual(['set-1']);
+    expect(subject.prisma.tenant.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          customerStage: {
+            in: [
+              TenantCustomerStage.PILOT,
+              TenantCustomerStage.BETA,
+              TenantCustomerStage.LIVE,
+            ],
+          },
+          integrationSources: {
+            some: { provider: 'LANGAME', isActive: true },
+          },
+        }) as unknown,
+      }),
+    );
   });
 
   it('admits only the exact revision-bound external pilot before data scopes', async () => {

@@ -40,7 +40,8 @@ const BACKUPS = `${ROOT}/backups/export`;
 const PRE_MIGRATE_DUMPS = `${ROOT}/backups/pre-migrate`;
 const SLOTS = ['blue', 'green'];
 const PORTS = { blue: { web: 13100, api: 14100 }, green: { web: 13200, api: 14200 } };
-const WORKERS = { 'bonus-ledger-worker': 16 * 60, 'langame-daily-worker': 45 * 60 };
+// The daily worker syncs 1337 (~40 min) and then every connected external network.
+const WORKERS = { 'bonus-ledger-worker': 16 * 60, 'langame-daily-worker': 100 * 60 };
 // Same checks that branch protection requires for main.
 const REQUIRED_CHECKS = [
   'Release impact classification',

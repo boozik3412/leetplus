@@ -44,11 +44,15 @@ import {
 } from './langame-external-import-lock';
 import {
   externalLangamePilotAllows,
-  externalLangameDataRequirements,
   isLangameExternalPilotAuthority,
   type LangameExternalPilotAuthority,
 } from './langame-external-pilot-authority';
 import { parseLangameDate as parseLangameDateValue } from './langame-date';
+import {
+  isLangameSectionLimitMessage,
+  langameImportRequirements,
+  langameSectionLimitMessage,
+} from './langame-section-limits';
 import {
   buildLangameTariffTypeGroupIndex,
   resolveLangameSessionTariff,
@@ -440,7 +444,6 @@ export class GuestDataFoundationService {
     const admission = await this.assertExecutionAllowed(
       tenantId,
       executionAction,
-      externalPilot,
     );
     if (
       externalPilot &&
@@ -557,16 +560,37 @@ export class GuestDataFoundationService {
           externalPilot,
         });
 
-        const hasEndpointErrors =
-          Object.keys(syncResult.endpointErrors).length > 0;
-        const status = !hasEndpointErrors
-          ? 'SUCCESS'
-          : syncResult.providerReadsSucceeded > 0
-            ? 'PARTIAL'
-            : 'FAILED';
-        const message = hasEndpointErrors
-          ? `${status === 'FAILED' ? 'Не загружены' : 'Не полностью загружены'} разделы Langame: ${Object.keys(syncResult.endpointErrors).join(', ')}. ${status === 'FAILED' ? 'Данные этого запуска не подтверждены.' : 'Доступные разделы сохранены.'}`
+        const endpointErrors = Object.entries(syncResult.endpointErrors);
+        const limited = endpointErrors
+          .filter(([, message]) => isLangameSectionLimitMessage(message))
+          .map(([endpoint]) => endpoint);
+        const incomplete = endpointErrors
+          .filter(([, message]) => !isLangameSectionLimitMessage(message))
+          .map(([endpoint]) => endpoint);
+        // Sections Langame does not give this key are not a failed read: the
+        // rest of the import is complete and advances the guest cursor.
+        const status =
+          endpointErrors.length > 0 && syncResult.providerReadsSucceeded === 0
+            ? 'FAILED'
+            : incomplete.length > 0
+              ? 'PARTIAL'
+              : 'SUCCESS';
+        const limitedNote = limited.length
+          ? `Недоступны в Langame для этого ключа API: ${limited.join(', ')}.`
           : null;
+        const message =
+          status === 'FAILED'
+            ? `Не загружены разделы Langame: ${endpointErrors.map(([endpoint]) => endpoint).join(', ')}. Данные этого запуска не подтверждены.`
+            : status === 'PARTIAL'
+              ? [
+                  `Не полностью загружены разделы Langame: ${incomplete.join(', ')}. Доступные разделы сохранены.`,
+                  limitedNote,
+                ]
+                  .filter(Boolean)
+                  .join(' ')
+              : limitedNote
+                ? `${limitedNote} Остальные разделы загружены.`
+                : null;
 
         await this.prisma.guestDataProfileRun.update({
           where: { id: run.id },
@@ -819,12 +843,11 @@ export class GuestDataFoundationService {
   private assertExecutionAllowed(
     tenantId: string,
     action: TenantExecutionAction,
-    externalPilot?: LangameExternalPilotAuthority,
   ) {
     return this.tenantExecutionAdmissionService.assertAllowed(
       tenantId,
-      action === 'OUTBOUND' && externalPilot
-        ? externalLangameDataRequirements(GUEST_FOUNDATION_MODULES)
+      action === 'OUTBOUND'
+        ? langameImportRequirements(GUEST_FOUNDATION_MODULES)
         : GUEST_FOUNDATION_MODULES.map((module) => ({ module, action })),
     );
   }
@@ -915,9 +938,9 @@ export class GuestDataFoundationService {
       : null;
     const endpointErrors =
       latestRun?.profile ?? latestSuccessfulRun?.profile ?? null;
-    const endpointErrorsCount = Object.keys(
+    const endpointErrorsCount = Object.values(
       this.statusDiagnosticsFromProfile(endpointErrors).endpointErrors,
-    ).length;
+    ).filter((message) => !isLangameSectionLimitMessage(message)).length;
     const status: GuestDataFoundationFreshnessStatus = runningRun
       ? 'RUNNING'
       : !latestRun
@@ -1421,12 +1444,11 @@ export class GuestDataFoundationService {
     profile: SourceProfile,
     endpoint: string,
     error: unknown,
+    afterRows = false,
   ) {
-    const message = error instanceof Error ? error.message : '';
     profile.endpointErrors[endpoint] =
-      /no permissions|forbidden|unauthorized|\b40[13]\b/i.test(message)
-        ? 'Langame не предоставил доступ к этому разделу.'
-        : 'Не удалось получить данные этого раздела Langame.';
+      (afterRows ? null : langameSectionLimitMessage(error)) ??
+      'Не удалось получить данные этого раздела Langame.';
   }
 
   private async syncStoreComputerCounts(
@@ -2787,7 +2809,8 @@ export class GuestDataFoundationService {
         // Earlier pages remain usable, but this endpoint is not complete.
         // A first-page failure still belongs to captureEndpoint.
         if (rows.length === 0 || !profile || !endpoint) throw error;
-        this.recordEndpointError(profile, endpoint, error);
+        // Earlier pages prove access, so this endpoint is incomplete.
+        this.recordEndpointError(profile, endpoint, error, true);
         break;
       }
       if (profile) await this.assertExternalProfileCurrent(profile);
@@ -2811,7 +2834,6 @@ export class GuestDataFoundationService {
       const admission = await this.assertExecutionAllowed(
         authority.tenantId,
         'OUTBOUND',
-        authority,
       );
       if (
         !externalLangamePilotAllows(authority, {

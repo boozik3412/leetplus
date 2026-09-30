@@ -135,7 +135,10 @@ import {
   type GuestGameEvaluationMode,
 } from './guest-game-source-policy';
 import { GuestGameMediaService } from './guest-game-media.service';
-import { loadGuestGameRuleBudgetSpent } from './guest-game-rule-budget';
+import {
+  GUEST_GAME_BUDGET_REWARD_STATUSES,
+  loadGuestGameRuleBudgetSpent,
+} from './guest-game-rule-budget';
 import {
   exactBalanceTopupReplayAttestation,
   type BalanceTopupReplayHistoricalStepOverride,
@@ -19905,7 +19908,8 @@ export class GuestGamificationService {
             where: {
               tenantId: user.tenantId,
               seasonId: { not: null },
-              status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+              // An expired step reward still proves the step was completed.
+              status: { in: ['PENDING', 'APPROVED', 'PAID', 'EXPIRED'] },
               OR: seasonOwners,
             },
             include: rewardInclude,
@@ -34891,6 +34895,10 @@ function latestMissionCompletionAt(
   );
 }
 
+const budgetSpendingRewardStatuses = new Set<string>([
+  ...GUEST_GAME_BUDGET_REWARD_STATUSES,
+]);
+
 function appendDryRunBudgetCheck(
   budgetAmount: number | null,
   projectedAmount: number,
@@ -34905,7 +34913,11 @@ function appendDryRunBudgetCheck(
   }
 
   const spent = Math.max(
-    sum(rewards.map((reward) => reward.rewardAmount)),
+    sum(
+      rewards
+        .filter((reward) => budgetSpendingRewardStatuses.has(reward.status))
+        .map((reward) => reward.rewardAmount),
+    ),
     exactSpent ?? 0,
   );
   const projected = spent + projectedAmount;
@@ -35975,19 +35987,12 @@ function dryRunSeasonFreeRewardPlan(
   };
 }
 
+// A completed step stays completed when its reward expires unclaimed: the
+// step's reward intent already exists, so treating the step as open again
+// left the guest stuck on it with "already recorded". Only a canceled reward
+// takes the step back.
 function dryRunSeasonRewardCountsAsStep(reward: GuestGameReward) {
-  const status = reward.status.toUpperCase();
-
-  if (status === 'CANCELED' || status === 'EXPIRED') {
-    return false;
-  }
-
-  const expiresAt = reward.expiresAt ? new Date(reward.expiresAt) : null;
-  if (expiresAt && Number.isFinite(expiresAt.getTime())) {
-    return expiresAt.getTime() >= Date.now();
-  }
-
-  return true;
+  return reward.status.toUpperCase() !== 'CANCELED';
 }
 
 function pickLootBoxReward(

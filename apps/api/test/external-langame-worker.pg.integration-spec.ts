@@ -567,7 +567,7 @@ describePostgres(
       ).resolves.toBe('next-import');
     });
 
-    it('keeps the full source cursor and latest status PARTIAL after successful child reads', async () => {
+    it('advances the full source cursor when only sections without API key access are missing', async () => {
       const tenant = await prisma.tenant.findUniqueOrThrow({
         where: { id: scope.tenantId },
       });
@@ -654,15 +654,17 @@ describePostgres(
         externalBusinessDate: '2026-09-26',
         externalPilot: authority,
       });
+      // Categories and club settings are not given to this key: a reported
+      // limit, so the business facts of the day are complete.
       expect(partial.results[0].scopes[0]).toMatchObject({
-        status: 'FAILED',
-        partial: true,
+        status: 'SUCCESS',
       });
-      const unchanged = await prisma.integrationSource.findUniqueOrThrow({
+      const advanced = await prisma.integrationSource.findUniqueOrThrow({
         where: { id: scope.sourceId },
       });
-      expect(unchanged.lastSyncedDate).toEqual(oldDate);
-      expect(unchanged.lastSyncedAt).toEqual(oldDate);
+      expect(advanced.lastSyncedDate).toEqual(
+        new Date('2026-09-26T00:00:00.000Z'),
+      );
       await prisma.integrationSyncJob.updateMany({
         where: {
           tenantId: scope.tenantId,
@@ -674,8 +676,18 @@ describePostgres(
         where: { tenantId: scope.tenantId },
         orderBy: { startedAt: 'desc' },
       });
-      expect(latest).toMatchObject({ mode: 'FULL', status: 'FAILED' });
-      expect(latest.errorMessage).toContain('LANGAME_SYNC_PARTIAL:');
+      expect(latest).toMatchObject({ mode: 'FULL', status: 'SUCCESS' });
+      expect(
+        await prisma.integrationSyncJob.findFirstOrThrow({
+          where: { tenantId: scope.tenantId, mode: 'CATALOG' },
+          orderBy: { startedAt: 'desc' },
+        }),
+      ).toMatchObject({
+        status: 'SUCCESS',
+        errorMessage: expect.stringContaining(
+          'LANGAME_SYNC_LIMITED:',
+        ) as unknown,
+      });
       expect(
         await prisma.integrationSyncJob.count({
           where: {
@@ -734,8 +746,7 @@ describePostgres(
         inventoryRequested: true,
       });
       expect(canaryPartial.results[0].scopes[0]).toMatchObject({
-        status: 'FAILED',
-        partial: true,
+        status: 'SUCCESS',
         inventoryRequested: true,
       });
       expect(
@@ -749,8 +760,7 @@ describePostgres(
         where: { tenantId: scope.tenantId, mode: 'FULL' },
         orderBy: { startedAt: 'desc' },
       });
-      expect(canaryAggregate).toMatchObject({ status: 'FAILED' });
-      expect(canaryAggregate.errorMessage).toContain('LANGAME_SYNC_PARTIAL:');
+      expect(canaryAggregate).toMatchObject({ status: 'SUCCESS' });
       client.listActiveProductGroups.mockResolvedValue([]);
       const canaryFull = await daily.runDailySync({
         tenantSlug: scope.tenantSlug,

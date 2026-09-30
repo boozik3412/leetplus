@@ -25253,7 +25253,7 @@ describe('Battle Pass step rewards outside the tenant reward window', () => {
       where: {
         tenantId: user.tenantId,
         seasonId: { not: null },
-        status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+        status: { in: ['PENDING', 'APPROVED', 'PAID', 'EXPIRED'] },
         OR: [{ profileId: 'profile-1' }, { guestId: { in: ['guest-1'] } }],
       },
     });
@@ -25335,5 +25335,74 @@ describe('rule budget spent from the database', () => {
     });
     expect(result.rules[0]?.blockers).toContain('Бюджет правила уже исчерпан');
     expect(result.rules[0]?.reasons).toContain('Бюджет: 5000/5000 руб');
+  });
+});
+
+describe('Battle Pass step with an expired reward', () => {
+  it('keeps the step completed when its reward expired unclaimed', async () => {
+    const { service } = createService();
+    jest
+      .spyOn(service as any, 'resolveDryRunProfile')
+      .mockResolvedValue(profileFixture());
+    jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+    jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+    const step = (level: number, title: string) => ({
+      level,
+      title,
+      freeReward: '100 бонусов',
+      freeRewardDetails: {
+        type: 'BONUS_BALANCE',
+        amount: 100,
+        label: '100 бонусов',
+        delivery: 'AUTO',
+      },
+      activationRules: {
+        schemaVersion: 2,
+        taskType: 'PLAY_TIME',
+        triggerKind: 'PLAY_HOUR',
+        evaluationPolicy: 'LIVE_PRIMARY',
+        sessionType: 'ANY',
+        metric: {
+          aggregation: 'duration',
+          eventTypes: ['PLAY_HOUR', 'SESSION_STOP'],
+          target: 60,
+          unit: 'минута',
+        },
+      },
+    });
+    jest.spyOn(service, 'getSeasons').mockResolvedValue([
+      seasonRow({
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        periodFrom: new Date('2026-06-01T00:00:00.000Z'),
+        premiumEnabled: false,
+        manualApprovalRequired: false,
+        storeIds: [],
+        levels: [step(1, 'Первый час'), step(2, 'Второй час')],
+      }),
+    ]);
+    jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([
+      rewardResult({
+        id: 'reward-step-1-expired',
+        status: 'EXPIRED',
+        walletState: 'EXPIRED',
+        rewardLabel: '100 бонусов',
+        evidence: { level: 1 },
+        qualifiedAt: '2026-06-02T10:00:00.000Z',
+        expiresAt: '2026-07-02T10:00:00.000Z',
+        season: { id: 'season-1', name: 'Season', status: 'ACTIVE' },
+      }),
+    ]);
+    jest.spyOn(service as any, 'getDryRunProgressEvents').mockResolvedValue([]);
+
+    const result = await service.dryRun(user, {
+      eventType: 'PLAY_HOUR',
+      occurredAt: isoNow,
+      sessionMinutes: 20,
+    });
+
+    expect(result.rules[0]).toMatchObject({
+      kind: 'SEASON',
+      battlePassStep: 2,
+    });
   });
 });

@@ -131,14 +131,26 @@ export function evaluateGuestGameProgress(
     conditions.eventTypes,
     conditions.eventType,
   );
+  // Streak and distinct-day goals span several days by definition. Their
+  // repeat periodicity only limits how often the reward is paid, so a new
+  // cycle starts right after the previous completion instead of being cut
+  // to the current day (which kept every repeat streak at 1/N forever).
+  const multiDayGoal =
+    aggregation === 'streak' || aggregation === 'distinctDays';
   const allEvents = dedupeProgressEvents(currentEvent, historyEvents).filter(
     (event) =>
       matchesProgressEvent(rule, conditions, metric, event, referenceEvent, {
         eventTypes,
         windowDays,
-        repeatCycleReset,
+        repeatCycleReset: repeatCycleReset && !multiDayGoal,
         completedAt,
-        resetImmediatelyAfterCompletion,
+        resetImmediatelyAfterCompletion:
+          resetImmediatelyAfterCompletion ||
+          Boolean(
+            multiDayGoal &&
+            completedAt &&
+            completedAt.getTime() <= referenceEvent.occurredAt.getTime(),
+          ),
       }),
   );
   const current = progressValue(

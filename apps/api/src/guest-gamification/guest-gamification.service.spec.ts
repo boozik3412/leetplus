@@ -25217,3 +25217,71 @@ describe('GuestGamificationService supplemental pipeline', () => {
     expect(process).not.toHaveBeenCalled();
   });
 });
+
+describe('Battle Pass step rewards outside the tenant reward window', () => {
+  it('reads the guest season rewards separately from the newest tenant rewards', async () => {
+    const { service, prisma } = createService();
+    const recentLootBoxReward = rewardRow({ id: 'reward-recent-loot-box' });
+    const earlyStepReward = rewardRow({
+      id: 'reward-step-1',
+      seasonId: 'season-1',
+      qualifiedAt: new Date('2026-09-08T11:10:00.000Z'),
+    });
+    prisma.guestGameReward.findMany.mockImplementation(
+      ({ where }: { where: { seasonId?: unknown } }) =>
+        Promise.resolve(
+          where.seasonId ? [earlyStepReward] : [recentLootBoxReward],
+        ),
+    );
+
+    const rewards = await (service as any).getDryRunRewards(user, {
+      missionIds: [],
+      seasonOwner: { profileId: 'profile-1', guestIds: ['guest-1', 'guest-1'] },
+    });
+
+    expect(rewards.map((reward: { id: string }) => reward.id).sort()).toEqual([
+      'reward-recent-loot-box',
+      'reward-step-1',
+    ]);
+    const calls = prisma.guestGameReward.findMany.mock.calls as Array<
+      [{ where: Record<string, unknown>; take?: number }]
+    >;
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.[0].take).toBe(1000);
+    expect(calls[1]?.[0]).toMatchObject({
+      where: {
+        tenantId: user.tenantId,
+        seasonId: { not: null },
+        status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+        OR: [{ profileId: 'profile-1' }, { guestId: { in: ['guest-1'] } }],
+      },
+    });
+    expect(calls[1]?.[0].take).toBeUndefined();
+  });
+
+  it('passes the evaluated guest to the reward read on a live event', async () => {
+    const { service } = createService();
+    jest
+      .spyOn(service as any, 'resolveDryRunProfile')
+      .mockResolvedValue(profileFixture());
+    jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+    jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+    jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+    const getDryRunRewards = jest
+      .spyOn(service as any, 'getDryRunRewards')
+      .mockResolvedValue([]);
+
+    await service.dryRun(user, {
+      eventType: 'PLAY_HOUR',
+      occurredAt: isoNow,
+      sessionMinutes: 20,
+    });
+
+    expect(getDryRunRewards).toHaveBeenCalledWith(
+      user,
+      expect.objectContaining({
+        seasonOwner: expect.objectContaining({ profileId: 'profile-1' }),
+      }),
+    );
+  });
+});

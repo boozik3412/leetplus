@@ -596,13 +596,16 @@ export class DashboardService {
     const timeZones = [...new Set(Object.values(storeTimeZones))];
     const scopeTimeZone = timeZones.length === 1 ? timeZones[0] : 'PER_STORE';
     const asOf = this.resolveAssortmentAsOf(query.asOf);
-    const [salesFacts, salesCoverage] = await Promise.all([
+    const [rawSalesFacts, salesCoverage] = await Promise.all([
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
           isCanceled: false,
           storeId: { in: selectedStoreIds },
-          saleDate: { gte: period.fromDate, lte: period.toDate },
+          saleDate: this.executiveLocalDayWindow(
+            this.toDateInputValue(period.fromDate),
+            this.toDateInputValue(period.toDate),
+          ),
         },
         select: {
           storeId: true,
@@ -617,6 +620,10 @@ export class DashboardService {
         period: { from: period.fromDate, to: period.toDate },
       }),
     ]);
+    const salesFacts = this.withExecutiveBusinessDate(
+      rawSalesFacts,
+      storeTimeZones,
+    );
     const businessDays = this.executiveDaysInclusive(
       period.fromDate,
       period.toDate,
@@ -677,9 +684,7 @@ export class DashboardService {
       (fact) =>
         !fact.isCanceled &&
         selectedStoreIdSet.has(fact.storeId) &&
-        confirmedStoreDays.has(
-          `${fact.storeId}:${this.toDateInputValue(fact.saleDate)}`,
-        ),
+        confirmedStoreDays.has(`${fact.storeId}:${fact.businessDate}`),
     );
     confirmedSalesFacts.forEach((fact) => {
       const current = revenueByStore.get(fact.storeId) ?? {
@@ -1062,16 +1067,16 @@ export class DashboardService {
       from: receiptValidationPrevious.from,
       to: product.scope.period.to,
     };
-    const [daySalesFacts, daySalesCoverage] = await Promise.all([
+    const [rawDaySalesFacts, daySalesCoverage] = await Promise.all([
       this.prisma.salesFact.findMany({
         where: {
           tenantId: product.tenantId,
           isCanceled: false,
           storeId: { in: storeIds },
-          saleDate: {
-            gte: new Date(`${allMetricDays.from}T00:00:00.000Z`),
-            lte: new Date(`${allMetricDays.to}T23:59:59.999Z`),
-          },
+          saleDate: this.executiveLocalDayWindow(
+            allMetricDays.from,
+            allMetricDays.to,
+          ),
         },
         select: {
           storeId: true,
@@ -1094,6 +1099,10 @@ export class DashboardService {
         },
       }),
     ]);
+    const daySalesFacts = this.withExecutiveBusinessDate(
+      rawDaySalesFacts,
+      product.scope.storeTimeZones,
+    );
     const receiptProjection = createReceiptMetricProjection({
       facts: daySalesFacts.map((fact) => ({
         ...fact,
@@ -1689,6 +1698,7 @@ export class DashboardService {
       storeId: string;
       revenue: { toNumber: () => number };
       saleDate: Date;
+      businessDate: string;
       isCanceled?: boolean;
     }>;
     salesDayEvidence: Array<{
@@ -1735,7 +1745,7 @@ export class DashboardService {
         !fact.isCanceled &&
         input.storeIds.includes(fact.storeId) &&
         confirmedStoreIds.has(fact.storeId) &&
-        this.toDateInputValue(fact.saleDate) === input.date,
+        fact.businessDate === input.date,
     );
     const visible = state === 'AVAILABLE' || state === 'PARTIAL';
     const value = visible
@@ -1811,6 +1821,40 @@ export class DashboardService {
       lastCalculatedAt,
       ratio,
     });
+  }
+
+  /**
+   * Sale timestamps covering the club-local days `from`..`to` in any time
+   * zone (UTC−12..UTC+14); callers keep the facts whose local day matches.
+   */
+  private executiveLocalDayWindow(from: string, to: string) {
+    const gte = new Date(`${from}T00:00:00.000Z`);
+    gte.setUTCHours(gte.getUTCHours() - 14);
+    const lte = new Date(`${to}T23:59:59.999Z`);
+    lte.setUTCHours(lte.getUTCHours() + 14);
+    return { gte, lte };
+  }
+
+  /**
+   * Sales belong to the club's local business day, like visits and the daily
+   * source coverage. The UTC date would move night sales (00:00–05:00 in
+   * Yekaterinburg) to the previous day, where they are not linked to guests yet.
+   */
+  private withExecutiveBusinessDate<
+    T extends { storeId: string; saleDate: Date },
+  >(
+    facts: readonly T[],
+    storeTimeZones: Readonly<Record<string, string>>,
+  ): Array<T & { businessDate: string }> {
+    const formatters = new Map<string, Intl.DateTimeFormat>();
+    return facts.map((fact) => ({
+      ...fact,
+      businessDate: this.executiveLocalDate(
+        fact.saleDate,
+        storeTimeZones[fact.storeId] ?? 'UTC',
+        formatters,
+      ),
+    }));
   }
 
   private executiveLocalDate(

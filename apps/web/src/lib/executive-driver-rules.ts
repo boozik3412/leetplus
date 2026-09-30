@@ -145,6 +145,41 @@ function nextDay(date: string) {
 }
 
 /**
+ * Calendar day of a timestamp in the club's time zone: sales, visits and the
+ * daily source coverage all use the club's day.
+ */
+export function clubLocalDay(iso: string, timeZone?: string | null) {
+  if (timeZone) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(new Date(iso));
+      const part = (type: string) =>
+        parts.find((item) => item.type === type)?.value;
+      return `${part("year")}-${part("month")}-${part("day")}`;
+    } catch {
+      // Unknown zone: fall back to the UTC day below.
+    }
+  }
+  return iso.slice(0, 10);
+}
+
+/** Last club-local day with a confirmed bar sale in the selection. */
+export function salesConfirmedThrough(summary: ExecutiveSummary) {
+  const days = summary.clubs.flatMap((club) => {
+    const factAsOf = club.metrics.productRevenue?.factAsOf;
+    return factAsOf
+      ? [clubLocalDay(factAsOf, summary.scope.storeTimeZones?.[club.storeId])]
+      : [];
+  });
+  if (days.length > 0) return days.sort()[days.length - 1];
+  return summary.metrics.productRevenue?.factAsOf?.slice(0, 10) ?? null;
+}
+
+/**
  * Clubs without bar sales since a day inside the period although they sold
  * before: closed or not delivering data. Their decline is not a sales signal.
  */
@@ -156,7 +191,12 @@ export function silentClubs(
     const metric = club.metrics.productRevenue;
     if (!metric || metric.state === "MISSING" || metric.state === "FAILED")
       return [];
-    const lastSale = metric.factAsOf?.slice(0, 10) ?? null;
+    const lastSale = metric.factAsOf
+      ? clubLocalDay(
+          metric.factAsOf,
+          summary.scope.storeTimeZones?.[club.storeId],
+        )
+      : null;
     const soldBefore =
       (metric.comparison?.previousValue ?? 0) > 0 || (metric.value ?? 0) > 0;
     if (!soldBefore) return [];

@@ -2476,7 +2476,7 @@ jobs:
       - name: Set up exact control Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version-file: .node-version
 
       - name: Build independently verified production-control candidate
         shell: bash
@@ -2495,6 +2495,11 @@ jobs:
             *) printf 'unexpected production-control Node path: %s\n' "$node_realpath" >&2; exit 1 ;;
           esac
           test "$("$node_realpath" -p 'process.versions.node.split(".")[0]')" = '22'
+          # The archive embeds these Node bytes; the handoff rebuild on another
+          # runner is only byte-identical when both use the pinned version.
+          pinned_node_version="$(< "$repository_root/.node-version")"
+          [[ "$pinned_node_version" =~ ^22\.[0-9]+\.[0-9]+$ ]]
+          test "$("$node_realpath" -p 'process.versions.node')" = "$pinned_node_version"
           # Normalize hosted-toolcache links and writable ancestors into a
           # byte-identical, root-owned source beneath the trusted /var/lib boundary.
           control_tool_cache_root="/var/lib/leetplus-production-control-node-$CI_RELEASE_SHA"
@@ -2583,7 +2588,7 @@ jobs:
       - name: Set up exact handoff Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version-file: .node-version
 
       - name: Download exact release-candidate authority
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -2763,6 +2768,9 @@ jobs:
             "$runner_tool_cache_real"/node/22.*/x64/bin/node) ;;
             *) printf 'unexpected handoff control Node path: %s\n' "$node_realpath" >&2; exit 1 ;;
           esac
+          pinned_node_version="$(< "$repository_root/.node-version")"
+          [[ "$pinned_node_version" =~ ^22\.[0-9]+\.[0-9]+$ ]]
+          test "$("$node_realpath" -p 'process.versions.node')" = "$pinned_node_version"
           # Recreate the same root-owned trust path for independent rebuild.
           control_tool_cache_root="/var/lib/leetplus-production-control-node-$CI_RELEASE_SHA"
           control_node_root="$control_tool_cache_root/node/22.leetplus-control-$CI_RELEASE_SHA"
@@ -2809,8 +2817,12 @@ jobs:
               --output-directory "$rebuilt_root"
           rebuilt_archive="$rebuilt_root/leetplus-production-control-$CI_RELEASE_SHA.tar.gz"
           rebuilt_checksum="$rebuilt_archive.sha256"
-          cmp --silent -- "$candidate_archive" "$rebuilt_archive"
-          cmp --silent -- "$candidate_checksum" "$rebuilt_checksum"
+          if ! cmp --silent -- "$candidate_archive" "$rebuilt_archive" \
+            || ! cmp --silent -- "$candidate_checksum" "$rebuilt_checksum"; then
+            printf 'rebuilt production-control archive differs from the candidate\n' >&2
+            sha256sum -- "$candidate_archive" "$rebuilt_archive" >&2
+            exit 1
+          fi
 
       - name: Freeze admitted handoff payloads
         shell: bash

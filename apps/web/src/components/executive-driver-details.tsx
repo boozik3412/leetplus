@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { ExecutiveLink } from "@/components/executive-link";
 import type {
   ExecutiveDriverFactors,
   ExecutiveDriverRow,
@@ -242,7 +242,7 @@ export function ExecutiveDriverDetails({
           className="mt-4 flex flex-wrap gap-2 text-sm"
         >
           {driverFocuses.map((item) => (
-            <Link
+            <ExecutiveLink
               key={item}
               href={driverDetailHref(summary, item)}
               prefetch={false}
@@ -250,7 +250,7 @@ export function ExecutiveDriverDetails({
               className={`rounded-full px-3 py-1.5 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${item === focus ? "bg-emerald-600 text-white" : "bg-[var(--surface-muted)] text-zinc-700 hover:bg-zinc-200 dark:text-zinc-200 dark:hover:bg-zinc-800"}`}
             >
               {column(item).label}
-            </Link>
+            </ExecutiveLink>
           ))}
         </nav>
       </header>
@@ -272,13 +272,13 @@ export function ExecutiveDriverDetails({
                   >
                     <td className="py-2.5 pr-3 font-medium">
                       {row.scope === "CLUB" && row.storeId && clubs.length > 1 ? (
-                        <Link
+                        <ExecutiveLink
                           href={driverDetailHref(summary, focus, [row.storeId])}
                           prefetch={false}
                           className="text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
                         >
                           {rowLabel(row)} →
-                        </Link>
+                        </ExecutiveLink>
                       ) : (
                         rowLabel(row)
                       )}

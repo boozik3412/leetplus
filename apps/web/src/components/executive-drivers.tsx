@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { ExecutiveLink } from "@/components/executive-link";
 import { ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import type {
   ExecutiveDriverFactor,
@@ -288,7 +288,7 @@ export function DriverTree({ summary }: { summary: ExecutiveSummary }) {
           );
           const isLever = lever?.kind === "LOSS" && lever.factor === factor;
           return (
-            <Link
+            <ExecutiveLink
               key={factor}
               href={driverDetailHref(summary, factorFocus[factor])}
               prefetch={false}
@@ -319,7 +319,7 @@ export function DriverTree({ summary }: { summary: ExecutiveSummary }) {
                   без сравнения
                 </span>
               )}
-            </Link>
+            </ExecutiveLink>
           );
         })}
         <div
@@ -328,7 +328,7 @@ export function DriverTree({ summary }: { summary: ExecutiveSummary }) {
         >
           =
         </div>
-        <Link
+        <ExecutiveLink
           href={driverDetailHref(summary, "bar")}
           prefetch={false}
           className={`flex flex-col gap-1.5 rounded-2xl border border-transparent bg-[var(--surface-muted)] p-4 ${tileLink}`}
@@ -351,7 +351,7 @@ export function DriverTree({ summary }: { summary: ExecutiveSummary }) {
               {resultChange.text}
             </span>
           ) : null}
-        </Link>
+        </ExecutiveLink>
       </div>
       {network.contributions?.length ? (
         <div className="flex flex-col gap-3">
@@ -475,7 +475,7 @@ function ClubCard({
             }
           : null;
   return (
-    <Link
+    <ExecutiveLink
       href={
         silentSince || !row.storeId
           ? clubDetailHref(summary, "productRevenue", [row.storeId ?? ""])
@@ -575,7 +575,7 @@ function ClubCard({
           {badge.text}
         </span>
       ) : null}
-    </Link>
+    </ExecutiveLink>
   );
 }
 
@@ -729,7 +729,7 @@ export function LoadPanel({ summary }: { summary: ExecutiveSummary }) {
             const change = previous === null ? null : row.current.loadEstimate! - previous;
             return (
               <li key={row.storeIds.join("+")}>
-                <Link
+                <ExecutiveLink
                   href={driverDetailHref(summary, "load", row.storeIds)}
                   prefetch={false}
                   className={`flex flex-col items-center gap-1 rounded-xl border border-transparent p-1 text-center ${tileLink}`}
@@ -749,7 +749,7 @@ export function LoadPanel({ summary }: { summary: ExecutiveSummary }) {
                     {arrow(tone(change))}было {formatNumber(previous!, 0)}%
                   </span>
                 ) : null}
-                </Link>
+                </ExecutiveLink>
               </li>
             );
           })}
@@ -775,13 +775,13 @@ export function LoadPanel({ summary }: { summary: ExecutiveSummary }) {
       </div>
       <p className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
         Ориентир: средняя загрузка клуба около {LOAD_REFERENCE}% за месяц.
-        <Link
+        <ExecutiveLink
           href={driverDetailHref(summary, "load")}
           prefetch={false}
           className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
         >
           Клубы и дни <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-        </Link>
+        </ExecutiveLink>
       </p>
     </section>
   );

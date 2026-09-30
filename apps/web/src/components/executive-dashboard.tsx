@@ -2,7 +2,7 @@
 
 import type { ExecutiveHistory } from "@/lib/executive-history";
 
-import Link from "next/link";
+import { ExecutiveLink } from "@/components/executive-link";
 import {
   clubDropSignals,
   deltaDirection,
@@ -343,14 +343,14 @@ function Headline({
           </p>
           <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
             <Delta metric={metric} against={against} />
-            <Link
+            <ExecutiveLink
               href={clubDetailHref(summary, key)}
               prefetch={false}
               className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
             >
               По клубам и дням{" "}
               <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-            </Link>
+            </ExecutiveLink>
           </p>
           <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
             {key === "revenue"
@@ -386,7 +386,7 @@ function Headline({
                 ? ((current - previous) / previous) * 100
                 : null;
             return (
-              <Link
+              <ExecutiveLink
                 key={label}
                 href={driverDetailHref(summary, focus)}
                 prefetch={false}
@@ -413,7 +413,7 @@ function Headline({
                     ? "без сравнения"
                     : `${change < 0 ? "▼ " : change > 0 ? "▲ " : ""}${formatSigned(change, 1, "%")}`}
                 </span>
-              </Link>
+              </ExecutiveLink>
             );
           })}
         </div>
@@ -760,13 +760,13 @@ function AssortmentLine({
         {frozenUsable
           ? ` · в остатке ${frozen.state === "PARTIAL" ? "оценочно " : ""}${formatMoney(frozen.value!)}`
           : ""}{" "}
-        <Link
+        <ExecutiveLink
           href={href}
           prefetch={false}
           className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
         >
           Открыть <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-        </Link>
+        </ExecutiveLink>
       </p>
       <p className="mt-0.5 text-zinc-500 dark:text-zinc-400">
         {health.inventory.asOf
@@ -837,17 +837,17 @@ export function ExecutivePriorities({
             return (
               <li
                 key={item.key}
-                className="grid grid-cols-[4px_minmax(0,1fr)] gap-3 rounded-xl bg-[var(--surface-muted)] py-3 pr-3"
+                className="relative grid grid-cols-[4px_minmax(0,1fr)] gap-3 rounded-xl bg-[var(--surface-muted)] py-3 pr-3"
               >
                 <span
                   aria-hidden="true"
                   className={`rounded-full ${style.stripe}`}
                 />
                 <span className="min-w-0">
-                  <Link
+                  <ExecutiveLink
                     href={item.href}
                     prefetch={false}
-                    className="group block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                    className="group block rounded-lg after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
                   >
                     <span className="flex flex-wrap items-center gap-x-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500 dark:text-zinc-400">
                       <span className={style.text}>{style.label}</span>
@@ -863,15 +863,15 @@ export function ExecutivePriorities({
                     <span className="mt-0.5 block text-xs leading-5 tabular-nums text-zinc-600 dark:text-zinc-300">
                       {item.caption}
                     </span>
-                  </Link>
+                  </ExecutiveLink>
                   {item.task ? (
-                    <Link
+                    <ExecutiveLink
                       href={taskDraftHref(item.task)}
                       prefetch={false}
-                      className="mt-2 inline-flex min-h-8 items-center gap-1 rounded-md border border-[var(--border-soft)] bg-[var(--surface)] px-2.5 text-xs font-semibold text-emerald-700 hover:border-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
+                      className="relative z-10 mt-2 inline-flex min-h-8 items-center gap-1 rounded-md border border-[var(--border-soft)] bg-[var(--surface)] px-2.5 text-xs font-semibold text-emerald-700 hover:border-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
                     >
                       + Поставить задачу
-                    </Link>
+                    </ExecutiveLink>
                   ) : null}
                 </span>
               </li>

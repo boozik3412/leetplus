@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { ExecutiveLink } from "@/components/executive-link";
 import { ArrowUpRight } from "@phosphor-icons/react";
 import { useMemo, type ReactNode } from "react";
 import {
@@ -198,14 +198,14 @@ export function ExecutiveTrendChart({
           </p>
         </div>
         {chartSummary ? (
-          <Link
+          <ExecutiveLink
             href={detailsHref}
             prefetch={false}
             aria-label={`Подробнее: ${label}`}
             className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-emerald-700 hover:bg-[var(--surface-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 dark:text-emerald-300"
           >
             Подробнее <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-          </Link>
+          </ExecutiveLink>
         ) : null}
       </div>
       {tabs ? <div className="mt-4">{tabs}</div> : null}

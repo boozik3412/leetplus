@@ -81,6 +81,45 @@ export type ExecutiveSummary = {
     metrics: ExecutiveMetrics;
   }>;
   days: Array<{ date: string; metrics: ExecutiveMetrics }>;
+  /** Revenue drivers; absent from an older API. */
+  drivers?: ExecutiveDrivers;
+};
+export type ExecutiveDriverFactors = {
+  barRevenue: number | null;
+  totalBarRevenue: number | null;
+  purchases: number | null;
+  averagePurchase: number | null;
+  visits: number | null;
+  purchasesPerVisit: number | null;
+  guests: number | null;
+  visitsPerGuest: number | null;
+  playedHours: number | null;
+  capacityHours: number | null;
+  loadEstimate: number | null;
+};
+export type ExecutiveDriverFactor =
+  | "VISITS"
+  | "CONVERSION"
+  | "PURCHASES"
+  | "CHECK";
+export type ExecutiveDriverRow = {
+  scope: "NETWORK" | "DOMAIN" | "CLUB";
+  storeId: string | null;
+  storeName: string;
+  storeIds: string[];
+  current: ExecutiveDriverFactors;
+  previous: ExecutiveDriverFactors | null;
+  contributions: Array<{ factor: ExecutiveDriverFactor; amount: number }> | null;
+  notes: string[];
+};
+export type ExecutiveDrivers = {
+  definitions: { purchase: string; visits: string; load: string };
+  rows: ExecutiveDriverRow[];
+  days: Array<{
+    date: string;
+    current: ExecutiveDriverFactors;
+    previous: ExecutiveDriverFactors | null;
+  }>;
 };
 export type ExecutiveOperations = {
   scope: ExecutiveAppliedScope;

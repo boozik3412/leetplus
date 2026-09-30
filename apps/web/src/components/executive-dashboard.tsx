@@ -24,13 +24,22 @@ import {
 } from "@/lib/staff-priorities-types";
 import { ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import {
-  ExecutiveClubTable,
-  clubDetailHref,
-} from "@/components/executive-club-table";
+  ClubLeverCards,
+  DriverDataStrip,
+  DriverTree,
+  LoadPanel,
+} from "@/components/executive-drivers";
 import {
   ExecutiveTrendChart,
   type ExecutiveTrendMetric,
+  type ExecutiveTrendSeries,
 } from "@/components/executive-trend-chart";
+import { clubDetailHref } from "@/lib/executive-links";
+import {
+  checkDrops,
+  conversionGaps,
+  silentClubs,
+} from "@/lib/executive-driver-rules";
 import { buildAssortmentReportHref } from "@/lib/assortment-report-query";
 import type { DashboardMetric } from "@/lib/dashboard-summary";
 import type {
@@ -261,8 +270,28 @@ function Headline({
   const bound = summary.clubs.filter(
     (club) => club.metrics.visits.state !== "MISSING",
   ).length;
+  const network = summary.drivers?.rows.find((row) => row.scope === "NETWORK");
+  const driverTiles = network
+    ? ([
+        ["Визиты", network.current.visits, network.previous?.visits, "COUNT"],
+        [
+          "Покупок в баре",
+          network.current.purchases,
+          network.previous?.purchases,
+          "COUNT",
+        ],
+        [
+          "Средний чек бара",
+          network.current.averagePurchase,
+          network.previous?.averagePurchase,
+          "RUB",
+        ],
+      ] as const)
+    : null;
   const secondary = (
-    ["visits", "averageProductCheck", "revenuePerVisit", "load", "topups"] as const
+    driverTiles
+      ? (["revenuePerVisit", "load", "topups"] as const)
+      : (["visits", "averageProductCheck", "revenuePerVisit", "load", "topups"] as const)
   )
     .map((metricKey) => ({ metricKey, metric: summary.metrics[metricKey] }))
     .filter(
@@ -270,7 +299,9 @@ function Headline({
         item.metric !== undefined && item.metric.state !== "MISSING",
     );
   const unconfirmed = (
-    ["serviceRevenue", "topups", "revenuePerVisit", "load", "averageProductCheck"] as const
+    driverTiles
+      ? (["serviceRevenue", "topups", "revenuePerVisit"] as const)
+      : (["serviceRevenue", "topups", "revenuePerVisit", "load", "averageProductCheck"] as const)
   )
     .map((metricKey) => ({ metricKey, metric: summary.metrics[metricKey] }))
     .filter(
@@ -320,6 +351,43 @@ function Headline({
           </div>
         ) : null}
       </div>
+      {driverTiles ? (
+        <dl className="mt-5 grid grid-cols-3 gap-2 sm:gap-3">
+          {driverTiles.map(([label, current, previous, unit]) => {
+            const change =
+              current !== null &&
+              previous !== null &&
+              previous !== undefined &&
+              previous !== 0
+                ? ((current - previous) / previous) * 100
+                : null;
+            return (
+              <div
+                key={label}
+                className="flex min-w-0 flex-col gap-1 rounded-xl bg-[var(--surface-muted)] px-3 py-3 sm:px-4"
+              >
+                <dt className="text-xs leading-4 text-zinc-600 dark:text-zinc-300">
+                  {label}
+                </dt>
+                <dd className="text-lg font-semibold tabular-nums text-[var(--foreground)] sm:text-xl">
+                  {current === null
+                    ? "—"
+                    : unit === "RUB"
+                      ? formatMoney(current)
+                      : formatNumber(current)}
+                </dd>
+                <dd
+                  className={`text-xs tabular-nums ${change === null ? "text-zinc-500 dark:text-zinc-400" : change < 0 ? "text-red-700 dark:text-red-300" : change > 0 ? "text-emerald-700 dark:text-emerald-300" : "text-zinc-500 dark:text-zinc-400"}`}
+                >
+                  {change === null
+                    ? "без сравнения"
+                    : `${change < 0 ? "▼ " : change > 0 ? "▲ " : ""}${formatSigned(change, 1, "%")}`}
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      ) : null}
       {secondary.length ? (
         <dl className="mt-5 grid gap-3 border-t border-[var(--border-soft)] pt-4 sm:grid-cols-2 xl:grid-cols-3">
           {secondary.map(({ metricKey, metric: item }) => (
@@ -421,7 +489,50 @@ function buildPriorities(
   const against = summary.scope.comparison
     ? formatRange(summary.scope.comparison.from, summary.scope.comparison.to)
     : "";
-  for (const drop of clubDropSignals(summary))
+  const silent = silentClubs(summary);
+  const silentIds = new Set(silent.map((club) => club.storeId));
+  for (const club of silent)
+    items.push({
+      key: `silent:${club.storeId}`,
+      kind: "SILENT_CLUB",
+      level: "DATA",
+      club: club.storeName,
+      title: `Нет продаж с ${formatDay(club.since)}`,
+      caption:
+        "Клуб закрыт или данные не приходят; сигнал о падении продаж для него не показывается",
+      href: clubDetailHref(summary, "productRevenue", [club.storeId]),
+    });
+  for (const gap of conversionGaps(summary.drivers).filter(
+    (item) => !silentIds.has(item.storeId),
+  ))
+    items.push({
+      key: `conversion:${gap.storeId}`,
+      kind: "CONVERSION_GAP",
+      level: "TODAY",
+      amount: gap.potential,
+      club: gap.storeName,
+      title: "Поднять покупки в баре",
+      caption: `${formatNumber(gap.value, 1)}% визитов с покупкой против ${formatNumber(gap.best, 1)}% в «${gap.bestStoreName}». Резерв ≈ ${formatSigned(gap.potential)} ₽ за такой же период`,
+      href: clubDetailHref(summary, "productRevenue", [gap.storeId]),
+    });
+  for (const drop of checkDrops(summary.drivers, silentIds))
+    items.push({
+      key: `check:${drop.storeId ?? "network"}`,
+      kind: "CHECK_DROP",
+      level: "TODAY",
+      amount: drop.amount === null ? null : -drop.amount,
+      club: drop.storeId ? drop.storeName : undefined,
+      title: "Средний чек бара упал",
+      caption: `${formatMoney(drop.current)} против ${formatMoney(drop.previous)} (${formatSigned(drop.percent, 1, "%")})${drop.amount === null ? "" : ` · ${formatSigned(drop.amount)} ₽`}`,
+      href: clubDetailHref(
+        summary,
+        "averageProductCheck",
+        drop.storeId ? [drop.storeId] : summary.scope.storeIds,
+      ),
+    });
+  for (const drop of clubDropSignals(summary).filter(
+    (item) => !silentIds.has(item.storeId),
+  ))
     items.push({
       key: `club-drop:${drop.storeId}`,
       kind: "CLUB_DROP",
@@ -468,8 +579,8 @@ function buildPriorities(
       caption: `${formatSigned(visits.comparison!.absoluteDelta!)} к ${against}`,
       href: clubDetailHref(summary, "visits"),
     });
+  // The average check is covered by CHECK_DROP (from 10%) on the drivers.
   for (const [key, kind, title] of [
-    ["averageProductCheck", "AVERAGE_CHECK_DECLINE", "Разобрать снижение среднего чека"],
     ["revenuePerVisit", "REVENUE_PER_VISIT_DECLINE", "Разобрать снижение дохода на визит"],
   ] as const) {
     const metric = summary.metrics[key];
@@ -789,6 +900,42 @@ function MetricSources({ summary }: { summary: ExecutiveSummary }) {
   );
 }
 
+type DriverTrend = "driverVisits" | "driverConversion" | "driverCheck";
+type TrendKey = ExecutiveTrendMetric | DriverTrend;
+
+const driverTrendLabels: Record<DriverTrend, string> = {
+  driverVisits: "Визиты",
+  driverConversion: "Конверсия",
+  driverCheck: "Чек",
+};
+
+function driverSeries(
+  days: NonNullable<ExecutiveSummary["drivers"]>["days"],
+  key: DriverTrend,
+): ExecutiveTrendSeries {
+  const pick = (factors: (typeof days)[number]["current"] | null) =>
+    factors === null
+      ? null
+      : key === "driverVisits"
+        ? factors.visits
+        : key === "driverConversion"
+          ? factors.purchasesPerVisit
+          : factors.averagePurchase;
+  return {
+    unit:
+      key === "driverVisits"
+        ? "COUNT"
+        : key === "driverConversion"
+          ? "PERCENT"
+          : "RUB",
+    rows: days.map((day) => ({
+      date: day.date,
+      value: pick(day.current),
+      previous: pick(day.previous),
+    })),
+  };
+}
+
 const trendOrder: ExecutiveTrendMetric[] = [
   "productRevenue",
   "revenue",
@@ -825,15 +972,30 @@ export function ExecutiveDashboard({
   history?: ExecutiveHistory;
   initialTrend?: string;
 }) {
-  const { available, unavailable } = trendOptions(summary);
+  const options = trendOptions(summary);
+  const driverDays = (history ? history.data?.drivers : summary.drivers)?.days ?? [];
+  const available: TrendKey[] = driverDays.length
+    ? [
+        options.available[0] ?? "productRevenue",
+        "driverVisits",
+        "driverConversion",
+        "driverCheck",
+      ]
+    : options.available;
+  const unavailable = driverDays.length
+    ? options.unavailable.filter(
+        (key) =>
+          key !== "visits" && key !== "averageProductCheck" && key !== "load",
+      )
+    : options.unavailable;
   const fallback = available[0] ?? "productRevenue";
-  const [trendMetric, setTrendMetric] = useState<ExecutiveTrendMetric>(
-    available.includes(initialTrend as ExecutiveTrendMetric)
-      ? (initialTrend as ExecutiveTrendMetric)
+  const [trendMetric, setTrendMetric] = useState<TrendKey>(
+    available.includes(initialTrend as TrendKey)
+      ? (initialTrend as TrendKey)
       : fallback,
   );
   const chartId = useId();
-  function selectTrend(metricKey: ExecutiveTrendMetric) {
+  function selectTrend(metricKey: TrendKey) {
     setTrendMetric(metricKey);
     // Shallow URL update: the choice survives reload and sharing without a new request.
     const url = new URL(window.location.href);
@@ -861,7 +1023,9 @@ export function ExecutiveDashboard({
             onClick={() => selectTrend(key)}
             className={`min-h-8 rounded-lg px-3 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 ${trendMetric === key ? "bg-[var(--surface)] text-[var(--foreground)] shadow-sm" : "text-zinc-600 hover:text-[var(--foreground)] dark:text-zinc-300"}`}
           >
-            {metricLabels[key]}
+            {key in driverTrendLabels
+              ? driverTrendLabels[key as DriverTrend]
+              : metricLabels[key as ExecutiveTrendMetric]}
           </button>
         ))}
       </div>
@@ -873,28 +1037,50 @@ export function ExecutiveDashboard({
       ) : null}
     </div>
   );
+  const isDriverTrend = trendMetric in driverTrendLabels;
+  const chartMetric: ExecutiveTrendMetric = isDriverTrend
+    ? trendMetric === "driverCheck"
+      ? "averageProductCheck"
+      : "visits"
+    : (trendMetric as ExecutiveTrendMetric);
+  const detailsSummary = history?.data ?? summary;
   const historyDetails = history?.data
-    ? `${clubDetailHref(history.data, trendMetric)}&returnPeriod=full-day`
-    : clubDetailHref(summary, trendMetric);
+    ? `${clubDetailHref(detailsSummary, chartMetric)}&returnPeriod=full-day`
+    : clubDetailHref(summary, chartMetric);
   return (
-    <div className="mt-5 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(340px,0.85fr)] xl:grid-rows-[auto_auto_auto_1fr]">
-      <div className="min-w-0 xl:col-start-1 xl:row-start-1">
+    <div className="mt-5 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="min-w-0 xl:col-span-2 xl:row-start-1">
+        <DriverDataStrip summary={summary} />
+      </div>
+      <div className="min-w-0 xl:col-start-1 xl:row-start-2">
         <Headline summary={summary} history={history} />
       </div>
-      <div className="min-w-0 xl:col-start-2 xl:row-span-4 xl:row-start-1">
+      <div className="min-w-0 xl:col-start-1 xl:row-start-3">
+        <DriverTree summary={summary} />
+      </div>
+      <div className="min-w-0 xl:col-start-2 xl:row-span-2 xl:row-start-2">
         {priorities ?? (
           <ExecutivePriorities summary={summary} operations={operations} />
         )}
       </div>
-      <div className="min-w-0 xl:col-start-1 xl:row-start-2">
-        <ExecutiveClubTable summary={summary} />
+      <div className="min-w-0 xl:col-span-2 xl:row-start-4">
+        <ClubLeverCards summary={summary} />
       </div>
-      <div className="min-w-0 xl:col-start-1 xl:row-start-3">
+      <div className="min-w-0 xl:col-start-1 xl:row-start-5">
         <ExecutiveTrendChart
           summary={summary}
           history={history}
-          metricKey={trendMetric}
-          label={metricLabels[trendMetric]}
+          metricKey={chartMetric}
+          series={
+            isDriverTrend
+              ? driverSeries(driverDays, trendMetric as DriverTrend)
+              : undefined
+          }
+          label={
+            isDriverTrend
+              ? driverTrendLabels[trendMetric as DriverTrend]
+              : metricLabels[chartMetric]
+          }
           id={chartId}
           detailsHref={historyDetails}
           tabs={tabs}
@@ -904,11 +1090,16 @@ export function ExecutiveDashboard({
                 Визиты — по клубам с привязанными сессиями ({bound} из{" "}
                 {summary.clubs.length})
               </span>
+            ) : trendMetric === "driverConversion" ? (
+              <span>Покупок в баре на 100 визитов, в процентах</span>
             ) : undefined
           }
         />
       </div>
-      <div className="min-w-0 xl:col-start-1 xl:row-start-4">
+      <div className="min-w-0 xl:col-start-2 xl:row-start-5">
+        <LoadPanel summary={summary} />
+      </div>
+      <div className="min-w-0 xl:col-span-2 xl:row-start-6">
         <MetricSources summary={summary} />
       </div>
     </div>

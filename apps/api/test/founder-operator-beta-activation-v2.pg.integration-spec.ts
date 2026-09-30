@@ -27,6 +27,7 @@ import {
 } from '../src/admin/founder-operator-beta-activation.service';
 import { FounderOperatorBetaGoService } from '../src/admin/founder-operator-beta-go.service';
 import { FounderOwnerInviteLifecycleService } from '../src/admin/founder-owner-invite-lifecycle.service';
+import { TenantAccessWindowService } from '../src/admin/tenant-access-window.service';
 import { SharedTenantProvisioningService } from '../src/admin/shared-tenant-provisioning.service';
 import { FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE } from '../src/config/environment-validation';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -1251,6 +1252,7 @@ async function activateThroughHttp(input: {
         useValue: input.activation,
       },
       { provide: FounderOwnerInviteLifecycleService, useValue: {} },
+      { provide: TenantAccessWindowService, useValue: {} },
     ],
   })
     .overrideGuard(JwtAuthGuard)

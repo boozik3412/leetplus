@@ -78,6 +78,10 @@ import {
   missionTaskTypeFromConditions,
   normalizeMissionWizardConditions,
 } from '../guest-gamification/guest-game-mission-contract';
+import {
+  guestGameRuleBudgetExhausted,
+  loadGuestGameRuleBudgetSpent,
+} from '../guest-gamification/guest-game-rule-budget';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type {
   LangameGuestBalancesPortalResult,
@@ -13377,6 +13381,13 @@ export class GuestPortalService {
       guestPortalProfileActivationBoundary(profile),
     );
     const missionRules = storeMissions;
+    // A case or mission whose budget is spent can no longer reward anyone, so
+    // it is not advertised. Cases the guest already holds stay openable.
+    const budgetSpentByRuleId = await loadGuestGameRuleBudgetSpent(
+      this.prisma,
+      context.tenant.id,
+      { lootBoxes, missions: missionRules },
+    );
     const missionProgress = await this.buildMissionProgress(
       context.tenant.id,
       guest,
@@ -13385,6 +13396,9 @@ export class GuestPortalService {
       context.store.timeZone,
     );
     const visibleMissions = missionRules
+      .filter(
+        (item) => !guestGameRuleBudgetExhausted(item, budgetSpentByRuleId),
+      )
       .filter((item) =>
         shouldShowGuestPortalMission(
           item,
@@ -13450,12 +13464,18 @@ export class GuestPortalService {
         }
       });
     }
-    const visibleCatalogLootBoxes = filterLootBoxesByVisualRefs(
-      storeLootBoxRows.filter(portalLootBoxVisibleInCatalog),
-      publishedVisualLootBoxRefs,
-    );
     const entitledRuleIds = new Set(
       entitlementRows.map((entitlement) => entitlement.ruleId),
+    );
+    const visibleCatalogLootBoxes = filterLootBoxesByVisualRefs(
+      storeLootBoxRows
+        .filter(portalLootBoxVisibleInCatalog)
+        .filter(
+          (lootBox) =>
+            entitledRuleIds.has(lootBox.id) ||
+            !guestGameRuleBudgetExhausted(lootBox, budgetSpentByRuleId),
+        ),
+      publishedVisualLootBoxRefs,
     );
     // Entitlements prioritize an earned catalog case, but they must never
     // promote a gift-only REWARD_TEMPLATE into the public storefront. Gift

@@ -96,6 +96,7 @@ function createPrismaMock() {
       count: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
+      groupBy: jest.fn().mockResolvedValue([]),
       updateMany: jest.fn(),
     },
     guestGameCompletionNotification: {
@@ -13968,5 +13969,105 @@ describe('GuestPortalService', () => {
       );
       expect(prisma.guestGameEvent.upsert).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('guest game module hides spent budgets', () => {
+  function lootBox(id: string, budgetAmount: number | null) {
+    return {
+      id,
+      tenantId: 'tenant-1',
+      name: `Case ${id}`,
+      status: 'ACTIVE',
+      usageKind: 'STANDALONE',
+      rewardType: 'BONUS_BALANCE',
+      rewardLabel: '100 бонусов',
+      manualApprovalRequired: false,
+      note: null,
+      storeIds: ['store-1'],
+      audienceId: null,
+      triggerKind: 'SESSION_START',
+      sessionType: null,
+      limits: {},
+      periodRules: {},
+      probabilityRules: {},
+      budgetAmount:
+        budgetAmount === null ? null : new Prisma.Decimal(budgetAmount),
+    };
+  }
+
+  it('drops a case with a spent budget unless the guest already holds it', async () => {
+    const { prisma, service } = createService();
+    jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+      tenant: { id: 'tenant-1', name: 'LeetPlus', slug: 'demo' },
+      store: {
+        id: 'store-1',
+        publicSlug: 'pushkinskaya',
+        name: '1337-Pushkinskaya',
+        address: 'Pushkinskaya, 217',
+        timeZone: 'Asia/Yekaterinburg',
+        externalDomain: 'club-1',
+        externalClubId: '1',
+        integrationSourceId: null,
+      },
+    });
+    jest.spyOn(service as any, 'findGuest').mockResolvedValue(null);
+    jest.spyOn(service as any, 'findProfile').mockResolvedValue(null);
+    jest
+      .spyOn(service as any, 'findPortalLootBoxEntitlements')
+      .mockResolvedValue([
+        {
+          id: 'entitlement-held',
+          ruleId: 'loot-spent-held',
+          status: 'AVAILABLE',
+          sourceEventType: 'SESSION_START',
+          storeId: 'store-1',
+          qualifiedAt: new Date('2026-09-20T13:20:00.000Z'),
+          evidence: null,
+        },
+      ]);
+    prisma.guestGameLootBox.findMany.mockResolvedValue([
+      lootBox('loot-spent', 5000),
+      lootBox('loot-spent-held', 5000),
+      lootBox('loot-open', 5000),
+      lootBox('loot-unlimited', null),
+    ]);
+    prisma.guestGameReward.groupBy.mockImplementation(
+      ({ by }: { by: string[] }) =>
+        Promise.resolve(
+          by[0] === 'lootBoxId'
+            ? [
+                {
+                  lootBoxId: 'loot-spent',
+                  _sum: { rewardAmount: new Prisma.Decimal(5000) },
+                },
+                {
+                  lootBoxId: 'loot-spent-held',
+                  _sum: { rewardAmount: new Prisma.Decimal(5200) },
+                },
+                {
+                  lootBoxId: 'loot-open',
+                  _sum: { rewardAmount: new Prisma.Decimal(4900) },
+                },
+              ]
+            : [],
+        ),
+    );
+
+    const portal = await (service as any).buildPortalPayload({
+      sub: 'guest-1',
+      purpose: 'guest_portal',
+      tenantId: 'tenant-1',
+      storeId: 'store-1',
+      guestId: 'guest-1',
+      profileId: null,
+      phoneHash: 'phone-hash',
+    });
+
+    expect(
+      portal.gamification.lootBoxes
+        .map((item: { id: string }) => item.id)
+        .sort(),
+    ).toEqual(['loot-open', 'loot-spent-held', 'loot-unlimited']);
   });
 });

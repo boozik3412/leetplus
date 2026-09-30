@@ -135,6 +135,7 @@ import {
   type GuestGameEvaluationMode,
 } from './guest-game-source-policy';
 import { GuestGameMediaService } from './guest-game-media.service';
+import { loadGuestGameRuleBudgetSpent } from './guest-game-rule-budget';
 import {
   exactBalanceTopupReplayAttestation,
   type BalanceTopupReplayHistoricalStepOverride,
@@ -13444,6 +13445,11 @@ export class GuestGamificationService {
       this.getSeasons(user),
       dto.storeId ? this.assertStore(user, dto.storeId) : Promise.resolve(null),
     ]);
+    const budgetSpentByRuleId = await loadGuestGameRuleBudgetSpent(
+      this.prisma,
+      user.tenantId,
+      { lootBoxes, missions, seasons },
+    );
     const prequalifiedLootBoxOpen = options.prequalifiedLootBoxOpen;
     if (
       prequalifiedLootBoxOpen &&
@@ -13595,6 +13601,7 @@ export class GuestGamificationService {
       ruleDomainTimeZones: options.ruleDomainTimeZones,
       ruleExternalDomains: options.ruleExternalDomains,
       prequalifiedLootBoxOpen,
+      budgetSpentByRuleId,
     };
     const targetLootBoxes = lootBoxId
       ? lootBoxes.filter((item) => item.id === lootBoxId)
@@ -33670,6 +33677,9 @@ type DryRunContext = {
   ruleDomainTimeZones?: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
   ruleExternalDomains?: ReadonlyMap<string, readonly string[]>;
   prequalifiedLootBoxOpen?: GuestGamePrequalifiedLootBoxOpen;
+  // Exact per-rule spend from the database; context.rewards is only a
+  // bounded window and would undercount long-running budgets.
+  budgetSpentByRuleId?: ReadonlyMap<string, number>;
 };
 
 type DryRunMissionRewardEntitlement = {
@@ -33862,6 +33872,7 @@ function evaluateLootBoxDryRun(
       ruleRewards,
       blockers,
       reasons,
+      context.budgetSpentByRuleId?.get(rule.id),
     );
     if (scopedContext) {
       appendDryRunLootBoxLimits(
@@ -33963,6 +33974,7 @@ function evaluateMissionDryRun(
     ruleRewards,
     blockers,
     reasons,
+    context.budgetSpentByRuleId?.get(rule.id),
   );
   if (scopedContext) {
     appendDryRunMissionLimits(
@@ -34093,6 +34105,7 @@ function evaluateSeasonDryRun(
     ruleRewards,
     blockers,
     reasons,
+    context.budgetSpentByRuleId?.get(rule.id),
   );
 
   if (rule.premiumEnabled) {
@@ -34884,13 +34897,17 @@ function appendDryRunBudgetCheck(
   rewards: GuestGameReward[],
   blockers: string[],
   reasons: string[],
+  exactSpent?: number,
 ) {
   if (budgetAmount == null) {
     reasons.push('Бюджет не задан');
     return;
   }
 
-  const spent = sum(rewards.map((reward) => reward.rewardAmount));
+  const spent = Math.max(
+    sum(rewards.map((reward) => reward.rewardAmount)),
+    exactSpent ?? 0,
+  );
   const projected = spent + projectedAmount;
   reasons.push(`Бюджет: ${spent}/${budgetAmount} руб`);
 

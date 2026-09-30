@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type SearchProfile = {
@@ -407,6 +408,8 @@ async function readClientError(response: Response) {
 }
 
 export function GamificationLogPanel() {
+  const searchParams = useSearchParams();
+  const requestedProfileId = searchParams.get("profileId");
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<SearchProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
@@ -457,6 +460,14 @@ export function GamificationLogPanel() {
     void loadMonitoring();
     return () => controller.abort();
   }, [monitoringRefreshKey]);
+
+  useEffect(() => {
+    // Deep link from the guest CRM card: /gamification/log?profileId=...
+    if (requestedProfileId && !selectedProfileId) {
+      void loadProfile(requestedProfileId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadProfile reads the latest filters; run once per requested id
+  }, [requestedProfileId]);
 
   const stores = data?.filters.stores ?? [];
   const activeTimeline =

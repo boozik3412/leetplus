@@ -56,6 +56,337 @@ export type GuestDashboardRow = {
   nextContactAt: string | null;
   crmUpdatedAt: string | null;
   phoneConsentStatus: GuestCommunicationConsentStatus;
+  gameProfile: GuestGameProfileBrief | null;
+  recommendedAction: GuestRecommendedAction;
+};
+
+export type GuestGameEngagement =
+  | "ACTIVE"
+  | "IDLE"
+  | "NOT_ACTIVATED"
+  | "PROFILE_INACTIVE";
+
+export type GuestGameProfileBrief = {
+  profileId: string;
+  status: string;
+  level: number;
+  xp: number;
+  xpToNextLevel: number;
+  registeredAt: string;
+  gameActivatedAt: string | null;
+  lastGameActivityAt: string | null;
+  isStaffTest: boolean;
+  channels: { telegram: boolean; max: boolean };
+  phoneConsentStatus: GuestCommunicationConsentStatus;
+  engagement: GuestGameEngagement;
+  gameEventsInPeriod: number;
+  pendingRewards: number;
+  rewardsExpiringSoon: number;
+  nearestRewardExpiresAt: string | null;
+  oldestPendingRewardAt: string | null;
+  rewardsQualifiedInPeriod: number;
+  rewardsPaidInPeriod: number;
+  rewardsPaidTotal: number;
+  lastRewardAt: string | null;
+  bonusConfirmedInPeriod: number;
+  bonusConfirmedTotal: number;
+  bonusPendingAmount: number;
+};
+
+export type GuestGameStatusFilter =
+  | "any"
+  | "registered"
+  | "not_registered"
+  | "active"
+  | "idle"
+  | "pending_rewards";
+
+export type GuestRecommendedActionKey =
+  | "MANUAL"
+  | "WIN_BACK"
+  | "REACTIVATE"
+  | "SECOND_VISIT"
+  | "CLAIM_REWARD"
+  | "INVITE_TO_GAME"
+  | "KEEP_WARM"
+  | "SOFT_TOUCH"
+  | "OBSERVE";
+
+export type GuestRecommendedAction = {
+  key: GuestRecommendedActionKey;
+  label: string;
+  reason: string;
+};
+
+export type GuestMetricComparison = {
+  current: number;
+  previous: number;
+  delta: number;
+  deltaPercent: number | null;
+};
+
+export type GuestsComparisonMetricKey =
+  | "activeGuests"
+  | "newGuests"
+  | "repeatGuests"
+  | "riskGuests"
+  | "lostGuests"
+  | "sessionsCount"
+  | "playHours"
+  | "transactionAmount"
+  | "barRevenue"
+  | "revenue"
+  | "arpu";
+
+export type GuestsComparisonSummary = {
+  previousPeriodFrom: string;
+  previousPeriodTo: string;
+  metrics: Record<GuestsComparisonMetricKey, GuestMetricComparison>;
+};
+
+export type GuestsKpiSummary = {
+  revenue: number;
+  arpu: number | null;
+  averageCheck: number | null;
+  averageCheckBase: number;
+  visitFrequency: number | null;
+  barBuyersShare: number | null;
+  barRevenuePerActiveGuest: number | null;
+  repeatShare: number | null;
+  returnedGuests: number;
+  quietGuests: number;
+  valueAtRisk: number;
+  lostValue: number;
+};
+
+export type GuestsHealthSummary = {
+  rfm: Array<{
+    segment: GuestRfmSegment;
+    guests: number;
+    guestsPercent: number;
+    revenue: number;
+    revenuePercent: number;
+  }>;
+  churn: Array<{
+    level: GuestChurnRiskLevel;
+    guests: number;
+    guestsPercent: number;
+    valueAtRisk: number;
+  }>;
+  consent: Array<{
+    status: GuestCommunicationConsentStatus;
+    guests: number;
+    guestsPercent: number;
+  }>;
+  crm: Array<{ status: GuestCrmStatus; guests: number }>;
+};
+
+export type GuestCohortStats = {
+  guests: number;
+  repeatShare: number | null;
+  averageVisitDays: number | null;
+  averageSessions: number | null;
+  averageRevenue: number | null;
+  averageBarRevenue: number | null;
+  riskShare: number | null;
+};
+
+export type GuestsGamificationSummary =
+  | {
+      available: true;
+      funnel: {
+        guests: number;
+        registered: number;
+        activated: number;
+        activeInPeriod: number;
+        withRewardsInPeriod: number;
+        withConfirmedBonusesInPeriod: number;
+      };
+      shares: {
+        registeredPercent: number | null;
+        activatedPercent: number | null;
+        activePercent: number | null;
+      };
+      rewards: {
+        pendingWalletItems: number;
+        guestsWithPendingRewards: number;
+        expiringSoonItems: number;
+        qualifiedInPeriod: number;
+        paidInPeriod: number;
+        bonusConfirmedAmountInPeriod: number;
+        bonusPendingAmount: number;
+      };
+      profiles: {
+        unlinked: number;
+        staffTest: number;
+        idle: number;
+        notActivated: number;
+      };
+      effect: {
+        registered: GuestCohortStats;
+        notRegistered: GuestCohortStats;
+        note: string;
+      };
+      topPlayers: GuestDashboardRow[];
+    }
+  | { available: false; reason: "NO_CAPABILITY" | "NOT_CONFIGURED" };
+
+export type GuestsCrmQueueSummary = {
+  openTasks: number;
+  inProgressTasks: number;
+  overdueTasks: number;
+  dueTodayTasks: number;
+  unassignedTasks: number;
+  followUpsDue: number;
+  followUpsOverdue: number;
+};
+
+export type GuestSignalKey =
+  | "VIP_AT_RISK"
+  | "NEW_WITHOUT_SECOND_VISIT"
+  | "BONUS_WITHOUT_ACTIVITY"
+  | "REWARDS_WAITING_CLAIM"
+  | "REWARDS_EXPIRING"
+  | "PLAYERS_GONE_IDLE"
+  | "ACTIVE_NOT_REGISTERED"
+  | "CONSENT_MISSING_VALUABLE"
+  | "CRM_FOLLOWUPS_DUE"
+  | "CRM_TASKS_OVERDUE"
+  | "UNLINKED_GAME_PROFILES";
+
+export type GuestSignalTone = "CRITICAL" | "WARNING" | "OPPORTUNITY" | "INFO";
+
+export type GuestSignalListFilters = Pick<
+  GuestListFilters,
+  | "signal"
+  | "segment"
+  | "crmStatus"
+  | "gameStatus"
+  | "churnRisk"
+  | "rfm"
+  | "consent"
+  | "sort"
+  | "direction"
+>;
+
+export type GuestSignalAction = {
+  kind: "CREATE_TASK" | "OPEN_LIST" | "OPEN_TASKS" | "OPEN_GAME";
+  label: string;
+  taskTitle: string | null;
+  taskDescription: string | null;
+};
+
+export type GuestSignalGuest = {
+  id: string;
+  displayName: string;
+  meta: string;
+  amount: number | null;
+};
+
+export type GuestSignal = {
+  key: GuestSignalKey;
+  tone: GuestSignalTone;
+  title: string;
+  condition: string;
+  count: number;
+  amount: number | null;
+  amountLabel: string | null;
+  listFilters: GuestSignalListFilters | null;
+  href: string | null;
+  guests: GuestSignalGuest[];
+  action: GuestSignalAction;
+};
+
+export type GuestActionItem = {
+  key: GuestSignalKey;
+  priority: number;
+  tone: GuestSignalTone;
+  title: string;
+  description: string;
+  count: number;
+  amount: number | null;
+  href: string | null;
+  listFilters: GuestSignalListFilters | null;
+  action: GuestSignalAction;
+};
+
+export type GuestBehaviorSummary = {
+  favoriteStoreName: string | null;
+  favoriteStoreVisits: number;
+  favoriteWeekday: number | null;
+  favoriteHour: number | null;
+  weekdays: Array<{ weekday: number; sessions: number }>;
+  hours: Array<{ hour: number; sessions: number }>;
+  sessionsPer30Days: number | null;
+  averageIntervalDays: number | null;
+  daysSinceLastVisit: number | null;
+  sampleSessions: number;
+  sampleFrom: string | null;
+};
+
+export type GuestGameRewardDetail = {
+  id: string;
+  status: string;
+  source: string;
+  rewardType: string;
+  rewardAmount: number;
+  rewardLabel: string;
+  sourceKind: "MISSION" | "LOOT_BOX" | "BATTLE_PASS" | "MANUAL";
+  sourceName: string | null;
+  storeName: string | null;
+  qualifiedAt: string;
+  paidAt: string | null;
+  claimExpiresAt: string | null;
+  expiresAt: string | null;
+};
+
+export type GuestGameWalletItemDetail = {
+  id: string;
+  kind: string;
+  sourceKind: string;
+  title: string;
+  rewardLabel: string;
+  status: string;
+  storeName: string | null;
+  availableAt: string;
+  expiresAt: string;
+  claimedAt: string | null;
+  expiresInDays: number;
+};
+
+export type GuestGameLedgerDetail = {
+  id: string;
+  status: string;
+  amount: number;
+  reason: string | null;
+  storeName: string | null;
+  createdAt: string;
+  confirmedAt: string | null;
+  failedAt: string | null;
+  canceledAt: string | null;
+};
+
+export type GuestGameEventDetail = {
+  id: string;
+  eventType: string;
+  source: string;
+  xpDelta: number;
+  occurredAt: string;
+  sourceName: string | null;
+};
+
+export type GuestGameDetail = {
+  profile: GuestGameProfileBrief;
+  rewards: GuestGameRewardDetail[];
+  wallet: GuestGameWalletItemDetail[];
+  ledger: GuestGameLedgerDetail[];
+  events: GuestGameEventDetail[];
+  totals: {
+    events: number;
+    rewards: number;
+    rewardsPaid: number;
+    ledgerEntries: number;
+  };
 };
 
 export type GuestChurnRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "LOST";
@@ -240,23 +571,40 @@ export type GuestsSummary = {
   topGuests: GuestDashboardRow[];
   riskGuestsRows: GuestDashboardRow[];
   bonusLoadGuestsRows: GuestDashboardRow[];
+  comparison: GuestsComparisonSummary;
+  kpi: GuestsKpiSummary;
+  health: GuestsHealthSummary;
+  crmQueue: GuestsCrmQueueSummary;
+  gamification: GuestsGamificationSummary;
+  attention: GuestSignal[];
+  actions: GuestActionItem[];
 };
+
+export type GuestListSort =
+  | "revenue"
+  | "sessions"
+  | "lastActivity"
+  | "registered"
+  | "rfm"
+  | "churnRisk"
+  | "ltv"
+  | "bonusLoad"
+  | "level"
+  | "pendingRewards"
+  | "gameActivity";
 
 export type GuestListFilters = GuestsSummaryFilters & {
   segment?: "top" | GuestSegment;
   crmStatus?: GuestCrmStatus;
+  gameStatus?: GuestGameStatusFilter;
+  churnRisk?: GuestChurnRiskLevel;
+  rfm?: GuestRfmSegment;
+  consent?: GuestCommunicationConsentStatus;
+  signal?: GuestSignalKey;
   search?: string;
   page?: string;
   pageSize?: string;
-  sort?:
-    | "revenue"
-    | "sessions"
-    | "lastActivity"
-    | "registered"
-    | "rfm"
-    | "churnRisk"
-    | "ltv"
-    | "bonusLoad";
+  sort?: GuestListSort;
   direction?: "asc" | "desc";
 };
 
@@ -681,6 +1029,11 @@ export type GuestDetail = GuestDashboardRow & {
     revenue: number;
     quantity: number;
   }>;
+  crmTasks: GuestCrmTask[];
+  contactEvents: GuestCrmContactEvent[];
+  behavior: GuestBehaviorSummary;
+  gameAccess: "AVAILABLE" | "NO_CAPABILITY";
+  gamification: GuestGameDetail | null;
 };
 
 export type GuestsSummaryFilters = {

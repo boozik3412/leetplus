@@ -147,7 +147,7 @@ export default async function AssortmentDashboardPage({
           </div>
         </header>
 
-        <div className="mt-5">
+        <div className="mt-5" data-lp-veil-target="">
           <AssortmentGrowthDashboard
             summary={summary}
             dashboardQuery={{
@@ -160,7 +160,10 @@ export default async function AssortmentDashboardPage({
           />
         </div>
 
-        <section className="mt-8 border-t border-zinc-200 pt-7 dark:border-zinc-800">
+        <section
+          data-lp-veil-target=""
+          className="mt-8 border-t border-zinc-200 pt-7 dark:border-zinc-800"
+        >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-600 dark:text-emerald-300">

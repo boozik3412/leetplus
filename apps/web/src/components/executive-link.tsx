@@ -2,12 +2,11 @@
 
 import Link from "next/link";
 import { useState, type ComponentProps } from "react";
-import { startNavigationFeedback } from "@/components/navigation-feedback";
 
 /**
- * A summary link that answers the tap at once. The next page is computed on
- * the server for 1–3 s; without feedback a tap on a phone looks ignored, and
- * the global progress bar does not see clicks that the router handles.
+ * A summary link that answers the tap at once: the tapped card pulses while
+ * the next page is computed on the server (1–3 s). The route bar and its label
+ * come from NavigationFeedback, which sees every link click.
  */
 export function ExecutiveLink({
   className,
@@ -34,7 +33,6 @@ export function ExecutiveLink({
         )
           return;
         setPending(true);
-        startNavigationFeedback();
       }}
     />
   );

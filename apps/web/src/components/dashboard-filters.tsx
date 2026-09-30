@@ -351,9 +351,19 @@ function DashboardFiltersContent({
       params.set("trend", trend);
     }
 
-    startNavigationFeedback();
+    const target = `${pathname}?${params.toString()}`;
+
+    // The same address: nothing will change, so there is nothing to wait for.
+    if (target === `${window.location.pathname}${window.location.search}`) {
+      if (closePanel) {
+        setOpenPanel(null);
+      }
+      return;
+    }
+
+    startNavigationFeedback("Обновляем данные…", { veil: true });
     startTransition(() => {
-      router.push(`${pathname}?${params.toString()}`);
+      router.push(target);
     });
 
     if (closePanel) {

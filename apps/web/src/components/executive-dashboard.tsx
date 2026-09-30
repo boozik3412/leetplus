@@ -1148,7 +1148,10 @@ export function ExecutiveDashboard({
       ? `${clubDetailHref(detailsSummary, chartMetric)}&returnPeriod=full-day`
       : clubDetailHref(summary, chartMetric);
   return (
-    <div className="mt-5 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+    <div
+      data-lp-veil-target=""
+      className="mt-5 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1fr)_420px]"
+    >
       <div className="min-w-0 xl:col-span-2 xl:row-start-1">
         <DriverDataStrip summary={summary} />
       </div>

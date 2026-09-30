@@ -204,8 +204,17 @@ export function GuestDashboardFilters({
       params.set("direction", filters.direction);
     }
 
-    startNavigationFeedback();
-    router.push(`${pathname}?${params.toString()}`);
+    const target = `${pathname}?${params.toString()}`;
+
+    if (target === `${window.location.pathname}${window.location.search}`) {
+      if (options?.closePanel ?? true) {
+        setOpenPanel(null);
+      }
+      return;
+    }
+
+    startNavigationFeedback("Обновляем данные…", { veil: true });
+    router.push(target);
 
     if (options?.closePanel ?? true) {
       setOpenPanel(null);

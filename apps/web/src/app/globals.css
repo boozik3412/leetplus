@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./loading-indicator.css";
 
 @keyframes navigation-progress {
   0% {

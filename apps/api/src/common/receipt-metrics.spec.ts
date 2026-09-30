@@ -72,6 +72,24 @@ describe('receipt metric projection', () => {
     expect(guestMinutePurchaseKey(null, at('10:00:00'))).toBeNull();
   });
 
+  it('uses the caller business day instead of the UTC date', () => {
+    // A night sale stored on the previous UTC date belongs to the club's day.
+    const night = {
+      ...sale('night', 300, '2026-09-06'),
+      businessDate: period.from,
+    };
+    const metric = projection([night, sale('day', 100)]).getMetric({
+      from: period.from,
+      to: period.from,
+    });
+    expect(metric.receiptEvidence?.receiptCount).toBe(2);
+    expect(metric.value).toBe(200);
+    expect(
+      projection([sale('night', 300, '2026-09-06')]).getMetric(period)
+        .receiptEvidence?.receiptCount,
+    ).toBe(0);
+  });
+
   it('counts receipts rather than lines and uses weighted receipt totals for every view', () => {
     const data = projection([
       sale('one', 100),

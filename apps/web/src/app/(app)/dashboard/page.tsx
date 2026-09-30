@@ -17,6 +17,7 @@ import { dashboardWorkspaceHref, getDefaultLandingPath } from "@/lib/landing";
 import { getStores } from "@/lib/stores";
 import { redirect } from "next/navigation";
 import { formatClubs, formatDay, formatRange } from "@/lib/executive-format";
+import { salesConfirmedThrough } from "@/lib/executive-driver-rules";
 import {
   executiveScopeMatches,
   loadExecutiveHistory,
@@ -127,14 +128,14 @@ export default async function DashboardPage({
   }
 
   const summary = summaryResult.value;
-  const factAsOf = summary.metrics.productRevenue?.factAsOf;
+  const salesThrough = salesConfirmedThrough(summary);
   const scopeLine = [
     formatRange(summary.scope.period.from, summary.scope.period.to),
     summary.scope.comparison
       ? `к ${formatRange(summary.scope.comparison.from, summary.scope.comparison.to)}`
       : "без сравнения",
     formatClubs(summary.scope.storeIds.length),
-    factAsOf ? `продажи подтверждены по ${formatDay(factAsOf.slice(0, 10))}` : null,
+    salesThrough ? `продажи подтверждены по ${formatDay(salesThrough)}` : null,
   ]
     .filter(Boolean)
     .join(" · ");

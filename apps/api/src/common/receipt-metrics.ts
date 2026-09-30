@@ -17,6 +17,12 @@ export type ReceiptFact = {
    * legacy reports do not, so their receipts are unchanged.
    */
   derivedPurchaseKey?: string | null;
+  /**
+   * Club-local business day of the sale (YYYY-MM-DD). The executive summary
+   * passes it so that sales, visits and coverage share the club's day; without
+   * it the UTC date is used, as legacy reports always did.
+   */
+  businessDate?: string;
 };
 
 function round(value: number) {
@@ -25,6 +31,10 @@ function round(value: number) {
 
 function day(value: Date) {
   return value.toISOString().slice(0, 10);
+}
+
+function saleDay(fact: ReceiptFact & { saleDate: Date }) {
+  return fact.businessDate ?? day(fact.saleDate);
 }
 
 function identityKey(fact: ReceiptFact) {
@@ -64,7 +74,7 @@ export function ambiguousReceiptKeys(facts: readonly ReceiptFact[]) {
     const key = identityKey(fact);
     if (!key || !fact.saleDate || fact.isCanceled) continue;
     const values = dates.get(key) ?? new Set<string>();
-    values.add(day(fact.saleDate));
+    values.add(fact.businessDate ?? day(fact.saleDate));
     dates.set(key, values);
   }
   return new Set(
@@ -161,7 +171,7 @@ export function createReceiptMetricProjection(input: {
     const confirmed = facts.filter(
       (fact) =>
         stores.has(fact.storeId) &&
-        confirmedDays.has(`${fact.storeId}:${day(fact.saleDate)}`),
+        confirmedDays.has(`${fact.storeId}:${saleDay(fact)}`),
     );
     const grouped = groupReceiptFacts(confirmed, ambiguous);
     const covered = confirmedDays.size;

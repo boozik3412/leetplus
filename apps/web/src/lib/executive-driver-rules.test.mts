@@ -4,6 +4,7 @@ import {
   checkDrops,
   conversionGaps,
   mainLever,
+  salesConfirmedThrough,
   silentClubs,
 } from "./executive-driver-rules.ts";
 
@@ -131,4 +132,26 @@ test("a club without sales since a day of the period is silent, not a sales drop
     { storeId: "kh", storeName: "kh", since: "2026-09-29" },
     { storeId: "gone", storeName: "gone", since: "2026-09-23" },
   ]);
+
+  // 20:30 UTC on 28.09 is 00:30 on 29.09 in Samara: the club sold on 29.09.
+  const samara = {
+    scope: {
+      period: { from: "2026-09-23", to: "2026-09-29" },
+      storeTimeZones: { kh: "Europe/Samara", ra: "Asia/Yekaterinburg" },
+    },
+    clubs: [
+      club("kh", "2026-09-28T20:30:00.000Z", 22_860, 69_910),
+      club("ra", "2026-09-29T18:40:00.000Z", 75_220, 61_467),
+    ],
+    metrics: { productRevenue: { factAsOf: "2026-09-29T18:40:00.000Z" } },
+  };
+  assert.deepEqual(silentClubs(samara as never), []);
+  assert.equal(salesConfirmedThrough(samara as never), "2026-09-29");
+  assert.equal(
+    salesConfirmedThrough({
+      ...samara,
+      clubs: [club("ra", "2026-09-29T19:10:00.000Z", 1, 1)],
+    } as never),
+    "2026-09-30",
+  );
 });

@@ -16,6 +16,7 @@ import {
 import { dashboardWorkspaceHref, getDefaultLandingPath } from "@/lib/landing";
 import { getStores } from "@/lib/stores";
 import { redirect } from "next/navigation";
+import { formatClubs, formatDay, formatRange } from "@/lib/executive-format";
 import {
   executiveScopeMatches,
   loadExecutiveHistory,
@@ -102,6 +103,7 @@ export default async function DashboardPage({
       <main className="min-h-screen bg-[var(--background)] px-4 py-6 text-[var(--foreground)] sm:px-6 lg:px-8">
         <div className="mx-auto max-w-[1480px]">
           <DashboardFilters
+            variant="executive"
             period={query.period ?? "full-week"}
             dateFrom={query.dateFrom ?? ""}
             dateTo={query.dateTo ?? ""}
@@ -125,6 +127,17 @@ export default async function DashboardPage({
   }
 
   const summary = summaryResult.value;
+  const factAsOf = summary.metrics.productRevenue?.factAsOf;
+  const scopeLine = [
+    formatRange(summary.scope.period.from, summary.scope.period.to),
+    summary.scope.comparison
+      ? `к ${formatRange(summary.scope.comparison.from, summary.scope.comparison.to)}`
+      : "без сравнения",
+    formatClubs(summary.scope.storeIds.length),
+    factAsOf ? `продажи подтверждены по ${formatDay(factAsOf.slice(0, 10))}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const staffRequest = getStaffPriorities(summary.scope.storeIds);
   const [operations, history] = await Promise.all([
     loadOperations(query, summary),
@@ -137,18 +150,18 @@ export default async function DashboardPage({
   return (
     <main className="min-h-screen bg-[var(--background)] px-4 py-6 text-[var(--foreground)] sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1480px]">
-        <header>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-300">
-            Обзор сети
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
-            Сводка сети
-          </h1>
-          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-            Результат, изменения и следующие действия по выбранным клубам.
-          </p>
-          <div className="mt-5">
+        <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+              Сводка сети
+            </h1>
+            <p className="mt-1 text-sm leading-6 tabular-nums text-zinc-600 dark:text-zinc-300">
+              {scopeLine}
+            </p>
+          </div>
+          <div className="min-w-0">
             <DashboardFilters
+              variant="executive"
               period={query.period ?? "full-week"}
               dateFrom={summary.scope.period.from}
               dateTo={summary.scope.period.to}
@@ -161,6 +174,7 @@ export default async function DashboardPage({
           </div>
         </header>
         <ExecutiveDashboard
+          initialTrend={first(params.trend)}
           summary={summary}
           operations={operations}
           history={history}

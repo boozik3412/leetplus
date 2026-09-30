@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -18,6 +19,7 @@ import {
   randomBytes,
 } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { hasCapability } from '../auth/capabilities';
 import { resolveSecuritySecret } from '../config/environment-validation';
 import { GuestDataFoundationService } from '../integrations/guest-data-foundation.service';
 import { LangameClient } from '../integrations/langame.client';
@@ -30,8 +32,58 @@ import { LangameSettingsService } from '../integrations/langame-settings.service
 import type { LangameGuestSession } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import {
+  GuestGameInsightsService,
+  type GuestGameDetail,
+} from './guest-game-insights.service';
+import {
+  buildCrmQueueSummary,
+  buildGuestBehaviorSummary,
+  buildGuestHealthSummary,
+  buildGuestKpiSummary,
+  buildGuestSignals,
+  buildGuestsGamificationSummary,
+  buildMetricComparison,
+  countReturnedGuests,
+  matchesGuestGameStatus,
+  matchesGuestSignal,
+  recommendGuestAction,
+  resolveGuestGameStatusFilter,
+  resolveGuestSignalFilter,
+  type GuestActionItem,
+  type GuestBehaviorSummary,
+  type GuestGameProfileBrief,
+  type GuestGameStatusFilter,
+  type GuestRecommendedAction,
+  type GuestSignal,
+  type GuestSignalKey,
+  type GuestsComparisonMetricKey,
+  type GuestsComparisonSummary,
+  type GuestsCrmQueueSummary,
+  type GuestsGamificationSummary,
+  type GuestsHealthSummary,
+  type GuestsKpiSummary,
+} from './guest-insights';
+
+export type {
+  GuestActionItem,
+  GuestBehaviorSummary,
+  GuestGameDetail,
+  GuestGameProfileBrief,
+  GuestGameStatusFilter,
+  GuestRecommendedAction,
+  GuestSignal,
+  GuestSignalKey,
+  GuestsComparisonSummary,
+  GuestsCrmQueueSummary,
+  GuestsGamificationSummary,
+  GuestsHealthSummary,
+  GuestsKpiSummary,
+};
 
 const GUEST_ANALYTICS_MIN_PERIOD_MONTHS = 3;
+const GUEST_BEHAVIOR_SAMPLE_DAYS = 90;
+const GUEST_DETAIL_CRM_ROWS = 20;
 
 export type GuestsSummaryQuery = {
   dateFrom?: string;
@@ -43,6 +95,11 @@ export type GuestsSummaryQuery = {
 export type GuestListQuery = GuestsSummaryQuery & {
   segment?: 'active' | 'new' | 'repeat' | 'risk' | 'lost' | 'quiet' | 'top';
   crmStatus?: GuestCrmStatus;
+  gameStatus?: GuestGameStatusFilter;
+  churnRisk?: GuestChurnRiskLevel;
+  rfm?: GuestRfmSegment;
+  consent?: GuestCommunicationConsentStatus;
+  signal?: GuestSignalKey;
   search?: string;
   page?: string;
   pageSize?: string;
@@ -54,7 +111,10 @@ export type GuestListQuery = GuestsSummaryQuery & {
     | 'rfm'
     | 'churnRisk'
     | 'ltv'
-    | 'bonusLoad';
+    | 'bonusLoad'
+    | 'level'
+    | 'pendingRewards'
+    | 'gameActivity';
   direction?: 'asc' | 'desc';
 };
 
@@ -244,6 +304,9 @@ export type GuestDashboardRow = {
   nextContactAt: string | null;
   crmUpdatedAt: string | null;
   phoneConsentStatus: GuestCommunicationConsentStatus;
+  /** Game projection; null when the guest has no linked profile or the caller lacks view_guest_gamification. */
+  gameProfile: GuestGameProfileBrief | null;
+  recommendedAction: GuestRecommendedAction;
 };
 
 export type GuestChurnRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'LOST';
@@ -428,6 +491,13 @@ export type GuestsSummary = {
   topGuests: GuestDashboardRow[];
   riskGuestsRows: GuestDashboardRow[];
   bonusLoadGuestsRows: GuestDashboardRow[];
+  comparison: GuestsComparisonSummary;
+  kpi: GuestsKpiSummary;
+  health: GuestsHealthSummary;
+  crmQueue: GuestsCrmQueueSummary;
+  gamification: GuestsGamificationSummary;
+  attention: GuestSignal[];
+  actions: GuestActionItem[];
 };
 
 export type GuestListResponse = {
@@ -581,6 +651,11 @@ export type GuestDetail = GuestDashboardRow & {
     revenue: number;
     quantity: number;
   }>;
+  crmTasks: GuestCrmTask[];
+  contactEvents: GuestCrmContactEvent[];
+  behavior: GuestBehaviorSummary;
+  gameAccess: 'AVAILABLE' | 'NO_CAPABILITY';
+  gamification: GuestGameDetail | null;
 };
 
 export type GuestLiveSessionResult = {
@@ -1039,6 +1114,8 @@ export class GuestsService {
     private readonly guestDataFoundationService: GuestDataFoundationService,
     private readonly langameSettingsService: LangameSettingsService,
     private readonly langameClient: LangameClient,
+    @Optional()
+    private readonly guestGameInsights?: GuestGameInsightsService,
   ) {}
 
   async getFilterOptions(user: AuthenticatedUser): Promise<GuestFilterOptions> {
@@ -1080,14 +1157,19 @@ export class GuestsService {
       maximumPeriodMonths: GUEST_ANALYTICS_MIN_PERIOD_MONTHS,
     });
     const filters = await this.resolveGuestFilters(tenantId, query);
-    const { guests, metricsByGuestId, groupsByKey } =
-      await this.buildGuestMetrics(tenantId, period, filters);
+    const includeGame = this.canViewGameInsights(user);
+    const now = new Date();
+    const { guests, metricsByGuestId, groupsByKey, gameFactsByGuestId } =
+      await this.buildGuestMetrics(tenantId, period, filters, undefined, {
+        includeGame,
+      });
     const rows = guests.map((guest) =>
       this.toDashboardRow(
         guest,
         metricsByGuestId.get(guest.id),
         period,
         groupsByKey,
+        gameFactsByGuestId.get(guest.id) ?? null,
       ),
     );
     const activeRows = rows.filter((row) => row.segment === 'active');
@@ -1119,12 +1201,75 @@ export class GuestsService {
       metricsByGuestId,
       period,
     );
-    const [trend, visitHeatmap, flowForecast, dataQuality] = await Promise.all([
+    const previousPeriod = this.previousPeriod(period);
+    const [
+      trend,
+      visitHeatmap,
+      flowForecast,
+      dataQuality,
+      previousTotals,
+      crmTasks,
+      unlinkedProfiles,
+    ] = await Promise.all([
       this.buildVisitTrend(tenantId, period, filters),
       this.buildVisitHeatmap(tenantId, period, filters),
       this.buildFlowForecast(tenantId, period, filters),
       this.getDataQuality(tenantId, period, filters),
+      this.buildPeriodTotals(tenantId, previousPeriod, filters),
+      this.prisma.guestCrmTask.findMany({
+        where: { tenantId, status: { in: ['OPEN', 'IN_PROGRESS'] } },
+        select: { status: true, dueAt: true, assignedToUserId: true },
+      }),
+      includeGame && this.guestGameInsights
+        ? this.guestGameInsights.countUnlinkedProfiles(tenantId)
+        : Promise.resolve(0),
     ]);
+    const activeGuests = activeRows.length + repeatRows.length + newRows.length;
+    const returnedGuests = countReturnedGuests(
+      guests.map((guest) =>
+        this.returnedGuestInput(metricsByGuestId.get(guest.id), period),
+      ),
+      period.fromDate,
+    );
+    const kpi = buildGuestKpiSummary({
+      rows,
+      activeGuests,
+      repeatGuests: repeatRows.length,
+      transactionAmount: periodMetrics.transactionAmount,
+      barRevenue: periodMetrics.barRevenue,
+      transactionsCount: periodMetrics.transactionsCount,
+      barSalesCount: periodMetrics.barSalesCount,
+      returnedGuests,
+    });
+    const comparison = this.buildComparisonSummary(
+      {
+        activeGuests,
+        newGuests: newRows.length,
+        repeatGuests: repeatRows.length,
+        riskGuests: riskRows.length,
+        lostGuests: lostRows.length,
+        sessionsCount: periodMetrics.sessionsCount,
+        playHours,
+        transactionAmount: this.round(periodMetrics.transactionAmount, 2),
+        barRevenue: this.round(periodMetrics.barRevenue, 2),
+        revenue: periodRevenue,
+        arpu: kpi.arpu ?? 0,
+      },
+      previousTotals,
+      previousPeriod,
+    );
+    const health = buildGuestHealthSummary(rows);
+    const crmQueue = buildCrmQueueSummary({ tasks: crmTasks, rows, now });
+    const gamification: GuestsGamificationSummary = includeGame
+      ? buildGuestsGamificationSummary({ rows, unlinkedProfiles })
+      : { available: false, reason: 'NO_CAPABILITY' };
+    const { attention, actions } = buildGuestSignals({
+      rows,
+      crmQueue,
+      gamification,
+      now,
+      periodToDate: period.toDate,
+    });
 
     return {
       tenantId,
@@ -1134,7 +1279,7 @@ export class GuestsService {
       storeId: filters.storeId,
       guestGroupId: filters.guestGroupId,
       totalGuests: guests.length,
-      activeGuests: activeRows.length + repeatRows.length + newRows.length,
+      activeGuests,
       newGuests: newRows.length,
       repeatGuests: repeatRows.length,
       riskGuests: riskRows.length,
@@ -1168,6 +1313,13 @@ export class GuestsService {
         'bonusLoad',
         'desc',
       ).slice(0, 12),
+      comparison,
+      kpi,
+      health,
+      crmQueue,
+      gamification,
+      attention,
+      actions,
     };
   }
 
@@ -1252,6 +1404,11 @@ export class GuestsService {
         'Последняя активность',
         'Следующий шаг',
         'Дата следующего контакта',
+        'Игровой профиль',
+        'Уровень',
+        'XP',
+        'Наград к получению',
+        'Игровая активность',
       ],
       ...guestList.rows.map((row) => [
         row.displayName,
@@ -1293,8 +1450,13 @@ export class GuestsService {
         row.churnRisk.valueAtRisk,
         this.formatExportDate(row.insertedAt),
         this.formatExportDate(row.lastActivityAt),
-        this.guestNextActionExportLabel(row),
+        row.recommendedAction.label,
         this.formatExportDateTime(row.nextContactAt),
+        row.gameProfile ? 'Да' : 'Нет',
+        row.gameProfile?.level ?? '',
+        row.gameProfile?.xp ?? '',
+        row.gameProfile?.pendingRewards ?? '',
+        this.formatExportDate(row.gameProfile?.lastGameActivityAt ?? null),
       ]),
     ];
 
@@ -2085,16 +2247,26 @@ export class GuestsService {
     const filters = await this.resolveGuestFilters(tenantId, query);
     const segment = this.resolveSegment(query.segment);
     const crmStatus = this.resolveCrmStatusFilter(query.crmStatus);
+    const gameStatus = resolveGuestGameStatusFilter(query.gameStatus);
+    const churnRisk = this.resolveChurnRiskFilter(query.churnRisk);
+    const rfm = this.resolveRfmFilter(query.rfm);
+    const consent = this.resolveConsentFilter(query.consent);
+    const signal = resolveGuestSignalFilter(query.signal);
     const sort = this.resolveSort(query.sort);
     const direction = this.resolveDirection(query.direction);
-    const { guests, metricsByGuestId, groupsByKey } =
-      await this.buildGuestMetrics(tenantId, period, filters);
+    const includeGame = this.canViewGameInsights(user);
+    const now = new Date();
+    const { guests, metricsByGuestId, groupsByKey, gameFactsByGuestId } =
+      await this.buildGuestMetrics(tenantId, period, filters, undefined, {
+        includeGame,
+      });
     let rows = guests.map((guest) =>
       this.toDashboardRow(
         guest,
         metricsByGuestId.get(guest.id),
         period,
         groupsByKey,
+        gameFactsByGuestId.get(guest.id) ?? null,
       ),
     );
 
@@ -2104,6 +2276,28 @@ export class GuestsService {
 
     if (crmStatus) {
       rows = rows.filter((row) => row.crmStatus === crmStatus);
+    }
+
+    if (gameStatus !== 'any') {
+      rows = rows.filter((row) => matchesGuestGameStatus(row, gameStatus));
+    }
+
+    if (churnRisk) {
+      rows = rows.filter((row) => row.churnRisk.level === churnRisk);
+    }
+
+    if (rfm) {
+      rows = rows.filter((row) => row.rfm.segment === rfm);
+    }
+
+    if (consent) {
+      rows = rows.filter((row) => row.phoneConsentStatus === consent);
+    }
+
+    if (signal) {
+      rows = rows.filter((row) =>
+        matchesGuestSignal(row, signal, { periodToDate: period.toDate, now }),
+      );
     }
 
     return {
@@ -2121,6 +2315,8 @@ export class GuestsService {
   async getGuest(user: AuthenticatedUser, id: string): Promise<GuestDetail> {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const period = this.resolvePeriod({});
+    const includeGame = this.canViewGameInsights(user);
+    const now = new Date();
     const guest = await this.prisma.guest.findFirst({
       where: { id, tenantId },
       select: this.guestSelect(),
@@ -2139,19 +2335,30 @@ export class GuestsService {
       excludedAdminGuestGroups: [],
       onlyGuestGroups: undefined,
     };
-    const { metricsByGuestId, groupsByKey } = await this.buildGuestMetrics(
-      tenantId,
-      period,
-      filters,
-      [id],
-    );
+    const { metricsByGuestId, groupsByKey, gameFactsByGuestId } =
+      await this.buildGuestMetrics(tenantId, period, filters, [id], {
+        includeGame,
+      });
     const row = this.toDashboardRow(
       guest,
       metricsByGuestId.get(id),
       period,
       groupsByKey,
+      gameFactsByGuestId.get(id) ?? null,
     );
-    const [crmEvents, sessions, transactions, sales] = await Promise.all([
+    const behaviorFrom = new Date(
+      now.getTime() - GUEST_BEHAVIOR_SAMPLE_DAYS * 86_400_000,
+    );
+    const [
+      crmEvents,
+      sessions,
+      transactions,
+      sales,
+      crmTasks,
+      contactEvents,
+      behaviorSessions,
+      gamification,
+    ] = await Promise.all([
       this.prisma.guestCrmEvent.findMany({
         where: { tenantId, guestId: id },
         orderBy: { createdAt: 'desc' },
@@ -2207,7 +2414,67 @@ export class GuestsService {
           quantity: true,
         },
       }),
+      this.prisma.guestCrmTask.findMany({
+        where: { tenantId, guestId: id },
+        orderBy: [{ createdAt: 'desc' }],
+        take: GUEST_DETAIL_CRM_ROWS,
+        include: {
+          audience: { select: { id: true, name: true } },
+          guest: { select: this.guestSelect() },
+          lead: true,
+          assignedToUser: { select: { id: true, fullName: true, email: true } },
+        },
+      }),
+      this.prisma.guestCrmContactEvent.findMany({
+        where: { tenantId, guestId: id },
+        orderBy: [{ contactedAt: 'desc' }, { createdAt: 'desc' }],
+        take: GUEST_DETAIL_CRM_ROWS,
+        include: {
+          audience: { select: { id: true, name: true } },
+          guest: { select: this.guestSelect() },
+          lead: true,
+          marketingCampaign: { select: { id: true, name: true } },
+          createdByUser: { select: { fullName: true, email: true } },
+        },
+      }),
+      this.prisma.guestSession.findMany({
+        where: { tenantId, guestId: id, startedAt: { gte: behaviorFrom } },
+        select: { startedAt: true, store: { select: { name: true } } },
+      }),
+      includeGame && this.guestGameInsights
+        ? this.guestGameInsights.loadGuestGameDetail(tenantId, id, period, now)
+        : Promise.resolve(null),
     ]);
+    const taskRows = crmTasks
+      .map((task) => this.toGuestCrmTask(task))
+      .sort((first, second) => {
+        const firstActive =
+          first.status === 'OPEN' || first.status === 'IN_PROGRESS' ? 0 : 1;
+        const secondActive =
+          second.status === 'OPEN' || second.status === 'IN_PROGRESS' ? 0 : 1;
+
+        if (firstActive !== secondActive) {
+          return firstActive - secondActive;
+        }
+
+        if (firstActive === 0) {
+          return (first.dueAt ?? '9999').localeCompare(second.dueAt ?? '9999');
+        }
+
+        return second.updatedAt.localeCompare(first.updatedAt);
+      });
+    const behavior = buildGuestBehaviorSummary({
+      sessions: behaviorSessions.map((session) => ({
+        startedAt: session.startedAt,
+        storeName: session.store?.name ?? null,
+      })),
+      primaryStoreName: row.primaryStoreName,
+      primaryStoreVisits: row.primaryStoreVisits,
+      expectedIntervalDays: row.churnRisk.expectedIntervalDays,
+      daysSinceActivity: row.churnRisk.daysSinceActivity,
+      sampleFrom: behaviorFrom,
+      now,
+    });
 
     return {
       ...row,
@@ -2247,6 +2514,13 @@ export class GuestsService {
         revenue: this.decimalToNumber(sale.revenue) ?? 0,
         quantity: this.decimalToNumber(sale.quantity) ?? 0,
       })),
+      crmTasks: taskRows,
+      contactEvents: contactEvents.map((event) =>
+        this.toGuestCrmContactEvent(event),
+      ),
+      behavior,
+      gameAccess: includeGame ? 'AVAILABLE' : 'NO_CAPABILITY',
+      gamification,
     };
   }
 
@@ -3672,6 +3946,7 @@ export class GuestsService {
     period: Period,
     filters: ResolvedGuestFilters,
     guestIds?: string[],
+    options: { includeGame?: boolean; lite?: boolean } = {},
   ) {
     const guestWhere = this.buildGuestWhere(tenantId, filters, guestIds);
     const storeWhere = filters.storeId ? { storeId: filters.storeId } : {};
@@ -3858,6 +4133,21 @@ export class GuestsService {
       ? allGuests.filter((guest) => metricsByGuestId.has(guest.id))
       : allGuests;
     const selectedGuestIds = guests.map((guest) => guest.id);
+    let gameFactsByGuestId = new Map<string, GuestGameProfileBrief>();
+
+    if (options.lite) {
+      return { guests, metricsByGuestId, groupsByKey, gameFactsByGuestId };
+    }
+
+    const gameFactsPromise =
+      options.includeGame && this.guestGameInsights
+        ? this.guestGameInsights.loadGuestGameFacts(
+            tenantId,
+            selectedGuestIds,
+            period,
+            now,
+          )
+        : null;
 
     await this.applyLifetimeRevenueMetrics(
       tenantId,
@@ -3872,7 +4162,11 @@ export class GuestsService {
       guests,
     );
 
-    return { guests, metricsByGuestId, groupsByKey };
+    if (gameFactsPromise) {
+      gameFactsByGuestId = await gameFactsPromise;
+    }
+
+    return { guests, metricsByGuestId, groupsByKey, gameFactsByGuestId };
   }
 
   private async applyLatestBonusBalanceMetrics(
@@ -6529,6 +6823,7 @@ export class GuestsService {
     metrics: GuestMetrics | undefined,
     period: Period,
     groupsByKey: GuestGroupsByKey,
+    gameProfile: GuestGameProfileBrief | null = null,
   ): GuestDashboardRow {
     const latestActivityAt = this.maxDate(
       guest.lastActivityAt,
@@ -6557,7 +6852,7 @@ export class GuestsService {
         ) ?? null)
       : null;
 
-    return {
+    const row: GuestDashboardRow = {
       id: guest.id,
       externalDomain: guest.externalDomain,
       externalGuestId: guest.externalGuestId,
@@ -6599,7 +6894,12 @@ export class GuestsService {
       nextContactAt: this.toIsoDateTime(guest.nextContactAt),
       crmUpdatedAt: this.toIsoDateTime(guest.crmUpdatedAt),
       phoneConsentStatus: guest.phoneConsentStatus,
+      gameProfile,
+      recommendedAction: { key: 'OBSERVE', label: '', reason: '' },
     };
+    row.recommendedAction = recommendGuestAction(row);
+
+    return row;
   }
 
   private segmentGuest(
@@ -7105,6 +7405,41 @@ export class GuestsService {
 
       if (crmStatus) {
         payload.crmStatus = crmStatus;
+      }
+    }
+    if (filters.gameStatus) {
+      const gameStatus = resolveGuestGameStatusFilter(filters.gameStatus);
+
+      if (gameStatus !== 'any') {
+        payload.gameStatus = gameStatus;
+      }
+    }
+    if (filters.churnRisk) {
+      const churnRisk = this.resolveChurnRiskFilter(filters.churnRisk);
+
+      if (churnRisk) {
+        payload.churnRisk = churnRisk;
+      }
+    }
+    if (filters.rfm) {
+      const rfm = this.resolveRfmFilter(filters.rfm);
+
+      if (rfm) {
+        payload.rfm = rfm;
+      }
+    }
+    if (filters.consent) {
+      const consent = this.resolveConsentFilter(filters.consent);
+
+      if (consent) {
+        payload.consent = consent;
+      }
+    }
+    if (filters.signal) {
+      const signal = resolveGuestSignalFilter(filters.signal);
+
+      if (signal) {
+        payload.signal = signal;
       }
     }
     if (search) {
@@ -7708,11 +8043,27 @@ export class GuestsService {
     const guestGroupId = this.stringJsonField(raw.guestGroupId);
     const segment = this.stringJsonField(raw.segment);
     const crmStatus = this.stringJsonField(raw.crmStatus);
+    const gameStatus = this.stringJsonField(raw.gameStatus);
+    const churnRisk = this.stringJsonField(raw.churnRisk);
+    const rfm = this.stringJsonField(raw.rfm);
+    const consent = this.stringJsonField(raw.consent);
+    const signal = this.stringJsonField(raw.signal);
     const search = this.stringJsonField(raw.search);
     const pageSize = this.stringJsonField(raw.pageSize);
     const sort = this.stringJsonField(raw.sort);
     const direction = this.stringJsonField(raw.direction);
 
+    if (gameStatus) {
+      payload.gameStatus = gameStatus as GuestSavedFilterPayload['gameStatus'];
+    }
+    if (churnRisk) {
+      payload.churnRisk = churnRisk as GuestSavedFilterPayload['churnRisk'];
+    }
+    if (rfm) payload.rfm = rfm as GuestSavedFilterPayload['rfm'];
+    if (consent) {
+      payload.consent = consent as GuestSavedFilterPayload['consent'];
+    }
+    if (signal) payload.signal = signal as GuestSavedFilterPayload['signal'];
     if (dateFrom) payload.dateFrom = dateFrom;
     if (dateTo) payload.dateTo = dateTo;
     if (storeId) payload.storeId = storeId;
@@ -7764,6 +8115,202 @@ export class GuestsService {
     }
 
     return this.parseDateInput(trimmed, 'nextContactAt');
+  }
+
+  private canViewGameInsights(user: AuthenticatedUser) {
+    return (
+      user.isPlatformAdmin ||
+      user.role === 'OWNER' ||
+      hasCapability(user, 'view_guest_gamification')
+    );
+  }
+
+  private previousPeriod(period: Period): Period {
+    const toDate = new Date(period.fromDate.getTime() - 1);
+    toDate.setUTCHours(23, 59, 59, 999);
+    const lengthDays = this.periodDays(period);
+    const fromDate = new Date(toDate);
+    fromDate.setUTCDate(fromDate.getUTCDate() - (lengthDays - 1));
+    fromDate.setUTCHours(0, 0, 0, 0);
+    const activityFromDate = new Date(fromDate);
+    activityFromDate.setUTCDate(activityFromDate.getUTCDate() - 60);
+
+    return {
+      fromDate,
+      toDate,
+      activityFromDate,
+      from: this.toIsoDate(fromDate),
+      to: this.toIsoDate(toDate),
+    };
+  }
+
+  private async buildPeriodTotals(
+    tenantId: string,
+    period: Period,
+    filters: ResolvedGuestFilters,
+  ): Promise<Record<GuestsComparisonMetricKey, number>> {
+    const { guests, metricsByGuestId } = await this.buildGuestMetrics(
+      tenantId,
+      period,
+      filters,
+      undefined,
+      { lite: true },
+    );
+    const counts = {
+      activeGuests: 0,
+      newGuests: 0,
+      repeatGuests: 0,
+      riskGuests: 0,
+      lostGuests: 0,
+    };
+
+    for (const guest of guests) {
+      const metrics = metricsByGuestId.get(guest.id);
+      const segment = this.segmentGuestWithin(guest, metrics, period);
+
+      if (segment === 'new') counts.newGuests += 1;
+      if (segment === 'repeat') counts.repeatGuests += 1;
+      if (segment === 'risk') counts.riskGuests += 1;
+      if (segment === 'lost') counts.lostGuests += 1;
+      if (segment === 'new' || segment === 'repeat' || segment === 'active') {
+        counts.activeGuests += 1;
+      }
+    }
+
+    const totals = this.sumPeriodMetrics(metricsByGuestId);
+    const revenue = this.round(totals.transactionAmount + totals.barRevenue, 2);
+
+    return {
+      ...counts,
+      sessionsCount: totals.sessionsCount,
+      playHours: this.round(totals.playMinutes / 60, 1),
+      transactionAmount: this.round(totals.transactionAmount, 2),
+      barRevenue: this.round(totals.barRevenue, 2),
+      revenue,
+      arpu:
+        counts.activeGuests > 0
+          ? this.round(revenue / counts.activeGuests, 2)
+          : 0,
+    };
+  }
+
+  /** Segment within a closed period: activity after the period end is ignored. */
+  private segmentGuestWithin(
+    guest: GuestBase,
+    metrics: GuestMetrics | undefined,
+    period: Period,
+  ): GuestDashboardRow['segment'] {
+    if (
+      guest.insertedAt &&
+      guest.insertedAt >= period.fromDate &&
+      guest.insertedAt <= period.toDate
+    ) {
+      return 'new';
+    }
+
+    const clampedGuestActivity =
+      guest.lastActivityAt && guest.lastActivityAt <= period.toDate
+        ? guest.lastActivityAt
+        : null;
+    const clampedMetricsActivity =
+      metrics?.latestActivityAt && metrics.latestActivityAt <= period.toDate
+        ? metrics.latestActivityAt
+        : null;
+    const latestActivityAt = this.maxDate(
+      clampedGuestActivity,
+      clampedMetricsActivity,
+    );
+
+    return this.segmentGuest(
+      { ...guest, insertedAt: null },
+      metrics,
+      latestActivityAt,
+      period,
+    );
+  }
+
+  private buildComparisonSummary(
+    current: Record<GuestsComparisonMetricKey, number>,
+    previous: Record<GuestsComparisonMetricKey, number>,
+    previousPeriod: Period,
+  ): GuestsComparisonSummary {
+    const keys: GuestsComparisonMetricKey[] = [
+      'activeGuests',
+      'newGuests',
+      'repeatGuests',
+      'riskGuests',
+      'lostGuests',
+      'sessionsCount',
+      'playHours',
+      'transactionAmount',
+      'barRevenue',
+      'revenue',
+      'arpu',
+    ];
+    const metrics = {} as GuestsComparisonSummary['metrics'];
+
+    for (const key of keys) {
+      metrics[key] = buildMetricComparison(current[key], previous[key]);
+    }
+
+    return {
+      previousPeriodFrom: previousPeriod.from,
+      previousPeriodTo: previousPeriod.to,
+      metrics,
+    };
+  }
+
+  private returnedGuestInput(
+    metrics: GuestMetrics | undefined,
+    period: Period,
+  ) {
+    const periodFromDay = this.toIsoDate(period.fromDate);
+    const activityDays = [
+      ...(metrics?.activityDays ?? new Set<string>()),
+    ].sort();
+    const periodDays = activityDays.filter((day) => day >= periodFromDay);
+    const previousDays = activityDays.filter((day) => day < periodFromDay);
+    const hasPeriodActivity =
+      periodDays.length > 0 ||
+      (metrics?.transactionsCount ?? 0) > 0 ||
+      (metrics?.barSalesCount ?? 0) > 0;
+
+    return {
+      hasPeriodActivity,
+      firstPeriodActivityAt: periodDays.length
+        ? new Date(`${periodDays[0]}T00:00:00.000Z`)
+        : hasPeriodActivity
+          ? period.fromDate
+          : null,
+      lastActivityBeforePeriodAt: previousDays.length
+        ? new Date(`${previousDays[previousDays.length - 1]}T00:00:00.000Z`)
+        : null,
+      firstRevenueAt: metrics?.lifetimeFirstRevenueAt ?? null,
+    };
+  }
+
+  private resolveChurnRiskFilter(value: GuestListQuery['churnRisk']) {
+    const allowed: GuestChurnRiskLevel[] = ['LOW', 'MEDIUM', 'HIGH', 'LOST'];
+    return value && allowed.includes(value) ? value : null;
+  }
+
+  private resolveRfmFilter(value: GuestListQuery['rfm']) {
+    const allowed: GuestRfmSegment[] = [
+      'CHAMPION',
+      'LOYAL',
+      'PROMISING',
+      'NEED_ATTENTION',
+      'AT_RISK',
+      'LOST',
+    ];
+    return value && allowed.includes(value) ? value : null;
+  }
+
+  private resolveConsentFilter(value: GuestListQuery['consent']) {
+    return value &&
+      Object.values(GuestCommunicationConsentStatus).includes(value)
+      ? value
+      : null;
   }
 
   private resolvePeriod(
@@ -7891,6 +8438,9 @@ export class GuestsService {
       'churnRisk',
       'ltv',
       'bonusLoad',
+      'level',
+      'pendingRewards',
+      'gameActivity',
     ];
     return allowed.includes(value ?? '') ? (value ?? 'revenue') : 'revenue';
   }
@@ -7975,30 +8525,6 @@ export class GuestsService {
     };
 
     return labels[status];
-  }
-
-  private guestNextActionExportLabel(row: GuestDashboardRow) {
-    if (row.nextAction) {
-      return row.nextAction;
-    }
-
-    if (row.churnRisk.level === 'HIGH' || row.segment === 'risk') {
-      return 'Связаться и предложить повод вернуться';
-    }
-
-    if (row.segment === 'lost') {
-      return 'Проверить контакт и подготовить реактивацию';
-    }
-
-    if (row.segment === 'new') {
-      return 'Закрепить первый повторный визит';
-    }
-
-    if (row.segment === 'quiet') {
-      return 'Добавить в мягкую коммуникацию';
-    }
-
-    return 'Плановое наблюдение';
   }
 
   private formatExportDate(value: string | null) {
@@ -8203,9 +8729,23 @@ export class GuestsService {
                     : sort === 'bonusLoad'
                       ? first.bonusLoad.currentBalance -
                         second.bonusLoad.currentBalance
-                      : first.transactionAmount +
-                        first.barRevenue -
-                        (second.transactionAmount + second.barRevenue);
+                      : sort === 'level'
+                        ? (first.gameProfile?.level ?? 0) -
+                            (second.gameProfile?.level ?? 0) ||
+                          (first.gameProfile?.xp ?? 0) -
+                            (second.gameProfile?.xp ?? 0)
+                        : sort === 'pendingRewards'
+                          ? (first.gameProfile?.pendingRewards ?? 0) -
+                            (second.gameProfile?.pendingRewards ?? 0)
+                          : sort === 'gameActivity'
+                            ? (
+                                first.gameProfile?.lastGameActivityAt ?? ''
+                              ).localeCompare(
+                                second.gameProfile?.lastGameActivityAt ?? '',
+                              )
+                            : first.transactionAmount +
+                              first.barRevenue -
+                              (second.transactionAmount + second.barRevenue);
 
       if (compare !== 0) {
         return compare * multiplier;

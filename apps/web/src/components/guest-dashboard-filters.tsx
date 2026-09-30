@@ -9,6 +9,12 @@ import type {
   GuestListFilters,
   GuestSegment,
 } from "@/lib/guests";
+import {
+  churnRiskLabels,
+  crmStatusLabels,
+  gameStatusFilterLabels,
+  rfmSegmentLabels,
+} from "@/lib/guest-insights";
 
 type GuestPeriod =
   | "day"
@@ -63,12 +69,14 @@ export function GuestDashboardFilters({
   period,
   periodFrom,
   periodTo,
+  gameAvailable = false,
 }: {
   filters: GuestListFilters;
   options: GuestFilterOptions;
   period?: string;
   periodFrom: string;
   periodTo: string;
+  gameAvailable?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -123,6 +131,10 @@ export function GuestDashboardFilters({
       storeId: string;
       guestGroupId: string;
       segment: GuestListFilters["segment"];
+      crmStatus: string;
+      gameStatus: string;
+      churnRisk: string;
+      rfm: string;
       search: string;
       pageSize: string;
     }> = {},
@@ -135,6 +147,10 @@ export function GuestDashboardFilters({
     const nextStoreId = overrides.storeId ?? filters.storeId ?? "";
     const nextGroupId = overrides.guestGroupId ?? filters.guestGroupId ?? "";
     const nextSegment = overrides.segment ?? filters.segment ?? "top";
+    const nextCrmStatus = overrides.crmStatus ?? filters.crmStatus ?? "";
+    const nextGameStatus = overrides.gameStatus ?? filters.gameStatus ?? "";
+    const nextChurnRisk = overrides.churnRisk ?? filters.churnRisk ?? "";
+    const nextRfm = overrides.rfm ?? filters.rfm ?? "";
     const nextSearch = overrides.search ?? filters.search ?? "";
     const nextPageSize = overrides.pageSize ?? filters.pageSize ?? "50";
 
@@ -156,8 +172,28 @@ export function GuestDashboardFilters({
       params.set("search", nextSearch.trim());
     }
 
-    if (filters.crmStatus) {
-      params.set("crmStatus", filters.crmStatus);
+    if (nextCrmStatus) {
+      params.set("crmStatus", nextCrmStatus);
+    }
+
+    if (nextGameStatus && nextGameStatus !== "any") {
+      params.set("gameStatus", nextGameStatus);
+    }
+
+    if (nextChurnRisk) {
+      params.set("churnRisk", nextChurnRisk);
+    }
+
+    if (nextRfm) {
+      params.set("rfm", nextRfm);
+    }
+
+    if (filters.consent) {
+      params.set("consent", filters.consent);
+    }
+
+    if (filters.signal) {
+      params.set("signal", filters.signal);
     }
 
     if (filters.sort) {
@@ -211,6 +247,10 @@ export function GuestDashboardFilters({
             segment: String(
               formData.get("segment") ?? "top",
             ) as GuestListFilters["segment"],
+            crmStatus: String(formData.get("crmStatus") ?? ""),
+            churnRisk: String(formData.get("churnRisk") ?? ""),
+            rfm: String(formData.get("rfm") ?? ""),
+            gameStatus: String(formData.get("gameStatus") ?? ""),
             search: String(formData.get("search") ?? ""),
             pageSize: String(formData.get("pageSize") ?? "50"),
           });
@@ -349,6 +389,92 @@ export function GuestDashboardFilters({
             </option>
           ))}
         </SelectField>
+
+        <SelectField
+          label="Риск оттока"
+          name="churnRisk"
+          defaultValue={filters.churnRisk ?? ""}
+          onChange={(value) => applyFilters({ churnRisk: value })}
+        >
+          <option value="">Любой риск</option>
+          {(["HIGH", "MEDIUM", "LOW", "LOST"] as const).map((level) => (
+            <option key={level} value={level}>
+              {churnRiskLabels[level]}
+            </option>
+          ))}
+        </SelectField>
+
+        <SelectField
+          label="RFM"
+          name="rfm"
+          defaultValue={filters.rfm ?? ""}
+          onChange={(value) => applyFilters({ rfm: value })}
+        >
+          <option value="">Все RFM</option>
+          {(
+            [
+              "CHAMPION",
+              "LOYAL",
+              "PROMISING",
+              "NEED_ATTENTION",
+              "AT_RISK",
+              "LOST",
+            ] as const
+          ).map((segment) => (
+            <option key={segment} value={segment}>
+              {rfmSegmentLabels[segment]}
+            </option>
+          ))}
+        </SelectField>
+
+        <SelectField
+          label="CRM-статус"
+          name="crmStatus"
+          defaultValue={filters.crmStatus ?? ""}
+          onChange={(value) => applyFilters({ crmStatus: value })}
+        >
+          <option value="">Любой статус</option>
+          {(
+            [
+              "NONE",
+              "WATCH",
+              "CONTACT",
+              "INVITED",
+              "LOYAL",
+              "VIP",
+              "PROBLEM",
+              "DO_NOT_CONTACT",
+            ] as const
+          ).map((status) => (
+            <option key={status} value={status}>
+              {crmStatusLabels[status]}
+            </option>
+          ))}
+        </SelectField>
+
+        {gameAvailable ? (
+          <SelectField
+            label="Игра"
+            name="gameStatus"
+            defaultValue={filters.gameStatus ?? "any"}
+            onChange={(value) => applyFilters({ gameStatus: value })}
+          >
+            {(
+              [
+                "any",
+                "registered",
+                "not_registered",
+                "active",
+                "idle",
+                "pending_rewards",
+              ] as const
+            ).map((status) => (
+              <option key={status} value={status}>
+                {gameStatusFilterLabels[status]}
+              </option>
+            ))}
+          </SelectField>
+        ) : null}
 
         <label className="grid min-w-[180px] flex-1 gap-1 text-sm md:max-w-xs">
           <span className="text-xs font-medium uppercase text-zinc-500">

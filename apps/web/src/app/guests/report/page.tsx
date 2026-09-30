@@ -216,6 +216,9 @@ function sortLabel(sort: NonNullable<GuestListFilters["sort"]>) {
     churnRisk: "Риск оттока",
     ltv: "LTV факт",
     bonusLoad: "Бонусы",
+    level: "Уровень в игре",
+    pendingRewards: "Награды к получению",
+    gameActivity: "Игровая активность",
   };
 
   return labels[sort];

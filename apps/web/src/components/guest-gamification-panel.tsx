@@ -12897,6 +12897,18 @@ function ProfileCard({
               profile.guest?.externalGuestId ??
               "контакт не задан"}
           </p>
+          {profile.guest ? (
+            <Link
+              href={`/guests/${profile.guest.id}`}
+              className="mt-1 inline-flex text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
+            >
+              Карточка гостя в CRM
+            </Link>
+          ) : (
+            <span className="mt-1 inline-flex text-xs text-zinc-400">
+              Гость Langame не привязан
+            </span>
+          )}
         </div>
         <div className="flex flex-wrap justify-end gap-2">
           {profile.isStaffTest ? (

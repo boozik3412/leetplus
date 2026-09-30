@@ -24,6 +24,7 @@
 - Statistics API: `GET /guests/gamification/statistics`
 - Backend: `apps/api/src/guest-gamification/*`
 - Data models: `GuestGameProfile`, `GuestGameLootBox`, `GuestGameMission`, `GuestGameSeason`, `GuestGameReward`, `GuestGameEvent`, `GuestGameRewardWalletItem`, `GuestGameEntitlement`
+- CRM-проекция игры: блок «Игровой модуль в клиентской базе» на `/guests`, блок «Геймификация» в карточке `/guests/[id]`, ссылка «Карточка гостя в CRM» в профиле Guest Game Hub и deep-link `/gamification/log?profileId=…`; контракт — `docs/agent-context/guests-crm-gamification.md`
 
 ## 3. Что уже реализовано
 

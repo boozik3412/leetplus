@@ -8,6 +8,8 @@ import {
   type ExecutiveQuery,
 } from "@/lib/dashboard-executive";
 import { dashboardWorkspaceHref, getDefaultLandingPath } from "@/lib/landing";
+import { ExecutiveDriverDetails } from "@/components/executive-driver-details";
+import { driverFocuses, type DriverFocus } from "@/lib/executive-links";
 import { redirect } from "next/navigation";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -107,6 +109,44 @@ export default async function ExecutiveDetailsPage({
     comparison: first(params.comparison) !== "false",
   };
   const summary = await getExecutiveSummary(query);
+  const back = new URLSearchParams({
+    period: first(params.returnPeriod) === "full-day" ? "full-day" : "custom",
+    dateFrom:
+      first(params.returnPeriod) === "full-day"
+        ? summary.scope.period.to
+        : summary.scope.period.from,
+    dateTo: summary.scope.period.to,
+    asOf: summary.scope.asOf,
+    comparison: String(query.comparison ?? true),
+  });
+  // A club drill-down returns to the selection it was opened from.
+  const returnStoreIds = values(params.returnStoreIds);
+  (returnStoreIds.length ? returnStoreIds : summary.scope.storeIds).forEach(
+    (storeId) => back.append("storeIds", storeId),
+  );
+  const backLink = (
+    <Link
+      href={`/dashboard?${back}`}
+      className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-600 dark:text-emerald-300"
+    >
+      <ArrowLeft className="h-4 w-4" />
+      Вернуться к сводке
+    </Link>
+  );
+  if (candidate === "drivers") {
+    const focusParam = first(params.focus);
+    const focus: DriverFocus = driverFocuses.includes(focusParam as DriverFocus)
+      ? (focusParam as DriverFocus)
+      : "bar";
+    return (
+      <main className="min-h-screen bg-[var(--background)] px-4 py-6 text-[var(--foreground)] sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-5xl">
+          {backLink}
+          <ExecutiveDriverDetails summary={summary} focus={focus} />
+        </div>
+      </main>
+    );
+  }
   const metric = summary.metrics[metricKey];
   if (!metric)
     return (
@@ -120,27 +160,10 @@ export default async function ExecutiveDetailsPage({
         </p>
       </main>
     );
-  const back = new URLSearchParams({
-    period: first(params.returnPeriod) === "full-day" ? "full-day" : "custom",
-    dateFrom:
-      first(params.returnPeriod) === "full-day"
-        ? summary.scope.period.to
-        : summary.scope.period.from,
-    dateTo: summary.scope.period.to,
-    asOf: summary.scope.asOf,
-    comparison: String(query.comparison ?? true),
-  });
-  summary.scope.storeIds.forEach((storeId) => back.append("storeIds", storeId));
   return (
     <main className="min-h-screen bg-[var(--background)] px-4 py-6 text-[var(--foreground)] sm:px-6 lg:px-8">
       <div className="mx-auto max-w-5xl">
-        <Link
-          href={`/dashboard?${back}`}
-          className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-600 dark:text-emerald-300"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Вернуться к сводке
-        </Link>
+        {backLink}
         <header className="mt-5 rounded-2xl border border-[var(--border-soft)] bg-[var(--surface)] p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-300">
             Детализация · агрегаты по клубам и дням

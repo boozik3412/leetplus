@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { StaffTaskCreateForm } from "@/components/staff-task-create-form";
+import {
+  StaffTaskCreateForm,
+  type StaffTaskDraft,
+} from "@/components/staff-task-create-form";
 import { StaffTaskHistory } from "@/components/staff-task-history";
 import { StaffTaskStatusActions } from "@/components/staff-task-status-actions";
 import { requireCurrentUser } from "@/lib/auth";
@@ -132,6 +135,32 @@ function isPriority(
     value === "HIGH" ||
     value === "URGENT"
   );
+}
+
+const draftTypes = new Set<StaffTaskDraft["type"]>([
+  "ONE_TIME",
+  "SHIFT",
+  "RECURRING",
+  "LONG_TERM",
+  "PERSONAL",
+  "CLUB",
+  "ROLE",
+]);
+
+/** A task prepared by a signal of the network summary (`draft*` params). */
+function resolveDraft(params: Awaited<SearchParams>): StaffTaskDraft | null {
+  const title = searchParam(params.draftTitle)?.trim().slice(0, 200);
+  if (!title) return null;
+  const priority = searchParam(params.draftPriority);
+  const type = searchParam(params.draftType) as StaffTaskDraft["type"];
+  return {
+    title,
+    description:
+      searchParam(params.draftDescription)?.trim().slice(0, 2000) ?? "",
+    storeId: searchParam(params.draftStoreId) ?? null,
+    priority: isPriority(priority) && priority !== "all" ? priority : "NORMAL",
+    type: draftTypes.has(type) ? type : "ONE_TIME",
+  };
 }
 
 function isSort(value: string | undefined): value is StaffTaskSortKey {
@@ -459,6 +488,7 @@ export default async function StaffTasksPage({
   const currentUser = await requireCurrentUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
+  const draft = resolveDraft(params);
   const report = await getStaffTaskReport(filters);
   const currentStaffUser = report.users.find((user) => user.id === currentUser.id);
   const activeGroupRows =
@@ -592,7 +622,7 @@ export default async function StaffTasksPage({
           </div>
         </section>
 
-        <section className="mt-6">
+        <section id="new-task" className="mt-6 scroll-mt-6">
           <StaffTaskCreateForm
             users={report.users}
             stores={report.stores}
@@ -601,6 +631,7 @@ export default async function StaffTasksPage({
               role: currentUser.role,
               stores: currentStaffUser?.stores ?? [],
             }}
+            draft={draft}
           />
         </section>
 

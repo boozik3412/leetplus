@@ -819,19 +819,20 @@ export class DashboardService {
         })
       : null;
     const storeIds = product.scope.storeIds;
-    const stores = await this.prisma.store.findMany({
+    // Session binding needs every active club of the tenant, independent of
+    // the club filter: with one club of a shared external domain selected, the
+    // domain would otherwise look single-store and all of its unbound sessions
+    // would be attributed to that club. The club filter applies after binding.
+    const tenantStoreTopology = await this.prisma.store.findMany({
       where: {
         tenantId: product.tenantId,
-        id: { in: storeIds },
         isActive: true,
       },
       select: {
         id: true,
-        name: true,
         tenantId: true,
         externalDomain: true,
         externalClubId: true,
-        timeZone: true,
         isActive: true,
       },
     });
@@ -880,7 +881,7 @@ export class DashboardService {
       this.executiveVisitsMetricForScope({
         sessions: sessionsWithStartedAt,
         tenantId: product.tenantId,
-        topology: stores,
+        topology: tenantStoreTopology,
         selectedStoreIds: storeId === undefined ? storeIds : [storeId],
         storeTimeZones: product.scope.storeTimeZones,
         period,
@@ -1284,7 +1285,10 @@ export class DashboardService {
         input.projection.set(session, projected);
       }
       const resolvedStoreId = projected.storeId;
-      if (resolvedStoreId && selectedStoreIds.has(resolvedStoreId)) {
+      if (resolvedStoreId) {
+        // Provably bound to a club outside the selection: neither counted nor
+        // an unknown for the selected clubs.
+        if (!selectedStoreIds.has(resolvedStoreId)) return;
         const localDate =
           projected.localDate ??
           (projected.localDate = this.executiveLocalDate(

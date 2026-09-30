@@ -9,7 +9,8 @@ export type StaffNotificationSourceType =
   | "RECURRING_RULE"
   | "TEAM_CHAT"
   | "KNOWLEDGE_BASE"
-  | "OPERATIONS_DASHBOARD";
+  | "OPERATIONS_DASHBOARD"
+  | "SUPPORT_TICKET";
 
 export type StaffNotification = {
   id: string;

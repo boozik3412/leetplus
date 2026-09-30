@@ -28,8 +28,9 @@ export default async function SupportTicketsPage({
   }
 
   const params = await searchParams;
+  // Without an explicit filter the page opens the working queue, not history.
   const report = await getStaffSupportTickets({
-    status: searchParam(params.status),
+    status: searchParam(params.status) ?? "active",
     topic: searchParam(params.topic),
     assignedToUserId: searchParam(params.assignedToUserId),
     search: searchParam(params.search),
@@ -51,14 +52,18 @@ export default async function SupportTicketsPage({
             Обращения гостей
           </h1>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Единая очередь сообщений о проблемах. Здесь можно назначить
-            ответственного, изменить статус и оставить внутренний комментарий.
+            Очередь сообщений о проблемах из игрового модуля. Возьмите
+            обращение в работу, проверьте его, оставьте внутренний комментарий
+            и отметьте результат.
           </p>
         </header>
         <StaffSupportTicketsWorkspace
           report={report}
           canManage={can(user, "manage_support_tickets")}
           apiBasePath="/api/support/bug-reports"
+          pagePath="/support"
+          currentUserId={user.id}
+          now={report.generatedAt}
         />
       </div>
     </main>

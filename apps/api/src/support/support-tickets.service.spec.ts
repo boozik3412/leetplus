@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@prisma/client';
 import { SupportTicketsService } from './support-tickets.service';
@@ -11,6 +15,7 @@ describe('SupportTicketsService tenant boundaries', () => {
         findFirst: jest.fn(),
         findMany: jest.fn(),
         groupBy: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
       },
       user: { findFirst: jest.fn(), findMany: jest.fn() },
       userRoleOverride: { findUnique: jest.fn(), findMany: jest.fn() },
@@ -92,10 +97,52 @@ describe('SupportTicketsService tenant boundaries', () => {
     role: UserRole.ADMIN,
   } as never;
 
+  function existingTicket(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'ticket-a',
+      tenantId: 'tenant-a',
+      ticketNumber: 'LP-BUG-A1B2C3D4',
+      status: 'NEW',
+      assignedToUserId: null,
+      updatedAt: new Date('2026-09-29T10:00:00.000Z'),
+      ...overrides,
+    };
+  }
+
+  function mockUpdateTransaction(
+    prisma: ReturnType<typeof fixture>['prisma'],
+    result: Record<string, unknown>,
+    changedCount = 1,
+  ) {
+    const tx = {
+      guestSupportTicket: {
+        updateMany: jest.fn().mockResolvedValue({ count: changedCount }),
+        findUniqueOrThrow: jest.fn().mockResolvedValue({
+          id: 'ticket-a',
+          ticketNumber: 'LP-BUG-A1B2C3D4',
+          updatedAt: new Date(),
+          ...result,
+        }),
+      },
+      guestSupportTicketAuditEvent: {
+        create: jest.fn().mockResolvedValue({}),
+      },
+    };
+    prisma.$transaction.mockImplementation(
+      (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx),
+    );
+    return tx;
+  }
+
   it('fails closed before querying support tables during the CURRENT_187 bridge', () => {
     const { service, prisma } = fixture('ALLOW_CURRENT_187');
 
-    expect(() => service.getPlatformTickets({})).toThrow(NotFoundException);
+    expect(() => service.getPlatformTickets(actor, {})).toThrow(
+      NotFoundException,
+    );
+    expect(() => service.getPlatformQueueSummary(actor)).toThrow(
+      NotFoundException,
+    );
     expect(prisma.guestSupportTicket.findFirst).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
@@ -109,7 +156,7 @@ describe('SupportTicketsService tenant boundaries', () => {
       throw new Error('unexpected ciphertext');
     });
 
-    const report = await service.getPlatformTickets({});
+    const report = await service.getPlatformTickets(actor, {});
 
     expect(report.rows[0]?.profile).toEqual({
       id: 'profile-a',
@@ -209,23 +256,10 @@ describe('SupportTicketsService tenant boundaries', () => {
     prisma.userRoleOverride.findUnique.mockResolvedValue({
       permissions: ['manage_support_tickets'],
     });
-    prisma.$transaction.mockImplementation(
-      (callback: (tx: any) => Promise<unknown>) =>
-        callback({
-          guestSupportTicket: {
-            update: jest.fn().mockResolvedValue({
-              id: 'ticket-a',
-              ticketNumber: 'LP-BUG-A1B2C3D4',
-              status: 'IN_PROGRESS',
-              assignedToUserId: 'technician-a',
-              updatedAt: new Date(),
-            }),
-          },
-          guestSupportTicketAuditEvent: {
-            create: jest.fn().mockResolvedValue({}),
-          },
-        }),
-    );
+    mockUpdateTransaction(prisma, {
+      status: 'IN_PROGRESS',
+      assignedToUserId: 'technician-a',
+    });
 
     await service.updateTenantTicket(actor, 'ticket-a', {
       status: 'IN_PROGRESS',
@@ -241,6 +275,271 @@ describe('SupportTicketsService tenant boundaries', () => {
       },
       select: { permissions: true },
     });
+  });
+
+  it('lists the active queue oldest first with unassigned and own filters', async () => {
+    const { service, prisma } = fixture();
+    mockListDependencies(prisma, supportTicketRow());
+
+    await service.getTenantTickets(actor, {
+      status: 'active',
+      assignedToUserId: 'none',
+    });
+    await service.getTenantTickets(actor, {
+      status: 'IN_PROGRESS',
+      assignedToUserId: 'me',
+    });
+    await service.getTenantTickets(actor, { status: 'RESOLVED' });
+
+    const calls = (
+      prisma.guestSupportTicket.findMany.mock.calls as Array<[unknown]>
+    ).map(([args]) => args);
+    expect(calls[0]).toMatchObject({
+      where: {
+        tenantId: 'tenant-a',
+        status: { in: ['NEW', 'IN_PROGRESS'] },
+        assignedToUserId: null,
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    expect(calls[1]).toMatchObject({
+      where: {
+        tenantId: 'tenant-a',
+        status: 'IN_PROGRESS',
+        assignedToUserId: 'user-a',
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    expect(calls[2]).toMatchObject({
+      where: { tenantId: 'tenant-a', status: 'RESOLVED' },
+      orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }],
+    });
+  });
+
+  it('reports unassigned, own and oldest waiting tickets in the summary', async () => {
+    const { service, prisma } = fixture();
+    mockListDependencies(prisma, supportTicketRow());
+    prisma.guestSupportTicket.groupBy.mockResolvedValue([
+      { status: 'NEW', _count: { _all: 3 } },
+      { status: 'IN_PROGRESS', _count: { _all: 2 } },
+      { status: 'CLOSED', _count: { _all: 4 } },
+    ]);
+    prisma.guestSupportTicket.count.mockImplementation(
+      ({ where }: { where: { assignedToUserId: string | null } }) =>
+        Promise.resolve(where.assignedToUserId === null ? 3 : 1),
+    );
+    prisma.guestSupportTicket.findFirst.mockResolvedValue({
+      createdAt: new Date('2026-09-16T12:42:00.000Z'),
+    });
+
+    const report = await service.getTenantTickets(actor, {});
+
+    expect(report.summary).toMatchObject({
+      NEW: 3,
+      IN_PROGRESS: 2,
+      CLOSED: 4,
+      active: 5,
+      total: 9,
+      unassigned: 3,
+      mine: 1,
+      oldestActiveCreatedAt: '2026-09-16T12:42:00.000Z',
+    });
+    expect(prisma.guestSupportTicket.count).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-a',
+        status: { in: ['NEW', 'IN_PROGRESS'] },
+        assignedToUserId: 'user-a',
+      },
+    });
+  });
+
+  it('returns a light queue summary with the newest unhandled ticket', async () => {
+    const { service, prisma } = fixture();
+    prisma.guestSupportTicket.groupBy.mockResolvedValue([
+      { status: 'NEW', _count: { _all: 2 } },
+    ]);
+    prisma.guestSupportTicket.findFirst.mockImplementation(
+      ({ where }: { where: { status?: unknown } }) =>
+        Promise.resolve(
+          where.status === 'NEW'
+            ? {
+                id: 'ticket-new',
+                ticketNumber: 'LP-BUG-0000000A',
+                topic: 'GAME_MODULE',
+                createdAt: new Date('2026-09-29T09:53:00.000Z'),
+                store: { name: 'Store A' },
+                tenant: { name: 'Tenant A' },
+              }
+            : { createdAt: new Date('2026-09-28T09:00:00.000Z') },
+        ),
+    );
+
+    const summary = await service.getTenantQueueSummary(actor);
+
+    expect(summary).toEqual({
+      scope: 'TENANT',
+      NEW: 2,
+      IN_PROGRESS: 0,
+      active: 2,
+      unassigned: 0,
+      mine: 0,
+      oldestActiveCreatedAt: '2026-09-28T09:00:00.000Z',
+      latestNew: {
+        id: 'ticket-new',
+        ticketNumber: 'LP-BUG-0000000A',
+        topic: 'GAME_MODULE',
+        createdAt: '2026-09-29T09:53:00.000Z',
+        storeName: 'Store A',
+        tenantName: 'Tenant A',
+      },
+    });
+    expect(prisma.guestSupportTicket.groupBy).toHaveBeenCalledWith({
+      by: ['status'],
+      where: { tenantId: 'tenant-a', status: { in: ['NEW', 'IN_PROGRESS'] } },
+      _count: { _all: true },
+    });
+  });
+
+  it('offers platform support the club specialists of every network on the page', async () => {
+    const { service, prisma } = fixture();
+    mockListDependencies(prisma, {
+      ...supportTicketRow(),
+      tenantId: 'tenant-a',
+    });
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'owner-a',
+        tenantId: 'tenant-a',
+        fullName: 'Owner A',
+        email: 'owner@example.invalid',
+        role: UserRole.OWNER,
+        isPlatformAdmin: false,
+        customRole: { permissions: [] },
+      },
+      {
+        id: 'cashier-a',
+        tenantId: 'tenant-a',
+        fullName: 'Cashier A',
+        email: 'cashier@example.invalid',
+        role: UserRole.CLUB_MANAGER,
+        isPlatformAdmin: false,
+        customRole: null,
+      },
+    ]);
+
+    const report = await service.getPlatformTickets(actor, {});
+
+    expect(prisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          isActive: true,
+          OR: [{ isPlatformAdmin: true }, { tenantId: { in: ['tenant-a'] } }],
+        },
+      }),
+    );
+    // OWNER keeps the support minimum even with a custom role.
+    expect(report.users.map((user) => user.id)).toEqual(['owner-a']);
+  });
+
+  it('lets an OWNER with a custom role take a ticket', async () => {
+    const { service, prisma } = fixture();
+    prisma.guestSupportTicket.findFirst.mockResolvedValue(existingTicket());
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'owner-a',
+      tenantId: 'tenant-a',
+      fullName: 'Owner A',
+      email: 'owner@example.invalid',
+      role: UserRole.OWNER,
+      isPlatformAdmin: false,
+      customRole: { permissions: [] },
+    });
+    const tx = mockUpdateTransaction(prisma, {
+      status: 'IN_PROGRESS',
+      assignedToUserId: 'owner-a',
+    });
+
+    await expect(
+      service.updateTenantTicket(actor, 'ticket-a', {
+        status: 'IN_PROGRESS',
+        assignedToUserId: 'owner-a',
+      }),
+    ).resolves.toMatchObject({
+      status: 'IN_PROGRESS',
+      assignedToUserId: 'owner-a',
+    });
+    const [updateArgs] = tx.guestSupportTicket.updateMany.mock.calls[0] as [
+      unknown,
+    ];
+    expect(updateArgs).toMatchObject({
+      where: {
+        id: 'ticket-a',
+        tenantId: 'tenant-a',
+        status: 'NEW',
+        assignedToUserId: null,
+      },
+      data: {
+        status: 'IN_PROGRESS',
+        assignedToUserId: 'owner-a',
+        resolvedAt: null,
+        closedAt: null,
+      },
+    });
+    const [auditArgs] = tx.guestSupportTicketAuditEvent.create.mock
+      .calls[0] as [unknown];
+    expect(auditArgs).toMatchObject({
+      data: {
+        action: 'UPDATED_BY_SUPPORT',
+        metadata: {
+          previousStatus: 'NEW',
+          status: 'IN_PROGRESS',
+          previousAssignedToUserId: null,
+          assignedToUserId: 'owner-a',
+        },
+      },
+    });
+  });
+
+  it('rejects a take when another specialist changed the ticket first', async () => {
+    const { service, prisma } = fixture();
+    prisma.guestSupportTicket.findFirst.mockResolvedValue(existingTicket());
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'user-a',
+      tenantId: 'tenant-a',
+      fullName: 'Admin A',
+      email: 'admin@example.invalid',
+      role: UserRole.ADMIN,
+      isPlatformAdmin: false,
+      customRole: null,
+    });
+    prisma.userRoleOverride.findUnique.mockResolvedValue(null);
+    const tx = mockUpdateTransaction(prisma, {}, 0);
+
+    await expect(
+      service.updateTenantTicket(actor, 'ticket-a', {
+        status: 'IN_PROGRESS',
+        assignedToUserId: 'user-a',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.guestSupportTicketAuditEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('does not rewrite timestamps or audit when nothing changes', async () => {
+    const { service, prisma } = fixture();
+    prisma.guestSupportTicket.findFirst.mockResolvedValue(
+      existingTicket({ status: 'RESOLVED', assignedToUserId: 'user-a' }),
+    );
+
+    await expect(
+      service.updateTenantTicket(actor, 'ticket-a', {
+        status: 'RESOLVED',
+        assignedToUserId: 'user-a',
+      }),
+    ).resolves.toMatchObject({
+      status: 'RESOLVED',
+      assignedToUserId: 'user-a',
+    });
+    expect(prisma.user.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('rejects an assignee from another tenant', async () => {

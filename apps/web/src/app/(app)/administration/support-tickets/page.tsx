@@ -39,7 +39,8 @@ export default async function PlatformSupportTicketsPage({
   const report = await getStaffSupportTickets(
     {
       tenantId: searchParam(params.tenantId),
-      status: searchParam(params.status),
+      // Without an explicit filter the page opens the working queue.
+      status: searchParam(params.status) ?? "active",
       topic: searchParam(params.topic),
       assignedToUserId: searchParam(params.assignedToUserId),
       search: searchParam(params.search),
@@ -74,6 +75,9 @@ export default async function PlatformSupportTicketsPage({
           report={report}
           canManage
           apiBasePath="/api/admin/support-tickets"
+          pagePath="/administration/support-tickets"
+          currentUserId={user.id}
+          now={report.generatedAt}
         />
       </div>
     </main>

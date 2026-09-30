@@ -44,16 +44,27 @@ const confirmationRoles = new Set<StaffTaskUserRole>([
 
 type AssignmentMode = "ANY_OF" | "INDIVIDUAL";
 
+/** A task prepared elsewhere (a signal of the network summary). */
+export type StaffTaskDraft = {
+  title: string;
+  description: string;
+  storeId: string | null;
+  priority: StaffTaskPriority;
+  type: StaffTaskType;
+};
+
 type StaffTaskCreateFormProps = {
   users: StaffTaskUser[];
   stores: StaffTaskStore[];
   currentUser: Pick<StaffTaskUser, "id" | "role" | "stores">;
+  draft?: StaffTaskDraft | null;
 };
 
 export function StaffTaskCreateForm({
   users,
   stores,
   currentUser,
+  draft = null,
 }: StaffTaskCreateFormProps) {
   const router = useRouter();
   const needsConfirmation = confirmationCreatorRoles.has(currentUser.role);
@@ -68,10 +79,16 @@ export function StaffTaskCreateForm({
     () => new Set(currentUserStoreIds),
     [currentUserStoreIds],
   );
-  const [isExpanded, setIsExpanded] = useState(() => !needsConfirmation);
+  const [isExpanded, setIsExpanded] = useState(
+    () => draft !== null || !needsConfirmation,
+  );
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedStoreId, setSelectedStoreId] = useState("");
+  const [selectedStoreId, setSelectedStoreId] = useState(() =>
+    draft?.storeId && stores.some((store) => store.id === draft.storeId)
+      ? draft.storeId
+      : "",
+  );
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -262,7 +279,9 @@ export function StaffTaskCreateForm({
       setSelectedStoreId(isSeniorAdministrator ? seniorStoreId : "");
       setAssignmentMode("INDIVIDUAL");
       setIsExpanded(false);
-      router.refresh();
+      // The draft lives in the URL: drop it so the form does not reopen with it.
+      if (draft) router.replace("/staff/tasks");
+      else router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Ошибка запроса");
     } finally {
@@ -279,7 +298,9 @@ export function StaffTaskCreateForm({
           </p>
           <h2 className="mt-1 text-lg font-semibold">Новая задача персоналу</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Можно выбрать весь клуб, группу сотрудников или точечных ответственных.
+            {draft
+              ? "Заполнено по сигналу сводки сети. Выберите ответственных и создайте задачу."
+              : "Можно выбрать весь клуб, группу сотрудников или точечных ответственных."}
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -333,6 +354,7 @@ export function StaffTaskCreateForm({
             <input
               name="title"
               required
+              defaultValue={draft?.title}
               placeholder="Например: проверить кассу вечерней смены"
               className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
             />
@@ -377,7 +399,8 @@ export function StaffTaskCreateForm({
           </span>
           <textarea
             name="description"
-            rows={3}
+            rows={draft ? 4 : 3}
+            defaultValue={draft?.description}
             placeholder="Что нужно проверить, какой результат приложить, на что обратить внимание."
             className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
           />
@@ -507,7 +530,7 @@ export function StaffTaskCreateForm({
             </span>
             <select
               name="type"
-              defaultValue="SHIFT"
+              defaultValue={draft?.type ?? "SHIFT"}
               className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
             >
               {taskTypes.map((type) => (
@@ -524,7 +547,7 @@ export function StaffTaskCreateForm({
             </span>
             <select
               name="priority"
-              defaultValue="NORMAL"
+              defaultValue={draft?.priority ?? "NORMAL"}
               className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
             >
               {priorities.map((priority) => (

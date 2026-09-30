@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import type {
   ExecutiveDriverFactor,
   ExecutiveDriverFactors,
@@ -21,7 +22,11 @@ import {
   formatSigned,
   periodDays,
 } from "@/lib/executive-format";
-import { clubDetailHref } from "@/lib/executive-links";
+import {
+  clubDetailHref,
+  driverDetailHref,
+  type DriverFocus,
+} from "@/lib/executive-links";
 
 type Tone = "up" | "down" | "flat";
 
@@ -37,6 +42,25 @@ const factorCaption: Record<ExecutiveDriverFactor, string> = {
   PURCHASES: "Покупок в баре",
   CHECK: "Средний чек бара",
 };
+const factorFocus: Record<ExecutiveDriverFactor, DriverFocus> = {
+  VISITS: "visits",
+  CONVERSION: "conversion",
+  PURCHASES: "purchases",
+  CHECK: "check",
+};
+/** Clickable tiles: hover, focus ring and an arrow in the corner. */
+const tileLink =
+  "group transition-[border-color,box-shadow] hover:border-emerald-500 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600";
+
+function TileArrow() {
+  return (
+    <ArrowRight
+      aria-hidden="true"
+      className="h-3.5 w-3.5 shrink-0 text-zinc-400 transition group-hover:translate-x-0.5 group-hover:text-emerald-600 dark:group-hover:text-emerald-400"
+    />
+  );
+}
+
 const factorColor: Record<ExecutiveDriverFactor, string> = {
   VISITS: "bg-sky-500 dark:bg-sky-400",
   PURCHASES: "bg-sky-500 dark:bg-sky-400",
@@ -247,6 +271,9 @@ export function DriverTree({ summary }: { summary: ExecutiveSummary }) {
             Почему изменился бар:{" "}
             {factors.map((factor) => factorTitle[factor].toLowerCase()).join(" × ")}
           </p>
+          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+            Нажмите на множитель — откроются клубы и дни
+          </p>
         </div>
         <span className="text-xs text-zinc-500 dark:text-zinc-400">
           Сеть{against ? ` · к ${against}` : ""}
@@ -261,15 +288,20 @@ export function DriverTree({ summary }: { summary: ExecutiveSummary }) {
           );
           const isLever = lever?.kind === "LOSS" && lever.factor === factor;
           return (
-            <div
+            <Link
               key={factor}
-              className={`flex flex-col gap-1.5 rounded-2xl p-4 ${isLever ? "border-2 border-red-500 bg-red-500/5 dark:border-red-400" : "border border-[var(--border-soft)]"}`}
+              href={driverDetailHref(summary, factorFocus[factor])}
+              prefetch={false}
+              className={`flex flex-col gap-1.5 rounded-2xl p-4 ${tileLink} ${isLever ? "border-2 border-red-500 bg-red-500/5 dark:border-red-400" : "border border-[var(--border-soft)]"}`}
             >
               <span
-                className={`text-[11px] font-semibold uppercase tracking-[0.08em] ${isLever ? toneText.down : factorText[factor]}`}
+                className={`flex items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] ${isLever ? toneText.down : factorText[factor]}`}
               >
-                {factorTitle[factor]}
-                {isLever ? " · главный рычаг" : ""}
+                <span>
+                  {factorTitle[factor]}
+                  {isLever ? " · главный рычаг" : ""}
+                </span>
+                <TileArrow />
               </span>
               <span className="text-sm text-zinc-600 dark:text-zinc-300">
                 {factorCaption[factor]}
@@ -287,7 +319,7 @@ export function DriverTree({ summary }: { summary: ExecutiveSummary }) {
                   без сравнения
                 </span>
               )}
-            </div>
+            </Link>
           );
         })}
         <div
@@ -296,9 +328,14 @@ export function DriverTree({ summary }: { summary: ExecutiveSummary }) {
         >
           =
         </div>
-        <div className="flex flex-col gap-1.5 rounded-2xl bg-[var(--surface-muted)] p-4">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500 dark:text-zinc-400">
+        <Link
+          href={driverDetailHref(summary, "bar")}
+          prefetch={false}
+          className={`flex flex-col gap-1.5 rounded-2xl border border-transparent bg-[var(--surface-muted)] p-4 ${tileLink}`}
+        >
+          <span className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500 dark:text-zinc-400">
             Результат
+            <TileArrow />
           </span>
           <span className="text-sm text-zinc-600 dark:text-zinc-300">
             Бар по покупкам
@@ -314,7 +351,7 @@ export function DriverTree({ summary }: { summary: ExecutiveSummary }) {
               {resultChange.text}
             </span>
           ) : null}
-        </div>
+        </Link>
       </div>
       {network.contributions?.length ? (
         <div className="flex flex-col gap-3">
@@ -439,19 +476,30 @@ function ClubCard({
           : null;
   return (
     <Link
-      href={clubDetailHref(summary, "productRevenue", [row.storeId ?? ""])}
+      href={
+        silentSince || !row.storeId
+          ? clubDetailHref(summary, "productRevenue", [row.storeId ?? ""])
+          : driverDetailHref(
+              summary,
+              gap
+                ? "conversion"
+                : lever
+                  ? factorFocus[lever.factor]
+                  : "bar",
+              [row.storeId],
+            )
+      }
       prefetch={false}
-      className={`flex min-w-0 flex-col gap-3.5 rounded-2xl p-4 transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 ${silentSince ? "border border-dashed border-zinc-300 bg-[var(--surface)] opacity-90 dark:border-zinc-700" : "border border-[var(--border-soft)] bg-[var(--surface)] shadow-sm"}`}
+      className={`flex min-w-0 flex-col gap-3.5 rounded-2xl p-4 ${tileLink} ${silentSince ? "border border-dashed border-zinc-300 bg-[var(--surface)] opacity-90 dark:border-zinc-700" : "border border-[var(--border-soft)] bg-[var(--surface)] shadow-sm"}`}
     >
-      <span className="flex items-baseline justify-between gap-2">
+      <span className="flex items-center justify-between gap-2">
         <strong className="truncate text-sm text-[var(--foreground)]">
           {row.storeName}
         </strong>
-        {pcs ? (
-          <span className="shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
-            {pcs} ПК
-          </span>
-        ) : null}
+        <span className="flex shrink-0 items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+          {pcs ? `${pcs} ПК` : null}
+          <TileArrow />
+        </span>
       </span>
       <span className="flex flex-wrap items-baseline gap-x-2.5">
         <span className="text-2xl font-bold tabular-nums text-[var(--foreground)]">
@@ -564,7 +612,7 @@ export function ClubLeverCards({ summary }: { summary: ExecutiveSummary }) {
           Клубы · главный рычаг
         </h2>
         <span className="text-sm text-zinc-600 dark:text-zinc-300">
-          Сначала те, где есть что исправить
+          Сначала те, где есть что исправить · карточка открывает клуб по дням
         </span>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -680,10 +728,12 @@ export function LoadPanel({ summary }: { summary: ExecutiveSummary }) {
             const previous = row.previous?.loadEstimate ?? null;
             const change = previous === null ? null : row.current.loadEstimate! - previous;
             return (
-              <li
-                key={row.storeIds.join("+")}
-                className="flex flex-col items-center gap-1 text-center"
-              >
+              <li key={row.storeIds.join("+")}>
+                <Link
+                  href={driverDetailHref(summary, "load", row.storeIds)}
+                  prefetch={false}
+                  className={`flex flex-col items-center gap-1 rounded-xl border border-transparent p-1 text-center ${tileLink}`}
+                >
                 <Ring
                   value={row.current.loadEstimate!}
                   good={row.current.loadEstimate! >= LOAD_REFERENCE}
@@ -699,6 +749,7 @@ export function LoadPanel({ summary }: { summary: ExecutiveSummary }) {
                     {arrow(tone(change))}было {formatNumber(previous!, 0)}%
                   </span>
                 ) : null}
+                </Link>
               </li>
             );
           })}
@@ -722,8 +773,15 @@ export function LoadPanel({ summary }: { summary: ExecutiveSummary }) {
           network?.previous?.playedHours,
         )}
       </div>
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+      <p className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
         Ориентир: средняя загрузка клуба около {LOAD_REFERENCE}% за месяц.
+        <Link
+          href={driverDetailHref(summary, "load")}
+          prefetch={false}
+          className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
+        >
+          Клубы и дни <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+        </Link>
       </p>
     </section>
   );

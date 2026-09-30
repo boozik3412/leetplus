@@ -29,7 +29,12 @@ type FormState = {
   password: string;
   scope: "NETWORK" | "STORES";
   storeIds: string[];
+  /** Lifetime of a registration link; a reissued link starts a fresh window. */
+  expiresInDays: number;
 };
+
+const INVITE_EXPIRY_OPTIONS = [1, 3, 7, 14, 30] as const;
+const DEFAULT_INVITE_EXPIRY_DAYS = 7;
 
 function createEmptyForm(defaultRole: UserRole): FormState {
   return {
@@ -41,6 +46,7 @@ function createEmptyForm(defaultRole: UserRole): FormState {
     password: "",
     scope: "STORES",
     storeIds: [],
+    expiresInDays: DEFAULT_INVITE_EXPIRY_DAYS,
   };
 }
 
@@ -54,6 +60,7 @@ function formFromAccount(account: UserAccount): FormState {
     password: "",
     scope: account.scope,
     storeIds: account.stores.map((store) => store.id),
+    expiresInDays: DEFAULT_INVITE_EXPIRY_DAYS,
   };
 }
 
@@ -67,6 +74,7 @@ function formFromInvite(invite: UserInvite): FormState {
     password: "",
     scope: invite.scope,
     storeIds: invite.stores.map((store) => store.id),
+    expiresInDays: DEFAULT_INVITE_EXPIRY_DAYS,
   };
 }
 
@@ -322,6 +330,14 @@ function inviteRoleLabel(invite: UserInvite) {
   return invite.customRole?.name ?? getRoleLabel(invite.role);
 }
 
+function formatInviteLifetime(days: number) {
+  if (days === 1) {
+    return "1 день";
+  }
+
+  return days < 5 ? `${days} дня` : `${days} дней`;
+}
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit",
@@ -338,14 +354,44 @@ function scopeLabel(account: Pick<UserAccount, "scope" | "stores">) {
   return account.stores.map((store) => store.name).join(", ");
 }
 
+const API_ERROR_TRANSLATIONS: Record<string, string> = {
+  "You cannot assign this role": "Вашей роли нельзя выдавать эту роль.",
+  "You cannot grant permissions outside your access scope":
+    "Нельзя выдать права, которых нет у вас самих.",
+  "Insufficient role permissions":
+    "Недостаточно прав для этого действия.",
+  "Access scope is required": "Выберите доступ: вся сеть или клубы.",
+  "Store access must contain at least one store":
+    "Выберите хотя бы один клуб.",
+  "Network access cannot contain explicit stores":
+    "Для доступа ко всей сети клубы выбирать не нужно.",
+  "OWNER assignment requires the dedicated owner-transfer workflow":
+    "Роль владельца передаётся отдельной процедурой, а не ссылкой.",
+  "Invite not found": "Ссылка не найдена. Обновите страницу.",
+  "Invite is already used": "По этой ссылке уже зарегистрировались.",
+  "Invite is expired": "Срок действия ссылки истёк. Выпустите новую.",
+  "Invite changed or was already accepted":
+    "Ссылка изменилась или уже использована. Обновите страницу.",
+  "Issue a new invite to widen its access scope":
+    "Чтобы расширить доступ, создайте новую ссылку.",
+  "Invite must be bound to a valid email address":
+    "Укажите корректный email или оставьте поле пустым.",
+};
+
+function translateApiError(message: string) {
+  return API_ERROR_TRANSLATIONS[message] ?? message;
+}
+
 async function readResponseError(response: Response) {
   try {
     const data = (await response.json()) as { message?: string | string[] };
     if (Array.isArray(data.message)) {
-      return data.message.join(", ");
+      return data.message.map(translateApiError).join(", ");
     }
 
-    return data.message ?? "Не удалось сохранить учетную запись";
+    return data.message
+      ? translateApiError(data.message)
+      : "Не удалось сохранить учетную запись";
   } catch {
     return "Не удалось сохранить учетную запись";
   }
@@ -871,6 +917,7 @@ export function UserAccountsPanel({
           customRoleId: form.customRoleId,
           scope: form.scope,
           storeIds,
+          expiresInDays: form.expiresInDays,
         }),
       });
 
@@ -885,14 +932,15 @@ export function UserAccountsPanel({
 
       const invite = (await response.json()) as UserInvite;
       setInvites((current) =>
-        current.map((item) => (item.id === invite.id ? invite : item)),
+        current.map((item) => (item.id === selectedInvite.id ? invite : item)),
       );
       setSelectedInviteId(invite.id);
       setForm(formFromInvite(invite));
       setCreatedInviteUrl(invite.registrationUrl ?? null);
       setStatus({
         type: "success",
-        message: "Приглашение обновлено.",
+        message:
+          "Новая ссылка готова. Прежняя ссылка больше не работает — отправьте сотруднику новую.",
       });
       setIsSaving(false);
       return;
@@ -909,7 +957,8 @@ export function UserAccountsPanel({
           customRoleId: form.customRoleId,
           scope: form.scope,
           storeIds,
-          expiresInDays: 7,
+          expiresInDays: form.expiresInDays,
+          deliveryMode: "LINK",
         }),
       });
 
@@ -931,7 +980,7 @@ export function UserAccountsPanel({
       setStatus({
         type: "success",
         message:
-          "Приглашение создано. Передайте ссылку сотруднику: пароль он задаст сам.",
+          "Ссылка создана. Отправьте её сотруднику: email и пароль он задаст сам при регистрации.",
       });
       setIsSaving(false);
       return;
@@ -987,7 +1036,7 @@ export function UserAccountsPanel({
     }
 
     const confirmed = window.confirm(
-      "Отменить приглашение? Ссылка перестанет работать.",
+      "Отозвать ссылку? Она перестанет работать, а сотрудник не сможет по ней зарегистрироваться.",
     );
 
     if (!confirmed) {
@@ -1014,7 +1063,7 @@ export function UserAccountsPanel({
     setSelectedInviteId(null);
     setForm(createEmptyForm(defaultRole));
     setCreatedInviteUrl(null);
-    setStatus({ type: "success", message: "Приглашение отменено." });
+    setStatus({ type: "success", message: "Ссылка отозвана." });
     setIsSaving(false);
   }
 
@@ -1118,37 +1167,91 @@ export function UserAccountsPanel({
             {selectedUser
               ? "Роль определяет доступ к разделам LeetPlus. Клубы задают рабочий контур сотрудника и ограничивают доступ к операционным данным."
               : selectedInvite
-                ? "Проверьте данные приглашения, скопируйте ссылку повторно, измените роль или отмените доступ."
-                : "Укажите email, роль и клубы. Сотрудник откроет персональную ссылку и сам задаст пароль при регистрации."}
+                ? "Ссылка показывается только один раз — сразу после создания. Если она потерялась или нужно изменить роль и клубы, выпустите новую: прежняя перестанет работать. Или отмените приглашение."
+                : "Выберите роль и клубы — мы создадим личную ссылку. Отправьте её сотруднику любым удобным способом: email и пароль он укажет сам при регистрации."}
           </p>
         </div>
 
         {!selectedUser && !selectedInvite ? (
           <div className="mt-5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
-            Новые учетные записи создаются только по персональной email-ссылке.
-            Пароль задает сам сотрудник.
+            Новые учетные записи создаются только по персональной ссылке.
+            Пароль задает сам сотрудник, отправка почтой не требуется.
           </div>
         ) : null}
 
         <form onSubmit={saveAccount} className="mt-5 space-y-5">
+          {!selectedUser ? (
+            <div
+              role="radiogroup"
+              aria-label="Способ передачи приглашения"
+              className="grid gap-2 sm:grid-cols-2"
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked="true"
+                aria-label="Ссылка-приглашение"
+                className="rounded-lg border border-emerald-500 bg-emerald-500/10 p-3 text-left ring-1 ring-emerald-500/30"
+              >
+                <span className="block text-sm font-semibold text-emerald-800 dark:text-emerald-200">
+                  Ссылка-приглашение
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-zinc-600 dark:text-zinc-400">
+                  Скопируйте ссылку и отправьте сотруднику сами.
+                </span>
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked="false"
+                aria-disabled="true"
+                aria-label="Отправить на e-mail (пока недоступно)"
+                disabled
+                title="Отправка на почту появится после настройки почтового сервера"
+                className="cursor-not-allowed rounded-lg border border-dashed border-zinc-300 p-3 text-left opacity-60 dark:border-zinc-700"
+              >
+                <span className="block text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                  Отправить на e-mail
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-zinc-500">
+                  Пока недоступно: почтовый сервер не настроен.
+                </span>
+              </button>
+            </div>
+          ) : null}
+
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1">
               <span className="text-xs font-bold uppercase text-zinc-500">
-                Email
+                {selectedUser ? "Email" : "Email (необязательно)"}
               </span>
               <input
-                required
+                required={Boolean(selectedUser)}
                 type="email"
                 value={form.email}
+                readOnly={Boolean(selectedInvite)}
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
                     email: event.target.value,
                   }))
                 }
-                placeholder="employee@club.ru"
-                className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                placeholder={
+                  selectedInvite
+                    ? "Не привязан: сотрудник укажет сам"
+                    : "employee@club.ru"
+                }
+                className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 read-only:bg-zinc-50 read-only:text-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:read-only:bg-zinc-900"
               />
+              {selectedUser ? null : (
+                <span className="block text-xs leading-5 text-zinc-500">
+                  {selectedInvite
+                    ? selectedInvite.email
+                      ? "Ссылка работает только для этого адреса."
+                      : "Ссылка не привязана к адресу: email сотрудник укажет при регистрации."
+                    : "Оставьте пустым — email сотрудник укажет сам. Если заполнить, ссылка сработает только для этого адреса."}
+                </span>
+              )}
             </label>
 
             <label className="space-y-1">
@@ -1166,6 +1269,11 @@ export function UserAccountsPanel({
                 placeholder="ФИО или рабочее имя"
                 className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
               />
+              {selectedUser ? null : (
+                <span className="block text-xs leading-5 text-zinc-500">
+                  Если не указать, сотрудник впишет имя при регистрации.
+                </span>
+              )}
             </label>
           </div>
 
@@ -1263,6 +1371,33 @@ export function UserAccountsPanel({
             ) : null}
           </div>
 
+          {!selectedUser ? (
+            <label className="block space-y-1">
+              <span className="text-xs font-bold uppercase text-zinc-500">
+                Срок действия ссылки
+              </span>
+              <select
+                value={form.expiresInDays}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    expiresInDays: Number(event.target.value),
+                  }))
+                }
+                className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                {INVITE_EXPIRY_OPTIONS.map((days) => (
+                  <option key={days} value={days}>
+                    {formatInviteLifetime(days)}
+                  </option>
+                ))}
+              </select>
+              <span className="block text-xs leading-5 text-zinc-500">
+                После регистрации ссылка перестаёт работать сама.
+              </span>
+            </label>
+          ) : null}
+
           {selectedUser ? (
             <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
               <label className="space-y-1">
@@ -1325,6 +1460,10 @@ export function UserAccountsPanel({
               <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-200">
                 Ссылка готова
               </p>
+              <p className="mt-1 text-xs leading-5 text-emerald-800 dark:text-emerald-200">
+                Отправьте её сотруднику. Ссылка показывается только сейчас: если
+                потеряется, выпустите новую — прежняя перестанет работать.
+              </p>
               <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
                 <input
                   readOnly
@@ -1374,8 +1513,8 @@ export function UserAccountsPanel({
                 : selectedUser
                   ? "Сохранить изменения"
                   : selectedInvite
-                    ? "Сохранить приглашение"
-                    : "Создать приглашение"}
+                    ? "Выпустить новую ссылку"
+                    : "Создать ссылку"}
             </button>
             {selectedInvite ? (
               <button
@@ -1384,7 +1523,7 @@ export function UserAccountsPanel({
                 disabled={isSaving || !canSaveSelected}
                 className="inline-flex h-11 items-center justify-center rounded-md border border-red-300 px-4 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/40 dark:text-red-200 dark:hover:bg-red-500/10"
               >
-                Отменить приглашение
+                Отозвать ссылку
               </button>
             ) : null}
             {selectedUser || selectedInvite ? (
@@ -1393,7 +1532,7 @@ export function UserAccountsPanel({
                 onClick={startCreate}
                 className="inline-flex h-11 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
               >
-                {selectedInvite ? "Новая ссылка" : "Создать другую"}
+                {selectedInvite ? "Другой сотрудник" : "Создать другую"}
               </button>
             ) : null}
           </div>
@@ -1422,7 +1561,7 @@ export function UserAccountsPanel({
                   role="button"
                   tabIndex={0}
                   aria-label={`Открыть приглашение ${
-                    invite.fullName || invite.email || "без email"
+                    invite.fullName || invite.email || "без имени"
                   }`}
                   onClick={() => startEditInvite(invite)}
                   onKeyDown={(event) => {
@@ -1441,13 +1580,16 @@ export function UserAccountsPanel({
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-semibold">
-                        {invite.fullName ||
-                          invite.email ||
-                          "Без привязки к email"}
+                        {invite.fullName || invite.email || "Ссылка без имени"}
                       </p>
                       <p className="mt-1 text-xs text-zinc-500">
                         {inviteRoleLabel(invite)} - {scopeLabel(invite)}
                       </p>
+                      {invite.email ? (
+                        <p className="mt-1 text-xs text-zinc-500">
+                          Только для {invite.email}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="flex flex-wrap justify-end gap-2">
                       <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">

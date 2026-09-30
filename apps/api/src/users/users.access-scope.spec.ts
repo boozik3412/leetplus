@@ -123,8 +123,23 @@ function inviteRow(
     revokedAt: null,
     revokedByUserId: null,
     identityClaimRevision: 1,
+    deliveryMode: 'EMAIL',
     createdAt: now,
     updatedAt: now,
+  };
+}
+
+/** A registration link that names no mailbox: the invitee picks their own. */
+function openLinkInviteRow(
+  id: string,
+  accessScope: 'NETWORK' | 'STORES',
+  storeIds: string[],
+) {
+  return {
+    ...inviteRow(id, accessScope, storeIds),
+    email: null,
+    identityClaimRevision: null,
+    deliveryMode: 'LINK',
   };
 }
 
@@ -446,37 +461,353 @@ describe('UsersService AccessScope boundary', () => {
     expect(prisma.store.findMany).not.toHaveBeenCalled();
   });
 
-  it('keeps external invitations fail-closed until verified email delivery is available', async () => {
+  it('creates a registration link without an email in an external tenant', async () => {
+    const { identityClaimBoundary, prisma, service } = createService({
+      tenantCustomerStage: TenantCustomerStage.PILOT,
+    });
+
+    const result = await service.createInvite(networkOwnerActor, {
+      fullName: 'Иван Петров',
+      role: UserRole.CLUB_ADMINISTRATOR,
+      scope: 'NETWORK',
+      storeIds: [],
+    });
+
+    const createArgs = firstMockArgument<{
+      data: Record<string, unknown>;
+    }>(prisma.userInvite.create);
+    const token = /#invite=([A-Za-z0-9_-]{43})$/u.exec(
+      result.registrationUrl ?? '',
+    )?.[1];
+    expect(token).toBeDefined();
+    expect(createArgs.data).toMatchObject({
+      tenantId,
+      email: null,
+      fullName: 'Иван Петров',
+      role: UserRole.CLUB_ADMINISTRATOR,
+      accessScope: 'NETWORK',
+      identityClaimRevision: null,
+      deliveryMode: 'LINK',
+      createdByUserId: networkOwnerActor.id,
+    });
+    // Only the hash of the bearer secret is stored.
+    expect(JSON.stringify(createArgs.data)).not.toContain(token as string);
+    expect(result).toMatchObject({
+      email: null,
+      deliveryMode: 'LINK',
+      role: UserRole.CLUB_ADMINISTRATOR,
+    });
+    expect(result.registrationUrl).toMatch(
+      /^https:\/\/example\.test\/register#invite=[A-Za-z0-9_-]{43}$/,
+    );
+    expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
+    expect(identityClaimBoundary.runTenantTransaction).not.toHaveBeenCalled();
+    expect(identityClaimBoundary.reserveInvite).not.toHaveBeenCalled();
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('keeps an optional email on an external link behind the identity claim boundary', async () => {
+    const { identityClaimBoundary, prisma, service } = createService({
+      tenantCustomerStage: TenantCustomerStage.PILOT,
+    });
+
+    const result = await service.createInvite(networkOwnerActor, {
+      email: ' New-User@Example.test ',
+      role: UserRole.CLUB_ADMINISTRATOR,
+      scope: 'NETWORK',
+      storeIds: [],
+    });
+
+    const createArgs = firstMockArgument<{
+      data: Record<string, unknown>;
+    }>(prisma.userInvite.create);
+    expect(createArgs.data).toMatchObject({
+      email: 'new-user@example.test',
+      deliveryMode: 'LINK',
+    });
+    expect(identityClaimBoundary.reserveInvite).toHaveBeenCalledTimes(1);
+    expect(identityClaimBoundary.transitionInvite).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      email: 'new-user@example.test',
+      deliveryMode: 'LINK',
+    });
+  });
+
+  it.each([
+    ['internal', TenantCustomerStage.INTERNAL],
+    ['external', TenantCustomerStage.PILOT],
+  ])(
+    'refuses mail delivery in an %s tenant until verified delivery is configured',
+    async (_label, tenantCustomerStage) => {
+      const { identityClaimBoundary, prisma, service } = createService({
+        tenantCustomerStage,
+      });
+
+      await expect(
+        service.createInvite(networkOwnerActor, {
+          email: 'new-user@example.test',
+          role: UserRole.CLUB_ADMINISTRATOR,
+          scope: 'NETWORK',
+          storeIds: [],
+          deliveryMode: 'EMAIL',
+        }),
+      ).rejects.toMatchObject({
+        response: { reasonCode: 'INVITE_EMAIL_DELIVERY_UNAVAILABLE' },
+      });
+      expect(prisma.userInvite.create).not.toHaveBeenCalled();
+      expect(identityClaimBoundary.reserveInvite).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an unknown delivery mode instead of treating it as a link', async () => {
+    const { prisma, service } = createService({});
+
+    await expect(
+      service.createInvite(networkOwnerActor, {
+        role: UserRole.CLUB_ADMINISTRATOR,
+        scope: 'NETWORK',
+        storeIds: [],
+        deliveryMode: 'SMS' as never,
+      }),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'INVITE_DELIVERY_MODE_INVALID' },
+    });
+    expect(prisma.userInvite.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['network OWNER', networkOwnerActor],
+    ['network ADMIN', networkAdminActor],
+    ['store MANAGER', storeActor],
+    ['store STANDARDS_MANAGER', storeStandardsManagerActor],
+  ])(
+    'lets a %s hand out administrator access as a link in an external tenant',
+    async (_label, actor) => {
+      const scope = actor.accessScope === 'NETWORK' ? 'NETWORK' : 'STORES';
+      const storeIds = scope === 'NETWORK' ? [] : ['a1'];
+
+      for (const role of [
+        UserRole.SENIOR_ADMINISTRATOR,
+        UserRole.CLUB_ADMINISTRATOR,
+      ]) {
+        const { prisma, service } = createService({
+          tenantCustomerStage: TenantCustomerStage.PILOT,
+        });
+
+        await expect(
+          service.createInvite(actor, { role, scope, storeIds }),
+        ).resolves.toMatchObject({ role, email: null, deliveryMode: 'LINK' });
+        expect(prisma.userInvite.create).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
+
+  it('does not let a store-scoped standards manager hand out a link for a foreign club', async () => {
     const { prisma, service } = createService({
       tenantCustomerStage: TenantCustomerStage.PILOT,
     });
 
     await expect(
-      service.createInvite(networkOwnerActor, {
-        email: 'new-user@example.test',
+      service.createInvite(storeStandardsManagerActor, {
+        role: UserRole.CLUB_ADMINISTRATOR,
+        scope: 'STORES',
+        storeIds: ['a3'],
+      }),
+    ).rejects.toThrow(ForbiddenException);
+    await expect(
+      service.createInvite(storeStandardsManagerActor, {
         role: UserRole.CLUB_ADMINISTRATOR,
         scope: 'NETWORK',
         storeIds: [],
       }),
-    ).rejects.toThrow(
-      'External tenant invitations require the verified email-delivery workflow',
-    );
-    expect(prisma.userInvite.findFirst).not.toHaveBeenCalled();
-    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    ).rejects.toThrow(ForbiddenException);
+    expect(prisma.userInvite.create).not.toHaveBeenCalled();
   });
 
-  it('keeps external invite cancellation on the same verified delivery boundary', async () => {
+  it('keeps cancelling a mail-delivery invite behind the verified boundary in an external tenant', async () => {
+    const existing = inviteRow('external-invite', 'NETWORK', []);
     const { identityClaimBoundary, prisma, service } = createService({
       tenantCustomerStage: TenantCustomerStage.PILOT,
     });
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
 
     await expect(
-      service.cancelInvite(networkOwnerActor, 'external-invite'),
+      service.cancelInvite(networkOwnerActor, existing.id),
     ).rejects.toThrow(
       'External tenant invitations require the verified email-delivery workflow',
     );
-    expect(prisma.userInvite.findFirst).not.toHaveBeenCalled();
     expect(identityClaimBoundary.releaseInvite).not.toHaveBeenCalled();
+    expect(prisma.userInvite.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('cancels an open registration link in an external tenant without identity claims', async () => {
+    const existing = openLinkInviteRow('open-link', 'STORES', ['a1']);
+    const { identityClaimBoundary, prisma, service } = createService({
+      tenantCustomerStage: TenantCustomerStage.PILOT,
+    });
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+
+    await expect(
+      service.cancelInvite(storeStandardsManagerActor, existing.id),
+    ).resolves.toEqual({ id: existing.id });
+
+    const revokeArgs = firstMockArgument<{
+      where: Record<string, unknown>;
+      data: Record<string, unknown>;
+    }>(prisma.userInvite.updateMany);
+    expect(revokeArgs.where).toMatchObject({
+      id: existing.id,
+      tenantId,
+      acceptedAt: null,
+      revokedAt: null,
+      updatedAt: existing.updatedAt,
+    });
+    expect(revokeArgs.data).toMatchObject({
+      revokedByUserId: storeStandardsManagerActor.id,
+    });
+    expect(revokeArgs.data.revokedAt).toBeInstanceOf(Date);
+    expect(identityClaimBoundary.runTenantTransaction).not.toHaveBeenCalled();
+    expect(identityClaimBoundary.assertInvite).not.toHaveBeenCalled();
+    expect(identityClaimBoundary.releaseInvite).not.toHaveBeenCalled();
+    expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('does not cancel an open link when it changed concurrently', async () => {
+    const existing = openLinkInviteRow('open-link', 'STORES', ['a1']);
+    const { prisma, service } = createService({});
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+    prisma.userInvite.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.cancelInvite(storeStandardsManagerActor, existing.id),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('reissues an open link as a new bearer secret and revokes the previous one', async () => {
+    const existing = openLinkInviteRow('open-link', 'STORES', ['a1']);
+    const { identityClaimBoundary, prisma, service } = createService({
+      tenantCustomerStage: TenantCustomerStage.PILOT,
+    });
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+
+    const result = await service.updateInvite(
+      storeStandardsManagerActor,
+      existing.id,
+      { fullName: 'Иван Петров', expiresInDays: 3 },
+    );
+
+    const createArgs = firstMockArgument<{
+      data: Record<string, unknown>;
+    }>(prisma.userInvite.create);
+    const revokeArgs = firstMockArgument<{
+      where: Record<string, unknown>;
+      data: Record<string, unknown>;
+    }>(prisma.userInvite.updateMany);
+    const invocationOrder = [
+      prisma.userInvite.create.mock.invocationCallOrder[0],
+      prisma.userInvite.updateMany.mock.invocationCallOrder[0],
+    ];
+    expect(invocationOrder).toEqual(
+      [...invocationOrder].sort((left, right) => left - right),
+    );
+    expect(createArgs.data).toMatchObject({
+      email: null,
+      fullName: 'Иван Петров',
+      identityClaimRevision: null,
+      deliveryMode: 'LINK',
+      createdByUserId: storeStandardsManagerActor.id,
+    });
+    expect(String(createArgs.data.id)).not.toBe(existing.id);
+    expect(String(createArgs.data.tokenHash)).not.toBe(existing.tokenHash);
+    expect(revokeArgs.where).toMatchObject({
+      id: existing.id,
+      tenantId,
+      acceptedAt: null,
+      revokedAt: null,
+      updatedAt: existing.updatedAt,
+    });
+    expect(revokeArgs.data.revokedAt).toBeInstanceOf(Date);
+    expect(revokeArgs.data.expiresAt).toBe(revokeArgs.data.revokedAt);
+    expect(result).toMatchObject({
+      email: null,
+      deliveryMode: 'LINK',
+      fullName: 'Иван Петров',
+    });
+    expect(result.registrationUrl).toMatch(
+      /^https:\/\/example\.test\/register#invite=[A-Za-z0-9_-]{43}$/,
+    );
+    expect(identityClaimBoundary.runTenantTransaction).not.toHaveBeenCalled();
+    expect(identityClaimBoundary.assertInvite).not.toHaveBeenCalled();
+    expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('does not add a mailbox to an already issued open link', async () => {
+    const existing = openLinkInviteRow('open-link', 'STORES', ['a1']);
+    const { identityClaimBoundary, prisma, service } = createService({});
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+
+    await expect(
+      service.updateInvite(storeStandardsManagerActor, existing.id, {
+        email: 'late@example.test',
+      }),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'INVITE_EMAIL_CHANGE_WORKFLOW_REQUIRED' },
+    });
+    expect(prisma.userInvite.create).not.toHaveBeenCalled();
+    expect(identityClaimBoundary.reserveInvite).not.toHaveBeenCalled();
+  });
+
+  it('does not widen an open link when it is reissued', async () => {
+    const existing = openLinkInviteRow('open-link', 'STORES', ['a1']);
+    const { prisma, service } = createService({});
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+
+    await expect(
+      service.updateInvite(storeActor, existing.id, {
+        scope: 'STORES',
+        storeIds: ['a1', 'a2'],
+      }),
+    ).rejects.toThrow('Issue a new invite to widen its access scope');
+    expect(prisma.userInvite.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps reissuing a mail-delivery invite behind the verified boundary in an external tenant', async () => {
+    const existing = inviteRow('external-invite', 'NETWORK', []);
+    const { prisma, service } = createService({
+      tenantCustomerStage: TenantCustomerStage.PILOT,
+    });
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+
+    await expect(
+      service.updateInvite(networkOwnerActor, existing.id, {
+        email: existing.email,
+      }),
+    ).rejects.toThrow(
+      'External tenant invitations require the verified email-delivery workflow',
+    );
+    expect(prisma.userInvite.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a legacy invite without both an email and link provenance', async () => {
+    const existing = {
+      ...inviteRow('legacy-invite', 'STORES', ['a1']),
+      email: null,
+      identityClaimRevision: null,
+    };
+    const { prisma, service } = createService({});
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+
+    await expect(
+      service.updateInvite(storeActor, existing.id, {}),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'IDENTITY_INVITE_PROVENANCE_REQUIRED' },
+    });
+    await expect(
+      service.cancelInvite(storeActor, existing.id),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'IDENTITY_INVITE_PROVENANCE_REQUIRED' },
+    });
+    expect(prisma.userInvite.updateMany).not.toHaveBeenCalled();
   });
 
   it('keeps every real user email change fail-closed until mailbox verification is available', async () => {
@@ -637,16 +968,18 @@ describe('UsersService AccessScope boundary', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
-  it('requires every invite to be bound to email', async () => {
-    const { service } = createService({});
+  it('refuses a malformed optional email instead of silently dropping it', async () => {
+    const { prisma, service } = createService({});
 
     await expect(
       service.createInvite(storeActor, {
+        email: 'not-an-email',
         role: UserRole.CLUB_ADMINISTRATOR,
         scope: 'STORES',
         storeIds: ['a1'],
       }),
     ).rejects.toThrow(BadRequestException);
+    expect(prisma.userInvite.create).not.toHaveBeenCalled();
   });
 
   it('creates the invite and identity provenance atomically in boundary order', async () => {

@@ -154,7 +154,7 @@ describe('CURRENT189 UsersController dormant invite route manifest', () => {
     expect(module).not.toContain('CURRENT189');
   });
 
-  it('keeps all three production routes BLOCKED in the Gate 1MT inventory', () => {
+  it('inventories the three production routes as fresh-scope registration-link routes', () => {
     const rows = EMPLOYEE_INVITE_CURRENT189_ROUTE_MANIFEST.map((route) =>
       PILOT_HTTP_SURFACE_MANIFEST.find(
         (entry) =>
@@ -162,17 +162,20 @@ describe('CURRENT189 UsersController dormant invite route manifest', () => {
       ),
     );
 
+    // The routes are opened for registration links only: the legacy handlers
+    // re-resolve the actor's fresh scope and never send mail. Delivering an
+    // invitation by mail stays refused until the CURRENT189 workflow (which is
+    // still not wired, see the previous test) is promoted.
     expect(rows).toHaveLength(3);
     for (const row of rows) {
       expect(row).toMatchObject({
         module: 'USERS_ROLES',
         capability: 'manage_users',
-        minimumScope: 'NETWORK',
-        decision: 'BLOCKED',
+        minimumScope: 'STORES',
+        storeFilter: 'REQUIRED',
+        decision: 'ALLOW',
+        gaps: [],
       });
-      expect(row?.gaps).toEqual(
-        expect.arrayContaining(['NETWORK_SCOPE_NOT_ASSERTED']),
-      );
     }
   });
 

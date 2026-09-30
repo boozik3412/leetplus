@@ -32,6 +32,7 @@ const BEARER_INVITE_TOKEN = 'A'.repeat(43);
 const OWNER_INVITE_TOKEN = 'B'.repeat(43);
 const MEMBER_INVITE_TOKEN = 'C'.repeat(43);
 const LEGACY_INVITE_TOKEN = 'D'.repeat(43);
+const LINK_INVITE_TOKEN = 'E'.repeat(43);
 
 type PrismaMock = {
   user: {
@@ -96,6 +97,7 @@ type EmailVerificationMock = {
 
 type IdentityEmailClaimMock = {
   runTenantTransaction: jest.Mock;
+  reserveInvite: jest.Mock;
   assertInvite: jest.Mock;
   transitionInvite: jest.Mock;
 };
@@ -167,6 +169,19 @@ function createMemberInvite(onboardingStatus = TenantOnboardingStatus.ACTIVE) {
     updatedAt: new Date(),
     identityClaimRevision: 2,
     tenant: createInviteTenant(onboardingStatus),
+  };
+}
+
+/** A registration link handed out without a mailbox (email chosen at signup). */
+function createOpenLinkInvite() {
+  return {
+    ...createMemberInvite(),
+    id: 'invite-link-1',
+    tokenHash: createHash('sha256').update(LINK_INVITE_TOKEN).digest('hex'),
+    email: null,
+    fullName: null,
+    identityClaimRevision: null,
+    deliveryMode: 'LINK',
   };
 }
 
@@ -257,6 +272,21 @@ describe('AuthService', () => {
             (tx: PrismaMock) => operation(tx, tx),
             IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
           )) as unknown,
+      ),
+      reserveInvite: jest.fn(
+        (
+          _tx: unknown,
+          input: { tenantId: string; subjectId: string },
+        ): Promise<unknown> =>
+          Promise.resolve({
+            schemaVersion: 2,
+            operation: 'RESERVE_INVITE',
+            decision: 'CREATED',
+            claimType: IdentityEmailClaimType.INVITE,
+            tenantId: input.tenantId,
+            subjectId: input.subjectId,
+            revision: 1,
+          }),
       ),
       assertInvite: jest.fn().mockResolvedValue({
         schemaVersion: 1,
@@ -1090,5 +1120,324 @@ describe('AuthService', () => {
     await expect(service.getInvite(BEARER_INVITE_TOKEN)).rejects.toThrow(
       BadRequestException,
     );
+  });
+
+  describe('registration link without a bound email', () => {
+    function arrangeOpenLinkAcceptance(invite = createOpenLinkInvite()) {
+      prisma.userInvite.findUnique.mockResolvedValue(invite);
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.create.mockResolvedValue({ id: 'ignored-generated-user' });
+      prisma.userInvite.updateMany.mockResolvedValue({ count: 1 });
+      identityEmailClaim.transitionInvite.mockResolvedValue({
+        schemaVersion: 2,
+        operation: 'TRANSITION_INVITE',
+        decision: 'TRANSITIONED',
+        claimType: IdentityEmailClaimType.USER,
+        tenantId: 'tenant-1',
+        subjectId: 'user-1',
+        revision: 2,
+      });
+      prisma.user.findUniqueOrThrow.mockImplementation(
+        ({ where }: { where: { id: string } }) => ({
+          ...createUserWithTenant(),
+          id: where.id,
+          role: UserRole.CLUB_ADMINISTRATOR,
+          tenant: {
+            ...createUserWithTenant().tenant,
+            customerStage: TenantCustomerStage.PILOT,
+            onboardingStatus: TenantOnboardingStatus.ACTIVE,
+            trialStartsAt: invite.tenant.trialStartsAt,
+            trialEndsAt: invite.tenant.trialEndsAt,
+            entitlementProfileRevision: 1,
+            moduleEntitlements: completeEntitlements(),
+          },
+        }),
+      );
+    }
+
+    const acceptanceInput = {
+      email: ' Staff@Club.RU ',
+      fullName: ' Иван Петров ',
+      password: 'strong-password',
+      confirmPassword: 'strong-password',
+    };
+
+    it('previews the link without a mailbox so the invitee can choose one', async () => {
+      prisma.userInvite.findUnique.mockResolvedValue(createOpenLinkInvite());
+
+      await expect(service.getInvite(LINK_INVITE_TOKEN)).resolves.toMatchObject(
+        {
+          email: null,
+          fullName: null,
+          role: UserRole.CLUB_ADMINISTRATOR,
+          scope: 'NETWORK',
+        },
+      );
+    });
+
+    it('registers the invitee under their own email and claims it atomically', async () => {
+      arrangeOpenLinkAcceptance();
+
+      const response = await service.acceptInvite(
+        LINK_INVITE_TOKEN,
+        acceptanceInput,
+      );
+
+      const userCreate = prisma.user.create as jest.Mock<
+        Promise<unknown>,
+        [{ data: Record<string, unknown> }]
+      >;
+      const createData = userCreate.mock.calls[0]?.[0].data;
+      const userId = createData?.id;
+      const reserveCall = identityEmailClaim.reserveInvite.mock
+        .calls[0] as unknown[];
+      const reserveInput = reserveCall[1] as {
+        email: string;
+        tenantId: string;
+        subjectId: string;
+      };
+      expect(response).toMatchObject({
+        accessToken: 'signed-token',
+        user: { id: userId, role: UserRole.CLUB_ADMINISTRATOR },
+      });
+      expect(createData).toMatchObject({
+        tenantId: 'tenant-1',
+        email: 'staff@club.ru',
+        fullName: 'Иван Петров',
+        role: UserRole.CLUB_ADMINISTRATOR,
+        accessScope: UserAccessScope.NETWORK,
+        isActive: true,
+        // A shared link proves nothing about the mailbox.
+        emailVerifiedAt: null,
+        identityClaimRevision: null,
+      });
+      expect(reserveInput).toMatchObject({
+        email: 'staff@club.ru',
+        tenantId: 'tenant-1',
+      });
+      expect(reserveInput.subjectId).not.toBe('invite-link-1');
+      expect(identityEmailClaim.assertInvite).not.toHaveBeenCalled();
+      expect(identityEmailClaim.transitionInvite).toHaveBeenCalledWith(prisma, {
+        email: 'staff@club.ru',
+        tenantId: 'tenant-1',
+        expectedSubjectId: reserveInput.subjectId,
+        expectedRevision: 1,
+        nextClaimType: IdentityEmailClaimType.USER,
+        nextSubjectId: userId,
+      });
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: userId },
+        data: { identityClaimRevision: 2 },
+      });
+      expect(prisma.userInvite.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'invite-link-1',
+          acceptedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: expect.any(Date) as Date },
+          updatedAt: expect.any(Date) as Date,
+        },
+        data: {
+          acceptedAt: expect.any(Date) as Date,
+          acceptedByUserId: userId,
+        },
+      });
+      expect(prisma.tenant.updateMany).not.toHaveBeenCalled();
+      expect(prisma.platformAdminAuditEvent.create).not.toHaveBeenCalled();
+      expect(
+        initialOwnerInviteDeliveryGate.assertSentInTransaction,
+      ).not.toHaveBeenCalled();
+
+      const firstInvocation = (mock: jest.Mock): number => {
+        const order = mock.mock.invocationCallOrder[0];
+        if (order === undefined) {
+          throw new Error('Expected mock to have been invoked');
+        }
+        return order;
+      };
+      expect(
+        firstInvocation(identityEmailClaim.runTenantTransaction),
+      ).toBeLessThan(firstInvocation(identityEmailClaim.reserveInvite));
+      expect(firstInvocation(identityEmailClaim.reserveInvite)).toBeLessThan(
+        firstInvocation(prisma.user.create),
+      );
+      expect(firstInvocation(prisma.user.create)).toBeLessThan(
+        firstInvocation(prisma.userInvite.updateMany),
+      );
+      expect(firstInvocation(prisma.userInvite.updateMany)).toBeLessThan(
+        firstInvocation(identityEmailClaim.transitionInvite),
+      );
+      expect(firstInvocation(identityEmailClaim.transitionInvite)).toBeLessThan(
+        firstInvocation(prisma.user.update),
+      );
+    });
+
+    it('takes the name from the link when the invitee leaves it empty', async () => {
+      arrangeOpenLinkAcceptance({
+        ...createOpenLinkInvite(),
+        fullName: 'Мария Иванова',
+      });
+
+      await service.acceptInvite(LINK_INVITE_TOKEN, {
+        email: 'maria@club.ru',
+        password: 'strong-password',
+        confirmPassword: 'strong-password',
+      });
+
+      const userCreate = prisma.user.create as jest.Mock<
+        Promise<unknown>,
+        [{ data: Record<string, unknown> }]
+      >;
+      expect(userCreate.mock.calls[0]?.[0].data).toMatchObject({
+        fullName: 'Мария Иванова',
+      });
+    });
+
+    it.each([
+      ['missing', undefined],
+      ['blank', '   '],
+      ['not an address', 'not-an-email'],
+      ['non-latin', 'иван@клуб.рф'],
+    ])(
+      'rejects a %s email before hashing the password or opening a transaction',
+      async (_case, email) => {
+        prisma.userInvite.findUnique.mockResolvedValue(createOpenLinkInvite());
+
+        await expect(
+          service.acceptInvite(LINK_INVITE_TOKEN, {
+            ...acceptanceInput,
+            email,
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(passwordService.hash).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(identityEmailClaim.reserveInvite).not.toHaveBeenCalled();
+        expect(prisma.user.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('needs a name from either the link or the invitee', async () => {
+      prisma.userInvite.findUnique.mockResolvedValue(createOpenLinkInvite());
+
+      await expect(
+        service.acceptInvite(LINK_INVITE_TOKEN, {
+          ...acceptanceInput,
+          fullName: '   ',
+        }),
+      ).rejects.toThrow('Укажите имя и фамилию');
+      expect(passwordService.hash).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('does not register an email that already has an account', async () => {
+      prisma.userInvite.findUnique.mockResolvedValue(createOpenLinkInvite());
+      prisma.user.findUnique.mockResolvedValue({ id: 'existing-user' });
+
+      await expect(
+        service.acceptInvite(LINK_INVITE_TOKEN, acceptanceInput),
+      ).rejects.toThrow('Пользователь с таким email уже существует');
+      expect(passwordService.hash).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('rolls back when the email is already claimed by another identity workflow', async () => {
+      arrangeOpenLinkAcceptance();
+      identityEmailClaim.reserveInvite.mockRejectedValue(
+        new ConflictException({
+          message: 'Identity email is unavailable',
+          reasonCode: 'IDENTITY_EMAIL_UNAVAILABLE',
+        }),
+      );
+
+      await expect(
+        service.acceptInvite(LINK_INVITE_TOKEN, acceptanceInput),
+      ).rejects.toThrow('Пользователь с таким email уже существует');
+      expect(prisma.user.create).not.toHaveBeenCalled();
+      expect(prisma.userInvite.updateMany).not.toHaveBeenCalled();
+      expect(identityEmailClaim.transitionInvite).not.toHaveBeenCalled();
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('propagates unexpected claim failures untouched', async () => {
+      arrangeOpenLinkAcceptance();
+      const failure = new ServiceUnavailableException({
+        message: 'Identity claim boundary is unavailable',
+        reasonCode: 'IDENTITY_CLAIM_BOUNDARY_UNAVAILABLE',
+      });
+      identityEmailClaim.reserveInvite.mockRejectedValue(failure);
+
+      await expect(
+        service.acceptInvite(LINK_INVITE_TOKEN, acceptanceInput),
+      ).rejects.toBe(failure);
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('does not consume a link that was used concurrently', async () => {
+      arrangeOpenLinkAcceptance();
+      prisma.userInvite.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.acceptInvite(LINK_INVITE_TOKEN, acceptanceInput),
+      ).rejects.toThrow('Invite changed or was already accepted');
+      expect(identityEmailClaim.transitionInvite).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('still refuses an initial owner shape on a link without email', async () => {
+      prisma.userInvite.findUnique.mockResolvedValue({
+        ...createOpenLinkInvite(),
+        role: UserRole.OWNER,
+      });
+
+      await expect(service.getInvite(LINK_INVITE_TOKEN)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('does not verify the mailbox of an email-bound link, unlike mailed invites', async () => {
+      arrangeOpenLinkAcceptance();
+      const bound = {
+        ...createMemberInvite(),
+        deliveryMode: 'LINK',
+        tokenHash: createHash('sha256').update(LINK_INVITE_TOKEN).digest('hex'),
+      };
+      prisma.userInvite.findUnique.mockResolvedValue(bound);
+
+      await service.acceptInvite(LINK_INVITE_TOKEN, {
+        password: 'strong-password',
+        confirmPassword: 'strong-password',
+      });
+      const userCreate = prisma.user.create as jest.Mock<
+        Promise<unknown>,
+        [{ data: Record<string, unknown> }]
+      >;
+      expect(userCreate.mock.calls[0]?.[0].data).toMatchObject({
+        email: 'invitee@example.test',
+        emailVerifiedAt: null,
+      });
+      expect(identityEmailClaim.assertInvite).toHaveBeenCalledTimes(1);
+      expect(identityEmailClaim.reserveInvite).not.toHaveBeenCalled();
+    });
+
+    it('keeps mailed invites verified because delivery proved the mailbox', async () => {
+      arrangeOpenLinkAcceptance();
+      prisma.userInvite.findUnique.mockResolvedValue({
+        ...createMemberInvite(),
+        deliveryMode: 'EMAIL',
+      });
+
+      await service.acceptInvite(MEMBER_INVITE_TOKEN, {
+        password: 'strong-password',
+        confirmPassword: 'strong-password',
+      });
+      const userCreate = prisma.user.create as jest.Mock<
+        Promise<unknown>,
+        [{ data: Record<string, unknown> }]
+      >;
+      expect(userCreate.mock.calls[0]?.[0].data.emailVerifiedAt).toBeInstanceOf(
+        Date,
+      );
+    });
   });
 });

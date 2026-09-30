@@ -80,6 +80,18 @@ function localizeAuthError(message: string) {
     return "Ссылка-приглашение не найдена.";
   }
 
+  if (normalized === "invite changed or was already accepted") {
+    return "Ссылка уже использована или изменена. Попросите выпустить новую.";
+  }
+
+  if (normalized.startsWith("tenant invite is not admitted")) {
+    if (normalized.endsWith("trial_expired")) {
+      return "Срок доступа вашей сети к LeetPlus закончился. Обратитесь к администратору LeetPlus.";
+    }
+
+    return "Доступ вашей сети к LeetPlus сейчас закрыт. Обратитесь к администратору LeetPlus.";
+  }
+
   if (normalized === "invalid email or password") {
     return "Неверный email или пароль.";
   }
@@ -182,6 +194,8 @@ export function AuthForm({
     form.confirmPassword.length > 0 &&
     form.password !== form.confirmPassword;
   const isOwnerInvite = invite?.role === "OWNER";
+  // A link handed out without a mailbox: the invitee names their own login.
+  const isOpenInvite = isInviteRegister && invite !== null && !invite.email;
 
   useEffect(() => {
     if (isRegister) {
@@ -413,6 +427,7 @@ export function AuthForm({
             <input
               name="name"
               autoComplete="name"
+              required={isOpenInvite}
               value={form.fullName}
               onChange={(event) =>
                 setForm((current) => ({
@@ -493,6 +508,12 @@ export function AuthForm({
           }
           required
         />
+        {isOpenInvite ? (
+          <span className="mt-1 block text-xs text-zinc-500">
+            Этот адрес станет вашим логином для входа. Используйте латинские
+            буквы.
+          </span>
+        ) : null}
       </label>
 
       <label className="block">

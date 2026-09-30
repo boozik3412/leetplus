@@ -30,9 +30,13 @@ import { AcceptUserInviteDto, LoginDto, RegisterDto } from './auth.dto';
 import { AuthenticatedUser, AuthTokenPayload } from './auth.types';
 import { resolveUserCapabilities } from './capabilities';
 import { EmailVerificationService } from './email-verification.service';
-import { IdentityEmailClaimService } from './identity-email-claim.service';
+import {
+  IdentityEmailClaimService,
+  type IdentityEmailClaimTransaction,
+} from './identity-email-claim.service';
 import { InitialOwnerInviteDeliveryGateService } from './initial-owner-invite-delivery-gate.service';
 import { PasswordService } from './password.service';
+import { isCanonicalIdentityEmail } from '../utilities/canonical-identity-email';
 
 type AuthResponse = {
   accessToken: string;
@@ -41,6 +45,8 @@ type AuthResponse = {
 
 const AUTH_TOKEN_EXPIRES_IN = '24h';
 const OPAQUE_INVITE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
+const INVITE_DELIVERY_EMAIL = 'EMAIL';
+const INVITE_DELIVERY_LINK = 'LINK';
 const tenantModuleEntitlementExecutionSelect = {
   module: true,
   readEnabled: true,
@@ -191,11 +197,19 @@ export class AuthService {
     const invite = await this.resolveActiveInvite(token);
     this.assertInviteAdmitted(invite);
     await this.assertInitialOwnerInviteDeliverySent(invite);
-    const identityClaimRevision = this.requireInviteIdentityClaimRevision(
-      invite.identityClaimRevision,
-    );
-    const email = this.resolveInviteEmail(invite.email, dto.email);
+    // A link without a bound mailbox lets the invitee choose their own login;
+    // its email claim is taken inside the acceptance transaction below.
+    const isOpenLink = invite.email === null;
+    const identityClaimRevision = isOpenLink
+      ? null
+      : this.requireInviteIdentityClaimRevision(invite.identityClaimRevision);
+    const email = isOpenLink
+      ? this.resolveOpenLinkEmail(dto.email)
+      : this.resolveInviteEmail(invite.email, dto.email);
     const fullName = this.resolveInviteFullName(invite.fullName, dto.fullName);
+    if (isOpenLink && !fullName) {
+      throw new BadRequestException('Укажите имя и фамилию');
+    }
     const password = dto.password;
     this.assertPassword(password);
     this.assertPasswordConfirmation(password, dto.confirmPassword);
@@ -219,12 +233,24 @@ export class AuthService {
       this.prisma,
       invite.tenantId,
       async (tx, identityTransaction) => {
-        await this.identityEmailClaim.assertInvite(identityTransaction, {
-          email,
-          tenantId: invite.tenantId,
-          subjectId: invite.id,
-          expectedRevision: identityClaimRevision,
-        });
+        const claim =
+          identityClaimRevision === null
+            ? await this.reserveOpenLinkEmail(
+                identityTransaction,
+                invite.tenantId,
+                email,
+              )
+            : await this.identityEmailClaim
+                .assertInvite(identityTransaction, {
+                  email,
+                  tenantId: invite.tenantId,
+                  subjectId: invite.id,
+                  expectedRevision: identityClaimRevision,
+                })
+                .then((assertion) => ({
+                  subjectId: invite.id,
+                  revision: assertion.revision,
+                }));
 
         const acceptedAt = new Date();
         const lockedTenants = await tx.$queryRaw<
@@ -287,7 +313,9 @@ export class AuthService {
             customRoleId: invite.customRoleId,
             accessScope: inviteAccessScope.mode,
             isActive: true,
-            emailVerifiedAt: new Date(),
+            // Only mail delivery proves the mailbox; a shared link does not.
+            emailVerifiedAt:
+              invite.deliveryMode === INVITE_DELIVERY_EMAIL ? new Date() : null,
             identityClaimRevision: null,
           },
         });
@@ -386,8 +414,8 @@ export class AuthService {
           await this.identityEmailClaim.transitionInvite(identityTransaction, {
             email,
             tenantId: invite.tenantId,
-            expectedSubjectId: invite.id,
-            expectedRevision: identityClaimRevision,
+            expectedSubjectId: claim.subjectId,
+            expectedRevision: claim.revision,
             nextClaimType: IdentityEmailClaimType.USER,
             nextSubjectId: userId,
           });
@@ -746,7 +774,7 @@ export class AuthService {
       throw new NotFoundException('Ссылка-приглашение не найдена');
     }
 
-    if (!invite.email) {
+    if (!invite.email && invite.deliveryMode !== INVITE_DELIVERY_LINK) {
       throw new BadRequestException(
         'Приглашение не привязано к email и должно быть перевыпущено',
       );
@@ -842,6 +870,57 @@ export class AuthService {
     }
 
     return email;
+  }
+
+  private resolveOpenLinkEmail(submittedEmail: unknown): string {
+    const email = this.normalizeEmail(submittedEmail);
+    if (!email) {
+      throw new BadRequestException(
+        'Укажите email: он будет вашим логином для входа',
+      );
+    }
+
+    this.assertEmail(email);
+    if (!isCanonicalIdentityEmail(email)) {
+      throw new BadRequestException(
+        'Укажите email латинскими буквами, например name@club.ru',
+      );
+    }
+
+    return email;
+  }
+
+  private async reserveOpenLinkEmail(
+    identityTransaction: IdentityEmailClaimTransaction,
+    tenantId: string,
+    email: string,
+  ): Promise<{ subjectId: string; revision: number }> {
+    const subjectId = randomUUID();
+    let reservation: Awaited<
+      ReturnType<IdentityEmailClaimService['reserveInvite']>
+    >;
+    try {
+      reservation = await this.identityEmailClaim.reserveInvite(
+        identityTransaction,
+        { email, tenantId, subjectId },
+      );
+    } catch (error) {
+      if (
+        error instanceof ConflictException &&
+        (error.getResponse() as { reasonCode?: unknown }).reasonCode ===
+          'IDENTITY_EMAIL_UNAVAILABLE'
+      ) {
+        throw new ConflictException(
+          'Пользователь с таким email уже существует',
+        );
+      }
+      throw error;
+    }
+    if (reservation.decision !== 'CREATED') {
+      throw new ConflictException('Пользователь с таким email уже существует');
+    }
+
+    return { subjectId, revision: reservation.revision };
   }
 
   private resolveInviteFullName(

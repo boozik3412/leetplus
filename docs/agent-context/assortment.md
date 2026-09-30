@@ -15,6 +15,7 @@ invariants remain mandatory for their scope. Test ports and past receipts are hi
 - Отсутствующие данные остаются `null`/`UNKNOWN`, известный ноль остаётся нулём, а `PARTIAL` не становится точным итогом; Web показывает причину и coverage у конкретной карточки.
 - Cutoff запроса — `selectedAssortmentAsOf`/report `asOf`; `inventory.asOf` — отдельная дата наблюдения остатка и не переносится как cutoff.
 - `DashboardService` добавляет summary в `GET /dashboard/summary`, а `ReportsService` использует те же row sets для `operations`, `inventory-turnover` и `replenishment` вместе с scoped rows и write-off details.
+- `/assortment/dashboard` (`DashboardService.getSummary`) buckets period facts by the club-local day via `common/club-time.ts` (`onClubDays`: wall-clock shift + ±14 h query margin; freshness uses the stored instant via `source`). Rolling "last N days" windows (demand, active SKU, `AssortmentHealthLoaderService`, reports) still use UTC days.
 - Web transport находится в `apps/web/src/lib/dashboard-summary.ts` и `apps/web/src/lib/reports.ts`; `/assortment/dashboard`, `/reports` и table pages сохраняют `from`, `to`, repeated `storeIds`/`categoryIds`, `asOf`, `noSalesDays` и subset URL.
 - Карточки ассортимента кликабельны: OOS/low-stock/no-sales ведут в отчёты, turnover/excess — в inventory-turnover, а списания — в movement table с `subset=write-offs`.
 - OOS `grossProfitAtRisk` хранит дневную/периодную оценку и cost basis: известная себестоимость позволяет расчёт, sale-price valuation не становится cost, отсутствие подтверждения остаётся null.

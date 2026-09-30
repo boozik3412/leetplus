@@ -114,7 +114,23 @@ query-параметры списка: `gameStatus`, `churnRisk`, `rfm`, `consen
 `POST /guests/crm/tasks` и `POST /guests/crm/contact-events`
 (`manage_communications`, NETWORK scope).
 
-## 7. Известные ограничения и следующие шаги
+## 7. Производительность (30.09.2026)
+
+Первая версия считала сводку и список по каждому запросу отдельно: все гости сети (53 тыс. на основной сети), все сессии окна, вся история продаж и **все транзакции сети** целиком в память Node. На проде это давало около 30 с на `/guests`, 120–166 % CPU и упор в потолок кучи V8 (2096 МБ в контейнере с лимитом 6 ГиБ).
+
+Сейчас:
+
+- **Один расчёт на всё.** `GuestsService.loadAnalysis` строит строки гостей, агрегаты, тренд, тепловую карту, прогноз, качество данных и сравнение с прошлым периодом за один проход. Сводка, список, экспорт и снимок группы берут его из `GuestAnalyticsCache`: параллельные запросы делят один расчёт (single-flight), результат свежий 2 минуты, до 60 минут отдаётся сразу с фоновым обновлением, не больше двух записей (около 110 МБ каждая), не больше одного расчёта одновременно.
+- **Сброс кэша.** `updateGuestCrm`, `createGuestCrmLead` и `updateGuestCrmLead` сбрасывают кэш сети; игровые данные и синк Langame обновляются по TTL. Поиск (`search`) кэш не использует. В ответе сводки `dataAsOf` показывает время расчёта.
+- **Меньше данных из базы.** LTV считается в SQL (`loadLifetimeRevenueRows`, двухуровневая группировка по гостю и дню) вместо загрузки всей истории; транзакции без даты не читаются; для больших сетей остатки бонусов и игровые профили читаются одним запросом на сеть вместо запроса на каждую тысячу гостей; независимые чтения стартуют вместе.
+- **ПДн только для выдаваемых строк.** В кэше строки с маскированными именами, расшифровка (`withPii`) выполняется для страницы списка, топ-списков, гостей в сигналах и строк экспорта. Порядок при равных значениях сортировки теперь детерминированный: по маске имени, затем по id.
+- **Цикл событий.** Тяжёлые циклы отдают управление (`yieldToEventLoop`), максимальная блокировка API при расчёте около 0,4 с вместо 1,9 с.
+
+Замер на синтетической базе в масштабе прода (53,5 тыс. гостей, 145 тыс. сессий, 293 тыс. транзакций): страница `/guests` холодная 18,1 с → 5,8 с, повторная 0,26 с, другая страница списка из кэша 0,07 с. Идентичность результатов проверена сравнением всех 53 482 строк гостей, сводки, CSV и карточек со старой версией на одних данных (сценарии: по умолчанию, без права геймификации, по клубу, по группе; в том числе с датированными транзакциями). Стенд: встроенный PostgreSQL 16 и `prisma db push`, скрипты в scratchpad сессии.
+
+**Данные, которые стоит починить отдельно.** У всех транзакций основной сети `GuestTransaction.happenedAt` и `type` пустые: Langame в `/transactions/list` отдаёт `date_update` и `balance`, а синк ждёт `date`/`amount` (см. `syncTransactions`), причём сумма берётся из `balance`. Поэтому "Пополнение баланса" в KPI гостей сейчас всегда 0, а LTV и выручка складываются только из продаж бара.
+
+## 8. Известные ограничения и следующие шаги
 
 - Heatmap, поведение и сегменты считаются в UTC; клубные часовые пояса не
   применяются.
@@ -124,10 +140,10 @@ query-параметры списка: `gameStatus`, `churnRisk`, `rfm`, `consen
 - Эффект игры — сравнение когорт без контрольной группы; причинность не
   заявляется.
 
-## 8. Проверка
+## 9. Проверка
 
 ```bash
-pnpm --filter api exec jest --runInBand --runTestsByPath src/guests/guest-insights.spec.ts src/guests/guest-game-insights.service.spec.ts src/guests/guests.service.spec.ts src/tenancy/pilot-crm-communications-boundary.spec.ts src/runtime/runtime-boundary.spec.ts
+pnpm --filter api exec jest --runInBand --runTestsByPath src/guests/guest-insights.spec.ts src/guests/guest-game-insights.service.spec.ts src/guests/guest-analytics-cache.spec.ts src/guests/guests.analysis.service.spec.ts src/guests/guests.service.spec.ts src/tenancy/pilot-crm-communications-boundary.spec.ts src/runtime/runtime-boundary.spec.ts
 pnpm --filter api exec tsc --noEmit -p tsconfig.build.json
 pnpm --filter web test:guest-insights
 pnpm --filter web typecheck

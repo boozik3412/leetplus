@@ -1521,6 +1521,20 @@ Support-функциональность следует тем же трём г�
   `no-store`;
 - guest process пишет только support-owned tables и не импортирует corporate
   auth, staff tasks, notifications или outbound transports;
+- переписка гостя с поддержкой (`/guest-portal/session/support/tickets*`:
+  список, обращение, прочтение, сообщение, оценка) требует guest JWT и
+  фильтрует каждое чтение и запись по exact tenant + `GuestGameProfile`.
+  Гостю возвращаются только описание, комментарии с событием
+  `PUBLIC_REPLY_SENT` и его собственные сообщения, подписанные
+  «Поддержка LeetPlus»/«Вы»: внутренние заметки, identity сотрудника,
+  audit metadata и вложения в guest contour не попадают. Web BFF
+  `/api/guest-support/tickets*` проверяет номер `LP-BUG-XXXXXXXX`,
+  idempotency key и allowlist JSON-полей, а ответ API заново проецирует по
+  схеме и отдаёт `no-store`. Публикация ответа гостю
+  (`visibility: PUBLIC`, `POST …/:id/resolve-with-reply`) доступна только в
+  corporate contour под теми же guards, что и очередь. Corporate код
+  использует чистые helpers из `guest-portal/guest-support-thread.ts`;
+  обратного импорта нет. Схема и миграции не меняются;
 - вложение ограничено одним JPG/PNG/WebP до 5 MiB, проверяется по bytes,
   очищается от metadata и выдаётся только как private attachment;
 - runtime flag `GUEST_BUG_REPORTING_MODE=OFF|LIVE` fail-closed и по умолчанию

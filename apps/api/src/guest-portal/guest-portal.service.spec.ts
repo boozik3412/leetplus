@@ -12545,7 +12545,7 @@ describe('GuestPortalService', () => {
           storeIds: ['store-1'],
           premiumEnabled: false,
           periodFrom: new Date('2026-07-09T00:00:00.000Z'),
-          periodTo: new Date('2026-10-01T00:00:00.000Z'),
+          periodTo: new Date('2099-10-01T00:00:00.000Z'),
           levels: [
             {
               level: 1,

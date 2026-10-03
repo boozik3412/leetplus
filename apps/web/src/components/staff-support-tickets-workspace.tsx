@@ -8,7 +8,7 @@ import {
   setDesktopNotices,
   useDesktopNoticeState,
 } from '@/components/support-queue-watch';
-import type { StaffSupportTicket, StaffSupportTicketsReport, SupportTicketStatus, TicketUser } from '@/lib/staff-support-tickets';
+import type { StaffSupportTicket, StaffSupportTicketsReport, SupportTicketCommentVisibility, SupportTicketStatus, TicketUser } from '@/lib/staff-support-tickets';
 import { supportTicketTopicLabels as topicLabels } from '@/lib/support-ticket-labels';
 
 const statusLabels: Record<SupportTicketStatus, string> = {
@@ -30,6 +30,11 @@ type WorkspaceProps = {
 };
 
 type ImagePreview = { src: string; label: string };
+type ComposerMode = 'INTERNAL' | 'PUBLIC';
+
+const guestAuthorLabel = 'Поддержка LeetPlus';
+// Events written by the guest or by the system on the guest's behalf.
+const guestActions = new Set(['CREATED_BY_GUEST', 'GUEST_MESSAGE_ADDED', 'GUEST_READ', 'GUEST_FEEDBACK', 'REOPENED_BY_GUEST']);
 
 export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, pagePath, currentUserId, now }: WorkspaceProps) {
   const router = useRouter();
@@ -37,6 +42,7 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
   const [busyTicketId, setBusyTicketId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [comments, setComments] = useState<Record<string, string>>({});
+  const [composerModes, setComposerModes] = useState<Record<string, ComposerMode>>({});
   const [preview, setPreview] = useState<ImagePreview | null>(null);
   const nowMs = new Date(now).getTime();
   const namesById = useMemo(() => collectUserNames(report), [report]);
@@ -83,7 +89,23 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
     event.preventDefault();
     const body = comments[ticket.id]?.trim() ?? '';
     if (!body) return;
-    if (await send(ticket, '/comments', 'POST', { body }, 'Не удалось добавить комментарий.')) {
+    const visibility = composerModes[ticket.id] ?? 'INTERNAL';
+    const sent = await send(
+      ticket,
+      '/comments',
+      'POST',
+      { body, visibility },
+      visibility === 'PUBLIC' ? 'Не удалось отправить ответ гостю.' : 'Не удалось добавить заметку.',
+    );
+    if (sent) {
+      setComments((current) => ({ ...current, [ticket.id]: '' }));
+    }
+  }
+
+  async function resolveWithReply(ticket: StaffSupportTicket) {
+    const body = comments[ticket.id]?.trim() ?? '';
+    if (!body) return;
+    if (await send(ticket, '/resolve-with-reply', 'POST', { body }, 'Не удалось ответить и решить обращение.')) {
       setComments((current) => ({ ...current, [ticket.id]: '' }));
     }
   }
@@ -102,18 +124,19 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
     <div className="space-y-5">
       <DesktopNoticeToggle />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
         <Metric label="В очереди" value={formatCount(report.summary.active)} tone="cyan" href={filterHref({ status: 'active' })} selected={isFilter('active')} />
         <Metric label="Новые, не взяты" value={formatCount(report.summary.NEW)} tone="amber" href={filterHref({ status: 'NEW' })} selected={isFilter('NEW')} />
         <Metric label="Без ответственного" value={formatCount(report.summary.unassigned)} tone="amber" href={filterHref({ status: 'active', assignedToUserId: 'none' })} selected={isFilter('active', 'none')} />
         <Metric label="Мои" value={formatCount(report.summary.mine)} tone="emerald" href={filterHref({ status: 'active', assignedToUserId: 'me' })} selected={isFilter('active', 'me')} />
+        <Metric label="Ждут ответа" value={formatCount(report.summary.awaitingStaff ?? 0)} tone={report.summary.awaitingStaff ? 'red' : 'zinc'} href={filterHref({ status: 'awaiting' })} selected={isFilter('awaiting')} />
         <Metric label="Дольше всех ждёт" value={oldestWaitMs === null ? '—' : formatDuration(oldestWaitMs)} tone={waitTone(oldestWaitMs)} href={filterHref({ status: 'active' })} selected={false} />
         <Metric label="Всего" value={formatCount(report.summary.total)} tone="zinc" href={filterHref({ status: 'all' })} selected={isFilter('all')} />
       </section>
 
       <form className="grid gap-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950 md:grid-cols-3 xl:grid-cols-6">
         {report.scope === 'PLATFORM' ? <FilterSelect name="tenantId" label="Сеть" defaultValue={report.filters.tenantId ?? ''} options={[["", 'Все сети'], ...report.tenants.map((tenant) => [tenant.id, tenant.name] as const)]} /> : null}
-        <FilterSelect name="status" label="Статус" defaultValue={report.filters.status} options={[['active', 'В очереди (новые и в работе)'], ['all', 'Все статусы'], ...report.statuses.map((value) => [value, statusLabels[value]] as const)]} />
+        <FilterSelect name="status" label="Статус" defaultValue={report.filters.status} options={[['active', 'В очереди (новые и в работе)'], ['awaiting', 'Ждут ответа гостю'], ['all', 'Все статусы'], ...report.statuses.map((value) => [value, statusLabels[value]] as const)]} />
         <FilterSelect name="topic" label="Тема" defaultValue={report.filters.topic} options={[['all', 'Все темы'], ...report.topics.map((value) => [value, topicLabels[value]] as const)]} />
         <FilterSelect name="assignedToUserId" label="Ответственный" defaultValue={report.filters.assignedToUserId ?? ''} options={[["", 'Все'], ['none', 'Без ответственного'], ['me', 'Назначены на меня'], ...report.users.map((user) => [user.id, userLabel(user)] as const)]} />
         <label className="space-y-1 text-xs font-bold uppercase text-zinc-500">
@@ -135,7 +158,7 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
       <section className="space-y-3">
         {report.rows.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-800">
-            {report.filters.status === 'active' && !report.filters.search ? 'Очередь пуста: все обращения обработаны.' : 'По выбранным фильтрам обращений нет.'}
+            {report.filters.status === 'active' && !report.filters.search ? 'Очередь пуста: все обращения обработаны.' : report.filters.status === 'awaiting' && !report.filters.search ? 'Все гости получили ответ.' : 'По выбранным фильтрам обращений нет.'}
           </div>
         ) : report.rows.map((ticket) => {
           const isBusy = isPending || busyTicketId === ticket.id;
@@ -153,6 +176,7 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
                     <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">{topicLabels[ticket.topic]}</span>
                     <span className="font-mono text-xs font-bold text-cyan-700 dark:text-cyan-300">{ticket.ticketNumber}</span>
                     <AgeBadge ticket={ticket} nowMs={nowMs} />
+                    <GuestThreadBadges ticket={ticket} />
                   </div>
                   <h2 className="mt-3 text-lg font-semibold">{ticket.profile.fullName ?? ticket.profile.displayName ?? ticket.profile.contactMasked ?? 'Гость игрового модуля'}</h2>
                   <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-600 dark:text-zinc-300">{ticket.description}</p>
@@ -217,14 +241,27 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
               <div className="border-t border-zinc-200 bg-zinc-50/70 px-5 py-4 dark:border-zinc-800 dark:bg-zinc-900/30">
                 {ticket.comments.length ? (
                   <div className="mb-3 space-y-2">
-                    {ticket.comments.map((comment) => <p key={comment.id} className="whitespace-pre-wrap break-words text-sm"><span className="font-semibold">{comment.authorUser ? userLabel(comment.authorUser) : 'Система'}:</span> <span className="text-zinc-600 dark:text-zinc-300">{comment.body}</span> <time className="ml-2 text-xs text-zinc-400">{formatDateTime(comment.createdAt)}</time></p>)}
+                    {ticket.comments.map((comment) => (
+                      <p key={comment.id} className={`whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm ${commentTones[comment.visibility ?? 'INTERNAL']}`}>
+                        <CommentBadge visibility={comment.visibility ?? 'INTERNAL'} />
+                        <span className="font-semibold">{comment.visibility === 'GUEST' ? 'Гость' : comment.authorUser ? userLabel(comment.authorUser) : 'Система'}:</span>{' '}
+                        <span className="text-zinc-600 dark:text-zinc-300">{comment.body}</span>
+                        <time className="ml-2 text-xs text-zinc-400">{formatDateTime(comment.createdAt)}</time>
+                      </p>
+                    ))}
                   </div>
                 ) : null}
                 {canManage ? (
-                  <form onSubmit={(event) => addComment(event, ticket)} className="flex flex-col gap-2 sm:flex-row">
-                    <input value={comments[ticket.id] ?? ''} onChange={(event) => setComments((current) => ({ ...current, [ticket.id]: event.target.value }))} maxLength={2000} placeholder="Внутренний комментарий: что проверили, что решили" className="h-10 flex-1 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950" />
-                    <button type="submit" disabled={isBusy || !(comments[ticket.id]?.trim())} className="h-10 rounded-lg bg-cyan-600 px-4 text-sm font-semibold text-white disabled:opacity-50">Добавить</button>
-                  </form>
+                  <TicketComposer
+                    mode={composerModes[ticket.id] ?? 'INTERNAL'}
+                    value={comments[ticket.id] ?? ''}
+                    busy={isBusy}
+                    canResolve={isOpen}
+                    onModeChange={(mode) => setComposerModes((current) => ({ ...current, [ticket.id]: mode }))}
+                    onChange={(value) => setComments((current) => ({ ...current, [ticket.id]: value }))}
+                    onSubmit={(event) => addComment(event, ticket)}
+                    onResolve={() => void resolveWithReply(ticket)}
+                  />
                 ) : null}
                 <TicketHistory ticket={ticket} namesById={namesById} />
               </div>
@@ -253,6 +290,110 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
   );
 }
 
+const commentTones: Record<SupportTicketCommentVisibility, string> = {
+  INTERNAL: 'bg-transparent',
+  PUBLIC: 'border border-cyan-500/30 bg-cyan-500/5',
+  GUEST: 'border border-amber-500/30 bg-amber-500/5',
+};
+
+function CommentBadge({ visibility }: { visibility: SupportTicketCommentVisibility }) {
+  const badge = {
+    INTERNAL: ['Заметка', 'bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'],
+    PUBLIC: ['Гостю', 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300'],
+    GUEST: ['От гостя', 'bg-amber-500/15 text-amber-700 dark:text-amber-300'],
+  }[visibility];
+  return <span className={`mr-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${badge[1]}`}>{badge[0]}</span>;
+}
+
+function GuestThreadBadges({ ticket }: { ticket: StaffSupportTicket }) {
+  const thread = ticket.guestThread;
+  if (!thread) return null;
+  const badges: Array<[string, string]> = [];
+  if (thread.awaitingStaff && (ticket.status === 'NEW' || ticket.status === 'IN_PROGRESS')) {
+    badges.push(['Ждёт ответа', 'bg-red-500/10 text-red-600 dark:text-red-300']);
+  }
+  if (thread.feedback) {
+    badges.push(
+      thread.feedback.value === 'HELPED'
+        ? ['Гость: помогло', 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300']
+        : ['Гость: не помогло', 'bg-red-500/10 text-red-600 dark:text-red-300'],
+    );
+  }
+  if (thread.lastPublicReplyAt) {
+    badges.push([thread.unreadByGuest ? 'Ответ не прочитан' : 'Ответ прочитан', 'bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400']);
+  }
+  return (
+    <>
+      {badges.map(([label, tone]) => (
+        <span key={label} className={`rounded-full px-2.5 py-1 text-xs font-semibold ${tone}`}>{label}</span>
+      ))}
+    </>
+  );
+}
+
+function TicketComposer({
+  mode,
+  value,
+  busy,
+  canResolve,
+  onModeChange,
+  onChange,
+  onSubmit,
+  onResolve,
+}: {
+  mode: ComposerMode;
+  value: string;
+  busy: boolean;
+  canResolve: boolean;
+  onModeChange: (mode: ComposerMode) => void;
+  onChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onResolve: () => void;
+}) {
+  const empty = !value.trim();
+  const tab = (target: ComposerMode, label: string) => (
+    <button
+      type="button"
+      aria-pressed={mode === target}
+      onClick={() => onModeChange(target)}
+      className={`h-8 rounded-md px-3 text-xs font-semibold transition ${mode === target ? 'bg-white text-zinc-950 shadow-sm dark:bg-zinc-800 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'}`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <form onSubmit={onSubmit} className="space-y-2">
+      <div className="inline-flex rounded-lg bg-zinc-200/70 p-1 dark:bg-zinc-900">
+        {tab('INTERNAL', 'Заметка для команды')}
+        {tab('PUBLIC', 'Ответ гостю')}
+      </div>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        maxLength={2000}
+        rows={mode === 'PUBLIC' ? 3 : 2}
+        placeholder={mode === 'PUBLIC' ? 'Ответ гостю: что случилось и что мы сделали' : 'Внутренняя заметка: что проверили, что решили'}
+        className={`w-full rounded-lg border bg-white px-3 py-2 text-sm dark:bg-zinc-950 ${mode === 'PUBLIC' ? 'border-cyan-500/50' : 'border-zinc-200 dark:border-zinc-700'}`}
+      />
+      {mode === 'PUBLIC' ? (
+        <p className="text-xs text-cyan-700 dark:text-cyan-300">Гость увидит ответ в игровом модуле от имени «{guestAuthorLabel}». Имя сотрудника не показывается.</p>
+      ) : (
+        <p className="text-xs text-zinc-500">Заметку видят только сотрудники.</p>
+      )}
+      <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+        {mode === 'PUBLIC' && canResolve ? (
+          <button type="button" disabled={busy || empty} onClick={onResolve} className="h-10 rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 disabled:opacity-50">
+            Ответить и решить
+          </button>
+        ) : null}
+        <button type="submit" disabled={busy || empty} className="h-10 rounded-lg bg-cyan-600 px-4 text-sm font-semibold text-white disabled:opacity-50">
+          {mode === 'PUBLIC' ? 'Отправить гостю' : 'Добавить заметку'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function DesktopNoticeToggle() {
   const state = useDesktopNoticeState();
   if (state === 'unsupported') return null;
@@ -276,7 +417,10 @@ function DesktopNoticeToggle() {
 
 function TicketHistory({ ticket, namesById }: { ticket: StaffSupportTicket; namesById: Map<string, string> }) {
   if (!ticket.auditEvents.length) return null;
-  const events = [...ticket.auditEvents].reverse();
+  const events = [...ticket.auditEvents]
+    .reverse()
+    // A guest reply is shown once, by its PUBLIC_REPLY_SENT event.
+    .filter((event) => !(event.action === 'COMMENT_ADDED' && isPublicComment(event.metadata)));
   return (
     <details className="mt-3 text-sm">
       <summary className="cursor-pointer select-none text-xs font-bold uppercase text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">История · {events.length}{events.length >= 20 ? ' последних' : ''}</summary>
@@ -300,14 +444,26 @@ function describeAuditEvent(event: StaffSupportTicket['auditEvents'][number], na
   const metadata = event.metadata && typeof event.metadata === 'object' ? (event.metadata as Record<string, unknown>) : {};
   const actor = event.actorUser
     ? `${userLabel(event.actorUser)}${metadata.platformScope === true ? ' (LeetPlus)' : ''}`
-    : event.action === 'CREATED_BY_GUEST' ? 'Гость' : 'Система';
+    : guestActions.has(event.action) ? 'Гость' : 'Система';
   const nameOf = (value: unknown) => (typeof value === 'string' ? namesById.get(value) ?? 'сотрудник' : 'не назначен');
 
   switch (event.action) {
     case 'CREATED_BY_GUEST':
       return { actor, text: metadata.hasAttachment === true ? 'обращение отправлено со скриншотом' : 'обращение отправлено' };
     case 'COMMENT_ADDED':
-      return { actor, text: 'добавлен комментарий' };
+      return { actor, text: 'добавлена заметка' };
+    case 'PUBLIC_REPLY_SENT':
+      return { actor, text: 'ответил гостю' };
+    case 'GUEST_MESSAGE_ADDED':
+      return { actor, text: 'написал в обращение' };
+    case 'GUEST_READ':
+      return { actor, text: 'прочитал ответ' };
+    case 'GUEST_FEEDBACK':
+      return { actor, text: metadata.value === 'HELPED' ? 'отметил, что ответ помог' : 'отметил, что ответ не помог' };
+    case 'REOPENED_BY_GUEST':
+      return { actor, text: 'обращение снова открыто' };
+    case 'AUTO_CLOSED':
+      return { actor, text: 'закрыто автоматически: гость не ответил 7 дней после решения' };
     case 'CLOSED_WITH_COMMENT':
       return { actor, text: 'закрыто с комментарием' };
     case 'UPDATED_BY_SUPPORT': {
@@ -362,7 +518,11 @@ function isStatus(value: unknown): value is SupportTicketStatus {
 }
 
 function isQueueFilter(status: string) {
-  return status === 'active' || status === 'NEW' || status === 'IN_PROGRESS';
+  return status === 'active' || status === 'awaiting' || status === 'NEW' || status === 'IN_PROGRESS';
+}
+
+function isPublicComment(metadata: unknown) {
+  return Boolean(metadata && typeof metadata === 'object' && (metadata as Record<string, unknown>).visibility === 'PUBLIC');
 }
 
 function AgeBadge({ ticket, nowMs }: { ticket: StaffSupportTicket; nowMs: number }) {

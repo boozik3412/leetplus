@@ -18,6 +18,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   SupportTicketsService,
   type SupportTicketCommentDto,
+  type SupportTicketResolveWithReplyDto,
   type SupportTicketsQuery,
   type SupportTicketUpdateDto,
   type SupportTicketCloseWithCommentDto,
@@ -67,6 +68,15 @@ export class PlatformSupportTicketsController {
     @Body() dto: SupportTicketCloseWithCommentDto,
   ) {
     return this.service.closePlatformTicketWithComment(user, id, dto);
+  }
+
+  @Post(':id/resolve-with-reply')
+  resolveWithReply(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: SupportTicketResolveWithReplyDto,
+  ) {
+    return this.service.resolvePlatformTicketWithReply(user, id, dto);
   }
 
   @Get(':id/attachments/:attachmentId')

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import type { GuestPortalGameSummary } from "@/lib/guest-portal";
+import { GUEST_SUPPORT_TICKETS_CHANGED_EVENT } from "@/lib/guest-support-tickets";
 import styles from "./guest-bug-report.module.css";
 
 const MIN_DESCRIPTION_LENGTH = 20;
@@ -172,6 +173,7 @@ export function GuestBugReportButton({
         ticketNumber: payload.ticketNumber,
         createdAt: payload.createdAt,
       });
+      window.dispatchEvent(new Event(GUEST_SUPPORT_TICKETS_CHANGED_EVENT));
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -227,6 +229,10 @@ export function GuestBugReportButton({
                     <h2 id="guestBugReportTitle">Спасибо, мы всё получили</h2>
                     <p>Номер обращения</p>
                     <strong>{result.ticketNumber}</strong>
+                    <p className={styles.successHint}>
+                      Ответ придёт в раздел «Мои обращения» — кнопка рядом с
+                      этой.
+                    </p>
                     <button type="button" onClick={closeDialog}>
                       Понятно
                     </button>

@@ -39,6 +39,7 @@ import {
 } from "@/components/lootbox-prize-visual";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 import { GuestBugReportButton } from "@/components/guest-bug-report";
+import { GuestSupportTickets } from "@/components/guest-support-tickets";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
 type GameNextAction = GuestPortalGameSummary["nextActions"][number];
@@ -1324,9 +1325,12 @@ function GameModuleTopbar({ summary }: { summary: GuestPortalGameSummary }) {
 
         <div className="lp-club-header-actions">
           {summary.support?.bugReporting?.enabled ? (
-            <GuestBugReportButton
-              configuration={summary.support.bugReporting}
-            />
+            <>
+              <GuestSupportTickets />
+              <GuestBugReportButton
+                configuration={summary.support.bugReporting}
+              />
+            </>
           ) : null}
           <div
             className="lp-club-session-state"

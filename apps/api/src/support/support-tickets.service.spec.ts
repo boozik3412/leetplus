@@ -13,9 +13,14 @@ describe('SupportTicketsService tenant boundaries', () => {
       guestSupportAttachment: { findFirst: jest.fn() },
       guestSupportTicket: {
         findFirst: jest.fn(),
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         groupBy: jest.fn(),
         count: jest.fn().mockResolvedValue(0),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      guestSupportTicketAuditEvent: {
+        findMany: jest.fn().mockResolvedValue([]),
+        create: jest.fn().mockResolvedValue({}),
       },
       user: { findFirst: jest.fn(), findMany: jest.fn() },
       userRoleOverride: { findUnique: jest.fn(), findMany: jest.fn() },
@@ -291,9 +296,15 @@ describe('SupportTicketsService tenant boundaries', () => {
     });
     await service.getTenantTickets(actor, { status: 'RESOLVED' });
 
+    // Only the page queries are ordered; the auto-close sweep and the
+    // "awaiting reply" lookup are not.
     const calls = (
-      prisma.guestSupportTicket.findMany.mock.calls as Array<[unknown]>
-    ).map(([args]) => args);
+      prisma.guestSupportTicket.findMany.mock.calls as Array<
+        [{ orderBy?: unknown }]
+      >
+    )
+      .map(([args]) => args)
+      .filter((args) => args.orderBy);
     expect(calls[0]).toMatchObject({
       where: {
         tenantId: 'tenant-a',
@@ -383,6 +394,7 @@ describe('SupportTicketsService tenant boundaries', () => {
       active: 2,
       unassigned: 0,
       mine: 0,
+      awaitingStaff: 0,
       oldestActiveCreatedAt: '2026-09-28T09:00:00.000Z',
       latestNew: {
         id: 'ticket-new',

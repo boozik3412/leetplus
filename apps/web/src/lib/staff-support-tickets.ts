@@ -1,7 +1,14 @@
 import { getApiUrl, getAuthHeaders } from "./api";
 
 export type SupportTicketStatus = "NEW" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
-export type SupportTicketStatusFilter = SupportTicketStatus | "active" | "all";
+export type SupportTicketStatusFilter =
+  | SupportTicketStatus
+  | "active"
+  | "awaiting"
+  | "all";
+// INTERNAL notes stay with staff; PUBLIC replies are shown to the guest as
+// "Поддержка LeetPlus"; GUEST rows are the guest's own messages.
+export type SupportTicketCommentVisibility = "INTERNAL" | "PUBLIC" | "GUEST";
 export type SupportTicketTopic =
   | "GAME_MODULE"
   | "MISSIONS_AND_BATTLE_PASS"
@@ -52,7 +59,19 @@ export type StaffSupportTicket = {
     body: string;
     createdAt: string;
     authorUser: TicketUser | null;
+    visibility: SupportTicketCommentVisibility;
   }>;
+  guestThread: {
+    awaitingStaff: boolean;
+    unreadByGuest: boolean;
+    lastPublicReplyAt: string | null;
+    lastGuestReadAt: string | null;
+    feedback: {
+      value: "HELPED" | "NOT_HELPED";
+      comment: string | null;
+      at: string;
+    } | null;
+  };
   auditEvents: Array<{
     id: string;
     action: string;
@@ -85,6 +104,7 @@ export type StaffSupportTicketsReport = {
     total: number;
     unassigned: number;
     mine: number;
+    awaitingStaff: number;
     oldestActiveCreatedAt: string | null;
   };
   tenants: Array<{ id: string; name: string; slug: string }>;
@@ -101,6 +121,7 @@ export type SupportQueueSummary = {
   active: number;
   unassigned: number;
   mine: number;
+  awaitingStaff: number;
   oldestActiveCreatedAt: string | null;
   latestNew: {
     id: string;

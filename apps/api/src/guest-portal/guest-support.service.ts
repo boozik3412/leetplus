@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -7,9 +8,20 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
+import { GuestSupportTicketStatus, Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  SUPPORT_FEEDBACK_COMMENT_MAX_LENGTH,
+  SUPPORT_GUEST_MESSAGE_MAX_LENGTH,
+  SUPPORT_PUBLIC_AUTHOR_LABEL,
+  SUPPORT_THREAD_ACTION_LIST,
+  SUPPORT_THREAD_ACTIONS,
+  closeStaleResolvedSupportTickets,
+  summarizeSupportThread,
+  supportGuestTicketState,
+  type SupportGuestFeedbackValue,
+} from './guest-support-thread';
 
 export const GUEST_BUG_REPORT_MAX_BYTES = 5 * 1024 * 1024;
 export const GUEST_BUG_REPORT_MIN_DESCRIPTION_LENGTH = 20;
@@ -80,6 +92,70 @@ export type GuestBugReportResponse = {
   ticketNumber: string;
   createdAt: string;
 };
+
+export type GuestSupportTicketContext = {
+  tenantId: string;
+  profileId: string;
+};
+
+export type GuestSupportTicketListItem = {
+  ticketNumber: string;
+  topic: string;
+  topicLabel: string;
+  status: GuestSupportTicketStatus;
+  statusLabel: string;
+  createdAt: string;
+  lastActivityAt: string;
+  lastReplyAt: string | null;
+  unread: boolean;
+};
+
+export type GuestSupportTicketList = {
+  tickets: GuestSupportTicketListItem[];
+  unreadCount: number;
+};
+
+export type GuestSupportTicketThread = {
+  ticket: GuestSupportTicketListItem & {
+    canReply: boolean;
+    replyReopens: boolean;
+    canGiveFeedback: boolean;
+    feedback: { value: SupportGuestFeedbackValue; at: string } | null;
+  };
+  messages: Array<{
+    id: string;
+    author: 'GUEST' | 'SUPPORT';
+    authorLabel: string;
+    body: string;
+    createdAt: string;
+  }>;
+};
+
+type GuestThreadEvent = {
+  action: string;
+  metadata: Prisma.JsonValue | null;
+  createdAt: Date;
+};
+
+const GUEST_SUPPORT_TICKET_NUMBER = /^LP-BUG-[0-9A-F]{8}$/;
+const GUEST_MESSAGES_PER_HOUR = 10;
+const GUEST_MESSAGES_PER_DAY = 30;
+const guestThreadTicketSelect = {
+  id: true,
+  tenantId: true,
+  ticketNumber: true,
+  topic: true,
+  description: true,
+  status: true,
+  resolvedAt: true,
+  closedAt: true,
+  lastActivityAt: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.GuestSupportTicketSelect;
+type GuestThreadTicket = Prisma.GuestSupportTicketGetPayload<{
+  select: typeof guestThreadTicketSelect;
+}>;
 
 @Injectable()
 export class GuestSupportService {
@@ -260,6 +336,483 @@ export class GuestSupportService {
     throw new ServiceUnavailableException(
       'Не удалось зарегистрировать обращение. Повторите попытку.',
     );
+  }
+
+  async listTickets(
+    context: GuestSupportTicketContext,
+  ): Promise<GuestSupportTicketList> {
+    this.assertTicketsAvailable();
+    const now = new Date();
+    await closeStaleResolvedSupportTickets(this.prisma, context, now);
+    const tickets = await this.prisma.guestSupportTicket.findMany({
+      where: { tenantId: context.tenantId, profileId: context.profileId },
+      select: guestThreadTicketSelect,
+      orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }],
+      take: 30,
+    });
+    const events = await this.threadEvents(
+      this.prisma,
+      context.tenantId,
+      tickets.map((ticket) => ticket.id),
+    );
+    const items = tickets.map((ticket) =>
+      this.listItem(ticket, events.get(ticket.id) ?? [], now),
+    );
+    return {
+      tickets: items,
+      unreadCount: items.filter((item) => item.unread).length,
+    };
+  }
+
+  async getTicket(
+    context: GuestSupportTicketContext,
+    ticketNumber: unknown,
+  ): Promise<GuestSupportTicketThread> {
+    this.assertTicketsAvailable();
+    const now = new Date();
+    const ticket = await this.findGuestTicket(
+      this.prisma,
+      context,
+      ticketNumber,
+    );
+    const events =
+      (await this.threadEvents(this.prisma, context.tenantId, [ticket.id])).get(
+        ticket.id,
+      ) ?? [];
+    const thread = summarizeSupportThread(events);
+    const commentIds = [...thread.publicCommentIds, ...thread.guestCommentIds];
+    const comments = commentIds.length
+      ? await this.prisma.guestSupportTicketComment.findMany({
+          where: {
+            tenantId: context.tenantId,
+            ticketId: ticket.id,
+            id: { in: commentIds },
+          },
+          select: { id: true, body: true, createdAt: true },
+        })
+      : [];
+    const state = supportGuestTicketState(ticket, thread, now);
+
+    return {
+      ticket: {
+        ...this.listItem(ticket, events, now),
+        canReply: state.canReply,
+        replyReopens: state.replyReopens,
+        canGiveFeedback: state.canGiveFeedback,
+        feedback: thread.feedback
+          ? {
+              value: thread.feedback.value,
+              at: thread.feedback.at.toISOString(),
+            }
+          : null,
+      },
+      messages: [
+        {
+          id: 'description',
+          author: 'GUEST' as const,
+          authorLabel: 'Вы',
+          body: ticket.description,
+          createdAt: ticket.createdAt.toISOString(),
+        },
+        ...comments
+          .map((comment) => {
+            const fromGuest = thread.guestCommentIds.has(comment.id);
+            return {
+              id: comment.id,
+              author: fromGuest ? ('GUEST' as const) : ('SUPPORT' as const),
+              authorLabel: fromGuest ? 'Вы' : SUPPORT_PUBLIC_AUTHOR_LABEL,
+              body: comment.body,
+              createdAt: comment.createdAt.toISOString(),
+            };
+          })
+          .sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
+      ],
+    };
+  }
+
+  async markTicketRead(
+    context: GuestSupportTicketContext,
+    ticketNumber: unknown,
+  ) {
+    this.assertTicketsAvailable();
+    const ticket = await this.findGuestTicket(
+      this.prisma,
+      context,
+      ticketNumber,
+    );
+    const events =
+      (await this.threadEvents(this.prisma, context.tenantId, [ticket.id])).get(
+        ticket.id,
+      ) ?? [];
+    if (summarizeSupportThread(events).unread) {
+      await this.prisma.guestSupportTicketAuditEvent.create({
+        data: {
+          tenantId: context.tenantId,
+          ticketId: ticket.id,
+          actorUserId: null,
+          action: SUPPORT_THREAD_ACTIONS.GUEST_READ,
+          metadata: { profileId: context.profileId },
+          createdAt: new Date(),
+        },
+      });
+    }
+    return { ok: true as const };
+  }
+
+  async addGuestMessage(
+    context: GuestSupportTicketContext,
+    ticketNumber: unknown,
+    input: { body?: unknown },
+    idempotencyKey: string | undefined,
+  ): Promise<GuestSupportTicketThread> {
+    this.assertTicketsAvailable();
+    const body = guestThreadText(
+      input.body,
+      2,
+      SUPPORT_GUEST_MESSAGE_MAX_LENGTH,
+      `Сообщение должно содержать от 2 до ${SUPPORT_GUEST_MESSAGE_MAX_LENGTH} символов.`,
+    );
+    const key = normalizeIdempotencyKey(idempotencyKey);
+
+    await this.withSerializableRetry(async (tx) => {
+      const now = new Date();
+      const ticket = await this.findGuestTicket(tx, context, ticketNumber);
+      const commentId = guestOperationUuid('guest-message', ticket.id, key);
+      const replay = await tx.guestSupportTicketComment.findUnique({
+        where: { id: commentId },
+        select: { id: true },
+      });
+      if (replay) {
+        return;
+      }
+      await this.assertGuestMessageLimits(tx, context, now);
+      const events =
+        (await this.threadEvents(tx, context.tenantId, [ticket.id])).get(
+          ticket.id,
+        ) ?? [];
+      const state = supportGuestTicketState(
+        ticket,
+        summarizeSupportThread(events),
+        now,
+      );
+      if (!state.canReply) {
+        throw new ConflictException(
+          'Обращение закрыто больше 7 дней назад. Если проблема повторилась, отправьте новое сообщение через «Сообщить о проблеме».',
+        );
+      }
+      await tx.guestSupportTicketComment.create({
+        data: {
+          id: commentId,
+          tenantId: context.tenantId,
+          ticketId: ticket.id,
+          authorUserId: null,
+          body,
+          createdAt: now,
+        },
+      });
+      await tx.guestSupportTicketAuditEvent.create({
+        data: {
+          tenantId: context.tenantId,
+          ticketId: ticket.id,
+          actorUserId: null,
+          action: SUPPORT_THREAD_ACTIONS.GUEST_MESSAGE,
+          metadata: { commentId, profileId: context.profileId },
+          createdAt: now,
+        },
+      });
+      await this.touchOrReopen(
+        tx,
+        ticket,
+        state.replyReopens,
+        'GUEST_MESSAGE',
+        now,
+      );
+    });
+
+    return this.getTicket(context, ticketNumber);
+  }
+
+  async giveFeedback(
+    context: GuestSupportTicketContext,
+    ticketNumber: unknown,
+    input: { value?: unknown; comment?: unknown },
+    idempotencyKey: string | undefined,
+  ): Promise<GuestSupportTicketThread> {
+    this.assertTicketsAvailable();
+    const value = input.value;
+    if (value !== 'HELPED' && value !== 'NOT_HELPED') {
+      throw new BadRequestException('Выберите, помог ли ответ.');
+    }
+    const rawComment =
+      typeof input.comment === 'string' ? input.comment.trim() : '';
+    const comment = rawComment
+      ? guestThreadText(
+          rawComment,
+          1,
+          SUPPORT_FEEDBACK_COMMENT_MAX_LENGTH,
+          `Комментарий должен быть не длиннее ${SUPPORT_FEEDBACK_COMMENT_MAX_LENGTH} символов.`,
+        )
+      : null;
+    const key = normalizeIdempotencyKey(idempotencyKey);
+
+    await this.withSerializableRetry(async (tx) => {
+      const now = new Date();
+      const ticket = await this.findGuestTicket(tx, context, ticketNumber);
+      const feedbackId = guestOperationUuid('guest-feedback', ticket.id, key);
+      const replay = await tx.guestSupportTicketAuditEvent.findUnique({
+        where: { id: feedbackId },
+        select: { id: true },
+      });
+      if (replay) {
+        return;
+      }
+      const events =
+        (await this.threadEvents(tx, context.tenantId, [ticket.id])).get(
+          ticket.id,
+        ) ?? [];
+      const state = supportGuestTicketState(
+        ticket,
+        summarizeSupportThread(events),
+        now,
+      );
+      if (!state.canGiveFeedback) {
+        throw new ConflictException(
+          'Оценить можно только решённое обращение, по которому ещё нет вашего ответа.',
+        );
+      }
+      let commentId: string | null = null;
+      if (comment) {
+        commentId = guestOperationUuid(
+          'guest-feedback-comment',
+          ticket.id,
+          key,
+        );
+        await tx.guestSupportTicketComment.create({
+          data: {
+            id: commentId,
+            tenantId: context.tenantId,
+            ticketId: ticket.id,
+            authorUserId: null,
+            body: comment,
+            createdAt: now,
+          },
+        });
+        await tx.guestSupportTicketAuditEvent.create({
+          data: {
+            tenantId: context.tenantId,
+            ticketId: ticket.id,
+            actorUserId: null,
+            action: SUPPORT_THREAD_ACTIONS.GUEST_MESSAGE,
+            metadata: { commentId, profileId: context.profileId },
+            createdAt: now,
+          },
+        });
+      }
+      const at = new Date(now.getTime() + 1);
+      await tx.guestSupportTicketAuditEvent.create({
+        data: {
+          id: feedbackId,
+          tenantId: context.tenantId,
+          ticketId: ticket.id,
+          actorUserId: null,
+          action: SUPPORT_THREAD_ACTIONS.GUEST_FEEDBACK,
+          metadata: {
+            value,
+            comment,
+            commentId,
+            profileId: context.profileId,
+            previousStatus: ticket.status,
+          },
+          createdAt: at,
+        },
+      });
+      if (value === 'NOT_HELPED') {
+        await this.touchOrReopen(tx, ticket, true, 'NOT_HELPED', at);
+      } else if (ticket.status === 'RESOLVED') {
+        const closed = await tx.guestSupportTicket.updateMany({
+          where: {
+            id: ticket.id,
+            tenantId: ticket.tenantId,
+            status: 'RESOLVED',
+            updatedAt: ticket.updatedAt,
+          },
+          data: { status: 'CLOSED', closedAt: at, lastActivityAt: at },
+        });
+        if (closed.count !== 1) {
+          throw new ConflictException(
+            'Обращение изменилось. Обновите страницу.',
+          );
+        }
+      }
+    });
+
+    return this.getTicket(context, ticketNumber);
+  }
+
+  private assertTicketsAvailable() {
+    if (!isGuestBugReportingLive(this.configService)) {
+      throw new NotFoundException('Раздел обращений недоступен.');
+    }
+  }
+
+  private async findGuestTicket(
+    db: Pick<Prisma.TransactionClient, 'guestSupportTicket'>,
+    context: GuestSupportTicketContext,
+    ticketNumber: unknown,
+  ): Promise<GuestThreadTicket> {
+    const number = typeof ticketNumber === 'string' ? ticketNumber.trim() : '';
+    const ticket = GUEST_SUPPORT_TICKET_NUMBER.test(number)
+      ? await db.guestSupportTicket.findFirst({
+          where: {
+            tenantId: context.tenantId,
+            profileId: context.profileId,
+            ticketNumber: number,
+          },
+          select: guestThreadTicketSelect,
+        })
+      : null;
+    if (!ticket) {
+      throw new NotFoundException('Обращение не найдено.');
+    }
+    return ticket;
+  }
+
+  private async threadEvents(
+    db: Pick<Prisma.TransactionClient, 'guestSupportTicketAuditEvent'>,
+    tenantId: string,
+    ticketIds: string[],
+  ) {
+    const grouped = new Map<string, GuestThreadEvent[]>();
+    if (!ticketIds.length) return grouped;
+    const rows = await db.guestSupportTicketAuditEvent.findMany({
+      where: {
+        tenantId,
+        ticketId: { in: ticketIds },
+        action: { in: [...SUPPORT_THREAD_ACTION_LIST] },
+      },
+      select: { ticketId: true, action: true, metadata: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    for (const row of rows) {
+      const list = grouped.get(row.ticketId) ?? [];
+      list.push(row);
+      grouped.set(row.ticketId, list);
+    }
+    return grouped;
+  }
+
+  private listItem(
+    ticket: GuestThreadTicket,
+    events: GuestThreadEvent[],
+    now: Date,
+  ): GuestSupportTicketListItem {
+    const thread = summarizeSupportThread(events);
+    const state = supportGuestTicketState(ticket, thread, now);
+    return {
+      ticketNumber: ticket.ticketNumber,
+      topic: ticket.topic,
+      topicLabel:
+        GUEST_BUG_REPORT_TOPIC_LABELS[ticket.topic as GuestBugReportTopic] ??
+        'Другое',
+      status: state.status,
+      statusLabel: state.statusLabel,
+      createdAt: ticket.createdAt.toISOString(),
+      lastActivityAt: ticket.lastActivityAt.toISOString(),
+      lastReplyAt: thread.lastPublicReplyAt?.toISOString() ?? null,
+      unread: thread.unread,
+    };
+  }
+
+  private async assertGuestMessageLimits(
+    tx: Prisma.TransactionClient,
+    context: GuestSupportTicketContext,
+    now: Date,
+  ) {
+    const messagesSince = (windowMs: number) =>
+      tx.guestSupportTicketAuditEvent.count({
+        where: {
+          tenantId: context.tenantId,
+          action: SUPPORT_THREAD_ACTIONS.GUEST_MESSAGE,
+          createdAt: { gte: new Date(now.getTime() - windowMs) },
+          ticket: { profileId: context.profileId },
+        },
+      });
+    if ((await messagesSince(oneHourMs)) >= GUEST_MESSAGES_PER_HOUR) {
+      throw new HttpException(
+        'Слишком много сообщений. Повторите попытку позднее.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    if ((await messagesSince(oneDayMs)) >= GUEST_MESSAGES_PER_DAY) {
+      throw new HttpException(
+        'Дневной лимит сообщений исчерпан. Повторите попытку завтра.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  // A guest reply or "did not help" on a finished ticket sends it back to the
+  // support queue as NEW; otherwise it only refreshes the activity time.
+  private async touchOrReopen(
+    tx: Prisma.TransactionClient,
+    ticket: GuestThreadTicket,
+    reopen: boolean,
+    reason: 'GUEST_MESSAGE' | 'NOT_HELPED',
+    now: Date,
+  ) {
+    const changed = await tx.guestSupportTicket.updateMany({
+      where: {
+        id: ticket.id,
+        tenantId: ticket.tenantId,
+        status: ticket.status,
+        updatedAt: ticket.updatedAt,
+      },
+      data: reopen
+        ? {
+            status: 'NEW',
+            resolvedAt: null,
+            closedAt: null,
+            lastActivityAt: now,
+          }
+        : { lastActivityAt: now },
+    });
+    if (changed.count !== 1) {
+      throw new ConflictException('Обращение изменилось. Обновите страницу.');
+    }
+    if (reopen) {
+      await tx.guestSupportTicketAuditEvent.create({
+        data: {
+          tenantId: ticket.tenantId,
+          ticketId: ticket.id,
+          actorUserId: null,
+          action: SUPPORT_THREAD_ACTIONS.REOPENED_BY_GUEST,
+          metadata: { previousStatus: ticket.status, status: 'NEW', reason },
+          createdAt: now,
+        },
+      });
+    }
+  }
+
+  private async withSerializableRetry(
+    work: (tx: Prisma.TransactionClient) => Promise<void>,
+  ) {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await this.prisma.$transaction(work, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        });
+        return;
+      } catch (error) {
+        if (
+          attempt < 2 &&
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          (error.code === 'P2034' || error.code === 'P2002')
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
   }
 }
 
@@ -599,4 +1152,24 @@ function invalidImage() {
   return new BadRequestException(
     'Файл повреждён или не является изображением.',
   );
+}
+
+function guestThreadText(
+  value: unknown,
+  min: number,
+  max: number,
+  message: string,
+) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (text.length < min || text.length > max || text.includes('\u0000')) {
+    throw new BadRequestException(message);
+  }
+  return text;
+}
+
+function guestOperationUuid(kind: string, ticketId: string, key: string) {
+  const hex = createHash('sha256')
+    .update(`${kind}:${ticketId}:${key}`)
+    .digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }

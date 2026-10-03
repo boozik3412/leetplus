@@ -549,6 +549,8 @@ const definitions: readonly ControllerDefinition[] = [
           'session',
           'session/game-missions',
           'session/game-summary',
+          'session/support/tickets',
+          'session/support/tickets/:ticketNumber',
         ],
       ],
       [
@@ -564,6 +566,9 @@ const definitions: readonly ControllerDefinition[] = [
           ':tenantSlug/:storeId/telegram-auth/status',
           'session/app-open',
           'session/support/bug-reports',
+          'session/support/tickets/:ticketNumber/read',
+          'session/support/tickets/:ticketNumber/messages',
+          'session/support/tickets/:ticketNumber/feedback',
           'session/completion-notifications/:notificationId/acknowledge',
           'session/reward-wallet/claim-all',
           'session/reward-wallet/items/:walletItemId/claim',
@@ -677,7 +682,7 @@ const definitions: readonly ControllerDefinition[] = [
     profile: 'NETWORK_VERIFIED',
     routes: [
       ['GET', ['', 'summary', ':id/attachments/:attachmentId']],
-      ['POST', [':id/comments']],
+      ['POST', [':id/comments', ':id/resolve-with-reply']],
       ['PATCH', [':id']],
     ],
   },

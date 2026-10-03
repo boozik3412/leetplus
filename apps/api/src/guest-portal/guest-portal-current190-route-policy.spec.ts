@@ -29,7 +29,7 @@ describe('GuestPortalCurrent190DormantRoutePolicy', () => {
       routeActivationAllowed: false,
       outboundAllowed: false,
       publicBootstrapAllowed: false,
-      inventoryCount: 32,
+      inventoryCount: 37,
       blockerCount: 3,
     });
   });

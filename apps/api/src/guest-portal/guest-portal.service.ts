@@ -67,6 +67,9 @@ import {
   type GuestBugReportInput,
   type GuestBugReportResponse,
   type GuestBugReportUploadFile,
+  type GuestSupportTicketContext,
+  type GuestSupportTicketList,
+  type GuestSupportTicketThread,
 } from './guest-support.service';
 import {
   evaluateGuestGameProgress,
@@ -4194,6 +4197,87 @@ export class GuestPortalService {
       input,
       file,
     );
+  }
+
+  async getSupportTickets(
+    authorization: string | undefined,
+  ): Promise<GuestSupportTicketList> {
+    const context = await this.guestSupportContext(
+      authorization,
+      GUEST_PORTAL_READ_REQUIREMENTS,
+    );
+    return this.guestSupportService.listTickets(context);
+  }
+
+  async getSupportTicket(
+    authorization: string | undefined,
+    ticketNumber: string,
+  ): Promise<GuestSupportTicketThread> {
+    const context = await this.guestSupportContext(
+      authorization,
+      GUEST_PORTAL_READ_REQUIREMENTS,
+    );
+    return this.guestSupportService.getTicket(context, ticketNumber);
+  }
+
+  async markSupportTicketRead(
+    authorization: string | undefined,
+    ticketNumber: string,
+  ) {
+    const context = await this.guestSupportContext(
+      authorization,
+      GUEST_PORTAL_WRITE_REQUIREMENTS,
+    );
+    return this.guestSupportService.markTicketRead(context, ticketNumber);
+  }
+
+  async addSupportTicketMessage(
+    authorization: string | undefined,
+    ticketNumber: string,
+    idempotencyKey: string | undefined,
+    dto: { body?: unknown },
+  ): Promise<GuestSupportTicketThread> {
+    const context = await this.guestSupportContext(
+      authorization,
+      GUEST_PORTAL_WRITE_REQUIREMENTS,
+    );
+    return this.guestSupportService.addGuestMessage(
+      context,
+      ticketNumber,
+      dto ?? {},
+      idempotencyKey,
+    );
+  }
+
+  async giveSupportTicketFeedback(
+    authorization: string | undefined,
+    ticketNumber: string,
+    idempotencyKey: string | undefined,
+    dto: { value?: unknown; comment?: unknown },
+  ): Promise<GuestSupportTicketThread> {
+    const context = await this.guestSupportContext(
+      authorization,
+      GUEST_PORTAL_WRITE_REQUIREMENTS,
+    );
+    return this.guestSupportService.giveFeedback(
+      context,
+      ticketNumber,
+      dto ?? {},
+      idempotencyKey,
+    );
+  }
+
+  // Tickets belong to the exact game profile of the verified guest session.
+  private async guestSupportContext(
+    authorization: string | undefined,
+    requirements: TenantExecutionRequirementInput,
+  ): Promise<GuestSupportTicketContext> {
+    const payload = await this.verifyGuestToken(authorization, requirements);
+    const profile = await this.findProfile(payload, payload.guestId ?? null);
+    if (!profile) {
+      throw new NotFoundException('Игровой профиль гостя не найден.');
+    }
+    return { tenantId: payload.tenantId, profileId: profile.id };
   }
 
   async getGameSummary(

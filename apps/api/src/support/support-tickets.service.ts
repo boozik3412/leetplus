@@ -16,6 +16,13 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { GUEST_BUG_REPORT_TOPICS } from '../guest-portal/guest-support.service';
+import {
+  SUPPORT_THREAD_ACTION_LIST,
+  SUPPORT_THREAD_ACTIONS,
+  closeStaleResolvedSupportTickets,
+  summarizeSupportThread,
+  type SupportThreadSummary,
+} from '../guest-portal/guest-support-thread';
 import { SecretEncryptionService } from '../integrations/secret-encryption.service';
 
 export const SUPPORT_TICKET_STATUSES = [
@@ -35,7 +42,12 @@ export const SUPPORT_TICKET_ACTIVE_STATUSES = [
   'IN_PROGRESS',
 ] as const satisfies readonly SupportTicketStatus[];
 
-export type SupportTicketStatusFilter = SupportTicketStatus | 'active' | 'all';
+// 'awaiting' = active tickets where the guest spoke last.
+export type SupportTicketStatusFilter =
+  | SupportTicketStatus
+  | 'active'
+  | 'awaiting'
+  | 'all';
 
 // Besides a user id, the assignee filter accepts `none` (unassigned) and `me`.
 export type SupportTicketAssigneeFilter = 'none' | 'me' | (string & {});
@@ -54,7 +66,13 @@ export type SupportTicketUpdateDto = {
   assignedToUserId?: string | null;
 };
 
-export type SupportTicketCommentDto = { body?: string };
+export type SupportTicketCommentDto = {
+  body?: string;
+  // PUBLIC comments are shown to the guest as "Поддержка LeetPlus".
+  visibility?: 'INTERNAL' | 'PUBLIC';
+};
+
+export type SupportTicketResolveWithReplyDto = { body?: string };
 
 export type SupportTicketCloseWithCommentDto = {
   tenantId?: string;
@@ -153,6 +171,30 @@ export class SupportTicketsService {
   ) {
     this.assertSupportSchemaReady();
     return this.addComment(user, { kind: 'PLATFORM', tenantId: null }, id, dto);
+  }
+
+  resolveTenantTicketWithReply(
+    user: AuthenticatedUser,
+    id: string,
+    dto: SupportTicketResolveWithReplyDto,
+  ) {
+    this.assertSupportSchemaReady();
+    const { tenantId } = this.tenantContextService.resolve(user);
+    return this.resolveWithReply(user, { kind: 'TENANT', tenantId }, id, dto);
+  }
+
+  resolvePlatformTicketWithReply(
+    user: AuthenticatedUser,
+    id: string,
+    dto: SupportTicketResolveWithReplyDto,
+  ) {
+    this.assertSupportSchemaReady();
+    return this.resolveWithReply(
+      user,
+      { kind: 'PLATFORM', tenantId: null },
+      id,
+      dto,
+    );
   }
 
   async closePlatformTicketWithComment(
@@ -367,9 +409,22 @@ export class SupportTicketsService {
   ) {
     const filters = normalizeFilters(query);
     const tenantId = scopeTenantId(scope);
+    const summaryWhere: Prisma.GuestSupportTicketWhereInput = tenantId
+      ? { tenantId }
+      : {};
+    await closeStaleResolvedSupportTickets(
+      this.prisma,
+      tenantId ? { tenantId } : {},
+      new Date(),
+    );
+    const awaitingIds =
+      filters.status === 'awaiting'
+        ? await this.awaitingStaffTicketIds(summaryWhere)
+        : null;
     const where: Prisma.GuestSupportTicketWhereInput = {
       ...(tenantId ? { tenantId } : {}),
       ...statusWhere(filters.status),
+      ...(awaitingIds ? { id: { in: awaitingIds } } : {}),
       ...(filters.topic === 'all' ? {} : { topic: filters.topic }),
       ...assigneeWhere(filters.assignedToUserId, user.id),
       ...(filters.search
@@ -412,9 +467,6 @@ export class SupportTicketsService {
         : {}),
     };
 
-    const summaryWhere: Prisma.GuestSupportTicketWhereInput = tenantId
-      ? { tenantId }
-      : {};
     const [rows, summaryRows, queue, tenants] = await Promise.all([
       this.prisma.guestSupportTicket.findMany({
         where,
@@ -510,7 +562,10 @@ export class SupportTicketsService {
         : tenantId
           ? [tenantId]
           : [...new Set(rows.map((row) => row.tenantId))];
-    const users = await this.getAssigneeCandidates(scope, assigneeTenantIds);
+    const [users, threads] = await Promise.all([
+      this.getAssigneeCandidates(scope, assigneeTenantIds),
+      this.threadSummaries(rows.map((row) => row.id)),
+    ]);
     const counts = countByStatus(summaryRows);
 
     return {
@@ -524,11 +579,14 @@ export class SupportTicketsService {
         total: Object.values(counts).reduce((sum, value) => sum + value, 0),
         unassigned: queue.unassigned,
         mine: queue.mine,
+        awaitingStaff: queue.awaitingStaff,
         oldestActiveCreatedAt: queue.oldestActiveCreatedAt,
       },
       tenants,
       users,
-      rows: rows.map((row) => this.projectTicketContact(row)),
+      rows: rows.map((row) =>
+        projectGuestThread(this.projectTicketContact(row), threads.get(row.id)),
+      ),
     };
   }
 
@@ -537,6 +595,11 @@ export class SupportTicketsService {
     const where: Prisma.GuestSupportTicketWhereInput = tenantId
       ? { tenantId }
       : {};
+    await closeStaleResolvedSupportTickets(
+      this.prisma,
+      tenantId ? { tenantId } : {},
+      new Date(),
+    );
     const [statusRows, queue, latestNew] = await Promise.all([
       this.prisma.guestSupportTicket.groupBy({
         by: ['status'],
@@ -569,6 +632,7 @@ export class SupportTicketsService {
       active: counts.NEW + counts.IN_PROGRESS,
       unassigned: queue.unassigned,
       mine: queue.mine,
+      awaitingStaff: queue.awaitingStaff,
       oldestActiveCreatedAt: queue.oldestActiveCreatedAt,
       latestNew: latestNew
         ? {
@@ -591,7 +655,7 @@ export class SupportTicketsService {
       ...where,
       status: { in: [...SUPPORT_TICKET_ACTIVE_STATUSES] },
     };
-    const [unassigned, mine, oldest] = await Promise.all([
+    const [unassigned, mine, oldest, awaiting] = await Promise.all([
       this.prisma.guestSupportTicket.count({
         where: { ...active, assignedToUserId: null },
       }),
@@ -603,12 +667,54 @@ export class SupportTicketsService {
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         select: { createdAt: true },
       }),
+      this.awaitingStaffTicketIds(where),
     ]);
     return {
       unassigned,
       mine,
+      awaitingStaff: awaiting.length,
       oldestActiveCreatedAt: oldest?.createdAt.toISOString() ?? null,
     };
+  }
+
+  // Active tickets whose last word in the guest conversation is the guest's
+  // (a message or "did not help") and that nobody has answered yet.
+  private async awaitingStaffTicketIds(
+    where: Prisma.GuestSupportTicketWhereInput,
+  ) {
+    const active = await this.prisma.guestSupportTicket.findMany({
+      where: { ...where, status: { in: [...SUPPORT_TICKET_ACTIVE_STATUSES] } },
+      select: { id: true },
+      take: 500,
+    });
+    const threads = await this.threadSummaries(active.map((row) => row.id));
+    return active
+      .map((row) => row.id)
+      .filter((id) => threads.get(id)?.awaitingStaff);
+  }
+
+  private async threadSummaries(ticketIds: string[]) {
+    const summaries = new Map<string, SupportThreadSummary>();
+    if (!ticketIds.length) return summaries;
+    const events = await this.prisma.guestSupportTicketAuditEvent.findMany({
+      where: {
+        ticketId: { in: ticketIds },
+        action: { in: [...SUPPORT_THREAD_ACTION_LIST] },
+      },
+      select: { ticketId: true, action: true, metadata: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const grouped = new Map<string, typeof events>();
+    for (const event of events) {
+      grouped.set(event.ticketId, [
+        ...(grouped.get(event.ticketId) ?? []),
+        event,
+      ]);
+    }
+    for (const id of ticketIds) {
+      summaries.set(id, summarizeSupportThread(grouped.get(id) ?? []));
+    }
+    return summaries;
   }
 
   private async getAssigneeCandidates(scope: TicketScope, tenantIds: string[]) {
@@ -830,18 +936,21 @@ export class SupportTicketsService {
     id: string,
     dto: SupportTicketCommentDto,
   ) {
-    const body = typeof dto.body === 'string' ? dto.body.trim() : '';
-    if (!body || body.length > 2000) {
-      throw new BadRequestException(
-        'Комментарий должен содержать от 1 до 2000 символов.',
-      );
+    const body = supportCommentBody(dto.body);
+    if (
+      dto.visibility !== undefined &&
+      dto.visibility !== 'INTERNAL' &&
+      dto.visibility !== 'PUBLIC'
+    ) {
+      throw new BadRequestException('Некорректная видимость комментария.');
     }
+    const isPublic = dto.visibility === 'PUBLIC';
     const ticket = await this.prisma.guestSupportTicket.findFirst({
       where: {
         id,
         ...(scope.kind === 'TENANT' ? { tenantId: scope.tenantId } : {}),
       },
-      select: { id: true, tenantId: true },
+      select: { id: true, tenantId: true, status: true, updatedAt: true },
     });
     if (!ticket) {
       throw new NotFoundException('Обращение не найдено.');
@@ -855,19 +964,9 @@ export class SupportTicketsService {
           ticketId: ticket.id,
           authorUserId: user.id,
           body,
+          createdAt: now,
         },
-        select: {
-          id: true,
-          body: true,
-          createdAt: true,
-          authorUser: {
-            select: { id: true, fullName: true, email: true },
-          },
-        },
-      });
-      await tx.guestSupportTicket.update({
-        where: { id: ticket.id },
-        data: { lastActivityAt: now },
+        select: commentSelection,
       });
       await tx.guestSupportTicketAuditEvent.create({
         data: {
@@ -875,10 +974,169 @@ export class SupportTicketsService {
           ticketId: ticket.id,
           actorUserId: user.id,
           action: 'COMMENT_ADDED',
-          metadata: { platformScope: scope.kind === 'PLATFORM' },
+          metadata: {
+            platformScope: scope.kind === 'PLATFORM',
+            visibility: isPublic ? 'PUBLIC' : 'INTERNAL',
+          },
+          createdAt: now,
         },
       });
-      return comment;
+      if (!isPublic) {
+        await tx.guestSupportTicket.update({
+          where: { id: ticket.id },
+          data: { lastActivityAt: now },
+        });
+        return { ...comment, visibility: 'INTERNAL' as const };
+      }
+
+      await this.publishReply(
+        tx,
+        user,
+        scope,
+        ticket.tenantId,
+        ticket.id,
+        comment.id,
+        now,
+      );
+      // Answering the guest means the ticket is being handled.
+      const takeInWork = ticket.status === 'NEW';
+      await tx.guestSupportTicket.updateMany({
+        where: { id: ticket.id, tenantId: ticket.tenantId },
+        data: {
+          lastActivityAt: now,
+          ...(takeInWork ? statusTimestamps('IN_PROGRESS', now) : {}),
+        },
+      });
+      if (takeInWork) {
+        await tx.guestSupportTicketAuditEvent.create({
+          data: {
+            tenantId: ticket.tenantId,
+            ticketId: ticket.id,
+            actorUserId: user.id,
+            action: 'UPDATED_BY_SUPPORT',
+            metadata: {
+              previousStatus: 'NEW',
+              status: 'IN_PROGRESS',
+              platformScope: scope.kind === 'PLATFORM',
+              reason: 'PUBLIC_REPLY',
+            },
+            createdAt: now,
+          },
+        });
+      }
+      return { ...comment, visibility: 'PUBLIC' as const };
+    });
+  }
+
+  private async resolveWithReply(
+    user: AuthenticatedUser,
+    scope: TicketScope,
+    id: string,
+    dto: SupportTicketResolveWithReplyDto,
+  ) {
+    const body = supportCommentBody(dto.body);
+    const ticket = await this.prisma.guestSupportTicket.findFirst({
+      where: {
+        id,
+        ...(scope.kind === 'TENANT' ? { tenantId: scope.tenantId } : {}),
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        ticketNumber: true,
+        status: true,
+        assignedToUserId: true,
+        updatedAt: true,
+      },
+    });
+    if (!ticket) {
+      throw new NotFoundException('Обращение не найдено.');
+    }
+    if (ticket.status !== 'NEW' && ticket.status !== 'IN_PROGRESS') {
+      throw new ConflictException(
+        'Обращение уже решено или закрыто. Ответьте гостю обычным ответом.',
+      );
+    }
+
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const resolved = await tx.guestSupportTicket.updateMany({
+        where: {
+          id: ticket.id,
+          tenantId: ticket.tenantId,
+          status: ticket.status,
+          updatedAt: ticket.updatedAt,
+        },
+        data: { ...statusTimestamps('RESOLVED', now), lastActivityAt: now },
+      });
+      if (resolved.count !== 1) {
+        throw new ConflictException(
+          'Обращение уже изменил другой сотрудник. Обновите страницу.',
+        );
+      }
+      const comment = await tx.guestSupportTicketComment.create({
+        data: {
+          tenantId: ticket.tenantId,
+          ticketId: ticket.id,
+          authorUserId: user.id,
+          body,
+          createdAt: now,
+        },
+        select: commentSelection,
+      });
+      await this.publishReply(
+        tx,
+        user,
+        scope,
+        ticket.tenantId,
+        ticket.id,
+        comment.id,
+        now,
+      );
+      await tx.guestSupportTicketAuditEvent.create({
+        data: {
+          tenantId: ticket.tenantId,
+          ticketId: ticket.id,
+          actorUserId: user.id,
+          action: 'UPDATED_BY_SUPPORT',
+          metadata: {
+            previousStatus: ticket.status,
+            status: 'RESOLVED',
+            previousAssignedToUserId: ticket.assignedToUserId,
+            assignedToUserId: ticket.assignedToUserId,
+            platformScope: scope.kind === 'PLATFORM',
+            reason: 'RESOLVED_WITH_REPLY',
+          },
+          createdAt: now,
+        },
+      });
+      return {
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        status: 'RESOLVED' as const,
+        comment: { ...comment, visibility: 'PUBLIC' as const },
+      };
+    });
+  }
+
+  private async publishReply(
+    tx: Prisma.TransactionClient,
+    user: AuthenticatedUser,
+    scope: TicketScope,
+    tenantId: string,
+    ticketId: string,
+    commentId: string,
+    now: Date,
+  ) {
+    await tx.guestSupportTicketAuditEvent.create({
+      data: {
+        tenantId,
+        ticketId,
+        actorUserId: user.id,
+        action: SUPPORT_THREAD_ACTIONS.PUBLIC_REPLY,
+        metadata: { commentId, platformScope: scope.kind === 'PLATFORM' },
+        createdAt: now,
+      },
     });
   }
 
@@ -951,11 +1209,61 @@ export class SupportTicketsService {
   }
 }
 
+const commentSelection = {
+  id: true,
+  body: true,
+  createdAt: true,
+  authorUser: { select: { id: true, fullName: true, email: true } },
+} satisfies Prisma.GuestSupportTicketCommentSelect;
+
+function supportCommentBody(value: unknown) {
+  const body = typeof value === 'string' ? value.trim() : '';
+  if (!body || body.length > 2000) {
+    throw new BadRequestException(
+      'Комментарий должен содержать от 1 до 2000 символов.',
+    );
+  }
+  return body;
+}
+
+// Staff see every comment; this only labels which ones the guest sees and
+// what the guest did with the answer.
+function projectGuestThread<T extends { comments: Array<{ id: string }> }>(
+  row: T,
+  thread: SupportThreadSummary | undefined,
+) {
+  return {
+    ...row,
+    comments: row.comments.map((comment) => ({
+      ...comment,
+      visibility: thread?.publicCommentIds.has(comment.id)
+        ? ('PUBLIC' as const)
+        : thread?.guestCommentIds.has(comment.id)
+          ? ('GUEST' as const)
+          : ('INTERNAL' as const),
+    })),
+    guestThread: {
+      awaitingStaff: thread?.awaitingStaff ?? false,
+      unreadByGuest: thread?.unread ?? false,
+      lastPublicReplyAt: thread?.lastPublicReplyAt?.toISOString() ?? null,
+      lastGuestReadAt: thread?.lastGuestReadAt?.toISOString() ?? null,
+      feedback: thread?.feedback
+        ? {
+            value: thread.feedback.value,
+            comment: thread.feedback.comment,
+            at: thread.feedback.at.toISOString(),
+          }
+        : null,
+    },
+  };
+}
+
 function normalizeFilters(query: SupportTicketsQuery) {
   const status: SupportTicketStatusFilter =
     query.status &&
     (query.status === 'all' ||
       query.status === 'active' ||
+      query.status === 'awaiting' ||
       SUPPORT_TICKET_STATUSES.includes(query.status))
       ? query.status
       : 'all';
@@ -988,7 +1296,7 @@ function statusWhere(
   status: SupportTicketStatusFilter,
 ): Prisma.GuestSupportTicketWhereInput {
   if (status === 'all') return {};
-  if (status === 'active') {
+  if (status === 'active' || status === 'awaiting') {
     return { status: { in: [...SUPPORT_TICKET_ACTIVE_STATUSES] } };
   }
   return { status };
@@ -997,6 +1305,7 @@ function statusWhere(
 function isQueueView(status: SupportTicketStatusFilter) {
   return (
     status === 'active' ||
+    status === 'awaiting' ||
     SUPPORT_TICKET_ACTIVE_STATUSES.some((active) => active === status)
   );
 }

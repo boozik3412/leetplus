@@ -21,6 +21,7 @@ import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
 import {
   SupportTicketsService,
   type SupportTicketCommentDto,
+  type SupportTicketResolveWithReplyDto,
   type SupportTicketsQuery,
   type SupportTicketUpdateDto,
 } from './support-tickets.service';
@@ -60,6 +61,15 @@ export class SupportTicketsController {
     @Body() dto: SupportTicketCommentDto,
   ) {
     return this.service.addTenantComment(user, id, dto);
+  }
+
+  @Post(':id/resolve-with-reply')
+  resolveWithReply(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: SupportTicketResolveWithReplyDto,
+  ) {
+    return this.service.resolveTenantTicketWithReply(user, id, dto);
   }
 
   @Get(':id/attachments/:attachmentId')

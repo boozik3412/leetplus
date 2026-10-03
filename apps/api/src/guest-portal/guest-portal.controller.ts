@@ -46,6 +46,8 @@ import {
   type GuestBugReportInput,
   type GuestBugReportResponse,
   type GuestBugReportUploadFile,
+  type GuestSupportTicketList,
+  type GuestSupportTicketThread,
 } from './guest-support.service';
 
 @Controller('guest-portal')
@@ -216,6 +218,65 @@ export class GuestPortalController {
       userAgent,
       dto,
       file,
+    );
+  }
+
+  @Get('session/support/tickets')
+  getSupportTickets(
+    @Headers('authorization') authorization: string | undefined,
+  ): Promise<GuestSupportTicketList> {
+    return this.guestPortalService.getSupportTickets(authorization);
+  }
+
+  @Get('session/support/tickets/:ticketNumber')
+  getSupportTicket(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('ticketNumber') ticketNumber: string,
+  ): Promise<GuestSupportTicketThread> {
+    return this.guestPortalService.getSupportTicket(
+      authorization,
+      ticketNumber,
+    );
+  }
+
+  @Post('session/support/tickets/:ticketNumber/read')
+  markSupportTicketRead(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('ticketNumber') ticketNumber: string,
+  ) {
+    return this.guestPortalService.markSupportTicketRead(
+      authorization,
+      ticketNumber,
+    );
+  }
+
+  @Post('session/support/tickets/:ticketNumber/messages')
+  addSupportTicketMessage(
+    @Headers('authorization') authorization: string | undefined,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Param('ticketNumber') ticketNumber: string,
+    @Body() dto: { body?: unknown },
+  ): Promise<GuestSupportTicketThread> {
+    return this.guestPortalService.addSupportTicketMessage(
+      authorization,
+      ticketNumber,
+      idempotencyKey,
+      dto,
+    );
+  }
+
+  @Post('session/support/tickets/:ticketNumber/feedback')
+  giveSupportTicketFeedback(
+    @Headers('authorization') authorization: string | undefined,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Param('ticketNumber') ticketNumber: string,
+    @Body() dto: { value?: unknown; comment?: unknown },
+  ): Promise<GuestSupportTicketThread> {
+    return this.guestPortalService.giveSupportTicketFeedback(
+      authorization,
+      ticketNumber,
+      idempotencyKey,
+      dto,
     );
   }
 

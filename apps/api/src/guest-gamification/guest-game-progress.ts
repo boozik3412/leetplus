@@ -1,4 +1,9 @@
 import { buildGuestGamePhysicalProgressIdentity } from './guest-game-origin-key';
+import {
+  guestGameWindowMatch,
+  guestGameWindowSpec,
+  sessionMinutesInsideWindow,
+} from './guest-game-session-window';
 
 export type GuestGameProgressAggregation =
   | 'count'
@@ -66,6 +71,7 @@ export type GuestGameProgressResult = {
 };
 
 const DEFAULT_WINDOW_DAYS = 365;
+const SESSION_DURATION_EVENT_TYPES = new Set(['PLAY_HOUR', 'SESSION_STOP']);
 
 export function evaluateGuestGameProgress(
   rule: GuestGameProgressRule,
@@ -137,11 +143,33 @@ export function evaluateGuestGameProgress(
   // to the current day (which kept every repeat streak at 1/N forever).
   const multiDayGoal =
     aggregation === 'streak' || aggregation === 'distinctDays';
-  const allEvents = dedupeProgressEvents(currentEvent, historyEvents).filter(
-    (event) =>
+  // OVERLAP windows count only the minutes of a session that lie inside the
+  // window, so the duration is replaced before filtering and summing.
+  const overlapSpec =
+    guestGameWindowMatch(metric, conditions) === 'OVERLAP'
+      ? guestGameWindowSpec(metric, conditions)
+      : null;
+  const windowApplied = new WeakSet<GuestGameProgressEvent>();
+  const allEvents = dedupeProgressEvents(currentEvent, historyEvents)
+    .map((event) => {
+      if (!overlapSpec || !isSessionDurationEvent(event)) return event;
+      const adjusted = {
+        ...event,
+        sessionMinutes: sessionMinutesInsideWindow({
+          endedAt: event.occurredAt,
+          minutes: event.sessionMinutes ?? 0,
+          spec: overlapSpec,
+          timeZone: rule.timeZone,
+        }),
+      };
+      windowApplied.add(adjusted);
+      return adjusted;
+    })
+    .filter((event) =>
       matchesProgressEvent(rule, conditions, metric, event, referenceEvent, {
         eventTypes,
         windowDays,
+        windowAppliedToDuration: windowApplied.has(event),
         repeatCycleReset: repeatCycleReset && !multiDayGoal,
         completedAt,
         resetImmediatelyAfterCompletion:
@@ -152,7 +180,7 @@ export function evaluateGuestGameProgress(
             completedAt.getTime() <= referenceEvent.occurredAt.getTime(),
           ),
       }),
-  );
+    );
   const current = progressValue(
     aggregation,
     allEvents,
@@ -361,6 +389,7 @@ function matchesProgressEvent(
   options: {
     eventTypes: string[];
     windowDays: number;
+    windowAppliedToDuration?: boolean;
     repeatCycleReset: boolean;
     completedAt: Date | null;
     resetImmediatelyAfterCompletion: boolean;
@@ -442,6 +471,9 @@ function matchesProgressEvent(
   ) {
     return false;
   }
+  if (options.windowAppliedToDuration && !(event.sessionMinutes ?? 0)) {
+    return false;
+  }
 
   const minSpendAmount = progressNumber(
     metric.minSpendAmount ?? conditions.minSpendAmount,
@@ -453,7 +485,10 @@ function matchesProgressEvent(
     return false;
   }
 
-  if (!matchesWeekdays(conditions, metric, event.occurredAt, rule.timeZone)) {
+  if (
+    !options.windowAppliedToDuration &&
+    !matchesWeekdays(conditions, metric, event.occurredAt, rule.timeZone)
+  ) {
     return false;
   }
 
@@ -467,7 +502,10 @@ function matchesProgressEvent(
     return false;
   }
 
-  if (!matchesHours(conditions, metric, event.occurredAt, rule.timeZone)) {
+  if (
+    !options.windowAppliedToDuration &&
+    !matchesHours(conditions, metric, event.occurredAt, rule.timeZone)
+  ) {
     return false;
   }
 
@@ -488,6 +526,13 @@ function matchesProgressEvent(
   }
 
   return true;
+}
+
+function isSessionDurationEvent(event: GuestGameProgressEvent) {
+  return (
+    SESSION_DURATION_EVENT_TYPES.has(normalizeProgressToken(event.eventType)) &&
+    (event.sessionMinutes ?? 0) > 0
+  );
 }
 
 function progressValue(

@@ -995,6 +995,11 @@ export class GuestGameLedgerFallbackService {
           ];
         }),
       );
+      // Evaluate in the order the guest actually played, not the order the
+      // provider delivered the facts (newest first). Cumulative goals read
+      // only history up to the evaluated event, so a late batch processed
+      // newest-first left every session alone ("75/100", "24/100", …).
+      // The discovery watermark follows the query order and is unaffected.
       const facts = uniqueFacts([
         ...candidateFacts.filter(
           (fact) => !isSessionStartFactType(fact.factType),
@@ -1005,6 +1010,8 @@ export class GuestGameLedgerFallbackService {
         }),
       ]).sort(
         (left, right) =>
+          (left.happenedAt ?? left.validFrom).getTime() -
+            (right.happenedAt ?? right.validFrom).getTime() ||
           left.validFrom.getTime() - right.validFrom.getTime() ||
           left.id.localeCompare(right.id),
       );

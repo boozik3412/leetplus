@@ -735,6 +735,38 @@ describe('GuestGameLedgerFallbackService', () => {
     );
   });
 
+  it('evaluates a late batch in play order, not in delivery order', async () => {
+    const { service, prisma, gamification } = createService();
+    const delivered = new Date(now.getTime() - 60_000);
+    // Langame returns the newest session first; the ledger keeps that order
+    // in validFrom. Cumulative daily goals need the earliest session first.
+    const session = (id: string, playedAt: string, offsetMs: number) => ({
+      ...fact(new Date(delivered.getTime() + offsetMs)),
+      id,
+      sourceExternalId: id,
+      sessionExternalId: id,
+      happenedAt: new Date(playedAt),
+    });
+    prisma.guestActivityFact.findMany.mockResolvedValueOnce([
+      session('fact-12-47', '2026-07-18T07:47:00.000Z', 0),
+      session('fact-12-40', '2026-07-18T07:40:00.000Z', 1),
+      session('fact-10-59', '2026-07-18T05:59:00.000Z', 2),
+    ]);
+
+    await service.runScheduled({ mode: 'SHADOW', tenantId: 'tenant-1' });
+
+    const occurred = (
+      gamification.dryRun.mock.calls as unknown as Array<
+        [unknown, { occurredAt?: string | Date }]
+      >
+    ).map(([, dto]) => new Date(dto.occurredAt ?? 0).toISOString());
+    expect(occurred).toEqual([
+      '2026-07-18T05:59:00.000Z',
+      '2026-07-18T07:40:00.000Z',
+      '2026-07-18T07:47:00.000Z',
+    ]);
+  });
+
   it('routes a store-less fact to a rule selected in the same Langame domain', async () => {
     const { service, prisma, gamification } = createService();
     prisma.guestActivityFact.findMany.mockResolvedValueOnce([

@@ -1,6 +1,12 @@
 import { Prisma } from '@prisma/client';
 
 import { guestGameTriggerMatches } from './guest-game-progress';
+import {
+  guestGameWindowIsRestricted,
+  guestGameWindowMatch,
+  guestGameWindowSpec,
+  sessionMinutesInsideWindow,
+} from './guest-game-session-window';
 
 export type GuestGameLedgerRule = {
   type: string;
@@ -90,8 +96,9 @@ export function evaluateGuestGameLedgerRule(
     rule.triggerKind,
     rule.sessionType,
   );
-  const relevantCandidates = facts.filter((fact) =>
-    relevantFactTypes.includes(fact.factType),
+  const relevantCandidates = applyLedgerWindowOverlap(
+    rule,
+    facts.filter((fact) => relevantFactTypes.includes(fact.factType)),
   );
   const eventParity = prepareEventParityCandidates(
     rule,
@@ -187,6 +194,42 @@ export function evaluateGuestGameLedgerRule(
     facts: candidates,
     progress: null,
   };
+}
+
+// Play-time facts whose duration was replaced by the minutes inside an
+// OVERLAP window; the period check by stop time is skipped for them.
+const ledgerWindowAppliedFacts = new WeakSet<GuestGameLedgerFact>();
+
+function applyLedgerWindowOverlap(
+  rule: GuestGameLedgerRule,
+  facts: GuestGameLedgerFact[],
+) {
+  const conditions = jsonObject(rule.periodRules) ?? {};
+  const metric = jsonObject(conditions.metric) ?? {};
+  if (guestGameWindowMatch(metric, conditions) !== 'OVERLAP') return facts;
+  const spec = guestGameWindowSpec(metric, conditions);
+  return facts.map((fact) => {
+    if (
+      !fact.factType.includes('PLAY_TIME') ||
+      !(fact.durationMinutes && fact.durationMinutes > 0) ||
+      !fact.happenedAt
+    ) {
+      return fact;
+    }
+    const timeZone = ledgerFactTimeZone(rule, fact);
+    if (guestGameWindowIsRestricted(spec) && !timeZone) return fact;
+    const adjusted: GuestGameLedgerFact = {
+      ...fact,
+      durationMinutes: sessionMinutesInsideWindow({
+        endedAt: fact.happenedAt,
+        minutes: fact.durationMinutes,
+        spec,
+        timeZone,
+      }),
+    };
+    ledgerWindowAppliedFacts.add(adjusted);
+    return adjusted;
+  });
 }
 
 function prepareEventParityCandidates(
@@ -326,13 +369,20 @@ function evaluateLedgerFactScope(
     }
   }
 
-  const periodResult = evaluateGuestGamePeriod(
-    rule.periodRules,
-    happenedAt,
-    ledgerFactTimeZone(rule, fact),
-  );
-  blockers.push(...periodResult.blockers);
-  insufficient.push(...periodResult.insufficient);
+  if (ledgerWindowAppliedFacts.has(fact)) {
+    // OVERLAP window: the duration already holds only the in-window minutes.
+    if (!fact.durationMinutes) {
+      blockers.push('сессия не попадает в окно времени правила');
+    }
+  } else {
+    const periodResult = evaluateGuestGamePeriod(
+      rule.periodRules,
+      happenedAt,
+      ledgerFactTimeZone(rule, fact),
+    );
+    blockers.push(...periodResult.blockers);
+    insufficient.push(...periodResult.insufficient);
+  }
 
   return { blockers, insufficient };
 }

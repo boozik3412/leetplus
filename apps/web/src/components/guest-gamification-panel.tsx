@@ -16630,6 +16630,10 @@ function seasonStepActivationRules(step: SeasonLevelStepForm) {
         taskType === "PLAY_TIME"
           ? Math.max(0, condition.minSessionMinutes)
           : undefined,
+      windowMatch:
+        taskType === "PLAY_TIME" && condition.windowMatch === "OVERLAP"
+          ? "OVERLAP"
+          : undefined,
       purchaseSource:
         taskType === "PRODUCT_PURCHASE" ? condition.purchaseSource : undefined,
       categoryCatalogSource:
@@ -17127,6 +17131,10 @@ function seasonStepConditionFromRules(
     hours: hours[0] ?? "09:00-21:00",
     weekdays,
     minSessionMinutes: numeric(String(metric.minSessionMinutes ?? "0"), 0),
+    windowMatch:
+      recordString(metric, "windowMatch")?.toUpperCase() === "OVERLAP"
+        ? "OVERLAP"
+        : "SESSION_END",
     purchaseSource,
     categoryCatalogSource,
     productMatch: enumConditionValue(

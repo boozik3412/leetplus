@@ -4381,10 +4381,10 @@ export class GuestPortalService {
     const stores = await this.prisma.store.findMany({
       where: {
         tenantId: scope.tenantId,
-        OR: [
-          { id: scope.storeId },
-          { isActive: true, gamificationEnabled: true },
-        ],
+        // Not `gamificationEnabled`: clubs earn rewards through active rules
+        // without that flag (see the club directory), so every active club
+        // of the network can be the subject of a report.
+        OR: [{ id: scope.storeId }, { isActive: true }],
       },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
@@ -4409,7 +4409,6 @@ export class GuestPortalService {
             id: storeId,
             tenantId: payload.tenantId,
             isActive: true,
-            gamificationEnabled: true,
           },
           select: { id: true },
         })

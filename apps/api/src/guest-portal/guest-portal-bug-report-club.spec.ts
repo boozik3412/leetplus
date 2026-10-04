@@ -83,10 +83,7 @@ describe('guest bug report club', () => {
       expect.objectContaining({
         where: {
           tenantId,
-          OR: [
-            { id: currentStoreId },
-            { isActive: true, gamificationEnabled: true },
-          ],
+          OR: [{ id: currentStoreId }, { isActive: true }],
         },
       }),
     );
@@ -131,7 +128,6 @@ describe('guest bug report club', () => {
         id: otherStoreId,
         tenantId,
         isActive: true,
-        gamificationEnabled: true,
       },
       select: { id: true },
     });

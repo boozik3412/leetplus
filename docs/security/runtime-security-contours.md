@@ -1537,8 +1537,7 @@ Support-функциональность следует тем же трём г�
   обратного импорта нет. Схема и миграции не меняются;
 - клуб обращения: гость может указать другой клуб своей сети в поле
   `storeId` формы (multipart allowlist `fields=6`, exclusive `parts=8`).
-  GuestRuntime принимает только активный клуб с игровым модулем того же
-  `tenantId`, иначе 400; клуб, выбранный в сессии, сохраняется в audit как
+  GuestRuntime принимает только активный клуб того же `tenantId`, иначе 400; клуб, выбранный в сессии, сохраняется в audit как
   `reportedFromStoreId`. Список клубов в game-summary — только `id` и
   название клубов сети гостя. Corporate `GET …/:id/guest-rewards` (те же
   guards, что очередь; capability `view_support_tickets`) читает кошелёк

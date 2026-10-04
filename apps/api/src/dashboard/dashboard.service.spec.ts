@@ -55,6 +55,9 @@ type DashboardPrismaMock = {
   integrationSyncJob: {
     findFirst: jest.Mock;
   };
+  storeClosure: {
+    findMany: jest.Mock;
+  };
 };
 
 type FreshStoreScopeMock = {
@@ -185,6 +188,9 @@ function createPrismaMock(): DashboardPrismaMock {
     },
     integrationSyncJob: {
       findFirst: jest.fn(),
+    },
+    storeClosure: {
+      findMany: jest.fn().mockResolvedValue([]),
     },
   };
 }
@@ -1502,6 +1508,83 @@ describe('DashboardService', () => {
       expect(summary.drivers.rows[0].notes.join(' ')).not.toContain(
         'без гостя',
       );
+    });
+
+    it('publishes owner closures and keeps closed days out of the load capacity', async () => {
+      prisma.store.findMany.mockImplementation(
+        ({ where }: { where?: { id?: { in?: string[] } } } = {}) =>
+          Promise.resolve(
+            sharedDomainStores
+              .filter(
+                (store) => !where?.id?.in || where.id.in.includes(store.id),
+              )
+              .map((store) => ({ ...store, computerCount: 10 })),
+          ),
+      );
+      prisma.storeClosure.findMany.mockResolvedValue([
+        {
+          storeId: 'store-kholmogorova',
+          closedFrom: new Date('2026-09-08T00:00:00.000Z'),
+          reopenedOn: null,
+          reason: 'Закрыт временно',
+        },
+      ]);
+      prisma.guestSession.findMany.mockResolvedValue(
+        [0, 1, 2].map((index) => ({
+          id: `shared-${index}`,
+          storeId: null,
+          externalProvider: 'LANGAME',
+          externalDomain: '46.langamepro.ru',
+          externalClubId: null,
+          externalSessionId: `shared-${index}`,
+          guestId: `g${index}`,
+          externalGuestId: null,
+          startedAt: new Date(`2026-09-07T1${index}:00:00.000Z`),
+          durationMinutes: 60,
+        })),
+      );
+
+      const summary = await service.getExecutiveSummary(user, {
+        ...query,
+        storeIds: ['store-pushkinskaya', 'store-kholmogorova'],
+      });
+
+      const [[closureQuery]] = prisma.storeClosure.findMany.mock.calls as Array<
+        [{ where: Record<string, unknown> }]
+      >;
+      expect(closureQuery.where).toMatchObject({
+        tenantId: 'tenant-demo',
+        storeId: { in: ['store-pushkinskaya', 'store-kholmogorova'] },
+      });
+      expect(summary.closures).toEqual([
+        {
+          storeId: 'store-kholmogorova',
+          storeName: '1337-Холмогорова',
+          closedFrom: '2026-09-08',
+          reopenedOn: null,
+          reason: 'Закрыт временно',
+          closedDays: 1,
+          previousClosedDays: 0,
+          periodDays: 2,
+        },
+      ]);
+      const [network, ...rest] = summary.drivers.rows;
+      // 10 PCs open for 2 days, 10 PCs open for 1 day: 24 h each.
+      expect(network.current.capacityHours).toBe(10 * 24 * 2 + 10 * 24 * 1);
+      expect(network.computerCount).toBe(20);
+      const kholmogorova = rest.find(
+        (row) => row.storeId === 'store-kholmogorova',
+      );
+      expect(kholmogorova?.computerCount).toBe(10);
+    });
+
+    it('publishes no closures when none touch the period', async () => {
+      const summary = await service.getExecutiveSummary(user, {
+        ...query,
+        storeIds: ['store-pushkinskaya'],
+      });
+
+      expect(summary.closures).toEqual([]);
     });
 
     it('skips sessions provably bound to the unselected club of the domain', async () => {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   checkDrops,
+  closureConflicts,
   conversionGaps,
   mainLever,
   salesConfirmedThrough,
@@ -129,8 +130,8 @@ test("a club without sales since a day of the period is silent, not a sales drop
     ],
   };
   assert.deepEqual(silentClubs(summary as never), [
-    { storeId: "kh", storeName: "kh", since: "2026-09-29" },
-    { storeId: "gone", storeName: "gone", since: "2026-09-23" },
+    { storeId: "kh", storeName: "kh", since: "2026-09-29", closure: null },
+    { storeId: "gone", storeName: "gone", since: "2026-09-23", closure: null },
   ]);
 
   // 20:30 UTC on 28.09 is 00:30 on 29.09 in Samara: the club sold on 29.09.
@@ -153,5 +154,89 @@ test("a club without sales since a day of the period is silent, not a sales drop
       clubs: [club("ra", "2026-09-29T19:10:00.000Z", 1, 1)],
     } as never),
     "2026-09-30",
+  );
+});
+
+const closureEntry = (
+  storeId: string,
+  closedFrom: string,
+  reopenedOn: string | null,
+  closedDays = 1,
+  reason: string | null = null,
+) => ({
+  storeId,
+  storeName: storeId,
+  closedFrom,
+  reopenedOn,
+  reason,
+  closedDays,
+  previousClosedDays: 0,
+  periodDays: 7,
+});
+const soldClub = (
+  storeId: string,
+  factAsOf: string | null,
+  value = 1,
+  previous = 1,
+) => ({
+  storeId,
+  storeName: storeId,
+  metrics: {
+    productRevenue: {
+      state: "AVAILABLE",
+      value,
+      factAsOf,
+      comparison: { previousValue: previous },
+    },
+  },
+});
+
+test("a declared closure explains the silence of a club; a mismatch does not", () => {
+  const base = {
+    scope: { period: { from: "2026-09-23", to: "2026-09-29" } },
+    clubs: [soldClub("kh", "2026-09-28T12:05:00.000Z", 22_860, 69_910)],
+  };
+  // Closed from the first silent day: explained.
+  const explained = silentClubs({
+    ...base,
+    closures: [closureEntry("kh", "2026-09-29", null, 1, "ремонт")],
+  } as never);
+  assert.equal(explained.length, 1);
+  assert.equal(explained[0].closure?.reason, "ремонт");
+  // The club reopens inside the period while still silent: not explained.
+  assert.equal(
+    silentClubs({
+      scope: base.scope,
+      clubs: [soldClub("kh", "2026-09-27T12:05:00.000Z", 22_860, 69_910)],
+      closures: [closureEntry("kh", "2026-09-28", "2026-09-29")],
+    } as never)[0].closure,
+    null,
+  );
+  // No closure at all.
+  assert.equal(silentClubs(base as never)[0].closure, null);
+});
+
+test("a club marked closed that keeps selling is reported once", () => {
+  assert.deepEqual(
+    closureConflicts({
+      scope: { period: { from: "2026-09-23", to: "2026-09-29" } },
+      // kh sells on 28.09 after closing on 25.09; ra's last sale is the closing day.
+      clubs: [
+        soldClub("kh", "2026-09-28T12:05:00.000Z"),
+        soldClub("ra", "2026-09-25T10:00:00.000Z"),
+      ],
+      closures: [
+        closureEntry("kh", "2026-09-25", null, 5),
+        closureEntry("ra", "2026-09-25", null, 5),
+      ],
+    } as never),
+    [
+      {
+        storeId: "kh",
+        storeName: "kh",
+        closedFrom: "2026-09-25",
+        lastSale: "2026-09-28",
+      },
+    ],
   );
 });

@@ -72,6 +72,19 @@ export type ExecutiveDetailMetricKey =
 export type ExecutiveMetrics = Record<ExecutiveMetricKey, ExecutiveMetric> & {
   averageProductCheck?: ExecutiveMetric;
 };
+/** A club closure declared by the owner that touches the selected period. */
+export type ExecutiveClosure = {
+  storeId: string;
+  storeName: string;
+  /** First closed day; may lie before the period. */
+  closedFrom: string;
+  /** First open day again, null while the club is closed. */
+  reopenedOn: string | null;
+  reason: string | null;
+  closedDays: number;
+  previousClosedDays: number;
+  periodDays: number;
+};
 export type ExecutiveSummary = {
   scope: ExecutiveAppliedScope;
   metrics: ExecutiveMetrics;
@@ -83,6 +96,8 @@ export type ExecutiveSummary = {
   days: Array<{ date: string; metrics: ExecutiveMetrics }>;
   /** Revenue drivers; absent from an older API. */
   drivers?: ExecutiveDrivers;
+  /** Declared club closures; absent from an older API. */
+  closures?: ExecutiveClosure[];
 };
 export type ExecutiveDriverFactors = {
   barRevenue: number | null;
@@ -107,6 +122,8 @@ export type ExecutiveDriverRow = {
   storeId: string | null;
   storeName: string;
   storeIds: string[];
+  /** Computers of the row's clubs; null when any club has no known count. */
+  computerCount?: number | null;
   current: ExecutiveDriverFactors;
   previous: ExecutiveDriverFactors | null;
   contributions: Array<{ factor: ExecutiveDriverFactor; amount: number }> | null;

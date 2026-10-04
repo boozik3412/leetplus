@@ -43,9 +43,11 @@ import {
 } from "@/lib/executive-links";
 import {
   checkDrops,
+  closureConflicts,
   conversionGaps,
   silentClubs,
 } from "@/lib/executive-driver-rules";
+import { closeClubHref, reopenClubHref } from "@/lib/executive-closures";
 import { buildAssortmentReportHref } from "@/lib/assortment-report-query";
 import type { DashboardMetric } from "@/lib/dashboard-summary";
 import type {
@@ -483,6 +485,8 @@ type PriorityItem = {
   href: string;
   /** «Поставить задачу»: the staff task form, filled from this signal. */
   task?: TaskDraft;
+  /** One more way to resolve the signal, next to «Поставить задачу». */
+  action?: { label: string; href: string };
 };
 
 const staffLevels: Record<StaffPriorityKind, PriorityLevel> = {
@@ -526,7 +530,8 @@ function buildPriorities(
   const period = formatRange(summary.scope.period.from, summary.scope.period.to);
   const onlyClub =
     summary.scope.storeIds.length === 1 ? summary.scope.storeIds[0] : null;
-  for (const club of silent)
+  // A closure declared by the owner explains the silence: nothing to resolve.
+  for (const club of silent.filter((item) => item.closure === null))
     items.push({
       key: `silent:${club.storeId}`,
       kind: "SILENT_CLUB",
@@ -536,11 +541,29 @@ function buildPriorities(
       caption:
         "Клуб закрыт или данные не приходят; сигнал о падении продаж для него не показывается",
       href: clubDetailHref(summary, "productRevenue", [club.storeId]),
+      action: {
+        label: "Отметить закрытым",
+        href: closeClubHref(club.storeId, club.since),
+      },
       task: {
         title: `Проверить клуб: нет продаж с ${formatDay(club.since)} · ${club.storeName}`,
         description: `В LeetPlus нет продаж клуба «${club.storeName}» с ${formatDay(club.since)}. Проверить: клуб работает или закрыт, работает ли касса и синхронизация Langame.`,
         storeId: club.storeId,
         priority: "HIGH",
+      },
+    });
+  for (const conflict of closureConflicts(summary))
+    items.push({
+      key: `closure-conflict:${conflict.storeId}`,
+      kind: "CLOSURE_CONFLICT",
+      level: "DATA",
+      club: conflict.storeName,
+      title: `Клуб отмечен закрытым с ${formatDay(conflict.closedFrom)}, но продажи идут`,
+      caption: `Последняя продажа ${formatDay(conflict.lastSale)}. Если клуб открылся, укажите дату открытия — иначе его дни не попадут в сравнение`,
+      href: `/stores#club-${conflict.storeId}`,
+      action: {
+        label: "Клуб открыт",
+        href: reopenClubHref(conflict.storeId, conflict.lastSale),
       },
     });
   for (const gap of conversionGaps(summary.drivers).filter(
@@ -593,7 +616,7 @@ function buildPriorities(
       amount: -drop.absoluteDelta,
       club: drop.storeName,
       title: "Разобрать падение продаж бара",
-      caption: `${formatSigned(drop.percentDelta, 1, "%")} · ${formatSigned(drop.absoluteDelta)} ₽ к ${against} · ≈ ${formatSigned(drop.perDay)} ₽ в день`,
+      caption: `${formatSigned(drop.percentDelta, 1, "%")} · ${formatSigned(drop.absoluteDelta)} ₽ к ${against} · ≈ ${formatSigned(drop.perDay)} ₽ в день${drop.perOpenDay ? " · по дням работы клуба" : ""}`,
       href: driverDetailHref(summary, "bar", [drop.storeId]),
       task: {
         title: `Разобрать падение продаж бара · ${drop.storeName}`,
@@ -864,14 +887,27 @@ export function ExecutivePriorities({
                       {item.caption}
                     </span>
                   </ExecutiveLink>
-                  {item.task ? (
-                    <ExecutiveLink
-                      href={taskDraftHref(item.task)}
-                      prefetch={false}
-                      className="relative z-10 mt-2 inline-flex min-h-8 items-center gap-1 rounded-md border border-[var(--border-soft)] bg-[var(--surface)] px-2.5 text-xs font-semibold text-emerald-700 hover:border-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
-                    >
-                      + Поставить задачу
-                    </ExecutiveLink>
+                  {item.task || item.action ? (
+                    <span className="relative z-10 mt-2 flex flex-wrap gap-2">
+                      {item.task ? (
+                        <ExecutiveLink
+                          href={taskDraftHref(item.task)}
+                          prefetch={false}
+                          className="inline-flex min-h-8 items-center gap-1 rounded-md border border-[var(--border-soft)] bg-[var(--surface)] px-2.5 text-xs font-semibold text-emerald-700 hover:border-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
+                        >
+                          + Поставить задачу
+                        </ExecutiveLink>
+                      ) : null}
+                      {item.action ? (
+                        <ExecutiveLink
+                          href={item.action.href}
+                          prefetch={false}
+                          className="inline-flex min-h-8 items-center gap-1 rounded-md border border-[var(--border-soft)] bg-[var(--surface)] px-2.5 text-xs font-semibold text-emerald-700 hover:border-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
+                        >
+                          {item.action.label}
+                        </ExecutiveLink>
+                      ) : null}
+                    </span>
                   ) : null}
                 </span>
               </li>

@@ -14,7 +14,9 @@ import {
   mainLever,
   silentClubs,
 } from "@/lib/executive-driver-rules";
+import { clubClosure, closedThroughout } from "@/lib/executive-closures";
 import {
+  formatClosure,
   formatDay,
   formatMoney,
   formatNumber,
@@ -160,7 +162,10 @@ export function DriverDataStrip({ summary }: { summary: ExecutiveSummary }) {
   const unbound = (summary.drivers?.rows ?? []).filter(
     (row) => row.scope === "CLUB" && row.current.visits === null,
   );
-  const silent = silentClubs(summary);
+  const closed = (summary.closures ?? []).filter(
+    (closure) => closure.closedDays > 0,
+  );
+  const silent = silentClubs(summary).filter((club) => club.closure === null);
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-[var(--border-soft)] bg-[var(--surface)] px-4 py-2.5 text-xs text-zinc-600 dark:text-zinc-300">
       {coverage && coverage.total !== null ? (
@@ -170,6 +175,18 @@ export function DriverDataStrip({ summary }: { summary: ExecutiveSummary }) {
             className={`h-2 w-2 rounded-full ${complete ? "bg-emerald-500" : "bg-amber-500"}`}
           />
           Продажи: {coverage.covered} из {coverage.total} клубо-дней
+        </span>
+      ) : null}
+      {closed.length ? (
+        <span className="inline-flex items-center gap-2">
+          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-zinc-400" />
+          Закрыты:{" "}
+          {closed
+            .map(
+              (closure) =>
+                `${closure.storeName} с ${formatDay(closure.closedFrom)}${closure.reopenedOn ? ` до ${formatDay(closure.reopenedOn)}` : ""}`,
+            )
+            .join(", ")}
         </span>
       ) : null}
       {silent.length ? (
@@ -367,7 +384,7 @@ export function DriverTree({ summary }: { summary: ExecutiveSummary }) {
                 ? `Главный рычаг — ${leverLabels[lever.factor]}: ${lossExplanation[lever.factor]} (${formatSigned(lever.amount)} ₽).`
                 : `Рост за счёт множителя «${leverLabels[lever.factor]}» (${formatSigned(lever.amount)} ₽).`}
               {silent.length && lever.kind === "LOSS"
-                ? ` Часть падения — клубы без продаж: ${silent.map((club) => club.storeName).join(", ")}.`
+                ? ` Часть падения — клубы без продаж: ${silent.map((club) => `${club.storeName}${club.closure ? " (закрыт)" : ""}`).join(", ")}.`
                 : ""}
             </p>
           ) : null}
@@ -419,10 +436,23 @@ function ClubCard({
   );
   const lever = mainLever(row);
   const days = periodDays(summary.scope.period.from, summary.scope.period.to);
+  // Capacity excludes closed days, so the computer count comes from the API.
   const pcs =
-    row.current.capacityHours && days
-      ? Math.round(row.current.capacityHours / (24 * days))
-      : null;
+    row.computerCount !== undefined
+      ? row.computerCount
+      : row.current.capacityHours && days
+        ? Math.round(row.current.capacityHours / (24 * days))
+        : null;
+  const closure = row.storeId ? clubClosure(summary, row.storeId) : null;
+  const closedAllPeriod =
+    row.storeId !== null &&
+    closedThroughout(
+      summary,
+      row.storeId,
+      summary.scope.period.from,
+      summary.scope.period.to,
+    );
+  const quiet = silentSince !== null || closedAllPeriod;
   const contributions = row.contributions ?? [];
   const totalShare = contributions.reduce(
     (sum, item) => sum + Math.abs(item.amount),
@@ -453,12 +483,17 @@ function ClubCard({
             ],
           ),
         ];
-  const badge = silentSince
+  const badge = closure
     ? {
         className: "bg-[var(--surface-muted)] text-zinc-600 dark:text-zinc-300",
-        text: `Нет продаж с ${formatDay(silentSince)} — клуб закрыт или данные не приходят`,
+        text: formatClosure(closure),
       }
-    : gap
+    : silentSince
+      ? {
+          className: "bg-[var(--surface-muted)] text-zinc-600 dark:text-zinc-300",
+          text: `Нет продаж с ${formatDay(silentSince)} — клуб закрыт или данные не приходят`,
+        }
+      : gap
       ? {
           className: "bg-amber-500/10 text-amber-900 dark:text-amber-100",
           text: `Резерв — конверсия: ${formatNumber(gap.value, 1)}% против ${formatNumber(gap.best, 1)}% у лучшего клуба`,
@@ -477,7 +512,7 @@ function ClubCard({
   return (
     <ExecutiveLink
       href={
-        silentSince || !row.storeId
+        quiet || !row.storeId
           ? clubDetailHref(summary, "productRevenue", [row.storeId ?? ""])
           : driverDetailHref(
               summary,
@@ -490,7 +525,7 @@ function ClubCard({
             )
       }
       prefetch={false}
-      className={`flex min-w-0 flex-col gap-3.5 rounded-2xl p-4 ${tileLink} ${silentSince ? "border border-dashed border-zinc-300 bg-[var(--surface)] opacity-90 dark:border-zinc-700" : "border border-[var(--border-soft)] bg-[var(--surface)] shadow-sm"}`}
+      className={`flex min-w-0 flex-col gap-3.5 rounded-2xl p-4 ${tileLink} ${quiet ? "border border-dashed border-zinc-300 bg-[var(--surface)] opacity-90 dark:border-zinc-700" : "border border-[var(--border-soft)] bg-[var(--surface)] shadow-sm"}`}
     >
       <span className="flex items-center justify-between gap-2">
         <strong className="truncate text-sm text-[var(--foreground)]">
@@ -509,7 +544,7 @@ function ClubCard({
         </span>
         {change ? (
           <span
-            className={`text-sm font-semibold tabular-nums ${silentSince ? toneText.flat : toneText[change.tone]}`}
+            className={`text-sm font-semibold tabular-nums ${quiet ? toneText.flat : toneText[change.tone]}`}
           >
             {arrow(change.tone)}
             {change.text.split(" · ")[0]}
@@ -529,7 +564,7 @@ function ClubCard({
           </span>
         ))}
       </span>
-      {contributions.length && totalShare > 0 && !silentSince ? (
+      {contributions.length && totalShare > 0 && !quiet ? (
         <span className="grid gap-1.5">
           <span
             aria-hidden="true"
@@ -591,7 +626,17 @@ export function ClubLeverCards({ summary }: { summary: ExecutiveSummary }) {
     conversionGaps(summary.drivers).map((gap) => [gap.storeId, gap]),
   );
   const rank = (row: ExecutiveDriverRow) => {
-    if (row.storeId && silent.has(row.storeId)) return 3;
+    if (
+      row.storeId &&
+      (silent.has(row.storeId) ||
+        closedThroughout(
+          summary,
+          row.storeId,
+          summary.scope.period.from,
+          summary.scope.period.to,
+        ))
+    )
+      return 3;
     const lever = mainLever(row);
     if ((row.storeId && gaps.has(row.storeId)) || lever?.kind === "LOSS")
       return 0;

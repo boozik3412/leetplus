@@ -382,6 +382,7 @@ model Tenant {
   staffChatReadReceipts                StaffChatReadReceipt[]
   staffNotifications                   StaffNotification[]
   guestSupportTickets                  GuestSupportTicket[]
+  storeClosures                        StoreClosure[]
   guestSupportAttachments              GuestSupportAttachment[]
   guestSupportTicketComments           GuestSupportTicketComment[]
   guestSupportTicketAuditEvents        GuestSupportTicketAuditEvent[]
@@ -1391,6 +1392,7 @@ model Store {
   staffChatMessages               StaffChatMessage[]
   staffNotifications              StaffNotification[]
   guestSupportTickets             GuestSupportTicket[]
+  closures                        StoreClosure[]
   staffMembers                    StaffMember[]
   userAccesses                    UserStoreAccess[]
   langameProductConfigurations    LangameClubProductConfiguration[]
@@ -1401,6 +1403,29 @@ model Store {
   @@unique([tenantId, publicSlug], map: "store_tenant_public_slug_uidx")
   @@index([tenantId])
   @@index([integrationSourceId])
+}
+
+/// A period when a club is closed, declared by the owner. closedFrom is the first
+/// closed club-local day; reopenedOn is the first day it is open again (null
+/// while it is still closed). The dashboards read it so that a closed club is
+/// not reported as a sales drop, and its PCs do not count as idle capacity.
+model StoreClosure {
+  id              String    @id @default(uuid())
+  tenantId        String
+  storeId         String
+  closedFrom      DateTime  @db.Date
+  reopenedOn      DateTime? @db.Date
+  reason          String?
+  createdByUserId String?
+  updatedByUserId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store  Store  @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([tenantId, storeId, closedFrom], map: "store_closure_store_from_idx")
+  @@index([tenantId, reopenedOn], map: "store_closure_tenant_reopened_idx")
 }
 
 model Category {

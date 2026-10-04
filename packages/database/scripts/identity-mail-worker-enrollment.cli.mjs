@@ -25,14 +25,14 @@ Additional environment for --apply:
   IDENTITY_MAIL_WORKER_ENROLLMENT_CONFIRM
 
 Exact confirmation:
-  APPLY_IDENTITY_MAIL_WORKER_ENROLLMENT_V1 <database> <role> <roleOid> 20260908180000_external_langame_simple_onboarding 191
+  APPLY_IDENTITY_MAIL_WORKER_ENROLLMENT_V1 <database> <role> <roleOid> 20261004090000_store_closures 192
 
 Safety contract:
   - The command never creates a role or a tenant enrollment row.
   - CURRENT_USER and SESSION_USER must be the unchanged database owner.
   - The existing target role must match exact name/OID and be LOGIN,
     NOINHERIT, non-privileged, without membership, role settings or ownership.
-  - Exact merged terminal release head CURRENT_191 and count 191 are required.
+  - Exact merged terminal release head CURRENT_192 and count 192 are required.
   - The target role receives public schema USAGE and EXECUTE on exactly five
     delivery RPCs: readiness, claim, provider-mark, complete and tenant-scoped
     reap.

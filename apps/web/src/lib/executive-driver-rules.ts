@@ -1,11 +1,14 @@
-// Decision rules over the revenue drivers of the executive summary. No
-// runtime imports so the node:test contract suite can load it directly.
+// Decision rules over the revenue drivers of the executive summary. The only
+// runtime import carries its extension so the node:test contract suite can load
+// this file directly.
 import type {
+  ExecutiveClosure,
   ExecutiveDriverFactor,
   ExecutiveDriverRow,
   ExecutiveDrivers,
   ExecutiveSummary,
 } from "./dashboard-executive";
+import { closedThroughout, closureOnDay } from "./executive-closures.ts";
 
 /** A club converts visits into bar purchases this much worse than the best club. */
 export const CONVERSION_GAP_RATIO = 0.75;
@@ -167,6 +170,40 @@ export function clubLocalDay(iso: string, timeZone?: string | null) {
   return iso.slice(0, 10);
 }
 
+/**
+ * Clubs the owner marked closed (no reopening date) that nevertheless sold
+ * after the closing day: the closure was probably never lifted.
+ */
+export function closureConflicts(
+  summary: ExecutiveSummary,
+): Array<{
+  storeId: string;
+  storeName: string;
+  closedFrom: string;
+  lastSale: string;
+}> {
+  return (summary.closures ?? []).flatMap((closure) => {
+    if (closure.reopenedOn !== null || closure.closedDays <= 0) return [];
+    const club = summary.clubs.find((item) => item.storeId === closure.storeId);
+    const factAsOf = club?.metrics.productRevenue?.factAsOf;
+    if (!club || !factAsOf) return [];
+    const lastSale = clubLocalDay(
+      factAsOf,
+      summary.scope.storeTimeZones?.[club.storeId],
+    );
+    return lastSale > closure.closedFrom
+      ? [
+          {
+            storeId: club.storeId,
+            storeName: club.storeName,
+            closedFrom: closure.closedFrom,
+            lastSale,
+          },
+        ]
+      : [];
+  });
+}
+
 /** Last club-local day with a confirmed bar sale in the selection. */
 export function salesConfirmedThrough(summary: ExecutiveSummary) {
   const days = summary.clubs.flatMap((club) => {
@@ -183,11 +220,21 @@ export function salesConfirmedThrough(summary: ExecutiveSummary) {
  * Clubs without bar sales since a day inside the period although they sold
  * before: closed or not delivering data. Their decline is not a sales signal.
  */
-export function silentClubs(
-  summary: ExecutiveSummary,
-): Array<{ storeId: string; storeName: string; since: string }> {
+export type SilentClub = {
+  storeId: string;
+  storeName: string;
+  since: string;
+  /** The owner's closure that explains the silence, else null. */
+  closure: ExecutiveClosure | null;
+};
+
+export function silentClubs(summary: ExecutiveSummary): SilentClub[] {
   const { from, to } = summary.scope.period;
-  return summary.clubs.flatMap((club) => {
+  const explained = (storeId: string, since: string) =>
+    closedThroughout(summary, storeId, since, to)
+      ? closureOnDay(summary, storeId, since)
+      : null;
+  return summary.clubs.flatMap((club): SilentClub[] => {
     const metric = club.metrics.productRevenue;
     if (!metric || metric.state === "MISSING" || metric.state === "FAILED")
       return [];
@@ -202,7 +249,14 @@ export function silentClubs(
     if (!soldBefore) return [];
     if (lastSale === null)
       return (metric.comparison?.previousValue ?? 0) > 0
-        ? [{ storeId: club.storeId, storeName: club.storeName, since: from }]
+        ? [
+            {
+              storeId: club.storeId,
+              storeName: club.storeName,
+              since: from,
+              closure: explained(club.storeId, from),
+            },
+          ]
         : [];
     return lastSale < to
       ? [
@@ -210,6 +264,7 @@ export function silentClubs(
             storeId: club.storeId,
             storeName: club.storeName,
             since: nextDay(lastSale),
+            closure: explained(club.storeId, nextDay(lastSale)),
           },
         ]
       : [];

@@ -5,18 +5,41 @@ import {
   StoreEditForm,
 } from "@/components/store-actions";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
+import { StoreClosureControl } from "@/components/store-closure-control";
 import { requireCurrentUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
   inferStoreCityFromAddress,
   timeZoneForStoreCity,
 } from "@/lib/store-location";
+import {
+  clubToday,
+  closureHeadline,
+  closureStatus,
+  closuresOfStore,
+  validDay,
+} from "@/lib/store-closure-state";
+import { getStoreClosures } from "@/lib/store-closures";
 import { getStores, type Store } from "@/lib/stores";
 import type { ReactNode } from "react";
 
-export default async function StoresPage() {
+const first = (value: string | string[] | undefined) =>
+  Array.isArray(value) ? value[0] : value;
+
+export default async function StoresPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await requireCurrentUser();
-  const stores = await getStores();
+  const params = await searchParams;
+  const [stores, closures] = await Promise.all([
+    getStores(),
+    getStoreClosures(),
+  ]);
+  // Links from the dashboard open a club's closure form with the day filled in.
+  const closeClub = first(params.closeClub);
+  const reopenClub = first(params.reopenClub);
   const canEditStores = can(user, "edit_stores");
   const missingCoordinates = stores.filter(
     (store) =>
@@ -114,8 +137,23 @@ export default async function StoresPage() {
             ) : null}
           </div>
           <div className="divide-y divide-zinc-100">
-            {stores.map((store) => (
-              <article key={store.id} className="px-5 py-5">
+            {stores.map((store) => {
+              const storeClosures = closuresOfStore(closures ?? [], store.id);
+              const today = clubToday(
+                store.timeZone ??
+                  timeZoneForStoreCity(
+                    store.city ?? inferStoreCityFromAddress(store.address),
+                  ),
+              );
+              const closure = closureStatus(storeClosures, today);
+              const closeDay = validDay(first(params.closedFrom));
+              const reopenDay = validDay(first(params.reopenedOn));
+              return (
+              <article
+                key={store.id}
+                id={`club-${store.id}`}
+                className="scroll-mt-6 px-5 py-5"
+              >
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -125,6 +163,13 @@ export default async function StoresPage() {
                       <StoreStatusPill tone={store.isActive ? "ready" : "muted"}>
                         {store.isActive ? "Активна" : "Архив"}
                       </StoreStatusPill>
+                      {closure.kind !== "OPEN" ? (
+                        <StoreStatusPill
+                          tone={closure.kind === "CLOSED" ? "warning" : "info"}
+                        >
+                          {closureHeadline(closure)}
+                        </StoreStatusPill>
+                      ) : null}
                       <StoreStatusPill
                         tone={store.gamificationEnabled ? "ready" : "muted"}
                       >
@@ -156,13 +201,30 @@ export default async function StoresPage() {
 
                 <StoreFieldReadiness store={store} />
 
+                {canEditStores && closures !== null ? (
+                  <StoreClosureControl
+                    storeId={store.id}
+                    storeName={store.name}
+                    today={today}
+                    closures={storeClosures}
+                    intent={
+                      closeClub === store.id && closeDay
+                        ? { mode: "close", date: closeDay }
+                        : reopenClub === store.id && reopenDay
+                          ? { mode: "reopen", date: reopenDay }
+                          : null
+                    }
+                  />
+                ) : null}
+
                 {canEditStores ? (
                   <div className="mt-4 rounded-lg border border-zinc-100 bg-zinc-50/70 p-3">
                     <StoreEditForm store={store} />
                   </div>
                 ) : null}
               </article>
-            ))}
+              );
+            })}
 
             {stores.length === 0 ? (
               <p className="px-5 py-6 text-sm text-zinc-500">

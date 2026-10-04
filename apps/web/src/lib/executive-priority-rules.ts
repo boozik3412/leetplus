@@ -1,4 +1,5 @@
 import type { ExecutiveMetric, ExecutiveSummary } from "./dashboard-executive";
+import { closedDaysIn } from "./executive-closures.ts";
 
 /** A missing/partial period or disabled comparison is not evidence of decline. */
 export function hasConfirmedDecline(
@@ -55,6 +56,8 @@ export type ClubDropSignal = {
   absoluteDelta: number;
   percentDelta: number;
   perDay: number;
+  /** Compared per open day because the club was closed in one of the periods. */
+  perOpenDay: boolean;
 };
 
 function inclusiveDays(from: string, to: string) {
@@ -67,16 +70,66 @@ function inclusiveDays(from: string, to: string) {
 /**
  * Confirmed product-revenue decline per club. Only AVAILABLE clubs with an
  * API comparison qualify, so partial or unconfirmed clubs never raise it.
+ * Days the owner declared the club closed are not sales days: such a club is
+ * compared per open day, and a club closed throughout raises nothing.
  */
 export function clubDropSignals(summary: ExecutiveSummary): ClubDropSignal[] {
   const days = inclusiveDays(
     summary.scope.period.from,
     summary.scope.period.to,
   );
-  if (!summary.scope.comparison || days < CLUB_DROP_MIN_PERIOD_DAYS) return [];
+  const { comparison } = summary.scope;
+  if (!comparison || days < CLUB_DROP_MIN_PERIOD_DAYS) return [];
+  const previousDays = inclusiveDays(comparison.from, comparison.to);
   return summary.clubs
     .flatMap((club): ClubDropSignal[] => {
       const metric = club.metrics.productRevenue;
+      const closed = closedDaysIn(
+        summary,
+        club.storeId,
+        summary.scope.period.from,
+        summary.scope.period.to,
+      );
+      const previousClosed = closedDaysIn(
+        summary,
+        club.storeId,
+        comparison.from,
+        comparison.to,
+      );
+      if (closed > 0 || previousClosed > 0) {
+        const openDays = days - closed;
+        const previousOpenDays = previousDays - previousClosed;
+        const previousValue = metric?.comparison?.previousValue;
+        if (
+          metric?.state !== "AVAILABLE" ||
+          metric.value === null ||
+          !Number.isFinite(metric.value) ||
+          typeof previousValue !== "number" ||
+          !Number.isFinite(previousValue) ||
+          previousValue <= 0 ||
+          openDays <= 0 ||
+          previousOpenDays <= 0
+        )
+          return [];
+        const perDay = metric.value / openDays;
+        const previousPerDay = previousValue / previousOpenDays;
+        const percentDelta = (perDay / previousPerDay - 1) * 100;
+        if (percentDelta > CLUB_DROP_TODAY_PERCENT) return [];
+        return [
+          {
+            storeId: club.storeId,
+            storeName: club.storeName,
+            level:
+              percentDelta <= CLUB_DROP_URGENT_PERCENT ? "URGENT" : "TODAY",
+            value: metric.value,
+            previousValue,
+            absoluteDelta: (perDay - previousPerDay) * openDays,
+            percentDelta,
+            perDay: perDay - previousPerDay,
+            perOpenDay: true,
+          },
+        ];
+      }
       const percentDelta = metric?.comparison?.percentDelta;
       if (
         !hasConfirmedDecline(metric) ||
@@ -97,6 +150,7 @@ export function clubDropSignals(summary: ExecutiveSummary): ClubDropSignal[] {
           absoluteDelta,
           percentDelta,
           perDay: absoluteDelta / days,
+          perOpenDay: false,
         },
       ];
     })
@@ -195,6 +249,7 @@ export const priorityKinds = [
   "TRAINING_INCOMPLETE",
   "REGULATIONS_UNACKNOWLEDGED",
   "SILENT_CLUB",
+  "CLOSURE_CONFLICT",
   "SALES_COVERAGE",
 ] as const;
 export type PriorityKind = (typeof priorityKinds)[number];

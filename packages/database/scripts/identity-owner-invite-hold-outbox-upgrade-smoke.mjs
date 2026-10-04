@@ -377,9 +377,9 @@ async function readMigrationPlan() {
   ]);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260908180000_external_langame_simple_onboarding",
+    "20261004090000_store_closures",
   );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_191");
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_192");
   const targetIndex = migrationDirectories.indexOf(TARGET_MIGRATION);
   assert.equal(
     targetIndex,

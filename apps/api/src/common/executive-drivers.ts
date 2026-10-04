@@ -37,6 +37,8 @@ export type ExecutiveDriverContribution = {
 };
 
 export type ExecutiveDriverRow = {
+  /** Computers of the row's clubs; null when any club has no known count. */
+  computerCount?: number | null;
   /** DOMAIN: clubs sharing one Langame domain, all selected (sessions are not split by club). */
   scope: 'NETWORK' | 'DOMAIN' | 'CLUB';
   storeId: string | null;

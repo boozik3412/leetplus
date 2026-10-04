@@ -264,3 +264,73 @@ test("direction follows the number and formatting uses a real minus", () => {
   assert.equal(isWeekend("2026-09-26"), true);
   assert.equal(periodDays("2026-09-23", "2026-09-29"), 7);
 });
+
+const closureOf = (
+  storeId: string,
+  closedFrom: string,
+  reopenedOn: string | null,
+  closedDays: number,
+  previousClosedDays = 0,
+) => ({
+  storeId,
+  storeName: `Club ${storeId}`,
+  closedFrom,
+  reopenedOn,
+  reason: null,
+  closedDays,
+  previousClosedDays,
+  periodDays: 7,
+});
+const withClosures = (
+  summary: never,
+  closures: Array<ReturnType<typeof closureOf>>,
+) => ({ ...(summary as object), closures }) as never;
+
+test("club drop: days the owner declared the club closed are not sales days", () => {
+  const clubs: Array<[string, ReturnType<typeof product>]> = [
+    ["kh", product(22_860, 69_910)],
+    ["rd", product(7_000, 10_000)],
+  ];
+  // Closed from 25.09 for good: 2 open days sold 11 430 a day against 9 987.
+  assert.deepEqual(
+    clubDropSignals(
+      withClosures(summaryOf(clubs), [closureOf("kh", "2026-09-25", null, 5)]),
+    ).map((signal) => signal.storeId),
+    ["rd"],
+  );
+  // Closed throughout the period: nothing to compare.
+  assert.deepEqual(
+    clubDropSignals(
+      withClosures(summaryOf(clubs), [closureOf("kh", "2026-09-20", null, 7)]),
+    ).map((signal) => signal.storeId),
+    ["rd"],
+  );
+  // One closed day does not hide a real decline: 6 open days still sold -62%.
+  const [signal] = clubDropSignals(
+    withClosures(summaryOf(clubs), [closureOf("kh", "2026-09-29", null, 1)]),
+  );
+  assert.equal(signal.storeId, "kh");
+  assert.equal(signal.level, "URGENT");
+  assert.equal(signal.perOpenDay, true);
+  assert.equal(Math.round(signal.percentDelta), -62);
+  // Without closures the signal keeps its totals.
+  assert.equal(clubDropSignals(summaryOf(clubs))[0].perOpenDay, false);
+});
+
+test("club drop: a closure in the comparison period lifts the base, not the decline", () => {
+  // 16-18.09 were closed: the base is 4 open days at 10 000, now 7 days at 5 000.
+  const [signal] = clubDropSignals(
+    withClosures(summaryOf([["kh", product(35_000, 40_000)]]), [
+      closureOf("kh", "2026-09-16", "2026-09-19", 0, 3),
+    ]),
+  );
+  assert.equal(signal.storeId, "kh");
+  assert.equal(signal.perOpenDay, true);
+  assert.equal(Math.round(signal.percentDelta), -50);
+  assert.equal(signal.level, "URGENT");
+  // The same totals without the closure are only -12.5%: no signal.
+  assert.deepEqual(
+    clubDropSignals(summaryOf([["kh", product(35_000, 40_000)]])),
+    [],
+  );
+});

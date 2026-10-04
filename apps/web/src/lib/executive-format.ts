@@ -43,6 +43,18 @@ export function formatWeekdayDay(value: string) {
   return `${weekdays[weekday]} ${Number(parts.day)}`;
 }
 
+/** «Клуб закрыт с 29.09» / «… с 25.09, открыт 28.09» + the owner's reason. */
+export function formatClosure(closure: {
+  closedFrom: string;
+  reopenedOn: string | null;
+  reason: string | null;
+}) {
+  const base = closure.reopenedOn
+    ? `Клуб закрыт с ${formatDay(closure.closedFrom)}, открыт ${formatDay(closure.reopenedOn)}`
+    : `Клуб закрыт с ${formatDay(closure.closedFrom)}`;
+  return closure.reason ? `${base} · ${closure.reason}` : base;
+}
+
 export function isWeekend(value: string) {
   if (!parseDay(value)) return false;
   const weekday = new Date(`${value}T00:00:00.000Z`).getUTCDay();

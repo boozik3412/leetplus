@@ -15,6 +15,13 @@ import {
   onClubDays,
 } from '../common/club-time';
 import {
+  closedDaysInRange,
+  closureDay,
+  rangeDays,
+  type ClosurePeriod,
+  type ExecutiveClosure,
+} from '../common/store-closure';
+import {
   decomposeBarRevenue,
   driverFactors,
   EXECUTIVE_DRIVER_DAYS_LIMIT,
@@ -84,6 +91,7 @@ export type DashboardExecutiveSummary = {
   }>;
   days: Array<{ date: string; metrics: ExecutiveMetrics }>;
   drivers: ExecutiveDrivers;
+  closures: ExecutiveClosure[];
 };
 
 export type DashboardExecutiveOperations = {
@@ -856,6 +864,35 @@ export class DashboardService {
         computerCount: true,
       },
     });
+    // Owner-declared closures of the selected clubs that touch either period:
+    // a closed club is not a sales decline and its computers are not idle.
+    const closureFrom = comparisonPeriod?.from ?? product.scope.period.from;
+    const storeClosures = await this.prisma.storeClosure.findMany({
+      where: {
+        tenantId: product.tenantId,
+        storeId: { in: storeIds },
+        closedFrom: {
+          lte: new Date(`${product.scope.period.to}T00:00:00.000Z`),
+        },
+        OR: [
+          { reopenedOn: null },
+          { reopenedOn: { gt: new Date(`${closureFrom}T00:00:00.000Z`) } },
+        ],
+      },
+      orderBy: { closedFrom: 'asc' },
+    });
+    const closuresByStore = new Map<string, ClosurePeriod[]>();
+    storeClosures.forEach((closure) =>
+      closuresByStore.set(closure.storeId, [
+        ...(closuresByStore.get(closure.storeId) ?? []),
+        {
+          closedFrom: closureDay(closure.closedFrom),
+          reopenedOn: closure.reopenedOn
+            ? closureDay(closure.reopenedOn)
+            : null,
+        },
+      ]),
+    );
     const sessionFrom = new Date(
       `${comparisonPeriod?.from ?? product.scope.period.from}T00:00:00.000Z`,
     );
@@ -1181,6 +1218,18 @@ export class DashboardService {
         new Date(`${period.from}T00:00:00.000Z`),
         new Date(`${period.to}T23:59:59.999Z`),
       ).length;
+      // Closed days are not capacity: an idle closed club must not lower the load.
+      const capacityDays = clubIds.map((id) =>
+        Math.max(
+          0,
+          days -
+            closedDaysInRange(
+              closuresByStore.get(id) ?? [],
+              period.from,
+              period.to,
+            ),
+        ),
+      );
       const visits = traffic.visits > 0 ? traffic.visits : null;
       return {
         factors: driverFactors({
@@ -1194,11 +1243,18 @@ export class DashboardService {
           capacityHours:
             visits !== null &&
             pcs.every((count) => typeof count === 'number' && count > 0)
-              ? pcs.reduce<number>((sum, count) => sum + (count ?? 0), 0) *
-                24 *
-                days
+              ? pcs.reduce<number>(
+                  (sum, count, index) =>
+                    sum + (count ?? 0) * 24 * capacityDays[index],
+                  0,
+                )
               : null,
         }),
+        computerCount: pcs.every(
+          (count) => typeof count === 'number' && count > 0,
+        )
+          ? pcs.reduce<number>((sum, count) => sum + (count ?? 0), 0)
+          : null,
         unresolvedVisits: visits === null && traffic.unresolved > 0,
       };
     };
@@ -1229,6 +1285,7 @@ export class DashboardService {
         storeId,
         storeName,
         storeIds: [...clubIds],
+        computerCount: current.computerCount,
         current: current.factors,
         previous: previous?.factors ?? null,
         contributions: previous
@@ -1296,9 +1353,41 @@ export class DashboardService {
       days: driverDays,
     };
 
+    const periodDayCount = rangeDays(
+      product.scope.period.from,
+      product.scope.period.to,
+    );
+    const closures: ExecutiveClosure[] = storeClosures.map((closure) => {
+      const own: ClosurePeriod[] = [
+        {
+          closedFrom: closureDay(closure.closedFrom),
+          reopenedOn: closure.reopenedOn
+            ? closureDay(closure.reopenedOn)
+            : null,
+        },
+      ];
+      return {
+        storeId: closure.storeId,
+        storeName: clubNames.get(closure.storeId) ?? closure.storeId,
+        closedFrom: own[0].closedFrom,
+        reopenedOn: own[0].reopenedOn,
+        reason: closure.reason,
+        closedDays: closedDaysInRange(
+          own,
+          product.scope.period.from,
+          product.scope.period.to,
+        ),
+        previousClosedDays: comparisonPeriod
+          ? closedDaysInRange(own, comparisonPeriod.from, comparisonPeriod.to)
+          : 0,
+        periodDays: periodDayCount,
+      };
+    });
+
     return {
       scope: { ...product.scope, comparison: comparisonPeriod },
       drivers,
+      closures,
       metrics: comparedMetrics,
       clubs: product.rows.map((row) => {
         const previousRow = previousProduct?.rows.find(

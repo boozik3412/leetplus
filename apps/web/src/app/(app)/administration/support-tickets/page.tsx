@@ -43,6 +43,7 @@ export default async function PlatformSupportTicketsPage({
       status: searchParam(params.status) ?? "active",
       topic: searchParam(params.topic),
       assignedToUserId: searchParam(params.assignedToUserId),
+      storeId: searchParam(params.storeId),
       search: searchParam(params.search),
       pageSize: searchParam(params.pageSize),
     },

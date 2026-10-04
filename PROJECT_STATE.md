@@ -310,7 +310,9 @@ backup и подписанные rollout receipts сохранены вне runt
 Guest bug-report description теперь согласованно принимает `20..2000`
 символов в Web/API/DB. Канонические пять allowlisted multipart-полей плюс один
 JPG/PNG/WebP проходят при `parts=7`; пределы `fields=5`, `files=1`, 5 MiB,
-signature/MIME sanitation, idempotency и abuse guards сохранены.
+signature/MIME sanitation, idempotency и abuse guards сохранены. С 04.10.2026
+добавлено шестое поле `storeId` (клуб обращения): `fields=6`, `parts=8` —
+см. [`docs/support/guest-bug-reporting.md`](docs/support/guest-bug-reporting.md).
 
 Менеджер по стандартам снова может приглашать canonical
 `CLUB_ADMINISTRATOR` и `SENIOR_ADMINISTRATOR`, но только в непустое подмножество

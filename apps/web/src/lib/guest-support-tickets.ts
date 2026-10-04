@@ -17,6 +17,8 @@ export type GuestSupportTicketStatus =
 export type GuestSupportTicketListItem = {
   ticketNumber: string;
   topicLabel: string;
+  // A guest's game profile spans the network; the club tells tickets apart.
+  storeName: string;
   status: GuestSupportTicketStatus;
   statusLabel: string;
   createdAt: string;
@@ -132,6 +134,7 @@ function projectListItem(value: unknown): GuestSupportTicketListItem | null {
     typeof item.ticketNumber !== "string" ||
     !GUEST_SUPPORT_TICKET_NUMBER.test(item.ticketNumber) ||
     typeof item.topicLabel !== "string" ||
+    typeof item.storeName !== "string" ||
     typeof item.status !== "string" ||
     !STATUSES.has(item.status) ||
     typeof item.statusLabel !== "string" ||
@@ -145,6 +148,7 @@ function projectListItem(value: unknown): GuestSupportTicketListItem | null {
   return {
     ticketNumber: item.ticketNumber,
     topicLabel: item.topicLabel,
+    storeName: item.storeName,
     status: item.status as GuestSupportTicketStatus,
     statusLabel: item.statusLabel,
     createdAt: item.createdAt,

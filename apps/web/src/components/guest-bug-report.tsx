@@ -22,6 +22,9 @@ export function GuestBugReportButton({
 }) {
   const [open, setOpen] = useState(false);
   const [topic, setTopic] = useState("");
+  const clubs = configuration.clubs ?? [];
+  const defaultClubId = configuration.currentClubId ?? clubs[0]?.id ?? "";
+  const [clubId, setClubId] = useState(defaultClubId);
   const [description, setDescription] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -87,6 +90,8 @@ export function GuestBugReportButton({
 
   function openDialog() {
     idempotencyKeyRef.current = createIdempotencyKey();
+    // The guest may have switched clubs since the last report.
+    setClubId(defaultClubId);
     setError(null);
     setResult(null);
     setOpen(true);
@@ -141,6 +146,9 @@ export function GuestBugReportButton({
     try {
       const body = new FormData();
       body.set("topic", topic);
+      if (clubId) {
+        body.set("storeId", clubId);
+      }
       body.set("description", normalizedDescription);
       body.set("route", `${window.location.pathname}${window.location.hash}`);
       body.set("viewport", `${window.innerWidth}x${window.innerHeight}`);
@@ -245,6 +253,24 @@ export function GuestBugReportButton({
                       Опишите, что произошло. Мы автоматически приложим данные о
                       странице и устройстве.
                     </p>
+
+                    {clubs.length > 1 ? (
+                      <label className={styles.field}>
+                        <span>Клуб, где случилась проблема</span>
+                        <select
+                          value={clubId}
+                          onChange={(event) => setClubId(event.target.value)}
+                        >
+                          {clubs.map((club) => (
+                            <option key={club.id} value={club.id}>
+                              {club.id === configuration.currentClubId
+                                ? `${club.name} — сейчас выбран`
+                                : club.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
 
                     <label className={styles.field}>
                       <span>Тема инцидента</span>

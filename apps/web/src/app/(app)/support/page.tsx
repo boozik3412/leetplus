@@ -33,6 +33,7 @@ export default async function SupportTicketsPage({
     status: searchParam(params.status) ?? "active",
     topic: searchParam(params.topic),
     assignedToUserId: searchParam(params.assignedToUserId),
+    storeId: searchParam(params.storeId),
     search: searchParam(params.search),
     pageSize: searchParam(params.pageSize),
   });
@@ -52,9 +53,9 @@ export default async function SupportTicketsPage({
             Обращения гостей
           </h1>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Очередь сообщений о проблемах из игрового модуля. Возьмите
-            обращение в работу, проверьте его, оставьте внутренний комментарий
-            и отметьте результат.
+            Очередь сообщений о проблемах из игрового модуля. Возьмите обращение
+            в работу, проверьте его, оставьте внутренний комментарий и отметьте
+            результат.
           </p>
         </header>
         <StaffSupportTicketsWorkspace

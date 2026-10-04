@@ -38048,6 +38048,8 @@ function buildVisualEditorPreviewSummary(
         enabled: false,
         maxAttachmentBytes: 5 * 1024 * 1024,
         topics: [],
+        clubs: [],
+        currentClubId: null,
       },
     },
     referral: {

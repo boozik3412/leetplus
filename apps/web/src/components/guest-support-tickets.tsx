@@ -243,7 +243,10 @@ export function GuestSupportTickets() {
                               />
                             </span>
                             <span className={styles.listTopic}>
-                              {ticket.topicLabel}
+                              <span className={styles.club}>
+                                {ticket.storeName}
+                              </span>{" "}
+                              · {ticket.topicLabel}
                             </span>
                             <span className={styles.listMeta}>
                               {ticket.unread ? (
@@ -364,7 +367,9 @@ function TicketThread({
       <button type="button" className={styles.back} onClick={onBack}>
         ← Все обращения
       </button>
-      <p className={shell.eyebrow}>{ticket.topicLabel}</p>
+      <p className={shell.eyebrow}>
+        {ticket.storeName} · {ticket.topicLabel}
+      </p>
       <h2 id="guestSupportTicketsTitle" className={styles.threadTitle}>
         {ticket.ticketNumber}
         <StatusChip status={ticket.status} label={ticket.statusLabel} />

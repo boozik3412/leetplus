@@ -1535,6 +1535,15 @@ Support-функциональность следует тем же трём г�
   corporate contour под теми же guards, что и очередь. Corporate код
   использует чистые helpers из `guest-portal/guest-support-thread.ts`;
   обратного импорта нет. Схема и миграции не меняются;
+- клуб обращения: гость может указать другой клуб своей сети в поле
+  `storeId` формы (multipart allowlist `fields=6`, exclusive `parts=8`).
+  GuestRuntime принимает только активный клуб с игровым модулем того же
+  `tenantId`, иначе 400; клуб, выбранный в сессии, сохраняется в audit как
+  `reportedFromStoreId`. Список клубов в game-summary — только `id` и
+  название клубов сети гостя. Corporate `GET …/:id/guest-rewards` (те же
+  guards, что очередь; capability `view_support_tickets`) читает кошелёк
+  наград только exact `tenantId + profileId` тикета, ничего не изменяет и
+  отдаёт названия наград и статусы без идентификаторов провайдеров;
 - вложение ограничено одним JPG/PNG/WebP до 5 MiB, проверяется по bytes,
   очищается от metadata и выдаётся только как private attachment;
 - runtime flag `GUEST_BUG_REPORTING_MODE=OFF|LIVE` fail-closed и по умолчанию

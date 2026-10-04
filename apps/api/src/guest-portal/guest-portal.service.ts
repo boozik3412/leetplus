@@ -115,6 +115,9 @@ const TELEGRAM_MINI_APP_INIT_DATA_TTL_SECONDS = 60 * 60 * 24;
 const TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MS = 15_000;
 const TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MIN_MS = 1000;
 const TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MAX_MS = 120_000;
+const GUEST_BUG_REPORT_STORE_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const GUEST_PORTAL_READ_REQUIREMENTS = [
   { module: TenantModule.GAMIFICATION, action: 'READ' },
 ] as const satisfies readonly TenantExecutionRequirement[];
@@ -1059,6 +1062,9 @@ export type GuestPortalGameSummary = {
       enabled: boolean;
       maxAttachmentBytes: number;
       topics: Array<{ value: string; label: string }>;
+      // Clubs of the network a report can be about; the current one first.
+      clubs: Array<{ id: string; name: string }>;
+      currentClubId: string | null;
     };
   };
   referral: {
@@ -4185,10 +4191,13 @@ export class GuestPortalService {
       );
     }
 
+    const storeId = await this.guestBugReportStoreId(payload, input.storeId);
+
     return this.guestSupportService.createBugReport(
       {
         tenantId: payload.tenantId,
-        storeId: payload.storeId,
+        storeId,
+        reportedFromStoreId: payload.storeId,
         profileId: profile.id,
         guestId: payload.guestId ?? profile.guestId ?? null,
         idempotencyKey,
@@ -4302,7 +4311,7 @@ export class GuestPortalService {
       referralStats,
       completionNotifications,
       rewardWallet,
-      support: this.guestSupportConfiguration(),
+      support: await this.guestSupportConfiguration(payload),
     });
 
     this.logGuestGameDebug('summary-result', {
@@ -4344,17 +4353,71 @@ export class GuestPortalService {
     return summary;
   }
 
-  private guestSupportConfiguration(): GuestPortalGameSummary['support'] {
+  private async guestSupportConfiguration(scope: {
+    tenantId: string;
+    storeId: string;
+  }): Promise<GuestPortalGameSummary['support']> {
+    const enabled = isGuestBugReportingLive(this.configService);
     return {
       bugReporting: {
-        enabled: isGuestBugReportingLive(this.configService),
+        enabled,
         maxAttachmentBytes: GUEST_BUG_REPORT_MAX_BYTES,
         topics: GUEST_BUG_REPORT_TOPICS.map((value) => ({
           value,
           label: GUEST_BUG_REPORT_TOPIC_LABELS[value],
         })),
+        clubs: enabled ? await this.guestBugReportClubs(scope) : [],
+        currentClubId: scope.storeId,
       },
     };
+  }
+
+  // A guest's game profile spans every club of the network, so a report may
+  // be about another club of the same network than the one selected now.
+  private async guestBugReportClubs(scope: {
+    tenantId: string;
+    storeId: string;
+  }) {
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId: scope.tenantId,
+        OR: [
+          { id: scope.storeId },
+          { isActive: true, gamificationEnabled: true },
+        ],
+      },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+    return [
+      ...stores.filter((store) => store.id === scope.storeId),
+      ...stores.filter((store) => store.id !== scope.storeId),
+    ];
+  }
+
+  private async guestBugReportStoreId(
+    payload: Pick<GuestPortalTokenPayload, 'tenantId' | 'storeId'>,
+    requested: unknown,
+  ) {
+    const storeId = typeof requested === 'string' ? requested.trim() : '';
+    if (!storeId || storeId === payload.storeId) {
+      return payload.storeId;
+    }
+    const store = GUEST_BUG_REPORT_STORE_ID.test(storeId)
+      ? await this.prisma.store.findFirst({
+          where: {
+            id: storeId,
+            tenantId: payload.tenantId,
+            isActive: true,
+            gamificationEnabled: true,
+          },
+          select: { id: true },
+        })
+      : null;
+    if (!store) {
+      throw new BadRequestException('Выберите клуб своей сети.');
+    }
+    return store.id;
   }
 
   async getGameMissions(
@@ -6744,7 +6807,7 @@ export class GuestPortalService {
       referralStats,
       completionNotifications,
       rewardWallet,
-      support: this.guestSupportConfiguration(),
+      support: await this.guestSupportConfiguration(nextPayload),
     });
 
     return {
@@ -6851,7 +6914,7 @@ export class GuestPortalService {
       referralStats,
       completionNotifications: previousCompletionNotifications,
       rewardWallet: previousRewardWallet,
-      support: this.guestSupportConfiguration(),
+      support: await this.guestSupportConfiguration(nextPayload),
     });
 
     const liveSessionStartResult =
@@ -6928,7 +6991,7 @@ export class GuestPortalService {
       referralStats,
       completionNotifications,
       rewardWallet,
-      support: this.guestSupportConfiguration(),
+      support: await this.guestSupportConfiguration(nextPayload),
     });
 
     this.recordGameAuditEvent({
@@ -7694,7 +7757,7 @@ export class GuestPortalService {
       referralStats,
       completionNotifications,
       rewardWallet,
-      support: this.guestSupportConfiguration(),
+      support: await this.guestSupportConfiguration(nextPayload),
     });
 
     this.logGuestGameDebug('open-success', {
@@ -7898,7 +7961,7 @@ export class GuestPortalService {
       referralStats,
       completionNotifications,
       rewardWallet,
-      support: this.guestSupportConfiguration(),
+      support: await this.guestSupportConfiguration(nextPayload),
     });
     const clubId = `${context.tenant.slug}:${
       context.store.publicSlug ?? context.store.id

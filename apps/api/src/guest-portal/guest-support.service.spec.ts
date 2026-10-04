@@ -198,6 +198,48 @@ describe('GuestSupportService', () => {
     expect(stripped.includes(Buffer.from('IDAT'))).toBe(true);
     expect(stripped.includes(Buffer.from('IEND'))).toBe(true);
   });
+
+  it('records the club the guest wrote from when the report is about another club', async () => {
+    const { service, tx } = fixture();
+
+    await service.createBugReport(
+      { ...context, storeId: 'store-b', reportedFromStoreId: 'store-a' },
+      input,
+    );
+
+    const audit = (
+      tx.guestSupportTicketAuditEvent.create.mock.calls as unknown as Array<
+        [{ data: { metadata: Record<string, unknown> } }]
+      >
+    )[0]?.[0].data.metadata;
+    expect(audit).toMatchObject({
+      storeId: 'store-b',
+      reportedFromStoreId: 'store-a',
+    });
+    expect(
+      (
+        tx.guestSupportTicket.create.mock.calls as unknown as Array<
+          [{ data: Record<string, unknown> }]
+        >
+      )[0]?.[0].data.storeId,
+    ).toBe('store-b');
+  });
+
+  it('does not repeat the club in the audit when it was not changed', async () => {
+    const { service, tx } = fixture();
+
+    await service.createBugReport(
+      { ...context, reportedFromStoreId: 'store-a' },
+      input,
+    );
+
+    const audit = (
+      tx.guestSupportTicketAuditEvent.create.mock.calls as unknown as Array<
+        [{ data: { metadata: Record<string, unknown> } }]
+      >
+    )[0]?.[0].data.metadata;
+    expect(audit).not.toHaveProperty('reportedFromStoreId');
+  });
 });
 
 function pngWithTextMetadata() {

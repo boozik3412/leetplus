@@ -211,11 +211,17 @@ const definitions: readonly ControllerDefinition[] = [
     routes: [
       [
         'GET',
-        ['', 'address-suggestions', 'address-geocode', 'yandex-maps-geocode'],
+        [
+          '',
+          'address-suggestions',
+          'address-geocode',
+          'yandex-maps-geocode',
+          'closures',
+        ],
       ],
-      ['POST', ['', 'address-geocode/missing']],
-      ['PATCH', [':id']],
-      ['DELETE', [':id']],
+      ['POST', ['', 'address-geocode/missing', ':id/closures']],
+      ['PATCH', [':id', ':id/closures/:closureId']],
+      ['DELETE', [':id', ':id/closures/:closureId']],
     ],
     overrides: {
       ...assortmentOutboundOverrides,
@@ -223,6 +229,10 @@ const definitions: readonly ControllerDefinition[] = [
       'POST /stores': { profile: 'NETWORK_VERIFIED' },
       'PATCH /stores/:id': { profile: 'NETWORK_VERIFIED' },
       'DELETE /stores/:id': { profile: 'NETWORK_VERIFIED' },
+      'GET /stores/closures': { profile: 'NETWORK_VERIFIED' },
+      'POST /stores/:id/closures': { profile: 'NETWORK_VERIFIED' },
+      'PATCH /stores/:id/closures/:closureId': { profile: 'NETWORK_VERIFIED' },
+      'DELETE /stores/:id/closures/:closureId': { profile: 'NETWORK_VERIFIED' },
     },
   },
   {

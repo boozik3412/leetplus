@@ -191,6 +191,21 @@ const NETWORK_MUTATION_BINDINGS: readonly NetworkMutationBinding[] = [
     method: 'archive',
   },
   {
+    id: 'POST /stores/:id/closures',
+    source: 'src/stores/store-closures.service.ts',
+    method: 'create',
+  },
+  {
+    id: 'PATCH /stores/:id/closures/:closureId',
+    source: 'src/stores/store-closures.service.ts',
+    method: 'update',
+  },
+  {
+    id: 'DELETE /stores/:id/closures/:closureId',
+    source: 'src/stores/store-closures.service.ts',
+    method: 'remove',
+  },
+  {
     id: 'POST /reports/oos-exclusions',
     source: 'src/reports/reports.service.ts',
     method: 'createOosExclusion',
@@ -616,8 +631,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(319);
-    expect(allowed).toHaveLength(258);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(323);
+    expect(allowed).toHaveLength(262);
     expect(blocked).toHaveLength(61);
     expect(outbound).toHaveLength(21);
     expect(
@@ -643,6 +658,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       'DELETE /products/:id',
       'DELETE /reports/oos-exclusions/:id',
       'DELETE /stores/:id',
+      'DELETE /stores/:id/closures/:closureId',
       'DELETE /suppliers/:id',
       'GET /categories',
       'GET /categories/langame/overview',
@@ -670,6 +686,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       'GET /reports/sku-performance',
       'GET /reports/suppliers-performance',
       'GET /stores',
+      'GET /stores/closures',
       'GET /suppliers',
       'GET /utilities/product-parsing',
       'GET /utilities/product-parsing/manual',
@@ -678,6 +695,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       'PATCH /products/bulk-category',
       'PATCH /reports/recommendations/:key/state',
       'PATCH /stores/:id',
+      'PATCH /stores/:id/closures/:closureId',
       'PATCH /suppliers/:id',
       'PATCH /utilities/product-parsing/manual/groups/:id',
       'POST /categories',
@@ -694,6 +712,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       'POST /imports/sales/preview',
       'POST /products',
       'POST /stores',
+      'POST /stores/:id/closures',
       'POST /reports/oos-exclusions',
       'POST /suppliers',
       'POST /utilities/product-parsing/analyze',

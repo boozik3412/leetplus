@@ -681,7 +681,10 @@ const definitions: readonly ControllerDefinition[] = [
     module: 'COMMUNICATIONS',
     profile: 'NETWORK_VERIFIED',
     routes: [
-      ['GET', ['', 'summary', ':id/attachments/:attachmentId']],
+      [
+        'GET',
+        ['', 'summary', ':id/guest-rewards', ':id/attachments/:attachmentId'],
+      ],
       ['POST', [':id/comments', ':id/resolve-with-reply']],
       ['PATCH', [':id']],
     ],

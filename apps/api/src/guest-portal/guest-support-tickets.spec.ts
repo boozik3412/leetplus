@@ -26,6 +26,7 @@ function ticketRow(overrides: Row = {}) {
     lastActivityAt: new Date('2026-10-01T10:00:00.000Z'),
     createdAt: new Date('2026-10-01T09:00:00.000Z'),
     updatedAt: new Date('2026-10-01T10:00:00.000Z'),
+    store: { name: 'Клуб на Радищева' },
     ...overrides,
   };
 }
@@ -127,6 +128,7 @@ describe('GuestSupportService guest ticket thread', () => {
           ticketNumber,
           topic: 'GAME_MODULE',
           topicLabel: expect.any(String) as string,
+          storeName: 'Клуб на Радищева',
           status: 'IN_PROGRESS',
           statusLabel: 'Разбираемся',
           createdAt: '2026-10-01T09:00:00.000Z',

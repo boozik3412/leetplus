@@ -13,6 +13,7 @@ const allowedFields = [
   "route",
   "viewport",
   "timeZone",
+  "storeId",
 ] as const;
 
 export async function POST(request: Request) {
@@ -33,10 +34,7 @@ export async function POST(request: Request) {
   const cookieStore = await cookies();
   const token = cookieStore.get(GUEST_AUTH_COOKIE_NAME)?.value ?? null;
   if (!token) {
-    return privateJson(
-      { message: "Гостевая сессия не найдена" },
-      401,
-    );
+    return privateJson({ message: "Гостевая сессия не найдена" }, 401);
   }
 
   const idempotencyKey = request.headers.get("idempotency-key")?.trim() ?? "";
@@ -77,10 +75,7 @@ export async function POST(request: Request) {
 
   const file = incoming.get("file");
   if (file !== null && !(file instanceof File)) {
-    return privateJson(
-      { message: "Вложение должно быть изображением." },
-      400,
-    );
+    return privateJson({ message: "Вложение должно быть изображением." }, 400);
   }
   if (file instanceof File && file.size > 0) {
     if (

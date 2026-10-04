@@ -24,6 +24,11 @@ import {
   type SupportThreadSummary,
 } from '../guest-portal/guest-support-thread';
 import { SecretEncryptionService } from '../integrations/secret-encryption.service';
+import {
+  buildSupportGuestRewards,
+  supportGuestRewardsSince,
+  type SupportTicketGuestRewards,
+} from './support-guest-rewards';
 
 export const SUPPORT_TICKET_STATUSES = [
   'NEW',
@@ -56,6 +61,8 @@ export type SupportTicketsQuery = {
   status?: SupportTicketStatusFilter;
   topic?: SupportTicketTopic | 'all';
   tenantId?: string;
+  // Club of the ticket; a guest's game profile spans every club of a network.
+  storeId?: string;
   assignedToUserId?: SupportTicketAssigneeFilter;
   search?: string;
   pageSize?: string;
@@ -382,6 +389,17 @@ export class SupportTicketsService {
     );
   }
 
+  getTenantTicketGuestRewards(user: AuthenticatedUser, id: string) {
+    this.assertSupportSchemaReady();
+    const { tenantId } = this.tenantContextService.resolve(user);
+    return this.getGuestRewards({ kind: 'TENANT', tenantId }, id);
+  }
+
+  getPlatformTicketGuestRewards(id: string) {
+    this.assertSupportSchemaReady();
+    return this.getGuestRewards({ kind: 'PLATFORM', tenantId: null }, id);
+  }
+
   getPlatformAttachment(ticketId: string, attachmentId: string) {
     this.assertSupportSchemaReady();
     return this.getAttachment(
@@ -425,6 +443,7 @@ export class SupportTicketsService {
       ...(tenantId ? { tenantId } : {}),
       ...statusWhere(filters.status),
       ...(awaitingIds ? { id: { in: awaitingIds } } : {}),
+      ...(filters.storeId ? { storeId: filters.storeId } : {}),
       ...(filters.topic === 'all' ? {} : { topic: filters.topic }),
       ...assigneeWhere(filters.assignedToUserId, user.id),
       ...(filters.search
@@ -467,7 +486,7 @@ export class SupportTicketsService {
         : {}),
     };
 
-    const [rows, summaryRows, queue, tenants] = await Promise.all([
+    const [rows, summaryRows, queue, tenants, stores] = await Promise.all([
       this.prisma.guestSupportTicket.findMany({
         where,
         orderBy: isQueueView(filters.status)
@@ -552,6 +571,7 @@ export class SupportTicketsService {
             select: { id: true, name: true, slug: true },
           })
         : Promise.resolve([]),
+      this.ticketStores(summaryWhere),
     ]);
 
     // Without a network filter the platform view offers the specialists of
@@ -562,9 +582,10 @@ export class SupportTicketsService {
         : tenantId
           ? [tenantId]
           : [...new Set(rows.map((row) => row.tenantId))];
-    const [users, threads] = await Promise.all([
+    const [users, threads, reportedFrom] = await Promise.all([
       this.getAssigneeCandidates(scope, assigneeTenantIds),
       this.threadSummaries(rows.map((row) => row.id)),
+      this.reportedFromStores(rows),
     ]);
     const counts = countByStatus(summaryRows);
 
@@ -583,11 +604,157 @@ export class SupportTicketsService {
         oldestActiveCreatedAt: queue.oldestActiveCreatedAt,
       },
       tenants,
+      stores,
       users,
-      rows: rows.map((row) =>
-        projectGuestThread(this.projectTicketContact(row), threads.get(row.id)),
-      ),
+      rows: rows.map((row) => ({
+        ...projectGuestThread(
+          this.projectTicketContact(row),
+          threads.get(row.id),
+        ),
+        reportedFromStore: reportedFrom.get(row.id) ?? null,
+      })),
     };
+  }
+
+  // Clubs that have tickets in the current scope, for the club filter.
+  private async ticketStores(where: Prisma.GuestSupportTicketWhereInput) {
+    const groups = await this.prisma.guestSupportTicket.groupBy({
+      by: ['storeId'],
+      where,
+      _count: { _all: true },
+    });
+    const counts = new Map<string, number>();
+    for (const group of groups as Array<{
+      storeId?: string;
+      _count?: { _all?: number };
+    }>) {
+      if (group.storeId) {
+        counts.set(group.storeId, group._count?._all ?? 0);
+      }
+    }
+    if (!counts.size) return [];
+    const stores = await this.prisma.store.findMany({
+      where: { id: { in: [...counts.keys()] } },
+      select: { id: true, name: true, tenant: { select: { name: true } } },
+      orderBy: { name: 'asc' },
+    });
+    return stores.map((store) => ({
+      id: store.id,
+      name: store.name,
+      tenantName: store.tenant.name,
+      tickets: counts.get(store.id) ?? 0,
+    }));
+  }
+
+  // The guest picks the club the problem is about; when it differs from the
+  // club selected in the game module, the card says where it was sent from.
+  private async reportedFromStores(
+    rows: Array<{ id: string; tenantId: string; storeId: string }>,
+  ) {
+    const result = new Map<string, { id: string; name: string }>();
+    if (!rows.length) return result;
+    const events = await this.prisma.guestSupportTicketAuditEvent.findMany({
+      where: {
+        ticketId: { in: rows.map((row) => row.id) },
+        action: 'CREATED_BY_GUEST',
+      },
+      select: { ticketId: true, metadata: true },
+    });
+    const fromByTicket = new Map<string, string>();
+    for (const event of events) {
+      const metadata =
+        event.metadata &&
+        typeof event.metadata === 'object' &&
+        !Array.isArray(event.metadata)
+          ? event.metadata
+          : {};
+      const from = metadata.reportedFromStoreId;
+      const row = rows.find((item) => item.id === event.ticketId);
+      if (typeof from === 'string' && row && from !== row.storeId) {
+        fromByTicket.set(event.ticketId, from);
+      }
+    }
+    if (!fromByTicket.size) return result;
+    const stores = await this.prisma.store.findMany({
+      where: { id: { in: [...new Set(fromByTicket.values())] } },
+      select: { id: true, name: true, tenantId: true },
+    });
+    for (const [ticketId, storeId] of fromByTicket) {
+      const row = rows.find((item) => item.id === ticketId);
+      const store = stores.find(
+        (item) => item.id === storeId && item.tenantId === row?.tenantId,
+      );
+      if (store) result.set(ticketId, { id: store.id, name: store.name });
+    }
+    return result;
+  }
+
+  private async getGuestRewards(
+    scope: TicketScope,
+    id: string,
+  ): Promise<SupportTicketGuestRewards> {
+    const ticket = await this.prisma.guestSupportTicket.findFirst({
+      where: {
+        id,
+        ...(scope.kind === 'TENANT' ? { tenantId: scope.tenantId } : {}),
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        profileId: true,
+        createdAt: true,
+        store: { select: { id: true, name: true } },
+      },
+    });
+    if (!ticket) {
+      throw new NotFoundException('Обращение не найдено.');
+    }
+    const wallet = await this.prisma.guestGameRewardWalletItem.findMany({
+      where: {
+        tenantId: ticket.tenantId,
+        profileId: ticket.profileId,
+        createdAt: { gte: supportGuestRewardsSince(ticket.createdAt) },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 300,
+      select: {
+        id: true,
+        storeId: true,
+        kind: true,
+        sourceKind: true,
+        title: true,
+        rewardLabel: true,
+        status: true,
+        createdAt: true,
+        claimedAt: true,
+        expiresAt: true,
+        reward: {
+          select: { status: true, rewardAmount: true, paidAt: true },
+        },
+      },
+    });
+    const otherStoreIds = [
+      ...new Set(
+        wallet
+          .map((item) => item.storeId)
+          .filter(
+            (storeId): storeId is string =>
+              Boolean(storeId) && storeId !== ticket.store.id,
+          ),
+      ),
+    ];
+    const stores = otherStoreIds.length
+      ? await this.prisma.store.findMany({
+          where: { tenantId: ticket.tenantId, id: { in: otherStoreIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    return buildSupportGuestRewards({
+      ticket,
+      wallet,
+      storeNames: new Map(stores.map((store) => [store.id, store.name])),
+      now: new Date(),
+    });
   }
 
   private async getQueueSummary(user: AuthenticatedUser, scope: TicketScope) {
@@ -1258,6 +1425,9 @@ function projectGuestThread<T extends { comments: Array<{ id: string }> }>(
   };
 }
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function normalizeFilters(query: SupportTicketsQuery) {
   const status: SupportTicketStatusFilter =
     query.status &&
@@ -1276,10 +1446,12 @@ function normalizeFilters(query: SupportTicketsQuery) {
     Math.max(Number.parseInt(query.pageSize ?? '100', 10) || 100, 1),
     200,
   );
+  const storeId = query.storeId?.trim() ?? '';
   return {
     status,
     topic,
     tenantId: query.tenantId?.trim() || null,
+    storeId: UUID_PATTERN.test(storeId) ? storeId : null,
     assignedToUserId: query.assignedToUserId?.trim() || null,
     search: query.search?.trim().slice(0, 200) || null,
     pageSize,

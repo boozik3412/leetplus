@@ -57,6 +57,7 @@ function fixture(ticket: Row | null = existingTicket()) {
       findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn().mockResolvedValue({}),
     },
+    store: { findMany: jest.fn().mockResolvedValue([]) },
     user: { findMany: jest.fn().mockResolvedValue([]) },
     userRoleOverride: { findMany: jest.fn().mockResolvedValue([]) },
     tenant: { findMany: jest.fn().mockResolvedValue([]) },
@@ -290,5 +291,89 @@ describe('SupportTicketsService replies to the guest', () => {
       unreadByGuest: true,
       feedback: null,
     });
+  });
+
+  it('filters the queue by club and shows where a report was sent from', async () => {
+    const { service, prisma } = fixture(null);
+    const row = {
+      id: 'ticket-a',
+      tenantId: 'tenant-a',
+      storeId: '33333333-3333-4333-8333-333333333333',
+      status: 'NEW',
+      profile: { contactMasked: null, phoneEncrypted: null, guest: null },
+      guest: null,
+      comments: [],
+    };
+    prisma.guestSupportTicket.findMany.mockImplementation(
+      (args: { orderBy?: unknown }) =>
+        Promise.resolve(args.orderBy ? [row] : []),
+    );
+    prisma.guestSupportTicket.groupBy.mockImplementation(
+      (args: { by: string[] }) =>
+        Promise.resolve(
+          args.by[0] === 'storeId'
+            ? [{ storeId: row.storeId, _count: { _all: 4 } }]
+            : [],
+        ),
+    );
+    prisma.guestSupportTicketAuditEvent.findMany.mockImplementation(
+      (args: { where: { action?: unknown } }) =>
+        Promise.resolve(
+          args.where.action === 'CREATED_BY_GUEST'
+            ? [
+                {
+                  ticketId: 'ticket-a',
+                  metadata: { reportedFromStoreId: 'store-from' },
+                },
+              ]
+            : [],
+        ),
+    );
+    prisma.store.findMany.mockImplementation(
+      (args: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(
+          args.where.id.in.includes('store-from')
+            ? [{ id: 'store-from', name: 'Холмогорова', tenantId: 'tenant-a' }]
+            : [
+                {
+                  id: row.storeId,
+                  name: 'Радищева',
+                  tenant: { name: 'Сеть' },
+                },
+              ],
+        ),
+    );
+
+    const report = await service.getTenantTickets(actor, {
+      storeId: row.storeId,
+    });
+
+    const pageQuery = (
+      prisma.guestSupportTicket.findMany.mock.calls as unknown as Array<
+        [{ orderBy?: unknown; where: Row }]
+      >
+    ).find(([args]) => args.orderBy)?.[0];
+    expect(pageQuery?.where).toMatchObject({
+      tenantId: 'tenant-a',
+      storeId: row.storeId,
+    });
+    expect(report.filters.storeId).toBe(row.storeId);
+    expect(report.stores).toEqual([
+      { id: row.storeId, name: 'Радищева', tenantName: 'Сеть', tickets: 4 },
+    ]);
+    expect(report.rows[0]?.reportedFromStore).toEqual({
+      id: 'store-from',
+      name: 'Холмогорова',
+    });
+
+    await service.getTenantTickets(actor, { storeId: "x' OR 1=1" });
+    const lastPage = (
+      prisma.guestSupportTicket.findMany.mock.calls as unknown as Array<
+        [{ orderBy?: unknown; where: Row }]
+      >
+    )
+      .filter(([args]) => args.orderBy)
+      .at(-1)?.[0];
+    expect(lastPage?.where).not.toHaveProperty('storeId');
   });
 });

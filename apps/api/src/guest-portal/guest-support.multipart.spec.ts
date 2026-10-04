@@ -43,7 +43,7 @@ describe('guest bug-report multipart envelope', () => {
     await app.close();
   });
 
-  it('accepts the canonical five fields and one screenshot', async () => {
+  it('accepts the canonical six fields and one screenshot', async () => {
     const httpServer = app.getHttpServer() as Parameters<typeof request>[0];
 
     await request(httpServer)
@@ -53,18 +53,26 @@ describe('guest bug-report multipart envelope', () => {
       .field('route', '/game')
       .field('viewport', '390x844')
       .field('timeZone', 'Asia/Yekaterinburg')
+      .field('storeId', '33333333-3333-4333-8333-333333333333')
       .attach('file', Buffer.from([0xff, 0xd8, 0xff, 0xd9]), {
         contentType: 'image/jpeg',
         filename: 'screen.jpg',
       })
       .expect(201)
       .expect({
-        fields: ['description', 'route', 'timeZone', 'topic', 'viewport'],
+        fields: [
+          'description',
+          'route',
+          'storeId',
+          'timeZone',
+          'topic',
+          'viewport',
+        ],
         fileBytes: 4,
       });
   });
 
-  it('still rejects a sixth text field', async () => {
+  it('still rejects a seventh text field', async () => {
     const httpServer = app.getHttpServer() as Parameters<typeof request>[0];
 
     await request(httpServer)
@@ -74,6 +82,7 @@ describe('guest bug-report multipart envelope', () => {
       .field('route', '/game')
       .field('viewport', '390x844')
       .field('timeZone', 'Asia/Yekaterinburg')
+      .field('storeId', '33333333-3333-4333-8333-333333333333')
       .field('unexpected', 'blocked')
       .expect(400);
   });

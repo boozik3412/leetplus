@@ -72,6 +72,14 @@ export class SupportTicketsController {
     return this.service.resolveTenantTicketWithReply(user, id, dto);
   }
 
+  @Get(':id/guest-rewards')
+  getGuestRewards(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.service.getTenantTicketGuestRewards(user, id);
+  }
+
   @Get(':id/attachments/:attachmentId')
   async getAttachment(
     @CurrentUser() user: AuthenticatedUser,

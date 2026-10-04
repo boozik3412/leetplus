@@ -8,7 +8,7 @@ import {
   setDesktopNotices,
   useDesktopNoticeState,
 } from '@/components/support-queue-watch';
-import type { StaffSupportTicket, StaffSupportTicketsReport, SupportTicketCommentVisibility, SupportTicketStatus, TicketUser } from '@/lib/staff-support-tickets';
+import type { StaffSupportTicket, StaffSupportTicketsReport, SupportTicketCommentVisibility, SupportTicketGuestRewards, SupportTicketStatus, TicketUser } from '@/lib/staff-support-tickets';
 import { supportTicketTopicLabels as topicLabels } from '@/lib/support-ticket-labels';
 
 const statusLabels: Record<SupportTicketStatus, string> = {
@@ -117,7 +117,7 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
     return `${pagePath}?${params.toString()}`;
   };
   const isFilter = (status: string, assignee: string | null = null) =>
-    report.filters.status === status && (report.filters.assignedToUserId ?? null) === assignee && !report.filters.search && report.filters.topic === 'all';
+    report.filters.status === status && (report.filters.assignedToUserId ?? null) === assignee && !report.filters.search && report.filters.topic === 'all' && !report.filters.storeId;
   const oldestWaitMs = report.summary.oldestActiveCreatedAt ? nowMs - new Date(report.summary.oldestActiveCreatedAt).getTime() : null;
 
   return (
@@ -134,10 +134,11 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
         <Metric label="Всего" value={formatCount(report.summary.total)} tone="zinc" href={filterHref({ status: 'all' })} selected={isFilter('all')} />
       </section>
 
-      <form className="grid gap-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950 md:grid-cols-3 xl:grid-cols-6">
+      <form className={`grid gap-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950 md:grid-cols-3 ${report.scope === 'PLATFORM' ? 'xl:grid-cols-7' : 'xl:grid-cols-6'}`}>
         {report.scope === 'PLATFORM' ? <FilterSelect name="tenantId" label="Сеть" defaultValue={report.filters.tenantId ?? ''} options={[["", 'Все сети'], ...report.tenants.map((tenant) => [tenant.id, tenant.name] as const)]} /> : null}
         <FilterSelect name="status" label="Статус" defaultValue={report.filters.status} options={[['active', 'В очереди (новые и в работе)'], ['awaiting', 'Ждут ответа гостю'], ['all', 'Все статусы'], ...report.statuses.map((value) => [value, statusLabels[value]] as const)]} />
         <FilterSelect name="topic" label="Тема" defaultValue={report.filters.topic} options={[['all', 'Все темы'], ...report.topics.map((value) => [value, topicLabels[value]] as const)]} />
+        <FilterSelect name="storeId" label="Клуб" defaultValue={report.filters.storeId ?? ''} options={[["", 'Все клубы'], ...(report.stores ?? []).map((store) => [store.id, `${store.name}${report.scope === 'PLATFORM' ? ` · ${store.tenantName}` : ''} (${store.tickets})`] as const)]} />
         <FilterSelect name="assignedToUserId" label="Ответственный" defaultValue={report.filters.assignedToUserId ?? ''} options={[["", 'Все'], ['none', 'Без ответственного'], ['me', 'Назначены на меня'], ...report.users.map((user) => [user.id, userLabel(user)] as const)]} />
         <label className="space-y-1 text-xs font-bold uppercase text-zinc-500">
           Поиск
@@ -173,6 +174,7 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge status={ticket.status} />
+                    <span className="rounded-full bg-violet-500/10 px-2.5 py-1 text-xs font-semibold text-violet-700 dark:text-violet-300" title="Клуб обращения">{ticket.store.name}</span>
                     <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">{topicLabels[ticket.topic]}</span>
                     <span className="font-mono text-xs font-bold text-cyan-700 dark:text-cyan-300">{ticket.ticketNumber}</span>
                     <AgeBadge ticket={ticket} nowMs={nowMs} />
@@ -184,6 +186,7 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
                     <Meta label="ФИО гостя" value={ticket.profile.fullName ?? ticket.profile.displayName ?? 'не указано'} />
                     <Meta label="Телефон" value={formatPhone(ticket.profile.phone ?? ticket.profile.contactMasked)} />
                     <Meta label="Сеть / клуб" value={`${ticket.tenant.name} · ${ticket.store.name}`} />
+                    {ticket.reportedFromStore ? <Meta label="Отправлено из клуба" value={`${ticket.reportedFromStore.name} — гость указал другой клуб`} /> : null}
                     <Meta label="Создано" value={formatDateTime(ticket.createdAt)} />
                     <Meta label="Последнее действие" value={formatDateTime(ticket.lastActivityAt)} />
                     {ticket.resolvedAt ? <Meta label="Решено" value={formatDateTime(ticket.resolvedAt)} /> : null}
@@ -191,6 +194,7 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
                     <Meta label="Среда" value={[ticket.device, ticket.browser, ticket.viewport].filter(Boolean).join(' · ') || 'не определена'} />
                     <Meta label="Страница" value={ticket.route ?? 'не указана'} />
                   </dl>
+                  <GuestRewardsPanel ticket={ticket} apiBasePath={apiBasePath} />
                   {ticket.attachments.length ? (
                     <div className="mt-4 flex flex-wrap gap-3">
                       {ticket.attachments.map((attachment) => {
@@ -391,6 +395,70 @@ function TicketComposer({
         </button>
       </div>
     </form>
+  );
+}
+
+// Lazily loads what the guest received in the ticket's club, so a "the case
+// was not given" report can be checked right in the card.
+function GuestRewardsPanel({ ticket, apiBasePath }: { ticket: StaffSupportTicket; apiBasePath: string }) {
+  const [state, setState] = useState<{ status: 'idle' | 'loading' | 'error'; data: SupportTicketGuestRewards | null }>({ status: 'idle', data: null });
+
+  async function load() {
+    if (state.status === 'loading' || state.data) return;
+    setState({ status: 'loading', data: null });
+    try {
+      const response = await fetch(`${apiBasePath}/${encodeURIComponent(ticket.id)}/guest-rewards`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('load failed');
+      setState({ status: 'idle', data: (await response.json()) as SupportTicketGuestRewards });
+    } catch {
+      setState({ status: 'error', data: null });
+    }
+  }
+
+  const data = state.data;
+  const tones = { DONE: 'bg-emerald-500', WAITING: 'bg-amber-500', PROBLEM: 'bg-red-500' } as const;
+  return (
+    <details className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50/60 text-sm dark:border-zinc-800 dark:bg-zinc-900/40" onToggle={(event) => { if ((event.currentTarget as HTMLDetailsElement).open) void load(); }}>
+      <summary className="cursor-pointer select-none px-3 py-2 text-xs font-bold uppercase text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
+        Награды гостя в клубе «{ticket.store.name}» · 30 дней до обращения и после
+      </summary>
+      <div className="space-y-2 px-3 pb-3">
+        {state.status === 'loading' ? <p className="text-xs text-zinc-500">Загружаем…</p> : null}
+        {state.status === 'error' ? (
+          <p className="text-xs text-red-600 dark:text-red-300">
+            Не удалось загрузить награды.{' '}
+            <button type="button" className="font-semibold underline" onClick={() => void load()}>Повторить</button>
+          </p>
+        ) : null}
+        {data ? (
+          <>
+            {data.items.length === 0 ? (
+              <p className="text-xs text-zinc-500">В этом клубе за период наград не было.</p>
+            ) : (
+              <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                {data.items.map((item) => (
+                  <li key={item.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1.5">
+                    <span className={`h-2 w-2 shrink-0 self-center rounded-full ${tones[item.state]}`} aria-hidden="true" />
+                    <span className="font-semibold">{item.title}</span>
+                    <span className="text-zinc-500">{item.rewardLabel} · {item.sourceLabel}</span>
+                    <span className="text-zinc-700 dark:text-zinc-200">— {item.stateLabel}{item.payout ? `; ${item.payout.amount} бонусов: ${item.payout.statusLabel}` : ''}</span>
+                    <time className="ml-auto text-xs text-zinc-400">{formatDateTime(item.createdAt)}</time>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {data.truncated ? <p className="text-xs text-zinc-500">Показаны последние {data.items.length}.</p> : null}
+            {data.otherClubs.length || data.withoutClub ? (
+              <p className="text-xs text-zinc-500">
+                За этот период в других клубах сети:{' '}
+                {[...data.otherClubs.map((club) => `${club.name} — ${club.items}`), ...(data.withoutClub ? [`без клуба — ${data.withoutClub}`] : [])].join(', ')}.
+                {' '}Если гость говорит о другом клубе, проверьте его.
+              </p>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </details>
   );
 }
 

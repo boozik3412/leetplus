@@ -46,6 +46,8 @@ export type StaffSupportTicket = {
   updatedAt: string;
   tenant: { id: string; name: string; slug: string };
   store: { id: string; name: string };
+  // Club selected in the game module when the guest reported about another one.
+  reportedFromStore: { id: string; name: string } | null;
   profile: {
     id: string;
     displayName: string | null;
@@ -93,6 +95,7 @@ export type StaffSupportTicketsReport = {
     status: SupportTicketStatusFilter;
     topic: SupportTicketTopic | "all";
     tenantId: string | null;
+    storeId: string | null;
     assignedToUserId: string | null;
     search: string | null;
     pageSize: number;
@@ -108,10 +111,42 @@ export type StaffSupportTicketsReport = {
     oldestActiveCreatedAt: string | null;
   };
   tenants: Array<{ id: string; name: string; slug: string }>;
+  stores: Array<{
+    id: string;
+    name: string;
+    tenantName: string;
+    tickets: number;
+  }>;
   users: TicketUser[];
   rows: StaffSupportTicket[];
   // Set by the Web loader: the moment waiting times on the page refer to.
   generatedAt: string;
+};
+
+// What the guest received in the ticket's club (loaded on demand).
+export type SupportTicketGuestRewards = {
+  ticketId: string;
+  store: { id: string; name: string };
+  since: string;
+  items: Array<{
+    id: string;
+    createdAt: string;
+    title: string;
+    rewardLabel: string;
+    sourceLabel: string;
+    state: "DONE" | "WAITING" | "PROBLEM";
+    stateLabel: string;
+    claimedAt: string | null;
+    expiresAt: string;
+    payout: {
+      amount: number;
+      statusLabel: string;
+      paidAt: string | null;
+    } | null;
+  }>;
+  truncated: boolean;
+  otherClubs: Array<{ storeId: string; name: string; items: number }>;
+  withoutClub: number;
 };
 
 export type SupportQueueSummary = {

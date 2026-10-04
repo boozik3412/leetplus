@@ -13,6 +13,7 @@ const listItem = {
   ticketNumber: "LP-BUG-A1B2C3D4",
   topic: "GAME_MODULE",
   topicLabel: "Игровой модуль",
+  storeName: "1337 Радищева",
   status: "RESOLVED",
   statusLabel: "Решено",
   createdAt: "2026-10-01T09:00:00.000Z",
@@ -32,6 +33,7 @@ test("projects the guest ticket list to known fields and recounts unread", () =>
       {
         ticketNumber: "LP-BUG-A1B2C3D4",
         topicLabel: "Игровой модуль",
+        storeName: "1337 Радищева",
         status: "RESOLVED",
         statusLabel: "Решено",
         createdAt: "2026-10-01T09:00:00.000Z",
@@ -226,4 +228,54 @@ test("puts the guest's tickets next to the bug report button", async () => {
   assert.match(tickets, /\/api\/guest-support\/tickets/);
   assert.match(tickets, /Idempotency-Key/);
   assert.match(tickets, /createPortal\(/);
+});
+
+test("keeps the club of every ticket for guests visiting several clubs", async () => {
+  const read = (...segments: string[]) =>
+    readFile(path.join(sourceRoot, ...segments), "utf8");
+  const [bugRoute, bugForm, tickets, workspace, staffRewards, adminRewards] =
+    await Promise.all([
+      read("app", "api", "guest-support", "bug-report", "route.ts"),
+      read("components", "guest-bug-report.tsx"),
+      read("components", "guest-support-tickets.tsx"),
+      read("components", "staff-support-tickets-workspace.tsx"),
+      read(
+        "app",
+        "api",
+        "support",
+        "bug-reports",
+        "[id]",
+        "guest-rewards",
+        "route.ts",
+      ),
+      read(
+        "app",
+        "api",
+        "admin",
+        "support-tickets",
+        "[id]",
+        "guest-rewards",
+        "route.ts",
+      ),
+    ]);
+
+  assert.match(bugRoute, /"storeId",\s*\] as const/);
+  assert.match(bugForm, /body\.set\("storeId", clubId\)/);
+  assert.match(bugForm, /clubs\.length > 1/);
+  assert.match(tickets, /ticket\.storeName/);
+  assert.match(workspace, /name="storeId" label="Клуб"/);
+  assert.match(workspace, /ticket\.reportedFromStore/);
+  assert.match(workspace, /\/guest-rewards`/);
+  for (const route of [staffRewards, adminRewards]) {
+    assert.match(route, /proxyJsonRequest/);
+    assert.match(route, /"GET"/);
+    assert.match(route, /privateNoStore:\s*true/);
+    assert.match(route, /forwardQuery:\s*false/);
+  }
+  assert.equal(
+    projectGuestSupportTicketList({
+      tickets: [{ ...listItem, storeName: undefined }],
+    }),
+    null,
+  );
 });

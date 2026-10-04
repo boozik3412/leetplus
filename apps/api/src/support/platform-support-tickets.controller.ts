@@ -79,6 +79,11 @@ export class PlatformSupportTicketsController {
     return this.service.resolvePlatformTicketWithReply(user, id, dto);
   }
 
+  @Get(':id/guest-rewards')
+  getGuestRewards(@Param('id') id: string) {
+    return this.service.getPlatformTicketGuestRewards(id);
+  }
+
   @Get(':id/attachments/:attachmentId')
   async getAttachment(
     @Param('id') id: string,

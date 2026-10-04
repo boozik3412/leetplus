@@ -736,6 +736,9 @@ export type GuestPortalGameSummary = {
       enabled: boolean;
       maxAttachmentBytes: number;
       topics: Array<{ value: string; label: string }>;
+      // Clubs of the network a report can be about; the current one first.
+      clubs?: Array<{ id: string; name: string }>;
+      currentClubId?: string | null;
     };
   };
   referral: {

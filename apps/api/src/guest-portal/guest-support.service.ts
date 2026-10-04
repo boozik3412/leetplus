@@ -29,11 +29,11 @@ export const GUEST_BUG_REPORT_MAX_DESCRIPTION_LENGTH = 2000;
 export const GUEST_BUG_REPORT_MULTIPART_LIMITS = Object.freeze({
   fileSize: GUEST_BUG_REPORT_MAX_BYTES,
   files: 1,
-  fields: 5,
+  fields: 6,
   fieldSize: 4 * 1024,
   // Busboy emits partsLimit when the counter reaches the configured value.
-  // Five text fields plus one optional file therefore need an exclusive cap of 7.
-  parts: 7,
+  // Six text fields plus one optional file therefore need an exclusive cap of 8.
+  parts: 8,
 });
 
 export const GUEST_BUG_REPORT_TOPICS = [
@@ -77,11 +77,15 @@ export type GuestBugReportInput = {
   route?: unknown;
   viewport?: unknown;
   timeZone?: unknown;
+  // Club the problem is about; defaults to the club selected in the module.
+  storeId?: unknown;
 };
 
 export type GuestBugReportContext = {
   tenantId: string;
   storeId: string;
+  // Club selected in the game module when it differs from `storeId`.
+  reportedFromStoreId?: string | null;
   profileId: string;
   guestId: string | null;
   idempotencyKey: string | undefined;
@@ -102,6 +106,7 @@ export type GuestSupportTicketListItem = {
   ticketNumber: string;
   topic: string;
   topicLabel: string;
+  storeName: string;
   status: GuestSupportTicketStatus;
   statusLabel: string;
   createdAt: string;
@@ -152,6 +157,7 @@ const guestThreadTicketSelect = {
   lastActivityAt: true,
   createdAt: true,
   updatedAt: true,
+  store: { select: { name: true } },
 } satisfies Prisma.GuestSupportTicketSelect;
 type GuestThreadTicket = Prisma.GuestSupportTicketGetPayload<{
   select: typeof guestThreadTicketSelect;
@@ -284,6 +290,10 @@ export class GuestSupportService {
                 metadata: {
                   topic,
                   storeId: context.storeId,
+                  ...(context.reportedFromStoreId &&
+                  context.reportedFromStoreId !== context.storeId
+                    ? { reportedFromStoreId: context.reportedFromStoreId }
+                    : {}),
                   profileId: context.profileId,
                   hasAttachment: Boolean(attachment),
                 },
@@ -714,6 +724,7 @@ export class GuestSupportService {
       topicLabel:
         GUEST_BUG_REPORT_TOPIC_LABELS[ticket.topic as GuestBugReportTopic] ??
         'Другое',
+      storeName: ticket.store.name,
       status: state.status,
       statusLabel: state.statusLabel,
       createdAt: ticket.createdAt.toISOString(),

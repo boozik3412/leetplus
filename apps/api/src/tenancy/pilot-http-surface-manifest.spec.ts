@@ -616,8 +616,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(318);
-    expect(allowed).toHaveLength(257);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(319);
+    expect(allowed).toHaveLength(258);
     expect(blocked).toHaveLength(61);
     expect(outbound).toHaveLength(21);
     expect(
@@ -803,10 +803,10 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       entry.path.startsWith('/support/bug-reports'),
     );
 
-    expect(communications).toHaveLength(24);
+    expect(communications).toHaveLength(25);
     expect(
       communications.filter((entry) => entry.decision === 'ALLOW'),
-    ).toHaveLength(24);
+    ).toHaveLength(25);
     expect(crm).toHaveLength(8);
     expect(
       crm.every(
@@ -826,6 +826,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
     expect(support.map((entry) => entry.id).sort()).toEqual([
       'GET /support/bug-reports',
       'GET /support/bug-reports/:id/attachments/:attachmentId',
+      'GET /support/bug-reports/:id/guest-rewards',
       'GET /support/bug-reports/summary',
       'PATCH /support/bug-reports/:id',
       'POST /support/bug-reports/:id/comments',

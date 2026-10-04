@@ -19,6 +19,9 @@ export type BattlePassStepConditionValue = {
   hours: string;
   weekdays: number[];
   minSessionMinutes: number;
+  // How a play-time session meets the time window: by the moment it ended
+  // (historical behaviour) or by its minutes that lie inside the window.
+  windowMatch: "SESSION_END" | "OVERLAP";
   purchaseSource: "ANY" | "PRODUCT" | "CATEGORY";
   categoryCatalogSource: "LANGAME" | "LEETPLUS";
   productMatch: "ANY" | "ALL";
@@ -48,6 +51,7 @@ export const defaultBattlePassStepCondition: BattlePassStepConditionValue = {
   hours: "09:00-21:00",
   weekdays: [],
   minSessionMinutes: 0,
+  windowMatch: "SESSION_END",
   purchaseSource: "PRODUCT",
   categoryCatalogSource: "LANGAME",
   productMatch: "ANY",
@@ -277,6 +281,30 @@ export function BattlePassStepConditionEditor({
           </div>
           {value.sessionType === "HOURLY" ? <HourlySessionSourceNote /> : null}
           <ScheduleFields value={value} patch={patch} />
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <Field label="Как учитывать окно времени">
+              <select
+                className={fieldClass}
+                value={value.windowMatch}
+                onChange={(event) =>
+                  patch({
+                    windowMatch: event.target
+                      .value as BattlePassStepConditionValue["windowMatch"],
+                  })
+                }
+              >
+                <option value="SESSION_END">
+                  Сессия заканчивается в окне
+                </option>
+                <option value="OVERLAP">Минуты сессии внутри окна</option>
+              </select>
+            </Field>
+            <p className="self-end text-xs text-zinc-500 md:col-span-2">
+              {value.windowMatch === "OVERLAP"
+                ? "Засчитываются только минуты сессии внутри дней и часов окна; сессия может начаться раньше или закончиться позже. «Минимум минут в сессии» проверяется по этим минутам."
+                : "Сессия засчитывается целиком, если закончилась в выбранные дни и часы."}
+            </p>
+          </div>
         </div>
       ) : null}
 

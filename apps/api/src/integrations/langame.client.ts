@@ -613,6 +613,20 @@ export class LangameClient {
       );
     }
 
+    // The master API reports a rejected write (e.g. a key without access to
+    // the route) as HTTP 200 with a non-zero error_code and no status field.
+    // Such a write did not happen and must never be confirmed.
+    const errorCode = this.isPlainObject(result)
+      ? masterErrorCode(result.error_code)
+      : null;
+    if (errorCode !== null) {
+      throw new BadRequestException(
+        this.hasStringField(result, 'error_message')
+          ? `Langame ${displayPath} returned an error: ${result.error_message}`
+          : `Langame ${displayPath} returned error code ${errorCode}`,
+      );
+    }
+
     return result;
   }
 
@@ -1011,4 +1025,14 @@ export class LangameClient {
       ? normalizedPath.slice('/master_api'.length)
       : normalizedPath;
   }
+}
+
+/** A non-zero master API error_code as text, or null when the call succeeded. */
+function masterErrorCode(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const code =
+    typeof value === 'number' || typeof value === 'string'
+      ? String(value).trim()
+      : JSON.stringify(value);
+  return code === '0' || code === '' ? null : code;
 }

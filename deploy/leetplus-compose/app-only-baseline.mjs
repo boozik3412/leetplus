@@ -47,7 +47,7 @@ function validateBundle(bundle) {
   imageId(bundle.appImages.api); imageId(bundle.appImages.web);
   exactKeys(bundle.schemaRequirement, ['migrationCount', 'migration', 'prismaSchemaSha256', 'migrationsInventorySha256'], 'schema requirement');
   demand(bundle.schemaRequirement.migrationCount === SCHEMA.migrationCount && bundle.schemaRequirement.migration === SCHEMA.migration,
-    'Candidate is not CURRENT191 compatible');
+    'Candidate schema requirement differs from the source migrations');
   hash(bundle.schemaRequirement.prismaSchemaSha256, 'Prisma schema');
   hash(bundle.schemaRequirement.migrationsInventorySha256, 'migration inventory');
   exactKeys(bundle.compatibilityRequirements, ['policySha256', 'composeRuntimeContractSha256', 'controllerCapability', 'dataContract'], 'compatibility requirements');

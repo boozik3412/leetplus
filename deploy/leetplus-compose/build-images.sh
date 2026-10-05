@@ -16,6 +16,10 @@ mkdir -p "$output"
 build_time=$(git show -s --format=%cI "$sha" | xargs -I '{}' date -u -d '{}' +%Y-%m-%dT%H:%M:%SZ)
 test "$(docker version --format '{{.Server.Version}}')" = 29.1.3
 docker info --format '{{json .DriverStatus}}' | grep -F 'io.containerd.snapshotter.v1'
+# The image must carry the schema head of this checkout's migrations.
+schema=$(node --input-type=module -e "import { SCHEMA } from './deploy/leetplus-compose/contract.mjs'; console.log(SCHEMA.migrationCount, SCHEMA.migration)")
+read -r schema_migration_count schema_migration <<<"$schema"
+[[ "$schema_migration_count" =~ ^[1-9][0-9]*$ && "$schema_migration" =~ ^[0-9]{14}_ ]]
 for target in api web; do
   docker build --platform linux/amd64 --provenance=false --file deploy/leetplus-compose/Dockerfile \
     --target "$target" --build-arg "RELEASE_SHA=$sha" --build-arg "BUILD_TIME=$build_time" \
@@ -27,7 +31,14 @@ api_id=$(docker image inspect --format '{{.Id}}' "leetplus-api:$sha")
 web_id=$(docker image inspect --format '{{.Id}}' "leetplus-web:$sha")
 pg_id=$(docker image inspect --format '{{.Id}}' "leetplus-postgres:$sha")
 redis_id=$(docker image inspect --format '{{.Id}}' "leetplus-redis:$sha")
-docker run --rm --network none --entrypoint node "$api_id" -e 'const m=require("/app/release.json");if(m.migrationCount!==191)process.exit(1);console.log(JSON.stringify(m))' > "$output/image-release.json"
+docker run --rm --network none -e "SCHEMA_MIGRATION_COUNT=$schema_migration_count" -e "SCHEMA_MIGRATION=$schema_migration" \
+  --entrypoint node "$api_id" -e '
+    const m=require("/app/release.json"),e=process.env;
+    if(m.migrationCount!==Number(e.SCHEMA_MIGRATION_COUNT)||m.migration!==e.SCHEMA_MIGRATION){
+      console.error(`Image schema head ${m.migrationCount} ${m.migration} differs from source ${e.SCHEMA_MIGRATION_COUNT} ${e.SCHEMA_MIGRATION}`);process.exit(1);
+    }
+    console.log(JSON.stringify(m));
+  ' > "$output/image-release.json"
 external_worker_capability=''
 if git cat-file -e "$sha:apps/api/src/integrations/langame-external-daily-worker.cli.ts" 2>/dev/null; then
   # A source-only CLI is insufficient: the exact admitted API image must carry
@@ -38,7 +49,8 @@ if git cat-file -e "$sha:apps/api/src/integrations/langame-external-daily-worker
     const entry=fs.statSync(path);if(!entry.isFile()||entry.size===0)process.exit(1);
   '
   external_worker_capability='LANGAME_EXTERNAL_SET1_V1'
-  bash deploy/leetplus-compose/test-external-worker-image.sh "$api_id" "$sha" "$build_time" "$output/external-worker-image-validation.json"
+  bash deploy/leetplus-compose/test-external-worker-image.sh "$api_id" "$sha" "$build_time" "$output/external-worker-image-validation.json" \
+    "$schema_migration" "$schema_migration_count"
 fi
 export LEETPLUS_EXTERNAL_WORKER_CAPABILITY="$external_worker_capability"
 node --input-type=module - "$output" "$api_id" "$web_id" "$pg_id" "$redis_id" <<'NODE'
@@ -71,8 +83,8 @@ docker run --detach --name "$web_name" --network none --read-only --cap-drop ALL
   --user 12020:12020 --tmpfs /tmp:rw,nosuid,nodev,size=134217728,mode=1777 \
   --tmpfs /app/apps/web/.next/cache:rw,nosuid,nodev,size=134217728,uid=12020,gid=12020 \
   -e "RELEASE_SHA=$sha" -e "WEB_BUILD_ID=$sha" -e "BUILD_TIME=$build_time" \
-  -e EXPECTED_DATABASE_MIGRATION=20260908180000_external_langame_simple_onboarding \
-  -e EXPECTED_DATABASE_MIGRATION_COUNT=191 -e API_URL=http://127.0.0.1:4000 "$web_id"
+  -e "EXPECTED_DATABASE_MIGRATION=$schema_migration" \
+  -e "EXPECTED_DATABASE_MIGRATION_COUNT=$schema_migration_count" -e API_URL=http://127.0.0.1:4000 "$web_id"
 trap 'docker rm --force "$web_name" >/dev/null' EXIT
 ready=false
 for attempt in $(seq 1 30); do

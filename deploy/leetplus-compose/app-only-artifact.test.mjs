@@ -21,6 +21,7 @@ import {
   validateRequiredGateReceipt,
 } from './app-only-artifact.mjs';
 import { validateArtifactPayload } from './admit-app-images.mjs';
+import { SCHEMA } from './contract.mjs';
 
 const sha = 'a'.repeat(40);
 const hash = character => character.repeat(64);
@@ -43,8 +44,8 @@ function bundle() {
     },
     appImages: { api: image('3'), web: image('4') },
     schemaRequirement: {
-      migrationCount: 191,
-      migration: '20260908180000_external_langame_simple_onboarding',
+      migrationCount: SCHEMA.migrationCount,
+      migration: SCHEMA.migration,
       prismaSchemaSha256: hash('5'),
       migrationsInventorySha256: hash('6'),
     },
@@ -90,8 +91,8 @@ test('AppBundle V2 accepts only exact API/Web and current schema requirements', 
   withPostgres.appImages.postgres = image('f');
   assert.throws(() => validateAppBundle(withPostgres), /app images keys are not exact/);
   const wrongSchema = structuredClone(bundle());
-  wrongSchema.schemaRequirement.migrationCount = 192;
-  assert.throws(() => validateAppBundle(wrongSchema), /not CURRENT191/);
+  wrongSchema.schemaRequirement.migrationCount = SCHEMA.migrationCount + 1;
+  assert.throws(() => validateAppBundle(wrongSchema), /differs from the source migrations/);
   const missingEvidence = structuredClone(bundle());
   delete missingEvidence.runtimeEvidence.networkValidationSha256;
   assert.throws(() => validateAppBundle(missingEvidence), /runtime evidence keys are not exact/);

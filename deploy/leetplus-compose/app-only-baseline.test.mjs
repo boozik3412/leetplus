@@ -131,7 +131,7 @@ test('V2 plan binds certified baseline and exact synthesized target while retain
     readinessReceiptSha256: opts.readinessReceiptSha256, now: opts.now }), /immutable app\/data evidence/);
 });
 test('live migration inventory requires all completed exact names and checksums', () => {
-  const rows = Array.from({ length: 190 }, (_, i) => ({ migration_name: `2026010100${String(i).padStart(4, '0')}_fixture`,
+  const rows = Array.from({ length: SCHEMA.migrationCount - 1 }, (_, i) => ({ migration_name: `2026010100${String(i).padStart(4, '0')}_fixture`,
     checksum: h, finished_at: '2026-09-24T00:00:00Z', rolled_back_at: null }));
   rows.push({ migration_name: SCHEMA.migration, checksum: other,
     finished_at: '2026-09-24T00:00:00Z', rolled_back_at: null });

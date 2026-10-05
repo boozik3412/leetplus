@@ -5,6 +5,18 @@ import { API_RESOURCE_PROFILE, EXTERNAL_WORKER_CAPABILITY, CONTRACT, SCHEMA, ren
 
 const r = { contract: CONTRACT, ...SCHEMA, releaseSha: 'a'.repeat(40), builtAt: '2026-09-10T12:00:00Z', images: Object.fromEntries(['api', 'web', 'postgres', 'redis'].map((x, i) => [x, `sha256:${String(i + 1).repeat(64)}`])) };
 const clone = v => structuredClone(v);
+// The golden digests were recorded at CURRENT191. Rendered environments carry
+// the source schema head, which is put back to that reference before hashing.
+const atCurrent191 = compose => {
+  const value = clone(compose);
+  for (const service of Object.values(value.services)) {
+    if (!service.environment || !Object.hasOwn(service.environment, 'EXPECTED_DATABASE_MIGRATION')) continue;
+    assert.equal(service.environment.EXPECTED_DATABASE_MIGRATION, SCHEMA.migration);
+    assert.equal(service.environment.EXPECTED_DATABASE_MIGRATION_COUNT, String(SCHEMA.migrationCount));
+    Object.assign(service.environment, { EXPECTED_DATABASE_MIGRATION: '20260908180000_external_langame_simple_onboarding', EXPECTED_DATABASE_MIGRATION_COUNT: '191' });
+  }
+  return value;
+};
 const withoutApiResources = service => { const value = { ...service }; delete value.mem_limit; delete value.memswap_limit; return value; };
 const GIB = 1024 ** 3;
 const bytes = value => {
@@ -24,8 +36,8 @@ function observed(service) {
 test('stable rendering, exact image IDs and separate Web/DB/worker boundaries', () => {
   const compose = renderCompose({ blue: r, green: r });
   assert.equal(digest(compose), digest(renderCompose({ blue: r, green: r })));
-  assert.equal(digest(compose), 'fceb4f0a8efb938ef0ea734b05fcac8e62d09fa1ebe96ceb9bdfe9c4debfff21');
-  assert.equal(digest(renderCompose({ blue: r, green: r, rehearsal: true })), '38054f1ff7f69704b2328a52c1367269b888f200b1aea065fd5854d4f493cce2');
+  assert.equal(digest(atCurrent191(compose)), 'fceb4f0a8efb938ef0ea734b05fcac8e62d09fa1ebe96ceb9bdfe9c4debfff21');
+  assert.equal(digest(atCurrent191(renderCompose({ blue: r, green: r, rehearsal: true }))), '38054f1ff7f69704b2328a52c1367269b888f200b1aea065fd5854d4f493cce2');
   assert.deepEqual(Object.keys(compose.services['web-blue'].networks), ['blue']);
   assert.equal(compose.services['web-blue'].environment.DATABASE_URL, undefined);
   assert.equal(compose.services.postgres.ports, undefined);
@@ -103,7 +115,7 @@ test('application and worker local dates preserve their distinct source timezone
   }
 });
 test('rejects arbitrary tag, schema mismatch, unknown API profile and data-image drift', () => {
-  for (const mutate of [x => x.images.api = 'node:latest', x => x.releaseSha = 'main', x => x.migrationCount = 192, x => x.apiResourceProfile = null, x => x.apiResourceProfile = 'API_12G_V1', x => x.apiResourceProfile = undefined]) {
+  for (const mutate of [x => x.images.api = 'node:latest', x => x.releaseSha = 'main', x => x.migrationCount = SCHEMA.migrationCount + 1, x => x.apiResourceProfile = null, x => x.apiResourceProfile = 'API_12G_V1', x => x.apiResourceProfile = undefined]) {
     const bad = clone(r); mutate(bad);
     assert.throws(() => renderCompose({ blue: bad, green: r }));
   }

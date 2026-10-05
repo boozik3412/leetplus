@@ -100,7 +100,7 @@ export function validateAppBundle(value) {
   demand(value.appImages.api !== value.appImages.web, 'API and Web images must be distinct');
 
   exactKeys(value.schemaRequirement, ['migrationCount', 'migration', 'prismaSchemaSha256', 'migrationsInventorySha256'], 'schema requirement');
-  demand(value.schemaRequirement.migrationCount === SCHEMA.migrationCount && value.schemaRequirement.migration === SCHEMA.migration, 'App bundle schema requirement is not CURRENT191');
+  demand(value.schemaRequirement.migrationCount === SCHEMA.migrationCount && value.schemaRequirement.migration === SCHEMA.migration, 'App bundle schema requirement differs from the source migrations');
   demand(HASH.test(value.schemaRequirement.prismaSchemaSha256 ?? '') && HASH.test(value.schemaRequirement.migrationsInventorySha256 ?? ''), 'Invalid schema requirement hashes');
 
   exactKeys(value.compatibilityRequirements, ['policySha256', 'composeRuntimeContractSha256', 'controllerCapability', 'dataContract'], 'compatibility requirements');

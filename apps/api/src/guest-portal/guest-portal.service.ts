@@ -15,6 +15,7 @@ import {
   GuestCommunicationConsentStatus,
   GuestCrmStatus,
   type GuestGameEntitlement,
+  type GuestGameProfile,
   type GuestPortalOtpChallenge,
   IntegrationProvider,
   Prisma,
@@ -7860,7 +7861,7 @@ export class GuestPortalService {
       context.store,
       sourceProfile,
     );
-    const targetIdentityProfile = targetGuest
+    let targetIdentityProfile = targetGuest
       ? await this.findCanonicalIdentityProfile({
           tenantId: context.tenant.id,
           phoneHash: payload.phoneHash,
@@ -7868,7 +7869,7 @@ export class GuestPortalService {
           externalDomain: context.store.externalDomain,
         })
       : null;
-    const targetGuestProfile =
+    let targetGuestProfile =
       targetGuest && !targetIdentityProfile
         ? await this.prisma.guestGameProfile.findFirst({
             where: {
@@ -7879,6 +7880,37 @@ export class GuestPortalService {
             orderBy: { updatedAt: 'desc' },
           })
         : null;
+    // The club's Langame guest may still be held by a profile the import
+    // created automatically, which nobody ever opened. A guest who already
+    // plays here keeps their profile: the resolver supersedes the shell and
+    // links the guest instead of switching them to a second profile.
+    if (
+      targetGuest &&
+      targetGuestProfile &&
+      isUntouchedGuestShell(targetGuestProfile) &&
+      context.tenant.id === payload.tenantId &&
+      sourceProfile?.status === 'ACTIVE' &&
+      sourceProfile.phoneHash &&
+      sourceProfile.id !== targetGuestProfile.id
+    ) {
+      const link = await this.linkGameProfileToLocalGuest(
+        targetPayloadBase,
+        sourceProfile.id,
+        targetGuest.id,
+        targetGuest.phoneMasked ?? null,
+        'guest_portal_club_selection',
+      );
+      if (link.status === 'LINKED' || link.status === 'ALREADY_LINKED') {
+        targetIdentityProfile = await this.prisma.guestGameProfile.findFirst({
+          where: {
+            id: sourceProfile.id,
+            tenantId: context.tenant.id,
+            status: 'ACTIVE',
+          },
+        });
+        targetGuestProfile = targetIdentityProfile ? null : targetGuestProfile;
+      }
+    }
     let targetProfile =
       targetIdentityProfile ??
       targetGuestProfile ??
@@ -18892,6 +18924,36 @@ function guestPortalLangameMatchNextAction(
   }
 
   return 'Не удалось проверить Langame по активным источникам. Попробуйте позже или обратитесь к администратору клуба.';
+}
+
+/**
+ * Cheap pre-check for a profile the import created for a Langame guest and
+ * nobody ever used: no login identity, never opened, no XP. The identity
+ * resolver re-checks it under a row lock, including rewards and other effects.
+ */
+function isUntouchedGuestShell(
+  profile: Pick<
+    GuestGameProfile,
+    | 'status'
+    | 'phoneHash'
+    | 'phoneEncrypted'
+    | 'telegramIdentity'
+    | 'maxIdentity'
+    | 'gameActivatedAt'
+    | 'xp'
+    | 'leadId'
+  >,
+) {
+  return (
+    profile.status === 'ACTIVE' &&
+    !profile.phoneHash &&
+    !profile.phoneEncrypted &&
+    !profile.telegramIdentity &&
+    !profile.maxIdentity &&
+    !profile.gameActivatedAt &&
+    profile.xp === 0 &&
+    !profile.leadId
+  );
 }
 
 function guestPortalLocalGameProfileMatchNextAction(

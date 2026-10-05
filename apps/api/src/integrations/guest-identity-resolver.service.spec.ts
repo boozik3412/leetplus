@@ -1,5 +1,8 @@
 import { IntegrationProvider } from '@prisma/client';
-import { GuestIdentityResolverService } from './guest-identity-resolver.service';
+import {
+  GUEST_SHELL_ABSORBED_REASON,
+  GuestIdentityResolverService,
+} from './guest-identity-resolver.service';
 
 const tenantId = 'tenant-1';
 const profileId = 'profile-1';
@@ -70,8 +73,10 @@ describe('GuestIdentityResolverService', () => {
     $queryRaw: jest.fn(),
     guestGameProfile: {
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn(),
     },
+    guestGameAuditEvent: { create: jest.fn() },
     guest: {
       findFirst: jest.fn(),
     },
@@ -116,6 +121,8 @@ describe('GuestIdentityResolverService', () => {
 
     tx.$queryRaw.mockResolvedValue([]);
     tx.guestGameProfile.findFirst.mockResolvedValue(profile());
+    tx.guestGameProfile.findMany.mockResolvedValue([]);
+    tx.guestGameAuditEvent.create.mockResolvedValue({ id: 'audit-1' });
     tx.guest.findFirst.mockResolvedValue(guest());
     tx.guestGameProfileIdentityLink.findFirst.mockResolvedValue(null);
     tx.guestGameProfileIdentityLink.findMany.mockResolvedValue([]);
@@ -512,6 +519,169 @@ describe('GuestIdentityResolverService', () => {
     });
     expect(tx.guestGameProfileIdentityLink.upsert).not.toHaveBeenCalled();
     expect(tx.guestGameProfile.update).not.toHaveBeenCalled();
+  });
+
+  const linkInput = () => ({
+    tenantId,
+    profileId,
+    guestId,
+    externalProvider: IntegrationProvider.LANGAME,
+    externalDomain,
+    externalGuestId: 'external-guest-1',
+    acceptedPhoneHashes: [phoneHash],
+    phoneMasked: '***0646',
+    matchSource: 'PORTAL_EXACT_MATCH',
+    verifiedAt,
+  });
+
+  function directOwner(
+    row: Partial<{
+      hasLoginIdentity: boolean;
+      activated: boolean;
+      xp: number;
+      leadId: string | null;
+    }> = {},
+    usage = 0,
+  ) {
+    const owner = {
+      id: 'shell-profile',
+      hasLoginIdentity: false,
+      activated: false,
+      xp: 0,
+      leadId: null,
+      ...row,
+    };
+    tx.guestGameProfile.findMany.mockResolvedValueOnce([
+      { id: 'shell-profile' },
+    ]);
+    // two advisory locks, then the locked owner row and, for an untouched
+    // row only, its usage count
+    tx.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([owner]);
+    if (
+      !owner.hasLoginIdentity &&
+      !owner.activated &&
+      owner.xp === 0 &&
+      !owner.leadId
+    ) {
+      tx.$queryRaw.mockResolvedValueOnce([{ total: BigInt(usage) }]);
+    }
+  }
+
+  it('supersedes an untouched auto-created direct owner before linking the real profile', async () => {
+    directOwner();
+
+    const result = await service.resolveExactMatch(linkInput());
+
+    expect(result).toMatchObject({ status: 'LINKED', profileId, guestId });
+    expect(tx.guestGameProfile.findMany).toHaveBeenCalledWith({
+      where: {
+        tenantId,
+        guestId,
+        status: 'ACTIVE',
+        id: { not: profileId },
+      },
+      select: { id: true },
+      take: 1,
+    });
+    expect(tx.guestGameProfile.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 'shell-profile' },
+      data: { status: 'SUPERSEDED', guestId: null },
+    });
+    // the real profile takes the freed primary guest afterwards
+    expect(tx.guestGameProfile.update).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: { id: profileId },
+        data: expect.objectContaining({ guestId }) as Record<string, unknown>,
+      }),
+    );
+    expect(tx.guestGameProfileIdentityLink.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId,
+        profileId: 'shell-profile',
+        status: { not: 'SUPERSEDED' },
+      },
+      data: { status: 'SUPERSEDED', supersededAt: verifiedAt },
+    });
+    expect(tx.guestGameAuditEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId,
+        profileId,
+        guestId,
+        entityType: 'GUEST_GAME_PROFILE',
+        entityId: 'shell-profile',
+        action: 'PROFILE_OWNER_REPAIRED',
+        reasonCode: GUEST_SHELL_ABSORBED_REASON,
+        payload: expect.objectContaining({
+          supersededProfileId: 'shell-profile',
+          canonicalProfileId: profileId,
+          historicalDataPolicy: 'RETAIN_NO_MOVE_NO_REPLAY',
+        }) as Record<string, unknown>,
+      }) as Record<string, unknown>,
+    });
+    const lockedOwnerQuery = (
+      callArgument(tx.$queryRaw, 2, 0) as readonly string[]
+    ).join('');
+    expect(lockedOwnerQuery).toContain('FOR UPDATE');
+  });
+
+  it('refuses a new link while a direct owner with real history holds the guest', async () => {
+    directOwner({ activated: true, hasLoginIdentity: true });
+
+    const result = await service.resolveExactMatch(linkInput());
+
+    expect(result).toMatchObject({
+      status: 'CONFLICT',
+      profileId,
+      guestId,
+      linkedNow: false,
+    });
+    expect(
+      firstCallArgument(tx.guestGameProfileIdentityLink.create),
+    ).toMatchObject({ data: { guestId, status: 'CONFLICT' } });
+    expect(tx.guestGameProfileIdentityLink.upsert).not.toHaveBeenCalled();
+    expect(tx.guestGameProfile.update).not.toHaveBeenCalled();
+    expect(tx.guestGameAuditEvent.create).not.toHaveBeenCalled();
+    // history was checked from the locked row alone; no usage query needed
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not absorb a shell that already earned an effect', async () => {
+    directOwner({}, 2);
+
+    const result = await service.resolveExactMatch(linkInput());
+
+    expect(result.status).toBe('CONFLICT');
+    expect(tx.guestGameProfile.update).not.toHaveBeenCalled();
+    expect(tx.guestGameAuditEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('leaves an existing link alone when a direct owner with history also holds the guest', async () => {
+    tx.guestGameProfileIdentityLink.findFirst
+      .mockResolvedValueOnce(activeLink({ guestId }))
+      .mockResolvedValueOnce(null);
+    directOwner({ activated: true });
+
+    const result = await service.resolveExactMatch(linkInput());
+
+    expect(result.status).toBe('ALREADY_LINKED');
+    expect(tx.guestGameProfileIdentityLink.create).not.toHaveBeenCalled();
+    expect(tx.guestGameAuditEvent.create).not.toHaveBeenCalled();
+    expect(tx.guestGameProfile.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'shell-profile' } }),
+    );
+  });
+
+  it('does not look for a direct owner when the phone does not match', async () => {
+    tx.guest.findFirst.mockResolvedValue(guest({ phoneHash: 'other-phone' }));
+
+    const result = await service.resolveExactMatch(linkInput());
+
+    expect(result.status).toBe('NOT_LINKED');
+    expect(tx.guestGameProfile.findMany).not.toHaveBeenCalled();
   });
 
   it('does not auto-link an ambiguous complete snapshot', async () => {

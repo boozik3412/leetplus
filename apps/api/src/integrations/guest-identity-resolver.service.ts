@@ -12,6 +12,7 @@ const SUPERSEDED_LINK_STATUS = 'SUPERSEDED';
 const CONFLICT_LINK_STATUS = 'CONFLICT';
 const IDENTITY_LINK_EVENT_TYPE = 'GAME_PROFILE_IDENTITY_LINKED';
 const IDENTITY_LINK_EVENT_SOURCE = 'IDENTITY_RESOLVER';
+export const GUEST_SHELL_ABSORBED_REASON = 'GUEST_SHELL_PROFILE_ABSORBED';
 // PostgreSQL accepts at most 32767 bind variables per prepared statement.
 // Keep enough headroom for the tenant/status predicates and future filters.
 const PROFILE_PHONE_HASH_BATCH_SIZE = 10_000;
@@ -438,6 +439,24 @@ export class GuestIdentityResolverService {
           );
         }
 
+        const directOwner = await this.absorbGuestShellOwner(
+          tx,
+          input,
+          profile.id,
+          verifiedAt,
+        );
+        // A direct owner with real history keeps the guest. Only a new link
+        // is refused; an existing one is left for manual review.
+        if (directOwner === 'BLOCKED' && activeLink?.guestId !== guest.id) {
+          await this.saveConflictLink(tx, input, candidateLink, verifiedAt);
+          return this.result(
+            'CONFLICT',
+            profile.id,
+            guest.id,
+            activeLink?.guestId ?? null,
+          );
+        }
+
         if (activeLink?.guestId === guest.id) {
           await tx.guestGameProfileIdentityLink.update({
             where: { id: activeLink.id },
@@ -637,6 +656,131 @@ export class GuestIdentityResolverService {
       select: { guestId: true },
     });
     return uniqueStrings(links.map((link) => link.guestId));
+  }
+
+  /**
+   * The snapshot pipeline creates a phoneless profile for every Langame guest
+   * it sees and keeps it as the guest's owner through GuestGameProfile.guestId.
+   * Linking the guest's real profile next to it splits one guest between two
+   * owners: events keep landing on the shell, facts on the real profile.
+   *
+   * An untouched shell (no login identity, never opened, no rewards, XP or
+   * other effects) is superseded here, with its history retained in place.
+   * A direct owner with anything of value is reported as BLOCKED.
+   */
+  private async absorbGuestShellOwner(
+    tx: Prisma.TransactionClient,
+    input: ResolveExactMatchInput,
+    profileId: string,
+    verifiedAt: Date,
+  ): Promise<'NONE' | 'ABSORBED' | 'BLOCKED'> {
+    const [candidate] = await tx.guestGameProfile.findMany({
+      where: {
+        tenantId: input.tenantId,
+        guestId: input.guestId,
+        status: 'ACTIVE',
+        id: { not: profileId },
+      },
+      select: { id: true },
+      take: 1,
+    });
+    if (!candidate) return 'NONE';
+
+    // Re-read under a row lock: a reward written for the shell concurrently
+    // must either be visible here or wait until the shell is superseded.
+    const owners = await tx.$queryRaw<
+      Array<{
+        id: string;
+        hasLoginIdentity: boolean;
+        activated: boolean;
+        xp: number;
+        leadId: string | null;
+      }>
+    >`
+      SELECT
+        "id",
+        ("phoneHash" IS NOT NULL OR "phoneEncrypted" IS NOT NULL
+          OR "telegramIdentity" IS NOT NULL OR "maxIdentity" IS NOT NULL)
+          AS "hasLoginIdentity",
+        ("gameActivatedAt" IS NOT NULL) AS "activated",
+        "xp",
+        "leadId"
+      FROM "GuestGameProfile"
+      WHERE "id" = ${candidate.id}
+        AND "tenantId" = ${input.tenantId}
+        AND "guestId" = ${input.guestId}
+        AND "status" = 'ACTIVE'
+      FOR UPDATE
+    `;
+    const owner = owners[0];
+    if (!owner) return 'NONE';
+    if (
+      owner.hasLoginIdentity ||
+      owner.activated ||
+      owner.xp !== 0 ||
+      owner.leadId
+    ) {
+      return 'BLOCKED';
+    }
+
+    const [usage] = await tx.$queryRaw<Array<{ total: bigint | number }>>`
+      SELECT
+        (SELECT COUNT(*) FROM "GuestGameReward" WHERE "profileId" = ${owner.id})
+        + (SELECT COUNT(*) FROM "GuestGameEntitlement" WHERE "profileId" = ${owner.id})
+        + (SELECT COUNT(*) FROM "GuestGameRewardWalletItem" WHERE "profileId" = ${owner.id})
+        + (SELECT COUNT(*) FROM "GuestGameXpPosting" WHERE "profileId" = ${owner.id})
+        + (SELECT COUNT(*) FROM "GuestBonusLedgerEntry" WHERE "profileId" = ${owner.id})
+        + (SELECT COUNT(*) FROM "GuestGameRewardIntent" WHERE "profileId" = ${owner.id})
+        + (SELECT COUNT(*) FROM "GuestGameCompletionNotification" WHERE "profileId" = ${owner.id})
+        + (SELECT COUNT(*) FROM "GuestGameDelivery" WHERE "profileId" = ${owner.id})
+        + (SELECT COUNT(*) FROM "GuestSupportTicket" WHERE "profileId" = ${owner.id})
+        + (SELECT COUNT(*) FROM "GuestPortalOtpChallenge" WHERE "profileId" = ${owner.id})
+        + (SELECT COUNT(*) FROM "GuestGameTelegramLinkChallenge" WHERE "profileId" = ${owner.id})
+        + (SELECT COUNT(*) FROM "GuestGameProfileIdentityLink"
+            WHERE "profileId" = ${owner.id}
+              AND "status" IN (${ACTIVE_LINK_STATUS}, ${PENDING_REBIND_LINK_STATUS}))
+        AS "total"
+    `;
+    if (Number(usage?.total ?? 1) !== 0) return 'BLOCKED';
+
+    await tx.guestGameProfileIdentityLink.updateMany({
+      where: {
+        tenantId: input.tenantId,
+        profileId: owner.id,
+        status: { not: SUPERSEDED_LINK_STATUS },
+      },
+      data: { status: SUPERSEDED_LINK_STATUS, supersededAt: verifiedAt },
+    });
+    await tx.guestGameProfile.update({
+      where: { id: owner.id },
+      data: { status: 'SUPERSEDED', guestId: null },
+    });
+    await tx.guestGameAuditEvent.create({
+      data: {
+        tenantId: input.tenantId,
+        profileId,
+        guestId: input.guestId,
+        entityType: 'GUEST_GAME_PROFILE',
+        entityId: owner.id,
+        action: 'PROFILE_OWNER_REPAIRED',
+        status: 'SUCCESS',
+        reasonCode: GUEST_SHELL_ABSORBED_REASON,
+        reasonText:
+          'An untouched auto-created guest profile was superseded before linking the guest to its real profile; history retained without move or replay.',
+        happenedAt: verifiedAt,
+        payload: {
+          supersededProfileId: owner.id,
+          canonicalProfileId: profileId,
+          guestId: input.guestId,
+          externalDomain: input.externalDomain,
+          externalGuestId: input.externalGuestId,
+          matchSource: input.matchSource,
+          historicalDataPolicy: 'RETAIN_NO_MOVE_NO_REPLAY',
+          materialEffectsMoved: 0,
+        },
+      },
+    });
+    return 'ABSORBED';
   }
 
   private async supersedePendingDomainLinks(input: {

@@ -33,6 +33,7 @@ import {
   guestGamePolicyAllowsEvaluation,
 } from './guest-game-source-policy';
 import {
+  CANONICAL_EVENT_OWNER_CONFLICT_CODE,
   EXACT_CANONICAL_OWNER_QUARANTINED_CODE,
   reconcileExactCanonicalEventOwner,
 } from './guest-game-exact-owner-reconciler';
@@ -70,6 +71,7 @@ export type GuestGameLedgerFallbackTenantResult = {
   fallbackFacts: number;
   duplicateFacts: number;
   failedFacts: number;
+  ownerConflictFacts: number;
   createdEvents: number;
   createdRewards: number;
 };
@@ -87,6 +89,7 @@ export type GuestGameLedgerFallbackRunResult = {
   fallbackFacts: number;
   duplicateFacts: number;
   failedFacts: number;
+  ownerConflictFacts: number;
   createdEvents: number;
   createdRewards: number;
   tenants: GuestGameLedgerFallbackTenantResult[];
@@ -1555,6 +1558,23 @@ export class GuestGameLedgerFallbackService {
                 },
               );
             } catch (error) {
+              // The live branch has no attempt cap, so an owner conflict that
+              // retries as FAILED never ends. Once the canonical event is
+              // proven to belong to another profile, the origin is settled.
+              if (
+                canonicalEventOwnerConflictError(error) &&
+                (await this.deadLetterProvenOwnerConflict({
+                  tenantId: user.tenantId,
+                  receiptId: receipt.id,
+                  claimAttempt: liveClaimAttempt,
+                  originKey,
+                  liveEventId: liveEvent.id,
+                  fact,
+                }))
+              ) {
+                result.ownerConflictFacts += 1;
+                continue;
+              }
               await this.prisma.guestGameOriginReceipt.updateMany({
                 where: {
                   id: receipt.id,
@@ -2578,6 +2598,83 @@ export class GuestGameLedgerFallbackService {
     });
   }
 
+  /**
+   * Settles a live reconciliation whose canonical event already belongs to
+   * another profile. The refusal to credit the session twice is correct and
+   * permanent, so the receipt leaves the retry queue as DEAD_LETTER with an
+   * audit row naming both profiles for support. Returns false (keep the
+   * ordinary FAILED retry) unless the conflict is proven from the event row.
+   */
+  private async deadLetterProvenOwnerConflict(input: {
+    tenantId: string;
+    receiptId: string;
+    claimAttempt: number;
+    originKey: string;
+    liveEventId: string;
+    fact: Prisma.GuestActivityFactGetPayload<Record<string, never>>;
+  }) {
+    const factProfileId = normalizedString(input.fact.profileId);
+    if (!factProfileId) return false;
+
+    return this.prisma.$transaction(async (tx) => {
+      const event = await tx.guestGameEvent.findFirst({
+        where: { tenantId: input.tenantId, id: input.liveEventId },
+        select: { id: true, profileId: true, guestId: true, eventType: true },
+      });
+      if (!event?.profileId || event.profileId === factProfileId) {
+        return false;
+      }
+
+      const deadLettered = await tx.guestGameOriginReceipt.updateMany({
+        where: {
+          id: input.receiptId,
+          status: 'PROCESSING',
+          claimedSource: 'LIVE_RECONCILIATION',
+          attempts: input.claimAttempt,
+        },
+        data: {
+          status: 'DEAD_LETTER',
+          claimedSource: 'SYSTEM_OWNER_GUARD',
+          claimExpiresAt: null,
+          processedAt: new Date(),
+          lastError:
+            'The canonical event of this origin belongs to another profile; ledger fallback will not credit it twice.',
+        },
+      });
+      if (deadLettered.count !== 1) return false;
+
+      await tx.guestGameAuditEvent.create({
+        data: {
+          tenantId: input.tenantId,
+          profileId: factProfileId,
+          guestId: input.fact.guestId,
+          storeId: input.fact.storeId,
+          entityType: 'GUEST_GAME_ORIGIN_RECEIPT',
+          entityId: input.receiptId,
+          action: 'LEDGER_FALLBACK_OWNER_CONFLICT_DEAD_LETTERED',
+          status: 'BLOCKED',
+          reasonCode: CANONICAL_EVENT_OWNER_CONFLICT_CODE,
+          reasonText:
+            'The physical session is already canonicalized for another profile; the fallback credit was not repeated.',
+          payload: {
+            receiptId: input.receiptId,
+            originKey: input.originKey,
+            factId: input.fact.id,
+            factProfileId,
+            factGuestId: input.fact.guestId,
+            sessionExternalId: input.fact.sessionExternalId,
+            eventId: event.id,
+            eventType: event.eventType,
+            eventProfileId: event.profileId,
+            eventGuestId: event.guestId,
+            attempts: input.claimAttempt,
+          },
+        },
+      });
+      return true;
+    });
+  }
+
   private async findOriginReceiptByCandidates(
     tenantId: string,
     originKeys: readonly string[],
@@ -3434,6 +3531,7 @@ function emptyTenantResult(
     fallbackFacts: 0,
     duplicateFacts: 0,
     failedFacts: 0,
+    ownerConflictFacts: 0,
     createdEvents: 0,
     createdRewards: 0,
   };
@@ -3463,6 +3561,7 @@ function summarize(
     fallbackFacts: total('fallbackFacts'),
     duplicateFacts: total('duplicateFacts'),
     failedFacts: total('failedFacts'),
+    ownerConflictFacts: total('ownerConflictFacts'),
     createdEvents: total('createdEvents'),
     createdRewards: total('createdRewards'),
     tenants,
@@ -3521,6 +3620,14 @@ function tenantBackgroundRuntimeIdentityNote(
   decision: TenantBackgroundRuntimeIdentityDecision,
 ) {
   return `Background runtime identity denied: ${decision.reasonCode}.`;
+}
+
+function canonicalEventOwnerConflictError(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+  const getResponse = (error as { getResponse?: unknown }).getResponse;
+  if (typeof getResponse !== 'function') return false;
+  const response: unknown = (getResponse as () => unknown).call(error);
+  return jsonRecord(response).code === CANONICAL_EVENT_OWNER_CONFLICT_CODE;
 }
 
 function exactOwnerQuarantineError(error: unknown) {

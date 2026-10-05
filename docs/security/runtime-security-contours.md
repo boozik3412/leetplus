@@ -1229,6 +1229,16 @@ entitlement кейса. Любой другой tenant, неизвестный f
 effect. Существующие origin keys, database lease и idempotency не позволяют
 повторному replay создать второй результат.
 
+Сбой ledger fallback, session-start fallback, supplemental pipeline или
+monitoring не прерывает остальные из этих независимых проходов: tick выполняет
+их все и завершается ошибкой в конце, перечисляя каждый сбой. Activity queue и
+snapshot pipeline по-прежнему останавливают tick сразу. Если live-сверка
+fallback получает отказ `CANONICAL_EVENT_OWNER_CONFLICT`, а строка
+канонического события подтверждает другого владельца-профиля, receipt
+становится `DEAD_LETTER` (`claimedSource=SYSTEM_OWNER_GUARD`) с audit
+`LEDGER_FALLBACK_OWNER_CONFLICT_DEAD_LETTERED` вместо бесконечного `FAILED`
+retry; повторного начисления нет (с 05.10.2026, worker placement не менялся).
+
 Установка unit/runner выполняется только exact production-control artifact с
 отдельно закреплённым install-map digest. Само наличие файлов в `main` или
 установка control generation не включает timer. Production activation требует

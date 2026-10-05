@@ -74,6 +74,7 @@ function services() {
         fallbackFacts: 1,
         duplicateFacts: 0,
         failedFacts: 0,
+        ownerConflictFacts: 0,
         createdEvents: 0,
         createdRewards: 0,
         tenants: [],
@@ -408,6 +409,11 @@ describe('guest gamification singleton worker', () => {
     ).rejects.toThrow(
       'Snapshot pipeline failed exact tenant processing: checked=1, processed=0, tenantsFailed=1, factsFailed=1 reason=Too many database connections opened',
     );
+    // Upstream stages still stop the tick before the downstream passes.
+    expect(failed.ledgerFallback.runScheduled).not.toHaveBeenCalled();
+    expect(
+      failed.gamification.runSupplementalPipelineScheduled,
+    ).not.toHaveBeenCalled();
   });
 
   it('fails closed when exact-tenant ledger fallback reports a failed fact', async () => {
@@ -425,6 +431,7 @@ describe('guest gamification singleton worker', () => {
       fallbackFacts: 0,
       duplicateFacts: 0,
       failedFacts: 1,
+      ownerConflictFacts: 0,
       createdEvents: 0,
       createdRewards: 0,
       tenants: [],
@@ -435,5 +442,146 @@ describe('guest gamification singleton worker', () => {
     ).rejects.toThrow(
       'Ledger fallback failed exact tenant processing: checked=1, tenantsFailed=1, factsFailed=1',
     );
+  });
+
+  function stableLiveEnv(): NodeJS.ProcessEnv {
+    return {
+      ...baseEnv(),
+      GUEST_GAMIFICATION_WORKER_CANARY: 'false',
+      GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT: '30',
+      GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_MODE: 'LIVE',
+      GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIMIT: '30',
+      GUEST_GAMIFICATION_WORKER_LEDGER_FALLBACK_LIVE_NOT_BEFORE:
+        '2026-09-05T00:00:00.000Z',
+      GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE: 'LIVE',
+      GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_LIMIT: '30',
+      GUEST_GAMIFICATION_WORKER_MONITORING_ENABLED: 'true',
+    };
+  }
+
+  function liveFallbackResult(
+    overrides: Partial<{
+      failedFacts: number;
+      ownerConflictFacts: number;
+      liveHandledFacts: number;
+    }> = {},
+  ) {
+    return {
+      mode: 'LIVE',
+      checkedTenants: 1,
+      processedTenants: 1,
+      skippedTenants: 0,
+      erroredTenants: 0,
+      checkedFacts: 2,
+      deferredFacts: 0,
+      liveHandledFacts: 0,
+      shadowFacts: 0,
+      fallbackFacts: 0,
+      duplicateFacts: 0,
+      failedFacts: 0,
+      ownerConflictFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+      tenants: [],
+      ...overrides,
+    };
+  }
+
+  it('still runs supplemental and monitoring after a ledger fallback failure and reports it at the end', async () => {
+    const dependencies = services();
+    const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    dependencies.ledgerFallback.runScheduled.mockResolvedValueOnce(
+      liveFallbackResult({ failedFacts: 3 }),
+    );
+
+    await expect(
+      runGuestGamificationWorkerOnce(
+        dependencies as never,
+        stableLiveEnv(),
+        logger,
+        new Date('2026-09-29T15:40:00.000Z'),
+      ),
+    ).rejects.toThrow(
+      'Ledger fallback failed exact tenant processing: checked=1, tenantsFailed=0, factsFailed=3',
+    );
+    expect(
+      dependencies.gamification.runSupplementalPipelineScheduled,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'LIVE', factTypes: ['BALANCE_TOPUP'] }),
+    );
+    expect(dependencies.monitoring.collectTenant).toHaveBeenCalledTimes(1);
+    expect(logger.log).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Guest gamification worker finished with failures:',
+      ),
+    );
+    expect(logger.log).toHaveBeenCalledWith(
+      expect.stringContaining('supplementalFacts=1'),
+    );
+  });
+
+  it('reports every failed independent pass of one tick', async () => {
+    const dependencies = services();
+    dependencies.ledgerFallback.runScheduled.mockRejectedValueOnce(
+      new Error('database\nunavailable'),
+    );
+    dependencies.gamification.runSupplementalPipelineScheduled.mockResolvedValueOnce(
+      {
+        checkedTenants: 1,
+        processedTenants: 0,
+        skippedTenants: 0,
+        erroredTenants: 1,
+        failedFacts: 1,
+        processedFacts: 0,
+        createdRewards: 0,
+      },
+    );
+    dependencies.monitoring.collectTenant.mockResolvedValueOnce({
+      status: 'FAILED',
+    });
+
+    const error = await runGuestGamificationWorkerOnce(
+      dependencies as never,
+      stableLiveEnv(),
+      { log: jest.fn(), warn: jest.fn(), error: jest.fn() },
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      [
+        'Ledger fallback threw: database unavailable',
+        'Supplemental pipeline failed exact tenant processing: checked=1, tenantsFailed=1, factsFailed=1',
+        'Gamification quality monitoring did not succeed',
+      ].join('; '),
+    );
+  });
+
+  it('finishes the tick when the only fallback outcome is a dead-lettered owner conflict', async () => {
+    const dependencies = services();
+    const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    dependencies.ledgerFallback.runScheduled.mockResolvedValueOnce(
+      liveFallbackResult({ ownerConflictFacts: 3 }),
+    );
+
+    await expect(
+      runGuestGamificationWorkerOnce(
+        dependencies as never,
+        stableLiveEnv(),
+        logger,
+      ),
+    ).resolves.toMatchObject({
+      ledgerFallback: { ownerConflictFacts: 3, failedFacts: 0 },
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Ledger fallback dead-lettered origins owned by another profile: count=3',
+    );
+    expect(logger.log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Guest gamification worker finished: .*ledgerFallbackOwnerConflicts=3/,
+      ),
+    );
+    expect(
+      dependencies.gamification.runSupplementalPipelineScheduled,
+    ).toHaveBeenCalledTimes(1);
   });
 });

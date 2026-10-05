@@ -26,6 +26,13 @@ const exactOperatorClaimedSources = [
 export const EXACT_CANONICAL_OWNER_QUARANTINED_CODE =
   'EXACT_CANONICAL_OWNER_QUARANTINED';
 
+/**
+ * The canonical event of an origin already exists for another profile (or
+ * another action type). Processing refuses to credit it a second time.
+ */
+export const CANONICAL_EVENT_OWNER_CONFLICT_CODE =
+  'CANONICAL_EVENT_OWNER_CONFLICT';
+
 type ExactPlayTimeFactType = (typeof exactPlayTimeFactTypes)[number];
 
 type LockedCanonicalEvent = {

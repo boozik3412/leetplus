@@ -111,6 +111,7 @@ import {
   normalizeGuestGameSourceKind,
 } from './guest-game-origin-key';
 import {
+  CANONICAL_EVENT_OWNER_CONFLICT_CODE,
   EXACT_CANONICAL_OWNER_QUARANTINED_CODE,
   reconcileExactCanonicalEventOwnerInTransaction,
   type ExactCanonicalOwnerReconcileOutcome,
@@ -15541,9 +15542,11 @@ export class GuestGamificationService {
         dryRun.eventType,
       )
     ) {
-      throw new ConflictException(
-        'Каноническое событие уже связано с другим гостем или типом действия.',
-      );
+      throw new ConflictException({
+        code: CANONICAL_EVENT_OWNER_CONFLICT_CODE,
+        message:
+          'Каноническое событие уже связано с другим гостем или типом действия.',
+      });
     }
 
     if (existingEvent && options.prequalifiedLootBoxOpen) {
@@ -16038,9 +16041,11 @@ export class GuestGamificationService {
               dryRun.eventType,
             )
           ) {
-            throw new ConflictException(
-              'Каноническое событие уже связано с другим гостем или типом действия.',
-            );
+            throw new ConflictException({
+              code: CANONICAL_EVENT_OWNER_CONFLICT_CODE,
+              message:
+                'Каноническое событие уже связано с другим гостем или типом действия.',
+            });
           }
           if (options.prequalifiedLootBoxOpen) {
             duplicateEvent =

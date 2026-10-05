@@ -657,6 +657,10 @@ function expectReferralEventCreated(
   expect(JSON.stringify(referralCalls)).not.toContain(options.referralCode);
 }
 
+function emptyBackfill() {
+  return { rewards: 0, events: 0, deliveries: 0, bonusLedgerEntries: 0 };
+}
+
 function portalPayloadFixture() {
   return {
     tenant: { name: 'LeetPlus', slug: 'demo' },
@@ -8059,6 +8063,186 @@ describe('GuestPortalService', () => {
         token: 'canonical-club-token',
         clubId: 'leet:radishcheva',
         portal,
+      });
+    });
+  });
+
+  describe('selectGameClub with an untouched auto-created club profile', () => {
+    const tokenPayload = {
+      sub: 'guest-portal:profile-1',
+      purpose: 'guest_portal',
+      tenantId: 'tenant-1',
+      storeId: 'store-1',
+      guestId: null,
+      profileId: 'profile-1',
+      phoneHash: 'phone-hash-1',
+    };
+    const targetGuest = {
+      id: 'guest-46',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: '46.langamepro.ru',
+      externalGuestId: '76331',
+      fullNameMasked: 'Игрок 46',
+      phoneMasked: '***0002',
+      emailMasked: null,
+    };
+    const playingProfile = {
+      id: 'profile-1',
+      tenantId: 'tenant-1',
+      status: 'ACTIVE',
+      guestId: null,
+      phoneHash: 'phone-hash-1',
+      phoneEncrypted: 'encrypted-phone',
+      displayName: 'Гость клуба',
+      contactMasked: '***0002',
+      gameActivatedAt: new Date('2026-09-29T16:39:31.000Z'),
+      xp: 0,
+    };
+    const shellProfile = {
+      id: 'shell-profile',
+      tenantId: 'tenant-1',
+      status: 'ACTIVE',
+      guestId: targetGuest.id,
+      phoneHash: null,
+      phoneEncrypted: null,
+      telegramIdentity: null,
+      maxIdentity: null,
+      leadId: null,
+      gameActivatedAt: null,
+      xp: 0,
+      displayName: 'М. Н. В.',
+      contactMasked: '***0002',
+    };
+
+    function arrange() {
+      const created = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const { jwtService, service } = created;
+      jest
+        .spyOn(service as any, 'verifyGuestToken')
+        .mockResolvedValue(tokenPayload);
+      jest.spyOn(service as any, 'getTenantStore').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: 'store-46',
+          publicSlug: 'club-46',
+          name: 'Club 46',
+          address: 'ул. 46',
+          externalDomain: '46.langamepro.ru',
+        },
+      });
+      jest
+        .spyOn(service as any, 'ensureGamificationClubAvailable')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(targetGuest);
+      jest
+        .spyOn(service as any, 'findProfile')
+        .mockResolvedValueOnce(playingProfile);
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        ...portalPayloadFixture(),
+        tenant: { name: 'Leet Clubs', slug: 'leet' },
+      });
+      jwtService.signAsync.mockResolvedValue('club-46-token');
+      return created;
+    }
+
+    it('keeps the playing profile and links it instead of switching to the shell', async () => {
+      const { jwtService, prisma, service } = arrange();
+      const link = jest
+        .spyOn(service as any, 'linkGameProfileToLocalGuest')
+        .mockResolvedValue({
+          status: 'LINKED',
+          guestId: targetGuest.id,
+          profileId: playingProfile.id,
+          linkedNow: true,
+          backfilled: emptyBackfill(),
+        });
+      prisma.guestGameProfile.findFirst
+        .mockResolvedValueOnce(shellProfile)
+        .mockResolvedValueOnce({ ...playingProfile, guestId: targetGuest.id });
+      prisma.guestGameProfile.update.mockResolvedValue({
+        ...playingProfile,
+        guestId: targetGuest.id,
+      });
+
+      await service.selectGameClub('Bearer guest-token', {
+        clubId: 'leet:club-46',
+      });
+
+      expect(link).toHaveBeenCalledWith(
+        expect.objectContaining({ tenantId: 'tenant-1', storeId: 'store-46' }),
+        playingProfile.id,
+        targetGuest.id,
+        targetGuest.phoneMasked,
+        'guest_portal_club_selection',
+      );
+      expect(prisma.guestGameProfile.update).toHaveBeenCalledTimes(1);
+      expect(prisma.guestGameProfile.update).toHaveBeenCalledWith({
+        where: { id: playingProfile.id },
+        data: expect.objectContaining({ status: 'ACTIVE' }),
+      });
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: `game-club:${playingProfile.id}:store-46`,
+          guestId: targetGuest.id,
+          profileId: playingProfile.id,
+        }),
+        expect.any(Object),
+      );
+    });
+
+    it('falls back to the club profile when the resolver refuses to absorb it', async () => {
+      const { jwtService, prisma, service } = arrange();
+      jest
+        .spyOn(service as any, 'linkGameProfileToLocalGuest')
+        .mockResolvedValue({
+          status: 'CONFLICT',
+          guestId: targetGuest.id,
+          profileId: playingProfile.id,
+          linkedNow: false,
+          backfilled: emptyBackfill(),
+        });
+      prisma.guestGameProfile.findFirst.mockResolvedValueOnce(shellProfile);
+      prisma.guestGameProfile.update.mockResolvedValue(shellProfile);
+
+      await service.selectGameClub('Bearer guest-token', {
+        clubId: 'leet:club-46',
+      });
+
+      expect(prisma.guestGameProfile.update).toHaveBeenCalledWith({
+        where: { id: shellProfile.id },
+        data: expect.objectContaining({ status: 'ACTIVE' }),
+      });
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ profileId: shellProfile.id }),
+        expect.any(Object),
+      );
+    });
+
+    it('does not try to absorb a club profile somebody already used', async () => {
+      const { prisma, service } = arrange();
+      const link = jest.spyOn(service as any, 'linkGameProfileToLocalGuest');
+      const usedProfile = {
+        ...shellProfile,
+        phoneHash: 'phone-hash-1',
+        gameActivatedAt: new Date('2026-09-08T09:00:32.000Z'),
+      };
+      prisma.guestGameProfile.findFirst.mockResolvedValueOnce(usedProfile);
+      prisma.guestGameProfile.update.mockResolvedValue(usedProfile);
+
+      await service.selectGameClub('Bearer guest-token', {
+        clubId: 'leet:club-46',
+      });
+
+      expect(link).not.toHaveBeenCalled();
+      expect(prisma.guestGameProfile.update).toHaveBeenCalledWith({
+        where: { id: usedProfile.id },
+        data: expect.objectContaining({ status: 'ACTIVE' }),
       });
     });
   });

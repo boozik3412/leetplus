@@ -330,98 +330,136 @@ export async function runGuestGamificationWorkerOnce(
     );
   }
 
-  const ledgerFallback =
-    config.ledgerFallbackMode === 'OFF'
-      ? null
-      : await services.ledgerFallback.runScheduled({
-          mode: config.ledgerFallbackMode,
-          tenantId: tenant.id,
-          playTimeAllowAllProfiles: true,
-          factTypes: [...playTimeFallbackFactTypes],
-          limit: config.ledgerFallbackLimit,
-          ...(config.ledgerFallbackLiveNotBefore
-            ? {
-                liveNotBefore: config.ledgerFallbackLiveNotBefore.toISOString(),
-              }
-            : {}),
-        });
-  if (
-    ledgerFallback &&
-    (ledgerFallback.checkedTenants !== 1 ||
-      ledgerFallback.erroredTenants > 0 ||
-      ledgerFallback.failedFacts > 0)
-  ) {
-    throw new Error(
-      `Ledger fallback failed exact tenant processing: checked=${ledgerFallback.checkedTenants}, tenantsFailed=${ledgerFallback.erroredTenants}, factsFailed=${ledgerFallback.failedFacts}`,
-    );
-  }
-
-  const sessionStartFallback =
-    config.sessionStartFallbackMode === 'OFF'
-      ? null
-      : await services.ledgerFallback.runScheduled({
-          mode: config.sessionStartFallbackMode,
-          tenantId: tenant.id,
-          profileId: config.sessionStartFallbackProfileId,
-          playTimeAllowAllProfiles: config.sessionStartFallbackAllowAllProfiles,
-          factTypes: [...sessionStartFallbackFactTypes],
-          limit: config.sessionStartFallbackLimit,
-          ...(config.sessionStartFallbackLiveNotBefore
-            ? {
-                liveNotBefore:
-                  config.sessionStartFallbackLiveNotBefore.toISOString(),
-              }
-            : {}),
-        });
-  if (
-    sessionStartFallback &&
-    (sessionStartFallback.checkedTenants !== 1 ||
-      sessionStartFallback.erroredTenants > 0 ||
-      sessionStartFallback.failedFacts > 0)
-  ) {
-    throw new Error(
-      `Session-start fallback failed exact tenant processing: checked=${sessionStartFallback.checkedTenants}, tenantsFailed=${sessionStartFallback.erroredTenants}, factsFailed=${sessionStartFallback.failedFacts}`,
-    );
-  }
-
-  const supplemental =
-    await services.gamification.runSupplementalPipelineScheduled({
-      tenantId: tenant.id,
-      mode: config.canary ? 'SHADOW' : 'LIVE',
-      factTypes: ['BALANCE_TOPUP'],
-      limit: config.supplementalLimit,
-    });
-  if (
-    supplemental.checkedTenants !== 1 ||
-    supplemental.erroredTenants > 0 ||
-    supplemental.failedFacts > 0
-  ) {
-    throw new Error(
-      `Supplemental pipeline failed exact tenant processing: checked=${supplemental.checkedTenants}, tenantsFailed=${supplemental.erroredTenants}, factsFailed=${supplemental.failedFacts}`,
-    );
-  }
-
-  let monitoring: { status: string } | null = null;
-  if (config.monitoringEnabled) {
-    const latest = await services.prisma.guestGameQualitySnapshot.findFirst({
-      where: { tenantId: tenant.id },
-      select: { measuredAt: true },
-      orderBy: { measuredAt: 'desc' },
-    });
-    if (
-      !latest ||
-      now.getTime() - latest.measuredAt.getTime() >= config.monitoringIntervalMs
-    ) {
-      monitoring = await services.monitoring.collectTenant(tenant.id, now);
-      if (monitoring.status !== 'SUCCESS') {
-        throw new Error('Gamification quality monitoring did not succeed');
+  // The passes below are independent of each other. A failing pass is
+  // reported when the tick ends, so it cannot starve the passes after it
+  // (supplemental top-ups and monitoring) on every tick.
+  const failures: string[] = [];
+  const ledgerFallback = await runIndependentPass(
+    failures,
+    'Ledger fallback',
+    async () => {
+      if (config.ledgerFallbackMode === 'OFF') return null;
+      const result = await services.ledgerFallback.runScheduled({
+        mode: config.ledgerFallbackMode,
+        tenantId: tenant.id,
+        playTimeAllowAllProfiles: true,
+        factTypes: [...playTimeFallbackFactTypes],
+        limit: config.ledgerFallbackLimit,
+        ...(config.ledgerFallbackLiveNotBefore
+          ? {
+              liveNotBefore: config.ledgerFallbackLiveNotBefore.toISOString(),
+            }
+          : {}),
+      });
+      if (
+        result.checkedTenants !== 1 ||
+        result.erroredTenants > 0 ||
+        result.failedFacts > 0
+      ) {
+        failures.push(
+          `Ledger fallback failed exact tenant processing: checked=${result.checkedTenants}, tenantsFailed=${result.erroredTenants}, factsFailed=${result.failedFacts}${tenantErrorReason(result.tenants)}`,
+        );
       }
-    }
+      return result;
+    },
+  );
+  if (ledgerFallback && ledgerFallback.ownerConflictFacts > 0) {
+    logger.warn(
+      `Ledger fallback dead-lettered origins owned by another profile: count=${ledgerFallback.ownerConflictFacts}`,
+    );
   }
+
+  const sessionStartFallback = await runIndependentPass(
+    failures,
+    'Session-start fallback',
+    async () => {
+      if (config.sessionStartFallbackMode === 'OFF') return null;
+      const result = await services.ledgerFallback.runScheduled({
+        mode: config.sessionStartFallbackMode,
+        tenantId: tenant.id,
+        profileId: config.sessionStartFallbackProfileId,
+        playTimeAllowAllProfiles: config.sessionStartFallbackAllowAllProfiles,
+        factTypes: [...sessionStartFallbackFactTypes],
+        limit: config.sessionStartFallbackLimit,
+        ...(config.sessionStartFallbackLiveNotBefore
+          ? {
+              liveNotBefore:
+                config.sessionStartFallbackLiveNotBefore.toISOString(),
+            }
+          : {}),
+      });
+      if (
+        result.checkedTenants !== 1 ||
+        result.erroredTenants > 0 ||
+        result.failedFacts > 0
+      ) {
+        failures.push(
+          `Session-start fallback failed exact tenant processing: checked=${result.checkedTenants}, tenantsFailed=${result.erroredTenants}, factsFailed=${result.failedFacts}${tenantErrorReason(result.tenants)}`,
+        );
+      }
+      return result;
+    },
+  );
+  if (sessionStartFallback && sessionStartFallback.ownerConflictFacts > 0) {
+    logger.warn(
+      `Session-start fallback dead-lettered origins owned by another profile: count=${sessionStartFallback.ownerConflictFacts}`,
+    );
+  }
+
+  const supplemental = await runIndependentPass(
+    failures,
+    'Supplemental pipeline',
+    async () => {
+      const result =
+        await services.gamification.runSupplementalPipelineScheduled({
+          tenantId: tenant.id,
+          mode: config.canary ? 'SHADOW' : 'LIVE',
+          factTypes: ['BALANCE_TOPUP'],
+          limit: config.supplementalLimit,
+        });
+      if (
+        result.checkedTenants !== 1 ||
+        result.erroredTenants > 0 ||
+        result.failedFacts > 0
+      ) {
+        failures.push(
+          `Supplemental pipeline failed exact tenant processing: checked=${result.checkedTenants}, tenantsFailed=${result.erroredTenants}, factsFailed=${result.failedFacts}`,
+        );
+      }
+      return result;
+    },
+  );
+
+  const monitoring = await runIndependentPass(
+    failures,
+    'Gamification quality monitoring',
+    async () => {
+      if (!config.monitoringEnabled) return null;
+      const latest = await services.prisma.guestGameQualitySnapshot.findFirst({
+        where: { tenantId: tenant.id },
+        select: { measuredAt: true },
+        orderBy: { measuredAt: 'desc' },
+      });
+      if (
+        latest &&
+        now.getTime() - latest.measuredAt.getTime() <
+          config.monitoringIntervalMs
+      ) {
+        return null;
+      }
+      const result = await services.monitoring.collectTenant(tenant.id, now);
+      if (result.status !== 'SUCCESS') {
+        failures.push('Gamification quality monitoring did not succeed');
+      }
+      return result;
+    },
+  );
 
   logger.log(
     [
-      'Guest gamification worker finished:',
+      failures.length
+        ? 'Guest gamification worker finished with failures:'
+        : 'Guest gamification worker finished:',
       `tenant=${tenant.slug}`,
       `canary=${config.canary}`,
       `activity=${activity.processed}`,
@@ -434,14 +472,19 @@ export async function runGuestGamificationWorkerOnce(
       `ledgerFallback=${config.ledgerFallbackMode}`,
       `ledgerFallbackFacts=${ledgerFallback?.liveHandledFacts ?? 0}`,
       `ledgerFallbackRewards=${ledgerFallback?.createdRewards ?? 0}`,
+      `ledgerFallbackOwnerConflicts=${ledgerFallback?.ownerConflictFacts ?? 0}`,
       `sessionStartFallback=${config.sessionStartFallbackMode}`,
       `sessionStartFallbackFacts=${sessionStartFallback?.liveHandledFacts ?? 0}`,
       `sessionStartFallbackRewards=${sessionStartFallback?.createdRewards ?? 0}`,
-      `supplementalFacts=${supplemental.processedFacts}`,
-      `supplementalRewards=${supplemental.createdRewards}`,
+      `supplementalFacts=${supplemental?.processedFacts ?? 0}`,
+      `supplementalRewards=${supplemental?.createdRewards ?? 0}`,
       `monitoring=${monitoring ? 'COLLECTED' : 'SKIPPED'}`,
     ].join(' '),
   );
+
+  if (failures.length) {
+    throw new Error(failures.join('; '));
+  }
 
   return {
     tenantId: tenant.id,
@@ -453,6 +496,31 @@ export async function runGuestGamificationWorkerOnce(
     supplemental,
     monitoring,
   };
+}
+
+async function runIndependentPass<T>(
+  failures: string[],
+  name: string,
+  run: () => Promise<T>,
+): Promise<T | null> {
+  try {
+    return await run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    failures.push(`${name} threw: ${oneLine(message)}`);
+    return null;
+  }
+}
+
+function tenantErrorReason(
+  tenants: ReadonlyArray<{ status: string; reason: string | null }>,
+) {
+  const reason = tenants.find((tenant) => tenant.status === 'ERROR')?.reason;
+  return reason ? ` reason=${oneLine(reason)}` : '';
+}
+
+function oneLine(value: string) {
+  return value.replace(/\s+/gu, ' ').trim().slice(0, 500);
 }
 
 function optional(value: string | undefined) {

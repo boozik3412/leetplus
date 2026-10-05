@@ -15,7 +15,10 @@ import {
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import type { GuestBonusLedgerSchedulerRuntimeStatus } from './guest-bonus-ledger-scheduler.service';
-import { EXACT_CANONICAL_OWNER_QUARANTINED_CODE } from './guest-game-exact-owner-reconciler';
+import {
+  CANONICAL_EVENT_OWNER_CONFLICT_CODE,
+  EXACT_CANONICAL_OWNER_QUARANTINED_CODE,
+} from './guest-game-exact-owner-reconciler';
 import {
   buildGuestGameOriginKey,
   buildGuestGamePhysicalProgressIdentity,
@@ -17271,6 +17274,52 @@ describe('GuestGamificationService', () => {
       expect(materialize).not.toHaveBeenCalled();
       expect(recordDecisions).not.toHaveBeenCalled();
       expect(prisma.guestGameEvent.findFirst).toHaveBeenCalledTimes(1);
+    });
+
+    it('tags a canonical event owned by another profile with a stable conflict code', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest
+        .spyOn(service, 'dryRun')
+        .mockResolvedValue(dryRunResult({ eventType: 'PLAY_HOUR' }));
+      prisma.guestGameEvent.findFirst.mockResolvedValueOnce({
+        ...eventResult({ id: 'event-legacy-owner', eventType: 'PLAY_HOUR' }),
+        profileId: 'profile-legacy',
+      });
+      const recordDecisions = jest.spyOn(service, 'recordRuleDecisions');
+
+      const error = await service
+        .processEvent(
+          user,
+          {
+            profileId: profile.id,
+            eventType: 'PLAY_HOUR',
+            sourceFactKind: 'GUEST_SESSION',
+            sourceFactId: 'fact-new-owner',
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: 'club-1',
+            externalId: 'session-owned-elsewhere',
+          },
+          {
+            evaluationMode: 'LIVE_LEDGER_FALLBACK',
+            originKey: 'origin-owned-elsewhere',
+            suppressLedgerShadow: true,
+          },
+        )
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        code: CANONICAL_EVENT_OWNER_CONFLICT_CODE,
+      });
+      expect((error as ConflictException).message).toBe(
+        'Каноническое событие уже связано с другим гостем или типом действия.',
+      );
+      expect(recordDecisions).not.toHaveBeenCalled();
     });
 
     it('skips rewards and decisions for exact canonicalization of an existing event', async () => {

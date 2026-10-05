@@ -170,6 +170,7 @@ export class GuestGameLedgerFallbackSchedulerService
       if (
         result.checkedFacts > 0 ||
         result.failedFacts > 0 ||
+        result.ownerConflictFacts > 0 ||
         result.createdRewards > 0
       ) {
         this.logger.log(
@@ -184,6 +185,7 @@ export class GuestGameLedgerFallbackSchedulerService
             `duplicates=${result.duplicateFacts}`,
             `rewards=${result.createdRewards}`,
             `failed=${result.failedFacts}`,
+            `ownerConflicts=${result.ownerConflictFacts}`,
           ].join(' '),
         );
       }

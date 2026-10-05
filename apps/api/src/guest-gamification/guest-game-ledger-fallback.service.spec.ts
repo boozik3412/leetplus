@@ -8,6 +8,8 @@ import * as exactOwnerReconciler from './guest-game-exact-owner-reconciler';
 import * as genericSessionRemediation from './guest-game-generic-session-remediation';
 import { GuestGameLedgerFallbackService } from './guest-game-ledger-fallback.service';
 
+const { CANONICAL_EVENT_OWNER_CONFLICT_CODE } = exactOwnerReconciler;
+
 const now = new Date('2026-07-18T12:00:00.000Z');
 const liveCanaryScope = {
   tenantId: 'tenant-1',
@@ -2793,6 +2795,169 @@ describe('GuestGameLedgerFallbackService', () => {
     expect(
       receiptUpdates.some((call) => call[0].data.status === 'LIVE_PROCESSED'),
     ).toBe(false);
+  });
+
+  function ownerConflictTransaction(eventProfileId: string) {
+    const tx = {
+      guestGameEvent: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'event-other-owner',
+          profileId: eventProfileId,
+          guestId: 'guest-1',
+          eventType: 'PLAY_HOUR',
+        }),
+      },
+      guestGameOriginReceipt: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      guestGameAuditEvent: {
+        create: jest.fn().mockResolvedValue({ id: 'audit-1' }),
+      },
+    };
+    return {
+      tx,
+      $transaction: jest.fn((run: (client: typeof tx) => unknown) => run(tx)),
+    };
+  }
+
+  function canonicalOwnerConflict() {
+    return new ConflictException({
+      code: CANONICAL_EVENT_OWNER_CONFLICT_CODE,
+      message:
+        'Каноническое событие уже связано с другим гостем или типом действия.',
+    });
+  }
+
+  it('dead-letters a live origin whose canonical event belongs to another profile instead of retrying it', async () => {
+    const { service, prisma, gamification } = createService({
+      liveEventId: 'event-other-owner',
+    });
+    const { tx, $transaction } = ownerConflictTransaction('profile-legacy');
+    Object.assign(prisma, { $transaction });
+    gamification.processEvent.mockRejectedValueOnce(canonicalOwnerConflict());
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        ...liveCanaryScope,
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      processedTenants: 1,
+      erroredTenants: 0,
+      failedFacts: 0,
+      ownerConflictFacts: 1,
+      liveHandledFacts: 0,
+      createdRewards: 0,
+    });
+    expect(tx.guestGameEvent.findFirst).toHaveBeenCalledWith({
+      where: { tenantId: 'tenant-1', id: 'event-other-owner' },
+      select: { id: true, profileId: true, guestId: true, eventType: true },
+    });
+    expect(tx.guestGameOriginReceipt.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'receipt-1',
+        status: 'PROCESSING',
+        claimedSource: 'LIVE_RECONCILIATION',
+        attempts: 1,
+      },
+      data: expect.objectContaining({
+        status: 'DEAD_LETTER',
+        claimedSource: 'SYSTEM_OWNER_GUARD',
+        claimExpiresAt: null,
+        processedAt: now,
+      }) as unknown,
+    });
+    expect(tx.guestGameAuditEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        entityType: 'GUEST_GAME_ORIGIN_RECEIPT',
+        entityId: 'receipt-1',
+        action: 'LEDGER_FALLBACK_OWNER_CONFLICT_DEAD_LETTERED',
+        status: 'BLOCKED',
+        reasonCode: CANONICAL_EVENT_OWNER_CONFLICT_CODE,
+        payload: expect.objectContaining({
+          factId: 'fact-1',
+          factProfileId: 'profile-1',
+          eventId: 'event-other-owner',
+          eventProfileId: 'profile-legacy',
+          sessionExternalId: 'session-42',
+        }) as unknown,
+      }) as unknown,
+    });
+    const receiptUpdates = prisma.guestGameOriginReceipt.updateMany.mock
+      .calls as unknown as Array<[{ data: Record<string, unknown> }]>;
+    expect(
+      receiptUpdates.some((call) =>
+        ['FAILED', 'LIVE_PROCESSED'].includes(call[0].data.status as string),
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps an owner conflict it cannot prove in the ordinary FAILED retry', async () => {
+    const { service, prisma, gamification } = createService({
+      liveEventId: 'event-other-owner',
+    });
+    // The event row names the same profile, so the conflict is not about
+    // ownership and must not be settled as one.
+    const { tx, $transaction } = ownerConflictTransaction('profile-1');
+    Object.assign(prisma, { $transaction });
+    gamification.processEvent.mockRejectedValueOnce(canonicalOwnerConflict());
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        ...liveCanaryScope,
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      failedFacts: 1,
+      ownerConflictFacts: 0,
+    });
+    expect(tx.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
+    expect(tx.guestGameAuditEvent.create).not.toHaveBeenCalled();
+    expect(prisma.guestGameOriginReceipt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'receipt-1',
+          claimedSource: 'LIVE_RECONCILIATION',
+          attempts: 1,
+        }) as unknown,
+        data: expect.objectContaining({
+          status: 'FAILED',
+          lastError:
+            'Каноническое событие уже связано с другим гостем или типом действия.',
+        }) as unknown,
+      }),
+    );
+  });
+
+  it('does not settle an unrelated LIVE reconciliation error as an owner conflict', async () => {
+    const { service, prisma, gamification } = createService({
+      liveEventId: 'event-other-owner',
+    });
+    const { tx, $transaction } = ownerConflictTransaction('profile-legacy');
+    Object.assign(prisma, { $transaction });
+    gamification.processEvent.mockRejectedValueOnce(
+      new ConflictException(
+        'Точечный replay не создаёт новое физическое событие.',
+      ),
+    );
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        ...liveCanaryScope,
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({ failedFacts: 1, ownerConflictFacts: 0 });
+    expect($transaction).not.toHaveBeenCalled();
+    expect(tx.guestGameAuditEvent.create).not.toHaveBeenCalled();
   });
 
   it('dead-letters exhausted receipts without starving a later fact', async () => {

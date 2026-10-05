@@ -96,6 +96,28 @@ intents, deliveries или bonus-ledger entries. Любой drift останав
 - postcheck подтвердил отсутствие новых reward/XP/entitlement и остальных
   перечисленных material effects.
 
+## Сессия засчитана другому профилю (ledger fallback, 05.10.2026)
+
+Признак: в audit есть `LEDGER_FALLBACK_OWNER_CONFLICT_DEAD_LETTERED`
+(`reasonCode=CANONICAL_EVENT_OWNER_CONFLICT`). Это значит, что
+`GuestGameEvent` этой физической сессии уже создан для другого профиля. Обычно
+это staff-созданный legacy-профиль с прямым `GuestGameProfile.guestId`, тогда
+как гость играет в своём портальном профиле с identity link.
+
+Ночной snapshot pipeline и live check-in находят владельца по `guestId`
+(legacy-профиль), а activity ledger находит его по identity link или токену
+портала. Первым событие создаёт snapshot pipeline. Fallback честно отказывается
+начислять сессию второй раз и теперь закрывает receipt как `DEAD_LETTER`
+вместо бесконечного retry.
+
+- Payload audit содержит `factProfileId` (кому не засчитано), `eventProfileId`
+  (кому засчитано), `eventId`, `sessionExternalId`.
+- Если у legacy-профиля `gameActivatedAt` пуст, решения по событию —
+  `BLOCKED` («Игровой модуль ещё не активирован»). Тогда гость фактически
+  не получил прогресс за эту сессию.
+- Компенсация и перенос события — только по решению владельца и с отдельной
+  read-only проверкой. Автоматический replay запрещён.
+
 ## Связанные документы
 
 - [Runtime/security contours](../security/runtime-security-contours.md)

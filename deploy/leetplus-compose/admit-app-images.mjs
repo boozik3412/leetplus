@@ -186,7 +186,7 @@ export function validateArtifactPayload(root) {
     exactKeys(slot.readiness, ['migration', 'migrationCount', 'releaseSha'], 'API slot readiness');
     demand(slot.readiness.migration === bundle.schemaRequirement.migration &&
       slot.readiness.migrationCount === bundle.schemaRequirement.migrationCount &&
-      slot.readiness.releaseSha === bundle.releaseSha, 'API slot is not CURRENT191 ready');
+      slot.readiness.releaseSha === bundle.releaseSha, 'API slot readiness does not match the bundle schema');
     exactKeys(slot.probes, ['version', 'publicGuestDirectory', 'invalidCorporateToken', 'invalidWorkerToken'], 'API slot probes');
     demand(slot.probes.version === 200 && slot.probes.publicGuestDirectory === 200 &&
       slot.probes.invalidCorporateToken === 401 && slot.probes.invalidWorkerToken === 401,

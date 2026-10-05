@@ -81,7 +81,7 @@ function waitReady(container, releaseMetadata) {
     }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
   }
-  throw new Error(`API readiness did not satisfy CURRENT191: ${lastError}`);
+  throw new Error(`API readiness did not report the source schema head: ${lastError}`);
 }
 
 function inspectReleaseMetadata() {
@@ -151,7 +151,7 @@ function cleanup() {
 try {
   const metadata = inspectReleaseMetadata();
   if (metadata.migration !== SCHEMA.migration || metadata.migrationCount !== SCHEMA.migrationCount) {
-    throw new Error('API image does not pin CURRENT191');
+    throw new Error('API image schema head differs from the source migrations');
   }
   temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'leetplus-app-api-runtime-'));
   docker(['network', 'create', '--internal', network]);

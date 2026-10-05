@@ -526,7 +526,7 @@ function probeSlot(plan, slot) {
   const expected = plan[slot];
   const api = JSON.parse(http(`http://127.0.0.1:${PORTS[slot].api}/health/ready`));
   const web = JSON.parse(http(`http://127.0.0.1:${PORTS[slot].web}/api/release-identity`));
-  demand(api.ok === true && api.release?.sha === expected.releaseSha && api.dependencies?.database?.migration === SCHEMA.migration && api.dependencies?.database?.migrationCount === 191, 'API readiness mismatch');
+  demand(api.ok === true && api.release?.sha === expected.releaseSha && api.dependencies?.database?.migration === SCHEMA.migration && api.dependencies?.database?.migrationCount === SCHEMA.migrationCount, 'API readiness mismatch');
   demand(web.release?.sha === expected.releaseSha && web.release?.webBuildId === expected.releaseSha, 'Web release identity mismatch');
   const specification = renderCompose({ blue: plan.blue, green: plan.green, dataRelease: plan.dataRelease, activeSlot: plan.targetSlot });
   for (const [name, expected] of Object.entries(specification.networks)) {

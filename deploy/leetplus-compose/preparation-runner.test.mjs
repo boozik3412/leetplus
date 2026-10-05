@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { APP_ONLY_CONTRACT, CONTRACT, GO_PACKET_CONTRACT, PHASES, PreparationRunner, assertInstalledAppOnlyDownloadPaths, ensurePrivateTree, fileDigest, validateAdmission, validateAppOnlyInput } from './preparation-runner.mjs';
-import { canonical, digest, renderCompose } from './contract.mjs';
+import { SCHEMA, canonical, digest, renderCompose } from './contract.mjs';
 import { deriveWorkerContinuation } from './worker-continuation.mjs';
 
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -19,7 +19,7 @@ function appOnlyFixture() {
     schemaVersion: 2, contract: 'LEETPLUS_COMPOSE_APP_BUNDLE_V2', releaseLane: 'L1_APP_ONLY', releaseSha: f.release.releaseSha, builtAt: '2026-09-22T00:00:00.000Z', apiResourceProfile: 'API_6G_V1',
     sourceImpact: { baseSha: 'c'.repeat(40), headSha: f.release.releaseSha, classifierId: 'LEETPLUS_RELEASE_IMPACT_V1', rulesSha256: hash('1'), impactReceiptSha256: hash('2') },
     appImages: { api: f.release.images.api, web: f.release.images.web },
-    schemaRequirement: { migrationCount: 191, migration: '20260908180000_external_langame_simple_onboarding', prismaSchemaSha256: hash('3'), migrationsInventorySha256: hash('4') },
+    schemaRequirement: { migrationCount: SCHEMA.migrationCount, migration: SCHEMA.migration, prismaSchemaSha256: hash('3'), migrationsInventorySha256: hash('4') },
     compatibilityRequirements: { policySha256: hash('5'), composeRuntimeContractSha256: hash('6'), controllerCapability: 'APP_ONLY_V2_BASELINE_CERTIFICATION', dataContract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1' },
     runtimeEvidence: { transportValidationSha256: hash('7'), apiRuntimeValidationSha256: hash('8'), archiveRoundtripSha256: hash('9'), networkValidationSha256: hash('a'), runtimeValidationSha256: hash('b') },
   };
@@ -107,8 +107,8 @@ function fixture({ resource = true, deadline = '2026-09-22T03:00:00.000Z' } = {}
     return file;
   };
   const image = digit => `sha256:${digit.repeat(64)}`;
-  const oldRelease = { contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1', releaseSha: 'b'.repeat(40), builtAt: '2026-09-21T00:00:00Z', migrationCount: 191, migration: '20260908180000_external_langame_simple_onboarding', apiResourceProfile: 'API_6G_V1', images: { api: image('5'), web: image('6'), postgres: image('7'), redis: image('8') } };
-  const release = { contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1', releaseSha: 'a'.repeat(40), builtAt: '2026-09-22T00:00:00Z', migrationCount: 191, migration: '20260908180000_external_langame_simple_onboarding', ...(resource ? { apiResourceProfile: 'API_6G_V1' } : {}), images: { api: image('1'), web: image('2'), postgres: image('3'), redis: image('4') } };
+  const oldRelease = { contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1', releaseSha: 'b'.repeat(40), builtAt: '2026-09-21T00:00:00Z', migrationCount: SCHEMA.migrationCount, migration: SCHEMA.migration, apiResourceProfile: 'API_6G_V1', images: { api: image('5'), web: image('6'), postgres: image('7'), redis: image('8') } };
+  const release = { contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1', releaseSha: 'a'.repeat(40), builtAt: '2026-09-22T00:00:00Z', migrationCount: SCHEMA.migrationCount, migration: SCHEMA.migration, ...(resource ? { apiResourceProfile: 'API_6G_V1' } : {}), images: { api: image('1'), web: image('2'), postgres: image('3'), redis: image('4') } };
   const releaseJson = write('bundle/release.json', release, true);
   const imagesArchive = write('bundle/images.tar.gz', 'images');
   const controlArchive = write('bundle/control.tar.gz', 'control');

@@ -24,6 +24,10 @@ mkdir -p "$output"
 build_time=$(git show -s --format=%cI "$sha" | xargs -I '{}' date -u -d '{}' +%Y-%m-%dT%H:%M:%SZ)
 test "$(docker version --format '{{.Server.Version}}')" = 29.1.3
 docker info --format '{{json .DriverStatus}}' | grep -F 'io.containerd.snapshotter.v1'
+# The image must carry the schema head of this checkout's migrations.
+schema=$(node --input-type=module -e "import { SCHEMA } from './deploy/leetplus-compose/contract.mjs'; console.log(SCHEMA.migrationCount, SCHEMA.migration)")
+read -r schema_migration_count schema_migration <<<"$schema"
+[[ "$schema_migration_count" =~ ^[1-9][0-9]*$ && "$schema_migration" =~ ^[0-9]{14}_ ]]
 
 tmp=$(mktemp -d "${RUNNER_TEMP:-/tmp}/leetplus-app-build.XXXXXX")
 pg_tag="leetplus-app-fixture-postgres:$sha"
@@ -43,7 +47,14 @@ done
 api_id=$(docker image inspect --format '{{.Id}}' "leetplus-api:$sha")
 web_id=$(docker image inspect --format '{{.Id}}' "leetplus-web:$sha")
 [[ "$api_id" =~ ^sha256:[a-f0-9]{64}$ && "$web_id" =~ ^sha256:[a-f0-9]{64}$ && "$api_id" != "$web_id" ]]
-docker run --rm --network none --entrypoint node "$api_id" -e 'const m=require("/app/release.json");if(m.migrationCount!==191)process.exit(1);console.log(JSON.stringify(m))' > "$tmp/image-release.json"
+docker run --rm --network none -e "SCHEMA_MIGRATION_COUNT=$schema_migration_count" -e "SCHEMA_MIGRATION=$schema_migration" \
+  --entrypoint node "$api_id" -e '
+    const m=require("/app/release.json"),e=process.env;
+    if(m.migrationCount!==Number(e.SCHEMA_MIGRATION_COUNT)||m.migration!==e.SCHEMA_MIGRATION){
+      console.error(`Image schema head ${m.migrationCount} ${m.migration} differs from source ${e.SCHEMA_MIGRATION_COUNT} ${e.SCHEMA_MIGRATION}`);process.exit(1);
+    }
+    console.log(JSON.stringify(m));
+  ' > "$tmp/image-release.json"
 external_worker_capability=''
 if git cat-file -e "$sha:apps/api/src/integrations/langame-external-daily-worker.cli.ts" 2>/dev/null; then
   docker run --rm --network none --entrypoint node "$api_id" -e '
@@ -52,7 +63,8 @@ if git cat-file -e "$sha:apps/api/src/integrations/langame-external-daily-worker
     if(!entry.isFile()||entry.size===0)process.exit(1);
   '
   external_worker_capability='LANGAME_EXTERNAL_SET1_V1'
-  bash deploy/leetplus-compose/test-external-worker-image.sh "$api_id" "$sha" "$build_time" "$tmp/external-worker-image-validation.json"
+  bash deploy/leetplus-compose/test-external-worker-image.sh "$api_id" "$sha" "$build_time" "$tmp/external-worker-image-validation.json" \
+    "$schema_migration" "$schema_migration_count"
 fi
 export LEETPLUS_EXTERNAL_WORKER_CAPABILITY="$external_worker_capability"
 if [[ -n "$external_worker_capability" ]]; then
@@ -90,8 +102,8 @@ for slot in blue green; do
     --user "$web_uid:$web_uid" --tmpfs /tmp:rw,nosuid,nodev,size=134217728,mode=1777 \
     --tmpfs "/app/apps/web/.next/cache:rw,nosuid,nodev,size=134217728,uid=$web_uid,gid=$web_uid" \
     -e "RELEASE_SHA=$sha" -e "WEB_BUILD_ID=$sha" -e "BUILD_TIME=$build_time" \
-    -e EXPECTED_DATABASE_MIGRATION=20260908180000_external_langame_simple_onboarding \
-    -e EXPECTED_DATABASE_MIGRATION_COUNT=191 -e API_URL=http://127.0.0.1:4000 "$web_id" >/dev/null
+    -e "EXPECTED_DATABASE_MIGRATION=$schema_migration" \
+    -e "EXPECTED_DATABASE_MIGRATION_COUNT=$schema_migration_count" -e API_URL=http://127.0.0.1:4000 "$web_id" >/dev/null
   ready=false
   for attempt in $(seq 1 30); do
     if docker exec "$web_name" node /opt/leetplus/health.cjs web >/dev/null; then ready=true; break; fi
@@ -105,11 +117,11 @@ done
 # exactly API and Web.
 node --input-type=module - "$tmp" "$sha" "$build_time" "$api_id" "$web_id" "$pg_id" <<'NODE'
 import fs from 'node:fs';
-import { canonical, EXTERNAL_WORKER_CAPABILITY } from './deploy/leetplus-compose/contract.mjs';
+import { canonical, EXTERNAL_WORKER_CAPABILITY, SCHEMA } from './deploy/leetplus-compose/contract.mjs';
 const [root, releaseSha, builtAt, api, web, postgres] = process.argv.slice(2);
 fs.writeFileSync(`${root}/release.json`, canonical({
   contract: 'LEETPLUS_COMPOSE_BLUE_GREEN_V1', releaseSha, builtAt,
-  migrationCount: 191, migration: '20260908180000_external_langame_simple_onboarding',
+  migrationCount: SCHEMA.migrationCount, migration: SCHEMA.migration,
   apiResourceProfile: 'API_6G_V1', images: { api, web, postgres, redis: api },
   ...(process.env.LEETPLUS_EXTERNAL_WORKER_CAPABILITY ? { externalWorkerCapability: EXTERNAL_WORKER_CAPABILITY } : {}),
 }), { flag: 'wx' });

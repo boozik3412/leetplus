@@ -1,8 +1,21 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const CONTRACT = 'LEETPLUS_COMPOSE_BLUE_GREEN_V1';
-export const SCHEMA = { migrationCount: 191, migration: '20260908180000_external_langame_simple_onboarding' };
+// The schema head of the repository checkout this module is part of, counted
+// the way image-metadata.mjs writes it into release.json. It used to be a
+// frozen CURRENT191 constant; `lp` applies pending migrations, so images are
+// now checked against the migrations they were built from. Controller
+// generations installed on the host keep their own frozen copies.
+function sourceSchemaHead() {
+  const root = fileURLToPath(new URL('../../packages/database/prisma/migrations/', import.meta.url));
+  const migrations = fs.readdirSync(root).filter(name => /^\d{14}_/.test(name) && fs.statSync(path.join(root, name)).isDirectory()).sort();
+  demand(migrations.length > 0, 'No Prisma migrations found');
+  return Object.freeze({ migrationCount: migrations.length, migration: migrations.at(-1) });
+}
+export const SCHEMA = sourceSchemaHead();
 export const API_RESOURCE_PROFILE = 'API_6G_V1';
 export const EXTERNAL_WORKER_CAPABILITY = 'LANGAME_EXTERNAL_SET1_V1';
 export const SLOTS = ['blue', 'green'];
@@ -25,7 +38,7 @@ export function demand(condition, message) { if (!condition) throw new Error(mes
 export function imageId(value) { demand(/^sha256:[a-f0-9]{64}$/.test(value ?? ''), 'Image must be an exact loaded image ID'); return value; }
 export function release(value) {
   demand(value?.contract === CONTRACT && /^[a-f0-9]{40}$/.test(value.releaseSha ?? ''), 'Invalid release identity');
-  demand(value.migrationCount === SCHEMA.migrationCount && value.migration === SCHEMA.migration, 'Only CURRENT191 is admitted');
+  demand(value.migrationCount === SCHEMA.migrationCount && value.migration === SCHEMA.migration, 'Release schema head differs from the source migrations');
   demand(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(value.builtAt ?? '') && Number.isFinite(Date.parse(value.builtAt)), 'Invalid build time');
   if (Object.hasOwn(value, 'apiResourceProfile')) demand(value.apiResourceProfile === API_RESOURCE_PROFILE, 'Invalid API resource profile');
   if (Object.hasOwn(value, 'externalWorkerCapability')) demand(value.externalWorkerCapability === EXTERNAL_WORKER_CAPABILITY, 'Invalid external worker capability');

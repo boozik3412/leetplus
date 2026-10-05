@@ -4,7 +4,10 @@ image=${1:?exact API image ID required}
 release_sha=${2:?exact release SHA required}
 build_time=${3:?exact build time required}
 output=${4:?receipt output required}
+migration=${5:?schema head migration required}
+migration_count=${6:?schema head migration count required}
 [[ "$image" =~ ^sha256:[a-f0-9]{64}$ && "$release_sha" =~ ^[a-f0-9]{40}$ ]]
+[[ "$migration" =~ ^[0-9]{14}_ && "$migration_count" =~ ^[1-9][0-9]*$ ]]
 root=$(mktemp -d "${RUNNER_TEMP:-/tmp}/leetplus-external-image.XXXXXX")
 cleanup() { sudo rm -f -- "$root/runtime.json"; rm -f -- "$root/stdout" "$root/stderr"; rmdir -- "$root"; }
 trap cleanup EXIT
@@ -16,8 +19,8 @@ docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-
   --user 12042:12042 --entrypoint node \
   --mount "type=bind,source=$root/runtime.json,target=/run/secrets/runtime.json,readonly" \
   -e "RELEASE_SHA=$release_sha" -e "BUILD_TIME=$build_time" \
-  -e EXPECTED_DATABASE_MIGRATION=20260908180000_external_langame_simple_onboarding \
-  -e EXPECTED_DATABASE_MIGRATION_COUNT=191 \
+  -e "EXPECTED_DATABASE_MIGRATION=$migration" \
+  -e "EXPECTED_DATABASE_MIGRATION_COUNT=$migration_count" \
   "$image" /opt/leetplus/runtime-entry.cjs langame-external-daily-worker \
   > "$root/stdout" 2> "$root/stderr"
 status=$?

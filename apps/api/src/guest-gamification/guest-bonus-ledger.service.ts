@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   IntegrationProvider,
   Prisma,
+  TenantCustomerStage,
   TenantLifecycleStatus,
   TenantModule,
   UserRole,
@@ -1211,6 +1212,35 @@ export class GuestBonusLedgerService {
       protocolBlockedDeliveries: result.canceled.protocolBlocked,
       note: bonusLedgerCancelNote(reason, result.canceled),
     };
+  }
+
+  /**
+   * External networks (PILOT/BETA/LIVE) whose owner opened outbound writes for
+   * both gamification and integrations. The scheduled dispatch re-checks the
+   * full execution admission per tenant, so this list only narrows the loop.
+   */
+  async listExternalBonusLedgerTenantSlugs(): Promise<string[]> {
+    const tenants = await this.prisma.tenant.findMany({
+      where: {
+        status: TenantLifecycleStatus.ACTIVE,
+        customerStage: {
+          in: [
+            TenantCustomerStage.PILOT,
+            TenantCustomerStage.BETA,
+            TenantCustomerStage.LIVE,
+          ],
+        },
+        AND: bonusLedgerOutboundRequirements.map((requirement) => ({
+          moduleEntitlements: {
+            some: { module: requirement.module, outboundEnabled: true },
+          },
+        })),
+      },
+      select: { slug: true },
+      orderBy: { slug: 'asc' },
+    });
+
+    return tenants.map((tenant) => tenant.slug);
   }
 
   async runScheduledDispatch(

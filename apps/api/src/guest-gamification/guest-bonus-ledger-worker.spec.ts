@@ -1,6 +1,7 @@
 import type { GuestGameScheduledBonusLedgerDispatchResult } from './guest-bonus-ledger.service';
 import {
   loadGuestBonusLedgerWorkerConfig,
+  runGuestBonusLedgerExternalTenantsOnce,
   runGuestBonusLedgerWorkerOnce,
 } from './guest-bonus-ledger-worker';
 
@@ -219,5 +220,135 @@ describe('guest bonus ledger worker', () => {
         rewardId: '00000000-0000-4000-8000-000000000002',
       }),
     );
+  });
+
+  describe('external networks', () => {
+    const liveEnv = (): NodeJS.ProcessEnv => ({
+      ...baseEnv(),
+      GUEST_BONUS_LEDGER_WORKER_DRY_RUN: 'false',
+      GUEST_BONUS_LEDGER_WORKER_CANARY: 'false',
+      GUEST_BONUS_LEDGER_WORKER_LIMIT: '50',
+      LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
+    });
+    const tenantResult = (
+      slug: string,
+      status: 'PROCESSED' | 'SKIPPED' | 'ERROR',
+      overrides: Partial<GuestGameScheduledBonusLedgerDispatchResult> = {},
+    ) =>
+      result({
+        mode: 'READY',
+        dryRun: false,
+        processedTenants: status === 'PROCESSED' ? 1 : 0,
+        tenants: [
+          {
+            tenantId: `${slug}-id`,
+            tenantSlug: slug,
+            status,
+            reason: status === 'PROCESSED' ? null : `${slug} reason`,
+            result: null,
+          },
+        ],
+        ...overrides,
+      });
+    const logger = () => ({
+      log: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+    });
+
+    it('dispatches each outbound-approved network after the primary tenant', async () => {
+      const service = {
+        listExternalBonusLedgerTenantSlugs: jest
+          .fn()
+          .mockResolvedValue(['demo', 'set-1', 'set-2']),
+        runScheduledDispatch: jest
+          .fn()
+          .mockImplementation(({ tenantSlug }: { tenantSlug: string }) =>
+            Promise.resolve(
+              tenantSlug === 'set-2'
+                ? tenantResult('set-2', 'SKIPPED')
+                : tenantResult(tenantSlug, 'PROCESSED', { confirmed: 1 }),
+            ),
+          ),
+      };
+
+      const outcome = await runGuestBonusLedgerExternalTenantsOnce(
+        service,
+        liveEnv(),
+        logger(),
+      );
+
+      expect(outcome).toEqual({
+        processed: ['set-1'],
+        skipped: ['set-2'],
+        failed: [],
+      });
+      expect(service.runScheduledDispatch).toHaveBeenCalledTimes(2);
+      expect(service.runScheduledDispatch).toHaveBeenCalledWith({
+        dryRun: false,
+        canary: false,
+        queueApprovedRewards: true,
+        limit: 50,
+        rewardTypes: ['BONUS_BALANCE'],
+        tenantSlug: 'set-1',
+      });
+    });
+
+    it('keeps going after a failing network and reports it', async () => {
+      const service = {
+        listExternalBonusLedgerTenantSlugs: jest
+          .fn()
+          .mockResolvedValue(['set-1', 'set-2', 'set-3']),
+        runScheduledDispatch: jest
+          .fn()
+          .mockImplementation(({ tenantSlug }: { tenantSlug: string }) => {
+            if (tenantSlug === 'set-1') {
+              return Promise.reject(new Error('boom'));
+            }
+            if (tenantSlug === 'set-2') {
+              return Promise.resolve(
+                tenantResult('set-2', 'PROCESSED', { failed: 1 }),
+              );
+            }
+            return Promise.resolve(tenantResult('set-3', 'ERROR'));
+          }),
+      };
+
+      const outcome = await runGuestBonusLedgerExternalTenantsOnce(
+        service,
+        liveEnv(),
+        logger(),
+      );
+
+      expect(outcome).toEqual({
+        processed: [],
+        skipped: [],
+        failed: ['set-1', 'set-2(entries=1)', 'set-3'],
+      });
+    });
+
+    it('stays on the primary tenant in canary mode or when disabled', async () => {
+      const service = {
+        listExternalBonusLedgerTenantSlugs: jest.fn(),
+        runScheduledDispatch: jest.fn(),
+      };
+
+      await runGuestBonusLedgerExternalTenantsOnce(
+        service,
+        baseEnv(),
+        logger(),
+      );
+      await runGuestBonusLedgerExternalTenantsOnce(
+        service,
+        {
+          ...liveEnv(),
+          GUEST_BONUS_LEDGER_WORKER_EXTERNAL_TENANTS_ENABLED: 'false',
+        },
+        logger(),
+      );
+
+      expect(service.listExternalBonusLedgerTenantSlugs).not.toHaveBeenCalled();
+      expect(service.runScheduledDispatch).not.toHaveBeenCalled();
+    });
   });
 });

@@ -13,6 +13,7 @@ import { GuestBonusLedgerSchedulerService } from './guest-bonus-ledger-scheduler
 import { GuestBonusLedgerService } from './guest-bonus-ledger.service';
 import {
   loadGuestBonusLedgerWorkerConfig,
+  runGuestBonusLedgerExternalTenantsOnce,
   runGuestBonusLedgerWorkerOnce,
 } from './guest-bonus-ledger-worker';
 import { GuestGamificationService } from './guest-gamification.service';
@@ -74,9 +75,17 @@ async function main() {
   );
 
   try {
-    await runGuestBonusLedgerWorkerOnce(
-      application.get(GuestBonusLedgerService),
-    );
+    const bonusLedger = application.get(GuestBonusLedgerService);
+    // The primary tenant runs first; external networks still dispatch when it
+    // fails, and the process then reports every failure.
+    let primaryError: Error | null = null;
+    try {
+      await runGuestBonusLedgerWorkerOnce(bonusLedger);
+    } catch (error) {
+      primaryError = error instanceof Error ? error : new Error(String(error));
+    }
+    const external = await runGuestBonusLedgerExternalTenantsOnce(bonusLedger);
+    if (primaryError) throw primaryError;
     await runGuestGamificationWorkerOnce({
       prisma: application.get(PrismaService),
       activityLedger: application.get(GuestActivityLedgerService),
@@ -84,6 +93,13 @@ async function main() {
       gamification: application.get(GuestGamificationService),
       monitoring: application.get(GuestGameQualityMonitoringService),
     });
+    // An external network's failure must not hold back the primary tenant's
+    // gamification pass, so it is reported only after that pass.
+    if (external.failed.length > 0) {
+      throw new Error(
+        `External networks failed: ${external.failed.join(', ')}`,
+      );
+    }
   } finally {
     await application.close();
   }

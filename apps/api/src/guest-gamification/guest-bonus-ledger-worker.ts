@@ -18,6 +18,7 @@ export type GuestBonusLedgerWorkerConfig = {
   dryRun: boolean;
   canary: boolean;
   queueApprovedRewards: boolean;
+  externalTenants: boolean;
 };
 
 const workerEnabledKey = 'GUEST_BONUS_LEDGER_WORKER_ENABLED';
@@ -103,6 +104,15 @@ export function loadGuestBonusLedgerWorkerConfig(
       env.LANGAME_BONUS_ACCRUAL_REWARD_TYPES,
   );
 
+  // External networks with owner-approved outbound follow the primary tenant
+  // on every live tick; a canary stays limited to its one tenant and reward.
+  const externalTenants =
+    parseBoolean(
+      env.GUEST_BONUS_LEDGER_WORKER_EXTERNAL_TENANTS_ENABLED,
+      true,
+      'GUEST_BONUS_LEDGER_WORKER_EXTERNAL_TENANTS_ENABLED',
+    ) && !canary;
+
   return {
     tenantId,
     tenantSlug,
@@ -112,6 +122,7 @@ export function loadGuestBonusLedgerWorkerConfig(
     dryRun,
     canary,
     queueApprovedRewards,
+    externalTenants,
   };
 }
 
@@ -166,6 +177,99 @@ export async function runGuestBonusLedgerWorkerOnce(
   }
 
   return result;
+}
+
+export type GuestBonusLedgerExternalTenantsResult = {
+  processed: string[];
+  skipped: string[];
+  failed: string[];
+};
+
+/**
+ * Dispatches the bonus ledger of every external network with owner-approved
+ * outbound after the primary tenant, one network at a time. A network that
+ * fails is reported and the next one still runs.
+ */
+export async function runGuestBonusLedgerExternalTenantsOnce(
+  service: Pick<
+    GuestBonusLedgerService,
+    'runScheduledDispatch' | 'listExternalBonusLedgerTenantSlugs'
+  >,
+  env: NodeJS.ProcessEnv = process.env,
+  logger: GuestBonusLedgerWorkerLogger = console,
+): Promise<GuestBonusLedgerExternalTenantsResult> {
+  const config = loadGuestBonusLedgerWorkerConfig(env);
+  const outcome: GuestBonusLedgerExternalTenantsResult = {
+    processed: [],
+    skipped: [],
+    failed: [],
+  };
+  if (!config.externalTenants) return outcome;
+
+  const slugs = (await service.listExternalBonusLedgerTenantSlugs()).filter(
+    (slug) => slug !== config.tenantSlug,
+  );
+  for (const slug of slugs) {
+    try {
+      const result = await service.runScheduledDispatch({
+        dryRun: config.dryRun,
+        canary: false,
+        queueApprovedRewards: config.queueApprovedRewards,
+        limit: config.limit,
+        rewardTypes: config.rewardTypes,
+        tenantSlug: slug,
+      });
+      const tenant = result.tenants[0];
+      if (
+        result.checkedTenants !== 1 ||
+        !tenant ||
+        tenant.tenantSlug !== slug
+      ) {
+        throw new Error('tenant scope was not processed exactly once');
+      }
+      if (tenant.status === 'SKIPPED') {
+        outcome.skipped.push(slug);
+        logger.log(
+          `Guest bonus ledger worker skipped: tenant=${slug} reason=${tenant.reason ?? 'UNKNOWN'}`,
+        );
+        continue;
+      }
+      if (tenant.status === 'ERROR') {
+        throw new Error(tenant.reason ?? 'tenant dispatch failed');
+      }
+      logger.log(
+        [
+          'Guest bonus ledger worker finished:',
+          `tenant=${slug}`,
+          'external=true',
+          `mode=${result.mode}`,
+          `queued=${result.queued}`,
+          `checked=${result.checked}`,
+          `confirmed=${result.confirmed}`,
+          `failed=${result.failed}`,
+          `blocked=${result.blocked}`,
+          `skipped=${result.skipped}`,
+        ].join(' '),
+      );
+      if (result.blocked > 0) {
+        logger.warn(
+          `Guest bonus ledger worker tenant=${slug} blocked=${result.blocked}`,
+        );
+      }
+      if (result.failed > 0) {
+        outcome.failed.push(`${slug}(entries=${result.failed})`);
+      } else {
+        outcome.processed.push(slug);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(
+        `Guest bonus ledger worker tenant ${slug} failed: ${message}`,
+      );
+      outcome.failed.push(slug);
+    }
+  }
+  return outcome;
 }
 
 function optional(value: string | undefined) {

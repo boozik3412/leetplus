@@ -122,7 +122,28 @@ preimage. Это пока только source/CI candidate, не установ�
   а перед каждым следующим scope сеть должна быть всё ещё допущена с той же
   `executionRevision` (закрытие срока доступа или смена профиля останавливают
   проход). `LANGAME_SCHEDULED_SYNC` и все игровые/бонусные задачи внешних
-  сетей остаются `EXTERNAL_DENY`; bonus worker по-прежнему только для INTERNAL.
+  сетей остаются `EXTERNAL_DENY`; bonus worker по-прежнему только для INTERNAL
+  (до 05.10.2026, см. ниже).
+
+### Начисление игровых бонусов во внешних сетях (05.10.2026)
+
+Решение владельца: гости EZ GAME получают выигранные в игре бонусы на баланс
+Langame, как в 1337.
+
+- Включение — отдельное решение владельца по сети: `outboundEnabled` у модулей
+  `GAMIFICATION` и `INTEGRATIONS`. Общая замена профиля прав OUTBOUND не
+  включает. Для EZ GAME включено 05.10 с аудитом
+  `TENANT_MODULE_OUTBOUND_ENABLED`.
+- Владелец расписания прежний: `lp-bonus.timer` → `bonus-ledger-worker`. После
+  основного tenant (`GUEST_BONUS_LEDGER_WORKER_TENANT_SLUG`) он по очереди
+  проводит очередь начислений каждой активной сети `PILOT/BETA/LIVE`, у которой
+  OUTBOUND открыт в обоих модулях. Допуск сети (`acquirePermit`,
+  `GUEST_BONUS_LEDGER_LANGAME` = `REVISION_FENCED`) проверяется как раньше, на
+  каждую запись. Сбой одной сети не останавливает остальные и игровой проход
+  основного tenant; тик завершается с ошибкой после него. Canary и
+  `GUEST_BONUS_LEDGER_WORKER_EXTERNAL_TENANTS_ENABLED=false` отключают этот
+  проход.
+- Остальные игровые фоновые задачи внешних сетей остаются `EXTERNAL_DENY`.
 - Фоновый импорт Langame пишет только данные самой сети, как ручная загрузка
   из /sync, поэтому требует модульный `WRITE`
   (INTEGRATIONS/ASSORTMENT/GAMIFICATION/STAFF), а не `OUTBOUND`. `OUTBOUND`

@@ -537,6 +537,8 @@ export type GuestPortalPayload = {
       };
       items: Array<{
         id: string;
+        // Reward paid out by this entry; merges the entry with the reward.
+        rewardId?: string | null;
         status:
           | "PENDING"
           | "PROCESSING"

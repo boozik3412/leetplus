@@ -1342,6 +1342,9 @@ export type GuestPortalBonusHistory = {
 
 export type GuestPortalBonusHistoryItem = {
   id: string;
+  // The reward this ledger entry pays out; the reward history page merges the
+  // entry with that reward instead of listing the same bonus twice.
+  rewardId: string | null;
   status:
     | 'PENDING'
     | 'PROCESSING'
@@ -1863,6 +1866,7 @@ type GuestPortalMissionProgress = {
 
 type GuestPortalBonusLedgerRow = {
   id: string;
+  rewardId?: string | null;
   status: string;
   entryType: string;
   amount: Prisma.Decimal;
@@ -13451,6 +13455,7 @@ export class GuestPortalService {
             },
             select: {
               id: true,
+              rewardId: true,
               status: true,
               entryType: true,
               amount: true,
@@ -21053,7 +21058,7 @@ function buildRewardSummary(
   };
 }
 
-function buildBonusLedgerHistory(
+export function buildBonusLedgerHistory(
   rows: GuestPortalBonusLedgerRow[],
 ): GuestPortalBonusHistory {
   const items = rows
@@ -21105,6 +21110,7 @@ function mapBonusLedgerHistoryItem(
 
   return {
     id: row.id,
+    rewardId: row.rewardId ?? null,
     status,
     statusLabel: bonusLedgerStatusLabel(status),
     amount: moneyNumber(decimalNumber(row.amount) ?? 0),

@@ -168,6 +168,14 @@ export const GUEST_PORTAL_CURRENT190_ROUTE_MANIFEST = Object.freeze([
     'PERSISTED_READ',
   ),
   route(
+    'getLeaderboard',
+    'GET',
+    '/guest-portal/session/leaderboard',
+    'READ',
+    'GUEST_SESSION',
+    'PERSISTED_READ',
+  ),
+  route(
     'recordAppOpen',
     'POST',
     '/guest-portal/session/app-open',

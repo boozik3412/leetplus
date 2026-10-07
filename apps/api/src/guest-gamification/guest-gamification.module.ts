@@ -29,6 +29,9 @@ import { GuestGamificationStatisticsService } from './guest-gamification-statist
 import { GuestGamificationController } from './guest-gamification.controller';
 import { GuestGamificationService } from './guest-gamification.service';
 import { SeasonStepCopyService } from './season-step-copy.service';
+import { GuestLeaderboardAdminController } from '../guest-leaderboard/guest-leaderboard-admin.controller';
+import { GuestLeaderboardAdminService } from '../guest-leaderboard/guest-leaderboard-admin.service';
+import { GuestLeaderboardReadService } from '../guest-leaderboard/guest-leaderboard-read.service';
 import { PlatformGuestGameSupportRecoveryController } from './platform-guest-game-support-recovery.controller';
 import {
   C61_BUDGET_REFILL_ATTESTATION_AUTHORITY,
@@ -59,6 +62,8 @@ export const GUEST_GAMIFICATION_PROVIDERS = [
   GuestBonusLedgerService,
   GuestBonusLedgerSchedulerService,
   C61BudgetRefillExceptionService,
+  GuestLeaderboardReadService,
+  GuestLeaderboardAdminService,
   {
     provide: C61_BUDGET_REFILL_ATTESTATION_AUTHORITY,
     useClass: ServerC61BudgetRefillAttestationAuthority,
@@ -71,6 +76,7 @@ export const GUEST_GAMIFICATION_EXPORTS = [
   GuestActivityLedgerService,
   GuestGameQualityMonitoringService,
   GuestBonusLedgerSchedulerService,
+  GuestLeaderboardReadService,
 ] as const;
 
 @Module({
@@ -81,6 +87,7 @@ export const GUEST_GAMIFICATION_EXPORTS = [
     GuestGameMediaController,
     GuestGamePublicMediaController,
     PlatformGuestGameSupportRecoveryController,
+    GuestLeaderboardAdminController,
   ],
   providers: [...GUEST_GAMIFICATION_PROVIDERS],
   exports: [...GUEST_GAMIFICATION_EXPORTS],

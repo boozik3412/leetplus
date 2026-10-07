@@ -2722,7 +2722,7 @@ export function runSelfTest() {
   assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 192);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20261004090000_store_closures",
+    "20261007120000_guest_leaderboard",
   );
   assert.deepEqual(DISPOSABLE_RESET_TRUNCATE_GUARDS, [
     {

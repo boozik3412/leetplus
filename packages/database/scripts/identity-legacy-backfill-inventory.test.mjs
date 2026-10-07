@@ -575,10 +575,10 @@ test("timeouts are bounded and embedded in the one-connection read-only URL", ()
 });
 
 test("the manifest exposes exactly two create-only proposal codes and exact column ACL", () => {
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 192);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 193);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20261004090000_store_closures",
+    "20261007120000_guest_leaderboard",
   );
   assert.deepEqual(
     Object.entries(FINDING_MANIFEST)
@@ -763,11 +763,11 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   );
   assert.match(
     CATALOG_STATE_SQL,
-    /d0fbb3e967c0f6e5c5442c0a896a3f9e68c812117f8ef583d31368e5610569d6/u,
+    /604d4b8210b425406b05975943502c47cde981b0ae18b02d842ee4d0f6a74d3f/u,
   );
   assert.match(
     CATALOG_STATE_SQL,
-    /40a196a0c877afd0237f39f726b2cfa201417a655052baa0bba76f9431831b65/u,
+    /eb31dc172b04196c239c35cb1f923091cfb30595d55b15ab47408a5f9c56b962/u,
   );
   assert.match(CATALOG_STATE_SQL, /releasedAt/u);
   assert.match(CATALOG_STATE_SQL, /secretCiphertext/u);

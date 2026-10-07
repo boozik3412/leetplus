@@ -24,7 +24,7 @@ Additional environment for --apply:
   RUNTIME_FUNCTION_ENROLLMENT_CONFIRM
 
 The exact confirmation value is:
-  APPLY_RUNTIME_FUNCTION_ENROLLMENT_V1 <database> <role> 20261004090000_store_closures 192
+  APPLY_RUNTIME_FUNCTION_ENROLLMENT_V1 <database> <role> 20261007120000_guest_leaderboard 193
 
 Safety contract:
   - The command never creates a role, database, schema, table, or function.

@@ -25,7 +25,7 @@ Additional environment for --apply:
   IDENTITY_MAIL_WORKER_ENROLLMENT_CONFIRM
 
 Exact confirmation:
-  APPLY_IDENTITY_MAIL_WORKER_ENROLLMENT_V1 <database> <role> <roleOid> 20261004090000_store_closures 192
+  APPLY_IDENTITY_MAIL_WORKER_ENROLLMENT_V1 <database> <role> <roleOid> 20261007120000_guest_leaderboard 193
 
 Safety contract:
   - The command never creates a role or a tenant enrollment row.

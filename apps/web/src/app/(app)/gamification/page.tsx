@@ -31,6 +31,7 @@ const gamificationTabs = new Set<TabId>([
   "missions",
   "checkIn",
   "seasons",
+  "leaderboard",
   "promoCards",
   "rewards",
   "testRun",

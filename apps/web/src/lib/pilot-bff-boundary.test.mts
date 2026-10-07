@@ -150,6 +150,27 @@ test("keeps guest portal GET queries allowlisted before upstream fetch", async (
     ),
     "?offset=10&limit=20",
   );
+  assert.equal(
+    resolveGuestPortalGetUpstreamQuery(
+      ["session", "leaderboard"],
+      "https://leetplus.invalid/api/guest-portal/session/leaderboard?scope=club&board=hours",
+    ),
+    "?scope=club&board=hours",
+  );
+  assert.equal(
+    resolveGuestPortalGetUpstreamQuery(
+      ["session", "leaderboard"],
+      "https://leetplus.invalid/api/guest-portal/session/leaderboard?storeId=other",
+    ),
+    null,
+  );
+  assert.deepEqual(
+    projectGuestPortalGetRequest(
+      ["session", "leaderboard"],
+      "https://leetplus.invalid/api/guest-portal/session/leaderboard",
+    ),
+    { ok: true, query: "" },
+  );
 
   for (const invalidUrl of [
     "https://leetplus.invalid/api/guest-portal/gamification/clubs?tenantSlug=other",

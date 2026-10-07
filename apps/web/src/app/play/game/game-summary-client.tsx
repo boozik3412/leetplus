@@ -40,6 +40,7 @@ import {
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 import { GuestBugReportButton } from "@/components/guest-bug-report";
 import { GuestSupportTickets } from "@/components/guest-support-tickets";
+import { GameRatingTeaser } from "./game-rating-client";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
 type GameNextAction = GuestPortalGameSummary["nextActions"][number];
@@ -1309,6 +1310,10 @@ function GameModuleTopbar({ summary }: { summary: GuestPortalGameSummary }) {
             aria-label="Меню игрового модуля"
             hidden={!menuOpen}
           >
+            <Link href="/game/rating" onClick={() => setMenuOpen(false)}>
+              <TrophyIcon />
+              <span>Рейтинг</span>
+            </Link>
             <button type="button" onClick={handleLogout}>
               <ExitIcon />
               <span>Выйти</span>
@@ -5851,6 +5856,7 @@ function PlayerProfilePanel({
           </span>
           <span>до следующего {formatNumber(levelProgress.remaining)} XP</span>
         </div>
+        <GameRatingTeaser />
       </div>
 
       {rewardWallet.pendingCount > 0 ? (
@@ -7926,6 +7932,26 @@ function PencilIcon() {
     >
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
+    </svg>
+  );
+}
+
+function TrophyIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+      <path d="M7 4h10v5a5 5 0 0 1-10 0z" />
+      <path d="M17 5h3v2a3 3 0 0 1-3 3" />
+      <path d="M7 5H4v2a3 3 0 0 0 3 3" />
     </svg>
   );
 }

@@ -49,6 +49,7 @@ import {
   type GuestSupportTicketList,
   type GuestSupportTicketThread,
 } from './guest-support.service';
+import type { GuestLeaderboardView } from '../guest-leaderboard/guest-leaderboard-read.service';
 
 @Controller('guest-portal')
 export class GuestPortalController {
@@ -188,6 +189,18 @@ export class GuestPortalController {
     return this.guestPortalService.getGameMissions(authorization, {
       offset,
       limit,
+    });
+  }
+
+  @Get('session/leaderboard')
+  getLeaderboard(
+    @Headers('authorization') authorization: string | undefined,
+    @Query('scope') scope?: string,
+    @Query('board') board?: string,
+  ): Promise<GuestLeaderboardView> {
+    return this.guestPortalService.getLeaderboard(authorization, {
+      scope,
+      board,
     });
   }
 

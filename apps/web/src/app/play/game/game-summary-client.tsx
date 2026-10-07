@@ -9902,7 +9902,9 @@ function normalizeBonusRewardHistoryItem(
   item: GameBonusHistoryItem,
 ): GameRewardHistoryItem {
   return {
-    id: item.id,
+    // A payout shares the reward's id, so the history shows the reward once
+    // (with its rarity) instead of a second "Обычное" row for the payout.
+    id: item.rewardId ?? item.id,
     status: item.status,
     walletState: bonusHistoryWalletState(item.status),
     rewardType: "BONUS",

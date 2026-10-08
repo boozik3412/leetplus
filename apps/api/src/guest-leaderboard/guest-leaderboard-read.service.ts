@@ -105,7 +105,8 @@ export type GuestLeaderboardView = {
     movement: number | null;
     excluded: boolean;
   } | null;
-  target: { rank: number; gap: number } | null;
+  /** The nearest better player: the one to overtake (or to reach the board). */
+  target: { rank: number; gap: number; name: string } | null;
   prizes: Array<{ place: number; label: string }>;
 };
 
@@ -482,10 +483,16 @@ export class GuestLeaderboardReadService {
     );
     const meProfileId = input.profileId;
     const visible = leaderboardVisibleRows(current, meProfileId ?? '');
+    const excluded = meProfileId
+      ? config.excludedProfileIds.includes(meProfileId)
+      : false;
+    const target =
+      meProfileId && !excluded ? leaderboardTarget(current, meProfileId) : null;
     const names = await this.profileNames(input.tenantId, [
       ...new Set([
         ...visible.map((row) => row.standing.profileId),
         ...(meProfileId ? [meProfileId] : []),
+        ...(target ? [target.profileId] : []),
       ]),
     ]);
     const nameOf = (profileId: string) => {
@@ -536,9 +543,6 @@ export class GuestLeaderboardReadService {
     const meStanding = meProfileId
       ? (current.find((row) => row.profileId === meProfileId) ?? null)
       : null;
-    const excluded = meProfileId
-      ? config.excludedProfileIds.includes(meProfileId)
-      : false;
     const meName = meProfileId ? nameOf(meProfileId) : null;
 
     return {
@@ -569,10 +573,13 @@ export class GuestLeaderboardReadService {
             excluded,
           }
         : null,
-      target:
-        meProfileId && !excluded
-          ? leaderboardTarget(current, meProfileId)
-          : null,
+      target: target
+        ? {
+            rank: target.rank,
+            gap: target.gap,
+            name: nameOf(target.profileId).name,
+          }
+        : null,
       prizes: leaderboardPrizes(
         config,
         scope === 'club' ? store!.id : LEADERBOARD_NETWORK_SCOPE_KEY,

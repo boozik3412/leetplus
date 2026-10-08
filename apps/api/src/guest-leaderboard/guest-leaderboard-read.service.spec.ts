@@ -167,7 +167,7 @@ describe('GuestLeaderboardReadService.guestView', () => {
       hasNickname: true,
       excluded: false,
     });
-    expect(view.target).toEqual({ rank: 2, gap: 61 });
+    expect(view.target).toEqual({ rank: 2, gap: 61, name: 'Игрок ••4417' });
     expect(view.prizes).toEqual([{ place: 1, label: 'Кейс «Легенда»' }]);
     expect(JSON.stringify(view)).not.toContain('***');
     expect(JSON.stringify(view)).not.toMatch(/"p[123]"|profileId/u);

@@ -540,7 +540,9 @@ export function leaderboardTarget(
   const index = standings.findIndex((row) => row.profileId === profileId);
   if (index < 0) {
     const last = standings.at(-1);
-    return last ? { rank: last.rank, gap: last.value + 1 } : null;
+    return last
+      ? { rank: last.rank, gap: last.value + 1, profileId: last.profileId }
+      : null;
   }
   const me = standings[index];
   for (let i = index - 1; i >= 0; i -= 1) {
@@ -548,6 +550,7 @@ export function leaderboardTarget(
       return {
         rank: standings[i].rank,
         gap: standings[i].value - me.value + 1,
+        profileId: standings[i].profileId,
       };
     }
   }

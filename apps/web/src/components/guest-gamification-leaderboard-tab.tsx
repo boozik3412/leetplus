@@ -568,7 +568,201 @@ export function GuestGamificationLeaderboardTab({
         enabledBoards={BOARDS.filter((board) => config.boards[board])}
         onChanged={() => load(true)}
       />
+
+      <ResultsCard canManage={canManage} />
     </section>
+  );
+}
+
+type Results = {
+  periods: string[];
+  periodKey: string | null;
+  rows: Array<{
+    id: string;
+    scopeKey: string;
+    scopeName: string;
+    board: GuestLeaderboardBoard;
+    boardLabel: string;
+    rank: number;
+    publicName: string;
+    contactMasked: string | null;
+    value: number;
+    prizeLabel: string | null;
+    status: string;
+    error: string | null;
+    issuedAt: string | null;
+  }>;
+};
+
+const RESULT_STATUS: Record<string, { label: string; tone: string }> = {
+  RECORDED: { label: "без приза", tone: "text-zinc-500 dark:text-zinc-400" },
+  PRIZE_PENDING: { label: "выдаётся", tone: "text-amber-700 dark:text-amber-300" },
+  PRIZE_ISSUED: { label: "выдан", tone: "text-emerald-700 dark:text-emerald-300" },
+  MANUAL_PRIZE: { label: "вручить вручную", tone: "text-amber-700 dark:text-amber-300" },
+  PRIZE_FAILED: { label: "не выдан", tone: "text-red-700 dark:text-red-300" },
+};
+
+const MONTHS = [
+  "январь",
+  "февраль",
+  "март",
+  "апрель",
+  "май",
+  "июнь",
+  "июль",
+  "август",
+  "сентябрь",
+  "октябрь",
+  "ноябрь",
+  "декабрь",
+];
+
+function periodLabel(periodKey: string) {
+  const [year, month] = periodKey.split("-").map(Number);
+  return `${MONTHS[(month ?? 1) - 1] ?? periodKey} ${year}`;
+}
+
+/** Frozen month results: winners, prizes and their state («Архив итогов»). */
+function ResultsCard({ canManage }: { canManage: boolean }) {
+  const [periodKey, setPeriodKey] = useState<string | null>(null);
+  const [data, setData] = useState<Results | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    const search = periodKey ? `?${new URLSearchParams({ periodKey }).toString()}` : "";
+    requestJson<Results>(`${API}/results${search}`)
+      .then((next) => {
+        if (!active) return;
+        setData(next);
+        setError(null);
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setError(loadError instanceof Error ? loadError.message : "Не удалось загрузить итоги.");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [periodKey, reload]);
+
+  async function act(id: string, action: "retry" | "delivered") {
+    setPendingId(id);
+    try {
+      await requestJson(`${API}/results/${encodeURIComponent(id)}/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      setReload((value) => value + 1);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Действие не выполнено.");
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  const groups = new Map<string, Results["rows"]>();
+  data?.rows.forEach((row) => {
+    const key = `${row.scopeName} · ${row.boardLabel}`;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  });
+
+  return (
+    <Card
+      title="Итоги месяцев"
+      description="1-го числа (через 12 часов после конца месяца по времени клуба) места фиксируются, а призы выдаются автоматически: бонусы — в кошелёк гостя, кейсы — в кошелёк кейсов. «Свой приз» вручают сотрудники и отмечают здесь."
+      aside={
+        data && data.periods.length > 0 ? (
+          <select
+            aria-label="Месяц"
+            className="min-h-10 rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-950 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+            value={data.periodKey ?? ""}
+            onChange={(event) => setPeriodKey(event.target.value)}
+          >
+            {data.periods.map((key) => (
+              <option key={key} value={key}>
+                {periodLabel(key)}
+              </option>
+            ))}
+          </select>
+        ) : null
+      }
+    >
+      {error ? (
+        <p role="alert" className="mb-3 text-sm text-red-700 dark:text-red-300">
+          {error}
+        </p>
+      ) : null}
+      {data && data.rows.length === 0 ? (
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          Итогов пока нет: первый месяц подведём 1-го числа следующего месяца.
+        </p>
+      ) : null}
+      <div className="grid gap-5">
+        {[...groups.entries()].map(([title, rows]) => (
+          <div key={title} className="overflow-x-auto">
+            <h4 className="mb-2 text-sm font-semibold text-zinc-950 dark:text-white">{title}</h4>
+            <table className="w-full min-w-[680px] text-left text-sm">
+              <tbody>
+                {rows.map((row) => {
+                  const status = RESULT_STATUS[row.status] ?? {
+                    label: row.status,
+                    tone: "text-zinc-500",
+                  };
+                  return (
+                    <tr key={row.id} className="border-t border-zinc-200 dark:border-zinc-800">
+                      <td className="w-12 py-2 pr-3 font-semibold">{row.rank}</td>
+                      <td className="py-2 pr-3">
+                        {row.publicName}
+                        {row.contactMasked ? (
+                          <span className="ml-2 text-zinc-500">{row.contactMasked}</span>
+                        ) : null}
+                      </td>
+                      <td className="py-2 pr-3">{formatLeaderboardValue(row.board, row.value)}</td>
+                      <td className="py-2 pr-3">{row.prizeLabel ?? "—"}</td>
+                      <td className={`py-2 pr-3 font-medium ${status.tone}`}>
+                        {status.label}
+                        {row.error ? (
+                          <span className="block text-xs font-normal text-red-700 dark:text-red-300">
+                            {row.error}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="py-2 text-right">
+                        {canManage && row.status === "PRIZE_FAILED" ? (
+                          <button
+                            type="button"
+                            disabled={pendingId === row.id}
+                            onClick={() => void act(row.id, "retry")}
+                            className="min-h-9 rounded-lg border border-zinc-300 px-3 text-xs font-semibold dark:border-zinc-700"
+                          >
+                            Повторить
+                          </button>
+                        ) : null}
+                        {canManage && row.status === "MANUAL_PRIZE" ? (
+                          <button
+                            type="button"
+                            disabled={pendingId === row.id}
+                            onClick={() => void act(row.id, "delivered")}
+                            className="min-h-9 rounded-lg bg-emerald-700 px-3 text-xs font-semibold text-white"
+                          >
+                            Выдан
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 

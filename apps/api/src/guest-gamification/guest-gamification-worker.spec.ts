@@ -373,6 +373,52 @@ describe('guest gamification singleton worker', () => {
     );
   });
 
+  it('sums up the leaderboard month in live mode only, without failing on a prize', async () => {
+    const live = services();
+    const settleTenant = jest.fn().mockResolvedValue({
+      frozenBoards: 1,
+      frozenRows: 4,
+      prizesIssued: 2,
+      manualPrizes: 1,
+      prizesFailed: 1,
+      failures: ['2026-10/rad/hours#1: bonus ledger is closed'],
+    });
+    const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    const now = new Date('2026-11-01T08:00:00.000Z');
+
+    const result = await runGuestGamificationWorkerOnce(
+      { ...live, leaderboardSettlement: { settleTenant } } as never,
+      {
+        ...baseEnv(),
+        GUEST_GAMIFICATION_WORKER_CANARY: 'false',
+        GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE: 'LIVE',
+      },
+      logger,
+      now,
+    );
+
+    expect(settleTenant).toHaveBeenCalledWith('tenant-1', now);
+    expect(result.leaderboard).toMatchObject({ prizesIssued: 2 });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Leaderboard prizes not issued'),
+    );
+    expect(logger.log).toHaveBeenCalledWith(
+      expect.stringContaining('leaderboardPrizes=2'),
+    );
+
+    const canarySettle = jest.fn();
+    await runGuestGamificationWorkerOnce(
+      {
+        ...services(),
+        leaderboardSettlement: { settleTenant: canarySettle },
+      } as never,
+      baseEnv(),
+      logger,
+      now,
+    );
+    expect(canarySettle).not.toHaveBeenCalled();
+  });
+
   it('fails closed for an external tenant or pipeline error', async () => {
     const external = services();
     external.prisma.tenant.findMany.mockResolvedValueOnce([

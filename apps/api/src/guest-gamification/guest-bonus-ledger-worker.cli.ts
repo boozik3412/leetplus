@@ -23,6 +23,8 @@ import {
   runGuestGamificationWorkerOnce,
 } from './guest-gamification-worker';
 import { GuestGameQualityMonitoringService } from './guest-game-quality-monitoring.service';
+import { GuestLeaderboardReadService } from '../guest-leaderboard/guest-leaderboard-read.service';
+import { GuestLeaderboardSettlementService } from '../guest-leaderboard/guest-leaderboard-settlement.service';
 
 const disabledInProcessBonusScheduler = {
   requestRun: () => undefined,
@@ -56,6 +58,8 @@ const disabledInProcessBonusScheduler = {
     GuestGamificationService,
     GuestGameLedgerFallbackService,
     GuestGameQualityMonitoringService,
+    GuestLeaderboardReadService,
+    GuestLeaderboardSettlementService,
     {
       provide: GuestBonusLedgerSchedulerService,
       useValue: disabledInProcessBonusScheduler,
@@ -92,6 +96,7 @@ async function main() {
       ledgerFallback: application.get(GuestGameLedgerFallbackService),
       gamification: application.get(GuestGamificationService),
       monitoring: application.get(GuestGameQualityMonitoringService),
+      leaderboardSettlement: application.get(GuestLeaderboardSettlementService),
     });
     // An external network's failure must not hold back the primary tenant's
     // gamification pass, so it is reported only after that pass.

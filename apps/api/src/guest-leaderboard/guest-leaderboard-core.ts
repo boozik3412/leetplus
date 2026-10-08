@@ -669,3 +669,82 @@ export function leaderboardPrizeLootBoxIds(config: GuestLeaderboardConfig) {
   );
   return [...ids];
 }
+
+/* ------------------------------------------------------------- settlement */
+
+export const LEADERBOARD_BOARD_LABELS: Record<LeaderboardBoard, string> = {
+  points: 'Общий зачёт',
+  hours: 'Часы',
+  sessions: 'Сессии',
+  quests: 'Задания',
+  cases: 'Кейсы',
+};
+
+/**
+ * A month is summed up this long after it ends in its zone, so sessions and
+ * rewards of the last night that the sync delivers late still count.
+ */
+export const LEADERBOARD_SETTLEMENT_GRACE_MS = 12 * 60 * 60 * 1000;
+/** Places frozen into the monthly results (prizes go to places 1..3). */
+export const LEADERBOARD_RESULT_SIZE = LEADERBOARD_TOP_SIZE;
+
+/**
+ * Whether the month of `period` is due to be summed up. A month that ended
+ * before the owner first saved the leaderboard is never settled.
+ */
+export function leaderboardSettlementDue(
+  period: Pick<LeaderboardPeriod, 'to'>,
+  now: Date,
+  settingsCreatedAt: Date,
+) {
+  return (
+    now.getTime() >= period.to.getTime() + LEADERBOARD_SETTLEMENT_GRACE_MS &&
+    settingsCreatedAt.getTime() < period.to.getTime()
+  );
+}
+
+/** The prize of a place (competition ranking: a shared place shares it). */
+export function leaderboardPrizeForRank(
+  config: GuestLeaderboardConfig,
+  scopeKey: string,
+  board: LeaderboardBoard,
+  rank: number,
+): LeaderboardPrize | null {
+  if (rank < 1 || rank > LEADERBOARD_PRIZE_PLACES) return null;
+  return config.prizes[scopeKey]?.[board]?.[rank - 1] ?? null;
+}
+
+/** One prize per profile, period, scope and board, whatever the retries. */
+export function leaderboardPrizeIdempotencyKey(input: {
+  tenantId: string;
+  periodKey: string;
+  scopeKey: string;
+  board: LeaderboardBoard;
+  profileId: string;
+}) {
+  return [
+    'guest-leaderboard-prize',
+    'v1',
+    input.tenantId,
+    input.periodKey,
+    input.scopeKey,
+    input.board,
+    input.profileId,
+  ].join(':');
+}
+
+/** «Рейтинг · октябрь · 1-е место · Общий зачёт · 1337 Радищева». */
+export function leaderboardPrizeTitle(input: {
+  monthLabel: string;
+  rank: number;
+  board: LeaderboardBoard;
+  scopeName: string;
+}) {
+  return [
+    'Рейтинг',
+    input.monthLabel.toLocaleLowerCase('ru'),
+    `${input.rank}-е место`,
+    LEADERBOARD_BOARD_LABELS[input.board],
+    input.scopeName,
+  ].join(' · ');
+}

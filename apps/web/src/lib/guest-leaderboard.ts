@@ -54,7 +54,7 @@ export type GuestLeaderboard = {
     movement: number | null;
     excluded: boolean;
   } | null;
-  target: { rank: number; gap: number } | null;
+  target: { rank: number; gap: number; name: string } | null;
   prizes: Array<{ place: number; label: string }>;
 };
 
@@ -106,6 +106,22 @@ export function formatPlayMinutes(minutes: number) {
   const rest = minutes % 60;
   if (hours === 0) return `${rest} мин`;
   return rest ? `${formatInteger(hours)} ч ${rest} мин` : `${formatInteger(hours)} ч`;
+}
+
+/** The bare value: «1 695», «18 ч 40 мин». */
+export function formatLeaderboardNumber(
+  board: GuestLeaderboardBoard,
+  value: number,
+) {
+  return board === "hours" ? formatPlayMinutes(value) : formatInteger(value);
+}
+
+/** The unit word after a number: «очков», «сессии»; empty for hours. */
+export function leaderboardUnitWord(
+  board: GuestLeaderboardBoard,
+  value: number,
+) {
+  return board === "hours" ? "" : pluralRu(value, FORMS[board]);
 }
 
 /** «1 695 очков», «18 ч 40 мин», «14 сессий». */

@@ -14,9 +14,12 @@ import {
   formatDaysLeft,
   formatFormula,
   formatLeaderboardGap,
+  formatLeaderboardNumber,
   formatLeaderboardValue,
   formatMovement,
   leaderboardInitial,
+  leaderboardUnitWord,
+  pluralRu,
   leaderboardRequestPath,
   type GuestLeaderboard,
   type GuestLeaderboardBoard,
@@ -511,42 +514,152 @@ function RatingBoard({
   );
 }
 
-function MeDock({ data }: { data: GuestLeaderboard }) {
+function TrophyIcon({ size = 30 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+      <path d="M7 4h10v5a5 5 0 0 1-10 0z" />
+      <path d="M17 5h3v2a3 3 0 0 1-3 3" />
+      <path d="M7 5H4v2a3 3 0 0 0 3 3" />
+    </svg>
+  );
+}
+
+function FlagIcon() {
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M5 21V4" />
+      <path d="M5 4h11l-2 4 2 4H5" />
+    </svg>
+  );
+}
+
+/** The guest's place in a hexagonal medal. */
+function RankMedal({ rank, small = false }: { rank: number; small?: boolean }) {
+  return (
+    <span className={["lp-rc-medal", small ? "is-small" : ""].join(" ")}>
+      <svg viewBox="0 0 56 64" aria-hidden="true">
+        <path d="M28 2 L53 16 L53 46 L28 62 L3 46 L3 16 Z" />
+      </svg>
+      <span>{rank}</span>
+    </span>
+  );
+}
+
+function formatPlaces(count: number) {
+  return `${count} ${pluralRu(count, ["место", "места", "мест"])}`;
+}
+
+function formatDays(count: number) {
+  return `${count} ${pluralRu(count, ["день", "дня", "дней"])}`;
+}
+
+/**
+ * Who to overtake next. Not ranked yet: the last player of the board; ranked:
+ * the nearest better place; the leader keeps the lead.
+ */
+function RivalLine({ data }: { data: GuestLeaderboard }) {
   const me = data.me!;
   const target = data.target;
-  const progress =
-    target && me.value > 0
-      ? Math.max(6, Math.min(96, Math.round((me.value / (me.value + target.gap)) * 100)))
-      : 6;
+  if (me.rank === 1) {
+    const second = data.entries.find((entry) => entry.rank > 1);
+    return (
+      <div className="lp-rc-rival">
+        <span className="lp-rc-rival-avatar is-me" aria-hidden="true">
+          <CrownIcon size={16} />
+        </span>
+        <p>
+          Вы лидер
+          {second ? (
+            <>
+              {" "}
+              — отрыв{" "}
+              <b>{formatLeaderboardValue(data.board, me.value - second.value)}</b>
+            </>
+          ) : null}
+          <br />
+          <span>удержите место до {data.period?.resultsLabel ?? "конца месяца"}</span>
+        </p>
+      </div>
+    );
+  }
+  if (!target) {
+    return (
+      <div className="lp-rc-rival">
+        <span className="lp-rc-rival-avatar is-me" aria-hidden="true">
+          <TrophyIcon size={16} />
+        </span>
+        <p>
+          Таблица ещё пуста
+          <br />
+          <span>первые очки сделают вас лидером</span>
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="lp-rc-rival">
+      <span className="lp-rc-rival-avatar" aria-hidden="true">
+        {leaderboardInitial(target.name)}
+      </span>
+      <p>
+        {me.rank ? `Соперник выше, #${target.rank}` : "Последний в таблице"} —{" "}
+        <b>{target.name}</b>
+        <br />
+        <span>
+          обгоните: {formatLeaderboardGap(data.board, target.gap, data.formula)}
+        </span>
+      </p>
+    </div>
+  );
+}
+
+function MeDock({ data }: { data: GuestLeaderboard }) {
+  const me = data.me!;
+  const days = data.period ? `до итогов ${formatDays(data.period.daysLeft)}` : "";
 
   return (
-    <aside className="lp-rating-dock" aria-label="Ваше место">
-      <div className="lp-rating-dock-head">
-        <span className="lp-rating-dock-rank">
-          {me.rank ? `#${me.rank}` : "—"}
-          <small>{me.rank ? `из ${data.totalPlayers}` : "вне рейтинга"}</small>
+    <aside className="lp-rating-dock lp-rc" aria-label="Ваше место">
+      <div className="lp-rc-head">
+        {me.rank ? (
+          <RankMedal rank={me.rank} small />
+        ) : (
+          <span className="lp-rc-icon is-small">
+            <FlagIcon />
+          </span>
+        )}
+        <span className="lp-rc-head-copy">
+          <strong>
+            {me.name} ·{" "}
+            {me.rank ? formatLeaderboardValue(data.board, me.value) : "на старте"}
+          </strong>
+          <span>{me.rank ? `из ${data.totalPlayers} · ${days}` : days}</span>
         </span>
-        <span className="lp-rating-dock-name">
-          <strong>{me.name} · вы</strong>
-          <span>{formatLeaderboardValue(data.board, me.value)}</span>
-        </span>
-        <Movement entry={{ movement: me.movement }} />
+        {me.rank ? <Movement entry={{ movement: me.movement }} /> : null}
       </div>
-      {target ? (
-        <div className="lp-rating-dock-target">
-          <p>
-            {me.rank ? `До #${target.rank}` : "Чтобы попасть в рейтинг"} —{" "}
-            <b>{formatLeaderboardGap(data.board, target.gap, data.formula)}</b>
-          </p>
-          <div className="lp-rating-bar is-dock" aria-hidden="true">
-            <span style={{ width: `${progress}%` }} />
-          </div>
-        </div>
-      ) : me.rank === 1 ? (
-        <p className="lp-rating-dock-leader">
-          Вы лидер месяца — удержите место до {data.period?.resultsLabel ?? "конца месяца"}
-        </p>
-      ) : null}
+      <RivalLine data={data} />
+      <style>{challengeCss}</style>
     </aside>
   );
 }
@@ -625,7 +738,10 @@ function NicknameBanner({
   );
 }
 
-/** «Ваше место» card for the game home; hidden while the rating is off. */
+/**
+ * «Вызов месяца» card for the game home (variant C of the canvas); hidden
+ * while the rating is off for the guest.
+ */
 export function GameRatingTeaser() {
   const [data, setData] = useState<GuestLeaderboard | null>(null);
 
@@ -644,73 +760,247 @@ export function GameRatingTeaser() {
   }, []);
 
   if (!data?.enabled || !data.me || data.me.excluded) return null;
-  const scopeLabel =
-    data.scopes.find((item) => item.scope === data.scope)?.label ?? "Рейтинг";
+  const me = data.me;
+  const period = data.period;
+  const eyebrow = `Вызов · ${period?.label.toLocaleLowerCase("ru") ?? "месяца"}`;
+  const leader = data.entries[0];
+  const third = data.entries.find((entry) => entry.rank === 3);
+  const prizeGap =
+    data.prizes.length && me.rank && me.rank > 3 && third
+      ? third.value - me.value + 1
+      : null;
+  const scopeGenitive = data.scope === "club" ? "клуба" : "сети";
 
   return (
-    <Link href="/game/rating" className="lp-rating-teaser">
-      <span className="lp-rating-teaser-label">
-        Рейтинг · {LEADERBOARD_BOARD_LABELS[data.board].toLocaleLowerCase("ru")}
-      </span>
-      <span className="lp-rating-teaser-main">
-        <strong>{data.me.rank ? `#${data.me.rank}` : "—"}</strong>
-        <span>
-          {data.me.rank
-            ? `из ${data.totalPlayers} · ${scopeLabel}`
-            : "Сыграйте, чтобы попасть в рейтинг"}
+    <section className="lp-rc lp-rc-card" aria-label="Рейтинг месяца">
+      <div className="lp-rc-head">
+        {me.rank ? (
+          <RankMedal rank={me.rank} />
+        ) : (
+          <span className="lp-rc-icon">
+            <TrophyIcon />
+          </span>
+        )}
+        <span className="lp-rc-head-copy">
+          <small>{eyebrow}</small>
+          <strong>
+            {me.rank ? `Вы ${me.rank}-й из ${data.totalPlayers}` : "Гонка уже идёт"}
+          </strong>
+          {me.rank && me.movement ? (
+            <span className={me.movement > 0 ? "is-up" : "is-down"}>
+              {me.movement > 0 ? "▲" : "▼"} {formatPlaces(Math.abs(me.movement))} за
+              сутки
+            </span>
+          ) : null}
         </span>
-      </span>
-      {data.target ? (
-        <span className="lp-rating-teaser-gap">
-          {data.me.rank ? `До #${data.target.rank}` : "До рейтинга"} —{" "}
-          {formatLeaderboardGap(data.board, data.target.gap, data.formula)}
-        </span>
-      ) : null}
-      <style>{teaserCss}</style>
-    </Link>
+      </div>
+
+      {me.rank ? (
+        <>
+          <RivalLine data={data} />
+          <div className="lp-rc-stats is-two">
+            <span>
+              <b>{period?.daysLeft ?? "—"}</b>
+              {pluralRu(period?.daysLeft ?? 0, ["день", "дня", "дней"])} до итогов
+            </span>
+            {prizeGap !== null ? (
+              <span>
+                <b>{formatLeaderboardNumber(data.board, prizeGap)}</b>
+                {`${leaderboardUnitWord(data.board, prizeGap)} до призовой тройки`.trim()}
+              </span>
+            ) : data.prizes.length && me.rank <= 3 ? (
+              <span className="is-gold">
+                <b>
+                  <TrophyIcon size={18} />
+                </b>
+                вы в призовой тройке
+              </span>
+            ) : (
+              <span>
+                <b>{data.totalPlayers}</b>
+                {pluralRu(data.totalPlayers, ["игрок", "игрока", "игроков"])} в гонке
+              </span>
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="lp-rc-copy">
+            {leader ? (
+              <>
+                Лидер {scopeGenitive} <b>{leader.name}</b> —{" "}
+                {formatLeaderboardValue(data.board, leader.value)}.
+              </>
+            ) : (
+              <>В этом месяце ещё никто не набрал очков — станьте первым.</>
+            )}
+            {data.prizes[0] && period ? (
+              <>
+                {" "}
+                {period.resultsLabel.replace(" ", " ")} лучший получит{" "}
+                <b className="lp-rc-gold">{data.prizes[0].label}</b>.
+              </>
+            ) : null}
+          </p>
+          <div className="lp-rc-stats">
+            <span>
+              <b>{period?.daysLeft ?? "—"}</b>
+              {pluralRu(period?.daysLeft ?? 0, ["день", "дня", "дней"])} до итогов
+            </span>
+            <span>
+              <b>{data.totalPlayers}</b>
+              {pluralRu(data.totalPlayers, ["игрок", "игрока", "игроков"])}
+            </span>
+            <span>
+              <b>
+                {data.target
+                  ? formatLeaderboardNumber(data.board, data.target.gap)
+                  : "1-й"}
+              </b>
+              {data.target
+                ? `${leaderboardUnitWord(data.board, data.target.gap)} до входа`.trim()
+                : "станьте первым"}
+            </span>
+          </div>
+        </>
+      )}
+
+      <Link
+        href="/game/rating"
+        className={["lp-rc-cta", me.rank ? "is-outline" : ""].join(" ")}
+      >
+        {me.rank ? "Открыть рейтинг" : "Вступить в гонку"}
+      </Link>
+      <style>{challengeCss}</style>
+    </section>
   );
 }
 
-const teaserCss = `
-.lp-rating-teaser {
+/** Variant C «Вызов месяца»: shared by the home card and the rating dock. */
+const challengeCss = `
+.lp-rc {
+  --rc-gold: #d0aa6c;
+  --rc-gold-soft: rgba(208, 170, 108, 0.12);
+  --rc-gold-line: rgba(208, 170, 108, 0.5);
+  --rc-muted: #bfae8e;
   display: grid;
-  gap: 6px;
-  margin-top: 14px;
-  padding: 14px 16px;
-  border: 1px solid rgba(131, 228, 236, 0.42);
-  border-radius: 8px;
+  gap: 14px;
   color: #edf7f8;
-  text-decoration: none;
-  background: rgba(131, 228, 236, 0.06);
-  transition: border-color 160ms ease, background 160ms ease;
 }
-.lp-rating-teaser:hover,
-.lp-rating-teaser:focus-visible {
-  border-color: #83e4ec;
-  background: rgba(131, 228, 236, 0.1);
+.lp-rc-card {
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--rc-gold-line);
+  border-radius: 10px;
+  background: #14110a;
 }
-.lp-rating-teaser-label {
-  color: #a8b9ba;
-  font-size: 12px;
-  font-weight: 700;
+.lp-rc-head { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.lp-rc-head-copy { display: grid; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.lp-rc-head-copy small {
+  color: var(--rc-gold);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
-.lp-rating-teaser-main {
+.lp-rc-head-copy strong {
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lp-rc-head-copy span { color: var(--rc-muted); font-size: 12px; }
+.lp-rc-head-copy span.is-up { color: #94d6b8; font-weight: 700; }
+.lp-rc-head-copy span.is-down { color: #f2a7a7; font-weight: 700; }
+.lp-rc-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  border: 1px solid var(--rc-gold-line);
+  border-radius: 14px;
+  color: var(--rc-gold);
+  background: rgba(208, 170, 108, 0.16);
+}
+.lp-rc-icon.is-small { width: 44px; height: 44px; border-radius: 12px; }
+.lp-rc-medal {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 64px;
+  flex: 0 0 auto;
+}
+.lp-rc-medal svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.lp-rc-medal path { fill: rgba(131, 228, 236, 0.14); stroke: #83e4ec; stroke-width: 2; }
+.lp-rc-medal span { position: relative; color: #83e4ec; font-size: 24px; font-weight: 900; }
+.lp-rc-medal.is-small { width: 40px; height: 46px; }
+.lp-rc-medal.is-small span { font-size: 17px; }
+.lp-rc-copy { margin: 0; color: #e6dccb; font-size: 13px; line-height: 1.5; }
+.lp-rc-gold { color: var(--rc-gold); }
+.lp-rc-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.lp-rc-stats span {
+  display: grid;
+  gap: 2px;
+  padding: 8px 4px;
+  border-radius: 8px;
+  color: var(--rc-muted);
+  background: var(--rc-gold-soft);
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: center;
+}
+.lp-rc-stats b { color: #edf7f8; font-size: 18px; font-weight: 900; }
+.lp-rc-rival {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--rc-gold-soft);
 }
-.lp-rating-teaser-main strong {
-  color: #83e4ec;
-  font-size: 30px;
-  line-height: 1;
+.lp-rc-rival p { margin: 0; min-width: 0; font-size: 13px; line-height: 1.4; }
+.lp-rc-rival p span { color: var(--rc-muted); }
+.lp-rc-rival-avatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  color: #edf7f8;
+  background: #43263c;
+  font-size: 12px;
   font-weight: 900;
 }
-.lp-rating-teaser-main span,
-.lp-rating-teaser-gap {
-  color: #c2d0d1;
-  font-size: 13px;
+.lp-rc-rival-avatar.is-me { color: var(--rc-gold); background: rgba(208, 170, 108, 0.2); }
+.lp-rc-stats.is-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.lp-rc-stats .is-gold { color: var(--rc-gold); }
+.lp-rc-stats .is-gold b { display: grid; place-items: center; height: 22px; color: var(--rc-gold); }
+.lp-rc-rival b { white-space: nowrap; }
+.lp-rc-cta {
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+  border-radius: 8px;
+  color: #1a1206;
+  background: var(--rc-gold);
+  font-size: 14px;
+  font-weight: 800;
+  text-decoration: none;
+}
+.lp-rc-cta.is-outline {
+  border: 1px solid rgba(208, 170, 108, 0.6);
+  color: var(--rc-gold);
+  background: transparent;
+}
+.lp-rc-cta:focus-visible { outline: 2px solid var(--rc-gold); outline-offset: 2px; }
+.lp-rating-dock.lp-rc {
+  gap: 12px;
+  border-color: var(--rc-gold);
+  background: rgba(20, 17, 10, 0.96);
 }
 `;
 
@@ -767,7 +1057,6 @@ const ratingCss = `
 .lp-rating-season p { margin: 0; color: #a8b9ba; font-size: 12px; line-height: 1.5; }
 .lp-rating-bar { height: 6px; border-radius: 99px; background: rgba(196, 224, 225, 0.12); overflow: hidden; }
 .lp-rating-bar span { display: block; height: 100%; border-radius: inherit; background: #d0aa6c; }
-.lp-rating-bar.is-dock span { background: #83e4ec; }
 .lp-rating-segment {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -976,16 +1265,6 @@ const ratingCss = `
   transform: translateX(-50%);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
 }
-.lp-rating-dock-head { display: flex; align-items: center; gap: 12px; }
-.lp-rating-dock-rank { display: flex; align-items: baseline; gap: 4px; color: #83e4ec; font-size: 26px; font-weight: 900; }
-.lp-rating-dock-rank small { color: #a8b9ba; font-size: 12px; font-weight: 600; }
-.lp-rating-dock-name { display: grid; flex: 1 1 auto; min-width: 0; }
-.lp-rating-dock-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.lp-rating-dock-name span { color: #c2d0d1; font-size: 13px; }
-.lp-rating-dock-target { display: grid; gap: 6px; }
-.lp-rating-dock-target p, .lp-rating-dock-leader { margin: 0; font-size: 13px; }
-.lp-rating-dock-target b { color: #83e4ec; }
-.lp-rating-dock-leader { color: #d0aa6c; font-weight: 700; }
 .lp-rating-notice { display: grid; gap: 10px; margin-top: 12px; }
 .lp-rating-notice.is-inline { margin-top: 0; }
 .lp-rating-notice h2 { margin: 0; font-size: 18px; }

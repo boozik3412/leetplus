@@ -105,11 +105,23 @@ describe('guest leaderboard core', () => {
       { profileId: 'c', value: 200, rank: 2 },
       { profileId: 'd', value: 104, rank: 4 },
     ];
-    expect(leaderboardTarget(standings, 'c')).toEqual({ rank: 1, gap: 101 });
-    expect(leaderboardTarget(standings, 'd')).toEqual({ rank: 2, gap: 97 });
+    expect(leaderboardTarget(standings, 'c')).toEqual({
+      rank: 1,
+      gap: 101,
+      profileId: 'a',
+    });
+    expect(leaderboardTarget(standings, 'd')).toEqual({
+      rank: 2,
+      gap: 97,
+      profileId: 'c',
+    });
     expect(leaderboardTarget(standings, 'a')).toBeNull();
     // Not ranked yet: what it takes to enter the board.
-    expect(leaderboardTarget(standings, 'z')).toEqual({ rank: 4, gap: 105 });
+    expect(leaderboardTarget(standings, 'z')).toEqual({
+      rank: 4,
+      gap: 105,
+      profileId: 'd',
+    });
   });
 
   it('shows the top and the guest with neighbours further down', () => {

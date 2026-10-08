@@ -29,7 +29,7 @@ The exact confirmation value is:
 Safety contract:
   - The command never creates a role, database, schema, table, or function.
   - The migration/admin DATABASE_URL must be different from the target role.
-  - PostgreSQL 16, completed migration 166, exact terminal migration 192 and exact count 192 are required.
+  - PostgreSQL 16, completed migration 166, exact terminal migration 193 and exact count 193 are required.
   - Only ten exact application functions receive EXECUTE: two delivery
     helpers, two staff-attachment invariant helpers, five sealed identity-email
     boundaries, and the PII-free initial OWNER invite SENT assertion.

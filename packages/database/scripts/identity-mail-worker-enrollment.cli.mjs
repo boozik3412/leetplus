@@ -32,7 +32,7 @@ Safety contract:
   - CURRENT_USER and SESSION_USER must be the unchanged database owner.
   - The existing target role must match exact name/OID and be LOGIN,
     NOINHERIT, non-privileged, without membership, role settings or ownership.
-  - Exact merged terminal release head CURRENT_192 and count 192 are required.
+  - Exact merged terminal release head CURRENT_193 and count 193 are required.
   - The target role receives public schema USAGE and EXECUTE on exactly five
     delivery RPCs: readiness, claim, provider-mark, complete and tenant-scoped
     reap.

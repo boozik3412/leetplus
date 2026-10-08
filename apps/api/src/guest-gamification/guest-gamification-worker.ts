@@ -1,4 +1,5 @@
 import { TenantCustomerStage, TenantLifecycleStatus } from '@prisma/client';
+import type { GuestLeaderboardSettlementService } from '../guest-leaderboard/guest-leaderboard-settlement.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { GuestActivityLedgerService } from './guest-activity-ledger.service';
 import type {
@@ -44,6 +45,11 @@ type GuestGamificationWorkerServices = {
     'runSnapshotPipelineScheduled' | 'runSupplementalPipelineScheduled'
   >;
   monitoring: Pick<GuestGameQualityMonitoringService, 'collectTenant'>;
+  /** Month-end leaderboard results and prizes; absent in older harnesses. */
+  leaderboardSettlement?: Pick<
+    GuestLeaderboardSettlementService,
+    'settleTenant'
+  >;
 };
 
 const workerEnabledKey = 'GUEST_GAMIFICATION_WORKER_ENABLED';
@@ -455,6 +461,26 @@ export async function runGuestGamificationWorkerOnce(
     },
   );
 
+  // A prize that cannot be issued is marked on its result row and shown in
+  // the admin «Рейтинг» tab; only an unexpected error fails the tick.
+  const leaderboard = await runIndependentPass(
+    failures,
+    'Leaderboard month results',
+    async () => {
+      if (config.canary || !services.leaderboardSettlement) return null;
+      const result = await services.leaderboardSettlement.settleTenant(
+        tenant.id,
+        now,
+      );
+      if (result.failures.length > 0) {
+        logger.warn(
+          `Leaderboard prizes not issued: ${result.failures.slice(0, 5).join('; ')}`,
+        );
+      }
+      return result;
+    },
+  );
+
   logger.log(
     [
       failures.length
@@ -479,6 +505,9 @@ export async function runGuestGamificationWorkerOnce(
       `supplementalFacts=${supplemental?.processedFacts ?? 0}`,
       `supplementalRewards=${supplemental?.createdRewards ?? 0}`,
       `monitoring=${monitoring ? 'COLLECTED' : 'SKIPPED'}`,
+      `leaderboardFrozen=${leaderboard?.frozenRows ?? 0}`,
+      `leaderboardPrizes=${leaderboard?.prizesIssued ?? 0}`,
+      `leaderboardPrizesFailed=${leaderboard?.prizesFailed ?? 0}`,
     ].join(' '),
   );
 
@@ -495,6 +524,7 @@ export async function runGuestGamificationWorkerOnce(
     sessionStartFallback,
     supplemental,
     monitoring,
+    leaderboard,
   };
 }
 

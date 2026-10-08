@@ -551,11 +551,13 @@ const definitions: readonly ControllerDefinition[] = [
     module: 'GAMIFICATION',
     profile: 'NETWORK_VERIFIED',
     routes: [
-      ['GET', ['settings', 'standings']],
+      ['GET', ['settings', 'standings', 'results']],
       ['PATCH', ['settings']],
       [
         'POST',
         [
+          'results/:resultId/retry',
+          'results/:resultId/delivered',
           'profiles/:profileId/exclusion',
           'profiles/:profileId/reset-nickname',
         ],

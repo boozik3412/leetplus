@@ -17,6 +17,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
 import {
   GuestLeaderboardAdminService,
+  type GuestLeaderboardAdminResults,
   type GuestLeaderboardAdminStandings,
   type GuestLeaderboardSettingsDto,
   type GuestLeaderboardSettingsResponse,
@@ -61,6 +62,30 @@ export class GuestLeaderboardAdminController {
     @Query('board') board?: string,
   ): Promise<GuestLeaderboardAdminStandings> {
     return this.service.getStandings(user, { scope, board });
+  }
+
+  @Get('results')
+  getResults(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('periodKey') periodKey?: string,
+  ): Promise<GuestLeaderboardAdminResults> {
+    return this.service.getResults(user, { periodKey });
+  }
+
+  @Post('results/:resultId/retry')
+  retryResult(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('resultId') resultId: string,
+  ) {
+    return this.service.updateResult(user, resultId, 'retry');
+  }
+
+  @Post('results/:resultId/delivered')
+  markResultDelivered(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('resultId') resultId: string,
+  ) {
+    return this.service.updateResult(user, resultId, 'delivered');
   }
 
   @Post('profiles/:profileId/exclusion')

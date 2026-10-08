@@ -8,6 +8,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   LEADERBOARD_BOARDS,
+  LEADERBOARD_BOARD_LABELS,
   LEADERBOARD_NETWORK_SCOPE_KEY,
   LeaderboardConfigError,
   leaderboardPlayerName,
@@ -65,6 +66,27 @@ export type GuestLeaderboardAdminStandings = {
     profileId: string;
     displayName: string | null;
     contactMasked: string | null;
+  }>;
+};
+
+export type GuestLeaderboardAdminResults = {
+  periods: string[];
+  periodKey: string | null;
+  rows: Array<{
+    id: string;
+    scopeKey: string;
+    scopeName: string;
+    board: LeaderboardBoard;
+    boardLabel: string;
+    rank: number;
+    profileId: string;
+    publicName: string;
+    contactMasked: string | null;
+    value: number;
+    prizeLabel: string | null;
+    status: string;
+    error: string | null;
+    issuedAt: string | null;
   }>;
 };
 
@@ -333,6 +355,130 @@ export class GuestLeaderboardAdminService {
     });
     this.reader.invalidateSettings(user.tenantId);
     return { profileId, ...result };
+  }
+
+  /** Frozen month results (archive) with the state of every prize. */
+  async getResults(
+    user: AuthenticatedUser,
+    query: { periodKey?: unknown },
+  ): Promise<GuestLeaderboardAdminResults> {
+    const periods = (
+      await this.prisma.guestLeaderboardPeriodResult.findMany({
+        where: { tenantId: user.tenantId },
+        select: { periodKey: true },
+        distinct: ['periodKey'],
+        orderBy: { periodKey: 'desc' },
+        take: 24,
+      })
+    ).map((row) => row.periodKey);
+    const periodKey =
+      typeof query.periodKey === 'string' && periods.includes(query.periodKey)
+        ? query.periodKey
+        : (periods[0] ?? null);
+    if (!periodKey) return { periods, periodKey: null, rows: [] };
+
+    const [rows, stores] = await Promise.all([
+      this.prisma.guestLeaderboardPeriodResult.findMany({
+        where: { tenantId: user.tenantId, periodKey },
+        orderBy: [{ scopeKey: 'asc' }, { board: 'asc' }, { rank: 'asc' }],
+      }),
+      this.reader.loadStores(user.tenantId),
+    ]);
+    const names = await this.reader.profileNames(user.tenantId, [
+      ...new Set(rows.map((row) => row.profileId)),
+    ]);
+    const storeNames = new Map(stores.map((store) => [store.id, store.name]));
+    return {
+      periods,
+      periodKey,
+      rows: rows.map((row) => {
+        const profile = names.get(row.profileId);
+        const prize = (row.prize ?? null) as {
+          label?: string;
+          error?: string;
+        } | null;
+        const board = row.board as LeaderboardBoard;
+        return {
+          id: row.id,
+          scopeKey: row.scopeKey,
+          scopeName:
+            row.scopeKey === LEADERBOARD_NETWORK_SCOPE_KEY
+              ? 'Сеть'
+              : (storeNames.get(row.scopeKey) ?? 'Клуб'),
+          board,
+          boardLabel: LEADERBOARD_BOARD_LABELS[board] ?? row.board,
+          rank: row.rank,
+          profileId: row.profileId,
+          publicName: leaderboardPlayerName({
+            displayName: profile?.displayName,
+            contactMasked: profile?.contactMasked,
+            importedNames: [
+              profile?.guest?.fullNameMasked,
+              profile?.guest?.externalGuestId,
+            ],
+          }).name,
+          contactMasked: profile?.contactMasked ?? null,
+          value: row.value,
+          prizeLabel: prize?.label ?? null,
+          status: row.status,
+          error: prize?.error ?? null,
+          issuedAt: row.issuedAt?.toISOString() ?? null,
+        };
+      }),
+    };
+  }
+
+  /**
+   * Staff actions on a frozen prize: retry a failed issue (the worker picks it
+   * up on its next tick) or confirm that a manual prize was handed over.
+   */
+  async updateResult(
+    user: AuthenticatedUser,
+    resultId: string,
+    action: 'retry' | 'delivered',
+  ) {
+    const row = await this.prisma.guestLeaderboardPeriodResult.findFirst({
+      where: { tenantId: user.tenantId, id: resultId },
+      select: { id: true, status: true, profileId: true, storeId: true },
+    });
+    if (!row) throw new NotFoundException('Результат не найден.');
+    const from = action === 'retry' ? 'PRIZE_FAILED' : 'MANUAL_PRIZE';
+    if (row.status !== from) {
+      throw new ConflictException(
+        action === 'retry'
+          ? 'Повторить можно только неудавшуюся выдачу.'
+          : 'Отметить выданным можно только приз, который вручается вручную.',
+      );
+    }
+    const status = action === 'retry' ? 'PRIZE_PENDING' : 'PRIZE_ISSUED';
+    const updated = await this.prisma.guestLeaderboardPeriodResult.updateMany({
+      where: { tenantId: user.tenantId, id: row.id, status: from },
+      data: {
+        status,
+        issuedAt: action === 'delivered' ? new Date() : null,
+      },
+    });
+    if (updated.count !== 1) {
+      throw new ConflictException(
+        'Статус приза уже изменился. Обновите страницу.',
+      );
+    }
+    await this.prisma.guestGameAuditEvent.create({
+      data: {
+        tenantId: user.tenantId,
+        profileId: row.profileId,
+        storeId: row.storeId,
+        entityType: 'LEADERBOARD_RESULT',
+        entityId: row.id,
+        action:
+          action === 'retry'
+            ? 'LEADERBOARD_PRIZE_RETRY_REQUESTED'
+            : 'LEADERBOARD_PRIZE_DELIVERED_MANUALLY',
+        status: 'APPLIED',
+        payload: { actorUserId: user.id },
+      },
+    });
+    return { id: row.id, status };
   }
 
   async resetNickname(user: AuthenticatedUser, profileId: string) {

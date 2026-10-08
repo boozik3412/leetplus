@@ -1901,9 +1901,16 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
 - Схема: миграция `20261007120000_guest_leaderboard` добавляет
   `GuestLeaderboardSettings` и `GuestLeaderboardPeriodResult` с grant для
   `leetplus_runtime`; голова identity-mail-worker поднята до 193.
-- Фиксация итогов месяца и выдача призов (worker) ещё не реализованы; таблица
-  `GuestLeaderboardPeriodResult` пока не пишется. Контракт модуля —
-  `docs/agent-context/guest-leaderboard.md`.
+- Worker (08.10.2026): `GuestLeaderboardSettlementService` — отдельный проход
+  `runGuestGamificationWorkerOnce` (lp-bonus.timer → bonus-ledger-worker), только
+  для INTERNAL tenant и только вне canary; внешние сети остаются `EXTERNAL_DENY`.
+  Через 12 ч после конца месяца в зоне клуба пишет топ-10 в
+  `GuestLeaderboardPeriodResult` и выдаёт призы по idempotency key: BONUS через
+  `GuestGamificationService.createReward` (кошелёк → bonus ledger → Langame),
+  кейс — AVAILABLE entitlement + wallet item, свой приз — `MANUAL_PRIZE`.
+  Корпоративные `GET …/leaderboard/results` и `POST …/results/:id/retry|delivered`
+  работают под теми же capability. Новых секретов, egress и таймеров нет.
+  Контракт модуля — `docs/agent-context/guest-leaderboard.md`.
 
 ## Langame и outbound network boundary
 

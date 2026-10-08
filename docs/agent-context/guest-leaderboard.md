@@ -16,9 +16,10 @@ The screen follows variant 1 «Арена» of the design canvas: a podium, a ta
 |---|---|
 | Pure rules: config validation, month windows, points, ranking, names, prizes | `apps/api/src/guest-leaderboard/guest-leaderboard-core.ts` |
 | Read side (Prisma only; used by the guest portal and the admin) | `guest-leaderboard-read.service.ts` |
-| Admin settings, standings, moderation | `guest-leaderboard-admin.service.ts`, `guest-leaderboard-admin.controller.ts` |
+| Month results and prizes (worker) | `guest-leaderboard-settlement.service.ts` |
+| Admin settings, standings, moderation, results | `guest-leaderboard-admin.service.ts`, `guest-leaderboard-admin.controller.ts` |
 | Guest route | `GET /guest-portal/session/leaderboard?scope=club\|network&board=points\|hours\|sessions\|quests\|cases` |
-| Admin routes | `GET/PATCH /guests/gamification/leaderboard/settings`, `GET …/standings?scope=network\|<storeId>&board=`, `POST …/profiles/:id/exclusion` `{excluded}`, `POST …/profiles/:id/reset-nickname` |
+| Admin routes | `GET/PATCH /guests/gamification/leaderboard/settings`, `GET …/standings?scope=network\|<storeId>&board=`, `GET …/results?periodKey=`, `POST …/results/:id/retry`, `POST …/results/:id/delivered`, `POST …/profiles/:id/exclusion` `{excluded}`, `POST …/profiles/:id/reset-nickname` |
 | Guest UI | `apps/web/src/app/play/game/game-rating-client.tsx` (`/game/rating`, `/play/game/rating`, home card «Ваше место», menu item) |
 | Admin UI | `apps/web/src/components/guest-gamification-leaderboard-tab.tsx` (tab «Рейтинг») |
 | Wording | `apps/web/src/lib/guest-leaderboard.ts` |
@@ -63,9 +64,27 @@ Points use the owner's formula, default 1 h = 10, mission = 30, case = 5, check-
 
 Saves are optimistic: `revision` must match. Exclusions change only through the moderation action, and a settings save keeps the stored list. Without a row the leaderboard is off.
 
+## Month results and prizes
+
+`GuestLeaderboardSettlementService` runs as an independent pass of the gamification worker. Scope: the INTERNAL tenant, live mode only, skipped in canary. External networks keep `EXTERNAL_DENY` for game jobs.
+
+- **Freeze.** A scope's previous month becomes due 12 h after it ended in its zone, provided the leaderboard settings existed before that month ended.
+  - For each enabled board, the top 10 places are written to `GuestLeaderboardPeriodResult` once.
+  - A place with a configured prize gets `PRIZE_PENDING` with the prize snapshot.
+  - The other places get `RECORDED`.
+  - Ties share the place and its prize.
+- **Issue.** Each `PRIZE_PENDING` row is issued once, with idempotency key `guest-leaderboard-prize:v1:<tenant>:<period>:<scope>:<board>:<profile>`:
+  - **BONUS:** `GuestGamificationService.createReward`, an approved `BONUS` with a 30-day wallet claim. The bonus ledger pays it to Langame after the claim.
+  - **LOOT_BOX:** an AVAILABLE `LOOT_BOX` entitlement plus a wallet item, valid for 30 days. A network prize uses the winner's most-played club.
+  - **CUSTOM:** set to `MANUAL_PRIZE`; staff confirm the handover in the tab.
+- **Failures.**
+  - A failure sets `PRIZE_FAILED` with the reason and only logs a worker warning. Staff can press «Повторить».
+  - An unexpected error fails the tick like the other passes.
+- **Audit.** Every step writes `GuestGameAuditEvent` with `LEADERBOARD_PRIZE_*` actions. The tab «Рейтинг» → «Итоги месяцев» shows the archive.
+- **Crown.** The crown for last month's winner is still computed live from activity, not from the frozen rows.
+
 ## Not built yet
 
-- **Month results and prizes.** On the 1st a worker must freeze the standings into `GuestLeaderboardPeriodResult` and issue the configured prizes through the reward pipeline. The table exists but nothing writes it yet.
 - **Notifications.** Telegram «тебя обогнали».
 - **«Битва клубов».**
 

@@ -94,6 +94,18 @@ const GuestGamificationStatisticsTab = dynamic(
   },
 );
 
+const GuestGamificationLeaderboardTab = dynamic(
+  () =>
+    import("@/components/guest-gamification-leaderboard-tab").then(
+      (module) => module.GuestGamificationLeaderboardTab,
+    ),
+  {
+    loading: () => (
+      <div className="mt-6 h-96 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-900" />
+    ),
+  },
+);
+
 type Props = {
   initialWorkspace: GuestGamificationWorkspace;
   audiences: GuestAudience[];
@@ -123,6 +135,7 @@ export type TabId =
   | "missions"
   | "checkIn"
   | "seasons"
+  | "leaderboard"
   | "promoCards"
   | "rewards"
   | "testRun";
@@ -525,6 +538,7 @@ const tabs: Array<{ id: TabId; label: string }> = [
   { id: "missions", label: "Задания" },
   { id: "checkIn", label: "Чекин" },
   { id: "seasons", label: "Battle Pass" },
+  { id: "leaderboard", label: "Рейтинг" },
   { id: "promoCards", label: "Промо баннеры" },
   { id: "testRun", label: "Тест запуска" },
   { id: "rewards", label: "Кошелек" },
@@ -3087,6 +3101,10 @@ export function GuestGamificationPanel({
 
           {activeTab === "statistics" ? (
             <GuestGamificationStatisticsTab stores={stores} />
+          ) : null}
+
+          {activeTab === "leaderboard" ? (
+            <GuestGamificationLeaderboardTab canManage={access.canManageRules} />
           ) : null}
 
           {activeTab === "profiles" ? (

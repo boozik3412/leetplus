@@ -27,9 +27,9 @@ const FINAL_MIGRATION_HEAD =
   "20260820010000_guest_portal_telegram_update_ledger";
 const CURRENT188_MIGRATION_COUNT = 188;
 const CURRENT188_MIGRATION_HEAD = "20260828190000_guest_support_bug_reports";
-const CURRENT_SOURCE_MIGRATION_COUNT = 192;
+const CURRENT_SOURCE_MIGRATION_COUNT = 193;
 const CURRENT_SOURCE_MIGRATION_HEAD =
-  "20261004090000_store_closures";
+  "20261007120000_guest_leaderboard";
 const FINAL_PRETERMINAL_MANIFEST_DIGEST =
   "094f3ad34ef8846f6088f51d5fb9491ff89af4509b60063453c22af07466d99b";
 const FINAL_WORKER_FUNCTION_DIGEST =
@@ -817,7 +817,8 @@ export async function createFounderPilotProductionHistoryPgAdapter(
                   '20260828190000_guest_support_bug_reports',
                   '20260908090000_initial_owner_invite_link_mode',
                   '20260908180000_external_langame_simple_onboarding',
-                  '20261004090000_store_closures'
+                  '20261004090000_store_closures',
+                  '20261007120000_guest_leaderboard'
                 )
               ) || E'\\n',
               'UTF8'

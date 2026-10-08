@@ -383,6 +383,8 @@ model Tenant {
   staffNotifications                   StaffNotification[]
   guestSupportTickets                  GuestSupportTicket[]
   storeClosures                        StoreClosure[]
+  guestLeaderboardSettings             GuestLeaderboardSettings?
+  guestLeaderboardPeriodResults        GuestLeaderboardPeriodResult[]
   guestSupportAttachments              GuestSupportAttachment[]
   guestSupportTicketComments           GuestSupportTicketComment[]
   guestSupportTicketAuditEvents        GuestSupportTicketAuditEvent[]
@@ -1409,6 +1411,48 @@ model Store {
 /// closed club-local day; reopenedOn is the first day it is open again (null
 /// while it is still closed). The dashboards read it so that a closed club is
 /// not reported as a sales drop, and its PCs do not count as idle capacity.
+/// Owner settings of the guest leaderboard («Рейтинг»): one row per network.
+/// `config` is validated by guest-leaderboard-core (boards, formula, prizes,
+/// club switches, moderation exclusions).
+model GuestLeaderboardSettings {
+  id              String   @id @default(uuid())
+  tenantId        String   @unique(map: "guest_leaderboard_settings_tenant_uidx")
+  enabled         Boolean  @default(false)
+  config          Json
+  revision        Int      @default(1)
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+/// Frozen monthly standings of the guest leaderboard and the prize issued for
+/// a place. `scopeKey` is `network` or a store id.
+model GuestLeaderboardPeriodResult {
+  id        String    @id @default(uuid())
+  tenantId  String
+  periodKey String
+  scopeKey  String
+  storeId   String?
+  board     String
+  rank      Int
+  profileId String
+  value     Int
+  prize     Json?
+  rewardId  String?
+  status    String    @default("RECORDED")
+  issuedAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, periodKey, scopeKey, board, profileId], map: "guest_leaderboard_period_result_uidx")
+  @@index([tenantId, periodKey, scopeKey, board, rank], map: "guest_leaderboard_period_result_rank_idx")
+  @@index([tenantId, profileId, periodKey], map: "guest_leaderboard_period_result_profile_idx")
+}
+
 model StoreClosure {
   id              String    @id @default(uuid())
   tenantId        String

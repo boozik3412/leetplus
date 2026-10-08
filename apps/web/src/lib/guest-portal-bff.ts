@@ -1,6 +1,7 @@
 const GUEST_PORTAL_GET_QUERY_ALLOWLIST = new Map<string, readonly string[]>([
   ["gamification/clubs", ["lat", "lng", "radiusKm"]],
   ["session/game-missions", ["offset", "limit"]],
+  ["session/leaderboard", ["scope", "board"]],
 ]);
 
 type GuestPortalGetProjection =
@@ -73,7 +74,9 @@ function isGuestPortalGetPathAllowed(path: readonly string[]): boolean {
     return (
       (path[0] === "gamification" && path[1] === "clubs") ||
       (path[0] === "session" &&
-        (path[1] === "game-summary" || path[1] === "game-missions"))
+        (path[1] === "game-summary" ||
+          path[1] === "game-missions" ||
+          path[1] === "leaderboard"))
     );
   }
 

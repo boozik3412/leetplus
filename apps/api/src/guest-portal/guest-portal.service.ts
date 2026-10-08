@@ -6,6 +6,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -92,6 +93,10 @@ import type {
   LangameGuestDetailsPortalResult,
   LangameGuestSearchResultItem,
 } from '../integrations/langame.types';
+import {
+  GuestLeaderboardReadService,
+  type GuestLeaderboardView,
+} from '../guest-leaderboard/guest-leaderboard-read.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   TenantExecutionAdmissionService,
@@ -1971,6 +1976,8 @@ export class GuestPortalService {
     private readonly guestIdentityResolver: GuestIdentityResolverService,
     private readonly tenantExecutionAdmission: TenantExecutionAdmissionService,
     private readonly guestSupportService: GuestSupportService,
+    @Optional()
+    private readonly guestLeaderboard?: GuestLeaderboardReadService,
   ) {}
 
   private gameDebugTraceId(prefix: string) {
@@ -4459,6 +4466,29 @@ export class GuestPortalService {
       nextOffset,
       items: missions,
     };
+  }
+
+  /**
+   * The guest leaderboard («Рейтинг») of the selected club or the network.
+   * Read-only; names are nicknames or «Игрок ••1234», never phones or ids.
+   */
+  async getLeaderboard(
+    authorization: string | undefined,
+    query: { scope?: unknown; board?: unknown } = {},
+  ): Promise<GuestLeaderboardView> {
+    const payload = await this.verifyGuestToken(authorization);
+    if (!this.guestLeaderboard) {
+      throw new ServiceUnavailableException('Рейтинг временно недоступен.');
+    }
+    const profile = await this.findProfile(payload, payload.guestId ?? null);
+
+    return this.guestLeaderboard.guestView({
+      tenantId: payload.tenantId,
+      profileId: profile?.gameActivatedAt ? profile.id : null,
+      storeId: payload.storeId,
+      scope: query.scope,
+      board: query.board,
+    });
   }
 
   private async prepareGameSummaryPortal(

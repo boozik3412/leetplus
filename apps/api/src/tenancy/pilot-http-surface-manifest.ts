@@ -546,6 +546,23 @@ const definitions: readonly ControllerDefinition[] = [
     },
   },
   {
+    source: 'src/guest-leaderboard/guest-leaderboard-admin.controller.ts',
+    prefix: '/guests/gamification/leaderboard',
+    module: 'GAMIFICATION',
+    profile: 'NETWORK_VERIFIED',
+    routes: [
+      ['GET', ['settings', 'standings']],
+      ['PATCH', ['settings']],
+      [
+        'POST',
+        [
+          'profiles/:profileId/exclusion',
+          'profiles/:profileId/reset-nickname',
+        ],
+      ],
+    ],
+  },
+  {
     source: 'src/guest-portal/guest-portal.controller.ts',
     prefix: '/guest-portal',
     module: 'GAMIFICATION',
@@ -559,6 +576,7 @@ const definitions: readonly ControllerDefinition[] = [
           'session',
           'session/game-missions',
           'session/game-summary',
+          'session/leaderboard',
           'session/support/tickets',
           'session/support/tickets/:ticketNumber',
         ],

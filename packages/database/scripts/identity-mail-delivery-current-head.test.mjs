@@ -20,7 +20,8 @@ const currentMigrationName =
   "20260908090000_initial_owner_invite_link_mode";
 const previousRelease191MigrationName =
   "20260908180000_external_langame_simple_onboarding";
-const releaseMigrationName = "20261004090000_store_closures";
+const previousRelease192MigrationName = "20261004090000_store_closures";
+const releaseMigrationName = "20261007120000_guest_leaderboard";
 const predecessorName = "20260818020000_identity_mail_delivery_current_head_v1";
 const preterminalManifestDigest =
   "589dd0a39f2372041a284392c72ad6ed59027877e909e1a5d377b9017c662fda";
@@ -29,7 +30,7 @@ const productionHistoryPreterminalManifestDigest =
 const workerAssertSourceDigest =
   "645feb480c46c42d7d8ca2dae07ec1c82f88264ac5d0e30d26593a8e566f3f66";
 const workerAssertDefinitionDigest =
-  "d0fbb3e967c0f6e5c5442c0a896a3f9e68c812117f8ef583d31368e5610569d6";
+  "604d4b8210b425406b05975943502c47cde981b0ae18b02d842ee4d0f6a74d3f";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -54,19 +55,20 @@ async function canonicalManifest() {
   return { entries, rows };
 }
 
-test("CURRENT192 preserves the reviewed CURRENT185 digest and advances readiness exactly once", async () => {
+test("CURRENT193 preserves the reviewed CURRENT185 digest and advances readiness exactly once", async () => {
   const { entries, rows } = await canonicalManifest();
-  assert.equal(entries.length, 192);
-  assert.equal(entries.at(-8), predecessorName);
-  assert.equal(entries.at(-7), guardMigrationName);
-  assert.equal(entries.at(-6), telegramMigrationName);
-  assert.equal(entries.at(-5), previousCurrentMigrationName);
-  assert.equal(entries.at(-4), previousCurrent189MigrationName);
-  assert.equal(entries.at(-3), currentMigrationName);
-  assert.equal(entries.at(-2), previousRelease191MigrationName);
+  assert.equal(entries.length, 193);
+  assert.equal(entries.at(-9), predecessorName);
+  assert.equal(entries.at(-8), guardMigrationName);
+  assert.equal(entries.at(-7), telegramMigrationName);
+  assert.equal(entries.at(-6), previousCurrentMigrationName);
+  assert.equal(entries.at(-5), previousCurrent189MigrationName);
+  assert.equal(entries.at(-4), currentMigrationName);
+  assert.equal(entries.at(-3), previousRelease191MigrationName);
+  assert.equal(entries.at(-2), previousRelease192MigrationName);
   assert.equal(entries.at(-1), releaseMigrationName);
   assert.equal(
-    sha256(`${rows.slice(0, -7).join("\n")}\n`),
+    sha256(`${rows.slice(0, -8).join("\n")}\n`),
     preterminalManifestDigest,
   );
 
@@ -230,15 +232,31 @@ test("CURRENT192 preserves the reviewed CURRENT185 digest and advances readiness
     /\b(?:DELETE|DROP|TRUNCATE|UPDATE)\b/iu,
   );
 
+  const release192Sql = normalizedBytes(
+    await readFile(
+      path.join(
+        migrationsRoot,
+        previousRelease192MigrationName,
+        "migration.sql",
+      ),
+    ),
+  ).toString("utf8");
+  assert.match(release192Sql, /CREATE TABLE public\."StoreClosure"/u);
+  assert.match(
+    release192Sql,
+    /migration_count IS DISTINCT FROM 192[\s\S]*20261004090000_store_closures/u,
+  );
+  assert.match(release192Sql, /not CURRENT_192/u);
+
   const releaseSql = normalizedBytes(
     await readFile(
       path.join(migrationsRoot, releaseMigrationName, "migration.sql"),
     ),
   ).toString("utf8");
-  assert.match(releaseSql, /CREATE TABLE public\."StoreClosure"/u);
+  assert.match(releaseSql, /CREATE TABLE public\."GuestLeaderboardSettings"/u);
   assert.match(
     releaseSql,
-    /FOREIGN KEY \("tenantId", "storeId"\) REFERENCES public\."Store"\("tenantId", "id"\)/u,
+    /CREATE TABLE public\."GuestLeaderboardPeriodResult"/u,
   );
   assert.match(
     releaseSql,
@@ -246,23 +264,23 @@ test("CURRENT192 preserves the reviewed CURRENT185 digest and advances readiness
   );
   assert.match(
     releaseSql,
-    /migration_count IS DISTINCT FROM 192[\s\S]*20261004090000_store_closures/u,
+    /migration_count IS DISTINCT FROM 193[\s\S]*20261007120000_guest_leaderboard/u,
   );
   assert.match(
     releaseSql,
-    /20260908180000_external_langame_simple_onboarding',\s*'20261004090000_store_closures'/u,
+    /20261004090000_store_closures',\s*'20261007120000_guest_leaderboard'/u,
   );
-  assert.match(releaseSql, /not CURRENT_192/u);
-  // lp wants the new table reachable by the runtime role; fresh databases of CI
-  // and local runs have no such role, so the grant is conditional.
+  assert.match(releaseSql, /not CURRENT_193/u);
+  // lp wants both new tables reachable by the runtime role; fresh databases of
+  // CI and local runs have no such role, so the grants are conditional.
   const runtimeGrant =
-    /GRANT SELECT, INSERT, UPDATE, DELETE\s+ON TABLE public\."StoreClosure" TO leetplus_runtime;/gu;
+    /GRANT SELECT, INSERT, UPDATE, DELETE\s+ON TABLE public\."GuestLeaderboard(?:Settings|PeriodResult)" TO leetplus_runtime;/gu;
   assert.match(
     releaseSql,
     /IF EXISTS \(\s*SELECT 1 FROM pg_catalog\.pg_roles WHERE rolname = 'leetplus_runtime'\s*\) THEN\s+GRANT/u,
   );
-  assert.equal(releaseSql.match(runtimeGrant)?.length, 1);
-  // Additive only: the foreign-key actions and the runtime grant are the sole
+  assert.equal(releaseSql.match(runtimeGrant)?.length, 2);
+  // Additive only: the foreign-key actions and the runtime grants are the sole
   // DELETE/UPDATE words.
   assert.doesNotMatch(
     releaseSql
@@ -273,7 +291,7 @@ test("CURRENT192 preserves the reviewed CURRENT185 digest and advances readiness
   assert.doesNotMatch(releaseSql, /^\s*(?:BEGIN|COMMIT);/imu);
 });
 
-test("the active worker repository consumes the exact CURRENT192 receipt", async () => {
+test("the active worker repository consumes the exact CURRENT193 receipt", async () => {
   const repository = await readFile(
     path.join(
       repositoryRoot,
@@ -286,7 +304,7 @@ test("the active worker repository consumes the exact CURRENT192 receipt", async
     "utf8",
   );
   assert.match(repository, new RegExp(releaseMigrationName, "u"));
-  assert.match(repository, /CURRENT_MIGRATION_COUNT = 192 as const/u);
+  assert.match(repository, /CURRENT_MIGRATION_COUNT = 193 as const/u);
   assert.match(repository, new RegExp(preterminalManifestDigest, "u"));
   assert.match(
     repository,
@@ -298,7 +316,7 @@ test("the active worker repository consumes the exact CURRENT192 receipt", async
   );
 });
 
-test("the legacy inventory pins the CURRENT192 worker function definition", async () => {
+test("the legacy inventory pins the CURRENT193 worker function definition", async () => {
   const inventory = await readFile(
     path.join(
       databaseRoot,

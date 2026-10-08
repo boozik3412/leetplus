@@ -8,6 +8,7 @@ import {
 import { GuestGamificationScheduledController } from '../guest-gamification/guest-gamification-scheduled.controller';
 import { GuestGamificationController } from '../guest-gamification/guest-gamification.controller';
 import { PlatformGuestGameSupportRecoveryController } from '../guest-gamification/platform-guest-game-support-recovery.controller';
+import { GuestLeaderboardAdminController } from '../guest-leaderboard/guest-leaderboard-admin.controller';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { StaffModule } from '../staff/staff.module';
 
@@ -23,6 +24,7 @@ import { StaffModule } from '../staff/staff.module';
     GuestGamificationScheduledController,
     GuestGameMediaController,
     PlatformGuestGameSupportRecoveryController,
+    GuestLeaderboardAdminController,
   ],
   providers: [...GUEST_GAMIFICATION_PROVIDERS],
   exports: [...GUEST_GAMIFICATION_EXPORTS],

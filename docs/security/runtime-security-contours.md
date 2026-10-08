@@ -1884,6 +1884,27 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   Langame request/response и claim payload: только счётчики, статусы, суммы и
   булевы флаги каналов. Контракт полей — `docs/agent-context/guests-crm-gamification.md`.
 
+### Рейтинг гостей (08.10.2026)
+
+- Public guest: новый `GET /guest-portal/session/leaderboard?scope&board`
+  (READ, guest JWT, `PERSISTED_READ` в CURRENT190-инвентаре; web BFF пропускает
+  только `scope` и `board`). Его обслуживает `GuestLeaderboardReadService`
+  (`apps/api/src/guest-leaderboard/`), зависящий только от `PrismaService`; он
+  явно зарегистрирован в `GuestRuntimeModule` и не пишет в БД, не регистрирует
+  scheduler, не ходит в Langame. Имена в ответе — ник гостя или «Игрок ••1234»
+  (последние 4 цифры из уже маскированного `contactMasked`); profile id, телефон,
+  Telegram и Langame-идентификаторы не отдаются.
+- Corporate: `/guests/gamification/leaderboard/*` (`GuestLeaderboardAdminController`
+  в обоих gamification-модулях, тот же guard-набор и NETWORK scope). RolesGuard:
+  GET → `view_guest_gamification`, PATCH/POST → `manage_guest_game_rules`.
+  Каждая запись (настройки, исключение, сброс ника) пишет `GuestGameAuditEvent`.
+- Схема: миграция `20261007120000_guest_leaderboard` добавляет
+  `GuestLeaderboardSettings` и `GuestLeaderboardPeriodResult` с grant для
+  `leetplus_runtime`; голова identity-mail-worker поднята до 193.
+- Фиксация итогов месяца и выдача призов (worker) ещё не реализованы; таблица
+  `GuestLeaderboardPeriodResult` пока не пишется. Контракт модуля —
+  `docs/agent-context/guest-leaderboard.md`.
+
 ## Langame и outbound network boundary
 
 1. Web runtime остаётся localhost-only.

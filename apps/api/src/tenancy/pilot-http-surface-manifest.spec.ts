@@ -631,9 +631,9 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(323);
-    expect(allowed).toHaveLength(262);
-    expect(blocked).toHaveLength(61);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(329);
+    expect(allowed).toHaveLength(267);
+    expect(blocked).toHaveLength(62);
     expect(outbound).toHaveLength(21);
     expect(
       PILOT_HTTP_SURFACE_MANIFEST.filter((entry) =>
@@ -874,7 +874,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
     );
     const allowed = gamification.filter((entry) => entry.decision === 'ALLOW');
 
-    expect(allowed).toHaveLength(79);
+    expect(allowed).toHaveLength(84);
     expect(
       allowed.every(
         (entry) =>
@@ -884,7 +884,9 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
           (entry.source ===
             'src/guest-gamification/guest-gamification.controller.ts' ||
             entry.source ===
-              'src/guest-gamification/guest-game-media.controller.ts'),
+              'src/guest-gamification/guest-game-media.controller.ts' ||
+            entry.source ===
+              'src/guest-leaderboard/guest-leaderboard-admin.controller.ts'),
       ),
     ).toBe(true);
     expect(

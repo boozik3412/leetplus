@@ -31,6 +31,7 @@ const sourceLabels: Record<StaffNotificationSourceType, string> = {
   KNOWLEDGE_BASE: "База знаний",
   OPERATIONS_DASHBOARD: "Опер. дашборд",
   SUPPORT_TICKET: "Поддержка",
+  GUEST_REWARD_ISSUE: "Выдача наград",
 };
 
 const NOTIFICATION_DISPLAY_TIME_ZONE = "Asia/Yekaterinburg";

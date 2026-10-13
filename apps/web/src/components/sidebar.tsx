@@ -179,6 +179,7 @@ const shiftWorkspaceNavHrefs = new Set([
   "/staff/knowledge-base",
   "/staff/discipline",
   "/staff/team-chat",
+  "/staff/notifications",
 ]);
 
 const compactSidebarIconClassName = "h-5 w-5 shrink-0";

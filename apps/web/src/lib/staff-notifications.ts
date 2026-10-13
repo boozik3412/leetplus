@@ -10,7 +10,8 @@ export type StaffNotificationSourceType =
   | "TEAM_CHAT"
   | "KNOWLEDGE_BASE"
   | "OPERATIONS_DASHBOARD"
-  | "SUPPORT_TICKET";
+  | "SUPPORT_TICKET"
+  | "GUEST_REWARD_ISSUE";
 
 export type StaffNotification = {
   id: string;

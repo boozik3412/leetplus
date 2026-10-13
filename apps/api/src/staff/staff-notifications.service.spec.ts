@@ -115,6 +115,7 @@ function createHarness(options?: {
   stores?: Array<{ id: string; name: string; isActive: boolean }>;
   directNotification?: ReturnType<typeof mutationSource> | null;
   supportTickets?: Array<Record<string, unknown>>;
+  guestRewards?: Array<Record<string, unknown>>;
 }) {
   const rows = options?.rows ?? [];
   const summaryRows = options?.summaryRows ?? [];
@@ -171,6 +172,9 @@ function createHarness(options?: {
     },
     guestSupportTicket: {
       findMany: jest.fn().mockResolvedValue(options?.supportTickets ?? []),
+    },
+    guestGameReward: {
+      findMany: jest.fn().mockResolvedValue(options?.guestRewards ?? []),
     },
     store: {
       findMany: storeFindMany,
@@ -245,6 +249,14 @@ describe('StaffNotificationsService AccessScope', () => {
       id: { in: ['a1'] },
     });
     expect(harness.prisma.staffTask.findMany).not.toHaveBeenCalled();
+    expect(harness.prisma.guestGameReward.findMany).toHaveBeenCalled();
+    expect(harness.prisma.staffNotification.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          sourceType: { in: ['GUEST_REWARD_ISSUE'] },
+        }) as unknown,
+      }),
+    );
   });
 
   it('keeps NETWORK list and options tenant-wide and refreshes current signals', async () => {
@@ -378,7 +390,15 @@ describe('StaffNotificationsService support tickets', () => {
     ...networkActor,
     id: 'support-admin',
     role: UserRole.ADMIN,
-    permissions: ['view_support_tickets', 'manage_support_tickets'],
+    permissions: [
+      'view_support_tickets',
+      'manage_support_tickets',
+      'view_guest_gamification',
+    ],
+  } satisfies AuthenticatedUser;
+  const rewardActor = {
+    ...networkActor,
+    permissions: ['view_guest_gamification'],
   } satisfies AuthenticatedUser;
 
   it('turns a NEW guest ticket into a signal that escalates after a day', async () => {
@@ -440,7 +460,7 @@ describe('StaffNotificationsService support tickets', () => {
 
   it('shows support signals only to staff who can open the support queue', async () => {
     const withoutCapability = createHarness();
-    await withoutCapability.service.getReport(networkActor);
+    await withoutCapability.service.getReport(rewardActor);
     expect(
       withoutCapability.staffNotificationFindMany.mock.calls[0]?.[0].where?.NOT,
     ).toEqual([{ sourceType: 'SUPPORT_TICKET' }]);
@@ -457,7 +477,7 @@ describe('StaffNotificationsService support tickets', () => {
     const storeScoped = createHarness();
     await storeScoped.service.getReport({
       ...storeActor,
-      permissions: ['view_support_tickets'],
+      permissions: ['view_support_tickets', 'approve_guest_game_rewards'],
     });
     expect(
       storeScoped.staffNotificationFindMany.mock.calls[0]?.[0].where?.NOT,
@@ -467,7 +487,7 @@ describe('StaffNotificationsService support tickets', () => {
   it('keeps the support restriction on acknowledge writes', async () => {
     const harness = createHarness();
 
-    await harness.service.acknowledge(networkActor, 'notification-a1');
+    await harness.service.acknowledge(rewardActor, 'notification-a1');
 
     expect(
       harness.staffNotificationFindFirst.mock.calls[0]?.[0].where?.NOT,
@@ -475,5 +495,121 @@ describe('StaffNotificationsService support tickets', () => {
     expect(
       harness.staffNotificationUpdate.mock.calls[0]?.[0].where?.NOT,
     ).toEqual([{ sourceType: 'SUPPORT_TICKET' }]);
+  });
+});
+
+describe('StaffNotificationsService guest reward hand-off', () => {
+  const clubAdministrator = {
+    ...storeActor,
+    id: 'club-admin-a1',
+    role: UserRole.CLUB_ADMINISTRATOR,
+    permissions: ['view_communications', 'approve_guest_game_rewards'],
+  } satisfies AuthenticatedUser;
+
+  function claimedReward(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'reward-drink',
+      rewardType: 'BATTLE_PASS_REWARD',
+      rewardLabel: 'Энергетик Adrenaline RUSH',
+      storeId: 'a1',
+      deliveryRequestedAt: new Date('2026-10-13T09:05:00.000Z'),
+      store: { name: 'A1' },
+      profile: { displayName: 'Данил', contactMasked: '***0086' },
+      guest: null,
+      season: { name: 'GAMEPASS vol.1' },
+      mission: null,
+      lootBox: null,
+      walletItems: [{ storeId: 'a1', store: { name: 'A1' } }],
+      ...overrides,
+    };
+  }
+
+  it('asks the club to hand over a prize the guest accepted in the wallet', async () => {
+    const harness = createHarness({
+      directNotification: null,
+      guestRewards: [
+        claimedReward(),
+        claimedReward({
+          id: 'reward-bonus',
+          rewardType: 'BONUS_BALANCE',
+          rewardLabel: '100 бонусов',
+        }),
+      ],
+    });
+
+    const result = await harness.service.syncTenantSignalsForSystem(tenantId);
+
+    expect(result.activeSignals).toBe(1);
+    expect(harness.prisma.guestGameReward.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId,
+          status: 'APPROVED',
+          paidAt: null,
+          claimRequired: true,
+          walletItems: {
+            some: { tenantId, kind: 'REWARD', status: 'CLAIMED' },
+          },
+        }) as unknown,
+      }),
+    );
+    const created = harness.prisma.staffNotification.create.mock.calls.map(
+      ([args]: [{ data: Record<string, unknown> }]) => args.data,
+    );
+    expect(created).toEqual([
+      expect.objectContaining({
+        sourceType: 'GUEST_REWARD_ISSUE',
+        sourceId: 'reward-drink',
+        dedupeKey: 'guest-reward:reward-drink:issue',
+        severity: 'WARNING',
+        status: 'OPEN',
+        storeId: 'a1',
+        targetUserId: null,
+        title: 'Выдайте награду гостю: Энергетик Adrenaline RUSH',
+        message: [
+          'Гость: Данил, ***0086',
+          'Приз: Энергетик Adrenaline RUSH',
+          'Источник: Battle Pass — GAMEPASS vol.1',
+          'Клуб: A1',
+          'Гость забрал награду в кошельке: 13.10, 14:05',
+          'LeetPlus не выдаёт этот приз автоматически: передайте его гостю и закройте уведомление.',
+        ].join('\n'),
+        actionLabel: null,
+        actionHref: null,
+      }),
+    ]);
+  });
+
+  it('refreshes reward hand-offs for club staff and shows them only to reward staff', async () => {
+    const harness = createHarness({
+      directNotification: null,
+      guestRewards: [claimedReward()],
+    });
+
+    await harness.service.getReport(clubAdministrator);
+
+    expect(harness.prisma.staffTask.findMany).not.toHaveBeenCalled();
+    const created = harness.prisma.staffNotification.create.mock.calls.map(
+      ([args]: [{ data: Record<string, unknown> }]) => args.data,
+    );
+    expect(created).toEqual([
+      expect.objectContaining({ sourceType: 'GUEST_REWARD_ISSUE' }),
+    ]);
+    expect(
+      harness.staffNotificationFindMany.mock.calls[0]?.[0].where?.NOT,
+    ).toEqual([{ sourceType: 'SUPPORT_TICKET' }]);
+
+    const buyer = createHarness();
+    await buyer.service.getReport({
+      ...storeActor,
+      role: UserRole.BUYER,
+      permissions: ['view_communications'],
+    });
+    expect(
+      buyer.staffNotificationFindMany.mock.calls[0]?.[0].where?.NOT,
+    ).toEqual([
+      { sourceType: 'SUPPORT_TICKET' },
+      { sourceType: 'GUEST_REWARD_ISSUE' },
+    ]);
   });
 });

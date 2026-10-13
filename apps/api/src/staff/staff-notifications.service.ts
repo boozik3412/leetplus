@@ -10,6 +10,8 @@ import {
   GUEST_BUG_REPORT_TOPIC_LABELS,
   type GuestBugReportTopic,
 } from '../guest-portal/guest-support.service';
+import { guestGameRewardUsesBonusLedger } from '../guest-gamification/guest-gamification.service';
+import { GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE } from '../guest-gamification/guest-reward-wallet-rules';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -28,11 +30,23 @@ const notificationSourceTypes = [
   'KNOWLEDGE_BASE',
   'OPERATIONS_DASHBOARD',
   'SUPPORT_TICKET',
+  'GUEST_REWARD_ISSUE',
 ] as const;
 // Support signals quote guest reports, so only staff who can open the
 // support queue (capability + network scope) may see them.
 const supportTicketSourceType = 'SUPPORT_TICKET';
 const supportTicketCriticalAfterHours = 24;
+// A guest accepted a prize that no integration can deliver (a drink, a
+// combo, free time), so the club administrator hands it over. These signals
+// name the guest, so only staff who work with game rewards may see them.
+const rewardIssueSourceType = 'GUEST_REWARD_ISSUE';
+const rewardIssueWindowHours = 72;
+const rewardIssueNotManualTypes = [
+  'LOOT_BOX_ENTITLEMENT',
+  GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
+  'XP',
+];
+const notificationDisplayTimeZone = 'Asia/Yekaterinburg';
 const notificationStatusFilters = ['all', ...notificationStatuses] as const;
 const notificationSeverityFilters = ['all', ...notificationSeverities] as const;
 const notificationSourceTypeFilters = [
@@ -123,8 +137,8 @@ type SignalDraft = {
   message: string;
   storeId: string | null;
   targetUserId: string | null;
-  actionLabel: string;
-  actionHref: string;
+  actionLabel: string | null;
+  actionHref: string | null;
   metadata: Prisma.InputJsonValue;
 };
 
@@ -162,6 +176,10 @@ export class StaffNotificationsService {
 
     if (scope.mode === 'NETWORK') {
       await this.syncTenantSignalsForSystem(tenantId);
+    } else {
+      // Club staff work in STORES scope; reward hand-offs must still reach
+      // them without a network-wide refresh of every other signal.
+      await this.syncCurrentSignals(tenantId, [rewardIssueSourceType]);
     }
 
     const where = this.buildWhere(tenantId, filters, user);
@@ -266,8 +284,14 @@ export class StaffNotificationsService {
     return this.toResponse(updated);
   }
 
-  private async syncCurrentSignals(tenantId: string) {
-    const signals = await this.collectSignals(tenantId);
+  private async syncCurrentSignals(
+    tenantId: string,
+    sourceTypes: readonly StaffNotificationSourceType[] = notificationSourceTypes,
+  ) {
+    const signals =
+      sourceTypes.length === 1 && sourceTypes[0] === rewardIssueSourceType
+        ? await this.collectRewardIssueSignals(tenantId, new Date())
+        : await this.collectSignals(tenantId);
     const now = new Date();
     let created = 0;
     let updated = 0;
@@ -321,7 +345,7 @@ export class StaffNotificationsService {
     const stale = await this.prisma.staffNotification.updateMany({
       where: {
         tenantId,
-        sourceType: { in: [...notificationSourceTypes] },
+        sourceType: { in: [...sourceTypes] },
         status: { not: 'RESOLVED' },
         dedupeKey:
           activeDedupeKeys.length > 0
@@ -356,6 +380,7 @@ export class StaffNotificationsService {
       returnedArticles,
       operationsDashboardSignals,
       newSupportTickets,
+      rewardIssueSignals,
     ] = await Promise.all([
       this.prisma.staffTask.findMany({
         where: {
@@ -457,6 +482,7 @@ export class StaffNotificationsService {
         orderBy: { createdAt: 'asc' },
         take: 100,
       }),
+      this.collectRewardIssueSignals(tenantId, now),
     ]);
 
     return [
@@ -651,7 +677,143 @@ export class StaffNotificationsService {
       ...newSupportTickets.map((ticket) =>
         this.toSupportTicketSignal(ticket, now),
       ),
+      ...rewardIssueSignals,
     ];
+  }
+
+  private async collectRewardIssueSignals(
+    tenantId: string,
+    now: Date,
+  ): Promise<SignalDraft[]> {
+    const claimedSince = new Date(
+      now.getTime() - rewardIssueWindowHours * 3600000,
+    );
+    const rewards = await this.prisma.guestGameReward.findMany({
+      where: {
+        tenantId,
+        status: 'APPROVED',
+        paidAt: null,
+        claimRequired: true,
+        deliveryRequestedAt: { gte: claimedSince },
+        rewardType: { notIn: rewardIssueNotManualTypes },
+        walletItems: {
+          some: { tenantId, kind: 'REWARD', status: 'CLAIMED' },
+        },
+      },
+      select: {
+        id: true,
+        rewardType: true,
+        rewardLabel: true,
+        storeId: true,
+        deliveryRequestedAt: true,
+        store: { select: { name: true } },
+        profile: { select: { displayName: true, contactMasked: true } },
+        guest: {
+          select: {
+            fullNameMasked: true,
+            phoneMasked: true,
+            externalGuestId: true,
+          },
+        },
+        season: { select: { name: true } },
+        mission: { select: { name: true } },
+        lootBox: { select: { name: true } },
+        walletItems: {
+          where: { tenantId, kind: 'REWARD', status: 'CLAIMED' },
+          select: { storeId: true, store: { select: { name: true } } },
+          take: 1,
+        },
+      },
+      orderBy: { deliveryRequestedAt: 'asc' },
+      take: 100,
+    });
+
+    return rewards
+      .filter((reward) => !guestGameRewardUsesBonusLedger(reward.rewardType))
+      .map((reward) => this.toRewardIssueSignal(reward));
+  }
+
+  private toRewardIssueSignal(reward: {
+    id: string;
+    rewardType: string;
+    rewardLabel: string;
+    storeId: string | null;
+    deliveryRequestedAt: Date | null;
+    store: { name: string } | null;
+    profile: {
+      displayName: string | null;
+      contactMasked: string | null;
+    } | null;
+    guest: {
+      fullNameMasked: string | null;
+      phoneMasked: string | null;
+      externalGuestId: string;
+    } | null;
+    season: { name: string } | null;
+    mission: { name: string } | null;
+    lootBox: { name: string } | null;
+    walletItems: Array<{
+      storeId: string | null;
+      store: { name: string } | null;
+    }>;
+  }): SignalDraft {
+    const wallet = reward.walletItems[0];
+    const storeId = reward.storeId ?? wallet?.storeId ?? null;
+    const storeName = reward.store?.name ?? wallet?.store?.name ?? null;
+    const guestLabel =
+      reward.profile?.displayName ??
+      reward.guest?.fullNameMasked ??
+      reward.guest?.externalGuestId ??
+      'гость без имени';
+    const guestContact =
+      reward.profile?.contactMasked ?? reward.guest?.phoneMasked ?? null;
+    const origin = reward.season
+      ? `Battle Pass — ${reward.season.name}`
+      : reward.mission
+        ? `Задание — ${reward.mission.name}`
+        : reward.lootBox
+          ? `Кейс — ${reward.lootBox.name}`
+          : 'Игровая награда';
+
+    return {
+      sourceType: rewardIssueSourceType,
+      sourceId: reward.id,
+      dedupeKey: `guest-reward:${reward.id}:issue`,
+      severity: 'WARNING',
+      title: `Выдайте награду гостю: ${reward.rewardLabel}`.slice(0, 240),
+      message: this.notificationMessage([
+        `Гость: ${guestLabel}${guestContact ? `, ${guestContact}` : ''}`,
+        `Приз: ${reward.rewardLabel}`,
+        `Источник: ${origin}`,
+        storeName ? `Клуб: ${storeName}` : null,
+        reward.deliveryRequestedAt
+          ? `Гость забрал награду в кошельке: ${this.formatDisplayDateTime(
+              reward.deliveryRequestedAt,
+            )}`
+          : null,
+        'LeetPlus не выдаёт этот приз автоматически: передайте его гостю и закройте уведомление.',
+      ]),
+      storeId,
+      targetUserId: null,
+      actionLabel: null,
+      actionHref: null,
+      metadata: {
+        rewardId: reward.id,
+        rewardType: reward.rewardType,
+        rewardLabel: reward.rewardLabel,
+        claimedAt: reward.deliveryRequestedAt?.toISOString() ?? null,
+      },
+    };
+  }
+
+  private formatDisplayDateTime(value: Date) {
+    return new Intl.DateTimeFormat('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: notificationDisplayTimeZone,
+    }).format(value);
   }
 
   private toSupportTicketSignal(
@@ -1061,20 +1223,27 @@ export class StaffNotificationsService {
     return {
       tenantId,
       AND: and,
-      ...this.supportSignalVisibility(user),
+      ...this.restrictedSignalVisibility(user),
     };
   }
 
-  private supportSignalVisibility(
+  private restrictedSignalVisibility(
     user: AuthenticatedUser,
   ): Pick<Prisma.StaffNotificationWhereInput, 'NOT'> {
     const canOpenSupportQueue =
       hasCapability(user, 'view_support_tickets') &&
       this.accessScopeService.resolve(user).mode === 'NETWORK';
+    const canSeeGuestRewards =
+      hasCapability(user, 'approve_guest_game_rewards') ||
+      hasCapability(user, 'view_guest_gamification');
+    const hidden = [
+      ...(canOpenSupportQueue ? [] : [supportTicketSourceType]),
+      ...(canSeeGuestRewards ? [] : [rewardIssueSourceType]),
+    ];
 
-    return canOpenSupportQueue
-      ? {}
-      : { NOT: [{ sourceType: supportTicketSourceType }] };
+    return hidden.length > 0
+      ? { NOT: hidden.map((sourceType) => ({ sourceType })) }
+      : {};
   }
 
   private buildScopedNotificationUniqueWhere(

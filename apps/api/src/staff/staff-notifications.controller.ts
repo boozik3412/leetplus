@@ -35,6 +35,11 @@ export class StaffNotificationsController {
     return this.staffNotificationsService.getReport(user, query);
   }
 
+  @Get('summary')
+  getSummary(@CurrentUser() user: AuthenticatedUser) {
+    return this.staffNotificationsService.getSummary(user);
+  }
+
   @Post('sync-signals')
   syncSignals(@CurrentUser() user: AuthenticatedUser) {
     return this.staffNotificationsService.syncSignals(user);

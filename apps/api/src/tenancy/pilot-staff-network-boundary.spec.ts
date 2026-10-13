@@ -131,6 +131,7 @@ const COMMUNICATIONS_STORE_BOUNDARIES: readonly ControllerBoundary[] = [
     className: 'StaffNotificationsController',
     routeIds: [
       'GET /staff/notifications',
+      'GET /staff/notifications/summary',
       'POST /staff/notifications/:id/acknowledge',
       'POST /staff/notifications/:id/resolve',
       'POST /staff/notifications/sync-signals',
@@ -500,7 +501,7 @@ describe('Gate 1MT staff scope boundaries', () => {
     );
   });
 
-  it('binds exactly ten in-app communications routes to fresh NETWORK or STORES authority', () => {
+  it('binds exactly eleven in-app communications routes to fresh NETWORK or STORES authority', () => {
     const routeIds: string[] = [];
 
     for (const boundary of COMMUNICATIONS_STORE_BOUNDARIES) {
@@ -516,7 +517,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       routeIds.push(...boundary.routeIds);
     }
 
-    expect(routeIds).toHaveLength(10);
+    expect(routeIds).toHaveLength(11);
     expect(new Set(routeIds).size).toBe(routeIds.length);
     expect(routeIds.every((id) => !id.includes('/guests/crm/'))).toBe(true);
   });

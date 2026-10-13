@@ -16,11 +16,15 @@ import {
   platformAdministrationHref,
   staffTasksWorkspaceHref,
 } from "@/lib/landing";
-import { canAccessPath } from "@/lib/permissions";
+import { can, canAccessPath } from "@/lib/permissions";
 import { getRoleLabel } from "@/lib/roles";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 import { useSupportQueueBadges } from "@/components/support-queue-watch";
+import {
+  rewardIssuesLabel,
+  useRewardIssueBadge,
+} from "@/components/reward-issue-watch";
 
 type NavItem = {
   href: string;
@@ -32,6 +36,7 @@ type NavItem = {
   };
   onNavigate?: () => void;
   badge?: number;
+  badgeLabel?: string;
 };
 
 type NavGroup = {
@@ -179,9 +184,12 @@ const shiftWorkspaceNavHrefs = new Set([
   "/staff/knowledge-base",
   "/staff/discipline",
   "/staff/team-chat",
+  "/staff/notifications",
 ]);
 
 const compactSidebarIconClassName = "h-5 w-5 shrink-0";
+
+const staffNotificationsHref = "/staff/notifications";
 
 const supportQueueHrefs = new Set([
   "/support",
@@ -190,6 +198,13 @@ const supportQueueHrefs = new Set([
 
 function groupBadgeTotal(items: NavItem[]) {
   return items.reduce((sum, item) => sum + (item.badge ?? 0), 0);
+}
+
+function groupBadgeLabel(items: NavItem[]) {
+  return items
+    .filter((item) => (item.badge ?? 0) > 0)
+    .map((item) => item.badgeLabel ?? newTicketsLabel(item.badge ?? 0))
+    .join(", ");
 }
 
 function newTicketsLabel(count: number) {
@@ -206,9 +221,11 @@ function newTicketsLabel(count: number) {
 
 function NavBadge({
   count,
+  label,
   variant = "inline",
 }: {
   count: number;
+  label?: string;
   variant?: "inline" | "corner";
 }) {
   if (count <= 0) {
@@ -216,8 +233,8 @@ function NavBadge({
   }
   return (
     <span
-      aria-label={newTicketsLabel(count)}
-      title={newTicketsLabel(count)}
+      aria-label={label ?? newTicketsLabel(count)}
+      title={label ?? newTicketsLabel(count)}
       className={[
         "inline-flex min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-bold leading-5 text-zinc-950",
         variant === "corner"
@@ -267,7 +284,14 @@ function resolveNavItemForUser(user: AuthUser | null, item: NavItem): NavItem {
   return item;
 }
 
-function NavLink({ href, label, activeQuery, onNavigate, badge }: NavItem) {
+function NavLink({
+  href,
+  label,
+  activeQuery,
+  onNavigate,
+  badge,
+  badgeLabel,
+}: NavItem) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isActive = isNavigationItemActive(
@@ -289,7 +313,7 @@ function NavLink({ href, label, activeQuery, onNavigate, badge }: NavItem) {
       ].join(" ")}
     >
       <span className="min-w-0">{label}</span>
-      <NavBadge count={badge ?? 0} />
+      <NavBadge count={badge ?? 0} label={badgeLabel} />
     </Link>
   );
 }
@@ -299,12 +323,14 @@ function NavSection({
   isOpen,
   onToggle,
   badge = 0,
+  badgeLabel,
   children,
 }: {
   title: string;
   isOpen: boolean;
   onToggle: () => void;
   badge?: number;
+  badgeLabel?: string;
   children: ReactNode;
 }) {
   return (
@@ -317,7 +343,7 @@ function NavSection({
       >
         <span className="flex items-center gap-2">
           {title}
-          {isOpen ? null : <NavBadge count={badge} />}
+          {isOpen ? null : <NavBadge count={badge} label={badgeLabel} />}
         </span>
         <span
           aria-hidden="true"
@@ -410,19 +436,20 @@ function CompactNavSection({
   }, [group.items.length, isOpen]);
 
   const badge = groupBadgeTotal(group.items);
+  const badgeLabel = groupBadgeLabel(group.items);
 
   if (group.items.length === 1) {
     return (
       <Link
         href={group.items[0].href}
-        title={badge ? `${group.title}: ${newTicketsLabel(badge)}` : group.title}
+        title={badge ? `${group.title}: ${badgeLabel}` : group.title}
         aria-label={group.title}
         aria-current={isActive ? "page" : undefined}
         onClick={onNavigate}
         className={compactGroupButtonClass({ isActive })}
       >
         <SectionIcon icon={group.icon} />
-        <NavBadge count={badge} variant="corner" />
+        <NavBadge count={badge} label={badgeLabel} variant="corner" />
       </Link>
     );
   }
@@ -465,7 +492,7 @@ function CompactNavSection({
       >
         <SectionIcon icon={group.icon} />
         <span className="sr-only">{group.title}</span>
-        <NavBadge count={badge} variant="corner" />
+        <NavBadge count={badge} label={badgeLabel} variant="corner" />
       </button>
       {isOpen ? (
         <div
@@ -857,12 +884,24 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
       .flatMap((group) => group.items.map((item) => item.href))
       .filter((href) => supportQueueHrefs.has(href)),
   );
+  const watchesRewardIssues =
+    (can(user, "approve_guest_game_rewards") ||
+      can(user, "view_guest_gamification")) &&
+    permittedNavGroups.some((group) =>
+      group.items.some((item) => item.href === staffNotificationsHref),
+    );
+  const rewardIssueBadge = useRewardIssueBadge(watchesRewardIssues);
   const allowedNavGroups = permittedNavGroups.map((group) => ({
     ...group,
-    items: group.items.map((item) => ({
-      ...item,
-      badge: supportQueueBadges[item.href],
-    })),
+    items: group.items.map((item) =>
+      item.href === staffNotificationsHref
+        ? {
+            ...item,
+            badge: rewardIssueBadge,
+            badgeLabel: rewardIssuesLabel(rewardIssueBadge),
+          }
+        : { ...item, badge: supportQueueBadges[item.href] },
+    ),
   }));
   const showHomeLink = Boolean(user);
   const homeHref = user ? getDefaultLandingPath(user) : "/dashboard";
@@ -1088,6 +1127,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
                   isOpen={Boolean(openNavGroups[group.title])}
                   onToggle={() => toggleNavGroup(group.title)}
                   badge={groupBadgeTotal(group.items)}
+                  badgeLabel={groupBadgeLabel(group.items)}
                 >
                   {group.items.map((item) => (
                     <NavLink

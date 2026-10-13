@@ -818,7 +818,7 @@ function staffDefinitions(): readonly ControllerDefinition[] {
       'notifications',
       'STORES_VERIFIED',
       [
-        ['GET', ['']],
+        ['GET', ['', 'summary']],
         ['POST', ['sync-signals', ':id/acknowledge', ':id/resolve']],
       ],
       'COMMUNICATIONS',

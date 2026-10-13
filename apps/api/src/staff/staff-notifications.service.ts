@@ -126,6 +126,10 @@ export type StaffNotificationResponse = {
   } | null;
 };
 
+export type StaffNotificationsSummary = {
+  rewardIssues: number;
+};
+
 type NotificationFilters = StaffNotificationsReport['filters'];
 
 type SignalDraft = {
@@ -178,8 +182,12 @@ export class StaffNotificationsService {
       await this.syncTenantSignalsForSystem(tenantId);
     } else {
       // Club staff work in STORES scope; reward hand-offs must still reach
-      // them without a network-wide refresh of every other signal.
-      await this.syncCurrentSignals(tenantId, [rewardIssueSourceType]);
+      // them, so refresh only these signals and only for their clubs.
+      await this.syncCurrentSignals(
+        tenantId,
+        [rewardIssueSourceType],
+        scope.allowedStoreIds,
+      );
     }
 
     const where = this.buildWhere(tenantId, filters, user);
@@ -260,37 +268,186 @@ export class StaffNotificationsService {
     return this.toResponse(updated);
   }
 
+  async getSummary(
+    user: AuthenticatedUser,
+  ): Promise<StaffNotificationsSummary> {
+    const { tenantId } = this.tenantContextService.resolve(user);
+
+    if (!this.canSeeGuestRewards(user)) {
+      return { rewardIssues: 0 };
+    }
+
+    const scope = this.accessScopeService.resolve(user);
+    await this.syncCurrentSignals(
+      tenantId,
+      [rewardIssueSourceType],
+      scope.mode === 'STORES' ? scope.allowedStoreIds : null,
+    );
+    const visibility = this.buildVisibilityWhere(tenantId, user);
+    const rewardIssues = await this.prisma.staffNotification.count({
+      where: {
+        ...visibility,
+        sourceType: rewardIssueSourceType,
+        status: { not: 'RESOLVED' },
+      },
+    });
+
+    return { rewardIssues };
+  }
+
   async resolve(user: AuthenticatedUser, id: string) {
     const { tenantId } = this.tenantContextService.resolve(user);
     const notification = await this.resolveNotification(tenantId, id, user);
     const now = new Date();
+    const handsOverReward =
+      notification.sourceType === rewardIssueSourceType &&
+      notification.sourceId !== null &&
+      notification.status !== 'RESOLVED';
 
-    const updated = await this.prisma.staffNotification.update({
-      where: this.buildScopedNotificationUniqueWhere(
-        tenantId,
-        notification.id,
-        user,
-      ),
-      data: {
-        status: 'RESOLVED',
-        resolvedAt: notification.resolvedAt ?? now,
-        resolvedByUserId: notification.resolvedByUserId ?? user.id,
-        acknowledgedAt: notification.acknowledgedAt ?? now,
-        acknowledgedByUserId: notification.acknowledgedByUserId ?? user.id,
-      },
-      include: notificationInclude,
+    if (handsOverReward && !hasCapability(user, 'approve_guest_game_rewards')) {
+      throw new ForbiddenException(
+        'Отметить выдачу приза может сотрудник с правом «Геймификация: награды».',
+      );
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (handsOverReward) {
+        await this.markRewardHandedOver(tx, {
+          tenantId,
+          rewardId: notification.sourceId!,
+          notificationId: notification.id,
+          storeId: notification.storeId,
+          userId: user.id,
+          handedOverAt: now,
+        });
+      }
+
+      return tx.staffNotification.update({
+        where: this.buildScopedNotificationUniqueWhere(
+          tenantId,
+          notification.id,
+          user,
+        ),
+        data: {
+          status: 'RESOLVED',
+          resolvedAt: notification.resolvedAt ?? now,
+          resolvedByUserId: notification.resolvedByUserId ?? user.id,
+          acknowledgedAt: notification.acknowledgedAt ?? now,
+          acknowledgedByUserId: notification.acknowledgedByUserId ?? user.id,
+        },
+        include: notificationInclude,
+      });
     });
 
     return this.toResponse(updated);
   }
 
+  // «Выдано» on a hand-off notification is the cashier redemption of a prize
+  // the guest already accepted in the wallet. A reward that was paid,
+  // canceled or expired meanwhile only closes the notification.
+  private async markRewardHandedOver(
+    tx: Prisma.TransactionClient,
+    input: {
+      tenantId: string;
+      rewardId: string;
+      notificationId: string;
+      storeId: string | null;
+      userId: string;
+      handedOverAt: Date;
+    },
+  ) {
+    await tx.$queryRaw(Prisma.sql`
+      SELECT "id"
+      FROM "GuestGameReward"
+      WHERE "id" = ${input.rewardId}
+        AND "tenantId" = ${input.tenantId}
+      FOR UPDATE
+    `);
+    const reward = await tx.guestGameReward.findFirst({
+      where: {
+        id: input.rewardId,
+        tenantId: input.tenantId,
+        status: 'APPROVED',
+        paidAt: null,
+        claimRequired: true,
+        walletItems: {
+          some: {
+            tenantId: input.tenantId,
+            kind: 'REWARD',
+            status: 'CLAIMED',
+          },
+        },
+      },
+      select: {
+        id: true,
+        rewardType: true,
+        rewardLabel: true,
+        rewardCode: true,
+        approvedByUserId: true,
+        evidence: true,
+        profileId: true,
+        guestId: true,
+        lootBoxId: true,
+        missionId: true,
+        seasonId: true,
+      },
+    });
+
+    if (
+      !reward ||
+      rewardIssueNotManualTypes.includes(reward.rewardType) ||
+      guestGameRewardUsesBonusLedger(reward.rewardType)
+    ) {
+      return;
+    }
+
+    await tx.guestGameReward.update({
+      where: { id: reward.id },
+      data: {
+        status: 'PAID',
+        paidAt: input.handedOverAt,
+        approvedByUserId: reward.approvedByUserId ?? input.userId,
+        evidence: {
+          source: 'staff_notification_handoff',
+          redeemedAt: input.handedOverAt.toISOString(),
+          redeemedByUserId: input.userId,
+          notificationId: input.notificationId,
+          ...(input.storeId ? { storeId: input.storeId } : {}),
+          ...(reward.evidence !== null
+            ? { previousEvidence: reward.evidence }
+            : {}),
+        },
+      },
+    });
+    await tx.guestGameEvent.create({
+      data: {
+        tenantId: input.tenantId,
+        profileId: reward.profileId,
+        guestId: reward.guestId,
+        lootBoxId: reward.lootBoxId,
+        missionId: reward.missionId,
+        seasonId: reward.seasonId,
+        createdByUserId: input.userId,
+        eventType: 'REWARD_PAID',
+        source: 'SYSTEM',
+        xpDelta: 0,
+        occurredAt: input.handedOverAt,
+        note: [reward.rewardLabel, reward.rewardCode, 'выдано по уведомлению']
+          .filter(Boolean)
+          .join(' · '),
+      },
+    });
+  }
+
   private async syncCurrentSignals(
     tenantId: string,
     sourceTypes: readonly StaffNotificationSourceType[] = notificationSourceTypes,
+    // A STORES-scoped refresh reads, writes and resolves only these clubs.
+    storeIds: readonly string[] | null = null,
   ) {
     const signals =
       sourceTypes.length === 1 && sourceTypes[0] === rewardIssueSourceType
-        ? await this.collectRewardIssueSignals(tenantId, new Date())
+        ? await this.collectRewardIssueSignals(tenantId, new Date(), storeIds)
         : await this.collectSignals(tenantId);
     const now = new Date();
     let created = 0;
@@ -299,8 +456,24 @@ export class StaffNotificationsService {
     for (const signal of signals) {
       const existing = await this.prisma.staffNotification.findFirst({
         where: { tenantId, dedupeKey: signal.dedupeKey },
-        select: { id: true },
+        select: {
+          id: true,
+          storeId: true,
+          sourceType: true,
+          sourceId: true,
+          targetUserId: true,
+          severity: true,
+          title: true,
+          message: true,
+          actionLabel: true,
+          actionHref: true,
+          metadata: true,
+        },
       });
+
+      if (existing && this.signalUnchanged(existing, signal)) {
+        continue;
+      }
 
       if (existing) {
         await this.prisma.staffNotification.update({
@@ -320,24 +493,35 @@ export class StaffNotificationsService {
         });
         updated += 1;
       } else {
-        await this.prisma.staffNotification.create({
-          data: {
-            tenantId,
-            storeId: signal.storeId,
-            targetUserId: signal.targetUserId,
-            sourceType: signal.sourceType,
-            sourceId: signal.sourceId,
-            severity: signal.severity,
-            status: 'OPEN',
-            title: signal.title,
-            message: signal.message,
-            actionLabel: signal.actionLabel,
-            actionHref: signal.actionHref,
-            dedupeKey: signal.dedupeKey,
-            metadata: signal.metadata,
-          },
-        });
-        created += 1;
+        try {
+          await this.prisma.staffNotification.create({
+            data: {
+              tenantId,
+              storeId: signal.storeId,
+              targetUserId: signal.targetUserId,
+              sourceType: signal.sourceType,
+              sourceId: signal.sourceId,
+              severity: signal.severity,
+              status: 'OPEN',
+              title: signal.title,
+              message: signal.message,
+              actionLabel: signal.actionLabel,
+              actionHref: signal.actionHref,
+              dedupeKey: signal.dedupeKey,
+              metadata: signal.metadata,
+            },
+          });
+          created += 1;
+        } catch (error) {
+          // Sidebar polls from several tabs may create the same signal at
+          // once; the unique dedupe key keeps exactly one row.
+          if (
+            !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+            error.code !== 'P2002'
+          ) {
+            throw error;
+          }
+        }
       }
     }
 
@@ -346,6 +530,7 @@ export class StaffNotificationsService {
       where: {
         tenantId,
         sourceType: { in: [...sourceTypes] },
+        ...(storeIds ? { storeId: { in: [...storeIds] } } : {}),
         status: { not: 'RESOLVED' },
         dedupeKey:
           activeDedupeKeys.length > 0
@@ -684,6 +869,7 @@ export class StaffNotificationsService {
   private async collectRewardIssueSignals(
     tenantId: string,
     now: Date,
+    storeIds: readonly string[] | null = null,
   ): Promise<SignalDraft[]> {
     const claimedSince = new Date(
       now.getTime() - rewardIssueWindowHours * 3600000,
@@ -695,6 +881,7 @@ export class StaffNotificationsService {
         paidAt: null,
         claimRequired: true,
         deliveryRequestedAt: { gte: claimedSince },
+        ...(storeIds ? { storeId: { in: [...storeIds] } } : {}),
         rewardType: { notIn: rewardIssueNotManualTypes },
         walletItems: {
           some: { tenantId, kind: 'REWARD', status: 'CLAIMED' },
@@ -791,7 +978,7 @@ export class StaffNotificationsService {
               reward.deliveryRequestedAt,
             )}`
           : null,
-        'LeetPlus не выдаёт этот приз автоматически: передайте его гостю и закройте уведомление.',
+        'LeetPlus не выдаёт этот приз автоматически: передайте его гостю и нажмите «Выдано».',
       ]),
       storeId,
       targetUserId: null,
@@ -1233,17 +1420,50 @@ export class StaffNotificationsService {
     const canOpenSupportQueue =
       hasCapability(user, 'view_support_tickets') &&
       this.accessScopeService.resolve(user).mode === 'NETWORK';
-    const canSeeGuestRewards =
-      hasCapability(user, 'approve_guest_game_rewards') ||
-      hasCapability(user, 'view_guest_gamification');
     const hidden = [
       ...(canOpenSupportQueue ? [] : [supportTicketSourceType]),
-      ...(canSeeGuestRewards ? [] : [rewardIssueSourceType]),
+      ...(this.canSeeGuestRewards(user) ? [] : [rewardIssueSourceType]),
     ];
 
     return hidden.length > 0
       ? { NOT: hidden.map((sourceType) => ({ sourceType })) }
       : {};
+  }
+
+  private canSeeGuestRewards(user: AuthenticatedUser) {
+    return (
+      hasCapability(user, 'approve_guest_game_rewards') ||
+      hasCapability(user, 'view_guest_gamification')
+    );
+  }
+
+  private signalUnchanged(
+    existing: {
+      storeId: string | null;
+      sourceType: string;
+      sourceId: string | null;
+      targetUserId: string | null;
+      severity: string;
+      title: string;
+      message: string | null;
+      actionLabel: string | null;
+      actionHref: string | null;
+      metadata: Prisma.JsonValue | null;
+    },
+    signal: SignalDraft,
+  ) {
+    return (
+      existing.storeId === signal.storeId &&
+      existing.sourceType === signal.sourceType &&
+      existing.sourceId === signal.sourceId &&
+      existing.targetUserId === signal.targetUserId &&
+      existing.severity === signal.severity &&
+      existing.title === signal.title &&
+      existing.message === signal.message &&
+      existing.actionLabel === signal.actionLabel &&
+      existing.actionHref === signal.actionHref &&
+      JSON.stringify(existing.metadata) === JSON.stringify(signal.metadata)
+    );
   }
 
   private buildScopedNotificationUniqueWhere(
@@ -1331,6 +1551,9 @@ export class StaffNotificationsService {
       select: {
         id: true,
         status: true,
+        sourceType: true,
+        sourceId: true,
+        storeId: true,
         acknowledgedAt: true,
         acknowledgedByUserId: true,
         resolvedAt: true,

@@ -116,6 +116,8 @@ function createHarness(options?: {
   directNotification?: ReturnType<typeof mutationSource> | null;
   supportTickets?: Array<Record<string, unknown>>;
   guestRewards?: Array<Record<string, unknown>>;
+  handOffReward?: Record<string, unknown> | null;
+  openRewardIssues?: number;
 }) {
   const rows = options?.rows ?? [];
   const summaryRows = options?.summaryRows ?? [];
@@ -154,6 +156,7 @@ function createHarness(options?: {
       update: staffNotificationUpdate,
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       create: jest.fn(),
+      count: jest.fn().mockResolvedValue(options?.openRewardIssues ?? 0),
     },
     staffTask: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -175,12 +178,23 @@ function createHarness(options?: {
     },
     guestGameReward: {
       findMany: jest.fn().mockResolvedValue(options?.guestRewards ?? []),
+      findFirst: jest.fn().mockResolvedValue(options?.handOffReward ?? null),
+      update: jest.fn().mockResolvedValue({}),
     },
+    guestGameEvent: {
+      create: jest.fn().mockResolvedValue({}),
+    },
+    $queryRaw: jest.fn().mockResolvedValue([]),
     store: {
       findMany: storeFindMany,
       findFirst: jest.fn().mockResolvedValue({ id: 'a1' }),
     },
   };
+  Object.assign(prisma, {
+    $transaction: jest.fn((callback: (tx: typeof prisma) => unknown) =>
+      callback(prisma),
+    ),
+  });
   const tenantContextService = {
     resolve: jest.fn().mockReturnValue({
       tenantId,
@@ -250,10 +264,18 @@ describe('StaffNotificationsService AccessScope', () => {
     });
     expect(harness.prisma.staffTask.findMany).not.toHaveBeenCalled();
     expect(harness.prisma.guestGameReward.findMany).toHaveBeenCalled();
+    expect(harness.prisma.guestGameReward.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          storeId: { in: ['a1'] },
+        }) as unknown,
+      }),
+    );
     expect(harness.prisma.staffNotification.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           sourceType: { in: ['GUEST_REWARD_ISSUE'] },
+          storeId: { in: ['a1'] },
         }) as unknown,
       }),
     );
@@ -572,7 +594,7 @@ describe('StaffNotificationsService guest reward hand-off', () => {
           'Источник: Battle Pass — GAMEPASS vol.1',
           'Клуб: A1',
           'Гость забрал награду в кошельке: 13.10, 14:05',
-          'LeetPlus не выдаёт этот приз автоматически: передайте его гостю и закройте уведомление.',
+          'LeetPlus не выдаёт этот приз автоматически: передайте его гостю и нажмите «Выдано».',
         ].join('\n'),
         actionLabel: null,
         actionHref: null,
@@ -611,5 +633,162 @@ describe('StaffNotificationsService guest reward hand-off', () => {
       { sourceType: 'SUPPORT_TICKET' },
       { sourceType: 'GUEST_REWARD_ISSUE' },
     ]);
+  });
+
+  it('counts open hand-offs for the sidebar badge after refreshing them', async () => {
+    const harness = createHarness({
+      directNotification: null,
+      guestRewards: [claimedReward()],
+      openRewardIssues: 3,
+    });
+
+    await expect(
+      harness.service.getSummary(clubAdministrator),
+    ).resolves.toEqual({ rewardIssues: 3 });
+    expect(harness.prisma.staffTask.findMany).not.toHaveBeenCalled();
+    expect(harness.prisma.staffNotification.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        tenantId,
+        sourceType: 'GUEST_REWARD_ISSUE',
+        status: { not: 'RESOLVED' },
+        AND: [
+          {
+            OR: [
+              { targetUserId: null },
+              { targetUserId: clubAdministrator.id },
+            ],
+          },
+          { storeId: { in: ['a1'] } },
+        ],
+      }) as unknown,
+    });
+
+    const buyer = createHarness({ guestRewards: [claimedReward()] });
+    await expect(
+      buyer.service.getSummary({
+        ...storeActor,
+        role: UserRole.BUYER,
+        permissions: ['view_communications'],
+      }),
+    ).resolves.toEqual({ rewardIssues: 0 });
+    expect(buyer.prisma.guestGameReward.findMany).not.toHaveBeenCalled();
+  });
+
+  it('skips rewriting a hand-off signal that did not change', async () => {
+    const harness = createHarness({ guestRewards: [claimedReward()] });
+    await harness.service.syncTenantSignalsForSystem(tenantId);
+    const created = harness.prisma.staffNotification.create.mock.calls.map(
+      ([args]: [{ data: Record<string, unknown> }]) => args.data,
+    );
+    expect(created).toHaveLength(0);
+    const draft = (
+      harness.prisma.staffNotification.update.mock.calls as Array<
+        [{ data: Record<string, unknown> }]
+      >
+    )[0]?.[0].data;
+    expect(draft).toBeDefined();
+
+    const second = createHarness({ guestRewards: [claimedReward()] });
+    second.staffNotificationFindFirst.mockResolvedValue({
+      id: 'existing',
+      ...draft,
+    } as never);
+    await second.service.syncTenantSignalsForSystem(tenantId);
+    expect(second.prisma.staffNotification.update).not.toHaveBeenCalled();
+  });
+
+  function rewardNotification() {
+    return {
+      ...mutationSource('notification-a1'),
+      sourceType: 'GUEST_REWARD_ISSUE',
+      sourceId: 'reward-drink',
+      storeId: 'a1',
+    };
+  }
+
+  it('marks the prize as handed over when staff press «Выдано»', async () => {
+    const harness = createHarness({
+      directNotification: rewardNotification(),
+      handOffReward: {
+        id: 'reward-drink',
+        rewardType: 'BATTLE_PASS_REWARD',
+        rewardLabel: 'Энергетик Adrenaline RUSH',
+        rewardCode: 'LP-1A2B3C4D',
+        approvedByUserId: null,
+        evidence: null,
+        profileId: 'profile-1',
+        guestId: null,
+        lootBoxId: null,
+        missionId: null,
+        seasonId: 'season-1',
+      },
+    });
+
+    await harness.service.resolve(clubAdministrator, 'notification-a1');
+
+    expect(harness.prisma.guestGameReward.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'reward-drink',
+          tenantId,
+          status: 'APPROVED',
+          paidAt: null,
+        }) as unknown,
+      }),
+    );
+    expect(harness.prisma.guestGameReward.update).toHaveBeenCalledWith({
+      where: { id: 'reward-drink' },
+      data: expect.objectContaining({
+        status: 'PAID',
+        approvedByUserId: clubAdministrator.id,
+        evidence: expect.objectContaining({
+          source: 'staff_notification_handoff',
+          redeemedByUserId: clubAdministrator.id,
+          notificationId: 'notification-a1',
+          storeId: 'a1',
+        }) as unknown,
+      }) as unknown,
+    });
+    expect(harness.prisma.guestGameEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        eventType: 'REWARD_PAID',
+        profileId: 'profile-1',
+        seasonId: 'season-1',
+        createdByUserId: clubAdministrator.id,
+        note: 'Энергетик Adrenaline RUSH · LP-1A2B3C4D · выдано по уведомлению',
+      }) as unknown,
+    });
+    expect(
+      harness.staffNotificationUpdate.mock.calls[0]?.[0].data,
+    ).toMatchObject({ status: 'RESOLVED' });
+  });
+
+  it('only closes the notification when the reward is no longer waiting', async () => {
+    const harness = createHarness({
+      directNotification: rewardNotification(),
+      handOffReward: null,
+    });
+
+    await harness.service.resolve(clubAdministrator, 'notification-a1');
+
+    expect(harness.prisma.guestGameReward.update).not.toHaveBeenCalled();
+    expect(harness.prisma.guestGameEvent.create).not.toHaveBeenCalled();
+    expect(
+      harness.staffNotificationUpdate.mock.calls[0]?.[0].data,
+    ).toMatchObject({ status: 'RESOLVED' });
+  });
+
+  it('refuses to hand over a prize without the reward capability', async () => {
+    const harness = createHarness({
+      directNotification: rewardNotification(),
+    });
+
+    await expect(
+      harness.service.resolve(
+        { ...networkActor, permissions: ['view_guest_gamification'] },
+        'notification-a1',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(harness.staffNotificationUpdate).not.toHaveBeenCalled();
   });
 });

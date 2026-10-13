@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type ReactNode } from "react";
+import { notifyRewardIssuesChanged } from "@/components/reward-issue-watch";
 import type {
   StaffNotification,
   StaffNotificationSeverity,
@@ -75,6 +76,18 @@ export function StaffNotificationsWorkspace({
     notification: StaffNotification,
     action: "acknowledge" | "resolve",
   ) {
+    const handsOverReward =
+      action === "resolve" && notification.sourceType === "GUEST_REWARD_ISSUE";
+
+    if (
+      handsOverReward &&
+      !window.confirm(
+        `Отметить, что гость получил приз «${notification.title.replace(/^Выдайте награду гостю: /u, "")}»?\nВ истории гостя награда станет «выдана».`,
+      )
+    ) {
+      return;
+    }
+
     setError(null);
     setSuccess(null);
     const response = await fetch(
@@ -92,6 +105,12 @@ export function StaffNotificationsWorkspace({
       return;
     }
 
+    if (notification.sourceType === "GUEST_REWARD_ISSUE") {
+      notifyRewardIssuesChanged();
+    }
+    if (handsOverReward) {
+      setSuccess("Приз отмечен выданным.");
+    }
     startTransition(() => router.refresh());
   }
 
@@ -623,7 +642,9 @@ function NotificationRow({
               disabled={disabled}
               className="rounded-lg bg-zinc-950 px-3 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-white"
             >
-              Закрыть
+              {notification.sourceType === "GUEST_REWARD_ISSUE"
+                ? "Выдано"
+                : "Закрыть"}
             </button>
           ) : null}
         </div>

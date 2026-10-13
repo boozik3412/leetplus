@@ -13,6 +13,10 @@ export type StaffNotificationSourceType =
   | "SUPPORT_TICKET"
   | "GUEST_REWARD_ISSUE";
 
+export type StaffNotificationsSummary = {
+  rewardIssues: number;
+};
+
 export type StaffNotification = {
   id: string;
   sourceType: StaffNotificationSourceType;

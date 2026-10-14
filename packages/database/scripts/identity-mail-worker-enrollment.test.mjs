@@ -180,7 +180,7 @@ test("requires an exact apply confirmation bound to role OID and head", () => {
   assert.match(confirmation, / 16384 /u);
   assert.match(
     confirmation,
-    /guest_leaderboard 194$/u,
+    /guest_game_holdout 194$/u,
   );
 });
 

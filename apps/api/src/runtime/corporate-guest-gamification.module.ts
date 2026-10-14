@@ -1,3 +1,4 @@
+import { GuestGameEffectModule } from '../guest-game-effect/guest-game-effect.module';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { GuestGameMediaController } from '../guest-gamification/guest-game-media.controller';
@@ -18,7 +19,7 @@ import { StaffModule } from '../staff/staff.module';
  * cannot accidentally expose a guest HTTP surface even before its perimeter.
  */
 @Module({
-  imports: [AuthModule, IntegrationsModule, StaffModule],
+  imports: [AuthModule, IntegrationsModule, StaffModule, GuestGameEffectModule],
   controllers: [
     GuestGamificationController,
     GuestGamificationScheduledController,

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/unbound-method */
 
+import { isInGameHoldout } from '../guest-game-effect/guest-game-effect-core';
 import {
   BadRequestException,
   ConflictException,
@@ -9716,6 +9717,62 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameEvent.create).not.toHaveBeenCalled();
       expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
       expect(langameClient.postEndpoint).not.toHaveBeenCalled();
+    });
+
+    it('keeps the holdout (control group) out of a mission and a standalone case', async () => {
+      const { service } = createService();
+      const profile = profileFixture();
+      const ids = Array.from({ length: 40 }, (_, index) => `rule-${index}`);
+      const heldId = ids.find((id) =>
+        isInGameHoldout({ scenarioId: id, profileId: profile.id, percent: 50 }),
+      )!;
+      const freeId = ids.find(
+        (id) =>
+          !isInGameHoldout({
+            scenarioId: id,
+            profileId: profile.id,
+            percent: 50,
+          }),
+      )!;
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profile);
+      jest
+        .spyOn(service, 'getLootBoxes')
+        .mockResolvedValue([
+          activeLootBox({ id: heldId, holdoutPercent: 50 }),
+        ]);
+      jest
+        .spyOn(service, 'getMissions')
+        .mockResolvedValue([
+          activeMission({ id: heldId, holdoutPercent: 50 }),
+          activeMission({ id: freeId, holdoutPercent: 50 }),
+        ]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'regular_session',
+        sessionMinutes: 90,
+      });
+
+      const held = result.rules.filter((rule) => rule.id === heldId);
+      expect(held).toHaveLength(2);
+      held.forEach((rule) => {
+        expect(rule.eligible).toBe(false);
+        expect(rule.blockers).toEqual(
+          expect.arrayContaining([
+            expect.stringContaining('контрольной группе'),
+          ]),
+        );
+      });
+      expect(
+        result.rules.find(
+          (rule) => rule.id === freeId && rule.kind === 'MISSION',
+        )?.eligible,
+      ).toBe(true);
     });
 
     it('does not self-unlock reward-template lootboxes on generic events but still evaluates BOTH', async () => {

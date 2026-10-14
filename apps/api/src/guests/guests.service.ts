@@ -26,6 +26,10 @@ import {
   guestTransactionSpend,
 } from '../common/guest-transaction-money';
 import { resolveSecuritySecret } from '../config/environment-validation';
+import {
+  GuestGameEffectService,
+  type GuestGameGuestEffect,
+} from '../guest-game-effect/guest-game-effect.service';
 import { GuestDataFoundationService } from '../integrations/guest-data-foundation.service';
 import { LangameClient } from '../integrations/langame.client';
 import {
@@ -673,6 +677,10 @@ export type GuestDetail = GuestDashboardRow & {
   gamification: GuestGameDetail | null;
 };
 
+export type GuestGameEffectResponse =
+  | ({ available: true } & GuestGameGuestEffect)
+  | { available: false; reason: 'NO_CAPABILITY' | 'NOT_CONFIGURED' };
+
 export type GuestLiveSessionResult = {
   checkedAt: string;
   isActive: boolean;
@@ -1201,6 +1209,8 @@ export class GuestsService {
     private readonly langameClient: LangameClient,
     @Optional()
     private readonly guestGameInsights?: GuestGameInsightsService,
+    @Optional()
+    private readonly gameEffect?: GuestGameEffectService,
   ) {}
 
   async getFilterOptions(user: AuthenticatedUser): Promise<GuestFilterOptions> {
@@ -2522,6 +2532,36 @@ export class GuestsService {
       direction,
       rows: this.sortRows(rows, sort, direction),
       baseById: analysis.baseById,
+    };
+  }
+
+  /**
+   * What the game changed for this guest: their change after activation
+   * against guests who were in the club the same day (see guest-game-effect).
+   * Separate from getGuest because the first tenant dataset takes seconds.
+   */
+  async getGuestGameEffect(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<GuestGameEffectResponse> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    if (!this.canViewGameInsights(user)) {
+      return { available: false, reason: 'NO_CAPABILITY' };
+    }
+    if (!this.gameEffect) {
+      return { available: false, reason: 'NOT_CONFIGURED' };
+    }
+    const guest = await this.prisma.guest.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+    if (!guest) {
+      throw new NotFoundException('Guest not found');
+    }
+
+    return {
+      available: true,
+      ...(await this.gameEffect.getGuestEffect(tenantId, guest.id)),
     };
   }
 

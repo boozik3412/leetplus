@@ -1,3 +1,4 @@
+import { GuestGameEffectModule } from '../guest-game-effect/guest-game-effect.module';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
@@ -80,7 +81,7 @@ export const GUEST_GAMIFICATION_EXPORTS = [
 ] as const;
 
 @Module({
-  imports: [AuthModule, IntegrationsModule, StaffModule],
+  imports: [AuthModule, IntegrationsModule, StaffModule, GuestGameEffectModule],
   controllers: [
     GuestGamificationController,
     GuestGamificationScheduledController,

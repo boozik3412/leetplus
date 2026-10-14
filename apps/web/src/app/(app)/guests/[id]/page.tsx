@@ -3,6 +3,7 @@ import { GuestBehaviorPanel } from "@/components/guest-behavior-panel";
 import { GuestCrmActivity } from "@/components/guest-crm-activity";
 import { GuestCrmForm } from "@/components/guest-crm-form";
 import { GuestGameCard } from "@/components/guest-game-card";
+import { GuestGameEffectPanel } from "@/components/guest-game-effect-panel";
 import {
   InsightBadge,
   InsightCard,
@@ -260,6 +261,12 @@ export default async function GuestPage({ params }: { params: PageParams }) {
         <div className="mt-6">
           <GuestGameCard guest={guest} />
         </div>
+
+        {guest.gameAccess === "AVAILABLE" && guest.gamification ? (
+          <div className="mt-6">
+            <GuestGameEffectPanel guestId={guest.id} />
+          </div>
+        ) : null}
 
         <div className="mt-6">
           <GuestBehaviorPanel guest={guest} />

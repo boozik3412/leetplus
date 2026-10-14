@@ -380,6 +380,7 @@ const definitions: readonly ControllerDefinition[] = [
         'GET',
         [
           'statistics',
+          'effect',
           'workspace',
           'facts',
           'activity-ledger/diagnostics',
@@ -454,6 +455,7 @@ const definitions: readonly ControllerDefinition[] = [
       [
         'PATCH',
         [
+          'effect/holdout',
           'profiles/:id',
           'loot-boxes/:id',
           'missions/wizard/:id',

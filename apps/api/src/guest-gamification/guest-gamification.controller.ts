@@ -1,4 +1,8 @@
 import {
+  GuestGameEffectService,
+  type GuestGameEffectReport,
+} from '../guest-game-effect/guest-game-effect.service';
+import {
   Body,
   Controller,
   Delete,
@@ -154,6 +158,7 @@ export class GuestGamificationController {
     private readonly ledgerFallbackScheduler: GuestGameLedgerFallbackSchedulerService,
     private readonly ruleReplayService: GuestGameRuleReplayService,
     private readonly seasonStepCopyService: SeasonStepCopyService,
+    private readonly effectService: GuestGameEffectService,
   ) {}
 
   @Get('statistics')
@@ -162,6 +167,22 @@ export class GuestGamificationController {
     @Query() query: GuestGamificationStatisticsQuery,
   ): Promise<GuestGamificationStatistics> {
     return this.statisticsService.getStatistics(user, query);
+  }
+
+  @Get('effect')
+  getEffect(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('storeId') storeId?: string,
+  ): Promise<GuestGameEffectReport> {
+    return this.effectService.getReport(user.tenantId, { storeId });
+  }
+
+  @Patch('effect/holdout')
+  setEffectHoldout(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: { kind?: unknown; id?: unknown; percent?: unknown },
+  ) {
+    return this.effectService.setHoldout(user.tenantId, dto);
   }
 
   @Get('workspace')

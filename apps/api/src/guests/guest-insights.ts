@@ -932,7 +932,7 @@ export function buildGuestsGamificationSummary(input: {
     effect: {
       registered: buildGuestCohortStats(registeredEffectRows),
       notRegistered: buildGuestCohortStats(notRegisteredEffectRows),
-      note: 'Сравнение активных в периоде гостей с игровым профилем и без него. Это корреляция, а не причинный эффект: контрольной группы и attribution window пока нет.',
+      note: 'Сравнение активных в периоде гостей с игровым профилем и без него. Это корреляция, а не эффект: в игру первыми приходят самые лояльные гости.',
     },
     topPlayers: [...realRegisteredRows]
       .sort((first, second) => {

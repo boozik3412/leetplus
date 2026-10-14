@@ -813,43 +813,6 @@ export type GuestGameEconomy = {
   scenarios: GuestGameEconomyScenario[];
 };
 
-export type GuestGameEffectScenario = {
-  kind: "LOOT_BOX" | "MISSION" | "SEASON" | "MANUAL";
-  id: string;
-  name: string;
-  status: GuestGameStatus | "ACTIVE";
-  eventsCount: number;
-  measuredEvents: number;
-  reachedGuests: number;
-  returnedGuests: number;
-  returnRatePercent: number | null;
-  postSessions: number;
-  postPlayMinutes: number;
-  productRevenue: number;
-  balanceTopUps: number;
-  totalRevenue: number;
-  averageRevenuePerReturnedGuest: number;
-  recommendation: string;
-};
-
-export type GuestGameEffect = {
-  windowDays: number;
-  summary: {
-    eventsCount: number;
-    measuredEvents: number;
-    reachedGuests: number;
-    returnedGuests: number;
-    returnRatePercent: number | null;
-    postSessions: number;
-    postPlayMinutes: number;
-    productRevenue: number;
-    balanceTopUps: number;
-    totalRevenue: number;
-    averageRevenuePerReturnedGuest: number;
-  };
-  scenarios: GuestGameEffectScenario[];
-};
-
 export type GuestGameCommunicationQueueStatus =
   | "READY_FOR_BOT"
   | "READY_FOR_CASHIER"
@@ -1604,7 +1567,6 @@ export type GuestGameGuestLogCatalog = {
 export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
   economy: GuestGameEconomy;
-  effect: GuestGameEffect;
   integrationReadiness: GuestGameIntegrationReadiness;
   pilotReadiness: GuestGamePilotReadiness;
   bonusLedgerAudit: GuestGameBonusLedgerAudit;

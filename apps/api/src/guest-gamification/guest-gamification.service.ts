@@ -36,6 +36,7 @@ import type {
   LangameTransaction,
 } from '../integrations/langame.types';
 import type { GuestPortalGameSummary } from '../guest-portal/guest-portal.service';
+import { guestTransactionTopUp } from '../common/guest-transaction-money';
 import { PrismaService } from '../prisma/prisma.service';
 import { StaffTeamChatService } from '../staff/staff-team-chat.service';
 import {
@@ -233,6 +234,13 @@ const guestLogMappingPresets = [
   'custom',
 ] as const;
 const guestLogMappingIntents = ['allow', 'block'] as const;
+// Langame transactions carry no type and repeat what the operation log already
+// reports (top-ups) next to plain balance spends; turning them into live
+// BAR_PURCHASE/BALANCE_TOPUP events would grant fake progress. They stay
+// visible in the facts view only.
+const liveExcludedSnapshotFactSources: ReadonlySet<string> = new Set([
+  'GUEST_TRANSACTION',
+]);
 const snapshotFactSources = [
   'GUEST_SESSION',
   'GUEST_LOG',
@@ -7135,7 +7143,11 @@ export class GuestGamificationService {
       ...pendingPurchaseDrainFacts,
       ...pendingPrimaryFacts,
       ...factsResult.facts,
-    ]).filter((fact) => !source || fact.source === source);
+    ]).filter(
+      (fact) =>
+        !liveExcludedSnapshotFactSources.has(fact.source) &&
+        (!source || fact.source === source),
+    );
     let orderedCandidates = sourceCandidates;
 
     // Snapshot sources are intentionally bounded. If already processed rows
@@ -21178,7 +21190,7 @@ export class GuestGamificationService {
           continue;
         }
 
-        const amount = transaction.amount ? Number(transaction.amount) : 0;
+        const amount = guestTransactionTopUp(transaction.amount);
 
         if (amount > 0) {
           transactionIds.add(transaction.id);

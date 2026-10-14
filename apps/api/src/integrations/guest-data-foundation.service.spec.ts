@@ -647,6 +647,47 @@ describe('GuestDataFoundationService', () => {
     expect(shiftUpsert.update.message).toBeNull();
   });
 
+  it('dates documented Langame transactions by date_update', async () => {
+    // The real `/transactions/list` row: no type, no date field but
+    // `date_update` («Дата транзакции»), the signed fiat sum in `balance`.
+    langameClient.listTransactions.mockResolvedValue([
+      {
+        id: 1019591,
+        guest_id: 42,
+        list_clubs_id: 10,
+        date_update: '2026-05-01 12:07:16',
+        balance: -560,
+        bonus_balance: 0,
+        cancel: 0,
+      },
+    ]);
+
+    await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    const calls = prisma.guestTransaction.upsert.mock.calls as Array<
+      [
+        {
+          create: {
+            happenedAt: Date | null;
+            updatedAtExternal: Date | null;
+            amount: { toString(): string } | null;
+            type: string | null;
+          };
+        },
+      ]
+    >;
+    const call = calls[0][0];
+    expect(call.create.happenedAt).toBeInstanceOf(Date);
+    expect(call.create.happenedAt?.getTime()).toBe(
+      call.create.updatedAtExternal?.getTime(),
+    );
+    expect(call.create.amount?.toString()).toBe('-560');
+    expect(call.create.type).toBeNull();
+  });
+
   it('rejects foundation sync before run mutation, credentials or provider calls when a dependent module is denied', async () => {
     tenantExecutionAdmissionService.assertAllowed.mockRejectedValueOnce(
       new Error('ENTITLEMENT_WRITE_DISABLED'),

@@ -14037,14 +14037,16 @@ export class GuestPortalService {
         : [],
       guest
         ? this.prisma.guestTransaction.aggregate({
-            where: { tenantId, guestId: guest.id, storeId },
+            // Zero-sum Langame rows only carry bonuses; they are not money
+            // operations the guest would recognise.
+            where: { tenantId, guestId: guest.id, storeId, amount: { not: 0 } },
             _count: { id: true },
             _max: { happenedAt: true },
           })
         : null,
       guest
         ? this.prisma.guestTransaction.findMany({
-            where: { tenantId, guestId: guest.id, storeId },
+            where: { tenantId, guestId: guest.id, storeId, amount: { not: 0 } },
             include: { store: { select: { name: true } } },
             orderBy: [{ happenedAt: 'desc' }, { createdAt: 'desc' }],
             take: 8,

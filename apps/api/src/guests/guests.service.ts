@@ -21,6 +21,10 @@ import {
 } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { hasCapability } from '../auth/capabilities';
+import {
+  GUEST_TRANSACTION_SPEND_SQL,
+  guestTransactionSpend,
+} from '../common/guest-transaction-money';
 import { resolveSecuritySecret } from '../config/environment-validation';
 import { GuestDataFoundationService } from '../integrations/guest-data-foundation.service';
 import { LangameClient } from '../integrations/langame.client';
@@ -4335,11 +4339,10 @@ export class GuestsService {
       this.applyLatest(metrics, transaction.happenedAt);
       this.addActivityDay(metrics, transaction.happenedAt);
 
-      if (transaction.happenedAt >= period.fromDate) {
+      const spend = guestTransactionSpend(transaction.amount);
+      if (transaction.happenedAt >= period.fromDate && spend > 0) {
         metrics.transactionsCount += 1;
-        metrics.transactionAmount += Math.abs(
-          this.decimalToNumber(transaction.amount) ?? 0,
-        );
+        metrics.transactionAmount += spend;
       }
     }
 
@@ -4860,7 +4863,7 @@ export class GuestsService {
               MIN(u.ts) AS "firstAt", MAX(u.ts) AS "lastAt"
        FROM (
         SELECT t."guestId" AS "guestId",
-               ABS(COALESCE(t.amount, 0)) AS txn,
+               ${Prisma.raw(GUEST_TRANSACTION_SPEND_SQL)} AS txn,
                0::numeric AS bar,
                t."happenedAt" AS ts,
                (t."happenedAt")::date AS day
@@ -4868,6 +4871,7 @@ export class GuestsService {
         WHERE t."tenantId" = ${tenantId}
           AND t."guestId" IS NOT NULL
           AND t."happenedAt" IS NOT NULL
+          AND ${Prisma.raw(GUEST_TRANSACTION_SPEND_SQL)} > 0
           ${transactionStore}
           ${transactionGuests}
         UNION ALL

@@ -2176,20 +2176,24 @@ export class GuestDataFoundationService {
         ? storesByExternalClubId.get(externalClubId)
         : null;
       const type = this.toNullableString(row.type);
-      const happenedAt = this.parseLangameDate(
-        row.date ??
-          row.date_normal ??
-          row.date_insert ??
-          row.created_at ??
-          row.created ??
-          row.time ??
-          row.datetime,
-        storeRef?.timeZone,
-      );
       const updatedAtExternal = this.parseLangameDate(
         row.date_update,
         storeRef?.timeZone,
       );
+      // `/transactions/list` documents `date_update` as «Дата транзакции» and
+      // sends no other date, so it is the operation time unless a richer
+      // field ever appears.
+      const happenedAt =
+        this.parseLangameDate(
+          row.date ??
+            row.date_normal ??
+            row.date_insert ??
+            row.created_at ??
+            row.created ??
+            row.time ??
+            row.datetime,
+          storeRef?.timeZone,
+        ) ?? updatedAtExternal;
       const amount = this.toBoolean(row.cancel)
         ? null
         : this.toDecimalOrNull(row.amount ?? row.sum ?? row.balance);

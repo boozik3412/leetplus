@@ -37,6 +37,7 @@ import {
   bonusSettlementStoreMatches,
   bonusSettlementStoreSelect,
 } from './guest-bonus-settlement';
+import { guestGameProfileStaffTestAutoMarkable } from './guest-staff-test';
 
 const langameBalancePhonePath = '/guests/balance/phone';
 const langameBalancePhoneMasterPath = `/master_api${langameBalancePhonePath}`;
@@ -3093,6 +3094,7 @@ export class GuestBonusLedgerService {
       where: {
         id: profileId,
         tenantId,
+        ...guestGameProfileStaffTestAutoMarkable(),
       },
       data: {
         isStaffTest: true,

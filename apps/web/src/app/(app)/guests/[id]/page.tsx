@@ -159,7 +159,7 @@ export default async function GuestPage({ params }: { params: PageParams }) {
             label="Деньги за 30 дней"
             value={formatRubles(guest.transactionAmount + guest.barRevenue)}
             caption={`бар ${formatRubles(guest.barRevenue)}`}
-            formula="Пополнения баланса + покупки бара за последние 30 дней"
+            formula="Списания с депозита Langame + покупки бара за последние 30 дней"
           />
           <KpiTile
             label="LTV факт"
@@ -316,10 +316,17 @@ function SessionsPanel({ guest }: { guest: GuestDetail }) {
   );
 }
 
+// Langame transactions are signed and untyped: + tops up the deposit,
+// − spends it, 0 carries only bonuses.
+function transactionKindLabel(amount: number | null) {
+  if (amount === null || amount === 0) return "Бонусы";
+  return amount > 0 ? "Пополнение" : "Списание";
+}
+
 function TransactionsPanel({ guest }: { guest: GuestDetail }) {
   return (
     <InsightCard className="overflow-hidden">
-      <InsightCardHeader eyebrow="Langame" title="Пополнения и баланс" />
+      <InsightCardHeader eyebrow="Langame" title="Пополнения и списания" />
       {guest.transactions.length > 0 ? (
         <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
           {guest.transactions.map((transaction) => (
@@ -329,12 +336,9 @@ function TransactionsPanel({ guest }: { guest: GuestDetail }) {
                 <span className="tabular-nums">{formatRubles(transaction.amount)}</span>
               </div>
               <p className="text-xs text-zinc-500">
-                {transaction.type ?? "тип не определён"} ·{" "}
+                {transactionKindLabel(transaction.amount)} ·{" "}
                 {transaction.storeName ?? transaction.externalDomain ?? "клуб не определён"}
-                {transaction.balance !== null
-                  ? ` · баланс ${formatRubles(transaction.balance)}`
-                  : ""}
-                {transaction.bonusBalance !== null
+                {transaction.bonusBalance
                   ? ` · бонусы ${formatRubles(transaction.bonusBalance)}`
                   : ""}
               </p>

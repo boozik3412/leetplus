@@ -20605,6 +20605,35 @@ describe('GuestGamificationService', () => {
       expect(processSpy).toHaveBeenCalledTimes(1);
     });
 
+    it('never feeds Langame transactions into live rules', async () => {
+      const { service } = createService();
+      const transactionFact = snapshotFact('transaction:spend', {
+        source: 'GUEST_TRANSACTION',
+        eventType: 'BAR_PURCHASE',
+        spendAmount: 560,
+      });
+      const sessionFact = snapshotFact('session:start');
+      jest
+        .spyOn(service, 'getSnapshotFacts')
+        .mockResolvedValue(snapshotFactsResult([transactionFact, sessionFact]));
+      jest.spyOn(service, 'dryRun').mockResolvedValue(dryRunResult());
+      const processSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValue(processResult());
+
+      const result = await service.runSnapshotPipeline(user, { limit: 10 });
+      const explicit = await service.runSnapshotPipeline(user, {
+        limit: 10,
+        source: 'GUEST_TRANSACTION',
+      });
+
+      expect(result.facts.map((fact) => fact.factId)).toEqual([
+        'session:start',
+      ]);
+      expect(explicit.checkedFacts).toBe(0);
+      expect(processSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('stores matching intermediate progress facts without issuing a reward', async () => {
       const { service } = createService();
       const progressDryRun = dryRunResult({

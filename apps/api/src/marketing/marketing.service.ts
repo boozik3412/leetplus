@@ -10,6 +10,7 @@ import {
   StockMovementType,
 } from '@prisma/client';
 import ExcelJS from 'exceljs';
+import { guestTransactionSpend } from '../common/guest-transaction-money';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -6356,7 +6357,9 @@ function confirmedTransactionSpendAmount(type: string | null, amount: number) {
     return 0;
   }
 
-  return Math.abs(amount);
+  // Langame `/transactions/list` is signed and untyped: a positive sum is a
+  // deposit top-up, a negative one is the spend.
+  return guestTransactionSpend(amount);
 }
 
 function unallocatedNetworkTopupAmount(operationLog: {

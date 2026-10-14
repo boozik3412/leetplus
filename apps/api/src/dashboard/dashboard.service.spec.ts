@@ -2504,6 +2504,27 @@ describe('DashboardService', () => {
         type: '1',
         amount: new Prisma.Decimal(4_200),
       },
+      {
+        // Langame `/transactions/list` is untyped: −4200 is the spend of
+        // the +4200 top-up above ('1' is the cash payment method).
+        storeId: 'store-1',
+        externalClubId: '1',
+        guestId: null,
+        externalGuestId: null,
+        happenedAt: inFullDay(),
+        type: null,
+        amount: new Prisma.Decimal(-4_200),
+      },
+      {
+        // A correction/test entry above the anomaly limit is not revenue.
+        storeId: 'store-1',
+        externalClubId: '1',
+        guestId: null,
+        externalGuestId: null,
+        happenedAt: inFullDay(),
+        type: null,
+        amount: new Prisma.Decimal(-66_664),
+      },
     ]);
 
     const summary = await service.getSummary(user);
@@ -2597,7 +2618,7 @@ describe('DashboardService', () => {
         externalGuestId: null,
         happenedAt: inFullDay(),
         type: '1',
-        amount: new Prisma.Decimal(1000),
+        amount: new Prisma.Decimal(-1000),
       },
       {
         storeId: 'store-2',
@@ -2606,7 +2627,7 @@ describe('DashboardService', () => {
         externalGuestId: null,
         happenedAt: inFullDay(),
         type: '1',
-        amount: new Prisma.Decimal(1000),
+        amount: new Prisma.Decimal(-1000),
       },
       {
         storeId: 'store-3',
@@ -2615,7 +2636,7 @@ describe('DashboardService', () => {
         externalGuestId: null,
         happenedAt: inFullDay(),
         type: '1',
-        amount: new Prisma.Decimal(1000),
+        amount: new Prisma.Decimal(-1000),
       },
     ]);
 

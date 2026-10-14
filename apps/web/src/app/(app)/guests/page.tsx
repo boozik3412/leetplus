@@ -240,7 +240,7 @@ export default async function GuestsPage({
                 ? "нет активных гостей"
                 : `ARPU ${formatRubles(summary.kpi.arpu)}`
             }
-            formula="Пополнения баланса + покупки бара в периоде. ARPU = выручка / активные гости"
+            formula="Списания с депозита Langame + покупки бара в периоде. ARPU = выручка / активные гости"
           />
           <KpiTile
             label="Средний чек"

@@ -1,6 +1,7 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma, TenantModule, type BusinessSnapshotRun } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { isGuestTransactionAnomaly } from '../common/guest-transaction-money';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   evaluateTenantBackgroundExecutionPolicy,
@@ -464,10 +465,10 @@ export class BusinessSnapshotService {
             sum + this.decimalToNumber(operationLog.amount),
           0,
         ),
-        transactionAmount: transactions.reduce(
-          (sum, transaction) => sum + this.decimalToNumber(transaction.amount),
-          0,
-        ),
+        transactionAmount: transactions.reduce((sum, transaction) => {
+          const amount = this.decimalToNumber(transaction.amount);
+          return isGuestTransactionAnomaly(amount) ? sum : sum + amount;
+        }, 0),
         latestFactAt: this.latestIso([
           sales._max.saleDate,
           clubRevenue._max.revenueDate,
@@ -933,7 +934,11 @@ export class BusinessSnapshotService {
   }
 
   private confirmedTransactionSpendAmount(type: string | null, amount: number) {
-    if (!Number.isFinite(amount) || amount === 0) {
+    if (
+      !Number.isFinite(amount) ||
+      amount === 0 ||
+      isGuestTransactionAnomaly(amount)
+    ) {
       return 0;
     }
 

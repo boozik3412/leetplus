@@ -1,3 +1,7 @@
+import {
+  guestTransactionSpend,
+  isGuestTransactionAnomaly,
+} from '../common/guest-transaction-money';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -5582,7 +5586,11 @@ export class DashboardService {
   }
 
   private confirmedTransactionSpendAmount(type: string | null, amount: number) {
-    if (!Number.isFinite(amount) || amount === 0) {
+    if (
+      !Number.isFinite(amount) ||
+      amount === 0 ||
+      isGuestTransactionAnomaly(amount)
+    ) {
       return 0;
     }
 
@@ -5590,7 +5598,13 @@ export class DashboardService {
       return 0;
     }
 
-    return Math.abs(amount);
+    // Langame `/transactions/list` is signed and untyped: a positive sum is a
+    // deposit top-up, so only an explicit spend type makes it a spend.
+    if (amount > 0) {
+      return this.isBalanceSpendOperationType(type) ? amount : 0;
+    }
+
+    return guestTransactionSpend(amount);
   }
 
   private isBalanceTopUpOperationType(type: string | null) {
@@ -5762,6 +5776,10 @@ export class DashboardService {
         amount,
       );
       row.transactionCount += 1;
+      if (isGuestTransactionAnomaly(amount)) {
+        // Test/correction entries would dwarf the real club money.
+        return;
+      }
       row.transactionNetAmount += amount;
       this.addDiagnosticsType(
         row.transactionTypes,

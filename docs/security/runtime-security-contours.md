@@ -1911,6 +1911,21 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   Корпоративные `GET …/leaderboard/results` и `POST …/results/:id/retry|delivered`
   работают под теми же capability. Новых секретов, egress и таймеров нет.
   Контракт модуля — `docs/agent-context/guest-leaderboard.md`.
+- Эффект игры (14.10.2026): `GuestGameEffectService`
+  (`apps/api/src/guest-game-effect/`, `GuestGameEffectModule`, только
+  `PrismaService`) импортируют `GuestsModule` и оба gamification-модуля; в
+  `GuestRuntimeModule` его нет, scheduler и egress нет. Corporate:
+  `GET /guests/gamification/effect` → `view_guest_gamification`,
+  `PATCH /guests/gamification/effect/holdout` → `manage_guest_game_rules`
+  (меняет только `holdoutPercent`/`holdoutStartedAt` задания или
+  самостоятельного кейса); `GET /guests/:id/game-effect` под `view_guests`,
+  игровые данные отдаются только с `view_guest_gamification`/OWNER/platform
+  admin. Публичный портал и живой движок правил используют только чистую
+  функцию `isInGameHoldout` из `guest-game-effect-core.ts`: гостю контрольной
+  группы задание и кейс не показываются и не выдаются. Миграция
+  `20261014120000_guest_game_holdout` добавляет две колонки со значением
+  по умолчанию «без контрольной группы»; голова identity-mail-worker — 194.
+  Контракт — `docs/agent-context/guest-game-effect.md`.
 
 ## Langame и outbound network boundary
 

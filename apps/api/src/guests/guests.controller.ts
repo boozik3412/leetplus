@@ -32,6 +32,7 @@ import {
   type GuestCrmTaskReportQuery,
   type GuestCrmTaskUpdateDto,
   type GuestCrmUser,
+  type GuestGameEffectResponse,
   type GuestCrmUpdateDto,
   type GuestExportFile,
   type GuestFilterOptions,
@@ -404,6 +405,14 @@ export class GuestsController {
     @Param('id') id: string,
   ): Promise<GuestLiveSessionResult> {
     return this.guestsService.getGuestLiveSession(user, id);
+  }
+
+  @Get(':id/game-effect')
+  getGuestGameEffect(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<GuestGameEffectResponse> {
+    return this.guestsService.getGuestGameEffect(user, id);
   }
 
   @Get(':id')

@@ -2627,6 +2627,10 @@ model GuestGameLootBox {
   budgetAmount           Decimal? @db.Decimal(12, 2)
   antiFraudRules         Json?
   manualApprovalRequired Boolean  @default(true)
+  /// Share of activated players (0–50 %) kept out of a standalone case to measure its effect.
+  holdoutPercent         Int      @default(0)
+  /// When the current holdout split started; reset on every percent change.
+  holdoutStartedAt       DateTime?
   note                   String?
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
@@ -2671,6 +2675,10 @@ model GuestGameMission {
   manualApprovalRequired Boolean   @default(true)
   definitionVersion      Int       @default(1)
   evaluationPolicy       String    @default("LIVE_PRIMARY")
+  /// Share of activated players (0–50 %) kept out of the mission to measure its effect.
+  holdoutPercent         Int       @default(0)
+  /// When the current holdout split started; reset on every percent change.
+  holdoutStartedAt       DateTime?
   note                   String?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt

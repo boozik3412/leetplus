@@ -262,7 +262,13 @@ export function GuestGamificationOverview({
         </div>
       </div>
       <p className="border-t border-zinc-100 px-5 py-3 text-xs text-zinc-500 dark:border-zinc-800">
-        {effect.note}
+        {effect.note}{" "}
+        <Link
+          href="/gamification?tab=effect"
+          className="font-semibold text-emerald-700 underline underline-offset-4 dark:text-emerald-300"
+        >
+          Эффект с поправкой на похожих гостей — в «Геймификация → Эффект»
+        </Link>
       </p>
     </InsightCard>
   );

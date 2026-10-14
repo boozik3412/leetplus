@@ -11,8 +11,8 @@ const DATABASE_PATTERN = /^lp_founder_artifact_api_[0-9a-f]{32}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const MAX_CHILD_OUTPUT_BYTES = 256 * 1024;
 const EXPECTED_MIGRATION =
-  "20261007120000_guest_leaderboard";
-const EXPECTED_MIGRATION_COUNT = 193;
+  "20261014120000_guest_game_holdout";
+const EXPECTED_MIGRATION_COUNT = 194;
 
 if (
   process.env.FOUNDER_RELEASE_ARTIFACT_API_CONFIRM !== REQUIRED_CONFIRMATION

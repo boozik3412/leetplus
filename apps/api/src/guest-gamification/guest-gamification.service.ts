@@ -36,7 +36,11 @@ import type {
   LangameTransaction,
 } from '../integrations/langame.types';
 import type { GuestPortalGameSummary } from '../guest-portal/guest-portal.service';
-import { guestTransactionTopUp } from '../common/guest-transaction-money';
+import {
+  isInGameHoldout,
+  type GameEffectVerdict,
+} from '../guest-game-effect/guest-game-effect-core';
+import { GuestGameEffectService } from '../guest-game-effect/guest-game-effect.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StaffTeamChatService } from '../staff/staff-team-chat.service';
 import {
@@ -271,7 +275,6 @@ type SnapshotPipelineBackfillPolicy = {
 type SnapshotPipelineRunOptions = {
   drainPendingPurchases?: boolean;
 };
-const gameEffectWindowDays = 14;
 const defaultGuestGameTimeZone = 'Asia/Yekaterinburg';
 const guestLootBoxOpenSourceKind = 'GUEST_LOOT_BOX_OPEN';
 const guestRewardWalletRetentionMs = 30 * 24 * 60 * 60 * 1000;
@@ -1033,6 +1036,9 @@ export type GuestGameLootBox = GuestGameRuleBase & {
   limits: Prisma.JsonValue | null;
   probabilityRules: Prisma.JsonValue;
   antiFraudRules: Prisma.JsonValue | null;
+  /** Control group share (standalone cases only), see guest-game-effect. */
+  holdoutPercent?: number;
+  holdoutStartedAt?: string | null;
 };
 
 export type GuestGameMission = GuestGameRuleBase & {
@@ -1050,6 +1056,9 @@ export type GuestGameMission = GuestGameRuleBase & {
   totalRewardLimit: number | null;
   maxPendingRewards: number;
   antiFraudRules: Prisma.JsonValue | null;
+  /** Control group share, see guest-game-effect. */
+  holdoutPercent?: number;
+  holdoutStartedAt?: string | null;
 };
 
 export type GuestGameMissionEvaluationPolicyDto = {
@@ -1564,43 +1573,6 @@ export type GuestGameEconomy = {
   scenarios: GuestGameEconomyScenario[];
 };
 
-export type GuestGameEffectScenario = {
-  kind: 'LOOT_BOX' | 'MISSION' | 'SEASON' | 'MANUAL';
-  id: string;
-  name: string;
-  status: StatusValue | 'ACTIVE';
-  eventsCount: number;
-  measuredEvents: number;
-  reachedGuests: number;
-  returnedGuests: number;
-  returnRatePercent: number | null;
-  postSessions: number;
-  postPlayMinutes: number;
-  productRevenue: number;
-  balanceTopUps: number;
-  totalRevenue: number;
-  averageRevenuePerReturnedGuest: number;
-  recommendation: string;
-};
-
-export type GuestGameEffect = {
-  windowDays: number;
-  summary: {
-    eventsCount: number;
-    measuredEvents: number;
-    reachedGuests: number;
-    returnedGuests: number;
-    returnRatePercent: number | null;
-    postSessions: number;
-    postPlayMinutes: number;
-    productRevenue: number;
-    balanceTopUps: number;
-    totalRevenue: number;
-    averageRevenuePerReturnedGuest: number;
-  };
-  scenarios: GuestGameEffectScenario[];
-};
-
 export type GuestGameCommunicationQueueStatus =
   | 'READY_FOR_BOT'
   | 'READY_FOR_CASHIER'
@@ -2091,7 +2063,6 @@ export type GuestGameBonusBalanceCurrentReconciliation = {
 export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
   economy: GuestGameEconomy;
-  effect: GuestGameEffect;
   integrationReadiness: GuestGameIntegrationReadiness;
   pilotReadiness: GuestGamePilotReadiness;
   bonusLedgerAudit: GuestGameBonusLedgerAudit;
@@ -4107,6 +4078,8 @@ export class GuestGamificationService {
     private readonly staffTeamChatService?: StaffTeamChatService,
     @Optional()
     private readonly mediaService?: GuestGameMediaService,
+    @Optional()
+    private readonly effectService?: GuestGameEffectService,
   ) {}
 
   private async resolveProfileIdentityGuestIds(
@@ -4357,9 +4330,8 @@ export class GuestGamificationService {
     ]);
 
     const targetPilotStore = pickPilotStore(pilotStores);
-    const [effect, pilotLedgerPreflight, pilotFirstBonusReconciliation] =
+    const [pilotLedgerPreflight, pilotFirstBonusReconciliation] =
       await Promise.all([
-        this.buildEffect(user, lootBoxes, missions, seasons, events),
         this.getPilotBonusLedgerPreflight(user, targetPilotStore),
         this.getPilotFirstBonusReconciliation(user, targetPilotStore),
       ]);
@@ -4379,7 +4351,6 @@ export class GuestGamificationService {
         rewards,
       ),
       economy: this.buildEconomy(lootBoxes, missions, seasons, rewards, events),
-      effect,
       integrationReadiness,
       pilotReadiness: this.buildPilotReadiness({
         tenantSlug: user.tenantSlug,
@@ -12208,12 +12179,17 @@ export class GuestGamificationService {
       this.getRewards(user, { take: null }),
       this.getEvents(user, { take: null }),
     ]);
-    const [economy, effect] = await Promise.all([
-      Promise.resolve(
-        this.buildEconomy(lootBoxes, missions, seasons, rewards, events, null),
-      ),
-      this.buildEffect(user, lootBoxes, missions, seasons, events, null),
-    ]);
+    const economy = this.buildEconomy(
+      lootBoxes,
+      missions,
+      seasons,
+      rewards,
+      events,
+      null,
+    );
+    const effect = this.effectService
+      ? await this.effectService.getReport(user.tenantId)
+      : null;
     const header = [
       'Раздел',
       'Тип',
@@ -12230,14 +12206,14 @@ export class GuestGamificationService {
       'Погашено, сумма',
       'XP',
       'Измеряемые события',
-      'Вернувшиеся гости',
-      'Возврат, %',
-      'Сессии после события',
-      'Игровые минуты после события',
-      'Бар/товары после события',
-      'Пополнения после события',
-      'Итого выручка после события',
-      'Средняя выручка на вернувшегося',
+      'Эффект: дни визитов на гостя',
+      'Эффект: часы игры на гостя',
+      'Эффект: списания депозита на гостя',
+      'Эффект: бар на гостя',
+      'Эффект: деньги на гостя',
+      'Эффект: деньги всего',
+      'Бонусы выдано, ₽',
+      'Деньги на 1 ₽ бонусов',
       'Окно эффекта, дней',
       'Рекомендация',
     ];
@@ -12298,60 +12274,48 @@ export class GuestGamificationService {
         '',
         scenario.recommendation,
       ]),
-      [
-        'Эффект',
-        'Сводка',
-        'Все сценарии',
-        '',
-        effect.summary.eventsCount,
-        effect.summary.reachedGuests,
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        effect.summary.measuredEvents,
-        effect.summary.returnedGuests,
-        effect.summary.returnRatePercent ?? '',
-        effect.summary.postSessions,
-        effect.summary.postPlayMinutes,
-        effect.summary.productRevenue,
-        effect.summary.balanceTopUps,
-        effect.summary.totalRevenue,
-        effect.summary.averageRevenuePerReturnedGuest,
-        effect.windowDays,
-        '',
-      ],
-      ...effect.scenarios.map((scenario) => [
-        'Эффект',
-        gameScenarioKindLabel(scenario.kind),
-        scenario.name,
-        gameScenarioStatusLabel(scenario.status),
-        scenario.eventsCount,
-        scenario.reachedGuests,
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        scenario.measuredEvents,
-        scenario.returnedGuests,
-        scenario.returnRatePercent ?? '',
-        scenario.postSessions,
-        scenario.postPlayMinutes,
-        scenario.productRevenue,
-        scenario.balanceTopUps,
-        scenario.totalRevenue,
-        scenario.averageRevenuePerReturnedGuest,
-        effect.windowDays,
-        scenario.recommendation,
-      ]),
+      ...(effect
+        ? [
+            {
+              kind: 'Игра',
+              name: 'Все игроки',
+              status: '',
+              cohort: effect.game,
+            },
+            ...effect.scenarios.map((scenario) => ({
+              kind: gameScenarioKindLabel(scenario.kind),
+              name: scenario.name,
+              status: gameScenarioStatusLabel(scenario.status as StatusValue),
+              cohort: scenario.cohort,
+            })),
+          ].map(({ kind, name, status, cohort }) => [
+            'Эффект',
+            kind,
+            name,
+            status,
+            '',
+            cohort.participants,
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            cohort.measured,
+            cohort.metrics.visitDays.effect,
+            Math.round((cohort.metrics.playMinutes.effect / 60) * 10) / 10,
+            cohort.metrics.balanceSpend.effect,
+            cohort.metrics.barRevenue.effect,
+            cohort.metrics.money.effect,
+            cohort.metrics.money.total,
+            cohort.cost.bonusRub,
+            cohort.moneyPerBonusRub ?? '',
+            cohort.windowDays,
+            gameEffectVerdictLabel(cohort.verdict),
+          ])
+        : []),
     ];
 
     return [
@@ -20918,320 +20882,6 @@ export class GuestGamificationService {
     };
   }
 
-  private async buildEffect(
-    user: AuthenticatedUser,
-    lootBoxes: GuestGameLootBox[],
-    missions: GuestGameMission[],
-    seasons: GuestGameSeason[],
-    events: GuestGameEvent[],
-    scenarioLimit: number | null = 12,
-  ): Promise<GuestGameEffect> {
-    const measurableEvents = events
-      .map((event) => ({
-        event,
-        guestId: event.guest?.id ?? null,
-        occurredAt: new Date(event.occurredAt),
-      }))
-      .filter(
-        (
-          item,
-        ): item is {
-          event: GuestGameEvent;
-          guestId: string;
-          occurredAt: Date;
-        } => Boolean(item.guestId) && !Number.isNaN(item.occurredAt.getTime()),
-      );
-
-    if (!measurableEvents.length) {
-      return emptyGameEffect();
-    }
-
-    const guestIds = uniqueStrings(
-      measurableEvents.map((item) => item.guestId),
-    );
-    const from = new Date(
-      Math.min(...measurableEvents.map((item) => item.occurredAt.getTime())),
-    );
-    const to = addDays(
-      new Date(
-        Math.max(...measurableEvents.map((item) => item.occurredAt.getTime())),
-      ),
-      gameEffectWindowDays,
-    );
-    const [sessions, transactions, productSales] = await Promise.all([
-      this.prisma.guestSession.findMany({
-        where: {
-          tenantId: user.tenantId,
-          guestId: { in: guestIds },
-          startedAt: { gte: from, lte: to },
-        },
-        select: {
-          id: true,
-          guestId: true,
-          startedAt: true,
-          stoppedAt: true,
-          durationMinutes: true,
-        },
-        orderBy: { startedAt: 'asc' },
-        take: 5000,
-      }),
-      this.prisma.guestTransaction.findMany({
-        where: {
-          tenantId: user.tenantId,
-          guestId: { in: guestIds },
-          happenedAt: { gte: from, lte: to },
-        },
-        select: {
-          id: true,
-          guestId: true,
-          happenedAt: true,
-          amount: true,
-        },
-        orderBy: { happenedAt: 'asc' },
-        take: 5000,
-      }),
-      this.prisma.salesFact.findMany({
-        where: {
-          tenantId: user.tenantId,
-          guestId: { in: guestIds },
-          saleDate: { gte: from, lte: to },
-          isCanceled: false,
-        },
-        select: {
-          id: true,
-          guestId: true,
-          saleDate: true,
-          revenue: true,
-        },
-        orderBy: { saleDate: 'asc' },
-        take: 5000,
-      }),
-    ]);
-    const scenarios: GuestGameEffectScenario[] = [
-      ...lootBoxes.map((item) =>
-        this.buildEffectScenario({
-          kind: 'LOOT_BOX',
-          id: item.id,
-          name: item.name,
-          status: item.status,
-          events: measurableEvents.filter(
-            (event) => event.event.lootBox?.id === item.id,
-          ),
-          sessions,
-          transactions,
-          productSales,
-        }),
-      ),
-      ...missions.map((item) =>
-        this.buildEffectScenario({
-          kind: 'MISSION',
-          id: item.id,
-          name: item.name,
-          status: item.status,
-          events: measurableEvents.filter(
-            (event) => event.event.mission?.id === item.id,
-          ),
-          sessions,
-          transactions,
-          productSales,
-        }),
-      ),
-      ...seasons.map((item) =>
-        this.buildEffectScenario({
-          kind: 'SEASON',
-          id: item.id,
-          name: item.name,
-          status: item.status,
-          events: measurableEvents.filter(
-            (event) => event.event.season?.id === item.id,
-          ),
-          sessions,
-          transactions,
-          productSales,
-        }),
-      ),
-    ];
-    const manualEvents = measurableEvents.filter(
-      (event) =>
-        !event.event.lootBox && !event.event.mission && !event.event.season,
-    );
-
-    if (manualEvents.length) {
-      scenarios.push(
-        this.buildEffectScenario({
-          kind: 'MANUAL',
-          id: 'manual',
-          name: 'Ручные события',
-          status: 'ACTIVE',
-          events: manualEvents,
-          sessions,
-          transactions,
-          productSales,
-        }),
-      );
-    }
-
-    const activeScenarios = scenarios.filter(
-      (scenario) => scenario.eventsCount > 0 || scenario.status === 'ACTIVE',
-    );
-    const summary = mergeGameEffectScenarios(activeScenarios);
-
-    return {
-      windowDays: gameEffectWindowDays,
-      summary,
-      scenarios: activeScenarios
-        .sort((left, right) => {
-          if (right.totalRevenue !== left.totalRevenue) {
-            return right.totalRevenue - left.totalRevenue;
-          }
-
-          if (right.returnedGuests !== left.returnedGuests) {
-            return right.returnedGuests - left.returnedGuests;
-          }
-
-          return right.eventsCount - left.eventsCount;
-        })
-        .slice(0, scenarioLimit ?? undefined),
-    };
-  }
-
-  private buildEffectScenario({
-    kind,
-    id,
-    name,
-    status,
-    events,
-    sessions,
-    transactions,
-    productSales,
-  }: {
-    kind: GuestGameEffectScenario['kind'];
-    id: string;
-    name: string;
-    status: GuestGameEffectScenario['status'];
-    events: Array<{ event: GuestGameEvent; guestId: string; occurredAt: Date }>;
-    sessions: Array<{
-      id: string;
-      guestId: string | null;
-      startedAt: Date | null;
-      stoppedAt: Date | null;
-      durationMinutes: number | null;
-    }>;
-    transactions: Array<{
-      id: string;
-      guestId: string | null;
-      happenedAt: Date | null;
-      amount: Prisma.Decimal | null;
-    }>;
-    productSales: Array<{
-      id: string;
-      guestId: string | null;
-      saleDate: Date;
-      revenue: Prisma.Decimal;
-    }>;
-  }): GuestGameEffectScenario {
-    const reachedGuestIds = new Set(events.map((event) => event.guestId));
-    const returnedGuestIds = new Set<string>();
-    const sessionIds = new Set<string>();
-    const transactionIds = new Set<string>();
-    const saleIds = new Set<string>();
-    let postPlayMinutes = 0;
-    let productRevenue = 0;
-    let balanceTopUps = 0;
-
-    for (const event of events) {
-      const windowTo = addDays(event.occurredAt, gameEffectWindowDays);
-      const matchedSessions = sessions.filter(
-        (session) =>
-          session.guestId === event.guestId &&
-          session.startedAt !== null &&
-          session.startedAt.getTime() > event.occurredAt.getTime() &&
-          session.startedAt.getTime() <= windowTo.getTime(),
-      );
-
-      if (matchedSessions.length) {
-        returnedGuestIds.add(event.guestId);
-      }
-
-      for (const session of matchedSessions) {
-        if (sessionIds.has(session.id)) {
-          continue;
-        }
-
-        sessionIds.add(session.id);
-        postPlayMinutes +=
-          session.durationMinutes ??
-          durationMinutes(session.startedAt, session.stoppedAt) ??
-          0;
-      }
-
-      for (const sale of productSales) {
-        if (
-          sale.guestId !== event.guestId ||
-          sale.saleDate.getTime() <= event.occurredAt.getTime() ||
-          sale.saleDate.getTime() > windowTo.getTime() ||
-          saleIds.has(sale.id)
-        ) {
-          continue;
-        }
-
-        saleIds.add(sale.id);
-        productRevenue += Number(sale.revenue);
-      }
-
-      for (const transaction of transactions) {
-        if (
-          transaction.guestId !== event.guestId ||
-          transaction.happenedAt === null ||
-          transaction.happenedAt.getTime() <= event.occurredAt.getTime() ||
-          transaction.happenedAt.getTime() > windowTo.getTime() ||
-          transactionIds.has(transaction.id)
-        ) {
-          continue;
-        }
-
-        const amount = guestTransactionTopUp(transaction.amount);
-
-        if (amount > 0) {
-          transactionIds.add(transaction.id);
-          balanceTopUps += amount;
-        }
-      }
-    }
-
-    const totalRevenue = productRevenue + balanceTopUps;
-
-    return {
-      kind,
-      id,
-      name,
-      status,
-      eventsCount: events.length,
-      measuredEvents: events.length,
-      reachedGuests: reachedGuestIds.size,
-      returnedGuests: returnedGuestIds.size,
-      returnRatePercent: percentOrNull(
-        returnedGuestIds.size,
-        reachedGuestIds.size,
-      ),
-      postSessions: sessionIds.size,
-      postPlayMinutes,
-      productRevenue,
-      balanceTopUps,
-      totalRevenue,
-      averageRevenuePerReturnedGuest: returnedGuestIds.size
-        ? Math.round(totalRevenue / returnedGuestIds.size)
-        : 0,
-      recommendation: effectRecommendation({
-        status,
-        eventsCount: events.length,
-        reachedGuests: reachedGuestIds.size,
-        returnedGuests: returnedGuestIds.size,
-        totalRevenue,
-      }),
-    };
-  }
-
   private async buildProfileData(
     user: AuthenticatedUser,
     dto: GuestGameProfileDto,
@@ -25412,6 +25062,8 @@ function mapLootBox(row: LootBoxRow): GuestGameLootBox {
     probabilityRules: row.probabilityRules,
     budgetAmount: numberOrNull(row.budgetAmount),
     antiFraudRules: row.antiFraudRules,
+    holdoutPercent: row.holdoutPercent,
+    holdoutStartedAt: row.holdoutStartedAt?.toISOString() ?? null,
     manualApprovalRequired: row.manualApprovalRequired,
     note: row.note,
     createdAt: row.createdAt.toISOString(),
@@ -25463,6 +25115,8 @@ function mapMission(row: MissionRow): GuestGameMission {
     totalRewardLimit: row.totalRewardLimit,
     maxPendingRewards: row.maxPendingRewards,
     antiFraudRules: row.antiFraudRules,
+    holdoutPercent: row.holdoutPercent,
+    holdoutStartedAt: row.holdoutStartedAt?.toISOString() ?? null,
     manualApprovalRequired: row.manualApprovalRequired,
     definitionVersion: row.definitionVersion,
     evaluationPolicy: guestGameMissionEvaluationPolicy(
@@ -29202,6 +28856,22 @@ function csvCell(value: unknown) {
         : (JSON.stringify(value) ?? '');
 
   return `"${text.replace(/"/g, '""')}"`;
+}
+
+function gameEffectVerdictLabel(verdict: GameEffectVerdict) {
+  switch (verdict) {
+    case 'POSITIVE':
+      return 'Эффект есть: гости приходят чаще или тратят больше похожих гостей';
+    case 'VISITS_ONLY':
+      return 'Ходят чаще похожих гостей, но не тратят больше: проверьте, не заменяют ли бонусы оплату';
+    case 'NEGATIVE':
+      return 'Эффект отрицательный: участники стали тратить меньше похожих гостей';
+    case 'NO_EFFECT':
+      return 'Разница с похожими гостями в пределах случайности';
+    case 'NOT_ENOUGH_DATA':
+    default:
+      return 'Мало измеренных гостей для вывода';
+  }
 }
 
 function gameScenarioKindLabel(kind: GuestGameEconomyScenario['kind']) {
@@ -33838,6 +33508,9 @@ function evaluateLootBoxDryRun(
     appendDryRunTriggerCheck(rule.triggerKind, context.eventType, blockers);
     appendDryRunRuleActivationCheck(rule, context, blockers, reasons);
     appendDryRunAudienceCheck(rule, context, blockers, reasons);
+    if (rule.usageKind === 'STANDALONE') {
+      appendDryRunHoldoutCheck(rule, context, blockers);
+    }
     scopedContext = appendDryRunStoreCheck(
       rule.id,
       rule.storeIds,
@@ -33961,6 +33634,7 @@ function evaluateMissionDryRun(
   appendDryRunTriggerCheck(rule.triggerKind, context.eventType, blockers);
   appendDryRunRuleActivationCheck(rule, context, blockers, reasons);
   appendDryRunAudienceCheck(rule, context, blockers, reasons);
+  appendDryRunHoldoutCheck(rule, context, blockers);
   const scopedContext = appendDryRunStoreCheck(
     rule.id,
     rule.storeIds,
@@ -34320,6 +33994,32 @@ function dryRunProfileGameActivatedAt(
 
   const value = new Date(profile.gameActivatedAt);
   return Number.isNaN(value.getTime()) ? null : value;
+}
+
+/**
+ * A holdout (control group) guest never qualifies for the scenario; the
+ * deterministic split lets the effect report compare them with the rest.
+ */
+function appendDryRunHoldoutCheck(
+  rule: { id: string; holdoutPercent?: number },
+  context: DryRunContext,
+  blockers: string[],
+) {
+  if (!rule.holdoutPercent || !context.profile?.id) {
+    return;
+  }
+
+  if (
+    isInGameHoldout({
+      scenarioId: rule.id,
+      profileId: context.profile.id,
+      percent: rule.holdoutPercent,
+    })
+  ) {
+    blockers.push(
+      `Гость в контрольной группе (${rule.holdoutPercent}%): сценарий ему не выдаётся, чтобы измерить эффект`,
+    );
+  }
 }
 
 function appendDryRunAudienceCheck(
@@ -36952,90 +36652,6 @@ function percentOrNull(value: number, total: number) {
   }
 
   return Math.round((value / total) * 1000) / 10;
-}
-
-function addDays(value: Date, days: number) {
-  return new Date(value.getTime() + days * 24 * 60 * 60 * 1000);
-}
-
-function emptyGameEffect(): GuestGameEffect {
-  return {
-    windowDays: gameEffectWindowDays,
-    summary: {
-      eventsCount: 0,
-      measuredEvents: 0,
-      reachedGuests: 0,
-      returnedGuests: 0,
-      returnRatePercent: null,
-      postSessions: 0,
-      postPlayMinutes: 0,
-      productRevenue: 0,
-      balanceTopUps: 0,
-      totalRevenue: 0,
-      averageRevenuePerReturnedGuest: 0,
-    },
-    scenarios: [],
-  };
-}
-
-function mergeGameEffectScenarios(
-  scenarios: GuestGameEffectScenario[],
-): GuestGameEffect['summary'] {
-  const totalRevenue = sum(scenarios.map((scenario) => scenario.totalRevenue));
-  const returnedCount = sum(
-    scenarios.map((scenario) => scenario.returnedGuests),
-  );
-
-  return {
-    eventsCount: sum(scenarios.map((scenario) => scenario.eventsCount)),
-    measuredEvents: sum(scenarios.map((scenario) => scenario.measuredEvents)),
-    reachedGuests: sum(scenarios.map((scenario) => scenario.reachedGuests)),
-    returnedGuests: returnedCount,
-    returnRatePercent: percentOrNull(
-      returnedCount,
-      sum(scenarios.map((scenario) => scenario.reachedGuests)),
-    ),
-    postSessions: sum(scenarios.map((scenario) => scenario.postSessions)),
-    postPlayMinutes: sum(scenarios.map((scenario) => scenario.postPlayMinutes)),
-    productRevenue: sum(scenarios.map((scenario) => scenario.productRevenue)),
-    balanceTopUps: sum(scenarios.map((scenario) => scenario.balanceTopUps)),
-    totalRevenue,
-    averageRevenuePerReturnedGuest: returnedCount
-      ? Math.round(totalRevenue / returnedCount)
-      : 0,
-  };
-}
-
-function effectRecommendation({
-  status,
-  eventsCount,
-  reachedGuests,
-  returnedGuests,
-  totalRevenue,
-}: {
-  status: GuestGameEffectScenario['status'];
-  eventsCount: number;
-  reachedGuests: number;
-  returnedGuests: number;
-  totalRevenue: number;
-}) {
-  if (status === 'ACTIVE' && eventsCount === 0) {
-    return 'Сценарий активен, но событий еще нет: проверьте dry-run и batch по snapshot-фактам.';
-  }
-
-  if (reachedGuests > 0 && returnedGuests === 0) {
-    return 'События есть, возврата пока нет: проверьте ценность награды и условия повторного визита.';
-  }
-
-  if (returnedGuests > 0 && totalRevenue === 0) {
-    return 'Гости возвращаются, но денежный эффект не виден: проверьте продажи бара и пополнения после визита.';
-  }
-
-  if (totalRevenue > 0) {
-    return 'Есть измеримый денежный эффект: сравните его со стоимостью наград и масштабируйте аккуратно.';
-  }
-
-  return 'Эффект будет считаться по сессиям, продажам и пополнениям после игровых событий.';
 }
 
 function gameEconomyGuestKey(row: GuestGameReward | GuestGameEvent) {

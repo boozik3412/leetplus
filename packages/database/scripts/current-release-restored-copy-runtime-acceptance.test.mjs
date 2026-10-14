@@ -49,8 +49,8 @@ import {
 } from "./current-release-restored-copy-runtime-acceptance.cli.mjs";
 
 const RELEASE_SHA = "f".repeat(40);
-const MIGRATION = "20261007120000_guest_leaderboard";
-const MIGRATION_COUNT = 193;
+const MIGRATION = "20261014120000_guest_game_holdout";
+const MIGRATION_COUNT = 194;
 const SYSTEM_IDENTIFIER = "7676240383393093856";
 const FIXTURE_OWNER_UID = process.getuid?.() ?? 0;
 const DATABASE_URL =

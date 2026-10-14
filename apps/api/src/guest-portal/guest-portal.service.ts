@@ -97,6 +97,7 @@ import {
   GuestLeaderboardReadService,
   type GuestLeaderboardView,
 } from '../guest-leaderboard/guest-leaderboard-read.service';
+import { isInGameHoldout } from '../guest-game-effect/guest-game-effect-core';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   TenantExecutionAdmissionService,
@@ -13587,7 +13588,8 @@ export class GuestPortalService {
       await this.resolveContextLangameCheckInReadiness(context);
     const storeMissions = missions
       .filter((item) => matchesStore(item.storeIds, context.store.id))
-      .filter((item) => activePeriod(item.periodFrom, item.periodTo));
+      .filter((item) => activePeriod(item.periodFrom, item.periodTo))
+      .filter((item) => !guestPortalInHoldout(item, profile?.id));
     const portalCheckIn = buildPortalCheckInSummary({
       ready: checkInReadiness.ready,
       blockedReason: checkInReadiness.message,
@@ -13690,6 +13692,14 @@ export class GuestPortalService {
           (lootBox) =>
             entitledRuleIds.has(lootBox.id) ||
             !guestGameRuleBudgetExhausted(lootBox, budgetSpentByRuleId),
+        )
+        // A control-group guest does not see a standalone case unless they
+        // already hold one.
+        .filter(
+          (lootBox) =>
+            entitledRuleIds.has(lootBox.id) ||
+            lootBox.usageKind !== 'STANDALONE' ||
+            !guestPortalInHoldout(lootBox, profile?.id),
         ),
       publishedVisualLootBoxRefs,
     );
@@ -19520,6 +19530,19 @@ function lootBoxCaseRarity(value: unknown): GuestPortalLootBoxCaseRarity {
     parsed === 'common'
     ? parsed
     : 'common';
+}
+
+/** The holdout split of guest-game-effect, applied to what the guest sees. */
+function guestPortalInHoldout(
+  rule: { id: string; holdoutPercent?: number | null },
+  profileId: string | null | undefined,
+) {
+  if (!profileId) return false;
+  return isInGameHoldout({
+    scenarioId: rule.id,
+    profileId,
+    percent: rule.holdoutPercent,
+  });
 }
 
 function buildLootBoxOpenState(

@@ -17,6 +17,7 @@ export type GameEffectValues = Record<GameEffectMetric, number>;
 
 export type GameEffectVerdict =
   | "POSITIVE"
+  | "VISITS_ONLY"
   | "NEGATIVE"
   | "NO_EFFECT"
   | "NOT_ENOUGH_DATA";
@@ -159,6 +160,7 @@ export const GAME_EFFECT_SCENARIO_KIND_LABELS: Record<
 
 export const GAME_EFFECT_VERDICT_LABELS: Record<GameEffectVerdict, string> = {
   POSITIVE: "Есть эффект",
+  VISITS_ONLY: "Чаще ходят, не больше тратят",
   NEGATIVE: "Отрицательный",
   NO_EFFECT: "В пределах случайности",
   NOT_ENOUGH_DATA: "Мало данных",
@@ -170,6 +172,7 @@ export function gameEffectVerdictTone(
   verdict: GameEffectVerdict,
 ): GameEffectTone {
   if (verdict === "POSITIVE") return "good";
+  if (verdict === "VISITS_ONLY") return "muted";
   if (verdict === "NEGATIVE") return "bad";
   if (verdict === "NO_EFFECT") return "neutral";
   return "muted";
@@ -179,6 +182,8 @@ export function gameEffectVerdictHint(verdict: GameEffectVerdict) {
   switch (verdict) {
     case "POSITIVE":
       return "Участники стали ходить чаще или тратить больше, чем похожие гости, и разница больше случайных колебаний.";
+    case "VISITS_ONLY":
+      return "Участники ходят чаще похожих гостей, но денег приносят не больше — часто бонусы заменяют оплату с депозита.";
     case "NEGATIVE":
       return "Участники стали тратить меньше похожих гостей. Проверьте, не заменяют ли бонусы оплату деньгами.";
     case "NO_EFFECT":

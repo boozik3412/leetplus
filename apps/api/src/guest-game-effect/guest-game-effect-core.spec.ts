@@ -315,6 +315,14 @@ describe('guest game effect core', () => {
     expect(gameEffectVerdict(50, { ...base, visitDays: metric(2, true) })).toBe(
       'POSITIVE',
     );
+    // More visits but less money (not conclusive): not a plain success.
+    expect(
+      gameEffectVerdict(50, {
+        ...base,
+        visitDays: metric(2, true),
+        money: metric(-900, false),
+      }),
+    ).toBe('VISITS_ONLY');
     expect(gameEffectVerdict(5, { ...base, money: metric(300, true) })).toBe(
       'NOT_ENOUGH_DATA',
     );

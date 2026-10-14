@@ -28862,6 +28862,8 @@ function gameEffectVerdictLabel(verdict: GameEffectVerdict) {
   switch (verdict) {
     case 'POSITIVE':
       return 'Эффект есть: гости приходят чаще или тратят больше похожих гостей';
+    case 'VISITS_ONLY':
+      return 'Ходят чаще похожих гостей, но не тратят больше: проверьте, не заменяют ли бонусы оплату';
     case 'NEGATIVE':
       return 'Эффект отрицательный: участники стали тратить меньше похожих гостей';
     case 'NO_EFFECT':

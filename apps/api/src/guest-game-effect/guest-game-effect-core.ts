@@ -726,13 +726,16 @@ export function holdoutBucket(key: string): number {
 
 export type GameEffectVerdict =
   | 'POSITIVE'
+  | 'VISITS_ONLY'
   | 'NEGATIVE'
   | 'NO_EFFECT'
   | 'NOT_ENOUGH_DATA';
 
 /**
- * Money decides; visit days decide only when money is not conclusive the
- * other way. "No effect" means the interval covers zero, not "proven zero".
+ * Money decides. Without a conclusive money result, more visits count as a
+ * positive effect only if the money estimate is not below zero; otherwise
+ * guests come more often but do not spend more (VISITS_ONLY). "No effect"
+ * means the interval covers zero, not "proven zero".
  */
 export function gameEffectVerdict(
   measured: number,
@@ -747,6 +750,9 @@ export function gameEffectVerdict(
   const money = sign('money');
   if (money !== 0) return money > 0 ? 'POSITIVE' : 'NEGATIVE';
   const visits = sign('visitDays');
-  if (visits !== 0) return visits > 0 ? 'POSITIVE' : 'NEGATIVE';
+  if (visits < 0) return 'NEGATIVE';
+  if (visits > 0) {
+    return metrics.money.effectPerGuest >= 0 ? 'POSITIVE' : 'VISITS_ONLY';
+  }
   return 'NO_EFFECT';
 }

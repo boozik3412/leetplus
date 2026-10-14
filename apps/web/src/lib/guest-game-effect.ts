@@ -237,11 +237,15 @@ export function gameEffectMetricTone(view: GameEffectMetricView): GameEffectTone
 
 export function gameEffectHoldoutStatus(holdout: GameEffectHoldoutView | null) {
   if (!holdout) return "Контрольной группы нет";
-  if (holdout.pendingReason === "NOT_STARTED") return "Группа ещё не начата";
+  const since = holdout.startedAt
+    ? ` с ${new Date(holdout.startedAt).toLocaleDateString("ru-RU")}`
+    : "";
+  const base = `Контрольная группа ${holdout.percent}%${since}`;
+  if (holdout.pendingReason === "NOT_STARTED") return `${base}: ещё не начата`;
   if (holdout.pendingReason === "TOO_EARLY") {
-    return "Прошло меньше 7 дней — результат позже";
+    return `${base}: результат через 7 дней после старта`;
   }
-  return `Контрольная группа ${holdout.percent}%`;
+  return base;
 }
 
 function csvCell(value: unknown) {

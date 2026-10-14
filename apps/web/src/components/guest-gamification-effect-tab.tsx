@@ -104,7 +104,10 @@ export function GuestGamificationEffectTab({ canManage }: Props) {
   }
 
   return (
-    <section className="mt-6 space-y-5" aria-labelledby="effect-title">
+    <section
+      className="mt-6 min-w-0 space-y-5"
+      aria-labelledby="effect-title"
+    >
       <header className="overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-950 text-white shadow-sm dark:border-zinc-800">
         <div className="relative px-5 py-6 sm:px-7 sm:py-7">
           <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-cyan-400/15 blur-3xl" />
@@ -606,9 +609,6 @@ function HoldoutBlock({
       <div className="min-w-0">
         <p className="font-semibold text-zinc-800 dark:text-zinc-200">
           {gameEffectHoldoutStatus(scenario.holdout)}
-          {scenario.holdout?.startedAt
-            ? ` с ${new Date(scenario.holdout.startedAt).toLocaleDateString("ru-RU")}`
-            : ""}
         </p>
         {result ? (
           <p className="mt-1 leading-5 text-zinc-600 dark:text-zinc-400">

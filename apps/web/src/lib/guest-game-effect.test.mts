@@ -78,7 +78,7 @@ test("names verdict tones and holdout states", () => {
       result: null,
       pendingReason: "TOO_EARLY",
     }),
-    "Прошло меньше 7 дней — результат позже",
+    "Контрольная группа 10%: результат через 7 дней после старта",
   );
 });
 

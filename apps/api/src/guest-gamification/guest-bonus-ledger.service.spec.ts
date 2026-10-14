@@ -13,6 +13,7 @@ import {
   GuestBonusLedgerService,
   type GuestGameBonusLedgerDispatchResult,
 } from './guest-bonus-ledger.service';
+import { guestGameProfileStaffTestAutoMarkable } from './guest-staff-test';
 
 const user: AuthenticatedUser = {
   id: 'user-1',
@@ -1563,7 +1564,11 @@ describe('GuestBonusLedgerService', () => {
     });
     expect(prisma.guestGameProfile.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'profile-staff', tenantId: user.tenantId },
+        where: {
+          id: 'profile-staff',
+          tenantId: user.tenantId,
+          ...guestGameProfileStaffTestAutoMarkable(),
+        },
         data: expect.objectContaining({
           isStaffTest: true,
           staffTestReason: 'STAFF_PHONE_MATCH',
@@ -1620,7 +1625,11 @@ describe('GuestBonusLedgerService', () => {
     });
     expect(prisma.guestGameProfile.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'profile-staff', tenantId: user.tenantId },
+        where: {
+          id: 'profile-staff',
+          tenantId: user.tenantId,
+          ...guestGameProfileStaffTestAutoMarkable(),
+        },
         data: expect.objectContaining({
           isStaffTest: true,
           staffTestReason: 'STAFF_PHONE_MATCH',
@@ -1699,7 +1708,11 @@ describe('GuestBonusLedgerService', () => {
     });
     expect(prisma.guestGameProfile.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'profile-staff-phone', tenantId: user.tenantId },
+        where: {
+          id: 'profile-staff-phone',
+          tenantId: user.tenantId,
+          ...guestGameProfileStaffTestAutoMarkable(),
+        },
         data: expect.objectContaining({
           isStaffTest: true,
           staffTestReason: 'STAFF_PHONE_MATCH',
@@ -1750,7 +1763,11 @@ describe('GuestBonusLedgerService', () => {
     });
     expect(prisma.guestGameProfile.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'profile-staff-phone', tenantId: user.tenantId },
+        where: {
+          id: 'profile-staff-phone',
+          tenantId: user.tenantId,
+          ...guestGameProfileStaffTestAutoMarkable(),
+        },
         data: expect.objectContaining({
           isStaffTest: true,
           staffTestReason: 'STAFF_PHONE_MATCH',

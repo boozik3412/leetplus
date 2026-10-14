@@ -103,6 +103,7 @@ import {
   type TenantExecutionRequirement,
   type TenantExecutionRequirementInput,
 } from '../tenancy/tenant-execution-admission.service';
+import { guestGameProfileStaffTestAutoMarkable } from '../guest-gamification/guest-staff-test';
 
 const OTP_TTL_MINUTES = 10;
 const OTP_MAX_ATTEMPTS = 5;
@@ -3858,7 +3859,6 @@ export class GuestPortalService {
                 guest?.externalGuestId ??
                 'Гость клуба',
               ...profileConsentData,
-              ...staffTestData,
               status: 'ACTIVE',
               lastActivityAt: now,
             },
@@ -3885,6 +3885,9 @@ export class GuestPortalService {
             },
             select: { id: true, guestId: true },
           });
+      if (existingProfile) {
+        await this.markStaffTestProfile(tx, profile.id, staffTestData);
+      }
 
       await tx.guestPortalOtpChallenge.update({
         where: { id: challenge.id },
@@ -9340,7 +9343,6 @@ export class GuestPortalService {
           guest?.externalGuestId ??
           'Гость клуба',
         ...gameProfileConsentGrantData(TELEGRAM_AUTH_CONSENT_SOURCE, now),
-        ...staffTestData,
         status: 'ACTIVE',
         lastActivityAt: now,
       };
@@ -9364,6 +9366,7 @@ export class GuestPortalService {
               },
               select: { id: true, guestId: true },
             });
+      await this.markStaffTestProfile(tx, profile.id, staffTestData);
 
       if (existingProfile && existingProfile.id !== challenge.profileId) {
         await tx.guestGameProfile.update({
@@ -14827,6 +14830,20 @@ export class GuestPortalService {
     }
 
     return null;
+  }
+
+  // Staff marking of an existing profile never overrides the owner's
+  // confirmation that the person is a guest.
+  private async markStaffTestProfile(
+    tx: Prisma.TransactionClient,
+    profileId: string,
+    staffTestData: ReturnType<GuestPortalService['staffTestProfilePatch']>,
+  ) {
+    if (!('isStaffTest' in staffTestData)) return;
+    await tx.guestGameProfile.updateMany({
+      where: { id: profileId, ...guestGameProfileStaffTestAutoMarkable() },
+      data: staffTestData,
+    });
   }
 
   private staffTestProfilePatch(match: GuestPortalStaffTestMatch | null) {

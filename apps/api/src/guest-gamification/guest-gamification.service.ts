@@ -24675,13 +24675,18 @@ export class GuestGamificationService {
     return domainStores.length === 1 ? domainStores[0] : null;
   }
 
+  // Langame compares date_from/date_to with the club-local date_start, so a
+  // UTC dateTo hid every session started after local midnight in clubs east
+  // of UTC (Yekaterinburg: 19:00-24:00 UTC) until the UTC day rolled over.
   private checkInLookupPeriod(now: Date) {
     const from = new Date(now);
     from.setUTCDate(from.getUTCDate() - 2);
+    const to = new Date(now);
+    to.setUTCDate(to.getUTCDate() + 1);
 
     return {
       dateFrom: this.checkInDateParam(from),
-      dateTo: this.checkInDateParam(now),
+      dateTo: this.checkInDateParam(to),
     };
   }
 

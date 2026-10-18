@@ -14554,6 +14554,18 @@ describe('GuestGamificationService', () => {
         sessionPacket: true,
       });
     });
+
+    it('looks one UTC day ahead for sessions started after club-local midnight', () => {
+      const { service } = createService();
+
+      // 23:58 UTC is already 04:58 next day in Yekaterinburg; Langame
+      // filters by the club-local date_start.
+      expect(
+        (service as any).checkInLookupPeriod(
+          new Date('2026-10-14T23:58:00.000Z'),
+        ),
+      ).toEqual({ dateFrom: '2026-10-12', dateTo: '2026-10-15' });
+    });
   });
 
   describe('processEvent', () => {

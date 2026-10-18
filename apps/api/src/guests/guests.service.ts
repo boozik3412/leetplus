@@ -3595,13 +3595,17 @@ export class GuestsService {
     };
   }
 
+  // Langame filters by the club-local date_start: a UTC dateTo would hide
+  // sessions started after local midnight in clubs east of UTC.
   private liveSessionLookupPeriod(now: Date) {
     const from = new Date(now);
     from.setUTCDate(from.getUTCDate() - 2);
+    const to = new Date(now);
+    to.setUTCDate(to.getUTCDate() + 1);
 
     return {
       dateFrom: this.toDateParam(from),
-      dateTo: this.toDateParam(now),
+      dateTo: this.toDateParam(to),
     };
   }
 

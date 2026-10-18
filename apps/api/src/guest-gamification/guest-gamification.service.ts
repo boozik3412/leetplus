@@ -19922,7 +19922,9 @@ export class GuestGamificationService {
       where: {
         tenantId: user.tenantId,
         ruleType: 'LOOT_BOX',
-        status: { in: ['AVAILABLE', 'OPENING', 'CONSUMED'] },
+        // EXPIRED stays in so its APPROVED source reward is matched and not
+        // counted as an unclaimed reward forever (maxPendingRewards).
+        status: { in: ['AVAILABLE', 'OPENING', 'CONSUMED', 'EXPIRED'] },
         OR: [
           {
             sourceReward: {

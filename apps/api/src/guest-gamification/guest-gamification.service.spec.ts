@@ -9719,6 +9719,71 @@ describe('GuestGamificationService', () => {
       expect(langameClient.postEndpoint).not.toHaveBeenCalled();
     });
 
+    it('does not count a case reward whose case expired as unclaimed', async () => {
+      const { service, prisma } = createService();
+      const mission = activeMission({
+        id: 'mission-case',
+        rewardType: 'LOOT_BOX_ENTITLEMENT',
+      });
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([mission]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([
+        rewardResult({
+          id: 'expired-case-reward',
+          status: 'APPROVED',
+          rewardType: 'LOOT_BOX_ENTITLEMENT',
+          qualifiedAt: '2026-06-01T09:00:00.000Z',
+          mission: { id: mission.id, name: mission.name, status: 'ACTIVE' },
+        } as Partial<GuestGameReward>),
+      ]);
+      prisma.guestGameEntitlement.findMany.mockImplementation(({ where }) =>
+        Promise.resolve(
+          (where?.status?.in ?? []).includes('EXPIRED')
+            ? [
+                {
+                  id: 'expired-case',
+                  ruleId: 'lootbox-1',
+                  status: 'EXPIRED',
+                  rewardId: null,
+                  sourceRewardId: 'expired-case-reward',
+                  profileId: 'profile-1',
+                  guestId: 'guest-1',
+                  qualifiedAt: new Date('2026-06-01T09:00:00.000Z'),
+                  evidence: {
+                    source: 'mission_reward_admin_approval',
+                    missionId: mission.id,
+                  },
+                  sourceReward: {
+                    missionId: mission.id,
+                    rewardType: 'LOOT_BOX_ENTITLEMENT',
+                    evidence: null,
+                  },
+                },
+              ]
+            : [],
+        ),
+      );
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'regular_session',
+        sessionMinutes: 90,
+      });
+
+      expect(result.rules[0].blockers).not.toContainEqual(
+        expect.stringContaining('незабранных наград'),
+      );
+      expect(result.rules[0].reasons).toContain(
+        'Накопленные незабранные награды этого задания: 0/1',
+      );
+    });
+
     it('keeps the holdout (control group) out of a mission and a standalone case', async () => {
       const { service } = createService();
       const profile = profileFixture();

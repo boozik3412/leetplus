@@ -87,6 +87,11 @@ import {
   guestGameRuleBudgetExhausted,
   loadGuestGameRuleBudgetSpent,
 } from '../guest-gamification/guest-game-rule-budget';
+import {
+  guestGameLootBoxDailyLimitExhausted,
+  guestGameMissionTotalLimitExhausted,
+  loadGuestGameRuleLimitUsage,
+} from '../guest-gamification/guest-game-rule-limit-usage';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type {
   LangameGuestBalancesPortalResult,
@@ -13606,6 +13611,19 @@ export class GuestPortalService {
       context.tenant.id,
       { lootBoxes, missions: missionRules },
     );
+    // The same goes for a mission whose lifetime reward limit is used up and
+    // a case whose network-wide daily limit is reached for today.
+    const limitUsage = await loadGuestGameRuleLimitUsage(
+      this.prisma,
+      context.tenant.id,
+      {
+        missions: missionRules,
+        lootBoxes: lootBoxes.filter((item) =>
+          matchesStore(item.storeIds, context.store.id),
+        ),
+        timeZone: guestGameTimeZone(context.store.timeZone),
+      },
+    );
     const missionProgress = await this.buildMissionProgress(
       context.tenant.id,
       guest,
@@ -13617,6 +13635,7 @@ export class GuestPortalService {
       .filter(
         (item) => !guestGameRuleBudgetExhausted(item, budgetSpentByRuleId),
       )
+      .filter((item) => !guestGameMissionTotalLimitExhausted(item, limitUsage))
       .filter((item) =>
         shouldShowGuestPortalMission(
           item,
@@ -13691,7 +13710,8 @@ export class GuestPortalService {
         .filter(
           (lootBox) =>
             entitledRuleIds.has(lootBox.id) ||
-            !guestGameRuleBudgetExhausted(lootBox, budgetSpentByRuleId),
+            (!guestGameRuleBudgetExhausted(lootBox, budgetSpentByRuleId) &&
+              !guestGameLootBoxDailyLimitExhausted(lootBox, limitUsage)),
         )
         // A control-group guest does not see a standalone case unless they
         // already hold one.

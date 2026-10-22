@@ -14254,4 +14254,73 @@ describe('guest game module hides spent budgets', () => {
         .sort(),
     ).toEqual(['loot-open', 'loot-spent-held', 'loot-unlimited']);
   });
+
+  it('drops a case whose network-wide daily limit is reached unless the guest holds it', async () => {
+    const { prisma, service } = createService();
+    jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+      tenant: { id: 'tenant-1', name: 'LeetPlus', slug: 'demo' },
+      store: {
+        id: 'store-1',
+        publicSlug: 'pushkinskaya',
+        name: '1337-Pushkinskaya',
+        address: 'Pushkinskaya, 217',
+        timeZone: 'Asia/Yekaterinburg',
+        externalDomain: 'club-1',
+        externalClubId: '1',
+        integrationSourceId: null,
+      },
+    });
+    jest.spyOn(service as any, 'findGuest').mockResolvedValue(null);
+    jest.spyOn(service as any, 'findProfile').mockResolvedValue(null);
+    jest
+      .spyOn(service as any, 'findPortalLootBoxEntitlements')
+      .mockResolvedValue([
+        {
+          id: 'entitlement-held',
+          ruleId: 'loot-full-held',
+          status: 'AVAILABLE',
+          sourceEventType: 'SESSION_START',
+          storeId: 'store-1',
+          qualifiedAt: new Date('2026-09-20T13:20:00.000Z'),
+          evidence: null,
+        },
+      ]);
+    const daily = (id: string) => ({
+      ...lootBox(id, null),
+      limits: { totalPerDay: 30 },
+    });
+    prisma.guestGameLootBox.findMany.mockResolvedValue([
+      daily('loot-full'),
+      daily('loot-full-held'),
+      daily('loot-open'),
+    ]);
+    prisma.guestGameReward.groupBy.mockResolvedValue([]);
+    prisma.$queryRaw.mockImplementation((query: { strings?: string[] }) =>
+      Promise.resolve(
+        (query?.strings ?? []).join('').includes('"lootBoxId" = box.id')
+          ? [
+              { id: 'loot-full', issued: 30 },
+              { id: 'loot-full-held', issued: 31 },
+              { id: 'loot-open', issued: 29 },
+            ]
+          : [],
+      ),
+    );
+
+    const portal = await (service as any).buildPortalPayload({
+      sub: 'guest-1',
+      purpose: 'guest_portal',
+      tenantId: 'tenant-1',
+      storeId: 'store-1',
+      guestId: 'guest-1',
+      profileId: null,
+      phoneHash: 'phone-hash',
+    });
+
+    expect(
+      portal.gamification.lootBoxes
+        .map((item: { id: string }) => item.id)
+        .sort(),
+    ).toEqual(['loot-full-held', 'loot-open']);
+  });
 });

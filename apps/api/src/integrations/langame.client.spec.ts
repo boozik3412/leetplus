@@ -463,6 +463,52 @@ describe('LangameClient', () => {
     );
   });
 
+  it('rejects a master balance write answered with a non-zero error_code', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(
+      responseWithBody({
+        errors: [],
+        error_code: 5,
+        error_message: 'No permissions to access this route',
+      }),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(
+      client.adjustGuestBalanceByPhone(
+        'https://1171.langame.ru/public_api',
+        'request-token',
+        {
+          phone: '79999999999',
+          type: 'bonus_balance',
+          sum: 100,
+          comment: 'LeetPlus test',
+        },
+      ),
+    ).rejects.toThrow(
+      'Langame /master_api/guests/balance/phone returned an error: No permissions to access this route',
+    );
+  });
+
+  it('accepts a master balance write answered with error_code 0', async () => {
+    const body = { item: { guest_id: 1, balance: 0 }, error_code: 0 };
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(responseWithBody(body)) as typeof fetch;
+
+    await expect(
+      client.adjustGuestBalanceByPhone(
+        'https://1337.langame.ru/public_api',
+        'request-token',
+        {
+          phone: '79999999999',
+          type: 'bonus_balance',
+          sum: 10,
+          comment: 'LeetPlus test',
+        },
+      ),
+    ).resolves.toEqual(body);
+  });
+
   it('never lets a Langame balance write disable or exceed the mandatory timeout', async () => {
     const fetchMock = jest
       .fn()

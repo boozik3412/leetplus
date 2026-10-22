@@ -8466,6 +8466,37 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameLootBox.update).toHaveBeenCalled();
     });
 
+    it('lets limits and issuance conditions change while a wallet right is live', async () => {
+      const { service, prisma } = createService();
+      const row = {
+        ...activeLootBox({
+          id: 'loot-live',
+          storeIds: ['store-1'],
+          limits: { totalPerDay: 30, maxPendingRewards: 1 },
+        }),
+        tenantId: user.tenantId,
+        createdAt: now,
+        updatedAt: now,
+        createdByUser: null,
+      };
+      prisma.guestGameLootBox.findFirst.mockResolvedValue(row);
+      prisma.guestGameRewardWalletItem.count.mockResolvedValue(1);
+      prisma.guestGameEntitlement.count.mockResolvedValue(1);
+      prisma.guestGameLootBox.update.mockResolvedValue({
+        ...row,
+        limits: { totalPerDay: 60, maxPendingRewards: 1 },
+      });
+
+      await service.updateLootBox(user, 'loot-live', {
+        limits: { totalPerDay: 60, maxPendingRewards: 1 },
+        budgetAmount: 900000,
+        sessionType: 'packet_hours',
+      } as any);
+
+      expect(prisma.guestGameRewardWalletItem.count).not.toHaveBeenCalled();
+      expect(prisma.guestGameLootBox.update).toHaveBeenCalled();
+    });
+
     it('blocks restart and delete while an unopened wallet right is live', async () => {
       const { service, prisma } = createService();
       const row = {

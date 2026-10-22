@@ -26618,23 +26618,18 @@ function mapDelivery(row: DeliveryRow): GuestGameDelivery {
   };
 }
 
+// Fields an already earned, unopened case depends on: what it can drop and
+// whether the guest module still shows it. Opening a held case skips every
+// issuance check (limits, budget, trigger, session, time windows, audience,
+// anti-fraud), so those stay editable while guests hold unopened cases.
 const lootBoxSemanticFields = [
   'status',
-  'audienceId',
-  'segment',
   'storeIds',
   'usageKind',
-  'triggerKind',
   'rewardType',
   'rewardAmount',
   'rewardLabel',
   'probabilityRules',
-  'sessionType',
-  'periodRules',
-  'limits',
-  'budgetAmount',
-  'antiFraudRules',
-  'manualApprovalRequired',
 ] as const;
 
 function lootBoxSemanticUpdateChanges(

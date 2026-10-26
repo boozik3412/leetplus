@@ -12914,6 +12914,189 @@ describe('GuestPortalService', () => {
         walletState: 'CANCELED',
       });
     });
+
+    it('keeps a battle pass step reached after its step reward expired unopened', async () => {
+      const { prisma, service } = createService();
+
+      jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'LeetPlus', slug: 'demo' },
+        store: {
+          id: 'store-1',
+          publicSlug: 'pushkinskaya',
+          name: '1337-Pushkinskaya',
+          address: 'Pushkinskaya, 217',
+          timeZone: 'Asia/Yekaterinburg',
+          externalDomain: 'club-1',
+          externalClubId: '1',
+          integrationSourceId: null,
+        },
+      });
+      jest.spyOn(service as any, 'findGuest').mockResolvedValue({
+        id: 'guest-1',
+        tenantId: 'tenant-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+        externalGuestTypeId: null,
+        phoneMasked: '***6330',
+        emailMasked: null,
+        fullNameMasked: null,
+        phoneEncrypted: null,
+        currentCountHours: null,
+        lastSyncedAt: null,
+        isDisabled: false,
+      });
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: 'profile-1',
+        tenantId: 'tenant-1',
+        guestId: 'guest-1',
+        leadId: null,
+        displayName: 'Guest One',
+        contactMasked: '***6330',
+        phoneHash: 'phone-hash',
+        phoneEncrypted: null,
+        phoneConsentStatus: 'GRANTED',
+        phoneConsentSource: 'telegram',
+        phoneConsentAt: new Date('2026-06-25T08:00:00.000Z'),
+        telegramIdentity: null,
+        maxIdentity: null,
+        unsubscribedAt: null,
+        xp: 0,
+        level: 1,
+        status: 'ACTIVE',
+        isStaffTest: false,
+        staffTestReason: null,
+        staffTestMatchedAt: null,
+        lastActivityAt: null,
+      });
+      prisma.guestGameSeason.findMany.mockResolvedValue([
+        {
+          id: 'season-1',
+          tenantId: 'tenant-1',
+          name: 'Season 67',
+          seasonType: 'CLUB_SEASON',
+          status: 'ACTIVE',
+          storeIds: ['store-1'],
+          premiumEnabled: false,
+          periodFrom: new Date('2026-07-01T00:00:00.000Z'),
+          periodTo: new Date('2099-10-01T00:00:00.000Z'),
+          levels: [
+            {
+              level: 1,
+              xp: 0,
+              title: 'Start',
+              condition: null,
+              description: null,
+              freeReward: '0 XP',
+              premiumReward: null,
+            },
+            {
+              level: 2,
+              xp: 250,
+              title: 'Promo',
+              condition: null,
+              description: null,
+              freeReward: 'Promo',
+              premiumReward: null,
+            },
+            {
+              level: 3,
+              xp: 500,
+              title: 'Lootbox',
+              condition: null,
+              description: null,
+              freeReward: 'Lootbox',
+              premiumReward: null,
+            },
+          ],
+        },
+      ]);
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          id: 'step-1-reward',
+          status: 'PAID',
+          claimRequired: false,
+          deliveryRequestedAt: null,
+          claimExpiresAt: null,
+          walletItems: [],
+          sourceEntitlements: [],
+          lootBoxId: null,
+          missionId: null,
+          seasonId: 'season-1',
+          rewardType: 'BATTLE_PASS_REWARD',
+          rewardAmount: new Prisma.Decimal(0),
+          rewardLabel: '0 XP',
+          rewardRarity: null,
+          rewardRarityLabel: null,
+          rewardDropChance: null,
+          rewardCode: null,
+          evidence: { level: 1 },
+          qualifiedAt: new Date('2026-07-10T12:00:00.000Z'),
+          expiresAt: null,
+          lootBox: null,
+          mission: null,
+          season: { name: 'Season 67' },
+        },
+        // Step 2 case was never opened: its entitlement burned.
+        {
+          id: 'step-2-burned-case',
+          status: 'APPROVED',
+          claimRequired: false,
+          deliveryRequestedAt: null,
+          claimExpiresAt: null,
+          walletItems: [],
+          sourceEntitlements: [{ status: 'EXPIRED' }],
+          lootBoxId: null,
+          missionId: null,
+          seasonId: 'season-1',
+          rewardType: 'LOOT_BOX_ENTITLEMENT',
+          rewardAmount: new Prisma.Decimal(0),
+          rewardLabel: 'Promo',
+          rewardRarity: null,
+          rewardRarityLabel: null,
+          rewardDropChance: null,
+          rewardCode: null,
+          evidence: { level: 2 },
+          qualifiedAt: new Date('2026-07-11T12:00:00.000Z'),
+          expiresAt: null,
+          lootBox: null,
+          mission: null,
+          season: { name: 'Season 67' },
+        },
+      ]);
+
+      const portal = await (service as any).buildPortalPayload({
+        sub: 'profile-1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: 'guest-1',
+        profileId: 'profile-1',
+        phoneHash: 'phone-hash',
+      });
+
+      expect(portal.gamification.seasons[0]).toMatchObject({
+        id: 'season-1',
+        currentLevel: 3,
+        reachedLevels: 2,
+        readyRewards: 0,
+      });
+      expect(portal.gamification.seasons[0].levels[1]).toMatchObject({
+        level: 2,
+        reached: true,
+        current: false,
+      });
+      expect(portal.gamification.seasons[0].levels[2]).toMatchObject({
+        level: 3,
+        reached: false,
+        current: true,
+      });
+      expect(
+        portal.gamification.rewards.find(
+          (reward: { id: string }) => reward.id === 'step-2-burned-case',
+        ),
+      ).toMatchObject({ walletState: 'EXPIRED' });
+    });
   });
 
   describe('buildLoyalty', () => {

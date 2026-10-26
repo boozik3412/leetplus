@@ -15271,6 +15271,161 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it('keeps the ledger step boundary at a previous step reward that expired unopened', async () => {
+      const { service, prisma, configService } = createService();
+      configService.get.mockImplementation((key: string) =>
+        key === 'GUEST_GAME_LEDGER_EVALUATOR_MODE' ? 'SHADOW' : undefined,
+      );
+      const stepActivatedAt = new Date('2026-06-10T09:00:00.000Z');
+      const firstHalfAt = new Date('2026-06-10T09:15:00.000Z');
+      const currentEventAt = now;
+      const playTimeRules = {
+        schemaVersion: 2,
+        taskType: 'PLAY_TIME',
+        triggerKind: 'PLAY_TIME',
+        sessionType: 'HOURLY',
+        metric: {
+          aggregation: 'duration',
+          target: 60,
+          unit: 'minutes',
+        },
+      };
+      prisma.guestGameSeason.findMany.mockResolvedValue([
+        {
+          id: 'season-1',
+          name: 'Test season',
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+          periodFrom: null,
+          periodTo: null,
+          storeIds: [],
+          xpRules: {},
+          levels: [
+            { level: 1, title: 'Step one', activationRules: playTimeRules },
+            { level: 2, title: 'Step two', activationRules: playTimeRules },
+          ],
+        },
+      ]);
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          id: 'reward-step-1',
+          seasonId: 'season-1',
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          // The step-1 case burned unopened; the step is still completed.
+          status: 'EXPIRED',
+          qualifiedAt: stepActivatedAt,
+          expiresAt: new Date('2026-06-10T09:30:00.000Z'),
+        },
+        {
+          id: 'reward-step-2-current-event',
+          seasonId: 'season-1',
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          status: 'APPROVED',
+          qualifiedAt: currentEventAt,
+          expiresAt: null,
+        },
+      ]);
+      prisma.guestActivityFact.findMany.mockResolvedValue([
+        {
+          id: 'play-time-first-half',
+          factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+          confidence: 'EXACT',
+          happenedAt: firstHalfAt,
+          createdAt: firstHalfAt,
+          storeId: null,
+          externalDomain: 'club-1',
+          tariffName: null,
+          tariffType: null,
+          amount: null,
+          durationMinutes: 30,
+          evidence: null,
+          store: null,
+        },
+        {
+          id: 'play-time-current-event-half',
+          factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+          confidence: 'EXACT',
+          happenedAt: currentEventAt,
+          createdAt: currentEventAt,
+          storeId: null,
+          externalDomain: 'club-1',
+          tariffName: null,
+          tariffType: null,
+          amount: null,
+          durationMinutes: 30,
+          evidence: null,
+          store: null,
+        },
+      ]);
+      const baseRule = dryRunResult().rules[0];
+
+      await service.recordRuleDecisions(
+        user,
+        dryRunResult({
+          eventType: 'PLAY_HOUR',
+          occurredAt: currentEventAt.toISOString(),
+          rules: [
+            {
+              ...baseRule,
+              id: 'season-1',
+              kind: 'SEASON',
+              name: 'Test season',
+              triggerKind: 'PLAY_TIME',
+              eligible: true,
+              rewardType: 'BONUS',
+              rewardAmount: 100,
+              rewardLabel: 'Step two reward',
+              selectedRewardLabel: 'Step two reward',
+              xpDelta: 0,
+              battlePassLevel: 2,
+              battlePassStep: 2,
+              battlePassStepTitle: 'Step two',
+              reasons: ['step progress is complete'],
+              blockers: [],
+            },
+          ],
+        }),
+        {
+          eventId: 'event-step-2',
+          sourceFactId: 'play-time-current-event-half',
+          excludeSeasonRewardIds: ['reward-step-2-current-event'],
+        },
+      );
+
+      expect(prisma.guestGameReward.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: { notIn: ['reward-step-2-current-event'] },
+            status: { in: ['PENDING', 'APPROVED', 'PAID', 'EXPIRED'] },
+          }),
+        }),
+      );
+      expect(prisma.guestActivityFact.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            happenedAt: {
+              gte: stepActivatedAt,
+              lte: currentEventAt,
+            },
+          }),
+        }),
+      );
+      const shadowDecision =
+        prisma.guestGameRuleDecision.createMany.mock.calls[1][0].data[0];
+      expect(shadowDecision).toMatchObject({
+        ruleType: 'BATTLE_PASS',
+        ruleId: 'season-1',
+        evaluationMode: 'SHADOW',
+        status: 'MATCHED',
+      });
+      expect(shadowDecision.evidence).toEqual(
+        expect.objectContaining({
+          progress: expect.objectContaining({ current: 60, target: 60 }),
+        }),
+      );
+    });
+
     it('pairs a blocked live open attempt with shadow without granting entitlement', async () => {
       const { service, prisma, configService } = createService();
       configService.get.mockImplementation((key: string) =>

@@ -50,7 +50,9 @@ def internal_rules(blue, green, data):
     rules = []
     for slot in [blue, green]:
         rules.append(['-s', f'172.31.{slot}.3/32', '-d', f'172.31.{slot}.2/32', '-p', 'tcp', '-m', 'tcp', '--dport', '4000', '-j', 'RETURN'])
-    for source in [10, 11, 20, 21]:
+    # .10/.11 — API blue/green, .20/.21 — bonus и Langame workers,
+    # .23 — daily-report-worker (.22 занят внешним Langame worker).
+    for source in [10, 11, 20, 21, 23]:
         for destination, port in [(2, '5432'), (3, '6379')]:
             rules.append(['-s', f'172.31.{data}.{source}/32', '-d', f'172.31.{data}.{destination}/32', '-p', 'tcp', '-m', 'tcp', '--dport', port, '-j', 'RETURN'])
     return rules

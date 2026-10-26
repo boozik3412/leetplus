@@ -1993,6 +1993,12 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   (`AccessScopeService.fromPersisted`): `STORES` получает только свои клубы.
   Неактивный пользователь не получает ничего. Чат, заблокировавший бота,
   отвязывается. `/stop` в боте выключает получателя.
+- Сеть worker-а: `data` `172.31.42.23` (единственный новый источник к
+  PostgreSQL/Redis в `network-fence.py`), `egress` `172.31.43.23` (Langame и
+  Cloud.ru через `lp_leetplus_https`), `leetplus_telegram_edge_default`
+  `172.25.0.11` — только для HTTP CONNECT к Privoxy `172.25.0.1:18118`
+  (Telegram через Tor с удалённым DNS; `api.telegram.org` на хосте
+  резолвится в fake-IP и в `providers.json` не входит).
 - Таймер `lp-report.timer` включается вручную только после того, как на
   хосте созданы compose-сервис `daily-report-worker`, его файл секретов и
   разрешён egress к Telegram и Cloud.ru; `lp` перезапускает после миграций

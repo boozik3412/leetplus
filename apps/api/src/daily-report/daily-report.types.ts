@@ -36,6 +36,21 @@ export type DailyReportSessionRow = {
   guestKey: string | null;
   startedAt: Date;
   durationMinutes: number | null;
+  /** When the guest registered in the club system, if known. */
+  guestRegisteredAt?: Date | null;
+};
+
+/** Short guest summary of one club day. */
+export type DailyReportGuestSummary = {
+  /** Guests registered during the club day. */
+  newGuests: number;
+  /** Guests who also came during the previous 7 club days. */
+  regulars: number;
+  /** Average visit length, hours; null without durations. */
+  averageVisitHours: number | null;
+  /** Local hour (`HH:00`) with the most guests playing at once. */
+  peakHour: string | null;
+  peakGuests: number;
 };
 
 export type DailyReportStockRow = {
@@ -126,6 +141,8 @@ export type DailyReportClub = {
   };
   /** Share of PC hours used, if the club's computer count is known. */
   load: number | null;
+  computerCount: number | null;
+  guestSummary: DailyReportGuestSummary;
   refunds: number;
   topProducts: DailyReportProductLine[];
   outOfStock: DailyReportStockSignal[];

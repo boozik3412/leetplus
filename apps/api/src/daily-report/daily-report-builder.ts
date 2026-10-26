@@ -8,6 +8,7 @@ import type {
   DailyReportInput,
   DailyReportMetric,
   DailyReportSaleRow,
+  DailyReportGuestSummary,
   DailyReportSessionRow,
   DailyReportShift,
   DailyReportShiftRow,
@@ -252,6 +253,74 @@ function stockSignals(
   };
 }
 
+/** New and returning guests, visit length and the busiest hour of the day. */
+export function guestSummary(
+  window: ClubDayWindow,
+  sessions: readonly DailyReportSessionRow[],
+): DailyReportGuestSummary {
+  const daySessions = sessions.filter((session) =>
+    inWindow(session.startedAt, window),
+  );
+  const earlierFrom = window.from.getTime() - 7 * 24 * HOUR_MS;
+  const seenBefore = new Set(
+    sessions
+      .filter(
+        (session) =>
+          session.guestKey &&
+          session.startedAt.getTime() >= earlierFrom &&
+          session.startedAt < window.from,
+      )
+      .map((session) => session.guestKey as string),
+  );
+  const firstByGuest = new Map<string, DailyReportSessionRow>();
+  daySessions.forEach((session) => {
+    if (session.guestKey && !firstByGuest.has(session.guestKey)) {
+      firstByGuest.set(session.guestKey, session);
+    }
+  });
+  let newGuests = 0;
+  let regulars = 0;
+  firstByGuest.forEach((session, key) => {
+    if (seenBefore.has(key)) regulars += 1;
+    const registered = session.guestRegisteredAt;
+    if (registered && inWindow(registered, window)) newGuests += 1;
+  });
+
+  const durations = daySessions
+    .map((session) => session.durationMinutes)
+    .filter((value): value is number => value !== null && value > 0);
+  const averageVisitHours = durations.length
+    ? round2(
+        durations.reduce((sum, value) => sum + value, 0) /
+          durations.length /
+          60,
+      )
+    : null;
+
+  // Guests playing at each whole hour of the club day.
+  let peakHour: string | null = null;
+  let peakGuests = 0;
+  for (
+    let at = window.from.getTime() + HOUR_MS;
+    at < window.to.getTime();
+    at += HOUR_MS
+  ) {
+    const playing = new Set<string>();
+    sessions.forEach((session, index) => {
+      const start = session.startedAt.getTime();
+      const end = start + (session.durationMinutes ?? 0) * 60_000;
+      if (start <= at && at < end) {
+        playing.add(session.guestKey ?? `session:${index}`);
+      }
+    });
+    if (playing.size > peakGuests) {
+      peakGuests = playing.size;
+      peakHour = localTime(new Date(at), window.timeZone);
+    }
+  }
+  return { newGuests, regulars, averageVisitHours, peakHour, peakGuests };
+}
+
 function topProducts(sales: readonly DailyReportSaleRow[]) {
   return [...groupBy(sales, (sale) => sale.productKey).values()]
     .map((rows) => ({
@@ -355,6 +424,8 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
         store.computerCount && store.computerCount > 0
           ? round2(day.playHours / (store.computerCount * 24))
           : null,
+      computerCount: store.computerCount ?? null,
+      guestSummary: guestSummary(window, storeSessions),
       refunds: round2(refunds),
       topProducts: topProducts(daySales),
       outOfStock: stock.outOfStock,

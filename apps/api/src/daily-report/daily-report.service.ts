@@ -234,6 +234,7 @@ export class DailyReportService {
           externalGuestId: true,
           startedAt: true,
           durationMinutes: true,
+          guest: { select: { insertedAt: true } },
         },
       }),
       this.loadLatestStock(tenantId, storeIds),
@@ -312,6 +313,7 @@ export class DailyReportService {
           guestKey: row.guestId ?? row.externalGuestId ?? null,
           startedAt: row.startedAt!,
           durationMinutes: row.durationMinutes,
+          guestRegisteredAt: row.guest?.insertedAt ?? null,
         })),
       stock: stockRows,
       stockSales: stockSalesRows.map((row) => ({

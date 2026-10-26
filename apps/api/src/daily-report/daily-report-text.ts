@@ -34,6 +34,33 @@ function formatDayLabel(club: DailyReportClub) {
   return `${prevDay}.${prevMonth} 09:00 — ${day}.${month} 09:00`;
 }
 
+function guestLine(club: DailyReportClub) {
+  const summary = club.guestSummary;
+  const metrics = club.metrics;
+  const parts = [
+    withChange(
+      `🎮 Гости: ${formatNumber(metrics.guests.value)}`,
+      metrics.guests,
+    ),
+  ];
+  if (metrics.guests.value > 0) {
+    parts.push(
+      `новых ${formatNumber(summary.newGuests)}, постоянных ${formatNumber(summary.regulars)}`,
+    );
+    if (summary.averageVisitHours !== null) {
+      parts.push(
+        `в среднем ${formatNumber(summary.averageVisitHours)} ч за визит`,
+      );
+    }
+    if (summary.peakHour) {
+      parts.push(
+        `пик в ${summary.peakHour}: ${formatNumber(summary.peakGuests)}${club.computerCount ? ` из ${formatNumber(club.computerCount)} ПК` : ' одновременно'}`,
+      );
+    }
+  }
+  return parts.join('; ');
+}
+
 function clubBlock(club: DailyReportClub) {
   const lines: string[] = [];
   const metrics = club.metrics;
@@ -47,10 +74,10 @@ function clubBlock(club: DailyReportClub) {
       `бар ${formatRub(metrics.barRevenue.value)}`,
       metrics.barRevenue,
     ),
-    withChange(`${formatNumber(metrics.guests.value)} гостей`, metrics.guests),
   ];
   if (club.load !== null) head.push(`загрузка ${formatPercent(club.load)}`);
   lines.push(head.join(', '));
+  lines.push(guestLine(club));
 
   if (club.shifts.length) {
     lines.push('Смены:');

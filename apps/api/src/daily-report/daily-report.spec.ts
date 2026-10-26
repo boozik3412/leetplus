@@ -1,4 +1,8 @@
-import { buildDailyReport, shiftBelongsToDay } from './daily-report-builder';
+import {
+  buildDailyReport,
+  guestSummary,
+  shiftBelongsToDay,
+} from './daily-report-builder';
 import {
   DailyReportCommentaryService,
   unknownNumbers,
@@ -329,6 +333,51 @@ describe('daily report builder', () => {
       'a'.repeat(3000),
       `${'b'.repeat(3000)}\n\n${'c'.repeat(100)}`,
     ]);
+  });
+});
+
+describe('guest summary', () => {
+  const at = (local: string) => new Date(`${local}+04:00`);
+  const window = clubDayWindow('2026-10-26', IZHEVSK);
+
+  it('counts new and returning guests, visit length and the peak hour', () => {
+    const summary = guestSummary(window, [
+      // Came two days ago too: a regular.
+      {
+        storeId: 'izh',
+        guestKey: 'g1',
+        startedAt: at('2026-10-23T20:00:00'),
+        durationMinutes: 60,
+      },
+      {
+        storeId: 'izh',
+        guestKey: 'g1',
+        startedAt: at('2026-10-25T20:30:00'),
+        durationMinutes: 120,
+      },
+      // Registered during the day: new.
+      {
+        storeId: 'izh',
+        guestKey: 'g2',
+        startedAt: at('2026-10-25T20:45:00'),
+        durationMinutes: 60,
+        guestRegisteredAt: at('2026-10-25T20:40:00'),
+      },
+      {
+        storeId: 'izh',
+        guestKey: 'g3',
+        startedAt: at('2026-10-26T01:00:00'),
+        durationMinutes: 30,
+        guestRegisteredAt: at('2026-01-01T12:00:00'),
+      },
+    ]);
+    expect(summary).toEqual({
+      newGuests: 1,
+      regulars: 1,
+      averageVisitHours: 1.17,
+      peakHour: '21:00',
+      peakGuests: 2,
+    });
   });
 });
 

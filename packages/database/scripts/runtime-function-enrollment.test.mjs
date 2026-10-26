@@ -254,7 +254,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20261014120000_guest_game_holdout 194$/u,
+    /20261026120000_daily_report_bot 195$/u,
   );
 });
 

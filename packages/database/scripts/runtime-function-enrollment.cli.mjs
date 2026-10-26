@@ -24,12 +24,12 @@ Additional environment for --apply:
   RUNTIME_FUNCTION_ENROLLMENT_CONFIRM
 
 The exact confirmation value is:
-  APPLY_RUNTIME_FUNCTION_ENROLLMENT_V1 <database> <role> 20261014120000_guest_game_holdout 194
+  APPLY_RUNTIME_FUNCTION_ENROLLMENT_V1 <database> <role> 20261026120000_daily_report_bot 195
 
 Safety contract:
   - The command never creates a role, database, schema, table, or function.
   - The migration/admin DATABASE_URL must be different from the target role.
-  - PostgreSQL 16, completed migration 166, exact terminal migration 194 and exact count 194 are required.
+  - PostgreSQL 16, completed migration 166, exact terminal migration 195 and exact count 195 are required.
   - Only ten exact application functions receive EXECUTE: two delivery
     helpers, two staff-attachment invariant helpers, five sealed identity-email
     boundaries, and the PII-free initial OWNER invite SENT assertion.

@@ -83,6 +83,15 @@ Workers, очистка и запуск после перезагрузки пе
 (`WORKERS` в `lp.mjs`, `TimeoutStartSec` в `lp-worker@.service`). После
 изменения этих значений `lp` переустанавливается (см. ниже).
 
+Worker бота «Отчёт за сутки» (`daily-report-worker`, `lp-report.timer`, тик
+каждые 5 минут) включается отдельно и только после настройки хоста:
+compose-сервис по образцу `langame-daily-worker` со своим адресом в сетях
+`data`/`egress` и доступом к PostgreSQL в сетевом фенсе, файл секретов
+`/srv/leetplus/secrets/daily-report-worker.json` (`DATABASE_URL`,
+`INTEGRATION_ENCRYPTION_KEY`, `DAILY_REPORT_*`), `api.telegram.org` и
+`foundation-models.api.cloud.ru` в списке провайдеров egress. Затем
+`systemctl enable --now lp-report.timer`.
+
 ## Миграции
 
 Если в релизе есть миграции, которых нет в базе, `lp stage`/`lp deploy` перед

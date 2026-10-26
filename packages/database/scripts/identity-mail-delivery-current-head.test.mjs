@@ -22,7 +22,8 @@ const previousRelease191MigrationName =
   "20260908180000_external_langame_simple_onboarding";
 const previousRelease192MigrationName = "20261004090000_store_closures";
 const previousRelease193MigrationName = "20261007120000_guest_leaderboard";
-const releaseMigrationName = "20261014120000_guest_game_holdout";
+const previousRelease194MigrationName = "20261014120000_guest_game_holdout";
+const releaseMigrationName = "20261026120000_daily_report_bot";
 const predecessorName = "20260818020000_identity_mail_delivery_current_head_v1";
 const preterminalManifestDigest =
   "589dd0a39f2372041a284392c72ad6ed59027877e909e1a5d377b9017c662fda";
@@ -31,7 +32,7 @@ const productionHistoryPreterminalManifestDigest =
 const workerAssertSourceDigest =
   "645feb480c46c42d7d8ca2dae07ec1c82f88264ac5d0e30d26593a8e566f3f66";
 const workerAssertDefinitionDigest =
-  "2e13e49801065101c76a3d4bd661e4b20830f917a853a01ba19b723e7b0f19fc";
+  "a6548a4a2434c6891bc9ed20396cbb7a8e6429bf74d445d5de4ef3357337dec4";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -56,21 +57,22 @@ async function canonicalManifest() {
   return { entries, rows };
 }
 
-test("CURRENT194 preserves the reviewed CURRENT185 digest and advances readiness exactly once", async () => {
+test("CURRENT195 preserves the reviewed CURRENT185 digest and advances readiness exactly once", async () => {
   const { entries, rows } = await canonicalManifest();
-  assert.equal(entries.length, 194);
-  assert.equal(entries.at(-10), predecessorName);
-  assert.equal(entries.at(-9), guardMigrationName);
-  assert.equal(entries.at(-8), telegramMigrationName);
-  assert.equal(entries.at(-7), previousCurrentMigrationName);
-  assert.equal(entries.at(-6), previousCurrent189MigrationName);
-  assert.equal(entries.at(-5), currentMigrationName);
-  assert.equal(entries.at(-4), previousRelease191MigrationName);
-  assert.equal(entries.at(-3), previousRelease192MigrationName);
-  assert.equal(entries.at(-2), previousRelease193MigrationName);
+  assert.equal(entries.length, 195);
+  assert.equal(entries.at(-11), predecessorName);
+  assert.equal(entries.at(-10), guardMigrationName);
+  assert.equal(entries.at(-9), telegramMigrationName);
+  assert.equal(entries.at(-8), previousCurrentMigrationName);
+  assert.equal(entries.at(-7), previousCurrent189MigrationName);
+  assert.equal(entries.at(-6), currentMigrationName);
+  assert.equal(entries.at(-5), previousRelease191MigrationName);
+  assert.equal(entries.at(-4), previousRelease192MigrationName);
+  assert.equal(entries.at(-3), previousRelease193MigrationName);
+  assert.equal(entries.at(-2), previousRelease194MigrationName);
   assert.equal(entries.at(-1), releaseMigrationName);
   assert.equal(
-    sha256(`${rows.slice(0, -9).join("\n")}\n`),
+    sha256(`${rows.slice(0, -10).join("\n")}\n`),
     preterminalManifestDigest,
   );
 
@@ -269,39 +271,55 @@ test("CURRENT194 preserves the reviewed CURRENT185 digest and advances readiness
   );
   assert.match(release193Sql, /not CURRENT_193/u);
 
+  const release194Sql = normalizedBytes(
+    await readFile(
+      path.join(
+        migrationsRoot,
+        previousRelease194MigrationName,
+        "migration.sql",
+      ),
+    ),
+  ).toString("utf8");
+  assert.match(
+    release194Sql,
+    /ALTER TABLE public\."GuestGameMission"\s+ADD COLUMN "holdoutPercent" INTEGER NOT NULL DEFAULT 0/u,
+  );
+  assert.match(
+    release194Sql,
+    /migration_count IS DISTINCT FROM 194[\s\S]*20261014120000_guest_game_holdout/u,
+  );
+  assert.match(release194Sql, /not CURRENT_194/u);
+
   const releaseSql = normalizedBytes(
     await readFile(
       path.join(migrationsRoot, releaseMigrationName, "migration.sql"),
     ),
   ).toString("utf8");
-  assert.match(
-    releaseSql,
-    /ALTER TABLE public\."GuestGameMission"\s+ADD COLUMN "holdoutPercent" INTEGER NOT NULL DEFAULT 0/u,
-  );
-  assert.match(
-    releaseSql,
-    /ALTER TABLE public\."GuestGameLootBox"\s+ADD COLUMN "holdoutPercent" INTEGER NOT NULL DEFAULT 0/u,
-  );
+  assert.match(releaseSql, /CREATE TABLE public\."DailyReportBot"/u);
+  assert.match(releaseSql, /CREATE TABLE public\."DailyReportRecipient"/u);
+  assert.match(releaseSql, /CREATE TABLE public\."DailyReportDelivery"/u);
   assert.match(
     releaseSql,
     /CREATE OR REPLACE FUNCTION public\."identity_mail_delivery_worker_assert_v1"/u,
   );
   assert.match(
     releaseSql,
-    /migration_count IS DISTINCT FROM 194[\s\S]*20261014120000_guest_game_holdout/u,
+    /migration_count IS DISTINCT FROM 195[\s\S]*20261026120000_daily_report_bot/u,
   );
   assert.match(
     releaseSql,
-    /20261007120000_guest_leaderboard',\s*'20261014120000_guest_game_holdout'/u,
+    /20261014120000_guest_game_holdout',\s*'20261026120000_daily_report_bot'/u,
   );
-  assert.match(releaseSql, /not CURRENT_194/u);
-  // Additive only: two defaulted columns and their checks, no new table.
-  assert.doesNotMatch(releaseSql, /\b(?:DELETE|DROP|TRUNCATE|UPDATE)\b/iu);
-  assert.doesNotMatch(releaseSql, /CREATE TABLE/u);
+  assert.match(releaseSql, /not CURRENT_195/u);
+  // Additive only: three new tables, no existing row or table changes.
+  assert.doesNotMatch(
+    releaseSql,
+    /\b(?:DROP|TRUNCATE|DELETE\s+FROM|UPDATE\s+public)\b/iu,
+  );
   assert.doesNotMatch(releaseSql, /^\s*(?:BEGIN|COMMIT);/imu);
 });
 
-test("the active worker repository consumes the exact CURRENT194 receipt", async () => {
+test("the active worker repository consumes the exact CURRENT195 receipt", async () => {
   const repository = await readFile(
     path.join(
       repositoryRoot,
@@ -314,7 +332,7 @@ test("the active worker repository consumes the exact CURRENT194 receipt", async
     "utf8",
   );
   assert.match(repository, new RegExp(releaseMigrationName, "u"));
-  assert.match(repository, /CURRENT_MIGRATION_COUNT = 194 as const/u);
+  assert.match(repository, /CURRENT_MIGRATION_COUNT = 195 as const/u);
   assert.match(repository, new RegExp(preterminalManifestDigest, "u"));
   assert.match(
     repository,
@@ -326,7 +344,7 @@ test("the active worker repository consumes the exact CURRENT194 receipt", async
   );
 });
 
-test("the legacy inventory pins the CURRENT194 worker function definition", async () => {
+test("the legacy inventory pins the CURRENT195 worker function definition", async () => {
   const inventory = await readFile(
     path.join(
       databaseRoot,

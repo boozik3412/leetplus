@@ -41,7 +41,8 @@ const PRE_MIGRATE_DUMPS = `${ROOT}/backups/pre-migrate`;
 const SLOTS = ['blue', 'green'];
 const PORTS = { blue: { web: 13100, api: 14100 }, green: { web: 13200, api: 14200 } };
 // The daily worker syncs 1337 (~40 min) and then every connected external network.
-const WORKERS = { 'bonus-ledger-worker': 16 * 60, 'langame-daily-worker': 100 * 60 };
+// The daily report worker ticks every 5 min; its 09:25 MSK data refresh is the longest step.
+const WORKERS = { 'bonus-ledger-worker': 16 * 60, 'langame-daily-worker': 100 * 60, 'daily-report-worker': 30 * 60 };
 // Same checks that branch protection requires for main.
 const REQUIRED_CHECKS = [
   'Release impact classification',
@@ -52,7 +53,7 @@ const REQUIRED_CHECKS = [
 ];
 const LEGACY_UNITS = { timers: ['leetplus-compose-bonus.timer', 'leetplus-compose-daily.timer'], boot: 'leetplus-compose-runtime.service' };
 const LP_UNITS = { timers: ['lp-bonus.timer', 'lp-daily.timer', 'lp-cleanup.timer'], boot: 'lp-runtime.service' };
-const WORKER_TIMERS = ['lp-bonus.timer', 'lp-daily.timer'];
+const WORKER_TIMERS = ['lp-bonus.timer', 'lp-daily.timer', 'lp-report.timer'];
 const MUTATING = new Set(['build', 'stage', 'switch', 'rollback', 'deploy', 'adopt', 'cleanup']);
 
 class Stop extends Error {}
@@ -347,6 +348,9 @@ function preMigrationDump(sha) {
 }
 
 async function withWorkersPaused(fn) {
+  // Restart only the timers that ran before: a worker whose compose service is
+  // not set up yet (its timer never enabled) must stay off.
+  const running = WORKER_TIMERS.filter(unit => run('systemctl', ['is-active', unit], { allowFail: true }).out === 'active');
   run('systemctl', ['stop', ...WORKER_TIMERS]);
   try {
     const deadline = Date.now() + 15 * 60_000;
@@ -359,7 +363,7 @@ async function withWorkersPaused(fn) {
     }
     return await fn();
   } finally {
-    run('systemctl', ['start', ...WORKER_TIMERS], { allowFail: true });
+    if (running.length) run('systemctl', ['start', ...running], { allowFail: true });
   }
 }
 
@@ -633,7 +637,7 @@ function status() {
   console.log(`database migrations: ${db.applied.size} (last ${[...db.applied.keys()].pop()})${db.unfinished.length ? `, UNFINISHED ${db.unfinished.join(', ')}` : ''}`);
   const workerImage = readJson(COMPOSE).services['bonus-ledger-worker']?.labels?.['ru.leetplus.release'];
   console.log(`workers run release: ${workerImage?.slice(0, 8) ?? '?'}`);
-  for (const unit of [...LP_UNITS.timers, LP_UNITS.boot, ...LEGACY_UNITS.timers, LEGACY_UNITS.boot, 'leetplus-compose-backup.timer', 'leetplus-compose-network-refresh.timer']) {
+  for (const unit of [...LP_UNITS.timers, 'lp-report.timer', LP_UNITS.boot, ...LEGACY_UNITS.timers, LEGACY_UNITS.boot, 'leetplus-compose-backup.timer', 'leetplus-compose-network-refresh.timer']) {
     console.log(`  ${unit.padEnd(40)} ${unitState(unit)}`);
   }
   const free = run('df', ['-h', '--output=avail', ROOT]).out.split('\n').pop().trim();

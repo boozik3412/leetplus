@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { BrandingSettingsForm } from "@/components/branding-settings-form";
+import { DailyReportBotSettings } from "@/components/daily-report-bot-settings";
 import { LangameSettingsForm } from "@/components/langame-settings-form";
 import type { BrandingSettings } from "@/lib/branding-settings";
 import type { LangameSettings } from "@/lib/langame-settings";
@@ -122,6 +123,8 @@ export function SettingsWorkspace() {
           title="Брендинг не загрузился"
         />
       )}
+
+      <DailyReportBotSettings />
 
       {state.langameSettings ? (
         <LangameSettingsForm initialSettings={state.langameSettings} />

@@ -51,6 +51,15 @@ const REQUIRED_CHECKS = [
   'Release critical pilot HTTP and fresh store scope',
   'Release critical PostgreSQL assortment isolation',
 ];
+// daily-report-worker uses the fence addresses of langame-daily-worker (.21):
+// the attested legacy network fence admits only fixed sources to PostgreSQL.
+// One address means one container at a time: the report tick skips while the
+// nightly sync runs, and the sync waits for a running tick to finish.
+const ADDRESS_PEERS = {
+  'daily-report-worker': { peer: 'langame-daily-worker', whileBusy: 'skip' },
+  'langame-daily-worker': { peer: 'daily-report-worker', whileBusy: 'wait' },
+};
+const PEER_WAIT_SEC = 5 * 60;
 const LEGACY_UNITS = { timers: ['leetplus-compose-bonus.timer', 'leetplus-compose-daily.timer'], boot: 'leetplus-compose-runtime.service' };
 const LP_UNITS = { timers: ['lp-bonus.timer', 'lp-daily.timer', 'lp-cleanup.timer'], boot: 'lp-runtime.service' };
 const WORKER_TIMERS = ['lp-bonus.timer', 'lp-daily.timer', 'lp-report.timer'];
@@ -523,11 +532,28 @@ async function switchTo(target, { reason }) {
   log(`done: ${target} serves ${sha.slice(0, 8)}; ${current} stays up as instant rollback (lp rollback)`);
 }
 
+export function addressPeerAction(name, peerRunning) {
+  const rule = ADDRESS_PEERS[name];
+  return rule && peerRunning ? rule.whileBusy : 'run';
+}
+
 async function worker(name) {
   const timeoutSec = WORKERS[name];
   if (!timeoutSec) fail(`Unknown worker ${name}`);
   const existing = containerInfo(`${PROJECT}-${name}`);
   if (existing.running) fail(`${name} is still running from a previous tick`);
+  const peer = ADDRESS_PEERS[name]?.peer;
+  const peerRunning = () => Boolean(peer) && containerInfo(`${PROJECT}-${peer}`).running === true;
+  const action = addressPeerAction(name, peerRunning());
+  if (action === 'skip') { log(`${name}: ${peer} is running on the shared address, skipping this tick`); return; }
+  if (action === 'wait') {
+    log(`${name}: waiting for ${peer} to release the shared address`);
+    const deadline = Date.now() + PEER_WAIT_SEC * 1000;
+    while (peerRunning()) {
+      if (Date.now() > deadline) fail(`${peer} still holds the shared address after ${PEER_WAIT_SEC / 60} min`);
+      await sleep(5000);
+    }
+  }
   compose(['up', '--no-start', '--no-deps', '--force-recreate', name], { timeout: 120_000 });
   const result = docker(['start', '--attach', `${PROJECT}-${name}`], { allowFail: true, timeout: timeoutSec * 1000, inherit: true });
   const state = inspect(`${PROJECT}-${name}`)?.State;

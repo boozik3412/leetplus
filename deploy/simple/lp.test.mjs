@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { backupsToPrune, migrationScript, planSchema } from './lp.mjs';
+import { addressPeerAction, backupsToPrune, migrationScript, planSchema } from './lp.mjs';
 
 const sum = char => char.repeat(64);
 const db = (entries, unfinished = []) => ({ applied: new Map(entries), unfinished });
@@ -56,4 +56,12 @@ test('backupsToPrune keeps 7 days, nightly runs for 14 days and the 3 newest', (
   // A stalled job: only old backups exist, the 3 newest survive.
   const old = ['backup-20260801T010000Z.lpbackup', 'backup-20260802T010000Z.lpbackup', 'backup-20260803T010000Z.lpbackup', 'backup-20260804T010000Z.lpbackup'];
   assert.deepEqual(backupsToPrune(old, now), ['backup-20260801T010000Z.lpbackup']);
+});
+
+test('workers sharing a fence address never run together', () => {
+  assert.equal(addressPeerAction('daily-report-worker', true), 'skip');
+  assert.equal(addressPeerAction('daily-report-worker', false), 'run');
+  assert.equal(addressPeerAction('langame-daily-worker', true), 'wait');
+  assert.equal(addressPeerAction('langame-daily-worker', false), 'run');
+  assert.equal(addressPeerAction('bonus-ledger-worker', true), 'run');
 });

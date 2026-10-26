@@ -37,7 +37,7 @@ if [[ "${actual_subnet}" != "${network_subnet}" || "${actual_gateway}" != "${lis
   exit 2
 fi
 
-if ! ip -4 addr show | grep -Fq "${listener_ip}/"; then
+if ! ip -4 addr show | grep -F "${listener_ip}/" >/dev/null; then
   echo "Required Docker bridge address ${listener_ip} is absent." >&2
   exit 2
 fi

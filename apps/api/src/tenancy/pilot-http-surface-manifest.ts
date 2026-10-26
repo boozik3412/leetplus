@@ -245,6 +245,7 @@ const definitions: readonly ControllerDefinition[] = [
         'GET',
         [
           'assortment',
+          'daily',
           'operations',
           'inventory-turnover',
           'assortment-matrix',
@@ -259,13 +260,21 @@ const definitions: readonly ControllerDefinition[] = [
           'export',
         ],
       ],
-      ['POST', ['oos-exclusions', 'email', 'digests/email']],
+      [
+        'POST',
+        ['daily/commentary', 'oos-exclusions', 'email', 'digests/email'],
+      ],
       ['DELETE', ['oos-exclusions/:id']],
       ['PATCH', ['recommendations/:key/state']],
     ],
     overrides: {
       ...assortmentOutboundOverrides,
       'GET /reports/assortment': { profile: 'STORES_VERIFIED' },
+      'GET /reports/daily': { profile: 'STORES_VERIFIED' },
+      'POST /reports/daily/commentary': {
+        effect: 'OUTBOUND',
+        profile: 'STORES_VERIFIED',
+      },
       'GET /reports/operations': { profile: 'STORES_VERIFIED' },
       'GET /reports/inventory-turnover': { profile: 'STORES_VERIFIED' },
       'GET /reports/assortment-matrix': { profile: 'STORES_VERIFIED' },

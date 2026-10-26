@@ -631,10 +631,10 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(335);
-    expect(allowed).toHaveLength(273);
-    expect(blocked).toHaveLength(62);
-    expect(outbound).toHaveLength(21);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(337);
+    expect(allowed).toHaveLength(274);
+    expect(blocked).toHaveLength(63);
+    expect(outbound).toHaveLength(22);
     expect(
       PILOT_HTTP_SURFACE_MANIFEST.filter((entry) =>
         entry.gaps.includes('STORE_SCOPE_NOT_ENFORCED_WITH_ALLOWED_STORE_IDS'),
@@ -674,6 +674,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       'GET /products/summary',
       'GET /reports/assortment',
       'GET /reports/assortment-matrix',
+      'GET /reports/daily',
       'GET /reports/export',
       'GET /reports/inventory-turnover',
       'GET /reports/lfl',

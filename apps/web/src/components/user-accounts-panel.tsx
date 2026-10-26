@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AuthUser } from "@/lib/auth";
 import { canAccessPath, type Capability } from "@/lib/permissions";
 import {
@@ -441,6 +441,33 @@ export function UserAccountsPanel({
   }>({ type: "idle", message: "" });
   const [isSaving, setIsSaving] = useState(false);
   const [isRoleSaving, setIsRoleSaving] = useState(false);
+  // On narrow screens the editors sit below the lists, so a tap that only
+  // changes state looks like nothing happened. Scroll the editor into view.
+  const accountEditorRef = useRef<HTMLElement>(null);
+  const roleEditorRef = useRef<HTMLFormElement>(null);
+  const [editorReveal, setEditorReveal] = useState<{
+    target: "account" | "role";
+    seq: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!editorReveal) {
+      return;
+    }
+
+    const element =
+      editorReveal.target === "account"
+        ? accountEditorRef.current
+        : roleEditorRef.current;
+    revealEditorOnNarrowScreen(element);
+  }, [editorReveal]);
+
+  function requestEditorReveal(target: "account" | "role") {
+    setEditorReveal((current) => ({
+      target,
+      seq: (current?.seq ?? 0) + 1,
+    }));
+  }
 
   const selectedUser = selectedId
     ? (users.find((account) => account.id === selectedId) ?? null)
@@ -648,6 +675,7 @@ export function UserAccountsPanel({
     setCreatedInviteUrl(null);
     setCopyStatus("");
     setStatus({ type: "idle", message: "" });
+    requestEditorReveal("account");
   }
 
   function startEdit(account: UserAccount) {
@@ -657,6 +685,7 @@ export function UserAccountsPanel({
     setCreatedInviteUrl(null);
     setCopyStatus("");
     setStatus({ type: "idle", message: "" });
+    requestEditorReveal("account");
   }
 
   function startEditInvite(invite: UserInvite) {
@@ -666,6 +695,7 @@ export function UserAccountsPanel({
     setCreatedInviteUrl(invite.registrationUrl ?? null);
     setCopyStatus("");
     setStatus({ type: "idle", message: "" });
+    requestEditorReveal("account");
   }
 
   function updateStoreSelection(storeId: string, checked: boolean) {
@@ -718,6 +748,7 @@ export function UserAccountsPanel({
     setRoleEditorMode("new");
     setRoleForm(createEmptyRoleForm());
     setRoleStatus({ type: "idle", message: "" });
+    requestEditorReveal("role");
   }
 
   function startCreateRoleFromSystem(role: UserRoleOption) {
@@ -734,6 +765,7 @@ export function UserAccountsPanel({
       permissions: [...role.permissions],
     });
     setRoleStatus({ type: "idle", message: "" });
+    requestEditorReveal("role");
   }
 
   function togglePermissionSection(sectionId: string) {
@@ -753,6 +785,7 @@ export function UserAccountsPanel({
     setRoleEditorMode("custom");
     setRoleForm(roleFormFromCustomRole(role));
     setRoleStatus({ type: "idle", message: "" });
+    requestEditorReveal("role");
   }
 
   function updateRolePermission(permission: Capability, checked: boolean) {
@@ -1145,7 +1178,10 @@ export function UserAccountsPanel({
         </div>
       </section>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+      <section
+        ref={accountEditorRef}
+        className="scroll-mt-4 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950"
+      >
         <div>
           <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
             {selectedUser
@@ -1745,8 +1781,9 @@ export function UserAccountsPanel({
 
           {isRoleEditorOpen ? (
             <form
+              ref={roleEditorRef}
               onSubmit={saveAccessRole}
-              className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+              className="scroll-mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
             >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -2049,4 +2086,18 @@ function StoreCheckbox({
       />
     </label>
   );
+}
+
+function revealEditorOnNarrowScreen(element: HTMLElement | null) {
+  if (!element || window.matchMedia("(min-width: 64rem)").matches) {
+    return;
+  }
+
+  const reduceMotion = window.matchMedia(
+    "(prefers-reduced-motion: reduce)",
+  ).matches;
+  element.scrollIntoView({
+    behavior: reduceMotion ? "auto" : "smooth",
+    block: "start",
+  });
 }

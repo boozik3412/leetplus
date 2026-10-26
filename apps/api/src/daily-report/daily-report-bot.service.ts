@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -16,6 +17,8 @@ import {
 } from './daily-report-telegram';
 
 export type DailyReportBotSettings = {
+  /** Only a platform admin sets the token; the bot is one for every network. */
+  canManageBot: boolean;
   bot: {
     connected: boolean;
     status: 'PENDING' | 'READY' | 'INVALID' | null;
@@ -39,9 +42,11 @@ export type DailyReportBotSettings = {
 };
 
 /**
- * Owner settings of the team bot: the encrypted token and the users who get
- * the report. No Telegram call happens here; the worker checks the token and
- * links chats, so the API keeps no new egress.
+ * One report bot for the whole platform: a platform admin stores its
+ * encrypted token (the single `DailyReportBot` row; `tenantId` is the network
+ * of the admin who saved it). Each network's owner ticks who gets that
+ * network's report. No Telegram call happens here; the worker checks the
+ * token and links chats, so the API keeps no new egress.
  */
 @Injectable()
 export class DailyReportBotService {
@@ -54,9 +59,9 @@ export class DailyReportBotService {
   async getSettings(user: AuthenticatedUser): Promise<DailyReportBotSettings> {
     const { tenantId } = await this.freshStoreScope.assertNetwork(user);
     const [bot, users, recipients] = await Promise.all([
-      this.prisma.dailyReportBot.findUnique({ where: { tenantId } }),
+      this.platformBot(),
       this.prisma.user.findMany({
-        where: { tenantId, isActive: true, isPlatformAdmin: false },
+        where: { tenantId, isActive: true },
         orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
         select: {
           id: true,
@@ -80,12 +85,13 @@ export class DailyReportBotService {
     ]);
     const byUser = new Map(recipients.map((row) => [row.userId, row]));
     return {
+      canManageBot: user.isPlatformAdmin,
       bot: {
         connected: Boolean(bot),
         status:
           (bot?.status as DailyReportBotSettings['bot']['status']) ?? null,
         botUsername: bot?.botUsername ?? null,
-        tokenHint: bot?.tokenHint ?? null,
+        tokenHint: user.isPlatformAdmin ? (bot?.tokenHint ?? null) : null,
         lastError: bot?.lastError ?? null,
         checkedAt: bot?.checkedAt?.toISOString() ?? null,
       },
@@ -116,43 +122,55 @@ export class DailyReportBotService {
 
   async saveToken(user: AuthenticatedUser, body: { token?: unknown }) {
     const { tenantId } = await this.freshStoreScope.assertNetwork(user);
+    this.assertPlatformAdmin(user);
     const token = normalizeBotToken(body?.token);
     if (!token) {
       throw new BadRequestException(
         'Токен должен выглядеть как 1234567890:AA… — скопируйте его из BotFather целиком',
       );
     }
+    const current = await this.platformBot();
+    // The same bot under a new token keeps its chats; another bot cannot
+    // write to chats linked through the old one.
+    const sameBot =
+      current !== null &&
+      botIdOf(current.tokenHint) === botIdOf(tokenHint(token));
     const data = {
       tokenCiphertext: this.encryption.encrypt(token, 'integration'),
       tokenHint: tokenHint(token),
-      botUsername: null,
+      botUsername: sameBot ? current.botUsername : null,
       status: 'PENDING',
       lastError: null,
       checkedAt: null,
-      updateOffset: 0,
+      updateOffset: sameBot ? current.updateOffset : 0,
       updatedByUserId: user.id,
     };
     await this.prisma.$transaction([
+      this.prisma.dailyReportBot.deleteMany({
+        where: { tenantId: { not: tenantId } },
+      }),
       this.prisma.dailyReportBot.upsert({
         where: { tenantId },
         create: { tenantId, ...data },
         update: data,
       }),
-      // A new bot cannot write to chats linked through the old one.
-      this.prisma.dailyReportRecipient.updateMany({
-        where: { tenantId },
-        data: { chatId: null, telegramName: null, linkedAt: null },
-      }),
+      ...(sameBot
+        ? []
+        : [
+            this.prisma.dailyReportRecipient.updateMany({
+              data: { chatId: null, telegramName: null, linkedAt: null },
+            }),
+          ]),
     ]);
     return this.getSettings(user);
   }
 
   async deleteToken(user: AuthenticatedUser) {
-    const { tenantId } = await this.freshStoreScope.assertNetwork(user);
+    await this.freshStoreScope.assertNetwork(user);
+    this.assertPlatformAdmin(user);
     await this.prisma.$transaction([
-      this.prisma.dailyReportBot.deleteMany({ where: { tenantId } }),
+      this.prisma.dailyReportBot.deleteMany(),
       this.prisma.dailyReportRecipient.updateMany({
-        where: { tenantId },
         data: { chatId: null, telegramName: null, linkedAt: null },
       }),
     ]);
@@ -184,10 +202,7 @@ export class DailyReportBotService {
   async createLink(user: AuthenticatedUser, userId: string) {
     const { tenantId } = await this.freshStoreScope.assertNetwork(user);
     await this.assertTenantUser(tenantId, userId);
-    const bot = await this.prisma.dailyReportBot.findUnique({
-      where: { tenantId },
-      select: { botUsername: true, status: true },
-    });
+    const bot = await this.platformBot();
     if (!bot?.botUsername || bot.status !== 'READY') {
       throw new BadRequestException(
         'Бот ещё не проверен: подождите пару минут после сохранения токена',
@@ -212,11 +227,31 @@ export class DailyReportBotService {
     return { url: `https://t.me/${bot.botUsername}?start=${code}` };
   }
 
+  /** The platform's bot: one row; the newest wins if an old one lingers. */
+  private platformBot() {
+    return this.prisma.dailyReportBot.findFirst({
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  private assertPlatformAdmin(user: AuthenticatedUser) {
+    if (!user.isPlatformAdmin) {
+      throw new ForbiddenException(
+        'Бота отчётов подключает администратор платформы',
+      );
+    }
+  }
+
   private async assertTenantUser(tenantId: string, userId: string) {
     const target = await this.prisma.user.findFirst({
-      where: { tenantId, id: userId, isActive: true, isPlatformAdmin: false },
+      where: { tenantId, id: userId, isActive: true },
       select: { id: true },
     });
     if (!target) throw new NotFoundException('Пользователь не найден');
   }
+}
+
+/** The numeric bot id from a hint such as `1234567890:…abcd`. */
+function botIdOf(hint: string) {
+  return hint.split(':')[0];
 }

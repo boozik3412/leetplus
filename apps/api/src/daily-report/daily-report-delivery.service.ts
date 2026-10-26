@@ -27,10 +27,11 @@ import {
 import type { DailyReport } from './daily-report.types';
 
 /**
- * One tick of the team bot (the worker runs it every few minutes):
- * check the token, link chats from `/start <code>`, refresh today's data,
- * send the morning report at 10:00 Moscow time and a follow-up when a shift
- * that was open at 10:00 closes.
+ * One tick of the platform's report bot (the worker runs it every few
+ * minutes): check the token, link chats from `/start <code>`, refresh today's
+ * data of every network with recipients, send each recipient the morning
+ * report of their own network at 10:00 Moscow time and a follow-up when a
+ * shift that was open at 10:00 closes.
  */
 
 export const DELIVERY_TIME_ZONE = 'Europe/Moscow';
@@ -134,16 +135,18 @@ export class DailyReportDeliveryService {
       followUps: 0,
       failures: [],
     };
-    const bots = await this.prisma.dailyReportBot.findMany();
-    for (const bot of bots) {
-      result.bots += 1;
-      try {
-        await this.tickBot(bot, now, deps, result);
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        this.logger.warn(`Daily report bot ${bot.tenantId}: ${reason}`);
-        result.failures.push(`${bot.tenantId}: ${reason}`);
-      }
+    // One bot for the platform; the newest row wins if an old one lingers.
+    const bot = await this.prisma.dailyReportBot.findFirst({
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (!bot) return result;
+    result.bots = 1;
+    try {
+      await this.tickBot(bot, now, deps, result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Daily report bot: ${reason}`);
+      result.failures.push(reason);
     }
     return result;
   }
@@ -165,7 +168,9 @@ export class DailyReportDeliveryService {
       clock.minutes >= REFRESH_FROM_MINUTE &&
       bot.refreshedForDate !== clock.date
     ) {
-      await this.refresh(bot.tenantId, clock.date, true, now, deps.refresh);
+      for (const tenantId of await this.recipientTenants()) {
+        await this.refresh(tenantId, clock.date, true, now, deps.refresh);
+      }
       await this.prisma.dailyReportBot.update({
         where: { id: bot.id },
         data: { refreshedForDate: clock.date, refreshedAt: now },
@@ -176,13 +181,15 @@ export class DailyReportDeliveryService {
       clock.minutes >= SEND_FROM_MINUTE &&
       clock.minutes < SEND_UNTIL_MINUTE
     ) {
-      result.sent += await this.sendDaily(
-        bot.tenantId,
-        token,
-        now,
-        clock.date,
-        deps,
-      );
+      for (const tenantId of await this.recipientTenants()) {
+        result.sent += await this.sendDaily(
+          tenantId,
+          token,
+          now,
+          clock.date,
+          deps,
+        );
+      }
     }
     result.followUps += await this.sendFollowUps(bot, token, now, deps);
   }
@@ -252,7 +259,6 @@ export class DailyReportDeliveryService {
       if (code) {
         const recipient = await this.prisma.dailyReportRecipient.findFirst({
           where: {
-            tenantId: bot.tenantId,
             linkCodeHash: hashLinkCode(code),
             linkCodeExpiresAt: { gt: now },
           },
@@ -291,7 +297,7 @@ export class DailyReportDeliveryService {
         }
       } else if (/^\/stop\b/.test(text)) {
         await this.prisma.dailyReportRecipient.updateMany({
-          where: { tenantId: bot.tenantId, chatId },
+          where: { chatId },
           data: { enabled: false },
         });
         await this.reply(
@@ -333,6 +339,16 @@ export class DailyReportDeliveryService {
     }
   }
 
+  /** Networks with at least one linked recipient who gets the report. */
+  private async recipientTenants() {
+    const rows = await this.prisma.dailyReportRecipient.findMany({
+      where: { enabled: true, chatId: { not: null } },
+      distinct: ['tenantId'],
+      select: { tenantId: true },
+    });
+    return rows.map((row) => row.tenantId);
+  }
+
   private async refresh(
     tenantId: string,
     today: string,
@@ -361,7 +377,7 @@ export class DailyReportDeliveryService {
     userId: string,
   ): Promise<DailyReportScope | null> {
     const user = await this.prisma.user.findFirst({
-      where: { tenantId, id: userId, isActive: true, isPlatformAdmin: false },
+      where: { tenantId, id: userId, isActive: true },
       select: {
         tenantId: true,
         accessScope: true,
@@ -488,7 +504,6 @@ export class DailyReportDeliveryService {
   ) {
     const dailies = await this.prisma.dailyReportDelivery.findMany({
       where: {
-        tenantId: bot.tenantId,
         kind: 'DAILY',
         status: 'SENT',
         sentAt: { gt: new Date(now.getTime() - FOLLOW_UP_WINDOW_MS) },
@@ -507,7 +522,6 @@ export class DailyReportDeliveryService {
       (
         await this.prisma.dailyReportDelivery.findMany({
           where: {
-            tenantId: bot.tenantId,
             kind: 'FOLLOW_UP',
             recipientId: {
               in: [
@@ -529,8 +543,16 @@ export class DailyReportDeliveryService {
 
     const shifts = await this.prisma.guestWorkingShift.findMany({
       where: {
-        tenantId: bot.tenantId,
-        id: { in: [...new Set(waiting.map((item) => item.ref.shiftId))] },
+        OR: [...new Set(waiting.map((item) => item.delivery.tenantId))].map(
+          (tenantId) => ({
+            tenantId,
+            id: {
+              in: waiting
+                .filter((item) => item.delivery.tenantId === tenantId)
+                .map((item) => item.ref.shiftId),
+            },
+          }),
+        ),
       },
       select: { id: true, stoppedAt: true },
     });
@@ -544,13 +566,18 @@ export class DailyReportDeliveryService {
         now.getTime() - bot.refreshedAt.getTime() >= SHIFT_REFRESH_INTERVAL_MS)
     ) {
       // Shifts close in Langame; pull working shifts again, at most every 30 min.
-      await this.refresh(
-        bot.tenantId,
-        moscowClock(now).date,
-        false,
-        now,
-        deps.refresh,
-      );
+      const open = waiting.filter((item) => !closed.has(item.ref.shiftId));
+      for (const tenantId of new Set(
+        open.map((item) => item.delivery.tenantId),
+      )) {
+        await this.refresh(
+          tenantId,
+          moscowClock(now).date,
+          false,
+          now,
+          deps.refresh,
+        );
+      }
       await this.prisma.dailyReportBot.update({
         where: { id: bot.id },
         data: { refreshedAt: now },
@@ -563,7 +590,7 @@ export class DailyReportDeliveryService {
     for (const { delivery, ref } of waiting) {
       if (!closed.has(ref.shiftId)) continue;
       const scope = await this.recipientScope(
-        bot.tenantId,
+        delivery.tenantId,
         delivery.recipient.userId,
       );
       if (!scope) continue;
@@ -583,7 +610,7 @@ export class DailyReportDeliveryService {
       }
       await this.prisma.dailyReportDelivery.create({
         data: {
-          tenantId: bot.tenantId,
+          tenantId: delivery.tenantId,
           recipientId: delivery.recipientId,
           reportKey: delivery.reportKey,
           kind: 'FOLLOW_UP',

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 type BotSettings = {
+  canManageBot: boolean;
   bot: {
     connected: boolean;
     status: "PENDING" | "READY" | "INVALID" | null;
@@ -46,7 +47,7 @@ async function call<T>(path: string, method: string, body?: unknown) {
 }
 
 function botStatusText(bot: BotSettings["bot"]) {
-  if (!bot.connected) return "Бот не подключён";
+  if (!bot.connected) return "Бот ещё не подключён администратором платформы";
   if (bot.status === "READY") return `Подключён @${bot.botUsername ?? "бот"}`;
   if (bot.status === "INVALID") return bot.lastError ?? "Токен не подошёл";
   return "Проверяем токен — это занимает до 5 минут";
@@ -135,43 +136,51 @@ export function DailyReportBotSettings() {
       ) : (
         <>
           <div className="mt-4 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
-            <p className="text-sm font-medium">1. Бот команды</p>
+            <p className="text-sm font-medium">1. Бот отчётов</p>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
               {botStatusText(settings.bot)}
-              {settings.bot.tokenHint
+              {settings.canManageBot && settings.bot.tokenHint
                 ? ` · токен ${settings.bot.tokenHint}`
                 : ""}
             </p>
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <input
-                autoComplete="off"
-                className="min-w-0 flex-1 rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                onChange={(event) => setToken(event.target.value)}
-                placeholder="Токен от @BotFather, например 1234567890:AA…"
-                type="password"
-                value={token}
-              />
-              <button
-                className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                disabled={busy || !token.trim()}
-                onClick={saveToken}
-                type="button"
-              >
-                {settings.bot.connected ? "Заменить токен" : "Подключить бота"}
-              </button>
-              {settings.bot.connected ? (
+            <p className="mt-1 text-xs text-zinc-500">
+              Один бот на все сети платформы: каждый получатель видит отчёт
+              только по своей сети.
+            </p>
+            {settings.canManageBot ? (
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <input
+                  autoComplete="off"
+                  className="min-w-0 flex-1 rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  onChange={(event) => setToken(event.target.value)}
+                  placeholder="Токен от @BotFather, например 1234567890:AA…"
+                  type="password"
+                  value={token}
+                />
                 <button
-                  className="rounded-md border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700"
-                  disabled={busy}
-                  onClick={() =>
-                    run(() => call<BotSettings>("/token", "DELETE"))
-                  }
+                  className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  disabled={busy || !token.trim()}
+                  onClick={saveToken}
                   type="button"
                 >
-                  Отключить
+                  {settings.bot.connected
+                    ? "Заменить токен"
+                    : "Подключить бота"}
                 </button>
-              ) : null}
-            </div>
+                {settings.bot.connected ? (
+                  <button
+                    className="rounded-md border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700"
+                    disabled={busy}
+                    onClick={() =>
+                      run(() => call<BotSettings>("/token", "DELETE"))
+                    }
+                    type="button"
+                  >
+                    Отключить
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-4 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">

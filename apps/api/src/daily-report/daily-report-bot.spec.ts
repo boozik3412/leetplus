@@ -1,4 +1,5 @@
 import {
+  DailyReportDeliveryService,
   moscowClock,
   openShiftRefs,
   renderFollowUp,
@@ -147,5 +148,63 @@ describe('daily report bot', () => {
     expect(error).toBeInstanceOf(TelegramApiError);
     expect((error as TelegramApiError).chatGone).toBe(true);
     expect((error as Error).message).not.toContain(TOKEN);
+  });
+
+  it('claims the morning refresh first and stops waiting for a hung one', async () => {
+    const calls: string[] = [];
+    const prisma = {
+      dailyReportBot: {
+        findFirst: jest.fn(() =>
+          Promise.resolve({
+            id: 'bot',
+            tokenCiphertext: 'sealed',
+            status: 'READY',
+            checkedAt: new Date('2026-10-26T06:00:00Z'),
+            updateOffset: BigInt(0),
+            refreshedForDate: null,
+            refreshedAt: null,
+          }),
+        ),
+        update: jest.fn(({ data }: { data: object }) => {
+          calls.push(`claim ${JSON.stringify(data)}`);
+          return Promise.resolve({});
+        }),
+      },
+      dailyReportRecipient: {
+        findMany: jest.fn(() => Promise.resolve([{ tenantId: 'demo' }])),
+      },
+      dailyReportDelivery: { findMany: jest.fn(() => Promise.resolve([])) },
+    };
+    const service = new DailyReportDeliveryService(
+      prisma as never,
+      { decrypt: () => TOKEN } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const telegramFetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ ok: true, result: [] }),
+      }),
+    ) as unknown as typeof fetch;
+    const refresh = jest.fn(() => {
+      calls.push('refresh');
+      return new Promise<void>(() => undefined); // Langame never answers
+    });
+
+    // 09:30 MSK: refresh time, before the 10:00 send.
+    const result = await service.tick(new Date('2026-10-26T06:30:00Z'), {
+      telegramFetch,
+      refresh,
+      refreshBudgetMs: 20,
+    });
+
+    expect(result.failures).toEqual([]);
+    expect(calls).toEqual([
+      'claim {"refreshedForDate":"2026-10-26","refreshedAt":"2026-10-26T06:30:00.000Z"}',
+      'refresh',
+    ]);
   });
 });

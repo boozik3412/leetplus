@@ -1193,6 +1193,34 @@ describe('GuestDataFoundationService', () => {
     });
   });
 
+  it('refreshes one period without pulling the guest directory again', async () => {
+    await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+      includeWorkingShifts: true,
+      skipGuestDirectory: true,
+    });
+
+    expect(langameClient.listGuests).not.toHaveBeenCalled();
+    expect(langameClient.listGuestBalances).not.toHaveBeenCalled();
+    expect(langameClient.listGuestBonusBalances).not.toHaveBeenCalled();
+    expect(guestIdentityResolver.reconcileDomainSnapshot).not.toHaveBeenCalled();
+    expect(langameClient.listGuestSessions).toHaveBeenCalled();
+    expect(langameClient.listWorkingShifts).toHaveBeenCalled();
+    expect(prisma.guestSession.upsert).toHaveBeenCalled();
+    expect(prisma.guestDataProfileRun.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'SUCCESS',
+          guestsCount: 0,
+          errorMessage: expect.stringContaining(
+            'справочник гостей и балансы не загружались',
+          ) as string,
+        }) as object,
+      }),
+    );
+  });
+
   it('loads guest logs only when explicitly requested', async () => {
     await service.syncTenant(user, {
       dateFrom: '2026-05-01',

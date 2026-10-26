@@ -95,7 +95,9 @@ Egress proxy задается отдельной переменной
 
 Compose закрепляет `leetplus_telegram_edge_default` как external network с
 subnet `172.25.0.0/16`, poller как `172.25.0.10`, а proxy слушает только
-`172.25.0.1:18118` и ACL-разрешает только этот poller IP. Listener нельзя
+`172.25.0.1:18118` и ACL-разрешает только этот poller IP и
+`172.25.0.11` — `daily-report-worker` бота «Отчёт за сутки» (отдельный бот
+команды, только getMe/getUpdates/sendMessage своего токена). Listener нельзя
 публиковать на host/LAN/public интерфейс.
 
 ## Сервисы на 1337

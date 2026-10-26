@@ -85,12 +85,25 @@ Workers, очистка и запуск после перезагрузки пе
 
 Worker бота «Отчёт за сутки» (`daily-report-worker`, `lp-report.timer`, тик
 каждые 5 минут) включается отдельно и только после настройки хоста:
-compose-сервис по образцу `langame-daily-worker` со своим адресом в сетях
-`data`/`egress` и доступом к PostgreSQL в сетевом фенсе, файл секретов
-`/srv/leetplus/secrets/daily-report-worker.json` (`DATABASE_URL`,
-`INTEGRATION_ENCRYPTION_KEY`, `DAILY_REPORT_*`), `api.telegram.org` и
-`foundation-models.api.cloud.ru` в списке провайдеров egress. Затем
-`systemctl enable --now lp-report.timer`.
+
+1. Сетевой фенс: `network-fence.py` из этого релиза пускает к PostgreSQL и
+   Redis адрес `.23` в сети `data`. Цепочка `LP_LEETPLUS_EGRESS_V2` уже
+   установлена, поэтому её пересоздают: убрать переход из `DOCKER-USER`,
+   удалить цепочку, `network-fence.py install` (окно — секунды).
+2. Telegram: Privoxy `172.25.0.1:18118` пускает `172.25.0.11`
+   (`install-telegram-http-proxy.sh` из `deploy/leetplus-telegram-edge`).
+   `api.telegram.org` в `providers.json` не добавляется: на хосте он
+   резолвится в fake-IP `198.18.x`, и `refresh` отверг бы весь список.
+3. Cloud.ru: `foundation-models.api.cloud.ru` в `httpsHosts`
+   `/etc/leetplus-compose/providers.json`, затем `network-fence.py refresh`.
+4. Compose-сервис `daily-report-worker` по образцу `langame-daily-worker`:
+   сети `data` `172.31.42.23`, `egress` `172.31.43.23` и внешняя
+   `leetplus_telegram_edge_default` `172.25.0.11`; секреты
+   `/srv/leetplus/secrets/daily-report-worker.json` — ключи
+   `langame-daily-worker.json` плюс `DAILY_REPORT_LLM_API_KEY` и
+   `DAILY_REPORT_TELEGRAM_PROXY_URL=http://172.25.0.1:18118`.
+5. Проверка: `lp worker daily-report-worker` завершается с кодом 0, затем
+   `systemctl enable --now lp-report.timer`.
 
 ## Миграции
 

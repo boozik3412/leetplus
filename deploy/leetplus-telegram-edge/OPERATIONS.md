@@ -85,7 +85,9 @@ automatic upgrade.
 Security invariants:
 
 - listener is only `172.25.0.1:18118`, never `0.0.0.0`, LAN or public;
-- only source `172.25.0.10` is admitted by Privoxy;
+- only sources `172.25.0.10` (guest `telegram-poller`) and `172.25.0.11`
+  (staff `daily-report-worker` from the lp compose project, its own bot
+  token) are admitted by Privoxy;
 - Compose keeps `leetplus_telegram_edge_default` external with subnet
   `172.25.0.0/16` and assigns `telegram-poller` the exact address
   `172.25.0.10`;

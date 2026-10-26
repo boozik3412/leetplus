@@ -43,6 +43,12 @@ export const SEND_UNTIL_MINUTE = 20 * 60;
 const MAX_DAILY_ATTEMPTS = 3;
 const FOLLOW_UP_WINDOW_MS = 24 * 60 * 60 * 1000;
 const SHIFT_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
+/**
+ * One network's Langame refresh may take this long. The worker unit is killed
+ * after 30 minutes, so a hung request must not eat the whole tick: the report
+ * then goes out on the data already loaded.
+ */
+export const REFRESH_BUDGET_MS = 10 * 60 * 1000;
 const TOKEN_RECHECK_MS = 6 * 60 * 60 * 1000;
 
 export type DailyReportRefresh = (input: {
@@ -57,6 +63,8 @@ export type DailyReportTickDeps = {
   telegramFetch: TelegramFetch;
   llmFetch?: typeof fetch;
   refresh?: DailyReportRefresh;
+  /** Tests shorten it; the worker uses REFRESH_BUDGET_MS. */
+  refreshBudgetMs?: number;
 };
 
 export type OpenShiftRef = {
@@ -168,14 +176,16 @@ export class DailyReportDeliveryService {
       clock.minutes >= REFRESH_FROM_MINUTE &&
       bot.refreshedForDate !== clock.date
     ) {
-      for (const tenantId of await this.recipientTenants()) {
-        await this.refresh(tenantId, clock.date, true, now, deps.refresh);
-      }
+      // Claimed before the refresh: a tick killed mid-refresh must not
+      // restart the same heavy pull every five minutes all day.
       await this.prisma.dailyReportBot.update({
         where: { id: bot.id },
         data: { refreshedForDate: clock.date, refreshedAt: now },
       });
       bot.refreshedAt = now;
+      for (const tenantId of await this.recipientTenants()) {
+        await this.refresh(tenantId, clock.date, true, now, deps);
+      }
     }
     if (
       clock.minutes >= SEND_FROM_MINUTE &&
@@ -354,21 +364,39 @@ export class DailyReportDeliveryService {
     today: string,
     full: boolean,
     now: Date,
-    refresh: DailyReportRefresh,
+    deps: DailyReportTickDeps,
   ) {
+    const refresh = deps.refresh;
+    if (!refresh) return;
+    const budgetMs = deps.refreshBudgetMs ?? REFRESH_BUDGET_MS;
+    let timer: NodeJS.Timeout | undefined;
     try {
-      await refresh({
-        tenantId,
-        dateFrom: shiftDate(today, -1),
-        dateTo: today,
-        full,
-      });
+      // An abandoned pull keeps running until the worker process exits.
+      await Promise.race([
+        refresh({
+          tenantId,
+          dateFrom: shiftDate(today, -1),
+          dateTo: today,
+          full,
+        }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new Error(`timed out after ${Math.round(budgetMs / 1000)}s`),
+              ),
+            budgetMs,
+          );
+        }),
+      ]);
     } catch (error) {
       // The report still goes out on the data already loaded; open shifts and
       // gaps make missing data visible.
       this.logger.warn(
         `Daily report refresh ${tenantId} failed at ${now.toISOString()}: ${error instanceof Error ? error.message : String(error)}`,
       );
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -566,23 +594,17 @@ export class DailyReportDeliveryService {
         now.getTime() - bot.refreshedAt.getTime() >= SHIFT_REFRESH_INTERVAL_MS)
     ) {
       // Shifts close in Langame; pull working shifts again, at most every 30 min.
-      const open = waiting.filter((item) => !closed.has(item.ref.shiftId));
-      for (const tenantId of new Set(
-        open.map((item) => item.delivery.tenantId),
-      )) {
-        await this.refresh(
-          tenantId,
-          moscowClock(now).date,
-          false,
-          now,
-          deps.refresh,
-        );
-      }
       await this.prisma.dailyReportBot.update({
         where: { id: bot.id },
         data: { refreshedAt: now },
       });
       bot.refreshedAt = now;
+      const open = waiting.filter((item) => !closed.has(item.ref.shiftId));
+      for (const tenantId of new Set(
+        open.map((item) => item.delivery.tenantId),
+      )) {
+        await this.refresh(tenantId, moscowClock(now).date, false, now, deps);
+      }
       return 0; // the next tick reads the refreshed shifts
     }
 

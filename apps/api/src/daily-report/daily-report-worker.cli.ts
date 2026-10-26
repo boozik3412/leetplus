@@ -59,6 +59,18 @@ function llmFetch(env: NodeJS.ProcessEnv): typeof fetch | undefined {
     ) as unknown as ReturnType<typeof fetch>) as typeof fetch;
 }
 
+/** One line per refresh step, so a slow step shows in the unit's journal. */
+async function timed<T>(step: string, work: () => Promise<T>): Promise<T> {
+  const started = Date.now();
+  try {
+    return await work();
+  } finally {
+    console.log(
+      `Daily report worker: ${step} took ${Math.round((Date.now() - started) / 1000)}s`,
+    );
+  }
+}
+
 async function main() {
   const application = await NestFactory.createApplicationContext(
     DailyReportWorkerModule,
@@ -74,21 +86,34 @@ async function main() {
       full,
     }) => {
       if (full) {
-        await langameSync.syncTenantById(
-          tenantId,
-          { dateFrom, dateTo, mode: 'QUICK', trigger: 'AUTO' },
-          'LANGAME_DAILY_SYNC',
+        await timed(`sales ${tenantId}`, () =>
+          langameSync.syncTenantById(
+            tenantId,
+            { dateFrom, dateTo, mode: 'QUICK', trigger: 'AUTO' },
+            'LANGAME_DAILY_SYNC',
+          ),
         );
-        await langameSync.syncTenantById(
-          tenantId,
-          { mode: 'INVENTORY', trigger: 'AUTO' },
-          'LANGAME_DAILY_SYNC',
+        await timed(`inventory ${tenantId}`, () =>
+          langameSync.syncTenantById(
+            tenantId,
+            { mode: 'INVENTORY', trigger: 'AUTO' },
+            'LANGAME_DAILY_SYNC',
+          ),
         );
       }
-      await guestFoundation.syncTenantById(
-        tenantId,
-        { dateFrom, dateTo, includeWorkingShifts: true },
-        'OUTBOUND',
+      await timed(`guests and shifts ${tenantId}`, () =>
+        guestFoundation.syncTenantById(
+          tenantId,
+          // The directory is the nightly worker's job: pulling ~25k guests
+          // per club took the whole 30-minute tick.
+          {
+            dateFrom,
+            dateTo,
+            includeWorkingShifts: true,
+            skipGuestDirectory: true,
+          },
+          'OUTBOUND',
+        ),
       );
     };
     const result = await application
@@ -113,9 +138,13 @@ async function main() {
 }
 
 if (require.main === module) {
-  void main().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Daily report worker failed: ${message}`);
-    process.exitCode = 1;
-  });
+  void main()
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Daily report worker failed: ${message}`);
+      process.exitCode = 1;
+    })
+    // A refresh abandoned after its budget may still hold sockets open;
+    // the tick is over, so it must not keep the process alive.
+    .finally(() => process.exit());
 }

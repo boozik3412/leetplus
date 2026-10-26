@@ -1992,7 +1992,11 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   `api.telegram.org` (getMe, getUpdates без webhook, sendMessage),
   Cloud.ru и Langame (обновление данных за вчера–сегодня в 09:25 МСК и смен
   каждые 30 мин, пока есть незакрытые смены из утреннего отчёта; без
-  записи `DailyDataCoverage`). Профиль секретов worker — общий
+  записи `DailyDataCoverage`). Это быстрое обновление за период: справочник
+  гостей и балансы (полные списки) грузит только ночной
+  `langame-daily-worker`. Утреннее обновление отмечается до начала и
+  делается раз в сутки, каждая сеть ограничена 10 минутами, после тика
+  процесс завершается, даже если брошенный запрос ещё висит. Профиль секретов worker — общий
   `WORKER_SECRET_KEY` плюс префикс `DAILY_REPORT_`
   (`DAILY_REPORT_LLM_API_KEY`, `DAILY_REPORT_TELEGRAM_PROXY_URL`,
   `DAILY_REPORT_LLM_PROXY_URL`).

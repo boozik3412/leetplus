@@ -102,6 +102,13 @@ export type GuestDataFoundationSyncQuery = {
   includeOperationLog?: boolean;
   includeCashTransactions?: boolean;
   includeWorkingShifts?: boolean;
+  /**
+   * Keep the guest directory and balances as they are (they are the full
+   * lists, tens of thousands of rows per club): a quick refresh of one day's
+   * sessions and shifts, such as the morning report's. Guests who appeared
+   * since the last full run stay unlinked until the next one.
+   */
+  skipGuestDirectory?: boolean;
 };
 
 export type GuestDataFoundationSyncResult = {
@@ -597,6 +604,14 @@ export class GuestDataFoundationService {
               : limitedNote
                 ? `${limitedNote} Остальные разделы загружены.`
                 : null;
+        const runNote = query.skipGuestDirectory
+          ? [
+              message,
+              'Быстрое обновление за период: справочник гостей и балансы не загружались.',
+            ]
+              .filter(Boolean)
+              .join(' ')
+          : message;
 
         await this.prisma.guestDataProfileRun.update({
           where: { id: run.id },
@@ -608,7 +623,7 @@ export class GuestDataFoundationService {
             transactionsCount: syncResult.transactions,
             productSalesLinked: syncResult.productSalesLinked,
             profile: syncResult.profile,
-            errorMessage: message,
+            errorMessage: runNote,
           },
         });
         Object.assign(sourceResult, syncResult, {
@@ -1169,62 +1184,77 @@ export class GuestDataFoundationService {
       });
     }
 
-    const guests = await this.captureEndpoint(profile, 'guests/list', () =>
-      this.paginate(
-        (page) =>
-          this.langameClient.listGuests(baseUrl, apiKey, {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-          }),
-        profile,
-        'guests/list',
-      ),
-    );
-    await this.syncGuests(tenantId, domain, guests, profile, now);
-    const guestsByExternalId = await this.loadGuestLookup(tenantId, domain);
-
-    const balances = await this.captureEndpoint(profile, 'guests/balance', () =>
-      this.paginate(
-        (page) =>
-          this.langameClient.listGuestBalances(baseUrl, apiKey, {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-          }),
-        profile,
-        'guests/balance',
-      ),
-    );
-    await this.syncBalances(
-      tenantId,
-      domain,
-      balances,
-      guestsByExternalId,
-      snapshotDate,
-      profile,
-    );
-
-    const bonusBalances = await this.captureEndpoint(
-      profile,
-      'guests/bonus_balance',
-      () =>
+    // A full directory pull also reconciles identities against the whole
+    // list, so a quick refresh must not run it on an empty one.
+    const skipDirectory = query.skipGuestDirectory ?? false;
+    let guests: LangameGuest[] = [];
+    let balances: unknown[] = [];
+    let bonusBalances: unknown[] = [];
+    if (!skipDirectory) {
+      guests = await this.captureEndpoint(profile, 'guests/list', () =>
         this.paginate(
           (page) =>
-            this.langameClient.listGuestBonusBalances(baseUrl, apiKey, {
+            this.langameClient.listGuests(baseUrl, apiKey, {
               page,
               pageLimit: DEFAULT_PAGE_LIMIT,
             }),
           profile,
-          'guests/bonus_balance',
+          'guests/list',
         ),
-    );
-    await this.syncBonusBalances(
-      tenantId,
-      domain,
-      bonusBalances,
-      guestsByExternalId,
-      snapshotDate,
-      profile,
-    );
+      );
+      await this.syncGuests(tenantId, domain, guests, profile, now);
+    }
+    const guestsByExternalId = await this.loadGuestLookup(tenantId, domain);
+
+    if (!skipDirectory) {
+      const balanceRows = await this.captureEndpoint(
+        profile,
+        'guests/balance',
+        () =>
+          this.paginate(
+            (page) =>
+              this.langameClient.listGuestBalances(baseUrl, apiKey, {
+                page,
+                pageLimit: DEFAULT_PAGE_LIMIT,
+              }),
+            profile,
+            'guests/balance',
+          ),
+      );
+      await this.syncBalances(
+        tenantId,
+        domain,
+        balanceRows,
+        guestsByExternalId,
+        snapshotDate,
+        profile,
+      );
+      balances = balanceRows;
+
+      const bonusRows = await this.captureEndpoint(
+        profile,
+        'guests/bonus_balance',
+        () =>
+          this.paginate(
+            (page) =>
+              this.langameClient.listGuestBonusBalances(baseUrl, apiKey, {
+                page,
+                pageLimit: DEFAULT_PAGE_LIMIT,
+              }),
+            profile,
+            'guests/bonus_balance',
+          ),
+      );
+      await this.syncBonusBalances(
+        tenantId,
+        domain,
+        bonusRows,
+        guestsByExternalId,
+        snapshotDate,
+        profile,
+      );
+      bonusBalances = bonusRows;
+    }
 
     const sessions = await this.captureEndpoint(
       profile,

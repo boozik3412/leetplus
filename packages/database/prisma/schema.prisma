@@ -385,6 +385,9 @@ model Tenant {
   storeClosures                        StoreClosure[]
   guestLeaderboardSettings             GuestLeaderboardSettings?
   guestLeaderboardPeriodResults        GuestLeaderboardPeriodResult[]
+  dailyReportBot                       DailyReportBot?
+  dailyReportRecipients                DailyReportRecipient[]
+  dailyReportDeliveries                DailyReportDelivery[]
   guestSupportAttachments              GuestSupportAttachment[]
   guestSupportTicketComments           GuestSupportTicketComment[]
   guestSupportTicketAuditEvents        GuestSupportTicketAuditEvent[]
@@ -526,6 +529,7 @@ model User {
   guestSavedFilters                    GuestSavedFilter[]
   guestAudiences                       GuestAudience[]
   storeAccesses                        UserStoreAccess[]
+  dailyReportRecipients                DailyReportRecipient[]
   createdUserInvites                   UserInvite[]                           @relation("UserInviteCreatedBy")
   acceptedUserInvites                  UserInvite[]                           @relation("UserInviteAcceptedBy")
   revokedUserInvites                   UserInvite[]                           @relation("UserInviteRevokedBy")
@@ -1451,6 +1455,75 @@ model GuestLeaderboardPeriodResult {
   @@unique([tenantId, periodKey, scopeKey, board, profileId], map: "guest_leaderboard_period_result_uidx")
   @@index([tenantId, periodKey, scopeKey, board, rank], map: "guest_leaderboard_period_result_rank_idx")
   @@index([tenantId, profileId, periodKey], map: "guest_leaderboard_period_result_profile_idx")
+}
+
+/// Team Telegram bot of the daily report («Отчёт за сутки»): one per network.
+/// The token is encrypted with INTEGRATION_ENCRYPTION_KEY; the worker checks it,
+/// fills `botUsername` and keeps the getUpdates offset.
+model DailyReportBot {
+  id               String    @id @default(uuid())
+  tenantId         String    @unique(map: "daily_report_bot_tenant_uidx")
+  tokenCiphertext  String
+  tokenHint        String
+  botUsername      String?
+  status           String    @default("PENDING")
+  lastError        String?
+  checkedAt        DateTime?
+  updateOffset     BigInt    @default(0)
+  refreshedForDate String?
+  refreshedAt      DateTime?
+  updatedByUserId  String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+/// A user the owner ticked to receive the daily report. `chatId` appears once
+/// the user opens the one-time link `t.me/<bot>?start=<code>`; only the code
+/// hash is stored.
+model DailyReportRecipient {
+  id                String    @id @default(uuid())
+  tenantId          String
+  userId            String
+  enabled           Boolean   @default(true)
+  chatId            String?
+  telegramName      String?
+  linkCodeHash      String?   @unique(map: "daily_report_recipient_link_code_uidx")
+  linkCodeExpiresAt DateTime?
+  linkedAt          DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  tenant     Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User                  @relation(fields: [tenantId, userId], references: [tenantId, id], onDelete: Cascade)
+  deliveries DailyReportDelivery[]
+
+  @@unique([tenantId, userId], map: "daily_report_recipient_user_uidx")
+}
+
+/// One sent (or failed) message batch: the morning report of `reportKey`
+/// (Moscow date of sending) or a follow-up for a shift that closed later.
+model DailyReportDelivery {
+  id           String    @id @default(uuid())
+  tenantId     String
+  recipientId  String
+  reportKey    String
+  kind         String
+  subjectKey   String    @default("")
+  status       String
+  attempts     Int       @default(1)
+  error        String?
+  openShiftIds Json?
+  sentAt       DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant    Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  recipient DailyReportRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([recipientId, reportKey, kind, subjectKey], map: "daily_report_delivery_uidx")
+  @@index([tenantId, createdAt], map: "daily_report_delivery_tenant_created_idx")
 }
 
 model StoreClosure {

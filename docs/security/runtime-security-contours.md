@@ -1957,15 +1957,46 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   данных гостей.
 - Секрет `DAILY_REPORT_LLM_API_KEY` (необязательные `DAILY_REPORT_LLM_BASE_URL`,
   `DAILY_REPORT_LLM_MODEL`, `DAILY_REPORT_LLM_TIMEOUT_MS`) принадлежит только
-  corporate API runtime. Без ключа endpoint отвечает статусом `DISABLED`
-  без сети. Для работы нужен reviewed egress API к
-  `foundation-models.api.cloud.ru:443`; public guest runtime и workers его не
-  получают.
+  corporate API runtime и worker `daily-report-worker` (ниже). Без ключа
+  endpoint отвечает статусом `DISABLED` без сети. Для работы нужен reviewed
+  egress к `foundation-models.api.cloud.ru:443`; public guest runtime его не
+  получает.
 - Ответ модели проверяется: любое число от 100, которого нет в отчёте,
   приводит к одной повторной попытке, затем разбор отбрасывается
   (`REJECTED`), а цифры отчёта показываются без него.
-- Telegram-рассылка и worker с таймером — отдельное изменение; этот раздел
-  описывает только пользовательский read и ручной ИИ-разбор.
+
+### Бот отчёта за сутки (26.10.2026)
+
+- Таблицы `DailyReportBot`, `DailyReportRecipient`, `DailyReportDelivery`
+  (миграция `20261026120000_daily_report_bot`, аддитивная, с GRANT для
+  `leetplus_runtime`; голова identity-mail-worker — 195).
+- Corporate `SettingsController`: `GET /settings/daily-report-bot`,
+  `POST|DELETE /settings/daily-report-bot/token`,
+  `PATCH /settings/daily-report-bot/recipients/:userId`,
+  `POST /settings/daily-report-bot/recipients/:userId/link`. Capability
+  `manage_integrations` (RolesGuard для `/settings`) и
+  `FreshStoreScopeService.assertNetwork`. Provider-вызовов в API нет: токен
+  только шифруется `SecretEncryptionService` (`integration`, ключ
+  `INTEGRATION_ENCRYPTION_KEY`) и в ответах показывается как подсказка
+  `id:…последние 4`. Ссылка подключения `t.me/<bot>?start=<code>` выдаётся
+  один раз; хранится только sha256 кода, срок 7 суток.
+- Worker `daily-report-worker` (`lp-report.timer`, тик каждые 5 минут,
+  `lp worker`, лимит 30 мин) — единственное место с egress к
+  `api.telegram.org` (getMe, getUpdates без webhook, sendMessage),
+  Cloud.ru и Langame (обновление данных за вчера–сегодня в 09:25 МСК и смен
+  каждые 30 мин, пока есть незакрытые смены из утреннего отчёта; без
+  записи `DailyDataCoverage`). Профиль секретов worker — общий
+  `WORKER_SECRET_KEY` плюс префикс `DAILY_REPORT_`
+  (`DAILY_REPORT_LLM_API_KEY`, `DAILY_REPORT_TELEGRAM_PROXY_URL`,
+  `DAILY_REPORT_LLM_PROXY_URL`).
+- Отчёт каждому получателю строится в его собственной сохранённой области
+  (`AccessScopeService.fromPersisted`): `STORES` получает только свои клубы.
+  Неактивный пользователь не получает ничего. Чат, заблокировавший бота,
+  отвязывается. `/stop` в боте выключает получателя.
+- Таймер `lp-report.timer` включается вручную только после того, как на
+  хосте созданы compose-сервис `daily-report-worker`, его файл секретов и
+  разрешён egress к Telegram и Cloud.ru; `lp` перезапускает после миграций
+  только те таймеры workers, которые были активны.
 
 ## Split-runtime successor в source
 

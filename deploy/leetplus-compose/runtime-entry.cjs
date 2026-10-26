@@ -8,6 +8,7 @@ const commands = {
   'bonus-ledger-worker': ['/app/apps/api/dist/guest-gamification/guest-bonus-ledger-worker.cli.js'],
   'langame-daily-worker': ['/app/apps/api/dist/integrations/langame-daily-worker.cli.js'],
   'langame-external-daily-worker': ['/app/apps/api/dist/integrations/langame-external-daily-worker.cli.js'],
+  'daily-report-worker': ['/app/apps/api/dist/daily-report/daily-report-worker.cli.js'],
 };
 const mode = process.argv[2];
 if (!Object.hasOwn(commands, mode) || process.argv.length !== 3 || process.getuid() === 0) {
@@ -26,9 +27,10 @@ if (metadata.contract !== 'LEETPLUS_COMPOSE_BLUE_GREEN_V1' || process.env.RELEAS
 if (mode === 'langame-external-daily-worker' && metadata.externalWorkerCapability !== 'LANGAME_EXTERNAL_SET1_V1') {
   throw new Error('External worker entrypoint requires the admitted application capability');
 }
-// Bonus-ledger and daily Langame workers decrypt integration credentials, so
-// INTEGRATION_ENCRYPTION_KEY belongs to their profile.
-const WORKER_SECRET_KEY = /^(DATABASE_URL|APP_ENCRYPTION_KEY|INTEGRATION_ENCRYPTION_KEY|LANGAME_|GUEST_)/;
+// Bonus-ledger, daily Langame and daily report workers decrypt integration
+// credentials, so INTEGRATION_ENCRYPTION_KEY belongs to their profile.
+// DAILY_REPORT_* carries the Cloud.ru key and the Telegram/LLM proxy URLs.
+const WORKER_SECRET_KEY = /^(DATABASE_URL|APP_ENCRYPTION_KEY|INTEGRATION_ENCRYPTION_KEY|LANGAME_|GUEST_|DAILY_REPORT_)/;
 const unsafe = /^(?:NODE_(?:OPTIONS|PATH|EXTRA_CA_CERTS|DEBUG|USE_ENV_PROXY)|LD_|BASH_ENV$|ENV$|HTTP_PROXY$|HTTPS_PROXY$|ALL_PROXY$|NO_PROXY$|SSLKEYLOGFILE$|OPENSSL_CONF$|OPENSSL_MODULES$|GCONV_PATH$|LOCPATH$|PRISMA_.*ENGINE)/i;
 for (const key of Object.keys(process.env)) if (unsafe.test(key)) delete process.env[key];
 if (mode !== 'web') {

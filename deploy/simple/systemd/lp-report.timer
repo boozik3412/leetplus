@@ -1,0 +1,10 @@
+[Unit]
+Description=LeetPlus daily report bot worker (lp)
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=5min
+Unit=lp-worker@daily-report-worker.service
+
+[Install]
+WantedBy=timers.target

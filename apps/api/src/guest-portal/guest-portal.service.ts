@@ -23555,6 +23555,10 @@ function buildSeasonProgress(
   };
 }
 
+// A step stays reached when its reward expires unopened: the engine already
+// counts it as completed and evaluates the next step, so showing the step as
+// open again left the guest looking stuck on it. Only a canceled reward takes
+// the step back.
 function seasonRewardStateCountsAsReachedLevel(
   state: GuestPortalReward['walletState'],
 ) {
@@ -23563,7 +23567,8 @@ function seasonRewardStateCountsAsReachedLevel(
     state === 'WAITING_CLAIM' ||
     state === 'DELIVERY_PROCESSING' ||
     state === 'READY' ||
-    state === 'REDEEMED'
+    state === 'REDEEMED' ||
+    state === 'EXPIRED'
   );
 }
 

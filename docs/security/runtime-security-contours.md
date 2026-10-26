@@ -1943,6 +1943,30 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
 5. Provider timeout/retry/idempotency оцениваются отдельно от database lock и
    HTTP concurrency.
 
+### Отчёт за сутки и ИИ-разбор (26.10.2026)
+
+- `GET /reports/daily` — corporate read в `ReportsController` под тем же
+  JwtAuth/RolesGuard и fresh store scope (`FreshStoreScopeService.resolve`):
+  `STORES` получает только свои клубы. Provider-вызовов нет.
+- `POST /reports/daily/commentary` — corporate `OUTBOUND` (классифицирован в
+  `tenant-execution-http-policy.ts`): тот же отчёт плюс один запрос к
+  OpenAI-совместимому LLM. Владелец выбрал Cloud.ru Foundation Models
+  (`https://foundation-models.api.cloud.ru/v1`, модель
+  `deepseek-ai/DeepSeek-V4-Pro`, размещена в РФ). В модель уходят только
+  посчитанные агрегаты, названия клубов и логины админов Langame, без
+  данных гостей.
+- Секрет `DAILY_REPORT_LLM_API_KEY` (необязательные `DAILY_REPORT_LLM_BASE_URL`,
+  `DAILY_REPORT_LLM_MODEL`, `DAILY_REPORT_LLM_TIMEOUT_MS`) принадлежит только
+  corporate API runtime. Без ключа endpoint отвечает статусом `DISABLED`
+  без сети. Для работы нужен reviewed egress API к
+  `foundation-models.api.cloud.ru:443`; public guest runtime и workers его не
+  получают.
+- Ответ модели проверяется: любое число от 100, которого нет в отчёте,
+  приводит к одной повторной попытке, затем разбор отбрасывается
+  (`REJECTED`), а цифры отчёта показываются без него.
+- Telegram-рассылка и worker с таймером — отдельное изменение; этот раздел
+  описывает только пользовательский read и ручной ИИ-разбор.
+
 ## Split-runtime successor в source
 
 На merge SHA `88719342...` реализованы:

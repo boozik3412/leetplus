@@ -19,6 +19,10 @@ import { UserRole } from '@prisma/client';
 import { ReportsEmailService } from './reports-email.service';
 import { ReportsDigestService } from './reports-digest.service';
 import {
+  DailyReportService,
+  type DailyReportPreview,
+} from '../daily-report/daily-report.service';
+import {
   ReportsExportService,
   type ReportExportQuery,
 } from './reports-export.service';
@@ -55,7 +59,26 @@ export class ReportsController {
     private readonly reportsExportService: ReportsExportService,
     private readonly reportsEmailService: ReportsEmailService,
     private readonly reportsDigestService: ReportsDigestService,
+    private readonly dailyReportService: DailyReportService,
   ) {}
+
+  @Get('daily')
+  getDailyReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('date') date?: string,
+  ): Promise<DailyReportPreview> {
+    return this.dailyReportService.previewForUser(user, { date });
+  }
+
+  @Post('daily/commentary')
+  getDailyReportCommentary(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: { date?: string },
+  ): Promise<DailyReportPreview> {
+    return this.dailyReportService.commentaryForUser(user, {
+      date: typeof body?.date === 'string' ? body.date : undefined,
+    });
+  }
 
   @Get('assortment')
   getAssortmentReport(

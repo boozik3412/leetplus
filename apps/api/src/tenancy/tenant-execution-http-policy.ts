@@ -81,6 +81,7 @@ const OUTBOUND_REQUESTS: readonly RegExp[] = [
   /^\/categories\/langame\/refresh$/,
   /^\/reports\/email$/,
   /^\/reports\/digests\/email$/,
+  /^\/reports\/daily\/commentary$/,
   /^\/guests\/gamification\/deliveries\/dispatch$/,
   /^\/guests\/gamification\/bonus-ledger\/dispatch$/,
   /^\/guests\/gamification\/log\/profiles\/[^/]+\/(?:sync|relink)$/,

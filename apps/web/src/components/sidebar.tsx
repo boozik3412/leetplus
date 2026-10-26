@@ -154,6 +154,7 @@ const navGroups: NavGroup[] = [
     title: "Управление",
     icon: "management",
     items: [
+      { href: "/reports/daily", label: "Отчёт за сутки" },
       { href: "/commercial/audit", label: "Коммерческий аудит" },
       { href: "/commercial/demo", label: "Демо-режим" },
       { href: "/commercial/tariffs", label: "Тарифы" },

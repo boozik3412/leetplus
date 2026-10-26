@@ -48,6 +48,8 @@ import { FactCsvImportService } from '../src/imports/fact-csv-import.service';
 import { ProductCsvImportService } from '../src/imports/product-csv-import.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ProductsService } from '../src/products/products.service';
+import { DailyReportCommentaryService } from '../src/daily-report/daily-report-commentary';
+import { DailyReportService } from '../src/daily-report/daily-report.service';
 import { ReportsController } from '../src/reports/reports.controller';
 import { ReportsDigestService } from '../src/reports/reports-digest.service';
 import { ReportsEmailService } from '../src/reports/reports-email.service';
@@ -1263,6 +1265,24 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
       );
       expect(storeA1Evidence).not.toContain(fixture.productA2Id);
       expect(storeA1Evidence).not.toContain(fixture.productB1Id);
+
+      // The daily report covers exactly the clubs of the reader's scope.
+      const dailyClubs = async () => {
+        const response = await request(httpServer)
+          .get('/reports/daily')
+          .expect(200);
+        const body = response.body as {
+          report: { clubs: Array<{ storeId: string }> };
+        };
+        return body.report.clubs.map((club) => club.storeId).sort();
+      };
+      expect(await dailyClubs()).toEqual([fixture.storeA1Id]);
+      currentUser = buildUser(fixture, 'A_NETWORK');
+      expect(await dailyClubs()).toEqual(
+        [fixture.storeA1Id, fixture.storeA2Id].sort(),
+      );
+      currentUser = buildUser(fixture, 'B_NETWORK');
+      expect(await dailyClubs()).toEqual([fixture.storeB1Id]);
     } finally {
       await app.close();
     }
@@ -1636,6 +1656,14 @@ async function buildReportsHttpApp(
       },
       { provide: ReportsEmailService, useValue: { sendReport: jest.fn() } },
       { provide: ReportsDigestService, useValue: { sendDigest: jest.fn() } },
+      {
+        provide: DailyReportService,
+        useValue: new DailyReportService(
+          prisma,
+          new FreshStoreScopeService(prisma, new AccessScopeService()),
+          { comment: jest.fn() } as unknown as DailyReportCommentaryService,
+        ),
+      },
     ],
   })
     .overrideGuard(JwtAuthGuard)

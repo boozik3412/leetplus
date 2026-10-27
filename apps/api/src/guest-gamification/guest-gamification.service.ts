@@ -9356,9 +9356,13 @@ export class GuestGamificationService {
         reward.perGuestLimitUnlimited === true
           ? null
           : intValue(reward.perGuestLimit),
+      // A loot-box reward has no money budget: the wizard's budget toggle and
+      // amount are its lifetime issue limit, so "unlimited" must clear it.
       totalRewardLimit:
-        rewardType === 'LOOT_BOX_ENTITLEMENT' && reward.budgetUnlimited !== true
-          ? intValue(reward.budgetAmount)
+        rewardType === 'LOOT_BOX_ENTITLEMENT'
+          ? reward.budgetUnlimited === true
+            ? null
+            : intValue(reward.budgetAmount)
           : intValue(reward.totalRewardLimit),
       maxPendingRewards:
         reward.maxPendingRewards === undefined
@@ -9379,6 +9383,12 @@ export class GuestGamificationService {
         where: { id },
         data: {
           ...(await this.buildMissionData(user, missionDto, false)),
+          // buildMissionData drops nulls (a partial update keeps the column),
+          // but the wizard always sends every limit: null here means the
+          // admin switched it to unlimited, so it has to be cleared.
+          budgetAmount: decimalValue(missionDto.budgetAmount) ?? null,
+          perGuestLimit: intValue(missionDto.perGuestLimit) ?? null,
+          totalRewardLimit: intValue(missionDto.totalRewardLimit) ?? null,
           definitionVersion: guestGameMissionDefinitionVersion,
           evaluationPolicy: missionEvaluationPolicy(taskType),
         },
@@ -25171,8 +25181,17 @@ function missionRowToWizardDto(row: MissionRow): GuestGameMissionWizardDto {
       perGuestLimitUnlimited: row.perGuestLimit === null,
       totalRewardLimit: row.totalRewardLimit,
       maxPendingRewards: row.maxPendingRewards,
-      budgetAmount: numberOrNull(row.budgetAmount),
-      budgetUnlimited: row.budgetAmount === null,
+      // The wizard edits a loot-box reward's issue limit through its budget
+      // fields (see saveMissionWizard); project the real limit there.
+      ...(row.rewardType === 'LOOT_BOX_ENTITLEMENT'
+        ? {
+            budgetAmount: row.totalRewardLimit,
+            budgetUnlimited: row.totalRewardLimit === null,
+          }
+        : {
+            budgetAmount: numberOrNull(row.budgetAmount),
+            budgetUnlimited: row.budgetAmount === null,
+          }),
       delivery: row.manualApprovalRequired ? 'ADMIN_APPROVAL' : 'AUTOMATIC',
     },
     appearance: jsonRecord(conditions.presentation ?? null),

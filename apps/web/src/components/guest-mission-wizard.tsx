@@ -2587,7 +2587,10 @@ function buildWizardDto(
       budgetAmount: form.budgetAmount,
       perGuestLimitUnlimited: form.perGuestLimitUnlimited,
       perGuestLimit: form.perGuestLimit,
-      totalRewardLimit: form.totalRewardLimit,
+      // A case reward's lifetime limit is the budget toggle/amount above;
+      // never send the hidden default for it.
+      totalRewardLimit:
+        form.rewardType === "LOOTBOX" ? null : form.totalRewardLimit,
       maxPendingRewards: form.maxPendingRewards,
       periodicity: form.periodicity,
     },

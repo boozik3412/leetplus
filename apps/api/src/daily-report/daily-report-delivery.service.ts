@@ -129,6 +129,10 @@ export const START_STOPPED_TEXT = [
   'Этот чат подключён, но отчёт отключён командой /stop. Включить снова можно в LeetPlus: Настройки → «Отчёт за сутки в Telegram».',
 ].join('\n');
 
+/** Reply to a link code that just linked the chat. */
+export const LINKED_TEXT =
+  'Готово! Сейчас пришлю последний готовый отчёт, а дальше он будет приходить сюда каждый день в 10:00 по Москве. Отключить: /stop';
+
 /** Picks the /start reply from the recipients already linked to the chat. */
 export function startReplyText(linked: { enabled: boolean }[]) {
   if (linked.some((recipient) => recipient.enabled)) return START_LINKED_TEXT;
@@ -201,7 +205,8 @@ export class DailyReportDeliveryService {
     const token = this.encryption.decrypt(bot.tokenCiphertext, 'integration');
     const ready = await this.checkToken(bot, token, now, deps.telegramFetch);
     if (!ready) return;
-    result.linked += await this.pollLinks(bot, token, now, deps.telegramFetch);
+    const linked = await this.pollLinks(bot, token, now, deps.telegramFetch);
+    result.linked += linked.length;
 
     const clock = moscowClock(now);
     if (
@@ -220,10 +225,29 @@ export class DailyReportDeliveryService {
         await this.refresh(tenantId, clock.date, true, now, deps);
       }
     }
-    if (
-      clock.minutes >= SEND_FROM_MINUTE &&
-      clock.minutes < SEND_UNTIL_MINUTE
-    ) {
+    const sendWindow =
+      clock.minutes >= SEND_FROM_MINUTE && clock.minutes < SEND_UNTIL_MINUTE;
+    if (linked.length) {
+      // A new recipient gets the latest report right away instead of waiting
+      // for 10:00, even when the chat was linked before and got it already.
+      const latest =
+        clock.minutes >= SEND_FROM_MINUTE
+          ? clock.date
+          : shiftDate(clock.date, -1);
+      for (const tenantId of new Set(linked.map((item) => item.tenantId))) {
+        result.sent += await this.sendDaily(
+          tenantId,
+          token,
+          now,
+          latest,
+          deps,
+          {
+            recipientIds: linked.map((item) => item.id),
+          },
+        );
+      }
+    }
+    if (sendWindow) {
       for (const tenantId of await this.recipientTenants()) {
         result.sent += await this.sendDaily(
           tenantId,
@@ -299,7 +323,7 @@ export class DailyReportDeliveryService {
       token,
       Number(bot.updateOffset),
     );
-    let linked = 0;
+    const linked: Array<{ id: string; tenantId: string }> = [];
     for (const update of updates) {
       const message = update.message;
       const chat = message?.chat;
@@ -331,13 +355,8 @@ export class DailyReportDeliveryService {
               linkCodeExpiresAt: null,
             },
           });
-          linked += 1;
-          await this.reply(
-            fetchImpl,
-            token,
-            chatId,
-            'Готово! Каждый день в 10:00 по Москве сюда будет приходить отчёт за прошедшие сутки. Отключить: /stop',
-          );
+          linked.push({ id: recipient.id, tenantId: recipient.tenantId });
+          await this.reply(fetchImpl, token, chatId, LINKED_TEXT);
         } else {
           await this.reply(
             fetchImpl,
@@ -477,9 +496,15 @@ export class DailyReportDeliveryService {
     now: Date,
     reportKey: string,
     deps: DailyReportTickDeps,
+    catchUp?: { recipientIds: string[] },
   ) {
     const recipients = await this.prisma.dailyReportRecipient.findMany({
-      where: { tenantId, enabled: true, chatId: { not: null } },
+      where: {
+        tenantId,
+        enabled: true,
+        chatId: { not: null },
+        ...(catchUp ? { id: { in: catchUp.recipientIds } } : {}),
+      },
       include: {
         deliveries: { where: { reportKey, kind: 'DAILY', subjectKey: '' } },
       },
@@ -493,6 +518,7 @@ export class DailyReportDeliveryService {
     for (const recipient of recipients) {
       const previous = recipient.deliveries[0];
       if (
+        !catchUp &&
         previous &&
         (previous.status === 'SENT' || previous.attempts >= MAX_DAILY_ATTEMPTS)
       ) {
@@ -502,14 +528,20 @@ export class DailyReportDeliveryService {
       if (!scope) continue;
       const key = scope.storeIds ? [...scope.storeIds].sort().join(',') : '*';
       if (!prepared.has(key)) {
-        prepared.set(key, this.prepare(scope, now, deps));
+        // The catch-up names its day: the morning send takes the latest one.
+        prepared.set(
+          key,
+          this.prepare(scope, now, deps, catchUp ? reportKey : undefined),
+        );
       }
       let error: string | null = null;
       let openShifts: OpenShiftRef[] = [];
       try {
         const { report, messages } = await prepared.get(key)!;
         if (!report.clubs.length) continue;
-        openShifts = openShiftRefs(report);
+        // Shifts of yesterday's report closed long ago: no follow-ups for them.
+        openShifts =
+          reportKey === moscowClock(now).date ? openShiftRefs(report) : [];
         for (const message of messages) {
           await sendMessage(
             deps.telegramFetch,
@@ -560,8 +592,9 @@ export class DailyReportDeliveryService {
     scope: DailyReportScope,
     now: Date,
     deps: DailyReportTickDeps,
+    reportDate?: string,
   ) {
-    const report = await this.reports.build(scope, now);
+    const report = await this.reports.build(scope, now, reportDate);
     const commentary = report.clubs.length
       ? await this.commentary.comment(report, deps.llmFetch)
       : null;

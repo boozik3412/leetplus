@@ -145,11 +145,13 @@ export function sendMessage(
   chatId: string,
   text: string,
   html = true,
+  silent = false,
 ) {
   return call<unknown>(fetchImpl, token, 'sendMessage', {
     chat_id: chatId,
     text,
     ...(html ? { parse_mode: 'HTML' } : {}),
+    ...(silent ? { disable_notification: true } : {}),
     link_preview_options: { is_disabled: true },
   });
 }

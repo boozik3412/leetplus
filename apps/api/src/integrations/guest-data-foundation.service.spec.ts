@@ -208,6 +208,7 @@ describe('GuestDataFoundationService', () => {
     guestSession: {
       upsert: jest.fn(),
       findUnique: jest.fn(),
+      updateMany: jest.fn(),
     },
     guestLog: {
       upsert: jest.fn(),
@@ -1204,7 +1205,9 @@ describe('GuestDataFoundationService', () => {
     expect(langameClient.listGuests).not.toHaveBeenCalled();
     expect(langameClient.listGuestBalances).not.toHaveBeenCalled();
     expect(langameClient.listGuestBonusBalances).not.toHaveBeenCalled();
-    expect(guestIdentityResolver.reconcileDomainSnapshot).not.toHaveBeenCalled();
+    expect(
+      guestIdentityResolver.reconcileDomainSnapshot,
+    ).not.toHaveBeenCalled();
     expect(langameClient.listGuestSessions).toHaveBeenCalled();
     expect(langameClient.listWorkingShifts).toHaveBeenCalled();
     expect(prisma.guestSession.upsert).toHaveBeenCalled();
@@ -1219,6 +1222,65 @@ describe('GuestDataFoundationService', () => {
         }) as object,
       }),
     );
+  });
+
+  it('takes the club of a session from its computer when two clubs share a domain', async () => {
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-a',
+        tenantId: 'tenant-1',
+        externalDomain: 'club.example',
+        externalClubId: '1',
+        isActive: true,
+        timeZone: 'Europe/Samara',
+      },
+      {
+        id: 'store-b',
+        tenantId: 'tenant-1',
+        externalDomain: 'club.example',
+        externalClubId: '2',
+        isActive: true,
+        timeZone: 'Europe/Samara',
+      },
+    ]);
+    langameClient.listPcTypeLinks.mockResolvedValue([
+      { id: 1, UUID: 'aaaa-0001', club_id: 1, name: 'PC 1' },
+      { id: 2, UUID: 'BBBB-0002', club_id: 2, name: 'PC 2' },
+    ]);
+    langameClient.listGuestSessions.mockResolvedValue([
+      {
+        id: 900,
+        guest_id: 42,
+        UUID: 'BBBB-0002',
+        date_start: '2026-05-01 10:00:00',
+        date_stop: '2026-05-01 12:00:00',
+      },
+    ]);
+
+    await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+      skipGuestDirectory: true,
+    });
+
+    expect(prisma.guestSession.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          storeId: 'store-b',
+          externalClubId: '2',
+          externalUuid: 'BBBB-0002',
+        }) as object,
+      }),
+    );
+    expect(prisma.guestSession.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        externalDomain: 'club.example',
+        storeId: null,
+        externalClubId: null,
+        externalUuid: { in: ['AAAA-0001', 'aaaa-0001'] },
+      }) as object,
+      data: { externalClubId: '1', storeId: 'store-a' },
+    });
   });
 
   it('loads guest logs only when explicitly requested', async () => {

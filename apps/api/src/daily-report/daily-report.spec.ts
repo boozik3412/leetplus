@@ -9,6 +9,12 @@ import {
 } from './daily-report-commentary';
 import { packMessages, renderDailyReport } from './daily-report-text';
 import {
+  formatRub,
+  pluralRu,
+  shortPersonName,
+  shortProductName,
+} from './daily-report-format';
+import {
   clubDayWindow,
   lastClosedClubDay,
   localTime,
@@ -253,9 +259,7 @@ describe('daily report builder', () => {
     expect(report.alerts[0]).toBe(
       '1337 Ижевск: смена Борис не закрыта (открыта в 21:05)',
     );
-    expect(report.alerts).toContain(
-      '1337 Ижевск: закончились ходовые товары: Monster 0,5',
-    );
+    expect(report.alerts).toContain('1337 Ижевск: закончились 1 ходовой товар');
   });
 
   it('compares admins with the network and with their own usual hour', () => {
@@ -315,15 +319,43 @@ describe('daily report builder', () => {
         ],
       }),
     );
-    const [message] = renderDailyReport(report, 'Сутки прошли спокойно.');
-    expect(message).toContain(
-      '📊 <b>Отчёт за сутки 25.10 09:00 — 26.10 09:00</b>',
+    const [summary, club] = renderDailyReport(report, 'Сутки прошли спокойно.');
+    expect(summary).toContain('📊 <b>Сутки 25.10 → 26.10</b>');
+    expect(summary).toContain('🧠 <b>Разбор</b>\nСутки прошли спокойно.');
+    expect(summary).toContain('👤 <b>Админы, ₽ в час</b>');
+    expect(summary).not.toContain('Клуб &lt;1337&gt;</b>');
+    expect(club).toContain('🏠 <b>Клуб &lt;1337&gt;</b>');
+    expect(club).toContain('⚠️ 21:05–не закрыта Борис');
+    expect(club).toContain(
+      '<blockquote expandable><b>🚫 Закончились (1)</b>\nMonster 0,5</blockquote>',
     );
-    expect(message).toContain('<b>Клуб &lt;1337&gt;</b>');
-    expect(message.indexOf('🧠 <b>Разбор</b>')).toBeLessThan(
-      message.indexOf('<b>Клуб &lt;1337&gt;</b>'),
+  });
+
+  it('shortens names and products and marks a club without guest data', () => {
+    expect(shortPersonName('Семенова Анастасия Анатольевна')).toBe(
+      'Семенова А.',
     );
-    expect(message).toContain('⚠️ Борис 21:05–не закрыта');
+    expect(shortPersonName('Администратор не определён')).toBe(
+      'Администратор не определён',
+    );
+    expect(
+      shortProductName('Энергетический напиток BURN Гуава 500мл ж/б'),
+    ).toBe('BURN Гуава 0,5 л');
+    expect(
+      shortProductName('Негазированная вода AQUA MINERALE Цитрус 1л ПЭТ'),
+    ).toBe('AQUA MINERALE Цитрус 1 л');
+    expect(shortProductName('Langame product #1052')).toBe(
+      'Товар #1052 (нет в каталоге Langame)',
+    );
+    expect(pluralRu(178, ['гость', 'гостя', 'гостей'])).toBe('гостей');
+    expect(pluralRu(22, ['гость', 'гостя', 'гостей'])).toBe('гостя');
+
+    const noGuests = buildDailyReport(input({ sessions: [] }));
+    expect(noGuests.alerts).toContain(
+      `1337 Ижевск: нет данных о гостях при кассе ${formatRub(33500)}, проверьте сессии в Langame`,
+    );
+    const [, club] = renderDailyReport(noGuests, null);
+    expect(club).toContain('гостей 0 ⚠️ нет данных о гостях');
   });
 
   it('splits long reports into Telegram-sized messages without cutting sections', () => {
@@ -452,6 +484,59 @@ describe('daily report commentary', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(result.status).toBe('REJECTED');
     expect(result.text).toBeNull();
+  });
+
+  it('asks again once when the provider times out, if the caller allows it', async () => {
+    const timeout = () =>
+      Promise.reject(
+        new DOMException(
+          'The operation was aborted due to timeout',
+          'TimeoutError',
+        ),
+      );
+    const answer = () =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            choices: [{ message: { content: 'Касса 45 300 ₽.' } }],
+          }),
+      });
+    const env = { DAILY_REPORT_LLM_API_KEY: 'key' };
+
+    const once = jest.fn().mockImplementationOnce(timeout);
+    expect((await service(env).comment(report, once as never)).status).toBe(
+      'FAILED',
+    );
+    expect(once).toHaveBeenCalledTimes(1);
+
+    const twice = jest
+      .fn()
+      .mockImplementationOnce(timeout)
+      .mockImplementationOnce(answer);
+    const result = await service(env).comment(report, twice as never, {
+      minTimeoutMs: 180_000,
+      retryOnFailure: true,
+    });
+    expect(result.status).toBe('OK');
+    expect(twice).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not ask again when the provider refuses the request', async () => {
+    const fetchImpl = jest.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 401,
+        text: () => Promise.resolve('bad key'),
+      }),
+    );
+    const result = await service({ DAILY_REPORT_LLM_API_KEY: 'key' }).comment(
+      report,
+      fetchImpl as never,
+      { retryOnFailure: true },
+    );
+    expect(result.status).toBe('FAILED');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('returns the commentary from Cloud.ru by default', async () => {

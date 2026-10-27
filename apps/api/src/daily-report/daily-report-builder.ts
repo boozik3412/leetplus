@@ -1,6 +1,12 @@
 import type { ClubDayWindow } from './daily-report-window';
 import { localTime } from './daily-report-window';
-import { formatChange, formatRub, round2 } from './daily-report-format';
+import {
+  formatArrow,
+  formatRub,
+  pluralRu,
+  round2,
+  shortPersonName,
+} from './daily-report-format';
 import type {
   DailyReport,
   DailyReportAdmin,
@@ -437,7 +443,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
     openShifts.forEach((shift) =>
       alerts.push({
         weight: 100,
-        text: `${store.name}: смена ${shift.adminName} не закрыта${shift.startedAt ? ` (открыта в ${shift.startedAt})` : ''}`,
+        text: `${store.name}: смена ${shortPersonName(shift.adminName)} не закрыта${shift.startedAt ? ` (открыта в ${shift.startedAt})` : ''}`,
       }),
     );
     if (gaps.length) {
@@ -456,7 +462,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
     if (revenueChange !== null && revenueChange <= REVENUE_DROP_ALERT) {
       alerts.push({
         weight: 80,
-        text: `${store.name}: касса ${formatRub(club.metrics.shiftRevenue.value)}, ${formatChange(revenueChange)} к обычному дню`,
+        text: `${store.name}: касса ${formatRub(club.metrics.shiftRevenue.value)}, ${formatArrow(revenueChange)} к обычному`,
       });
     }
     const barChange = club.metrics.barRevenue.change;
@@ -471,7 +477,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
     } else if (barChange !== null && barChange <= BAR_DROP_ALERT) {
       alerts.push({
         weight: 70,
-        text: `${store.name}: бар ${formatRub(club.metrics.barRevenue.value)}, ${formatChange(barChange)} к обычному дню`,
+        text: `${store.name}: бар ${formatRub(club.metrics.barRevenue.value)}, ${formatArrow(barChange)} к обычному`,
       });
     }
     if (
@@ -485,12 +491,17 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
       });
     }
     if (stock.outOfStock.length) {
+      // The names are in the club's own message; here only how many.
+      const count = stock.outOfStock.length;
       alerts.push({
         weight: 75,
-        text: `${store.name}: закончились ходовые товары: ${stock.outOfStock
-          .slice(0, 5)
-          .map((item) => item.name)
-          .join(', ')}`,
+        text: `${store.name}: закончились ${count} ${pluralRu(count, ['ходовой товар', 'ходовых товара', 'ходовых товаров'])}`,
+      });
+    }
+    if (day.shiftRevenue > 0 && club.metrics.visits.value === 0) {
+      alerts.push({
+        weight: 65,
+        text: `${store.name}: нет данных о гостях при кассе ${formatRub(day.shiftRevenue)}, проверьте сессии в Langame`,
       });
     }
     if (
@@ -571,7 +582,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
     .forEach((admin) =>
       alerts.push({
         weight: 50,
-        text: `${admin.name}: ${formatRub(admin.revenuePerHour ?? 0)} в час, ${formatChange(admin.vsUsual)} к своему обычному`,
+        text: `${shortPersonName(admin.name)}: ${formatRub(admin.revenuePerHour ?? 0)} в час, ${formatArrow(admin.vsUsual)} к своему обычному`,
       }),
     );
 

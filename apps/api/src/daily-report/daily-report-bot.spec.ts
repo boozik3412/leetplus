@@ -1,5 +1,9 @@
 import {
   DailyReportDeliveryService,
+  LINKED_TEXT,
+  START_LINKED_TEXT,
+  START_STOPPED_TEXT,
+  START_TEXT,
   moscowClock,
   openShiftRefs,
   renderFollowUp,
@@ -129,7 +133,7 @@ describe('daily report bot', () => {
     ]);
     const text = renderFollowUp(later, refs[0])!;
     expect(text).toContain('1337 Ижевск: смена закрыта');
-    expect(text).toContain('Дима 21:06–09:12');
+    expect(text).toContain('21:06–09:12 Дима');
     expect(text).toContain('/ч');
     expect(text).toContain('+5%');
   });
@@ -209,6 +213,194 @@ describe('daily report bot', () => {
     expect(calls).toEqual([
       'claim {"refreshedForDate":"2026-10-26","refreshedAt":"2026-10-26T06:30:00.000Z"}',
       'refresh',
+    ]);
+  });
+
+  it.each([
+    ['a linked chat', [{ enabled: true }], START_LINKED_TEXT],
+    ['a chat that sent /stop', [{ enabled: false }], START_STOPPED_TEXT],
+    ['an unknown chat', [], START_TEXT],
+  ])('answers a bare /start from %s', async (_, linked, expected) => {
+    const sent: string[] = [];
+    const prisma = {
+      dailyReportBot: {
+        findFirst: jest.fn(() =>
+          Promise.resolve({
+            id: 'bot',
+            tokenCiphertext: 'sealed',
+            status: 'READY',
+            checkedAt: new Date('2026-10-27T02:30:00Z'),
+            updateOffset: BigInt(0),
+            refreshedForDate: null,
+            refreshedAt: null,
+          }),
+        ),
+        update: jest.fn(() => Promise.resolve({})),
+      },
+      dailyReportRecipient: {
+        findMany: jest.fn(({ where }: { where: { chatId?: string } }) =>
+          Promise.resolve(where.chatId === '42' ? linked : []),
+        ),
+      },
+      dailyReportDelivery: { findMany: jest.fn(() => Promise.resolve([])) },
+    };
+    const service = new DailyReportDeliveryService(
+      prisma as never,
+      { decrypt: () => TOKEN } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const telegramFetch = jest.fn((url: string, init: { body: string }) => {
+      const method = url.split('/').pop();
+      if (method === 'sendMessage') {
+        sent.push((JSON.parse(init.body) as { text: string }).text);
+      }
+      const result =
+        method === 'getUpdates'
+          ? [
+              {
+                update_id: 5,
+                message: {
+                  chat: { id: 42, type: 'private' },
+                  from: { first_name: 'Никита' },
+                  text: '/start',
+                },
+              },
+            ]
+          : true;
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ ok: true, result }),
+      });
+    }) as unknown as typeof fetch;
+
+    // 06:00 MSK: before the refresh and the send window.
+    await service.tick(new Date('2026-10-27T03:00:00Z'), { telegramFetch });
+
+    expect(sent).toEqual([expected]);
+  });
+
+  it('sends the latest report as soon as a chat is linked', async () => {
+    const sent: string[] = [];
+    const silent: boolean[] = [];
+    const upserts: Array<{ create: { reportKey: string; status: string } }> =
+      [];
+    const prisma = {
+      dailyReportBot: {
+        findFirst: jest.fn(() =>
+          Promise.resolve({
+            id: 'bot',
+            tokenCiphertext: 'sealed',
+            status: 'READY',
+            checkedAt: new Date('2026-10-27T02:30:00Z'),
+            updateOffset: BigInt(0),
+            refreshedForDate: null,
+            refreshedAt: null,
+          }),
+        ),
+        update: jest.fn(() => Promise.resolve({})),
+      },
+      dailyReportRecipient: {
+        findFirst: jest.fn(() =>
+          Promise.resolve({ id: 'r1', tenantId: 'demo', userId: 'u1' }),
+        ),
+        update: jest.fn(() => Promise.resolve({})),
+        findMany: jest.fn(() =>
+          Promise.resolve([
+            { id: 'r1', userId: 'u1', chatId: '42', deliveries: [] },
+          ]),
+        ),
+      },
+      user: {
+        findFirst: jest.fn(() =>
+          Promise.resolve({
+            tenantId: 'demo',
+            accessScope: 'NETWORK',
+            storeAccesses: [],
+          }),
+        ),
+      },
+      dailyReportDelivery: {
+        upsert: jest.fn((args: (typeof upserts)[number]) => {
+          upserts.push(args);
+          return Promise.resolve({});
+        }),
+        findMany: jest.fn(() => Promise.resolve([])),
+      },
+    };
+    const metric = { value: 1, usual: null, change: null };
+    const build = jest.fn(() =>
+      Promise.resolve({
+        ...report([club()]),
+        totals: {
+          shiftRevenue: metric,
+          barRevenue: metric,
+          barMargin: metric,
+          guests: metric,
+          visits: metric,
+          playHours: metric,
+        },
+        alerts: [],
+        admins: [],
+      }),
+    );
+    const service = new DailyReportDeliveryService(
+      prisma as never,
+      { decrypt: () => TOKEN } as never,
+      { fromPersisted: () => ({ mode: 'NETWORK' }) } as never,
+      { build } as never,
+      { comment: () => Promise.resolve({ text: null }) } as never,
+    );
+    const telegramFetch = jest.fn((url: string, init: { body: string }) => {
+      const method = url.split('/').pop();
+      if (method === 'sendMessage') {
+        const body = JSON.parse(init.body) as {
+          text: string;
+          disable_notification?: boolean;
+        };
+        sent.push(body.text);
+        silent.push(body.disable_notification === true);
+      }
+      const result =
+        method === 'getUpdates'
+          ? [
+              {
+                update_id: 5,
+                message: {
+                  chat: { id: 42, type: 'private' },
+                  from: { first_name: 'Никита' },
+                  text: `/start ${'a'.repeat(32)}`,
+                },
+              },
+            ]
+          : true;
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ ok: true, result }),
+      });
+    }) as unknown as typeof fetch;
+
+    // 06:00 MSK: today's report is not out yet, so yesterday's is the latest.
+    const result = await service.tick(new Date('2026-10-27T03:00:00Z'), {
+      telegramFetch,
+    });
+
+    expect(result.linked).toBe(1);
+    expect(result.sent).toBe(1);
+    expect(sent[0]).toBe(LINKED_TEXT);
+    expect(sent[1]).toContain('📊 <b>Сутки');
+    // The summary rings once; the club message follows without a sound.
+    expect(silent).toEqual([false, false, true]);
+    expect(build).toHaveBeenCalledWith(
+      { tenantId: 'demo', storeIds: null },
+      expect.any(Date),
+      '2026-10-26',
+    );
+    expect(upserts.map((item) => item.create.reportKey)).toEqual([
+      '2026-10-26',
     ]);
   });
 

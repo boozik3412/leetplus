@@ -15017,7 +15017,8 @@ export class GuestGamificationService {
             where: {
               tenantId: user.tenantId,
               seasonId: { in: seasonIds },
-              status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+              // An expired step reward still proves the step was completed.
+              status: { in: ['PENDING', 'APPROVED', 'PAID', 'EXPIRED'] },
               ...(options.excludeSeasonRewardIds?.length
                 ? { id: { notIn: options.excludeSeasonRewardIds } }
                 : {}),
@@ -35412,7 +35413,6 @@ function guestGameShadowBattlePassStepActivatedAt(
     season.periodFrom && season.periodFrom > season.createdAt
       ? season.periodFrom
       : season.createdAt;
-  const now = Date.now();
   const excludedRewardIds = new Set(excludeRewardIds);
 
   for (const reward of rewards) {
@@ -35424,11 +35424,9 @@ function guestGameShadowBattlePassStepActivatedAt(
     ) {
       continue;
     }
-    const status = reward.status.toUpperCase();
-    if (status === 'CANCELED' || status === 'EXPIRED') {
-      continue;
-    }
-    if (reward.expiresAt && reward.expiresAt.getTime() < now) {
+    // Same rule as dryRunSeasonRewardCountsAsStep: only a canceled reward
+    // reopens its step, an expired one still marks it completed.
+    if (reward.status.toUpperCase() === 'CANCELED') {
       continue;
     }
     if (reward.qualifiedAt > activatedAt) {

@@ -5,28 +5,52 @@ import {
   commentaryStatusText,
   parseTelegramHtml,
   type DailyReportPreview,
+  type DailyReportSegment,
 } from "@/lib/daily-report-view";
+
+function Segment({ segment }: { segment: DailyReportSegment }) {
+  if (segment.bold && segment.italic) {
+    return (
+      <strong>
+        <em>{segment.text}</em>
+      </strong>
+    );
+  }
+  if (segment.bold) return <strong>{segment.text}</strong>;
+  if (segment.italic) {
+    return <em className="text-zinc-500">{segment.text}</em>;
+  }
+  return <span>{segment.text}</span>;
+}
+
+/** Neighbouring segments of one quote render as one quote block. */
+function groupQuotes(segments: DailyReportSegment[]) {
+  const groups: Array<{ quote: boolean; segments: DailyReportSegment[] }> = [];
+  segments.forEach((segment) => {
+    const last = groups.at(-1);
+    if (last && last.quote === segment.quote) last.segments.push(segment);
+    else groups.push({ quote: segment.quote, segments: [segment] });
+  });
+  return groups;
+}
 
 function TelegramMessage({ message }: { message: string }) {
   return (
     <div className="whitespace-pre-wrap rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm leading-6 text-zinc-900 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100">
-      {parseTelegramHtml(message).map((segment, index) => {
-        if (segment.bold && segment.italic) {
-          return (
-            <strong key={index}>
-              <em>{segment.text}</em>
-            </strong>
-          );
-        }
-        if (segment.bold) return <strong key={index}>{segment.text}</strong>;
-        if (segment.italic) {
-          return (
-            <em key={index} className="text-zinc-500">
-              {segment.text}
-            </em>
-          );
-        }
-        return <span key={index}>{segment.text}</span>;
+      {groupQuotes(parseTelegramHtml(message)).map((group, groupIndex) => {
+        const content = group.segments.map((segment, index) => (
+          <Segment key={index} segment={segment} />
+        ));
+        return group.quote ? (
+          <div
+            key={groupIndex}
+            className="my-1 border-l-2 border-sky-500 bg-sky-50 px-2 dark:bg-sky-950/40"
+          >
+            {content}
+          </div>
+        ) : (
+          <span key={groupIndex}>{content}</span>
+        );
       })}
     </div>
   );

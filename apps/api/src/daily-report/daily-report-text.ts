@@ -1,8 +1,11 @@
 import {
-  formatChange,
+  formatArrow,
   formatNumber,
   formatPercent,
   formatRub,
+  pluralRu,
+  shortPersonName,
+  shortProductName,
 } from './daily-report-format';
 import type {
   DailyReport,
@@ -20,77 +23,120 @@ export function escapeHtml(value: string) {
     .replace(/>/g, '&gt;');
 }
 
-function withChange(text: string, metric: DailyReportMetric) {
-  const change = formatChange(metric.change);
-  return change ? `${text} (${change})` : text;
+/** Lists in a club message stop here; the rest is a count. */
+const LIST_LIMIT = 15;
+
+function arrow(metric: DailyReportMetric) {
+  const text = formatArrow(metric.change);
+  return text ? ` ${text}` : '';
+}
+
+function dayMonth(date: string) {
+  const [, month, day] = date.split('-');
+  return `${day}.${month}`;
 }
 
 function formatDayLabel(club: DailyReportClub) {
-  const [, month, day] = club.reportDate.split('-');
   const previous = new Date(`${club.reportDate}T00:00:00Z`);
   previous.setUTCDate(previous.getUTCDate() - 1);
-  const prevDay = String(previous.getUTCDate()).padStart(2, '0');
-  const prevMonth = String(previous.getUTCMonth() + 1).padStart(2, '0');
-  return `${prevDay}.${prevMonth} 09:00 — ${day}.${month} 09:00`;
+  return `${dayMonth(previous.toISOString().slice(0, 10))} → ${dayMonth(club.reportDate)}`;
 }
 
-function guestLine(club: DailyReportClub) {
-  const summary = club.guestSummary;
-  const metrics = club.metrics;
-  const parts = [
-    withChange(
-      `🎮 Гости: ${formatNumber(metrics.guests.value)}`,
-      metrics.guests,
-    ),
-  ];
-  if (metrics.guests.value > 0) {
-    parts.push(
-      `новых ${formatNumber(summary.newGuests)}, постоянных ${formatNumber(summary.regulars)}`,
+function wholeNumber(value: number) {
+  return formatNumber(Math.round(value));
+}
+
+function summarySection(report: DailyReport) {
+  const first = report.clubs[0];
+  const totals = report.totals;
+  const guests = totals.guests.value;
+  const visits = totals.visits.value;
+  return [
+    first
+      ? `📊 <b>Сутки ${formatDayLabel(first)}</b>`
+      : '📊 <b>Отчёт за сутки</b>',
+    '<i>с 09:00 до 09:00 по времени клуба</i>',
+    '',
+    `<b>${formatRub(totals.shiftRevenue.value)}</b> касса${arrow(totals.shiftRevenue)}`,
+    `<b>${formatRub(totals.barRevenue.value)}</b> бар${arrow(totals.barRevenue)} · маржа ${formatRub(totals.barMargin.value)}`,
+    `<b>${wholeNumber(guests)}</b> ${pluralRu(guests, ['гость', 'гостя', 'гостей'])}${arrow(totals.guests)} · ${wholeNumber(visits)} ${pluralRu(visits, ['визит', 'визита', 'визитов'])} · ${wholeNumber(totals.playHours.value)} ч`,
+    '<i>▲▼ к среднему за 7 суток</i>',
+  ].join('\n');
+}
+
+function adminsSection(report: DailyReport) {
+  const lines = ['👤 <b>Админы, ₽ в час</b>'];
+  report.admins.forEach((admin, index) => {
+    const usual = formatArrow(admin.vsUsual);
+    lines.push(
+      `${index + 1}. ${escapeHtml(shortPersonName(admin.name))} · ${wholeNumber(admin.revenuePerHour ?? 0)}${usual ? ` ${usual} к своему обычному` : ''}`,
     );
+  });
+  return lines.join('\n');
+}
+
+function guestLines(club: DailyReportClub) {
+  const metrics = club.metrics;
+  const load =
+    club.load !== null ? `Загрузка ${formatPercent(club.load)} · ` : '';
+  const guests = metrics.guests.value;
+  if (metrics.visits.value === 0 && metrics.shiftRevenue.value > 0) {
+    return [`${load}гостей 0 ⚠️ нет данных о гостях`];
+  }
+  const lines = [
+    `${load}гостей <b>${wholeNumber(guests)}</b>${arrow(metrics.guests)}`,
+  ];
+  if (guests > 0) {
+    const summary = club.guestSummary;
+    const details = [
+      `новых ${formatNumber(summary.newGuests)}`,
+      `постоянных ${formatNumber(summary.regulars)}`,
+    ];
     if (summary.averageVisitHours !== null) {
-      parts.push(
-        `в среднем ${formatNumber(summary.averageVisitHours)} ч за визит`,
-      );
+      details.push(`${formatNumber(summary.averageVisitHours)} ч за визит`);
     }
     if (summary.peakHour) {
-      parts.push(
-        `пик в ${summary.peakHour}: ${formatNumber(summary.peakGuests)}${club.computerCount ? ` из ${formatNumber(club.computerCount)} ПК` : ' одновременно'}`,
+      details.push(
+        `пик в ${summary.peakHour}: ${formatNumber(summary.peakGuests)}${club.computerCount ? ` из ${formatNumber(club.computerCount)} ПК` : ''}`,
       );
     }
+    lines.push(details.join(' · '));
   }
-  return parts.join('; ');
+  return lines;
+}
+
+/** A collapsed Telegram quote: the title with the count, the items inside. */
+function collapsedList(title: string, items: string[]) {
+  const shown = items.slice(0, LIST_LIMIT);
+  const rest = items.length - shown.length;
+  return [
+    `<blockquote expandable><b>${title} (${items.length})</b>`,
+    ...shown,
+    ...(rest > 0 ? [`и ещё ${rest}`] : []),
+  ]
+    .join('\n')
+    .concat('</blockquote>');
 }
 
 function clubBlock(club: DailyReportClub) {
-  const lines: string[] = [];
   const metrics = club.metrics;
-  lines.push(`<b>${escapeHtml(club.name)}</b>`);
-  const head = [
-    withChange(
-      `касса ${formatRub(metrics.shiftRevenue.value)}`,
-      metrics.shiftRevenue,
-    ),
-    withChange(
-      `бар ${formatRub(metrics.barRevenue.value)}`,
-      metrics.barRevenue,
-    ),
+  const lines: string[] = [
+    `🏠 <b>${escapeHtml(club.name)}</b>`,
+    `Касса <b>${formatRub(metrics.shiftRevenue.value)}</b>${arrow(metrics.shiftRevenue)} · бар <b>${formatRub(metrics.barRevenue.value)}</b>${arrow(metrics.barRevenue)}`,
+    ...guestLines(club),
+    '',
   ];
-  if (club.load !== null) head.push(`загрузка ${formatPercent(club.load)}`);
-  lines.push(head.join(', '));
-  lines.push(guestLine(club));
-
   if (club.shifts.length) {
-    lines.push('Смены:');
+    lines.push('<b>Смены</b>');
     club.shifts.forEach((shift) => {
       const time = `${shift.startedAt ?? '?'}–${shift.stoppedAt ?? 'не закрыта'}`;
-      const parts = [
-        `${escapeHtml(shift.adminName)} ${time}`,
-        formatRub(shift.revenue),
-      ];
-      if (shift.revenuePerHour !== null) {
-        parts.push(`${formatRub(shift.revenuePerHour)}/ч`);
-      }
-      lines.push(`${shift.closed ? '•' : '⚠️'} ${parts.join(' · ')}`);
+      const perHour =
+        shift.revenuePerHour !== null
+          ? ` · ${formatRub(shift.revenuePerHour)}/ч`
+          : '';
+      lines.push(
+        `${shift.closed ? '' : '⚠️ '}${time} ${escapeHtml(shortPersonName(shift.adminName))} · <b>${formatRub(shift.revenue)}</b>${perHour}`,
+      );
     });
   } else {
     lines.push('⚠️ Смен за сутки нет в данных');
@@ -100,71 +146,48 @@ function clubBlock(club: DailyReportClub) {
   }
   if (club.topProducts.length) {
     lines.push(
-      `Топ бара: ${club.topProducts
-        .map(
+      collapsedList(
+        '🍫 Топ бара',
+        club.topProducts.map(
           (item) =>
-            `${escapeHtml(item.name)} — ${formatNumber(item.quantity)} шт, ${formatRub(item.revenue)}`,
-        )
-        .join('; ')}`,
+            `${escapeHtml(shortProductName(item.name))} · ${formatNumber(item.quantity)} шт · ${formatRub(item.revenue)}`,
+        ),
+      ),
     );
   }
   if (club.outOfStock.length) {
     lines.push(
-      `Закончились: ${club.outOfStock.map((item) => escapeHtml(item.name)).join(', ')}`,
+      collapsedList(
+        '🚫 Закончились',
+        club.outOfStock.map((item) => escapeHtml(shortProductName(item.name))),
+      ),
     );
   }
   if (club.runningOut.length) {
     lines.push(
-      `Заканчиваются: ${club.runningOut
-        .map(
+      collapsedList(
+        '⏳ Заканчиваются',
+        club.runningOut.map(
           (item) =>
-            `${escapeHtml(item.name)} (${formatNumber(item.quantity)} шт)`,
-        )
-        .join(', ')}`,
+            `${escapeHtml(shortProductName(item.name))} · осталось ${formatNumber(item.quantity)} шт`,
+        ),
+      ),
     );
   }
   return lines.join('\n');
 }
 
 /**
- * The report as Telegram HTML parts, each under the message limit. The
- * commentary, when present, comes right after the network summary: the owner
- * reads the conclusions first and the per-club detail below.
+ * The report as Telegram HTML messages, each under the message limit. The
+ * first message is the network on one screen: totals, what needs attention,
+ * the AI commentary and the admins. Each club follows in a message of its
+ * own, sent without a sound.
  */
 export function renderDailyReport(
   report: DailyReport,
   commentary: string | null,
 ): string[] {
-  const sections: string[] = [];
-  const first = report.clubs[0];
-  const totals = report.totals;
-  const title = first
-    ? `📊 <b>Отчёт за сутки ${formatDayLabel(first)}</b>`
-    : '📊 <b>Отчёт за сутки</b>';
-  const zones = new Set(report.clubs.map((club) => club.timeZone));
-  sections.push(
-    [
-      title,
-      zones.size > 1 ? '<i>Время каждого клуба — местное.</i>' : null,
-      '',
-      withChange(
-        `💰 Касса: ${formatRub(totals.shiftRevenue.value)}`,
-        totals.shiftRevenue,
-      ),
-      withChange(
-        `🥤 Бар: ${formatRub(totals.barRevenue.value)}, маржа ${formatRub(totals.barMargin.value)}`,
-        totals.barRevenue,
-      ),
-      withChange(
-        `🎮 Гости: ${formatNumber(totals.guests.value)}, визитов ${formatNumber(totals.visits.value)}, ${formatNumber(Math.round(totals.playHours.value))} ч игры`,
-        totals.guests,
-      ),
-      '<i>В скобках — к среднему за прошлые 7 суток.</i>',
-    ]
-      .filter((line) => line !== null)
-      .join('\n'),
-  );
-
+  const sections = [summarySection(report)];
   if (report.alerts.length) {
     sections.push(
       [
@@ -176,25 +199,11 @@ export function renderDailyReport(
   if (commentary?.trim()) {
     sections.push(`🧠 <b>Разбор</b>\n${escapeHtml(commentary.trim())}`);
   }
-  report.clubs.forEach((club) => sections.push(clubBlock(club)));
-  if (report.admins.length) {
-    const lines = ['👤 <b>Админы, выручка в час</b>'];
-    report.admins.forEach((admin, index) => {
-      const compare = [
-        admin.vsNetwork !== null
-          ? `${formatChange(admin.vsNetwork)} к среднему по сети`
-          : null,
-        admin.vsUsual !== null
-          ? `${formatChange(admin.vsUsual)} к своему обычному`
-          : null,
-      ].filter(Boolean);
-      lines.push(
-        `${index + 1}. ${escapeHtml(admin.name)} — ${formatRub(admin.revenuePerHour ?? 0)}/ч${compare.length ? ` (${compare.join(', ')})` : ''}`,
-      );
-    });
-    sections.push(lines.join('\n'));
-  }
-  return packMessages(sections);
+  if (report.admins.length) sections.push(adminsSection(report));
+  return [
+    ...packMessages(sections),
+    ...report.clubs.flatMap((club) => packMessages([clubBlock(club)])),
+  ];
 }
 
 /** Joins sections into as few messages as fit, never splitting a section. */

@@ -133,7 +133,7 @@ describe('daily report bot', () => {
     ]);
     const text = renderFollowUp(later, refs[0])!;
     expect(text).toContain('1337 Ижевск: смена закрыта');
-    expect(text).toContain('Дима 21:06–09:12');
+    expect(text).toContain('21:06–09:12 Дима');
     expect(text).toContain('/ч');
     expect(text).toContain('+5%');
   });
@@ -284,6 +284,7 @@ describe('daily report bot', () => {
 
   it('sends the latest report as soon as a chat is linked', async () => {
     const sent: string[] = [];
+    const silent: boolean[] = [];
     const upserts: Array<{ create: { reportKey: string; status: string } }> =
       [];
     const prisma = {
@@ -355,7 +356,12 @@ describe('daily report bot', () => {
     const telegramFetch = jest.fn((url: string, init: { body: string }) => {
       const method = url.split('/').pop();
       if (method === 'sendMessage') {
-        sent.push((JSON.parse(init.body) as { text: string }).text);
+        const body = JSON.parse(init.body) as {
+          text: string;
+          disable_notification?: boolean;
+        };
+        sent.push(body.text);
+        silent.push(body.disable_notification === true);
       }
       const result =
         method === 'getUpdates'
@@ -385,7 +391,9 @@ describe('daily report bot', () => {
     expect(result.linked).toBe(1);
     expect(result.sent).toBe(1);
     expect(sent[0]).toBe(LINKED_TEXT);
-    expect(sent[1]).toContain('Отчёт за сутки');
+    expect(sent[1]).toContain('📊 <b>Сутки');
+    // The summary rings once; the club message follows without a sound.
+    expect(silent).toEqual([false, false, true]);
     expect(build).toHaveBeenCalledWith(
       { tenantId: 'demo', storeIds: null },
       expect.any(Date),

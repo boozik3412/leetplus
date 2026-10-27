@@ -4,7 +4,11 @@ import { SecretEncryptionService } from '../integrations/secret-encryption.servi
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
 import { DailyReportCommentaryService } from './daily-report-commentary';
-import { formatChange, formatRub } from './daily-report-format';
+import {
+  formatChange,
+  formatRub,
+  shortPersonName,
+} from './daily-report-format';
 import {
   DailyReportService,
   type DailyReportScope,
@@ -151,7 +155,7 @@ export function renderFollowUp(report: DailyReport, ref: OpenShiftRef) {
   const change = formatChange(club.metrics.shiftRevenue.change);
   return [
     `✅ <b>${escapeHtml(club.name)}: смена закрыта</b>`,
-    `${escapeHtml(shift.adminName)} ${shift.startedAt ?? '?'}–${shift.stoppedAt} · ${formatRub(shift.revenue)}${perHour}`,
+    `${shift.startedAt ?? '?'}–${shift.stoppedAt} ${escapeHtml(shortPersonName(shift.adminName))} · ${formatRub(shift.revenue)}${perHour}`,
     `Наличные ${formatRub(shift.cash)}, безнал ${formatRub(shift.cashless)}${shift.refunds ? `, возвраты ${formatRub(shift.refunds)}` : ''}`,
     `Касса клуба за сутки теперь ${formatRub(club.metrics.shiftRevenue.value)}${change ? ` (${change})` : ''}`,
   ].join('\n');
@@ -542,12 +546,15 @@ export class DailyReportDeliveryService {
         // Shifts of yesterday's report closed long ago: no follow-ups for them.
         openShifts =
           reportKey === moscowClock(now).date ? openShiftRefs(report) : [];
-        for (const message of messages) {
+        // One sound per report: the clubs follow the summary silently.
+        for (const [index, message] of messages.entries()) {
           await sendMessage(
             deps.telegramFetch,
             token,
             recipient.chatId!,
             message,
+            true,
+            index > 0,
           );
         }
       } catch (caught) {

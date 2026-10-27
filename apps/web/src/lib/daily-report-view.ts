@@ -20,6 +20,8 @@ export type DailyReportSegment = {
   text: string;
   bold: boolean;
   italic: boolean;
+  /** Inside a (collapsed) Telegram quote. */
+  quote: boolean;
 };
 
 const ENTITIES: Record<string, string> = {
@@ -29,27 +31,33 @@ const ENTITIES: Record<string, string> = {
 };
 
 /**
- * Splits a Telegram HTML message into plain text segments. Only <b> and <i>
- * are formatting; everything else stays text, so the page renders the
- * message as React text nodes and never injects HTML.
+ * Splits a Telegram HTML message into plain text segments. Only <b>, <i> and
+ * <blockquote> are formatting; everything else stays text, so the page
+ * renders the message as React text nodes and never injects HTML.
  */
 export function parseTelegramHtml(message: string): DailyReportSegment[] {
   const segments: DailyReportSegment[] = [];
   let bold = false;
   let italic = false;
-  message.split(/(<\/?[bi]>)/).forEach((part) => {
-    if (part === "<b>") bold = true;
-    else if (part === "</b>") bold = false;
-    else if (part === "<i>") italic = true;
-    else if (part === "</i>") italic = false;
-    else if (part) {
-      segments.push({
-        text: part.replace(/&(?:lt|gt|amp);/g, (entity) => ENTITIES[entity]),
-        bold,
-        italic,
-      });
-    }
-  });
+  let quote = false;
+  message
+    .split(/(<\/?[bi]>|<blockquote(?: expandable)?>|<\/blockquote>)/)
+    .forEach((part) => {
+      if (part.startsWith("<blockquote")) quote = true;
+      else if (part === "</blockquote>") quote = false;
+      else if (part === "<b>") bold = true;
+      else if (part === "</b>") bold = false;
+      else if (part === "<i>") italic = true;
+      else if (part === "</i>") italic = false;
+      else if (part) {
+        segments.push({
+          text: part.replace(/&(?:lt|gt|amp);/g, (entity) => ENTITIES[entity]),
+          bold,
+          italic,
+          quote,
+        });
+      }
+    });
   return segments;
 }
 

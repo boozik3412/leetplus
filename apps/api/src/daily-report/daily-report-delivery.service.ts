@@ -17,6 +17,7 @@ import {
   hashLinkCode,
   linkCodeFromText,
   sendMessage,
+  setBotProfile,
 } from './daily-report-telegram';
 import { escapeHtml, renderDailyReport } from './daily-report-text';
 import {
@@ -49,7 +50,8 @@ const SHIFT_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
  * then goes out on the data already loaded.
  */
 export const REFRESH_BUDGET_MS = 10 * 60 * 1000;
-const TOKEN_RECHECK_MS = 6 * 60 * 60 * 1000;
+/** getMe and the bot's description/commands are refreshed this often. */
+const TOKEN_RECHECK_MS = 60 * 60 * 1000;
 
 export type DailyReportRefresh = (input: {
   tenantId: string;
@@ -101,6 +103,15 @@ export function openShiftRefs(report: DailyReport): OpenShiftRef[] {
       })),
   );
 }
+
+/** Reply to a bare /start: the chat is not linked to anyone yet. */
+export const START_TEXT = [
+  'Это бот ежедневного отчёта LeetPlus.',
+  '',
+  'Каждое утро в 10:00 по Москве он присылает отчёт по клубам вашей сети за прошедшие сутки: выручку смен и бара, сравнение администраторов, гостей, незакрытые смены, товары, которых нет в наличии, и короткий разбор от ИИ.',
+  '',
+  'Этот чат пока не подключён. Попросите владельца сети открыть в LeetPlus Настройки → «Отчёт за сутки в Telegram» и выдать вам «Ссылку для подключения». Откройте её здесь, в Telegram, — бот ответит «Готово!».',
+].join('\n');
 
 /** The message sent when a shift that was open in the morning report closes. */
 export function renderFollowUp(report: DailyReport, ref: OpenShiftRef) {
@@ -229,6 +240,14 @@ export class DailyReportDeliveryService {
       });
       bot.status = 'READY';
       bot.botUsername = me.username ?? null;
+      try {
+        await setBotProfile(fetchImpl, token);
+      } catch (error) {
+        // Cosmetic: the report still goes out without the description.
+        this.logger.warn(
+          `Daily report bot profile: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       return true;
     } catch (error) {
       if (error instanceof TelegramApiError && error.status === 401) {
@@ -317,12 +336,7 @@ export class DailyReportDeliveryService {
           'Отчёт отключён. Включить снова можно в LeetPlus: Настройки → Отчёт за сутки.',
         );
       } else if (/^\/start\b/.test(text)) {
-        await this.reply(
-          fetchImpl,
-          token,
-          chatId,
-          'Это бот ежедневного отчёта LeetPlus. Чтобы подключиться, откройте ссылку, которую выдаёт владелец сети в настройках.',
-        );
+        await this.reply(fetchImpl, token, chatId, START_TEXT);
       }
     }
     if (updates.length) {

@@ -108,6 +108,37 @@ export function getUpdates(
   });
 }
 
+/** What Telegram shows on the bot's empty chat screen (up to 512 chars). */
+export const BOT_DESCRIPTION = [
+  'Ежедневный отчёт LeetPlus по клубам вашей сети.',
+  '',
+  'Каждое утро в 10:00 по Москве: выручка смен и бара, сравнение администраторов, гости, незакрытые смены, товары, которых нет в наличии, и короткий разбор от ИИ. Если смена закроется позже, бот пришлёт её итог.',
+  '',
+  'Подключение: откройте ссылку из LeetPlus — Настройки → «Отчёт за сутки в Telegram» → «Ссылка для подключения».',
+].join('\n');
+
+/** The line under the bot's name in its profile (up to 120 chars). */
+export const BOT_SHORT_DESCRIPTION =
+  'Утренний отчёт LeetPlus по клубам: выручка, смены, гости, бар и разбор от ИИ.';
+
+export const BOT_COMMANDS = [
+  { command: 'start', description: 'Что умеет бот и как подключиться' },
+  { command: 'stop', description: 'Отключить отчёт' },
+];
+
+/** Description and command menu; repeating the calls changes nothing. */
+export async function setBotProfile(fetchImpl: TelegramFetch, token: string) {
+  await call<boolean>(fetchImpl, token, 'setMyDescription', {
+    description: BOT_DESCRIPTION,
+  });
+  await call<boolean>(fetchImpl, token, 'setMyShortDescription', {
+    short_description: BOT_SHORT_DESCRIPTION,
+  });
+  await call<boolean>(fetchImpl, token, 'setMyCommands', {
+    commands: BOT_COMMANDS,
+  });
+}
+
 export function sendMessage(
   fetchImpl: TelegramFetch,
   token: string,

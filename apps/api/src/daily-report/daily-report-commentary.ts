@@ -14,6 +14,9 @@ export const DAILY_REPORT_LLM_DEFAULTS = {
   baseUrl: 'https://foundation-models.api.cloud.ru/v1',
   model: 'deepseek-ai/DeepSeek-V4-Pro',
   timeoutMs: 60_000,
+  // The morning report is sent by the worker, which has time to wait: a
+  // reasoning model on the whole network's figures needs minutes, not seconds.
+  workerTimeoutMs: 180_000,
   // DeepSeek V4 reasons before answering; the reasoning counts towards the limit.
   maxTokens: 6000,
 } as const;
@@ -32,6 +35,13 @@ export type CommentaryResult =
       text: null;
       reason: string;
     };
+
+export type CommentaryOptions = {
+  /** The request waits at least this long, whatever the configured timeout. */
+  minTimeoutMs?: number;
+  /** Ask once more when the provider times out, drops or answers 5xx. */
+  retryOnFailure?: boolean;
+};
 
 type NumberMention = { raw: string; value: number; tol: number };
 
@@ -156,8 +166,13 @@ export class DailyReportCommentaryService {
   async comment(
     report: DailyReport,
     fetchImpl: typeof fetch = fetch,
+    options: CommentaryOptions = {},
   ): Promise<CommentaryResult> {
-    const config = this.config();
+    const configured = this.config();
+    const config = configured && {
+      ...configured,
+      timeoutMs: Math.max(configured.timeoutMs, options.minTimeoutMs ?? 0),
+    };
     if (!config) {
       return {
         status: 'DISABLED',
@@ -176,7 +191,12 @@ export class DailyReportCommentaryService {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       let text: string;
       try {
-        text = await this.complete(config, messages, fetchImpl);
+        text = await this.completeWithRetry(
+          config,
+          messages,
+          fetchImpl,
+          options.retryOnFailure ?? false,
+        );
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         this.logger.warn(`Daily report commentary failed: ${reason}`);
@@ -201,6 +221,25 @@ export class DailyReportCommentaryService {
     }
     this.logger.warn(`Daily report commentary rejected: ${lastReason}`);
     return { status: 'REJECTED', text: null, reason: lastReason };
+  }
+
+  private async completeWithRetry(
+    config: DailyReportLlmConfig,
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+    fetchImpl: typeof fetch,
+    retry: boolean,
+  ) {
+    try {
+      return await this.complete(config, messages, fetchImpl);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      // A 4xx (bad key, unknown model) will not get better on a second try.
+      if (!retry || /^LLM responded 4\d\d/.test(reason)) throw error;
+      this.logger.warn(
+        `Daily report commentary failed, asking again: ${reason}`,
+      );
+      return this.complete(config, messages, fetchImpl);
+    }
   }
 
   private async complete(

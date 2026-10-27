@@ -454,6 +454,59 @@ describe('daily report commentary', () => {
     expect(result.text).toBeNull();
   });
 
+  it('asks again once when the provider times out, if the caller allows it', async () => {
+    const timeout = () =>
+      Promise.reject(
+        new DOMException(
+          'The operation was aborted due to timeout',
+          'TimeoutError',
+        ),
+      );
+    const answer = () =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            choices: [{ message: { content: 'Касса 45 300 ₽.' } }],
+          }),
+      });
+    const env = { DAILY_REPORT_LLM_API_KEY: 'key' };
+
+    const once = jest.fn().mockImplementationOnce(timeout);
+    expect((await service(env).comment(report, once as never)).status).toBe(
+      'FAILED',
+    );
+    expect(once).toHaveBeenCalledTimes(1);
+
+    const twice = jest
+      .fn()
+      .mockImplementationOnce(timeout)
+      .mockImplementationOnce(answer);
+    const result = await service(env).comment(report, twice as never, {
+      minTimeoutMs: 180_000,
+      retryOnFailure: true,
+    });
+    expect(result.status).toBe('OK');
+    expect(twice).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not ask again when the provider refuses the request', async () => {
+    const fetchImpl = jest.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 401,
+        text: () => Promise.resolve('bad key'),
+      }),
+    );
+    const result = await service({ DAILY_REPORT_LLM_API_KEY: 'key' }).comment(
+      report,
+      fetchImpl as never,
+      { retryOnFailure: true },
+    );
+    expect(result.status).toBe('FAILED');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('returns the commentary from Cloud.ru by default', async () => {
     const fetchImpl = jest.fn(() =>
       Promise.resolve({

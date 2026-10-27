@@ -3,7 +3,10 @@ import type { Prisma } from '@prisma/client';
 import { SecretEncryptionService } from '../integrations/secret-encryption.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
-import { DailyReportCommentaryService } from './daily-report-commentary';
+import {
+  DAILY_REPORT_LLM_DEFAULTS,
+  DailyReportCommentaryService,
+} from './daily-report-commentary';
 import { formatChange, formatRub } from './daily-report-format';
 import {
   DailyReportService,
@@ -530,7 +533,10 @@ export class DailyReportDeliveryService {
   ) {
     const report = await this.reports.build(scope, now);
     const commentary = report.clubs.length
-      ? await this.commentary.comment(report, deps.llmFetch)
+      ? await this.commentary.comment(report, deps.llmFetch, {
+          minTimeoutMs: DAILY_REPORT_LLM_DEFAULTS.workerTimeoutMs,
+          retryOnFailure: true,
+        })
       : null;
     return {
       report,

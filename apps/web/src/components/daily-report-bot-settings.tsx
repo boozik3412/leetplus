@@ -50,7 +50,7 @@ function botStatusText(bot: BotSettings["bot"]) {
   if (!bot.connected) return "Бот ещё не подключён администратором платформы";
   if (bot.status === "READY") return `Подключён @${bot.botUsername ?? "бот"}`;
   if (bot.status === "INVALID") return bot.lastError ?? "Токен не подошёл";
-  return "Проверяем токен — это занимает до 5 минут";
+  return "Проверяем токен — это занимает пару минут";
 }
 
 function recipientText(user: BotSettings["users"][number]) {

@@ -5,12 +5,16 @@ import {
   renderFollowUp,
 } from './daily-report-delivery.service';
 import {
+  BOT_COMMANDS,
+  BOT_DESCRIPTION,
+  BOT_SHORT_DESCRIPTION,
   TelegramApiError,
   hashLinkCode,
   linkCodeFromText,
   newLinkCode,
   normalizeBotToken,
   sendMessage,
+  setBotProfile,
   tokenHint,
 } from './daily-report-telegram';
 import type { DailyReport, DailyReportClub } from './daily-report.types';
@@ -206,5 +210,28 @@ describe('daily report bot', () => {
       'claim {"refreshedForDate":"2026-10-26","refreshedAt":"2026-10-26T06:30:00.000Z"}',
       'refresh',
     ]);
+  });
+
+  it('describes itself and its commands to Telegram', async () => {
+    const bodies: Record<string, unknown> = {};
+    const fetchImpl = jest.fn((url: string, init: { body: string }) => {
+      bodies[url.split('/').pop()!] = JSON.parse(init.body);
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ ok: true, result: true }),
+      });
+    }) as unknown as typeof fetch;
+
+    await setBotProfile(fetchImpl, TOKEN);
+
+    expect(Object.keys(bodies)).toEqual([
+      'setMyDescription',
+      'setMyShortDescription',
+      'setMyCommands',
+    ]);
+    expect(BOT_DESCRIPTION.length).toBeLessThanOrEqual(512);
+    expect(BOT_SHORT_DESCRIPTION.length).toBeLessThanOrEqual(120);
+    expect(bodies.setMyCommands).toEqual({ commands: BOT_COMMANDS });
   });
 });

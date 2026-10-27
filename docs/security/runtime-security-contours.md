@@ -1987,9 +1987,10 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   получателей своей сети. Получатель получает отчёт только своей сети и в
   своей области клубов. Новый токен того же бота сохраняет привязанные чаты,
   токен другого бота отвязывает их во всех сетях.
-- Worker `daily-report-worker` (`lp-report.timer`, тик каждые 5 минут,
-  `lp worker`, лимит 30 мин) — единственное место с egress к
-  `api.telegram.org` (getMe, getUpdates без webhook, sendMessage),
+- Worker `daily-report-worker` (`lp-report.timer`, тик через минуту после
+  предыдущего, `lp worker`, лимит 30 мин) — единственное место с egress к
+  `api.telegram.org` (getMe, getUpdates без webhook, sendMessage; раз в час
+  setMyDescription/setMyShortDescription/setMyCommands),
   Cloud.ru и Langame (обновление данных за вчера–сегодня в 09:25 МСК и смен
   каждые 30 мин, пока есть незакрытые смены из утреннего отчёта; без
   записи `DailyDataCoverage`). Это быстрое обновление за период: справочник

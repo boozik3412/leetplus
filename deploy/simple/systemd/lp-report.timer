@@ -3,7 +3,7 @@ Description=LeetPlus daily report bot worker (lp)
 
 [Timer]
 OnBootSec=3min
-OnUnitInactiveSec=5min
+OnUnitInactiveSec=1min
 Unit=lp-worker@daily-report-worker.service
 
 [Install]

@@ -104,14 +104,36 @@ export function openShiftRefs(report: DailyReport): OpenShiftRef[] {
   );
 }
 
-/** Reply to a bare /start: the chat is not linked to anyone yet. */
-export const START_TEXT = [
+const START_INTRO = [
   'Это бот ежедневного отчёта LeetPlus.',
   '',
   'Каждое утро в 10:00 по Москве он присылает отчёт по клубам вашей сети за прошедшие сутки: выручку смен и бара, сравнение администраторов, гостей, незакрытые смены, товары, которых нет в наличии, и короткий разбор от ИИ.',
   '',
+];
+
+/** Reply to a bare /start: the chat is not linked to anyone yet. */
+export const START_TEXT = [
+  ...START_INTRO,
   'Этот чат пока не подключён. Попросите владельца сети открыть в LeetPlus Настройки → «Отчёт за сутки в Telegram» и выдать вам «Ссылку для подключения». Откройте её здесь, в Telegram, — бот ответит «Готово!».',
 ].join('\n');
+
+/** Reply to a bare /start from a chat that already gets the report. */
+export const START_LINKED_TEXT = [
+  ...START_INTRO,
+  'Этот чат подключён: следующий отчёт придёт сюда в 10:00 по Москве. Отключить: /stop',
+].join('\n');
+
+/** Reply to a bare /start from a chat that turned the report off with /stop. */
+export const START_STOPPED_TEXT = [
+  ...START_INTRO,
+  'Этот чат подключён, но отчёт отключён командой /stop. Включить снова можно в LeetPlus: Настройки → «Отчёт за сутки в Telegram».',
+].join('\n');
+
+/** Picks the /start reply from the recipients already linked to the chat. */
+export function startReplyText(linked: { enabled: boolean }[]) {
+  if (linked.some((recipient) => recipient.enabled)) return START_LINKED_TEXT;
+  return linked.length ? START_STOPPED_TEXT : START_TEXT;
+}
 
 /** The message sent when a shift that was open in the morning report closes. */
 export function renderFollowUp(report: DailyReport, ref: OpenShiftRef) {
@@ -336,7 +358,18 @@ export class DailyReportDeliveryService {
           'Отчёт отключён. Включить снова можно в LeetPlus: Настройки → Отчёт за сутки.',
         );
       } else if (/^\/start\b/.test(text)) {
-        await this.reply(fetchImpl, token, chatId, START_TEXT);
+        // One chat may get the reports of several networks.
+        const linkedRecipients =
+          await this.prisma.dailyReportRecipient.findMany({
+            where: { chatId },
+            select: { enabled: true },
+          });
+        await this.reply(
+          fetchImpl,
+          token,
+          chatId,
+          startReplyText(linkedRecipients),
+        );
       }
     }
     if (updates.length) {

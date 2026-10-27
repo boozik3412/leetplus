@@ -1,5 +1,8 @@
 import {
   DailyReportDeliveryService,
+  START_LINKED_TEXT,
+  START_STOPPED_TEXT,
+  START_TEXT,
   moscowClock,
   openShiftRefs,
   renderFollowUp,
@@ -210,6 +213,72 @@ describe('daily report bot', () => {
       'claim {"refreshedForDate":"2026-10-26","refreshedAt":"2026-10-26T06:30:00.000Z"}',
       'refresh',
     ]);
+  });
+
+  it.each([
+    ['a linked chat', [{ enabled: true }], START_LINKED_TEXT],
+    ['a chat that sent /stop', [{ enabled: false }], START_STOPPED_TEXT],
+    ['an unknown chat', [], START_TEXT],
+  ])('answers a bare /start from %s', async (_, linked, expected) => {
+    const sent: string[] = [];
+    const prisma = {
+      dailyReportBot: {
+        findFirst: jest.fn(() =>
+          Promise.resolve({
+            id: 'bot',
+            tokenCiphertext: 'sealed',
+            status: 'READY',
+            checkedAt: new Date('2026-10-27T02:30:00Z'),
+            updateOffset: BigInt(0),
+            refreshedForDate: null,
+            refreshedAt: null,
+          }),
+        ),
+        update: jest.fn(() => Promise.resolve({})),
+      },
+      dailyReportRecipient: {
+        findMany: jest.fn(({ where }: { where: { chatId?: string } }) =>
+          Promise.resolve(where.chatId === '42' ? linked : []),
+        ),
+      },
+      dailyReportDelivery: { findMany: jest.fn(() => Promise.resolve([])) },
+    };
+    const service = new DailyReportDeliveryService(
+      prisma as never,
+      { decrypt: () => TOKEN } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const telegramFetch = jest.fn((url: string, init: { body: string }) => {
+      const method = url.split('/').pop();
+      if (method === 'sendMessage') {
+        sent.push((JSON.parse(init.body) as { text: string }).text);
+      }
+      const result =
+        method === 'getUpdates'
+          ? [
+              {
+                update_id: 5,
+                message: {
+                  chat: { id: 42, type: 'private' },
+                  from: { first_name: 'Никита' },
+                  text: '/start',
+                },
+              },
+            ]
+          : true;
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ ok: true, result }),
+      });
+    }) as unknown as typeof fetch;
+
+    // 06:00 MSK: before the refresh and the send window.
+    await service.tick(new Date('2026-10-27T03:00:00Z'), { telegramFetch });
+
+    expect(sent).toEqual([expected]);
   });
 
   it('describes itself and its commands to Telegram', async () => {

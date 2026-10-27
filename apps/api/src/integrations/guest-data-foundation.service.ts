@@ -1272,6 +1272,13 @@ export class GuestDataFoundationService {
           'guests/sessions',
         ),
     );
+    const pcClubs = this.pcClubsByUuid(pcTypesInClubs, pcTypeLinks);
+    await this.assignSessionClubsByPc(
+      tenantId,
+      domain,
+      pcClubs,
+      sessionStoreCandidates,
+    );
     await this.syncSessions(
       tenantId,
       domain,
@@ -1281,6 +1288,7 @@ export class GuestDataFoundationService {
       sessionStoreCandidates,
       profile,
       tariffTypeGroups,
+      pcClubs,
     );
 
     const transactions = await this.captureEndpoint(
@@ -1485,6 +1493,80 @@ export class GuestDataFoundationService {
     profile.endpointErrors[endpoint] =
       (afterRows ? null : langameSectionLimitMessage(error)) ??
       'Не удалось получить данные этого раздела Langame.';
+  }
+
+  /** Computer UUID (upper case) → Langame club, from the PC links. */
+  private pcClubsByUuid(
+    pcTypesInClubs: LangamePcTypeInClub[],
+    pcTypeLinks: LangamePcTypeLink[],
+  ) {
+    const clubFields = [
+      'club_id',
+      'clubId',
+      'list_clubs_id',
+      'list_club_id',
+      'external_club_id',
+      'id_club',
+      'clubs_id',
+    ];
+    const typeToClub = new Map<string, string>();
+    for (const row of pcTypesInClubs) {
+      const typeId = this.firstStringField(row, [
+        'id',
+        'type_id',
+        'pc_type_id',
+      ]);
+      const clubId = this.firstStringField(row, clubFields);
+      if (typeId && clubId) typeToClub.set(typeId, clubId);
+    }
+    const clubs = new Map<string, string>();
+    for (const row of pcTypeLinks) {
+      const uuid = this.firstStringField(row, ['UUID', 'uuid', 'pc_uuid']);
+      const typeId = this.firstStringField(row, ['type_id', 'pc_type_id']);
+      const clubId =
+        this.firstStringField(row, clubFields) ??
+        (typeId ? typeToClub.get(typeId) : undefined);
+      if (uuid && clubId) clubs.set(uuid.toUpperCase(), clubId);
+    }
+    return clubs;
+  }
+
+  /**
+   * Gives earlier sessions without a club their club by computer, so the
+   * history of a domain with several clubs is split by club as well.
+   */
+  private async assignSessionClubsByPc(
+    tenantId: string,
+    domain: string,
+    pcClubs: Map<string, string>,
+    storeCandidates: GuestSessionStoreCandidate[],
+  ) {
+    const uuidsByClub = new Map<string, string[]>();
+    for (const [uuid, clubId] of pcClubs) {
+      const uuids = uuidsByClub.get(clubId) ?? [];
+      uuids.push(uuid, uuid.toLowerCase());
+      uuidsByClub.set(clubId, uuids);
+    }
+    for (const [clubId, uuids] of uuidsByClub) {
+      const store = resolveGuestSessionStore({
+        tenantId,
+        externalDomain: domain,
+        externalClubId: clubId,
+        stores: storeCandidates,
+      });
+      if (!store.storeId) continue;
+      await this.prisma.guestSession.updateMany({
+        where: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          storeId: null,
+          externalClubId: null,
+          externalUuid: { in: uuids },
+        },
+        data: { externalClubId: clubId, storeId: store.storeId },
+      });
+    }
   }
 
   private async syncStoreComputerCounts(
@@ -2083,6 +2165,7 @@ export class GuestDataFoundationService {
     sessionStoreCandidates: GuestSessionStoreCandidate[],
     profile: SourceProfile,
     tariffTypeGroups: LangameTariffTypeGroupIndex,
+    pcClubs: Map<string, string> = new Map(),
   ) {
     for (const row of rows) {
       const externalSessionId = this.toNullableString(row.id);
@@ -2090,9 +2173,14 @@ export class GuestDataFoundationService {
         continue;
       }
       const externalGuestId = this.toNullableString(row.guest_id);
-      const externalClubId = this.toNullableString(
-        row.club_id ?? row.list_clubs_id,
-      );
+      const externalUuid = this.toNullableString(row.UUID);
+      // Langame sends sessions without a club; on a domain with several clubs
+      // the club comes from the computer (session UUID) instead.
+      const externalClubId =
+        this.toNullableString(row.club_id ?? row.list_clubs_id) ??
+        (externalUuid
+          ? (pcClubs.get(externalUuid.toUpperCase()) ?? null)
+          : null);
       const storeRef = externalClubId
         ? storesByExternalClubId.get(externalClubId)
         : null;
@@ -2152,7 +2240,7 @@ export class GuestDataFoundationService {
           externalSessionId,
           externalGuestId,
           externalClubId,
-          externalUuid: this.toNullableString(row.UUID),
+          externalUuid,
           startedAt,
           stoppedAt,
           durationMinutes: this.durationMinutes(startedAt, stoppedAt),
@@ -2169,7 +2257,7 @@ export class GuestDataFoundationService {
           storeId,
           externalGuestId,
           externalClubId,
-          externalUuid: this.toNullableString(row.UUID),
+          externalUuid,
           startedAt,
           stoppedAt,
           durationMinutes: this.durationMinutes(startedAt, stoppedAt),

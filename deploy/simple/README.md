@@ -91,7 +91,10 @@ Worker бота «Отчёт за сутки» (`daily-report-worker`, `lp-repor
    Worker использует адреса `langame-daily-worker` (`data` `172.31.42.21`,
    `egress` `172.31.43.21`); `lp worker` не запускает их одновременно: тик
    отчёта пропускается, пока идёт ночная синхронизация, а синхронизация ждёт
-   до 5 минут окончания тика.
+   до 5 минут окончания тика. Контейнер обоих стартует под общим
+   `flock` `/var/lib/leetplus-compose/fence-address.lock`: проверка «сосед
+   запущен» сама по себе не атомарна, и 2026-10-27 синхронизация упала с
+   `Address already in use`, стартовав в ту же секунду, что и тик отчёта.
 2. Telegram: Privoxy `172.25.0.1:18118` пускает `172.25.0.11`
    (`install-telegram-http-proxy.sh` из `deploy/leetplus-telegram-edge`).
    `api.telegram.org` в `providers.json` не добавляется: на хосте он

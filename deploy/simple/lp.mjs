@@ -60,6 +60,12 @@ const ADDRESS_PEERS = {
   'langame-daily-worker': { peer: 'daily-report-worker', whileBusy: 'wait' },
 };
 const PEER_WAIT_SEC = 5 * 60;
+// Checking whether the peer container runs is not atomic with starting ours: on
+// 2026-10-27 a report tick started in the same second as the nightly sync and the
+// sync died with "Address already in use". Both peers therefore hold one lock
+// file for the whole container run; the conflict exit code tells "busy" apart.
+const ADDRESS_LOCK = '/var/lib/leetplus-compose/fence-address.lock';
+const ADDRESS_BUSY_EXIT = 75;
 const LEGACY_UNITS = { timers: ['leetplus-compose-bonus.timer', 'leetplus-compose-daily.timer'], boot: 'leetplus-compose-runtime.service' };
 const LP_UNITS = { timers: ['lp-bonus.timer', 'lp-daily.timer', 'lp-cleanup.timer'], boot: 'lp-runtime.service' };
 const WORKER_TIMERS = ['lp-bonus.timer', 'lp-daily.timer', 'lp-report.timer'];
@@ -537,6 +543,14 @@ export function addressPeerAction(name, peerRunning) {
   return rule && peerRunning ? rule.whileBusy : 'run';
 }
 
+// flock prefix for `docker start` of a worker that shares the fence address.
+export function addressLockArgs(name) {
+  const rule = ADDRESS_PEERS[name];
+  if (!rule) return [];
+  const wait = rule.whileBusy === 'wait' ? ['--timeout', String(PEER_WAIT_SEC)] : ['--nonblock'];
+  return ['--exclusive', ...wait, '--conflict-exit-code', String(ADDRESS_BUSY_EXIT), ADDRESS_LOCK];
+}
+
 async function worker(name) {
   const timeoutSec = WORKERS[name];
   if (!timeoutSec) fail(`Unknown worker ${name}`);
@@ -555,7 +569,15 @@ async function worker(name) {
     }
   }
   compose(['up', '--no-start', '--no-deps', '--force-recreate', name], { timeout: 120_000 });
-  const result = docker(['start', '--attach', `${PROJECT}-${name}`], { allowFail: true, timeout: timeoutSec * 1000, inherit: true });
+  const start = ['docker', 'start', '--attach', `${PROJECT}-${name}`];
+  const lock = addressLockArgs(name);
+  const result = lock.length
+    ? run('flock', [...lock, ...start], { allowFail: true, timeout: timeoutSec * 1000, inherit: true })
+    : run(start[0], start.slice(1), { allowFail: true, timeout: timeoutSec * 1000, inherit: true });
+  if (result.status === ADDRESS_BUSY_EXIT && lock.length) {
+    if (ADDRESS_PEERS[name].whileBusy === 'skip') { log(`${name}: ${peer} holds the shared address lock, skipping this tick`); return; }
+    fail(`${name}: ${peer} still holds the shared address lock after ${PEER_WAIT_SEC / 60} min`);
+  }
   const state = inspect(`${PROJECT}-${name}`)?.State;
   if (!result.ok || state?.Running || state?.ExitCode !== 0) {
     if (state?.Running) docker(['stop', '--time', '60', `${PROJECT}-${name}`], { allowFail: true });

@@ -55,6 +55,7 @@ function club(overrides: Partial<DailyReportClub> = {}): DailyReportClub {
       peakHour: null,
       peakGuests: 0,
     },
+    online: null,
     refunds: 0,
     topProducts: [],
     outOfStock: [],

@@ -5,6 +5,8 @@ export type DailyReportStore = {
   name: string;
   timeZone: string;
   computerCount: number | null;
+  /** Langame address of the club (`46.langamepro.ru`); several clubs may share one. */
+  domain?: string | null;
 };
 
 export type DailyReportShiftRow = {
@@ -17,8 +19,20 @@ export type DailyReportShiftRow = {
   cash: number;
   cashless: number;
   mobilePay: number;
+  yandexPay: number;
   refunds: number;
   incass: number;
+};
+
+/**
+ * A balance top-up the guest paid online in the Langame app. Langame records
+ * it without a club, so it never reaches a shift's cash; only the Langame
+ * address tells which clubs it belongs to.
+ */
+export type DailyReportOnlineTopupRow = {
+  domain: string;
+  paidAt: Date;
+  amount: number;
 };
 
 export type DailyReportSaleRow = {
@@ -79,6 +93,8 @@ export type DailyReportInput = {
   stockDays: number;
   /** Products the owner excluded from out-of-stock signals. */
   oosExcludedProductKeys: ReadonlySet<string>;
+  /** Online top-ups of the report and baseline windows. */
+  onlineTopups?: DailyReportOnlineTopupRow[];
 };
 
 export type DailyReportShift = {
@@ -119,6 +135,17 @@ export type DailyReportMetric = {
   change: number | null;
 };
 
+/** Online top-ups of the club's Langame address over the club day. */
+export type DailyReportOnline = {
+  amount: DailyReportMetric;
+  payments: number;
+  /**
+   * Other clubs on the same Langame address: the amount is theirs together
+   * and cannot be split, since an online payment names no club.
+   */
+  sharedWith: string[];
+};
+
 export type DailyReportClub = {
   storeId: string;
   name: string;
@@ -143,6 +170,7 @@ export type DailyReportClub = {
   load: number | null;
   computerCount: number | null;
   guestSummary: DailyReportGuestSummary;
+  online: DailyReportOnline | null;
   refunds: number;
   topProducts: DailyReportProductLine[];
   outOfStock: DailyReportStockSignal[];
@@ -168,7 +196,11 @@ export type DailyReport = {
   generatedAt: string;
   clubs: DailyReportClub[];
   totals: {
+    /** Clubs' cash plus online top-ups: all money the network took in. */
+    revenue: DailyReportMetric;
     shiftRevenue: DailyReportMetric;
+    onlineTopups: DailyReportMetric;
+    onlinePayments: number;
     barRevenue: DailyReportMetric;
     barMargin: DailyReportMetric;
     visits: DailyReportMetric;

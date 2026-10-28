@@ -55,16 +55,17 @@ const REQUIRED_CHECKS = [
 // the attested legacy network fence admits only fixed sources to PostgreSQL.
 // One address means one container at a time: the report tick skips while the
 // nightly sync runs, and the sync waits for a running tick to finish.
-// A peer counts as busy from the moment its systemd unit starts, not only once
-// its container runs: `compose up` takes seconds, and on 27.10 a report tick
-// that passed its check in that window took the address and the nightly sync
-// failed with "Address already in use". Both units check each other after
-// becoming active, so at least one of two simultaneous ticks sees the other.
 const ADDRESS_PEERS = {
   'daily-report-worker': { peer: 'langame-daily-worker', whileBusy: 'skip' },
   'langame-daily-worker': { peer: 'daily-report-worker', whileBusy: 'wait' },
 };
 const PEER_WAIT_SEC = 5 * 60;
+// Checking whether the peer container runs is not atomic with starting ours: on
+// 2026-10-27 a report tick started in the same second as the nightly sync and the
+// sync died with "Address already in use". Both peers therefore hold one lock
+// file for the whole container run; the conflict exit code tells "busy" apart.
+const ADDRESS_LOCK = '/var/lib/leetplus-compose/fence-address.lock';
+const ADDRESS_BUSY_EXIT = 75;
 const LEGACY_UNITS = { timers: ['leetplus-compose-bonus.timer', 'leetplus-compose-daily.timer'], boot: 'leetplus-compose-runtime.service' };
 const LP_UNITS = { timers: ['lp-bonus.timer', 'lp-daily.timer', 'lp-cleanup.timer'], boot: 'lp-runtime.service' };
 const WORKER_TIMERS = ['lp-bonus.timer', 'lp-daily.timer', 'lp-report.timer'];
@@ -537,13 +538,17 @@ async function switchTo(target, { reason }) {
   log(`done: ${target} serves ${sha.slice(0, 8)}; ${current} stays up as instant rollback (lp rollback)`);
 }
 
-export function addressPeerBusy({ unitState, containerRunning }) {
-  return containerRunning === true || ['active', 'activating', 'deactivating', 'reloading'].includes(unitState);
-}
-
 export function addressPeerAction(name, peerRunning) {
   const rule = ADDRESS_PEERS[name];
   return rule && peerRunning ? rule.whileBusy : 'run';
+}
+
+// flock prefix for `docker start` of a worker that shares the fence address.
+export function addressLockArgs(name) {
+  const rule = ADDRESS_PEERS[name];
+  if (!rule) return [];
+  const wait = rule.whileBusy === 'wait' ? ['--timeout', String(PEER_WAIT_SEC)] : ['--nonblock'];
+  return ['--exclusive', ...wait, '--conflict-exit-code', String(ADDRESS_BUSY_EXIT), ADDRESS_LOCK];
 }
 
 async function worker(name) {
@@ -552,10 +557,7 @@ async function worker(name) {
   const existing = containerInfo(`${PROJECT}-${name}`);
   if (existing.running) fail(`${name} is still running from a previous tick`);
   const peer = ADDRESS_PEERS[name]?.peer;
-  const peerRunning = () => Boolean(peer) && addressPeerBusy({
-    unitState: run('systemctl', ['is-active', `lp-worker@${peer}.service`], { allowFail: true }).out,
-    containerRunning: containerInfo(`${PROJECT}-${peer}`).running,
-  });
+  const peerRunning = () => Boolean(peer) && containerInfo(`${PROJECT}-${peer}`).running === true;
   const action = addressPeerAction(name, peerRunning());
   if (action === 'skip') { log(`${name}: ${peer} is running on the shared address, skipping this tick`); return; }
   if (action === 'wait') {
@@ -567,7 +569,15 @@ async function worker(name) {
     }
   }
   compose(['up', '--no-start', '--no-deps', '--force-recreate', name], { timeout: 120_000 });
-  const result = docker(['start', '--attach', `${PROJECT}-${name}`], { allowFail: true, timeout: timeoutSec * 1000, inherit: true });
+  const start = ['docker', 'start', '--attach', `${PROJECT}-${name}`];
+  const lock = addressLockArgs(name);
+  const result = lock.length
+    ? run('flock', [...lock, ...start], { allowFail: true, timeout: timeoutSec * 1000, inherit: true })
+    : run(start[0], start.slice(1), { allowFail: true, timeout: timeoutSec * 1000, inherit: true });
+  if (result.status === ADDRESS_BUSY_EXIT && lock.length) {
+    if (ADDRESS_PEERS[name].whileBusy === 'skip') { log(`${name}: ${peer} holds the shared address lock, skipping this tick`); return; }
+    fail(`${name}: ${peer} still holds the shared address lock after ${PEER_WAIT_SEC / 60} min`);
+  }
   const state = inspect(`${PROJECT}-${name}`)?.State;
   if (!result.ok || state?.Running || state?.ExitCode !== 0) {
     if (state?.Running) docker(['stop', '--time', '60', `${PROJECT}-${name}`], { allowFail: true });

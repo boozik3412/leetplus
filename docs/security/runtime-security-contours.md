@@ -650,6 +650,20 @@ Snapshot pipeline создаёт для каждого гостя Langame без
 владельцев расписаний нет; worker и public guest контуры уже писали эти таблицы
 через тот же resolver.
 
+### Complete snapshot: переход гостя на второй Langame-аккаунт
+
+Раньше complete guest snapshot считал телефон с двумя Langame-гостями в одном
+`externalDomain` неоднозначным и не трогал привязку. Если гость ушёл на второй
+аккаунт, профиль навсегда оставался на старом. Теперь неоднозначность
+снимается в одном случае: `lastActivityAt` (Langame `date_last_activity`)
+у гостя из ACTIVE identity link профиля старше 30 дней от `syncedAt`, и среди
+остальных гостей с этим телефоном ровно один активен в эти 30 дней. Он идёт
+в обычный `resolveExactMatch` с двумя подтверждениями подряд
+(`PENDING_REBIND` → `REBOUND`), с теми же owner/conflict-проверками и
+backfill. Без дат активности, при двух активных аккаунтах или при телефоне,
+совпавшем с несколькими профилями, всё остаётся `ambiguous`. Новых маршрутов,
+секретов, egress, worker и scheduler нет.
+
 ### Public guest verified-phone registration repair 08.09.2026
 
 Production-разбор второго обращения (`*3669`) подтвердил отдельный predecessor

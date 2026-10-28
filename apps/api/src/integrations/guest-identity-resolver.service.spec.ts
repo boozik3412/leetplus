@@ -723,6 +723,96 @@ describe('GuestIdentityResolverService', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  describe('same-phone accounts after the guest moved to the other one', () => {
+    const day = 24 * 60 * 60_000;
+    const snapshot = (
+      oldActivity: Date | null,
+      newActivity: Date | null,
+      extra: Array<{ guestId: string; lastActivityAt: Date | null }> = [],
+    ) =>
+      service.reconcileDomainSnapshot({
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain,
+        syncedAt: verifiedAt,
+        complete: true,
+        candidates: [
+          { guestId: 'guest-old', lastActivityAt: oldActivity },
+          { guestId: 'guest-new', lastActivityAt: newActivity },
+          ...extra,
+        ].map((candidate) => ({
+          ...candidate,
+          externalGuestId: `external-${candidate.guestId}`,
+          phoneHashes: [phoneHash],
+          phoneMasked: '***0646',
+        })),
+      });
+    const ago = (days: number) => new Date(verifiedAt.getTime() - days * day);
+
+    beforeEach(() => {
+      prisma.guestGameProfile.findMany.mockResolvedValue([
+        { id: profileId, phoneHash },
+      ]);
+      tx.guestGameProfileIdentityLink.findFirst.mockResolvedValue({
+        guestId: 'guest-old',
+      });
+    });
+
+    it('moves towards the only active account once the linked one is idle for 30 days', async () => {
+      const resolveSpy = jest
+        .spyOn(service, 'resolveExactMatch')
+        .mockResolvedValue({
+          status: 'PENDING_REBIND',
+          profileId,
+          guestId: 'guest-new',
+          previousGuestId: 'guest-old',
+          linkedNow: false,
+          backfilled: {} as never,
+        });
+
+      const result = await snapshot(ago(32), ago(1));
+
+      expect(result).toMatchObject({ pendingRebind: 1, ambiguous: 0 });
+      expect(resolveSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profileId,
+          guestId: 'guest-new',
+          externalGuestId: 'external-guest-new',
+          requiredRebindConfirmations: 2,
+        }),
+      );
+    });
+
+    it('stays ambiguous while the linked account was active in the last 30 days', async () => {
+      const resolveSpy = jest.spyOn(service, 'resolveExactMatch');
+
+      const result = await snapshot(ago(10), ago(1));
+
+      expect(result).toMatchObject({ ambiguous: 1 });
+      expect(resolveSpy).not.toHaveBeenCalled();
+    });
+
+    it('stays ambiguous when more than one other account is active', async () => {
+      const resolveSpy = jest.spyOn(service, 'resolveExactMatch');
+
+      const result = await snapshot(ago(40), ago(1), [
+        { guestId: 'guest-third', lastActivityAt: ago(2) },
+      ]);
+
+      expect(result).toMatchObject({ ambiguous: 1 });
+      expect(resolveSpy).not.toHaveBeenCalled();
+    });
+
+    it('stays ambiguous without activity dates', async () => {
+      const resolveSpy = jest.spyOn(service, 'resolveExactMatch');
+
+      const result = await snapshot(null, ago(1));
+
+      expect(result).toMatchObject({ ambiguous: 1 });
+      expect(resolveSpy).not.toHaveBeenCalled();
+    });
+  });
+
   it('chunks large profile hash lookups below the PostgreSQL bind limit', async () => {
     const phoneHashes = Array.from(
       { length: 10_001 },

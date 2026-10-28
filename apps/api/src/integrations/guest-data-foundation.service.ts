@@ -1873,6 +1873,7 @@ export class GuestDataFoundationService {
           externalGuestId,
           phoneHashes: this.phoneHashVariants(row.phone, phone.hash),
           phoneMasked: phone.masked,
+          lastActivityAt: this.parseLangameDate(row.date_last_activity),
         });
       }
     }

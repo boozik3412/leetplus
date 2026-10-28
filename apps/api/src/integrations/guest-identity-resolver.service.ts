@@ -16,6 +16,10 @@ export const GUEST_SHELL_ABSORBED_REASON = 'GUEST_SHELL_PROFILE_ABSORBED';
 // PostgreSQL accepts at most 32767 bind variables per prepared statement.
 // Keep enough headroom for the tenant/status predicates and future filters.
 const PROFILE_PHONE_HASH_BATCH_SIZE = 10_000;
+// A guest who registered twice in Langame with one phone and moved to the
+// other account: the linked account must be idle this long, and the other
+// one active within it, before the snapshot treats the phone as unambiguous.
+const IDLE_DUPLICATE_ACCOUNT_MS = 30 * 24 * 60 * 60_000;
 
 export type GuestIdentityBackfillSummary = {
   rewards: number;
@@ -50,6 +54,7 @@ export type GuestIdentitySnapshotCandidate = {
   externalGuestId: string;
   phoneHashes: string[];
   phoneMasked: string | null;
+  lastActivityAt?: Date | null;
 };
 
 export type GuestIdentitySnapshotReconcileResult = {
@@ -176,7 +181,10 @@ export class GuestIdentityResolverService {
       profileIdsByCandidate.set(candidate.guestId, matchedProfileIds);
     }
 
-    const validConfirmationPairs = new Set<string>();
+    const candidateByProfile = new Map<
+      string,
+      GuestIdentitySnapshotCandidate
+    >();
     for (const profile of profiles) {
       if (!profile.phoneHash) {
         continue;
@@ -184,17 +192,26 @@ export class GuestIdentityResolverService {
       const matchedCandidates = [
         ...(candidatesByPhoneHash.get(profile.phoneHash)?.values() ?? []),
       ];
-      const candidate = matchedCandidates[0];
+      const candidate =
+        matchedCandidates.length === 1
+          ? matchedCandidates[0]
+          : await this.findIdleDuplicateSuccessor(
+              input,
+              profile.id,
+              matchedCandidates,
+            );
       if (
-        matchedCandidates.length === 1 &&
         candidate &&
         profileIdsByCandidate.get(candidate.guestId)?.size === 1
       ) {
-        validConfirmationPairs.add(
-          identityPairKey(profile.id, candidate.guestId),
-        );
+        candidateByProfile.set(profile.id, candidate);
       }
     }
+    const validConfirmationPairs = new Set(
+      [...candidateByProfile].map(([profileId, candidate]) =>
+        identityPairKey(profileId, candidate.guestId),
+      ),
+    );
 
     const pendingLinks =
       await this.prisma.guestGameProfileIdentityLink.findMany({
@@ -233,16 +250,9 @@ export class GuestIdentityResolverService {
         continue;
       }
 
-      const matchedCandidates = [
-        ...(candidatesByPhoneHash.get(profile.phoneHash)?.values() ?? []),
-      ];
-      const candidate = matchedCandidates[0];
+      const candidate = candidateByProfile.get(profile.id);
 
-      if (
-        matchedCandidates.length !== 1 ||
-        !candidate ||
-        profileIdsByCandidate.get(candidate.guestId)?.size !== 1
-      ) {
+      if (!candidate) {
         result.ambiguous += 1;
         continue;
       }
@@ -269,6 +279,57 @@ export class GuestIdentityResolverService {
     }
 
     return result;
+  }
+
+  // Two same-phone accounts stay ambiguous unless the profile's linked one
+  // has been idle for IDLE_DUPLICATE_ACCOUNT_MS and exactly one other is
+  // active within it. Missing activity dates never break the tie.
+  private async findIdleDuplicateSuccessor(
+    input: {
+      tenantId: string;
+      externalProvider: IntegrationProvider;
+      externalDomain: string;
+      syncedAt: Date;
+    },
+    profileId: string,
+    matchedCandidates: GuestIdentitySnapshotCandidate[],
+  ) {
+    if (matchedCandidates.length < 2) {
+      return null;
+    }
+
+    const activeLink = await this.prisma.guestGameProfileIdentityLink.findFirst(
+      {
+        where: {
+          tenantId: input.tenantId,
+          profileId,
+          externalProvider: input.externalProvider,
+          externalDomain: input.externalDomain,
+          status: ACTIVE_LINK_STATUS,
+        },
+        select: { guestId: true },
+      },
+    );
+    const linked = matchedCandidates.find(
+      (candidate) => candidate.guestId === activeLink?.guestId,
+    );
+    const idleBefore = input.syncedAt.getTime() - IDLE_DUPLICATE_ACCOUNT_MS;
+
+    if (
+      !linked?.lastActivityAt ||
+      linked.lastActivityAt.getTime() >= idleBefore
+    ) {
+      return null;
+    }
+
+    const activeOthers = matchedCandidates.filter(
+      (candidate) =>
+        candidate.guestId !== linked.guestId &&
+        candidate.lastActivityAt &&
+        candidate.lastActivityAt.getTime() >= idleBefore,
+    );
+
+    return activeOthers.length === 1 ? activeOthers[0] : null;
   }
 
   private async findActiveProfilesByPhoneHashes(

@@ -3293,7 +3293,8 @@ export class GuestsService {
     diagnostics: GuestLiveSessionResult['diagnostics'];
   }) {
     const pageLimit = 200;
-    const maxPages = 5;
+    // Same limit as the check-in lookup: the domain is paged for every club.
+    const maxPages = 15;
     const tariffTypeGroups = await this.resolveLiveSessionTariffTypeGroups(
       params.baseUrl,
       params.apiKey,
@@ -3599,7 +3600,7 @@ export class GuestsService {
   // sessions started after local midnight in clubs east of UTC.
   private liveSessionLookupPeriod(now: Date) {
     const from = new Date(now);
-    from.setUTCDate(from.getUTCDate() - 2);
+    from.setUTCDate(from.getUTCDate() - 1);
     const to = new Date(now);
     to.setUTCDate(to.getUTCDate() + 1);
 

@@ -218,6 +218,10 @@ const LANGAME_TARIFF_TYPE_GROUP_CACHE_MS = 10 * 60 * 1000;
 const liveSessionStartCacheDefaultTtlMs = 30_000;
 const liveSessionStartLookupDefaultTimeoutMs = 4_000;
 const liveSessionStartCacheMaxEntries = 1_000;
+// /guests/sessions has no guest filter, so the lookup pages every session of
+// every club on the domain. Two busy clubs on one domain (Холмогорова and
+// Пушкинская) pass 1000 rows in a few days, past the old 5-page limit.
+const checkInLookupMaxPages = 15;
 const liveCheckInFactSourceKind = 'LEETPLUS_LIVE_CHECK_IN';
 const liveCheckInFactParserVersion = 'live-check-in-v1';
 const promoBannerDisplayLimit = 4;
@@ -24042,7 +24046,7 @@ export class GuestGamificationService {
     expectedStore?: CheckInExpectedStore | null;
   }): Promise<CheckInLiveSession | null> {
     const pageLimit = 200;
-    const maxPages = 5;
+    const maxPages = checkInLookupMaxPages;
     const candidates: CheckInLiveSession[] = [];
     const tariffTypeGroups = await this.resolveLangameTariffTypeGroups(
       params.source.baseUrl,
@@ -24119,6 +24123,19 @@ export class GuestGamificationService {
 
       if (rows.length < pageLimit) {
         break;
+      }
+
+      if (page === maxPages) {
+        this.logGuestGameDebug(
+          'check-in-session-lookup-truncated',
+          {
+            tenantId: params.tenantId ?? null,
+            apiSource: this.guestGameDebugSource(params.source),
+            period: params.period,
+            rowsChecked: page * pageLimit,
+          },
+          'warn',
+        );
       }
     }
 
@@ -24691,9 +24708,11 @@ export class GuestGamificationService {
   // Langame compares date_from/date_to with the club-local date_start, so a
   // UTC dateTo hid every session started after local midnight in clubs east
   // of UTC (Yekaterinburg: 19:00-24:00 UTC) until the UTC day rolled over.
+  // One day back still covers any session open for 29+ hours; a wider window
+  // only adds closed rows of every club on the domain ahead of the open ones.
   private checkInLookupPeriod(now: Date) {
     const from = new Date(now);
-    from.setUTCDate(from.getUTCDate() - 2);
+    from.setUTCDate(from.getUTCDate() - 1);
     const to = new Date(now);
     to.setUTCDate(to.getUTCDate() + 1);
 

@@ -9911,9 +9911,7 @@ describe('GuestGamificationService', () => {
         .mockResolvedValue(profile);
       jest
         .spyOn(service, 'getLootBoxes')
-        .mockResolvedValue([
-          activeLootBox({ id: heldId, holdoutPercent: 50 }),
-        ]);
+        .mockResolvedValue([activeLootBox({ id: heldId, holdoutPercent: 50 })]);
       jest
         .spyOn(service, 'getMissions')
         .mockResolvedValue([
@@ -14727,6 +14725,52 @@ describe('GuestGamificationService', () => {
       });
     });
 
+    it('finds an open session past the fifth page of a busy shared domain', async () => {
+      const { service, langameClient } = createService();
+      const closedPage = (page: number) =>
+        Array.from({ length: 200 }, (_, index) => ({
+          id: `closed-${page}-${index}`,
+          guest_id: `other-${index}`,
+          club_id: '1',
+          date_start: '2026-10-27 12:00:00',
+          date_stop: '2026-10-27 14:00:00',
+        }));
+
+      langameClient.listGuestSessions.mockImplementation(
+        (_baseUrl: string, _apiKey: string, { page }: { page: number }) =>
+          Promise.resolve(
+            page < 7
+              ? closedPage(page)
+              : [
+                  {
+                    id: 'session-open',
+                    guest_id: 'lg-guest-1',
+                    club_id: '2',
+                    date_start: '2026-10-28 18:59:00',
+                    date_stop: null,
+                  },
+                ],
+          ),
+      );
+
+      const result = await (service as any).findCheckInSessionInSource({
+        apiKey: 'api-key',
+        source: {
+          id: 'source-1',
+          domain: 'club-1',
+          baseUrl: 'https://langame.example',
+        },
+        externalGuestId: 'lg-guest-1',
+        period: { dateFrom: '2026-10-27', dateTo: '2026-10-29' },
+      });
+
+      expect(langameClient.listGuestSessions).toHaveBeenCalledTimes(7);
+      expect(result).toMatchObject({
+        externalSessionId: 'session-open',
+        externalClubId: '2',
+      });
+    });
+
     it('looks one UTC day ahead for sessions started after club-local midnight', () => {
       const { service } = createService();
 
@@ -14736,7 +14780,7 @@ describe('GuestGamificationService', () => {
         (service as any).checkInLookupPeriod(
           new Date('2026-10-14T23:58:00.000Z'),
         ),
-      ).toEqual({ dateFrom: '2026-10-12', dateTo: '2026-10-15' });
+      ).toEqual({ dateFrom: '2026-10-13', dateTo: '2026-10-15' });
     });
   });
 

@@ -76,6 +76,16 @@ export function zonedWallClockToInstant(
   return new Date(second);
 }
 
+/**
+ * The instant of a club wall-clock time that was stored as if it were UTC
+ * (Langame dates of rows without a club are parsed that way).
+ */
+export function wallClockStoredAsUtcToInstant(value: Date, timeZone: string) {
+  const guess = value.getTime();
+  const first = guess - zoneOffsetMs(new Date(guess), timeZone);
+  return new Date(guess - zoneOffsetMs(new Date(first), timeZone));
+}
+
 /** Club-local calendar date `YYYY-MM-DD` of an instant. */
 export function localDate(value: Date, timeZone: string) {
   const parts = wallClockParts(value, timeZone);

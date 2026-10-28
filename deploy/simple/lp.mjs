@@ -55,6 +55,11 @@ const REQUIRED_CHECKS = [
 // the attested legacy network fence admits only fixed sources to PostgreSQL.
 // One address means one container at a time: the report tick skips while the
 // nightly sync runs, and the sync waits for a running tick to finish.
+// A peer counts as busy from the moment its systemd unit starts, not only once
+// its container runs: `compose up` takes seconds, and on 27.10 a report tick
+// that passed its check in that window took the address and the nightly sync
+// failed with "Address already in use". Both units check each other after
+// becoming active, so at least one of two simultaneous ticks sees the other.
 const ADDRESS_PEERS = {
   'daily-report-worker': { peer: 'langame-daily-worker', whileBusy: 'skip' },
   'langame-daily-worker': { peer: 'daily-report-worker', whileBusy: 'wait' },
@@ -532,6 +537,10 @@ async function switchTo(target, { reason }) {
   log(`done: ${target} serves ${sha.slice(0, 8)}; ${current} stays up as instant rollback (lp rollback)`);
 }
 
+export function addressPeerBusy({ unitState, containerRunning }) {
+  return containerRunning === true || ['active', 'activating', 'deactivating', 'reloading'].includes(unitState);
+}
+
 export function addressPeerAction(name, peerRunning) {
   const rule = ADDRESS_PEERS[name];
   return rule && peerRunning ? rule.whileBusy : 'run';
@@ -543,7 +552,10 @@ async function worker(name) {
   const existing = containerInfo(`${PROJECT}-${name}`);
   if (existing.running) fail(`${name} is still running from a previous tick`);
   const peer = ADDRESS_PEERS[name]?.peer;
-  const peerRunning = () => Boolean(peer) && containerInfo(`${PROJECT}-${peer}`).running === true;
+  const peerRunning = () => Boolean(peer) && addressPeerBusy({
+    unitState: run('systemctl', ['is-active', `lp-worker@${peer}.service`], { allowFail: true }).out,
+    containerRunning: containerInfo(`${PROJECT}-${peer}`).running,
+  });
   const action = addressPeerAction(name, peerRunning());
   if (action === 'skip') { log(`${name}: ${peer} is running on the shared address, skipping this tick`); return; }
   if (action === 'wait') {

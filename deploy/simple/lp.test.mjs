@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { addressPeerAction, backupsToPrune, migrationScript, planSchema } from './lp.mjs';
+import { addressPeerAction, addressPeerBusy, backupsToPrune, migrationScript, planSchema } from './lp.mjs';
 
 const sum = char => char.repeat(64);
 const db = (entries, unfinished = []) => ({ applied: new Map(entries), unfinished });
@@ -64,4 +64,12 @@ test('workers sharing a fence address never run together', () => {
   assert.equal(addressPeerAction('langame-daily-worker', true), 'wait');
   assert.equal(addressPeerAction('langame-daily-worker', false), 'run');
   assert.equal(addressPeerAction('bonus-ledger-worker', true), 'run');
+});
+
+test('a peer holds the shared address from its unit start, before its container runs', () => {
+  assert.equal(addressPeerBusy({ unitState: 'activating', containerRunning: false }), true);
+  assert.equal(addressPeerBusy({ unitState: 'active', containerRunning: undefined }), true);
+  assert.equal(addressPeerBusy({ unitState: 'inactive', containerRunning: true }), true);
+  assert.equal(addressPeerBusy({ unitState: 'inactive', containerRunning: false }), false);
+  assert.equal(addressPeerBusy({ unitState: 'failed', containerRunning: undefined }), false);
 });

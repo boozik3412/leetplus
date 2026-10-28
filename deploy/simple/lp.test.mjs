@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { addressPeerAction, backupsToPrune, migrationScript, planSchema } from './lp.mjs';
+import { addressLockArgs, addressPeerAction, backupsToPrune, migrationScript, planSchema } from './lp.mjs';
 
 const sum = char => char.repeat(64);
 const db = (entries, unfinished = []) => ({ applied: new Map(entries), unfinished });
@@ -64,4 +64,14 @@ test('workers sharing a fence address never run together', () => {
   assert.equal(addressPeerAction('langame-daily-worker', true), 'wait');
   assert.equal(addressPeerAction('langame-daily-worker', false), 'run');
   assert.equal(addressPeerAction('bonus-ledger-worker', true), 'run');
+});
+
+test('fence address peers start their container under one shared lock', () => {
+  const report = addressLockArgs('daily-report-worker');
+  const daily = addressLockArgs('langame-daily-worker');
+  assert.equal(report.at(-1), daily.at(-1));
+  assert.ok(report.includes('--nonblock'));
+  assert.deepEqual(daily.slice(1, 3), ['--timeout', '300']);
+  assert.equal(report[report.indexOf('--conflict-exit-code') + 1], daily[daily.indexOf('--conflict-exit-code') + 1]);
+  assert.deepEqual(addressLockArgs('bonus-ledger-worker'), []);
 });

@@ -1458,6 +1458,19 @@ exact profile/event/rule, затем восстанавливаются по о�
 и ретроактивное потребление события следующим ещё закрытым шагом Battle Pass
 запрещены.
 
+### Check-in по второму Langame-аккаунту гостя
+
+Если у привязанного к профилю Langame-гостя нет открытой сессии, check-in
+и live session start ищут её ещё у не более чем трёх Langame-гостей того же
+tenant, `externalDomain` и точного `phoneHash`. Учитываются только аккаунты
+без собственного игрового профиля и без ACTIVE identity link другого профиля.
+Поиск включается, только если `lastActivityAt` привязанного гостя старше
+`GUEST_GAME_CHECK_IN_SIBLING_IDLE_DAYS` (по умолчанию 30 дней, 1–365). Ранние
+двойные привязки с двумя живыми аккаунтами так не затрагиваются. Привязка
+профиля, identity links и владельцы событий не меняются. Событие и факт
+check-in остаются у профиля, а `sessionExternalId` берётся из реальной сессии.
+Новых маршрутов, секретов, egress и worker нет.
+
 ### Langame N−1 manifest successor и worker authorization
 
 Исторический N−1 `activation.receipt` остаётся immutable даже при additive

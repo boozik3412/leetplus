@@ -239,6 +239,7 @@ describe('GuestDataFoundationService', () => {
       findMany: jest.fn(),
     },
     $transaction: jest.fn(),
+    $executeRaw: jest.fn(),
   };
   const tenantContextService = {
     resolve: jest.fn(),
@@ -342,6 +343,7 @@ describe('GuestDataFoundationService', () => {
     prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 0 });
     prisma.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 0 });
     prisma.$transaction.mockResolvedValue([]);
+    prisma.$executeRaw.mockResolvedValue(0);
     prisma.salesFact.updateMany.mockResolvedValue({ count: 1 });
     prisma.guestStaffIdentityMapping.findMany.mockResolvedValue([]);
     prisma.guestBonusBalanceCurrent.findMany.mockResolvedValue([]);
@@ -1222,6 +1224,48 @@ describe('GuestDataFoundationService', () => {
         }) as object,
       }),
     );
+  });
+
+  it('keys an operation by its Langame row, not by the period, and removes earlier copies', async () => {
+    await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+      skipGuestDirectory: true,
+    });
+    await service.syncTenant(user, {
+      dateFrom: '2026-04-28',
+      dateTo: '2026-05-02',
+      skipGuestDirectory: true,
+    });
+
+    const keys = (
+      prisma.guestOperationLog.upsert.mock.calls as unknown as Array<
+        [
+          {
+            where: {
+              tenantId_externalProvider_externalDomain_sourceKey: {
+                sourceKey: string;
+              };
+            };
+            create: { sourcePayloadHash: string };
+          },
+        ]
+      >
+    ).map(([args]) => ({
+      key: args.where.tenantId_externalProvider_externalDomain_sourceKey
+        .sourceKey,
+      hash: args.create.sourcePayloadHash,
+    }));
+    expect(keys.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(keys.map((item) => item.key)).size).toBe(1);
+    expect(keys[0].key).toBe(`op:${keys[0].hash}`);
+    expect(prisma.$executeRaw).toHaveBeenCalled();
+    const [query, ...values] = prisma.$executeRaw.mock.calls[0] as [
+      TemplateStringsArray,
+      ...unknown[],
+    ];
+    expect(query.join('?')).toContain('DELETE FROM "GuestOperationLog"');
+    expect(values).toEqual(['op:%', 'tenant-1', expect.any(String)]);
   });
 
   it('takes the club of a session from its computer when two clubs share a domain', async () => {

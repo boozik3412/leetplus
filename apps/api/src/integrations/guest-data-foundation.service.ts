@@ -354,6 +354,9 @@ class ExternalGuestDataFenceError extends ServiceUnavailableException {
   }
 }
 
+/** Key of a Langame operation: `op:` and the hash of its answer row. */
+const OPERATION_LOG_KEY_PREFIX = 'op:';
+
 @Injectable()
 export class GuestDataFoundationService {
   private readonly logger = new Logger(GuestDataFoundationService.name);
@@ -2481,15 +2484,12 @@ export class GuestDataFoundationService {
           row.date_normal,
           storeRef?.timeZone,
         );
-        const sourceKey = this.sourceKey([
-          chunk.from,
-          chunk.to,
-          index,
-          row.date_normal,
-          externalClubId,
-          type,
-          row.sum,
-        ]);
+        // Langame gives an operation no id. The whole answer row is the
+        // identity: the chunk loader already keeps one row per payload, so
+        // the key no longer depends on the period or the row's position and
+        // a later sync of the same day updates the row instead of adding one.
+        const sourcePayloadHash = this.payloadHash(row);
+        const sourceKey = `${OPERATION_LOG_KEY_PREFIX}${sourcePayloadHash}`;
 
         profile.operationLogs.total += 1;
         profile.operationLogs.invalidDates +=
@@ -2520,7 +2520,7 @@ export class GuestDataFoundationService {
             operationForm,
             happenedAt,
             amount: this.toDecimalOrNull(row.sum),
-            sourcePayloadHash: this.payloadHash(row),
+            sourcePayloadHash,
           },
           update: {
             storeId: storeRef?.id ?? null,
@@ -2531,13 +2531,44 @@ export class GuestDataFoundationService {
             operationForm,
             happenedAt,
             amount: this.toDecimalOrNull(row.sum),
-            sourcePayloadHash: this.payloadHash(row),
+            sourcePayloadHash,
           },
         });
       }
     }
 
+    await this.removeDuplicateOperationLogs(tenantId, domain);
     return allRows;
+  }
+
+  /**
+   * Until 28.10.2026 every sync stored operations it had already loaded once
+   * more under a key built from its period and row number. One row per
+   * payload stays, preferring the one with the stable key.
+   */
+  private async removeDuplicateOperationLogs(tenantId: string, domain: string) {
+    const removed = await this.prisma.$executeRaw`
+      DELETE FROM "GuestOperationLog" AS duplicate
+      USING (
+        SELECT "id",
+               row_number() OVER (
+                 PARTITION BY "sourcePayloadHash"
+                 ORDER BY ("sourceKey" LIKE ${`${OPERATION_LOG_KEY_PREFIX}%`}) DESC,
+                          "createdAt",
+                          "id"
+               ) AS "position"
+        FROM "GuestOperationLog"
+        WHERE "tenantId" = ${tenantId}
+          AND "externalProvider" = 'LANGAME'
+          AND "externalDomain" = ${domain}
+          AND "sourcePayloadHash" IS NOT NULL
+      ) AS ranked
+      WHERE duplicate."id" = ranked."id" AND ranked."position" > 1`;
+    if (removed > 0) {
+      this.logger.log(
+        `Removed ${removed} duplicate Langame operations of ${domain}`,
+      );
+    }
   }
 
   private async loadOperationLogChunk(

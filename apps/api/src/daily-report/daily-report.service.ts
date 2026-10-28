@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { IntegrationProvider, Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
@@ -13,11 +13,13 @@ import {
   clubDayWindow,
   lastClosedClubDay,
   shiftDate,
+  wallClockStoredAsUtcToInstant,
   type ClubDayWindow,
 } from './daily-report-window';
 import type {
   DailyReport,
   DailyReportInput,
+  DailyReportOnlineTopupRow,
   DailyReportSaleRow,
   DailyReportShiftRow,
 } from './daily-report.types';
@@ -123,7 +125,13 @@ export class DailyReportService {
         isActive: true,
         ...(scope.storeIds ? { id: { in: [...scope.storeIds] } } : {}),
       },
-      select: { id: true, name: true, timeZone: true, computerCount: true },
+      select: {
+        id: true,
+        name: true,
+        timeZone: true,
+        computerCount: true,
+        externalDomain: true,
+      },
       orderBy: { name: 'asc' },
     });
     const storeIds = stores.map((store) => store.id);
@@ -182,6 +190,7 @@ export class DailyReportService {
       stockRows,
       stockSalesRows,
       exclusions,
+      onlineTopups,
     ] = await Promise.all([
       this.prisma.guestWorkingShift.findMany({
         where: {
@@ -252,6 +261,7 @@ export class DailyReportService {
         where: { tenantId },
         select: { productId: true },
       }),
+      this.loadOnlineTopups(tenantId, windows, rangeFrom, rangeTo),
     ]);
 
     const adminNames = await this.loadAdminNames(tenantId, [
@@ -273,6 +283,7 @@ export class DailyReportService {
         cash: toNumber(row.cashAmount),
         cashless: toNumber(row.cashlessAmount),
         mobilePay: toNumber(row.mobilePay),
+        yandexPay: toNumber(row.yandexPay),
         refunds: toNumber(row.refundsCash) + toNumber(row.refundsCashless),
         incass: toNumber(row.incassAmount),
       };
@@ -298,6 +309,7 @@ export class DailyReportService {
         name: store.name,
         timeZone: window.timeZone,
         computerCount: store.computerCount,
+        domain: store.externalDomain?.trim() || null,
         window,
       })),
       baselineWindows: Object.fromEntries(
@@ -327,7 +339,74 @@ export class DailyReportService {
       })),
       stockDays: STOCK_DAYS,
       oosExcludedProductKeys: new Set(exclusions.map((row) => row.productId)),
+      onlineTopups,
     };
+  }
+
+  /**
+   * Balance top-ups paid in the Langame app. Langame gives them no club
+   * (`club_id` 0), so they are kept by Langame address; their time is the
+   * club clock stored as UTC. A sync of another period stores the same
+   * operation once more under a new key, hence one row per payload.
+   */
+  private async loadOnlineTopups(
+    tenantId: string,
+    windows: Array<{
+      store: { externalDomain: string | null };
+      window: ClubDayWindow;
+    }>,
+    rangeFrom: Date,
+    rangeTo: Date,
+  ): Promise<DailyReportOnlineTopupRow[]> {
+    const timeZones = new Map<string, string>();
+    windows.forEach(({ store, window }) => {
+      const domain = store.externalDomain?.trim();
+      if (domain && !timeZones.has(domain)) {
+        timeZones.set(domain, window.timeZone);
+      }
+    });
+    if (!timeZones.size) return [];
+    const rows = await this.prisma.guestOperationLog.findMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: { in: [...timeZones.keys()] },
+        storeId: null,
+        OR: [{ externalClubId: null }, { externalClubId: '0' }],
+        amount: { gt: 0 },
+        // The stored wall clock is up to a day off UTC.
+        happenedAt: {
+          gte: new Date(rangeFrom.getTime() - DAY_MS),
+          lt: new Date(rangeTo.getTime() + DAY_MS),
+        },
+      },
+      select: {
+        id: true,
+        externalDomain: true,
+        type: true,
+        operationName: true,
+        happenedAt: true,
+        amount: true,
+        sourcePayloadHash: true,
+      },
+    });
+    const seen = new Set<string>();
+    return rows.flatMap((row) => {
+      const domain = row.externalDomain!;
+      const key = `${domain}:${row.sourcePayloadHash ?? row.id}`;
+      if (!row.happenedAt || !isTopUp(row) || seen.has(key)) return [];
+      seen.add(key);
+      return [
+        {
+          domain,
+          paidAt: wallClockStoredAsUtcToInstant(
+            row.happenedAt,
+            timeZones.get(domain)!,
+          ),
+          amount: toNumber(row.amount),
+        },
+      ];
+    });
   }
 
   private async loadLatestStock(tenantId: string, storeIds: string[]) {
@@ -400,6 +479,14 @@ export class DailyReportService {
   }
 }
 
+/** Langame `plus` operations: «Пополнение баланса». */
+function isTopUp(row: { type: string | null; operationName: string | null }) {
+  return (
+    row.type?.trim().toLowerCase() === 'plus' ||
+    /пополнен/i.test(row.operationName ?? '')
+  );
+}
+
 const shiftSelect = {
   id: true,
   storeId: true,
@@ -410,6 +497,7 @@ const shiftSelect = {
   cashAmount: true,
   cashlessAmount: true,
   mobilePay: true,
+  yandexPay: true,
   refundsCash: true,
   refundsCashless: true,
   incassAmount: true,

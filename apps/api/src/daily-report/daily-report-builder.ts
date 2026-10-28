@@ -57,7 +57,13 @@ type DayAggregate = {
 };
 
 export function shiftRevenue(shift: DailyReportShiftRow) {
-  return shift.cash + shift.cashless + shift.mobilePay - shift.refunds;
+  return (
+    shift.cash +
+    shift.cashless +
+    shift.mobilePay +
+    shift.yandexPay -
+    shift.refunds
+  );
 }
 
 function shiftHours(shift: DailyReportShiftRow, until: Date) {
@@ -327,6 +333,58 @@ export function guestSummary(
   return { newGuests, regulars, averageVisitHours, peakHour, peakGuests };
 }
 
+type AddressOnline = {
+  amount: DailyReportMetric;
+  payments: number;
+  clubs: string[];
+};
+
+/**
+ * Online top-ups of each Langame address over the day and the usual day of
+ * its clubs. Clubs on one address keep one clock, so the first club's day is
+ * the address's day. An address without any top-ups is left out.
+ */
+function onlineByAddress(input: DailyReportInput) {
+  const topups = groupBy(input.onlineTopups ?? [], (row) => row.domain);
+  const result = new Map<string, AddressOnline>();
+  groupBy(
+    input.stores.filter((store) => store.domain),
+    (store) => store.domain!,
+  ).forEach((stores, domain) => {
+    const rows = topups.get(domain) ?? [];
+    const inDay = (window: ClubDayWindow) =>
+      rows.filter((row) => inWindow(row.paidAt, window));
+    const total = (window: ClubDayWindow) =>
+      inDay(window).reduce((sum, row) => sum + row.amount, 0);
+    const window = stores[0].window;
+    const amount = metric(
+      total(window),
+      (input.baselineWindows[stores[0].id] ?? []).map(total),
+    );
+    if (!amount.value && !amount.usual) return;
+    result.set(domain, {
+      amount,
+      payments: inDay(window).length,
+      clubs: stores.map((store) => store.name),
+    });
+  });
+  return result;
+}
+
+function sumMetrics(metrics: readonly DailyReportMetric[]): DailyReportMetric {
+  const value = metrics.reduce((sum, item) => sum + item.value, 0);
+  // The usual network day is the sum of each part's usual day, so a club
+  // with a short history does not drag the network baseline down.
+  const usual = metrics.every((item) => item.usual !== null)
+    ? metrics.reduce((sum, item) => sum + (item.usual ?? 0), 0)
+    : null;
+  return {
+    value: round2(value),
+    usual: usual === null ? null : round2(usual),
+    change: usual && usual > 0 ? round2(value / usual - 1) : null,
+  };
+}
+
 function topProducts(sales: readonly DailyReportSaleRow[]) {
   return [...groupBy(sales, (sale) => sale.productKey).values()]
     .map((rows) => ({
@@ -345,6 +403,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
   const salesByStore = groupBy(input.sales, (sale) => sale.storeId);
   const sessionsByStore = groupBy(input.sessions, (session) => session.storeId);
   const alerts: Array<{ weight: number; text: string }> = [];
+  const online = onlineByAddress(input);
 
   const clubs: DailyReportClub[] = input.stores.map((store) => {
     const window = store.window;
@@ -383,7 +442,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
         hours: round2(hours),
         revenue: round2(revenue),
         cash: round2(shift.cash),
-        cashless: round2(shift.cashless + shift.mobilePay),
+        cashless: round2(shift.cashless + shift.mobilePay + shift.yandexPay),
         refunds: round2(shift.refunds),
         revenuePerHour:
           shift.stoppedAt && hours >= MIN_COMPARABLE_SHIFT_HOURS
@@ -407,6 +466,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
       input.oosExcludedProductKeys,
     );
     const refunds = dayShiftRows.reduce((sum, shift) => sum + shift.refunds, 0);
+    const address = store.domain ? online.get(store.domain) : undefined;
     const club: DailyReportClub = {
       storeId: store.id,
       name: store.name,
@@ -432,6 +492,13 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
           : null,
       computerCount: store.computerCount ?? null,
       guestSummary: guestSummary(window, storeSessions),
+      online: address
+        ? {
+            amount: address.amount,
+            payments: address.payments,
+            sharedWith: address.clubs.filter((name) => name !== store.name),
+          }
+        : null,
       refunds: round2(refunds),
       topProducts: topProducts(daySales),
       outOfStock: stock.outOfStock,
@@ -586,26 +653,24 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
       }),
     );
 
-  const sumMetric = (key: MetricKey): DailyReportMetric => {
-    const value = clubs.reduce((sum, club) => sum + club.metrics[key].value, 0);
-    // The usual network day is the sum of each club's usual day, so a club
-    // with a short history does not drag the network baseline down.
-    const usualParts = clubs.map((club) => club.metrics[key].usual);
-    const usual = usualParts.every((part) => part !== null)
-      ? usualParts.reduce<number>((sum, part) => sum + (part ?? 0), 0)
-      : null;
-    return {
-      value: round2(value),
-      usual: usual === null ? null : round2(usual),
-      change: usual && usual > 0 ? round2(value / usual - 1) : null,
-    };
-  };
+  const sumMetric = (key: MetricKey) =>
+    sumMetrics(clubs.map((club) => club.metrics[key]));
+  const shiftTotal = sumMetric('shiftRevenue');
+  const onlineTotal = sumMetrics(
+    [...online.values()].map((address) => address.amount),
+  );
 
   return {
     generatedAt: now.toISOString(),
     clubs,
     totals: {
-      shiftRevenue: sumMetric('shiftRevenue'),
+      revenue: online.size ? sumMetrics([shiftTotal, onlineTotal]) : shiftTotal,
+      shiftRevenue: shiftTotal,
+      onlineTopups: onlineTotal,
+      onlinePayments: [...online.values()].reduce(
+        (sum, address) => sum + address.payments,
+        0,
+      ),
       barRevenue: sumMetric('barRevenue'),
       barMargin: sumMetric('barMargin'),
       visits: sumMetric('visits'),

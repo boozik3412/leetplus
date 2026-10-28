@@ -18,6 +18,7 @@ import {
   clubDayWindow,
   lastClosedClubDay,
   localTime,
+  wallClockStoredAsUtcToInstant,
 } from './daily-report-window';
 import type {
   DailyReportInput,
@@ -39,6 +40,7 @@ function shift(
     cash: 0,
     cashless: 0,
     mobilePay: 0,
+    yandexPay: 0,
     refunds: 0,
     incass: 0,
     ...overrides,
@@ -54,6 +56,15 @@ describe('club day window', () => {
     const yekaterinburg = clubDayWindow('2026-10-26', YEKATERINBURG);
     expect(yekaterinburg.from.toISOString()).toBe('2026-10-25T04:00:00.000Z');
     expect(yekaterinburg.to.toISOString()).toBe('2026-10-26T04:00:00.000Z');
+  });
+
+  it('reads a club wall clock stored as UTC', () => {
+    expect(
+      wallClockStoredAsUtcToInstant(
+        new Date('2026-10-27T10:00:00.000Z'),
+        IZHEVSK,
+      ).toISOString(),
+    ).toBe('2026-10-27T06:00:00.000Z');
   });
 
   it('takes the day that closed this morning at 10:00 MSK', () => {
@@ -365,6 +376,102 @@ describe('daily report builder', () => {
       'a'.repeat(3000),
       `${'b'.repeat(3000)}\n\n${'c'.repeat(100)}`,
     ]);
+  });
+
+  it('counts Yandex Pay in the shift cash', () => {
+    const report = buildDailyReport(
+      input({
+        shifts: [
+          shift({
+            startedAt: at('2026-10-25T09:00:00'),
+            stoppedAt: at('2026-10-26T09:00:00'),
+            cash: 1000,
+            cashless: 2000,
+            mobilePay: 300,
+            yandexPay: 400,
+            refunds: 200,
+          }),
+        ],
+      }),
+    );
+    expect(report.clubs[0].metrics.shiftRevenue.value).toBe(3500);
+    expect(report.clubs[0].shifts[0].cashless).toBe(2700);
+  });
+
+  it('adds online top-ups to the network and shares them on a common Langame address', () => {
+    const store = (id: string, name: string, domain: string) => ({
+      id,
+      name,
+      timeZone: IZHEVSK,
+      computerCount: null,
+      domain,
+      window,
+    });
+    const topup = (domain: string, local: string, amount: number) => ({
+      domain,
+      paidAt: at(local),
+      amount,
+    });
+    const report = buildDailyReport(
+      input({
+        stores: [
+          store('izh', '1337 Пушкинская', 'pair.langame.ru'),
+          store('hol', '1337 Холмогорова', 'pair.langame.ru'),
+          store('rad', '1337 Радищева', 'rad.langame.ru'),
+        ],
+        baselineWindows: { izh: baseline, hol: baseline, rad: baseline },
+        onlineTopups: [
+          topup('pair.langame.ru', '2026-10-25T12:00:00', 1000),
+          topup('pair.langame.ru', '2026-10-26T08:30:00', 500),
+          // After 09:00: the next club day.
+          topup('pair.langame.ru', '2026-10-26T09:30:00', 700),
+          topup('rad.langame.ru', '2026-10-25T20:00:00', 300),
+          // A usual day a week ago.
+          topup('rad.langame.ru', '2026-10-19T20:00:00', 2100),
+        ],
+      }),
+    );
+    const [pushkinskaya, holmogorova, radishcheva] = report.clubs;
+    expect(pushkinskaya.online).toEqual({
+      amount: { value: 1500, usual: 0, change: null },
+      payments: 2,
+      sharedWith: ['1337 Холмогорова'],
+    });
+    expect(holmogorova.online?.sharedWith).toEqual(['1337 Пушкинская']);
+    expect(radishcheva.online).toEqual({
+      amount: { value: 300, usual: 300, change: 0 },
+      payments: 1,
+      sharedWith: [],
+    });
+    expect(report.totals.onlineTopups.value).toBe(1800);
+    expect(report.totals.onlinePayments).toBe(3);
+    expect(report.totals.revenue.value).toBe(
+      report.totals.shiftRevenue.value + 1800,
+    );
+
+    const [summary, pair] = renderDailyReport(report, null);
+    expect(summary).toContain(
+      `<b>${formatRub(report.totals.revenue.value)}</b> выручка`,
+    );
+    expect(summary).toContain(
+      `├ кассы клубов <b>${formatRub(report.totals.shiftRevenue.value)}</b>`,
+    );
+    expect(summary).toContain(
+      // 1 800 ₽ against the usual 300 ₽ of Радищева.
+      `└ онлайн из приложения <b>${formatRub(1800)}</b> ▲ 500% · 3 оплаты`,
+    );
+    expect(pair).toContain(
+      `Онлайн из приложения <b>${formatRub(1500)}</b> · 2 оплаты`,
+    );
+    expect(pair).toContain(
+      '<i>Общая сумма клубов 1337 Пушкинская и 1337 Холмогорова: Langame не делит онлайн по клубам</i>',
+    );
+  });
+
+  it('keeps the cash line alone without online top-ups', () => {
+    const [summary] = renderDailyReport(buildDailyReport(input()), null);
+    expect(summary).toContain(`<b>${formatRub(33500)}</b> касса`);
+    expect(summary).not.toContain('онлайн');
   });
 });
 

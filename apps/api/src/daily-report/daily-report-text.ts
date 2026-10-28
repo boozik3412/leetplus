@@ -46,6 +46,25 @@ function wholeNumber(value: number) {
   return formatNumber(Math.round(value));
 }
 
+function payments(count: number) {
+  return `${formatNumber(count)} ${pluralRu(count, ['оплата', 'оплаты', 'оплат'])}`;
+}
+
+/** Clubs' cash, and with online top-ups the network revenue split in two. */
+function revenueLines(report: DailyReport) {
+  const totals = report.totals;
+  if (!report.clubs.some((club) => club.online)) {
+    return [
+      `<b>${formatRub(totals.shiftRevenue.value)}</b> касса${arrow(totals.shiftRevenue)}`,
+    ];
+  }
+  return [
+    `<b>${formatRub(totals.revenue.value)}</b> выручка${arrow(totals.revenue)}`,
+    `├ кассы клубов <b>${formatRub(totals.shiftRevenue.value)}</b>${arrow(totals.shiftRevenue)}`,
+    `└ онлайн из приложения <b>${formatRub(totals.onlineTopups.value)}</b>${arrow(totals.onlineTopups)} · ${payments(totals.onlinePayments)}`,
+  ];
+}
+
 function summarySection(report: DailyReport) {
   const first = report.clubs[0];
   const totals = report.totals;
@@ -57,7 +76,7 @@ function summarySection(report: DailyReport) {
       : '📊 <b>Отчёт за сутки</b>',
     '<i>с 09:00 до 09:00 по времени клуба</i>',
     '',
-    `<b>${formatRub(totals.shiftRevenue.value)}</b> касса${arrow(totals.shiftRevenue)}`,
+    ...revenueLines(report),
     `<b>${formatRub(totals.barRevenue.value)}</b> бар${arrow(totals.barRevenue)} · маржа ${formatRub(totals.barMargin.value)}`,
     `<b>${wholeNumber(guests)}</b> ${pluralRu(guests, ['гость', 'гостя', 'гостей'])}${arrow(totals.guests)} · ${wholeNumber(visits)} ${pluralRu(visits, ['визит', 'визита', 'визитов'])} · ${wholeNumber(totals.playHours.value)} ч`,
     '<i>▲▼ к среднему за 7 суток</i>',
@@ -118,11 +137,27 @@ function collapsedList(title: string, items: string[]) {
     .concat('</blockquote>');
 }
 
+function onlineLines(club: DailyReportClub) {
+  const online = club.online;
+  if (!online) return [];
+  const lines = [
+    `Онлайн из приложения <b>${formatRub(online.amount.value)}</b>${arrow(online.amount)} · ${payments(online.payments)}`,
+  ];
+  if (online.sharedWith.length) {
+    const clubs = [club.name, ...online.sharedWith].map(escapeHtml);
+    lines.push(
+      `<i>Общая сумма клубов ${clubs.slice(0, -1).join(', ')} и ${clubs.at(-1)}: Langame не делит онлайн по клубам</i>`,
+    );
+  }
+  return lines;
+}
+
 function clubBlock(club: DailyReportClub) {
   const metrics = club.metrics;
   const lines: string[] = [
     `🏠 <b>${escapeHtml(club.name)}</b>`,
     `Касса <b>${formatRub(metrics.shiftRevenue.value)}</b>${arrow(metrics.shiftRevenue)} · бар <b>${formatRub(metrics.barRevenue.value)}</b>${arrow(metrics.barRevenue)}`,
+    ...onlineLines(club),
     ...guestLines(club),
     '',
   ];

@@ -222,6 +222,10 @@ const liveSessionStartCacheMaxEntries = 1_000;
 // every club on the domain. Two busy clubs on one domain (Холмогорова and
 // Пушкинская) pass 1000 rows in a few days, past the old 5-page limit.
 const checkInLookupMaxPages = 15;
+// Langame accounts sharing the guest's phone that the check-in also searches.
+const checkInSiblingGuestLimit = 3;
+// The linked account must be idle this long before a sibling account counts.
+const checkInSiblingDefaultIdleDays = 30;
 const liveCheckInFactSourceKind = 'LEETPLUS_LIVE_CHECK_IN';
 const liveCheckInFactParserVersion = 'live-check-in-v1';
 const promoBannerDisplayLimit = 4;
@@ -23193,6 +23197,117 @@ export class GuestGamificationService {
   }
 
   private async findActiveCheckInSession(
+    tenantId: string,
+    guest: {
+      id?: string;
+      externalDomain: string | null;
+      externalGuestId: string;
+      currentCountHours?: Prisma.Decimal | number | string | null;
+    },
+    options: CheckInLookupOptions = {},
+  ): Promise<CheckInLiveSession | null> {
+    const session = await this.findActiveCheckInSessionForExternalGuest(
+      tenantId,
+      guest,
+      options,
+    );
+
+    if (session) {
+      return session;
+    }
+
+    // A guest who registered twice in Langame with one phone may play under
+    // the account the game profile is not linked to. Its open session counts
+    // only while that account belongs to no other game profile and the linked
+    // one has been idle long enough not to be an early double binding.
+    for (const sibling of await this.findCheckInSiblingGuests(
+      tenantId,
+      guest,
+    )) {
+      const siblingSession =
+        await this.findActiveCheckInSessionForExternalGuest(
+          tenantId,
+          sibling,
+          options,
+        );
+
+      if (siblingSession) {
+        this.logGuestGameDebug('check-in-session-found-on-sibling-account', {
+          tenantId,
+          guestId: guest.id ?? null,
+          siblingGuestId: sibling.id,
+          session: this.guestGameDebugSession(siblingSession),
+        });
+        return siblingSession;
+      }
+    }
+
+    return null;
+  }
+
+  private async findCheckInSiblingGuests(
+    tenantId: string,
+    guest: { id?: string; externalDomain: string | null },
+  ) {
+    const guestId = nullableId(guest.id);
+    const externalDomain = nullableString(guest.externalDomain);
+
+    if (!guestId || !externalDomain) {
+      return [];
+    }
+
+    const primary = await this.prisma.guest.findFirst({
+      where: { id: guestId, tenantId },
+      select: { phoneHash: true, lastActivityAt: true },
+    });
+    const phoneHash = nullableString(primary?.phoneHash);
+
+    if (!phoneHash) {
+      return [];
+    }
+
+    const idleSince = new Date(
+      Date.now() - this.checkInSiblingIdleDays() * 24 * 60 * 60_000,
+    );
+
+    if (primary?.lastActivityAt && primary.lastActivityAt > idleSince) {
+      return [];
+    }
+
+    return this.prisma.guest.findMany({
+      where: {
+        tenantId,
+        id: { not: guestId },
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain,
+        phoneHash,
+        gameProfiles: { none: {} },
+        gameProfileIdentityLinks: {
+          none: { status: 'ACTIVE', profile: { guestId: { not: guestId } } },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: checkInSiblingGuestLimit,
+      select: {
+        id: true,
+        externalDomain: true,
+        externalGuestId: true,
+        currentCountHours: true,
+      },
+    });
+  }
+
+  private checkInSiblingIdleDays() {
+    const configured = intValue(
+      this.configService.get<string>('GUEST_GAME_CHECK_IN_SIBLING_IDLE_DAYS'),
+    );
+
+    return configured == null
+      ? checkInSiblingDefaultIdleDays
+      : Math.min(365, Math.max(1, configured));
+  }
+
+  private async findActiveCheckInSessionForExternalGuest(
     tenantId: string,
     guest: {
       externalDomain: string | null;

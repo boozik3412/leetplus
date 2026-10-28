@@ -14771,6 +14771,81 @@ describe('GuestGamificationService', () => {
       });
     });
 
+    describe('same-phone Langame accounts', () => {
+      const primaryGuest = {
+        id: 'guest-old',
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-old',
+        currentCountHours: null,
+      };
+      const siblingSession = {
+        externalDomain: 'club-1',
+        externalSessionId: 'session-new',
+        externalGuestId: 'lg-new',
+      };
+
+      it('finds the open session of an unbound account with the same phone once the linked one is idle', async () => {
+        const { service, prisma } = createService();
+        prisma.guest.findFirst.mockResolvedValue({
+          phoneHash: 'phone-hash',
+          lastActivityAt: new Date(Date.now() - 32 * 24 * 60 * 60_000),
+        });
+        prisma.guest.findMany.mockResolvedValue([
+          {
+            id: 'guest-new',
+            externalDomain: 'club-1',
+            externalGuestId: 'lg-new',
+            currentCountHours: null,
+          },
+        ]);
+        const lookup = jest
+          .spyOn(service as any, 'findActiveCheckInSessionForExternalGuest')
+          .mockImplementation((_tenantId: unknown, guest: any) =>
+            Promise.resolve(
+              guest.externalGuestId === 'lg-new' ? siblingSession : null,
+            ),
+          );
+
+        await expect(
+          (service as any).findActiveCheckInSession('tenant-1', primaryGuest),
+        ).resolves.toBe(siblingSession);
+        expect(lookup).toHaveBeenCalledTimes(2);
+        expect(prisma.guest.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              tenantId: 'tenant-1',
+              id: { not: 'guest-old' },
+              externalDomain: 'club-1',
+              phoneHash: 'phone-hash',
+              gameProfiles: { none: {} },
+              gameProfileIdentityLinks: {
+                none: {
+                  status: 'ACTIVE',
+                  profile: { guestId: { not: 'guest-old' } },
+                },
+              },
+            }),
+          }),
+        );
+      });
+
+      it('keeps to the linked account while it was active in the last 30 days', async () => {
+        const { service, prisma } = createService();
+        prisma.guest.findFirst.mockResolvedValue({
+          phoneHash: 'phone-hash',
+          lastActivityAt: new Date(Date.now() - 10 * 24 * 60 * 60_000),
+        });
+        jest
+          .spyOn(service as any, 'findActiveCheckInSessionForExternalGuest')
+          .mockResolvedValue(null);
+
+        await expect(
+          (service as any).findActiveCheckInSession('tenant-1', primaryGuest),
+        ).resolves.toBeNull();
+        expect(prisma.guest.findMany).not.toHaveBeenCalled();
+      });
+    });
+
     it('looks one UTC day ahead for sessions started after club-local midnight', () => {
       const { service } = createService();
 

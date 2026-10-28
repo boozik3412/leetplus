@@ -10,14 +10,16 @@ import type { DailyReport } from './daily-report.types';
 
 export const DAILY_REPORT_LLM_DEFAULTS = {
   // Cloud.ru Evolution Foundation Models: the request stays in Russia for the
-  // models hosted by Cloud.ru itself (owner decision 26.10.2026).
+  // models hosted by Cloud.ru itself (owner decision 26.10.2026). GLM-5.1
+  // answers the network's figures in 12–20 s; DeepSeek V4 Pro did not answer
+  // within 5 minutes (checked 28.10.2026).
   baseUrl: 'https://foundation-models.api.cloud.ru/v1',
-  model: 'deepseek-ai/DeepSeek-V4-Pro',
+  model: 'zai-org/GLM-5.1',
   timeoutMs: 60_000,
   // The morning report is sent by the worker, which has time to wait: a
   // reasoning model on the whole network's figures needs minutes, not seconds.
   workerTimeoutMs: 180_000,
-  // DeepSeek V4 reasons before answering; the reasoning counts towards the limit.
+  // GLM-5.1 reasons before answering; the reasoning counts towards the limit.
   maxTokens: 6000,
 } as const;
 

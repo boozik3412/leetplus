@@ -1952,7 +1952,8 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   `tenant-execution-http-policy.ts`): тот же отчёт плюс один запрос к
   OpenAI-совместимому LLM. Владелец выбрал Cloud.ru Foundation Models
   (`https://foundation-models.api.cloud.ru/v1`, модель
-  `deepseek-ai/DeepSeek-V4-Pro`, размещена в РФ). В модель уходят только
+  `zai-org/GLM-5.1`, размещена в РФ; с 28.10.2026 вместо
+  `deepseek-ai/DeepSeek-V4-Pro`, которая не отвечала за 5 минут). В модель уходят только
   посчитанные агрегаты, названия клубов и логины админов Langame, без
   данных гостей.
 - Секрет `DAILY_REPORT_LLM_API_KEY` (необязательные `DAILY_REPORT_LLM_BASE_URL`,

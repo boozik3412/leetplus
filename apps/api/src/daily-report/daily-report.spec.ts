@@ -558,7 +558,7 @@ describe('daily report commentary', () => {
     expect(result).toEqual({
       status: 'OK',
       text: 'Касса 45 300 ₽, спокойные сутки.',
-      model: 'deepseek-ai/DeepSeek-V4-Pro',
+      model: 'zai-org/GLM-5.1',
     });
     const [url, request] = fetchImpl.mock.calls[0] as unknown as [
       string,

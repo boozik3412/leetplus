@@ -119,23 +119,47 @@ export class DailyReportService {
     now: Date,
     reportDate?: string,
   ): Promise<DailyReportInput> {
+    const storeSelect = {
+      id: true,
+      name: true,
+      timeZone: true,
+      computerCount: true,
+      externalDomain: true,
+    } satisfies Prisma.StoreSelect;
     const stores = await this.prisma.store.findMany({
       where: {
         tenantId: scope.tenantId,
         isActive: true,
         ...(scope.storeIds ? { id: { in: [...scope.storeIds] } } : {}),
       },
-      select: {
-        id: true,
-        name: true,
-        timeZone: true,
-        computerCount: true,
-        externalDomain: true,
-      },
+      select: storeSelect,
       orderBy: { name: 'asc' },
     });
     const storeIds = stores.map((store) => store.id);
-    const windows = stores.map((store) => {
+    // Clubs outside the scope on a reported club's Langame address weigh the
+    // split of the address's online top-ups.
+    const domains = [
+      ...new Set(
+        stores.flatMap((store) =>
+          store.externalDomain?.trim() ? [store.externalDomain] : [],
+        ),
+      ),
+    ];
+    const peers =
+      scope.storeIds && domains.length
+        ? await this.prisma.store.findMany({
+            where: {
+              tenantId: scope.tenantId,
+              isActive: true,
+              id: { notIn: storeIds },
+              externalDomain: { in: domains },
+            },
+            select: storeSelect,
+            orderBy: { name: 'asc' },
+          })
+        : [];
+    const peerIds = peers.map((store) => store.id);
+    const windowsOf = (store: (typeof stores)[number]) => {
       const timeZone = store.timeZone?.trim() || 'UTC';
       const window = reportDate
         ? clubDayWindow(reportDate, timeZone)
@@ -147,7 +171,9 @@ export class DailyReportService {
         );
       }
       return { store, window, baseline };
-    });
+    };
+    const windows = stores.map(windowsOf);
+    const peerWindows = peers.map(windowsOf);
 
     if (!windows.length) {
       return {
@@ -181,6 +207,7 @@ export class DailyReportService {
     const stockFrom = new Date(now.getTime() - STOCK_DAYS * DAY_MS);
     const tenantId = scope.tenantId;
     const storeFilter = { in: storeIds };
+    const weightFilter = { in: [...storeIds, ...peerIds] };
 
     const [
       shiftRows,
@@ -195,7 +222,7 @@ export class DailyReportService {
       this.prisma.guestWorkingShift.findMany({
         where: {
           tenantId,
-          storeId: storeFilter,
+          storeId: weightFilter,
           OR: [
             {
               startedAt: {
@@ -234,7 +261,7 @@ export class DailyReportService {
       this.prisma.guestSession.findMany({
         where: {
           tenantId,
-          storeId: storeFilter,
+          storeId: weightFilter,
           startedAt: { gte: rangeFrom, lt: rangeTo },
         },
         select: {
@@ -313,7 +340,10 @@ export class DailyReportService {
         window,
       })),
       baselineWindows: Object.fromEntries(
-        windows.map(({ store, baseline }) => [store.id, baseline]),
+        [...windows, ...peerWindows].map(({ store, baseline }) => [
+          store.id,
+          baseline,
+        ]),
       ),
       shifts: shiftRows.filter((row) => row.storeId).map(toShift),
       historyShifts: historyRows.filter((row) => row.storeId).map(toShift),
@@ -340,6 +370,14 @@ export class DailyReportService {
       stockDays: STOCK_DAYS,
       oosExcludedProductKeys: new Set(exclusions.map((row) => row.productId)),
       onlineTopups,
+      addressPeers: peerWindows.map(({ store, window }) => ({
+        id: store.id,
+        name: store.name,
+        timeZone: window.timeZone,
+        computerCount: store.computerCount,
+        domain: store.externalDomain?.trim() || null,
+        window,
+      })),
     };
   }
 

@@ -272,6 +272,7 @@ const snapshotPipelineBackfillLookbackMinMs = 24 * 60 * 60 * 1000;
 const snapshotPipelineBackfillLookbackMaxMs = 90 * 24 * 60 * 60 * 1000;
 const snapshotPipelinePendingPurchaseLookbackDefaultMs =
   30 * 24 * 60 * 60 * 1000;
+const snapshotPipelinePendingSessionLookbackDefaultMs = 3 * 24 * 60 * 60 * 1000;
 type SnapshotPipelineBackfillMode = 'OFF' | 'SHADOW' | 'LIVE';
 type SnapshotPipelineBackfillPolicy = {
   mode: SnapshotPipelineBackfillMode;
@@ -282,6 +283,7 @@ type SnapshotPipelineBackfillPolicy = {
 };
 type SnapshotPipelineRunOptions = {
   drainPendingPurchases?: boolean;
+  drainPendingSessions?: boolean;
 };
 const defaultGuestGameTimeZone = 'Asia/Yekaterinburg';
 const guestLootBoxOpenSourceKind = 'GUEST_LOOT_BOX_OPEN';
@@ -6681,10 +6683,32 @@ export class GuestGamificationService {
     limit: number,
     cutoff: Date,
     profileGuestIds: string[] = [],
+    options: { gameProfileGuestsOnly?: boolean } = {},
   ): Promise<GuestGameSnapshotFact[]> {
     const scopedGuestIds = uniqueStrings(profileGuestIds);
     const profileScope = scopedGuestIds.length
       ? Prisma.sql`AND session."guestId" IN (${Prisma.join(scopedGuestIds)})`
+      : Prisma.sql``;
+    // The scheduled drain only owes facts to guests who already play: a
+    // session of any other Langame guest would create a game profile for
+    // them, and the network has far more of those than the batch can take.
+    const gameProfileScope = options.gameProfileGuestsOnly
+      ? Prisma.sql`
+          AND (
+            EXISTS (
+              SELECT 1
+              FROM "GuestGameProfile" profile
+              WHERE profile."tenantId" = session."tenantId"
+                AND profile."guestId" = session."guestId"
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM "GuestGameProfileIdentityLink" link
+              WHERE link."tenantId" = session."tenantId"
+                AND link."guestId" = session."guestId"
+                AND link."status" = 'ACTIVE'
+            )
+          )`
       : Prisma.sql``;
     const pendingRows =
       (await this.prisma.$queryRaw<
@@ -6801,6 +6825,7 @@ export class GuestGamificationService {
             OR session."stoppedAt" >= ${cutoff}
           )
           ${profileScope}
+          ${gameProfileScope}
           AND (
             pending."needsSessionStart"
             OR pending."needsPlayHour"
@@ -7093,6 +7118,30 @@ export class GuestGamificationService {
             ),
           )
         : [];
+    // Langame reports a session stop only with the next data sync, which
+    // rewrites hundreds of sessions at once. The latest-30 window below sees a
+    // few of them per tick, so PLAY_HOUR of a game guest is drained from the
+    // durable GuestSession anti-join, the same way as purchases above.
+    const pendingSessionDrainFacts =
+      options.drainPendingSessions === true &&
+      !dryRunOnly &&
+      (!source || source === 'GUEST_SESSION')
+        ? await this.loadPendingSessionSnapshotFacts(
+            user,
+            limit,
+            new Date(
+              Date.now() -
+                this.configMilliseconds(
+                  'GUEST_GAME_PIPELINE_PENDING_SESSION_LOOKBACK_MS',
+                  snapshotPipelinePendingSessionLookbackDefaultMs,
+                  snapshotPipelineBackfillLookbackMinMs,
+                  snapshotPipelineBackfillLookbackMaxMs,
+                ),
+            ),
+            [],
+            { gameProfileGuestsOnly: true },
+          )
+        : [];
     const pendingPrimaryFacts = backfillPolicy.enabled
       ? await this.loadPendingPrimarySnapshotFacts(
           user,
@@ -7104,8 +7153,10 @@ export class GuestGamificationService {
     const latestSnapshotFactKeys = new Set(
       factsResult.facts.map(snapshotFactKey),
     );
-    const pendingPurchaseDrainFactKeys = new Set(
-      pendingPurchaseDrainFacts.map(snapshotFactKey),
+    const pendingDrainFactKeys = new Set(
+      [...pendingPurchaseDrainFacts, ...pendingSessionDrainFacts].map(
+        snapshotFactKey,
+      ),
     );
     const shadowBackfillOnlyFactKeys = new Set(
       backfillPolicy.mode === 'SHADOW'
@@ -7114,12 +7165,13 @@ export class GuestGamificationService {
             .filter(
               (key) =>
                 !latestSnapshotFactKeys.has(key) &&
-                !pendingPurchaseDrainFactKeys.has(key),
+                !pendingDrainFactKeys.has(key),
             )
         : [],
     );
     const sourceCandidates = uniqueSnapshotFacts([
       ...pendingPurchaseDrainFacts,
+      ...pendingSessionDrainFacts,
       ...pendingPrimaryFacts,
       ...factsResult.facts,
     ]).filter(
@@ -7549,7 +7601,7 @@ export class GuestGamificationService {
             allowedStoreIds: [],
           },
           dto,
-          { drainPendingPurchases: true },
+          { drainPendingPurchases: true, drainPendingSessions: true },
         );
 
         tenantResults.push({

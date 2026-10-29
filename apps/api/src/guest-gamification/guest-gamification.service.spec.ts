@@ -21898,6 +21898,101 @@ describe('GuestGamificationService', () => {
       },
     );
 
+    it('drains PLAY_HOUR of a game guest whose stop arrived below a burst of more than 30 synced sessions', async () => {
+      const { service, prisma } = createService();
+      const recentFacts = Array.from({ length: 31 }, (_, index) =>
+        snapshotFact(`session:synced-session-${index}:play`, {
+          eventType: 'PLAY_HOUR',
+          externalId: `synced-session-${index}`,
+        }),
+      );
+
+      jest
+        .spyOn(service, 'getSnapshotFacts')
+        .mockResolvedValue(snapshotFactsResult(recentFacts));
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          id: 'stopped-session-32',
+          needsSessionStart: false,
+          needsPlayHour: true,
+          needsPackageCorrection: false,
+        },
+      ]);
+      prisma.guestSession.findMany.mockResolvedValue([
+        {
+          id: 'stopped-session-32',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalSessionId: 'stopped-session-32',
+          externalGuestId: 'guest-external-1',
+          startedAt: new Date(now.getTime() - 90 * 60_000),
+          stoppedAt: now,
+          durationMinutes: 90,
+          normalStop: true,
+          packet: false,
+          guest: {
+            id: 'guest-1',
+            externalDomain: 'club-1',
+            externalGuestId: 'guest-external-1',
+            fullNameMasked: 'Guest',
+            phoneMasked: '***0646',
+            emailMasked: null,
+          },
+          store: { id: 'store-1', name: 'Club 1' },
+        },
+      ]);
+      prisma.guestGameEvent.findMany.mockResolvedValue(
+        recentFacts.map((fact) => ({
+          externalProvider: fact.externalProvider,
+          externalDomain: fact.externalDomain,
+          externalId: `guest-game:GUEST_SESSION:PLAY_HOUR:${fact.externalId}`,
+        })),
+      );
+      jest.spyOn(service, 'processEvent').mockResolvedValue(processResult());
+
+      const result = await service.runSnapshotPipeline(
+        user,
+        { source: 'GUEST_SESSION', limit: 1 },
+        { drainPendingSessions: true },
+      );
+
+      expect(result).toMatchObject({ checkedFacts: 1, processedFacts: 1 });
+      expect(service.processEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          eventType: 'PLAY_HOUR',
+          sourceFactId: 'session:stopped-session-32:play',
+        }),
+      );
+      const query = prisma.$queryRaw.mock.calls[0]?.[0] as Prisma.Sql;
+      expect(query.strings.join(' ')).toContain('"GuestGameProfile" profile');
+      const cutoff = query.values.find(
+        (value): value is Date => value instanceof Date,
+      );
+      expect(Date.now() - (cutoff?.getTime() ?? 0)).toBeGreaterThanOrEqual(
+        3 * 24 * 60 * 60 * 1000,
+      );
+      expect(Date.now() - (cutoff?.getTime() ?? 0)).toBeLessThan(
+        3 * 24 * 60 * 60 * 1000 + 5_000,
+      );
+    });
+
+    it('does not drain sessions outside the scheduled run', async () => {
+      const { service, prisma } = createService();
+
+      jest
+        .spyOn(service, 'getSnapshotFacts')
+        .mockResolvedValue(snapshotFactsResult([]));
+      prisma.$queryRaw.mockResolvedValue([]);
+
+      await service.runSnapshotPipeline(user, {
+        source: 'GUEST_SESSION',
+        limit: 1,
+      });
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
     it('drains a pending purchase below a burst of more than 30 recent snapshot facts without generic backfill flags', async () => {
       const fixture = createService();
       const { service, prisma } = fixture;
@@ -24775,7 +24870,7 @@ describe('GuestGamificationService', () => {
       );
     });
 
-    it('enables durable pending-purchase draining only for the scheduled primary pipeline', async () => {
+    it('enables durable pending-purchase and pending-session draining only for the scheduled primary pipeline', async () => {
       const { service, prisma } = createService();
       prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
       const run = jest.spyOn(service, 'runSnapshotPipeline').mockResolvedValue({
@@ -24802,7 +24897,7 @@ describe('GuestGamificationService', () => {
           tenantSlug: user.tenantSlug,
         }),
         { limit: 30 },
-        { drainPendingPurchases: true },
+        { drainPendingPurchases: true, drainPendingSessions: true },
       );
     });
 

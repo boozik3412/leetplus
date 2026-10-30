@@ -3,6 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
+import {
+  PlatformNetworkActionsPanel,
+  PlatformNetworkCreatePanel,
+} from "@/components/platform-network-panels";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import {
   TenantAccessPanel,
@@ -1086,6 +1090,8 @@ export function PlatformAdministrationWorkspace({
           </div>
         </section>
 
+        <PlatformNetworkCreatePanel onCreated={refreshAfterAccessChange} />
+
         <section
           id="tenants"
           className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
@@ -1213,6 +1219,10 @@ export function PlatformAdministrationWorkspace({
                   <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_420px]">
                     <div className="space-y-3 text-sm">
                       <TenantAccessPanel
+                        tenant={tenant}
+                        onChanged={refreshAfterAccessChange}
+                      />
+                      <PlatformNetworkActionsPanel
                         tenant={tenant}
                         onChanged={refreshAfterAccessChange}
                       />

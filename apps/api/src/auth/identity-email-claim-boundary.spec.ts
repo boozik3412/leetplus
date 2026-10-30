@@ -13,6 +13,8 @@ const ALLOWED_TENANT_LOCK_IMPLEMENTATIONS = new Set([
 const ALLOWED_USER_OWNERSHIP_WRITERS = new Set(['auth/auth.service.ts']);
 const ALLOWED_INVITE_WRITERS = new Set([
   'admin/founder-owner-invite-lifecycle.service.ts',
+  // Open OWNER link of a platform-created network: no mailbox, no claim.
+  'admin/platform-network.service.ts',
   'auth/auth.service.ts',
   'users/users.service.ts',
 ]);

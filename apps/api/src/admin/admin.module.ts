@@ -10,6 +10,7 @@ import { FounderOperatorBetaActivationDatabaseService } from './founder-operator
 import { FounderOperatorBetaActivationService } from './founder-operator-beta-activation.service';
 import { FounderOperatorBetaGoService } from './founder-operator-beta-go.service';
 import { FounderOwnerInviteLifecycleService } from './founder-owner-invite-lifecycle.service';
+import { PlatformNetworkService } from './platform-network.service';
 import { SharedTenantProvisioningService } from './shared-tenant-provisioning.service';
 import { TenantAccessWindowService } from './tenant-access-window.service';
 
@@ -25,6 +26,7 @@ import { TenantAccessWindowService } from './tenant-access-window.service';
     FounderOperatorBetaActivationService,
     FounderOwnerInviteLifecycleService,
     TenantAccessWindowService,
+    PlatformNetworkService,
   ],
 })
 export class AdminModule {}

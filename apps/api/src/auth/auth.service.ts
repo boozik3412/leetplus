@@ -123,6 +123,8 @@ type InviteAdmissionCandidate = {
   accessScope: UserAccessScope | null;
   customRoleId: string | null;
   storeIds: readonly string[];
+  email: string | null;
+  deliveryMode: string;
   tenant: PersistedTenantExecutionSubject;
 };
 
@@ -287,6 +289,10 @@ export class AuthService {
         this.assertInviteAdmitted(lockedInvite, acceptedAt);
         await this.assertInitialOwnerInviteDeliverySent(lockedInvite, tx);
 
+        if (this.isNetworkOwnerLink(lockedInvite)) {
+          await this.assertNetworkOwnerLinkIssuer(tx, invite.createdByUserId);
+        }
+
         if (invite.role === UserRole.OWNER) {
           const ownerCount = await tx.user.count({
             where: {
@@ -345,7 +351,25 @@ export class AuthService {
           throw new ConflictException('Invite changed or was already accepted');
         }
 
-        if (invite.role === UserRole.OWNER) {
+        if (this.isNetworkOwnerLink(lockedInvite)) {
+          // The network is already ONBOARDING: the platform-admin link only
+          // seats its first owner, so there is no onboarding transition.
+          await tx.platformAdminAuditEvent.create({
+            data: {
+              tenantId: invite.tenantId,
+              actorUserId: userId,
+              action: 'TENANT_NETWORK_OWNER_LINK_ACCEPTED',
+              targetType: 'TENANT_ONBOARDING',
+              targetId: invite.tenantId,
+              reason: 'First network owner registered by the platform link',
+              metadata: {
+                inviteId: invite.id,
+                ownerUserId: userId,
+                issuedByUserId: invite.createdByUserId,
+              },
+            },
+          });
+        } else if (invite.role === UserRole.OWNER) {
           const transitioned = await tx.tenant.updateMany({
             where: {
               id: invite.tenantId,
@@ -817,9 +841,45 @@ export class AuthService {
       return;
     }
 
-    if (invite.role === UserRole.OWNER) {
+    if (invite.role === UserRole.OWNER && !this.isNetworkOwnerLink(invite)) {
       throw new UnauthorizedException(
         'Additional owner invites require the owner-transfer workflow',
+      );
+    }
+  }
+
+  /**
+   * Open `OWNER/NETWORK` link of a network a platform admin created already
+   * ONBOARDING (`PlatformNetworkService`). It seats the first owner only: the
+   * acceptance transaction also requires zero owners and a platform-admin
+   * issuer.
+   */
+  private isNetworkOwnerLink(invite: InviteAdmissionCandidate): boolean {
+    return (
+      invite.role === UserRole.OWNER &&
+      invite.accessScope === UserAccessScope.NETWORK &&
+      invite.customRoleId === null &&
+      invite.storeIds.length === 0 &&
+      invite.email === null &&
+      invite.deliveryMode === INVITE_DELIVERY_LINK &&
+      invite.tenant.customerStage !== TenantCustomerStage.INTERNAL &&
+      invite.tenant.onboardingStatus === TenantOnboardingStatus.ONBOARDING
+    );
+  }
+
+  private async assertNetworkOwnerLinkIssuer(
+    tx: Prisma.TransactionClient,
+    createdByUserId: string | null,
+  ): Promise<void> {
+    const issuer = createdByUserId
+      ? await tx.user.findUnique({
+          where: { id: createdByUserId },
+          select: { isActive: true, isPlatformAdmin: true },
+        })
+      : null;
+    if (!issuer?.isActive || !issuer.isPlatformAdmin) {
+      throw new UnauthorizedException(
+        'Network owner link must be issued by an active platform administrator',
       );
     }
   }

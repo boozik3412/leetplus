@@ -151,6 +151,9 @@ export class PlatformNetworkService {
           trialStartsAt: now,
           trialEndsAt,
           entitlementProfileRevision: 1,
+          // Execution admission refuses revision 0, and after insert the
+          // revision is trigger-owned, so a new network must start at 1.
+          executionRevision: 1,
           statusChangedAt: now,
           statusReason: 'Created by platform admin with an owner link',
         },

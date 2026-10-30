@@ -95,6 +95,14 @@ describePostgres('platform network PostgreSQL workflow', () => {
       select: { id: true },
     });
     const tenantIds = tenants.map(({ id }) => id);
+    // Deleted networks keep their audit rows with tenantId NULL; remove them by
+    // actor before the actor row is gone, so the shared smoke database stays
+    // empty for the later clean-database checks in the same CI job.
+    if (actor?.id) {
+      await prisma.platformAdminAuditEvent.deleteMany({
+        where: { actorUserId: actor.id },
+      });
+    }
     if (tenantIds.length > 0) {
       await prisma.$transaction([
         prisma.identityEmailClaim.deleteMany({
@@ -111,9 +119,6 @@ describePostgres('platform network PostgreSQL workflow', () => {
         prisma.tenant.deleteMany({ where: { id: { in: tenantIds } } }),
       ]);
     }
-    await prisma.platformAdminAuditEvent.deleteMany({
-      where: { actorUserId: actor?.id },
-    });
     await prisma.$disconnect();
   });
 

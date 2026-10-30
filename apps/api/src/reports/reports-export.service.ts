@@ -55,7 +55,8 @@ type ProductMovementRow = {
   storeName: string;
   categoryName: string;
   totalQuantity: number;
-  stockQuantity: number;
+  /** Null when there is no fresh stock for the SKU. */
+  stockQuantity: number | null;
   revenue: number;
   dailyQuantity: Record<string, number>;
 };
@@ -908,20 +909,20 @@ export class ReportsExportService {
     salesReport.rows.forEach((row) => {
       const categoryName = row.categoryName ?? 'Без категории';
 
-      if (category && categoryName !== category) {
+      if (row.isCanceled || (category && categoryName !== category)) {
         return;
       }
 
       const key = `${row.storeId}:${row.productId}`;
-      const date = row.saleDate.slice(0, 10);
+      const date = row.saleDay;
       const current =
         rowsByKey.get(key) ??
         ({
-          productName: row.productNameAtSale ?? row.productName,
+          productName: row.productName,
           storeName: row.storeName,
           categoryName,
           totalQuantity: 0,
-          stockQuantity: stockByStoreProduct.get(key) ?? 0,
+          stockQuantity: stockByStoreProduct.get(key) ?? null,
           revenue: 0,
           dailyQuantity: Object.fromEntries(dates.map((day) => [day, 0])),
         } satisfies ProductMovementRow);
@@ -937,7 +938,8 @@ export class ReportsExportService {
       .map((row) => ({
         ...row,
         totalQuantity: this.round(row.totalQuantity),
-        stockQuantity: this.round(row.stockQuantity),
+        stockQuantity:
+          row.stockQuantity === null ? null : this.round(row.stockQuantity),
         revenue: this.round(row.revenue),
       }))
       .sort(

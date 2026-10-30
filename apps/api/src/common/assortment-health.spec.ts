@@ -572,6 +572,19 @@ describe('buildAssortmentHealth', () => {
           snapshotDate: new Date('2026-09-12T00:00:00.000Z'),
           quantity: 4,
         },
+        // The 09-14 sync is still running: the club's last full list is 09-12.
+        {
+          storeId: 'store-1',
+          productId: 'priced',
+          snapshotDate: new Date('2026-09-12T00:00:00.000Z'),
+          quantity: 2,
+        },
+        {
+          storeId: 'store-1',
+          productId: 'unknown-no-sales',
+          snapshotDate: new Date('2026-09-12T00:00:00.000Z'),
+          quantity: 3,
+        },
       ],
       sales: [],
       salesCoverage: [
@@ -1187,13 +1200,14 @@ describe('buildAssortmentHealth', () => {
     );
 
     expect(health.rows[0].grossProfitAtRisk).toMatchObject({
+      // 21 sold over the 20 days before it ran out on 09-14.
       perDay: {
-        value: 80,
+        value: 84,
         state: 'AVAILABLE',
         coverage: { covered: 3, total: 3, percent: 100 },
         asOf: '2026-09-14',
       },
-      forPeriod: { value: 800, state: 'AVAILABLE' },
+      forPeriod: { value: 840, state: 'AVAILABLE' },
       costBasis: 'CLUB_PURCHASE_PRICE',
     });
   });
@@ -1289,8 +1303,8 @@ describe('buildAssortmentHealth', () => {
     );
 
     expect(health.rows[0].grossProfitAtRisk).toMatchObject({
-      perDay: { value: -20 },
-      forPeriod: { value: -200 },
+      perDay: { value: -21 },
+      forPeriod: { value: -210 },
       costBasis: 'CLUB_PURCHASE_PRICE',
     });
   });
@@ -1332,10 +1346,10 @@ describe('buildAssortmentHealth', () => {
     );
 
     expect(health.rows[0]).toMatchObject({
-      demand21d: { value: 0.3 },
+      demand21d: { value: 0.4 },
       grossProfitAtRisk: {
         perDay: { value: 0.4 },
-        forPeriod: { value: 7.7 },
+        forPeriod: { value: 8.1 },
       },
     });
   });
@@ -1414,6 +1428,56 @@ describe('buildAssortmentHealth', () => {
       },
       forPeriod: { value: 3600 },
       costBasis: 'SALES_UNIT_COST',
+    });
+  });
+
+  it('averages demand over in-stock days and reads a SKU missing from the latest full list as zero', () => {
+    const others = ['o1', 'o2', 'o3', 'o4'];
+    const days = Array.from({ length: 21 }, (_, index) => {
+      const day = new Date('2026-08-25T00:00:00.000Z');
+      day.setUTCDate(day.getUTCDate() + index);
+      return day;
+    });
+    const health = buildAssortmentHealth(
+      valuationSummaryInput({
+        products: [
+          { id: 'cola', isActive: true },
+          ...others.map((id) => ({ id, isActive: true })),
+        ],
+        inventorySnapshots: [
+          ...days.flatMap((day) =>
+            others.map((productId) => ({
+              storeId: 'store-1',
+              productId,
+              snapshotDate: day,
+              quantity: 5,
+            })),
+          ),
+          // On stock for the first 7 days, then gone from the club's list.
+          ...days.slice(0, 7).map((day) => ({
+            storeId: 'store-1',
+            productId: 'cola',
+            snapshotDate: day,
+            quantity: 10,
+          })),
+        ],
+        sales: days.slice(0, 7).map((day) => ({
+          storeId: 'store-1',
+          productId: 'cola',
+          saleDate: day,
+          quantity: 3,
+          revenue: 300,
+        })),
+      }),
+    );
+
+    expect(health.rows.find((row) => row.productId === 'cola')).toMatchObject({
+      inventory: { value: 0, state: 'AVAILABLE', asOf: '2026-09-14' },
+      demand21d: { value: 3, state: 'AVAILABLE' },
+      demandSoldQuantity: 21,
+      demandDaysInStock: 7,
+      risk: 'OUT_OF_STOCK',
+      recommendedOrderQuantity: 21,
     });
   });
 });

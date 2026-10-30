@@ -282,6 +282,8 @@ export type SalesDetailRow = {
   canceledAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** The club's calendar day of the sale, YYYY-MM-DD. */
+  saleDay: string;
 };
 
 export type SalesDetailReport = {
@@ -1600,19 +1602,23 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: OperationalReportQuery,
   ): Promise<SalesDetailReport> {
-    const { tenantId, tenantSlug, storeFilter } =
-      await this.resolveStoreReadScope(user, query.storeId);
+    const scope = await this.resolveStoreReadScope(user, query.storeId);
+    const { tenantId, tenantSlug, storeFilter } = scope;
     const period = this.resolvePeriod(query);
+    const from = this.toDateInputValue(period.fromDate);
+    const to = this.toDateInputValue(period.toDate);
 
-    const [salesFacts, inventorySnapshots] = await Promise.all([
+    const [stores, salesFacts, inventorySnapshots] = await Promise.all([
+      this.prisma.store.findMany({
+        where: scope.storeWhere,
+        select: { id: true, externalDomain: true, timeZone: true },
+      }),
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
           ...storeFilter,
-          saleDate: {
-            gte: period.fromDate,
-            lte: period.toDate,
-          },
+          // The period is in club days; the exact cut is made below.
+          saleDate: clubDayQueryWindow(period.fromDate, period.toDate),
         },
         include: {
           product: {
@@ -1659,57 +1665,63 @@ export class ReportsService {
       }),
     ]);
     const costBasisByProduct = buildProductCostBasis([], inventorySnapshots);
+    const saleDayOf = this.clubDayOf(stores);
 
     return {
       tenantId,
       tenantSlug,
-      from: this.toDateInputValue(period.fromDate),
-      to: this.toDateInputValue(period.toDate),
+      from,
+      to,
       storeId: query.storeId ?? null,
-      rows: salesFacts.map((fact) => {
+      rows: salesFacts.flatMap((fact) => {
+        const saleDay = saleDayOf(fact.storeId, fact.saleDate);
+        if (saleDay < from || saleDay > to) return [];
         const quantity = fact.quantity.toNumber();
         const revenue = fact.revenue.toNumber();
         const cost = this.saleCost(fact, costBasisByProduct);
         const grossProfit = revenue - cost;
 
-        return {
-          id: fact.id,
-          saleDate: fact.saleDate.toISOString(),
-          productId: fact.productId,
-          article: fact.product.article,
-          productName: fact.product.name,
-          productNameAtSale: fact.productNameAtSale,
-          storeId: fact.storeId,
-          storeName: fact.store.name,
-          storeNameAtSale: fact.storeNameAtSale,
-          categoryName: fact.product.category?.name ?? null,
-          supplierName: fact.product.supplier?.name ?? null,
-          quantity: this.round(quantity),
-          revenue: this.round(revenue),
-          cost: this.round(cost),
-          unitSalePrice: quantity > 0 ? this.round(revenue / quantity) : 0,
-          unitCost: quantity > 0 ? this.round(cost / quantity) : 0,
-          grossProfit: this.round(grossProfit),
-          marginPercent: this.marginPercent(cost, revenue),
-          markupPercent: this.markupPercent(cost, revenue),
-          purchasePrice: fact.product.purchasePrice.toNumber(),
-          salePrice: fact.product.salePrice.toNumber(),
-          facing: fact.product.facing,
-          source:
-            fact.externalProvider ??
-            fact.externalDomain ??
-            (fact.sourcePayloadHash ? 'IMPORT' : 'MANUAL'),
-          externalProvider: fact.externalProvider,
-          externalDomain: fact.externalDomain,
-          externalSaleId: fact.externalSaleId,
-          externalProductId: fact.externalProductId,
-          externalClubId: fact.externalClubId,
-          sourcePayloadHash: fact.sourcePayloadHash,
-          isCanceled: fact.isCanceled,
-          canceledAt: fact.canceledAt?.toISOString() ?? null,
-          createdAt: fact.createdAt.toISOString(),
-          updatedAt: fact.updatedAt.toISOString(),
-        };
+        return [
+          {
+            id: fact.id,
+            saleDate: fact.saleDate.toISOString(),
+            productId: fact.productId,
+            article: fact.product.article,
+            productName: fact.product.name,
+            productNameAtSale: fact.productNameAtSale,
+            storeId: fact.storeId,
+            storeName: fact.store.name,
+            storeNameAtSale: fact.storeNameAtSale,
+            categoryName: fact.product.category?.name ?? null,
+            supplierName: fact.product.supplier?.name ?? null,
+            quantity: this.round(quantity),
+            revenue: this.round(revenue),
+            cost: this.round(cost),
+            unitSalePrice: quantity > 0 ? this.round(revenue / quantity) : 0,
+            unitCost: quantity > 0 ? this.round(cost / quantity) : 0,
+            grossProfit: this.round(grossProfit),
+            marginPercent: this.marginPercent(cost, revenue),
+            markupPercent: this.markupPercent(cost, revenue),
+            purchasePrice: fact.product.purchasePrice.toNumber(),
+            salePrice: fact.product.salePrice.toNumber(),
+            facing: fact.product.facing,
+            source:
+              fact.externalProvider ??
+              fact.externalDomain ??
+              (fact.sourcePayloadHash ? 'IMPORT' : 'MANUAL'),
+            externalProvider: fact.externalProvider,
+            externalDomain: fact.externalDomain,
+            externalSaleId: fact.externalSaleId,
+            externalProductId: fact.externalProductId,
+            externalClubId: fact.externalClubId,
+            sourcePayloadHash: fact.sourcePayloadHash,
+            isCanceled: fact.isCanceled,
+            canceledAt: fact.canceledAt?.toISOString() ?? null,
+            createdAt: fact.createdAt.toISOString(),
+            updatedAt: fact.updatedAt.toISOString(),
+            saleDay,
+          },
+        ];
       }),
     };
   }
@@ -1718,20 +1730,22 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: OperationalReportQuery,
   ): Promise<SkuPerformanceReport> {
-    const { tenantId, tenantSlug, storeFilter } =
-      await this.resolveStoreReadScope(user, query.storeId);
+    const scope = await this.resolveStoreReadScope(user, query.storeId);
+    const { tenantId, tenantSlug, storeFilter } = scope;
     const period = this.resolvePeriod(query);
 
-    const [salesFacts, inventorySnapshots] = await Promise.all([
+    const [stores, periodSales, inventorySnapshots] = await Promise.all([
+      this.prisma.store.findMany({
+        where: scope.storeWhere,
+        select: { id: true, externalDomain: true, timeZone: true },
+      }),
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
           isCanceled: false,
           ...storeFilter,
-          saleDate: {
-            gte: period.fromDate,
-            lte: period.toDate,
-          },
+          // The period is in club days; the exact cut is made below.
+          saleDate: clubDayQueryWindow(period.fromDate, period.toDate),
         },
         include: {
           product: {
@@ -1780,6 +1794,7 @@ export class ReportsService {
       }),
     ]);
     const costBasisByProduct = buildProductCostBasis([], inventorySnapshots);
+    const salesFacts = this.onClubPeriodDays(periodSales, stores, period);
 
     const shouldUseCanonicalGrouping = !query.storeId;
     const buildRows = (useCanonicalGrouping: boolean) => {
@@ -4562,6 +4577,35 @@ export class ReportsService {
     return rank[role];
   }
 
+  /** The club's calendar day (YYYY-MM-DD) of an instant. */
+  private clubDayOf(
+    stores: ReadonlyArray<{
+      id: string;
+      externalDomain: string | null;
+      timeZone: string | null;
+    }>,
+  ) {
+    const zoneOf = clubTimeZoneResolver(stores);
+    const formatters = new Map<string, Intl.DateTimeFormat>();
+    return (storeId: string, at: Date) =>
+      this.toDateInputValue(clubWallClock(at, zoneOf(storeId), formatters));
+  }
+
+  /** Sales on the club days of `period`, loaded with clubDayQueryWindow. */
+  private onClubPeriodDays<T extends { storeId: string; saleDate: Date }>(
+    sales: T[],
+    stores: Parameters<ReportsService['clubDayOf']>[0],
+    period: { fromDate: Date; toDate: Date },
+  ) {
+    const dayOf = this.clubDayOf(stores);
+    const from = this.toDateInputValue(period.fromDate);
+    const to = this.toDateInputValue(period.toDate);
+    return sales.filter((sale) => {
+      const day = dayOf(sale.storeId, sale.saleDate);
+      return day >= from && day <= to;
+    });
+  }
+
   private resolvePeriod(query: OperationalReportQuery) {
     const now = new Date();
     const defaultTo = new Date(
@@ -4881,7 +4925,7 @@ export class ReportsService {
           categoryName: product.categoryName,
           supplierName: product.supplierName,
           stockQuantity: this.round(stockQuantity),
-          soldQuantity: this.round(averageDailySales * DEMAND_PERIOD_DAYS),
+          soldQuantity: this.round(row.demandSoldQuantity),
           averageDailySales: this.round(averageDailySales),
           stockDays: row.turnoverDays.value,
           dailyNeed,

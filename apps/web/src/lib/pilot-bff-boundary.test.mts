@@ -529,10 +529,10 @@ test("bounds the reports SSR fan-out to two upstream loaders at a time", async (
     .map((match) => [...match[1].matchAll(loaderPattern)].length)
     .filter((count) => count > 0);
 
-  assert.deepEqual(boundedBlocks, [2, 2, 2, 2, 2, 2]);
+  assert.deepEqual(boundedBlocks, [2, 2, 2, 2]);
   assert.equal(
     boundedBlocks.reduce((total, count) => total + count, 0),
-    12,
+    8,
   );
 });
 

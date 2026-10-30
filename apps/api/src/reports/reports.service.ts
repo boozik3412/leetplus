@@ -28,6 +28,19 @@ import type {
   AssortmentNoSalesWindow,
   AssortmentValuationBasis,
 } from '../common/assortment-health';
+import {
+  clubDayQueryWindow,
+  clubTimeZoneResolver,
+  clubWallClock,
+} from '../common/club-time';
+import {
+  buildOrderPlanningRows,
+  ORDER_PLANNING_COVER_DAYS,
+  ORDER_PLANNING_DEFAULT_COVER_DAYS,
+  ORDER_PLANNING_DEFAULT_WINDOW_DAYS,
+  ORDER_PLANNING_WINDOW_DAYS,
+  type OrderPlanningRow,
+} from './order-planning';
 
 export type ReportGroup = {
   id: string | null;
@@ -514,6 +527,26 @@ export type ReplenishmentReport = {
   rows: ReplenishmentRow[];
   assortmentHealth: AssortmentHealth['summary'];
   coverage: ReplenishmentCoverage;
+};
+
+export type OrderPlanningQuery = {
+  days?: string;
+  coverDays?: string;
+};
+
+export type OrderPlanningReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  days: string[];
+  windowDays: number;
+  coverDays: number;
+  windowOptions: readonly number[];
+  coverOptions: readonly number[];
+  generatedAt: string;
+  excludedProducts: number;
+  rows: OrderPlanningRow[];
 };
 
 export type InventoryTurnoverStatus = 'OK' | 'SLOW' | 'FROZEN';
@@ -2296,6 +2329,187 @@ export class ReportsService {
       assortmentHealth: assortmentHealth.health.summary,
       coverage: replenishmentRows.coverage,
     };
+  }
+
+  async getOrderPlanningReport(
+    user: AuthenticatedUser,
+    query: OrderPlanningQuery,
+  ): Promise<OrderPlanningReport> {
+    const windowDays = this.resolveOption(
+      query.days,
+      ORDER_PLANNING_WINDOW_DAYS,
+      ORDER_PLANNING_DEFAULT_WINDOW_DAYS,
+    );
+    const coverDays = this.resolveOption(
+      query.coverDays,
+      ORDER_PLANNING_COVER_DAYS,
+      ORDER_PLANNING_DEFAULT_COVER_DAYS,
+    );
+    const scope = await this.resolveStoreReadScope(user);
+    const { tenantId, tenantSlug, storeFilter } = scope;
+    const now = new Date();
+    const stores = await this.prisma.store.findMany({
+      where: scope.storeWhere,
+      select: { id: true, name: true, externalDomain: true, timeZone: true },
+      orderBy: { name: 'asc' },
+    });
+    const zoneOf = clubTimeZoneResolver(stores);
+    const formatters = new Map<string, Intl.DateTimeFormat>();
+    // Full club-local days ending yesterday in the tenant's zone.
+    const today = clubWallClock(now, zoneOf(), formatters);
+    const toDate = new Date(
+      Date.UTC(
+        today.getUTCFullYear(),
+        today.getUTCMonth(),
+        today.getUTCDate() - 1,
+      ),
+    );
+    const fromDate = new Date(toDate);
+    fromDate.setUTCDate(fromDate.getUTCDate() - (windowDays - 1));
+    const days = Array.from({ length: windowDays }, (_, index) => {
+      const day = new Date(fromDate);
+      day.setUTCDate(day.getUTCDate() + index);
+      return this.toDateInputValue(day);
+    });
+    const snapshotsFrom = new Date(fromDate);
+    snapshotsFrom.setUTCDate(snapshotsFrom.getUTCDate() - 14);
+    const toEnd = new Date(toDate);
+    toEnd.setUTCHours(23, 59, 59, 999);
+    const productWhere: Prisma.ProductWhereInput = { tenantId, isActive: true };
+
+    const [products, sales, snapshots, configurations, exclusions] =
+      await Promise.all([
+        this.prisma.product.findMany({
+          where: productWhere,
+          select: {
+            id: true,
+            article: true,
+            name: true,
+            purchasePrice: true,
+            canonicalProductId: true,
+            canonicalProduct: { select: { name: true } },
+            category: { select: { name: true } },
+            supplier: { select: { name: true, orderMultiplicity: true } },
+          },
+        }),
+        this.prisma.salesFact.findMany({
+          where: {
+            tenantId,
+            isCanceled: false,
+            ...storeFilter,
+            product: productWhere,
+            saleDate: clubDayQueryWindow(fromDate, toEnd),
+          },
+          select: {
+            storeId: true,
+            productId: true,
+            saleDate: true,
+            quantity: true,
+            revenue: true,
+          },
+        }),
+        this.prisma.inventorySnapshot.findMany({
+          where: {
+            tenantId,
+            ...storeFilter,
+            product: productWhere,
+            snapshotDate: { gte: snapshotsFrom, lte: now },
+          },
+          select: {
+            storeId: true,
+            productId: true,
+            snapshotDate: true,
+            updatedAt: true,
+            quantity: true,
+          },
+        }),
+        this.prisma.langameClubProductConfiguration.findMany({
+          where: {
+            tenantId,
+            isActive: true,
+            productId: { not: null },
+            purchasePrice: { not: null },
+            ...storeFilter,
+          },
+          select: { storeId: true, productId: true, purchasePrice: true },
+        }),
+        this.prisma.productOosExclusion.findMany({
+          where: { tenantId },
+          select: { productId: true },
+        }),
+      ]);
+    const clubPurchasePrices = new Map<string, number>();
+    configurations.forEach((configuration) => {
+      const price = configuration.purchasePrice?.toNumber() ?? 0;
+      if (configuration.productId && price > 0) {
+        clubPurchasePrices.set(
+          `${configuration.storeId}:${configuration.productId}`,
+          price,
+        );
+      }
+    });
+    const excludedProductIds = new Set(
+      exclusions.map((exclusion) => exclusion.productId),
+    );
+    const rows = buildOrderPlanningRows({
+      now,
+      days,
+      coverDays,
+      stores,
+      products: products.map((product) => ({
+        id: product.id,
+        article: product.article,
+        name: product.name,
+        canonicalProductId: product.canonicalProductId,
+        canonicalName: product.canonicalProduct?.name ?? null,
+        categoryName: product.category?.name ?? null,
+        supplierName: product.supplier?.name ?? null,
+        orderMultiplicity: product.supplier?.orderMultiplicity ?? null,
+        purchasePrice: product.purchasePrice.toNumber(),
+      })),
+      sales: sales.map((sale) => ({
+        storeId: sale.storeId,
+        productId: sale.productId,
+        day: this.toDateInputValue(
+          clubWallClock(sale.saleDate, zoneOf(sale.storeId), formatters),
+        ),
+        quantity: sale.quantity.toNumber(),
+        revenue: sale.revenue.toNumber(),
+      })),
+      snapshots: snapshots.map((snapshot) => ({
+        storeId: snapshot.storeId,
+        productId: snapshot.productId,
+        day: this.toDateInputValue(snapshot.snapshotDate),
+        quantity: snapshot.quantity.toNumber(),
+        observedAt: snapshot.updatedAt,
+      })),
+      clubPurchasePrices,
+      excludedProductIds,
+    });
+
+    return {
+      tenantId,
+      tenantSlug,
+      from: days[0],
+      to: days[days.length - 1],
+      days,
+      windowDays,
+      coverDays,
+      windowOptions: ORDER_PLANNING_WINDOW_DAYS,
+      coverOptions: ORDER_PLANNING_COVER_DAYS,
+      generatedAt: now.toISOString(),
+      excludedProducts: excludedProductIds.size,
+      rows,
+    };
+  }
+
+  private resolveOption(
+    value: string | undefined,
+    options: readonly number[],
+    fallback: number,
+  ) {
+    const parsed = Number(value);
+    return options.includes(parsed) ? parsed : fallback;
   }
 
   async getNewProductsReport(

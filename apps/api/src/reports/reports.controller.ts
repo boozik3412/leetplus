@@ -41,6 +41,8 @@ import {
   type NewProductsReport,
   type OperationalReport,
   type OperationalReportQuery,
+  type OrderPlanningQuery,
+  type OrderPlanningReport,
   type PlanFactReport,
   type ProductOosExclusionDto,
   type ProductOosExclusionRow,
@@ -149,6 +151,14 @@ export class ReportsController {
     @Query() query: OperationalReportQuery,
   ): Promise<ReplenishmentReport> {
     return this.reportsService.getReplenishmentReport(user, query);
+  }
+
+  @Get('order-planning')
+  getOrderPlanningReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: OrderPlanningQuery,
+  ): Promise<OrderPlanningReport> {
+    return this.reportsService.getOrderPlanningReport(user, query);
   }
 
   @Get('new-products')

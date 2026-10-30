@@ -372,6 +372,60 @@ export type ReplenishmentRisk =
   | "OK"
   | "NO_SALES";
 
+export type OrderPlanningStatus =
+  | "OUT_OF_STOCK"
+  | "CRITICAL"
+  | "ORDER"
+  | "OK"
+  | "EXCESS"
+  | "NO_STOCK_DATA"
+  | "NO_SALES";
+
+export type OrderPlanningRow = {
+  storeId: string;
+  storeName: string;
+  productId: string;
+  article: string;
+  name: string;
+  groupKey: string;
+  groupName: string;
+  categoryName: string | null;
+  supplierName: string | null;
+  orderMultiplicity: number | null;
+  unitCost: number | null;
+  dailySales: number[];
+  soldQuantity: number;
+  soldLast7Days: number;
+  revenue: number;
+  daysInStock: number;
+  daysOutOfStock: number;
+  averageDailySales: number;
+  stockQuantity: number | null;
+  stockObservedAt: string | null;
+  stockStale: boolean;
+  stockDaysLeft: number | null;
+  need: number;
+  recommendedOrder: number;
+  orderAmount: number | null;
+  lowData: boolean;
+  status: OrderPlanningStatus;
+};
+
+export type OrderPlanningReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  days: string[];
+  windowDays: number;
+  coverDays: number;
+  windowOptions: number[];
+  coverOptions: number[];
+  generatedAt: string;
+  excludedProducts: number;
+  rows: OrderPlanningRow[];
+};
+
 export type ReplenishmentRow = {
   productId: string;
   storeId: string;
@@ -936,6 +990,31 @@ export async function getReplenishmentReport(
   }
 
   return response.json() as Promise<ReplenishmentReport>;
+}
+
+export async function getOrderPlanningReport(filters: {
+  days?: string;
+  coverDays?: string;
+}): Promise<OrderPlanningReport> {
+  const params = new URLSearchParams();
+
+  if (filters.days) params.set("days", filters.days);
+  if (filters.coverDays) params.set("coverDays", filters.coverDays);
+
+  const query = params.toString();
+  const response = await fetch(
+    `${getApiUrl()}/reports/order-planning${query ? `?${query}` : ""}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch order planning report");
+  }
+
+  return response.json() as Promise<OrderPlanningReport>;
 }
 
 export async function getNewProductsReport(

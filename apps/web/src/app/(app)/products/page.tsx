@@ -65,6 +65,25 @@ export default async function ProductsPage() {
           <SummaryCard label="С поставщиком" value={summary.suppliedSku} />
         </section>
 
+        <Link
+          href="/products/order"
+          className="group mb-4 flex flex-col gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 md:flex-row md:items-center md:justify-between dark:border-emerald-900 dark:bg-emerald-950/40"
+        >
+          <div>
+            <h2 className="text-base font-semibold text-zinc-950 dark:text-zinc-100">
+              Заказ товаров
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm leading-5 text-zinc-600 dark:text-zinc-300">
+              Что заказать в клубы: продажи по дням, остатки, дни в наличии,
+              потребность и количество к заказу в одной таблице с фильтрами и
+              сортировкой.
+            </p>
+          </div>
+          <p className="shrink-0 text-sm font-semibold text-emerald-800 group-hover:text-emerald-950 dark:text-emerald-300">
+            Открыть заказ →
+          </p>
+        </Link>
+
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <HubLink
             href="/products/table"

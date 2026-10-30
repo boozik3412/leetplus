@@ -1430,12 +1430,20 @@ function ReplenishmentTable({
             TOP-5 позиций к заказу в каждом клубе.
           </p>
         </div>
-        <ReportLoadingLink
-          href={`/reports/replenishment/table?${params.toString()}`}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-        >
-          Открыть полный отчёт
-        </ReportLoadingLink>
+        <div className="flex flex-wrap gap-2">
+          <ReportLoadingLink
+            href="/products/order"
+            className="rounded-md bg-zinc-950 px-3 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+          >
+            Заказ товаров
+          </ReportLoadingLink>
+          <ReportLoadingLink
+            href={`/reports/replenishment/table?${params.toString()}`}
+            className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            Открыть полный отчёт
+          </ReportLoadingLink>
+        </div>
       </div>
 
       {compactRows.length > 0 ? (

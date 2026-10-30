@@ -45,8 +45,8 @@ export function buildAssortmentReportHref(
     return `/assortment/dashboard?${params}`;
   }
 
-  if (subset === "oos-risk") {
-    return `/reports/oos/table?${params}`;
+  if (subset === "oos-risk" || subset === "low-stock") {
+    return orderPlanningHref(scope, "running-out");
   }
 
   if (subset === "assortment-risk") {
@@ -55,18 +55,11 @@ export function buildAssortmentReportHref(
   }
 
   if (subset === "out-of-stock") {
-    params.set("stockStatus", "OUT_OF_STOCK");
-    return `/reports/oos/table?${params}`;
-  }
-
-  if (subset === "low-stock") {
-    params.set("stockStatus", "LOW_STOCK");
-    return `/reports/oos/table?${params}`;
+    return orderPlanningHref(scope, "out-of-stock");
   }
 
   if (subset === "no-sales") {
-    params.set("noSalesDays", String(scope.noSalesDays));
-    return `/reports/no-sales/table?${params}`;
+    return orderPlanningHref(scope, "no-movement");
   }
 
   if (subset === "write-offs") {
@@ -78,4 +71,24 @@ export function buildAssortmentReportHref(
   }
 
   return `/reports/inventory-turnover/table?${params}`;
+}
+
+/**
+ * Shortage and no-sales drilldowns open «Заказ товаров» (it replaced those
+ * reports). It always shows the latest full club days, so only the club,
+ * category and no-sales window carry over.
+ */
+function orderPlanningHref(
+  scope: AssortmentReportScope,
+  view: "running-out" | "out-of-stock" | "no-movement",
+) {
+  const params = new URLSearchParams({ view });
+  scope.storeIds.forEach((storeId) => params.append("storeIds", storeId));
+  scope.categoryIds.forEach((categoryId) =>
+    params.append("categoryIds", categoryId),
+  );
+  if (view === "no-movement") {
+    params.set("noSalesDays", String(scope.noSalesDays));
+  }
+  return `/products/order?${params}`;
 }

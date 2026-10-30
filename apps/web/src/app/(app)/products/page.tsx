@@ -98,16 +98,22 @@ export default async function ProductsPage() {
             action="Разобрать SKU"
           />
           <HubLink
-            href="/products/movement/table"
+            href="/products/order?view=movement"
             title="Движение товаров"
-            description="Продажи и остатки по SKU за период — без смешения с каталогом."
+            description="Продажи по дням клуба рядом с остатком: «Заказ товаров», настроенный на движение."
             action="Открыть движение"
           />
           <HubLink
-            href="/reports/oos/table"
+            href="/products/order?view=running-out"
             title="Нет в наличии"
-            description="Оперативный список дефицита и рисков по ассортименту."
+            description="Чего нет или хватит на 3 дня и меньше: «Заказ товаров», настроенный на дефицит."
             action="Открыть дефицит"
+          />
+          <HubLink
+            href="/reports/abc/table"
+            title="Рейтинг SKU и ABC"
+            description="Место товара по выручке, группы ABC по выручке и прибыли, фильтры и сортировка."
+            action="Открыть рейтинг"
           />
           <HubLink
             href="/reports/assortment-matrix/table"

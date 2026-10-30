@@ -10,7 +10,6 @@ import {
   frozenStockValuationLabel,
 } from "@/lib/frozen-stock";
 import { AbcReportToggle } from "@/components/abc-report-toggle";
-import { NoSalesPeriodTable } from "@/components/no-sales-period-table";
 import { OosExclusionActions } from "@/components/oos-exclusion-actions";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { ReportDigestForm } from "@/components/report-digest-form";
@@ -18,12 +17,12 @@ import { ReportEmailForm } from "@/components/report-email-form";
 import { ReportEmailInlineForm } from "@/components/report-email-inline-form";
 import { ReportLoadingLink } from "@/components/report-loading-link";
 import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
+import { orderPlanningHref } from "@/lib/order-planning-views";
 import {
   getAssortmentReport,
   getLflReport,
   getNewProductsReport,
   getOperationalReport,
-  getReplenishmentReport,
   getSkuPerformanceReport,
   getSuppliersPerformanceReport,
   type LflPeriod,
@@ -31,11 +30,8 @@ import {
   type LflReportRow,
   type LowMarginProduct,
   type NewProductsReport,
-  type OutOfStockRiskProduct,
-  type ReplenishmentRow,
   type ReportRecommendation,
   type ReportGroup,
-  type SkuPerformanceRow,
   type SupplierPerformanceRow,
 } from "@/lib/reports";
 import { getStores, type Store } from "@/lib/stores";
@@ -190,21 +186,7 @@ export default async function ReportsPage({
       : undefined,
   };
   const lflPeriod = resolveLflPeriod(params.lflPeriod);
-  const defaultNoSales7 = lastFullDaysRange(7);
-  const defaultNoSales14 = lastFullDaysRange(14);
   const defaultNoSales21 = lastFullDaysRange(21);
-  const noSalesFilters = {
-    ...filters,
-    from: filters.from ?? defaultNoSales7.from,
-    to: filters.to ?? defaultNoSales7.to,
-    noSalesDays: 7 as const,
-  };
-  const noSalesFilters14 = {
-    ...filters,
-    from: filters.from ?? defaultNoSales14.from,
-    to: filters.to ?? defaultNoSales14.to,
-    noSalesDays: 14 as const,
-  };
   const noSalesFilters21 = {
     ...filters,
     from: filters.from ?? defaultNoSales21.from,
@@ -217,18 +199,11 @@ export default async function ReportsPage({
     getAssortmentReport(),
     getOperationalReport(filters),
   ]);
-  const [skuPerformanceReport, replenishmentReport] = await Promise.all([
+  const [skuPerformanceReport, suppliersPerformanceReport] = await Promise.all([
     getSkuPerformanceReport(filters),
-    getReplenishmentReport(filters),
-  ]);
-  const [suppliersPerformanceReport, noSalesReport7] = await Promise.all([
     getSuppliersPerformanceReport(filters),
-    getOperationalReport(noSalesFilters),
   ]);
-  const [noSalesReport14, noSalesReport21] = await Promise.all([
-    getOperationalReport(noSalesFilters14),
-    getOperationalReport(noSalesFilters21),
-  ]);
+  const noSalesReport21 = await getOperationalReport(noSalesFilters21);
   const [newProductsReport, lflReport] = await Promise.all([
     getNewProductsReport({ storeId: filters.storeId }),
     getLflReport(lflPeriod),
@@ -405,59 +380,20 @@ export default async function ReportsPage({
           </ReportDisclosure>
 
           <ReportDisclosure
-            title="Риск out-of-stock"
-            description="SKU, где текущего остатка хватит на 3 дня или меньше."
+            title="Заказ, дефицит и товары без движения"
+            description="Отчёты «Остатки и потребность», «Риск out-of-stock», «Товары без продаж» и «Движение товаров» собраны в «Заказ товаров»."
           >
-            <RiskTable
-              rows={operationalReport.outOfStockRiskProducts}
-              from={operationalReport.from}
-              to={operationalReport.to}
-              storeId={operationalReport.storeId}
-              storeIds={operationalReport.storeIds}
-              categoryIds={operationalReport.categoryIds}
-              asOf={operationalReport.asOf}
-            />
-          </ReportDisclosure>
-
-          <ReportDisclosure
-            title="Товары без продаж"
-            description="Активные SKU с остатком, но без продаж за 7, 14 или 21 день."
-          >
-            <NoSalesPeriodTable
-              rowsByPeriod={{
-                7: noSalesReport7.productsWithoutSales,
-                14: noSalesReport14.productsWithoutSales,
-                21: noSalesReport21.productsWithoutSales,
-              }}
-              networkBadge={<NetworkSkuBadge />}
-              scope={{
-                from: noSalesReport21.from,
-                to: noSalesReport21.to,
-                asOf: noSalesReport21.asOf,
-                storeIds: noSalesReport21.storeIds,
-                categoryIds: noSalesReport21.categoryIds,
+            <OrderPlanningLinks
+              params={{
+                storeIds: operationalReport.storeIds,
+                categoryIds: operationalReport.categoryIds,
               }}
             />
           </ReportDisclosure>
 
           <ReportDisclosure
-            title="Остатки и потребность"
-            description="Позиции к заказу по клубам, ССР, остаткам в днях и недельной потребности."
-          >
-            <ReplenishmentTable
-              rows={replenishmentReport.rows}
-              from={replenishmentReport.from}
-              to={replenishmentReport.to}
-              storeId={replenishmentReport.storeId}
-              storeIds={replenishmentReport.storeIds}
-              categoryIds={replenishmentReport.categoryIds}
-              asOf={replenishmentReport.asOf}
-            />
-          </ReportDisclosure>
-
-          <ReportDisclosure
-            title="ABC-анализ"
-            description="Группы A/B/C по накопительной доле выручки или прибыли."
+            title="Рейтинг SKU и ABC"
+            description="Место товара по выручке, группы A/B/C по выручке и прибыли, доли и продажи на фейс в одной таблице."
           >
             <AbcReportToggle
               revenueRows={skuPerformanceReport.abcByRevenue}
@@ -467,19 +403,6 @@ export default async function ReportsPage({
                 to: operationalReport.to,
                 storeId: operationalReport.storeId,
               })}
-            />
-          </ReportDisclosure>
-
-          <ReportDisclosure
-            title="ТОП SKU по выручке"
-            description="Рейтинг товаров с выручкой, прибылью, маржой и эффективностью фейса."
-          >
-            <TopSkuTable
-              rows={skuPerformanceReport.topByRevenue}
-              stores={stores}
-              storeId={operationalReport.storeId}
-              from={operationalReport.from}
-              to={operationalReport.to}
             />
           </ReportDisclosure>
 
@@ -733,6 +656,52 @@ function AssortmentRiskPanel({
           </tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+const ORDER_PLANNING_LINKS = [
+  {
+    view: "order",
+    title: "Что заказать",
+    text: "Вместо «Остатков и потребности»: спрос по дням в наличии и количество с кратностью поставщика.",
+  },
+  {
+    view: "running-out",
+    title: "Кончится за 3 дня",
+    text: "Вместо «Риска out-of-stock»: нет в наличии или хватит на 3 дня и меньше.",
+  },
+  {
+    view: "no-movement",
+    title: "Без движения",
+    text: "Вместо «Товаров без продаж»: лежит на остатке и не продавался 7–60 дней, с деньгами в остатке.",
+  },
+  {
+    view: "movement",
+    title: "Движение",
+    text: "Вместо «Движения товаров»: продажи по дням клуба рядом с остатком.",
+  },
+] as const;
+
+function OrderPlanningLinks({
+  params,
+}: {
+  params: { storeIds: string[]; categoryIds: string[] };
+}) {
+  return (
+    <section className="mt-6 grid gap-3 sm:grid-cols-2">
+      {ORDER_PLANNING_LINKS.map((link) => (
+        <ReportLoadingLink
+          key={link.view}
+          href={orderPlanningHref(link.view, params)}
+          className="rounded-lg border border-zinc-200 bg-white px-5 py-4 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50/40"
+        >
+          <span className="block text-base font-semibold text-zinc-950">
+            {link.title}
+          </span>
+          <span className="mt-1 block text-sm text-zinc-500">{link.text}</span>
+        </ReportLoadingLink>
+      ))}
     </section>
   );
 }
@@ -1264,434 +1233,6 @@ function recommendationStatusLabel(status: ReportRecommendation["status"]) {
   };
 
   return labels[status];
-}
-
-function RiskTable({
-  rows,
-  from,
-  to,
-  storeId,
-  storeIds,
-  categoryIds,
-  asOf,
-}: {
-  rows: OutOfStockRiskProduct[];
-  from: string;
-  to: string;
-  storeId: string | null;
-  storeIds: string[];
-  categoryIds: string[];
-  asOf: string;
-}) {
-  const compactRows = topOutOfStockRowsByStore(rows);
-  const hasOverflow = rows.length > compactRows.length;
-  const params = new URLSearchParams({ from, to });
-
-  if (storeId) {
-    params.set("storeId", storeId);
-  }
-  storeIds.forEach((id) => params.append("storeIds", id));
-  categoryIds.forEach((id) => params.append("categoryIds", id));
-  if (asOf) params.set("asOf", asOf);
-  return (
-    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="flex flex-col gap-2 border-b border-zinc-200 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="text-base font-semibold">Риск out-of-stock</h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            Товары, где текущего остатка хватит на 3 дня или меньше.
-          </p>
-        </div>
-        <ReportLoadingLink
-          href={`/reports/oos/table?${params.toString()}`}
-          className={[
-            "rounded-md border px-3 py-2 text-sm font-medium hover:bg-zinc-50",
-            hasOverflow
-              ? "border-amber-300 bg-amber-50 text-amber-800"
-              : "border-zinc-300 text-zinc-700",
-          ].join(" ")}
-        >
-          Открыть полный отчёт{hasOverflow ? " • есть ещё" : ""}
-        </ReportLoadingLink>
-      </div>
-
-      {compactRows.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
-              <tr>
-                <th className="px-5 py-3 font-medium">Клуб</th>
-                <th className="px-5 py-3 font-medium">Товар</th>
-                <th className="px-5 py-3 text-right font-medium">Остаток</th>
-                <th className="px-5 py-3 text-right font-medium">
-                  Продажи/день
-                </th>
-                <th className="px-5 py-3 text-right font-medium">
-                  Выручка/день
-                </th>
-                <th className="px-5 py-3 text-right font-medium">
-                  Прибыль/день
-                </th>
-                <th className="px-5 py-3 text-right font-medium">
-                  Прибыль за период
-                </th>
-                <th className="px-5 py-3 text-right font-medium">Дней</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100">
-              {compactRows.map((row) => (
-                <tr key={`${row.storeId}:${row.productId}`}>
-                  <td className="px-5 py-4 text-zinc-700">{row.storeName}</td>
-                  <td className="px-5 py-4 font-medium text-zinc-950">
-                    <span className="inline-flex items-center gap-2">
-                      {row.name}
-                      {row.isCanonical ? <NetworkSkuBadge /> : null}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatQuantity(row.stockQuantity)}
-                  </td>
-                  <td
-                    className="px-5 py-4 text-right tabular-nums text-zinc-700"
-                    title="ССР — среднесуточные продажи за последние 21 полный день."
-                  >
-                    {formatQuantity(row.averageDailySales)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {row.revenueAtRiskPerDay === null
-                      ? "Нет данных"
-                      : formatMoney(row.revenueAtRiskPerDay)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {row.grossProfitAtRiskPerDay === null
-                      ? "Нет данных"
-                      : formatMoney(row.grossProfitAtRiskPerDay)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {row.grossProfitAtRiskForPeriod === null
-                      ? "Нет данных"
-                      : formatMoney(row.grossProfitAtRiskForPeriod)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-red-700">
-                    {row.stockDays === null
-                      ? "Нет данных"
-                      : formatQuantity(row.stockDays)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="px-5 py-6 text-sm text-zinc-500">
-          Критичных остатков по текущему фильтру нет.
-        </p>
-      )}
-    </section>
-  );
-}
-
-function ReplenishmentTable({
-  rows,
-  from,
-  to,
-  storeId,
-  storeIds,
-  categoryIds,
-  asOf,
-}: {
-  rows: ReplenishmentRow[];
-  from: string;
-  to: string;
-  storeId: string | null;
-  storeIds: string[];
-  categoryIds: string[];
-  asOf: string;
-}) {
-  const compactRows = topReplenishmentRowsByStore(rows);
-  const params = new URLSearchParams({ from, to });
-
-  if (storeId) {
-    params.set("storeId", storeId);
-  }
-  storeIds.forEach((id) => params.append("storeIds", id));
-  categoryIds.forEach((id) => params.append("categoryIds", id));
-  if (asOf) params.set("asOf", asOf);
-
-  return (
-    <section
-      id="replenishment"
-      className="mt-6 scroll-mt-8 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm"
-    >
-      <div className="flex flex-col gap-2 border-b border-zinc-200 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="text-base font-semibold">Остатки и потребность</h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            TOP-5 позиций к заказу в каждом клубе.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <ReportLoadingLink
-            href="/products/order"
-            className="rounded-md bg-zinc-950 px-3 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
-          >
-            Заказ товаров
-          </ReportLoadingLink>
-          <ReportLoadingLink
-            href={`/reports/replenishment/table?${params.toString()}`}
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-          >
-            Открыть полный отчёт
-          </ReportLoadingLink>
-        </div>
-      </div>
-
-      {compactRows.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-left text-sm">
-            <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
-              <tr>
-                <th className="px-5 py-3 font-medium">Товар</th>
-                <th className="px-5 py-3 font-medium">Клуб</th>
-                <th className="px-5 py-3 text-right font-medium">Остаток</th>
-                <th
-                  className="px-5 py-3 text-right font-medium"
-                  title="ССР — среднесуточные продажи за последние 21 полный день."
-                >
-                  ССР
-                </th>
-                <th className="px-5 py-3 text-right font-medium">
-                  Остаток в днях
-                </th>
-                <th
-                  className="px-5 py-3 text-right font-medium"
-                  title="Потребность рассчитана на неделю продаж: ССР × 7 минус текущий остаток."
-                >
-                  Потребность
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100">
-              {compactRows.map((row) => (
-                <tr key={`${row.storeId}:${row.productId}`}>
-                  <td className="px-5 py-4 font-medium text-zinc-950">
-                    <span className="inline-flex items-center gap-2">
-                      {row.name}
-                      {row.isCanonical ? <NetworkSkuBadge /> : null}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4 text-zinc-700">{row.storeName}</td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatQuantity(row.stockQuantity)}
-                  </td>
-                  <td
-                    className="px-5 py-4 text-right tabular-nums text-zinc-700"
-                    title="ССР — среднесуточные продажи за последние 21 полный день."
-                  >
-                    {formatQuantity(row.averageDailySales)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {row.stockDays === null
-                      ? "—"
-                      : formatQuantity(row.stockDays)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatQuantity(row.dailyNeed)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="px-5 py-6 text-sm text-zinc-500">
-          Активных SKU для расчёта пополнения нет.
-        </p>
-      )}
-    </section>
-  );
-}
-
-function topReplenishmentRowsByStore(rows: ReplenishmentRow[]) {
-  const rowsByStore = new Map<string, ReplenishmentRow[]>();
-
-  rows.forEach((row) => {
-    rowsByStore.set(row.storeId, [
-      ...(rowsByStore.get(row.storeId) ?? []),
-      row,
-    ]);
-  });
-
-  return [...rowsByStore.values()].flatMap((storeRows) =>
-    storeRows
-      .filter((row) => row.recommendedOrder > 0 || row.dailyNeed > 0)
-      .sort(
-        (a, b) =>
-          b.recommendedOrder - a.recommendedOrder ||
-          b.dailyNeed - a.dailyNeed ||
-          a.name.localeCompare(b.name),
-      )
-      .slice(0, 5),
-  );
-}
-
-function topOutOfStockRowsByStore(rows: OutOfStockRiskProduct[]) {
-  const rowsByStore = new Map<string, OutOfStockRiskProduct[]>();
-
-  rows.forEach((row) => {
-    rowsByStore.set(row.storeId, [
-      ...(rowsByStore.get(row.storeId) ?? []),
-      row,
-    ]);
-  });
-
-  return [...rowsByStore.values()].flatMap((storeRows) =>
-    storeRows
-      .sort(
-        (a, b) =>
-          b.averageDailySales - a.averageDailySales ||
-          a.name.localeCompare(b.name),
-      )
-      .slice(0, 3),
-  );
-}
-
-function TopSkuTable({
-  rows,
-  stores,
-  storeId,
-  from,
-  to,
-}: {
-  rows: SkuPerformanceRow[];
-  stores: Store[];
-  storeId: string | null;
-  from: string;
-  to: string;
-}) {
-  const params = new URLSearchParams({ from, to });
-
-  if (storeId) {
-    params.set("storeId", storeId);
-  }
-
-  return (
-    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h2 className="text-base font-semibold">ТОП SKU по выручке</h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            Рейтинг товаров с прибылью, маржой и эффективностью на 1 фейс.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <form>
-            <input type="hidden" name="from" value={from} />
-            <input type="hidden" name="to" value={to} />
-            <select
-              name="storeId"
-              defaultValue={storeId ?? ""}
-              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
-            >
-              <option value="">Вся сеть</option>
-              {stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="submit"
-              className="ml-2 rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50"
-            >
-              Применить
-            </button>
-          </form>
-          <ReportLoadingLink
-            href={`/reports/top-sku/table?${params.toString()}`}
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-          >
-            Открыть полный отчёт
-          </ReportLoadingLink>
-        </div>
-      </div>
-
-      {rows.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1120px] text-left text-sm">
-            <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
-              <tr>
-                <th className="px-5 py-3 font-medium">Клуб</th>
-                <th className="px-5 py-3 font-medium">Товар</th>
-                <th className="px-5 py-3 font-medium">Категория</th>
-                <th className="px-5 py-3 text-right font-medium">Продано</th>
-                <th className="px-5 py-3 text-right font-medium">Выручка</th>
-                <th className="px-5 py-3 text-right font-medium">Прибыль</th>
-                <th className="px-5 py-3 text-right font-medium">Маржа</th>
-                <th className="px-5 py-3 text-right font-medium">Прод./фейс</th>
-                <th className="px-5 py-3 text-right font-medium">Приб./фейс</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100">
-              {rows.map((row) => (
-                <tr key={row.productId}>
-                  <td className="px-5 py-4 text-zinc-700">
-                    {storeId
-                      ? (stores.find((store) => store.id === storeId)?.name ??
-                        "Клуб")
-                      : "Вся сеть"}
-                  </td>
-                  <td className="px-5 py-4 font-medium text-zinc-950">
-                    <span className="inline-flex items-center gap-2">
-                      {row.name}
-                      {row.isCanonical ? <NetworkSkuBadge /> : null}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4 text-zinc-700">
-                    {row.categoryName ?? "—"}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatQuantity(row.soldQuantity)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatMoney(row.revenue)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatMoney(row.grossProfit)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatPercent(row.marginPercent)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatQuantity(row.salesPerFacing)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatMoney(row.profitPerFacing)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="px-5 py-6 text-sm text-zinc-500">
-          Продаж по текущему фильтру нет.
-        </p>
-      )}
-    </section>
-  );
-}
-
-function NetworkSkuBadge() {
-  return (
-    <span
-      title="Товар является сетевым: составлен из одинаковых товаров, но с разными названиями в разных клубах."
-      aria-label="Сетевой товар"
-      className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-50 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100"
-    >
-      ⇄
-    </span>
-  );
 }
 
 function TopSuppliersTable({

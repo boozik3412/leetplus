@@ -1,12 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 
 import type {
   OrderPlanningReport,
   OrderPlanningRow,
   OrderPlanningStatus,
 } from "@/lib/reports";
+import {
+  ORDER_PLANNING_VIEWS,
+  type OrderPlanningView,
+} from "@/lib/order-planning-views";
 
 type Grouping = "store" | "network";
 type SortDirection = "asc" | "desc";
@@ -25,7 +30,9 @@ type ViewRow = {
   revenue: number;
   daysInStock: number;
   averageDailySales: number;
+  forecast: number;
   stockQuantity: number | null;
+  stockValue: number | null;
   stockStale: boolean;
   stockDaysLeft: number | null;
   need: number;
@@ -48,11 +55,13 @@ type ColumnKey =
   | "soldLast7Days"
   | "daysInStock"
   | "averageDailySales"
+  | "forecast"
   | "stockQuantity"
   | "stockDaysLeft"
   | "need"
   | "recommendedOrder"
-  | "orderAmount";
+  | "orderAmount"
+  | "stockValue";
 
 type Column = {
   key: ColumnKey;
@@ -118,21 +127,155 @@ const NEEDS_ORDER = new Set<OrderPlanningStatus>([
   "ORDER",
 ]);
 
+type AmountMode = "order" | "stock";
+
+type ViewPreset = {
+  label: string;
+  description: string;
+  statuses: OrderPlanningStatus[];
+  sortKey: ColumnKey;
+  sortDirection: SortDirection;
+  showDaily: boolean;
+  amountMode: AmountMode;
+  noMovement?: boolean;
+};
+
+/**
+ * One-click setups that turn the report into the narrower reports it
+ * replaces: each sets status filters, sorting and the visible columns.
+ */
+const VIEW_PRESETS: Record<OrderPlanningView, ViewPreset> = {
+  order: {
+    label: "Заказ",
+    description:
+      "Что заказать: нет в наличии, кончится за 3 дня и не хватит на выбранный запас. Сначала самое срочное.",
+    statuses: ["OUT_OF_STOCK", "CRITICAL", "ORDER"],
+    sortKey: "status",
+    sortDirection: "asc",
+    showDaily: false,
+    amountMode: "order",
+  },
+  "out-of-stock": {
+    label: "Нет в наличии",
+    description:
+      "Товар продаётся, а остатка нет. Сверху то, что продаётся быстрее всего: там больше всего упущенных продаж.",
+    statuses: ["OUT_OF_STOCK"],
+    sortKey: "averageDailySales",
+    sortDirection: "desc",
+    showDaily: false,
+    amountMode: "order",
+  },
+  "running-out": {
+    label: "Кончится за 3 дня",
+    description:
+      "Остатка хватит на 3 дня или меньше, включая уже закончившиеся. Сверху то, что кончится раньше.",
+    statuses: ["OUT_OF_STOCK", "CRITICAL"],
+    sortKey: "stockDaysLeft",
+    sortDirection: "asc",
+    showDaily: false,
+    amountMode: "order",
+  },
+  "no-movement": {
+    label: "Без движения",
+    description:
+      "Товар лежит на остатке, но не продавался выбранное число дней. Сверху то, где заморожено больше всего денег.",
+    statuses: [],
+    sortKey: "stockValue",
+    sortDirection: "desc",
+    showDaily: false,
+    amountMode: "stock",
+    noMovement: true,
+  },
+  forecast: {
+    label: "Прогноз продаж",
+    description:
+      "Сколько продастся за выбранный запас по средним продажам в дни наличия. Продажи по дням открыты, сверху самые продаваемые.",
+    statuses: [],
+    sortKey: "forecast",
+    sortDirection: "desc",
+    showDaily: true,
+    amountMode: "order",
+  },
+  movement: {
+    label: "Движение товаров",
+    description:
+      "Продажи каждого товара по дням за период и текущий остаток. Сверху самые продаваемые.",
+    statuses: [],
+    sortKey: "soldQuantity",
+    sortDirection: "desc",
+    showDaily: true,
+    amountMode: "order",
+  },
+  excess: {
+    label: "Избыток",
+    description:
+      "Остатка больше, чем нужно на три срока запаса. Сверху то, чего хватит дольше всего.",
+    statuses: ["EXCESS"],
+    sortKey: "stockDaysLeft",
+    sortDirection: "desc",
+    showDaily: false,
+    amountMode: "stock",
+  },
+  all: {
+    label: "Все товары",
+    description: "Все товары, которые были на остатке за период, без фильтров.",
+    statuses: [],
+    sortKey: "status",
+    sortDirection: "asc",
+    showDaily: false,
+    amountMode: "order",
+  },
+};
+
+const NO_MOVEMENT_DAYS = [7, 14, 21, 30, 45, 60];
+
 export function OrderPlanningTable({
   report,
+  initialView,
 }: {
   report: OrderPlanningReport;
+  initialView: OrderPlanningView;
 }) {
+  const pathname = usePathname();
+  const initial = VIEW_PRESETS[initialView];
+  const [view, setView] = useState<OrderPlanningView | null>(initialView);
   const [grouping, setGrouping] = useState<Grouping>("store");
   const [search, setSearch] = useState("");
   const [stores, setStores] = useState<string[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [suppliers, setSuppliers] = useState<string[]>([]);
-  const [statuses, setStatuses] = useState<OrderPlanningStatus[]>([]);
-  const [showDaily, setShowDaily] = useState(false);
-  const [sortKey, setSortKey] = useState<ColumnKey>("status");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [statuses, setStatuses] = useState<OrderPlanningStatus[]>(
+    initial.statuses,
+  );
+  const [showDaily, setShowDaily] = useState(initial.showDaily);
+  const [sortKey, setSortKey] = useState<ColumnKey>(initial.sortKey);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(
+    initial.sortDirection,
+  );
+  const [amountMode, setAmountMode] = useState<AmountMode>(initial.amountMode);
+  const [noMovementDays, setNoMovementDays] = useState<number | null>(
+    initial.noMovement ? 7 : null,
+  );
   const [visible, setVisible] = useState(PAGE_SIZE);
+  const noMovementOptions = NO_MOVEMENT_DAYS.filter(
+    (days) => days <= report.windowDays,
+  );
+
+  function applyView(next: OrderPlanningView) {
+    const preset = VIEW_PRESETS[next];
+    setView(next);
+    setStatuses(preset.statuses);
+    setSortKey(preset.sortKey);
+    setSortDirection(preset.sortDirection);
+    setShowDaily(preset.showDaily);
+    setAmountMode(preset.amountMode);
+    setNoMovementDays(preset.noMovement ? (noMovementDays ?? 7) : null);
+    setVisible(PAGE_SIZE);
+    // Keep the chosen view in the address so the link opens the same setup.
+    const params = new URLSearchParams(window.location.search);
+    params.set("view", next);
+    window.history.replaceState(null, "", `${pathname}?${params.toString()}`);
+  }
 
   const options = useMemo(
     () => ({
@@ -168,9 +311,9 @@ export function OrderPlanningTable({
   const groupedRows = useMemo(
     () =>
       grouping === "store"
-        ? scopedRows.map(storeViewRow)
-        : networkViewRows(scopedRows),
-    [grouping, scopedRows],
+        ? scopedRows.map((row) => storeViewRow(row, report.coverDays))
+        : networkViewRows(scopedRows, report.coverDays),
+    [grouping, report.coverDays, scopedRows],
   );
 
   const statusCounts = useMemo(() => {
@@ -183,13 +326,17 @@ export function OrderPlanningTable({
 
   const rows = useMemo(() => {
     const filtered = groupedRows.filter(
-      (row) => statuses.length === 0 || statuses.includes(row.status),
+      (row) =>
+        (statuses.length === 0 || statuses.includes(row.status)) &&
+        (noMovementDays === null ||
+          ((row.stockQuantity ?? 0) > 0 &&
+            sumLast(row.dailySales, noMovementDays) === 0)),
     );
     return filtered.sort((a, b) => {
       const result = compareRows(a, b, sortKey);
       return sortDirection === "asc" ? result : -result;
     });
-  }, [groupedRows, sortDirection, sortKey, statuses]);
+  }, [groupedRows, noMovementDays, sortDirection, sortKey, statuses]);
 
   const totals = useMemo(() => {
     const toOrder = rows.filter((row) => row.recommendedOrder > 0);
@@ -200,6 +347,7 @@ export function OrderPlanningTable({
       amountUnknown: toOrder.filter(
         (row) => row.orderAmount === null || row.orderAmountPartial,
       ).length,
+      stockValue: rows.reduce((sum, row) => sum + (row.stockValue ?? 0), 0),
       outOfStock: rows.filter((row) => row.status === "OUT_OF_STOCK").length,
       critical: rows.filter((row) => row.status === "CRITICAL").length,
     };
@@ -238,6 +386,12 @@ export function OrderPlanningTable({
       hint: "Продано ÷ дней в наличии. Дни без остатка не занижают спрос.",
     },
     {
+      key: "forecast",
+      label: `Прогноз на ${report.coverDays} дн.`,
+      align: "right",
+      hint: `Сколько продастся за ${report.coverDays} дн.: продаж в день × ${report.coverDays}.`,
+    },
+    {
       key: "stockQuantity",
       label: "Остаток",
       align: "right",
@@ -261,15 +415,23 @@ export function OrderPlanningTable({
       align: "right",
       hint: "Потребность, округлённая вверх до целых штук и кратности поставщика.",
     },
-    {
-      key: "orderAmount",
-      label: "Сумма",
-      align: "right",
-      hint: "Заказать × закупочная цена клуба (или товара). Пусто — цена неизвестна.",
-    },
+    amountMode === "stock"
+      ? {
+          key: "stockValue",
+          label: "Деньги в остатке",
+          align: "right",
+          hint: "Остаток × закупочная цена клуба (или товара). Пусто — цена неизвестна.",
+        }
+      : {
+          key: "orderAmount",
+          label: "Сумма заказа",
+          align: "right",
+          hint: "Заказать × закупочная цена клуба (или товара). Пусто — цена неизвестна.",
+        },
   ];
 
   function toggleSort(key: ColumnKey) {
+    setView(null);
     if (key === sortKey) {
       setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
       return;
@@ -288,6 +450,8 @@ export function OrderPlanningTable({
   }
 
   function toggleStatus(status: OrderPlanningStatus) {
+    setView(null);
+    setNoMovementDays(null);
     setVisible(PAGE_SIZE);
     setStatuses((current) =>
       current.includes(status)
@@ -302,6 +466,8 @@ export function OrderPlanningTable({
     setCategories([]);
     setSuppliers([]);
     setStatuses([]);
+    setNoMovementDays(null);
+    setView(null);
     setVisible(PAGE_SIZE);
   }
 
@@ -318,12 +484,14 @@ export function OrderPlanningTable({
       "За 7 дн.",
       "Дней в наличии",
       "Продаж в день",
+      `Прогноз на ${report.coverDays} дн.`,
       "Остаток",
       "Хватит, дн.",
       "Потребность",
       "Заказать",
       "Кратность",
-      "Сумма",
+      "Сумма заказа",
+      "Деньги в остатке",
     ];
     const lines = rows.map((row) => [
       STATUS_META[row.status].label,
@@ -337,12 +505,14 @@ export function OrderPlanningTable({
       csvNumber(row.soldLast7Days),
       String(row.daysInStock),
       csvNumber(row.averageDailySales),
+      csvNumber(row.forecast),
       row.stockQuantity === null ? "" : csvNumber(row.stockQuantity),
       row.stockDaysLeft === null ? "" : csvNumber(row.stockDaysLeft),
       csvNumber(row.need),
       String(row.recommendedOrder),
       row.orderMultiplicity ? String(row.orderMultiplicity) : "",
       row.orderAmount === null ? "" : csvNumber(row.orderAmount),
+      row.stockValue === null ? "" : csvNumber(row.stockValue),
     ]);
     const content = [header, ...lines]
       .map((line) => line.map(escapeCsv).join(";"))
@@ -363,14 +533,113 @@ export function OrderPlanningTable({
     stores.length > 0 ||
     categories.length > 0 ||
     suppliers.length > 0 ||
-    statuses.length > 0;
+    statuses.length > 0 ||
+    noMovementDays !== null;
   const visibleRows = rows.slice(0, visible);
   const onlyToOrder =
     statuses.length === NEEDS_ORDER.size &&
     statuses.every((status) => NEEDS_ORDER.has(status));
+  const activePreset = view ? VIEW_PRESETS[view] : null;
 
   return (
     <div>
+      <section
+        aria-label="Настроить отчёт"
+        className="mx-4 mb-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+      >
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Настроить отчёт на
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {ORDER_PLANNING_VIEWS.map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={view === key}
+                  onClick={() => applyView(key)}
+                  className={[
+                    "rounded-xl border px-3 py-2 text-sm font-semibold transition-colors",
+                    view === key
+                      ? "border-emerald-700 bg-emerald-700 text-white dark:border-emerald-400 dark:bg-emerald-400 dark:text-zinc-950"
+                      : "border-zinc-300 bg-white text-zinc-800 hover:border-zinc-400 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800",
+                  ].join(" ")}
+                >
+                  {VIEW_PRESETS[key].label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-3 max-w-3xl text-sm text-zinc-600 dark:text-zinc-300">
+              {activePreset
+                ? activePreset.description
+                : "Своя настройка: фильтры и сортировка изменены вручную."}
+            </p>
+            {noMovementDays !== null ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-zinc-500">Без продаж за</span>
+                {noMovementOptions.map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    aria-pressed={noMovementDays === days}
+                    onClick={() => {
+                      setVisible(PAGE_SIZE);
+                      setNoMovementDays(days);
+                    }}
+                    className={[
+                      "rounded-full border px-3 py-1 text-xs font-semibold",
+                      noMovementDays === days
+                        ? "border-zinc-950 bg-zinc-950 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-950"
+                        : "border-zinc-300 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900",
+                    ].join(" ")}
+                  >
+                    {days} дн.
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <form className="flex shrink-0 flex-wrap items-end gap-3">
+            {view ? <input type="hidden" name="view" value={view} /> : null}
+            <label className="block text-xs font-medium uppercase text-zinc-500">
+              Период продаж
+              <select
+                name="days"
+                defaultValue={String(report.windowDays)}
+                className="mt-2 block w-32 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium normal-case text-zinc-950 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              >
+                {report.windowOptions.map((days) => (
+                  <option key={days} value={days}>
+                    {days} дн.
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-xs font-medium uppercase text-zinc-500">
+              Запас на
+              <select
+                name="coverDays"
+                defaultValue={String(report.coverDays)}
+                className="mt-2 block w-32 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium normal-case text-zinc-950 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              >
+                {report.coverOptions.map((days) => (
+                  <option key={days} value={days}>
+                    {days} дн.
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="rounded-xl bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950"
+            >
+              Пересчитать
+            </button>
+          </form>
+        </div>
+      </section>
+
       <section
         aria-label="Итоги заказа"
         className="grid grid-cols-2 gap-3 px-4 pb-4 lg:grid-cols-5"
@@ -380,15 +649,23 @@ export function OrderPlanningTable({
           value={formatInt(totals.skuToOrder)}
         />
         <SummaryTile label="Штук к заказу" value={formatInt(totals.units)} />
-        <SummaryTile
-          label="Сумма заказа"
-          value={formatMoney(totals.amount)}
-          hint={
-            totals.amountUnknown > 0
-              ? `Без цены: ${formatInt(totals.amountUnknown)} поз.`
-              : "По закупочным ценам"
-          }
-        />
+        {amountMode === "stock" ? (
+          <SummaryTile
+            label="Деньги в остатке"
+            value={formatMoney(totals.stockValue)}
+            hint="По закупочным ценам"
+          />
+        ) : (
+          <SummaryTile
+            label="Сумма заказа"
+            value={formatMoney(totals.amount)}
+            hint={
+              totals.amountUnknown > 0
+                ? `Без цены: ${formatInt(totals.amountUnknown)} поз.`
+                : "По закупочным ценам"
+            }
+          />
+        )}
         <SummaryTile
           label="Нет в наличии"
           value={formatInt(totals.outOfStock)}
@@ -432,6 +709,8 @@ export function OrderPlanningTable({
             type="button"
             aria-pressed={onlyToOrder}
             onClick={() => {
+              setView(null);
+              setNoMovementDays(null);
               setVisible(PAGE_SIZE);
               setStatuses(onlyToOrder ? [] : [...NEEDS_ORDER]);
             }}
@@ -539,7 +818,10 @@ export function OrderPlanningTable({
               <input
                 type="checkbox"
                 checked={showDaily}
-                onChange={(event) => setShowDaily(event.target.checked)}
+                onChange={(event) => {
+                  setView(null);
+                  setShowDaily(event.target.checked);
+                }}
                 className="h-4 w-4 accent-emerald-600"
               />
               Продажи по дням
@@ -678,6 +960,7 @@ export function OrderPlanningTable({
                   <span className="text-zinc-400"> / {report.windowDays}</span>
                 </Cell>
                 <Cell right>{formatQuantity(row.averageDailySales)}</Cell>
+                <Cell right>{formatQuantity(row.forecast)}</Cell>
                 <Cell right strong>
                   <span
                     title={
@@ -711,12 +994,20 @@ export function OrderPlanningTable({
                     {row.recommendedOrder}
                   </span>
                 </Cell>
-                <Cell right>
-                  {row.orderAmount === null
-                    ? "—"
-                    : formatMoney(row.orderAmount)}
-                  {row.orderAmountPartial ? " *" : ""}
-                </Cell>
+                {amountMode === "stock" ? (
+                  <Cell right>
+                    {row.stockValue === null
+                      ? "—"
+                      : formatMoney(row.stockValue)}
+                  </Cell>
+                ) : (
+                  <Cell right>
+                    {row.orderAmount === null
+                      ? "—"
+                      : formatMoney(row.orderAmount)}
+                    {row.orderAmountPartial ? " *" : ""}
+                  </Cell>
+                )}
               </tr>
             ))}
             {rows.length === 0 ? (
@@ -751,7 +1042,7 @@ export function OrderPlanningTable({
   );
 }
 
-function storeViewRow(row: OrderPlanningRow): ViewRow {
+function storeViewRow(row: OrderPlanningRow, coverDays: number): ViewRow {
   return {
     key: `${row.storeId}:${row.productId}`,
     name: row.name,
@@ -766,7 +1057,9 @@ function storeViewRow(row: OrderPlanningRow): ViewRow {
     revenue: row.revenue,
     daysInStock: row.daysInStock,
     averageDailySales: row.averageDailySales,
+    forecast: round(row.averageDailySales * coverDays),
     stockQuantity: row.stockQuantity,
+    stockValue: stockValueOf(row),
     stockStale: row.stockStale,
     stockDaysLeft: row.stockDaysLeft,
     need: row.need,
@@ -785,7 +1078,10 @@ function storeViewRow(row: OrderPlanningRow): ViewRow {
  * keeps its own need, so the network order is the sum of club orders and the
  * status is the most urgent club status.
  */
-function networkViewRows(rows: OrderPlanningRow[]): ViewRow[] {
+function networkViewRows(
+  rows: OrderPlanningRow[],
+  coverDays: number,
+): ViewRow[] {
   const groups = new Map<string, OrderPlanningRow[]>();
   rows.forEach((row) => {
     const group = groups.get(row.groupKey) ?? [];
@@ -808,6 +1104,9 @@ function networkViewRows(rows: OrderPlanningRow[]): ViewRow[] {
     const averageDailySales = sum((row) => row.averageDailySales);
     const ordered = clubRows.filter((row) => row.recommendedOrder > 0);
     const pricedOrders = ordered.filter((row) => row.orderAmount !== null);
+    const stockValues = clubRows
+      .map(stockValueOf)
+      .filter((value): value is number => value !== null);
 
     return {
       key,
@@ -825,7 +1124,12 @@ function networkViewRows(rows: OrderPlanningRow[]): ViewRow[] {
       revenue: round(sum((row) => row.revenue)),
       daysInStock: Math.max(...clubRows.map((row) => row.daysInStock)),
       averageDailySales: round(averageDailySales),
+      forecast: round(averageDailySales * coverDays),
       stockQuantity: stockQuantity === null ? null : round(stockQuantity),
+      stockValue:
+        stockValues.length === 0
+          ? null
+          : round(stockValues.reduce((total, value) => total + value, 0)),
       stockStale: clubRows.some((row) => row.stockStale),
       stockDaysLeft:
         stockQuantity !== null && averageDailySales > 0
@@ -851,6 +1155,16 @@ function networkViewRows(rows: OrderPlanningRow[]): ViewRow[] {
       clubRows,
     };
   });
+}
+
+function stockValueOf(row: OrderPlanningRow) {
+  return row.unitCost === null || row.stockQuantity === null
+    ? null
+    : round(Math.max(0, row.stockQuantity) * row.unitCost);
+}
+
+function sumLast(values: number[], days: number) {
+  return values.slice(-days).reduce((total, value) => total + value, 0);
 }
 
 function compareRows(a: ViewRow, b: ViewRow, key: ColumnKey) {

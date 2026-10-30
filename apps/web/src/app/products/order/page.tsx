@@ -3,6 +3,7 @@ import Link from "next/link";
 import { OrderPlanningTable } from "@/components/order-planning-table";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
+import { isOrderPlanningView } from "@/lib/order-planning-views";
 import { getOrderPlanningReport } from "@/lib/reports";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
@@ -14,6 +15,7 @@ export default async function ProductOrderPage({
 }) {
   await requireCurrentUser();
   const params = await searchParams;
+  const view = searchParam(params.view);
   const report = await getOrderPlanningReport({
     days: searchParam(params.days),
     coverDays: searchParam(params.coverDays),
@@ -53,44 +55,7 @@ export default async function ProductOrderPage({
           </Link>
         </div>
 
-        <form className="mt-4 flex flex-wrap items-end gap-3">
-          <label className="block text-xs font-medium uppercase text-zinc-500">
-            Период продаж
-            <select
-              name="days"
-              defaultValue={String(report.windowDays)}
-              className="mt-2 block w-44 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-medium normal-case text-zinc-950"
-            >
-              {report.windowOptions.map((days) => (
-                <option key={days} value={days}>
-                  {days} дн.
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-xs font-medium uppercase text-zinc-500">
-            Запас на
-            <select
-              name="coverDays"
-              defaultValue={String(report.coverDays)}
-              className="mt-2 block w-44 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-medium normal-case text-zinc-950"
-            >
-              {report.coverOptions.map((days) => (
-                <option key={days} value={days}>
-                  {days} дн.
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="submit"
-            className="rounded-xl bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
-          >
-            Пересчитать
-          </button>
-        </form>
-
-        <details className="mt-4 max-w-4xl rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700">
+        <details className="mt-4 mb-4 max-w-4xl rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700">
           <summary className="cursor-pointer font-medium text-zinc-900">
             Как считается заказ
           </summary>
@@ -131,7 +96,10 @@ export default async function ProductOrderPage({
         </details>
       </div>
 
-      <OrderPlanningTable report={report} />
+      <OrderPlanningTable
+        report={report}
+        initialView={isOrderPlanningView(view) ? view : "order"}
+      />
     </main>
   );
 }

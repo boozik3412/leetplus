@@ -43,7 +43,12 @@ function range(from: number, to: number, step: number) {
   return days;
 }
 
-function createService(overrides: { lootBoxes?: unknown[] } = {}) {
+function createService(
+  overrides: {
+    lootBoxes?: unknown[];
+    monthlyVisits?: Array<{ guestId: string; month: string }>;
+  } = {},
+) {
   const players = Array.from({ length: 12 }, (_, index) => ({
     id: `profile-${index}`,
     guestId: `player-${index}`,
@@ -132,6 +137,9 @@ function createService(overrides: { lootBoxes?: unknown[] } = {}) {
         if (text.includes('AS dated')) {
           return Promise.resolve([{ dated: 10, undated: 0, anomalous: 1 }]);
         }
+        if (text.includes('AS month')) {
+          return Promise.resolve(overrides.monthlyVisits ?? []);
+        }
         return Promise.resolve(daily);
       }),
   };
@@ -189,6 +197,56 @@ describe('GuestGameEffectService', () => {
     expect(mission?.cohort.comparisonGuests).toBe(6);
     expect(mission?.cohort.cost.bonusRub).toBe(3000);
     expect(mission?.holdout).toBeNull();
+  });
+
+  it('adds monthly costs and next-month return of the whole network', async () => {
+    const { service } = createService({
+      monthlyVisits: [
+        { guestId: 'player-0', month: '2026-07' },
+        { guestId: 'player-0', month: '2026-08' },
+        { guestId: 'player-0', month: '2026-09' },
+        { guestId: 'player-0', month: '2026-10' },
+        { guestId: 'guest-0', month: '2026-08' },
+        { guestId: 'staff-guest', month: '2026-08' },
+        { guestId: 'staff-guest', month: '2026-09' },
+      ],
+    });
+    const report = await service.getReport('tenant-1', { storeId: 'store-2' });
+
+    expect(report.costByMonth).toEqual([
+      {
+        month: '2026-09',
+        bonusRub: { LOOT_BOX: 0, MISSION: 3000, SEASON: 0, OTHER: 0 },
+        totalBonusRub: 3000,
+        prizes: 0,
+        players: 6,
+      },
+    ]);
+    // Activated in September: July is before the game, August is the month
+    // before activation (left out), September counts as a player month.
+    expect(report.returnByMonth).toEqual([
+      {
+        month: '2026-07',
+        group: 'FUTURE_PLAYER',
+        guests: 1,
+        returned: 1,
+        partial: false,
+      },
+      {
+        month: '2026-08',
+        group: 'NEVER',
+        guests: 1,
+        returned: 0,
+        partial: false,
+      },
+      {
+        month: '2026-09',
+        group: 'PLAYER',
+        guests: 1,
+        returned: 1,
+        partial: true,
+      },
+    ]);
   });
 
   it('filters the report to the home club of guests', async () => {

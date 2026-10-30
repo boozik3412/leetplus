@@ -10,6 +10,9 @@ import {
   measureCohortEffect,
   measureGuestEffect,
   measureHoldoutEffect,
+  measureMonthlyReturn,
+  monthOfDay,
+  summarizeMonthlyCosts,
   visitBucket,
   windowValues,
   type GameEffectDailyRow,
@@ -326,5 +329,145 @@ describe('guest game effect core', () => {
     expect(gameEffectVerdict(5, { ...base, money: metric(300, true) })).toBe(
       'NOT_ENOUGH_DATA',
     );
+  });
+});
+
+describe('monthly cost and return', () => {
+  it('sums paid bonuses per month and mechanic and fills empty months', () => {
+    const rows = summarizeMonthlyCosts([
+      {
+        day: dayNumberFromIso('2026-07-03'),
+        kind: 'LOOT_BOX',
+        holderKey: 'p1',
+        bonusRub: 100,
+        prize: false,
+      },
+      {
+        day: dayNumberFromIso('2026-07-20'),
+        kind: 'LOOT_BOX',
+        holderKey: 'p1',
+        bonusRub: 50,
+        prize: false,
+      },
+      {
+        day: dayNumberFromIso('2026-09-01'),
+        kind: 'MISSION',
+        holderKey: 'p2',
+        bonusRub: 500,
+        prize: false,
+      },
+      {
+        day: dayNumberFromIso('2026-09-02'),
+        kind: 'SEASON',
+        holderKey: 'p1',
+        bonusRub: 0,
+        prize: true,
+      },
+      {
+        day: dayNumberFromIso('2026-09-03'),
+        kind: 'OTHER',
+        holderKey: 'p3',
+        bonusRub: 0,
+        prize: false,
+      },
+    ]);
+
+    expect(rows.map((row) => row.month)).toEqual([
+      '2026-07',
+      '2026-08',
+      '2026-09',
+    ]);
+    expect(rows[0]).toMatchObject({ totalBonusRub: 150, players: 1 });
+    expect(rows[0].bonusRub.LOOT_BOX).toBe(150);
+    expect(rows[1]).toMatchObject({ totalBonusRub: 0, prizes: 0, players: 0 });
+    expect(rows[2]).toMatchObject({
+      totalBonusRub: 500,
+      prizes: 1,
+      players: 2,
+    });
+    expect(rows[2].bonusRub.MISSION).toBe(500);
+  });
+
+  it('splits next-month return into players, future players and the rest', () => {
+    const rows = measureMonthlyReturn({
+      visits: [
+        // Activates in October: May and June count as before the game,
+        // August is skipped (activation month is next), September too.
+        { guestId: 'a', month: '2026-05' },
+        { guestId: 'a', month: '2026-06' },
+        { guestId: 'a', month: '2026-09' },
+        { guestId: 'a', month: '2026-10' },
+        // Activated in May: a player from May on.
+        { guestId: 'b', month: '2026-05' },
+        { guestId: 'b', month: '2026-07' },
+        { guestId: 'b', month: '2026-08' },
+        { guestId: 'c', month: '2026-05' },
+        { guestId: 'c', month: '2026-06' },
+        { guestId: 'staff', month: '2026-05' },
+      ],
+      activationMonth: new Map([
+        ['a', '2026-10'],
+        ['b', '2026-05'],
+        ['staff', '2026-05'],
+      ]),
+      excluded: new Set(['staff']),
+      currentMonth: '2026-09',
+    });
+
+    expect(rows).toEqual([
+      {
+        month: '2026-05',
+        group: 'PLAYER',
+        guests: 1,
+        returned: 0,
+        partial: false,
+      },
+      {
+        month: '2026-05',
+        group: 'FUTURE_PLAYER',
+        guests: 1,
+        returned: 1,
+        partial: false,
+      },
+      {
+        month: '2026-05',
+        group: 'NEVER',
+        guests: 1,
+        returned: 1,
+        partial: false,
+      },
+      {
+        month: '2026-06',
+        group: 'FUTURE_PLAYER',
+        guests: 1,
+        returned: 0,
+        partial: false,
+      },
+      {
+        month: '2026-06',
+        group: 'NEVER',
+        guests: 1,
+        returned: 0,
+        partial: false,
+      },
+      {
+        month: '2026-07',
+        group: 'PLAYER',
+        guests: 1,
+        returned: 1,
+        partial: false,
+      },
+      {
+        month: '2026-08',
+        group: 'PLAYER',
+        guests: 1,
+        returned: 0,
+        partial: true,
+      },
+    ]);
+  });
+
+  it('names months of day numbers', () => {
+    expect(monthOfDay(dayNumberFromIso('2026-10-31'))).toBe('2026-10');
   });
 });

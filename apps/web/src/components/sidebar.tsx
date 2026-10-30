@@ -143,6 +143,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/assortment/dashboard", label: "Дашборд ассортимента" },
       { href: "/products", label: "Товары" },
+      { href: "/products/order", label: "Заказ товаров" },
       { href: "/categories", label: "Категории" },
       { href: "/suppliers", label: "Поставщики" },
       { href: "/reports", label: "Отчёты" },

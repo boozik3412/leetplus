@@ -84,11 +84,7 @@ export default async function SupplierScorecardTablePage({
         ]}
         filters={[
           { key: "supplierName", label: "Поставщик", type: "text" },
-          {
-            key: "problemCategoryName",
-            label: "Проблемная категория",
-            type: "select",
-          },
+          { key: "problemCategoryName", label: "Проблемная категория", type: "select" },
         ]}
       />
     </main>

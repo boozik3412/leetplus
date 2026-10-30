@@ -1,7 +1,10 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { SimpleReportTable } from "@/components/simple-report-table";
 import { requireCurrentUser } from "@/lib/auth";
-import { getPlanFactReport, type PlanFactReportRow } from "@/lib/reports";
+import {
+  getPlanFactReport,
+  type PlanFactReportRow,
+} from "@/lib/reports";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
@@ -69,11 +72,7 @@ export default async function PlanFactTablePage({
           { key: "currentRevenue", label: "Факт выручки", align: "right" },
           { key: "planRevenue", label: "План выручки", align: "right" },
           { key: "revenueDelta", label: "Откл. выручки", align: "right" },
-          {
-            key: "revenueCompletionPercent",
-            label: "% выручки",
-            align: "right",
-          },
+          { key: "revenueCompletionPercent", label: "% выручки", align: "right" },
           { key: "currentGrossProfit", label: "Факт прибыли", align: "right" },
           { key: "planGrossProfit", label: "План прибыли", align: "right" },
           { key: "grossProfitDelta", label: "Откл. прибыли", align: "right" },

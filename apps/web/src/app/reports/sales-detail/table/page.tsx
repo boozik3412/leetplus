@@ -38,7 +38,9 @@ export default async function SalesDetailTablePage({
         <ReportBreadcrumbs current="Общий отчет по продажам" />
         <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-sm font-medium text-emerald-700">Полный отчет</p>
+            <p className="text-sm font-medium text-emerald-700">
+              Полный отчет
+            </p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight">
               Общий отчет по продажам
             </h1>

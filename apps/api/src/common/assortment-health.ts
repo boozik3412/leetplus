@@ -1,3 +1,5 @@
+import { countDaysInStock, observedDaysByStore } from './stock-days';
+
 export const ASSORTMENT_NO_SALES_WINDOWS = [7, 14, 21, 30] as const;
 
 export type AssortmentNoSalesWindow =
@@ -163,7 +165,10 @@ export type AssortmentHealthRow = {
   productId: string;
   excluded: boolean;
   inventory: AssortmentMetric<number>;
+  /** Daily demand: sold in the last 21 days ÷ days the SKU was on stock. */
   demand21d: AssortmentMetric<number>;
+  demandSoldQuantity: number;
+  demandDaysInStock: number;
   price: AssortmentPriceMetric;
   grossProfitAtRisk?: AssortmentGrossProfitAtRisk;
   noSales: Record<AssortmentNoSalesWindow, boolean | null>;
@@ -207,6 +212,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_INVENTORY_STALE_AFTER_HOURS = 36;
 const DEFAULT_PRICE_CONFIGURATION_STALE_AFTER_HOURS = 36;
 const DEFAULT_EXCESS_STOCK_DAYS = 30;
+const DEMAND_WINDOW_DAYS = 21;
 
 export function buildAssortmentHealth(
   input: AssortmentHealthInput,
@@ -224,10 +230,7 @@ export function buildAssortmentHealth(
     1000;
   const activeStores = input.stores.filter((store) => store.isActive);
   const activeProducts = input.products.filter((product) => product.isActive);
-  const snapshotsByGrain = latestSnapshotsAt(
-    input.inventorySnapshots,
-    input.asOf,
-  );
+  const stockHistory = buildStockHistory(input.inventorySnapshots, input.asOf);
   const storesById = new Map(activeStores.map((store) => [store.id, store]));
   const productsById = new Map(
     activeProducts.map((product) => [product.id, product]),
@@ -244,7 +247,7 @@ export function buildAssortmentHealth(
       product,
       excludedProductIds,
       incomingKeys,
-      snapshotsByGrain,
+      stockHistory,
       staleAfterMs,
     }),
   );
@@ -258,16 +261,16 @@ function buildRow(context: {
   product: AssortmentHealthProduct;
   excludedProductIds: Set<string>;
   incomingKeys: Set<string>;
-  snapshotsByGrain: Map<string, AssortmentInventorySnapshot>;
+  stockHistory: StockHistory;
   staleAfterMs: number;
 }): AssortmentHealthRow {
   const { input, store, product } = context;
   const key = grainKey(store.id, product.id);
   const demandTo = boundedTo(input.demandTo ?? input.period.to, input.asOf);
   const excluded = context.excludedProductIds.has(product.id);
-  const snapshot = context.snapshotsByGrain.get(key);
+  const snapshot = currentSnapshot(context.stockHistory, store.id, key);
   const inventory = inventoryMetric(snapshot, input.asOf, context.staleAfterMs);
-  const demandWindow = windowFrom(demandTo, 21);
+  const demandWindow = windowFrom(demandTo, DEMAND_WINDOW_DAYS);
   const demandCoverage = salesCoverageMetric(
     input.salesCoverage,
     store.id,
@@ -282,14 +285,26 @@ function buildRow(context: {
     demandTo,
   );
   const demandQuantity = sum(demandSales.map((sale) => sale.quantity));
-  const demand21d = demandMetric(demandQuantity, demandCoverage, demandTo);
+  const demandDaysInStock = daysInStockIn(
+    context.stockHistory,
+    store.id,
+    key,
+    demandWindow,
+    demandSales,
+  );
+  const demand21d = demandMetric(
+    demandQuantity,
+    demandDaysInStock,
+    demandCoverage,
+    demandTo,
+  );
   const price = priceMetric(input, store, product.id);
   const grossProfitAtRisk = grossProfitAtRiskMetrics(
     input,
     store,
     product,
     demand21d,
-    demandQuantity / 21,
+    demandDaysInStock > 0 ? demandQuantity / demandDaysInStock : 0,
     price,
     demandWindow,
     demandTo,
@@ -369,6 +384,8 @@ function buildRow(context: {
     excluded,
     inventory,
     demand21d,
+    demandSoldQuantity: demandQuantity,
+    demandDaysInStock,
     price,
     grossProfitAtRisk,
     noSales,
@@ -495,11 +512,31 @@ function buildSummary(
   };
 }
 
-function latestSnapshotsAt(
+type StockHistory = {
+  latestByGrain: Map<string, AssortmentInventorySnapshot>;
+  /** The SKU's stock by snapshot day (YYYY-MM-DD). */
+  daysByGrain: Map<string, Map<string, number>>;
+  /** Fully observed snapshot days of each club (see common/stock-days). */
+  observedByStore: Map<string, Set<string>>;
+  /** The club's latest fully observed day and when it was observed. */
+  latestStoreDay: Map<
+    string,
+    { day: string; snapshotDate: Date; observedAt: Date }
+  >;
+};
+
+function buildStockHistory(
   snapshots: AssortmentInventorySnapshot[],
   asOf: Date,
-) {
-  const result = new Map<string, AssortmentInventorySnapshot>();
+): StockHistory {
+  const latestByGrain = new Map<string, AssortmentInventorySnapshot>();
+  const daysByGrain = new Map<string, Map<string, number>>();
+  const known: Array<{
+    storeId: string;
+    day: string;
+    snapshotDate: Date;
+    observedAt: Date;
+  }> = [];
   snapshots.forEach((snapshot) => {
     if (
       snapshot.snapshotDate > asOf ||
@@ -507,11 +544,101 @@ function latestSnapshotsAt(
     )
       return;
     const key = grainKey(snapshot.storeId, snapshot.productId);
-    const current = result.get(key);
+    const current = latestByGrain.get(key);
     if (!current || current.snapshotDate < snapshot.snapshotDate)
-      result.set(key, snapshot);
+      latestByGrain.set(key, snapshot);
+    const day = dateValue(snapshot.snapshotDate);
+    const days = daysByGrain.get(key) ?? new Map<string, number>();
+    days.set(day, snapshot.quantity);
+    daysByGrain.set(key, days);
+    known.push({
+      storeId: snapshot.storeId,
+      day,
+      snapshotDate: snapshot.snapshotDate,
+      observedAt: snapshot.observedAt ?? snapshot.snapshotDate,
+    });
   });
-  return result;
+  const observedByStore = observedDaysByStore(known);
+  const latestStoreDay = new Map<
+    string,
+    { day: string; snapshotDate: Date; observedAt: Date }
+  >();
+  // Observed days are added in date order: the last one is the latest.
+  const lastDayByStore = new Map(
+    [...observedByStore].map(([storeId, days]) => [storeId, [...days].at(-1)]),
+  );
+  known.forEach((item) => {
+    if (item.day !== lastDayByStore.get(item.storeId)) return;
+    const current = latestStoreDay.get(item.storeId);
+    if (!current || current.observedAt < item.observedAt) {
+      latestStoreDay.set(item.storeId, {
+        day: item.day,
+        snapshotDate: item.snapshotDate,
+        observedAt: item.observedAt,
+      });
+    }
+  });
+  return { latestByGrain, daysByGrain, observedByStore, latestStoreDay };
+}
+
+/**
+ * The SKU's latest snapshot; zero when the club's latest full stock list no
+ * longer has it (Langame drops SKUs that ran out).
+ */
+function currentSnapshot(
+  history: StockHistory,
+  storeId: string,
+  key: string,
+): AssortmentInventorySnapshot | undefined {
+  const snapshot = history.latestByGrain.get(key);
+  const storeDay = history.latestStoreDay.get(storeId);
+  if (
+    !snapshot ||
+    !storeDay ||
+    dateValue(snapshot.snapshotDate) >= storeDay.day
+  )
+    return snapshot;
+  return {
+    ...snapshot,
+    quantity: 0,
+    snapshotDate: storeDay.snapshotDate,
+    observedAt: storeDay.observedAt,
+  };
+}
+
+/** Days of the window the SKU was on stock or sold (see common/stock-days). */
+function daysInStockIn(
+  history: StockHistory,
+  storeId: string,
+  key: string,
+  from: Date,
+  sales: AssortmentSale[],
+) {
+  const days = Array.from({ length: DEMAND_WINDOW_DAYS }, (_, index) =>
+    dateValue(new Date(from.getTime() + index * DAY_MS)),
+  );
+  const storeDays = history.observedByStore.get(storeId) ?? new Set<string>();
+  const snapshots = history.daysByGrain.get(key) ?? new Map<string, number>();
+  let beforeDay = '';
+  let before: number | null = null;
+  snapshots.forEach((quantity, day) => {
+    if (day < days[0] && day > beforeDay) {
+      beforeDay = day;
+      before = quantity;
+    }
+  });
+  const soldByDay = new Map<string, number>();
+  sales.forEach((sale) => {
+    const day = dateValue(sale.saleDate);
+    soldByDay.set(day, (soldByDay.get(day) ?? 0) + sale.quantity);
+  });
+  return countDaysInStock({
+    days,
+    storeDays,
+    before,
+    snapshots,
+    sales: days.map((day) => soldByDay.get(day) ?? 0),
+  });
 }
 
 function inventoryMetric(
@@ -584,6 +711,7 @@ function salesCoverageMetric(
 
 function demandMetric(
   quantity: number,
+  daysInStock: number,
   coverageMetric: AssortmentMetric<number>,
   asOf: Date,
 ): AssortmentMetric<number> {
@@ -597,7 +725,7 @@ function demandMetric(
     );
   }
   return metric(
-    quantity / 21,
+    daysInStock > 0 ? quantity / daysInStock : 0,
     'AVAILABLE',
     coverage(1, 1),
     null,

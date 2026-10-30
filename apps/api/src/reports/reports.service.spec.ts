@@ -12,6 +12,7 @@ type ReportsPrismaMock = {
   };
   store: {
     findFirst: jest.Mock;
+    findMany: jest.Mock;
   };
   salesFact: {
     findMany: jest.Mock;
@@ -80,6 +81,7 @@ function createPrismaMock(): ReportsPrismaMock {
     },
     store: {
       findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     salesFact: {
       findMany: jest.fn(),
@@ -1183,6 +1185,45 @@ describe('ReportsService', () => {
     ]);
   });
 
+  it('cuts the SKU performance period on club days', async () => {
+    prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
+    prisma.store.findMany.mockResolvedValue([
+      { id: 'store-1', externalDomain: null, timeZone: 'Europe/Moscow' },
+    ]);
+    const sale = (id: string, saleDate: string) => ({
+      tenantId: 'tenant-1',
+      storeId: 'store-1',
+      productId: id,
+      saleDate: new Date(saleDate),
+      quantity: new Prisma.Decimal(1),
+      revenue: new Prisma.Decimal(100),
+      cost: new Prisma.Decimal(50),
+      product: {
+        id,
+        article: id,
+        name: id,
+        facing: 1,
+        category: null,
+        supplier: null,
+      },
+    });
+    prisma.salesFact.findMany.mockResolvedValue([
+      // 1 April 00:30 in Moscow, still 31 March in UTC.
+      sale('first-night', '2026-03-31T21:30:00.000Z'),
+      // 11 April 01:00 in Moscow: after the period.
+      sale('after-period', '2026-04-10T22:00:00.000Z'),
+    ]);
+    prisma.productOosExclusion.findMany.mockResolvedValue([]);
+
+    const report = await service.getSkuPerformanceReport(user, {
+      from: '2026-04-01',
+      to: '2026-04-10',
+      storeId: 'store-1',
+    });
+
+    expect(report.rows.map((row) => row.article)).toEqual(['first-night']);
+  });
+
   it('builds SKU performance report with ABC groups', async () => {
     prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
     prisma.salesFact.findMany.mockResolvedValue([
@@ -1191,6 +1232,7 @@ describe('ReportsService', () => {
         storeId: 'store-1',
         store: { id: 'store-1', name: 'Club A' },
         productId: 'product-1',
+        saleDate: new Date('2026-04-05T12:00:00.000Z'),
         quantity: new Prisma.Decimal(10),
         revenue: new Prisma.Decimal(800),
         cost: new Prisma.Decimal(500),
@@ -1208,6 +1250,7 @@ describe('ReportsService', () => {
         storeId: 'store-1',
         store: { id: 'store-1', name: 'Club A' },
         productId: 'product-2',
+        saleDate: new Date('2026-04-05T12:00:00.000Z'),
         quantity: new Prisma.Decimal(5),
         revenue: new Prisma.Decimal(150),
         cost: new Prisma.Decimal(100),
@@ -1224,6 +1267,7 @@ describe('ReportsService', () => {
         tenantId: 'tenant-1',
         storeId: 'store-1',
         productId: 'product-3',
+        saleDate: new Date('2026-04-10T22:00:00.000Z'),
         quantity: new Prisma.Decimal(2),
         revenue: new Prisma.Decimal(50),
         cost: new Prisma.Decimal(40),

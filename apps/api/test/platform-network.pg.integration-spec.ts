@@ -225,6 +225,8 @@ describePostgres('platform network PostgreSQL workflow', () => {
     });
     expect(claim.subjectId).toBe(owner.id);
     expect(tenant.onboardingStatus).toBe('ONBOARDING');
+    // Execution admission (Langame connect, sync) refuses revision 0.
+    expect(tenant.executionRevision).toBeGreaterThanOrEqual(1);
 
     // The network now has an owner: no new owner link, and the old one is spent.
     await expect(

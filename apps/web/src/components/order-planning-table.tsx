@@ -232,17 +232,26 @@ const NO_MOVEMENT_DAYS = [7, 14, 21, 30, 45, 60];
 export function OrderPlanningTable({
   report,
   initialView,
+  initialFilters,
 }: {
   report: OrderPlanningReport;
   initialView: OrderPlanningView;
+  /** Clubs and categories by name, from an old report link. */
+  initialFilters?: {
+    stores: string[];
+    categories: string[];
+    noMovementDays: number | null;
+  };
 }) {
   const pathname = usePathname();
   const initial = VIEW_PRESETS[initialView];
   const [view, setView] = useState<OrderPlanningView | null>(initialView);
   const [grouping, setGrouping] = useState<Grouping>("store");
   const [search, setSearch] = useState("");
-  const [stores, setStores] = useState<string[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
+  const [stores, setStores] = useState<string[]>(initialFilters?.stores ?? []);
+  const [categories, setCategories] = useState<string[]>(
+    initialFilters?.categories ?? [],
+  );
   const [suppliers, setSuppliers] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<OrderPlanningStatus[]>(
     initial.statuses,
@@ -253,13 +262,19 @@ export function OrderPlanningTable({
     initial.sortDirection,
   );
   const [amountMode, setAmountMode] = useState<AmountMode>(initial.amountMode);
-  const [noMovementDays, setNoMovementDays] = useState<number | null>(
-    initial.noMovement ? 7 : null,
-  );
-  const [visible, setVisible] = useState(PAGE_SIZE);
   const noMovementOptions = NO_MOVEMENT_DAYS.filter(
     (days) => days <= report.windowDays,
   );
+  const requestedNoMovementDays = initialFilters?.noMovementDays ?? null;
+  const [noMovementDays, setNoMovementDays] = useState<number | null>(
+    initial.noMovement
+      ? requestedNoMovementDays !== null &&
+        noMovementOptions.includes(requestedNoMovementDays)
+        ? requestedNoMovementDays
+        : 7
+      : null,
+  );
+  const [visible, setVisible] = useState(PAGE_SIZE);
 
   function applyView(next: OrderPlanningView) {
     const preset = VIEW_PRESETS[next];

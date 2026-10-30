@@ -28,8 +28,8 @@ export default async function RecommendationsTablePage({
         <ReportBreadcrumbs current="Рекомендации" />
         <h1 className="text-3xl font-semibold tracking-tight">Рекомендации</h1>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-          Рабочий список автоматических рекомендаций с ответственными,
-          статусами и финансовым эффектом.
+          Рабочий список автоматических рекомендаций с ответственными, статусами
+          и финансовым эффектом.
         </p>
       </div>
       <RecommendationsWorkflowTable initialRows={report.recommendations} />

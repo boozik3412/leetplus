@@ -190,6 +190,7 @@ type SalesFactUpsertCall = [
       revenue: Prisma.Decimal;
       cost: Prisma.Decimal;
       sourcePayloadHash: string;
+      saleDate: Date;
     };
   },
 ];
@@ -592,6 +593,29 @@ describe('LangameSyncService', () => {
     expect(syncJobUpdate.data.inventoryCount).toBe(1);
     expect(syncJobUpdate.data.salesCount).toBe(1);
     expect(syncJobUpdate.data.discrepancyCount).toBe(0);
+  });
+
+  it('reads the sale time on the club clock', async () => {
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-1',
+        externalClubId: '1',
+        name: '1337',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+    ]);
+
+    await service.syncTenant(user, {
+      dateFrom: '2026-04-29',
+      dateTo: '2026-04-29',
+    });
+
+    const [salesUpsert] = prisma.salesFact.upsert.mock
+      .calls[0] as SalesFactUpsertCall;
+    // 10:12 in Yekaterinburg (UTC+5).
+    expect(salesUpsert.create.saleDate).toEqual(
+      new Date('2026-04-29T05:12:16.000Z'),
+    );
   });
 
   it('does not advance the sales cursor after an inventory-only sync', async () => {

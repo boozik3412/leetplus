@@ -140,22 +140,31 @@ function collapsedList(title: string, items: string[]) {
 function onlineLines(club: DailyReportClub) {
   const online = club.online;
   if (!online) return [];
-  const lines = [
-    `Онлайн из приложения <b>${formatRub(online.amount.value)}</b>${arrow(online.amount)} · ${payments(online.payments)}`,
-  ];
-  if (online.sharedWith.length) {
-    const clubs = [club.name, ...online.sharedWith].map(escapeHtml);
-    lines.push(
-      `<i>Общая сумма клубов ${clubs.slice(0, -1).join(', ')} и ${clubs.at(-1)}: Langame не делит онлайн по клубам</i>`,
-    );
+  if (!online.sharedWith.length) {
+    return [
+      `Онлайн из приложения <b>${formatRub(online.amount.value)}</b>${arrow(online.amount)} · ${payments(online.payments)}`,
+    ];
   }
-  return lines;
+  const others = online.sharedWith.map(escapeHtml);
+  const peers =
+    others.length > 1
+      ? `${others.slice(0, -1).join(', ')} и ${others.at(-1)}`
+      : others[0];
+  return [
+    `Онлайн из приложения <b>${formatRub(online.amount.value)}</b>${arrow(online.amount)}`,
+    `<i>${formatPercent(online.share)} от ${formatRub(online.addressAmount)} (${payments(online.payments)}), общих с ${peers}: делим по гостям и среднему чеку</i>`,
+  ];
 }
 
 function clubBlock(club: DailyReportClub) {
   const metrics = club.metrics;
   const lines: string[] = [
     `🏠 <b>${escapeHtml(club.name)}</b>`,
+    ...(club.online
+      ? [
+          `Выручка <b>${formatRub(club.revenue.value)}</b>${arrow(club.revenue)}`,
+        ]
+      : []),
     `Касса <b>${formatRub(metrics.shiftRevenue.value)}</b>${arrow(metrics.shiftRevenue)} · бар <b>${formatRub(metrics.barRevenue.value)}</b>${arrow(metrics.barRevenue)}`,
     ...onlineLines(club),
     ...guestLines(club),

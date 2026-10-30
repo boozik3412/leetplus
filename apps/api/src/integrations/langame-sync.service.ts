@@ -29,6 +29,7 @@ import {
 } from '../tenancy/tenant-background-execution-policy';
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import { LangameClient } from './langame.client';
+import { parseLangameDate as parseLangameZonedDate } from './langame-date';
 import {
   assertExactExternalImportLockHeld,
   withExactExternalImportLock,
@@ -106,6 +107,8 @@ type StoreSyncRef = {
   id: string;
   name: string;
   executionRevision?: number;
+  /** The club's zone: Langame sale times are its wall clock. */
+  timeZone?: string | null;
 };
 
 type ResolvedSyncPeriod = {
@@ -1539,6 +1542,7 @@ export class LangameSyncService {
         id: true,
         name: true,
         externalClubId: true,
+        timeZone: true,
       },
     });
     const storesByExternalClubId = new Map(
@@ -1547,9 +1551,15 @@ export class LangameSyncService {
         {
           id: store.id,
           name: store.name,
+          timeZone: store.timeZone,
         },
       ]),
     );
+    // A placeholder club of the address keeps the zone its clubs share.
+    const domainZones = new Set(
+      stores.map((store) => store.timeZone?.trim() || 'UTC'),
+    );
+    const domainTimeZone = domainZones.size === 1 ? [...domainZones][0] : 'UTC';
     const productConfigurations =
       await this.prisma.langameClubProductConfiguration.findMany({
         where: {
@@ -1636,7 +1646,10 @@ export class LangameSyncService {
             ? new Prisma.Decimal(0)
             : purchasePrice.mul(row.count);
           const nextQuantity = isCanceled ? 0 : row.count;
-          const nextSaleDate = this.parseLangameDate(row.date);
+          const nextSaleDate = this.parseLangameSaleDate(
+            row.date,
+            store.timeZone?.trim() || domainTimeZone,
+          );
           const externalReceiptId = this.langameReceiptId(row);
           const sourcePayloadHash = bindReceiptIdentityToSourceHash(
             externalReceiptId,
@@ -1906,7 +1919,7 @@ export class LangameSyncService {
         name: true,
       },
     });
-    const resolved = {
+    const resolved: StoreSyncRef = {
       id: store.id,
       name: store.name,
     };
@@ -2186,6 +2199,17 @@ export class LangameSyncService {
     return new Date(
       Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
     );
+  }
+
+  /** A sale time: Langame gives the club's wall clock without a zone. */
+  private parseLangameSaleDate(value: string, timeZone: string) {
+    const date = parseLangameZonedDate(value, timeZone);
+
+    if (!date) {
+      throw new BadRequestException(`Invalid Langame date: ${value}`);
+    }
+
+    return date;
   }
 
   private parseLangameDate(value: string) {

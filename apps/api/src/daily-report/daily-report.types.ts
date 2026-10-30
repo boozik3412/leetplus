@@ -95,6 +95,12 @@ export type DailyReportInput = {
   oosExcludedProductKeys: ReadonlySet<string>;
   /** Online top-ups of the report and baseline windows. */
   onlineTopups?: DailyReportOnlineTopupRow[];
+  /**
+   * Clubs outside the report's scope on the Langame address of a reported
+   * club. They are not reported; their shifts and sessions in `shifts` and
+   * `sessions` only weigh the split of the address's online top-ups.
+   */
+  addressPeers?: Array<DailyReportStore & { window: ClubDayWindow }>;
 };
 
 export type DailyReportShift = {
@@ -135,15 +141,22 @@ export type DailyReportMetric = {
   change: number | null;
 };
 
-/** Online top-ups of the club's Langame address over the club day. */
+/** The club's part of the online top-ups of its Langame address. */
 export type DailyReportOnline = {
+  /** All of the address's top-ups, or the club's share of a common address. */
   amount: DailyReportMetric;
+  /** Payments on the address over the club day. */
   payments: number;
   /**
-   * Other clubs on the same Langame address: the amount is theirs together
-   * and cannot be split, since an online payment names no club.
+   * Other clubs on the same Langame address. An online payment names no
+   * club, so the address's top-ups are split between its clubs in proportion
+   * to guests × average check (cash per visit) of the day.
    */
   sharedWith: string[];
+  /** The club's share of the address's top-ups of the day, 1 when alone. */
+  share: number;
+  /** All top-ups of the address over the club day. */
+  addressAmount: number;
 };
 
 export type DailyReportClub = {
@@ -171,6 +184,8 @@ export type DailyReportClub = {
   computerCount: number | null;
   guestSummary: DailyReportGuestSummary;
   online: DailyReportOnline | null;
+  /** Cash plus the club's part of online top-ups. */
+  revenue: DailyReportMetric;
   refunds: number;
   topProducts: DailyReportProductLine[];
   outOfStock: DailyReportStockSignal[];

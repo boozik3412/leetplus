@@ -79,6 +79,7 @@
     "test:integration:design-partner-runtime-admission:pg": "jest --config ./test/jest-pg-integration.json --ci --runInBand --runTestsByPath test/design-partner-runtime-admission.pg.integration-spec.ts",
     "test:integration:external-langame-worker:pg": "jest --config ./test/jest-pg-integration.json --ci --runInBand --runTestsByPath test/external-langame-worker.pg.integration-spec.ts",
     "test:integration:shared-tenant-shell-provisioning:pg": "jest --config ./test/jest-pg-integration.json --ci --runInBand --runTestsByPath test/shared-tenant-shell-provisioning.pg.integration-spec.ts",
+    "test:integration:platform-network:pg": "jest --config ./test/jest-pg-integration.json --ci --runInBand --runTestsByPath test/platform-network.pg.integration-spec.ts",
     "test:integration:shared-beta-runtime-release-activation:pg": "jest --config ./test/jest-pg-integration.json --ci --runInBand --runTestsByPath test/shared-beta-runtime-release-activation.pg.integration-spec.ts",
     "test:integration:founder-operator-beta-activation-v2:pg": "jest --config ./test/jest-pg-integration.json --ci --runInBand --runTestsByPath test/founder-operator-beta-activation-v2.pg.integration-spec.ts",
     "test:integration:identity-owner-invite-hold-outbox:pg": "jest --config ./test/jest-pg-integration.json --ci --runInBand --runTestsByPath test/identity-owner-invite-hold-outbox.pg.integration-spec.ts",

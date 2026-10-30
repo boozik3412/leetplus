@@ -1823,6 +1823,39 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   `EXTERNAL_DENY` не затрагиваются; неактивированная shell-сеть остаётся за
   activation workflow.
 
+### Создание и удаление сети администратором платформы
+
+- Маршруты control plane под `JwtAuthGuard + PlatformAdminGuard`, каждый
+  повторно проверяет активного `isPlatformAdmin` в БД внутри транзакции:
+  `POST /admin/tenants` (новая сеть), `POST /admin/tenants/:tenantId/owner-link`
+  (новая ссылка владельцу), `POST /admin/tenants/:tenantId/delete`. Web —
+  панели «Новая сеть» и «Управление сетью» на `/administration` через
+  same-origin BFF; ответы со ссылкой — private/no-store.
+- Новая сеть: `ACTIVE/PILOT/ONBOARDING`, окно доступа бессрочно или N дней,
+  полный module profile с outbound `OFF`, OWNER role override как у shell,
+  один временный клуб «Компьютерный клуб 1» (`Europe/Moscow`) с gamification и
+  background execution `OFF`. Langame, workers и рассылки не подключаются.
+- Владелец получает открытую ссылку `OWNER/NETWORK` (`email = NULL`,
+  `deliveryMode = LINK`, `createdByUserId` = platform admin): письмо не
+  отправляется, логин владелец задаёт сам, email claim берётся при accept.
+  `AuthService.acceptInvite` допускает такой OWNER только в
+  не-`INTERNAL` сети в `ONBOARDING`, при нуле владельцев и активном
+  platform-admin издателе; переходов onboarding нет, audit
+  `TENANT_NETWORK_OWNER_LINK_ACCEPTED`. Tenant-пользователи по-прежнему не
+  могут выдать OWNER (`/users/invites` это запрещает). Initial OWNER flow
+  (`OWNER_INVITED`, email-bound, DB guards) не меняется.
+- URL — bearer-секрет: показывается один раз, не хранится в БД (только
+  sha256), audit (`PLATFORM_NETWORK_CREATED`,
+  `PLATFORM_NETWORK_OWNER_LINK_ISSUED`) и логах. Новая ссылка отзывает прежние
+  открытые OWNER-ссылки и выдаётся только пока у сети нет владельца.
+- Удаление (`confirmation = DELETE <slug>`) разрешено только для сети без
+  товаров, продаж, гостей и интеграций, без platform admin среди аккаунтов и
+  не для сети самого администратора. Удаляются клубы, аккаунты, приглашения,
+  role overrides и module rows; worker-артефакты каскадно; audit сохраняется с
+  `tenantId = NULL` (`PLATFORM_NETWORK_DELETED`). Runtime не имеет прав на
+  `IdentityEmailClaim`, поэтому сеть, где кто-то зарегистрировался через
+  claim boundary, отклоняется внешним ключом целиком, без частичного удаления.
+
 ### Делегирование учётных записей сотрудникам
 
 - `/users/invites*` принадлежит corporate tenant contour и всегда требует

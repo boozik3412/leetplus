@@ -21,6 +21,7 @@ import { ExternalLangameWorkerTenantService } from './external-langame-worker-te
 import { FounderOperatorBetaActivationService } from './founder-operator-beta-activation.service';
 import { FounderOperatorBetaGoService } from './founder-operator-beta-go.service';
 import { FounderOwnerInviteLifecycleService } from './founder-owner-invite-lifecycle.service';
+import { PlatformNetworkService } from './platform-network.service';
 import { SharedTenantProvisioningService } from './shared-tenant-provisioning.service';
 import { TenantAccessWindowService } from './tenant-access-window.service';
 
@@ -36,6 +37,7 @@ export class AdminController {
     private readonly founderOperatorBetaActivationService: FounderOperatorBetaActivationService,
     private readonly founderOwnerInviteLifecycleService: FounderOwnerInviteLifecycleService,
     private readonly tenantAccessWindowService: TenantAccessWindowService,
+    private readonly platformNetworkService: PlatformNetworkService,
   ) {}
 
   @Get('overview')
@@ -59,6 +61,33 @@ export class AdminController {
       disposition: `attachment; filename="${file.fileName}"`,
       length: file.buffer.byteLength,
     });
+  }
+
+  @Post('tenants')
+  createNetwork(@CurrentUser() user: AuthenticatedUser, @Body() body: unknown) {
+    return this.platformNetworkService.create(user, body ?? {});
+  }
+
+  @Post('tenants/:tenantId/owner-link')
+  issueNetworkOwnerLink(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Body() body: unknown,
+  ) {
+    return this.platformNetworkService.issueOwnerLink(
+      user,
+      tenantId,
+      body ?? {},
+    );
+  }
+
+  @Post('tenants/:tenantId/delete')
+  deleteNetwork(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Body() body: unknown,
+  ) {
+    return this.platformNetworkService.delete(user, tenantId, body ?? {});
   }
 
   @Get('tenants/:tenantId/langame/service-diagnostics')

@@ -266,6 +266,8 @@ export type SalesDetailRow = {
   canceledAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** The club's calendar day of the sale, YYYY-MM-DD. */
+  saleDay: string;
 };
 
 export type SalesDetailReport = {

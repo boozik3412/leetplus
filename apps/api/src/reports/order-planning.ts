@@ -1,13 +1,11 @@
+import { countDaysInStock, observedDays } from '../common/stock-days';
+
 /**
  * Order planning ("Заказ товаров"): one row per club × SKU that was on stock
  * in the window, with daily sales, current stock and the quantity to order.
  *
- * Demand is averaged over the days the SKU was actually available, so a week
- * out of stock does not hide real demand. A day counts as available when the
- * club's snapshot for that day was positive or the SKU sold that day. When the
- * club has snapshots for other SKUs that day, a missing SKU snapshot means
- * zero; a day without a full snapshot for the club (sync gap, sync still
- * running) repeats the last known stock.
+ * Demand is averaged over the days the SKU was actually available (see
+ * common/stock-days), so a week out of stock does not hide real demand.
  */
 
 export const ORDER_PLANNING_WINDOW_DAYS = [21, 28, 30, 45, 60] as const;
@@ -20,8 +18,6 @@ export const ORDER_PLANNING_CRITICAL_DAYS = 3;
 /** Stock lasting longer than cover × this is reported as excess. */
 export const ORDER_PLANNING_EXCESS_FACTOR = 3;
 const INVENTORY_STALE_AFTER_MS = 36 * 60 * 60 * 1000;
-/** A club day is fully observed when it has this share of the previous one. */
-const OBSERVED_DAY_SHARE = 0.8;
 
 export type OrderPlanningStatus =
   | 'OUT_OF_STOCK'
@@ -201,17 +197,12 @@ export function buildOrderPlanningRows(
     // A SKU whose snapshots all predate the club's latest full snapshot day
     // has dropped out of the club's stock list: its stock is zero now.
     const latestStoreDay = [...storeDays].sort().at(-1) ?? null;
-    let carried: number | null = value.before?.quantity ?? null;
-    let daysInStock = 0;
-
-    days.forEach((day, index) => {
-      const snapshot = value.snapshots.get(day);
-      if (snapshot !== undefined) {
-        carried = snapshot;
-      } else if (storeDays.has(day)) {
-        carried = 0;
-      }
-      if ((carried ?? 0) > 0 || value.sales[index] > 0) daysInStock += 1;
+    const daysInStock = countDaysInStock({
+      days,
+      storeDays,
+      before: value.before?.quantity ?? null,
+      snapshots: value.snapshots,
+      sales: value.sales,
     });
 
     const latest = value.latest;
@@ -327,19 +318,6 @@ export function roundToMultiplicity(need: number, multiplicity: number | null) {
   if (units <= 0) return 0;
   if (!multiplicity || multiplicity <= 1) return units;
   return Math.ceil(units / multiplicity) * multiplicity;
-}
-
-function observedDays(counts: ReadonlyMap<string, number>) {
-  const result = new Set<string>();
-  let previous: number | null = null;
-  [...counts.keys()].sort().forEach((day) => {
-    const count = counts.get(day)!;
-    if (previous === null || count >= previous * OBSERVED_DAY_SHARE) {
-      result.add(day);
-      previous = count;
-    }
-  });
-  return result;
 }
 
 function statusRank(status: OrderPlanningStatus) {

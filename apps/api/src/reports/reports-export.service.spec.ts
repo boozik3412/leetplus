@@ -213,6 +213,7 @@ const salesDetailReport: SalesDetailReport = {
       canceledAt: null,
       createdAt: '2026-04-10T12:01:00.000Z',
       updatedAt: '2026-04-10T12:01:00.000Z',
+      saleDay: '2026-04-10',
     },
   ],
 };
@@ -373,5 +374,50 @@ describe('ReportsExportService', () => {
 
     expect(content).toContain('Низкий остаток;DRK-001;Cola;Club A;');
     expect(content).not.toContain('SNK-002');
+  });
+
+  it('exports product movement by club day without canceled sales or unknown stock', async () => {
+    const sale = salesDetailReport.rows[0];
+    reportsService.getSalesDetailReport.mockResolvedValue({
+      ...salesDetailReport,
+      from: '2026-04-10',
+      to: '2026-04-11',
+      rows: [
+        { ...sale, productNameAtSale: 'Кола старая' },
+        // Night sale: 11 April in the club, 10 April in UTC.
+        {
+          ...sale,
+          id: 'sale-2',
+          saleDate: '2026-04-10T22:30:00.000Z',
+          saleDay: '2026-04-11',
+          quantity: 1,
+          revenue: 100,
+        },
+        {
+          ...sale,
+          id: 'sale-3',
+          quantity: 5,
+          revenue: 500,
+          isCanceled: true,
+        },
+        {
+          ...sale,
+          id: 'sale-4',
+          productId: 'product-3',
+          productName: 'Water',
+          quantity: 1,
+          revenue: 50,
+        },
+      ],
+    });
+
+    const file = await service.exportReports(user, {
+      report: 'product-movement',
+    });
+    const content = file.buffer.toString('utf8');
+
+    expect(content).toContain('Cola;Club A;Напитки;2;1;3;1;300');
+    expect(content).toContain('Water;Club A;Напитки;1;0;1;;50');
+    expect(content).not.toContain('Кола старая');
   });
 });

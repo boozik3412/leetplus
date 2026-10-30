@@ -22,7 +22,8 @@ type MovementRow = {
   storeName: string;
   categoryName: string;
   totalQuantity: number;
-  stockQuantity: number;
+  /** Null when there is no fresh stock for the SKU. */
+  stockQuantity: number | null;
   totalRevenue: number;
   dailyQuantity: Record<string, number>;
 };
@@ -177,7 +178,8 @@ export default async function ProductMovementTablePage({
             <p className="mt-2 max-w-3xl text-sm text-zinc-600">
               Продажи за последние {days} полных дней,{" "}
               {formatDateLabel(range.from)} - {formatDateLabel(range.to)}, в
-              разрезе SKU, клубов и категорий.
+              разрезе SKU, клубов и категорий. Дни считаются по времени клуба,
+              отменённые продажи не учитываются.
             </p>
           </div>
           <Link
@@ -303,7 +305,7 @@ export default async function ProductMovementTablePage({
                   {formatQuantity(row.totalQuantity)}
                 </td>
                 <td className="px-4 py-3 text-right font-semibold tabular-nums">
-                  {formatQuantity(row.stockQuantity)}
+                  {formatNullableQuantity(row.stockQuantity)}
                 </td>
                 <td className="px-4 py-3 text-right font-semibold tabular-nums">
                   {formatCurrency(row.totalRevenue)}
@@ -359,6 +361,10 @@ function buildMovementRows(
     ]),
   );
   const filteredRows = rows.filter((row) => {
+    if (row.isCanceled) {
+      return false;
+    }
+
     if (filters.storeId && row.storeId !== filters.storeId) {
       return false;
     }
@@ -389,16 +395,16 @@ function aggregateMovementRows(
   rows.forEach((row) => {
     const categoryName = row.categoryName ?? "Без категории";
     const key = `${row.storeId}:${row.productId}`;
-    const date = row.saleDate.slice(0, 10);
+    const date = row.saleDay;
     const current =
       result.get(key) ??
       ({
         key,
-        label: row.productNameAtSale ?? row.productName,
+        label: row.productName,
         storeName: row.storeName,
         categoryName,
         totalQuantity: 0,
-        stockQuantity: stockByStoreProduct.get(key) ?? 0,
+        stockQuantity: stockByStoreProduct.get(key) ?? null,
         totalRevenue: 0,
         dailyQuantity: Object.fromEntries(dates.map((day) => [day, 0])),
       } satisfies MovementRow);

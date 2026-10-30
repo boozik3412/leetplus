@@ -7569,6 +7569,135 @@ describe('GuestGamificationService', () => {
         activationData.periodFrom.toISOString(),
       );
       expect(result.mission.periodTo).toBeNull();
+      expect(prisma.guestGameAuditEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          entityType: 'MISSION',
+          entityId: 'mission-1',
+          action: 'MISSION_WIZARD_ACTIVATED',
+        }),
+      });
+    });
+
+    it('keeps the activation time when an edited live mission is saved', async () => {
+      const { service, prisma } = createService();
+      const startedAt = new Date('2026-10-01T09:00:00.000Z');
+      const active = missionRow({
+        status: 'ACTIVE',
+        periodFrom: startedAt,
+        conditions: {
+          ...missionRow().conditions,
+          activatedAt: startedAt.toISOString(),
+        },
+      });
+      prisma.guestGameMission.findFirst.mockResolvedValue(active);
+      prisma.store.findMany.mockResolvedValue([
+        { id: 'store-1', externalDomain: 'domain-1' },
+      ]);
+      prisma.guestGameMission.update.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve(missionRow({ ...data, periodFrom: startedAt })),
+      );
+
+      await service.saveMissionWizard(
+        user,
+        {
+          name: 'Renamed mission',
+          taskType: 'APP_OPEN',
+          visibility: 'VISIBLE',
+          storeIds: ['store-1'],
+          indefinite: true,
+          conditions: {},
+          reward: { type: 'NONE', xpEnabled: false },
+        },
+        'mission-1',
+      );
+
+      const data = prisma.guestGameMission.update.mock.calls[0][0].data;
+      expect(data.status).toBe('DRAFT');
+      expect(data.conditions).toMatchObject({
+        activatedAt: startedAt.toISOString(),
+      });
+      expect(data.periodFrom).toEqual(startedAt);
+      const audit = prisma.guestGameAuditEvent.create.mock.calls[0][0].data;
+      expect(audit).toMatchObject({
+        entityType: 'MISSION',
+        entityId: 'mission-1',
+        action: 'MISSION_WIZARD_SAVED',
+        payload: {
+          actorUserId: user.id,
+          before: {
+            name: 'Indefinite mission',
+            status: 'ACTIVE',
+            activatedAt: startedAt.toISOString(),
+            periodFrom: startedAt.toISOString(),
+          },
+          after: { name: 'Renamed mission', status: 'DRAFT' },
+        },
+      });
+    });
+
+    it('re-publishes an edited indefinite mission without restarting progress', async () => {
+      const { service, prisma } = createService();
+      const startedAt = new Date('2026-10-01T09:00:00.000Z');
+      const edited = missionRow({
+        status: 'DRAFT',
+        periodFrom: startedAt,
+        conditions: {
+          ...missionRow().conditions,
+          activatedAt: startedAt.toISOString(),
+        },
+      });
+      prisma.guestGameMission.findFirst.mockResolvedValue(edited);
+      prisma.guestGameMission.findFirstOrThrow.mockResolvedValue(edited);
+      prisma.store.findFirst.mockResolvedValue(visualEditorStore());
+      prisma.guestGameMission.update.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve(missionRow({ ...data })),
+      );
+
+      await service.activateMissionWizard(user, 'mission-1');
+      const activationData =
+        prisma.guestGameMission.update.mock.calls[0][0].data;
+
+      expect(activationData.status).toBe('ACTIVE');
+      expect(activationData.periodFrom).toEqual(startedAt);
+      expect(activationData.conditions).toMatchObject({
+        activatedAt: startedAt.toISOString(),
+      });
+      expect(
+        prisma.guestGameAuditEvent.create.mock.calls[0][0].data.action,
+      ).toBe('MISSION_WIZARD_REPUBLISHED');
+    });
+
+    it('restarts a paused mission that is published again', async () => {
+      const { service, prisma } = createService();
+      const startedAt = new Date('2026-10-01T09:00:00.000Z');
+      const paused = missionRow({
+        status: 'PAUSED',
+        periodFrom: startedAt,
+        conditions: {
+          ...missionRow().conditions,
+          activatedAt: startedAt.toISOString(),
+        },
+      });
+      prisma.guestGameMission.findFirst.mockResolvedValue(paused);
+      prisma.guestGameMission.findFirstOrThrow.mockResolvedValue(paused);
+      prisma.store.findFirst.mockResolvedValue(visualEditorStore());
+      prisma.guestGameMission.update.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve(missionRow({ ...data })),
+      );
+
+      await service.activateMissionWizard(user, 'mission-1');
+      const activationData =
+        prisma.guestGameMission.update.mock.calls[0][0].data;
+
+      expect(activationData.periodFrom.getTime()).toBeGreaterThan(
+        startedAt.getTime(),
+      );
+      expect(activationData.conditions.activatedAt).toBe(
+        activationData.periodFrom.toISOString(),
+      );
     });
   });
 

@@ -8472,6 +8472,8 @@ describe('GuestGamificationService', () => {
           id: 'loot-live',
           rewardLabel: 'Old prize',
           storeIds: ['store-1'],
+          // No prize list: the case drops its top-level reward.
+          probabilityRules: {},
         }),
         tenantId: user.tenantId,
         createdAt: now,
@@ -8572,6 +8574,111 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameRewardWalletItem.count).not.toHaveBeenCalled();
       expect(prisma.guestGameLootBox.update).toHaveBeenCalled();
     });
+
+    it.each([
+      [
+        'an editor-rebuilt prize JSON with the same prizes',
+        {
+          type: 'weighted',
+          source: 'business_controls',
+          caseRarity: 'RARE',
+          totalChancePercent: 100,
+          prizes: [
+            {
+              rewardType: 'BONUS_BALANCE',
+              rewardAmount: 50,
+              rewardLabel: '50 бонусов',
+              chancePercent: 85,
+              weight: 85,
+              noBonus: false,
+              visualMode: 'AUTO',
+              iconKey: 'coins',
+              imageUrl: null,
+              borderColor: '#22c55e',
+              textColor: null,
+              backgroundColor: null,
+            },
+            {
+              rewardType: 'BONUS_BALANCE',
+              rewardAmount: 200,
+              rewardLabel: '200 бонусов',
+              chancePercent: 15,
+              weight: 15,
+              noBonus: false,
+              visualMode: 'AUTO',
+              iconKey: 'coins',
+              imageUrl: null,
+              borderColor: null,
+              textColor: null,
+              backgroundColor: null,
+            },
+          ],
+        },
+        false,
+      ],
+      [
+        'a changed prize chance',
+        {
+          type: 'weighted',
+          prizes: [
+            {
+              rewardType: 'BONUS_BALANCE',
+              rewardAmount: 50,
+              rewardLabel: '50 бонусов',
+              weight: 50,
+            },
+            {
+              rewardType: 'BONUS_BALANCE',
+              rewardAmount: 200,
+              rewardLabel: '200 бонусов',
+              weight: 50,
+            },
+          ],
+        },
+        true,
+      ],
+    ])(
+      'with a live wallet right, saving a limit with %s is blocked=%s',
+      async (_label, probabilityRules, blocked) => {
+        const { service, prisma } = createService();
+        const row = {
+          ...activeLootBox({
+            id: 'loot-live',
+            storeIds: ['store-2', 'store-1'],
+            limits: { totalPerDay: 30, maxPendingRewards: 1 },
+          }),
+          rewardAmount: new Prisma.Decimal(50),
+          tenantId: user.tenantId,
+          createdAt: now,
+          updatedAt: now,
+          createdByUser: null,
+        };
+        prisma.guestGameLootBox.findFirst.mockResolvedValue(row);
+        prisma.guestGameRewardWalletItem.count.mockResolvedValue(1);
+        prisma.guestGameEntitlement.count.mockResolvedValue(1);
+        prisma.guestGameLootBox.update.mockResolvedValue(row);
+
+        const save = service.updateLootBox(user, 'loot-live', {
+          status: 'ACTIVE',
+          usageKind: 'STANDALONE',
+          storeIds: ['store-1', 'store-2'],
+          rewardType: 'BONUS_BALANCE',
+          rewardAmount: 50,
+          rewardLabel: '50 бонусов',
+          limits: { totalPerDay: 3000, maxPendingRewards: 1 },
+          probabilityRules,
+        });
+
+        if (blocked) {
+          await expect(save).rejects.toBeInstanceOf(ConflictException);
+          expect(prisma.guestGameLootBox.update).not.toHaveBeenCalled();
+        } else {
+          await save;
+          expect(prisma.guestGameRewardWalletItem.count).not.toHaveBeenCalled();
+          expect(prisma.guestGameLootBox.update).toHaveBeenCalled();
+        }
+      },
+    );
 
     it('blocks restart and delete while an unopened wallet right is live', async () => {
       const { service, prisma } = createService();

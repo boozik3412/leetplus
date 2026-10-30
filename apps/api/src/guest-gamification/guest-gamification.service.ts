@@ -26828,10 +26828,8 @@ function mapDelivery(row: DeliveryRow): GuestGameDelivery {
 // whether the guest module still shows it. Opening a held case skips every
 // issuance check (limits, budget, trigger, session, time windows, audience,
 // anti-fraud), so those stay editable while guests hold unopened cases.
-const lootBoxSemanticFields = [
-  'status',
-  'storeIds',
-  'usageKind',
+const lootBoxVisibilityFields = ['status', 'usageKind'] as const;
+const lootBoxPrizeFields = [
   'rewardType',
   'rewardAmount',
   'rewardLabel',
@@ -26845,21 +26843,68 @@ function lootBoxSemanticUpdateChanges(
     | Prisma.GuestGameLootBoxUncheckedUpdateInput,
 ) {
   const update = data as Record<string, unknown>;
+  const has = (field: string) => field in update;
+  const changed = (left: unknown, right: unknown) =>
+    canonicalGuestGameJsonFingerprint(lootBoxSemanticComparableValue(left)) !==
+    canonicalGuestGameJsonFingerprint(lootBoxSemanticComparableValue(right));
 
-  return lootBoxSemanticFields.some((field) => {
-    if (!Object.prototype.hasOwnProperty.call(update, field)) {
-      return false;
+  if (
+    lootBoxVisibilityFields.some(
+      (field) => has(field) && changed(current[field], update[field]),
+    )
+  ) {
+    return true;
+  }
+  if (
+    has('storeIds') &&
+    changed(
+      [...stringArray(current.storeIds as Prisma.JsonValue)].sort(),
+      [
+        ...stringArray(
+          lootBoxSemanticComparableValue(update.storeIds) as Prisma.JsonValue,
+        ),
+      ].sort(),
+    )
+  ) {
+    return true;
+  }
+  if (!lootBoxPrizeFields.some(has)) {
+    return false;
+  }
+
+  // The editors rebuild probabilityRules in their own JSON shape (colors,
+  // icons, legacy items, rarity labels), so compare the prizes a case can
+  // actually drop, the way opening reads them, not the raw JSON.
+  const next = { ...current };
+  for (const field of lootBoxPrizeFields) {
+    if (has(field)) {
+      next[field] = lootBoxSemanticComparableValue(update[field]);
     }
+  }
+  return changed(lootBoxDroppablePrizes(current), lootBoxDroppablePrizes(next));
+}
 
-    return (
-      canonicalGuestGameJsonFingerprint(
-        lootBoxSemanticComparableValue(current[field]),
-      ) !==
-      canonicalGuestGameJsonFingerprint(
-        lootBoxSemanticComparableValue(update[field]),
-      )
-    );
-  });
+function lootBoxDroppablePrizes(row: Record<string, unknown>) {
+  const rewardAmount = row.rewardAmount;
+  return lootBoxRewards({
+    name: typeof row.name === 'string' ? row.name : '',
+    rewardType: typeof row.rewardType === 'string' ? row.rewardType : null,
+    rewardAmount:
+      rewardAmount === null || rewardAmount === undefined
+        ? null
+        : Number(
+            rewardAmount instanceof Prisma.Decimal
+              ? rewardAmount.toString()
+              : rewardAmount,
+          ),
+    rewardLabel: typeof row.rewardLabel === 'string' ? row.rewardLabel : null,
+    probabilityRules: row.probabilityRules ?? null,
+  } as GuestGameLootBox).map((prize) => ({
+    rewardType: prize.rewardType,
+    rewardAmount: roundMoney(Number(prize.rewardAmount ?? 0)),
+    rewardLabel: prize.rewardLabel,
+    chancePercent: prize.chancePercent,
+  }));
 }
 
 function lootBoxSemanticComparableValue(value: unknown): unknown {

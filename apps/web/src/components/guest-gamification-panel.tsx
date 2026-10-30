@@ -1557,6 +1557,7 @@ export function GuestGamificationPanel({
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editingLootBoxId, setEditingLootBoxId] = useState<string | null>(null);
   const [isLootBoxFormOpen, setIsLootBoxFormOpen] = useState(false);
+  const [lootBoxFormRevealSeq, setLootBoxFormRevealSeq] = useState(0);
   const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
   const [isMissionFormOpen, setIsMissionFormOpen] = useState(false);
   const [editingSeasonId, setEditingSeasonId] = useState<string | null>(null);
@@ -1719,6 +1720,7 @@ export function GuestGamificationPanel({
     setEditingLootBoxId(lootBox.id);
     setIsLootBoxFormOpen(true);
     setActiveTab("lootBoxes");
+    setLootBoxFormRevealSeq((seq) => seq + 1);
   }
 
   function createLootBox() {
@@ -3159,6 +3161,7 @@ export function GuestGamificationPanel({
               guestLogCatalog={workspace.guestLogCatalog}
               editingId={editingLootBoxId}
               isFormOpen={isLootBoxFormOpen}
+              formRevealSeq={lootBoxFormRevealSeq}
               onSave={saveLootBox}
               onEdit={editLootBox}
               onCreateNew={createLootBox}
@@ -7591,6 +7594,7 @@ function LootBoxesTab({
   guestLogCatalog,
   editingId,
   isFormOpen,
+  formRevealSeq,
   onSave,
   onEdit,
   onCreateNew,
@@ -7610,6 +7614,7 @@ function LootBoxesTab({
   guestLogCatalog: GuestGameGuestLogCatalog;
   editingId: string | null;
   isFormOpen: boolean;
+  formRevealSeq: number;
   onSave: () => Promise<void>;
   onEdit: (lootBox: GuestGameLootBox) => void;
   onCreateNew: () => void;
@@ -7648,6 +7653,7 @@ function LootBoxesTab({
     <RulesLayout
       canManage={canManage}
       formTitle={formTitle}
+      formRevealSeq={formRevealSeq}
       formAction={
         !isFormOpen ? (
           <button
@@ -12766,6 +12772,7 @@ function RulesLayout<T>({
   items,
   renderItem,
   layout = "sidebar",
+  formRevealSeq = 0,
 }: {
   canManage: boolean;
   formTitle: string;
@@ -12776,8 +12783,32 @@ function RulesLayout<T>({
   items: T[];
   renderItem: (item: T) => ReactNode;
   layout?: "sidebar" | "stacked";
+  /** Bump to bring the form into view (e.g. after «Редактировать» in the list). */
+  formRevealSeq?: number;
 }) {
   const isStacked = layout === "stacked";
+  const formRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!formRevealSeq) {
+      return;
+    }
+    const element = formRef.current;
+    if (!element) {
+      return;
+    }
+    const rect = element.getBoundingClientRect();
+    if (rect.top >= 0 && rect.top < window.innerHeight / 2) {
+      return;
+    }
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    element.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "start",
+    });
+  }, [formRevealSeq]);
 
   return (
     <div
@@ -12790,9 +12821,11 @@ function RulesLayout<T>({
       }
     >
       {canManage ? (
-        <Panel title={formTitle} action={formAction}>
-          {form}
-        </Panel>
+        <div ref={formRef} className="scroll-mt-4">
+          <Panel title={formTitle} action={formAction}>
+            {form}
+          </Panel>
+        </div>
       ) : null}
       <section className="min-w-0 space-y-3">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">

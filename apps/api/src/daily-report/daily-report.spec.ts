@@ -20,6 +20,7 @@ import {
   localTime,
   wallClockStoredAsUtcToInstant,
 } from './daily-report-window';
+import { closedClubIds, DailyReportService } from './daily-report.service';
 import type {
   DailyReportInput,
   DailyReportShiftRow,
@@ -585,6 +586,205 @@ describe('daily report builder', () => {
     const [summary] = renderDailyReport(buildDailyReport(input()), null);
     expect(summary).toContain(`<b>${formatRub(33500)}</b> касса`);
     expect(summary).not.toContain('онлайн');
+  });
+});
+
+describe('closed clubs', () => {
+  const closure = (
+    storeId: string,
+    closedFrom: string,
+    reopenedOn: string | null,
+  ) => ({ storeId, closedFrom, reopenedOn });
+
+  it('drops a club closed on its report day and keeps it from the day it reopens', () => {
+    const clubs = [
+      { storeId: 'rod', reportDate: '2026-10-31' },
+      { storeId: 'izh', reportDate: '2026-10-31' },
+      { storeId: 'hol', reportDate: '2026-10-31' },
+      { storeId: 'rad', reportDate: '2026-10-31' },
+    ];
+    const closed = closedClubIds(clubs, [
+      // Closed with no reopening date: out.
+      closure('rod', '2026-10-15', null),
+      // Reopens on the report day: back in.
+      closure('izh', '2026-10-20', '2026-10-31'),
+      // Closes the day after: still in.
+      closure('hol', '2026-11-01', null),
+      // Reopens tomorrow: still out.
+      closure('rad', '2026-10-30', '2026-11-01'),
+    ]);
+    expect([...closed].sort()).toEqual(['rad', 'rod']);
+  });
+
+  it('reads each club on its own report day', () => {
+    const closed = closedClubIds(
+      [
+        { storeId: 'izh', reportDate: '2026-10-30' },
+        { storeId: 'ekb', reportDate: '2026-10-31' },
+      ],
+      [closure('izh', '2026-10-31', null), closure('ekb', '2026-10-31', null)],
+    );
+    expect([...closed]).toEqual(['ekb']);
+  });
+
+  function serviceWith(
+    stores: Array<{ id: string; name: string; externalDomain: string | null }>,
+    closures: Array<{
+      storeId: string;
+      closedFrom: Date;
+      reopenedOn: Date | null;
+    }>,
+  ) {
+    const none = () => Promise.resolve([]);
+    const storeFindMany = jest.fn(
+      ({ where }: { where: { id?: { in?: string[]; notIn?: string[] } } }) =>
+        Promise.resolve(
+          stores
+            .filter(
+              (store) =>
+                (!where.id?.in || where.id.in.includes(store.id)) &&
+                (!where.id?.notIn || !where.id.notIn.includes(store.id)),
+            )
+            .map((store) => ({
+              ...store,
+              timeZone: IZHEVSK,
+              computerCount: 10,
+            })),
+        ),
+    );
+    const prisma = {
+      store: { findMany: storeFindMany },
+      storeClosure: {
+        findMany: jest.fn(
+          ({ where }: { where: { storeId: { in: string[] } } }) =>
+            Promise.resolve(
+              closures.filter((item) =>
+                where.storeId.in.includes(item.storeId),
+              ),
+            ),
+        ),
+      },
+      guestWorkingShift: { findMany: jest.fn(none) },
+      salesFact: { findMany: jest.fn(none), groupBy: jest.fn(none) },
+      guestSession: { findMany: jest.fn(none) },
+      productOosExclusion: { findMany: jest.fn(none) },
+      guestOperationLog: { findMany: jest.fn(none) },
+      inventorySnapshot: { groupBy: jest.fn(none), findMany: jest.fn(none) },
+      langameStaffUser: { findMany: jest.fn(none) },
+    };
+    const service = new DailyReportService(
+      prisma as never,
+      {} as never,
+      {} as never,
+    );
+    return { service, prisma };
+  }
+
+  const now = new Date('2026-10-31T07:00:00.000Z');
+  const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
+
+  it('leaves a closed club out of the network report and its online', async () => {
+    const { service, prisma } = serviceWith(
+      [
+        {
+          id: 'izh',
+          name: '1337 Пушкинская',
+          externalDomain: 'pair.langame.ru',
+        },
+        {
+          id: 'hol',
+          name: '1337 Холмогорова',
+          externalDomain: 'pair.langame.ru',
+        },
+        {
+          id: 'rod',
+          name: '1337 Родонитовая',
+          externalDomain: 'rod.langame.ru',
+        },
+      ],
+      [{ storeId: 'rod', closedFrom: day('2026-10-15'), reopenedOn: null }],
+    );
+    const input = await service.loadInput(
+      { tenantId: 'demo', storeIds: null },
+      now,
+    );
+    expect(input.stores.map((store) => store.id)).toEqual(['izh', 'hol']);
+    expect(Object.keys(input.baselineWindows).sort()).toEqual(['hol', 'izh']);
+    const shiftWhere = prisma.guestWorkingShift.findMany.mock.calls[0][0] as {
+      where: { storeId: { in: string[] } };
+    };
+    expect(shiftWhere.where.storeId.in.sort()).toEqual(['hol', 'izh']);
+    const onlineWhere = prisma.guestOperationLog.findMany.mock.calls[0][0] as {
+      where: { externalDomain: { in: string[] } };
+    };
+    expect(onlineWhere.where.externalDomain.in).toEqual(['pair.langame.ru']);
+  });
+
+  it('gives the whole address online to the open club when its pair is closed', async () => {
+    const { service } = serviceWith(
+      [
+        {
+          id: 'izh',
+          name: '1337 Пушкинская',
+          externalDomain: 'pair.langame.ru',
+        },
+        {
+          id: 'hol',
+          name: '1337 Холмогорова',
+          externalDomain: 'pair.langame.ru',
+        },
+      ],
+      [{ storeId: 'hol', closedFrom: day('2026-10-01'), reopenedOn: null }],
+    );
+    const input = await service.loadInput(
+      { tenantId: 'demo', storeIds: ['izh'] },
+      now,
+    );
+    expect(input.stores.map((store) => store.id)).toEqual(['izh']);
+    expect(input.addressPeers ?? []).toEqual([]);
+  });
+
+  it('builds an empty report for a recipient whose clubs are all closed', async () => {
+    const { service } = serviceWith(
+      [
+        {
+          id: 'rod',
+          name: '1337 Родонитовая',
+          externalDomain: 'rod.langame.ru',
+        },
+      ],
+      [{ storeId: 'rod', closedFrom: day('2026-10-15'), reopenedOn: null }],
+    );
+    const report = await service.build(
+      { tenantId: 'demo', storeIds: ['rod'] },
+      now,
+    );
+    expect(report.clubs).toEqual([]);
+  });
+
+  it('reports a club again from the day it reopens', async () => {
+    const { service } = serviceWith(
+      [
+        {
+          id: 'rod',
+          name: '1337 Родонитовая',
+          externalDomain: 'rod.langame.ru',
+        },
+      ],
+      [
+        {
+          storeId: 'rod',
+          closedFrom: day('2026-10-15'),
+          reopenedOn: day('2026-10-30'),
+        },
+      ],
+    );
+    const input = await service.loadInput(
+      { tenantId: 'demo', storeIds: null },
+      now,
+      '2026-10-30',
+    );
+    expect(input.stores.map((store) => store.id)).toEqual(['rod']);
   });
 });
 

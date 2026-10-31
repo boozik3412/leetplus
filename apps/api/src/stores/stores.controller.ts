@@ -132,4 +132,15 @@ export class StoresController {
   archive(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.storesService.archive(id, user);
   }
+
+  @Roles(UserRole.OWNER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post(':id/delete')
+  deleteEmpty(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.storesService.deleteEmpty(id, body ?? {}, user);
+  }
 }

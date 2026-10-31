@@ -18,6 +18,11 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { SHARED_BETA_INITIAL_OWNER_CAPABILITIES } from '../auth/capabilities';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  StoreDeletionService,
+  type DeleteStoreResult,
+  type StoreDeletionCandidate,
+} from '../stores/store-deletion.service';
 import { OPEN_ENDED_TENANT_ACCESS_ENDS_AT } from '../tenancy/tenant-access-window';
 import { COMPLETE_TENANT_MODULE_PROFILE } from '../tenancy/tenant-entitlement-profile.service';
 
@@ -44,6 +49,7 @@ const CREATE_FIELDS = new Set([
 ]);
 const OWNER_LINK_FIELDS = new Set(['confirmation', 'linkExpiresInDays']);
 const DELETE_FIELDS = new Set(['confirmation']);
+const STORE_DELETE_FIELDS = new Set(['confirmation']);
 
 type CreateNetworkCommand = {
   tenantName: string;
@@ -108,6 +114,7 @@ export class PlatformNetworkService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly storeDeletion: StoreDeletionService,
   ) {}
 
   async create(
@@ -487,6 +494,32 @@ export class PlatformNetworkService {
       }
       throw error;
     }
+  }
+
+  async listStores(
+    actor: AuthenticatedUser,
+    tenantId: string,
+  ): Promise<{ stores: StoreDeletionCandidate[] }> {
+    this.assertPlatformAdminActor(actor);
+    return { stores: await this.storeDeletion.listCandidates(tenantId) };
+  }
+
+  async deleteStore(
+    actor: AuthenticatedUser,
+    tenantId: string,
+    storeId: string,
+    dto: unknown,
+  ): Promise<DeleteStoreResult> {
+    this.assertPlatformAdminActor(actor);
+    const body = this.record(dto, STORE_DELETE_FIELDS);
+    return this.storeDeletion.deleteStore({
+      tenantId,
+      storeId,
+      actorUserId: actor.id,
+      actorKind: 'PLATFORM_ADMIN',
+      confirmation: body.confirmation,
+      authorize: (tx) => this.assertFreshPlatformAdmin(tx, actor.id),
+    });
   }
 
   private async createOwnerInvite(

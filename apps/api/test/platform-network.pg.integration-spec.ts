@@ -10,6 +10,7 @@ import { IdentityEmailClaimService } from '../src/auth/identity-email-claim.serv
 import { InitialOwnerInviteDeliveryGateService } from '../src/auth/initial-owner-invite-delivery-gate.service';
 import { PasswordService } from '../src/auth/password.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { StoreDeletionService } from '../src/stores/store-deletion.service';
 import { AccessScopeService } from '../src/tenancy/access-scope.service';
 import { TenantExecutionPolicyService } from '../src/tenancy/tenant-execution-policy.service';
 
@@ -72,7 +73,11 @@ describePostgres('platform network PostgreSQL workflow', () => {
       isActive: true,
     } as AuthenticatedUser;
 
-    networks = new PlatformNetworkService(prisma, config);
+    networks = new PlatformNetworkService(
+      prisma,
+      config,
+      new StoreDeletionService(prisma),
+    );
     auth = new AuthService(
       prisma,
       new PasswordService(),

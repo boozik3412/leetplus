@@ -1859,6 +1859,28 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   `IdentityEmailClaim`, поэтому сеть, где кто-то зарегистрировался через
   claim boundary, отклоняется внешним ключом целиком, без частичного удаления.
 
+### Удаление пустого клуба
+
+- Два входа в один `StoreDeletionService`: control plane
+  `GET /admin/tenants/:tenantId/stores` (клубы сети с причинами, почему их нельзя
+  удалить) и `POST /admin/tenants/:tenantId/stores/:storeId/delete` (platform
+  admin, свежая проверка `isPlatformAdmin` в транзакции); corporate
+  `POST /stores/:id/delete` (`OWNER` с `NETWORK` scope, `FreshStoreScopeService.
+  assertNetwork` и повторная проверка роли, scope и tenant актора в транзакции).
+  Web — панель «Клубы сети» на `/administration` и кнопка «Удалить» на `/stores`
+  только для владельца сети. Подтверждение — `confirmation = УДАЛИТЬ`.
+- Большинство внешних ключей на `Store` — `ON DELETE SET NULL`, поэтому удаление
+  клуба с данными молча отвязало бы продажи, гостей и персонал. Удаление
+  отклоняется, пока клуб упомянут хоть в одной строке `STORE_REFERENCES`
+  (продажи, остатки, гости, игра, маркетинг, персонал, закрытия), есть доступы
+  сотрудников к клубу, неиспользованные приглашения на него или привязка к
+  Langame; PostgreSQL-тест сверяет список с каталогом БД, новый столбец со
+  ссылкой на клуб без записи в список роняет CI. Нельзя удалить последний
+  действующий клуб сети и чужой клуб.
+- Строка клуба блокируется `FOR UPDATE` до проверок (конфликтует с `KEY SHARE`
+  любой вставки со ссылкой на клуб), удаления в одной сети сериализуются
+  advisory lock. Audit `STORE_DELETED` с `tenantId` сети и видом актора.
+
 ### Делегирование учётных записей сотрудникам
 
 - `/users/invites*` принадлежит corporate tenant contour и всегда требует

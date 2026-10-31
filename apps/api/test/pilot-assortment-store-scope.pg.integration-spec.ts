@@ -55,6 +55,7 @@ import { ReportsDigestService } from '../src/reports/reports-digest.service';
 import { ReportsEmailService } from '../src/reports/reports-email.service';
 import { ReportsExportService } from '../src/reports/reports-export.service';
 import { ReportsService } from '../src/reports/reports.service';
+import { StoreDeletionService } from '../src/stores/store-deletion.service';
 import { StoresService } from '../src/stores/stores.service';
 import { SuppliersService } from '../src/suppliers/suppliers.service';
 import { AccessScopeService } from '../src/tenancy/access-scope.service';
@@ -1572,6 +1573,7 @@ function buildStoresService(prisma: PrismaService) {
     new TenantContextService(),
     new ConfigService(),
     freshStoreScopeService,
+    new StoreDeletionService(prisma),
   );
 }
 

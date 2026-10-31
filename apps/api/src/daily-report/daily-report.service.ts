@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { IntegrationProvider, Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { closureDay, type ClosurePeriod } from '../common/store-closure';
 import { PrismaService } from '../prisma/prisma.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { buildDailyReport } from './daily-report-builder';
@@ -31,6 +32,28 @@ const ADMIN_HISTORY_DAYS = 30;
 const STOCK_DAYS = 14;
 const OPEN_SHIFT_LOOKBACK_MS = 2 * DAY_MS;
 const DATE_INPUT = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Clubs closed on their own report day: the day lies in a closure's
+ * [closedFrom, reopenedOn), so a club is back on the day it reopens.
+ */
+export function closedClubIds(
+  clubs: ReadonlyArray<{ storeId: string; reportDate: string }>,
+  closures: ReadonlyArray<ClosurePeriod & { storeId: string }>,
+) {
+  return new Set(
+    clubs
+      .filter(({ storeId, reportDate }) =>
+        closures.some(
+          (closure) =>
+            closure.storeId === storeId &&
+            closure.closedFrom <= reportDate &&
+            (closure.reopenedOn === null || reportDate < closure.reopenedOn),
+        ),
+      )
+      .map(({ storeId }) => storeId),
+  );
+}
 
 export type DailyReportPreview = {
   report: DailyReport;
@@ -126,40 +149,9 @@ export class DailyReportService {
       computerCount: true,
       externalDomain: true,
     } satisfies Prisma.StoreSelect;
-    const stores = await this.prisma.store.findMany({
-      where: {
-        tenantId: scope.tenantId,
-        isActive: true,
-        ...(scope.storeIds ? { id: { in: [...scope.storeIds] } } : {}),
-      },
-      select: storeSelect,
-      orderBy: { name: 'asc' },
-    });
-    const storeIds = stores.map((store) => store.id);
-    // Clubs outside the scope on a reported club's Langame address weigh the
-    // split of the address's online top-ups.
-    const domains = [
-      ...new Set(
-        stores.flatMap((store) =>
-          store.externalDomain?.trim() ? [store.externalDomain] : [],
-        ),
-      ),
-    ];
-    const peers =
-      scope.storeIds && domains.length
-        ? await this.prisma.store.findMany({
-            where: {
-              tenantId: scope.tenantId,
-              isActive: true,
-              id: { notIn: storeIds },
-              externalDomain: { in: domains },
-            },
-            select: storeSelect,
-            orderBy: { name: 'asc' },
-          })
-        : [];
-    const peerIds = peers.map((store) => store.id);
-    const windowsOf = (store: (typeof stores)[number]) => {
+    const windowsOf = (
+      store: Prisma.StoreGetPayload<{ select: typeof storeSelect }>,
+    ) => {
       const timeZone = store.timeZone?.trim() || 'UTC';
       const window = reportDate
         ? clubDayWindow(reportDate, timeZone)
@@ -172,8 +164,53 @@ export class DailyReportService {
       }
       return { store, window, baseline };
     };
-    const windows = stores.map(windowsOf);
-    const peerWindows = peers.map(windowsOf);
+    // A club closed on its report day (owner's closure in «Торговые точки») is
+    // out of the report: no club block, no follow-ups, no share of online.
+    const openOnReportDay = async (
+      rows: Prisma.StoreGetPayload<{ select: typeof storeSelect }>[],
+    ) => {
+      const windows = rows.map(windowsOf);
+      const closed = await this.closedOnReportDay(scope.tenantId, windows);
+      return windows.filter(({ store }) => !closed.has(store.id));
+    };
+    const windows = await openOnReportDay(
+      await this.prisma.store.findMany({
+        where: {
+          tenantId: scope.tenantId,
+          isActive: true,
+          ...(scope.storeIds ? { id: { in: [...scope.storeIds] } } : {}),
+        },
+        select: storeSelect,
+        orderBy: { name: 'asc' },
+      }),
+    );
+    const stores = windows.map(({ store }) => store);
+    const storeIds = stores.map((store) => store.id);
+    // Open clubs outside the scope on a reported club's Langame address weigh
+    // the split of the address's online top-ups.
+    const domains = [
+      ...new Set(
+        stores.flatMap((store) =>
+          store.externalDomain?.trim() ? [store.externalDomain] : [],
+        ),
+      ),
+    ];
+    const peerWindows =
+      scope.storeIds && domains.length
+        ? await openOnReportDay(
+            await this.prisma.store.findMany({
+              where: {
+                tenantId: scope.tenantId,
+                isActive: true,
+                id: { notIn: storeIds },
+                externalDomain: { in: domains },
+              },
+              select: storeSelect,
+              orderBy: { name: 'asc' },
+            }),
+          )
+        : [];
+    const peerIds = peerWindows.map(({ store }) => store.id);
 
     if (!windows.length) {
       return {
@@ -387,6 +424,37 @@ export class DailyReportService {
    * club clock stored as UTC. A sync of another period stores the same
    * operation once more under a new key, hence one row per payload.
    */
+  private async closedOnReportDay(
+    tenantId: string,
+    windows: ReadonlyArray<{ store: { id: string }; window: ClubDayWindow }>,
+  ) {
+    if (!windows.length) return new Set<string>();
+    const days = windows.map(({ window }) => window.reportDate).sort();
+    const closures = await this.prisma.storeClosure.findMany({
+      where: {
+        tenantId,
+        storeId: { in: windows.map(({ store }) => store.id) },
+        closedFrom: { lte: new Date(`${days.at(-1)}T00:00:00.000Z`) },
+        OR: [
+          { reopenedOn: null },
+          { reopenedOn: { gt: new Date(`${days[0]}T00:00:00.000Z`) } },
+        ],
+      },
+      select: { storeId: true, closedFrom: true, reopenedOn: true },
+    });
+    return closedClubIds(
+      windows.map(({ store, window }) => ({
+        storeId: store.id,
+        reportDate: window.reportDate,
+      })),
+      closures.map((closure) => ({
+        storeId: closure.storeId,
+        closedFrom: closureDay(closure.closedFrom),
+        reopenedOn: closure.reopenedOn ? closureDay(closure.reopenedOn) : null,
+      })),
+    );
+  }
+
   private async loadOnlineTopups(
     tenantId: string,
     windows: Array<{

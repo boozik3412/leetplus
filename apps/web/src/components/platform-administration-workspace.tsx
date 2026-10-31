@@ -6,6 +6,7 @@ import { startNavigationFeedback } from "@/components/navigation-feedback";
 import {
   PlatformNetworkActionsPanel,
   PlatformNetworkCreatePanel,
+  PlatformNetworkStoresPanel,
 } from "@/components/platform-network-panels";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import {
@@ -1223,6 +1224,10 @@ export function PlatformAdministrationWorkspace({
                         onChanged={refreshAfterAccessChange}
                       />
                       <PlatformNetworkActionsPanel
+                        tenant={tenant}
+                        onChanged={refreshAfterAccessChange}
+                      />
+                      <PlatformNetworkStoresPanel
                         tenant={tenant}
                         onChanged={refreshAfterAccessChange}
                       />

@@ -1,5 +1,6 @@
 import { TenantCustomerStage, UserRole } from '@prisma/client';
 import { StoresService } from './stores.service';
+import type { StoreDeletionService } from './store-deletion.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -88,6 +89,7 @@ describe('StoresService', () => {
       tenantContext as unknown as TenantContextService,
       config as unknown as ConfigService,
       freshStoreScope as unknown as FreshStoreScopeService,
+      {} as StoreDeletionService,
     );
   });
 

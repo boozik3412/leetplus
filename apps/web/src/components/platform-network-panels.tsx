@@ -416,3 +416,190 @@ export function PlatformNetworkActionsPanel({
     </div>
   );
 }
+
+type NetworkStore = {
+  id: string;
+  name: string;
+  isActive: boolean;
+  blockers: string[];
+};
+
+const STORE_DELETE_CONFIRMATION = "УДАЛИТЬ";
+
+export function PlatformNetworkStoresPanel({
+  tenant,
+  onChanged,
+}: {
+  tenant: Pick<NetworkActionsTenant, "id" | "storesCount">;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [stores, setStores] = useState<NetworkStore[] | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (tenant.storesCount === 0) {
+    return null;
+  }
+
+  async function loadStores() {
+    setIsLoading(true);
+    setError(null);
+    const response = await fetch(`/api/admin/tenants/${tenant.id}/stores`, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      setError(await readError(response));
+      setIsLoading(false);
+      return;
+    }
+    const result = (await response.json()) as { stores: NetworkStore[] };
+    setStores(result.stores);
+    setIsLoading(false);
+  }
+
+  async function afterDelete() {
+    await loadStores();
+    await onChanged();
+  }
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase text-zinc-500">
+          Клубы сети ({tenant.storesCount})
+        </p>
+        <button
+          type="button"
+          disabled={isLoading}
+          onClick={() => void loadStores()}
+          className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-200"
+        >
+          {isLoading ? "Загружаем…" : stores ? "Обновить" : "Показать клубы"}
+        </button>
+      </div>
+      {error ? (
+        <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-200">
+          {error}
+        </p>
+      ) : null}
+      {stores ? (
+        <ul className="mt-3 grid gap-2">
+          {stores.map((store) => (
+            <NetworkStoreRow
+              key={store.id}
+              tenantId={tenant.id}
+              store={store}
+              onDeleted={afterDelete}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function NetworkStoreRow({
+  tenantId,
+  store,
+  onDeleted,
+}: {
+  tenantId: string;
+  store: NetworkStore;
+  onDeleted: () => Promise<void>;
+}) {
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canDelete = store.blockers.length === 0;
+
+  async function deleteStore() {
+    setIsDeleting(true);
+    setError(null);
+    const response = await fetch(
+      `/api/admin/tenants/${tenantId}/stores/${store.id}/delete`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation: confirmation.trim() }),
+      },
+    );
+    if (!response.ok) {
+      setError(await readError(response));
+      setIsDeleting(false);
+      return;
+    }
+    setIsDeleting(false);
+    await onDeleted();
+  }
+
+  return (
+    <li className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium">
+          {store.name}
+          {store.isActive ? null : (
+            <span className="ml-2 text-xs text-zinc-500">в архиве</span>
+          )}
+        </span>
+        {canDelete && !isConfirming ? (
+          <button
+            type="button"
+            onClick={() => setIsConfirming(true)}
+            className="rounded-lg border border-red-500/40 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:border-red-500 dark:text-red-200"
+          >
+            Удалить клуб
+          </button>
+        ) : null}
+      </div>
+      {canDelete ? null : (
+        <p className="mt-1 text-xs text-zinc-500">
+          Удалить нельзя: {store.blockers.join(", ")}
+        </p>
+      )}
+      {canDelete && isConfirming ? (
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+          <input
+            value={confirmation}
+            onChange={(event) => setConfirmation(event.target.value)}
+            placeholder={STORE_DELETE_CONFIRMATION}
+            aria-label={`Подтверждение удаления клуба ${store.name}`}
+            className="min-w-0 flex-1 rounded-lg border border-red-500/30 bg-white px-3 py-2 text-xs outline-none dark:bg-zinc-950"
+          />
+          <button
+            type="button"
+            disabled={
+              isDeleting || confirmation.trim() !== STORE_DELETE_CONFIRMATION
+            }
+            onClick={() => void deleteStore()}
+            className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isDeleting ? "Удаляем…" : "Удалить навсегда"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setIsConfirming(false);
+              setConfirmation("");
+              setError(null);
+            }}
+            className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
+          >
+            Отмена
+          </button>
+        </div>
+      ) : null}
+      {canDelete && isConfirming ? (
+        <p className="mt-1 text-xs text-zinc-500">
+          Клуб удаляется навсегда. Для подтверждения введите{" "}
+          <code className="font-semibold">{STORE_DELETE_CONFIRMATION}</code>.
+        </p>
+      ) : null}
+      {error ? (
+        <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-200">
+          {error}
+        </p>
+      ) : null}
+    </li>
+  );
+}

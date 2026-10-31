@@ -196,6 +196,11 @@ const NETWORK_MUTATION_BINDINGS: readonly NetworkMutationBinding[] = [
     method: 'create',
   },
   {
+    id: 'POST /stores/:id/delete',
+    source: 'src/stores/stores.service.ts',
+    method: 'deleteEmpty',
+  },
+  {
     id: 'PATCH /stores/:id/closures/:closureId',
     source: 'src/stores/store-closures.service.ts',
     method: 'update',
@@ -631,8 +636,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(338);
-    expect(allowed).toHaveLength(275);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(339);
+    expect(allowed).toHaveLength(276);
     expect(blocked).toHaveLength(63);
     expect(outbound).toHaveLength(22);
     expect(
@@ -715,6 +720,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       'POST /products',
       'POST /stores',
       'POST /stores/:id/closures',
+      'POST /stores/:id/delete',
       'POST /reports/oos-exclusions',
       'POST /suppliers',
       'POST /utilities/product-parsing/analyze',

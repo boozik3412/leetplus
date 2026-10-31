@@ -1,6 +1,7 @@
 import {
   StoreArchiveButton,
   StoreBulkGeocodeButton,
+  StoreDeleteButton,
   StoreCreateForm,
   StoreEditForm,
 } from "@/components/store-actions";
@@ -41,6 +42,9 @@ export default async function StoresPage({
   const closeClub = first(params.closeClub);
   const reopenClub = first(params.reopenClub);
   const canEditStores = can(user, "edit_stores");
+  // Permanent deletion of an empty club is reserved for the network owner.
+  const canDeleteStores =
+    user.role === "OWNER" && user.accessScope === "NETWORK";
   const missingCoordinates = stores.filter(
     (store) =>
       store.isActive &&
@@ -193,8 +197,11 @@ export default async function StoresPage({
                     </p>
                   </div>
                   {canEditStores ? (
-                    <div className="shrink-0">
+                    <div className="flex shrink-0 flex-col items-end gap-2">
                       <StoreArchiveButton id={store.id} />
+                      {canDeleteStores ? (
+                        <StoreDeleteButton id={store.id} name={store.name} />
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

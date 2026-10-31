@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import type { CreateStoreDto, UpdateStoreDto } from './stores.dto';
+import { StoreDeletionService } from './store-deletion.service';
 import {
   cityFromStoreAddress,
   isSupportedTimeZone,
@@ -82,6 +83,7 @@ export class StoresService {
     private readonly tenantContextService: TenantContextService,
     private readonly configService: ConfigService,
     private readonly freshStoreScopeService: FreshStoreScopeService,
+    private readonly storeDeletionService: StoreDeletionService,
   ) {}
 
   async findAll(user: AuthenticatedUser) {
@@ -707,6 +709,29 @@ export class StoresService {
         isActive: false,
         backgroundExecutionEnabled: false,
       },
+    });
+  }
+
+  async deleteEmpty(id: string, dto: unknown, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const body =
+      typeof dto === 'object' && dto !== null && !Array.isArray(dto)
+        ? (dto as Record<string, unknown>)
+        : {};
+
+    return this.storeDeletionService.deleteStore({
+      tenantId,
+      storeId: id,
+      actorUserId: user.id,
+      actorKind: 'NETWORK_OWNER',
+      confirmation: body.confirmation,
+      authorize: (tx) =>
+        this.storeDeletionService.assertFreshNetworkOwner(
+          tx,
+          user.id,
+          tenantId,
+        ),
     });
   }
 

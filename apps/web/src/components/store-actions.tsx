@@ -198,6 +198,89 @@ export function StoreArchiveButton({ id }: { id: string }) {
   );
 }
 
+const STORE_DELETE_CONFIRMATION = "УДАЛИТЬ";
+
+export function StoreDeleteButton({ id, name }: { id: string; name: string }) {
+  const router = useRouter();
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleDelete() {
+    setIsSubmitting(true);
+    setError(null);
+    const response = await fetch(`/api/stores/${id}/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmation: confirmation.trim() }),
+    });
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      const data = (await response.json()) as ErrorResponse;
+      setError(getErrorMessage(data));
+      return;
+    }
+
+    router.refresh();
+  }
+
+  if (!isConfirming) {
+    return (
+      <button
+        type="button"
+        onClick={() => setIsConfirming(true)}
+        className="rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+      >
+        Удалить
+      </button>
+    );
+  }
+
+  return (
+    <div className="grid w-64 gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-left">
+      <p className="text-xs text-zinc-700">
+        Клуб «{name}» удалится навсегда. Это возможно, только если у него нет
+        продаж, гостей, сотрудников и других данных; иначе отправьте его в
+        архив. Введите{" "}
+        <span className="font-semibold">{STORE_DELETE_CONFIRMATION}</span>.
+      </p>
+      <input
+        value={confirmation}
+        onChange={(event) => setConfirmation(event.target.value)}
+        placeholder={STORE_DELETE_CONFIRMATION}
+        aria-label={`Подтверждение удаления клуба ${name}`}
+        className="rounded-md border border-red-200 bg-white px-2 py-1.5 text-sm outline-none"
+      />
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={
+            isSubmitting || confirmation.trim() !== STORE_DELETE_CONFIRMATION
+          }
+          className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-red-300"
+        >
+          {isSubmitting ? "..." : "Удалить навсегда"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setIsConfirming(false);
+            setConfirmation("");
+            setError(null);
+          }}
+          className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-600"
+        >
+          Отмена
+        </button>
+      </div>
+      {error ? <p className="text-xs text-red-600">{error}</p> : null}
+    </div>
+  );
+}
+
 export function StoreBulkGeocodeButton({
   missingCount,
 }: {

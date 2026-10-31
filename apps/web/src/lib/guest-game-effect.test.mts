@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  formatGameEffectMonth,
+  formatGameEffectShare,
+  gameEffectReturnSeries,
+  gameEffectReturnShare,
   formatGameEffectDelta,
   formatGameEffectInterval,
   formatGameEffectValue,
@@ -53,17 +57,32 @@ function cohort(): GameEffectCohortView {
 }
 
 test("formats values in their units and signed deltas", () => {
-  assert.equal(formatGameEffectValue("playMinutes", 90).replace(nbsp, " "), "1,5 ч");
-  assert.equal(formatGameEffectValue("money", 1234).replace(nbsp, " "), "1 234 ₽");
+  assert.equal(
+    formatGameEffectValue("playMinutes", 90).replace(nbsp, " "),
+    "1,5 ч",
+  );
+  assert.equal(
+    formatGameEffectValue("money", 1234).replace(nbsp, " "),
+    "1 234 ₽",
+  );
   assert.equal(formatGameEffectDelta("visitDays", 1.46), "+1,5");
-  assert.equal(formatGameEffectDelta("money", -320).replace(nbsp, " "), "−320 ₽");
+  assert.equal(
+    formatGameEffectDelta("money", -320).replace(nbsp, " "),
+    "−320 ₽",
+  );
   assert.equal(formatGameEffectDelta("money", 0.2).replace(nbsp, " "), "0 ₽");
   assert.equal(formatGameEffectDelta("playMinutes", 30), "+0,5 ч");
   assert.equal(
-    formatGameEffectInterval("money", { ciLow: -10, ciHigh: 50 })?.replace(nbsp, " "),
+    formatGameEffectInterval("money", { ciLow: -10, ciHigh: 50 })?.replace(
+      nbsp,
+      " ",
+    ),
     "от −10 ₽ до +50 ₽",
   );
-  assert.equal(formatGameEffectInterval("money", { ciLow: null, ciHigh: 1 }), null);
+  assert.equal(
+    formatGameEffectInterval("money", { ciLow: null, ciHigh: 1 }),
+    null,
+  );
 });
 
 test("names verdict tones and holdout states", () => {
@@ -111,6 +130,8 @@ test("exports the game and every scenario as CSV", () => {
         cohort: cohort(),
       },
     ],
+    costByMonth: [],
+    returnByMonth: [],
   };
   const csv = gameEffectReportCsv(report);
   const lines = csv.split("\n");
@@ -119,4 +140,54 @@ test("exports the game and every scenario as CSV", () => {
   assert.ok(lines[1].startsWith("Игра в целом,Активация,12,10,2,0,40"));
   assert.ok(lines[2].startsWith('"Задание ""7 ДНЕЙ"", бонус",Задание'));
   assert.ok(lines[2].includes("Есть эффект"));
+});
+
+test("monthly return series puts every group of a month on one point", () => {
+  const rows = [
+    {
+      month: "2026-09",
+      group: "PLAYER",
+      guests: 12,
+      returned: 9,
+      partial: true,
+    },
+    {
+      month: "2026-08",
+      group: "NEVER",
+      guests: 10,
+      returned: 4,
+      partial: false,
+    },
+    {
+      month: "2026-08",
+      group: "FUTURE_PLAYER",
+      guests: 10,
+      returned: 8,
+      partial: false,
+    },
+    // Under 10 guests: no point.
+    { month: "2026-09", group: "NEVER", guests: 9, returned: 9, partial: true },
+  ] as const;
+  const series = gameEffectReturnSeries(rows);
+  assert.deepEqual(
+    series.map((point) => [
+      point.label,
+      point.PLAYER,
+      point.FUTURE_PLAYER,
+      point.NEVER,
+      point.partial,
+    ]),
+    [
+      ["авг 26", null, 0.8, 0.4, false],
+      ["сен 26", 0.75, null, null, true],
+    ],
+  );
+  assert.equal(gameEffectReturnShare(rows, "NEVER"), 0.4);
+  assert.equal(gameEffectReturnShare(rows, "PLAYER"), null);
+  assert.equal(
+    gameEffectReturnShare(rows, "PLAYER", { includePartial: true }),
+    0.75,
+  );
+  assert.equal(formatGameEffectShare(0.754), "75%");
+  assert.equal(formatGameEffectMonth("2026-01"), "янв 26");
 });

@@ -99,6 +99,36 @@ export type GameEffectReport = {
     }>;
   };
   scenarios: GameEffectScenarioView[];
+  /** Paid bonuses and prizes per month and mechanic, whole network. */
+  costByMonth: GameEffectMonthlyCost[];
+  /** Next-month return of players, future players and the rest, whole network. */
+  returnByMonth: GameEffectMonthlyReturn[];
+};
+
+export const GAME_EFFECT_COST_KINDS = [
+  "LOOT_BOX",
+  "MISSION",
+  "SEASON",
+  "OTHER",
+] as const;
+export type GameEffectCostKind = (typeof GAME_EFFECT_COST_KINDS)[number];
+
+export type GameEffectMonthlyCost = {
+  month: string;
+  bonusRub: Record<GameEffectCostKind, number>;
+  totalBonusRub: number;
+  prizes: number;
+  players: number;
+};
+
+export type GameEffectReturnGroup = "PLAYER" | "FUTURE_PLAYER" | "NEVER";
+
+export type GameEffectMonthlyReturn = {
+  month: string;
+  group: GameEffectReturnGroup;
+  guests: number;
+  returned: number;
+  partial: boolean;
 };
 
 export type GuestGameEffectActivation =
@@ -165,6 +195,110 @@ export const GAME_EFFECT_VERDICT_LABELS: Record<GameEffectVerdict, string> = {
   NO_EFFECT: "В пределах случайности",
   NOT_ENOUGH_DATA: "Мало данных",
 };
+
+export const GAME_EFFECT_COST_KIND_LABELS: Record<GameEffectCostKind, string> =
+  {
+    LOOT_BOX: "Кейсы",
+    MISSION: "Задания",
+    SEASON: "Боевой пропуск",
+    OTHER: "Без сценария",
+  };
+
+export const GAME_EFFECT_RETURN_GROUP_LABELS: Record<
+  GameEffectReturnGroup,
+  string
+> = {
+  PLAYER: "Игроки",
+  FUTURE_PLAYER: "Будущие игроки, до игры",
+  NEVER: "Не играли",
+};
+
+const MONTH_NAMES = [
+  "янв",
+  "фев",
+  "мар",
+  "апр",
+  "май",
+  "июн",
+  "июл",
+  "авг",
+  "сен",
+  "окт",
+  "ноя",
+  "дек",
+];
+
+/** "2026-10" → "окт 26". */
+export function formatGameEffectMonth(month: string): string {
+  const [year, value] = month.split("-");
+  return `${MONTH_NAMES[Number(value) - 1] ?? value} ${year.slice(2)}`;
+}
+
+export type GameEffectReturnPoint = {
+  month: string;
+  label: string;
+  /** Share 0..1 per group, null when the group had no guests that month. */
+  PLAYER: number | null;
+  FUTURE_PLAYER: number | null;
+  NEVER: number | null;
+  guests: Record<GameEffectReturnGroup, number>;
+  partial: boolean;
+};
+
+/** Fewer guests than this make a month's share noise, not a point. */
+export const GAME_EFFECT_RETURN_MIN_GUESTS = 10;
+
+/** One chart point per month with the return share of every group. */
+export function gameEffectReturnSeries(
+  rows: readonly GameEffectMonthlyReturn[],
+): GameEffectReturnPoint[] {
+  const byMonth = new Map<string, GameEffectReturnPoint>();
+  rows.forEach((row) => {
+    let point = byMonth.get(row.month);
+    if (!point) {
+      point = {
+        month: row.month,
+        label: formatGameEffectMonth(row.month),
+        PLAYER: null,
+        FUTURE_PLAYER: null,
+        NEVER: null,
+        guests: { PLAYER: 0, FUTURE_PLAYER: 0, NEVER: 0 },
+        partial: row.partial,
+      };
+      byMonth.set(row.month, point);
+    }
+    point[row.group] =
+      row.guests >= GAME_EFFECT_RETURN_MIN_GUESTS
+        ? row.returned / row.guests
+        : null;
+    point.guests[row.group] = row.guests;
+    point.partial = point.partial || row.partial;
+  });
+  return [...byMonth.values()].sort((left, right) =>
+    left.month.localeCompare(right.month),
+  );
+}
+
+/** Return share of a group over its months, weighted by guests. */
+export function gameEffectReturnShare(
+  rows: readonly GameEffectMonthlyReturn[],
+  group: GameEffectReturnGroup,
+  options: { includePartial?: boolean } = {},
+): number | null {
+  let guests = 0;
+  let returned = 0;
+  rows.forEach((row) => {
+    if (row.group !== group) return;
+    if (row.partial && !options.includePartial) return;
+    guests += row.guests;
+    returned += row.returned;
+  });
+  return guests ? returned / guests : null;
+}
+
+export function formatGameEffectShare(value: number | null): string {
+  return value === null ? "—" : `${Math.round(value * 100)}%`;
+}
 
 export type GameEffectTone = "good" | "bad" | "neutral" | "muted";
 
@@ -235,7 +369,9 @@ export function formatGameEffectInterval(
   return `от ${formatGameEffectDelta(metric, view.ciLow)} до ${formatGameEffectDelta(metric, view.ciHigh)}`;
 }
 
-export function gameEffectMetricTone(view: GameEffectMetricView): GameEffectTone {
+export function gameEffectMetricTone(
+  view: GameEffectMetricView,
+): GameEffectTone {
   if (!view.significant) return "neutral";
   return view.effect > 0 ? "good" : "bad";
 }

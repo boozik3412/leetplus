@@ -1,22 +1,42 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
+  GAME_EFFECT_COST_KINDS,
+  GAME_EFFECT_COST_KIND_LABELS,
   GAME_EFFECT_METRICS,
   GAME_EFFECT_METRIC_LABELS,
+  GAME_EFFECT_RETURN_GROUP_LABELS,
   GAME_EFFECT_SCENARIO_KIND_LABELS,
   GAME_EFFECT_VERDICT_LABELS,
   formatGameEffectDelta,
   formatGameEffectInterval,
+  formatGameEffectMonth,
+  formatGameEffectShare,
   formatGameEffectValue,
   gameEffectHoldoutStatus,
   gameEffectMetricTone,
   gameEffectReportCsv,
+  gameEffectReturnSeries,
+  gameEffectReturnShare,
   gameEffectVerdictHint,
   gameEffectVerdictTone,
   type GameEffectCohortView,
+  type GameEffectCostKind,
   type GameEffectMetric,
   type GameEffectReport,
+  type GameEffectReturnGroup,
   type GameEffectScenarioView,
   type GameEffectTone,
   type GameEffectVerdict,
@@ -104,10 +124,7 @@ export function GuestGamificationEffectTab({ canManage }: Props) {
   }
 
   return (
-    <section
-      className="mt-6 min-w-0 space-y-5"
-      aria-labelledby="effect-title"
-    >
+    <section className="mt-6 min-w-0 space-y-5" aria-labelledby="effect-title">
       <header className="overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-950 text-white shadow-sm dark:border-zinc-800">
         <div className="relative px-5 py-6 sm:px-7 sm:py-7">
           <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-cyan-400/15 blur-3xl" />
@@ -200,6 +217,8 @@ export function GuestGamificationEffectTab({ canManage }: Props) {
         >
           <DataQualityNotes report={data} />
           <GameSection report={data} />
+          <ReturnSection report={data} />
+          <CostSection report={data} />
           {!data.storeId && data.game.byStore.length > 1 ? (
             <StoreSection report={data} />
           ) : null}
@@ -271,7 +290,9 @@ function Delta({
   return (
     <span
       className={`font-semibold tabular-nums ${deltaClasses[gameEffectMetricTone(view)]}`}
-      title={formatGameEffectInterval(metric, view) ?? "Мало гостей для интервала"}
+      title={
+        formatGameEffectInterval(metric, view) ?? "Мало гостей для интервала"
+      }
     >
       {formatGameEffectDelta(metric, view.effect)}
     </span>
@@ -281,7 +302,8 @@ function Delta({
 function coverageText(cohort: GameEffectCohortView) {
   const parts = [`измерено ${cohort.measured} из ${cohort.participants}`];
   if (cohort.immature) parts.push(`окно ещё идёт у ${cohort.immature}`);
-  if (cohort.unmatched) parts.push(`без пары для сравнения ${cohort.unmatched}`);
+  if (cohort.unmatched)
+    parts.push(`без пары для сравнения ${cohort.unmatched}`);
   if (cohort.noHistory) parts.push(`без визитов в данных ${cohort.noHistory}`);
   return parts.join(" · ");
 }
@@ -394,6 +416,314 @@ function BeforeAfterTable({ cohort }: { cohort: GameEffectCohortView }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+const COST_KIND_COLORS: Record<GameEffectCostKind, string> = {
+  LOOT_BOX: "#0891b2",
+  MISSION: "#a1a1aa",
+  SEASON: "#d4d4d8",
+  OTHER: "#e4e4e7",
+};
+
+const RETURN_GROUPS: Array<{
+  group: GameEffectReturnGroup;
+  color: string;
+  dash?: string;
+}> = [
+  { group: "PLAYER", color: "#0891b2" },
+  { group: "FUTURE_PLAYER", color: "#0891b2", dash: "6 4" },
+  { group: "NEVER", color: "#a1a1aa" },
+];
+
+const chartTick = { fill: "#71717a", fontSize: 11 };
+const chartTooltipStyle = {
+  borderRadius: 12,
+  borderColor: "#e4e4e7",
+  fontSize: 12,
+};
+
+function networkNote(report: GameEffectReport) {
+  return report.storeId ? " Считается по всей сети, без фильтра клуба." : "";
+}
+
+function StatTile({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
+      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
+        {value}
+      </p>
+      <p className="mt-1 text-xs text-zinc-500">{hint}</p>
+    </div>
+  );
+}
+
+function ReturnSection({ report }: { report: GameEffectReport }) {
+  const series = useMemo(
+    () => gameEffectReturnSeries(report.returnByMonth),
+    [report.returnByMonth],
+  );
+  const shares = {
+    future: gameEffectReturnShare(report.returnByMonth, "FUTURE_PLAYER"),
+    never: gameEffectReturnShare(report.returnByMonth, "NEVER"),
+    player: gameEffectReturnShare(report.returnByMonth, "PLAYER"),
+  };
+  const partial = series.at(-1)?.partial ? series.at(-1) : null;
+  return (
+    <Card
+      title="Возвращаются ли игроки: до игры и после"
+      subtitle={`Доля гостей месяца, которые пришли и в следующем месяце; месяц, где в группе меньше 10 гостей, не показан. Будущие игроки — те, кто начнёт играть позже: линия показывает, какими они были до игры. Если они и до игры возвращались чаще остальных, эта разница — самоотбор, а не эффект игры.${networkNote(report)}`}
+    >
+      {series.length ? (
+        <>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatTile
+              label="Будущие игроки, до игры"
+              value={formatGameEffectShare(shares.future)}
+              hint="возвращались в следующем месяце"
+            />
+            <StatTile
+              label="Игроки после старта"
+              value={formatGameEffectShare(shares.player)}
+              hint="по закончившимся месяцам"
+            />
+            <StatTile
+              label="Не играли"
+              value={formatGameEffectShare(shares.never)}
+              hint="остальные гости"
+            />
+          </div>
+          <div
+            className="mt-4 h-64 w-full"
+            aria-label="Доля гостей, вернувшихся в следующем месяце, по группам"
+          >
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={series}
+                margin={{ top: 8, right: 12, bottom: 0, left: -12 }}
+              >
+                <CartesianGrid
+                  vertical={false}
+                  stroke="#e4e4e7"
+                  strokeDasharray="3 3"
+                />
+                <XAxis
+                  dataKey="label"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={chartTick}
+                  minTickGap={8}
+                />
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  tick={chartTick}
+                  domain={[0, 1]}
+                  ticks={[0, 0.25, 0.5, 0.75, 1]}
+                  tickFormatter={(value) =>
+                    formatGameEffectShare(Number(value))
+                  }
+                  width={48}
+                />
+                <Tooltip
+                  cursor={{ stroke: "#a1a1aa", strokeDasharray: "3 3" }}
+                  contentStyle={chartTooltipStyle}
+                  formatter={(value, name, item) => {
+                    const group = name as GameEffectReturnGroup;
+                    const guests = (
+                      item.payload as {
+                        guests: Record<GameEffectReturnGroup, number>;
+                      }
+                    ).guests[group];
+                    return [
+                      `${formatGameEffectShare(Number(value))} из ${guests}`,
+                      GAME_EFFECT_RETURN_GROUP_LABELS[group],
+                    ];
+                  }}
+                />
+                {RETURN_GROUPS.map(({ group, color, dash }) => (
+                  <Line
+                    key={group}
+                    type="linear"
+                    dataKey={group}
+                    name={group}
+                    stroke={color}
+                    strokeWidth={2.5}
+                    strokeDasharray={dash}
+                    dot={{ r: 3, fill: color, strokeWidth: 0 }}
+                    activeDot={{ r: 5, strokeWidth: 2, stroke: "#ffffff" }}
+                    connectNulls={false}
+                    isAnimationActive={false}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-zinc-600 dark:text-zinc-400">
+            {RETURN_GROUPS.map(({ group, color, dash }) => (
+              <span key={group} className="inline-flex items-center gap-2">
+                <svg width="22" height="6" aria-hidden>
+                  <line
+                    x1="0"
+                    x2="22"
+                    y1="3"
+                    y2="3"
+                    stroke={color}
+                    strokeWidth="2.5"
+                    strokeDasharray={dash}
+                  />
+                </svg>
+                {GAME_EFFECT_RETURN_GROUP_LABELS[group]}
+              </span>
+            ))}
+          </div>
+          {partial ? (
+            <p className="mt-2 text-xs text-zinc-500">
+              {`${partial.label}: следующий месяц ещё идёт, доля вырастет. Гость, который начал играть в следующем месяце, в этот месяц не входит: активация сама по себе часто означает визит.`}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <p className="text-sm text-zinc-500">Визитов за последний год нет.</p>
+      )}
+    </Card>
+  );
+}
+
+function CostSection({ report }: { report: GameEffectReport }) {
+  const rows = useMemo(
+    () =>
+      report.costByMonth.map((row) => ({
+        ...row,
+        label: formatGameEffectMonth(row.month),
+        ...row.bonusRub,
+      })),
+    [report.costByMonth],
+  );
+  const kinds = GAME_EFFECT_COST_KINDS.filter((kind) =>
+    report.costByMonth.some((row) => row.bonusRub[kind] > 0),
+  );
+  const last = report.costByMonth.at(-1);
+  const previous = report.costByMonth.at(-2);
+  const running = last?.month === report.generatedAt.slice(0, 7);
+  const lootShare =
+    last && last.totalBonusRub
+      ? last.bonusRub.LOOT_BOX / last.totalBonusRub
+      : null;
+  return (
+    <Card
+      title="Во что обходится игра"
+      subtitle={`Выплаченные бонусы по месяцам и механикам, по номиналу. Реальная цена бонуса ниже, если им платят за свободные места, и выше, если он заменяет оплату с депозита. Призы без цены считаются штуками.${networkNote(report)}`}
+    >
+      {last ? (
+        <>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatTile
+              label={`Бонусы · ${formatGameEffectMonth(last.month)}${running ? ", месяц идёт" : ""}`}
+              value={formatGameEffectValue("money", last.totalBonusRub)}
+              hint={
+                previous
+                  ? `${formatGameEffectMonth(previous.month)}: ${formatGameEffectValue("money", previous.totalBonusRub)}`
+                  : "первый месяц с выплатами"
+              }
+            />
+            <StatTile
+              label="На игрока с наградой"
+              value={
+                last.players
+                  ? formatGameEffectValue(
+                      "money",
+                      last.totalBonusRub / last.players,
+                    )
+                  : "—"
+              }
+              hint={`${last.players} игроков${last.prizes ? ` · призов ${last.prizes}` : ""}`}
+            />
+            <StatTile
+              label="Доля кейсов"
+              value={formatGameEffectShare(lootShare)}
+              hint="от бонусов месяца"
+            />
+          </div>
+          <div
+            className="mt-4 h-64 w-full"
+            aria-label="Выплаченные бонусы по месяцам и механикам"
+          >
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={rows}
+                margin={{ top: 8, right: 12, bottom: 0, left: -4 }}
+              >
+                <CartesianGrid
+                  vertical={false}
+                  stroke="#e4e4e7"
+                  strokeDasharray="3 3"
+                />
+                <XAxis
+                  dataKey="label"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={chartTick}
+                  minTickGap={8}
+                />
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  tick={chartTick}
+                  width={80}
+                  tickFormatter={(value) =>
+                    `${Math.round(Number(value) / 1000)} тыс.`
+                  }
+                />
+                <Tooltip
+                  cursor={{ fill: "rgba(161, 161, 170, 0.12)" }}
+                  contentStyle={chartTooltipStyle}
+                  formatter={(value, name) => [
+                    formatGameEffectValue("money", Number(value)),
+                    GAME_EFFECT_COST_KIND_LABELS[name as GameEffectCostKind],
+                  ]}
+                />
+                {kinds.map((kind) => (
+                  <Bar
+                    key={kind}
+                    dataKey={kind}
+                    name={kind}
+                    stackId="cost"
+                    fill={COST_KIND_COLORS[kind]}
+                    isAnimationActive={false}
+                  />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-zinc-600 dark:text-zinc-400">
+            {kinds.map((kind) => (
+              <span key={kind} className="inline-flex items-center gap-2">
+                <span
+                  className="h-3 w-3 rounded-sm"
+                  style={{ backgroundColor: COST_KIND_COLORS[kind] }}
+                  aria-hidden
+                />
+                {GAME_EFFECT_COST_KIND_LABELS[kind]}
+              </span>
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="text-sm text-zinc-500">Выплаченных наград пока нет.</p>
+      )}
+    </Card>
   );
 }
 
@@ -620,8 +950,8 @@ function HoldoutBlock({
             )}
             , деньги{" "}
             {formatGameEffectDelta("money", result.metrics.money.effect)} на
-            гостя — <strong>{GAME_EFFECT_VERDICT_LABELS[result.verdict]}</strong>
-            .
+            гостя —{" "}
+            <strong>{GAME_EFFECT_VERDICT_LABELS[result.verdict]}</strong>.
           </p>
         ) : (
           <p className="mt-1 leading-5 text-zinc-500">
@@ -708,17 +1038,16 @@ function MethodNote({ report }: { report: GameEffectReport }) {
         <li>
           Похожие гости — были в клубе в тот же день (или ±3 дня) и за{" "}
           {report.windowDays} дней до ходили столько же раз (0, 1, 2–3, 4–7,
-          8–14, 15+). Их среднее изменение — то, что было бы с игроком без
-          игры.
+          8–14, 15+). Их среднее изменение — то, что было бы с игроком без игры.
         </li>
         <li>
           Эффект на гостя = изменение игрока − изменение похожих. Интервал —
           95%: если он целиком выше нуля, эффект не случаен.
         </li>
         <li>
-          Деньги гостя = списания с депозита Langame + бар. Если бонусы
-          заменяют оплату деньгами, это уже видно как меньшие списания.
-          Бонусы показаны по номиналу.
+          Деньги гостя = списания с депозита Langame + бар. Если бонусы заменяют
+          оплату деньгами, это уже видно как меньшие списания. Бонусы показаны
+          по номиналу.
         </li>
         <li>
           Считаем только гостей, у которых окно уже закончилось (данные по{" "}

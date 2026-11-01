@@ -307,6 +307,7 @@ export type GuestPortalPayload = {
       id: string;
       kind:
         | "CLAIM_REWARD"
+        | "AWAIT_REWARD_HANDOFF"
         | "OPEN_LOOT_BOX"
         | "FINISH_MISSION"
         | "BATTLE_PASS"

@@ -1471,6 +1471,7 @@ export type GuestPortalNextAction = {
   id: string;
   kind:
     | 'CLAIM_REWARD'
+    | 'AWAIT_REWARD_HANDOFF'
     | 'OPEN_LOOT_BOX'
     | 'FINISH_MISSION'
     | 'BATTLE_PASS'
@@ -21348,9 +21349,16 @@ export function buildNextActions(input: {
   checkIn: GuestPortalCheckInSummary;
 }): GuestPortalNextAction[] {
   const actions: GuestPortalNextAction[] = [];
+  // A claimed claim-required reward stays READY until an administrator hands
+  // it out; the guest has nothing left to press, so it is not a claim action.
   const readyReward = input.rewards.find(
-    (reward) => reward.walletState === 'READY',
+    (reward) => reward.walletState === 'READY' && reward.claimedAt === null,
   );
+  const handoffReward = readyReward
+    ? null
+    : (input.rewards.find(
+        (reward) => reward.walletState === 'READY' && reward.claimedAt !== null,
+      ) ?? null);
   const latestLootBox = input.lootBoxes.find((lootBox) => lootBox.latestReward);
   const closestMission = input.missions
     .filter((mission) => mission.progressPercent < 100)
@@ -21371,6 +21379,19 @@ export function buildNextActions(input: {
         : readyReward.rewardLabel,
       priority: 'HIGH',
       statusLabel: readyReward.expiresAt ? 'есть срок действия' : 'готово',
+      progressPercent: 100,
+      anchor: 'rewards',
+    });
+  } else if (handoffReward) {
+    actions.push({
+      id: `handoff:${handoffReward.id}`,
+      kind: 'AWAIT_REWARD_HANDOFF',
+      title: 'Награда ждёт выдачи у администратора',
+      description: handoffReward.sourceLabel
+        ? `${handoffReward.rewardLabel} из сценария "${handoffReward.sourceLabel}". Подойдите к администратору клуба.`
+        : `${handoffReward.rewardLabel}. Подойдите к администратору клуба.`,
+      priority: 'MEDIUM',
+      statusLabel: 'ждёт выдачи',
       progressPercent: 100,
       anchor: 'rewards',
     });

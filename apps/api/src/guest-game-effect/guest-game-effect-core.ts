@@ -756,3 +756,172 @@ export function gameEffectVerdict(
   }
   return 'NO_EFFECT';
 }
+
+export const GAME_EFFECT_COST_KINDS = [
+  'LOOT_BOX',
+  'MISSION',
+  'SEASON',
+  'OTHER',
+] as const;
+export type GameEffectCostKind = (typeof GAME_EFFECT_COST_KINDS)[number];
+
+export type GameEffectCostItem = {
+  day: number;
+  kind: GameEffectCostKind;
+  /** Profile (or guest) that got the reward; counts players per month. */
+  holderKey: string;
+  bonusRub: number;
+  prize: boolean;
+};
+
+export type GameEffectMonthlyCost = {
+  month: string;
+  bonusRub: Record<GameEffectCostKind, number>;
+  totalBonusRub: number;
+  prizes: number;
+  /** Players who got a paid bonus or prize that month. */
+  players: number;
+};
+
+/** `YYYY-MM` of a day number. */
+export function monthOfDay(day: number): string {
+  return dayNumberToIso(day).slice(0, 7);
+}
+
+/** `YYYY-MM` shifted by whole months. */
+export function addMonths(month: string, count: number): string {
+  const [year, value] = month.split('-').map(Number);
+  return new Date(Date.UTC(year, value - 1 + count, 1))
+    .toISOString()
+    .slice(0, 7);
+}
+
+/**
+ * Paid bonuses and prizes per calendar month and mechanic: what the game
+ * costs over time, outside any measurement window. Months without rewards
+ * between the first and the last one are kept at zero.
+ */
+export function summarizeMonthlyCosts(
+  items: readonly GameEffectCostItem[],
+): GameEffectMonthlyCost[] {
+  const byMonth = new Map<
+    string,
+    { row: GameEffectMonthlyCost; holders: Set<string> }
+  >();
+  const ensure = (month: string) => {
+    let entry = byMonth.get(month);
+    if (!entry) {
+      entry = {
+        row: {
+          month,
+          bonusRub: { LOOT_BOX: 0, MISSION: 0, SEASON: 0, OTHER: 0 },
+          totalBonusRub: 0,
+          prizes: 0,
+          players: 0,
+        },
+        holders: new Set(),
+      };
+      byMonth.set(month, entry);
+    }
+    return entry;
+  };
+  items.forEach((item) => {
+    if (!item.bonusRub && !item.prize) return;
+    const entry = ensure(monthOfDay(item.day));
+    entry.row.bonusRub[item.kind] += item.bonusRub;
+    entry.row.totalBonusRub += item.bonusRub;
+    if (item.prize) entry.row.prizes += 1;
+    entry.holders.add(item.holderKey);
+  });
+  const months = [...byMonth.keys()].sort();
+  if (months.length > 1) {
+    for (
+      let month = months[0];
+      month < months[months.length - 1];
+      month = addMonths(month, 1)
+    ) {
+      ensure(month);
+    }
+  }
+  return [...byMonth.values()]
+    .map(({ row, holders }) => ({ ...row, players: holders.size }))
+    .sort((left, right) => left.month.localeCompare(right.month));
+}
+
+export type GameEffectReturnGroup = 'PLAYER' | 'FUTURE_PLAYER' | 'NEVER';
+
+export type GameEffectMonthlyReturn = {
+  month: string;
+  group: GameEffectReturnGroup;
+  /** Guests with a visit that month. */
+  guests: number;
+  /** Of them, guests with a visit the next month. */
+  returned: number;
+  /** The next month is still running, so the share will still grow. */
+  partial: boolean;
+};
+
+/**
+ * Share of a month's guests who come back the next month, for players
+ * (activated by the end of the month), future players (activate later than
+ * the next month) and guests who never played. Future players show how loyal
+ * players were before the game: a gap between them and the rest is
+ * self-selection, not an effect. A guest who activates in the next month is
+ * left out of that month, because activation itself often means a visit.
+ */
+export function measureMonthlyReturn(input: {
+  visits: ReadonlyArray<{ guestId: string; month: string }>;
+  activationMonth: ReadonlyMap<string, string>;
+  excluded: ReadonlySet<string>;
+  currentMonth: string;
+}): GameEffectMonthlyReturn[] {
+  const monthsByGuest = new Map<string, Set<string>>();
+  input.visits.forEach(({ guestId, month }) => {
+    if (input.excluded.has(guestId)) return;
+    let months = monthsByGuest.get(guestId);
+    if (!months) {
+      months = new Set();
+      monthsByGuest.set(guestId, months);
+    }
+    months.add(month);
+  });
+
+  const rows = new Map<string, GameEffectMonthlyReturn>();
+  monthsByGuest.forEach((months, guestId) => {
+    const activation = input.activationMonth.get(guestId);
+    months.forEach((month) => {
+      if (month >= input.currentMonth) return;
+      const next = addMonths(month, 1);
+      let group: GameEffectReturnGroup;
+      if (activation === undefined) group = 'NEVER';
+      else if (activation <= month) group = 'PLAYER';
+      else if (activation > next) group = 'FUTURE_PLAYER';
+      else return;
+      const key = `${month}:${group}`;
+      let row = rows.get(key);
+      if (!row) {
+        row = {
+          month,
+          group,
+          guests: 0,
+          returned: 0,
+          partial: next === input.currentMonth,
+        };
+        rows.set(key, row);
+      }
+      row.guests += 1;
+      if (months.has(next)) row.returned += 1;
+    });
+  });
+
+  const order: Record<GameEffectReturnGroup, number> = {
+    PLAYER: 0,
+    FUTURE_PLAYER: 1,
+    NEVER: 2,
+  };
+  return [...rows.values()].sort(
+    (left, right) =>
+      left.month.localeCompare(right.month) ||
+      order[left.group] - order[right.group],
+  );
+}

@@ -8611,7 +8611,7 @@ export class GuestGamificationService {
           tx,
           user,
           lootBox.id,
-          'изменить условия',
+          'изменить призы',
         );
       }
       const nextStatus = enumValue(dto.status, statusValues, undefined);
@@ -11137,7 +11137,7 @@ export class GuestGamificationService {
                 tx,
                 user,
                 existingLootBox.id,
-                'изменить условия через визуальный редактор',
+                'изменить призы через визуальный редактор',
               );
             }
             return tx.guestGameLootBox.update({
@@ -21127,7 +21127,9 @@ export class GuestGamificationService {
       probabilityRules:
         jsonValue(dto.probabilityRules) ??
         (isCreate ? defaultProbabilityRules() : undefined),
-      budgetAmount: decimalValue(dto.budgetAmount),
+      // null is «Безлимит»: clear the budget instead of keeping the old one.
+      budgetAmount:
+        dto.budgetAmount === null ? null : decimalValue(dto.budgetAmount),
       antiFraudRules: jsonValue(dto.antiFraudRules),
       manualApprovalRequired:
         dto.manualApprovalRequired ?? (isCreate ? true : undefined),
@@ -26894,11 +26896,11 @@ function mapDelivery(row: DeliveryRow): GuestGameDelivery {
   };
 }
 
-// Fields an already earned, unopened case depends on: what it can drop and
-// whether the guest module still shows it. Opening a held case skips every
-// issuance check (limits, budget, trigger, session, time windows, audience,
-// anti-fraud), so those stay editable while guests hold unopened cases.
-const lootBoxVisibilityFields = ['status', 'usageKind'] as const;
+// Fields an already earned, unopened case depends on: what it can drop.
+// Opening a held case from the wallet skips every issuance check (status,
+// clubs, catalog visibility, limits, budget, trigger, session, time windows,
+// audience, anti-fraud) and the wallet lists it regardless of the rule, so
+// all of those stay editable while guests hold unopened cases.
 const lootBoxPrizeFields = [
   'rewardType',
   'rewardAmount',
@@ -26918,26 +26920,6 @@ function lootBoxSemanticUpdateChanges(
     canonicalGuestGameJsonFingerprint(lootBoxSemanticComparableValue(left)) !==
     canonicalGuestGameJsonFingerprint(lootBoxSemanticComparableValue(right));
 
-  if (
-    lootBoxVisibilityFields.some(
-      (field) => has(field) && changed(current[field], update[field]),
-    )
-  ) {
-    return true;
-  }
-  if (
-    has('storeIds') &&
-    changed(
-      [...stringArray(current.storeIds as Prisma.JsonValue)].sort(),
-      [
-        ...stringArray(
-          lootBoxSemanticComparableValue(update.storeIds) as Prisma.JsonValue,
-        ),
-      ].sort(),
-    )
-  ) {
-    return true;
-  }
   if (!lootBoxPrizeFields.some(has)) {
     return false;
   }

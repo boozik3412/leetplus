@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { PrismaModule } from '../prisma/prisma.module';
+import { StoreDeletionService } from '../stores/store-deletion.service';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
@@ -27,6 +28,7 @@ import { TenantAccessWindowService } from './tenant-access-window.service';
     FounderOwnerInviteLifecycleService,
     TenantAccessWindowService,
     PlatformNetworkService,
+    StoreDeletionService,
   ],
 })
 export class AdminModule {}

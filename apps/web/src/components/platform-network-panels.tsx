@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { StoreDeletionFlow } from "@/components/store-deletion-flow";
 
 type AccessChoice = "OPEN_ENDED" | "DAYS";
 
@@ -414,5 +415,132 @@ export function PlatformNetworkActionsPanel({
         </div>
       ) : null}
     </div>
+  );
+}
+
+type NetworkStore = {
+  id: string;
+  name: string;
+  isActive: boolean;
+};
+
+export function PlatformNetworkStoresPanel({
+  tenant,
+  onChanged,
+}: {
+  tenant: Pick<NetworkActionsTenant, "id" | "storesCount">;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [stores, setStores] = useState<NetworkStore[] | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (tenant.storesCount === 0) {
+    return null;
+  }
+
+  async function loadStores() {
+    setIsLoading(true);
+    setError(null);
+    const response = await fetch(`/api/admin/tenants/${tenant.id}/stores`, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      setError(await readError(response));
+      setIsLoading(false);
+      return;
+    }
+    const result = (await response.json()) as { stores: NetworkStore[] };
+    setStores(result.stores);
+    setIsLoading(false);
+  }
+
+  async function afterDelete() {
+    await loadStores();
+    await onChanged();
+  }
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase text-zinc-500">
+          Клубы сети ({tenant.storesCount})
+        </p>
+        <button
+          type="button"
+          disabled={isLoading}
+          onClick={() => void loadStores()}
+          className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-200"
+        >
+          {isLoading ? "Загружаем…" : stores ? "Обновить" : "Показать клубы"}
+        </button>
+      </div>
+      {error ? (
+        <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-200">
+          {error}
+        </p>
+      ) : null}
+      {stores ? (
+        <ul className="mt-3 grid gap-2">
+          {stores.map((store) => (
+            <NetworkStoreRow
+              key={store.id}
+              tenantId={tenant.id}
+              store={store}
+              onDeleted={afterDelete}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function NetworkStoreRow({
+  tenantId,
+  store,
+  onDeleted,
+}: {
+  tenantId: string;
+  store: NetworkStore;
+  onDeleted: () => Promise<void>;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const base = `/api/admin/tenants/${tenantId}/stores/${store.id}`;
+
+  return (
+    <li className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium">
+          {store.name}
+          {store.isActive ? null : (
+            <span className="ml-2 text-xs text-zinc-500">в архиве</span>
+          )}
+        </span>
+        {isOpen ? null : (
+          <button
+            type="button"
+            onClick={() => setIsOpen(true)}
+            className="rounded-lg border border-red-500/40 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:border-red-500 dark:text-red-200"
+          >
+            Удалить клуб
+          </button>
+        )}
+      </div>
+      {isOpen ? (
+        <div className="mt-2">
+          <StoreDeletionFlow
+            storeName={store.name}
+            previewUrl={`${base}/deletion-preview`}
+            deleteUrl={`${base}/delete`}
+            onDeleted={async () => {
+              setIsOpen(false);
+              await onDeleted();
+            }}
+            onCancel={() => setIsOpen(false)}
+          />
+        </div>
+      ) : null}
+    </li>
   );
 }

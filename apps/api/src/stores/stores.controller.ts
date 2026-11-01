@@ -132,4 +132,25 @@ export class StoresController {
   archive(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.storesService.archive(id, user);
   }
+
+  @Roles(UserRole.OWNER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get(':id/deletion-preview')
+  previewDeletion(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.storesService.previewDeletion(id, user);
+  }
+
+  @Roles(UserRole.OWNER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post(':id/delete')
+  deletePermanently(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.storesService.deletePermanently(id, body ?? {}, user);
+  }
 }

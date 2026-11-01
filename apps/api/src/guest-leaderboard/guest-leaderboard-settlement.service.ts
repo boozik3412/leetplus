@@ -3,6 +3,7 @@ import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { GuestGamificationService } from '../guest-gamification/guest-gamification.service';
 import { acquireGuestGameLootBoxRuleLock } from '../guest-gamification/guest-game-loot-box-lock';
+import { stampGuestGameLootBoxPrizeSnapshots } from '../guest-gamification/guest-game-loot-box-prize-snapshot';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   LEADERBOARD_NETWORK_SCOPE_KEY,
@@ -421,6 +422,7 @@ export class GuestLeaderboardSettlementService {
         update: {},
         select: { id: true },
       });
+      await stampGuestGameLootBoxPrizeSnapshots(tx, tenantId, lootBox.id);
       await tx.guestGameRewardWalletItem.upsert({
         where: {
           tenantId_entitlementId: { tenantId, entitlementId: entitlement.id },

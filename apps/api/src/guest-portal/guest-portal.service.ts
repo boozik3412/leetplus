@@ -52,6 +52,7 @@ import {
   guestGameRewardIsBattlePassCompletionMarker,
 } from '../guest-gamification/guest-reward-wallet-rules';
 import { acquireGuestGameLootBoxRuleLock } from '../guest-gamification/guest-game-loot-box-lock';
+import { stampGuestGameLootBoxPrizeSnapshots } from '../guest-gamification/guest-game-loot-box-prize-snapshot';
 import {
   GUEST_BONUS_SETTLEMENT_BINDING,
   resolveBonusSettlementStore,
@@ -12393,6 +12394,11 @@ export class GuestPortalService {
         }
 
         if (entitlement.status === 'AVAILABLE') {
+          await stampGuestGameLootBoxPrizeSnapshots(
+            tx,
+            input.tenantId,
+            input.lootBox.id,
+          );
           await tx.guestGameRewardWalletItem.upsert({
             where: {
               tenantId_entitlementId: {

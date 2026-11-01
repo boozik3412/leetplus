@@ -79,6 +79,7 @@ function setup(options: { createdAt?: Date; existingResults?: number } = {}) {
           { id: 'rad', name: '1337 Радищева', timeZone: 'Asia/Yekaterinburg' },
         ]),
     },
+    $executeRaw: () => Promise.resolve(1),
     $queryRaw: () =>
       Promise.resolve([
         activity('p1', 900),

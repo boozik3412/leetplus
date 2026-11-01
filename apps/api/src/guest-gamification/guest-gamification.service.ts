@@ -76,6 +76,10 @@ import {
   guestGameRewardIsBattlePassCompletionMarker,
 } from './guest-reward-wallet-rules';
 import { acquireGuestGameLootBoxRuleLock } from './guest-game-loot-box-lock';
+import {
+  readGuestGameLootBoxPrizeSnapshot,
+  stampGuestGameLootBoxPrizeSnapshots,
+} from './guest-game-loot-box-prize-snapshot';
 import { GuestBonusLedgerService } from './guest-bonus-ledger.service';
 import {
   evaluateGuestGameLedgerRule,
@@ -8607,11 +8611,11 @@ export class GuestGamificationService {
         throw new NotFoundException('Лутбокс не найден');
       }
       if (lootBoxSemanticUpdateChanges(lootBox, data)) {
-        await this.assertNoLiveLootBoxWalletEntitlements(
+        // Cases guests already hold keep the prizes they were earned with.
+        await stampGuestGameLootBoxPrizeSnapshots(
           tx,
-          user,
+          user.tenantId,
           lootBox.id,
-          'изменить условия',
         );
       }
       const nextStatus = enumValue(dto.status, statusValues, undefined);
@@ -11133,11 +11137,11 @@ export class GuestGamificationService {
               existingLootBox.limits,
             );
             if (lootBoxSemanticUpdateChanges(existingLootBox, data)) {
-              await this.assertNoLiveLootBoxWalletEntitlements(
+              // Cases guests already hold keep the prizes they were earned with.
+              await stampGuestGameLootBoxPrizeSnapshots(
                 tx,
-                user,
+                user.tenantId,
                 existingLootBox.id,
-                'изменить условия через визуальный редактор',
               );
             }
             return tx.guestGameLootBox.update({
@@ -13723,8 +13727,36 @@ export class GuestGamificationService {
       prequalifiedLootBoxOpen,
       budgetSpentByRuleId,
     };
+    const heldCasePrizes = prequalifiedLootBoxOpen
+      ? readGuestGameLootBoxPrizeSnapshot(
+          (
+            await this.prisma.guestGameEntitlement.findFirst({
+              where: {
+                id: prequalifiedLootBoxOpen.entitlementId,
+                tenantId: user.tenantId,
+                ruleType: 'LOOT_BOX',
+                ruleId: prequalifiedLootBoxOpen.ruleId,
+              },
+              select: { evidence: true },
+            })
+          )?.evidence,
+        )
+      : null;
     const targetLootBoxes = lootBoxId
-      ? lootBoxes.filter((item) => item.id === lootBoxId)
+      ? lootBoxes
+          .filter((item) => item.id === lootBoxId)
+          // A held case draws from the prizes frozen when it was earned.
+          .map((item) =>
+            heldCasePrizes && item.id === prequalifiedLootBoxOpen?.ruleId
+              ? {
+                  ...item,
+                  rewardType: heldCasePrizes.rewardType ?? item.rewardType,
+                  rewardAmount: heldCasePrizes.rewardAmount,
+                  rewardLabel: heldCasePrizes.rewardLabel,
+                  probabilityRules: heldCasePrizes.probabilityRules,
+                }
+              : item,
+          )
       : lootBoxes.filter(lootBoxVisibleInCatalog);
 
     if (lootBoxId && !targetLootBoxes.length) {
@@ -14384,6 +14416,11 @@ export class GuestGamificationService {
               select: { id: true },
             });
             if (status === 'AVAILABLE') {
+              await stampGuestGameLootBoxPrizeSnapshots(
+                tx,
+                input.tenantId,
+                input.rule.id,
+              );
               await upsertEntitlementWalletItem(tx, {
                 tenantId: input.tenantId,
                 profileId: input.profileId,
@@ -15060,6 +15097,11 @@ export class GuestGamificationService {
       }
 
       if (entitlement.status === 'AVAILABLE') {
+        await stampGuestGameLootBoxPrizeSnapshots(
+          tx,
+          user.tenantId,
+          liveLootBox.id,
+        );
         await upsertEntitlementWalletItem(tx, {
           tenantId: user.tenantId,
           profileId: reward.profileId,
@@ -21127,7 +21169,9 @@ export class GuestGamificationService {
       probabilityRules:
         jsonValue(dto.probabilityRules) ??
         (isCreate ? defaultProbabilityRules() : undefined),
-      budgetAmount: decimalValue(dto.budgetAmount),
+      // null is «Безлимит»: clear the budget instead of keeping the old one.
+      budgetAmount:
+        dto.budgetAmount === null ? null : decimalValue(dto.budgetAmount),
       antiFraudRules: jsonValue(dto.antiFraudRules),
       manualApprovalRequired:
         dto.manualApprovalRequired ?? (isCreate ? true : undefined),
@@ -26894,11 +26938,12 @@ function mapDelivery(row: DeliveryRow): GuestGameDelivery {
   };
 }
 
-// Fields an already earned, unopened case depends on: what it can drop and
-// whether the guest module still shows it. Opening a held case skips every
-// issuance check (limits, budget, trigger, session, time windows, audience,
-// anti-fraud), so those stay editable while guests hold unopened cases.
-const lootBoxVisibilityFields = ['status', 'usageKind'] as const;
+// Fields an already earned, unopened case draws from: what it can drop.
+// Changing them first freezes the current prizes onto the cases guests hold
+// (stampGuestGameLootBoxPrizeSnapshots). Opening a held case from the wallet
+// skips every issuance check (status, clubs, catalog visibility, limits,
+// budget, trigger, session, time windows, audience, anti-fraud), so nothing
+// else needs protecting.
 const lootBoxPrizeFields = [
   'rewardType',
   'rewardAmount',
@@ -26918,26 +26963,6 @@ function lootBoxSemanticUpdateChanges(
     canonicalGuestGameJsonFingerprint(lootBoxSemanticComparableValue(left)) !==
     canonicalGuestGameJsonFingerprint(lootBoxSemanticComparableValue(right));
 
-  if (
-    lootBoxVisibilityFields.some(
-      (field) => has(field) && changed(current[field], update[field]),
-    )
-  ) {
-    return true;
-  }
-  if (
-    has('storeIds') &&
-    changed(
-      [...stringArray(current.storeIds as Prisma.JsonValue)].sort(),
-      [
-        ...stringArray(
-          lootBoxSemanticComparableValue(update.storeIds) as Prisma.JsonValue,
-        ),
-      ].sort(),
-    )
-  ) {
-    return true;
-  }
   if (!lootBoxPrizeFields.some(has)) {
     return false;
   }

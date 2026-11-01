@@ -8594,7 +8594,7 @@ describe('GuestGamificationService', () => {
   });
 
   describe('lootbox wallet lifecycle guard', () => {
-    it('blocks a semantic lootbox update while an unopened wallet right is live', async () => {
+    it('freezes held cases on their earned prizes before a prize change, then saves', async () => {
       const { service, prisma } = createService();
       const row = {
         ...activeLootBox({
@@ -8611,38 +8611,32 @@ describe('GuestGamificationService', () => {
       };
       prisma.guestGameLootBox.findFirst.mockResolvedValue(row);
       prisma.guestGameRewardWalletItem.count.mockResolvedValue(1);
-
-      await expect(
-        service.updateLootBox(user, 'loot-live', {
-          rewardLabel: 'Changed prize',
-        }),
-      ).rejects.toMatchObject({
-        response: expect.objectContaining({
-          code: 'LOOT_BOX_HAS_LIVE_WALLET_ENTITLEMENTS',
-          pendingEntitlements: 1,
-        }),
+      prisma.guestGameLootBox.update.mockResolvedValue(row);
+      const order: string[] = [];
+      prisma.$executeRaw.mockImplementation(() => {
+        order.push('stamp');
+        return Promise.resolve(1);
+      });
+      prisma.guestGameLootBox.update.mockImplementation(() => {
+        order.push('update');
+        return Promise.resolve(row);
       });
 
-      expect(prisma.guestGameRewardWalletItem.count).toHaveBeenCalledWith({
-        where: expect.objectContaining({
-          tenantId: user.tenantId,
-          kind: 'LOOT_BOX_ENTITLEMENT',
-          OR: [
-            { status: 'OPENING' },
-            {
-              status: 'PENDING',
-              expiresAt: { gt: expect.any(Date) },
-            },
-          ],
-          entitlement: {
-            is: expect.objectContaining({
-              tenantId: user.tenantId,
-              ruleId: 'loot-live',
-            }),
-          },
-        }),
+      await service.updateLootBox(user, 'loot-live', {
+        rewardLabel: 'Changed prize',
       });
-      expect(prisma.guestGameLootBox.update).not.toHaveBeenCalled();
+
+      expect(order).toEqual(['stamp', 'update']);
+      const stampSql = prisma.$executeRaw.mock.calls[0][0] as Prisma.Sql;
+      expect(stampSql.sql).toContain('UPDATE "GuestGameEntitlement"');
+      expect(stampSql.values).toEqual(
+        expect.arrayContaining([
+          'lootBoxPrizeSnapshot',
+          'loot-live',
+          user.tenantId,
+        ]),
+      );
+      expect(prisma.guestGameRewardWalletItem.count).not.toHaveBeenCalled();
     });
 
     it('keeps display-only lootbox edits available while a wallet right is live', async () => {
@@ -8767,8 +8761,8 @@ describe('GuestGamificationService', () => {
         true,
       ],
     ])(
-      'with a live wallet right, saving a limit with %s is blocked=%s',
-      async (_label, probabilityRules, blocked) => {
+      'with a live wallet right, saving a limit with %s freezes held cases=%s',
+      async (_label, probabilityRules, freezes) => {
         const { service, prisma } = createService();
         const row = {
           ...activeLootBox({
@@ -8798,14 +8792,10 @@ describe('GuestGamificationService', () => {
           probabilityRules,
         });
 
-        if (blocked) {
-          await expect(save).rejects.toBeInstanceOf(ConflictException);
-          expect(prisma.guestGameLootBox.update).not.toHaveBeenCalled();
-        } else {
-          await save;
-          expect(prisma.guestGameRewardWalletItem.count).not.toHaveBeenCalled();
-          expect(prisma.guestGameLootBox.update).toHaveBeenCalled();
-        }
+        await save;
+        expect(prisma.guestGameRewardWalletItem.count).not.toHaveBeenCalled();
+        expect(prisma.guestGameLootBox.update).toHaveBeenCalled();
+        expect(prisma.$executeRaw).toHaveBeenCalledTimes(freezes ? 1 : 0);
       },
     );
 
@@ -10521,6 +10511,100 @@ describe('GuestGamificationService', () => {
           'The exact reward-wallet entitlement was prequalified at issuance.',
           'Mutable template status and store scope are not re-evaluated for the durable entitlement.',
         ]),
+      });
+    });
+
+    it('opens a held case from the prizes frozen when it was earned', async () => {
+      const { service, prisma } = createService();
+      const editedRule = activeLootBox({
+        id: 'loot-entitled',
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: 500,
+        rewardLabel: '500 бонусов',
+        probabilityRules: {
+          type: 'weighted',
+          prizes: [
+            {
+              rewardType: 'BONUS_BALANCE',
+              rewardAmount: 500,
+              rewardLabel: '500 бонусов',
+              weight: 100,
+            },
+          ],
+        },
+      });
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        name: '1337 Pushkinskaya',
+        timeZone: 'Asia/Yekaterinburg',
+      });
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([editedRule]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'getDryRunAudienceMemberIds')
+        .mockResolvedValue(new Set());
+      prisma.guestGameEntitlement.findMany.mockResolvedValue([]);
+      prisma.guestGameEntitlement.findFirst.mockResolvedValue({
+        evidence: {
+          source: 'session_start',
+          lootBoxPrizeSnapshot: {
+            rewardType: 'BONUS_BALANCE',
+            rewardAmount: '50',
+            rewardLabel: '50 бонусов',
+            probabilityRules: {
+              type: 'weighted',
+              prizes: [
+                {
+                  rewardType: 'BONUS_BALANCE',
+                  rewardAmount: 50,
+                  rewardLabel: '50 бонусов',
+                  weight: 100,
+                },
+              ],
+            },
+            capturedAt: '2026-06-01T10:00:00.000Z',
+          },
+        },
+      });
+
+      const input = {
+        lootBoxId: 'loot-entitled',
+        profileId: 'profile-1',
+        storeId: 'store-1',
+        eventType: 'APP_OPEN',
+        occurredAt: '2026-06-10T10:00:00.000Z',
+      };
+      const held = await service.dryRun(user, input, {
+        prequalifiedLootBoxOpen: {
+          tenantId: 'tenant-1',
+          entitlementId: 'entitlement-wallet',
+          ruleId: 'loot-entitled',
+          profileId: 'profile-1',
+          storeId: 'store-1',
+        },
+      });
+      const fresh = await service.dryRun(user, input);
+
+      expect(prisma.guestGameEntitlement.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'entitlement-wallet',
+            ruleId: 'loot-entitled',
+          }),
+        }),
+      );
+      expect(held.rules[0]).toMatchObject({
+        rewardAmount: 50,
+        rewardLabel: '50 бонусов',
+      });
+      expect(fresh.rules[0]).toMatchObject({
+        rewardAmount: 500,
+        rewardLabel: '500 бонусов',
       });
     });
 

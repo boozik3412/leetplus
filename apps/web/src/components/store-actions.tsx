@@ -7,6 +7,7 @@ import {
   timeZoneForStoreCity,
 } from "@/lib/store-location";
 import type { Store } from "@/lib/stores";
+import { StoreDeletionFlow } from "@/components/store-deletion-flow";
 
 type ErrorResponse = {
   message?: string;
@@ -195,6 +196,36 @@ export function StoreArchiveButton({ id }: { id: string }) {
     >
       {isSubmitting ? "..." : "В архив"}
     </button>
+  );
+}
+
+export function StoreDeleteButton({ id, name }: { id: string; name: string }) {
+  const router = useRouter();
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!isOpen) {
+    return (
+      <button
+        type="button"
+        onClick={() => setIsOpen(true)}
+        className="rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+      >
+        Удалить
+      </button>
+    );
+  }
+
+  return (
+    <StoreDeletionFlow
+      storeName={name}
+      previewUrl={`/api/stores/${id}/deletion-preview`}
+      deleteUrl={`/api/stores/${id}/delete`}
+      onDeleted={() => {
+        setIsOpen(false);
+        router.refresh();
+      }}
+      onCancel={() => setIsOpen(false)}
+    />
   );
 }
 

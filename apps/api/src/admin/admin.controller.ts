@@ -90,6 +90,42 @@ export class AdminController {
     return this.platformNetworkService.delete(user, tenantId, body ?? {});
   }
 
+  @Get('tenants/:tenantId/stores')
+  listNetworkStores(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+  ) {
+    return this.platformNetworkService.listStores(user, tenantId);
+  }
+
+  @Get('tenants/:tenantId/stores/:storeId/deletion-preview')
+  previewNetworkStoreDeletion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Param('storeId') storeId: string,
+  ) {
+    return this.platformNetworkService.previewStoreDeletion(
+      user,
+      tenantId,
+      storeId,
+    );
+  }
+
+  @Post('tenants/:tenantId/stores/:storeId/delete')
+  deleteNetworkStore(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Param('storeId') storeId: string,
+    @Body() body: unknown,
+  ) {
+    return this.platformNetworkService.deleteStore(
+      user,
+      tenantId,
+      storeId,
+      body ?? {},
+    );
+  }
+
   @Get('tenants/:tenantId/langame/service-diagnostics')
   getTenantLangameServiceDiagnostics(@Param('tenantId') tenantId: string) {
     return this.adminService.getTenantLangameServiceDiagnostics(tenantId);

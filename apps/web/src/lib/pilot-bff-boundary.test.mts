@@ -30,10 +30,10 @@ const PROTECTED_PILOT_PREFIXES = [
   "utilities/product-parsing/",
 ] as const;
 
-const EXPECTED_PROTECTED_ROUTE_FILES = 139;
-const EXPECTED_PROTECTED_HANDLERS = 169;
+const EXPECTED_PROTECTED_ROUTE_FILES = 141;
+const EXPECTED_PROTECTED_HANDLERS = 171;
 const EXPECTED_PROTECTED_INVENTORY_SHA256 =
-  "a5a47d642cd1a4c8513c0fe36c2769e2eb047bbd2b48139edd42b193ebc8f731";
+  "42c88f09d38b093afd2f2d754a23a6dcc8d361e2dd93c5cf42b19edcc80ef80c";
 
 const KNOWN_PUBLIC_GAME_BOUNDARIES = new Map([
   ["guest-game/media/[id]/route.ts", ["GET"]],

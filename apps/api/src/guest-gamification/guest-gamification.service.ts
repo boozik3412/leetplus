@@ -9439,35 +9439,72 @@ export class GuestGamificationService {
           'Задание создано в старом редакторе и не может быть перезаписано мастером.',
         );
       }
-      const row = await this.prisma.guestGameMission.update({
-        where: { id },
-        data: {
-          ...(await this.buildMissionData(user, missionDto, false)),
-          // buildMissionData drops nulls (a partial update keeps the column),
-          // but the wizard always sends every limit: null here means the
-          // admin switched it to unlimited, so it has to be cleared.
-          budgetAmount: decimalValue(missionDto.budgetAmount) ?? null,
-          perGuestLimit: intValue(missionDto.perGuestLimit) ?? null,
-          totalRewardLimit: intValue(missionDto.totalRewardLimit) ?? null,
-          definitionVersion: guestGameMissionDefinitionVersion,
-          evaluationPolicy: missionEvaluationPolicy(taskType),
-        },
-        include: missionInclude,
+      // Editing a published mission turns it back into a draft until it is
+      // re-published. The wizard rebuilds conditions from scratch, so carry
+      // the activation time over: guests' progress is counted from it.
+      const preservedActivatedAt = missionRepublishActivatedAt(existing);
+      if (preservedActivatedAt) {
+        missionDto.conditions = ruleMetadataWithActivatedAt(
+          missionDto.conditions,
+          preservedActivatedAt,
+        );
+        if (conditions.indefinite === true) {
+          missionDto.periodFrom = (
+            existing.periodFrom ?? preservedActivatedAt
+          ).toISOString();
+        }
+      }
+      const data = {
+        ...(await this.buildMissionData(user, missionDto, false)),
+        // buildMissionData drops nulls (a partial update keeps the column),
+        // but the wizard always sends every limit: null here means the
+        // admin switched it to unlimited, so it has to be cleared.
+        budgetAmount: decimalValue(missionDto.budgetAmount) ?? null,
+        perGuestLimit: intValue(missionDto.perGuestLimit) ?? null,
+        totalRewardLimit: intValue(missionDto.totalRewardLimit) ?? null,
+        definitionVersion: guestGameMissionDefinitionVersion,
+        evaluationPolicy: missionEvaluationPolicy(taskType),
+      };
+      const row = await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.guestGameMission.update({
+          where: { id },
+          data,
+          include: missionInclude,
+        });
+        await recordMissionRevision(
+          tx,
+          user,
+          'MISSION_WIZARD_SAVED',
+          existing,
+          updated,
+        );
+        return updated;
       });
       return { mission: mapMission(row), readiness };
     }
 
-    const row = await this.prisma.guestGameMission.create({
-      data: {
-        ...((await this.buildMissionData(
-          user,
-          missionDto,
-          true,
-        )) as Prisma.GuestGameMissionUncheckedCreateInput),
-        definitionVersion: guestGameMissionDefinitionVersion,
-        evaluationPolicy: missionEvaluationPolicy(taskType),
-      },
-      include: missionInclude,
+    const data = {
+      ...((await this.buildMissionData(
+        user,
+        missionDto,
+        true,
+      )) as Prisma.GuestGameMissionUncheckedCreateInput),
+      definitionVersion: guestGameMissionDefinitionVersion,
+      evaluationPolicy: missionEvaluationPolicy(taskType),
+    };
+    const row = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.guestGameMission.create({
+        data,
+        include: missionInclude,
+      });
+      await recordMissionRevision(
+        tx,
+        user,
+        'MISSION_WIZARD_CREATED',
+        null,
+        created,
+      );
+      return created;
     });
     return { mission: mapMission(row), readiness };
   }
@@ -9549,25 +9586,45 @@ export class GuestGamificationService {
         this.assertStore(user, storeId),
       ),
     );
-    const activatedAt = new Date();
-    const row = await this.prisma.guestGameMission.update({
-      where: { id },
-      data: {
-        status: 'ACTIVE',
-        evaluationPolicy: readiness.evaluationPolicy,
-        missionType: readiness.taskType,
-        triggerKind: missionWizardTrigger(readiness.taskType),
-        progressTarget: intValue(normalizedMetric.target) ?? 1,
-        progressUnit: nullableString(normalizedMetric.unit),
-        ...(missionConditions.indefinite === true
-          ? { periodFrom: activatedAt, periodTo: null }
-          : {}),
-        conditions: ruleMetadataWithActivatedAt(
-          normalizedConditions,
-          activatedAt,
-        ),
-      },
-      include: missionInclude,
+    // Re-publishing an edited mission keeps its original start, otherwise
+    // every guest's progress (check-in streaks, counters) drops to zero.
+    const previousActivatedAt = missionRepublishActivatedAt(mission);
+    const activatedAt = previousActivatedAt ?? new Date();
+    const row = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.guestGameMission.update({
+        where: { id },
+        data: {
+          status: 'ACTIVE',
+          evaluationPolicy: readiness.evaluationPolicy,
+          missionType: readiness.taskType,
+          triggerKind: missionWizardTrigger(readiness.taskType),
+          progressTarget: intValue(normalizedMetric.target) ?? 1,
+          progressUnit: nullableString(normalizedMetric.unit),
+          ...(missionConditions.indefinite === true
+            ? {
+                periodFrom: previousActivatedAt
+                  ? (mission.periodFrom ?? activatedAt)
+                  : activatedAt,
+                periodTo: null,
+              }
+            : {}),
+          conditions: ruleMetadataWithActivatedAt(
+            normalizedConditions,
+            activatedAt,
+          ),
+        },
+        include: missionInclude,
+      });
+      await recordMissionRevision(
+        tx,
+        user,
+        previousActivatedAt
+          ? 'MISSION_WIZARD_REPUBLISHED'
+          : 'MISSION_WIZARD_ACTIVATED',
+        mission,
+        updated,
+      );
+      return updated;
     });
     return { mission: mapMission(row), readiness };
   }
@@ -9606,10 +9663,20 @@ export class GuestGamificationService {
           ) as Prisma.InputJsonValue,
         }
       : data;
-    const row = await this.prisma.guestGameMission.update({
-      where: { id },
-      data: nextData,
-      include: missionInclude,
+    const row = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.guestGameMission.update({
+        where: { id },
+        data: nextData,
+        include: missionInclude,
+      });
+      await recordMissionRevision(
+        tx,
+        user,
+        'MISSION_UPDATED',
+        mission,
+        updated,
+      );
+      return updated;
     });
 
     return mapMission(row);
@@ -9714,8 +9781,11 @@ export class GuestGamificationService {
       }),
     ]);
 
-    await this.prisma.guestGameMission.delete({
-      where: { id: mission.id },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.guestGameMission.delete({
+        where: { id: mission.id },
+      });
+      await recordMissionRevision(tx, user, 'MISSION_DELETED', mission, null);
     });
 
     return {
@@ -34348,6 +34418,78 @@ function dryRunRuleActivatedAt(
     dryRunDateOrNull(limits.activatedAt),
     dryRunDateOrNull(conditions.activatedAt),
   ].reduce(maxDate, null);
+}
+
+/**
+ * The activation time a mission keeps when it is saved or published again.
+ * A wizard save demotes a live mission to DRAFT until it is re-published, so
+ * both ACTIVE and DRAFT carry it over. A paused or archived mission that is
+ * brought back starts over, like updateMission's re-activation does.
+ */
+function missionRepublishActivatedAt(mission: {
+  status: string;
+  conditions: Prisma.JsonValue | null;
+}) {
+  if (mission.status !== 'ACTIVE' && mission.status !== 'DRAFT') {
+    return null;
+  }
+
+  return dryRunDateOrNull(jsonRecord(mission.conditions).activatedAt);
+}
+
+type MissionRevisionSource = Prisma.GuestGameMissionGetPayload<
+  Record<string, never>
+>;
+
+function missionRevisionSnapshot(mission: MissionRevisionSource) {
+  return {
+    name: mission.name,
+    status: mission.status,
+    missionType: mission.missionType,
+    progressTarget: mission.progressTarget,
+    activatedAt:
+      dryRunDateOrNull(
+        jsonRecord(mission.conditions).activatedAt,
+      )?.toISOString() ?? null,
+    periodFrom: mission.periodFrom?.toISOString() ?? null,
+    periodTo: mission.periodTo?.toISOString() ?? null,
+    storeIds: mission.storeIds,
+    rewardType: mission.rewardType,
+    rewardAmount: mission.rewardAmount?.toString() ?? null,
+    xpReward: mission.xpReward,
+    budgetAmount: mission.budgetAmount?.toString() ?? null,
+    perGuestLimit: mission.perGuestLimit,
+    totalRewardLimit: mission.totalRewardLimit,
+    audienceId: mission.audienceId,
+    conditions: mission.conditions,
+  } as Prisma.InputJsonObject;
+}
+
+/**
+ * Mission edit log: every admin write keeps the previous and the new
+ * definition, so a lost start date or limit can be read back later.
+ */
+async function recordMissionRevision(
+  tx: Prisma.TransactionClient,
+  user: AuthenticatedUser,
+  action: string,
+  before: MissionRevisionSource | null,
+  after: MissionRevisionSource | null,
+) {
+  await tx.guestGameAuditEvent.create({
+    data: {
+      tenantId: user.tenantId,
+      entityType: 'MISSION',
+      entityId: (after ?? before)?.id ?? null,
+      action,
+      status: 'APPLIED',
+      payload: {
+        actorUserId: actorUserId(user),
+        before: before ? missionRevisionSnapshot(before) : null,
+        after: after ? missionRevisionSnapshot(after) : null,
+      },
+    },
+  });
 }
 
 function ruleMetadataWithActivatedAt(

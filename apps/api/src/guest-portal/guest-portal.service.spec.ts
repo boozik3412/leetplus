@@ -1534,6 +1534,89 @@ describe('case reward public contract', () => {
     );
   });
 
+  it('shows a claimed physical reward as waiting for handoff, not as a claim', () => {
+    const walletState = rewardWalletState('APPROVED', null, {
+      claimRequired: true,
+      deliveryRequestedAt: new Date('2026-10-20T10:00:00.000Z'),
+      claimExpiresAt: new Date('2026-10-27T10:00:00.000Z'),
+      rewardType: 'PHYSICAL',
+      rewardAmount: 0,
+      walletItems: [{ status: 'CLAIMED' }],
+    });
+    const checkIn = {
+      enabled: false,
+      ready: false,
+      title: 'Чекин',
+      description: 'Чекин недоступен',
+      rewardLabel: null,
+      xpReward: 0,
+      blockedReason: null,
+    };
+    const reward = {
+      id: 'season-physical-reward',
+      status: 'APPROVED',
+      walletState,
+      rewardType: 'PHYSICAL',
+      rewardAmount: 0,
+      rewardLabel: 'Энергетик',
+      rewardRarity: null,
+      rewardRarityLabel: null,
+      rewardDropChance: null,
+      sourceId: 'season-1',
+      sourceKind: 'BATTLE_PASS' as const,
+      sourceLabel: 'Сезон 1',
+      storeId: 'store-1',
+      storeName: 'Club',
+      rewardCode: null,
+      claimPayload: null,
+      qualifiedAt: '2026-10-19T10:00:00.000Z',
+      claimedAt: '2026-10-20T10:00:00.000Z',
+      expiresAt: null,
+    };
+
+    expect(walletState).toBe('READY');
+    const actions = buildNextActions({
+      guestFound: true,
+      lootBoxes: [],
+      missions: [],
+      seasons: [],
+      rewards: [reward],
+      checkIn,
+    });
+    expect(actions).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'CLAIM_REWARD' }),
+      ]),
+    );
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'handoff:season-physical-reward',
+          kind: 'AWAIT_REWARD_HANDOFF',
+          title: 'Награда ждёт выдачи у администратора',
+          statusLabel: 'ждёт выдачи',
+        }),
+      ]),
+    );
+
+    const unclaimed = { ...reward, id: 'ready-auto-reward', claimedAt: null };
+    expect(
+      buildNextActions({
+        guestFound: true,
+        lootBoxes: [],
+        missions: [],
+        seasons: [],
+        rewards: [reward, unclaimed],
+        checkIn,
+      }).filter((action) => action.anchor === 'rewards'),
+    ).toEqual([
+      expect.objectContaining({
+        id: 'claim:ready-auto-reward',
+        kind: 'CLAIM_REWARD',
+      }),
+    ]);
+  });
+
   it('reports case delivery in progress until an entitlement exists', () => {
     expect(
       rewardWalletState('APPROVED', null, {

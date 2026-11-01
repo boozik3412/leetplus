@@ -22,6 +22,7 @@ import type {
   LangameUser,
   LangameWorkingShift,
 } from './langame.types';
+import { createLangameFetch } from './langame-fetch';
 
 type LangameResponse<T> = {
   status?: boolean;
@@ -50,6 +51,8 @@ const maximumLangameDiagnosticResponseBytes = 4 * 1024 * 1024;
 
 @Injectable()
 export class LangameClient {
+  private readonly langameFetch = createLangameFetch();
+
   async listClubs(baseUrl: string, apiKey: string) {
     return this.getList<LangameClub>(baseUrl, '/clubs/list', apiKey);
   }
@@ -387,7 +390,7 @@ export class LangameClient {
     const url = new URL(`${this.normalizeBaseUrl(baseUrl)}/routes`);
     url.searchParams.set('api_key', apiKey);
 
-    const response = await fetch(url, {
+    const response = await this.langameFetch(url, {
       method: 'GET',
       headers: {
         'X-API-KEY': apiKey,
@@ -430,7 +433,7 @@ export class LangameClient {
     );
 
     try {
-      const response = await fetch(url, {
+      const response = await this.langameFetch(url, {
         method: 'GET',
         headers: {
           'X-API-KEY': apiKey,
@@ -528,7 +531,7 @@ export class LangameClient {
     const normalizedPath = path.startsWith('/') ? path : `/${path}`;
     const url = new URL(`${this.normalizeBaseUrl(baseUrl)}${normalizedPath}`);
 
-    const response = await fetch(url, {
+    const response = await this.langameFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -673,7 +676,7 @@ export class LangameClient {
   ): Promise<T[]> {
     const normalizedPath = this.masterApiPath(path);
     const displayPath = `/master_api${normalizedPath}`;
-    const response = await fetch(
+    const response = await this.langameFetch(
       new URL(`${this.masterApiBaseUrl(baseUrl)}${normalizedPath}`),
       {
         method: 'GET',
@@ -766,14 +769,14 @@ export class LangameClient {
     timeoutMs?: number,
   ) {
     if (!timeoutMs || timeoutMs <= 0) {
-      return fetch(url, init);
+      return this.langameFetch(url, init);
     }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      return await fetch(url, {
+      return await this.langameFetch(url, {
         ...init,
         signal: controller.signal,
       });

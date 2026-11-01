@@ -3,6 +3,7 @@ import Link from "next/link";
 import { OrderPlanningTable } from "@/components/order-planning-table";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
+import { getCategories } from "@/lib/catalog";
 import { isOrderPlanningView } from "@/lib/order-planning-views";
 import { getOrderPlanningReport } from "@/lib/reports";
 
@@ -16,10 +17,32 @@ export default async function ProductOrderPage({
   await requireCurrentUser();
   const params = await searchParams;
   const view = searchParam(params.view);
-  const report = await getOrderPlanningReport({
-    days: searchParam(params.days),
-    coverDays: searchParam(params.coverDays),
-  });
+  const categoryIds = searchParamValues(params.categoryIds);
+  const [report, categories] = await Promise.all([
+    getOrderPlanningReport({
+      days: searchParam(params.days),
+      coverDays: searchParam(params.coverDays),
+    }),
+    // Old report links filter by category id; the table filters by name.
+    categoryIds.length > 0 ? getCategories() : Promise.resolve([]),
+  ]);
+  const storeIds = new Set(searchParamValues(params.storeIds));
+  const initialFilters = {
+    stores: [
+      ...new Set(
+        report.rows
+          .filter((row) => storeIds.has(row.storeId))
+          .map((row) => row.storeName),
+      ),
+    ],
+    categories: [
+      ...categories
+        .filter((category) => categoryIds.includes(category.id))
+        .map((category) => category.name),
+      ...searchParamValues(params.category),
+    ],
+    noMovementDays: Number(searchParam(params.noSalesDays)) || null,
+  };
 
   return (
     <main className="min-h-screen bg-[var(--background)] text-zinc-950">
@@ -99,6 +122,7 @@ export default async function ProductOrderPage({
       <OrderPlanningTable
         report={report}
         initialView={isOrderPlanningView(view) ? view : "order"}
+        initialFilters={initialFilters}
       />
     </main>
   );
@@ -106,6 +130,10 @@ export default async function ProductOrderPage({
 
 function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function searchParamValues(value: string | string[] | undefined) {
+  return value === undefined ? [] : Array.isArray(value) ? value : [value];
 }
 
 function formatDate(value: string) {

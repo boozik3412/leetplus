@@ -267,7 +267,7 @@ export function AssortmentGrowthDashboard({
         <DriverGroup
           title="Что растит товарные операции"
           tone="blue"
-          href="/reports/oos/table"
+          href="/products/order?view=running-out"
           className="xl:border-b-0 xl:border-r"
           rows={[
             {
@@ -298,7 +298,7 @@ export function AssortmentGrowthDashboard({
         <DriverGroup
           title="Что растит сумму операции"
           tone="amber"
-          href="/reports/top-sku/table"
+          href="/reports/abc/table"
           className="md:col-span-2 xl:col-span-1 xl:border-b-0"
           rows={[
             {

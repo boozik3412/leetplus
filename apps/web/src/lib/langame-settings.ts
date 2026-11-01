@@ -46,6 +46,8 @@ export type LangameOnboardingDiagnostic = {
   requiresSelection: boolean;
   reasonCode:
     | "LANGAME_DIAGNOSTIC_FAILED"
+    | "LANGAME_DOMAIN_UNREACHABLE"
+    | "LANGAME_AUTH_REJECTED"
     | "LANGAME_NO_ACTIVE_CLUBS"
     | "LANGAME_CLUB_LIST_INVALID"
     | null;

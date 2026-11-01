@@ -514,6 +514,12 @@ function getPreviewError(preview: LangameSettingsPreview) {
   if (failed?.reasonCode === "LANGAME_CLUB_LIST_INVALID") {
     return `Домен ${failed.domain} вернул некорректный список клубов.`;
   }
+  if (failed?.reasonCode === "LANGAME_DOMAIN_UNREACHABLE") {
+    return `Сервер LeetPlus не смог связаться с ${failed.domain}. Проверьте домен. Если он указан верно, напишите в поддержку LeetPlus: домен нужно открыть на сервере.`;
+  }
+  if (failed?.reasonCode === "LANGAME_AUTH_REJECTED") {
+    return `Langame отклонил API-ключ для ${failed.domain}. Проверьте, что ключ выдан для этого домена.`;
+  }
   return failed
     ? `Не удалось подключиться к ${failed.domain}. Проверьте API-ключ и домен.`
     : "Не удалось проверить подключение Langame.";

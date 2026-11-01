@@ -19,6 +19,7 @@ import {
   GAME_EFFECT_METRICS,
   GAME_EFFECT_MIN_WINDOW_DAYS,
   GAME_EFFECT_WINDOW_DAYS,
+  addMonths,
   buildGameEffectDataset,
   dayNumberToIso,
   gameEffectVerdict,
@@ -27,12 +28,18 @@ import {
   measureCohortEffect,
   measureGuestEffect,
   measureHoldoutEffect,
+  measureMonthlyReturn,
+  monthOfDay,
+  summarizeMonthlyCosts,
   type GameEffectCohortResult,
+  type GameEffectCostItem,
   type GameEffectDataset,
   type GameEffectGuestResult,
   type GameEffectHoldoutResult,
   type GameEffectMetric,
   type GameEffectMetricResult,
+  type GameEffectMonthlyCost,
+  type GameEffectMonthlyReturn,
   type GameEffectParticipant,
   type GameEffectValues,
   type GameEffectVerdict,
@@ -41,6 +48,8 @@ import {
 const DATASET_TTL_MS = 10 * 60 * 1000;
 const MAX_CACHED_TENANTS = 8;
 const MAX_LOOKBACK_DAYS = 400;
+/** Months of history in the cost and return-by-month charts. */
+const MONTHLY_HISTORY_MONTHS = 12;
 const MAX_SESSION_MINUTES = 24 * 60;
 const CANCELED_REWARD_STATUSES = ['CANCELED', 'CANCELLED', 'VOID', 'REJECTED'];
 const MONEY_REWARD_TYPES = new Set([
@@ -142,6 +151,10 @@ export type GuestGameEffectReport = {
     }>;
   };
   scenarios: GuestGameEffectScenarioView[];
+  /** Paid bonuses and prizes per month and mechanic, whole network. */
+  costByMonth: GameEffectMonthlyCost[];
+  /** Next-month return of players, future players and the rest, whole network. */
+  returnByMonth: GameEffectMonthlyReturn[];
 };
 
 export type GuestGameGuestEffect = {
@@ -207,6 +220,8 @@ type EffectData = {
   scenarios: Scenario[];
   participation: Map<string, Map<string, number>>;
   costs: Map<string, RewardCost[]>;
+  costByMonth: GameEffectMonthlyCost[];
+  returnByMonth: GameEffectMonthlyReturn[];
   dataQuality: GuestGameEffectReport['dataQuality'];
 };
 
@@ -305,6 +320,8 @@ export class GuestGameEffectService {
             right.cohort.participants - left.cohort.participants ||
             left.name.localeCompare(right.name, 'ru'),
         ),
+      costByMonth: data.costByMonth,
+      returnByMonth: data.returnByMonth,
     };
   }
 
@@ -775,10 +792,12 @@ export class GuestGameEffectService {
     const guestByProfile = new Map<string, string>();
     const players = new Map<string, Player>();
     const staffGuestIds = new Set<string>();
+    const staffProfileIds = new Set<string>();
     let playersWithoutGuest = 0;
     let earliestExposure = todayDay;
 
     profiles.forEach((profile) => {
+      if (profile.isStaffTest) staffProfileIds.add(profile.id);
       if (!profile.guestId) {
         if (profile.gameActivatedAt && !profile.isStaffTest) {
           playersWithoutGuest += 1;
@@ -842,12 +861,49 @@ export class GuestGameEffectService {
       })),
     ];
 
+    const historyFromMonth = addMonths(
+      monthOfDay(todayDay),
+      -MONTHLY_HISTORY_MONTHS,
+    );
     const participation = new Map<string, Map<string, number>>();
     const costs = new Map<string, RewardCost[]>();
+    const costItems: GameEffectCostItem[] = [];
     rewards.forEach((reward) => {
       const guestId =
         reward.guestId ??
         (reward.profileId ? guestByProfile.get(reward.profileId) : undefined);
+      // The monthly cost counts rewards of unlinked profiles too.
+      const holderKey = reward.profileId ?? reward.guestId;
+      if (
+        reward.status === 'PAID' &&
+        holderKey &&
+        !(reward.profileId && staffProfileIds.has(reward.profileId)) &&
+        !(guestId && staffGuestIds.has(guestId))
+      ) {
+        const amount = Number(reward.rewardAmount);
+        const day = localDayNumber(reward.paidAt ?? reward.qualifiedAt, zone);
+        if (monthOfDay(day) >= historyFromMonth) {
+          costItems.push({
+            day,
+            kind: reward.lootBoxId
+              ? 'LOOT_BOX'
+              : reward.missionId
+                ? 'MISSION'
+                : reward.seasonId
+                  ? 'SEASON'
+                  : 'OTHER',
+            holderKey,
+            bonusRub:
+              MONEY_REWARD_TYPES.has(reward.rewardType) &&
+              Number.isFinite(amount)
+                ? amount
+                : 0,
+            prize:
+              !MONEY_REWARD_TYPES.has(reward.rewardType) &&
+              !NON_PRIZE_REWARD_TYPES.has(reward.rewardType),
+          });
+        }
+      }
       if (!guestId) return;
       const key = reward.missionId
         ? scenarioKey('MISSION', reward.missionId)
@@ -893,9 +949,14 @@ export class GuestGameEffectService {
     );
     // One day of slack on the UTC side; local days are cut again below.
     const from = new Date((fromDay - 1) * 86_400_000);
-    const [rows, quality] = await Promise.all([
+    // One day of slack on the UTC side; local months are cut again below.
+    const historyFrom = new Date(
+      Date.parse(`${historyFromMonth}-01T00:00:00Z`) - 86_400_000,
+    );
+    const [rows, quality, monthlyVisits] = await Promise.all([
       this.loadDailyRows(tenantId, zone, from),
       this.loadTransactionQuality(tenantId),
+      this.loadMonthlyVisits(tenantId, zone, historyFrom),
     ]);
     const dataset = buildGameEffectDataset(
       rows.filter((row) => row.day >= fromDay && row.day <= lastCompleteDay),
@@ -906,6 +967,18 @@ export class GuestGameEffectService {
       if (!dataset.timelines.get(guestId)?.homeStoreId) {
         playersWithoutHomeStore += 1;
       }
+    });
+
+    const activationMonth = new Map<string, string>();
+    players.forEach((player, guestId) => {
+      if (player.isStaffTest || player.activationDay === null) return;
+      activationMonth.set(guestId, monthOfDay(player.activationDay));
+    });
+    const returnByMonth = measureMonthlyReturn({
+      visits: monthlyVisits.filter((visit) => visit.month >= historyFromMonth),
+      activationMonth,
+      excluded: staffGuestIds,
+      currentMonth: monthOfDay(todayDay),
     });
 
     this.logger.log(
@@ -923,6 +996,8 @@ export class GuestGameEffectService {
       scenarios,
       participation,
       costs,
+      costByMonth: summarizeMonthlyCosts(costItems),
+      returnByMonth,
       dataQuality: {
         ...quality,
         playersWithoutGuest,
@@ -1001,6 +1076,21 @@ export class GuestGameEffectService {
       balanceSpend: Number(row.balanceSpend) || 0,
       barRevenue: Number(row.barRevenue) || 0,
     }));
+  }
+
+  /** Months (network time zone) in which each guest had a session. */
+  private async loadMonthlyVisits(tenantId: string, zone: string, from: Date) {
+    const rows = await this.prisma.$queryRaw<
+      Array<{ guestId: string; month: string }>
+    >(Prisma.sql`
+      SELECT DISTINCT s."guestId" AS "guestId",
+             to_char(((s."startedAt" AT TIME ZONE 'UTC') AT TIME ZONE ${zone}), 'YYYY-MM') AS month
+      FROM "GuestSession" s
+      WHERE s."tenantId" = ${tenantId}
+        AND s."guestId" IS NOT NULL
+        AND s."startedAt" >= (${from.toISOString()}::timestamptz AT TIME ZONE 'UTC')
+    `);
+    return rows;
   }
 
   private async loadTransactionQuality(tenantId: string) {

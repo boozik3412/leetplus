@@ -1835,6 +1835,9 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   полный module profile с outbound `OFF`, OWNER role override как у shell,
   один временный клуб «Компьютерный клуб 1» (`Europe/Moscow`) с gamification и
   background execution `OFF`. Langame, workers и рассылки не подключаются.
+  Сеть создаётся с `executionRevision = 1` (дальше ревизией владеет триггер):
+  с ревизией 0 любой шаг под execution admission, включая подключение
+  Langame, отклонялся `TENANT_EXECUTION_REVISION_INVALID` (#330).
 - Владелец получает открытую ссылку `OWNER/NETWORK` (`email = NULL`,
   `deliveryMode = LINK`, `createdByUserId` = platform admin): письмо не
   отправляется, логин владелец задаёт сам, email claim берётся при accept.
@@ -2002,6 +2005,29 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
    scope остаётся fail-closed.
 5. Provider timeout/retry/idempotency оцениваются отдельно от database lock и
    HTTP concurrency.
+
+### Прокси Langame для новых сетей (30.10.2026)
+
+- Фенс пускает API и workers только на точные hostnames из
+  `/etc/leetplus-compose/providers.json`, а у каждой сети Langame свой
+  `<клуб>.langame.ru` на своём IP. Домен, которого нет в списке, при
+  подключении уходил в таймаут. Теперь проверка подключения различает
+  `LANGAME_DOMAIN_UNREACHABLE` и `LANGAME_AUTH_REJECTED` и пишет причину в лог
+  без ключа (#330).
+- `LANGAME_PROXY_URL` (только `http://` без учётных данных) направляет все
+  запросы `LangameClient` через CONNECT-прокси `deploy/simple/langame-proxy.mjs`.
+  Прокси пускает только поддомены `langame.ru`/`langamepro.ru`, только порт 443,
+  только на публичные IPv4 (DNS-ответ проверяется, fake-IP `198.18.0.0/15` и
+  private отвергаются) и только от адресов `LANGAME_PROXY_SOURCES`. TLS сквозной:
+  ключи и данные прокси не видит.
+- Размещение вне фенсируемой `172.31.40.0/22`: internal-сеть
+  `leetplus-langame` `172.31.46.0/24` (прокси `.2`, API-слоты `.10/.11`, daily и
+  report workers `.21`) без маршрута наружу и сеть выхода прокси
+  `leetplus-langame-out` `172.31.47.0/24`. V2 firewall, `providers.json` и
+  внешний worker 1171 не меняются. Ключ `LANGAME_PROXY_URL` получают только
+  `api-*`, `langame-daily-worker` и `daily-report-worker`; Web — нет.
+- Без `LANGAME_PROXY_URL` поведение прежнее. Шаги установки и отката:
+  `deploy/simple/README.md`, раздел «Прокси Langame».
 
 ### Отчёт за сутки и ИИ-разбор (26.10.2026)
 

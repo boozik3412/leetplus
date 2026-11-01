@@ -4659,7 +4659,7 @@ export class DashboardService {
         description: `Закажите ${this.round(input.forecast.recommendedOrderQuantity)} шт. с учётом недельного спроса и кратности поставщика.`,
         metric: `${input.forecast.oosRiskSkuCount} SKU · ${this.round(input.forecast.lostRevenue ?? 0)} ₽ под риском`,
         impactRubles: input.forecast.recoverableRevenue,
-        href: '/reports/replenishment/table',
+        href: '/products/order?view=order',
       });
     }
 
@@ -4759,7 +4759,7 @@ export class DashboardService {
           'Источники и покрытие в норме. Проверьте динамику продаж и категории-лидеры.',
         metric: 'Контрольный просмотр',
         impactRubles: null,
-        href: '/reports/top-sku/table',
+        href: '/reports/abc/table',
       });
     }
 

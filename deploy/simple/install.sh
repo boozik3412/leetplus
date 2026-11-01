@@ -8,6 +8,9 @@ dest=/opt/leetplus-deploy
 install -d -m 0700 "$dest" /var/lib/leetplus-deploy
 install -m 0700 "$src/lp.mjs" "$dest/lp.mjs"
 ln -sfn "$dest/lp.mjs" /usr/local/sbin/lp
+# Read by the non-root langame-proxy container through a read-only bind mount.
+install -d -m 0755 /opt/leetplus-langame-proxy
+install -m 0644 "$src/langame-proxy.mjs" /opt/leetplus-langame-proxy/langame-proxy.mjs
 for unit in "$src"/systemd/*; do install -m 0644 "$unit" /etc/systemd/system/; done
 systemctl daemon-reload
 echo "lp installed: $(sha256sum "$dest/lp.mjs" | cut -c1-12)"

@@ -110,6 +110,62 @@ Worker бота «Отчёт за сутки» (`daily-report-worker`, `lp-repor
 5. Проверка: `lp worker daily-report-worker` завершается с кодом 0, затем
    `systemctl enable --now lp-report.timer`.
 
+## Прокси Langame (`langame-proxy`)
+
+Сетевой фенс пускает API только на точные хосты из `providers.json`, а у
+каждой сети клубов Langame свой сервер `<клуб>.langame.ru` со своим IP. Чтобы
+новая сеть подключалась без правки хоста, запросы к Langame идут через
+CONNECT-прокси `langame-proxy.mjs`: он открывает TLS-туннель только к
+поддоменам `langame.ru` и `langamepro.ru`, только на порт 443, только на
+публичные IPv4 и только от заданных адресов. Содержимое запросов и ключи он не
+видит (TLS сквозной). Без `LANGAME_PROXY_URL` API ходит напрямую, как раньше.
+
+Раскладка (вне `172.31.40.0/22`, поэтому фенс и `LP_LEETPLUS_HOST_V2` её не
+касаются, а сам фенс не меняется):
+
+| Сеть | Подсеть | Кто |
+| --- | --- | --- |
+| `leetplus-langame` (internal) | `172.31.46.0/24` | прокси `.2`, `api-blue` `.10`, `api-green` `.11`, `langame-daily-worker` и `daily-report-worker` `.21` (общий адрес, как в `data`/`egress`) |
+| `leetplus-langame-out` | `172.31.47.0/24` | только прокси `.2`, отсюда он выходит в интернет |
+
+Сеть `internal` не даёт контейнерам маршрута наружу: шлюз API остаётся
+`egress` (`gw_priority 1`), обойти фенс через неё нельзя.
+
+Установка (один раз):
+
+1. `install.sh` (см. ниже) кладёт `/opt/leetplus-langame-proxy/langame-proxy.mjs`.
+2. В `/srv/leetplus/compose.json`:
+   - `networks`: `langame` = `{name: leetplus-langame, driver: bridge,
+     internal: true, enable_ipv6: false, ipam: {config: [{subnet: 172.31.46.0/24}]}}`
+     и `langame_out` = то же с `name: leetplus-langame-out`, `internal: false`,
+     подсетью `172.31.47.0/24`;
+   - сервис `langame-proxy`: образ `node:22.22.2-bookworm-slim@sha256:868499d5…`
+     (тот же, что база образов приложения), `command: [node, /proxy/langame-proxy.mjs]`,
+     `user: "65534:65534"`, `read_only`, `cap_drop: [ALL]`,
+     `security_opt: [no-new-privileges:true]`, `mem_limit: 128m`, `pids_limit: 64`,
+     `restart: unless-stopped`, bind `/opt/leetplus-langame-proxy/langame-proxy.mjs`
+     → `/proxy/langame-proxy.mjs` (ro), `environment:
+     LANGAME_PROXY_SOURCES=172.31.46.10,172.31.46.11,172.31.46.21`, сети
+     `langame` `172.31.46.2` и `langame_out` `172.31.47.2` (`gw_priority 1`);
+   - `api-blue`, `api-green`, `langame-daily-worker`, `daily-report-worker`:
+     добавить сеть `langame` с адресами из таблицы.
+3. В `api-blue.json`, `api-green.json`, `langame-daily-worker.json`,
+   `daily-report-worker.json` добавить
+   `LANGAME_PROXY_URL=http://172.31.46.2:3128` (ключ `LANGAME_*` уже разрешён
+   профилям workers в `runtime-entry.cjs`). Внешний worker 1171 не трогать.
+4. `docker compose --project-name leetplus --file /srv/leetplus/compose.json up -d --no-deps langame-proxy`
+5. `lp deploy <sha>`: новый слот поднимается уже с сетью и ключом; workers
+   подхватят их на следующем тике. Старый слот получит их на следующем деплое.
+6. Проверка из рабочего API (ожидается 403 «нет ключа» от Langame, а не таймаут):
+
+```bash
+docker exec -w /app/apps/api leetplus-api-<slot> node -e "const {ProxyAgent,fetch}=require('undici');fetch('https://ostrov.centralarena.langame.ru/public_api/clubs/list',{dispatcher:new ProxyAgent('http://172.31.46.2:3128')}).then(r=>console.log(r.status))"
+docker logs --tail 20 leetplus-langame-proxy
+```
+
+Откат: убрать `LANGAME_PROXY_URL` из секретов и пересоздать слот — API снова
+ходит напрямую через фенс (там остаются известные домены).
+
 ## Миграции
 
 Если в релизе есть миграции, которых нет в базе, `lp stage`/`lp deploy` перед

@@ -1,4 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
 import {
   IntegrationProvider,
   IntegrationSyncMode,
@@ -682,6 +683,65 @@ describe('LangameSettingsService', () => {
     expect(prisma.integrationSource.updateMany).not.toHaveBeenCalled();
     expect(prisma.integrationSource.upsert).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      'a domain the server cannot reach',
+      Object.assign(new Error('This operation was aborted'), {
+        name: 'AbortError',
+      }),
+      'LANGAME_DOMAIN_UNREACHABLE',
+    ],
+    [
+      'a refused connection',
+      new TypeError('fetch failed', {
+        cause: Object.assign(new Error('connect ECONNREFUSED'), {
+          code: 'ECONNREFUSED',
+        }),
+      }),
+      'LANGAME_DOMAIN_UNREACHABLE',
+    ],
+    [
+      'a rejected API key',
+      new Error(
+        'Langame /clubs/list failed: 403 Forbidden - submitted-secret-key',
+      ),
+      'LANGAME_AUTH_REJECTED',
+    ],
+  ])(
+    'tells %s apart from other diagnostic failures',
+    async (_case, error, reasonCode) => {
+      langameClient.getDiagnosticEndpoint.mockRejectedValue(error);
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+
+      const result = await service.previewSettings(user, {
+        apiKey: 'submitted-secret-key',
+        domains: ['ostrov.centralarena.langame.ru'],
+      });
+
+      expect(result).toMatchObject({
+        status: 'REJECTED',
+        diagnostics: [
+          {
+            domain: 'ostrov.centralarena.langame.ru',
+            status: 'FAILED',
+            reasonCode,
+          },
+        ],
+      });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `ostrov.centralarena.langame.ru failed (${reasonCode})`,
+        ),
+      );
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(
+        'submitted-secret-key',
+      );
+      warn.mockRestore();
+    },
+  );
 
   it('rejects non-Langame diagnostic hosts before any outbound request', async () => {
     await expect(

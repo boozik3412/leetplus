@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -324,6 +325,8 @@ type LangameOnboardingDiagnostic = {
   requiresSelection: boolean;
   reasonCode:
     | 'LANGAME_DIAGNOSTIC_FAILED'
+    | 'LANGAME_DOMAIN_UNREACHABLE'
+    | 'LANGAME_AUTH_REJECTED'
     | 'LANGAME_NO_ACTIVE_CLUBS'
     | 'LANGAME_CLUB_LIST_INVALID'
     | null;
@@ -344,6 +347,8 @@ const tariffSnapshotEndpointKeys = new Set<LangameEndpointProfileKey>([
 
 @Injectable()
 export class LangameSettingsService {
+  private readonly logger = new Logger(LangameSettingsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
@@ -2916,14 +2921,21 @@ export class LangameSettingsService {
             requiresSelection: parsed.clubs.length > 1,
             reasonCode: null,
           };
-        } catch {
+        } catch (error) {
+          const reasonCode = this.onboardingFailureReason(error);
+          this.logger.warn(
+            `Langame onboarding check for ${domain} failed (${reasonCode}): ${this.redactApiKey(
+              this.errorText(error),
+              apiKey,
+            )}`,
+          );
           return {
             domain,
             status: 'FAILED' as const,
             clubCount: 0,
             clubs: [],
             requiresSelection: false,
-            reasonCode: 'LANGAME_DIAGNOSTIC_FAILED' as const,
+            reasonCode,
           };
         }
       }),
@@ -2939,6 +2951,55 @@ export class LangameSettingsService {
     }
 
     return diagnostics;
+  }
+
+  /**
+   * The production egress firewall only lets the API reach allow-listed
+   * Langame hosts, so a new club domain times out until it is added there.
+   * Telling that apart from a rejected key saves the owner from re-entering a
+   * valid key (30.10.2026, ostrov.centralarena.langame.ru).
+   */
+  private onboardingFailureReason(
+    error: unknown,
+  ):
+    | 'LANGAME_DOMAIN_UNREACHABLE'
+    | 'LANGAME_AUTH_REJECTED'
+    | 'LANGAME_DIAGNOSTIC_FAILED' {
+    const text = this.errorText(error);
+    if (
+      (error instanceof Error &&
+        (error.name === 'AbortError' || error.name === 'TimeoutError')) ||
+      /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EHOSTUNREACH|ENETUNREACH|UND_ERR/i.test(
+        text,
+      )
+    ) {
+      return 'LANGAME_DOMAIN_UNREACHABLE';
+    }
+    if (/ failed: 40[13]\b/.test(text)) {
+      return 'LANGAME_AUTH_REJECTED';
+    }
+    return 'LANGAME_DIAGNOSTIC_FAILED';
+  }
+
+  private errorText(error: unknown) {
+    if (!(error instanceof Error)) {
+      return String(error);
+    }
+    const cause = (error as { cause?: unknown }).cause;
+    const causeText =
+      cause instanceof Error
+        ? [cause.message, (cause as { code?: unknown }).code]
+            .filter((part) => typeof part === 'string' && part)
+            .join(' ')
+        : '';
+    return [`${error.name}: ${error.message}`, causeText]
+      .filter(Boolean)
+      .join(' / ')
+      .slice(0, 500);
+  }
+
+  private redactApiKey(text: string, apiKey: string) {
+    return apiKey ? text.split(apiKey).join('***') : text;
   }
 
   private toOnboardingClubs(payload: unknown): {

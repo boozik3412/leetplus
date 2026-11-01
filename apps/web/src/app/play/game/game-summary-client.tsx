@@ -16365,6 +16365,7 @@ function gameActionHref(action: GameNextAction) {
 function gameActionButtonLabel(action: GameNextAction) {
   const labels = {
     CLAIM_REWARD: "Забрать награду",
+    AWAIT_REWARD_HANDOFF: "Мои награды",
     OPEN_LOOT_BOX: "Открыть приз",
     FINISH_MISSION: "Открыть квест",
     BATTLE_PASS: "Открыть сезон",

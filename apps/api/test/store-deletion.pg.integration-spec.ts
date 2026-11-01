@@ -76,13 +76,27 @@ describePostgres('club deletion PostgreSQL boundary', () => {
       },
     });
     if (tenantIds.length > 0) {
+      // Children first; every table a test writes to is listed here.
+      for (const table of [
+        'GuestSession',
+        'StaffMember',
+        'StaffChecklistTemplate',
+        'StaffDisciplinePolicy',
+        'ClubRevenueFact',
+        'InventorySnapshot',
+        'SalesFact',
+        'StoreClosure',
+        'Product',
+        'UserInvite',
+      ]) {
+        await prisma.$executeRaw(
+          Prisma.sql`
+            DELETE FROM ${Prisma.raw(`public."${table}"`)}
+            WHERE "tenantId" IN (${Prisma.join(tenantIds)})
+          `,
+        );
+      }
       await prisma.$transaction([
-        prisma.storeClosure.deleteMany({
-          where: { tenantId: { in: tenantIds } },
-        }),
-        prisma.userInvite.deleteMany({
-          where: { tenantId: { in: tenantIds } },
-        }),
         prisma.userStoreAccess.deleteMany({
           where: { user: { tenantId: { in: tenantIds } } },
         }),
@@ -131,115 +145,216 @@ describePostgres('club deletion PostgreSQL boundary', () => {
     expect([...known].filter((ref) => !catalog.has(ref)).sort()).toEqual([]);
   });
 
-  it('lets a network owner delete an empty club and refuses everything else', async () => {
+  it('deletes a club with its data after both confirmations', async () => {
     const tenantId = await createTenant('owner');
     const keep = await createStore(tenantId, 'Основной клуб');
-    const empty = await createStore(tenantId, 'Пустой клуб');
-    const withClosure = await createStore(tenantId, 'Клуб с закрытием');
-    const withStaff = await createStore(tenantId, 'Клуб с сотрудником');
-    const withInvite = await createStore(tenantId, 'Клуб с приглашением');
-    const langame = await createStore(tenantId, 'Клуб из Langame', {
-      externalClubId: `${runId}-langame`,
-    });
+    const target = await createStore(tenantId, 'Клуб с историей');
     const owner = await createUser(tenantId, 'owner', { role: 'OWNER' });
     const networkAdmin = await createUser(tenantId, 'network-admin', {
       role: 'ADMIN',
     });
-    const storeManager = await createUser(tenantId, 'store-manager', {
+    const sharedManager = await createUser(tenantId, 'shared-manager', {
       role: 'MANAGER',
       accessScope: 'STORES',
     });
-    await prisma.userStoreAccess.create({
-      data: { userId: storeManager, storeId: withStaff },
+    const onlyHereManager = await createUser(tenantId, 'only-here', {
+      role: 'MANAGER',
+      accessScope: 'STORES',
     });
-    await prisma.storeClosure.create({
+    await prisma.userStoreAccess.createMany({
+      data: [
+        { userId: sharedManager, storeId: keep },
+        { userId: sharedManager, storeId: target },
+        { userId: onlyHereManager, storeId: target },
+      ],
+    });
+    const product = await prisma.product.create({
       data: {
         tenantId,
-        storeId: withClosure,
-        closedFrom: new Date('2026-10-01T00:00:00.000Z'),
+        article: `${runId}-cola`,
+        name: 'Кола',
+        purchasePrice: 50,
+        salePrice: 100,
+      },
+      select: { id: true },
+    });
+    const day = new Date('2026-10-01T00:00:00.000Z');
+    await prisma.salesFact.createMany({
+      data: [keep, target].map((storeId) => ({
+        tenantId,
+        storeId,
+        productId: product.id,
+        saleDate: day,
+        quantity: 1,
+        revenue: 100,
+        cost: 50,
+      })),
+    });
+    await prisma.inventorySnapshot.create({
+      data: {
+        tenantId,
+        storeId: target,
+        productId: product.id,
+        snapshotDate: day,
+        quantity: 5,
       },
     });
-    await prisma.userInvite.create({
+    await prisma.storeClosure.create({
+      data: { tenantId, storeId: target, closedFrom: day },
+    });
+    await prisma.clubRevenueFact.create({
+      data: { tenantId, storeId: target, revenueDate: day, totalRevenue: 1000 },
+    });
+    await prisma.staffDisciplinePolicy.create({
+      data: { tenantId, storeId: target },
+    });
+    const session = await prisma.guestSession.create({
+      data: { tenantId, storeId: target, externalSessionId: `${runId}-s1` },
+      select: { id: true },
+    });
+    const clubChecklist = await prisma.staffChecklistTemplate.create({
+      data: {
+        tenantId,
+        storeId: target,
+        title: 'Открытие клуба',
+        sections: [],
+        status: 'ACTIVE',
+      },
+      select: { id: true },
+    });
+    const invite = await prisma.userInvite.create({
       data: {
         tenantId,
         role: 'MANAGER',
         accessScope: 'STORES',
-        storeIds: [withInvite],
+        storeIds: [target],
         tokenHash: `${runId}-store-invite`,
         expiresAt: new Date(Date.now() + 86_400_000),
         deliveryMode: 'LINK',
       },
+      select: { id: true },
     });
 
-    const asOwner = (storeId: string, confirmation: unknown = 'УДАЛИТЬ') =>
+    const asOwner = (
+      storeId: string,
+      storeName: unknown = 'Клуб с историей',
+      confirmation: unknown = 'УДАЛИТЬ',
+    ) =>
       deletion.deleteStore({
         tenantId,
         storeId,
         actorUserId: owner,
         actorKind: 'NETWORK_OWNER',
+        storeName,
         confirmation,
         authorize: (tx) =>
           deletion.assertFreshNetworkOwner(tx, owner, tenantId),
       });
 
-    const candidates = await deletion.listCandidates(tenantId);
-    const blockersOf = (storeId: string) =>
-      candidates.find((candidate) => candidate.id === storeId)?.blockers;
-    expect(blockersOf(empty)).toEqual([]);
-    expect(blockersOf(keep)).toEqual([]);
-    expect(blockersOf(withClosure)).toEqual(['дни закрытия']);
-    expect(blockersOf(withStaff)).toEqual([
-      'сотрудники с доступом только к этому клубу',
+    const preview = await deletion.preview(tenantId, target);
+    expect(preview.store).toMatchObject({
+      id: target,
+      name: 'Клуб с историей',
+      langameLinked: false,
+    });
+    expect(preview.deletes).toEqual(
+      expect.arrayContaining([
+        { label: 'продажи', count: 1 },
+        { label: 'остатки', count: 1 },
+        { label: 'дни закрытия', count: 1 },
+        { label: 'выручка', count: 1 },
+        { label: 'правила дисциплины', count: 1 },
+      ]),
+    );
+    expect(preview.archives).toEqual([{ label: 'чек-листы', count: 1 }]);
+    expect(preview.detaches).toEqual([{ label: 'сеансы гостей', count: 1 }]);
+    expect(preview.blockers).toEqual([
+      'у сотрудников (1) это единственный клуб доступа, сначала дайте им другой клуб или отключите их',
     ]);
-    expect(blockersOf(withInvite)).toEqual(['неиспользованные приглашения']);
-    expect(blockersOf(langame)).toEqual(['подключение к Langame']);
 
-    await expect(asOwner(empty, 'удалить')).rejects.toBeInstanceOf(
+    // Both confirmations are required, and only the network owner may act.
+    await expect(asOwner(target, 'Клуб')).rejects.toBeInstanceOf(
       BadRequestException,
     );
     await expect(
+      asOwner(target, 'Клуб с историей', 'удалить'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
       deletion.deleteStore({
         tenantId,
-        storeId: empty,
+        storeId: target,
         actorUserId: networkAdmin,
         actorKind: 'NETWORK_OWNER',
+        storeName: 'Клуб с историей',
         confirmation: 'УДАЛИТЬ',
         authorize: (tx) =>
           deletion.assertFreshNetworkOwner(tx, networkAdmin, tenantId),
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    for (const blocked of [withClosure, withStaff, withInvite, langame]) {
-      await expect(asOwner(blocked)).rejects.toBeInstanceOf(ConflictException);
-    }
+    await expect(asOwner(target)).rejects.toBeInstanceOf(ConflictException);
     await expect(asOwner(randomUUID())).rejects.toBeInstanceOf(
       NotFoundException,
     );
+    expect(await prisma.salesFact.count({ where: { storeId: target } })).toBe(
+      1,
+    );
 
-    await expect(asOwner(empty)).resolves.toMatchObject({
-      ok: true,
-      storeId: empty,
-      storeName: 'Пустой клуб',
+    // A disabled account no longer holds the club back.
+    await prisma.user.update({
+      where: { id: onlyHereManager },
+      data: { isActive: false },
     });
-    expect(await prisma.store.count({ where: { id: empty } })).toBe(0);
-    expect(
-      await prisma.platformAdminAuditEvent.count({
-        where: {
-          tenantId,
-          actorUserId: owner,
-          action: STORE_DELETED_ACTION,
-          targetId: empty,
-        },
-      }),
-    ).toBe(1);
+    await expect(asOwner(target, '  Клуб с историей ')).resolves.toMatchObject({
+      ok: true,
+      storeId: target,
+      storeName: 'Клуб с историей',
+      revokedInvites: 1,
+    });
 
-    // Other clubs stay untouched by the refused attempts.
+    expect(await prisma.store.count({ where: { id: target } })).toBe(0);
     expect(
-      await prisma.store.count({
-        where: {
-          id: { in: [keep, withClosure, withStaff, withInvite, langame] },
-        },
+      await prisma.salesFact.count({ where: { tenantId, storeId: keep } }),
+    ).toBe(1);
+    expect(await prisma.salesFact.count({ where: { tenantId } })).toBe(1);
+    expect(await prisma.inventorySnapshot.count({ where: { tenantId } })).toBe(
+      0,
+    );
+    expect(await prisma.storeClosure.count({ where: { tenantId } })).toBe(0);
+    expect(await prisma.clubRevenueFact.count({ where: { tenantId } })).toBe(0);
+    expect(
+      await prisma.staffDisciplinePolicy.count({ where: { tenantId } }),
+    ).toBe(0);
+    await expect(
+      prisma.guestSession.findUniqueOrThrow({ where: { id: session.id } }),
+    ).resolves.toMatchObject({ storeId: null });
+    await expect(
+      prisma.staffChecklistTemplate.findUniqueOrThrow({
+        where: { id: clubChecklist.id },
       }),
-    ).toBe(5);
+    ).resolves.toMatchObject({ storeId: null, status: 'ARCHIVED' });
+    const revoked = await prisma.userInvite.findUniqueOrThrow({
+      where: { id: invite.id },
+    });
+    expect(revoked.revokedAt).not.toBeNull();
+    expect(
+      await prisma.userStoreAccess.findMany({
+        where: { userId: { in: [sharedManager, onlyHereManager] } },
+        select: { userId: true, storeId: true },
+      }),
+    ).toEqual([{ userId: sharedManager, storeId: keep }]);
+    const audit = await prisma.platformAdminAuditEvent.findFirstOrThrow({
+      where: {
+        tenantId,
+        actorUserId: owner,
+        action: STORE_DELETED_ACTION,
+        targetId: target,
+      },
+    });
+    expect(audit.metadata).toMatchObject({
+      actorKind: 'NETWORK_OWNER',
+      revokedInvites: 1,
+      archived: [{ label: 'чек-листы', count: 1 }],
+    });
   });
 
   it('never deletes the last active club and stays inside the network', async () => {
@@ -247,33 +362,61 @@ describePostgres('club deletion PostgreSQL boundary', () => {
     const only = await createStore(tenantId, 'Единственный клуб');
     const archived = await createStore(tenantId, 'Архивный клуб', {
       isActive: false,
+      externalClubId: `${runId}-langame`,
     });
     const otherTenant = await createTenant('foreign');
     const foreign = await createStore(otherTenant, 'Чужой клуб');
     await createStore(otherTenant, 'Второй чужой клуб');
 
-    const candidates = await networks.listStores(admin, tenantId);
-    expect(
-      candidates.stores.find((store) => store.id === only)?.blockers,
-    ).toEqual(['это единственный действующий клуб сети']);
+    const { stores } = await networks.listStores(admin, tenantId);
+    expect(stores.map((store) => store.id)).toEqual([only, archived]);
+    const onlyPreview = await networks.previewStoreDeletion(
+      admin,
+      tenantId,
+      only,
+    );
+    expect(onlyPreview.blockers).toEqual([
+      'это единственный действующий клуб сети, сначала добавьте другой',
+    ]);
+    const langamePreview = await networks.previewStoreDeletion(
+      admin,
+      tenantId,
+      archived,
+    );
+    expect(langamePreview.store.langameLinked).toBe(true);
+    expect(langamePreview.warnings).toHaveLength(1);
+    await expect(
+      networks.previewStoreDeletion(admin, tenantId, foreign),
+    ).rejects.toBeInstanceOf(NotFoundException);
 
     await expect(
-      networks.deleteStore(admin, tenantId, only, { confirmation: 'УДАЛИТЬ' }),
+      networks.deleteStore(admin, tenantId, only, {
+        storeName: 'Единственный клуб',
+        confirmation: 'УДАЛИТЬ',
+      }),
     ).rejects.toBeInstanceOf(ConflictException);
     await expect(
       networks.deleteStore(admin, tenantId, foreign, {
+        storeName: 'Чужой клуб',
         confirmation: 'УДАЛИТЬ',
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
     await expect(
       networks.deleteStore(admin, tenantId, archived, {
+        storeName: 'Архивный клуб',
         confirmation: 'УДАЛИТЬ',
         extra: true,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      networks.deleteStore(admin, tenantId, archived, {
+        confirmation: 'УДАЛИТЬ',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
     await expect(
       networks.deleteStore(admin, tenantId, archived, {
+        storeName: 'Архивный клуб',
         confirmation: 'УДАЛИТЬ',
       }),
     ).resolves.toMatchObject({ ok: true, storeId: archived });
@@ -282,7 +425,11 @@ describePostgres('club deletion PostgreSQL boundary', () => {
 
     const notAdmin = { ...admin, isPlatformAdmin: false };
     await expect(
+      networks.previewStoreDeletion(notAdmin, tenantId, only),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
       networks.deleteStore(notAdmin, tenantId, only, {
+        storeName: 'Единственный клуб',
         confirmation: 'УДАЛИТЬ',
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);

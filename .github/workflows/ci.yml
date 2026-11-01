@@ -2252,7 +2252,7 @@ jobs:
           NODE_ENV: test
           PLATFORM_NETWORK_PG_CONFIRM: run-platform-network-postgres-fixtures
 
-      - name: Verify club deletion keeps referenced clubs and the last active club
+      - name: Verify club deletion removes club data only after both confirmations
         run: pnpm --filter api test:integration:store-deletion:pg
         env:
           NODE_ENV: test

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { StoreDeletionFlow } from "@/components/store-deletion-flow";
 
 type AccessChoice = "OPEN_ENDED" | "DAYS";
 
@@ -421,10 +422,7 @@ type NetworkStore = {
   id: string;
   name: string;
   isActive: boolean;
-  blockers: string[];
 };
-
-const STORE_DELETE_CONFIRMATION = "УДАЛИТЬ";
 
 export function PlatformNetworkStoresPanel({
   tenant,
@@ -507,31 +505,8 @@ function NetworkStoreRow({
   store: NetworkStore;
   onDeleted: () => Promise<void>;
 }) {
-  const [isConfirming, setIsConfirming] = useState(false);
-  const [confirmation, setConfirmation] = useState("");
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const canDelete = store.blockers.length === 0;
-
-  async function deleteStore() {
-    setIsDeleting(true);
-    setError(null);
-    const response = await fetch(
-      `/api/admin/tenants/${tenantId}/stores/${store.id}/delete`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirmation: confirmation.trim() }),
-      },
-    );
-    if (!response.ok) {
-      setError(await readError(response));
-      setIsDeleting(false);
-      return;
-    }
-    setIsDeleting(false);
-    await onDeleted();
-  }
+  const [isOpen, setIsOpen] = useState(false);
+  const base = `/api/admin/tenants/${tenantId}/stores/${store.id}`;
 
   return (
     <li className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
@@ -542,63 +517,29 @@ function NetworkStoreRow({
             <span className="ml-2 text-xs text-zinc-500">в архиве</span>
           )}
         </span>
-        {canDelete && !isConfirming ? (
+        {isOpen ? null : (
           <button
             type="button"
-            onClick={() => setIsConfirming(true)}
+            onClick={() => setIsOpen(true)}
             className="rounded-lg border border-red-500/40 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:border-red-500 dark:text-red-200"
           >
             Удалить клуб
           </button>
-        ) : null}
+        )}
       </div>
-      {canDelete ? null : (
-        <p className="mt-1 text-xs text-zinc-500">
-          Удалить нельзя: {store.blockers.join(", ")}
-        </p>
-      )}
-      {canDelete && isConfirming ? (
-        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-          <input
-            value={confirmation}
-            onChange={(event) => setConfirmation(event.target.value)}
-            placeholder={STORE_DELETE_CONFIRMATION}
-            aria-label={`Подтверждение удаления клуба ${store.name}`}
-            className="min-w-0 flex-1 rounded-lg border border-red-500/30 bg-white px-3 py-2 text-xs outline-none dark:bg-zinc-950"
-          />
-          <button
-            type="button"
-            disabled={
-              isDeleting || confirmation.trim() !== STORE_DELETE_CONFIRMATION
-            }
-            onClick={() => void deleteStore()}
-            className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isDeleting ? "Удаляем…" : "Удалить навсегда"}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setIsConfirming(false);
-              setConfirmation("");
-              setError(null);
+      {isOpen ? (
+        <div className="mt-2">
+          <StoreDeletionFlow
+            storeName={store.name}
+            previewUrl={`${base}/deletion-preview`}
+            deleteUrl={`${base}/delete`}
+            onDeleted={async () => {
+              setIsOpen(false);
+              await onDeleted();
             }}
-            className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
-          >
-            Отмена
-          </button>
+            onCancel={() => setIsOpen(false)}
+          />
         </div>
-      ) : null}
-      {canDelete && isConfirming ? (
-        <p className="mt-1 text-xs text-zinc-500">
-          Клуб удаляется навсегда. Для подтверждения введите{" "}
-          <code className="font-semibold">{STORE_DELETE_CONFIRMATION}</code>.
-        </p>
-      ) : null}
-      {error ? (
-        <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-200">
-          {error}
-        </p>
       ) : null}
     </li>
   );

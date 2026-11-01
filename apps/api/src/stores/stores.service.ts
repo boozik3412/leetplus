@@ -712,9 +712,15 @@ export class StoresService {
     });
   }
 
-  async deleteEmpty(id: string, dto: unknown, user: AuthenticatedUser) {
+  async previewDeletion(id: string, user: AuthenticatedUser) {
     await this.freshStoreScopeService.assertNetwork(user);
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    return this.storeDeletionService.preview(tenantId, id);
+  }
+
+  async deletePermanently(id: string, dto: unknown, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
     const body =
       typeof dto === 'object' && dto !== null && !Array.isArray(dto)
         ? (dto as Record<string, unknown>)
@@ -725,6 +731,7 @@ export class StoresService {
       storeId: id,
       actorUserId: user.id,
       actorKind: 'NETWORK_OWNER',
+      storeName: body.storeName,
       confirmation: body.confirmation,
       authorize: (tx) =>
         this.storeDeletionService.assertFreshNetworkOwner(

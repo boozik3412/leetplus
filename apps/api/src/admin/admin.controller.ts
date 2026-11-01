@@ -98,6 +98,19 @@ export class AdminController {
     return this.platformNetworkService.listStores(user, tenantId);
   }
 
+  @Get('tenants/:tenantId/stores/:storeId/deletion-preview')
+  previewNetworkStoreDeletion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Param('storeId') storeId: string,
+  ) {
+    return this.platformNetworkService.previewStoreDeletion(
+      user,
+      tenantId,
+      storeId,
+    );
+  }
+
   @Post('tenants/:tenantId/stores/:storeId/delete')
   deleteNetworkStore(
     @CurrentUser() user: AuthenticatedUser,

@@ -21,7 +21,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   StoreDeletionService,
   type DeleteStoreResult,
-  type StoreDeletionCandidate,
+  type NetworkStoreSummary,
+  type StoreDeletionPreview,
 } from '../stores/store-deletion.service';
 import { OPEN_ENDED_TENANT_ACCESS_ENDS_AT } from '../tenancy/tenant-access-window';
 import { COMPLETE_TENANT_MODULE_PROFILE } from '../tenancy/tenant-entitlement-profile.service';
@@ -49,7 +50,7 @@ const CREATE_FIELDS = new Set([
 ]);
 const OWNER_LINK_FIELDS = new Set(['confirmation', 'linkExpiresInDays']);
 const DELETE_FIELDS = new Set(['confirmation']);
-const STORE_DELETE_FIELDS = new Set(['confirmation']);
+const STORE_DELETE_FIELDS = new Set(['storeName', 'confirmation']);
 
 type CreateNetworkCommand = {
   tenantName: string;
@@ -499,9 +500,18 @@ export class PlatformNetworkService {
   async listStores(
     actor: AuthenticatedUser,
     tenantId: string,
-  ): Promise<{ stores: StoreDeletionCandidate[] }> {
+  ): Promise<{ stores: NetworkStoreSummary[] }> {
     this.assertPlatformAdminActor(actor);
-    return { stores: await this.storeDeletion.listCandidates(tenantId) };
+    return { stores: await this.storeDeletion.listStores(tenantId) };
+  }
+
+  async previewStoreDeletion(
+    actor: AuthenticatedUser,
+    tenantId: string,
+    storeId: string,
+  ): Promise<StoreDeletionPreview> {
+    this.assertPlatformAdminActor(actor);
+    return this.storeDeletion.preview(tenantId, storeId);
   }
 
   async deleteStore(
@@ -517,6 +527,7 @@ export class PlatformNetworkService {
       storeId,
       actorUserId: actor.id,
       actorKind: 'PLATFORM_ADMIN',
+      storeName: body.storeName,
       confirmation: body.confirmation,
       authorize: (tx) => this.assertFreshPlatformAdmin(tx, actor.id),
     });

@@ -7,6 +7,7 @@ import {
 } from "@/components/store-actions";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StoreClosureControl } from "@/components/store-closure-control";
+import { StoreLogoControl } from "@/components/store-logo-control";
 import { requireCurrentUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
@@ -225,6 +226,14 @@ export default async function StoresPage({
                             ? { mode: "reopen", date: reopenDay }
                             : null
                       }
+                    />
+                  ) : null}
+
+                  {canEditStores ? (
+                    <StoreLogoControl
+                      storeId={store.id}
+                      storeName={store.name}
+                      logoUrl={store.gameLogoUrl ?? null}
                     />
                   ) : null}
 

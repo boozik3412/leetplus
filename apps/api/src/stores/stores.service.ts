@@ -12,6 +12,7 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import type { CreateStoreDto, UpdateStoreDto } from './stores.dto';
 import { StoreDeletionService } from './store-deletion.service';
+import { normalizeGameLogoUrl } from '../settings/game-logo';
 import {
   cityFromStoreAddress,
   isSupportedTimeZone,
@@ -686,6 +687,14 @@ export class StoresService {
             : {}),
         ...(dto.yandexMapsUrl !== undefined ? { yandexMapsUrl } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        ...(dto.gameLogoUrl !== undefined
+          ? {
+              gameLogoUrl: normalizeGameLogoUrl(
+                dto.gameLogoUrl,
+                'Логотип клуба',
+              ),
+            }
+          : {}),
         ...(dto.gamificationEnabled !== undefined
           ? {
               gamificationEnabled: this.normalizeBoolean(

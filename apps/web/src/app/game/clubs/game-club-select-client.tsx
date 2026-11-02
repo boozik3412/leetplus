@@ -780,6 +780,11 @@ function ClubCard({
   onSelect: () => void;
 }) {
   const distance = distanceLabel(club);
+  const hasTags =
+    current ||
+    club.gamification.activeMissions > 0 ||
+    club.gamification.activeSeasons > 0 ||
+    club.gamification.activeLootBoxes > 0;
 
   return (
     <article
@@ -795,13 +800,16 @@ function ClubCard({
             <span>{formatClubLocation(club)}</span>
           </span>
         </div>
-        <div className="lp-club-tags">
-          <span className="is-live">game module</span>
-          {club.gamification.activeMissions > 0 ? <span>квесты</span> : null}
-          {club.gamification.activeSeasons > 0 ? <span>батлпасс</span> : null}
-          {club.gamification.activeLootBoxes > 0 ? <span>лутбоксы</span> : null}
-          {current ? <span className="is-current">текущая сессия</span> : null}
-        </div>
+        {hasTags ? (
+          <div className="lp-club-tags">
+            {club.gamification.activeMissions > 0 ? <span>квесты</span> : null}
+            {club.gamification.activeSeasons > 0 ? <span>батлпасс</span> : null}
+            {club.gamification.activeLootBoxes > 0 ? (
+              <span>лутбоксы</span>
+            ) : null}
+            {current ? <span className="is-current">текущая сессия</span> : null}
+          </div>
+        ) : null}
       </div>
       <div className="lp-club-card-side">
         {distance ? <span className="lp-club-distance">{distance}</span> : null}
@@ -1677,10 +1685,6 @@ function ClubSelectStyles() {
   font-weight: 820;
   letter-spacing: .1em;
   text-transform: uppercase;
-}
-.lp-club-tags .is-live {
-  border-color: rgba(131, 228, 236, .36);
-  color: var(--cyan);
 }
 .lp-club-tags .is-current {
   border-color: rgba(208, 170, 108, .42);

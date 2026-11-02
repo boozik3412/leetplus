@@ -1,6 +1,7 @@
 import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import type { TenantContextService } from '../tenancy/tenant-context.service';
 import { StaffDisciplineService } from './staff-discipline.service';
 
@@ -28,9 +29,28 @@ const owner = {
   allowedStoreIds: [],
 } satisfies AuthenticatedUser;
 
-function createHarness() {
+const clubAdministrator = {
+  id: 'admin-a',
+  email: 'admin-a@example.test',
+  fullName: 'Admin A',
+  role: UserRole.CLUB_ADMINISTRATOR,
+  isPlatformAdmin: false,
+  tenantId,
+  tenantSlug: 'tenant-a',
+  accessScope: 'STORES',
+  allowedStoreIds: ['store-a'],
+} satisfies AuthenticatedUser;
+
+function createHarness(
+  scope: { mode: 'NETWORK' | 'STORES'; allowedStoreIds: string[] } = {
+    mode: 'NETWORK',
+    allowedStoreIds: [],
+  },
+) {
   const recordFindMany: RecordFindManyMock = jest.fn();
   recordFindMany.mockResolvedValue([]);
+  const storeFindMany = jest.fn().mockResolvedValue([]);
+  const userFindMany = jest.fn().mockResolvedValue([]);
   const prisma = {
     staffDisciplineRule: {
       count: jest.fn().mockResolvedValue(1),
@@ -40,10 +60,10 @@ function createHarness() {
       findMany: recordFindMany,
     },
     store: {
-      findMany: jest.fn().mockResolvedValue([]),
+      findMany: storeFindMany,
     },
     user: {
-      findMany: jest.fn().mockResolvedValue([]),
+      findMany: userFindMany,
     },
     staffDisciplinePolicy: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -52,12 +72,98 @@ function createHarness() {
   const tenantContext = {
     resolve: jest.fn().mockResolvedValue({ tenantId }),
   } as unknown as TenantContextService;
+  const freshStoreScope = {
+    resolve: jest.fn((user: AuthenticatedUser) =>
+      Promise.resolve({
+        userId: user.id,
+        tenantId,
+        tenantSlug: 'tenant-a',
+        ...scope,
+      }),
+    ),
+  };
 
   return {
-    service: new StaffDisciplineService(prisma, tenantContext),
+    service: new StaffDisciplineService(
+      prisma,
+      tenantContext,
+      freshStoreScope as unknown as FreshStoreScopeService,
+    ),
     recordFindMany,
+    storeFindMany,
+    userFindMany,
+    freshStoreScope,
   };
 }
+
+describe('StaffDisciplineService own motivation report', () => {
+  it('pins a STORES administrator to their own records and in-scope clubs', async () => {
+    const harness = createHarness({
+      mode: 'STORES',
+      allowedStoreIds: ['store-a'],
+    });
+    harness.recordFindMany.mockImplementation((args) =>
+      Promise.resolve(
+        (args as { distinct?: unknown }).distinct
+          ? [{ storeId: 'store-old' }]
+          : [],
+      ),
+    );
+
+    const report = await harness.service.getOwnReport(clubAdministrator, {
+      userId: 'someone-else',
+    });
+
+    expect(harness.freshStoreScope.resolve).toHaveBeenCalledWith(
+      clubAdministrator,
+    );
+    expect(harness.recordFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId, userId: 'admin-a', status: 'ACTIVE' },
+      }),
+    );
+    expect(harness.storeFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId, id: { in: ['store-a', 'store-old'] } },
+      }),
+    );
+    expect(harness.userFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId, id: 'admin-a', isActive: true },
+      }),
+    );
+    expect(report.access).toEqual({
+      mode: 'SELF',
+      canManage: false,
+      canExport: false,
+    });
+    expect(report.filters.userId).toBe('admin-a');
+  });
+
+  it('keeps every club visible for a NETWORK administrator', async () => {
+    const harness = createHarness();
+
+    await harness.service.getOwnReport({
+      ...clubAdministrator,
+      role: UserRole.SENIOR_ADMINISTRATOR,
+      accessScope: 'NETWORK',
+      allowedStoreIds: [],
+    });
+
+    expect(harness.storeFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId } }),
+    );
+  });
+
+  it('refuses managers, who use the network workspace instead', async () => {
+    const harness = createHarness();
+
+    await expect(harness.service.getOwnReport(owner)).rejects.toThrow(
+      'Personal motivation is available to administrators only',
+    );
+    expect(harness.freshStoreScope.resolve).not.toHaveBeenCalled();
+  });
+});
 
 describe('StaffDisciplineService report period', () => {
   it('shows every active record by default without an implicit date range or row cap', async () => {
@@ -115,7 +221,7 @@ describe('StaffDisciplineService report period', () => {
 
 describe('Staff discipline period filters', () => {
   function createService() {
-    return new StaffDisciplineService({} as never, {} as never);
+    return new StaffDisciplineService({} as never, {} as never, {} as never);
   }
 
   function resolveFilters(

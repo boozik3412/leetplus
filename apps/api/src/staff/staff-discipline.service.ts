@@ -7,6 +7,7 @@ import {
 import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import {
   buildStaffExportFile,
@@ -225,6 +226,7 @@ export class StaffDisciplineService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
 
   async getReport(user: AuthenticatedUser, query: StaffDisciplineQuery = {}) {
@@ -233,6 +235,68 @@ export class StaffDisciplineService {
     const access = this.resolveDisciplineAccess(user);
     const filters = this.resolveFilters(query, access.userId, 'all');
 
+    return this.buildReport(tenantId, access, filters, { tenantId });
+  }
+
+  /**
+   * «Личная мотивация» for shift administrators. Unlike getReport it accepts a
+   * STORES subject: the rows are pinned to the caller's own userId, so the
+   * tenant-wide selectors that keep getReport NETWORK-only never run. The
+   * club list is narrowed to the caller's fresh store scope plus clubs where
+   * their own records were written.
+   */
+  async getOwnReport(
+    user: AuthenticatedUser,
+    query: StaffDisciplineQuery = {},
+  ) {
+    if (
+      !selfDisciplineRoles.includes(
+        user.role as (typeof selfDisciplineRoles)[number],
+      )
+    ) {
+      throw new ForbiddenException(
+        'Personal motivation is available to administrators only',
+      );
+    }
+
+    const scope = await this.freshStoreScopeService.resolve(user);
+    const tenantId = scope.tenantId;
+    await this.ensureDefaultRules(tenantId);
+    const access: StaffDisciplineAccess = {
+      mode: 'SELF',
+      userId: scope.userId,
+      canManage: false,
+      canExport: false,
+    };
+    const filters = this.resolveFilters(query, access.userId, 'all');
+    let storeWhere: Prisma.StoreWhereInput = { tenantId };
+
+    if (scope.mode !== 'NETWORK') {
+      const ownRecordStores = await this.prisma.staffDisciplineRecord.findMany({
+        where: { tenantId, userId: scope.userId, storeId: { not: null } },
+        select: { storeId: true },
+        distinct: ['storeId'],
+      });
+      const storeIds = new Set<string>(scope.allowedStoreIds);
+
+      for (const record of ownRecordStores) {
+        if (record.storeId) {
+          storeIds.add(record.storeId);
+        }
+      }
+
+      storeWhere = { tenantId, id: { in: [...storeIds] } };
+    }
+
+    return this.buildReport(tenantId, access, filters, storeWhere);
+  }
+
+  private async buildReport(
+    tenantId: string,
+    access: StaffDisciplineAccess,
+    filters: ResolvedDisciplineFilters,
+    storeWhere: Prisma.StoreWhereInput,
+  ) {
     const [rules, records, stores, users, policies] = await Promise.all([
       this.prisma.staffDisciplineRule.findMany({
         where: { tenantId },
@@ -244,7 +308,7 @@ export class StaffDisciplineService {
         orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
       }),
       this.prisma.store.findMany({
-        where: { tenantId },
+        where: storeWhere,
         select: { id: true, name: true, isActive: true },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),

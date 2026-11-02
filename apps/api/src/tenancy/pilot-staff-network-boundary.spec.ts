@@ -153,6 +153,11 @@ const COMMUNICATIONS_STORE_BOUNDARIES: readonly ControllerBoundary[] = [
 
 const STAFF_STORE_BOUNDARIES: readonly ControllerBoundary[] = [
   {
+    source: 'staff/staff-discipline.controller.ts',
+    className: 'StaffOwnDisciplineController',
+    routeIds: ['GET /staff/discipline/me'],
+  },
+  {
     source: 'staff/staff-shift-workspace.controller.ts',
     className: 'StaffShiftWorkspaceController',
     routeIds: ['GET /staff/shift-workspace/profile'],
@@ -543,7 +548,7 @@ describe('Gate 1MT staff scope boundaries', () => {
     }
   });
 
-  it('binds all 24 store-aware staff routes to fresh NETWORK or STORES authority', () => {
+  it('binds all 25 store-aware staff routes to fresh NETWORK or STORES authority', () => {
     const routeIds: string[] = [];
 
     for (const boundary of STAFF_STORE_BOUNDARIES) {
@@ -559,7 +564,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       routeIds.push(...boundary.routeIds);
     }
 
-    expect(routeIds).toHaveLength(24);
+    expect(routeIds).toHaveLength(25);
     expect(new Set(routeIds).size).toBe(routeIds.length);
   });
 

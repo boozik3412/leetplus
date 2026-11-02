@@ -438,7 +438,10 @@ export class RolesGuard implements CanActivate {
     }
 
     if (path.startsWith('/staff/discipline')) {
-      if (this.isSelfDisciplineReadPath(path, method, role)) {
+      if (
+        this.isOwnDisciplineReadPath(path, method) ||
+        this.isSelfDisciplineReadPath(path, method, role)
+      ) {
         return 'view_staff_shift_workspace';
       }
 
@@ -525,13 +528,19 @@ export class RolesGuard implements CanActivate {
     );
   }
 
+  // GET /staff/discipline/me only ever returns the caller's own records; its
+  // controller limits it to shift administrators.
+  private isOwnDisciplineReadPath(path: string, method: string) {
+    return path === '/staff/discipline/me' && this.isReadMethod(method);
+  }
+
   private isSelfDisciplineReadPath(
     path: string,
     method: string,
     role: UserRole | null | undefined,
   ) {
     return (
-      path === '/staff/discipline' &&
+      (path === '/staff/discipline' || path === '/staff/discipline/me') &&
       this.isReadMethod(method) &&
       (role === UserRole.SENIOR_ADMINISTRATOR ||
         role === UserRole.CLUB_ADMINISTRATOR)

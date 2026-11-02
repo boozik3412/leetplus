@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
+import { FreshStoreScopeGuard } from '../tenancy/fresh-store-scope.guard';
 import {
   StaffDisciplineService,
   type StaffAdministratorRatingsQuery,
@@ -87,6 +88,29 @@ export class StaffDisciplineController {
     @Body() dto: StaffDisciplineRecordUpdateDto,
   ) {
     return this.staffDisciplineService.updateRecord(user, id, dto);
+  }
+}
+
+/**
+ * «Личная мотивация»: an administrator's own warnings and fines. Club
+ * administrators are usually bound to one club (STORES scope), so this read
+ * uses fresh NETWORK-or-STORES authority instead of the NETWORK-only guard of
+ * the management workspace above; the service pins every row to the caller.
+ */
+@Controller('staff/discipline/me')
+@Roles(UserRole.SENIOR_ADMINISTRATOR, UserRole.CLUB_ADMINISTRATOR)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshStoreScopeGuard)
+export class StaffOwnDisciplineController {
+  constructor(
+    private readonly staffDisciplineService: StaffDisciplineService,
+  ) {}
+
+  @Get()
+  getOwnReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffDisciplineQuery,
+  ) {
+    return this.staffDisciplineService.getOwnReport(user, query);
   }
 }
 

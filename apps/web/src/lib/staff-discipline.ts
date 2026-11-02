@@ -163,6 +163,28 @@ export async function getStaffDisciplineReport(
   return response.json() as Promise<StaffDisciplineReport>;
 }
 
+/**
+ * «Личная мотивация» for shift administrators: only the caller's own records.
+ * Unlike the management report it works in STORES scope.
+ */
+export async function getOwnStaffDisciplineReport(
+  filters: StaffDisciplineFilters = {},
+): Promise<StaffDisciplineReport> {
+  const response = await fetch(
+    `${getApiUrl()}/staff/discipline/me${query(filters)}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch own staff discipline report");
+  }
+
+  return response.json() as Promise<StaffDisciplineReport>;
+}
+
 export async function getStaffAdministratorRatings(
   filters: Pick<
     StaffDisciplineFilters,

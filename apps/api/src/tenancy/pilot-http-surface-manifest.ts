@@ -797,6 +797,12 @@ function staffDefinitions(): readonly ControllerDefinition[] {
     ),
     staffController(
       'staff-discipline.controller.ts',
+      'discipline/me',
+      'STORES_VERIFIED',
+      [['GET', ['']]],
+    ),
+    staffController(
+      'staff-discipline.controller.ts',
       'administrator-ratings',
       'NETWORK_VERIFIED',
       [['GET', ['']]],
@@ -1198,6 +1204,9 @@ function resolveCapability(
   }
   if (path.startsWith('/staff/knowledge-base')) {
     return method === 'GET' ? 'view_staff_knowledge' : 'edit_staff_knowledge';
+  }
+  if (path === '/staff/discipline/me' && method === 'GET') {
+    return 'view_staff_shift_workspace';
   }
   if (
     path.startsWith('/staff/discipline') ||

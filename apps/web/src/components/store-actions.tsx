@@ -208,7 +208,7 @@ export function StoreDeleteButton({ id, name }: { id: string; name: string }) {
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+        className="rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/40"
       >
         Удалить
       </button>
@@ -247,7 +247,9 @@ export function StoreBulkGeocodeButton({
       const response = await fetch("/api/stores/address-geocode/missing", {
         method: "POST",
       });
-      const data = (await response.json()) as BulkGeocodeResponse | ErrorResponse;
+      const data = (await response.json()) as
+        | BulkGeocodeResponse
+        | ErrorResponse;
 
       if (!response.ok) {
         setStatus(getErrorMessage(data));
@@ -256,13 +258,9 @@ export function StoreBulkGeocodeButton({
 
       const result = data as BulkGeocodeResponse;
       const savedPrefix =
-        linkSaves.saved > 0
-          ? `Сохранено из ссылок: ${linkSaves.saved}. `
-          : "";
+        linkSaves.saved > 0 ? `Сохранено из ссылок: ${linkSaves.saved}. ` : "";
       const failedPrefix =
-        linkSaves.failed > 0
-          ? `Ошибок ссылок: ${linkSaves.failed}. `
-          : "";
+        linkSaves.failed > 0 ? `Ошибок ссылок: ${linkSaves.failed}. ` : "";
       setStatus(
         `${savedPrefix}${failedPrefix}Заполнено: ${result.updated}, ошибок: ${result.failed}, пропущено: ${result.skipped}`,
       );
@@ -425,9 +423,7 @@ function StoreInputs({ store }: { store?: Store }) {
     }
   }
 
-  async function handleYandexMapsGeocode(
-    event: MouseEvent<HTMLButtonElement>,
-  ) {
+  async function handleYandexMapsGeocode(event: MouseEvent<HTMLButtonElement>) {
     const query = yandexMapsUrl.trim();
     const form = event.currentTarget.form;
     const storeAction = form?.dataset.storeAction;

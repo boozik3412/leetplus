@@ -82,10 +82,10 @@ export default async function StoresPage({
 
         {canEditStores ? <StoreCreateForm /> : null}
 
-        <section className="mt-6 rounded-lg border border-cyan-100 bg-cyan-50/70 px-5 py-4 text-sm text-zinc-800">
+        <section className="mt-6 rounded-lg border border-cyan-100 bg-cyan-50/70 px-5 py-4 text-sm text-zinc-800 dark:border-cyan-900/60 dark:bg-cyan-950/30">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
                 LeetPlus Game
               </p>
               <h2 className="mt-1 text-base font-semibold text-zinc-950">
@@ -101,8 +101,8 @@ export default async function StoresPage({
               <span
                 className={
                   gameStoresMissingCoordinates === 0 && gameStores.length > 0
-                    ? "rounded-full bg-emerald-100 px-3 py-1 font-semibold text-emerald-800"
-                    : "rounded-full bg-amber-100 px-3 py-1 font-semibold text-amber-800"
+                    ? "rounded-full bg-emerald-100 px-3 py-1 font-semibold text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300"
+                    : "rounded-full bg-amber-100 px-3 py-1 font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"
                 }
               >
                 {gameStores.length === 0
@@ -112,13 +112,13 @@ export default async function StoresPage({
                     : `Без координат: ${gameStoresMissingCoordinates}`}
               </span>
               <a
-                className="rounded-md border border-cyan-200 bg-white px-3 py-2 font-semibold text-cyan-800 hover:bg-cyan-50"
+                className="rounded-md border border-cyan-200 bg-white px-3 py-2 font-semibold text-cyan-800 hover:bg-cyan-50 dark:border-cyan-800 dark:text-cyan-200 dark:hover:bg-cyan-950"
                 href="/game/clubs"
               >
                 Проверить выбор клуба
               </a>
               <a
-                className="rounded-md border border-cyan-200 bg-white px-3 py-2 font-semibold text-cyan-800 hover:bg-cyan-50"
+                className="rounded-md border border-cyan-200 bg-white px-3 py-2 font-semibold text-cyan-800 hover:bg-cyan-50 dark:border-cyan-800 dark:text-cyan-200 dark:hover:bg-cyan-950"
                 href="/game"
               >
                 Проверить игру
@@ -153,83 +153,87 @@ export default async function StoresPage({
               const closeDay = validDay(first(params.closedFrom));
               const reopenDay = validDay(first(params.reopenedOn));
               return (
-              <article
-                key={store.id}
-                id={`club-${store.id}`}
-                className="scroll-mt-6 px-5 py-5"
-              >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-lg font-semibold text-zinc-950">
-                        {store.name}
-                      </h3>
-                      <StoreStatusPill tone={store.isActive ? "ready" : "muted"}>
-                        {store.isActive ? "Активна" : "Архив"}
-                      </StoreStatusPill>
-                      {closure.kind !== "OPEN" ? (
+                <article
+                  key={store.id}
+                  id={`club-${store.id}`}
+                  className="scroll-mt-6 px-5 py-5"
+                >
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-lg font-semibold text-zinc-950">
+                          {store.name}
+                        </h3>
                         <StoreStatusPill
-                          tone={closure.kind === "CLOSED" ? "warning" : "info"}
+                          tone={store.isActive ? "ready" : "muted"}
                         >
-                          {closureHeadline(closure)}
+                          {store.isActive ? "Активна" : "Архив"}
                         </StoreStatusPill>
-                      ) : null}
-                      <StoreStatusPill
-                        tone={store.gamificationEnabled ? "ready" : "muted"}
-                      >
-                        {store.gamificationEnabled
-                          ? "Геймификация включена"
-                          : "Геймификация выключена"}
-                      </StoreStatusPill>
-                      <StoreStatusPill
-                        tone={hasCoordinates(store) ? "ready" : "warning"}
-                      >
-                        {hasCoordinates(store)
-                          ? "Карта готова"
-                          : "Нужны координаты"}
-                      </StoreStatusPill>
+                        {closure.kind !== "OPEN" ? (
+                          <StoreStatusPill
+                            tone={
+                              closure.kind === "CLOSED" ? "warning" : "info"
+                            }
+                          >
+                            {closureHeadline(closure)}
+                          </StoreStatusPill>
+                        ) : null}
+                        <StoreStatusPill
+                          tone={store.gamificationEnabled ? "ready" : "muted"}
+                        >
+                          {store.gamificationEnabled
+                            ? "Геймификация включена"
+                            : "Геймификация выключена"}
+                        </StoreStatusPill>
+                        <StoreStatusPill
+                          tone={hasCoordinates(store) ? "ready" : "warning"}
+                        >
+                          {hasCoordinates(store)
+                            ? "Карта готова"
+                            : "Нужны координаты"}
+                        </StoreStatusPill>
+                      </div>
+                      <p className="mt-1 text-sm text-zinc-500">
+                        {store.address ?? "Адрес не заполнен"}
+                      </p>
+                      <p className="mt-2 break-all font-mono text-xs text-zinc-500">
+                        /game/auth?storeId={store.publicSlug ?? store.id}
+                      </p>
                     </div>
-                    <p className="mt-1 text-sm text-zinc-500">
-                      {store.address ?? "Адрес не заполнен"}
-                    </p>
-                    <p className="mt-2 break-all font-mono text-xs text-zinc-500">
-                      /game/auth?storeId={store.publicSlug ?? store.id}
-                    </p>
+                    {canEditStores ? (
+                      <div className="flex shrink-0 flex-col items-end gap-2">
+                        <StoreArchiveButton id={store.id} />
+                        {canDeleteStores ? (
+                          <StoreDeleteButton id={store.id} name={store.name} />
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
+
+                  <StoreFieldReadiness store={store} />
+
+                  {canEditStores && closures !== null ? (
+                    <StoreClosureControl
+                      storeId={store.id}
+                      storeName={store.name}
+                      today={today}
+                      closures={storeClosures}
+                      intent={
+                        closeClub === store.id && closeDay
+                          ? { mode: "close", date: closeDay }
+                          : reopenClub === store.id && reopenDay
+                            ? { mode: "reopen", date: reopenDay }
+                            : null
+                      }
+                    />
+                  ) : null}
+
                   {canEditStores ? (
-                    <div className="flex shrink-0 flex-col items-end gap-2">
-                      <StoreArchiveButton id={store.id} />
-                      {canDeleteStores ? (
-                        <StoreDeleteButton id={store.id} name={store.name} />
-                      ) : null}
+                    <div className="mt-4 rounded-lg border border-zinc-100 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                      <StoreEditForm store={store} />
                     </div>
                   ) : null}
-                </div>
-
-                <StoreFieldReadiness store={store} />
-
-                {canEditStores && closures !== null ? (
-                  <StoreClosureControl
-                    storeId={store.id}
-                    storeName={store.name}
-                    today={today}
-                    closures={storeClosures}
-                    intent={
-                      closeClub === store.id && closeDay
-                        ? { mode: "close", date: closeDay }
-                        : reopenClub === store.id && reopenDay
-                          ? { mode: "reopen", date: reopenDay }
-                          : null
-                    }
-                  />
-                ) : null}
-
-                {canEditStores ? (
-                  <div className="mt-4 rounded-lg border border-zinc-100 bg-zinc-50/70 p-3">
-                    <StoreEditForm store={store} />
-                  </div>
-                ) : null}
-              </article>
+                </article>
               );
             })}
 
@@ -300,7 +304,7 @@ function StoreFieldReadiness({ store }: { store: Store }) {
           ? "Город есть, но часовой пояс не определен."
           : coordinatesReady
             ? "Карта уже работает; часовой пояс нужен для расписаний и отчетов."
-          : "Выберите город, и поле подставится автоматически.",
+            : "Выберите город, и поле подставится автоматически.",
       tone: displayTimeZone ? "ready" : displayCity ? "warning" : "info",
     },
     {
@@ -373,13 +377,13 @@ function StoreFieldReadiness({ store }: { store: Store }) {
 function storeStatusToneClass(tone: StoreStatusTone) {
   switch (tone) {
     case "ready":
-      return "bg-emerald-100 text-emerald-800";
+      return "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300";
     case "warning":
-      return "bg-amber-100 text-amber-800";
+      return "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300";
     case "missing":
-      return "bg-rose-100 text-rose-800";
+      return "bg-rose-100 text-rose-800 dark:bg-rose-500/15 dark:text-rose-300";
     case "info":
-      return "bg-cyan-100 text-cyan-800";
+      return "bg-cyan-100 text-cyan-800 dark:bg-cyan-500/15 dark:text-cyan-300";
     case "muted":
     default:
       return "bg-zinc-100 text-zinc-600";

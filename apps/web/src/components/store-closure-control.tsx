@@ -79,7 +79,10 @@ export function StoreClosureControl({
     try {
       const response = await fetch(url, {
         method,
-        headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+        headers:
+          body === undefined
+            ? undefined
+            : { "Content-Type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
       if (!response.ok) {
@@ -129,7 +132,7 @@ export function StoreClosureControl({
 
   return (
     <div
-      className="mt-4 rounded-lg border border-zinc-100 bg-zinc-50/70 p-3"
+      className="mt-4 rounded-lg border border-zinc-100 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/60"
       data-store-closure={storeId}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -189,9 +192,7 @@ export function StoreClosureControl({
           }
         >
           <label className="grid gap-1 text-xs font-medium text-zinc-600">
-            {mode === "close"
-              ? "Первый день закрытия"
-              : "Первый рабочий день"}
+            {mode === "close" ? "Первый день закрытия" : "Первый рабочий день"}
             <input
               type="date"
               required
@@ -216,7 +217,11 @@ export function StoreClosureControl({
             <span />
           )}
           <span className="flex gap-2">
-            <button type="submit" disabled={isSubmitting} className={primaryClass}>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className={primaryClass}
+            >
               {isSubmitting ? "Сохраняем…" : "Сохранить"}
             </button>
             <button

@@ -23481,8 +23481,7 @@ export function seasonLevels(
       };
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
-    .sort((left, right) => left.level - right.level)
-    .slice(0, 12);
+    .sort((left, right) => left.level - right.level);
 }
 
 function seasonRewardLootBoxPreview(

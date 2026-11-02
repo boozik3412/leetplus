@@ -691,7 +691,7 @@ function VisualPreview({
             </div>
             {payload.battlePass.enabled ? (
               <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-                {levels.slice(0, 12).map((level) => (
+                {levels.map((level) => (
                   <div
                     key={level.level}
                     className="rounded-lg border border-[#c4e0e524] bg-[#061014] p-3"
@@ -1704,7 +1704,7 @@ function RewardRows({
   onChange: (rewards: Array<{ level: number; reward: string }>) => void;
 }) {
   const shownLevels = Array.from(
-    { length: Math.min(levelCount, 8) },
+    { length: levelCount },
     (_, index) => index + 1,
   );
 

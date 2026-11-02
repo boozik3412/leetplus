@@ -204,6 +204,48 @@ describe('StoresService', () => {
     });
   });
 
+  it('saves a per-club game logo from the clubs page', async () => {
+    prisma.store.findFirst.mockResolvedValue({ id: 'store-1', name: 'Club A' });
+    prisma.store.update.mockResolvedValue({ id: 'store-1' });
+
+    await service.update(
+      'store-1',
+      { gameLogoUrl: 'data:IMAGE/PNG;base64,iVBORw0KGgo=' },
+      user,
+    );
+
+    expect(freshStoreScope.assertNetwork).toHaveBeenCalledWith(user);
+    expect(prisma.store.update).toHaveBeenCalledWith({
+      where: { id: 'store-1' },
+      data: { gameLogoUrl: 'data:image/png;base64,iVBORw0KGgo=' },
+    });
+  });
+
+  it('clears a club logo so the network logo is used again', async () => {
+    prisma.store.findFirst.mockResolvedValue({ id: 'store-1', name: 'Club A' });
+    prisma.store.update.mockResolvedValue({ id: 'store-1' });
+
+    await service.update('store-1', { gameLogoUrl: null }, user);
+
+    expect(prisma.store.update).toHaveBeenCalledWith({
+      where: { id: 'store-1' },
+      data: { gameLogoUrl: null },
+    });
+  });
+
+  it('rejects a club logo that is not an inline PNG, JPG or WebP', async () => {
+    prisma.store.findFirst.mockResolvedValue({ id: 'store-1', name: 'Club A' });
+
+    await expect(
+      service.update(
+        'store-1',
+        { gameLogoUrl: 'https://example.com/logo.svg' },
+        user,
+      ),
+    ).rejects.toThrow('Логотип клуба');
+    expect(prisma.store.update).not.toHaveBeenCalled();
+  });
+
   it('updates coordinates with comma decimals for game club geosearch', async () => {
     prisma.store.findFirst.mockResolvedValue({
       id: 'store-1',

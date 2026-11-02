@@ -923,12 +923,14 @@ export function canAccessPath(user: AuthUser | null, href: string) {
   }
 
   if (href.startsWith("/staff") || href.startsWith("/guests/staff-control")) {
-    if (user?.accessScope === "STORES" && isNetworkOnlyStaffPath(href)) {
-      return false;
-    }
-
+    // «Личная мотивация» reads only the administrator's own records through
+    // the store-aware /staff/discipline/me API, so it is open in STORES scope.
     if (canAccessOwnDisciplinePath(user, href)) {
       return true;
+    }
+
+    if (user?.accessScope === "STORES" && isNetworkOnlyStaffPath(href)) {
+      return false;
     }
 
     if (isShiftWorkspaceRole(user) && href.startsWith("/staff")) {

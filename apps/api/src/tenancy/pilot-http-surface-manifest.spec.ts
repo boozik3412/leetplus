@@ -636,8 +636,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(340);
-    expect(allowed).toHaveLength(277);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(341);
+    expect(allowed).toHaveLength(278);
     expect(blocked).toHaveLength(63);
     expect(outbound).toHaveLength(22);
     expect(
@@ -797,8 +797,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.minimumScope === 'NETWORK',
     );
 
-    expect(staff).toHaveLength(86);
-    expect(allowed).toHaveLength(85);
+    expect(staff).toHaveLength(87);
+    expect(allowed).toHaveLength(86);
     expect(networkAllowed.map(({ id }) => id).sort()).toEqual(
       [...STAFF_NETWORK_ROUTE_IDS].sort(),
     );

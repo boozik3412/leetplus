@@ -1,8 +1,12 @@
 import Link from "next/link";
 import { StaffDisciplineWorkspace } from "@/components/staff-discipline-workspace";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireNetworkScopedUser } from "@/lib/auth";
 import {
+  requireNetworkScopedUser,
+  requireTenantWorkspaceUser,
+} from "@/lib/auth";
+import {
+  getOwnStaffDisciplineReport,
   getStaffDisciplineReport,
   type StaffDisciplineFilters,
 } from "@/lib/staff-discipline";
@@ -77,10 +81,22 @@ export default async function StaffDisciplinePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireNetworkScopedUser();
+  const user = await requireTenantWorkspaceUser();
+  // Administrators see only their own records («Личная мотивация»); that read
+  // is store-aware, so a club-bound administrator is not sent to 404. Every
+  // other role uses the tenant-wide management workspace.
+  const isOwnView =
+    user.role === "CLUB_ADMINISTRATOR" || user.role === "SENIOR_ADMINISTRATOR";
+
+  if (!isOwnView) {
+    await requireNetworkScopedUser();
+  }
+
   const params = await searchParams;
   const filters = resolveFilters(params);
-  const report = await getStaffDisciplineReport(filters);
+  const report = isOwnView
+    ? await getOwnStaffDisciplineReport(filters)
+    : await getStaffDisciplineReport(filters);
   const isSelfView = report.access.mode === "SELF";
   const pageTitle = isSelfView ? "Мотивация" : "Мотивация персонала";
   const pageDescription = isSelfView
@@ -111,10 +127,14 @@ export default async function StaffDisciplinePage({
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
           current={pageTitle}
-          items={[
-            { href: "/dashboard", label: "Дашборд" },
-            { href: "/staff/tasks", label: "Персонал" },
-          ]}
+          items={
+            isSelfView
+              ? [{ href: "/staff/shift-workspace", label: "Моя смена" }]
+              : [
+                  { href: "/dashboard", label: "Дашборд" },
+                  { href: "/staff/tasks", label: "Персонал" },
+                ]
+          }
         />
 
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -227,7 +247,9 @@ export default async function StaffDisciplinePage({
                 defaultValue={report.filters.storeId ?? ""}
                 className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               >
-                <option value="">Вся сеть</option>
+                <option value="">
+                  {isSelfView ? "Все клубы" : "Вся сеть"}
+                </option>
                 {report.stores.map((store) => (
                   <option key={store.id} value={store.id}>
                     {store.name}

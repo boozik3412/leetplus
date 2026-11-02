@@ -883,6 +883,7 @@ describe('RolesGuard', () => {
     [
       { method: 'GET', path: '/staff' },
       { method: 'GET', path: '/staff/discipline' },
+      { method: 'GET', path: '/staff/discipline/me' },
       { method: 'GET', path: '/staff/task-templates' },
       { method: 'POST', path: '/staff/tasks' },
       { method: 'POST', path: '/staff/shift-regulations' },
@@ -1040,6 +1041,15 @@ describe('RolesGuard', () => {
             createContext({
               method: 'GET',
               path: '/staff/discipline',
+              user: { role, permissions },
+            }),
+          ),
+        ).toBe(true);
+        expect(
+          guard.canActivate(
+            createContext({
+              method: 'GET',
+              path: '/staff/discipline/me',
               user: { role, permissions },
             }),
           ),

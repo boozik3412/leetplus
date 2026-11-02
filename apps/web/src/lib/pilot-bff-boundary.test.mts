@@ -614,7 +614,7 @@ test("keeps transitional tenant-wide staff workspaces out of STORES scope", asyn
   for (const [index, source] of pageSources.entries()) {
     assert.match(
       source,
-      /import \{ requireNetworkScopedUser \} from ["']@\/lib\/auth["']/,
+      /import \{[^}]*\brequireNetworkScopedUser\b[^}]*\} from ["']@\/lib\/auth["']/,
       `${networkOnlyPages[index]} must import the scope gate`,
     );
     assert.match(
@@ -623,6 +623,43 @@ test("keeps transitional tenant-wide staff workspaces out of STORES scope", asyn
       `${networkOnlyPages[index]} must apply the scope gate before data access`,
     );
   }
+});
+
+test("opens only the administrator's own motivation view in STORES scope", async () => {
+  const [pageSource, permissionsSource, librarySource] = await Promise.all([
+    readFile(
+      fileURLToPath(
+        new URL("../app/(app)/staff/discipline/page.tsx", import.meta.url),
+      ),
+      "utf8",
+    ),
+    readFile(fileURLToPath(new URL("permissions.ts", import.meta.url)), "utf8"),
+    readFile(
+      fileURLToPath(new URL("staff-discipline.ts", import.meta.url)),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(
+    pageSource,
+    /if \(!isOwnView\) \{\s*await requireNetworkScopedUser\(\);\s*\}/,
+  );
+  assert.match(
+    pageSource,
+    /isOwnView\s*\?\s*await getOwnStaffDisciplineReport\(filters\)\s*:\s*await getStaffDisciplineReport\(filters\)/,
+  );
+  assert.match(librarySource, /\/staff\/discipline\/me\$\{query\(filters\)\}/);
+  assert.match(
+    permissionsSource,
+    /path === ["']\/staff\/discipline["'] &&\s*\(user\.role === ["']SENIOR_ADMINISTRATOR["'] \|\|\s*user\.role === ["']CLUB_ADMINISTRATOR["']\)/,
+  );
+  assert.ok(
+    permissionsSource.indexOf("canAccessOwnDisciplinePath(user, href)") <
+      permissionsSource.indexOf(
+        'user?.accessScope === "STORES" && isNetworkOnlyStaffPath(href)',
+      ),
+    "own motivation must be decided before the STORES network-only gate",
+  );
 });
 
 test("keeps the store-aware shift workspace behind authenticated API authority", async () => {

@@ -1896,6 +1896,23 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   advisory lock. Audit `STORE_DELETED` с `tenantId` сети, видом актора и
   количеством удалённых, архивированных и отвязанных строк.
 
+### Личная мотивация администраторов (02.11.2026)
+
+- Рабочее место `/staff/discipline` («Мотивация») остаётся NETWORK-only для
+  управляющих ролей: `GET /staff/discipline`, export, policy и records за
+  `FreshNetworkScopeGuard`.
+- Для `CLUB_ADMINISTRATOR` и `SENIOR_ADMINISTRATOR` есть отдельное чтение
+  своих записей `GET /staff/discipline/me` (`StaffOwnDisciplineController`,
+  `FreshStoreScopeGuard`, capability `view_staff_shift_workspace`, manifest
+  `STORES_VERIFIED/ALLOW`). Сервис повторно читает свежий scope, жёстко
+  фильтрует записи и список сотрудников по `userId` вызывающего и сужает список
+  клубов до его клубов доступа плюс клубов его собственных записей. Управления,
+  выгрузки и чужих записей нет; другие роли получают 403.
+- Web: для этих двух ролей страница `/staff/discipline` читает `/me` и
+  доступна в `STORES` scope (`canAccessOwnDisciplinePath` проверяется до
+  network-only фильтра), остальные роли по-прежнему проходят
+  `requireNetworkScopedUser`. Схема БД, egress и worker placement не менялись.
+
 ### Делегирование учётных записей сотрудникам
 
 - `/users/invites*` принадлежит corporate tenant contour и всегда требует

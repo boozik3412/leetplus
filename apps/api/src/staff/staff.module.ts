@@ -19,6 +19,7 @@ import { StaffChecklistsService } from './staff-checklists.service';
 import {
   StaffAdministratorRatingsController,
   StaffDisciplineController,
+  StaffOwnDisciplineController,
 } from './staff-discipline.controller';
 import { StaffDisciplineService } from './staff-discipline.service';
 import { StaffDirectoryController } from './staff-directory.controller';
@@ -87,6 +88,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffChecklistsController,
     StaffTeamChatController,
     StaffNotificationsController,
+    StaffOwnDisciplineController,
     StaffDisciplineController,
     StaffAdministratorRatingsController,
     StaffSalaryController,

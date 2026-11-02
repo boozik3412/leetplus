@@ -2573,6 +2573,21 @@ describe('GuestPortalService', () => {
       );
     });
 
+    it('returns every configured Battle Pass step, not only the first twelve', () => {
+      const levels = seasonLevels(
+        Array.from({ length: 15 }, (_, index) => ({
+          level: 15 - index,
+          xp: (15 - index) * 100,
+          freeReward: `Награда ${15 - index}`,
+        })),
+      );
+
+      expect(levels).toHaveLength(15);
+      expect(levels.map((level) => level.level)).toEqual(
+        Array.from({ length: 15 }, (_, index) => index + 1),
+      );
+    });
+
     it('publishes the linked case artwork contract and exact drop chances for a Battle Pass reward', () => {
       const [level] = seasonLevels(
         [

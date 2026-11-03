@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import {
   IntegrationProvider,
   TenantCustomerStage,
@@ -1483,6 +1484,7 @@ describe('GuestDataFoundationService', () => {
         })),
       )
       .mockRejectedValueOnce(new Error('No permissions on the second page'));
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
 
     const result = await service.syncTenant(user, {
       dateFrom: '2026-05-01',
@@ -1491,6 +1493,14 @@ describe('GuestDataFoundationService', () => {
 
     expect(result.sourceResults[0].guests).toBe(200);
     expect(result.sourceResults[0].status).toBe('PARTIAL');
+    // The owner sees a plain phrase; the log keeps Langame's answer and page.
+    expect(result.sourceResults[0].endpointErrors['guests/list']).toBe(
+      'Не удалось получить данные этого раздела Langame.',
+    );
+    expect(warn).toHaveBeenCalledWith(
+      'Langame club.example guests/list page 2 failed: No permissions on the second page',
+    );
+    warn.mockRestore();
     expect(prisma.guest.upsert).toHaveBeenCalledTimes(200);
     expect(prisma.guestSession.upsert).toHaveBeenCalled();
     expect(guestIdentityResolver.reconcileDomainSnapshot).toHaveBeenCalledWith(

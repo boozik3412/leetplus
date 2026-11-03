@@ -367,6 +367,8 @@ export class GuestDataFoundationService {
     SourceProfile,
     LangameExternalPilotAuthority
   >();
+  // The domain of a profile, so a lost section names its network in the log.
+  private readonly profileDomains = new WeakMap<SourceProfile, string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -1098,6 +1100,7 @@ export class GuestDataFoundationService {
     const { tenantId, baseUrl, domain, apiKey, period, query, externalPilot } =
       params;
     const profile = this.createEmptyProfile(period);
+    this.profileDomains.set(profile, domain);
     if (externalPilot)
       this.externalProfileAuthorities.set(profile, externalPilot);
     const now = new Date();
@@ -1492,10 +1495,18 @@ export class GuestDataFoundationService {
     endpoint: string,
     error: unknown,
     afterRows = false,
+    page?: number,
   ) {
+    const limit = afterRows ? null : langameSectionLimitMessage(error);
     profile.endpointErrors[endpoint] =
-      (afterRows ? null : langameSectionLimitMessage(error)) ??
-      'Не удалось получить данные этого раздела Langame.';
+      limit ?? 'Не удалось получить данные этого раздела Langame.';
+    if (limit) return;
+    // The profile keeps the owner-facing phrase; the log keeps Langame's own
+    // answer, without which a section that fails every night stays a guess.
+    const reason = error instanceof Error ? error.message : String(error);
+    this.logger.warn(
+      `Langame ${this.profileDomains.get(profile) ?? '?'} ${endpoint}${page ? ` page ${page}` : ''} failed: ${reason.slice(0, 300)}`,
+    );
   }
 
   /** Computer UUID (upper case) → Langame club, from the PC links. */
@@ -2977,7 +2988,7 @@ export class GuestDataFoundationService {
         // A first-page failure still belongs to captureEndpoint.
         if (rows.length === 0 || !profile || !endpoint) throw error;
         // Earlier pages prove access, so this endpoint is incomplete.
-        this.recordEndpointError(profile, endpoint, error, true);
+        this.recordEndpointError(profile, endpoint, error, true, page);
         break;
       }
       if (profile) await this.assertExternalProfileCurrent(profile);

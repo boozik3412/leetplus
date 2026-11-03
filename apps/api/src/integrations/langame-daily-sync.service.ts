@@ -109,10 +109,23 @@ class IncompleteDailyFactsScopeError extends Error {
     readonly sourceCounts: Record<string, unknown>,
     readonly summary: Record<string, unknown>,
     readonly partial = false,
+    /** Staff sections that came in whole although the guest ones did not. */
+    readonly staff: {
+      sourceCounts: Record<string, unknown>;
+      summary: Record<string, unknown>;
+    } | null = null,
   ) {
     super(message);
   }
 }
+
+/** Langame sections behind the STAFF_SHIFTS scope. */
+const STAFF_ENDPOINTS = [
+  'users/list',
+  'working_shifts/list',
+  'all_operations_log/list',
+  'log_cash_transaction/list',
+];
 
 export type DailySyncResult = {
   date: string;
@@ -929,6 +942,21 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
                     isLangameSectionLimitMessage(message),
                   )),
             ),
+          // A guest list that breaks off must not fail shifts that came in.
+          result.failedSources === 0 &&
+            result.sourceResults.length === result.sources &&
+            result.sourceResults.every(
+              (source) =>
+                source.status !== 'FAILED' &&
+                STAFF_ENDPOINTS.every(
+                  (endpoint) => !source.endpointErrors?.[endpoint],
+                ),
+            )
+            ? {
+                sourceCounts: this.staffShiftCounts(result),
+                summary: this.staffShiftSummary(result),
+              }
+            : null,
         );
       }
 
@@ -957,6 +985,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
           ? 'External Langame guest foundation failed; inspect the source receipt.'
           : this.errorMessage(error);
 
+      const staff = incomplete?.staff ?? null;
       await Promise.all([
         this.markCoverageFinished(input, guestScope, {
           status: DailyDataCoverageStatus.FAILED,
@@ -971,16 +1000,39 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
             : {}),
           errorMessage,
         }),
-        this.markCoverageFinished(input, staffScope, {
-          status: DailyDataCoverageStatus.FAILED,
-          ...(incomplete
-            ? {
-                summary: { ...incomplete.summary, partial: incomplete.partial },
-              }
-            : {}),
-          errorMessage,
-        }),
+        staff
+          ? this.markCoverageFinished(input, staffScope, {
+              status: DailyDataCoverageStatus.SUCCESS,
+              sourceCounts: staff.sourceCounts,
+              summary: staff.summary,
+            })
+          : this.markCoverageFinished(input, staffScope, {
+              status: DailyDataCoverageStatus.FAILED,
+              ...(incomplete
+                ? {
+                    summary: {
+                      ...incomplete.summary,
+                      partial: incomplete.partial,
+                    },
+                  }
+                : {}),
+              errorMessage,
+            }),
       ]);
+
+      if (staff) {
+        return [
+          {
+            ...this.finishedScope(
+              guestScope,
+              DailyDataCoverageStatus.FAILED,
+              errorMessage,
+            ),
+            partial: incomplete?.partial ?? false,
+          },
+          this.finishedScope(staffScope, DailyDataCoverageStatus.SUCCESS),
+        ];
+      }
 
       return [
         {

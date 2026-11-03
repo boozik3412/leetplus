@@ -917,6 +917,93 @@ describe('LangameDailySyncService tenant execution admission', () => {
     );
   });
 
+  it('keeps staff shifts when only the guest list breaks off', async () => {
+    const subject = createSubject();
+    subject.prisma.tenant.findMany.mockResolvedValue([
+      { id: 'tenant-internal', slug: 'internal' },
+    ]);
+    subject.admissionService.evaluate.mockResolvedValue({
+      allowed: true,
+      tenantId: 'tenant-internal',
+      customerStage: TenantCustomerStage.INTERNAL,
+    });
+    subject.langameSyncService.syncTenantById.mockResolvedValue({
+      sources: 1,
+      failedSources: 0,
+      partialSources: 0,
+      sourceResults: [],
+    });
+    const guestListBroke = {
+      domain: 'ostrov.example',
+      status: 'PARTIAL',
+      workingShifts: 2,
+      langameUsers: 5,
+      operationLogs: 40,
+      cashTransactions: 3,
+      endpointErrors: {
+        'guests/list': 'Не удалось получить данные этого раздела Langame.',
+        'guests/logs':
+          'Langame больше не отдаёт этот раздел списком по всей сети.',
+      },
+    };
+    subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
+      sources: 1,
+      failedSources: 0,
+      partialSources: 1,
+      sourceResults: [guestListBroke],
+    });
+
+    const result = await subject.service.runDailySync({ date: '2026-09-20' });
+    expect(result.results[0].scopes).toContainEqual(
+      expect.objectContaining({
+        scope: DailyDataCoverageScope.GUEST_FOUNDATION,
+        status: DailyDataCoverageStatus.FAILED,
+      }),
+    );
+    expect(result.results[0].scopes).toContainEqual(
+      expect.objectContaining({
+        scope: DailyDataCoverageScope.STAFF_SHIFTS,
+        status: DailyDataCoverageStatus.SUCCESS,
+      }),
+    );
+    const staffCoverage = (
+      subject.prisma.dailyDataCoverage.upsert.mock.calls as Array<
+        [{ update: { status?: string }; where: unknown }]
+      >
+    ).filter(([call]) =>
+      JSON.stringify(call.where).includes(DailyDataCoverageScope.STAFF_SHIFTS),
+    );
+    expect(staffCoverage.at(-1)?.[0].update.status).toBe(
+      DailyDataCoverageStatus.SUCCESS,
+    );
+
+    // A staff section with its own error still fails the staff scope.
+    subject.guestDataFoundationService.syncTenantById.mockResolvedValue({
+      sources: 1,
+      failedSources: 0,
+      partialSources: 1,
+      sourceResults: [
+        {
+          ...guestListBroke,
+          endpointErrors: {
+            ...guestListBroke.endpointErrors,
+            'working_shifts/list':
+              'Не удалось получить данные этого раздела Langame.',
+          },
+        },
+      ],
+    });
+    const staffBroke = await subject.service.runDailySync({
+      date: '2026-09-20',
+    });
+    expect(staffBroke.results[0].scopes).toContainEqual(
+      expect.objectContaining({
+        scope: DailyDataCoverageScope.STAFF_SHIFTS,
+        status: DailyDataCoverageStatus.FAILED,
+      }),
+    );
+  });
+
   it('refreshes current inventory after legacy QUICK coverage closes without rewriting sales coverage', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-09-14T09:00:00.000Z'));

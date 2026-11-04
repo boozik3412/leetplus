@@ -24,17 +24,6 @@ export type DailyReportShiftRow = {
   incass: number;
 };
 
-/**
- * A balance top-up the guest paid online in the Langame app. Langame records
- * it without a club, so it never reaches a shift's cash; only the Langame
- * address tells which clubs it belongs to.
- */
-export type DailyReportOnlineTopupRow = {
-  domain: string;
-  paidAt: Date;
-  amount: number;
-};
-
 export type DailyReportSaleRow = {
   storeId: string;
   productKey: string;
@@ -93,14 +82,6 @@ export type DailyReportInput = {
   stockDays: number;
   /** Products the owner excluded from out-of-stock signals. */
   oosExcludedProductKeys: ReadonlySet<string>;
-  /** Online top-ups of the report and baseline windows. */
-  onlineTopups?: DailyReportOnlineTopupRow[];
-  /**
-   * Clubs outside the report's scope on the Langame address of a reported
-   * club. They are not reported; their shifts and sessions in `shifts` and
-   * `sessions` only weigh the split of the address's online top-ups.
-   */
-  addressPeers?: Array<DailyReportStore & { window: ClubDayWindow }>;
 };
 
 export type DailyReportShift = {
@@ -141,22 +122,12 @@ export type DailyReportMetric = {
   change: number | null;
 };
 
-/** The club's part of the online top-ups of its Langame address. */
+/**
+ * Balance top-ups paid in the Langame app that Langame assigned to the
+ * club's shifts (`mobile_pay`). A part of the shift revenue, not on top of it.
+ */
 export type DailyReportOnline = {
-  /** All of the address's top-ups, or the club's share of a common address. */
   amount: DailyReportMetric;
-  /** Payments on the address over the club day. */
-  payments: number;
-  /**
-   * Other clubs on the same Langame address. An online payment names no
-   * club, so the address's top-ups are split between its clubs in proportion
-   * to guests × average check (cash per visit) of the day.
-   */
-  sharedWith: string[];
-  /** The club's share of the address's top-ups of the day, 1 when alone. */
-  share: number;
-  /** All top-ups of the address over the club day. */
-  addressAmount: number;
 };
 
 export type DailyReportClub = {
@@ -184,7 +155,7 @@ export type DailyReportClub = {
   computerCount: number | null;
   guestSummary: DailyReportGuestSummary;
   online: DailyReportOnline | null;
-  /** Cash plus the club's part of online top-ups. */
+  /** The club's shift revenue, online app payments included. */
   revenue: DailyReportMetric;
   refunds: number;
   topProducts: DailyReportProductLine[];
@@ -211,11 +182,11 @@ export type DailyReport = {
   generatedAt: string;
   clubs: DailyReportClub[];
   totals: {
-    /** Clubs' cash plus online top-ups: all money the network took in. */
+    /** Clubs' shift revenue: all money the network took in. */
     revenue: DailyReportMetric;
     shiftRevenue: DailyReportMetric;
+    /** The part of `revenue` paid in the Langame app. */
     onlineTopups: DailyReportMetric;
-    onlinePayments: number;
     barRevenue: DailyReportMetric;
     barMargin: DailyReportMetric;
     visits: DailyReportMetric;

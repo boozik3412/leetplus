@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { IntegrationProvider, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { closureDay, type ClosurePeriod } from '../common/store-closure';
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,13 +14,11 @@ import {
   clubDayWindow,
   lastClosedClubDay,
   shiftDate,
-  wallClockStoredAsUtcToInstant,
   type ClubDayWindow,
 } from './daily-report-window';
 import type {
   DailyReport,
   DailyReportInput,
-  DailyReportOnlineTopupRow,
   DailyReportSaleRow,
   DailyReportShiftRow,
 } from './daily-report.types';
@@ -186,32 +184,6 @@ export class DailyReportService {
     );
     const stores = windows.map(({ store }) => store);
     const storeIds = stores.map((store) => store.id);
-    // Open clubs outside the scope on a reported club's Langame address weigh
-    // the split of the address's online top-ups.
-    const domains = [
-      ...new Set(
-        stores.flatMap((store) =>
-          store.externalDomain?.trim() ? [store.externalDomain] : [],
-        ),
-      ),
-    ];
-    const peerWindows =
-      scope.storeIds && domains.length
-        ? await openOnReportDay(
-            await this.prisma.store.findMany({
-              where: {
-                tenantId: scope.tenantId,
-                isActive: true,
-                id: { notIn: storeIds },
-                externalDomain: { in: domains },
-              },
-              select: storeSelect,
-              orderBy: { name: 'asc' },
-            }),
-          )
-        : [];
-    const peerIds = peerWindows.map(({ store }) => store.id);
-
     if (!windows.length) {
       return {
         generatedAt: now,
@@ -244,7 +216,6 @@ export class DailyReportService {
     const stockFrom = new Date(now.getTime() - STOCK_DAYS * DAY_MS);
     const tenantId = scope.tenantId;
     const storeFilter = { in: storeIds };
-    const weightFilter = { in: [...storeIds, ...peerIds] };
 
     const [
       shiftRows,
@@ -254,12 +225,11 @@ export class DailyReportService {
       stockRows,
       stockSalesRows,
       exclusions,
-      onlineTopups,
     ] = await Promise.all([
       this.prisma.guestWorkingShift.findMany({
         where: {
           tenantId,
-          storeId: weightFilter,
+          storeId: storeFilter,
           OR: [
             {
               startedAt: {
@@ -298,7 +268,7 @@ export class DailyReportService {
       this.prisma.guestSession.findMany({
         where: {
           tenantId,
-          storeId: weightFilter,
+          storeId: storeFilter,
           startedAt: { gte: rangeFrom, lt: rangeTo },
         },
         select: {
@@ -325,7 +295,6 @@ export class DailyReportService {
         where: { tenantId },
         select: { productId: true },
       }),
-      this.loadOnlineTopups(tenantId, windows, rangeFrom, rangeTo),
     ]);
 
     const adminNames = await this.loadAdminNames(tenantId, [
@@ -377,10 +346,7 @@ export class DailyReportService {
         window,
       })),
       baselineWindows: Object.fromEntries(
-        [...windows, ...peerWindows].map(({ store, baseline }) => [
-          store.id,
-          baseline,
-        ]),
+        windows.map(({ store, baseline }) => [store.id, baseline]),
       ),
       shifts: shiftRows.filter((row) => row.storeId).map(toShift),
       historyShifts: historyRows.filter((row) => row.storeId).map(toShift),
@@ -406,24 +372,9 @@ export class DailyReportService {
       })),
       stockDays: STOCK_DAYS,
       oosExcludedProductKeys: new Set(exclusions.map((row) => row.productId)),
-      onlineTopups,
-      addressPeers: peerWindows.map(({ store, window }) => ({
-        id: store.id,
-        name: store.name,
-        timeZone: window.timeZone,
-        computerCount: store.computerCount,
-        domain: store.externalDomain?.trim() || null,
-        window,
-      })),
     };
   }
 
-  /**
-   * Balance top-ups paid in the Langame app. Langame gives them no club
-   * (`club_id` 0), so they are kept by Langame address; their time is the
-   * club clock stored as UTC. A sync of another period stores the same
-   * operation once more under a new key, hence one row per payload.
-   */
   private async closedOnReportDay(
     tenantId: string,
     windows: ReadonlyArray<{ store: { id: string }; window: ClubDayWindow }>,
@@ -453,66 +404,6 @@ export class DailyReportService {
         reopenedOn: closure.reopenedOn ? closureDay(closure.reopenedOn) : null,
       })),
     );
-  }
-
-  private async loadOnlineTopups(
-    tenantId: string,
-    windows: Array<{
-      store: { externalDomain: string | null };
-      window: ClubDayWindow;
-    }>,
-    rangeFrom: Date,
-    rangeTo: Date,
-  ): Promise<DailyReportOnlineTopupRow[]> {
-    const timeZones = new Map<string, string>();
-    windows.forEach(({ store, window }) => {
-      const domain = store.externalDomain?.trim();
-      if (domain && !timeZones.has(domain)) {
-        timeZones.set(domain, window.timeZone);
-      }
-    });
-    if (!timeZones.size) return [];
-    const rows = await this.prisma.guestOperationLog.findMany({
-      where: {
-        tenantId,
-        externalProvider: IntegrationProvider.LANGAME,
-        externalDomain: { in: [...timeZones.keys()] },
-        storeId: null,
-        OR: [{ externalClubId: null }, { externalClubId: '0' }],
-        amount: { gt: 0 },
-        // The stored wall clock is up to a day off UTC.
-        happenedAt: {
-          gte: new Date(rangeFrom.getTime() - DAY_MS),
-          lt: new Date(rangeTo.getTime() + DAY_MS),
-        },
-      },
-      select: {
-        id: true,
-        externalDomain: true,
-        type: true,
-        operationName: true,
-        happenedAt: true,
-        amount: true,
-        sourcePayloadHash: true,
-      },
-    });
-    const seen = new Set<string>();
-    return rows.flatMap((row) => {
-      const domain = row.externalDomain!;
-      const key = `${domain}:${row.sourcePayloadHash ?? row.id}`;
-      if (!row.happenedAt || !isTopUp(row) || seen.has(key)) return [];
-      seen.add(key);
-      return [
-        {
-          domain,
-          paidAt: wallClockStoredAsUtcToInstant(
-            row.happenedAt,
-            timeZones.get(domain)!,
-          ),
-          amount: toNumber(row.amount),
-        },
-      ];
-    });
   }
 
   private async loadLatestStock(tenantId: string, storeIds: string[]) {
@@ -583,14 +474,6 @@ export class DailyReportService {
         .filter((entry): entry is [string, string] => Boolean(entry[1])),
     );
   }
-}
-
-/** Langame `plus` operations: «Пополнение баланса». */
-function isTopUp(row: { type: string | null; operationName: string | null }) {
-  return (
-    row.type?.trim().toLowerCase() === 'plus' ||
-    /пополнен/i.test(row.operationName ?? '')
-  );
 }
 
 const shiftSelect = {

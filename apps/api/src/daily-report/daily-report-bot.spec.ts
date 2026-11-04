@@ -337,6 +337,7 @@ describe('daily report bot', () => {
       Promise.resolve({
         ...report([club()]),
         totals: {
+          revenue: metric,
           shiftRevenue: metric,
           barRevenue: metric,
           barMargin: metric,

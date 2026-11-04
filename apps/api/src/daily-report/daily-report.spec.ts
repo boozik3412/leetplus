@@ -364,7 +364,7 @@ describe('daily report builder', () => {
 
     const noGuests = buildDailyReport(input({ sessions: [] }));
     expect(noGuests.alerts).toContain(
-      `1337 Ижевск: нет данных о гостях при кассе ${formatRub(33500)}, проверьте сессии в Langame`,
+      `1337 Ижевск: нет данных о гостях при выручке ${formatRub(33500)}, проверьте сессии в Langame`,
     );
     const [, club] = renderDailyReport(noGuests, null);
     expect(club).toContain('гостей 0 ⚠️ нет данных о гостях');
@@ -399,192 +399,110 @@ describe('daily report builder', () => {
     expect(report.clubs[0].shifts[0].cashless).toBe(2700);
   });
 
-  describe('online top-ups', () => {
-    const store = (id: string, name: string, domain: string) => ({
-      id,
-      name,
-      timeZone: IZHEVSK,
-      computerCount: null,
-      domain,
-      window,
-    });
-    const topup = (domain: string, local: string, amount: number) => ({
-      domain,
-      paidAt: at(local),
-      amount,
-    });
-    const session = (storeId: string, guestKey: string, local: string) => ({
-      storeId,
-      guestKey,
-      startedAt: at(local),
-      durationMinutes: 60,
-    });
-    const pair = store('izh', '1337 Пушкинская', 'pair.langame.ru');
-    const holmogorova = store('hol', '1337 Холмогорова', 'pair.langame.ru');
-    const radishcheva = store('rad', '1337 Радищева', 'rad.langame.ru');
-    const pairDay = {
-      shifts: [
-        // Пушкинская: 3 guests, 4 visits, 8 000 ₽ — check 2 000 ₽, weight 6 000.
-        shift({
-          id: 'izh-day',
-          storeId: 'izh',
-          startedAt: at('2026-10-25T09:00:00'),
-          stoppedAt: at('2026-10-26T09:00:00'),
-          cash: 8000,
-        }),
-        // Холмогорова: 2 guests, 2 visits, 2 000 ₽ — check 1 000 ₽, weight 2 000.
-        shift({
-          id: 'hol-day',
-          storeId: 'hol',
-          adminKey: 'pair.langame.ru:7',
-          startedAt: at('2026-10-25T09:00:00'),
-          stoppedAt: at('2026-10-26T09:00:00'),
-          cash: 2000,
-        }),
-      ],
-      sessions: [
-        session('izh', 'a', '2026-10-25T12:00:00'),
-        session('izh', 'a', '2026-10-25T18:00:00'),
-        session('izh', 'b', '2026-10-25T19:00:00'),
-        session('izh', 'c', '2026-10-25T20:00:00'),
-        session('hol', 'd', '2026-10-25T12:00:00'),
-        session('hol', 'e', '2026-10-25T13:00:00'),
-      ],
-    };
-
-    it('splits a common address by guests × average check and adds the part to club revenue', () => {
+  describe('online app payments', () => {
+    it('shows app payments inside the shift revenue, never on top of it', () => {
       const report = buildDailyReport(
         input({
-          stores: [pair, holmogorova, radishcheva],
-          baselineWindows: { izh: baseline, hol: baseline, rad: baseline },
-          ...pairDay,
-          onlineTopups: [
-            topup('pair.langame.ru', '2026-10-25T12:00:00', 1000),
-            topup('pair.langame.ru', '2026-10-26T08:30:00', 600),
-            // After 09:00: the next club day.
-            topup('pair.langame.ru', '2026-10-26T09:30:00', 700),
-            topup('rad.langame.ru', '2026-10-25T20:00:00', 300),
-            // A usual day a week ago.
-            topup('rad.langame.ru', '2026-10-19T20:00:00', 2100),
+          shifts: [
+            shift({
+              startedAt: at('2026-10-25T09:00:00'),
+              stoppedAt: at('2026-10-26T09:00:00'),
+              cash: 1000,
+              cashless: 5000,
+              mobilePay: 3000,
+            }),
+            // A usual day a week ago, without app payments.
+            shift({
+              startedAt: at('2026-10-19T09:00:00'),
+              stoppedAt: at('2026-10-20T09:00:00'),
+              cash: 1000,
+              cashless: 5000,
+              mobilePay: 1500,
+            }),
           ],
         }),
       );
-      const [pushkinskaya, holm, rad] = report.clubs;
-      expect(pushkinskaya.online).toEqual({
-        amount: { value: 1200, usual: 0, change: null },
-        payments: 2,
-        sharedWith: ['1337 Холмогорова'],
-        share: 0.75,
-        addressAmount: 1600,
+      const [club] = report.clubs;
+      expect(club.metrics.shiftRevenue.value).toBe(9000);
+      expect(club.revenue.value).toBe(9000);
+      expect(club.online).toEqual({
+        amount: { value: 3000, usual: 1500, change: 1 },
       });
-      expect(holm.online).toMatchObject({
-        amount: { value: 400 },
-        share: 0.25,
-        sharedWith: ['1337 Пушкинская'],
-      });
-      expect(pushkinskaya.revenue.value).toBe(8000 + 1200);
-      expect(holm.revenue.value).toBe(2000 + 400);
-      expect(rad.online).toEqual({
-        amount: { value: 300, usual: 300, change: 0 },
-        payments: 1,
-        sharedWith: [],
-        share: 1,
-        addressAmount: 300,
-      });
-      expect(report.totals.onlineTopups.value).toBe(1900);
-      expect(report.totals.onlinePayments).toBe(3);
-      expect(report.totals.revenue.value).toBe(
-        report.totals.shiftRevenue.value + 1900,
-      );
+      expect(report.totals.revenue.value).toBe(9000);
+      expect(report.totals.shiftRevenue.value).toBe(9000);
+      expect(report.totals.onlineTopups.value).toBe(3000);
 
       const [summary, ...clubs] = renderDailyReport(report, null);
+      expect(summary).toContain(`<b>${formatRub(9000)}</b> выручка`);
+      expect(summary).toContain(
+        `└ в т.ч. онлайн из приложения <b>${formatRub(3000)}</b>`,
+      );
+      expect(summary).not.toContain('касса');
       const text = clubs.join('\n');
-      expect(summary).toContain(
-        `<b>${formatRub(report.totals.revenue.value)}</b> выручка`,
-      );
-      expect(summary).toContain(
-        `└ онлайн из приложения <b>${formatRub(1900)}</b>`,
-      );
-      expect(text).toContain(`Выручка <b>${formatRub(9200)}</b>`);
-      expect(text).toContain(`Онлайн из приложения <b>${formatRub(1200)}</b>`);
+      expect(text).toContain(`Выручка <b>${formatRub(9000)}</b>`);
       expect(text).toContain(
-        `<i>75% от ${formatRub(1600)} (2 оплаты), общих с 1337 Холмогорова: делим по гостям и среднему чеку</i>`,
-      );
-      expect(text).toContain(
-        `Онлайн из приложения <b>${formatRub(300)}</b> ±0% · 1 оплата`,
+        `в т.ч. онлайн из приложения <b>${formatRub(3000)}</b>`,
       );
     });
 
-    it('weighs a peer outside the scope without reporting it', () => {
-      const report = buildDailyReport(
-        input({
-          stores: [pair],
-          addressPeers: [holmogorova],
-          baselineWindows: { izh: baseline, hol: baseline },
-          ...pairDay,
-          onlineTopups: [topup('pair.langame.ru', '2026-10-25T12:00:00', 1600)],
-        }),
-      );
-      expect(report.clubs.map((club) => club.storeId)).toEqual(['izh']);
-      expect(report.clubs[0].online).toMatchObject({
-        amount: { value: 1200 },
-        share: 0.75,
-        sharedWith: ['1337 Холмогорова'],
-      });
-      expect(report.totals.onlineTopups.value).toBe(1200);
-      expect(report.totals.shiftRevenue.value).toBe(8000);
-    });
-
-    it('splits by guests, then equally, when there is no cash', () => {
-      const byGuests = buildDailyReport(
-        input({
-          stores: [pair, holmogorova],
-          baselineWindows: { izh: baseline, hol: baseline },
-          shifts: [],
-          sessions: pairDay.sessions,
-          onlineTopups: [topup('pair.langame.ru', '2026-10-25T12:00:00', 1000)],
-        }),
-      );
-      expect(byGuests.clubs.map((club) => club.online?.amount.value)).toEqual([
-        600, 400,
-      ]);
-
-      const equally = buildDailyReport(
-        input({
-          stores: [pair, holmogorova],
-          baselineWindows: { izh: baseline, hol: baseline },
-          shifts: [],
-          sessions: [],
-          onlineTopups: [topup('pair.langame.ru', '2026-10-25T12:00:00', 1000)],
-        }),
-      );
-      expect(equally.clubs.map((club) => club.online?.amount.value)).toEqual([
-        500, 500,
-      ]);
-    });
-
-    it('keeps the kopecks of an uneven split', () => {
+    it('keeps the online parts of clubs on one Langame address apart', () => {
       const report = buildDailyReport(
         input({
           stores: [
-            pair,
-            holmogorova,
-            store('third', '1337 Третий', 'pair.langame.ru'),
+            {
+              id: 'izh',
+              name: '1337 Пушкинская',
+              timeZone: IZHEVSK,
+              computerCount: null,
+              domain: 'pair.langame.ru',
+              window,
+            },
+            {
+              id: 'hol',
+              name: '1337 Холмогорова',
+              timeZone: IZHEVSK,
+              computerCount: null,
+              domain: 'pair.langame.ru',
+              window,
+            },
           ],
-          baselineWindows: { izh: baseline, hol: baseline, third: baseline },
-          shifts: [],
-          sessions: [],
-          onlineTopups: [topup('pair.langame.ru', '2026-10-25T12:00:00', 100)],
+          baselineWindows: { izh: baseline, hol: baseline },
+          shifts: [
+            shift({
+              storeId: 'izh',
+              startedAt: at('2026-10-25T09:00:00'),
+              stoppedAt: at('2026-10-26T09:00:00'),
+              cash: 8000,
+              mobilePay: 1200,
+            }),
+            shift({
+              storeId: 'hol',
+              adminKey: 'pair.langame.ru:7',
+              startedAt: at('2026-10-25T09:00:00'),
+              stoppedAt: at('2026-10-26T09:00:00'),
+              cash: 2000,
+              mobilePay: 400,
+            }),
+          ],
         }),
       );
-      const parts = report.clubs.map((club) => club.online!.amount.value);
-      expect(parts).toEqual([33.33, 33.33, 33.34]);
+      expect(
+        report.clubs.map((club) => [
+          club.revenue.value,
+          club.online?.amount.value,
+        ]),
+      ).toEqual([
+        [9200, 1200],
+        [2400, 400],
+      ]);
+      expect(report.totals.revenue.value).toBe(11600);
+      expect(report.totals.onlineTopups.value).toBe(1600);
     });
   });
 
-  it('keeps the cash line alone without online top-ups', () => {
+  it('keeps the revenue line alone without app payments', () => {
     const [summary] = renderDailyReport(buildDailyReport(input()), null);
-    expect(summary).toContain(`<b>${formatRub(33500)}</b> касса`);
+    expect(summary).toContain(`<b>${formatRub(33500)}</b> выручка`);
     expect(summary).not.toContain('онлайн');
   });
 });
@@ -714,34 +632,9 @@ describe('closed clubs', () => {
       where: { storeId: { in: string[] } };
     };
     expect(shiftWhere.where.storeId.in.sort()).toEqual(['hol', 'izh']);
-    const onlineWhere = prisma.guestOperationLog.findMany.mock.calls[0][0] as {
-      where: { externalDomain: { in: string[] } };
-    };
-    expect(onlineWhere.where.externalDomain.in).toEqual(['pair.langame.ru']);
-  });
-
-  it('gives the whole address online to the open club when its pair is closed', async () => {
-    const { service } = serviceWith(
-      [
-        {
-          id: 'izh',
-          name: '1337 Пушкинская',
-          externalDomain: 'pair.langame.ru',
-        },
-        {
-          id: 'hol',
-          name: '1337 Холмогорова',
-          externalDomain: 'pair.langame.ru',
-        },
-      ],
-      [{ storeId: 'hol', closedFrom: day('2026-10-01'), reopenedOn: null }],
-    );
-    const input = await service.loadInput(
-      { tenantId: 'demo', storeIds: ['izh'] },
-      now,
-    );
-    expect(input.stores.map((store) => store.id)).toEqual(['izh']);
-    expect(input.addressPeers ?? []).toEqual([]);
+    // App payments come with the shifts; the club-less operation log is not
+    // read, so online money is not counted twice.
+    expect(prisma.guestOperationLog.findMany).not.toHaveBeenCalled();
   });
 
   it('builds an empty report for a recipient whose clubs are all closed', async () => {

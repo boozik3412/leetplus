@@ -13,7 +13,6 @@ import type {
   DailyReportClub,
   DailyReportInput,
   DailyReportMetric,
-  DailyReportOnline,
   DailyReportSaleRow,
   DailyReportGuestSummary,
   DailyReportSessionRow,
@@ -48,6 +47,8 @@ type MetricKey = keyof DailyReportClub['metrics'];
 
 type DayAggregate = {
   shiftRevenue: number;
+  /** Part of `shiftRevenue` paid in the Langame app (`mobile_pay`). */
+  appRevenue: number;
   barRevenue: number;
   barMargin: number;
   barItems: number;
@@ -57,6 +58,12 @@ type DayAggregate = {
   hasData: boolean;
 };
 
+/**
+ * Everything the club took in on the shift, as Langame closes it: cash,
+ * card, app and Yandex Pay payments less refunds. `mobile_pay` is the
+ * guests' balance top-ups in the Langame app that Langame assigns to this
+ * club's shift, so online money is already here and is never added again.
+ */
 export function shiftRevenue(shift: DailyReportShiftRow) {
   return (
     shift.cash +
@@ -133,6 +140,7 @@ function aggregateDay(
       (sum, shift) => sum + shiftRevenue(shift),
       0,
     ),
+    appRevenue: dayShifts.reduce((sum, shift) => sum + shift.mobilePay, 0),
     barRevenue: daySales.reduce((sum, sale) => sum + sale.revenue, 0),
     barMargin: daySales.reduce(
       (sum, sale) => sum + (sale.cost > 0 ? sale.revenue - sale.cost : 0),
@@ -334,103 +342,6 @@ export function guestSummary(
   return { newGuests, regulars, averageVisitHours, peakHour, peakGuests };
 }
 
-type ClubOnline = {
-  online: DailyReportOnline;
-  /** The club's part on each baseline window, by index. */
-  baseline: number[];
-};
-
-/**
- * A club's weight in the split of its address's online top-ups: guests ×
- * average check, the check being the day's cash per visit.
- */
-function onlineWeight(day: DayAggregate) {
-  const averageCheck = day.visits > 0 ? day.shiftRevenue / day.visits : 0;
-  return Math.max(0, day.guests * averageCheck);
-}
-
-/** Shares by weight, else by guests, else equal parts. */
-function onlineShares(days: readonly DayAggregate[]) {
-  const byWeight = (weight: (day: DayAggregate) => number) => {
-    const weights = days.map(weight);
-    const total = weights.reduce((sum, value) => sum + value, 0);
-    return total > 0 ? weights.map((value) => value / total) : null;
-  };
-  return (
-    byWeight(onlineWeight) ??
-    byWeight((day) => day.guests) ??
-    days.map(() => 1 / days.length)
-  );
-}
-
-/** Parts of `total` by `shares`, in kopecks that add up to the total. */
-function splitAmount(total: number, shares: readonly number[]) {
-  const parts = shares.map((share) => round2(total * share));
-  if (parts.length) {
-    const others = parts.slice(0, -1).reduce((sum, value) => sum + value, 0);
-    parts[parts.length - 1] = round2(total - others);
-  }
-  return parts;
-}
-
-/**
- * Each reported club's part of the online top-ups of its Langame address,
- * over the day and the usual day. Clubs on one address keep one clock, so
- * the first club's days are the address's days; peers outside the report's
- * scope weigh the split too. An address without any top-ups is left out.
- */
-function onlineByClub(
-  input: DailyReportInput,
-  aggregate: (storeId: string, window: ClubDayWindow) => DayAggregate,
-) {
-  const topups = groupBy(input.onlineTopups ?? [], (row) => row.domain);
-  const reported = new Set(input.stores.map((store) => store.id));
-  const result = new Map<string, ClubOnline>();
-  groupBy(
-    [...input.stores, ...(input.addressPeers ?? [])].filter(
-      (store) => store.domain,
-    ),
-    (store) => store.domain!,
-  ).forEach((stores, domain) => {
-    if (!reported.has(stores[0].id)) return;
-    const rows = topups.get(domain) ?? [];
-    const inDay = (window: ClubDayWindow) =>
-      rows.filter((row) => inWindow(row.paidAt, window));
-    const parts = (window: ClubDayWindow) => {
-      const total = inDay(window).reduce((sum, row) => sum + row.amount, 0);
-      const shares = onlineShares(
-        stores.map((store) => aggregate(store.id, window)),
-      );
-      return { total, shares, parts: splitAmount(total, shares) };
-    };
-    const window = stores[0].window;
-    const day = parts(window);
-    const past = (input.baselineWindows[stores[0].id] ?? []).map(parts);
-    const address = metric(
-      day.total,
-      past.map((item) => item.total),
-    );
-    if (!address.value && !address.usual) return;
-    stores.forEach((store, index) => {
-      if (!reported.has(store.id)) return;
-      const baseline = past.map((item) => item.parts[index]);
-      result.set(store.id, {
-        online: {
-          amount: metric(day.parts[index], baseline),
-          payments: inDay(window).length,
-          sharedWith: stores
-            .filter((other) => other.id !== store.id)
-            .map((other) => other.name),
-          share: round2(day.shares[index]),
-          addressAmount: round2(day.total),
-        },
-        baseline,
-      });
-    });
-  });
-  return result;
-}
-
 function sumMetrics(metrics: readonly DailyReportMetric[]): DailyReportMetric {
   const value = metrics.reduce((sum, item) => sum + item.value, 0);
   // The usual network day is the sum of each part's usual day, so a club
@@ -463,14 +374,6 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
   const salesByStore = groupBy(input.sales, (sale) => sale.storeId);
   const sessionsByStore = groupBy(input.sessions, (session) => session.storeId);
   const alerts: Array<{ weight: number; text: string }> = [];
-  const aggregateOf = (storeId: string, window: ClubDayWindow) =>
-    aggregateDay(
-      window,
-      shiftsByStore.get(storeId) ?? [],
-      salesByStore.get(storeId) ?? [],
-      sessionsByStore.get(storeId) ?? [],
-    );
-  const online = onlineByClub(input, aggregateOf);
 
   const clubs: DailyReportClub[] = input.stores.map((store) => {
     const window = store.window;
@@ -478,13 +381,9 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
     const storeSales = salesByStore.get(store.id) ?? [];
     const storeSessions = sessionsByStore.get(store.id) ?? [];
     const day = aggregateDay(window, storeShifts, storeSales, storeSessions);
-    const pastDays = (input.baselineWindows[store.id] ?? [])
-      .map((past, index) => ({
-        index,
-        day: aggregateDay(past, storeShifts, storeSales, storeSessions),
-      }))
-      .filter((past) => past.day.hasData);
-    const baseline = pastDays.map((past) => past.day);
+    const baseline = (input.baselineWindows[store.id] ?? [])
+      .map((past) => aggregateDay(past, storeShifts, storeSales, storeSessions))
+      .filter((past) => past.hasData);
     const pick = (key: MetricKey) =>
       metric(
         day[key],
@@ -537,7 +436,10 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
       input.oosExcludedProductKeys,
     );
     const refunds = dayShiftRows.reduce((sum, shift) => sum + shift.refunds, 0);
-    const clubOnline = online.get(store.id);
+    const appRevenue = metric(
+      day.appRevenue,
+      baseline.map((past) => past.appRevenue),
+    );
     const club: DailyReportClub = {
       storeId: store.id,
       name: store.name,
@@ -563,14 +465,9 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
           : null,
       computerCount: store.computerCount ?? null,
       guestSummary: guestSummary(window, storeSessions),
-      online: clubOnline?.online ?? null,
-      revenue: metric(
-        day.shiftRevenue + (clubOnline?.online.amount.value ?? 0),
-        pastDays.map(
-          (past) =>
-            past.day.shiftRevenue + (clubOnline?.baseline[past.index] ?? 0),
-        ),
-      ),
+      online:
+        appRevenue.value || appRevenue.usual ? { amount: appRevenue } : null,
+      revenue: pick('shiftRevenue'),
       refunds: round2(refunds),
       topProducts: topProducts(daySales),
       outOfStock: stock.outOfStock,
@@ -601,7 +498,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
     if (revenueChange !== null && revenueChange <= REVENUE_DROP_ALERT) {
       alerts.push({
         weight: 80,
-        text: `${store.name}: касса ${formatRub(club.metrics.shiftRevenue.value)}, ${formatArrow(revenueChange)} к обычному`,
+        text: `${store.name}: выручка ${formatRub(club.metrics.shiftRevenue.value)}, ${formatArrow(revenueChange)} к обычному`,
       });
     }
     const barChange = club.metrics.barRevenue.change;
@@ -640,7 +537,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
     if (day.shiftRevenue > 0 && club.metrics.visits.value === 0) {
       alerts.push({
         weight: 65,
-        text: `${store.name}: нет данных о гостях при кассе ${formatRub(day.shiftRevenue)}, проверьте сессии в Langame`,
+        text: `${store.name}: нет данных о гостях при выручке ${formatRub(day.shiftRevenue)}, проверьте сессии в Langame`,
       });
     }
     if (
@@ -732,28 +629,14 @@ export function buildDailyReport(input: DailyReportInput): DailyReport {
     club.online ? [club.online] : [],
   );
   const onlineTotal = sumMetrics(clubsOnline.map((item) => item.amount));
-  // Clubs of one address count its payments once.
-  const addressPayments = new Map<string, number>();
-  input.stores.forEach((store, index) => {
-    const payments = clubs[index].online?.payments;
-    if (store.domain && payments !== undefined) {
-      addressPayments.set(store.domain, payments);
-    }
-  });
 
   return {
     generatedAt: now.toISOString(),
     clubs,
     totals: {
-      revenue: clubsOnline.length
-        ? sumMetrics([shiftTotal, onlineTotal])
-        : shiftTotal,
+      revenue: shiftTotal,
       shiftRevenue: shiftTotal,
       onlineTopups: onlineTotal,
-      onlinePayments: [...addressPayments.values()].reduce(
-        (sum, payments) => sum + payments,
-        0,
-      ),
       barRevenue: sumMetric('barRevenue'),
       barMargin: sumMetric('barMargin'),
       visits: sumMetric('visits'),

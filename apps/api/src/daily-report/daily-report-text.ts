@@ -46,23 +46,21 @@ function wholeNumber(value: number) {
   return formatNumber(Math.round(value));
 }
 
-function payments(count: number) {
-  return `${formatNumber(count)} ${pluralRu(count, ['оплата', 'оплаты', 'оплат'])}`;
-}
-
-/** Clubs' cash, and with online top-ups the network revenue split in two. */
+/**
+ * The network revenue as Langame closes the shifts; the app part is shown
+ * inside it, never added on top.
+ */
 function revenueLines(report: DailyReport) {
   const totals = report.totals;
-  if (!report.clubs.some((club) => club.online)) {
-    return [
-      `<b>${formatRub(totals.shiftRevenue.value)}</b> касса${arrow(totals.shiftRevenue)}`,
-    ];
-  }
-  return [
+  const lines = [
     `<b>${formatRub(totals.revenue.value)}</b> выручка${arrow(totals.revenue)}`,
-    `├ кассы клубов <b>${formatRub(totals.shiftRevenue.value)}</b>${arrow(totals.shiftRevenue)}`,
-    `└ онлайн из приложения <b>${formatRub(totals.onlineTopups.value)}</b>${arrow(totals.onlineTopups)} · ${payments(totals.onlinePayments)}`,
   ];
+  if (report.clubs.some((club) => club.online)) {
+    lines.push(
+      `└ в т.ч. онлайн из приложения <b>${formatRub(totals.onlineTopups.value)}</b>${arrow(totals.onlineTopups)}`,
+    );
+  }
+  return lines;
 }
 
 function summarySection(report: DailyReport) {
@@ -140,19 +138,8 @@ function collapsedList(title: string, items: string[]) {
 function onlineLines(club: DailyReportClub) {
   const online = club.online;
   if (!online) return [];
-  if (!online.sharedWith.length) {
-    return [
-      `Онлайн из приложения <b>${formatRub(online.amount.value)}</b>${arrow(online.amount)} · ${payments(online.payments)}`,
-    ];
-  }
-  const others = online.sharedWith.map(escapeHtml);
-  const peers =
-    others.length > 1
-      ? `${others.slice(0, -1).join(', ')} и ${others.at(-1)}`
-      : others[0];
   return [
-    `Онлайн из приложения <b>${formatRub(online.amount.value)}</b>${arrow(online.amount)}`,
-    `<i>${formatPercent(online.share)} от ${formatRub(online.addressAmount)} (${payments(online.payments)}), общих с ${peers}: делим по гостям и среднему чеку</i>`,
+    `в т.ч. онлайн из приложения <b>${formatRub(online.amount.value)}</b>${arrow(online.amount)}`,
   ];
 }
 
@@ -160,12 +147,7 @@ function clubBlock(club: DailyReportClub) {
   const metrics = club.metrics;
   const lines: string[] = [
     `🏠 <b>${escapeHtml(club.name)}</b>`,
-    ...(club.online
-      ? [
-          `Выручка <b>${formatRub(club.revenue.value)}</b>${arrow(club.revenue)}`,
-        ]
-      : []),
-    `Касса <b>${formatRub(metrics.shiftRevenue.value)}</b>${arrow(metrics.shiftRevenue)} · бар <b>${formatRub(metrics.barRevenue.value)}</b>${arrow(metrics.barRevenue)}`,
+    `Выручка <b>${formatRub(club.revenue.value)}</b>${arrow(club.revenue)} · бар <b>${formatRub(metrics.barRevenue.value)}</b>${arrow(metrics.barRevenue)}`,
     ...onlineLines(club),
     ...guestLines(club),
     '',

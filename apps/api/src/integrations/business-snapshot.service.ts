@@ -412,8 +412,9 @@ export class BusinessSnapshotService {
     );
     const shiftCashRevenue =
       shiftCash + shiftCashless + shiftMobilePay - shiftRefunds;
-    const dashboardNetworkRevenue =
-      allocatedClubRevenue + unallocatedTopupRevenue;
+    // Online top-ups are spent in the clubs, so they are already in the
+    // balance spend; adding them would count the same money twice.
+    const dashboardNetworkRevenue = allocatedClubRevenue;
 
     return {
       periodFrom: period.dateFrom,
@@ -447,8 +448,7 @@ export class BusinessSnapshotService {
         allocatedClubRevenue,
         dashboardNetworkRevenue,
         shiftCashRevenue,
-        formula:
-          'max(products, balance_spend, transactions_spend) + unallocated_online_topups',
+        formula: 'max(products, balance_spend, transactions_spend)',
         primarySource:
           balanceOperationSpendRevenue >= transactionSpendRevenue &&
           balanceOperationSpendRevenue >= productRevenue &&

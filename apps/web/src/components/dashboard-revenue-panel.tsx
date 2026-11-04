@@ -612,8 +612,11 @@ function UnallocatedTopupRevenue({ revenue }: { revenue: number }) {
 
   return (
     <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-zinc-200/70 px-3 py-2 text-xs dark:border-zinc-800/80">
-      <span className="text-zinc-500 dark:text-zinc-400">
-        Онлайн-пополнения без клуба
+      <span
+        className="text-zinc-500 dark:text-zinc-400"
+        title="Гости тратят эти деньги в клубах, поэтому они уже учтены в выручке при списании баланса"
+      >
+        Онлайн-пополнения, справочно (не входят в выручку)
       </span>
       <span className="font-semibold tabular-nums">{formatMoney(revenue)}</span>
     </div>

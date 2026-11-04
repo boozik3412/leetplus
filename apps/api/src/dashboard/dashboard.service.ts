@@ -5231,11 +5231,11 @@ export class DashboardService {
       input.balanceOperationRevenue,
       input.transactionSpendRevenue,
     );
-    const liveNetworkRevenue =
-      allocatedClubRevenue + input.unallocatedTopupRevenue;
-    const snapshotNetworkRevenue = this.snapshotNumber(
+    // Online top-ups are not added: guests spend that balance in the clubs,
+    // so the money is already in the balance spend.
+    const liveNetworkRevenue = allocatedClubRevenue;
+    const snapshotNetworkRevenue = this.snapshotNetworkRevenue(
       input.exactSnapshot?.summary,
-      'dashboardNetworkRevenue',
     );
     const hasExactSnapshot =
       input.exactSnapshot?.status === 'SUCCESS' ||
@@ -5307,8 +5307,7 @@ export class DashboardService {
           input.shiftCashRevenue,
       ),
       primarySource,
-      formula:
-        'max(products, balance_spend, transactions_spend) + unallocated_online_topups',
+      formula: 'max(products, balance_spend, transactions_spend)',
       sourceCounts,
     };
   }
@@ -5351,10 +5350,7 @@ export class DashboardService {
       generatedAt: snapshot.finishedAt?.toISOString() ?? null,
       periodFrom: snapshot.periodFrom?.toISOString() ?? null,
       periodTo: snapshot.periodTo?.toISOString() ?? null,
-      networkRevenue: this.snapshotNumber(
-        snapshot.summary,
-        'dashboardNetworkRevenue',
-      ),
+      networkRevenue: this.snapshotNetworkRevenue(snapshot.summary),
       sourceCounts: this.snapshotNumberRecord(snapshot.sourceCounts),
     };
   }
@@ -5369,7 +5365,7 @@ export class DashboardService {
         title: 'Fresh revenue snapshot',
         notes: [
           'Dashboard uses the prepared REVENUE snapshot for this exact period.',
-          'Formula separates club-recognized revenue and unallocated online top-ups.',
+          'Revenue is recognized when guests spend their balance in the clubs; online top-ups are shown apart and not added.',
         ],
       };
     }
@@ -5429,6 +5425,18 @@ export class DashboardService {
 
       return sum + incoming - refunds;
     }, 0);
+  }
+
+  /**
+   * Network revenue of a prepared snapshot. Snapshots made before 04.11.2026
+   * stored `dashboardNetworkRevenue` with online top-ups added on top of the
+   * balance spend, so their club part is taken instead.
+   */
+  private snapshotNetworkRevenue(summary: unknown) {
+    return (
+      this.snapshotNumber(summary, 'allocatedClubRevenue') ??
+      this.snapshotNumber(summary, 'dashboardNetworkRevenue')
+    );
   }
 
   private snapshotNumber(snapshot: unknown, key: string) {
@@ -5925,8 +5933,6 @@ export class DashboardService {
       totals.productRevenue,
       totals.balanceSpendRevenueCandidate,
     );
-    const dashboardNetworkRevenue =
-      allocatedClubRevenue + unallocatedTopups.amount;
     const balanceTopupFlow =
       totals.operationPlusAmount + unallocatedTopups.amount;
 
@@ -5934,17 +5940,19 @@ export class DashboardService {
       {
         key: 'dashboard-network-revenue',
         title: 'Текущий KPI сети',
-        amount: this.round(dashboardNetworkRevenue),
-        formula:
-          'max(бар/товары, списания баланса) + нераспределенные online-пополнения',
+        amount: this.round(allocatedClubRevenue),
+        formula: 'max(бар/товары, списания баланса)',
         description:
-          'Сумма, которую сводный дашборд может использовать как сетевую выручку: клубная часть отдельно, online-пополнения отдельно.',
+          'Выручка сети на дашборде: деньги признаются, когда гость тратит баланс в клубе. Online-пополнения не прибавляются: гости тратят их в клубах, и они уже есть в списаниях.',
         includes: [
           'products/expense',
           'all_operations_log/list или transactions/list',
-          'нераспределенные online-пополнения',
         ],
-        excludes: ['working_shifts/list', 'balances/list'],
+        excludes: [
+          'нераспределенные online-пополнения',
+          'working_shifts/list',
+          'balances/list',
+        ],
         recommendation: 'PRIMARY',
       },
       {
@@ -6059,10 +6067,10 @@ export class DashboardService {
         endpoint: 'GET /public_api/all_operations_log/list',
         amount: this.round(unallocatedTopups.amount),
         count: unallocatedTopups.count,
-        includedInNetworkRevenue: true,
+        includedInNetworkRevenue: false,
         includedInClubRevenue: false,
-        role: 'PRIMARY',
-        note: 'Входит в сетевую выручку как нераспределенный денежный поток, но не назначается конкретному клубу.',
+        role: 'CONTROL',
+        note: 'Денежный поток, не выручка: в выручку эти деньги попадают, когда гость тратит баланс в клубе.',
       },
       {
         key: 'working-shifts',

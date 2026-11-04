@@ -49,6 +49,7 @@ import {
 } from './langame-external-pilot-authority';
 import { parseLangameDate as parseLangameDateValue } from './langame-date';
 import {
+  LANGAME_RATE_LIMIT_RETRY_DELAYS_MS,
   LANGAME_TRANSIENT_RETRY_DELAYS_MS,
   withLangameTransientRetry,
 } from './langame-transient-retry';
@@ -362,6 +363,7 @@ export class GuestDataFoundationService {
   private readonly logger = new Logger(GuestDataFoundationService.name);
   // Overridable in tests; one gateway error must not leave a day incomplete.
   private readonly transientRetryDelaysMs = LANGAME_TRANSIENT_RETRY_DELAYS_MS;
+  private readonly rateLimitRetryDelaysMs = LANGAME_RATE_LIMIT_RETRY_DELAYS_MS;
   private readonly activeBackgroundTenantSyncs = new Set<string>();
   private readonly externalProfileAuthorities = new WeakMap<
     SourceProfile,
@@ -1479,7 +1481,11 @@ export class GuestDataFoundationService {
     profile.providerReadsAttempted += 1;
     let rows: T[];
     try {
-      rows = await withLangameTransientRetry(load, this.transientRetryDelaysMs);
+      rows = await withLangameTransientRetry(
+        load,
+        this.transientRetryDelaysMs,
+        this.rateLimitRetryDelaysMs,
+      );
       profile.providerReadsSucceeded += 1;
     } catch (error) {
       if (error instanceof ExternalGuestDataFenceError) throw error;
@@ -2981,6 +2987,7 @@ export class GuestDataFoundationService {
             : await withLangameTransientRetry(
                 () => fetchPage(page),
                 this.transientRetryDelaysMs,
+                this.rateLimitRetryDelaysMs,
               );
       } catch (error) {
         if (error instanceof ExternalGuestDataFenceError) throw error;

@@ -1197,6 +1197,38 @@ describe('GuestDataFoundationService', () => {
     });
   });
 
+  it('waits out a 429 on a later guest page and reads the whole list', async () => {
+    Object.assign(service, {
+      transientRetryDelaysMs: [0, 0],
+      rateLimitRetryDelaysMs: [0, 0],
+    });
+    const guests = (offset: number, size: number) =>
+      Array.from({ length: size }, (_, index) => ({
+        guest_id: offset + index,
+        fio: 'Synthetic guest',
+      }));
+    langameClient.listGuests
+      .mockReset()
+      .mockResolvedValueOnce(guests(1000, 200))
+      .mockRejectedValueOnce(
+        new Error(
+          'Langame /guests/list failed: 429 Too Many Requests - {"status":429}',
+        ),
+      )
+      .mockResolvedValueOnce(guests(1200, 50));
+
+    const result = await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    expect(langameClient.listGuests).toHaveBeenCalledTimes(3);
+    expect(result.sourceResults[0]).toMatchObject({ guests: 250 });
+    expect(
+      result.sourceResults[0].endpointErrors['guests/list'],
+    ).toBeUndefined();
+  });
+
   it('refreshes one period without pulling the guest directory again', async () => {
     await service.syncTenant(user, {
       dateFrom: '2026-05-01',

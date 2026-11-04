@@ -1,4 +1,5 @@
 import {
+  isLangameRateLimitError,
   isLangameTransientError,
   withLangameTransientRetry,
 } from './langame-transient-retry';
@@ -57,5 +58,35 @@ describe('Langame transient retry', () => {
       'No permissions',
     );
     expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits out a 429 and reads the same page again', async () => {
+    const tooMany = new Error(
+      'Langame /guests/list failed: 429 Too Many Requests - {"status":429,"detail":"Too Many Requests"}',
+    );
+    expect(isLangameRateLimitError(tooMany)).toBe(true);
+    expect(isLangameTransientError(tooMany)).toBe(false);
+    const read = jest
+      .fn()
+      .mockRejectedValueOnce(tooMany)
+      .mockRejectedValueOnce(tooMany)
+      .mockRejectedValueOnce(new Error('502 Bad Gateway'))
+      .mockResolvedValueOnce(['row']);
+
+    await expect(
+      withLangameTransientRetry(read, [0], [0, 0, 0]),
+    ).resolves.toEqual(['row']);
+    expect(read).toHaveBeenCalledTimes(4);
+  });
+
+  it('gives up on a 429 that outlasts its pauses', async () => {
+    const read = jest
+      .fn()
+      .mockRejectedValue(new Error('429 Too Many Requests'));
+
+    await expect(withLangameTransientRetry(read, [0], [0, 0])).rejects.toThrow(
+      '429',
+    );
+    expect(read).toHaveBeenCalledTimes(3);
   });
 });

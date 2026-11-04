@@ -2454,7 +2454,7 @@ describe('DashboardService', () => {
     expect(summary.adjustedGrossProfitToPreviousPercent).toBe(80);
   });
 
-  it('uses balance spend as store revenue and adds unallocated top-ups to network revenue', async () => {
+  it('uses balance spend as store revenue and keeps unallocated top-ups out of network revenue', async () => {
     mockEmptyDashboardData();
     prisma.guestOperationLog.findMany.mockResolvedValue([
       {
@@ -2530,10 +2530,12 @@ describe('DashboardService', () => {
     const summary = await service.getSummary(user);
 
     expect(summary.totalRevenue).toBe(0);
-    expect(summary.clubRevenue).toBe(57200);
+    // Guests spend online top-ups in the clubs, so that money is already in
+    // the spend; the top-ups are shown apart and never added on top.
+    expect(summary.clubRevenue).toBe(7200);
     expect(summary.unallocatedTopupRevenue).toBe(50000);
     expect(summary.revenueBreakdown).toMatchObject({
-      networkRevenue: 57200,
+      networkRevenue: 7200,
       allocatedClubRevenue: 7200,
       balanceOperationRevenue: 2000,
       transactionSpendRevenue: 7200,
@@ -2548,6 +2550,31 @@ describe('DashboardService', () => {
       totalRevenueSource: 'TRANSACTIONS',
       productRevenue: 0,
     });
+  });
+
+  it('reads an old revenue snapshot without its online top-ups added on top', async () => {
+    mockEmptyDashboardData();
+    const snapshot = {
+      status: 'SUCCESS',
+      finishedAt: new Date('2026-11-03T00:01:10.000Z'),
+      periodFrom: null,
+      periodTo: null,
+      sourceCounts: {},
+      // Written before 04.11.2026: network = club part + online top-ups.
+      summary: {
+        allocatedClubRevenue: 175_037,
+        unallocatedTopupRevenue: 62_672,
+        dashboardNetworkRevenue: 237_709,
+      },
+    };
+    prisma.businessSnapshotRun.findFirst.mockResolvedValue(snapshot);
+
+    const summary = await service.getSummary(user);
+
+    expect(summary.revenueBreakdown.primarySource).toBe('SNAPSHOT');
+    expect(summary.revenueBreakdown.networkRevenue).toBe(175_037);
+    expect(summary.clubRevenue).toBe(175_037);
+    expect(summary.revenueSnapshot.networkRevenue).toBe(175_037);
   });
 
   it('calculates the club opportunity only from confirmed total-revenue denominators', async () => {
@@ -2726,7 +2753,7 @@ describe('DashboardService', () => {
       expect.arrayContaining([
         expect.objectContaining({
           key: 'dashboard-network-revenue',
-          amount: 14000,
+          amount: 4000,
           recommendation: 'PRIMARY',
         }),
         expect.objectContaining({
@@ -2746,7 +2773,7 @@ describe('DashboardService', () => {
         expect.objectContaining({
           key: 'unallocated-topups',
           amount: 10000,
-          includedInNetworkRevenue: true,
+          includedInNetworkRevenue: false,
           includedInClubRevenue: false,
         }),
         expect.objectContaining({

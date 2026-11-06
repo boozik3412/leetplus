@@ -74,6 +74,7 @@ release does not require a documentation change.
 - Guest dashboard, guest card, CRM signals or the guest ↔ game projection: [guests CRM guide](docs/agent-context/guests-crm-gamification.md).
 - Guest leaderboard («Рейтинг»): [leaderboard guide](docs/agent-context/guest-leaderboard.md).
 - Game effect («Эффект», holdout, guest card effect): [game effect guide](docs/agent-context/guest-game-effect.md).
+- New screens, visual or interaction changes, accessibility or UI review: [UI/UX rules](docs/agent-context/ui-ux.md).
 - Loading states, skeletons, the route progress bar or a new heavy screen: [loading UI guide](docs/agent-context/loading-ui.md).
 - Code changes and local QA: [commands and verification](docs/agent-context/verification.md); preserve the current required CI/admission gates.
 - Deployment/release work: [deploy/simple/README.md](deploy/simple/README.md). [Historical context](docs/agent-context/history-2026-09-17.md) and `docs/deployment/` are only for tracing earlier decisions, not startup reading.

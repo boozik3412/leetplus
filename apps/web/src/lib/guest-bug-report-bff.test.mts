@@ -50,6 +50,10 @@ test("keeps the game header inside the module width and aligns support controls"
     path.join(sourceRoot, "app", "play", "game", "game-summary-client.tsx"),
     "utf8",
   );
+  const gameStyles = await readFile(
+    path.join(sourceRoot, "app", "play", "game", "_game", "club-home-css.ts"),
+    "utf8",
+  );
   const supportStyles = await readFile(
     path.join(sourceRoot, "components", "guest-bug-report.module.css"),
     "utf8",
@@ -57,11 +61,11 @@ test("keeps the game header inside the module width and aligns support controls"
 
   assert.match(game, /className="lp-club-topbar-inner"/);
   assert.match(
-    game,
+    gameStyles,
     /\.lp-club-topbar-inner\s*\{[\s\S]*?width:\s*min\(1480px, 100%\)/,
   );
-  assert.match(game, /--lp-club-header-control-size:\s*44px/);
-  assert.match(game, /height:\s*var\(--lp-club-header-control-size\)/);
+  assert.match(gameStyles, /--lp-club-header-control-size:\s*44px/);
+  assert.match(gameStyles, /height:\s*var\(--lp-club-header-control-size\)/);
   assert.match(
     supportStyles,
     /width:\s*var\(--lp-club-header-control-size, 44px\)/,

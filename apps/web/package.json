@@ -23,7 +23,8 @@
     "test:employee-invite-current189-bff-candidate": "node --test --experimental-strip-types src/lib/employee-invite-current189-bff-candidate.test.mts",
     "test:owner-invite-link-bff-boundary": "node --test --experimental-strip-types src/lib/owner-invite-link-bff-boundary.test.mts",
     "test:guest-insights": "node --test --experimental-strip-types src/lib/guest-insights.test.mts src/lib/guest-game-effect.test.mts",
-    "test:daily-report": "node --test --experimental-strip-types src/lib/daily-report-view.test.mts"
+    "test:daily-report": "node --test --experimental-strip-types src/lib/daily-report-view.test.mts",
+    "test:assortment": "node --test --experimental-strip-types src/lib/stock-value.test.mts src/lib/assortment-report-query.test.mts src/lib/assortment-risk.test.mts"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

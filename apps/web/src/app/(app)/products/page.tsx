@@ -110,6 +110,12 @@ export default async function ProductsPage() {
             action="Открыть дефицит"
           />
           <HubLink
+            href="/products/stock-value"
+            title="Деньги в остатке"
+            description="Сколько денег лежит в товаре: что не продаётся, лишний запас и прибыль, которую теряем без остатка."
+            action="Открыть деньги в остатке"
+          />
+          <HubLink
             href="/reports/abc/table"
             title="Рейтинг SKU и ABC"
             description="Место товара по выручке, группы ABC по выручке и прибыли, фильтры и сортировка."

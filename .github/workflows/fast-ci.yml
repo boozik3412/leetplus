@@ -22,7 +22,7 @@ env:
 jobs:
   release_impact:
     name: Release impact classification
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       effective_lane: ${{ steps.classify.outputs.effective_lane }}
@@ -128,7 +128,7 @@ jobs:
     name: Fast authority root trust
     needs: release_impact
     if: needs.release_impact.outputs.effective_lane != 'L0_DOCS'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
       postgres:
@@ -455,7 +455,7 @@ jobs:
   release-critical-application:
     name: Release critical pilot HTTP and fresh store scope
     needs: release_impact
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
 
     steps:
@@ -524,7 +524,7 @@ jobs:
   release-critical-postgresql-assortment:
     name: Release critical PostgreSQL assortment isolation
     needs: release_impact
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       PGOPTIONS: -c lock_timeout=5000 -c statement_timeout=120000
@@ -613,7 +613,7 @@ jobs:
     name: Fast application checks
     needs: release_impact
     if: needs.release_impact.outputs.effective_lane != 'L0_DOCS'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
 
     steps:

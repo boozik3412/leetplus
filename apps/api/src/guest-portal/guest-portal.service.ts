@@ -903,6 +903,7 @@ export type GuestPortalPayload = {
     nextLevelXp: number;
     levelProgressPercent: number;
     frame: 'starter' | 'bronze' | 'silver' | 'gold' | 'diamond';
+    tutorialSeenVersion: number;
   };
   loyalty: {
     groupName: string | null;
@@ -1834,6 +1835,14 @@ export type GuestPortalProfileUpdateResponse = {
   summary: GuestPortalGameSummary;
   message: string;
 };
+
+export type GuestPortalTutorialSeenResponse = {
+  tutorialSeenVersion: number;
+};
+
+// Highest tutorial version the web client ships. A stored version above it is
+// never written, so a future client can still show its newer walkthrough.
+export const GUEST_PORTAL_TUTORIAL_MAX_VERSION = 1000;
 
 export type GuestPortalLootBoxOpenResponse = {
   processed: true;
@@ -6859,6 +6868,55 @@ export class GuestPortalService {
       profile: summary.profile,
       summary,
       message: 'Никнейм обновлен.',
+    };
+  }
+
+  async markTutorialSeen(
+    authorization: string | undefined,
+    dto: { version?: unknown },
+  ): Promise<GuestPortalTutorialSeenResponse> {
+    const version = dto.version;
+
+    if (
+      typeof version !== 'number' ||
+      !Number.isInteger(version) ||
+      version < 1 ||
+      version > GUEST_PORTAL_TUTORIAL_MAX_VERSION
+    ) {
+      throw new BadRequestException(
+        `Версия обучения должна быть целым числом от 1 до ${GUEST_PORTAL_TUTORIAL_MAX_VERSION}.`,
+      );
+    }
+
+    const payload = await this.verifyGuestToken(
+      authorization,
+      GUEST_PORTAL_WRITE_REQUIREMENTS,
+    );
+    const guest = await this.findGuest(payload);
+    const profile = await this.findProfile(payload, guest?.id ?? null);
+
+    if (!profile) {
+      throw new BadRequestException(
+        'Игровой профиль гостя не найден. Сначала подтвердите телефон и выберите клуб.',
+      );
+    }
+
+    // Monotonic and scoped to the exact tenant profile: an older client can
+    // never lower the stored version, and a repeat is a no-op.
+    await this.prisma.guestGameProfile.updateMany({
+      where: {
+        id: profile.id,
+        tenantId: payload.tenantId,
+        tutorialSeenVersion: { lt: version },
+      },
+      data: {
+        tutorialSeenVersion: version,
+        tutorialSeenAt: new Date(),
+      },
+    });
+
+    return {
+      tutorialSeenVersion: Math.max(profile.tutorialSeenVersion, version),
     };
   }
 
@@ -13840,6 +13898,7 @@ export class GuestPortalService {
         nextLevelXp,
         levelProgressPercent,
         frame: frameForLevel(level),
+        tutorialSeenVersion: profile?.tutorialSeenVersion ?? 0,
       },
       loyalty,
       guestSnapshot: buildGuestSnapshot(guest, crmLead, profile),

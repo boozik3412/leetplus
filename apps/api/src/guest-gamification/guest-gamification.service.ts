@@ -38092,6 +38092,7 @@ function buildVisualEditorPreviewSummary(
       nextLevelXp: 500,
       levelProgressPercent: 0,
       frame: 'starter',
+      tutorialSeenVersion: 0,
     },
     support: {
       bugReporting: {

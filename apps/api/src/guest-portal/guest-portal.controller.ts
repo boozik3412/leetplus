@@ -30,6 +30,7 @@ import {
   type GuestPortalOtpVerifyResponse,
   type GuestPortalPayload,
   type GuestPortalProfileUpdateResponse,
+  type GuestPortalTutorialSeenResponse,
   type GuestPortalPublicConfig,
   type GuestPortalTelegramAuthStartResponse,
   type GuestPortalTelegramAuthStatusResponse,
@@ -339,6 +340,14 @@ export class GuestPortalController {
     @Body() dto: { displayName?: unknown },
   ): Promise<GuestPortalProfileUpdateResponse> {
     return this.guestPortalService.updateProfile(authorization, dto);
+  }
+
+  @Post('session/tutorial')
+  markTutorialSeen(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() dto: { version?: unknown },
+  ): Promise<GuestPortalTutorialSeenResponse> {
+    return this.guestPortalService.markTutorialSeen(authorization, dto);
   }
 
   @Post('session/loot-boxes/:lootBoxId/open')

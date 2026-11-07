@@ -157,6 +157,8 @@ function resolveGuestPortalPostBodyFields(
         return ["displayName"];
       case "select-club":
         return ["clubId", "tenantSlug", "storeId"];
+      case "tutorial":
+        return ["version"];
       default:
         return null;
     }

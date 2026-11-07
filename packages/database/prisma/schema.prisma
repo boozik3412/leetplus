@@ -2612,6 +2612,8 @@ model GuestGameProfile {
   lastActivityAt          DateTime?
   gameActivatedAt         DateTime?
   preActivationXpExcluded Int                             @default(0)
+  tutorialSeenVersion     Int                             @default(0)
+  tutorialSeenAt          DateTime?
   createdAt               DateTime                        @default(now())
   updatedAt               DateTime                        @updatedAt
 

@@ -186,7 +186,7 @@ export function GameTutorial({
         previous = signature;
         setLayout({
           stepId: step.id,
-          ...placeCard(rect ? padRect(rect) : null, cardHeight),
+          ...placeCard(rect ? clipToViewport(padRect(rect)) : null, cardHeight),
         });
       }
 
@@ -488,6 +488,15 @@ function padRect(rect: Rect): Rect {
     width: rect.width + SPOTLIGHT_PADDING * 2,
     height: rect.height + SPOTLIGHT_PADDING * 2,
   };
+}
+
+// A block inside a horizontal scroller (the Battle Pass chain on phones) can
+// be wider than the screen; the spotlight only frames its visible part.
+function clipToViewport(rect: Rect): Rect {
+  const left = Math.max(rect.left, 4);
+  const right = Math.min(rect.left + rect.width, window.innerWidth - 4);
+
+  return { ...rect, left, width: Math.max(right - left, 0) };
 }
 
 function clamp(value: number, min: number, max: number) {

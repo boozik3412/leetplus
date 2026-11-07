@@ -20,7 +20,7 @@ export const GAME_TUTORIAL_STEPS: readonly GameTutorialStep[] = [
     id: "welcome",
     title: "Добро пожаловать в игру",
     body: (clubName) =>
-      `Это игра клуба ${clubName}. Выполняйте задания в клубе, поднимайте уровень и забирайте награды. Покажем, что где, за минуту.`,
+      `Это игра клуба ${clubName}. Выполняйте задания в клубе, поднимайте уровень и забирайте награды. Покажем, что где, за пару минут.`,
     targets: null,
   },
   {
@@ -51,12 +51,45 @@ export const GAME_TUTORIAL_STEPS: readonly GameTutorialStep[] = [
       "Кейс открывается, когда выполнено его условие. Если он закрыт, нажмите «почему?». В карточке видно, что может выпасть и с каким шансом.",
     targets: ["#lootBoxes"],
   },
+  // Battle Pass gets several steps: the season, the main reward, the chain of
+  // steps and the current task. Classes live in HomeBattlePass.
   {
     id: "battle-pass",
     title: "Боевой пропуск",
     body: () =>
-      "Сезонная цепочка наград. Выполняйте шаг с пометкой «Сейчас», чтобы двигаться дальше. Подробные правила в кнопке «Как работает».",
-    targets: ["#battlePass"],
+      "Сезонная цепочка заданий клуба с наградой за каждый шаг. Здесь название сезона, сколько пройдено и сколько дней осталось. Нажмите сюда, чтобы увидеть все награды сезона.",
+    targets: [".lp-club-battlepass-season"],
+  },
+  {
+    id: "battle-pass-main-reward",
+    title: "Главная награда сезона",
+    body: () =>
+      "Сезонный контейнер ждёт в конце цепочки. На карточке написано, на каком шаге он откроется.",
+    targets: [".lp-club-battlepass-main-reward"],
+  },
+  {
+    id: "battle-pass-steps",
+    title: "Шаги пропуска",
+    body: () =>
+      "Каждая карточка — шаг с наградой. «Сейчас» — шаг, который вы выполняете, «Получено» — награда ваша, «Закрыто» — шаг впереди. Нажмите на карточку, чтобы увидеть условие. Цепочку можно листать вбок.",
+    targets: [
+      ".lp-club-battlepass-level-rail",
+      ".lp-club-battlepass-reward-grid",
+    ],
+  },
+  {
+    id: "battle-pass-progress",
+    title: "Что делать сейчас",
+    body: () =>
+      "Здесь пройденные шаги и задание, которое нужно выполнить сейчас. Когда условие выполнено, пропуск сам перейдёт к следующему шагу, а награда придёт в «Награды».",
+    targets: [".lp-club-battlepass-progress"],
+  },
+  {
+    id: "battle-pass-help",
+    title: "Правила пропуска",
+    body: () =>
+      "Кнопка «Как работает» коротко напомнит правила и покажет, какая награда следующая.",
+    targets: [".lp-club-battlepass-help"],
   },
   {
     id: "rewards",

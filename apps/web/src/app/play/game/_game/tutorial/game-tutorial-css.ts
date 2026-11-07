@@ -63,6 +63,18 @@ export const gameTutorialCss = String.raw`
   width: auto;
 }
 
+/* On wide screens a block taller than the window (Battle Pass) leaves no room
+   next to it: keep the card at its normal width in the bottom-right corner
+   instead of a full-width strip. */
+@media (min-width: 641px) {
+  .lp-tutorial[data-mode="sheet"] .lp-tutorial-card {
+    left: auto;
+    right: 24px;
+    bottom: 24px;
+    width: min(380px, calc(100vw - 48px));
+  }
+}
+
 .lp-tutorial-card h3 {
   max-width: calc(100% - 48px);
   margin: 0;

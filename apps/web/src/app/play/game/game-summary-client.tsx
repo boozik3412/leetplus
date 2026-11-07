@@ -42,510 +42,93 @@ import { GuestBugReportButton } from "@/components/guest-bug-report";
 import { GuestSupportTickets } from "@/components/guest-support-tickets";
 import { GameRatingTeaser } from "./game-rating-client";
 import { clubHomeCss } from "./_game/club-home-css";
-
-type LoadState = "loading" | "ready" | "empty" | "error";
-type GameNextAction = GuestPortalGameSummary["nextActions"][number];
-type GameRewardWalletState =
-  GuestPortalGameSummary["rewards"]["recent"][number]["walletState"];
-type GameRewardHistoryItem = Omit<
-  GuestPortalGameSummary["rewards"]["recent"][number],
-  "sourceKind"
-> & {
-  sourceKind: GuestPortalRewardWalletItem["sourceKind"];
-  storeId: string | null;
-  storeName: string | null;
-  claimedAt: string | null;
-};
-type GameBonusHistoryItem =
-  GuestPortalGameSummary["rewards"]["bonusHistory"]["items"][number];
-type GameMission = GuestPortalGameMissionPage["items"][number];
-type GameMissionHistoryItem =
-  GuestPortalGameSummary["missions"]["history"][number];
-type GameJourneyStep = GuestPortalGameSummary["journey"]["steps"][number];
-type HomeBanner = {
-  id: string;
-  label: string;
-  title: string;
-  description: string;
-  tag: string;
-  featured?: boolean;
-  href: string;
-  imageUrl?: string | null;
-};
-type HomeLootCard = {
-  id: string;
-  title: string;
-  description: string;
-  triggerKind: string;
-  sessionType: string | null;
-  schedule: GuestPortalGameSummary["lootBoxes"]["featured"][number]["schedule"];
-  status: string;
-  active: boolean;
-  openable: boolean;
-  openState: GuestPortalGameSummary["lootBoxes"]["featured"][number]["openState"];
-  openBlocker: string | null;
-  rewardLabel: string | null;
-  possibleRewards: GuestPortalGameSummary["lootBoxes"]["featured"][number]["possibleRewards"];
-  caseRarity: GuestPortalLootBoxRarity;
-  caseRarityLabel: string;
-  rewardRarity?: GuestPortalLootBoxRarity | null;
-  rewardRarityLabel?: string | null;
-  rewardDropChance?: number | null;
-  weeklyOpenedCount: number;
-  weeklyLimit: number | null;
-  dailyOpenedCount: number;
-  dailyLimit: number | null;
-  periodicLimitPeriod: "DAILY" | "WEEKLY" | "MONTHLY" | null;
-  periodicOpenedCount: number;
-  walletItemId: string | null;
-  walletReady: boolean;
-  walletStatus: GuestPortalRewardWalletItem["status"] | null;
-};
-type LootboxOverlayPhase =
-  | "ready"
-  | "charging"
-  | "rolling"
-  | "opening"
-  | "open"
-  | "collected";
-type GuestPortalLootBoxOpenResponse = {
-  processed: true;
-  idempotent: boolean;
-  createdRewards: number;
-  queuedRewardAmount: number;
-  rewards: Array<{
-    rewardType?: string | null;
-    rewardLabel?: string | null;
-    rewardRarity?: GuestPortalLootBoxRarity | null;
-    rewardRarityLabel?: string | null;
-    rewardDropChance?: number | null;
-    visualMode?: "AUTO" | "ICON" | "IMAGE";
-    iconKey?: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
-    imageUrl?: string | null;
-    borderColor?: string | null;
-    textColor?: string | null;
-    backgroundColor?: string | null;
-  }>;
-  summary: GuestPortalGameSummary;
-  message: string;
-};
-type LootboxOpenReward = GuestPortalLootBoxOpenResponse["rewards"][number];
-type LootboxRouletteReward = {
-  id: string;
-  reward: string;
-  caption: string;
-  rarity: GuestPortalLootBoxRarity | null;
-  rarityLabel: string | null;
-  dropChance: number | null;
-  rewardType: string | null;
-  visualMode: "AUTO" | "ICON" | "IMAGE";
-  iconKey: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
-  imageUrl: string | null;
-  borderColor: string | null;
-  textColor: string | null;
-  backgroundColor: string | null;
-  isWinner?: boolean;
-};
-type LootboxRouletteState = {
-  runId: number;
-  lootBoxId: string;
-  items: LootboxRouletteReward[];
-  winningIndex: number;
-  durationMs: number;
-  reward: string;
-  caption: string;
-  rarity: GuestPortalLootBoxRarity | null;
-  rarityLabel: string | null;
-  dropChance: number | null;
-  message: string;
-  skipped: boolean;
-};
-type GuestPortalProfileUpdateResponse = {
-  summary: GuestPortalGameSummary;
-  message: string;
-};
-
-function debugGuestGame(stage: string, payload: Record<string, unknown> = {}) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    const logger = globalThis.console;
-    logger.info(`[guest-game-debug:${stage}]`, payload);
-  } catch {
-    // Diagnostics must never affect the guest flow.
-  }
-}
-
-function debugHomeLootCard(card: HomeLootCard | null | undefined) {
-  if (!card) {
-    return null;
-  }
-
-  return {
-    id: card.id,
-    title: card.title,
-    triggerKind: card.triggerKind,
-    sessionType: card.sessionType,
-    schedule: card.schedule,
-    status: card.status,
-    openable: card.openable,
-    openState: card.openState,
-    openBlocker: card.openBlocker,
-    weeklyOpenedCount: card.weeklyOpenedCount,
-    weeklyLimit: card.weeklyLimit,
-    dailyOpenedCount: card.dailyOpenedCount,
-    dailyLimit: card.dailyLimit,
-    periodicLimitPeriod: card.periodicLimitPeriod,
-    periodicOpenedCount: card.periodicOpenedCount,
-    walletReady: card.walletReady,
-    walletStatus: card.walletStatus,
-  };
-}
-
-function debugSummarySnapshot(summary: GuestPortalGameSummary) {
-  return {
-    generatedAt: summary.generatedAt,
-    tenant: summary.tenant.slug,
-    storeId: summary.store.id,
-    storeName: summary.store.name,
-    profileId: summary.profile.id,
-    contactMasked: summary.profile.contactMasked,
-    lootBoxesTotal: summary.lootBoxes.total,
-    featuredLootBoxes: summary.lootBoxes.featured.map((lootBox) => ({
-      id: lootBox.id,
-      name: lootBox.name,
-      triggerKind: lootBox.triggerKind,
-      sessionType: lootBox.sessionType,
-      schedule: lootBox.schedule,
-      openable: lootBox.openable,
-      openState: lootBox.openState,
-      openBlocker: lootBox.openBlocker,
-      openedCount: lootBox.openedCount,
-      readyRewards: lootBox.readyRewards,
-      weeklyOpenedCount: lootBox.weeklyOpenedCount,
-      weeklyLimit: lootBox.weeklyLimit,
-      dailyOpenedCount: lootBox.dailyOpenedCount,
-      dailyLimit: lootBox.dailyLimit,
-      periodicLimitPeriod: lootBox.periodicLimitPeriod,
-      periodicOpenedCount: lootBox.periodicOpenedCount,
-    })),
-  };
-}
-
-type BannerTitleStyle = CSSProperties &
-  Partial<
-    Record<
-      | "--banner-title-size"
-      | "--banner-title-line-height"
-      | "--banner-title-compact-size"
-      | "--banner-title-compact-line-height",
-      string
-    >
-  >;
-type HomeBattleQuest = {
-  id: string;
-  sourceKind: "journey" | "mission" | "fallback";
-  sourceId: string;
-  title: string;
-  description: string;
-  state: "complete" | "current" | "locked";
-  label: string;
-  step: string;
-  status: string;
-  condition: string;
-  reward: string;
-  preview: string;
-  progress?: {
-    current: number;
-    total: number;
-    label: string;
-    percent: number;
-  };
-  periodTo?: string | null;
-  x: string;
-  y: string;
-};
-type BattlePassDetailProgress = NonNullable<HomeBattleQuest["progress"]>;
-type HomeBattlePassSeason = NonNullable<
-  GuestPortalGameSummary["battlePass"]["active"]
->;
-type HomeBattlePassLevel = HomeBattlePassSeason["levels"][number];
-type BattlePassRewardType =
-  | "xp"
-  | "coins"
-  | "discount"
-  | "lootbox"
-  | "avatar"
-  | "boost"
-  | "rank";
-type BattlePassRewardStatus = "locked" | "current" | "ready" | "claimed";
-type BattlePassRewardCard = {
-  id: string;
-  level: number;
-  title: string;
-  subtitle: string;
-  condition?: string | null;
-  executionCondition?: string | null;
-  description?: string | null;
-  plannedReward?: string | null;
-  type: BattlePassRewardType;
-  rarity: GuestPortalLootBoxRarity;
-  status: BattlePassRewardStatus;
-  image?: string;
-  lootBoxPreview?: GuestPortalRewardLootBoxPreview | null;
-  rewardValue?: string;
-  xpThreshold?: number;
-  previousXpThreshold?: number;
-  quest?: HomeBattleQuest;
-};
-type BattlePassEventName =
-  | "reward_click"
-  | "reward_claim"
-  | "help_click"
-  | "track_scroll"
-  | "level_focus";
-type QuestStatus = "done" | "live" | "next";
-type RewardHistorySource =
-  | "checkin"
-  | "lootbox"
-  | "battlepass"
-  | "quest"
-  | "promo";
-type RewardHistorySourceFilter = RewardHistorySource | "all";
-type RewardHistoryRarityFilter = GuestPortalLootBoxRarity | "all";
-const LOOTBOX_RARITY_LABELS: Record<GuestPortalLootBoxRarity, string> = {
-  common: "Обычная",
-  rare: "Редкая",
-  epic: "Эпическая",
-  legendary: "Легендарная",
-};
-const LOOTBOX_CASE_RARITY_LABELS: Record<GuestPortalLootBoxRarity, string> = {
-  common: "Обычный",
-  rare: "Редкий",
-  epic: "Эпический",
-  legendary: "Легендарный",
-};
-const LEVEL_XP_STEP = 500;
-const REWARD_WALLET_PULSE_STORAGE_VERSION = 1;
-const EMPTY_REWARD_WALLET: GuestPortalRewardWallet = {
-  pendingCount: 0,
-  nextExpiresAt: null,
-  retentionDays: 30,
-  items: [],
-  history: [],
-};
-const EMPTY_LOOTBOX_SCHEDULE: HomeLootCard["schedule"] = {
-  timeWindowMode: "ANY",
-  weekdayMode: "ANY",
-  weekdays: [],
-  hours: [],
-};
-const REWARD_HISTORY_SOURCE_ORDER: RewardHistorySource[] = [
-  "checkin",
-  "lootbox",
-  "battlepass",
-  "quest",
-  "promo",
-];
-const REWARD_HISTORY_SOURCE_LABELS: Record<RewardHistorySource, string> = {
-  checkin: "Чекины",
-  lootbox: "Лутбоксы",
-  battlepass: "Боевой пропуск",
-  quest: "Квесты",
-  promo: "Другие награды",
-};
-const REWARD_HISTORY_SOURCE_ROW_LABELS: Record<RewardHistorySource, string> = {
-  checkin: "Чекин",
-  lootbox: "Лутбокс",
-  battlepass: "Боевой пропуск",
-  quest: "Квест",
-  promo: "Награда",
-};
-const REWARD_HISTORY_RARITY_ORDER: GuestPortalLootBoxRarity[] = [
-  "common",
-  "rare",
-  "epic",
-  "legendary",
-];
-const REWARD_HISTORY_RARITY_LABELS: Record<GuestPortalLootBoxRarity, string> = {
-  common: "Обычные",
-  rare: "Редкие",
-  epic: "Эпические",
-  legendary: "Легендарные",
-};
-const REWARD_HISTORY_RARITY_ROW_LABELS: Record<
-  GuestPortalLootBoxRarity,
-  string
-> = {
-  common: "Обычное",
-  rare: "Редкое",
-  epic: "Эпическое",
-  legendary: "Легендарное",
-};
-const REWARD_HISTORY_SOURCE_TONES: Record<RewardHistorySource, string> = {
-  checkin: "129 230 176",
-  lootbox: "131 228 236",
-  battlepass: "208 170 108",
-  quest: "148 214 184",
-  promo: "158 181 183",
-};
-const REWARD_HISTORY_PAGE_SIZE = 20;
-const LOOTBOX_ROULETTE_MS: Record<GuestPortalLootBoxRarity, number> = {
-  common: 5200,
-  rare: 5400,
-  epic: 5600,
-  legendary: 5800,
-};
-const LOOTBOX_CHARGE_MIN_MS = 760;
-const LOOTBOX_CASE_OPEN_MS = 1320;
-const LOOTBOX_ROULETTE_FALLBACK_REWARDS: ReadonlyArray<
-  Omit<LootboxRouletteReward, "id">
-> = [
-  {
-    reward: "50 бонусов",
-    caption: "basic reward",
-    rarity: "common",
-    rarityLabel: LOOTBOX_RARITY_LABELS.common,
-    dropChance: 85,
-    rewardType: "BONUS_BALANCE",
-    visualMode: "AUTO",
-    iconKey: "coins",
-    imageUrl: null,
-    borderColor: null,
-    textColor: null,
-    backgroundColor: null,
-  },
-  {
-    reward: "100 бонусов",
-    caption: "club reward",
-    rarity: "rare",
-    rarityLabel: LOOTBOX_RARITY_LABELS.rare,
-    dropChance: 8,
-    rewardType: "BONUS_BALANCE",
-    visualMode: "AUTO",
-    iconKey: "coins",
-    imageUrl: null,
-    borderColor: null,
-    textColor: null,
-    backgroundColor: null,
-  },
-  {
-    reward: "200 бонусов",
-    caption: "epic reward",
-    rarity: "epic",
-    rarityLabel: LOOTBOX_RARITY_LABELS.epic,
-    dropChance: 4,
-    rewardType: "BONUS_BALANCE",
-    visualMode: "AUTO",
-    iconKey: "coins",
-    imageUrl: null,
-    borderColor: null,
-    textColor: null,
-    backgroundColor: null,
-  },
-  {
-    reward: "Промокод",
-    caption: "legend reward",
-    rarity: "legendary",
-    rarityLabel: LOOTBOX_RARITY_LABELS.legendary,
-    dropChance: 1,
-    rewardType: "PROMOCODE",
-    visualMode: "AUTO",
-    iconKey: "ticket",
-    imageUrl: null,
-    borderColor: null,
-    textColor: null,
-    backgroundColor: null,
-  },
-];
-type PlayerQuest = {
-  id: string;
-  title: string;
-  description: string;
-  condition: string;
-  status: QuestStatus;
-  progress?: {
-    current: number;
-    total: number;
-    label: string;
-    percent: number;
-  };
-  reward?: {
-    type: "xp" | "lootbox" | "rank" | "promo";
-    value: string | number;
-  };
-  walletItem: GuestPortalRewardWalletItem | null;
-  rewardLootBox: GuestPortalRewardLootBoxPreview | null;
-  preview: GuestMissionPreviewData;
-};
-type QuestCompletionDialog = {
-  id: string;
-  title: string;
-  rewardLabel: string;
-  statusLabel: string;
-  receivedAt: string;
-  rewardLootBox: GuestPortalRewardLootBoxPreview | null;
-};
-type BattlePassLevelCompletionDialog = {
-  seasonId: string;
-  seasonName: string;
-  completedLevel: number;
-  completedTitle: string;
-  rewardLabel: string;
-  nextLevel: number | null;
-  nextTitle: string | null;
-  nextCondition: string | null;
-  rewardLootBox: GuestPortalRewardLootBoxPreview | null;
-};
-type CheckInCompletionDialog = {
-  id: string;
-  alreadyCounted: boolean;
-  error: boolean;
-  rewardLabel: string | null;
-  receivedAt: string;
-  note: string | null;
-};
-type CompletionDialogQueueItem =
-  | {
-      key: string;
-      kind: "CHECK_IN";
-      occurredAt: string;
-      completion: CheckInCompletionDialog;
-    }
-  | {
-      key: string;
-      kind: "QUEST";
-      occurredAt: string;
-      notificationId?: string;
-      completion: QuestCompletionDialog;
-    }
-  | {
-      key: string;
-      kind: "BATTLE_PASS";
-      occurredAt: string;
-      notificationId?: string;
-      completion: BattlePassLevelCompletionDialog;
-    };
-type UnavailableLootboxMessage = string | null;
-type QuestBoardStyle = CSSProperties &
-  Partial<
-    Record<
-      | "--quest-board-left"
-      | "--quest-board-top"
-      | "--quest-board-right"
-      | "--quest-board-bottom",
-      string
-    >
-  >;
-
-const GUEST_GAME_AUTH_REQUIRED_MESSAGE =
-  "Сессия входа не найдена или истекла. Подтвердите телефон заново.";
-
-class EmptySessionError extends Error {}
-
-const QUEST_BOARD_PAGE_SIZE = 10;
+import type {
+  LoadState,
+  HomeLootCard,
+  LootboxOverlayPhase,
+  LootboxRouletteState,
+  UnavailableLootboxMessage,
+  QuestBoardStyle,
+  CompletionDialogQueueItem,
+  PlayerQuest,
+  QuestCompletionDialog,
+  HomeBanner,
+  HomeBattleQuest,
+  BattlePassRewardCard,
+  CheckInCompletionDialog,
+  BattlePassLevelCompletionDialog,
+  GameRewardHistoryItem,
+  GameMission,
+  GameMissionHistoryItem,
+  BattlePassDetailProgress,
+  HomeBattlePassLevel,
+  HomeBattlePassSeason,
+  BattlePassRewardStatus,
+  BattlePassEventName,
+  BattlePassRewardType,
+  GameNextAction,
+  BannerTitleStyle,
+  GuestPortalLootBoxOpenResponse,
+  QuestStatus,
+  GameJourneyStep,
+  RewardHistorySourceFilter,
+  RewardHistoryRarityFilter,
+  RewardHistorySource,
+  GameRewardWalletState,
+  GameBonusHistoryItem,
+  LootboxRouletteReward,
+  LootboxOpenReward,
+} from "./_game/types";
+import {
+  recordGameAppOpen,
+  EmptySessionError,
+  loadGameSummary,
+  openGameRewardWalletLootBox,
+  claimGameRewardWalletItem,
+  claimAllGameRewardWalletItems,
+  logoutGameSession,
+  acknowledgeGameCompletionNotification,
+  loadGameMissionPage,
+  checkInGameSession,
+  openGameLootBox,
+  updateGameProfileNickname,
+} from "./_game/api";
+import {
+  getErrorMessage,
+  wait,
+  clampPercent,
+  formatNumber,
+  formatChancePercent,
+  formatDate,
+  joinRussianList,
+} from "./_game/format";
+import {
+  GUEST_GAME_AUTH_REQUIRED_MESSAGE,
+  EMPTY_REWARD_WALLET,
+  LOOTBOX_CHARGE_MIN_MS,
+  LOOTBOX_CASE_OPEN_MS,
+  QUEST_BOARD_PAGE_SIZE,
+  LOOTBOX_RARITY_LABELS,
+  REWARD_WALLET_PULSE_STORAGE_VERSION,
+  EMPTY_LOOTBOX_SCHEDULE,
+  LOOTBOX_CASE_RARITY_LABELS,
+  LEVEL_XP_STEP,
+  REWARD_HISTORY_PAGE_SIZE,
+  REWARD_HISTORY_SOURCE_ORDER,
+  REWARD_HISTORY_SOURCE_LABELS,
+  REWARD_HISTORY_RARITY_ORDER,
+  REWARD_HISTORY_RARITY_LABELS,
+  REWARD_HISTORY_SOURCE_ROW_LABELS,
+  REWARD_HISTORY_SOURCE_TONES,
+  REWARD_HISTORY_RARITY_ROW_LABELS,
+  LOOTBOX_ROULETTE_MS,
+  LOOTBOX_ROULETTE_FALLBACK_REWARDS,
+} from "./_game/constants";
+import {
+  debugGuestGame,
+  debugSummarySnapshot,
+  debugHomeLootCard,
+} from "./_game/debug";
 
 export function GameSummaryClient() {
   const [summary, setSummary] = useState<GuestPortalGameSummary | null>(null);
@@ -6689,16 +6272,6 @@ function sameScheduleWeekdays(left: number[], right: number[]) {
   );
 }
 
-function joinRussianList(value: string[]) {
-  const items = value.filter(Boolean);
-
-  if (items.length <= 1) {
-    return items[0] ?? "";
-  }
-
-  return `${items.slice(0, -1).join(", ")} и ${items.at(-1)}`;
-}
-
 function withHourlySessionExtensionNotice(
   label: string,
   sessionType: string | null,
@@ -8772,311 +8345,6 @@ function isCheckInAvailable(summary: GuestPortalGameSummary) {
   );
 }
 
-async function loadGameSummary() {
-  const startedAt = Date.now();
-  debugGuestGame("api-summary-start");
-  const response = await fetch("/api/guest-portal/session/game-summary", {
-    cache: "no-store",
-  });
-  debugGuestGame("api-summary-response", {
-    status: response.status,
-    ok: response.ok,
-    durationMs: Date.now() - startedAt,
-  });
-
-  if (response.status === 401) {
-    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      await readResponseMessage(response, "Не удалось обновить игровой экран."),
-    );
-  }
-
-  const summary = (await response.json()) as GuestPortalGameSummary;
-  debugGuestGame("api-summary-data", debugSummarySnapshot(summary));
-
-  return summary;
-}
-
-async function loadGameMissionPage({
-  offset,
-  limit,
-}: {
-  offset: number;
-  limit: number;
-}): Promise<GuestPortalGameMissionPage> {
-  const search = new URLSearchParams({
-    offset: String(Math.max(0, offset)),
-    limit: String(Math.max(1, limit)),
-  });
-  const response = await fetch(
-    `/api/guest-portal/session/game-missions?${search.toString()}`,
-    { cache: "no-store" },
-  );
-
-  if (response.status === 401) {
-    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      await readResponseMessage(
-        response,
-        "Не удалось загрузить остальные задания.",
-      ),
-    );
-  }
-
-  return (await response.json()) as GuestPortalGameMissionPage;
-}
-
-async function acknowledgeGameCompletionNotification(notificationId: string) {
-  const response = await fetch(
-    `/api/guest-portal/session/completion-notifications/${encodeURIComponent(notificationId)}/acknowledge`,
-    {
-      method: "POST",
-      cache: "no-store",
-    },
-  );
-
-  if (response.status === 401) {
-    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      await readResponseMessage(response, "Не удалось закрыть уведомление."),
-    );
-  }
-}
-
-async function claimGameRewardWalletItem(
-  itemId: string,
-): Promise<GuestPortalGameSummary> {
-  return postGameRewardWalletClaim(
-    `/api/guest-portal/session/reward-wallet/items/${encodeURIComponent(itemId)}/claim`,
-  );
-}
-
-async function claimAllGameRewardWalletItems(): Promise<GuestPortalGameSummary> {
-  return postGameRewardWalletClaim(
-    "/api/guest-portal/session/reward-wallet/claim-all",
-  );
-}
-
-async function postGameRewardWalletClaim(
-  url: string,
-): Promise<GuestPortalGameSummary> {
-  const response = await fetch(url, {
-    method: "POST",
-    cache: "no-store",
-  });
-
-  if (response.status === 401) {
-    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      await readResponseMessage(
-        response,
-        "Не удалось обновить кошелёк наград.",
-      ),
-    );
-  }
-
-  const payload = (await response.json()) as
-    | GuestPortalGameSummary
-    | { summary?: GuestPortalGameSummary };
-  const summary =
-    "summary" in payload && payload.summary ? payload.summary : payload;
-
-  if (
-    summary &&
-    "generatedAt" in summary &&
-    typeof summary.generatedAt === "string"
-  ) {
-    return summary as GuestPortalGameSummary;
-  }
-
-  return loadGameSummary();
-}
-
-async function recordGameAppOpen(surface: "WEB" | "TG_MINI_APP") {
-  const response = await fetch("/api/guest-portal/session/app-open", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ surface }),
-    cache: "no-store",
-  });
-
-  if (response.status === 401) {
-    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      await readResponseMessage(
-        response,
-        "Не удалось загрузить игровой экран.",
-      ),
-    );
-  }
-
-  return (await response.json()) as {
-    previousSummary: GuestPortalGameSummary;
-    summary: GuestPortalGameSummary;
-  };
-}
-
-async function updateGameProfileNickname(displayName: string) {
-  const response = await fetch("/api/guest-portal/session/profile", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ displayName }),
-    cache: "no-store",
-  });
-
-  if (response.status === 401) {
-    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      await readResponseMessage(response, "Не удалось сохранить никнейм."),
-    );
-  }
-
-  return ((await response.json()) as GuestPortalProfileUpdateResponse).summary;
-}
-
-async function checkInGameSession(): Promise<GuestPortalCheckInResponse> {
-  const response = await fetch("/api/guest-portal/session/check-in", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ note: "Чекин гостя из игрового модуля." }),
-    cache: "no-store",
-  });
-
-  if (response.status === 401) {
-    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      await readResponseMessage(response, "Не удалось сделать чекин."),
-    );
-  }
-
-  return (await response.json()) as GuestPortalCheckInResponse;
-}
-
-async function openGameLootBox(
-  lootBoxId: string,
-): Promise<GuestPortalLootBoxOpenResponse> {
-  const startedAt = Date.now();
-  debugGuestGame("api-lootbox-open-start", { lootBoxId });
-  const response = await fetch(
-    `/api/guest-portal/session/loot-boxes/${encodeURIComponent(lootBoxId)}/open`,
-    {
-      method: "POST",
-      cache: "no-store",
-    },
-  );
-  debugGuestGame("api-lootbox-open-response", {
-    lootBoxId,
-    status: response.status,
-    ok: response.ok,
-    durationMs: Date.now() - startedAt,
-  });
-
-  if (response.status === 401) {
-    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      await readResponseMessage(response, "Лутбокс сейчас недоступен."),
-    );
-  }
-
-  const result = (await response.json()) as GuestPortalLootBoxOpenResponse;
-  debugGuestGame("api-lootbox-open-data", {
-    lootBoxId,
-    idempotent: result.idempotent,
-    createdRewards: result.createdRewards,
-    queuedRewardAmount: result.queuedRewardAmount,
-    rewards: result.rewards,
-    summary: debugSummarySnapshot(result.summary),
-  });
-
-  return result;
-}
-
-async function openGameRewardWalletLootBox(
-  walletItemId: string,
-): Promise<GuestPortalLootBoxOpenResponse> {
-  const response = await fetch(
-    `/api/guest-portal/session/reward-wallet/items/${encodeURIComponent(walletItemId)}/open`,
-    {
-      method: "POST",
-      cache: "no-store",
-    },
-  );
-
-  if (response.status === 401) {
-    throw new EmptySessionError(
-      "Сессия входа истекла. Подтвердите телефон заново.",
-    );
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      await readResponseMessage(
-        response,
-        "Лутбокс из кошелька сейчас недоступен.",
-      ),
-    );
-  }
-
-  return (await response.json()) as GuestPortalLootBoxOpenResponse;
-}
-
-async function logoutGameSession() {
-  const response = await fetch("/api/guest-portal/session/logout", {
-    method: "POST",
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      await readResponseMessage(response, "Не удалось завершить сессию."),
-    );
-  }
-}
-
-async function readResponseMessage(
-  response: Response,
-  fallback = "Не удалось загрузить игровой экран.",
-) {
-  try {
-    const payload = (await response.json()) as { message?: unknown };
-    return typeof payload.message === "string" ? payload.message : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function getErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
-}
-
-function wait(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
 function preloadLootboxPrizeImages(
   rewards: Array<{ imageUrl?: string | null }>,
 ) {
@@ -9492,33 +8760,4 @@ function revealLootboxRarity({
     winningIndex,
     skipped,
   });
-}
-
-function clampPercent(value: number) {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-
-  return Math.min(100, Math.max(0, value));
-}
-
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
-function formatChancePercent(value: number) {
-  return `${new Intl.NumberFormat("ru-RU", {
-    maximumFractionDigits: 2,
-  }).format(value)}%`;
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
 }

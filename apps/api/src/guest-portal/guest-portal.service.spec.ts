@@ -81,6 +81,7 @@ function createPrismaMock() {
       findMany: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     guestGameTelegramLinkChallenge: {
       findFirst: jest.fn(),
@@ -3711,6 +3712,65 @@ describe('GuestPortalService', () => {
         },
         data: { acknowledgedAt: expect.any(Date) },
       });
+    });
+
+    it('marks the tutorial seen monotonically for the exact tenant profile', async () => {
+      const { prisma, service } = createService();
+      jest.spyOn(service as any, 'verifyGuestToken').mockResolvedValue({
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: 'guest-1',
+        profileId: 'profile-1',
+      });
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValue({ id: 'guest-1' });
+      jest
+        .spyOn(service as any, 'findProfile')
+        .mockResolvedValue({ id: 'profile-1', tutorialSeenVersion: 0 });
+      prisma.guestGameProfile.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(
+        service.markTutorialSeen('Bearer guest-token', { version: 1 }),
+      ).resolves.toEqual({ tutorialSeenVersion: 1 });
+      expect(prisma.guestGameProfile.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'profile-1',
+          tenantId: 'tenant-1',
+          tutorialSeenVersion: { lt: 1 },
+        },
+        data: { tutorialSeenVersion: 1, tutorialSeenAt: expect.any(Date) },
+      });
+    });
+
+    it('keeps a newer stored tutorial version and rejects invalid versions', async () => {
+      const { prisma, service } = createService();
+      const verifyGuestToken = jest
+        .spyOn(service as any, 'verifyGuestToken')
+        .mockResolvedValue({
+          tenantId: 'tenant-1',
+          storeId: 'store-1',
+          guestId: 'guest-1',
+          profileId: 'profile-1',
+        });
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValue({ id: 'guest-1' });
+      jest
+        .spyOn(service as any, 'findProfile')
+        .mockResolvedValue({ id: 'profile-1', tutorialSeenVersion: 3 });
+      prisma.guestGameProfile.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.markTutorialSeen('Bearer guest-token', { version: 2 }),
+      ).resolves.toEqual({ tutorialSeenVersion: 3 });
+
+      for (const version of [0, -1, 1.5, 1001, '1', null, undefined]) {
+        await expect(
+          service.markTutorialSeen('Bearer guest-token', { version }),
+        ).rejects.toThrow('Версия обучения');
+      }
+      expect(verifyGuestToken).toHaveBeenCalledTimes(1);
     });
 
     it.each(['PENDING', 'APPROVED'] as const)(

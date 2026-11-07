@@ -98,9 +98,9 @@ describe('CURRENT190 GuestPortalController AST manifest', () => {
       ({ handler, method, path }) => ({ handler, method, path }),
     );
 
-    expect(astRoutes).toHaveLength(38);
-    expect(new Set(astRoutes.map((entry) => entry.handler)).size).toBe(38);
-    expect(new Set(manifestRoutes.map((entry) => entry.handler)).size).toBe(38);
+    expect(astRoutes).toHaveLength(39);
+    expect(new Set(astRoutes.map((entry) => entry.handler)).size).toBe(39);
+    expect(new Set(manifestRoutes.map((entry) => entry.handler)).size).toBe(39);
     expect(sorted(manifestRoutes)).toEqual(sorted(astRoutes));
   });
 
@@ -118,7 +118,7 @@ describe('CURRENT190 GuestPortalController AST manifest', () => {
       PUBLIC_BOOTSTRAP: 9,
       OUTBOUND: 9,
       READ: 6,
-      WRITE: 14,
+      WRITE: 15,
     });
 
     for (const entry of GUEST_PORTAL_CURRENT190_ROUTE_MANIFEST) {

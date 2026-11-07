@@ -313,6 +313,24 @@ test("keeps guest portal POST bodies route-scoped before upstream fetch", async 
   );
   assert.deepEqual(
     projectGuestPortalPostBody(
+      ["session", "tutorial"],
+      JSON.stringify({ version: 1 }),
+    ),
+    { ok: true, body: JSON.stringify({ version: 1 }) },
+  );
+  assert.deepEqual(
+    projectGuestPortalPostBody(
+      ["session", "tutorial"],
+      JSON.stringify({ version: 1, profileId: "other" }),
+    ),
+    {
+      ok: false,
+      status: 400,
+      message: "Недопустимые поля запроса гостевого модуля.",
+    },
+  );
+  assert.deepEqual(
+    projectGuestPortalPostBody(
       ["session", "loot-boxes", "loot-1", "open"],
       JSON.stringify({ storeId: "hidden" }),
     ),

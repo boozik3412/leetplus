@@ -42,6 +42,11 @@ import { GuestBugReportButton } from "@/components/guest-bug-report";
 import { GuestSupportTickets } from "@/components/guest-support-tickets";
 import { GameRatingTeaser } from "./game-rating-client";
 import { clubHomeCss } from "./_game/club-home-css";
+import {
+  GameTutorial,
+  TutorialMenuIcon,
+  useGameTutorial,
+} from "./_game/tutorial/game-tutorial";
 import type {
   LoadState,
   HomeLootCard,
@@ -834,7 +839,13 @@ function EmptySessionView({
   );
 }
 
-function GameModuleTopbar({ summary }: { summary: GuestPortalGameSummary }) {
+function GameModuleTopbar({
+  summary,
+  onTutorialOpen,
+}: {
+  summary: GuestPortalGameSummary;
+  onTutorialOpen?: () => void;
+}) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const brandLogoUrl = summary.store.gameLogoUrl ?? summary.tenant.gameLogoUrl;
@@ -896,6 +907,18 @@ function GameModuleTopbar({ summary }: { summary: GuestPortalGameSummary }) {
               <TrophyIcon />
               <span>Рейтинг</span>
             </Link>
+            {onTutorialOpen ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onTutorialOpen();
+                }}
+              >
+                <TutorialMenuIcon />
+                <span>Как играть</span>
+              </button>
+            ) : null}
             <button type="button" onClick={handleLogout}>
               <ExitIcon />
               <span>Выйти</span>
@@ -2060,9 +2083,20 @@ function ReadyGameView({
     }
   }
 
+  const tutorial = useGameTutorial({
+    seenVersion: summary.profile.tutorialSeenVersion,
+    blocked: Boolean(
+      lootboxOverlayCard ||
+        unavailableLootboxCard ||
+        questDetails ||
+        activeCompletionDialog ||
+        questsExpanded,
+    ),
+  });
+
   return (
     <div className="lp-club-home">
-      <GameModuleTopbar summary={summary} />
+      <GameModuleTopbar summary={summary} onTutorialOpen={tutorial.start} />
 
       <div
         ref={shellRef}
@@ -2211,6 +2245,10 @@ function ReadyGameView({
           errorMessage={completionDialogError}
           onAcknowledge={acknowledgeActiveCompletionDialog}
         />
+      ) : null}
+
+      {tutorial.open ? (
+        <GameTutorial clubName={summary.store.name} onClose={tutorial.close} />
       ) : null}
     </div>
   );

@@ -272,6 +272,14 @@ export const GUEST_PORTAL_CURRENT190_ROUTE_MANIFEST = Object.freeze([
     'PERSISTED_WRITE',
   ),
   route(
+    'markTutorialSeen',
+    'POST',
+    '/guest-portal/session/tutorial',
+    'WRITE',
+    'GUEST_SESSION',
+    'PERSISTED_WRITE',
+  ),
+  route(
     'openLootBox',
     'POST',
     '/guest-portal/session/loot-boxes/:lootBoxId/open',

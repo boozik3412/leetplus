@@ -234,6 +234,9 @@ export type GuestPortalPayload = {
     nextLevelXp: number;
     levelProgressPercent: number;
     frame: "starter" | "bronze" | "silver" | "gold" | "diamond";
+    // Highest game tutorial version the guest finished or skipped. Absent
+    // when the API predates the tutorial, so the client never auto-starts it.
+    tutorialSeenVersion?: number;
   };
   loyalty: {
     groupName: string | null;

@@ -40,6 +40,7 @@ export const STAFF_TASK_ALLOWED_ADDITIVE_TAIL = Object.freeze([
   "20261007120000_guest_leaderboard",
   "20261014120000_guest_game_holdout",
   "20261026120000_daily_report_bot",
+  "20261107090000_guest_game_tutorial",
 ]);
 
 export const CURRENT_EXPECTED_MIGRATION_COUNT =
@@ -50,4 +51,4 @@ export const CURRENT_EXPECTED_LATEST_MIGRATION =
 
 // Keep the reader-facing admission state explicit. A later release migration
 // must update this value together with the additive-tail allowlist.
-export const STAFF_TASK_CURRENT_RELEASE_STATE = "CURRENT_195";
+export const STAFF_TASK_CURRENT_RELEASE_STATE = "CURRENT_196";

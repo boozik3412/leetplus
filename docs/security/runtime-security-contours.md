@@ -2044,6 +2044,25 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   по умолчанию «без контрольной группы»; голова identity-mail-worker — 194.
   Контракт — `docs/agent-context/guest-game-effect.md`.
 
+### Обучение игре для гостя (07.11.2026)
+
+- Public guest: новый `POST /guest-portal/session/tutorial` с телом
+  `{ version }` (WRITE, guest JWT, `PERSISTED_WRITE` в CURRENT190-инвентаре;
+  web BFF пропускает только `version`). `GuestPortalService.markTutorialSeen`
+  проверяет целое `1..1000` до чтения токена и пишет только две колонки
+  своего профиля: `updateMany` по exact `id + tenantId` и
+  `tutorialSeenVersion < version`, поэтому версия только растёт, а повтор —
+  no-op. Без lock, scheduler, egress и событий игры; XP, награды и
+  `lastActivityAt` не меняются.
+- `game-summary` отдаёт `profile.tutorialSeenVersion`. Web показывает тур сам,
+  только если поле есть и меньше версии клиента; ответ старого API без поля
+  тур не запускает.
+- Схема: миграция `20261107090000_guest_game_tutorial` добавляет
+  `GuestGameProfile.tutorialSeenVersion INTEGER NOT NULL DEFAULT 0` (check
+  `0..1000`) и `tutorialSeenAt TIMESTAMP(3)`. Новых таблиц нет, табличные
+  grant `leetplus_runtime` покрывают колонки; обслуживающий релиз их не читает,
+  `lp rollback` безопасен. Голова identity-mail-worker — 196.
+
 ## Langame и outbound network boundary
 
 1. Web runtime остаётся localhost-only.

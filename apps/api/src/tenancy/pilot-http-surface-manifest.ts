@@ -620,6 +620,7 @@ const definitions: readonly ControllerDefinition[] = [
           'session/reward-wallet/items/:walletItemId/claim',
           'session/reward-wallet/items/:walletItemId/open',
           'session/profile',
+          'session/tutorial',
           'session/loot-boxes/:lootBoxId/open',
           'session/select-club',
           'telegram-mini-app/session',

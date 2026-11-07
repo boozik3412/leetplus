@@ -8,7 +8,15 @@ const sourceRoot = path.resolve(import.meta.dirname, "..");
 test("reward history shows a paid bonus once, merged by its reward id", async () => {
   const [game, contract] = await Promise.all([
     readFile(
-      path.join(sourceRoot, "app", "play", "game", "game-summary-client.tsx"),
+      path.join(
+        sourceRoot,
+        "app",
+        "play",
+        "game",
+        "_game",
+        "rewards",
+        "history.ts",
+      ),
       "utf8",
     ),
     readFile(path.join(sourceRoot, "lib", "guest-portal.ts"), "utf8"),

@@ -202,8 +202,8 @@ export default async function CommercialAuditPage() {
             )} прибыли в риске и ${formatMoney(
               assortmentRisk.frozenStockAmount,
             )} в замороженном остатке.`}
-            actionHref={reportHref("/reports/assortment-risk/table", filters)}
-            actionLabel="Открыть отчет по рискам"
+            actionHref="/products/stock-value?view=frozen"
+            actionLabel="Открыть «Деньги в остатке»"
           >
             <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
               {topRiskRows.length > 0 ? (
@@ -296,10 +296,7 @@ export default async function CommercialAuditPage() {
             summary={`${formatMoney(
               turnoverReport.totalFrozenStockAmount,
             )} денег лежит в замороженных позициях.`}
-            actionHref={reportHref(
-              "/reports/inventory-turnover/table",
-              filters,
-            )}
+            actionHref="/products/stock-value?view=excess"
             actionLabel="Проверить оборачиваемость"
           >
             <CompactStats

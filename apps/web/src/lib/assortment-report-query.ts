@@ -50,8 +50,7 @@ export function buildAssortmentReportHref(
   }
 
   if (subset === "assortment-risk") {
-    params.set("noSalesDays", String(scope.noSalesDays));
-    return `/reports/assortment-risk/table?${params}`;
+    return stockValueHref(scope, "frozen");
   }
 
   if (subset === "out-of-stock") {
@@ -66,29 +65,42 @@ export function buildAssortmentReportHref(
     return `/products/movement/table?${params}`;
   }
 
-  if (subset === "excess") {
-    params.set("excess", "true");
-  }
-
-  return `/reports/inventory-turnover/table?${params}`;
+  return stockValueHref(scope, subset === "excess" ? "excess" : "all");
 }
 
 /**
  * Shortage and no-sales drilldowns open «Заказ товаров» (it replaced those
- * reports). It always shows the latest full club days, so only the club,
- * category and no-sales window carry over.
+ * reports). It and «Деньги в остатке» always show the latest full club days,
+ * so only the club, category and no-sales window carry over.
  */
 function orderPlanningHref(
   scope: AssortmentReportScope,
   view: "running-out" | "out-of-stock" | "no-movement",
+) {
+  return scopedHref("/products/order", view, scope, view === "no-movement");
+}
+
+/** Frozen stock, turnover and excess drilldowns open «Деньги в остатке». */
+function stockValueHref(
+  scope: AssortmentReportScope,
+  view: "frozen" | "excess" | "all",
+) {
+  return scopedHref("/products/stock-value", view, scope, view === "frozen");
+}
+
+function scopedHref(
+  pathname: string,
+  view: string,
+  scope: AssortmentReportScope,
+  withNoSalesDays: boolean,
 ) {
   const params = new URLSearchParams({ view });
   scope.storeIds.forEach((storeId) => params.append("storeIds", storeId));
   scope.categoryIds.forEach((categoryId) =>
     params.append("categoryIds", categoryId),
   );
-  if (view === "no-movement") {
+  if (withNoSalesDays) {
     params.set("noSalesDays", String(scope.noSalesDays));
   }
-  return `/products/order?${params}`;
+  return `${pathname}?${params}`;
 }

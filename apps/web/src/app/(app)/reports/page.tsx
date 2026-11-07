@@ -1,14 +1,6 @@
 import type { ReactNode } from "react";
 import { BusinessSnapshotGate } from "@/components/business-snapshot-gate";
 import { requireCurrentUser } from "@/lib/auth";
-import {
-  buildAssortmentRiskSummary,
-  type AssortmentRiskRow,
-} from "@/lib/assortment-risk";
-import {
-  frozenStockFormulaText,
-  frozenStockValuationLabel,
-} from "@/lib/frozen-stock";
 import { AbcReportToggle } from "@/components/abc-report-toggle";
 import { OosExclusionActions } from "@/components/oos-exclusion-actions";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
@@ -17,7 +9,7 @@ import { ReportEmailForm } from "@/components/report-email-form";
 import { ReportEmailInlineForm } from "@/components/report-email-inline-form";
 import { ReportLoadingLink } from "@/components/report-loading-link";
 import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
-import { orderPlanningHref } from "@/lib/order-planning-views";
+import { orderPlanningHref, stockValueHref } from "@/lib/order-planning-views";
 import {
   getAssortmentReport,
   getLflReport,
@@ -151,20 +143,6 @@ function salesDetailTableHref({
   return `/reports/sales-detail/table?${params.toString()}`;
 }
 
-function lastFullDaysRange(days: number) {
-  const now = new Date();
-  const toDate = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
-  );
-  const fromDate = new Date(toDate);
-  fromDate.setUTCDate(fromDate.getUTCDate() - (days - 1));
-
-  return {
-    from: fromDate.toISOString().slice(0, 10),
-    to: toDate.toISOString().slice(0, 10),
-  };
-}
-
 export default async function ReportsPage({
   searchParams,
 }: {
@@ -186,13 +164,6 @@ export default async function ReportsPage({
       : undefined,
   };
   const lflPeriod = resolveLflPeriod(params.lflPeriod);
-  const defaultNoSales21 = lastFullDaysRange(21);
-  const noSalesFilters21 = {
-    ...filters,
-    from: filters.from ?? defaultNoSales21.from,
-    to: filters.to ?? defaultNoSales21.to,
-    noSalesDays: 21 as const,
-  };
   // Report endpoints fan out to several PostgreSQL queries each. Keep useful
   // parallelism without letting one SSR render exhaust the shared pool.
   const [assortmentReport, operationalReport] = await Promise.all([
@@ -203,7 +174,6 @@ export default async function ReportsPage({
     getSkuPerformanceReport(filters),
     getSuppliersPerformanceReport(filters),
   ]);
-  const noSalesReport21 = await getOperationalReport(noSalesFilters21);
   const [newProductsReport, lflReport] = await Promise.all([
     getNewProductsReport({ storeId: filters.storeId }),
     getLflReport(lflPeriod),
@@ -212,12 +182,10 @@ export default async function ReportsPage({
     getStores(),
     safeGetBusinessSnapshot("ASSORTMENT_ARRIVALS"),
   ]);
-  const assortmentRisk = buildAssortmentRiskSummary({
-    oosRows: operationalReport.outOfStockRiskProducts,
-    noSalesRows: noSalesReport21.productsWithoutSales,
-    oosState: operationalReport.assortmentHealth?.outOfStock.state,
-    noSalesState: noSalesReport21.assortmentHealth?.noSales[21].state,
-  });
+  const scopeParams = {
+    storeIds: operationalReport.storeIds,
+    categoryIds: operationalReport.categoryIds,
+  };
 
   return (
     <main className="px-6 py-8 text-zinc-950">
@@ -266,32 +234,14 @@ export default async function ReportsPage({
 
         <section className="mt-6 grid gap-3">
           <ReportDisclosure
-            title="Деньги в риске"
-            description="Прибыль в риске из-за OOS плюс деньги, замороженные в товарах без движения."
+            title="Деньги в остатке"
+            description="Отчёты «Деньги в риске» и «Оборачиваемость и медленные SKU» собраны в один экран: сколько стоит остаток, что не продаётся, лишний запас и упущенная прибыль."
           >
-            <AssortmentRiskPanel
-              totalRiskAmount={assortmentRisk.totalRiskAmount}
-              oosProfitAtRisk={assortmentRisk.oosProfitAtRisk}
-              frozenStockAmount={assortmentRisk.frozenStockAmount}
-              rows={assortmentRisk.rows.slice(0, 20)}
-            />
-          </ReportDisclosure>
-
-          <ReportDisclosure
-            title="Оборачиваемость и медленные SKU"
-            description="Текущий остаток, продажи за период, дни запаса и деньги в остатках."
-          >
-            <ReportRoutePanel
-              title="Оборачиваемость и медленные SKU"
-              description="Полная таблица считает продажи за выбранный период против текущего остатка, показывает дни запаса, оборот/остаток, деньги в остатках и статусы медленного или замороженного SKU."
-              href={`/reports/inventory-turnover/table?${reportTableParams(
-                operationalReport,
-              )}`}
-              metrics={[
-                { label: "Порог медленного SKU", value: "30+ дней" },
-                { label: "Деньги в остатках", value: "остаток × оценка" },
-                { label: "Уровень", value: "клуб + SKU" },
-              ]}
+            <ReportLinkCards
+              links={STOCK_VALUE_LINKS.map((link) => ({
+                ...link,
+                href: stockValueHref(link.view, scopeParams),
+              }))}
             />
           </ReportDisclosure>
 
@@ -383,11 +333,11 @@ export default async function ReportsPage({
             title="Заказ, дефицит и товары без движения"
             description="Отчёты «Остатки и потребность», «Риск out-of-stock», «Товары без продаж» и «Движение товаров» собраны в «Заказ товаров»."
           >
-            <OrderPlanningLinks
-              params={{
-                storeIds: operationalReport.storeIds,
-                categoryIds: operationalReport.categoryIds,
-              }}
+            <ReportLinkCards
+              links={ORDER_PLANNING_LINKS.map((link) => ({
+                ...link,
+                href: orderPlanningHref(link.view, scopeParams),
+              }))}
             />
           </ReportDisclosure>
 
@@ -554,112 +504,6 @@ function Metric({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-function AssortmentRiskPanel({
-  totalRiskAmount,
-  oosProfitAtRisk,
-  frozenStockAmount,
-  rows,
-}: {
-  totalRiskAmount: number | null;
-  oosProfitAtRisk: number | null;
-  frozenStockAmount: number | null;
-  rows: AssortmentRiskRow[];
-}) {
-  return (
-    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h2 className="text-base font-semibold">Деньги в риске</h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            OOS показывает недополучаемую прибыль, товары без движения -
-            замороженные деньги в остатках. {frozenStockFormulaText}
-          </p>
-        </div>
-        <ReportLoadingLink
-          href="/reports/assortment-risk/table"
-          className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-        >
-          Открыть полный отчёт
-        </ReportLoadingLink>
-      </div>
-      <div className="grid gap-px bg-zinc-200 sm:grid-cols-3">
-        <Metric
-          label="Всего в риске"
-          value={
-            totalRiskAmount === null ? "Частично" : formatMoney(totalRiskAmount)
-          }
-        />
-        <Metric
-          label="Прибыль OOS"
-          value={
-            oosProfitAtRisk === null
-              ? "Нет данных"
-              : formatMoney(oosProfitAtRisk)
-          }
-        />
-        <Metric
-          label="Заморожено"
-          value={
-            frozenStockAmount === null
-              ? "Нет оценки"
-              : formatMoney(frozenStockAmount)
-          }
-        />
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1040px] text-left text-sm">
-          <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
-            <tr>
-              <th className="px-5 py-3 font-medium">Риск</th>
-              <th className="px-5 py-3 font-medium">Клуб</th>
-              <th className="px-5 py-3 font-medium">Товар</th>
-              <th className="px-5 py-3 text-right font-medium">Прибыль OOS</th>
-              <th className="px-5 py-3 text-right font-medium">Оценка</th>
-              <th className="px-5 py-3 font-medium">Источник</th>
-              <th className="px-5 py-3 text-right font-medium">Заморожено</th>
-              <th className="px-5 py-3 text-right font-medium">Всего</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100">
-            {rows.map((row, index) => (
-              <tr key={`${row.riskType}:${row.storeName}:${row.name}:${index}`}>
-                <td className="px-5 py-4 text-zinc-700">{row.riskTypeLabel}</td>
-                <td className="px-5 py-4 text-zinc-700">{row.storeName}</td>
-                <td className="px-5 py-4 font-medium text-zinc-950">
-                  {row.name}
-                </td>
-                <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                  {row.profitAtRiskForPeriod === null
-                    ? "Нет данных"
-                    : formatMoney(row.profitAtRiskForPeriod)}
-                </td>
-                <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                  {row.frozenStockUnitValue === null
-                    ? "—"
-                    : formatMoney(row.frozenStockUnitValue)}
-                </td>
-                <td className="px-5 py-4 text-zinc-700">
-                  {frozenStockValuationLabel(row.frozenStockValuation)}
-                </td>
-                <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                  {row.frozenStockAmount === null
-                    ? "Нет оценки"
-                    : formatMoney(row.frozenStockAmount)}
-                </td>
-                <td className="px-5 py-4 text-right tabular-nums font-semibold text-zinc-950">
-                  {row.totalRiskAmount === null
-                    ? "Частично"
-                    : formatMoney(row.totalRiskAmount)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
 const ORDER_PLANNING_LINKS = [
   {
     view: "order",
@@ -683,17 +527,40 @@ const ORDER_PLANNING_LINKS = [
   },
 ] as const;
 
-function OrderPlanningLinks({
-  params,
+const STOCK_VALUE_LINKS = [
+  {
+    view: "frozen",
+    title: "Без продаж",
+    text: "Вместо «Денег в риске»: товар на остатке, который не продавался 7–60 дней, и сколько в нём денег.",
+  },
+  {
+    view: "excess",
+    title: "Лишний запас",
+    text: "Вместо «Оборачиваемости»: часть остатка, которая не продастся за 14, 30 или 60 дней.",
+  },
+  {
+    view: "lost-profit",
+    title: "Нет в наличии: теряем прибыль",
+    text: "Прибыль, которую не получаем в день из-за товаров, которых нет на остатке.",
+  },
+  {
+    view: "all",
+    title: "Всё в остатке",
+    text: "Деньги в остатке по товарам, клубам, категориям и поставщикам.",
+  },
+] as const;
+
+function ReportLinkCards({
+  links,
 }: {
-  params: { storeIds: string[]; categoryIds: string[] };
+  links: Array<{ view: string; title: string; text: string; href: string }>;
 }) {
   return (
     <section className="mt-6 grid gap-3 sm:grid-cols-2">
-      {ORDER_PLANNING_LINKS.map((link) => (
+      {links.map((link) => (
         <ReportLoadingLink
           key={link.view}
-          href={orderPlanningHref(link.view, params)}
+          href={link.href}
           className="rounded-lg border border-zinc-200 bg-white px-5 py-4 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50/40"
         >
           <span className="block text-base font-semibold text-zinc-950">

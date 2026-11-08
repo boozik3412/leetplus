@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffKnowledgeBaseWorkspace } from "@/components/staff-knowledge-base-workspace";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getStaffKnowledgeBaseReport,
   type StaffKnowledgeArticleStatus,
@@ -96,7 +96,7 @@ export default async function StaffKnowledgeBasePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/staff/knowledge-base");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffKnowledgeBaseReport(filters);

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffDirectoryWorkspace } from "@/components/staff-directory-workspace";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getStaffDirectoryReport,
   type StaffDirectoryFilters,
@@ -58,7 +58,7 @@ export default async function StaffDirectoryPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/staff/directory");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffDirectoryReport(filters);

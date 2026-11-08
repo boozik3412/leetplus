@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffAssessmentsWorkspace } from "@/components/staff-assessments-workspace";
-import { requireNetworkScopedUser } from "@/lib/auth";
+import { ensurePageAccess, requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffAssessmentsReport,
   type StaffAssessmentKind,
@@ -96,7 +96,8 @@ export default async function StaffAssessmentsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireNetworkScopedUser();
+  const user = await requireNetworkScopedUser();
+  ensurePageAccess(user, "/staff/assessments");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffAssessmentsReport(filters);

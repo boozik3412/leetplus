@@ -1,10 +1,10 @@
 import { ManualProductParsing } from "@/components/manual-product-parsing";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import { getManualProductParsing } from "@/lib/product-parsing";
 
 export default async function ManualProductParsingPage() {
-  await requireCurrentUser();
+  await requirePageAccess("/utilities/product-parsing/manual");
   const overview = await getManualProductParsing();
 
   return (

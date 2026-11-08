@@ -723,10 +723,10 @@ test("keeps store-aware checklist workspaces behind authenticated API authority"
   for (const [index, source] of pageSources.entries()) {
     assert.match(
       source,
-      /import \{ requireCurrentUser \} from ["']@\/lib\/auth["']/,
+      /import \{[^}]*\brequire(?:CurrentUser|PageAccess)\b[^}]*\} from ["']@\/lib\/auth["']/,
       `${pages[index]} must require an authenticated user`,
     );
-    assert.match(source, /await requireCurrentUser\(\)/);
+    assert.match(source, /await require(?:CurrentUser\(\)|PageAccess\(["']\/staff\/)/);
     assert.doesNotMatch(source, /requireNetworkScopedUser/);
     assert.match(source, /report\.accessScope/);
   }
@@ -742,9 +742,9 @@ test("keeps the store-aware knowledge workspace behind authenticated API authori
 
   assert.match(
     pageSource,
-    /import \{ requireCurrentUser \} from ["']@\/lib\/auth["']/,
+    /import \{[^}]*\brequire(?:CurrentUser|PageAccess)\b[^}]*\} from ["']@\/lib\/auth["']/,
   );
-  assert.match(pageSource, /await requireCurrentUser\(\)/);
+  assert.match(pageSource, /await require(?:CurrentUser\(\)|PageAccess\(["']\/staff\/)/);
   assert.doesNotMatch(pageSource, /requireNetworkScopedUser/);
 });
 
@@ -758,9 +758,9 @@ test("keeps store-aware shift regulations behind authenticated API authority", a
 
   assert.match(
     pageSource,
-    /import \{ requireCurrentUser \} from ["']@\/lib\/auth["']/,
+    /import \{[^}]*\brequire(?:CurrentUser|PageAccess)\b[^}]*\} from ["']@\/lib\/auth["']/,
   );
-  assert.match(pageSource, /await requireCurrentUser\(\)/);
+  assert.match(pageSource, /await require(?:CurrentUser\(\)|PageAccess\(["']\/staff\/)/);
   assert.match(pageSource, /report\.rows\.filter\(\(row\) => row\.canManage\)/);
   assert.doesNotMatch(pageSource, /requireNetworkScopedUser/);
 });
@@ -778,9 +778,9 @@ test("keeps store-aware training courses and profiles behind authenticated API a
   for (const source of pageSources) {
     assert.match(
       source,
-      /import \{ requireCurrentUser \} from ["']@\/lib\/auth["']/,
+      /import \{[^}]*\brequire(?:CurrentUser|PageAccess)\b[^}]*\} from ["']@\/lib\/auth["']/,
     );
-    assert.match(source, /await requireCurrentUser\(\)/);
+    assert.match(source, /await require(?:CurrentUser\(\)|PageAccess\(["']\/staff\/)/);
     assert.doesNotMatch(source, /requireNetworkScopedUser/);
   }
 });
@@ -795,9 +795,9 @@ test("keeps store-aware onboarding behind authenticated API authority", async ()
 
   assert.match(
     pageSource,
-    /import \{ requireCurrentUser \} from ["']@\/lib\/auth["']/,
+    /import \{[^}]*\brequire(?:CurrentUser|PageAccess)\b[^}]*\} from ["']@\/lib\/auth["']/,
   );
-  assert.match(pageSource, /await requireCurrentUser\(\)/);
+  assert.match(pageSource, /await require(?:CurrentUser\(\)|PageAccess\(["']\/staff\/)/);
   assert.match(pageSource, /report\.accessScope === ["']NETWORK["']/);
   assert.doesNotMatch(pageSource, /requireNetworkScopedUser/);
 });

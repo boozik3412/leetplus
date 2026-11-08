@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { GuestAudiencesPanel } from "@/components/guest-audiences-panel";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getGuestAudiences,
   getGuestCrmContactEvents,
@@ -13,7 +13,7 @@ import {
 } from "@/lib/guests";
 
 export default async function GuestCrmPage() {
-  await requireCurrentUser();
+  await requirePageAccess("/guests/crm");
 
   const baseFilters: GuestListFilters = {
     segment: "top",

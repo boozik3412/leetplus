@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getDashboardSummary,
   type DashboardStoreRevenueMetric,
@@ -125,7 +125,7 @@ export default async function DashboardRevenueByClubPage({
     redirect(revenueByClubCanonicalHref(params));
   }
 
-  await requireCurrentUser();
+  await requirePageAccess("/dashboard/revenue-by-club");
 
   const filters = {
     period: searchParam(params.period) ?? "full-day",

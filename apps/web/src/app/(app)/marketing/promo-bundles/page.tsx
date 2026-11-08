@@ -1,7 +1,7 @@
 import { MarketingPromoBundlesWorkspace } from "@/components/marketing-campaigns-panel";
 import { BusinessSnapshotGate } from "@/components/business-snapshot-gate";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
 import {
   getMarketingPromoBundleLaunches,
@@ -38,7 +38,7 @@ const emptyMarketingTariffConditions: MarketingTariffConditions = {
 };
 
 export default async function MarketingPromoBundlesPage() {
-  await requireCurrentUser();
+  await requirePageAccess("/marketing/promo-bundles");
 
   const [
     promoBundles,

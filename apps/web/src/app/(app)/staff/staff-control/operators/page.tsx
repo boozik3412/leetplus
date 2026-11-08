@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Fragment } from "react";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffIdentityMappingForm } from "@/components/staff-identity-mapping-form";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getStaffOperators,
   getStaffControlFilterOptions,
@@ -242,7 +242,7 @@ export default async function StaffOperatorsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/staff/staff-control/operators");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const isFullView = searchParam(params.view) === "full";

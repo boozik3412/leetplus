@@ -2,13 +2,14 @@ import Link from "next/link";
 
 import { ProductCreateForm } from "@/components/product-actions";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
 import { getCategories, getSuppliers } from "@/lib/catalog";
 import { can } from "@/lib/permissions";
 import { getProductCatalogSummary } from "@/lib/products";
 
 export default async function ProductsPage() {
   const user = await requireCurrentUser();
+  ensurePageAccess(user, "/products");
   const canEditProducts =
     user.accessScope === "NETWORK" && can(user, "edit_products");
   const [summary, categories, suppliers] = await Promise.all([

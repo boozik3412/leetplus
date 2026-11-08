@@ -2,8 +2,10 @@ import { getApiUrl, getAuthHeaders } from "./api";
 import { notFound, redirect } from "next/navigation";
 import {
   getAuthenticatedDestination,
+  getDefaultLandingPath,
   platformAdministrationHref,
 } from "./landing";
+import { canAccessPath } from "./permissions";
 import { cache } from "react";
 
 export type AuthUser = {
@@ -108,6 +110,35 @@ export async function requireCurrentUser() {
   if (!user) {
     redirect("/login");
   }
+
+  return user;
+}
+
+/**
+ * Page-level companion of the sidebar rule: a page the user's role cannot
+ * open (canAccessPath is false) sends them to their supported landing page
+ * before any restricted API fetch, instead of rendering a failed request.
+ * The API remains the authoritative boundary; this never widens access.
+ * When the landing page itself is the denied path, the page renders and the
+ * API decides, so a custom role without its landing capability cannot loop.
+ */
+export function ensurePageAccess(user: AuthUser, path: string) {
+  if (canAccessPath(user, path)) {
+    return;
+  }
+
+  const landingPath = getDefaultLandingPath(user);
+  const landingRoute = landingPath.split(/[?#]/u, 1)[0] ?? landingPath;
+
+  if (landingRoute !== path) {
+    redirect(landingPath);
+  }
+}
+
+export async function requirePageAccess(path: string) {
+  const user = await requireCurrentUser();
+
+  ensurePageAccess(user, path);
 
   return user;
 }

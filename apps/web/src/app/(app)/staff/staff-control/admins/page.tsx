@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getStaffControl,
   getStaffControlFilterOptions,
@@ -145,7 +145,7 @@ export default async function StaffAdminsReportPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/staff/staff-control/admins");
   const params = await searchParams;
   const filters: GuestsSummaryFilters = {
     dateFrom: searchParam(params.dateFrom),

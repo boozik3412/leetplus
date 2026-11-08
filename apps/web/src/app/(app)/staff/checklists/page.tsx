@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffChecklistWorkspace } from "@/components/staff-checklist-workspace";
-import { requireCurrentUser } from "@/lib/auth";
+import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
 import {
   getStaffChecklistReport,
   type StaffChecklistFilterStatus,
@@ -110,6 +110,7 @@ export default async function StaffChecklistsPage({
   searchParams: SearchParams;
 }) {
   const user = await requireCurrentUser();
+  ensurePageAccess(user, "/staff/checklists");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffChecklistReport(filters);

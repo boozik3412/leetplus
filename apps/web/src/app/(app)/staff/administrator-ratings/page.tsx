@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getStaffAdministratorRatings,
   type StaffAdministratorRating,
@@ -69,7 +69,7 @@ export default async function StaffAdministratorRatingsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/staff/administrator-ratings");
   const params = await searchParams;
   const report = await getStaffAdministratorRatings(resolveFilters(params));
   const cards = [

@@ -1,7 +1,7 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { SimpleReportTable } from "@/components/simple-report-table";
 import { productAssortmentRoleLabel } from "@/lib/assortment-matrix";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getAssortmentMatrixReport,
   type AssortmentMatrixRow,
@@ -71,7 +71,7 @@ export default async function AssortmentMatrixTablePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/reports/assortment-matrix/table");
   const params = await searchParams;
   const report = await getAssortmentMatrixReport({
     from: searchParam(params.from),

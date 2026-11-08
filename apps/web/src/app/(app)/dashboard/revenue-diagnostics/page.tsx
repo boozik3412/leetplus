@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { RevenueSnapshotGate } from "@/components/revenue-snapshot-gate";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getDashboardRevenueDiagnostics,
   type DashboardRevenueDiagnosticsRow,
@@ -131,7 +131,7 @@ export default async function DashboardRevenueDiagnosticsPage({
     redirect(diagnosticsCanonicalHref(params));
   }
 
-  await requireCurrentUser();
+  await requirePageAccess("/dashboard/revenue-diagnostics");
 
   const filters = {
     period: searchParam(params.period) ?? "full-day",

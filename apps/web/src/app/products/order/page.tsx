@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { OrderPlanningTable } from "@/components/order-planning-table";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import { getCategories } from "@/lib/catalog";
 import { isOrderPlanningView } from "@/lib/order-planning-views";
 import { getOrderPlanningReport } from "@/lib/reports";
@@ -14,7 +14,7 @@ export default async function ProductOrderPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/products/order");
   const params = await searchParams;
   const view = searchParam(params.view);
   const categoryIds = searchParamValues(params.categoryIds);

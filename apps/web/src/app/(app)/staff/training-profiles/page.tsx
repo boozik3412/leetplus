@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffTrainingProfilesWorkspace } from "@/components/staff-training-profiles-workspace";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getStaffTrainingProfilesReport,
   type StaffTrainingProfileRole,
@@ -93,7 +93,7 @@ export default async function StaffTrainingProfilesPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/staff/training-profiles");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffTrainingProfilesReport(filters);

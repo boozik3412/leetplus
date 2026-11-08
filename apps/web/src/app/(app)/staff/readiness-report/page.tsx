@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireNetworkScopedUser } from "@/lib/auth";
+import { ensurePageAccess, requireNetworkScopedUser } from "@/lib/auth";
 import { getRoleLabel } from "@/lib/roles";
 import {
   getStaffReadinessReport,
@@ -93,7 +93,8 @@ export default async function StaffReadinessReportPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireNetworkScopedUser();
+  const user = await requireNetworkScopedUser();
+  ensurePageAccess(user, "/staff/readiness-report");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffReadinessReport(filters);

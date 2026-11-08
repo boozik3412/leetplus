@@ -1,6 +1,6 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { SimpleReportTable } from "@/components/simple-report-table";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getPlanFactReport,
   type PlanFactReportRow,
@@ -28,7 +28,7 @@ export default async function PlanFactTablePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/reports/plan-fact/table");
   const params = await searchParams;
   const report = await getPlanFactReport({
     from: searchParam(params.from),

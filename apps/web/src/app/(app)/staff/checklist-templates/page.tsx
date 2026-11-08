@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffChecklistTemplateBuilder } from "@/components/staff-checklist-template-builder";
-import { requireCurrentUser } from "@/lib/auth";
+import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
 import { isShiftWorkspaceRole } from "@/lib/landing";
 import {
   getStaffChecklistTemplateReport,
@@ -94,6 +94,8 @@ export default async function StaffChecklistTemplatesPage({
   if (isShiftWorkspaceRole(user.role)) {
     redirect("/staff/checklists");
   }
+
+  ensurePageAccess(user, "/staff/checklist-templates");
 
   const filters = resolveFilters(params);
   const initialTemplateId = searchParam(params.templateId);

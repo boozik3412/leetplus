@@ -1,6 +1,6 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffSalaryWorkspaceView } from "@/components/staff-salary-workspace";
-import { requireNetworkScopedUser } from "@/lib/auth";
+import { ensurePageAccess, requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffSalaryWorkspace,
   type StaffSalaryFilters,
@@ -40,7 +40,8 @@ export default async function StaffSalaryPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireNetworkScopedUser();
+  const user = await requireNetworkScopedUser();
+  ensurePageAccess(user, "/staff/salary");
   const params = await searchParams;
   const workspace = await getStaffSalaryWorkspace(resolveFilters(params));
 

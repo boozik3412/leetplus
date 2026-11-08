@@ -1,6 +1,6 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { SalesDetailReportTable } from "@/components/sales-detail-report-table";
-import { requireCurrentUser } from "@/lib/auth";
+import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
 import { getSalesDetailReport } from "@/lib/reports";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
@@ -25,6 +25,7 @@ export default async function SalesDetailTablePage({
   searchParams: SearchParams;
 }) {
   const user = await requireCurrentUser();
+  ensurePageAccess(user, "/reports/sales-detail/table");
   const params = await searchParams;
   const report = await getSalesDetailReport({
     from: searchParam(params.from),

@@ -1,6 +1,6 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { SimpleReportTable } from "@/components/simple-report-table";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import { getNewProductsReport } from "@/lib/reports";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
@@ -41,7 +41,7 @@ export default async function NewProductsTablePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/reports/new-products/table");
   const params = await searchParams;
   const report = await getNewProductsReport({
     storeId: searchParam(params.storeId),

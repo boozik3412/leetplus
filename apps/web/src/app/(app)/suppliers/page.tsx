@@ -4,7 +4,7 @@ import {
   CatalogRenameForm,
 } from "@/components/catalog-actions";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
 import { getSuppliers } from "@/lib/catalog";
 import { can } from "@/lib/permissions";
 
@@ -22,6 +22,7 @@ function formatMoney(value: string | null) {
 
 export default async function SuppliersPage() {
   const user = await requireCurrentUser();
+  ensurePageAccess(user, "/suppliers");
   const suppliers = await getSuppliers();
   const canEditSuppliers = can(user, "edit_products");
 

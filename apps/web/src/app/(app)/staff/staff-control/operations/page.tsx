@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getStaffOperations,
   getStaffControlFilterOptions,
@@ -186,7 +186,7 @@ export default async function StaffOperationsReportPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/staff/staff-control/operations");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const [report, options] = await Promise.all([

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireNetworkScopedUser } from "@/lib/auth";
+import { ensurePageAccess, requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffAiAssistantReport,
   type StaffAiActionDraft,
@@ -87,7 +87,8 @@ export default async function StaffAiAssistantPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireNetworkScopedUser();
+  const user = await requireNetworkScopedUser();
+  ensurePageAccess(user, "/staff/ai-assistant");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffAiAssistantReport(filters);

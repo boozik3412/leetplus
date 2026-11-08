@@ -8,7 +8,7 @@ import {
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StoreClosureControl } from "@/components/store-closure-control";
 import { StoreLogoControl } from "@/components/store-logo-control";
-import { requireCurrentUser } from "@/lib/auth";
+import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
   inferStoreCityFromAddress,
@@ -34,6 +34,7 @@ export default async function StoresPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireCurrentUser();
+  ensurePageAccess(user, "/stores");
   const params = await searchParams;
   const [stores, closures] = await Promise.all([
     getStores(),

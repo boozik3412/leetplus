@@ -3,7 +3,7 @@ import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffShiftOperationsOverview } from "@/components/staff-shift-operations-overview";
 import { StaffShiftRegulationBuilder } from "@/components/staff-shift-regulation-builder";
 import { StaffShiftRegulationCatalog } from "@/components/staff-shift-regulation-catalog";
-import { requireCurrentUser } from "@/lib/auth";
+import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { getStaffChecklistExecutionReport } from "@/lib/staff-checklists";
 import {
@@ -163,6 +163,7 @@ export default async function StaffShiftRegulationsPage({
   searchParams: SearchParams;
 }) {
   const user = await requireCurrentUser();
+  ensurePageAccess(user, "/staff/shift-regulations");
   const params = await searchParams;
   const requestedFilters = resolveFilters(params);
   const canLoadNetworkCompanions = user.accessScope === "NETWORK";

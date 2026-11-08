@@ -6,7 +6,7 @@ import {
 } from "@/components/staff-task-create-form";
 import { StaffTaskHistory } from "@/components/staff-task-history";
 import { StaffTaskStatusActions } from "@/components/staff-task-status-actions";
-import { requireCurrentUser } from "@/lib/auth";
+import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
 import {
   getStaffTaskReport,
   type StaffTask,
@@ -486,6 +486,7 @@ export default async function StaffTasksPage({
   searchParams: SearchParams;
 }) {
   const currentUser = await requireCurrentUser();
+  ensurePageAccess(currentUser, "/staff/tasks");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const draft = resolveDraft(params);

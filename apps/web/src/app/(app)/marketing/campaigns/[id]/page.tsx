@@ -4,7 +4,7 @@ import { MarketingCampaignCrmTaskButton } from "@/components/marketing-campaign-
 import { MarketingCampaignContactForm } from "@/components/marketing-campaign-contact-form";
 import { MarketingCampaignWorkspace } from "@/components/marketing-campaign-workspace";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getGuestCrmContactEvents,
   getGuestCrmTasks,
@@ -102,7 +102,7 @@ export default async function MarketingCampaignPage({
   params: PageParams;
   searchParams: PageSearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/marketing/campaigns");
   const { id } = await params;
   const activeTab = resolveCampaignScenarioTab((await searchParams).tab);
 

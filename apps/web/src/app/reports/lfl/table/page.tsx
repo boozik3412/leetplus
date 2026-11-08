@@ -1,5 +1,5 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getLflReport,
   type LflGroupLevel,
@@ -61,7 +61,7 @@ export default async function LflTablePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/reports/lfl/table");
   const params = await searchParams;
   const period = resolvePeriod(params.period);
   const report = await getLflReport(period);

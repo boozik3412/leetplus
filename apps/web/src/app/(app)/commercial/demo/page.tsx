@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 
 const demoMetrics = [
   {
@@ -83,7 +83,7 @@ const demoClubs = [
 ];
 
 export default async function CommercialDemoPage() {
-  await requireCurrentUser();
+  await requirePageAccess("/commercial/demo");
 
   return (
     <main className="min-h-full bg-zinc-50 px-4 py-6 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-100 sm:px-6 lg:px-10">

@@ -1,11 +1,11 @@
 import { OosExclusionsManager } from "@/components/oos-exclusions-manager";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import { getProducts } from "@/lib/products";
 import { getOosExclusions } from "@/lib/reports";
 
 export default async function OosExclusionsPage() {
-  await requireCurrentUser();
+  await requirePageAccess("/reports/oos-exclusions");
   const [exclusions, products] = await Promise.all([
     getOosExclusions(),
     getProducts(),

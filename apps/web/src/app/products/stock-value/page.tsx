@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StockValueTable } from "@/components/stock-value-table";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import { getCategories } from "@/lib/catalog";
 import { getOrderPlanningReport } from "@/lib/reports";
 import {
@@ -21,7 +21,7 @@ export default async function StockValuePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/products/stock-value");
   const params = await searchParams;
   const view = searchParam(params.view);
   const noSalesDays = Number(searchParam(params.noSalesDays)) || null;

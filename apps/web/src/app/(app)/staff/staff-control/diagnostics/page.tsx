@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import { getStaffControl, type GuestsSummaryFilters } from "@/lib/guests";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
@@ -35,7 +35,7 @@ export default async function StaffDiagnosticsReportPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/staff/staff-control/diagnostics");
   const params = await searchParams;
   const filters: GuestsSummaryFilters = {
     dateFrom: searchParam(params.dateFrom),

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { GuestAudiencesPanel } from "@/components/guest-audiences-panel";
 import { GuestSavedFiltersPanel } from "@/components/guest-saved-filters-panel";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getGuestAudiences,
   getGuestCrmContactEvents,
@@ -293,7 +293,7 @@ export default async function GuestFullReportPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/guests/report");
   const params = await searchParams;
   const filters: GuestListFilters = {
     dateFrom: searchParam(params.dateFrom),

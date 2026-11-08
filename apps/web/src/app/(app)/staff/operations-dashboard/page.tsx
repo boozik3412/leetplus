@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { BusinessSnapshotGate } from "@/components/business-snapshot-gate";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireNetworkScopedUser } from "@/lib/auth";
+import { ensurePageAccess, requireNetworkScopedUser } from "@/lib/auth";
 import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
 import {
   getStaffOperationsDashboard,
@@ -174,7 +174,8 @@ export default async function StaffOperationsDashboardPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireNetworkScopedUser();
+  const user = await requireNetworkScopedUser();
+  ensurePageAccess(user, "/staff/operations-dashboard");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const [dashboard, staffSnapshot] = await Promise.all([

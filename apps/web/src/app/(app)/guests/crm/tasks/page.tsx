@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getGuestCrmTaskReport,
   getGuestCrmUsers,
@@ -173,7 +173,7 @@ export default async function GuestCrmTasksPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/guests/crm/tasks");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const [report, users] = await Promise.all([

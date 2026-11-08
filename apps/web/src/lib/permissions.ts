@@ -1,5 +1,5 @@
 import type { AuthUser } from "./auth";
-import { canManageUserAccess } from "./roles";
+import { canManageUserAccess } from "./roles.ts";
 
 export type Capability =
   | "view_dashboard"
@@ -876,6 +876,15 @@ function resolveStaffPathCapability(href: string): Capability {
   return "view_staff";
 }
 
+// Sections whose rule used to match only the exact path: a nested page such
+// as /utilities/product-parsing/manual fell through to the final `return
+// true` and was open to every role.
+function isPathOrChild(href: string, sectionPath: string) {
+  const path = href.split(/[?#]/u, 1)[0] ?? href;
+
+  return path === sectionPath || path.startsWith(`${sectionPath}/`);
+}
+
 export function canAccessPath(user: AuthUser | null, href: string) {
   if (href === "/admin" || href.startsWith("/administration")) {
     return Boolean(user?.isPlatformAdmin);
@@ -889,7 +898,7 @@ export function canAccessPath(user: AuthUser | null, href: string) {
     return can(user, "view_dashboard");
   }
 
-  if (href === "/users") {
+  if (isPathOrChild(href, "/users")) {
     return Boolean(
       user && canManageUserAccess(user.role) && can(user, "manage_users"),
     );
@@ -979,19 +988,19 @@ export function canAccessPath(user: AuthUser | null, href: string) {
     );
   }
 
-  if (href === "/settings") {
+  if (isPathOrChild(href, "/settings")) {
     return can(user, "manage_integrations");
   }
 
-  if (href === "/sync") {
+  if (isPathOrChild(href, "/sync")) {
     return can(user, "run_sync");
   }
 
-  if (href === "/import") {
+  if (isPathOrChild(href, "/import")) {
     return can(user, "import_data");
   }
 
-  if (href === "/utilities") {
+  if (isPathOrChild(href, "/utilities")) {
     return can(user, "use_utilities");
   }
 

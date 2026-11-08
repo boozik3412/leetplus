@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { HeaderFilterDetails } from "./header-filter-details";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getStaffChecklistExecutionReport,
   type StaffChecklistExecutionProblemFilter,
@@ -309,7 +309,7 @@ export default async function StaffChecklistExecutionReportPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/staff/checklists/report");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffChecklistExecutionReport(filters);

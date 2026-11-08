@@ -1,6 +1,6 @@
 import { RecommendationsWorkflowTable } from "@/components/recommendations-workflow-table";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import { getOperationalReport } from "@/lib/reports";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
@@ -14,7 +14,7 @@ export default async function RecommendationsTablePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/reports/recommendations/table");
   const params = await searchParams;
   const report = await getOperationalReport({
     from: searchParam(params.from),

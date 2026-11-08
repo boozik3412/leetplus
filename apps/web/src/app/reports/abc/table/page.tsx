@@ -1,6 +1,6 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { SimpleReportTable } from "@/components/simple-report-table";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import { getSkuPerformanceReport } from "@/lib/reports";
 import { getStores } from "@/lib/stores";
 
@@ -29,7 +29,7 @@ export default async function SkuRatingTablePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/reports/abc/table");
   const params = await searchParams;
   const storeId = searchParam(params.storeId) || undefined;
   const [report, stores] = await Promise.all([

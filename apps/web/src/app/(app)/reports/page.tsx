@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { BusinessSnapshotGate } from "@/components/business-snapshot-gate";
-import { requireCurrentUser } from "@/lib/auth";
+import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
 import { AbcReportToggle } from "@/components/abc-report-toggle";
 import { OosExclusionActions } from "@/components/oos-exclusion-actions";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
@@ -149,6 +149,7 @@ export default async function ReportsPage({
   searchParams: SearchParams;
 }) {
   const user = await requireCurrentUser();
+  ensurePageAccess(user, "/reports");
   const params = await searchParams;
   const filters = {
     from: searchParam(params.from),

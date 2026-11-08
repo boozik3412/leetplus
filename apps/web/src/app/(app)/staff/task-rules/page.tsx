@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffTaskRulesWorkspace } from "@/components/staff-task-rules-workspace";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getStaffTaskRuleReport,
   type StaffTaskRuleCadence,
@@ -75,7 +75,7 @@ export default async function StaffTaskRulesPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/staff/task-rules");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffTaskRuleReport(filters);

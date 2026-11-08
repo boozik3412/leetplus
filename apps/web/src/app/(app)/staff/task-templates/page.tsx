@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffTaskTemplateBuilder } from "@/components/staff-task-template-builder";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getStaffTaskTemplateReport,
   type StaffTaskTemplateFilters,
@@ -98,7 +98,7 @@ export default async function StaffTaskTemplatesPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/staff/task-templates");
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffTaskTemplateReport(filters);

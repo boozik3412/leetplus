@@ -1776,6 +1776,15 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   `dashboard/summary`.
 - Нельзя чинить неверный redirect расширением capability, tenant scope или
   cross-tenant доступа.
+- Страница корпоративного блока, которую роль не может открыть по
+  `canAccessPath` (то же правило, что скрывает пункт меню), до первого
+  restricted API fetch отправляет на landing роли (`requirePageAccess` /
+  `ensurePageAccess` в `apps/web/src/lib/auth.ts`). Это UX-слой поверх API,
+  а не authorization: API остаётся authoritative boundary, capabilities и
+  scope не расширяются. Если запрещённая страница сама является landing,
+  она рендерится и решение принимает API, чтобы не было цикла redirect.
+  Ошибка загрузки в corporate-сегментах показывается через `error.tsx`
+  (`(app)`, `reports`, `products`, `guests`) без текста серверной ошибки.
 - Сохранённая platform-admin сессия не является tenant-контекстом. Tenant
   выбирается явно и подписывается.
 

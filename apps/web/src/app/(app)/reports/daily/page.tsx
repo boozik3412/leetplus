@@ -1,6 +1,6 @@
 import { DailyReportMessages } from "@/components/daily-report-messages";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import { getDailyReport } from "@/lib/daily-report";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
@@ -12,7 +12,7 @@ export default async function DailyReportPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requirePageAccess("/reports/daily");
   const params = await searchParams;
   const rawDate = Array.isArray(params.date) ? params.date[0] : params.date;
   const date = rawDate && DATE_INPUT.test(rawDate) ? rawDate : null;

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { MarketingCampaignsPanel } from "@/components/marketing-campaigns-panel";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import {
   getGuestAudiences,
   getGuestCrmLeads,
@@ -337,7 +337,7 @@ function buildMarketingAiSuggestions({
 }
 
 export default async function MarketingPage() {
-  await requireCurrentUser();
+  await requirePageAccess("/marketing");
 
   const [
     groups,

@@ -2,11 +2,12 @@ import { LeetplusCategoryDirectory } from "@/components/leetplus-category-direct
 import { LangameCategoryImport } from "@/components/langame-category-import";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { getCategories, getLangameCategoryCatalog } from "@/lib/catalog";
-import { requireCurrentUser } from "@/lib/auth";
+import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 
 export default async function CategoriesPage() {
   const user = await requireCurrentUser();
+  ensurePageAccess(user, "/categories");
   const [categories, langameCatalog] = await Promise.all([
     getCategories(),
     getLangameCategoryCatalog(),

@@ -7,7 +7,7 @@ import {
 } from "@/components/category-analytics";
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import { getCategories } from "@/lib/catalog";
 import { getDashboardSummary } from "@/lib/dashboard-summary";
 import { getStores } from "@/lib/stores";
@@ -67,7 +67,7 @@ export default async function AssortmentDashboardPage({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
-  await requireCurrentUser();
+  await requirePageAccess("/assortment/dashboard");
 
   const filters = {
     period: searchParam(params.period) ?? "full-day",

@@ -1,6 +1,6 @@
 import { MarketingMissionsPanel } from "@/components/marketing-missions-panel";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requirePageAccess } from "@/lib/auth";
 import { getGuestAudiences } from "@/lib/guests";
 import {
   getMarketingPromoScenarioRewards,
@@ -17,7 +17,7 @@ async function safeList<T>(promise: Promise<T[]>): Promise<T[]> {
 }
 
 export default async function MarketingMissionsPage() {
-  await requireCurrentUser();
+  await requirePageAccess("/marketing/missions");
 
   const [missions, rewards, audiences, stores] = await Promise.all([
     safeList(getMarketingPromoScenarios()),

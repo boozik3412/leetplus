@@ -13970,41 +13970,130 @@ export class GuestPortalService {
       ...(guest ? [{ guestId: guest.id }] : []),
       ...(profile ? [{ profileId: profile.id }] : []),
     ];
+    const entitlementScope: Prisma.GuestGameEntitlementWhereInput[] = [
+      ...(guest ? [{ guestId: guest.id }] : []),
+      ...(profile ? [{ profileId: profile.id }] : []),
+    ];
 
-    const [eventRows, rewardRows] = await Promise.all([
-      this.prisma.guestGameEvent.findMany({
-        where: {
-          tenantId,
-          occurredAt: { gte: earliestMissionHistoryStart },
-          OR: eventScope,
-        },
-        select: {
-          eventType: true,
-          occurredAt: true,
-          externalDomain: true,
-          payload: true,
-        },
-        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
-        take: 1000,
-      }),
-      this.prisma.guestGameReward.findMany({
-        where: {
-          tenantId,
-          missionId: { in: missionIds },
-          qualifiedAt: { gte: earliestMissionHistoryStart },
-          OR: rewardScope,
-          status: { not: 'CANCELED' },
-        },
-        select: {
-          missionId: true,
-          qualifiedAt: true,
-        },
-      }),
-    ]);
+    // The reward engine starts a new repeat cycle from the guest's latest
+    // completion of the mission, whenever it happened (see
+    // latestMissionCompletionAt in guest-gamification.service). A relaunch
+    // moves the history start forward, so completions before it must still be
+    // read here: otherwise a DAILY minutes quest shows minutes summed across
+    // days as 100% while the engine counts only today and issues nothing.
+    const preGameHistoryMissionIds = missions
+      .filter((mission) => missionPermitsPreGameHistory(mission))
+      .map((mission) => mission.id);
+    const [eventRows, rewardRows, completionRows, completionEntitlements] =
+      await Promise.all([
+        this.prisma.guestGameEvent.findMany({
+          where: {
+            tenantId,
+            occurredAt: { gte: earliestMissionHistoryStart },
+            OR: eventScope,
+          },
+          select: {
+            eventType: true,
+            occurredAt: true,
+            externalDomain: true,
+            payload: true,
+          },
+          orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+          take: 1000,
+        }),
+        this.prisma.guestGameReward.findMany({
+          where: {
+            tenantId,
+            missionId: { in: missionIds },
+            qualifiedAt: { gte: earliestMissionHistoryStart },
+            OR: rewardScope,
+            status: { not: 'CANCELED' },
+          },
+          select: {
+            missionId: true,
+            qualifiedAt: true,
+          },
+        }),
+        this.prisma.guestGameReward.groupBy({
+          by: ['missionId'],
+          where: {
+            tenantId,
+            missionId: { in: missionIds },
+            status: {
+              in: [...GUEST_PORTAL_MISSION_COMPLETION_REWARD_STATUSES],
+            },
+            AND: [
+              { OR: rewardScope },
+              {
+                OR: [
+                  { qualifiedAt: { gte: activatedAt } },
+                  ...(preGameHistoryMissionIds.length
+                    ? [{ missionId: { in: preGameHistoryMissionIds } }]
+                    : []),
+                ],
+              },
+            ],
+          },
+          _max: { qualifiedAt: true },
+        }),
+        this.prisma.guestGameEntitlement.findMany({
+          where: {
+            tenantId,
+            ruleType: 'LOOT_BOX',
+            status: {
+              in: [...GUEST_PORTAL_MISSION_COMPLETION_ENTITLEMENT_STATUSES],
+            },
+            AND: [
+              { OR: entitlementScope },
+              {
+                OR: [
+                  {
+                    sourceReward: {
+                      is: {
+                        tenantId,
+                        missionId: { in: missionIds },
+                        rewardType: 'LOOT_BOX_ENTITLEMENT',
+                      },
+                    },
+                  },
+                  ...missionIds.map((missionId) => ({
+                    evidence: { path: ['missionId'], equals: missionId },
+                  })),
+                ],
+              },
+            ],
+          },
+          select: {
+            qualifiedAt: true,
+            evidence: true,
+            sourceReward: { select: { missionId: true, rewardType: true } },
+          },
+          orderBy: { qualifiedAt: 'desc' },
+          take: 500,
+        }),
+      ]);
 
     const progressEvents = eventRows.map(portalEventToProgressEvent);
     const rewardCounts = new Map<string, number>();
-    const latestRewardAt = new Map<string, Date>();
+    const latestCompletionAt = new Map<string, Date>();
+    const noteCompletion = (missionId: string | null, qualifiedAt: Date) => {
+      if (!missionId || !missionById.has(missionId)) return;
+      const latest = latestCompletionAt.get(missionId);
+      if (!latest || qualifiedAt > latest) {
+        latestCompletionAt.set(missionId, qualifiedAt);
+      }
+    };
+    completionRows.forEach((row) => {
+      if (row._max.qualifiedAt) {
+        noteCompletion(row.missionId, row._max.qualifiedAt);
+      }
+    });
+    completionEntitlements.forEach((entitlement) => {
+      noteCompletion(
+        portalEntitlementMissionId(entitlement),
+        entitlement.qualifiedAt,
+      );
+    });
 
     rewardRows.forEach((row) => {
       if (!row.missionId) {
@@ -14026,10 +14115,6 @@ export class GuestPortalService {
         row.missionId,
         (rewardCounts.get(row.missionId) ?? 0) + 1,
       );
-      const latest = latestRewardAt.get(row.missionId);
-      if (!latest || row.qualifiedAt > latest) {
-        latestRewardAt.set(row.missionId, row.qualifiedAt);
-      }
     });
 
     const progress = new Map<string, GuestPortalMissionProgress>();
@@ -14052,7 +14137,7 @@ export class GuestPortalService {
           periodTo: mission.periodTo,
           timeZone,
           repeatPeriodicity: guestGameProgressPeriodicity(reward.periodicity),
-          repeatCompletedAt: latestRewardAt.get(mission.id) ?? null,
+          repeatCompletedAt: latestCompletionAt.get(mission.id) ?? null,
         },
         null,
         progressEvents.filter((event) => event.occurredAt >= historyStart),
@@ -24265,20 +24350,51 @@ function missionProgressHistoryStart(
 ) {
   const ruleActivatedAt =
     portalMissionProgressStart(mission) ?? mission.createdAt;
+  return missionPermitsPreGameHistory(mission) ||
+    ruleActivatedAt >= gameActivatedAt
+    ? ruleActivatedAt
+    : gameActivatedAt;
+}
+
+function missionPermitsPreGameHistory(mission: {
+  triggerKind: string;
+  conditions: Prisma.JsonValue;
+}) {
   const taskType =
     missionTaskTypeFromConditions(
       jsonRecord(mission.conditions),
       mission.triggerKind,
     ) ?? mission.triggerKind;
-  const permitsPreGameHistory = [
-    'PRODUCT_PURCHASE',
-    'BALANCE_TOPUP',
-    'BALANCE_TOP_UP',
-  ].includes(taskType.toUpperCase());
+  return ['PRODUCT_PURCHASE', 'BALANCE_TOPUP', 'BALANCE_TOP_UP'].includes(
+    taskType.toUpperCase(),
+  );
+}
 
-  return permitsPreGameHistory || ruleActivatedAt >= gameActivatedAt
-    ? ruleActivatedAt
-    : gameActivatedAt;
+// Same reward/entitlement set the reward engine reads to find the guest's
+// latest mission completion (getDryRunRewards / getDryRunMissionRewardEntitlements).
+const GUEST_PORTAL_MISSION_COMPLETION_REWARD_STATUSES = [
+  'PENDING',
+  'APPROVED',
+  'PAID',
+] as const;
+const GUEST_PORTAL_MISSION_COMPLETION_ENTITLEMENT_STATUSES = [
+  'AVAILABLE',
+  'OPENING',
+  'CONSUMED',
+  'EXPIRED',
+] as const;
+
+function portalEntitlementMissionId(entitlement: {
+  evidence: Prisma.JsonValue | null;
+  sourceReward: { missionId: string | null; rewardType: string } | null;
+}) {
+  if (
+    entitlement.sourceReward?.rewardType === 'LOOT_BOX_ENTITLEMENT' &&
+    entitlement.sourceReward.missionId
+  ) {
+    return entitlement.sourceReward.missionId;
+  }
+  return stringField(jsonRecord(entitlement.evidence).missionId);
 }
 
 function guestGameDebugJson(payload: Record<string, unknown>) {

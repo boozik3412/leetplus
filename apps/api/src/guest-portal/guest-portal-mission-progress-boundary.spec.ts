@@ -41,20 +41,13 @@ describe('GuestPortalService mission progress history boundaries', () => {
       },
       guestGameReward: {
         findMany: jest.fn().mockResolvedValue([]),
+        groupBy: jest.fn().mockResolvedValue([]),
+      },
+      guestGameEntitlement: {
+        findMany: jest.fn().mockResolvedValue([]),
       },
     };
-    const service = new GuestPortalService(
-      prisma as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-    );
+    const service = portalService(prisma);
 
     const progress = await (service as any).buildMissionProgress(
       'tenant-1',
@@ -107,7 +100,166 @@ describe('GuestPortalService mission progress history boundaries', () => {
       }),
     );
   });
+
+  it('restarts a DAILY minutes quest from a completion made before the relaunch, like the reward engine', async () => {
+    // «МЕНЯЕМ МИНУТЫ НА КЕЙС»: 300 minutes, DAILY, relaunched 31.10. The guest
+    // got the case on 16.10, so the engine counts only today's minutes.
+    const relaunchedAt = new Date('2026-10-31T16:47:13.000Z');
+    const completedBeforeRelaunch = new Date('2026-10-16T12:31:28.000Z');
+    const minutes = (occurredAt: string, sessionMinutes: number) => ({
+      eventType: 'PLAY_HOUR',
+      occurredAt: new Date(occurredAt),
+      externalDomain: 'club-1.langame.ru',
+      payload: { input: { sessionMinutes }, store: { id: 'store-1' } },
+    });
+    const prisma = {
+      guestGameEvent: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            minutes('2026-11-08T07:00:00.000Z', 40),
+            minutes('2026-11-07T10:00:00.000Z', 80),
+            minutes('2026-11-06T10:00:00.000Z', 69),
+            minutes('2026-11-05T10:00:00.000Z', 294),
+          ]),
+      },
+      guestGameReward: {
+        findMany: jest.fn().mockResolvedValue([]),
+        groupBy: jest.fn().mockResolvedValue([
+          {
+            missionId: 'minutes',
+            _max: { qualifiedAt: completedBeforeRelaunch },
+          },
+        ]),
+      },
+      guestGameEntitlement: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    };
+    const service = portalService(prisma);
+    jest.useFakeTimers({ now: new Date('2026-11-08T08:00:00.000Z') });
+
+    try {
+      const progress = await (service as any).buildMissionProgress(
+        'tenant-1',
+        { id: 'guest-1' },
+        {
+          id: 'profile-1',
+          gameActivatedAt: new Date('2026-09-01T00:00:00.000Z'),
+        },
+        [minutesMission('minutes', relaunchedAt)],
+        'Asia/Yekaterinburg',
+      );
+
+      expect(progress.get('minutes')).toEqual({ current: 40, percent: 13 });
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(prisma.guestGameReward.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        by: ['missionId'],
+        where: expect.objectContaining({
+          missionId: { in: ['minutes'] },
+          status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+        }),
+      }),
+    );
+    const groupByWhere = prisma.guestGameReward.groupBy.mock.calls[0][0].where;
+    expect(groupByWhere).not.toHaveProperty('qualifiedAt');
+  });
+
+  it('reads the latest completion from a case entitlement when the reward row is missing', async () => {
+    const relaunchedAt = new Date('2026-10-31T16:47:13.000Z');
+    const prisma = {
+      guestGameEvent: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            eventType: 'PLAY_HOUR',
+            occurredAt: new Date('2026-11-05T10:00:00.000Z'),
+            externalDomain: 'club-1.langame.ru',
+            payload: {
+              input: { sessionMinutes: 300 },
+              store: { id: 'store-1' },
+            },
+          },
+        ]),
+      },
+      guestGameReward: {
+        findMany: jest.fn().mockResolvedValue([]),
+        groupBy: jest.fn().mockResolvedValue([]),
+      },
+      guestGameEntitlement: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            qualifiedAt: new Date('2026-10-20T10:00:00.000Z'),
+            evidence: { missionId: 'minutes' },
+            sourceReward: null,
+          },
+        ]),
+      },
+    };
+    const service = portalService(prisma);
+    jest.useFakeTimers({ now: new Date('2026-11-08T08:00:00.000Z') });
+
+    try {
+      const progress = await (service as any).buildMissionProgress(
+        'tenant-1',
+        { id: 'guest-1' },
+        {
+          id: 'profile-1',
+          gameActivatedAt: new Date('2026-09-01T00:00:00.000Z'),
+        },
+        [minutesMission('minutes', relaunchedAt)],
+        'Asia/Yekaterinburg',
+      );
+
+      expect(progress.get('minutes')).toEqual({ current: 0, percent: 0 });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
+
+function portalService(prisma: unknown) {
+  return new GuestPortalService(
+    prisma as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
+}
+
+function minutesMission(id: string, activatedAt: Date) {
+  return {
+    id,
+    createdAt: new Date('2026-07-17T14:58:09.000Z'),
+    definitionVersion: 2,
+    triggerKind: 'PLAY_HOUR',
+    conditions: {
+      activatedAt: activatedAt.toISOString(),
+      reward: { type: 'LOOTBOX', periodicity: 'DAILY' },
+      metric: {
+        unit: 'минут',
+        target: 300,
+        eventTypes: ['PLAY_HOUR', 'SESSION_STOP'],
+        windowDays: 100000,
+        aggregation: 'duration',
+        minSessionMinutes: 1,
+      },
+    },
+    storeIds: ['store-1'],
+    periodFrom: activatedAt,
+    periodTo: null,
+    progressTarget: 300,
+    progressUnit: 'минут',
+  };
+}
 
 function mission({
   id,

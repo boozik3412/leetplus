@@ -440,10 +440,10 @@ export function validateMissionWizard(
       taskType === 'FACEIT_MATCH'
         ? 'Журнал матчей FACEIT по сессиям в клубе'
         : evaluationPolicy === 'LEDGER_SUPPLEMENTAL'
-        ? 'Игровой журнал, второй боевой слой'
-        : evaluationPolicy === 'LIVE_WITH_LEDGER_FALLBACK'
-          ? 'Боевой pipeline с резервным слоем игрового журнала'
-          : 'Текущий боевой pipeline',
+          ? 'Игровой журнал, второй боевой слой'
+          : evaluationPolicy === 'LIVE_WITH_LEDGER_FALLBACK'
+            ? 'Боевой pipeline с резервным слоем игрового журнала'
+            : 'Текущий боевой pipeline',
     blockers,
     warnings,
   };
@@ -464,7 +464,11 @@ export type GuestGameFaceitMatchGoal =
  * per-match filters. Unknown filter keys are dropped.
  */
 function normalizeFaceitMatchMetric(metric: Record<string, unknown>) {
-  const goal = enumValue(metric.matchGoal, guestGameFaceitMatchGoals, 'MATCHES');
+  const goal = enumValue(
+    metric.matchGoal,
+    guestGameFaceitMatchGoals,
+    'MATCHES',
+  );
   const filters = objectValue(metric.matchFilters);
   const minimum = (value: unknown, max: number) => {
     const parsed = numberValue(value);

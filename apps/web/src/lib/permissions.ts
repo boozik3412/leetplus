@@ -45,6 +45,7 @@ export type Capability =
   | "manage_users"
   | "manage_integrations"
   | "run_sync"
+  | "import_guest_foundation"
   | "import_data"
   | "use_utilities"
   | "edit_products"
@@ -388,6 +389,12 @@ export const capabilityOptions: CapabilityOption[] = [
       "Запуск ручной синхронизации данных и просмотр статусов загрузки.",
   },
   {
+    key: "import_guest_foundation",
+    label: "Импорт гостевого контура",
+    description:
+      "Запуск загрузки гостевой основы для геймификации и персонала без доступа к CRM-действиям.",
+  },
+  {
     key: "import_data",
     label: "Импорт данных",
     description: "Ручной импорт товаров, остатков, продаж и движений.",
@@ -493,6 +500,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "manage_users",
     "manage_integrations",
     "run_sync",
+    "import_guest_foundation",
     "import_data",
     "use_utilities",
     ...productEditCapabilities,
@@ -519,6 +527,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "manage_users",
     "manage_integrations",
     "run_sync",
+    "import_guest_foundation",
     "import_data",
     "use_utilities",
     ...productEditCapabilities,

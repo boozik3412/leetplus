@@ -98,7 +98,6 @@ const navGroups: NavGroup[] = [
       { href: "/communications", label: "Обзор коммуникаций" },
       { href: "/staff/team-chat", label: "Командный чат" },
       { href: "/staff/notifications", label: "Уведомления" },
-      { href: "/guests/crm/tasks", label: "CRM-задачи контакта" },
     ],
   },
   {
@@ -134,7 +133,6 @@ const navGroups: NavGroup[] = [
       { href: "/marketing/missions", label: "Промо-сценарии" },
       { href: "/marketing#campaigns", label: "Кампании" },
       { href: "/guests/report#audiences", label: "Группы гостей" },
-      { href: "/guests/crm/tasks", label: "Задачи контакта" },
     ],
   },
   {
@@ -833,6 +831,8 @@ function resolveCurrentProductArea(pathname: string): ProductArea {
   }
 
   if (
+    currentPathname === "/reports/daily" ||
+    currentPathname.startsWith("/reports/daily/") ||
     currentPathname.startsWith("/commercial") ||
     currentPathname.startsWith("/users") ||
     currentPathname.startsWith("/stores") ||

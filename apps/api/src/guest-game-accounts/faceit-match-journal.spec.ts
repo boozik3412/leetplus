@@ -190,3 +190,67 @@ describe('FACEIT match journal rules', () => {
     expect(parseFaceitMatchStats({ rounds: [] })).toBeNull();
   });
 });
+
+describe('FACEIT live response shape (checked 09.11.2026)', () => {
+  it('reads history and stats exactly as FACEIT Data API v4 returns them', () => {
+    // Trimmed from a live response: lowercase status, unix seconds.
+    const [history] = parseFaceitHistory({
+      items: [
+        {
+          match_id: '1-269f2966-3dd5-4230-b753-d5439984a482',
+          status: 'finished',
+          game_mode: '5v5',
+          competition_type: 'matchmaking',
+          started_at: 1794137622,
+          finished_at: 1794141400,
+        },
+      ],
+    });
+    expect(faceitMatchEligibility(history)).toBeNull();
+
+    const stats = parseFaceitMatchStats({
+      rounds: [
+        {
+          round_stats: { Map: 'de_mirage', Score: '13 / 9' },
+          teams: [
+            {
+              team_id: 'd5718986-aae9-47c5-8c67-ae4760ba1861',
+              players: [
+                {
+                  player_id: 'ac71ba3c-d3d4-45e7-8be2-26aa3986867d',
+                  player_stats: {
+                    'Headshots %': '80',
+                    Assists: '7',
+                    ADR: '93.7',
+                    Deaths: '24',
+                    MVPs: '8',
+                    Kills: '35',
+                    Result: '1',
+                    'K/D Ratio': '1.46',
+                    'K/R Ratio': '1.2',
+                    'Penta Kills': '0',
+                    'Quadro Kills': '1',
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(
+      faceitMissionFacts(stats!, 'ac71ba3c-d3d4-45e7-8be2-26aa3986867d'),
+    ).toMatchObject({
+      result: 'WIN',
+      kills: 35,
+      deaths: 24,
+      assists: 7,
+      kd: 1.46,
+      adr: 93.7,
+      hsPercent: 80,
+      mvps: 8,
+      aces: 0,
+      map: 'de_mirage',
+    });
+  });
+});

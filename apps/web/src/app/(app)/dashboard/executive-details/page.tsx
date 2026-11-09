@@ -8,6 +8,7 @@ import {
   type ExecutiveQuery,
 } from "@/lib/dashboard-executive";
 import { dashboardWorkspaceHref, getDefaultLandingPath } from "@/lib/landing";
+import { canAccessPath } from "@/lib/permissions";
 import { ExecutiveDriverDetails } from "@/components/executive-driver-details";
 import { driverFocuses, type DriverFocus } from "@/lib/executive-links";
 import { redirect } from "next/navigation";
@@ -86,6 +87,20 @@ function evidence(metric: ExecutiveMetric) {
     .join(" · ");
 }
 
+/** Same period and clubs on the source reconciliation page. */
+function revenueDiagnosticsLink(scope: {
+  period: { from: string; to: string };
+  storeIds: readonly string[];
+}) {
+  const params = new URLSearchParams({
+    period: "custom",
+    dateFrom: scope.period.from,
+    dateTo: scope.period.to,
+  });
+  scope.storeIds.forEach((storeId) => params.append("storeIds", storeId));
+  return `/dashboard/revenue-diagnostics?${params}`;
+}
+
 export default async function ExecutiveDetailsPage({
   searchParams,
 }: {
@@ -148,6 +163,11 @@ export default async function ExecutiveDetailsPage({
     );
   }
   const metric = summary.metrics[metricKey];
+  const revenueDiagnosticsHref =
+    (metricKey === "revenue" || metricKey === "productRevenue") &&
+    canAccessPath(user, "/dashboard/revenue-diagnostics")
+      ? revenueDiagnosticsLink(summary.scope)
+      : null;
   if (!metric)
     return (
       <main className="p-6">
@@ -230,6 +250,16 @@ export default async function ExecutiveDetailsPage({
                 как среднее дневных средних.
               </p>
             </div>
+          ) : null}
+          {revenueDiagnosticsHref ? (
+            <p className="mt-4 text-sm">
+              <Link
+                href={revenueDiagnosticsHref}
+                className="font-semibold text-emerald-700 hover:text-emerald-600 dark:text-emerald-300"
+              >
+                Сверка источников выручки по клубам
+              </Link>
+            </p>
           ) : null}
         </header>
         <section className="mt-5 grid gap-5 lg:grid-cols-2">

@@ -185,6 +185,7 @@ const permissionSectionDefinitions: PermissionSectionDefinition[] = [
       "manage_users",
       "manage_integrations",
       "run_sync",
+      "import_guest_foundation",
       "import_data",
       "use_utilities",
     ],

@@ -279,7 +279,7 @@ export function GameClubSelectClient({
   return (
     <main className="lp-club-select-page min-h-dvh overflow-x-hidden bg-black text-[#edf7f8] [color-scheme:dark]">
       <header className="lp-club-topbar">
-        <Link className="lp-club-icon-button" href="/" aria-label="Назад">
+        <Link className="lp-club-icon-button" href="/start" aria-label="Назад">
           <ChevronLeftIcon />
         </Link>
         <div className="lp-club-brand">

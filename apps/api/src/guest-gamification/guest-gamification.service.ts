@@ -92,8 +92,10 @@ import {
 } from './guest-game-rule-evaluator';
 import {
   evaluateGuestGameProgress,
+  guestGameExternalMatchStats,
   guestGameProgressPeriodicity,
   guestGameTriggerMatches,
+  type GuestGameExternalMatchStats,
   type GuestGameProgressEvent,
   type GuestGameProgressResult,
 } from './guest-game-progress';
@@ -2519,6 +2521,17 @@ export type GuestGameDryRunDto = {
   categoryName?: string | null;
   supplierName?: string | null;
   quantity?: number | string | null;
+  /** FACEIT match facts; set only by the worker's match journal pass. */
+  externalMatch?: GuestGameExternalMatchStats | null;
+};
+
+export type GuestGameExternalMatchPipelineResult = {
+  status: 'PROCESSED' | 'SKIPPED';
+  reason: string | null;
+  checkedMatches: number;
+  processedMatches: number;
+  failedMatches: number;
+  createdRewards: number;
 };
 
 export type GuestGameProcessEventDto = GuestGameDryRunDto & {
@@ -2635,6 +2648,7 @@ export type GuestGameDryRunResult = {
     categoryName: string | null;
     supplierName: string | null;
     quantity: number | null;
+    externalMatch?: GuestGameExternalMatchStats | null;
   };
   summary: {
     checkedRules: number;
@@ -7750,6 +7764,252 @@ export class GuestGamificationService {
     }
 
     return summarizeSupplementalPipeline(mode, results);
+  }
+
+  /**
+   * FACEIT_MATCH missions: turns COUNTED rows of the match journal (matches
+   * inside a paid club session, written by the worker's game-accounts pass)
+   * into game events. Worker-only, exact tenant, bounded per tick. The origin
+   * key `FACEIT:<match>:<player>` keeps a replay idempotent.
+   */
+  async runExternalMatchPipelineScheduled(input: {
+    tenantId: string;
+    limit?: number;
+  }): Promise<GuestGameExternalMatchPipelineResult> {
+    const limit = Math.min(50, Math.max(1, intValue(input.limit) ?? 20));
+    const result: GuestGameExternalMatchPipelineResult = {
+      status: 'PROCESSED',
+      reason: null,
+      checkedMatches: 0,
+      processedMatches: 0,
+      failedMatches: 0,
+      createdRewards: 0,
+    };
+    const tenant = await this.prisma.tenant.findFirst({
+      where: { id: input.tenantId },
+      select: {
+        id: true,
+        slug: true,
+        status: true,
+        users: {
+          where: {
+            isActive: true,
+            accessScope: 'NETWORK',
+            role: { in: [...scheduledPipelineActorRoles] },
+          },
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            role: true,
+            customRoleId: true,
+            isPlatformAdmin: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+    if (!tenant || tenant.status !== TenantLifecycleStatus.ACTIVE) {
+      return { ...result, status: 'SKIPPED', reason: 'Tenant is not active.' };
+    }
+    const admission = await this.tenantExecutionAdmission.evaluate(
+      tenant.id,
+      gamificationWriteRequirements,
+    );
+    const denial = tenantBackgroundExecutionDenialNote(
+      admission,
+      'GUEST_GAMIFICATION_SUPPLEMENTAL_PIPELINE',
+    );
+    if (denial) {
+      return { ...result, status: 'SKIPPED', reason: denial };
+    }
+    const actor = this.pickScheduledPipelineActor(tenant.users);
+    if (!actor) {
+      return {
+        ...result,
+        status: 'SKIPPED',
+        reason: 'No audit-safe tenant actor is available.',
+      };
+    }
+    const user: AuthenticatedUser = {
+      id: actor.id,
+      email: actor.email,
+      fullName: actor.fullName,
+      role: actor.role,
+      customRoleId: actor.customRoleId,
+      isPlatformAdmin: actor.isPlatformAdmin,
+      tenantId: tenant.id,
+      tenantSlug: tenant.slug,
+      tenantStatus: tenant.status,
+      accessScope: 'NETWORK',
+      allowedStoreIds: [],
+    };
+
+    const [missions, stores] = await Promise.all([
+      this.prisma.guestGameMission.findMany({
+        where: {
+          tenantId: tenant.id,
+          status: 'ACTIVE',
+          definitionVersion: guestGameMissionDefinitionVersion,
+          evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
+          triggerKind: 'FACEIT_MATCH',
+        },
+        select: {
+          id: true,
+          createdAt: true,
+          periodFrom: true,
+          periodTo: true,
+          conditions: true,
+          storeIds: true,
+        },
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId: tenant.id, isActive: true },
+        select: { id: true, externalDomain: true, timeZone: true },
+      }),
+    ]);
+    if (!missions.length) {
+      return {
+        ...result,
+        status: 'SKIPPED',
+        reason: 'No active FACEIT_MATCH missions.',
+      };
+    }
+    const ruleExternalDomains = new Map<string, readonly string[]>(
+      missions.map((mission) => [
+        mission.id,
+        supplementalRuleExternalDomains(
+          guestGameStringArray(mission.storeIds),
+          guestGameStringArray(jsonRecord(mission.conditions).externalDomains),
+          stores,
+        ),
+      ]),
+    );
+    const ruleDomainTimeZones = new Map<
+      string,
+      ReadonlyMap<string, string | null>
+    >(
+      missions.map((mission) => [
+        mission.id,
+        new Map(
+          Object.entries(
+            guestGameRuleDomainTimeZones(
+              guestGameStringArray(mission.storeIds),
+              stores,
+            ),
+          ),
+        ),
+      ]),
+    );
+
+    const matches = await this.prisma.guestGameExternalMatch.findMany({
+      where: {
+        tenantId: tenant.id,
+        provider: 'FACEIT',
+        decision: 'COUNTED',
+        eventId: null,
+        decisionReason: null,
+        externalDomain: { not: null },
+      },
+      include: {
+        profile: { select: { id: true, guestId: true } },
+        account: { select: { externalId: true, status: true } },
+      },
+      orderBy: [{ finishedAt: 'asc' }, { id: 'asc' }],
+      take: limit,
+    });
+
+    for (const match of matches) {
+      const externalDomain = match.externalDomain;
+      if (!externalDomain) continue;
+      const stats = jsonRecord(match.stats);
+      const session = jsonRecord(stats.session as Prisma.JsonValue | null);
+      const sessionStoreId = nullableString(session.storeId);
+      const ruleIds = missions
+        .filter((mission) => {
+          // A match belongs to one club; a mission for other clubs of the
+          // same Langame domain does not count it.
+          const missionStoreIds = guestGameStringArray(mission.storeIds);
+          if (
+            sessionStoreId &&
+            missionStoreIds.length &&
+            !missionStoreIds.includes(sessionStoreId)
+          ) {
+            return false;
+          }
+          return supplementalMissionMatchesFact(
+            mission,
+            stores,
+            externalDomain,
+            match.finishedAt,
+          );
+        })
+        .map((mission) => mission.id);
+      result.checkedMatches += 1;
+      if (!ruleIds.length) {
+        // No mission covers this club or period: keep the row, mark it seen.
+        await this.prisma.guestGameExternalMatch.updateMany({
+          where: { id: match.id, tenantId: tenant.id, eventId: null },
+          data: { decisionReason: 'NO_MATCHING_MISSION' },
+        });
+        continue;
+      }
+      const externalMatch = guestGameExternalMatchStats(stats.match);
+      const stableId = `${match.externalMatchId}:${match.account.externalId}`;
+
+      try {
+        const processed = await this.processEvent(
+          user,
+          {
+            profileId: match.profileId,
+            guestId: match.profile.guestId,
+            storeId: sessionStoreId,
+            eventType: 'FACEIT_MATCH',
+            occurredAt: match.finishedAt.toISOString(),
+            sourceFactId: `faceit-match:${stableId}`,
+            sourceFactKind: 'FACEIT_MATCH',
+            sourceKind: 'FACEIT_MATCH',
+            externalDomain,
+            externalId: stableId,
+            externalMatch,
+            activeRulesOnly: true,
+            payload: {
+              externalMatch: externalMatch ? externalMatch : null,
+              journalId: match.id,
+              sessionExternalId: match.sessionExternalId,
+            },
+          },
+          {
+            allowedRuleIds: ruleIds,
+            evaluationMode: 'LIVE_SUPPLEMENTAL',
+            evaluatorVersion: 'faceit-match-v1',
+            ruleDomainTimeZones,
+            ruleExternalDomains,
+            originKey: `FACEIT:${stableId}`,
+            suppressLedgerShadow: true,
+          },
+        );
+        await this.prisma.guestGameExternalMatch.updateMany({
+          where: { id: match.id, tenantId: tenant.id, eventId: null },
+          data: { eventId: processed.event.id, decisionReason: null },
+        });
+        result.processedMatches += 1;
+        result.createdRewards += processed.summary.createdRewards;
+      } catch (error) {
+        result.failedMatches += 1;
+        await this.prisma.guestGameExternalMatch.updateMany({
+          where: { id: match.id, tenantId: tenant.id, eventId: null },
+          // A failing match goes to staff review instead of retrying forever.
+          data: {
+            decision: 'REVIEW',
+            decisionReason:
+              `PROCESS_FAILED: ${pipelineErrorMessage(error)}`.slice(0, 500),
+          },
+        });
+      }
+    }
+
+    return result;
   }
 
   private async runSupplementalPipelineForTenant(
@@ -13556,6 +13816,7 @@ export class GuestGamificationService {
     const categoryName = nullableString(dto.categoryName) ?? null;
     const supplierName = nullableString(dto.supplierName) ?? null;
     const quantity = dryRunOptionalNumber(dto.quantity);
+    const externalMatch = guestGameExternalMatchStats(dto.externalMatch);
     const externalProvider = nullableString(dto.externalProvider) ?? null;
     const externalDomain = nullableString(dto.externalDomain) ?? null;
     const sourceKind = nullableString(dto.sourceKind) ?? null;
@@ -13707,6 +13968,7 @@ export class GuestGamificationService {
       categoryName,
       supplierName,
       quantity,
+      externalMatch,
       rewards,
       missionRewardEntitlements: missionEntitlementsAfterActivation,
       lootBoxLimitEntitlements,
@@ -13822,6 +14084,7 @@ export class GuestGamificationService {
         categoryName,
         supplierName,
         quantity,
+        ...(externalMatch ? { externalMatch } : {}),
       },
       summary: {
         checkedRules: rules.length,
@@ -31122,6 +31385,7 @@ function processRewardInputSnapshot(
     categoryName: nullableString(input.categoryName) ?? null,
     supplierName: nullableString(input.supplierName) ?? null,
     quantity: finiteJsonNumber(input.quantity) ?? null,
+    externalMatch: guestGameExternalMatchStats(input.externalMatch),
   };
 }
 
@@ -33641,6 +33905,7 @@ function storedEventToProgressEvent(row: {
     categoryName: nullableString(input.categoryName),
     supplierName: nullableString(input.supplierName),
     quantity: dryRunOptionalNumber(input.quantity),
+    externalMatch: guestGameExternalMatchStats(input.externalMatch),
   };
 }
 
@@ -33673,6 +33938,7 @@ function currentEventToProgressEvent(
     categoryName: context.categoryName,
     supplierName: context.supplierName,
     quantity: context.quantity,
+    externalMatch: context.externalMatch,
   };
 }
 
@@ -33707,6 +33973,7 @@ type DryRunContext = {
   categoryName: string | null;
   supplierName: string | null;
   quantity: number | null;
+  externalMatch: GuestGameExternalMatchStats | null;
   rewards: GuestGameReward[];
   missionRewardEntitlements: DryRunMissionRewardEntitlement[];
   lootBoxLimitEntitlements: DryRunMissionRewardEntitlement[];

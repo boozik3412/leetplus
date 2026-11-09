@@ -67,6 +67,14 @@ type WizardState = {
   checkInMode: "SINGLE" | "COUNT" | "PERIOD" | "STREAK";
   checkInCount: number;
   checkInDays: number;
+  faceitGoal: "MATCHES" | "WINS" | "KILLS" | "ACES";
+  faceitCount: number;
+  faceitRequireWin: boolean;
+  faceitMinKd: number;
+  faceitMinAdr: number;
+  faceitMinHsPercent: number;
+  faceitMinKills: number;
+  faceitMaps: string[];
   specificDayEnabled: boolean;
   specificTimeEnabled: boolean;
   periodicity: "NONE" | "DAILY" | "WEEKLY" | "MONTHLY";
@@ -103,6 +111,24 @@ const productGroupCatalogCache = new Map<
   string,
   GuestGameMissionProductGroupCatalog
 >();
+/** CS2 maps a FACEIT mission can be limited to (FACEIT map ids). */
+const faceitMapOptions = [
+  { id: "de_mirage", label: "Mirage" },
+  { id: "de_inferno", label: "Inferno" },
+  { id: "de_nuke", label: "Nuke" },
+  { id: "de_ancient", label: "Ancient" },
+  { id: "de_anubis", label: "Anubis" },
+  { id: "de_dust2", label: "Dust II" },
+  { id: "de_train", label: "Train" },
+  { id: "de_overpass", label: "Overpass" },
+  { id: "de_vertigo", label: "Vertigo" },
+] as const;
+const faceitGoalUnits: Record<WizardState["faceitGoal"], string> = {
+  MATCHES: "матчей",
+  WINS: "побед",
+  KILLS: "убийств",
+  ACES: "эйсов",
+};
 const missionCoverWidth = 1200;
 const missionCoverHeight = 640;
 const missionCoverMaxBytes = 2 * 1024 * 1024;
@@ -803,6 +829,7 @@ function ConditionsStep(props: {
               <option value="PRODUCT_PURCHASE">Покупка</option>
               <option value="BALANCE_TOPUP">Пополнение баланса</option>
               <option value="CHECK_IN">Чекин</option>
+              <option value="FACEIT_MATCH">Матчи FACEIT CS2</option>
             </select>
           </Field>
           <Field label="Видимость">
@@ -939,6 +966,9 @@ function ConditionsStep(props: {
           ) : null}
           {form.taskType === "CHECK_IN" ? (
             <CheckInLogic form={form} setForm={setForm} />
+          ) : null}
+          {form.taskType === "FACEIT_MATCH" ? (
+            <FaceitMatchLogic form={form} setForm={setForm} />
           ) : null}
         </div>
       </section>
@@ -1429,6 +1459,136 @@ function TopupLogic({
         клубе домена {domains.join(", ") || "выбранных клубов"} выполнит это
         задание независимо от конкретного клуба. Источник: игровой журнал,
         второй боевой слой.
+      </div>
+      <CommonSchedule form={form} setForm={setForm} />
+    </div>
+  );
+}
+
+function FaceitMatchLogic({ form, setForm }: StateProps) {
+  const goalTargetLabel =
+    form.faceitGoal === "KILLS"
+      ? "Сколько убийств набрать"
+      : form.faceitGoal === "ACES"
+        ? "Сколько эйсов сделать"
+        : form.faceitGoal === "WINS"
+          ? "Сколько матчей выиграть"
+          : "Сколько матчей сыграть";
+  return (
+    <div className="space-y-4">
+      <div className={subsectionClass}>
+        <SubTitle>Цель</SubTitle>
+        <CompactScenarios
+          values={[
+            { id: "MATCHES", label: "Матчи", hint: "Сыграть N матчей" },
+            { id: "WINS", label: "Победы", hint: "Выиграть N матчей" },
+            { id: "KILLS", label: "Убийства", hint: "Набрать N за все матчи" },
+            { id: "ACES", label: "Эйсы", hint: "5 убийств за раунд" },
+          ]}
+          value={form.faceitGoal}
+          onChange={(value) =>
+            setForm((state) => ({
+              ...state,
+              faceitGoal: value as WizardState["faceitGoal"],
+            }))
+          }
+        />
+        <div className="mt-3">
+          <NumberField
+            label={goalTargetLabel}
+            min={1}
+            value={form.faceitCount}
+            onChange={(faceitCount) =>
+              setForm((state) => ({ ...state, faceitCount }))
+            }
+          />
+        </div>
+      </div>
+      <div className={subsectionClass}>
+        <SubTitle>Какой матч засчитывать</SubTitle>
+        <p className="mb-3 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          Оставьте 0, чтобы не ограничивать показатель.
+        </p>
+        {form.faceitGoal !== "WINS" ? (
+          <div className="mb-3">
+            <Toggle
+              label="Только победные матчи"
+              checked={form.faceitRequireWin}
+              onChange={(faceitRequireWin) =>
+                setForm((state) => ({ ...state, faceitRequireWin }))
+              }
+            />
+          </div>
+        ) : null}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <NumberField
+            label="K/D за матч не ниже"
+            step={0.1}
+            value={form.faceitMinKd}
+            onChange={(faceitMinKd) =>
+              setForm((state) => ({ ...state, faceitMinKd }))
+            }
+          />
+          <NumberField
+            label="ADR за матч не ниже"
+            value={form.faceitMinAdr}
+            onChange={(faceitMinAdr) =>
+              setForm((state) => ({ ...state, faceitMinAdr }))
+            }
+          />
+          <NumberField
+            label="Убийств в голову не меньше, %"
+            value={form.faceitMinHsPercent}
+            onChange={(faceitMinHsPercent) =>
+              setForm((state) => ({ ...state, faceitMinHsPercent }))
+            }
+          />
+          <NumberField
+            label="Убийств за матч не меньше"
+            value={form.faceitMinKills}
+            onChange={(faceitMinKills) =>
+              setForm((state) => ({ ...state, faceitMinKills }))
+            }
+          />
+        </div>
+        <fieldset className="mt-4">
+          <legend className="text-sm font-semibold">
+            Карты{" "}
+            <span className="font-normal text-zinc-500">
+              (не выбрано ни одной — подходит любая)
+            </span>
+          </legend>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {faceitMapOptions.map((map) => {
+              const selected = form.faceitMaps.includes(map.id);
+              return (
+                <button
+                  key={map.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() =>
+                    setForm((state) => ({
+                      ...state,
+                      faceitMaps: selected
+                        ? state.faceitMaps.filter((id) => id !== map.id)
+                        : [...state.faceitMaps, map.id],
+                    }))
+                  }
+                  className={`min-h-11 rounded-full border px-3 text-sm font-semibold transition ${selected ? "border-emerald-500 bg-emerald-100/70 dark:bg-emerald-950/40" : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"}`}
+                >
+                  {map.label}
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+      </div>
+      <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-6 text-amber-950 dark:border-amber-900 dark:bg-amber-950/25 dark:text-amber-100">
+        <strong>Засчитываются только матчи в клубе.</strong> Матч FACEIT CS2
+        5×5 должен пройти целиком во время оплаченной сессии гостя в одном из
+        выбранных клубов, а у гостя должен быть привязан Steam в разделе
+        «Игровые аккаунты». Матчи появляются в задании через 10–20 минут после
+        окончания. Матч против другого гостя сети уходит на проверку.
       </div>
       <CommonSchedule form={form} setForm={setForm} />
     </div>
@@ -2277,11 +2437,13 @@ function NumberField({
   label,
   value,
   min = 0,
+  step,
   onChange,
 }: {
   label: string;
   value: number;
   min?: number;
+  step?: number;
   onChange: (value: number) => void;
 }) {
   return (
@@ -2290,6 +2452,7 @@ function NumberField({
         className={fieldClass}
         type="number"
         min={min}
+        step={step}
         value={value}
         onChange={(event) =>
           onChange(Math.max(min, Number(event.target.value) || min))
@@ -2557,6 +2720,21 @@ function buildWizardDto(
       hours: form.specificTimeEnabled && form.hours ? [form.hours] : [],
       unit: form.checkInMode === "STREAK" ? "дней" : "чекинов",
     });
+  if (form.taskType === "FACEIT_MATCH")
+    Object.assign(metric, {
+      matchGoal: form.faceitGoal,
+      count: form.faceitCount,
+      target: form.faceitCount,
+      unit: faceitGoalUnits[form.faceitGoal],
+      matchFilters: {
+        requireWin: form.faceitGoal === "WINS" || form.faceitRequireWin,
+        minKd: form.faceitMinKd || undefined,
+        minAdr: form.faceitMinAdr || undefined,
+        minHsPercent: form.faceitMinHsPercent || undefined,
+        minKills: form.faceitMinKills || undefined,
+        maps: form.faceitMaps.length ? form.faceitMaps : undefined,
+      },
+    });
   const selectedLootBox = lootBoxes.find((item) => item.id === form.lootBoxId);
   const selectedPromo = promos.find((item) => item.id === form.promoCodeId);
   return {
@@ -2633,7 +2811,9 @@ function buildPreview(
             : form.topupMode === "COUNT"
               ? form.topupCount
               : 1
-          : form.taskType === "CHECK_IN"
+          : form.taskType === "FACEIT_MATCH"
+            ? form.faceitCount
+            : form.taskType === "CHECK_IN"
             ? form.checkInMode === "STREAK"
               ? form.checkInDays
               : form.checkInMode === "SINGLE"
@@ -2658,7 +2838,9 @@ function buildPreview(
             ? form.topupMode === "PERIOD_TOTAL"
               ? "₽"
               : "пополнений"
-            : form.checkInMode === "STREAK"
+            : form.taskType === "FACEIT_MATCH"
+              ? faceitGoalUnits[form.faceitGoal]
+              : form.checkInMode === "STREAK"
               ? "дней"
               : "чекинов";
   return {
@@ -2731,6 +2913,7 @@ function previewCondition(form: WizardState) {
       : form.topupMode === "COUNT"
         ? `Пополнить баланс ${form.topupCount} раз, каждый раз ${form.topupComparison === "EXACT" ? "ровно на" : "не менее чем на"} ${form.topupAmount} ₽`
         : `Пополнить баланс ${form.topupComparison === "EXACT" ? "ровно на" : "не менее чем на"} ${form.topupAmount} ₽`;
+  if (form.taskType === "FACEIT_MATCH") return faceitPreviewCondition(form);
   const checkInAction =
     form.checkInMode === "STREAK"
       ? `Сделать чекин ${form.checkInDays} дней подряд`
@@ -2750,6 +2933,36 @@ function previewCondition(form: WizardState) {
   );
 }
 
+function faceitPreviewCondition(form: WizardState) {
+  const count = form.faceitCount;
+  const action =
+    form.faceitGoal === "WINS"
+      ? `Выиграть ${count} ${faceitPlural(count, "матч", "матча", "матчей")} FACEIT CS2`
+      : form.faceitGoal === "KILLS"
+        ? `Сделать ${count} ${faceitPlural(count, "убийство", "убийства", "убийств")} в матчах FACEIT CS2`
+        : form.faceitGoal === "ACES"
+          ? `Сделать ${count} ${faceitPlural(count, "эйс", "эйса", "эйсов")} в матчах FACEIT CS2`
+          : `Сыграть ${count} ${faceitPlural(count, "матч", "матча", "матчей")} FACEIT CS2`;
+  const details = [
+    form.faceitGoal !== "WINS" && form.faceitRequireWin ? "только победы" : null,
+    form.faceitMinKills ? `от ${form.faceitMinKills} убийств за матч` : null,
+    form.faceitMinKd ? `K/D от ${form.faceitMinKd}` : null,
+    form.faceitMinAdr ? `ADR от ${form.faceitMinAdr}` : null,
+    form.faceitMinHsPercent ? `от ${form.faceitMinHsPercent}% в голову` : null,
+    form.faceitMaps.length ? `карты: ${form.faceitMaps.join(", ")}` : null,
+  ].filter(Boolean);
+
+  return `${action} в клубе во время своей сессии${details.length ? ` · ${details.join(" · ")}` : ""}`;
+}
+
+function faceitPlural(value: number, one: string, few: string, many: string) {
+  const mod10 = Math.abs(value) % 10;
+  const mod100 = Math.abs(value) % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
 function withWizardHourlyExtensionNotice(
   label: string,
   sessionType: WizardState["sessionType"],
@@ -2766,7 +2979,9 @@ function logicSubtitle(taskType: TaskType) {
         ? "Условие проверяется по положительным фактам покупок, привязанным к гостю."
         : taskType === "BALANCE_TOPUP"
           ? "Условие проверяется по успешным пополнениям из игрового журнала."
-          : "Условие проверяется по успешным чекинам с календарём клуба.";
+          : taskType === "FACEIT_MATCH"
+            ? "Условие проверяется по матчам FACEIT CS2, сыгранным в клубе во время сессии гостя."
+            : "Условие проверяется по успешным чекинам с календарём клуба.";
 }
 function rewardReady(form: WizardState) {
   return (
@@ -2845,6 +3060,7 @@ function wizardStateFromDefinition(
   const appearance = recordValue(definition.appearance);
   const taskType = wizardTaskType(definition.taskType, defaults.taskType);
   const weekdays = numberListValue(metric.weekdays);
+  const matchFilters = recordValue(metric.matchFilters);
   const hours = stringListValue(metric.hours);
   const productIds = stringListValue(metric.productIds);
   const externalProductIds = stringListValue(metric.externalProductIds);
@@ -2975,6 +3191,23 @@ function wizardStateFromDefinition(
       ),
       checkInCount: numberValue(metric.count, defaults.checkInCount),
       checkInDays: numberValue(metric.days, defaults.checkInDays),
+      faceitGoal: enumValue(
+        stringValue(metric.matchGoal),
+        ["MATCHES", "WINS", "KILLS", "ACES"] as const,
+        defaults.faceitGoal,
+      ),
+      faceitCount: numberValue(
+        metric.count ?? metric.target,
+        defaults.faceitCount,
+      ),
+      faceitRequireWin: matchFilters.requireWin === true,
+      faceitMinKd: numberValue(matchFilters.minKd, 0),
+      faceitMinAdr: numberValue(matchFilters.minAdr, 0),
+      faceitMinHsPercent: numberValue(matchFilters.minHsPercent, 0),
+      faceitMinKills: numberValue(matchFilters.minKills, 0),
+      faceitMaps: stringListValue(matchFilters.maps).filter((map) =>
+        faceitMapOptions.some((option) => option.id === map),
+      ),
       specificDayEnabled: weekdays.length > 0,
       specificTimeEnabled: hours.length > 0,
       periodicity: enumValue(
@@ -3069,6 +3302,7 @@ function wizardTaskType(value: string, fallback: TaskType) {
       "PRODUCT_PURCHASE",
       "BALANCE_TOPUP",
       "CHECK_IN",
+      "FACEIT_MATCH",
     ] as const,
     fallback,
   );
@@ -3201,6 +3435,14 @@ function initialState(
     checkInMode: "SINGLE",
     checkInCount: 5,
     checkInDays: 7,
+    faceitGoal: "MATCHES",
+    faceitCount: 3,
+    faceitRequireWin: false,
+    faceitMinKd: 0,
+    faceitMinAdr: 0,
+    faceitMinHsPercent: 0,
+    faceitMinKills: 0,
+    faceitMaps: [],
     specificDayEnabled: false,
     specificTimeEnabled: false,
     periodicity: "NONE",

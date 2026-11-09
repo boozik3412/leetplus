@@ -224,5 +224,12 @@ export function gameMissionPreviewData(mission: GameMission): GuestMissionPrevie
     products: mission.productNames,
     productMode: mission.productMode ?? undefined,
     minimumAmount: mission.minimumAmount,
+    conditionLink:
+      normalizeGameRuleTrigger(mission.triggerKind) === "FACEIT_MATCH"
+        ? {
+            href: "/game/accounts",
+            label: "Матчи засчитываются после привязки Steam",
+          }
+        : null,
   };
 }

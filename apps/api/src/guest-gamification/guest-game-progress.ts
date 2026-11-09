@@ -15,6 +15,34 @@ export type GuestGameProgressAggregation =
 
 export type GuestGameProgressPeriodicity = 'DAILY' | 'WEEKLY' | 'MONTHLY';
 
+/**
+ * Facts of one external game match (FACEIT CS2) of the guest. Only matches
+ * inside a paid club session reach the engine; see GuestGameExternalMatch.
+ */
+export type GuestGameExternalMatchStats = {
+  provider: 'FACEIT';
+  game: 'cs2';
+  result: 'WIN' | 'LOSS' | null;
+  kills: number | null;
+  deaths: number | null;
+  assists: number | null;
+  kd: number | null;
+  adr: number | null;
+  hsPercent: number | null;
+  mvps: number | null;
+  aces: number | null;
+  map: string | null;
+};
+
+export const GUEST_GAME_EXTERNAL_MATCH_SUM_FIELDS = [
+  'kills',
+  'aces',
+  'mvps',
+] as const;
+
+export type GuestGameExternalMatchSumField =
+  (typeof GUEST_GAME_EXTERNAL_MATCH_SUM_FIELDS)[number];
+
 export type GuestGameProgressEvent = {
   eventType: string;
   occurredAt: Date;
@@ -41,6 +69,7 @@ export type GuestGameProgressEvent = {
   categoryName?: string | null;
   supplierName?: string | null;
   quantity?: number | null;
+  externalMatch?: GuestGameExternalMatchStats | null;
 };
 
 export type GuestGameProgressRule = {
@@ -187,6 +216,7 @@ export function evaluateGuestGameProgress(
     rule.timeZone,
     resolvedTarget,
     localDateKey(referenceEvent.occurredAt, rule.timeZone),
+    externalMatchSumField(metric),
   );
   const productCoverageComplete = productCoverageMatches(
     conditions,
@@ -525,7 +555,101 @@ function matchesProgressEvent(
     return false;
   }
 
+  if (!matchesExternalMatchFilters(metric, event)) {
+    return false;
+  }
+
   return true;
+}
+
+function externalMatchSumField(
+  metric: Record<string, unknown>,
+): GuestGameExternalMatchSumField | null {
+  const field = progressString(metric.sumField);
+  return GUEST_GAME_EXTERNAL_MATCH_SUM_FIELDS.includes(
+    field as GuestGameExternalMatchSumField,
+  )
+    ? (field as GuestGameExternalMatchSumField)
+    : null;
+}
+
+/**
+ * Filters of an external-match mission (`metric.matchFilters`). A mission
+ * with filters or a match sum field never counts an event without match facts.
+ */
+function matchesExternalMatchFilters(
+  metric: Record<string, unknown>,
+  event: GuestGameProgressEvent,
+) {
+  const filters = progressRecord(metric.matchFilters);
+  const requireWin = filters.requireWin === true;
+  const minimums: Array<[keyof GuestGameExternalMatchStats, unknown]> = [
+    ['kills', filters.minKills],
+    ['kd', filters.minKd],
+    ['adr', filters.minAdr],
+    ['hsPercent', filters.minHsPercent],
+    ['aces', filters.minAces],
+  ];
+  const maps = progressStringValues(filters.maps).map((map) =>
+    map.toLowerCase(),
+  );
+  const active =
+    requireWin ||
+    maps.length > 0 ||
+    minimums.some(([, value]) => progressNumber(value) !== null) ||
+    externalMatchSumField(metric) !== null;
+
+  if (!active) {
+    return true;
+  }
+
+  const match = event.externalMatch;
+  if (!match) {
+    return false;
+  }
+  if (requireWin && match.result !== 'WIN') {
+    return false;
+  }
+  if (maps.length && !(match.map && maps.includes(match.map.toLowerCase()))) {
+    return false;
+  }
+
+  return minimums.every(([field, value]) => {
+    const minimum = progressNumber(value);
+    if (minimum === null) return true;
+    const actual = match[field];
+    return typeof actual === 'number' && actual >= minimum;
+  });
+}
+
+/** Reads match facts stored on a game event; null when absent or malformed. */
+export function guestGameExternalMatchStats(
+  value: unknown,
+): GuestGameExternalMatchStats | null {
+  const record = progressRecord(value);
+  if (record.provider !== 'FACEIT' || record.game !== 'cs2') {
+    return null;
+  }
+  const number = (key: string) => {
+    const parsed = progressNumber(record[key]);
+    return parsed === null ? null : roundProgress(parsed);
+  };
+  const result = progressString(record.result)?.toUpperCase();
+
+  return {
+    provider: 'FACEIT',
+    game: 'cs2',
+    result: result === 'WIN' || result === 'LOSS' ? result : null,
+    kills: number('kills'),
+    deaths: number('deaths'),
+    assists: number('assists'),
+    kd: number('kd'),
+    adr: number('adr'),
+    hsPercent: number('hsPercent'),
+    mvps: number('mvps'),
+    aces: number('aces'),
+    map: progressString(record.map)?.slice(0, 64) ?? null,
+  };
 }
 
 function isSessionDurationEvent(event: GuestGameProgressEvent) {
@@ -541,9 +665,19 @@ function progressValue(
   timeZone?: string | null,
   target?: number,
   referenceDateKey?: string,
+  sumField?: GuestGameExternalMatchSumField | null,
 ) {
   if (aggregation === 'exists') {
     return events.length > 0 ? 1 : 0;
+  }
+
+  if (aggregation === 'sum' && sumField) {
+    return roundProgress(
+      events.reduce(
+        (sum, event) => sum + Math.max(0, event.externalMatch?.[sumField] ?? 0),
+        0,
+      ),
+    );
   }
 
   if (aggregation === 'sum') {

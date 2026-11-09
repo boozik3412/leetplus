@@ -12,7 +12,7 @@ import { HourlySessionSourceNote } from "@/components/hourly-session-source-note
 
 export type BattlePassStepConditionValue = {
   schemaVersion?: number;
-  taskType: GuestGameMissionWizardTaskType | "APP_OPEN";
+  taskType: Exclude<GuestGameMissionWizardTaskType, "FACEIT_MATCH">;
   sessionType: "ANY" | "HOURLY" | "PACKAGE_OR_SUBSCRIPTION";
   target: number;
   windowDays: number;

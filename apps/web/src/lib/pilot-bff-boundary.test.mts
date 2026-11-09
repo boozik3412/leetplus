@@ -320,6 +320,50 @@ test("keeps guest portal POST bodies route-scoped before upstream fetch", async 
   );
   assert.deepEqual(
     projectGuestPortalPostBody(
+      ["session", "game-accounts", "steam-verify"],
+      JSON.stringify({ state: "v1.x", openid: { "openid.mode": "id_res" } }),
+    ),
+    {
+      ok: true,
+      body: JSON.stringify({ state: "v1.x", openid: { "openid.mode": "id_res" } }),
+    },
+  );
+  assert.deepEqual(
+    projectGuestPortalPostBody(
+      ["session", "game-accounts", "steam-verify"],
+      JSON.stringify({ state: "v1.x", steamId: "76561198000000001" }),
+    ),
+    {
+      ok: false,
+      status: 400,
+      message: "Недопустимые поля запроса гостевого модуля.",
+    },
+  );
+  assert.deepEqual(
+    projectGuestPortalPostBody(["session", "game-accounts", "steam-start"], ""),
+    { ok: true, body: "" },
+  );
+  assert.deepEqual(
+    projectGuestPortalPostBody(
+      ["session", "game-accounts", "steam-unlink"],
+      JSON.stringify({ profileId: "other" }),
+    ),
+    {
+      ok: false,
+      status: 400,
+      message: "Недопустимые поля запроса гостевого модуля.",
+    },
+  );
+  assert.deepEqual(
+    projectGuestPortalPostBody(["session", "game-accounts", "steam-link"], ""),
+    {
+      ok: false,
+      status: 404,
+      message: "Маршрут гостевого модуля недоступен через web BFF.",
+    },
+  );
+  assert.deepEqual(
+    projectGuestPortalPostBody(
       ["session", "tutorial"],
       JSON.stringify({ version: 1, profileId: "other" }),
     ),

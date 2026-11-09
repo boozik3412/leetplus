@@ -8692,7 +8692,7 @@ describe('GuestGamificationService', () => {
         limits: { totalPerDay: 60, maxPendingRewards: 1 },
         budgetAmount: 900000,
         sessionType: 'packet_hours',
-      } as any);
+      });
 
       expect(prisma.guestGameRewardWalletItem.count).not.toHaveBeenCalled();
       expect(prisma.guestGameLootBox.update).toHaveBeenCalled();
@@ -26450,5 +26450,128 @@ describe('Battle Pass step with an expired reward', () => {
       kind: 'SEASON',
       battlePassStep: 2,
     });
+  });
+});
+
+describe('GuestGamificationService FACEIT match pipeline', () => {
+  const faceitMission = {
+    id: 'mission-faceit-1',
+    createdAt: new Date('2026-11-01T00:00:00.000Z'),
+    periodFrom: new Date('2026-11-01T00:00:00.000Z'),
+    periodTo: new Date('2026-12-01T00:00:00.000Z'),
+    conditions: {
+      activatedAt: '2026-11-01T00:00:00.000Z',
+      taskType: 'FACEIT_MATCH',
+    },
+    storeIds: ['store-club'],
+  };
+  const journalRow = (overrides: Record<string, unknown> = {}) => ({
+    id: 'journal-1',
+    tenantId: user.tenantId,
+    profileId: 'profile-1',
+    accountId: 'account-faceit',
+    externalMatchId: 'm-1',
+    finishedAt: new Date('2026-11-09T13:10:00.000Z'),
+    externalDomain: '46.langamepro.ru',
+    sessionExternalId: 'lg-1',
+    stats: {
+      match: { provider: 'FACEIT', game: 'cs2', result: 'WIN', kills: 21 },
+      session: { storeId: 'store-club' },
+    },
+    profile: { id: 'profile-1', guestId: 'guest-1' },
+    account: { externalId: 'faceit-me', status: 'ACTIVE' },
+    ...overrides,
+  });
+
+  function setup(rows: unknown[]) {
+    const { service, prisma } = createService();
+    const journal = {
+      findMany: jest.fn().mockResolvedValue(rows),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    };
+    Object.assign(prisma, { guestGameExternalMatch: journal });
+    prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
+    prisma.guestGameMission.findMany.mockResolvedValue([faceitMission]);
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-club',
+        externalDomain: '46.langamepro.ru',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+      {
+        id: 'store-other',
+        externalDomain: '46.langamepro.ru',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+    ]);
+    const process = jest
+      .spyOn(service, 'processEvent')
+      .mockResolvedValue(processResult());
+    return { service, prisma, journal, process };
+  }
+
+  it('turns a counted match into one idempotent FACEIT_MATCH event', async () => {
+    const { service, journal, process } = setup([journalRow()]);
+
+    const result = await service.runExternalMatchPipelineScheduled({
+      tenantId: user.tenantId,
+    });
+
+    expect(result).toMatchObject({ processedMatches: 1, failedMatches: 0 });
+    const [, dto, options] = process.mock.calls[0];
+    expect(dto).toMatchObject({
+      profileId: 'profile-1',
+      eventType: 'FACEIT_MATCH',
+      storeId: 'store-club',
+      externalDomain: '46.langamepro.ru',
+      externalMatch: { result: 'WIN', kills: 21 },
+    });
+    expect(options).toMatchObject({
+      allowedRuleIds: [faceitMission.id],
+      evaluationMode: 'LIVE_SUPPLEMENTAL',
+      originKey: 'FACEIT:m-1:faceit-me',
+    });
+    expect(journal.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ eventId: null }) as unknown,
+      }),
+    );
+  });
+
+  it('does not count a match from another club of the same domain', async () => {
+    const { service, journal, process } = setup([
+      journalRow({
+        stats: {
+          match: { provider: 'FACEIT', game: 'cs2', result: 'WIN' },
+          session: { storeId: 'store-other' },
+        },
+      }),
+    ]);
+
+    await service.runExternalMatchPipelineScheduled({
+      tenantId: user.tenantId,
+    });
+
+    expect(process).not.toHaveBeenCalled();
+    expect(journal.updateMany).toHaveBeenCalledWith({
+      where: { id: 'journal-1', tenantId: user.tenantId, eventId: null },
+      data: { decisionReason: 'NO_MATCHING_MISSION' },
+    });
+  });
+
+  it('sends a match that fails to process to review', async () => {
+    const { service, journal, process } = setup([journalRow()]);
+    process.mockRejectedValueOnce(new Error('boom'));
+
+    const result = await service.runExternalMatchPipelineScheduled({
+      tenantId: user.tenantId,
+    });
+
+    expect(result.failedMatches).toBe(1);
+    expect(journal.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ decision: 'REVIEW' }) as unknown,
+      }),
+    );
   });
 });

@@ -399,3 +399,74 @@ describe('guest mission wizard contract', () => {
     });
   });
 });
+
+describe('FACEIT match mission contract', () => {
+  it('reads FACEIT matches only from the worker journal', () => {
+    expect(missionEvaluationPolicy('FACEIT_MATCH')).toBe('LEDGER_SUPPLEMENTAL');
+  });
+
+  it('normalizes a kills goal with filters and drops junk', () => {
+    const conditions = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'FACEIT_MATCH',
+      conditions: {
+        sessionType: 'HOURLY',
+        metric: {
+          matchGoal: 'KILLS',
+          count: 100,
+          matchFilters: {
+            minKd: 1.1,
+            minAdr: 9999,
+            minKills: -3,
+            maps: ['de_mirage', 'DROP TABLE', 'De_Inferno'],
+            surprise: true,
+          },
+        },
+      },
+    });
+
+    expect(conditions).toMatchObject({
+      taskType: 'FACEIT_MATCH',
+      sessionType: 'ANY',
+      metric: {
+        eventTypes: ['FACEIT_MATCH'],
+        matchGoal: 'KILLS',
+        aggregation: 'sum',
+        sumField: 'kills',
+        unit: 'убийств',
+        target: 100,
+        matchFilters: {
+          minKd: 1.1,
+          minAdr: 500,
+          maps: ['de_mirage', 'de_inferno'],
+        },
+      },
+    });
+    const filters = (conditions.metric as Record<string, unknown>)
+      .matchFilters as Record<string, unknown>;
+    expect(filters).not.toHaveProperty('minKills');
+    expect(filters).not.toHaveProperty('surprise');
+  });
+
+  it('turns a wins goal into a counted match that requires a win', () => {
+    const conditions = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'FACEIT_MATCH',
+      conditions: { metric: { matchGoal: 'WINS', count: 5 } },
+    });
+
+    expect(conditions.metric).toMatchObject({
+      aggregation: 'count',
+      target: 5,
+      matchFilters: { requireWin: true },
+    });
+    expect(conditions.metric).not.toHaveProperty('sumField');
+    expect(
+      validateMissionWizard({
+        ...common,
+        taskType: 'FACEIT_MATCH',
+        conditions: { metric: { matchGoal: 'WINS', count: 5 } },
+      }),
+    ).toMatchObject({ sourceLabel: 'Журнал матчей FACEIT по сессиям в клубе' });
+  });
+});

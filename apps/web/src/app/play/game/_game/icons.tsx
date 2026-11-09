@@ -157,3 +157,20 @@ export function ExitIcon() {
     </svg>
   );
 }
+
+export function GamepadIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6 11h4M8 9v4M15 12h.01M18 10h.01" />
+      <path d="M17.3 5H6.7a4 4 0 0 0-3.96 3.43l-.7 5A3 3 0 0 0 5 17c.8 0 1.56-.32 2.12-.88L9 14.25h6l1.88 1.87A3 3 0 0 0 21.96 13.43l-.7-5A4 4 0 0 0 17.3 5z" />
+    </svg>
+  );
+}

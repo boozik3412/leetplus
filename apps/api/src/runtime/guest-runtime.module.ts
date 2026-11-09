@@ -9,6 +9,7 @@ import { GuestBonusLedgerService } from '../guest-gamification/guest-bonus-ledge
 import { GuestGamePublicMediaController } from '../guest-gamification/guest-game-media.controller';
 import { GuestGameMediaService } from '../guest-gamification/guest-game-media.service';
 import { GuestGamificationService } from '../guest-gamification/guest-gamification.service';
+import { GuestGameAccountsService } from '../guest-game-accounts/guest-game-accounts.service';
 import { GuestLeaderboardReadService } from '../guest-leaderboard/guest-leaderboard-read.service';
 import { GuestPortalController } from '../guest-portal/guest-portal.controller';
 import { GuestPortalService } from '../guest-portal/guest-portal.service';
@@ -75,6 +76,7 @@ const disabledBonusLedgerScheduler = {
     GuestGamificationService,
     GuestActivityLedgerService,
     GuestLeaderboardReadService,
+    GuestGameAccountsService,
     GuestPortalService,
     GuestSupportService,
   ],

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 export type GuestMissionPreviewTheme =
@@ -26,6 +27,8 @@ export type GuestMissionPreviewData = {
   products?: string[];
   productMode?: "ANY" | "ALL";
   minimumAmount?: number | null;
+  /** A step the guest must take first, e.g. linking Steam for FACEIT missions. */
+  conditionLink?: { href: string; label: string } | null;
 };
 
 const missionIconLabels = {
@@ -349,6 +352,14 @@ export function GuestMissionPreview({
             <div className="space-y-4 p-5">
               <PreviewBlock label="Условие" palette={palette} variant="plain">
                 <p className="text-sm font-bold text-white">{data.condition}</p>
+                {data.conditionLink ? (
+                  <Link
+                    href={data.conditionLink.href}
+                    className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-emerald-300 underline underline-offset-4 hover:text-emerald-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
+                  >
+                    {data.conditionLink.label}
+                  </Link>
+                ) : null}
               </PreviewBlock>
               {data.products?.length ? (
                 <PreviewBlock

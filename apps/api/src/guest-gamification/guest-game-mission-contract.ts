@@ -9,6 +9,7 @@ export const guestGameMissionTaskTypes = [
   'PRODUCT_PURCHASE',
   'BALANCE_TOPUP',
   'CHECK_IN',
+  'FACEIT_MATCH',
 ] as const;
 
 export type GuestGameMissionTaskType =
@@ -89,6 +90,7 @@ export function missionTaskTypeFromConditions(
     BALANCE_TOP_UP: 'BALANCE_TOPUP',
     CHECK_IN: 'CHECK_IN',
     CHECKIN: 'CHECK_IN',
+    FACEIT_MATCH: 'FACEIT_MATCH',
   };
 
   for (const candidate of candidates) {
@@ -104,7 +106,11 @@ export function missionTaskTypeFromConditions(
 export function missionEvaluationPolicy(
   taskType: GuestGameMissionTaskType,
 ): GuestGameMissionEvaluationPolicy {
-  if (taskType === 'BALANCE_TOPUP') return 'LEDGER_SUPPLEMENTAL';
+  // FACEIT matches arrive only from the worker's match journal, never from
+  // the live Langame pipeline.
+  if (taskType === 'BALANCE_TOPUP' || taskType === 'FACEIT_MATCH') {
+    return 'LEDGER_SUPPLEMENTAL';
+  }
   if (taskType === 'PLAY_TIME') return 'LIVE_WITH_LEDGER_FALLBACK';
   return 'LIVE_PRIMARY';
 }
@@ -116,6 +122,7 @@ export function missionWizardTrigger(taskType: GuestGameMissionTaskType) {
     PRODUCT_PURCHASE: 'PRODUCT_PURCHASE',
     BALANCE_TOPUP: 'BALANCE_TOPUP',
     CHECK_IN: 'CHECK_IN',
+    FACEIT_MATCH: 'FACEIT_MATCH',
   };
   return values[taskType];
 }
@@ -158,6 +165,7 @@ export function normalizeMissionWizardConditions(
     PRODUCT_PURCHASE: ['PRODUCT_PURCHASE', 'BAR_PURCHASE'],
     BALANCE_TOPUP: ['BALANCE_TOPUP'],
     CHECK_IN: ['CHECK_IN'],
+    FACEIT_MATCH: ['FACEIT_MATCH'],
   };
 
   const normalizedMetric: Record<string, unknown> = {
@@ -277,6 +285,10 @@ export function normalizeMissionWizardConditions(
           1);
   }
 
+  if (taskType === 'FACEIT_MATCH') {
+    Object.assign(normalizedMetric, normalizeFaceitMatchMetric(metric));
+  }
+
   return {
     ...jsonObject(source),
     schemaVersion: guestGameMissionDefinitionVersion,
@@ -288,7 +300,9 @@ export function normalizeMissionWizardConditions(
         ? 'HIDDEN'
         : 'VISIBLE',
     sessionType:
-      taskType === 'APP_OPEN' || taskType === 'BALANCE_TOPUP'
+      taskType === 'APP_OPEN' ||
+      taskType === 'BALANCE_TOPUP' ||
+      taskType === 'FACEIT_MATCH'
         ? 'ANY'
         : sessionType,
     ...(taskType === 'PRODUCT_PURCHASE'
@@ -373,6 +387,12 @@ export function validateMissionWizard(
     }
   }
 
+  if (taskType === 'FACEIT_MATCH') {
+    warnings.push(
+      'Засчитываются только матчи FACEIT CS2 5×5, сыгранные в клубе во время оплаченной сессии гостя, у которого привязан Steam.',
+    );
+  }
+
   if (taskType === 'BALANCE_TOPUP') {
     warnings.push(
       'Пополнение определяется внутри домена Langame независимо от конкретного клуба.',
@@ -417,13 +437,69 @@ export function validateMissionWizard(
     source:
       evaluationPolicy === 'LEDGER_SUPPLEMENTAL' ? 'ACTIVITY_LEDGER' : 'LIVE',
     sourceLabel:
-      evaluationPolicy === 'LEDGER_SUPPLEMENTAL'
+      taskType === 'FACEIT_MATCH'
+        ? 'Журнал матчей FACEIT по сессиям в клубе'
+        : evaluationPolicy === 'LEDGER_SUPPLEMENTAL'
         ? 'Игровой журнал, второй боевой слой'
         : evaluationPolicy === 'LIVE_WITH_LEDGER_FALLBACK'
           ? 'Боевой pipeline с резервным слоем игрового журнала'
           : 'Текущий боевой pipeline',
     blockers,
     warnings,
+  };
+}
+
+export const guestGameFaceitMatchGoals = [
+  'MATCHES',
+  'WINS',
+  'KILLS',
+  'ACES',
+] as const;
+
+export type GuestGameFaceitMatchGoal =
+  (typeof guestGameFaceitMatchGoals)[number];
+
+/**
+ * FACEIT_MATCH metric: a goal (matches, wins, kills or aces) and optional
+ * per-match filters. Unknown filter keys are dropped.
+ */
+function normalizeFaceitMatchMetric(metric: Record<string, unknown>) {
+  const goal = enumValue(metric.matchGoal, guestGameFaceitMatchGoals, 'MATCHES');
+  const filters = objectValue(metric.matchFilters);
+  const minimum = (value: unknown, max: number) => {
+    const parsed = numberValue(value);
+    return parsed !== null && parsed > 0 ? Math.min(parsed, max) : undefined;
+  };
+  const maps = stringArray(filters.maps)
+    .map((map) => map.toLowerCase())
+    .filter((map) => /^[a-z0-9_]{2,40}$/.test(map))
+    .slice(0, 12);
+  const matchFilters = jsonObject({
+    requireWin: goal === 'WINS' || filters.requireWin === true || undefined,
+    minKills: minimum(filters.minKills, 100),
+    minKd: minimum(filters.minKd, 20),
+    minAdr: minimum(filters.minAdr, 500),
+    minHsPercent: minimum(filters.minHsPercent, 100),
+    minAces: minimum(filters.minAces, 10),
+    maps: maps.length ? maps : undefined,
+  });
+  const units: Record<GuestGameFaceitMatchGoal, string> = {
+    MATCHES: 'матчей',
+    WINS: 'побед',
+    KILLS: 'убийств',
+    ACES: 'эйсов',
+  };
+
+  return {
+    matchGoal: goal,
+    matchFilters,
+    aggregation: goal === 'KILLS' || goal === 'ACES' ? 'sum' : 'count',
+    sumField: goal === 'KILLS' ? 'kills' : goal === 'ACES' ? 'aces' : null,
+    unit: units[goal],
+    target: Math.max(
+      1,
+      Math.floor(numberValue(metric.count) ?? numberValue(metric.target) ?? 1),
+    ),
   };
 }
 

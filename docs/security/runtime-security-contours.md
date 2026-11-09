@@ -2072,6 +2072,60 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   grant `leetplus_runtime` покрывают колонки; обслуживающий релиз их не читает,
   `lp rollback` безопасен. Голова identity-mail-worker — 196.
 
+### Игровые аккаунты гостя: Steam и FACEIT (09.11.2026)
+
+- Public guest: `GET /guest-portal/session/game-accounts` (READ,
+  `PERSISTED_READ`), `POST …/game-accounts/steam-start` (WRITE, без тела),
+  `POST …/game-accounts/steam-verify` `{ state, openid }` (OUTBOUND,
+  `OUTBOUND_ADMISSION`, требования GAMIFICATION WRITE + OUTBOUND) и
+  `POST …/game-accounts/steam-unlink` (WRITE). Guest JWT, exact
+  `tenantId + profileId` профиля из токена; web BFF пропускает только
+  `state`/`openid` для verify и пустое тело для остальных. Логика —
+  `GuestGameAccountsService` (только Prisma и config, без корпоративных
+  модулей), подключён в guest runtime и combined `GuestPortalModule`.
+- Привязка только через Steam OpenID 2.0: `state` — HMAC
+  (`GUEST_PORTAL_JWT_SECRET`) от tenant, profile, срока 15 мин и nonce, без
+  таблицы. Ответ Steam принимается только с нашим точным `return_to`
+  (`WEB_URL/game/accounts?lpState=…`), `op_endpoint` Steam, `claimed_id`
+  `https://steamcommunity.com/openid/id/<SteamID64>` и подписанными полями;
+  затем API вне транзакции делает `check_authentication` к
+  `https://steamcommunity.com/openid/login` (таймаут 8 с) и требует
+  `is_valid:true`. Ник или SteamID, введённые руками, не принимаются.
+- Правила: один ACTIVE Steam на профиль и один профиль на Steam в сети
+  (частичные уникальные индексы); запись привязки сериализуется
+  `pg_advisory_xact_lock` по exact `tenantId + SteamID`; Steam, отвязанный от
+  другого профиля, и смена Steam в своём профиле ждут 30 дней. Отвязка
+  снимает и найденный через Steam FACEIT. Журнал — `GuestGameAuditEvent`
+  `STEAM_LINKED`/`STEAM_UNLINKED`.
+- Выключатель: `GUEST_GAME_EXTERNAL_ACCOUNTS_ENABLED=true` у API; без него
+  `steam-start`/`steam-verify` отвечают 404, GET — `enabled: false`, пункт
+  меню «Игровые аккаунты» не показывается.
+- Worker: в `runGuestGamificationWorkerOnce` (lp-bonus, INTERNAL tenant, не в
+  canary) независимый проход «Game accounts lookup»
+  (`GuestGameAccountsLookupService`): до 10 Steam-аккаунтов за тик — ник,
+  аватар и баны через Steam Web API, поиск FACEIT по SteamID
+  (`/data/v4/players?game=cs2&game_player_id=`), FACEIT принимается, только
+  если в ответе тот же SteamID. 429 или недоступность FACEIT завершают проход до
+  следующего тика. Ключи `GUEST_GAME_STEAM_WEB_API_KEY` и
+  `GUEST_GAME_FACEIT_API_KEY` есть только в профиле worker-а (префикс `GUEST_`
+  уже разрешён в `runtime-entry.cjs`); API и Web их не получают. Без ключей
+  проход — no-op.
+- Egress: API — только `steamcommunity.com:443` (OpenID verify); worker —
+  `api.steampowered.com:443` и `open.faceit.com:443`. Опциональный
+  `GUEST_GAME_EXTERNAL_PROXY_URL` (только `http://` без учётных данных)
+  направляет эти запросы через `langame-proxy`, где для них добавляются точные
+  хосты `=steamcommunity.com,=api.steampowered.com,=open.faceit.com` в
+  `LANGAME_PROXY_SUFFIXES` (запись `=host` пускает только этот хост, без
+  поддоменов). Шаги — `deploy/simple/README.md`, «Игровые аккаунты».
+- Схема: миграция `20261109120000_guest_game_external_accounts` создаёт
+  `GuestGameExternalAccount` и `GuestGameExternalMatch` (журнал матчей для
+  следующего шага, пока не пишется), FK на `(tenantId, id)` профиля с
+  cascade, grant `leetplus_runtime`. Обслуживающий релиз таблицы не читает,
+  `lp rollback` безопасен. Голова identity-mail-worker — 197.
+- Матчи FACEIT в заданиях засчитываются только внутри оплаченной сессии гостя
+  в клубе (`GuestSession`); этот проход и тип задания `FACEIT_MATCH` — отдельным
+  изменением.
+
 ## Langame и outbound network boundary
 
 1. Web runtime остаётся localhost-only.

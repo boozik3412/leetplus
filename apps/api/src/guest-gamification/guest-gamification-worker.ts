@@ -1,4 +1,5 @@
 import { TenantCustomerStage, TenantLifecycleStatus } from '@prisma/client';
+import type { GuestGameAccountsLookupService } from '../guest-game-accounts/guest-game-accounts-lookup.service';
 import type { GuestLeaderboardSettlementService } from '../guest-leaderboard/guest-leaderboard-settlement.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { GuestActivityLedgerService } from './guest-activity-ledger.service';
@@ -50,6 +51,8 @@ type GuestGamificationWorkerServices = {
     GuestLeaderboardSettlementService,
     'settleTenant'
   >;
+  /** Steam facts and FACEIT lookup of linked game accounts; absent in older harnesses. */
+  gameAccountsLookup?: Pick<GuestGameAccountsLookupService, 'lookupTenant'>;
 };
 
 const workerEnabledKey = 'GUEST_GAMIFICATION_WORKER_ENABLED';
@@ -481,6 +484,25 @@ export async function runGuestGamificationWorkerOnce(
     },
   );
 
+  // Steam/FACEIT keys exist only in this worker profile; without them the
+  // pass is a no-op. A provider error is recorded on the account row.
+  const gameAccounts = await runIndependentPass(
+    failures,
+    'Game accounts lookup',
+    async () => {
+      if (config.canary || !services.gameAccountsLookup) return null;
+      const result = await services.gameAccountsLookup.lookupTenant(
+        tenant.id,
+        now,
+        env,
+      );
+      if (result.rateLimited) {
+        logger.warn('FACEIT rate limit reached; lookup resumes next tick');
+      }
+      return result;
+    },
+  );
+
   logger.log(
     [
       failures.length
@@ -508,6 +530,8 @@ export async function runGuestGamificationWorkerOnce(
       `leaderboardFrozen=${leaderboard?.frozenRows ?? 0}`,
       `leaderboardPrizes=${leaderboard?.prizesIssued ?? 0}`,
       `leaderboardPrizesFailed=${leaderboard?.prizesFailed ?? 0}`,
+      `gameAccountsChecked=${gameAccounts?.checked ?? 0}`,
+      `gameAccountsFaceitFound=${gameAccounts?.found ?? 0}`,
     ].join(' '),
   );
 
@@ -525,6 +549,7 @@ export async function runGuestGamificationWorkerOnce(
     supplemental,
     monitoring,
     leaderboard,
+    gameAccounts,
   };
 }
 

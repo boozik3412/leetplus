@@ -100,6 +100,10 @@ import type {
   LangameGuestSearchResultItem,
 } from '../integrations/langame.types';
 import {
+  GuestGameAccountsService,
+  type GuestGameAccountsView,
+} from '../guest-game-accounts/guest-game-accounts.service';
+import {
   GuestLeaderboardReadService,
   type GuestLeaderboardView,
 } from '../guest-leaderboard/guest-leaderboard-read.service';
@@ -145,6 +149,10 @@ const GUEST_PORTAL_COMMUNICATION_OUTBOUND_REQUIREMENTS = [
 const GUEST_PORTAL_TELEGRAM_AUTH_MUTATION_REQUIREMENTS = [
   { module: TenantModule.GAMIFICATION, action: 'WRITE' },
   ...GUEST_PORTAL_COMMUNICATION_OUTBOUND_REQUIREMENTS,
+] as const satisfies readonly TenantExecutionRequirement[];
+const GUEST_PORTAL_GAME_ACCOUNT_OUTBOUND_REQUIREMENTS = [
+  { module: TenantModule.GAMIFICATION, action: 'WRITE' },
+  { module: TenantModule.GAMIFICATION, action: 'OUTBOUND' },
 ] as const satisfies readonly TenantExecutionRequirement[];
 const GUEST_PORTAL_INTEGRATION_OUTBOUND_REQUIREMENTS = [
   { module: TenantModule.GAMIFICATION, action: 'OUTBOUND' },
@@ -1996,6 +2004,8 @@ export class GuestPortalService {
     private readonly guestSupportService: GuestSupportService,
     @Optional()
     private readonly guestLeaderboard?: GuestLeaderboardReadService,
+    @Optional()
+    private readonly guestGameAccounts?: GuestGameAccountsService,
   ) {}
 
   private gameDebugTraceId(prefix: string) {
@@ -6918,6 +6928,79 @@ export class GuestPortalService {
     return {
       tutorialSeenVersion: Math.max(profile.tutorialSeenVersion, version),
     };
+  }
+
+  async getGameAccounts(
+    authorization: string | undefined,
+  ): Promise<GuestGameAccountsView> {
+    const scope = await this.gameAccountScope(
+      authorization,
+      GUEST_PORTAL_READ_REQUIREMENTS,
+    );
+
+    return this.requireGameAccounts().getAccounts(scope);
+  }
+
+  async startSteamLink(
+    authorization: string | undefined,
+  ): Promise<{ redirectUrl: string }> {
+    const scope = await this.gameAccountScope(
+      authorization,
+      GUEST_PORTAL_WRITE_REQUIREMENTS,
+    );
+
+    return this.requireGameAccounts().startSteamLink(scope);
+  }
+
+  async verifySteamLink(
+    authorization: string | undefined,
+    dto: { state?: unknown; openid?: unknown },
+  ): Promise<GuestGameAccountsView> {
+    const scope = await this.gameAccountScope(
+      authorization,
+      GUEST_PORTAL_GAME_ACCOUNT_OUTBOUND_REQUIREMENTS,
+    );
+
+    return this.requireGameAccounts().verifySteamLink(scope, dto);
+  }
+
+  async unlinkSteam(
+    authorization: string | undefined,
+  ): Promise<GuestGameAccountsView> {
+    const scope = await this.gameAccountScope(
+      authorization,
+      GUEST_PORTAL_WRITE_REQUIREMENTS,
+    );
+
+    return this.requireGameAccounts().unlinkSteam(scope);
+  }
+
+  private requireGameAccounts() {
+    if (!this.guestGameAccounts) {
+      throw new NotFoundException(
+        'Игровые аккаунты в этом клубе пока недоступны.',
+      );
+    }
+
+    return this.guestGameAccounts;
+  }
+
+  /** The exact tenant game profile of the guest token. */
+  private async gameAccountScope(
+    authorization: string | undefined,
+    requirements: TenantExecutionRequirementInput,
+  ) {
+    const payload = await this.verifyGuestToken(authorization, requirements);
+    const guest = await this.findGuest(payload);
+    const profile = await this.findProfile(payload, guest?.id ?? null);
+
+    if (!profile) {
+      throw new BadRequestException(
+        'Игровой профиль гостя не найден. Сначала подтвердите телефон и выберите клуб.',
+      );
+    }
+
+    return { tenantId: payload.tenantId, profileId: profile.id };
   }
 
   async recordAppOpen(

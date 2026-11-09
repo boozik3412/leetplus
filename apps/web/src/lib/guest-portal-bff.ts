@@ -76,6 +76,7 @@ function isGuestPortalGetPathAllowed(path: readonly string[]): boolean {
       (path[0] === "session" &&
         (path[1] === "game-summary" ||
           path[1] === "game-missions" ||
+          path[1] === "game-accounts" ||
           path[1] === "leaderboard"))
     );
   }
@@ -168,6 +169,11 @@ function resolveGuestPortalPostBodyFields(
     switch (`${path[1]}/${path[2]}`) {
       case "reward-wallet/claim-all":
         return [];
+      case "game-accounts/steam-start":
+      case "game-accounts/steam-unlink":
+        return [];
+      case "game-accounts/steam-verify":
+        return ["state", "openid"];
       case "communications/messenger":
         return ["channel", "identity"];
       case "communications/preferences":

@@ -166,6 +166,41 @@ docker logs --tail 20 leetplus-langame-proxy
 Откат: убрать `LANGAME_PROXY_URL` из секретов и пересоздать слот — API снова
 ходит напрямую через фенс (там остаются известные домены).
 
+## Игровые аккаунты (Steam, FACEIT)
+
+Привязка Steam в игре гостя и поиск FACEIT по SteamID. По умолчанию выключено.
+Ходят наружу: API — на `steamcommunity.com` (проверка входа через Steam),
+`bonus-ledger-worker` — на `api.steampowered.com` и `open.faceit.com`. Ключи
+провайдеров получает только worker.
+
+Включение (один раз, после деплоя релиза с миграцией
+`20261109120000_guest_game_external_accounts`):
+
+1. Прокси: в `environment` сервиса `langame-proxy` добавить
+   `LANGAME_PROXY_SUFFIXES=langame.ru,langamepro.ru,=steamcommunity.com,=api.steampowered.com,=open.faceit.com`
+   (запись `=хост` пускает только этот хост); пересоздать `langame-proxy`.
+   Адрес workers `172.31.46.21` уже есть в `LANGAME_PROXY_SOURCES`.
+2. `bonus-ledger-worker` в `/srv/leetplus/compose.json`: добавить сеть
+   `langame` (общий адрес workers `172.31.46.21`, как у daily/report).
+3. Секреты `api-blue.json`, `api-green.json`:
+   `GUEST_GAME_EXTERNAL_PROXY_URL=http://172.31.46.2:3128`,
+   `GUEST_GAME_EXTERNAL_ACCOUNTS_ENABLED=true`.
+4. Секреты `bonus-ledger-worker.json`:
+   `GUEST_GAME_EXTERNAL_PROXY_URL=http://172.31.46.2:3128`,
+   `GUEST_GAME_STEAM_WEB_API_KEY=<ключ Steam Web API>`,
+   `GUEST_GAME_FACEIT_API_KEY=<серверный ключ FACEIT App Studio>`.
+   Префикс `GUEST_` уже разрешён профилю worker-а в `runtime-entry.cjs`.
+5. `lp deploy <sha>`: API-слот поднимается с новыми ключами, worker подхватит
+   их на следующем тике.
+6. Проверка из рабочего API (ожидается HTTP 200 от Steam, а не таймаут):
+
+```bash
+docker exec -w /app/apps/api leetplus-api-<slot> node -e "const {ProxyAgent,fetch}=require('undici');fetch('https://steamcommunity.com/openid/login',{dispatcher:new ProxyAgent('http://172.31.46.2:3128')}).then(r=>console.log(r.status))"
+```
+
+Откат: `GUEST_GAME_EXTERNAL_ACCOUNTS_ENABLED=false` (или удалить) и
+пересоздать слот — привязка закрывается, привязанные аккаунты остаются в базе.
+
 ## Миграции
 
 Если в релизе есть миграции, которых нет в базе, `lp stage`/`lp deploy` перед

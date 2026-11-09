@@ -10,6 +10,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { GuestGameAccountsView } from '../guest-game-accounts/guest-game-accounts.service';
 import {
   type GuestPortalAppOpenResponse,
   type GuestPortalCheckInResponse,
@@ -203,6 +204,35 @@ export class GuestPortalController {
       scope,
       board,
     });
+  }
+
+  @Get('session/game-accounts')
+  getGameAccounts(
+    @Headers('authorization') authorization: string | undefined,
+  ): Promise<GuestGameAccountsView> {
+    return this.guestPortalService.getGameAccounts(authorization);
+  }
+
+  @Post('session/game-accounts/steam-start')
+  startSteamLink(
+    @Headers('authorization') authorization: string | undefined,
+  ): Promise<{ redirectUrl: string }> {
+    return this.guestPortalService.startSteamLink(authorization);
+  }
+
+  @Post('session/game-accounts/steam-verify')
+  verifySteamLink(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() dto: { state?: unknown; openid?: unknown },
+  ): Promise<GuestGameAccountsView> {
+    return this.guestPortalService.verifySteamLink(authorization, dto);
+  }
+
+  @Post('session/game-accounts/steam-unlink')
+  unlinkSteam(
+    @Headers('authorization') authorization: string | undefined,
+  ): Promise<GuestGameAccountsView> {
+    return this.guestPortalService.unlinkSteam(authorization);
   }
 
   @Post('session/app-open')

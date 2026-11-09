@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
-import { requireCurrentUser } from "@/lib/auth";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
+import { requirePageAccess } from "@/lib/auth";
 import { orderPlanningHref } from "@/lib/order-planning-views";
 import { getOperationalReport } from "@/lib/reports";
 
@@ -13,7 +14,7 @@ export default async function ProductMovementTablePage({
 }: MovementTablePageProps) {
   const params = await searchParams;
   if (searchParam(params?.subset) === "write-offs") {
-    await requireCurrentUser();
+    await requirePageAccess("/products/movement/table");
     const report = await getOperationalReport({
       from: searchParam(params?.from),
       to: searchParam(params?.to),
@@ -27,6 +28,12 @@ export default async function ProductMovementTablePage({
 
     return (
       <main className="min-h-screen bg-[var(--background)] px-4 py-4 text-zinc-950">
+        <ReportBreadcrumbs
+          current="Списания"
+          items={[
+            { href: "/assortment/dashboard", label: "Дашборд ассортимента" },
+          ]}
+        />
         <div className="mb-4">
           <h1 className="text-3xl font-semibold tracking-tight">Списания</h1>
           <p className="mt-2 text-sm text-zinc-600">

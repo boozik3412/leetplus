@@ -2118,13 +2118,33 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   `LANGAME_PROXY_SUFFIXES` (запись `=host` пускает только этот хост, без
   поддоменов). Шаги — `deploy/simple/README.md`, «Игровые аккаунты».
 - Схема: миграция `20261109120000_guest_game_external_accounts` создаёт
-  `GuestGameExternalAccount` и `GuestGameExternalMatch` (журнал матчей для
-  следующего шага, пока не пишется), FK на `(tenantId, id)` профиля с
+  `GuestGameExternalAccount` и `GuestGameExternalMatch` (журнал матчей), FK
+  на `(tenantId, id)` профиля с
   cascade, grant `leetplus_runtime`. Обслуживающий релиз таблицы не читает,
   `lp rollback` безопасен. Голова identity-mail-worker — 197.
-- Матчи FACEIT в заданиях засчитываются только внутри оплаченной сессии гостя
-  в клубе (`GuestSession`); этот проход и тип задания `FACEIT_MATCH` — отдельным
-  изменением.
+- Журнал матчей (тот же worker, не в canary, проход «FACEIT match journal»
+  после «Game accounts lookup»): `syncFaceitMatches` читает историю CS2
+  (`/data/v4/players/{id}/history`) ACTIVE FACEIT-аккаунтов exact tenant — до
+  10 аккаунтов и 20 запросов `/matches/{id}/stats` за тик, не глубже 7 дней и
+  не раньше привязки, матч моложе 10 минут ждёт. Каждый новый матч пишется в
+  `GuestGameExternalMatch` с решением: `COUNTED` — завершённый 5×5 matchmaking
+  от 15 минут, целиком внутри `GuestSession` гостя (профиль и его ACTIVE
+  identity links, допуск 5 минут; открытая сессия — не старше 24 ч);
+  `OUTSIDE_SESSION`; `NOT_ELIGIBLE` (причина: тип/длина матча, нет статистики,
+  дневной лимит 10 засчитанных); `REVIEW` — другой привязанный гость сети в
+  команде соперника. 429 или недоступность FACEIT останавливают проход до
+  следующего тика, `matchesSyncedUntil` сдвигается только по обработанным.
+- Затем `GuestGamificationService.runExternalMatchPipelineScheduled` (тот же
+  tenant admission и аудит-актор, что у supplemental pipeline) превращает
+  `COUNTED` строки без события в `GuestGameEvent` `FACEIT_MATCH` через
+  `processEvent` (`LIVE_SUPPLEMENTAL`, только правила `FACEIT_MATCH` с политикой
+  `LEDGER_SUPPLEMENTAL`, `originKey` `FACEIT:<match>:<player>` —
+  идемпотентно). Матч засчитывается только заданиям, у которых клуб сессии
+  входит в `storeIds`; без подходящего задания строке ставится
+  `NO_MATCHING_MISSION`, ошибка обработки переводит её в `REVIEW`. Live
+  pipeline Langame задания `FACEIT_MATCH` не видит. Тип задания: цель
+  `MATCHES|WINS|KILLS|ACES` и фильтры матча (победа, K/D, ADR, HS%, убийства,
+  карты) в `metric.matchFilters`.
 
 ## Langame и outbound network boundary
 

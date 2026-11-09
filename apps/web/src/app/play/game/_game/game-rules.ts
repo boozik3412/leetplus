@@ -63,6 +63,8 @@ export function guestActionRequirementLabel(
       return "Сделайте покупку в клубе.";
     case "BALANCE_TOPUP":
       return "Пополните баланс в клубе.";
+    case "FACEIT_MATCH":
+      return "Сыграйте матч FACEIT CS2 в клубе во время своей сессии. Нужен привязанный Steam.";
     case "GUEST_LOG":
       return "Выполните нужное действие в клубе.";
     case "REFERRAL_ACCEPTED":
@@ -126,6 +128,8 @@ export function gameRuleEventLabel(triggerKind: string) {
       return "покупка товара";
     case "BALANCE_TOPUP":
       return "пополнение баланса";
+    case "FACEIT_MATCH":
+      return "матч FACEIT CS2 в клубе";
     case "GUEST_LOG":
       return "событие Langame";
     case "REFERRAL_ACCEPTED":

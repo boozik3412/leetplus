@@ -254,7 +254,8 @@ export type GuestGameMissionWizardTaskType =
   | "PLAY_TIME"
   | "PRODUCT_PURCHASE"
   | "BALANCE_TOPUP"
-  | "CHECK_IN";
+  | "CHECK_IN"
+  | "FACEIT_MATCH";
 
 export type GuestGameMissionWizardDto = {
   name: string;

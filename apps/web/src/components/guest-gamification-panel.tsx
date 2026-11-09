@@ -33,13 +33,6 @@ import {
   type BattlePassStepConditionValue,
 } from "@/components/battle-pass-step-condition-editor";
 import { normalizeExternalActionUrl } from "@/lib/external-links";
-import {
-  guestRewardActionNotice,
-  guestRewardFulfillmentLabel,
-  guestRewardLifecycleDescription,
-  guestRewardStatusLabel,
-  isAutomaticLedgerReward,
-} from "@/lib/guest-reward-status-labels";
 import type {
   GuestAudience,
   GuestCrmLead,
@@ -59,7 +52,6 @@ import type {
   GuestGameDeliveryDispatchResult,
   GuestGameDeliveryStatus,
   GuestGameLootBox,
-  GuestGameLootBoxUsageKind,
   GuestGameMission,
   GuestGamePilotRunbookAction,
   GuestGamePromoCard,
@@ -81,6 +73,152 @@ import type {
 } from "@/lib/guest-gamification";
 import type { Product } from "@/lib/products";
 import type { Store } from "@/lib/stores";
+import type {
+  TabId,
+  RuleTemplateType,
+  LootBoxTimeWindowMode,
+  LootBoxWeekdayMode,
+  LootBoxPeriodicLimitPeriod,
+  ProfileForm,
+  LootBoxForm,
+  MissionForm,
+  SeasonLevelStepForm,
+  SeasonForm,
+  PromoBannerForm,
+  RewardForm,
+  RewardRedeemForm,
+  EventForm,
+  DryRunForm,
+  BonusLedgerActionResult,
+  PromoBannerNotice,
+  MissionMigrationNotice,
+  GuestLogMappingPayload,
+  BonusLedgerActionOptions,
+  LootBoxCaseRarity,
+  PromoBannerUsageSummary,
+  PromoBannerUsageInfo,
+  LootBoxPrizeForm,
+  MissionQuestStepForm,
+  GuestLogEventOption,
+  GuestLogBusinessPreset,
+  StatusPillTone,
+} from "./guest-gamification/shared/types";
+export type { TabId } from "./guest-gamification/shared/types";
+import {
+  rewardTypeOptions,
+  defaultLootBoxPrizes,
+  defaultMissionQuestSteps,
+  emptyDryRunSource,
+  smallButtonClass,
+  dangerButtonClass,
+  primaryButtonClass,
+  fieldClass,
+  dryRunEventOptions,
+  sessionTypeOptions,
+  manualXpEventOptions,
+  lootBoxCaseRarityOptions,
+  triggerHelpText,
+  lootBoxUsageKindLabels,
+  PROMO_BANNER_DISPLAY_LIMIT,
+  statusLabels,
+  rewardStatusOptions,
+  weekdayPresets,
+  weekdayOptions,
+  guestLogBusinessPresetDefinitions,
+} from "./guest-gamification/shared/constants";
+import {
+  jsonText,
+  cloneMissionQuestSteps,
+  manualXpPayloadText,
+  isCheckInMission,
+  normalizeCheckInMissionForm,
+  nullable,
+  primaryLootBoxPrize,
+  formatMoney,
+  formatDate,
+  sessionTypeLabel,
+  rewardTypeLabelFromValue,
+  guestLogBusinessPresets,
+  manualXpEventOption,
+  trackingId,
+  optionLabel,
+  tariffRuleSummary,
+  guestLogRuleSummary,
+  formatBudgetAmount,
+  missionVisibilityValue,
+  stringRule,
+  storeScopeLabel,
+  lootBoxPeriodicLimitPeriod,
+  sortWeekdays,
+  numeric,
+  formatChanceNumber,
+  lootBoxPrizesToForm,
+  missionQuestSteps,
+  seasonStepRewardLabel,
+  lootBoxCaseRarity,
+  rewardGuestFullName,
+  formatRewardPhone,
+  formatGuestShortName,
+  rewardRarityLabel,
+  rewardActivityLabel,
+  guestLogEventOptions,
+  csvList,
+  appendCsvToken,
+  removeCsvToken,
+  appendCsvTokens,
+  csvHasToken,
+  normalizeUiSessionType,
+  stringListRule,
+  asRecord,
+  metricRule,
+  arrayRule,
+  optionalNumber,
+  canonicalLootBoxRewardType,
+  seasonStepRewardDefinition,
+  bonusAmountFromRewardLabel,
+} from "./guest-gamification/shared/helpers";
+import { fetchJson, ApiRequestError } from "./guest-gamification/shared/api";
+import {
+  SectionTitle,
+  MiniMetric,
+  EmptyState,
+  StatusMetric,
+  Field,
+  Panel,
+  OptionHelp,
+  FormSection,
+  OptionSelect,
+  ToggleField,
+  StatusPill,
+} from "./guest-gamification/shared/ui";
+import {
+  TariffConditionFields,
+  RewardRow,
+  RulesLayout,
+  RuleCommonFields,
+  StoreSelect,
+  RuleCard,
+  StatusSelect,
+  AudienceSelect,
+  BudgetField,
+  RewardApprovalSelect,
+  BusinessRuleSection,
+  SelectedGuestLogEvents,
+} from "./guest-gamification/shared/rule-fields";
+import {
+  buildPromoBannerUsage,
+  promoCardMetadata,
+  metadataString,
+  compactStoreNames,
+  renderPromoBannerImage,
+  clampPromoBannerScale,
+  clampPromoBannerOffset,
+  promoBannerCanAppear,
+  promoBannerMatchesStore,
+  dateMs,
+  promoBannerIsInActivePeriod,
+  isInlineImageSource,
+} from "./guest-gamification/shared/promo-banner";
 
 const GuestGamificationEffectTab = dynamic(
   () =>
@@ -139,52 +277,12 @@ type Props = {
   };
 };
 
-export type TabId =
-  | "overview"
-  | "statistics"
-  | "effect"
-  | "profiles"
-  | "lootBoxes"
-  | "missions"
-  | "checkIn"
-  | "seasons"
-  | "leaderboard"
-  | "promoCards"
-  | "rewards"
-  | "testRun";
-
 export type EditorMode = "advanced" | "visual";
-
-type RuleTemplateType = "loot-boxes" | "missions" | "seasons" | "promo-cards";
-
-const PROMO_BANNER_DISPLAY_LIMIT = 4;
-const PROMO_BANNER_IMAGE_WIDTH = 720;
-const PROMO_BANNER_IMAGE_HEIGHT = 1280;
-const PROMO_BANNER_MAX_DATA_URL_LENGTH = 2_400_000;
-const promoBannerJpegQualities = [0.78, 0.68, 0.58] as const;
 
 const editorModeOptions = [
   ["advanced", "Расширенные настройки"],
   ["visual", "Визуальный редактор"],
 ] as const satisfies readonly [EditorMode, string][];
-
-type GuestLogMappingPayload = {
-  rawType: string;
-  label: string;
-  preset: GuestGameGuestLogMappingPreset;
-  intent: GuestGameGuestLogMappingIntent;
-  note: string;
-};
-
-type BonusLedgerActionResult =
-  | { kind: "queue"; result: GuestGameBonusLedgerQueueResult }
-  | { kind: "dispatch"; result: GuestGameBonusLedgerDispatchResult }
-  | { kind: "cancel"; result: GuestGameBonusLedgerDispatchItem };
-
-type BonusLedgerActionOptions = {
-  storeId?: string | null;
-  limit?: number;
-};
 
 type RuleDeleteBlockedModal = {
   title: string;
@@ -214,333 +312,12 @@ type MissionWizardMigrationResult = {
   skipped: Array<{ id: string; name: string; reason: string }>;
 };
 
-type MissionMigrationNotice = {
-  message: string;
-};
-
-type PromoBannerUsageInfo = {
-  visibleStoreNames: string[];
-  overflowStoreNames: string[];
-};
-
-type PromoBannerStoreUsage = {
-  storeId: string;
-  storeName: string;
-  activeCount: number;
-  visibleCount: number;
-  overflowCount: number;
-};
-
-type PromoBannerUsageSummary = {
-  byCardId: Map<string, PromoBannerUsageInfo>;
-  visibleCardIds: Set<string>;
-  overflowCardIds: Set<string>;
-  activeCardIds: Set<string>;
-  stores: PromoBannerStoreUsage[];
-};
-
-type ProfileForm = {
-  guestId: string;
-  leadId: string;
-  displayName: string;
-  contactMasked: string;
-  telegramIdentity: string;
-  maxIdentity: string;
-  xp: string;
-  level: string;
-  status: GuestGameProfileStatus;
-};
-
-type LootBoxPrizeForm = {
-  id: string;
-  rewardType: string;
-  rewardAmount: string;
-  rewardLabel: string;
-  chancePercent: string;
-  noBonus: boolean;
-  visualMode: LootBoxPrizeVisualMode;
-  iconKey: LootBoxPrizeIconKey;
-  imageUrl: string;
-  borderColor: string;
-  textColor: string;
-  backgroundColor: string;
-};
-
-type LootBoxTimeWindowMode = "ANY" | "QUIET_HOURS" | "CUSTOM";
-type LootBoxWeekdayMode = "ANY" | "WEEKDAYS" | "WEEKENDS" | "CUSTOM";
-type LootBoxCaseRarity = NonNullable<GuestGameReward["rewardRarity"]>;
-type LootBoxPeriodicLimitPeriod = "DAILY" | "WEEKLY" | "MONTHLY";
-
-type LootBoxForm = {
-  name: string;
-  status: GuestGameStatus;
-  usageKind: GuestGameLootBoxUsageKind;
-  triggerKind: string;
-  rewardType: string;
-  rewardAmount: string;
-  rewardLabel: string;
-  caseRarity: LootBoxCaseRarity;
-  audienceId: string;
-  segment: string;
-  sessionType: string;
-  tariffGroupId: string;
-  tariffPeriodId: string;
-  tariffTypeId: string;
-  guestLogTypes: string;
-  blockedGuestLogTypes: string;
-  storeIds: string[];
-  quietHoursEnabled: boolean;
-  weekdaysOnly: boolean;
-  timeWindowMode: LootBoxTimeWindowMode;
-  weekdayMode: LootBoxWeekdayMode;
-  selectedWeekdays: number[];
-  hourFrom: string;
-  hourTo: string;
-  perGuestPerWeek: string;
-  periodicLimitEnabled: boolean;
-  periodicLimitPeriod: LootBoxPeriodicLimitPeriod;
-  totalPerDay: string;
-  maxPendingRewards: string;
-  prizes: LootBoxPrizeForm[];
-  requireCashierConfirmation: boolean;
-  oneDevicePerGuest: boolean;
-  periodRulesText: string;
-  limitsText: string;
-  probabilityRulesText: string;
-  budgetAmount: string;
-  budgetUnlimited: boolean;
-  antiFraudText: string;
-  manualApprovalRequired: boolean;
-  note: string;
-};
-
-type MissionQuestStepForm = {
-  id: string;
-  title: string;
-  missionId: string;
-};
-
-type MissionForm = {
-  name: string;
-  status: GuestGameStatus;
-  missionType: string;
-  triggerKind: string;
-  visibility: string;
-  rewardType: string;
-  rewardAmount: string;
-  rewardLabel: string;
-  xpReward: string;
-  progressTarget: string;
-  progressUnit: string;
-  audienceId: string;
-  storeIds: string[];
-  periodFrom: string;
-  periodTo: string;
-  budgetAmount: string;
-  budgetUnlimited: boolean;
-  perGuestLimit: string;
-  perGuestLimitUnlimited: boolean;
-  totalRewardLimit: string;
-  sessionType: string;
-  tariffGroupId: string;
-  tariffPeriodId: string;
-  tariffTypeId: string;
-  guestLogTypes: string;
-  blockedGuestLogTypes: string;
-  metricAggregation: string;
-  metricEventTypes: string;
-  metricHours: string;
-  metricProductIds: string;
-  metricExternalProductIds: string;
-  metricCategoryIds: string;
-  metricCategoryNames: string;
-  windowDays: string;
-  weekdaysOnly: boolean;
-  minSessionMinutes: string;
-  minSpendAmount: string;
-  questEnabled: boolean;
-  questSteps: MissionQuestStepForm[];
-  requireLangameFact: boolean;
-  denySameDayRepeat: boolean;
-  requireCashierConfirmation: boolean;
-  conditionsText: string;
-  antiFraudText: string;
-  manualApprovalRequired: boolean;
-  note: string;
-};
-
-type SeasonLevelStepForm = {
-  id: string;
-  level: string;
-  xp: string;
-  title: string;
-  condition: string;
-  description: string;
-  freeReward: string;
-  premiumReward: string;
-  conditionV2?: BattlePassStepConditionValue;
-  triggerKind?: string;
-  sessionType?: string;
-  timeWindowMode?: LootBoxTimeWindowMode;
-  weekdayMode?: LootBoxWeekdayMode;
-  selectedWeekdays?: number[];
-  hourFrom?: string;
-  hourTo?: string;
-  tariffGroupId?: string;
-  tariffPeriodId?: string;
-  tariffTypeId?: string;
-  guestLogTypes?: string;
-  blockedGuestLogTypes?: string;
-  freeRewardType?: string;
-  freeRewardAmount?: string;
-  freeRewardLabel?: string;
-  freeRewardCode?: string;
-  freeRewardLootBoxId?: string;
-  freeRewardLootBoxName?: string;
-  freeRewardLootBoxRarity?: LootBoxCaseRarity;
-  freeRewardDelivery?: string;
-  premiumRewardType?: string;
-  premiumRewardAmount?: string;
-  premiumRewardLabel?: string;
-  premiumRewardCode?: string;
-  premiumRewardLootBoxId?: string;
-  premiumRewardLootBoxName?: string;
-  premiumRewardLootBoxRarity?: LootBoxCaseRarity;
-  premiumRewardDelivery?: string;
-};
-
-type SeasonForm = {
-  name: string;
-  status: GuestGameStatus;
-  seasonType: string;
-  audienceId: string;
-  storeIds: string[];
-  periodFrom: string;
-  periodTo: string;
-  xpVisit: string;
-  xpCheckIn: string;
-  xpPlayHour: string;
-  xpBarPurchase: string;
-  xpMissionCompletion: string;
-  xpPacketSessionBonus: string;
-  xpGuestLog: string;
-  sessionType: string;
-  tariffGroupId: string;
-  tariffPeriodId: string;
-  tariffTypeId: string;
-  guestLogTypes: string;
-  blockedGuestLogTypes: string;
-  levelCount: string;
-  xpPerLevel: string;
-  freeRewardEvery: string;
-  premiumRewardEvery: string;
-  freeRewardLabel: string;
-  premiumRewardLabel: string;
-  levelSteps: SeasonLevelStepForm[];
-  xpRulesText: string;
-  levelsText: string;
-  freeRewardsText: string;
-  premiumRewardsText: string;
-  premiumEnabled: boolean;
-  premiumUpgradeMode: string;
-  budgetAmount: string;
-  budgetUnlimited: boolean;
-  manualApprovalRequired: boolean;
-  note: string;
-};
-
-type PromoBannerForm = {
-  title: string;
-  label: string;
-  description: string;
-  tag: string;
-  status: GuestGameStatus;
-  targetAnchor: string;
-  priority: string;
-  storeIds: string[];
-  periodFrom: string;
-  periodTo: string;
-  actionLabel: string;
-  actionUrl: string;
-  imageUrl: string;
-  imageSource: string;
-  imageScale: string;
-  imageOffsetX: string;
-  imageOffsetY: string;
-};
-
-type PromoBannerNotice = {
-  tone: "warning" | "error";
-  message: string;
-};
-
 type PromoBannerDragState = {
   pointerId: number;
   startX: number;
   startY: number;
   offsetX: number;
   offsetY: number;
-};
-
-type RewardForm = {
-  profileId: string;
-  guestId: string;
-  lootBoxId: string;
-  missionId: string;
-  seasonId: string;
-  storeId: string;
-  status: GuestGameRewardStatus;
-  source: string;
-  rewardType: string;
-  rewardAmount: string;
-  rewardLabel: string;
-  rewardCode: string;
-  expiresAt: string;
-  note: string;
-  evidenceText: string;
-};
-
-type RewardRedeemForm = {
-  claim: string;
-  storeId: string;
-  note: string;
-};
-
-type EventForm = {
-  profileId: string;
-  eventType: string;
-  source: string;
-  xpDelta: string;
-  note: string;
-  payloadText: string;
-};
-
-type DryRunForm = {
-  profileId: string;
-  guestId: string;
-  storeId: string;
-  eventType: string;
-  occurredAt: string;
-  sessionType: string;
-  sessionPacket: string;
-  tariffGroupId: string;
-  tariffPeriodId: string;
-  tariffTypeId: string;
-  guestLogType: string;
-  productId: string;
-  externalProductId: string;
-  categoryId: string;
-  productName: string;
-  categoryName: string;
-  supplierName: string;
-  quantity: string;
-  sessionMinutes: string;
-  spendAmount: string;
-  sourceFactId: string;
-  sourceFactKind: string;
-  externalProvider: string;
-  externalDomain: string;
-  externalId: string;
 };
 
 const tabs: Array<{ id: TabId; label: string }> = [
@@ -565,96 +342,6 @@ const promoTargetOptions = [
   { value: "battlePass", label: "Battle Pass" },
   { value: "rewards", label: "Кошелек наград" },
 ];
-
-const dryRunEventOptions = [
-  { value: "SESSION_START", label: "Старт сессии" },
-  { value: "APP_OPEN", label: "Открытие приложения" },
-  { value: "VISIT", label: "Визит" },
-  { value: "CHECK_IN", label: "Чекин в клубе" },
-  { value: "PLAY_HOUR", label: "Час игры" },
-  { value: "BAR_PURCHASE", label: "Покупка бара" },
-  { value: "PRODUCT_PURCHASE", label: "Товарная покупка" },
-  { value: "BALANCE_TOPUP", label: "Пополнение баланса" },
-  { value: "GUEST_LOG", label: "Лог гостя" },
-  { value: "REFERRAL_ACCEPTED", label: "Реферал принят" },
-  { value: "REPEAT_VISIT", label: "Повторный визит" },
-  { value: "MISSION_COMPLETED", label: "Задание выполнено" },
-];
-
-const manualXpEventOptions = [
-  {
-    value: "MANUAL_XP",
-    label: "Ручная корректировка XP",
-    description:
-      "Используйте для разового начисления или списания опыта по решению команды.",
-    defaultXpDelta: "50",
-    payloadReason: "manual_adjustment",
-  },
-  {
-    value: "CHECK_IN",
-    label: "Чекин в клубе",
-    description:
-      "Фиксирует ручной чекин, если гостя нужно отметить без гостевого экрана.",
-    defaultXpDelta: "10",
-    payloadReason: "manual_check_in",
-  },
-  {
-    value: "VISIT",
-    label: "Визит в клуб",
-    description:
-      "Отмечает посещение гостя, когда автоматический факт пока не подтянулся.",
-    defaultXpDelta: "20",
-    payloadReason: "manual_visit",
-  },
-  {
-    value: "PLAY_HOUR",
-    label: "Час игры",
-    description:
-      "Подходит для ручного зачета игрового времени или компенсации за сессию.",
-    defaultXpDelta: "25",
-    payloadReason: "manual_play_hour",
-  },
-  {
-    value: "MISSION_COMPLETED",
-    label: "Задание выполнено",
-    description:
-      "Используйте, когда сотрудник вручную подтверждает выполнение задания.",
-    defaultXpDelta: "50",
-    payloadReason: "manual_mission_completed",
-  },
-  {
-    value: "REFERRAL_ACCEPTED",
-    label: "Приглашенный гость зарегистрировался",
-    description:
-      "Ручной зачет реферального события, если автоматическая атрибуция не сработала.",
-    defaultXpDelta: "50",
-    payloadReason: "manual_referral",
-  },
-  {
-    value: "APP_OPEN",
-    label: "Открытие приложения",
-    description:
-      "Ручной зачет активности для сценариев возврата гостя в приложение.",
-    defaultXpDelta: "5",
-    payloadReason: "manual_app_open",
-  },
-] as const;
-
-function manualXpEventOption(value: string) {
-  return (
-    manualXpEventOptions.find((option) => option.value === value) ??
-    manualXpEventOptions[0]
-  );
-}
-
-function manualXpPayloadText(eventType: string) {
-  const option = manualXpEventOption(eventType);
-
-  return jsonText({
-    reason: option.payloadReason,
-    createdFrom: "guest_game_hub",
-  });
-}
 
 const lootBoxTriggerOptions = [
   { value: "SESSION_START", label: "Старт сессии" },
@@ -709,49 +396,6 @@ const lootBoxPeriodicLimitOptions: Array<{
   { value: "WEEKLY", label: "Еженедельный" },
   { value: "MONTHLY", label: "Ежемесячный" },
 ];
-
-const weekdayOptions = [
-  { value: 1, label: "Пн" },
-  { value: 2, label: "Вт" },
-  { value: 3, label: "Ср" },
-  { value: 4, label: "Чт" },
-  { value: 5, label: "Пт" },
-  { value: 6, label: "Сб" },
-  { value: 0, label: "Вс" },
-];
-
-const weekdayPresets: Record<LootBoxWeekdayMode, number[]> = {
-  ANY: [0, 1, 2, 3, 4, 5, 6],
-  WEEKDAYS: [1, 2, 3, 4, 5],
-  WEEKENDS: [0, 6],
-  CUSTOM: [1, 2, 3, 4, 5],
-};
-
-const triggerHelpText: Record<string, string> = {
-  SESSION_START:
-    "Правило проверится, когда у гостя начнется игровая сессия в клубе.",
-  APP_OPEN:
-    "Правило проверится, когда гость откроет сайт игрового модуля или Telegram Mini App. Подходит для возврата потерявшихся гостей.",
-  CHECK_IN:
-    "Правило проверится после чекина гостя в игровом модуле выбранного клуба.",
-  VISIT:
-    "Общий визит в клуб: подходит для сценариев, где сессия, чекин или лог Langame считаются посещением.",
-  PLAY_HOUR:
-    "Правило проверится по накопленному игровому времени, например за час игры или завершение сессии.",
-  BAR_PURCHASE:
-    "Правило проверится после покупки или списания в баре, если факт есть в сохраненных данных.",
-  PRODUCT_PURCHASE:
-    "Правило проверится после товарной покупки из сохраненных продаж или списаний.",
-  BALANCE_TOPUP:
-    "Правило проверится после пополнения баланса гостя в сохраненных фактах Langame.",
-  GUEST_LOG:
-    "Правило проверится по событию из guests/logs. Ниже можно ограничить разрешенные и запрещенные типы логов.",
-  REFERRAL_ACCEPTED:
-    "Правило проверится, когда приглашенный гость успешно зарегистрируется по реферальной ссылке.",
-  REPEAT_VISIT:
-    "Правило проверит повторное посещение гостя в заданном окне времени.",
-  MISSION_COMPLETED: "Правило проверится после выполнения другого задания.",
-};
 
 const missionTypeOptions = [
   { value: "REPEAT_VISIT", label: "Повторный визит" },
@@ -832,17 +476,6 @@ const audienceHelpText: Record<string, string> = {
     "Для гостей, пришедших через приглашение, или для реферальных механик.",
 };
 
-const rewardTypeOptions = [
-  { value: "PROMOCODE", label: "Промокод" },
-  { value: "BONUS_BALANCE", label: "Бонусы Langame" },
-  { value: "BALANCE", label: "Денежный баланс Langame" },
-  { value: "XP", label: "Опыт XP" },
-  { value: "FREE_HOURS", label: "Бесплатные часы" },
-  { value: "CASHIER_CODE", label: "Код кассиру" },
-  { value: "MERCH", label: "Физический приз" },
-  { value: "BATTLE_PASS_REWARD", label: "Награда Battle Pass" },
-];
-
 const checkInRewardTypeOptions = rewardTypeOptions.filter((option) =>
   ["XP", "BONUS_BALANCE"].includes(option.value),
 );
@@ -868,40 +501,11 @@ const battlePassStepRewardDeliveryOptions = [
   { value: "ADMIN", label: "Администратором" },
 ];
 
-const legacyRewardTypeLabelOptions = [
-  { value: "BONUS", label: "Бонусы Langame (старый тип)" },
-  { value: "BONUS_POINTS", label: "Бонусы Langame (старый тип)" },
-  { value: "LOYALTY_BONUS", label: "Бонусы Langame (старый тип)" },
-  { value: "CASHBACK", label: "Бонусы Langame (старый тип)" },
-  { value: "CASH_BALANCE", label: "Бонусы Langame (старый тип)" },
-  { value: "LANGAME_BALANCE", label: "Бонусы Langame (старый тип)" },
-  { value: "MONEY_BALANCE", label: "Денежный баланс Langame (старый тип)" },
-  { value: "WALLET_BALANCE", label: "Денежный баланс Langame (старый тип)" },
-];
-
-const rewardTypeLabelOptions = [
-  ...rewardTypeOptions,
-  ...legacyRewardTypeLabelOptions,
-];
-
-const sessionTypeOptions = [
-  { value: "regular_session", label: "почасовая сессия" },
-  { value: "packet_hours", label: "пакет или абонемент" },
-];
-
 const dryRunPacketOptions = [
   { value: "", label: "не указано" },
   { value: "true", label: "пакет или абонемент" },
   { value: "false", label: "почасовая сессия" },
 ];
-
-const statusLabels: Record<GuestGameStatus, string> = {
-  DRAFT: "черновик",
-  ACTIVE: "активно",
-  PAUSED: "пауза",
-  FINISHED: "завершено",
-  ARCHIVED: "архив",
-};
 
 const profileStatusLabels: Record<GuestGameProfileStatus, string> = {
   ACTIVE: "активен",
@@ -917,100 +521,12 @@ const rewardStatusLabels: Record<GuestGameRewardStatus, string> = {
   EXPIRED: "сгорело",
 };
 
-const rewardRarityLabels: Record<
-  NonNullable<GuestGameReward["rewardRarity"]>,
-  string
-> = {
-  common: "Обычная",
-  rare: "Редкая",
-  epic: "Эпическая",
-  legendary: "Легендарная",
-};
-
-const lootBoxCaseRarityLabels: Record<LootBoxCaseRarity, string> = {
-  common: "Обычный",
-  rare: "Редкий",
-  epic: "Эпический",
-  legendary: "Легендарный",
-};
-
-const lootBoxCaseRarityOptions = (
-  Object.keys(lootBoxCaseRarityLabels) as LootBoxCaseRarity[]
-).map((value) => ({ value, label: lootBoxCaseRarityLabels[value] }));
-
-const lootBoxUsageKindOptions: Array<{
-  value: GuestGameLootBoxUsageKind;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: "STANDALONE",
-    label: "Витрина",
-    description: "Показывается отдельной карточкой в игровом модуле.",
-  },
-  {
-    value: "REWARD_TEMPLATE",
-    label: "Подарочный",
-    description: "Не отображается в витрине и используется только как награда.",
-  },
-  {
-    value: "BOTH",
-    label: "Витрина + подарок",
-    description: "Можно открыть в витрине и выдать как награду.",
-  },
-];
-
-const lootBoxUsageKindLabels: Record<GuestGameLootBoxUsageKind, string> = {
-  STANDALONE: "витрина",
-  REWARD_TEMPLATE: "подарочный",
-  BOTH: "витрина + подарок",
-};
-
-const rewardStatusActionLabels: Record<GuestGameRewardStatus, string> = {
-  PENDING: "Вернуть к выдаче",
-  APPROVED: "Согласовать",
-  PAID: "Отметить выдано",
-  CANCELED: "Отменить",
-  EXPIRED: "Списать как сгоревшую",
-};
-
 type RewardSortMode = "newest" | "oldest";
-
-const fieldClass =
-  "w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-950 outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white";
-
-const smallButtonClass =
-  "rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-200 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/30 dark:hover:text-emerald-100";
-
-const dangerButtonClass =
-  "rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 transition hover:border-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:text-red-200 dark:hover:border-red-700 dark:hover:bg-red-950/30";
-
-const primaryButtonClass =
-  "rounded-lg bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300";
-
-const formSectionClass =
-  "rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/35";
-
-const statusOptions: GuestGameStatus[] = [
-  "DRAFT",
-  "ACTIVE",
-  "PAUSED",
-  "FINISHED",
-  "ARCHIVED",
-];
 
 const profileStatusOptions: GuestGameProfileStatus[] = [
   "ACTIVE",
   "PAUSED",
   "ARCHIVED",
-];
-
-const rewardStatusOptions: GuestGameRewardStatus[] = [
-  "PENDING",
-  "APPROVED",
-  "PAID",
-  "CANCELED",
-  "EXPIRED",
 ];
 
 const defaultProfileForm: ProfileForm = {
@@ -1024,65 +540,6 @@ const defaultProfileForm: ProfileForm = {
   level: "1",
   status: "ACTIVE",
 };
-
-const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
-  {
-    id: "default-bonus-50",
-    rewardType: "BONUS_BALANCE",
-    rewardAmount: "50",
-    rewardLabel: "50 бонусов",
-    chancePercent: "85",
-    noBonus: false,
-    visualMode: "AUTO",
-    iconKey: "coins",
-    imageUrl: "",
-    borderColor: "",
-    textColor: "",
-    backgroundColor: "",
-  },
-  {
-    id: "default-bonus-100",
-    rewardType: "BONUS_BALANCE",
-    rewardAmount: "100",
-    rewardLabel: "100 бонусов",
-    chancePercent: "5",
-    noBonus: false,
-    visualMode: "AUTO",
-    iconKey: "coins",
-    imageUrl: "",
-    borderColor: "",
-    textColor: "",
-    backgroundColor: "",
-  },
-  {
-    id: "default-bonus-200",
-    rewardType: "BONUS_BALANCE",
-    rewardAmount: "200",
-    rewardLabel: "200 бонусов",
-    chancePercent: "2",
-    noBonus: false,
-    visualMode: "AUTO",
-    iconKey: "coins",
-    imageUrl: "",
-    borderColor: "",
-    textColor: "",
-    backgroundColor: "",
-  },
-  {
-    id: "default-promo-1000",
-    rewardType: "PROMOCODE",
-    rewardAmount: "1000",
-    rewardLabel: "Промокод на 1000 рублей",
-    chancePercent: "1",
-    noBonus: false,
-    visualMode: "AUTO",
-    iconKey: "ticket",
-    imageUrl: "",
-    borderColor: "",
-    textColor: "",
-    backgroundColor: "",
-  },
-];
 
 const defaultLootBoxForm: LootBoxForm = {
   name: "Лутбокс тихих часов",
@@ -1159,29 +616,7 @@ const defaultLootBoxForm: LootBoxForm = {
   note: "Выдача только после проверки администратором.",
 };
 
-const defaultMissionQuestSteps: MissionQuestStepForm[] = [
-  {
-    id: "step-1",
-    title: "Сыграть сессию от 90 минут",
-    missionId: "",
-  },
-  {
-    id: "step-2",
-    title: "Купить напиток или снек",
-    missionId: "",
-  },
-  {
-    id: "step-3",
-    title: "Вернуться в будний день",
-    missionId: "",
-  },
-];
-
 const maxMissionQuestSteps = 10;
-
-function cloneMissionQuestSteps(steps: MissionQuestStepForm[]) {
-  return steps.map((step) => ({ ...step }));
-}
 
 const defaultMissionForm: MissionForm = {
   name: "Вернись в будний день",
@@ -1461,14 +896,6 @@ const defaultEventForm: EventForm = {
   xpDelta: "50",
   note: "",
   payloadText: manualXpPayloadText("MANUAL_XP"),
-};
-
-const emptyDryRunSource = {
-  sourceFactId: "",
-  sourceFactKind: "",
-  externalProvider: "",
-  externalDomain: "",
-  externalId: "",
 };
 
 const defaultDryRunForm: DryRunForm = {
@@ -9696,22 +9123,6 @@ function promoBannerPreviewTitleSize(title: string) {
   return 24;
 }
 
-function clampPromoBannerScale(value: number) {
-  if (!Number.isFinite(value)) {
-    return 1;
-  }
-
-  return Math.min(3, Math.max(1, value));
-}
-
-function clampPromoBannerOffset(value: number) {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-
-  return Math.min(45, Math.max(-45, value));
-}
-
 function formatPromoBannerNumber(value: number) {
   return String(Math.round(value * 100) / 100);
 }
@@ -12408,451 +11819,6 @@ function SeasonStepRewardFields({
   );
 }
 
-function BusinessRuleSection({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <fieldset className="space-y-3 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.04] p-3">
-      <legend className="px-1 text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
-        {title}
-      </legend>
-      <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-        {description}
-      </p>
-      {children}
-    </fieldset>
-  );
-}
-
-function FormSection({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className={`${formSectionClass} space-y-3`}>
-      <div>
-        <h3 className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-          {title}
-        </h3>
-        {description ? (
-          <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-            {description}
-          </p>
-        ) : null}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function OptionSelect({
-  options,
-  value,
-  onChange,
-  preservedLabel,
-}: {
-  options: Array<{ value: string; label: string }>;
-  value: string;
-  onChange: (value: string) => void;
-  preservedLabel: string;
-}) {
-  const hasCurrentOption = options.some((option) => option.value === value);
-
-  return (
-    <select
-      className={fieldClass}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      {!hasCurrentOption && value ? (
-        <option value={value}>
-          {preservedLabel}: {value}
-        </option>
-      ) : null}
-      {options.map((option) => (
-        <option key={option.value || "empty"} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function OptionHelp({ children }: { children: ReactNode }) {
-  return (
-    <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-      {children}
-    </p>
-  );
-}
-
-function RewardApprovalSelect({
-  manualApprovalRequired,
-  onChange,
-}: {
-  manualApprovalRequired: boolean;
-  onChange: (manualApprovalRequired: boolean) => void;
-}) {
-  return (
-    <Field label="Выдача награды">
-      <select
-        className={fieldClass}
-        value={manualApprovalRequired ? "manual" : "auto"}
-        onChange={(event) => onChange(event.target.value === "manual")}
-      >
-        <option value="auto">Автоматически</option>
-        <option value="manual">После подтверждения сотрудником</option>
-      </select>
-    </Field>
-  );
-}
-
-function ToggleField({
-  label,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  disabled?: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label
-      className={`flex min-h-10 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 ${
-        disabled ? "cursor-not-allowed opacity-60" : ""
-      }`}
-    >
-      <span>{label}</span>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-    </label>
-  );
-}
-
-function BudgetField({
-  value,
-  unlimited,
-  onChange,
-}: {
-  value: string;
-  unlimited: boolean;
-  onChange: (patch: {
-    budgetAmount?: string;
-    budgetUnlimited?: boolean;
-  }) => void;
-}) {
-  return (
-    <Field label="Бюджет">
-      <div className="space-y-2">
-        <input
-          className={`${fieldClass} disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:disabled:bg-zinc-900`}
-          type="number"
-          min="0"
-          value={unlimited ? "" : value}
-          disabled={unlimited}
-          placeholder={unlimited ? "Без ограничений" : undefined}
-          onChange={(event) => onChange({ budgetAmount: event.target.value })}
-        />
-        <label className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
-          <span>Безлимит</span>
-          <input
-            type="checkbox"
-            checked={unlimited}
-            onChange={(event) =>
-              onChange({ budgetUnlimited: event.target.checked })
-            }
-          />
-        </label>
-      </div>
-    </Field>
-  );
-}
-
-function RuleCommonFields({
-  status,
-  name,
-  ruleKind,
-  lootBoxUsageKind,
-  rewardType,
-  rewardAmount,
-  rewardLabel,
-  audienceId,
-  budgetAmount,
-  budgetUnlimited,
-  manualApprovalRequired,
-  note,
-  audiences,
-  hideRewardFields = false,
-  onChange,
-}: {
-  status: GuestGameStatus;
-  name: string;
-  ruleKind?: "lootBox" | "mission";
-  lootBoxUsageKind?: GuestGameLootBoxUsageKind;
-  rewardType: string;
-  rewardAmount: string;
-  rewardLabel: string;
-  audienceId: string;
-  budgetAmount: string;
-  budgetUnlimited: boolean;
-  manualApprovalRequired: boolean;
-  note: string;
-  audiences: GuestAudience[];
-  hideRewardFields?: boolean;
-  onChange: (patch: Partial<LootBoxForm & MissionForm>) => void;
-}) {
-  return (
-    <>
-      <FormSection title="Основное">
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(180px,0.6fr)]">
-          <Field label="Название">
-            <input
-              className={fieldClass}
-              value={name}
-              onChange={(event) => onChange({ name: event.target.value })}
-            />
-          </Field>
-          <Field label="Статус">
-            <StatusSelect
-              value={status}
-              onChange={(next) => onChange({ status: next })}
-            />
-          </Field>
-        </div>
-      </FormSection>
-      <FormSection
-        title={hideRewardFields ? "Бюджет и выдача" : "Награда и бюджет"}
-      >
-        {hideRewardFields ? (
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(180px,260px)]">
-            <BudgetField
-              value={budgetAmount}
-              unlimited={budgetUnlimited}
-              onChange={onChange}
-            />
-            <RewardApprovalSelect
-              manualApprovalRequired={manualApprovalRequired}
-              onChange={(nextManualApprovalRequired) =>
-                onChange({
-                  manualApprovalRequired: nextManualApprovalRequired,
-                })
-              }
-            />
-          </div>
-        ) : (
-          <>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              <Field label="Тип награды">
-                <OptionSelect
-                  options={rewardTypeOptions}
-                  value={rewardType}
-                  preservedLabel="Сохраненный тип награды"
-                  onChange={(nextRewardType) =>
-                    onChange({ rewardType: nextRewardType })
-                  }
-                />
-              </Field>
-              <Field label="Сумма">
-                <input
-                  className={fieldClass}
-                  type="number"
-                  value={rewardAmount}
-                  onChange={(event) =>
-                    onChange({ rewardAmount: event.target.value })
-                  }
-                />
-              </Field>
-              <BudgetField
-                value={budgetAmount}
-                unlimited={budgetUnlimited}
-                onChange={onChange}
-              />
-            </div>
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(180px,260px)]">
-              <Field label="Название награды">
-                <input
-                  className={fieldClass}
-                  value={rewardLabel}
-                  onChange={(event) =>
-                    onChange({ rewardLabel: event.target.value })
-                  }
-                />
-              </Field>
-              <RewardApprovalSelect
-                manualApprovalRequired={manualApprovalRequired}
-                onChange={(nextManualApprovalRequired) =>
-                  onChange({
-                    manualApprovalRequired: nextManualApprovalRequired,
-                  })
-                }
-              />
-            </div>
-          </>
-        )}
-      </FormSection>
-      {ruleKind === "lootBox" ? (
-        <FormSection
-          title="Назначение лутбокса"
-          description="Выберите, где кейс будет использоваться: в витрине игрового модуля, как подарок за другие активности или в обоих сценариях."
-        >
-          <div className="grid gap-2 md:grid-cols-3">
-            {lootBoxUsageKindOptions.map((option) => {
-              const active = lootBoxUsageKind === option.value;
-
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={[
-                    "rounded-lg border p-3 text-left transition",
-                    active
-                      ? "border-emerald-300 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-200 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-50 dark:ring-emerald-600/30"
-                      : "border-zinc-200 bg-white text-zinc-700 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/20",
-                  ].join(" ")}
-                  onClick={() =>
-                    onChange({
-                      usageKind: option.value,
-                    } as Partial<LootBoxForm & MissionForm>)
-                  }
-                >
-                  <span className="block text-sm font-bold">
-                    {option.label}
-                  </span>
-                  <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                    {option.description}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </FormSection>
-      ) : null}
-      <FormSection title="Аудитория и заметка">
-        <AudienceSelect
-          audiences={audiences}
-          value={audienceId}
-          onChange={(next) => onChange({ audienceId: next })}
-        />
-        <Field label="Заметка">
-          <textarea
-            className={`${fieldClass} min-h-20`}
-            value={note}
-            onChange={(event) => onChange({ note: event.target.value })}
-          />
-        </Field>
-      </FormSection>
-    </>
-  );
-}
-
-function RulesLayout<T>({
-  canManage,
-  formTitle,
-  formAction,
-  form,
-  listTitle,
-  listSummary,
-  items,
-  renderItem,
-  layout = "sidebar",
-  formRevealSeq = 0,
-}: {
-  canManage: boolean;
-  formTitle: string;
-  formAction?: ReactNode;
-  form: ReactNode;
-  listTitle: string;
-  listSummary?: ReactNode;
-  items: T[];
-  renderItem: (item: T) => ReactNode;
-  layout?: "sidebar" | "stacked";
-  /** Bump to bring the form into view (e.g. after «Редактировать» in the list). */
-  formRevealSeq?: number;
-}) {
-  const isStacked = layout === "stacked";
-  const formRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!formRevealSeq) {
-      return;
-    }
-    const element = formRef.current;
-    if (!element) {
-      return;
-    }
-    const rect = element.getBoundingClientRect();
-    if (rect.top >= 0 && rect.top < window.innerHeight / 2) {
-      return;
-    }
-    const reduceMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
-    element.scrollIntoView({
-      behavior: reduceMotion ? "auto" : "smooth",
-      block: "start",
-    });
-  }, [formRevealSeq]);
-
-  return (
-    <div
-      className={
-        canManage
-          ? isStacked
-            ? "grid gap-5"
-            : "grid items-start gap-4 2xl:grid-cols-[minmax(360px,420px)_minmax(0,1fr)]"
-          : "grid gap-5"
-      }
-    >
-      {canManage ? (
-        <div ref={formRef} className="scroll-mt-4">
-          <Panel title={formTitle} action={formAction}>
-            {form}
-          </Panel>
-        </div>
-      ) : null}
-      <section className="min-w-0 space-y-3">
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-          <SectionTitle title={listTitle} />
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-            {items.length} правил
-          </p>
-        </div>
-        {listSummary ? <div>{listSummary}</div> : null}
-        <div
-          className={
-            isStacked
-              ? "grid gap-3 lg:grid-cols-2"
-              : "grid max-w-5xl gap-3 lg:grid-cols-2 2xl:max-w-none"
-          }
-        >
-          {items.length ? (
-            items.map(renderItem)
-          ) : (
-            <EmptyState text="Правил пока нет" />
-          )}
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function ProfileCard({
   profile,
   onEdit,
@@ -12948,217 +11914,6 @@ function ProfileCard({
   );
 }
 
-function RuleCard({
-  eyebrow,
-  trackingId,
-  title,
-  status,
-  subtitle,
-  meta,
-  details,
-  onEdit,
-  onStatus,
-  onDelete,
-  onRestart,
-  saving,
-  deleteSaving,
-  restartSaving,
-  canManage,
-}: {
-  eyebrow?: string;
-  trackingId?: string;
-  title: string;
-  status: GuestGameStatus;
-  subtitle: string;
-  meta: string[];
-  details?: ReactNode;
-  onEdit: () => void;
-  onStatus: (status: GuestGameStatus) => Promise<void>;
-  onDelete?: () => Promise<void>;
-  onRestart?: () => Promise<void>;
-  saving: boolean;
-  deleteSaving?: boolean;
-  restartSaving?: boolean;
-  canManage: boolean;
-}) {
-  return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          {eyebrow || trackingId ? (
-            <div className="mb-1 flex flex-wrap items-center gap-2">
-              {eyebrow ? (
-                <p className="text-[11px] font-bold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
-                  {eyebrow}
-                </p>
-              ) : null}
-              {trackingId ? (
-                <span className="rounded-md border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-cyan-800 dark:border-cyan-900/70 dark:bg-cyan-950/40 dark:text-cyan-200">
-                  ID {trackingId}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-          <h3 className="text-base font-bold text-zinc-950 dark:text-white">
-            {title}
-          </h3>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            {subtitle}
-          </p>
-        </div>
-        <StatusPill
-          label={statusLabels[status]}
-          tone={ruleStatusPillTone(status)}
-        />
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {meta.map((item) => (
-          <span
-            key={item}
-            className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
-          >
-            {item}
-          </span>
-        ))}
-      </div>
-      {details ? <div className="mt-3">{details}</div> : null}
-      {canManage ? (
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button type="button" className={smallButtonClass} onClick={onEdit}>
-            Редактировать
-          </button>
-          {onDelete ? (
-            <button
-              type="button"
-              className={dangerButtonClass}
-              disabled={saving || restartSaving || deleteSaving}
-              onClick={onDelete}
-            >
-              {deleteSaving ? "Удаление..." : "Удалить"}
-            </button>
-          ) : null}
-          {onRestart ? (
-            <button
-              type="button"
-              className={smallButtonClass}
-              disabled={saving || restartSaving || deleteSaving}
-              onClick={onRestart}
-            >
-              {restartSaving ? "Перезапуск..." : "Перезапустить"}
-            </button>
-          ) : null}
-          {statusOptions.map((nextStatus) => (
-            <button
-              key={nextStatus}
-              type="button"
-              className={smallButtonClass}
-              disabled={
-                saving || restartSaving || deleteSaving || status === nextStatus
-              }
-              onClick={() => onStatus(nextStatus)}
-            >
-              {statusLabels[nextStatus]}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <p className="mt-4 text-xs font-medium text-zinc-500 dark:text-zinc-400">
-          Только просмотр правила: редактирование и смена статуса недоступны.
-        </p>
-      )}
-    </div>
-  );
-}
-
-function rewardGuestFullName(reward: GuestGameReward) {
-  return (
-    reward.profile?.displayName ??
-    reward.guest?.displayName ??
-    reward.guestExternalId ??
-    "Гость"
-  );
-}
-
-function formatGuestShortName(value: string | null | undefined) {
-  const normalized = value?.trim().replace(/\s+/g, " ");
-
-  if (!normalized || normalized === "без гостя") {
-    return "Гость";
-  }
-
-  if (/^гость(?:\s|$)/i.test(normalized)) {
-    return normalized;
-  }
-
-  const parts = normalized.split(" ").filter(Boolean);
-  const initial = (part: string) => part.slice(0, 1).toLocaleUpperCase("ru-RU");
-
-  if (parts.length >= 3) {
-    return `${parts[0]} ${initial(parts[1])}.${initial(parts[2])}.`;
-  }
-
-  if (parts.length === 2) {
-    return `${parts[0]} ${initial(parts[1])}.`;
-  }
-
-  return normalized;
-}
-
-function formatPhoneTail(value: string | null | undefined) {
-  if (!value) {
-    return "телефон не указан";
-  }
-
-  const digits = value.replace(/\D/g, "");
-
-  if (digits.length >= 6) {
-    return `***${digits.slice(-6)}`;
-  }
-
-  if (digits.length > 0) {
-    return `***${digits}`;
-  }
-
-  return value;
-}
-
-function formatRewardPhone(reward: GuestGameReward) {
-  return formatPhoneTail(
-    reward.guest?.contact ?? reward.profile?.contactMasked,
-  );
-}
-
-function rewardActivityLabel(reward: GuestGameReward) {
-  if (reward.activityLabel?.trim()) {
-    return reward.activityLabel;
-  }
-
-  if (reward.lootBox) {
-    return `Лутбокс "${reward.lootBox.name}"`;
-  }
-
-  if (reward.mission) {
-    if (
-      reward.mission.missionType === "CHECK_IN" ||
-      reward.mission.triggerKind === "CHECK_IN"
-    ) {
-      return "Чекин";
-    }
-
-    return `Задание "${reward.mission.name}"`;
-  }
-
-  if (reward.season) {
-    return `Battlepass "${reward.season.name}"`;
-  }
-
-  if (reward.source === "MANUAL" || reward.source === "CASHIER") {
-    return "Ручная награда";
-  }
-
-  return "Игровое событие";
-}
-
 function rewardSearchTokens(reward: GuestGameReward) {
   const fullName = rewardGuestFullName(reward);
   const phone = formatRewardPhone(reward);
@@ -13179,213 +11934,6 @@ function rewardSearchTokens(reward: GuestGameReward) {
   ]
     .filter(Boolean)
     .map((token) => String(token).toLocaleLowerCase("ru-RU"));
-}
-
-function rewardRarityLabel(reward: GuestGameReward) {
-  return (
-    reward.rewardRarityLabel ??
-    (reward.rewardRarity ? rewardRarityLabels[reward.rewardRarity] : null)
-  );
-}
-
-function rewardStatusButtonLabel(
-  reward: GuestGameReward,
-  status: GuestGameRewardStatus,
-) {
-  if (status === "APPROVED" && isAutomaticLedgerReward(reward)) {
-    return "Согласовать и начислить";
-  }
-
-  return rewardStatusActionLabels[status];
-}
-
-function RewardRow({
-  reward,
-  onStatus,
-  onEdit,
-  saving,
-  canApprove,
-}: {
-  reward: GuestGameReward;
-  onStatus: (
-    reward: GuestGameReward,
-    status: GuestGameRewardStatus,
-  ) => Promise<void>;
-  onEdit: (reward: GuestGameReward) => void;
-  saving: string | null;
-  canApprove: boolean;
-}) {
-  const fullGuestName = rewardGuestFullName(reward);
-  const guestName = formatGuestShortName(fullGuestName);
-  const guestContact = formatRewardPhone(reward);
-  const activity = rewardActivityLabel(reward);
-  const storeName = reward.store?.name ?? "любой клуб";
-  const qualifiedAt = formatDate(reward.qualifiedAt);
-  const rewardTypeLabel = rewardTypeLabelFromValue(reward.rewardType);
-  const rarityLabel = rewardRarityLabel(reward);
-
-  return (
-    <details className="group rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <summary className="cursor-pointer list-none p-4 outline-none transition hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-emerald-400 dark:hover:bg-zinc-900/60 [&::-webkit-details-marker]:hidden">
-        <div className="grid gap-3 lg:grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_auto] lg:items-center">
-          <div className="min-w-0">
-            <p className="text-xs font-bold uppercase text-zinc-400">
-              Тип активности
-            </p>
-            <p className="mt-1 font-semibold text-zinc-950 dark:text-white">
-              {activity}
-            </p>
-            <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
-              {reward.rewardLabel}
-            </p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs font-bold uppercase text-zinc-400">Клуб</p>
-            <p className="mt-1 truncate text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-              {storeName}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs font-bold uppercase text-zinc-400">Дата</p>
-            <p className="mt-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-              {qualifiedAt}
-            </p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs font-bold uppercase text-zinc-400">ФИО</p>
-            <p className="mt-1 truncate text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-              {guestName}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs font-bold uppercase text-zinc-400">Телефон</p>
-            <p className="mt-1 font-mono text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-              {guestContact}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2 lg:justify-end">
-            {rarityLabel ? (
-              <StatusPill
-                label={rarityLabel}
-                tone={rewardRarityPillTone(reward.rewardRarity)}
-              />
-            ) : null}
-            <StatusPill
-              label={guestRewardStatusLabel(reward)}
-              tone={rewardStatusPillTone(reward.status)}
-            />
-            <StatusPill
-              label={guestRewardFulfillmentLabel(reward)}
-              tone={rewardWalletPillTone(reward.walletState)}
-            />
-          </div>
-        </div>
-      </summary>
-      <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-bold text-zinc-950 dark:text-white">
-                {reward.rewardLabel}
-              </h3>
-              <StatusPill
-                label={guestRewardStatusLabel(reward)}
-                tone={rewardStatusPillTone(reward.status)}
-              />
-              <StatusPill
-                label={guestRewardFulfillmentLabel(reward)}
-                tone={rewardWalletPillTone(reward.walletState)}
-              />
-              {rarityLabel ? (
-                <StatusPill
-                  label={rarityLabel}
-                  tone={rewardRarityPillTone(reward.rewardRarity)}
-                />
-              ) : null}
-            </div>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              {guestName} · телефон: {guestContact}
-            </p>
-            {fullGuestName !== guestName ? (
-              <p className="mt-1 text-xs text-zinc-400">
-                Имя в профиле: {fullGuestName}
-              </p>
-            ) : null}
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              {rewardTypeLabel} · {formatMoney(reward.rewardAmount)}
-              {rarityLabel ? ` · ${rarityLabel}` : ""}
-            </p>
-            <p className="mt-1 text-xs text-zinc-400">
-              {storeName} · {qualifiedAt}
-            </p>
-            <p className="mt-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
-              {guestRewardLifecycleDescription(reward)}
-            </p>
-            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-              <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
-                <span className="block font-semibold uppercase text-zinc-400">
-                  Код кассиру
-                </span>
-                <span className="mt-1 block font-mono text-sm font-bold text-zinc-900 dark:text-white">
-                  {reward.rewardCode ?? "будет создан при согласовании"}
-                </span>
-              </div>
-              <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
-                <span className="block font-semibold uppercase text-zinc-400">
-                  Срок
-                </span>
-                <span className="mt-1 block text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-                  {reward.expiresAt
-                    ? formatDate(reward.expiresAt)
-                    : "без срока"}
-                </span>
-              </div>
-            </div>
-            {reward.claimPayload ? (
-              <p className="mt-2 rounded-lg border border-dashed border-cyan-300/40 px-3 py-2 text-xs text-cyan-700 dark:text-cyan-200">
-                QR-код готов для гостевой страницы. Для ручной выдачи
-                используйте короткий код кассиру выше.
-              </p>
-            ) : null}
-          </div>
-          {canApprove ? (
-            <div className="min-w-0 space-y-2">
-              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-                {guestRewardActionNotice(reward)}
-              </p>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
-                <button
-                  type="button"
-                  className={smallButtonClass}
-                  onClick={() => onEdit(reward)}
-                >
-                  Редактировать
-                </button>
-                {rewardStatusOptions.map((status) => (
-                  <button
-                    key={status}
-                    type="button"
-                    className={smallButtonClass}
-                    disabled={
-                      saving === `reward-${reward.id}` ||
-                      reward.status === status
-                    }
-                    onClick={() => onStatus(reward, status)}
-                  >
-                    {rewardStatusButtonLabel(reward, status)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 xl:text-right">
-              Только просмотр награды
-            </p>
-          )}
-        </div>
-      </div>
-    </details>
-  );
 }
 
 function EventRow({ event }: { event: GuestGameEvent }) {
@@ -13418,308 +11966,6 @@ function EventRow({ event }: { event: GuestGameEvent }) {
   );
 }
 
-function StatusSelect({
-  value,
-  onChange,
-}: {
-  value: GuestGameStatus;
-  onChange: (value: GuestGameStatus) => void;
-}) {
-  return (
-    <select
-      className={fieldClass}
-      value={value}
-      onChange={(event) => onChange(event.target.value as GuestGameStatus)}
-    >
-      {statusOptions.map((status) => (
-        <option key={status} value={status}>
-          {statusLabels[status]}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function AudienceSelect({
-  audiences,
-  value,
-  onChange,
-}: {
-  audiences: GuestAudience[];
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <Field label="Группа гостей">
-      <select
-        className={fieldClass}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">Все гости</option>
-        {audiences.map((audience) => (
-          <option key={audience.id} value={audience.id}>
-            {audience.name} · {audience.guestsCount}
-          </option>
-        ))}
-      </select>
-    </Field>
-  );
-}
-
-function StoreSelect({
-  stores,
-  value,
-  onChange,
-}: {
-  stores: Store[];
-  value: string[];
-  onChange: (value: string[]) => void;
-}) {
-  const selectedStores = new Set(value);
-  const toggleStore = (storeId: string) => {
-    onChange(
-      selectedStores.has(storeId)
-        ? value.filter((currentStoreId) => currentStoreId !== storeId)
-        : [...value, storeId],
-    );
-  };
-
-  return (
-    <Field label="Клубы">
-      <div className="grid gap-2 sm:grid-cols-2">
-        {stores.length ? (
-          stores.map((store) => {
-            const selected = selectedStores.has(store.id);
-
-            return (
-              <button
-                key={store.id}
-                type="button"
-                aria-pressed={selected}
-                className={[
-                  "flex min-h-12 items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left text-sm transition",
-                  selected
-                    ? "border-emerald-300 bg-emerald-50 text-emerald-900 shadow-sm dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100"
-                    : "border-zinc-200 bg-white text-zinc-700 hover:border-cyan-300 hover:bg-cyan-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-cyan-800 dark:hover:bg-cyan-950/30",
-                ].join(" ")}
-                onClick={() => toggleStore(store.id)}
-              >
-                <span className="min-w-0 truncate font-semibold">
-                  {store.name}
-                </span>
-                <span
-                  className={[
-                    "shrink-0 rounded-full px-2 py-1 text-[11px] font-bold uppercase",
-                    selected
-                      ? "bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100"
-                      : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400",
-                  ].join(" ")}
-                >
-                  {selected ? "выбран" : "выбрать"}
-                </span>
-              </button>
-            );
-          })
-        ) : (
-          <p className="rounded-lg border border-dashed border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-            Клубы пока не добавлены.
-          </p>
-        )}
-      </div>
-      <OptionHelp>
-        Можно выбрать несколько клубов обычными кликами. Повторный клик снимает
-        выбор.
-      </OptionHelp>
-    </Field>
-  );
-}
-
-type TariffConditionPatch = {
-  tariffGroupId?: string;
-  tariffPeriodId?: string;
-  tariffTypeId?: string;
-};
-
-function TariffConditionFields({
-  snapshots,
-  tariffGroupId,
-  tariffPeriodId,
-  tariffTypeId,
-  onChange,
-}: {
-  snapshots: GuestGameTariffSnapshotEndpoint[];
-  tariffGroupId: string;
-  tariffPeriodId: string;
-  tariffTypeId: string;
-  onChange: (patch: TariffConditionPatch) => void;
-}) {
-  const groupItems = tariffItemsByEndpoint(snapshots, "tariffsGroups");
-  const periodItems = tariffItemsByEndpoint(snapshots, "tariffsTimePeriod");
-  const typeItems = tariffItemsByEndpoint(snapshots, "tariffsTypesGroups");
-  const hasItems = groupItems.length || periodItems.length || typeItems.length;
-
-  return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
-          Тарифные условия Langame
-        </p>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          {hasItems
-            ? "Выберите только те условия, которые должны ограничивать правило."
-            : "Справочники тарифов пока не заполнены snapshot-синхронизацией."}
-        </p>
-      </div>
-      <div className="mt-3 grid gap-3 lg:grid-cols-3">
-        <TariffConditionSelect
-          label="Группа тарифа"
-          emptyLabel="Любая группа"
-          items={groupItems}
-          value={tariffGroupId}
-          onChange={(value) => onChange({ tariffGroupId: value })}
-        />
-        <TariffConditionSelect
-          label="Период тарифа"
-          emptyLabel="Любой период"
-          items={periodItems}
-          value={tariffPeriodId}
-          onChange={(value) => onChange({ tariffPeriodId: value })}
-        />
-        <TariffConditionSelect
-          label="Тип тарифа"
-          emptyLabel="Любой тип"
-          items={typeItems}
-          value={tariffTypeId}
-          onChange={(value) => onChange({ tariffTypeId: value })}
-        />
-      </div>
-    </div>
-  );
-}
-
-type GuestLogBusinessPreset = {
-  id: string;
-  label: string;
-  description: string;
-  intent: "allow" | "block";
-  tokens: string[];
-  types: string[];
-};
-
-const guestLogBusinessPresetDefinitions: Array<
-  Omit<GuestLogBusinessPreset, "types">
-> = [
-  {
-    id: "visit_or_session_start",
-    label: "Старт визита или сессии",
-    description: "Подходит для лутбокса при начале игры или задания на визит.",
-    intent: "allow",
-    tokens: [
-      "start",
-      "visit",
-      "login",
-      "session",
-      "play",
-      "старт",
-      "визит",
-      "вход",
-      "начал",
-      "начало",
-      "сесс",
-      "сеанс",
-      "игр",
-    ],
-  },
-  {
-    id: "session_finish",
-    label: "Завершение сессии",
-    description: "Полезно для заданий на отыгранную сессию или итоговый XP.",
-    intent: "allow",
-    tokens: [
-      "finish",
-      "finished",
-      "end",
-      "stop",
-      "logout",
-      "close",
-      "заверш",
-      "оконч",
-      "выход",
-      "стоп",
-    ],
-  },
-  {
-    id: "events_and_tournaments",
-    label: "Турниры и события",
-    description:
-      "Подходит для заданий за участие в турнирах и клубных событиях.",
-    intent: "allow",
-    tokens: [
-      "tournament",
-      "event",
-      "quest",
-      "mission",
-      "challenge",
-      "турнир",
-      "событ",
-      "ивент",
-      "квест",
-      "мисси",
-      "челлендж",
-    ],
-  },
-  {
-    id: "balance_and_payment",
-    label: "Баланс и оплата",
-    description:
-      "Подходит для заданий или XP за пополнение, оплату или бонусы.",
-    intent: "allow",
-    tokens: [
-      "balance",
-      "payment",
-      "pay",
-      "deposit",
-      "bonus",
-      "topup",
-      "transaction",
-      "cash",
-      "плат",
-      "баланс",
-      "пополн",
-      "бонус",
-      "депозит",
-      "касс",
-    ],
-  },
-  {
-    id: "manual_or_risk",
-    label: "Ручные и рискованные события",
-    description:
-      "Лучше добавлять в запрет anti-fraud, чтобы исключить тесты и корректировки.",
-    intent: "block",
-    tokens: [
-      "manual",
-      "cancel",
-      "rollback",
-      "refund",
-      "delete",
-      "edit",
-      "test",
-      "debug",
-      "admin",
-      "коррект",
-      "отмен",
-      "возврат",
-      "тест",
-      "удал",
-      "ручн",
-      "админ",
-      "ошиб",
-    ],
-  },
-];
-
 const guestLogMappingPresetOptions: Array<{
   id: GuestGameGuestLogMappingPreset;
   label: string;
@@ -13741,156 +11987,6 @@ function guestLogMappingDraftFromItem(
     intent: item?.mapping?.intent ?? "allow",
     note: item?.mapping?.note ?? "",
   };
-}
-
-function guestLogBusinessPresets(
-  items: GuestGameGuestLogCatalog["items"],
-): GuestLogBusinessPreset[] {
-  if (!items.length) {
-    return [];
-  }
-
-  const mappedPresets = new Map<string, GuestLogBusinessPreset>();
-
-  for (const item of items) {
-    if (!item.mapping) {
-      continue;
-    }
-
-    const definition = guestLogBusinessPresetDefinitions.find(
-      (preset) => preset.id === item.mapping?.preset,
-    );
-    const id = `mapped:${item.mapping.preset}:${item.mapping.intent}`;
-    const existing = mappedPresets.get(id) ?? {
-      id,
-      label:
-        item.mapping.preset === "custom"
-          ? item.mapping.label
-          : (definition?.label ?? item.mapping.label),
-      description:
-        item.mapping.note ??
-        definition?.description ??
-        "Сохраненное сопоставление raw-типа guests/logs.",
-      intent: item.mapping.intent,
-      tokens: [],
-      types: [],
-    };
-
-    if (!existing.types.includes(item.type)) {
-      existing.types.push(item.type);
-    }
-
-    mappedPresets.set(id, existing);
-  }
-
-  const autoPresets = guestLogBusinessPresetDefinitions
-    .map((definition) => ({
-      ...definition,
-      types: Array.from(
-        new Set(
-          items
-            .filter(
-              (item) =>
-                !item.mapping &&
-                guestLogTypeMatchesPreset(item, definition.tokens),
-            )
-            .map((item) => item.type),
-        ),
-      ),
-    }))
-    .filter((preset) => preset.types.length);
-
-  return [...mappedPresets.values(), ...autoPresets];
-}
-
-function guestLogTypeMatchesPreset(
-  item: GuestGameGuestLogCatalog["items"][number],
-  tokens: string[],
-) {
-  const searchable = `${item.type} ${item.normalizedType}`.toLowerCase();
-
-  return tokens.some((token) => searchable.includes(token.toLowerCase()));
-}
-
-type GuestLogEventOption = {
-  value: string;
-  label: string;
-  description: string;
-};
-
-const fallbackGuestLogEventOptions: GuestLogEventOption[] = [
-  {
-    value: "visit",
-    label: "Визит гостя",
-    description: "Гость появился в клубе или был отмечен как посетитель.",
-  },
-  {
-    value: "login",
-    label: "Вход гостя",
-    description: "Гость вошел в систему или был найден в логах авторизации.",
-  },
-  {
-    value: "session_start",
-    label: "Старт игровой сессии",
-    description:
-      "Начало игровой активности, если такой тип есть в guests/logs.",
-  },
-  {
-    value: "tournament",
-    label: "Турнир или событие",
-    description: "Участие в турнире, ивенте или похожей клубной активности.",
-  },
-  {
-    value: "manual_cancel",
-    label: "Ручная отмена",
-    description: "Служебное действие, обычно его добавляют в исключения.",
-  },
-  {
-    value: "test",
-    label: "Тестовое событие",
-    description: "Тестовые логи, которые не должны выдавать реальные награды.",
-  },
-];
-
-function guestLogEventOptions(
-  catalog: GuestGameGuestLogCatalog,
-  selectedValues: string[],
-): GuestLogEventOption[] {
-  const options = new Map<string, GuestLogEventOption>();
-
-  for (const item of catalog.items) {
-    const domainLabel = item.domains
-      .slice(0, 2)
-      .map((domain) => domain.domain)
-      .join(", ");
-    options.set(item.type, {
-      value: item.type,
-      label: item.mapping?.label
-        ? `${item.mapping.label} · ${item.type}`
-        : item.type,
-      description: `${item.count} логов${
-        domainLabel ? ` · ${domainLabel}` : ""
-      }`,
-    });
-  }
-
-  for (const fallback of fallbackGuestLogEventOptions) {
-    if (!options.has(fallback.value)) {
-      options.set(fallback.value, fallback);
-    }
-  }
-
-  for (const value of selectedValues) {
-    if (!options.has(value)) {
-      options.set(value, {
-        value,
-        label: value,
-        description: "Сохраненное значение из правила.",
-      });
-    }
-  }
-
-  return Array.from(options.values());
 }
 
 function missionMetricEventOptions(
@@ -13926,49 +12022,6 @@ function missionMetricEventOptions(
   }
 
   return Array.from(options.values());
-}
-
-function SelectedGuestLogEvents({
-  values,
-  options,
-  emptyLabel,
-  onRemove,
-}: {
-  values: string[];
-  options: GuestLogEventOption[];
-  emptyLabel: string;
-  onRemove: (value: string) => void;
-}) {
-  if (!values.length) {
-    return (
-      <p className="rounded-lg border border-dashed border-zinc-200 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-        {emptyLabel}
-      </p>
-    );
-  }
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      {values.map((value) => {
-        const option = options.find((item) => item.value === value);
-
-        return (
-          <button
-            key={value}
-            type="button"
-            className="inline-flex max-w-full items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-left text-xs font-semibold text-emerald-900 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-emerald-900/70 dark:bg-emerald-950/30 dark:text-emerald-100 dark:hover:border-red-900 dark:hover:bg-red-950/30 dark:hover:text-red-200"
-            title="Убрать событие из правила"
-            onClick={() => onRemove(value)}
-          >
-            <span className="truncate">{option?.label ?? value}</span>
-            <span aria-hidden="true" className="text-sm leading-none">
-              x
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 type GuestLogConditionPatch = {
@@ -14587,10 +12640,6 @@ function filterCategoryOptions(
   );
 }
 
-function missionVisibilityValue(value: string | null | undefined) {
-  return String(value ?? "").toUpperCase() === "HIDDEN" ? "HIDDEN" : "VISIBLE";
-}
-
 function missionVisibilitySummary(value: unknown) {
   return missionVisibilityValue(stringRule(value, "visibility", "VISIBLE")) ===
     "HIDDEN"
@@ -14716,40 +12765,6 @@ function SelectionChips({
   );
 }
 
-function TariffConditionSelect({
-  label,
-  emptyLabel,
-  items,
-  value,
-  onChange,
-}: {
-  label: string;
-  emptyLabel: string;
-  items: GuestGameTariffSnapshotEndpoint["typedItems"];
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <Field label={label}>
-      <select
-        className={fieldClass}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">{emptyLabel}</option>
-        {items.map((item) => (
-          <option
-            key={`${item.domain}-${tariffItemValue(item)}`}
-            value={tariffItemValue(item)}
-          >
-            {tariffItemLabel(item)}
-          </option>
-        ))}
-      </select>
-    </Field>
-  );
-}
-
 function LinkSelect<T extends { id: string; name: string }>({
   label,
   value,
@@ -14796,43 +12811,6 @@ function JsonField({
         onChange={(event) => onChange(event.target.value)}
       />
     </Field>
-  );
-}
-
-function Panel({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-bold text-zinc-950 dark:text-white">
-          {title}
-        </h2>
-        {action ? <div className="shrink-0">{action}</div> : null}
-      </div>
-      {children ? <div className="mt-4">{children}</div> : null}
-    </section>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="block space-y-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-200">
-      <span>{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function SectionTitle({ title }: { title: string }) {
-  return (
-    <h2 className="text-lg font-bold text-zinc-950 dark:text-white">{title}</h2>
   );
 }
 
@@ -14983,99 +12961,6 @@ function StatCard({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function StatusMetric({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: ReactNode;
-  hint: string;
-}) {
-  return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-        {label}
-      </p>
-      <p className="mt-2 text-3xl font-bold text-zinc-950 dark:text-white">
-        {value}
-      </p>
-      <p className="mt-1 text-xs text-zinc-400">{hint}</p>
-    </div>
-  );
-}
-
-function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="rounded-md bg-zinc-100 p-2 dark:bg-zinc-900">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
-        {label}
-      </p>
-      <p className="mt-1 truncate text-sm font-bold text-zinc-950 dark:text-white">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-type StatusPillTone =
-  | "neutral"
-  | "success"
-  | "info"
-  | "warning"
-  | "danger"
-  | "purple"
-  | "cyan";
-
-const statusPillToneClasses: Record<StatusPillTone, string> = {
-  neutral:
-    "bg-zinc-100 text-zinc-700 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-200 dark:ring-zinc-700",
-  success:
-    "bg-emerald-100 text-emerald-800 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-200 dark:ring-emerald-800",
-  info: "bg-sky-100 text-sky-800 ring-sky-200 dark:bg-sky-950 dark:text-sky-200 dark:ring-sky-800",
-  warning:
-    "bg-amber-100 text-amber-800 ring-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:ring-amber-800",
-  danger:
-    "bg-red-100 text-red-800 ring-red-200 dark:bg-red-950 dark:text-red-200 dark:ring-red-800",
-  purple:
-    "bg-violet-100 text-violet-800 ring-violet-200 dark:bg-violet-950 dark:text-violet-200 dark:ring-violet-800",
-  cyan: "bg-cyan-100 text-cyan-800 ring-cyan-200 dark:bg-cyan-950 dark:text-cyan-200 dark:ring-cyan-800",
-};
-
-function StatusPill({
-  label,
-  tone = "neutral",
-}: {
-  label: string;
-  tone?: StatusPillTone;
-}) {
-  return (
-    <span
-      className={[
-        "rounded-full px-2 py-1 text-xs font-bold ring-1",
-        statusPillToneClasses[tone],
-      ].join(" ")}
-    >
-      {label}
-    </span>
-  );
-}
-
-function ruleStatusPillTone(status: GuestGameStatus): StatusPillTone {
-  switch (status) {
-    case "ACTIVE":
-      return "success";
-    case "DRAFT":
-      return "info";
-    case "PAUSED":
-      return "warning";
-    case "FINISHED":
-      return "cyan";
-    case "ARCHIVED":
-      return "neutral";
-  }
-}
-
 function profileStatusPillTone(status: GuestGameProfileStatus): StatusPillTone {
   switch (status) {
     case "ACTIVE":
@@ -15085,64 +12970,6 @@ function profileStatusPillTone(status: GuestGameProfileStatus): StatusPillTone {
     case "ARCHIVED":
       return "neutral";
   }
-}
-
-function rewardStatusPillTone(status: GuestGameRewardStatus): StatusPillTone {
-  switch (status) {
-    case "PENDING":
-      return "warning";
-    case "APPROVED":
-      return "info";
-    case "PAID":
-      return "success";
-    case "CANCELED":
-      return "neutral";
-    case "EXPIRED":
-      return "danger";
-  }
-}
-
-function rewardWalletPillTone(
-  status: GuestGameReward["walletState"],
-): StatusPillTone {
-  switch (status) {
-    case "WAITING_APPROVAL":
-      return "warning";
-    case "READY":
-      return "success";
-    case "DELIVERY_PROCESSING":
-      return "info";
-    case "REDEEMED":
-      return "cyan";
-    case "CANCELED":
-      return "neutral";
-    case "EXPIRED":
-      return "danger";
-  }
-}
-
-function rewardRarityPillTone(
-  rarity: GuestGameReward["rewardRarity"],
-): StatusPillTone {
-  switch (rarity) {
-    case "rare":
-      return "info";
-    case "epic":
-      return "purple";
-    case "legendary":
-      return "warning";
-    case "common":
-    default:
-      return "neutral";
-  }
-}
-
-function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="rounded-lg border border-dashed border-zinc-300 p-6 text-center text-sm font-medium text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-      {text}
-    </div>
-  );
 }
 
 function profileToForm(profile: GuestGameProfile): ProfileForm {
@@ -15333,39 +13160,8 @@ function missionToForm(mission: GuestGameMission): MissionForm {
   };
 }
 
-function isCheckInMission(mission: GuestGameMission) {
-  return (
-    mission.missionType === "CHECK_IN" || mission.triggerKind === "CHECK_IN"
-  );
-}
-
 function isCheckInMissionForm(form: MissionForm) {
   return form.missionType === "CHECK_IN" || form.triggerKind === "CHECK_IN";
-}
-
-function normalizeCheckInMissionForm(form: MissionForm): MissionForm {
-  const rewardType = form.rewardType || "XP";
-  const xpReward = form.xpReward && form.xpReward !== "0" ? form.xpReward : "0";
-
-  return {
-    ...form,
-    missionType: "CHECK_IN",
-    triggerKind: "CHECK_IN",
-    rewardType,
-    rewardAmount: rewardType === "XP" ? "0" : form.rewardAmount || "50",
-    rewardLabel:
-      form.rewardLabel ||
-      (rewardType === "BONUS_BALANCE" ? "Бонусы за чекин" : "XP за чекин"),
-    xpReward: rewardType === "XP" && xpReward === "0" ? "20" : xpReward,
-    progressTarget: form.progressTarget || "1",
-    progressUnit: form.progressUnit || "check_in",
-    metricAggregation: form.metricAggregation || "count",
-    metricEventTypes: form.metricEventTypes || "CHECK_IN",
-    questEnabled: false,
-    questSteps: [],
-    requireLangameFact: false,
-    denySameDayRepeat: false,
-  };
 }
 
 function seasonToForm(season: GuestGameSeason): SeasonForm {
@@ -15463,38 +13259,6 @@ function rewardToForm(reward: GuestGameReward): RewardForm {
     note: reward.note ?? "",
     evidenceText: jsonFormValue(reward.evidence),
   };
-}
-
-type ApiRequestErrorBody = {
-  code?: string;
-  message?: string;
-  stores?: Array<{ storeName?: string }>;
-  storeNames?: string[];
-};
-
-class ApiRequestError extends Error {
-  status: number;
-  body: ApiRequestErrorBody | null;
-
-  constructor(status: number, body: ApiRequestErrorBody | null) {
-    super(body?.message ?? "Ошибка запроса");
-    this.name = "ApiRequestError";
-    this.status = status;
-    this.body = body;
-  }
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, { cache: "no-store", ...init });
-
-  if (!response.ok) {
-    const body = (await response
-      .json()
-      .catch(() => null)) as ApiRequestErrorBody | null;
-    throw new ApiRequestError(response.status, body);
-  }
-
-  return response.json() as Promise<T>;
 }
 
 function postJson<T = unknown>(url: string, body: unknown) {
@@ -15606,20 +13370,6 @@ function extractDeleteBlockedStores(message: string) {
     .filter(Boolean);
 }
 
-function nullable(value: string) {
-  return value.trim() ? value.trim() : null;
-}
-
-function promoCardMetadata(promoCard: GuestGamePromoCard) {
-  return asRecord(promoCard.metadata);
-}
-
-function metadataString(metadata: Record<string, unknown>, key: string) {
-  const value = metadata[key];
-
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
 function numberMetadata(
   metadata: Record<string, unknown>,
   key: string,
@@ -15636,24 +13386,6 @@ function numberMetadata(
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function storeScopeLabel(storeIds: string[], stores: Store[]) {
-  if (!storeIds.length) {
-    return "все клубы";
-  }
-
-  const names = storeIds
-    .map((storeId) => stores.find((store) => store.id === storeId)?.name)
-    .filter((value): value is string => Boolean(value));
-
-  if (!names.length) {
-    return `${storeIds.length} клуб.`;
-  }
-
-  return names.length > 2
-    ? `${names.slice(0, 2).join(", ")} +${names.length - 2}`
-    : names.join(", ");
-}
-
 function lootBoxMatchesStoreFilter(
   lootBox: Pick<GuestGameLootBox, "storeIds">,
   storeId: string,
@@ -15661,67 +13393,6 @@ function lootBoxMatchesStoreFilter(
   return (
     !storeId || !lootBox.storeIds.length || lootBox.storeIds.includes(storeId)
   );
-}
-
-function buildPromoBannerUsage(
-  promoCards: GuestGamePromoCard[],
-  stores: Store[],
-): PromoBannerUsageSummary {
-  const byCardId = new Map<string, PromoBannerUsageInfo>();
-  const visibleCardIds = new Set<string>();
-  const overflowCardIds = new Set<string>();
-  const activeCardIds = new Set<string>();
-  const nowMs = Date.now();
-  const storeTargets = stores.length
-    ? stores.map((store) => ({ id: store.id, name: store.name }))
-    : [{ id: "__all__", name: "все клубы" }];
-  const activeCards = promoCards
-    .filter((promoCard) => promoBannerCanAppear(promoCard, nowMs))
-    .sort(comparePromoBannersForPortal);
-
-  activeCards.forEach((promoCard) => activeCardIds.add(promoCard.id));
-
-  const storeUsages = storeTargets
-    .map((store) => {
-      const eligibleCards = activeCards.filter((promoCard) =>
-        promoBannerMatchesStore(promoCard, store.id),
-      );
-
-      eligibleCards.forEach((promoCard, index) => {
-        const info = promoBannerUsageInfo(byCardId, promoCard.id);
-
-        if (index < PROMO_BANNER_DISPLAY_LIMIT) {
-          visibleCardIds.add(promoCard.id);
-          info.visibleStoreNames.push(store.name);
-        } else {
-          overflowCardIds.add(promoCard.id);
-          info.overflowStoreNames.push(store.name);
-        }
-      });
-
-      return {
-        storeId: store.id,
-        storeName: store.name,
-        activeCount: eligibleCards.length,
-        visibleCount: Math.min(
-          eligibleCards.length,
-          PROMO_BANNER_DISPLAY_LIMIT,
-        ),
-        overflowCount: Math.max(
-          eligibleCards.length - PROMO_BANNER_DISPLAY_LIMIT,
-          0,
-        ),
-      };
-    })
-    .filter((usage) => usage.activeCount > 0);
-
-  return {
-    byCardId,
-    visibleCardIds,
-    overflowCardIds,
-    activeCardIds,
-    stores: storeUsages,
-  };
 }
 
 function promoBannerDraftLimitWarning(
@@ -15793,78 +13464,6 @@ function promoBannerFormIsInActivePeriod(form: PromoBannerForm) {
   return true;
 }
 
-function promoBannerUsageInfo(
-  map: Map<string, PromoBannerUsageInfo>,
-  promoCardId: string,
-) {
-  const current = map.get(promoCardId);
-
-  if (current) {
-    return current;
-  }
-
-  const next = { visibleStoreNames: [], overflowStoreNames: [] };
-  map.set(promoCardId, next);
-
-  return next;
-}
-
-function promoBannerCanAppear(promoCard: GuestGamePromoCard, nowMs: number) {
-  return (
-    promoCard.status === "ACTIVE" &&
-    promoBannerIsInActivePeriod(promoCard, nowMs)
-  );
-}
-
-function promoBannerIsInActivePeriod(
-  promoCard: GuestGamePromoCard,
-  nowMs = Date.now(),
-) {
-  const fromMs = dateMs(promoCard.periodFrom);
-  const toMs = dateMs(promoCard.periodTo);
-
-  if (fromMs !== null && fromMs > nowMs) {
-    return false;
-  }
-
-  if (toMs !== null && toMs < nowMs) {
-    return false;
-  }
-
-  return true;
-}
-
-function promoBannerMatchesStore(
-  promoCard: GuestGamePromoCard,
-  storeId: string,
-) {
-  return (
-    storeId === "__all__" ||
-    !promoCard.storeIds.length ||
-    promoCard.storeIds.includes(storeId)
-  );
-}
-
-function comparePromoBannersForPortal(
-  left: GuestGamePromoCard,
-  right: GuestGamePromoCard,
-) {
-  const priorityDelta = right.priority - left.priority;
-
-  if (priorityDelta !== 0) {
-    return priorityDelta;
-  }
-
-  const updatedDelta =
-    (dateMs(right.updatedAt) ?? 0) - (dateMs(left.updatedAt) ?? 0);
-
-  if (updatedDelta !== 0) {
-    return updatedDelta;
-  }
-
-  return (dateMs(right.createdAt) ?? 0) - (dateMs(left.createdAt) ?? 0);
-}
-
 function promoBannerUsageMeta(
   promoCard: GuestGamePromoCard,
   usage: PromoBannerUsageSummary,
@@ -15897,26 +13496,6 @@ function promoBannerUsageMeta(
   }
 
   return meta.length ? meta : [scope, "не показывается"];
-}
-
-function compactStoreNames(names: string[]) {
-  const uniqueNames = Array.from(new Set(names));
-
-  if (uniqueNames.length > 2) {
-    return `${uniqueNames.slice(0, 2).join(", ")} +${uniqueNames.length - 2}`;
-  }
-
-  return uniqueNames.join(", ");
-}
-
-function dateMs(value: string | null | undefined) {
-  if (!value) {
-    return null;
-  }
-
-  const parsed = new Date(value).getTime();
-
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function promoTargetLabel(targetAnchor: string | null) {
@@ -15978,172 +13557,6 @@ async function persistPromoBannerImage(imageUrl: string) {
   }
 
   return asset.url;
-}
-
-async function renderPromoBannerImage(form: PromoBannerForm) {
-  const source = form.imageSource || form.imageUrl;
-
-  if (!source) {
-    return "";
-  }
-
-  if (!form.imageSource) {
-    return form.imageUrl;
-  }
-
-  if (typeof window === "undefined") {
-    return form.imageUrl || source;
-  }
-
-  if (!isInlineImageSource(source)) {
-    throw new Error(
-      "Картинка баннера должна храниться в LeetPlus. Загрузите изображение файлом и сохраните баннер еще раз.",
-    );
-  }
-
-  return new Promise<string>((resolve, reject) => {
-    const image = new window.Image();
-    image.crossOrigin = "anonymous";
-    image.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = PROMO_BANNER_IMAGE_WIDTH;
-      canvas.height = PROMO_BANNER_IMAGE_HEIGHT;
-      const context = canvas.getContext("2d");
-
-      if (!context || !image.naturalWidth || !image.naturalHeight) {
-        reject(new Error("Не удалось подготовить изображение баннера."));
-        return;
-      }
-
-      const scale =
-        Math.max(
-          PROMO_BANNER_IMAGE_WIDTH / image.naturalWidth,
-          PROMO_BANNER_IMAGE_HEIGHT / image.naturalHeight,
-        ) * clampPromoBannerScale(Number(form.imageScale));
-      const drawWidth = image.naturalWidth * scale;
-      const drawHeight = image.naturalHeight * scale;
-      const offsetX = clampPromoBannerOffset(Number(form.imageOffsetX));
-      const offsetY = clampPromoBannerOffset(Number(form.imageOffsetY));
-      const dx =
-        (PROMO_BANNER_IMAGE_WIDTH - drawWidth) / 2 +
-        (offsetX / 100) * PROMO_BANNER_IMAGE_WIDTH;
-      const dy =
-        (PROMO_BANNER_IMAGE_HEIGHT - drawHeight) / 2 +
-        (offsetY / 100) * PROMO_BANNER_IMAGE_HEIGHT;
-
-      context.fillStyle = "#050b0e";
-      context.fillRect(
-        0,
-        0,
-        PROMO_BANNER_IMAGE_WIDTH,
-        PROMO_BANNER_IMAGE_HEIGHT,
-      );
-      context.drawImage(image, dx, dy, drawWidth, drawHeight);
-
-      try {
-        const imageDataUrl = promoBannerJpegQualities.reduce<string | null>(
-          (best, quality) => {
-            if (best && best.length <= PROMO_BANNER_MAX_DATA_URL_LENGTH) {
-              return best;
-            }
-
-            return canvas.toDataURL("image/jpeg", quality);
-          },
-          null,
-        );
-
-        if (!imageDataUrl) {
-          reject(new Error("Не удалось подготовить изображение баннера."));
-          return;
-        }
-
-        if (imageDataUrl.length > PROMO_BANNER_MAX_DATA_URL_LENGTH) {
-          reject(
-            new Error(
-              "Картинка баннера слишком тяжелая. Загрузите изображение меньшего размера или с меньшим количеством деталей.",
-            ),
-          );
-          return;
-        }
-
-        resolve(imageDataUrl);
-      } catch {
-        reject(
-          new Error(
-            "Не удалось сохранить картинку баннера у нас. Загрузите изображение файлом, а не внешней ссылкой.",
-          ),
-        );
-      }
-    };
-    image.onerror = () =>
-      reject(new Error("Не удалось загрузить изображение баннера."));
-    image.src = source;
-  });
-}
-
-function isInlineImageSource(value: string) {
-  return value.trim().toLowerCase().startsWith("data:image/");
-}
-
-function csvList(value: string) {
-  return Array.from(
-    new Set(
-      value
-        .split(/[,;\n]/)
-        .map((item) => item.trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function appendCsvToken(current: string, token: string) {
-  return appendCsvTokens(current, [token]);
-}
-
-function appendCsvTokens(current: string, tokens: string[]) {
-  const values = csvList(current);
-  const existing = new Set(values.map((value) => value.toLowerCase()));
-  const nextValues = [...values];
-
-  for (const token of tokens) {
-    const normalizedToken = token.trim();
-
-    if (!normalizedToken) {
-      continue;
-    }
-
-    const key = normalizedToken.toLowerCase();
-
-    if (existing.has(key)) {
-      continue;
-    }
-
-    existing.add(key);
-    nextValues.push(normalizedToken);
-  }
-
-  return nextValues.join(", ");
-}
-
-function removeCsvToken(current: string, token: string) {
-  const key = token.trim().toLowerCase();
-
-  if (!key) {
-    return csvList(current).join(", ");
-  }
-
-  return csvList(current)
-    .filter((value) => value.toLowerCase() !== key)
-    .join(", ");
-}
-
-function csvHasToken(current: string, token: string) {
-  const key = token.trim().toLowerCase();
-
-  return (
-    Boolean(key) &&
-    csvList(current).some((value) => value.toLowerCase() === key)
-  );
 }
 
 function buildLootBoxPeriodRules(form: LootBoxForm) {
@@ -16687,74 +14100,6 @@ function seasonStepActivationRules(step: SeasonLevelStepForm) {
   };
 }
 
-function seasonStepRewardDefinition(
-  step: SeasonLevelStepForm,
-  track: "free" | "premium",
-) {
-  const legacyReward = track === "free" ? step.freeReward : step.premiumReward;
-  const rewardType =
-    (track === "free" ? step.freeRewardType : step.premiumRewardType) ??
-    (legacyReward?.trim() ? "ADMIN_OTHER" : "");
-
-  if (!rewardType) {
-    return null;
-  }
-
-  const amountValue =
-    track === "free" ? step.freeRewardAmount : step.premiumRewardAmount;
-  const labelValue =
-    track === "free" ? step.freeRewardLabel : step.premiumRewardLabel;
-  const codeValue =
-    track === "free" ? step.freeRewardCode : step.premiumRewardCode;
-  const lootBoxIdValue =
-    track === "free" ? step.freeRewardLootBoxId : step.premiumRewardLootBoxId;
-  const lootBoxNameValue =
-    track === "free"
-      ? step.freeRewardLootBoxName
-      : step.premiumRewardLootBoxName;
-  const lootBoxRarityValue =
-    track === "free"
-      ? step.freeRewardLootBoxRarity
-      : step.premiumRewardLootBoxRarity;
-  const deliveryValue =
-    track === "free" ? step.freeRewardDelivery : step.premiumRewardDelivery;
-  const amount = optionalNumber(amountValue ?? "");
-  const rawLabel = (labelValue ?? legacyReward ?? "").trim();
-  const label =
-    rawLabel ||
-    (rewardType === "BONUS_BALANCE" && amount != null
-      ? `${amount} бонусов`
-      : rewardType === "PROMOCODE"
-        ? "Промокод"
-        : rewardType === "LOOT_BOX"
-          ? (nullable(lootBoxNameValue ?? "") ?? "Лутбокс Battle Pass")
-          : "Ручная награда");
-
-  return {
-    type: rewardType,
-    label,
-    amount,
-    code: nullable(codeValue ?? ""),
-    delivery: deliveryValue === "ADMIN" ? "ADMIN" : "AUTO",
-    ...(rewardType === "LOOT_BOX"
-      ? {
-          lootBox: {
-            id: nullable(lootBoxIdValue ?? ""),
-            name: nullable(lootBoxNameValue ?? "") ?? label,
-            caseRarity: lootBoxRarityValue ?? "common",
-          },
-        }
-      : {}),
-  };
-}
-
-function seasonStepRewardLabel(
-  step: SeasonLevelStepForm,
-  track: "free" | "premium",
-) {
-  return seasonStepRewardDefinition(step, track)?.label ?? "";
-}
-
 function battlePassRewardTrackSummary(
   form: SeasonForm,
   track: "free" | "premium",
@@ -16887,19 +14232,6 @@ function battlePassBonusRewardType(value: string | null | undefined) {
     "LANGAME_BALANCE",
     "LOYALTY_BONUS",
   ].includes((value ?? "").trim().toUpperCase());
-}
-
-function bonusAmountFromRewardLabel(value: string | null | undefined) {
-  const match = (value ?? "").match(
-    /(\d[\d\s]*(?:[.,]\d+)?)\s*(?:бонус|балл)/i,
-  );
-
-  if (!match) {
-    return null;
-  }
-
-  const amount = Number(match[1].replace(/\s/g, "").replace(",", "."));
-  return Number.isFinite(amount) ? amount : null;
 }
 
 function rewardLabelLooksLikeLootBox(value: string | null | undefined) {
@@ -17205,47 +14537,10 @@ function levelRewardLabel(level: number, everyValue: string, label: string) {
   return every && label.trim() && level % every === 0 ? label.trim() : null;
 }
 
-function numeric(value: string, fallback: number) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function optionalNumber(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  return value as Record<string, unknown>;
-}
-
-function arrayRule(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
 function numberArrayRule(value: unknown, key: string) {
   return arrayRule(asRecord(value)[key])
     .map((item) => Number(item))
     .filter((item) => Number.isInteger(item) && item >= 0 && item <= 6);
-}
-
-function sortWeekdays(value: number[]) {
-  const order = new Map(
-    weekdayOptions.map((item, index) => [item.value, index]),
-  );
-
-  return Array.from(new Set(value))
-    .filter((item) => order.has(item))
-    .sort((left, right) => (order.get(left) ?? 0) - (order.get(right) ?? 0));
 }
 
 function sameWeekdays(left: number[], right: number[]) {
@@ -17333,19 +14628,6 @@ function lootBoxWeekdaysForMode(form: LootBoxForm) {
   return weekdayPresets[form.weekdayMode];
 }
 
-function lootBoxPeriodicLimitPeriod(
-  value: unknown,
-): LootBoxPeriodicLimitPeriod | null {
-  const raw = typeof value === "string" ? value.trim().toUpperCase() : "";
-
-  return raw === "DAILY" || raw === "WEEKLY" || raw === "MONTHLY" ? raw : null;
-}
-
-function metricRule(value: unknown) {
-  const record = asRecord(value);
-  return asRecord(record.metric ?? record.progressMetric);
-}
-
 function numberRule(value: unknown, key: string, fallback: string) {
   const raw = asRecord(value)[key];
   if (typeof raw === "number" && Number.isFinite(raw)) {
@@ -17357,150 +14639,12 @@ function numberRule(value: unknown, key: string, fallback: string) {
   return fallback;
 }
 
-function stringRule(value: unknown, key: string, fallback: string) {
-  const raw = asRecord(value)[key];
-  return typeof raw === "string" && raw.trim() ? raw : fallback;
-}
-
-function stringListRule(value: unknown, key: string, fallback = "") {
-  const raw = asRecord(value)[key];
-  if (Array.isArray(raw)) {
-    return raw
-      .filter(
-        (item): item is string =>
-          typeof item === "string" && item.trim().length > 0,
-      )
-      .join(", ");
-  }
-
-  return typeof raw === "string" && raw.trim() ? raw : fallback;
-}
-
-function optionLabel(
-  options: Array<{ value: string; label: string }>,
-  value: string,
-) {
-  return options.find((option) => option.value === value)?.label ?? value;
-}
-
 function seasonTypeLabel(value: string) {
   return value === "CLUB_SEASON" ? "Клубный сезон" : value || "Клубный сезон";
 }
 
-function rewardTypeLabelFromValue(value: string) {
-  return optionLabel(rewardTypeLabelOptions, value);
-}
-
-function canonicalLootBoxRewardType(value: string) {
-  const normalized = value.trim().toUpperCase();
-
-  if (!normalized) {
-    return value;
-  }
-
-  if (
-    [
-      "BONUS",
-      "BONUS_POINTS",
-      "BONUS_BALANCE",
-      "CASHBACK",
-      "LOYALTY_BONUS",
-    ].includes(normalized)
-  ) {
-    return "BONUS_BALANCE";
-  }
-
-  return normalized;
-}
-
 function missionTypeLabel(value: string) {
   return optionLabel(missionTypeOptions, value);
-}
-
-function tariffItemsByEndpoint(
-  snapshots: GuestGameTariffSnapshotEndpoint[],
-  endpointKey: string,
-) {
-  return (
-    snapshots.find((snapshot) => snapshot.endpointKey === endpointKey)
-      ?.typedItems ?? []
-  );
-}
-
-function tariffItemValue(
-  item: GuestGameTariffSnapshotEndpoint["typedItems"][number],
-) {
-  return item.externalId ?? item.id;
-}
-
-function tariffItemLabel(
-  item: GuestGameTariffSnapshotEndpoint["typedItems"][number],
-) {
-  const label = item.label ?? item.name ?? item.externalId ?? item.id;
-  return item.domain ? `${label} · ${item.domain}` : label;
-}
-
-function tariffRuleSummary(value: unknown) {
-  const record = asRecord(value);
-  const count = [
-    record.tariffGroupId,
-    record.tariffPeriodId,
-    record.tariffTypeId,
-  ].filter((item) => typeof item === "string" && item.trim()).length;
-
-  return count ? `тарифы: ${count}` : "любой тариф";
-}
-
-function guestLogRuleSummary(conditions: unknown, antiFraud?: unknown) {
-  const conditionRecord = asRecord(conditions);
-  const antiFraudRecord = asRecord(antiFraud);
-  const allowedCount = arrayRule(conditionRecord.guestLogTypes).filter(
-    (item) => typeof item === "string" && item.trim(),
-  ).length;
-  const blockedCount = [
-    ...arrayRule(conditionRecord.blockedGuestLogTypes),
-    ...arrayRule(antiFraudRecord.blockedGuestLogTypes),
-  ].filter((item) => typeof item === "string" && item.trim()).length;
-
-  if (allowedCount && blockedCount) {
-    return `logs: ${allowedCount} / anti-fraud ${blockedCount}`;
-  }
-  if (allowedCount) {
-    return `logs: ${allowedCount}`;
-  }
-  if (blockedCount) {
-    return `anti-fraud logs: ${blockedCount}`;
-  }
-  return "любой log";
-}
-
-function missionQuestSteps(value: unknown) {
-  const steps = asRecord(value).questSteps;
-  if (!Array.isArray(steps)) {
-    return [];
-  }
-
-  return steps
-    .map((item, index) => {
-      const record = asRecord(item);
-      const title = typeof record.title === "string" ? record.title.trim() : "";
-      const id =
-        typeof record.id === "string" && record.id.trim()
-          ? record.id.trim()
-          : `step-${index + 1}`;
-      const missionId =
-        typeof record.missionId === "string" && record.missionId.trim()
-          ? record.missionId.trim()
-          : typeof record.templateMissionId === "string" &&
-              record.templateMissionId.trim()
-            ? record.templateMissionId.trim()
-            : "";
-
-      return title ? { id, title, missionId } : null;
-    })
-    .filter((item): item is { id: string; title: string; missionId: string } =>
-      Boolean(item),
-    );
 }
 
 function missionQuestEnabled(value: unknown) {
@@ -17576,132 +14720,6 @@ function timeWindowPart(value: unknown, part: 0 | 1, fallback: string) {
   return fallback;
 }
 
-function lootBoxPrizesToForm(
-  value: unknown,
-  fallback: Pick<
-    LootBoxPrizeForm,
-    "rewardType" | "rewardAmount" | "rewardLabel"
-  >,
-): LootBoxPrizeForm[] {
-  const record = asRecord(value);
-  const prizes = Array.isArray(record.prizes) ? record.prizes : [];
-  const items = Array.isArray(record.items) ? record.items : [];
-  const source = prizes.length ? prizes : items;
-  const mapped = source
-    .map((item, index) => lootBoxPrizeFromRuleItem(item, index, fallback))
-    .filter((item): item is LootBoxPrizeForm => Boolean(item));
-
-  if (mapped.length) {
-    return mapped;
-  }
-
-  if (fallback.rewardLabel || fallback.rewardType || fallback.rewardAmount) {
-    return [
-      {
-        id: "fallback-prize",
-        rewardType: canonicalLootBoxRewardType(
-          fallback.rewardType || "PROMOCODE",
-        ),
-        rewardAmount: fallback.rewardAmount || "0",
-        rewardLabel: fallback.rewardLabel || "Награда лутбокса",
-        chancePercent: "100",
-        noBonus: false,
-        visualMode: "AUTO",
-        iconKey: defaultLootBoxPrizeIconKey(fallback.rewardType),
-        imageUrl: "",
-        borderColor: "",
-        textColor: "",
-        backgroundColor: "",
-      },
-    ];
-  }
-
-  return defaultLootBoxPrizes.map((prize) => ({ ...prize }));
-}
-
-function lootBoxPrizeFromRuleItem(
-  value: unknown,
-  index: number,
-  fallback: Pick<
-    LootBoxPrizeForm,
-    "rewardType" | "rewardAmount" | "rewardLabel"
-  >,
-): LootBoxPrizeForm | null {
-  const record = asRecord(value);
-  const rewardLabel = String(
-    record.rewardLabel ?? record.label ?? fallback.rewardLabel ?? "",
-  ).trim();
-
-  if (!rewardLabel) {
-    return null;
-  }
-
-  const rewardType = canonicalLootBoxRewardType(
-    String(
-      record.rewardType ?? record.type ?? fallback.rewardType ?? "PROMOCODE",
-    ),
-  );
-  const noBonus = rewardType === "MERCH" && record.noBonus === true;
-
-  return {
-    id: `rule-prize-${index}`,
-    rewardType,
-    rewardAmount: noBonus
-      ? "0"
-      : numberFormValue(
-          record.rewardAmount ?? record.amount ?? fallback.rewardAmount ?? "0",
-        ),
-    rewardLabel,
-    chancePercent: numberFormValue(
-      record.chancePercent ?? record.weight ?? record.probability ?? "0",
-    ),
-    noBonus,
-    visualMode: lootBoxPrizeVisualMode(record.visualMode),
-    iconKey: normalizeLootBoxPrizeIconKey(
-      typeof record.iconKey === "string" ? record.iconKey : null,
-      String(record.rewardType ?? record.type ?? fallback.rewardType ?? ""),
-    ),
-    imageUrl:
-      typeof record.imageUrl === "string" &&
-      record.imageUrl.startsWith("/api/guest-game/media/")
-        ? record.imageUrl
-        : "",
-    borderColor:
-      typeof record.borderColor === "string"
-        ? (normalizeLootBoxPrizeColor(record.borderColor) ?? "")
-        : "",
-    textColor:
-      typeof record.textColor === "string"
-        ? (normalizeLootBoxPrizeColor(record.textColor) ?? "")
-        : "",
-    backgroundColor:
-      typeof record.backgroundColor === "string"
-        ? (normalizeLootBoxPrizeColor(record.backgroundColor) ?? "")
-        : "",
-  };
-}
-
-function lootBoxPrizeVisualMode(value: unknown): LootBoxPrizeVisualMode {
-  return value === "ICON" || value === "IMAGE" ? value : "AUTO";
-}
-
-function lootBoxCaseRarity(value: unknown): LootBoxCaseRarity {
-  const record = asRecord(value);
-  const raw = record.caseRarity ?? record.skinRarity ?? record.lootBoxRarity;
-
-  return raw === "rare" ||
-    raw === "epic" ||
-    raw === "legendary" ||
-    raw === "common"
-    ? raw
-    : "common";
-}
-
-function numberFormValue(value: unknown) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? formatChanceNumber(parsed) : "";
-}
-
 function lootBoxPrizePatch(
   form: LootBoxForm,
   prizes: LootBoxPrizeForm[],
@@ -17713,23 +14731,6 @@ function lootBoxPrizePatch(
     rewardType: primary.rewardType,
     rewardAmount: primary.rewardAmount,
     rewardLabel: primary.rewardLabel,
-  };
-}
-
-function primaryLootBoxPrize(form: LootBoxForm) {
-  const prize = form.prizes.find(
-    (item) =>
-      item.rewardLabel.trim() ||
-      item.rewardAmount.trim() ||
-      item.rewardType.trim(),
-  );
-
-  return {
-    rewardType: canonicalLootBoxRewardType(
-      prize?.rewardType || form.rewardType || "PROMOCODE",
-    ),
-    rewardAmount: prize?.rewardAmount || form.rewardAmount || "0",
-    rewardLabel: prize?.rewardLabel || form.rewardLabel || "Награда лутбокса",
   };
 }
 
@@ -17760,13 +14761,6 @@ function normalizeLootBoxPrizeChances(prizes: LootBoxPrizeForm[]) {
     ...prize,
     chancePercent: formatChanceNumber(rounded[index]),
   }));
-}
-
-function formatChanceNumber(value: number) {
-  const rounded = Math.round(value * 100) / 100;
-  return Number.isInteger(rounded)
-    ? String(rounded)
-    : String(rounded).replace(/\.?0+$/, "");
 }
 
 function seasonLevelStep(value: unknown, fallback: string) {
@@ -17820,10 +14814,6 @@ function parseJson(text: string, label: string, allowEmpty = true) {
   }
 }
 
-function jsonText(value: unknown) {
-  return JSON.stringify(value, null, 2);
-}
-
 function jsonFormValue(value: unknown, fallback = "") {
   if (value == null) {
     return fallback;
@@ -17867,18 +14857,6 @@ function dateInputIsoValue(value: string) {
   const date = new Date(normalized);
 
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function formatMoney(value: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency: "RUB",
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
-function formatBudgetAmount(value: number | null | undefined) {
-  return value == null ? "Безлимит" : formatMoney(value);
 }
 
 function missionAvailabilitySummary(mission: GuestGameMission) {
@@ -18097,77 +15075,6 @@ function communicationQueueStatusClass(
   }
 }
 
-function sessionTypeLabel(value: string | null) {
-  const normalized = normalizeUiSessionType(value);
-
-  if (normalized === "unknown" || normalized === "unknown_session") {
-    return "тип сессии неизвестен";
-  }
-
-  return (
-    sessionTypeOptions.find((option) => option.value === normalized)?.label ??
-    value ??
-    "любой тип"
-  );
-}
-
-function trackingId(prefix: string, value: string | null | undefined) {
-  const compact = (value ?? "")
-    .replace(/[^a-zA-Z0-9]/g, "")
-    .slice(0, 8)
-    .toUpperCase();
-
-  return `${prefix}-${compact || "NEW"}`;
-}
-
-function normalizeUiSessionType(value: string | null | undefined) {
-  const normalized = (value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_");
-
-  if (
-    ["any", "all", "any_session", "любая", "любой", "любая_сессия"].includes(
-      normalized,
-    )
-  ) {
-    return "";
-  }
-
-  if (
-    [
-      "packet_hours",
-      "package_or_subscription",
-      "package_or_subscription_session",
-      "packet",
-      "package",
-      "package_hours",
-      "subscription",
-      "membership",
-      "abonement",
-      "abonnement",
-      "абонемент",
-    ].includes(normalized)
-  ) {
-    return "packet_hours";
-  }
-
-  if (
-    [
-      "hourly",
-      "hourly_session",
-      "regular_session",
-      "regular",
-      "common",
-      "default",
-    ].includes(normalized)
-  ) {
-    return "regular_session";
-  }
-
-  return normalized;
-}
-
 function battlePassLevelRows(season: GuestGameSeason) {
   return arrayRule(season.levels).map((item, index) => {
     const record = asRecord(item);
@@ -18232,18 +15139,4 @@ function tariffSnapshotStatusClass(status: GuestGameTariffSnapshotStatus) {
     default:
       return "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300";
   }
-}
-
-function formatDate(value: string | null) {
-  if (!value) {
-    return "без даты";
-  }
-
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
 }

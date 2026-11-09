@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { LeetPlusMark } from "@/components/brand/leetplus-logo";
 
 export function WalletCaseIcon() {
   return (
@@ -23,7 +24,11 @@ export function BrandMark({ logoUrl }: { logoUrl?: string | null }) {
     );
   }
 
-  return <span className="lp-club-brand-mark" aria-hidden="true" />;
+  return (
+    <span className="lp-club-brand-mark" aria-hidden="true">
+      <LeetPlusMark tone="onDark" />
+    </span>
+  );
 }
 
 export function MenuIcon() {

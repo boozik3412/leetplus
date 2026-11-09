@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LeetPlusMark } from "@/components/brand/leetplus-logo";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 import type {
   GuestPortalClubSelectResponse,
@@ -282,6 +283,7 @@ export function GameClubSelectClient({
           <ChevronLeftIcon />
         </Link>
         <div className="lp-club-brand">
+          <LeetPlusMark className="lp-club-brand-mark" tone="onDark" />
           <span>
             <strong>LeetPlus Game</strong>
             <em>выбор клуба</em>
@@ -1173,25 +1175,11 @@ function ClubSelectStyles() {
   gap: 12px;
   min-width: 0;
 }
-.lp-club-brand-mark {
-  position: relative;
+.lp-club-select-page .lp-club-brand-mark {
+  display: block;
   width: 34px;
   height: 34px;
   flex: 0 0 auto;
-  border: 1px solid rgba(196, 224, 225, 0.36);
-  border-radius: 50%;
-}
-.lp-club-brand-mark::before,
-.lp-club-brand-mark::after {
-  content: "";
-  position: absolute;
-  inset: 8px;
-  border: 1px solid rgba(131, 228, 236, 0.38);
-  transform: rotate(45deg);
-}
-.lp-club-brand-mark::after {
-  inset: 14px;
-  border-color: var(--amber);
 }
 .lp-club-brand strong,
 .lp-club-brand em {

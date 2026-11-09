@@ -225,39 +225,13 @@ export const clubHomeCss = `
 
 .lp-club-brand-mark {
   position: relative;
+  display: block;
   width: 34px;
   height: 34px;
   flex: 0 0 auto;
-  border: 1px solid rgba(196, 224, 225, 0.36);
-  border-radius: 50%;
 }
 
-.lp-club-brand-mark::before,
-.lp-club-brand-mark::after {
-  content: "";
-  position: absolute;
-  inset: 8px;
-  border: 1px solid rgba(131, 228, 236, 0.38);
-  transform: rotate(45deg);
-}
-
-.lp-club-brand-mark::after {
-  inset: 14px;
-  border-color: var(--amber);
-}
-
-.lp-club-brand-mark.is-custom-logo {
-  overflow: visible;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.lp-club-brand-mark.is-custom-logo::before,
-.lp-club-brand-mark.is-custom-logo::after {
-  display: none;
-}
-
+.lp-club-brand-mark svg,
 .lp-club-brand-mark img {
   display: block;
   width: 100%;
@@ -3133,11 +3107,10 @@ export const clubHomeCss = `
   transition: transform 180ms ease;
 }
 
-.lp-club-battlepass-emblem img {
+.lp-club-battlepass-emblem svg {
   display: block;
-  width: 104px;
-  height: 104px;
-  object-fit: contain;
+  width: 88px;
+  height: 88px;
   filter:
     drop-shadow(0 0 18px rgba(131, 228, 236, 0.44))
     drop-shadow(0 12px 18px rgba(0, 0, 0, 0.45));
@@ -4907,14 +4880,6 @@ export const clubHomeCss = `
   height: 30px;
 }
 
-.lp-club-switch .lp-club-brand-mark::before {
-  inset: 7px;
-}
-
-.lp-club-switch .lp-club-brand-mark::after {
-  inset: 12px;
-}
-
 .lp-reward-scope-field select,
 .lp-reward-search input,
 .lp-reward-rarity-field select {
@@ -5835,9 +5800,9 @@ export const clubHomeCss = `
     padding: 18px;
   }
 
-  .lp-club-battlepass-emblem img {
-    width: 82px;
-    height: 82px;
+  .lp-club-battlepass-emblem svg {
+    width: 70px;
+    height: 70px;
   }
 
   .lp-club-battlepass-main-reward {

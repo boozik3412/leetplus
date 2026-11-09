@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { UserCallInstructionModal } from "./user-call-instruction-modal";
+import { LeetPlusMark } from "@/components/brand/leetplus-logo";
 import { LegalEntityInfo } from "@/components/legal-entity-info";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 import type {
@@ -1251,11 +1252,9 @@ export function PlayRegistrationClient({
         >
           <div className="flex min-w-0 items-center gap-3">
             {isGameAuth ? (
-              <span className="lp-game-auth-brand-mark" aria-hidden="true" />
+              <LeetPlusMark className="lp-game-auth-brand-mark" tone="onDark" />
             ) : (
-              <div className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-emerald-300/40 bg-emerald-300/[0.12] text-sm font-black text-emerald-100">
-                LP
-              </div>
+              <LeetPlusMark size={44} tone="onDark" />
             )}
             <div className="min-w-0">
               <p
@@ -3451,27 +3450,10 @@ const gameAuthCss = `
 }
 
 .lp-game-auth-brand-mark {
-  position: relative;
+  display: block;
   width: 34px;
   height: 34px;
   flex: 0 0 auto;
-  border: 1px solid rgba(186, 236, 238, 0.42);
-  border-radius: 50%;
-  box-shadow: inset 0 0 18px rgba(140, 230, 237, 0.12);
-}
-
-.lp-game-auth-brand-mark::before,
-.lp-game-auth-brand-mark::after {
-  content: "";
-  position: absolute;
-  inset: 8px;
-  border: 1px solid rgba(140, 230, 237, 0.36);
-  transform: rotate(45deg);
-}
-
-.lp-game-auth-brand-mark::after {
-  inset: 14px;
-  border-color: #d0aa6c;
 }
 
 .lp-game-auth-flow {

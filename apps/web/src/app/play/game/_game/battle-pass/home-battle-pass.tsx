@@ -12,6 +12,7 @@ import type { GuestPortalGameSummary } from "@/lib/guest-portal";
 import type { HomeBattleQuest, BattlePassRewardCard } from "../types";
 import { clampPercent, formatNumber } from "../format";
 import Image from "next/image";
+import { LeetPlusMark } from "@/components/brand/leetplus-logo";
 import { lootboxSkinForRarity } from "@/lib/lootbox-assets";
 import {
   buildBattlePassRewardCards,
@@ -230,16 +231,7 @@ export function HomeBattlePass({
           onClick={() => setSeasonRewardsOpen(true)}
         >
           <span className="lp-club-battlepass-emblem">
-            <picture>
-              <source
-                srcSet="/assets/brand/leetplus-logo-white.svg?v=battlepass-track"
-                media="(prefers-color-scheme: dark)"
-              />
-              <img
-                src="/assets/brand/leetplus-logo-white.svg?v=battlepass-track"
-                alt="LeetPlus"
-              />
-            </picture>
+            <LeetPlusMark size={88} tone="onDark" />
           </span>
           <span className="lp-club-battlepass-season-copy">
             <strong>{seasonName}</strong>

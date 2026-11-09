@@ -1,7 +1,8 @@
 import type { CSSProperties } from "react";
+import { LeetPlusMark } from "@/components/brand/leetplus-logo";
 
 /**
- * The LP mark with an orbit: a green arc that circles the mark with a bright
+ * The LeetPlus mark with an orbit: a green arc that circles the mark with a bright
  * "ping" dot at its head. Indeterminate by design, no percentage. `bare` drops
  * the mark and the glow for small inline uses.
  */
@@ -24,7 +25,11 @@ export function LoaderMark({
       <span className="lp-orbit-dot">
         <i />
       </span>
-      {bare ? null : <span className="lp-orbit-mark">LP</span>}
+      {bare ? null : (
+        <span className="lp-orbit-mark">
+          <LeetPlusMark />
+        </span>
+      )}
     </span>
   );
 }

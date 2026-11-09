@@ -19,6 +19,7 @@ import {
 import { can, canAccessPath } from "@/lib/permissions";
 import { getRoleLabel } from "@/lib/roles";
 import { ThemeSwitcher } from "@/components/theme-switcher";
+import { LeetPlusMark } from "@/components/brand/leetplus-logo";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 import { useSupportQueueBadges } from "@/components/support-queue-watch";
 import {
@@ -695,8 +696,8 @@ function LogoLink({
 
 function LogoMark() {
   return (
-    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-semibold text-white transition group-hover:bg-zinc-900 dark:bg-emerald-400 dark:text-zinc-950 dark:group-hover:bg-emerald-300">
-      LP
+    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl transition-transform group-hover:scale-105 motion-reduce:transition-none motion-reduce:group-hover:scale-100">
+      <LeetPlusMark size={34} />
     </span>
   );
 }

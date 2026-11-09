@@ -16,7 +16,7 @@ const TIPS = [
 ] as const;
 
 /**
- * Brand loader: LP orbit, what we are assembling (four sources, no percent),
+ * Brand loader: LeetPlus mark orbit, what we are assembling (four sources, no percent),
  * rotating status lines and a product tip. For the entry and for screens
  * without a skeleton of their own.
  */

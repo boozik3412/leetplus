@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
+import { LeetPlusLogo, LeetPlusMark } from "@/components/brand/leetplus-logo";
 import { LegalEntityInfo } from "@/components/legal-entity-info";
 import type { GuestHomepageContext } from "@/lib/guest-homepage";
 import { lootboxSkinForRarity } from "@/lib/lootbox-assets";
@@ -31,15 +32,7 @@ export function ModuleChoicePage({
     <main className="lp-home">
       <header className="lp-home-header">
         <Link className="lp-home-brand" href="/start" aria-label="LeetPlus">
-          <Image
-            alt=""
-            aria-hidden="true"
-            height={42}
-            priority
-            src="/assets/brand/leetplus-logo-white.svg"
-            width={42}
-          />
-          <span>LeetPlus</span>
+          <LeetPlusLogo decorative height={34} tone="onDark" />
         </Link>
 
         <Link className="lp-home-analytics" href={analyticsHref}>
@@ -115,13 +108,7 @@ export function ModuleChoicePage({
         <div className="lp-home-game-surface">
           <div className="lp-home-club-summary">
             <div className="lp-home-club-emblem" aria-hidden="true">
-              <Image
-                alt=""
-                height={74}
-                priority
-                src="/assets/brand/leetplus-logo-white.svg"
-                width={74}
-              />
+              <LeetPlusMark size={64} tone="onDark" />
             </div>
             <div className="lp-home-level">
               <span>Уровень клуба</span>
@@ -367,16 +354,20 @@ const homeCss = `
   display: inline-flex;
   align-items: center;
   justify-self: start;
-  gap: 12px;
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: 0.17em;
-  text-transform: uppercase;
+  min-height: 44px;
 }
 
-.lp-home-brand img {
-  width: 42px;
-  height: 42px;
+.lp-home-brand svg {
+  display: block;
+  width: auto;
+  height: 34px;
+  stroke: none;
+}
+
+.lp-home-brand:focus-visible {
+  outline: 2px solid rgba(116, 231, 239, 0.7);
+  outline-offset: 4px;
+  border-radius: 6px;
 }
 
 .lp-home-select-club:hover,
@@ -618,8 +609,11 @@ const homeCss = `
   min-height: 86px;
 }
 
-.lp-home-club-emblem img {
-  filter: drop-shadow(0 0 20px rgba(116, 231, 239, 0.15));
+.lp-home-club-emblem svg {
+  width: 64px;
+  height: 64px;
+  stroke: none;
+  filter: drop-shadow(0 0 20px rgba(116, 231, 239, 0.18));
 }
 
 .lp-home-level,
@@ -1128,14 +1122,8 @@ const homeCss = `
     padding: 13px 15px;
   }
 
-  .lp-home-brand {
-    gap: 9px;
-    font-size: 11px;
-  }
-
-  .lp-home-brand img {
-    width: 36px;
-    height: 36px;
+  .lp-home-brand svg {
+    height: 28px;
   }
 
   .lp-home-analytics {
@@ -1182,9 +1170,9 @@ const homeCss = `
     display: none;
   }
 
-  .lp-home-club-emblem img {
-    width: 58px;
-    height: 58px;
+  .lp-home-club-emblem svg {
+    width: 50px;
+    height: 50px;
   }
 
   .lp-home-level,

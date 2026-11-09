@@ -29,6 +29,13 @@
   --border-soft: #e4e4e7;
   --accent: #16a34a;
   --accent-strong: #15803d;
+  /* LeetPlus logo palette (brand kit). */
+  --brand-accent-on-light: #007681;
+  --brand-ink-on-light: #0b191d;
+  --brand-accent-on-dark: #83e4ec;
+  --brand-ink-on-dark: #f4fbfc;
+  --brand-accent: var(--brand-accent-on-light);
+  --brand-ink: var(--brand-ink-on-light);
   color-scheme: light;
 }
 
@@ -40,6 +47,8 @@
   --border-soft: #272f3d;
   --accent: #22c55e;
   --accent-strong: #86efac;
+  --brand-accent: var(--brand-accent-on-dark);
+  --brand-ink: var(--brand-ink-on-dark);
   color-scheme: dark;
 }
 

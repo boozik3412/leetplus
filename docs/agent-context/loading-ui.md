@@ -1,7 +1,7 @@
 # Loading UI
 
 Owner decision 30.09.2026: one waiting language for every heavy screen. Concept and
-mockup: the LP mark with an orbit and a "ping" dot, four data sources, skeletons that
+mockup: the LeetPlus mark with an orbit and a "ping" dot, four data sources, skeletons that
 repeat the page layout. No percentages: the server reports no progress, so nothing
 shows one.
 

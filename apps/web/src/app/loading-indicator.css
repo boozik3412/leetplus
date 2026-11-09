@@ -1,5 +1,5 @@
 /*
-  Loading indicator: LP orbit, skeleton, route bar.
+  Loading indicator: LeetPlus mark orbit, skeleton, route bar.
   Tokens follow the app theme (.dark on <html>). Motion is indeterminate on
   purpose: the server does not report progress, so nothing here shows a
   percentage. Reduced motion: no rotation and no shimmer, the text stays.
@@ -8,8 +8,6 @@
 :root {
   --lp-skeleton-base: #e8e8ec;
   --lp-skeleton-shine: #f7f7f9;
-  --lp-mark-bg: #18181b;
-  --lp-mark-fg: #ffffff;
   --lp-accent: #16a34a;
   --lp-accent-bright: #22c55e;
   --lp-warn: #b45309;
@@ -19,8 +17,6 @@
 .dark {
   --lp-skeleton-base: #1b2230;
   --lp-skeleton-shine: #2a3548;
-  --lp-mark-bg: #34d399;
-  --lp-mark-fg: #06120b;
   --lp-accent: #22c55e;
   --lp-accent-bright: #86efac;
   --lp-warn: #fbbf24;
@@ -186,7 +182,7 @@
   animation-delay: var(--d, 0s);
 }
 
-/* LP mark with orbit. --lp-size sets the diameter. */
+/* LeetPlus mark with orbit. --lp-size sets the diameter. */
 .lp-orbit {
   --lp-ring: max(2px, calc(var(--lp-size, 96px) * 0.042));
   position: relative;
@@ -202,7 +198,11 @@
   position: absolute;
   inset: calc(var(--lp-size, 96px) * -0.21);
   border-radius: 50%;
-  background: radial-gradient(circle, var(--lp-accent) 0%, transparent 62%);
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--brand-accent) 45%, transparent) 0%,
+    transparent 62%
+  );
   animation: lp-breathe 2.6s ease-in-out infinite;
   pointer-events: none;
 }
@@ -257,13 +257,13 @@
   justify-content: center;
   width: calc(var(--lp-size, 96px) * 0.604);
   height: calc(var(--lp-size, 96px) * 0.604);
-  border-radius: calc(var(--lp-size, 96px) * 0.198);
-  background: var(--lp-mark-bg);
-  color: var(--lp-mark-fg);
-  font-size: calc(var(--lp-size, 96px) * 0.198);
-  font-weight: 700;
-  letter-spacing: 0.03em;
   animation: lp-mark 2.6s ease-in-out infinite;
+}
+
+.lp-orbit-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 /* Four data sources: dots light up in turn ("опрашиваем"), never "готово". */

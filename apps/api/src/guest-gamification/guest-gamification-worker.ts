@@ -43,7 +43,9 @@ type GuestGamificationWorkerServices = {
   ledgerFallback: Pick<GuestGameLedgerFallbackService, 'runScheduled'>;
   gamification: Pick<
     GuestGamificationService,
-    'runSnapshotPipelineScheduled' | 'runSupplementalPipelineScheduled'
+    | 'runSnapshotPipelineScheduled'
+    | 'runSupplementalPipelineScheduled'
+    | 'runExternalMatchPipelineScheduled'
   >;
   monitoring: Pick<GuestGameQualityMonitoringService, 'collectTenant'>;
   /** Month-end leaderboard results and prizes; absent in older harnesses. */
@@ -52,7 +54,10 @@ type GuestGamificationWorkerServices = {
     'settleTenant'
   >;
   /** Steam facts and FACEIT lookup of linked game accounts; absent in older harnesses. */
-  gameAccountsLookup?: Pick<GuestGameAccountsLookupService, 'lookupTenant'>;
+  gameAccountsLookup?: Pick<
+    GuestGameAccountsLookupService,
+    'lookupTenant' | 'syncFaceitMatches'
+  >;
 };
 
 const workerEnabledKey = 'GUEST_GAMIFICATION_WORKER_ENABLED';
@@ -503,6 +508,29 @@ export async function runGuestGamificationWorkerOnce(
     },
   );
 
+  // FACEIT matches of linked guests are journaled against their paid club
+  // sessions; only COUNTED rows become FACEIT_MATCH game events.
+  const faceitMatches = await runIndependentPass(
+    failures,
+    'FACEIT match journal',
+    async () => {
+      if (config.canary || !services.gameAccountsLookup) return null;
+      const journal = await services.gameAccountsLookup.syncFaceitMatches(
+        tenant.id,
+        now,
+        env,
+      );
+      if (journal.rateLimited) {
+        logger.warn('FACEIT rate limit reached; match sync resumes next tick');
+      }
+      const events =
+        await services.gamification.runExternalMatchPipelineScheduled({
+          tenantId: tenant.id,
+        });
+      return { journal, events };
+    },
+  );
+
   logger.log(
     [
       failures.length
@@ -532,6 +560,10 @@ export async function runGuestGamificationWorkerOnce(
       `leaderboardPrizesFailed=${leaderboard?.prizesFailed ?? 0}`,
       `gameAccountsChecked=${gameAccounts?.checked ?? 0}`,
       `gameAccountsFaceitFound=${gameAccounts?.found ?? 0}`,
+      `faceitMatchesJournaled=${faceitMatches?.journal.journaled ?? 0}`,
+      `faceitMatchesCounted=${faceitMatches?.journal.counted ?? 0}`,
+      `faceitMatchesReview=${faceitMatches?.journal.review ?? 0}`,
+      `faceitMatchEvents=${faceitMatches?.events.processedMatches ?? 0}`,
     ].join(' '),
   );
 
@@ -550,6 +582,7 @@ export async function runGuestGamificationWorkerOnce(
     monitoring,
     leaderboard,
     gameAccounts,
+    faceitMatches,
   };
 }
 

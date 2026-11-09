@@ -2,6 +2,17 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  FACEIT_DAILY_COUNTED_CAP,
+  faceitMatchEligibility,
+  faceitMissionFacts,
+  opposingLinkedPlayers,
+  parseFaceitHistory,
+  parseFaceitMatchStats,
+  sessionForMatch,
+  type ClubSessionWindow,
+  type FaceitJournalDecision,
+} from './faceit-match-journal';
+import {
   createGuestGameExternalFetch,
   type GuestGameExternalFetch,
 } from './guest-game-external-fetch';
@@ -23,6 +34,22 @@ const REQUEST_TIMEOUT_MS = 5_000;
 const REFRESH_AFTER_MS = 24 * 60 * 60 * 1000;
 const RETRY_FAILED_AFTER_MS = 60 * 60 * 1000;
 const DEFAULT_LIMIT = 10;
+/** FACEIT history is read only this far back, even for an old link. */
+const MATCH_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+/** Recent matches wait so FACEIT stats are final. */
+const MATCH_SETTLE_MS = 10 * 60 * 1000;
+const MATCH_ACCOUNTS_PER_TICK = 10;
+const MATCH_STATS_PER_TICK = 20;
+
+export type FaceitMatchSyncResult = {
+  accounts: number;
+  journaled: number;
+  counted: number;
+  review: number;
+  rateLimited: boolean;
+  unreachable: boolean;
+  skipped: string | null;
+};
 
 export type GuestGameAccountsLookupResult = {
   checked: number;
@@ -311,6 +338,302 @@ export class GuestGameAccountsLookupService {
     }
 
     return result;
+  }
+
+  /**
+   * Reads FACEIT CS2 history of linked accounts and journals each new match
+   * with a decision. Only COUNTED rows become game events (in the
+   * gamification pass); a match counts only inside a paid club session.
+   */
+  async syncFaceitMatches(
+    tenantId: string,
+    now = new Date(),
+    env: NodeJS.ProcessEnv = process.env,
+  ): Promise<FaceitMatchSyncResult> {
+    const key = env.GUEST_GAME_FACEIT_API_KEY?.trim() || null;
+    const result: FaceitMatchSyncResult = {
+      accounts: 0,
+      journaled: 0,
+      counted: 0,
+      review: 0,
+      rateLimited: false,
+      unreachable: false,
+      skipped: null,
+    };
+    if (!key) {
+      result.skipped = 'no FACEIT key';
+      return result;
+    }
+
+    const to = new Date(now.getTime() - MATCH_SETTLE_MS);
+    const accounts = await this.prisma.guestGameExternalAccount.findMany({
+      where: {
+        tenantId,
+        provider: 'FACEIT',
+        status: 'ACTIVE',
+        OR: [{ matchesSyncedUntil: null }, { matchesSyncedUntil: { lt: to } }],
+      },
+      orderBy: [
+        { matchesSyncedUntil: { sort: 'asc', nulls: 'first' } },
+        { linkedAt: 'asc' },
+      ],
+      take: MATCH_ACCOUNTS_PER_TICK,
+    });
+    if (!accounts.length) return result;
+
+    const linked = await this.prisma.guestGameExternalAccount.findMany({
+      where: { tenantId, provider: 'FACEIT', status: 'ACTIVE' },
+      select: { externalId: true },
+    });
+    const linkedPlayerIds = new Set(linked.map((row) => row.externalId));
+    let statsBudget = MATCH_STATS_PER_TICK;
+
+    for (const account of accounts) {
+      const from = new Date(
+        Math.max(
+          account.linkedAt.getTime(),
+          account.matchesSyncedUntil?.getTime() ?? 0,
+          now.getTime() - MATCH_LOOKBACK_MS,
+        ),
+      );
+      if (from >= to) continue;
+
+      const history = await this.faceitGet(
+        key,
+        `/players/${encodeURIComponent(account.externalId)}/history?game=cs2&from=${Math.floor(from.getTime() / 1000)}&to=${Math.floor(to.getTime() / 1000)}&offset=0&limit=20`,
+      );
+      if (history.kind === 'RATE_LIMITED') {
+        result.rateLimited = true;
+        break;
+      }
+      if (history.kind === 'UNREACHABLE') {
+        result.unreachable = true;
+        break;
+      }
+      result.accounts += 1;
+      if (history.kind !== 'OK') {
+        continue;
+      }
+
+      const items = parseFaceitHistory(history.body).sort(
+        (a, b) =>
+          (a.finishedAt?.getTime() ?? 0) - (b.finishedAt?.getTime() ?? 0),
+      );
+      const known = new Set(
+        (
+          await this.prisma.guestGameExternalMatch.findMany({
+            where: {
+              tenantId,
+              provider: 'FACEIT',
+              accountId: account.id,
+              externalMatchId: { in: items.map((item) => item.matchId) },
+            },
+            select: { externalMatchId: true },
+          })
+        ).map((row) => row.externalMatchId),
+      );
+      const sessions = await this.clubSessions(
+        tenantId,
+        account.profileId,
+        from,
+        now,
+      );
+      let syncedUntil = to;
+      let stopped = false;
+
+      for (const item of items) {
+        if (known.has(item.matchId) || !item.finishedAt) continue;
+        if (item.finishedAt < account.linkedAt) continue;
+        let decision: FaceitJournalDecision = 'COUNTED';
+        let reason: string | null = faceitMatchEligibility(item);
+        let session: ClubSessionWindow | null = null;
+        let facts: ReturnType<typeof faceitMissionFacts> = null;
+
+        if (reason) {
+          decision = 'NOT_ELIGIBLE';
+        } else {
+          session = sessionForMatch(
+            sessions,
+            item.startedAt as Date,
+            item.finishedAt,
+            now,
+          );
+          if (!session) {
+            decision = 'OUTSIDE_SESSION';
+          }
+        }
+
+        if (decision === 'COUNTED') {
+          if (statsBudget <= 0) {
+            // Leave the rest of this account for the next tick.
+            syncedUntil = new Date(item.finishedAt.getTime() - 1000);
+            stopped = true;
+            break;
+          }
+          statsBudget -= 1;
+          const statsResponse = await this.faceitGet(
+            key,
+            `/matches/${encodeURIComponent(item.matchId)}/stats`,
+          );
+          if (
+            statsResponse.kind === 'RATE_LIMITED' ||
+            statsResponse.kind === 'UNREACHABLE'
+          ) {
+            result.rateLimited ||= statsResponse.kind === 'RATE_LIMITED';
+            result.unreachable ||= statsResponse.kind === 'UNREACHABLE';
+            syncedUntil = new Date(item.finishedAt.getTime() - 1000);
+            stopped = true;
+            break;
+          }
+          const stats =
+            statsResponse.kind === 'OK'
+              ? parseFaceitMatchStats(statsResponse.body)
+              : null;
+          facts = stats ? faceitMissionFacts(stats, account.externalId) : null;
+          if (!stats || !facts) {
+            decision = 'NOT_ELIGIBLE';
+            reason = 'NO_PLAYER_STATS';
+          } else if (
+            opposingLinkedPlayers(stats, account.externalId, linkedPlayerIds)
+              .length
+          ) {
+            decision = 'REVIEW';
+            reason = 'LINKED_GUEST_ON_OTHER_TEAM';
+          } else {
+            const countedToday = await this.prisma.guestGameExternalMatch.count(
+              {
+                where: {
+                  tenantId,
+                  profileId: account.profileId,
+                  decision: 'COUNTED',
+                  finishedAt: {
+                    gt: new Date(
+                      item.finishedAt.getTime() - 24 * 60 * 60 * 1000,
+                    ),
+                    lte: item.finishedAt,
+                  },
+                },
+              },
+            );
+            if (countedToday >= FACEIT_DAILY_COUNTED_CAP) {
+              decision = 'NOT_ELIGIBLE';
+              reason = 'DAILY_CAP';
+            }
+          }
+        }
+
+        await this.prisma.guestGameExternalMatch.createMany({
+          data: [
+            {
+              tenantId,
+              profileId: account.profileId,
+              accountId: account.id,
+              provider: 'FACEIT',
+              externalMatchId: item.matchId,
+              game: 'cs2',
+              startedAt: item.startedAt,
+              finishedAt: item.finishedAt,
+              sessionExternalId: session?.externalSessionId ?? null,
+              externalDomain: session?.externalDomain ?? null,
+              decision,
+              decisionReason: decision === 'COUNTED' ? null : reason,
+              stats: {
+                ...(facts ? { match: facts } : {}),
+                ...(session
+                  ? {
+                      session: {
+                        storeId: session.storeId,
+                        startedAt: session.startedAt?.toISOString() ?? null,
+                        stoppedAt: session.stoppedAt?.toISOString() ?? null,
+                      },
+                    }
+                  : {}),
+              },
+            },
+          ],
+          skipDuplicates: true,
+        });
+        result.journaled += 1;
+        if (decision === 'COUNTED') result.counted += 1;
+        if (decision === 'REVIEW') result.review += 1;
+      }
+
+      await this.prisma.guestGameExternalAccount.updateMany({
+        where: { id: account.id, tenantId, status: 'ACTIVE' },
+        data: { matchesSyncedUntil: syncedUntil },
+      });
+      if (stopped && (result.rateLimited || result.unreachable)) break;
+    }
+
+    return result;
+  }
+
+  private async clubSessions(
+    tenantId: string,
+    profileId: string,
+    from: Date,
+    now: Date,
+  ): Promise<ClubSessionWindow[]> {
+    const [profile, links] = await Promise.all([
+      this.prisma.guestGameProfile.findFirst({
+        where: { id: profileId, tenantId },
+        select: { guestId: true },
+      }),
+      this.prisma.guestGameProfileIdentityLink.findMany({
+        where: { tenantId, profileId, status: 'ACTIVE' },
+        select: { guestId: true },
+      }),
+    ]);
+    const guestIds = [
+      ...new Set(
+        [profile?.guestId, ...links.map((link) => link.guestId)].filter(
+          (id): id is string => Boolean(id),
+        ),
+      ),
+    ];
+    if (!guestIds.length) return [];
+
+    const rows = await this.prisma.guestSession.findMany({
+      where: {
+        tenantId,
+        guestId: { in: guestIds },
+        startedAt: {
+          gte: new Date(from.getTime() - 24 * 60 * 60 * 1000),
+          lte: now,
+        },
+      },
+      select: {
+        externalSessionId: true,
+        externalDomain: true,
+        storeId: true,
+        startedAt: true,
+        stoppedAt: true,
+      },
+      orderBy: { startedAt: 'asc' },
+      take: 500,
+    });
+
+    return rows;
+  }
+
+  private async faceitGet(
+    key: string,
+    path: string,
+  ): Promise<
+    | { kind: 'OK'; body: unknown }
+    | { kind: 'NOT_FOUND' | 'FAILED' | 'RATE_LIMITED' | 'UNREACHABLE' }
+  > {
+    try {
+      const { status, body } = await this.getJson(`${FACEIT_API}${path}`, {
+        Authorization: `Bearer ${key}`,
+      });
+      if (status === 200) return { kind: 'OK', body };
+      if (status === 404) return { kind: 'NOT_FOUND' };
+      if (status === 429) return { kind: 'RATE_LIMITED' };
+      return { kind: 'FAILED' };
+    } catch {
+      return { kind: 'UNREACHABLE' };
+    }
   }
 
   private async getJson(url: string, headers: Record<string, string> = {}) {

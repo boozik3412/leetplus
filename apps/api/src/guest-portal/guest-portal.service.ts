@@ -77,6 +77,7 @@ import {
 import {
   evaluateGuestGameProgress,
   guestGameProgressPeriodicity,
+  guestGameExternalMatchStats,
   guestGameTriggerMatches,
   type GuestGameProgressEvent,
 } from '../guest-gamification/guest-game-progress';
@@ -20704,6 +20705,9 @@ export function guestPortalMissionConditionLabel(
   sessionType: string | null,
 ) {
   const target = numberField(metric.target) ?? 1;
+  if (missionType === 'FACEIT_MATCH') {
+    return guestPortalFaceitMatchLabel(metric, target);
+  }
   if (missionType === 'PRODUCT_PURCHASE') {
     const mode = stringField(metric.productMatch)?.toUpperCase();
     const purchaseSource = stringField(metric.purchaseSource)?.toUpperCase();
@@ -20799,6 +20803,52 @@ export function guestPortalMissionConditionLabel(
     : action;
 
   return appendHourlySessionSourceNotice(label, sessionType);
+}
+
+function guestPortalFaceitMatchLabel(
+  metric: Record<string, unknown>,
+  target: number,
+) {
+  const goal = stringField(metric.matchGoal)?.toUpperCase();
+  const filters = jsonRecord(metric.matchFilters);
+  const action =
+    goal === 'WINS'
+      ? `Выиграть ${target} ${russianPlural(target, 'матч', 'матча', 'матчей')} FACEIT CS2`
+      : goal === 'KILLS'
+        ? `Сделать ${target} ${russianPlural(target, 'убийство', 'убийства', 'убийств')} в матчах FACEIT CS2`
+        : goal === 'ACES'
+          ? `Сделать ${target} ${russianPlural(target, 'эйс', 'эйса', 'эйсов')} в матчах FACEIT CS2`
+          : `Сыграть ${target} ${russianPlural(target, 'матч', 'матча', 'матчей')} FACEIT CS2`;
+  const maps = unknownStringArray(filters.maps)
+    .map(stringField)
+    .filter((map): map is string => Boolean(map));
+  const details = [
+    goal !== 'WINS' && filters.requireWin === true ? 'только победы' : null,
+    numberField(filters.minKills)
+      ? `от ${numberField(filters.minKills)} убийств за матч`
+      : null,
+    numberField(filters.minKd) ? `K/D от ${numberField(filters.minKd)}` : null,
+    numberField(filters.minAdr)
+      ? `ADR от ${numberField(filters.minAdr)}`
+      : null,
+    numberField(filters.minHsPercent)
+      ? `от ${numberField(filters.minHsPercent)}% в голову`
+      : null,
+    numberField(filters.minAces)
+      ? `от ${numberField(filters.minAces)} эйсов за матч`
+      : null,
+    maps.length ? `карты: ${maps.join(', ')}` : null,
+  ].filter(Boolean);
+
+  return `${action} в клубе во время своей сессии${details.length ? ` · ${details.join(' · ')}` : ''}`;
+}
+
+function russianPlural(value: number, one: string, few: string, many: string) {
+  const mod10 = Math.abs(value) % 10;
+  const mod100 = Math.abs(value) % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }
 
 function guestPortalPurchaseCategoryLabels(metric: Record<string, unknown>) {
@@ -24355,6 +24405,8 @@ function guestGameTriggerLabel(value: string) {
       return 'покупка товара';
     case 'BALANCE_TOPUP':
       return 'пополнение баланса';
+    case 'FACEIT_MATCH':
+      return 'матч FACEIT CS2 в клубе';
     case 'GUEST_LOG':
       return 'событие Langame';
     case 'REFERRAL_ACCEPTED':
@@ -24399,6 +24451,7 @@ function portalEventToProgressEvent(row: {
     categoryName: stringField(input.categoryName),
     supplierName: stringField(input.supplierName),
     quantity: numberField(input.quantity),
+    externalMatch: guestGameExternalMatchStats(input.externalMatch),
   };
 }
 

@@ -14665,3 +14665,30 @@ describe('guest game module hides spent budgets', () => {
     ).toEqual(['loot-full-held', 'loot-open']);
   });
 });
+
+describe('FACEIT match mission label', () => {
+  it('says what to play, where and with which filters', () => {
+    expect(
+      guestPortalMissionConditionLabel(
+        'FACEIT_MATCH',
+        {
+          matchGoal: 'WINS',
+          target: 3,
+          matchFilters: { requireWin: true, minKd: 1.2, maps: ['de_mirage'] },
+        },
+        'ANY',
+      ),
+    ).toBe(
+      'Выиграть 3 матча FACEIT CS2 в клубе во время своей сессии · K/D от 1.2 · карты: de_mirage',
+    );
+    expect(
+      guestPortalMissionConditionLabel(
+        'FACEIT_MATCH',
+        { matchGoal: 'KILLS', target: 100 },
+        'ANY',
+      ),
+    ).toBe(
+      'Сделать 100 убийств в матчах FACEIT CS2 в клубе во время своей сессии',
+    );
+  });
+});

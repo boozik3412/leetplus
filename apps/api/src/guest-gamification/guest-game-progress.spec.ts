@@ -1646,3 +1646,84 @@ describe('guest game progress domain routing', () => {
     ).toMatchObject({ current: 0, completed: false, matchedEvents: 0 });
   });
 });
+
+describe('FACEIT match missions', () => {
+  const at = (minutes: number) => new Date(Date.UTC(2026, 10, 9, 12, minutes));
+  const match = (
+    overrides: Partial<NonNullable<GuestGameProgressEvent['externalMatch']>>,
+  ): NonNullable<GuestGameProgressEvent['externalMatch']> => ({
+    provider: 'FACEIT',
+    game: 'cs2',
+    result: 'WIN',
+    kills: 20,
+    deaths: 15,
+    assists: 3,
+    kd: 1.33,
+    adr: 85,
+    hsPercent: 45,
+    mvps: 3,
+    aces: 0,
+    map: 'de_mirage',
+    ...overrides,
+  });
+  const event = (
+    minutes: number,
+    overrides: Partial<NonNullable<GuestGameProgressEvent['externalMatch']>>,
+  ): GuestGameProgressEvent => ({
+    eventType: 'FACEIT_MATCH',
+    occurredAt: at(minutes),
+    externalMatch: match(overrides),
+  });
+
+  it('counts only wins on the chosen maps with the minimum K/D', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'FACEIT_MATCH',
+        progressTarget: 3,
+        conditions: {
+          metric: {
+            eventTypes: ['FACEIT_MATCH'],
+            aggregation: 'count',
+            target: 3,
+            matchFilters: {
+              requireWin: true,
+              minKd: 1.2,
+              maps: ['de_mirage', 'de_inferno'],
+            },
+          },
+        },
+      },
+      event(50, {}),
+      [
+        event(10, { map: 'DE_INFERNO' }),
+        event(20, { result: 'LOSS' }),
+        event(30, { kd: 0.9 }),
+        event(40, { map: 'de_nuke' }),
+        { eventType: 'FACEIT_MATCH', occurredAt: at(45) },
+      ],
+    );
+
+    expect(result).toMatchObject({ current: 2, target: 3, completed: false });
+  });
+
+  it('sums kills across matches toward the goal', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'FACEIT_MATCH',
+        progressTarget: 50,
+        conditions: {
+          metric: {
+            eventTypes: ['FACEIT_MATCH'],
+            aggregation: 'sum',
+            sumField: 'kills',
+            target: 50,
+          },
+        },
+      },
+      event(30, { kills: 22 }),
+      [event(10, { kills: 18 }), event(20, { kills: 14, result: 'LOSS' })],
+    );
+
+    expect(result).toMatchObject({ current: 54, target: 50, completed: true });
+  });
+});

@@ -34,7 +34,11 @@ export function admittedHost(target, suffixes = DEFAULT_SUFFIXES) {
   if (!match || match[2] !== '443') return null;
   const host = match[1].toLowerCase();
   if (!HOSTNAME.test(host)) return null;
-  return suffixes.some(suffix => host.endsWith(`.${suffix}`)) ? host : null;
+  // `=host` admits exactly that host (guest game: Steam, FACEIT); a plain
+  // entry admits its subdomains only (Langame club servers).
+  return suffixes.some(suffix =>
+    suffix.startsWith('=') ? host === suffix.slice(1) : host.endsWith(`.${suffix}`),
+  ) ? host : null;
 }
 
 async function resolvePublic(host) {

@@ -15,6 +15,17 @@ test('admittedHost lets through only club subdomains on port 443', () => {
   assert.equal(admittedHost('1337.langame.ru'), null);
 });
 
+test('admittedHost lets an =host entry through only as that exact host', () => {
+  const suffixes = ['langame.ru', '=steamcommunity.com', '=open.faceit.com', '=api.steampowered.com'];
+  assert.equal(admittedHost('steamcommunity.com:443', suffixes), 'steamcommunity.com');
+  assert.equal(admittedHost('OPEN.faceit.com:443', suffixes), 'open.faceit.com');
+  assert.equal(admittedHost('api.steampowered.com:443', suffixes), 'api.steampowered.com');
+  assert.equal(admittedHost('evil.steamcommunity.com:443', suffixes), null);
+  assert.equal(admittedHost('www.faceit.com:443', suffixes), null);
+  assert.equal(admittedHost('steamcommunity.com:80', suffixes), null);
+  assert.equal(admittedHost('1337.langame.ru:443', suffixes), '1337.langame.ru');
+});
+
 test('isPublicIpv4 rejects private, loopback and router fake-IP ranges', () => {
   assert.equal(isPublicIpv4('92.53.124.51'), true);
   for (const address of ['10.1.2.3', '127.0.0.1', '172.31.42.2', '192.168.1.137', '198.18.0.42', '100.64.0.1', '169.254.1.1', '::1']) {

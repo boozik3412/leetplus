@@ -99,6 +99,14 @@ function services() {
         processedFacts: 1,
         createdRewards: 0,
       }),
+      runExternalMatchPipelineScheduled: jest.fn().mockResolvedValue({
+        status: 'PROCESSED',
+        reason: null,
+        checkedMatches: 1,
+        processedMatches: 1,
+        failedMatches: 0,
+        createdRewards: 0,
+      }),
     },
     monitoring: {
       collectTenant: jest.fn().mockResolvedValue({ status: 'SUCCESS' }),
@@ -417,6 +425,70 @@ describe('guest gamification singleton worker', () => {
       now,
     );
     expect(canarySettle).not.toHaveBeenCalled();
+  });
+
+  it('journals FACEIT matches and turns counted ones into events in live mode only', async () => {
+    const live = services();
+    const gameAccountsLookup = {
+      lookupTenant: jest
+        .fn()
+        .mockResolvedValue({ checked: 0, found: 0, rateLimited: false }),
+      syncFaceitMatches: jest.fn().mockResolvedValue({
+        accounts: 1,
+        journaled: 3,
+        counted: 2,
+        review: 1,
+        rateLimited: false,
+        unreachable: false,
+        skipped: null,
+      }),
+    };
+    const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    const now = new Date('2026-11-09T12:00:00.000Z');
+    const env = {
+      ...baseEnv(),
+      GUEST_GAMIFICATION_WORKER_CANARY: 'false',
+      GUEST_GAMIFICATION_WORKER_SUPPLEMENTAL_MODE: 'LIVE',
+    };
+
+    const result = await runGuestGamificationWorkerOnce(
+      { ...live, gameAccountsLookup } as never,
+      env,
+      logger,
+      now,
+    );
+
+    expect(gameAccountsLookup.syncFaceitMatches).toHaveBeenCalledWith(
+      'tenant-1',
+      now,
+      env,
+    );
+    expect(
+      live.gamification.runExternalMatchPipelineScheduled,
+    ).toHaveBeenCalledWith({ tenantId: 'tenant-1' });
+    expect(result.faceitMatches).toMatchObject({
+      journal: { counted: 2 },
+      events: { processedMatches: 1 },
+    });
+    expect(logger.log).toHaveBeenCalledWith(
+      expect.stringContaining('faceitMatchesCounted=2'),
+    );
+
+    const canary = services();
+    const canaryLookup = {
+      lookupTenant: jest.fn(),
+      syncFaceitMatches: jest.fn(),
+    };
+    await runGuestGamificationWorkerOnce(
+      { ...canary, gameAccountsLookup: canaryLookup } as never,
+      baseEnv(),
+      logger,
+      now,
+    );
+    expect(canaryLookup.syncFaceitMatches).not.toHaveBeenCalled();
+    expect(
+      canary.gamification.runExternalMatchPipelineScheduled,
+    ).not.toHaveBeenCalled();
   });
 
   it('fails closed for an external tenant or pipeline error', async () => {

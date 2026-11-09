@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { GuestGamificationModule } from '../guest-gamification/guest-gamification.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
+import { GuestGameAccountsService } from '../guest-game-accounts/guest-game-accounts.service';
 import { GuestPortalController } from './guest-portal.controller';
 import { GuestPortalService } from './guest-portal.service';
 import { GuestSupportService } from './guest-support.service';
@@ -16,6 +17,10 @@ import { GuestSupportService } from './guest-support.service';
     GuestGamificationModule,
   ],
   controllers: [GuestPortalController],
-  providers: [GuestPortalService, GuestSupportService],
+  providers: [
+    GuestPortalService,
+    GuestSupportService,
+    GuestGameAccountsService,
+  ],
 })
 export class GuestPortalModule {}

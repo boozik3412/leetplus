@@ -77,6 +77,7 @@ import {
 import {
   evaluateGuestGameProgress,
   guestGameProgressPeriodicity,
+  guestGameExternalMatchStats,
   guestGameTriggerMatches,
   type GuestGameProgressEvent,
 } from '../guest-gamification/guest-game-progress';
@@ -99,6 +100,10 @@ import type {
   LangameGuestDetailsPortalResult,
   LangameGuestSearchResultItem,
 } from '../integrations/langame.types';
+import {
+  GuestGameAccountsService,
+  type GuestGameAccountsView,
+} from '../guest-game-accounts/guest-game-accounts.service';
 import {
   GuestLeaderboardReadService,
   type GuestLeaderboardView,
@@ -145,6 +150,10 @@ const GUEST_PORTAL_COMMUNICATION_OUTBOUND_REQUIREMENTS = [
 const GUEST_PORTAL_TELEGRAM_AUTH_MUTATION_REQUIREMENTS = [
   { module: TenantModule.GAMIFICATION, action: 'WRITE' },
   ...GUEST_PORTAL_COMMUNICATION_OUTBOUND_REQUIREMENTS,
+] as const satisfies readonly TenantExecutionRequirement[];
+const GUEST_PORTAL_GAME_ACCOUNT_OUTBOUND_REQUIREMENTS = [
+  { module: TenantModule.GAMIFICATION, action: 'WRITE' },
+  { module: TenantModule.GAMIFICATION, action: 'OUTBOUND' },
 ] as const satisfies readonly TenantExecutionRequirement[];
 const GUEST_PORTAL_INTEGRATION_OUTBOUND_REQUIREMENTS = [
   { module: TenantModule.GAMIFICATION, action: 'OUTBOUND' },
@@ -1996,6 +2005,8 @@ export class GuestPortalService {
     private readonly guestSupportService: GuestSupportService,
     @Optional()
     private readonly guestLeaderboard?: GuestLeaderboardReadService,
+    @Optional()
+    private readonly guestGameAccounts?: GuestGameAccountsService,
   ) {}
 
   private gameDebugTraceId(prefix: string) {
@@ -6918,6 +6929,79 @@ export class GuestPortalService {
     return {
       tutorialSeenVersion: Math.max(profile.tutorialSeenVersion, version),
     };
+  }
+
+  async getGameAccounts(
+    authorization: string | undefined,
+  ): Promise<GuestGameAccountsView> {
+    const scope = await this.gameAccountScope(
+      authorization,
+      GUEST_PORTAL_READ_REQUIREMENTS,
+    );
+
+    return this.requireGameAccounts().getAccounts(scope);
+  }
+
+  async startSteamLink(
+    authorization: string | undefined,
+  ): Promise<{ redirectUrl: string }> {
+    const scope = await this.gameAccountScope(
+      authorization,
+      GUEST_PORTAL_WRITE_REQUIREMENTS,
+    );
+
+    return this.requireGameAccounts().startSteamLink(scope);
+  }
+
+  async verifySteamLink(
+    authorization: string | undefined,
+    dto: { state?: unknown; openid?: unknown },
+  ): Promise<GuestGameAccountsView> {
+    const scope = await this.gameAccountScope(
+      authorization,
+      GUEST_PORTAL_GAME_ACCOUNT_OUTBOUND_REQUIREMENTS,
+    );
+
+    return this.requireGameAccounts().verifySteamLink(scope, dto);
+  }
+
+  async unlinkSteam(
+    authorization: string | undefined,
+  ): Promise<GuestGameAccountsView> {
+    const scope = await this.gameAccountScope(
+      authorization,
+      GUEST_PORTAL_WRITE_REQUIREMENTS,
+    );
+
+    return this.requireGameAccounts().unlinkSteam(scope);
+  }
+
+  private requireGameAccounts() {
+    if (!this.guestGameAccounts) {
+      throw new NotFoundException(
+        'Игровые аккаунты в этом клубе пока недоступны.',
+      );
+    }
+
+    return this.guestGameAccounts;
+  }
+
+  /** The exact tenant game profile of the guest token. */
+  private async gameAccountScope(
+    authorization: string | undefined,
+    requirements: TenantExecutionRequirementInput,
+  ) {
+    const payload = await this.verifyGuestToken(authorization, requirements);
+    const guest = await this.findGuest(payload);
+    const profile = await this.findProfile(payload, guest?.id ?? null);
+
+    if (!profile) {
+      throw new BadRequestException(
+        'Игровой профиль гостя не найден. Сначала подтвердите телефон и выберите клуб.',
+      );
+    }
+
+    return { tenantId: payload.tenantId, profileId: profile.id };
   }
 
   async recordAppOpen(
@@ -20621,6 +20705,9 @@ export function guestPortalMissionConditionLabel(
   sessionType: string | null,
 ) {
   const target = numberField(metric.target) ?? 1;
+  if (missionType === 'FACEIT_MATCH') {
+    return guestPortalFaceitMatchLabel(metric, target);
+  }
   if (missionType === 'PRODUCT_PURCHASE') {
     const mode = stringField(metric.productMatch)?.toUpperCase();
     const purchaseSource = stringField(metric.purchaseSource)?.toUpperCase();
@@ -20716,6 +20803,52 @@ export function guestPortalMissionConditionLabel(
     : action;
 
   return appendHourlySessionSourceNotice(label, sessionType);
+}
+
+function guestPortalFaceitMatchLabel(
+  metric: Record<string, unknown>,
+  target: number,
+) {
+  const goal = stringField(metric.matchGoal)?.toUpperCase();
+  const filters = jsonRecord(metric.matchFilters);
+  const action =
+    goal === 'WINS'
+      ? `Выиграть ${target} ${russianPlural(target, 'матч', 'матча', 'матчей')} FACEIT CS2`
+      : goal === 'KILLS'
+        ? `Сделать ${target} ${russianPlural(target, 'убийство', 'убийства', 'убийств')} в матчах FACEIT CS2`
+        : goal === 'ACES'
+          ? `Сделать ${target} ${russianPlural(target, 'эйс', 'эйса', 'эйсов')} в матчах FACEIT CS2`
+          : `Сыграть ${target} ${russianPlural(target, 'матч', 'матча', 'матчей')} FACEIT CS2`;
+  const maps = unknownStringArray(filters.maps)
+    .map(stringField)
+    .filter((map): map is string => Boolean(map));
+  const details = [
+    goal !== 'WINS' && filters.requireWin === true ? 'только победы' : null,
+    numberField(filters.minKills)
+      ? `от ${numberField(filters.minKills)} убийств за матч`
+      : null,
+    numberField(filters.minKd) ? `K/D от ${numberField(filters.minKd)}` : null,
+    numberField(filters.minAdr)
+      ? `ADR от ${numberField(filters.minAdr)}`
+      : null,
+    numberField(filters.minHsPercent)
+      ? `от ${numberField(filters.minHsPercent)}% в голову`
+      : null,
+    numberField(filters.minAces)
+      ? `от ${numberField(filters.minAces)} эйсов за матч`
+      : null,
+    maps.length ? `карты: ${maps.join(', ')}` : null,
+  ].filter(Boolean);
+
+  return `${action} в клубе во время своей сессии${details.length ? ` · ${details.join(' · ')}` : ''}`;
+}
+
+function russianPlural(value: number, one: string, few: string, many: string) {
+  const mod10 = Math.abs(value) % 10;
+  const mod100 = Math.abs(value) % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }
 
 function guestPortalPurchaseCategoryLabels(metric: Record<string, unknown>) {
@@ -24272,6 +24405,8 @@ function guestGameTriggerLabel(value: string) {
       return 'покупка товара';
     case 'BALANCE_TOPUP':
       return 'пополнение баланса';
+    case 'FACEIT_MATCH':
+      return 'матч FACEIT CS2 в клубе';
     case 'GUEST_LOG':
       return 'событие Langame';
     case 'REFERRAL_ACCEPTED':
@@ -24316,6 +24451,7 @@ function portalEventToProgressEvent(row: {
     categoryName: stringField(input.categoryName),
     supplierName: stringField(input.supplierName),
     quantity: numberField(input.quantity),
+    externalMatch: guestGameExternalMatchStats(input.externalMatch),
   };
 }
 

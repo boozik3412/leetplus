@@ -77,7 +77,14 @@ import {
 } from "./_game/lootbox/hints";
 import { revealLootboxRarity } from "./_game/lootbox/rarity";
 import { LootboxOpeningOverlay } from "./_game/lootbox/opening-overlay";
-import { MenuIcon, TrophyIcon, ExitIcon, BrandMark } from "./_game/icons";
+import {
+  MenuIcon,
+  TrophyIcon,
+  ExitIcon,
+  BrandMark,
+  GamepadIcon,
+} from "./_game/icons";
+import { GUEST_GAME_ACCOUNTS_PATH } from "@/lib/guest-game-accounts";
 import { HomeLootBoxes } from "./_game/lootbox/home-loot-boxes";
 import { LootboxUnavailableModal } from "./_game/lootbox/unavailable-modal";
 import {
@@ -829,7 +836,31 @@ function GameModuleTopbar({
 }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [gameAccountsEnabled, setGameAccountsEnabled] = useState(false);
+  const gameAccountsChecked = useRef(false);
   const brandLogoUrl = summary.store.gameLogoUrl ?? summary.tenant.gameLogoUrl;
+
+  // «Игровые аккаунты» appears only where the network turned them on; the
+  // check runs once, when the guest first opens the menu.
+  useEffect(() => {
+    if (!menuOpen || gameAccountsChecked.current) {
+      return;
+    }
+
+    gameAccountsChecked.current = true;
+    fetch(GUEST_GAME_ACCOUNTS_PATH, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: unknown) => {
+        if (
+          data &&
+          typeof data === "object" &&
+          (data as { enabled?: unknown }).enabled === true
+        ) {
+          setGameAccountsEnabled(true);
+        }
+      })
+      .catch(() => undefined);
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -888,6 +919,12 @@ function GameModuleTopbar({
               <TrophyIcon />
               <span>Рейтинг</span>
             </Link>
+            {gameAccountsEnabled ? (
+              <Link href="/game/accounts" onClick={() => setMenuOpen(false)}>
+                <GamepadIcon />
+                <span>Игровые аккаунты</span>
+              </Link>
+            ) : null}
             {onTutorialOpen ? (
               <button
                 type="button"

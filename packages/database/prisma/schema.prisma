@@ -385,6 +385,8 @@ model Tenant {
   storeClosures                        StoreClosure[]
   guestLeaderboardSettings             GuestLeaderboardSettings?
   guestLeaderboardPeriodResults        GuestLeaderboardPeriodResult[]
+  guestGameExternalAccounts            GuestGameExternalAccount[]
+  guestGameExternalMatches             GuestGameExternalMatch[]
   dailyReportBot                       DailyReportBot?
   dailyReportRecipients                DailyReportRecipient[]
   dailyReportDeliveries                DailyReportDelivery[]
@@ -1455,6 +1457,72 @@ model GuestLeaderboardPeriodResult {
   @@unique([tenantId, periodKey, scopeKey, board, profileId], map: "guest_leaderboard_period_result_uidx")
   @@index([tenantId, periodKey, scopeKey, board, rank], map: "guest_leaderboard_period_result_rank_idx")
   @@index([tenantId, profileId, periodKey], map: "guest_leaderboard_period_result_profile_idx")
+}
+
+/// Game accounts a guest linked to the game profile (Steam via OpenID, FACEIT
+/// found by the verified SteamID). At most one ACTIVE account per provider and
+/// profile, and one ACTIVE profile per external id in a network (partial
+/// unique indexes in the migration). `details` keeps public facts the worker
+/// fetched (nickname, avatar, FACEIT level/ELO, Steam bans).
+model GuestGameExternalAccount {
+  id                 String    @id @default(uuid())
+  tenantId           String
+  profileId          String
+  provider           String
+  externalId         String
+  nickname           String?
+  status             String    @default("ACTIVE")
+  verifiedVia        String
+  linkedAt           DateTime
+  unlinkedAt         DateTime?
+  lookupStatus       String    @default("PENDING")
+  checkedAt          DateTime?
+  matchesSyncedUntil DateTime?
+  details            Json?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  tenant  Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  profile GuestGameProfile         @relation(fields: [tenantId, profileId], references: [tenantId, id], onDelete: Cascade)
+  matches GuestGameExternalMatch[]
+
+  @@unique([tenantId, id], map: "guest_game_external_account_tenant_id_uidx")
+  @@index([tenantId, profileId, provider, status], map: "guest_game_external_account_profile_idx")
+  @@index([tenantId, provider, externalId], map: "guest_game_external_account_external_idx")
+  @@index([tenantId, provider, status, lookupStatus, checkedAt], map: "guest_game_external_account_worker_idx")
+}
+
+/// Match journal of linked game accounts. A match counts for missions only
+/// when it lies inside a paid Langame session of the guest in the club
+/// (`decision` = COUNTED, `eventId` is the game event it produced).
+model GuestGameExternalMatch {
+  id                String    @id @default(uuid())
+  tenantId          String
+  profileId         String
+  accountId         String
+  provider          String
+  externalMatchId   String
+  game              String
+  startedAt         DateTime?
+  finishedAt        DateTime
+  sessionExternalId String?
+  externalDomain    String?
+  decision          String
+  decisionReason    String?
+  stats             Json?
+  eventId           String?
+  reviewedByUserId  String?
+  reviewedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  tenant  Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  profile GuestGameProfile         @relation(fields: [tenantId, profileId], references: [tenantId, id], onDelete: Cascade)
+  account GuestGameExternalAccount @relation(fields: [tenantId, accountId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, provider, externalMatchId, accountId], map: "guest_game_external_match_uidx")
+  @@index([tenantId, profileId, finishedAt], map: "guest_game_external_match_profile_idx")
+  @@index([tenantId, decision, finishedAt], map: "guest_game_external_match_decision_idx")
 }
 
 /// Team Telegram bot of the daily report («Отчёт за сутки»): one per network.
@@ -2641,6 +2709,8 @@ model GuestGameProfile {
   portalOtpChallenges      GuestPortalOtpChallenge[]
   supportTickets           GuestSupportTicket[]
   identityLinks            GuestGameProfileIdentityLink[]
+  externalAccounts         GuestGameExternalAccount[]
+  externalMatches          GuestGameExternalMatch[]
 
   @@unique([tenantId, guestId], map: "guest_game_profile_guest_uidx")
   @@unique([tenantId, leadId], map: "guest_game_profile_lead_uidx")

@@ -2,7 +2,7 @@
  * Telegram account that receives club-owner requests from the homepage.
  * Change it here only: the CTA link and the visible handle both use it.
  */
-export const SALES_TELEGRAM_USERNAME = "leetplus_sales";
+export const SALES_TELEGRAM_USERNAME = "leetorigin";
 
 const SALES_GREETING =
   "Здравствуйте! Хочу подключить игровой модуль LeetPlus (2 месяца бесплатно).";

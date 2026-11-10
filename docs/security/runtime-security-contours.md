@@ -1928,7 +1928,7 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   или scheduler нет. В ответ и логи не попадают ключ, ответы Langame и
   идентификаторы гостей: только номера ПК, занятость, имя администратора смены
   и суммы.
-- Web: страница `/stores/floor-plan` (`canAccessPath` раздела `/stores`) и BFF
+- Web: страница `/visualization`, раздел меню «Визуализация» (`canAccessPath` как у раздела `/stores`) и BFF
   `/api/stores/:id/floor-plan*` через `proxyJsonRequest` (cookie → JWT,
   `private, no-store`). Сама 3D-сцена — статические файлы
   `public/club-scheme/<template>/` и vendored three.js без данных; данные она

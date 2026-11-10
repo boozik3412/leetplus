@@ -6,6 +6,7 @@ import {
   CLUB_FLOOR_PLAN_TEMPLATES,
   clubFloorPlanSceneUrl,
   clubFloorPlanTemplateFor,
+  type ClubFloorPlanTemplate,
 } from "@/lib/club-floor-plan-templates";
 import { can } from "@/lib/permissions";
 import { getStores, type Store } from "@/lib/stores";
@@ -18,11 +19,11 @@ const first = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
 // The saved hall decides the scene; a failed read falls back to the club name.
-async function savedTemplateOf(storeId: string) {
+async function savedTemplateOf(storeId: string, headers: HeadersInit) {
   try {
     const response = await fetchWithTimeout(
       `${getApiUrl()}/stores/${encodeURIComponent(storeId)}/floor-plan`,
-      { cache: "no-store", headers: await getAuthHeaders() },
+      { cache: "no-store", headers },
     );
     if (!response.ok) {
       return null;
@@ -36,32 +37,45 @@ async function savedTemplateOf(storeId: string) {
   }
 }
 
-export default async function StoreFloorPlanPage({
+export default async function VisualizationPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireCurrentUser();
-  ensurePageAccess(user, "/stores/floor-plan");
+  ensurePageAccess(user, "/visualization");
   const params = await searchParams;
   const stores = (await getStores()).filter((store) => store.isActive);
+  const headers = await getAuthHeaders();
+  const saved = await Promise.all(
+    stores.map((store) => savedTemplateOf(store.id, headers)),
+  );
+  const clubs = stores.map((store, index) => ({
+    store,
+    saved: saved[index],
+    template: clubFloorPlanTemplateFor(store, saved[index]),
+  }));
   const requested = first(params.store);
   const selected =
-    stores.find((store) => store.id === requested) ??
-    stores.find((store) => clubFloorPlanTemplateFor(store)) ??
-    stores[0] ??
+    clubs.find((club) => club.store.id === requested) ??
+    clubs.find((club) => club.template) ??
+    clubs[0] ??
     null;
-  const template = selected
-    ? clubFloorPlanTemplateFor(selected, await savedTemplateOf(selected.id))
-    : null;
   // Saving the hall is a network-wide setting, as on the API.
   const canEdit =
     can(user, "edit_stores") &&
     user.accessScope === "NETWORK" &&
     ["OWNER", "ADMIN", "MANAGER"].includes(user.role);
+  const template = selected
+    ? clubFloorPlanTemplateFor(
+        selected.store,
+        selected.saved,
+        canEdit ? first(params.template) : null,
+      )
+    : null;
   const sceneUrl =
     selected && template
-      ? clubFloorPlanSceneUrl(template, selected.id, canEdit)
+      ? clubFloorPlanSceneUrl(template, selected.store.id, canEdit)
       : null;
 
   return (
@@ -69,10 +83,7 @@ export default async function StoreFloorPlanPage({
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
           current="Схема клуба"
-          items={[
-            { href: "/dashboard", label: "Дашборд" },
-            { href: "/stores", label: "Торговые точки" },
-          ]}
+          items={[{ href: "/dashboard", label: "Дашборд" }]}
         />
         <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -99,37 +110,53 @@ export default async function StoreFloorPlanPage({
           ) : null}
         </div>
 
-        {stores.length > 1 ? (
+        {clubs.length > 1 ? (
           <nav aria-label="Клуб" className="mb-4 flex flex-wrap gap-2">
-            {stores.map((store) => (
+            {clubs.map((club) => (
               <StoreChip
-                key={store.id}
-                store={store}
-                active={store.id === selected?.id}
+                key={club.store.id}
+                store={club.store}
+                ready={Boolean(club.template)}
+                active={club.store.id === selected?.store.id}
               />
             ))}
           </nav>
         ) : null}
 
         {sceneUrl && selected ? (
-          <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800">
-            <iframe
-              key={selected.id}
-              className="block h-[calc(100dvh-15rem)] min-h-[34rem] w-full"
-              src={sceneUrl}
-              title={`Схема клуба ${selected.name}`}
-            />
-          </div>
+          <>
+            {!selected.saved && canEdit ? (
+              <p className="mb-3 text-sm text-zinc-600">
+                Схема ещё не сохранена для этого клуба. Нажмите «Редактировать»
+                и «Сохранить схему», чтобы закрепить её.
+              </p>
+            ) : null}
+            <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800">
+              <iframe
+                key={`${selected.store.id}:${template?.id}`}
+                className="block h-[calc(100dvh-15rem)] min-h-[34rem] w-full"
+                src={sceneUrl}
+                title={`Схема клуба ${selected.store.name}`}
+              />
+            </div>
+          </>
         ) : (
-          <EmptyState store={selected} />
+          <EmptyState store={selected?.store ?? null} canEdit={canEdit} />
         )}
       </div>
     </main>
   );
 }
 
-function StoreChip({ store, active }: { store: Store; active: boolean }) {
-  const ready = Boolean(clubFloorPlanTemplateFor(store));
+function StoreChip({
+  store,
+  ready,
+  active,
+}: {
+  store: Store;
+  ready: boolean;
+  active: boolean;
+}) {
   return (
     <Link
       aria-current={active ? "page" : undefined}
@@ -138,7 +165,7 @@ function StoreChip({ store, active }: { store: Store; active: boolean }) {
           ? "inline-flex min-h-11 items-center gap-2 rounded-full border border-cyan-600 bg-cyan-50 px-4 text-sm font-semibold text-cyan-900 dark:border-cyan-500 dark:bg-cyan-950/50 dark:text-cyan-100"
           : "inline-flex min-h-11 items-center gap-2 rounded-full border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
       }
-      href={`/stores/floor-plan?store=${encodeURIComponent(store.id)}`}
+      href={`/visualization?store=${encodeURIComponent(store.id)}`}
     >
       {store.name}
       {ready ? null : (
@@ -148,19 +175,64 @@ function StoreChip({ store, active }: { store: Store; active: boolean }) {
   );
 }
 
-function EmptyState({ store }: { store: Store | null }) {
+function EmptyState({
+  store,
+  canEdit,
+}: {
+  store: Store | null;
+  canEdit: boolean;
+}) {
   return (
     <div className="rounded-lg border border-dashed border-zinc-300 bg-white px-6 py-10 text-center dark:border-zinc-700 dark:bg-zinc-900">
       <h2 className="text-base font-semibold text-zinc-950">
         {store
-          ? `Для клуба «${store.name}» схемы зала пока нет`
+          ? `Для клуба «${store.name}» схема зала не выбрана`
           : "Активных клубов пока нет"}
       </h2>
-      <p className="mx-auto mt-2 max-w-xl text-sm text-zinc-600">
-        {store
-          ? `Зал рисуем по схеме бронирования Langame. Сейчас готова схема: ${CLUB_FLOOR_PLAN_TEMPLATES.map((template) => template.title).join(", ")}. Напишите в поддержку, чтобы добавить этот клуб.`
-          : "Добавьте клуб в разделе «Торговые точки»."}
-      </p>
+      {store && canEdit ? (
+        <>
+          <p className="mx-auto mt-2 max-w-xl text-sm text-zinc-600">
+            Выберите нарисованный зал. После «Сохранить схему» в редакторе он
+            закрепится за этим клубом.
+          </p>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            {CLUB_FLOOR_PLAN_TEMPLATES.map((template) => (
+              <TemplateLink
+                key={template.id}
+                store={store}
+                template={template}
+              />
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="mx-auto mt-2 max-w-xl text-sm text-zinc-600">
+          {store
+            ? "Зал рисуем по схеме бронирования Langame. Напишите в поддержку, чтобы добавить этот клуб."
+            : "Добавьте клуб в разделе «Торговые точки»."}
+        </p>
+      )}
     </div>
+  );
+}
+
+function TemplateLink({
+  store,
+  template,
+}: {
+  store: Store;
+  template: ClubFloorPlanTemplate;
+}) {
+  const params = new URLSearchParams({
+    store: store.id,
+    template: template.id,
+  });
+  return (
+    <Link
+      className="inline-flex min-h-11 items-center rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white hover:bg-cyan-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600"
+      href={`/visualization?${params.toString()}`}
+    >
+      Зал «{template.title}»
+    </Link>
   );
 }

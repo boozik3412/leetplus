@@ -51,6 +51,7 @@ type NavGroup = {
     | "marketing"
     | "assortment"
     | "management"
+    | "visualization"
     | "administration";
   items: NavItem[];
 };
@@ -160,10 +161,14 @@ const navGroups: NavGroup[] = [
       { href: "/commercial/tariffs", label: "Тарифы" },
       { href: "/users", label: "Пользователи и роли" },
       { href: "/stores", label: "Торговые точки" },
-      { href: "/stores/floor-plan", label: "Схема клуба" },
       { href: "/sync", label: "Синхронизация" },
       { href: "/settings", label: "Настройки" },
     ],
+  },
+  {
+    title: "Визуализация",
+    icon: "visualization",
+    items: [{ href: "/visualization", label: "Схема клуба" }],
   },
   {
     title: "Администрирование",
@@ -626,6 +631,16 @@ function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
     );
   }
 
+  if (icon === "visualization") {
+    return (
+      <svg {...common}>
+        <path d="M12 3 20 7.5v9L12 21l-8-4.5v-9z" />
+        <path d="M4 7.5 12 12l8-4.5" />
+        <path d="M12 12v9" />
+      </svg>
+    );
+  }
+
   if (icon === "administration") {
     return (
       <svg {...common}>
@@ -818,6 +833,13 @@ function resolveCurrentProductArea(pathname: string): ProductArea {
     currentPathname.startsWith("/admin")
   ) {
     return "Администрирование";
+  }
+
+  if (
+    currentPathname === "/visualization" ||
+    currentPathname.startsWith("/visualization/")
+  ) {
+    return "Визуализация";
   }
 
   if (currentPathname.startsWith("/marketing")) {

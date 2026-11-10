@@ -76,10 +76,10 @@ const guardedPages = [
   ["(app)/staff/tasks/page.tsx", "/staff/tasks"],
   ["(app)/staff/training-courses/page.tsx", "/staff/training-courses"],
   ["(app)/staff/training-profiles/page.tsx", "/staff/training-profiles"],
-  ["(app)/stores/floor-plan/page.tsx", "/stores/floor-plan"],
   ["(app)/stores/page.tsx", "/stores"],
   ["(app)/suppliers/page.tsx", "/suppliers"],
   ["(app)/utilities/page.tsx", "/utilities"],
+  ["(app)/visualization/page.tsx", "/visualization"],
   ["(app)/utilities/product-parsing/manual/page.tsx", "/utilities/product-parsing/manual"],
   ["guests/report/page.tsx", "/guests/report"],
   ["products/order/page.tsx", "/products/order"],
@@ -148,5 +148,16 @@ test("session-only pages run the page access guard before loading data", () => {
         `${file} loads data before the page access guard`,
       );
     }
+  }
+});
+
+test("the club scheme follows the clubs section rule", () => {
+  for (const role of roles) {
+    const subject = user({ role });
+    assert.equal(
+      canAccessPath(subject, "/visualization"),
+      canAccessPath(subject, "/stores"),
+      role,
+    );
   }
 });

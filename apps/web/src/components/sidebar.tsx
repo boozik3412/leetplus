@@ -160,6 +160,7 @@ const navGroups: NavGroup[] = [
       { href: "/commercial/tariffs", label: "Тарифы" },
       { href: "/users", label: "Пользователи и роли" },
       { href: "/stores", label: "Торговые точки" },
+      { href: "/stores/floor-plan", label: "Схема клуба" },
       { href: "/sync", label: "Синхронизация" },
       { href: "/settings", label: "Настройки" },
     ],

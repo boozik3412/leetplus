@@ -383,6 +383,7 @@ model Tenant {
   staffNotifications                   StaffNotification[]
   guestSupportTickets                  GuestSupportTicket[]
   storeClosures                        StoreClosure[]
+  storeFloorPlans                      StoreFloorPlan[]
   guestLeaderboardSettings             GuestLeaderboardSettings?
   guestLeaderboardPeriodResults        GuestLeaderboardPeriodResult[]
   guestGameExternalAccounts            GuestGameExternalAccount[]
@@ -1401,6 +1402,7 @@ model Store {
   staffNotifications              StaffNotification[]
   guestSupportTickets             GuestSupportTicket[]
   closures                        StoreClosure[]
+  floorPlan                       StoreFloorPlan?
   staffMembers                    StaffMember[]
   userAccesses                    UserStoreAccess[]
   langameProductConfigurations    LangameClubProductConfiguration[]
@@ -1611,6 +1613,26 @@ model StoreClosure {
 
   @@index([tenantId, storeId, closedFrom], map: "store_closure_store_from_idx")
   @@index([tenantId, reopenedOn], map: "store_closure_tenant_reopened_idx")
+}
+
+/// The club floor plan («Схема клуба»): one per club. `layout` is the hall
+/// template id plus the owner's furniture and seat placement from the corporate
+/// editor, validated by StoreFloorPlansService. `revision` guards concurrent
+/// saves: a save names the revision it started from.
+model StoreFloorPlan {
+  id              String   @id @default(uuid())
+  tenantId        String
+  storeId         String
+  layout          Json
+  revision        Int      @default(1)
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store  Store  @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([tenantId, storeId], map: "store_floor_plan_store_uidx")
 }
 
 model Category {

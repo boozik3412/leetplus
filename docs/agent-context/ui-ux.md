@@ -133,9 +133,9 @@ backfill, batch, BFF, JWT, Prisma/Postgres/Redis. Explain the effect
 instead («повтор не начислит дважды», «не удалось обработать»).
 
 `pnpm --filter web test:ui-copy` (`apps/web/src/lib/ui-copy-jargon.test.mts`)
-scans visible copy of `apps/web` screens and fails when a file gains a service
-word. Existing ones are counted in `ui-copy-jargon.baseline.json`; the count
-only goes down. After removing words, lower it with
+scans visible copy of `apps/web` screens and fails when a service word is
+added. Existing ones are counted in `ui-copy-jargon.baseline.json`; the total
+per word only goes down, and moving code between files does not change it. After removing words, lower it with
 `UPDATE_UI_COPY_BASELINE=1 pnpm --filter web test:ui-copy`. New terms go into
 both this table and `JARGON_TERMS` in the test.
 

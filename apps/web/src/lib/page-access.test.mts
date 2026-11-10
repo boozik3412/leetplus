@@ -42,7 +42,10 @@ const guardedPages = [
   ["(app)/commercial/demo/page.tsx", "/commercial/demo"],
   ["(app)/commercial/tariffs/page.tsx", "/commercial/tariffs"],
   ["(app)/dashboard/revenue-by-club/page.tsx", "/dashboard/revenue-by-club"],
-  ["(app)/dashboard/revenue-diagnostics/page.tsx", "/dashboard/revenue-diagnostics"],
+  [
+    "(app)/dashboard/revenue-diagnostics/page.tsx",
+    "/dashboard/revenue-diagnostics",
+  ],
   ["(app)/guests/crm/page.tsx", "/guests/crm"],
   ["(app)/guests/crm/tasks/page.tsx", "/guests/crm/tasks"],
   ["(app)/marketing/campaigns/[id]/page.tsx", "/marketing/campaigns"],
@@ -53,7 +56,10 @@ const guardedPages = [
   ["(app)/reports/daily/page.tsx", "/reports/daily"],
   ["(app)/reports/oos-exclusions/page.tsx", "/reports/oos-exclusions"],
   ["(app)/reports/page.tsx", "/reports"],
-  ["(app)/staff/administrator-ratings/page.tsx", "/staff/administrator-ratings"],
+  [
+    "(app)/staff/administrator-ratings/page.tsx",
+    "/staff/administrator-ratings",
+  ],
   ["(app)/staff/ai-assistant/page.tsx", "/staff/ai-assistant"],
   ["(app)/staff/assessments/page.tsx", "/staff/assessments"],
   ["(app)/staff/checklist-templates/page.tsx", "/staff/checklist-templates"],
@@ -67,9 +73,18 @@ const guardedPages = [
   ["(app)/staff/salary/page.tsx", "/staff/salary"],
   ["(app)/staff/shift-regulations/page.tsx", "/staff/shift-regulations"],
   ["(app)/staff/staff-control/admins/page.tsx", "/staff/staff-control/admins"],
-  ["(app)/staff/staff-control/diagnostics/page.tsx", "/staff/staff-control/diagnostics"],
-  ["(app)/staff/staff-control/operations/page.tsx", "/staff/staff-control/operations"],
-  ["(app)/staff/staff-control/operators/page.tsx", "/staff/staff-control/operators"],
+  [
+    "(app)/staff/staff-control/diagnostics/page.tsx",
+    "/staff/staff-control/diagnostics",
+  ],
+  [
+    "(app)/staff/staff-control/operations/page.tsx",
+    "/staff/staff-control/operations",
+  ],
+  [
+    "(app)/staff/staff-control/operators/page.tsx",
+    "/staff/staff-control/operators",
+  ],
   ["(app)/staff/staff-control/page.tsx", "/staff/staff-control"],
   ["(app)/staff/task-rules/page.tsx", "/staff/task-rules"],
   ["(app)/staff/task-templates/page.tsx", "/staff/task-templates"],
@@ -80,18 +95,27 @@ const guardedPages = [
   ["(app)/suppliers/page.tsx", "/suppliers"],
   ["(app)/utilities/page.tsx", "/utilities"],
   ["(app)/visualization/page.tsx", "/visualization"],
-  ["(app)/utilities/product-parsing/manual/page.tsx", "/utilities/product-parsing/manual"],
+  [
+    "(app)/utilities/product-parsing/manual/page.tsx",
+    "/utilities/product-parsing/manual",
+  ],
   ["guests/report/page.tsx", "/guests/report"],
   ["products/order/page.tsx", "/products/order"],
   ["products/stock-value/page.tsx", "/products/stock-value"],
   ["reports/abc/table/page.tsx", "/reports/abc/table"],
-  ["reports/assortment-matrix/table/page.tsx", "/reports/assortment-matrix/table"],
+  [
+    "reports/assortment-matrix/table/page.tsx",
+    "/reports/assortment-matrix/table",
+  ],
   ["reports/lfl/table/page.tsx", "/reports/lfl/table"],
   ["reports/new-products/table/page.tsx", "/reports/new-products/table"],
   ["reports/plan-fact/table/page.tsx", "/reports/plan-fact/table"],
   ["reports/recommendations/table/page.tsx", "/reports/recommendations/table"],
   ["reports/sales-detail/table/page.tsx", "/reports/sales-detail/table"],
-  ["reports/supplier-scorecard/table/page.tsx", "/reports/supplier-scorecard/table"],
+  [
+    "reports/supplier-scorecard/table/page.tsx",
+    "/reports/supplier-scorecard/table",
+  ],
 ] as const;
 
 test("every default role can open its own landing page", () => {
@@ -115,9 +139,18 @@ test("nested section pages follow their section rule", () => {
   assert.equal(canAccessPath(user({ role: "TRAINEE" }), manualParsing), false);
   assert.equal(canAccessPath(user({ role: "MARKETER" }), manualParsing), false);
   assert.equal(canAccessPath(user({ role: "BUYER" }), manualParsing), true);
-  assert.equal(canAccessPath(user({ role: "BUYER" }), "/utilities?tab=x"), true);
-  assert.equal(canAccessPath(user({ role: "TRAINEE" }), "/settings/langame"), false);
-  assert.equal(canAccessPath(user({ role: "OWNER" }), "/settings/langame"), true);
+  assert.equal(
+    canAccessPath(user({ role: "BUYER" }), "/utilities?tab=x"),
+    true,
+  );
+  assert.equal(
+    canAccessPath(user({ role: "TRAINEE" }), "/settings/langame"),
+    false,
+  );
+  assert.equal(
+    canAccessPath(user({ role: "OWNER" }), "/settings/langame"),
+    true,
+  );
 });
 
 test("a platform admin without tenant context is sent away from tenant pages", () => {
@@ -129,7 +162,10 @@ test("a platform admin without tenant context is sent away from tenant pages", (
 
 test("session-only pages run the page access guard before loading data", () => {
   for (const [file, route] of guardedPages) {
-    const source = readFileSync(new URL(`../app/${file}`, import.meta.url), "utf8");
+    const source = readFileSync(
+      new URL(`../app/${file}`, import.meta.url),
+      "utf8",
+    );
     const guardIndex = Math.max(
       source.indexOf(`requirePageAccess("${route}")`),
       source.indexOf(`, "${route}");`),
@@ -140,7 +176,9 @@ test("session-only pages run the page access guard before loading data", () => {
 
     const exportIndex = source.indexOf("export default");
     const body = source.slice(exportIndex);
-    const firstLoad = body.search(/await (?:Promise\.all|get[A-Z]|safeGet[A-Z])/u);
+    const firstLoad = body.search(
+      /await (?:Promise\.all|get[A-Z]|safeGet[A-Z])/u,
+    );
 
     if (firstLoad >= 0) {
       assert.ok(
@@ -151,13 +189,18 @@ test("session-only pages run the page access guard before loading data", () => {
   }
 });
 
-test("the club scheme follows the clubs section rule", () => {
+test("the club scheme opens wherever the clubs section does, and for standards managers", () => {
   for (const role of roles) {
     const subject = user({ role });
-    assert.equal(
-      canAccessPath(subject, "/visualization"),
-      canAccessPath(subject, "/stores"),
-      role,
-    );
+    if (canAccessPath(subject, "/stores")) {
+      assert.equal(canAccessPath(subject, "/visualization"), true, role);
+    }
   }
+  const standards = user({ role: "STANDARDS_MANAGER" });
+  assert.equal(canAccessPath(standards, "/visualization"), true);
+  assert.equal(canAccessPath(standards, "/stores"), false);
+  assert.equal(
+    canAccessPath(user({ role: "TRAINEE" }), "/visualization"),
+    false,
+  );
 });

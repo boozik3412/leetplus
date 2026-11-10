@@ -641,8 +641,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(349);
-    expect(allowed).toHaveLength(281);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(350);
+    expect(allowed).toHaveLength(282);
     expect(blocked).toHaveLength(68);
     expect(outbound).toHaveLength(22);
     expect(
@@ -702,6 +702,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       'GET /stores/:id/floor-plan',
       'GET /stores/:id/floor-plan/live',
       'GET /stores/closures',
+      'GET /stores/floor-plans',
       'GET /suppliers',
       'GET /utilities/product-parsing',
       'GET /utilities/product-parsing/manual',

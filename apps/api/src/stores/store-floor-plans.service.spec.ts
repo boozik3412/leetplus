@@ -27,7 +27,7 @@ describe('StoreFloorPlansService', () => {
     allowedStoreIds: [],
   };
   let prisma: {
-    store: { findFirst: jest.Mock };
+    store: { findFirst: jest.Mock; findMany: jest.Mock };
     storeFloorPlan: { create: jest.Mock; updateMany: jest.Mock };
   };
   let scope: { assertNetwork: jest.Mock; resolveRequestedStoreIds: jest.Mock };
@@ -41,6 +41,7 @@ describe('StoreFloorPlansService', () => {
           name: 'Холмогорова 17',
           floorPlan: null,
         }),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       storeFloorPlan: {
         create: jest.fn().mockResolvedValue({}),
@@ -54,6 +55,43 @@ describe('StoreFloorPlansService', () => {
         .mockResolvedValue({ tenantId: 'tenant-demo' }),
     };
     service = new StoreFloorPlansService(prisma as never, scope as never);
+  });
+
+  it('lists the active clubs of the scope with their saved hall', async () => {
+    scope.resolveRequestedStoreIds.mockResolvedValue({
+      tenantId: 'tenant-demo',
+      effectiveStoreIds: ['store-kh', 'store-p'],
+    });
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-kh',
+        name: 'APEKS',
+        address: 'Холмогорова 17б',
+        floorPlan: { layout },
+      },
+      { id: 'store-p', name: '1337', address: null, floorPlan: null },
+    ]);
+
+    await expect(service.listClubs(user)).resolves.toEqual({
+      clubs: [
+        {
+          id: 'store-kh',
+          name: 'APEKS',
+          address: 'Холмогорова 17б',
+          template: 'apex-holmogorova-17',
+        },
+        { id: 'store-p', name: '1337', address: null, template: null },
+      ],
+    });
+    expect(scope.resolveRequestedStoreIds).toHaveBeenCalledWith(user);
+    const [query] = prisma.store.findMany.mock.calls[0] as [
+      { where: Record<string, unknown> },
+    ];
+    expect(query.where).toEqual({
+      tenantId: 'tenant-demo',
+      isActive: true,
+      id: { in: ['store-kh', 'store-p'] },
+    });
   });
 
   it('reads the plan of a club inside the fresh store scope', async () => {

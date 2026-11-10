@@ -71,7 +71,7 @@ function takeNick() { if (!guestPool.length) guestPool = NICKS.slice(); return g
 function newGuest() { const nick = takeNick(); return { nick, ava: pick(AVA), lvl: 3 + Math.floor(rnd() * 38), xp: Math.floor(rnd() * 100), spent: 200 + Math.floor(rnd() * 1400), quest: Math.floor(rnd() * 100), shirt: pick(SHIRTS), hair: pick(HAIRS), skin: pick(SKINS) }; }
 
 /* ---------------- live club state (Langame through the LeetPlus API) ---------------- */
-const LIVE = { loaded: false, status: 'LOADING', at: null, guests: null, shift: null, revenue: null, warnings: [], failed: false };
+const LIVE = { loaded: false, status: 'LOADING', at: null, guests: null, shift: null, revenue: null, purchases: null, game: null, warnings: [], failed: false };
 function plural(n, one, few, many) { const a = n % 10, b = n % 100; return `${fmt.format(n)} ${a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many}`; }
 const pad2 = n => String(n).padStart(2, '0');
 const hhmm = d => pad2(d.getHours()) + ':' + pad2(d.getMinutes());
@@ -83,6 +83,58 @@ function shiftInfo() {
   const mins = st ? Math.max(0, Math.floor((Date.now() - st.getTime()) / 60000)) : null;
   const full = s.adminName || 'Администратор';
   return { full, short: shortName(full), start: st ? hhmm(st) : '—', dur: mins == null ? '' : `${Math.floor(mins / 60)} ч ${pad2(mins % 60)} мин` };
+}
+const GAME_KIND = { MISSION: ['Миссия', 'acc'], CASE: ['Кейс', 'warn'], PROMO: ['Акция', 'lilac'] };
+const ddmm = d => pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1);
+function gameCounts(g) {
+  const n = k => g.items.filter(i => i.kind === k).length;
+  return [[n('MISSION'), 'миссия', 'миссии', 'миссий'], [n('CASE'), 'кейс', 'кейса', 'кейсов'], [n('PROMO'), 'акция', 'акции', 'акций']].filter(x => x[0]).map(x => plural(...x)).join(', ');
+}
+const FOLD = { zones: false, game: false };
+try { Object.assign(FOLD, JSON.parse(localStorage.getItem('leetplus-floor-plan-fold') || '{}')); } catch (e) { }
+function toggleFold(id) { FOLD[id] = !FOLD[id]; try { localStorage.setItem('leetplus-floor-plan-fold', JSON.stringify(FOLD)); } catch (e) { } }
+const CHEVRON = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+function foldHead(id, title, summary) {
+  const open = !!FOLD[id];
+  return `<button class="fold" type="button" data-fold="${id}" aria-expanded="${open}"><span class="ft"><b>${title}</b><span class="fs">${summary}</span></span><span class="fc">${open ? 'Свернуть' : 'Развернуть'}${CHEVRON}</span></button>`;
+}
+function gameHtml() {
+  const g = LIVE.game, r = LIVE.revenue;
+  const when = r && r.period === 'TODAY' ? 'За сегодня' : 'За смену';
+  let summary, body;
+  if (!LIVE.loaded) { summary = 'загружаю…'; body = '<div class="note">Загружаю игровой модуль…</div>'; }
+  else if (!g) { summary = 'нет данных'; body = '<div class="note">Не удалось получить активности игрового модуля, попробую при следующем обновлении.</div>'; }
+  else {
+    const done = g.completed || {}, items = Array.isArray(g.items) ? g.items : [], season = g.season;
+    summary = `${when} выполнено: ${plural(done.missions || 0, 'миссия', 'миссии', 'миссий')}, ${plural(done.cases || 0, 'кейс', 'кейса', 'кейсов')}, ${plural(done.rewards || 0, 'награда', 'награды', 'наград')}`;
+    if (!items.length && !season) body = '<div class="note">Для этого клуба сейчас нет запущенных миссий, кейсов и акций.</div>';
+    else {
+      const shown = items.slice(0, 6);
+      const rows = shown.map(i => {
+        const k = GAME_KIND[i.kind] || ['Активность', 'off'];
+        const meta = [i.reward, i.xp ? `+${fmt.format(i.xp)} XP` : null, i.segment ? 'для сегмента' : null].filter(Boolean).map(esc).join(' · ');
+        const end = i.endsAt ? `до ${ddmm(new Date(i.endsAt))}` : 'бессрочно';
+        return `<div class="li"><span class="chip ${k[1]} gk">${k[0]}</span><span class="grow"><b title="${esc(i.title)}">${esc(i.title)}</b>${meta ? `<span>${meta}</span>` : ''}</span><span class="r num">${end}</span></div>`;
+      }).join('');
+      const seasonHtml = season ? `<div class="gseason"><span class="grow"><b>${esc(season.name)}</b><span>Сезон${season.levels ? ' · ' + plural(season.levels, 'уровень', 'уровня', 'уровней') : ''}</span></span><span class="r num">${season.endsAt ? 'до ' + ddmm(new Date(season.endsAt)) : 'бессрочно'}</span></div>` : '';
+      body = `<div class="gnow">Активно сейчас · ${esc(gameCounts({ items }) || 'только сезон')}</div>${seasonHtml}<div class="list games">${rows}</div>${items.length > shown.length ? `<div class="note">И ещё ${plural(items.length - shown.length, 'активность', 'активности', 'активностей')}, все в разделе «Игровой модуль».</div>` : ''}`;
+    }
+  }
+  return `<div class="sec fsec gamesec${FOLD.game ? ' open' : ''}">${foldHead('game', 'Игровой модуль', summary)}<div class="fbody">${body}</div></div>`;
+}
+function purchasesHtml() {
+  const list = LIVE.purchases, r = LIVE.revenue;
+  const when = r && r.period === 'TODAY' ? 'за сегодня' : 'за смену';
+  let body;
+  if (!LIVE.loaded) body = '<div class="note">Загружаю продажи…</div>';
+  else if (!Array.isArray(list)) body = '<div class="note">Langame не отдал продажи, попробую при следующем обновлении.</div>';
+  else if (!list.length) body = `<div class="note">${when === 'за смену' ? 'В этой смене' : 'Сегодня'} ещё ничего не продано.</div>`;
+  else body = `<div class="list buys">${list.map(p => {
+    const at = p.at ? hhmm(new Date(p.at)) : '—';
+    const qty = p.quantity && p.quantity !== 1 ? ` × ${fmt.format(p.quantity)}` : '';
+    return `<div class="li"><span class="t num">${at}</span><span class="grow"><b title="${esc(p.title)}">${esc(p.title)}${qty}</b>${p.category ? `<span>${esc(p.category)}</span>` : ''}</span><span class="r num">${rub(p.sum)}</span></div>`;
+  }).join('')}</div>`;
+  return `<div class="sec buysec"><h3>Последние покупки <span>${when}</span></h3>${body}</div>`;
 }
 /* ---------------- three setup ---------------- */
 const canvas = $('#gl');
@@ -682,6 +734,15 @@ const ease = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
 let view = { type: 'home' }; let sheetOpen = false;
 const panel = $('#panel'), pbody = $('#pbody');
 const isPhone = () => innerWidth <= 760;
+/* KPI cards wrap on the left; the overview card keeps the top-right corner on the same line. */
+const PANEL_W = 340, PANEL_COMPACT_W = 300;
+function layoutChrome() {
+  const st = document.getElementById('stage'), p = document.getElementById('panel');
+  if (!st || !p) return;
+  if (isPhone()) { st.style.removeProperty('--pw'); return; }
+  const pw = p.classList.contains('home') && matchMedia('(hover: hover)').matches ? PANEL_COMPACT_W : PANEL_W;
+  st.style.setProperty('--pw', pw + 'px');
+}
 
 function select(v, opts = {}) {
   view = v;
@@ -716,14 +777,15 @@ function renderKPIs() {
   const since = r && r.since ? hhmm(new Date(r.since)) : null;
   const k = [
     ['admin', 'Администратор смены', sh ? sh.short : (LIVE.loaded ? 'Смена не открыта' : '—'), sh ? `смена с ${sh.start} · ${sh.dur}` : (LIVE.loaded ? 'в Langame нет открытой смены' : 'загружаю'), ICON.badge, 'var(--accent-soft)', 'var(--accent)', true],
-    ['rev', today ? 'Выручка за сегодня' : 'Выручка за смену', rubOr(r && r.total), since ? `с ${since} · все оплаты в Langame` : 'все оплаты в Langame', ICON.rub, 'var(--good-soft)', 'var(--good)', true],
-    ['goods', 'Выручка: товары', rubOr(r && r.goods), r && r.goodsCount != null ? `${plural(r.goodsCount, 'товар', 'товара', 'товаров')} продано` : 'продажи на стойке', ICON.cup, 'var(--rose-soft)', 'var(--rose)', true],
+    ['rev', today ? 'Выручка за сегодня' : 'Выручка за смену', rubOr(r && r.total), since ? `с ${since}` : '', ICON.rub, 'var(--good-soft)', 'var(--good)', true],
+    ['goods', 'Выручка: товары', rubOr(r && r.goods), r && r.goodsCount != null ? plural(r.goodsCount, 'товар', 'товара', 'товаров') : '', ICON.cup, 'var(--rose-soft)', 'var(--rose)', true],
     ['pcs', 'ПК заняты', linked.length ? `${pcsBusy} / ${linked.length}` : '—', linked.length ? Math.round(pcsBusy / linked.length * 100) + '% загрузка' : 'нет данных о ПК', ICON.pc, 'var(--lilac-soft)', 'var(--lilac)', true],
-    ['guests', 'Гостей в клубе', LIVE.guests == null ? '—' : fmt.format(LIVE.guests), 'по открытым сеансам', ICON.users, 'var(--accent-soft)', 'var(--accent)', true]
+    ['guests', 'Гостей в клубе', LIVE.guests == null ? '—' : fmt.format(LIVE.guests), '', ICON.users, 'var(--accent-soft)', 'var(--accent)', true]
   ];
   $('#kpis').innerHTML = k.map(([id, l, v, sub, ic, bg, fg, mutedSub]) =>
-    `<div class="kpi${id === 'admin' && adminHL ? ' hl' : ''}" data-k="${id}"${id === 'admin' && sh ? ` title="${esc(sh.full)} · смена с ${sh.start}"` : ''}><div class="kic" style="background:${bg};color:${fg}">${ic}</div><div><small>${l}</small><b class="num ${prevK[id] !== undefined && prevK[id] !== v ? 'flash' : ''}">${esc(v)}</b><em class="${mutedSub ? 'muted' : ''}">${esc(sub)}</em></div></div>`).join('');
+    `<div class="kpi${id === 'admin' && adminHL ? ' hl' : ''}" data-k="${id}"${id === 'admin' && sh ? ` title="${esc(sh.full)} · смена с ${sh.start}"` : ''}><div class="kic" style="background:${bg};color:${fg}">${ic}</div><div><small>${l}</small><b class="num ${prevK[id] !== undefined && prevK[id] !== v ? 'flash' : ''}">${esc(v)}</b>${sub ? `<em class="${mutedSub ? 'muted' : ''}">${esc(sub)}</em>` : ''}</div></div>`).join('');
   k.forEach(([id, , v]) => prevK[id] = v);
+  layoutChrome();
 }
 
 /* ---------------- floating cards ---------------- */
@@ -828,6 +890,8 @@ function liveNote() {
   return `Статусы ПК, смена и выручка из Langame, обновление каждые 20 секунд${at ? ` · последнее в ${at}` : ''}.${LIVE.warnings.length ? ' ' + LIVE.warnings.map(esc).join(' ') : ''}`;
 }
 function renderPanel() {
+  panel.classList.toggle('home', view.type === 'home' && !editing);
+  layoutChrome();
   if (editing) { panel.classList.toggle('collapsed', isPhone() && !sheetOpen); renderEditor(); syncPills(); return; }
   panel.classList.toggle('collapsed', isPhone() && !sheetOpen);
   $('#grab').setAttribute('aria-label', sheetOpen ? 'Свернуть панель' : 'Развернуть панель');
@@ -836,12 +900,12 @@ function renderPanel() {
     const linked = linkedSeats(), pcs = seats.filter(s => s.state === 'busy').length, freeN = seats.filter(s => s.state === 'free').length, ending = seats.filter(s => seatState(s) === 'ending').length;
     h += `<div class="ph"><div><div class="eyebrow">Обзор клуба</div><h2>${esc(CLUB.name)}</h2><div class="sub">Планировка по схеме бронирования Langame · ${seats.length} мест на схеме</div></div><span class="chip ${LIVE.status === 'LIVE' ? 'good' : 'off'}">${LIVE.status === 'LIVE' ? 'Live' : 'Нет данных'}</span></div>
     <div class="statgrid"><div class="stat"><small>Загрузка</small><b class="num">${linked.length ? Math.round(pcs / linked.length * 100) + '%' : '—'}</b></div><div class="stat"><small>Свободно</small><b class="num">${linked.length ? freeN : '—'}</b></div><div class="stat"><small>Заканчивают</small><b class="num">${linked.length ? ending : '—'}</b></div></div>
-    <div class="sec"><h3>Зоны <span>нажмите, чтобы приблизить</span></h3>${Object.keys(ZONES).map(id => {
+    <div class="sec fsec zonesec${FOLD.zones ? ' open' : ''}">${foldHead('zones', 'Зоны и компьютеры', linked.length ? `${pcs} из ${linked.length} ПК заняты · ${plural(Object.keys(ZONES).length - 1, 'зона', 'зоны', 'зон')}` : 'нет данных Langame')}<div class="fbody"><div class="fhint">Нажмите на зону, чтобы приблизить</div>${Object.keys(ZONES).map(id => {
       const z = ZONES[id], ss = id === 'admin' ? [] : zoneSeats(id), ln = linkedSeats(ss).length, b = busyCount(id);
       const val = id === 'admin' ? rubOr(LIVE.revenue && LIVE.revenue.goods) : ln ? `${b} / ${ln}` : '—';
       const pct = id === 'admin' ? (shiftInfo() ? 100 : 0) : ln ? b / ln * 100 : 0;
       return `<button class="zrow" type="button" data-zone="${id}"><span class="dot" style="background:${z.color}"></span><b>${z.name} <span style="color:var(--muted);font-weight:600;font-size:11.5px">${z.range}</span></b><span class="v num">${val}</span><span class="bar"><i style="width:${pct}%;background:${z.color}"></i></span></button>`;
-    }).join('')}</div>`;
+    }).join('')}</div></div>${gameHtml()}${purchasesHtml()}`;
   } else if (view.type === 'zone') {
     const id = view.id, z = ZONES[id];
     h += `<button class="back" type="button" data-act="home">← Весь клуб</button>`;
@@ -857,7 +921,7 @@ function renderPanel() {
       const sh = shiftInfo(), r = LIVE.revenue;
       h += `<div class="ph"><div><div class="eyebrow">Админ</div><h2>Стойка и бар</h2><div class="sub">Смена, выручка и продажи товаров на стойке</div></div><span class="chip ${sh ? 'good' : 'off'}">${sh ? 'Смена открыта' : 'Смена не открыта'}</span></div>
       <div class="sec"><h3>Смена</h3><dl class="kv"><dt>Администратор</dt><dd>${sh ? esc(sh.full) : '—'}</dd><dt>Начало</dt><dd>${sh ? `${sh.start}, идёт ${sh.dur}` : '—'}</dd><dt>${r && r.period === 'TODAY' ? 'Выручка за сегодня' : 'Выручка за смену'}</dt><dd>${rubOr(r && r.total)}</dd><dt>Товары</dt><dd>${rubOr(r && r.goods)}${r && r.goodsCount != null ? ' · ' + plural(r.goodsCount, 'товар', 'товара', 'товаров') : ''}</dd></dl></div>
-      <div class="statgrid"><div class="stat"><small>Товары</small><b class="num">${rubOr(r && r.goods)}</b></div><div class="stat"><small>Гостей</small><b class="num">${LIVE.guests == null ? '—' : fmt.format(LIVE.guests)}</b></div><div class="stat"><small>ПК заняты</small><b class="num">${seats.filter(s => s.state === 'busy').length}</b></div></div>`;
+      <div class="statgrid"><div class="stat"><small>Товары</small><b class="num">${rubOr(r && r.goods)}</b></div><div class="stat"><small>Гостей</small><b class="num">${LIVE.guests == null ? '—' : fmt.format(LIVE.guests)}</b></div><div class="stat"><small>ПК заняты</small><b class="num">${seats.filter(s => s.state === 'busy').length}</b></div></div>${purchasesHtml()}`;
     }
   } else if (view.type === 'seat') {
     const s = seats.find(x => x.id === view.id), z = ZONES[s.zone], st = seatState(s);
@@ -872,6 +936,7 @@ function renderPanel() {
     }
     h += `<div class="sec"><h3>Конфиг</h3>${cfgHtml(z)}</div>`;
   }
+  if (view.type === 'home') h += `<div class="more">Наведите, чтобы раскрыть</div>`;
   h += `<div class="note">${liveNote()}</div>`;
   pbody.innerHTML = h;
   syncPills();
@@ -879,6 +944,7 @@ function renderPanel() {
 pbody.addEventListener('click', e => {
   const z = e.target.closest('[data-zone]'); if (z) return select({ type: 'zone', id: z.dataset.zone });
   const s = e.target.closest('[data-seat]'); if (s) return select({ type: 'seat', id: s.dataset.seat });
+  const f = e.target.closest('[data-fold]'); if (f) { toggleFold(f.dataset.fold); return renderPanel(); }
   const a = e.target.closest('[data-act]'); if (!a) return;
   if (a.dataset.act === 'home') return select({ type: 'home' });
 });
@@ -910,7 +976,7 @@ function setStatus(textValue, kind) {
 }
 function applyLive(data) {
   const before = new Map(seats.map(s => [s.id, s.state]));
-  LIVE.status = data.status; LIVE.at = data.generatedAt; LIVE.guests = data.guests; LIVE.shift = data.shift; LIVE.revenue = data.revenue; LIVE.warnings = Array.isArray(data.warnings) ? data.warnings : []; LIVE.failed = false;
+  LIVE.status = data.status; LIVE.at = data.generatedAt; LIVE.guests = data.guests; LIVE.shift = data.shift; LIVE.revenue = data.revenue; LIVE.purchases = Array.isArray(data.purchases) ? data.purchases : null; LIVE.game = data.game && typeof data.game === 'object' ? data.game : null; LIVE.warnings = Array.isArray(data.warnings) ? data.warnings : []; LIVE.failed = false;
   const byNum = new Map();
   for (const pc of Array.isArray(data.pcs) ? data.pcs : []) if (pc && pc.number != null && !byNum.has(pc.number)) byNum.set(pc.number, pc);
   for (const s of seats) {

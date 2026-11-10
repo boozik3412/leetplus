@@ -9,31 +9,28 @@ import {
   type ClubFloorPlanTemplate,
 } from "@/lib/club-floor-plan-templates";
 import { can } from "@/lib/permissions";
-import { getStores, type Store } from "@/lib/stores";
 
-type FloorPlanView = {
-  plan: { layout: { template?: string } } | null;
-};
+type Store = { id: string; name: string; address: string | null };
+type FloorPlanClub = Store & { template: string | null };
 
 const first = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
-// The saved hall decides the scene; a failed read falls back to the club name.
-async function savedTemplateOf(storeId: string, headers: HeadersInit) {
+// Active clubs of the viewer's scope with the hall saved for each. A failed
+// read shows the empty state rather than an error page.
+async function floorPlanClubs(): Promise<FloorPlanClub[]> {
   try {
     const response = await fetchWithTimeout(
-      `${getApiUrl()}/stores/${encodeURIComponent(storeId)}/floor-plan`,
-      { cache: "no-store", headers },
+      `${getApiUrl()}/stores/floor-plans`,
+      { cache: "no-store", headers: await getAuthHeaders() },
     );
     if (!response.ok) {
-      return null;
+      return [];
     }
-    const view = (await response.json()) as FloorPlanView;
-    return typeof view.plan?.layout?.template === "string"
-      ? view.plan.layout.template
-      : null;
+    const view = (await response.json()) as { clubs?: FloorPlanClub[] };
+    return Array.isArray(view.clubs) ? view.clubs : [];
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -45,15 +42,10 @@ export default async function VisualizationPage({
   const user = await requireCurrentUser();
   ensurePageAccess(user, "/visualization");
   const params = await searchParams;
-  const stores = (await getStores()).filter((store) => store.isActive);
-  const headers = await getAuthHeaders();
-  const saved = await Promise.all(
-    stores.map((store) => savedTemplateOf(store.id, headers)),
-  );
-  const clubs = stores.map((store, index) => ({
+  const clubs = (await floorPlanClubs()).map(({ template, ...store }) => ({
     store,
-    saved: saved[index],
-    template: clubFloorPlanTemplateFor(store, saved[index]),
+    saved: template,
+    template: clubFloorPlanTemplateFor(store, template),
   }));
   const requested = first(params.store);
   const selected =

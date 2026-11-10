@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { IntegrationProvider } from '@prisma/client';
+import { IntegrationProvider, Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { parseLangameDate } from '../integrations/langame-date';
 import { LangameClient } from '../integrations/langame.client';
@@ -35,6 +35,24 @@ export type StoreFloorPlanLivePurchase = {
   sum: number;
 };
 
+/** A game mechanic running for the club's guests right now. */
+export type StoreFloorPlanLiveGameItem = {
+  kind: 'MISSION' | 'CASE' | 'PROMO';
+  title: string;
+  reward: string | null;
+  xp: number | null;
+  endsAt: string | null;
+  /** Offered to one guest segment, not to every guest. */
+  segment: boolean;
+};
+
+export type StoreFloorPlanLiveGame = {
+  /** Rewards guests of this club got in the shift (or today). */
+  completed: { missions: number; cases: number; rewards: number };
+  season: { name: string; endsAt: string | null; levels: number | null } | null;
+  items: StoreFloorPlanLiveGameItem[];
+};
+
 export type StoreFloorPlanLiveView = {
   storeId: string;
   status: 'LIVE' | 'NOT_CONNECTED' | 'UNAVAILABLE';
@@ -58,6 +76,12 @@ export type StoreFloorPlanLiveView = {
    * `null` when Langame did not answer.
    */
   purchases: StoreFloorPlanLivePurchase[] | null;
+  /**
+   * What the LeetPlus game module runs for this club now: active missions,
+   * cases, promo cards and the season, without guests or their progress.
+   * `null` when it could not be read.
+   */
+  game: StoreFloorPlanLiveGame | null;
   warnings: string[];
 };
 
@@ -92,7 +116,19 @@ const SHIFT_PAGES = 3;
 const EXPENSE_PAGE_LIMIT = 500;
 const EXPENSE_PAGES = 10;
 const PURCHASES_SHOWN = 8;
+const GAME_ITEMS_SHOWN = 30;
+/** Rewards that really went to a guest (not cancelled or expired). */
+const COUNTED_REWARD_STATUSES = ['PENDING', 'APPROVED', 'PAID'];
+/** Cases a guest can get directly; templates are only handed out by missions. */
+const GUEST_CASE_USAGE = ['STANDALONE', 'BOTH'];
 const DAY_MS = 24 * 60 * 60_000;
+const GAME_WARNING = 'Не удалось получить активности игрового модуля.';
+
+/** An empty club list means the mechanic runs in every club. */
+function forStore(storeIds: Prisma.JsonValue | null, storeId: string) {
+  if (!Array.isArray(storeIds) || storeIds.length === 0) return true;
+  return storeIds.includes(storeId);
+}
 
 function text(value: unknown): string | null {
   if (typeof value === 'string') {
@@ -260,8 +296,25 @@ export class StoreFloorPlanLiveService {
       shift: null,
       revenue: null,
       purchases: null,
+      game: null,
       warnings: [warning],
     };
+  }
+
+  /** A club without Langame still shows what the game module runs there. */
+  private async withGame(
+    store: LiveStore,
+    now: Date,
+    view: StoreFloorPlanLiveView,
+  ): Promise<StoreFloorPlanLiveView> {
+    const game = await this.loadGame(
+      store,
+      localMidnight(now, store.timeZone),
+      now,
+    );
+    return game.ok
+      ? { ...view, game: game.value }
+      : { ...view, warnings: [...view.warnings, GAME_WARNING] };
   }
 
   private async buildSnapshot(
@@ -269,11 +322,15 @@ export class StoreFloorPlanLiveService {
     now: Date,
   ): Promise<StoreFloorPlanLiveView> {
     if (store.externalProvider !== IntegrationProvider.LANGAME) {
-      return this.empty(
+      return this.withGame(
         store,
         now,
-        'NOT_CONNECTED',
-        'Клуб не подключён к Langame, на схеме нет живых данных.',
+        this.empty(
+          store,
+          now,
+          'NOT_CONNECTED',
+          'Клуб не подключён к Langame, на схеме нет живых данных.',
+        ),
       );
     }
 
@@ -286,20 +343,28 @@ export class StoreFloorPlanLiveService {
       apiKey = access.apiKey;
       source = this.sourceForStore(store, access.sources);
     } catch {
-      return this.empty(
+      return this.withGame(
         store,
         now,
-        'NOT_CONNECTED',
-        'Подключение к Langame не настроено.',
+        this.empty(
+          store,
+          now,
+          'NOT_CONNECTED',
+          'Подключение к Langame не настроено.',
+        ),
       );
     }
 
     if (!source) {
-      return this.empty(
+      return this.withGame(
         store,
         now,
-        'NOT_CONNECTED',
-        'Для клуба не найден активный домен Langame.',
+        this.empty(
+          store,
+          now,
+          'NOT_CONNECTED',
+          'Для клуба не найден активный домен Langame.',
+        ),
       );
     }
 
@@ -374,17 +439,21 @@ export class StoreFloorPlanLiveService {
     );
 
     const since = openShift?.startedAt ?? localMidnight(now, store.timeZone);
-    const [adminName, revenueResult, goodsResult] = await Promise.all([
-      openShift ? this.adminName(store, source.domain, openShift.userId) : null,
-      this.loadRevenue(store, langame, since, now).then(
-        (value) => ({ ok: true as const, value }),
-        (error: unknown) => ({ ok: false as const, error }),
-      ),
-      this.loadGoods(store, langame, since, openShift?.id ?? null, now).then(
-        (value) => ({ ok: true as const, value }),
-        (error: unknown) => ({ ok: false as const, error }),
-      ),
-    ]);
+    const [adminName, revenueResult, goodsResult, gameResult] =
+      await Promise.all([
+        openShift
+          ? this.adminName(store, source.domain, openShift.userId)
+          : null,
+        this.loadRevenue(store, langame, since, now).then(
+          (value) => ({ ok: true as const, value }),
+          (error: unknown) => ({ ok: false as const, error }),
+        ),
+        this.loadGoods(store, langame, since, openShift?.id ?? null, now).then(
+          (value) => ({ ok: true as const, value }),
+          (error: unknown) => ({ ok: false as const, error }),
+        ),
+        this.loadGame(store, since, now),
+      ]);
 
     if (!revenueResult.ok) {
       this.logFailure('operations', {
@@ -400,6 +469,7 @@ export class StoreFloorPlanLiveService {
       });
       warnings.push('Не удалось получить продажи товаров из Langame.');
     }
+    if (!gameResult.ok) warnings.push(GAME_WARNING);
 
     const nothingRead = !catalog && !sessions && !revenueResult.ok;
 
@@ -423,6 +493,7 @@ export class StoreFloorPlanLiveService {
         goodsCount: goodsResult.ok ? goodsResult.value.count : null,
       },
       purchases: goodsResult.ok ? goodsResult.value.purchases : null,
+      game: gameResult.ok ? gameResult.value : null,
       warnings,
     };
   }
@@ -714,6 +785,155 @@ export class StoreFloorPlanLiveService {
   }
 
   /** Names of the sold goods from the club's assortment, by Langame id. */
+  /** Game mechanics of the club and what its guests got since `since`. */
+  private async loadGame(
+    store: LiveStore,
+    since: Date,
+    now: Date,
+  ): Promise<{ ok: true; value: StoreFloorPlanLiveGame } | { ok: false }> {
+    const tenantId = store.tenantId;
+    const running = {
+      AND: [
+        { OR: [{ periodFrom: null }, { periodFrom: { lte: now } }] },
+        { OR: [{ periodTo: null }, { periodTo: { gte: now } }] },
+      ],
+    };
+    const rewardsSince = (extra: Prisma.GuestGameRewardWhereInput) =>
+      this.prisma.guestGameReward.count({
+        where: {
+          tenantId,
+          storeId: store.id,
+          status: { in: COUNTED_REWARD_STATUSES },
+          qualifiedAt: { gte: since, lte: now },
+          ...extra,
+        },
+      });
+    try {
+      const [
+        missions,
+        cases,
+        seasons,
+        promos,
+        missionRewards,
+        caseRewards,
+        rewards,
+      ] = await Promise.all([
+        this.prisma.guestGameMission.findMany({
+          where: { tenantId, status: 'ACTIVE', ...running },
+          select: {
+            name: true,
+            rewardLabel: true,
+            xpReward: true,
+            periodTo: true,
+            storeIds: true,
+            audienceId: true,
+          },
+          orderBy: { updatedAt: 'desc' },
+        }),
+        this.prisma.guestGameLootBox.findMany({
+          where: {
+            tenantId,
+            status: 'ACTIVE',
+            usageKind: { in: GUEST_CASE_USAGE },
+          },
+          select: {
+            name: true,
+            rewardLabel: true,
+            storeIds: true,
+            audienceId: true,
+          },
+          orderBy: { updatedAt: 'desc' },
+        }),
+        this.prisma.guestGameSeason.findMany({
+          where: { tenantId, status: 'ACTIVE', ...running },
+          select: { name: true, periodTo: true, levels: true, storeIds: true },
+          orderBy: { updatedAt: 'desc' },
+        }),
+        this.prisma.guestGamePromoCard.findMany({
+          where: { tenantId, status: 'ACTIVE', ...running },
+          select: { title: true, label: true, periodTo: true, storeIds: true },
+          orderBy: [{ priority: 'desc' }, { updatedAt: 'desc' }],
+        }),
+        rewardsSince({ missionId: { not: null } }),
+        rewardsSince({ lootBoxId: { not: null } }),
+        rewardsSince({}),
+      ]);
+
+      const here = (storeIds: Prisma.JsonValue | null) =>
+        forStore(storeIds, store.id);
+      const items: StoreFloorPlanLiveGameItem[] = [
+        ...missions
+          .filter((mission) => here(mission.storeIds))
+          .map(
+            (mission): StoreFloorPlanLiveGameItem => ({
+              kind: 'MISSION',
+              title: mission.name,
+              reward: text(mission.rewardLabel),
+              xp: mission.xpReward > 0 ? mission.xpReward : null,
+              endsAt: mission.periodTo?.toISOString() ?? null,
+              segment: mission.audienceId !== null,
+            }),
+          ),
+        ...cases
+          .filter((lootBox) => here(lootBox.storeIds))
+          .map(
+            (lootBox): StoreFloorPlanLiveGameItem => ({
+              kind: 'CASE',
+              title: lootBox.name,
+              reward: text(lootBox.rewardLabel),
+              xp: null,
+              endsAt: null,
+              segment: lootBox.audienceId !== null,
+            }),
+          ),
+        ...promos
+          .filter((promo) => here(promo.storeIds))
+          .map(
+            (promo): StoreFloorPlanLiveGameItem => ({
+              kind: 'PROMO',
+              title: promo.title,
+              reward: text(promo.label),
+              xp: null,
+              endsAt: promo.periodTo?.toISOString() ?? null,
+              segment: false,
+            }),
+          ),
+      ];
+      const season =
+        seasons
+          .filter((entry) => here(entry.storeIds))
+          .sort(
+            (left, right) =>
+              (left.periodTo?.getTime() ?? Number.MAX_SAFE_INTEGER) -
+              (right.periodTo?.getTime() ?? Number.MAX_SAFE_INTEGER),
+          )[0] ?? null;
+
+      return {
+        ok: true,
+        value: {
+          completed: {
+            missions: missionRewards,
+            cases: caseRewards,
+            rewards,
+          },
+          season: season
+            ? {
+                name: season.name,
+                endsAt: season.periodTo?.toISOString() ?? null,
+                levels: Array.isArray(season.levels)
+                  ? season.levels.length
+                  : null,
+              }
+            : null,
+          items: items.slice(0, GAME_ITEMS_SHOWN),
+        },
+      };
+    } catch (error: unknown) {
+      this.logFailure('game module', { status: 'rejected', reason: error });
+      return { ok: false };
+    }
+  }
+
   private async productNames(
     store: LiveStore,
     domain: string,

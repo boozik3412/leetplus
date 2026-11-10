@@ -34,6 +34,11 @@ describe('StoreFloorPlanLiveService', () => {
     staffMember: { findFirst: jest.Mock };
     langameStaffUser: { findFirst: jest.Mock };
     product: { findMany: jest.Mock };
+    guestGameMission: { findMany: jest.Mock };
+    guestGameLootBox: { findMany: jest.Mock };
+    guestGameSeason: { findMany: jest.Mock };
+    guestGamePromoCard: { findMany: jest.Mock };
+    guestGameReward: { count: jest.Mock };
   };
   let scope: { resolveRequestedStoreIds: jest.Mock };
   let settings: { resolveTenantAccess: jest.Mock };
@@ -57,6 +62,71 @@ describe('StoreFloorPlanLiveService', () => {
             category: { name: 'Энергетики' },
           },
         ]),
+      },
+      guestGameMission: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            name: '7 дней в клубе',
+            rewardLabel: '2 часа в VIP',
+            xpReward: 300,
+            periodTo: new Date('2026-11-16T18:59:59.000Z'),
+            storeIds: [],
+            audienceId: null,
+          },
+          {
+            name: 'Только для другого клуба',
+            rewardLabel: null,
+            xpReward: 50,
+            periodTo: null,
+            storeIds: ['store-other'],
+            audienceId: null,
+          },
+          {
+            name: 'Возвращайся',
+            rewardLabel: ' ',
+            xpReward: 0,
+            periodTo: null,
+            storeIds: ['store-kh'],
+            audienceId: 'aud-1',
+          },
+        ]),
+      },
+      guestGameLootBox: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            name: 'Кейс «Минуты»',
+            rewardLabel: 'до 3 часов игры',
+            storeIds: null,
+            audienceId: null,
+          },
+        ]),
+      },
+      guestGameSeason: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            name: 'Осенний пропуск',
+            periodTo: new Date('2026-11-30T18:59:59.000Z'),
+            levels: [{}, {}, {}],
+            storeIds: [],
+          },
+        ]),
+      },
+      guestGamePromoCard: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            title: 'Ночной пакет −20%',
+            label: null,
+            periodTo: null,
+            storeIds: ['store-kh'],
+          },
+        ]),
+      },
+      guestGameReward: {
+        count: jest
+          .fn()
+          .mockImplementation(({ where }: { where: Record<string, unknown> }) =>
+            Promise.resolve(where.missionId ? 4 : where.lootBoxId ? 2 : 7),
+          ),
       },
     };
     scope = {
@@ -306,6 +376,81 @@ describe('StoreFloorPlanLiveService', () => {
     });
   });
 
+  it('lists the game mechanics running in the club now', async () => {
+    const view = await service.get('store-kh', user, NOW);
+
+    expect(view.game).toEqual({
+      completed: { missions: 4, cases: 2, rewards: 7 },
+      season: {
+        name: 'Осенний пропуск',
+        endsAt: '2026-11-30T18:59:59.000Z',
+        levels: 3,
+      },
+      items: [
+        {
+          kind: 'MISSION',
+          title: '7 дней в клубе',
+          reward: '2 часа в VIP',
+          xp: 300,
+          endsAt: '2026-11-16T18:59:59.000Z',
+          segment: false,
+        },
+        {
+          kind: 'MISSION',
+          title: 'Возвращайся',
+          reward: null,
+          xp: null,
+          endsAt: null,
+          segment: true,
+        },
+        {
+          kind: 'CASE',
+          title: 'Кейс «Минуты»',
+          reward: 'до 3 часов игры',
+          xp: null,
+          endsAt: null,
+          segment: false,
+        },
+        {
+          kind: 'PROMO',
+          title: 'Ночной пакет −20%',
+          reward: null,
+          xp: null,
+          endsAt: null,
+          segment: false,
+        },
+      ],
+    });
+    const [missionQuery] = prisma.guestGameMission.findMany.mock.calls[0] as [
+      { where: Record<string, unknown> },
+    ];
+    expect(missionQuery.where).toMatchObject({
+      tenantId: 'tenant-demo',
+      status: 'ACTIVE',
+    });
+    // Rewards are counted for this club since the shift start only.
+    const [rewardQuery] = prisma.guestGameReward.count.mock.calls[0] as [
+      { where: Record<string, unknown> },
+    ];
+    expect(rewardQuery.where).toMatchObject({
+      tenantId: 'tenant-demo',
+      storeId: 'store-kh',
+      status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+      qualifiedAt: { gte: new Date('2026-11-10T05:00:00.000Z'), lte: NOW },
+    });
+  });
+
+  it('keeps the club view when the game module cannot be read', async () => {
+    prisma.guestGameSeason.findMany.mockRejectedValue(new Error('db down'));
+    const view = await service.get('store-kh', user, NOW);
+
+    expect(view.status).toBe('LIVE');
+    expect(view.game).toBeNull();
+    expect(view.warnings).toEqual([
+      'Не удалось получить активности игрового модуля.',
+    ]);
+  });
+
   it('shares one Langame read between viewers inside the window', async () => {
     await service.get('store-kh', user, NOW);
     await service.get('store-kh', user, new Date(NOW.getTime() + 5_000));
@@ -357,6 +502,8 @@ describe('StoreFloorPlanLiveService', () => {
 
     expect(view.status).toBe('NOT_CONNECTED');
     expect(settings.resolveTenantAccess).not.toHaveBeenCalled();
+    // The game module does not need Langame.
+    expect(view.game?.items).toHaveLength(4);
   });
 
   it('counts today since club midnight when no shift is open', async () => {

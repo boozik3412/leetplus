@@ -68,10 +68,13 @@ export function LandingPage({ cabinetHref, gameHref, gameLabel }: LandingPagePro
 
       <section id="emotions" style={{ padding: "120px 24px 96px" }}>
       <div style={{ maxWidth: "1240px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "48px" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "space-between", gap: "24px" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: "16px", maxWidth: "760px" }}>
       <p style={{ margin: "0", fontSize: "13px", fontWeight: "800", letterSpacing: "3px", textTransform: "uppercase", color: "#D0AA6C" }}>Игровой модуль</p>
       <h2 style={{ margin: "0", fontFamily: "var(--lpl-display)", fontWeight: "700", fontSize: "clamp(30px, 4vw, 50px)", lineHeight: "1.1" }}>Гость возвращается не за скидкой. <span style={{ color: "#83E4EC" }}>За эмоцией.</span></h2>
       <p style={{ margin: "0", color: "#A9BEC4", fontSize: "19px" }}>Три чувства, которые знакомы каждому геймеру, теперь работают на ваш клуб.</p>
+      </div>
+      <Link href={gameHref} className="guest-cta" style={{ flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "10px", background: "linear-gradient(135deg, #F3D38E, #D0AA6C)", color: "#1A1306", fontWeight: "800", fontSize: "17px", padding: "16px 24px", borderRadius: "14px", minHeight: "52px", boxSizing: "border-box" }}><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"></path><path d="M7 6h10a5 5 0 0 1 4.9 6l-.6 3.2a3 3 0 0 1-5.3 1.3L14.5 15h-5L8 16.5a3 3 0 0 1-5.3-1.3L2.1 12A5 5 0 0 1 7 6z"></path></svg>Войти в игровой модуль<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></Link>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))", gap: "22px" }}>
       <article className="emo ph-thrill" style={{ position: "relative", overflow: "hidden", minHeight: "520px", borderRadius: "26px", border: "1px solid #1E313A", display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: "32px", gap: "12px" }}>

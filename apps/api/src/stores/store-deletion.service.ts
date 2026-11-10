@@ -58,6 +58,7 @@ export const STORE_REFERENCES: readonly StoreReference[] = [
   ref('StaffTaskRecurringRule', 'storeId', 'DELETE', 'задачи'),
   ref('StaffTaskTemplate', 'storeId', 'DELETE', 'задачи'),
   ref('StoreClosure', 'storeId', 'DELETE', 'дни закрытия'),
+  ref('StoreFloorPlan', 'storeId', 'DELETE', 'схема клуба'),
   ref('StockMovement', 'storeId', 'DELETE', 'движения товаров'),
   ref('InventorySnapshot', 'storeId', 'DELETE', 'остатки'),
   ref('SalesFact', 'storeId', 'DELETE', 'продажи'),

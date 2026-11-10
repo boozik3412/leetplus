@@ -101,7 +101,8 @@ language of the code (UX audit, 10.11.2026). Rules:
   «Начисления», «Проверка без начисления», not «ledger», «dry-run».
 - Service words (below) are allowed only in platform administration
   (`/administration`) and inside a collapsed «Диагностика» block that a normal
-  user never needs. Mark such lines with a `ui-copy-allow` comment.
+  user never needs. Mark such lines with a `ui-copy-allow` comment, or put it
+  in a comment right above a whole diagnostics component or label helper.
 - A status is a verdict plus the next action: «Данные за вчера ещё не
   пришли — обновим в 06:00» rather than «Typed snapshot еще не создан».
 - Keep one name per thing across menu, page title, buttons and empty states.

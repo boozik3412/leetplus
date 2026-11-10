@@ -83,9 +83,9 @@ export default async function GuestPage({ params }: { params: PageParams }) {
                 </InsightBadge>
                 <InsightBadge
                   tone={rfmTone(guest.rfm.segment)}
-                  title={`R${guest.rfm.recencyScore} F${guest.rfm.frequencyScore} M${guest.rfm.monetaryScore}`}
+                  title={`Давность ${guest.rfm.recencyScore} · частота ${guest.rfm.frequencyScore} · деньги ${guest.rfm.monetaryScore} (баллы из 5)`}
                 >
-                  RFM {guest.rfm.totalScore}/15 · {rfmSegmentLabels[guest.rfm.segment]}
+                  Ценность {guest.rfm.totalScore}/15 · {rfmSegmentLabels[guest.rfm.segment]}
                 </InsightBadge>
                 <InsightBadge tone={churnTone(guest.churnRisk.level)} title={guest.churnRisk.reason}>
                   Риск оттока: {churnRiskLabels[guest.churnRisk.level]} ({guest.churnRisk.score})

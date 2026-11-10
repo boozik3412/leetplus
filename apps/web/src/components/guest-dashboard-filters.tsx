@@ -414,12 +414,12 @@ export function GuestDashboardFilters({
         </SelectField>
 
         <SelectField
-          label="RFM"
+          label="Ценность гостя"
           name="rfm"
           defaultValue={filters.rfm ?? ""}
           onChange={(value) => applyFilters({ rfm: value })}
         >
-          <option value="">Все RFM</option>
+          <option value="">Любая ценность</option>
           {(
             [
               "CHAMPION",

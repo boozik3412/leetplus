@@ -41,9 +41,6 @@
   "app/(app)/staff/staff-control/page.tsx": {
     "endpoint": 2
   },
-  "app/(app)/sync/page.tsx": {
-    "api": 1
-  },
   "app/game/app/telegram-mini-app-client.tsx": {
     "lootbox": 2
   },
@@ -79,9 +76,6 @@
   },
   "components/branding-settings-form.tsx": {
     "api": 1
-  },
-  "components/business-snapshot-gate.tsx": {
-    "snapshot": 8
   },
   "components/catalog-actions.tsx": {
     "api": 1
@@ -164,16 +158,6 @@
   "components/langame-settings-form.tsx": {
     "api": 7,
     "tenant": 1
-  },
-  "components/langame-sync-panel.tsx": {
-    "anti-fraud": 4,
-    "api": 5,
-    "dry-run": 1,
-    "endpoint": 38,
-    "lootbox": 4,
-    "payload": 2,
-    "promo-scenario": 1,
-    "snapshot": 20
   },
   "components/leetplus-category-directory.tsx": {
     "api": 4

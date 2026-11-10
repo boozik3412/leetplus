@@ -267,7 +267,16 @@ export function visibleStrings(
     return false;
   };
 
+  // A top-level declaration (a diagnostics panel component, its label helper)
+  // whose leading comment carries the marker is skipped as a whole.
+  const allowedDeclaration = (node: ts.Node) =>
+    (ts.isFunctionDeclaration(node) || ts.isVariableStatement(node)) &&
+    (ts.getLeadingCommentRanges(source, node.getFullStart()) ?? []).some(
+      (range) => source.slice(range.pos, range.end).includes(ALLOW_MARKER),
+    );
+
   const visit = (node: ts.Node) => {
+    if (allowedDeclaration(node)) return;
     if (ts.isJsxText(node)) {
       push(node, node.text);
     } else if (
@@ -345,6 +354,10 @@ test("the scanner reads visible copy and ignores code", () => {
     "      <p>Тапы по клубо-дням и капитализм API-ключа</p>",
     "    </section>",
     "  );",
+    "}",
+    "// ui-copy-allow: support diagnostics",
+    "function Diagnostics() {",
+    "  return <p>Endpoint snapshot</p>;",
     "}",
   ].join("\n");
   const hits = jargonHits(source).map((hit) => `${hit.line}:${hit.term}`);

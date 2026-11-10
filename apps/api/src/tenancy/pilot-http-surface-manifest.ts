@@ -1,4 +1,7 @@
-import type { AccessCapability } from '../auth/capabilities';
+import {
+  isClubSchemeReadPath,
+  type AccessCapability,
+} from '../auth/capabilities';
 
 /**
  * Gate 1MT inventory for the first external tenant.
@@ -244,7 +247,7 @@ const definitions: readonly ControllerDefinition[] = [
     module: 'ASSORTMENT',
     profile: 'STORES_VERIFIED',
     routes: [
-      ['GET', [':id/floor-plan', ':id/floor-plan/live']],
+      ['GET', ['floor-plans', ':id/floor-plan', ':id/floor-plan/live']],
       ['PATCH', [':id/floor-plan']],
     ],
     overrides: {
@@ -1143,6 +1146,9 @@ function resolveCapability(
     }
     if (path.startsWith('/categories') || path.startsWith('/suppliers')) {
       return method === 'GET' ? 'view_assortment_catalog' : 'edit_catalog';
+    }
+    if (method === 'GET' && isClubSchemeReadPath(path)) {
+      return 'view_club_scheme';
     }
     if (path.startsWith('/stores')) {
       return method === 'GET' ? 'view_assortment_stores' : 'edit_stores';

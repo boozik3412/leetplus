@@ -27,6 +27,15 @@ export type StoreFloorPlanView = {
   } | null;
 };
 
+/** A club the viewer may open on «Схема клуба», with its saved hall. */
+export type StoreFloorPlanClub = {
+  id: string;
+  name: string;
+  address: string | null;
+  /** Template of the saved plan; `null` until someone saves it. */
+  template: string | null;
+};
+
 export type SaveStoreFloorPlanDto = {
   layout?: unknown;
   revision?: unknown;
@@ -59,6 +68,44 @@ export class StoreFloorPlansService {
     private readonly prisma: PrismaService,
     private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
+
+  /** Active clubs in the viewer's fresh scope, for the club picker. */
+  async listClubs(
+    user: AuthenticatedUser,
+  ): Promise<{ clubs: StoreFloorPlanClub[] }> {
+    const { tenantId, effectiveStoreIds } =
+      await this.freshStoreScopeService.resolveRequestedStoreIds(user);
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId,
+        isActive: true,
+        ...(effectiveStoreIds ? { id: { in: [...effectiveStoreIds] } } : {}),
+      },
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        floorPlan: { select: { layout: true } },
+      },
+    });
+
+    return {
+      clubs: stores.map((store) => {
+        const layout = store.floorPlan?.layout;
+        const template =
+          isPlainObject(layout) && typeof layout.template === 'string'
+            ? layout.template
+            : null;
+        return {
+          id: store.id,
+          name: store.name,
+          address: store.address,
+          template,
+        };
+      }),
+    };
+  }
 
   async get(
     storeId: string,

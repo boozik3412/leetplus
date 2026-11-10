@@ -137,6 +137,68 @@ describe('RolesGuard', () => {
     ).toBe(true);
   });
 
+  it('opens the club scheme to a standards manager without the clubs section', () => {
+    reflector.getAllAndOverride.mockReturnValue(Object.values(UserRole));
+    const permissions = resolveUserCapabilities({
+      role: UserRole.STANDARDS_MANAGER,
+    });
+    const request = (method: string, path: string) =>
+      createContext({
+        method,
+        path,
+        user: { role: UserRole.STANDARDS_MANAGER, permissions },
+      });
+
+    expect(permissions).toContain('view_club_scheme');
+    expect(guard.canActivate(request('GET', '/stores/floor-plans'))).toBe(true);
+    expect(guard.canActivate(request('GET', '/stores/s1/floor-plan'))).toBe(
+      true,
+    );
+    expect(
+      guard.canActivate(request('GET', '/stores/s1/floor-plan/live')),
+    ).toBe(true);
+    expect(() => guard.canActivate(request('GET', '/stores'))).toThrow(
+      ForbiddenException,
+    );
+    expect(() =>
+      guard.canActivate(request('PATCH', '/stores/s1/floor-plan')),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('keeps the club scheme for a role override that only sees clubs', () => {
+    reflector.getAllAndOverride.mockReturnValue(Object.values(UserRole));
+    const permissions = resolveUserCapabilities({
+      role: UserRole.MANAGER,
+      roleOverride: { permissions: ['view_assortment_stores'] },
+    });
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/stores/s1/floor-plan/live',
+          user: {
+            role: UserRole.MANAGER,
+            hasRoleOverride: true,
+            permissions,
+          },
+        }),
+      ),
+    ).toBe(true);
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/stores/s1/floor-plan',
+          user: {
+            role: UserRole.TRAINEE,
+            permissions: resolveUserCapabilities({ role: UserRole.TRAINEE }),
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
   it('keeps trainee access outside the assortment boundary', () => {
     reflector.getAllAndOverride.mockReturnValue(Object.values(UserRole));
     const permissions = resolveUserCapabilities({ role: UserRole.TRAINEE });
@@ -350,10 +412,7 @@ describe('RolesGuard', () => {
   );
 
   it.each([
-    [
-      '/integrations/langame/sync',
-      ['run_sync', 'import_data'],
-    ],
+    ['/integrations/langame/sync', ['run_sync', 'import_data']],
     [
       '/integrations/langame/guests/foundation/sync',
       ['run_sync', 'import_guest_foundation'],
@@ -617,25 +676,22 @@ describe('RolesGuard', () => {
     'view_staff_training',
     'view_staff_knowledge',
     'approve_guest_game_rewards',
-  ])(
-    'allows %s through the staff attachment guard boundary',
-    (permission) => {
-      reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+  ])('allows %s through the staff attachment guard boundary', (permission) => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
 
-      expect(
-        guard.canActivate(
-          createContext({
-            method: 'GET',
-            path: '/staff/attachments/attachment-1',
-            user: {
-              role: UserRole.MARKETER,
-              permissions: [permission],
-            },
-          }),
-        ),
-      ).toBe(true);
-    },
-  );
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/attachments/attachment-1',
+          user: {
+            role: UserRole.MARKETER,
+            permissions: [permission],
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
 
   it('does not turn task-only attachment admission into team-chat route access', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
@@ -1256,11 +1312,7 @@ describe('RolesGuard', () => {
   });
 
   it('keeps bonus-ledger writes behind both the endpoint role and ledger capability', () => {
-    const endpointRoles = [
-      UserRole.OWNER,
-      UserRole.ADMIN,
-      UserRole.MANAGER,
-    ];
+    const endpointRoles = [UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER];
     reflector.getAllAndOverride.mockReturnValue(endpointRoles);
     reflector.get.mockReturnValue(endpointRoles);
 

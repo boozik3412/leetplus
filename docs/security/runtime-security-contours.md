@@ -1907,11 +1907,16 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
 
 ### Схема клуба (10.11.2026)
 
-- Corporate tenant contour. `GET /stores/:id/floor-plan` и
+- Corporate tenant contour. `GET /stores/floor-plans` (активные клубы
+  свежего scope и сохранённый зал каждого), `GET /stores/:id/floor-plan` и
   `GET /stores/:id/floor-plan/live` (`StoreFloorPlansController`, JWT +
-  `RolesGuard` → `view_assortment_stores`, manifest `STORES_VERIFIED`) читают
+  `RolesGuard` → `view_club_scheme`, manifest `STORES_VERIFIED`) читают
   клуб только внутри свежего store scope (`resolveRequestedStoreIds`), чужой
-  клуб — 404. `PATCH /stores/:id/floor-plan` — `OWNER/ADMIN/MANAGER`,
+  клуб — 404. Capability `view_club_scheme` («Схема клуба», 10.11.2026)
+  есть у `STANDARDS_MANAGER` по умолчанию; её также дают `view_reports`,
+  `view_assortment_stores` и `edit_stores`, поэтому прежние роли и role
+  overrides доступ не теряют. Она не открывает `GET /stores` и другие
+  маршруты клубов. `PATCH /stores/:id/floor-plan` — `OWNER/ADMIN/MANAGER`,
   `edit_stores`, `FreshStoreScopeService.assertNetwork` (manifest
   `NETWORK_VERIFIED`).
 - Таблица `StoreFloorPlan` (одна строка на клуб, `ON DELETE CASCADE` вместе с
@@ -1926,9 +1931,10 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   10 минут), поэтому частота запросов к Langame не растёт с числом зрителей;
   отказ Langame не кэшируется. Записи в Langame, новых доменов egress, worker
   или scheduler нет. В ответ и логи не попадают ключ, ответы Langame и
-  идентификаторы гостей: только номера ПК, занятость, имя администратора смены
-  и суммы.
-- Web: страница `/visualization`, раздел меню «Визуализация» (`canAccessPath` как у раздела `/stores`) и BFF
+  идентификаторы гостей: только номера ПК, занятость, имя администратора смены,
+  суммы и последние продажи товаров (время, название и категория товара из
+  ассортимента сети, количество, сумма; без гостя и чека).
+- Web: страница `/visualization`, раздел меню «Визуализация» (`canAccessPath` → `view_club_scheme`) и BFF
   `/api/stores/:id/floor-plan*` через `proxyJsonRequest` (cookie → JWT,
   `private, no-store`). Сама 3D-сцена — статические файлы
   `public/club-scheme/<template>/` и vendored three.js без данных; данные она

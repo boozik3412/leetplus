@@ -23,6 +23,13 @@ export class StoreFloorPlansController {
 
   @Roles(...TENANT_USER_ROLES)
   @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get('floor-plans')
+  listClubs(@CurrentUser() user: AuthenticatedUser) {
+    return this.storeFloorPlansService.listClubs(user);
+  }
+
+  @Roles(...TENANT_USER_ROLES)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get(':id/floor-plan')
   getFloorPlan(
     @Param('id') id: string,

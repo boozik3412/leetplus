@@ -33,6 +33,7 @@ describe('StoreFloorPlanLiveService', () => {
     store: { findFirst: jest.Mock };
     staffMember: { findFirst: jest.Mock };
     langameStaffUser: { findFirst: jest.Mock };
+    product: { findMany: jest.Mock };
   };
   let scope: { resolveRequestedStoreIds: jest.Mock };
   let settings: { resolveTenantAccess: jest.Mock };
@@ -48,6 +49,15 @@ describe('StoreFloorPlanLiveService', () => {
           .mockResolvedValue({ displayName: 'Иванова Мария Сергеевна' }),
       },
       langameStaffUser: { findFirst: jest.fn().mockResolvedValue(null) },
+      product: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            name: 'Red Bull 0,25',
+            externalProductId: '5',
+            category: { name: 'Энергетики' },
+          },
+        ]),
+      },
     };
     scope = {
       resolveRequestedStoreIds: jest
@@ -181,6 +191,27 @@ describe('StoreFloorPlanLiveService', () => {
           cancel: 0,
         },
         {
+          id: 4,
+          date: '2026-11-10 12:40:00',
+          list_goods_id: 7,
+          list_clubs_id: 2,
+          working_shift_id: 900,
+          price_sale: 150,
+          count: 1,
+          cancel: 0,
+        },
+        // other club, same shift window
+        {
+          id: 5,
+          date: '2026-11-10 12:50:00',
+          list_goods_id: 5,
+          list_clubs_id: 1,
+          working_shift_id: 901,
+          price_sale: 120,
+          count: 1,
+          cancel: 0,
+        },
+        {
           id: 2,
           date: '2026-11-10 11:10:00',
           list_goods_id: 6,
@@ -236,8 +267,33 @@ describe('StoreFloorPlanLiveService', () => {
       period: 'SHIFT',
       since: '2026-11-10T05:00:00.000Z',
       total: 450.5,
-      goods: 240,
-      goodsCount: 2,
+      goods: 390,
+      goodsCount: 3,
+    });
+    // Newest first; a product missing from the assortment keeps its id.
+    expect(view.purchases).toEqual([
+      {
+        at: '2026-11-10T07:40:00.000Z',
+        title: 'Товар №7',
+        category: null,
+        quantity: 1,
+        sum: 150,
+      },
+      {
+        at: '2026-11-10T06:00:00.000Z',
+        title: 'Red Bull 0,25',
+        category: 'Энергетики',
+        quantity: 2,
+        sum: 240,
+      },
+    ]);
+    const [productQuery] = prisma.product.findMany.mock.calls[0] as [
+      { where: Record<string, unknown> },
+    ];
+    expect(productQuery.where).toMatchObject({
+      tenantId: 'tenant-demo',
+      externalDomain: '46.langamepro.ru',
+      externalProductId: { in: ['7', '5'] },
     });
     expect(view.warnings).toEqual([]);
     const [staffQuery] = prisma.staffMember.findFirst.mock.calls[0] as [
@@ -267,8 +323,29 @@ describe('StoreFloorPlanLiveService', () => {
 
     expect(view.status).toBe('LIVE');
     expect(view.revenue?.total).toBeNull();
-    expect(view.revenue?.goods).toBe(240);
+    expect(view.revenue?.goods).toBe(390);
     expect(view.warnings).toEqual(['Не удалось получить выручку из Langame.']);
+  });
+
+  it('shows the purchases even when the assortment cannot be read', async () => {
+    prisma.product.findMany.mockRejectedValue(new Error('db down'));
+    const view = await service.get('store-kh', user, NOW);
+
+    expect(view.purchases?.map((purchase) => purchase.title)).toEqual([
+      'Товар №7',
+      'Товар №5',
+    ]);
+    expect(view.warnings).toEqual([]);
+  });
+
+  it('has no purchases list when Langame sales fail', async () => {
+    client.listProductExpenses.mockRejectedValue(new Error('timeout'));
+    const view = await service.get('store-kh', user, NOW);
+
+    expect(view.purchases).toBeNull();
+    expect(view.warnings).toEqual([
+      'Не удалось получить продажи товаров из Langame.',
+    ]);
   });
 
   it('reports a club without Langame without calling it', async () => {

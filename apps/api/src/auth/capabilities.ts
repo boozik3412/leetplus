@@ -47,6 +47,12 @@ export const accessCapabilityCatalog = [
     description: 'Просмотр клубов, привязок и сетевого контура.',
   },
   {
+    key: 'view_club_scheme',
+    label: 'Схема клуба',
+    description:
+      'Раздел «Визуализация»: 3D-схема своих клубов с загрузкой ПК, сменой, выручкой и покупками из Langame. Без доступа к настройкам клубов.',
+  },
+  {
     key: 'view_guests',
     label: 'Гости и CRM',
     description:
@@ -405,6 +411,8 @@ const requestedCapabilityAlternatives: Partial<
   view_assortment_products: ['edit_products'],
   view_assortment_catalog: ['edit_catalog'],
   view_assortment_stores: ['edit_stores'],
+  // Whoever sees the clubs of the network also sees their floor plan.
+  view_club_scheme: ['view_reports', 'view_assortment_stores', 'edit_stores'],
   view_guests: guestActionCapabilities,
   view_marketing: ['manage_marketing'],
   view_communications: ['manage_communications'],
@@ -587,6 +595,7 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_communications',
     'manage_communications',
     'manage_users',
+    'view_club_scheme',
     ...standardsManagerStaffCapabilities,
   ],
   [UserRole.SENIOR_ADMINISTRATOR]: [
@@ -731,6 +740,14 @@ function capabilityMatches(
   }
 
   return false;
+}
+
+/** «Схема клуба» reads: the club list and one club's plan and live state. */
+export function isClubSchemeReadPath(path: string) {
+  return (
+    path === '/stores/floor-plans' ||
+    /^\/stores\/[^/]+\/floor-plan(?:\/live)?$/.test(path)
+  );
 }
 
 export function hasCapability(

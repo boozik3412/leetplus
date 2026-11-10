@@ -26,6 +26,15 @@ export type StoreFloorPlanLivePc = {
   busyUntil: string | null;
 };
 
+/** One line of a sale of goods or services at the club bar. */
+export type StoreFloorPlanLivePurchase = {
+  at: string | null;
+  title: string;
+  category: string | null;
+  quantity: number;
+  sum: number;
+};
+
 export type StoreFloorPlanLiveView = {
   storeId: string;
   status: 'LIVE' | 'NOT_CONNECTED' | 'UNAVAILABLE';
@@ -43,6 +52,12 @@ export type StoreFloorPlanLiveView = {
     goods: number | null;
     goodsCount: number | null;
   } | null;
+  /**
+   * Latest goods and services sold in the shift (or today), newest first.
+   * Game time is not here: Langame sells it through sessions, not goods.
+   * `null` when Langame did not answer.
+   */
+  purchases: StoreFloorPlanLivePurchase[] | null;
   warnings: string[];
 };
 
@@ -76,6 +91,7 @@ const SHIFT_PAGE_LIMIT = 50;
 const SHIFT_PAGES = 3;
 const EXPENSE_PAGE_LIMIT = 500;
 const EXPENSE_PAGES = 10;
+const PURCHASES_SHOWN = 8;
 const DAY_MS = 24 * 60 * 60_000;
 
 function text(value: unknown): string | null {
@@ -243,6 +259,7 @@ export class StoreFloorPlanLiveService {
       guests: null,
       shift: null,
       revenue: null,
+      purchases: null,
       warnings: [warning],
     };
   }
@@ -405,6 +422,7 @@ export class StoreFloorPlanLiveService {
         goods: goodsResult.ok ? goodsResult.value.total : null,
         goodsCount: goodsResult.ok ? goodsResult.value.count : null,
       },
+      purchases: goodsResult.ok ? goodsResult.value.purchases : null,
       warnings,
     };
   }
@@ -665,7 +683,76 @@ export class StoreFloorPlanLiveService {
       rows.push(...pageRows);
       if (pageRows.length < EXPENSE_PAGE_LIMIT) break;
     }
-    return this.goodsSince(store, rows, since, shiftId);
+    const goods = this.goodsSince(store, rows, since, shiftId);
+    const names = await this.productNames(
+      store,
+      langame.source.domain,
+      goods.latest,
+    );
+    return {
+      total: goods.total,
+      count: goods.count,
+      purchases: goods.latest.map((row) => {
+        const id = text(row.list_goods_id);
+        const known = id ? names.get(id) : undefined;
+        const quantity = amount(row.count);
+        return {
+          at:
+            parseLangameDate(text(row.date), store.timeZone)?.toISOString() ??
+            null,
+          title:
+            text(row.name) ??
+            text(row.goods_name) ??
+            known?.name ??
+            (id ? `Товар №${id}` : 'Товар'),
+          category: known?.category ?? null,
+          quantity: Math.round(quantity * 1000) / 1000,
+          sum: round2(amount(row.price_sale) * quantity),
+        };
+      }),
+    };
+  }
+
+  /** Names of the sold goods from the club's assortment, by Langame id. */
+  private async productNames(
+    store: LiveStore,
+    domain: string,
+    rows: readonly LangameProductExpense[],
+  ) {
+    const ids = [
+      ...new Set(
+        rows
+          .map((row) => text(row.list_goods_id))
+          .filter((id): id is string => id !== null),
+      ),
+    ];
+    const names = new Map<string, { name: string; category: string | null }>();
+    if (ids.length === 0) return names;
+    try {
+      const products = await this.prisma.product.findMany({
+        where: {
+          tenantId: store.tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          externalProductId: { in: ids },
+        },
+        select: {
+          name: true,
+          externalProductId: true,
+          category: { select: { name: true } },
+        },
+      });
+      for (const product of products) {
+        if (!product.externalProductId) continue;
+        names.set(product.externalProductId, {
+          name: product.name,
+          category: product.category?.name ?? null,
+        });
+      }
+    } catch (error: unknown) {
+      this.logFailure('product names', { status: 'rejected', reason: error });
+    }
+    return names;
   }
 
   /** Goods sold in the club since `since` (or in the open shift). */
@@ -677,6 +764,7 @@ export class StoreFloorPlanLiveService {
   ) {
     let total = 0;
     let count = 0;
+    const sold: Array<{ row: LangameProductExpense; at: number }> = [];
     for (const row of rows) {
       if (truthy(row.cancel)) continue;
       const clubId = text(row.list_clubs_id);
@@ -691,7 +779,19 @@ export class StoreFloorPlanLiveService {
       const quantity = amount(row.count);
       total += amount(row.price_sale) * quantity;
       count += quantity;
+      sold.push({
+        row,
+        at: parseLangameDate(text(row.date), store.timeZone)?.getTime() ?? 0,
+      });
     }
-    return { total: round2(total), count: Math.round(count) };
+    sold.sort(
+      (left, right) =>
+        right.at - left.at || amount(right.row.id) - amount(left.row.id),
+    );
+    return {
+      total: round2(total),
+      count: Math.round(count),
+      latest: sold.slice(0, PURCHASES_SHOWN).map((entry) => entry.row),
+    };
   }
 }

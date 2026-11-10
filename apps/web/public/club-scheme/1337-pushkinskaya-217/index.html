@@ -224,6 +224,26 @@ body.editing #gl.pointer{cursor:move}
 .demo.warn{color:var(--warn)}
 .feed .empty{font-size:12px;color:var(--muted);padding:2px 0}
 .chip.off{background:var(--surface-2);color:var(--muted)}
+.buys .t{flex:none;width:38px;color:var(--muted);font-weight:700;font-size:11.5px}
+#stage{--pw:340px}
+.kpis{max-width:calc(100% - 32px - var(--pw) - 12px);flex-wrap:wrap;overflow:visible;padding-bottom:0}
+.tools{top:auto;right:auto;left:50%;bottom:max(16px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);flex-direction:row}
+.panel .more{display:none}
+@media (max-width:760px){.kpis{max-width:calc(100% - 32px);flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}}
+@media (min-width:761px) and (hover:hover){
+.panel{transition:width .22s ease,box-shadow .22s ease}
+.panel.home:not(:hover):not(:focus-within){bottom:auto;width:300px;max-height:calc(100% - 28px)}
+.panel.home:not(:hover):not(:focus-within) .pbody{padding:14px 14px 12px;gap:12px}
+.panel.home:not(:hover):not(:focus-within) .ph .eyebrow,.panel.home:not(:hover):not(:focus-within) .ph .sub,.panel.home:not(:hover):not(:focus-within) .sec h3,.panel.home:not(:hover):not(:focus-within) .zrow .bar,.panel.home:not(:hover):not(:focus-within) .zrow b span,.panel.home:not(:hover):not(:focus-within) .buysec,.panel.home:not(:hover):not(:focus-within) .note{display:none}
+.panel.home:not(:hover):not(:focus-within) .ph h2{font-size:16px;margin:0}
+.panel.home:not(:hover):not(:focus-within) .stat{padding:7px 9px}
+.panel.home:not(:hover):not(:focus-within) .stat b{font-size:15px}
+.panel.home:not(:hover):not(:focus-within) .stat small{font-size:10px}
+.panel.home:not(:hover):not(:focus-within) .sec{gap:0}
+.panel.home:not(:hover):not(:focus-within) .zrow{padding:5px 9px}
+.panel.home:not(:hover):not(:focus-within) .more{display:block;font-size:11px;color:var(--muted);text-align:center;border-top:1px solid var(--line);padding-top:9px}
+.panel.home:hover,.panel.home:focus-within{box-shadow:0 18px 50px rgba(0,0,0,.18)}
+}
 </style>
 
 </head>

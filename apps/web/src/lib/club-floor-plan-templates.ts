@@ -15,6 +15,11 @@ export const CLUB_FLOOR_PLAN_TEMPLATES: readonly ClubFloorPlanTemplate[] = [
     title: "Apex · Холмогорова 17б",
     matches: /холмогоров/iu,
   },
+  {
+    id: "1337-pushkinskaya-217",
+    title: "1337 · Пушкинская 217",
+    matches: /пушкинск/iu,
+  },
 ];
 
 export function clubFloorPlanTemplateById(id: string | null | undefined) {

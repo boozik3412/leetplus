@@ -1,4 +1,4 @@
-/* LeetPlus «Схема клуба»: 3D-сцена зала Apex · Холмогорова 17 (шаблон apex-holmogorova-17).
+/* LeetPlus «Схема клуба»: 3D-сцена зала Apex · Холмогорова 17б (шаблон apex-holmogorova-17).
    Данные: GET/PATCH /api/stores/:id/floor-plan и GET /api/stores/:id/floor-plan/live. */
 (() => {
 'use strict';
@@ -19,6 +19,8 @@ if (Q.get('theme') === 'dark' || Q.get('theme') === 'light') document.documentEl
 })();
 const API = STORE_ID ? `/api/stores/${encodeURIComponent(STORE_ID)}/floor-plan` : null;
 const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const cfgOf = (z, k) => { const r = (z.cfg || []).find(c => c[0] === k); return r ? r[1] : '—'; };
+const clubInitials = name => { const w = String(name).replace(/[^\p{L}\p{N} ]+/gu, ' ').trim().split(/\s+/).filter(Boolean); return (w.length > 1 ? w[0][0] + w[1][0] : (w[0] || '··').slice(0, 2)).toUpperCase(); };
 const rnd = (() => { let a = 1337; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();
 const pick = arr => arr[Math.floor(rnd() * arr.length)];
 const fmt = new Intl.NumberFormat('ru-RU');
@@ -50,7 +52,7 @@ const X0 = -18.35, X_END = CYBER[1][1] + 1.76, HALL_C = (X0 + X_END) / 2, HALL_W
 const PLOT_C = HALL_C + 0.15, PLOT_W = HALL_W + 10.6;
 
 const ZONES = {
-  standart: { name: 'Standart', range: 'ПК 1–36', color: '#4FB8C0', c3: 0x7FD3D8, anchor: [-6.6, 2.3, 0], off: [-60, -190], cam: { t: [-6.6, 0, 0.2], d: 34 },
+  standart: { name: 'Standart', range: 'ПК 1–36', total: 36, note: 'ПК 1–3 и 19–21 на схеме нет.', color: '#4FB8C0', c3: 0x7FD3D8, anchor: [-6.6, 2.3, 0], off: [-60, -190], cam: { t: [-6.6, 0, 0.2], d: 34 },
     cfg: [['Процессор', 'i5 12400'], ['Видеокарта', 'RTX 4060 / 2060 SUPER'], ['Память', 'DDR 16 ГБ'], ['Монитор', 'Acer / Asus 240 Гц'], ['Девайсы', 'Razer DA v3, HyperX Cloud 2, DP Arena KD1']] },
   duo: { name: 'Duo', range: 'ПК 38–39', color: '#E8955E', c3: 0xF7B48A, anchor: [8.05, 2.1, -2.3], off: [-70, -170], cam: { t: [8.05, 0, -1.4], d: 13 },
     cfg: [['Процессор', 'i5 12400'], ['Видеокарта', 'RTX 4060'], ['Память', 'DDR 32 ГБ'], ['Монитор', 'Alienware 240 Гц'], ['Девайсы', 'Logitech Superlight, HyperX Cloud 2, DP KD87A']] },
@@ -450,6 +452,7 @@ const merchMat = new THREE.MeshBasicMaterial({ map: ctex(512, 96, (ctx, w, h, d)
   ctx.fillStyle = d ? '#0F2227' : '#FFFFFF'; rr(ctx, 0, 0, w, h, 16); ctx.fill();
   drawLogo(ctx, 26, 6, 0.85, d ? '#83E4EC' : '#007681', d ? '#F4FBFC' : '#0B191D');
 }), transparent: true });
+const tvMat = new THREE.MeshBasicMaterial({ map: gameScreen('LeetPlus', ['#2BB3BE', '#0E3A40'], true) });
 const STAFF = { shirt: 0x007681, hair: 0x1d1d22, skin: 0xd39e7c };
 const hitMat = new THREE.MeshBasicMaterial({ visible: false });
 function staffAt(g, x, z) { const p = makePerson(STAFF, false); p.position.set(x, 0, z); p.userData.isStaff = true; mesh(p, cyl(0.36, 0.36, 1.9, 10), hitMat, 0, 0.95, 0, false); g.add(p); g.userData.staff = p; }
@@ -549,10 +552,29 @@ const CATALOG = {
     }
   } },
   merch: { fam: 'storage', name: 'Шкафчик для мерча и продуктов', icon: '<rect x="6" y="2" width="20" height="26" rx="2"/><path d="M6 9h20M6 16h20M6 22h20M11 5h10"/>', build: g => glassCase(g, 0.9, 1.9, 0.46, { top: 0.2, base: 0.1, rows: ['pack', 'mug', 'tee', 'cap'], mat: M.cabinet, inMat: M.wallTop, sign: merchMat }) },
+  merchSlim: { fam: 'storage', name: 'Узкий шкаф для мерча', icon: '<rect x="10" y="2" width="12" height="26" rx="2"/><path d="M10 9h12M10 16h12M10 22h12"/>', build: g => glassCase(g, 0.5, 1.9, 0.42, { top: 0.12, base: 0.1, rows: ['pack', 'mug', 'cap', 'tee'], mat: M.cabinet, inMat: M.wallTop }) },
+  coatRack: { fam: 'storage', name: 'Напольная вешалка', len: [0.8, 2.0, 1.2], icon: '<path d="M4 6h24M6 6v20M26 6v20M3 26h6M23 26h6M11 6v14M16 6v16M21 6v14"/>', build: (g, it) => {
+    const L = it.len || 1.2;
+    for (const x of [-L / 2, L / 2]) { C(g, 0.018, 0.018, 1.6, M.steel, x, 0.04, 0, 8); B(g, 0.06, 0.04, 0.5, M.steel, x, 0, 0, 0.01); }
+    const bar = mesh(g, cyl(0.016, 0.016, L, 8), M.steel, 0, 1.62, 0); bar.rotation.z = Math.PI / 2;
+    const n = Math.max(2, Math.floor((L - 0.2) / 0.2));
+    for (let i = 0; i < n; i++) { const x = -L / 2 + 0.15 + (L - 0.3) * i / (n - 1); B(g, 0.05, 0.7 - (i % 3) * 0.08, 0.38, GOODS[(i * 3) % GOODS.length], x, 0.88 + (i % 3) * 0.08, 0, 0.03); }
+  } },
+  foodBar: { fam: 'bar', name: 'Барная стойка для еды', len: [0.8, 3.0, 1.3], icon: '<rect x="2" y="9" width="28" height="5" rx="1.5"/><path d="M6 14v13M26 14v13M6 22h20"/>', build: (g, it) => {
+    const L = it.len || 1.3;
+    B(g, L, 0.05, 0.45, M.wood, 0, 1.03, 0, 0.015);
+    for (const x of [-L / 2 + 0.06, L / 2 - 0.06]) B(g, 0.05, 1.03, 0.4, M.steel, x, 0, -0.02, 0.01);
+    const foot = mesh(g, cyl(0.015, 0.015, L - 0.1, 8), M.steel, 0, 0.28, 0.16); foot.rotation.z = Math.PI / 2;
+    B(g, L - 0.12, 0.02, 0.02, LED.busy, 0, 1.0, 0.21, 0.005).castShadow = false;
+  } },
+  tv: { fam: 'other', name: 'Телевизор на стене', icon: '<rect x="3" y="6" width="26" height="16" rx="2"/><path d="M12 26h8"/>', build: g => {
+    B(g, 1.25, 0.74, 0.05, M.dark, 0, 1.0, 0, 0.02);
+    plane(g, 1.17, 0.66, tvMat, 0, 1.37, 0.027).userData.unmirror = true;
+  } },
   table: { fam: 'other', name: 'Журнальный столик', icon: '<rect x="7" y="10" width="18" height="12" rx="2"/>', build: g => { B(g, 0.9, 0.06, 0.55, M.wood, 0, 0.38, 0, 0.02); for (const [x, z] of [[-0.38, -0.2], [0.38, -0.2], [-0.38, 0.2], [0.38, 0.2]]) B(g, 0.05, 0.38, 0.05, M.woodDark, x, 0, z, 0.01); } },
   plant: { fam: 'other', name: 'Растение', icon: '<circle cx="16" cy="16" r="9"/><path d="M16 9v14M10 14l6 3 6-4"/>', build: g => { C(g, 0.22, 0.17, 0.42, M.pot, 0, 0, 0, 14); mesh(g, sph(0.36, 12, 9), M.leaf2, 0, 0.75, 0); mesh(g, sph(0.26, 12, 9), M.leaf, 0.14, 1.02, 0.05); } }
 };
-const FAMILY = { sofa: ['sofa2', 'sofa3', 'sofaL', 'armchair', 'beanbag'], reception: ['recStraight', 'recL', 'recRound'], bar: ['barShelf', 'fridge', 'fridgeBar', 'stool'], storage: ['lockers', 'merch'], other: ['table', 'plant'] };
+const FAMILY = { sofa: ['sofa2', 'sofa3', 'sofaL', 'armchair', 'beanbag'], reception: ['recStraight', 'recL', 'recRound'], bar: ['barShelf', 'fridge', 'fridgeBar', 'foodBar', 'stool'], storage: ['lockers', 'merch', 'merchSlim', 'coatRack'], other: ['table', 'plant', 'tv'] };
 const FAMILY_TITLE = { sofa: 'диваны', reception: 'ресепшен', bar: 'бар и холодильники', storage: 'шкафы', other: 'другое' };
 const REC_X = 2.95, WALL_IN = ADMIN_WALL - 0.05, RY_W = -Math.PI / 2;   // reception line; items on the wall behind admin face the hall (-x)
 const DEFAULT_ITEMS = [
@@ -717,7 +739,7 @@ function cardContent(id) {
   const z = ZONES[id];
   if (id === 'admin') { const sh = shiftInfo(); return ['Админ · смена', sh ? sh.short : 'смена не открыта', `товары ${rubOr(LIVE.revenue && LIVE.revenue.goods)}`]; }
   const ss = zoneSeats(id), b = busyCount(id), end = ss.filter(s => seatState(s) === 'ending').length, ln = linkedSeats(ss).length;
-  const sub = id === 'standart' ? `${end} заканчивают · ${z.cfg[1][1]}` : `${z.cfg[1][1]} · ${z.cfg[3][1].replace(/^.* (\d)/, '$1')}`;
+  const sub = id === 'standart' ? `${end} заканчивают · ${cfgOf(z, 'Видеокарта')}` : `${cfgOf(z, 'Видеокарта')} · ${cfgOf(z, 'Монитор').replace(/^.* (\d)/, '$1')}`;
   return [`${z.name} · ${z.range}`, ln ? `${b} / ${ln} заняты` : 'нет данных', sub];
 }
 function renderCards() {
@@ -825,11 +847,11 @@ function renderPanel() {
     h += `<button class="back" type="button" data-act="home">← Весь клуб</button>`;
     if (id !== 'admin') {
       const ss = zoneSeats(id); const c = st => ss.filter(s => seatState(s) === st).length;
-      h += `<div class="ph"><div><div class="eyebrow">Зона</div><h2>${z.name}</h2><div class="sub">${z.range}${ss.length !== (id === 'standart' ? 36 : ss.length) ? ` · на схеме ${ss.length} мест` : ''}</div></div><span class="chip acc">${ss.filter(s => s.state === 'busy').length} / ${linkedSeats(ss).length || ss.length}</span></div>
+      h += `<div class="ph"><div><div class="eyebrow">Зона</div><h2>${z.name}</h2><div class="sub">${z.range}${z.total && ss.length !== z.total ? ` · на схеме ${ss.length} мест` : ''}</div></div><span class="chip acc">${ss.filter(s => s.state === 'busy').length} / ${linkedSeats(ss).length || ss.length}</span></div>
       <div class="statgrid"><div class="stat"><small>Свободно</small><b class="num">${c('free')}</b></div><div class="stat"><small>Заканчивают</small><b class="num">${c('ending')}</b></div><div class="stat"><small>Играют</small><b class="num">${c('busy') + c('ending')}</b></div></div>
       <div class="sec"><h3>Места</h3><div class="seats">${ss.map(s => { const st = seatState(s); return `<button class="seat" type="button" data-seat="${s.id}" style="--sc:${COL[st]}"><b>${s.id}</b><span>${STC[st][0]}</span><span class="num">${s.state === 'busy' && s.left != null ? 'ещё ' + hm(s.left) : '&nbsp;'}</span></button>`; }).join('')}</div>
       <div class="legend"><span><i style="background:var(--accent)"></i>играет</span><span><i style="background:var(--warn)"></i>меньше 15 мин</span><span><i style="background:var(--good)"></i>свободен</span><span><i style="background:var(--muted)"></i>нет в Langame</span></div>
-      ${id === 'standart' ? '<div class="note">ПК 1–3 и 19–21 на схеме нет.</div>' : ''}</div>
+      ${z.note ? `<div class="note">${esc(z.note)}</div>` : ''}</div>
       <div class="sec"><h3>Конфиг</h3>${cfgHtml(z)}</div>`;
     } else {
       const sh = shiftInfo(), r = LIVE.revenue;
@@ -840,7 +862,7 @@ function renderPanel() {
   } else if (view.type === 'seat') {
     const s = seats.find(x => x.id === view.id), z = ZONES[s.zone], st = seatState(s);
     h += `<button class="back" type="button" data-zone="${s.zone}">← ${z.name}</button>
-    <div class="ph"><div><div class="eyebrow">${z.name}</div><h2>${s.id}</h2><div class="sub">${z.cfg[1][1]} · ${z.cfg[3][1]}</div></div><span class="chip ${STC[st][1]}">${STC[st][0]}</span></div>`;
+    <div class="ph"><div><div class="eyebrow">${z.name}</div><h2>${s.id}</h2><div class="sub">${cfgOf(z, 'Видеокарта')} · ${cfgOf(z, 'Монитор')}</div></div><span class="chip ${STC[st][1]}">${STC[st][0]}</span></div>`;
     if (s.state === 'busy') {
       h += `<dl class="kv"><dt>Статус</dt><dd>идёт сеанс</dd><dt>Осталось</dt><dd class="num" style="color:${st === 'ending' ? 'var(--warn)' : 'inherit'}">${s.left == null ? 'без конца в Langame' : hm(s.left)}</dd>${s.until ? `<dt>До</dt><dd class="num">${hhmm(new Date(s.until))}</dd>` : ''}</dl>`;
     } else if (s.state === 'free') {
@@ -1053,7 +1075,7 @@ async function loadPlan() {
     const r = await fetch(API, { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
-    CLUB.name = data.storeName || CLUB.name; $('#clubName').textContent = CLUB.name; document.title = 'Схема клуба · ' + CLUB.name;
+    CLUB.name = data.storeName || CLUB.name; $('#clubName').textContent = CLUB.name; $('#clubIc').textContent = clubInitials(CLUB.name); document.title = 'Схема клуба · ' + CLUB.name;
     const plan = data.plan && data.plan.layout && data.plan.layout.template === TEMPLATE ? data.plan : null;
     store.revision = data.plan ? data.plan.revision : 0;
     savedLayout = plan ? plan.layout : null;

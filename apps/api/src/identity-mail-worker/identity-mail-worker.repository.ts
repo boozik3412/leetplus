@@ -14,8 +14,7 @@ import type {
   ReapIdentityMailDeliveryInput,
 } from './identity-mail-worker.types';
 
-const CURRENT_MIGRATION =
-  '20261110090000_store_floor_plan' as const;
+const CURRENT_MIGRATION = '20261110090000_store_floor_plan' as const;
 const CURRENT_MIGRATION_COUNT = 198 as const;
 const PRETERMINAL_MIGRATION_MANIFEST_DIGESTS = new Set<string>([
   // Canonical clean install.

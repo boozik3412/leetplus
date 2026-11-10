@@ -5,36 +5,45 @@
 export type ClubFloorPlanTemplate = {
   id: string;
   title: string;
-  /** Recognises the club before its plan was ever saved. */
+  /** Recognises the club by its name or address before a plan is saved. */
   matches: RegExp;
 };
 
 export const CLUB_FLOOR_PLAN_TEMPLATES: readonly ClubFloorPlanTemplate[] = [
   {
     id: "apex-holmogorova-17",
-    title: "Apex · Холмогорова 17",
-    matches: /холмогорова\D{0,4}17(?!\d)/iu,
+    title: "Apex · Холмогорова 17б",
+    matches: /холмогоров/iu,
   },
 ];
 
+export function clubFloorPlanTemplateById(id: string | null | undefined) {
+  return id
+    ? (CLUB_FLOOR_PLAN_TEMPLATES.find((template) => template.id === id) ?? null)
+    : null;
+}
+
+/**
+ * The hall of a club: the saved plan wins, then a hall the editor picked on
+ * the page, then a hall recognised by the club name or address.
+ */
 export function clubFloorPlanTemplateFor(
   store: { name: string; address?: string | null },
   savedTemplate?: string | null,
+  chosenTemplate?: string | null,
 ): ClubFloorPlanTemplate | null {
   if (savedTemplate) {
-    return (
-      CLUB_FLOOR_PLAN_TEMPLATES.find(
-        (template) => template.id === savedTemplate,
-      ) ?? null
-    );
+    return clubFloorPlanTemplateById(savedTemplate);
   }
 
   return (
+    clubFloorPlanTemplateById(chosenTemplate) ??
     CLUB_FLOOR_PLAN_TEMPLATES.find(
       (template) =>
         template.matches.test(store.name) ||
         Boolean(store.address && template.matches.test(store.address)),
-    ) ?? null
+    ) ??
+    null
   );
 }
 

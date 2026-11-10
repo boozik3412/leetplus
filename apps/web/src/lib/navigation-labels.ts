@@ -21,7 +21,7 @@ const ROUTE_LABELS: ReadonlyArray<readonly [prefix: string, label: string]> = [
   ["/marketing", "Открываем маркетинг…"],
   ["/categories", "Открываем категории…"],
   ["/suppliers", "Открываем поставщиков…"],
-  ["/stores/floor-plan", "Открываем схему клуба…"],
+  ["/visualization", "Открываем схему клуба…"],
   ["/stores", "Открываем клубы…"],
   ["/users", "Открываем пользователей…"],
   ["/settings", "Открываем настройки…"],

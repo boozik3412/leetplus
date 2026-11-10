@@ -977,7 +977,7 @@ export function canAccessPath(user: AuthUser | null, href: string) {
     return can(user, "view_assortment_catalog") || can(user, "edit_catalog");
   }
 
-  if (href.startsWith("/stores")) {
+  if (href.startsWith("/stores") || isPathOrChild(href, "/visualization")) {
     return can(user, "view_assortment_stores") || can(user, "edit_stores");
   }
 

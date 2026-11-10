@@ -12,13 +12,25 @@ test("finds the hall of a club by its name or address", () => {
   );
   assert.equal(
     clubFloorPlanTemplateFor({
-      name: "Apex",
-      address: "Пермь, ул. Холмогорова, 17",
+      name: "APEKS",
+      address: "Пермь, ул. Холмогорова, д. 17Б",
     })?.id,
     "apex-holmogorova-17",
   );
-  assert.equal(clubFloorPlanTemplateFor({ name: "Холмогорова 171" }), null);
+  assert.equal(clubFloorPlanTemplateFor({ name: "APEKS" }), null);
   assert.equal(clubFloorPlanTemplateFor({ name: "Ленина 5" }), null);
+});
+
+test("an editor can open a known hall for any club", () => {
+  assert.equal(
+    clubFloorPlanTemplateFor({ name: "APEKS" }, null, "apex-holmogorova-17")
+      ?.id,
+    "apex-holmogorova-17",
+  );
+  assert.equal(
+    clubFloorPlanTemplateFor({ name: "APEKS" }, null, "../other"),
+    null,
+  );
 });
 
 test("a saved plan keeps its own hall", () => {

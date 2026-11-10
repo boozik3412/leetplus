@@ -17,6 +17,19 @@ test("finds the hall of a club by its name or address", () => {
     })?.id,
     "apex-holmogorova-17",
   );
+  assert.equal(
+    clubFloorPlanTemplateFor({ name: "1337 Пушкинская" })?.id,
+    "1337-pushkinskaya-217",
+  );
+  assert.equal(
+    clubFloorPlanTemplateFor({ name: "1337", address: "ул. Пушкина, 217" }),
+    null,
+  );
+  assert.equal(
+    clubFloorPlanTemplateFor({ name: "1337", address: "Пушкинская ул., 217" })
+      ?.id,
+    "1337-pushkinskaya-217",
+  );
   assert.equal(clubFloorPlanTemplateFor({ name: "APEKS" }), null);
   assert.equal(clubFloorPlanTemplateFor({ name: "Ленина 5" }), null);
 });

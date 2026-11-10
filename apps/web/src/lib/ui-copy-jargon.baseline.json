@@ -1,0 +1,250 @@
+{
+  "app/(app)/commercial/demo/page.tsx": {
+    "api": 1
+  },
+  "app/(app)/commercial/tariffs/page.tsx": {
+    "api": 1
+  },
+  "app/(app)/dashboard/revenue-diagnostics/page.tsx": {
+    "endpoint": 1
+  },
+  "app/(app)/gamification/page.tsx": {
+    "api": 22,
+    "canary": 2,
+    "cron": 1,
+    "dispatch": 3,
+    "dry-run": 5,
+    "endpoint": 2,
+    "guest-game-hub": 1,
+    "ledger": 5,
+    "payload": 1
+  },
+  "app/(app)/guests/[id]/page.tsx": {
+    "api": 1
+  },
+  "app/(app)/marketing/missions/page.tsx": {
+    "promo-scenario": 1
+  },
+  "app/(app)/marketing/page.tsx": {
+    "api": 1,
+    "promo-scenario": 1
+  },
+  "app/(app)/reports/page.tsx": {
+    "tenant": 1
+  },
+  "app/(app)/settings/page.tsx": {
+    "api": 1
+  },
+  "app/(app)/staff/staff-control/diagnostics/page.tsx": {
+    "endpoint": 1
+  },
+  "app/(app)/staff/staff-control/page.tsx": {
+    "endpoint": 2
+  },
+  "app/(app)/sync/page.tsx": {
+    "api": 1
+  },
+  "app/game/app/telegram-mini-app-client.tsx": {
+    "lootbox": 2
+  },
+  "app/game/clubs/game-club-select-client.tsx": {
+    "lootbox": 1
+  },
+  "app/play/game/_game/battle-pass/modals.tsx": {
+    "lootbox": 2
+  },
+  "app/play/game/_game/lootbox/home-loot-boxes.tsx": {
+    "lootbox": 6
+  },
+  "app/play/game/_game/lootbox/opening-overlay.tsx": {
+    "lootbox": 3
+  },
+  "app/play/game/_game/rewards/journal-panel.tsx": {
+    "lootbox": 1
+  },
+  "app/play/game/_game/rewards/wallet-inbox-panel.tsx": {
+    "lootbox": 2
+  },
+  "app/play/game/game-summary-client.tsx": {
+    "lootbox": 5
+  },
+  "app/play/play-registration-client.tsx": {
+    "guest-game-hub": 1,
+    "ledger": 1,
+    "lootbox": 1,
+    "snapshot": 1
+  },
+  "components/auth-form.tsx": {
+    "api": 2
+  },
+  "components/branding-settings-form.tsx": {
+    "api": 1
+  },
+  "components/business-snapshot-gate.tsx": {
+    "snapshot": 8
+  },
+  "components/catalog-actions.tsx": {
+    "api": 1
+  },
+  "components/category-triage-table.tsx": {
+    "api": 1
+  },
+  "components/dashboard-revenue-panel.tsx": {
+    "snapshot": 1
+  },
+  "components/executive-dashboard.tsx": {
+    "club-days": 2
+  },
+  "components/executive-drivers.tsx": {
+    "club-days": 1
+  },
+  "components/fact-csv-import.tsx": {
+    "api": 1
+  },
+  "components/gamification-log-panel.tsx": {
+    "canary": 1,
+    "cron": 1,
+    "dry-run": 2,
+    "ledger": 1,
+    "payload": 1,
+    "tenant": 1
+  },
+  "components/guest-dashboard-panels.tsx": {
+    "api": 1
+  },
+  "components/guest-game-card.tsx": {
+    "guest-game-hub": 2,
+    "ledger": 1
+  },
+  "components/guest-gamification-overview.tsx": {
+    "guest-game-hub": 1,
+    "ledger": 1
+  },
+  "components/guest-gamification-panel.tsx": {
+    "anti-fraud": 1,
+    "api": 3,
+    "batch": 7,
+    "canary": 3,
+    "dead-letter": 2,
+    "dispatch": 14,
+    "dry-run": 9,
+    "endpoint": 2,
+    "guest-game-hub": 1,
+    "idempotency": 3,
+    "lease": 1,
+    "ledger": 30,
+    "lootbox": 53,
+    "materializer": 2,
+    "payload": 3,
+    "promo-scenario": 1,
+    "retry": 6,
+    "snapshot": 22
+  },
+  "components/guest-gamification-statistics-tab.tsx": {
+    "ledger": 1,
+    "lootbox": 1
+  },
+  "components/guest-gamification-visual-editor.tsx": {
+    "lootbox": 18
+  },
+  "components/guest-gamification/shared/rule-fields.tsx": {
+    "lootbox": 1,
+    "snapshot": 1
+  },
+  "components/guest-gamification/tabs/profiles-tab.tsx": {
+    "payload": 2
+  },
+  "components/guest-mission-wizard.tsx": {
+    "ledger": 1,
+    "lootbox": 7
+  },
+  "components/langame-category-import.tsx": {
+    "api": 3
+  },
+  "components/langame-settings-form.tsx": {
+    "api": 7,
+    "tenant": 1
+  },
+  "components/langame-sync-panel.tsx": {
+    "anti-fraud": 4,
+    "api": 5,
+    "dry-run": 1,
+    "endpoint": 38,
+    "lootbox": 4,
+    "payload": 2,
+    "promo-scenario": 1,
+    "snapshot": 20
+  },
+  "components/leetplus-category-directory.tsx": {
+    "api": 4
+  },
+  "components/manual-product-parsing.tsx": {
+    "api": 2
+  },
+  "components/marketing-campaigns-panel.tsx": {
+    "anti-fraud": 3,
+    "api": 2,
+    "endpoint": 1,
+    "snapshot": 1
+  },
+  "components/marketing-missions-panel.tsx": {
+    "anti-fraud": 3,
+    "api": 1,
+    "dry-run": 1,
+    "guest-game-hub": 2,
+    "lootbox": 2,
+    "promo-scenario": 3,
+    "snapshot": 1
+  },
+  "components/module-choice-page.tsx": {
+    "lootbox": 1
+  },
+  "components/product-actions.tsx": {
+    "tenant": 1
+  },
+  "components/product-csv-import.tsx": {
+    "api": 1,
+    "tenant": 1
+  },
+  "components/product-parsing-utility.tsx": {
+    "api": 1
+  },
+  "components/report-digest-form.tsx": {
+    "api": 1
+  },
+  "components/report-email-form.tsx": {
+    "api": 1
+  },
+  "components/report-email-inline-form.tsx": {
+    "api": 1
+  },
+  "components/revenue-snapshot-gate.tsx": {
+    "snapshot": 9
+  },
+  "components/settings-workspace.tsx": {
+    "api": 1
+  },
+  "components/sidebar.tsx": {
+    "promo-scenario": 1,
+    "tenant": 1
+  },
+  "components/staff-directory-workspace.tsx": {
+    "api": 1,
+    "snapshot": 1
+  },
+  "components/staff-knowledge-base-workspace.tsx": {
+    "snapshot": 1
+  },
+  "components/staff-task-rules-workspace.tsx": {
+    "cron": 1
+  },
+  "components/store-logo-control.tsx": {
+    "api": 1
+  },
+  "components/tenant-onboarding-notice.tsx": {
+    "api": 1
+  },
+  "components/user-accounts-panel.tsx": {
+    "promo-scenario": 1
+  }
+}

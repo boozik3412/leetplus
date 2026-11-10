@@ -113,23 +113,22 @@
   },
   "components/guest-gamification-panel.tsx": {
     "anti-fraud": 1,
-    "api": 3,
-    "batch": 7,
+    "batch": 2,
     "canary": 3,
     "dead-letter": 2,
     "dispatch": 14,
     "dry-run": 9,
     "endpoint": 2,
     "guest-game-hub": 1,
-    "idempotency": 3,
+    "idempotency": 1,
     "lease": 1,
     "ledger": 30,
-    "lootbox": 53,
+    "lootbox": 50,
     "materializer": 2,
     "payload": 3,
     "promo-scenario": 1,
     "retry": 6,
-    "snapshot": 22
+    "snapshot": 16
   },
   "components/guest-gamification-statistics-tab.tsx": {
     "ledger": 1,
@@ -142,8 +141,18 @@
     "lootbox": 1,
     "snapshot": 1
   },
+  "components/guest-gamification/tabs/dry-run-tab.tsx": {
+    "api": 3,
+    "batch": 5,
+    "idempotency": 2,
+    "lootbox": 2,
+    "snapshot": 6
+  },
   "components/guest-gamification/tabs/profiles-tab.tsx": {
     "payload": 2
+  },
+  "components/guest-gamification/tabs/rewards-tab.tsx": {
+    "lootbox": 1
   },
   "components/guest-mission-wizard.tsx": {
     "ledger": 1,

@@ -1905,6 +1905,35 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   advisory lock. Audit `STORE_DELETED` с `tenantId` сети, видом актора и
   количеством удалённых, архивированных и отвязанных строк.
 
+### Схема клуба (10.11.2026)
+
+- Corporate tenant contour. `GET /stores/:id/floor-plan` и
+  `GET /stores/:id/floor-plan/live` (`StoreFloorPlansController`, JWT +
+  `RolesGuard` → `view_assortment_stores`, manifest `STORES_VERIFIED`) читают
+  клуб только внутри свежего store scope (`resolveRequestedStoreIds`), чужой
+  клуб — 404. `PATCH /stores/:id/floor-plan` — `OWNER/ADMIN/MANAGER`,
+  `edit_stores`, `FreshStoreScopeService.assertNetwork` (manifest
+  `NETWORK_VERIFIED`).
+- Таблица `StoreFloorPlan` (одна строка на клуб, `ON DELETE CASCADE` вместе с
+  клубом, `STORE_REFERENCES` = `DELETE`). Сохранение идёт с версией, с которой
+  редактор начал: устаревшая версия — 409, затирания чужих правок нет. Схема
+  ограничена 90 КБ (ниже лимита тела API 100 КБ), сохраняются только поля
+  `template/v/items/pcs`.
+- Живые данные — только чтение Langame из corporate API тем же ключом сети,
+  что и остальные corporate-чтения (`linking_pc_by_type`, `types_of_pc_in_clubs`,
+  `sessions`, `working_shifts`, `all_operations_log`, `products/expense`).
+  Ответ кэшируется в памяти процесса на 15 секунд на клуб (список ПК — на
+  10 минут), поэтому частота запросов к Langame не растёт с числом зрителей;
+  отказ Langame не кэшируется. Записи в Langame, новых доменов egress, worker
+  или scheduler нет. В ответ и логи не попадают ключ, ответы Langame и
+  идентификаторы гостей: только номера ПК, занятость, имя администратора смены
+  и суммы.
+- Web: страница `/stores/floor-plan` (`canAccessPath` раздела `/stores`) и BFF
+  `/api/stores/:id/floor-plan*` через `proxyJsonRequest` (cookie → JWT,
+  `private, no-store`). Сама 3D-сцена — статические файлы
+  `public/club-scheme/<template>/` и vendored three.js без данных; данные она
+  получает тем же BFF с cookie пользователя, в iframe того же origin.
+
 ### Личная мотивация администраторов (02.11.2026)
 
 - Рабочее место `/staff/discipline` («Мотивация») остаётся NETWORK-only для

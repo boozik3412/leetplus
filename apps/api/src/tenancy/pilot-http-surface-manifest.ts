@@ -239,6 +239,19 @@ const definitions: readonly ControllerDefinition[] = [
     },
   },
   {
+    source: 'src/stores/store-floor-plans.controller.ts',
+    prefix: '/stores',
+    module: 'ASSORTMENT',
+    profile: 'STORES_VERIFIED',
+    routes: [
+      ['GET', [':id/floor-plan', ':id/floor-plan/live']],
+      ['PATCH', [':id/floor-plan']],
+    ],
+    overrides: {
+      'PATCH /stores/:id/floor-plan': { profile: 'NETWORK_VERIFIED' },
+    },
+  },
+  {
     source: 'src/reports/reports.controller.ts',
     prefix: '/reports',
     module: 'ASSORTMENT',

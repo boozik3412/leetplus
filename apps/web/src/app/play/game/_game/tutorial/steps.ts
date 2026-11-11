@@ -133,7 +133,7 @@ export const GAME_TUTORIAL_STEPS: readonly GameTutorialStep[] = [
     id: "game-accounts",
     title: "Игровые аккаунты",
     body: () =>
-      "В меню есть «Игровые аккаунты». Привяжите Steam, и матчи FACEIT CS2, сыгранные в клубе во время вашей сессии, будут засчитываться в задания.",
+      "В меню есть «Игровые аккаунты». Привяжите Steam, и мы сами найдём ваш FACEIT. Тогда матчи CS2, сыгранные в клубе во время вашей сессии, будут засчитываться в задания FACEIT.",
     targets: [".lp-club-menu-button"],
     requires: "gameAccounts",
   },

@@ -986,6 +986,22 @@ let toastT;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2200); }
 
 /* ---------------- live simulation ---------------- */
+/* ---------------- other clubs of the network with a drawn hall (full screen only) ---------------- */
+async function loadClubNav() {
+  if (window.parent !== window || !STORE_ID) return;
+  let data = null;
+  try { const r = await fetch('/api/stores/floor-plans', { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } }); if (!r.ok) return; data = await r.json(); } catch (e) { return; }
+  const clubs = (data && Array.isArray(data.clubs) ? data.clubs : []).filter(c => c && c.id && c.id !== STORE_ID && /^[a-z0-9-]+$/.test(c.template || ''));
+  if (!clubs.length) return;
+  const nav = $('#clubNav');
+  nav.innerHTML = clubs.map(c => {
+    const p = new URLSearchParams({ store: c.id }); if (CAN_EDIT) p.set('edit', '1'); if (Q.get('theme')) p.set('theme', Q.get('theme'));
+    const street = String(c.address || '').replace(/^\s*(г\.|город)\s*[^,]+,\s*/iu, '').trim();
+    return `<a class="club" href="../${c.template}/index.html?${p}" title="Схема клуба ${esc(c.name)}" aria-label="Схема клуба ${esc(c.name)}"><span class="ic">${esc(clubInitials(c.name))}</span><span><b>${esc(c.name)}</b><span>${esc(street || 'Схема клуба')}</span></span></a>`;
+  }).join('');
+  nav.hidden = false;
+}
+loadClubNav();
 function refresh() { renderKPIs(); renderCards(); if (editing) return; renderPanel(); }
 let pollTimer = null, pollBusy = false;
 const POLL_MS = 20000, POLL_HIDDEN_MS = 60000;

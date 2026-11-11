@@ -4,6 +4,8 @@ import { getApiUrl, getAuthHeaders } from "./api";
 type ProxyJsonRequestOptions = {
   forwardQuery?: boolean;
   privateNoStore?: boolean;
+  /** Reshapes a successful API body before it reaches the browser. */
+  transform?: (body: unknown) => unknown;
 };
 
 type ProxyFileRequestOptions = {
@@ -49,7 +51,8 @@ export async function proxyJsonRequest(
     });
   }
 
-  return NextResponse.json(await response.json(), {
+  const json = (await response.json()) as unknown;
+  return NextResponse.json(options.transform ? options.transform(json) : json, {
     headers: responseHeaders,
   });
 }

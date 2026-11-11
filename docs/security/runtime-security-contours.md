@@ -1945,7 +1945,12 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   работает.
 - Web: страница `/visualization`, раздел меню «Визуализация» (`canAccessPath` → `view_club_scheme`) и BFF
   `/api/stores/:id/floor-plan*` через `proxyJsonRequest` (cookie → JWT,
-  `private, no-store`). Сама 3D-сцена — статические файлы
+  `private, no-store`). BFF `GET /api/stores/floor-plans` (11.11.2026) тем же
+  путём читает `GET /stores/floor-plans` и отдаёт только клубы с нарисованным
+  залом (id, название, адрес, шаблон): из него сцена на полном экране строит
+  карточки других клубов сети для переключения. Новых прав, данных и
+  запросов к Langame нет; в iframe страницы `/visualization` карточки не
+  показываются. Сама 3D-сцена — статические файлы
   `public/club-scheme/<template>/` и vendored three.js без данных; данные она
   получает тем же BFF с cookie пользователя, в iframe того же origin.
 

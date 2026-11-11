@@ -63,3 +63,45 @@ export function clubFloorPlanSceneUrl(
   }
   return `/club-scheme/${template.id}/index.html?${params.toString()}`;
 }
+
+/**
+ * Clubs for the switcher of the full-screen scene: only clubs with a hall,
+ * resolved the same way as on /visualization (saved plan, then name or
+ * address). Unknown or malformed rows are dropped.
+ */
+export function clubFloorPlanSwitcher(body: unknown) {
+  const rows =
+    body &&
+    typeof body === "object" &&
+    Array.isArray((body as { clubs?: unknown }).clubs)
+      ? (body as { clubs: unknown[] }).clubs
+      : [];
+  const clubs: {
+    id: string;
+    name: string;
+    address: string | null;
+    template: string;
+  }[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") {
+      continue;
+    }
+    const { id, name, address, template } = row as Record<string, unknown>;
+    if (typeof id !== "string" || typeof name !== "string") {
+      continue;
+    }
+    const hall = clubFloorPlanTemplateFor(
+      { name, address: typeof address === "string" ? address : null },
+      typeof template === "string" ? template : null,
+    );
+    if (hall) {
+      clubs.push({
+        id,
+        name,
+        address: typeof address === "string" ? address : null,
+        template: hall.id,
+      });
+    }
+  }
+  return { clubs };
+}

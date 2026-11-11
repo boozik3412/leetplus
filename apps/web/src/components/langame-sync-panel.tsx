@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { CaretDown } from "@phosphor-icons/react";
 import type { LangameSettings } from "@/lib/langame-settings";
 import {
   isLangameSyncLimitedMessage,
@@ -410,6 +412,7 @@ const guestSearchFieldLabels: Record<GuestSearchField, string> = {
   bonus_program_number: "Бонусная карта",
 };
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 const endpointProfileOptions: EndpointProfileOption[] = [
   {
     key: "allOperationsLog",
@@ -630,6 +633,7 @@ const endpointProfileOptions: EndpointProfileOption[] = [
   },
 ];
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 const langameEndpointMap: EndpointMapItem[] = [
   {
     method: "GET",
@@ -988,6 +992,166 @@ function getErrorMessage(data: unknown) {
   return "Не удалось выполнить запрос";
 }
 
+const diagnosticsBlockIds = new Set([
+  "endpoint-profile-diagnostics",
+  "guest-search-diagnostics",
+]);
+
+type SyncVerdictTone = "ok" | "warning" | "danger" | "neutral";
+
+const verdictToneClass: Record<SyncVerdictTone, string> = {
+  ok: "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-900/70 dark:bg-emerald-950/25 dark:text-emerald-100",
+  warning:
+    "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-100",
+  danger:
+    "border-red-200 bg-red-50 text-red-950 dark:border-red-900/70 dark:bg-red-950/25 dark:text-red-100",
+  neutral:
+    "border-zinc-200 bg-white text-zinc-900 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100",
+};
+
+const verdictDotClass: Record<SyncVerdictTone, string> = {
+  ok: "bg-emerald-500",
+  warning: "bg-amber-500",
+  danger: "bg-red-500",
+  neutral: "bg-zinc-400 dark:bg-zinc-500",
+};
+
+function sourceNames(sources: SourceSyncHealth[]) {
+  return sources.map((source) => source.name || source.domain).join(", ");
+}
+
+/** One verdict for the whole page: does the data flow, and what to do if not. */
+function syncVerdict({
+  isSyncing,
+  latestGuestStatus,
+  settings,
+}: {
+  isSyncing: boolean;
+  latestGuestStatus: GuestSyncStatus | null;
+  settings: LangameSettings;
+}): {
+  tone: SyncVerdictTone;
+  title: string;
+  detail: string;
+  action?: { href: string; label: string };
+} {
+  if (!settings.hasApiKey) {
+    return {
+      tone: "warning",
+      title: "Подключение к Langame не настроено",
+      detail:
+        "Без ключа доступа данные клубов не загружаются. Добавьте его в настройках.",
+      action: { href: "/settings", label: "Открыть настройки" },
+    };
+  }
+
+  const sources = getSourceSyncHealth(settings);
+  const failed = sources.filter((source) => source.status === "FAILED");
+  const partial = sources.filter((source) => source.status === "PARTIAL");
+  const guestStatus = guestSyncDisplayStatus(latestGuestStatus);
+  const latestSuccess = settings.latestSuccessfulSyncJob;
+  const updated = latestSuccess
+    ? `Последнее успешное обновление: ${formatDateTime(getSyncJobTime(latestSuccess))}.`
+    : "";
+
+  if (isSyncing || guestStatus === "RUNNING") {
+    return {
+      tone: "neutral",
+      title: "Данные обновляются",
+      detail:
+        `Статус обновится сам, страницу можно не перезагружать. ${updated}`.trim(),
+    };
+  }
+
+  if (failed.length > 0 || guestStatus === "FAILED") {
+    const what =
+      failed.length > 0
+        ? `Не обновились данные: ${sourceNames(failed)}.`
+        : "Не обновились данные по гостям.";
+
+    return {
+      tone: "danger",
+      title: "Есть ошибка",
+      detail: `${what} Запустите обновление ещё раз. Если ошибка повторится, отправьте в поддержку снимок блока «Подробно для поддержки».`,
+    };
+  }
+
+  if (!latestSuccess) {
+    return {
+      tone: "neutral",
+      title: "Данные ещё не загружались",
+      detail: "Выберите период ниже и нажмите «Обновить данные».",
+    };
+  }
+
+  if (partial.length > 0 || guestStatus === "PARTIAL") {
+    const what =
+      partial.length > 0
+        ? `Часть данных не пришла: ${sourceNames(partial)}.`
+        : "Часть данных по гостям не пришла.";
+
+    return {
+      tone: "warning",
+      title: "Данные загружены не полностью",
+      detail: `${what} Отчёты работают по тому, что загрузилось. ${updated}`,
+    };
+  }
+
+  return {
+    tone: "ok",
+    title: "Всё работает",
+    detail: updated,
+  };
+}
+
+function SyncVerdict(props: {
+  isSyncing: boolean;
+  latestGuestStatus: GuestSyncStatus | null;
+  settings: LangameSettings;
+}) {
+  const verdict = syncVerdict(props);
+
+  return (
+    <div
+      className={`flex flex-col gap-3 rounded-lg border px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${verdictToneClass[verdict.tone]}`}
+      role="status"
+    >
+      <div className="flex min-w-0 items-start gap-3">
+        <span
+          aria-hidden="true"
+          className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${verdictDotClass[verdict.tone]}`}
+        />
+        <div className="min-w-0">
+          <p className="text-base font-semibold">{verdict.title}</p>
+          {verdict.detail ? (
+            <p className="mt-0.5 text-sm opacity-80">{verdict.detail}</p>
+          ) : null}
+        </div>
+      </div>
+      {verdict.action ? (
+        <Link
+          href={verdict.action.href}
+          className="inline-flex h-9 shrink-0 cursor-pointer items-center justify-center rounded-md border border-current/30 bg-white/70 px-3 text-sm font-semibold transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:bg-white/10 dark:hover:bg-white/15"
+        >
+          {verdict.action.label}
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
+// ui-copy-allow: support diagnostics, shown only inside «Подробно для поддержки»
+const diagnosticsErrors = {
+  businessSnapshots: "Не удалось создать typed snapshot-джобы",
+  serviceEndpoints: "Не удалось проверить сервисные endpoints Langame",
+  profileUnknown: "Endpoint не найден в карте профилирования",
+  profileFailed: "Не удалось профилировать endpoint Langame",
+  snapshotUnknown: "Endpoint не найден в карте snapshot",
+  snapshotFailed: "Не удалось создать snapshot Langame endpoint",
+  clubIdRequired: "Укажите ID клуба для выбранного endpoint",
+  guestIdRequired: "Укажите ID гостя для выбранного endpoint",
+} as const;
+
 export function LangameSyncPanel({
   initialSettings,
   initialIncludeGuestLogs = false,
@@ -1072,6 +1236,26 @@ export function LangameSyncPanel({
   >(null);
   const [businessSnapshotRunResult, setBusinessSnapshotRunResult] =
     useState<BusinessSnapshotRunResult | null>(null);
+  // Support details stay folded for everyday use; a deep link from the game
+  // module checklist (?endpoint=… or #…-diagnostics) opens them.
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(
+    Boolean(initialEndpointProfileKey),
+  );
+  const diagnosticsRef = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+
+    const details = diagnosticsRef.current;
+
+    if (details && diagnosticsBlockIds.has(hash)) {
+      // Opening the element fires "toggle", which syncs the state.
+      details.open = true;
+      window.setTimeout(() => {
+        document.getElementById(hash)?.scrollIntoView({ block: "start" });
+      }, 0);
+    }
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -1159,6 +1343,7 @@ export function LangameSyncPanel({
   }
 
   function scrollToDiagnosticsBlock(elementId: string) {
+    setDiagnosticsOpen(true);
     window.setTimeout(() => {
       document.getElementById(elementId)?.scrollIntoView({
         behavior: "smooth",
@@ -1270,14 +1455,16 @@ export function LangameSyncPanel({
       } else if (assortmentCompletionMessage) {
         setWarning(assortmentCompletionMessage);
       } else if (!guests.running && !guestSyncCompletionMessage(guests)) {
-        setSuccess("Общая синхронизация Langame завершена.");
+        setSuccess("Данные из Langame обновлены.");
       }
 
       await refreshBusinessSnapshotStatus();
       await refreshSettings();
     } catch (syncError) {
       setError(
-        syncError instanceof Error ? syncError.message : "API недоступен",
+        syncError instanceof Error
+          ? syncError.message
+          : "Не удалось связаться с сервером. Повторите через минуту.",
       );
       setAssortmentStatus("error");
       setGuestStatus("error");
@@ -1341,7 +1528,7 @@ export function LangameSyncPanel({
       setBusinessSnapshotError(
         snapshotError instanceof Error
           ? snapshotError.message
-          : "Не удалось создать typed snapshot-джобы",
+          : diagnosticsErrors.businessSnapshots,
       );
     }
   }
@@ -1399,7 +1586,7 @@ export function LangameSyncPanel({
       setServiceDiagnosticsError(
         serviceError instanceof Error
           ? serviceError.message
-          : "Не удалось проверить сервисные endpoints Langame",
+          : diagnosticsErrors.serviceEndpoints,
       );
     }
   }
@@ -1414,7 +1601,7 @@ export function LangameSyncPanel({
     );
 
     if (!selectedEndpoint) {
-      setEndpointProfileError("Endpoint не найден в карте профилирования");
+      setEndpointProfileError(diagnosticsErrors.profileUnknown);
       setEndpointProfileStatus("error");
       return;
     }
@@ -1423,7 +1610,7 @@ export function LangameSyncPanel({
       selectedEndpoint.requiredParams.includes("clubId") &&
       !endpointProfileClubId.trim()
     ) {
-      setEndpointProfileError("Укажите ID клуба для выбранного endpoint");
+      setEndpointProfileError(diagnosticsErrors.clubIdRequired);
       setEndpointProfileStatus("error");
       return;
     }
@@ -1432,7 +1619,7 @@ export function LangameSyncPanel({
       selectedEndpoint.requiredParams.includes("guestId") &&
       !endpointProfileGuestId.trim()
     ) {
-      setEndpointProfileError("Укажите ID гостя для выбранного endpoint");
+      setEndpointProfileError(diagnosticsErrors.guestIdRequired);
       setEndpointProfileStatus("error");
       return;
     }
@@ -1476,7 +1663,7 @@ export function LangameSyncPanel({
       setEndpointProfileError(
         profileError instanceof Error
           ? profileError.message
-          : "Не удалось профилировать endpoint Langame",
+          : diagnosticsErrors.profileFailed,
       );
     }
   }
@@ -1487,7 +1674,7 @@ export function LangameSyncPanel({
     );
 
     if (!selectedEndpoint) {
-      setEndpointSnapshotError("Endpoint не найден в карте snapshot");
+      setEndpointSnapshotError(diagnosticsErrors.snapshotUnknown);
       setEndpointSnapshotStatus("error");
       return;
     }
@@ -1496,7 +1683,7 @@ export function LangameSyncPanel({
       selectedEndpoint.requiredParams.includes("clubId") &&
       !endpointProfileClubId.trim()
     ) {
-      setEndpointSnapshotError("Укажите ID клуба для выбранного endpoint");
+      setEndpointSnapshotError(diagnosticsErrors.clubIdRequired);
       setEndpointSnapshotStatus("error");
       return;
     }
@@ -1505,7 +1692,7 @@ export function LangameSyncPanel({
       selectedEndpoint.requiredParams.includes("guestId") &&
       !endpointProfileGuestId.trim()
     ) {
-      setEndpointSnapshotError("Укажите ID гостя для выбранного endpoint");
+      setEndpointSnapshotError(diagnosticsErrors.guestIdRequired);
       setEndpointSnapshotStatus("error");
       return;
     }
@@ -1549,7 +1736,7 @@ export function LangameSyncPanel({
       setEndpointSnapshotError(
         snapshotError instanceof Error
           ? snapshotError.message
-          : "Не удалось создать snapshot Langame endpoint",
+          : diagnosticsErrors.snapshotFailed,
       );
     }
   }
@@ -1602,19 +1789,21 @@ export function LangameSyncPanel({
 
   return (
     <section className="mt-6 space-y-6">
+      <SyncVerdict
+        isSyncing={isSyncing}
+        latestGuestStatus={latestGuestStatus}
+        settings={settings}
+      />
       <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
-              Общая синхронизация
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-              Все данные Langame за выбранный период
+            <h2 className="text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+              Обновить данные из Langame
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Одна кнопка обновляет клубы, товары, остатки, продажи, общую
-              выручку, гостей, сессии, пополнения баланса, покупки бара и
-              служебные логи.
+              Выберите период и нажмите одну кнопку: обновятся клубы, товары,
+              остатки, продажи, выручка, гости, сессии, пополнения баланса и
+              покупки бара.
             </p>
           </div>
 
@@ -1624,9 +1813,9 @@ export function LangameSyncPanel({
             disabled={
               !settings.hasApiKey || !syncDateFrom || !syncDateTo || isSyncing
             }
-            className="rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+            className="cursor-pointer rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300 dark:focus-visible:ring-offset-zinc-950"
           >
-            {isSyncing ? "Синхронизация..." : "Запустить общую синхронизацию"}
+            {isSyncing ? "Обновляем…" : "Обновить данные"}
           </button>
         </div>
 
@@ -1638,7 +1827,7 @@ export function LangameSyncPanel({
                 type="button"
                 onClick={() => selectSyncPeriod(option.value)}
                 className={[
-                  "rounded-lg border px-4 py-3 text-left transition",
+                  "cursor-pointer rounded-lg border px-4 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500",
                   syncPeriod === option.value
                     ? "border-zinc-950 bg-zinc-950 text-white dark:border-emerald-400 dark:bg-emerald-400 dark:text-zinc-950"
                     : "border-zinc-200 bg-zinc-50 text-zinc-900 hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-zinc-700",
@@ -1695,14 +1884,13 @@ export function LangameSyncPanel({
           />
           <span>
             <span className="block font-semibold text-zinc-950 dark:text-zinc-50">
-              Проверить `guests/logs` для геймификации
+              Загрузить действия гостей для игрового модуля
             </span>
             <span className="mt-1 block leading-5 text-zinc-600 dark:text-zinc-400">
-              Опционально загрузит типы событий гостя за выбранный период для
-              миссий, лутбоксов, battle pass и anti-fraud. Обычная синхронизация
-              остается легче, если флаг выключен.
+              Нужно для заданий, кейсов, Battle Pass и защиты от накруток. Без
+              этой галочки обновление идёт быстрее.
               {initialIncludeGuestLogs
-                ? " Флаг включен по ссылке из чек-листа геймификации."
+                ? " Галочка включена по ссылке из настройки игрового модуля."
                 : ""}
             </span>
           </span>
@@ -1744,87 +1932,111 @@ export function LangameSyncPanel({
         ) : null}
       </div>
 
-      <SyncHealthSummary
-        latestGuestStatus={latestGuestStatus}
-        guestStatusError={guestStatusError}
-        settings={settings}
-      />
-      <BusinessSnapshotPanel
-        dateFrom={syncDateFrom}
-        dateTo={syncDateTo}
-        error={businessSnapshotError}
-        result={businessSnapshotRunResult}
-        snapshots={businessSnapshots}
-        status={businessSnapshotStatus}
-        onRun={runBusinessSnapshots}
-      />
-      <EndpointMapPanel
-        diagnostics={routeDiagnostics}
-        diagnosticsError={routeDiagnosticsError}
-        diagnosticsStatus={routeDiagnosticsStatus}
-        latestGuestStatus={latestGuestStatus}
-        onCheckDiagnostics={checkRouteDiagnostics}
-        onOpenGuestSearchDiagnostics={openGuestSearchDiagnostics}
-        onSelectProfileKey={selectEndpointProfile}
-        settings={settings}
-      />
-      <EndpointProfileQualityOverview
-        selectedProfileKey={endpointProfileKey}
-        settings={settings}
-        onSelectProfileKey={selectEndpointProfile}
-      />
-      <div id="endpoint-profile-diagnostics" className="scroll-mt-6">
-        <EndpointProfileDiagnosticsPanel
-          clubId={endpointProfileClubId}
-          dateFrom={syncDateFrom}
-          dateTo={syncDateTo}
-          guestId={endpointProfileGuestId}
-          page={endpointProfilePage}
-          pageLimit={endpointProfilePageLimit}
-          profileError={endpointProfileError}
-          profileKey={endpointProfileKey}
-          profileStatus={endpointProfileStatus}
-          result={endpointProfileResult}
-          settings={settings}
-          snapshotError={endpointSnapshotError}
-          snapshotResult={endpointSnapshotResult}
-          snapshotStatus={endpointSnapshotStatus}
-          sourceId={endpointProfileSourceId}
-          onClubIdChange={setEndpointProfileClubId}
-          onGuestIdChange={setEndpointProfileGuestId}
-          onPageChange={setEndpointProfilePage}
-          onPageLimitChange={setEndpointProfilePageLimit}
-          onProfileKeyChange={setEndpointProfileKey}
-          onSourceIdChange={setEndpointProfileSourceId}
-          onSnapshot={runEndpointSnapshot}
-          onSubmit={checkEndpointProfileDiagnostics}
-        />
-      </div>
-      <ServiceDiagnosticsPanel
-        diagnostics={serviceDiagnostics}
-        diagnosticsError={serviceDiagnosticsError}
-        diagnosticsStatus={serviceDiagnosticsStatus}
-        onCheckDiagnostics={checkServiceDiagnostics}
-        settings={settings}
-      />
-      <div id="guest-search-diagnostics" className="scroll-mt-6">
-        <GuestSearchDiagnosticsPanel
-          field={guestSearchField}
-          query={guestSearchQuery}
-          result={guestSearchResult}
-          searchError={guestSearchError}
-          searchStatus={guestSearchStatus}
-          settings={settings}
-          onFieldChange={setGuestSearchField}
-          onQueryChange={setGuestSearchQuery}
-          onSubmit={searchGuestDiagnostics}
-        />
-      </div>
-      <LatestGuestDiagnostics status={latestGuestStatus} />
-      <div className="grid gap-6 xl:grid-cols-2">
-        <SyncHistory jobs={settings.syncJobs} />
-        <GuestSyncHistory status={latestGuestStatus} />
-      </div>
+      <details
+        className="group rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+        ref={diagnosticsRef}
+        open={diagnosticsOpen}
+        onToggle={(event) => setDiagnosticsOpen(event.currentTarget.open)}
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-5 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 [&::-webkit-details-marker]:hidden">
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+              Подробно для поддержки
+            </span>
+            <span className="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
+              Состояние каждого клуба, ручные проверки подключения и история
+              запусков. Для обычной работы не нужно.
+            </span>
+          </span>
+          <CaretDown
+            aria-hidden="true"
+            className="h-4 w-4 shrink-0 text-zinc-500 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+          />
+        </summary>
+        <div className="space-y-6 border-t border-zinc-200 p-5 dark:border-zinc-800">
+          <SyncHealthSummary
+            latestGuestStatus={latestGuestStatus}
+            guestStatusError={guestStatusError}
+            settings={settings}
+          />
+          <BusinessSnapshotPanel
+            dateFrom={syncDateFrom}
+            dateTo={syncDateTo}
+            error={businessSnapshotError}
+            result={businessSnapshotRunResult}
+            snapshots={businessSnapshots}
+            status={businessSnapshotStatus}
+            onRun={runBusinessSnapshots}
+          />
+          <EndpointMapPanel
+            diagnostics={routeDiagnostics}
+            diagnosticsError={routeDiagnosticsError}
+            diagnosticsStatus={routeDiagnosticsStatus}
+            latestGuestStatus={latestGuestStatus}
+            onCheckDiagnostics={checkRouteDiagnostics}
+            onOpenGuestSearchDiagnostics={openGuestSearchDiagnostics}
+            onSelectProfileKey={selectEndpointProfile}
+            settings={settings}
+          />
+          <EndpointProfileQualityOverview
+            selectedProfileKey={endpointProfileKey}
+            settings={settings}
+            onSelectProfileKey={selectEndpointProfile}
+          />
+          <div id="endpoint-profile-diagnostics" className="scroll-mt-6">
+            <EndpointProfileDiagnosticsPanel
+              clubId={endpointProfileClubId}
+              dateFrom={syncDateFrom}
+              dateTo={syncDateTo}
+              guestId={endpointProfileGuestId}
+              page={endpointProfilePage}
+              pageLimit={endpointProfilePageLimit}
+              profileError={endpointProfileError}
+              profileKey={endpointProfileKey}
+              profileStatus={endpointProfileStatus}
+              result={endpointProfileResult}
+              settings={settings}
+              snapshotError={endpointSnapshotError}
+              snapshotResult={endpointSnapshotResult}
+              snapshotStatus={endpointSnapshotStatus}
+              sourceId={endpointProfileSourceId}
+              onClubIdChange={setEndpointProfileClubId}
+              onGuestIdChange={setEndpointProfileGuestId}
+              onPageChange={setEndpointProfilePage}
+              onPageLimitChange={setEndpointProfilePageLimit}
+              onProfileKeyChange={setEndpointProfileKey}
+              onSourceIdChange={setEndpointProfileSourceId}
+              onSnapshot={runEndpointSnapshot}
+              onSubmit={checkEndpointProfileDiagnostics}
+            />
+          </div>
+          <ServiceDiagnosticsPanel
+            diagnostics={serviceDiagnostics}
+            diagnosticsError={serviceDiagnosticsError}
+            diagnosticsStatus={serviceDiagnosticsStatus}
+            onCheckDiagnostics={checkServiceDiagnostics}
+            settings={settings}
+          />
+          <div id="guest-search-diagnostics" className="scroll-mt-6">
+            <GuestSearchDiagnosticsPanel
+              field={guestSearchField}
+              query={guestSearchQuery}
+              result={guestSearchResult}
+              searchError={guestSearchError}
+              searchStatus={guestSearchStatus}
+              settings={settings}
+              onFieldChange={setGuestSearchField}
+              onQueryChange={setGuestSearchQuery}
+              onSubmit={searchGuestDiagnostics}
+            />
+          </div>
+          <LatestGuestDiagnostics status={latestGuestStatus} />
+          <div className="grid gap-6 xl:grid-cols-2">
+            <SyncHistory jobs={settings.syncJobs} />
+            <GuestSyncHistory status={latestGuestStatus} />
+          </div>
+        </div>
+      </details>
     </section>
   );
 }
@@ -1887,7 +2099,6 @@ function SyncStepCard({
 
 function SyncResultSummary({ result }: { result: CombinedSyncResult }) {
   const guestRun = result.guests?.latestRun ?? null;
-  const guestDiagnostics = guestRun?.diagnostics ?? null;
 
   return (
     <div className="mt-5 rounded-lg border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
@@ -1924,9 +2135,6 @@ function SyncResultSummary({ result }: { result: CombinedSyncResult }) {
           <Metric label="Транзакций" value={guestRun.transactionsCount} />
           <Metric label="Покупок бара" value={guestRun.productSalesLinked} />
         </div>
-      ) : null}
-      {guestDiagnostics ? (
-        <PcDiagnostics diagnostics={guestDiagnostics} className="mt-4" />
       ) : null}
     </div>
   );
@@ -2022,6 +2230,7 @@ function SyncSourceResults({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function SyncHealthSummary({
   settings,
   latestGuestStatus,
@@ -2267,6 +2476,7 @@ function SyncHealthSummary({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function BusinessSnapshotPanel({
   snapshots,
   status,
@@ -2492,6 +2702,7 @@ function SnapshotKeyValues({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function EndpointMapPanel({
   settings,
   latestGuestStatus,
@@ -2793,6 +3004,7 @@ function EndpointMapPanel({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function GuestEndpointReadinessPanel({
   profileHealthByKey,
   onSelectProfileKey,
@@ -2902,6 +3114,7 @@ function GuestEndpointReadinessPanel({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function EndpointProfileQualityOverview({
   settings,
   selectedProfileKey,
@@ -3047,6 +3260,7 @@ function EndpointProfileQualityOverview({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function EndpointProfileDiagnosticsPanel({
   settings,
   profileKey,
@@ -3413,6 +3627,7 @@ function EndpointProfileDiagnosticsPanel({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function LatestEndpointProfiles({
   profiles,
   snapshots,
@@ -3552,6 +3767,7 @@ function LatestEndpointProfiles({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function EndpointSnapshotResultSummary({
   result,
 }: {
@@ -3631,6 +3847,7 @@ function EndpointSnapshotResultSummary({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function ServiceDiagnosticsPanel({
   settings,
   diagnostics,
@@ -3824,6 +4041,7 @@ function ServiceDiagnosticsPanel({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function GuestSearchDiagnosticsPanel({
   settings,
   query,
@@ -4023,6 +4241,7 @@ function GuestSearchDiagnosticsPanel({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function LatestGuestDiagnostics({
   status,
 }: {
@@ -4092,6 +4311,7 @@ function LatestGuestDiagnostics({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function PcDiagnostics({
   diagnostics,
   className = "",
@@ -4224,6 +4444,7 @@ function DiagnosticCard({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function SyncHistory({ jobs }: { jobs: LangameSettings["syncJobs"] }) {
   const latestJobs = getLatestSyncJobsByDomain(jobs);
 
@@ -4303,6 +4524,7 @@ function SyncHistory({ jobs }: { jobs: LangameSettings["syncJobs"] }) {
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function GuestSyncHistory({ status }: { status: GuestSyncStatus | null }) {
   const runs = status?.recentRuns ?? [];
 
@@ -4429,6 +4651,7 @@ function EndpointFreshnessCard({
   );
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function buildEndpointProfileHealth(
   settings: LangameSettings,
 ): EndpointProfileHealth[] {
@@ -4466,6 +4689,7 @@ function buildEndpointProfileHealth(
   });
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function fallbackEndpointProfileHealth(
   key: EndpointProfileKey,
 ): EndpointProfileHealth {
@@ -4508,6 +4732,7 @@ function mapEndpointSnapshotCandidateStatus(
   return "unchecked";
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function endpointSnapshotCandidateStatusLabel(
   status: LangameSettings["endpointSnapshotCandidates"][number]["status"],
 ) {
@@ -4688,6 +4913,7 @@ function endpointProfileHealthLabel(status: EndpointProfileHealthStatus) {
   return "не проверен";
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function endpointProfileHealthDetail(profile: EndpointProfileHealth) {
   if (profile.status === "unchecked") {
     return "Production-профиля пока нет. Выберите endpoint и запустите ручную проверку.";
@@ -5131,6 +5357,7 @@ function syncStatusLabel(value: string) {
   return langameSyncStatusLabel(value);
 }
 
+// ui-copy-allow: support diagnostics («Подробно для поддержки»)
 function syncFreshnessLabel(value: GuestSyncFreshness["status"]) {
   if (value === "FRESH") {
     return "свежий";

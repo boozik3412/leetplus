@@ -91,6 +91,55 @@ Decide which one you are building before choosing density, sizes and motion.
     state, failed load → an error with «Повторить», never a blank frame. A chart's
     key number is also present as text for screen readers.
 
+## Язык интерфейса
+
+Club staff are owners, managers and administrators, not developers. Test users
+called the cabinet «сложно, неудобно» mostly because screens speak the
+language of the code (UX audit, 10.11.2026). Rules:
+
+- Name things by what the user does or gets, not by how the system works:
+  «Начисления», «Проверка без начисления», not «ledger», «dry-run».
+- Service words (below) are allowed only in platform administration
+  (`/administration`) and inside a collapsed «Диагностика» block that a normal
+  user never needs. Mark such lines with a `ui-copy-allow` comment, or put it
+  in a comment right above a whole diagnostics component or label helper.
+- A status is a verdict plus the next action: «Данные за вчера ещё не
+  пришли — обновим в 06:00» rather than «Typed snapshot еще не создан».
+- Keep one name per thing across menu, page title, buttons and empty states.
+
+Agreed names (decisions of 10.11.2026):
+
+| Thing | Say | Do not say |
+|---|---|---|
+| The game module in the cabinet | «Игровой модуль» | «Guest Game Hub», «Игра» |
+| Random reward containers | «Кейсы», «кейс» | «Лутбоксы», «lootbox» |
+| Season pass | «Battle Pass» (kept, guests know it) | — |
+| Guest game tasks | «Задания» | «Миссии», «квесты» in navigation |
+| Marketing promo tasks | «Акции» | «Промо-сценарии» |
+| Calculation for a period | «расчёт за период», «данные на <дату>» | «snapshot», «typed snapshot» |
+| Test without paying out | «проверка без начисления» | «dry-run» |
+| Bonus operations log | «журнал начислений» | «ledger», «bonus ledger» |
+| Reward issuing | «выдача наград» | «materializer», «dispatcher», «dispatch» |
+| Trial on one club | «пробный запуск» | «canary» |
+| Connection to Langame | «подключение», «ключ доступа Langame» | «endpoint», «API», «API key» |
+| Organisation in LeetPlus | «сеть», «компания» | «tenant» |
+| Protection from abuse | «защита от накруток» | «anti-fraud», «антифрод» |
+| Club × day coverage | «дни по клубам» | «клубо-дни» |
+| Automatic schedule | «по расписанию» | «cron», «scheduler» |
+| Try again | «повторить» | «retry» |
+| Access rights | «права доступа», «доступ к клубам» | «capability», «scope» |
+
+Never show: idempotency, lease, dead letter, payload, worker, runtime,
+backfill, batch, BFF, JWT, Prisma/Postgres/Redis. Explain the effect
+instead («повтор не начислит дважды», «не удалось обработать»).
+
+`pnpm --filter web test:ui-copy` (`apps/web/src/lib/ui-copy-jargon.test.mts`)
+scans visible copy of `apps/web` screens and fails when a service word is
+added. Existing ones are counted in `ui-copy-jargon.baseline.json`; the total
+per word only goes down, and moving code between files does not change it. After removing words, lower it with
+`UPDATE_UI_COPY_BASELINE=1 pnpm --filter web test:ui-copy`. New terms go into
+both this table and `JARGON_TERMS` in the test.
+
 ## Before you hand over UI work
 
 - [ ] Both themes checked; contrast holds in dark mode.
@@ -101,5 +150,6 @@ Decide which one you are building before choosing density, sizes and motion.
       large numbers, a long club or guest name).
 - [ ] Reduced motion leaves the screen usable and complete.
 - [ ] No new raw hex, no new icon set, no new web font.
+- [ ] Copy follows «Язык интерфейса»; `test:ui-copy` passes.
 - [ ] Verified in a real browser per [verification](verification.md); screenshots
       in the PR for visible changes.

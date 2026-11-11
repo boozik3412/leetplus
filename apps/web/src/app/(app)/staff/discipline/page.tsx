@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { StaffDisciplineWorkspace } from "@/components/staff-discipline-workspace";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
+import { StaffControlTabs } from "@/components/staff-control-tabs";
 import {
   requireNetworkScopedUser,
   requireTenantWorkspaceUser,
@@ -136,6 +137,7 @@ export default async function StaffDisciplinePage({
                 ]
           }
         />
+        <StaffControlTabs user={user} current="/staff/discipline" />
 
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -169,12 +171,6 @@ export default async function StaffDisciplinePage({
               ) : null}
               {report.access.canManage ? (
                 <>
-                  <Link
-                    href="/staff/administrator-ratings"
-                    className="inline-flex h-10 items-center rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-                  >
-                    Рейтинг администраторов
-                  </Link>
                   <Link
                     href="/staff/operations-dashboard"
                     className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"

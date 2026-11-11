@@ -1905,6 +1905,55 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   advisory lock. Audit `STORE_DELETED` с `tenantId` сети, видом актора и
   количеством удалённых, архивированных и отвязанных строк.
 
+### Схема клуба (10.11.2026)
+
+- Corporate tenant contour. `GET /stores/floor-plans` (активные клубы
+  свежего scope и сохранённый зал каждого), `GET /stores/:id/floor-plan` и
+  `GET /stores/:id/floor-plan/live` (`StoreFloorPlansController`, JWT +
+  `RolesGuard` → `view_club_scheme`, manifest `STORES_VERIFIED`) читают
+  клуб только внутри свежего store scope (`resolveRequestedStoreIds`), чужой
+  клуб — 404. Capability `view_club_scheme` («Схема клуба», 10.11.2026)
+  есть у `STANDARDS_MANAGER` по умолчанию; её также дают `view_reports`,
+  `view_assortment_stores` и `edit_stores`, поэтому прежние роли и role
+  overrides доступ не теряют. Она не открывает `GET /stores` и другие
+  маршруты клубов. `PATCH /stores/:id/floor-plan` — `OWNER/ADMIN/MANAGER`,
+  `edit_stores`, `FreshStoreScopeService.assertNetwork` (manifest
+  `NETWORK_VERIFIED`).
+- Таблица `StoreFloorPlan` (одна строка на клуб, `ON DELETE CASCADE` вместе с
+  клубом, `STORE_REFERENCES` = `DELETE`). Сохранение идёт с версией, с которой
+  редактор начал: устаревшая версия — 409, затирания чужих правок нет. Схема
+  ограничена 90 КБ (ниже лимита тела API 100 КБ), сохраняются только поля
+  `template/v/items/pcs`.
+- Живые данные — только чтение Langame из corporate API тем же ключом сети,
+  что и остальные corporate-чтения (`linking_pc_by_type`, `types_of_pc_in_clubs`,
+  `sessions`, `working_shifts`, `all_operations_log`, `products/expense`).
+  Ответ кэшируется в памяти процесса на 15 секунд на клуб (список ПК — на
+  10 минут), поэтому частота запросов к Langame не растёт с числом зрителей;
+  отказ Langame не кэшируется. Записи в Langame, новых доменов egress, worker
+  или scheduler нет. В ответ и логи не попадают ключ, ответы Langame и
+  идентификаторы гостей: только номера ПК, занятость, имя администратора смены,
+  суммы и последние продажи товаров (время, название и категория товара из
+  ассортимента сети, количество, сумма; без гостя и чека).
+- Блок «Игровой модуль» в том же ответе читает только БД LeetPlus в tenant
+  клуба: активные сейчас `GuestGameMission`, `GuestGameLootBox` (`STANDALONE`
+  и `BOTH`), `GuestGameSeason` и `GuestGamePromoCard`, у которых список клубов
+  пуст или содержит этот клуб (название, подпись награды, XP, срок, признак
+  сегмента), и число наград `GuestGameReward` этого клуба за смену или день
+  (`PENDING/APPROVED/PAID`). Гостей, профилей, прогресса и сегментов по имени
+  в ответе нет; Langame для блока не нужен, поэтому он есть и у клуба без
+  Langame. Ошибка чтения даёт `game: null` и предупреждение, остальная схема
+  работает.
+- Web: страница `/visualization`, раздел меню «Визуализация» (`canAccessPath` → `view_club_scheme`) и BFF
+  `/api/stores/:id/floor-plan*` через `proxyJsonRequest` (cookie → JWT,
+  `private, no-store`). BFF `GET /api/stores/floor-plans` (11.11.2026) тем же
+  путём читает `GET /stores/floor-plans` и отдаёт только клубы с нарисованным
+  залом (id, название, адрес, шаблон): из него сцена на полном экране строит
+  карточки других клубов сети для переключения. Новых прав, данных и
+  запросов к Langame нет; в iframe страницы `/visualization` карточки не
+  показываются. Сама 3D-сцена — статические файлы
+  `public/club-scheme/<template>/` и vendored three.js без данных; данные она
+  получает тем же BFF с cookie пользователя, в iframe того же origin.
+
 ### Личная мотивация администраторов (02.11.2026)
 
 - Рабочее место `/staff/discipline` («Мотивация») остаётся NETWORK-only для

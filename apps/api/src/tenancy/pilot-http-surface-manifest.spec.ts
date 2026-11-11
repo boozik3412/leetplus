@@ -211,6 +211,11 @@ const NETWORK_MUTATION_BINDINGS: readonly NetworkMutationBinding[] = [
     method: 'remove',
   },
   {
+    id: 'PATCH /stores/:id/floor-plan',
+    source: 'src/stores/store-floor-plans.service.ts',
+    method: 'save',
+  },
+  {
     id: 'POST /reports/oos-exclusions',
     source: 'src/reports/reports.service.ts',
     method: 'createOosExclusion',
@@ -636,8 +641,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(346);
-    expect(allowed).toHaveLength(278);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(350);
+    expect(allowed).toHaveLength(282);
     expect(blocked).toHaveLength(68);
     expect(outbound).toHaveLength(22);
     expect(
@@ -694,7 +699,10 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       'GET /reports/suppliers-performance',
       'GET /stores',
       'GET /stores/:id/deletion-preview',
+      'GET /stores/:id/floor-plan',
+      'GET /stores/:id/floor-plan/live',
       'GET /stores/closures',
+      'GET /stores/floor-plans',
       'GET /suppliers',
       'GET /utilities/product-parsing',
       'GET /utilities/product-parsing/manual',
@@ -704,6 +712,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       'PATCH /reports/recommendations/:key/state',
       'PATCH /stores/:id',
       'PATCH /stores/:id/closures/:closureId',
+      'PATCH /stores/:id/floor-plan',
       'PATCH /suppliers/:id',
       'PATCH /utilities/product-parsing/manual/groups/:id',
       'POST /categories',

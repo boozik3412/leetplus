@@ -1,7 +1,7 @@
 10bd5aa8531e40f2db7a7e35574ada86a2b92ec0ba1185a5e25f2c74513bec33  ./activate-legacy-rollback-contour.sh
 cf95e1a3a704833a67b27cbc356abf16ab62c517b23ec708d19796818b332de3  ./apply-legacy-database-login-fence.sh
 4a25ff7561727f707ce37aa394ca5e0b0b28f52f5b63516dcdac5dfa6a60c130  ./apply-legacy-rollback-egress.sh
-beec39068b116378f2e2f61d801e15f131e8a9e26f77154570065eff2ce3b277  ./blue-green-cutover.sh
+0cfcc415c9b93972645b1786ff0daee2139300eeec13a99137814d24a2a72c5f  ./blue-green-cutover.sh
 754d19795a8fd798906fdbcf44652adb9ad6b869ce272b22e3891893d3fd2a39  ./install-legacy-rollback-contour.sh
 e533a946eb7d4393b7f1f692da2f57f4d8bf86180658ff82d677084fc683b50a  ./legacy-rollback-auth-edge.mjs
 ea25c3cf121ff21f21c02b5bf017ac6b20e943918b6624210d593e800493127c  ./legacy-rollback-child-loopback.cjs
@@ -22,6 +22,6 @@ d6e7b4fe8e0aeb9a77caae62d2fb4ed9322e6383148934c5e26ff3f9126120dd  ./systemd/lega
 891dbecdafa8dcca3ce746402cf8fedf8be28659a3ade1f280a0fed75a63b61a  ./systemd/legacy-rollback-7de04ff4.env.example
 11f17ccd578217c5eb639b00da0ae51213aba6083a521610d607f326a34f343b  ./systemd/legacy-rollback-safe.env.example
 65d7aae54bdded580a491713185229d81bec9f560249f5f4cb82e279900358f8  ./systemd/nginx.service.d/leetplus-blue-green-recovery.conf
-da53c65c0dec67895c688d7a847e76a574025eff2e344d60cb206123cb492de2  ./verify-legacy-rollback-authenticated-reads.mjs
+433c7bc2dfbab1c223cafaf79938fbd8951af635fd727f26925b358894e52b35  ./verify-legacy-rollback-authenticated-reads.mjs
 c5bc4da0b6f449ecc95b4c5fabc1c7aabe5cfadc6e564a7a8ea95d4a3720be8f  ./verify-legacy-rollback-readiness.sh
 3d43aed52db9f28b7b54d9fd7042a04fcf0fd16f873e14944c12dd98c23487f5  ./verify-legacy-runtime-drain.sh

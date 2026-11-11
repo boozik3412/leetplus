@@ -7,7 +7,11 @@ import {
 import { Reflector } from '@nestjs/core';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest } from './auth.types';
-import { AccessCapability, hasCapability } from './capabilities';
+import {
+  AccessCapability,
+  hasCapability,
+  isClubSchemeReadPath,
+} from './capabilities';
 import { ROLES_KEY } from './roles.decorator';
 
 const staffAttachmentCapabilities: readonly AccessCapability[] = [
@@ -194,6 +198,10 @@ export class RolesGuard implements CanActivate {
       return this.isReadMethod(method)
         ? 'view_assortment_catalog'
         : 'edit_catalog';
+    }
+
+    if (this.isReadMethod(method) && isClubSchemeReadPath(path)) {
+      return 'view_club_scheme';
     }
 
     if (path.startsWith('/stores')) {

@@ -117,6 +117,7 @@ const permissionSectionDefinitions: PermissionSectionDefinition[] = [
       "view_assortment_products",
       "view_assortment_catalog",
       "view_assortment_stores",
+      "view_club_scheme",
       "edit_products",
       "edit_catalog",
       "edit_stores",

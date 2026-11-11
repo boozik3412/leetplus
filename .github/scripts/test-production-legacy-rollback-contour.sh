@@ -460,7 +460,7 @@ const stores = Array.from({ length: 4 }, (_, index) => ({
 const capabilityKeys = [
   'view_dashboard', 'view_reports', 'view_assortment_reports', 'export_reports',
   'manage_assortment_reports', 'view_assortment_products', 'view_assortment_catalog',
-  'view_assortment_stores', 'view_guests', 'export_guests', 'manage_guest_crm',
+  'view_assortment_stores', 'view_club_scheme', 'view_guests', 'export_guests', 'manage_guest_crm',
   'view_guest_gamification', 'manage_guest_game_rules', 'approve_guest_game_rewards',
   'operate_guest_game_ledger',
   'view_guest_game_pii', 'view_marketing', 'manage_marketing', 'view_communications',
@@ -480,7 +480,8 @@ const capabilityOptions = capabilityKeys.map((key) => ({
 }));
 const legacyCapabilityKeys = capabilityKeys.filter((key) =>
   key !== 'operate_guest_game_ledger' && key !== 'import_guest_foundation' &&
-  key !== 'view_support_tickets' && key !== 'manage_support_tickets');
+  key !== 'view_support_tickets' && key !== 'manage_support_tickets' &&
+  key !== 'view_club_scheme');
 const legacyCapabilityOptions = capabilityOptions.filter((capability) =>
   legacyCapabilityKeys.includes(capability.key));
 const roleOptions = [

@@ -10,6 +10,7 @@ export type Capability =
   | "view_assortment_products"
   | "view_assortment_catalog"
   | "view_assortment_stores"
+  | "view_club_scheme"
   | "view_guests"
   | "export_guests"
   | "manage_guest_crm"
@@ -124,6 +125,8 @@ const requestedCapabilityAlternatives: Partial<
   view_assortment_products: ["edit_products"],
   view_assortment_catalog: ["edit_catalog"],
   view_assortment_stores: ["edit_stores"],
+  // Whoever sees the clubs of the network also sees their floor plan.
+  view_club_scheme: ["view_reports", "view_assortment_stores", "edit_stores"],
   view_guests: guestActionCapabilities,
   view_marketing: ["manage_marketing"],
   view_communications: ["manage_communications"],
@@ -183,6 +186,12 @@ export const capabilityOptions: CapabilityOption[] = [
     key: "view_assortment_stores",
     label: "Клубы сети",
     description: "Просмотр клубов, привязок и сетевого контура.",
+  },
+  {
+    key: "view_club_scheme",
+    label: "Схема клуба",
+    description:
+      "Раздел «Визуализация»: 3D-схема своих клубов с загрузкой ПК, сменой, выручкой и покупками из Langame. Без доступа к настройкам клубов.",
   },
   {
     key: "view_guests",
@@ -600,6 +609,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_communications",
     "manage_communications",
     "manage_users",
+    "view_club_scheme",
     ...standardsManagerStaffCapabilities,
   ],
   SENIOR_ADMINISTRATOR: [
@@ -975,6 +985,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
 
   if (href.startsWith("/categories") || href.startsWith("/suppliers")) {
     return can(user, "view_assortment_catalog") || can(user, "edit_catalog");
+  }
+
+  if (isPathOrChild(href, "/visualization")) {
+    return can(user, "view_club_scheme");
   }
 
   if (href.startsWith("/stores")) {

@@ -2,13 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import {
-  useEffect,
-  useRef,
-  useState,
-  type FocusEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useId, useRef, useState, type FocusEvent } from "react";
 import type { AuthUser } from "@/lib/auth";
 import {
   getDefaultLandingPath,
@@ -18,6 +12,10 @@ import {
 } from "@/lib/landing";
 import { can, canAccessPath } from "@/lib/permissions";
 import { getRoleLabel } from "@/lib/roles";
+import {
+  sidebarCollapsedCookie,
+  sidebarCollapsedValue,
+} from "@/lib/sidebar-preference";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { LeetPlusMark } from "@/components/brand/leetplus-logo";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
@@ -35,53 +33,72 @@ type NavItem = {
     value: string;
     exclude?: boolean;
   };
+  /** Other pages that belong to this item and keep it highlighted. */
+  activePaths?: string[];
+  /**
+   * Pages to open instead when the user cannot open `href`, in order. The
+   * item stays one menu entry while each role lands on a page it may open.
+   */
+  fallbackHrefs?: string[];
   onNavigate?: () => void;
   badge?: number;
   badgeLabel?: string;
 };
 
+type NavIcon =
+  | "guests"
+  | "gamification"
+  | "assortment"
+  | "staff"
+  | "reports"
+  | "settings"
+  | "administration"
+  | "chat"
+  | "notifications";
+
 type NavGroup = {
   title: string;
-  icon:
-    | "guests"
-    | "gamification"
-    | "communications"
-    | "support"
-    | "staff"
-    | "marketing"
-    | "assortment"
-    | "management"
-    | "administration";
+  icon: NavIcon;
   items: NavItem[];
 };
 
-type ProductArea = "Главная" | NavGroup["title"];
+type PersonalNavItem = NavItem & { icon: NavIcon };
+
+type ProductArea = "Сводка" | "Сообщения" | NavGroup["title"];
 
 type OpenNavGroupsState = {
   pathname: string;
   groups: Record<string, boolean>;
 };
 
+// Seven labelled groups agreed on 11.11.2026 (UX plan, step 1.4). Page
+// addresses and access rules are unchanged; only the menu is regrouped.
 const navGroups: NavGroup[] = [
   {
-    title: "Гости",
+    title: "Гости и возврат",
     icon: "guests",
     items: [
-      { href: "/guests", label: "Дашборд гостей" },
-      { href: "/guests#guest-list", label: "Список гостей" },
-      { href: "/guests/report", label: "Полный отчет" },
-      { href: "/guests/report#audiences", label: "Группы" },
-      { href: "/guests/crm", label: "CRM" },
-      { href: "/guests/crm/tasks", label: "Задачи CRM" },
+      { href: "/guests", label: "Клиентская база" },
+      { href: "/guests/report", label: "Полный отчёт и группы" },
+      {
+        href: "/guests/crm",
+        label: "CRM и задачи",
+        activePaths: ["/guests/crm/tasks"],
+      },
+      { href: "/marketing", label: "Кампании" },
+      { href: "/marketing/missions", label: "Акции" },
+      { href: "/marketing/promo-bundles", label: "Промо-наборы" },
+      { href: "/communications", label: "Рассылки" },
+      { href: "/support", label: "Обращения гостей" },
     ],
   },
   {
-    title: "Геймификация",
+    title: "Игровой модуль",
     icon: "gamification",
     items: [
       {
         href: "/gamification",
-        label: "Управление",
+        label: "Настройка",
         activeQuery: { name: "tab", value: "statistics", exclude: true },
       },
       {
@@ -93,75 +110,56 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    title: "Коммуникации",
-    icon: "communications",
+    title: "Товары",
+    icon: "assortment",
     items: [
-      { href: "/communications", label: "Обзор коммуникаций" },
-      { href: "/staff/team-chat", label: "Командный чат" },
-      { href: "/staff/notifications", label: "Уведомления" },
+      { href: "/assortment/dashboard", label: "Обзор ассортимента" },
+      { href: "/products", label: "Товары" },
+      { href: "/products/order", label: "Заказ товаров" },
+      { href: "/categories", label: "Категории" },
+      { href: "/suppliers", label: "Поставщики" },
+      { href: "/import", label: "Импорт" },
+      { href: "/utilities", label: "Утилиты" },
     ],
-  },
-  {
-    title: "Поддержка",
-    icon: "support",
-    items: [{ href: "/support", label: "Обращения гостей" }],
   },
   {
     title: "Персонал",
     icon: "staff",
     items: [
       { href: "/staff", label: "Обзор персонала" },
+      { href: "/staff/directory", label: "Сотрудники" },
       { href: "/staff/operations-dashboard", label: "Операционная дисциплина" },
       { href: "/staff/tasks", label: "Задачи и правила" },
       { href: "/staff/shift-regulations", label: "Регламенты и чек-листы" },
       { href: "/staff/training-courses", label: "Обучение и аттестации" },
       { href: "/staff/knowledge-base", label: "База знаний" },
-      { href: "/staff/administrator-ratings", label: "Контроль и мотивация" },
-      { href: "/staff/discipline", label: "Мотивация" },
-      { href: "/staff/salary", label: "Расчет зарплаты" },
-      { href: "/staff/directory", label: "Сотрудники" },
-      { href: "/staff/staff-control", label: "Контроль персонала" },
+      {
+        href: "/staff/administrator-ratings",
+        label: "Контроль и мотивация",
+        activePaths: ["/staff/discipline", "/staff/staff-control"],
+        fallbackHrefs: ["/staff/staff-control", "/staff/discipline"],
+      },
+      { href: "/staff/salary", label: "Расчёт зарплаты" },
     ],
   },
   {
-    title: "Маркетинг",
-    icon: "marketing",
-    items: [
-      { href: "/marketing", label: "План кампании" },
-      { href: "/marketing#goals", label: "Цели" },
-      { href: "/marketing#mechanics", label: "Механики" },
-      { href: "/marketing/promo-bundles", label: "Промо-наборы" },
-      { href: "/marketing/missions", label: "Промо-сценарии" },
-      { href: "/marketing#campaigns", label: "Кампании" },
-      { href: "/guests/report#audiences", label: "Группы гостей" },
-    ],
-  },
-  {
-    title: "Ассортимент",
-    icon: "assortment",
-    items: [
-      { href: "/assortment/dashboard", label: "Дашборд ассортимента" },
-      { href: "/products", label: "Товары" },
-      { href: "/products/order", label: "Заказ товаров" },
-      { href: "/categories", label: "Категории" },
-      { href: "/suppliers", label: "Поставщики" },
-      { href: "/reports", label: "Отчёты" },
-      { href: "/import", label: "Импорт" },
-      { href: "/utilities", label: "Утилиты" },
-    ],
-  },
-  {
-    title: "Управление",
-    icon: "management",
+    title: "Отчёты",
+    icon: "reports",
     items: [
       { href: "/reports/daily", label: "Отчёт за сутки" },
+      { href: "/reports", label: "Отчёты по ассортименту" },
       { href: "/commercial/audit", label: "Коммерческий аудит" },
-      { href: "/commercial/demo", label: "Демо-режим" },
-      { href: "/commercial/tariffs", label: "Тарифы" },
+    ],
+  },
+  {
+    title: "Настройки",
+    icon: "settings",
+    items: [
+      { href: "/stores", label: "Клубы" },
       { href: "/users", label: "Пользователи и роли" },
-      { href: "/stores", label: "Торговые точки" },
-      { href: "/sync", label: "Синхронизация" },
-      { href: "/settings", label: "Настройки" },
+      { href: "/sync", label: "Подключение Langame" },
+      { href: "/visualization", label: "Схема клуба" },
+      { href: "/settings", label: "Настройки сети" },
     ],
   },
   {
@@ -176,6 +174,12 @@ const navGroups: NavGroup[] = [
       { href: "/administration/support-tickets", label: "Тикеты поддержки" },
     ],
   },
+];
+
+// Personal tools sit at the bottom of the menu, next to the profile.
+const personalNavItems: PersonalNavItem[] = [
+  { href: "/staff/team-chat", label: "Командный чат", icon: "chat" },
+  { href: "/staff/notifications", label: "Уведомления", icon: "notifications" },
 ];
 
 const shiftWorkspaceNavHrefs = new Set([
@@ -270,6 +274,26 @@ function canShowNavItem(user: AuthUser | null, item: NavItem) {
 }
 
 function resolveNavItemForUser(user: AuthUser | null, item: NavItem): NavItem {
+  if (item.fallbackHrefs && !canAccessPath(user, item.href)) {
+    const fallbackHref = item.fallbackHrefs.find((href) =>
+      canAccessPath(user, href),
+    );
+
+    if (fallbackHref) {
+      return {
+        ...item,
+        href: fallbackHref,
+        // An administrator who only sees their own warnings and fines.
+        label:
+          fallbackHref === "/staff/discipline" &&
+          user &&
+          isShiftWorkspaceRole(user.role)
+            ? "Мотивация"
+            : item.label,
+      };
+    }
+  }
+
   if (
     user &&
     isShiftWorkspaceRole(user.role) &&
@@ -285,29 +309,48 @@ function resolveNavItemForUser(user: AuthUser | null, item: NavItem): NavItem {
   return item;
 }
 
+function isNavItemActive(
+  pathname: string,
+  item: Pick<NavItem, "href" | "activeQuery" | "activePaths">,
+  searchParams?: Pick<URLSearchParams, "get">,
+) {
+  return (
+    isNavigationItemActive(
+      pathname,
+      item.href,
+      searchParams,
+      item.activeQuery,
+    ) ||
+    (item.activePaths ?? []).some((path) =>
+      isNavigationItemActive(pathname, path),
+    )
+  );
+}
+
 function NavLink({
   href,
   label,
   activeQuery,
+  activePaths,
   onNavigate,
   badge,
   badgeLabel,
 }: NavItem) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const isActive = isNavigationItemActive(
+  const isActive = isNavItemActive(
     pathname,
-    href,
+    { href, activeQuery, activePaths },
     searchParams,
-    activeQuery,
   );
 
   return (
     <Link
       href={href}
       onClick={onNavigate}
+      aria-current={isActive ? "page" : undefined}
       className={[
-        "flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
+        "flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70",
         isActive
           ? "bg-zinc-950 text-white shadow-sm dark:bg-emerald-400 dark:text-zinc-950"
           : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100",
@@ -319,54 +362,118 @@ function NavLink({
   );
 }
 
-function NavSection({
-  title,
+function ExpandedNavGroup({
+  group,
   isOpen,
+  isCurrent,
   onToggle,
-  badge = 0,
-  badgeLabel,
-  children,
+  onNavigate,
 }: {
-  title: string;
+  group: NavGroup;
   isOpen: boolean;
+  isCurrent: boolean;
   onToggle: () => void;
-  badge?: number;
-  badgeLabel?: string;
-  children: ReactNode;
+  onNavigate?: () => void;
 }) {
+  const panelId = useId();
+  const badge = groupBadgeTotal(group.items);
+  const badgeLabel = groupBadgeLabel(group.items);
+
   return (
-    <div className="space-y-1">
+    <div>
       <button
         type="button"
         aria-expanded={isOpen}
+        aria-controls={panelId}
         onClick={onToggle}
-        className="flex w-full items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-200 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
-      >
-        <span className="flex items-center gap-2">
-          {title}
-          {isOpen ? null : <NavBadge count={badge} label={badgeLabel} />}
-        </span>
-        <span
-          aria-hidden="true"
-          className={[
-            "text-sm leading-none text-zinc-400 transition-transform duration-200 ease-out",
-            isOpen ? "rotate-90" : "",
-          ].join(" ")}
-        >
-          &gt;
-        </span>
-      </button>
-      <div
         className={[
-          "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
-          isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+          "flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70",
+          isCurrent
+            ? "bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+            : "text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900",
         ].join(" ")}
       >
-        <div className="min-h-0 overflow-hidden">
-          <div className="space-y-1 pl-2 pt-1">{children}</div>
+        <SectionIcon icon={group.icon} />
+        <span className="min-w-0 flex-1">{group.title}</span>
+        {isOpen ? null : <NavBadge count={badge} label={badgeLabel} />}
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={[
+            "h-4 w-4 shrink-0 text-zinc-400 transition-transform motion-reduce:transition-none",
+            isOpen ? "rotate-180" : "",
+          ].join(" ")}
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {isOpen ? (
+        <div id={panelId} className="space-y-0.5 pb-1.5 pl-8 pt-0.5">
+          {group.items.map((item) => (
+            <NavLink key={item.href} {...item} onNavigate={onNavigate} />
+          ))}
         </div>
-      </div>
+      ) : null}
     </div>
+  );
+}
+
+function PersonalNavLink({
+  item,
+  compact,
+  onNavigate,
+}: {
+  item: PersonalNavItem;
+  compact: boolean;
+  onNavigate?: () => void;
+}) {
+  const pathname = usePathname();
+  const isActive = isNavItemActive(pathname, item);
+  const title = item.badge
+    ? `${item.label}: ${item.badgeLabel ?? item.badge}`
+    : item.label;
+
+  if (compact) {
+    return (
+      <Link
+        href={item.href}
+        title={title}
+        aria-label={title}
+        aria-current={isActive ? "page" : undefined}
+        onClick={onNavigate}
+        className={compactGroupButtonClass({ isActive })}
+      >
+        <SectionIcon icon={item.icon} />
+        <NavBadge
+          count={item.badge ?? 0}
+          label={item.badgeLabel}
+          variant="corner"
+        />
+      </Link>
+    );
+  }
+
+  return (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      aria-current={isActive ? "page" : undefined}
+      className={[
+        "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70",
+        isActive
+          ? "bg-zinc-950 text-white dark:bg-emerald-400 dark:text-zinc-950"
+          : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100",
+      ].join(" ")}
+    >
+      <SectionIcon icon={item.icon} />
+      <span className="min-w-0 flex-1">{item.label}</span>
+      <NavBadge count={item.badge ?? 0} label={item.badgeLabel} />
+    </Link>
   );
 }
 
@@ -544,7 +651,7 @@ function compactGroupButtonClass({
   ].join(" ");
 }
 
-function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
+function SectionIcon({ icon }: { icon: NavIcon }) {
   const common = {
     className: compactSidebarIconClassName,
     viewBox: "0 0 24 24",
@@ -591,28 +698,18 @@ function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
     );
   }
 
-  if (icon === "communications") {
+  if (icon === "reports") {
     return (
       <svg {...common}>
-        <path d="M5 6.5A3.5 3.5 0 0 1 8.5 3h7A3.5 3.5 0 0 1 19 6.5v5A3.5 3.5 0 0 1 15.5 15H12l-4 3v-3.2A3.5 3.5 0 0 1 5 11.5z" />
-        <path d="M9 8h6" />
-        <path d="M9 11h4" />
-        <path d="M18.5 11.5A3.5 3.5 0 0 1 21 15v4l-3-2h-4" />
+        <path d="M4 20h16" />
+        <path d="M7 16v-5" />
+        <path d="M12 16V6" />
+        <path d="M17 16v-8" />
       </svg>
     );
   }
 
-  if (icon === "support") {
-    return (
-      <svg {...common}>
-        <path d="M9 4.5 7.7 2.8M15 4.5l1.3-1.7M8 9H4.5M19.5 9H16M8 14H4.5M19.5 14H16M9 19.5l-1.8 1.7M15 19.5l1.8 1.7" />
-        <path d="M8 8.5a4 4 0 0 1 8 0v6.3a4 4 0 0 1-8 0V8.5Z" />
-        <path d="M8 11.5h8M12 7v10" />
-      </svg>
-    );
-  }
-
-  if (icon === "management") {
+  if (icon === "settings") {
     return (
       <svg {...common}>
         <path d="M5 7h14" />
@@ -635,12 +732,21 @@ function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
     );
   }
 
-  if (icon === "marketing") {
+  if (icon === "chat") {
     return (
       <svg {...common}>
-        <path d="M5 13.5h3.5l7-4.5v10l-7-4.5H5z" />
-        <path d="M8.5 14.5l1.2 4.5" />
-        <path d="M18.5 9.8a4.2 4.2 0 0 1 0 8.4" />
+        <path d="M5 6.5A3.5 3.5 0 0 1 8.5 3h7A3.5 3.5 0 0 1 19 6.5v5A3.5 3.5 0 0 1 15.5 15H12l-4 3v-3.2A3.5 3.5 0 0 1 5 11.5z" />
+        <path d="M9 8h6" />
+        <path d="M9 11h4" />
+      </svg>
+    );
+  }
+
+  if (icon === "notifications") {
+    return (
+      <svg {...common}>
+        <path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z" />
+        <path d="M10 20.5a2.2 2.2 0 0 0 4 0" />
       </svg>
     );
   }
@@ -705,7 +811,7 @@ function LogoMark() {
 function CompactHomeLink({
   href = "/dashboard",
   isActive,
-  title = "Главная: сводный дашборд сети",
+  title = "Сводка: главный экран сети",
   onNavigate,
 }: {
   href?: string;
@@ -788,90 +894,171 @@ function isNavigationItemActive(
 
 function resolveCurrentProductArea(pathname: string): ProductArea {
   const currentPathname = normalizeNavigationPath(pathname);
+  const startsWithAny = (...prefixes: string[]) =>
+    prefixes.some(
+      (prefix) =>
+        currentPathname === prefix || currentPathname.startsWith(`${prefix}/`),
+    );
 
   if (isDashboardPath(currentPathname)) {
-    return "Главная";
+    return "Сводка";
   }
 
-  if (
-    currentPathname.startsWith("/communications") ||
-    currentPathname.startsWith("/staff/team-chat") ||
-    currentPathname.startsWith("/staff/notifications")
-  ) {
-    return "Коммуникации";
+  if (startsWithAny("/staff/team-chat", "/staff/notifications")) {
+    return "Сообщения";
   }
 
-  if (currentPathname.startsWith("/support")) {
-    return "Поддержка";
-  }
-
-  if (
-    currentPathname.startsWith("/staff") ||
-    currentPathname.startsWith("/guests/staff-control")
-  ) {
+  if (startsWithAny("/staff", "/guests/staff-control")) {
     return "Персонал";
   }
 
   if (
     currentPathname.startsWith("/administration") ||
-    currentPathname.startsWith("/admin")
+    startsWithAny("/admin")
   ) {
     return "Администрирование";
   }
 
-  if (currentPathname.startsWith("/marketing")) {
-    return "Маркетинг";
+  if (startsWithAny("/gamification", "/guests/gamification")) {
+    return "Игровой модуль";
   }
 
-  if (currentPathname.startsWith("/gamification")) {
-    return "Геймификация";
+  if (startsWithAny("/guests", "/marketing", "/communications", "/support")) {
+    return "Гости и возврат";
   }
 
-  if (currentPathname.startsWith("/guests")) {
-    return "Гости";
-  }
-
-  if (
-    currentPathname === "/reports/daily" ||
-    currentPathname.startsWith("/reports/daily/") ||
-    currentPathname.startsWith("/commercial") ||
-    currentPathname.startsWith("/users") ||
-    currentPathname.startsWith("/stores") ||
-    currentPathname.startsWith("/sync") ||
-    currentPathname.startsWith("/settings")
-  ) {
-    return "Управление";
+  if (startsWithAny("/reports", "/commercial")) {
+    return "Отчёты";
   }
 
   if (
-    currentPathname.startsWith("/assortment") ||
-    currentPathname.startsWith("/products") ||
-    currentPathname.startsWith("/categories") ||
-    currentPathname.startsWith("/suppliers") ||
-    currentPathname.startsWith("/reports") ||
-    currentPathname.startsWith("/import") ||
-    currentPathname.startsWith("/utilities")
+    startsWithAny("/stores", "/users", "/sync", "/settings", "/visualization")
   ) {
-    return "Ассортимент";
+    return "Настройки";
   }
 
-  return "Главная";
+  if (
+    startsWithAny(
+      "/assortment",
+      "/products",
+      "/categories",
+      "/suppliers",
+      "/import",
+      "/utilities",
+    )
+  ) {
+    return "Товары";
+  }
+
+  return "Сводка";
 }
 
-export function Sidebar({ user }: { user: AuthUser | null }) {
+function ExpandedHomeLink({
+  href,
+  label,
+  isActive,
+  onNavigate,
+}: {
+  href: string;
+  label: string;
+  isActive: boolean;
+  onNavigate?: () => void;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      aria-current={isActive ? "page" : undefined}
+      className={[
+        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70",
+        isActive
+          ? "bg-zinc-950 text-white shadow-sm dark:bg-emerald-400 dark:text-zinc-950"
+          : "text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900",
+      ].join(" ")}
+    >
+      <HomeIcon />
+      <span className="min-w-0 flex-1">{label}</span>
+    </Link>
+  );
+}
+
+function FoldIcon({ direction }: { direction: "left" | "right" }) {
+  return (
+    <svg
+      className={compactSidebarIconClassName}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3.5" y="4.5" width="17" height="15" rx="3" />
+      <path d="M9 4.5v15" />
+      {direction === "left" ? (
+        <path d="m15.5 10-2 2 2 2" />
+      ) : (
+        <path d="m13.5 10 2 2-2 2" />
+      )}
+    </svg>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <svg
+      className={compactSidebarIconClassName}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="m16 17 5-5-5-5" />
+      <path d="M21 12H9" />
+    </svg>
+  );
+}
+
+function writeSidebarCollapsedPreference(collapsed: boolean) {
+  const maxAge = collapsed ? 60 * 60 * 24 * 365 : 0;
+
+  document.cookie = `${sidebarCollapsedCookie}=${
+    collapsed ? sidebarCollapsedValue : ""
+  }; path=/; max-age=${maxAge}; samesite=lax`;
+}
+
+export function Sidebar({
+  user,
+  initialCollapsed = false,
+}: {
+  user: AuthUser | null;
+  /** The desktop menu starts folded to icons when the user chose so. */
+  initialCollapsed?: boolean;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const desktopSidebarRef = useRef<HTMLElement | null>(null);
-  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(initialCollapsed);
   const [tenantContextError, setTenantContextError] = useState<string | null>(
     null,
   );
+  // Hover menus of the folded icon rail.
   const [openNavState, setOpenNavState] = useState<OpenNavGroupsState>({
     pathname: "",
     groups: {},
   });
+  // Groups the user opened or closed by hand in the full menu. Without a
+  // choice, the group of the current page is open.
+  const [expandedGroupChoices, setExpandedGroupChoices] = useState<
+    Record<string, boolean>
+  >({});
   const openNavGroups =
     openNavState.pathname === pathname ? openNavState.groups : {};
   const permittedNavGroups = navGroups
@@ -882,6 +1069,9 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         .filter((item) => canShowNavItem(user, item)),
     }))
     .filter((group) => group.items.length > 0);
+  const permittedPersonalItems = personalNavItems
+    .map((item) => ({ ...item, ...resolveNavItemForUser(user, item) }))
+    .filter((item) => canShowNavItem(user, item));
   const supportQueueBadges = useSupportQueueBadges(
     permittedNavGroups
       .flatMap((group) => group.items.map((item) => item.href))
@@ -890,35 +1080,37 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   const watchesRewardIssues =
     (can(user, "approve_guest_game_rewards") ||
       can(user, "view_guest_gamification")) &&
-    permittedNavGroups.some((group) =>
-      group.items.some((item) => item.href === staffNotificationsHref),
-    );
+    permittedPersonalItems.some((item) => item.href === staffNotificationsHref);
   const rewardIssueBadge = useRewardIssueBadge(watchesRewardIssues);
   const allowedNavGroups = permittedNavGroups.map((group) => ({
     ...group,
-    items: group.items.map((item) =>
-      item.href === staffNotificationsHref
-        ? {
-            ...item,
-            badge: rewardIssueBadge,
-            badgeLabel: rewardIssuesLabel(rewardIssueBadge),
-          }
-        : { ...item, badge: supportQueueBadges[item.href] },
-    ),
+    items: group.items.map((item) => ({
+      ...item,
+      badge: supportQueueBadges[item.href],
+    })),
   }));
+  const allowedPersonalItems = permittedPersonalItems.map((item) =>
+    item.href === staffNotificationsHref
+      ? {
+          ...item,
+          badge: rewardIssueBadge,
+          badgeLabel: rewardIssuesLabel(rewardIssueBadge),
+        }
+      : item,
+  );
   const showHomeLink = Boolean(user);
   const homeHref = user ? getDefaultLandingPath(user) : "/dashboard";
   const homeLabel =
     homeHref === platformAdministrationHref
       ? "Администрирование"
       : homeHref === "/dashboard"
-        ? "Главная"
+        ? "Сводка"
         : "Моя смена";
   const homeTitle =
     homeHref === platformAdministrationHref
-      ? "Главная: администрирование платформы"
+      ? "Администрирование платформы"
       : homeHref === "/dashboard"
-        ? "Главная: сводный дашборд сети"
+        ? "Сводка: главный экран сети"
         : "Моя смена: задачи, регламенты и текущая выручка";
   const isHomeActive = isNavigationItemActive(pathname, homeHref);
   const isDashboardArea = isDashboardPath(pathname);
@@ -957,10 +1149,6 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         return;
       }
 
-      if (mobileMenuRef.current?.contains(target)) {
-        return;
-      }
-
       setOpenNavState({ pathname, groups: {} });
     }
 
@@ -989,8 +1177,17 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     const previousBodyOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsMobileMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("keydown", closeOnEscape);
+
     return () => {
       document.body.style.overflow = previousBodyOverflow;
+      document.removeEventListener("keydown", closeOnEscape);
     };
   }, [isMobileMenuOpen]);
 
@@ -1019,17 +1216,14 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     router.refresh();
   }
 
-  function toggleNavGroup(title: string) {
-    setOpenNavState((current) => {
-      const currentGroups = current.pathname === pathname ? current.groups : {};
+  function isExpandedGroupOpen(title: string) {
+    return expandedGroupChoices[title] ?? title === currentProductArea;
+  }
 
-      return {
-        pathname,
-        groups: {
-          [title]: !currentGroups[title],
-        },
-      };
-    });
+  function toggleExpandedGroup(title: string) {
+    const isOpen = isExpandedGroupOpen(title);
+
+    setExpandedGroupChoices((current) => ({ ...current, [title]: !isOpen }));
   }
 
   function openNavGroup(title: string) {
@@ -1048,7 +1242,37 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
 
   function closeMobileMenu() {
     setIsMobileMenuOpen(false);
+  }
+
+  function setCollapsed(collapsed: boolean) {
     closeNavGroups();
+    setIsCollapsed(collapsed);
+    writeSidebarCollapsedPreference(collapsed);
+  }
+
+  function renderExpandedNav(onNavigate?: () => void) {
+    return (
+      <>
+        {showHomeLink ? (
+          <ExpandedHomeLink
+            href={homeHref}
+            label={homeLabel}
+            isActive={isHomeActive}
+            onNavigate={onNavigate}
+          />
+        ) : null}
+        {allowedNavGroups.map((group) => (
+          <ExpandedNavGroup
+            key={group.title}
+            group={group}
+            isOpen={isExpandedGroupOpen(group.title)}
+            isCurrent={!isHomeActive && currentProductArea === group.title}
+            onToggle={() => toggleExpandedGroup(group.title)}
+            onNavigate={onNavigate}
+          />
+        ))}
+      </>
+    );
   }
 
   return (
@@ -1088,10 +1312,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
             onClick={closeMobileMenu}
             className="absolute inset-0 z-0 bg-zinc-950/60 backdrop-blur-sm"
           />
-          <div
-            ref={mobileMenuRef}
-            className="relative z-10 flex h-dvh max-h-dvh w-[min(20rem,calc(100vw-2rem))] flex-col border-r border-zinc-200/80 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
-          >
+          <div className="relative z-10 flex h-dvh max-h-dvh w-[min(20rem,calc(100vw-2rem))] flex-col border-r border-zinc-200/80 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
             <div className="border-b border-zinc-200/80 px-4 py-4 dark:border-zinc-800">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
@@ -1109,40 +1330,31 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
                   type="button"
                   aria-label="Закрыть меню"
                   onClick={closeMobileMenu}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 text-xl leading-none text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 text-xl leading-none text-zinc-600 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
                 >
                   ×
                 </button>
               </div>
             </div>
-            <nav className="flex-1 space-y-1 overflow-y-auto overscroll-contain p-3">
-              {showHomeLink ? (
-                <NavLink
-                  href={homeHref}
-                  label={homeLabel}
-                  onNavigate={closeMobileMenu}
-                />
-              ) : null}
-              {allowedNavGroups.map((group) => (
-                <NavSection
-                  key={group.title}
-                  title={group.title}
-                  isOpen={Boolean(openNavGroups[group.title])}
-                  onToggle={() => toggleNavGroup(group.title)}
-                  badge={groupBadgeTotal(group.items)}
-                  badgeLabel={groupBadgeLabel(group.items)}
-                >
-                  {group.items.map((item) => (
-                    <NavLink
+            <nav
+              aria-label="Главное меню"
+              className="flex-1 space-y-0.5 overflow-y-auto overscroll-contain p-3"
+            >
+              {renderExpandedNav(closeMobileMenu)}
+            </nav>
+            <div className="space-y-3 border-t border-zinc-200/80 p-3 dark:border-zinc-800">
+              {allowedPersonalItems.length > 0 ? (
+                <div className="space-y-0.5">
+                  {allowedPersonalItems.map((item) => (
+                    <PersonalNavLink
                       key={item.href}
-                      {...item}
+                      item={item}
+                      compact={false}
                       onNavigate={closeMobileMenu}
                     />
                   ))}
-                </NavSection>
-              ))}
-            </nav>
-            <div className="border-t border-zinc-200/80 p-3 dark:border-zinc-800">
+                </div>
+              ) : null}
               <UserPanel
                 user={user}
                 tenantContextError={tenantContextError}
@@ -1154,61 +1366,203 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         </div>
       ) : null}
 
-      <aside
-        ref={desktopSidebarRef}
-        className="sticky top-0 z-[70] hidden h-dvh max-h-dvh w-20 shrink-0 flex-col border-r border-zinc-200/80 bg-white/80 shadow-[inset_-1px_0_0_rgb(255_255_255_/_0.5)] backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-950/75 md:flex"
-      >
-        <Link
-          href={homeHref}
-          title={homeTitle}
-          aria-label={homeTitle}
-          onClick={closeNavGroups}
-          onFocus={closeNavGroups}
-          onMouseEnter={closeNavGroups}
-          onPointerEnter={closeNavGroups}
-          className="group flex border-b border-zinc-200/80 px-3 py-4 transition-colors hover:bg-zinc-100/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:hover:bg-zinc-900/70"
+      {isCollapsed ? (
+        <aside
+          ref={desktopSidebarRef}
+          className="sticky top-0 z-[70] hidden h-dvh max-h-dvh w-20 shrink-0 flex-col border-r border-zinc-200/80 bg-white/80 shadow-[inset_-1px_0_0_rgb(255_255_255_/_0.5)] backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-950/75 md:flex"
         >
-          <LogoMark />
-        </Link>
-        <nav className="min-h-0 flex-1 space-y-2 overflow-visible px-3 py-4">
-          {showHomeLink ? (
-            <>
-              <CompactHomeLink
-                href={homeHref}
-                isActive={isHomeActive}
-                title={homeTitle}
+          <Link
+            href={homeHref}
+            title={homeTitle}
+            aria-label={homeTitle}
+            onClick={closeNavGroups}
+            onFocus={closeNavGroups}
+            onMouseEnter={closeNavGroups}
+            onPointerEnter={closeNavGroups}
+            className="group flex border-b border-zinc-200/80 px-3 py-4 transition-colors hover:bg-zinc-100/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:hover:bg-zinc-900/70"
+          >
+            <LogoMark />
+          </Link>
+          <nav
+            aria-label="Главное меню"
+            className="min-h-0 flex-1 space-y-2 overflow-visible px-3 py-4"
+          >
+            {showHomeLink ? (
+              <>
+                <CompactHomeLink
+                  href={homeHref}
+                  isActive={isHomeActive}
+                  title={homeTitle}
+                  onNavigate={closeNavGroups}
+                />
+                {allowedNavGroups.length > 0 ? (
+                  <div
+                    aria-hidden="true"
+                    className="mx-auto h-px w-10 bg-zinc-200/80 dark:bg-zinc-800/80"
+                  />
+                ) : null}
+              </>
+            ) : null}
+            {allowedNavGroups.map((group) => (
+              <CompactNavSection
+                key={group.title}
+                group={group}
+                isActive={!isHomeActive && currentProductArea === group.title}
+                isOpen={Boolean(openNavGroups[group.title])}
+                onOpen={() => openNavGroup(group.title)}
+                onClose={closeNavGroups}
                 onNavigate={closeNavGroups}
               />
-              {allowedNavGroups.length > 0 ? (
-                <div
-                  aria-hidden="true"
-                  className="mx-auto h-px w-10 bg-zinc-200/80 dark:bg-zinc-800/80"
-                />
-              ) : null}
-            </>
-          ) : null}
-          {allowedNavGroups.map((group) => (
-            <CompactNavSection
-              key={group.title}
-              group={group}
-              isActive={!isHomeActive && currentProductArea === group.title}
-              isOpen={Boolean(openNavGroups[group.title])}
-              onOpen={() => openNavGroup(group.title)}
-              onClose={closeNavGroups}
-              onNavigate={closeNavGroups}
+            ))}
+          </nav>
+          <div className="shrink-0 space-y-2 border-t border-zinc-200/80 p-3 dark:border-zinc-800">
+            {allowedPersonalItems.map((item) => (
+              <PersonalNavLink
+                key={item.href}
+                item={item}
+                compact
+                onNavigate={closeNavGroups}
+              />
+            ))}
+            <ThemeSwitcher variant="compact" />
+            <CompactUserPanel
+              user={user}
+              onLeaveTenantContext={handleLeaveTenantContext}
+              onLogout={handleLogout}
             />
-          ))}
-        </nav>
-        <div className="shrink-0 space-y-3 border-t border-zinc-200/80 p-3 dark:border-zinc-800">
-          <ThemeSwitcher variant="compact" />
-          <CompactUserPanel
-            user={user}
-            onLeaveTenantContext={handleLeaveTenantContext}
-            onLogout={handleLogout}
-          />
-        </div>
-      </aside>
+            <button
+              type="button"
+              title="Развернуть меню"
+              aria-label="Развернуть меню"
+              onClick={() => setCollapsed(false)}
+              className="flex h-10 w-12 cursor-pointer items-center justify-center rounded-2xl text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+            >
+              <FoldIcon direction="right" />
+            </button>
+          </div>
+        </aside>
+      ) : (
+        <aside
+          ref={desktopSidebarRef}
+          className="sticky top-0 z-[70] hidden h-dvh max-h-dvh w-64 shrink-0 flex-col border-r border-zinc-200/80 bg-white/80 backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-950/75 md:flex"
+        >
+          <div className="flex items-center gap-2 border-b border-zinc-200/80 px-3 py-3 dark:border-zinc-800">
+            <Link
+              href={homeHref}
+              aria-label={homeTitle}
+              className="group flex min-w-0 flex-1 items-center gap-1 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70"
+            >
+              <LogoMark />
+              <span className="truncate text-base font-bold text-zinc-950 dark:text-zinc-50">
+                LeetPlus
+              </span>
+            </Link>
+            <button
+              type="button"
+              title="Свернуть меню"
+              aria-label="Свернуть меню"
+              onClick={() => setCollapsed(true)}
+              className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+            >
+              <FoldIcon direction="left" />
+            </button>
+          </div>
+          <nav
+            aria-label="Главное меню"
+            className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-3 py-3"
+          >
+            {renderExpandedNav()}
+          </nav>
+          <div className="shrink-0 space-y-2 border-t border-zinc-200/80 p-3 dark:border-zinc-800">
+            {allowedPersonalItems.length > 0 ? (
+              <div className="space-y-0.5">
+                {allowedPersonalItems.map((item) => (
+                  <PersonalNavLink
+                    key={item.href}
+                    item={item}
+                    compact={false}
+                  />
+                ))}
+              </div>
+            ) : null}
+            <ExpandedUserRow
+              user={user}
+              tenantContextError={tenantContextError}
+              onLeaveTenantContext={handleLeaveTenantContext}
+              onLogout={handleLogout}
+            />
+          </div>
+        </aside>
+      )}
     </>
+  );
+}
+
+function ExpandedUserRow({
+  user,
+  tenantContextError,
+  onLeaveTenantContext,
+  onLogout,
+}: {
+  user: AuthUser | null;
+  tenantContextError: string | null;
+  onLeaveTenantContext: () => void;
+  onLogout: () => void;
+}) {
+  if (!user) {
+    return (
+      <div className="flex items-center gap-2">
+        <Link
+          href="/login"
+          className="flex-1 rounded-xl bg-zinc-900 px-3 py-2 text-center text-sm font-medium text-white transition hover:bg-zinc-800"
+        >
+          Войти
+        </Link>
+        <ThemeSwitcher placement="up" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 px-1">
+        <div
+          className="min-w-0 flex-1"
+          title={`${user.fullName ?? user.email} · ${user.tenantSlug}.leetplus.ru`}
+        >
+          <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+            {user.fullName ?? user.email}
+          </p>
+          <p className="truncate text-xs text-zinc-500">
+            {getRoleLabel(user.role)}
+          </p>
+        </div>
+        <ThemeSwitcher placement="up" />
+        <button
+          type="button"
+          title="Выйти"
+          aria-label="Выйти"
+          onClick={onLogout}
+          className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-2xl border border-zinc-200 bg-white/80 text-zinc-600 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:bg-zinc-950/70 dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-50"
+        >
+          <LogoutIcon />
+        </button>
+      </div>
+      {user.platformTenantContext ? (
+        <button
+          type="button"
+          onClick={onLeaveTenantContext}
+          className="w-full rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+        >
+          К управлению платформой ({user.tenantSlug})
+        </button>
+      ) : null}
+      {tenantContextError ? (
+        <p className="text-xs text-red-600 dark:text-red-300">
+          {tenantContextError}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

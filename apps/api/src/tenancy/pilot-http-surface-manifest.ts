@@ -1,4 +1,7 @@
-import type { AccessCapability } from '../auth/capabilities';
+import {
+  isClubSchemeReadPath,
+  type AccessCapability,
+} from '../auth/capabilities';
 
 /**
  * Gate 1MT inventory for the first external tenant.
@@ -236,6 +239,19 @@ const definitions: readonly ControllerDefinition[] = [
       'POST /stores/:id/closures': { profile: 'NETWORK_VERIFIED' },
       'PATCH /stores/:id/closures/:closureId': { profile: 'NETWORK_VERIFIED' },
       'DELETE /stores/:id/closures/:closureId': { profile: 'NETWORK_VERIFIED' },
+    },
+  },
+  {
+    source: 'src/stores/store-floor-plans.controller.ts',
+    prefix: '/stores',
+    module: 'ASSORTMENT',
+    profile: 'STORES_VERIFIED',
+    routes: [
+      ['GET', ['floor-plans', ':id/floor-plan', ':id/floor-plan/live']],
+      ['PATCH', [':id/floor-plan']],
+    ],
+    overrides: {
+      'PATCH /stores/:id/floor-plan': { profile: 'NETWORK_VERIFIED' },
     },
   },
   {
@@ -1130,6 +1146,9 @@ function resolveCapability(
     }
     if (path.startsWith('/categories') || path.startsWith('/suppliers')) {
       return method === 'GET' ? 'view_assortment_catalog' : 'edit_catalog';
+    }
+    if (method === 'GET' && isClubSchemeReadPath(path)) {
+      return 'view_club_scheme';
     }
     if (path.startsWith('/stores')) {
       return method === 'GET' ? 'view_assortment_stores' : 'edit_stores';

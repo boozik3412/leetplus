@@ -31,7 +31,13 @@ import {
   HourlySessionSourceNote,
 } from "@/components/hourly-session-source-note";
 
-type Step = "conditions" | "rewards" | "appearance";
+type Step =
+  | "template"
+  | "what"
+  | "reward"
+  | "audience"
+  | "appearance"
+  | "launch";
 type TaskType = GuestGameMissionWizardTaskType;
 type RewardType = "LANGAME_BONUS" | "LOOTBOX" | "PROMOCODE" | "NONE";
 type SelectedProduct = Pick<
@@ -105,6 +111,114 @@ const cardClass =
   "rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950";
 const subsectionClass =
   "rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20";
+// UX plan 2.3: the wizard is the main way to launch a game mechanic. The
+// steps only regroup the existing fields; saving and activation use the same
+// wizard requests as before, so no new accrual rule appears here.
+const wizardSteps: Array<{ id: Step; label: string }> = [
+  { id: "template", label: "Шаблон" },
+  { id: "what", label: "Что поощряем" },
+  { id: "reward", label: "Награда" },
+  { id: "audience", label: "Для кого" },
+  { id: "appearance", label: "Как увидит гость" },
+  { id: "launch", label: "Запуск" },
+];
+
+const taskTypeOptions: Array<{ id: TaskType; label: string; hint: string }> = [
+  { id: "PLAY_TIME", label: "Игровое время", hint: "Минуты игры в клубе" },
+  { id: "CHECK_IN", label: "Визиты", hint: "Гость отмечается в клубе" },
+  {
+    id: "PRODUCT_PURCHASE",
+    label: "Покупки",
+    hint: "Бар, товары или категории",
+  },
+  {
+    id: "BALANCE_TOPUP",
+    label: "Пополнение баланса",
+    hint: "Разовое, несколько или сумма",
+  },
+  {
+    id: "FACEIT_MATCH",
+    label: "Матчи FACEIT CS2",
+    hint: "Матчи, победы, убийства",
+  },
+  {
+    id: "APP_OPEN",
+    label: "Вход в игровой модуль",
+    hint: "Гость открыл приложение",
+  },
+];
+
+type MissionTemplateId = "play3h" | "secondVisit" | "barPurchase" | "blank";
+
+type MissionTemplate = {
+  id: MissionTemplateId;
+  title: string;
+  text: string;
+  apply: (state: WizardState, lootBoxes: GuestGameLootBox[]) => WizardState;
+};
+
+const missionTemplates: MissionTemplate[] = [
+  {
+    id: "play3h",
+    title: "3 часа игры → кейс",
+    text: "Гость наигрывает 3 часа в клубе и получает кейс.",
+    apply: (state, lootBoxes) => ({
+      ...state,
+      name: "3 часа игры — кейс",
+      taskType: "PLAY_TIME",
+      target: 180,
+      minSessionMinutes: 30,
+      // Without a ready case the reward step asks to pick or create one.
+      rewardType: "LOOTBOX",
+      lootBoxId: lootBoxes[0]?.id ?? "",
+      description: "Наиграй 3 часа в клубе и получи кейс.",
+      actionText: "Играть",
+    }),
+  },
+  {
+    id: "secondVisit",
+    title: "Второй визит за 7 дней",
+    text: "Гость приходит ещё раз в течение недели и получает бонусы.",
+    apply: (state) => ({
+      ...state,
+      name: "Второй визит за 7 дней",
+      taskType: "CHECK_IN",
+      checkInMode: "PERIOD",
+      checkInCount: 2,
+      windowDays: 7,
+      rewardType: "LANGAME_BONUS",
+      rewardAmount: 100,
+      rewardLabel: "100 бонусов на баланс",
+      description: "Приходи в клуб ещё раз в течение 7 дней и получи бонусы.",
+      actionText: "Отметиться",
+    }),
+  },
+  {
+    id: "barPurchase",
+    title: "Покупка в баре",
+    text: "Покупка от 300 ₽ приносит гостю бонусы на баланс.",
+    apply: (state) => ({
+      ...state,
+      name: "Покупка в баре от 300 ₽",
+      taskType: "PRODUCT_PURCHASE",
+      purchaseSource: "ANY",
+      amountMode: "SINGLE_MINIMUM",
+      minimumAmount: 300,
+      rewardType: "LANGAME_BONUS",
+      rewardAmount: 50,
+      rewardLabel: "50 бонусов на баланс",
+      description: "Купи что-нибудь в баре от 300 ₽ и получи бонусы.",
+      actionText: "В бар",
+    }),
+  },
+  {
+    id: "blank",
+    title: "С чистого листа",
+    text: "Сами выберете, что поощрять и какой будет награда.",
+    apply: (state) => state,
+  },
+];
+
 const productCatalogCache = new Map<string, ProductCatalog>();
 const productCatalogCacheLimit = 100;
 const productGroupCatalogCache = new Map<
@@ -157,7 +271,13 @@ export function GuestMissionWizard({
   initialMissionId?: string | null;
   initialTaskType?: TaskType;
 }) {
-  const [step, setStep] = useState<Step>("conditions");
+  const startsFromExisting = Boolean(initialMissionId || initialTaskType);
+  const [step, setStep] = useState<Step>(
+    startsFromExisting ? "what" : "template",
+  );
+  const [templateId, setTemplateId] = useState<MissionTemplateId | null>(
+    startsFromExisting ? "blank" : null,
+  );
   const [form, setForm] = useState<WizardState>(() =>
     initialState(stores, initialTaskType),
   );
@@ -197,6 +317,7 @@ export function GuestMissionWizard({
   const [message, setMessage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const autosaveReady = useRef(false);
+  const stepBarRef = useRef<HTMLDivElement>(null);
 
   const rewardLootBoxes = useMemo(
     () =>
@@ -440,6 +561,35 @@ export function GuestMissionWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activated, draftId, dto]);
 
+  const stepReady: Record<Step, boolean> = {
+    template: templateId !== null,
+    what: true,
+    reward: rewardReady(form),
+    audience: form.storeIds.length > 0,
+    appearance: Boolean(form.name.trim()),
+    launch: readiness?.ready === true,
+  };
+  const stepIndex = wizardSteps.findIndex((item) => item.id === step);
+
+  function goToStep(next: Step) {
+    setStep(next);
+    const bar = stepBarRef.current;
+    if (bar && bar.getBoundingClientRect().top < 0) {
+      bar.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+  }
+  const nextStep = wizardSteps[stepIndex + 1] ?? null;
+
+  function pickTemplate(id: MissionTemplateId) {
+    const template = missionTemplates.find((item) => item.id === id);
+    if (!template) return;
+    setTemplateId(id);
+    setForm(template.apply(initialState(stores), rewardLootBoxes));
+    setSelectedProducts([]);
+    setSelectedProductGroups([]);
+    goToStep("what");
+  }
+
   async function saveDraft(automatic = false): Promise<string | null> {
     if (!automatic) setMessage(null);
     setSaveState("saving");
@@ -478,7 +628,7 @@ export function GuestMissionWizard({
   async function activate(missionId: string | null = draftId) {
     if (!missionId) {
       setMessage(
-        "Новое задание ещё не сохранено. Выберите «Да, сохранить и активировать».",
+        "Новое задание ещё не сохранено. Выберите «Да, сохранить и запустить».",
       );
       return false;
     }
@@ -585,38 +735,36 @@ export function GuestMissionWizard({
           подтверждение активации.
         </div>
       ) : null}
-      <div className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-2 shadow-sm md:grid-cols-3 dark:border-zinc-800 dark:bg-zinc-950">
-        <StepButton
-          index="01"
-          label="Условия"
-          active={step === "conditions"}
-          ready={Boolean(form.storeIds.length)}
-          onClick={() => setStep("conditions")}
-        />
-        <StepButton
-          index="02"
-          label="Награды"
-          active={step === "rewards"}
-          ready={rewardReady(form)}
-          onClick={() => setStep("rewards")}
-        />
-        <StepButton
-          index="03"
-          label="Внешнее оформление"
-          active={step === "appearance"}
-          ready={Boolean(form.name.trim())}
-          onClick={() => setStep("appearance")}
-        />
+      <div
+        ref={stepBarRef}
+        className="grid scroll-mt-4 grid-cols-2 gap-2 rounded-xl border border-zinc-200 bg-white p-2 shadow-sm sm:grid-cols-3 xl:grid-cols-6 dark:border-zinc-800 dark:bg-zinc-950"
+      >
+        {wizardSteps.map((item, index) => (
+          <StepButton
+            key={item.id}
+            index={String(index + 1).padStart(2, "0")}
+            label={item.label}
+            active={step === item.id}
+            ready={stepReady[item.id]}
+            onClick={() => setStep(item.id)}
+          />
+        ))}
       </div>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_430px]">
         <div className="space-y-4">
-          {step === "conditions" ? (
-            <ConditionsStep
+          {step === "template" ? (
+            <TemplateStep
+              selected={templateId}
+              hasLootBoxes={rewardLootBoxes.length > 0}
+              onPick={pickTemplate}
+            />
+          ) : null}
+          {step === "what" ? (
+            <WhatStep
               form={form}
               setForm={setForm}
               stores={stores}
-              audiences={audiences}
               search={search}
               setSearch={(value) => {
                 setSearch(value);
@@ -638,12 +786,20 @@ export function GuestMissionWizard({
               clearProductGroups={() => setSelectedProductGroups([])}
             />
           ) : null}
-          {step === "rewards" ? (
+          {step === "reward" ? (
             <RewardsStep
               form={form}
               setForm={setForm}
               lootBoxes={rewardLootBoxes}
               promoBundles={activePromos}
+            />
+          ) : null}
+          {step === "audience" ? (
+            <AudienceStep
+              form={form}
+              setForm={setForm}
+              stores={stores}
+              audiences={audiences}
             />
           ) : null}
           {step === "appearance" ? (
@@ -653,6 +809,48 @@ export function GuestMissionWizard({
               uploading={uploading}
               uploadCover={uploadCover}
             />
+          ) : null}
+          {step === "launch" ? (
+            <LaunchStep
+              form={form}
+              preview={preview}
+              stores={stores}
+              audiences={audiences}
+              readiness={readiness}
+              onEdit={goToStep}
+            />
+          ) : null}
+          {step !== "template" ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => goToStep(wizardSteps[stepIndex - 1].id)}
+                className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold transition hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+              >
+                Назад
+              </button>
+              {step === "launch" && !activated ? (
+                <button
+                  type="button"
+                  onClick={() => setActivationConfirmationOpen(true)}
+                  disabled={
+                    saveState === "saving" || readiness?.ready === false
+                  }
+                  className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-40"
+                >
+                  Запустить
+                </button>
+              ) : null}
+              {nextStep ? (
+                <button
+                  type="button"
+                  onClick={() => goToStep(nextStep.id)}
+                  className="rounded-lg bg-zinc-950 px-5 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+                >
+                  Далее: {nextStep.label}
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
 
@@ -667,6 +865,7 @@ export function GuestMissionWizard({
             </div>
             <GuestMissionPreview data={preview} />
           </div>
+          <BudgetSummaryCard form={form} preview={preview} />
           <ReadinessCard readiness={readiness} />
         </aside>
       </div>
@@ -679,10 +878,10 @@ export function GuestMissionWizard({
           {activated ? (
             <div className="text-sm">
               <p className="font-bold text-emerald-700 underline decoration-2 underline-offset-4 dark:text-emerald-300">
-                Задание активировано
+                Задание запущено
               </p>
               <p className="mt-1 text-xs leading-5 text-emerald-800/80 dark:text-emerald-200/80">
-                Задание {draftId?.slice(0, 8)} уже находится в боевом контуре.
+                Гости уже видят задание и могут его выполнять.
                 Мастер можно закрыть.
               </p>
             </div>
@@ -725,7 +924,7 @@ export function GuestMissionWizard({
                 disabled={saveState === "saving" || readiness?.ready === false}
                 className="rounded-lg bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 dark:bg-emerald-400 dark:text-zinc-950"
               >
-                Подтвердить активацию
+                Запустить
               </button>
             </div>
           )}
@@ -749,10 +948,10 @@ export function GuestMissionWizard({
               id="activation-confirmation-title"
               className="text-xl font-black"
             >
-              Сохранить изменения перед активацией?
+              Сохранить изменения перед запуском?
             </h2>
             <p className="mt-2 text-sm leading-6 text-zinc-300">
-              Выберите, какую версию задания отправить в игровой контур.
+              Выберите, какую версию задания запустить для гостей.
             </p>
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
@@ -767,7 +966,7 @@ export function GuestMissionWizard({
                 onClick={() => void handleActivationChoice(true)}
                 className="rounded-lg bg-emerald-400 px-4 py-2.5 text-sm font-bold text-zinc-950 transition hover:bg-emerald-300"
               >
-                Да, сохранить и активировать
+                Да, сохранить и запустить
               </button>
             </div>
           </div>
@@ -777,11 +976,10 @@ export function GuestMissionWizard({
   );
 }
 
-function ConditionsStep(props: {
+function WhatStep(props: {
   form: WizardState;
   setForm: React.Dispatch<React.SetStateAction<WizardState>>;
   stores: Store[];
-  audiences: GuestAudience[];
   search: string;
   setSearch: (value: string) => void;
   products: Product[];
@@ -804,34 +1002,80 @@ function ConditionsStep(props: {
     <>
       <section className={cardClass}>
         <SectionTitle
-          title="Основные параметры"
-          subtitle="Кому доступно задание и в какой период оно действует."
+          title="Что поощряем"
+          subtitle="Выберите действие гостя, за которое он получит награду."
         />
-        <div className="mt-5 grid gap-4 md:grid-cols-3">
-          <Field label="Тип задания" required>
-            <select
-              className={fieldClass}
-              value={form.taskType}
-              onChange={(event) => {
-                const taskType = event.target.value as TaskType;
-                setForm((state) => ({
-                  ...state,
-                  taskType,
-                  sessionType:
-                    taskType === "PLAY_TIME" || taskType === "CHECK_IN"
-                      ? state.sessionType
-                      : "ANY",
-                }));
-              }}
-            >
-              <option value="APP_OPEN">Вход в игровой модуль</option>
-              <option value="PLAY_TIME">Игровое время</option>
-              <option value="PRODUCT_PURCHASE">Покупка</option>
-              <option value="BALANCE_TOPUP">Пополнение баланса</option>
-              <option value="CHECK_IN">Чекин</option>
-              <option value="FACEIT_MATCH">Матчи FACEIT CS2</option>
-            </select>
-          </Field>
+        <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {taskTypeOptions.map((option) => {
+            const active = form.taskType === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={active}
+                onClick={() =>
+                  setForm((state) => ({
+                    ...state,
+                    taskType: option.id,
+                    sessionType:
+                      option.id === "PLAY_TIME" || option.id === "CHECK_IN"
+                        ? state.sessionType
+                        : "ANY",
+                  }))
+                }
+                className={`min-h-16 rounded-lg border px-3 py-2.5 text-left transition ${active ? "border-emerald-500 bg-emerald-50 ring-1 ring-emerald-300 dark:bg-emerald-950/40" : "border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"}`}
+              >
+                <strong className="block text-sm">{option.label}</strong>
+                <span className="mt-1 block text-xs leading-4 text-zinc-500">
+                  {option.hint}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className={cardClass}>
+        <SectionTitle
+          title="Условие"
+          subtitle={logicSubtitle(form.taskType)}
+        />
+        <div className="mt-5">
+          {form.taskType === "APP_OPEN" ? <AppOpenLogic /> : null}
+          {form.taskType === "PLAY_TIME" ? (
+            <PlayTimeLogic form={form} setForm={setForm} />
+          ) : null}
+          {form.taskType === "PRODUCT_PURCHASE" ? (
+            <PurchaseLogic {...props} />
+          ) : null}
+          {form.taskType === "BALANCE_TOPUP" ? (
+            <TopupLogic form={form} setForm={setForm} stores={props.stores} />
+          ) : null}
+          {form.taskType === "CHECK_IN" ? (
+            <CheckInLogic form={form} setForm={setForm} />
+          ) : null}
+          {form.taskType === "FACEIT_MATCH" ? (
+            <FaceitMatchLogic form={form} setForm={setForm} />
+          ) : null}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function AudienceStep({
+  form,
+  setForm,
+  stores,
+  audiences,
+}: StateProps & { stores: Store[]; audiences: GuestAudience[] }) {
+  return (
+    <section className={cardClass}>
+        <SectionTitle
+          title="Для кого и когда"
+          subtitle="Какие гости и в каких клубах видят задание, и сколько оно действует."
+        />
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
           <Field label="Видимость">
             <select
               className={fieldClass}
@@ -859,7 +1103,7 @@ function ConditionsStep(props: {
               }
             >
               <option value="">Все гости</option>
-              {props.audiences.map((audience) => (
+              {audiences.map((audience) => (
                 <option key={audience.id} value={audience.id}>
                   {audience.name}
                 </option>
@@ -870,7 +1114,7 @@ function ConditionsStep(props: {
         <div className="mt-4">
           <Field label="Клубы" required>
             <div className="grid gap-2 sm:grid-cols-2">
-              {props.stores.map((store) => {
+              {stores.map((store) => {
                 const active = form.storeIds.includes(store.id);
                 return (
                   <button
@@ -948,31 +1192,6 @@ function ConditionsStep(props: {
         ) : null}
       </section>
 
-      <section className={cardClass}>
-        <SectionTitle
-          title="Логика выполнения"
-          subtitle={logicSubtitle(form.taskType)}
-        />
-        <div className="mt-5">
-          {form.taskType === "APP_OPEN" ? <AppOpenLogic /> : null}
-          {form.taskType === "PLAY_TIME" ? (
-            <PlayTimeLogic form={form} setForm={setForm} />
-          ) : null}
-          {form.taskType === "PRODUCT_PURCHASE" ? (
-            <PurchaseLogic {...props} />
-          ) : null}
-          {form.taskType === "BALANCE_TOPUP" ? (
-            <TopupLogic form={form} setForm={setForm} stores={props.stores} />
-          ) : null}
-          {form.taskType === "CHECK_IN" ? (
-            <CheckInLogic form={form} setForm={setForm} />
-          ) : null}
-          {form.taskType === "FACEIT_MATCH" ? (
-            <FaceitMatchLogic form={form} setForm={setForm} />
-          ) : null}
-        </div>
-      </section>
-    </>
   );
 }
 
@@ -1030,7 +1249,7 @@ function PlayTimeLogic({ form, setForm }: StateProps) {
   );
 }
 
-function PurchaseLogic(props: Parameters<typeof ConditionsStep>[0]) {
+function PurchaseLogic(props: Parameters<typeof WhatStep>[0]) {
   const { form, setForm } = props;
   return (
     <div className="space-y-4">
@@ -1245,7 +1464,7 @@ function PurchaseLogic(props: Parameters<typeof ConditionsStep>[0]) {
   );
 }
 
-function CategoryPicker(props: Parameters<typeof ConditionsStep>[0]) {
+function CategoryPicker(props: Parameters<typeof WhatStep>[0]) {
   return (
     <div className={subsectionClass}>
       <div className="mb-4 rounded-lg border border-zinc-200 bg-white/70 p-3 dark:border-zinc-800 dark:bg-zinc-950/40">
@@ -1619,6 +1838,18 @@ function CheckInLogic({ form, setForm }: StateProps) {
           }
         />
       </div>
+      {form.checkInMode === "PERIOD" ? (
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <NumberField
+            label="За сколько дней"
+            min={1}
+            value={form.windowDays}
+            onChange={(windowDays) =>
+              setForm((state) => ({ ...state, windowDays }))
+            }
+          />
+        </div>
+      ) : null}
       {form.checkInMode !== "SINGLE" ? (
         <div className={subsectionClass}>
           <NumberField
@@ -1804,7 +2035,7 @@ function RewardsStep({
               }
             >
               <option value="LANGAME_BONUS">Бонусы Langame</option>
-              <option value="LOOTBOX">Лутбокс</option>
+              <option value="LOOTBOX">Кейс</option>
               <option value="PROMOCODE">Промокод</option>
               <option value="NONE">Без основной награды</option>
             </select>
@@ -1852,7 +2083,7 @@ function RewardsStep({
         ) : null}
         {form.rewardType === "LOOTBOX" ? (
           <div className="mt-4">
-            <Field label="Наградной лутбокс" required>
+            <Field label="Наградной кейс" required>
               <select
                 className={fieldClass}
                 value={form.lootBoxId}
@@ -1863,7 +2094,7 @@ function RewardsStep({
                   }))
                 }
               >
-                <option value="">Выберите опубликованный лутбокс</option>
+                <option value="">Выберите опубликованный кейс</option>
                 {lootBoxes.map((box) => (
                   <option key={box.id} value={box.id}>
                     {box.name}
@@ -1881,7 +2112,7 @@ function RewardsStep({
                 target="_blank"
                 className="shrink-0 rounded-lg border border-emerald-300 px-3 py-2 text-xs font-bold text-emerald-800 dark:text-emerald-200"
               >
-                Создать лутбокс для награды
+                Создать кейс для награды
               </Link>
             </div>
           </div>
@@ -1923,16 +2154,16 @@ function RewardsStep({
         <SectionTitle
           title={
             form.rewardType === "LOOTBOX"
-              ? "Лимиты выдачи лутбокса"
+              ? "Лимиты выдачи кейсов"
               : "Бюджет и лимиты"
           }
-          subtitle="Ограничения применяются существующим reward и bonus-ledger контуром."
+          subtitle="Ограничения соблюдаются при каждой выдаче награды."
         />
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <Toggle
             label={
               form.rewardType === "LOOTBOX"
-                ? "Безлимитное количество лутбоксов"
+                ? "Безлимитное количество кейсов"
                 : "Безлимитный бюджет"
             }
             checked={form.budgetUnlimited}
@@ -2364,6 +2595,213 @@ function MissionCoverEditor({
   );
 }
 
+function TemplateStep({
+  selected,
+  hasLootBoxes,
+  onPick,
+}: {
+  selected: MissionTemplateId | null;
+  hasLootBoxes: boolean;
+  onPick: (id: MissionTemplateId) => void;
+}) {
+  return (
+    <section className={cardClass}>
+      <SectionTitle
+        title="С чего начнём?"
+        subtitle="Шаблон заполнит условия и награду. Всё можно поменять на следующих шагах."
+      />
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        {missionTemplates.map((template) => {
+          const active = selected === template.id;
+          return (
+            <button
+              key={template.id}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onPick(template.id)}
+              className={`flex min-h-28 flex-col rounded-xl border p-4 text-left transition ${active ? "border-emerald-500 bg-emerald-50 ring-1 ring-emerald-300 dark:bg-emerald-950/40" : "border-zinc-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/40 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"}`}
+            >
+              <strong className="text-base">{template.title}</strong>
+              <span className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-400">
+                {template.text}
+              </span>
+              {template.id === "play3h" && !hasLootBoxes ? (
+                <span className="mt-2 text-xs leading-4 text-amber-700 dark:text-amber-300">
+                  Готового кейса для награды пока нет, его можно выбрать или
+                  создать на шаге «Награда».
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+        <div className="flex min-h-28 flex-col rounded-xl border border-dashed border-zinc-300 p-4 dark:border-zinc-700">
+          <strong className="text-base">Приведи друга</strong>
+          <span className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-400">
+            Награда за друга, который зарегистрировался по приглашению. Пока
+            настраивается в расширенных настройках, раздел «Задания».
+          </span>
+          <Link
+            href="/gamification?tab=missions"
+            className="mt-auto pt-2 text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-300"
+          >
+            Открыть «Задания»
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function LaunchStep({
+  form,
+  preview,
+  stores,
+  audiences,
+  readiness,
+  onEdit,
+}: {
+  form: WizardState;
+  preview: GuestMissionPreviewData;
+  stores: Store[];
+  audiences: GuestAudience[];
+  readiness: GuestGameMissionWizardReadiness | null;
+  onEdit: (step: Step) => void;
+}) {
+  const audience = audiences.find((item) => item.id === form.audienceId);
+  const storeNames = stores
+    .filter((store) => form.storeIds.includes(store.id))
+    .map((store) => store.name);
+  const rows: Array<{ label: string; value: string; step: Step }> = [
+    { label: "Что поощряем", value: preview.condition, step: "what" },
+    {
+      label: "Награда",
+      value: `${preview.reward}${preview.xp > 0 ? ` и ${preview.xp} XP` : ""}`,
+      step: "reward",
+    },
+    {
+      label: "Выдача",
+      value:
+        form.delivery === "AUTOMATIC"
+          ? "Автоматически"
+          : "После подтверждения администратором",
+      step: "reward",
+    },
+    { label: "Бюджет", value: budgetSummary(form), step: "reward" },
+    {
+      label: "Для кого",
+      value: `${audience?.name ?? "Все гости"}${form.visibility === "HIDDEN" ? ", скрыто до события" : ""}`,
+      step: "audience",
+    },
+    {
+      label: "Клубы",
+      value: storeNames.length ? storeNames.join(", ") : "Не выбраны",
+      step: "audience",
+    },
+    { label: "Срок", value: periodSummary(form), step: "audience" },
+    {
+      label: "Название для гостя",
+      value: form.name.trim() || "Не задано",
+      step: "appearance",
+    },
+  ];
+
+  return (
+    <section className={cardClass}>
+      <SectionTitle
+        title="Проверьте и запустите"
+        subtitle="Если что-то не так, нажмите «Изменить» рядом со строкой."
+      />
+      <dl className="mt-5 divide-y divide-zinc-200 dark:divide-zinc-800">
+        {rows.map((row) => (
+          <div
+            key={row.label}
+            className="flex flex-col gap-1 py-3 sm:flex-row sm:items-start sm:gap-4"
+          >
+            <dt className="w-44 shrink-0 text-sm text-zinc-500">{row.label}</dt>
+            <dd className="min-w-0 flex-1 text-sm font-semibold">
+              {row.value}
+            </dd>
+            <button
+              type="button"
+              onClick={() => onEdit(row.step)}
+              className="w-fit text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-300"
+            >
+              Изменить
+            </button>
+          </div>
+        ))}
+      </dl>
+      {readiness && !readiness.ready ? (
+        <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+          Перед запуском нужно исправить: {readiness.blockers.join("; ")}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function BudgetSummaryCard({
+  form,
+  preview,
+}: {
+  form: WizardState;
+  preview: GuestMissionPreviewData;
+}) {
+  return (
+    <div className={cardClass}>
+      <h3 className="font-black">Сводка и бюджет</h3>
+      <dl className="mt-3 space-y-2 text-sm">
+        <div>
+          <dt className="text-zinc-500">Условие</dt>
+          <dd className="font-semibold">{preview.condition}</dd>
+        </div>
+        <div>
+          <dt className="text-zinc-500">Награда</dt>
+          <dd className="font-semibold">
+            {preview.reward}
+            {preview.xp > 0 ? ` и ${preview.xp} XP` : ""}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-zinc-500">Бюджет</dt>
+          <dd className="font-semibold">{budgetSummary(form)}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
+function budgetSummary(form: WizardState) {
+  if (form.rewardType === "NONE") return "Без основной награды";
+  const total =
+    form.rewardType === "LOOTBOX"
+      ? form.budgetUnlimited
+        ? "кейсов без ограничения"
+        : `до ${form.budgetAmount} кейсов всего`
+      : form.budgetUnlimited
+        ? "общий бюджет без ограничения"
+        : `общий бюджет ${form.budgetAmount}`;
+  const perGuest = form.perGuestLimitUnlimited
+    ? "без лимита на гостя"
+    : `не больше ${form.perGuestLimit} на гостя`;
+  return `${total[0].toUpperCase()}${total.slice(1)}, ${perGuest}`;
+}
+
+function periodSummary(form: WizardState) {
+  if (form.indefinite) return "Бессрочно, с момента запуска";
+  const format = (value: string) =>
+    new Date(value).toLocaleString("ru-RU", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  return form.periodTo
+    ? `С ${format(form.periodFrom)} до ${format(form.periodTo)}`
+    : `С ${format(form.periodFrom)}, без даты окончания`;
+}
+
 function ReadinessCard({
   readiness,
 }: {
@@ -2371,7 +2809,7 @@ function ReadinessCard({
 }) {
   return (
     <div className={cardClass}>
-      <h3 className="font-black">Готовность задания</h3>
+      <h3 className="font-black">Готовность к запуску</h3>
       {readiness ? (
         <>
           <div className="mt-3 rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-800">
@@ -2380,10 +2818,12 @@ function ReadinessCard({
             >
               {readiness.sourceLabel}
             </span>
-            <p className="mt-1 text-xs text-zinc-500">
+            <details className="mt-1 text-xs text-zinc-500">
+              <summary className="cursor-pointer">Технические детали</summary>
+              {/* ui-copy-allow: техническая сводка для поддержки */}
               Policy: {readiness.evaluationPolicy} · контракт v
               {readiness.definitionVersion}
-            </p>
+            </details>
           </div>
           <ul className="mt-3 space-y-2 text-sm">
             {readiness.blockers.map((blocker) => (
@@ -2615,7 +3055,7 @@ function StepButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex min-h-20 items-center gap-3 rounded-lg px-4 text-left transition ${active ? "bg-emerald-50 ring-1 ring-emerald-300 dark:bg-emerald-950/30" : "hover:bg-zinc-50 dark:hover:bg-zinc-900"}`}
+      className={`flex min-h-16 items-center gap-3 rounded-lg px-3 text-left transition ${active ? "bg-emerald-50 ring-1 ring-emerald-300 dark:bg-emerald-950/30" : "hover:bg-zinc-50 dark:hover:bg-zinc-900"}`}
     >
       <span
         className={`grid h-9 w-9 place-items-center rounded-lg text-xs font-black ${active ? "bg-emerald-500 text-white" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800"}`}
@@ -2625,7 +3065,7 @@ function StepButton({
       <span>
         <strong className="block">{label}</strong>
         <small className={ready ? "text-emerald-600" : "text-zinc-400"}>
-          {ready ? "Заполнено" : "Нужно заполнить"}
+          {ready ? "Готово" : "Заполнить"}
         </small>
       </span>
     </button>
@@ -2795,7 +3235,7 @@ function buildPreview(
       ? `${form.rewardAmount} бонусов на баланс`
       : form.rewardType === "LOOTBOX"
         ? (lootBoxes.find((box) => box.id === form.lootBoxId)?.name ??
-          "Наградной лутбокс")
+          "Наградной кейс")
         : form.rewardType === "PROMOCODE"
           ? (promos.find((promo) => promo.id === form.promoCodeId)?.name ??
             "Промокод")
@@ -2919,7 +3359,9 @@ function previewCondition(form: WizardState) {
       ? `Сделать чекин ${form.checkInDays} дней подряд`
       : form.checkInMode === "SINGLE"
         ? "Сделать чекин в клубе"
-        : `Сделать ${form.checkInCount} чекинов`;
+        : form.checkInMode === "PERIOD"
+          ? `Сделать ${form.checkInCount} чекинов за ${form.windowDays} дней`
+          : `Сделать ${form.checkInCount} чекинов`;
   const sessionRequirement =
     form.sessionType === "HOURLY"
       ? " во время активной почасовой сессии"

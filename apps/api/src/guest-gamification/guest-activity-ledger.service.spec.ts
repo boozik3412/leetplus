@@ -3047,6 +3047,178 @@ describe('GuestActivityLedgerService', () => {
       }),
     );
   });
+
+  describe('queue priority', () => {
+    // Claims respect the priority filter and FIFO order, like PostgreSQL.
+    function useOrderedClaims() {
+      (prisma.guestActivitySyncJob.findFirst as jest.Mock).mockImplementation(
+        ({ where }) => {
+          const priorityOnly = Array.isArray(where?.AND);
+          const row = Array.from(syncJobs.values())
+            .filter((candidate) =>
+              ['PENDING', 'RETRY'].includes(candidate.status),
+            )
+            .filter(
+              (candidate) =>
+                !priorityOnly ||
+                (typeof candidate.reason === 'string' &&
+                  !candidate.reason.startsWith('AUTOMATIC_')),
+            )
+            .sort(
+              (left, right) =>
+                left.nextAttemptAt.getTime() - right.nextAttemptAt.getTime(),
+            )[0];
+          return Promise.resolve(
+            row
+              ? {
+                  ...row,
+                  tenant: { customerStage: TenantCustomerStage.INTERNAL },
+                }
+              : null,
+          );
+        },
+      );
+    }
+
+    async function enqueue(profile: string, reason: string, at: number) {
+      await service.enqueueProfileSync({
+        tenantId,
+        profileId: profile,
+        guestId,
+        storeId,
+        reason,
+      });
+      const job = Array.from(syncJobs.values()).find(
+        (row) => row.profileId === profile,
+      )!;
+      job.nextAttemptAt = new Date(at);
+    }
+
+    it('claims a job a guest is waiting for before older background recovery', async () => {
+      useOrderedClaims();
+      await enqueue('profile-recovery', 'AUTOMATIC_RECOVERY_PARTIAL', 1_000);
+      await enqueue('profile-app-open', 'APP_OPEN', 2_000);
+      const syncProfile = jest
+        .spyOn(service, 'syncProfile')
+        .mockResolvedValue({ status: 'SUCCESS' } as any);
+
+      const result = await service.processQueuedSyncJobs(1, 'test-worker');
+
+      expect(result).toMatchObject({ processed: 1, priority: 1 });
+      expect(syncProfile).toHaveBeenCalledTimes(1);
+      expect(syncProfile.mock.calls[0]?.[0]).toMatchObject({
+        profileId: 'profile-app-open',
+        reason: 'APP_OPEN',
+      });
+    });
+
+    it('caps background jobs per call and still drains guest-facing ones', async () => {
+      useOrderedClaims();
+      await enqueue('profile-recovery-1', 'AUTOMATIC_RECOVERY_PARTIAL', 1_000);
+      await enqueue(
+        'profile-recovery-2',
+        'AUTOMATIC_HOURLY_SESSION_REPLAY',
+        1_500,
+      );
+      await enqueue('profile-ticket', 'SUPPORT_TICKET', 2_000);
+      await enqueue('profile-summary', 'GAME_SUMMARY', 3_000);
+      const syncProfile = jest
+        .spyOn(service, 'syncProfile')
+        .mockResolvedValue({ status: 'SUCCESS' } as any);
+
+      const result = await service.processQueuedSyncJobs(
+        6,
+        'test-worker',
+        undefined,
+        { backgroundLimit: 1 },
+      );
+
+      expect(result).toMatchObject({ processed: 3, priority: 2 });
+      expect(syncProfile.mock.calls.map(([input]) => input.profileId)).toEqual([
+        'profile-ticket',
+        'profile-summary',
+        'profile-recovery-1',
+      ]);
+      expect(
+        Array.from(syncJobs.values()).find(
+          (row) => row.profileId === 'profile-recovery-2',
+        )?.status,
+      ).toBe('PENDING');
+    });
+
+    it('stops starting new jobs once the time budget has passed', async () => {
+      useOrderedClaims();
+      await enqueue('profile-a', 'APP_OPEN', 1_000);
+      await enqueue('profile-b', 'APP_OPEN', 2_000);
+      let now = 0;
+      const syncProfile = jest
+        .spyOn(service, 'syncProfile')
+        .mockImplementation(() => {
+          now += 60_000;
+          return Promise.resolve({ status: 'SUCCESS' } as never);
+        });
+
+      const result = await service.processQueuedSyncJobs(
+        5,
+        'test-worker',
+        undefined,
+        { budgetMs: 30_000, clock: () => now },
+      );
+
+      expect(result).toMatchObject({ processed: 1 });
+      expect(syncProfile).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not let background recovery demote a queued guest-facing job', async () => {
+      await service.enqueueProfileSync({
+        tenantId,
+        profileId,
+        guestId,
+        storeId,
+        reason: 'APP_OPEN',
+      });
+      await service.enqueueProfileSync({
+        tenantId,
+        profileId,
+        guestId,
+        storeId,
+        reason: 'AUTOMATIC_RECOVERY_PARTIAL',
+      });
+
+      expect(Array.from(syncJobs.values())[0]).toMatchObject({
+        status: 'PENDING',
+        reason: 'APP_OPEN',
+      });
+
+      await service.enqueueProfileSync({
+        tenantId,
+        profileId,
+        guestId,
+        storeId,
+        reason: 'SUPPORT_TICKET',
+      });
+      expect(Array.from(syncJobs.values())[0]?.reason).toBe('SUPPORT_TICKET');
+    });
+
+    it('promotes a queued background job when a guest opens the app', async () => {
+      await service.enqueueProfileSync({
+        tenantId,
+        profileId,
+        guestId,
+        storeId,
+        reason: 'AUTOMATIC_RECOVERY_FAILED',
+      });
+      await service.enqueueProfileSync({
+        tenantId,
+        profileId,
+        guestId,
+        storeId,
+        reason: 'APP_OPEN',
+      });
+
+      expect(Array.from(syncJobs.values())[0]?.reason).toBe('APP_OPEN');
+    });
+  });
 });
 
 describe('guest activity sync failure classification', () => {

@@ -1307,6 +1307,29 @@ fallback получает отказ `CANONICAL_EVENT_OWNER_CONFLICT`, а стр
 `LEDGER_FALLBACK_OWNER_CONFLICT_DEAD_LETTERED` вместо бесконечного `FAILED`
 retry; повторного начисления нет (с 05.10.2026, worker placement не менялся).
 
+#### Очередь синхрона гостя: приоритет (11.11.2026)
+
+- Задания `GuestActivitySyncJob` с причиной не `AUTOMATIC_*` (открытие
+  приложения, game summary, сессия, обращение в поддержку, ручная перепривязка)
+  берутся из очереди раньше фоновых `AUTOMATIC_RECOVERY_*` и
+  `AUTOMATIC_HOURLY_SESSION_REPLAY`; внутри каждой группы порядок прежний
+  (`nextAttemptAt`). Фоновая постановка в очередь не понижает уже стоящее
+  задание гостя.
+- Worker (тот же `lp-bonus.timer` → `bonus-ledger-worker`, tenant и admission
+  прежние) за тик ставит не больше одного due recovery и обрабатывает не
+  больше одного фонового задания, как раньше, плюс до
+  `GUEST_GAMIFICATION_WORKER_PRIORITY_ACTIVITY_LIMIT` (по умолчанию 5, до 10)
+  заданий гостей. Новое задание не начинается, если с начала прохода очереди
+  прошло `GUEST_GAMIFICATION_WORKER_PRIORITY_ACTIVITY_BUDGET_MS` (по умолчанию
+  3 минуты, 10 с–5 мин); начатое доводится до конца. Задания выполняются
+  последовательно, пул соединений worker не меняется.
+- Public guest: после созданного обращения с темой «Задания и боевой пропуск»
+  или «Лутбоксы и награды» портал ставит то же задание синхрона, что и
+  `APP_OPEN` (причина `SUPPORT_TICKET`), для клуба обращения и клуба сессии.
+  Это одна запись в очередь в БД: Langame из запроса гостя не вызывается,
+  scheduler в API не регистрируется.
+- Новых маршрутов, секретов, egress, таблиц и таймеров нет.
+
 Установка unit/runner выполняется только exact production-control artifact с
 отдельно закреплённым install-map digest. Само наличие файлов в `main` или
 установка control generation не включает timer. Production activation требует

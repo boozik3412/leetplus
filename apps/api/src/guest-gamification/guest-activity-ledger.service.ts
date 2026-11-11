@@ -44,6 +44,13 @@ const SYNC_JOB_LOCK_STALE_MS = 10 * 60 * 1000;
 const SYNC_JOB_MAX_ATTEMPTS = 5;
 const SYNC_JOB_BASE_BACKOFF_MS = 15 * 1000;
 const SYNC_JOB_PARTIAL_CONTINUATION_DELAY_MS = 1_000;
+// Background jobs (recovery, hourly replay) are queued with this reason
+// prefix; every other reason means a guest or an operator is waiting.
+const BACKGROUND_SYNC_REASON_PREFIX = 'AUTOMATIC_';
+const PRIORITY_SYNC_JOB_WHERE: Prisma.GuestActivitySyncJobWhereInput = {
+  reason: { not: null },
+  NOT: { reason: { startsWith: BACKGROUND_SYNC_REASON_PREFIX } },
+};
 const INFERRED_PACKAGE_USAGE_LOOKBACK_DAYS = 30;
 const INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS = 15 * 60 * 1000;
 // Keep persisted fact identity stable during the fail-closed hourly rollout.
@@ -263,16 +270,24 @@ export class GuestActivityLedgerService {
     const jobKey = this.syncJobKey(input);
     const existing = await this.prisma.guestActivitySyncJob.findUnique({
       where: { jobKey },
-      select: { id: true, status: true },
+      select: { id: true, status: true, reason: true },
     });
+    // A background recovery must not demote a job a guest is waiting for:
+    // the queued job keeps its guest-facing reason and therefore its place.
+    const keepExistingReason =
+      existing !== null &&
+      isPrioritySyncReason(existing.reason) &&
+      !isPrioritySyncReason(input.reason);
+    const reasonData = keepExistingReason
+      ? {}
+      : { reason: input.reason ?? null, payload: this.syncJobPayload(input) };
 
     if (existing?.status === 'RUNNING') {
       return this.prisma.guestActivitySyncJob.update({
         where: { id: existing.id },
         data: {
           rerunRequested: true,
-          reason: input.reason ?? null,
-          payload: this.syncJobPayload(input),
+          ...reasonData,
         },
       });
     }
@@ -287,8 +302,7 @@ export class GuestActivityLedgerService {
         data: {
           guestId: input.guestId ?? null,
           storeId: input.storeId ?? null,
-          reason: input.reason ?? null,
-          payload: this.syncJobPayload(input),
+          ...reasonData,
           ...(alreadyQueued
             ? {}
             : {
@@ -331,22 +345,52 @@ export class GuestActivityLedgerService {
     }
   }
 
+  /**
+   * Jobs a guest or operator is waiting for (app open, game summary, support
+   * ticket, relink) are claimed before background recovery/replay jobs.
+   * `backgroundLimit` caps background jobs in this call and `budgetMs` stops
+   * claiming new jobs once that much time has passed; a job already started
+   * always runs to its end.
+   */
   async processQueuedSyncJobs(
     limit = 5,
     workerId = `api-${process.pid}`,
     tenantId?: string,
+    options: {
+      backgroundLimit?: number;
+      budgetMs?: number;
+      clock?: () => number;
+    } = {},
   ) {
     const results: Array<{
       jobId: string;
       status: string;
+      priority: boolean;
       errorMessage?: string;
     }> = [];
+    const clock = options.clock ?? Date.now;
+    const startedAt = clock();
+    const backgroundLimit = options.backgroundLimit ?? limit;
+    let backgroundClaimed = 0;
 
     for (let index = 0; index < limit; index += 1) {
-      const job = await this.claimNextSyncJob(workerId, tenantId);
+      if (
+        index > 0 &&
+        options.budgetMs !== undefined &&
+        clock() - startedAt >= options.budgetMs
+      ) {
+        break;
+      }
+      const job = await this.claimNextSyncJob(workerId, tenantId, {
+        includeBackground: backgroundClaimed < backgroundLimit,
+      });
 
       if (!job) {
         break;
+      }
+      const priority = isPrioritySyncReason(job.reason);
+      if (!priority) {
+        backgroundClaimed += 1;
       }
 
       try {
@@ -374,18 +418,20 @@ export class GuestActivityLedgerService {
         results.push({
           jobId: job.id,
           status,
+          priority,
           ...(partialError ? { errorMessage: partialError } : {}),
         });
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         const status = await this.failSyncJob(job.id, errorMessage);
-        results.push({ jobId: job.id, status, errorMessage });
+        results.push({ jobId: job.id, status, priority, errorMessage });
       }
     }
 
     return {
       processed: results.length,
+      priority: results.filter((result) => result.priority).length,
       success: results.filter((result) => result.status === 'SUCCESS').length,
       retried: results.filter((result) => result.status === 'RETRY').length,
       failed: results.filter((result) => result.status === 'FAILED').length,
@@ -592,7 +638,11 @@ export class GuestActivityLedgerService {
     return { scanned: states.length, queued, skipped };
   }
 
-  private async claimNextSyncJob(workerId: string, tenantId?: string) {
+  private async claimNextSyncJob(
+    workerId: string,
+    tenantId?: string,
+    options: { includeBackground?: boolean } = {},
+  ) {
     const now = new Date();
     const staleAt = new Date(now.getTime() - SYNC_JOB_LOCK_STALE_MS);
     const availableWhere: Prisma.GuestActivitySyncJobWhereInput = {
@@ -608,17 +658,26 @@ export class GuestActivityLedgerService {
         { status: 'RUNNING', lockedAt: { lt: staleAt } },
       ],
     };
-    const candidate = await this.prisma.guestActivitySyncJob.findFirst({
-      where: availableWhere,
-      include: {
-        tenant: {
-          select: {
-            customerStage: true,
+    const findCandidate = (where: Prisma.GuestActivitySyncJobWhereInput) =>
+      this.prisma.guestActivitySyncJob.findFirst({
+        where,
+        include: {
+          tenant: {
+            select: {
+              customerStage: true,
+            },
           },
         },
-      },
-      orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
-    });
+        orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
+      });
+    const candidate =
+      (await findCandidate({
+        ...availableWhere,
+        AND: [PRIORITY_SYNC_JOB_WHERE],
+      })) ??
+      (options.includeBackground === false
+        ? null
+        : await findCandidate(availableWhere));
 
     if (!candidate) {
       return null;
@@ -4280,6 +4339,13 @@ function sourceLocalDate(date: Date | null, timeZone: string) {
   } catch {
     return date.toISOString().slice(0, 10);
   }
+}
+
+export function isPrioritySyncReason(reason: string | null | undefined) {
+  return (
+    typeof reason === 'string' &&
+    !reason.startsWith(BACKGROUND_SYNC_REASON_PREFIX)
+  );
 }
 
 function formatDateParam(date: Date) {

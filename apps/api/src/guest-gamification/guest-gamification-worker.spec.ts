@@ -219,6 +219,36 @@ describe('guest gamification singleton worker', () => {
     ).toThrow('GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT=1');
   });
 
+  it('drains guest-facing syncs within a bounded budget per tick', () => {
+    expect(loadGuestGamificationWorkerConfig(baseEnv())).toMatchObject({
+      activityLimit: 1,
+      priorityActivityLimit: 5,
+      priorityActivityBudgetMs: 180_000,
+    });
+    expect(
+      loadGuestGamificationWorkerConfig({
+        ...baseEnv(),
+        GUEST_GAMIFICATION_WORKER_PRIORITY_ACTIVITY_LIMIT: '2',
+        GUEST_GAMIFICATION_WORKER_PRIORITY_ACTIVITY_BUDGET_MS: '60000',
+      }),
+    ).toMatchObject({
+      priorityActivityLimit: 2,
+      priorityActivityBudgetMs: 60_000,
+    });
+    expect(() =>
+      loadGuestGamificationWorkerConfig({
+        ...baseEnv(),
+        GUEST_GAMIFICATION_WORKER_PRIORITY_ACTIVITY_LIMIT: '11',
+      }),
+    ).toThrow('GUEST_GAMIFICATION_WORKER_PRIORITY_ACTIVITY_LIMIT');
+    expect(() =>
+      loadGuestGamificationWorkerConfig({
+        ...baseEnv(),
+        GUEST_GAMIFICATION_WORKER_PRIORITY_ACTIVITY_BUDGET_MS: '600000',
+      }),
+    ).toThrow('GUEST_GAMIFICATION_WORKER_PRIORITY_ACTIVITY_BUDGET_MS');
+  });
+
   it('processes one exact INTERNAL tenant without live canary rewards', async () => {
     const dependencies = services();
     const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
@@ -236,9 +266,10 @@ describe('guest gamification singleton worker', () => {
     expect(
       dependencies.activityLedger.processQueuedSyncJobs,
     ).toHaveBeenCalledWith(
-      1,
+      6,
       expect.stringMatching(/^gamification-worker-/),
       'tenant-1',
+      { backgroundLimit: 1, budgetMs: 180_000 },
     );
     expect(
       dependencies.gamification.runSnapshotPipelineScheduled,

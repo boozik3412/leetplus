@@ -81,15 +81,21 @@ export function useGameTutorial({
 
 export function GameTutorial({
   clubName,
+  gameAccountsEnabled,
   onClose,
 }: {
   clubName: string;
+  // Known only after a request, so it may turn true while the tour is open.
+  gameAccountsEnabled: boolean;
   onClose: () => void;
 }) {
-  const [steps] = useState(() =>
+  const [visibleSteps] = useState(() =>
     GAME_TUTORIAL_STEPS.filter(
       (step) => step.targets === null || findTargets(step).length > 0,
     ),
+  );
+  const steps = visibleSteps.filter(
+    (step) => step.requires !== "gameAccounts" || gameAccountsEnabled,
   );
   const [index, setIndex] = useState(0);
   const [layout, setLayout] = useState<Layout | null>(null);

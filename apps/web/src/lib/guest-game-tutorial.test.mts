@@ -63,6 +63,18 @@ test("the tour starts with a welcome card and has unique steps", () => {
   assert.match(GAME_TUTORIAL_STEPS[0].body("Клуб 1337"), /Клуб 1337/u);
 });
 
+test("the game accounts step shows only where the feature is on", () => {
+  const step = GAME_TUTORIAL_STEPS.find((item) => item.id === "game-accounts");
+
+  assert.ok(step);
+  assert.equal(step.requires, "gameAccounts");
+  assert.ok(step.targets && step.targets.length > 0);
+  assert.equal(
+    GAME_TUTORIAL_STEPS.filter((item) => item.requires).length,
+    1,
+  );
+});
+
 test("the web BFF forwards only the tutorial version", () => {
   assert.deepEqual(
     projectGuestPortalPostBody(

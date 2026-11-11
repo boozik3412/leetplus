@@ -827,27 +827,20 @@ function EmptySessionView({
   );
 }
 
-function GameModuleTopbar({
-  summary,
-  onTutorialOpen,
-}: {
-  summary: GuestPortalGameSummary;
-  onTutorialOpen?: () => void;
-}) {
-  const router = useRouter();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [gameAccountsEnabled, setGameAccountsEnabled] = useState(false);
-  const gameAccountsChecked = useRef(false);
-  const brandLogoUrl = summary.store.gameLogoUrl ?? summary.tenant.gameLogoUrl;
+type GameAccountsAvailability = { enabled: boolean; check: () => void };
 
-  // «Игровые аккаунты» appears only where the network turned them on; the
-  // check runs once, when the guest first opens the menu.
-  useEffect(() => {
-    if (!menuOpen || gameAccountsChecked.current) {
+// «Игровые аккаунты» exist only where the network turned them on. The check
+// runs once, the first time the menu or the tutorial needs it.
+function useGameAccountsAvailability(): GameAccountsAvailability {
+  const [enabled, setEnabled] = useState(false);
+  const checked = useRef(false);
+
+  const check = useCallback(() => {
+    if (checked.current) {
       return;
     }
 
-    gameAccountsChecked.current = true;
+    checked.current = true;
     fetch(GUEST_GAME_ACCOUNTS_PATH, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : null))
       .then((data: unknown) => {
@@ -856,11 +849,37 @@ function GameModuleTopbar({
           typeof data === "object" &&
           (data as { enabled?: unknown }).enabled === true
         ) {
-          setGameAccountsEnabled(true);
+          setEnabled(true);
         }
       })
       .catch(() => undefined);
-  }, [menuOpen]);
+  }, []);
+
+  return useMemo(() => ({ enabled, check }), [enabled, check]);
+}
+
+function GameModuleTopbar({
+  summary,
+  gameAccounts,
+  onTutorialOpen,
+}: {
+  summary: GuestPortalGameSummary;
+  // Shared with the tutorial on the home screen; other screens check alone.
+  gameAccounts?: GameAccountsAvailability;
+  onTutorialOpen?: () => void;
+}) {
+  const router = useRouter();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const ownGameAccounts = useGameAccountsAvailability();
+  const { enabled: gameAccountsEnabled, check: checkGameAccounts } =
+    gameAccounts ?? ownGameAccounts;
+  const brandLogoUrl = summary.store.gameLogoUrl ?? summary.tenant.gameLogoUrl;
+
+  useEffect(() => {
+    if (menuOpen) {
+      checkGameAccounts();
+    }
+  }, [checkGameAccounts, menuOpen]);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -2111,10 +2130,22 @@ function ReadyGameView({
         questsExpanded,
     ),
   });
+  const gameAccounts = useGameAccountsAvailability();
+  const checkGameAccounts = gameAccounts.check;
+
+  useEffect(() => {
+    if (tutorial.open) {
+      checkGameAccounts();
+    }
+  }, [checkGameAccounts, tutorial.open]);
 
   return (
     <div className="lp-club-home">
-      <GameModuleTopbar summary={summary} onTutorialOpen={tutorial.start} />
+      <GameModuleTopbar
+        summary={summary}
+        gameAccounts={gameAccounts}
+        onTutorialOpen={tutorial.start}
+      />
 
       <div
         ref={shellRef}
@@ -2266,7 +2297,11 @@ function ReadyGameView({
       ) : null}
 
       {tutorial.open ? (
-        <GameTutorial clubName={summary.store.name} onClose={tutorial.close} />
+        <GameTutorial
+          clubName={summary.store.name}
+          gameAccountsEnabled={gameAccounts.enabled}
+          onClose={tutorial.close}
+        />
       ) : null}
     </div>
   );

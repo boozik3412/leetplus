@@ -10,6 +10,8 @@ export type GameTutorialStep = {
   // match. `null` is a centered card without a spotlight. A step whose
   // targets are all missing (the club has no such block) is skipped.
   targets: readonly string[] | null;
+  // A feature the network can switch off; without it the step is skipped.
+  requires?: "gameAccounts";
 };
 
 // Selectors use the existing ids/classes of the game screen instead of new
@@ -113,6 +115,15 @@ export const GAME_TUTORIAL_STEPS: readonly GameTutorialStep[] = [
     body: () =>
       "Нажмите на название клуба, чтобы перейти в игру другого клуба сети.",
     targets: [".lp-club-switch"],
+  },
+  {
+    // The menu item exists only where the network turned game accounts on.
+    id: "game-accounts",
+    title: "Игровые аккаунты",
+    body: () =>
+      "В меню есть «Игровые аккаунты». Привяжите Steam, и мы сами найдём ваш FACEIT. Тогда матчи CS2, сыгранные в клубе, будут засчитываться в задания на матчи FACEIT.",
+    targets: [".lp-club-menu-button"],
+    requires: "gameAccounts",
   },
   {
     id: "menu",

@@ -1831,7 +1831,7 @@ export function CommunicationQueueCard({
             value={outbox.summary.cashier + outbox.summary.manual}
           />
         </div>
-        <div className="mt-3 grid gap-2 lg:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-3 grid gap-2 [overflow-wrap:anywhere] lg:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
           <div className="rounded-lg border border-cyan-200 bg-cyan-100/60 p-3 text-xs leading-5 text-cyan-950 dark:border-cyan-900/60 dark:bg-cyan-950/40 dark:text-cyan-100">
             <p className="font-bold uppercase tracking-wide">Dispatcher</p>
             <p className="mt-1 text-sm font-semibold">

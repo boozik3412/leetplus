@@ -2325,7 +2325,7 @@ export function GuestGamificationPanel({
                 Создать механику
               </Link>
             ) : null}
-            <div className="inline-flex rounded-lg border border-zinc-200 bg-white p-1 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="inline-flex max-w-full rounded-lg border border-zinc-200 bg-white p-1 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
               {editorModeOptions.map(([mode, label]) => (
                 <button
                   key={mode}
@@ -2333,7 +2333,7 @@ export function GuestGamificationPanel({
                   disabled={editorModeRefreshing !== null}
                   onClick={() => void switchEditorMode(mode)}
                   className={[
-                    "whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition disabled:cursor-wait disabled:opacity-70",
+                    "min-w-0 rounded-md px-3 text-center sm:whitespace-nowrap py-1.5 text-xs font-semibold transition disabled:cursor-wait disabled:opacity-70",
                     editorMode === mode
                       ? "bg-zinc-950 text-white dark:bg-cyan-300 dark:text-zinc-950"
                       : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white",

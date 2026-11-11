@@ -125,7 +125,7 @@ CONNECT-прокси `langame-proxy.mjs`: он открывает TLS-тунне
 
 | Сеть | Подсеть | Кто |
 | --- | --- | --- |
-| `leetplus-langame` (internal) | `172.31.46.0/24` | прокси `.2`, `api-blue` `.10`, `api-green` `.11`, `langame-daily-worker` и `daily-report-worker` `.21` (общий адрес, как в `data`/`egress`) |
+| `leetplus-langame` (internal) | `172.31.46.0/24` | прокси `.2`, `api-blue` `.10`, `api-green` `.11`, `langame-daily-worker` и `daily-report-worker` `.21` (общий адрес, как в `data`/`egress`), `bonus-ledger-worker` `.22` (только Steam/FACEIT, см. «Игровые аккаунты») |
 | `leetplus-langame-out` | `172.31.47.0/24` | только прокси `.2`, отсюда он выходит в интернет |
 
 Сеть `internal` не даёт контейнерам маршрута наружу: шлюз API остаётся
@@ -174,25 +174,39 @@ docker logs --tail 20 leetplus-langame-proxy
 провайдеров получает только worker.
 
 Включение (один раз, после деплоя релиза с миграцией
-`20261109120000_guest_game_external_accounts`):
+`20261109120000_guest_game_external_accounts`; на проде сделано 11.11.2026):
 
-1. Прокси: в `environment` сервиса `langame-proxy` добавить
+1. Прокси: обновить `/opt/leetplus-langame-proxy/langame-proxy.mjs` из
+   релиза (`install.sh` или `git -C /srv/leetplus-src show
+   <sha>:deploy/simple/langame-proxy.mjs`): точные хосты `=хост` появились
+   вместе с этой функцией, старая копия их не пускает.
+2. `langame-proxy` в `/srv/leetplus/compose.json`, `environment`:
    `LANGAME_PROXY_SUFFIXES=langame.ru,langamepro.ru,=steamcommunity.com,=api.steampowered.com,=open.faceit.com`
-   (запись `=хост` пускает только этот хост); пересоздать `langame-proxy`.
-   Адрес workers `172.31.46.21` уже есть в `LANGAME_PROXY_SOURCES`.
-2. `bonus-ledger-worker` в `/srv/leetplus/compose.json`: добавить сеть
-   `langame` (общий адрес workers `172.31.46.21`, как у daily/report).
-3. Секреты `api-blue.json`, `api-green.json`:
+   (запись `=хост` пускает только этот хост) и добавить `172.31.46.22` в
+   `LANGAME_PROXY_SOURCES`.
+3. `bonus-ledger-worker` в `compose.json`: сеть `langame` с **отдельным**
+   адресом `172.31.46.22` (как запись `langame-daily-worker`, другой адрес).
+   Общий `172.31.46.21` занимать нельзя: его делят только
+   `langame-daily-worker` и `daily-report-worker` под общим `flock` в `lp`,
+   worker бонусов в эту блокировку не входит и столкнулся бы с ними
+   («Address already in use»).
+4. Секреты `api-blue.json`, `api-green.json`:
    `GUEST_GAME_EXTERNAL_PROXY_URL=http://172.31.46.2:3128`,
    `GUEST_GAME_EXTERNAL_ACCOUNTS_ENABLED=true`.
-4. Секреты `bonus-ledger-worker.json`:
+5. Секреты `bonus-ledger-worker.json`:
    `GUEST_GAME_EXTERNAL_PROXY_URL=http://172.31.46.2:3128`,
    `GUEST_GAME_STEAM_WEB_API_KEY=<ключ Steam Web API>`,
    `GUEST_GAME_FACEIT_API_KEY=<серверный ключ FACEIT App Studio>`.
    Префикс `GUEST_` уже разрешён профилю worker-а в `runtime-entry.cjs`.
-5. `lp deploy <sha>`: API-слот поднимается с новыми ключами, worker подхватит
-   их на следующем тике.
-6. Проверка из рабочего API (ожидается HTTP 200 от Steam, а не таймаут):
+   Ключи не передавать через чат или командную строку: вводить скрытым
+   вводом и отправлять на хост через stdin.
+6. Пересоздать прокси, когда `langame-daily-worker` и `daily-report-worker`
+   не запущены:
+   `docker compose --project-name leetplus --file /srv/leetplus/compose.json up -d --no-deps langame-proxy`.
+7. `lp deploy <sha>` (можно тот же, что обслуживает): API-слот поднимается с
+   новыми секретами, worker подхватит их на следующем тике. Деплой до шага 4
+   флаг не включит, нужен повторный.
+8. Проверка из рабочего API (ожидается HTTP 200 от Steam, а не таймаут):
 
 ```bash
 docker exec -w /app/apps/api leetplus-api-<slot> node -e "const {ProxyAgent,fetch}=require('undici');fetch('https://steamcommunity.com/openid/login',{dispatcher:new ProxyAgent('http://172.31.46.2:3128')}).then(r=>console.log(r.status))"

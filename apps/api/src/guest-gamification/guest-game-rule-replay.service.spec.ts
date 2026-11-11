@@ -2955,9 +2955,7 @@ describe('legacy generic session classification remediation', () => {
     expect(sql).toContain('session."packet" = false');
     expect(sql).toContain('session."updatedAt" <= event."createdAt"');
     expect(sql).toContain("'session:'");
-    expect(sql).toContain(
-      "event.\"payload\" ->> 'sourceFactKind' = 'GUEST_SESSION'",
-    );
+    expect(sql).toContain('event."sourceFactKind" = \'GUEST_SESSION\'');
     expect(sql).toContain('session."externalSessionId"');
     expect(sql).toContain('sessionBillingKind');
     expect(sql).toContain('observedSessionBillingKind');

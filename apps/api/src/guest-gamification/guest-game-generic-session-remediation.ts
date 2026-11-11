@@ -128,6 +128,38 @@ export async function drainLegacyGenericSessionClassifications(
   return aggregate;
 }
 
+// Shared tails of the candidate proofs below. They reference the derived
+// `event` columns of the candidate query and carry no parameters.
+const GENERIC_SESSION_PROOF = Prisma.sql`
+  session."expand" = true
+  AND session."packet" = false
+  AND (
+    event."eventType" <> 'SESSION_START'
+    OR session."updatedAt" <= event."createdAt"
+  )
+`;
+
+const GENERIC_SESSION_FACT_PROOF = Prisma.sql`
+  fact."externalProvider" = event."provider"
+  AND fact."externalDomain" = event."domain"
+  AND fact."sessionExternalId" = event."sessionKey"
+  AND fact."factType" = event."factType"
+  AND fact."lifecycleStatus" = 'ACTIVE'
+  AND fact."confidence" = 'EXACT'
+  AND fact."supersededAt" IS NULL
+  AND LOWER(COALESCE(fact."evidence" ->> 'sessionBillingKind', '')) =
+    'unknown'
+  AND LOWER(COALESCE(
+    fact."evidence" ->> 'observedSessionBillingKind',
+    ''
+  )) = 'hourly'
+  AND LOWER(COALESCE(
+    fact."evidence" ->> 'expanded',
+    fact."evidence" ->> 'expand',
+    ''
+  )) IN ('true', '1')
+`;
+
 export async function remediateLegacyGenericSessionClassifications(
   prisma: PrismaService,
   input: {
@@ -155,124 +187,175 @@ export async function remediateLegacyGenericSessionClassifications(
 
   const batchLimit = Math.max(1, Math.min(Math.trunc(input.limit), 100));
 
+  // Every proof below starts from an exact key the event already carries
+  // (GuestSession/GuestActivityFact primary key or the GuestSession unique
+  // key), so each candidate costs a few index lookups. The previous form
+  // correlated on payload expressions with no index behind them; once the
+  // planner estimated one candidate row it re-scanned GuestActivityFact for
+  // every legacy event and a worker tick hung for the full lp time limit.
   const candidates = await prisma.$queryRaw<CandidateRow[]>(Prisma.sql`
     SELECT event."id" AS "eventId"
-    FROM "GuestGameEvent" event
-    WHERE event."tenantId" = ${input.tenantId}
-      AND event."eventType" IN (${Prisma.join(eventTypes)})
-      AND event."payload" #>> '{source}' =
-        'guest_gamification_process_event'
-      AND event."payload" #>> '{processSchemaVersion}' = '2'
-      AND event."payload" #> '{input,sessionPacket}' = 'false'::jsonb
-      AND event."payload" #>>
-        '{genericSessionClassificationRemediation,status}' IS NULL
-      AND COALESCE(
-        NULLIF(event."payload" ->> 'sessionExternalId', ''),
-        NULLIF(event."payload" ->> 'externalId', '')
-      ) IS NOT NULL
+    FROM (
+      SELECT
+        event."id",
+        event."tenantId",
+        event."createdAt",
+        event."eventType",
+        COALESCE(
+          event."externalProvider",
+          'LANGAME'::"IntegrationProvider"
+        ) AS "provider",
+        event."externalDomain" AS "domain",
+        COALESCE(
+          event."externalDomain",
+          'guest-gamification-snapshot'
+        ) AS "sessionDomain",
+        COALESCE(
+          NULLIF(event."payload" ->> 'sessionExternalId', ''),
+          NULLIF(event."payload" ->> 'externalId', '')
+        ) AS "sessionKey",
+        event."payload" ->> 'sourceFactId' AS "sourceFactId",
+        event."payload" ->> 'sourceFactKind' AS "sourceFactKind",
+        CASE event."eventType"
+          WHEN 'SESSION_START' THEN ':start'
+          WHEN 'PLAY_HOUR' THEN ':play'
+        END AS "sessionFactSuffix",
+        CASE event."eventType"
+          WHEN 'SESSION_START' THEN 'SESSION_STARTED'
+          WHEN 'PLAY_HOUR' THEN 'SESSION_PLAY_TIME_ACCUMULATED'
+        END AS "factType",
+        CASE event."eventType"
+          WHEN 'SESSION_START' THEN 'HOURLY_SESSION_STARTED'
+          WHEN 'PLAY_HOUR' THEN 'HOURLY_PLAY_TIME_ACCUMULATED'
+        END AS "hourlyFactType"
+      FROM "GuestGameEvent" event
+      WHERE event."tenantId" = ${input.tenantId}
+        AND event."eventType" IN (${Prisma.join(eventTypes)})
+        AND event."payload" #>> '{source}' =
+          'guest_gamification_process_event'
+        AND event."payload" #>> '{processSchemaVersion}' = '2'
+        AND event."payload" #> '{input,sessionPacket}' = 'false'::jsonb
+        AND event."payload" #>>
+          '{genericSessionClassificationRemediation,status}' IS NULL
+      -- Keep the derived columns as a fence so proofs probe by key.
+      OFFSET 0
+    ) event
+    WHERE event."sessionKey" IS NOT NULL
       AND (
         EXISTS (
           SELECT 1
           FROM "GuestSession" session
-          WHERE session."tenantId" = event."tenantId"
-            AND session."externalSessionId" = COALESCE(
-              NULLIF(event."payload" ->> 'sessionExternalId', ''),
-              NULLIF(event."payload" ->> 'externalId', '')
+          WHERE session."id" = SUBSTRING(
+              event."sourceFactId"
+              FROM 9
+              FOR GREATEST(
+                LENGTH(event."sourceFactId") - 8
+                  - LENGTH(event."sessionFactSuffix"),
+                0
+              )
             )
+            AND event."sourceFactId" = CONCAT(
+              'session:',
+              session."id",
+              event."sessionFactSuffix"
+            )
+            AND session."tenantId" = event."tenantId"
+            AND session."externalSessionId" = event."sessionKey"
             AND COALESCE(
               session."externalProvider",
               'LANGAME'::"IntegrationProvider"
-            ) = COALESCE(
-              event."externalProvider",
-              'LANGAME'::"IntegrationProvider"
-            )
+            ) = event."provider"
             AND COALESCE(
               session."externalDomain",
               'guest-gamification-snapshot'
-            ) = COALESCE(
-              event."externalDomain",
-              'guest-gamification-snapshot'
+            ) = event."sessionDomain"
+            AND ${GENERIC_SESSION_PROOF}
+        )
+        OR (
+          event."sourceFactKind" = 'GUEST_SESSION'
+          AND event."sourceFactId" = event."sessionKey"
+          AND (
+            EXISTS (
+              SELECT 1
+              FROM "GuestSession" session
+              WHERE session."tenantId" = event."tenantId"
+                AND session."externalProvider" = event."provider"
+                AND session."externalDomain" = event."sessionDomain"
+                AND session."externalSessionId" = event."sessionKey"
+                AND ${GENERIC_SESSION_PROOF}
             )
-            AND session."expand" = true
-            AND session."packet" = false
-            AND (
-              event."eventType" <> 'SESSION_START'
-              OR session."updatedAt" <= event."createdAt"
-            )
-            AND (
-              event."payload" ->> 'sourceFactId' = CONCAT(
-                'session:',
-                session."id",
-                CASE event."eventType"
-                  WHEN 'SESSION_START' THEN ':start'
-                  WHEN 'PLAY_HOUR' THEN ':play'
-                END
+            -- GuestSession keys may be NULL; legacy rows matched them as
+            -- LANGAME / guest-gamification-snapshot.
+            OR (
+              event."provider" = 'LANGAME'::"IntegrationProvider"
+              AND EXISTS (
+                SELECT 1
+                FROM "GuestSession" session
+                WHERE session."tenantId" = event."tenantId"
+                  AND session."externalProvider" IS NULL
+                  AND session."externalDomain" = event."sessionDomain"
+                  AND session."externalSessionId" = event."sessionKey"
+                  AND ${GENERIC_SESSION_PROOF}
               )
-              OR (
-                event."payload" ->> 'sourceFactKind' = 'GUEST_SESSION'
-                AND event."payload" ->> 'sourceFactId' =
-                  session."externalSessionId"
+            )
+            OR (
+              event."sessionDomain" = 'guest-gamification-snapshot'
+              AND EXISTS (
+                SELECT 1
+                FROM "GuestSession" session
+                WHERE session."tenantId" = event."tenantId"
+                  AND session."externalProvider" = event."provider"
+                  AND session."externalDomain" IS NULL
+                  AND session."externalSessionId" = event."sessionKey"
+                  AND ${GENERIC_SESSION_PROOF}
               )
             )
+            OR (
+              event."provider" = 'LANGAME'::"IntegrationProvider"
+              AND event."sessionDomain" = 'guest-gamification-snapshot'
+              AND EXISTS (
+                SELECT 1
+                FROM "GuestSession" session
+                WHERE session."tenantId" = event."tenantId"
+                  AND session."externalProvider" IS NULL
+                  AND session."externalDomain" IS NULL
+                  AND session."externalSessionId" = event."sessionKey"
+                  AND ${GENERIC_SESSION_PROOF}
+              )
+            )
+          )
         )
         OR EXISTS (
           SELECT 1
           FROM "GuestActivityFact" fact
-          WHERE fact."tenantId" = event."tenantId"
-            AND fact."externalProvider" = COALESCE(
-              event."externalProvider",
-              'LANGAME'::"IntegrationProvider"
-            )
-            AND fact."externalDomain" = event."externalDomain"
-            AND fact."sessionExternalId" = COALESCE(
-              NULLIF(event."payload" ->> 'sessionExternalId', ''),
-              NULLIF(event."payload" ->> 'externalId', '')
-            )
-            AND fact."factType" = CASE event."eventType"
-              WHEN 'SESSION_START' THEN 'SESSION_STARTED'
-              WHEN 'PLAY_HOUR' THEN 'SESSION_PLAY_TIME_ACCUMULATED'
-            END
-            AND fact."lifecycleStatus" = 'ACTIVE'
-            AND fact."confidence" = 'EXACT'
-            AND fact."supersededAt" IS NULL
-            AND (
-              fact."id" = event."payload" ->> 'sourceFactId'
-              OR EXISTS (
-                SELECT 1
-                FROM "GuestActivityFact" superseded_typed_fact
-                WHERE superseded_typed_fact."tenantId" = fact."tenantId"
-                  AND superseded_typed_fact."id" =
-                    event."payload" ->> 'sourceFactId'
-                  AND superseded_typed_fact."externalProvider" =
-                    fact."externalProvider"
-                  AND superseded_typed_fact."externalDomain" =
-                    fact."externalDomain"
-                  AND superseded_typed_fact."sessionExternalId" =
-                    fact."sessionExternalId"
-                  AND superseded_typed_fact."sourceHash" = fact."sourceHash"
-                  AND superseded_typed_fact."factType" =
-                    CASE event."eventType"
-                      WHEN 'SESSION_START' THEN 'HOURLY_SESSION_STARTED'
-                      WHEN 'PLAY_HOUR' THEN
-                        'HOURLY_PLAY_TIME_ACCUMULATED'
-                    END
-                  AND superseded_typed_fact."lifecycleStatus" = 'SUPERSEDED'
-                  AND superseded_typed_fact."supersededAt" IS NOT NULL
-              )
-            )
-            AND LOWER(COALESCE(
-              fact."evidence" ->> 'sessionBillingKind',
-              ''
-            )) = 'unknown'
-            AND LOWER(COALESCE(
-              fact."evidence" ->> 'observedSessionBillingKind',
-              ''
-            )) = 'hourly'
-            AND LOWER(COALESCE(
-              fact."evidence" ->> 'expanded',
-              fact."evidence" ->> 'expand',
-              ''
-            )) IN ('true', '1')
+          WHERE fact."id" = event."sourceFactId"
+            AND fact."tenantId" = event."tenantId"
+            AND ${GENERIC_SESSION_FACT_PROOF}
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM (
+            -- Primary-key probe first; the fence keeps the planner from
+            -- walking every SUPERSEDED fact of the tenant instead.
+            SELECT candidate.*
+            FROM "GuestActivityFact" candidate
+            WHERE candidate."id" = event."sourceFactId"
+            OFFSET 0
+          ) superseded_typed_fact
+          JOIN "GuestActivityFact" fact
+            ON fact."tenantId" = superseded_typed_fact."tenantId"
+            AND fact."factType" = event."factType"
+            AND superseded_typed_fact."sourceHash" = fact."sourceHash"
+          WHERE superseded_typed_fact."tenantId" = event."tenantId"
+            AND superseded_typed_fact."factType" = event."hourlyFactType"
+            AND superseded_typed_fact."lifecycleStatus" = 'SUPERSEDED'
+            AND superseded_typed_fact."supersededAt" IS NOT NULL
+            AND superseded_typed_fact."externalProvider" =
+              fact."externalProvider"
+            AND superseded_typed_fact."externalDomain" = fact."externalDomain"
+            AND superseded_typed_fact."sessionExternalId" =
+              fact."sessionExternalId"
+            AND ${GENERIC_SESSION_FACT_PROOF}
         )
       )
     ORDER BY event."createdAt", event."id"

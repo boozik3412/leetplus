@@ -89,9 +89,6 @@
   "components/executive-dashboard.tsx": {
     "club-days": 2
   },
-  "components/executive-drivers.tsx": {
-    "club-days": 1
-  },
   "components/fact-csv-import.tsx": {
     "api": 1
   },
@@ -209,7 +206,6 @@
     "api": 1
   },
   "components/sidebar.tsx": {
-    "promo-scenario": 1,
     "tenant": 1
   },
   "components/staff-directory-workspace.tsx": {

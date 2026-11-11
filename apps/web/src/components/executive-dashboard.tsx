@@ -49,6 +49,10 @@ import {
 } from "@/lib/executive-driver-rules";
 import { closeClubHref, reopenClubHref } from "@/lib/executive-closures";
 import { buildAssortmentReportHref } from "@/lib/assortment-report-query";
+import {
+  executiveVerdict,
+  type ExecutiveVerdictTone,
+} from "@/lib/executive-verdict";
 import type { DashboardMetric } from "@/lib/dashboard-summary";
 import type {
   ExecutiveMetric,
@@ -255,6 +259,20 @@ function Sparkline({
   );
 }
 
+const verdictDot: Record<ExecutiveVerdictTone, string> = {
+  up: "bg-emerald-500",
+  down: "bg-red-500",
+  flat: "bg-zinc-400",
+  unknown: "bg-amber-500",
+};
+
+/** What an empty driver tile waits for, instead of a bare dash. */
+const emptyTileHint: Record<"visits" | "purchases" | "check", string> = {
+  visits: "появятся, когда сессии Langame привяжутся к клубам",
+  purchases: "появятся, когда в продажах будет номер чека или гость",
+  check: "появится, когда в продажах будет номер чека или гость",
+};
+
 function headlineKey(summary: ExecutiveSummary) {
   return summary.metrics.serviceRevenue.state === "AVAILABLE"
     ? "revenue"
@@ -270,6 +288,7 @@ function Headline({
 }) {
   const key = headlineKey(summary);
   const metric = summary.metrics[key];
+  const verdict = executiveVerdict(summary, key);
   const against = summary.scope.comparison
     ? formatRange(summary.scope.comparison.from, summary.scope.comparison.to)
     : null;
@@ -377,6 +396,16 @@ function Headline({
           </div>
         ) : null}
       </div>
+      <p
+        data-testid="executive-verdict"
+        className="mt-4 flex items-start gap-2.5 rounded-xl bg-[var(--surface-muted)] px-4 py-3 text-[15px] leading-6 text-[var(--foreground)]"
+      >
+        <span
+          aria-hidden="true"
+          className={`mt-2 h-2 w-2 shrink-0 rounded-full ${verdictDot[verdict.tone]}`}
+        />
+        <span>{verdict.text}</span>
+      </p>
       {driverTiles ? (
         <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3">
           {driverTiles.map(([label, current, previous, unit, focus]) => {
@@ -401,20 +430,31 @@ function Headline({
                     className="h-3.5 w-3.5 shrink-0 text-zinc-400 transition group-hover:translate-x-0.5 group-hover:text-emerald-600 dark:group-hover:text-emerald-400"
                   />
                 </span>
-                <span className="text-lg font-semibold tabular-nums text-[var(--foreground)] sm:text-xl">
-                  {current === null
-                    ? "—"
-                    : unit === "RUB"
-                      ? formatMoney(current)
-                      : formatNumber(current)}
-                </span>
-                <span
-                  className={`text-xs tabular-nums ${change === null ? "text-zinc-500 dark:text-zinc-400" : change < 0 ? "text-red-700 dark:text-red-300" : change > 0 ? "text-emerald-700 dark:text-emerald-300" : "text-zinc-500 dark:text-zinc-400"}`}
-                >
-                  {change === null
-                    ? "без сравнения"
-                    : `${change < 0 ? "▼ " : change > 0 ? "▲ " : ""}${formatSigned(change, 1, "%")}`}
-                </span>
+                {current === null ? (
+                  <>
+                    <span className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">
+                      Пока нет данных
+                    </span>
+                    <span className="hidden text-xs leading-4 text-zinc-500 sm:block dark:text-zinc-400">
+                      {emptyTileHint[focus]}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-lg font-semibold tabular-nums text-[var(--foreground)] sm:text-xl">
+                      {unit === "RUB"
+                        ? formatMoney(current)
+                        : formatNumber(current)}
+                    </span>
+                    <span
+                      className={`text-xs tabular-nums ${change === null ? "text-zinc-500 dark:text-zinc-400" : change < 0 ? "text-red-700 dark:text-red-300" : change > 0 ? "text-emerald-700 dark:text-emerald-300" : "text-zinc-500 dark:text-zinc-400"}`}
+                    >
+                      {change === null
+                        ? "без сравнения"
+                        : `${change < 0 ? "▼ " : change > 0 ? "▲ " : ""}${formatSigned(change, 1, "%")}`}
+                    </span>
+                  </>
+                )}
               </ExecutiveLink>
             );
           })}

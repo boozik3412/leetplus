@@ -23,6 +23,7 @@ import {
   formatRange,
   formatSigned,
   periodDays,
+  pluralRu,
 } from "@/lib/executive-format";
 import {
   clubDetailHref,
@@ -166,51 +167,87 @@ export function DriverDataStrip({ summary }: { summary: ExecutiveSummary }) {
     (closure) => closure.closedDays > 0,
   );
   const silent = silentClubs(summary).filter((club) => club.closure === null);
+  const issues = silent.length + unbound.length;
+  const healthy = Boolean(complete) && issues === 0;
+  if (!coverage && !closed.length && !issues && !summary.drivers) return null;
+  // One badge instead of a strip (UX plan, step 1.5); details open on click.
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-[var(--border-soft)] bg-[var(--surface)] px-4 py-2.5 text-xs text-zinc-600 dark:text-zinc-300">
-      {coverage && coverage.total !== null ? (
-        <span className="inline-flex items-center gap-2">
-          <span
-            aria-hidden="true"
-            className={`h-2 w-2 rounded-full ${complete ? "bg-emerald-500" : "bg-amber-500"}`}
-          />
-          Продажи: {coverage.covered} из {coverage.total} клубо-дней
-        </span>
-      ) : null}
-      {closed.length ? (
-        <span className="inline-flex items-center gap-2">
-          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-zinc-400" />
-          Закрыты:{" "}
-          {closed
-            .map(
-              (closure) =>
-                `${closure.storeName} с ${formatDay(closure.closedFrom)}${closure.reopenedOn ? ` до ${formatDay(closure.reopenedOn)}` : ""}`,
-            )
-            .join(", ")}
-        </span>
-      ) : null}
-      {silent.length ? (
-        <span className="inline-flex items-center gap-2">
-          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-amber-500" />
-          Без продаж:{" "}
-          {silent
-            .map((club) => `${club.storeName} с ${formatDay(club.since)}`)
-            .join(", ")}
-        </span>
-      ) : null}
-      {unbound.length ? (
-        <span className="inline-flex items-center gap-2">
-          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-zinc-400" />
-          Визиты не разнесены по клубам:{" "}
-          {unbound.map((row) => row.storeName).join(", ")}
-        </span>
-      ) : null}
-      {summary.drivers ? (
-        <span className="text-zinc-500 dark:text-zinc-400 lg:ml-auto">
-          Покупка — продажи одному гостю в одну минуту
-        </span>
-      ) : null}
-    </div>
+    <details className="group w-fit max-w-full text-xs text-zinc-600 dark:text-zinc-300">
+      <summary className="inline-flex min-h-8 cursor-pointer list-none items-center gap-2 rounded-full border border-[var(--border-soft)] bg-[var(--surface)] px-3 py-1 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 [&::-webkit-details-marker]:hidden">
+        <span
+          aria-hidden="true"
+          className={`h-2 w-2 shrink-0 rounded-full ${healthy ? "bg-emerald-500" : "bg-amber-500"}`}
+        />
+        {coverage && coverage.total !== null
+          ? complete
+            ? "Продажи подтверждены за все дни"
+            : `Продажи: ${coverage.covered} из ${coverage.total} дней по клубам`
+          : "Данные периода"}
+        {issues ? ` · ${issues} ${pluralRu(issues, ["замечание", "замечания", "замечаний"])}` : ""}
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-3.5 w-3.5 text-zinc-400 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </summary>
+      <ul className="mt-2 grid gap-1.5 rounded-xl border border-[var(--border-soft)] bg-[var(--surface)] px-4 py-3 leading-5">
+        {coverage && coverage.total !== null ? (
+          <li className="flex items-start gap-2">
+            <span
+              aria-hidden="true"
+              className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${complete ? "bg-emerald-500" : "bg-amber-500"}`}
+            />
+            Продажи подтверждены: {coverage.covered} из {coverage.total} дней по клубам
+          </li>
+        ) : null}
+        {closed.length ? (
+          <li className="flex items-start gap-2">
+            <span aria-hidden="true" className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-zinc-400" />
+            <span>
+              Закрыты:{" "}
+              {closed
+                .map(
+                  (closure) =>
+                    `${closure.storeName} с ${formatDay(closure.closedFrom)}${closure.reopenedOn ? ` до ${formatDay(closure.reopenedOn)}` : ""}`,
+                )
+                .join(", ")}
+            </span>
+          </li>
+        ) : null}
+        {silent.length ? (
+          <li className="flex items-start gap-2">
+            <span aria-hidden="true" className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+            <span>
+              Без продаж:{" "}
+              {silent
+                .map((club) => `${club.storeName} с ${formatDay(club.since)}`)
+                .join(", ")}
+            </span>
+          </li>
+        ) : null}
+        {unbound.length ? (
+          <li className="flex items-start gap-2">
+            <span aria-hidden="true" className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-zinc-400" />
+            <span>
+              Визиты не разнесены по клубам:{" "}
+              {unbound.map((row) => row.storeName).join(", ")}
+            </span>
+          </li>
+        ) : null}
+        {summary.drivers ? (
+          <li className="text-zinc-500 dark:text-zinc-400">
+            Покупка — продажи одному гостю в одну минуту.
+          </li>
+        ) : null}
+      </ul>
+    </details>
   );
 }
 
@@ -271,27 +308,51 @@ export function DriverTree({ summary }: { summary: ExecutiveSummary }) {
     network.current.barRevenue,
     network.previous?.barRevenue,
   );
+  // Folded by default (UX plan, step 1.5): the headline already says what
+  // changed; the tree is the explanation for whoever wants it.
   return (
     <section
       aria-labelledby="driver-tree-title"
-      className="flex flex-col gap-5 rounded-2xl border border-[var(--border-soft)] bg-[var(--surface)] p-5 shadow-sm sm:p-6"
+      className="rounded-2xl border border-[var(--border-soft)] bg-[var(--surface)] shadow-sm"
     >
+      <details className="group">
+        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-2xl p-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 sm:px-6 [&::-webkit-details-marker]:hidden">
+          <div className="min-w-0">
+            <h2
+              id="driver-tree-title"
+              className="text-lg font-semibold text-[var(--foreground)]"
+            >
+              Дерево выручки
+            </h2>
+            <span className="mt-1 block text-sm text-zinc-600 dark:text-zinc-300">
+              Почему изменился бар:{" "}
+              {factors
+                .map((factor) => factorTitle[factor].toLowerCase())
+                .join(" × ")}
+            </span>
+          </div>
+          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+            <span className="group-open:hidden">Показать</span>
+            <span className="hidden group-open:inline">Скрыть</span>
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-4 w-4 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </span>
+        </summary>
+        <div className="flex flex-col gap-5 px-5 pb-5 sm:px-6 sm:pb-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div>
-          <h2
-            id="driver-tree-title"
-            className="text-lg font-semibold text-[var(--foreground)]"
-          >
-            Дерево выручки
-          </h2>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-            Почему изменился бар:{" "}
-            {factors.map((factor) => factorTitle[factor].toLowerCase()).join(" × ")}
-          </p>
-          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-            Нажмите на множитель — откроются клубы и дни
-          </p>
-        </div>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          Нажмите на множитель — откроются клубы и дни
+        </p>
         <span className="text-xs text-zinc-500 dark:text-zinc-400">
           Сеть{against ? ` · к ${against}` : ""}
         </span>
@@ -401,6 +462,8 @@ export function DriverTree({ summary }: { summary: ExecutiveSummary }) {
           {network.notes.join(" ")}
         </p>
       ) : null}
+        </div>
+      </details>
     </section>
   );
 }

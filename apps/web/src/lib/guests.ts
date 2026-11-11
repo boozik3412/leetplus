@@ -666,11 +666,7 @@ export type GuestCrmTask = {
   assignedToUser: { id: string; displayName: string; email: string } | null;
 };
 
-export type GuestCrmTaskStatus =
-  | "OPEN"
-  | "IN_PROGRESS"
-  | "DONE"
-  | "CANCELED";
+export type GuestCrmTaskStatus = "OPEN" | "IN_PROGRESS" | "DONE" | "CANCELED";
 
 export type GuestCrmTaskSortKey =
   | "dueAt"
@@ -1035,6 +1031,31 @@ export type GuestDetail = GuestDashboardRow & {
   behavior: GuestBehaviorSummary;
   gameAccess: "AVAILABLE" | "NO_CAPABILITY";
   gamification: GuestGameDetail | null;
+  staffMark: GuestStaffMark;
+};
+
+/** Pseudo guest group of the filters: guests marked as staff on their card. */
+export const GUEST_STAFF_GROUP_ID = "marked-staff";
+
+export type GuestStaffMark = {
+  /** Marked on the card: out of guest analytics, rating and game statistics. */
+  isStaff: boolean;
+  markedAt: string | null;
+  markedBy: string | null;
+  /** Langame admin group: already out of guest analytics by its group. */
+  inAdminGroup: boolean;
+  /** A linked game profile matched a staff phone, the card is not marked. */
+  autoDetected: { reason: string; matchedAt: string | null } | null;
+  /** The owner confirmed the person is a guest: phone matching stays off. */
+  confirmedGuest: boolean;
+  events: Array<{
+    id: string;
+    isStaff: boolean;
+    note: string | null;
+    gameProfilesUpdated: number;
+    createdAt: string;
+    createdBy: string | null;
+  }>;
 };
 
 export type GuestsSummaryFilters = {

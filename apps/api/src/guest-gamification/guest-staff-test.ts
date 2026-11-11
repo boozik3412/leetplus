@@ -18,3 +18,8 @@ export function guestGameProfileStaffTestAutoMarkable(): Prisma.GuestGameProfile
     ],
   };
 }
+
+// The network marked the guest card as its own staff member (Guest.isStaff).
+// The linked game profiles follow the mark; an unmark writes
+// OWNER_CONFIRMED_GUEST so phone matching does not bring the mark back.
+export const GAME_PROFILE_STAFF_TEST_OWNER_MARKED_STAFF = 'OWNER_MARKED_STAFF';

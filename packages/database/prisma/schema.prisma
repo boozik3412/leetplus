@@ -342,6 +342,7 @@ model Tenant {
   reportDigestScheduleRuns             ReportDigestScheduleRun[]
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
   guestStaffIdentityMappingEvents      GuestStaffIdentityMappingEvent[]
+  guestStaffMarkEvents                 GuestStaffMarkEvent[]
   langameStaffUsers                    LangameStaffUser[]
   staffMembers                         StaffMember[]
   staffTasks                           StaffTask[]
@@ -493,6 +494,7 @@ model User {
   publishedGuestGameVisualDrafts       GuestGameVisualDraft[]                 @relation("GuestGameVisualDraftPublishedBy")
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
   guestStaffIdentityMappingEvents      GuestStaffIdentityMappingEvent[]
+  guestStaffMarkEvents                 GuestStaffMarkEvent[]
   staffMember                          StaffMember?                           @relation("StaffMemberUser")
   createdStaffMembers                  StaffMember[]                          @relation("StaffMemberCreatedBy")
   createdStaffTasks                    StaffTask[]                            @relation("StaffTaskCreatedBy")
@@ -2305,12 +2307,19 @@ model Guest {
   phoneConsentSource      String?
   phoneConsentAt          DateTime?
   unsubscribedAt          DateTime?
+  /// Marked by the network as its own staff member: excluded from guest
+  /// analytics, the leaderboard and game statistics (LeetPlus-only, never
+  /// overwritten by the Langame sync).
+  isStaff                 Boolean                         @default(false)
+  staffMarkedAt           DateTime?
+  staffMarkedByUserId     String?
   sourcePayloadHash       String?
   lastSyncedAt            DateTime?
   createdAt               DateTime                        @default(now())
   updatedAt               DateTime                        @updatedAt
 
   tenant                     Tenant                           @relation(fields: [tenantId], references: [id])
+  staffMarkEvents            GuestStaffMarkEvent[]
   salesFacts                 SalesFact[]
   balanceSnapshots           GuestBalanceSnapshot[]
   bonusBalanceSnapshots      GuestBonusBalanceSnapshot[]
@@ -2373,6 +2382,27 @@ model GuestCrmEvent {
   @@index([tenantId, createdAt])
   @@index([guestId, createdAt])
   @@index([createdByUserId])
+}
+
+/// Journal of «сотрудник» marks on a guest card: who marked or unmarked the
+/// guest, when, and how many linked game profiles followed the mark.
+model GuestStaffMarkEvent {
+  id                  String   @id @default(uuid())
+  tenantId            String
+  guestId             String
+  isStaff             Boolean
+  note                String?
+  gameProfilesUpdated Int      @default(0)
+  createdByUserId     String?
+  createdAt           DateTime @default(now())
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id])
+  guest         Guest  @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  createdByUser User?  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt], map: "guest_staff_mark_event_created_idx")
+  @@index([guestId, createdAt], map: "guest_staff_mark_event_guest_idx")
+  @@index([createdByUserId], map: "guest_staff_mark_event_user_idx")
 }
 
 model GuestCrmLead {

@@ -46,7 +46,11 @@ export function GuestGameCard({ guest }: { guest: GuestDetail }) {
           eyebrow="Геймификация"
           title="Игровой профиль не найден"
           description="Гость не зарегистрирован в игровом модуле или его телефон ещё не сопоставлен с профилем. Профиль появляется после регистрации через Telegram или веб-кабинет и подтверждения телефона."
-          aside={<PillLink href="/gamification?tab=profiles">Игровой модуль</PillLink>}
+          aside={
+            <PillLink href="/gamification?tab=profiles">
+              Игровой модуль
+            </PillLink>
+          }
         />
         <div className="p-5">
           <EmptyNote>
@@ -81,9 +85,13 @@ export function GuestGameCard({ guest }: { guest: GuestDetail }) {
             {profile.channels.telegram ? (
               <InsightBadge tone="info">Telegram</InsightBadge>
             ) : null}
-            {profile.channels.max ? <InsightBadge tone="info">MAX</InsightBadge> : null}
+            {profile.channels.max ? (
+              <InsightBadge tone="info">MAX</InsightBadge>
+            ) : null}
             {profile.isStaffTest ? (
-              <InsightBadge tone="warning">Тест сотрудника</InsightBadge>
+              <InsightBadge tone="warning">
+                Сотрудник · не в рейтинге
+              </InsightBadge>
             ) : null}
             <span className="text-xs text-zinc-500">
               регистрация {formatDate(profile.registeredAt)} · активация{" "}
@@ -94,14 +102,18 @@ export function GuestGameCard({ guest }: { guest: GuestDetail }) {
         }
         aside={
           <div className="flex flex-wrap gap-2">
-            <PillLink href="/gamification?tab=profiles">Игровой модуль</PillLink>
+            <PillLink href="/gamification?tab=profiles">
+              Игровой модуль
+            </PillLink>
             <PillLink href="/gamification/log">Игровой журнал</PillLink>
           </div>
         }
       />
       <div className="px-5 pt-4">
         <div className="flex items-center justify-between text-xs text-zinc-500">
-          <span>До следующего уровня {formatNumber(profile.xpToNextLevel)} XP</span>
+          <span>
+            До следующего уровня {formatNumber(profile.xpToNextLevel)} XP
+          </span>
           <span>{levelProgress} %</span>
         </div>
         <div className="mt-1 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
@@ -146,11 +158,15 @@ export function GuestGameCard({ guest }: { guest: GuestDetail }) {
       <div className="grid gap-5 border-t border-zinc-100 p-4 dark:border-zinc-800 xl:grid-cols-2">
         <ListBlock title="Кошелёк наград" emptyLabel="Записей кошелька нет.">
           {detail.wallet.map((item) => (
-            <li key={item.id} className="flex items-start justify-between gap-3 py-2">
+            <li
+              key={item.id}
+              className="flex items-start justify-between gap-3 py-2"
+            >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{item.title}</p>
                 <p className="text-xs text-zinc-500">
-                  {item.rewardLabel} · {rewardSourceKindLabels[item.sourceKind] ?? item.sourceKind}
+                  {item.rewardLabel} ·{" "}
+                  {rewardSourceKindLabels[item.sourceKind] ?? item.sourceKind}
                   {item.storeName ? ` · ${item.storeName}` : ""}
                 </p>
               </div>
@@ -179,9 +195,14 @@ export function GuestGameCard({ guest }: { guest: GuestDetail }) {
         </ListBlock>
         <ListBlock title="Награды" emptyLabel="Наград пока нет.">
           {detail.rewards.map((reward) => (
-            <li key={reward.id} className="flex items-start justify-between gap-3 py-2">
+            <li
+              key={reward.id}
+              className="flex items-start justify-between gap-3 py-2"
+            >
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{reward.rewardLabel}</p>
+                <p className="truncate text-sm font-medium">
+                  {reward.rewardLabel}
+                </p>
                 <p className="text-xs text-zinc-500">
                   {rewardSourceKindLabels[reward.sourceKind]}
                   {reward.sourceName ? `: ${reward.sourceName}` : ""}
@@ -193,7 +214,8 @@ export function GuestGameCard({ guest }: { guest: GuestDetail }) {
                   tone={
                     reward.status === "PAID"
                       ? "good"
-                      : reward.status === "CANCELED" || reward.status === "EXPIRED"
+                      : reward.status === "CANCELED" ||
+                          reward.status === "EXPIRED"
                         ? "danger"
                         : "warning"
                   }
@@ -209,9 +231,15 @@ export function GuestGameCard({ guest }: { guest: GuestDetail }) {
             </li>
           ))}
         </ListBlock>
-        <ListBlock title="Бонусы в Langame" emptyLabel="Операций bonus ledger нет.">
+        <ListBlock
+          title="Бонусы в Langame"
+          emptyLabel="Операций bonus ledger нет."
+        >
           {detail.ledger.map((entry) => (
-            <li key={entry.id} className="flex items-start justify-between gap-3 py-2">
+            <li
+              key={entry.id}
+              className="flex items-start justify-between gap-3 py-2"
+            >
               <div className="min-w-0">
                 <p className="text-sm font-medium tabular-nums">
                   +{formatRubles(entry.amount)}
@@ -244,7 +272,10 @@ export function GuestGameCard({ guest }: { guest: GuestDetail }) {
         </ListBlock>
         <ListBlock title="Последние игровые события" emptyLabel="Событий нет.">
           {detail.events.map((event) => (
-            <li key={event.id} className="flex items-start justify-between gap-3 py-2">
+            <li
+              key={event.id}
+              className="flex items-start justify-between gap-3 py-2"
+            >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">
                   {gameEventTypeLabel(event.eventType)}
@@ -252,7 +283,9 @@ export function GuestGameCard({ guest }: { guest: GuestDetail }) {
                 </p>
                 <p className="text-xs text-zinc-500">
                   источник {event.source}
-                  {event.xpDelta ? ` · ${event.xpDelta > 0 ? "+" : ""}${event.xpDelta} XP` : ""}
+                  {event.xpDelta
+                    ? ` · ${event.xpDelta > 0 ? "+" : ""}${event.xpDelta} XP`
+                    : ""}
                 </p>
               </div>
               <p className="shrink-0 text-xs text-zinc-500">
@@ -281,7 +314,9 @@ function ListBlock({
         {title}
       </p>
       {children.length > 0 ? (
-        <ul className="mt-1 divide-y divide-zinc-100 dark:divide-zinc-800">{children}</ul>
+        <ul className="mt-1 divide-y divide-zinc-100 dark:divide-zinc-800">
+          {children}
+        </ul>
       ) : (
         <p className="mt-2 text-sm text-zinc-500">{emptyLabel}</p>
       )}

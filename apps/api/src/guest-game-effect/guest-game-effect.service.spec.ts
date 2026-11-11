@@ -69,8 +69,13 @@ function createService(
     ).flat(),
     // A staff tester that must never count.
     ...visitRows('staff-guest', range(A - 28, A + 28, 1)),
+    // A guest marked as staff on the card, without a game profile.
+    ...visitRows('marked-staff-guest', range(A - 28, A + 28, 7)),
   ];
   const prisma = {
+    guest: {
+      findMany: jest.fn().mockResolvedValue([{ id: 'marked-staff-guest' }]),
+    },
     store: {
       findMany: jest.fn().mockResolvedValue([
         { id: 'store-1', name: 'Радищева', timeZone: ZONE },

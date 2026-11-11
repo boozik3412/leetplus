@@ -308,14 +308,15 @@ export function DriverTree({ summary }: { summary: ExecutiveSummary }) {
     network.current.barRevenue,
     network.previous?.barRevenue,
   );
-  // Folded by default (UX plan, step 1.5): the headline already says what
-  // changed; the tree is the explanation for whoever wants it.
+  // Open by default (owner's ask, 11.11): it fills the column next to
+  // «Требует внимания» and shows why the bar changed without a click. The
+  // header still folds it for whoever does not need it.
   return (
     <section
       aria-labelledby="driver-tree-title"
       className="rounded-2xl border border-[var(--border-soft)] bg-[var(--surface)] shadow-sm"
     >
-      <details className="group">
+      <details className="group" open>
         <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-2xl p-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 sm:px-6 [&::-webkit-details-marker]:hidden">
           <div className="min-w-0">
             <h2

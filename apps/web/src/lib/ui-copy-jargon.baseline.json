@@ -89,9 +89,6 @@
   "components/executive-dashboard.tsx": {
     "club-days": 2
   },
-  "components/executive-drivers.tsx": {
-    "club-days": 1
-  },
   "components/fact-csv-import.tsx": {
     "api": 1
   },

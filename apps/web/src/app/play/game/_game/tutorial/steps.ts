@@ -1,6 +1,8 @@
-// Guest game tutorial ("Как играть"). Raise the version when a step is added
-// or a mechanic changes enough that every guest should see the tour again.
-export const GAME_TUTORIAL_VERSION = 1;
+// Guest game tutorial ("Как играть"). A new guest sees the whole tour and may
+// skip it. When steps are added, raise the version and mark the new steps
+// with `since`: guests who saw an older version are shown only those steps,
+// once, without a skip.
+export const GAME_TUTORIAL_VERSION = 2;
 
 export type GameTutorialStep = {
   id: string;
@@ -10,7 +12,30 @@ export type GameTutorialStep = {
   // match. `null` is a centered card without a spotlight. A step whose
   // targets are all missing (the club has no such block) is skipped.
   targets: readonly string[] | null;
+  // Shown only where the network turned the feature on.
+  requires?: "gameAccounts";
+  // Tutorial version that added the step (1 when absent).
+  since?: number;
 };
+
+export type GameTutorialFeatures = { gameAccounts: boolean };
+
+// "full": the whole tour (new guest, or opened from the menu).
+// "updates": only steps added after the version the guest has seen.
+export type GameTutorialMode = "full" | "updates";
+
+/** Steps for the mode and features; DOM availability is checked by the tour. */
+export function gameTutorialStepsFor(
+  features: GameTutorialFeatures,
+  mode: GameTutorialMode = "full",
+  seenVersion = 0,
+): GameTutorialStep[] {
+  return GAME_TUTORIAL_STEPS.filter(
+    (step) =>
+      (step.requires === undefined || features[step.requires]) &&
+      (mode === "full" || (step.since ?? 1) > seenVersion),
+  );
+}
 
 // Selectors use the existing ids/classes of the game screen instead of new
 // markup, so moving components between files does not break the tour. The
@@ -113,6 +138,17 @@ export const GAME_TUTORIAL_STEPS: readonly GameTutorialStep[] = [
     body: () =>
       "Нажмите на название клуба, чтобы перейти в игру другого клуба сети.",
     targets: [".lp-club-switch"],
+  },
+  {
+    // The menu item itself is hidden until the menu opens, so the step
+    // points at the menu button.
+    id: "game-accounts",
+    title: "Игровые аккаунты",
+    body: () =>
+      "В меню есть «Игровые аккаунты». Привяжите Steam, и мы сами найдём ваш FACEIT. Тогда матчи CS2, сыгранные в клубе во время вашей сессии, будут засчитываться в задания FACEIT.",
+    targets: [".lp-club-menu-button"],
+    requires: "gameAccounts",
+    since: 2,
   },
   {
     id: "menu",

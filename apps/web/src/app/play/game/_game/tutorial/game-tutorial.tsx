@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
+import { loadGameAccountsEnabled } from "@/lib/guest-game-accounts";
 import { markGameTutorialSeen } from "./api";
 import { gameTutorialCss } from "./game-tutorial-css";
 import {
-  GAME_TUTORIAL_STEPS,
   GAME_TUTORIAL_VERSION,
+  gameTutorialStepsFor,
+  type GameTutorialMode,
   type GameTutorialStep,
 } from "./steps";
 
@@ -28,10 +30,13 @@ type Layout = {
 };
 
 /**
- * Tutorial state for the game screen. The tour starts by itself once, when
- * the profile has not seen the current version and nothing else is open, and
- * can be replayed from the menu. Finishing or skipping saves the version on
- * the guest profile; a failed save only means the tour may show again later.
+ * Tutorial state for the game screen. A guest who has never seen the tour
+ * gets the whole tour once (it can be skipped). A guest who saw an older
+ * version gets only the steps added since then, once and without a skip;
+ * when none of them applies here (the network has no such feature) nothing
+ * opens and the version is not saved, so the steps still show if the feature
+ * is turned on later. The menu replays the whole tour. Finishing saves the
+ * version on the guest profile; a failed save only means it may show again.
  */
 export function useGameTutorial({
   seenVersion,
@@ -41,26 +46,48 @@ export function useGameTutorial({
   blocked: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<GameTutorialMode>("full");
   const dismissedRef = useRef(false);
   const savedRef = useRef(false);
   // An API without the field (older release) never auto-starts the tour.
   const needsTour =
     typeof seenVersion === "number" && seenVersion < GAME_TUTORIAL_VERSION;
+  const autoMode: GameTutorialMode = seenVersion ? "updates" : "full";
 
   useEffect(() => {
     if (open || blocked || dismissedRef.current || !needsTour) {
       return;
     }
 
-    const timeoutId = window.setTimeout(
-      () => setOpen(true),
-      AUTO_START_DELAY_MS,
-    );
+    let active = true;
+    const timeoutId = window.setTimeout(() => {
+      if (autoMode === "full") {
+        setMode("full");
+        setOpen(true);
+        return;
+      }
 
-    return () => window.clearTimeout(timeoutId);
-  }, [blocked, needsTour, open]);
+      void loadGameAccountsEnabled().then((gameAccounts) => {
+        if (
+          active &&
+          availableSteps(gameAccounts, "updates", seenVersion ?? 0).length > 0
+        ) {
+          setMode("updates");
+          setOpen(true);
+        }
+      });
+    }, AUTO_START_DELAY_MS);
 
-  const start = useCallback(() => setOpen(true), []);
+    return () => {
+      active = false;
+      window.clearTimeout(timeoutId);
+    };
+  }, [autoMode, blocked, needsTour, open, seenVersion]);
+
+  const start = useCallback(() => {
+    setMode("full");
+    setOpen(true);
+  }, []);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -76,22 +103,32 @@ export function useGameTutorial({
     });
   }, [needsTour]);
 
-  return { open, start, close };
+  return { open, mode, seenVersion: seenVersion ?? 0, start, close };
 }
 
 export function GameTutorial({
   clubName,
+  mode = "full",
+  seenVersion = 0,
   onClose,
 }: {
   clubName: string;
+  mode?: GameTutorialMode;
+  seenVersion?: number;
   onClose: () => void;
 }) {
-  const [steps] = useState(() =>
-    GAME_TUTORIAL_STEPS.filter(
-      (step) => step.targets === null || findTargets(step).length > 0,
-    ),
+  const updates = mode === "updates";
+  // Steps and position change together when the game accounts step joins.
+  const [tour, setTour] = useState(() => ({
+    steps: availableSteps(false, mode, seenVersion),
+    index: 0,
+  }));
+  const { steps, index } = tour;
+  const setIndex = useCallback(
+    (update: (value: number) => number) =>
+      setTour((current) => ({ ...current, index: update(current.index) })),
+    [],
   );
-  const [index, setIndex] = useState(0);
   const [layout, setLayout] = useState<Layout | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const primaryRef = useRef<HTMLButtonElement | null>(null);
@@ -99,6 +136,35 @@ export function GameTutorial({
   const step = steps[index] ?? steps[0];
   const isFirst = index === 0;
   const isLast = index === steps.length - 1;
+
+  // The game accounts step joins once the network answers that the feature
+  // is on (usually long before the guest reaches it near the end).
+  useEffect(() => {
+    let active = true;
+
+    void loadGameAccountsEnabled().then((enabled) => {
+      if (!active || !enabled) {
+        return;
+      }
+
+      const next = availableSteps(true, mode, seenVersion);
+
+      setTour((current) => {
+        if (next.length === current.steps.length) {
+          return current;
+        }
+
+        // Keep the guest on the step they are reading.
+        const currentId = current.steps[current.index]?.id;
+        const moved = next.findIndex((item) => item.id === currentId);
+        return { steps: next, index: moved >= 0 ? moved : current.index };
+      });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [mode, seenVersion]);
 
   useEffect(() => {
     returnFocusRef.current = document.activeElement;
@@ -205,15 +271,16 @@ export function GameTutorial({
     }
 
     setIndex((value) => Math.min(value + 1, steps.length - 1));
-  }, [isLast, onClose, steps.length]);
+  }, [isLast, onClose, setIndex, steps.length]);
 
   const goBack = useCallback(() => {
     setIndex((value) => Math.max(value - 1, 0));
-  }, []);
+  }, [setIndex]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
+      // The "what's new" steps are shown once and are not skipped.
+      if (event.key === "Escape" && !updates) {
         event.preventDefault();
         onClose();
       }
@@ -222,7 +289,7 @@ export function GameTutorial({
     window.addEventListener("keydown", handleKeyDown);
 
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [onClose, updates]);
 
   function handleCardKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === "ArrowRight") {
@@ -299,21 +366,39 @@ export function GameTutorial({
         style={current ? current.style : { visibility: "hidden" }}
         onKeyDown={handleCardKeyDown}
       >
-        <button
-          type="button"
-          className="lp-tutorial-close"
-          aria-label="Закрыть обучение"
-          onClick={onClose}
-        >
-          ×
-        </button>
+        {updates ? null : (
+          <button
+            type="button"
+            className="lp-tutorial-close"
+            aria-label="Закрыть обучение"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        )}
         <span className="lp-tutorial-counter">
-          {isFirst ? "Как играть" : `Шаг ${index} из ${steps.length - 1}`}
+          {updates
+            ? steps.length > 1
+              ? `Новое в игре · ${index + 1} из ${steps.length}`
+              : "Новое в игре"
+            : isFirst
+              ? "Как играть"
+              : `Шаг ${index} из ${steps.length - 1}`}
         </span>
         <h3 id={titleId}>{step.title}</h3>
         <p id={bodyId}>{step.body(clubName)}</p>
         <div className="lp-tutorial-actions">
-          {isFirst ? (
+          {updates ? (
+            isFirst ? null : (
+              <button
+                type="button"
+                className="lp-tutorial-secondary"
+                onClick={goBack}
+              >
+                Назад
+              </button>
+            )
+          ) : isFirst ? (
             <button
               type="button"
               className="lp-tutorial-secondary"
@@ -336,10 +421,18 @@ export function GameTutorial({
             className="lp-tutorial-primary"
             onClick={goNext}
           >
-            {isFirst ? "Показать" : isLast ? "Готово" : "Далее"}
+            {updates
+              ? isLast
+                ? "Понятно"
+                : "Далее"
+              : isFirst
+                ? "Показать"
+                : isLast
+                  ? "Готово"
+                  : "Далее"}
           </button>
         </div>
-        {!isFirst && !isLast ? (
+        {!updates && !isFirst && !isLast ? (
           <button type="button" className="lp-tutorial-skip" onClick={onClose}>
             Пропустить обучение
           </button>
@@ -429,6 +522,16 @@ function placeCard(
   }
 
   return { spot, mode: "sheet", style: {} };
+}
+
+function availableSteps(
+  gameAccounts: boolean,
+  mode: GameTutorialMode,
+  seenVersion: number,
+): GameTutorialStep[] {
+  return gameTutorialStepsFor({ gameAccounts }, mode, seenVersion).filter(
+    (step) => step.targets === null || findTargets(step).length > 0,
+  );
 }
 
 function findTargets(step: GameTutorialStep): HTMLElement[] {

@@ -44,6 +44,7 @@ const SYNC_JOB_LOCK_STALE_MS = 10 * 60 * 1000;
 const SYNC_JOB_MAX_ATTEMPTS = 5;
 const SYNC_JOB_BASE_BACKOFF_MS = 15 * 1000;
 const SYNC_JOB_PARTIAL_CONTINUATION_DELAY_MS = 1_000;
+const CONTINUATION_SOURCE_FRESH_MS = 30 * 60 * 1000;
 // Background jobs (recovery, hourly replay) are queued with this reason
 // prefix; every other reason means a guest or an operator is waiting.
 const BACKGROUND_SYNC_REASON_PREFIX = 'AUTOMATIC_';
@@ -206,16 +207,20 @@ type SyncWindow = {
   initial: boolean;
   earliestRuleAt: Date | null;
   parserReplay?: boolean;
+  // The previous run of this guest stopped PARTIAL and this run continues it.
+  continuation?: boolean;
 };
 
 type SourceSyncWindow = SyncWindow & {
   startPage: number;
+  // Source already finished moments ago in the same continuation chain.
+  skip?: boolean;
 };
 
 type SourceFetchResult<T> = {
   rows: T[];
   partial: boolean;
-  status: 'SUCCESS' | 'PARTIAL' | 'FAILED';
+  status: 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'SKIPPED';
   pagesFetched: number;
   rowsFetched: number;
   nextPage: number | null;
@@ -850,7 +855,10 @@ export class GuestActivityLedgerService {
       return { status: 'SKIPPED' as GuestActivitySyncStatus };
     }
 
-    const window = await this.resolveSyncWindow(context, state);
+    const window = {
+      ...(await this.resolveSyncWindow(context, state)),
+      continuation: state?.status === 'PARTIAL',
+    };
 
     await this.upsertSyncState(context, {
       status: 'RUNNING',
@@ -1615,7 +1623,7 @@ export class GuestActivityLedgerService {
       .filter((value, index, values) => values.indexOf(value) === index);
     const staleBinding = failureClasses.includes('STALE_EXTERNAL_GUEST');
     const partial = Object.values(sourceResults).some(
-      (result) => result.status !== 'SUCCESS',
+      (result) => result.status === 'PARTIAL' || result.status === 'FAILED',
     );
 
     if (
@@ -1876,6 +1884,19 @@ export class GuestActivityLedgerService {
       fallbackWindow,
     );
 
+    if (window.skip) {
+      return {
+        rows: [],
+        partial: false,
+        status: 'SKIPPED',
+        pagesFetched: 0,
+        rowsFetched: 0,
+        nextPage: null,
+        window,
+        errorMessage: null,
+      };
+    }
+
     await this.upsertSourceSyncState(context, sourceKind, window, {
       status: 'RUNNING',
       pagesFetched: 0,
@@ -1891,7 +1912,7 @@ export class GuestActivityLedgerService {
           loadPage(
             page,
             formatDateParam(window.from),
-            formatDateParam(window.to),
+            formatLangameDateToParam(window.to),
           ),
         filterRow,
         window.startPage,
@@ -1938,7 +1959,7 @@ export class GuestActivityLedgerService {
     sourceKind: string,
     result: SourceFetchResult<T>,
   ) {
-    if (result.status === 'FAILED') {
+    if (result.status === 'FAILED' || result.status === 'SKIPPED') {
       return;
     }
 
@@ -1988,6 +2009,28 @@ export class GuestActivityLedgerService {
         earliestRuleAt: state.syncFrom,
         startPage: state.nextPage,
         parserReplay: jsonObjectRecord(state.diagnostics).parserReplay === true,
+      };
+    }
+
+    // A continuation re-runs only the sources that are still unfinished: a
+    // source that completed within this chain keeps its fresh watermark
+    // instead of paging the whole club again.
+    if (
+      fallbackWindow.continuation &&
+      state?.status === 'SUCCESS' &&
+      !requiresHourlySessionReplay &&
+      state.lastSuccessfulTo &&
+      fallbackWindow.to.getTime() - state.lastSuccessfulTo.getTime() <
+        CONTINUATION_SOURCE_FRESH_MS
+    ) {
+      return {
+        from: state.lastSuccessfulTo,
+        to: state.lastSuccessfulTo,
+        initial: false,
+        earliestRuleAt: state.syncFrom,
+        startPage: 1,
+        parserReplay: false,
+        skip: true,
       };
     }
 
@@ -4350,6 +4393,15 @@ export function isPrioritySyncReason(reason: string | null | undefined) {
 
 function formatDateParam(date: Date) {
   return date.toISOString().slice(0, 10);
+}
+
+// Langame filters by the club's local calendar date, which is ahead of the
+// UTC date in the evening for the clubs east of UTC (Yekaterinburg: after
+// 19:00 UTC). The upper bound is therefore the next UTC date, otherwise rows
+// from the local night stay invisible until UTC midnight. No rows exist past
+// "now", so the wider bound reads nothing extra.
+function formatLangameDateToParam(date: Date) {
+  return formatDateParam(new Date(date.getTime() + 24 * 60 * 60 * 1000));
 }
 
 function subtractDays(date: Date, days: number) {

@@ -2556,6 +2556,92 @@ describe('GuestActivityLedgerService', () => {
     );
   });
 
+  it('continues only the unfinished source after a PARTIAL run', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({
+      id: index + 1,
+      guest_id: externalGuestId,
+      club_id: '15',
+      date: '06.07.2026 17:00',
+      type: `log-${index}`,
+    }));
+    langameClient.listGuestLogs.mockImplementation((_url, _key, query) =>
+      (query?.page ?? 1) <= 20 ? fullPage : [],
+    );
+
+    const first = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'PARTIAL_FIRST',
+    });
+    expect(first.status).toBe('PARTIAL');
+    const finishedSessions = sourceSyncStates.get('LANGAME_GUEST_SESSION');
+    expect(finishedSessions).toEqual(
+      expect.objectContaining({ status: 'SUCCESS' }),
+    );
+
+    langameClient.listGuestLogs.mockClear();
+    langameClient.listGuestSessions.mockClear();
+    langameClient.listTransactions.mockClear();
+    langameClient.listProductExpenses.mockClear();
+    langameClient.listBalanceTopups.mockClear();
+    const second = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'PARTIAL_CONTINUE',
+    });
+
+    expect(second.status).toBe('SUCCESS');
+    expect(langameClient.listGuestLogs).toHaveBeenCalledWith(
+      source.baseUrl,
+      'api-key',
+      expect.objectContaining({ page: 21 }),
+    );
+    expect(langameClient.listGuestSessions).not.toHaveBeenCalled();
+    expect(langameClient.listTransactions).not.toHaveBeenCalled();
+    expect(langameClient.listProductExpenses).not.toHaveBeenCalled();
+    expect(langameClient.listBalanceTopups).not.toHaveBeenCalled();
+    expect(sourceSyncStates.get('LANGAME_GUEST_SESSION')).toEqual(
+      expect.objectContaining({
+        status: 'SUCCESS',
+        lastSuccessfulTo: finishedSessions?.lastSuccessfulTo,
+      }),
+    );
+
+    // The next ordinary sync reads every source again.
+    langameClient.listBalanceTopups.mockClear();
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'APP_OPEN',
+    });
+    expect(langameClient.listBalanceTopups).toHaveBeenCalled();
+  });
+
+  it('asks Langame up to the next UTC date so the local night is included', async () => {
+    const before = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'DATE_TO',
+    });
+    const after = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+
+    const dateTo = (
+      langameClient.listBalanceTopups.mock.calls as unknown as Array<
+        [string, string, { dateTo: string }]
+      >
+    )[0]?.[2].dateTo;
+    expect([before, after]).toContain(dateTo);
+  });
+
   it('keeps successful sources when one Langame endpoint fails', async () => {
     langameClient.listTransactions.mockRejectedValue(
       new Error('transactions unavailable'),

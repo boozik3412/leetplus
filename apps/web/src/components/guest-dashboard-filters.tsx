@@ -70,7 +70,10 @@ export function GuestDashboardFilters({
   periodFrom,
   periodTo,
   gameAvailable = false,
+  tab,
 }: {
+  /** Current /guests tab, kept when filters change. */
+  tab?: string;
   filters: GuestListFilters;
   options: GuestFilterOptions;
   period?: string;
@@ -87,6 +90,16 @@ export function GuestDashboardFilters({
   );
   const [customFrom, setCustomFrom] = useState(filters.dateFrom ?? periodFrom);
   const [customTo, setCustomTo] = useState(filters.dateTo ?? periodTo);
+  const advancedCount = [
+    filters.guestGroupId,
+    filters.segment && filters.segment !== "top" ? filters.segment : "",
+    filters.churnRisk,
+    filters.rfm,
+    filters.crmStatus,
+    filters.gameStatus && filters.gameStatus !== "any" ? filters.gameStatus : "",
+    filters.search,
+  ].filter(Boolean).length;
+  const [moreOpen, setMoreOpen] = useState(advancedCount > 0);
   const selectedPeriodLabel =
     selectedPeriod === "custom"
       ? formatCustomPeriodLabel(customFrom, customTo)
@@ -202,6 +215,10 @@ export function GuestDashboardFilters({
 
     if (filters.direction) {
       params.set("direction", filters.direction);
+    }
+
+    if (tab && tab !== "overview") {
+      params.set("tab", tab);
     }
 
     const target = `${pathname}?${params.toString()}`;
@@ -368,139 +385,156 @@ export function GuestDashboardFilters({
           ))}
         </SelectField>
 
-        <SelectField
-          label="Группа"
-          name="guestGroupId"
-          defaultValue={filters.guestGroupId ?? ""}
-          onChange={(value) => applyFilters({ guestGroupId: value })}
+        <button
+          type="button"
+          aria-expanded={moreOpen}
+          aria-controls="guest-more-filters"
+          onClick={() => setMoreOpen((open) => !open)}
+          className="h-10 rounded-full border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
         >
-          <option value="">Все группы</option>
-          {options.groups.map((group) => (
-            <option key={group.id} value={group.id}>
-              {group.name} ({group.externalDomain ?? "источник"})
-            </option>
-          ))}
-        </SelectField>
+          {moreOpen ? "Скрыть фильтры" : "Ещё фильтры"}
+          {advancedCount > 0 ? ` · ${advancedCount}` : ""}
+        </button>
 
-        <SelectField
-          label="Сегмент"
-          name="segment"
-          defaultValue={filters.segment ?? "top"}
-          onChange={(value) =>
-            applyFilters({ segment: value as GuestListFilters["segment"] })
-          }
+        {/* Hidden, not unmounted: the form still submits these values. */}
+        <div
+          id="guest-more-filters"
+          className={moreOpen ? "contents" : "hidden"}
         >
-          {(
-            ["top", "active", "new", "repeat", "risk", "lost", "quiet"] as const
-          ).map((segment) => (
-            <option key={segment} value={segment}>
-              {segmentLabels[segment]}
-            </option>
-          ))}
-        </SelectField>
-
-        <SelectField
-          label="Риск оттока"
-          name="churnRisk"
-          defaultValue={filters.churnRisk ?? ""}
-          onChange={(value) => applyFilters({ churnRisk: value })}
-        >
-          <option value="">Любой риск</option>
-          {(["HIGH", "MEDIUM", "LOW", "LOST"] as const).map((level) => (
-            <option key={level} value={level}>
-              {churnRiskLabels[level]}
-            </option>
-          ))}
-        </SelectField>
-
-        <SelectField
-          label="Ценность гостя"
-          name="rfm"
-          defaultValue={filters.rfm ?? ""}
-          onChange={(value) => applyFilters({ rfm: value })}
-        >
-          <option value="">Любая ценность</option>
-          {(
-            [
-              "CHAMPION",
-              "LOYAL",
-              "PROMISING",
-              "NEED_ATTENTION",
-              "AT_RISK",
-              "LOST",
-            ] as const
-          ).map((segment) => (
-            <option key={segment} value={segment}>
-              {rfmSegmentLabels[segment]}
-            </option>
-          ))}
-        </SelectField>
-
-        <SelectField
-          label="CRM-статус"
-          name="crmStatus"
-          defaultValue={filters.crmStatus ?? ""}
-          onChange={(value) => applyFilters({ crmStatus: value })}
-        >
-          <option value="">Любой статус</option>
-          {(
-            [
-              "NONE",
-              "WATCH",
-              "CONTACT",
-              "INVITED",
-              "LOYAL",
-              "VIP",
-              "PROBLEM",
-              "DO_NOT_CONTACT",
-            ] as const
-          ).map((status) => (
-            <option key={status} value={status}>
-              {crmStatusLabels[status]}
-            </option>
-          ))}
-        </SelectField>
-
-        {gameAvailable ? (
           <SelectField
-            label="Игра"
-            name="gameStatus"
-            defaultValue={filters.gameStatus ?? "any"}
-            onChange={(value) => applyFilters({ gameStatus: value })}
+            label="Группа"
+            name="guestGroupId"
+            defaultValue={filters.guestGroupId ?? ""}
+            onChange={(value) => applyFilters({ guestGroupId: value })}
           >
-            {(
-              [
-                "any",
-                "registered",
-                "not_registered",
-                "active",
-                "idle",
-                "pending_rewards",
-              ] as const
-            ).map((status) => (
-              <option key={status} value={status}>
-                {gameStatusFilterLabels[status]}
+            <option value="">Все группы</option>
+            {options.groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name} ({group.externalDomain ?? "источник"})
               </option>
             ))}
           </SelectField>
-        ) : null}
 
-        <label className="grid min-w-[180px] flex-1 gap-1 text-sm md:max-w-xs">
-          <span className="text-xs font-medium uppercase text-zinc-500">
-            Поиск
-          </span>
-          <input
-            type="search"
-            name="search"
-            defaultValue={filters.search ?? ""}
-            placeholder="ID, телефон, email"
-            className="h-10 w-full min-w-0 rounded-full border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-          />
-        </label>
-        <input type="hidden" name="pageSize" value={filters.pageSize ?? "50"} />
-        <button className="h-10 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">
-          Применить
-        </button>
+          <SelectField
+            label="Сегмент"
+            name="segment"
+            defaultValue={filters.segment ?? "top"}
+            onChange={(value) =>
+              applyFilters({ segment: value as GuestListFilters["segment"] })
+            }
+          >
+            {(
+              ["top", "active", "new", "repeat", "risk", "lost", "quiet"] as const
+            ).map((segment) => (
+              <option key={segment} value={segment}>
+                {segmentLabels[segment]}
+              </option>
+            ))}
+          </SelectField>
+
+          <SelectField
+            label="Риск оттока"
+            name="churnRisk"
+            defaultValue={filters.churnRisk ?? ""}
+            onChange={(value) => applyFilters({ churnRisk: value })}
+          >
+            <option value="">Любой риск</option>
+            {(["HIGH", "MEDIUM", "LOW", "LOST"] as const).map((level) => (
+              <option key={level} value={level}>
+                {churnRiskLabels[level]}
+              </option>
+            ))}
+          </SelectField>
+
+          <SelectField
+            label="Ценность гостя"
+            name="rfm"
+            defaultValue={filters.rfm ?? ""}
+            onChange={(value) => applyFilters({ rfm: value })}
+          >
+            <option value="">Любая ценность</option>
+            {(
+              [
+                "CHAMPION",
+                "LOYAL",
+                "PROMISING",
+                "NEED_ATTENTION",
+                "AT_RISK",
+                "LOST",
+              ] as const
+            ).map((segment) => (
+              <option key={segment} value={segment}>
+                {rfmSegmentLabels[segment]}
+              </option>
+            ))}
+          </SelectField>
+
+          <SelectField
+            label="CRM-статус"
+            name="crmStatus"
+            defaultValue={filters.crmStatus ?? ""}
+            onChange={(value) => applyFilters({ crmStatus: value })}
+          >
+            <option value="">Любой статус</option>
+            {(
+              [
+                "NONE",
+                "WATCH",
+                "CONTACT",
+                "INVITED",
+                "LOYAL",
+                "VIP",
+                "PROBLEM",
+                "DO_NOT_CONTACT",
+              ] as const
+            ).map((status) => (
+              <option key={status} value={status}>
+                {crmStatusLabels[status]}
+              </option>
+            ))}
+          </SelectField>
+
+          {gameAvailable ? (
+            <SelectField
+              label="Игра"
+              name="gameStatus"
+              defaultValue={filters.gameStatus ?? "any"}
+              onChange={(value) => applyFilters({ gameStatus: value })}
+            >
+              {(
+                [
+                  "any",
+                  "registered",
+                  "not_registered",
+                  "active",
+                  "idle",
+                  "pending_rewards",
+                ] as const
+              ).map((status) => (
+                <option key={status} value={status}>
+                  {gameStatusFilterLabels[status]}
+                </option>
+              ))}
+            </SelectField>
+          ) : null}
+
+          <label className="grid min-w-[180px] flex-1 gap-1 text-sm md:max-w-xs">
+            <span className="text-xs font-medium uppercase text-zinc-500">
+              Поиск
+            </span>
+            <input
+              type="search"
+              name="search"
+              defaultValue={filters.search ?? ""}
+              placeholder="ID, телефон, email"
+              className="h-10 w-full min-w-0 rounded-full border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            />
+          </label>
+          <input type="hidden" name="pageSize" value={filters.pageSize ?? "50"} />
+          <button className="h-10 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">
+            Применить
+          </button>
+        </div>
       </form>
     </section>
   );

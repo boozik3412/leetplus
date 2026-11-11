@@ -306,7 +306,7 @@ const tabs: Array<{ id: TabId; label: string }> = [
   { id: "statistics", label: "Статистика" },
   { id: "effect", label: "Эффект" },
   { id: "profiles", label: "Профили" },
-  { id: "lootBoxes", label: "Лутбоксы" },
+  { id: "lootBoxes", label: "Кейсы" },
   { id: "missions", label: "Задания" },
   { id: "checkIn", label: "Чекин" },
   { id: "seasons", label: "Battle Pass" },
@@ -2299,15 +2299,21 @@ export function GuestGamificationPanel({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-              Геймификация гостей
+              Гости
             </p>
             <h1 className="mt-2 text-3xl font-bold tracking-tight text-zinc-950 dark:text-white">
-              Guest Game Hub: XP, задания, лутбоксы и кошелек
+              Игровой модуль
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Здесь живет постоянная игровая экономика гостя: профиль, уровень,
-              прогресс, правила, Battle Pass и награды. Разовые маркетинговые
-              офферы и промо-эффект кампаний настраиваются отдельно.
+              Уровни, задания, кейсы, Battle Pass и награды гостей. Разовые
+              акции для кампаний настраиваются в разделе{" "}
+              <Link
+                href="/marketing/missions"
+                className="font-semibold text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-300"
+              >
+                «Акции»
+              </Link>
+              .
             </p>
           </div>
           <div className="flex shrink-0 flex-col items-start gap-2 lg:items-end">
@@ -2329,55 +2335,8 @@ export function GuestGamificationPanel({
                 </button>
               ))}
             </div>
-            {access.isPlatformAdmin ? (
-              <div className="max-w-xl rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-                Начисления в Langame идут через bonus ledger: approved-награда
-                попадает в очередь, dry-run проверяет контур, а dispatch пишет
-                бонусы только при включенном backend-режиме.
-              </div>
-            ) : null}
           </div>
         </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
-            <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-              Здесь: игровая экономика
-            </p>
-            <h2 className="mt-1 font-semibold text-zinc-950 dark:text-white">
-              Долгий прогресс гостя
-            </h2>
-            <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              XP, уровни, лутбоксы, игровые задания, Battle Pass, кошелек
-              наград, safe dry-run и batch по подготовленным snapshot-фактам.
-            </p>
-          </div>
-          <Link
-            href="/marketing/missions"
-            className="rounded-lg border border-zinc-200 p-4 transition hover:border-emerald-500/70 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-          >
-            <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
-              Маркетинг
-            </p>
-            <h2 className="mt-1 font-semibold text-zinc-950 dark:text-white">
-              Промо-сценарии кампаний
-            </h2>
-            <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Тихие часы, повторный визит, бар, события, аудитории, бюджеты и
-              ручная очередь выдачи для измеримого промо-эффекта.
-            </p>
-          </Link>
-        </div>
-
-        {rewardMaterializerStatus || access.canRunRewardMaterializer ? (
-          <RewardMaterializerControl
-            status={rewardMaterializerStatus}
-            result={rewardMaterializerResult}
-            canRun={access.canRunRewardMaterializer}
-            running={saving === "reward-materializer-run"}
-            onRun={runRewardMaterializer}
-          />
-        ) : null}
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
@@ -2414,7 +2373,7 @@ export function GuestGamificationPanel({
             {!access.canApproveRewards
               ? "выдача и погашение наград недоступны"
               : "награды доступны"}
-            . Просмотр и безопасный dry-run остаются доступными.
+            . Просмотр и проверка без начисления остаются доступными.
           </div>
         ) : null}
       </section>
@@ -2476,6 +2435,29 @@ export function GuestGamificationPanel({
               canOperateLedger={access.canOperateLedger}
               canManageRules={access.canManageRules}
               canViewIntegrationReadiness={access.isPlatformAdmin}
+              diagnosticsLead={
+                <>
+                  {access.isPlatformAdmin ? (
+                    // ui-copy-allow: диагностика для платформы
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+                      Начисления в Langame идут через журнал начислений:
+                      подтверждённая награда попадает в очередь, проверка без
+                      начисления проверяет связку, а отправка пишет бонусы
+                      только при включенном режиме на сервере.
+                    </div>
+                  ) : null}
+                  {rewardMaterializerStatus ||
+                  access.canRunRewardMaterializer ? (
+                    <RewardMaterializerControl
+                      status={rewardMaterializerStatus}
+                      result={rewardMaterializerResult}
+                      canRun={access.canRunRewardMaterializer}
+                      running={saving === "reward-materializer-run"}
+                      onRun={runRewardMaterializer}
+                    />
+                  ) : null}
+                </>
+              }
               onPrepareOutbox={prepareDeliveryOutbox}
               onDispatchOutbox={dispatchDeliveryOutbox}
               deliveryDispatchResult={deliveryDispatchResult}
@@ -7679,12 +7661,12 @@ function RewardMaterializerControl({
   const modeLabel = !status
     ? "статус недоступен"
     : killSwitchEnabled
-      ? "kill switch включен"
+      ? "остановлено"
       : runtimeRunning
         ? "выполняется"
         : backgroundAppliesToTenant
-          ? "фоновый режим"
-          : "ручной режим";
+          ? "автоматически"
+          : "вручную";
   const modeClass = !status
     ? "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
     : killSwitchEnabled
@@ -7699,7 +7681,7 @@ function RewardMaterializerControl({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="font-bold text-zinc-950 dark:text-white">
-              Materializer наград
+              Обработка наград
             </h2>
             <span
               className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${modeClass}`}
@@ -7710,9 +7692,10 @@ function RewardMaterializerControl({
           <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
             {status ? (
               <>
-                Готово к обработке: {queueReady}. В работе: {queueProcessing}.
-                Dead letter: {deadLetters}. Ручной проход обрабатывает только
-                текущую сеть через штатные lease, retries и идемпотентность.
+                Ждут обработки: {queueReady}. В работе: {queueProcessing}.
+                Не удалось обработать: {deadLetters}. Обычно это идёт само;
+                ручной запуск обработает только вашу сеть, и повтор не начислит
+                награду дважды.
               </>
             ) : (
               "Очередь не загружена, поэтому ручной запуск заблокирован."
@@ -7729,8 +7712,8 @@ function RewardMaterializerControl({
             {running || runtimeRunning
               ? "Обрабатываем…"
               : backgroundAppliesToTenant
-                ? "Фоновая обработка включена"
-                : "Обработать (до 100 на этап)"}
+                ? "Идёт автоматически"
+                : "Обработать сейчас (до 100)"}
           </button>
         ) : null}
       </div>
@@ -7740,13 +7723,10 @@ function RewardMaterializerControl({
           <span className="font-semibold">
             {rewardMaterializerResultLabel(result)}
           </span>
-          {" · "}intents: {result.intents.applied} применено,{" "}
-          {materializerIssueCount(result.intents)} проблем; effects:{" "}
-          {result.effects.applied} применено, {result.effects.recovered}{" "}
-          восстановлено, {materializerIssueCount(result.effects)} проблем
-          (failed {result.effects.failed}, dead letter{" "}
-          {result.effects.deadLettered}, stale{" "}
-          {result.effects.staleFinalizations}).
+          {" · "}события: {result.intents.applied} обработано,{" "}
+          {materializerIssueCount(result.intents)} с ошибкой; награды:{" "}
+          {result.effects.applied} выдано, {result.effects.recovered}{" "}
+          восстановлено, {materializerIssueCount(result.effects)} с ошибкой.
         </div>
       ) : null}
     </section>
@@ -7763,7 +7743,7 @@ function rewardMaterializerResultLabel(
   result: GuestGameRewardMaterializerManualRunResult,
 ) {
   if (result.reason === "KILL_SWITCH_ENABLED") {
-    return "Запуск заблокирован kill switch";
+    return "Обработка остановлена, запуск недоступен";
   }
   if (result.reason === "RUN_ALREADY_IN_PROGRESS") {
     return "Другой проход уже выполняется";

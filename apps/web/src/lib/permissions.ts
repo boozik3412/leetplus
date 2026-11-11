@@ -215,7 +215,7 @@ export const capabilityOptions: CapabilityOption[] = [
     key: "view_guest_gamification",
     label: "Геймификация: просмотр",
     description:
-      "Просмотр Guest Game Hub, профилей, правил, событий и очереди наград.",
+      "Просмотр игрового модуля, профилей, правил, событий и очереди наград.",
   },
   {
     key: "manage_guest_game_rules",

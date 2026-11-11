@@ -372,7 +372,7 @@ export function MarketingMissionsPanel({
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
               Планируйте краткосрочные промо-условия для кампаний: аудитория,
               клубы, период, бюджет, лимиты и очередь ручной выдачи. Постоянные
-              XP, уровни, лутбоксы, Battle Pass и кошелек наград живут в Guest Game Hub.
+              XP, уровни, лутбоксы, Battle Pass и кошелёк наград живут в игровом модуле.
             </p>
           </div>
           <button
@@ -402,7 +402,7 @@ export function MarketingMissionsPanel({
             className="rounded-lg border border-zinc-200 p-4 transition hover:border-emerald-500/70 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
           >
             <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
-              Guest Game Hub
+              Игровой модуль
             </p>
             <h2 className="mt-1 font-semibold text-zinc-950 dark:text-white">
               Постоянная игровая экономика

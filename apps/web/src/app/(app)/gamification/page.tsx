@@ -555,18 +555,18 @@ export default async function GamificationPage({
       <main className="px-4 py-6 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-3xl rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <ReportBreadcrumbs
-            current="Геймификация"
-            items={[{ href: "/dashboard", label: "Дашборд" }]}
+            current="Игровой модуль"
+            items={[{ href: "/dashboard", label: "Сводка" }]}
           />
           <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-            Геймификация
+            Игровой модуль
           </p>
           <h1 className="mt-2 text-2xl font-semibold text-zinc-950 dark:text-white">
             Нет доступа
           </h1>
           <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Для открытия Guest Game Hub нужна роль с доступом
-            `Геймификация: просмотр`. Управление правилами и выдача наград
+            Чтобы открыть игровой модуль, нужна роль с доступом
+            «Геймификация: просмотр». Управление правилами и выдача наград
             настраиваются отдельными правами.
           </p>
         </div>
@@ -618,8 +618,8 @@ export default async function GamificationPage({
     <main className="px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
-          current="Геймификация"
-          items={[{ href: "/dashboard", label: "Дашборд" }]}
+          current="Игровой модуль"
+          items={[{ href: "/dashboard", label: "Сводка" }]}
         />
 
         <GuestGamificationPanel

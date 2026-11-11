@@ -15,7 +15,6 @@
     "dispatch": 3,
     "dry-run": 5,
     "endpoint": 2,
-    "guest-game-hub": 1,
     "ledger": 5,
     "payload": 1
   },
@@ -104,28 +103,20 @@
     "api": 1
   },
   "components/guest-game-card.tsx": {
-    "guest-game-hub": 2,
     "ledger": 1
   },
   "components/guest-gamification-overview.tsx": {
-    "guest-game-hub": 1,
     "ledger": 1
   },
   "components/guest-gamification-panel.tsx": {
-    "batch": 2,
+    "batch": 1,
     "canary": 1,
-    "dead-letter": 2,
-    "dispatch": 4,
-    "dry-run": 3,
-    "guest-game-hub": 1,
-    "idempotency": 1,
-    "lease": 1,
-    "ledger": 7,
-    "lootbox": 43,
-    "materializer": 2,
+    "dispatch": 3,
+    "ledger": 6,
+    "lootbox": 40,
+    "materializer": 1,
     "payload": 1,
-    "promo-scenario": 1,
-    "snapshot": 3
+    "snapshot": 2
   },
   "components/guest-gamification-statistics-tab.tsx": {
     "ledger": 1,
@@ -152,7 +143,7 @@
     "dry-run": 6,
     "endpoint": 2,
     "ledger": 23,
-    "lootbox": 7,
+    "lootbox": 4,
     "payload": 2,
     "retry": 6,
     "snapshot": 13
@@ -190,7 +181,6 @@
     "anti-fraud": 3,
     "api": 1,
     "dry-run": 1,
-    "guest-game-hub": 2,
     "lootbox": 2,
     "promo-scenario": 3,
     "snapshot": 1

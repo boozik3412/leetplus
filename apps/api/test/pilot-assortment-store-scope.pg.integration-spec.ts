@@ -35,6 +35,7 @@ import { RolesGuard } from '../src/auth/roles.guard';
 import { CategoriesService } from '../src/categories/categories.service';
 import { AssortmentHealthLoaderService } from '../src/common/assortment-health-loader.service';
 import { DashboardController } from '../src/dashboard/dashboard.controller';
+import { DashboardSetupProgressService } from '../src/dashboard/dashboard-setup-progress.service';
 import {
   DashboardService,
   type DashboardExecutiveSummary,
@@ -1690,14 +1691,24 @@ async function buildDashboardHttpApp(
   prisma: PrismaService,
   getUser: () => AuthenticatedUser,
 ): Promise<INestApplication> {
+  const freshStoreScope = new FreshStoreScopeService(
+    prisma,
+    new AccessScopeService(),
+  );
   const dashboardService = new DashboardService(
     prisma,
-    new FreshStoreScopeService(prisma, new AccessScopeService()),
+    freshStoreScope,
     new AssortmentHealthLoaderService(prisma),
   );
   const testingModule = await Test.createTestingModule({
     controllers: [DashboardController],
-    providers: [{ provide: DashboardService, useValue: dashboardService }],
+    providers: [
+      { provide: DashboardService, useValue: dashboardService },
+      {
+        provide: DashboardSetupProgressService,
+        useValue: new DashboardSetupProgressService(prisma, freshStoreScope),
+      },
+    ],
   })
     .overrideGuard(JwtAuthGuard)
     .useValue({

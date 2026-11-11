@@ -133,9 +133,13 @@ const definitions: readonly ControllerDefinition[] = [
           'executive-summary',
           'executive-operations',
           'revenue-diagnostics',
+          'setup-progress',
         ],
       ],
     ],
+    overrides: {
+      'GET /dashboard/setup-progress': { profile: 'NETWORK_VERIFIED' },
+    },
   },
   {
     source: 'src/products/products.controller.ts',

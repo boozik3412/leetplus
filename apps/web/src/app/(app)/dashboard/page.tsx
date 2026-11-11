@@ -13,7 +13,14 @@ import {
   type ExecutiveOperations,
   type ExecutiveQuery,
 } from "@/lib/dashboard-executive";
-import { dashboardWorkspaceHref, getDefaultLandingPath } from "@/lib/landing";
+import {
+  dashboardWorkspaceHref,
+  getDefaultLandingPath,
+  shouldShowTenantOnboardingNotice,
+} from "@/lib/landing";
+import { TenantOnboardingNotice } from "@/components/tenant-onboarding-notice";
+import { getSetupProgress } from "@/lib/dashboard-setup-progress";
+import { setupChecklistVisible } from "@/lib/setup-progress";
 import { getStores } from "@/lib/stores";
 import { redirect } from "next/navigation";
 import { formatClubs, formatDay, formatRange } from "@/lib/executive-format";
@@ -140,13 +147,16 @@ export default async function DashboardPage({
     .filter(Boolean)
     .join(" · ");
   const staffRequest = getStaffPriorities(summary.scope.storeIds);
-  const [operations, history] = await Promise.all([
+  const [operations, history, setupProgress] = await Promise.all([
     loadOperations(query, summary),
     loadExecutiveHistory(query.period, summary, (historyQuery) =>
       getExecutiveSummary(historyQuery, {
         signal: AbortSignal.timeout(15_000),
       }),
     ),
+    shouldShowTenantOnboardingNotice(user)
+      ? getSetupProgress()
+      : Promise.resolve(null),
   ]);
   return (
     <main className="min-h-screen bg-[var(--background)] px-4 py-6 text-[var(--foreground)] sm:px-6 lg:px-8">
@@ -174,6 +184,9 @@ export default async function DashboardPage({
             />
           </div>
         </header>
+        {setupProgress && setupChecklistVisible(setupProgress) ? (
+          <TenantOnboardingNotice progress={setupProgress} />
+        ) : null}
         <ExecutiveDashboard
           initialTrend={first(params.trend)}
           summary={summary}

@@ -16,12 +16,17 @@ import {
   type DashboardQuery,
   type DashboardSummary,
 } from './dashboard.service';
+import { DashboardSetupProgressService } from './dashboard-setup-progress.service';
+import type { DashboardSetupProgress } from './dashboard-setup-progress';
 
 @Controller('dashboard')
 @Roles(...Object.values(UserRole))
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class DashboardController {
-  constructor(private readonly dashboardService: DashboardService) {}
+  constructor(
+    private readonly dashboardService: DashboardService,
+    private readonly setupProgressService: DashboardSetupProgressService,
+  ) {}
 
   @Get('summary')
   getSummary(
@@ -61,5 +66,12 @@ export class DashboardController {
     @Query() query?: DashboardQuery,
   ): Promise<DashboardRevenueDiagnostics> {
     return this.dashboardService.getRevenueDiagnostics(user, query);
+  }
+
+  @Get('setup-progress')
+  getSetupProgress(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<DashboardSetupProgress> {
+    return this.setupProgressService.get(user);
   }
 }

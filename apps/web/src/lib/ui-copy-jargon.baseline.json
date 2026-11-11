@@ -221,9 +221,6 @@
   "components/store-logo-control.tsx": {
     "api": 1
   },
-  "components/tenant-onboarding-notice.tsx": {
-    "api": 1
-  },
   "components/user-accounts-panel.tsx": {
     "promo-scenario": 1
   }

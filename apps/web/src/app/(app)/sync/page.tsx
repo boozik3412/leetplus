@@ -66,9 +66,9 @@ export default async function SyncPage({ searchParams }: SyncPageProps) {
             Синхронизация
           </h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Единый запуск обновляет ассортимент, продажи, выручку клубов и
-            модуль гостей. Настройка API-ключа и доменов вынесена в раздел
-            настроек.
+            Загрузка данных клубов из Langame: ассортимент, продажи, выручка и
+            гости. Ключ доступа Langame и адреса клубов задаются в разделе
+            «Настройки».
           </p>
         </div>
 

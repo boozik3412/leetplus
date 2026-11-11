@@ -124,7 +124,7 @@ export function GuestListTable({
             <thead className="bg-zinc-50 text-[11px] uppercase tracking-[0.08em] text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Гость</th>
-                <th className="px-4 py-3 text-left font-semibold">Сегмент · RFM</th>
+                <th className="px-4 py-3 text-left font-semibold">Сегмент · ценность</th>
                 <th className="px-4 py-3 text-left font-semibold">Риск оттока</th>
                 <th className="px-4 py-3 text-right font-semibold">Деньги · LTV</th>
                 <th className="px-4 py-3 text-right font-semibold">Бонусы</th>
@@ -202,7 +202,7 @@ function GuestRow({
           </InsightBadge>
           <InsightBadge
             tone={rfmTone(row.rfm.segment)}
-            title={`R${row.rfm.recencyScore} F${row.rfm.frequencyScore} M${row.rfm.monetaryScore}`}
+            title={`Давность ${row.rfm.recencyScore} · частота ${row.rfm.frequencyScore} · деньги ${row.rfm.monetaryScore} (баллы из 5)`}
           >
             {rfmSegmentLabels[row.rfm.segment]} · {row.rfm.totalScore}/15
           </InsightBadge>

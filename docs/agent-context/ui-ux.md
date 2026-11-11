@@ -101,7 +101,8 @@ language of the code (UX audit, 10.11.2026). Rules:
   «Начисления», «Проверка без начисления», not «ledger», «dry-run».
 - Service words (below) are allowed only in platform administration
   (`/administration`) and inside a collapsed «Диагностика» block that a normal
-  user never needs. Mark such lines with a `ui-copy-allow` comment.
+  user never needs. Mark such lines with a `ui-copy-allow` comment, or put it
+  in a comment right above a whole diagnostics component or label helper.
 - A status is a verdict plus the next action: «Данные за вчера ещё не
   пришли — обновим в 06:00» rather than «Typed snapshot еще не создан».
 - Keep one name per thing across menu, page title, buttons and empty states.
@@ -133,9 +134,9 @@ backfill, batch, BFF, JWT, Prisma/Postgres/Redis. Explain the effect
 instead («повтор не начислит дважды», «не удалось обработать»).
 
 `pnpm --filter web test:ui-copy` (`apps/web/src/lib/ui-copy-jargon.test.mts`)
-scans visible copy of `apps/web` screens and fails when a file gains a service
-word. Existing ones are counted in `ui-copy-jargon.baseline.json`; the count
-only goes down. After removing words, lower it with
+scans visible copy of `apps/web` screens and fails when a service word is
+added. Existing ones are counted in `ui-copy-jargon.baseline.json`; the total
+per word only goes down, and moving code between files does not change it. After removing words, lower it with
 `UPDATE_UI_COPY_BASELINE=1 pnpm --filter web test:ui-copy`. New terms go into
 both this table and `JARGON_TERMS` in the test.
 

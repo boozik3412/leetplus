@@ -1084,7 +1084,7 @@ export function buildGuestSignals(input: {
       tone: 'CRITICAL',
       title: 'VIP в риске оттока',
       condition:
-        'RFM «Чемпион»/«Лояльный» или CRM-статус VIP, при этом риск оттока высокий или требует наблюдения',
+        'Ценность «Чемпион»/«Лояльный» или CRM-статус VIP, при этом риск оттока высокий или требует наблюдения',
       count: vipAtRisk.length,
       amount,
       amountLabel: 'деньги периода под риском',
@@ -1280,7 +1280,7 @@ export function buildGuestSignals(input: {
         key: 'ACTIVE_NOT_REGISTERED',
         tone: 'OPPORTUNITY',
         title: 'Повторные гости без игрового профиля',
-        condition: 'Сегмент «Повторные» и нет связанного GuestGameProfile',
+        condition: 'Сегмент «Повторные», но у гостя ещё нет игрового профиля',
         count: notRegistered.length,
         amount: null,
         amountLabel: null,
@@ -1307,7 +1307,7 @@ export function buildGuestSignals(input: {
       tone: 'INFO',
       title: 'Ценные гости без согласия на связь',
       condition:
-        'RFM «Чемпион»/«Лояльный» или VIP, статус согласия на коммуникации не определён',
+        'Ценность «Чемпион»/«Лояльный» или VIP, статус согласия на коммуникации не определён',
       count: consentMissing.length,
       amount: null,
       amountLabel: null,

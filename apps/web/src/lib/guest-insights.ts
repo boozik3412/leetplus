@@ -163,7 +163,7 @@ export const sortLabels: Record<GuestListSort, string> = {
   sessions: "Сессии",
   lastActivity: "Активность",
   registered: "Регистрация",
-  rfm: "RFM",
+  rfm: "Ценность гостя",
   churnRisk: "Риск оттока",
   ltv: "LTV",
   bonusLoad: "Бонусы",
@@ -556,7 +556,7 @@ export function activeFilterChips(filters: GuestListFilters) {
     });
   }
   if (filters.rfm) {
-    chips.push({ key: "rfm", label: `RFM: ${rfmSegmentLabels[filters.rfm]}` });
+    chips.push({ key: "rfm", label: `Ценность: ${rfmSegmentLabels[filters.rfm]}` });
   }
   if (filters.consent) {
     chips.push({ key: "consent", label: consentLabels[filters.consent] });

@@ -212,7 +212,7 @@ function sortLabel(sort: NonNullable<GuestListFilters["sort"]>) {
     sessions: "Сессии",
     lastActivity: "Активность",
     registered: "Регистрация",
-    rfm: "RFM",
+    rfm: "Ценность гостя",
     churnRisk: "Риск оттока",
     ltv: "LTV факт",
     bonusLoad: "Бонусы",
@@ -732,7 +732,7 @@ function ReportTable({
                       </p>
                     ) : null}
                     <p className="mt-1 text-xs text-zinc-500">
-                      RFM {row.rfm.totalScore}/15 · {rfmSegmentLabel(row.rfm.segment)}
+                      Ценность {row.rfm.totalScore}/15 · {rfmSegmentLabel(row.rfm.segment)}
                     </p>
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">

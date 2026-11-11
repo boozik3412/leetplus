@@ -1896,6 +1896,20 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   `IdentityEmailClaim`, поэтому сеть, где кто-то зарегистрировался через
   claim boundary, отклоняется внешним ключом целиком, без частичного удаления.
 
+### Чек-лист запуска сети (11.11.2026)
+
+- `GET /dashboard/setup-progress` — corporate tenant read под
+  `JwtAuthGuard + RolesGuard` (capability `/dashboard*`), сервис сначала
+  делает `FreshStoreScopeService.assertNetwork`: `STORES`-аккаунт получает 403.
+- Ответ — только да/нет по пяти шагам (Langame, клубы, сотрудники, первое
+  задание, первый отправленный отчёт за сутки) и `hasData`. Имён, контактов,
+  сумм и идентификаторов в ответе нет; маршрут ничего не пишет и не ходит
+  наружу. Состояние не хранится: всё считается из существующих строк tenant.
+- Web показывает чек-лист на `/dashboard` только `OWNER` сети в
+  `ONBOARDING` (не platform admin, `shouldShowTenantOnboardingNotice`) и
+  прячет его, когда пять шагов выполнены. Ошибка этого запроса не ломает
+  сводку: блок просто не показывается.
+
 ### Удаление клуба
 
 - Два входа в один `StoreDeletionService`: control plane

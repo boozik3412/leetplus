@@ -492,8 +492,48 @@ export function guestsHref(filters: GuestListFilters) {
   return guestsPathHref("/guests", filters);
 }
 
+/** Tabs of /guests (UX plan, step 2.1); «overview» is the default. */
+export const guestsTabs = ["overview", "list", "groups", "report"] as const;
+export type GuestsTab = (typeof guestsTabs)[number];
+
+export function parseGuestsTab(value: string | undefined): GuestsTab {
+  return guestsTabs.includes(value as GuestsTab)
+    ? (value as GuestsTab)
+    : "overview";
+}
+
+export function guestsTabHref(
+  tab: GuestsTab,
+  filters: GuestListFilters,
+  period?: string,
+) {
+  const href = guestsPathHref("/guests", filters);
+  const extra = new URLSearchParams();
+
+  if (period) {
+    extra.set("period", period);
+  }
+
+  if (tab !== "overview") {
+    extra.set("tab", tab);
+  }
+
+  const query = extra.toString();
+
+  if (!query) {
+    return href;
+  }
+
+  return `${href}${href.includes("?") ? "&" : "?"}${query}`;
+}
+
+/** The guest list itself: the «Список» tab with these filters. */
+export function guestListHref(filters: GuestListFilters) {
+  return guestsTabHref("list", filters);
+}
+
 export function guestListAnchorHref(filters: GuestListFilters) {
-  return `${guestsPathHref("/guests", filters)}#guest-list`;
+  return `${guestListHref(filters)}#guest-list`;
 }
 
 export function guestsReportHref(filters: GuestListFilters) {

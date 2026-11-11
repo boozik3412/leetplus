@@ -12,7 +12,7 @@
 | Игровая проекция | `apps/api/src/guests/guest-game-insights.service.ts` | Read-only чтение `GuestGameProfile` и связанных таблиц по `Guest.id`. Только Prisma; не импортирует игровой модуль. |
 | Сборка ответа | `apps/api/src/guests/guests.service.ts` (`getSummary`, `getGuests`, `getGuest`) | Строки гостей получают `gameProfile` и `recommendedAction`; summary получает `comparison`, `kpi`, `health`, `crmQueue`, `gamification`, `attention`, `actions`; detail — `crmTasks`, `contactEvents`, `behavior`, `gamification`. |
 | Web-типы и подписи | `apps/web/src/lib/guests.ts`, `apps/web/src/lib/guest-insights.ts` | Зеркало API-типов, русские подписи, тона бейджей, ссылки. Тест: `pnpm --filter web test:guest-insights`. |
-| Экраны | `apps/web/src/app/(app)/guests/page.tsx`, `apps/web/src/app/(app)/guests/[id]/page.tsx`, `apps/web/src/components/guest-*.tsx` | Дашборд и карточка «гость 360». |
+| Экраны | `apps/web/src/app/(app)/guests/page.tsx`, `apps/web/src/app/(app)/guests/[id]/page.tsx`, `apps/web/src/components/guest-*.tsx` | Дашборд и карточка «гость 360». `/guests` разбит на вкладки `?tab=` (11.11.2026): Обзор (5 KPI, сигналы, очередь действий) · `list` · `groups` · `report`. Список и группы грузятся только на своих вкладках; ссылки «открыть список» ведут через `guestListHref` / `guestListAnchorHref` на `tab=list`. |
 
 Маршруты API не менялись: `GET /guests/summary`, `GET /guests`,
 `GET /guests/:id`, `GET /guests/export` только расширили ответ. Новые

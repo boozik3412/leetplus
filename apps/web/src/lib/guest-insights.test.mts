@@ -7,8 +7,12 @@ import {
   formatPercent,
   formatRubles,
   guestsExportHref,
+  guestListAnchorHref,
+  guestListHref,
   guestsHref,
+  guestsTabHref,
   hourRangeLabel,
+  parseGuestsTab,
   pluralize,
   signalListFilters,
   guestsWord,
@@ -30,6 +34,26 @@ test("hrefs keep only known list filters and drop paging from export", () => {
     guestsExportHref({ segment: "risk", page: "3", pageSize: "50" }),
     "/api/guests/export?segment=risk",
   );
+});
+
+test("tab hrefs keep filters, the period and open the list tab", () => {
+  assert.equal(guestsTabHref("overview", {}), "/guests");
+  assert.equal(
+    guestsTabHref("report", { storeId: "s1" }, "month"),
+    "/guests?storeId=s1&period=month&tab=report",
+  );
+  assert.equal(guestsTabHref("groups", {}), "/guests?tab=groups");
+  assert.equal(
+    guestListHref({ segment: "risk", page: "1" }),
+    "/guests?segment=risk&page=1&tab=list",
+  );
+  assert.equal(
+    guestListAnchorHref({ signal: "VIP_AT_RISK" }),
+    "/guests?signal=VIP_AT_RISK&tab=list#guest-list",
+  );
+  assert.equal(parseGuestsTab("list"), "list");
+  assert.equal(parseGuestsTab("unknown"), "overview");
+  assert.equal(parseGuestsTab(undefined), "overview");
 });
 
 test("signal filters inherit the dashboard scope and reset paging", () => {

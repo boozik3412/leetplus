@@ -79,6 +79,36 @@ test("the game accounts step shows only where the network turned it on", () => {
   );
 });
 
+test("guests who saw an older tour get only the new steps", () => {
+  const ids = (steps: { id: string }[]) => steps.map((s) => s.id);
+  const all = gameTutorialStepsFor({ gameAccounts: true }, "full", 1);
+
+  // A full tour ignores what was seen; an update shows only newer steps.
+  assert.equal(all.length, GAME_TUTORIAL_STEPS.length);
+  assert.deepEqual(
+    ids(gameTutorialStepsFor({ gameAccounts: true }, "updates", 1)),
+    ["game-accounts"],
+  );
+  assert.deepEqual(
+    ids(gameTutorialStepsFor({ gameAccounts: false }, "updates", 1)),
+    [],
+  );
+  assert.deepEqual(
+    ids(
+      gameTutorialStepsFor(
+        { gameAccounts: true },
+        "updates",
+        GAME_TUTORIAL_VERSION,
+      ),
+    ),
+    [],
+  );
+  // Every step's version exists: nothing is added "from the future".
+  for (const step of GAME_TUTORIAL_STEPS) {
+    assert.ok((step.since ?? 1) <= GAME_TUTORIAL_VERSION, step.id);
+  }
+});
+
 test("the web BFF forwards only the tutorial version", () => {
   assert.deepEqual(
     projectGuestPortalPostBody(

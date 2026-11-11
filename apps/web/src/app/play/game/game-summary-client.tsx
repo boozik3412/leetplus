@@ -2259,7 +2259,12 @@ function ReadyGameView({
       ) : null}
 
       {tutorial.open ? (
-        <GameTutorial clubName={summary.store.name} onClose={tutorial.close} />
+        <GameTutorial
+          clubName={summary.store.name}
+          mode={tutorial.mode}
+          seenVersion={tutorial.seenVersion}
+          onClose={tutorial.close}
+        />
       ) : null}
     </div>
   );

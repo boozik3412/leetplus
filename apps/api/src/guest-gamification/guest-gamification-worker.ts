@@ -20,6 +20,8 @@ export type GuestGamificationWorkerConfig = Readonly<{
   tenantSlug: string | null;
   canary: boolean;
   activityLimit: number;
+  priorityActivityLimit: number;
+  priorityActivityBudgetMs: number;
   pipelineLimit: number;
   ledgerFallbackMode: GuestGameLedgerFallbackMode;
   ledgerFallbackLimit: number;
@@ -117,6 +119,22 @@ export function loadGuestGamificationWorkerConfig(
   if (activityLimit !== 1) {
     throw new Error('GUEST_GAMIFICATION_WORKER_ACTIVITY_LIMIT=1 is required');
   }
+  // Guest-facing syncs (app open, ticket, relink) drain ahead of background
+  // recovery: up to this many per tick, and no new one is started once the
+  // budget has passed, so the oneshot stays well inside its systemd timeout.
+  const priorityActivityLimit = boundedPositiveInt(
+    env.GUEST_GAMIFICATION_WORKER_PRIORITY_ACTIVITY_LIMIT,
+    5,
+    10,
+    'GUEST_GAMIFICATION_WORKER_PRIORITY_ACTIVITY_LIMIT',
+  );
+  const priorityActivityBudgetMs = boundedPositiveInt(
+    env.GUEST_GAMIFICATION_WORKER_PRIORITY_ACTIVITY_BUDGET_MS,
+    3 * 60 * 1_000,
+    5 * 60 * 1_000,
+    'GUEST_GAMIFICATION_WORKER_PRIORITY_ACTIVITY_BUDGET_MS',
+    10_000,
+  );
   const pipelineLimit = boundedPositiveInt(
     env.GUEST_GAMIFICATION_WORKER_PIPELINE_LIMIT,
     canary ? 1 : 30,
@@ -242,6 +260,8 @@ export function loadGuestGamificationWorkerConfig(
     tenantSlug,
     canary,
     activityLimit,
+    priorityActivityLimit,
+    priorityActivityBudgetMs,
     pipelineLimit,
     ledgerFallbackMode,
     ledgerFallbackLimit,
@@ -307,10 +327,16 @@ export async function runGuestGamificationWorkerOnce(
     );
   }
 
+  // At most `activityLimit` (one) background recovery per tick, as before;
+  // the rest of the pass goes to syncs a guest is waiting for.
   const activity = await services.activityLedger.processQueuedSyncJobs(
-    config.activityLimit,
+    config.activityLimit + config.priorityActivityLimit,
     `gamification-worker-${process.pid}`,
     tenant.id,
+    {
+      backgroundLimit: config.activityLimit,
+      budgetMs: config.priorityActivityBudgetMs,
+    },
   );
   if (activity.failed > 0) {
     throw new Error(

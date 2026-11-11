@@ -44,6 +44,14 @@ const SYNC_JOB_LOCK_STALE_MS = 10 * 60 * 1000;
 const SYNC_JOB_MAX_ATTEMPTS = 5;
 const SYNC_JOB_BASE_BACKOFF_MS = 15 * 1000;
 const SYNC_JOB_PARTIAL_CONTINUATION_DELAY_MS = 1_000;
+const CONTINUATION_SOURCE_FRESH_MS = 30 * 60 * 1000;
+// Background jobs (recovery, hourly replay) are queued with this reason
+// prefix; every other reason means a guest or an operator is waiting.
+const BACKGROUND_SYNC_REASON_PREFIX = 'AUTOMATIC_';
+const PRIORITY_SYNC_JOB_WHERE: Prisma.GuestActivitySyncJobWhereInput = {
+  reason: { not: null },
+  NOT: { reason: { startsWith: BACKGROUND_SYNC_REASON_PREFIX } },
+};
 const INFERRED_PACKAGE_USAGE_LOOKBACK_DAYS = 30;
 const INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS = 15 * 60 * 1000;
 // Keep persisted fact identity stable during the fail-closed hourly rollout.
@@ -199,16 +207,20 @@ type SyncWindow = {
   initial: boolean;
   earliestRuleAt: Date | null;
   parserReplay?: boolean;
+  // The previous run of this guest stopped PARTIAL and this run continues it.
+  continuation?: boolean;
 };
 
 type SourceSyncWindow = SyncWindow & {
   startPage: number;
+  // Source already finished moments ago in the same continuation chain.
+  skip?: boolean;
 };
 
 type SourceFetchResult<T> = {
   rows: T[];
   partial: boolean;
-  status: 'SUCCESS' | 'PARTIAL' | 'FAILED';
+  status: 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'SKIPPED';
   pagesFetched: number;
   rowsFetched: number;
   nextPage: number | null;
@@ -263,16 +275,24 @@ export class GuestActivityLedgerService {
     const jobKey = this.syncJobKey(input);
     const existing = await this.prisma.guestActivitySyncJob.findUnique({
       where: { jobKey },
-      select: { id: true, status: true },
+      select: { id: true, status: true, reason: true },
     });
+    // A background recovery must not demote a job a guest is waiting for:
+    // the queued job keeps its guest-facing reason and therefore its place.
+    const keepExistingReason =
+      existing !== null &&
+      isPrioritySyncReason(existing.reason) &&
+      !isPrioritySyncReason(input.reason);
+    const reasonData = keepExistingReason
+      ? {}
+      : { reason: input.reason ?? null, payload: this.syncJobPayload(input) };
 
     if (existing?.status === 'RUNNING') {
       return this.prisma.guestActivitySyncJob.update({
         where: { id: existing.id },
         data: {
           rerunRequested: true,
-          reason: input.reason ?? null,
-          payload: this.syncJobPayload(input),
+          ...reasonData,
         },
       });
     }
@@ -287,8 +307,7 @@ export class GuestActivityLedgerService {
         data: {
           guestId: input.guestId ?? null,
           storeId: input.storeId ?? null,
-          reason: input.reason ?? null,
-          payload: this.syncJobPayload(input),
+          ...reasonData,
           ...(alreadyQueued
             ? {}
             : {
@@ -331,22 +350,52 @@ export class GuestActivityLedgerService {
     }
   }
 
+  /**
+   * Jobs a guest or operator is waiting for (app open, game summary, support
+   * ticket, relink) are claimed before background recovery/replay jobs.
+   * `backgroundLimit` caps background jobs in this call and `budgetMs` stops
+   * claiming new jobs once that much time has passed; a job already started
+   * always runs to its end.
+   */
   async processQueuedSyncJobs(
     limit = 5,
     workerId = `api-${process.pid}`,
     tenantId?: string,
+    options: {
+      backgroundLimit?: number;
+      budgetMs?: number;
+      clock?: () => number;
+    } = {},
   ) {
     const results: Array<{
       jobId: string;
       status: string;
+      priority: boolean;
       errorMessage?: string;
     }> = [];
+    const clock = options.clock ?? Date.now;
+    const startedAt = clock();
+    const backgroundLimit = options.backgroundLimit ?? limit;
+    let backgroundClaimed = 0;
 
     for (let index = 0; index < limit; index += 1) {
-      const job = await this.claimNextSyncJob(workerId, tenantId);
+      if (
+        index > 0 &&
+        options.budgetMs !== undefined &&
+        clock() - startedAt >= options.budgetMs
+      ) {
+        break;
+      }
+      const job = await this.claimNextSyncJob(workerId, tenantId, {
+        includeBackground: backgroundClaimed < backgroundLimit,
+      });
 
       if (!job) {
         break;
+      }
+      const priority = isPrioritySyncReason(job.reason);
+      if (!priority) {
+        backgroundClaimed += 1;
       }
 
       try {
@@ -374,18 +423,20 @@ export class GuestActivityLedgerService {
         results.push({
           jobId: job.id,
           status,
+          priority,
           ...(partialError ? { errorMessage: partialError } : {}),
         });
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         const status = await this.failSyncJob(job.id, errorMessage);
-        results.push({ jobId: job.id, status, errorMessage });
+        results.push({ jobId: job.id, status, priority, errorMessage });
       }
     }
 
     return {
       processed: results.length,
+      priority: results.filter((result) => result.priority).length,
       success: results.filter((result) => result.status === 'SUCCESS').length,
       retried: results.filter((result) => result.status === 'RETRY').length,
       failed: results.filter((result) => result.status === 'FAILED').length,
@@ -592,7 +643,11 @@ export class GuestActivityLedgerService {
     return { scanned: states.length, queued, skipped };
   }
 
-  private async claimNextSyncJob(workerId: string, tenantId?: string) {
+  private async claimNextSyncJob(
+    workerId: string,
+    tenantId?: string,
+    options: { includeBackground?: boolean } = {},
+  ) {
     const now = new Date();
     const staleAt = new Date(now.getTime() - SYNC_JOB_LOCK_STALE_MS);
     const availableWhere: Prisma.GuestActivitySyncJobWhereInput = {
@@ -608,17 +663,26 @@ export class GuestActivityLedgerService {
         { status: 'RUNNING', lockedAt: { lt: staleAt } },
       ],
     };
-    const candidate = await this.prisma.guestActivitySyncJob.findFirst({
-      where: availableWhere,
-      include: {
-        tenant: {
-          select: {
-            customerStage: true,
+    const findCandidate = (where: Prisma.GuestActivitySyncJobWhereInput) =>
+      this.prisma.guestActivitySyncJob.findFirst({
+        where,
+        include: {
+          tenant: {
+            select: {
+              customerStage: true,
+            },
           },
         },
-      },
-      orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
-    });
+        orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
+      });
+    const candidate =
+      (await findCandidate({
+        ...availableWhere,
+        AND: [PRIORITY_SYNC_JOB_WHERE],
+      })) ??
+      (options.includeBackground === false
+        ? null
+        : await findCandidate(availableWhere));
 
     if (!candidate) {
       return null;
@@ -791,7 +855,10 @@ export class GuestActivityLedgerService {
       return { status: 'SKIPPED' as GuestActivitySyncStatus };
     }
 
-    const window = await this.resolveSyncWindow(context, state);
+    const window = {
+      ...(await this.resolveSyncWindow(context, state)),
+      continuation: state?.status === 'PARTIAL',
+    };
 
     await this.upsertSyncState(context, {
       status: 'RUNNING',
@@ -1556,7 +1623,7 @@ export class GuestActivityLedgerService {
       .filter((value, index, values) => values.indexOf(value) === index);
     const staleBinding = failureClasses.includes('STALE_EXTERNAL_GUEST');
     const partial = Object.values(sourceResults).some(
-      (result) => result.status !== 'SUCCESS',
+      (result) => result.status === 'PARTIAL' || result.status === 'FAILED',
     );
 
     if (
@@ -1817,6 +1884,19 @@ export class GuestActivityLedgerService {
       fallbackWindow,
     );
 
+    if (window.skip) {
+      return {
+        rows: [],
+        partial: false,
+        status: 'SKIPPED',
+        pagesFetched: 0,
+        rowsFetched: 0,
+        nextPage: null,
+        window,
+        errorMessage: null,
+      };
+    }
+
     await this.upsertSourceSyncState(context, sourceKind, window, {
       status: 'RUNNING',
       pagesFetched: 0,
@@ -1832,7 +1912,7 @@ export class GuestActivityLedgerService {
           loadPage(
             page,
             formatDateParam(window.from),
-            formatDateParam(window.to),
+            formatLangameDateToParam(window.to),
           ),
         filterRow,
         window.startPage,
@@ -1879,7 +1959,7 @@ export class GuestActivityLedgerService {
     sourceKind: string,
     result: SourceFetchResult<T>,
   ) {
-    if (result.status === 'FAILED') {
+    if (result.status === 'FAILED' || result.status === 'SKIPPED') {
       return;
     }
 
@@ -1929,6 +2009,28 @@ export class GuestActivityLedgerService {
         earliestRuleAt: state.syncFrom,
         startPage: state.nextPage,
         parserReplay: jsonObjectRecord(state.diagnostics).parserReplay === true,
+      };
+    }
+
+    // A continuation re-runs only the sources that are still unfinished: a
+    // source that completed within this chain keeps its fresh watermark
+    // instead of paging the whole club again.
+    if (
+      fallbackWindow.continuation &&
+      state?.status === 'SUCCESS' &&
+      !requiresHourlySessionReplay &&
+      state.lastSuccessfulTo &&
+      fallbackWindow.to.getTime() - state.lastSuccessfulTo.getTime() <
+        CONTINUATION_SOURCE_FRESH_MS
+    ) {
+      return {
+        from: state.lastSuccessfulTo,
+        to: state.lastSuccessfulTo,
+        initial: false,
+        earliestRuleAt: state.syncFrom,
+        startPage: 1,
+        parserReplay: false,
+        skip: true,
       };
     }
 
@@ -4282,8 +4384,24 @@ function sourceLocalDate(date: Date | null, timeZone: string) {
   }
 }
 
+export function isPrioritySyncReason(reason: string | null | undefined) {
+  return (
+    typeof reason === 'string' &&
+    !reason.startsWith(BACKGROUND_SYNC_REASON_PREFIX)
+  );
+}
+
 function formatDateParam(date: Date) {
   return date.toISOString().slice(0, 10);
+}
+
+// Langame filters by the club's local calendar date, which is ahead of the
+// UTC date in the evening for the clubs east of UTC (Yekaterinburg: after
+// 19:00 UTC). The upper bound is therefore the next UTC date, otherwise rows
+// from the local night stay invisible until UTC midnight. No rows exist past
+// "now", so the wider bound reads nothing extra.
+function formatLangameDateToParam(date: Date) {
+  return formatDateParam(new Date(date.getTime() + 24 * 60 * 60 * 1000));
 }
 
 function subtractDays(date: Date, days: number) {

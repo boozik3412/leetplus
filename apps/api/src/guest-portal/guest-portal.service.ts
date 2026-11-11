@@ -139,6 +139,11 @@ const TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MIN_MS = 1000;
 const TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MAX_MS = 120_000;
 const GUEST_BUG_REPORT_STORE_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Ticket topics that queue a guest activity sync right after the ticket.
+const GUEST_BUG_REPORT_SYNC_TOPICS: ReadonlySet<string> = new Set([
+  'MISSIONS_AND_BATTLE_PASS',
+  'LOOT_BOXES_AND_REWARDS',
+]);
 
 const GUEST_PORTAL_READ_REQUIREMENTS = [
   { module: TenantModule.GAMIFICATION, action: 'READ' },
@@ -4239,7 +4244,7 @@ export class GuestPortalService {
 
     const storeId = await this.guestBugReportStoreId(payload, input.storeId);
 
-    return this.guestSupportService.createBugReport(
+    const report = await this.guestSupportService.createBugReport(
       {
         tenantId: payload.tenantId,
         storeId,
@@ -4252,6 +4257,31 @@ export class GuestPortalService {
       input,
       file,
     );
+
+    // A ticket about rewards usually means progress is waiting for Langame
+    // data: pull it now so support sees fresh facts and the reward can land
+    // before anyone answers. Same queue job as APP_OPEN, deduplicated per
+    // profile and club.
+    if (
+      GUEST_BUG_REPORT_SYNC_TOPICS.has(
+        typeof input.topic === 'string' ? input.topic : '',
+      )
+    ) {
+      this.scheduleGuestActivityLedgerSync(
+        { ...payload, storeId },
+        profile.id,
+        'SUPPORT_TICKET',
+      );
+      if (storeId !== payload.storeId) {
+        this.scheduleGuestActivityLedgerSync(
+          payload,
+          profile.id,
+          'SUPPORT_TICKET',
+        );
+      }
+    }
+
+    return report;
   }
 
   async getSupportTickets(

@@ -2087,6 +2087,32 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   Langame request/response и claim payload: только счётчики, статусы, суммы и
   булевы флаги каналов. Контракт полей — `docs/agent-context/guests-crm-gamification.md`.
 
+### Отметка «Сотрудник» в карточке гостя (11.11.2026)
+
+- Corporate: `PATCH /guests/:id/staff` (`GuestsController`, `JwtAuthGuard` +
+  `RolesGuard` → `manage_guest_crm`, плюс `FreshNetworkScopeGuard`: отметка
+  меняет показатели всей сети). Тело `{ isStaff: boolean, note? }`. Web BFF —
+  `apps/web/src/app/api/guests/[id]/staff/route.ts`; кнопки в карточке видны
+  только при `manage_guest_crm` и NETWORK-доступе.
+- Схема: миграция `20261111090000_guest_staff_mark` (199) добавляет
+  `Guest.isStaff/staffMarkedAt/staffMarkedByUserId` со значением «не сотрудник»
+  и журнал `GuestStaffMarkEvent` с grant для `leetplus_runtime`; голова
+  identity-mail-worker поднята до 199. Обслуживающий релиз новые поля не читает.
+- Запись идёт в одной транзакции: `Guest`, все `GuestGameProfile` того же
+  человека (`guestId` карточки или тот же подтверждённый `phoneHash`) и строка
+  журнала. Отметка ставит профилям `isStaffTest = true`, причина
+  `OWNER_MARKED_STAFF`; снятие — `isStaffTest = false`, причина
+  `OWNER_CONFIRMED_GUEST`, поэтому автоматическая проверка телефона профиль
+  больше не помечает. Langame не вызывается, scheduler и egress не добавлены.
+- Public guest: `resolveStaffTestMatch` при входе/регистрации дополнительно
+  читает `Guest` по exact `tenantId + phoneHash + isStaff`, чтобы новый профиль
+  отмеченного сотрудника сразу получил `isStaffTest`. Это одно чтение по
+  индексу `(tenantId, phoneHash)` вне блокировок; корпоративная авторизация,
+  JWT и guards в публичный контур не попадают.
+- Игра и награды для сотрудника работают как для автоматически найденных
+  сотрудников (`staffRewardsPolicy: ALLOW`); исключение — из аналитики гостей,
+  рейтинга, статистики игры и «Эффекта».
+
 ### Рейтинг гостей (08.10.2026)
 
 - Public guest: новый `GET /guest-portal/session/leaderboard?scope&board`

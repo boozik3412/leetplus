@@ -115,7 +115,10 @@ import {
   type TenantExecutionRequirement,
   type TenantExecutionRequirementInput,
 } from '../tenancy/tenant-execution-admission.service';
-import { guestGameProfileStaffTestAutoMarkable } from '../guest-gamification/guest-staff-test';
+import {
+  GAME_PROFILE_STAFF_TEST_OWNER_MARKED_STAFF,
+  guestGameProfileStaffTestAutoMarkable,
+} from '../guest-gamification/guest-staff-test';
 
 const OTP_TTL_MINUTES = 10;
 const OTP_MAX_ATTEMPTS = 5;
@@ -15084,25 +15087,38 @@ export class GuestPortalService {
       return null;
     }
 
-    const [staffMembers, langameStaffUsers] = await Promise.all([
-      this.prisma.staffMember.findMany({
-        where: {
-          tenantId,
-          status: { notIn: ['DISMISSED', 'ARCHIVED'] },
-          phone: { not: null },
-        },
-        select: { phone: true },
-        take: 1000,
-      }),
-      this.prisma.langameStaffUser.findMany({
-        where: {
-          tenantId,
-          phone: { not: null },
-        },
-        select: { phone: true },
-        take: 1000,
-      }),
-    ]);
+    const [markedStaffGuest, staffMembers, langameStaffUsers] =
+      await Promise.all([
+        // The network marked this phone's guest card as staff.
+        this.prisma.guest.findFirst({
+          where: { tenantId, phoneHash: phone.hash, isStaff: true },
+          select: { id: true },
+        }),
+        this.prisma.staffMember.findMany({
+          where: {
+            tenantId,
+            status: { notIn: ['DISMISSED', 'ARCHIVED'] },
+            phone: { not: null },
+          },
+          select: { phone: true },
+          take: 1000,
+        }),
+        this.prisma.langameStaffUser.findMany({
+          where: {
+            tenantId,
+            phone: { not: null },
+          },
+          select: { phone: true },
+          take: 1000,
+        }),
+      ]);
+
+    if (markedStaffGuest) {
+      return {
+        reason: GAME_PROFILE_STAFF_TEST_OWNER_MARKED_STAFF,
+        matchedAt: new Date(),
+      };
+    }
 
     if (
       staffMembers.some((member) =>

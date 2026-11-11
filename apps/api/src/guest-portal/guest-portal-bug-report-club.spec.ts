@@ -26,13 +26,14 @@ function fixture(mode = 'LIVE') {
       createdAt: '2026-10-04T10:00:00.000Z',
     }),
   };
+  const activityLedger = { scheduleProfileSync: jest.fn() };
   const service = new GuestPortalService(
     prisma as never,
     config as never,
     {} as never,
     {} as never,
     {} as never,
-    {} as never,
+    activityLedger as never,
     {} as never,
     {} as never,
     {} as never,
@@ -47,7 +48,7 @@ function fixture(mode = 'LIVE') {
   jest
     .spyOn(service as never, 'findProfile')
     .mockResolvedValue({ id: 'profile-a', guestId: 'guest-a' } as never);
-  return { service, prisma, guestSupportService };
+  return { service, prisma, guestSupportService, activityLedger };
 }
 
 const input = {
@@ -154,5 +155,69 @@ describe('guest bug report club', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.store.findFirst).toHaveBeenCalledTimes(1);
     expect(guestSupportService.createBugReport).not.toHaveBeenCalled();
+  });
+  it('queues a Langame sync of the ticket club for a rewards ticket', async () => {
+    const { service, prisma, activityLedger } = fixture();
+    prisma.store.findFirst.mockResolvedValue({ id: otherStoreId });
+
+    await service.createBugReport('Bearer x', 'bug:key-12345', 'UA', {
+      ...input,
+      storeId: otherStoreId,
+    });
+
+    expect(activityLedger.scheduleProfileSync.mock.calls).toEqual([
+      [
+        {
+          tenantId,
+          storeId: otherStoreId,
+          profileId: 'profile-a',
+          guestId: 'guest-a',
+          reason: 'SUPPORT_TICKET',
+        },
+      ],
+      [
+        {
+          tenantId,
+          storeId: currentStoreId,
+          profileId: 'profile-a',
+          guestId: 'guest-a',
+          reason: 'SUPPORT_TICKET',
+        },
+      ],
+    ]);
+  });
+
+  it('queues one sync for a battle pass ticket about the current club', async () => {
+    const { service, activityLedger } = fixture();
+
+    await service.createBugReport('Bearer x', 'bug:key-12345', 'UA', {
+      ...input,
+      topic: 'MISSIONS_AND_BATTLE_PASS',
+    });
+
+    expect(activityLedger.scheduleProfileSync).toHaveBeenCalledTimes(1);
+    expect(activityLedger.scheduleProfileSync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        storeId: currentStoreId,
+        reason: 'SUPPORT_TICKET',
+      }),
+    );
+  });
+
+  it('does not queue a sync for other ticket topics or a failed ticket', async () => {
+    const { service, activityLedger, guestSupportService } = fixture();
+
+    await service.createBugReport('Bearer x', 'bug:key-12345', 'UA', {
+      ...input,
+      topic: 'INTERFACE_AND_DISPLAY',
+    });
+    guestSupportService.createBugReport.mockRejectedValueOnce(
+      new BadRequestException('Выберите тему обращения.'),
+    );
+    await expect(
+      service.createBugReport('Bearer x', 'bug:key-12345', 'UA', input),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(activityLedger.scheduleProfileSync).not.toHaveBeenCalled();
   });
 });

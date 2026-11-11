@@ -696,7 +696,7 @@ function applySeat(s) {
   s.led.material = LED[st];
   s.scr.material = s.state === 'busy' ? SCREEN[s.game] : s.state === 'booked' ? SCREEN.booked : SCREEN.free;
   if (s.state === 'busy') {
-    if (!s.person) { s.person = makePerson(s.guest, true); s.person.position.set(0, 0, 0.82); s.g.add(s.person); s.person.userData.ph = rnd() * 6; }
+    if (!s.person && !s.arriving) { s.person = makePerson(s.guest, true); s.person.position.set(0, 0, 0.82); s.g.add(s.person); s.person.userData.ph = rnd() * 6; }
     s.ch.rotation.y = 0;
   } else {
     if (s.person) { s.g.remove(s.person); s.person = null; }
@@ -704,12 +704,12 @@ function applySeat(s) {
   }
 }
 function occupy(s, until) {
-  if (s.state !== 'busy') s.guest = newGuest();
+  if (s.state !== 'busy') { s.guest = newGuest(); s.arriving = canWalk(); }
   s.state = 'busy'; s.game = 'play'; s.until = until; s.left = until ? Math.max(0, (until - Date.now()) / 60000) : null;
   applySeat(s);
 }
-function free(s) { s.state = 'free'; s.guest = null; s.game = null; s.left = null; s.until = null; applySeat(s); }
-function setOff(s) { s.state = 'off'; s.guest = null; s.game = null; s.left = null; s.until = null; applySeat(s); }
+function free(s) { if (s.state === 'busy') startDeparture(s, s.guest); s.state = 'free'; s.guest = null; s.game = null; s.left = null; s.until = null; applySeat(s); }
+function setOff(s) { if (s.state === 'busy') startDeparture(s, s.guest); s.state = 'off'; s.guest = null; s.game = null; s.left = null; s.until = null; applySeat(s); }
 seats.forEach(setOff);
 
 function zoneSeats(z) { return seats.filter(s => s.zone === z); }
@@ -986,6 +986,152 @@ let toastT;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2200); }
 
 /* ---------------- live simulation ---------------- */
+/* ---------------- guests walk in from the street when a session starts and out when it ends ---------------- */
+const ENTRY = { side: SIDE_Z + 0.4, turn: DOOR_X, path: [[DOOR_X, Z_END - 0.7]] };
+const NAV = { sig: '', cell: 0.15, w: 0, h: 0, x0: 0, z0: 0, block: null };
+const NAV_R = 0.14, VISIT_MAX = 12, VISIT_SPEED = 1.45;
+const visitors = [];
+function navSig() {
+  let s = items.length + '|';
+  for (const it of items) s += it.g.position.x.toFixed(1) + ',' + it.g.position.z.toFixed(1) + ',' + it.g.rotation.y.toFixed(2) + ';';
+  for (const x of seats) s += x.g.position.x.toFixed(1) + ',' + x.g.position.z.toFixed(1) + ',' + x.g.rotation.y.toFixed(2) + ';';
+  return s;
+}
+function navBuild() {
+  const sig = navSig();
+  if (NAV.block && NAV.sig === sig) return;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const r of wallRects) { x0 = Math.min(x0, r.x0); x1 = Math.max(x1, r.x1); z0 = Math.min(z0, r.z0); z1 = Math.max(z1, r.z1); }
+  const c = NAV.cell; NAV.x0 = x0 - 1; NAV.z0 = z0 - 1;
+  NAV.w = Math.ceil((x1 - x0 + 2) / c); NAV.h = Math.ceil((z1 - z0 + 2) / c);
+  const block = new Uint8Array(NAV.w * NAV.h);
+  const fill = (rx0, rx1, rz0, rz1) => {
+    // cells whose centre lies inside the rectangle grown by the body radius
+    const i0 = Math.max(0, Math.ceil((rx0 - NAV_R - NAV.x0) / c - 0.5)), i1 = Math.min(NAV.w - 1, Math.floor((rx1 + NAV_R - NAV.x0) / c - 0.5));
+    const j0 = Math.max(0, Math.ceil((rz0 - NAV_R - NAV.z0) / c - 0.5)), j1 = Math.min(NAV.h - 1, Math.floor((rz1 + NAV_R - NAV.z0) / c - 0.5));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) block[j * NAV.w + i] = 1;
+  };
+  for (const r of wallRects) fill(r.x0, r.x1, r.z0, r.z1);
+  for (const it of items) { const b = new THREE.Box3().setFromObject(it.g); if (b.max.y - b.min.y > 0.25 && b.max.y > 0.3) fill(b.min.x, b.max.x, b.min.z, b.max.z); }
+  // a desk blocks the way; behind its chair one may pass if there is no other way
+  const v = new THREE.Vector3();
+  for (const s of seats) {
+    s.g.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(s.g.matrixWorld).invert();
+    const b = new THREE.Box3();
+    for (const [lx, lz] of [[-0.5, -0.42], [0.5, -0.42], [-0.5, 1.05], [0.5, 1.05]]) { v.set(lx, 0, lz); s.g.localToWorld(v); b.expandByPoint(v); }
+    const i0 = Math.max(0, Math.floor((b.min.x - NAV_R - NAV.x0) / c)), i1 = Math.min(NAV.w - 1, Math.floor((b.max.x + NAV_R - NAV.x0) / c));
+    const j0 = Math.max(0, Math.floor((b.min.z - NAV_R - NAV.z0) / c)), j1 = Math.min(NAV.h - 1, Math.floor((b.max.z + NAV_R - NAV.z0) / c));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      v.set(NAV.x0 + (i + 0.5) * c, 0, NAV.z0 + (j + 0.5) * c).applyMatrix4(inv);
+      if (Math.abs(v.x) > 0.5 + NAV_R || v.z < -0.42 - NAV_R || v.z > 1.05 + NAV_R) continue;
+      const n = j * NAV.w + i; block[n] = v.z <= 0.42 + NAV_R ? 1 : Math.max(block[n], 2);
+    }
+  }
+  NAV.block = block; NAV.sig = sig;
+}
+const navCell = (x, z) => [Math.floor((x - NAV.x0) / NAV.cell), Math.floor((z - NAV.z0) / NAV.cell)];
+const navFree = (i, j) => i >= 0 && j >= 0 && i < NAV.w && j < NAV.h && NAV.block[j * NAV.w + i] !== 1;
+const navClear = (i, j) => i >= 0 && j >= 0 && i < NAV.w && j < NAV.h && !NAV.block[j * NAV.w + i];
+const navPoint = (i, j) => [NAV.x0 + (i + 0.5) * NAV.cell, NAV.z0 + (j + 0.5) * NAV.cell];
+function navNearest(i, j) {
+  if (navFree(i, j)) return [i, j];
+  for (let r = 1; r <= 10; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+    if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
+    if (navFree(i + di, j + dj)) return [i + di, j + dj];
+  }
+  return null;
+}
+function navSight(a, b) {
+  const d = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.ceil(d / (NAV.cell * 0.5));
+  for (let k = 1; k < n; k++) { const [i, j] = navCell(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n); if (!navClear(i, j)) return false; }
+  return true;
+}
+// A* on the floor grid, then the corners that keep a clear line of sight
+function navPath(from, to) {
+  navBuild();
+  const s = navNearest(...navCell(from[0], from[1])), g = navNearest(...navCell(to[0], to[1]));
+  if (!s || !g) return null;
+  const W = NAV.w, start = s[1] * W + s[0], goal = g[1] * W + g[0];
+  const cost = new Float32Array(W * NAV.h).fill(Infinity), prev = new Int32Array(W * NAV.h).fill(-1), shut = new Uint8Array(W * NAV.h);
+  const heap = [], hv = [];
+  const push = (n, f) => { heap.push(n); hv.push(f); let k = heap.length - 1; while (k > 0) { const p = (k - 1) >> 1; if (hv[p] <= hv[k]) break; [heap[p], heap[k]] = [heap[k], heap[p]]; [hv[p], hv[k]] = [hv[k], hv[p]]; k = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop(), lv = hv.pop(); if (heap.length) { heap[0] = last; hv[0] = lv; let k = 0; for (;;) { const l = 2 * k + 1, r = l + 1; let m = k; if (l < heap.length && hv[l] < hv[m]) m = l; if (r < heap.length && hv[r] < hv[m]) m = r; if (m === k) break; [heap[m], heap[k]] = [heap[k], heap[m]]; [hv[m], hv[k]] = [hv[k], hv[m]]; k = m; } } return top; };
+  const hx = n => { const dx = Math.abs(n % W - g[0]), dz = Math.abs(((n / W) | 0) - g[1]); return Math.max(dx, dz) + 0.414 * Math.min(dx, dz); };
+  cost[start] = 0; push(start, hx(start));
+  while (heap.length) {
+    const n = pop(); if (n === goal) break; if (shut[n]) continue; shut[n] = 1;
+    const i = n % W, j = (n / W) | 0;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      if (!di && !dj) continue;
+      if (!navFree(i + di, j + dj)) continue;
+      if (di && dj && (!navFree(i + di, j) || !navFree(i, j + dj))) continue;
+      const m = (j + dj) * W + i + di, c = cost[n] + (di && dj ? 1.414 : 1) * (NAV.block[m] === 2 ? 5 : 1);
+      if (c < cost[m]) { cost[m] = c; prev[m] = n; push(m, c + hx(m)); }
+    }
+  }
+  if (prev[goal] < 0 && goal !== start) return null;
+  const cells = []; for (let n = goal; n >= 0; n = prev[n]) { cells.push(navPoint(n % W, (n / W) | 0)); if (n === start) break; }
+  cells.reverse();
+  const pts = [from]; let a = from;
+  for (let k = 1; k < cells.length; k++) if (!navSight(a, cells[k]) ) { a = cells[k - 1]; pts.push(a); }
+  pts.push(to);
+  return pts;
+}
+function seatPoint(s, z) { const v = new THREE.Vector3(0, 0, z); s.g.localToWorld(v); return [v.x, v.z]; }
+function streetIn() {
+  let dir = rnd() < 0.5 ? -1 : 1, d = 6 + rnd() * 8, sx = ENTRY.turn + dir * d;
+  if (sx < MOVER_X[0] + 1 || sx > MOVER_X[1] - 1) sx = ENTRY.turn - dir * d;
+  sx = THREE.MathUtils.clamp(sx, MOVER_X[0] + 1, MOVER_X[1] - 1);
+  return [[sx, ENTRY.side], [ENTRY.turn, ENTRY.side], ...ENTRY.path];
+}
+const canWalk = () => LIVE.loaded && !editing && !reduced && document.visibilityState === 'visible' && visitors.length < VISIT_MAX;
+function addVisitor(guest, pts, seat, mode) {
+  const p = makePerson({ shirt: guest.shirt, hair: guest.hair, skin: guest.skin }, false);
+  p.position.set(pts[0][0], 0.08, pts[0][1]); world.add(p);
+  const v = { p, pts, i: 0, t: 0, seat, mode, guest }; visitors.push(v); return v;
+}
+function startArrival(s) {
+  const street = streetIn(), door = street[street.length - 1];
+  const inside = navPath(door, seatPoint(s, 1.5));
+  if (!inside) { s.arriving = false; applySeat(s); return; }
+  s.visitor = addVisitor(s.guest, [...street, ...inside.slice(1), seatPoint(s, 0.82)], s, 'in');
+}
+function leavePath(from) {
+  const street = streetIn(), door = street[street.length - 1];
+  const inside = navPath(from, door);
+  return inside ? [...inside, ...street.slice(0, -1).reverse()] : null;
+}
+function startDeparture(s, guest) {
+  if (s.visitor) { turnBack(s.visitor); return; }
+  if (!guest || !canWalk()) return;
+  const out = leavePath(seatPoint(s, 1.5));
+  if (out) addVisitor(guest, [seatPoint(s, 0.82), ...out], null, 'out');
+}
+function turnBack(v) {
+  const here = [v.p.position.x, v.p.position.z], out = leavePath(here);
+  if (v.seat) { v.seat.arriving = false; v.seat.visitor = null; v.seat = null; }
+  if (!out) { dropVisitor(v); return; }
+  v.pts = out; v.i = 0; v.t = 0; v.mode = 'out';
+}
+function dropVisitor(v) { world.remove(v.p); const k = visitors.indexOf(v); if (k >= 0) visitors.splice(k, 1); }
+function finishVisitor(v) {
+  dropVisitor(v);
+  if (v.mode === 'in' && v.seat) { const s = v.seat; s.arriving = false; s.visitor = null; applySeat(s); }
+}
+function finishVisitors() { for (const v of visitors.slice()) finishVisitor(v); }
+function stepVisitors(dt, t) {
+  for (const v of visitors.slice()) {
+    const a = v.pts[v.i], b = v.pts[v.i + 1];
+    if (!b) { finishVisitor(v); continue; }
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 0.001;
+    v.t += dt * VISIT_SPEED / len;
+    if (v.t >= 1) { v.t = 0; v.i++; continue; }
+    v.p.position.x = a[0] + (b[0] - a[0]) * v.t; v.p.position.z = a[1] + (b[1] - a[1]) * v.t;
+    if (len > 0.01) { const target = Math.atan2(b[0] - a[0], b[1] - a[1]); let d = target - v.p.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); v.p.rotation.y += d * Math.min(1, dt * 8); }
+    const sw = Math.sin(t * 7 * VISIT_SPEED + v.p.id) * 0.5; v.p.userData.legs[0].rotation.x = sw; v.p.userData.legs[1].rotation.x = -sw; v.p.userData.arms[0].rotation.x = -sw * 0.7; v.p.userData.arms[1].rotation.x = sw * 0.7;
+  }
+}
 /* ---------------- other clubs of the network with a drawn hall (full screen only) ---------------- */
 async function loadClubNav() {
   if (window.parent !== window || !STORE_ID) return;
@@ -1022,6 +1168,7 @@ function applyLive(data) {
   }
   if (LIVE.loaded) for (const s of seats) {
     const was = before.get(s.id);
+    if (s.arriving && !s.visitor) startArrival(s);
     if (was !== 'busy' && s.state === 'busy') addEvent('in', `${s.id} занят`, ZONES[s.zone].name);
     else if (was === 'busy' && s.state === 'free') addEvent('out', `${s.id} освободился`, ZONES[s.zone].name);
   }
@@ -1390,7 +1537,7 @@ addEventListener('keydown', e => {
 /* mode switch */
 const EDIT_VIEW = { t: [1.7, 0, 0.6], d: 62, dir: [0.06, 1.7, 0.6] };
 function setEditing(on) {
-  editing = on; document.body.classList.toggle('editing', on);
+  editing = on; document.body.classList.toggle('editing', on); if (on) finishVisitors();
   $('#editBtn').setAttribute('aria-pressed', String(on)); $('#editBtn span').textContent = on ? 'Готово' : 'Редактор схемы';
   if (on) { view = { type: 'home' }; ring.visible = false; setAuto(false); flyTo(isPhone() ? { t: [3.4, 0, 0], d: 30, rot: 1.12, dir: EDIT_VIEW.dir } : EDIT_VIEW); if (isPhone()) sheetOpen = true; syncPills(); }
   else { deselect(); select({ type: 'home' }); }
@@ -1500,6 +1647,7 @@ function animate() {
       if (len > 0.01) { const target = Math.atan2(b[0] - a[0], b[1] - a[1]); let d = target - w.p.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); w.p.rotation.y += d * Math.min(1, dt * 8); }
       const sw = Math.sin(t * 7 * w.speed) * 0.5; w.p.userData.legs[0].rotation.x = sw; w.p.userData.legs[1].rotation.x = -sw; w.p.userData.arms[0].rotation.x = -sw * 0.7; w.p.userData.arms[1].rotation.x = sw * 0.7;
     }
+    stepVisitors(dt, t);
     ring.scale.setScalar(0.75 + Math.sin(t * 4) * 0.05);
   }
   if (selected && editing) boxHelper.setFromObject(selected);

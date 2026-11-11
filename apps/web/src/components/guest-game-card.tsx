@@ -46,7 +46,7 @@ export function GuestGameCard({ guest }: { guest: GuestDetail }) {
           eyebrow="Геймификация"
           title="Игровой профиль не найден"
           description="Гость не зарегистрирован в игровом модуле или его телефон ещё не сопоставлен с профилем. Профиль появляется после регистрации через Telegram или веб-кабинет и подтверждения телефона."
-          aside={<PillLink href="/gamification?tab=profiles">Guest Game Hub</PillLink>}
+          aside={<PillLink href="/gamification?tab=profiles">Игровой модуль</PillLink>}
         />
         <div className="p-5">
           <EmptyNote>
@@ -94,7 +94,7 @@ export function GuestGameCard({ guest }: { guest: GuestDetail }) {
         }
         aside={
           <div className="flex flex-wrap gap-2">
-            <PillLink href="/gamification?tab=profiles">Guest Game Hub</PillLink>
+            <PillLink href="/gamification?tab=profiles">Игровой модуль</PillLink>
             <PillLink href="/gamification/log">Игровой журнал</PillLink>
           </div>
         }

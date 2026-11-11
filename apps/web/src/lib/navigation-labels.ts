@@ -17,7 +17,7 @@ const ROUTE_LABELS: ReadonlyArray<readonly [prefix: string, label: string]> = [
   ["/staff/tasks", "Открываем задачи персонала…"],
   ["/staff/checklists", "Открываем чек-листы…"],
   ["/staff", "Открываем персонал…"],
-  ["/gamification", "Открываем геймификацию…"],
+  ["/gamification", "Открываем игровой модуль…"],
   ["/marketing", "Открываем маркетинг…"],
   ["/categories", "Открываем категории…"],
   ["/suppliers", "Открываем поставщиков…"],

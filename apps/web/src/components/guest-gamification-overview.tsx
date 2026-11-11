@@ -142,7 +142,7 @@ export function GuestGamificationOverview({
         description="Связка по GuestGameProfile.guestId: сколько гостей из выборки зарегистрированы в игре, играют, получают награды и бонусы. Тестовые профили сотрудников исключены."
         aside={
           <div className="flex flex-wrap gap-2">
-            <PillLink href="/gamification">Guest Game Hub</PillLink>
+            <PillLink href="/gamification">Игровой модуль</PillLink>
             <PillLink href="/gamification?tab=statistics">Статистика игры</PillLink>
           </div>
         }

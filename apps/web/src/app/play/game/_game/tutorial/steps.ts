@@ -10,7 +10,20 @@ export type GameTutorialStep = {
   // match. `null` is a centered card without a spotlight. A step whose
   // targets are all missing (the club has no such block) is skipped.
   targets: readonly string[] | null;
+  // Shown only where the network turned the feature on.
+  requires?: "gameAccounts";
 };
+
+export type GameTutorialFeatures = { gameAccounts: boolean };
+
+/** Steps whose feature is on; DOM availability is checked by the tour. */
+export function gameTutorialStepsFor(
+  features: GameTutorialFeatures,
+): GameTutorialStep[] {
+  return GAME_TUTORIAL_STEPS.filter(
+    (step) => step.requires === undefined || features[step.requires],
+  );
+}
 
 // Selectors use the existing ids/classes of the game screen instead of new
 // markup, so moving components between files does not break the tour. The
@@ -113,6 +126,16 @@ export const GAME_TUTORIAL_STEPS: readonly GameTutorialStep[] = [
     body: () =>
       "Нажмите на название клуба, чтобы перейти в игру другого клуба сети.",
     targets: [".lp-club-switch"],
+  },
+  {
+    // The menu item itself is hidden until the menu opens, so the step
+    // points at the menu button.
+    id: "game-accounts",
+    title: "Игровые аккаунты",
+    body: () =>
+      "В меню есть «Игровые аккаунты». Привяжите Steam, и матчи FACEIT CS2, сыгранные в клубе во время вашей сессии, будут засчитываться в задания.",
+    targets: [".lp-club-menu-button"],
+    requires: "gameAccounts",
   },
   {
     id: "menu",

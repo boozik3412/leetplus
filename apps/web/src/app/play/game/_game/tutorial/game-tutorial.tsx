@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
+import { loadGameAccountsEnabled } from "@/lib/guest-game-accounts";
 import { markGameTutorialSeen } from "./api";
 import { gameTutorialCss } from "./game-tutorial-css";
 import {
-  GAME_TUTORIAL_STEPS,
   GAME_TUTORIAL_VERSION,
+  gameTutorialStepsFor,
   type GameTutorialStep,
 } from "./steps";
 
@@ -86,12 +87,17 @@ export function GameTutorial({
   clubName: string;
   onClose: () => void;
 }) {
-  const [steps] = useState(() =>
-    GAME_TUTORIAL_STEPS.filter(
-      (step) => step.targets === null || findTargets(step).length > 0,
-    ),
+  // Steps and position change together when the game accounts step joins.
+  const [tour, setTour] = useState(() => ({
+    steps: availableSteps(false),
+    index: 0,
+  }));
+  const { steps, index } = tour;
+  const setIndex = useCallback(
+    (update: (value: number) => number) =>
+      setTour((current) => ({ ...current, index: update(current.index) })),
+    [],
   );
-  const [index, setIndex] = useState(0);
   const [layout, setLayout] = useState<Layout | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const primaryRef = useRef<HTMLButtonElement | null>(null);
@@ -99,6 +105,35 @@ export function GameTutorial({
   const step = steps[index] ?? steps[0];
   const isFirst = index === 0;
   const isLast = index === steps.length - 1;
+
+  // The game accounts step joins once the network answers that the feature
+  // is on (usually long before the guest reaches it near the end).
+  useEffect(() => {
+    let active = true;
+
+    void loadGameAccountsEnabled().then((enabled) => {
+      if (!active || !enabled) {
+        return;
+      }
+
+      const next = availableSteps(true);
+
+      setTour((current) => {
+        if (next.length === current.steps.length) {
+          return current;
+        }
+
+        // Keep the guest on the step they are reading.
+        const currentId = current.steps[current.index]?.id;
+        const moved = next.findIndex((item) => item.id === currentId);
+        return { steps: next, index: moved >= 0 ? moved : current.index };
+      });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     returnFocusRef.current = document.activeElement;
@@ -205,11 +240,11 @@ export function GameTutorial({
     }
 
     setIndex((value) => Math.min(value + 1, steps.length - 1));
-  }, [isLast, onClose, steps.length]);
+  }, [isLast, onClose, setIndex, steps.length]);
 
   const goBack = useCallback(() => {
     setIndex((value) => Math.max(value - 1, 0));
-  }, []);
+  }, [setIndex]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -429,6 +464,12 @@ function placeCard(
   }
 
   return { spot, mode: "sheet", style: {} };
+}
+
+function availableSteps(gameAccounts: boolean): GameTutorialStep[] {
+  return gameTutorialStepsFor({ gameAccounts }).filter(
+    (step) => step.targets === null || findTargets(step).length > 0,
+  );
 }
 
 function findTargets(step: GameTutorialStep): HTMLElement[] {

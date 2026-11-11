@@ -39,16 +39,13 @@ export default async function GuestMissionWizardPage({
       <main className="px-4 py-6 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-3xl rounded-xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <ReportBreadcrumbs
-            current="Мастер заданий"
-            items={[
-              { href: "/gamification", label: "Геймификация" },
-              { href: "/gamification?tab=missions", label: "Задания" },
-            ]}
+            current={initialMissionId ? "Изменение задания" : "Новая механика"}
+            items={[{ href: "/gamification", label: "Игровой модуль" }]}
           />
           <h1 className="mt-6 text-2xl font-black">Нет доступа</h1>
           <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Для создания и активации заданий требуется право «Геймификация:
-            управление правилами».
+            Для создания и запуска игровых механик нужно право «Геймификация:
+            правила».
           </p>
         </div>
       </main>
@@ -74,12 +71,17 @@ export default async function GuestMissionWizardPage({
     <main className="px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1500px]">
         <ReportBreadcrumbs
-          current="Мастер заданий"
-          items={[
-            { href: "/gamification", label: "Геймификация" },
-            { href: "/gamification?tab=missions", label: "Задания" },
-          ]}
+          current={initialMissionId ? "Изменение задания" : "Новая механика"}
+          items={[{ href: "/gamification", label: "Игровой модуль" }]}
         />
+        <h1 className="mb-1 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white">
+          {initialMissionId ? "Изменение задания" : "Новая механика"}
+        </h1>
+        <p className="mb-5 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+          Выберите шаблон или начните с чистого листа: что поощряем, какая
+          награда, для кого и как гость это увидит. Предпросмотр показывает,
+          как задание будет выглядеть у гостя.
+        </p>
         <GuestMissionWizard
           stores={stores}
           audiences={audiences}

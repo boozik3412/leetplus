@@ -2317,6 +2317,14 @@ export function GuestGamificationPanel({
             </p>
           </div>
           <div className="flex shrink-0 flex-col items-start gap-2 lg:items-end">
+            {access.canManageRules ? (
+              <Link
+                href="/gamification/missions/wizard"
+                className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
+              >
+                Создать механику
+              </Link>
+            ) : null}
             <div className="inline-flex rounded-lg border border-zinc-200 bg-white p-1 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
               {editorModeOptions.map(([mode, label]) => (
                 <button

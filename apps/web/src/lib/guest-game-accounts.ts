@@ -30,6 +30,29 @@ export type GuestGameAccounts = {
 
 export const GUEST_GAME_ACCOUNTS_PATH = "/api/guest-portal/session/game-accounts";
 
+let enabledRequest: Promise<boolean> | null = null;
+
+/**
+ * Whether the network turned game accounts on. Asked once per page load and
+ * shared by the menu and the tutorial; a failed request is asked again later.
+ */
+export function loadGameAccountsEnabled(): Promise<boolean> {
+  enabledRequest ??= fetch(GUEST_GAME_ACCOUNTS_PATH, { cache: "no-store" })
+    .then((response) => (response.ok ? response.json() : null))
+    .then(
+      (data: unknown) =>
+        Boolean(data) &&
+        typeof data === "object" &&
+        (data as { enabled?: unknown }).enabled === true,
+    )
+    .catch(() => {
+      enabledRequest = null;
+      return false;
+    });
+
+  return enabledRequest;
+}
+
 const OPENID_KEY = /^openid\.[a-z_]{2,32}$/;
 const MAX_OPENID_FIELDS = 16;
 

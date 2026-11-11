@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   GAME_TUTORIAL_STEPS,
   GAME_TUTORIAL_VERSION,
+  gameTutorialStepsFor,
 } from "../app/play/game/_game/tutorial/steps.ts";
 import { projectGuestPortalPostBody } from "./guest-portal-bff.ts";
 
@@ -61,6 +62,51 @@ test("the tour starts with a welcome card and has unique steps", () => {
     GAME_TUTORIAL_STEPS.length,
   );
   assert.match(GAME_TUTORIAL_STEPS[0].body("Клуб 1337"), /Клуб 1337/u);
+});
+
+test("the game accounts step shows only where the network turned it on", () => {
+  const off = gameTutorialStepsFor({ gameAccounts: false }).map((s) => s.id);
+  const on = gameTutorialStepsFor({ gameAccounts: true }).map((s) => s.id);
+
+  assert.ok(!off.includes("game-accounts"));
+  assert.ok(on.includes("game-accounts"));
+  assert.equal(on.length, off.length + 1);
+  // It comes before the menu step, which already points at the menu button.
+  assert.equal(on.indexOf("game-accounts") + 1, on.indexOf("menu"));
+  assert.match(
+    GAME_TUTORIAL_STEPS.find((s) => s.id === "game-accounts")!.body(""),
+    /Steam/u,
+  );
+});
+
+test("guests who saw an older tour get only the new steps", () => {
+  const ids = (steps: { id: string }[]) => steps.map((s) => s.id);
+  const all = gameTutorialStepsFor({ gameAccounts: true }, "full", 1);
+
+  // A full tour ignores what was seen; an update shows only newer steps.
+  assert.equal(all.length, GAME_TUTORIAL_STEPS.length);
+  assert.deepEqual(
+    ids(gameTutorialStepsFor({ gameAccounts: true }, "updates", 1)),
+    ["game-accounts"],
+  );
+  assert.deepEqual(
+    ids(gameTutorialStepsFor({ gameAccounts: false }, "updates", 1)),
+    [],
+  );
+  assert.deepEqual(
+    ids(
+      gameTutorialStepsFor(
+        { gameAccounts: true },
+        "updates",
+        GAME_TUTORIAL_VERSION,
+      ),
+    ),
+    [],
+  );
+  // Every step's version exists: nothing is added "from the future".
+  for (const step of GAME_TUTORIAL_STEPS) {
+    assert.ok((step.since ?? 1) <= GAME_TUTORIAL_VERSION, step.id);
+  }
 });
 
 test("the web BFF forwards only the tutorial version", () => {

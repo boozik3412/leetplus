@@ -84,7 +84,7 @@ import {
   BrandMark,
   GamepadIcon,
 } from "./_game/icons";
-import { GUEST_GAME_ACCOUNTS_PATH } from "@/lib/guest-game-accounts";
+import { loadGameAccountsEnabled } from "@/lib/guest-game-accounts";
 import { HomeLootBoxes } from "./_game/lootbox/home-loot-boxes";
 import { LootboxUnavailableModal } from "./_game/lootbox/unavailable-modal";
 import {
@@ -848,18 +848,11 @@ function GameModuleTopbar({
     }
 
     gameAccountsChecked.current = true;
-    fetch(GUEST_GAME_ACCOUNTS_PATH, { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: unknown) => {
-        if (
-          data &&
-          typeof data === "object" &&
-          (data as { enabled?: unknown }).enabled === true
-        ) {
-          setGameAccountsEnabled(true);
-        }
-      })
-      .catch(() => undefined);
+    void loadGameAccountsEnabled().then((enabled) => {
+      if (enabled) {
+        setGameAccountsEnabled(true);
+      }
+    });
   }, [menuOpen]);
 
   useEffect(() => {
@@ -2266,7 +2259,12 @@ function ReadyGameView({
       ) : null}
 
       {tutorial.open ? (
-        <GameTutorial clubName={summary.store.name} onClose={tutorial.close} />
+        <GameTutorial
+          clubName={summary.store.name}
+          mode={tutorial.mode}
+          seenVersion={tutorial.seenVersion}
+          onClose={tutorial.close}
+        />
       ) : null}
     </div>
   );

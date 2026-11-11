@@ -2165,7 +2165,11 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   направляет эти запросы через `langame-proxy`, где для них добавляются точные
   хосты `=steamcommunity.com,=api.steampowered.com,=open.faceit.com` в
   `LANGAME_PROXY_SUFFIXES` (запись `=host` пускает только этот хост, без
-  поддоменов). Шаги — `deploy/simple/README.md`, «Игровые аккаунты».
+  поддоменов). Worker бонусов подключён к `leetplus-langame` отдельным адресом
+  `172.31.46.22` (добавлен в `LANGAME_PROXY_SOURCES`): общий `.21` daily и
+  report workers защищён их `flock` в `lp`, worker бонусов в него не входит.
+  Ключ `LANGAME_PROXY_URL` worker бонусов не получает. Включено на проде
+  11.11.2026. Шаги — `deploy/simple/README.md`, «Игровые аккаунты».
 - Схема: миграция `20261109120000_guest_game_external_accounts` создаёт
   `GuestGameExternalAccount` и `GuestGameExternalMatch` (журнал матчей), FK
   на `(tenantId, id)` профиля с
@@ -2227,7 +2231,8 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   ключи и данные прокси не видит.
 - Размещение вне фенсируемой `172.31.40.0/22`: internal-сеть
   `leetplus-langame` `172.31.46.0/24` (прокси `.2`, API-слоты `.10/.11`, daily и
-  report workers `.21`) без маршрута наружу и сеть выхода прокси
+  report workers `.21`, bonus-ledger-worker `.22` только для Steam/FACEIT) без
+  маршрута наружу и сеть выхода прокси
   `leetplus-langame-out` `172.31.47.0/24`. V2 firewall, `providers.json` и
   внешний worker 1171 не меняются. Ключ `LANGAME_PROXY_URL` получают только
   `api-*`, `langame-daily-worker` и `daily-report-worker`; Web — нет.

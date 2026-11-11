@@ -52,6 +52,7 @@ const guardedPages = [
   ["(app)/marketing/campaigns/[id]/page.tsx", "/marketing/campaigns"],
   ["(app)/marketing/missions/page.tsx", "/marketing/missions"],
   ["(app)/marketing/page.tsx", "/marketing"],
+  ["(app)/marketing/new/page.tsx", "/marketing/new"],
   ["(app)/marketing/promo-bundles/page.tsx", "/marketing/promo-bundles"],
   ["(app)/products/page.tsx", "/products"],
   ["(app)/reports/daily/page.tsx", "/reports/daily"],

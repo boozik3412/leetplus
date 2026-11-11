@@ -106,7 +106,7 @@
     "canary": 1,
     "dispatch": 3,
     "ledger": 6,
-    "lootbox": 39,
+    "lootbox": 30,
     "materializer": 1,
     "payload": 1,
     "snapshot": 2
@@ -148,6 +148,9 @@
   },
   "components/guest-gamification/tabs/rewards-tab.tsx": {
     "lootbox": 1
+  },
+  "components/guest-gamification/tabs/seasons-tab.tsx": {
+    "lootbox": 9
   },
   "components/langame-category-import.tsx": {
     "api": 3

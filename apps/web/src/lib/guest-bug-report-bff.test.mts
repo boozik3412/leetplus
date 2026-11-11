@@ -97,22 +97,38 @@ test("shows a Battle Pass save failure next to the save action", async () => {
     path.join(sourceRoot, "components", "guest-gamification-panel.tsx"),
     "utf8",
   );
+  const seasonsTab = await readFile(
+    path.join(
+      sourceRoot,
+      "components",
+      "guest-gamification",
+      "tabs",
+      "seasons-tab.tsx",
+    ),
+    "utf8",
+  );
 
   assert.match(panel, /<SeasonsTab[\s\S]*?error=\{error\}/);
   assert.match(
-    panel,
+    seasonsTab,
     /\{error \? \([\s\S]*?role="alert"[\s\S]*?\{error\}[\s\S]*?<button[\s\S]*?onClick=\{onSave\}/,
   );
 });
 
 test("labels the reward delivery method on every saved Battle Pass card", async () => {
-  const panel = await readFile(
-    path.join(sourceRoot, "components", "guest-gamification-panel.tsx"),
+  const seasonsTab = await readFile(
+    path.join(
+      sourceRoot,
+      "components",
+      "guest-gamification",
+      "tabs",
+      "seasons-tab.tsx",
+    ),
     "utf8",
   );
 
   assert.match(
-    panel,
+    seasonsTab,
     /item\.manualApprovalRequired\s*\?\s*"выдача: после подтверждения сотрудником"\s*:\s*"выдача: автоматически"/,
   );
 });

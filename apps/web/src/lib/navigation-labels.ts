@@ -27,7 +27,8 @@ const ROUTE_LABELS: ReadonlyArray<readonly [prefix: string, label: string]> = [
   ["/settings", "Открываем настройки…"],
   ["/support", "Открываем поддержку…"],
   ["/import", "Открываем импорт…"],
-  ["/sync", "Открываем синхронизацию…"],
+  ["/sync", "Открываем журнал загрузок…"],
+  ["/connections", "Открываем подключения…"],
 ];
 
 export const DEFAULT_NAVIGATION_LABEL = "Загружаем раздел…";

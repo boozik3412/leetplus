@@ -157,7 +157,11 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/stores", label: "Клубы" },
       { href: "/users", label: "Пользователи и роли" },
-      { href: "/sync", label: "Подключение Langame" },
+      {
+        href: "/connections",
+        label: "Подключения",
+        activePaths: ["/sync"],
+      },
       { href: "/visualization", label: "Схема клуба" },
       { href: "/settings", label: "Настройки сети" },
     ],
@@ -932,7 +936,14 @@ function resolveCurrentProductArea(pathname: string): ProductArea {
   }
 
   if (
-    startsWithAny("/stores", "/users", "/sync", "/settings", "/visualization")
+    startsWithAny(
+      "/stores",
+      "/users",
+      "/connections",
+      "/sync",
+      "/settings",
+      "/visualization",
+    )
   ) {
     return "Настройки";
   }

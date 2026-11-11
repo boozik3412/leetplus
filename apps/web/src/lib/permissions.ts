@@ -1015,7 +1015,7 @@ export function canAccessPath(user: AuthUser | null, href: string) {
     return can(user, "manage_integrations");
   }
 
-  if (isPathOrChild(href, "/sync")) {
+  if (isPathOrChild(href, "/sync") || isPathOrChild(href, "/connections")) {
     return can(user, "run_sync");
   }
 

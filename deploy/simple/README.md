@@ -21,7 +21,7 @@ ssh root@192.168.1.137 lp deploy <sha>
 
 | Шаг | Что происходит |
 | --- | --- |
-| Проверка | коммит есть в `main`, обязательные проверки GitHub зелёные |
+| Проверка | коммит есть в `main`, обязательные проверки GitHub зелёные, и ни одна другая проверка не упала. Исключение: сборки старых образов полной приёмки (`Compose immutable image candidate`, `Compose app-only immutable image candidate`, `B app-only Docker image shadow`). `lp` эти образы не выкатывает, а их сборка зависит от зеркал Ubuntu, поэтому их падение выводится как предупреждение |
 | Сборка | образы `leetplus-api:<sha>` и `leetplus-web:<sha>` собираются на сервере из исходников GitHub (лог: `/var/lib/leetplus-deploy/build-<sha>.log`) |
 | Схема БД | миграции образа сравниваются с `_prisma_migrations`; новые применяются (см. «Миграции»), расхождение базы и релиза — отказ |
 | Workers | entrypoint bonus/daily worker запускается на новом образе с их настоящими секретами в режиме самопроверки (`LEETPLUS_ENTRY_CHECK=1`, без сети, без работы); иначе отказ |

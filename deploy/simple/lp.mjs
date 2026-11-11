@@ -51,6 +51,16 @@ const REQUIRED_CHECKS = [
   'Release critical pilot HTTP and fresh store scope',
   'Release critical PostgreSQL assortment isolation',
 ];
+// CI jobs that only build the legacy full-admission Compose images. lp builds
+// api/web on the host and keeps the running PostgreSQL/Redis, so these images
+// are never deployed. Their builds pull Ubuntu/Debian mirrors, and a mirror
+// outage must not block a release: a failure here is a warning, not a refusal.
+// Every other failed check still blocks.
+const NON_BLOCKING_IMAGE_CHECKS = [
+  'Compose immutable image candidate',
+  'Compose app-only immutable image candidate',
+  'B app-only Docker image shadow',
+];
 // daily-report-worker uses the fence addresses of langame-daily-worker (.21):
 // the attested legacy network fence admits only fixed sources to PostgreSQL.
 // One address means one container at a time: the report tick skips while the
@@ -201,15 +211,25 @@ async function checkRuns(sha) {
   }
   return runs;
 }
-async function verifyCi(sha) {
-  const runs = await checkRuns(sha);
-  const bad = runs.filter(r => r.status === 'completed' && !['success', 'skipped', 'neutral'].includes(r.conclusion));
-  if (bad.length) fail(`CI failed for ${sha.slice(0, 8)}: ${[...new Set(bad.map(r => r.name))].join(', ')}`);
+export function ciVerdict(runs) {
+  const unique = list => [...new Set(list)];
+  const failed = runs.filter(r => r.status === 'completed' && !['success', 'skipped', 'neutral'].includes(r.conclusion));
+  const blocking = failed.filter(r => REQUIRED_CHECKS.includes(r.name) || !NON_BLOCKING_IMAGE_CHECKS.includes(r.name));
   const missing = REQUIRED_CHECKS.filter(name => !runs.some(r => r.name === name && r.status === 'completed' && r.conclusion === 'success'));
-  if (missing.length) {
-    const pending = missing.filter(name => runs.some(r => r.name === name && r.status !== 'completed'));
-    fail(pending.length ? `CI still running for ${sha.slice(0, 8)}: ${pending.join(', ')}` : `Required checks missing for ${sha.slice(0, 8)}: ${missing.join(', ')}`);
+  return {
+    failed: unique(blocking.map(r => r.name)),
+    warnings: unique(failed.filter(r => !blocking.includes(r)).map(r => r.name)),
+    pending: missing.filter(name => runs.some(r => r.name === name && r.status !== 'completed')),
+    missing,
+  };
+}
+async function verifyCi(sha) {
+  const verdict = ciVerdict(await checkRuns(sha));
+  if (verdict.failed.length) fail(`CI failed for ${sha.slice(0, 8)}: ${verdict.failed.join(', ')}`);
+  if (verdict.missing.length) {
+    fail(verdict.pending.length ? `CI still running for ${sha.slice(0, 8)}: ${verdict.pending.join(', ')}` : `Required checks missing for ${sha.slice(0, 8)}: ${verdict.missing.join(', ')}`);
   }
+  if (verdict.warnings.length) log(`CI warning: legacy image build failed (not deployed by lp): ${verdict.warnings.join(', ')}`);
   log(`CI ok: ${REQUIRED_CHECKS.length} required checks passed`);
 }
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { addressLockArgs, addressPeerAction, backupsToPrune, migrationScript, planSchema } from './lp.mjs';
+import { addressLockArgs, addressPeerAction, backupsToPrune, ciVerdict, migrationScript, planSchema } from './lp.mjs';
 
 const sum = char => char.repeat(64);
 const db = (entries, unfinished = []) => ({ applied: new Map(entries), unfinished });
@@ -74,4 +74,30 @@ test('fence address peers start their container under one shared lock', () => {
   assert.deepEqual(daily.slice(1, 3), ['--timeout', '300']);
   assert.equal(report[report.indexOf('--conflict-exit-code') + 1], daily[daily.indexOf('--conflict-exit-code') + 1]);
   assert.deepEqual(addressLockArgs('bonus-ledger-worker'), []);
+});
+
+const REQUIRED = ['Release impact classification', 'Fast authority root trust', 'Fast application checks', 'Release critical pilot HTTP and fresh store scope', 'Release critical PostgreSQL assortment isolation'];
+const ok = name => ({ name, status: 'completed', conclusion: 'success' });
+
+test('ciVerdict passes when every required check succeeded', () => {
+  assert.deepEqual(ciVerdict([...REQUIRED.map(ok), { name: 'Compose app-only immutable image candidate', status: 'completed', conclusion: 'skipped' }]), { failed: [], warnings: [], pending: [], missing: [] });
+});
+
+test('ciVerdict turns a failed legacy image build into a warning', () => {
+  const verdict = ciVerdict([...REQUIRED.map(ok), { name: 'Compose immutable image candidate', status: 'completed', conclusion: 'failure' }, { name: 'B app-only Docker image shadow', status: 'completed', conclusion: 'failure' }]);
+  assert.deepEqual(verdict.failed, []);
+  assert.deepEqual(verdict.warnings, ['Compose immutable image candidate', 'B app-only Docker image shadow']);
+});
+
+test('ciVerdict still blocks any other failed check', () => {
+  const verdict = ciVerdict([...REQUIRED.map(ok), { name: 'PostgreSQL migration smoke', status: 'completed', conclusion: 'failure' }, { name: 'Application checks', status: 'completed', conclusion: 'cancelled' }]);
+  assert.deepEqual(verdict.failed, ['PostgreSQL migration smoke', 'Application checks']);
+});
+
+test('ciVerdict reports a required check that failed, is still running or is missing', () => {
+  const runs = [ok(REQUIRED[0]), { name: REQUIRED[1], status: 'completed', conclusion: 'failure' }, { name: REQUIRED[2], status: 'in_progress', conclusion: null }, ok(REQUIRED[3])];
+  const verdict = ciVerdict(runs);
+  assert.deepEqual(verdict.failed, [REQUIRED[1]]);
+  assert.deepEqual(verdict.pending, [REQUIRED[2]]);
+  assert.deepEqual(verdict.missing, [REQUIRED[1], REQUIRED[2], REQUIRED[4]]);
 });

@@ -17,7 +17,8 @@ import {
   gameEngagementLabels,
   gameEngagementTone,
   guestsExportHref,
-  guestsHref,
+  guestListAnchorHref,
+  guestListHref,
   guestsReportHref,
   recommendedActionTone,
   rfmSegmentLabels,
@@ -75,7 +76,7 @@ export function GuestListTable({
               {chips.map((chip) => (
                 <Link
                   key={chip.key}
-                  href={guestsHref({ ...filters, [chip.key]: undefined, page: "1" })}
+                  href={guestListHref({ ...filters, [chip.key]: undefined, page: "1" })}
                   title="Убрать фильтр"
                   className="inline-flex items-center gap-1 rounded-full border border-zinc-300 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
                 >
@@ -84,7 +85,7 @@ export function GuestListTable({
                 </Link>
               ))}
               <Link
-                href={guestsHref({
+                href={guestListHref({
                   dateFrom: filters.dateFrom,
                   dateTo: filters.dateTo,
                   storeId: filters.storeId,
@@ -327,7 +328,7 @@ function SortLink({
 
   return (
     <Link
-      href={guestsHref({ ...filters, sort, direction: nextDirection, page: "1" })}
+      href={guestListHref({ ...filters, sort, direction: nextDirection, page: "1" })}
       className={[
         "rounded-full border px-2.5 py-1 transition-colors",
         isActive
@@ -362,7 +363,7 @@ function PaginationLink({
 
   return (
     <Link
-      href={`${guestsHref({ ...filters, page: String(page) })}#guest-list`}
+      href={guestListAnchorHref({ ...filters, page: String(page) })}
       className="rounded-md border border-zinc-300 px-3 py-2 font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
     >
       {children}

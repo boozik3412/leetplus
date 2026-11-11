@@ -11,7 +11,7 @@ import {
   formatPeriodDate,
   formatRubles,
   guestsExportHref,
-  guestsHref,
+  guestListHref,
   guestsReportHref,
   hourRangeLabel,
   segmentLabels,
@@ -93,7 +93,7 @@ export function BonusLoadPanel({ summary }: { summary: GuestsSummary }) {
           value={formatRubles(bonusLoad.inactiveBalance)}
           caption={`${formatNumber(bonusLoad.inactiveGuests)} гостей в риске или без визитов`}
           tone={bonusLoad.inactiveBalance > 0 ? "danger" : "good"}
-          href={guestsHref({
+          href={guestListHref({
             ...summaryToFilters(summary),
             signal: "BONUS_WITHOUT_ACTIVITY",
             sort: "bonusLoad",
@@ -128,7 +128,7 @@ export function BonusLoadPanel({ summary }: { summary: GuestsSummary }) {
               </p>
             </div>
             <PillLink
-              href={guestsHref({ ...summaryToFilters(summary), sort: "bonusLoad" })}
+              href={guestListHref({ ...summaryToFilters(summary), sort: "bonusLoad" })}
             >
               Все по бонусам
             </PillLink>
@@ -188,7 +188,7 @@ export function RetentionPanel({ summary }: { summary: GuestsSummary }) {
           label="Без 2-го визита"
           value={formatNumber(retention.withoutSecondActivity)}
           caption="нужен контакт"
-          href={guestsHref({
+          href={guestListHref({
             ...summaryToFilters(summary),
             signal: "NEW_WITHOUT_SECOND_VISIT",
             sort: "registered",

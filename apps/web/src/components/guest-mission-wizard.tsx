@@ -2140,7 +2140,7 @@ function RewardsStep({
             </Field>
             <div className="mt-3 text-right">
               <Link
-                href="/marketing?tab=promoBundles"
+                href="/marketing/promo-bundles"
                 target="_blank"
                 className="rounded-lg border border-emerald-300 px-3 py-2 text-xs font-bold text-emerald-800 dark:text-emerald-200"
               >

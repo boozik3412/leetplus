@@ -24,10 +24,6 @@
   "app/(app)/marketing/missions/page.tsx": {
     "promo-scenario": 1
   },
-  "app/(app)/marketing/page.tsx": {
-    "api": 1,
-    "promo-scenario": 1
-  },
   "app/(app)/reports/page.tsx": {
     "tenant": 1
   },

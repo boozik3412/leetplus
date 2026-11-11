@@ -192,6 +192,82 @@ const goalOptions: Array<{ value: MarketingCampaignGoal; label: string }> = [
   { value: "PROMO_BUNDLE", label: "Промо-набор" },
 ];
 
+export type MarketingCampaignsView = "list" | "new";
+
+// UX plan 2.4: a new campaign is a six-step wizard; the steps reuse the
+// existing campaign form fields and the same create request.
+type CampaignWizardStep =
+  | "goal"
+  | "group"
+  | "mechanic"
+  | "channel"
+  | "control"
+  | "effect";
+
+const campaignWizardSteps: Array<{ id: CampaignWizardStep; label: string }> = [
+  { id: "goal", label: "Цель" },
+  { id: "group", label: "Группа" },
+  { id: "mechanic", label: "Механика" },
+  { id: "channel", label: "Канал" },
+  { id: "control", label: "Контроль" },
+  { id: "effect", label: "Эффект" },
+];
+
+const campaignGoalHints: Record<MarketingCampaignGoal, string> = {
+  RETURN_GUESTS: "Гости в риске и потерянные: группа и контакт.",
+  REPEAT_VISIT: "Новые гости, которые ещё не пришли второй раз.",
+  WEAK_HOURS: "Турниры, офферы и события в слабую загрузку.",
+  BAR_GROWTH: "Предложение для гостей, которые мало берут в баре.",
+  EVENT_PROMO: "Событие или бронь с ответственным и следующим контактом.",
+  PROMO_BUNDLE: "Готовый набор: игра, бар и сервис.",
+};
+
+const campaignGoalEffects: Record<MarketingCampaignGoal, string> = {
+  RETURN_GUESTS: "сколько гостей из группы вернулись и сколько принесли",
+  REPEAT_VISIT: "сколько новых гостей пришли второй раз",
+  WEAK_HOURS: "загрузку и выручку в выбранные часы",
+  BAR_GROWTH: "выручку бара и средний чек группы",
+  EVENT_PROMO: "брони, пришедших гостей и выручку события",
+  PROMO_BUNDLE: "продажи и использование набора",
+};
+
+function campaignWizardStepDone(
+  step: CampaignWizardStep,
+  form: CampaignFormState,
+) {
+  switch (step) {
+    case "goal":
+      return Boolean(form.name.trim());
+    case "group":
+      return Boolean(form.audienceId);
+    case "mechanic":
+      return form.goal === "PROMO_BUNDLE"
+        ? Boolean(form.promoBundleId)
+        : Boolean(form.mechanic);
+    case "channel":
+      return Boolean(form.channel);
+    case "control":
+      return Boolean(
+        form.ownerUserId && form.dueAt && form.periodFrom && form.periodTo,
+      );
+    case "effect":
+      return false;
+  }
+}
+
+function WizardStepTitle({ title, text }: { title: string; text: string }) {
+  return (
+    <div>
+      <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
+        {title}
+      </h2>
+      <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+        {text}
+      </p>
+    </div>
+  );
+}
+
 const statusOptions: Array<{ value: MarketingCampaignStatus; label: string }> = [
   { value: "DRAFT", label: "Черновик" },
   { value: "PLANNED", label: "Запланирована" },
@@ -614,7 +690,9 @@ export function MarketingCampaignsPanel({
   promoBundleLaunches,
   tariffConditions = emptyMarketingTariffConditions,
   stores,
+  view = "list",
 }: {
+  view?: MarketingCampaignsView;
   campaigns: MarketingCampaign[];
   audiences: GuestAudience[];
   users: GuestCrmUser[];
@@ -652,6 +730,16 @@ export function MarketingCampaignsPanel({
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] =
     useState<CampaignStatusFilter>("ACTIVE");
+  const [wizardStep, setWizardStep] = useState<CampaignWizardStep>("goal");
+  const [bundleOpen, setBundleOpen] = useState(false);
+
+  function goToWizardStep(next: CampaignWizardStep) {
+    setWizardStep(next);
+    const top = document.getElementById("campaign-form");
+    if (top && top.getBoundingClientRect().top < 0) {
+      top.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
   const selectedTemplate =
     promoMechanicTemplates.find((template) => template.id === selectedTemplateId) ??
     promoMechanicTemplates[0];
@@ -664,16 +752,6 @@ export function MarketingCampaignsPanel({
     [bundleDraft, bundleEconomics],
   );
 
-  const summary = useMemo(
-    () => ({
-      total: rows.length,
-      active: rows.filter(
-        (row) => row.status === "PLANNED" || row.status === "RUNNING",
-      ).length,
-      drafts: rows.filter((row) => row.status === "DRAFT").length,
-    }),
-    [rows],
-  );
   const campaignCounts = useMemo(
     () =>
       Object.fromEntries(
@@ -1034,286 +1112,456 @@ export function MarketingCampaignsPanel({
     setPendingTaskCampaignId(null);
   }
 
+  if (view === "new") {
+    if (lastCreatedCampaign) {
+      return (
+        <section className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 p-6 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+            Черновик создан
+          </p>
+          <h2 className="mt-2 text-2xl font-bold text-zinc-950 dark:text-white">
+            {lastCreatedCampaign.name}
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-emerald-900 dark:text-emerald-100">
+            Откройте карточку, чтобы проверить план, создать CRM-задачу и
+            потом смотреть эффект.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link
+              href={`/marketing/campaigns/${lastCreatedCampaign.id}`}
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+            >
+              Открыть кампанию
+            </Link>
+            <Link
+              href="/marketing"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+            >
+              К списку кампаний
+            </Link>
+            <button
+              type="button"
+              onClick={() => {
+                setLastCreatedCampaign(null);
+                setWizardStep("goal");
+              }}
+              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+            >
+              Создать ещё одну
+            </button>
+          </div>
+        </section>
+      );
+    }
+
+    const wizardIndex = campaignWizardSteps.findIndex(
+      (item) => item.id === wizardStep,
+    );
+    const nextWizardStep = campaignWizardSteps[wizardIndex + 1] ?? null;
+
+    return (
+      <form
+        id="campaign-form"
+        onSubmit={(event) => {
+          if (wizardStep !== "effect") {
+            event.preventDefault();
+            if (nextWizardStep) goToWizardStep(nextWizardStep.id);
+            return;
+          }
+          void createCampaign(event);
+        }}
+        className="mt-6 scroll-mt-6 space-y-4"
+      >
+        <div className="grid grid-cols-2 gap-2 rounded-lg border border-zinc-200 bg-white p-2 sm:grid-cols-3 xl:grid-cols-6 dark:border-zinc-800 dark:bg-zinc-950">
+          {campaignWizardSteps.map((item, index) => {
+            const isActive = item.id === wizardStep;
+            const isDone = campaignWizardStepDone(item.id, form);
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => goToWizardStep(item.id)}
+                aria-current={isActive ? "step" : undefined}
+                className={[
+                  "flex min-h-14 items-center gap-3 rounded-lg px-3 text-left transition",
+                  isActive
+                    ? "bg-emerald-50 ring-1 ring-emerald-300 dark:bg-emerald-500/10"
+                    : "hover:bg-zinc-50 dark:hover:bg-zinc-900",
+                ].join(" ")}
+              >
+                <span
+                  className={[
+                    "grid h-8 w-8 shrink-0 place-items-center rounded-lg text-xs font-bold",
+                    isActive
+                      ? "bg-emerald-500 text-white"
+                      : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800",
+                  ].join(" ")}
+                >
+                  {index + 1}
+                </span>
+                <span>
+                  <strong className="block text-sm">{item.label}</strong>
+                  <small
+                    className={
+                      isDone ? "text-emerald-600" : "text-zinc-400"
+                    }
+                  >
+                    {isDone ? "Готово" : "Заполнить"}
+                  </small>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <section className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
+          {wizardStep === "goal" ? (
+            <div className="space-y-4">
+              <WizardStepTitle
+                title="Что нужно бизнесу?"
+                text="Цель задаёт, какой эффект кампания будет считать."
+              />
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {goalOptions.map((option) => {
+                  const isActive = form.goal === option.value;
+
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={isActive}
+                      onClick={() =>
+                        setForm((current) => ({
+                          ...current,
+                          goal: option.value,
+                          mechanicConfig: null,
+                          promoBundleId: "",
+                        }))
+                      }
+                      className={[
+                        "min-h-20 rounded-lg border px-3 py-2.5 text-left transition",
+                        isActive
+                          ? "border-emerald-500 bg-emerald-50 ring-1 ring-emerald-300 dark:bg-emerald-500/10"
+                          : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900",
+                      ].join(" ")}
+                    >
+                      <strong className="block text-sm text-zinc-950 dark:text-white">
+                        {option.label}
+                      </strong>
+                      <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                        {campaignGoalHints[option.value]}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            <Field label="Название">
+              <input
+                value={form.name}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, name: event.target.value }))
+                }
+                placeholder="Например: Вернуть гостей в риске на выходные"
+                className={fieldClassName}
+              />
+            </Field>
+            </div>
+          ) : null}
+
+          {wizardStep === "group" ? (
+            <div className="space-y-4">
+              <WizardStepTitle
+                title="Кому адресуем"
+                text="Сохранённая группа гостей и клуб. По группе считаются охват, согласия и эффект."
+              />
+              <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Группа">
+                  <select
+                    value={form.audienceId}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        audienceId: event.target.value,
+                      }))
+                    }
+                    className={fieldClassName}
+                  >
+                    <option value="">Без группы</option>
+                    {audiences.map((audience) => (
+                      <option key={audience.id} value={audience.id}>
+                        {audience.name} · {audience.guestsCount} гостей
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+            <Field label="Клуб">
+                  <select
+                    value={form.storeId}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, storeId: event.target.value }))
+                    }
+                    className={fieldClassName}
+                  >
+                    <option value="">Вся сеть</option>
+                    {stores.map((store) => (
+                      <option key={store.id} value={store.id}>
+                        {store.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            <CampaignGroupRoute
+              selectedAudience={selectedAudience}
+              audiencesCount={audiences.length}
+            />
+            </div>
+          ) : null}
+
+          {wizardStep === "mechanic" ? (
+            <div className="space-y-4">
+              <WizardStepTitle
+                title="Что предлагаем"
+                text="Механика кампании. Готовый сценарий или промо-набор заполнит сразу несколько шагов."
+              />
+              <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Механика">
+                  <select
+                    value={form.mechanic}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        mechanic: event.target.value,
+                        mechanicConfig: null,
+                      }))
+                    }
+                    className={fieldClassName}
+                  >
+                    {mechanicOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <details
+                open={bundleOpen}
+                onToggle={(event) =>
+                  setBundleOpen((event.target as HTMLDetailsElement).open)
+                }
+                className="rounded-lg border border-zinc-200 dark:border-zinc-800"
+              >
+                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+                  Готовые сценарии и промо-наборы
+                </summary>
+            <PromoMechanicsBuilder
+              selectedTemplate={selectedTemplate}
+              selectedTemplateId={selectedTemplateId}
+              promoBundles={savedPromoBundles}
+              tariffConditions={tariffConditions}
+              bundleDraft={bundleDraft}
+              bundleEconomics={bundleEconomics}
+              bundleVerdict={bundleVerdict}
+              bundleCatalogNotice={bundleCatalogNotice}
+              isSavingBundle={isSavingBundle}
+              onSelectTemplate={setSelectedTemplateId}
+              onApplyTemplate={applyTemplate}
+              bundleApplyNotice={bundleApplyNotice}
+              onBundleDraftChange={(draft) => {
+                setBundleApplyNotice(false);
+                setBundleCatalogNotice(null);
+                setBundleDraft(draft);
+              }}
+              onUsePromoBundle={applyExistingPromoBundle}
+              onApplyBundle={applyBundleDraft}
+            />
+
+              </details>
+            </div>
+          ) : null}
+
+          {wizardStep === "channel" ? (
+            <div className="space-y-4">
+              <WizardStepTitle
+                title="Как гости узнают"
+                text="Канал, через который команда свяжется с гостями."
+              />
+              <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Канал">
+                  <select
+                    value={form.channel}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, channel: event.target.value }))
+                    }
+                    className={fieldClassName}
+                  >
+                    {channelOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            </div>
+          ) : null}
+
+          {wizardStep === "control" ? (
+            <div className="space-y-4">
+              <WizardStepTitle
+                title="Кто и когда"
+                text="Ответственный, срок, период действия и бюджет."
+              />
+              <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Ответственный">
+                  <select
+                    value={form.ownerUserId}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        ownerUserId: event.target.value,
+                      }))
+                    }
+                    className={fieldClassName}
+                  >
+                    <option value="">Не назначен</option>
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+            <Field label="Дедлайн">
+                  <input
+                    type="date"
+                    value={form.dueAt}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, dueAt: event.target.value }))
+                    }
+                    className={fieldClassName}
+                  />
+                </Field>
+            <Field label="Период с">
+                  <input
+                    type="date"
+                    value={form.periodFrom}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        periodFrom: event.target.value,
+                      }))
+                    }
+                    className={fieldClassName}
+                  />
+                </Field>
+            <Field label="Период по">
+                  <input
+                    type="date"
+                    value={form.periodTo}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, periodTo: event.target.value }))
+                    }
+                    className={fieldClassName}
+                  />
+                </Field>
+            <Field label="Бюджет, руб">
+                  <input
+                    inputMode="decimal"
+                    value={form.budget}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, budget: event.target.value }))
+                    }
+                    placeholder="0"
+                    className={fieldClassName}
+                  />
+                </Field>
+            <Field label="Заметка">
+                  <input
+                    value={form.note}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, note: event.target.value }))
+                    }
+                    placeholder="Что предложить и как проверить результат"
+                    className={fieldClassName}
+                  />
+                </Field>
+              </div>
+            </div>
+          ) : null}
+
+          {wizardStep === "effect" ? (
+            <div className="space-y-4">
+              <WizardStepTitle
+                title="Как поймём, что сработало"
+                text={`После запуска кампания покажет: ${campaignGoalEffects[form.goal]}. Эффект, контакты и выгрузка будут в карточке кампании.`}
+              />
+            <CampaignDraftHandoff
+              form={form}
+              selectedAudience={selectedAudience}
+              selectedPromoBundle={selectedFormPromoBundle}
+              steps={campaignDraftSteps}
+              isSubmitting={isSubmitting}
+              onBackToBundle={() => {
+                setBundleOpen(true);
+                goToWizardStep("mechanic");
+              }}
+            />
+            </div>
+          ) : null}
+        </section>
+
+        {error ? (
+          <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {wizardIndex > 0 ? (
+            <button
+              type="button"
+              onClick={() =>
+                goToWizardStep(campaignWizardSteps[wizardIndex - 1].id)
+              }
+              className="min-h-10 rounded-xl border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Назад
+            </button>
+          ) : (
+            <Link
+              href="/marketing"
+              className="inline-flex min-h-10 items-center rounded-xl border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              К списку кампаний
+            </Link>
+          )}
+          {nextWizardStep ? (
+            <button
+              type="button"
+              onClick={() => goToWizardStep(nextWizardStep.id)}
+              className="min-h-10 rounded-xl bg-zinc-950 px-5 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+            >
+              Далее: {nextWizardStep.label}
+            </button>
+          ) : null}
+        </div>
+      </form>
+    );
+  }
+
   return (
     <section
       id="campaigns"
       className="mt-6 scroll-mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
     >
-      <div className="grid gap-4 border-b border-zinc-200 p-6 dark:border-zinc-800 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-        <div>
-          <p className="text-sm font-bold uppercase tracking-wide text-emerald-500">
-            Кампании
-          </p>
-          <h2 className="mt-2 text-2xl font-bold text-zinc-950 dark:text-white">
-            Черновики и ручной запуск
-          </h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-            Сохраните цель, группу, канал, ответственного и срок. Это пока
-            управленческий план без автоматических бонусов и рассылок в Langame.
-          </p>
-        </div>
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <MetricPill label="Всего" value={summary.total} />
-          <MetricPill label="Активные" value={summary.active} />
-          <MetricPill label="Черновики" value={summary.drafts} />
-        </div>
-      </div>
-
-      <PromoMechanicsBuilder
-        selectedTemplate={selectedTemplate}
-        selectedTemplateId={selectedTemplateId}
-        promoBundles={savedPromoBundles}
-        tariffConditions={tariffConditions}
-        bundleDraft={bundleDraft}
-        bundleEconomics={bundleEconomics}
-        bundleVerdict={bundleVerdict}
-        bundleCatalogNotice={bundleCatalogNotice}
-        isSavingBundle={isSavingBundle}
-        onSelectTemplate={setSelectedTemplateId}
-        onApplyTemplate={applyTemplate}
-        bundleApplyNotice={bundleApplyNotice}
-        onBundleDraftChange={(draft) => {
-          setBundleApplyNotice(false);
-          setBundleCatalogNotice(null);
-          setBundleDraft(draft);
-        }}
-        onUsePromoBundle={applyExistingPromoBundle}
-        onApplyBundle={applyBundleDraft}
-      />
-
-      <PromoBundleStandaloneLaunchPanel
-        launches={promoLaunchRows}
-        launchForm={launchForm}
-        selectedPromoBundle={selectedLaunchPromoBundle}
-        promoBundles={savedPromoBundles}
-        audiences={audiences}
-        stores={stores}
-        isCreatingLaunch={isCreatingLaunch}
-        pendingLaunchId={pendingLaunchId}
-        onLaunchFormChange={setLaunchForm}
-        onCreateLaunch={createPromoBundleLaunch}
-        onUpdateLaunchStatus={updatePromoBundleLaunchStatus}
-      />
-
-      <form
-        id="campaign-form"
-        onSubmit={createCampaign}
-        className="grid gap-4 border-b border-zinc-200 p-4 dark:border-zinc-800 lg:grid-cols-12"
-      >
-        <CampaignDraftHandoff
-          form={form}
-          selectedAudience={selectedAudience}
-          selectedPromoBundle={selectedFormPromoBundle}
-          steps={campaignDraftSteps}
-          isSubmitting={isSubmitting}
-          onBackToBundle={() => scrollToMarketingSection("bundle")}
-        />
-
-        <Field label="Цель" className="lg:col-span-3">
-          <select
-            value={form.goal}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                goal: event.target.value as MarketingCampaignGoal,
-                mechanicConfig: null,
-                promoBundleId: "",
-              }))
-            }
-            className={fieldClassName}
-          >
-            {goalOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-
-        <Field label="Название" className="lg:col-span-4">
-          <input
-            value={form.name}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, name: event.target.value }))
-            }
-            placeholder="Например: Вернуть гостей в риске на выходные"
-            className={fieldClassName}
-          />
-        </Field>
-
-        <Field label="Группа" className="lg:col-span-3">
-          <select
-            value={form.audienceId}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                audienceId: event.target.value,
-              }))
-            }
-            className={fieldClassName}
-          >
-            <option value="">Без группы</option>
-            {audiences.map((audience) => (
-              <option key={audience.id} value={audience.id}>
-                {audience.name} · {audience.guestsCount} гостей
-              </option>
-            ))}
-          </select>
-        </Field>
-
-        <Field label="Клуб" className="lg:col-span-2">
-          <select
-            value={form.storeId}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, storeId: event.target.value }))
-            }
-            className={fieldClassName}
-          >
-            <option value="">Вся сеть</option>
-            {stores.map((store) => (
-              <option key={store.id} value={store.id}>
-                {store.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-
-        <CampaignGroupRoute
-          selectedAudience={selectedAudience}
-          audiencesCount={audiences.length}
-        />
-
-        <Field label="Канал" className="lg:col-span-3">
-          <select
-            value={form.channel}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, channel: event.target.value }))
-            }
-            className={fieldClassName}
-          >
-            {channelOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </Field>
-
-        <Field label="Механика" className="lg:col-span-3">
-          <select
-            value={form.mechanic}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                mechanic: event.target.value,
-                mechanicConfig: null,
-              }))
-            }
-            className={fieldClassName}
-          >
-            {mechanicOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </Field>
-
-        <Field label="Ответственный" className="lg:col-span-3">
-          <select
-            value={form.ownerUserId}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                ownerUserId: event.target.value,
-              }))
-            }
-            className={fieldClassName}
-          >
-            <option value="">Не назначен</option>
-            {users.map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.displayName}
-              </option>
-            ))}
-          </select>
-        </Field>
-
-        <Field label="Дедлайн" className="lg:col-span-3">
-          <input
-            type="date"
-            value={form.dueAt}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, dueAt: event.target.value }))
-            }
-            className={fieldClassName}
-          />
-        </Field>
-
-        <Field label="Период с" className="lg:col-span-2">
-          <input
-            type="date"
-            value={form.periodFrom}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                periodFrom: event.target.value,
-              }))
-            }
-            className={fieldClassName}
-          />
-        </Field>
-
-        <Field label="Период по" className="lg:col-span-2">
-          <input
-            type="date"
-            value={form.periodTo}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, periodTo: event.target.value }))
-            }
-            className={fieldClassName}
-          />
-        </Field>
-
-        <Field label="Бюджет, руб" className="lg:col-span-2">
-          <input
-            inputMode="decimal"
-            value={form.budget}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, budget: event.target.value }))
-            }
-            placeholder="0"
-            className={fieldClassName}
-          />
-        </Field>
-
-        <Field label="Заметка" className="lg:col-span-4">
-          <input
-            value={form.note}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, note: event.target.value }))
-            }
-            placeholder="Что предложить и как проверить результат"
-            className={fieldClassName}
-          />
-        </Field>
-
-        <div className="flex items-end lg:col-span-2">
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="min-h-11 w-full rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSubmitting ? "Сохраняем..." : "Создать"}
-          </button>
-        </div>
-
-        {error ? (
-          <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200 lg:col-span-12">
-            {error}
-          </p>
-        ) : null}
-      </form>
+      {error ? (
+        <p className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200">
+          {error}
+        </p>
+      ) : null}
 
       <section
         id="campaign-list"
@@ -1342,19 +1590,6 @@ export function MarketingCampaignsPanel({
           </div>
         ) : null}
         <div className="space-y-4 border-b border-zinc-200 p-4 dark:border-zinc-800">
-          <div className="max-w-4xl">
-            <p className="text-sm font-bold uppercase tracking-wide text-emerald-500">
-              Рабочий список
-            </p>
-            <h3 className="mt-2 text-xl font-semibold text-zinc-950 dark:text-white">
-              Кампании по статусам
-            </h3>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              На общем экране показываем только контрольные поля и следующий
-              шаг. План, контакты, эффект и экспорт открываются в карточке
-              кампании.
-            </p>
-          </div>
           <div className="flex flex-wrap gap-2">
             {campaignStatusFilters.map((filter) => {
               const isActive = statusFilter === filter.value;
@@ -1391,9 +1626,8 @@ export function MarketingCampaignsPanel({
         <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
           {rows.length === 0 ? (
             <div className="p-6 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Кампаний пока нет. Создайте первый черновик из цели, группы и
-              канала, чтобы команда понимала, что запускать и как потом
-              контролировать эффект.
+              Кампаний пока нет. Нажмите «Новая кампания»: мастер проведёт от
+              цели и группы гостей до ответственного и эффекта.
             </div>
           ) : visibleRows.length > 0 ? (
             visibleRows.map((campaign) => {
@@ -1517,11 +1751,34 @@ export function MarketingCampaignsPanel({
           ) : (
             <div className="p-6 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
               В выбранном статусе кампаний нет. Можно переключить фильтр или
-              создать новый черновик выше.
+              создать новую кампанию.
             </div>
           )}
         </div>
       </section>
+
+      <details
+        id="bundle-launches-disclosure"
+        className="border-t border-zinc-200 dark:border-zinc-800"
+      >
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+          Запуски промо-наборов без кампании ({promoLaunchRows.length})
+        </summary>
+          <PromoBundleStandaloneLaunchPanel
+            launches={promoLaunchRows}
+            launchForm={launchForm}
+            selectedPromoBundle={selectedLaunchPromoBundle}
+            promoBundles={savedPromoBundles}
+            audiences={audiences}
+            stores={stores}
+            isCreatingLaunch={isCreatingLaunch}
+            pendingLaunchId={pendingLaunchId}
+            onLaunchFormChange={setLaunchForm}
+            onCreateLaunch={createPromoBundleLaunch}
+            onUpdateLaunchStatus={updatePromoBundleLaunchStatus}
+          />
+
+      </details>
     </section>
   );
 }

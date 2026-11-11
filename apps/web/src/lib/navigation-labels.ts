@@ -21,13 +21,14 @@ const ROUTE_LABELS: ReadonlyArray<readonly [prefix: string, label: string]> = [
   ["/marketing", "Открываем маркетинг…"],
   ["/categories", "Открываем категории…"],
   ["/suppliers", "Открываем поставщиков…"],
-  ["/visualization", "Открываем схему клуба…"],
+  ["/visualization", "Открываем визуализацию клубов…"],
   ["/stores", "Открываем клубы…"],
   ["/users", "Открываем пользователей…"],
   ["/settings", "Открываем настройки…"],
   ["/support", "Открываем поддержку…"],
   ["/import", "Открываем импорт…"],
-  ["/sync", "Открываем синхронизацию…"],
+  ["/sync", "Открываем журнал загрузок…"],
+  ["/connections", "Открываем подключения…"],
 ];
 
 export const DEFAULT_NAVIGATION_LABEL = "Загружаем раздел…";

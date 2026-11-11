@@ -74,13 +74,13 @@ export default async function VisualizationPage({
     <main className="px-4 py-6 text-zinc-950 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
-          current="Схема клуба"
-          items={[{ href: "/dashboard", label: "Дашборд" }]}
+          current="Визуализация клубов"
+          items={[{ href: "/dashboard", label: "Сводка" }]}
         />
         <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              Схема клуба
+              Визуализация клубов
             </h1>
             <p className="mt-1 max-w-2xl text-sm text-zinc-600">
               3D-зал клуба с живыми данными Langame: занятые компьютеры, смена
@@ -128,7 +128,7 @@ export default async function VisualizationPage({
                 key={`${selected.store.id}:${template?.id}`}
                 className="block h-[calc(100dvh-15rem)] min-h-[34rem] w-full"
                 src={sceneUrl}
-                title={`Схема клуба ${selected.store.name}`}
+                title={`Визуализация клуба ${selected.store.name}`}
               />
             </div>
           </>

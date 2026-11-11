@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useId, useRef, useState, type FocusEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FocusEvent,
+  type ReactNode,
+} from "react";
 import type { AuthUser } from "@/lib/auth";
 import {
   getDefaultLandingPath,
@@ -64,7 +71,11 @@ type NavGroup = {
 
 type PersonalNavItem = NavItem & { icon: NavIcon };
 
-type ProductArea = "Сводка" | "Сообщения" | NavGroup["title"];
+type ProductArea =
+  | "Сводка"
+  | "Визуализация клубов"
+  | "Сообщения"
+  | NavGroup["title"];
 
 type OpenNavGroupsState = {
   pathname: string;
@@ -157,8 +168,11 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/stores", label: "Клубы" },
       { href: "/users", label: "Пользователи и роли" },
-      { href: "/sync", label: "Подключение Langame" },
-      { href: "/visualization", label: "Схема клуба" },
+      {
+        href: "/connections",
+        label: "Подключения",
+        activePaths: ["/sync"],
+      },
       { href: "/settings", label: "Настройки сети" },
     ],
   },
@@ -781,6 +795,32 @@ function HomeIcon() {
   );
 }
 
+function VisualizationIcon() {
+  return (
+    <svg
+      className={compactSidebarIconClassName}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z" />
+      <path d="m4 7.5 8 4.5 8-4.5" />
+      <path d="M12 12v9" />
+    </svg>
+  );
+}
+
+// «Визуализация клубов» sits right under «Сводка» (asked 11.11.2026):
+// owners open it as often as the summary itself.
+const visualizationNavItem: NavItem = {
+  href: "/visualization",
+  label: "Визуализация клубов",
+};
+
 function LogoLink({
   href = "/dashboard",
   onNavigate,
@@ -812,11 +852,13 @@ function CompactHomeLink({
   href = "/dashboard",
   isActive,
   title = "Сводка: главный экран сети",
+  icon = <HomeIcon />,
   onNavigate,
 }: {
   href?: string;
   isActive: boolean;
   title?: string;
+  icon?: ReactNode;
   onNavigate?: () => void;
 }) {
   return (
@@ -831,7 +873,7 @@ function CompactHomeLink({
       onPointerEnter={onNavigate}
       className={compactGroupButtonClass({ isActive })}
     >
-      <HomeIcon />
+      {icon}
     </Link>
   );
 }
@@ -904,6 +946,10 @@ function resolveCurrentProductArea(pathname: string): ProductArea {
     return "Сводка";
   }
 
+  if (startsWithAny("/visualization")) {
+    return "Визуализация клубов";
+  }
+
   if (startsWithAny("/staff/team-chat", "/staff/notifications")) {
     return "Сообщения";
   }
@@ -932,7 +978,13 @@ function resolveCurrentProductArea(pathname: string): ProductArea {
   }
 
   if (
-    startsWithAny("/stores", "/users", "/sync", "/settings", "/visualization")
+    startsWithAny(
+      "/stores",
+      "/users",
+      "/connections",
+      "/sync",
+      "/settings",
+    )
   ) {
     return "Настройки";
   }
@@ -957,11 +1009,13 @@ function ExpandedHomeLink({
   href,
   label,
   isActive,
+  icon = <HomeIcon />,
   onNavigate,
 }: {
   href: string;
   label: string;
   isActive: boolean;
+  icon?: ReactNode;
   onNavigate?: () => void;
 }) {
   return (
@@ -976,7 +1030,7 @@ function ExpandedHomeLink({
           : "text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900",
       ].join(" ")}
     >
-      <HomeIcon />
+      {icon}
       <span className="min-w-0 flex-1">{label}</span>
     </Link>
   );
@@ -1113,6 +1167,12 @@ export function Sidebar({
         ? "Сводка: главный экран сети"
         : "Моя смена: задачи, регламенты и текущая выручка";
   const isHomeActive = isNavigationItemActive(pathname, homeHref);
+  const showVisualizationLink =
+    showHomeLink && canShowNavItem(user, visualizationNavItem);
+  const isVisualizationActive = isNavigationItemActive(
+    pathname,
+    visualizationNavItem.href,
+  );
   const isDashboardArea = isDashboardPath(pathname);
   const currentProductArea = resolveCurrentProductArea(pathname);
   const hasOpenNavGroup = Object.values(openNavGroups).some(Boolean);
@@ -1261,6 +1321,15 @@ export function Sidebar({
             onNavigate={onNavigate}
           />
         ) : null}
+        {showVisualizationLink ? (
+          <ExpandedHomeLink
+            href={visualizationNavItem.href}
+            label={visualizationNavItem.label}
+            isActive={isVisualizationActive}
+            icon={<VisualizationIcon />}
+            onNavigate={onNavigate}
+          />
+        ) : null}
         {allowedNavGroups.map((group) => (
           <ExpandedNavGroup
             key={group.title}
@@ -1395,6 +1464,15 @@ export function Sidebar({
                   title={homeTitle}
                   onNavigate={closeNavGroups}
                 />
+                {showVisualizationLink ? (
+                  <CompactHomeLink
+                    href={visualizationNavItem.href}
+                    isActive={isVisualizationActive}
+                    title={visualizationNavItem.label}
+                    icon={<VisualizationIcon />}
+                    onNavigate={closeNavGroups}
+                  />
+                ) : null}
                 {allowedNavGroups.length > 0 ? (
                   <div
                     aria-hidden="true"

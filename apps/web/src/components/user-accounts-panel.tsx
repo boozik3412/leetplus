@@ -295,7 +295,7 @@ const roleAccessPreviewRoutes: RoleAccessPreviewRoute[] = [
   },
   { group: "Управление", href: "/users", label: "Пользователи и роли" },
   { group: "Управление", href: "/stores", label: "Торговые точки" },
-  { group: "Управление", href: "/sync", label: "Синхронизация" },
+  { group: "Управление", href: "/connections", label: "Подключения" },
   { group: "Управление", href: "/settings", label: "Настройки" },
 ];
 

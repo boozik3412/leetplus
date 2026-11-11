@@ -176,7 +176,7 @@ export function BusinessSnapshotGate({
           ) : null}
         </div>
         <Link
-          href="/sync"
+          href="/connections"
           className={[
             "inline-flex h-8 shrink-0 cursor-pointer items-center justify-center rounded-md border px-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500",
             needsAction

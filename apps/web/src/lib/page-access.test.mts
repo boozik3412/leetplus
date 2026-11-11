@@ -41,6 +41,7 @@ const guardedPages = [
   ["(app)/categories/page.tsx", "/categories"],
   ["(app)/commercial/demo/page.tsx", "/commercial/demo"],
   ["(app)/commercial/tariffs/page.tsx", "/commercial/tariffs"],
+  ["(app)/connections/page.tsx", "/connections"],
   ["(app)/dashboard/revenue-by-club/page.tsx", "/dashboard/revenue-by-club"],
   [
     "(app)/dashboard/revenue-diagnostics/page.tsx",

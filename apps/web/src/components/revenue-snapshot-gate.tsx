@@ -157,10 +157,10 @@ export function RevenueSnapshotGate({
           ) : null}
         </div>
         <Link
-          href="/sync"
+          href="/connections"
           className="inline-flex shrink-0 items-center justify-center rounded-lg border border-current/20 bg-white/70 px-4 py-2 text-sm font-semibold transition hover:bg-white dark:bg-white/10 dark:hover:bg-white/15"
         >
-          Открыть синхронизацию
+          Открыть подключения
         </Link>
       </div>
 

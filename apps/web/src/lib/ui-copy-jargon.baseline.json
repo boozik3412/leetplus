@@ -154,10 +154,6 @@
   "components/guest-gamification/tabs/rewards-tab.tsx": {
     "lootbox": 1
   },
-  "components/guest-mission-wizard.tsx": {
-    "ledger": 1,
-    "lootbox": 7
-  },
   "components/langame-category-import.tsx": {
     "api": 3
   },

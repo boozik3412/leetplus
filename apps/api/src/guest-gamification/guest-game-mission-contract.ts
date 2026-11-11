@@ -422,7 +422,7 @@ export function validateMissionWizard(
     );
   }
   if (rewardType === 'LOOTBOX' && !stringValue(reward.lootBoxId)) {
-    blockers.push('Выберите наградной лутбокс.');
+    blockers.push('Выберите кейс для награды.');
   }
   if (rewardType === 'PROMOCODE' && !stringValue(reward.promoCodeId)) {
     blockers.push('Выберите промокод.');

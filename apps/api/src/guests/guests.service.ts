@@ -30,6 +30,10 @@ import {
   GuestGameEffectService,
   type GuestGameGuestEffect,
 } from '../guest-game-effect/guest-game-effect.service';
+import {
+  GAME_PROFILE_STAFF_TEST_OWNER_CONFIRMED_GUEST,
+  GAME_PROFILE_STAFF_TEST_OWNER_MARKED_STAFF,
+} from '../guest-gamification/guest-staff-test';
 import { GuestDataFoundationService } from '../integrations/guest-data-foundation.service';
 import { LangameClient } from '../integrations/langame.client';
 import {
@@ -634,6 +638,27 @@ export type GuestCrmContactEvent = {
   createdBy: string | null;
 };
 
+export type GuestStaffMark = {
+  /** Marked on the card: out of guest analytics, rating and game statistics. */
+  isStaff: boolean;
+  markedAt: string | null;
+  markedBy: string | null;
+  /** Langame admin group: already out of guest analytics by its group. */
+  inAdminGroup: boolean;
+  /** A linked game profile matched a staff phone, the card is not marked. */
+  autoDetected: { reason: string; matchedAt: string | null } | null;
+  /** The owner confirmed the person is a guest: phone matching stays off. */
+  confirmedGuest: boolean;
+  events: Array<{
+    id: string;
+    isStaff: boolean;
+    note: string | null;
+    gameProfilesUpdated: number;
+    createdAt: string;
+    createdBy: string | null;
+  }>;
+};
+
 export type GuestDetail = GuestDashboardRow & {
   crmEvents: Array<{
     id: string;
@@ -675,6 +700,7 @@ export type GuestDetail = GuestDashboardRow & {
   behavior: GuestBehaviorSummary;
   gameAccess: 'AVAILABLE' | 'NO_CAPABILITY';
   gamification: GuestGameDetail | null;
+  staffMark: GuestStaffMark;
 };
 
 export type GuestGameEffectResponse =
@@ -1009,6 +1035,16 @@ export type GuestCrmUpdateDto = {
   nextContactAt?: string | null;
 };
 
+export type GuestStaffMarkDto = {
+  isStaff?: unknown;
+  note?: string | null;
+};
+
+/** Pseudo guest group of the filters: guests marked as staff on their card. */
+export const GUEST_STAFF_GROUP_ID = 'marked-staff';
+const GUEST_STAFF_GROUP_NAME = 'Сотрудники (не в расчётах)';
+const GUEST_STAFF_MARK_EVENT_ROWS = 10;
+
 type GuestBase = {
   id: string;
   externalDomain: string | null;
@@ -1118,6 +1154,11 @@ type ResolvedGuestFilters = {
     externalDomain: string | null;
     externalGuestTypeId: string;
   }>;
+  /**
+   * EXCLUDE: guests marked as staff stay out (guest analytics);
+   * ONLY: the «Сотрудники» pseudo group; ANY: single card, staff control.
+   */
+  markedStaff: 'EXCLUDE' | 'ONLY' | 'ANY';
 };
 
 type GuestGroupsByKey = Map<string, string>;
@@ -1238,7 +1279,18 @@ export class GuestsService {
       }),
     ]);
 
-    return { stores, groups };
+    return {
+      stores,
+      groups: [
+        ...groups,
+        {
+          id: GUEST_STAFF_GROUP_ID,
+          name: GUEST_STAFF_GROUP_NAME,
+          externalDomain: null,
+          externalGroupId: GUEST_STAFF_GROUP_ID,
+        },
+      ],
+    };
   }
 
   async getSummary(
@@ -2587,6 +2639,7 @@ export class GuestsService {
       search: null,
       excludedAdminGuestGroups: [],
       onlyGuestGroups: undefined,
+      markedStaff: 'ANY',
     };
     const { metricsByGuestId, groupsByKey, gameFactsByGuestId } =
       await this.buildGuestMetrics(tenantId, period, filters, [id], {
@@ -2611,6 +2664,7 @@ export class GuestsService {
       contactEvents,
       behaviorSessions,
       gamification,
+      staffMark,
     ] = await Promise.all([
       this.prisma.guestCrmEvent.findMany({
         where: { tenantId, guestId: id },
@@ -2697,6 +2751,7 @@ export class GuestsService {
       includeGame && this.guestGameInsights
         ? this.guestGameInsights.loadGuestGameDetail(tenantId, id, period, now)
         : Promise.resolve(null),
+      this.loadGuestStaffMark(tenantId, id),
     ]);
     const taskRows = crmTasks
       .map((task) => this.toGuestCrmTask(task))
@@ -2774,7 +2829,186 @@ export class GuestsService {
       behavior,
       gameAccess: includeGame ? 'AVAILABLE' : 'NO_CAPABILITY',
       gamification,
+      staffMark: {
+        ...staffMark,
+        inAdminGroup: row.guestGroupName
+          ? this.isAdminGuestGroupName(row.guestGroupName)
+          : false,
+      },
     };
+  }
+
+  private async loadGuestStaffMark(
+    tenantId: string,
+    guestId: string,
+  ): Promise<Omit<GuestStaffMark, 'inAdminGroup'>> {
+    const [guest, events] = await Promise.all([
+      this.prisma.guest.findFirst({
+        where: { id: guestId, tenantId },
+        select: {
+          isStaff: true,
+          staffMarkedAt: true,
+          staffMarkedByUserId: true,
+          phoneHash: true,
+        },
+      }),
+      this.prisma.guestStaffMarkEvent.findMany({
+        where: { tenantId, guestId },
+        orderBy: { createdAt: 'desc' },
+        take: GUEST_STAFF_MARK_EVENT_ROWS,
+        select: {
+          id: true,
+          isStaff: true,
+          note: true,
+          gameProfilesUpdated: true,
+          createdAt: true,
+          createdByUser: { select: { fullName: true, email: true } },
+        },
+      }),
+    ]);
+    const [profiles, markedBy] = await Promise.all([
+      this.prisma.guestGameProfile.findMany({
+        where: { tenantId, ...this.staffMarkProfileWhere(guestId, guest) },
+        select: {
+          isStaffTest: true,
+          staffTestReason: true,
+          staffTestMatchedAt: true,
+        },
+      }),
+      guest?.staffMarkedByUserId
+        ? this.prisma.user.findFirst({
+            where: { id: guest.staffMarkedByUserId },
+            select: { fullName: true, email: true },
+          })
+        : Promise.resolve(null),
+    ]);
+    const isStaff = guest?.isStaff ?? false;
+    const autoProfile = isStaff
+      ? null
+      : (profiles.find((profile) => profile.isStaffTest) ?? null);
+
+    return {
+      isStaff,
+      markedAt: isStaff
+        ? this.toIsoDateTime(guest?.staffMarkedAt ?? null)
+        : null,
+      markedBy: isStaff
+        ? (markedBy?.fullName ?? markedBy?.email ?? null)
+        : null,
+      autoDetected: autoProfile
+        ? {
+            reason: autoProfile.staffTestReason ?? 'STAFF_PHONE_MATCH',
+            matchedAt: this.toIsoDateTime(autoProfile.staffTestMatchedAt),
+          }
+        : null,
+      confirmedGuest:
+        !isStaff &&
+        !autoProfile &&
+        profiles.some(
+          (profile) =>
+            profile.staffTestReason ===
+            GAME_PROFILE_STAFF_TEST_OWNER_CONFIRMED_GUEST,
+        ),
+      events: events.map((event) => ({
+        id: event.id,
+        isStaff: event.isStaff,
+        note: event.note,
+        gameProfilesUpdated: event.gameProfilesUpdated,
+        createdAt: event.createdAt.toISOString(),
+        createdBy:
+          event.createdByUser?.fullName ?? event.createdByUser?.email ?? null,
+      })),
+    };
+  }
+
+  // The game profiles of the same person: linked to the card or registered
+  // with the same verified phone (a second Langame account of the guest).
+  private staffMarkProfileWhere(
+    guestId: string,
+    guest: { phoneHash: string | null } | null,
+  ): Prisma.GuestGameProfileWhereInput {
+    return guest?.phoneHash
+      ? { OR: [{ guestId }, { phoneHash: guest.phoneHash }] }
+      : { guestId };
+  }
+
+  /**
+   * Marks or unmarks the guest as a staff member of the network. A marked
+   * guest leaves guest analytics (dashboard, list, CRM signals, export),
+   * the leaderboard, game statistics and the game effect; the game itself and
+   * its rewards keep working. Every change is journaled in GuestStaffMarkEvent.
+   */
+  async updateGuestStaffMark(
+    user: AuthenticatedUser,
+    id: string,
+    dto: GuestStaffMarkDto,
+  ): Promise<GuestDetail> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+
+    if (typeof dto?.isStaff !== 'boolean') {
+      throw new BadRequestException('isStaff must be true or false');
+    }
+
+    const isStaff = dto.isStaff;
+    const note = this.normalizeText(dto.note, 500);
+    const guest = await this.prisma.guest.findFirst({
+      where: { id, tenantId },
+      select: { id: true, phoneHash: true },
+    });
+
+    if (!guest) {
+      throw new NotFoundException('Guest not found');
+    }
+
+    const now = new Date();
+    const profileWhere: Prisma.GuestGameProfileWhereInput = {
+      tenantId,
+      ...this.staffMarkProfileWhere(id, guest),
+    };
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.guest.update({
+        where: { id },
+        data: {
+          isStaff,
+          staffMarkedAt: isStaff ? now : null,
+          staffMarkedByUserId: isStaff ? user.id : null,
+        },
+      });
+      const changedProfiles = await tx.guestGameProfile.count({
+        where: { ...profileWhere, isStaffTest: !isStaff },
+      });
+      // An unmark also protects profiles that were never marked: the owner
+      // said the person is a guest, phone matching must not mark them later.
+      await tx.guestGameProfile.updateMany({
+        where: profileWhere,
+        data: isStaff
+          ? {
+              isStaffTest: true,
+              staffTestReason: GAME_PROFILE_STAFF_TEST_OWNER_MARKED_STAFF,
+              staffTestMatchedAt: now,
+            }
+          : {
+              isStaffTest: false,
+              staffTestReason: GAME_PROFILE_STAFF_TEST_OWNER_CONFIRMED_GUEST,
+              staffTestMatchedAt: null,
+            },
+      });
+      await tx.guestStaffMarkEvent.create({
+        data: {
+          tenantId,
+          guestId: id,
+          isStaff,
+          note,
+          gameProfilesUpdated: changedProfiles,
+          createdByUserId: user.id,
+        },
+      });
+    });
+
+    this.analysisCache.invalidateTenant(tenantId);
+
+    return this.getGuest(user, id);
   }
 
   async getStaffControl(
@@ -2834,6 +3068,7 @@ export class GuestsService {
         externalDomain: group.externalDomain,
         externalGuestTypeId: group.externalGroupId,
       })),
+      markedStaff: 'ANY',
     };
     const { guests, metricsByGuestId, groupsByKey } =
       await this.buildGuestMetrics(tenantId, period, filters);
@@ -4962,6 +5197,12 @@ export class GuestsService {
       }));
     }
 
+    if (filters.markedStaff === 'EXCLUDE') {
+      where.isStaff = false;
+    } else if (filters.markedStaff === 'ONLY') {
+      where.isStaff = true;
+    }
+
     if (filters.excludedAdminGuestGroups.length > 0) {
       where.NOT = {
         OR: filters.excludedAdminGuestGroups.map((group) => ({
@@ -5485,6 +5726,20 @@ export class GuestsService {
       }
     }
 
+    if (guestGroupId === GUEST_STAFF_GROUP_ID) {
+      // Marked staff of every Langame group, admin groups included.
+      return {
+        storeId,
+        guestGroupId,
+        externalDomain: null,
+        externalGuestTypeId: null,
+        search,
+        excludedAdminGuestGroups: [],
+        onlyGuestGroups: undefined,
+        markedStaff: 'ONLY',
+      };
+    }
+
     if (guestGroupId) {
       const group = groups.find((candidate) => candidate.id === guestGroupId);
 
@@ -5508,6 +5763,7 @@ export class GuestsService {
       search,
       excludedAdminGuestGroups,
       onlyGuestGroups: undefined,
+      markedStaff: 'EXCLUDE',
     };
   }
 

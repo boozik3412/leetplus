@@ -4,6 +4,7 @@ import { GuestCrmActivity } from "@/components/guest-crm-activity";
 import { GuestCrmForm } from "@/components/guest-crm-form";
 import { GuestGameCard } from "@/components/guest-game-card";
 import { GuestGameEffectPanel } from "@/components/guest-game-effect-panel";
+import { GuestStaffMarkPanel } from "@/components/guest-staff-mark-panel";
 import {
   InsightBadge,
   InsightCard,
@@ -55,6 +56,8 @@ export default async function GuestPage({ params }: { params: PageParams }) {
 
   const canManageCrm = can(user, "manage_guest_crm");
   const canManageCommunications = can(user, "manage_communications");
+  // The staff mark changes network-wide numbers: the API wants NETWORK scope.
+  const canMarkStaff = canManageCrm && user.accessScope === "NETWORK";
   const game = guest.gameProfile;
 
   return (
@@ -78,6 +81,14 @@ export default async function GuestPage({ params }: { params: PageParams }) {
                 {guest.displayName}
               </h1>
               <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                {guest.staffMark.isStaff ? (
+                  <InsightBadge
+                    tone="warning"
+                    title="Не учитывается в аналитике гостей, рейтинге и статистике игры"
+                  >
+                    Сотрудник · не в расчётах
+                  </InsightBadge>
+                ) : null}
                 <InsightBadge tone={segmentTone(guest.segment)}>
                   {segmentLabels[guest.segment]}
                 </InsightBadge>
@@ -151,6 +162,11 @@ export default async function GuestPage({ params }: { params: PageParams }) {
                 ФИО и телефон показываются полностью пользователям с правом
                 просмотра гостей. Документы гостя не показываются.
               </p>
+              <GuestStaffMarkPanel
+                guestId={guest.id}
+                staffMark={guest.staffMark}
+                canManage={canMarkStaff}
+              />
             </div>
           </div>
         </InsightCard>

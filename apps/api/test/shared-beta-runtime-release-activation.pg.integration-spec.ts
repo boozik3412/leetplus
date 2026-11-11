@@ -30,8 +30,8 @@ const DISPOSABLE_DATABASE_PATTERN = /^lp_activation176_pg_test_[0-9a-f]{32}$/u;
 const DISPOSABLE_ROLE_PATTERN = /^lp_activation_role_ci_[0-9a-f]{24}$/u;
 const DISPOSABLE_BYSTANDER_ROLE_PATTERN =
   /^lp_activation_bystander_ci_[0-9a-f]{24}$/u;
-const TARGET_MIGRATION = '20261110090000_store_floor_plan';
-const TARGET_MIGRATION_COUNT = 198;
+const TARGET_MIGRATION = '20261111090000_guest_staff_mark';
+const TARGET_MIGRATION_COUNT = 199;
 const ACTIVATION_FUNCTION_SIGNATURE =
   'public."shared_beta_tenant_activate_v1"(text,text,text,text,text,text,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)';
 const CATALOG_RELATION_PROBE =

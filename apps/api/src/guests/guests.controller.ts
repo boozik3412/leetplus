@@ -34,6 +34,7 @@ import {
   type GuestCrmUser,
   type GuestGameEffectResponse,
   type GuestCrmUpdateDto,
+  type GuestStaffMarkDto,
   type GuestExportFile,
   type GuestFilterOptions,
   type GuestLiveSessionResult,
@@ -430,5 +431,17 @@ export class GuestsController {
     @Body() dto: GuestCrmUpdateDto,
   ): Promise<GuestDetail> {
     return this.guestsService.updateGuestCrm(user, id, dto);
+  }
+
+  // Marks the guest as a staff member of the network (or a guest again):
+  // a network-wide analytics decision, so it needs fresh NETWORK scope.
+  @UseGuards(FreshNetworkScopeGuard)
+  @Patch(':id/staff')
+  updateGuestStaffMark(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: GuestStaffMarkDto,
+  ): Promise<GuestDetail> {
+    return this.guestsService.updateGuestStaffMark(user, id, dto);
   }
 }

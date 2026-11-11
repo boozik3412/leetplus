@@ -83,7 +83,7 @@ export function GuestGameCard({ guest }: { guest: GuestDetail }) {
             ) : null}
             {profile.channels.max ? <InsightBadge tone="info">MAX</InsightBadge> : null}
             {profile.isStaffTest ? (
-              <InsightBadge tone="warning">Тест сотрудника</InsightBadge>
+              <InsightBadge tone="warning">Сотрудник · не в рейтинге</InsightBadge>
             ) : null}
             <span className="text-xs text-zinc-500">
               регистрация {formatDate(profile.registeredAt)} · активация{" "}

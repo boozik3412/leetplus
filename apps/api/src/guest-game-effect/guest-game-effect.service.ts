@@ -725,65 +725,78 @@ export class GuestGameEffectService {
   private async load(tenantId: string): Promise<EffectData> {
     const startedAt = Date.now();
     const loadedAt = new Date();
-    const [stores, profiles, missions, lootBoxes, seasons, rewards] =
-      await Promise.all([
-        this.prisma.store.findMany({
-          where: { tenantId, isActive: true },
-          select: { id: true, name: true, timeZone: true },
-          orderBy: { name: 'asc' },
-        }),
-        this.prisma.guestGameProfile.findMany({
-          where: { tenantId },
-          select: {
-            id: true,
-            guestId: true,
-            gameActivatedAt: true,
-            isStaffTest: true,
-          },
-        }),
-        this.prisma.guestGameMission.findMany({
-          where: { tenantId },
-          select: {
-            id: true,
-            name: true,
-            status: true,
-            storeIds: true,
-            holdoutPercent: true,
-            holdoutStartedAt: true,
-          },
-        }),
-        this.prisma.guestGameLootBox.findMany({
-          where: { tenantId },
-          select: {
-            id: true,
-            name: true,
-            status: true,
-            usageKind: true,
-            storeIds: true,
-            holdoutPercent: true,
-            holdoutStartedAt: true,
-          },
-        }),
-        this.prisma.guestGameSeason.findMany({
-          where: { tenantId },
-          select: { id: true, name: true, status: true, storeIds: true },
-        }),
-        this.prisma.guestGameReward.findMany({
-          where: { tenantId, status: { notIn: CANCELED_REWARD_STATUSES } },
-          select: {
-            guestId: true,
-            profileId: true,
-            missionId: true,
-            lootBoxId: true,
-            seasonId: true,
-            status: true,
-            rewardType: true,
-            rewardAmount: true,
-            qualifiedAt: true,
-            paidAt: true,
-          },
-        }),
-      ]);
+    const [
+      stores,
+      profiles,
+      missions,
+      lootBoxes,
+      seasons,
+      rewards,
+      markedStaffGuests,
+    ] = await Promise.all([
+      this.prisma.store.findMany({
+        where: { tenantId, isActive: true },
+        select: { id: true, name: true, timeZone: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.guestGameProfile.findMany({
+        where: { tenantId },
+        select: {
+          id: true,
+          guestId: true,
+          gameActivatedAt: true,
+          isStaffTest: true,
+        },
+      }),
+      this.prisma.guestGameMission.findMany({
+        where: { tenantId },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          storeIds: true,
+          holdoutPercent: true,
+          holdoutStartedAt: true,
+        },
+      }),
+      this.prisma.guestGameLootBox.findMany({
+        where: { tenantId },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          usageKind: true,
+          storeIds: true,
+          holdoutPercent: true,
+          holdoutStartedAt: true,
+        },
+      }),
+      this.prisma.guestGameSeason.findMany({
+        where: { tenantId },
+        select: { id: true, name: true, status: true, storeIds: true },
+      }),
+      this.prisma.guestGameReward.findMany({
+        where: { tenantId, status: { notIn: CANCELED_REWARD_STATUSES } },
+        select: {
+          guestId: true,
+          profileId: true,
+          missionId: true,
+          lootBoxId: true,
+          seasonId: true,
+          status: true,
+          rewardType: true,
+          rewardAmount: true,
+          qualifiedAt: true,
+          paidAt: true,
+        },
+      }),
+      // Guests marked as staff on their card stay out of both groups even
+      // without a game profile.
+      this.prisma.guest.findMany({
+        where: { tenantId, isStaff: true },
+        select: { id: true },
+      }),
+    ]);
 
     const timeZone = networkTimeZone(stores);
     const zone = safeTimeZone(timeZone);
@@ -791,13 +804,18 @@ export class GuestGameEffectService {
     const lastCompleteDay = todayDay - 1;
     const guestByProfile = new Map<string, string>();
     const players = new Map<string, Player>();
-    const staffGuestIds = new Set<string>();
+    const staffGuestIds = new Set<string>(
+      markedStaffGuests.map((guest) => guest.id),
+    );
     const staffProfileIds = new Set<string>();
     let playersWithoutGuest = 0;
     let earliestExposure = todayDay;
 
     profiles.forEach((profile) => {
-      if (profile.isStaffTest) staffProfileIds.add(profile.id);
+      const isStaff =
+        profile.isStaffTest ||
+        (profile.guestId !== null && staffGuestIds.has(profile.guestId));
+      if (isStaff) staffProfileIds.add(profile.id);
       if (!profile.guestId) {
         if (profile.gameActivatedAt && !profile.isStaffTest) {
           playersWithoutGuest += 1;
@@ -805,7 +823,7 @@ export class GuestGameEffectService {
         return;
       }
       guestByProfile.set(profile.id, profile.guestId);
-      if (profile.isStaffTest) staffGuestIds.add(profile.guestId);
+      if (isStaff) staffGuestIds.add(profile.guestId);
       const activationDay = profile.gameActivatedAt
         ? localDayNumber(profile.gameActivatedAt, zone)
         : null;
@@ -815,7 +833,7 @@ export class GuestGameEffectService {
       players.set(profile.guestId, {
         profileId: profile.id,
         activationDay,
-        isStaffTest: profile.isStaffTest,
+        isStaffTest: isStaff,
       });
     });
 

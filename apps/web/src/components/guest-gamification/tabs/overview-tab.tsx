@@ -63,6 +63,7 @@ export function OverviewTab({
   canOperateLedger,
   canManageRules,
   canViewIntegrationReadiness,
+  diagnosticsLead,
   onPrepareOutbox,
   onDispatchOutbox,
   deliveryDispatchResult,
@@ -91,6 +92,8 @@ export function OverviewTab({
   canOperateLedger: boolean;
   canManageRules: boolean;
   canViewIntegrationReadiness: boolean;
+  /** Support-only controls from the panel, shown first inside «Диагностика». */
+  diagnosticsLead?: ReactNode;
   onPrepareOutbox: () => void;
   onDispatchOutbox: () => void;
   deliveryDispatchResult: GuestGameDeliveryDispatchResult | null;
@@ -131,7 +134,7 @@ export function OverviewTab({
       <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <SectionTitle title="Старт игрового контура" />
+            <SectionTitle title="Старт игрового модуля" />
             <p className="mt-2 max-w-3xl text-sm text-zinc-500 dark:text-zinc-400">
               Соберите экономику от профиля гостя до ручной выдачи награды.
               Каждый блок можно настроить отдельно, а затем связать в единый
@@ -165,7 +168,7 @@ export function OverviewTab({
           />
           <ScenarioStepCard
             step="3"
-            title="Лутбокс"
+            title="Кейсы"
             text="Настроить открытие при старте сессии, клубы, лимиты и призы."
             metric={`${workspace.summary.activeLootBoxes} активных`}
             action="Настроить"
@@ -206,89 +209,16 @@ export function OverviewTab({
         </div>
       </section>
 
-      <div className="grid gap-3 md:grid-cols-3">
-        <SafetyNoteCard
-          title="Langame"
-          value="ledger-контур"
-          text="Правила используют подготовленные события и не пишут бонусы напрямую: начисление идет через bonus ledger и backend-флаг реальной записи."
-        />
-        <SafetyNoteCard
-          title="Экономика"
-          value={formatMoney(workspace.summary.plannedBudget)}
-          text="Бюджеты и лимиты держат стоимость призов под контролем до запуска автоматизации."
-        />
-        <SafetyNoteCard
-          title="Выдача"
-          value={formatMoney(workspace.summary.pendingRewardAmount)}
-          text="Награды проходят через кошелек, outbox или bonus ledger, чтобы исключить двойную выдачу и сохранить аудит начислений."
-        />
-      </div>
-
-      <EconomyControlCard economy={workspace.economy} />
       <EffectLinkCard onOpen={() => onOpenTab("effect")} />
-      {canViewIntegrationReadiness ? (
-        <IntegrationReadinessCard readiness={workspace.integrationReadiness} />
-      ) : null}
-      <PilotReadinessCard
-        readiness={workspace.pilotReadiness}
-        saving={saving}
-        canApproveRewards={canOperateLedger}
-        onOpenDryRun={() => onOpenTab("testRun")}
-        onQueueBonusLedger={onQueueBonusLedger}
-        onDryRunBonusLedger={onDryRunBonusLedger}
-        onDispatchBonusLedger={onDispatchBonusLedgerCanary}
-        onCancelBonusLedgerEntry={onCancelBonusLedgerEntry}
-        onOpenReconciliation={() =>
-          document
-            .getElementById("bonus-balance-reconciliation")
-            ?.scrollIntoView({ behavior: "smooth", block: "start" })
-        }
-      />
-      <BonusLedgerAuditCard
-        audit={workspace.bonusLedgerAudit}
-        saving={saving}
-        canApproveRewards={canOperateLedger}
-        onQueueBonusLedger={onQueueBonusLedger}
-        onDryRunBonusLedger={onDryRunBonusLedger}
-        onDispatchBonusLedger={onDispatchBonusLedger}
-        result={bonusLedgerResult}
-      />
-      <BonusBalanceCurrentReconciliationCard
-        reconciliation={workspace.bonusBalanceCurrentReconciliation}
-      />
-      <CommunicationQueueCard
-        queue={workspace.communicationQueue}
-        outbox={workspace.deliveryOutbox}
-        saving={saving}
-        canApproveRewards={canApproveRewards}
-        onOpenRewards={() => onOpenTab("rewards")}
-        onPrepareOutbox={onPrepareOutbox}
-        onDispatchOutbox={onDispatchOutbox}
-        deliveryDispatchResult={deliveryDispatchResult}
-        onUpdateDeliveryStatus={onUpdateDeliveryStatus}
-      />
-
-      <TariffSnapshotReadinessCard
-        snapshots={workspace.tariffSnapshots}
-        onOpenRules={() => onOpenTab("lootBoxes")}
-      />
-
-      <GuestLogCatalogCard
-        catalog={workspace.guestLogCatalog}
-        saving={saving}
-        canManage={canManageRules}
-        onSaveMapping={onSaveGuestLogMapping}
-        onDeleteMapping={onDeleteGuestLogMapping}
-      />
 
       <PortalLinksCard tenantSlug={tenantSlug} stores={stores} />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
         <section className="space-y-3">
-          <SectionTitle title="Активные контуры" />
-          <div className="grid gap-3 md:grid-cols-5">
+          <SectionTitle title="Что сейчас работает" />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
             <StatusMetric
-              label="Лутбоксы"
+              label="Кейсы"
               value={workspace.summary.activeLootBoxes}
               hint={`${workspace.lootBoxes.length} всего`}
             />
@@ -348,6 +278,104 @@ export function OverviewTab({
           </div>
         </section>
       </div>
+
+      <details
+        id="gamification-diagnostics"
+        className="group rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+      >
+        <summary className="flex cursor-pointer list-none items-start justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
+          <div>
+            <h2 className="font-semibold text-zinc-950 dark:text-white">
+              Диагностика
+            </h2>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              Для поддержки: обработка наград, бюджет и очередь, начисления в
+              Langame, сверка баланса, рассылки, тарифы и события.
+            </p>
+          </div>
+          <span className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+            <span className="group-open:hidden">Показать</span>
+            <span className="hidden group-open:inline">Скрыть</span>
+          </span>
+        </summary>
+        {/* ui-copy-allow: диагностика для поддержки */}
+        <div className="space-y-5 border-t border-zinc-200 p-4 dark:border-zinc-800">
+          {diagnosticsLead}
+          <div className="grid gap-3 md:grid-cols-3">
+            <SafetyNoteCard
+              title="Langame"
+              value="ledger-контур"
+              text="Правила используют подготовленные события и не пишут бонусы напрямую: начисление идет через bonus ledger и backend-флаг реальной записи."
+            />
+            <SafetyNoteCard
+              title="Экономика"
+              value={formatMoney(workspace.summary.plannedBudget)}
+              text="Бюджеты и лимиты держат стоимость призов под контролем до запуска автоматизации."
+            />
+            <SafetyNoteCard
+              title="Выдача"
+              value={formatMoney(workspace.summary.pendingRewardAmount)}
+              text="Награды проходят через кошелек, outbox или bonus ledger, чтобы исключить двойную выдачу и сохранить аудит начислений."
+            />
+          </div>
+
+          <EconomyControlCard economy={workspace.economy} />
+          {canViewIntegrationReadiness ? (
+            <IntegrationReadinessCard readiness={workspace.integrationReadiness} />
+          ) : null}
+          <PilotReadinessCard
+            readiness={workspace.pilotReadiness}
+            saving={saving}
+            canApproveRewards={canOperateLedger}
+            onOpenDryRun={() => onOpenTab("testRun")}
+            onQueueBonusLedger={onQueueBonusLedger}
+            onDryRunBonusLedger={onDryRunBonusLedger}
+            onDispatchBonusLedger={onDispatchBonusLedgerCanary}
+            onCancelBonusLedgerEntry={onCancelBonusLedgerEntry}
+            onOpenReconciliation={() =>
+              document
+                .getElementById("bonus-balance-reconciliation")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" })
+            }
+          />
+          <BonusLedgerAuditCard
+            audit={workspace.bonusLedgerAudit}
+            saving={saving}
+            canApproveRewards={canOperateLedger}
+            onQueueBonusLedger={onQueueBonusLedger}
+            onDryRunBonusLedger={onDryRunBonusLedger}
+            onDispatchBonusLedger={onDispatchBonusLedger}
+            result={bonusLedgerResult}
+          />
+          <BonusBalanceCurrentReconciliationCard
+            reconciliation={workspace.bonusBalanceCurrentReconciliation}
+          />
+          <CommunicationQueueCard
+            queue={workspace.communicationQueue}
+            outbox={workspace.deliveryOutbox}
+            saving={saving}
+            canApproveRewards={canApproveRewards}
+            onOpenRewards={() => onOpenTab("rewards")}
+            onPrepareOutbox={onPrepareOutbox}
+            onDispatchOutbox={onDispatchOutbox}
+            deliveryDispatchResult={deliveryDispatchResult}
+            onUpdateDeliveryStatus={onUpdateDeliveryStatus}
+          />
+
+          <TariffSnapshotReadinessCard
+            snapshots={workspace.tariffSnapshots}
+            onOpenRules={() => onOpenTab("lootBoxes")}
+          />
+
+          <GuestLogCatalogCard
+            catalog={workspace.guestLogCatalog}
+            saving={saving}
+            canManage={canManageRules}
+            onSaveMapping={onSaveGuestLogMapping}
+            onDeleteMapping={onDeleteGuestLogMapping}
+          />
+        </div>
+      </details>
     </div>
   );
 }
@@ -2698,11 +2726,10 @@ export function PortalLinksCard({
             Публичные ссылки для клубов
           </h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-            По этим ссылкам гости проходят OTP-вход и видят свой уровень
-            лояльности Langame, XP, задания, лутбоксы, battle pass и кошелек
-            наград без доступа к внутренним разделам LeetPlus. Ссылки используют
-            публичный slug клуба, старые URL с внутренним ID продолжают
-            работать.
+            По этим ссылкам гости входят по коду из сообщения и видят свой
+            уровень лояльности Langame, XP, задания, кейсы, Battle Pass и
+            кошелёк наград. Внутренние разделы LeetPlus им недоступны. Старые
+            ссылки клубов продолжают работать.
           </p>
         </div>
         <span className="rounded-full border border-cyan-300 px-3 py-1 text-xs font-bold text-cyan-800 dark:border-cyan-800 dark:text-cyan-200">
@@ -2734,7 +2761,7 @@ export function PortalLinksCard({
                 </span>
                 {store.publicSlug ? null : (
                   <span className="mt-2 block text-[11px] text-amber-700 dark:text-amber-300">
-                    Slug еще не задан, используется технический ID.
+                    Короткий адрес клуба не задан, ссылка длиннее обычной.
                   </span>
                 )}
               </a>

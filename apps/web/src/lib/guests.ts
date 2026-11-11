@@ -666,7 +666,11 @@ export type GuestCrmTask = {
   assignedToUser: { id: string; displayName: string; email: string } | null;
 };
 
-export type GuestCrmTaskStatus = "OPEN" | "IN_PROGRESS" | "DONE" | "CANCELED";
+export type GuestCrmTaskStatus =
+  | "OPEN"
+  | "IN_PROGRESS"
+  | "DONE"
+  | "CANCELED";
 
 export type GuestCrmTaskSortKey =
   | "dueAt"

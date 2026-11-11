@@ -96,15 +96,10 @@ export default async function GuestPage({ params }: { params: PageParams }) {
                   tone={rfmTone(guest.rfm.segment)}
                   title={`Давность ${guest.rfm.recencyScore} · частота ${guest.rfm.frequencyScore} · деньги ${guest.rfm.monetaryScore} (баллы из 5)`}
                 >
-                  Ценность {guest.rfm.totalScore}/15 ·{" "}
-                  {rfmSegmentLabels[guest.rfm.segment]}
+                  Ценность {guest.rfm.totalScore}/15 · {rfmSegmentLabels[guest.rfm.segment]}
                 </InsightBadge>
-                <InsightBadge
-                  tone={churnTone(guest.churnRisk.level)}
-                  title={guest.churnRisk.reason}
-                >
-                  Риск оттока: {churnRiskLabels[guest.churnRisk.level]} (
-                  {guest.churnRisk.score})
+                <InsightBadge tone={churnTone(guest.churnRisk.level)} title={guest.churnRisk.reason}>
+                  Риск оттока: {churnRiskLabels[guest.churnRisk.level]} ({guest.churnRisk.score})
                 </InsightBadge>
                 {guest.crmStatus !== "NONE" ? (
                   <InsightBadge tone={crmStatusTone(guest.crmStatus)}>
@@ -117,8 +112,7 @@ export default async function GuestPage({ params }: { params: PageParams }) {
                 {guest.gameAccess === "AVAILABLE" ? (
                   game ? (
                     <InsightBadge tone={gameEngagementTone(game.engagement)}>
-                      Игра: уровень {game.level} ·{" "}
-                      {gameEngagementLabels[game.engagement]}
+                      Игра: уровень {game.level} · {gameEngagementLabels[game.engagement]}
                     </InsightBadge>
                   ) : (
                     <InsightBadge tone="neutral">Не в игре</InsightBadge>
@@ -130,32 +124,23 @@ export default async function GuestPage({ params }: { params: PageParams }) {
                   Рекомендуемое действие
                 </p>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <InsightBadge
-                    tone={recommendedActionTone(guest.recommendedAction.key)}
-                  >
+                  <InsightBadge tone={recommendedActionTone(guest.recommendedAction.key)}>
                     {recommendedActionLabels[guest.recommendedAction.key]}
                   </InsightBadge>
                   <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
                     {guest.recommendedAction.label}
                   </p>
                 </div>
-                <p className="mt-1 text-xs text-zinc-500">
-                  {guest.recommendedAction.reason}
-                </p>
+                <p className="mt-1 text-xs text-zinc-500">{guest.recommendedAction.reason}</p>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <PillLink href="/guests">К списку гостей</PillLink>
                 {guest.gameAccess === "AVAILABLE" && game ? (
-                  <PillLink
-                    href={`/gamification/log?profileId=${encodeURIComponent(game.profileId)}`}
-                  >
+                  <PillLink href={`/gamification/log?profileId=${encodeURIComponent(game.profileId)}`}>
                     Игровой журнал
                   </PillLink>
                 ) : null}
-                <PillLink
-                  href={`/api/guests/${guest.id}/live-session`}
-                  external
-                >
+                <PillLink href={`/api/guests/${guest.id}/live-session`} external>
                   Сессия сейчас (API)
                 </PillLink>
               </div>
@@ -164,29 +149,13 @@ export default async function GuestPage({ params }: { params: PageParams }) {
               <dl className="grid gap-3 text-sm">
                 <Info label="Контакт" value={guest.contact} />
                 <Info label="Внешний ID" value={guest.externalGuestId} />
-                <Info
-                  label="Группа"
-                  value={guest.guestGroupName ?? "не определена"}
-                />
-                <Info
-                  label="Источник"
-                  value={guest.externalDomain ?? "не определён"}
-                />
-                <Info
-                  label="Регистрация"
-                  value={formatDate(guest.insertedAt)}
-                />
-                <Info
-                  label="Последняя активность"
-                  value={formatDate(guest.lastActivityAt)}
-                />
+                <Info label="Группа" value={guest.guestGroupName ?? "не определена"} />
+                <Info label="Источник" value={guest.externalDomain ?? "не определён"} />
+                <Info label="Регистрация" value={formatDate(guest.insertedAt)} />
+                <Info label="Последняя активность" value={formatDate(guest.lastActivityAt)} />
                 <Info
                   label="Следующий контакт"
-                  value={
-                    guest.nextContactAt
-                      ? formatDate(guest.nextContactAt)
-                      : "не назначен"
-                  }
+                  value={guest.nextContactAt ? formatDate(guest.nextContactAt) : "не назначен"}
                 />
               </dl>
               <p className="mt-3 text-xs text-zinc-500">
@@ -244,8 +213,7 @@ export default async function GuestPage({ params }: { params: PageParams }) {
             value={`${guest.churnRisk.score}/100`}
             caption={guest.churnRisk.reason}
             tone={
-              guest.churnRisk.level === "HIGH" ||
-              guest.churnRisk.level === "LOST"
+              guest.churnRisk.level === "HIGH" || guest.churnRisk.level === "LOST"
                 ? "danger"
                 : guest.churnRisk.level === "MEDIUM"
                   ? "warning"
@@ -294,15 +262,9 @@ export default async function GuestPage({ params }: { params: PageParams }) {
               />
               <dl className="grid gap-3 p-5 text-sm">
                 <Info label="Статус" value={crmStatusLabels[guest.crmStatus]} />
-                <Info
-                  label="Следующее действие"
-                  value={guest.nextAction ?? "—"}
-                />
+                <Info label="Следующее действие" value={guest.nextAction ?? "—"} />
                 <Info label="Заметка" value={guest.crmNote ?? "—"} />
-                <Info
-                  label="Обновлено"
-                  value={formatDateTime(guest.crmUpdatedAt)}
-                />
+                <Info label="Обновлено" value={formatDateTime(guest.crmUpdatedAt)} />
               </dl>
             </InsightCard>
           )}
@@ -357,9 +319,7 @@ function SessionsPanel({ guest }: { guest: GuestDetail }) {
           {guest.sessions.map((session) => (
             <div key={session.id} className="grid gap-1 px-5 py-3 text-sm">
               <div className="flex items-center justify-between gap-3">
-                <span className="font-medium">
-                  {formatDateTime(session.startedAt)}
-                </span>
+                <span className="font-medium">{formatDateTime(session.startedAt)}</span>
                 <span className="tabular-nums text-zinc-500">
                   {session.durationMinutes === null
                     ? "нет длительности"
@@ -367,9 +327,7 @@ function SessionsPanel({ guest }: { guest: GuestDetail }) {
                 </span>
               </div>
               <p className="text-xs text-zinc-500">
-                {session.storeName ??
-                  session.externalDomain ??
-                  "клуб не определён"}
+                {session.storeName ?? session.externalDomain ?? "клуб не определён"}
               </p>
             </div>
           ))}
@@ -397,18 +355,12 @@ function TransactionsPanel({ guest }: { guest: GuestDetail }) {
           {guest.transactions.map((transaction) => (
             <div key={transaction.id} className="grid gap-1 px-5 py-3 text-sm">
               <div className="flex items-center justify-between gap-3">
-                <span className="font-medium">
-                  {formatDateTime(transaction.happenedAt)}
-                </span>
-                <span className="tabular-nums">
-                  {formatRubles(transaction.amount)}
-                </span>
+                <span className="font-medium">{formatDateTime(transaction.happenedAt)}</span>
+                <span className="tabular-nums">{formatRubles(transaction.amount)}</span>
               </div>
               <p className="text-xs text-zinc-500">
                 {transactionKindLabel(transaction.amount)} ·{" "}
-                {transaction.storeName ??
-                  transaction.externalDomain ??
-                  "клуб не определён"}
+                {transaction.storeName ?? transaction.externalDomain ?? "клуб не определён"}
                 {transaction.bonusBalance
                   ? ` · бонусы ${formatRubles(transaction.bonusBalance)}`
                   : ""}
@@ -417,9 +369,7 @@ function TransactionsPanel({ guest }: { guest: GuestDetail }) {
           ))}
         </div>
       ) : (
-        <p className="px-5 py-6 text-sm text-zinc-500">
-          Денежных операций пока нет.
-        </p>
+        <p className="px-5 py-6 text-sm text-zinc-500">Денежных операций пока нет.</p>
       )}
     </InsightCard>
   );
@@ -461,9 +411,7 @@ function SalesPanel({ guest }: { guest: GuestDetail }) {
           </table>
         </div>
       ) : (
-        <p className="px-5 py-6 text-sm text-zinc-500">
-          Связанных покупок бара пока нет.
-        </p>
+        <p className="px-5 py-6 text-sm text-zinc-500">Связанных покупок бара пока нет.</p>
       )}
     </InsightCard>
   );

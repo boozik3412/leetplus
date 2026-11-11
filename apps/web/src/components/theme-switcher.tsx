@@ -11,8 +11,11 @@ const themeOptions: { value: ThemeMode; label: string }[] = [
 
 export function ThemeSwitcher({
   variant = "default",
+  placement = variant === "compact" ? "up" : "down",
 }: {
   variant?: "default" | "compact";
+  /** Where the menu opens; the menu footer needs it to open upwards. */
+  placement?: "up" | "down";
 }) {
   const { theme, setTheme } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
@@ -22,8 +25,8 @@ export function ThemeSwitcher({
     themeOptions.find((option) => option.value === theme)?.label ?? "Тема";
   const menuClassName = [
     "absolute z-[90] w-44 overflow-hidden rounded-2xl border border-zinc-200 bg-white p-1 shadow-xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/40",
-    isCompact
-      ? "bottom-[calc(100%+0.5rem)] left-0"
+    placement === "up"
+      ? `bottom-[calc(100%+0.5rem)] ${isCompact ? "left-0" : "right-0"}`
       : "right-0 top-[calc(100%+0.5rem)]",
   ].join(" ");
 

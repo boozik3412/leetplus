@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
+import { StaffControlTabs } from "@/components/staff-control-tabs";
 import { requirePageAccess } from "@/lib/auth";
 import {
   getStaffControl,
@@ -197,7 +198,7 @@ export default async function StaffControlPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requirePageAccess("/staff/staff-control");
+  const user = await requirePageAccess("/staff/staff-control");
   const params = await searchParams;
   const filters: GuestsSummaryFilters = {
     dateFrom: searchParam(params.dateFrom),
@@ -220,6 +221,7 @@ export default async function StaffControlPage({
             { href: "/staff", label: "Персонал" },
           ]}
         />
+        <StaffControlTabs user={user} current="/staff/staff-control" />
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">

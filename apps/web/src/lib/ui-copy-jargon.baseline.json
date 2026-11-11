@@ -209,7 +209,6 @@
     "api": 1
   },
   "components/sidebar.tsx": {
-    "promo-scenario": 1,
     "tenant": 1
   },
   "components/staff-directory-workspace.tsx": {

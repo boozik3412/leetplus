@@ -3872,6 +3872,148 @@ export const clubHomeCss = `
   text-transform: uppercase;
 }
 
+/* Monthly race under the level: a scoreboard slice and one goal line. */
+.lp-club-race {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.lp-club-race-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--quiet);
+  font-size: 11px;
+}
+
+.lp-club-race-board {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(0, 6, 9, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-club-race-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.lp-club-race-row + .lp-club-race-row {
+  border-top: 1px solid rgba(196, 224, 225, 0.07);
+}
+
+.lp-club-race-row > span:first-child {
+  color: var(--quiet);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.lp-club-race-row > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-club-race-row b {
+  color: var(--text);
+  font-weight: 760;
+}
+
+.lp-club-race-row.is-leader > span:first-child,
+.lp-club-race-row.is-leader b {
+  color: var(--amber);
+}
+
+.lp-club-race-row.is-me {
+  color: var(--text);
+  font-weight: 760;
+  background: linear-gradient(90deg, rgba(131, 228, 236, 0.16), rgba(131, 228, 236, 0.04));
+  box-shadow: inset 2px 0 0 var(--cyan);
+}
+
+.lp-club-race-row.is-me > span:first-child {
+  color: var(--cyan);
+}
+
+.lp-club-race-row.is-outside {
+  color: var(--muted);
+  background: transparent;
+  box-shadow: inset 2px 0 0 rgba(131, 228, 236, 0.4);
+}
+
+.lp-club-race-gap {
+  height: 10px;
+  border-top: 1px solid rgba(196, 224, 225, 0.07);
+  background: repeating-linear-gradient(90deg, rgba(196, 224, 225, 0.18) 0 2px, transparent 2px 7px) center / 100% 1px no-repeat;
+}
+
+.lp-club-race-cutoff {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 18px;
+  padding: 0 10px;
+  border-top: 1px dashed rgba(208, 170, 108, 0.7);
+  color: var(--amber);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.lp-club-race-goal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 6px 0 12px;
+  border: 1px solid rgba(131, 228, 236, 0.2);
+  border-radius: 7px;
+  color: var(--cyan);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+  transition: border-color 160ms ease;
+}
+
+.lp-club-race-goal svg {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  transition: transform 160ms ease;
+}
+
+.lp-club-race:hover .lp-club-race-goal {
+  border-color: rgba(131, 228, 236, 0.55);
+}
+
+.lp-club-race:hover .lp-club-race-goal svg {
+  transform: translateX(2px);
+}
+
+.lp-club-race:focus-visible {
+  border-radius: 8px;
+  outline: 2px solid var(--cyan);
+  outline-offset: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-club-race-goal,
+  .lp-club-race-goal svg {
+    transition: none;
+  }
+}
+
 .lp-club-reward-wallet {
   position: relative;
   display: grid;

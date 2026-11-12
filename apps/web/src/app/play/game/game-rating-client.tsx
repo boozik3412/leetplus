@@ -17,8 +17,8 @@ import {
   formatLeaderboardNumber,
   formatLeaderboardValue,
   formatMovement,
+  leaderboardSlice,
   leaderboardInitial,
-  leaderboardUnitWord,
   pluralRu,
   leaderboardRequestPath,
   type GuestLeaderboard,
@@ -567,10 +567,6 @@ function RankMedal({ rank, small = false }: { rank: number; small?: boolean }) {
   );
 }
 
-function formatPlaces(count: number) {
-  return `${count} ${pluralRu(count, ["место", "места", "мест"])}`;
-}
-
 function formatDays(count: number) {
   return `${count} ${pluralRu(count, ["день", "дня", "дней"])}`;
 }
@@ -739,10 +735,12 @@ function NicknameBanner({
 }
 
 /**
- * «Вызов месяца» card for the game home (variant C of the canvas); hidden
- * while the rating is off for the guest.
+ * The monthly race on the game home: a scoreboard slice under the level
+ * (leader, you and your neighbours, or the cutoff line while you are outside
+ * the board) and one goal line that opens the rating. Hidden while the rating
+ * is off for the guest. Styles live with the profile in club-home-css.
  */
-export function GameRatingTeaser() {
+export function GameRatingSlice() {
   const [data, setData] = useState<GuestLeaderboard | null>(null);
 
   useEffect(() => {
@@ -760,123 +758,69 @@ export function GameRatingTeaser() {
   }, []);
 
   if (!data?.enabled || !data.me || data.me.excluded) return null;
-  const me = data.me;
-  const period = data.period;
-  const eyebrow = `Вызов · ${period?.label.toLocaleLowerCase("ru") ?? "месяца"}`;
-  const leader = data.entries[0];
-  const third = data.entries.find((entry) => entry.rank === 3);
-  const prizeGap =
-    data.prizes.length && me.rank && me.rank > 3 && third
-      ? third.value - me.value + 1
-      : null;
-  const scopeGenitive = data.scope === "club" ? "клуба" : "сети";
+  const { rows, goal } = leaderboardSlice(data);
+  const month = data.period?.label.toLocaleLowerCase("ru");
+  const title = month ? `Рейтинг за ${month}` : "Рейтинг месяца";
 
   return (
-    <section className="lp-rc lp-rc-card" aria-label="Рейтинг месяца">
-      <div className="lp-rc-head">
-        {me.rank ? (
-          <RankMedal rank={me.rank} />
-        ) : (
-          <span className="lp-rc-icon">
-            <TrophyIcon />
-          </span>
-        )}
-        <span className="lp-rc-head-copy">
-          <small>{eyebrow}</small>
-          <strong>
-            {me.rank ? `Вы ${me.rank}-й из ${data.totalPlayers}` : "Гонка уже идёт"}
-          </strong>
-          {me.rank && me.movement ? (
-            <span className={me.movement > 0 ? "is-up" : "is-down"}>
-              {me.movement > 0 ? "▲" : "▼"} {formatPlaces(Math.abs(me.movement))} за
-              сутки
-            </span>
-          ) : null}
+    <Link
+      href="/game/rating"
+      className="lp-club-race"
+      aria-label={`${title}. ${goal}. Открыть рейтинг`}
+    >
+      <span className="lp-club-race-head">
+        <span className="lp-club-small-label">{title}</span>
+        {data.period ? <span>{formatDaysLeft(data.period.daysLeft)}</span> : null}
+      </span>
+      {rows.length ? (
+        <span className="lp-club-race-board" aria-hidden="true">
+          {rows.map((row, index) => {
+            if (row.kind === "gap") {
+              return <span key={index} className="lp-club-race-gap" />;
+            }
+            if (row.kind === "cutoff") {
+              return (
+                <span key={index} className="lp-club-race-cutoff">
+                  граница таблицы
+                </span>
+              );
+            }
+            const outside = row.kind === "outside";
+            return (
+              <span
+                key={index}
+                className={[
+                  "lp-club-race-row",
+                  outside || row.isMe ? "is-me" : "",
+                  outside ? "is-outside" : "",
+                  !outside && row.rank === 1 ? "is-leader" : "",
+                ].join(" ")}
+              >
+                <span>{outside ? "—" : row.rank}</span>
+                <span>{outside || row.isMe ? "Вы" : row.name}</span>
+                <b>{formatLeaderboardNumber(data.board, row.value)}</b>
+              </span>
+            );
+          })}
         </span>
-      </div>
-
-      {me.rank ? (
-        <>
-          <RivalLine data={data} />
-          <div className="lp-rc-stats is-two">
-            <span>
-              <b>{period?.daysLeft ?? "—"}</b>
-              {pluralRu(period?.daysLeft ?? 0, ["день", "дня", "дней"])} до итогов
-            </span>
-            {prizeGap !== null ? (
-              <span>
-                <b>{formatLeaderboardNumber(data.board, prizeGap)}</b>
-                {`${leaderboardUnitWord(data.board, prizeGap)} до призовой тройки`.trim()}
-              </span>
-            ) : data.prizes.length && me.rank <= 3 ? (
-              <span className="is-gold">
-                <b>
-                  <TrophyIcon size={18} />
-                </b>
-                вы в призовой тройке
-              </span>
-            ) : (
-              <span>
-                <b>{data.totalPlayers}</b>
-                {pluralRu(data.totalPlayers, ["игрок", "игрока", "игроков"])} в гонке
-              </span>
-            )}
-          </div>
-        </>
-      ) : (
-        <>
-          <p className="lp-rc-copy">
-            {leader ? (
-              <>
-                Лидер {scopeGenitive} <b>{leader.name}</b> —{" "}
-                {formatLeaderboardValue(data.board, leader.value)}.
-              </>
-            ) : (
-              <>В этом месяце ещё никто не набрал очков — станьте первым.</>
-            )}
-            {data.prizes[0] && period ? (
-              <>
-                {" "}
-                {period.resultsLabel.replace(" ", " ")} лучший получит{" "}
-                <b className="lp-rc-gold">{data.prizes[0].label}</b>.
-              </>
-            ) : null}
-          </p>
-          <div className="lp-rc-stats">
-            <span>
-              <b>{period?.daysLeft ?? "—"}</b>
-              {pluralRu(period?.daysLeft ?? 0, ["день", "дня", "дней"])} до итогов
-            </span>
-            <span>
-              <b>{data.totalPlayers}</b>
-              {pluralRu(data.totalPlayers, ["игрок", "игрока", "игроков"])}
-            </span>
-            <span>
-              <b>
-                {data.target
-                  ? formatLeaderboardNumber(data.board, data.target.gap)
-                  : "1-й"}
-              </b>
-              {data.target
-                ? `${leaderboardUnitWord(data.board, data.target.gap)} до входа`.trim()
-                : "станьте первым"}
-            </span>
-          </div>
-        </>
-      )}
-
-      <Link
-        href="/game/rating"
-        className={["lp-rc-cta", me.rank ? "is-outline" : ""].join(" ")}
-      >
-        {me.rank ? "Открыть рейтинг" : "Вступить в гонку"}
-      </Link>
-      <style>{challengeCss}</style>
-    </section>
+      ) : null}
+      <span className="lp-club-race-goal">
+        <span>{goal}</span>
+        <ChevronIcon />
+      </span>
+    </Link>
   );
 }
 
-/** Variant C «Вызов месяца»: shared by the home card and the rating dock. */
+function ChevronIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+/** «Вызов месяца» styles of the rating dock. */
 const challengeCss = `
 .lp-rc {
   --rc-gold: #d0aa6c;
@@ -886,13 +830,6 @@ const challengeCss = `
   display: grid;
   gap: 14px;
   color: #edf7f8;
-}
-.lp-rc-card {
-  margin-top: 14px;
-  padding: 16px;
-  border: 1px solid var(--rc-gold-line);
-  border-radius: 10px;
-  background: #14110a;
 }
 .lp-rc-head { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .lp-rc-head-copy { display: grid; gap: 2px; min-width: 0; flex: 1 1 auto; }
@@ -938,21 +875,6 @@ const challengeCss = `
 .lp-rc-medal span { position: relative; color: #83e4ec; font-size: 24px; font-weight: 900; }
 .lp-rc-medal.is-small { width: 40px; height: 46px; }
 .lp-rc-medal.is-small span { font-size: 17px; }
-.lp-rc-copy { margin: 0; color: #e6dccb; font-size: 13px; line-height: 1.5; }
-.lp-rc-gold { color: var(--rc-gold); }
-.lp-rc-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.lp-rc-stats span {
-  display: grid;
-  gap: 2px;
-  padding: 8px 4px;
-  border-radius: 8px;
-  color: var(--rc-muted);
-  background: var(--rc-gold-soft);
-  font-size: 11px;
-  line-height: 1.25;
-  text-align: center;
-}
-.lp-rc-stats b { color: #edf7f8; font-size: 18px; font-weight: 900; }
 .lp-rc-rival {
   display: flex;
   align-items: center;
@@ -976,27 +898,7 @@ const challengeCss = `
   font-weight: 900;
 }
 .lp-rc-rival-avatar.is-me { color: var(--rc-gold); background: rgba(208, 170, 108, 0.2); }
-.lp-rc-stats.is-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.lp-rc-stats .is-gold { color: var(--rc-gold); }
-.lp-rc-stats .is-gold b { display: grid; place-items: center; height: 22px; color: var(--rc-gold); }
 .lp-rc-rival b { white-space: nowrap; }
-.lp-rc-cta {
-  display: grid;
-  place-items: center;
-  min-height: 44px;
-  border-radius: 8px;
-  color: #1a1206;
-  background: var(--rc-gold);
-  font-size: 14px;
-  font-weight: 800;
-  text-decoration: none;
-}
-.lp-rc-cta.is-outline {
-  border: 1px solid rgba(208, 170, 108, 0.6);
-  color: var(--rc-gold);
-  background: transparent;
-}
-.lp-rc-cta:focus-visible { outline: 2px solid var(--rc-gold); outline-offset: 2px; }
 .lp-rating-dock.lp-rc {
   gap: 12px;
   border-color: var(--rc-gold);

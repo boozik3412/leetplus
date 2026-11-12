@@ -23,7 +23,7 @@ import {
   sidebarCollapsedCookie,
   sidebarCollapsedValue,
 } from "@/lib/sidebar-preference";
-import { ThemeSwitcher } from "@/components/theme-switcher";
+import { ThemeSwitcher, ThemeToggle } from "@/components/theme-switcher";
 import { LeetPlusMark } from "@/components/brand/leetplus-logo";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 import { useSupportQueueBadges } from "@/components/support-queue-watch";
@@ -1371,6 +1371,7 @@ export function Sidebar({
             </p>
           </div>
         </div>
+        <ThemeToggle className="ml-auto h-11 w-11" />
       </div>
 
       {isMobileMenuOpen ? (
@@ -1395,14 +1396,17 @@ export function Sidebar({
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  aria-label="Закрыть меню"
-                  onClick={closeMobileMenu}
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 text-xl leading-none text-zinc-600 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                >
-                  ×
-                </button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <ThemeToggle className="h-11 w-11" />
+                  <button
+                    type="button"
+                    aria-label="Закрыть меню"
+                    onClick={closeMobileMenu}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 text-xl leading-none text-zinc-600 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
             </div>
             <nav
@@ -1452,6 +1456,9 @@ export function Sidebar({
           >
             <LogoMark />
           </Link>
+          <div className="flex justify-center border-b border-zinc-200/80 py-2 dark:border-zinc-800">
+            <ThemeToggle className="h-10 w-12 rounded-2xl" />
+          </div>
           <nav
             aria-label="Главное меню"
             className="min-h-0 flex-1 space-y-2 overflow-visible px-3 py-4"
@@ -1535,6 +1542,7 @@ export function Sidebar({
                 LeetPlus
               </span>
             </Link>
+            <ThemeToggle />
             <button
               type="button"
               title="Свернуть меню"

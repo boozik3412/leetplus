@@ -76,6 +76,10 @@ function createPrismaMock() {
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    guestVisitRating: {
+      findFirst: jest.fn(),
+      updateMany: jest.fn(),
+    },
     guestGameProfile: {
       findFirst: jest.fn(),
       findMany: jest.fn(),
@@ -10106,6 +10110,107 @@ describe('GuestPortalService', () => {
         expect(JSON.stringify(result)).not.toContain('123456');
       },
     );
+
+    describe('visit rating answer', () => {
+      const ratingId = '8f6f1c1e-5d2a-4b7e-9c1d-2a3b4c5d6e7f';
+      const rateCallback = (score: number, chat = 123456) => ({
+        update_id: 701,
+        callback_query: {
+          id: `callback-rate-${score}`,
+          from: { id: chat },
+          data: `bot:rate:${ratingId}:${score}`,
+          message: { chat: { id: chat } },
+        },
+      });
+
+      it('stores a good score and thanks the guest', async () => {
+        const { prisma, service } = createService({
+          GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        });
+        prisma.guestVisitRating.findFirst.mockResolvedValue({
+          id: ratingId,
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+        });
+        prisma.guestVisitRating.updateMany.mockResolvedValue({ count: 1 });
+
+        const result = await service.handleTelegramWebhook(
+          'telegram-secret',
+          rateCallback(5),
+        );
+
+        expect(prisma.guestVisitRating.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              id: ratingId,
+              profile: { telegramIdentity: 'chat:123456' },
+            }) as unknown,
+          }),
+        );
+        expect(prisma.guestVisitRating.updateMany).toHaveBeenCalledWith({
+          where: { id: ratingId, tenantId: 'tenant-1' },
+          data: { score: 5, answeredAt: expect.any(Date) as Date },
+        });
+        expect(result).toMatchObject({
+          action: 'TELEGRAM_VISIT_RATING',
+          profileId: 'profile-1',
+          reply: {
+            text: 'Спасибо за оценку! Ждём вас снова.',
+            replyMarkup: {
+              inline_keyboard: [[{ text: 'Меню', callback_data: 'bot:menu' }]],
+            },
+          },
+        });
+      });
+
+      it('asks what went wrong after a low score', async () => {
+        const { prisma, service } = createService({
+          GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        });
+        prisma.guestVisitRating.findFirst.mockResolvedValue({
+          id: ratingId,
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+        });
+
+        const result = await service.handleTelegramWebhook(
+          'telegram-secret',
+          rateCallback(2),
+        );
+
+        expect(result).toMatchObject({
+          action: 'TELEGRAM_VISIT_RATING',
+          reply: {
+            text: expect.stringContaining('Что пошло не так?') as string,
+            replyMarkup: {
+              inline_keyboard: [
+                [{ text: 'Написать клубу', callback_data: 'bot:write' }],
+                [{ text: 'Меню', callback_data: 'bot:menu' }],
+              ],
+            },
+          },
+        });
+      });
+
+      it('does not store a score for a question of another chat', async () => {
+        const { prisma, service } = createService({
+          GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        });
+        prisma.guestVisitRating.findFirst.mockResolvedValue(null);
+
+        const result = await service.handleTelegramWebhook(
+          'telegram-secret',
+          rateCallback(1, 999999),
+        );
+
+        expect(prisma.guestVisitRating.updateMany).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          action: 'TELEGRAM_VISIT_RATING',
+          profileId: null,
+          reply: { text: expect.stringContaining('уже не принимается') },
+        });
+      });
+    });
 
     describe('promotional broadcasts choice', () => {
       const promoCallback = (data: string) => ({

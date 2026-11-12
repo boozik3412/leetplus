@@ -1802,7 +1802,7 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
 
 1. `GuestTelegramOutboxMessage` (миграция 200, grant `leetplus_runtime`) —
    единая очередь исходящих сообщений гостю в Telegram: сейчас
-   `SUPPORT_REPLY`, `CAMPAIGN_NEWS`, `CAMPAIGN_PROMO`. Строка уникальна по
+   `SUPPORT_REPLY`, `CAMPAIGN_NEWS`, `CAMPAIGN_PROMO`, `VISIT_RATING`. Строка уникальна по
    `tenantId + sourceKey` и привязана к exact `tenantId + profileId`.
 2. Worker routes `POST /guests/communications/telegram-outbox/claim|report`
    регистрируются только в corporate runtime (`GuestCommunicationsModule`),
@@ -1812,7 +1812,7 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
    webhook secret и не bot token: edge не получает sync token ради очереди.
 3. Claim выдаёт сообщение под lease 2 минуты и `claimToken`; перед выдачей
    заново проверяет tenant admission `COMMUNICATIONS/OUTBOUND`, статус профиля
-   и наличие чата, а для `CAMPAIGN_*` — что гость не отписан (для
+   и наличие чата, а для всего, кроме `SUPPORT_REPLY`, — что гость не отписан (для
    `CAMPAIGN_PROMO` ещё `promoConsentStatus = GRANTED`). Report меняет
    только строку с тем же `claimToken` в `SENDING`; повтор до 5 попыток с
    backoff и Telegram `retry_after`, 403/«chat not found» → `BLOCKED`.
@@ -1852,6 +1852,22 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
    читает визиты/награды и пишет только `GuestTelegramOutboxMessage` и
    отметки запуска в JSON кампании; новой egress, секрета и процесса нет,
    public guest и API runtime scheduler не получают.
+9. Оценка визита (миграция 202: `GuestVisitRating`,
+   `GuestVisitRatingSettings`, grant `leetplus_runtime`). Включает сеть
+   `POST /marketing/visit-ratings/settings` — corporate контур,
+   `manage_marketing` + fresh NETWORK scope; отчёт `GET
+   /marketing/visit-ratings` (`view_marketing`) заново читает store scope,
+   STORES-пользователь видит только свои клубы. Вопрос ставит только
+   scheduler-проход `bonus-ledger-worker` (тот же `lp-bonus.timer`): сети с
+   включённой оценкой, admission `COMMUNICATIONS/OUTBOUND`, не чаще раза в 5
+   минут на сеть, с 11 до 22 по времени сети, до 300 вопросов за запуск. Он
+   читает `GuestSession`/`Guest`/`GuestGameProfile` и пишет в одной
+   транзакции `GuestVisitRating` и `VISIT_RATING` в очередь
+   (`sourceKey = visit-rating:<ratingId>`). Ответ гостя — кнопка
+   `bot:rate:<ratingId>:<1-5>` в public guest webhook: обновляет оценку,
+   только если вопрос ушёл в этот же чат (`profile.telegramIdentity`) не
+   раньше недели назад; других записей webhook не делает. Новой egress,
+   секрета и процесса нет.
 
 ## Инварианты корпоративного входа
 

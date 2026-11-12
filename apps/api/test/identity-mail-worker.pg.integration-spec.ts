@@ -33,8 +33,8 @@ const REQUIRED_CONFIRMATION = 'run-identity-mail-worker-postgres-smtp-e2e';
 const integrationEnabled =
   process.env.IDENTITY_MAIL_WORKER_PG_E2E_CONFIRM === REQUIRED_CONFIRMATION;
 const describePostgres = integrationEnabled ? describe : describe.skip;
-const CURRENT_MIGRATION = '20261112120000_guest_telegram_campaigns';
-const CURRENT_MIGRATION_COUNT = 201;
+const CURRENT_MIGRATION = '20261112150000_guest_visit_ratings';
+const CURRENT_MIGRATION_COUNT = 202;
 const RELEASE_SHA = resolveReleaseSha();
 const AAD_ENVIRONMENT = 'pg-worker-e2e';
 const TRIAL_DURATION_SECONDS = 7 * 24 * 60 * 60;

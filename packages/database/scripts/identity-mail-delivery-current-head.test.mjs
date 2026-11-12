@@ -30,7 +30,9 @@ const previousRelease197MigrationName =
 const previousRelease198MigrationName = "20261110090000_store_floor_plan";
 const previousRelease199MigrationName = "20261111090000_guest_staff_mark";
 const previousRelease200MigrationName = "20261112090000_guest_telegram_outbox";
-const releaseMigrationName = "20261112120000_guest_telegram_campaigns";
+const previousRelease201MigrationName =
+  "20261112120000_guest_telegram_campaigns";
+const releaseMigrationName = "20261112150000_guest_visit_ratings";
 const predecessorName = "20260818020000_identity_mail_delivery_current_head_v1";
 const preterminalManifestDigest =
   "589dd0a39f2372041a284392c72ad6ed59027877e909e1a5d377b9017c662fda";
@@ -39,7 +41,7 @@ const productionHistoryPreterminalManifestDigest =
 const workerAssertSourceDigest =
   "645feb480c46c42d7d8ca2dae07ec1c82f88264ac5d0e30d26593a8e566f3f66";
 const workerAssertDefinitionDigest =
-  "5adcad3715dfd62e3526ec4de9761cbfa738712d269936e796a1331bc7cbee96";
+  "b10fff9712ed79bb05f139fd18b2677f1e9e75016a133f232c30072be8bc366a";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -64,28 +66,29 @@ async function canonicalManifest() {
   return { entries, rows };
 }
 
-test("CURRENT201 preserves the reviewed CURRENT185 digest and advances readiness exactly once", async () => {
+test("CURRENT202 preserves the reviewed CURRENT185 digest and advances readiness exactly once", async () => {
   const { entries, rows } = await canonicalManifest();
-  assert.equal(entries.length, 201);
-  assert.equal(entries.at(-17), predecessorName);
-  assert.equal(entries.at(-16), guardMigrationName);
-  assert.equal(entries.at(-15), telegramMigrationName);
-  assert.equal(entries.at(-14), previousCurrentMigrationName);
-  assert.equal(entries.at(-13), previousCurrent189MigrationName);
-  assert.equal(entries.at(-12), currentMigrationName);
-  assert.equal(entries.at(-11), previousRelease191MigrationName);
-  assert.equal(entries.at(-10), previousRelease192MigrationName);
-  assert.equal(entries.at(-9), previousRelease193MigrationName);
-  assert.equal(entries.at(-8), previousRelease194MigrationName);
-  assert.equal(entries.at(-7), previousRelease195MigrationName);
-  assert.equal(entries.at(-6), previousRelease196MigrationName);
-  assert.equal(entries.at(-5), previousRelease197MigrationName);
-  assert.equal(entries.at(-4), previousRelease198MigrationName);
-  assert.equal(entries.at(-3), previousRelease199MigrationName);
-  assert.equal(entries.at(-2), previousRelease200MigrationName);
+  assert.equal(entries.length, 202);
+  assert.equal(entries.at(-18), predecessorName);
+  assert.equal(entries.at(-17), guardMigrationName);
+  assert.equal(entries.at(-16), telegramMigrationName);
+  assert.equal(entries.at(-15), previousCurrentMigrationName);
+  assert.equal(entries.at(-14), previousCurrent189MigrationName);
+  assert.equal(entries.at(-13), currentMigrationName);
+  assert.equal(entries.at(-12), previousRelease191MigrationName);
+  assert.equal(entries.at(-11), previousRelease192MigrationName);
+  assert.equal(entries.at(-10), previousRelease193MigrationName);
+  assert.equal(entries.at(-9), previousRelease194MigrationName);
+  assert.equal(entries.at(-8), previousRelease195MigrationName);
+  assert.equal(entries.at(-7), previousRelease196MigrationName);
+  assert.equal(entries.at(-6), previousRelease197MigrationName);
+  assert.equal(entries.at(-5), previousRelease198MigrationName);
+  assert.equal(entries.at(-4), previousRelease199MigrationName);
+  assert.equal(entries.at(-3), previousRelease200MigrationName);
+  assert.equal(entries.at(-2), previousRelease201MigrationName);
   assert.equal(entries.at(-1), releaseMigrationName);
   assert.equal(
-    sha256(`${rows.slice(0, -16).join("\n")}\n`),
+    sha256(`${rows.slice(0, -17).join("\n")}\n`),
     preterminalManifestDigest,
   );
 
@@ -406,45 +409,58 @@ test("CURRENT201 preserves the reviewed CURRENT185 digest and advances readiness
   );
   assert.match(release200Sql, /not CURRENT_200/u);
 
+  const release201Sql = normalizedBytes(
+    await readFile(
+      path.join(
+        migrationsRoot,
+        previousRelease201MigrationName,
+        "migration.sql",
+      ),
+    ),
+  ).toString("utf8");
+  assert.match(
+    release201Sql,
+    /ALTER TABLE public\."GuestGameProfile"\s+ADD COLUMN "promoConsentStatus" TEXT NOT NULL DEFAULT 'UNKNOWN'/u,
+  );
+  assert.match(
+    release201Sql,
+    /migration_count IS DISTINCT FROM 201[\s\S]*20261112120000_guest_telegram_campaigns/u,
+  );
+  assert.match(release201Sql, /not CURRENT_201/u);
+
   const releaseSql = normalizedBytes(
     await readFile(
       path.join(migrationsRoot, releaseMigrationName, "migration.sql"),
     ),
   ).toString("utf8");
-  assert.match(
-    releaseSql,
-    /ALTER TABLE public\."GuestGameProfile"\s+ADD COLUMN "promoConsentStatus" TEXT NOT NULL DEFAULT 'UNKNOWN'/u,
-  );
-  assert.match(
-    releaseSql,
-    /CHECK \("promoConsentStatus" IN \('UNKNOWN', 'GRANTED', 'DENIED'\)\)/u,
-  );
+  assert.match(releaseSql, /CREATE TABLE public\."GuestVisitRating"/u);
+  assert.match(releaseSql, /CREATE TABLE public\."GuestVisitRatingSettings"/u);
   assert.match(
     releaseSql,
     /CREATE OR REPLACE FUNCTION public\."identity_mail_delivery_worker_assert_v1"/u,
   );
   assert.match(
     releaseSql,
-    /migration_count IS DISTINCT FROM 201[\s\S]*20261112120000_guest_telegram_campaigns/u,
+    /migration_count IS DISTINCT FROM 202[\s\S]*20261112150000_guest_visit_ratings/u,
   );
   assert.match(
     releaseSql,
-    /20261112090000_guest_telegram_outbox',\s*'20261112120000_guest_telegram_campaigns'/u,
+    /20261112120000_guest_telegram_campaigns',\s*'20261112150000_guest_visit_ratings'/u,
   );
-  assert.match(releaseSql, /not CURRENT_201/u);
-  // Additive only: two defaulted columns and one CHECK on GuestGameProfile.
+  assert.match(releaseSql, /not CURRENT_202/u);
+  // Expand only: two new tables, no change to existing ones.
   assert.doesNotMatch(
     releaseSql,
     /\b(?:DROP|TRUNCATE|DELETE\s+FROM|UPDATE\s+public)\b/iu,
   );
   assert.doesNotMatch(
     releaseSql,
-    /ALTER TABLE public\."(?!GuestGameProfile")/u,
+    /ALTER TABLE public\."(?!GuestVisitRating"|GuestVisitRatingSettings")/u,
   );
   assert.doesNotMatch(releaseSql, /^\s*(?:BEGIN|COMMIT);/imu);
 });
 
-test("the active worker repository consumes the exact CURRENT201 receipt", async () => {
+test("the active worker repository consumes the exact CURRENT202 receipt", async () => {
   const repository = await readFile(
     path.join(
       repositoryRoot,
@@ -457,7 +473,7 @@ test("the active worker repository consumes the exact CURRENT201 receipt", async
     "utf8",
   );
   assert.match(repository, new RegExp(releaseMigrationName, "u"));
-  assert.match(repository, /CURRENT_MIGRATION_COUNT = 201 as const/u);
+  assert.match(repository, /CURRENT_MIGRATION_COUNT = 202 as const/u);
   assert.match(repository, new RegExp(preterminalManifestDigest, "u"));
   assert.match(
     repository,
@@ -469,7 +485,7 @@ test("the active worker repository consumes the exact CURRENT201 receipt", async
   );
 });
 
-test("the legacy inventory pins the CURRENT201 worker function definition", async () => {
+test("the legacy inventory pins the CURRENT202 worker function definition", async () => {
   const inventory = await readFile(
     path.join(
       databaseRoot,

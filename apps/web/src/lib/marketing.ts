@@ -878,3 +878,61 @@ export async function getMarketingCampaignTelegram(
 
   return response.json() as Promise<MarketingCampaignTelegram>;
 }
+
+export type VisitRatingReport = {
+  settings: {
+    enabled: boolean;
+    enabledAt: string | null;
+    lastRunAt: string | null;
+    sendHours: { from: number; to: number };
+    delayMinutes: number;
+    lookbackHours: number;
+    minSessionMinutes: number;
+    repeatDays: number;
+  };
+  scope: "NETWORK" | "STORES";
+  periodDays: number;
+  reachableGuests: number;
+  totals: {
+    asked: number;
+    answered: number;
+    average: number | null;
+    low: number;
+    distribution: Record<"1" | "2" | "3" | "4" | "5", number>;
+  };
+  stores: Array<{
+    storeId: string;
+    storeName: string;
+    asked: number;
+    answered: number;
+    average: number | null;
+    low: number;
+  }>;
+  recentLow: Array<{
+    id: string;
+    score: number;
+    answeredAt: string;
+    visitEndedAt: string;
+    storeName: string | null;
+    guestId: string | null;
+    guestName: string | null;
+  }>;
+};
+
+export async function getVisitRatingReport(
+  days: number,
+): Promise<VisitRatingReport> {
+  const response = await fetch(
+    `${getApiUrl()}/marketing/visit-ratings?days=${encodeURIComponent(String(days))}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch visit ratings");
+  }
+
+  return response.json() as Promise<VisitRatingReport>;
+}

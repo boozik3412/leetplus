@@ -1805,7 +1805,10 @@ export class MarketingService {
         status,
         channel: normalizeText(dto.channel, 80),
         mechanic: normalizeText(dto.mechanic, 80),
-        mechanicConfig: normalizeMechanicConfig(dto.mechanicConfig),
+        mechanicConfig: keepTelegramConfig(
+          normalizeMechanicConfig(dto.mechanicConfig),
+          null,
+        ),
         periodFrom: parseOptionalDate(dto.periodFrom),
         periodTo: parseOptionalDate(dto.periodTo),
         dueAt: parseOptionalDate(dto.dueAt),
@@ -2564,7 +2567,7 @@ export class MarketingService {
   ): Promise<MarketingCampaign> {
     const existing = await this.prisma.marketingCampaign.findFirst({
       where: { id, tenantId: user.tenantId },
-      select: { id: true },
+      select: { id: true, mechanicConfig: true },
     });
 
     if (!existing) {
@@ -2617,7 +2620,10 @@ export class MarketingService {
     }
 
     if (hasOwn(dto, 'mechanicConfig')) {
-      data.mechanicConfig = normalizeMechanicConfig(dto.mechanicConfig);
+      data.mechanicConfig = keepTelegramConfig(
+        normalizeMechanicConfig(dto.mechanicConfig),
+        existing.mechanicConfig,
+      );
     }
 
     if (hasOwn(dto, 'periodFrom')) {
@@ -5173,6 +5179,34 @@ function requireText(value: unknown, label: string, maxLength: number) {
   }
 
   return text;
+}
+
+// The Telegram tab owns mechanicConfig.telegram (text, automatic rule and its
+// run markers). Saving the campaign form must not drop or roll it back.
+export function keepTelegramConfig(
+  next: Prisma.InputJsonValue | typeof Prisma.JsonNull,
+  existing: Prisma.JsonValue | null,
+): Prisma.InputJsonValue | typeof Prisma.JsonNull {
+  const telegram =
+    existing && typeof existing === 'object' && !Array.isArray(existing)
+      ? existing.telegram
+      : undefined;
+  if (telegram === undefined || telegram === null) {
+    if (next !== Prisma.JsonNull && typeof next === 'object' && next) {
+      const { telegram: _ignored, ...rest } = next as Prisma.JsonObject;
+      void _ignored;
+      return rest;
+    }
+    return next;
+  }
+  const base =
+    next !== Prisma.JsonNull &&
+    next &&
+    typeof next === 'object' &&
+    !Array.isArray(next)
+      ? (next as Prisma.JsonObject)
+      : {};
+  return { ...base, telegram };
 }
 
 function normalizeMechanicConfig(

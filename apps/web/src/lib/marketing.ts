@@ -72,10 +72,7 @@ export type MarketingMissionRewardStatus =
   | "PAID"
   | "CANCELED";
 
-export type MarketingMissionRewardSource =
-  | "MANUAL"
-  | "LANGAME"
-  | "API_IMPORT";
+export type MarketingMissionRewardSource = "MANUAL" | "LANGAME" | "API_IMPORT";
 
 export type MarketingPromoBundleStructure = {
   composition: {
@@ -673,10 +670,13 @@ export async function getMarketingTariffConditions(): Promise<MarketingTariffCon
 export async function getMarketingPromoBundleLaunches(): Promise<
   MarketingPromoBundleLaunch[]
 > {
-  const response = await fetch(`${getApiUrl()}/marketing/promo-bundle-launches`, {
-    cache: "no-store",
-    headers: await getAuthHeaders(),
-  });
+  const response = await fetch(
+    `${getApiUrl()}/marketing/promo-bundle-launches`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
 
   if (!response.ok) {
     throw new Error("Failed to fetch marketing promo bundle launches");
@@ -806,8 +806,34 @@ export type MarketingCampaignTelegramDraft = {
   buttonUrl: string | null;
 };
 
+export type MarketingCampaignTelegramTrigger =
+  | "LAPSED"
+  | "NO_SECOND_VISIT"
+  | "REWARD_EXPIRING";
+
+export type MarketingCampaignTelegramAutomation = {
+  trigger: MarketingCampaignTelegramTrigger;
+  days: number;
+  enabled: boolean;
+  enabledAt: string | null;
+  lastRunAt: string | null;
+  lastQueued: number | null;
+  reach: {
+    matching: number;
+    unsubscribed: number;
+    noPromoConsent: number;
+    recentlyMessaged: number;
+    alreadySent: number;
+    willReceive: number;
+  };
+  campaignRunning: boolean;
+  sendHours: { from: number; to: number };
+  timeZone: string;
+};
+
 export type MarketingCampaignTelegram = {
   campaignId: string;
+  campaignStatus: string;
   audience: { id: string; name: string } | null;
   draft: MarketingCampaignTelegramDraft | null;
   signature: string;
@@ -832,6 +858,7 @@ export type MarketingCampaignTelegram = {
   lastSentAt: string | null;
   lastQueued: number | null;
   frequencyDays: number;
+  automation: MarketingCampaignTelegramAutomation | null;
 };
 
 export async function getMarketingCampaignTelegram(

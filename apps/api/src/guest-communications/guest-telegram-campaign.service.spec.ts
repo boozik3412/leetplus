@@ -31,6 +31,8 @@ type FixtureOptions = {
   profiles?: Row[];
   outboxRows?: Row[];
   allowed?: boolean;
+  status?: string;
+  candidates?: Row[];
 };
 
 function fixture({
@@ -41,10 +43,15 @@ function fixture({
   profiles = [profile('p1'), profile('p2')],
   outboxRows = [],
   allowed = true,
+  status = 'DRAFT',
+  candidates = [],
 }: FixtureOptions = {}) {
   const campaign = {
     id: 'campaign-a',
     tenantId: 'tenant-a',
+    status,
+    periodFrom: null,
+    periodTo: null,
     audienceId,
     storeIds,
     mechanicConfig: telegram ? { telegram } : {},
@@ -67,7 +74,15 @@ function fixture({
           Promise.resolve({ count: data.length }),
         ),
     },
-    store: { findFirst: jest.fn().mockResolvedValue({ name: 'Ленина' }) },
+    store: {
+      findFirst: jest.fn().mockResolvedValue({ name: 'Ленина' }),
+      findMany: jest
+        .fn()
+        .mockResolvedValue([
+          { name: 'Ленина', timeZone: 'Asia/Yekaterinburg' },
+        ]),
+    },
+    $queryRaw: jest.fn().mockResolvedValue(candidates),
   };
   const admission = { evaluate: jest.fn().mockResolvedValue({ allowed }) };
   const service = new GuestTelegramCampaignService(
@@ -337,5 +352,182 @@ describe('GuestTelegramCampaignService', () => {
       [{ module: 'COMMUNICATIONS', action: 'OUTBOUND' }],
       NOW,
     );
+  });
+
+  describe('automatic rule', () => {
+    const automation = {
+      trigger: 'LAPSED',
+      days: 21,
+      enabled: true,
+      enabledAt: '2026-11-11T10:00:00.000Z',
+      enabledByUserId: 'user-a',
+    };
+
+    it('switches the rule on and starts a draft campaign', async () => {
+      const { service, prisma, admission } = fixture({ telegram: newsDraft });
+
+      const result = await service.saveAutomation(
+        user,
+        'campaign-a',
+        { trigger: 'LAPSED', days: 30, enabled: true },
+        NOW,
+      );
+
+      expect(admission.evaluate).toHaveBeenCalled();
+      expect(prisma.marketingCampaign.updateMany).toHaveBeenCalledWith({
+        where: { id: 'campaign-a', tenantId: 'tenant-a' },
+        data: {
+          status: 'RUNNING',
+          mechanicConfig: {
+            telegram: {
+              ...newsDraft,
+              automation: {
+                trigger: 'LAPSED',
+                days: 30,
+                enabled: true,
+                enabledAt: NOW.toISOString(),
+                enabledByUserId: 'user-a',
+              },
+            },
+          },
+        },
+      });
+      expect(result).toMatchObject({
+        campaignStatus: 'RUNNING',
+        automation: {
+          trigger: 'LAPSED',
+          days: 30,
+          enabled: true,
+          campaignRunning: true,
+          reach: { matching: 0, willReceive: 0 },
+        },
+      });
+    });
+
+    it.each([
+      ['there is no saved text', { telegram: null }],
+      ['outbound messages are off', { telegram: newsDraft, allowed: false }],
+      ['the campaign is finished', { telegram: newsDraft, status: 'FINISHED' }],
+    ])('refuses to switch it on when %s', async (_name, options) => {
+      const { service, prisma } = fixture(options);
+
+      await expect(
+        service.saveAutomation(
+          user,
+          'campaign-a',
+          { trigger: 'LAPSED', enabled: true },
+          NOW,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.marketingCampaign.updateMany).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [{ trigger: 'SPAM' }],
+      [{ trigger: 'LAPSED', days: 3 }],
+      [{ trigger: 'REWARD_EXPIRING', days: 30 }],
+      [{ trigger: 'LAPSED', enabled: 'yes' }],
+    ])('rejects invalid settings %j', async (dto) => {
+      const { service } = fixture({ telegram: newsDraft });
+
+      await expect(
+        service.saveAutomation(user, 'campaign-a', dto, NOW),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('shows who matches the rule now instead of the guest group', async () => {
+      const { service, prisma } = fixture({
+        telegram: { ...newsDraft, automation },
+        status: 'RUNNING',
+        candidates: [
+          {
+            profileId: 'p1',
+            guestId: 'guest-p1',
+            telegramIdentity: 'chat:p1',
+            phoneConsentStatus: 'GRANTED',
+            promoConsentStatus: 'UNKNOWN',
+            episodeAt: new Date('2026-10-20T10:00:00.000Z'),
+            walletItemId: null,
+            rewardTitle: null,
+            expiresAt: null,
+          },
+        ],
+      });
+
+      const result = await service.get(user, 'campaign-a', NOW);
+
+      expect(result.automation).toMatchObject({
+        trigger: 'LAPSED',
+        enabled: true,
+        campaignRunning: true,
+        timeZone: 'Asia/Yekaterinburg',
+        sendHours: { from: 12, to: 21 },
+        reach: { matching: 1, willReceive: 1 },
+      });
+      expect(prisma.guestAudienceMember.findMany).not.toHaveBeenCalled();
+    });
+
+    it('does not send by hand while the rule is on', async () => {
+      const { service, prisma } = fixture({
+        telegram: { ...newsDraft, automation },
+        status: 'RUNNING',
+      });
+
+      await expect(
+        service.send(user, 'campaign-a', NOW),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(
+        prisma.guestTelegramOutboxMessage.createMany,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('goes back to a one-off send only after the rule is off', async () => {
+      const off = fixture({
+        telegram: {
+          ...newsDraft,
+          automation: { ...automation, enabled: false },
+        },
+        status: 'RUNNING',
+      });
+      await off.service.saveAutomation(
+        user,
+        'campaign-a',
+        { trigger: null },
+        NOW,
+      );
+      expect(off.prisma.marketingCampaign.updateMany).toHaveBeenCalledWith({
+        where: { id: 'campaign-a', tenantId: 'tenant-a' },
+        data: { mechanicConfig: { telegram: newsDraft } },
+      });
+    });
+
+    it('switches the rule off and keeps it while it is on', async () => {
+      const { service, prisma } = fixture({
+        telegram: { ...newsDraft, automation },
+        status: 'RUNNING',
+      });
+
+      await service.saveAutomation(user, 'campaign-a', { enabled: false }, NOW);
+      expect(prisma.marketingCampaign.updateMany).toHaveBeenLastCalledWith({
+        where: { id: 'campaign-a', tenantId: 'tenant-a' },
+        data: {
+          mechanicConfig: {
+            telegram: {
+              ...newsDraft,
+              automation: {
+                ...automation,
+                enabled: false,
+                disabledAt: NOW.toISOString(),
+                disabledByUserId: 'user-a',
+              },
+            },
+          },
+        },
+      });
+
+      await expect(
+        service.saveAutomation(user, 'campaign-a', { trigger: null }, NOW),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
   });
 });

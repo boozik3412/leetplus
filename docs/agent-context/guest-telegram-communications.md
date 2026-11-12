@@ -42,6 +42,35 @@
 5. Согласие на акции гость даёт сам: «Акции клуба» в меню бота или
    «Присылать акции клуба» после входа.
 
+## Автосценарии
+
+1. Режим «Автоматически» на той же вкладке: правило вместо группы гостей.
+   Хранится в `mechanicConfig.telegram.automation` (`trigger`, `days`,
+   `enabled`, отметки включения и последнего запуска), без миграции.
+   Правила: `LAPSED` (нет визита N дней, 7–180), `NO_SECOND_VISIT` (один день
+   визитов, первый N дней назад, 2–60), `REWARD_EXPIRING` (незабранная
+   награда в кошельке сгорает в ближайшие N дней, 1–14; к тексту добавляется
+   её название и дата).
+2. Визиты — `GuestSession.startedAt` гостя; клубы кампании фильтруют по клубу
+   последнего визита (для наград — по клубу награды). Ловятся только свежие
+   случаи: окно `[N, N+14]` дней, давние потеряшки при включении не получают
+   сообщение. Сотрудники, отключённые гости и `DO_NOT_CONTACT` не входят.
+3. Один раз на случай: `sourceKey = campaign:<id>:auto:<случай>:profile:<id>`
+   (случай — дата последнего визита, `second-visit` или id награды).
+   Вернулся и снова пропал — новый случай.
+4. Ставит в очередь `bonus-ledger-worker` (`runTelegramAutomationsOnce` после
+   бонусов): только кампании `RUNNING` в своих датах, не чаще раза в 30 минут
+   на кампанию, с 12 до 21 по времени сети, не больше 300 за запуск,
+   с проверкой admission `COMMUNICATIONS/OUTBOUND`. Отметки запуска пишутся
+   `jsonb_set`, чтобы не затереть текст, сохранённый в кабинете.
+   Лимит «одно рекламное сообщение в 3 дня» общий с ручными рассылками;
+   напоминание о награде его не ждёт.
+5. Включение (`POST …/telegram/automation`, fresh NETWORK scope) требует
+   сохранённого текста и переводит черновик/запланированную кампанию в
+   `RUNNING`; при включённом правиле ручная отправка закрыта. Форма кампании
+   (`PATCH /marketing/campaigns/:id`) не может ни стереть, ни создать
+   `mechanicConfig.telegram`.
+
 ## Где что живёт
 
 | Слой | Место |
@@ -55,6 +84,7 @@
 | Рассылка кампании | `apps/api/src/guest-communications/guest-telegram-campaign.service.ts`, `marketing-campaign-telegram.controller.ts` |
 | Согласие на акции в боте | `guest-portal.service.ts` (`telegramWebhookPromoResponse`, `telegramBotPromoChoice`) |
 | Вкладка «Telegram» | `apps/web/src/components/marketing-campaign-telegram-panel.tsx`, `app/(app)/marketing/campaigns/[id]/page.tsx` |
+| Автосценарии | `apps/api/src/guest-communications/guest-telegram-automation.ts` (правила, SQL, проход worker), запуск в `guest-gamification/guest-bonus-ledger-worker.cli.ts`, карточка `apps/web/src/components/marketing-campaign-telegram-automation.tsx` |
 
 ## Правила
 
@@ -73,5 +103,5 @@
 ## Проверка
 
 ```bash
-pnpm --filter api exec jest --runInBand --runTestsByPath src/guest-communications/guest-telegram-outbox.service.spec.ts src/guest-communications/guest-telegram-campaign.service.spec.ts src/guest-portal/telegram-outbox-sender.spec.ts src/guest-portal/guest-support-telegram.spec.ts src/support/support-guest-replies.spec.ts src/guest-portal/guest-portal.service.spec.ts src/runtime/runtime-boundary.spec.ts
+pnpm --filter api exec jest --runInBand --runTestsByPath src/guest-communications/guest-telegram-outbox.service.spec.ts src/guest-communications/guest-telegram-campaign.service.spec.ts src/guest-communications/guest-telegram-automation.spec.ts src/marketing/marketing-telegram-config.spec.ts src/guest-portal/telegram-outbox-sender.spec.ts src/guest-portal/guest-support-telegram.spec.ts src/support/support-guest-replies.spec.ts src/guest-portal/guest-portal.service.spec.ts src/runtime/runtime-boundary.spec.ts
 ```

@@ -1,20 +1,27 @@
-import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
+import {
+  ArrowRight,
+  CheckCircle,
+  WarningCircle,
+} from "@phosphor-icons/react/dist/ssr";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
-import { buildAssortmentRiskSummary } from "@/lib/assortment-risk";
 import { ReportLoadingLink } from "@/components/report-loading-link";
+import { requireCurrentUser } from "@/lib/auth";
 import { getDefaultLandingPath } from "@/lib/landing";
+import {
+  buildMoneyLossReport,
+  type DataGap,
+  type LossPart,
+  type LossPartKey,
+} from "@/lib/money-loss-report";
 import { can } from "@/lib/permissions";
 import {
   getAssortmentMatrixReport,
-  getAssortmentReport,
-  getInventoryTurnoverReport,
   getOperationalReport,
   type ReportRecommendation,
 } from "@/lib/reports";
 
-const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const PERIOD_DAYS = 14;
 
 function lastFullDaysRange(days: number) {
   const now = new Date();
@@ -30,435 +37,371 @@ function lastFullDaysRange(days: number) {
   };
 }
 
-function formatMoney(value: number | null) {
-  if (value === null) {
-    return "нет полной оценки";
-  }
-
+function formatMoney(value: number) {
   return `${new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 0,
-  }).format(Math.round(value))} руб`;
-}
-
-function formatNumber(value: number, maximumFractionDigits = 0) {
-  return new Intl.NumberFormat("ru-RU", {
-    maximumFractionDigits,
-  }).format(value);
-}
-
-function formatPercent(value: number | null) {
-  if (value === null || !Number.isFinite(value)) {
-    return "нет данных";
-  }
-
-  return `${formatNumber(value, 1)}%`;
+  }).format(Math.round(value))} ₽`;
 }
 
 function formatDateLabel(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
 
-  if (!match) {
-    return value;
-  }
-
-  return `${match[3]}.${match[2]}.${match[1]}`;
+  return match ? `${match[3]}.${match[2]}` : value;
 }
 
-function differenceInDays(from: string, to: string) {
-  const fromDate = new Date(`${from}T00:00:00.000Z`);
-  const toDate = new Date(`${to}T00:00:00.000Z`);
+function plural(count: number, one: string, few: string, many: string) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
 
-  return Math.max(
-    1,
-    Math.round((toDate.getTime() - fromDate.getTime()) / DAY_IN_MS) + 1,
-  );
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }
 
-function isActiveRecommendation(recommendation: ReportRecommendation) {
-  return (
-    recommendation.status !== "DONE" &&
-    recommendation.status !== "HIDDEN" &&
-    recommendation.status !== "REJECTED"
-  );
+function daysCount(count: number) {
+  return `${count} ${plural(count, "дня", "дней", "дней")}`;
 }
 
-function reportHref(path: string, filters: { from: string; to: string }) {
-  const params = new URLSearchParams(filters);
-
-  return `${path}?${params.toString()}`;
+function goodsCount(count: number) {
+  return `${count} ${plural(count, "товар", "товара", "товаров")}`;
 }
 
-export default async function CommercialAuditPage() {
+const PART_TONE: Record<LossPartKey, { bar: string; dot: string }> = {
+  deficit: { bar: "bg-rose-500", dot: "bg-rose-500" },
+  writeOffs: { bar: "bg-amber-500", dot: "bg-amber-500" },
+  missingMandatory: { bar: "bg-sky-500", dot: "bg-sky-500" },
+};
+
+export default async function MoneyLossPage() {
   const user = await requireCurrentUser();
 
   if (!can(user, "view_reports")) {
     redirect(getDefaultLandingPath(user));
   }
 
-  const filters = lastFullDaysRange(14);
-  const [assortmentReport, operationalReport, matrixReport, turnoverReport] =
-    await Promise.all([
-      getAssortmentReport(),
-      getOperationalReport(filters),
-      getAssortmentMatrixReport(filters),
-      getInventoryTurnoverReport(filters),
-    ]);
+  const filters = lastFullDaysRange(PERIOD_DAYS);
+  const [operationalReport, matrixReport] = await Promise.all([
+    getOperationalReport(filters),
+    getAssortmentMatrixReport(filters),
+  ]);
 
-  const assortmentRisk = buildAssortmentRiskSummary({
-    oosRows: operationalReport.outOfStockRiskProducts,
+  const report = buildMoneyLossReport({
+    outOfStockRows: operationalReport.outOfStockRiskProducts,
     noSalesRows: operationalReport.productsWithoutSales,
-    oosState: operationalReport.assortmentHealth?.outOfStock.state,
-    noSalesState: operationalReport.assortmentHealth?.noSales[21].state,
+    writeOffAmount: operationalReport.writeOffAmount,
+    recommendations: operationalReport.recommendations,
+    matrixRows: matrixReport.rows,
+    marginCoverage: operationalReport.marginCoverage,
+    healthStates: [
+      operationalReport.assortmentHealth?.outOfStock.state,
+      operationalReport.assortmentHealth?.noSales[21].state,
+    ],
   });
-  const activeRecommendations = operationalReport.recommendations
-    .filter(isActiveRecommendation)
-    .sort((a, b) => b.effectAmount - a.effectAmount);
-  const expectedEffect = activeRecommendations
-    .slice(0, 10)
-    .reduce((total, item) => total + item.effectAmount, 0);
-  const activeSkuShare =
-    assortmentReport.totalSku > 0
-      ? (assortmentReport.activeSku / assortmentReport.totalSku) * 100
-      : null;
-  const periodDays = differenceInDays(filters.from, filters.to);
-  const topRiskRows = assortmentRisk.rows.slice(0, 5);
-  const topRecommendations = activeRecommendations.slice(0, 5);
-  const qualityIndex = matrixReport.summary.qualityIndex;
+  const queueHref = `/reports/recommendations/table?${new URLSearchParams(
+    filters,
+  ).toString()}`;
 
   return (
     <main className="min-h-full bg-zinc-50 px-4 py-6 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-100 sm:px-6 lg:px-10">
-      <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6">
         <ReportBreadcrumbs
-          current="Коммерческий аудит"
+          current="Где теряем деньги"
           items={[
             { href: "/dashboard", label: "Дашборд" },
             { href: "/reports", label: "Отчёты" },
           ]}
         />
 
-        <section className="flex flex-col gap-4 border-b border-zinc-200 pb-6 dark:border-zinc-800 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl space-y-3">
-            <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-              Отчёты
-            </p>
-            <h1 className="text-3xl font-black tracking-normal text-zinc-950 dark:text-white sm:text-4xl">
-              Коммерческий аудит сети
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="max-w-2xl space-y-2">
+            <h1 className="text-3xl font-black tracking-normal text-zinc-950 dark:text-white">
+              Где теряем деньги
             </h1>
             <p className="text-base leading-7 text-zinc-600 dark:text-zinc-300">
-              Сводка показывает, где сейчас лежат деньги: дефицит, замороженный
-              остаток, потенциал действий и качество ассортиментной матрицы.
+              Сколько сеть недополучила за {PERIOD_DAYS} дней, из чего это
+              складывается и что сделать в первую очередь.
             </p>
           </div>
-          <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-            Период:{" "}
-            <span className="font-semibold text-zinc-950 dark:text-white">
-              {formatDateLabel(filters.from)} - {formatDateLabel(filters.to)}
-            </span>{" "}
-            ({periodDays} дн.)
-          </div>
-        </section>
+          <p className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm tabular-nums text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+            {formatDateLabel(filters.from)} – {formatDateLabel(filters.to)}
+          </p>
+        </header>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MetricCard
-            label="Деньги в риске"
-            value={formatMoney(assortmentRisk.totalRiskAmount)}
-            note={`${formatNumber(
-              assortmentRisk.oosSkuCount + assortmentRisk.noSalesSkuCount,
-            )} SKU требуют действия`}
-            tone="rose"
-          />
-          <MetricCard
-            label="Потенциал действий"
-            value={formatMoney(expectedEffect)}
-            note={`${formatNumber(
-              activeRecommendations.length,
-            )} активных рекомендаций`}
-            tone="emerald"
-          />
-          <MetricCard
-            label="Качество матрицы"
-            value={formatPercent(qualityIndex)}
-            note={`${formatNumber(
-              matrixReport.summary.healthyCells,
-            )} здоровых обязательных ячеек`}
-            tone="sky"
-          />
-          <MetricCard
-            label="Активный SKU"
-            value={formatPercent(activeSkuShare)}
-            note={`${formatNumber(assortmentReport.activeSku)} из ${formatNumber(
-              assortmentReport.totalSku,
-            )} SKU активны`}
-            tone="amber"
+        <section className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
+          <LossCard total={report.totalLoss} parts={report.parts} />
+          <FrozenCard
+            amount={report.frozen.amount}
+            skuCount={report.frozen.skuCount}
+            unvaluedCount={report.frozen.unvaluedCount}
+            noSalesDays={operationalReport.noSalesDays}
           />
         </section>
 
-        <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-          <AuditPanel
-            title="Потери"
-            eyebrow="дефицит и замороженный сток"
-            summary={`${formatMoney(
-              assortmentRisk.oosProfitAtRisk,
-            )} прибыли в риске и ${formatMoney(
-              assortmentRisk.frozenStockAmount,
-            )} в замороженном остатке.`}
-            actionHref="/products/stock-value?view=frozen"
-            actionLabel="Открыть «Деньги в остатке»"
-          >
-            <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-              {topRiskRows.length > 0 ? (
-                topRiskRows.map((row) => (
-                  <div
-                    key={`${row.riskType}-${row.storeName}-${row.name}`}
-                    className="py-3"
-                  >
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-zinc-950 dark:text-white">
-                          {row.name}
-                        </p>
-                        <p className="text-xs text-zinc-500">
-                          {row.storeName} · {row.riskTypeLabel}
-                        </p>
-                      </div>
-                      <p className="text-sm font-bold text-rose-600 dark:text-rose-300">
-                        {formatMoney(row.totalRiskAmount)}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <EmptyLine text="Критичных потерь в выбранном периоде не найдено." />
-              )}
-            </div>
-          </AuditPanel>
-
-          <AuditPanel
-            title="Возможности роста"
-            eyebrow="действия с оценкой эффекта"
-            summary={`Первые ${formatNumber(
-              Math.min(topRecommendations.length, 5),
-            )} действий дают ${formatMoney(
-              topRecommendations.reduce(
-                (total, item) => total + item.effectAmount,
-                0,
-              ),
-            )} оцененного эффекта.`}
-            actionHref={reportHref("/reports/recommendations/table", filters)}
-            actionLabel="Открыть очередь действий"
-          >
-            <div className="space-y-3">
-              {topRecommendations.length > 0 ? (
-                topRecommendations.map((recommendation) => (
-                  <RecommendationLine
-                    key={recommendation.id}
-                    recommendation={recommendation}
-                  />
-                ))
-              ) : (
-                <EmptyLine text="Активных рекомендаций нет." />
-              )}
-            </div>
-          </AuditPanel>
-        </section>
-
-        <section className="grid gap-4 xl:grid-cols-3">
-          <AuditPanel
-            title="Качество матрицы"
-            eyebrow="обязательные SKU по клубам"
-            summary={`${formatPercent(
-              qualityIndex,
-            )} - текущий индекс качества по сети.`}
-            actionHref={reportHref("/reports/assortment-matrix/table", filters)}
-            actionLabel="Открыть матрицу"
-          >
-            <CompactStats
-              rows={[
-                [
-                  "Здоровые ячейки",
-                  formatNumber(matrixReport.summary.healthyCells),
-                ],
-                [
-                  "Нет остатка",
-                  formatNumber(matrixReport.summary.noStockCells),
-                ],
-                [
-                  "Не заведено",
-                  formatNumber(matrixReport.summary.missingCells),
-                ],
-              ]}
-            />
-          </AuditPanel>
-
-          <AuditPanel
-            title="Оборачиваемость"
-            eyebrow="запас и медленные SKU"
-            summary={`${formatMoney(
-              turnoverReport.totalFrozenStockAmount,
-            )} денег лежит в замороженных позициях.`}
-            actionHref="/products/stock-value?view=excess"
-            actionLabel="Проверить оборачиваемость"
-          >
-            <CompactStats
-              rows={[
-                ["Медленные SKU", formatNumber(turnoverReport.slowSkuCount)],
-                [
-                  "Замороженные SKU",
-                  formatNumber(turnoverReport.frozenSkuCount),
-                ],
-                [
-                  "Средний запас",
-                  turnoverReport.averageStockDays === null
-                    ? "нет данных"
-                    : `${formatNumber(turnoverReport.averageStockDays, 1)} дн.`,
-                ],
-              ]}
-            />
-          </AuditPanel>
-
-          <AuditPanel
-            title="Итог периода"
-            eyebrow="выручка и прибыль"
-            summary="Выручка, валовая прибыль и маржа сети за выбранный период."
-            actionHref="/reports"
-            actionLabel="Перейти к отчетам"
-          >
-            <CompactStats
-              rows={[
-                [
-                  "Выручка за период",
-                  formatMoney(operationalReport.totalRevenue),
-                ],
-                ["Валовая прибыль", formatMoney(operationalReport.grossProfit)],
-                ["Маржа", formatPercent(operationalReport.marginPercent)],
-              ]}
-            />
-          </AuditPanel>
+        <section className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
+          <ActionsCard
+            actions={report.actions}
+            effect={report.actionsEffect}
+            queueHref={queueHref}
+          />
+          <GapsCard gaps={report.gaps} />
         </section>
       </div>
     </main>
   );
 }
 
-function MetricCard({
-  label,
-  value,
-  note,
-  tone,
-}: {
-  label: string;
-  value: string;
-  note: string;
-  tone: "rose" | "emerald" | "sky" | "amber";
-}) {
-  const toneClass = {
-    rose: "text-rose-600 dark:text-rose-300",
-    emerald: "text-emerald-600 dark:text-emerald-300",
-    sky: "text-sky-600 dark:text-sky-300",
-    amber: "text-amber-600 dark:text-amber-300",
-  }[tone];
+function LossCard({ total, parts }: { total: number; parts: LossPart[] }) {
+  const barParts = parts.filter((part) => part.amount > 0);
 
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">
-        {label}
+    <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">
+        Теряем за {PERIOD_DAYS} дней
       </p>
-      <p className={`mt-3 text-2xl font-black tracking-normal ${toneClass}`}>
-        {value}
+      <p className="mt-1 text-4xl font-black tabular-nums tracking-normal text-rose-600 dark:text-rose-300">
+        {formatMoney(total)}
       </p>
-      <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-        {note}
+
+      {barParts.length > 0 ? (
+        <div
+          className="mt-4 flex h-3 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800"
+          aria-hidden
+        >
+          {barParts.map((part) => (
+            <div
+              key={part.key}
+              className={PART_TONE[part.key].bar}
+              style={{ width: `${(part.amount / total) * 100}%` }}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      <ul className="mt-4 divide-y divide-zinc-200 dark:divide-zinc-800">
+        {parts.map((part) => (
+          <li key={part.key} className="py-3">
+            <LossPartRow part={part} total={total} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function LossPartRow({ part, total }: { part: LossPart; total: number }) {
+  const share =
+    total > 0 && part.amount > 0 ? Math.round((part.amount / total) * 100) : 0;
+  const notes: string[] = [];
+
+  if (part.unvaluedCount > 0) {
+    notes.push(`ещё ${goodsCount(part.unvaluedCount)} без оценки`);
+  }
+  if (part.estimate && part.amount > 0) {
+    notes.push("оценка");
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-start justify-between gap-3">
+        <p className="flex min-w-0 items-center gap-2 pt-0.5 text-sm font-semibold text-zinc-950 dark:text-white">
+          <span
+            className={`h-2.5 w-2.5 shrink-0 rounded-full ${PART_TONE[part.key].dot}`}
+            aria-hidden
+          />
+          {part.label}
+        </p>
+        <div className="shrink-0 text-right">
+          {part.unavailable ? (
+            <p className="text-sm font-semibold text-zinc-500 dark:text-zinc-400">
+              не загружено
+            </p>
+          ) : (
+            <p className="text-lg font-black tabular-nums text-zinc-950 dark:text-white">
+              {formatMoney(part.amount)}
+              {share > 0 ? (
+                <span className="ml-2 text-sm font-semibold text-zinc-500 dark:text-zinc-400">
+                  {share}%
+                </span>
+              ) : null}
+            </p>
+          )}
+          {notes.length > 0 ? (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              {notes.join(" · ")}
+            </p>
+          ) : null}
+        </div>
+      </div>
+      <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+        {part.hint}
       </p>
+      <ReportLoadingLink
+        href={part.href}
+        className="inline-flex cursor-pointer items-center gap-1 rounded text-sm font-semibold text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
+      >
+        Подробнее
+        <ArrowRight
+          size={14}
+          aria-hidden
+          className="ml-1 inline align-[-2px]"
+        />
+      </ReportLoadingLink>
     </div>
   );
 }
 
-function AuditPanel({
-  title,
-  eyebrow,
-  summary,
-  actionHref,
-  actionLabel,
-  children,
+function FrozenCard({
+  amount,
+  skuCount,
+  unvaluedCount,
+  noSalesDays,
 }: {
-  title: string;
-  eyebrow: string;
-  summary: string;
-  actionHref: string;
-  actionLabel: string;
-  children: ReactNode;
+  amount: number;
+  skuCount: number;
+  unvaluedCount: number;
+  noSalesDays: number;
 }) {
   return (
-    <section className="flex min-h-[20rem] flex-col rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="space-y-2">
-        <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-          {eyebrow}
+    <section className="flex flex-col rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">
+        Заморожено в остатке
+      </p>
+      <p className="mt-1 text-3xl font-black tabular-nums tracking-normal text-amber-600 dark:text-amber-300">
+        {formatMoney(amount)}
+      </p>
+      <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+        {skuCount > 0
+          ? `Без продаж ${daysCount(noSalesDays)} и дольше: ${goodsCount(skuCount)}. Эти деньги не потеряны, их можно вернуть распродажей или возвратом поставщику.`
+          : `Товаров без продаж ${daysCount(noSalesDays)} и дольше нет.`}
+      </p>
+      {unvaluedCount > 0 ? (
+        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+          Ещё {goodsCount(unvaluedCount)} без входящей цены не вошли в сумму.
         </p>
-        <h2 className="text-xl font-black tracking-normal text-zinc-950 dark:text-white">
-          {title}
-        </h2>
-        <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-          {summary}
-        </p>
-      </div>
-      <div className="mt-4 min-h-0 flex-1">{children}</div>
+      ) : null}
       <ReportLoadingLink
-        href={actionHref}
-        className="mt-5 rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-semibold text-zinc-900 transition hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-100 dark:hover:border-emerald-400 dark:hover:text-emerald-300"
+        href="/products/stock-value?view=frozen"
+        className="mt-auto inline-flex cursor-pointer items-center gap-1 self-start rounded pt-4 text-sm font-semibold text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
       >
-        {actionLabel}
+        Открыть «Деньги в остатке»
+        <ArrowRight
+          size={14}
+          aria-hidden
+          className="ml-1 inline align-[-2px]"
+        />
       </ReportLoadingLink>
     </section>
   );
 }
 
-function RecommendationLine({
-  recommendation,
+function ActionsCard({
+  actions,
+  effect,
+  queueHref,
 }: {
-  recommendation: ReportRecommendation;
+  actions: ReportRecommendation[];
+  effect: number;
+  queueHref: string;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-zinc-950 dark:text-white">
-            {recommendation.title}
+    <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+        <h2 className="text-xl font-black tracking-normal text-zinc-950 dark:text-white">
+          Что сделать в первую очередь
+        </h2>
+        {actions.length > 0 ? (
+          <p className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
+            вернёт до {formatMoney(effect)}
           </p>
-          <p className="mt-1 text-xs leading-5 text-zinc-500">
-            {recommendation.storeName ?? "Вся сеть"} ·{" "}
-            {recommendation.effectLabel}
-          </p>
-        </div>
-        <p className="shrink-0 text-sm font-bold text-emerald-600 dark:text-emerald-300">
-          {formatMoney(recommendation.effectAmount)}
-        </p>
+        ) : null}
       </div>
-    </div>
+
+      {actions.length > 0 ? (
+        <ol className="mt-4 space-y-2">
+          {actions.map((action, index) => (
+            <li
+              key={action.id}
+              className="flex gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60"
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                {index + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-zinc-950 dark:text-white">
+                  {action.title}
+                </p>
+                <p className="mt-0.5 text-sm text-zinc-600 dark:text-zinc-300">
+                  {action.storeName ?? "Вся сеть"} · {action.action}
+                </p>
+              </div>
+              <p className="shrink-0 text-sm font-bold tabular-nums text-emerald-700 dark:text-emerald-300">
+                {formatMoney(action.effectAmount)}
+              </p>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="mt-4 flex items-center gap-2 rounded-lg border border-dashed border-zinc-300 px-4 py-5 text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+          <CheckCircle size={18} aria-hidden className="text-emerald-600" />
+          Срочных действий нет: всё, что нашли, уже в работе или сделано.
+        </p>
+      )}
+
+      <ReportLoadingLink
+        href={queueHref}
+        className="mt-4 inline-flex cursor-pointer items-center gap-1 rounded text-sm font-semibold text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
+      >
+        Вся очередь действий
+        <ArrowRight
+          size={14}
+          aria-hidden
+          className="ml-1 inline align-[-2px]"
+        />
+      </ReportLoadingLink>
+    </section>
   );
 }
 
-function CompactStats({ rows }: { rows: [string, string][] }) {
+function GapsCard({ gaps }: { gaps: DataGap[] }) {
   return (
-    <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-      {rows.map(([label, value]) => (
-        <div
-          key={label}
-          className="flex items-center justify-between gap-4 py-3"
-        >
-          <p className="text-sm text-zinc-600 dark:text-zinc-300">{label}</p>
-          <p className="text-right text-sm font-bold text-zinc-950 dark:text-white">
-            {value}
-          </p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function EmptyLine({ text }: { text: string }) {
-  return (
-    <p className="rounded-lg border border-dashed border-zinc-300 px-4 py-5 text-sm text-zinc-500 dark:border-zinc-700">
-      {text}
-    </p>
+    <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <h2 className="text-xl font-black tracking-normal text-zinc-950 dark:text-white">
+        Чтобы цифры были точнее
+      </h2>
+      {gaps.length > 0 ? (
+        <ul className="mt-4 space-y-3">
+          {gaps.map((gap) => (
+            <li key={gap.key} className="flex gap-3">
+              <WarningCircle
+                size={20}
+                aria-hidden
+                className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-300"
+              />
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm leading-6 text-zinc-700 dark:text-zinc-200">
+                  {gap.text}
+                </p>
+                <ReportLoadingLink
+                  href={gap.href}
+                  className="inline-flex cursor-pointer items-center gap-1 rounded text-sm font-semibold text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-emerald-300"
+                >
+                  {gap.actionLabel}
+                  <ArrowRight
+                    size={14}
+                    aria-hidden
+                    className="ml-1 inline align-[-2px]"
+                  />
+                </ReportLoadingLink>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-4 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+          <CheckCircle size={18} aria-hidden className="text-emerald-600" />
+          Данных хватает: цены, обязательные товары и списания на месте.
+        </p>
+      )}
+    </section>
   );
 }

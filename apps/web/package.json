@@ -25,7 +25,7 @@
     "test:guest-insights": "node --test --experimental-strip-types src/lib/guest-insights.test.mts src/lib/guest-game-effect.test.mts",
     "test:daily-report": "node --test --experimental-strip-types src/lib/daily-report-view.test.mts",
     "test:ui-copy": "node --test --experimental-strip-types src/lib/ui-copy-jargon.test.mts",
-    "test:assortment": "node --test --experimental-strip-types src/lib/stock-value.test.mts src/lib/assortment-report-query.test.mts src/lib/assortment-risk.test.mts"
+    "test:assortment": "node --test --experimental-strip-types src/lib/stock-value.test.mts src/lib/assortment-report-query.test.mts src/lib/assortment-risk.test.mts src/lib/money-loss-report.test.mts"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

@@ -1,8 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { getApiUrl, getAuthHeaders, readApiError } from "@/lib/api";
+import {
+  fetchWithTimeout,
+  getApiUrl,
+  getAuthHeaders,
+  readApiError,
+} from "@/lib/api";
 import { requireTenantWorkspaceUser } from "@/lib/auth";
+import { clubFloorPlanForShift } from "@/lib/club-floor-plan-templates";
 import {
   type StaffOperatorReportRow,
   type StaffOperatorShiftDetail,
@@ -108,6 +114,20 @@ async function safeValue<T>(promise: Promise<T>, fallback: T): Promise<T> {
     return await promise;
   } catch {
     return fallback;
+  }
+}
+
+// Clubs of the viewer's scope with their saved hall, for «Сейчас в зале».
+// A failed read hides the block rather than the page.
+async function floorPlanClubs(): Promise<unknown> {
+  try {
+    const response = await fetchWithTimeout(
+      `${getApiUrl()}/stores/floor-plans`,
+      { cache: "no-store", headers: await getAuthHeaders() },
+    );
+    return response.ok ? await response.json() : null;
+  } catch {
+    return null;
   }
 }
 
@@ -624,14 +644,25 @@ export default async function StaffShiftWorkspacePage({
     },
   );
 
-  const [myTasks, reviewTasks, checklists, escalatedReport, profile] =
-    await Promise.all([
-      myTasksPromise,
-      reviewTasksPromise,
-      checklistsPromise,
-      escalatedChecklistsPromise,
-      profilePromise,
-    ]);
+  const floorPlanClubsPromise = can(user, "view_club_scheme")
+    ? floorPlanClubs()
+    : Promise.resolve(null);
+
+  const [
+    myTasks,
+    reviewTasks,
+    checklists,
+    escalatedReport,
+    profile,
+    floorPlanBody,
+  ] = await Promise.all([
+    myTasksPromise,
+    reviewTasksPromise,
+    checklistsPromise,
+    escalatedChecklistsPromise,
+    profilePromise,
+    floorPlanClubsPromise,
+  ]);
   const staffMember = profile.staffMember;
   const shiftRow = profile.operator;
   const currentShift = findCurrentShiftDetail(shiftRow);
@@ -646,6 +677,11 @@ export default async function StaffShiftWorkspacePage({
   const activeTasks = myTasks.rows.filter(isActiveTask);
   const nextTasks = activeTasks.slice(0, 5);
   const staffStoreId = staffMember?.store?.id ?? null;
+  const hall = clubFloorPlanForShift(
+    floorPlanBody,
+    staffStoreId,
+    currentShift?.storeName ?? null,
+  );
   const escalatedChecklists = sortEscalatedChecklists(
     filterClubChecklistRows(
       escalatedChecklistRows(escalatedReport.rows, user.id),
@@ -783,6 +819,8 @@ export default async function StaffShiftWorkspacePage({
           />
         ) : null}
 
+        {hall ? <HallPanel hall={hall} /> : null}
+
         <section className="mt-4 grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
           <WorkPanel
             selectedChecklist={selectedChecklist}
@@ -844,6 +882,48 @@ export default async function StaffShiftWorkspacePage({
         </section>
       </div>
     </main>
+  );
+}
+
+// «Сейчас в зале»: the calm 3D hall of the club with hints over the guests
+// and the guests' messages (the scene's embed=shift mode).
+function HallPanel({
+  hall,
+}: {
+  hall: NonNullable<ReturnType<typeof clubFloorPlanForShift>>;
+}) {
+  return (
+    <section
+      aria-labelledby="shift-hall-title"
+      className="mt-4 min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-[#0e141b]"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div className="min-w-0">
+          <h2
+            id="shift-hall-title"
+            className="text-lg font-semibold text-zinc-950 dark:text-white"
+          >
+            Сейчас в зале
+          </h2>
+          <p className="mt-0.5 text-sm text-zinc-600 dark:text-zinc-400">
+            Кто сидит за компьютерами и на кого из гостей обратить внимание.
+            Обращения гостей появляются здесь сами.
+          </p>
+        </div>
+        <Link
+          href={hall.fullUrl}
+          className="inline-flex min-h-10 items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-900 transition hover:border-emerald-500 hover:text-emerald-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-100 dark:hover:border-emerald-400 dark:hover:text-emerald-200"
+        >
+          Открыть на весь экран
+        </Link>
+      </div>
+      <iframe
+        key={hall.storeId}
+        className="block h-[36rem] w-full bg-zinc-100 sm:h-[40rem] dark:bg-[#0b1117]"
+        src={hall.sceneUrl}
+        title={`Схема зала ${hall.name}`}
+      />
+    </section>
   );
 }
 

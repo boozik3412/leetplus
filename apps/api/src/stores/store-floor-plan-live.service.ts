@@ -148,6 +148,22 @@ export type StoreFloorPlanSeatView = {
   } | null;
 };
 
+/** Busy computers and their Langame guests; internal to the API. */
+export type StoreFloorPlanSeatedGuests = {
+  storeId: string;
+  tenantId: string;
+  timeZone: string | null;
+  domain: string | null;
+  seats: Array<{
+    number: number;
+    langameGuestId: string | null;
+    startedAt: Date;
+    endsAt: Date | null;
+    /** Lines the guest bought at the bar this shift; null if unknown. */
+    purchases: number | null;
+  }>;
+};
+
 type LiveSeat = {
   guestId: string | null;
   startedAt: Date;
@@ -305,6 +321,35 @@ export class StoreFloorPlanLiveService {
   ): Promise<StoreFloorPlanLiveView> {
     const { snapshot } = await this.snapshot(storeId, user, now);
     return snapshot.view;
+  }
+
+  /**
+   * Busy computers of the club with the Langame guest of each session, from
+   * the same shared 15-second Langame read as the club view. For the hints of
+   * «Схема клуба»; the Langame guest ids never leave the API.
+   */
+  async seatedGuests(
+    storeId: string,
+    user: AuthenticatedUser,
+    now = new Date(),
+  ): Promise<StoreFloorPlanSeatedGuests> {
+    const { store, snapshot } = await this.snapshot(storeId, user, now);
+    return {
+      storeId: store.id,
+      tenantId: store.tenantId,
+      timeZone: store.timeZone,
+      domain: snapshot.domain,
+      seats: Array.from(snapshot.seats, ([number, seat]) => ({
+        number,
+        langameGuestId: seat.guestId,
+        startedAt: seat.startedAt,
+        endsAt: seat.stop,
+        purchases:
+          snapshot.view.purchases === null || !seat.guestId
+            ? null
+            : (snapshot.purchasesByGuest.get(seat.guestId)?.length ?? 0),
+      })).sort((first, second) => first.number - second.number),
+    };
   }
 
   /**

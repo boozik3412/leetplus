@@ -641,8 +641,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(352);
-    expect(allowed).toHaveLength(284);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(354);
+    expect(allowed).toHaveLength(286);
     expect(blocked).toHaveLength(68);
     expect(outbound).toHaveLength(22);
     expect(
@@ -702,6 +702,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       'GET /stores/:id/deletion-preview',
       'GET /stores/:id/floor-plan',
       'GET /stores/:id/floor-plan/live',
+      'GET /stores/:id/floor-plan/live/attention',
       'GET /stores/:id/floor-plan/live/seats/:number',
       'GET /stores/closures',
       'GET /stores/floor-plans',
@@ -842,10 +843,23 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       entry.path.startsWith('/support/bug-reports'),
     );
 
-    expect(communications).toHaveLength(26);
+    expect(communications).toHaveLength(27);
     expect(
       communications.filter((entry) => entry.decision === 'ALLOW'),
-    ).toHaveLength(26);
+    ).toHaveLength(27);
+    expect(
+      communications.find(
+        (entry) =>
+          entry.id === 'POST /stores/:id/floor-plan/live/alerts/:ticketId',
+      ),
+    ).toMatchObject({
+      decision: 'ALLOW',
+      minimumScope: 'STORES',
+      storeFilter: 'REQUIRED',
+      capability: 'manage_communications',
+      effect: 'TENANT_WRITE',
+      gaps: [],
+    });
     expect(crm).toHaveLength(8);
     expect(
       crm.every(

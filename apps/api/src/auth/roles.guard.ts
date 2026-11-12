@@ -10,6 +10,7 @@ import { AuthenticatedRequest } from './auth.types';
 import {
   AccessCapability,
   hasCapability,
+  isClubSchemeAlertPath,
   isClubSchemeReadPath,
 } from './capabilities';
 import { ROLES_KEY } from './roles.decorator';
@@ -202,6 +203,10 @@ export class RolesGuard implements CanActivate {
 
     if (this.isReadMethod(method) && isClubSchemeReadPath(path)) {
       return 'view_club_scheme';
+    }
+
+    if (method === 'POST' && isClubSchemeAlertPath(path)) {
+      return 'manage_communications';
     }
 
     if (path.startsWith('/stores')) {

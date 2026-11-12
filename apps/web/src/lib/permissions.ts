@@ -616,12 +616,16 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_communications",
     "manage_communications",
     "approve_guest_game_rewards",
+    "view_club_scheme",
+    "view_guests",
     ...shiftStaffCapabilities,
   ],
   CLUB_ADMINISTRATOR: [
     "view_communications",
     "manage_communications",
     "approve_guest_game_rewards",
+    "view_club_scheme",
+    "view_guests",
     ...shiftStaffCapabilities,
   ],
   TRAINEE: [

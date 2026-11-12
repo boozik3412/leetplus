@@ -2091,6 +2091,38 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   тарифов и карточки нового гостя, worker и scheduler нет. BFF
   `GET /api/stores/:id/floor-plan/live/seats/:number` проксирует его тем же
   `proxyJsonRequest`.
+- Подсказки и обращения гостей (12.11.2026): `GET /stores/:id/floor-plan/live/attention`
+  (`StoreFloorPlansController`, JWT + `RolesGuard` → `view_club_scheme`,
+  manifest `STORES_VERIFIED`) на каждый запрос заново проверяет свежий store
+  scope через то же 15-секундное чтение Langame, а собранный ответ
+  кэширует в памяти процесса на 15 секунд на клуб и уровень доступа (с правом
+  «Гости» и без). Без `view_guests` ответ несёт `guestAccess = NO_CAPABILITY`,
+  только номер ПК и подсказку «осталось N мин» без гостя; БД гостей и
+  обращения не читаются. С `view_guests` гости за ПК находятся так же, как в
+  `/live/seats` (`tenantId` + `guest_id` сеанса), и из полей карточки гостя
+  (`GuestsService.floorPlanGuestRows`: сегмент, RFM, CRM-статус, задача,
+  нагрузка бонусов, игровые счётчики наград) сервер строит только готовые
+  тексты подсказок с именем гостя; телефона, денег гостя и игровых
+  идентификаторов в ответе нет. Счётчики наград используются для подсказки и
+  без `view_guest_gamification` (виден только текст «N наград ждут»). Гостям
+  с отметкой «Сотрудник» — только «осталось N мин». Обращения — `GuestSupportTicket`
+  этого клуба (`tenantId` + `storeId`): открытые за 12 часов (до 20) и
+  решённые за час (до 3), с номером ПК гостя, именем, каналом и последним
+  сообщением гостя в одну строку до 200 символов. Записей в Langame, новых
+  запросов к Langame, worker и scheduler нет.
+- `POST /stores/:id/floor-plan/live/alerts/:ticketId` (`StoreGuestAlertsController`,
+  модуль `COMMUNICATIONS`, manifest `STORES_VERIFIED`, `RolesGuard` →
+  `manage_communications`, сервис дополнительно требует `view_guests` и
+  `view_club_scheme`) меняет статус обращения клуба из свежего scope: только
+  `NEW → IN_PROGRESS` и `NEW/IN_PROGRESS → RESOLVED`, compare-and-set в
+  транзакции, иначе 409; чужой клуб или tenant — 404. Исполнитель обращения
+  не назначается; в `GuestSupportTicketAuditEvent` пишется
+  `UPDATED_FROM_CLUB_SCHEME` с автором и статусами. Гостю ничего не
+  отправляется.
+- Роли `CLUB_ADMINISTRATOR` и `SENIOR_ADMINISTRATOR` (12.11.2026) получили
+  `view_club_scheme` и `view_guests`: схема зала на «Моя смена» и полная
+  карточка гостя по клику. `view_guests` открывает им раздел «Гости» всей
+  сети, как и `CLUB_MANAGER` (список гостей не сужается по клубу).
 - Web: страница `/visualization`, раздел меню «Визуализация» (`canAccessPath` → `view_club_scheme`) и BFF
   `/api/stores/:id/floor-plan*` через `proxyJsonRequest` (cookie → JWT,
   `private, no-store`). BFF `GET /api/stores/floor-plans` (11.11.2026) тем же
@@ -2098,7 +2130,13 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   залом (id, название, адрес, шаблон): из него сцена на полном экране строит
   карточки других клубов сети для переключения. Новых прав, данных и
   запросов к Langame нет; в iframe страницы `/visualization` карточки не
-  показываются. Сама 3D-сцена — статические файлы
+  показываются. Страница «Моя смена» (`/staff/shift-workspace`) при
+  `view_club_scheme` читает тот же `GET /stores/floor-plans` и показывает
+  зал клуба сотрудника в iframe сцены с `embed=shift` (спокойный режим без
+  улицы и автоповорота, метки подсказок над ПК, список и обращения); BFF
+  `GET /api/stores/:id/floor-plan/live/attention` и
+  `POST /api/stores/:id/floor-plan/live/alerts/:ticketId` проксируют новые
+  маршруты тем же `proxyJsonRequest`. Сама 3D-сцена — статические файлы
   `public/club-scheme/<template>/` и vendored three.js без данных; данные она
   получает тем же BFF с cookie пользователя, в iframe того же origin.
 

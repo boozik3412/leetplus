@@ -2838,6 +2838,54 @@ export class GuestsService {
     };
   }
 
+  /**
+   * Rows of the guests sitting in a club now, for the hints of «Схема клуба»:
+   * the same dashboard rows as the guest list (segment, RFM, CRM, bonus load,
+   * game profile brief). Game facts are read even when the viewer lacks
+   * `view_guest_gamification`: the caller turns them into a short hint and
+   * never returns the profile itself.
+   */
+  async floorPlanGuestRows(
+    tenantId: string,
+    guestIds: readonly string[],
+  ): Promise<GuestDashboardRow[]> {
+    const ids = Array.from(new Set(guestIds));
+    if (ids.length === 0) return [];
+    const period = this.resolvePeriod({});
+    const filters: ResolvedGuestFilters = {
+      storeId: null,
+      guestGroupId: null,
+      externalDomain: null,
+      externalGuestTypeId: null,
+      search: null,
+      excludedAdminGuestGroups: [],
+      onlyGuestGroups: undefined,
+      markedStaff: 'ANY',
+    };
+    const guests = await this.prisma.guest.findMany({
+      where: { tenantId, id: { in: ids } },
+      select: this.guestSelect(),
+    });
+    if (guests.length === 0) return [];
+    const { metricsByGuestId, groupsByKey, gameFactsByGuestId } =
+      await this.buildGuestMetrics(
+        tenantId,
+        period,
+        filters,
+        guests.map((guest) => guest.id),
+        { includeGame: true },
+      );
+    return guests.map((guest) =>
+      this.toDashboardRow(
+        guest,
+        metricsByGuestId.get(guest.id),
+        period,
+        groupsByKey,
+        gameFactsByGuestId.get(guest.id) ?? null,
+      ),
+    );
+  }
+
   private async loadGuestStaffMark(
     tenantId: string,
     guestId: string,

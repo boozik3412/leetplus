@@ -1,5 +1,5 @@
 /* LeetPlus «Схема клуба»: 3D-сцена зала 1337 · Пушкинская 217 (шаблон 1337-pushkinskaya-217).
-   Данные: GET/PATCH /api/stores/:id/floor-plan, GET /api/stores/:id/floor-plan/live и /live/seats/:n. */
+   Данные: GET/PATCH /api/stores/:id/floor-plan, GET /api/stores/:id/floor-plan/live, /live/seats/:n и /live/attention, POST /live/alerts/:id. */
 (() => {
 'use strict';
 /* ---------------- helpers ---------------- */
@@ -8,6 +8,10 @@ const $ = s => document.querySelector(s);
 const Q = new URLSearchParams(location.search);
 const STORE_ID = Q.get('store') || '';
 const CAN_EDIT = Q.get('edit') === '1';
+// embed=shift: the hall on «Моя смена». Calm: no street traffic, no auto-rotation, guests do not walk in.
+const EMBED = Q.get('embed') === 'shift';
+const CALM = EMBED || Q.get('calm') === '1';
+if (EMBED) document.documentElement.classList.add('embed');
 const TEMPLATE = '1337-pushkinskaya-217';
 if (Q.get('theme') === 'dark' || Q.get('theme') === 'light') document.documentElement.setAttribute('data-theme', Q.get('theme'));
 // Inside the LeetPlus cabinet the scene follows the cabinet's theme switch.
@@ -738,7 +742,8 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme
 /* ---------------- camera ---------------- */
 const DIR = new THREE.Vector3(0.32, 0.86, 0.92).normalize();
 const HOME = { t: [0, 0, 0.8], d: 44 };
-const homeView = () => innerWidth <= 760 ? { t: [0, 0, 0.4], d: 40 } : HOME;
+const baseHomeView = () => innerWidth <= 760 ? { t: [0, 0, 0.4], d: 40 } : HOME;
+const homeView = () => { const v = baseHomeView(); return EMBED && innerWidth > 760 ? Object.assign({}, v, { d: v.d * 0.76 }) : v; };
 let fly = null;
 function camFor(p) { const t = new THREE.Vector3(...p.t); return { t, pos: t.clone().add((p.dir ? new THREE.Vector3(...p.dir).normalize() : DIR.clone()).applyAxisAngle(new THREE.Vector3(0, 1, 0), p.rot || 0).multiplyScalar(p.d * fitScale())) }; }
 function fitScale() { const a = camera.aspect; return a < 0.8 ? 1.75 : a < 1.2 ? 1.3 : 1; }
@@ -887,6 +892,7 @@ function updateOverlay() {
     const ex = Math.max(cx, Math.min(ax, cx + cw)), ey = Math.max(cy, Math.min(ay, cy + chh));
     ln.setAttribute('x1', ax); ln.setAttribute('y1', ay); ln.setAttribute('x2', ex); ln.setAttribute('y2', ey);
   }
+  placeAttentionMarkers();
   for (const [id, el] of pillEls) {
     const s = seats.find(x => x.id === id); const w = seatWorld(s);
     const [px, py] = project(w.x, 1.9, w.z);
@@ -909,13 +915,15 @@ function liveNote() {
   return `Статусы ПК, смена и выручка из Langame, обновление каждые 20 секунд${at ? ` · последнее в ${at}` : ''}.${LIVE.warnings.length ? ' ' + LIVE.warnings.map(esc).join(' ') : ''}`;
 }
 function renderPanel() {
-  panel.classList.toggle('home', view.type === 'home' && !editing);
+  panel.classList.toggle('home', view.type === 'home' && !editing && !EMBED);
   layoutChrome();
   if (editing) { panel.classList.toggle('collapsed', isPhone() && !sheetOpen); renderEditor(); syncPills(); return; }
   panel.classList.toggle('collapsed', isPhone() && !sheetOpen);
   $('#grab').setAttribute('aria-label', sheetOpen ? 'Свернуть панель' : 'Развернуть панель');
   let h = '';
-  if (view.type === 'home') {
+  if (view.type === 'home' && EMBED) {
+    h += attentionHomeHtml();
+  } else if (view.type === 'home') {
     const linked = linkedSeats(), pcs = seats.filter(s => s.state === 'busy').length, freeN = seats.filter(s => s.state === 'free').length, ending = seats.filter(s => seatState(s) === 'ending').length;
     h += `<div class="ph"><div><div class="eyebrow">Обзор клуба</div><h2>${esc(CLUB.name)}</h2><div class="sub">Планировка по схеме бронирования Langame · ${seats.length} мест на схеме</div></div><span class="chip ${LIVE.status === 'LIVE' ? 'good' : 'off'}">${LIVE.status === 'LIVE' ? 'Live' : 'Нет данных'}</span></div>
     <div class="statgrid"><div class="stat"><small>Загрузка</small><b class="num">${linked.length ? Math.round(pcs / linked.length * 100) + '%' : '—'}</b></div><div class="stat"><small>Свободно</small><b class="num">${linked.length ? freeN : '—'}</b></div><div class="stat"><small>Заканчивают</small><b class="num">${linked.length ? ending : '—'}</b></div></div>
@@ -947,7 +955,7 @@ function renderPanel() {
     h += `<button class="back" type="button" data-zone="${s.zone}">← ${z.name}</button>
     <div class="ph"><div><div class="eyebrow">${z.name}</div><h2>${s.id}</h2><div class="sub">${cfgOf(z, 'Видеокарта')} · ${cfgOf(z, 'Монитор')}</div></div><span class="chip ${STC[st][1]}">${STC[st][0]}</span></div>`;
     if (s.state === 'busy') {
-      h += seatSessionHtml(s, st);
+      h += seatHintsHtml(s) + seatSessionHtml(s, st);
     } else if (s.state === 'free') {
       h += `<dl class="kv"><dt>Статус</dt><dd>свободен</dd></dl>`;
     } else {
@@ -955,7 +963,7 @@ function renderPanel() {
     }
     h += `<div class="sec"><h3>Конфиг</h3>${cfgHtml(z)}</div>`;
   }
-  if (view.type === 'home') h += `<div class="more">Наведите, чтобы раскрыть</div>`;
+  if (view.type === 'home' && !EMBED) h += `<div class="more">Наведите, чтобы раскрыть</div>`;
   h += `<div class="note">${liveNote()}</div>`;
   pbody.innerHTML = h;
   syncPills();
@@ -1085,7 +1093,7 @@ function streetIn() {
   sx = THREE.MathUtils.clamp(sx, MOVER_X[0] + 1, MOVER_X[1] - 1);
   return [[sx, ENTRY.side], [ENTRY.turn, ENTRY.side], ...ENTRY.path];
 }
-const canWalk = () => LIVE.loaded && !editing && !reduced && document.visibilityState === 'visible' && visitors.length < VISIT_MAX;
+const canWalk = () => LIVE.loaded && !CALM && !editing && !reduced && document.visibilityState === 'visible' && visitors.length < VISIT_MAX;
 function addVisitor(guest, pts, seat, mode) {
   const p = makePerson({ shirt: guest.shirt, hair: guest.hair, skin: guest.skin }, false);
   p.position.set(pts[0][0], 0.08, pts[0][1]); world.add(p);
@@ -1244,6 +1252,233 @@ function hoverSeatInfo(s) {
   tipSeatNum = num; clearTimeout(tipSeatTimer);
   if (num) tipSeatTimer = setTimeout(() => { if (tipSeatNum === num) seatInfo(s, true); }, 350);
 }
+/* ---------------- attention: GET /api/stores/:id/floor-plan/live/attention ----------------
+   Hints over the computers (what to pay attention to about the guest) and the
+   guests' messages. `var`: the scene is built before this part of the script runs,
+   and CLUB / editing are declared further down, so only callbacks touch them. */
+var ATTN = { data: null, pending: false, failed: false, off: new Set(), busy: new Set(), timer: 0, back: 0 };
+var ATTN_POLL_MS = 15000;
+var ATTN_TONES = ['ALERT', 'TODAY', 'OFFER', 'NEW', 'KNOW'];
+var ATTN_TONE_LABEL = { ALERT: 'Обращения', TODAY: 'Сегодня', OFFER: 'Предложить', NEW: 'Новые', KNOW: 'Знай гостя' };
+var ATTN_SVG = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+var ATTN_ICON = {
+  GUEST_MESSAGE: ATTN_SVG('<path d="M12 5v9M12 18.5v.5"/>'),
+  REWARD_EXPIRING: ICON.gift, REWARDS_WAITING: ICON.gift,
+  TIME_ENDING: ATTN_SVG('<circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2M9.5 2.5h5"/>'),
+  TASK: ATTN_SVG('<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
+  NOT_IN_GAME: ICON.star, GAME_IDLE: ICON.star, BONUS_IDLE: ICON.rub, NO_PURCHASES: ICON.cup,
+  FIRST_VISIT: ATTN_SVG('<path d="M12 5v14M5 12h14"/>'),
+  VIP: ICON.badge, RETURNED: ATTN_SVG('<path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v5h5"/>')
+};
+var attnMarkers = new Map();
+
+function attnDayKey() { const d = new Date(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; }
+function attnDoneKey() { return `lp-attn-done:${STORE_ID}:${attnDayKey()}`; }
+function attnDone() {
+  try { const v = JSON.parse(localStorage.getItem(attnDoneKey()) || '[]'); return new Set(Array.isArray(v) ? v : []); } catch (e) { return new Set(); }
+}
+function attnMarkDone(id) {
+  const done = attnDone(); done.add(id);
+  try { localStorage.setItem(attnDoneKey(), JSON.stringify([...done].slice(-300))); } catch (e) { /* private mode: hidden until reload */ }
+  ATTN.hidden = ATTN.hidden || new Set(); ATTN.hidden.add(id);
+}
+function attnHintId(seat, hint) { return `${seat.number}:${seat.guestId || ''}:${hint.key}`; }
+function attnIsDone(seat, hint, done) { const id = attnHintId(seat, hint); return done.has(id) || (ATTN.hidden && ATTN.hidden.has(id)); }
+/* Hints of a seat that are still open and pass the tone filter, most urgent first. */
+function attnOpenHints(seat, done) {
+  return seat.hints.filter(h => !ATTN.off.has(h.tone) && (h.key === 'GUEST_MESSAGE' || !attnIsDone(seat, h, done)));
+}
+function attnSceneSeat(num) { return seats.find(x => x.num === num) || null; }
+function attnAgo(iso) {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (!isFinite(m)) return '';
+  return m < 1 ? 'только что' : m < 60 ? `${m} мин назад` : `${Math.floor(m / 60)} ч ${m % 60} мин назад`;
+}
+
+async function loadAttention() {
+  if (!API || ATTN.pending || document.hidden) return;
+  ATTN.pending = true;
+  try {
+    const r = await fetch(`${API}/live/attention`, { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } });
+    if (r.ok) { ATTN.data = await r.json(); ATTN.failed = false; } else ATTN.failed = true;
+  } catch (e) { ATTN.failed = true; }
+  ATTN.pending = false;
+  attnRefreshPanel();
+}
+function attnRefreshPanel() {
+  if (typeof editing === 'undefined' || editing) return;
+  if ((view.type === 'home' && EMBED) || view.type === 'seat') renderPanel();
+}
+function startAttention() {
+  if (!API) return;
+  loadAttention();
+  clearInterval(ATTN.timer);
+  ATTN.timer = setInterval(loadAttention, ATTN_POLL_MS);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) loadAttention(); });
+}
+
+async function setAlertStatus(id, status) {
+  if (!API || ATTN.busy.has(id)) return;
+  ATTN.busy.add(id); attnRefreshPanel();
+  let ok = false, msg = null;
+  try {
+    const r = await fetch(`${API}/live/alerts/${encodeURIComponent(id)}`, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ status }) });
+    ok = r.ok;
+    if (!ok) { const d = await r.json().catch(() => null); msg = d && typeof d.message === 'string' ? d.message : null; if (r.status === 403) msg = 'Нет прав менять обращения'; if (r.status === 409) msg = msg || 'Обращение уже изменили'; }
+  } catch (e) { ok = false; }
+  ATTN.busy.delete(id);
+  if (ok && ATTN.data) {
+    const a = ATTN.data.alerts.find(x => x.id === id); if (a) a.status = status;
+    if (status === 'RESOLVED') for (const s of ATTN.data.seats) s.hints = s.hints.filter(h => !(h.key === 'GUEST_MESSAGE' && h.alertId === id));
+  }
+  toast(ok ? (status === 'RESOLVED' ? 'Обращение решено' : 'Отметили, что вы идёте') : (msg || 'Не получилось изменить обращение'));
+  attnRefreshPanel();
+  loadAttention();
+}
+
+/* ---------------- markers over the heads of the guests ---------------- */
+function placeAttentionMarkers() {
+  const d = ATTN.data;
+  const show = d && typeof editing !== 'undefined' && !editing && view.type !== 'seat';
+  const want = new Set();
+  const placed = [];
+  if (show) {
+    const done = attnDone();
+    const rows = [];
+    for (const seat of d.seats) {
+      const open = attnOpenHints(seat, done);
+      const s = attnSceneSeat(seat.number);
+      if (!open.length || !s || s.state !== 'busy') continue;
+      let w;
+      if (s.person && s.person.userData.head) { w = s.person.userData.head.getWorldPosition(new THREE.Vector3()); w.y += 0.42; }
+      else { w = seatWorld(s); w.y = 1.9; }
+      const [x, y, depth] = project(w.x, w.y, w.z);
+      if (depth > 1) continue;
+      rows.push({ seat, s, top: open[0], more: open.length - 1, x, y });
+    }
+    rows.sort((a, b) => ATTN_TONES.indexOf(a.top.tone) - ATTN_TONES.indexOf(b.top.tone) || b.y - a.y);
+    for (const r of rows) {
+      const key = String(r.seat.number); want.add(key);
+      let el = attnMarkers.get(key);
+      if (!el) {
+        el = document.createElement('button'); el.type = 'button'; el.className = 'amk';
+        el.addEventListener('click', () => { const s = attnSceneSeat(Number(el.dataset.n)); if (s) select({ type: 'seat', id: s.id }); });
+        overlay.appendChild(el); attnMarkers.set(key, el);
+      }
+      el.dataset.n = key;
+      const wide = r.top.tone === 'ALERT';
+      const sig = `${r.top.tone}|${r.top.key}|${r.more}|${wide ? r.top.title : ''}`;
+      if (el.dataset.sig !== sig) {
+        el.dataset.sig = sig;
+        el.className = `amk t-${r.top.tone}${wide ? ' wide' : ''}`;
+        el.innerHTML = `<i>${ATTN_ICON[r.top.key] || ''}</i><span>${wide ? 'Обращение' : esc(r.s.num)}</span>${r.more > 0 ? `<em>+${r.more}</em>` : ''}`;
+        el.setAttribute('aria-label', `ПК ${r.seat.number}${r.seat.guestName ? ', ' + r.seat.guestName : ''}: ${r.top.title}`);
+        el.title = `ПК ${r.seat.number} · ${r.top.title}`;
+      }
+      const w = el.offsetWidth || 40, h = el.offsetHeight || 24;
+      // Nearest free spot: above the head, then beside it, then one row higher.
+      const hits = (x, y) => placed.some(p => Math.abs(p.x - x) < (p.w + w) / 2 + 3 && Math.abs(p.y - y) < h + 2);
+      const side = w + 4, up = h + 3;
+      const spots = [[0, 0], [side * 0.6, 0], [-side * 0.6, 0], [0, -up], [side * 0.6, -up], [-side * 0.6, -up], [side * 1.2, 0], [-side * 1.2, 0], [0, -2 * up]];
+      let x = r.x, y = r.y;
+      for (const [dx, dy] of spots) if (!hits(r.x + dx, r.y + dy)) { x = r.x + dx; y = r.y + dy; break; }
+      placed.push({ x, y, w });
+      el.style.transform = `translate(${Math.round(x)}px,${Math.round(y)}px) translate(-50%,-100%)`;
+    }
+  }
+  for (const [key, el] of attnMarkers) if (!want.has(key)) { el.remove(); attnMarkers.delete(key); }
+}
+
+/* ---------------- panel: the hall on «Моя смена» ---------------- */
+function attnChipsHtml(d, done) {
+  const count = {};
+  for (const seat of d.seats) for (const h of seat.hints) if (h.key !== 'GUEST_MESSAGE' && !attnIsDone(seat, h, done)) count[h.tone] = (count[h.tone] || 0) + 1;
+  count.ALERT = d.alerts.filter(a => a.status !== 'RESOLVED').length;
+  return `<div class="achips" role="group" aria-label="Что показывать на схеме">${ATTN_TONES.map(t => `<button type="button" class="achip" data-tone="${t}" aria-pressed="${ATTN.off.has(t) ? 'false' : 'true'}"><i class="t-${t}"></i>${ATTN_TONE_LABEL[t]}<em class="num">${count[t] || 0}</em></button>`).join('')}</div>`;
+}
+function attnAlertHtml(a) {
+  const busy = ATTN.busy.has(a.id);
+  const seat = a.number != null ? attnSceneSeat(a.number) : null;
+  const who = `${a.number != null ? `ПК ${a.number}` : 'Не за ПК'}${a.guestName ? ' · ' + esc(a.guestName) : ''}`;
+  const acts = a.status === 'RESOLVED' ? `<span class="adone">Решено</span>`
+    : `${a.status === 'NEW' ? `<button type="button" class="abtn" data-alert="${esc(a.id)}" data-status="IN_PROGRESS"${busy ? ' disabled' : ''}>Иду</button>` : `<span class="aprog">Администратор идёт</span>`}<button type="button" class="abtn pri" data-alert="${esc(a.id)}" data-status="RESOLVED"${busy ? ' disabled' : ''}>Решено</button>`;
+  return `<div class="arow s-${a.status}"${seat ? ` data-seat="${esc(seat.id)}" role="button" tabindex="0"` : ''}><div class="atop"><b>${who}</b><time>${a.channel === 'TELEGRAM' ? 'Telegram' : 'Приложение'} · ${attnAgo(a.lastActivityAt || a.createdAt)}</time></div><q>${esc(a.text)}</q><div class="aacts">${acts}</div></div>`;
+}
+function attentionHomeHtml() {
+  const linked = linkedSeats(), busyN = seats.filter(s => s.state === 'busy').length;
+  let h = `<div class="ph"><div><div class="eyebrow">Сейчас в зале</div><h2>${esc(CLUB.name)}</h2><div class="sub">${linked.length ? `${busyN} из ${linked.length} ПК заняты` : 'Нет данных Langame о компьютерах'}</div></div><span class="chip ${LIVE.status === 'LIVE' ? 'good' : 'off'}">${LIVE.status === 'LIVE' ? 'Live' : 'Нет данных'}</span></div>`;
+  const d = ATTN.data;
+  if (!d) return h + `<div class="note">${ATTN.failed ? 'Не удалось получить подсказки, попробую ещё раз.' : 'Загружаю подсказки по гостям…'}</div>`;
+  const done = attnDone();
+  h += attnChipsHtml(d, done);
+  if (d.guestAccess === 'AVAILABLE') {
+    const open = d.alerts.filter(a => a.status !== 'RESOLVED').length;
+    const alerts = ATTN.off.has('ALERT') ? [] : d.alerts;
+    h += `<div class="sec asec"><h3>Обращения гостей <span class="acnt${open ? ' red' : ''}">${open}</span></h3>${alerts.length ? `<div class="alist">${alerts.map(attnAlertHtml).join('')}</div>` : `<div class="aempty">${ATTN.off.has('ALERT') ? 'Обращения скрыты фильтром' : 'Новых обращений нет'}</div>`}</div>`;
+  }
+  const rows = [];
+  for (const seat of d.seats) {
+    const open = attnOpenHints(seat, done).filter(x => x.key !== 'GUEST_MESSAGE');
+    if (open.length) rows.push({ seat, open });
+  }
+  rows.sort((a, b) => ATTN_TONES.indexOf(a.open[0].tone) - ATTN_TONES.indexOf(b.open[0].tone) || a.seat.number - b.seat.number);
+  h += `<div class="sec"><h3>На что обратить внимание <span class="acnt">${rows.length}</span></h3>${rows.length ? `<div class="alist">${rows.map(({ seat, open }) => {
+    const s = attnSceneSeat(seat.number), top = open[0];
+    return `<div class="lrow"${s ? ` data-seat="${esc(s.id)}" role="button" tabindex="0"` : ''}><span class="apc t-${top.tone}">${seat.number}</span><span class="lt"><b>${seat.guestName ? esc(seat.guestName) + ' · ' : ''}${esc(top.title)}</b><span>${esc(top.hint)}${open.length > 1 ? ` · ещё ${open.length - 1}` : ''}</span></span><button type="button" class="aok" data-done="${esc(attnHintId(seat, top))}" aria-label="Готово: ${esc(top.title)}">Готово</button></div>`;
+  }).join('')}</div>` : `<div class="aempty">Сейчас подсказок нет. Метки появятся над ПК, когда будет повод.</div>`}</div>`;
+  if (d.guestAccess !== 'AVAILABLE') h += `<div class="lockn">Подсказки по гостям и обращения видят роли с доступом к разделу «Гости». Сейчас видно только, у кого заканчивается время.</div>`;
+  return h;
+}
+/* Hints of the guest at the selected computer, above the session block. */
+function seatHintsHtml(s) {
+  const d = ATTN.data;
+  if (!d || !s || s.state !== 'busy') return '';
+  const seat = d.seats.find(x => x.number === s.num);
+  if (!seat || !seat.hints.length) return '';
+  const done = attnDone();
+  const items = seat.hints.map(hint => {
+    const isDone = hint.key !== 'GUEST_MESSAGE' && attnIsDone(seat, hint, done);
+    const alert = hint.key === 'GUEST_MESSAGE' && hint.alertId ? d.alerts.find(a => a.id === hint.alertId) : null;
+    let acts = '';
+    if (alert && alert.status !== 'RESOLVED') {
+      const busy = ATTN.busy.has(alert.id);
+      acts = `<div class="aacts">${alert.status === 'NEW' ? `<button type="button" class="abtn" data-alert="${esc(alert.id)}" data-status="IN_PROGRESS"${busy ? ' disabled' : ''}>Иду</button>` : `<span class="aprog">Администратор идёт</span>`}<button type="button" class="abtn pri" data-alert="${esc(alert.id)}" data-status="RESOLVED"${busy ? ' disabled' : ''}>Решено</button></div>`;
+    } else if (!isDone && hint.key !== 'GUEST_MESSAGE') {
+      acts = `<div class="aacts"><button type="button" class="aok" data-done="${esc(attnHintId(seat, hint))}">Готово</button></div>`;
+    }
+    return `<li class="${isDone ? 'isdone' : ''}"><i class="t-${hint.tone}"></i><div><b>${esc(hint.title)}</b><span class="say">${esc(hint.hint)}</span>${acts}</div></li>`;
+  }).join('');
+  return `<div class="sec ahints"><h3>На что обратить внимание</h3><ul>${items}</ul></div>`;
+}
+
+/* Buttons inside the panel run before the panel's own click handler, which
+   would open the computer of the row. */
+pbody.addEventListener('click', e => {
+  const tone = e.target.closest('[data-tone]');
+  const done = e.target.closest('[data-done]');
+  const alert = e.target.closest('[data-alert]');
+  if (!tone && !done && !alert) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  if (tone) { const t = tone.dataset.tone; if (ATTN.off.has(t)) ATTN.off.delete(t); else ATTN.off.add(t); renderPanel(); return; }
+  if (done) { attnMarkDone(done.dataset.done); toast('Подсказка скрыта до конца дня'); renderPanel(); return; }
+  if (alert && !alert.disabled) setAlertStatus(alert.dataset.alert, alert.dataset.status);
+}, true);
+pbody.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-seat][role="button"]')) { e.preventDefault(); e.target.click(); }
+});
+
+/* On «Моя смена» the hall goes back to its place 20 seconds after the last touch. */
+if (EMBED) {
+  controls.addEventListener('end', () => {
+    clearTimeout(ATTN.back);
+    ATTN.back = setTimeout(() => { if (view.type === 'home' && !fly && !(typeof editing !== 'undefined' && editing)) flyTo(homeView()); }, 20000);
+  });
+}
+/* Calm hall: no cars and no people in the street. */
+if (CALM) {
+  for (const m of movers) m.o.visible = false;
+  for (const w of walkers) w.p.visible = false;
+}
 /* ---------------- other clubs of the network with a drawn hall (full screen only) ---------------- */
 async function loadClubNav() {
   if (window.parent !== window || !STORE_ID) return;
@@ -1390,7 +1625,7 @@ $('#kpis').addEventListener('pointerout', e => { if (e.target.closest('[data-k="
 $('#kpis').addEventListener('click', e => { if (!editing && e.target.closest('[data-k="admin"]')) select({ type: 'zone', id: 'admin' }); });
 
 /* ---------------- tools ---------------- */
-let autoPref = !reduced;
+let autoPref = !reduced && !CALM;
 function setAuto(on) { controls.autoRotate = on; $('#rot').setAttribute('aria-pressed', String(on)); }
 function userTouched() { fly = null; if (controls.autoRotate) setAuto(false); }
 controls.addEventListener('start', userTouched);
@@ -1746,7 +1981,7 @@ function animate() {
   // clamp target
   controls.target.x = THREE.MathUtils.clamp(controls.target.x, X0 - 2, X_END + 2); controls.target.z = THREE.MathUtils.clamp(controls.target.z, Z0 - 2, Z_END + 4); controls.target.y = 0;
   controls.update();
-  if (!reduced) {
+  if (!reduced && !CALM) {
     for (const s of seats) if (s.person) { const ph = s.person.userData.ph; s.person.userData.head.position.y = 1.47 + Math.sin(t * 2 + ph) * 0.012; s.person.userData.hair.position.y = s.person.userData.head.position.y; s.person.rotation.y = Math.sin(t * 0.5 + ph) * 0.06; }
     items.forEach((it, i) => { const p = it.g.userData.staff; if (p) p.rotation.y = Math.sin(t * 0.3 + i) * 0.35; });
     for (const m of movers) { m.o.position.x += m.v * dt; if (m.o.position.x > MOVER_X[1]) m.o.position.x = MOVER_X[0]; if (m.o.position.x < MOVER_X[0]) m.o.position.x = MOVER_X[1]; }
@@ -1781,6 +2016,7 @@ requestAnimationFrame(() => { measureObstacles(); });
 animate();
 
 loadPlan().then(poll);
+startAttention();
 setInterval(minuteTick, 30000);
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { redrawTextures(); measureObstacles(); });
 window.__club = { select, seats, camera, controls, sel: () => selected, items: () => items, select3d, settle, Box3: THREE.Box3 };

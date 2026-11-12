@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { StoreFloorPlanAttentionService } from './store-floor-plan-attention.service';
 import { StoreFloorPlanLiveService } from './store-floor-plan-live.service';
 import {
   StoreFloorPlansService,
@@ -27,6 +28,7 @@ export class StoreFloorPlansController {
   constructor(
     private readonly storeFloorPlansService: StoreFloorPlansService,
     private readonly storeFloorPlanLiveService: StoreFloorPlanLiveService,
+    private readonly storeFloorPlanAttentionService: StoreFloorPlanAttentionService,
   ) {}
 
   @Roles(...TENANT_USER_ROLES)
@@ -65,6 +67,17 @@ export class StoreFloorPlansController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.storeFloorPlanLiveService.getSeat(id, number, user);
+  }
+
+  /** Hints about the guests at the computers and the guests' messages. */
+  @Roles(...TENANT_USER_ROLES)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get(':id/floor-plan/live/attention')
+  getFloorPlanAttention(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.storeFloorPlanAttentionService.get(id, user);
   }
 
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)

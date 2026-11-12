@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  clubFloorPlanForShift,
   clubFloorPlanSceneUrl,
   clubFloorPlanSwitcher,
   clubFloorPlanTemplateFor,
@@ -69,6 +70,10 @@ test("the scene opens for one club and edits only when allowed", () => {
     clubFloorPlanSceneUrl(template, "s1", true),
     "/club-scheme/apex-holmogorova-17/index.html?store=s1&edit=1",
   );
+  assert.equal(
+    clubFloorPlanSceneUrl(template, "s1", false, "shift"),
+    "/club-scheme/apex-holmogorova-17/index.html?store=s1&embed=shift",
+  );
 });
 
 test("lists only clubs with a hall for the scene switcher", () => {
@@ -122,4 +127,30 @@ test("lists only clubs with a hall for the scene switcher", () => {
   );
   assert.deepEqual(clubFloorPlanSwitcher(null), { clubs: [] });
   assert.deepEqual(clubFloorPlanSwitcher({ clubs: "x" }), { clubs: [] });
+});
+
+test("puts the hall of the employee's club on «Моя смена»", () => {
+  const body = {
+    clubs: [
+      { id: "s1", name: "Apex", address: "Холмогорова 17б", template: null },
+      { id: "s2", name: "1337", address: "Пушкинская 217", template: null },
+      { id: "s3", name: "Без зала", address: null, template: null },
+    ],
+  };
+  assert.deepEqual(clubFloorPlanForShift(body, "s2", null), {
+    storeId: "s2",
+    name: "1337",
+    sceneUrl:
+      "/club-scheme/1337-pushkinskaya-217/index.html?store=s2&embed=shift",
+    fullUrl: "/visualization?store=s2",
+  });
+  assert.equal(clubFloorPlanForShift(body, null, "Apex")?.storeId, "s1");
+  // Several clubs and none of them the employee's: no hall on the page.
+  assert.equal(clubFloorPlanForShift(body, "s3", null), null);
+  assert.equal(clubFloorPlanForShift(body, null, null), null);
+  assert.equal(
+    clubFloorPlanForShift({ clubs: [body.clubs[0]] }, null, null)?.storeId,
+    "s1",
+  );
+  assert.equal(clubFloorPlanForShift(null, "s1", null), null);
 });

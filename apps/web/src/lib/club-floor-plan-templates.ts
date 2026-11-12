@@ -52,14 +52,22 @@ export function clubFloorPlanTemplateFor(
   );
 }
 
+/**
+ * `embed: "shift"` is the calm hall on «Моя смена»: no street traffic, no
+ * auto-rotation, hints over the guests and the guests' messages in the panel.
+ */
 export function clubFloorPlanSceneUrl(
   template: ClubFloorPlanTemplate,
   storeId: string,
   canEdit: boolean,
+  embed?: "shift",
 ) {
   const params = new URLSearchParams({ store: storeId });
   if (canEdit) {
     params.set("edit", "1");
+  }
+  if (embed) {
+    params.set("embed", embed);
   }
   return `/club-scheme/${template.id}/index.html?${params.toString()}`;
 }
@@ -109,4 +117,32 @@ export function clubFloorPlanSwitcher(body: unknown) {
     }
   }
   return { clubs };
+}
+
+/**
+ * The hall on «Моя смена»: the club of the employee, then the club of the
+ * open shift, then the only club with a hall in the viewer's scope. Several
+ * clubs and none of them his own: no hall, the full scene stays one click away.
+ */
+export function clubFloorPlanForShift(
+  body: unknown,
+  staffStoreId: string | null,
+  shiftStoreName: string | null,
+) {
+  const { clubs } = clubFloorPlanSwitcher(body);
+  const club =
+    (staffStoreId ? clubs.find((row) => row.id === staffStoreId) : null) ??
+    (shiftStoreName
+      ? clubs.find((row) => row.name === shiftStoreName)
+      : null) ??
+    (clubs.length === 1 ? clubs[0] : null);
+  const template = club ? clubFloorPlanTemplateById(club.template) : null;
+  return club && template
+    ? {
+        storeId: club.id,
+        name: club.name,
+        sceneUrl: clubFloorPlanSceneUrl(template, club.id, false, "shift"),
+        fullUrl: `/visualization?store=${encodeURIComponent(club.id)}`,
+      }
+    : null;
 }

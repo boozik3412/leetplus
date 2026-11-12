@@ -18,6 +18,8 @@ export const GUEST_TELEGRAM_OUTBOX_KINDS = [
   'CAMPAIGN_NEWS',
   // Promotions: only guests who said yes in the bot («Акции клуба»).
   'CAMPAIGN_PROMO',
+  // «Оценка визита» after a Langame session; respects the unsubscribe.
+  'VISIT_RATING',
 ] as const;
 export type GuestTelegramOutboxKind =
   (typeof GUEST_TELEGRAM_OUTBOX_KINDS)[number];

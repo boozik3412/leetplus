@@ -28,6 +28,7 @@ import { GuestLeaderboardSettlementService } from '../guest-leaderboard/guest-le
 import { GuestGameAccountsLookupService } from '../guest-game-accounts/guest-game-accounts-lookup.service';
 import { runTelegramAutomationsOnce } from '../guest-communications/guest-telegram-automation';
 import { loadAutomationCampaigns } from '../guest-communications/guest-telegram-campaign.service';
+import { runVisitRatingAsksOnce } from '../guest-communications/guest-visit-rating';
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 
 const disabledInProcessBonusScheduler = {
@@ -113,6 +114,24 @@ async function main() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`Telegram automations failed: ${message}`);
+    }
+    // «Оценка визита»: the bot question after a Langame session. Same rule:
+    // logged, never holds back the bonus ledger.
+    try {
+      await runVisitRatingAsksOnce(
+        {
+          prisma: application.get(PrismaService),
+          admission: application.get(TenantExecutionAdmissionService),
+        },
+        new Date(),
+        {
+          log: (message) => console.log(message),
+          warn: (message) => console.warn(message),
+        },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Visit ratings failed: ${message}`);
     }
     if (primaryError) throw primaryError;
     await runGuestGamificationWorkerOnce({

@@ -71,6 +71,28 @@
    (`PATCH /marketing/campaigns/:id`) не может ни стереть, ни создать
    `mechanicConfig.telegram`.
 
+## Оценка визита
+
+1. Включает сеть на странице «Оценки визитов» (`/marketing/visit-ratings`,
+   `POST /marketing/visit-ratings/settings`, fresh NETWORK scope). Настройка —
+   `GuestVisitRatingSettings` (нет строки — выключено).
+2. `bonus-ledger-worker` (`runVisitRatingAsksOnce` после автосценариев), не
+   чаще раза в 5 минут на сеть, с 11 до 22 по времени сети, до 300 за запуск:
+   берёт последнюю сессию гостя (`GuestSession`), закончившуюся 30 минут – 6
+   часов назад и длиной от 20 минут; гостя с чатом бота, не сотрудника, не
+   отписанного и не «не связываться»; не чаще раза в 7 дней на профиль и один
+   раз на сессию (уникальность `tenantId + guestSessionId`).
+3. В одной транзакции пишет `GuestVisitRating` (score пустой) и
+   `VISIT_RATING` в очередь с кнопками 1–5 (`bot:rate:<ratingId>:<n>`, хелперы
+   в `guest-portal/guest-visit-rating-callback.ts`).
+4. Кнопку принимает public webhook (`telegramWebhookVisitRatingResponse`):
+   только чат, которому ушёл вопрос, в течение недели; повторное нажатие
+   меняет оценку. После 1–3 бот просит написать, что не так, и даёт кнопку
+   «Написать клубу» — текст гостя становится обычным обращением TELEGRAM.
+5. Отчёт (`GET /marketing/visit-ratings?days=7|30|90`): средняя, доля
+   ответивших, распределение, клубы от худшего к лучшему, последние оценки
+   1–3 со ссылкой на гостя. STORES-пользователь видит только свои клубы.
+
 ## Где что живёт
 
 | Слой | Место |
@@ -84,6 +106,7 @@
 | Рассылка кампании | `apps/api/src/guest-communications/guest-telegram-campaign.service.ts`, `marketing-campaign-telegram.controller.ts` |
 | Согласие на акции в боте | `guest-portal.service.ts` (`telegramWebhookPromoResponse`, `telegramBotPromoChoice`) |
 | Вкладка «Telegram» | `apps/web/src/components/marketing-campaign-telegram-panel.tsx`, `app/(app)/marketing/campaigns/[id]/page.tsx` |
+| Оценка визита | `apps/api/src/guest-communications/guest-visit-rating.ts` (проход worker), `guest-visit-rating.service.ts` + `marketing-visit-rating.controller.ts` (отчёт, настройка), ответ в `guest-portal.service.ts`, экран `apps/web/src/components/marketing-visit-ratings-panel.tsx` |
 | Автосценарии | `apps/api/src/guest-communications/guest-telegram-automation.ts` (правила, SQL, проход worker), запуск в `guest-gamification/guest-bonus-ledger-worker.cli.ts`, карточка `apps/web/src/components/marketing-campaign-telegram-automation.tsx` |
 
 ## Правила
@@ -103,5 +126,5 @@
 ## Проверка
 
 ```bash
-pnpm --filter api exec jest --runInBand --runTestsByPath src/guest-communications/guest-telegram-outbox.service.spec.ts src/guest-communications/guest-telegram-campaign.service.spec.ts src/guest-communications/guest-telegram-automation.spec.ts src/marketing/marketing-telegram-config.spec.ts src/guest-portal/telegram-outbox-sender.spec.ts src/guest-portal/guest-support-telegram.spec.ts src/support/support-guest-replies.spec.ts src/guest-portal/guest-portal.service.spec.ts src/runtime/runtime-boundary.spec.ts
+pnpm --filter api exec jest --runInBand --runTestsByPath src/guest-communications/guest-telegram-outbox.service.spec.ts src/guest-communications/guest-telegram-campaign.service.spec.ts src/guest-communications/guest-telegram-automation.spec.ts src/guest-communications/guest-visit-rating.spec.ts src/guest-communications/guest-visit-rating.service.spec.ts src/guest-portal/guest-visit-rating-callback.spec.ts src/marketing/marketing-telegram-config.spec.ts src/guest-portal/telegram-outbox-sender.spec.ts src/guest-portal/guest-support-telegram.spec.ts src/support/support-guest-replies.spec.ts src/guest-portal/guest-portal.service.spec.ts src/runtime/runtime-boundary.spec.ts
 ```

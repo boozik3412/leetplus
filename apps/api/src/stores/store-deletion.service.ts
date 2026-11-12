@@ -60,6 +60,7 @@ export const STORE_REFERENCES: readonly StoreReference[] = [
     'DELETE',
     'сообщения гостям в Telegram',
   ),
+  ref('GuestVisitRating', 'storeId', 'DELETE', 'оценки визитов'),
   ref('StaffTask', 'storeId', 'DELETE', 'задачи'),
   ref('StaffTaskRecurringRule', 'storeId', 'DELETE', 'задачи'),
   ref('StaffTaskTemplate', 'storeId', 'DELETE', 'задачи'),

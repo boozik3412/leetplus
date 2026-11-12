@@ -396,6 +396,8 @@ model Tenant {
   guestSupportTicketComments           GuestSupportTicketComment[]
   guestSupportTicketAuditEvents        GuestSupportTicketAuditEvent[]
   guestTelegramOutboxMessages          GuestTelegramOutboxMessage[]
+  guestVisitRatings                    GuestVisitRating[]
+  guestVisitRatingSettings             GuestVisitRatingSettings?
   guestSavedFilters                    GuestSavedFilter[]
   guestAudiences                       GuestAudience[]
   guestAudienceMembers                 GuestAudienceMember[]
@@ -2768,6 +2770,7 @@ model GuestGameProfile {
   externalAccounts         GuestGameExternalAccount[]
   externalMatches          GuestGameExternalMatch[]
   telegramOutboxMessages   GuestTelegramOutboxMessage[]
+  visitRatings             GuestVisitRating[]
 
   @@unique([tenantId, guestId], map: "guest_game_profile_guest_uidx")
   @@unique([tenantId, leadId], map: "guest_game_profile_lead_uidx")
@@ -5622,6 +5625,44 @@ model GuestTelegramOutboxMessage {
   @@index([tenantId, supportTicketId], map: "guest_telegram_outbox_ticket_idx")
   @@index([tenantId, marketingCampaignId], map: "guest_telegram_outbox_campaign_idx")
   @@index([tenantId, profileId, createdAt], map: "guest_telegram_outbox_profile_idx")
+}
+
+// A guest's 1–5 rating of a club visit, asked through the guest Telegram bot
+// after a Langame session ends. One row per asked session; score stays null
+// until the guest taps a button.
+model GuestVisitRating {
+  id             String    @id @default(uuid())
+  tenantId       String
+  storeId        String?
+  profileId      String
+  guestId        String?
+  guestSessionId String
+  visitEndedAt   DateTime
+  askedAt        DateTime  @default(now())
+  score          Int?
+  answeredAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  profile GuestGameProfile @relation(fields: [tenantId, profileId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([tenantId, guestSessionId], map: "guest_visit_rating_session_uidx")
+  @@index([tenantId, visitEndedAt], map: "guest_visit_rating_visit_idx")
+  @@index([tenantId, profileId, askedAt], map: "guest_visit_rating_profile_idx")
+}
+
+// Network switch for visit ratings; no row means off.
+model GuestVisitRatingSettings {
+  tenantId        String    @id
+  enabled         Boolean   @default(false)
+  enabledAt       DateTime?
+  enabledByUserId String?
+  lastRunAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
 model StaffNotification {

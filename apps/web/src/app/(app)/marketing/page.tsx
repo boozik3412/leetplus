@@ -75,7 +75,8 @@ function findAudience(
 
   return (
     groups.find((group) => {
-      const searchable = `${group.name} ${group.description ?? ""}`.toLowerCase();
+      const searchable =
+        `${group.name} ${group.description ?? ""}`.toLowerCase();
 
       return normalizedKeywords.some((keyword) => searchable.includes(keyword));
     }) ??
@@ -105,7 +106,9 @@ function buildMarketingAiSuggestions({
   const consentLeads = leads.filter(
     (lead) => lead.phoneConsentStatus === "GRANTED",
   );
-  const activeBundles = promoBundles.filter((bundle) => bundle.status === "ACTIVE");
+  const activeBundles = promoBundles.filter(
+    (bundle) => bundle.status === "ACTIVE",
+  );
   const campaignCounts = new Map<MarketingCampaign["goal"], number>();
 
   campaigns.forEach((campaign) => {
@@ -124,7 +127,12 @@ function buildMarketingAiSuggestions({
   const riskAudience = findAudience(groups, ["риск", "потер", "vip", "top"]);
   const newGuestAudience = findAudience(groups, ["нов", "втор", "повтор"]);
   const quietHoursAudience = findAudience(groups, ["тих", "час", "загруз"]);
-  const barAudience = findAudience(groups, ["бар", "комбо", "напит", "низкий бар"]);
+  const barAudience = findAudience(groups, [
+    "бар",
+    "комбо",
+    "напит",
+    "низкий бар",
+  ]);
   const hasHistory = campaigns.length >= 3;
   const historyReason = hasHistory
     ? `В истории уже ${formatCount(campaigns.length)} кампаний, поэтому подсказки учитывают покрытие целей и текущие рабочие хвосты.`
@@ -141,7 +149,8 @@ function buildMarketingAiSuggestions({
       title: "Закрыть просроченные контакты",
       goalLabel: campaignGoalLabels.RETURN_GUESTS,
       audienceLabel: overdueAudienceName,
-      mechanic: "Персональный звонок или CRM-задача с коротким поводом вернуться",
+      mechanic:
+        "Персональный звонок или CRM-задача с коротким поводом вернуться",
       channel: "CRM-задача администратору или управляющему",
       messageDraft:
         "Здравствуйте! Давно не виделись в клубе. Хотим предложить удобное время для визита и персональный повод вернуться на этой неделе.",
@@ -158,7 +167,10 @@ function buildMarketingAiSuggestions({
     suggestions.push({
       title: "Продвинуть готовый промо-набор",
       goalLabel: campaignGoalLabels.PROMO_BUNDLE,
-      audienceLabel: barAudience?.name ?? quietHoursAudience?.name ?? "группа с потенциалом бара",
+      audienceLabel:
+        barAudience?.name ??
+        quietHoursAudience?.name ??
+        "группа с потенциалом бара",
       mechanic: `Оффер из каталога: ${bundle.name}`,
       channel: "Объявление в клубе плюс CRM-задача на личное предложение",
       messageDraft: `Для вас подготовили набор "${bundle.name}". Можно использовать на ближайшем визите, пока действует лимит предложения.`,
@@ -174,15 +186,17 @@ function buildMarketingAiSuggestions({
     const goal = leastCoveredGoal ?? "RETURN_GUESTS";
     const audience =
       goal === "REPEAT_VISIT"
-        ? newGuestAudience ?? topAudience
+        ? (newGuestAudience ?? topAudience)
         : goal === "WEAK_HOURS"
-          ? quietHoursAudience ?? topAudience
+          ? (quietHoursAudience ?? topAudience)
           : goal === "BAR_GROWTH" || goal === "PROMO_BUNDLE"
-            ? barAudience ?? topAudience
-            : riskAudience ?? topAudience;
+            ? (barAudience ?? topAudience)
+            : (riskAudience ?? topAudience);
 
     suggestions.push({
-      title: hasHistory ? "Закрыть пробел в целях" : "Запустить первую управляемую кампанию",
+      title: hasHistory
+        ? "Закрыть пробел в целях"
+        : "Запустить первую управляемую кампанию",
       goalLabel: campaignGoalLabels[goal],
       audienceLabel: `${audience.name} (${formatCount(audience.guestsCount)} гостей)`,
       mechanic:
@@ -194,7 +208,9 @@ function buildMarketingAiSuggestions({
               ? "Сохраненный промо-набор с лимитом и ручной проверкой использования"
               : "CRM-контакт с фиксированным результатом и контрольной датой",
       channel:
-        goal === "EVENT_PROMO" ? "CRM-лид, звонок и объявление в клубе" : "CRM-задача и разговор в клубе",
+        goal === "EVENT_PROMO"
+          ? "CRM-лид, звонок и объявление в клубе"
+          : "CRM-задача и разговор в клубе",
       messageDraft:
         goal === "WEAK_HOURS"
           ? "В эти часы в клубе спокойнее, а играть выгоднее. Подготовили для вас специальный повод прийти именно в удобное окно."
@@ -230,7 +246,8 @@ function buildMarketingAiSuggestions({
       title: "Собрать базу для подсказок",
       goalLabel: campaignGoalLabels.RETURN_GUESTS,
       audienceLabel: "сначала сохраните группу гостей",
-      mechanic: "Минимальная CRM-кампания с ответственным и результатом контакта",
+      mechanic:
+        "Минимальная CRM-кампания с ответственным и результатом контакта",
       channel: "CRM-задача",
       messageDraft:
         "Подготовьте первую группу гостей и зафиксируйте результаты контактов, чтобы LeetPlus начал предлагать более точные сценарии.",
@@ -257,17 +274,16 @@ export default async function MarketingPage() {
     promoBundles,
     promoBundleLaunches,
     stores,
-  ] =
-    await Promise.all([
-      safeList(getGuestAudiences()),
-      safeList(getGuestCrmLeads()),
-      safeList(getGuestCrmTasks()),
-      safeList(getGuestCrmUsers()),
-      safeList(getMarketingCampaigns()),
-      safeList(getMarketingPromoBundles()),
-      safeList(getMarketingPromoBundleLaunches()),
-      safeList(getStores()),
-    ]);
+  ] = await Promise.all([
+    safeList(getGuestAudiences()),
+    safeList(getGuestCrmLeads()),
+    safeList(getGuestCrmTasks()),
+    safeList(getGuestCrmUsers()),
+    safeList(getMarketingCampaigns()),
+    safeList(getMarketingPromoBundles()),
+    safeList(getMarketingPromoBundleLaunches()),
+    safeList(getStores()),
+  ]);
 
   const marketingAiSuggestions = buildMarketingAiSuggestions({
     groups,
@@ -301,6 +317,12 @@ export default async function MarketingPage() {
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
+            <Link
+              href="/marketing/visit-ratings"
+              className="inline-flex min-h-11 items-center justify-center rounded-full border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Оценки визитов
+            </Link>
             <Link
               href="/marketing/promo-bundles"
               className="inline-flex min-h-11 items-center justify-center rounded-full border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"

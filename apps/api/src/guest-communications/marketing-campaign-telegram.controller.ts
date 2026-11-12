@@ -10,6 +10,7 @@ import {
   GuestTelegramCampaignService,
   type MarketingCampaignTelegram,
   type MarketingCampaignTelegramSendResult,
+  type TelegramAutomationDto,
   type TelegramCampaignDraftDto,
 } from './guest-telegram-campaign.service';
 
@@ -53,5 +54,17 @@ export class MarketingCampaignTelegramController {
     @Param('id') id: string,
   ): Promise<MarketingCampaignTelegramSendResult> {
     return this.campaigns.send(user, id);
+  }
+
+  // Switching an automatic rule on sends to every guest who matches it, so it
+  // needs the same fresh NETWORK scope as a manual send.
+  @Post('automation')
+  @UseGuards(FreshNetworkScopeGuard)
+  saveAutomation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: TelegramAutomationDto,
+  ): Promise<MarketingCampaignTelegram> {
+    return this.campaigns.saveAutomation(user, id, dto ?? {});
   }
 }

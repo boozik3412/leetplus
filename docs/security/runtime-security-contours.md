@@ -1838,6 +1838,20 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
    покрывает рекламу). Меняет его только сам гость кнопками бота
    (`bot:promo`, `bot:promo:yes|no`) в public guest webhook; полная отписка
    ставит `DENIED`. Corporate API согласие не записывает.
+8. Автосценарии кампаний (без миграции): `POST
+   /marketing/campaigns/:id/telegram/automation` — corporate контур, те же
+   guards, что у `send` (`manage_marketing` + fresh NETWORK scope), включение
+   ещё проверяет tenant admission `COMMUNICATIONS/OUTBOUND`. Правило лежит в
+   `MarketingCampaign.mechanicConfig.telegram.automation`; обычное сохранение
+   кампании этот ключ не создаёт и не меняет. Ставит сообщения в очередь
+   только scheduler-проход `bonus-ledger-worker` (worker контур, уже
+   существующий `lp-bonus.timer`): по всем сетям с включённым правилом и
+   кампанией `RUNNING`, заново проверяя admission сети, не чаще раза в 30
+   минут на кампанию, с 12 до 21 по времени сети, до 300 строк за запуск,
+   `sourceKey = campaign:<id>:auto:<случай>:profile:<profileId>`. Worker
+   читает визиты/награды и пишет только `GuestTelegramOutboxMessage` и
+   отметки запуска в JSON кампании; новой egress, секрета и процесса нет,
+   public guest и API runtime scheduler не получают.
 
 ## Инварианты корпоративного входа
 

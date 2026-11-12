@@ -3,8 +3,14 @@
 import { useId, useMemo, useState } from "react";
 import type {
   MarketingCampaignTelegram,
+  MarketingCampaignTelegramTrigger,
   MarketingCampaignTelegramType,
 } from "@/lib/marketing";
+import {
+  MarketingCampaignTelegramAutomationCard,
+  triggerDays,
+  triggerOptions,
+} from "./marketing-campaign-telegram-automation";
 
 const TEXT_MAX = 1500;
 const BUTTON_TEXT_MAX = 40;
@@ -25,6 +31,8 @@ const typeOptions: Array<{
     hint: "Скидки, бонусы, предложения. По закону о рекламе уходит только гостям, которые нажали в боте «Присылать акции клуба».",
   },
 ];
+
+type SendMode = "MANUAL" | "AUTO";
 
 type Props = {
   campaignId: string;
@@ -68,18 +76,36 @@ export function MarketingCampaignTelegramPanel({ campaignId, initial }: Props) {
     initial?.draft?.buttonText ?? "",
   );
   const [buttonUrl, setButtonUrl] = useState(initial?.draft?.buttonUrl ?? "");
-  const [pending, setPending] = useState<"save" | "send" | null>(null);
+  const [mode, setMode] = useState<SendMode>(
+    initial?.automation ? "AUTO" : "MANUAL",
+  );
+  const [trigger, setTrigger] = useState<MarketingCampaignTelegramTrigger>(
+    initial?.automation?.trigger ?? "LAPSED",
+  );
+  const [days, setDays] = useState(
+    String(initial?.automation?.days ?? triggerDays.LAPSED.default),
+  );
+  const [pending, setPending] = useState<"save" | "send" | "automation" | null>(
+    null,
+  );
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const saved = summary?.draft ?? null;
+  const savedAutomation = summary?.automation ?? null;
+  const ruleDirty =
+    mode === "AUTO" &&
+    (!savedAutomation ||
+      savedAutomation.trigger !== trigger ||
+      String(savedAutomation.days) !== days.trim());
   const dirty =
     !saved ||
     saved.type !== type ||
     saved.text !== text.trim() ||
     (saved.buttonText ?? "") !== buttonText.trim() ||
-    (saved.buttonUrl ?? "") !== buttonUrl.trim();
+    (saved.buttonUrl ?? "") !== buttonUrl.trim() ||
+    ruleDirty;
 
   const previewButtons = useMemo(() => {
     const buttons: string[] = [];
@@ -127,7 +153,19 @@ export function MarketingCampaignTelegramPanel({ campaignId, initial }: Props) {
         setError(await readError(response, "Не удалось сохранить текст"));
         return;
       }
-      const next = (await response.json()) as MarketingCampaignTelegram;
+      let next = (await response.json()) as MarketingCampaignTelegram;
+      if (mode === "AUTO") {
+        const rule = await postAutomation({
+          trigger,
+          days: Number(days.trim()),
+        });
+        if (!rule.ok) {
+          setSummary(next);
+          setError(rule.error);
+          return;
+        }
+        next = rule.summary;
+      }
       setSummary(next);
       if (next.draft) {
         // The server trims the text and normalizes the link; mirror it so
@@ -136,9 +174,87 @@ export function MarketingCampaignTelegramPanel({ campaignId, initial }: Props) {
         setButtonText(next.draft.buttonText ?? "");
         setButtonUrl(next.draft.buttonUrl ?? "");
       }
-      setNotice("Текст сохранён. Проверьте, сколько гостей получат сообщение.");
+      setNotice(
+        mode === "AUTO"
+          ? "Текст и правило сохранены. Проверьте, кто подходит под правило сейчас."
+          : "Текст сохранён. Проверьте, сколько гостей получат сообщение.",
+      );
     } catch {
       setError("Не удалось сохранить текст. Проверьте связь и повторите.");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function postAutomation(
+    body: Record<string, unknown>,
+  ): Promise<
+    | { ok: true; summary: MarketingCampaignTelegram }
+    | { ok: false; error: string }
+  > {
+    const response = await fetch(
+      `/api/marketing/campaigns/${encodeURIComponent(campaignId)}/telegram/automation`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await readError(response, "Не удалось сохранить правило"),
+      };
+    }
+    return {
+      ok: true,
+      summary: (await response.json()) as MarketingCampaignTelegram,
+    };
+  }
+
+  async function setAutomationEnabled(enabled: boolean) {
+    setError(null);
+    setNotice(null);
+    setPending("automation");
+    try {
+      const result = await postAutomation({ enabled });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setSummary(result.summary);
+      setNotice(
+        enabled
+          ? "Автосценарий включён. Первые сообщения уйдут в ближайшие полчаса в дневное время клуба."
+          : "Автосценарий выключен. Новые сообщения больше не ставятся в очередь.",
+      );
+    } catch {
+      setError("Не удалось сохранить правило. Проверьте связь и повторите.");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function chooseMode(next: SendMode) {
+    if (next === mode) return;
+    setError(null);
+    setNotice(null);
+    if (next === "AUTO" || !savedAutomation) {
+      setMode(next);
+      return;
+    }
+    // Back to a one-off send: the stored (switched off) rule is removed.
+    setPending("automation");
+    try {
+      const result = await postAutomation({ trigger: null });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setSummary(result.summary);
+      setMode("MANUAL");
+    } catch {
+      setError("Не удалось сменить режим. Проверьте связь и повторите.");
     } finally {
       setPending(null);
     }
@@ -218,13 +334,15 @@ export function MarketingCampaignTelegramPanel({ campaignId, initial }: Props) {
           </p>
           <h2 className="mt-2 text-xl font-semibold">Сообщение гостям</h2>
           <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Сообщение придёт от игрового бота клуба гостям из группы «
-            {summary.audience?.name ?? "—"}». Под ним всегда есть кнопка
-            отписки. Ответы гостей попадут в «Поддержку».
+            {mode === "AUTO"
+              ? "Сообщение придёт от игрового бота клуба каждому гостю, который подходит под правило, один раз на случай."
+              : `Сообщение придёт от игрового бота клуба гостям из группы «${summary.audience?.name ?? "—"}».`}{" "}
+            Под ним всегда есть кнопка отписки. Ответы гостей попадут в
+            «Поддержку».
           </p>
         </div>
 
-        {!summary.audience ? (
+        {mode === "MANUAL" && !summary.audience ? (
           <p className="m-5 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
             У кампании нет группы гостей. Выберите группу при создании кампании
             в «Маркетинге», затем вернитесь сюда.
@@ -263,6 +381,126 @@ export function MarketingCampaignTelegramPanel({ campaignId, initial }: Props) {
             </div>
           </fieldset>
 
+          <fieldset>
+            <legend className="text-sm font-semibold">Как отправлять</legend>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {(
+                [
+                  {
+                    id: "MANUAL",
+                    label: "Один раз",
+                    hint: "Вы сами нажимаете «Отправить», сообщение уходит группе гостей кампании.",
+                  },
+                  {
+                    id: "AUTO",
+                    label: "Автоматически",
+                    hint: "Пока кампания идёт, сообщение само уходит каждому новому гостю, который подходит под правило.",
+                  },
+                ] as const
+              ).map((option) => {
+                const locked =
+                  option.id === "MANUAL" && Boolean(savedAutomation?.enabled);
+                return (
+                  <label
+                    key={option.id}
+                    className={`rounded-lg border p-3 text-sm transition focus-within:ring-2 focus-within:ring-emerald-500 ${
+                      locked
+                        ? "cursor-not-allowed opacity-60"
+                        : "cursor-pointer"
+                    } ${
+                      mode === option.id
+                        ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
+                        : "border-zinc-200 hover:border-emerald-400 dark:border-zinc-800"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 font-semibold">
+                      <input
+                        type="radio"
+                        name={`${ids}-mode`}
+                        value={option.id}
+                        checked={mode === option.id}
+                        disabled={locked || pending !== null}
+                        onChange={() => void chooseMode(option.id)}
+                        className="h-4 w-4 accent-emerald-600"
+                      />
+                      {option.label}
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-zinc-600 dark:text-zinc-400">
+                      {locked
+                        ? "Сначала выключите автосценарий справа."
+                        : option.hint}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          {mode === "AUTO" ? (
+            <fieldset>
+              <legend className="text-sm font-semibold">Кому и когда</legend>
+              <div className="mt-2 grid gap-2">
+                {triggerOptions.map((option) => (
+                  <label
+                    key={option.id}
+                    className={`cursor-pointer rounded-lg border p-3 text-sm transition focus-within:ring-2 focus-within:ring-emerald-500 ${
+                      trigger === option.id
+                        ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
+                        : "border-zinc-200 hover:border-emerald-400 dark:border-zinc-800"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 font-semibold">
+                      <input
+                        type="radio"
+                        name={`${ids}-trigger`}
+                        value={option.id}
+                        checked={trigger === option.id}
+                        onChange={() => {
+                          setTrigger(option.id);
+                          setDays(
+                            String(
+                              savedAutomation?.trigger === option.id
+                                ? savedAutomation.days
+                                : triggerDays[option.id].default,
+                            ),
+                          );
+                        }}
+                        className="h-4 w-4 accent-emerald-600"
+                      />
+                      {option.label}
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-zinc-600 dark:text-zinc-400">
+                      {option.hint}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                <label htmlFor={`${ids}-days`}>
+                  {triggerOptions.find((option) => option.id === trigger)
+                    ?.daysLabel ?? "Дней"}
+                </label>
+                <input
+                  id={`${ids}-days`}
+                  type="number"
+                  inputMode="numeric"
+                  min={triggerDays[trigger].min}
+                  max={triggerDays[trigger].max}
+                  value={days}
+                  onChange={(event) => setDays(event.target.value)}
+                  aria-describedby={`${ids}-days-hint`}
+                  className="min-h-10 w-24 rounded-md border border-zinc-300 bg-white px-3 text-sm tabular-nums text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                />
+                <span
+                  id={`${ids}-days-hint`}
+                  className="text-xs text-zinc-500 dark:text-zinc-400"
+                >
+                  от {triggerDays[trigger].min} до {triggerDays[trigger].max}
+                </span>
+              </div>
+            </fieldset>
+          ) : null}
+
           <div>
             <label htmlFor={`${ids}-text`} className="text-sm font-semibold">
               Текст сообщения
@@ -293,7 +531,9 @@ export function MarketingCampaignTelegramPanel({ campaignId, initial }: Props) {
                 className="text-sm font-semibold"
               >
                 Кнопка со ссылкой{" "}
-                <span className="font-normal text-zinc-500">(необязательно)</span>
+                <span className="font-normal text-zinc-500">
+                  (необязательно)
+                </span>
               </label>
               <input
                 id={`${ids}-button-text`}
@@ -379,86 +619,107 @@ export function MarketingCampaignTelegramPanel({ campaignId, initial }: Props) {
           </div>
         </div>
 
-        <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
-          <h3 className="text-sm font-semibold">Кто получит</h3>
-          {dirty ? (
-            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-              Числа пересчитаются после сохранения.
-            </p>
-          ) : null}
-          <dl className="mt-3 grid gap-2 text-sm">
-            {reachRows.map((row) => (
-              <div key={row.label} className="flex items-start justify-between gap-3">
-                <dt className="min-w-0 text-zinc-600 dark:text-zinc-400">
-                  {row.label}
-                  {row.hint ? (
-                    <span className="block text-xs text-zinc-500">{row.hint}</span>
-                  ) : null}
-                </dt>
-                <dd className="font-semibold tabular-nums">
-                  {formatNumber(row.value)}
+        {mode === "AUTO" ? (
+          <MarketingCampaignTelegramAutomationCard
+            automation={savedAutomation}
+            campaignStatus={summary.campaignStatus}
+            promo={saved?.type === "PROMO"}
+            frequencyDays={summary.frequencyDays}
+            hasText={Boolean(saved)}
+            dirty={dirty}
+            pending={pending === "automation"}
+            disabled={pending !== null}
+            onToggle={(enabled) => void setAutomationEnabled(enabled)}
+          />
+        ) : (
+          <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
+            <h3 className="text-sm font-semibold">Кто получит</h3>
+            {dirty ? (
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                Числа пересчитаются после сохранения.
+              </p>
+            ) : null}
+            <dl className="mt-3 grid gap-2 text-sm">
+              {reachRows.map((row) => (
+                <div
+                  key={row.label}
+                  className="flex items-start justify-between gap-3"
+                >
+                  <dt className="min-w-0 text-zinc-600 dark:text-zinc-400">
+                    {row.label}
+                    {row.hint ? (
+                      <span className="block text-xs text-zinc-500">
+                        {row.hint}
+                      </span>
+                    ) : null}
+                  </dt>
+                  <dd className="font-semibold tabular-nums">
+                    {formatNumber(row.value)}
+                  </dd>
+                </div>
+              ))}
+              <div className="flex items-center justify-between gap-3 border-t border-zinc-200 pt-2 dark:border-zinc-800">
+                <dt className="font-semibold">Получат сообщение</dt>
+                <dd className="text-lg font-semibold text-emerald-700 tabular-nums dark:text-emerald-300">
+                  {formatNumber(reach.willReceive)}
                 </dd>
               </div>
-            ))}
-            <div className="flex items-center justify-between gap-3 border-t border-zinc-200 pt-2 dark:border-zinc-800">
-              <dt className="font-semibold">Получат сообщение</dt>
-              <dd className="text-lg font-semibold text-emerald-700 tabular-nums dark:text-emerald-300">
-                {formatNumber(reach.willReceive)}
-              </dd>
-            </div>
-          </dl>
+            </dl>
 
-          {confirming ? (
-            <div className="mt-4 rounded-md border border-emerald-500 p-3">
-              <p className="text-sm font-semibold">
-                Отправить сообщение {formatNumber(reach.willReceive)} гостям?
-                Отменить отправку будет нельзя.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={send}
-                  disabled={pending !== null}
-                  className="inline-flex min-h-10 cursor-pointer items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 disabled:cursor-wait disabled:opacity-70"
-                >
-                  {pending === "send" ? "Отправляем..." : "Да, отправить"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirming(false)}
-                  disabled={pending !== null}
-                  className="inline-flex min-h-10 cursor-pointer items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-zinc-700 dark:hover:bg-zinc-900"
-                >
-                  Отмена
-                </button>
+            {confirming ? (
+              <div className="mt-4 rounded-md border border-emerald-500 p-3">
+                <p className="text-sm font-semibold">
+                  Отправить сообщение {formatNumber(reach.willReceive)} гостям?
+                  Отменить отправку будет нельзя.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={send}
+                    disabled={pending !== null}
+                    className="inline-flex min-h-10 cursor-pointer items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 disabled:cursor-wait disabled:opacity-70"
+                  >
+                    {pending === "send" ? "Отправляем..." : "Да, отправить"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirming(false)}
+                    disabled={pending !== null}
+                    className="inline-flex min-h-10 cursor-pointer items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                  >
+                    Отмена
+                  </button>
+                </div>
               </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setConfirming(true)}
-              disabled={!canSend}
-              className="mt-4 inline-flex min-h-10 w-full cursor-pointer items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Отправить в Telegram
-            </button>
-          )}
-          {!saved ? (
-            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-              Сначала напишите и сохраните текст.
-            </p>
-          ) : null}
-        </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirming(true)}
+                disabled={!canSend}
+                className="mt-4 inline-flex min-h-10 w-full cursor-pointer items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Отправить в Telegram
+              </button>
+            )}
+            {!saved ? (
+              <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                Сначала напишите и сохраните текст.
+              </p>
+            ) : null}
+          </div>
+        )}
 
         <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
           <h3 className="text-sm font-semibold">Доставка</h3>
           {delivery.total === 0 ? (
             <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-              Рассылку ещё не отправляли.
+              {mode === "AUTO"
+                ? "Автосценарий ещё ничего не отправлял."
+                : "Рассылку ещё не отправляли."}
             </p>
           ) : (
             <>
-              {summary.lastSentAt ? (
+              {mode === "MANUAL" && summary.lastSentAt ? (
                 <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                   Последний запуск {formatDate(summary.lastSentAt)}
                 </p>
@@ -486,8 +747,8 @@ export function MarketingCampaignTelegramPanel({ campaignId, initial }: Props) {
                 ))}
               </dl>
               <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
-                Доставленные сообщения попадают в журнал контактов и во
-                вкладку «Эффект».
+                Доставленные сообщения попадают в журнал контактов и во вкладку
+                «Эффект».
               </p>
             </>
           )}

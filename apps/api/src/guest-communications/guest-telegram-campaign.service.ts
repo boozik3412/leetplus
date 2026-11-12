@@ -11,6 +11,22 @@ import {
   type TenantExecutionRequirement,
 } from '../tenancy/tenant-execution-admission.service';
 import {
+  TELEGRAM_AUTOMATION_CAMPAIGN_STATUS,
+  TELEGRAM_AUTOMATION_DAYS,
+  TELEGRAM_AUTOMATION_SEND_HOURS,
+  automationTimeZone,
+  findAutomationCandidates,
+  isTelegramAutomationTrigger,
+  runningAutomationWhere,
+  selectAutomationRecipients,
+  storedAutomation,
+  stringArray,
+  type AutomationCampaign,
+  type TelegramAutomationReach,
+  type TelegramAutomationSettings,
+  type TelegramAutomationTrigger,
+} from './guest-telegram-automation';
+import {
   GUEST_TELEGRAM_OUTBOX_TEXT_MAX,
   type GuestTelegramOutboxKind,
 } from './guest-telegram-outbox.service';
@@ -77,8 +93,29 @@ export type TelegramCampaignDelivery = {
   skipped: number;
 };
 
+export type TelegramAutomationDto = {
+  trigger?: unknown;
+  days?: unknown;
+  enabled?: unknown;
+};
+
+export type MarketingCampaignTelegramAutomation = {
+  trigger: TelegramAutomationTrigger;
+  days: number;
+  enabled: boolean;
+  enabledAt: string | null;
+  lastRunAt: string | null;
+  lastQueued: number | null;
+  // Who matches the rule right now and who of them would get the message.
+  reach: TelegramAutomationReach;
+  campaignRunning: boolean;
+  sendHours: { from: number; to: number };
+  timeZone: string;
+};
+
 export type MarketingCampaignTelegram = {
   campaignId: string;
+  campaignStatus: string;
   audience: { id: string; name: string } | null;
   draft: TelegramCampaignDraft | null;
   signature: string;
@@ -88,6 +125,7 @@ export type MarketingCampaignTelegram = {
   lastSentAt: string | null;
   lastQueued: number | null;
   frequencyDays: number;
+  automation: MarketingCampaignTelegramAutomation | null;
 };
 
 export type MarketingCampaignTelegramSendResult = MarketingCampaignTelegram & {
@@ -97,6 +135,9 @@ export type MarketingCampaignTelegramSendResult = MarketingCampaignTelegram & {
 type CampaignRow = {
   id: string;
   tenantId: string;
+  status: string;
+  periodFrom: Date | null;
+  periodTo: Date | null;
   audienceId: string | null;
   storeIds: Prisma.JsonValue;
   mechanicConfig: Prisma.JsonValue;
@@ -152,6 +193,11 @@ export class GuestTelegramCampaignService {
     const draft = storedDraft(campaign.mechanicConfig);
     if (!draft) {
       throw new BadRequestException('Сначала сохраните текст рассылки.');
+    }
+    if (campaignAutomation(campaign)?.enabled) {
+      throw new BadRequestException(
+        'У кампании включён автосценарий: сообщения уходят сами. Выключите его, чтобы отправить вручную.',
+      );
     }
     if (!campaign.audienceId) {
       throw new BadRequestException(
@@ -230,6 +276,90 @@ export class GuestTelegramCampaignService {
     };
   }
 
+  /**
+   * Saves the automatic rule of the campaign and switches it on or off.
+   * Switching on needs a saved text and outbound messages allowed for the
+   * network; a draft or planned campaign starts running with it.
+   */
+  async saveAutomation(
+    user: AuthenticatedUser,
+    campaignId: string,
+    dto: TelegramAutomationDto,
+    now = new Date(),
+  ): Promise<MarketingCampaignTelegram> {
+    const campaign = await this.loadCampaign(user, campaignId);
+    const config = configRecord(campaign.mechanicConfig);
+    const telegram = configRecord(config.telegram);
+    const current = storedAutomation(telegram);
+
+    if (dto?.trigger === null) {
+      if (current?.enabled) {
+        throw new BadRequestException(
+          'Сначала выключите автосценарий, потом переходите к разовой отправке.',
+        );
+      }
+      const { automation: _removed, ...rest } = telegram;
+      void _removed;
+      const mechanicConfig = { ...config, telegram: rest } as Prisma.JsonObject;
+      await this.prisma.marketingCampaign.updateMany({
+        where: { id: campaign.id, tenantId: campaign.tenantId },
+        data: { mechanicConfig },
+      });
+      return this.summary({ ...campaign, mechanicConfig }, now);
+    }
+
+    const settings = parseAutomation(dto, current);
+    let status = campaign.status;
+    if (settings.enabled && !current?.enabled) {
+      if (!storedDraft(campaign.mechanicConfig)) {
+        throw new BadRequestException('Сначала сохраните текст сообщения.');
+      }
+      if (status === 'FINISHED' || status === 'CANCELED') {
+        throw new BadRequestException(
+          'Кампания завершена: автосценарий в ней не запустить.',
+        );
+      }
+      const admission = await this.tenantExecutionAdmission.evaluate(
+        campaign.tenantId,
+        SEND_REQUIREMENTS,
+        now,
+      );
+      if (!admission.allowed) {
+        throw new BadRequestException(
+          'Рассылки для сети сейчас выключены: исходящие сообщения не разрешены.',
+        );
+      }
+      if (status === 'DRAFT' || status === 'PLANNED') {
+        status = TELEGRAM_AUTOMATION_CAMPAIGN_STATUS;
+      }
+    }
+
+    const automation = {
+      ...configRecord(telegram.automation),
+      trigger: settings.trigger,
+      days: settings.days,
+      enabled: settings.enabled,
+      ...(settings.enabled && !current?.enabled
+        ? { enabledAt: now.toISOString(), enabledByUserId: user.id }
+        : {}),
+      ...(!settings.enabled && current?.enabled
+        ? { disabledAt: now.toISOString(), disabledByUserId: user.id }
+        : {}),
+    };
+    const mechanicConfig = {
+      ...config,
+      telegram: { ...telegram, automation },
+    } as Prisma.JsonObject;
+    await this.prisma.marketingCampaign.updateMany({
+      where: { id: campaign.id, tenantId: campaign.tenantId },
+      data: {
+        mechanicConfig,
+        ...(status !== campaign.status ? { status } : {}),
+      },
+    });
+    return this.summary({ ...campaign, status, mechanicConfig }, now);
+  }
+
   private async loadCampaign(
     user: AuthenticatedUser,
     campaignId: string,
@@ -242,6 +372,9 @@ export class GuestTelegramCampaignService {
       select: {
         id: true,
         tenantId: true,
+        status: true,
+        periodFrom: true,
+        periodTo: true,
         audienceId: true,
         storeIds: true,
         mechanicConfig: true,
@@ -264,13 +397,20 @@ export class GuestTelegramCampaignService {
       configRecord(campaign.mechanicConfig).telegram,
     );
     const signature = this.signature(campaign, await this.storeNames(campaign));
-    const [{ reach }, delivery] = await Promise.all([
-      this.resolveRecipients(campaign, draft, now),
+    const automation = campaignAutomation(campaign);
+    const [{ reach }, delivery, automationSummary] = await Promise.all([
+      automation
+        ? { reach: emptyReach() }
+        : this.resolveRecipients(campaign, draft, now),
       this.delivery(campaign),
+      automation
+        ? this.automationSummary(campaign, automation, draft, now)
+        : null,
     ]);
     const message = draft ? composeMessage(draft, signature) : null;
     return {
       campaignId: campaign.id,
+      campaignStatus: campaign.status,
       audience: campaign.audience,
       draft,
       signature,
@@ -289,6 +429,44 @@ export class GuestTelegramCampaignService {
       lastQueued:
         typeof telegram.lastQueued === 'number' ? telegram.lastQueued : null,
       frequencyDays: TELEGRAM_CAMPAIGN_FREQUENCY_MS / (24 * 60 * 60 * 1000),
+      automation: automationSummary,
+    };
+  }
+
+  private async automationSummary(
+    campaign: CampaignRow,
+    automation: TelegramAutomationSettings,
+    draft: TelegramCampaignDraft | null,
+    now: Date,
+  ): Promise<MarketingCampaignTelegramAutomation> {
+    const timeZone = await automationTimeZone(this.prisma, campaign.tenantId);
+    const candidates = await findAutomationCandidates(this.prisma, {
+      tenantId: campaign.tenantId,
+      trigger: automation.trigger,
+      days: automation.days,
+      storeIds: stringArray(campaign.storeIds),
+      now,
+      timeZone,
+    });
+    const { reach } = await selectAutomationRecipients(this.prisma, {
+      tenantId: campaign.tenantId,
+      campaignId: campaign.id,
+      trigger: automation.trigger,
+      promo: draft?.type === 'PROMO',
+      candidates,
+      now,
+    });
+    return {
+      trigger: automation.trigger,
+      days: automation.days,
+      enabled: automation.enabled,
+      enabledAt: automation.enabledAt,
+      lastRunAt: automation.lastRunAt,
+      lastQueued: automation.lastQueued,
+      reach,
+      campaignRunning: isRunning(campaign, now),
+      sendHours: { ...TELEGRAM_AUTOMATION_SEND_HOURS },
+      timeZone,
     };
   }
 
@@ -567,4 +745,137 @@ function singleStoreId(value: Prisma.JsonValue) {
     typeof value[0] === 'string'
     ? value[0]
     : null;
+}
+
+export function parseAutomation(
+  dto: TelegramAutomationDto,
+  current: TelegramAutomationSettings | null,
+): { trigger: TelegramAutomationTrigger; days: number; enabled: boolean } {
+  const trigger = dto?.trigger ?? current?.trigger;
+  if (!isTelegramAutomationTrigger(trigger)) {
+    throw new BadRequestException(
+      'Выберите правило: давно не был, нет второго визита или награда сгорает.',
+    );
+  }
+  const range = TELEGRAM_AUTOMATION_DAYS[trigger];
+  const rawDays =
+    dto?.days === undefined
+      ? current?.trigger === trigger
+        ? current.days
+        : range.default
+      : dto.days;
+  const days = typeof rawDays === 'string' ? Number(rawDays) : rawDays;
+  if (
+    typeof days !== 'number' ||
+    !Number.isInteger(days) ||
+    days < range.min ||
+    days > range.max
+  ) {
+    throw new BadRequestException(
+      `Число дней должно быть от ${range.min} до ${range.max}.`,
+    );
+  }
+  const enabled =
+    dto?.enabled === undefined ? (current?.enabled ?? false) : dto.enabled;
+  if (typeof enabled !== 'boolean') {
+    throw new BadRequestException('Укажите, включён ли автосценарий.');
+  }
+  return { trigger, days, enabled };
+}
+
+function campaignAutomation(campaign: { mechanicConfig: Prisma.JsonValue }) {
+  return storedAutomation(
+    configRecord(configRecord(campaign.mechanicConfig).telegram),
+  );
+}
+
+function isRunning(
+  campaign: Pick<CampaignRow, 'status' | 'periodFrom' | 'periodTo'>,
+  now: Date,
+) {
+  const dayMs = 24 * 60 * 60 * 1000;
+  return (
+    campaign.status === TELEGRAM_AUTOMATION_CAMPAIGN_STATUS &&
+    (!campaign.periodFrom || campaign.periodFrom <= now) &&
+    (!campaign.periodTo || campaign.periodTo.getTime() >= now.getTime() - dayMs)
+  );
+}
+
+function emptyReach(): TelegramCampaignReach {
+  return {
+    audienceTotal: 0,
+    withTelegram: 0,
+    unsubscribed: 0,
+    noPromoConsent: 0,
+    recentlyMessaged: 0,
+    alreadyQueued: 0,
+    willReceive: 0,
+  };
+}
+
+/**
+ * Running campaigns with an enabled Telegram automation, with their message
+ * ready to queue. Used by the bonus-ledger worker, across all networks.
+ */
+export async function loadAutomationCampaigns(
+  prisma: Pick<PrismaService, 'marketingCampaign' | 'store'>,
+  now: Date,
+): Promise<AutomationCampaign[]> {
+  const rows = await prisma.marketingCampaign.findMany({
+    where: {
+      ...runningAutomationWhere(now),
+      mechanicConfig: {
+        path: ['telegram', 'automation', 'enabled'],
+        equals: true,
+      },
+    },
+    select: {
+      id: true,
+      tenantId: true,
+      storeIds: true,
+      createdByUserId: true,
+      mechanicConfig: true,
+      tenant: { select: { name: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+  const campaigns: AutomationCampaign[] = [];
+  for (const row of rows) {
+    const draft = storedDraft(row.mechanicConfig);
+    const automation = campaignAutomation(row);
+    if (!draft || !automation?.enabled) continue;
+    const storeIds = stringArray(row.storeIds);
+    const store =
+      storeIds.length === 1
+        ? await prisma.store.findFirst({
+            where: { id: storeIds[0], tenantId: row.tenantId },
+            select: { name: true },
+          })
+        : null;
+    const signature = store?.name?.trim()
+      ? `Клуб «${store.name.trim()}»`
+      : row.tenant.name.trim() || 'Ваш клуб';
+    const kind: GuestTelegramOutboxKind =
+      draft.type === 'PROMO' ? 'CAMPAIGN_PROMO' : 'CAMPAIGN_NEWS';
+    campaigns.push({
+      id: row.id,
+      tenantId: row.tenantId,
+      storeIds: row.storeIds,
+      createdByUserId: row.createdByUserId,
+      automation,
+      promo: draft.type === 'PROMO',
+      message: (note) => {
+        const message = composeMessage(
+          note ? { ...draft, text: `${draft.text}\n\n${note}` } : draft,
+          signature,
+        );
+        return {
+          text: message.text,
+          replyMarkup: message.replyMarkup,
+          kind: kind,
+        };
+      },
+    });
+  }
+  return campaigns;
 }

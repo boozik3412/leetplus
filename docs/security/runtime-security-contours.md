@@ -1802,7 +1802,7 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
 
 1. `GuestTelegramOutboxMessage` (миграция 200, grant `leetplus_runtime`) —
    единая очередь исходящих сообщений гостю в Telegram: сейчас
-   `SUPPORT_REPLY`, далее `CAMPAIGN`. Строка уникальна по
+   `SUPPORT_REPLY`, `CAMPAIGN_NEWS`, `CAMPAIGN_PROMO`. Строка уникальна по
    `tenantId + sourceKey` и привязана к exact `tenantId + profileId`.
 2. Worker routes `POST /guests/communications/telegram-outbox/claim|report`
    регистрируются только в corporate runtime (`GuestCommunicationsModule`),
@@ -1812,7 +1812,8 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
    webhook secret и не bot token: edge не получает sync token ради очереди.
 3. Claim выдаёт сообщение под lease 2 минуты и `claimToken`; перед выдачей
    заново проверяет tenant admission `COMMUNICATIONS/OUTBOUND`, статус профиля
-   и наличие чата, а для `CAMPAIGN` — что гость не отписан. Report меняет
+   и наличие чата, а для `CAMPAIGN_*` — что гость не отписан (для
+   `CAMPAIGN_PROMO` ещё `promoConsentStatus = GRANTED`). Report меняет
    только строку с тем же `claimToken` в `SENDING`; повтор до 5 попыток с
    backoff и Telegram `retry_after`, 403/«chat not found» → `BLOCKED`.
 4. Отправку делает только `telegram-poller` через тот же process-scoped
@@ -1822,6 +1823,21 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
    не влияет на poll.
 5. В ответе worker route есть только chat id, текст и allowlisted кнопки;
    телефон, ФИО и support metadata в edge не передаются.
+6. Рассылки кампаний (миграция 201): `GET /marketing/campaigns/:id/telegram`,
+   `POST …/telegram/draft`, `POST …/telegram/send` — corporate контур,
+   `JwtAuthGuard` + `RolesGuard` (`view_marketing` / `manage_marketing`), как у
+   остального `/marketing`; `send` дополнительно требует fresh NETWORK scope
+   (`FreshNetworkScopeGuard`) и tenant admission `COMMUNICATIONS/OUTBOUND`.
+   Send только ставит строки в очередь (`sourceKey =
+   campaign:<id>:profile:<profileId>`, `skipDuplicates`), не больше 10 000 за
+   раз и не чаще одного сообщения кампании гостю в 3 дня. Доставленное
+   сообщение пишет `GuestCrmContactEvent` (канал «Telegram-бот», `result`
+   пустой) в report worker route.
+7. Согласие на акции — `GuestGameProfile.promoConsentStatus`
+   (`UNKNOWN|GRANTED|DENIED`), отдельно от согласия при входе в игру (оно не
+   покрывает рекламу). Меняет его только сам гость кнопками бота
+   (`bot:promo`, `bot:promo:yes|no`) в public guest webhook; полная отписка
+   ставит `DENIED`. Corporate API согласие не записывает.
 
 ## Инварианты корпоративного входа
 

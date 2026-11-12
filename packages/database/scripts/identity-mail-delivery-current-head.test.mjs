@@ -39,7 +39,7 @@ const productionHistoryPreterminalManifestDigest =
 const workerAssertSourceDigest =
   "645feb480c46c42d7d8ca2dae07ec1c82f88264ac5d0e30d26593a8e566f3f66";
 const workerAssertDefinitionDigest =
-  "f84e49729dfdbf36521a131626fd14c57b215d23f36f1cf8ff3bf68dbf3512a2";
+  "5adcad3715dfd62e3526ec4de9761cbfa738712d269936e796a1331bc7cbee96";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");

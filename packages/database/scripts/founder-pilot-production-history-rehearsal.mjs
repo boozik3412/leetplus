@@ -27,9 +27,9 @@ const FINAL_MIGRATION_HEAD =
   "20260820010000_guest_portal_telegram_update_ledger";
 const CURRENT188_MIGRATION_COUNT = 188;
 const CURRENT188_MIGRATION_HEAD = "20260828190000_guest_support_bug_reports";
-const CURRENT_SOURCE_MIGRATION_COUNT = 200;
+const CURRENT_SOURCE_MIGRATION_COUNT = 201;
 const CURRENT_SOURCE_MIGRATION_HEAD =
-  "20261112090000_guest_telegram_outbox";
+  "20261112120000_guest_telegram_campaigns";
 const FINAL_PRETERMINAL_MANIFEST_DIGEST =
   "094f3ad34ef8846f6088f51d5fb9491ff89af4509b60063453c22af07466d99b";
 const FINAL_WORKER_FUNCTION_DIGEST =
@@ -825,7 +825,8 @@ export async function createFounderPilotProductionHistoryPgAdapter(
                   '20261109120000_guest_game_external_accounts',
                   '20261110090000_store_floor_plan',
                   '20261111090000_guest_staff_mark',
-                  '20261112090000_guest_telegram_outbox'
+                  '20261112090000_guest_telegram_outbox',
+                  '20261112120000_guest_telegram_campaigns'
                 )
               ) || E'\\n',
               'UTF8'

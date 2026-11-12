@@ -796,3 +796,58 @@ export async function getMarketingCampaignEffect(
 
   return response.json() as Promise<MarketingCampaignEffect>;
 }
+
+export type MarketingCampaignTelegramType = "NEWS" | "PROMO";
+
+export type MarketingCampaignTelegramDraft = {
+  type: MarketingCampaignTelegramType;
+  text: string;
+  buttonText: string | null;
+  buttonUrl: string | null;
+};
+
+export type MarketingCampaignTelegram = {
+  campaignId: string;
+  audience: { id: string; name: string } | null;
+  draft: MarketingCampaignTelegramDraft | null;
+  signature: string;
+  preview: { text: string; buttons: string[] } | null;
+  reach: {
+    audienceTotal: number;
+    withTelegram: number;
+    unsubscribed: number;
+    noPromoConsent: number;
+    recentlyMessaged: number;
+    alreadyQueued: number;
+    willReceive: number;
+  };
+  delivery: {
+    total: number;
+    queued: number;
+    sent: number;
+    failed: number;
+    blocked: number;
+    skipped: number;
+  };
+  lastSentAt: string | null;
+  lastQueued: number | null;
+  frequencyDays: number;
+};
+
+export async function getMarketingCampaignTelegram(
+  id: string,
+): Promise<MarketingCampaignTelegram> {
+  const response = await fetch(
+    `${getApiUrl()}/marketing/campaigns/${encodeURIComponent(id)}/telegram`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch marketing campaign Telegram broadcast");
+  }
+
+  return response.json() as Promise<MarketingCampaignTelegram>;
+}

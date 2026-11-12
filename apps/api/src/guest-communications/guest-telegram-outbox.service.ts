@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma, TenantModule } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,7 +14,10 @@ import {
 
 export const GUEST_TELEGRAM_OUTBOX_KINDS = [
   'SUPPORT_REPLY',
-  'CAMPAIGN',
+  // Club news from a marketing campaign: every guest who has not unsubscribed.
+  'CAMPAIGN_NEWS',
+  // Promotions: only guests who said yes in the bot («Акции клуба»).
+  'CAMPAIGN_PROMO',
 ] as const;
 export type GuestTelegramOutboxKind =
   (typeof GUEST_TELEGRAM_OUTBOX_KINDS)[number];
@@ -46,6 +49,7 @@ const OUTBOX_SEND_REQUIREMENTS = [
 ] as const satisfies readonly TenantExecutionRequirement[];
 
 const TELEGRAM_CHAT_IDENTITY = /^chat:(-?\d{1,20})$/;
+export const GUEST_TELEGRAM_CAMPAIGN_CONTACT_CHANNEL = 'Telegram-бот';
 const INACTIVE_PROFILE_STATUSES = new Set([
   'ARCHIVED',
   'SUPERSEDED',
@@ -115,6 +119,8 @@ type OutboxWriter = Pick<
 
 @Injectable()
 export class GuestTelegramOutboxService {
+  private readonly logger = new Logger(GuestTelegramOutboxService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantExecutionAdmission: TenantExecutionAdmissionService,
@@ -204,6 +210,7 @@ export class GuestTelegramOutboxService {
             telegramIdentity: true,
             status: true,
             phoneConsentStatus: true,
+            promoConsentStatus: true,
           },
         },
       },
@@ -272,7 +279,13 @@ export class GuestTelegramOutboxService {
           claimToken: report.claimToken,
           status: 'SENDING',
         },
-        select: { attempts: true },
+        select: {
+          attempts: true,
+          tenantId: true,
+          marketingCampaignId: true,
+          createdByUserId: true,
+          profile: { select: { guestId: true } },
+        },
       });
       if (!row) {
         ignored += 1;
@@ -290,6 +303,17 @@ export class GuestTelegramOutboxService {
       });
       if (updated.count === 1) {
         applied += 1;
+        if (report.outcome === 'SENT' && row.marketingCampaignId) {
+          // The message is already delivered; a failed journal write must
+          // not fail the poller's report for the rest of the batch.
+          await this.recordCampaignContact(row, now).catch((error: unknown) =>
+            this.logger.warn(
+              `Campaign contact for outbox ${report.id} not recorded: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            ),
+          );
+        }
       } else {
         ignored += 1;
       }
@@ -297,12 +321,47 @@ export class GuestTelegramOutboxService {
 
     return { applied, ignored };
   }
+
+  // A delivered campaign message is a contact in the campaign's «Эффект»
+  // (no result: delivery is not a reply from the guest).
+  private async recordCampaignContact(
+    row: {
+      tenantId: string;
+      marketingCampaignId: string | null;
+      createdByUserId: string | null;
+      profile: { guestId: string | null };
+    },
+    now: Date,
+  ) {
+    if (!row.marketingCampaignId || !row.profile.guestId) return;
+    const campaign = await this.prisma.marketingCampaign.findFirst({
+      where: { id: row.marketingCampaignId, tenantId: row.tenantId },
+      select: { audienceId: true },
+    });
+    if (!campaign) return;
+    await this.prisma.guestCrmContactEvent.create({
+      data: {
+        tenantId: row.tenantId,
+        guestId: row.profile.guestId,
+        audienceId: campaign.audienceId,
+        marketingCampaignId: row.marketingCampaignId,
+        createdByUserId: row.createdByUserId,
+        channel: GUEST_TELEGRAM_CAMPAIGN_CONTACT_CHANNEL,
+        note: 'Рассылка доставлена в Telegram.',
+        contactedAt: now,
+      },
+    });
+  }
 }
 
 function outboxSkipReason(
   row: {
     kind: string;
-    profile: { status: string; phoneConsentStatus: string };
+    profile: {
+      status: string;
+      phoneConsentStatus: string;
+      promoConsentStatus: string;
+    };
   },
   tenantAllowed: boolean | undefined,
 ) {
@@ -318,6 +377,13 @@ function outboxSkipReason(
       row.profile.phoneConsentStatus === 'DENIED')
   ) {
     return 'GUEST_UNSUBSCRIBED';
+  }
+  // The guest may have withdrawn the promo "yes" after the campaign queued.
+  if (
+    row.kind === 'CAMPAIGN_PROMO' &&
+    row.profile.promoConsentStatus !== 'GRANTED'
+  ) {
+    return 'NO_PROMO_CONSENT';
   }
   return null;
 }

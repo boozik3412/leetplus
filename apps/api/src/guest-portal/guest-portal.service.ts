@@ -220,6 +220,11 @@ const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
 const TELEGRAM_BOT_UNSUBSCRIBE_CALLBACK = 'bot:unsubscribe';
 const TELEGRAM_BOT_WRITE_CALLBACK = 'bot:write';
 const TELEGRAM_BOT_UNSUBSCRIBE_CONFIRM_CALLBACK = 'bot:unsubscribe:confirm';
+// Promotional broadcasts need the guest's own "yes" in the bot: login consent
+// covers quests only. Club news goes to every guest who has not unsubscribed.
+const TELEGRAM_BOT_PROMO_CALLBACK = 'bot:promo';
+const TELEGRAM_BOT_PROMO_YES_CALLBACK = 'bot:promo:yes';
+const TELEGRAM_BOT_PROMO_NO_CALLBACK = 'bot:promo:no';
 const TELEGRAM_LINK_EVENT_PREFIX = 'guest_portal:telegram_bot_link:';
 const TELEGRAM_AUTH_EVENT_PREFIX = 'guest_portal:telegram_auth:';
 const GAME_CONSENT_EVENT_TYPE = 'GAME_CONSENT_GRANTED';
@@ -850,6 +855,7 @@ export type GuestPortalTelegramWebhookResponse = {
     | 'TELEGRAM_BOT_CLUB_SELECTED'
     | 'TELEGRAM_BOT_HELP'
     | 'TELEGRAM_BOT_WRITE'
+    | 'TELEGRAM_BOT_PROMO'
     | 'TELEGRAM_GUEST_MESSAGE'
     | 'UNSUBSCRIBE'
     | 'UNSUBSCRIBE_CONFIRMATION'
@@ -9160,6 +9166,18 @@ export class GuestPortalService {
       return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
     }
 
+    const promoChoice = telegramBotPromoChoice(update.callbackData);
+    if (promoChoice) {
+      return this.dispatchTelegramWebhookReply(
+        await this.telegramWebhookPromoResponse(
+          update.telegramChatId,
+          promoChoice,
+          telegramIdentityMasked,
+        ),
+        update.telegramChatId,
+      );
+    }
+
     if (update.callbackData?.trim() === TELEGRAM_BOT_WRITE_CALLBACK) {
       return this.dispatchTelegramWebhookReply(
         this.telegramWebhookWriteToClubPrompt(telegramIdentityMasked),
@@ -9895,6 +9913,12 @@ export class GuestPortalService {
               ],
             ]
           : []),
+        [
+          {
+            text: 'Присылать акции клуба',
+            callback_data: TELEGRAM_BOT_PROMO_YES_CALLBACK,
+          },
+        ],
       ],
     };
 
@@ -10651,6 +10675,12 @@ export class GuestPortalService {
               callback_data: '/help',
             },
             {
+              text: 'Акции клуба',
+              callback_data: TELEGRAM_BOT_PROMO_CALLBACK,
+            },
+          ],
+          [
+            {
               text: 'Отписаться',
               callback_data: TELEGRAM_BOT_UNSUBSCRIBE_CALLBACK,
             },
@@ -11152,6 +11182,122 @@ export class GuestPortalService {
     }
   }
 
+  // «Акции клуба»: the guest's own answer about promotional broadcasts.
+  // Saying yes also lifts an earlier bot unsubscribe for this chat, since it
+  // is a new explicit request to receive messages.
+  private async telegramWebhookPromoResponse(
+    telegramChatIdValue: string,
+    choice: 'ASK' | 'YES' | 'NO',
+    telegramIdentityMasked: string | null,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    const reply = (
+      message: string,
+      text: string,
+      buttons: Array<Array<{ text: string; callback_data: string }>>,
+    ) =>
+      this.withTelegramPlatformReply({
+        status: 'IGNORED',
+        action: 'TELEGRAM_BOT_PROMO',
+        profileId: null,
+        telegramIdentityMasked,
+        message,
+        reply: {
+          provider: 'TELEGRAM',
+          method: 'sendMessage',
+          chatIdMasked: telegramIdentityMasked,
+          text,
+          replyMarkup: { inline_keyboard: buttons },
+        },
+      });
+    const menuRow = [{ text: 'Меню', callback_data: 'bot:menu' }];
+    const profiles = await this.prisma.guestGameProfile.findMany({
+      where: {
+        telegramIdentity: `chat:${telegramChatIdValue}`,
+        status: 'ACTIVE',
+      },
+      select: { id: true, promoConsentStatus: true },
+    });
+    if (!profiles.length) {
+      return reply(
+        'Telegram promo choice from a chat without a game profile.',
+        'Сначала войдите в игру через Telegram на сайте LeetPlus, и тогда сможете выбрать, присылать ли акции клуба.',
+        [menuRow],
+      );
+    }
+
+    if (choice === 'ASK') {
+      const granted = profiles.some(
+        (profile) => profile.promoConsentStatus === 'GRANTED',
+      );
+      return reply(
+        'Telegram bot asked about promotional broadcasts.',
+        [
+          granted
+            ? 'Сейчас мы присылаем сюда акции и спецпредложения клуба.'
+            : 'Сейчас акции и спецпредложения клуба сюда не приходят.',
+          'Новости клуба (часы работы, ремонт, новое железо) и ответы на ваши сообщения приходят в любом случае, пока вы не отписались.',
+        ].join('\n'),
+        [
+          granted
+            ? [
+                {
+                  text: 'Не присылать акции',
+                  callback_data: TELEGRAM_BOT_PROMO_NO_CALLBACK,
+                },
+              ]
+            : [
+                {
+                  text: 'Присылать акции',
+                  callback_data: TELEGRAM_BOT_PROMO_YES_CALLBACK,
+                },
+              ],
+          menuRow,
+        ],
+      );
+    }
+
+    const now = new Date();
+    const profileIds = profiles.map((profile) => profile.id);
+    if (choice === 'YES') {
+      await this.prisma.guestGameProfile.updateMany({
+        where: { id: { in: profileIds } },
+        data: { promoConsentStatus: 'GRANTED', promoConsentAt: now },
+      });
+      await this.prisma.guestGameProfile.updateMany({
+        where: {
+          id: { in: profileIds },
+          phoneConsentStatus: {
+            in: [
+              GuestCommunicationConsentStatus.UNSUBSCRIBED,
+              GuestCommunicationConsentStatus.DENIED,
+            ],
+          },
+        },
+        data: {
+          phoneConsentStatus: GuestCommunicationConsentStatus.GRANTED,
+          phoneConsentSource: 'telegram_bot_promo',
+          phoneConsentAt: now,
+          unsubscribedAt: null,
+        },
+      });
+      return reply(
+        'Telegram guest agreed to promotional broadcasts.',
+        'Готово: будем присылать сюда акции и спецпредложения клуба. Передумаете — нажмите «Акции клуба» в меню.',
+        [menuRow],
+      );
+    }
+
+    await this.prisma.guestGameProfile.updateMany({
+      where: { id: { in: profileIds } },
+      data: { promoConsentStatus: 'DENIED', promoConsentAt: now },
+    });
+    return reply(
+      'Telegram guest declined promotional broadcasts.',
+      'Хорошо, акции присылать не будем. Новости клуба и ответы на ваши сообщения по-прежнему придут сюда; чтобы не получать ничего, нажмите «Отписаться» в меню.',
+      [menuRow],
+    );
+  }
+
   private telegramWebhookUnsubscribeConfirmationResponse(
     telegramIdentityMasked: string | null,
   ): GuestPortalTelegramWebhookResponse {
@@ -11275,6 +11421,8 @@ export class GuestPortalService {
           phoneConsentSource: 'telegram_bot',
           phoneConsentAt: null,
           unsubscribedAt: now,
+          promoConsentStatus: 'DENIED',
+          promoConsentAt: now,
         },
       });
 
@@ -19046,6 +19194,21 @@ function telegramWebhookUpdate(value: unknown) {
 // Key of a plain text message a guest typed in a private chat with the bot.
 // Edits, channel posts, groups, buttons, contacts and slash commands are not
 // guest messages.
+function telegramBotPromoChoice(
+  callbackData: string | null,
+): 'ASK' | 'YES' | 'NO' | null {
+  switch (callbackData?.trim()) {
+    case TELEGRAM_BOT_PROMO_CALLBACK:
+      return 'ASK';
+    case TELEGRAM_BOT_PROMO_YES_CALLBACK:
+      return 'YES';
+    case TELEGRAM_BOT_PROMO_NO_CALLBACK:
+      return 'NO';
+    default:
+      return null;
+  }
+}
+
 function telegramWebhookGuestMessageKey(
   dto: unknown,
   update: {

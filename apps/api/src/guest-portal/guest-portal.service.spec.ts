@@ -9723,6 +9723,12 @@ describe('GuestPortalService', () => {
                   callback_data: 'bot:menu',
                 },
               ],
+              [
+                {
+                  text: 'Присылать акции клуба',
+                  callback_data: 'bot:promo:yes',
+                },
+              ],
             ],
           },
         },
@@ -9868,6 +9874,12 @@ describe('GuestPortalService', () => {
                   text: 'Помощь',
                   callback_data: '/help',
                 },
+                {
+                  text: 'Акции клуба',
+                  callback_data: 'bot:promo',
+                },
+              ],
+              [
                 {
                   text: 'Отписаться',
                   callback_data: 'bot:unsubscribe',
@@ -10095,6 +10107,124 @@ describe('GuestPortalService', () => {
       },
     );
 
+    describe('promotional broadcasts choice', () => {
+      const promoCallback = (data: string) => ({
+        update_id: 601,
+        callback_query: {
+          id: `callback-${data}`,
+          from: { id: 123456 },
+          data,
+          message: { chat: { id: 123456 } },
+        },
+      });
+
+      it('shows the current choice and the button to change it', async () => {
+        const { prisma, service } = createService({
+          GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        });
+        prisma.guestGameProfile.findMany.mockResolvedValue([
+          { id: 'profile-1', promoConsentStatus: 'UNKNOWN' },
+        ]);
+
+        const result = await service.handleTelegramWebhook(
+          'telegram-secret',
+          promoCallback('bot:promo'),
+        );
+
+        expect(result).toMatchObject({
+          action: 'TELEGRAM_BOT_PROMO',
+          reply: {
+            text: expect.stringContaining('сюда не приходят') as string,
+            replyMarkup: {
+              inline_keyboard: [
+                [{ text: 'Присылать акции', callback_data: 'bot:promo:yes' }],
+                [{ text: 'Меню', callback_data: 'bot:menu' }],
+              ],
+            },
+          },
+        });
+        expect(prisma.guestGameProfile.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('records consent and lifts an earlier unsubscribe on «yes»', async () => {
+        const { prisma, service } = createService({
+          GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        });
+        prisma.guestGameProfile.findMany.mockResolvedValue([
+          { id: 'profile-1', promoConsentStatus: 'DENIED' },
+        ]);
+
+        const result = await service.handleTelegramWebhook(
+          'telegram-secret',
+          promoCallback('bot:promo:yes'),
+        );
+
+        expect(prisma.guestGameProfile.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { telegramIdentity: 'chat:123456', status: 'ACTIVE' },
+          }),
+        );
+        expect(prisma.guestGameProfile.updateMany).toHaveBeenNthCalledWith(1, {
+          where: { id: { in: ['profile-1'] } },
+          data: {
+            promoConsentStatus: 'GRANTED',
+            promoConsentAt: expect.any(Date),
+          },
+        });
+        expect(prisma.guestGameProfile.updateMany).toHaveBeenNthCalledWith(2, {
+          where: {
+            id: { in: ['profile-1'] },
+            phoneConsentStatus: { in: ['UNSUBSCRIBED', 'DENIED'] },
+          },
+          data: expect.objectContaining({
+            phoneConsentStatus: 'GRANTED',
+            phoneConsentSource: 'telegram_bot_promo',
+            unsubscribedAt: null,
+          }) as Record<string, unknown>,
+        });
+        expect(result.reply?.text).toContain('будем присылать');
+      });
+
+      it('records the refusal on «no» without touching other consent', async () => {
+        const { prisma, service } = createService({
+          GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        });
+        prisma.guestGameProfile.findMany.mockResolvedValue([
+          { id: 'profile-1', promoConsentStatus: 'GRANTED' },
+        ]);
+
+        const result = await service.handleTelegramWebhook(
+          'telegram-secret',
+          promoCallback('bot:promo:no'),
+        );
+
+        expect(prisma.guestGameProfile.updateMany).toHaveBeenCalledTimes(1);
+        expect(prisma.guestGameProfile.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['profile-1'] } },
+          data: {
+            promoConsentStatus: 'DENIED',
+            promoConsentAt: expect.any(Date),
+          },
+        });
+        expect(result.reply?.text).toContain('акции присылать не будем');
+      });
+
+      it('asks a chat without a game profile to log in first', async () => {
+        const { prisma, service } = createService({
+          GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        });
+        prisma.guestGameProfile.findMany.mockResolvedValue([]);
+
+        const result = await service.handleTelegramWebhook(
+          'telegram-secret',
+          promoCallback('bot:promo:yes'),
+        );
+
+        expect(prisma.guestGameProfile.updateMany).not.toHaveBeenCalled();
+        expect(result.reply?.text).toContain('Сначала войдите в игру');
+      });
+    });
+
     it('unsubscribes after the confirmation button and replies', async () => {
       const { prisma, service } = createService({
         GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
@@ -10131,6 +10261,8 @@ describe('GuestPortalService', () => {
           phoneConsentSource: 'telegram_bot',
           phoneConsentAt: null,
           unsubscribedAt: expect.any(Date),
+          promoConsentStatus: 'DENIED',
+          promoConsentAt: expect.any(Date),
         },
       });
       expect(prisma.guest.updateMany).toHaveBeenCalledWith(

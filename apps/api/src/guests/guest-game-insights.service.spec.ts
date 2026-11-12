@@ -41,6 +41,10 @@ describe('GuestGameInsightsService', () => {
   const ledgerCount = jest.fn();
   const eventFindMany = jest.fn();
   const eventCount = jest.fn();
+  const externalAccountFindMany = jest.fn();
+  const externalMatchFindMany = jest.fn();
+  const externalMatchGroupBy = jest.fn();
+  const storeFindMany = jest.fn();
   let service: GuestGameInsightsService;
 
   beforeEach(() => {
@@ -55,7 +59,17 @@ describe('GuestGameInsightsService', () => {
       guestGameReward: { findMany: rewardFindMany, count: rewardCount },
       guestBonusLedgerEntry: { findMany: ledgerFindMany, count: ledgerCount },
       guestGameEvent: { findMany: eventFindMany, count: eventCount },
+      guestGameExternalAccount: { findMany: externalAccountFindMany },
+      guestGameExternalMatch: {
+        findMany: externalMatchFindMany,
+        groupBy: externalMatchGroupBy,
+      },
+      store: { findMany: storeFindMany },
     } as never);
+    externalAccountFindMany.mockResolvedValue([]);
+    externalMatchFindMany.mockResolvedValue([]);
+    externalMatchGroupBy.mockResolvedValue([]);
+    storeFindMany.mockResolvedValue([]);
   });
 
   it('returns an empty map without guest ids and without profiles', async () => {
@@ -271,5 +285,171 @@ describe('GuestGameInsightsService', () => {
       ledgerEntries: 2,
     });
     expect(JSON.stringify(detail)).not.toContain('langameRequest');
+  });
+  it('shows linked Steam/FACEIT accounts and the FACEIT match journal', async () => {
+    profileFindFirst.mockResolvedValueOnce(
+      profileRow({
+        displayName: 'Nick',
+        tutorialSeenVersion: 2,
+        tutorialSeenAt: new Date('2026-09-01T00:00:00.000Z'),
+      }),
+    );
+    walletFindMany.mockResolvedValue([]);
+    rewardFindMany.mockResolvedValue([]);
+    ledgerFindMany.mockResolvedValue([]);
+    eventFindMany.mockImplementation((args: { where: { id?: unknown } }) =>
+      Promise.resolve(
+        args.where.id ? [{ id: 'event-faceit', xpDelta: 40 }] : [],
+      ),
+    );
+    eventCount.mockResolvedValue(0);
+    rewardCount.mockResolvedValue(0);
+    ledgerCount.mockResolvedValue(0);
+    externalAccountFindMany.mockResolvedValueOnce([
+      {
+        id: 'acc-steam',
+        provider: 'STEAM',
+        externalId: '76561198000000001',
+        nickname: 'steam-nick',
+        status: 'ACTIVE',
+        linkedAt: new Date('2026-09-10T00:00:00.000Z'),
+        unlinkedAt: null,
+        lookupStatus: 'FOUND',
+        checkedAt: new Date('2026-09-10T00:05:00.000Z'),
+        matchesSyncedUntil: null,
+        details: {
+          avatarUrl: 'https://avatars.example/a.jpg',
+          steamBans: { vac: false, gameBans: 0, community: false },
+        },
+      },
+      {
+        id: 'acc-faceit',
+        provider: 'FACEIT',
+        externalId: 'faceit-player-1',
+        nickname: 'faceit_nick',
+        status: 'ACTIVE',
+        linkedAt: new Date('2026-09-10T00:05:00.000Z'),
+        unlinkedAt: null,
+        lookupStatus: 'FOUND',
+        checkedAt: new Date('2026-09-10T00:05:00.000Z'),
+        matchesSyncedUntil: new Date('2026-09-20T00:00:00.000Z'),
+        details: { level: 7, elo: 1450, steamId: '76561198000000001' },
+      },
+    ]);
+    externalMatchFindMany.mockResolvedValueOnce([
+      {
+        id: 'match-1',
+        provider: 'FACEIT',
+        game: 'cs2',
+        externalMatchId: '1-abc-def',
+        startedAt: new Date('2026-09-15T18:00:00.000Z'),
+        finishedAt: new Date('2026-09-15T18:40:00.000Z'),
+        decision: 'COUNTED',
+        decisionReason: null,
+        stats: {
+          match: {
+            provider: 'FACEIT',
+            result: 'WIN',
+            kills: 21,
+            deaths: 15,
+            assists: 4,
+            kd: 1.4,
+            adr: 88.5,
+            hsPercent: 52,
+            mvps: 3,
+            aces: 0,
+            map: 'de_mirage',
+          },
+          session: { storeId: 'store-1', startedAt: null, stoppedAt: null },
+        },
+        eventId: 'event-faceit',
+        reviewedAt: null,
+      },
+      {
+        id: 'match-2',
+        provider: 'FACEIT',
+        game: 'cs2',
+        externalMatchId: '1-home',
+        startedAt: new Date('2026-09-14T18:00:00.000Z'),
+        finishedAt: new Date('2026-09-14T18:40:00.000Z'),
+        decision: 'OUTSIDE_SESSION',
+        decisionReason: null,
+        stats: {},
+        eventId: null,
+        reviewedAt: null,
+      },
+    ]);
+    externalMatchGroupBy.mockResolvedValueOnce([
+      { decision: 'COUNTED', _count: { _all: 3 } },
+      { decision: 'OUTSIDE_SESSION', _count: { _all: 2 } },
+      { decision: 'REVIEW', _count: { _all: 1 } },
+    ]);
+    storeFindMany.mockResolvedValueOnce([{ id: 'store-1', name: 'Клуб 1' }]);
+
+    const detail = await service.loadGuestGameDetail(
+      't',
+      'guest-1',
+      period,
+      now,
+    );
+
+    expect(detail?.connection).toEqual({
+      profileId: 'profile-1',
+      status: 'ACTIVE',
+      displayName: 'Nick',
+      tutorialSeenVersion: 2,
+      tutorialSeenAt: '2026-09-01T00:00:00.000Z',
+    });
+    expect(detail?.externalAccounts[0]).toEqual(
+      expect.objectContaining({
+        provider: 'STEAM',
+        profileUrl: 'https://steamcommunity.com/profiles/76561198000000001',
+        steamBans: { vac: false, gameBans: 0, community: false },
+        faceitLevel: null,
+      }),
+    );
+    expect(detail?.externalAccounts[1]).toEqual(
+      expect.objectContaining({
+        provider: 'FACEIT',
+        faceitLevel: 7,
+        faceitElo: 1450,
+        profileUrl: 'https://www.faceit.com/ru/players/faceit_nick',
+      }),
+    );
+    expect(detail?.externalMatches[0]).toEqual(
+      expect.objectContaining({
+        decision: 'COUNTED',
+        storeName: 'Клуб 1',
+        map: 'de_mirage',
+        result: 'WIN',
+        kills: 21,
+        kd: 1.4,
+        xpDelta: 40,
+        matchUrl: 'https://www.faceit.com/ru/cs2/room/1-abc-def',
+      }),
+    );
+    expect(detail?.externalMatches[1]).toEqual(
+      expect.objectContaining({
+        decision: 'OUTSIDE_SESSION',
+        storeName: null,
+        result: null,
+        xpDelta: null,
+      }),
+    );
+    expect(detail?.externalMatchTotals).toEqual({
+      total: 6,
+      counted: 3,
+      outsideSession: 2,
+      notEligible: 0,
+      review: 1,
+    });
+    expect(
+      firstCallArg<{ where: unknown }>(externalMatchFindMany).where,
+    ).toEqual({ tenantId: 't', profileId: 'profile-1' });
+    expect(firstCallArg<{ where: unknown }>(storeFindMany).where).toEqual({
+      tenantId: 't',
+      id: { in: ['store-1'] },
+    });
+    expect(JSON.stringify(detail)).not.toContain('avatars.example');
   });
 });

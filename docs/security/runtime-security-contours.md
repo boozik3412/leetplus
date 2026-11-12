@@ -2100,6 +2100,14 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
 - Проекция не раскрывает `phoneEncrypted`, `telegramIdentity`, `maxIdentity`,
   Langame request/response и claim payload: только счётчики, статусы, суммы и
   булевы флаги каналов. Контракт полей — `docs/agent-context/guests-crm-gamification.md`.
+- С 12.11.2026 `GET /guests/:id` в той же проекции отдаёт игровые аккаунты
+  гостя и журнал матчей FACEIT (`GuestGameExternalAccount`,
+  `GuestGameExternalMatch`, только чтение, exact `tenantId + profileId`):
+  ник, публичный ID и ссылку на публичный профиль Steam/FACEIT, баны Steam,
+  уровень/ELO FACEIT, решение журнала и статистику самого гостя. Аватары,
+  сырые ответы провайдеров и других игроков матча проекция не отдаёт. Steam и
+  FACEIT при этом не вызываются; маршрут, права, scheduler и egress не
+  менялись.
 
 ### Отметка «Сотрудник» в карточке гостя (11.11.2026)
 

@@ -237,7 +237,96 @@ export const gameEventTypeLabels: Record<string, string> = {
   BALANCE_TOPUP: "Пополнение",
   PRODUCT_EXPENSE: "Покупка",
   MANUAL_ADJUSTMENT: "Ручная корректировка",
+  FACEIT_MATCH: "Матч FACEIT",
 };
+
+export const gameProfileStatusLabels: Record<string, string> = {
+  ACTIVE: "Активен",
+  BLOCKED: "Заблокирован",
+  DISABLED: "Отключён",
+  ARCHIVED: "В архиве",
+};
+
+export const externalProviderLabels: Record<string, string> = {
+  STEAM: "Steam",
+  FACEIT: "FACEIT",
+};
+
+export const externalLookupStatusLabels: Record<string, string> = {
+  PENDING: "ещё не проверен",
+  FOUND: "найден",
+  NOT_FOUND: "FACEIT не найден",
+  FAILED: "ошибка проверки",
+};
+
+export const externalMatchDecisionLabels: Record<string, string> = {
+  COUNTED: "Засчитан",
+  OUTSIDE_SESSION: "Вне сессии",
+  NOT_ELIGIBLE: "Не подходит",
+  REVIEW: "На проверке",
+};
+
+/**
+ * Badge of a journal row. A COUNTED row is a valid club match; it becomes a
+ * game event only when a FACEIT mission of that club takes it.
+ */
+export function externalMatchBadge(match: {
+  decision: string;
+  decisionReason: string | null;
+  eventId: string | null;
+}): { label: string; tone: BadgeTone } {
+  if (match.decision === "COUNTED" && !match.eventId) {
+    return match.decisionReason === "NO_MATCHING_MISSION"
+      ? { label: "Без задания", tone: "neutral" }
+      : { label: "Ждёт начисления", tone: "info" };
+  }
+  return {
+    label: externalMatchDecisionLabels[match.decision] ?? match.decision,
+    tone: externalMatchDecisionTone(match.decision),
+  };
+}
+
+export function externalMatchDecisionTone(decision: string): BadgeTone {
+  if (decision === "COUNTED") return "good";
+  if (decision === "REVIEW") return "warning";
+  if (decision === "OUTSIDE_SESSION") return "neutral";
+  return "danger";
+}
+
+const externalMatchReasonLabels: Record<string, string> = {
+  NOT_FINISHED: "матч не завершён",
+  NOT_5V5: "не режим 5×5",
+  NOT_MATCHMAKING: "не матчмейкинг FACEIT",
+  NO_TIMES: "у матча нет времени начала или конца",
+  TOO_SHORT: "матч короче 15 минут",
+  NO_PLAYER_STATS: "FACEIT не отдал статистику игрока",
+  DAILY_CAP: "уже 10 засчитанных матчей за сутки",
+  LINKED_GUEST_ON_OTHER_TEAM: "в команде соперника другой гость сети",
+  NO_MATCHING_MISSION: "нет задания FACEIT для этого клуба",
+  FACEIT_LINKED_ELSEWHERE: "FACEIT привязан к другому гостю",
+  FACEIT_UNREACHABLE: "FACEIT недоступен",
+};
+
+/** Plain-language reason of a match journal decision. */
+export function externalMatchReasonLabel(
+  decision: string,
+  reason: string | null,
+): string | null {
+  if (reason) {
+    if (reason.startsWith("PROCESS_FAILED")) {
+      return "ошибка начисления, нужна проверка";
+    }
+    return externalMatchReasonLabels[reason] ?? reason;
+  }
+  if (decision === "OUTSIDE_SESSION") {
+    return "в это время у гостя не было сессии в клубе";
+  }
+  return null;
+}
+
+export function externalLookupErrorLabel(error: string | null) {
+  return error ? (externalMatchReasonLabels[error] ?? error) : null;
+}
 
 export function gameEventTypeLabel(eventType: string) {
   return gameEventTypeLabels[eventType] ?? eventType;

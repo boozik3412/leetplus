@@ -712,9 +712,20 @@ export type GuestCrmLead = {
   matchedGuestId: string | null;
   matchedGuestDisplayName: string | null;
   matchedAt: string | null;
+  stage: GuestCrmLeadStage;
+  stageChangedAt: string | null;
+  visitAt: string | null;
+  assignedToUser: { id: string; displayName: string; email: string } | null;
   createdAt: string;
   updatedAt: string;
 };
+
+export type GuestCrmLeadStage =
+  | "NEW"
+  | "IN_PROGRESS"
+  | "AGREED"
+  | "CAME"
+  | "DECLINED";
 
 export type GuestCrmTask = {
   id: string;

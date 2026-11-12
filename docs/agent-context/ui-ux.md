@@ -32,6 +32,22 @@ Decide which one you are building before choosing density, sizes and motion.
 - Copy is Russian (`<html lang="ru">`). Numbers, money and dates through
   `Intl`/`toLocaleString("ru-RU")`; `tabular-nums` in tables, KPIs, timers and
   prices so digits do not jump.
+- Lists that people work through (CRM, staff tasks, checklists) use the shared
+  pieces, not a page-wide form above the list: `components/board.tsx` (columns
+  with cards; drag is a mouse shortcut, the card opens the record so keyboard and
+  touch can change the column too), `components/side-panel.tsx` (create/edit one
+  record on the right, native `<dialog>`), `components/more-fields.tsx` (rare
+  fields folded under «Дополнительно», so a form shows 3–5 fields). Pure column
+  logic is in `lib/board.ts`. Users: «Задачи CRM» (`/guests/crm/tasks`,
+  «Доска / Список» in `?view=`), «Заявки» CRM, «Ручные награды» and «Задачи
+  персонала» (`/staff/tasks`, `?layout=list`). «Чек-листы» open on «Сегодня»
+  for people who check others (card per person on shift, `lib/checklist-today.ts`;
+  the list is `?tab=all`, and any list filter or `runId` opens it). When a board has workflow rules
+  (who may move a card where), keep them in one pure module that the buttons and
+  the drop both use (`lib/staff-task-moves.ts`) and say in words why a drop was
+  refused. Dates in client components render UTC on the server and local time
+  after hydration (`components/local-date-time.tsx` or the same
+  `useSyncExternalStore` switch), never a bare `Intl` call.
 
 ## Rules by priority
 
@@ -115,7 +131,7 @@ Agreed names (decisions of 10.11.2026):
 | Random reward containers | «Кейсы», «кейс» | «Лутбоксы», «lootbox» |
 | Season pass | «Battle Pass» (kept, guests know it) | — |
 | Guest game tasks | «Задания» | «Миссии», «квесты» in navigation |
-| Marketing promo tasks | «Акции» | «Промо-сценарии» |
+| One-off rewards staff give by hand (`/marketing/missions`, since 12.11) | «Ручные награды» | «Акции», «Промо-сценарии» |
 | Calculation for a period | «расчёт за период», «данные на <дату>» | «snapshot», «typed snapshot» |
 | Test without paying out | «проверка без начисления» | «dry-run» |
 | Bonus operations log | «журнал начислений» | «ledger», «bonus ledger» |

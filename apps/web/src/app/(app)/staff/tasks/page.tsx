@@ -1,12 +1,23 @@
 import Link from "next/link";
+import { LocalDateTime } from "@/components/local-date-time";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import {
   StaffTaskCreateForm,
   type StaffTaskDraft,
 } from "@/components/staff-task-create-form";
+import { StaffTaskBoard } from "@/components/staff-task-board";
 import { StaffTaskHistory } from "@/components/staff-task-history";
 import { StaffTaskStatusActions } from "@/components/staff-task-status-actions";
 import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
+import {
+  isKnowledgeBaseApprovalTask,
+  staffTaskAssigneeLabel,
+  staffTaskObserverLabels,
+  staffTaskPriorityLabels,
+  staffTaskStatusLabels,
+  staffTaskTypeLabels,
+} from "@/lib/staff-task-display";
+import { staffTaskCandidateUserIds } from "@/lib/staff-task-moves";
 import {
   getStaffTaskReport,
   type StaffTask,
@@ -15,8 +26,8 @@ import {
   type StaffTaskGroup,
   type StaffTaskPriority,
   type StaffTaskSortKey,
-  type StaffTaskStatus,
   type StaffTaskType,
+  type StaffTaskUser,
   type StaffTaskViewMode,
 } from "@/lib/staff-tasks";
 
@@ -32,54 +43,41 @@ const statusLabels: Record<StaffTaskFilterStatus, string> = {
   CANCELED: "Отменены",
 };
 
+/** The four views people switch between every day. */
+const chipViews: StaffTaskViewMode[] = ["all", "today", "overdue", "my"];
+
+const chipLabels: Partial<Record<StaffTaskViewMode, string>> = {
+  all: "Все",
+  today: "Сегодня",
+  overdue: "Просрочены",
+  my: "Мои",
+};
+
+/** The rest of the views live in one «Вид» dropdown. */
+const extraViews: Array<{ key: StaffTaskViewMode; label: string }> = [
+  { key: "watched", label: "Я наблюдаю" },
+  { key: "approval", label: "Возврат из базы знаний" },
+  { key: "byClub", label: "Сводка по клубам" },
+  { key: "byEmployee", label: "Сводка по сотрудникам" },
+  { key: "byShift", label: "Сводка по сменам" },
+  { key: "byStatus", label: "Сводка по статусам" },
+];
+
 const groupViewLabels: Partial<Record<StaffTaskViewMode, string>> = {
-  byClub: "Задачи по клубам",
-  byEmployee: "Задачи по сотрудникам",
-  byShift: "Задачи по сменам",
-  byStatus: "Задачи по статусам",
+  byClub: "По клубам",
+  byEmployee: "По сотрудникам",
+  byShift: "По сменам",
+  byStatus: "По статусам",
 };
 
 const groupViewDescriptions: Partial<Record<StaffTaskViewMode, string>> = {
-  byClub: "Где скапливается работа и просрочка по клубам.",
-  byEmployee: "Нагрузка, просрочка и проверка по ответственным.",
-  byShift: "Сменные задачи и задачи, уже связанные с фактами смен.",
-  byStatus: "Рабочая воронка задач от новых до закрытых.",
+  byClub: "Где копятся задачи и просрочка.",
+  byEmployee: "Сколько задач у каждого и что просрочено.",
+  byShift: "Задачи на смену и задачи, привязанные к сменам.",
+  byStatus: "Сколько задач на каждом шаге.",
 };
 
-const taskStatusLabels: Record<StaffTaskStatus, string> = {
-  OPEN: "Новая",
-  IN_PROGRESS: "В работе",
-  ON_REVIEW: "На проверке",
-  DONE: "Готово",
-  CANCELED: "Отменена",
-};
-
-const typeLabels: Record<StaffTaskType | "all", string> = {
-  all: "Все типы",
-  ONE_TIME: "Разовая",
-  SHIFT: "На смену",
-  RECURRING: "Повторяемая",
-  LONG_TERM: "Долгосрочная",
-  PERSONAL: "Личная",
-  CLUB: "Для клуба",
-  ROLE: "Для роли",
-};
-
-const priorityLabels: Record<StaffTaskPriority | "all", string> = {
-  all: "Все приоритеты",
-  LOW: "Низкий",
-  NORMAL: "Обычный",
-  HIGH: "Высокий",
-  URGENT: "Срочно",
-};
-
-const sortLabels: Record<StaffTaskSortKey, string> = {
-  dueAt: "Дедлайн",
-  createdAt: "Создано",
-  updatedAt: "Обновлено",
-  status: "Статус",
-  priority: "Приоритет",
-};
+type Layout = "board" | "list";
 
 function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -200,6 +198,10 @@ function resolveFilters(params: Awaited<SearchParams>): StaffTaskFilters {
   };
 }
 
+function resolveLayout(params: Awaited<SearchParams>): Layout {
+  return searchParam(params.layout) === "list" ? "list" : "board";
+}
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
@@ -221,11 +223,21 @@ function exportHref(format: "csv" | "xlsx", filters: StaffTaskFilters) {
 function taskListHref(
   filters: StaffTaskFilters,
   patch: Record<string, string | null | undefined>,
+  layout: Layout,
 ) {
   const params = new URLSearchParams();
   const next: Record<string, string | null | undefined> = {
     ...filters,
+    // Defaults stay out of the address.
+    view: filters.view === "all" ? null : filters.view,
+    status: filters.status === "all" ? null : filters.status,
+    sort: filters.sort === "dueAt" ? null : filters.sort,
+    direction: filters.direction === "asc" ? null : filters.direction,
+    pageSize: filters.pageSize === "200" ? null : filters.pageSize,
+    type: filters.type === "all" ? null : filters.type,
+    priority: filters.priority === "all" ? null : filters.priority,
     taskId: null,
+    layout: layout === "list" ? "list" : null,
     ...patch,
   };
 
@@ -237,100 +249,6 @@ function taskListHref(
 
   const value = params.toString();
   return value ? `/staff/tasks?${value}` : "/staff/tasks";
-}
-
-function formatDateTime(value: string | null) {
-  if (!value) {
-    return "без срока";
-  }
-
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
-
-function userLabel(user: StaffTask["assignedToUser"]) {
-  return user?.fullName ?? user?.email ?? null;
-}
-
-function observerLabels(task: StaffTask) {
-  return task.observers
-    .map((observer) => userLabel(observer.user))
-    .filter(Boolean)
-    .join(", ");
-}
-
-function taskLabelsRecord(task: StaffTask) {
-  if (
-    task.labels &&
-    typeof task.labels === "object" &&
-    !Array.isArray(task.labels)
-  ) {
-    return task.labels as Record<string, unknown>;
-  }
-
-  return null;
-}
-
-function isApprovalWorkflowTask(task: StaffTask) {
-  const labels = taskLabelsRecord(task);
-
-  return (
-    labels?.workflow === "KNOWLEDGE_BASE_APPROVAL" ||
-    labels?.workflowStep === "RETURNED_ARTICLE_REVISION" ||
-    task.title.toLocaleLowerCase("ru-RU").startsWith(
-      "доработать материал базы знаний:",
-    ) ||
-    Boolean(
-      task.description?.includes(
-        "Материал возвращен на доработку из базы знаний.",
-      ),
-    )
-  );
-}
-
-function taskCandidateUserIds(task: StaffTask) {
-  const labels = taskLabelsRecord(task);
-  const candidateUserIds = labels?.candidateUserIds;
-
-  return Array.isArray(candidateUserIds)
-    ? candidateUserIds.filter(
-        (candidateUserId): candidateUserId is string =>
-          typeof candidateUserId === "string" && candidateUserId.length > 0,
-      )
-    : [];
-}
-
-function taskAssigneeLabel(task: StaffTask, users: StaffTask["assignedToUser"][]) {
-  const assignedLabel = userLabel(task.assignedToUser);
-
-  if (assignedLabel) {
-    return assignedLabel;
-  }
-
-  const labels = taskLabelsRecord(task);
-
-  if (labels?.assignmentMode !== "ANY_OF") {
-    return null;
-  }
-
-  const candidates = new Set(taskCandidateUserIds(task));
-  const candidateLabels = users
-    .filter((user): user is NonNullable<typeof user> =>
-      Boolean(user && candidates.has(user.id)),
-    )
-    .map((user) => userLabel(user))
-    .filter(Boolean);
-
-  if (candidateLabels.length === 0) {
-    return candidates.size > 0 ? `Любой из ${candidates.size}` : null;
-  }
-
-  return `Любой из: ${candidateLabels.join(", ")}`;
 }
 
 function statusBadgeClass(task: StaffTask) {
@@ -381,33 +299,32 @@ function StaffTaskGroupSummary({
   description,
   groups,
   filters,
+  layout,
 }: {
   title: string;
   description: string;
   groups: StaffTaskGroup[];
   filters: StaffTaskFilters;
+  layout: Layout;
 }) {
   return (
     <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-            Быстрый разбор
-          </p>
-          <h2 className="mt-1 text-lg font-semibold">{title}</h2>
+          <h2 className="text-lg font-semibold">{title}</h2>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
             {description}
           </p>
         </div>
         <Link
-          href={taskListHref(filters, {
-            view: "all",
-            status: "all",
-            shiftId: null,
-          })}
+          href={taskListHref(
+            filters,
+            { view: null, status: null, shiftId: null },
+            layout,
+          )}
           className="text-sm font-semibold text-emerald-700 hover:text-emerald-600 dark:text-emerald-300 dark:hover:text-emerald-200"
         >
-          Сбросить представление
+          Убрать сводку
         </Link>
       </div>
 
@@ -415,14 +332,18 @@ function StaffTaskGroupSummary({
         {groups.slice(0, 12).map((group) => {
           const activeCount =
             group.open + group.inProgress + group.onReview;
-          const href = taskListHref(filters, {
-            view: "all",
-            status: group.filter.status ?? filters.status ?? "all",
-            storeId: group.filter.storeId ?? filters.storeId,
-            assignedToUserId:
-              group.filter.assignedToUserId ?? filters.assignedToUserId,
-            shiftId: group.filter.shiftId ?? filters.shiftId,
-          });
+          const href = taskListHref(
+            filters,
+            {
+              view: null,
+              status: group.filter.status ?? filters.status ?? null,
+              storeId: group.filter.storeId ?? filters.storeId,
+              assignedToUserId:
+                group.filter.assignedToUserId ?? filters.assignedToUserId,
+              shiftId: group.filter.shiftId ?? filters.shiftId,
+            },
+            layout,
+          );
 
           return (
             <Link
@@ -489,6 +410,7 @@ export default async function StaffTasksPage({
   ensurePageAccess(currentUser, "/staff/tasks");
   const params = await searchParams;
   const filters = resolveFilters(params);
+  const layout = resolveLayout(params);
   const draft = resolveDraft(params);
   const report = await getStaffTaskReport(filters);
   const currentStaffUser = report.users.find((user) => user.id === currentUser.id);
@@ -502,14 +424,20 @@ export default async function StaffTasksPage({
           : report.filters.view === "byStatus"
             ? report.groups.byStatus
             : [];
-
-  const summaryCards = [
-    { label: "Всего", value: report.summary.total },
-    { label: "Просрочено", value: report.summary.overdue },
-    { label: "В работе", value: report.summary.inProgress },
-    { label: "На проверке", value: report.summary.onReview },
-    { label: "Готово", value: report.summary.done },
-  ];
+  const quickViewCount = new Map(
+    report.quickViews.map((view) => [view.key, view.count]),
+  );
+  const activeView = report.filters.view;
+  const isChipView = chipViews.includes(activeView);
+  const statusFilter = report.filters.status;
+  const filterControlClass =
+    "h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950";
+  const layoutLinkClass = (active: boolean) =>
+    `inline-flex h-9 items-center rounded-md px-3 text-sm font-semibold transition ${
+      active
+        ? "bg-white text-zinc-950 shadow-sm dark:bg-zinc-800 dark:text-white"
+        : "text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
+    }`;
 
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
@@ -522,146 +450,146 @@ export default async function StaffTasksPage({
           ]}
         />
 
-        <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-              Персонал
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-              Операционные задачи
+            <h1 className="text-3xl font-semibold tracking-tight">
+              Задачи персонала
             </h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Задачи для смен, клубов и сотрудников: кто делает, к какому сроку
-              и что уже выполнено.
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Кто что делает и к какому сроку. Откройте карточку, чтобы
+              сменить статус или написать комментарий.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <a
-              href={exportHref("csv", filters)}
-              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              CSV
-            </a>
-            <a
-              href={exportHref("xlsx", filters)}
-              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              XLSX
-            </a>
+          <div id="new-task" className="flex flex-wrap items-center gap-2">
             <Link
               href="/staff/task-templates"
-              className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >
               Шаблоны задач
             </Link>
-            <Link
-              href="/staff/staff-control"
-              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              Контроль администраторов
-            </Link>
+            <StaffTaskCreateForm
+              users={report.users}
+              stores={report.stores}
+              currentUser={{
+                id: currentUser.id,
+                role: currentUser.role,
+                stores: currentStaffUser?.stores ?? [],
+              }}
+              draft={draft}
+            />
           </div>
         </header>
 
-        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {summaryCards.map((card) => (
-            <div
-              key={card.label}
-              className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950"
-            >
-              <p className="text-xs font-bold uppercase text-zinc-500">
-                {card.label}
-              </p>
-              <p className="mt-2 text-2xl font-semibold">
-                {formatNumber(card.value)}
-              </p>
-            </div>
-          ))}
-        </section>
+        <nav
+          aria-label="Быстрый отбор задач"
+          className="mt-6 flex flex-wrap gap-2"
+        >
+          {chipViews.map((key) => {
+            const isActive = activeView === key;
 
-        <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="flex flex-wrap gap-2">
-            {report.quickViews.map((view) => {
-              const isActive = report.filters.view === view.key;
-              const href = taskListHref(filters, {
-                view: view.key,
-                status:
-                  view.key === "today" ||
-                  view.key === "overdue" ||
-                  view.key === "approval"
-                    ? "all"
-                    : filters.status,
-                shiftId: view.key === "byShift" ? null : filters.shiftId,
-                observerUserId:
-                  view.key === "watched" ? null : filters.observerUserId,
-              });
-
-              return (
-                <Link
-                  key={view.key}
-                  href={href}
-                  className={`inline-flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition ${
-                    isActive
-                      ? "border-emerald-400 bg-emerald-500 text-zinc-950"
-                      : "border-zinc-200 text-zinc-700 hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
-                  }`}
-                >
-                  <span>{view.label}</span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs ${
-                      isActive
-                        ? "bg-zinc-950/10 text-zinc-950"
-                        : "bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
-                    }`}
-                  >
-                    {formatNumber(view.count)}
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-
-        <section id="new-task" className="mt-6 scroll-mt-6">
-          <StaffTaskCreateForm
-            users={report.users}
-            stores={report.stores}
-            currentUser={{
-              id: currentUser.id,
-              role: currentUser.role,
-              stores: currentStaffUser?.stores ?? [],
-            }}
-            draft={draft}
-          />
-        </section>
-
-        <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <form className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto]">
-            <label className="space-y-1">
-              <span className="text-xs font-bold uppercase text-zinc-500">
-                Статус
-              </span>
-              <select
-                name="status"
-                defaultValue={report.filters.status}
-                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            return (
+              <Link
+                key={key}
+                href={taskListHref(
+                  filters,
+                  {
+                    view: key === "all" ? null : key,
+                    status: null,
+                    shiftId: null,
+                    observerUserId: null,
+                  },
+                  layout,
+                )}
+                aria-current={isActive ? "page" : undefined}
+                className={`inline-flex h-9 items-center gap-2 rounded-full border px-3.5 text-sm font-semibold transition ${
+                  isActive
+                    ? "border-emerald-500 bg-emerald-500 text-zinc-950"
+                    : "border-zinc-200 text-zinc-700 hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
+                }`}
               >
-                {Object.entries(statusLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
+                {chipLabels[key]}
+                <span
+                  className={`tabular-nums ${
+                    isActive ? "text-zinc-950/70" : "text-zinc-500"
+                  } ${key === "overdue" && !isActive && (quickViewCount.get(key) ?? 0) > 0 ? "font-bold text-red-600 dark:text-red-300" : ""}`}
+                >
+                  {formatNumber(quickViewCount.get(key) ?? 0)}
+                </span>
+              </Link>
+            );
+          })}
+        </nav>
+
+        <section className="mt-4 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          <form
+            className={`grid gap-3 sm:grid-cols-2 ${
+              layout === "list"
+                ? "lg:grid-cols-[1fr_1fr_1fr_1fr_1.2fr_auto]"
+                : "lg:grid-cols-[1fr_1fr_1fr_1.2fr_auto]"
+            }`}
+          >
+            {layout === "list" ? (
+              <input type="hidden" name="layout" value="list" />
+            ) : null}
+            {report.filters.observerUserId && activeView !== "watched" ? (
+              <input
+                type="hidden"
+                name="observerUserId"
+                value={report.filters.observerUserId}
+              />
+            ) : null}
+            {layout === "board" && statusFilter !== "all" ? (
+              <input type="hidden" name="status" value={statusFilter} />
+            ) : null}
+
+            <label className="space-y-1">
+              <span className="text-xs font-semibold text-zinc-500">Вид</span>
+              <select
+                name="view"
+                defaultValue={activeView}
+                className={filterControlClass}
+              >
+                <option value={isChipView ? activeView : "all"}>
+                  {isChipView && activeView !== "all"
+                    ? `Обычный · ${chipLabels[activeView]}`
+                    : "Обычный"}
+                </option>
+                {extraViews.map((view) => (
+                  <option key={view.key} value={view.key}>
+                    {view.label}
+                    {quickViewCount.has(view.key)
+                      ? ` · ${formatNumber(quickViewCount.get(view.key) ?? 0)}`
+                      : ""}
                   </option>
                 ))}
               </select>
             </label>
 
+            {layout === "list" ? (
+              <label className="space-y-1">
+                <span className="text-xs font-semibold text-zinc-500">
+                  Статус
+                </span>
+                <select
+                  name="status"
+                  defaultValue={statusFilter}
+                  className={filterControlClass}
+                >
+                  {Object.entries(statusLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
             <label className="space-y-1">
-              <span className="text-xs font-bold uppercase text-zinc-500">
-                Клуб
-              </span>
+              <span className="text-xs font-semibold text-zinc-500">Клуб</span>
               <select
                 name="storeId"
                 defaultValue={report.filters.storeId ?? ""}
-                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                className={filterControlClass}
               >
                 <option value="">Вся сеть</option>
                 {report.stores.map((store) => (
@@ -673,13 +601,13 @@ export default async function StaffTasksPage({
             </label>
 
             <label className="space-y-1">
-              <span className="text-xs font-bold uppercase text-zinc-500">
+              <span className="text-xs font-semibold text-zinc-500">
                 Ответственный
               </span>
               <select
                 name="assignedToUserId"
                 defaultValue={report.filters.assignedToUserId ?? ""}
-                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                className={filterControlClass}
               >
                 <option value="">Все</option>
                 {report.users.map((user) => (
@@ -691,183 +619,204 @@ export default async function StaffTasksPage({
             </label>
 
             <label className="space-y-1">
-              <span className="text-xs font-bold uppercase text-zinc-500">
-                Наблюдатель
-              </span>
-              <select
-                name="observerUserId"
-                defaultValue={report.filters.observerUserId ?? ""}
-                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-              >
-                <option value="">Все</option>
-                {report.users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.fullName ?? user.email}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="space-y-1">
-              <span className="text-xs font-bold uppercase text-zinc-500">
-                Поиск
-              </span>
+              <span className="text-xs font-semibold text-zinc-500">Поиск</span>
               <input
                 name="search"
+                type="search"
                 defaultValue={report.filters.search ?? ""}
                 placeholder="Название или комментарий"
-                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                className={filterControlClass}
               />
             </label>
 
             <div className="flex items-end">
-              <button className="h-10 w-full rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">
+              <button className="h-10 w-full cursor-pointer rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">
                 Показать
               </button>
             </div>
           </form>
-
-          <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-500">
-            <span>Тип: {typeLabels[report.filters.type]}</span>
-            <span>Приоритет: {priorityLabels[report.filters.priority]}</span>
-            <span>Сортировка: {sortLabels[report.filters.sort]}</span>
-            {report.filters.observerUserId ? (
-              <span>
-                Наблюдатель:{" "}
-                {userLabel(
-                  report.users.find(
-                    (user) => user.id === report.filters.observerUserId,
-                  ) ?? null,
-                ) ?? "выбран"}
-              </span>
-            ) : null}
-          </div>
         </section>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div
+            role="group"
+            aria-label="Как показать задачи"
+            className="inline-flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900"
+          >
+            <Link
+              href={taskListHref(filters, {}, "board")}
+              aria-current={layout === "board" ? "page" : undefined}
+              className={layoutLinkClass(layout === "board")}
+            >
+              Доска
+            </Link>
+            <Link
+              href={taskListHref(filters, {}, "list")}
+              aria-current={layout === "list" ? "page" : undefined}
+              className={layoutLinkClass(layout === "list")}
+            >
+              Список
+            </Link>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+            {layout === "board" && statusFilter !== "all" ? (
+              <Link
+                href={taskListHref(filters, { status: null }, layout)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1 font-semibold text-zinc-700 transition hover:bg-zinc-200 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                Только «{statusLabels[statusFilter]}» · показать все
+              </Link>
+            ) : null}
+            <span className="text-zinc-500">
+              Скачать:{" "}
+              <a
+                href={exportHref("csv", filters)}
+                className="font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
+              >
+                CSV
+              </a>
+              {" · "}
+              <a
+                href={exportHref("xlsx", filters)}
+                className="font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
+              >
+                XLSX
+              </a>
+            </span>
+          </div>
+        </div>
 
         {activeGroupRows.length > 0 ? (
           <StaffTaskGroupSummary
             filters={filters}
             groups={activeGroupRows}
-            title={groupViewLabels[report.filters.view] ?? "Группировка задач"}
+            layout={layout}
+            title={groupViewLabels[activeView] ?? "Сводка"}
             description={
-              groupViewDescriptions[report.filters.view] ??
-              "Сводка по текущему представлению задач."
+              groupViewDescriptions[activeView] ??
+              "Сводка по выбранным задачам."
             }
           />
         ) : null}
 
-        <section className="mt-6 space-y-3">
-          <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-300">Список задач</p>
-            <h2 className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50">Задачи по выбранным фильтрам</h2>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              Ниже отображаются задачи, подходящие под выбранный статус, клуб, ответственного и поиск.
-            </p>
-          </div>
-          {report.rows.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
-              Задач по текущим фильтрам нет. Создайте первую задачу выше или
-              снимите часть фильтров.
-            </div>
-          ) : (
-            report.rows.map((task) => {
-              const isFocusedTask = report.filters.taskId === task.id;
-
-              return (
-              <article
-                key={task.id}
-                id={`task-${task.id}`}
-                className={[
-                  "scroll-mt-24 rounded-lg border bg-white p-4 shadow-sm dark:bg-zinc-950",
-                  isFocusedTask
-                    ? "border-emerald-500 ring-2 ring-emerald-500/25 dark:border-emerald-400"
-                    : "border-zinc-200 dark:border-zinc-800",
-                ].join(" ")}
-              >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={statusBadgeClass(task)}>
-                        {task.isOverdue
-                          ? "Просрочено"
-                          : taskStatusLabels[task.status]}
-                      </span>
-                      <span
-                        className={`text-xs font-bold uppercase ${priorityClass(
-                          task.priority,
-                        )}`}
-                      >
-                        {priorityLabels[task.priority]}
-                      </span>
-                      <span className="text-xs text-zinc-500">
-                        {typeLabels[task.type]}
-                      </span>
-                      {isApprovalWorkflowTask(task) ? (
-                        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
-                          Из согласования базы знаний
-                        </span>
-                      ) : null}
-                    </div>
-
-                    <h2 className="mt-3 text-lg font-semibold">{task.title}</h2>
-                    {task.description ? (
-                      <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                        {task.description}
-                      </p>
-                    ) : null}
-
-                    <dl className="mt-3 grid gap-2 text-sm text-zinc-600 dark:text-zinc-400 sm:grid-cols-2 lg:grid-cols-5">
-                      <div>
-                        <dt className="text-xs font-bold uppercase text-zinc-500">
-                          Срок
-                        </dt>
-                        <dd>{formatDateTime(task.dueAt)}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs font-bold uppercase text-zinc-500">
-                          Клуб
-                        </dt>
-                        <dd>{task.store?.name ?? "Вся сеть"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs font-bold uppercase text-zinc-500">
-                          Ответственный
-                        </dt>
-                        <dd>
-                          {taskAssigneeLabel(task, report.users) ??
-                            "Не назначен"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs font-bold uppercase text-zinc-500">
-                          Наблюдатели
-                        </dt>
-                        <dd>{observerLabels(task) || "Нет"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs font-bold uppercase text-zinc-500">
-                          Создано
-                        </dt>
-                        <dd>{formatDateTime(task.createdAt)}</dd>
-                      </div>
-                    </dl>
-                  </div>
-
-                  <StaffTaskStatusActions
-                    taskId={task.id}
-                    status={task.status}
-                    assignedToUser={task.assignedToUser}
-                    candidateUserIds={taskCandidateUserIds(task)}
-                    currentUser={currentUser}
-                  />
-                </div>
-                <StaffTaskHistory task={task} currentUser={currentUser} />
-              </article>
-              );
-            })
-          )}
-        </section>
+        {layout === "board" ? (
+          <section className="mt-4">
+            <StaffTaskBoard
+              key={report.filters.taskId ?? "board"}
+              tasks={report.rows}
+              users={report.users}
+              currentUser={currentUser}
+              focusTaskId={report.filters.taskId}
+            />
+          </section>
+        ) : (
+          <section className="mt-4 space-y-3">
+            {report.rows.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+                Задач нет. Нажмите «+ Задача» или снимите часть фильтров.
+              </div>
+            ) : (
+              report.rows.map((task) => (
+                <StaffTaskListItem
+                  key={task.id}
+                  task={task}
+                  users={report.users}
+                  currentUser={currentUser}
+                  isFocused={report.filters.taskId === task.id}
+                />
+              ))
+            )}
+          </section>
+        )}
       </div>
     </main>
+  );
+}
+
+function StaffTaskListItem({
+  task,
+  users,
+  currentUser,
+  isFocused,
+}: {
+  task: StaffTask;
+  users: StaffTaskUser[];
+  currentUser: Parameters<typeof StaffTaskHistory>[0]["currentUser"];
+  isFocused: boolean;
+}) {
+  return (
+    <article
+      id={`task-${task.id}`}
+      className={[
+        "scroll-mt-24 rounded-lg border bg-white p-4 shadow-sm dark:bg-zinc-950",
+        isFocused
+          ? "border-emerald-500 ring-2 ring-emerald-500/25 dark:border-emerald-400"
+          : "border-zinc-200 dark:border-zinc-800",
+      ].join(" ")}
+    >
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={statusBadgeClass(task)}>
+              {task.isOverdue ? "Просрочено" : staffTaskStatusLabels[task.status]}
+            </span>
+            <span
+              className={`text-xs font-semibold ${priorityClass(task.priority)}`}
+            >
+              {staffTaskPriorityLabels[task.priority]}
+            </span>
+            <span className="text-xs text-zinc-500">
+              {staffTaskTypeLabels[task.type]}
+            </span>
+            {isKnowledgeBaseApprovalTask(task) ? (
+              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
+                Возврат из базы знаний
+              </span>
+            ) : null}
+          </div>
+
+          <h2 className="mt-3 text-lg font-semibold [overflow-wrap:anywhere]">
+            {task.title}
+          </h2>
+          {task.description ? (
+            <p className="mt-2 max-w-3xl whitespace-pre-line text-sm leading-6 text-zinc-600 [overflow-wrap:anywhere] dark:text-zinc-400">
+              {task.description}
+            </p>
+          ) : null}
+
+          <dl className="mt-3 grid gap-2 text-sm text-zinc-600 dark:text-zinc-400 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <dt className="text-xs font-semibold text-zinc-500">Срок</dt>
+              <dd>
+                <LocalDateTime value={task.dueAt} empty="без срока" />
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold text-zinc-500">Клуб</dt>
+              <dd>{task.store?.name ?? "Вся сеть"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold text-zinc-500">Кто</dt>
+              <dd>{staffTaskAssigneeLabel(task, users) ?? "Не назначен"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold text-zinc-500">
+                Наблюдатели
+              </dt>
+              <dd>{staffTaskObserverLabels(task) || "Нет"}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <StaffTaskStatusActions
+          taskId={task.id}
+          status={task.status}
+          assignedToUser={task.assignedToUser}
+          candidateUserIds={staffTaskCandidateUserIds(task.labels)}
+          currentUser={currentUser}
+        />
+      </div>
+      <StaffTaskHistory task={task} currentUser={currentUser} />
+    </article>
   );
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ChecklistTabs } from "@/components/checklist-tabs";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffChecklistTemplateBuilder } from "@/components/staff-checklist-template-builder";
 import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
@@ -115,21 +116,17 @@ export default async function StaffChecklistTemplatesPage({
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
-          current="Чек-листы смены"
+          current="Шаблоны"
           items={[
             { href: "/dashboard", label: "Дашборд" },
-            { href: "/staff/tasks", label: "Задачи персонала" },
-            { href: "/staff/checklists", label: "Чеклисты смены" },
+            { href: "/staff/checklists", label: "Чек-листы" },
           ]}
         />
 
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-              Персонал
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-              Чек-листы смены
+            <h1 className="text-3xl font-semibold tracking-tight">
+              Шаблоны чек-листов
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
               Каталог чек-листов, которые можно выбрать при запуске смены.
@@ -143,14 +140,9 @@ export default async function StaffChecklistTemplatesPage({
             >
               Регламенты
             </Link>
-            <Link
-              href="/staff/checklists"
-              className="inline-flex h-11 min-w-44 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:hover:bg-zinc-900"
-            >
-              Выполнение чек-листов
-            </Link>
           </div>
         </header>
+        <ChecklistTabs current="templates" />
 
         <section className="mt-6 flex flex-wrap gap-2 border-y border-zinc-200 py-3 dark:border-zinc-800">
           {summaryCards.map((card) => (

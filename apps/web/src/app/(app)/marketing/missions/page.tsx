@@ -1,12 +1,11 @@
-import { MarketingMissionsPanel } from "@/components/marketing-missions-panel";
+import { ManualRewardsPanel } from "@/components/manual-rewards-panel";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requirePageAccess } from "@/lib/auth";
-import { getGuestAudiences } from "@/lib/guests";
 import {
   getMarketingPromoScenarioRewards,
   getMarketingPromoScenarios,
 } from "@/lib/marketing";
-import { getStores } from "@/lib/stores";
+import { can } from "@/lib/permissions";
 
 async function safeList<T>(promise: Promise<T[]>): Promise<T[]> {
   try {
@@ -16,32 +15,29 @@ async function safeList<T>(promise: Promise<T[]>): Promise<T[]> {
   }
 }
 
-export default async function MarketingMissionsPage() {
-  await requirePageAccess("/marketing/missions");
+export default async function ManualRewardsPage() {
+  const user = await requirePageAccess("/marketing/missions");
 
-  const [missions, rewards, audiences, stores] = await Promise.all([
+  const [missions, rewards] = await Promise.all([
     safeList(getMarketingPromoScenarios()),
     safeList(getMarketingPromoScenarioRewards()),
-    safeList(getGuestAudiences()),
-    safeList(getStores()),
   ]);
 
   return (
     <main className="px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
-          current="Акции"
+          current="Ручные награды"
           items={[
             { href: "/dashboard", label: "Дашборд" },
             { href: "/marketing", label: "Маркетинг" },
           ]}
         />
 
-        <MarketingMissionsPanel
+        <ManualRewardsPanel
           missions={missions}
           rewards={rewards}
-          audiences={audiences}
-          stores={stores}
+          canCreateGameMissions={can(user, "manage_guest_game_rules")}
         />
       </div>
     </main>

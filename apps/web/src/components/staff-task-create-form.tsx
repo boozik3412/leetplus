@@ -1,7 +1,10 @@
 "use client";
 
+import { Plus } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
+import { MoreFields } from "@/components/more-fields";
+import { SidePanel } from "@/components/side-panel";
 import type {
   StaffTaskPriority,
   StaffTaskStore,
@@ -22,9 +25,9 @@ const taskTypes: Array<{ value: StaffTaskType; label: string }> = [
 ];
 
 const priorities: Array<{ value: StaffTaskPriority; label: string }> = [
-  { value: "LOW", label: "Низкий" },
-  { value: "NORMAL", label: "Обычный" },
-  { value: "HIGH", label: "Высокий" },
+  { value: "LOW", label: "Низкая" },
+  { value: "NORMAL", label: "Обычная" },
+  { value: "HIGH", label: "Высокая" },
   { value: "URGENT", label: "Срочно" },
 ];
 
@@ -60,6 +63,11 @@ type StaffTaskCreateFormProps = {
   draft?: StaffTaskDraft | null;
 };
 
+/**
+ * «+ Задача» and the side panel with the new-task form. Three fields are always
+ * visible (что сделать, кто, срок); club, comment, type, priority and
+ * observers are folded under «Дополнительно».
+ */
 export function StaffTaskCreateForm({
   users,
   stores,
@@ -79,9 +87,8 @@ export function StaffTaskCreateForm({
     () => new Set(currentUserStoreIds),
     [currentUserStoreIds],
   );
-  const [isExpanded, setIsExpanded] = useState(
-    () => draft !== null || !needsConfirmation,
-  );
+  // A draft from the network summary opens the panel right away.
+  const [isOpen, setIsOpen] = useState(() => draft !== null);
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState(() =>
@@ -108,7 +115,7 @@ export function StaffTaskCreateForm({
                 )),
           )
         : users
-      ).sort((left, right) => userLabel(left).localeCompare(userLabel(right))),
+      ).sort((left, right) => userLabel(left).localeCompare(userLabel(right), "ru")),
     [
       currentUser.id,
       currentUserStoreIdSet,
@@ -123,14 +130,14 @@ export function StaffTaskCreateForm({
       (needsConfirmation
         ? users.filter((user) => confirmationRoles.has(user.role))
         : users
-      ).sort((left, right) => userLabel(left).localeCompare(userLabel(right))),
+      ).sort((left, right) => userLabel(left).localeCompare(userLabel(right), "ru")),
     [needsConfirmation, users],
   );
   const activeStores = useMemo(
     () =>
       stores
         .filter((store) => store.isActive)
-        .sort((left, right) => left.name.localeCompare(right.name)),
+        .sort((left, right) => left.name.localeCompare(right.name, "ru")),
     [stores],
   );
   const visibleStores = useMemo(
@@ -147,7 +154,30 @@ export function StaffTaskCreateForm({
       "",
     [activeStores, currentUserStoreIdSet, currentUserStoreIds],
   );
-  const taskStoreId = isSeniorAdministrator ? seniorStoreId : selectedStoreId;
+  // People of one club are picked → the task belongs to that club, even when
+  // «Клуб» under «Дополнительно» was left as «Вся сеть» (the API only lets a
+  // network-wide task go to people without a club).
+  const inferredStore = useMemo(() => {
+    const picked = assigneeUsers.filter((user) =>
+      selectedAssigneeIds.has(user.id),
+    );
+    let common: string[] | null = null;
+
+    for (const user of picked) {
+      const ids = userStoreIds(user);
+      if (ids.length === 0) continue;
+      common = common === null ? ids : common.filter((id) => ids.includes(id));
+    }
+
+    if (common === null) return { id: "", conflict: false };
+
+    const store = activeStores.find((item) => common.includes(item.id));
+    return { id: store?.id ?? "", conflict: !store };
+  }, [activeStores, assigneeUsers, selectedAssigneeIds]);
+  const taskStoreId = isSeniorAdministrator
+    ? seniorStoreId
+    : selectedStoreId || inferredStore.id;
+  const taskStoreName = stores.find((store) => store.id === taskStoreId)?.name;
   const usersWithoutStore = useMemo(
     () =>
       isSeniorAdministrator
@@ -188,7 +218,8 @@ export function StaffTaskCreateForm({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const title = String(form.get("title") ?? "").trim();
     const assigneeIds = Array.from(selectedAssigneeIds);
 
@@ -235,6 +266,13 @@ export function StaffTaskCreateForm({
       }
     }
 
+    if (!isSeniorAdministrator && !selectedStoreId && inferredStore.conflict) {
+      setError(
+        "Выбраны сотрудники разных клубов. Поставьте задачу отдельно для каждого клуба или выберите клуб в «Дополнительно».",
+      );
+      return;
+    }
+
     if (isSeniorAdministrator && !seniorStoreId) {
       setError("У старшего администратора не указан клуб. Назначить задачу можно только внутри своего клуба.");
       return;
@@ -274,11 +312,11 @@ export function StaffTaskCreateForm({
         throw new Error(data?.message ?? "Не удалось создать задачу");
       }
 
-      event.currentTarget.reset();
+      formElement.reset();
       setSelectedAssigneeIds(new Set());
       setSelectedStoreId(isSeniorAdministrator ? seniorStoreId : "");
       setAssignmentMode("INDIVIDUAL");
-      setIsExpanded(false);
+      setIsOpen(false);
       // The draft lives in the URL: drop it so the form does not reopen with it.
       if (draft) router.replace("/staff/tasks");
       else router.refresh();
@@ -289,318 +327,311 @@ export function StaffTaskCreateForm({
     }
   }
 
+  const inputClass =
+    "h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950";
+  const labelClass = "text-sm font-semibold text-zinc-800 dark:text-zinc-100";
+
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-            Быстрое создание
-          </p>
-          <h2 className="mt-1 text-lg font-semibold">Новая задача персоналу</h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            {draft
-              ? "Заполнено по сигналу сводки сети. Выберите ответственных и создайте задачу."
-              : "Можно выбрать весь клуб, группу сотрудников или точечных ответственных."}
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          {isExpanded ? (
+    <>
+      <button
+        type="button"
+        onClick={() => setIsOpen(true)}
+        className="inline-flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+      >
+        <Plus size={16} weight="bold" aria-hidden />
+        Задача
+      </button>
+
+      <SidePanel
+        open={isOpen}
+        onClose={() => setIsOpen(false)}
+        eyebrow={draft ? "По сигналу сводки сети" : "Задачи персонала"}
+        title="Новая задача"
+        footer={
+          <>
             <button
               type="button"
-              onClick={() => setIsExpanded(false)}
-              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
+              onClick={() => setIsOpen(false)}
+              className="cursor-pointer rounded-md border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >
-              Свернуть
+              Отмена
             </button>
-          ) : null}
-          {isExpanded ? (
             <button
               type="submit"
               form="staff-task-create-form"
               disabled={isPending}
-              className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              className="cursor-pointer rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isPending ? "Сохраняем..." : "Создать задачу"}
+              {isPending ? "Сохраняем…" : "Создать задачу"}
             </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setIsExpanded(true)}
-              className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-            >
-              Создать задачу
-            </button>
-          )}
-        </div>
-      </div>
-
-      <form
-        id="staff-task-create-form"
-        onSubmit={submit}
-        hidden={!isExpanded}
-        noValidate
+          </>
+        }
       >
-        <div
-          className={`mt-4 grid gap-3 ${
-            isSeniorAdministrator
-              ? "lg:grid-cols-[1.4fr_1fr]"
-              : "lg:grid-cols-[1.4fr_1fr_1fr]"
-          }`}
+        <form
+          id="staff-task-create-form"
+          onSubmit={submit}
+          noValidate
+          className="space-y-5"
         >
-          <label className="space-y-1">
-            <span className="text-xs font-bold uppercase text-zinc-500">
-              Что сделать
-            </span>
+          <label className="block space-y-1.5">
+            <span className={labelClass}>Что сделать</span>
             <input
               name="title"
               required
               defaultValue={draft?.title}
               placeholder="Например: проверить кассу вечерней смены"
-              className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+              className={inputClass}
             />
           </label>
 
-          {!isSeniorAdministrator ? (
-            <label className="space-y-1">
-              <span className="text-xs font-bold uppercase text-zinc-500">
-                Клуб задачи
-              </span>
-              <select
-                name="storeId"
-                value={selectedStoreId}
-                onChange={(event) => setSelectedStoreId(event.target.value)}
-                className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-              >
-                <option value="">Вся сеть</option>
-                {stores.map((store) => (
-                  <option key={store.id} value={store.id}>
-                    {store.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
+          <fieldset className="space-y-2">
+            <legend className={labelClass}>Кто</legend>
+            <p className="text-xs leading-5 text-zinc-500">
+              {needsStaffAssignee
+                ? "Отметьте клуб целиком или отдельных администраторов и стажёров."
+                : "Отметьте клуб целиком или отдельных сотрудников. Можно оставить пустым."}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <CheckPill
+                label={
+                  isSeniorAdministrator ? "Весь персонал клуба" : "Весь персонал"
+                }
+                count={assigneeUsers.length}
+                checked={allAssigneesSelected}
+                disabled={assigneeUsers.length === 0}
+                onChange={(checked) =>
+                  setMany(
+                    assigneeUsers.map((user) => user.id),
+                    checked,
+                  )
+                }
+              />
+              {visibleStores.map((store) => {
+                const storeUsers = assigneeUsers.filter((user) =>
+                  userStoreIds(user).includes(store.id),
+                );
+                const checked =
+                  storeUsers.length > 0 &&
+                  storeUsers.every((user) => selectedAssigneeIds.has(user.id));
 
-          <label className="space-y-1">
-            <span className="text-xs font-bold uppercase text-zinc-500">
-              Дедлайн
-            </span>
-            <input
-              name="dueAt"
-              type="datetime-local"
-              className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-            />
-          </label>
-        </div>
-
-        <label className="mt-3 block space-y-1">
-          <span className="text-xs font-bold uppercase text-zinc-500">
-            Комментарий
-          </span>
-          <textarea
-            name="description"
-            rows={draft ? 4 : 3}
-            defaultValue={draft?.description}
-            placeholder="Что нужно проверить, какой результат приложить, на что обратить внимание."
-            className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-          />
-        </label>
-
-        <fieldset className="mt-3 rounded-lg border border-dashed border-zinc-200 p-3 dark:border-zinc-800">
-          <legend className="px-1 text-xs font-bold uppercase text-zinc-500">
-            Ответственные
-          </legend>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="text-sm font-semibold">
-                Выбрано: {selectedCount}
-              </p>
-              <p className="mt-1 text-xs leading-5 text-zinc-500">
-                Отметьте клуб целиком или отдельных сотрудников. Для администраторов доступны только администраторы и стажеры.
-              </p>
+                return (
+                  <CheckPill
+                    key={store.id}
+                    label={store.name}
+                    count={storeUsers.length}
+                    checked={checked}
+                    disabled={storeUsers.length === 0}
+                    onChange={(nextChecked) => toggleStore(store, nextChecked)}
+                  />
+                );
+              })}
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <label className={assignmentModeClass(assignmentMode === "ANY_OF")}>
-                <input
-                  type="radio"
-                  name="assignmentMode"
-                  value="ANY_OF"
-                  checked={assignmentMode === "ANY_OF"}
-                  onChange={() => setAssignmentMode("ANY_OF")}
-                  className="sr-only"
-                />
-                <span>Одна общая</span>
-                <span className="text-[11px] font-normal text-zinc-500">
-                  Выполнит любой из выбранных
-                </span>
-              </label>
-              <label
-                className={assignmentModeClass(assignmentMode === "INDIVIDUAL")}
-              >
-                <input
-                  type="radio"
-                  name="assignmentMode"
-                  value="INDIVIDUAL"
-                  checked={assignmentMode === "INDIVIDUAL"}
-                  onChange={() => setAssignmentMode("INDIVIDUAL")}
-                  className="sr-only"
-                />
-                <span>Каждому отдельно</span>
-                <span className="text-[11px] font-normal text-zinc-500">
-                  Будет создана задача на каждого
-                </span>
-              </label>
-            </div>
-          </div>
 
-          <div className="mt-3 flex flex-wrap gap-2">
-            <CheckPill
-              label={isSeniorAdministrator ? "Весь персонал клуба" : "Весь персонал"}
-              count={assigneeUsers.length}
-              checked={allAssigneesSelected}
-              disabled={assigneeUsers.length === 0}
-              onChange={(checked) =>
-                setMany(
-                  assigneeUsers.map((user) => user.id),
-                  checked,
-                )
-              }
-            />
-            {visibleStores.map((store) => {
-              const storeUsers = assigneeUsers.filter((user) =>
-                userStoreIds(user).includes(store.id),
-              );
-              const checked =
-                storeUsers.length > 0 &&
-                storeUsers.every((user) => selectedAssigneeIds.has(user.id));
+            <div className="max-h-64 space-y-3 overflow-y-auto rounded-md border border-zinc-200 p-2 dark:border-zinc-800">
+              {visibleStores.map((store) => {
+                const storeUsers = assigneeUsers.filter((user) =>
+                  userStoreIds(user).includes(store.id),
+                );
 
-              return (
-                <CheckPill
-                  key={store.id}
-                  label={store.name}
-                  count={storeUsers.length}
-                  checked={checked}
-                  disabled={storeUsers.length === 0}
-                  onChange={(nextChecked) => toggleStore(store, nextChecked)}
-                />
-              );
-            })}
-          </div>
+                if (storeUsers.length === 0) {
+                  return null;
+                }
 
-          <div className="mt-3 grid gap-3 lg:grid-cols-2">
-            {visibleStores.map((store) => {
-              const storeUsers = assigneeUsers.filter((user) =>
-                userStoreIds(user).includes(store.id),
-              );
-
-              if (storeUsers.length === 0) {
-                return null;
-              }
-
-              return (
+                return (
+                  <AssigneeGroup
+                    key={store.id}
+                    title={store.name}
+                    users={storeUsers}
+                    selectedAssigneeIds={selectedAssigneeIds}
+                    onToggle={(id, checked) => setMany([id], checked)}
+                  />
+                );
+              })}
+              {usersWithoutStore.length > 0 ? (
                 <AssigneeGroup
-                  key={store.id}
-                  title={store.name}
-                  users={storeUsers}
+                  title="Без клуба"
+                  users={usersWithoutStore}
                   selectedAssigneeIds={selectedAssigneeIds}
                   onToggle={(id, checked) => setMany([id], checked)}
                 />
-              );
-            })}
-            {usersWithoutStore.length > 0 ? (
-              <AssigneeGroup
-                title="Вся сеть / без клуба"
-                users={usersWithoutStore}
-                selectedAssigneeIds={selectedAssigneeIds}
-                onToggle={(id, checked) => setMany([id], checked)}
-              />
-            ) : null}
-            {assigneeUsers.length === 0 ? (
-              <p className="rounded-md border border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800">
-                Нет доступных сотрудников для назначения.
-              </p>
-            ) : null}
-          </div>
-        </fieldset>
-
-        <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
-          <label className="space-y-1">
-            <span className="text-xs font-bold uppercase text-zinc-500">
-              Тип
-            </span>
-            <select
-              name="type"
-              defaultValue={draft?.type ?? "SHIFT"}
-              className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-            >
-              {taskTypes.map((type) => (
-                <option key={type.value} value={type.value}>
-                  {type.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-xs font-bold uppercase text-zinc-500">
-              Приоритет
-            </span>
-            <select
-              name="priority"
-              defaultValue={draft?.priority ?? "NORMAL"}
-              className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-            >
-              {priorities.map((priority) => (
-                <option key={priority.value} value={priority.value}>
-                  {priority.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {observerUsers.length > 0 || needsConfirmation ? (
-          <fieldset className="mt-3 rounded-lg border border-dashed border-zinc-200 p-3 dark:border-zinc-800">
-            <legend className="px-1 text-xs font-bold uppercase text-zinc-500">
-              {needsConfirmation ? "Подтверждение задачи" : "Наблюдатели"}
-            </legend>
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-              <p className="mt-1 text-xs leading-5 text-zinc-500">
-                {needsConfirmation
-                  ? "Постановку задачи должен подтвердить старший администратор, управляющий клубом или менеджер по стандартам."
-                  : "Получают задачу в список наблюдения, но не становятся ответственными."}
-              </p>
-              <span className="text-xs font-semibold text-zinc-500">
-                {needsConfirmation
-                  ? "Обязательно выбрать"
-                  : "Можно выбрать несколько"}
-              </span>
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {observerUsers.map((user) => (
-                <UserCheckbox
-                  key={user.id}
-                  user={user}
-                  name="observerUserIds"
-                  checked={undefined}
-                />
-              ))}
-              {observerUsers.length === 0 ? (
-                <p className="rounded-md border border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800">
-                  Нет доступных подтверждающих с нужной ролью.
+              ) : null}
+              {assigneeUsers.length === 0 ? (
+                <p className="px-1 py-2 text-sm text-zinc-500">
+                  Нет сотрудников, которым можно поставить задачу.
                 </p>
               ) : null}
             </div>
-          </fieldset>
-        ) : null}
+            <p className="text-xs font-semibold text-zinc-500" aria-live="polite">
+              Выбрано: {selectedCount}
+              {selectedCount > 0 && !isSeniorAdministrator
+                ? ` · ${taskStoreName ?? "вся сеть"}`
+                : ""}
+            </p>
 
-        {error ? (
-          <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
-            {error}
-          </p>
-        ) : null}
-      </form>
-    </section>
+            {selectedCount > 1 ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label
+                  className={assignmentModeClass(
+                    assignmentMode === "INDIVIDUAL",
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="assignmentMode"
+                    value="INDIVIDUAL"
+                    checked={assignmentMode === "INDIVIDUAL"}
+                    onChange={() => setAssignmentMode("INDIVIDUAL")}
+                    className="sr-only"
+                  />
+                  <span>Каждому своя</span>
+                  <span className="text-[11px] font-normal text-zinc-500">
+                    Задача появится у каждого
+                  </span>
+                </label>
+                <label
+                  className={assignmentModeClass(assignmentMode === "ANY_OF")}
+                >
+                  <input
+                    type="radio"
+                    name="assignmentMode"
+                    value="ANY_OF"
+                    checked={assignmentMode === "ANY_OF"}
+                    onChange={() => setAssignmentMode("ANY_OF")}
+                    className="sr-only"
+                  />
+                  <span>Одна на всех</span>
+                  <span className="text-[11px] font-normal text-zinc-500">
+                    Сделает любой из выбранных
+                  </span>
+                </label>
+              </div>
+            ) : null}
+          </fieldset>
+
+          <label className="block space-y-1.5">
+            <span className={labelClass}>Срок</span>
+            <input name="dueAt" type="datetime-local" className={inputClass} />
+          </label>
+
+          {needsConfirmation ? (
+            <fieldset className="space-y-2">
+              <legend className={labelClass}>Кто подтвердит</legend>
+              <p className="text-xs leading-5 text-zinc-500">
+                Старший администратор, управляющий клубом или менеджер по
+                стандартам.
+              </p>
+              <ObserverList users={observerUsers} />
+            </fieldset>
+          ) : null}
+
+          <MoreFields defaultOpen={Boolean(draft?.description)}>
+            {!isSeniorAdministrator ? (
+              <label className="block space-y-1.5">
+                <span className={labelClass}>Клуб</span>
+                <select
+                  name="storeId"
+                  value={selectedStoreId}
+                  onChange={(event) => setSelectedStoreId(event.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">Вся сеть</option>
+                  {stores.map((store) => (
+                    <option key={store.id} value={store.id}>
+                      {store.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
+            <label className="block space-y-1.5">
+              <span className={labelClass}>Комментарий</span>
+              <textarea
+                name="description"
+                rows={draft ? 4 : 3}
+                defaultValue={draft?.description}
+                placeholder="Что проверить, что приложить в ответ."
+                className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+              />
+            </label>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block space-y-1.5">
+                <span className={labelClass}>Тип</span>
+                <select
+                  name="type"
+                  defaultValue={draft?.type ?? "SHIFT"}
+                  className={inputClass}
+                >
+                  {taskTypes.map((type) => (
+                    <option key={type.value} value={type.value}>
+                      {type.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block space-y-1.5">
+                <span className={labelClass}>Важность</span>
+                <select
+                  name="priority"
+                  defaultValue={draft?.priority ?? "NORMAL"}
+                  className={inputClass}
+                >
+                  {priorities.map((priority) => (
+                    <option key={priority.value} value={priority.value}>
+                      {priority.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {!needsConfirmation && observerUsers.length > 0 ? (
+              <fieldset className="space-y-2">
+                <legend className={labelClass}>Наблюдатели</legend>
+                <p className="text-xs leading-5 text-zinc-500">
+                  Видят задачу у себя, но не отвечают за неё.
+                </p>
+                <ObserverList users={observerUsers} />
+              </fieldset>
+            ) : null}
+          </MoreFields>
+
+          {error ? (
+            <p
+              role="alert"
+              className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+            >
+              {error}
+            </p>
+          ) : null}
+        </form>
+      </SidePanel>
+    </>
+  );
+}
+
+function ObserverList({ users }: { users: StaffTaskUser[] }) {
+  if (users.length === 0) {
+    return (
+      <p className="rounded-md border border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800">
+        Нет сотрудников с нужной ролью.
+      </p>
+    );
+  }
+
+  return (
+    <div className="grid max-h-48 gap-2 overflow-y-auto">
+      {users.map((user) => (
+        <UserCheckbox
+          key={user.id}
+          user={user}
+          name="observerUserIds"
+          checked={undefined}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -616,14 +647,11 @@ function AssigneeGroup({
   onToggle: (id: string, checked: boolean) => void;
 }) {
   return (
-    <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold">{title}</p>
-        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
-          {users.length}
-        </span>
-      </div>
-      <div className="mt-2 grid gap-2">
+    <div>
+      <p className="px-1 text-xs font-semibold text-zinc-500">
+        {title} · {users.length}
+      </p>
+      <div className="mt-1.5 grid gap-1.5">
         {users.map((user) => (
           <UserCheckbox
             key={user.id}

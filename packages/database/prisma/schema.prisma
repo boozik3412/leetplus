@@ -166,6 +166,14 @@ enum GuestCrmStatus {
   DO_NOT_CONTACT
 }
 
+enum GuestCrmLeadStage {
+  NEW
+  IN_PROGRESS
+  AGREED
+  CAME
+  DECLINED
+}
+
 enum GuestCommunicationConsentStatus {
   UNKNOWN
   GRANTED
@@ -464,7 +472,8 @@ model User {
   emailVerificationTokens              EmailVerificationToken[]
   importJobs                           ImportJob[]
   guestCrmEvents                       GuestCrmEvent[]
-  guestCrmLeads                        GuestCrmLead[]
+  guestCrmLeads                        GuestCrmLead[]                         @relation("GuestCrmLeadCreatedBy")
+  assignedGuestCrmLeads                GuestCrmLead[]                         @relation("GuestCrmLeadAssignedTo")
   guestCrmTasks                        GuestCrmTask[]                         @relation("GuestCrmTaskCreatedBy")
   assignedGuestCrmTasks                GuestCrmTask[]                         @relation("GuestCrmTaskAssignedTo")
   guestCrmContactEvents                GuestCrmContactEvent[]
@@ -2432,12 +2441,19 @@ model GuestCrmLead {
   phoneConsentAt     DateTime?
   unsubscribedAt     DateTime?
   matchedAt          DateTime?
+  /// Board column «Заявки»; independent of crmStatus (relationship with the guest).
+  stage              GuestCrmLeadStage               @default(NEW)
+  stageChangedAt     DateTime?
+  assignedToUserId   String?
+  /// When the guest wants to come (booking, birthday, event).
+  visitAt            DateTime?
   createdAt          DateTime                        @default(now())
   updatedAt          DateTime                        @updatedAt
 
   tenant           Tenant                 @relation(fields: [tenantId], references: [id])
   matchedGuest     Guest?                 @relation(fields: [matchedGuestId], references: [id], onDelete: SetNull)
-  createdByUser    User?                  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByUser    User?                  @relation("GuestCrmLeadCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  assignedToUser   User?                  @relation("GuestCrmLeadAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
   crmTasks         GuestCrmTask[]
   crmContactEvents GuestCrmContactEvent[]
   gameProfiles     GuestGameProfile[]
@@ -2446,6 +2462,8 @@ model GuestCrmLead {
   @@index([tenantId, phoneHash], map: "guest_crm_lead_phone_idx")
   @@index([matchedGuestId], map: "guest_crm_lead_guest_idx")
   @@index([createdByUserId], map: "guest_crm_lead_user_idx")
+  @@index([tenantId, stage, updatedAt], map: "guest_crm_lead_stage_idx")
+  @@index([assignedToUserId], map: "guest_crm_lead_assignee_idx")
 }
 
 model GuestCrmTask {

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { HeaderFilterDetails } from "./header-filter-details";
+import { ChecklistTabs } from "@/components/checklist-tabs";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requirePageAccess } from "@/lib/auth";
 import {
@@ -337,7 +338,7 @@ export default async function StaffChecklistExecutionReportPage({
           items={[
             { href: "/dashboard", label: "Дашборд" },
             { href: "/staff/tasks", label: "Персонал" },
-            { href: "/staff/checklists", label: "Чеклисты смены" },
+            { href: "/staff/checklists", label: "Чек-листы" },
           ]}
         />
 
@@ -347,12 +348,11 @@ export default async function StaffChecklistExecutionReportPage({
               Персонал
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-              Отчет по выполнению чеклистов
+              Отчёт по чек-листам
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
               Контроль выполнения по клубам, сменам, сотрудникам и конкретным
-              чеклистам. В отчет попадают созданные выполнения регламентов и
-              шаблонов чеклистов.
+              чек-листам. В отчёт попадают все запуски регламентов и шаблонов.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -368,20 +368,9 @@ export default async function StaffChecklistExecutionReportPage({
             >
               XLSX
             </a>
-            <Link
-              href="/staff/checklists"
-              className="inline-flex rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-            >
-              Открыть выполнения
-            </Link>
-            <Link
-              href="/staff/checklist-templates"
-              className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
-            >
-              Шаблоны
-            </Link>
           </div>
         </header>
+        <ChecklistTabs current="report" />
 
         <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
           {summaryCards.map((card) => (

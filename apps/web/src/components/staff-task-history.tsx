@@ -6,6 +6,7 @@ import {
   StaffAttachmentUpload,
   type StaffAttachmentUploadResult,
 } from "@/components/staff-attachment-upload";
+import { LocalDateTime } from "@/components/local-date-time";
 import type { AuthUser } from "@/lib/auth";
 import type { StaffTask, StaffTaskStatus } from "@/lib/staff-tasks";
 
@@ -80,16 +81,6 @@ function resolveEvidenceHref(value: string) {
   return match
     ? `/api/staff/attachments/${encodeURIComponent(match[1])}`
     : value;
-}
-
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
 }
 
 function userName(
@@ -173,9 +164,12 @@ function canCancelTask(
 export function StaffTaskHistory({
   task,
   currentUser,
+  defaultOpen = false,
 }: {
   task: StaffTask;
   currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">;
+  /** Open in the task side panel, folded in the long list. */
+  defaultOpen?: boolean;
 }) {
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
@@ -243,7 +237,10 @@ export function StaffTaskHistory({
   const statusOptions = getStatusOptions(task, currentUser);
 
   return (
-    <details className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+    <details
+      open={defaultOpen}
+      className="@container mt-4 rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/40"
+    >
       <summary className="cursor-pointer text-sm font-semibold text-zinc-800 transition hover:text-emerald-700 dark:text-zinc-100 dark:hover:text-emerald-300">
         История и подтверждение
         <span className="ml-2 text-xs font-normal text-zinc-500">
@@ -251,7 +248,7 @@ export function StaffTaskHistory({
         </span>
       </summary>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+      <div className="mt-4 grid gap-4 @3xl:grid-cols-[1.1fr_0.9fr]">
         <form onSubmit={submit} className="space-y-3">
           <label className="block space-y-1">
             <span className="text-xs font-bold uppercase text-zinc-500">
@@ -265,7 +262,7 @@ export function StaffTaskHistory({
             />
           </label>
 
-          <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
+          <div className="grid gap-3 @xl:grid-cols-[1fr_1fr]">
             <label className="space-y-1">
               <span className="text-xs font-bold uppercase text-zinc-500">
                 Ссылка на доказательство
@@ -311,7 +308,7 @@ export function StaffTaskHistory({
             </label>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+          <div className="grid gap-3 @xl:grid-cols-[1fr_1fr_auto]">
             <label className="space-y-1">
               <span className="text-xs font-bold uppercase text-zinc-500">
                 Тип доказательства
@@ -383,7 +380,7 @@ export function StaffTaskHistory({
                   >
                     <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
                       <span>{userName(comment.authorUser, "Автор скрыт")}</span>
-                      <span>{formatDateTime(comment.createdAt)}</span>
+                      <span><LocalDateTime value={comment.createdAt} /></span>
                     </div>
                     {comment.body ? (
                       <p className="mt-2 leading-5 text-zinc-700 dark:text-zinc-200">
@@ -426,7 +423,7 @@ export function StaffTaskHistory({
                   ) : null}
                   <p className="mt-0.5 text-zinc-500">
                     {userName(event.actorUser)} ·{" "}
-                    {formatDateTime(event.createdAt)}
+                    <LocalDateTime value={event.createdAt} />
                   </p>
                 </div>
               ))}

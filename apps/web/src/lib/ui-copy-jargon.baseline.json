@@ -165,9 +165,6 @@
     "endpoint": 1,
     "snapshot": 1
   },
-  "components/marketing-missions-panel.tsx": {
-    "anti-fraud": 3
-  },
   "components/module-choice-page.tsx": {
     "lootbox": 1
   },

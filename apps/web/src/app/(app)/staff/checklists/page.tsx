@@ -1,8 +1,14 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { ChecklistTabs } from "@/components/checklist-tabs";
+import { ChecklistToday } from "@/components/checklist-today";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffChecklistWorkspace } from "@/components/staff-checklist-workspace";
 import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
+import { dayKey, shiftDayKey } from "@/lib/checklist-today";
+import { getStaffTaskReport } from "@/lib/staff-tasks";
 import {
+  getStaffChecklistExecutionReport,
   getStaffChecklistReport,
   type StaffChecklistFilterStatus,
   type StaffChecklistFilters,
@@ -104,6 +110,19 @@ function isChecklistUseOnlyRole(role: string) {
   return checklistUseOnlyRoles.has(role);
 }
 
+/** Filters other than the tab: a link with them means «show the list». */
+function hasListFilters(params: Awaited<SearchParams>) {
+  return [
+    "status",
+    "shiftKind",
+    "runId",
+    "regulationId",
+    "storeId",
+    "assignedToUserId",
+    "search",
+  ].some((key) => Boolean(searchParam(params[key])));
+}
+
 export default async function StaffChecklistsPage({
   searchParams,
 }: {
@@ -112,16 +131,24 @@ export default async function StaffChecklistsPage({
   const user = await requireCurrentUser();
   ensurePageAccess(user, "/staff/checklists");
   const params = await searchParams;
+  const mayCheckOthers = !isChecklistUseOnlyRole(user.role);
+  const tab =
+    searchParam(params.tab) === "all" || hasListFilters(params)
+      ? "all"
+      : "today";
+
+  if (mayCheckOthers && tab === "today") {
+    return <ChecklistTodayPage />;
+  }
+
   const filters = resolveFilters(params);
   const report = await getStaffChecklistReport(filters);
-  const canManageChecklists =
-    report.canManageChecklistRuns && !isChecklistUseOnlyRole(user.role);
+  const canManageChecklists = report.canManageChecklistRuns && mayCheckOthers;
   const breadcrumbItems = [
     { href: "/dashboard", label: "Дашборд" },
-    { href: "/staff/tasks", label: "Задачи персонала" },
     ...(canManageChecklists
-      ? [{ href: "/staff/shift-regulations", label: "Регламенты смены" }]
-      : []),
+      ? [{ href: "/staff/staff-control", label: "Контроль персонала" }]
+      : [{ href: "/staff/tasks", label: "Задачи персонала" }]),
   ];
 
   const summaryCards = [
@@ -136,36 +163,21 @@ export default async function StaffChecklistsPage({
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
-        <ReportBreadcrumbs current="Чеклисты смены" items={breadcrumbItems} />
+        <ReportBreadcrumbs current="Чек-листы" items={breadcrumbItems} />
 
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-              Персонал
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-              Чеклисты смены
+            <h1 className="text-3xl font-semibold tracking-tight">
+              Чек-листы
             </h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
               {canManageChecklists
-                ? "Выполнение опубликованных регламентов: открыть смену, закрыть кассу, проверить бар, PC-зону и чистоту. Обязательные пункты и доказательства контролируются перед отправкой на проверку."
-                : "Текущие чек-листы вашей смены: отметьте пункты, приложите доказательства и отправьте результат на проверку."}
+                ? "Все запуски чек-листов: открытие и закрытие смены, касса, бар, зал и чистота. Обязательные пункты и фото проверяются перед отправкой."
+                : "Чек-листы вашей смены: отметьте пункты, приложите фото и отправьте на проверку."}
             </p>
           </div>
           {canManageChecklists ? (
             <div className="flex flex-wrap gap-2">
-              <Link
-                href="/staff/checklists/report"
-                className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
-              >
-                Отчет по чек-листам
-              </Link>
-              <Link
-                href="/staff/checklist-templates"
-                className="inline-flex rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-              >
-                Шаблоны чеклистов
-              </Link>
               <Link
                 href="/staff/shift-regulations"
                 className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
@@ -175,6 +187,7 @@ export default async function StaffChecklistsPage({
             </div>
           ) : null}
         </header>
+        {mayCheckOthers ? <ChecklistTabs current="all" /> : null}
 
         <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
           {summaryCards.map((card) => (
@@ -277,7 +290,7 @@ export default async function StaffChecklistsPage({
               <input
                 name="search"
                 defaultValue={report.filters.search ?? ""}
-                placeholder="Название чеклиста или регламента"
+                placeholder="Название чек-листа или регламента"
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
               />
             </label>
@@ -303,6 +316,54 @@ export default async function StaffChecklistsPage({
             canStartFromRegulations={canManageChecklists}
           />
         </section>
+      </div>
+    </main>
+  );
+}
+
+async function ChecklistTodayPage() {
+  const now = new Date();
+  // A window around today: the exact day is cut in the viewer's time zone.
+  const today = dayKey(now, "UTC");
+  const [execution, tasks] = await Promise.all([
+    getStaffChecklistExecutionReport({
+      dateFrom: shiftDayKey(today, -7),
+      dateTo: shiftDayKey(today, 1),
+    }).catch(() => null),
+    getStaffTaskReport({
+      dueFrom: shiftDayKey(today, -1),
+      dueTo: shiftDayKey(today, 1),
+      pageSize: "500",
+    }).catch(() => null),
+  ]);
+
+  // No access to the execution report: the list is still there.
+  if (!execution) redirect("/staff/checklists?tab=all");
+
+  return (
+    <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
+      <div className="mx-auto max-w-7xl">
+        <ReportBreadcrumbs
+          current="Чек-листы"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/staff/staff-control", label: "Контроль персонала" },
+          ]}
+        />
+        <header>
+          <h1 className="text-3xl font-semibold tracking-tight">Чек-листы</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+            Кто сегодня на смене и как идут их чек-листы. Нажмите на чек-лист,
+            чтобы открыть пункты и фото.
+          </p>
+        </header>
+        <ChecklistTabs current="today" />
+        <ChecklistToday
+          runs={execution.runs}
+          tasks={tasks?.rows ?? []}
+          nowIso={now.toISOString()}
+          tasksAvailable={tasks !== null}
+        />
       </div>
     </main>
   );

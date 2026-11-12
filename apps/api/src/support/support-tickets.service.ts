@@ -18,12 +18,14 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { GUEST_BUG_REPORT_TOPICS } from '../guest-portal/guest-support.service';
 import {
   SUPPORT_THREAD_ACTION_LIST,
+  SUPPORT_TELEGRAM_TICKET_KIND,
   SUPPORT_THREAD_ACTIONS,
   closeStaleResolvedSupportTickets,
   summarizeSupportThread,
   type SupportThreadSummary,
 } from '../guest-portal/guest-support-thread';
 import { SecretEncryptionService } from '../integrations/secret-encryption.service';
+import { GuestTelegramOutboxService } from '../guest-communications/guest-telegram-outbox.service';
 import {
   buildSupportGuestRewards,
   supportGuestRewardsSince,
@@ -112,6 +114,7 @@ export class SupportTicketsService {
     private readonly tenantContextService: TenantContextService,
     private readonly configService: ConfigService,
     private readonly secretEncryptionService: SecretEncryptionService,
+    private readonly telegramOutbox: GuestTelegramOutboxService,
   ) {}
 
   getTenantTickets(user: AuthenticatedUser, query: SupportTicketsQuery) {
@@ -582,11 +585,17 @@ export class SupportTicketsService {
         : tenantId
           ? [tenantId]
           : [...new Set(rows.map((row) => row.tenantId))];
-    const [users, threads, reportedFrom] = await Promise.all([
-      this.getAssigneeCandidates(scope, assigneeTenantIds),
-      this.threadSummaries(rows.map((row) => row.id)),
-      this.reportedFromStores(rows),
-    ]);
+    const [users, threads, reportedFrom, telegramDeliveries] =
+      await Promise.all([
+        this.getAssigneeCandidates(scope, assigneeTenantIds),
+        this.threadSummaries(rows.map((row) => row.id)),
+        this.reportedFromStores(rows),
+        this.telegramReplyDeliveries(
+          rows
+            .filter((row) => row.kind === SUPPORT_TELEGRAM_TICKET_KIND)
+            .map((row) => row.id),
+        ),
+      ]);
     const counts = countByStatus(summaryRows);
 
     return {
@@ -606,14 +615,53 @@ export class SupportTicketsService {
       tenants,
       stores,
       users,
-      rows: rows.map((row) => ({
-        ...projectGuestThread(
+      rows: rows.map((row) => {
+        const projected = projectGuestThread(
           this.projectTicketContact(row),
           threads.get(row.id),
-        ),
-        reportedFromStore: reportedFrom.get(row.id) ?? null,
-      })),
+        );
+        return {
+          ...projected,
+          channel:
+            row.kind === SUPPORT_TELEGRAM_TICKET_KIND
+              ? ('TELEGRAM' as const)
+              : ('WEB' as const),
+          comments: projected.comments.map((comment) => ({
+            ...comment,
+            telegramDelivery: telegramDeliveries.get(comment.id) ?? null,
+          })),
+          reportedFromStore: reportedFrom.get(row.id) ?? null,
+        };
+      }),
     };
+  }
+
+  // Delivery of staff replies to guests who wrote through the Telegram bot,
+  // by comment id. Only status facts; no chat ids or provider payloads.
+  private async telegramReplyDeliveries(ticketIds: string[]) {
+    const deliveries = new Map<
+      string,
+      { status: string; sentAt: string | null; errorCode: string | null }
+    >();
+    if (!ticketIds.length) return deliveries;
+    const rows = await this.prisma.guestTelegramOutboxMessage.findMany({
+      where: { supportTicketId: { in: ticketIds }, kind: 'SUPPORT_REPLY' },
+      select: {
+        supportCommentId: true,
+        status: true,
+        sentAt: true,
+        lastErrorCode: true,
+      },
+    });
+    for (const row of rows) {
+      if (!row.supportCommentId) continue;
+      deliveries.set(row.supportCommentId, {
+        status: row.status,
+        sentAt: row.sentAt?.toISOString() ?? null,
+        errorCode: row.lastErrorCode,
+      });
+    }
+    return deliveries;
   }
 
   // Clubs that have tickets in the current scope, for the club filter.
@@ -1162,7 +1210,7 @@ export class SupportTicketsService {
         scope,
         ticket.tenantId,
         ticket.id,
-        comment.id,
+        comment,
         now,
       );
       // Answering the guest means the ticket is being handled.
@@ -1257,7 +1305,7 @@ export class SupportTicketsService {
         scope,
         ticket.tenantId,
         ticket.id,
-        comment.id,
+        comment,
         now,
       );
       await tx.guestSupportTicketAuditEvent.create({
@@ -1292,7 +1340,7 @@ export class SupportTicketsService {
     scope: TicketScope,
     tenantId: string,
     ticketId: string,
-    commentId: string,
+    comment: { id: string; body: string },
     now: Date,
   ) {
     await tx.guestSupportTicketAuditEvent.create({
@@ -1301,10 +1349,38 @@ export class SupportTicketsService {
         ticketId,
         actorUserId: user.id,
         action: SUPPORT_THREAD_ACTIONS.PUBLIC_REPLY,
-        metadata: { commentId, platformScope: scope.kind === 'PLATFORM' },
+        metadata: {
+          commentId: comment.id,
+          platformScope: scope.kind === 'PLATFORM',
+        },
         createdAt: now,
       },
     });
+
+    // A guest who wrote through the Telegram bot gets the answer there too;
+    // the bot poller sends it from the outbox.
+    const ticket = await tx.guestSupportTicket.findFirst({
+      where: { id: ticketId, tenantId },
+      select: {
+        kind: true,
+        storeId: true,
+        profileId: true,
+        store: { select: { name: true } },
+      },
+    });
+    if (ticket?.kind === SUPPORT_TELEGRAM_TICKET_KIND) {
+      await this.telegramOutbox.enqueue(tx, {
+        tenantId,
+        storeId: ticket.storeId,
+        profileId: ticket.profileId,
+        kind: 'SUPPORT_REPLY',
+        sourceKey: `support-comment:${comment.id}`,
+        supportTicketId: ticketId,
+        supportCommentId: comment.id,
+        createdByUserId: user.id,
+        text: supportTelegramReplyText(ticket.store.name, comment.body),
+      });
+    }
   }
 
   private async getAttachment(
@@ -1382,6 +1458,16 @@ const commentSelection = {
   createdAt: true,
   authorUser: { select: { id: true, fullName: true, email: true } },
 } satisfies Prisma.GuestSupportTicketCommentSelect;
+
+function supportTelegramReplyText(storeName: string, body: string) {
+  return [
+    `Ответ клуба «${storeName}»:`,
+    '',
+    body,
+    '',
+    'Чтобы ответить, просто напишите сюда.',
+  ].join('\n');
+}
 
 function supportCommentBody(value: unknown) {
   const body = typeof value === 'string' ? value.trim() : '';

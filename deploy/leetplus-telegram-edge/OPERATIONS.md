@@ -165,6 +165,29 @@ Do not start `bot-consumer` in live mode until these fields are real and checked
 - `GUEST_GAME_BOT_CONSUMER_TELEGRAM_BOT_TOKEN`
 - `GUEST_GAME_BOT_CONSUMER_DRY_RUN=false`
 
+Guest messages outbox (staff replies to guests who wrote to the bot):
+
+- The bot turns a guest's free text into a «Telegram» conversation in the
+  club's «Поддержка» queue when the main API runs with
+  `GUEST_BUG_REPORTING_MODE=LIVE`. A public reply from staff is queued in
+  `GuestTelegramOutboxMessage`.
+- `telegram-poller` claims queued messages from
+  `POST /guests/communications/telegram-outbox/claim`, sends them through the
+  same Privoxy/Tor egress as polling and reports each outcome to
+  `POST /guests/communications/telegram-outbox/report`.
+- It is off until `GUEST_GAME_TG_EDGE_OUTBOX_TOKEN` in
+  `secrets/telegram-edge.env` and `GUEST_TELEGRAM_OUTBOX_TOKEN` in the main API
+  env hold the same random value of at least 32 characters
+  (`openssl rand -hex 32`). Do not reuse the sync service token, the webhook
+  secret or the bot token.
+- `GUEST_GAME_TG_EDGE_DRY_RUN=true` also keeps the outbox off.
+- Check: `docker compose logs telegram-poller | grep "Telegram outbox"` shows
+  `Telegram outbox sender started` after start (or `sender off (…)` with the
+  reason), then `claimed=… sent=…` lines only when something was sent. Errors
+  are logged as `Telegram outbox tick failed` without message text.
+- Delivery is at least once: if the report call is lost after a send, the
+  message returns to the queue when its 2-minute lease expires.
+
 Health checks:
 
 ```bash

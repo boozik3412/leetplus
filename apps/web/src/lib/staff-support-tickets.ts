@@ -26,6 +26,12 @@ export type TicketUser = {
   isPlatformAdmin?: boolean;
 };
 
+export type SupportTelegramDelivery = {
+  status: "QUEUED" | "SENDING" | "SENT" | "FAILED" | "BLOCKED" | "SKIPPED";
+  sentAt: string | null;
+  errorCode: string | null;
+};
+
 export type StaffSupportTicket = {
   id: string;
   ticketNumber: string;
@@ -48,6 +54,9 @@ export type StaffSupportTicket = {
   store: { id: string; name: string };
   // Club selected in the game module when the guest reported about another one.
   reportedFromStore: { id: string; name: string } | null;
+  // TELEGRAM: the guest wrote to the guest Telegram bot; public replies are
+  // delivered to that chat too.
+  channel?: "WEB" | "TELEGRAM";
   profile: {
     id: string;
     displayName: string | null;
@@ -62,6 +71,7 @@ export type StaffSupportTicket = {
     createdAt: string;
     authorUser: TicketUser | null;
     visibility: SupportTicketCommentVisibility;
+    telegramDelivery?: SupportTelegramDelivery | null;
   }>;
   guestThread: {
     awaitingStaff: boolean;

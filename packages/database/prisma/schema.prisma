@@ -2724,6 +2724,9 @@ model GuestGameProfile {
   phoneConsentSource      String?
   phoneConsentAt          DateTime?
   unsubscribedAt          DateTime?
+  // Own answer in the bot to "send me club promotions": UNKNOWN | GRANTED | DENIED.
+  promoConsentStatus      String                          @default("UNKNOWN")
+  promoConsentAt          DateTime?
   xp                      Int                             @default(0)
   level                   Int                             @default(1)
   status                  String                          @default("ACTIVE")
@@ -2806,16 +2809,16 @@ model GuestGameProfileIdentityLink {
 }
 
 model GuestGameLootBox {
-  id                     String   @id @default(uuid())
+  id                     String    @id @default(uuid())
   tenantId               String
   audienceId             String?
   createdByUserId        String?
   name                   String
-  status                 String   @default("DRAFT")
-  usageKind              String   @default("STANDALONE")
+  status                 String    @default("DRAFT")
+  usageKind              String    @default("STANDALONE")
   triggerKind            String
   rewardType             String
-  rewardAmount           Decimal? @db.Decimal(12, 2)
+  rewardAmount           Decimal?  @db.Decimal(12, 2)
   rewardLabel            String?
   segment                String?
   sessionType            String?
@@ -2823,16 +2826,16 @@ model GuestGameLootBox {
   periodRules            Json?
   limits                 Json?
   probabilityRules       Json
-  budgetAmount           Decimal? @db.Decimal(12, 2)
+  budgetAmount           Decimal?  @db.Decimal(12, 2)
   antiFraudRules         Json?
-  manualApprovalRequired Boolean  @default(true)
+  manualApprovalRequired Boolean   @default(true)
   /// Share of activated players (0–50 %) kept out of a standalone case to measure its effect.
-  holdoutPercent         Int      @default(0)
+  holdoutPercent         Int       @default(0)
   /// When the current holdout split started; reset on every percent change.
   holdoutStartedAt       DateTime?
   note                   String?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   tenant        Tenant            @relation(fields: [tenantId], references: [id])
   audience      GuestAudience?    @relation(fields: [audienceId], references: [id], onDelete: SetNull)

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MarketingCampaignCrmTaskButton } from "@/components/marketing-campaign-crm-task-button";
 import { MarketingCampaignContactForm } from "@/components/marketing-campaign-contact-form";
+import { MarketingCampaignTelegramPanel } from "@/components/marketing-campaign-telegram-panel";
 import { MarketingCampaignWorkspace } from "@/components/marketing-campaign-workspace";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requirePageAccess } from "@/lib/auth";
@@ -15,6 +16,7 @@ import {
 import {
   getMarketingCampaign,
   getMarketingCampaignEffect,
+  getMarketingCampaignTelegram,
   type MarketingCampaign,
   type MarketingCampaignAudienceBreakdownRow,
   type MarketingCampaignEconomics,
@@ -29,7 +31,13 @@ import {
 
 type PageParams = Promise<{ id: string }>;
 type PageSearchParams = Promise<Record<string, string | string[] | undefined>>;
-type CampaignScenarioTab = "plan" | "launch" | "contacts" | "effect" | "export";
+type CampaignScenarioTab =
+  | "plan"
+  | "launch"
+  | "contacts"
+  | "telegram"
+  | "effect"
+  | "export";
 
 const campaignScenarioTabs: Array<{
   id: CampaignScenarioTab;
@@ -50,6 +58,11 @@ const campaignScenarioTabs: Array<{
     id: "contacts",
     label: "Контакты",
     description: "CRM-задача и журнал",
+  },
+  {
+    id: "telegram",
+    label: "Telegram",
+    description: "рассылка через бота",
   },
   {
     id: "effect",
@@ -106,13 +119,21 @@ export default async function MarketingCampaignPage({
   const { id } = await params;
   const activeTab = resolveCampaignScenarioTab((await searchParams).tab);
 
-  const [campaignResult, effectResult, tasksResult, contactEventsResult] =
-    await Promise.allSettled([
-      getMarketingCampaign(id),
-      getMarketingCampaignEffect(id),
-      safeList(getGuestCrmTasks()),
-      safeList(getGuestCrmContactEvents()),
-    ]);
+  const [
+    campaignResult,
+    effectResult,
+    tasksResult,
+    contactEventsResult,
+    telegramResult,
+  ] = await Promise.allSettled([
+    getMarketingCampaign(id),
+    getMarketingCampaignEffect(id),
+    safeList(getGuestCrmTasks()),
+    safeList(getGuestCrmContactEvents()),
+    activeTab === "telegram"
+      ? getMarketingCampaignTelegram(id)
+      : Promise.resolve(null),
+  ]);
 
   if (campaignResult.status === "rejected") {
     notFound();
@@ -211,6 +232,15 @@ export default async function MarketingCampaignPage({
           </section>
         ) : null}
 
+        {activeTab === "telegram" ? (
+          <MarketingCampaignTelegramPanel
+            campaignId={campaign.id}
+            initial={
+              telegramResult.status === "fulfilled" ? telegramResult.value : null
+            }
+          />
+        ) : null}
+
         {activeTab === "effect" ? (
           <EffectAnalytics
             campaign={campaign}
@@ -258,7 +288,7 @@ function CampaignScenarioTabs({
           один рабочий сценарий, который нужен сейчас.
         </p>
       </div>
-      <div className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-2 p-3 sm:grid-cols-3 lg:grid-cols-6">
         {campaignScenarioTabs.map((tab) => {
           const isActive = tab.id === activeTab;
 

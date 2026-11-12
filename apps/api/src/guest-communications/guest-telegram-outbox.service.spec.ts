@@ -26,11 +26,19 @@ function fixture({
   const admission = {
     evaluate: jest.fn().mockResolvedValue({ allowed }),
   };
+  const marketingCampaign = {
+    findFirst: jest.fn().mockResolvedValue({ audienceId: 'audience-a' }),
+  };
+  const guestCrmContactEvent = { create: jest.fn().mockResolvedValue({}) };
   const service = new GuestTelegramOutboxService(
-    { guestTelegramOutboxMessage: outbox } as never,
+    {
+      guestTelegramOutboxMessage: outbox,
+      marketingCampaign,
+      guestCrmContactEvent,
+    } as never,
     admission as never,
   );
-  return { service, outbox, admission };
+  return { service, outbox, admission, guestCrmContactEvent };
 }
 
 function claimedRow(overrides: Row = {}) {
@@ -44,6 +52,7 @@ function claimedRow(overrides: Row = {}) {
       telegramIdentity: 'chat:123456',
       status: 'ACTIVE',
       phoneConsentStatus: 'GRANTED',
+      promoConsentStatus: 'UNKNOWN',
     },
     ...overrides,
   };
@@ -124,6 +133,7 @@ describe('GuestTelegramOutboxService', () => {
           telegramIdentity: null,
           status: 'ACTIVE',
           phoneConsentStatus: 'GRANTED',
+          promoConsentStatus: 'UNKNOWN',
         },
       },
       true,
@@ -137,6 +147,7 @@ describe('GuestTelegramOutboxService', () => {
           telegramIdentity: 'chat:1',
           status: 'MERGED_TELEGRAM_AUTH',
           phoneConsentStatus: 'GRANTED',
+          promoConsentStatus: 'UNKNOWN',
         },
       },
       true,
@@ -146,16 +157,32 @@ describe('GuestTelegramOutboxService', () => {
     [
       'a campaign to an unsubscribed guest',
       {
-        kind: 'CAMPAIGN',
+        kind: 'CAMPAIGN_NEWS',
         profile: {
           telegramIdentity: 'chat:1',
           status: 'ACTIVE',
           phoneConsentStatus: 'UNSUBSCRIBED',
+          promoConsentStatus: 'GRANTED',
         },
       },
       true,
       'SKIPPED',
       'GUEST_UNSUBSCRIBED',
+    ],
+    [
+      'a promo to a guest who has not agreed to promos',
+      {
+        kind: 'CAMPAIGN_PROMO',
+        profile: {
+          telegramIdentity: 'chat:1',
+          status: 'ACTIVE',
+          phoneConsentStatus: 'GRANTED',
+          promoConsentStatus: 'DENIED',
+        },
+      },
+      true,
+      'SKIPPED',
+      'NO_PROMO_CONSENT',
     ],
     [
       'a network without outbound',
@@ -189,6 +216,7 @@ describe('GuestTelegramOutboxService', () => {
             telegramIdentity: 'chat:9',
             status: 'ACTIVE',
             phoneConsentStatus: 'UNSUBSCRIBED',
+            promoConsentStatus: 'UNKNOWN',
           },
         }),
       ],
@@ -200,8 +228,14 @@ describe('GuestTelegramOutboxService', () => {
   });
 
   it('records a sent message and releases the claim', async () => {
-    const { service, outbox } = fixture();
-    outbox.findFirst.mockResolvedValue({ attempts: 1 });
+    const { service, outbox, guestCrmContactEvent } = fixture();
+    outbox.findFirst.mockResolvedValue({
+      attempts: 1,
+      tenantId: 'tenant-a',
+      marketingCampaignId: null,
+      createdByUserId: 'user-a',
+      profile: { guestId: 'guest-a' },
+    });
 
     const result = await service.report(
       {
@@ -229,6 +263,55 @@ describe('GuestTelegramOutboxService', () => {
         lastErrorCode: null,
       },
     });
+    expect(guestCrmContactEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('logs a delivered campaign message as a contact for its «Эффект»', async () => {
+    const { service, outbox, guestCrmContactEvent } = fixture();
+    outbox.findFirst.mockResolvedValue({
+      attempts: 1,
+      tenantId: 'tenant-a',
+      marketingCampaignId: 'campaign-a',
+      createdByUserId: 'user-a',
+      profile: { guestId: 'guest-a' },
+    });
+
+    await service.report(
+      { results: [{ id: ID_A, claimToken: TOKEN, outcome: 'SENT' }] },
+      NOW,
+    );
+
+    expect(guestCrmContactEvent.create).toHaveBeenCalledWith({
+      data: {
+        tenantId: 'tenant-a',
+        guestId: 'guest-a',
+        audienceId: 'audience-a',
+        marketingCampaignId: 'campaign-a',
+        createdByUserId: 'user-a',
+        channel: 'Telegram-бот',
+        note: 'Рассылка доставлена в Telegram.',
+        contactedAt: NOW,
+      },
+    });
+  });
+
+  it('keeps the report applied when the contact journal write fails', async () => {
+    const { service, outbox, guestCrmContactEvent } = fixture();
+    outbox.findFirst.mockResolvedValue({
+      attempts: 1,
+      tenantId: 'tenant-a',
+      marketingCampaignId: 'campaign-a',
+      createdByUserId: null,
+      profile: { guestId: 'guest-a' },
+    });
+    guestCrmContactEvent.create.mockRejectedValue(new Error('db down'));
+
+    await expect(
+      service.report(
+        { results: [{ id: ID_A, claimToken: TOKEN, outcome: 'SENT' }] },
+        NOW,
+      ),
+    ).resolves.toEqual({ applied: 1, ignored: 0 });
   });
 
   it('retries with backoff and Telegram retry_after, then gives up', async () => {

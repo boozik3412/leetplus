@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { GuestCommunicationsModule } from '../guest-communications/guest-communications.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
@@ -8,7 +9,13 @@ import { SupportTicketsController } from './support-tickets.controller';
 import { SupportTicketsService } from './support-tickets.service';
 
 @Module({
-  imports: [AuthModule, IntegrationsModule, PrismaModule, TenancyModule],
+  imports: [
+    AuthModule,
+    GuestCommunicationsModule,
+    IntegrationsModule,
+    PrismaModule,
+    TenancyModule,
+  ],
   controllers: [SupportTicketsController, PlatformSupportTicketsController],
   providers: [SupportTicketsService],
 })

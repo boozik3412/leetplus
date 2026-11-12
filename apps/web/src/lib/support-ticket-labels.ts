@@ -11,3 +11,23 @@ export const supportTicketTopicLabels: Record<SupportTicketTopic, string> = {
   INTERFACE_AND_DISPLAY: "Интерфейс и отображение",
   OTHER: "Другое",
 };
+
+export type SupportTelegramDeliveryStatus =
+  | "QUEUED"
+  | "SENDING"
+  | "SENT"
+  | "FAILED"
+  | "BLOCKED"
+  | "SKIPPED";
+
+export const supportTelegramDeliveryLabels: Record<
+  SupportTelegramDeliveryStatus,
+  string
+> = {
+  QUEUED: "Отправляется в Telegram",
+  SENDING: "Отправляется в Telegram",
+  SENT: "Доставлено в Telegram",
+  FAILED: "Не доставлено в Telegram",
+  BLOCKED: "Гость закрыл чат с ботом",
+  SKIPPED: "Не отправлено в Telegram",
+};

@@ -17,6 +17,9 @@ export const SUPPORT_THREAD_ACTIONS = Object.freeze({
 export const SUPPORT_THREAD_ACTION_LIST = Object.values(SUPPORT_THREAD_ACTIONS);
 
 export const SUPPORT_PUBLIC_AUTHOR_LABEL = 'Поддержка LeetPlus';
+// Ticket kind of a conversation a guest started by writing to the guest
+// Telegram bot; staff replies to it are also delivered to the bot chat.
+export const SUPPORT_TELEGRAM_TICKET_KIND = 'TELEGRAM';
 export const SUPPORT_AUTO_CLOSE_MS = 7 * 24 * 60 * 60 * 1000;
 export const SUPPORT_REOPEN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const SUPPORT_GUEST_MESSAGE_MAX_LENGTH = 1000;

@@ -16,8 +16,7 @@ import {
 } from "react";
 import { ProfileIcon, PencilIcon } from "../icons";
 import { formatNumber, clampPercent } from "../format";
-import { GameRatingTeaser } from "../../game-rating-client";
-import { RaceHeaderLine, RaceScoreSlice, useRaceVariant } from "../home/race-mockups";
+import { GameRatingSlice } from "../../game-rating-client";
 import Link from "next/link";
 import { rewardWalletItemStatusHint } from "../rewards/wallet";
 import { GuestMissionPreview } from "@/components/guest-mission-preview";
@@ -93,7 +92,6 @@ export function PlayerProfilePanel({
   onQuestClick: (quest: PlayerQuest) => void;
   onQuestsToggle: () => void;
 }) {
-  const raceVariant = useRaceVariant();
   const compactQuests = orderedPlayerQuests(quests).slice(0, 5);
   const checkInDescription =
     checkInAction?.description ??
@@ -228,7 +226,6 @@ export function PlayerProfilePanel({
             </button>
           )}
         </div>
-        {raceVariant === "c" ? <RaceHeaderLine /> : null}
       </div>
 
       <div className="lp-club-profile-section">
@@ -252,8 +249,7 @@ export function PlayerProfilePanel({
           </span>
           <span>до следующего {formatNumber(levelProgress.remaining)} XP</span>
         </div>
-        {raceVariant === "current" ? <GameRatingTeaser /> : null}
-        {raceVariant === "a" ? <RaceScoreSlice /> : null}
+        <GameRatingSlice />
       </div>
 
       {rewardWallet.pendingCount > 0 ? (

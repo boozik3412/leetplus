@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   GuestCommunicationConsentStatus,
+  GuestCrmLeadStage,
   GuestCrmStatus,
   IntegrationProvider,
   Prisma,
@@ -161,11 +162,24 @@ export type GuestCrmLeadDto = {
   nextContactAt?: string | null;
   phoneConsentStatus?: GuestCommunicationConsentStatus | null;
   phoneConsentSource?: string | null;
+  stage?: GuestCrmLeadStage | null;
+  assignedToUserId?: string | null;
+  visitAt?: string | null;
 };
 
+/**
+ * Consent fields are changed only when phoneConsentStatus is sent. The board
+ * fields (stage, assignee, visit date, what the guest wants, note) are changed
+ * only when their key is present.
+ */
 export type GuestCrmLeadUpdateDto = {
   phoneConsentStatus?: GuestCommunicationConsentStatus | null;
   phoneConsentSource?: string | null;
+  stage?: GuestCrmLeadStage | null;
+  assignedToUserId?: string | null;
+  visitAt?: string | null;
+  eventName?: string | null;
+  crmNote?: string | null;
 };
 
 export type GuestCrmTaskDto = {
@@ -582,6 +596,10 @@ export type GuestCrmLead = {
   matchedGuestId: string | null;
   matchedGuestDisplayName: string | null;
   matchedAt: string | null;
+  stage: GuestCrmLeadStage;
+  stageChangedAt: string | null;
+  visitAt: string | null;
+  assignedToUser: { id: string; displayName: string; email: string } | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -1892,9 +1910,10 @@ export class GuestsService {
     const rows = await this.prisma.guestCrmLead.findMany({
       where: { tenantId },
       orderBy: [{ matchedAt: 'asc' }, { updatedAt: 'desc' }],
-      take: 50,
+      take: 300,
       include: {
         matchedGuest: { select: this.guestSelect() },
+        assignedToUser: { select: { id: true, fullName: true, email: true } },
       },
     });
 
@@ -1929,6 +1948,11 @@ export class GuestsService {
       phoneConsentStatus === GuestCommunicationConsentStatus.GRANTED
         ? new Date()
         : null;
+    const stage = this.resolveCrmLeadStage(dto.stage) ?? GuestCrmLeadStage.NEW;
+    const assignedToUserId = await this.resolveCrmTaskAssignee(
+      tenantId,
+      dto.assignedToUserId,
+    );
     const row = await this.prisma.guestCrmLead.create({
       data: {
         tenantId,
@@ -1956,9 +1980,14 @@ export class GuestsService {
             ? new Date()
             : null,
         matchedAt: matchedGuest ? new Date() : null,
+        stage,
+        stageChangedAt: stage === GuestCrmLeadStage.NEW ? null : new Date(),
+        assignedToUserId,
+        visitAt: this.resolveOptionalDate(dto.visitAt, 'visitAt'),
       },
       include: {
         matchedGuest: { select: this.guestSelect() },
+        assignedToUser: { select: { id: true, fullName: true, email: true } },
       },
     });
 
@@ -1977,6 +2006,7 @@ export class GuestsService {
           createdByUserId: user.id,
           leadId: row.id,
           guestId: matchedGuest?.id ?? null,
+          assignedToUserId,
           title:
             row.nextAction ??
             `Связаться с CRM-гостем: ${this.toGuestCrmLead(row).displayName}`,
@@ -1999,13 +2029,102 @@ export class GuestsService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const existing = await this.prisma.guestCrmLead.findFirst({
       where: { id, tenantId },
-      select: { id: true, matchedGuestId: true },
+      select: { id: true, matchedGuestId: true, stage: true },
     });
 
     if (!existing) {
       throw new NotFoundException('CRM lead not found');
     }
 
+    const boardUpdate = await this.resolveCrmLeadBoardUpdate(
+      tenantId,
+      dto,
+      existing.stage,
+    );
+
+    if ('phoneConsentStatus' in dto) {
+      await this.updateGuestCrmLeadConsent(user, tenantId, existing, dto);
+    }
+
+    if (Object.keys(boardUpdate).length > 0) {
+      await this.prisma.guestCrmLead.update({
+        where: { id: existing.id },
+        data: boardUpdate,
+      });
+    }
+
+    const row = await this.prisma.guestCrmLead.findFirst({
+      where: { id: existing.id, tenantId },
+      include: {
+        matchedGuest: { select: this.guestSelect() },
+        assignedToUser: { select: { id: true, fullName: true, email: true } },
+      },
+    });
+
+    if (!row) {
+      throw new NotFoundException('CRM lead not found');
+    }
+
+    this.analysisCache.invalidateTenant(tenantId);
+
+    return this.toGuestCrmLead(row);
+  }
+
+  private resolveCrmLeadStage(value?: string | null) {
+    if (value === undefined || value === null || value === '') {
+      return null;
+    }
+
+    if (
+      !Object.values(GuestCrmLeadStage).includes(value as GuestCrmLeadStage)
+    ) {
+      throw new BadRequestException('stage is not supported');
+    }
+
+    return value as GuestCrmLeadStage;
+  }
+
+  private async resolveCrmLeadBoardUpdate(
+    tenantId: string,
+    dto: GuestCrmLeadUpdateDto,
+    currentStage: GuestCrmLeadStage,
+  ): Promise<Prisma.GuestCrmLeadUncheckedUpdateInput> {
+    const update: Prisma.GuestCrmLeadUncheckedUpdateInput = {};
+    const stage = this.resolveCrmLeadStage(dto.stage);
+
+    if (stage && stage !== currentStage) {
+      update.stage = stage;
+      update.stageChangedAt = new Date();
+    }
+
+    if ('assignedToUserId' in dto) {
+      update.assignedToUserId = await this.resolveCrmTaskAssignee(
+        tenantId,
+        dto.assignedToUserId,
+      );
+    }
+
+    if ('visitAt' in dto) {
+      update.visitAt = this.resolveOptionalDate(dto.visitAt, 'visitAt');
+    }
+
+    if ('eventName' in dto) {
+      update.eventName = this.normalizeText(dto.eventName, 160);
+    }
+
+    if ('crmNote' in dto) {
+      update.crmNote = this.normalizeText(dto.crmNote, 2000);
+    }
+
+    return update;
+  }
+
+  private async updateGuestCrmLeadConsent(
+    user: AuthenticatedUser,
+    tenantId: string,
+    existing: { id: string; matchedGuestId: string | null },
+    dto: GuestCrmLeadUpdateDto,
+  ) {
     const phoneConsentStatus = this.resolvePhoneConsentStatus(
       dto.phoneConsentStatus,
     );
@@ -2074,21 +2193,6 @@ export class GuestsService {
         data: leadUpdate,
       });
     }
-
-    const row = await this.prisma.guestCrmLead.findFirst({
-      where: { id: existing.id, tenantId },
-      include: {
-        matchedGuest: { select: this.guestSelect() },
-      },
-    });
-
-    if (!row) {
-      throw new NotFoundException('CRM lead not found');
-    }
-
-    this.analysisCache.invalidateTenant(tenantId);
-
-    return this.toGuestCrmLead(row);
   }
 
   async getGuestCrmTaskReport(
@@ -2320,10 +2424,12 @@ export class GuestsService {
 
   async getGuestCrmContactEvents(
     user: AuthenticatedUser,
+    leadId?: string | null,
   ): Promise<GuestCrmContactEvent[]> {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    const lead = this.normalizeText(leadId, 80);
     const rows = await this.prisma.guestCrmContactEvent.findMany({
-      where: { tenantId },
+      where: lead ? { tenantId, leadId: lead } : { tenantId },
       orderBy: [{ contactedAt: 'desc' }, { createdAt: 'desc' }],
       take: 50,
       include: {
@@ -8274,9 +8380,17 @@ export class GuestsService {
     unsubscribedAt: Date | null;
     matchedGuestId: string | null;
     matchedAt: Date | null;
+    stage: GuestCrmLeadStage;
+    stageChangedAt: Date | null;
+    visitAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
     matchedGuest?: GuestBase | null;
+    assignedToUser?: {
+      id: string;
+      fullName: string | null;
+      email: string;
+    } | null;
   }): GuestCrmLead {
     const leadName =
       this.decryptSensitiveValue(row.fullNameEncrypted) ??
@@ -8312,6 +8426,17 @@ export class GuestsService {
       matchedGuestId: row.matchedGuestId,
       matchedGuestDisplayName,
       matchedAt: this.toIsoDateTime(row.matchedAt),
+      stage: row.stage,
+      stageChangedAt: this.toIsoDateTime(row.stageChangedAt),
+      visitAt: this.toIsoDateTime(row.visitAt),
+      assignedToUser: row.assignedToUser
+        ? {
+            id: row.assignedToUser.id,
+            displayName:
+              row.assignedToUser.fullName ?? row.assignedToUser.email,
+            email: row.assignedToUser.email,
+          }
+        : null,
       createdAt:
         this.toIsoDateTime(row.createdAt) ?? row.createdAt.toISOString(),
       updatedAt:
@@ -8858,14 +8983,17 @@ export class GuestsService {
     return normalized;
   }
 
-  private resolveOptionalDate(value: string | null | undefined) {
+  private resolveOptionalDate(
+    value: string | null | undefined,
+    field = 'nextContactAt',
+  ) {
     const trimmed = value?.trim();
 
     if (!trimmed) {
       return null;
     }
 
-    return this.parseDateInput(trimmed, 'nextContactAt');
+    return this.parseDateInput(trimmed, field);
   }
 
   private canViewGameInsights(user: AuthenticatedUser) {

@@ -248,8 +248,9 @@ export class GuestsController {
   @Get('crm/contact-events')
   getGuestCrmContactEvents(
     @CurrentUser() user: AuthenticatedUser,
+    @Query('leadId') leadId?: string,
   ): Promise<GuestCrmContactEvent[]> {
-    return this.guestsService.getGuestCrmContactEvents(user);
+    return this.guestsService.getGuestCrmContactEvents(user, leadId);
   }
 
   @UseGuards(FreshNetworkScopeGuard)

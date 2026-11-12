@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { CrmTaskBoard } from "@/components/crm-task-board";
+import { CrmTabs } from "@/components/crm-tabs";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requirePageAccess } from "@/lib/auth";
 import {
@@ -217,47 +218,29 @@ export default async function GuestCrmTasksPage({
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
-          current="Задачи CRM"
+          current="Задачи"
           items={[
             { href: "/dashboard", label: "Дашборд" },
-            { href: "/guests/crm", label: "CRM гостей" },
+            { href: "/guests/crm", label: "CRM и задачи" },
           ]}
         />
 
-        <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-              Гости
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-              Задачи CRM
-            </h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Кому из гостей позвонить или написать, кто это делает и к какому
-              сроку.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href={tasksExportHref(filters)}
-              className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 hover:bg-emerald-400"
-            >
-              Скачать CSV
-            </Link>
-            <Link
-              href="/communications"
-              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              Коммуникации
-            </Link>
-            <Link
-              href="/guests/crm"
-              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              Назад в CRM
-            </Link>
-          </div>
+        <header className="flex flex-wrap items-end justify-between gap-3">
+          <h1 className="text-3xl font-semibold tracking-tight">
+            CRM и задачи
+          </h1>
+          <Link
+            href={tasksExportHref(filters)}
+            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            Скачать CSV
+          </Link>
         </header>
+        <CrmTabs current="tasks" />
+        <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+          Кому из гостей позвонить или написать, кто это делает и к какому
+          сроку.
+        </p>
 
         <section className="mt-6 grid gap-3 md:grid-cols-4">
           <MetricCard

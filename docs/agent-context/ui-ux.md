@@ -32,6 +32,14 @@ Decide which one you are building before choosing density, sizes and motion.
 - Copy is Russian (`<html lang="ru">`). Numbers, money and dates through
   `Intl`/`toLocaleString("ru-RU")`; `tabular-nums` in tables, KPIs, timers and
   prices so digits do not jump.
+- Lists that people work through (CRM, staff tasks, checklists) use the shared
+  pieces, not a page-wide form above the list: `components/board.tsx` (columns
+  with cards; drag is a mouse shortcut, the card opens the record so keyboard and
+  touch can change the column too), `components/side-panel.tsx` (create/edit one
+  record on the right, native `<dialog>`), `components/more-fields.tsx` (rare
+  fields folded under «Дополнительно», so a form shows 3–5 fields). Pure column
+  logic is in `lib/board.ts`. First users: «Задачи CRM» (`/guests/crm/tasks`,
+  «Доска / Список» in `?view=`) and «Ручные награды».
 
 ## Rules by priority
 

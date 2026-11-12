@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { CrmTaskBoard } from "@/components/crm-task-board";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requirePageAccess } from "@/lib/auth";
 import {
@@ -11,6 +12,7 @@ import {
   type GuestCrmTaskStatus,
   type GuestCrmTaskTargetType,
 } from "@/lib/guests";
+import { can } from "@/lib/permissions";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
@@ -49,7 +51,9 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function isStatus(value: string | undefined): value is GuestCrmTaskStatus | "all" {
+function isStatus(
+  value: string | undefined,
+): value is GuestCrmTaskStatus | "all" {
   return (
     value === "all" ||
     value === "OPEN" ||
@@ -59,8 +63,15 @@ function isStatus(value: string | undefined): value is GuestCrmTaskStatus | "all
   );
 }
 
-function isTargetType(value: string | undefined): value is GuestCrmTaskTargetType {
-  return value === "all" || value === "group" || value === "guest" || value === "lead";
+function isTargetType(
+  value: string | undefined,
+): value is GuestCrmTaskTargetType {
+  return (
+    value === "all" ||
+    value === "group" ||
+    value === "guest" ||
+    value === "lead"
+  );
 }
 
 function isSortKey(value: string | undefined): value is GuestCrmTaskSortKey {
@@ -74,6 +85,25 @@ function isSortKey(value: string | undefined): value is GuestCrmTaskSortKey {
   );
 }
 
+type TasksView = "board" | "list";
+
+function resolveView(params: Awaited<SearchParams>): TasksView {
+  return searchParam(params.view) === "list" ? "list" : "board";
+}
+
+function viewHref(params: Awaited<SearchParams>, view: TasksView) {
+  const next = new URLSearchParams();
+
+  Object.entries(params).forEach(([key, value]) => {
+    const single = searchParam(value);
+    if (single && key !== "view") next.set(key, single);
+  });
+  if (view === "list") next.set("view", "list");
+
+  const query = next.toString();
+  return query ? `/guests/crm/tasks?${query}` : "/guests/crm/tasks";
+}
+
 function resolveFilters(params: Awaited<SearchParams>): GuestCrmTaskFilters {
   const status = searchParam(params.status);
   const targetType = searchParam(params.targetType);
@@ -81,7 +111,8 @@ function resolveFilters(params: Awaited<SearchParams>): GuestCrmTaskFilters {
   const direction = searchParam(params.direction);
 
   return {
-    status: isStatus(status) ? status : "all",
+    // The board shows every status as a column, so it never filters by one.
+    status: resolveView(params) === "list" && isStatus(status) ? status : "all",
     assignedToUserId: searchParam(params.assignedToUserId),
     targetType: isTargetType(targetType) ? targetType : "all",
     search: searchParam(params.search)?.trim(),
@@ -173,8 +204,9 @@ export default async function GuestCrmTasksPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requirePageAccess("/guests/crm/tasks");
+  const user = await requirePageAccess("/guests/crm/tasks");
   const params = await searchParams;
+  const view = resolveView(params);
   const filters = resolveFilters(params);
   const [report, users] = await Promise.all([
     getGuestCrmTaskReport(filters),
@@ -201,9 +233,8 @@ export default async function GuestCrmTasksPage({
               Задачи CRM
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Полный рабочий журнал по задачам: контакты с группами,
-              CRM-гостями и гостями Langame, ответственные, дедлайны и статус
-              исполнения.
+              Кому из гостей позвонить или написать, кто это делает и к какому
+              сроку.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -229,27 +260,42 @@ export default async function GuestCrmTasksPage({
         </header>
 
         <section className="mt-6 grid gap-3 md:grid-cols-4">
-          <MetricCard title="Активные" value={report.summary.open + report.summary.inProgress} />
-          <MetricCard title="Просрочены" value={report.summary.overdue} tone="warn" />
+          <MetricCard
+            title="Активные"
+            value={report.summary.open + report.summary.inProgress}
+          />
+          <MetricCard
+            title="Просрочены"
+            value={report.summary.overdue}
+            tone="warn"
+          />
           <MetricCard title="Закрыты" value={report.summary.done} tone="good" />
-          <MetricCard title="Без ответственного" value={report.summary.withoutAssignee} />
+          <MetricCard
+            title="Без ответственного"
+            value={report.summary.withoutAssignee}
+          />
         </section>
 
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <form className="grid gap-3 lg:grid-cols-6" method="get">
-            <FilterField label="Статус">
-              <select
-                name="status"
-                defaultValue={report.status}
-                className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-              >
-                {Object.entries(statusLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </FilterField>
+            {view === "list" ? (
+              <input type="hidden" name="view" value="list" />
+            ) : null}
+            {view === "list" ? (
+              <FilterField label="Статус">
+                <select
+                  name="status"
+                  defaultValue={report.status}
+                  className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                >
+                  {Object.entries(statusLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </FilterField>
+            ) : null}
             <FilterField label="Ответственный">
               <select
                 name="assignedToUserId"
@@ -337,89 +383,154 @@ export default async function GuestCrmTasksPage({
           </form>
         </section>
 
-        <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="border-b border-zinc-200 px-4 py-4 dark:border-zinc-800">
+        <div className="mt-6 flex flex-wrap items-end justify-between gap-3">
+          <div>
             <h2 className="text-lg font-semibold">
               Задачи: {formatNumber(report.totalRows)}
             </h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              Показано {formatNumber(report.rows.length)} из{" "}
-              {formatNumber(report.totalRows)}.
-            </p>
+            {report.rows.length < report.totalRows ? (
+              <p className="mt-1 text-sm text-zinc-500">
+                Показано {formatNumber(report.rows.length)} из{" "}
+                {formatNumber(report.totalRows)}. Уточните фильтры, чтобы
+                увидеть остальные.
+              </p>
+            ) : null}
           </div>
-          <div className="hidden min-w-full overflow-x-auto lg:block">
-            <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
-              <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/70">
-                <tr>
-                  <th className="px-4 py-3 text-left font-semibold">Задача</th>
-                  <th className="px-4 py-3 text-left font-semibold">Цель</th>
-                  <th className="px-4 py-3 text-left font-semibold">Статус</th>
-                  <th className="px-4 py-3 text-left font-semibold">Ответственный</th>
-                  <th className="px-4 py-3 text-left font-semibold">Дедлайн</th>
-                  <th className="px-4 py-3 text-left font-semibold">Создана</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-900">
-                {report.rows.map((task) => (
-                  <tr key={task.id}>
-                    <td className="max-w-sm px-4 py-4 align-top">
-                      <p className="font-semibold">{task.title}</p>
-                      {task.description ? (
-                        <p className="mt-1 line-clamp-4 whitespace-pre-line break-words text-xs leading-5 text-zinc-500">
-                          {task.description}
-                        </p>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-4 align-top">
-                      <p className="font-medium">{taskTarget(task)}</p>
-                      <p className="mt-1 text-xs text-zinc-500">{taskTargetType(task)}</p>
-                    </td>
-                    <td className="px-4 py-4 align-top">
-                      <span className={statusBadgeClass(task.status)}>
-                        {taskStatusLabels[task.status]}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 align-top">
-                      {task.assignedToUser?.displayName ?? "не назначен"}
-                    </td>
-                    <td className="px-4 py-4 align-top">{formatDateTime(task.dueAt)}</td>
-                    <td className="px-4 py-4 align-top">{formatDateTime(task.createdAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="grid gap-3 p-3 lg:hidden">
-            {report.rows.map((task) => (
-              <article
-                key={task.id}
-                className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40"
+          <nav
+            aria-label="Вид"
+            className="inline-flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900"
+          >
+            {(
+              [
+                ["board", "Доска"],
+                ["list", "Список"],
+              ] as const
+            ).map(([value, label]) => (
+              <Link
+                key={value}
+                href={viewHref(params, value)}
+                aria-current={view === value ? "page" : undefined}
+                className={`rounded-md px-3 py-1.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                  view === value
+                    ? "bg-white text-zinc-950 shadow-sm dark:bg-zinc-950 dark:text-white"
+                    : "text-zinc-600 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white"
+                }`}
               >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-semibold">{task.title}</p>
-                    <p className="mt-1 text-sm text-zinc-500">
-                      {taskTargetType(task)}: {taskTarget(task)}
-                    </p>
-                  </div>
-                  <span className={statusBadgeClass(task.status)}>
-                    {taskStatusLabels[task.status]}
-                  </span>
-                </div>
-                {task.description ? (
-                  <p className="mt-3 whitespace-pre-line break-words text-sm leading-5 text-zinc-500">
-                    {task.description}
-                  </p>
-                ) : null}
-                <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-                  <InfoTerm title="Ответственный" value={task.assignedToUser?.displayName ?? "не назначен"} />
-                  <InfoTerm title="Дедлайн" value={formatDateTime(task.dueAt)} />
-                  <InfoTerm title="Создана" value={formatDateTime(task.createdAt)} />
-                </dl>
-              </article>
+                {label}
+              </Link>
             ))}
-          </div>
-        </section>
+          </nav>
+        </div>
+
+        {view === "board" ? (
+          <section className="mt-4">
+            <CrmTaskBoard
+              tasks={report.rows}
+              users={users}
+              canManage={can(user, "manage_communications")}
+            />
+          </section>
+        ) : (
+          <section className="mt-4 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="hidden min-w-full overflow-x-auto lg:block">
+              <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
+                <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/70">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-semibold">
+                      Задача
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold">Цель</th>
+                    <th className="px-4 py-3 text-left font-semibold">
+                      Статус
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold">
+                      Ответственный
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold">
+                      Дедлайн
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold">
+                      Создана
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-900">
+                  {report.rows.map((task) => (
+                    <tr key={task.id}>
+                      <td className="max-w-sm px-4 py-4 align-top">
+                        <p className="font-semibold">{task.title}</p>
+                        {task.description ? (
+                          <p className="mt-1 line-clamp-4 whitespace-pre-line break-words text-xs leading-5 text-zinc-500">
+                            {task.description}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-4 align-top">
+                        <p className="font-medium">{taskTarget(task)}</p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {taskTargetType(task)}
+                        </p>
+                      </td>
+                      <td className="px-4 py-4 align-top">
+                        <span className={statusBadgeClass(task.status)}>
+                          {taskStatusLabels[task.status]}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 align-top">
+                        {task.assignedToUser?.displayName ?? "не назначен"}
+                      </td>
+                      <td className="px-4 py-4 align-top">
+                        {formatDateTime(task.dueAt)}
+                      </td>
+                      <td className="px-4 py-4 align-top">
+                        {formatDateTime(task.createdAt)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="grid gap-3 p-3 lg:hidden">
+              {report.rows.map((task) => (
+                <article
+                  key={task.id}
+                  className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold">{task.title}</p>
+                      <p className="mt-1 text-sm text-zinc-500">
+                        {taskTargetType(task)}: {taskTarget(task)}
+                      </p>
+                    </div>
+                    <span className={statusBadgeClass(task.status)}>
+                      {taskStatusLabels[task.status]}
+                    </span>
+                  </div>
+                  {task.description ? (
+                    <p className="mt-3 whitespace-pre-line break-words text-sm leading-5 text-zinc-500">
+                      {task.description}
+                    </p>
+                  ) : null}
+                  <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+                    <InfoTerm
+                      title="Ответственный"
+                      value={task.assignedToUser?.displayName ?? "не назначен"}
+                    />
+                    <InfoTerm
+                      title="Дедлайн"
+                      value={formatDateTime(task.dueAt)}
+                    />
+                    <InfoTerm
+                      title="Создана"
+                      value={formatDateTime(task.createdAt)}
+                    />
+                  </dl>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     </main>
   );

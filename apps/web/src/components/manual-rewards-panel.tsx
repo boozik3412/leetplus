@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { MoreFields } from "@/components/more-fields";
 import type { GuestDashboardRow, GuestListResponse } from "@/lib/guests";
 import type {
   MarketingMission,
@@ -418,30 +419,14 @@ export function ManualRewardsPanel({
             >
               Награда
             </label>
-            <div className="flex gap-2">
-              <input
-                id="reward-label"
-                value={rewardLabel}
-                onChange={(event) => setRewardLabel(event.target.value)}
-                placeholder="500 бонусов"
-                maxLength={160}
-                className={`${fieldClass} min-w-0 flex-1`}
-              />
-              <div className="w-24 shrink-0">
-                <input
-                  aria-label="Стоимость награды для сети, ₽"
-                  inputMode="decimal"
-                  value={rewardAmount}
-                  onChange={(event) => setRewardAmount(event.target.value)}
-                  placeholder="₽"
-                  className={fieldClass}
-                />
-              </div>
-            </div>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              В поле справа можно указать, во сколько рублей обходится награда.
-              Это нужно для учёта бюджета, поле необязательное.
-            </p>
+            <input
+              id="reward-label"
+              value={rewardLabel}
+              onChange={(event) => setRewardLabel(event.target.value)}
+              placeholder="500 бонусов"
+              maxLength={160}
+              className={fieldClass}
+            />
           </div>
 
           <div className="space-y-1.5">
@@ -473,6 +458,32 @@ export function ManualRewardsPanel({
               className={fieldClass}
             />
           </div>
+
+          <MoreFields>
+            <div className="space-y-1.5">
+              <label
+                htmlFor="reward-amount"
+                className="text-sm font-semibold text-zinc-800 dark:text-zinc-100"
+              >
+                Во сколько обходится сети, ₽
+              </label>
+              <input
+                id="reward-amount"
+                inputMode="decimal"
+                value={rewardAmount}
+                onChange={(event) => setRewardAmount(event.target.value)}
+                placeholder="Например, 300"
+                aria-describedby="reward-amount-help"
+                className={fieldClass}
+              />
+              <p
+                id="reward-amount-help"
+                className="text-xs text-zinc-500 dark:text-zinc-400"
+              >
+                Нужно для учёта бюджета на награды. Можно не заполнять.
+              </p>
+            </div>
+          </MoreFields>
 
           {error ? (
             <p

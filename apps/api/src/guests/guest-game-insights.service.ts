@@ -7,6 +7,16 @@ import {
   type GuestGameProfileFacts,
   type GuestInsightPeriod,
 } from './guest-insights';
+import {
+  GUEST_GAME_DETAIL_EXTERNAL_MATCH_ROWS,
+  externalMatchStoreIds,
+  externalMatchTotals,
+  toExternalAccountDetail,
+  toExternalMatchDetail,
+  type GuestGameExternalAccountDetail,
+  type GuestGameExternalMatchDetail,
+  type GuestGameExternalMatchTotals,
+} from './guest-game-external-projection';
 
 /**
  * Read-only projection of the guest game module for the guest CRM contour.
@@ -81,8 +91,22 @@ export type GuestGameEventDetail = {
   sourceName: string | null;
 };
 
+export type GuestGameConnectionDetail = {
+  profileId: string;
+  status: string;
+  displayName: string | null;
+  tutorialSeenVersion: number;
+  tutorialSeenAt: string | null;
+};
+
 export type GuestGameDetail = {
   profile: GuestGameProfileBrief;
+  connection: GuestGameConnectionDetail;
+  /** Steam/FACEIT accounts, active first; unlinked ones kept for history. */
+  externalAccounts: GuestGameExternalAccountDetail[];
+  /** Latest FACEIT match journal rows with the decision for missions. */
+  externalMatches: GuestGameExternalMatchDetail[];
+  externalMatchTotals: GuestGameExternalMatchTotals;
   rewards: GuestGameRewardDetail[];
   wallet: GuestGameWalletItemDetail[];
   ledger: GuestGameLedgerDetail[];
@@ -208,7 +232,12 @@ export class GuestGameInsightsService {
   ): Promise<GuestGameDetail | null> {
     const profile = await this.prisma.guestGameProfile.findFirst({
       where: { tenantId, guestId },
-      select: profileSelect,
+      select: {
+        ...profileSelect,
+        displayName: true,
+        tutorialSeenVersion: true,
+        tutorialSeenAt: true,
+      },
     });
 
     if (!profile) {
@@ -221,7 +250,16 @@ export class GuestGameInsightsService {
       period,
       now,
     );
-    const [rewards, wallet, ledger, events, totals] = await Promise.all([
+    const [
+      rewards,
+      wallet,
+      ledger,
+      events,
+      totals,
+      externalAccounts,
+      externalMatches,
+      externalMatchGroups,
+    ] = await Promise.all([
       this.prisma.guestGameReward.findMany({
         where: { tenantId, profileId: profile.id },
         orderBy: [{ qualifiedAt: 'desc' }, { id: 'desc' }],
@@ -320,10 +358,92 @@ export class GuestGameInsightsService {
           where: { tenantId, profileId: profile.id, source: 'GAMIFICATION' },
         }),
       ]),
+      this.prisma.guestGameExternalAccount.findMany({
+        where: { tenantId, profileId: profile.id },
+        // 'ACTIVE' sorts before 'UNLINKED'.
+        orderBy: [{ status: 'asc' }, { linkedAt: 'desc' }, { id: 'desc' }],
+        take: 6,
+        select: {
+          id: true,
+          provider: true,
+          externalId: true,
+          nickname: true,
+          status: true,
+          linkedAt: true,
+          unlinkedAt: true,
+          lookupStatus: true,
+          checkedAt: true,
+          matchesSyncedUntil: true,
+          details: true,
+        },
+      }),
+      this.prisma.guestGameExternalMatch.findMany({
+        where: { tenantId, profileId: profile.id },
+        orderBy: [{ finishedAt: 'desc' }, { id: 'desc' }],
+        take: GUEST_GAME_DETAIL_EXTERNAL_MATCH_ROWS,
+        select: {
+          id: true,
+          provider: true,
+          game: true,
+          externalMatchId: true,
+          startedAt: true,
+          finishedAt: true,
+          decision: true,
+          decisionReason: true,
+          stats: true,
+          eventId: true,
+          reviewedAt: true,
+        },
+      }),
+      this.prisma.guestGameExternalMatch.groupBy({
+        by: ['decision'],
+        where: { tenantId, profileId: profile.id },
+        _count: { _all: true },
+      }),
     ]);
+    const matchStoreIds = externalMatchStoreIds(externalMatches);
+    const matchEventIds = externalMatches
+      .map((match) => match.eventId)
+      .filter((id): id is string => Boolean(id));
+    const [matchStores, matchEvents] = await Promise.all([
+      matchStoreIds.length
+        ? this.prisma.store.findMany({
+            where: { tenantId, id: { in: matchStoreIds } },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve<Array<{ id: string; name: string }>>([]),
+      matchEventIds.length
+        ? this.prisma.guestGameEvent.findMany({
+            where: {
+              tenantId,
+              profileId: profile.id,
+              id: { in: matchEventIds },
+            },
+            select: { id: true, xpDelta: true },
+          })
+        : Promise.resolve<Array<{ id: string; xpDelta: number }>>([]),
+    ]);
+    const storeNames = new Map(
+      matchStores.map((store) => [store.id, store.name] as const),
+    );
+    const eventXp = new Map(
+      matchEvents.map((event) => [event.id, event.xpDelta] as const),
+    );
 
     return {
       profile: brief,
+      connection: {
+        profileId: profile.id,
+        status: profile.status,
+        displayName: profile.displayName,
+        tutorialSeenVersion: profile.tutorialSeenVersion,
+        tutorialSeenAt: iso(profile.tutorialSeenAt),
+      },
+      externalAccounts: externalAccounts.map(toExternalAccountDetail),
+      externalMatches: externalMatches.map((match) =>
+        toExternalMatchDetail(match, storeNames, eventXp),
+      ),
+      externalMatchTotals: externalMatchTotals(externalMatchGroups),
       rewards: rewards.map((reward) => ({
         id: reward.id,
         status: reward.status,

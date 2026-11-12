@@ -375,8 +375,73 @@ export type GuestGameEventDetail = {
   sourceName: string | null;
 };
 
+export type GuestGameConnectionDetail = {
+  profileId: string;
+  status: string;
+  displayName: string | null;
+  tutorialSeenVersion: number;
+  tutorialSeenAt: string | null;
+};
+
+export type GuestGameExternalAccountDetail = {
+  id: string;
+  provider: string;
+  status: string;
+  nickname: string | null;
+  externalId: string;
+  profileUrl: string | null;
+  linkedAt: string;
+  unlinkedAt: string | null;
+  lookupStatus: string;
+  lookupError: string | null;
+  checkedAt: string | null;
+  matchesSyncedUntil: string | null;
+  faceitLevel: number | null;
+  faceitElo: number | null;
+  steamBans: { vac: boolean; gameBans: number; community: boolean } | null;
+};
+
+export type GuestGameExternalMatchDetail = {
+  id: string;
+  provider: string;
+  game: string;
+  externalMatchId: string;
+  matchUrl: string | null;
+  startedAt: string | null;
+  finishedAt: string;
+  decision: string;
+  decisionReason: string | null;
+  storeName: string | null;
+  map: string | null;
+  result: "WIN" | "LOSS" | null;
+  kills: number | null;
+  deaths: number | null;
+  assists: number | null;
+  kd: number | null;
+  adr: number | null;
+  hsPercent: number | null;
+  mvps: number | null;
+  aces: number | null;
+  eventId: string | null;
+  xpDelta: number | null;
+  reviewedAt: string | null;
+};
+
+export type GuestGameExternalMatchTotals = {
+  total: number;
+  counted: number;
+  outsideSession: number;
+  notEligible: number;
+  review: number;
+};
+
 export type GuestGameDetail = {
   profile: GuestGameProfileBrief;
+  /** Absent in responses of releases before 12.11.2026. */
+  connection?: GuestGameConnectionDetail;
+  externalAccounts?: GuestGameExternalAccountDetail[];
+  externalMatches?: GuestGameExternalMatchDetail[];
+  externalMatchTotals?: GuestGameExternalMatchTotals;
   rewards: GuestGameRewardDetail[];
   wallet: GuestGameWalletItemDetail[];
   ledger: GuestGameLedgerDetail[];

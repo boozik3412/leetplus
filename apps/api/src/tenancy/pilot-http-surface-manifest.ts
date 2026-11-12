@@ -258,6 +258,7 @@ const definitions: readonly ControllerDefinition[] = [
           ':id/floor-plan',
           ':id/floor-plan/live',
           ':id/floor-plan/live/seats/:number',
+          ':id/floor-plan/live/attention',
         ],
       ],
       ['PATCH', [':id/floor-plan']],
@@ -265,6 +266,13 @@ const definitions: readonly ControllerDefinition[] = [
     overrides: {
       'PATCH /stores/:id/floor-plan': { profile: 'NETWORK_VERIFIED' },
     },
+  },
+  {
+    source: 'src/stores/store-guest-alerts.controller.ts',
+    prefix: '/stores',
+    module: 'COMMUNICATIONS',
+    profile: 'STORES_VERIFIED',
+    routes: [['POST', [':id/floor-plan/live/alerts/:ticketId']]],
   },
   {
     source: 'src/reports/reports.controller.ts',

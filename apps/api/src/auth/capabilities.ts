@@ -602,12 +602,16 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_communications',
     'manage_communications',
     'approve_guest_game_rewards',
+    'view_club_scheme',
+    'view_guests',
     ...shiftStaffCapabilities,
   ],
   [UserRole.CLUB_ADMINISTRATOR]: [
     'view_communications',
     'manage_communications',
     'approve_guest_game_rewards',
+    'view_club_scheme',
+    'view_guests',
     ...shiftStaffCapabilities,
   ],
   [UserRole.TRAINEE]: [
@@ -746,8 +750,19 @@ function capabilityMatches(
 export function isClubSchemeReadPath(path: string) {
   return (
     path === '/stores/floor-plans' ||
-    /^\/stores\/[^/]+\/floor-plan(?:\/live(?:\/seats\/[^/]+)?)?$/.test(path)
+    /^\/stores\/[^/]+\/floor-plan(?:\/live(?:\/seats\/[^/]+|\/attention)?)?$/.test(
+      path,
+    )
   );
+}
+
+/**
+ * «Иду» / «Решено» on a guest message from «Схема клуба»: answering guests,
+ * so `manage_communications`; the service also requires the scheme and the
+ * «Гости» section.
+ */
+export function isClubSchemeAlertPath(path: string) {
+  return /^\/stores\/[^/]+\/floor-plan\/live\/alerts\/[^/]+$/.test(path);
 }
 
 export function hasCapability(

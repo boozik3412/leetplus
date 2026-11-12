@@ -16,7 +16,7 @@ import {
 } from "react";
 import { ProfileIcon, PencilIcon } from "../icons";
 import { formatNumber, clampPercent } from "../format";
-import { GameRatingTeaser } from "../../game-rating-client";
+import { GameRatingSlice } from "../../game-rating-client";
 import Link from "next/link";
 import { rewardWalletItemStatusHint } from "../rewards/wallet";
 import { GuestMissionPreview } from "@/components/guest-mission-preview";
@@ -249,7 +249,7 @@ export function PlayerProfilePanel({
           </span>
           <span>до следующего {formatNumber(levelProgress.remaining)} XP</span>
         </div>
-        <GameRatingTeaser />
+        <GameRatingSlice />
       </div>
 
       {rewardWallet.pendingCount > 0 ? (

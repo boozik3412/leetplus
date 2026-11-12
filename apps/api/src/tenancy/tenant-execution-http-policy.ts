@@ -70,6 +70,12 @@ const EXACT_MODULE_REQUESTS: ReadonlyArray<{
     path: /^\/guests\/crm\/tasks\/[^/]+$/,
     module: TenantModule.COMMUNICATIONS,
   },
+  {
+    // «Иду» / «Решено» on a guest message from «Схема клуба».
+    method: 'POST',
+    path: /^\/stores\/[^/]+\/floor-plan\/live\/alerts\/[^/]+$/,
+    module: TenantModule.COMMUNICATIONS,
+  },
 ];
 
 const OUTBOUND_REQUESTS: readonly RegExp[] = [

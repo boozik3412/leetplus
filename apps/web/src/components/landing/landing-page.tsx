@@ -1,7 +1,9 @@
 /* eslint-disable @next/next/no-img-element -- static decorative landing art, sized by CSS */
-import Link from "next/link";
+import { LandingAnalytics } from "@/components/landing/landing-analytics";
+import { LANDING_GOALS } from "@/components/landing/landing-config";
 import { LandingPricing } from "@/components/landing/landing-pricing";
 import { LandingStart } from "@/components/landing/landing-start";
+import { LandingStickyCta } from "@/components/landing/landing-sticky-cta";
 import { landingCss } from "@/components/landing/landing-styles";
 
 type LandingPageProps = {
@@ -10,6 +12,9 @@ type LandingPageProps = {
   gameLabel: string;
 };
 
+// Exits to the cabinet and the guest game are plain <a> on purpose: a full page
+// load leaves the homepage analytics behind instead of carrying it, via
+// client-side navigation, into the login and guest screens.
 export function LandingPage({ cabinetHref, gameHref, gameLabel }: LandingPageProps) {
   return (
     <div className="lpl">
@@ -24,8 +29,9 @@ export function LandingPage({ cabinetHref, gameHref, gameLabel }: LandingPagePro
       <a href="#pricing" style={{ color: "#C9DADE" }}>Тарифы</a>
       </nav>
       <div style={{ display: "flex", alignItems: "center", gap: "10px", marginLeft: "auto" }}>
-      <Link href={cabinetHref} className="lp-ghost" style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "14px", fontWeight: "700", color: "#C9DADE", padding: "10px 14px", border: "1px solid #2A4450", borderRadius: "12px", minHeight: "44px", boxSizing: "border-box" }}><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg><span className="hide-sm">Кабинет клуба</span></Link>
-      <Link href={gameHref} className="guest-cta" style={{ display: "inline-flex", alignItems: "center", gap: "10px", background: "linear-gradient(135deg, #F3D38E, #D0AA6C)", color: "#1A1306", padding: "8px 16px 8px 10px", borderRadius: "12px", minHeight: "44px", boxSizing: "border-box" }}><span style={{ width: "30px", height: "30px", borderRadius: "8px", background: "rgba(26, 19, 6, 0.14)", display: "flex", alignItems: "center", justifyContent: "center" }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"></path><path d="M7 6h10a5 5 0 0 1 4.9 6l-.6 3.2a3 3 0 0 1-5.3 1.3L14.5 15h-5L8 16.5a3 3 0 0 1-5.3-1.3L2.1 12A5 5 0 0 1 7 6z"></path></svg></span><span style={{ display: "flex", flexDirection: "column", lineHeight: "1.1" }}><span className="hide-sm" style={{ fontSize: "11px", fontWeight: "800", letterSpacing: "1.2px", textTransform: "uppercase", opacity: "0.75" }}>Я гость клуба</span><span style={{ fontSize: "15px", fontWeight: "800" }}>{gameLabel}</span></span></Link>
+      <a href="#start" data-goal={LANDING_GOALS.startCta} data-goal-place="header" className="lp-btn hide-sm" style={{ display: "inline-flex", alignItems: "center", fontSize: "14px", fontWeight: "800", color: "#050B10", background: "linear-gradient(90deg, #83E4EC, #B8F1F5)", padding: "10px 16px", borderRadius: "12px", minHeight: "44px", boxSizing: "border-box" }}>Подключить клуб</a>
+      <a href={cabinetHref} data-goal={LANDING_GOALS.cabinet} data-goal-place="header" className="lp-ghost" style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "14px", fontWeight: "700", color: "#C9DADE", padding: "10px 14px", border: "1px solid #2A4450", borderRadius: "12px", minHeight: "44px", boxSizing: "border-box" }}><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg><span className="hide-sm">Кабинет клуба</span></a>
+      <a href={gameHref} data-goal={LANDING_GOALS.guestPlay} data-goal-place="header" className="guest-cta" style={{ display: "inline-flex", alignItems: "center", gap: "10px", background: "linear-gradient(135deg, #F3D38E, #D0AA6C)", color: "#1A1306", padding: "8px 16px 8px 10px", borderRadius: "12px", minHeight: "44px", boxSizing: "border-box" }}><span style={{ width: "30px", height: "30px", borderRadius: "8px", background: "rgba(26, 19, 6, 0.14)", display: "flex", alignItems: "center", justifyContent: "center" }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"></path><path d="M7 6h10a5 5 0 0 1 4.9 6l-.6 3.2a3 3 0 0 1-5.3 1.3L14.5 15h-5L8 16.5a3 3 0 0 1-5.3-1.3L2.1 12A5 5 0 0 1 7 6z"></path></svg></span><span style={{ display: "flex", flexDirection: "column", lineHeight: "1.1" }}><span className="hide-sm" style={{ fontSize: "11px", fontWeight: "800", letterSpacing: "1.2px", textTransform: "uppercase", opacity: "0.75" }}>Я гость клуба</span><span style={{ fontSize: "15px", fontWeight: "800" }}>{gameLabel}</span></span></a>
       </div>
       </div>
       </header>
@@ -38,15 +44,16 @@ export function LandingPage({ cabinetHref, gameHref, gameLabel }: LandingPagePro
       <h1 style={{ margin: "0", fontFamily: "var(--lpl-display)", fontWeight: "800", fontSize: "clamp(36px, 5.4vw, 66px)", lineHeight: "1.06", letterSpacing: "-1px" }}>Клуб, в который <span className="shine">хочется вернуться</span></h1>
       <p style={{ margin: "0", fontSize: "20px", lineHeight: "1.6", color: "#C9DADE", maxWidth: "560px" }}>Кейсы, задания, боевой пропуск и рейтинг превращают обычный вечер за ПК в игру вокруг вашего клуба. Гость приходит за наградой, а вы видите, сколько это принесло.</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "14px" }}>
-      <a href="#start" className="lp-btn" style={{ display: "inline-flex", alignItems: "center", gap: "10px", background: "linear-gradient(90deg, #83E4EC, #B8F1F5)", color: "#050B10", fontWeight: "800", fontSize: "17px", padding: "18px 28px", borderRadius: "14px", boxShadow: "0 10px 30px rgba(131, 228, 236, 0.3)" }}>2 месяца бесплатно
+      <a href="#start" data-goal={LANDING_GOALS.startCta} data-goal-place="hero" className="lp-btn" style={{ display: "inline-flex", alignItems: "center", gap: "10px", background: "linear-gradient(90deg, #83E4EC, #B8F1F5)", color: "#050B10", fontWeight: "800", fontSize: "17px", padding: "18px 28px", borderRadius: "14px", boxShadow: "0 10px 30px rgba(131, 228, 236, 0.3)" }}>2 месяца бесплатно
       <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></a>
       <a href="#emotions" className="lp-ghost" style={{ display: "inline-flex", alignItems: "center", gap: "10px", color: "#F3FAFA", fontWeight: "700", fontSize: "17px", padding: "18px 24px", borderRadius: "14px", border: "1px solid rgba(201, 218, 222, 0.35)" }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>Как это выглядит</a>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "28px", marginTop: "8px" }}>
-      <div><p style={{ margin: "0", fontFamily: "var(--lpl-display)", fontWeight: "700", fontSize: "30px", color: "#83E4EC" }}>+1,8</p><p style={{ margin: "0", fontSize: "14px", color: "#A9BEC4" }}>дня визитов на игрока</p></div>
-      <div><p style={{ margin: "0", fontFamily: "var(--lpl-display)", fontWeight: "700", fontSize: "30px", color: "#D0AA6C" }}>+665 ₽</p><p style={{ margin: "0", fontSize: "14px", color: "#A9BEC4" }}>трат за 28 дней</p></div>
+      <div><p style={{ margin: "0", fontFamily: "var(--lpl-display)", fontWeight: "700", fontSize: "30px", color: "#83E4EC" }}>+1,8</p><p style={{ margin: "0", fontSize: "14px", color: "#A9BEC4" }}>дня визитов за 28 дней</p></div>
+      <div><p style={{ margin: "0", fontFamily: "var(--lpl-display)", fontWeight: "700", fontSize: "30px", color: "#D0AA6C" }}>+665 ₽</p><p style={{ margin: "0", fontSize: "14px", color: "#A9BEC4" }}>трат игрока за 28 дней</p></div>
       <div><p style={{ margin: "0", fontFamily: "var(--lpl-display)", fontWeight: "700", fontSize: "30px", color: "#F3FAFA" }}>0</p><p style={{ margin: "0", fontSize: "14px", color: "#A9BEC4" }}>приложений гостю ставить</p></div>
       </div>
+      <p style={{ margin: "-12px 0 0", fontSize: "14px", color: "#8EA6AD", maxWidth: "560px" }}>Пилот в сети из 4 клубов, октябрь 2026: игроки в сравнении с похожими гостями без игры.</p>
       </div>
       <div style={{ flex: "1 1 520px", minWidth: "0", position: "relative", padding: "24px 0" }}>
       <div className="glow-pulse" aria-hidden="true" style={{ position: "absolute", inset: "10% 10%", borderRadius: "50%", background: "radial-gradient(circle, rgba(208, 170, 108, 0.45) 0%, rgba(208, 170, 108, 0) 70%)" }}></div>
@@ -74,7 +81,7 @@ export function LandingPage({ cabinetHref, gameHref, gameLabel }: LandingPagePro
       <h2 style={{ margin: "0", fontFamily: "var(--lpl-display)", fontWeight: "700", fontSize: "clamp(30px, 4vw, 50px)", lineHeight: "1.1" }}>Гость возвращается не за скидкой. <span style={{ color: "#83E4EC" }}>За эмоцией.</span></h2>
       <p style={{ margin: "0", color: "#A9BEC4", fontSize: "19px" }}>Три чувства, которые знакомы каждому геймеру, теперь работают на ваш клуб.</p>
       </div>
-      <Link href={gameHref} className="guest-cta" style={{ flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "10px", background: "linear-gradient(135deg, #F3D38E, #D0AA6C)", color: "#1A1306", fontWeight: "800", fontSize: "17px", padding: "16px 24px", borderRadius: "14px", minHeight: "52px", boxSizing: "border-box" }}><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"></path><path d="M7 6h10a5 5 0 0 1 4.9 6l-.6 3.2a3 3 0 0 1-5.3 1.3L14.5 15h-5L8 16.5a3 3 0 0 1-5.3-1.3L2.1 12A5 5 0 0 1 7 6z"></path></svg>Войти в игровой модуль<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></Link>
+      <a href={gameHref} data-goal={LANDING_GOALS.guestPlay} data-goal-place="game-module" className="guest-cta" style={{ flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "10px", background: "linear-gradient(135deg, #F3D38E, #D0AA6C)", color: "#1A1306", fontWeight: "800", fontSize: "17px", padding: "16px 24px", borderRadius: "14px", minHeight: "52px", boxSizing: "border-box" }}><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"></path><path d="M7 6h10a5 5 0 0 1 4.9 6l-.6 3.2a3 3 0 0 1-5.3 1.3L14.5 15h-5L8 16.5a3 3 0 0 1-5.3-1.3L2.1 12A5 5 0 0 1 7 6z"></path></svg>Войти в игровой модуль<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></a>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))", gap: "22px" }}>
       <article className="emo ph-thrill" style={{ position: "relative", overflow: "hidden", minHeight: "520px", borderRadius: "26px", border: "1px solid #1E313A", display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: "32px", gap: "12px" }}>
@@ -203,13 +210,16 @@ export function LandingPage({ cabinetHref, gameHref, gameLabel }: LandingPagePro
 
       <LandingStart />
 
-      <footer style={{ padding: "40px 24px", borderTop: "1px solid #12232B", background: "#050B10" }}>
+      <footer className="lp-footer" style={{ padding: "40px 24px", borderTop: "1px solid #12232B", background: "#050B10" }}>
       <div style={{ maxWidth: "1240px", margin: "0 auto", display: "flex", flexWrap: "wrap", gap: "24px 40px", alignItems: "center", justifyContent: "space-between", fontSize: "14px", color: "#8EA6AD" }}>
       <img src="/landing/logo.svg" alt="LeetPlus" style={{ height: "24px", width: "auto" }} />
       <p style={{ margin: "0" }}>Оператор сайта ООО «ЛИТ» · ОГРН 1231800017063 · ИНН 1800006677 · КПП 180001001</p>
-      <nav aria-label="Ссылки в подвале" style={{ display: "flex", flexWrap: "wrap", gap: "20px" }}><Link href={cabinetHref} style={{ color: "#A9BEC4" }}>Кабинет клуба</Link><Link href={gameHref} style={{ color: "#A9BEC4" }}>Играть в клубе</Link></nav>
+      <nav aria-label="Ссылки в подвале" style={{ display: "flex", flexWrap: "wrap", gap: "20px" }}><a href={cabinetHref} data-goal={LANDING_GOALS.cabinet} data-goal-place="footer" style={{ color: "#A9BEC4" }}>Кабинет клуба</a><a href={gameHref} data-goal={LANDING_GOALS.guestPlay} data-goal-place="footer" style={{ color: "#A9BEC4" }}>Играть в клубе</a></nav>
       </div>
       </footer>
+
+      <LandingStickyCta />
+      <LandingAnalytics />
     </div>
   );
 }

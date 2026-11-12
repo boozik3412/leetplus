@@ -1,3 +1,5 @@
+import { LANDING_GOALS, SALES_EMAIL, SALES_PHONE } from "@/components/landing/landing-config";
+
 /**
  * Telegram account that receives club-owner requests from the homepage.
  * Change it here only: the CTA link and the visible handle both use it.
@@ -44,8 +46,15 @@ export function LandingStart() {
       <li key={perk} style={{ display: "flex", gap: "12px", alignItems: "center", fontSize: "16px", fontWeight: "700" }}><span aria-hidden="true" style={{ flex: "none", width: "26px", height: "26px", borderRadius: "8px", background: "rgba(131, 228, 236, 0.12)", border: "1px solid rgba(131, 228, 236, 0.4)", color: "#83E4EC", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}>✓</span>{perk}</li>
     ))}
     </ul>
-    <a href={salesTelegramHref} target="_blank" rel="noopener noreferrer" className="lp-btn guest-cta" style={{ font: "inherit", fontWeight: "800", fontSize: "18px", display: "flex", alignItems: "center", justifyContent: "center", gap: "12px", background: "linear-gradient(90deg, #83E4EC 0%, #C6F6F9 100%)", color: "#050B10", textDecoration: "none", borderRadius: "16px", padding: "20px", minHeight: "56px", boxShadow: "0 16px 40px rgba(131, 228, 236, 0.25)" }}><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M21.94 4.6 18.8 19.4c-.24 1.05-.86 1.31-1.74.82l-4.8-3.54-2.32 2.23c-.26.26-.47.47-.97.47l.35-4.9 8.92-8.06c.39-.35-.08-.54-.6-.19L6.62 13.17 1.88 11.7c-1.03-.32-1.05-1.03.22-1.53L20.6 3.04c.86-.32 1.61.19 1.34 1.56Z"></path></svg>Написать в Telegram</a>
+    <a href={salesTelegramHref} target="_blank" rel="noopener noreferrer" data-goal={LANDING_GOALS.leadTelegram} data-goal-place="start" className="lp-btn guest-cta" style={{ font: "inherit", fontWeight: "800", fontSize: "18px", display: "flex", alignItems: "center", justifyContent: "center", gap: "12px", background: "linear-gradient(90deg, #83E4EC 0%, #C6F6F9 100%)", color: "#050B10", textDecoration: "none", borderRadius: "16px", padding: "20px", minHeight: "56px", boxShadow: "0 16px 40px rgba(131, 228, 236, 0.25)" }}><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M21.94 4.6 18.8 19.4c-.24 1.05-.86 1.31-1.74.82l-4.8-3.54-2.32 2.23c-.26.26-.47.47-.97.47l.35-4.9 8.92-8.06c.39-.35-.08-.54-.6-.19L6.62 13.17 1.88 11.7c-1.03-.32-1.05-1.03.22-1.53L20.6 3.04c.86-.32 1.61.19 1.34 1.56Z"></path></svg>Написать в Telegram</a>
     <p style={{ margin: "-8px 0 0", textAlign: "center", fontSize: "14px", color: "#8EA6AD" }}>или найдите в Telegram <span style={{ color: "#C9DADE", fontWeight: "700" }}>@{SALES_TELEGRAM_USERNAME}</span></p>
+    {SALES_PHONE || SALES_EMAIL ? (
+      <p style={{ margin: "-12px 0 0", textAlign: "center", fontSize: "15px", color: "#8EA6AD", display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "4px 16px" }}>
+      <span style={{ flexBasis: "100%" }}>Нет Telegram под рукой?</span>
+      {SALES_PHONE ? <a href={`tel:${SALES_PHONE.replace(/[^+\d]/g, "")}`} data-goal={LANDING_GOALS.leadPhone} data-goal-place="start" style={{ fontWeight: "700", whiteSpace: "nowrap" }}>{SALES_PHONE}</a> : null}
+      {SALES_EMAIL ? <a href={`mailto:${SALES_EMAIL}`} data-goal={LANDING_GOALS.leadEmail} data-goal-place="start" style={{ fontWeight: "700", whiteSpace: "nowrap" }}>{SALES_EMAIL}</a> : null}
+      </p>
+    ) : null}
     </div>
     </div>
     </section>

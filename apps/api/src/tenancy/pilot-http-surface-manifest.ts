@@ -251,7 +251,15 @@ const definitions: readonly ControllerDefinition[] = [
     module: 'ASSORTMENT',
     profile: 'STORES_VERIFIED',
     routes: [
-      ['GET', ['floor-plans', ':id/floor-plan', ':id/floor-plan/live']],
+      [
+        'GET',
+        [
+          'floor-plans',
+          ':id/floor-plan',
+          ':id/floor-plan/live',
+          ':id/floor-plan/live/seats/:number',
+        ],
+      ],
       ['PATCH', [':id/floor-plan']],
     ],
     overrides: {

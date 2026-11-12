@@ -39,7 +39,9 @@ describe('StoreFloorPlanLiveService', () => {
     guestGameSeason: { findMany: jest.Mock };
     guestGamePromoCard: { findMany: jest.Mock };
     guestGameReward: { count: jest.Mock };
+    guest: { findFirst: jest.Mock };
   };
+  let guests: { getGuest: jest.Mock };
   let scope: { resolveRequestedStoreIds: jest.Mock };
   let settings: { resolveTenantAccess: jest.Mock };
   let client: Record<string, jest.Mock>;
@@ -129,6 +131,57 @@ describe('StoreFloorPlanLiveService', () => {
           ),
       },
     };
+    prisma.guest = {
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ id: 'guest-501', isStaff: false }),
+    };
+    guests = {
+      getGuest: jest.fn().mockResolvedValue({
+        id: 'guest-501',
+        displayName: 'Иван П.',
+        segment: 'repeat',
+        rfm: { segment: 'LOYAL' },
+        crmStatus: 'NONE',
+        crmNote: null,
+        nextAction: null,
+        insertedAt: '2025-03-02T10:00:00.000Z',
+        visitsDays: 48,
+        playHours: 120.5,
+        ltv: { totalRevenue: 31400 },
+        recommendedAction: {
+          key: 'REMIND_REWARD',
+          label: 'Напомнить о награде',
+          reason: '2 награды ждут',
+        },
+        // The running session is already synced: it is not the previous visit.
+        sessions: [
+          {
+            startedAt: '2026-11-10T07:10:00.000Z',
+            storeName: 'APEKS',
+          },
+          {
+            startedAt: '2026-11-07T12:00:00.000Z',
+            storeName: '1337 Пушкинская',
+          },
+        ],
+        transactions: [
+          { balance: null, bonusBalance: null },
+          { balance: 240, bonusBalance: 85 },
+        ],
+        gameAccess: 'AVAILABLE',
+        gameProfile: {
+          level: 7,
+          xp: 3320,
+          xpToNextLevel: 180,
+          pendingRewards: 2,
+          rewardsExpiringSoon: 1,
+          nearestRewardExpiresAt: '2026-11-11T10:00:00.000Z',
+          rewardsPaidTotal: 5,
+        },
+        gamification: null,
+      }),
+    };
     scope = {
       resolveRequestedStoreIds: jest
         .fn()
@@ -147,6 +200,10 @@ describe('StoreFloorPlanLiveService', () => {
       }),
     };
     client = {
+      listTariffTypeGroups: jest.fn().mockResolvedValue([
+        { id: 1, name: 'Поминутный' },
+        { id: 9, name: '3 часа' },
+      ]),
       listPcTypesInClubs: jest.fn().mockResolvedValue([
         { id: 1, name: 'Standart' },
         { id: 2, name: 'VIP' },
@@ -182,6 +239,7 @@ describe('StoreFloorPlanLiveService', () => {
           UUID: 'AAA-17',
           date_start: '2026-11-10 12:10:00',
           date_stop: '2026-11-10 15:10:00',
+          packet: 9,
         },
         // finished on PC 40
         {
@@ -255,6 +313,7 @@ describe('StoreFloorPlanLiveService', () => {
           date: '2026-11-10 11:00:00',
           list_goods_id: 5,
           list_clubs_id: 2,
+          real_guest_id: 501,
           working_shift_id: 900,
           price_sale: 120,
           count: 2,
@@ -296,6 +355,7 @@ describe('StoreFloorPlanLiveService', () => {
           date: '2026-11-10 09:00:00',
           list_goods_id: 6,
           list_clubs_id: 2,
+          real_guest_id: 501,
           working_shift_id: 899,
           price_sale: 90,
           count: 1,
@@ -308,6 +368,7 @@ describe('StoreFloorPlanLiveService', () => {
       scope as never,
       settings as never,
       client as never,
+      guests as never,
     );
   });
 
@@ -518,6 +579,97 @@ describe('StoreFloorPlanLiveService', () => {
         total: 1450.5,
       }),
     );
+  });
+
+  it('shows the guest at a busy computer to a role that sees guests', async () => {
+    const seat = await service.getSeat('store-kh', 17, user, NOW);
+
+    expect(seat).toMatchObject({
+      storeId: 'store-kh',
+      number: 17,
+      busy: true,
+      guestAccess: 'AVAILABLE',
+      session: {
+        startedAt: '2026-11-10T07:10:00.000Z',
+        endsAt: '2026-11-10T10:10:00.000Z',
+        tariff: '3 часа',
+      },
+    });
+    const [guestQuery] = prisma.guest.findFirst.mock.calls[0] as [
+      { where: Record<string, unknown> },
+    ];
+    expect(guestQuery.where).toEqual({
+      tenantId: 'tenant-demo',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: '46.langamepro.ru',
+      externalGuestId: '501',
+    });
+    expect(guests.getGuest).toHaveBeenCalledWith(user, 'guest-501');
+    expect(seat.guest).toMatchObject({
+      id: 'guest-501',
+      displayName: 'Иван П.',
+      visitsDays: 48,
+      totalRevenue: 31400,
+      previousVisit: {
+        at: '2026-11-07T12:00:00.000Z',
+        storeName: '1337 Пушкинская',
+      },
+      balance: 240,
+      bonusBalance: 85,
+      recommendedAction: { key: 'REMIND_REWARD' },
+      game: { level: 7, pendingRewards: 2 },
+    });
+    // Only this guest's purchases of the open shift.
+    expect(seat.guest?.purchases).toEqual([
+      {
+        at: '2026-11-10T06:00:00.000Z',
+        title: 'Red Bull 0,25',
+        category: 'Энергетики',
+        quantity: 2,
+        sum: 240,
+      },
+    ]);
+    // The club view does not carry guests.
+    const view = await service.get('store-kh', user, NOW);
+    expect(JSON.stringify(view)).not.toContain('501');
+  });
+
+  it('shows only the session to a role without the guests section', async () => {
+    const manager: AuthenticatedUser = {
+      ...user,
+      role: UserRole.STANDARDS_MANAGER,
+      permissions: ['view_club_scheme'],
+    };
+    const seat = await service.getSeat('store-kh', 17, manager, NOW);
+
+    expect(seat.guestAccess).toBe('NO_CAPABILITY');
+    expect(seat.session?.tariff).toBe('3 часа');
+    expect(seat.guest).toBeNull();
+    expect(prisma.guest.findFirst).not.toHaveBeenCalled();
+    expect(guests.getGuest).not.toHaveBeenCalled();
+  });
+
+  it('has no session for a free computer', async () => {
+    const seat = await service.getSeat('store-kh', 40, user, NOW);
+
+    expect(seat).toEqual({
+      storeId: 'store-kh',
+      number: 40,
+      busy: false,
+      session: null,
+      guestAccess: 'AVAILABLE',
+      guest: null,
+    });
+  });
+
+  it('keeps the session when the guest is not loaded yet', async () => {
+    prisma.guest.findFirst.mockResolvedValue(null);
+    client.listTariffTypeGroups.mockRejectedValue(new Error('timeout'));
+    const seat = await service.getSeat('store-kh', 17, user, NOW);
+
+    expect(seat.busy).toBe(true);
+    expect(seat.session?.tariff).toBeNull();
+    expect(seat.guest).toBeNull();
   });
 
   it.each([

@@ -1,6 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { IntegrationProvider, Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { hasCapability } from '../auth/capabilities';
+import { GuestsService } from '../guests/guests.service';
 import { parseLangameDate } from '../integrations/langame-date';
 import { LangameClient } from '../integrations/langame.client';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
@@ -10,6 +12,7 @@ import type {
   LangamePcTypeInClub,
   LangamePcTypeLink,
   LangameProductExpense,
+  LangameTariffTypeGroup,
   LangameWorkingShift,
 } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -85,6 +88,71 @@ export type StoreFloorPlanLiveView = {
   warnings: string[];
 };
 
+/** The guest at a busy computer, for roles that see the «Гости» section. */
+export type StoreFloorPlanSeatGuest = {
+  id: string;
+  displayName: string;
+  isStaff: boolean;
+  segment: string;
+  rfmSegment: string;
+  crmStatus: string;
+  crmNote: string | null;
+  nextAction: string | null;
+  /** First seen in Langame. */
+  since: string | null;
+  visitsDays: number;
+  playHours: number;
+  totalRevenue: number;
+  previousVisit: { at: string; storeName: string | null } | null;
+  balance: number | null;
+  bonusBalance: number | null;
+  recommendedAction: { key: string; label: string; reason: string } | null;
+  /** What this guest bought at this club in the shift (or today). */
+  purchases: StoreFloorPlanLivePurchase[];
+  gameAccess: 'AVAILABLE' | 'NO_CAPABILITY';
+  game: {
+    level: number;
+    xp: number;
+    xpToNextLevel: number;
+    pendingRewards: number;
+    rewardsExpiringSoon: number;
+    nearestRewardExpiresAt: string | null;
+    rewardsPaidTotal: number;
+  } | null;
+};
+
+/** One computer of the floor plan with its current session. */
+export type StoreFloorPlanSeatView = {
+  storeId: string;
+  number: number;
+  busy: boolean;
+  session: {
+    startedAt: string;
+    endsAt: string | null;
+    /** Langame tariff (package) name, when the session runs on one. */
+    tariff: string | null;
+  } | null;
+  /** NO_CAPABILITY: the viewer does not see the «Гости» section. */
+  guestAccess: 'AVAILABLE' | 'NO_CAPABILITY';
+  /** `null` also when the guest is not loaded from Langame yet. */
+  guest: StoreFloorPlanSeatGuest | null;
+};
+
+type LiveSeat = {
+  guestId: string | null;
+  startedAt: Date;
+  stop: Date | null;
+  packet: string | null;
+};
+
+/** The club view plus what a click on one computer needs, never sent whole. */
+type LiveSnapshot = {
+  view: StoreFloorPlanLiveView;
+  domain: string | null;
+  seats: Map<number, LiveSeat>;
+  purchasesByGuest: Map<string, LangameProductExpense[]>;
+};
+
 type LiveStore = {
   id: string;
   tenantId: string;
@@ -116,6 +184,9 @@ const SHIFT_PAGES = 3;
 const EXPENSE_PAGE_LIMIT = 500;
 const EXPENSE_PAGES = 10;
 const PURCHASES_SHOWN = 8;
+const GUEST_PURCHASES_SHOWN = 10;
+/** Tariff names change rarely. */
+const TARIFF_TTL_MS = 10 * 60_000;
 const GAME_ITEMS_SHOWN = 30;
 /** Rewards that really went to a guest (not cancelled or expired). */
 const COUNTED_REWARD_STATUSES = ['PENDING', 'APPROVED', 'PAID'];
@@ -203,17 +274,16 @@ function round2(value: number) {
 @Injectable()
 export class StoreFloorPlanLiveService {
   private readonly logger = new Logger(StoreFloorPlanLiveService.name);
-  private readonly snapshots = new Map<
-    string,
-    CacheEntry<StoreFloorPlanLiveView>
-  >();
+  private readonly snapshots = new Map<string, CacheEntry<LiveSnapshot>>();
   private readonly catalogs = new Map<string, CacheEntry<PcCatalog>>();
+  private readonly tariffs = new Map<string, CacheEntry<Map<string, string>>>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly freshStoreScopeService: FreshStoreScopeService,
     private readonly langameSettingsService: LangameSettingsService,
     private readonly langameClient: LangameClient,
+    private readonly guestsService: GuestsService,
   ) {}
 
   async get(
@@ -221,6 +291,55 @@ export class StoreFloorPlanLiveService {
     user: AuthenticatedUser,
     now = new Date(),
   ): Promise<StoreFloorPlanLiveView> {
+    const { snapshot } = await this.snapshot(storeId, user, now);
+    return snapshot.view;
+  }
+
+  /**
+   * One computer of the club: its session and, for roles that see the
+   * «Гости» section, the guest at it. The session comes from the same shared
+   * Langame read as the club view; the guest is read from the LeetPlus guest
+   * card by the Langame guest id of the session.
+   */
+  async getSeat(
+    storeId: string,
+    number: number,
+    user: AuthenticatedUser,
+    now = new Date(),
+  ): Promise<StoreFloorPlanSeatView> {
+    const { store, snapshot } = await this.snapshot(storeId, user, now);
+    const seat = snapshot.seats.get(number) ?? null;
+    const guestAccess = canViewGuests(user) ? 'AVAILABLE' : 'NO_CAPABILITY';
+    const result: StoreFloorPlanSeatView = {
+      storeId: store.id,
+      number,
+      busy: seat !== null,
+      session: null,
+      guestAccess,
+      guest: null,
+    };
+    if (!seat) return result;
+
+    const [tariff, guest] = await Promise.all([
+      this.tariffName(store, snapshot.domain, seat.packet, now),
+      guestAccess === 'AVAILABLE' && seat.guestId && snapshot.domain
+        ? this.seatGuest(store, snapshot, seat, seat.guestId, user)
+        : null,
+    ]);
+    result.session = {
+      startedAt: seat.startedAt.toISOString(),
+      endsAt: seat.stop ? seat.stop.toISOString() : null,
+      tariff,
+    };
+    result.guest = guest;
+    return result;
+  }
+
+  private async snapshot(
+    storeId: string,
+    user: AuthenticatedUser,
+    now: Date,
+  ): Promise<{ store: LiveStore; snapshot: LiveSnapshot }> {
     const scope = await this.freshStoreScopeService.resolveRequestedStoreIds(
       user,
       [storeId],
@@ -243,9 +362,131 @@ export class StoreFloorPlanLiveService {
     }
 
     const key = `${store.tenantId}:${store.id}`;
-    return this.cached(this.snapshots, key, SNAPSHOT_TTL_MS, now, () =>
-      this.buildSnapshot(store, now),
+    const snapshot = await this.cached(
+      this.snapshots,
+      key,
+      SNAPSHOT_TTL_MS,
+      now,
+      () => this.buildSnapshot(store, now),
     );
+    return { store, snapshot };
+  }
+
+  private async seatGuest(
+    store: LiveStore,
+    snapshot: LiveSnapshot,
+    seat: LiveSeat,
+    langameGuestId: string,
+    user: AuthenticatedUser,
+  ): Promise<StoreFloorPlanSeatGuest | null> {
+    const found = await this.prisma.guest.findFirst({
+      where: {
+        tenantId: store.tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: snapshot.domain,
+        externalGuestId: langameGuestId,
+      },
+      select: { id: true, isStaff: true },
+    });
+    if (!found) return null;
+
+    const detail = await this.guestsService.getGuest(user, found.id);
+    const sessionStart = seat.startedAt.getTime();
+    const previous = detail.sessions.find((session) => {
+      const at = session.startedAt ? Date.parse(session.startedAt) : NaN;
+      // The running session may already be synced: skip it.
+      return Number.isFinite(at) && at < sessionStart - 60_000;
+    });
+    const money = detail.transactions.find(
+      (row) => row.balance !== null || row.bonusBalance !== null,
+    );
+    const rows = snapshot.purchasesByGuest.get(langameGuestId) ?? [];
+    const shown = rows.slice(0, GUEST_PURCHASES_SHOWN);
+    const names = await this.productNames(store, snapshot.domain ?? '', shown);
+    const profile = detail.gamification?.profile ?? detail.gameProfile ?? null;
+
+    return {
+      id: detail.id,
+      displayName: detail.displayName,
+      isStaff: found.isStaff,
+      segment: detail.segment,
+      rfmSegment: detail.rfm.segment,
+      crmStatus: detail.crmStatus,
+      crmNote: detail.crmNote,
+      nextAction: detail.nextAction,
+      since: detail.insertedAt,
+      visitsDays: detail.visitsDays,
+      playHours: detail.playHours,
+      totalRevenue: detail.ltv.totalRevenue,
+      previousVisit: previous?.startedAt
+        ? { at: previous.startedAt, storeName: previous.storeName }
+        : null,
+      balance: money?.balance ?? null,
+      bonusBalance: money?.bonusBalance ?? null,
+      recommendedAction:
+        detail.recommendedAction.key === 'OBSERVE' ||
+        !detail.recommendedAction.label
+          ? null
+          : {
+              key: detail.recommendedAction.key,
+              label: detail.recommendedAction.label,
+              reason: detail.recommendedAction.reason,
+            },
+      purchases: shown.map((row) => this.purchase(store, row, names)),
+      gameAccess: detail.gameAccess,
+      game: profile
+        ? {
+            level: profile.level,
+            xp: profile.xp,
+            xpToNextLevel: profile.xpToNextLevel,
+            pendingRewards: profile.pendingRewards,
+            rewardsExpiringSoon: profile.rewardsExpiringSoon,
+            nearestRewardExpiresAt: profile.nearestRewardExpiresAt,
+            rewardsPaidTotal: profile.rewardsPaidTotal,
+          }
+        : null,
+    };
+  }
+
+  /** Name of the Langame tariff a session runs on; `null` if unknown. */
+  private async tariffName(
+    store: LiveStore,
+    domain: string | null,
+    packet: string | null,
+    now: Date,
+  ) {
+    if (!packet || !domain) return null;
+    try {
+      const access = await this.langameSettingsService.resolveTenantAccess(
+        store.tenantId,
+      );
+      const source = access.sources.find((item) => item.domain === domain);
+      if (!source) return null;
+      const names = await this.cached(
+        this.tariffs,
+        `${store.tenantId}:${domain}`,
+        TARIFF_TTL_MS,
+        now,
+        async () => {
+          const rows: LangameTariffTypeGroup[] =
+            await this.langameClient.listTariffTypeGroups(
+              source.baseUrl,
+              access.apiKey,
+            );
+          const map = new Map<string, string>();
+          for (const row of rows) {
+            const id = text(row.id);
+            const name = text(row.name);
+            if (id && name) map.set(id, name);
+          }
+          return map;
+        },
+      );
+      return names.get(packet) ?? null;
+    } catch (error: unknown) {
+      this.logFailure('tariffs', { status: 'rejected', reason: error });
+      return null;
+    }
   }
 
   private cached<T>(
@@ -306,21 +547,26 @@ export class StoreFloorPlanLiveService {
     store: LiveStore,
     now: Date,
     view: StoreFloorPlanLiveView,
-  ): Promise<StoreFloorPlanLiveView> {
+  ): Promise<LiveSnapshot> {
     const game = await this.loadGame(
       store,
       localMidnight(now, store.timeZone),
       now,
     );
-    return game.ok
-      ? { ...view, game: game.value }
-      : { ...view, warnings: [...view.warnings, GAME_WARNING] };
+    return {
+      view: game.ok
+        ? { ...view, game: game.value }
+        : { ...view, warnings: [...view.warnings, GAME_WARNING] },
+      domain: null,
+      seats: new Map(),
+      purchasesByGuest: new Map(),
+    };
   }
 
   private async buildSnapshot(
     store: LiveStore,
     now: Date,
-  ): Promise<StoreFloorPlanLiveView> {
+  ): Promise<LiveSnapshot> {
     if (store.externalProvider !== IntegrationProvider.LANGAME) {
       return this.withGame(
         store,
@@ -407,6 +653,7 @@ export class StoreFloorPlanLiveService {
 
     const clubUuids = new Set(catalog?.pcs.map((pc) => pc.uuid) ?? []);
     const busyByUuid = new Map<string, Date | null>();
+    const latestByUuid = new Map<string, LiveSeat>();
     const guestIds = new Set<string>();
     for (const session of sessions ?? []) {
       if (!clubUuids.has(session.uuid)) continue;
@@ -418,7 +665,24 @@ export class StoreFloorPlanLiveService {
       ) {
         busyByUuid.set(session.uuid, session.stop);
       }
+      const latest = latestByUuid.get(session.uuid);
+      if (!latest || session.start > latest.startedAt) {
+        latestByUuid.set(session.uuid, {
+          guestId: session.guestId,
+          startedAt: session.start,
+          stop: session.stop,
+          packet: session.packet,
+        });
+      }
       guestIds.add(session.guestKey);
+    }
+    const seats = new Map<number, LiveSeat>();
+    for (const pc of catalog?.pcs ?? []) {
+      const seat = latestByUuid.get(pc.uuid);
+      const number = seatNumberFromName(pc.name);
+      if (seat && number !== null && !seats.has(number)) {
+        seats.set(number, seat);
+      }
     }
 
     const pcs: StoreFloorPlanLivePc[] = (catalog?.pcs ?? []).map((pc) => {
@@ -473,7 +737,7 @@ export class StoreFloorPlanLiveService {
 
     const nothingRead = !catalog && !sessions && !revenueResult.ok;
 
-    return {
+    const view: StoreFloorPlanLiveView = {
       storeId: store.id,
       status: nothingRead ? 'UNAVAILABLE' : 'LIVE',
       generatedAt: now.toISOString(),
@@ -495,6 +759,14 @@ export class StoreFloorPlanLiveService {
       purchases: goodsResult.ok ? goodsResult.value.purchases : null,
       game: gameResult.ok ? gameResult.value : null,
       warnings,
+    };
+    return {
+      view,
+      domain: source.domain,
+      seats,
+      purchasesByGuest: goodsResult.ok
+        ? goodsResult.value.byGuest
+        : new Map<string, LangameProductExpense[]>(),
     };
   }
 
@@ -598,18 +870,29 @@ export class StoreFloorPlanLiveService {
     timeZone: string | null,
     now: Date,
   ) {
-    const active: Array<{ uuid: string; stop: Date | null; guestKey: string }> =
-      [];
+    const active: Array<{
+      uuid: string;
+      start: Date;
+      stop: Date | null;
+      guestKey: string;
+      guestId: string | null;
+      packet: string | null;
+    }> = [];
     for (const row of rows) {
       const uuid = text(row.UUID)?.toUpperCase();
       const start = parseLangameDate(text(row.date_start), timeZone);
       if (!uuid || !start || start > now) continue;
       const stop = parseLangameDate(text(row.date_stop), timeZone);
       if (stop && stop <= now) continue;
+      const guestId = text(row.real_guest_id) ?? text(row.guest_id);
+      const packet = text(row.packet);
       active.push({
         uuid,
+        start,
         stop,
-        guestKey: text(row.real_guest_id) ?? text(row.guest_id) ?? `pc:${uuid}`,
+        guestKey: guestId ?? `pc:${uuid}`,
+        guestId,
+        packet: packet && packet !== '0' ? packet : null,
       });
     }
     return active;
@@ -763,24 +1046,30 @@ export class StoreFloorPlanLiveService {
     return {
       total: goods.total,
       count: goods.count,
-      purchases: goods.latest.map((row) => {
-        const id = text(row.list_goods_id);
-        const known = id ? names.get(id) : undefined;
-        const quantity = amount(row.count);
-        return {
-          at:
-            parseLangameDate(text(row.date), store.timeZone)?.toISOString() ??
-            null,
-          title:
-            text(row.name) ??
-            text(row.goods_name) ??
-            known?.name ??
-            (id ? `Товар №${id}` : 'Товар'),
-          category: known?.category ?? null,
-          quantity: Math.round(quantity * 1000) / 1000,
-          sum: round2(amount(row.price_sale) * quantity),
-        };
-      }),
+      purchases: goods.latest.map((row) => this.purchase(store, row, names)),
+      byGuest: goods.byGuest,
+    };
+  }
+
+  private purchase(
+    store: Pick<LiveStore, 'timeZone'>,
+    row: LangameProductExpense,
+    names: Map<string, { name: string; category: string | null }>,
+  ): StoreFloorPlanLivePurchase {
+    const id = text(row.list_goods_id);
+    const known = id ? names.get(id) : undefined;
+    const quantity = amount(row.count);
+    return {
+      at:
+        parseLangameDate(text(row.date), store.timeZone)?.toISOString() ?? null,
+      title:
+        text(row.name) ??
+        text(row.goods_name) ??
+        known?.name ??
+        (id ? `Товар №${id}` : 'Товар'),
+      category: known?.category ?? null,
+      quantity: Math.round(quantity * 1000) / 1000,
+      sum: round2(amount(row.price_sale) * quantity),
     };
   }
 
@@ -1008,10 +1297,28 @@ export class StoreFloorPlanLiveService {
       (left, right) =>
         right.at - left.at || amount(right.row.id) - amount(left.row.id),
     );
+    const byGuest = new Map<string, LangameProductExpense[]>();
+    for (const { row } of sold) {
+      const guestId = text(row.real_guest_id) ?? text(row.guest_id);
+      if (!guestId) continue;
+      const list = byGuest.get(guestId);
+      if (list) list.push(row);
+      else byGuest.set(guestId, [row]);
+    }
     return {
       total: round2(total),
       count: Math.round(count),
       latest: sold.slice(0, PURCHASES_SHOWN).map((entry) => entry.row),
+      byGuest,
     };
   }
+}
+
+/** Same rule as the «Гости» section: the guest card is `view_guests`. */
+function canViewGuests(user: AuthenticatedUser) {
+  return (
+    user.isPlatformAdmin ||
+    user.role === 'OWNER' ||
+    hasCapability(user, 'view_guests')
+  );
 }

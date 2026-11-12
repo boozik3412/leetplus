@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { LANDING_GOALS } from "@/components/landing/landing-config";
 
 // Monthly price per club, rubles: one module / two modules / all three.
 const PRICES_SMALL_CLUB = [5500, 8900, 10900] as const; // up to 30 PCs
@@ -40,7 +41,7 @@ export function LandingPricing() {
     <p style={{ margin: "0", fontSize: "20px", fontWeight: "800" }}>Игровой модуль первые 2 месяца бесплатно</p>
     <p style={{ margin: "0", color: "#A9BEC4", fontSize: "15px" }}>Подключаем, настраиваем сценарии под ваш клуб и каждый месяц присылаем отчёт «Эффект игры». Решение о продлении принимаете по цифрам.</p>
     </div>
-    <a href="#start" className="lp-btn" style={{ flex: "0 0 auto", display: "inline-flex", alignItems: "center", gap: "8px", background: "#F3FAFA", color: "#050B10", fontWeight: "800", padding: "14px 20px", borderRadius: "14px", minHeight: "44px", boxSizing: "border-box" }}>Начать бесплатно<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></a>
+    <a href="#start" data-goal={LANDING_GOALS.startCta} data-goal-place="pricing-free" className="lp-btn" style={{ flex: "0 0 auto", display: "inline-flex", alignItems: "center", gap: "8px", background: "#F3FAFA", color: "#050B10", fontWeight: "800", padding: "14px 20px", borderRadius: "14px", minHeight: "44px", boxSizing: "border-box" }}>Начать бесплатно<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></a>
     </div>
     </div>
 
@@ -62,7 +63,7 @@ export function LandingPricing() {
     <li style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#83E4EC" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none", marginTop: "2px" }}><path d="M5 12l5 5L20 7"></path></svg>Настройка под ваш клуб</li>
     <li style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#83E4EC" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none", marginTop: "2px" }}><path d="M5 12l5 5L20 7"></path></svg>Помощь на запуске</li>
     </ul>
-    <a href="#start" className="lp-ghost" style={{ marginTop: "auto", textAlign: "center", color: "#F3FAFA", fontWeight: "700", padding: "15px", borderRadius: "14px", border: "1px solid #2A4450", minHeight: "44px", boxSizing: "border-box" }}>Выбрать модуль</a>
+    <a href="#start" data-goal={LANDING_GOALS.startCta} data-goal-place="pricing-one" className="lp-ghost" style={{ marginTop: "auto", textAlign: "center", color: "#F3FAFA", fontWeight: "700", padding: "15px", borderRadius: "14px", border: "1px solid #2A4450", minHeight: "44px", boxSizing: "border-box" }}>Выбрать модуль</a>
     </article>
 
     <article className="plan" style={{ background: "#0D1A21", border: "1px solid #1E313A", borderRadius: "24px", padding: "30px", display: "flex", flexDirection: "column", gap: "20px" }}>
@@ -84,7 +85,7 @@ export function LandingPricing() {
     <li style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#83E4EC" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none", marginTop: "2px" }}><path d="M5 12l5 5L20 7"></path></svg>Данные модулей в одном кабинете</li>
     <li style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#83E4EC" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none", marginTop: "2px" }}><path d="M5 12l5 5L20 7"></path></svg>Права сотрудников по ролям</li>
     </ul>
-    <a href="#start" className="lp-ghost" style={{ marginTop: "auto", textAlign: "center", color: "#F3FAFA", fontWeight: "700", padding: "15px", borderRadius: "14px", border: "1px solid #2A4450", minHeight: "44px", boxSizing: "border-box" }}>Выбрать два</a>
+    <a href="#start" data-goal={LANDING_GOALS.startCta} data-goal-place="pricing-two" className="lp-ghost" style={{ marginTop: "auto", textAlign: "center", color: "#F3FAFA", fontWeight: "700", padding: "15px", borderRadius: "14px", border: "1px solid #2A4450", minHeight: "44px", boxSizing: "border-box" }}>Выбрать два</a>
     </article>
 
     <article className="plan" style={{ position: "relative", background: "linear-gradient(165deg, #10343B 0%, #0D1A21 55%)", border: "1px solid #83E4EC", borderRadius: "24px", padding: "30px", display: "flex", flexDirection: "column", gap: "20px", boxShadow: "0 0 0 4px rgba(131, 228, 236, 0.08), 0 30px 80px rgba(131, 228, 236, 0.16)" }}>
@@ -107,7 +108,7 @@ export function LandingPricing() {
     <li style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#83E4EC" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none", marginTop: "2px" }}><path d="M5 12l5 5L20 7"></path></svg>Дашборд сети и ежедневный отчёт в Telegram</li>
     <li style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#83E4EC" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none", marginTop: "2px" }}><path d="M5 12l5 5L20 7"></path></svg>Отчёт «Эффект игры» каждый месяц</li>
     </ul>
-    <a href="#start" className="lp-btn" style={{ marginTop: "auto", textAlign: "center", background: "#83E4EC", color: "#050B10", fontWeight: "800", padding: "15px", borderRadius: "14px", minHeight: "44px", boxSizing: "border-box" }}>Подключить всё</a>
+    <a href="#start" data-goal={LANDING_GOALS.startCta} data-goal-place="pricing-all" className="lp-btn" style={{ marginTop: "auto", textAlign: "center", background: "#83E4EC", color: "#050B10", fontWeight: "800", padding: "15px", borderRadius: "14px", minHeight: "44px", boxSizing: "border-box" }}>Подключить всё</a>
     </article>
     </div>
 

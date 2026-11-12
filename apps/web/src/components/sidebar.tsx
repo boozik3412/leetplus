@@ -84,13 +84,16 @@ type OpenNavGroupsState = {
 
 // Seven labelled groups agreed on 11.11.2026 (UX plan, step 1.4). Page
 // addresses and access rules are unchanged; only the menu is regrouped.
+// 12.11.2026 («Уборка»): the full guest report, the communications hub,
+// categories, product utilities, the staff overview and the commercial audit
+// left the menu (pages stay reachable from their sections); «Чек-листы» got
+// their own item.
 const navGroups: NavGroup[] = [
   {
     title: "Гости и возврат",
     icon: "guests",
     items: [
       { href: "/guests", label: "Клиентская база" },
-      { href: "/guests/report", label: "Полный отчёт и группы" },
       {
         href: "/guests/crm",
         label: "CRM и задачи",
@@ -99,7 +102,6 @@ const navGroups: NavGroup[] = [
       { href: "/marketing", label: "Кампании" },
       { href: "/marketing/missions", label: "Акции" },
       { href: "/marketing/promo-bundles", label: "Промо-наборы" },
-      { href: "/communications", label: "Рассылки" },
       { href: "/support", label: "Обращения гостей" },
     ],
   },
@@ -127,21 +129,23 @@ const navGroups: NavGroup[] = [
       { href: "/assortment/dashboard", label: "Обзор ассортимента" },
       { href: "/products", label: "Товары" },
       { href: "/products/order", label: "Заказ товаров" },
-      { href: "/categories", label: "Категории" },
       { href: "/suppliers", label: "Поставщики" },
       { href: "/import", label: "Импорт" },
-      { href: "/utilities", label: "Утилиты" },
     ],
   },
   {
     title: "Персонал",
     icon: "staff",
     items: [
-      { href: "/staff", label: "Обзор персонала" },
       { href: "/staff/directory", label: "Сотрудники" },
       { href: "/staff/operations-dashboard", label: "Операционная дисциплина" },
       { href: "/staff/tasks", label: "Задачи и правила" },
-      { href: "/staff/shift-regulations", label: "Регламенты и чек-листы" },
+      {
+        href: "/staff/checklists",
+        label: "Чек-листы",
+        activePaths: ["/staff/checklist-templates"],
+      },
+      { href: "/staff/shift-regulations", label: "Регламенты смены" },
       { href: "/staff/training-courses", label: "Обучение и аттестации" },
       { href: "/staff/knowledge-base", label: "База знаний" },
       {
@@ -159,7 +163,6 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/reports/daily", label: "Отчёт за сутки" },
       { href: "/reports", label: "Отчёты по ассортименту" },
-      { href: "/commercial/audit", label: "Коммерческий аудит" },
     ],
   },
   {

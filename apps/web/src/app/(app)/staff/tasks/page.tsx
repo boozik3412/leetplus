@@ -531,9 +531,8 @@ export default async function StaffTasksPage({
               Операционные задачи
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Первый рабочий слой Stage 8: задачи для смен, клубов и
-              ответственных сотрудников. Чеклисты, регламенты и обучение будут
-              подключаться к этой очереди следующим шагом.
+              Задачи для смен, клубов и сотрудников: кто делает, к какому сроку
+              и что уже выполнено.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

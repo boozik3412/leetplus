@@ -4,7 +4,7 @@ import { ProductCreateForm } from "@/components/product-actions";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
 import { getCategories, getSuppliers } from "@/lib/catalog";
-import { can } from "@/lib/permissions";
+import { can, canAccessPath } from "@/lib/permissions";
 import { getProductCatalogSummary } from "@/lib/products";
 
 export default async function ProductsPage() {
@@ -140,6 +140,22 @@ export default async function ProductsPage() {
             description="Ручная обработка товарных документов и поступлений."
             action="Открыть поступления"
           />
+          {canAccessPath(user, "/categories") ? (
+            <HubLink
+              href="/categories"
+              title="Категории сети"
+              description="Единый список категорий для отчётов: объединение категорий клубов и импорт из Langame."
+              action="Открыть категории"
+            />
+          ) : null}
+          {canAccessPath(user, "/utilities") ? (
+            <HubLink
+              href="/utilities"
+              title="Дубли товаров"
+              description="Один товар под разными названиями в клубах: найти и объединить, чтобы отчёты не дробили продажи."
+              action="Найти дубли"
+            />
+          ) : null}
         </section>
 
         {canEditProducts ? (

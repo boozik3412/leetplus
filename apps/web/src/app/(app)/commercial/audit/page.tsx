@@ -132,14 +132,14 @@ export default async function CommercialAuditPage() {
           current="Коммерческий аудит"
           items={[
             { href: "/dashboard", label: "Дашборд" },
-            { href: "/commercial/audit", label: "Управление" },
+            { href: "/reports", label: "Отчёты" },
           ]}
         />
 
         <section className="flex flex-col gap-4 border-b border-zinc-200 pb-6 dark:border-zinc-800 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl space-y-3">
             <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-              Этап 6
+              Отчёты
             </p>
             <h1 className="text-3xl font-black tracking-normal text-zinc-950 dark:text-white sm:text-4xl">
               Коммерческий аудит сети
@@ -317,9 +317,9 @@ export default async function CommercialAuditPage() {
           </AuditPanel>
 
           <AuditPanel
-            title="Вывод для продажи"
-            eyebrow="что показать в демо"
-            summary="Эта страница - основа коммерческой демо-витрины: она переводит отчеты в деньги и действия."
+            title="Итог периода"
+            eyebrow="выручка и прибыль"
+            summary="Выручка, валовая прибыль и маржа сети за выбранный период."
             actionHref="/reports"
             actionLabel="Перейти к отчетам"
           >

@@ -45,6 +45,40 @@ function allReportsHref(scope: {
   return `/reports?${params}`;
 }
 
+const assortmentViews = [
+  ["actions", "Что сделать"],
+  ["analytics", "Динамика и прогноз"],
+  ["categories", "Категории"],
+] as const;
+
+type AssortmentView = (typeof assortmentViews)[number][0];
+
+function assortmentView(value: string | undefined): AssortmentView {
+  return value === "analytics" || value === "categories" ? value : "actions";
+}
+
+// Keeps every filter in the address and swaps only the tab, so a link to a
+// tab keeps the period, clubs and categories the owner picked.
+function assortmentViewHref(
+  params: { [key: string]: string | string[] | undefined },
+  view: AssortmentView,
+) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (key === "view" || value === undefined) {
+      continue;
+    }
+    for (const item of Array.isArray(value) ? value : [value]) {
+      query.append(key, item);
+    }
+  }
+  if (view !== "actions") {
+    query.set("view", view);
+  }
+  const search = query.toString();
+  return search ? `/assortment/dashboard?${search}` : "/assortment/dashboard";
+}
+
 function formatDate(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
 
@@ -84,6 +118,8 @@ export default async function AssortmentDashboardPage({
     skuGrouping:
       searchParam(params.skuGrouping) === "club" ? "club" : "network",
   } as const;
+
+  const view = assortmentView(searchParam(params.view));
 
   const [summary, stores, categories] = await Promise.all([
     getDashboardSummary(filters),
@@ -147,62 +183,82 @@ export default async function AssortmentDashboardPage({
           </div>
         </header>
 
-        <div className="mt-5" data-lp-veil-target="">
-          <AssortmentGrowthDashboard
-            summary={summary}
-            dashboardQuery={{
-              period: filters.period,
-              dateFrom: filters.dateFrom,
-              dateTo: filters.dateTo,
-              skuGrouping: filters.skuGrouping,
-              asOf: filters.asOf,
-            }}
-          />
-        </div>
-
-        <section
-          data-lp-veil-target=""
-          className="mt-8 border-t border-zinc-200 pt-7 dark:border-zinc-800"
+        <nav
+          aria-label="Разделы ассортимента"
+          className="mt-5 flex gap-1 overflow-x-auto border-b border-zinc-200 dark:border-zinc-800"
         >
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-600 dark:text-emerald-300">
-                Детализация
-              </p>
-              <h2 className="mt-2 text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-                Категории под выбранными фильтрами
-              </h2>
-              <p className="mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-                Сравните вклад категорий в оборот
-                {summary.marginCoverage.state === "READY"
-                  ? " и прибыль"
-                  : "; показатели прибыли появятся после полного покрытия себестоимости"}{" "}
-                после выбора клубов и периода.
-              </p>
-            </div>
+          {assortmentViews.map(([id, label]) => (
             <Link
-              href="/reports/assortment-matrix/table"
-              className="inline-flex min-h-10 w-fit items-center gap-2 text-sm font-semibold text-zinc-700 hover:text-emerald-700 dark:text-zinc-200 dark:hover:text-emerald-300"
+              key={id}
+              href={assortmentViewHref(params, id)}
+              aria-current={view === id ? "page" : undefined}
+              className={[
+                "-mb-px whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold transition",
+                view === id
+                  ? "border-emerald-500 text-zinc-950 dark:text-white"
+                  : "border-transparent text-zinc-500 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white",
+              ].join(" ")}
             >
-              Открыть матрицу
-              <ArrowRight
-                className="h-4 w-4"
-                weight="bold"
-                aria-hidden="true"
-              />
+              {label}
             </Link>
-          </div>
-          <div className="mt-4 grid gap-5 xl:grid-cols-2">
-            <CategoryShareChart
-              rows={summary.categoryAnalytics}
-              profitAvailable={summary.marginCoverage.state === "READY"}
+          ))}
+        </nav>
+
+        {view === "categories" ? null : (
+          <div className="mt-5" data-lp-veil-target="">
+            <AssortmentGrowthDashboard
+              section={view}
+              summary={summary}
+              dashboardQuery={{
+                period: filters.period,
+                dateFrom: filters.dateFrom,
+                dateTo: filters.dateTo,
+                skuGrouping: filters.skuGrouping,
+                asOf: filters.asOf,
+              }}
             />
-            <CategoryEfficiencyChart
-              rows={summary.categoryAnalytics}
-              profitAvailable={summary.marginCoverage.state === "READY"}
-            />
           </div>
-        </section>
+        )}
+
+        {view === "categories" ? (
+          <section data-lp-veil-target="" className="mt-6">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+                  Категории под выбранными фильтрами
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+                  Сравните вклад категорий в оборот
+                  {summary.marginCoverage.state === "READY"
+                    ? " и прибыль"
+                    : "; показатели прибыли появятся после полного покрытия себестоимости"}{" "}
+                  после выбора клубов и периода.
+                </p>
+              </div>
+              <Link
+                href="/reports/assortment-matrix/table"
+                className="inline-flex min-h-10 w-fit items-center gap-2 text-sm font-semibold text-zinc-700 hover:text-emerald-700 dark:text-zinc-200 dark:hover:text-emerald-300"
+              >
+                Открыть матрицу
+                <ArrowRight
+                  className="h-4 w-4"
+                  weight="bold"
+                  aria-hidden="true"
+                />
+              </Link>
+            </div>
+            <div className="mt-4 grid gap-5 xl:grid-cols-2">
+              <CategoryShareChart
+                rows={summary.categoryAnalytics}
+                profitAvailable={summary.marginCoverage.state === "READY"}
+              />
+              <CategoryEfficiencyChart
+                rows={summary.categoryAnalytics}
+                profitAvailable={summary.marginCoverage.state === "READY"}
+              />
+            </div>
+          </section>
+        ) : null}
       </div>
     </main>
   );

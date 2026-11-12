@@ -220,7 +220,7 @@ export function GuestGamificationStatisticsTab({ stores }: Props) {
               detail={`${formatNumber(data.summary.otherDeliveredRewards)} — не бонусы`}
             />
             <KpiCard
-              eyebrow="Подтверждено в ledger"
+              eyebrow="Подтверждено в журнале начислений"
               title="Бонусы"
               value={`${formatNumber(data.summary.confirmedBonuses.current)} Б`}
               comparison={data.summary.confirmedBonuses}

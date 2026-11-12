@@ -351,6 +351,12 @@ function DashboardFiltersContent({
       params.set("trend", trend);
     }
 
+    // Keep the open assortment tab («Динамика и прогноз», «Категории»).
+    const view = new URLSearchParams(window.location.search).get("view");
+    if (view) {
+      params.set("view", view);
+    }
+
     const target = `${pathname}?${params.toString()}`;
 
     // The same address: nothing will change, so there is nothing to wait for.

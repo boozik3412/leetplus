@@ -906,12 +906,12 @@ export function OrderPlanningTable({
               >
                 <Cell>
                   <span
-                    className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_META[row.status].className}`}
+                    className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_META[row.status].className}`}
                   >
                     {STATUS_META[row.status].label}
                   </span>
                   {grouping === "network" && row.clubs > 1 ? (
-                    <div className="mt-0.5 text-[11px] text-zinc-500">
+                    <div className="mt-0.5 text-xs text-zinc-500">
                       {
                         row.clubRows.filter(
                           (club) => club.status === row.status,
@@ -925,7 +925,7 @@ export function OrderPlanningTable({
                   <div className="font-medium text-zinc-950 dark:text-zinc-100">
                     {row.name}
                   </div>
-                  <div className="text-[11px] text-zinc-500">
+                  <div className="text-xs text-zinc-500">
                     {row.article}
                     {row.lowData ? (
                       <span

@@ -60,8 +60,9 @@
 }
 
 /*
- * Type scale of the staff cabinet (UX plan 2.5). Only the (app) shell opts
- * in, so the public guest game keeps its own sizes. Tailwind v4 utilities
+ * Type scale of the staff cabinet (UX plan 2.5). The (app) shell and the
+ * standalone staff tables (products, reports, guest report) opt in, so the
+ * public guest game keeps its own sizes. Tailwind v4 utilities
  * read these variables, so «text-xs» captions become 13 px; body text and
  * values stay at text-sm (14 px) and above.
  */

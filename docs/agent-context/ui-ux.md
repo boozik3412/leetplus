@@ -40,7 +40,9 @@ Decide which one you are building before choosing density, sizes and motion.
   fields folded under «Дополнительно», so a form shows 3–5 fields). Pure column
   logic is in `lib/board.ts`. Users: «Задачи CRM» (`/guests/crm/tasks`,
   «Доска / Список» in `?view=`), «Заявки» CRM, «Ручные награды» and «Задачи
-  персонала» (`/staff/tasks`, `?layout=list`). When a board has workflow rules
+  персонала» (`/staff/tasks`, `?layout=list`). «Чек-листы» open on «Сегодня»
+  for people who check others (card per person on shift, `lib/checklist-today.ts`;
+  the list is `?tab=all`, and any list filter or `runId` opens it). When a board has workflow rules
   (who may move a card where), keep them in one pure module that the buttons and
   the drop both use (`lib/staff-task-moves.ts`) and say in words why a drop was
   refused. Dates in client components render UTC on the server and local time

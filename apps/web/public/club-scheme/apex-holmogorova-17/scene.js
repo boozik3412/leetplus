@@ -1,5 +1,5 @@
 /* LeetPlus «Схема клуба»: 3D-сцена зала Apex · Холмогорова 17б (шаблон apex-holmogorova-17).
-   Данные: GET/PATCH /api/stores/:id/floor-plan и GET /api/stores/:id/floor-plan/live. */
+   Данные: GET/PATCH /api/stores/:id/floor-plan, GET /api/stores/:id/floor-plan/live и /live/seats/:n. */
 (() => {
 'use strict';
 /* ---------------- helpers ---------------- */
@@ -689,8 +689,8 @@ function occupy(s, until) {
   s.state = 'busy'; s.game = 'play'; s.until = until; s.left = until ? Math.max(0, (until - Date.now()) / 60000) : null;
   applySeat(s);
 }
-function free(s) { if (s.state === 'busy') startDeparture(s, s.guest); s.state = 'free'; s.guest = null; s.game = null; s.left = null; s.until = null; applySeat(s); }
-function setOff(s) { if (s.state === 'busy') startDeparture(s, s.guest); s.state = 'off'; s.guest = null; s.game = null; s.left = null; s.until = null; applySeat(s); }
+function free(s) { if (s.state === 'busy') startDeparture(s, s.guest); forgetSeatInfo(s); s.state = 'free'; s.guest = null; s.game = null; s.left = null; s.until = null; applySeat(s); }
+function setOff(s) { if (s.state === 'busy') startDeparture(s, s.guest); forgetSeatInfo(s); s.state = 'off'; s.guest = null; s.game = null; s.left = null; s.until = null; applySeat(s); }
 seats.forEach(setOff);
 
 function zoneSeats(z) { return seats.filter(s => s.zone === z); }
@@ -928,7 +928,7 @@ function renderPanel() {
     h += `<button class="back" type="button" data-zone="${s.zone}">← ${z.name}</button>
     <div class="ph"><div><div class="eyebrow">${z.name}</div><h2>${s.id}</h2><div class="sub">${cfgOf(z, 'Видеокарта')} · ${cfgOf(z, 'Монитор')}</div></div><span class="chip ${STC[st][1]}">${STC[st][0]}</span></div>`;
     if (s.state === 'busy') {
-      h += `<dl class="kv"><dt>Статус</dt><dd>идёт сеанс</dd><dt>Осталось</dt><dd class="num" style="color:${st === 'ending' ? 'var(--warn)' : 'inherit'}">${s.left == null ? 'без конца в Langame' : hm(s.left)}</dd>${s.until ? `<dt>До</dt><dd class="num">${hhmm(new Date(s.until))}</dd>` : ''}</dl>`;
+      h += seatSessionHtml(s, st);
     } else if (s.state === 'free') {
       h += `<dl class="kv"><dt>Статус</dt><dd>свободен</dd></dl>`;
     } else {
@@ -1113,6 +1113,106 @@ function stepVisitors(dt, t) {
     const sw = Math.sin(t * 7 * VISIT_SPEED + v.p.id) * 0.5; v.p.userData.legs[0].rotation.x = sw; v.p.userData.legs[1].rotation.x = -sw; v.p.userData.arms[0].rotation.x = -sw * 0.7; v.p.userData.arms[1].rotation.x = sw * 0.7;
   }
 }
+/* ---------------- guest at a computer: GET /api/stores/:id/floor-plan/live/seats/:n ----------------
+   `var`: seats are built and rendered before this part of the script runs. */
+var SEAT_INFO = new Map();
+var SEAT_INFO_TTL = 20000;
+var LEVEL_XP = 500;
+var SEG_LABEL = { active: 'Активный', new: 'Новый', repeat: 'Постоянный', risk: 'В риске', lost: 'Давно не был', quiet: 'Редко ходит' };
+var SEG_TONE = { active: 'good', new: 'acc', repeat: 'lilac', risk: 'warn', lost: 'off', quiet: 'off' };
+var CRM_LABEL = { WATCH: 'Наблюдать', CONTACT: 'Связаться', INVITED: 'Приглашён', LOYAL: 'Лояльный', VIP: 'VIP', PROBLEM: 'Проблема', DO_NOT_CONTACT: 'Не беспокоить' };
+function seatInfo(s, want) {
+  if (!SEAT_INFO || !API || !s || s.state !== 'busy' || !s.num) return null;
+  const e = SEAT_INFO.get(s.num);
+  if (want && !(e && e.pending) && !(e && performance.now() - e.at < SEAT_INFO_TTL)) loadSeatInfo(s.num);
+  return e ? e.data : null;
+}
+async function loadSeatInfo(num) {
+  const prev = SEAT_INFO.get(num);
+  SEAT_INFO.set(num, { at: prev ? prev.at : 0, data: prev ? prev.data : null, pending: true });
+  let data = null;
+  try {
+    const r = await fetch(`${API}/live/seats/${encodeURIComponent(num)}`, { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } });
+    if (r.ok) data = await r.json();
+  } catch (e) { data = null; }
+  if (!SEAT_INFO.has(num)) return;
+  SEAT_INFO.set(num, { at: performance.now(), data: data || (prev && prev.data && !prev.data.failed ? prev.data : { failed: true }), pending: false });
+  if (!editing && view.type === 'seat') { const s = seats.find(x => x.id === view.id); if (s && s.num === num) renderPanel(); }
+}
+function forgetSeatInfo(s) { if (SEAT_INFO && s && s.num) SEAT_INFO.delete(s.num); }
+function agoText(iso) {
+  const d = new Date(iso); if (isNaN(d)) return '—';
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  return days <= 0 ? 'сегодня' : days === 1 ? 'вчера' : plural(days, 'день', 'дня', 'дней') + ' назад';
+}
+function sinceText(iso) {
+  const d = new Date(iso); if (isNaN(d)) return null;
+  return 'с ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(/^\d+\s*/, '') + ' ' + d.getFullYear();
+}
+function initials(name) { return String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'; }
+function seatSessionHtml(s, st) {
+  const info = seatInfo(s, true), ses = info && info.session;
+  const started = ses && ses.startedAt ? new Date(ses.startedAt) : null;
+  let h = `<dl class="kv"><dt>Статус</dt><dd>идёт сеанс</dd>`;
+  if (started && !isNaN(started)) h += `<dt>В клубе</dt><dd class="num">${hm((Date.now() - started.getTime()) / 60000)}, с ${hhmm(started)}</dd>`;
+  h += `<dt>Осталось</dt><dd class="num" style="color:${st === 'ending' ? 'var(--warn)' : 'inherit'}">${s.left == null ? 'без конца в Langame' : hm(s.left)}</dd>${s.until ? `<dt>До</dt><dd class="num">${hhmm(new Date(s.until))}</dd>` : ''}`;
+  if (ses && ses.tariff) h += `<dt>Тариф</dt><dd>${esc(ses.tariff)}</dd>`;
+  h += `</dl>`;
+  return h + seatGuestHtml(info);
+}
+function seatGuestHtml(info) {
+  if (!API) return '';
+  if (!info) return `<div class="sec gsec"><h3>Гость</h3><div class="note">Загружаю данные гостя…</div></div>`;
+  if (info.failed) return `<div class="sec gsec"><h3>Гость</h3><div class="note">Не удалось получить данные гостя, попробую ещё раз.</div></div>`;
+  if (info.guestAccess !== 'AVAILABLE') return `<div class="sec gsec"><h3>Гость</h3><div class="lockn">Имя, визиты и покупки гостя видят роли с доступом к разделу «Гости».</div></div>`;
+  const g = info.guest;
+  if (!g) return `<div class="sec gsec"><h3>Гость</h3><div class="note">Гость ещё не загружен из Langame, данные появятся после синхронизации.</div></div>`;
+  const tags = [];
+  if (g.isStaff) tags.push(`<span class="chip off">Сотрудник</span>`);
+  if (SEG_LABEL[g.segment]) tags.push(`<span class="chip ${SEG_TONE[g.segment] || 'off'}">${SEG_LABEL[g.segment]}</span>`);
+  if (CRM_LABEL[g.crmStatus]) tags.push(`<span class="chip ${g.crmStatus === 'VIP' ? 'lilac' : g.crmStatus === 'PROBLEM' || g.crmStatus === 'DO_NOT_CONTACT' ? 'warn' : 'off'}">${CRM_LABEL[g.crmStatus]}</span>`);
+  const since = g.since ? sinceText(g.since) : null;
+  if (since) tags.push(`<span class="chip off">${since}</span>`);
+  let h = `<div class="sec gsec"><h3>Гость <a class="glink" href="/guests/${encodeURIComponent(g.id)}" target="_top">Карточка гостя →</a></h3>
+    <div class="gwho"><div class="gav">${esc(initials(g.displayName))}</div><div class="grow"><b>${esc(g.displayName)}</b><div class="gtags">${tags.join('')}</div></div></div>
+    <div class="statgrid"><div class="stat"><small>Визитов</small><b class="num">${fmt.format(g.visitsDays)}</b></div><div class="stat"><small>Часов игры</small><b class="num">${fmt.format(Math.round(g.playHours))}</b></div><div class="stat"><small>Потратил</small><b class="num">${rub(g.totalRevenue)}</b></div></div>
+    <dl class="kv">`;
+  h += `<dt>Прошлый визит</dt><dd>${g.previousVisit ? `${agoText(g.previousVisit.at)}${g.previousVisit.storeName && g.previousVisit.storeName !== CLUB.name ? ', ' + esc(g.previousVisit.storeName) : ''}` : 'первый визит'}</dd>`;
+  if (g.balance != null || g.bonusBalance != null) h += `<dt>Баланс · бонусы</dt><dd class="num">${rubOr(g.balance)} · ${g.bonusBalance == null ? '—' : fmt.format(Math.round(g.bonusBalance)) + ' Б'}</dd>`;
+  if (g.nextAction) h += `<dt>Следующий шаг</dt><dd>${esc(g.nextAction)}</dd>`;
+  h += `</dl>`;
+  if (g.crmNote) h += `<div class="note">${esc(g.crmNote)}</div>`;
+  h += `</div>`;
+  const when = LIVE.revenue && LIVE.revenue.period === 'TODAY' ? 'за сегодня' : 'за смену';
+  h += `<div class="sec"><h3>Купил ${when}</h3>${g.purchases && g.purchases.length ? `<div class="list buys">${g.purchases.map(p => {
+    const qty = p.quantity && p.quantity !== 1 ? ` × ${fmt.format(p.quantity)}` : '';
+    return `<div class="li"><span class="t num">${p.at ? hhmm(new Date(p.at)) : '—'}</span><span class="grow"><b title="${esc(p.title)}">${esc(p.title)}${qty}</b></span><span class="r num">${rub(p.sum)}</span></div>`;
+  }).join('')}</div>` : `<div class="note">Пока ничего не покупал.</div>`}</div>`;
+  if (g.gameAccess === 'AVAILABLE') {
+    const gm = g.game;
+    if (!gm) h += `<div class="sec"><h3>Игровой модуль</h3><div class="note">Гость ещё не в игре.</div></div>`;
+    else {
+      const pct = Math.round((LEVEL_XP - Math.min(LEVEL_XP, gm.xpToNextLevel)) / LEVEL_XP * 100);
+      h += `<div class="sec"><h3>Игровой модуль</h3><dl class="kv"><dt>Уровень ${fmt.format(gm.level)}</dt><dd class="num">ещё ${fmt.format(gm.xpToNextLevel)} XP</dd></dl><span class="gbar"><i style="width:${Math.max(0, Math.min(100, pct))}%"></i></span>
+      <dl class="kv"><dt>Не забрал наград</dt><dd class="num">${fmt.format(gm.pendingRewards)}${gm.rewardsExpiringSoon ? ` · ${fmt.format(gm.rewardsExpiringSoon)} скоро сгорит` : ''}</dd>${gm.nearestRewardExpiresAt && gm.pendingRewards ? `<dt>Ближайшая сгорает</dt><dd class="num">${new Date(gm.nearestRewardExpiresAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}</dd>` : ''}<dt>Получил наград</dt><dd class="num">${fmt.format(gm.rewardsPaidTotal)}</dd></dl></div>`;
+    }
+  }
+  if (g.recommendedAction) h += `<div class="gtip"><b>Подсказка админу</b>${esc(g.recommendedAction.label)}${g.recommendedAction.reason ? `: ${esc(g.recommendedAction.reason)}` : ''}</div>`;
+  return h;
+}
+function seatTipHtml(s) {
+  let h = `<b>${s.id}</b> · играет${s.left != null ? ` · ещё <span class="num">${hm(s.left)}</span>` : ''}`;
+  const info = seatInfo(s, false), g = info && info.guest;
+  if (g) h += `<br><span class="gtipn">${esc(g.displayName)}${g.game ? ` · ур. ${fmt.format(g.game.level)}` : ''}${SEG_LABEL[g.segment] ? ' · ' + SEG_LABEL[g.segment].toLowerCase() : ''}</span>`;
+  return h;
+}
+var tipSeatNum = null, tipSeatTimer = 0;
+function hoverSeatInfo(s) {
+  const num = s && s.state === 'busy' ? s.num : null;
+  if (num === tipSeatNum) return;
+  tipSeatNum = num; clearTimeout(tipSeatTimer);
+  if (num) tipSeatTimer = setTimeout(() => { if (tipSeatNum === num) seatInfo(s, true); }, 350);
+}
 /* ---------------- other clubs of the network with a drawn hall (full screen only) ---------------- */
 async function loadClubNav() {
   if (window.parent !== window || !STORE_ID) return;
@@ -1226,7 +1326,8 @@ canvas.addEventListener('pointermove', e => {
   if (h && h.data.type === 'seat') {
     const s = seats.find(x => x.id === h.data.id); const w = seatWorld(s); hoverRing.visible = true; hoverRing.position.set(w.x, 0.05, w.z);
     tip.hidden = false; tip.style.left = h.x + 'px'; tip.style.top = h.y + 'px';
-    tip.innerHTML = s.state === 'busy' ? `<b>${s.id}</b> · играет${s.left != null ? ` · ещё <span class="num">${hm(s.left)}</span>` : ''}` : `<b>${s.id}</b> · ${s.state === 'free' ? 'свободен' : 'нет данных Langame'}`;
+    hoverSeatInfo(s);
+    tip.innerHTML = s.state === 'busy' ? seatTipHtml(s) : `<b>${s.id}</b> · ${s.state === 'free' ? 'свободен' : 'нет данных Langame'}`;
   } else if (h) { hoverRing.visible = false; tip.hidden = false; tip.style.left = h.x + 'px'; tip.style.top = h.y + 'px'; tip.innerHTML = `<b>${ZONES[h.data.id].name}</b> · открыть`; }
   else { hoverRing.visible = false; tip.hidden = true; }
 });

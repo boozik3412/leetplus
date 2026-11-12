@@ -1985,6 +1985,23 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   в ответе нет; Langame для блока не нужен, поэтому он есть и у клуба без
   Langame. Ошибка чтения даёт `game: null` и предупреждение, остальная схема
   работает.
+- Гость за компьютером (12.11.2026): `GET /stores/:id/floor-plan/live/seats/:number`
+  (тот же контроллер, JWT + `RolesGuard` → `view_club_scheme`, manifest
+  `STORES_VERIFIED`, свежий store scope, чужой клуб — 404). Сеанс ПК (начало,
+  конец, название тарифа Langame из `tariffs/types_groups`, кэш 10 минут)
+  берётся из того же общего 15-секундного чтения Langame, что и схема; в
+  ответ `/floor-plan/live` идентификаторы гостей по-прежнему не попадают, они
+  живут только в памяти процесса до конца окна кэша. Данные гостя отдаются
+  только пользователю с правом раздела «Гости» (`view_guests`, OWNER или
+  platform admin; иначе `guestAccess = NO_CAPABILITY` и только сеанс): гость
+  находится по `tenantId` + домену Langame + `guest_id` сеанса, а поля берутся
+  из `GuestsService.getGuest` — той же карточки гостя с теми же правилами ПДн
+  (имя как в карточке, без телефона и e-mail в ответе), игровые поля только
+  при `view_guest_gamification`. Покупки гостя — строки `products/expense`
+  этого клуба за смену (или день) с его `real_guest_id` из того же чтения.
+  Записей, новых запросов к Langame, кроме справочника тарифов, worker и
+  scheduler нет. BFF `GET /api/stores/:id/floor-plan/live/seats/:number`
+  проксирует его тем же `proxyJsonRequest`.
 - Web: страница `/visualization`, раздел меню «Визуализация» (`canAccessPath` → `view_club_scheme`) и BFF
   `/api/stores/:id/floor-plan*` через `proxyJsonRequest` (cookie → JWT,
   `private, no-store`). BFF `GET /api/stores/floor-plans` (11.11.2026) тем же

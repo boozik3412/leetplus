@@ -64,6 +64,11 @@ export function clubFloorPlanSceneUrl(
   return `/club-scheme/${template.id}/index.html?${params.toString()}`;
 }
 
+/** Night still of the hall for the «Сейчас в клубах» banner on «Сводка». */
+export function clubFloorPlanPreviewUrl(templateId: string) {
+  return `/club-scheme/${encodeURIComponent(templateId)}/preview-dark.jpg`;
+}
+
 /**
  * Clubs for the switcher of the full-screen scene: only clubs with a hall,
  * resolved the same way as on /visualization (saved plan, then name or

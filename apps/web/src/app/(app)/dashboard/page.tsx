@@ -1,3 +1,7 @@
+import {
+  ClubsLiveBanner,
+  type BannerClub,
+} from "@/components/clubs-live-banner";
 import { DashboardFilters } from "@/components/dashboard-filters";
 import {
   ExecutiveDashboard,
@@ -6,6 +10,9 @@ import {
 import { Suspense } from "react";
 import { getStaffPriorities } from "@/lib/staff-priorities";
 import { requireTenantWorkspaceUser } from "@/lib/auth";
+import { fetchWithTimeout, getApiUrl, getAuthHeaders } from "@/lib/api";
+import { clubFloorPlanSwitcher } from "@/lib/club-floor-plan-templates";
+import { canAccessPath } from "@/lib/permissions";
 import {
   ExecutiveDashboardRequestError,
   getExecutiveOperations,
@@ -56,6 +63,31 @@ function first(value: string | string[] | undefined) {
 
 function values(value: string | string[] | undefined) {
   return value ? (Array.isArray(value) ? value : [value]) : [];
+}
+
+// Clubs with a drawn hall for the «Сейчас в клубах» banner. Only for viewers
+// of «Визуализация клубов»; a slow or failed read hides the banner instead of
+// holding the summary.
+async function loadBannerClubs(
+  storeIds: readonly string[],
+): Promise<BannerClub[]> {
+  try {
+    const response = await fetchWithTimeout(
+      `${getApiUrl()}/stores/floor-plans`,
+      { cache: "no-store", headers: await getAuthHeaders() },
+      4_000,
+    );
+    if (!response.ok) {
+      return [];
+    }
+    const { clubs } = clubFloorPlanSwitcher(await response.json());
+    const inScope = new Set(storeIds);
+    return clubs
+      .filter((club) => inScope.size === 0 || inScope.has(club.id))
+      .map(({ id, name, template }) => ({ id, name, template }));
+  } catch {
+    return [];
+  }
 }
 
 async function loadOperations(
@@ -147,7 +179,7 @@ export default async function DashboardPage({
     .filter(Boolean)
     .join(" · ");
   const staffRequest = getStaffPriorities(summary.scope.storeIds);
-  const [operations, history, setupProgress] = await Promise.all([
+  const [operations, history, setupProgress, bannerClubs] = await Promise.all([
     loadOperations(query, summary),
     loadExecutiveHistory(query.period, summary, (historyQuery) =>
       getExecutiveSummary(historyQuery, {
@@ -157,6 +189,9 @@ export default async function DashboardPage({
     shouldShowTenantOnboardingNotice(user)
       ? getSetupProgress()
       : Promise.resolve(null),
+    canAccessPath(user, "/visualization")
+      ? loadBannerClubs(summary.scope.storeIds)
+      : Promise.resolve([]),
   ]);
   return (
     <main className="min-h-screen bg-[var(--background)] px-4 py-6 text-[var(--foreground)] sm:px-6 lg:px-8">
@@ -184,6 +219,7 @@ export default async function DashboardPage({
             />
           </div>
         </header>
+        <ClubsLiveBanner clubs={bannerClubs} />
         {setupProgress && setupChecklistVisible(setupProgress) ? (
           <TenantOnboardingNotice progress={setupProgress} />
         ) : null}

@@ -40,6 +40,7 @@ describe('SupportTicketsService tenant boundaries', () => {
         GUEST_SUPPORT_SCHEMA_BRIDGE_MODE: schemaBridgeMode,
       }),
       secretEncryption as never,
+      { enqueue: jest.fn() } as never,
     );
     return { service, prisma, secretEncryption };
   }

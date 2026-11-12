@@ -74,8 +74,12 @@ const metricTones: Record<
 export function AssortmentGrowthDashboard({
   summary,
   dashboardQuery,
+  section = "actions",
 }: {
   summary: DashboardSummary;
+  // «actions»: what to do today (UX plan 2.x: overview fits ~2 screens);
+  // «analytics»: method, trends, forecast and growth drivers.
+  section?: "actions" | "analytics";
   dashboardQuery: {
     period: string;
     dateFrom?: string;
@@ -101,63 +105,69 @@ export function AssortmentGrowthDashboard({
   ).length;
   const sourceAlert = growth.sources.some((source) => source.state !== "FRESH");
 
+  if (section === "actions") {
+    return (
+      <div className="space-y-5">
+        <section
+          className={`flex flex-col gap-3 rounded-2xl border px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:px-5 ${
+            sourceAlert
+              ? "border-amber-200 bg-amber-50/70 dark:border-amber-900 dark:bg-amber-950/20"
+              : "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/20"
+          }`}
+        >
+          <div className="flex min-w-0 items-start gap-3">
+            {sourceAlert ? (
+              <WarningCircle
+                className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-300"
+                weight="fill"
+                aria-hidden="true"
+              />
+            ) : (
+              <CheckCircle
+                className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-300"
+                weight="fill"
+                aria-hidden="true"
+              />
+            )}
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                {freshSources} из {growth.sources.length} источников готовы
+              </p>
+              <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                Дашборд отделяет точные чеки от товарных операций и скрывает
+                производные метрики при конфликте источников.
+              </p>
+            </div>
+          </div>
+          <span
+            className={`shrink-0 rounded-full bg-white px-3 py-1.5 text-xs font-semibold shadow-sm dark:bg-zinc-950 ${sourceAlert ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}
+            title={
+              calculationCaveats > 0
+                ? `${calculationCaveats} с неполным покрытием; подробности есть в методике расчёта.`
+                : "Все источники выбранного периода имеют полное покрытие."
+            }
+          >
+            {calculationsWithData} рассчитано · {calculationCaveats} требуют
+            внимания
+          </span>
+        </section>
+
+        <AssortmentHealthCards
+          summary={summary}
+          dashboardQuery={dashboardQuery}
+        />
+
+        <GrowthKpiStrip growth={growth} visitBinding={summary.visitBinding} />
+
+        <SourceHealthPanel sources={growth.sources} />
+
+        <ActionCenter actions={growth.actions} summary={summary} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
-      <section
-        className={`flex flex-col gap-3 rounded-2xl border px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:px-5 ${
-          sourceAlert
-            ? "border-amber-200 bg-amber-50/70 dark:border-amber-900 dark:bg-amber-950/20"
-            : "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/20"
-        }`}
-      >
-        <div className="flex min-w-0 items-start gap-3">
-          {sourceAlert ? (
-            <WarningCircle
-              className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-300"
-              weight="fill"
-              aria-hidden="true"
-            />
-          ) : (
-            <CheckCircle
-              className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-300"
-              weight="fill"
-              aria-hidden="true"
-            />
-          )}
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
-              {freshSources} из {growth.sources.length} источников готовы
-            </p>
-            <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-              Дашборд отделяет точные чеки от товарных операций и скрывает
-              производные метрики при конфликте источников.
-            </p>
-          </div>
-        </div>
-        <span
-          className={`shrink-0 rounded-full bg-white px-3 py-1.5 text-xs font-semibold shadow-sm dark:bg-zinc-950 ${sourceAlert ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}
-          title={
-            calculationCaveats > 0
-              ? `${calculationCaveats} с неполным покрытием; подробности есть в методике расчёта.`
-              : "Все источники выбранного периода имеют полное покрытие."
-          }
-        >
-          {calculationsWithData} рассчитано · {calculationCaveats} требуют
-          внимания
-        </span>
-      </section>
-
-      <AssortmentHealthCards
-        summary={summary}
-        dashboardQuery={dashboardQuery}
-      />
-
-      <GrowthKpiStrip growth={growth} visitBinding={summary.visitBinding} />
-
-      <SourceHealthPanel sources={growth.sources} />
-
-      <ActionCenter actions={growth.actions} summary={summary} />
-
       <details className="group rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500 dark:text-zinc-200 sm:px-5">
           <span>Методика расчёта показателей</span>
@@ -178,7 +188,7 @@ export function AssortmentGrowthDashboard({
                   {calculation.label}
                 </p>
                 <span
-                  className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${calculationStateTone(calculation.state)}`}
+                  className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold uppercase tracking-wide ${calculationStateTone(calculation.state)}`}
                 >
                   {calculationStateLabel(calculation.state)}
                 </span>
@@ -186,11 +196,11 @@ export function AssortmentGrowthDashboard({
               <p className="mt-2 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
                 {calculation.formula}
               </p>
-              <p className="mt-2 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+              <p className="mt-2 text-xs leading-4 text-zinc-500 dark:text-zinc-400">
                 {calculation.source} · {calculation.grain}
               </p>
               {calculation.note ? (
-                <p className="mt-2 text-[11px] leading-4 text-amber-700 dark:text-amber-300">
+                <p className="mt-2 text-xs leading-4 text-amber-700 dark:text-amber-300">
                   {calculation.note}
                 </p>
               ) : null}
@@ -446,7 +456,7 @@ function SourceHealthPanel({
                     />
                   </span>
                   <span
-                    className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${sourceStateTone(source.state)}`}
+                    className={`rounded-full px-2 py-1 text-xs font-semibold uppercase tracking-wide ${sourceStateTone(source.state)}`}
                   >
                     {sourceStateLabel(source.state)}
                   </span>
@@ -457,7 +467,7 @@ function SourceHealthPanel({
                 <p className="mt-1 min-h-10 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
                   {source.detail}
                 </p>
-                <p className="mt-2 text-[11px] tabular-nums text-zinc-400 dark:text-zinc-500">
+                <p className="mt-2 text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
                   {source.coveragePercent === null
                     ? formatSourceDate(source.lastFactAt)
                     : `${formatPercent(source.coveragePercent)} покрытия`}
@@ -675,7 +685,7 @@ function ForecastPanel({ summary }: { summary: DashboardSummary }) {
             </p>
           </div>
           <span
-            className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${forecastConfidenceTone(forecast.confidence)}`}
+            className={`rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${forecastConfidenceTone(forecast.confidence)}`}
           >
             {forecastConfidenceLabel(forecast.confidence)} точность
           </span>
@@ -958,7 +968,7 @@ function GrowthMetric({
         {detail}
       </p>
       {qualification ? (
-        <p className="mt-1 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+        <p className="mt-1 text-xs leading-4 text-zinc-500 dark:text-zinc-400">
           {qualification}
         </p>
       ) : null}

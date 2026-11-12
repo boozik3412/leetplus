@@ -38,8 +38,14 @@ Decide which one you are building before choosing density, sizes and motion.
   touch can change the column too), `components/side-panel.tsx` (create/edit one
   record on the right, native `<dialog>`), `components/more-fields.tsx` (rare
   fields folded under «Дополнительно», so a form shows 3–5 fields). Pure column
-  logic is in `lib/board.ts`. First users: «Задачи CRM» (`/guests/crm/tasks`,
-  «Доска / Список» in `?view=`) and «Ручные награды».
+  logic is in `lib/board.ts`. Users: «Задачи CRM» (`/guests/crm/tasks`,
+  «Доска / Список» in `?view=`), «Заявки» CRM, «Ручные награды» and «Задачи
+  персонала» (`/staff/tasks`, `?layout=list`). When a board has workflow rules
+  (who may move a card where), keep them in one pure module that the buttons and
+  the drop both use (`lib/staff-task-moves.ts`) and say in words why a drop was
+  refused. Dates in client components render UTC on the server and local time
+  after hydration (`components/local-date-time.tsx` or the same
+  `useSyncExternalStore` switch), never a bare `Intl` call.
 
 ## Rules by priority
 

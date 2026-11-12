@@ -3,26 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { AuthUser } from "@/lib/auth";
+import {
+  canCancelStaffTask,
+  staffTaskMoves,
+  staffTaskStatusRequest,
+  type StaffTaskMove,
+} from "@/lib/staff-task-moves";
 import type { StaffTaskStatus, StaffTaskUser } from "@/lib/staff-tasks";
-
-const reviewerRoles = new Set<AuthUser["role"]>([
-  "OWNER",
-  "ADMIN",
-  "MANAGER",
-  "CLUB_MANAGER",
-  "STANDARDS_MANAGER",
-]);
-const statusManagerRoles = new Set<AuthUser["role"]>([
-  ...reviewerRoles,
-  "SENIOR_ADMINISTRATOR",
-  "CLUB_ADMINISTRATOR",
-]);
-
-type StaffTaskStatusAction = {
-  status: StaffTaskStatus;
-  label: string;
-  variant: "primary" | "secondary";
-};
 
 type StaffTaskStatusActionsProps = {
   taskId: string;
@@ -50,12 +37,9 @@ export function StaffTaskStatusActions({
     setError(null);
 
     try {
-      const endpoint =
-        next === "CANCELED"
-          ? `/api/staff/tasks/${taskId}`
-          : `/api/staff/tasks/${taskId}/comments`;
-      const response = await fetch(endpoint, {
-        method: next === "CANCELED" ? "PATCH" : "POST",
+      const request = staffTaskStatusRequest(taskId, next);
+      const response = await fetch(request.url, {
+        method: request.method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: next }),
       });
@@ -75,14 +59,16 @@ export function StaffTaskStatusActions({
     }
   }
 
-  const actions = getStatusActions(
-    status,
-    assignedToUser,
-    candidateUserIds,
+  const actions = staffTaskMoves(
+    {
+      status,
+      assignedToUserId: assignedToUser?.id ?? null,
+      candidateUserIds,
+    },
     currentUser,
   );
   const isTerminal = status === "DONE" || status === "CANCELED";
-  const canCancel = canCancelTask(currentUser);
+  const canCancel = canCancelStaffTask(currentUser);
 
   return (
     <div className="flex flex-col gap-2">
@@ -118,92 +104,7 @@ export function StaffTaskStatusActions({
   );
 }
 
-function getStatusActions(
-  status: StaffTaskStatus,
-  assignedToUser: StaffTaskUser | null,
-  candidateUserIds: string[],
-  currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">,
-) {
-  const actions: StaffTaskStatusAction[] = [];
-  const canMove = canMoveTask(assignedToUser, candidateUserIds, currentUser);
-
-  if (status === "OPEN" && canMove) {
-    actions.push({
-      status: "IN_PROGRESS",
-      label: "В работу",
-      variant: "primary",
-    });
-  }
-
-  if (status === "IN_PROGRESS" && canMove) {
-    actions.push({
-      status: "ON_REVIEW",
-      label: "На проверку",
-      variant: "primary",
-    });
-  }
-
-  if (status === "ON_REVIEW") {
-    if (canReturnTask(assignedToUser, candidateUserIds, currentUser)) {
-      actions.push({
-        status: "IN_PROGRESS",
-        label: "Вернуть в работу",
-        variant: "secondary",
-      });
-    }
-
-    if (canApproveTask(assignedToUser, candidateUserIds, currentUser)) {
-      actions.push({
-        status: "DONE",
-        label: "Готово",
-        variant: "primary",
-      });
-    }
-  }
-
-  return actions;
-}
-
-function canApproveTask(
-  assignedToUser: StaffTaskUser | null,
-  candidateUserIds: string[],
-  currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">,
-) {
-  return (
-    assignedToUser?.id !== currentUser.id &&
-    !candidateUserIds.includes(currentUser.id) &&
-    (currentUser.isPlatformAdmin || reviewerRoles.has(currentUser.role))
-  );
-}
-
-function canReturnTask(
-  assignedToUser: StaffTaskUser | null,
-  candidateUserIds: string[],
-  currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">,
-) {
-  return canMoveTask(assignedToUser, candidateUserIds, currentUser);
-}
-
-function canMoveTask(
-  assignedToUser: StaffTaskUser | null,
-  candidateUserIds: string[],
-  currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">,
-) {
-  return (
-    assignedToUser?.id === currentUser.id ||
-    candidateUserIds.includes(currentUser.id) ||
-    currentUser.isPlatformAdmin ||
-    reviewerRoles.has(currentUser.role)
-  );
-}
-
-function canCancelTask(
-  currentUser: Pick<AuthUser, "role" | "isPlatformAdmin">,
-) {
-  return currentUser.isPlatformAdmin || statusManagerRoles.has(currentUser.role);
-}
-
-function buttonClass(variant: StaffTaskStatusAction["variant"]) {
+function buttonClass(variant: StaffTaskMove["variant"]) {
   if (variant === "secondary") {
     return "inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900";
   }

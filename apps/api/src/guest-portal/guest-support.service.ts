@@ -15,6 +15,7 @@ import {
   SUPPORT_FEEDBACK_COMMENT_MAX_LENGTH,
   SUPPORT_GUEST_MESSAGE_MAX_LENGTH,
   SUPPORT_PUBLIC_AUTHOR_LABEL,
+  SUPPORT_TELEGRAM_TICKET_KIND,
   SUPPORT_THREAD_ACTION_LIST,
   SUPPORT_THREAD_ACTIONS,
   closeStaleResolvedSupportTickets,
@@ -135,6 +136,17 @@ export type GuestSupportTicketThread = {
     createdAt: string;
   }>;
 };
+
+export type GuestTelegramMessageContext = {
+  tenantId: string;
+  storeId: string;
+  profileId: string;
+  guestId: string | null;
+};
+
+export type GuestTelegramMessageResult =
+  | { status: 'CREATED' | 'APPENDED' | 'REOPENED'; ticketNumber: string }
+  | { status: 'DISABLED' | 'RATE_LIMITED' | 'TOO_LONG' | 'EMPTY' };
 
 type GuestThreadEvent = {
   action: string;
@@ -467,6 +479,179 @@ export class GuestSupportService {
       });
     }
     return { ok: true as const };
+  }
+
+  // A message a guest wrote to the guest Telegram bot. It continues the
+  // guest's open Telegram conversation (a ticket of kind TELEGRAM), reopens a
+  // recently finished one, or starts a new one in the guest's club. The same
+  // Telegram update never adds a second message.
+  async recordTelegramMessage(
+    context: GuestTelegramMessageContext,
+    rawText: unknown,
+    updateKey: string,
+  ): Promise<GuestTelegramMessageResult> {
+    if (!isGuestBugReportingLive(this.configService)) {
+      return { status: 'DISABLED' };
+    }
+    const text = typeof rawText === 'string' ? rawText.trim() : '';
+    if (!text || text.includes('\u0000')) {
+      return { status: 'EMPTY' };
+    }
+    if (text.length > SUPPORT_GUEST_MESSAGE_MAX_LENGTH) {
+      return { status: 'TOO_LONG' };
+    }
+
+    let result: GuestTelegramMessageResult = { status: 'EMPTY' };
+    try {
+      await this.withSerializableRetry(async (tx) => {
+        const now = new Date();
+        const candidates = await tx.guestSupportTicket.findMany({
+          where: {
+            tenantId: context.tenantId,
+            profileId: context.profileId,
+            kind: SUPPORT_TELEGRAM_TICKET_KIND,
+          },
+          orderBy: [{ lastActivityAt: 'desc' }, { createdAt: 'desc' }],
+          take: 1,
+          select: guestThreadTicketSelect,
+        });
+        const latest = candidates[0] ?? null;
+        const events = latest
+          ? ((await this.threadEvents(tx, context.tenantId, [latest.id])).get(
+              latest.id,
+            ) ?? [])
+          : [];
+        const state = latest
+          ? supportGuestTicketState(latest, summarizeSupportThread(events), now)
+          : null;
+
+        if (latest && state?.canReply) {
+          const commentId = guestOperationUuid(
+            'telegram-message',
+            latest.id,
+            updateKey,
+          );
+          const replay = await tx.guestSupportTicketComment.findUnique({
+            where: { id: commentId },
+            select: { id: true },
+          });
+          if (replay) {
+            result = { status: 'APPENDED', ticketNumber: latest.ticketNumber };
+            return;
+          }
+          await this.assertGuestMessageLimits(tx, context, now);
+          await tx.guestSupportTicketComment.create({
+            data: {
+              id: commentId,
+              tenantId: context.tenantId,
+              ticketId: latest.id,
+              authorUserId: null,
+              body: text,
+              createdAt: now,
+            },
+          });
+          await tx.guestSupportTicketAuditEvent.create({
+            data: {
+              tenantId: context.tenantId,
+              ticketId: latest.id,
+              actorUserId: null,
+              action: SUPPORT_THREAD_ACTIONS.GUEST_MESSAGE,
+              metadata: {
+                commentId,
+                profileId: context.profileId,
+                channel: 'TELEGRAM',
+              },
+              createdAt: now,
+            },
+          });
+          await this.touchOrReopen(
+            tx,
+            latest,
+            state.replyReopens,
+            'GUEST_MESSAGE',
+            now,
+          );
+          result = {
+            status: state.replyReopens ? 'REOPENED' : 'APPENDED',
+            ticketNumber: latest.ticketNumber,
+          };
+          return;
+        }
+
+        const idempotencyKey = `telegram:${updateKey}`;
+        const existing = await tx.guestSupportTicket.findUnique({
+          where: {
+            tenantId_profileId_idempotencyKey: {
+              tenantId: context.tenantId,
+              profileId: context.profileId,
+              idempotencyKey,
+            },
+          },
+          select: { ticketNumber: true },
+        });
+        if (existing) {
+          result = { status: 'CREATED', ticketNumber: existing.ticketNumber };
+          return;
+        }
+        const openedToday = await tx.guestSupportTicket.count({
+          where: {
+            tenantId: context.tenantId,
+            profileId: context.profileId,
+            createdAt: { gte: new Date(now.getTime() - oneDayMs) },
+          },
+        });
+        if (openedToday >= 20) {
+          throw new HttpException(
+            'Дневной лимит обращений исчерпан.',
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
+        const ticketNumber = `LP-BUG-${randomUUID()
+          .replace(/-/g, '')
+          .slice(0, 8)
+          .toUpperCase()}`;
+        const ticket = await tx.guestSupportTicket.create({
+          data: {
+            ticketNumber,
+            tenantId: context.tenantId,
+            storeId: context.storeId,
+            profileId: context.profileId,
+            guestId: context.guestId,
+            idempotencyKey,
+            kind: SUPPORT_TELEGRAM_TICKET_KIND,
+            topic: 'OTHER',
+            description: text,
+            lastActivityAt: now,
+          },
+          select: { id: true, ticketNumber: true },
+        });
+        await tx.guestSupportTicketAuditEvent.create({
+          data: {
+            tenantId: context.tenantId,
+            ticketId: ticket.id,
+            action: 'CREATED_BY_GUEST',
+            metadata: {
+              topic: 'OTHER',
+              storeId: context.storeId,
+              profileId: context.profileId,
+              channel: 'TELEGRAM',
+              hasAttachment: false,
+            },
+            createdAt: now,
+          },
+        });
+        result = { status: 'CREATED', ticketNumber: ticket.ticketNumber };
+      });
+    } catch (error) {
+      if (
+        error instanceof HttpException &&
+        error.getStatus() === Number(HttpStatus.TOO_MANY_REQUESTS)
+      ) {
+        return { status: 'RATE_LIMITED' };
+      }
+      throw error;
+    }
+    return result;
   }
 
   async addGuestMessage(

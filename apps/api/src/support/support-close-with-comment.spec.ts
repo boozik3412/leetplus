@@ -55,6 +55,7 @@ function fixture() {
     {} as never,
     new ConfigService({}),
     {} as never,
+    { enqueue: jest.fn() } as never,
   );
   const actor = { id: '44444444-4444-4444-8444-444444444444' } as never;
   return { service, prisma, tx, actor };

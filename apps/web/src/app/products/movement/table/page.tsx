@@ -27,7 +27,7 @@ export default async function ProductMovementTablePage({
     const movements = report.writeOffMovements ?? [];
 
     return (
-      <main className="min-h-screen bg-[var(--background)] px-4 py-4 text-zinc-950">
+      <main className="cabinet-type-scale min-h-screen bg-[var(--background)] px-4 py-4 text-zinc-950">
         <ReportBreadcrumbs
           current="Списания"
           items={[

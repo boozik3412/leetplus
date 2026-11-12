@@ -2022,9 +2022,9 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
     result: "jsonb",
     securityDefiner: true,
     definitionSha256:
-      "f84e49729dfdbf36521a131626fd14c57b215d23f36f1cf8ff3bf68dbf3512a2",
+      "b10fff9712ed79bb05f139fd18b2677f1e9e75016a133f232c30072be8bc366a",
     sourceSha256Candidates: Object.freeze([
-      "27a197ee33a948860cb484d4b47d7f4fb20702550db9472cd72fbca1780db766",
+      "f8444d0082b020384015415c4111fbc8d5f3559249316410ee09931a02d49c70",
     ]),
   },
   {

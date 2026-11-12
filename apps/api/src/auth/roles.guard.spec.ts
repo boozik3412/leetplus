@@ -157,6 +157,9 @@ describe('RolesGuard', () => {
     expect(
       guard.canActivate(request('GET', '/stores/s1/floor-plan/live')),
     ).toBe(true);
+    expect(
+      guard.canActivate(request('GET', '/stores/s1/floor-plan/live/seats/17')),
+    ).toBe(true);
     expect(() => guard.canActivate(request('GET', '/stores'))).toThrow(
       ForbiddenException,
     );

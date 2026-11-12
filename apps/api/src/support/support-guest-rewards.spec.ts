@@ -159,6 +159,7 @@ describe('SupportTicketsService guest rewards', () => {
       { resolve: jest.fn(() => ({ tenantId: 'tenant-a' })) } as never,
       new ConfigService({}),
       {} as never,
+      { enqueue: jest.fn() } as never,
     );
     return { service, prisma };
   }

@@ -72,10 +72,7 @@ export type MarketingMissionRewardStatus =
   | "PAID"
   | "CANCELED";
 
-export type MarketingMissionRewardSource =
-  | "MANUAL"
-  | "LANGAME"
-  | "API_IMPORT";
+export type MarketingMissionRewardSource = "MANUAL" | "LANGAME" | "API_IMPORT";
 
 export type MarketingPromoBundleStructure = {
   composition: {
@@ -673,10 +670,13 @@ export async function getMarketingTariffConditions(): Promise<MarketingTariffCon
 export async function getMarketingPromoBundleLaunches(): Promise<
   MarketingPromoBundleLaunch[]
 > {
-  const response = await fetch(`${getApiUrl()}/marketing/promo-bundle-launches`, {
-    cache: "no-store",
-    headers: await getAuthHeaders(),
-  });
+  const response = await fetch(
+    `${getApiUrl()}/marketing/promo-bundle-launches`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
 
   if (!response.ok) {
     throw new Error("Failed to fetch marketing promo bundle launches");
@@ -795,4 +795,144 @@ export async function getMarketingCampaignEffect(
   }
 
   return response.json() as Promise<MarketingCampaignEffect>;
+}
+
+export type MarketingCampaignTelegramType = "NEWS" | "PROMO";
+
+export type MarketingCampaignTelegramDraft = {
+  type: MarketingCampaignTelegramType;
+  text: string;
+  buttonText: string | null;
+  buttonUrl: string | null;
+};
+
+export type MarketingCampaignTelegramTrigger =
+  | "LAPSED"
+  | "NO_SECOND_VISIT"
+  | "REWARD_EXPIRING";
+
+export type MarketingCampaignTelegramAutomation = {
+  trigger: MarketingCampaignTelegramTrigger;
+  days: number;
+  enabled: boolean;
+  enabledAt: string | null;
+  lastRunAt: string | null;
+  lastQueued: number | null;
+  reach: {
+    matching: number;
+    unsubscribed: number;
+    noPromoConsent: number;
+    recentlyMessaged: number;
+    alreadySent: number;
+    willReceive: number;
+  };
+  campaignRunning: boolean;
+  sendHours: { from: number; to: number };
+  timeZone: string;
+};
+
+export type MarketingCampaignTelegram = {
+  campaignId: string;
+  campaignStatus: string;
+  audience: { id: string; name: string } | null;
+  draft: MarketingCampaignTelegramDraft | null;
+  signature: string;
+  preview: { text: string; buttons: string[] } | null;
+  reach: {
+    audienceTotal: number;
+    withTelegram: number;
+    unsubscribed: number;
+    noPromoConsent: number;
+    recentlyMessaged: number;
+    alreadyQueued: number;
+    willReceive: number;
+  };
+  delivery: {
+    total: number;
+    queued: number;
+    sent: number;
+    failed: number;
+    blocked: number;
+    skipped: number;
+  };
+  lastSentAt: string | null;
+  lastQueued: number | null;
+  frequencyDays: number;
+  automation: MarketingCampaignTelegramAutomation | null;
+};
+
+export async function getMarketingCampaignTelegram(
+  id: string,
+): Promise<MarketingCampaignTelegram> {
+  const response = await fetch(
+    `${getApiUrl()}/marketing/campaigns/${encodeURIComponent(id)}/telegram`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch marketing campaign Telegram broadcast");
+  }
+
+  return response.json() as Promise<MarketingCampaignTelegram>;
+}
+
+export type VisitRatingReport = {
+  settings: {
+    enabled: boolean;
+    enabledAt: string | null;
+    lastRunAt: string | null;
+    sendHours: { from: number; to: number };
+    delayMinutes: number;
+    lookbackHours: number;
+    minSessionMinutes: number;
+    repeatDays: number;
+  };
+  scope: "NETWORK" | "STORES";
+  periodDays: number;
+  reachableGuests: number;
+  totals: {
+    asked: number;
+    answered: number;
+    average: number | null;
+    low: number;
+    distribution: Record<"1" | "2" | "3" | "4" | "5", number>;
+  };
+  stores: Array<{
+    storeId: string;
+    storeName: string;
+    asked: number;
+    answered: number;
+    average: number | null;
+    low: number;
+  }>;
+  recentLow: Array<{
+    id: string;
+    score: number;
+    answeredAt: string;
+    visitEndedAt: string;
+    storeName: string | null;
+    guestId: string | null;
+    guestName: string | null;
+  }>;
+};
+
+export async function getVisitRatingReport(
+  days: number,
+): Promise<VisitRatingReport> {
+  const response = await fetch(
+    `${getApiUrl()}/marketing/visit-ratings?days=${encodeURIComponent(String(days))}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch visit ratings");
+  }
+
+  return response.json() as Promise<VisitRatingReport>;
 }

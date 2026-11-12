@@ -14,6 +14,11 @@ import {
   loadTelegramBotApiProxyUrl,
   maskTelegramBotApiProxyUrl,
 } from './telegram-bot-api-fetch';
+import {
+  loadTelegramOutboxConfig,
+  runTelegramOutboxTick,
+  type TelegramOutboxConfig,
+} from './telegram-outbox-sender';
 
 export type TelegramPollingConfig = {
   allowedUpdates: string[];
@@ -134,6 +139,7 @@ async function main() {
   });
 
   validatePollingConfig(edgeConfig, pollingConfig);
+  const outboxConfig = loadTelegramOutboxConfig(process.env);
 
   if (pollingConfig.deleteWebhookOnStart) {
     await deleteTelegramWebhook(
@@ -158,6 +164,13 @@ async function main() {
       )}`,
     );
   }
+
+  const outboxLoop = runTelegramOutboxLoop(edgeConfig, outboxConfig, {
+    leetPlusFetch: fetch,
+    telegramFetch: telegramFetchImpl,
+    logger,
+    shouldStop: () => stopRequested,
+  });
 
   while (!stopRequested) {
     const lastPollStartedAt = new Date().toISOString();
@@ -215,7 +228,47 @@ async function main() {
     }
   }
 
+  await outboxLoop;
   logger.log('Telegram poller stopped.');
+}
+
+// Runs beside the long poll, so a staff reply does not wait for the next
+// getUpdates timeout. Errors only delay the next tick; the poll is unaffected.
+export async function runTelegramOutboxLoop(
+  edgeConfig: TelegramEdgeConfig,
+  outboxConfig: TelegramOutboxConfig,
+  deps: {
+    leetPlusFetch: TelegramEdgeFetch;
+    telegramFetch: TelegramEdgeFetch;
+    logger: TelegramEdgeLogger;
+    shouldStop: () => boolean;
+  },
+) {
+  if (!outboxConfig.enabled || edgeConfig.dryRun) {
+    deps.logger.log(
+      `Telegram outbox sender off (${
+        edgeConfig.dryRun ? 'dry-run' : 'no GUEST_GAME_TG_EDGE_OUTBOX_TOKEN'
+      }).`,
+    );
+    return;
+  }
+  deps.logger.log(
+    `Telegram outbox sender started interval=${outboxConfig.intervalMs}ms batch=${outboxConfig.batchSize}`,
+  );
+  while (!deps.shouldStop()) {
+    try {
+      const tick = await runTelegramOutboxTick(edgeConfig, outboxConfig, deps);
+      // A full batch means more is waiting: claim again right away.
+      if (tick.claimed >= outboxConfig.batchSize) {
+        continue;
+      }
+    } catch (error) {
+      deps.logger.error(
+        `Telegram outbox tick failed: ${safeErrorMessage(error)}`,
+      );
+    }
+    await delay(outboxConfig.intervalMs);
+  }
 }
 
 export function loadTelegramPollingConfig(

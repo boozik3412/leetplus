@@ -395,6 +395,9 @@ model Tenant {
   guestSupportAttachments              GuestSupportAttachment[]
   guestSupportTicketComments           GuestSupportTicketComment[]
   guestSupportTicketAuditEvents        GuestSupportTicketAuditEvent[]
+  guestTelegramOutboxMessages          GuestTelegramOutboxMessage[]
+  guestVisitRatings                    GuestVisitRating[]
+  guestVisitRatingSettings             GuestVisitRatingSettings?
   guestSavedFilters                    GuestSavedFilter[]
   guestAudiences                       GuestAudience[]
   guestAudienceMembers                 GuestAudienceMember[]
@@ -2723,6 +2726,9 @@ model GuestGameProfile {
   phoneConsentSource      String?
   phoneConsentAt          DateTime?
   unsubscribedAt          DateTime?
+  // Own answer in the bot to "send me club promotions": UNKNOWN | GRANTED | DENIED.
+  promoConsentStatus      String                          @default("UNKNOWN")
+  promoConsentAt          DateTime?
   xp                      Int                             @default(0)
   level                   Int                             @default(1)
   status                  String                          @default("ACTIVE")
@@ -2763,6 +2769,8 @@ model GuestGameProfile {
   identityLinks            GuestGameProfileIdentityLink[]
   externalAccounts         GuestGameExternalAccount[]
   externalMatches          GuestGameExternalMatch[]
+  telegramOutboxMessages   GuestTelegramOutboxMessage[]
+  visitRatings             GuestVisitRating[]
 
   @@unique([tenantId, guestId], map: "guest_game_profile_guest_uidx")
   @@unique([tenantId, leadId], map: "guest_game_profile_lead_uidx")
@@ -2804,16 +2812,16 @@ model GuestGameProfileIdentityLink {
 }
 
 model GuestGameLootBox {
-  id                     String   @id @default(uuid())
+  id                     String    @id @default(uuid())
   tenantId               String
   audienceId             String?
   createdByUserId        String?
   name                   String
-  status                 String   @default("DRAFT")
-  usageKind              String   @default("STANDALONE")
+  status                 String    @default("DRAFT")
+  usageKind              String    @default("STANDALONE")
   triggerKind            String
   rewardType             String
-  rewardAmount           Decimal? @db.Decimal(12, 2)
+  rewardAmount           Decimal?  @db.Decimal(12, 2)
   rewardLabel            String?
   segment                String?
   sessionType            String?
@@ -2821,16 +2829,16 @@ model GuestGameLootBox {
   periodRules            Json?
   limits                 Json?
   probabilityRules       Json
-  budgetAmount           Decimal? @db.Decimal(12, 2)
+  budgetAmount           Decimal?  @db.Decimal(12, 2)
   antiFraudRules         Json?
-  manualApprovalRequired Boolean  @default(true)
+  manualApprovalRequired Boolean   @default(true)
   /// Share of activated players (0–50 %) kept out of a standalone case to measure its effect.
-  holdoutPercent         Int      @default(0)
+  holdoutPercent         Int       @default(0)
   /// When the current holdout split started; reset on every percent change.
   holdoutStartedAt       DateTime?
   note                   String?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   tenant        Tenant            @relation(fields: [tenantId], references: [id])
   audience      GuestAudience?    @relation(fields: [audienceId], references: [id], onDelete: SetNull)
@@ -5579,6 +5587,82 @@ model GuestSupportTicketAuditEvent {
 
   @@index([tenantId, ticketId, createdAt], map: "guest_support_audit_ticket_idx")
   @@index([actorUserId], map: "guest_support_audit_actor_idx")
+}
+
+/// Messages LeetPlus sends to a guest through the guest Telegram bot: staff
+/// replies to a guest's Telegram conversation and, later, campaign messages.
+/// The corporate API only queues rows; the bot poller on the Telegram edge
+/// claims them by service token, sends them and reports the outcome.
+model GuestTelegramOutboxMessage {
+  id                  String    @id @default(uuid())
+  tenantId            String
+  storeId             String?
+  profileId           String
+  kind                String
+  sourceKey           String
+  supportTicketId     String?
+  supportCommentId    String?
+  marketingCampaignId String?
+  createdByUserId     String?
+  text                String
+  replyMarkup         Json?
+  status              String    @default("QUEUED")
+  attempts            Int       @default(0)
+  nextAttemptAt       DateTime  @default(now())
+  claimToken          String?
+  leaseExpiresAt      DateTime?
+  sentAt              DateTime?
+  telegramMessageId   String?
+  lastErrorCode       String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  profile GuestGameProfile @relation(fields: [tenantId, profileId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([tenantId, sourceKey], map: "guest_telegram_outbox_source_uidx")
+  @@index([status, nextAttemptAt], map: "guest_telegram_outbox_due_idx")
+  @@index([tenantId, supportTicketId], map: "guest_telegram_outbox_ticket_idx")
+  @@index([tenantId, marketingCampaignId], map: "guest_telegram_outbox_campaign_idx")
+  @@index([tenantId, profileId, createdAt], map: "guest_telegram_outbox_profile_idx")
+}
+
+// A guest's 1–5 rating of a club visit, asked through the guest Telegram bot
+// after a Langame session ends. One row per asked session; score stays null
+// until the guest taps a button.
+model GuestVisitRating {
+  id             String    @id @default(uuid())
+  tenantId       String
+  storeId        String?
+  profileId      String
+  guestId        String?
+  guestSessionId String
+  visitEndedAt   DateTime
+  askedAt        DateTime  @default(now())
+  score          Int?
+  answeredAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  profile GuestGameProfile @relation(fields: [tenantId, profileId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([tenantId, guestSessionId], map: "guest_visit_rating_session_uidx")
+  @@index([tenantId, visitEndedAt], map: "guest_visit_rating_visit_idx")
+  @@index([tenantId, profileId, askedAt], map: "guest_visit_rating_profile_idx")
+}
+
+// Network switch for visit ratings; no row means off.
+model GuestVisitRatingSettings {
+  tenantId        String    @id
+  enabled         Boolean   @default(false)
+  enabledAt       DateTime?
+  enabledByUserId String?
+  lastRunAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
 model StaffNotification {

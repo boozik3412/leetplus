@@ -26,6 +26,10 @@ import { GuestGameQualityMonitoringService } from './guest-game-quality-monitori
 import { GuestLeaderboardReadService } from '../guest-leaderboard/guest-leaderboard-read.service';
 import { GuestLeaderboardSettlementService } from '../guest-leaderboard/guest-leaderboard-settlement.service';
 import { GuestGameAccountsLookupService } from '../guest-game-accounts/guest-game-accounts-lookup.service';
+import { runTelegramAutomationsOnce } from '../guest-communications/guest-telegram-automation';
+import { loadAutomationCampaigns } from '../guest-communications/guest-telegram-campaign.service';
+import { runVisitRatingAsksOnce } from '../guest-communications/guest-visit-rating';
+import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 
 const disabledInProcessBonusScheduler = {
   requestRun: () => undefined,
@@ -91,6 +95,44 @@ async function main() {
       primaryError = error instanceof Error ? error : new Error(String(error));
     }
     const external = await runGuestBonusLedgerExternalTenantsOnce(bonusLedger);
+    // Automatic Telegram messages of running campaigns only queue outbox rows;
+    // a failure is logged and never holds back the bonus ledger.
+    try {
+      const prisma = application.get(PrismaService);
+      await runTelegramAutomationsOnce(
+        {
+          prisma,
+          admission: application.get(TenantExecutionAdmissionService),
+          loadCampaigns: (now) => loadAutomationCampaigns(prisma, now),
+        },
+        new Date(),
+        {
+          log: (message) => console.log(message),
+          warn: (message) => console.warn(message),
+        },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Telegram automations failed: ${message}`);
+    }
+    // «Оценка визита»: the bot question after a Langame session. Same rule:
+    // logged, never holds back the bonus ledger.
+    try {
+      await runVisitRatingAsksOnce(
+        {
+          prisma: application.get(PrismaService),
+          admission: application.get(TenantExecutionAdmissionService),
+        },
+        new Date(),
+        {
+          log: (message) => console.log(message),
+          warn: (message) => console.warn(message),
+        },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Visit ratings failed: ${message}`);
+    }
     if (primaryError) throw primaryError;
     await runGuestGamificationWorkerOnce({
       prisma: application.get(PrismaService),

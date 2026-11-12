@@ -1,7 +1,13 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import {
   CalendarBlank,
   CaretDown,
@@ -349,6 +355,12 @@ function DashboardFiltersContent({
       : null;
     if (trend) {
       params.set("trend", trend);
+    }
+
+    // Keep the open assortment tab («Динамика и прогноз», «Категории»).
+    const view = new URLSearchParams(window.location.search).get("view");
+    if (view) {
+      params.set("view", view);
     }
 
     const target = `${pathname}?${params.toString()}`;
@@ -728,8 +740,44 @@ function DropdownPanel({
   children: React.ReactNode;
   className: string;
 }) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // The panel opens from the left edge of the filters. When the filters sit
+  // at the right of the header (as on «Сводка»), a wide panel would run past
+  // the screen edge, so shift it back inside the viewport.
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) {
+      return;
+    }
+    const gutter = 16;
+    function fitIntoViewport() {
+      if (!panel) {
+        return;
+      }
+      panel.style.translate = "";
+      const rect = panel.getBoundingClientRect();
+      const viewport = document.documentElement.clientWidth;
+      const overflowRight = rect.right - (viewport - gutter);
+      const overflowLeft = gutter - rect.left;
+      const shift =
+        overflowRight > 0
+          ? -Math.min(overflowRight, rect.left - gutter)
+          : overflowLeft > 0
+            ? overflowLeft
+            : 0;
+      if (shift !== 0) {
+        panel.style.translate = `${Math.round(shift)}px 0`;
+      }
+    }
+    fitIntoViewport();
+    window.addEventListener("resize", fitIntoViewport);
+    return () => window.removeEventListener("resize", fitIntoViewport);
+  }, []);
+
   return (
     <div
+      ref={panelRef}
       className={[
         "absolute z-40 mt-2 rounded-3xl border border-zinc-200 bg-white p-4 shadow-2xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/40",
         className,

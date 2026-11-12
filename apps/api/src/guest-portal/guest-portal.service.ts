@@ -62,6 +62,11 @@ import { GuestIdentityResolverService } from '../integrations/guest-identity-res
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
 import { buildTelegramSendMessageBody } from './telegram-send-message-payload';
 import {
+  parseVisitRatingCallback,
+  VISIT_RATING_LOW_SCORE_MAX,
+  visitRatingThanks,
+} from './guest-visit-rating-callback';
+import {
   GUEST_BUG_REPORT_MAX_BYTES,
   GUEST_BUG_REPORT_TOPICS,
   GUEST_BUG_REPORT_TOPIC_LABELS,
@@ -218,7 +223,15 @@ const INCOMING_CALL_LAST4_CHANNEL = 'INCOMING_CALL_LAST4';
 const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
   'guest_portal:communication_preference:';
 const TELEGRAM_BOT_UNSUBSCRIBE_CALLBACK = 'bot:unsubscribe';
+const TELEGRAM_BOT_WRITE_CALLBACK = 'bot:write';
+// A guest may change the visit rating for a week after the question.
+const VISIT_RATING_ANSWER_MS = 7 * 24 * 60 * 60 * 1000;
 const TELEGRAM_BOT_UNSUBSCRIBE_CONFIRM_CALLBACK = 'bot:unsubscribe:confirm';
+// Promotional broadcasts need the guest's own "yes" in the bot: login consent
+// covers quests only. Club news goes to every guest who has not unsubscribed.
+const TELEGRAM_BOT_PROMO_CALLBACK = 'bot:promo';
+const TELEGRAM_BOT_PROMO_YES_CALLBACK = 'bot:promo:yes';
+const TELEGRAM_BOT_PROMO_NO_CALLBACK = 'bot:promo:no';
 const TELEGRAM_LINK_EVENT_PREFIX = 'guest_portal:telegram_bot_link:';
 const TELEGRAM_AUTH_EVENT_PREFIX = 'guest_portal:telegram_auth:';
 const GAME_CONSENT_EVENT_TYPE = 'GAME_CONSENT_GRANTED';
@@ -848,6 +861,10 @@ export type GuestPortalTelegramWebhookResponse = {
     | 'TELEGRAM_BOT_CLUBS'
     | 'TELEGRAM_BOT_CLUB_SELECTED'
     | 'TELEGRAM_BOT_HELP'
+    | 'TELEGRAM_BOT_WRITE'
+    | 'TELEGRAM_BOT_PROMO'
+    | 'TELEGRAM_VISIT_RATING'
+    | 'TELEGRAM_GUEST_MESSAGE'
     | 'UNSUBSCRIBE'
     | 'UNSUBSCRIBE_CONFIRMATION'
     | 'DUPLICATE_UPDATE'
@@ -9157,6 +9174,37 @@ export class GuestPortalService {
       return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
     }
 
+    const visitRating = parseVisitRatingCallback(update.callbackData);
+    if (visitRating) {
+      return this.dispatchTelegramWebhookReply(
+        await this.telegramWebhookVisitRatingResponse(
+          update.telegramChatId,
+          visitRating,
+          telegramIdentityMasked,
+        ),
+        update.telegramChatId,
+      );
+    }
+
+    const promoChoice = telegramBotPromoChoice(update.callbackData);
+    if (promoChoice) {
+      return this.dispatchTelegramWebhookReply(
+        await this.telegramWebhookPromoResponse(
+          update.telegramChatId,
+          promoChoice,
+          telegramIdentityMasked,
+        ),
+        update.telegramChatId,
+      );
+    }
+
+    if (update.callbackData?.trim() === TELEGRAM_BOT_WRITE_CALLBACK) {
+      return this.dispatchTelegramWebhookReply(
+        this.telegramWebhookWriteToClubPrompt(telegramIdentityMasked),
+        update.telegramChatId,
+      );
+    }
+
     if (update.callbackData) {
       const cityCallbackToken = telegramBotCityCallbackToken(
         update.callbackData,
@@ -9208,6 +9256,23 @@ export class GuestPortalService {
       );
 
       return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
+    }
+
+    const guestMessageKey = telegramWebhookGuestMessageKey(dto, update);
+    if (guestMessageKey) {
+      const response = await this.recordTelegramGuestMessage(
+        update.telegramChatId,
+        update.text,
+        guestMessageKey,
+        telegramIdentityMasked,
+      );
+
+      if (response) {
+        return this.dispatchTelegramWebhookReply(
+          response,
+          update.telegramChatId,
+        );
+      }
     }
 
     return {
@@ -9868,6 +9933,12 @@ export class GuestPortalService {
               ],
             ]
           : []),
+        [
+          {
+            text: 'Присылать акции клуба',
+            callback_data: TELEGRAM_BOT_PROMO_YES_CALLBACK,
+          },
+        ],
       ],
     };
 
@@ -9901,6 +9972,11 @@ export class GuestPortalService {
           [
             'LeetPlus bot: здесь можно продолжить игру после Telegram-входа.',
             'Доступные действия: профиль, квесты, награды, выбор клуба, Mini App, сайт и отписка от уведомлений.',
+            ...(isGuestBugReportingLive(this.configService)
+              ? [
+                  'Чтобы написать клубу, просто отправьте сообщение в этот чат: ответ придёт сюда.',
+                ]
+              : []),
             'Для входа заново выберите клуб на сайте и нажмите "Войти через Telegram".',
           ].join('\n'),
         ),
@@ -10586,6 +10662,14 @@ export class GuestPortalService {
           ],
           ...checkInRow,
           [
+            ...(isGuestBugReportingLive(this.configService)
+              ? [
+                  {
+                    text: 'Написать клубу',
+                    callback_data: TELEGRAM_BOT_WRITE_CALLBACK,
+                  },
+                ]
+              : []),
             {
               text: 'Выбрать клуб',
               callback_data: 'bot:clubs',
@@ -10610,6 +10694,12 @@ export class GuestPortalService {
               text: 'Помощь',
               callback_data: '/help',
             },
+            {
+              text: 'Акции клуба',
+              callback_data: TELEGRAM_BOT_PROMO_CALLBACK,
+            },
+          ],
+          [
             {
               text: 'Отписаться',
               callback_data: TELEGRAM_BOT_UNSUBSCRIBE_CALLBACK,
@@ -10959,6 +11049,342 @@ export class GuestPortalService {
     return response;
   }
 
+  private telegramWebhookWriteToClubPrompt(
+    telegramIdentityMasked: string | null,
+  ): GuestPortalTelegramWebhookResponse {
+    const live = isGuestBugReportingLive(this.configService);
+    return this.withTelegramPlatformReply({
+      status: 'IGNORED',
+      action: 'TELEGRAM_BOT_WRITE',
+      profileId: null,
+      telegramIdentityMasked,
+      message: 'Telegram bot explained how to write to the club.',
+      reply: {
+        provider: 'TELEGRAM',
+        method: 'sendMessage',
+        chatIdMasked: telegramIdentityMasked,
+        text: live
+          ? [
+              'Напишите сообщение прямо в этот чат: вопрос, пожелание или жалобу.',
+              'Мы передадим его администратору вашего клуба, ответ придёт сюда.',
+            ].join('\n')
+          : 'Сообщения клубу через бота пока не принимаются.',
+      },
+    });
+  }
+
+  // A guest's own words to the bot (not a command, contact or button) go to
+  // the club as a Telegram conversation in the support queue.
+  private async recordTelegramGuestMessage(
+    telegramChatIdValue: string,
+    text: string | null,
+    messageKey: string,
+    telegramIdentityMasked: string | null,
+  ): Promise<GuestPortalTelegramWebhookResponse | null> {
+    if (!isGuestBugReportingLive(this.configService)) {
+      return null;
+    }
+
+    const platformReply = (message: string, replyText: string) =>
+      this.withTelegramPlatformReply({
+        status: 'IGNORED',
+        action: 'TELEGRAM_GUEST_MESSAGE',
+        profileId: null,
+        telegramIdentityMasked,
+        message,
+        reply: {
+          provider: 'TELEGRAM',
+          method: 'sendMessage',
+          chatIdMasked: telegramIdentityMasked,
+          text: replyText,
+        },
+      });
+
+    const profile = await this.prisma.guestGameProfile.findFirst({
+      where: {
+        telegramIdentity: `chat:${telegramChatIdValue}`,
+        status: {
+          notIn: [
+            'ARCHIVED',
+            'SUPERSEDED',
+            TELEGRAM_AUTH_MERGED_PROFILE_STATUS,
+            TELEGRAM_AUTH_PROFILE_STATUS,
+          ],
+        },
+      },
+      orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
+      select: { id: true, tenantId: true, guestId: true },
+    });
+    if (!profile) {
+      return platformReply(
+        'Telegram guest message from a chat without a game profile.',
+        [
+          'Чтобы написать клубу, сначала войдите в игру через Telegram.',
+          'Откройте сайт LeetPlus, выберите клуб и нажмите "Войти через Telegram".',
+        ].join('\n'),
+      );
+    }
+
+    const club = await this.findTelegramBotLatestClub(profile.id);
+    if (!club) {
+      return platformReply(
+        'Telegram guest message without a known club.',
+        'Не нашли ваш клуб. Войдите в игру через Telegram на сайте LeetPlus ещё раз, и тогда сможете написать клубу.',
+      );
+    }
+
+    const admission = await this.tenantExecutionAdmission.evaluate(
+      profile.tenantId,
+      GUEST_PORTAL_WRITE_REQUIREMENTS,
+    );
+    if (!admission.allowed) {
+      return platformReply(
+        'Telegram guest message refused by tenant admission.',
+        'Сейчас клуб не принимает сообщения через бота. Попробуйте позже.',
+      );
+    }
+
+    const result = await this.guestSupportService.recordTelegramMessage(
+      {
+        tenantId: profile.tenantId,
+        storeId: club.storeId,
+        profileId: profile.id,
+        guestId: profile.guestId,
+      },
+      text,
+      messageKey,
+    );
+
+    switch (result.status) {
+      case 'DISABLED':
+      case 'EMPTY':
+        return null;
+      case 'RATE_LIMITED':
+        return platformReply(
+          'Telegram guest message rate limited.',
+          'Слишком много сообщений подряд. Напишите, пожалуйста, чуть позже.',
+        );
+      case 'TOO_LONG':
+        return platformReply(
+          'Telegram guest message is too long.',
+          'Сообщение слишком длинное. Уложитесь, пожалуйста, в 1000 символов.',
+        );
+      case 'APPENDED':
+        // The conversation is open; another confirmation would only add noise.
+        return {
+          status: 'CONFIRMED',
+          action: 'TELEGRAM_GUEST_MESSAGE',
+          profileId: profile.id,
+          telegramIdentityMasked,
+          message: 'Telegram guest message added to the open conversation.',
+        };
+      case 'CREATED':
+      case 'REOPENED':
+        return this.withTelegramOutboundScope(
+          {
+            status: 'CONFIRMED',
+            action: 'TELEGRAM_GUEST_MESSAGE',
+            profileId: profile.id,
+            telegramIdentityMasked,
+            message: 'Telegram guest message passed to the club.',
+            reply: {
+              provider: 'TELEGRAM',
+              method: 'sendMessage',
+              chatIdMasked: telegramIdentityMasked,
+              text: [
+                `Передали ваше сообщение клубу «${club.name}».`,
+                'Ответ придёт сюда, в этот чат. Если хотите что-то добавить, просто напишите.',
+              ].join('\n'),
+            },
+          },
+          { tenantId: profile.tenantId, storeId: club.storeId },
+        );
+    }
+  }
+
+  // «Акции клуба»: the guest's own answer about promotional broadcasts.
+  // Saying yes also lifts an earlier bot unsubscribe for this chat, since it
+  // is a new explicit request to receive messages.
+  // The guest tapped 1–5 under the «Оценка визита» question. Only the chat the
+  // question went to can answer it; a second tap within a week changes the
+  // score.
+  private async telegramWebhookVisitRatingResponse(
+    telegramChatIdValue: string,
+    answer: { ratingId: string; score: number },
+    telegramIdentityMasked: string | null,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    const menuRow = [{ text: 'Меню', callback_data: 'bot:menu' }];
+    const reply = (
+      message: string,
+      text: string,
+      buttons: Array<Array<{ text: string; callback_data: string }>>,
+      profileId: string | null = null,
+    ) =>
+      this.withTelegramPlatformReply({
+        status: 'IGNORED',
+        action: 'TELEGRAM_VISIT_RATING',
+        profileId,
+        telegramIdentityMasked,
+        message,
+        reply: {
+          provider: 'TELEGRAM',
+          method: 'sendMessage',
+          chatIdMasked: telegramIdentityMasked,
+          text,
+          replyMarkup: { inline_keyboard: buttons },
+        },
+      });
+    const now = new Date();
+    const rating = await this.prisma.guestVisitRating.findFirst({
+      where: {
+        id: answer.ratingId,
+        askedAt: { gt: new Date(now.getTime() - VISIT_RATING_ANSWER_MS) },
+        profile: { telegramIdentity: `chat:${telegramChatIdValue}` },
+      },
+      select: { id: true, tenantId: true, profileId: true },
+    });
+    if (!rating) {
+      return reply(
+        'Telegram visit rating for an unknown or expired question.',
+        'Эта оценка уже не принимается. Спасибо, что откликнулись!',
+        [menuRow],
+      );
+    }
+    await this.prisma.guestVisitRating.updateMany({
+      where: { id: rating.id, tenantId: rating.tenantId },
+      data: { score: answer.score, answeredAt: now },
+    });
+    return reply(
+      'Telegram guest rated the visit.',
+      visitRatingThanks(answer.score),
+      answer.score <= VISIT_RATING_LOW_SCORE_MAX
+        ? [
+            [
+              {
+                text: 'Написать клубу',
+                callback_data: TELEGRAM_BOT_WRITE_CALLBACK,
+              },
+            ],
+            menuRow,
+          ]
+        : [menuRow],
+      rating.profileId,
+    );
+  }
+
+  private async telegramWebhookPromoResponse(
+    telegramChatIdValue: string,
+    choice: 'ASK' | 'YES' | 'NO',
+    telegramIdentityMasked: string | null,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    const reply = (
+      message: string,
+      text: string,
+      buttons: Array<Array<{ text: string; callback_data: string }>>,
+    ) =>
+      this.withTelegramPlatformReply({
+        status: 'IGNORED',
+        action: 'TELEGRAM_BOT_PROMO',
+        profileId: null,
+        telegramIdentityMasked,
+        message,
+        reply: {
+          provider: 'TELEGRAM',
+          method: 'sendMessage',
+          chatIdMasked: telegramIdentityMasked,
+          text,
+          replyMarkup: { inline_keyboard: buttons },
+        },
+      });
+    const menuRow = [{ text: 'Меню', callback_data: 'bot:menu' }];
+    const profiles = await this.prisma.guestGameProfile.findMany({
+      where: {
+        telegramIdentity: `chat:${telegramChatIdValue}`,
+        status: 'ACTIVE',
+      },
+      select: { id: true, promoConsentStatus: true },
+    });
+    if (!profiles.length) {
+      return reply(
+        'Telegram promo choice from a chat without a game profile.',
+        'Сначала войдите в игру через Telegram на сайте LeetPlus, и тогда сможете выбрать, присылать ли акции клуба.',
+        [menuRow],
+      );
+    }
+
+    if (choice === 'ASK') {
+      const granted = profiles.some(
+        (profile) => profile.promoConsentStatus === 'GRANTED',
+      );
+      return reply(
+        'Telegram bot asked about promotional broadcasts.',
+        [
+          granted
+            ? 'Сейчас мы присылаем сюда акции и спецпредложения клуба.'
+            : 'Сейчас акции и спецпредложения клуба сюда не приходят.',
+          'Новости клуба (часы работы, ремонт, новое железо) и ответы на ваши сообщения приходят в любом случае, пока вы не отписались.',
+        ].join('\n'),
+        [
+          granted
+            ? [
+                {
+                  text: 'Не присылать акции',
+                  callback_data: TELEGRAM_BOT_PROMO_NO_CALLBACK,
+                },
+              ]
+            : [
+                {
+                  text: 'Присылать акции',
+                  callback_data: TELEGRAM_BOT_PROMO_YES_CALLBACK,
+                },
+              ],
+          menuRow,
+        ],
+      );
+    }
+
+    const now = new Date();
+    const profileIds = profiles.map((profile) => profile.id);
+    if (choice === 'YES') {
+      await this.prisma.guestGameProfile.updateMany({
+        where: { id: { in: profileIds } },
+        data: { promoConsentStatus: 'GRANTED', promoConsentAt: now },
+      });
+      await this.prisma.guestGameProfile.updateMany({
+        where: {
+          id: { in: profileIds },
+          phoneConsentStatus: {
+            in: [
+              GuestCommunicationConsentStatus.UNSUBSCRIBED,
+              GuestCommunicationConsentStatus.DENIED,
+            ],
+          },
+        },
+        data: {
+          phoneConsentStatus: GuestCommunicationConsentStatus.GRANTED,
+          phoneConsentSource: 'telegram_bot_promo',
+          phoneConsentAt: now,
+          unsubscribedAt: null,
+        },
+      });
+      return reply(
+        'Telegram guest agreed to promotional broadcasts.',
+        'Готово: будем присылать сюда акции и спецпредложения клуба. Передумаете — нажмите «Акции клуба» в меню.',
+        [menuRow],
+      );
+    }
+
+    await this.prisma.guestGameProfile.updateMany({
+      where: { id: { in: profileIds } },
+      data: { promoConsentStatus: 'DENIED', promoConsentAt: now },
+    });
+    return reply(
+      'Telegram guest declined promotional broadcasts.',
+      'Хорошо, акции присылать не будем. Новости клуба и ответы на ваши сообщения по-прежнему придут сюда; чтобы не получать ничего, нажмите «Отписаться» в меню.',
+      [menuRow],
+    );
+  }
+
   private telegramWebhookUnsubscribeConfirmationResponse(
     telegramIdentityMasked: string | null,
   ): GuestPortalTelegramWebhookResponse {
@@ -11082,6 +11508,8 @@ export class GuestPortalService {
           phoneConsentSource: 'telegram_bot',
           phoneConsentAt: null,
           unsubscribedAt: now,
+          promoConsentStatus: 'DENIED',
+          promoConsentAt: now,
         },
       });
 
@@ -18848,6 +19276,51 @@ function telegramWebhookUpdate(value: unknown) {
     contactUserId,
     callbackData,
   };
+}
+
+// Key of a plain text message a guest typed in a private chat with the bot.
+// Edits, channel posts, groups, buttons, contacts and slash commands are not
+// guest messages.
+function telegramBotPromoChoice(
+  callbackData: string | null,
+): 'ASK' | 'YES' | 'NO' | null {
+  switch (callbackData?.trim()) {
+    case TELEGRAM_BOT_PROMO_CALLBACK:
+      return 'ASK';
+    case TELEGRAM_BOT_PROMO_YES_CALLBACK:
+      return 'YES';
+    case TELEGRAM_BOT_PROMO_NO_CALLBACK:
+      return 'NO';
+    default:
+      return null;
+  }
+}
+
+function telegramWebhookGuestMessageKey(
+  dto: unknown,
+  update: {
+    text: string | null;
+    callbackData: string | null;
+    contactPhone: string | null;
+    telegramChatId: string;
+  },
+) {
+  const record = objectRecord(dto);
+  const message = objectRecord(record?.message);
+  const text = update.text?.trim() ?? '';
+  if (
+    !message ||
+    update.callbackData ||
+    update.contactPhone ||
+    !text ||
+    text.startsWith('/') ||
+    typeof message.text !== 'string' ||
+    update.telegramChatId.startsWith('-')
+  ) {
+    return null;
+  }
+  const updateId = telegramWebhookUpdateId(dto);
+  return updateId === null ? null : `update:${updateId.toString()}`;
 }
 
 function telegramWebhookUpdateId(value: unknown) {

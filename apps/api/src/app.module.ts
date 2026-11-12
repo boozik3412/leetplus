@@ -20,6 +20,7 @@ import { SettingsModule } from './settings/settings.module';
 import { StaffModule } from './staff/staff.module';
 import { StoresModule } from './stores/stores.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
+import { GuestCommunicationsModule } from './guest-communications/guest-communications.module';
 import { SupportModule } from './support/support.module';
 import { TenancyModule } from './tenancy/tenancy.module';
 import { UtilitiesModule } from './utilities/utilities.module';
@@ -49,6 +50,7 @@ import { UsersModule } from './users/users.module';
     MarketingModule,
     SettingsModule,
     StaffModule,
+    GuestCommunicationsModule,
     SupportModule,
     UtilitiesModule,
     UsersModule,

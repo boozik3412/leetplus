@@ -1664,6 +1664,19 @@ Support-функциональность следует тем же трём г�
   отдаёт названия наград и статусы без идентификаторов провайдеров;
 - вложение ограничено одним JPG/PNG/WebP до 5 MiB, проверяется по bytes,
   очищается от metadata и выдаётся только как private attachment;
+- обращения из Telegram-бота (12.11.2026): при `LIVE` свободный текст гостя в
+  личном чате бота (не команда, не кнопка, не контакт) принимается тем же
+  `/guest-portal/telegram/webhook` под webhook secret. GuestRuntime находит
+  только exact активный `GuestGameProfile` с `telegramIdentity = chat:<id>` и
+  его последний подтверждённый клуб, проверяет tenant admission и пишет только
+  support-owned tables: новое обращение `kind = TELEGRAM`, `topic = OTHER`
+  (idempotency `telegram:update:<update_id>`, лимит 20 в сутки на профиль) или
+  комментарий гостя в последнем открытом/переоткрываемом TELEGRAM-обращении
+  (id комментария детерминирован от update, повтор доставки не дублирует).
+  Чат без профиля получает только platform-safe подсказку войти. Публичный
+  ответ сотрудника на TELEGRAM-обращение в corporate contour ставит строку в
+  `GuestTelegramOutboxMessage`; guest process очередь не читает и в Telegram
+  не пишет;
 - runtime flag `GUEST_BUG_REPORTING_MODE=OFF|LIVE` fail-closed и по умолчанию
   равен `OFF`.
 - schema bridge содержит только именованные exact-пары:
@@ -1784,6 +1797,77 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
 8. Production GO требует non-consuming `getMe`/`getWebhookInfo`, пустой webhook,
    ровно один process, свежий heartbeat, monotonic state, Telegram canary и
    отрицательную public/corporate/worker matrix.
+
+### Очередь сообщений гостям через Telegram-бот (12.11.2026)
+
+1. `GuestTelegramOutboxMessage` (миграция 200, grant `leetplus_runtime`) —
+   единая очередь исходящих сообщений гостю в Telegram: сейчас
+   `SUPPORT_REPLY`, `CAMPAIGN_NEWS`, `CAMPAIGN_PROMO`, `VISIT_RATING`. Строка уникальна по
+   `tenantId + sourceKey` и привязана к exact `tenantId + profileId`.
+2. Worker routes `POST /guests/communications/telegram-outbox/claim|report`
+   регистрируются только в corporate runtime (`GuestCommunicationsModule`),
+   проходят `assertScheduledHttpAllowed` и требуют отдельный header
+   `x-telegram-outbox-token`, сравниваемый с `GUEST_TELEGRAM_OUTBOX_TOKEN`
+   (≥ 32 символов, sha256 + timing-safe). Это не `SYNC_SERVICE_TOKEN`, не
+   webhook secret и не bot token: edge не получает sync token ради очереди.
+3. Claim выдаёт сообщение под lease 2 минуты и `claimToken`; перед выдачей
+   заново проверяет tenant admission `COMMUNICATIONS/OUTBOUND`, статус профиля
+   и наличие чата, а для всего, кроме `SUPPORT_REPLY`, — что гость не отписан (для
+   `CAMPAIGN_PROMO` ещё `promoConsentStatus = GRANTED`). Report меняет
+   только строку с тем же `claimToken` в `SENDING`; повтор до 5 попыток с
+   backoff и Telegram `retry_after`, 403/«chat not found» → `BLOCKED`.
+4. Отправку делает только `telegram-poller` через тот же process-scoped
+   Privoxy/Tor egress, что и polling. API, corporate и guest processes в
+   Telegram не ходят; новой provider egress нет. Без
+   `GUEST_GAME_TG_EDGE_OUTBOX_TOKEN` или при dry run цикл очереди выключен и
+   не влияет на poll.
+5. В ответе worker route есть только chat id, текст и allowlisted кнопки;
+   телефон, ФИО и support metadata в edge не передаются.
+6. Рассылки кампаний (миграция 201): `GET /marketing/campaigns/:id/telegram`,
+   `POST …/telegram/draft`, `POST …/telegram/send` — corporate контур,
+   `JwtAuthGuard` + `RolesGuard` (`view_marketing` / `manage_marketing`), как у
+   остального `/marketing`; `send` дополнительно требует fresh NETWORK scope
+   (`FreshNetworkScopeGuard`) и tenant admission `COMMUNICATIONS/OUTBOUND`.
+   Send только ставит строки в очередь (`sourceKey =
+   campaign:<id>:profile:<profileId>`, `skipDuplicates`), не больше 10 000 за
+   раз и не чаще одного сообщения кампании гостю в 3 дня. Доставленное
+   сообщение пишет `GuestCrmContactEvent` (канал «Telegram-бот», `result`
+   пустой) в report worker route.
+7. Согласие на акции — `GuestGameProfile.promoConsentStatus`
+   (`UNKNOWN|GRANTED|DENIED`), отдельно от согласия при входе в игру (оно не
+   покрывает рекламу). Меняет его только сам гость кнопками бота
+   (`bot:promo`, `bot:promo:yes|no`) в public guest webhook; полная отписка
+   ставит `DENIED`. Corporate API согласие не записывает.
+8. Автосценарии кампаний (без миграции): `POST
+   /marketing/campaigns/:id/telegram/automation` — corporate контур, те же
+   guards, что у `send` (`manage_marketing` + fresh NETWORK scope), включение
+   ещё проверяет tenant admission `COMMUNICATIONS/OUTBOUND`. Правило лежит в
+   `MarketingCampaign.mechanicConfig.telegram.automation`; обычное сохранение
+   кампании этот ключ не создаёт и не меняет. Ставит сообщения в очередь
+   только scheduler-проход `bonus-ledger-worker` (worker контур, уже
+   существующий `lp-bonus.timer`): по всем сетям с включённым правилом и
+   кампанией `RUNNING`, заново проверяя admission сети, не чаще раза в 30
+   минут на кампанию, с 12 до 21 по времени сети, до 300 строк за запуск,
+   `sourceKey = campaign:<id>:auto:<случай>:profile:<profileId>`. Worker
+   читает визиты/награды и пишет только `GuestTelegramOutboxMessage` и
+   отметки запуска в JSON кампании; новой egress, секрета и процесса нет,
+   public guest и API runtime scheduler не получают.
+9. Оценка визита (миграция 202: `GuestVisitRating`,
+   `GuestVisitRatingSettings`, grant `leetplus_runtime`). Включает сеть
+   `POST /marketing/visit-ratings/settings` — corporate контур,
+   `manage_marketing` + fresh NETWORK scope; отчёт `GET
+   /marketing/visit-ratings` (`view_marketing`) заново читает store scope,
+   STORES-пользователь видит только свои клубы. Вопрос ставит только
+   scheduler-проход `bonus-ledger-worker` (тот же `lp-bonus.timer`): сети с
+   включённой оценкой, admission `COMMUNICATIONS/OUTBOUND`, не чаще раза в 5
+   минут на сеть, с 11 до 22 по времени сети, до 300 вопросов за запуск. Он
+   читает `GuestSession`/`Guest`/`GuestGameProfile` и пишет в одной
+   транзакции `GuestVisitRating` и `VISIT_RATING` в очередь
+   (`sourceKey = visit-rating:<ratingId>`). Ответ гостя — кнопка
+   `bot:rate:<ratingId>:<1-5>` в public guest webhook: обновляет оценку,
+   только если вопрос ушёл в этот же чат (`profile.telegramIdentity`) не
+   раньше недели назад; других записей webhook не делает. Новой egress,
+   секрета и процесса нет.
 
 ## Инварианты корпоративного входа
 
@@ -1985,6 +2069,28 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   в ответе нет; Langame для блока не нужен, поэтому он есть и у клуба без
   Langame. Ошибка чтения даёт `game: null` и предупреждение, остальная схема
   работает.
+- Гость за компьютером (12.11.2026): `GET /stores/:id/floor-plan/live/seats/:number`
+  (тот же контроллер, JWT + `RolesGuard` → `view_club_scheme`, manifest
+  `STORES_VERIFIED`, свежий store scope, чужой клуб — 404). Сеанс ПК (начало,
+  конец, название тарифа Langame из `tariffs/types_groups`, кэш 10 минут)
+  берётся из того же общего 15-секундного чтения Langame, что и схема; в
+  ответ `/floor-plan/live` идентификаторы гостей по-прежнему не попадают, они
+  живут только в памяти процесса до конца окна кэша. Данные гостя отдаются
+  только пользователю с правом раздела «Гости» (`view_guests`, OWNER или
+  platform admin; иначе `guestAccess = NO_CAPABILITY` и только сеанс): гость
+  находится по `tenantId` + домену Langame + `guest_id` сеанса, а поля берутся
+  из `GuestsService.getGuest` — той же карточки гостя с теми же правилами ПДн
+  (имя как в карточке, без телефона и e-mail в ответе), игровые поля только
+  при `view_guest_gamification`. Покупки гостя — строки `products/expense`
+  этого клуба за смену (или день) с его `real_guest_id` из того же чтения.
+  Если гостя ещё нет в базе LeetPlus (справочник гостей синхронизируется
+  ночью, а гость зарегистрирован позже), ответ несёт `newGuest`: только `fio`
+  из Langame `/guests/{guest_id}` того же источника (телефон из ответа не
+  передаётся, кэш 10 минут в памяти процесса) и его покупки за смену; то же
+  право `view_guests`. Записей, новых запросов к Langame, кроме справочника
+  тарифов и карточки нового гостя, worker и scheduler нет. BFF
+  `GET /api/stores/:id/floor-plan/live/seats/:number` проксирует его тем же
+  `proxyJsonRequest`.
 - Web: страница `/visualization`, раздел меню «Визуализация» (`canAccessPath` → `view_club_scheme`) и BFF
   `/api/stores/:id/floor-plan*` через `proxyJsonRequest` (cookie → JWT,
   `private, no-store`). BFF `GET /api/stores/floor-plans` (11.11.2026) тем же

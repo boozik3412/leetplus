@@ -18,20 +18,22 @@ export default async function GamificationLogPage() {
           current="Игровой журнал"
           items={[
             { href: "/dashboard", label: "Дашборд" },
-            { href: "/gamification", label: "Геймификация" },
+            { href: "/gamification", label: "Игровой модуль" },
           ]}
         />
 
         <header className="mb-6">
           <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-            Геймификация
+            Игровой модуль
           </p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">
             Игровой журнал
           </h1>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Диагностика действий гостя в игровом модуле, логов Langame и
-            сравнения текущей боевой проверки с новым слоем Игрового журнала.
+            Найдите гостя по телефону и посмотрите, что игра делала с ним:
+            какие задания засчитаны, какие кейсы и награды выданы и почему
+            что-то не начислилось. Пригодится, когда гость пишет «мне не
+            засчитали».
           </p>
         </header>
 

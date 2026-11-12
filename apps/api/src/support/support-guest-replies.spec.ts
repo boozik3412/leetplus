@@ -27,9 +27,19 @@ function existingTicket(overrides: Row = {}) {
   };
 }
 
-function fixture(ticket: Row | null = existingTicket()) {
+function fixture(
+  ticket: Row | null = existingTicket(),
+  channelTicket: Row = {
+    kind: 'BUG',
+    storeId: 'store-a',
+    profileId: 'profile-a',
+    store: { name: 'Клуб А' },
+  },
+) {
+  const telegramOutbox = { enqueue: jest.fn().mockResolvedValue(undefined) };
   const tx = {
     guestSupportTicket: {
+      findFirst: jest.fn().mockResolvedValue(channelTicket),
       update: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
@@ -70,8 +80,9 @@ function fixture(ticket: Row | null = existingTicket()) {
     { resolve: jest.fn(() => ({ tenantId: 'tenant-a' })) } as never,
     new ConfigService({}),
     { decrypt: jest.fn() } as never,
+    telegramOutbox as never,
   );
-  return { service, prisma, tx };
+  return { service, prisma, tx, telegramOutbox };
 }
 
 function audits(tx: ReturnType<typeof fixture>['tx']) {
@@ -122,6 +133,44 @@ describe('SupportTicketsService replies to the guest', () => {
       where: { id: 'ticket-a', tenantId: 'tenant-a' },
       data: expect.objectContaining({ status: 'IN_PROGRESS' }) as Row,
     });
+  });
+
+  it('queues the reply for the Telegram chat of a guest who wrote to the bot', async () => {
+    const { service, tx, telegramOutbox } = fixture(existingTicket(), {
+      kind: 'TELEGRAM',
+      storeId: 'store-a',
+      profileId: 'profile-a',
+      store: { name: 'Клуб А' },
+    });
+
+    await service.addTenantComment(actor, 'ticket-a', {
+      body: 'Ответ',
+      visibility: 'PUBLIC',
+    });
+
+    expect(telegramOutbox.enqueue).toHaveBeenCalledWith(tx, {
+      tenantId: 'tenant-a',
+      storeId: 'store-a',
+      profileId: 'profile-a',
+      kind: 'SUPPORT_REPLY',
+      sourceKey: 'support-comment:comment-1',
+      supportTicketId: 'ticket-a',
+      supportCommentId: 'comment-1',
+      createdByUserId: 'user-a',
+      text: expect.stringContaining('Ответ клуба «Клуб А»') as string,
+    });
+  });
+
+  it('does not queue Telegram messages for web tickets or internal notes', async () => {
+    const { service, telegramOutbox } = fixture();
+
+    await service.addTenantComment(actor, 'ticket-a', {
+      body: 'Ответ',
+      visibility: 'PUBLIC',
+    });
+    await service.addTenantComment(actor, 'ticket-a', { body: 'Заметка' });
+
+    expect(telegramOutbox.enqueue).not.toHaveBeenCalled();
   });
 
   it('does not change the status of a ticket already in work', async () => {

@@ -13,6 +13,8 @@ export type ThemeMode = "light" | "dark" | "system";
 
 type ThemeContextValue = {
   theme: ThemeMode;
+  /** What the page actually shows: "system" resolved by the OS setting. */
+  resolvedTheme: "light" | "dark";
   setTheme: (theme: ThemeMode) => void;
 };
 
@@ -29,6 +31,7 @@ function applyTheme(theme: ThemeMode) {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>("system");
+  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -38,8 +41,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         : "system";
 
     applyTheme(currentTheme);
+    const prefersDark = window.matchMedia(
+      "(prefers-color-scheme: dark)",
+    ).matches;
     const frame = window.requestAnimationFrame(() => {
       setThemeState(currentTheme);
+      setSystemPrefersDark(prefersDark);
     });
 
     return () => window.cancelAnimationFrame(frame);
@@ -47,7 +54,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const handleChange = () => applyTheme(theme);
+    const handleChange = () => {
+      setSystemPrefersDark(media.matches);
+      applyTheme(theme);
+    };
 
     media.addEventListener("change", handleChange);
     return () => media.removeEventListener("change", handleChange);
@@ -56,13 +66,19 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       theme,
+      resolvedTheme:
+        theme === "system"
+          ? systemPrefersDark
+            ? ("dark" as const)
+            : ("light" as const)
+          : theme,
       setTheme: (nextTheme: ThemeMode) => {
         window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
         setThemeState(nextTheme);
         applyTheme(nextTheme);
       },
     }),
-    [theme],
+    [theme, systemPrefersDark],
   );
 
   return (

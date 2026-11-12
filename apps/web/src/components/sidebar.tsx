@@ -101,7 +101,7 @@ const navGroups: NavGroup[] = [
         activePaths: ["/guests/crm/tasks"],
       },
       { href: "/marketing", label: "Кампании" },
-      { href: "/marketing/missions", label: "Акции" },
+      { href: "/marketing/missions", label: "Ручные награды" },
       { href: "/marketing/promo-bundles", label: "Промо-наборы" },
       { href: "/support", label: "Обращения гостей" },
     ],

@@ -115,7 +115,7 @@ Agreed names (decisions of 10.11.2026):
 | Random reward containers | «Кейсы», «кейс» | «Лутбоксы», «lootbox» |
 | Season pass | «Battle Pass» (kept, guests know it) | — |
 | Guest game tasks | «Задания» | «Миссии», «квесты» in navigation |
-| Marketing promo tasks | «Акции» | «Промо-сценарии» |
+| One-off rewards staff give by hand (`/marketing/missions`, since 12.11) | «Ручные награды» | «Акции», «Промо-сценарии» |
 | Calculation for a period | «расчёт за период», «данные на <дату>» | «snapshot», «typed snapshot» |
 | Test without paying out | «проверка без начисления» | «dry-run» |
 | Bonus operations log | «журнал начислений» | «ledger», «bonus ledger» |

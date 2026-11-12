@@ -2305,13 +2305,14 @@ export function GuestGamificationPanel({
               Игровой модуль
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Уровни, задания, кейсы, Battle Pass и награды гостей. Разовые
-              акции для кампаний настраиваются в разделе{" "}
+              Уровни, задания, кейсы, Battle Pass и награды гостей. Разовую
+              награду гостю вручную (турнир, друг, день рождения) выдают в
+              разделе{" "}
               <Link
                 href="/marketing/missions"
                 className="font-semibold text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-300"
               >
-                «Акции»
+                «Ручные награды»
               </Link>
               .
             </p>

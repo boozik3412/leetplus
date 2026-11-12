@@ -62,6 +62,11 @@ import { GuestIdentityResolverService } from '../integrations/guest-identity-res
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
 import { buildTelegramSendMessageBody } from './telegram-send-message-payload';
 import {
+  parseVisitRatingCallback,
+  VISIT_RATING_LOW_SCORE_MAX,
+  visitRatingThanks,
+} from './guest-visit-rating-callback';
+import {
   GUEST_BUG_REPORT_MAX_BYTES,
   GUEST_BUG_REPORT_TOPICS,
   GUEST_BUG_REPORT_TOPIC_LABELS,
@@ -219,6 +224,8 @@ const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
   'guest_portal:communication_preference:';
 const TELEGRAM_BOT_UNSUBSCRIBE_CALLBACK = 'bot:unsubscribe';
 const TELEGRAM_BOT_WRITE_CALLBACK = 'bot:write';
+// A guest may change the visit rating for a week after the question.
+const VISIT_RATING_ANSWER_MS = 7 * 24 * 60 * 60 * 1000;
 const TELEGRAM_BOT_UNSUBSCRIBE_CONFIRM_CALLBACK = 'bot:unsubscribe:confirm';
 // Promotional broadcasts need the guest's own "yes" in the bot: login consent
 // covers quests only. Club news goes to every guest who has not unsubscribed.
@@ -856,6 +863,7 @@ export type GuestPortalTelegramWebhookResponse = {
     | 'TELEGRAM_BOT_HELP'
     | 'TELEGRAM_BOT_WRITE'
     | 'TELEGRAM_BOT_PROMO'
+    | 'TELEGRAM_VISIT_RATING'
     | 'TELEGRAM_GUEST_MESSAGE'
     | 'UNSUBSCRIBE'
     | 'UNSUBSCRIBE_CONFIRMATION'
@@ -9166,6 +9174,18 @@ export class GuestPortalService {
       return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
     }
 
+    const visitRating = parseVisitRatingCallback(update.callbackData);
+    if (visitRating) {
+      return this.dispatchTelegramWebhookReply(
+        await this.telegramWebhookVisitRatingResponse(
+          update.telegramChatId,
+          visitRating,
+          telegramIdentityMasked,
+        ),
+        update.telegramChatId,
+      );
+    }
+
     const promoChoice = telegramBotPromoChoice(update.callbackData);
     if (promoChoice) {
       return this.dispatchTelegramWebhookReply(
@@ -11185,6 +11205,73 @@ export class GuestPortalService {
   // «Акции клуба»: the guest's own answer about promotional broadcasts.
   // Saying yes also lifts an earlier bot unsubscribe for this chat, since it
   // is a new explicit request to receive messages.
+  // The guest tapped 1–5 under the «Оценка визита» question. Only the chat the
+  // question went to can answer it; a second tap within a week changes the
+  // score.
+  private async telegramWebhookVisitRatingResponse(
+    telegramChatIdValue: string,
+    answer: { ratingId: string; score: number },
+    telegramIdentityMasked: string | null,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    const menuRow = [{ text: 'Меню', callback_data: 'bot:menu' }];
+    const reply = (
+      message: string,
+      text: string,
+      buttons: Array<Array<{ text: string; callback_data: string }>>,
+      profileId: string | null = null,
+    ) =>
+      this.withTelegramPlatformReply({
+        status: 'IGNORED',
+        action: 'TELEGRAM_VISIT_RATING',
+        profileId,
+        telegramIdentityMasked,
+        message,
+        reply: {
+          provider: 'TELEGRAM',
+          method: 'sendMessage',
+          chatIdMasked: telegramIdentityMasked,
+          text,
+          replyMarkup: { inline_keyboard: buttons },
+        },
+      });
+    const now = new Date();
+    const rating = await this.prisma.guestVisitRating.findFirst({
+      where: {
+        id: answer.ratingId,
+        askedAt: { gt: new Date(now.getTime() - VISIT_RATING_ANSWER_MS) },
+        profile: { telegramIdentity: `chat:${telegramChatIdValue}` },
+      },
+      select: { id: true, tenantId: true, profileId: true },
+    });
+    if (!rating) {
+      return reply(
+        'Telegram visit rating for an unknown or expired question.',
+        'Эта оценка уже не принимается. Спасибо, что откликнулись!',
+        [menuRow],
+      );
+    }
+    await this.prisma.guestVisitRating.updateMany({
+      where: { id: rating.id, tenantId: rating.tenantId },
+      data: { score: answer.score, answeredAt: now },
+    });
+    return reply(
+      'Telegram guest rated the visit.',
+      visitRatingThanks(answer.score),
+      answer.score <= VISIT_RATING_LOW_SCORE_MAX
+        ? [
+            [
+              {
+                text: 'Написать клубу',
+                callback_data: TELEGRAM_BOT_WRITE_CALLBACK,
+              },
+            ],
+            menuRow,
+          ]
+        : [menuRow],
+      rating.profileId,
+    );
+  }
+
   private async telegramWebhookPromoResponse(
     telegramChatIdValue: string,
     choice: 'ASK' | 'YES' | 'NO',

@@ -178,7 +178,7 @@ function NoSalesSelector({
   };
 }) {
   return (
-    <div className="flex rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 text-[10px] font-semibold dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="flex rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 text-xs font-semibold dark:border-zinc-800 dark:bg-zinc-900">
       {[7, 14, 21, 30].map((days) => {
         const active = days === selected;
         const href = `/assortment/dashboard?${dashboardScopeParams({ ...scope, noSalesDays: days as 7 | 14 | 21 | 30 }, dashboardQuery)}`;
@@ -273,7 +273,7 @@ function HealthCard({
         <p className="mt-1 min-h-5 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
           {value.reason ?? stateLabel(value.state)}
         </p>
-        <p className="mt-2 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+        <p className="mt-2 text-xs leading-4 text-zinc-500 dark:text-zinc-400">
           {coverageLabel(value)} · {dataDate}
           {additionalDate ? ` · ${additionalDate}` : ""}
           {valuation ? ` · ${valuation}` : ""}

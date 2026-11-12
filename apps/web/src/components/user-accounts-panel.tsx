@@ -276,7 +276,7 @@ const roleAccessPreviewRoutes: RoleAccessPreviewRoute[] = [
   {
     group: "Маркетинг",
     href: "/marketing/missions",
-    label: "Промо-сценарии",
+    label: "Акции",
   },
   {
     group: "Ассортимент",

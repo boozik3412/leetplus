@@ -58,7 +58,7 @@ export default async function StockValuePage({
   };
 
   return (
-    <main className="min-h-screen bg-[var(--background)] text-zinc-950">
+    <main className="cabinet-type-scale min-h-screen bg-[var(--background)] text-zinc-950">
       <div className="px-4 py-4">
         <ReportBreadcrumbs
           current="Деньги в остатке"

@@ -338,7 +338,7 @@ export default async function GuestFullReportPage({
   };
 
   return (
-    <main className="min-h-screen bg-zinc-50 px-5 py-5 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-100">
+    <main className="cabinet-type-scale min-h-screen bg-zinc-50 px-5 py-5 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-100">
       <div className="mx-auto max-w-[1760px]">
         <ReportBreadcrumbs
           current="Полный отчет по гостям"

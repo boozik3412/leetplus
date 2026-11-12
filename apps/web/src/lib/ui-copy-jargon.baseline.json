@@ -21,9 +21,6 @@
   "app/(app)/guests/[id]/page.tsx": {
     "api": 1
   },
-  "app/(app)/marketing/missions/page.tsx": {
-    "promo-scenario": 1
-  },
   "app/(app)/reports/page.tsx": {
     "tenant": 1
   },
@@ -115,7 +112,6 @@
     "snapshot": 2
   },
   "components/guest-gamification-statistics-tab.tsx": {
-    "ledger": 1,
     "lootbox": 1
   },
   "components/guest-gamification-visual-editor.tsx": {
@@ -170,12 +166,7 @@
     "snapshot": 1
   },
   "components/marketing-missions-panel.tsx": {
-    "anti-fraud": 3,
-    "api": 1,
-    "dry-run": 1,
-    "lootbox": 2,
-    "promo-scenario": 3,
-    "snapshot": 1
+    "anti-fraud": 3
   },
   "components/module-choice-page.tsx": {
     "lootbox": 1
@@ -220,8 +211,5 @@
   },
   "components/store-logo-control.tsx": {
     "api": 1
-  },
-  "components/user-accounts-panel.tsx": {
-    "promo-scenario": 1
   }
 }

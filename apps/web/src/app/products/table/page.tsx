@@ -48,7 +48,7 @@ export default async function ProductsTablePage({
   const catalog = await (unfilteredCatalogPromise ?? getProductCatalog(query));
 
   return (
-    <main className="min-h-screen bg-[var(--background)] text-zinc-950">
+    <main className="cabinet-type-scale min-h-screen bg-[var(--background)] text-zinc-950">
       <div className="px-4 py-4">
         <nav aria-label="Навигация" className="mb-3 text-sm text-zinc-500">
           <ol className="flex flex-wrap items-center gap-2">

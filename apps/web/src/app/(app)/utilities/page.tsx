@@ -11,22 +11,23 @@ export default async function UtilitiesPage() {
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
-          current="Утилиты"
+          current="Дубли товаров"
           items={[
             { href: "/dashboard", label: "Дашборд" },
-            { href: "/administration", label: "Администрирование" },
+            { href: "/products", label: "Товары" },
           ]}
         />
         <div>
           <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
-            Операционные инструменты
+            Товары
           </p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-            Утилиты
+            Дубли товаров
           </h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Инструменты для приведения данных сети к единому виду без изменения
-            фактических продаж, цен, поставщиков и остатков по клубам.
+            Один и тот же товар в разных клубах часто называется по-разному.
+            Здесь его можно объединить в один товар сети. Продажи, цены и
+            остатки в клубах не меняются.
           </p>
         </div>
 

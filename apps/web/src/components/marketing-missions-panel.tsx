@@ -370,10 +370,9 @@ export function MarketingMissionsPanel({
               Акции
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Краткосрочные акции для кампаний: кому, в каких клубах, на какой
-              срок, бюджет, лимиты и очередь ручной выдачи. Постоянные XP,
-              уровни, кейсы, Battle Pass и кошелёк наград живут в игровом
-              модуле.
+              Акции с ручной выдачей: администратор сам проверяет, что гость
+              выполнил условие, и выдаёт награду. LeetPlus ничего не начисляет
+              автоматически.
             </p>
           </div>
           <button
@@ -387,31 +386,32 @@ export function MarketingMissionsPanel({
 
         <div className="mt-5 grid gap-3 md:grid-cols-2">
           <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
-            <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-              Здесь: маркетинг
-            </p>
-            <h2 className="mt-1 font-semibold text-zinc-950 dark:text-white">
-              Разовый спрос и промо-эффект
+            <h2 className="font-semibold text-zinc-950 dark:text-white">
+              Как это работает
             </h2>
-            <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Акции для кампаний, групп гостей, тихих часов, бара и событий.
-              Награды пока выдаются вручную: автоматическое начисление через
-              Langame ещё не подключено.
-            </p>
+            <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              <li>Создайте акцию: условие, награда, клубы и срок.</li>
+              <li>Администратор добавляет гостя в очередь выдачи.</li>
+              <li>
+                Управляющий согласует, начисляет бонус в Langame и отмечает
+                «выдано».
+              </li>
+            </ol>
           </div>
           <Link
-            href="/gamification"
+            href="/gamification/missions/wizard"
             className="rounded-lg border border-zinc-200 p-4 transition hover:border-emerald-500/70 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
           >
-            <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
-              Игровой модуль
-            </p>
-            <h2 className="mt-1 font-semibold text-zinc-950 dark:text-white">
-              Постоянная игровая экономика
+            <h2 className="font-semibold text-zinc-950 dark:text-white">
+              Нужно без ручной проверки?
             </h2>
             <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Игровые профили, XP, уровни, кейсы, задания, Battle Pass и
-              кошелёк наград.
+              Визит, игровые часы, покупку в баре и пополнение видно в Langame.
+              Создайте задание в игровом модуле: оно засчитается и наградит
+              гостя само.
+            </p>
+            <p className="mt-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+              Создать задание →
             </p>
           </Link>
         </div>
@@ -565,23 +565,6 @@ export function MarketingMissionsPanel({
                 {audiences.map((audience) => (
                   <option key={audience.id} value={audience.id}>
                     {audience.name} · {audience.guestsCount}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Тип факта">
-              <select
-                value={form.triggerKind}
-                onChange={(event) =>
-                  patchForm({
-                    triggerKind: event.target.value as MarketingMissionTriggerKind,
-                  })
-                }
-                className={fieldClass}
-              >
-                {Object.entries(triggerLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
                   </option>
                 ))}
               </select>

@@ -8,6 +8,7 @@ const ROUTE_LABELS: ReadonlyArray<readonly [prefix: string, label: string]> = [
   ["/dashboard", "Открываем сводку сети…"],
   ["/assortment", "Открываем ассортимент…"],
   ["/reports", "Готовим отчёт…"],
+  ["/commercial/audit", "Готовим отчёт…"],
   ["/products/table", "Готовим отчёт…"],
   ["/products/movement", "Готовим отчёт…"],
   ["/products/order", "Готовим отчёт…"],

@@ -14,13 +14,13 @@ export default async function ManualProductParsingPage() {
           current="Ручной парсинг товаров"
           items={[
             { href: "/dashboard", label: "Дашборд" },
-            { href: "/administration", label: "Администрирование" },
-            { href: "/utilities", label: "Утилиты" },
+            { href: "/products", label: "Товары" },
+            { href: "/utilities", label: "Дубли товаров" },
           ]}
         />
         <div>
           <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
-            Утилиты / Парсинг
+            Товары / Дубли товаров
           </p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">
             Ручной парсинг товаров

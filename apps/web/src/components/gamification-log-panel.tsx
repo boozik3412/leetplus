@@ -614,12 +614,6 @@ export function GamificationLogPanel() {
 
   return (
     <section className="space-y-5">
-      <MonitoringPanel
-        data={monitoring}
-        error={monitoringError}
-        onOpenProfile={(profileId) => void loadProfile(profileId)}
-      />
-
       <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <form
           className="grid gap-3 lg:grid-cols-[1fr_auto]"
@@ -919,8 +913,44 @@ export function GamificationLogPanel() {
           </div>
         </>
       ) : null}
+
+      {/* Engine-rollout monitoring (shadow/canary, raw alert codes) is for
+          LeetPlus support, so it sits folded under the guest lookup. */}
+      <details className="rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+          Техническая диагностика для поддержки LeetPlus
+          <span className="ml-2 font-normal text-zinc-500 dark:text-zinc-400">
+            {monitoringSummary(monitoring, monitoringError)}
+          </span>
+        </summary>
+        <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+          <MonitoringPanel
+            data={monitoring}
+            error={monitoringError}
+            onOpenProfile={(profileId) => void loadProfile(profileId)}
+          />
+        </div>
+      </details>
     </section>
   );
+}
+
+function monitoringSummary(
+  data: MonitoringResponse | null,
+  error: string | null,
+) {
+  if (error) {
+    return "недоступна";
+  }
+  if (!data) {
+    return "загружаем…";
+  }
+  if (!data.latest) {
+    return "данных пока нет";
+  }
+  return data.alerts.length
+    ? `есть отклонения: ${data.alerts.length}`
+    : "отклонений нет";
 }
 
 function BindingRecoveryPanel({

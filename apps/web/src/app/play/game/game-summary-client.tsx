@@ -93,6 +93,7 @@ import {
 } from "./_game/game-rules";
 import { buildHomeBattleQuests } from "./_game/battle-pass/track";
 import { HomeBattlePass } from "./_game/battle-pass/home-battle-pass";
+import { RaceTrack, useRaceVariant } from "./_game/home/race-mockups";
 import { BattlePassLevelCompletionModal } from "./_game/battle-pass/modals";
 import {
   gameRewardWallet,
@@ -2094,6 +2095,7 @@ function ReadyGameView({
     }
   }
 
+  const raceVariant = useRaceVariant();
   const tutorial = useGameTutorial({
     seenVersion: summary.profile.tutorialSeenVersion,
     blocked: Boolean(
@@ -2128,6 +2130,8 @@ function ReadyGameView({
             onRefresh={() => void refreshGameSummary()}
             onSelect={openLootboxOverlay}
           />
+
+          {raceVariant === "b" ? <RaceTrack /> : null}
 
           {summary.battlePass.active?.levels.length ? (
             <HomeBattlePass

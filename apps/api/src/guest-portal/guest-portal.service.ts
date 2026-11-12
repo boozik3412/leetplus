@@ -217,6 +217,8 @@ const SMS_RU_OTP_BASE_URL = 'https://sms.ru';
 const INCOMING_CALL_LAST4_CHANNEL = 'INCOMING_CALL_LAST4';
 const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
   'guest_portal:communication_preference:';
+const TELEGRAM_BOT_UNSUBSCRIBE_CALLBACK = 'bot:unsubscribe';
+const TELEGRAM_BOT_UNSUBSCRIBE_CONFIRM_CALLBACK = 'bot:unsubscribe:confirm';
 const TELEGRAM_LINK_EVENT_PREFIX = 'guest_portal:telegram_bot_link:';
 const TELEGRAM_AUTH_EVENT_PREFIX = 'guest_portal:telegram_auth:';
 const GAME_CONSENT_EVENT_TYPE = 'GAME_CONSENT_GRANTED';
@@ -847,6 +849,7 @@ export type GuestPortalTelegramWebhookResponse = {
     | 'TELEGRAM_BOT_CLUB_SELECTED'
     | 'TELEGRAM_BOT_HELP'
     | 'UNSUBSCRIBE'
+    | 'UNSUBSCRIBE_CONFIRMATION'
     | 'DUPLICATE_UPDATE'
     | 'UNKNOWN';
   profileId: string | null;
@@ -9052,10 +9055,32 @@ export class GuestPortalService {
       `chat:${update.telegramChatId}`,
     );
 
-    if (telegramWebhookUnsubscribeCommand(update.text)) {
-      return this.unsubscribeTelegramWebhookProfile(
+    const unsubscribeIntent = telegramWebhookUnsubscribeIntent(update);
+
+    if (unsubscribeIntent === 'ASK') {
+      return this.dispatchTelegramWebhookReply(
+        this.telegramWebhookUnsubscribeConfirmationResponse(
+          telegramIdentityMasked,
+        ),
+        update.telegramChatId,
+      );
+    }
+
+    if (unsubscribeIntent === 'CONFIRM') {
+      const response = await this.unsubscribeTelegramWebhookProfile(
         update.telegramChatId,
         telegramIdentityMasked,
+      );
+
+      return this.dispatchTelegramWebhookReply(
+        this.withTelegramPlatformReply({
+          ...response,
+          reply: this.telegramWebhookUnsubscribeResultReply(
+            telegramIdentityMasked,
+            response.profilesAffected ?? 0,
+          ),
+        }),
+        update.telegramChatId,
       );
     }
 
@@ -9395,7 +9420,7 @@ export class GuestPortalService {
       update.contactUserId &&
       update.contactUserId !== update.telegramChatId
     ) {
-      return {
+      return this.withTelegramPlatformReply({
         status: 'FAILED',
         action: 'TELEGRAM_AUTH_CONTACT',
         profileId: null,
@@ -9406,7 +9431,7 @@ export class GuestPortalService {
           telegramIdentityMasked,
           'Для входа в LeetPlus нужен ваш собственный номер Telegram. Нажмите кнопку ниже и поделитесь телефоном этого аккаунта.',
         ),
-      };
+      });
     }
 
     const telegramIdentity = `chat:${update.telegramChatId}`;
@@ -9426,7 +9451,7 @@ export class GuestPortalService {
       });
 
     if (!challenge) {
-      return {
+      return this.withTelegramPlatformReply({
         status: 'IGNORED',
         action: 'TELEGRAM_AUTH_CONTACT',
         profileId: null,
@@ -9437,7 +9462,7 @@ export class GuestPortalService {
           telegramIdentityMasked,
           'Активный вход LeetPlus не найден. Откройте регистрацию на leetplus.ru/play и начните вход через Telegram заново.',
         ),
-      };
+      });
     }
 
     await this.tenantExecutionAdmission.assertAllowed(
@@ -9801,7 +9826,16 @@ export class GuestPortalService {
       where: {
         ...(commandCandidate ? { id: commandCandidate.profile.id } : {}),
         telegramIdentity,
-        status: { not: 'ARCHIVED' },
+        // A repeat Telegram login merges its temporary profile into the
+        // guest's existing one; the merged shell keeps the chat id but must
+        // never answer the menu instead of the real profile.
+        status: {
+          notIn: [
+            'ARCHIVED',
+            'SUPERSEDED',
+            TELEGRAM_AUTH_MERGED_PROFILE_STATUS,
+          ],
+        },
       },
       orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
       select: {
@@ -10469,7 +10503,7 @@ export class GuestPortalService {
             },
             {
               text: 'Отписаться',
-              callback_data: '/stop',
+              callback_data: TELEGRAM_BOT_UNSUBSCRIBE_CALLBACK,
             },
           ],
         ],
@@ -10816,6 +10850,77 @@ export class GuestPortalService {
     return response;
   }
 
+  private telegramWebhookUnsubscribeConfirmationResponse(
+    telegramIdentityMasked: string | null,
+  ): GuestPortalTelegramWebhookResponse {
+    return this.withTelegramPlatformReply({
+      status: 'IGNORED',
+      action: 'UNSUBSCRIBE_CONFIRMATION',
+      profileId: null,
+      telegramIdentityMasked,
+      message:
+        'Telegram unsubscribe button asked for confirmation; consent was not changed.',
+      reply: {
+        provider: 'TELEGRAM',
+        method: 'sendMessage',
+        chatIdMasked: telegramIdentityMasked,
+        text: [
+          'Отписаться от уведомлений LeetPlus?',
+          'Бот и клубы перестанут присылать вам сообщения: о наградах, акциях и новостях.',
+          'Играть, входить и пользоваться меню бота можно будет как раньше.',
+        ].join('\n'),
+        replyMarkup: {
+          inline_keyboard: [
+            [
+              {
+                text: 'Да, отписаться',
+                callback_data: TELEGRAM_BOT_UNSUBSCRIBE_CONFIRM_CALLBACK,
+              },
+            ],
+            [
+              {
+                text: 'Нет, вернуться в меню',
+                callback_data: 'bot:menu',
+              },
+            ],
+          ],
+        },
+      },
+    });
+  }
+
+  private telegramWebhookUnsubscribeResultReply(
+    chatIdMasked: string | null,
+    profilesAffected: number,
+  ): GuestPortalTelegramWebhookResponse['reply'] {
+    return {
+      provider: 'TELEGRAM',
+      method: 'sendMessage',
+      chatIdMasked,
+      text:
+        profilesAffected > 0
+          ? [
+              'Готово: вы отписались от уведомлений LeetPlus.',
+              'Бот и клубы больше не будут присылать вам сообщения.',
+              'Игра, вход и меню бота работают как раньше.',
+            ].join('\n')
+          : [
+              'Этот Telegram не связан с игровым профилем LeetPlus, поэтому уведомлений сюда не приходит.',
+              'Чтобы играть, выберите клуб на сайте и нажмите "Войти через Telegram".',
+            ].join('\n'),
+      replyMarkup: {
+        inline_keyboard: [
+          [
+            {
+              text: 'Меню',
+              callback_data: 'bot:menu',
+            },
+          ],
+        ],
+      },
+    };
+  }
+
   private async unsubscribeTelegramWebhookProfile(
     telegramChatIdValue: string,
     telegramIdentityMasked: string | null,
@@ -10859,6 +10964,18 @@ export class GuestPortalService {
     );
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // The game profile keeps its own consent: a guest without a matched
+      // Langame card or CRM lead is unsubscribed only through this row.
+      await tx.guestGameProfile.updateMany({
+        where: { id: { in: profileIds } },
+        data: {
+          phoneConsentStatus: GuestCommunicationConsentStatus.UNSUBSCRIBED,
+          phoneConsentSource: 'telegram_bot',
+          phoneConsentAt: null,
+          unsubscribedAt: now,
+        },
+      });
+
       if (guestIds.length > 0) {
         await tx.guest.updateMany({
           where: { id: { in: guestIds } },
@@ -18692,6 +18809,29 @@ function telegramWebhookUnsubscribeCommand(text: string | null) {
       command,
     ) || /^(stop|unsubscribe|cancel|отписаться|стоп|отписка)$/i.test(trimmed)
   );
+}
+
+// A typed /stop (or "стоп") is a deliberate request and unsubscribes at once.
+// A button tap only asks for confirmation: the button sits under every bot
+// menu, including old messages whose button still sends the legacy "/stop".
+function telegramWebhookUnsubscribeIntent(update: {
+  text: string | null;
+  callbackData: string | null;
+}): 'ASK' | 'CONFIRM' | null {
+  const callbackData = update.callbackData?.trim() ?? null;
+
+  if (callbackData) {
+    if (callbackData === TELEGRAM_BOT_UNSUBSCRIBE_CONFIRM_CALLBACK) {
+      return 'CONFIRM';
+    }
+
+    return callbackData === TELEGRAM_BOT_UNSUBSCRIBE_CALLBACK ||
+      telegramWebhookUnsubscribeCommand(callbackData)
+      ? 'ASK'
+      : null;
+  }
+
+  return telegramWebhookUnsubscribeCommand(update.text) ? 'CONFIRM' : null;
 }
 
 function telegramWebhookBotCommand(

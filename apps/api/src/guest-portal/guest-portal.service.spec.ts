@@ -9723,7 +9723,7 @@ describe('GuestPortalService', () => {
                 },
                 {
                   text: 'Отписаться',
-                  callback_data: '/stop',
+                  callback_data: 'bot:unsubscribe',
                 },
               ],
             ],
@@ -9863,6 +9863,19 @@ describe('GuestPortalService', () => {
           message: expect.stringContaining(
             'provider delivery rows and events were preserved',
           ),
+          replyAdmission: {
+            status: 'ADMITTED',
+            scopeKind: 'PLATFORM_SAFE',
+            scopeCount: 0,
+          },
+          reply: {
+            text: expect.stringContaining(
+              'вы отписались от уведомлений LeetPlus',
+            ),
+            replyMarkup: {
+              inline_keyboard: [[{ text: 'Меню', callback_data: 'bot:menu' }]],
+            },
+          },
         });
         expect(JSON.stringify(result)).not.toContain('telegram-token');
       } finally {
@@ -9875,6 +9888,206 @@ describe('GuestPortalService', () => {
           }
         }
       }
+    });
+
+    it.each([
+      ['the menu button', 'bot:unsubscribe'],
+      ['a legacy /stop button from an old message', '/stop'],
+    ])(
+      'asks for confirmation before unsubscribing from %s',
+      async (_label, callbackData) => {
+        const { prisma, service } = createService({
+          GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        });
+
+        const result = await service.handleTelegramWebhook('telegram-secret', {
+          update_id: 501,
+          callback_query: {
+            id: 'callback-unsubscribe',
+            from: { id: 123456 },
+            data: callbackData,
+            message: { chat: { id: 123456 } },
+          },
+        });
+
+        expect(prisma.guestGameProfile.findMany).not.toHaveBeenCalled();
+        expect(prisma.guest.updateMany).not.toHaveBeenCalled();
+        expect(prisma.guestCrmLead.updateMany).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          status: 'IGNORED',
+          action: 'UNSUBSCRIBE_CONFIRMATION',
+          profileId: null,
+          replyAdmission: {
+            status: 'ADMITTED',
+            scopeKind: 'PLATFORM_SAFE',
+            scopeCount: 0,
+          },
+          reply: {
+            text: expect.stringContaining(
+              'Отписаться от уведомлений LeetPlus?',
+            ),
+            replyMarkup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: 'Да, отписаться',
+                    callback_data: 'bot:unsubscribe:confirm',
+                  },
+                ],
+                [
+                  {
+                    text: 'Нет, вернуться в меню',
+                    callback_data: 'bot:menu',
+                  },
+                ],
+              ],
+            },
+          },
+        });
+        expect(JSON.stringify(result)).not.toContain('123456');
+      },
+    );
+
+    it('unsubscribes after the confirmation button and replies', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+      prisma.guestGameProfile.findMany.mockResolvedValue([
+        {
+          id: 'profile-1',
+          tenantId: 'tenant-1',
+          guestId: 'guest-1',
+          leadId: null,
+        },
+      ]);
+      prisma.guestGameDelivery.findMany.mockResolvedValue([]);
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        update_id: 502,
+        callback_query: {
+          id: 'callback-unsubscribe-confirm',
+          from: { id: 123456 },
+          data: 'bot:unsubscribe:confirm',
+          message: { chat: { id: 123456 } },
+        },
+      });
+
+      expect(prisma.guestGameProfile.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { telegramIdentity: 'chat:123456', status: 'ACTIVE' },
+        }),
+      );
+      expect(prisma.guestGameProfile.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['profile-1'] } },
+        data: {
+          phoneConsentStatus: 'UNSUBSCRIBED',
+          phoneConsentSource: 'telegram_bot',
+          phoneConsentAt: null,
+          unsubscribedAt: expect.any(Date),
+        },
+      });
+      expect(prisma.guest.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ['guest-1'] } },
+          data: expect.objectContaining({
+            phoneConsentStatus: 'UNSUBSCRIBED',
+            crmStatus: 'DO_NOT_CONTACT',
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        status: 'UNSUBSCRIBED',
+        action: 'UNSUBSCRIBE',
+        profilesAffected: 1,
+        replyAdmission: { status: 'ADMITTED', scopeKind: 'PLATFORM_SAFE' },
+        reply: {
+          text: expect.stringContaining('Игра, вход и меню бота работают'),
+        },
+      });
+    });
+
+    it('answers a contact of another Telegram user with a retry prompt', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        message: {
+          chat: { id: 123456 },
+          from: { id: 123456 },
+          contact: { phone_number: '+79990001122', user_id: 654321 },
+        },
+      });
+
+      expect(
+        prisma.guestGameTelegramLinkChallenge.findFirst,
+      ).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        status: 'FAILED',
+        action: 'TELEGRAM_AUTH_CONTACT',
+        replyAdmission: { status: 'ADMITTED', scopeKind: 'PLATFORM_SAFE' },
+        reply: {
+          text: expect.stringContaining('ваш собственный номер'),
+          replyMarkup: {
+            keyboard: [
+              [{ text: 'Поделиться телефоном', request_contact: true }],
+            ],
+          },
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain('9990001122');
+    });
+
+    it('answers a contact without an active Telegram login', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+      prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue(null);
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        message: {
+          chat: { id: 123456 },
+          from: { id: 123456 },
+          contact: { phone_number: '+79990001122', user_id: 123456 },
+        },
+      });
+
+      expect(result).toMatchObject({
+        status: 'IGNORED',
+        action: 'TELEGRAM_AUTH_CONTACT',
+        replyAdmission: { status: 'ADMITTED', scopeKind: 'PLATFORM_SAFE' },
+        reply: {
+          text: expect.stringContaining('Активный вход LeetPlus не найден'),
+          replyMarkup: { remove_keyboard: true },
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain('9990001122');
+    });
+
+    it('replies to /stop from a chat without a game profile', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+      prisma.guestGameProfile.findMany.mockResolvedValue([]);
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        message: {
+          text: 'стоп',
+          chat: { id: 123456 },
+          from: { id: 123456 },
+        },
+      });
+
+      expect(prisma.guest.updateMany).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        status: 'IGNORED',
+        action: 'UNSUBSCRIBE',
+        profilesAffected: 0,
+        replyAdmission: { status: 'ADMITTED', scopeKind: 'PLATFORM_SAFE' },
+        reply: {
+          text: expect.stringContaining('не связан с игровым профилем'),
+        },
+      });
     });
 
     it('answers Telegram /status callback with the bot menu', async () => {
@@ -9899,6 +10112,9 @@ describe('GuestPortalService', () => {
         expect.objectContaining({
           where: expect.objectContaining({
             telegramIdentity: 'chat:123456',
+            status: {
+              notIn: ['ARCHIVED', 'SUPERSEDED', 'MERGED_TELEGRAM_AUTH'],
+            },
           }),
         }),
       );

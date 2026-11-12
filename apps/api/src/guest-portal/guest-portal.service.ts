@@ -9101,6 +9101,8 @@ export class GuestPortalService {
         );
       }
 
+      let linkResponse: GuestPortalTelegramWebhookResponse;
+
       try {
         const result = await this.confirmTelegramLink(secret, {
           code,
@@ -9108,16 +9110,20 @@ export class GuestPortalService {
           telegramUsername: update.telegramUsername,
         });
 
-        return {
+        linkResponse = {
           status: 'CONFIRMED',
           action: 'LINK_CODE',
           profileId: result.profileId,
           telegramIdentityMasked: result.telegramIdentityMasked,
           message:
             'Telegram webhook подтвердил код и сохранил chat_id гостя. Внешняя отправка наград остается под управлением delivery dispatcher.',
+          reply: this.telegramWebhookBotMenuReply(
+            telegramIdentityMasked,
+            'Готово: Telegram подключен к вашему игровому профилю LeetPlus. Ниже меню бота.',
+          ),
         };
       } catch (error) {
-        return {
+        linkResponse = {
           status: 'FAILED',
           action: 'LINK_CODE',
           profileId: null,
@@ -9126,8 +9132,20 @@ export class GuestPortalService {
             error instanceof Error
               ? error.message
               : 'Telegram webhook не смог подтвердить код.',
+          reply: this.telegramWebhookRemoveKeyboardReply(
+            telegramIdentityMasked,
+            [
+              'Эта ссылка для входа уже не действует: она устарела или уже использована.',
+              'Вернитесь на сайт LeetPlus, выберите клуб и нажмите "Войти через Telegram" еще раз.',
+            ].join('\n'),
+          ),
         };
       }
+
+      return this.dispatchTelegramWebhookReply(
+        this.withTelegramPlatformReply(linkResponse),
+        update.telegramChatId,
+      );
     }
 
     if (update.contactPhone) {
@@ -9342,7 +9360,11 @@ export class GuestPortalService {
       });
 
     if (!challenge) {
-      return null;
+      return this.repeatTelegramAuthStart(
+        code,
+        telegramChatIdValue,
+        telegramIdentityMasked,
+      );
     }
 
     await this.tenantExecutionAdmission.assertAllowed(
@@ -9410,6 +9432,83 @@ export class GuestPortalService {
       },
       challenge,
     );
+  }
+
+  // The guest opened the same login link again (a second tap on Start).
+  // Nothing changes; the guest only gets the step they are on.
+  private async repeatTelegramAuthStart(
+    code: string,
+    telegramChatIdValue: string,
+    telegramIdentityMasked: string | null,
+  ): Promise<GuestPortalTelegramWebhookResponse | null> {
+    const challenge =
+      await this.prisma.guestGameTelegramLinkChallenge.findFirst({
+        where: {
+          codeHash: this.hashTelegramLinkCode(code),
+          status: {
+            in: [
+              TELEGRAM_AUTH_AWAITING_CONTACT_STATUS,
+              TELEGRAM_AUTH_VERIFIED_STATUS,
+              TELEGRAM_AUTH_SESSION_ISSUED_STATUS,
+            ],
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          tenantId: true,
+          storeId: true,
+          profileId: true,
+          status: true,
+          expiresAt: true,
+          profile: { select: { telegramIdentity: true } },
+        },
+      });
+
+    if (!challenge) {
+      return null;
+    }
+
+    if (
+      challenge.status === TELEGRAM_AUTH_AWAITING_CONTACT_STATUS &&
+      challenge.expiresAt.getTime() > Date.now() &&
+      challenge.profile.telegramIdentity === `chat:${telegramChatIdValue}`
+    ) {
+      return this.withTelegramOutboundScope(
+        {
+          status: 'AWAITING_CONTACT',
+          action: 'TELEGRAM_AUTH_START',
+          profileId: challenge.profileId,
+          telegramIdentityMasked,
+          message:
+            'Repeated Telegram auth start; the guest is asked for the contact again.',
+          reply: this.telegramWebhookContactRequestReply(
+            telegramIdentityMasked,
+          ),
+        },
+        { tenantId: challenge.tenantId, storeId: challenge.storeId },
+      );
+    }
+
+    return this.withTelegramPlatformReply({
+      status: 'IGNORED',
+      action: 'TELEGRAM_AUTH_START',
+      profileId: null,
+      telegramIdentityMasked,
+      message:
+        'Repeated Telegram auth start for a link that is already used or expired.',
+      reply: this.telegramWebhookBotMenuReply(
+        telegramIdentityMasked,
+        challenge.status === TELEGRAM_AUTH_AWAITING_CONTACT_STATUS
+          ? [
+              'Эта ссылка для входа уже не действует.',
+              'Вернитесь на сайт LeetPlus, выберите клуб и нажмите "Войти через Telegram" еще раз.',
+            ].join('\n')
+          : [
+              'Вход по этой ссылке уже выполнен.',
+              'Вернитесь на сайт LeetPlus или продолжайте в боте: меню ниже.',
+            ].join('\n'),
+      ),
+    });
   }
 
   private async completeTelegramAuthContact(
@@ -9822,37 +9921,84 @@ export class GuestPortalService {
           clubCallbackToken,
         )
       : null;
-    const profile = await this.prisma.guestGameProfile.findFirst({
-      where: {
-        ...(commandCandidate ? { id: commandCandidate.profile.id } : {}),
-        telegramIdentity,
-        // A repeat Telegram login merges its temporary profile into the
-        // guest's existing one; the merged shell keeps the chat id but must
-        // never answer the menu instead of the real profile.
-        status: {
-          notIn: [
-            'ARCHIVED',
-            'SUPERSEDED',
-            TELEGRAM_AUTH_MERGED_PROFILE_STATUS,
-          ],
+    const findBotProfile = (skipPendingAuth: boolean) =>
+      this.prisma.guestGameProfile.findFirst({
+        where: {
+          ...(commandCandidate ? { id: commandCandidate.profile.id } : {}),
+          telegramIdentity,
+          // A repeat Telegram login merges its temporary profile into the
+          // guest's existing one; the merged shell keeps the chat id but
+          // must never answer the menu instead of the real profile.
+          status: {
+            notIn: [
+              'ARCHIVED',
+              'SUPERSEDED',
+              TELEGRAM_AUTH_MERGED_PROFILE_STATUS,
+              ...(skipPendingAuth ? [TELEGRAM_AUTH_PROFILE_STATUS] : []),
+            ],
+          },
         },
-      },
-      orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
-      select: {
-        id: true,
-        tenantId: true,
-        guestId: true,
-        phoneHash: true,
-        phoneEncrypted: true,
-        contactMasked: true,
-        phoneConsentStatus: true,
-        phoneConsentAt: true,
-        xp: true,
-        level: true,
-        status: true,
-        unsubscribedAt: true,
-      },
-    });
+        orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
+        select: {
+          id: true,
+          tenantId: true,
+          guestId: true,
+          phoneHash: true,
+          phoneEncrypted: true,
+          contactMasked: true,
+          phoneConsentStatus: true,
+          phoneConsentAt: true,
+          xp: true,
+          level: true,
+          status: true,
+          unsubscribedAt: true,
+        },
+      });
+    let profile = await findBotProfile(false);
+
+    if (profile?.status === TELEGRAM_AUTH_PROFILE_STATUS) {
+      const pendingChallenge =
+        await this.prisma.guestGameTelegramLinkChallenge.findFirst({
+          where: {
+            profileId: profile.id,
+            tenantId: profile.tenantId,
+            status: {
+              in: [
+                TELEGRAM_AUTH_PENDING_STATUS,
+                TELEGRAM_AUTH_AWAITING_CONTACT_STATUS,
+              ],
+            },
+            expiresAt: { gt: new Date() },
+          },
+          orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+          select: {
+            tenantId: true,
+            storeId: true,
+          },
+        });
+
+      if (pendingChallenge) {
+        return this.withTelegramOutboundScope(
+          {
+            status: 'AWAITING_CONTACT',
+            action,
+            profileId: profile.id,
+            telegramIdentityMasked,
+            message:
+              'Telegram bot menu command received while auth is waiting for contact-share.',
+            reply: this.telegramWebhookContactRequestReply(
+              telegramIdentityMasked,
+              'Вход почти готов. Поделитесь телефоном кнопкой Telegram, чтобы LeetPlus подтвердил профиль.',
+            ),
+          },
+          pendingChallenge,
+        );
+      }
+
+      // An abandoned login (its link expired) must not hide the guest's
+      // confirmed profile or leave the chat without an answer.
+      profile = await findBotProfile(true);
+    }
 
     if (!profile) {
       return this.withTelegramPlatformReply({
@@ -9872,43 +10018,6 @@ export class GuestPortalService {
           ].join('\n'),
         ),
       });
-    }
-
-    if (profile.status === TELEGRAM_AUTH_PROFILE_STATUS) {
-      const pendingChallenge =
-        await this.prisma.guestGameTelegramLinkChallenge.findFirst({
-          where: {
-            profileId: profile.id,
-            tenantId: profile.tenantId,
-            status: {
-              in: [
-                TELEGRAM_AUTH_PENDING_STATUS,
-                TELEGRAM_AUTH_AWAITING_CONTACT_STATUS,
-              ],
-            },
-          },
-          orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
-          select: {
-            tenantId: true,
-            storeId: true,
-          },
-        });
-      const response: GuestPortalTelegramWebhookResponse = {
-        status: 'AWAITING_CONTACT',
-        action,
-        profileId: profile.id,
-        telegramIdentityMasked,
-        message:
-          'Telegram bot menu command received while auth is waiting for contact-share.',
-        reply: this.telegramWebhookContactRequestReply(
-          telegramIdentityMasked,
-          'Вход почти готов. Поделитесь телефоном кнопкой Telegram, чтобы LeetPlus подтвердил профиль.',
-        ),
-      };
-
-      return pendingChallenge
-        ? this.withTelegramOutboundScope(response, pendingChallenge)
-        : response;
     }
 
     const scopedClub =

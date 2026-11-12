@@ -136,6 +136,16 @@ export type StoreFloorPlanSeatView = {
   guestAccess: 'AVAILABLE' | 'NO_CAPABILITY';
   /** `null` also when the guest is not loaded from Langame yet. */
   guest: StoreFloorPlanSeatGuest | null;
+  /**
+   * A guest of the session who is not in the LeetPlus guest base yet: the
+   * guest directory is read from Langame once a night, so guests registered
+   * since then have no card. Name straight from Langame (`null` if Langame
+   * did not answer) and the shift purchases of the club.
+   */
+  newGuest: {
+    displayName: string | null;
+    purchases: StoreFloorPlanLivePurchase[];
+  } | null;
 };
 
 type LiveSeat = {
@@ -187,6 +197,7 @@ const PURCHASES_SHOWN = 8;
 const GUEST_PURCHASES_SHOWN = 10;
 /** Tariff names change rarely. */
 const TARIFF_TTL_MS = 10 * 60_000;
+const NEW_GUEST_NAME_TTL_MS = 10 * 60_000;
 const GAME_ITEMS_SHOWN = 30;
 /** Rewards that really went to a guest (not cancelled or expired). */
 const COUNTED_REWARD_STATUSES = ['PENDING', 'APPROVED', 'PAID'];
@@ -277,6 +288,7 @@ export class StoreFloorPlanLiveService {
   private readonly snapshots = new Map<string, CacheEntry<LiveSnapshot>>();
   private readonly catalogs = new Map<string, CacheEntry<PcCatalog>>();
   private readonly tariffs = new Map<string, CacheEntry<Map<string, string>>>();
+  private readonly newGuestNames = new Map<string, CacheEntry<string | null>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -317,6 +329,7 @@ export class StoreFloorPlanLiveService {
       session: null,
       guestAccess,
       guest: null,
+      newGuest: null,
     };
     if (!seat) return result;
 
@@ -332,7 +345,74 @@ export class StoreFloorPlanLiveService {
       tariff,
     };
     result.guest = guest;
+    if (
+      !guest &&
+      guestAccess === 'AVAILABLE' &&
+      seat.guestId &&
+      snapshot.domain
+    ) {
+      result.newGuest = await this.newSeatGuest(
+        store,
+        snapshot,
+        seat.guestId,
+        now,
+      );
+    }
     return result;
+  }
+
+  /** The guest of a session who has no LeetPlus card yet (see `newGuest`). */
+  private async newSeatGuest(
+    store: LiveStore,
+    snapshot: LiveSnapshot,
+    langameGuestId: string,
+    now: Date,
+  ): Promise<StoreFloorPlanSeatView['newGuest']> {
+    const domain = snapshot.domain ?? '';
+    const rows = snapshot.purchasesByGuest.get(langameGuestId) ?? [];
+    const shown = rows.slice(0, GUEST_PURCHASES_SHOWN);
+    const [displayName, names] = await Promise.all([
+      this.langameGuestName(store, domain, langameGuestId, now),
+      this.productNames(store, domain, shown),
+    ]);
+    return {
+      displayName,
+      purchases: shown.map((row) => this.purchase(store, row, names)),
+    };
+  }
+
+  /** Guest name from the Langame guest card; `null` if unknown. */
+  private async langameGuestName(
+    store: LiveStore,
+    domain: string,
+    langameGuestId: string,
+    now: Date,
+  ) {
+    try {
+      return await this.cached(
+        this.newGuestNames,
+        `${store.tenantId}:${domain}:${langameGuestId}`,
+        NEW_GUEST_NAME_TTL_MS,
+        now,
+        async () => {
+          const access = await this.langameSettingsService.resolveTenantAccess(
+            store.tenantId,
+          );
+          const source = access.sources.find((item) => item.domain === domain);
+          if (!source) return null;
+          const payload: unknown =
+            await this.langameClient.getDiagnosticEndpoint(
+              source.baseUrl,
+              access.apiKey,
+              `/guests/${encodeURIComponent(langameGuestId)}`,
+            );
+          return langameGuestFio(payload);
+        },
+      );
+    } catch (error: unknown) {
+      this.logFailure('guest', { status: 'rejected', reason: error });
+      return null;
+    }
   }
 
   private async snapshot(
@@ -1312,6 +1392,18 @@ export class StoreFloorPlanLiveService {
       byGuest,
     };
   }
+}
+
+/** `fio` of the Langame `/guests/{id}` answer (`data` is a row or a list). */
+function langameGuestFio(payload: unknown): string | null {
+  const data =
+    payload && typeof payload === 'object' && 'data' in payload
+      ? payload.data
+      : payload;
+  const row: unknown = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row !== 'object') return null;
+  const fio = text((row as Record<string, unknown>).fio);
+  return fio ? fio.replace(/\s+/g, ' ').slice(0, 120) : null;
 }
 
 /** Same rule as the «Гости» section: the guest card is `view_guests`. */

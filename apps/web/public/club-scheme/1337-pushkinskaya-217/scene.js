@@ -1185,7 +1185,7 @@ function seatGuestHtml(info) {
   if (info.failed) return `<div class="sec gsec"><h3>Гость</h3><div class="note">Не удалось получить данные гостя, попробую ещё раз.</div></div>`;
   if (info.guestAccess !== 'AVAILABLE') return `<div class="sec gsec"><h3>Гость</h3><div class="lockn">Имя, визиты и покупки гостя видят роли с доступом к разделу «Гости».</div></div>`;
   const g = info.guest;
-  if (!g) return `<div class="sec gsec"><h3>Гость</h3><div class="note">Гость ещё не загружен из Langame, данные появятся после синхронизации.</div></div>`;
+  if (!g) return newGuestHtml(info.newGuest);
   const tags = [];
   if (g.isStaff) tags.push(`<span class="chip off">Сотрудник</span>`);
   if (SEG_LABEL[g.segment]) tags.push(`<span class="chip ${SEG_TONE[g.segment] || 'off'}">${SEG_LABEL[g.segment]}</span>`);
@@ -1202,11 +1202,7 @@ function seatGuestHtml(info) {
   h += `</dl>`;
   if (g.crmNote) h += `<div class="note">${esc(g.crmNote)}</div>`;
   h += `</div>`;
-  const when = LIVE.revenue && LIVE.revenue.period === 'TODAY' ? 'за сегодня' : 'за смену';
-  h += `<div class="sec"><h3>Купил ${when}</h3>${g.purchases && g.purchases.length ? `<div class="list buys">${g.purchases.map(p => {
-    const qty = p.quantity && p.quantity !== 1 ? ` × ${fmt.format(p.quantity)}` : '';
-    return `<div class="li"><span class="t num">${p.at ? hhmm(new Date(p.at)) : '—'}</span><span class="grow"><b title="${esc(p.title)}">${esc(p.title)}${qty}</b></span><span class="r num">${rub(p.sum)}</span></div>`;
-  }).join('')}</div>` : `<div class="note">Пока ничего не покупал.</div>`}</div>`;
+  h += guestBuysHtml(g.purchases);
   if (g.gameAccess === 'AVAILABLE') {
     const gm = g.game;
     if (!gm) h += `<div class="sec"><h3>Игровой модуль</h3><div class="note">Гость ещё не в игре.</div></div>`;
@@ -1219,9 +1215,25 @@ function seatGuestHtml(info) {
   if (g.recommendedAction) h += `<div class="gtip"><b>Подсказка админу</b>${esc(g.recommendedAction.label)}${g.recommendedAction.reason ? `: ${esc(g.recommendedAction.reason)}` : ''}</div>`;
   return h;
 }
+function guestBuysHtml(list) {
+  const when = LIVE.revenue && LIVE.revenue.period === 'TODAY' ? 'за сегодня' : 'за смену';
+  return `<div class="sec"><h3>Купил ${when}</h3>${list && list.length ? `<div class="list buys">${list.map(p => {
+    const qty = p.quantity && p.quantity !== 1 ? ` × ${fmt.format(p.quantity)}` : '';
+    return `<div class="li"><span class="t num">${p.at ? hhmm(new Date(p.at)) : '—'}</span><span class="grow"><b title="${esc(p.title)}">${esc(p.title)}${qty}</b></span><span class="r num">${rub(p.sum)}</span></div>`;
+  }).join('')}</div>` : `<div class="note">Пока ничего не покупал.</div>`}</div>`;
+}
+/* A guest registered after the nightly guest sync: no LeetPlus card yet. */
+function newGuestHtml(ng) {
+  if (!ng) return `<div class="sec gsec"><h3>Гость</h3><div class="note">Гость ещё не загружен из Langame, данные появятся после синхронизации.</div></div>`;
+  const name = ng.displayName || 'Гость Langame';
+  return `<div class="sec gsec"><h3>Гость</h3>
+    <div class="gwho"><div class="gav">${esc(initials(name))}</div><div class="grow"><b>${esc(name)}</b><div class="gtags"><span class="chip acc">Новый гость</span></div></div></div>
+    <div class="note">Карточки гостя в LeetPlus ещё нет: справочник гостей приходит из Langame ночью, тогда появятся визиты, баланс и ссылка на карточку.</div></div>` + guestBuysHtml(ng.purchases);
+}
 function seatTipHtml(s) {
   let h = `<b>${s.id}</b> · играет${s.left != null ? ` · ещё <span class="num">${hm(s.left)}</span>` : ''}`;
   const info = seatInfo(s, false), g = info && info.guest;
+  if (!g && info && info.newGuest && info.newGuest.displayName) h += `<br><span class="gtipn">${esc(info.newGuest.displayName)} · новый гость</span>`;
   if (g) h += `<br><span class="gtipn">${esc(g.displayName)}${g.game ? ` · ур. ${fmt.format(g.game.level)}` : ''}${SEG_LABEL[g.segment] ? ' · ' + SEG_LABEL[g.segment].toLowerCase() : ''}</span>`;
   return h;
 }

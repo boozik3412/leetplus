@@ -200,6 +200,10 @@ describe('StoreFloorPlanLiveService', () => {
       }),
     };
     client = {
+      getDiagnosticEndpoint: jest.fn().mockResolvedValue({
+        status: true,
+        data: { guest_id: 501, fio: '  Новиков   Пётр ', phone: '79990001122' },
+      }),
       listTariffTypeGroups: jest.fn().mockResolvedValue([
         { id: 1, name: 'Поминутный' },
         { id: 9, name: '3 часа' },
@@ -645,8 +649,10 @@ describe('StoreFloorPlanLiveService', () => {
     expect(seat.guestAccess).toBe('NO_CAPABILITY');
     expect(seat.session?.tariff).toBe('3 часа');
     expect(seat.guest).toBeNull();
+    expect(seat.newGuest).toBeNull();
     expect(prisma.guest.findFirst).not.toHaveBeenCalled();
     expect(guests.getGuest).not.toHaveBeenCalled();
+    expect(client.getDiagnosticEndpoint).not.toHaveBeenCalled();
   });
 
   it('has no session for a free computer', async () => {
@@ -659,17 +665,41 @@ describe('StoreFloorPlanLiveService', () => {
       session: null,
       guestAccess: 'AVAILABLE',
       guest: null,
+      newGuest: null,
     });
   });
 
-  it('keeps the session when the guest is not loaded yet', async () => {
+  it('names a guest who has no card yet from Langame', async () => {
     prisma.guest.findFirst.mockResolvedValue(null);
+    const seat = await service.getSeat('store-kh', 17, user, NOW);
+
+    expect(seat.guest).toBeNull();
+    expect(guests.getGuest).not.toHaveBeenCalled();
+    expect(client.getDiagnosticEndpoint).toHaveBeenCalledWith(
+      'https://46.langamepro.ru/public_api',
+      expect.any(String),
+      '/guests/501',
+    );
+    expect(seat.newGuest?.displayName).toBe('Новиков Пётр');
+    expect(seat.newGuest?.purchases.length).toBeGreaterThan(0);
+    // The phone of the Langame card is not passed on.
+    expect(JSON.stringify(seat)).not.toContain('7999');
+
+    // The name is remembered between polls.
+    await service.getSeat('store-kh', 17, user, NOW);
+    expect(client.getDiagnosticEndpoint).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the session when Langame does not name the new guest', async () => {
+    prisma.guest.findFirst.mockResolvedValue(null);
+    client.getDiagnosticEndpoint.mockRejectedValue(new Error('timeout'));
     client.listTariffTypeGroups.mockRejectedValue(new Error('timeout'));
     const seat = await service.getSeat('store-kh', 17, user, NOW);
 
     expect(seat.busy).toBe(true);
     expect(seat.session?.tariff).toBeNull();
     expect(seat.guest).toBeNull();
+    expect(seat.newGuest).toMatchObject({ displayName: null });
   });
 
   it.each([

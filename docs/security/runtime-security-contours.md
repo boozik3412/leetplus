@@ -2067,9 +2067,14 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   (имя как в карточке, без телефона и e-mail в ответе), игровые поля только
   при `view_guest_gamification`. Покупки гостя — строки `products/expense`
   этого клуба за смену (или день) с его `real_guest_id` из того же чтения.
-  Записей, новых запросов к Langame, кроме справочника тарифов, worker и
-  scheduler нет. BFF `GET /api/stores/:id/floor-plan/live/seats/:number`
-  проксирует его тем же `proxyJsonRequest`.
+  Если гостя ещё нет в базе LeetPlus (справочник гостей синхронизируется
+  ночью, а гость зарегистрирован позже), ответ несёт `newGuest`: только `fio`
+  из Langame `/guests/{guest_id}` того же источника (телефон из ответа не
+  передаётся, кэш 10 минут в памяти процесса) и его покупки за смену; то же
+  право `view_guests`. Записей, новых запросов к Langame, кроме справочника
+  тарифов и карточки нового гостя, worker и scheduler нет. BFF
+  `GET /api/stores/:id/floor-plan/live/seats/:number` проксирует его тем же
+  `proxyJsonRequest`.
 - Web: страница `/visualization`, раздел меню «Визуализация» (`canAccessPath` → `view_club_scheme`) и BFF
   `/api/stores/:id/floor-plan*` через `proxyJsonRequest` (cookie → JWT,
   `private, no-store`). BFF `GET /api/stores/floor-plans` (11.11.2026) тем же

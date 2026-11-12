@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Patch,
+  UseGuards,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -46,6 +54,17 @@ export class StoreFloorPlansController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.storeFloorPlanLiveService.get(id, user);
+  }
+
+  @Roles(...TENANT_USER_ROLES)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get(':id/floor-plan/live/seats/:number')
+  getFloorPlanSeat(
+    @Param('id') id: string,
+    @Param('number', ParseIntPipe) number: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.storeFloorPlanLiveService.getSeat(id, number, user);
   }
 
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)

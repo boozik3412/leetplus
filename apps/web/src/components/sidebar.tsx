@@ -87,7 +87,8 @@ type OpenNavGroupsState = {
 // 12.11.2026 («Уборка»): the full guest report, the communications hub,
 // categories, product utilities, the staff overview and the commercial audit
 // left the menu (pages stay reachable from their sections); «Чек-листы» got
-// their own item.
+// their own item. Later on 12.11 the audit came back under «Отчёты» as the
+// «Где теряем деньги» report.
 const navGroups: NavGroup[] = [
   {
     title: "Гости и возврат",
@@ -163,6 +164,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/reports/daily", label: "Отчёт за сутки" },
       { href: "/reports", label: "Отчёты по ассортименту" },
+      { href: "/commercial/audit", label: "Где теряем деньги" },
     ],
   },
   {

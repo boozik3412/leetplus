@@ -42,8 +42,17 @@ const guestCards: HubCard[] = [
   },
 ];
 
+const guestMessagesCard: HubCard = {
+  href: "/support",
+  eyebrow: "Telegram-бот",
+  title: "Сообщения гостей",
+  description:
+    "Гости пишут клубу в Telegram-бот, сообщения попадают в обращения. Ответ «Гостю» придёт гостю в тот же чат.",
+  accent: "Гость -> бот -> клуб -> ответ",
+};
+
 const nextSteps = [
-  "Telegram/MAX-боты для внешней связи с гостями после настройки согласий.",
+  "Рассылки через Telegram-бот по группам гостей из маркетинговых кампаний.",
   "Шаблоны объявлений и регламенты реакции для клубных каналов.",
   "Тонкая матрица каналов: какие роли видят объявления, поддержку, клубные и CRM-коммуникации.",
 ];
@@ -53,8 +62,10 @@ export default async function CommunicationsPage() {
 
   const canViewCommunications = can(user, "view_communications");
   const canViewGuests = can(user, "view_guests");
+  const canViewGuestMessages = can(user, "view_support_tickets");
   const cards = [
     ...(canViewCommunications ? staffCards : []),
+    ...(canViewGuestMessages ? [guestMessagesCard] : []),
     ...(canViewGuests ? guestCards : []),
   ];
   const primaryAction = canViewCommunications

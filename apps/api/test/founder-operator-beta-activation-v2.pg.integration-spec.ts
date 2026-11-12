@@ -57,8 +57,8 @@ const DISPOSABLE_WORKER_ROLE_PATTERN = /^lp_founder_mail_[0-9a-f]{24}$/u;
 const RESTORED_COPY_TEMPLATE_PATTERN = /^leetplus_restored_[a-z0-9_]{1,96}$/u;
 const RESTORED_COPY_TEMPLATE_ENV =
   'FOUNDER_PILOT_MAIL_PG_RESTORED_COPY_TEMPLATE';
-const CURRENT_MIGRATION = '20261111090000_guest_staff_mark';
-const CURRENT_MIGRATION_COUNT = 199;
+const CURRENT_MIGRATION = '20261112090000_guest_telegram_outbox';
+const CURRENT_MIGRATION_COUNT = 200;
 const RELEASE_SHA = resolveReleaseSha();
 const FINGERPRINT_KEY =
   'founder-beta-v2-fixture-fingerprint-key-aaaaaaaaaaaaaaaa';

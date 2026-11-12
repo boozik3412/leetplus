@@ -72,6 +72,7 @@ release does not require a documentation change.
 - Assortment, inventory, stock movements or reports: [assortment guide](docs/agent-context/assortment.md) and [metric contract](docs/assortment-dashboard-metric-contract.md).
 - Executive dashboard, periods, revenue or priorities: [executive guide](docs/agent-context/executive-dashboard.md) and the relevant [priority contract](docs/executive-dashboard-priorities.md).
 - Guest dashboard, guest card, CRM signals or the guest ↔ game projection: [guests CRM guide](docs/agent-context/guests-crm-gamification.md).
+- Guest messages through the Telegram bot (inbox, staff replies, outbox, broadcasts): [Telegram communications guide](docs/agent-context/guest-telegram-communications.md).
 - Guest leaderboard («Рейтинг»): [leaderboard guide](docs/agent-context/guest-leaderboard.md).
 - Game effect («Эффект», holdout, guest card effect): [game effect guide](docs/agent-context/guest-game-effect.md).
 - New screens, visual or interaction changes, accessibility or UI review: [UI/UX rules](docs/agent-context/ui-ux.md).

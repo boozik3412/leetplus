@@ -9,7 +9,7 @@ import {
   useDesktopNoticeState,
 } from '@/components/support-queue-watch';
 import type { StaffSupportTicket, StaffSupportTicketsReport, SupportTicketCommentVisibility, SupportTicketGuestRewards, SupportTicketStatus, TicketUser } from '@/lib/staff-support-tickets';
-import { supportTicketTopicLabels as topicLabels } from '@/lib/support-ticket-labels';
+import { supportTelegramDeliveryLabels, supportTicketTopicLabels as topicLabels } from '@/lib/support-ticket-labels';
 
 const statusLabels: Record<SupportTicketStatus, string> = {
   NEW: 'Новое',
@@ -175,7 +175,11 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge status={ticket.status} />
                     <span className="rounded-full bg-violet-500/10 px-2.5 py-1 text-xs font-semibold text-violet-700 dark:text-violet-300" title="Клуб обращения">{ticket.store.name}</span>
-                    <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">{topicLabels[ticket.topic]}</span>
+                    {ticket.channel === 'TELEGRAM' ? (
+                      <span className="rounded-full bg-sky-500/10 px-2.5 py-1 text-xs font-semibold text-sky-700 dark:text-sky-300" title="Гость написал в Telegram-бот, ответ «Гостю» придёт ему в чат">Telegram</span>
+                    ) : (
+                      <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">{topicLabels[ticket.topic]}</span>
+                    )}
                     <span className="font-mono text-xs font-bold text-cyan-700 dark:text-cyan-300">{ticket.ticketNumber}</span>
                     <AgeBadge ticket={ticket} nowMs={nowMs} />
                     <GuestThreadBadges ticket={ticket} />
@@ -251,6 +255,11 @@ export function StaffSupportTicketsWorkspace({ report, canManage, apiBasePath, p
                         <span className="font-semibold">{comment.visibility === 'GUEST' ? 'Гость' : comment.authorUser ? userLabel(comment.authorUser) : 'Система'}:</span>{' '}
                         <span className="text-zinc-600 dark:text-zinc-300">{comment.body}</span>
                         <time className="ml-2 text-xs text-zinc-400">{formatDateTime(comment.createdAt)}</time>
+                        {comment.telegramDelivery ? (
+                          <span className={`ml-2 text-xs font-semibold ${comment.telegramDelivery.status === 'SENT' ? 'text-emerald-700 dark:text-emerald-300' : comment.telegramDelivery.status === 'QUEUED' || comment.telegramDelivery.status === 'SENDING' ? 'text-zinc-500' : 'text-red-600 dark:text-red-300'}`}>
+                            · {supportTelegramDeliveryLabels[comment.telegramDelivery.status]}
+                          </span>
+                        ) : null}
                       </p>
                     ))}
                   </div>

@@ -1664,6 +1664,19 @@ Support-функциональность следует тем же трём г�
   отдаёт названия наград и статусы без идентификаторов провайдеров;
 - вложение ограничено одним JPG/PNG/WebP до 5 MiB, проверяется по bytes,
   очищается от metadata и выдаётся только как private attachment;
+- обращения из Telegram-бота (12.11.2026): при `LIVE` свободный текст гостя в
+  личном чате бота (не команда, не кнопка, не контакт) принимается тем же
+  `/guest-portal/telegram/webhook` под webhook secret. GuestRuntime находит
+  только exact активный `GuestGameProfile` с `telegramIdentity = chat:<id>` и
+  его последний подтверждённый клуб, проверяет tenant admission и пишет только
+  support-owned tables: новое обращение `kind = TELEGRAM`, `topic = OTHER`
+  (idempotency `telegram:update:<update_id>`, лимит 20 в сутки на профиль) или
+  комментарий гостя в последнем открытом/переоткрываемом TELEGRAM-обращении
+  (id комментария детерминирован от update, повтор доставки не дублирует).
+  Чат без профиля получает только platform-safe подсказку войти. Публичный
+  ответ сотрудника на TELEGRAM-обращение в corporate contour ставит строку в
+  `GuestTelegramOutboxMessage`; guest process очередь не читает и в Telegram
+  не пишет;
 - runtime flag `GUEST_BUG_REPORTING_MODE=OFF|LIVE` fail-closed и по умолчанию
   равен `OFF`.
 - schema bridge содержит только именованные exact-пары:
@@ -1784,6 +1797,31 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
 8. Production GO требует non-consuming `getMe`/`getWebhookInfo`, пустой webhook,
    ровно один process, свежий heartbeat, monotonic state, Telegram canary и
    отрицательную public/corporate/worker matrix.
+
+### Очередь сообщений гостям через Telegram-бот (12.11.2026)
+
+1. `GuestTelegramOutboxMessage` (миграция 200, grant `leetplus_runtime`) —
+   единая очередь исходящих сообщений гостю в Telegram: сейчас
+   `SUPPORT_REPLY`, далее `CAMPAIGN`. Строка уникальна по
+   `tenantId + sourceKey` и привязана к exact `tenantId + profileId`.
+2. Worker routes `POST /guests/communications/telegram-outbox/claim|report`
+   регистрируются только в corporate runtime (`GuestCommunicationsModule`),
+   проходят `assertScheduledHttpAllowed` и требуют отдельный header
+   `x-telegram-outbox-token`, сравниваемый с `GUEST_TELEGRAM_OUTBOX_TOKEN`
+   (≥ 32 символов, sha256 + timing-safe). Это не `SYNC_SERVICE_TOKEN`, не
+   webhook secret и не bot token: edge не получает sync token ради очереди.
+3. Claim выдаёт сообщение под lease 2 минуты и `claimToken`; перед выдачей
+   заново проверяет tenant admission `COMMUNICATIONS/OUTBOUND`, статус профиля
+   и наличие чата, а для `CAMPAIGN` — что гость не отписан. Report меняет
+   только строку с тем же `claimToken` в `SENDING`; повтор до 5 попыток с
+   backoff и Telegram `retry_after`, 403/«chat not found» → `BLOCKED`.
+4. Отправку делает только `telegram-poller` через тот же process-scoped
+   Privoxy/Tor egress, что и polling. API, corporate и guest processes в
+   Telegram не ходят; новой provider egress нет. Без
+   `GUEST_GAME_TG_EDGE_OUTBOX_TOKEN` или при dry run цикл очереди выключен и
+   не влияет на poll.
+5. В ответе worker route есть только chat id, текст и allowlisted кнопки;
+   телефон, ФИО и support metadata в edge не передаются.
 
 ## Инварианты корпоративного входа
 

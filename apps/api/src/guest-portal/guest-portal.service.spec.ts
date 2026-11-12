@@ -297,6 +297,9 @@ function createService(configValues: Record<string, string | undefined> = {}) {
       }),
     ),
   };
+  const guestSupportService = {
+    recordTelegramMessage: jest.fn(),
+  };
   const service = new GuestPortalService(
     prisma,
     configService,
@@ -308,6 +311,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     secretEncryptionService as any,
     guestIdentityResolver as any,
     tenantExecutionAdmission as any,
+    guestSupportService as any,
   );
 
   prisma.tenant.findFirst.mockResolvedValue(null);
@@ -507,6 +511,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     guestActivityLedgerService,
     guestBonusLedgerSchedulerService,
     guestIdentityResolver,
+    guestSupportService,
     jwtService,
     langameSettingsService,
     prisma,
@@ -1931,6 +1936,148 @@ describe('GuestPortalService', () => {
           { module: 'COMMUNICATIONS', action: 'OUTBOUND' },
         ],
       );
+    });
+
+    describe('guest messages to the club', () => {
+      const liveConfig = {
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_BUG_REPORTING_MODE: 'LIVE',
+      };
+      const linkedProfile = {
+        id: 'profile-1',
+        tenantId: 'tenant-1',
+        guestId: 'guest-1',
+      };
+      const textUpdate = (text: string) => ({
+        update_id: 9001,
+        message: {
+          text,
+          chat: { id: 123456, type: 'private' },
+          from: { id: 123456 },
+        },
+      });
+
+      it('passes a linked guest message to the club and confirms in its scope', async () => {
+        const { guestSupportService, prisma, service } =
+          createService(liveConfig);
+        prisma.guestGameProfile.findFirst.mockResolvedValue(linkedProfile);
+        prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
+          storeId: 'store-1',
+          store: { name: 'Клуб на Ленина' },
+        });
+        guestSupportService.recordTelegramMessage.mockResolvedValue({
+          status: 'CREATED',
+          ticketNumber: 41,
+        });
+
+        const result = await service.handleTelegramWebhook(
+          'telegram-secret',
+          textUpdate('Можно забронировать ПК на вечер?'),
+        );
+
+        expect(guestSupportService.recordTelegramMessage).toHaveBeenCalledWith(
+          {
+            tenantId: 'tenant-1',
+            storeId: 'store-1',
+            profileId: 'profile-1',
+            guestId: 'guest-1',
+          },
+          'Можно забронировать ПК на вечер?',
+          'update:9001',
+        );
+        expect(result).toMatchObject({
+          status: 'CONFIRMED',
+          action: 'TELEGRAM_GUEST_MESSAGE',
+          profileId: 'profile-1',
+          replyAdmission: {
+            status: 'ADMITTED',
+            scopeKind: 'TENANT_STORES',
+            scopeCount: 1,
+          },
+        });
+        expect(result.reply?.text).toContain('Клуб на Ленина');
+      });
+
+      it('does not answer again while the conversation is open', async () => {
+        const { guestSupportService, prisma, service } =
+          createService(liveConfig);
+        prisma.guestGameProfile.findFirst.mockResolvedValue(linkedProfile);
+        prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
+          storeId: 'store-1',
+          store: { name: 'Клуб' },
+        });
+        guestSupportService.recordTelegramMessage.mockResolvedValue({
+          status: 'APPENDED',
+          ticketNumber: 41,
+        });
+
+        const result = await service.handleTelegramWebhook(
+          'telegram-secret',
+          textUpdate('И ещё вопрос'),
+        );
+
+        expect(result).toMatchObject({
+          status: 'CONFIRMED',
+          action: 'TELEGRAM_GUEST_MESSAGE',
+        });
+        expect(result.reply).toBeUndefined();
+      });
+
+      it('asks a chat without a game profile to log in first', async () => {
+        const { guestSupportService, prisma, service } =
+          createService(liveConfig);
+        prisma.guestGameProfile.findFirst.mockResolvedValue(null);
+
+        const result = await service.handleTelegramWebhook(
+          'telegram-secret',
+          textUpdate('Привет'),
+        );
+
+        expect(
+          guestSupportService.recordTelegramMessage,
+        ).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          action: 'TELEGRAM_GUEST_MESSAGE',
+          replyAdmission: { scopeKind: 'PLATFORM_SAFE' },
+        });
+        expect(result.reply?.text).toContain('войдите в игру');
+      });
+
+      it('explains how to write after the menu button', async () => {
+        const { service } = createService(liveConfig);
+
+        const result = await service.handleTelegramWebhook('telegram-secret', {
+          update_id: 9002,
+          callback_query: {
+            id: 'cb-1',
+            data: 'bot:write',
+            from: { id: 123456 },
+            message: { chat: { id: 123456 } },
+          },
+        });
+
+        expect(result).toMatchObject({
+          action: 'TELEGRAM_BOT_WRITE',
+          replyAdmission: { scopeKind: 'PLATFORM_SAFE' },
+        });
+        expect(result.reply?.text).toContain('Напишите сообщение');
+      });
+
+      it('ignores free text while guest support is not live', async () => {
+        const { guestSupportService, service } = createService({
+          GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        });
+
+        const result = await service.handleTelegramWebhook(
+          'telegram-secret',
+          textUpdate('Привет'),
+        );
+
+        expect(
+          guestSupportService.recordTelegramMessage,
+        ).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ status: 'IGNORED', action: 'UNKNOWN' });
+      });
     });
 
     it('skips Telegram dispatch without a platform-safe marker or tenant/store scope', async () => {

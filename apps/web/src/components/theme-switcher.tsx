@@ -181,3 +181,51 @@ function ThemeIcon({
     </svg>
   );
 }
+
+/**
+ * One-tap day/night switch for the top of the menu. It flips what the page
+ * shows right now; the menu footer keeps the full choice with «Системная».
+ */
+export function ThemeToggle({ className = "" }: { className?: string }) {
+  const { resolvedTheme, setTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+  const label = isDark ? "Включить светлую тему" : "Включить тёмную тему";
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={isDark}
+      aria-label="Тёмная тема"
+      title={label}
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+      className={[
+        "relative inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-xl text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-amber-200",
+        className,
+      ].join(" ")}
+    >
+      <span
+        aria-hidden="true"
+        className={[
+          "absolute inset-0 flex items-center justify-center transition duration-300 ease-out motion-reduce:transition-none",
+          isDark
+            ? "-rotate-90 scale-50 opacity-0"
+            : "rotate-0 scale-100 opacity-100",
+        ].join(" ")}
+      >
+        <ThemeIcon mode="light" className="h-5 w-5" />
+      </span>
+      <span
+        aria-hidden="true"
+        className={[
+          "absolute inset-0 flex items-center justify-center transition duration-300 ease-out motion-reduce:transition-none",
+          isDark
+            ? "rotate-0 scale-100 opacity-100"
+            : "rotate-90 scale-50 opacity-0",
+        ].join(" ")}
+      >
+        <ThemeIcon mode="dark" className="h-5 w-5" />
+      </span>
+    </button>
+  );
+}

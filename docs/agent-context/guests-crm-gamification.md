@@ -114,6 +114,29 @@ query-параметры списка: `gameStatus`, `churnRisk`, `rfm`, `consen
 `POST /guests/crm/tasks` и `POST /guests/crm/contact-events`
 (`manage_communications`, NETWORK scope).
 
+### Игра, Steam и FACEIT в карточке гостя (12.11.2026)
+
+`gamification` карточки дополнительно отдаёт (`GuestGameInsightsService`,
+маппинг — `apps/api/src/guests/guest-game-external-projection.ts`):
+
+- `connection`: `profileId`, статус профиля, имя в игре (`displayName`),
+  `tutorialSeenVersion`/`tutorialSeenAt`;
+- `externalAccounts` (до 6, ACTIVE первыми): Steam/FACEIT, ник, публичный ID
+  (SteamID64 / FACEIT player id) и ссылка на публичный профиль, даты привязки
+  и отвязки, статус поиска FACEIT и код ошибки, баны Steam, уровень и ELO
+  FACEIT. Аватар и сырые ответы провайдеров не отдаются;
+- `externalMatches` (20 последних по `finishedAt`): решение журнала и причина,
+  клуб сессии, карта, итог и статистика самого гостя (K/D/A, K/D, ADR, HS%,
+  MVP, эйсы), ссылка на комнату FACEIT, XP созданного события; других игроков
+  матча нет;
+- `externalMatchTotals`: число строк журнала по решениям.
+
+В Web блок «Геймификация» показывает «Подключён к игре» / «Не подключён к
+игре», строку фактов профиля, «Игровые аккаунты» и таблицу «Матчи FACEIT CS2».
+`COUNTED` без события показывается как «Ждёт начисления», с причиной
+`NO_MATCHING_MISSION` — «Без задания». Права те же: `view_guests` +
+`view_guest_gamification` (или OWNER / platform admin).
+
 ### Сотрудник в карточке гостя (11.11.2026)
 
 Блок «Сотрудник клуба» в карточке (`guest-staff-mark-panel.tsx`) ставит или

@@ -4,6 +4,9 @@ import {
   activeFilterChips,
   deltaLabel,
   deltaTone,
+  externalMatchBadge,
+  externalMatchReasonLabel,
+  gameEventTypeLabel,
   formatPercent,
   formatRubles,
   guestsExportHref,
@@ -119,4 +122,38 @@ test("formatters and chips are stable for the dashboard", () => {
     ["segment", "gameStatus", "rfm"],
   );
   assert.deepEqual(activeFilterChips({ segment: "top", gameStatus: "any" }), []);
+});
+
+test("FACEIT journal rows read as plain decisions on the guest card", () => {
+  assert.deepEqual(
+    externalMatchBadge({ decision: "COUNTED", decisionReason: null, eventId: "e1" }),
+    { label: "Засчитан", tone: "good" },
+  );
+  assert.deepEqual(
+    externalMatchBadge({ decision: "COUNTED", decisionReason: null, eventId: null }),
+    { label: "Ждёт начисления", tone: "info" },
+  );
+  assert.deepEqual(
+    externalMatchBadge({
+      decision: "COUNTED",
+      decisionReason: "NO_MATCHING_MISSION",
+      eventId: null,
+    }),
+    { label: "Без задания", tone: "neutral" },
+  );
+  assert.equal(
+    externalMatchBadge({ decision: "REVIEW", decisionReason: null, eventId: null }).label,
+    "На проверке",
+  );
+  assert.equal(
+    externalMatchReasonLabel("OUTSIDE_SESSION", null),
+    "в это время у гостя не было сессии в клубе",
+  );
+  assert.equal(externalMatchReasonLabel("NOT_ELIGIBLE", "TOO_SHORT"), "матч короче 15 минут");
+  assert.equal(
+    externalMatchReasonLabel("REVIEW", "PROCESS_FAILED: boom"),
+    "ошибка начисления, нужна проверка",
+  );
+  assert.equal(externalMatchReasonLabel("COUNTED", null), null);
+  assert.equal(gameEventTypeLabel("FACEIT_MATCH"), "Матч FACEIT");
 });

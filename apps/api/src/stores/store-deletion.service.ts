@@ -54,6 +54,12 @@ export const STORE_REFERENCES: readonly StoreReference[] = [
   ref('GuestPortalOtpChallenge', 'storeId', 'DELETE', 'входы гостей'),
   ref('GuestGameTelegramLinkChallenge', 'storeId', 'DELETE', 'входы гостей'),
   ref('GuestSupportTicket', 'storeId', 'DELETE', 'обращения гостей'),
+  ref(
+    'GuestTelegramOutboxMessage',
+    'storeId',
+    'DELETE',
+    'сообщения гостям в Telegram',
+  ),
   ref('StaffTask', 'storeId', 'DELETE', 'задачи'),
   ref('StaffTaskRecurringRule', 'storeId', 'DELETE', 'задачи'),
   ref('StaffTaskTemplate', 'storeId', 'DELETE', 'задачи'),

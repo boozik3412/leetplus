@@ -4459,8 +4459,8 @@ function PromoBundleStandaloneLaunchPanel({
               Текущие отдельные запуски
             </p>
             <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Это не кампании: здесь нет CRM-задачи. Аудиторию можно оставить
-              общей или ограничить сохраненной группой гостей.
+              Промо-набор, запущенный сам по себе, например предложение на
+              кассе. Его можно дать всем гостям или только одной группе.
             </p>
           </div>
           <div className="max-h-[520px] divide-y divide-zinc-200 overflow-y-auto dark:divide-zinc-800">

@@ -19,6 +19,7 @@ test("the pill names what is opening", () => {
   assert.equal(navigationLabel("/staff/tasks"), "Открываем задачи персонала…");
   assert.equal(navigationLabel("/assortment/dashboard"), "Открываем ассортимент…");
   assert.equal(navigationLabel("/reports/oos/table"), "Готовим отчёт…");
+  assert.equal(navigationLabel("/commercial/audit"), "Готовим отчёт…");
   assert.equal(navigationLabel("/guests/crm/tasks"), "Открываем CRM гостей…");
 });
 

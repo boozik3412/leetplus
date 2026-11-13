@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import {
   autoLinkStaffMembersToLangame,
   normalizeStaffLinkEmail,
+  normalizeStaffLinkName,
   normalizeStaffLinkPhone,
   planStaffLangameAutoLinks,
   staffLangameIdentityKey,
@@ -9,19 +10,31 @@ import {
 
 const admin = (
   externalUserId: string,
-  fields: { email?: string; phone?: string; domain?: string } = {},
+  fields: {
+    email?: string;
+    phone?: string;
+    domain?: string;
+    name?: string;
+  } = {},
 ) => ({
   externalDomain: fields.domain ?? '46.langamepro.ru',
   externalUserId,
+  username: fields.name ?? null,
   email: fields.email ?? null,
   phone: fields.phone ?? null,
 });
 
 const member = (
   id: string,
-  fields: { email?: string; phone?: string; storeDomain?: string } = {},
+  fields: {
+    email?: string;
+    phone?: string;
+    storeDomain?: string;
+    name?: string;
+  } = {},
 ) => ({
   id,
+  displayName: fields.name ?? null,
   email: fields.email ?? null,
   phone: fields.phone ?? null,
   storeDomain: fields.storeDomain ?? null,
@@ -131,6 +144,122 @@ describe('planStaffLangameAutoLinks', () => {
     ).toEqual([]);
   });
 
+  it('links by full name inside the club domain, ё = е, patronymic optional', () => {
+    const admins = [
+      admin('364', { name: 'Семенова Анастасия Анатольевна' }),
+      admin('91', {
+        name: 'Вяткин Владислав Олегович',
+        domain: '1337.langame.ru',
+      }),
+      admin('88', {
+        name: 'Вяткин Владислав Олегович',
+        domain: '443.langame.ru',
+      }),
+    ];
+    expect(
+      planStaffLangameAutoLinks(
+        [
+          member('m1', {
+            name: 'Семёнова  Анастасия Анатольевна',
+            storeDomain: '46.langamepro.ru',
+          }),
+          member('m2', {
+            name: 'Вяткин Владислав',
+            storeDomain: '1337.langame.ru',
+          }),
+        ],
+        admins,
+        new Set(),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        memberId: 'm1',
+        externalUserId: '364',
+        source: 'AUTO_NAME',
+      }),
+      expect.objectContaining({
+        memberId: 'm2',
+        externalDomain: '1337.langame.ru',
+        externalUserId: '91',
+        source: 'AUTO_NAME',
+      }),
+    ]);
+  });
+
+  it('does not link by name across domains, on a different patronymic or a namesake', () => {
+    expect(
+      planStaffLangameAutoLinks(
+        [member('m1', { name: 'Петухов Данил Денисович' })],
+        [admin('88', { name: 'Петухов Данил Денисович' })],
+        new Set(),
+      ),
+    ).toEqual([]);
+    expect(
+      planStaffLangameAutoLinks(
+        [
+          member('m1', {
+            name: 'Тюрин Данил Антонович',
+            storeDomain: '46.langamepro.ru',
+          }),
+        ],
+        [admin('305', { name: 'Тюрин Данил Анатольевич' })],
+        new Set(),
+      ),
+    ).toEqual([]);
+    expect(
+      planStaffLangameAutoLinks(
+        [
+          member('m1', {
+            name: 'Иванов Иван',
+            storeDomain: '46.langamepro.ru',
+          }),
+        ],
+        [
+          admin('1', { name: 'Иванов Иван Петрович' }),
+          admin('2', { name: 'Иванов Иван Сергеевич' }),
+        ],
+        new Set(),
+      ),
+    ).toEqual([]);
+  });
+
+  it('prefers email over name and skips when they point to different admins', () => {
+    expect(
+      planStaffLangameAutoLinks(
+        [
+          member('m1', {
+            name: 'Иванов Иван',
+            email: 'a@club.ru',
+            storeDomain: '46.langamepro.ru',
+          }),
+        ],
+        [admin('1', { name: 'Иванов Иван', email: 'a@club.ru' })],
+        new Set(),
+      ),
+    ).toEqual([expect.objectContaining({ source: 'AUTO_EMAIL' })]);
+    expect(
+      planStaffLangameAutoLinks(
+        [
+          member('m1', {
+            name: 'Иванов Иван',
+            email: 'a@club.ru',
+            storeDomain: '46.langamepro.ru',
+          }),
+        ],
+        [
+          admin('1', { email: 'a@club.ru' }),
+          admin('2', { name: 'Иванов Иван' }),
+        ],
+        new Set(),
+      ),
+    ).toEqual([]);
+  });
+
+  it('needs at least surname and first name', () => {
+    expect(normalizeStaffLinkName('acc')).toBeNull();
+    expect(normalizeStaffLinkName('Ёлкин Пётр')).toEqual(['елкин', 'петр']);
+  });
+
   it('ignores short phones and malformed emails', () => {
     expect(normalizeStaffLinkPhone('12345')).toBeNull();
     expect(normalizeStaffLinkEmail('not-an-email')).toBeNull();
@@ -168,6 +297,7 @@ describe('autoLinkStaffMembersToLangame', () => {
       .mockResolvedValueOnce([
         {
           id: 'm1',
+          displayName: 'Иванов Иван',
           email: 'a@club.ru',
           phone: null,
           store: { externalDomain: '46.langamepro.ru' },
@@ -229,7 +359,13 @@ describe('autoLinkStaffMembersToLangame', () => {
     const prisma = prismaMock();
     prisma.staffMember.findMany
       .mockResolvedValueOnce([
-        { id: 'm1', email: 'a@club.ru', phone: null, store: null },
+        {
+          id: 'm1',
+          displayName: 'Иванов Иван',
+          email: 'a@club.ru',
+          phone: null,
+          store: null,
+        },
       ])
       .mockResolvedValueOnce([]);
     prisma.langameStaffUser.findMany.mockResolvedValue([

@@ -6,14 +6,18 @@ import { IntegrationProvider, Prisma } from '@prisma/client';
  *
  * - MANUAL: set or cleared by a person in the staff card. Never touched by
  *   the automatic pass, including an explicit «no link».
- * - AUTO_EMAIL / AUTO_PHONE: LeetPlus found exactly one Langame admin with the
- *   same email (or phone) and that admin matched no other card.
+ * - AUTO_EMAIL / AUTO_PHONE / AUTO_NAME: LeetPlus found exactly one Langame
+ *   admin with the same email, phone or full name (surname + first name, and
+ *   patronymic when either side has it) and that admin matched no other card.
+ *   Langame admins carry no email today and few phones, so the full name does
+ *   most of the work; it is only trusted inside the domain of the card club.
  * - null: links made before 13.11.2026, or no link and no decision yet.
  */
 export const STAFF_LANGAME_LINK_SOURCES = [
   'MANUAL',
   'AUTO_EMAIL',
   'AUTO_PHONE',
+  'AUTO_NAME',
 ] as const;
 
 export type StaffLangameLinkSource =
@@ -21,6 +25,7 @@ export type StaffLangameLinkSource =
 
 export type StaffLangameLinkMember = {
   id: string;
+  displayName: string | null;
   email: string | null;
   phone: string | null;
   /** Langame domain of the member's club; null = any domain of the tenant. */
@@ -30,6 +35,7 @@ export type StaffLangameLinkMember = {
 export type StaffLangameLinkAdmin = {
   externalDomain: string;
   externalUserId: string;
+  username: string | null;
   email: string | null;
   phone: string | null;
 };
@@ -38,7 +44,7 @@ export type StaffLangameLinkPlanItem = {
   memberId: string;
   externalDomain: string;
   externalUserId: string;
-  source: Extract<StaffLangameLinkSource, 'AUTO_EMAIL' | 'AUTO_PHONE'>;
+  source: Exclude<StaffLangameLinkSource, 'MANUAL'>;
 };
 
 const INACTIVE_MEMBER_STATUSES = ['DISMISSED', 'ARCHIVED'];
@@ -54,6 +60,38 @@ export function normalizeStaffLinkEmail(value: string | null | undefined) {
 export function normalizeStaffLinkPhone(value: string | null | undefined) {
   const digits = value?.replace(/\D/gu, '') ?? '';
   return digits.length >= 10 && digits.length <= 15 ? digits.slice(-10) : null;
+}
+
+/**
+ * Full name as comparable tokens: lower case, ё → е, letters only. At least
+ * surname and first name are required, so logins like «acc» never match.
+ */
+export function normalizeStaffLinkName(value: string | null | undefined) {
+  const tokens =
+    value
+      ?.toLowerCase()
+      .replace(/ё/gu, 'е')
+      .split(/[^\p{L}]+/u)
+      .filter(Boolean) ?? [];
+  return tokens.length >= 2 && tokens.length <= 4 ? tokens : null;
+}
+
+/**
+ * Same person by name: equal surname and first name; a patronymic counts
+ * only when both sides have one (it must then be equal too).
+ */
+function sameStaffLinkName(left: string[], right: string[]) {
+  if (
+    left.length !== right.length &&
+    Math.min(left.length, right.length) !== 2
+  ) {
+    return false;
+  }
+  const shared = Math.min(left.length, right.length);
+  for (let index = 0; index < shared; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
 }
 
 export function staffLangameIdentityKey(domain: string, userId: string) {
@@ -82,19 +120,30 @@ export function planStaffLangameAutoLinks(
       key: staffLangameIdentityKey(admin.externalDomain, admin.externalUserId),
       email: normalizeStaffLinkEmail(admin.email),
       phone: normalizeStaffLinkPhone(admin.phone),
+      name: normalizeStaffLinkName(admin.username),
     }))
-    .filter((admin) => admin.email || admin.phone);
+    .filter((admin) => admin.email || admin.phone || admin.name);
 
   const matchesByMember = new Map<
     string,
-    Array<{ key: string; admin: StaffLangameLinkAdmin; byEmail: boolean }>
+    Array<{
+      key: string;
+      admin: StaffLangameLinkAdmin;
+      byEmail: boolean;
+      byPhone: boolean;
+    }>
   >();
   const membersByAdminKey = new Map<string, Set<string>>();
 
   for (const member of members) {
     const email = normalizeStaffLinkEmail(member.email);
     const phone = normalizeStaffLinkPhone(member.phone);
-    if (!email && !phone) continue;
+    // A name is trusted only inside one club domain: a network card (no
+    // club) is matched by email or phone alone.
+    const name = member.storeDomain
+      ? normalizeStaffLinkName(member.displayName)
+      : null;
+    if (!email && !phone && !name) continue;
 
     const matches = freeAdmins
       .filter(
@@ -107,8 +156,11 @@ export function planStaffLangameAutoLinks(
         admin: admin.admin,
         byEmail: Boolean(email && admin.email === email),
         byPhone: Boolean(phone && admin.phone === phone),
+        byName: Boolean(
+          name && admin.name && sameStaffLinkName(name, admin.name),
+        ),
       }))
-      .filter((match) => match.byEmail || match.byPhone);
+      .filter((match) => match.byEmail || match.byPhone || match.byName);
 
     matchesByMember.set(member.id, matches);
     for (const match of matches) {
@@ -128,7 +180,11 @@ export function planStaffLangameAutoLinks(
       memberId: member.id,
       externalDomain: match.admin.externalDomain,
       externalUserId: match.admin.externalUserId,
-      source: match.byEmail ? 'AUTO_EMAIL' : 'AUTO_PHONE',
+      source: match.byEmail
+        ? 'AUTO_EMAIL'
+        : match.byPhone
+          ? 'AUTO_PHONE'
+          : 'AUTO_NAME',
     });
   }
 
@@ -142,7 +198,8 @@ type StaffLinkPrisma = {
 
 /**
  * Links cards without a Langame identity and without a manual decision to
- * the Langame admin with the same email or phone. Never overwrites or
+ * the Langame admin with the same email, phone or full name (see
+ * planStaffLangameAutoLinks). Never overwrites or
  * clears a link; a concurrent edit or a unique collision skips the card.
  */
 export async function autoLinkStaffMembersToLangame(
@@ -158,10 +215,10 @@ export async function autoLinkStaffMembersToLangame(
       externalUserId: null,
       externalLinkSource: null,
       status: { notIn: INACTIVE_MEMBER_STATUSES },
-      OR: [{ email: { not: null } }, { phone: { not: null } }],
     },
     select: {
       id: true,
+      displayName: true,
       email: true,
       phone: true,
       store: { select: { externalDomain: true } },
@@ -179,11 +236,11 @@ export async function autoLinkStaffMembersToLangame(
         tenantId,
         externalProvider: IntegrationProvider.LANGAME,
         missingFromSourceAt: null,
-        OR: [{ email: { not: null } }, { phone: { not: null } }],
       },
       select: {
         externalDomain: true,
         externalUserId: true,
+        username: true,
         email: true,
         phone: true,
       },
@@ -210,6 +267,7 @@ export async function autoLinkStaffMembersToLangame(
   const plan = planStaffLangameAutoLinks(
     members.map((member) => ({
       id: member.id,
+      displayName: member.displayName,
       email: member.email,
       phone: member.phone,
       storeDomain: member.store?.externalDomain ?? null,

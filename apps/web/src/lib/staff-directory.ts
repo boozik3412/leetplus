@@ -55,7 +55,12 @@ export type StaffDirectoryMember = {
   externalDomain: string | null;
   externalUserId: string | null;
   /** MANUAL — set in the card; AUTO_* — LeetPlus matched by email/phone. */
-  externalLinkSource: "MANUAL" | "AUTO_EMAIL" | "AUTO_PHONE" | null;
+  externalLinkSource:
+    | "MANUAL"
+    | "AUTO_EMAIL"
+    | "AUTO_PHONE"
+    | "AUTO_NAME"
+    | null;
   externalLinkedAt: string | null;
   note: string | null;
   createdAt: string;

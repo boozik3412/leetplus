@@ -162,6 +162,9 @@ function langameLinkSourceNote(member: StaffDirectoryMember) {
   if (member.externalLinkSource === "AUTO_PHONE") {
     return ` · привязан автоматически по телефону${missing}`;
   }
+  if (member.externalLinkSource === "AUTO_NAME") {
+    return ` · привязан автоматически по ФИО${missing}`;
+  }
   return missing;
 }
 
@@ -876,8 +879,9 @@ export function StaffDirectoryWorkspace({
               </Field>
             </div>
             <p className="mt-2 text-xs text-zinc-500">
-              Если почта или телефон в карточке совпадают ровно с одним
-              администратором Langame, LeetPlus привяжет его сам. Привязку,
+              Если почта, телефон или ФИО в карточке совпадают ровно с одним
+              администратором Langame в клубе сотрудника, LeetPlus привяжет
+              его сам. Привязку,
               которую вы поменяли или очистили здесь, LeetPlus больше не
               трогает.
             </p>

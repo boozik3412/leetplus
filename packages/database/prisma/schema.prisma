@@ -4478,7 +4478,7 @@ model StaffMember {
   externalProvider   IntegrationProvider?
   externalDomain     String?
   externalUserId     String?
-  /// MANUAL | AUTO_EMAIL | AUTO_PHONE; NULL for links made before 13.11.2026.
+  /// MANUAL | AUTO_EMAIL | AUTO_PHONE | AUTO_NAME; NULL for links made before 13.11.2026.
   externalLinkSource String?
   externalLinkedAt   DateTime?
   note               String?

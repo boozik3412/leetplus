@@ -1994,6 +1994,26 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   прячет его, когда пять шагов выполнены. Ошибка этого запроса не ломает
   сводку: блок просто не показывается.
 
+### Удаление задачи персонала (13.11.2026)
+
+- `DELETE /staff/tasks/:id` — corporate tenant write в `StaffTasksController`
+  (JWT + `RolesGuard` + `FreshStoreScopeGuard`, capability
+  `manage_staff_tasks`, manifest `STORES_VERIFIED`). Сервис дополнительно
+  требует роль проверяющего (OWNER/ADMIN/MANAGER/CLUB_MANAGER/STANDARDS_MANAGER
+  или platform admin): администратор и старший администратор не удаляют задачи,
+  даже свои, чтобы не стирать просрочку из рейтинга.
+- Задача ищется и блокируется (`FOR UPDATE`) в том же scope, что и изменение;
+  вне scope — 404. Перед удалением её `STAFF_TASK`-привязки вложений снимаются
+  (`syncNativeResourceAttachments` с пустым списком, осиротевшие файлы уходят в
+  `QUARANTINED`), иначе сработает deferred guard родителя вложений.
+  Комментарии, наблюдатели и журнал задачи удаляются каскадом; ссылки
+  правил-повторов (`lastCreatedTaskId`, `createdTaskId`) обнуляются, прогон
+  правила остаётся, поэтому задача не создаётся заново.
+- Web: BFF `DELETE /api/staff/tasks/:id` через `proxyJsonRequest`, кнопка
+  «Удалить» с подтверждением в карточке задачи.
+- Не выполненный пункт чек-листа больше не создаёт задачу «Проверить пункт
+  чеклиста»; инцидент в чате и уведомления остаются.
+
 ### Удаление клуба
 
 - Два входа в один `StoreDeletionService`: control plane

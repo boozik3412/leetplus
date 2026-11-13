@@ -1796,6 +1796,8 @@ function placeShiftWork() {
   }
   const feedTop = feedEl && feedEl.offsetParent ? feedEl.offsetTop : stage.clientHeight - 14;
   tk.style.bottom = (stage.clientHeight - feedTop + 10) + 'px';
+  // same width as «Лента клуба» under it
+  tk.style.width = feedEl && feedEl.offsetParent ? feedEl.offsetWidth + 'px' : '';
   tk.style.maxHeight = Math.max(120, Math.min(330, feedTop - 150)) + 'px';
 }
 /* ---------------- other clubs of the network with a drawn hall (full screen only) ---------------- */

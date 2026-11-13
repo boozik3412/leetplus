@@ -5,6 +5,8 @@ import { useState } from "react";
 import type { AuthUser } from "@/lib/auth";
 import {
   canCancelStaffTask,
+  canDeleteStaffTask,
+  staffTaskDeleteRequest,
   staffTaskMoves,
   staffTaskStatusRequest,
   type StaffTaskMove,
@@ -31,6 +33,8 @@ export function StaffTaskStatusActions({
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   async function updateStatus(next: StaffTaskStatus) {
     setPendingStatus(next);
@@ -59,6 +63,28 @@ export function StaffTaskStatusActions({
     }
   }
 
+  async function deleteTask() {
+    setDeleting(true);
+    setError(null);
+
+    try {
+      const request = staffTaskDeleteRequest(taskId);
+      const response = await fetch(request.url, { method: request.method });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        throw new Error(data?.message ?? "Не удалось удалить задачу");
+      }
+
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Ошибка запроса");
+      setDeleting(false);
+    }
+  }
+
   const actions = staffTaskMoves(
     {
       status,
@@ -69,6 +95,8 @@ export function StaffTaskStatusActions({
   );
   const isTerminal = status === "DONE" || status === "CANCELED";
   const canCancel = canCancelStaffTask(currentUser);
+  const canDelete = canDeleteStaffTask(currentUser);
+  const busy = pendingStatus !== null || deleting;
 
   return (
     <div className="flex flex-col gap-2">
@@ -77,7 +105,7 @@ export function StaffTaskStatusActions({
           <button
             key={action.status}
             type="button"
-            disabled={pendingStatus !== null}
+            disabled={busy}
             onClick={() => updateStatus(action.status)}
             className={buttonClass(action.variant)}
           >
@@ -88,14 +116,53 @@ export function StaffTaskStatusActions({
         {!isTerminal && canCancel ? (
           <button
             type="button"
-            disabled={pendingStatus !== null}
+            disabled={busy}
             onClick={() => updateStatus("CANCELED")}
             className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
           >
             Отменить
           </button>
         ) : null}
+
+        {canDelete && !confirmDelete ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setConfirmDelete(true)}
+            className="inline-flex h-9 items-center justify-center rounded-md border border-red-200 px-3 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10"
+          >
+            Удалить
+          </button>
+        ) : null}
       </div>
+
+      {canDelete && confirmDelete ? (
+        <div
+          role="group"
+          aria-label="Подтверждение удаления"
+          className="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-800 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200"
+        >
+          <p>Удалить задачу навсегда? Комментарии и история тоже удалятся.</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void deleteTask()}
+              className="inline-flex h-9 items-center justify-center rounded-md bg-red-600 px-3 text-xs font-semibold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {deleting ? "Удаляем..." : "Да, удалить"}
+            </button>
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => setConfirmDelete(false)}
+              className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-xs font-semibold text-zinc-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Не удалять
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {error ? (
         <p className="text-xs text-red-600 dark:text-red-300">{error}</p>

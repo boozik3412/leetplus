@@ -173,8 +173,10 @@ export class GuestGamificationController {
   getEffect(
     @CurrentUser() user: AuthenticatedUser,
     @Query('storeId') storeId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ): Promise<GuestGameEffectReport> {
-    return this.effectService.getReport(user.tenantId, { storeId });
+    return this.effectService.getReport(user.tenantId, { storeId, from, to });
   }
 
   @Patch('effect/holdout')

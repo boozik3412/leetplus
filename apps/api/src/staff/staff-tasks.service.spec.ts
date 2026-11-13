@@ -127,6 +127,7 @@ describe('StaffTasksService status review workflow', () => {
       staffTask: {
         findFirst: jest.fn().mockResolvedValue(currentTask),
         update: jest.fn() as StaffTaskUpdateMock,
+        delete: jest.fn().mockResolvedValue({ id: currentTask.id }),
       },
       staffTaskComment: {
         create: jest.fn() as StaffTaskCommentCreateMock,
@@ -157,6 +158,7 @@ describe('StaffTasksService status review workflow', () => {
     };
     const staffAttachmentBindingsService = {
       bindPendingResourceAttachments: jest.fn().mockResolvedValue(undefined),
+      syncNativeResourceAttachments: jest.fn().mockResolvedValue(undefined),
     };
     const service = new StaffTasksService(
       prisma as never,
@@ -872,6 +874,68 @@ describe('StaffTasksService status review workflow', () => {
     ).rejects.toThrow(ForbiddenException);
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('lets a club manager delete a task and release its attachments first', async () => {
+    const { service, staffAttachmentBindingsService, tx } =
+      createService('ON_REVIEW');
+
+    await expect(
+      service.deleteTask(actor(UserRole.CLUB_MANAGER, 'manager-1'), 'task-1'),
+    ).resolves.toEqual({ id: 'task-1', deleted: true });
+
+    expect(
+      staffAttachmentBindingsService.syncNativeResourceAttachments,
+    ).toHaveBeenCalledWith(tx, {
+      tenantId,
+      actorUserId: 'manager-1',
+      resourceKind: 'STAFF_TASK',
+      resourceId: 'task-1',
+      attachmentIds: [],
+    });
+    expect(tx.staffTask.delete).toHaveBeenCalledWith({
+      where: { id: 'task-1' },
+    });
+    expect(
+      staffAttachmentBindingsService.syncNativeResourceAttachments.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(tx.staffTask.delete.mock.invocationCallOrder[0]);
+  });
+
+  it.each([UserRole.CLUB_ADMINISTRATOR, UserRole.SENIOR_ADMINISTRATOR])(
+    'does not let %s delete a task, even their own',
+    async (role) => {
+      const { service, tx } = createService('OPEN', 'admin-1');
+
+      await expect(
+        service.deleteTask(actor(role, 'admin-1'), 'task-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(tx.staffTask.delete).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not let a view-only manager delete a task', async () => {
+    const { service, tx } = createService('OPEN');
+    const viewer: AuthenticatedUser = {
+      ...actor(UserRole.CLUB_MANAGER, 'manager-1'),
+      hasRoleOverride: true,
+      permissions: ['view_staff_tasks'],
+    };
+
+    await expect(service.deleteTask(viewer, 'task-1')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(tx.staffTask.delete).not.toHaveBeenCalled();
+  });
+
+  it('does not delete a task outside the manager scope', async () => {
+    const { service, tx } = createService('OPEN');
+    tx.staffTask.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.deleteTask(actor(UserRole.CLUB_MANAGER, 'manager-1'), 'task-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(tx.staffTask.delete).not.toHaveBeenCalled();
   });
 
   it('creates task evidence and binds a fresh attachment in one transaction', async () => {

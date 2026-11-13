@@ -17,7 +17,7 @@ import {
   getGuestGamificationWorkspace,
   type GuestGamificationWorkspace,
 } from "@/lib/guest-gamification";
-import { can } from "@/lib/permissions";
+import { can, canUseGuestGameTestRun } from "@/lib/permissions";
 import { getProducts, type Product } from "@/lib/products";
 import { getStores, type Store } from "@/lib/stores";
 
@@ -546,9 +546,13 @@ export default async function GamificationPage({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
-  const initialTab = parseGamificationTab(params.tab);
   const initialEditorMode = parseGamificationMode(params.mode);
   const user = await requireCurrentUser();
+  const canUseTestRun = canUseGuestGameTestRun(user);
+  const requestedTab = parseGamificationTab(params.tab);
+  // A stale ?tab=testRun link from a lower role lands on the overview.
+  const initialTab =
+    requestedTab === "testRun" && !canUseTestRun ? "overview" : requestedTab;
 
   if (!can(user, "view_guest_gamification")) {
     return (
@@ -641,6 +645,7 @@ export default async function GamificationPage({
             canViewGuestPii: can(user, "view_guest_game_pii"),
             isPlatformAdmin: user.isPlatformAdmin,
             canRunRewardMaterializer,
+            canUseTestRun,
           }}
         />
       </div>

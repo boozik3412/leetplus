@@ -5,7 +5,12 @@ import { join } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import type { AuthUser } from "./auth";
-import { can, capabilityOptions, type Capability } from "./permissions.ts";
+import {
+  can,
+  canUseGuestGameTestRun,
+  capabilityOptions,
+  type Capability,
+} from "./permissions.ts";
 import { roleOrder } from "./roles.ts";
 
 // The role/capability matrix is written twice: the API enforces it
@@ -101,4 +106,47 @@ test("custom permissions expand the same way on web and API", () => {
       }
     }
   }
+});
+
+test("«Тест запуска» is open on web exactly where the API allows its routes", () => {
+  const controller = readFileSync(
+    new URL(
+      "../../../api/src/guest-gamification/guest-gamification.controller.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  for (const route of [
+    "@Post('dry-run')",
+    "@Get('facts')",
+    "@Post('process-event')",
+    "@Post('pipeline/run')",
+  ]) {
+    const start = controller.indexOf(route);
+    assert.notEqual(start, -1, `${route} not found in the API controller`);
+    // Decorators of this handler end where its parameters start.
+    const decorators = controller.slice(
+      start,
+      controller.indexOf("@CurrentUser()", start),
+    );
+    assert.match(
+      decorators,
+      /@StrictRoles\(UserRole\.OWNER, UserRole\.ADMIN\)\s+@UseGuards\(StrictRolesGuard\)/,
+      `${route} must keep the OWNER/ADMIN ceiling`,
+    );
+  }
+
+  const allowed = roleOrder.filter((role) =>
+    canUseGuestGameTestRun(webUser(role)),
+  );
+  assert.deepEqual(allowed, ["OWNER", "ADMIN"]);
+  assert.equal(
+    canUseGuestGameTestRun(
+      webUser("MANAGER", [
+        "view_guest_gamification",
+        "manage_guest_game_rules",
+      ]),
+    ),
+    false,
+  );
 });

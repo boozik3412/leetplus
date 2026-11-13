@@ -901,6 +901,7 @@ function renderPanel() {
   panel.classList.toggle('home', view.type === 'home' && !editing && !EMBED);
   layoutChrome();
   placeShiftWork();
+  renderAttnLegend();
   if (editing) { panel.classList.toggle('collapsed', isPhone() && !sheetOpen); renderEditor(); syncPills(); return; }
   panel.classList.toggle('collapsed', isPhone() && !sheetOpen);
   $('#grab').setAttribute('aria-label', sheetOpen ? 'Свернуть панель' : 'Развернуть панель');
@@ -1204,8 +1205,17 @@ function seatGuestHtml(info) {
       <dl class="kv"><dt>Не забрал наград</dt><dd class="num">${fmt.format(gm.pendingRewards)}${gm.rewardsExpiringSoon ? ` · ${fmt.format(gm.rewardsExpiringSoon)} скоро сгорит` : ''}</dd>${gm.nearestRewardExpiresAt && gm.pendingRewards ? `<dt>Ближайшая сгорает</dt><dd class="num">${new Date(gm.nearestRewardExpiresAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}</dd>` : ''}<dt>Получил наград</dt><dd class="num">${fmt.format(gm.rewardsPaidTotal)}</dd></dl></div>`;
     }
   }
-  if (g.recommendedAction) h += `<div class="gtip"><b>Подсказка админу</b>${esc(g.recommendedAction.label)}${g.recommendedAction.reason ? `: ${esc(g.recommendedAction.reason)}` : ''}</div>`;
+  if (g.recommendedAction && !tipRepeatsHints(g.recommendedAction.key)) h += `<div class="gtip"><b>Подсказка админу</b>${esc(g.recommendedAction.label)}${g.recommendedAction.reason ? `: ${esc(g.recommendedAction.reason)}` : ''}</div>`;
   return h;
+}
+/* The tip is left out when «На что обратить внимание» above already says it. */
+var TIP_REPEATS = { CLAIM_REWARD: ['REWARDS_WAITING', 'REWARD_EXPIRING'], INVITE_TO_GAME: ['NOT_IN_GAME'], KEEP_WARM: ['VIP'], SECOND_VISIT: ['FIRST_VISIT'], MANUAL: ['TASK'], WIN_BACK: ['RETURNED'] };
+function tipRepeatsHints(key) {
+  const keys = TIP_REPEATS[key];
+  if (!keys || view.type !== 'seat' || typeof ATTN === 'undefined' || !ATTN || !ATTN.data) return false;
+  const s = seats.find(x => x.id === view.id);
+  const at = s && ATTN.data.seats.find(x => x.number === s.num);
+  return !!at && at.hints.some(h => keys.includes(h.key));
 }
 function guestBuysHtml(list) {
   const when = LIVE.revenue && LIVE.revenue.period === 'TODAY' ? 'за сегодня' : 'за смену';
@@ -1243,7 +1253,7 @@ function hoverSeatInfo(s) {
 var ATTN = { data: null, pending: false, failed: false, off: new Set(), busy: new Set(), timer: 0, back: 0 };
 var ATTN_POLL_MS = 15000;
 var ATTN_TONES = ['ALERT', 'TODAY', 'OFFER', 'NEW', 'KNOW'];
-var ATTN_TONE_LABEL = { ALERT: 'Обращения', TODAY: 'Сегодня', OFFER: 'Предложить', NEW: 'Новые', KNOW: 'Знай гостя' };
+var ATTN_TONE_LABEL = { ALERT: 'Обращение', TODAY: 'Сделать сейчас', OFFER: 'Предложить', NEW: 'Новый гость', KNOW: 'Знать о госте' };
 var ATTN_SVG = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 var ATTN_ICON = {
   GUEST_MESSAGE: ATTN_SVG('<path d="M12 5v9M12 18.5v.5"/>'),
@@ -1288,6 +1298,38 @@ async function loadAttention() {
   } catch (e) { ATTN.failed = true; }
   ATTN.pending = false;
   attnRefreshPanel();
+  renderAttnLegend();
+}
+/* Colour legend of the guest markers on the full scene, bottom right; each
+   row also hides or shows its markers. «Моя смена» has the same colours as
+   chips in its panel. */
+var ATTN_TONE_NOTE = { ALERT: 'гость написал в Telegram или приложении', TODAY: 'кончается время, сгорает награда', OFFER: 'бар, бонусы, позвать в игру', NEW: 'первый визит в клуб', KNOW: 'VIP, давно не был(а), задача из CRM' };
+function attnLegendHtml(d, done) {
+  const count = {};
+  for (const seat of d.seats) for (const h of seat.hints) if (h.key !== 'GUEST_MESSAGE' && !attnIsDone(seat, h, done)) count[h.tone] = (count[h.tone] || 0) + 1;
+  count.ALERT = d.alerts.filter(a => a.status !== 'RESOLVED').length;
+  return `<h3>Маркеры гостей</h3><div class="alegl">${ATTN_TONES.map(t => `<button type="button" class="alegr" data-tone="${t}" aria-pressed="${ATTN.off.has(t) ? 'false' : 'true'}" title="${ATTN.off.has(t) ? 'Показать' : 'Скрыть'} на схеме"><i class="t-${t}"></i><span><b>${ATTN_TONE_LABEL[t]}</b><small>${ATTN_TONE_NOTE[t]}</small></span><em class="num">${count[t] || 0}</em></button>`).join('')}</div>`;
+}
+function renderAttnLegend() {
+  if (EMBED || !API) return;
+  const stage = document.getElementById('stage');
+  if (!stage) return;
+  let el = document.getElementById('attleg');
+  if (!el) {
+    el = document.createElement('section'); el.id = 'attleg'; el.className = 'attleg'; el.setAttribute('aria-label', 'Цвета маркеров гостей'); el.hidden = true;
+    stage.appendChild(el);
+    el.addEventListener('click', e => {
+      const b = e.target.closest('[data-tone]'); if (!b) return;
+      const t = b.dataset.tone; if (ATTN.off.has(t)) ATTN.off.delete(t); else ATTN.off.add(t);
+      renderAttnLegend();
+      const f = el.querySelector(`[data-tone="${t}"]`); if (f) f.focus();
+    });
+  }
+  const show = !!ATTN.data && view.type === 'home' && !(typeof editing !== 'undefined' && editing) && !isPhone();
+  el.hidden = !show;
+  if (!show) return;
+  el.innerHTML = attnLegendHtml(ATTN.data, attnDone());
+  if (typeof placeShiftWork === 'function') placeShiftWork();
 }
 function attnRefreshPanel() {
   if (typeof editing === 'undefined' || editing) return;
@@ -1581,7 +1623,7 @@ function swAdminEmpty(part) {
 }
 function swWhoHtml() {
   if (!swAdminMode()) return '';
-  return `<div class="swwho"><span class="swwl">Режим администратора смены</span><b title="${esc(swAdminName(false))}">${esc(swAdminName(true))}</b><button type="button" class="swx" data-swmode="off">Выйти</button></div>`;
+  return `<div class="swwho"><span class="swwt"><span class="swwl">Режим администратора смены</span><b title="${esc(swAdminName(false))}">${esc(swAdminName(true))}</b></span><button type="button" class="swx" data-swmode="off">Выйти</button></div>`;
 }
 /* The switch in the «Стойка и бар» card, for a senior administrator and above. */
 function swModeHtml() {
@@ -1759,22 +1801,24 @@ function renderShiftWork() {
   placeShiftWork();
   if (list && !SW.scrolled) { const now = list.querySelector('.isnow') || [...list.querySelectorAll('.swrow')].find(r => !r.querySelector('.chip.good')); if (now) { list.scrollTop = Math.max(0, now.offsetTop - list.offsetTop - 40); SW.scrolled = true; } }
 }
-/* The checklist goes under the compact «Обзор клуба», the tasks above «Лента клуба». */
+/* For the administrator the checklist takes the place of «Обзор клуба» (the
+   overview comes back with any card: a click on a guest opens the guest panel
+   as before); the tasks stay above «Лента клуба». */
 function placeShiftWork() {
   const cl = document.getElementById('swcl'), tk = document.getElementById('swtk');
   const stage = document.getElementById('stage'), panelEl = document.getElementById('panel'), feedEl = document.querySelector('.feed');
   if (!cl || !tk || !stage) return;
   const show = swOn() && view.type === 'home' && !editing && !isPhone();
+  if (panelEl) panelEl.classList.toggle('swoff', show);
   cl.hidden = !show; tk.hidden = !show;
   if (!show) return;
-  // the overview grows over the checklist while hovered; keep the checklist where it was
-  if (!panelEl.matches(':hover') && !panelEl.matches(':focus-within')) {
-    const top = panelEl.offsetTop + panelEl.offsetHeight + 10;
-    cl.style.top = top + 'px';
-    cl.style.width = panelEl.offsetWidth + 'px';
-    cl.style.maxHeight = Math.max(120, stage.clientHeight - top - 14) + 'px';
-    cl.hidden = stage.clientHeight - top < 120;
-  }
+  const top = 14;
+  cl.style.top = top + 'px';
+  cl.style.width = '340px';
+  // the marker legend sits under the checklist, bottom right
+  const leg = document.getElementById('attleg');
+  const below = leg && !leg.hidden ? leg.offsetHeight + 10 : 0;
+  cl.style.maxHeight = Math.max(120, stage.clientHeight - top - 14 - below) + 'px';
   const feedTop = feedEl && feedEl.offsetParent ? feedEl.offsetTop : stage.clientHeight - 14;
   tk.style.bottom = (stage.clientHeight - feedTop + 10) + 'px';
   // same width as «Лента клуба» under it

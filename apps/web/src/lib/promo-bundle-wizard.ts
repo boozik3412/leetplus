@@ -513,3 +513,26 @@ export function pluralRu(
 function formatRub(value: number) {
   return `${Math.round(value).toLocaleString("ru-RU")} ₽`;
 }
+
+/**
+ * A same-site path to come back to after the wizard (e.g. the campaign
+ * wizard). Anything that is not a plain "/path" is ignored.
+ */
+export function safeReturnPath(value: string | null | undefined) {
+  const path = value?.trim() ?? "";
+  return path.startsWith("/") &&
+    !path.startsWith("//") &&
+    !path.includes("\\") &&
+    !/[\u0000-\u001f]/.test(path)
+    ? path
+    : null;
+}
+
+/** returnTo with ?promoBundle=<id> added (keeps other params and #hash). */
+export function returnWithPromoBundle(returnTo: string, promoBundleId: string) {
+  const [path, hash = ""] = returnTo.split("#");
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}promoBundle=${encodeURIComponent(promoBundleId)}${
+    hash ? `#${hash}` : ""
+  }`;
+}

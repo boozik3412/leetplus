@@ -4,7 +4,6 @@ import Link from "next/link";
 import {
   useEffect,
   useMemo,
-  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -30,6 +29,7 @@ import type {
   MarketingTariffConditions,
 } from "@/lib/marketing";
 import { MoreFields } from "@/components/more-fields";
+import { promoBundleOfferLine } from "@/lib/promo-bundle-wizard";
 import type { Product } from "@/lib/products";
 import type { Store } from "@/lib/stores";
 
@@ -267,6 +267,228 @@ function WizardStepTitle({ title, text }: { title: string; text: string }) {
       <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
         {text}
       </p>
+    </div>
+  );
+}
+
+/** Campaign fields a chosen promo bundle fills in (goal, name, mechanic…). */
+function promoBundleCampaignPatch(
+  promoBundle: MarketingPromoBundle,
+  tariffConditions: MarketingTariffConditions,
+) {
+  const draft = promoBundleToDraft(promoBundle);
+  const economics = buildPromoBundleEconomics(draft);
+  const verdict = buildPromoBundleVerdict(draft, economics);
+  const note =
+    promoBundle.note ??
+    buildPromoBundleNote(draft, economics, [], tariffConditions);
+  const bundleType = getPromoBundleTypeOption(draft.bundleType);
+  const mechanicConfig = isRecord(promoBundle.mechanicConfig)
+    ? { ...promoBundle.mechanicConfig, promoBundleId: promoBundle.id }
+    : {
+        ...buildPromoBundleConfig(
+          draft,
+          economics,
+          verdict,
+          [],
+          tariffConditions,
+        ),
+        promoBundleId: promoBundle.id,
+      };
+
+  return {
+    form: {
+      goal: "PROMO_BUNDLE",
+      name: promoBundle.name,
+      channel: "CRM-задача",
+      mechanic: bundleType.title,
+      mechanicConfig,
+      promoBundleId: promoBundle.id,
+      budget: String(Math.round(economics.discountBudget)),
+      note,
+    } satisfies Partial<CampaignFormState>,
+    expectedUses: draft.expectedUses,
+  };
+}
+
+const mechanicCardClass =
+  "flex min-h-24 flex-col gap-1.5 rounded-lg border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500";
+
+function mechanicCardState(active: boolean) {
+  return active
+    ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
+    : "border-zinc-200 bg-white hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-950";
+}
+
+// Step «Механика» of the campaign wizard: a ready scenario or a promo bundle
+// from the catalogue. New bundles are made in the promo-bundle wizard, which
+// comes back here with the bundle chosen.
+function CampaignMechanicPicker({
+  appliedTemplateId,
+  onApplyTemplate,
+  promoBundles,
+  selectedPromoBundleId,
+  onUsePromoBundle,
+  createBundleHref,
+}: {
+  appliedTemplateId: string | null;
+  onApplyTemplate: (template: PromoMechanicTemplate) => void;
+  promoBundles: MarketingPromoBundle[];
+  selectedPromoBundleId: string;
+  onUsePromoBundle: (bundle: MarketingPromoBundle) => void;
+  createBundleHref: string;
+}) {
+  const activeBundles = promoBundles.filter(
+    (bundle) => bundle.status !== "ARCHIVED",
+  );
+  const applied =
+    promoMechanicTemplates.find(
+      (template) => template.id === appliedTemplateId,
+    ) ?? null;
+
+  return (
+    <div className="grid gap-6">
+      <section className="grid gap-3" aria-labelledby="mechanic-scenarios">
+        <div>
+          <h3
+            id="mechanic-scenarios"
+            className="text-base font-semibold text-zinc-950 dark:text-white"
+          >
+            Готовый сценарий
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            Нажмите на сценарий: цель, канал, механика и заметка заполнятся
+            сами.
+          </p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {promoMechanicTemplates.map((template) => {
+            const isActive = template.id === appliedTemplateId;
+            return (
+              <button
+                key={template.id}
+                type="button"
+                aria-pressed={isActive}
+                onClick={() => onApplyTemplate(template)}
+                className={`${mechanicCardClass} ${mechanicCardState(isActive)}`}
+              >
+                <span className="flex items-start justify-between gap-2">
+                  <span className="text-sm font-semibold text-zinc-950 dark:text-white">
+                    {template.title}
+                  </span>
+                  {isActive ? (
+                    <span className="shrink-0 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                      Выбран
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-xs leading-5 text-zinc-600 dark:text-zinc-400">
+                  {template.description}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {applied ? (
+          <div className="grid gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+            <p className="text-sm leading-6 text-zinc-700 dark:text-zinc-200">
+              <strong className="font-semibold text-zinc-950 dark:text-white">
+                {applied.title}.
+              </strong>{" "}
+              {applied.tradeoff}
+            </p>
+            <dl className="grid gap-3 sm:grid-cols-2">
+              <MechanicFact label="Кому" value={applied.audienceHint} />
+              <MechanicFact
+                label="Как поймём результат"
+                value={applied.primaryKpi}
+              />
+              <MechanicFact label="Что отметить" value={applied.controlPoint} />
+              <MechanicFact label="Риск" value={applied.risk} />
+            </dl>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="grid gap-3" aria-labelledby="mechanic-bundles">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3
+              id="mechanic-bundles"
+              className="text-base font-semibold text-zinc-950 dark:text-white"
+            >
+              Или промо-набор
+            </h3>
+            <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              Готовое предложение: что получает гость и за сколько.
+            </p>
+          </div>
+          <Link
+            href={createBundleHref}
+            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-300 px-4 text-sm font-semibold text-zinc-800 transition hover:border-emerald-500 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-100 dark:hover:text-emerald-300"
+          >
+            Создать промо-набор
+          </Link>
+        </div>
+        {activeBundles.length > 0 ? (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {activeBundles.map((bundle) => {
+              const draft = promoBundleToDraft(bundle);
+              const economics = buildPromoBundleEconomics(draft);
+              const isActive = bundle.id === selectedPromoBundleId;
+              return (
+                <button
+                  key={bundle.id}
+                  type="button"
+                  aria-pressed={isActive}
+                  onClick={() => onUsePromoBundle(bundle)}
+                  className={`${mechanicCardClass} ${mechanicCardState(isActive)}`}
+                >
+                  <span className="flex items-start justify-between gap-2">
+                    <span className="min-w-0 text-sm font-semibold text-zinc-950 [overflow-wrap:anywhere] dark:text-white">
+                      {bundle.name}
+                    </span>
+                    {isActive ? (
+                      <span className="shrink-0 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                        Выбран
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="text-xs leading-5 text-zinc-600 dark:text-zinc-400">
+                    {promoBundleOfferLine(draft.gameItem, draft.barItems)}
+                  </span>
+                  <span className="mt-auto text-sm tabular-nums text-zinc-950 dark:text-white">
+                    <strong>{formatRubles(economics.promoPrice)}</strong>
+                    {economics.basePrice > economics.promoPrice ? (
+                      <span className="ml-1.5 text-xs text-zinc-500 line-through dark:text-zinc-400">
+                        {formatRubles(economics.basePrice)}
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="rounded-lg border border-dashed border-zinc-300 p-4 text-sm leading-6 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+            Промо-наборов пока нет. Создайте первый: после сохранения вы
+            вернётесь сюда, и он сразу выберется.
+          </p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function MechanicFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+        {label}
+      </dt>
+      <dd className="mt-0.5 text-sm leading-5 text-zinc-800 dark:text-zinc-200">
+        {value}
+      </dd>
     </div>
   );
 }
@@ -624,35 +846,6 @@ const emptyMarketingTariffConditions: MarketingTariffConditions = {
   summary: { groups: 0, periods: 0, types: 0, latestAt: null },
 };
 
-const bundleFieldHints = {
-  gameItem:
-    "Что именно получает гость в игровой части: часы, пакет времени, тариф или бронь места.",
-  barItems:
-    "Какие позиции бара входят в набор: напитки, снеки, комбо или конкретные товары.",
-  serviceItems:
-    "Дополнительная часть оффера: кальян, бронь зоны, сервис или другая услуга. Можно оставить пустым.",
-  gamePrice:
-    "Стоимость игровой части внутри набора: часы, пакет времени или тариф, который входит в оффер.",
-  barPrice:
-    "Плановая стоимость товаров бара в наборе: напитки, снеки или готовый барный комплект.",
-  servicePrice:
-    "Дополнительная услуга в наборе: кальян, бронь, сервисный сбор или другой платный элемент.",
-  discount:
-    "Сумма выгоды для гостя. Она вычитается из полной цены набора и формирует скидочный бюджет.",
-  cost:
-    "Оценочная себестоимость одного использования набора. Нужна для проверки маржи перед запуском.",
-  expectedUses:
-    "Максимальное число использований набора в кампании. По нему считается плановая выручка и бюджет скидки.",
-  minSpend:
-    "Минимальный чек, при котором можно применить набор. Если не нужен, оставьте 0.",
-  validityDays:
-    "Сколько дней действует предложение после запуска или контакта с гостем.",
-  accountingReference:
-    "Внутренний код услуги, бонусной операции или ручная подсказка для администратора, если это не товар из ассортимента.",
-  writeOffRule:
-    "Когда учитывать расход по набору: при фактическом использовании, при продаже или только после ручной сверки.",
-};
-
 const accountingKindOptions: Array<{
   value: PromoBundleAccountingKind;
   label: string;
@@ -695,10 +888,13 @@ export function MarketingCampaignsPanel({
   stores,
   view = "list",
   initialAudienceId,
+  initialPromoBundleId,
 }: {
   view?: MarketingCampaignsView;
   /** «Создать кампанию» on a guest group opens the wizard with it chosen. */
   initialAudienceId?: string;
+  /** Back from «Создать промо-набор»: the new bundle is chosen on «Механика». */
+  initialPromoBundleId?: string;
   campaigns: MarketingCampaign[];
   audiences: GuestAudience[];
   users: GuestCrmUser[];
@@ -708,32 +904,34 @@ export function MarketingCampaignsPanel({
   stores: Store[];
 }) {
   const [rows, setRows] = useState(campaigns);
-  const [savedPromoBundles, setSavedPromoBundles] = useState(promoBundles);
+  const [savedPromoBundles] = useState(promoBundles);
   const [promoLaunchRows, setPromoLaunchRows] = useState(promoBundleLaunches);
   const [audienceRows, setAudienceRows] = useState(audiences);
-  const [form, setForm] = useState<CampaignFormState>(() =>
-    initialAudienceId &&
-    audiences.some((audience) => audience.id === initialAudienceId)
-      ? { ...emptyForm, audienceId: initialAudienceId }
-      : emptyForm,
-  );
+  // Back from «Создать промо-набор» with ?promoBundle=<id>: that bundle is
+  // already chosen and the wizard opens on «Механика».
+  const [initialBundle] = useState(() => {
+    const bundle = initialPromoBundleId
+      ? promoBundles.find((item) => item.id === initialPromoBundleId)
+      : undefined;
+    return bundle ? promoBundleCampaignPatch(bundle, tariffConditions) : null;
+  });
+  const [form, setForm] = useState<CampaignFormState>(() => {
+    const base =
+      initialAudienceId &&
+      audiences.some((audience) => audience.id === initialAudienceId)
+        ? { ...emptyForm, audienceId: initialAudienceId }
+        : emptyForm;
+    return initialBundle ? { ...base, ...initialBundle.form } : base;
+  });
   const [groupBuilderOpen, setGroupBuilderOpen] = useState(false);
   const [launchForm, setLaunchForm] = useState<PromoBundleLaunchFormState>({
     ...emptyPromoBundleLaunchForm,
-    promoBundleId: promoBundles[0]?.id ?? "",
+    promoBundleId:
+      initialBundle?.form.promoBundleId ?? promoBundles[0]?.id ?? "",
+    maxUses: initialBundle?.expectedUses ?? emptyPromoBundleLaunchForm.maxUses,
   });
-  const [selectedTemplateId, setSelectedTemplateId] = useState(
-    promoMechanicTemplates[0]?.id ?? "",
-  );
-  const [bundleDraft, setBundleDraft] =
-    useState<PromoBundleDraft>(emptyBundleDraft);
-  const [bundleApplyNotice, setBundleApplyNotice] = useState(false);
-  const [bundleCatalogNotice, setBundleCatalogNotice] = useState<string | null>(
-    null,
-  );
   const [lastCreatedCampaign, setLastCreatedCampaign] =
     useState<MarketingCampaign | null>(null);
-  const [isSavingBundle, setIsSavingBundle] = useState(false);
   const [isCreatingLaunch, setIsCreatingLaunch] = useState(false);
   const [pendingLaunchId, setPendingLaunchId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -743,8 +941,12 @@ export function MarketingCampaignsPanel({
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] =
     useState<CampaignStatusFilter>("ACTIVE");
-  const [wizardStep, setWizardStep] = useState<CampaignWizardStep>("goal");
-  const [bundleOpen, setBundleOpen] = useState(false);
+  const [wizardStep, setWizardStep] = useState<CampaignWizardStep>(
+    initialBundle ? "mechanic" : "goal",
+  );
+  const [appliedTemplateId, setAppliedTemplateId] = useState<string | null>(
+    null,
+  );
 
   function goToWizardStep(next: CampaignWizardStep) {
     setWizardStep(next);
@@ -753,17 +955,6 @@ export function MarketingCampaignsPanel({
       top.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }
-  const selectedTemplate =
-    promoMechanicTemplates.find((template) => template.id === selectedTemplateId) ??
-    promoMechanicTemplates[0];
-  const bundleEconomics = useMemo(
-    () => buildPromoBundleEconomics(bundleDraft),
-    [bundleDraft],
-  );
-  const bundleVerdict = useMemo(
-    () => buildPromoBundleVerdict(bundleDraft, bundleEconomics),
-    [bundleDraft, bundleEconomics],
-  );
 
   const campaignCounts = useMemo(
     () =>
@@ -837,8 +1028,6 @@ export function MarketingCampaignsPanel({
     setLastCreatedCampaign(campaign);
     setStatusFilter(campaign.status === "DRAFT" ? "DRAFT" : "ACTIVE");
     setForm(emptyForm);
-    setBundleApplyNotice(false);
-    setBundleCatalogNotice(null);
     setIsSubmitting(false);
     window.requestAnimationFrame(() => {
       document
@@ -848,8 +1037,7 @@ export function MarketingCampaignsPanel({
   }
 
   function applyTemplate(template: PromoMechanicTemplate) {
-    setBundleApplyNotice(false);
-    setBundleCatalogNotice(null);
+    setAppliedTemplateId(template.id);
     setForm((current) => ({
       ...current,
       goal: template.goal,
@@ -863,127 +1051,15 @@ export function MarketingCampaignsPanel({
     }));
   }
 
-  async function applyBundleDraft() {
-    if (bundleVerdict.tone === "blocked" || isSavingBundle) {
-      return;
-    }
-
-    setIsSavingBundle(true);
-    setError(null);
-    const note = buildPromoBundleNote(
-      bundleDraft,
-      bundleEconomics,
-      [],
-      tariffConditions,
-    );
-    const bundleType = getPromoBundleTypeOption(bundleDraft.bundleType);
-    const mechanicConfig = buildPromoBundleConfig(
-      bundleDraft,
-      bundleEconomics,
-      bundleVerdict,
-      [],
-      tariffConditions,
-    );
-    const response = await fetch("/api/marketing/promo-bundles", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: `Комбо: ${bundleType.title}`,
-        bundleType: bundleDraft.bundleType,
-        mechanicConfig,
-        note,
-      }),
-    });
-
-    if (!response.ok) {
-      setError(await readError(response));
-      setIsSavingBundle(false);
-      return;
-    }
-
-    const promoBundle = (await response.json()) as MarketingPromoBundle;
-    setSavedPromoBundles((current) => [
-      promoBundle,
-      ...current.filter((item) => item.id !== promoBundle.id),
-    ]);
-
-    setForm((current) => ({
-      ...current,
-      goal: "PROMO_BUNDLE",
-      name: promoBundle.name,
-      channel: "CRM-задача",
-      mechanic: bundleType.title,
-      mechanicConfig: {
-        ...mechanicConfig,
-        promoBundleId: promoBundle.id,
-      },
-      promoBundleId: promoBundle.id,
-      budget: String(Math.round(bundleEconomics.discountBudget)),
-      note,
-    }));
-    setLaunchForm((current) => ({
-      ...current,
-      promoBundleId: promoBundle.id,
-      maxUses: current.maxUses || bundleDraft.expectedUses,
-    }));
-    setBundleApplyNotice(true);
-    setBundleCatalogNotice(
-      "Комбо-набор сохранен в каталоге и перенесен в форму кампании.",
-    );
-    setIsSavingBundle(false);
-    window.requestAnimationFrame(() => {
-      scrollToMarketingSection("campaign-form");
-    });
-  }
-
   function applyExistingPromoBundle(promoBundle: MarketingPromoBundle) {
-    const draft = promoBundleToDraft(promoBundle);
-    const economics = buildPromoBundleEconomics(draft);
-    const verdict = buildPromoBundleVerdict(draft, economics);
-    const note =
-      promoBundle.note ??
-      buildPromoBundleNote(draft, economics, [], tariffConditions);
-    const bundleType = getPromoBundleTypeOption(draft.bundleType);
-    const mechanicConfig = isRecord(promoBundle.mechanicConfig)
-      ? {
-          ...promoBundle.mechanicConfig,
-          promoBundleId: promoBundle.id,
-        }
-      : {
-          ...buildPromoBundleConfig(
-            draft,
-            economics,
-            verdict,
-            [],
-            tariffConditions,
-          ),
-          promoBundleId: promoBundle.id,
-        };
-
-    setBundleDraft(draft);
-    setForm((current) => ({
-      ...current,
-      goal: "PROMO_BUNDLE",
-      name: promoBundle.name,
-      channel: "CRM-задача",
-      mechanic: bundleType.title,
-      mechanicConfig,
-      promoBundleId: promoBundle.id,
-      budget: String(Math.round(economics.discountBudget)),
-      note,
-    }));
+    const patch = promoBundleCampaignPatch(promoBundle, tariffConditions);
+    setAppliedTemplateId(null);
+    setForm((current) => ({ ...current, ...patch.form }));
     setLaunchForm((current) => ({
       ...current,
       promoBundleId: promoBundle.id,
-      maxUses: current.maxUses || draft.expectedUses,
+      maxUses: current.maxUses || patch.expectedUses,
     }));
-    setBundleApplyNotice(true);
-    setBundleCatalogNotice(
-      "Существующий комбо-набор связан с формой кампании.",
-    );
-    window.requestAnimationFrame(() => {
-      scrollToMarketingSection("campaign-form");
-    });
   }
 
   async function updateStatus(
@@ -1367,7 +1443,10 @@ export function MarketingCampaignsPanel({
                     }
                     className={fieldClassName}
                   >
-                    {mechanicOptions.map((option) => (
+                    {(mechanicOptions.includes(form.mechanic) || !form.mechanic
+                      ? mechanicOptions
+                      : [form.mechanic, ...mechanicOptions]
+                    ).map((option) => (
                       <option key={option} value={option}>
                         {option}
                       </option>
@@ -1375,39 +1454,18 @@ export function MarketingCampaignsPanel({
                   </select>
                 </Field>
               </div>
-              <details
-                open={bundleOpen}
-                onToggle={(event) =>
-                  setBundleOpen((event.target as HTMLDetailsElement).open)
-                }
-                className="rounded-lg border border-zinc-200 dark:border-zinc-800"
-              >
-                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-                  Готовые сценарии и промо-наборы
-                </summary>
-            <PromoMechanicsBuilder
-              selectedTemplate={selectedTemplate}
-              selectedTemplateId={selectedTemplateId}
-              promoBundles={savedPromoBundles}
-              tariffConditions={tariffConditions}
-              bundleDraft={bundleDraft}
-              bundleEconomics={bundleEconomics}
-              bundleVerdict={bundleVerdict}
-              bundleCatalogNotice={bundleCatalogNotice}
-              isSavingBundle={isSavingBundle}
-              onSelectTemplate={setSelectedTemplateId}
-              onApplyTemplate={applyTemplate}
-              bundleApplyNotice={bundleApplyNotice}
-              onBundleDraftChange={(draft) => {
-                setBundleApplyNotice(false);
-                setBundleCatalogNotice(null);
-                setBundleDraft(draft);
-              }}
-              onUsePromoBundle={applyExistingPromoBundle}
-              onApplyBundle={applyBundleDraft}
-            />
-
-              </details>
+              <CampaignMechanicPicker
+                appliedTemplateId={appliedTemplateId}
+                onApplyTemplate={applyTemplate}
+                promoBundles={savedPromoBundles}
+                selectedPromoBundleId={form.promoBundleId}
+                onUsePromoBundle={applyExistingPromoBundle}
+                createBundleHref={`/marketing/promo-bundles?view=new&returnTo=${encodeURIComponent(
+                  form.audienceId
+                    ? `/marketing/new?audience=${encodeURIComponent(form.audienceId)}`
+                    : "/marketing/new",
+                )}`}
+              />
             </div>
           ) : null}
 
@@ -1533,10 +1591,7 @@ export function MarketingCampaignsPanel({
               selectedPromoBundle={selectedFormPromoBundle}
               steps={campaignDraftSteps}
               isSubmitting={isSubmitting}
-              onBackToBundle={() => {
-                setBundleOpen(true);
-                goToWizardStep("mechanic");
-              }}
+              onBackToBundle={() => goToWizardStep("mechanic")}
             />
             </div>
           ) : null}
@@ -2942,915 +2997,6 @@ function PromoBundleUsageJournal({
   );
 }
 
-function PromoMechanicsBuilder({
-  mode = "campaign",
-  showCatalogChooser = true,
-  bundleActionLabel,
-  productOptions = [],
-  tariffConditions = emptyMarketingTariffConditions,
-  selectedTemplate,
-  selectedTemplateId,
-  promoBundles,
-  bundleDraft,
-  bundleEconomics,
-  bundleVerdict,
-  bundleCatalogNotice,
-  bundleApplyNotice,
-  isSavingBundle,
-  onSelectTemplate,
-  onApplyTemplate,
-  onBundleDraftChange,
-  onUsePromoBundle,
-  onApplyBundle,
-}: {
-  mode?: "campaign" | "catalog";
-  showCatalogChooser?: boolean;
-  bundleActionLabel?: string;
-  productOptions?: Product[];
-  tariffConditions?: MarketingTariffConditions;
-  selectedTemplate: PromoMechanicTemplate;
-  selectedTemplateId: string;
-  promoBundles: MarketingPromoBundle[];
-  bundleDraft: PromoBundleDraft;
-  bundleEconomics: PromoBundleEconomics;
-  bundleVerdict: PromoBundleVerdict;
-  bundleCatalogNotice: string | null;
-  bundleApplyNotice: boolean;
-  isSavingBundle: boolean;
-  onSelectTemplate: (id: string) => void;
-  onApplyTemplate: (template: PromoMechanicTemplate) => void;
-  onBundleDraftChange: (draft: PromoBundleDraft) => void;
-  onUsePromoBundle: (bundle: MarketingPromoBundle) => void;
-  onApplyBundle: () => void | Promise<void>;
-}) {
-  const isCatalogMode = mode === "catalog";
-  const bundleNotePreview = buildPromoBundleNote(
-    bundleDraft,
-    bundleEconomics,
-    productOptions,
-    tariffConditions,
-  );
-  const bundleStructure = promoBundleStructureFromDraft(
-    bundleDraft,
-    bundleEconomics,
-    productOptions,
-    tariffConditions,
-  );
-  const [activeBundlePart, setActiveBundlePart] =
-    useState<PromoBundlePart>("first");
-  const [isBundleCatalogOpen, setIsBundleCatalogOpen] = useState(false);
-  const [bundleCatalogSearch, setBundleCatalogSearch] = useState("");
-  const [selectedPromoBundleId, setSelectedPromoBundleId] = useState(
-    promoBundles[0]?.id ?? "",
-  );
-  const bundleCatalogRef = useRef<HTMLDivElement>(null);
-  const bundleType = getPromoBundleTypeOption(bundleDraft.bundleType);
-  const selectedPromoBundle =
-    promoBundles.find((bundle) => bundle.id === selectedPromoBundleId) ??
-    promoBundles[0] ??
-    null;
-  const bundleCatalogQuery = bundleCatalogSearch.trim().toLocaleLowerCase("ru-RU");
-  const filteredPromoBundles = useMemo(() => {
-    if (!bundleCatalogQuery) {
-      return promoBundles;
-    }
-
-    return promoBundles.filter((bundle) =>
-      [
-        bundle.name,
-        promoBundleTypeLabel(bundle.bundleType),
-        bundle.note ?? "",
-      ]
-        .join(" ")
-        .toLocaleLowerCase("ru-RU")
-        .includes(bundleCatalogQuery),
-    );
-  }, [bundleCatalogQuery, promoBundles]);
-  const activePartLabel =
-    activeBundlePart === "first"
-      ? bundleType.firstLabel
-      : bundleType.secondLabel;
-  const activePartValue =
-    activeBundlePart === "first" ? bundleDraft.gameItem : bundleDraft.barItems;
-  const activePartFilters =
-    activeBundlePart === "first"
-      ? bundleType.firstFilters
-      : bundleType.secondFilters;
-  const activePartHint =
-    activeBundlePart === "first" ? bundleType.firstHint : bundleType.secondHint;
-  const activePriceHint =
-    activeBundlePart === "first"
-      ? `Стоимость части "${bundleType.firstLabel}" без скидки. Нужна только для расчета цены, бюджета и маржи.`
-      : `Стоимость части "${bundleType.secondLabel}" без скидки. Нужна только для расчета цены, бюджета и маржи.`;
-
-  useEffect(() => {
-    if (!isBundleCatalogOpen) {
-      return;
-    }
-
-    function closeOnOutsideClick(event: PointerEvent) {
-      if (
-        bundleCatalogRef.current &&
-        !bundleCatalogRef.current.contains(event.target as Node)
-      ) {
-        setIsBundleCatalogOpen(false);
-      }
-    }
-
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setIsBundleCatalogOpen(false);
-      }
-    }
-
-    document.addEventListener("pointerdown", closeOnOutsideClick);
-    document.addEventListener("keydown", closeOnEscape);
-
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsideClick);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [isBundleCatalogOpen]);
-
-  function updateActivePartText(value: string) {
-    onBundleDraftChange(
-      activeBundlePart === "first"
-        ? { ...bundleDraft, gameItem: value }
-        : { ...bundleDraft, barItems: value },
-    );
-  }
-
-  function updateActivePartPrice(value: string) {
-    onBundleDraftChange(
-      activeBundlePart === "first"
-        ? { ...bundleDraft, gamePrice: value }
-        : { ...bundleDraft, barPrice: value },
-    );
-  }
-
-  function applyPartFilter(filter: string) {
-    const current = activePartValue.trim();
-    const next = current.includes(filter)
-      ? current
-      : current
-        ? `${current}; ${filter}`
-        : filter;
-
-    updateActivePartText(next);
-  }
-
-  function loadPromoBundleAsBasis(promoBundle: MarketingPromoBundle) {
-    setSelectedPromoBundleId(promoBundle.id);
-    setIsBundleCatalogOpen(false);
-    setActiveBundlePart("first");
-    onBundleDraftChange(promoBundleToDraft(promoBundle));
-  }
-
-  function selectPromoBundleFromCatalog(promoBundle: MarketingPromoBundle) {
-    setSelectedPromoBundleId(promoBundle.id);
-    setIsBundleCatalogOpen(false);
-    setActiveBundlePart("first");
-    onUsePromoBundle(promoBundle);
-  }
-
-  return (
-    <section className="border-b border-zinc-200 p-4 dark:border-zinc-800">
-      <div
-        className={
-          isCatalogMode
-            ? "grid gap-4"
-            : "grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,1.05fr)]"
-        }
-      >
-        {isCatalogMode ? null : (
-          <div
-          id="mechanics"
-          className="scroll-mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-                Механики
-              </p>
-              <h3 className="mt-2 text-xl font-semibold text-zinc-950 dark:text-white">
-                Быстрый сценарий
-              </h3>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                Выберите тип промо, чтобы форма кампании заполнилась понятной
-                целью, каналом, механикой и управленческой заметкой.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => onApplyTemplate(selectedTemplate)}
-              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-            >
-              Применить
-            </button>
-          </div>
-
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            {promoMechanicTemplates.map((template) => {
-              const isActive = template.id === selectedTemplateId;
-
-              return (
-                <button
-                  key={template.id}
-                  type="button"
-                  onClick={() => onSelectTemplate(template.id)}
-                  className={`min-h-24 rounded-lg border p-3 text-left transition ${
-                    isActive
-                      ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
-                      : "border-zinc-200 bg-white hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-950"
-                  }`}
-                >
-                  <span className="text-sm font-semibold text-zinc-950 dark:text-white">
-                    {template.title}
-                  </span>
-                  <span className="mt-2 block text-xs leading-5 text-zinc-600 dark:text-zinc-400">
-                    {template.description}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-            <p className="text-sm font-semibold text-zinc-950 dark:text-white">
-              {selectedTemplate.title}: {selectedTemplate.mechanic}
-            </p>
-            <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              {selectedTemplate.tradeoff}
-            </p>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <MechanicDecisionItem
-                label="Кому"
-                value={selectedTemplate.audienceHint}
-              />
-              <MechanicDecisionItem
-                label="KPI"
-                value={selectedTemplate.primaryKpi}
-              />
-              <MechanicDecisionItem
-                label="Контроль"
-                value={selectedTemplate.controlPoint}
-              />
-              <MechanicDecisionItem label="Риск" value={selectedTemplate.risk} />
-            </div>
-          </div>
-        </div>
-        )}
-
-        <div
-          id={isCatalogMode ? "promo-bundle-builder" : "bundle"}
-          className="scroll-mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-                Промо-набор
-              </p>
-              <h3 className="mt-2 text-xl font-semibold text-zinc-950 dark:text-white">
-                {isCatalogMode
-                  ? "Создание промо-набора"
-                  : "Конструктор комбо-набора"}
-              </h3>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                {isCatalogMode
-                  ? "Соберите оффер как самостоятельный каталожный набор: тип, две части, экономика, лимиты и условия применения."
-                  : "Соберите оффер по шагам: выберите тип, настройте две части, проверьте экономику и сохраните набор в каталог."}
-              </p>
-            </div>
-            {isCatalogMode ? null : (
-              <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
-                <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                  Сохранение
-                </p>
-                <p className="mt-1">
-                  Кнопка появится ниже, после коммерческой проверки.
-                </p>
-              </div>
-            )}
-          </div>
-          <p className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
-            {isCatalogMode
-              ? "Настройте состав и экономику без выбора группы гостей. После сохранения набор появится в каталоге, его можно будет открыть для правки и позже использовать в кампании, ассортименте и учете услуг."
-              : "Настройте состав и экономику набора, затем перенесите расчет в каталог комбо-наборов. После сохранения он подставится в форму кампании, а позже сможет использоваться в ассортименте и учете услуг."}
-          </p>
-          {bundleApplyNotice ? (
-            <p className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold leading-6 text-emerald-800 dark:border-emerald-500/50 dark:bg-emerald-500/10 dark:text-emerald-200">
-              {bundleCatalogNotice ??
-                "Промо-набор перенесен в форму кампании выше."}
-            </p>
-          ) : null}
-
-          <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-                  Шаг 1
-                </p>
-                <h4 className="mt-1 text-base font-semibold text-zinc-950 dark:text-white">
-                  Выберите вид комбо-набора
-                </h4>
-              </div>
-              <p className="max-w-xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                От типа зависит, какие две части вы собираете и какие фильтры
-                подбора показываются ниже.
-              </p>
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {promoBundleTypeOptions.map((option) => {
-              const isActive = option.id === bundleDraft.bundleType;
-
-              return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => {
-                      setActiveBundlePart("first");
-                      onBundleDraftChange({
-                        ...bundleDraft,
-                        bundleType: option.id,
-                        gameItem: option.firstDefault,
-                        barItems: option.secondDefault,
-                        ...defaultAccountingForBundleType(option.id),
-                      });
-                    }}
-                    className={[
-                      "min-h-24 rounded-lg border p-3 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30",
-                      isActive
-                        ? "border-emerald-500 bg-emerald-50 shadow-sm dark:bg-emerald-500/10"
-                        : "border-zinc-200 bg-zinc-50 hover:border-emerald-400 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-900/80",
-                    ].join(" ")}
-                  >
-                    <span className="text-sm font-semibold text-zinc-950 dark:text-white">
-                      {option.title}
-                    </span>
-                    <span className="mt-2 block text-xs leading-5 text-zinc-600 dark:text-zinc-400">
-                      {option.description}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            {showCatalogChooser ? (
-              <div ref={bundleCatalogRef} className="relative mt-3">
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 transition duration-200 hover:border-emerald-400/60 hover:bg-white hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-emerald-500/50 dark:hover:bg-zinc-900/80">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                      Каталог промо-наборов
-                    </p>
-                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
-                      {formatBundleCount(promoBundles.length)}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
-                    {selectedPromoBundle
-                      ? `Выбран: ${selectedPromoBundle.name}`
-                      : isCatalogMode
-                        ? "Готовые наборы можно выбрать для запуска или взять как основу нового набора."
-                        : "Готовые наборы можно быстро подставить в кампанию или взять как основу."}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  aria-expanded={isBundleCatalogOpen}
-                  onClick={() => setIsBundleCatalogOpen((isOpen) => !isOpen)}
-                  className="group inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-800 transition duration-200 hover:-translate-y-0.5 hover:border-emerald-400 hover:text-emerald-600 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
-                >
-                  Открыть каталог
-                  <DisclosureChevron isOpen={isBundleCatalogOpen} />
-                </button>
-              </div>
-
-              {isBundleCatalogOpen ? (
-                <div className="absolute right-0 top-full z-50 mt-2 w-full overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl shadow-zinc-950/15 dark:border-zinc-700 dark:bg-zinc-950 dark:shadow-black/40 sm:w-[560px] sm:max-w-[calc(100vw-8rem)]">
-                  <div className="border-b border-zinc-200 p-3 dark:border-zinc-800">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold text-zinc-950 dark:text-white">
-                          Сохраненные промо-наборы
-                        </p>
-                        <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                          Каталог живет отдельно от кампаний и позже подойдет
-                          для ассортимента и учета услуг.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setIsBundleCatalogOpen(false)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-sm font-semibold text-zinc-500 transition hover:border-emerald-400 hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-white"
-                        aria-label="Закрыть каталог промо-наборов"
-                      >
-                        ×
-                      </button>
-                    </div>
-                    <input
-                      value={bundleCatalogSearch}
-                      onChange={(event) =>
-                        setBundleCatalogSearch(event.target.value)
-                      }
-                      placeholder="Поиск по названию, типу или заметке"
-                      className="mt-3 h-10 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-950 outline-none transition placeholder:text-zinc-400 hover:border-zinc-300 hover:bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:hover:border-zinc-600 dark:hover:bg-zinc-950"
-                    />
-                  </div>
-                  <div className="max-h-96 overflow-y-auto p-2">
-                    {filteredPromoBundles.length > 0 ? (
-                      <div className="grid gap-2">
-                        {filteredPromoBundles.map((bundle) => (
-                          <PromoBundleCatalogItem
-                            key={bundle.id}
-                            bundle={bundle}
-                            isActive={bundle.id === selectedPromoBundle?.id}
-                            onLoadAsBasis={() => loadPromoBundleAsBasis(bundle)}
-                            onUse={() => selectPromoBundleFromCatalog(bundle)}
-                            useLabel={
-                              isCatalogMode ? "Выбрать для запуска" : undefined
-                            }
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-dashed border-zinc-300 px-3 py-4 text-sm leading-6 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-                        {promoBundles.length === 0
-                          ? "Сохраненных наборов пока нет. Создайте первый после коммерческой проверки ниже."
-                          : "По этому запросу наборов не найдено."}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-            ) : null}
-          </div>
-
-          <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(240px,0.75fr)_minmax(0,1.25fr)] lg:items-stretch">
-            <div className="h-full rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-              <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-                Шаг 2
-              </p>
-              <h4 className="mt-1 text-base font-semibold text-zinc-950 dark:text-white">
-                Соберите две части
-              </h4>
-              <div className="mt-3 grid gap-2">
-                <PromoBundlePartCard
-                  label={bundleType.firstLabel}
-                  value={bundleDraft.gameItem}
-                  amount={bundleDraft.gamePrice}
-                  isActive={activeBundlePart === "first"}
-                  onClick={() => setActiveBundlePart("first")}
-                />
-                <PromoBundlePartCard
-                  label={bundleType.secondLabel}
-                  value={bundleDraft.barItems}
-                  amount={bundleDraft.barPrice}
-                  isActive={activeBundlePart === "second"}
-                  onClick={() => setActiveBundlePart("second")}
-                />
-              </div>
-            </div>
-
-            <div className="h-full rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.42fr)] md:items-start">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-                    Шаг 3
-                  </p>
-                  <h4 className="mt-1 text-base font-semibold text-zinc-950 dark:text-white">
-                    Уточните состав и цену
-                  </h4>
-                  <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                    Сейчас редактируется: {activePartLabel}. {activePartHint}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-                  Слева опишите, что получает гость. Справа укажите стоимость
-                  этой части в рублях для расчета цены, скидки и маржи.
-                </div>
-              </div>
-              <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_220px] md:items-start">
-                <TextDraftField
-                  label={`Что входит: ${activePartLabel}`}
-                  tooltip={
-                    activeBundlePart === "first"
-                      ? bundleType.firstHint
-                      : bundleType.secondHint
-                  }
-                  value={activePartValue}
-                  placeholder={
-                    activeBundlePart === "first"
-                      ? bundleType.firstPlaceholder
-                      : bundleType.secondPlaceholder
-                  }
-                  onChange={updateActivePartText}
-                />
-                <NumericDraftField
-                  label="Стоимость, руб"
-                  tooltip={activePriceHint}
-                  value={
-                    activeBundlePart === "first"
-                      ? bundleDraft.gamePrice
-                      : bundleDraft.barPrice
-                  }
-                  onChange={updateActivePartPrice}
-                />
-              </div>
-              <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                    Фильтры подбора
-                  </p>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Нажмите, чтобы добавить критерий в состав.
-                  </p>
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {activePartFilters.map((filter) => (
-                    <button
-                      key={filter}
-                      type="button"
-                      onClick={() => applyPartFilter(filter)}
-                      className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
-                    >
-                      {filter}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-                  Шаг 4
-                </p>
-                <h4 className="mt-1 text-base font-semibold text-zinc-950 dark:text-white">
-                  Расчет экономики
-                </h4>
-              </div>
-              <p className="max-w-xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                {bundleType.recommendation}
-              </p>
-            </div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <NumericDraftField
-                label="Скидка, руб"
-                tooltip={bundleFieldHints.discount}
-                value={bundleDraft.discount}
-                onChange={(value) =>
-                  onBundleDraftChange({ ...bundleDraft, discount: value })
-                }
-              />
-              <NumericDraftField
-                label="Себестоимость, руб"
-                tooltip={bundleFieldHints.cost}
-                value={bundleDraft.cost}
-                onChange={(value) =>
-                  onBundleDraftChange({ ...bundleDraft, cost: value })
-                }
-              />
-              <NumericDraftField
-                label="Лимит, шт"
-                tooltip={bundleFieldHints.expectedUses}
-                value={bundleDraft.expectedUses}
-                onChange={(value) =>
-                  onBundleDraftChange({ ...bundleDraft, expectedUses: value })
-                }
-              />
-              <NumericDraftField
-                label="Мин. чек, руб"
-                tooltip={bundleFieldHints.minSpend}
-                value={bundleDraft.minSpend}
-                onChange={(value) =>
-                  onBundleDraftChange({ ...bundleDraft, minSpend: value })
-                }
-              />
-              <NumericDraftField
-                label="Срок, дней"
-                tooltip={bundleFieldHints.validityDays}
-                value={bundleDraft.validityDays}
-                onChange={(value) =>
-                  onBundleDraftChange({ ...bundleDraft, validityDays: value })
-                }
-              />
-              <TextDraftField
-                label="Доп. условие"
-                tooltip={bundleFieldHints.serviceItems}
-                value={bundleDraft.serviceItems}
-                placeholder="Например: только будни или ручная выдача"
-                onChange={(value) =>
-                  onBundleDraftChange({ ...bundleDraft, serviceItems: value })
-                }
-              />
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-            <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              Лимиты и антифрод
-            </p>
-            <div className="mt-3 grid gap-2 md:grid-cols-3">
-              <ToggleDraftField
-                label="Один на гостя"
-                checked={bundleDraft.onePerGuest}
-                onChange={(checked) =>
-                  onBundleDraftChange({
-                    ...bundleDraft,
-                    onePerGuest: checked,
-                  })
-                }
-              />
-              <ToggleDraftField
-                label="Ручное подтверждение"
-                checked={bundleDraft.requiresApproval}
-                onChange={(checked) =>
-                  onBundleDraftChange({
-                    ...bundleDraft,
-                    requiresApproval: checked,
-                  })
-                }
-              />
-              <ToggleDraftField
-                label="Не суммировать скидки"
-                checked={bundleDraft.noStacking}
-                onChange={(checked) =>
-                  onBundleDraftChange({
-                    ...bundleDraft,
-                    noStacking: checked,
-                  })
-                }
-              />
-            </div>
-          </div>
-
-          <PromoBundleTariffConditionsPanel
-            draft={bundleDraft}
-            tariffConditions={tariffConditions}
-            onChange={onBundleDraftChange}
-          />
-
-          <PromoBundleAccountingPanel
-            bundleType={bundleType}
-            draft={bundleDraft}
-            productOptions={productOptions}
-            onChange={onBundleDraftChange}
-          />
-
-          <div className="mt-4 grid gap-2 sm:grid-cols-4">
-            <PromoMetric
-              label="Цена"
-              value={formatRubles(bundleEconomics.promoPrice)}
-            />
-            <PromoMetric
-              label="Выручка"
-              value={formatRubles(bundleEconomics.revenue)}
-            />
-            <PromoMetric
-              label="Маржа"
-              value={
-                bundleEconomics.marginPercent === null
-                  ? "нет данных"
-                  : `${formatPercent(bundleEconomics.marginPercent)}`
-              }
-            />
-            <PromoMetric
-              label="Бюджет"
-              value={formatRubles(bundleEconomics.discountBudget)}
-            />
-            <PromoMetric
-              label="Мин. чек"
-              value={formatRubles(parseMoney(bundleDraft.minSpend))}
-            />
-            <PromoMetric
-              label="Срок"
-              value={`${formatNumber(Math.round(parseMoney(bundleDraft.validityDays)))} дн.`}
-            />
-          </div>
-
-          <PromoBundleStructureStrip structure={bundleStructure} />
-
-          <PromoBundleVerdictCard
-            verdict={bundleVerdict}
-            notePreview={bundleNotePreview}
-            bundleApplyNotice={bundleApplyNotice}
-            isSavingBundle={isSavingBundle}
-            onApplyBundle={onApplyBundle}
-            mode={mode}
-            actionLabelOverride={bundleActionLabel}
-          />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function PromoBundleAccountingPanel({
-  bundleType,
-  draft,
-  productOptions,
-  onChange,
-}: {
-  bundleType: PromoBundleTypeOption;
-  draft: PromoBundleDraft;
-  productOptions: Product[];
-  onChange: (draft: PromoBundleDraft) => void;
-}) {
-  const sortedProducts = useMemo(
-    () =>
-      [...productOptions].sort((left, right) => {
-        if (left.isOperationalActive !== right.isOperationalActive) {
-          return left.isOperationalActive ? -1 : 1;
-        }
-
-        return left.name.localeCompare(right.name, "ru-RU");
-      }),
-    [productOptions],
-  );
-  const selectedWriteOffRule =
-    writeOffRuleOptions.find((option) => option.value === draft.writeOffRule) ??
-    writeOffRuleOptions[0];
-
-  return (
-    <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Учетные привязки
-          </p>
-          <h4 className="mt-1 text-base font-semibold text-zinc-950 dark:text-white">
-            Свяжите части набора с товаром, услугой или бонусом
-          </h4>
-        </div>
-        <p className="max-w-xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-          Эти поля не запускают автоматическое списание в Langame, но сохраняют
-          понятную основу для будущего учета товаров и услуг.
-        </p>
-      </div>
-
-      <div className="mt-3 grid gap-3 lg:grid-cols-2">
-        <PromoBundleAccountingPart
-          title={bundleType.firstLabel}
-          kind={draft.firstAccountingKind}
-          productId={draft.firstAccountingProductId}
-          reference={draft.firstAccountingReference}
-          productOptions={sortedProducts}
-          onKindChange={(kind) =>
-            onChange({
-              ...draft,
-              firstAccountingKind: kind,
-              firstAccountingProductId: "",
-              firstAccountingReference: "",
-            })
-          }
-          onProductIdChange={(productId) =>
-            onChange({ ...draft, firstAccountingProductId: productId })
-          }
-          onReferenceChange={(reference) =>
-            onChange({ ...draft, firstAccountingReference: reference })
-          }
-        />
-        <PromoBundleAccountingPart
-          title={bundleType.secondLabel}
-          kind={draft.secondAccountingKind}
-          productId={draft.secondAccountingProductId}
-          reference={draft.secondAccountingReference}
-          productOptions={sortedProducts}
-          onKindChange={(kind) =>
-            onChange({
-              ...draft,
-              secondAccountingKind: kind,
-              secondAccountingProductId: "",
-              secondAccountingReference: "",
-            })
-          }
-          onProductIdChange={(productId) =>
-            onChange({ ...draft, secondAccountingProductId: productId })
-          }
-          onReferenceChange={(reference) =>
-            onChange({ ...draft, secondAccountingReference: reference })
-          }
-        />
-      </div>
-
-      <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,0.45fr)_minmax(0,1fr)]">
-        <label className="block space-y-1">
-          <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Правило списания
-            <FieldTooltip text={bundleFieldHints.writeOffRule} />
-          </span>
-          <select
-            value={draft.writeOffRule}
-            onChange={(event) =>
-              onChange({
-                ...draft,
-                writeOffRule: event.target.value as PromoBundleWriteOffRule,
-              })
-            }
-            className={fieldClassName}
-          >
-            {writeOffRuleOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <span className="block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-            {selectedWriteOffRule.description}
-          </span>
-        </label>
-        <TextDraftField
-          label="Комментарий для учета"
-          value={draft.accountingNote}
-          placeholder="Например: списать напиток по факту выдачи, игровое время сверить по смене"
-          onChange={(accountingNote) => onChange({ ...draft, accountingNote })}
-        />
-      </div>
-    </div>
-  );
-}
-
-function PromoBundleAccountingPart({
-  title,
-  kind,
-  productId,
-  reference,
-  productOptions,
-  onKindChange,
-  onProductIdChange,
-  onReferenceChange,
-}: {
-  title: string;
-  kind: PromoBundleAccountingKind;
-  productId: string;
-  reference: string;
-  productOptions: Product[];
-  onKindChange: (kind: PromoBundleAccountingKind) => void;
-  onProductIdChange: (productId: string) => void;
-  onReferenceChange: (reference: string) => void;
-}) {
-  const isProduct = kind === "PRODUCT";
-
-  return (
-    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/70">
-      <p className="text-sm font-semibold text-zinc-950 dark:text-white">
-        {title}
-      </p>
-      <div className="mt-3 grid gap-2">
-        <label className="block space-y-1">
-          <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Тип привязки
-          </span>
-          <select
-            value={kind}
-            onChange={(event) =>
-              onKindChange(event.target.value as PromoBundleAccountingKind)
-            }
-            className={fieldClassName}
-          >
-            {accountingKindOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {isProduct ? (
-          <label className="block space-y-1">
-            <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              Товар
-            </span>
-            <select
-              value={productId}
-              onChange={(event) => onProductIdChange(event.target.value)}
-              className={fieldClassName}
-            >
-              <option value="">Выберите товар</option>
-              {productOptions.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {productAccountingLabel(product)}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <TextDraftField
-            label={accountingReferenceLabel(kind)}
-            tooltip={bundleFieldHints.accountingReference}
-            value={reference}
-            placeholder={accountingReferencePlaceholder(kind)}
-            onChange={onReferenceChange}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
 function PromoBundleStandaloneLaunchPanel({
   launches,
   launchForm,
@@ -4243,679 +3389,6 @@ function PromoBundleStandaloneLaunchPanel({
         </div>
       </div>
     </section>
-  );
-}
-
-function PromoBundlePartCard({
-  label,
-  value,
-  amount,
-  isActive,
-  onClick,
-}: {
-  label: string;
-  value: string;
-  amount: string;
-  isActive: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "rounded-lg border p-3 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30",
-        isActive
-          ? "border-emerald-500 bg-emerald-50 shadow-sm dark:bg-emerald-500/10"
-          : "border-zinc-200 bg-zinc-50 hover:border-emerald-400 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-900/80",
-      ].join(" ")}
-    >
-      <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-        {label}
-      </span>
-      <span className="mt-1 block text-sm font-semibold leading-5 text-zinc-950 dark:text-white">
-        Состав: {value.trim() || "не выбрано"}
-      </span>
-      <span className="mt-2 block text-sm text-zinc-600 dark:text-zinc-300">
-        Стоимость: {formatRubles(parseMoney(amount))}
-      </span>
-    </button>
-  );
-}
-
-function PromoBundleTariffConditionsPanel({
-  draft,
-  tariffConditions,
-  onChange,
-}: {
-  draft: PromoBundleDraft;
-  tariffConditions: MarketingTariffConditions;
-  onChange: (draft: PromoBundleDraft) => void;
-}) {
-  const totalOptions =
-    tariffConditions.groups.length +
-    tariffConditions.periods.length +
-    tariffConditions.types.length;
-  const summary = promoBundleTariffRuleSummary(draft, tariffConditions);
-
-  return (
-    <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-            Тарифные условия
-          </p>
-          <h4 className="mt-1 text-base font-semibold text-zinc-950 dark:text-white">
-            Где действует набор
-          </h4>
-        </div>
-        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-          {summary}
-        </span>
-      </div>
-      <div className="mt-3 grid gap-3 md:grid-cols-3">
-        <MarketingTariffSelect
-          label="Группа тарифов"
-          value={draft.tariffGroupId}
-          options={tariffConditions.groups}
-          emptyLabel="Любая группа"
-          onChange={(value) => onChange({ ...draft, tariffGroupId: value })}
-        />
-        <MarketingTariffSelect
-          label="Период"
-          value={draft.tariffPeriodId}
-          options={tariffConditions.periods}
-          emptyLabel="Любой период"
-          onChange={(value) => onChange({ ...draft, tariffPeriodId: value })}
-        />
-        <MarketingTariffSelect
-          label="Тип тарифа"
-          value={draft.tariffTypeId}
-          options={tariffConditions.types}
-          emptyLabel="Любой тип"
-          onChange={(value) => onChange({ ...draft, tariffTypeId: value })}
-        />
-      </div>
-      {totalOptions === 0 ? (
-        <p className="mt-3 rounded-lg border border-dashed border-zinc-300 px-3 py-2 text-sm leading-6 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-          Сохраненных тарифных snapshot-строк пока нет. Обновите тарифные
-          endpoints в разделе синхронизации, затем вернитесь к набору.
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function MarketingTariffSelect({
-  label,
-  value,
-  options,
-  emptyLabel,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: MarketingTariffConditionItem[];
-  emptyLabel: string;
-  onChange: (value: string) => void;
-}) {
-  const hasSelectedOption =
-    !value || options.some((option) => marketingTariffItemValue(option) === value);
-
-  return (
-    <label className="block">
-      <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-        {label}
-      </span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1 h-11 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm font-semibold text-zinc-950 transition hover:border-emerald-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white"
-      >
-        <option value="">{emptyLabel}</option>
-        {!hasSelectedOption ? (
-          <option value={value}>{value} · сохранено ранее</option>
-        ) : null}
-        {options.map((option) => (
-          <option key={option.id} value={marketingTariffItemValue(option)}>
-            {marketingTariffItemLabel(option)}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function PromoBundleCatalogItem({
-  bundle,
-  isActive,
-  onLoadAsBasis,
-  onUse,
-  useLabel = "Выбрать",
-}: {
-  bundle: MarketingPromoBundle;
-  isActive: boolean;
-  onLoadAsBasis: () => void;
-  onUse: () => void;
-  useLabel?: string;
-}) {
-  const draft = promoBundleToDraft(bundle);
-  const economics = buildPromoBundleEconomics(draft);
-  const structure = promoBundleStructureFromBundle(bundle);
-  const composition = structure.composition.summary;
-  const tariffSummary = structure.conditions?.tariffSummary ?? "любой тариф";
-  const margin =
-    economics.marginPercent === null
-      ? "маржа не рассчитана"
-      : `маржа ${formatPercent(economics.marginPercent)}`;
-
-  return (
-    <div
-      className={[
-        "grid gap-3 rounded-lg border p-3 transition duration-200 hover:-translate-y-0.5 hover:shadow-sm md:grid-cols-[minmax(0,1fr)_auto] md:items-center",
-        isActive
-          ? "border-emerald-500 bg-emerald-50 shadow-sm dark:bg-emerald-500/10"
-          : "border-zinc-200 bg-zinc-50 hover:border-emerald-400 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-900/80",
-      ].join(" ")}
-    >
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="truncate text-sm font-semibold text-zinc-950 dark:text-white">
-            {bundle.name}
-          </p>
-          <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
-            {promoBundleTypeLabel(draft.bundleType)}
-          </span>
-        </div>
-        <p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-          {composition || "Состав набора не заполнен"}
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-          <span>{formatRubles(economics.promoPrice)}</span>
-          <span>{margin}</span>
-          <span>{formatNumber(economics.expectedUses)} исп.</span>
-          {tariffSummary !== "любой тариф" ? <span>{tariffSummary}</span> : null}
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-2 md:justify-end">
-        <button
-          type="button"
-          onClick={onLoadAsBasis}
-          className="inline-flex min-h-9 items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 transition duration-200 hover:-translate-y-0.5 hover:border-emerald-400 hover:text-emerald-600 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
-        >
-          Как основу
-        </button>
-        <button
-          type="button"
-          onClick={onUse}
-          className="inline-flex min-h-9 items-center justify-center rounded-lg bg-emerald-500 px-3 text-xs font-semibold text-zinc-950 transition duration-200 hover:-translate-y-0.5 hover:bg-emerald-400 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
-        >
-          {useLabel}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function NumericDraftField({
-  label,
-  tooltip,
-  value,
-  onChange,
-}: {
-  label: string;
-  tooltip?: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="block space-y-1">
-      <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-        {label}
-        {tooltip ? <FieldTooltip text={tooltip} /> : null}
-      </span>
-      <input
-        inputMode="decimal"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className={fieldClassName}
-      />
-    </label>
-  );
-}
-
-function DisclosureChevron({ isOpen }: { isOpen: boolean }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={[
-        "h-4 w-4 translate-y-px transition-transform duration-200",
-        isOpen ? "rotate-180" : "",
-      ].join(" ")}
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="m7 10 5 5 5-5"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="2"
-      />
-    </svg>
-  );
-}
-
-function TextDraftField({
-  label,
-  tooltip,
-  value,
-  placeholder,
-  onChange,
-}: {
-  label: string;
-  tooltip?: string;
-  value: string;
-  placeholder: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="block space-y-1">
-      <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-        {label}
-        {tooltip ? <FieldTooltip text={tooltip} /> : null}
-      </span>
-      <input
-        value={value}
-        placeholder={placeholder}
-        onChange={(event) => onChange(event.target.value)}
-        className={fieldClassName}
-      />
-    </label>
-  );
-}
-
-function FieldTooltip({ text }: { text: string }) {
-  const triggerRef = useRef<HTMLSpanElement | null>(null);
-  const [position, setPosition] = useState<{
-    left: number;
-    top: number;
-    placement: "top" | "bottom";
-  } | null>(null);
-
-  function showTooltip() {
-    const trigger = triggerRef.current;
-
-    if (!trigger) {
-      return;
-    }
-
-    const rect = trigger.getBoundingClientRect();
-    const width = Math.min(280, window.innerWidth - 24);
-    const margin = 12;
-    const estimatedHeight = 128;
-    const left = Math.min(
-      Math.max(rect.left + rect.width / 2 - width / 2, margin),
-      window.innerWidth - width - margin,
-    );
-    const hasSpaceBelow =
-      rect.bottom + estimatedHeight + margin <= window.innerHeight;
-
-    setPosition({
-      left,
-      top: hasSpaceBelow ? rect.bottom + 8 : Math.max(margin, rect.top - 8),
-      placement: hasSpaceBelow ? "bottom" : "top",
-    });
-  }
-
-  return (
-    <span className="inline-flex">
-      <span
-        ref={triggerRef}
-        tabIndex={0}
-        title={text}
-        aria-label={text}
-        onFocus={showTooltip}
-        onBlur={() => setPosition(null)}
-        onMouseEnter={showTooltip}
-        onMouseLeave={() => setPosition(null)}
-        className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-zinc-300 text-[10px] font-bold leading-none text-zinc-500 outline-none transition hover:border-emerald-400 hover:text-emerald-500 focus:border-emerald-400 focus:text-emerald-500 dark:border-zinc-700 dark:text-zinc-400"
-      >
-        ?
-      </span>
-      {position
-        ? createPortal(
-            <span
-              role="tooltip"
-              style={{
-                left: position.left,
-                top: position.top,
-                width: Math.min(280, window.innerWidth - 24),
-                transform:
-                  position.placement === "top"
-                    ? "translateY(-100%)"
-                    : undefined,
-              }}
-              className="pointer-events-none fixed z-[1000] rounded-lg border border-zinc-200 bg-white p-3 text-left text-xs font-medium normal-case leading-5 tracking-normal text-zinc-700 shadow-xl dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
-            >
-              {text}
-            </span>,
-            document.body,
-          )
-        : null}
-    </span>
-  );
-}
-
-function ToggleDraftField({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className="flex min-h-12 cursor-pointer items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400/70 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200">
-      <span>{label}</span>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        className="h-4 w-4 accent-emerald-500"
-      />
-    </label>
-  );
-}
-
-function MechanicDecisionItem({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
-      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-        {label}
-      </p>
-      <p className="mt-1 text-sm leading-5 text-zinc-700 dark:text-zinc-300">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function PromoMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-        {label}
-      </p>
-      <p className="mt-1 text-lg font-semibold text-zinc-950 dark:text-white">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function PromoBundleStructureStrip({
-  structure,
-}: {
-  structure: MarketingPromoBundleStructure;
-}) {
-  const missing =
-    structure.accounting.missingFields.length > 0
-      ? `Уточнить: ${structure.accounting.missingFields.join(", ")}`
-      : structure.accounting.writeOffLabel;
-  const accountingDetails = [
-    structure.accounting.firstRef.label,
-    structure.accounting.secondRef.label,
-  ]
-    .filter(Boolean)
-    .join(" / ");
-
-  return (
-    <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-          Паспорт набора
-        </p>
-        <span
-          className={[
-            "rounded-full border px-2.5 py-1 text-xs font-semibold",
-            structure.accounting.readiness === "READY"
-              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-              : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-          ].join(" ")}
-        >
-          {structure.accounting.label}
-        </span>
-      </div>
-      <div className="mt-3 grid gap-2 md:grid-cols-4">
-        <PromoBundlePassportItem
-          label="Состав"
-          value={structure.composition.summary}
-        />
-        <PromoBundlePassportItem
-          label="Цена"
-          value={`${formatRubles(structure.pricing.promoPrice)} из ${formatRubles(
-            structure.pricing.basePrice,
-          )}`}
-        />
-        <PromoBundlePassportItem
-          label="Лимит"
-          value={`${formatNumber(structure.limits.expectedUses)} исп. · ${formatNumber(
-            structure.limits.validityDays,
-          )} дн.`}
-        />
-        <PromoBundlePassportItem
-          label="Учет"
-          value={accountingDetails ? `${missing} · ${accountingDetails}` : missing}
-        />
-      </div>
-    </div>
-  );
-}
-
-function PromoBundlePassportItem({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/70">
-      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-        {label}
-      </p>
-      <p className="mt-1 truncate text-sm font-semibold text-zinc-950 dark:text-white">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function PromoBundleVerdictCard({
-  verdict,
-  notePreview,
-  bundleApplyNotice,
-  isSavingBundle,
-  onApplyBundle,
-  mode = "campaign",
-  actionLabelOverride,
-}: {
-  verdict: PromoBundleVerdict;
-  notePreview: string;
-  bundleApplyNotice: boolean;
-  isSavingBundle: boolean;
-  onApplyBundle: () => void | Promise<void>;
-  mode?: "campaign" | "catalog";
-  actionLabelOverride?: string;
-}) {
-  const isCatalogMode = mode === "catalog";
-  const toneClass =
-    verdict.tone === "ready"
-      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-      : verdict.tone === "blocked"
-        ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300"
-        : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
-  const canCreateBundle = verdict.tone !== "blocked";
-  const statusLabel =
-    verdict.tone === "ready"
-      ? "Проверка пройдена"
-      : verdict.tone === "blocked"
-        ? "Есть блокер"
-        : "Нужна ручная проверка";
-  const actionLabel = isSavingBundle
-    ? "Сохраняем..."
-    : actionLabelOverride
-      ? actionLabelOverride
-    : verdict.tone === "ready"
-      ? isCatalogMode
-        ? "Создать промо-набор"
-        : "Создать и сохранить промо-набор"
-      : verdict.tone === "warning"
-        ? "Сохранить после ручной проверки"
-        : "Исправьте расчет";
-  const nextStepText = bundleApplyNotice
-    ? isCatalogMode
-      ? "Набор сохранен в каталог и открыт в конструкторе."
-      : "Набор сохранен в каталог и уже связан с формой кампании."
-    : verdict.tone === "ready"
-      ? isCatalogMode
-        ? "Экономика прошла проверку. Сохраните набор в каталог или обновите выбранный набор."
-        : "Экономика прошла проверку. Сохраните набор в каталог и привяжите его к черновику кампании."
-      : verdict.tone === "warning"
-        ? "Есть предупреждения. Сохранение доступно, но сначала проверьте условия и лимиты."
-        : "Исправьте блокирующие ошибки, затем сохраните набор.";
-
-  return (
-    <div className="mt-4 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="grid gap-4 border-b border-zinc-200 p-4 dark:border-zinc-800 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-stretch">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              Коммерческая проверка
-            </p>
-            <span
-              className={[
-                "rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wide",
-                toneClass,
-              ].join(" ")}
-            >
-              {statusLabel}
-            </span>
-          </div>
-          <h4 className="mt-2 text-base font-semibold text-zinc-950 dark:text-white">
-            {verdict.title}
-          </h4>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-            {verdict.description}
-          </p>
-        </div>
-        <div className="flex flex-col justify-between rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-              Действие после проверки
-            </p>
-            <p className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
-              {nextStepText}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onApplyBundle}
-            disabled={!canCreateBundle || isSavingBundle}
-            className={[
-              "mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-xl px-4 text-sm font-semibold transition",
-              canCreateBundle && !isSavingBundle
-                ? "bg-emerald-500 text-zinc-950 hover:bg-emerald-400"
-                : "cursor-not-allowed border border-zinc-200 text-zinc-400 dark:border-zinc-800 dark:text-zinc-600",
-            ].join(" ")}
-          >
-            {actionLabel}
-          </button>
-        </div>
-      </div>
-      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.72fr)]">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Что проверили
-          </p>
-          <div className="mt-2 grid gap-2 md:grid-cols-2">
-            {verdict.checks.map((check) => (
-              <div
-                key={check}
-                className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm leading-5 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-300"
-              >
-                {check}
-              </div>
-            ))}
-          </div>
-        </div>
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Что будет дальше
-          </p>
-          <div className="mt-2 grid gap-2">
-            <NextStepItem
-              title="Каталог"
-              text="Промо-набор сохранится как отдельная сущность и появится в списке готовых наборов."
-            />
-            <NextStepItem
-              title="Кампания"
-              text={
-                isCatalogMode
-                  ? "Если понадобится CRM-сценарий, этот же набор можно будет привязать к кампании без пересборки."
-                  : "Расчет, механика и ссылка на набор перенесутся в форму кампании для выбора группы, периода и ответственного."
-              }
-            />
-            <NextStepItem
-              title={isCatalogMode ? "Повторное использование" : "Ассортимент и учет"}
-              text={
-                isCatalogMode
-                  ? "Набор остается в каталоге: его можно открыть, поправить и затем использовать в кампании, ассортименте или учете услуг."
-                  : "Позже этот же набор можно будет использовать в ассортименте, услугах и товарном учете без пересборки с нуля."
-              }
-            />
-          </div>
-        </div>
-      </div>
-      <p className="mx-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-300">
-        {bundleApplyNotice
-          ? isCatalogMode
-            ? "Промо-набор сохранен в каталог. Можно продолжать правку или выбрать другой набор."
-            : "Промо-набор уже перенесен в форму кампании. Проверьте группу, период, ответственного и сохраните черновик."
-          : "После проверки создайте промо-набор: он сохранится как отдельный элемент каталога, сможет быть привязан к кампании и позднее использоваться в ассортименте, товарах и услугах."}
-      </p>
-      <details className="m-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/70">
-        <summary className="cursor-pointer text-sm font-semibold text-zinc-950 dark:text-white">
-          {isCatalogMode
-            ? "Что сохранится в заметке набора"
-            : "Что попадет в заметку кампании"}
-        </summary>
-        <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-          {notePreview}
-        </p>
-      </details>
-    </div>
-  );
-}
-
-function NextStepItem({ title, text }: { title: string; text: string }) {
-  return (
-    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/70">
-      <p className="text-sm font-semibold text-zinc-950 dark:text-white">
-        {title}
-      </p>
-      <p className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
-        {text}
-      </p>
-    </div>
   );
 }
 
@@ -5454,30 +3927,6 @@ function productAccountingLabel(product: Product) {
   ]
     .filter(Boolean)
     .join(" · ");
-}
-
-function accountingReferenceLabel(kind: PromoBundleAccountingKind) {
-  if (kind === "SERVICE") {
-    return "Код услуги";
-  }
-
-  if (kind === "BONUS") {
-    return "Код бонуса";
-  }
-
-  return "Ручная ссылка";
-}
-
-function accountingReferencePlaceholder(kind: PromoBundleAccountingKind) {
-  if (kind === "SERVICE") {
-    return "Например: пакет 5 часов, бронь, кальян";
-  }
-
-  if (kind === "BONUS") {
-    return "Например: +100 бонусов или +60 минут";
-  }
-
-  return "Например: выдать администратором и сверить в конце смены";
 }
 
 function accountingKindLabel(kind: PromoBundleAccountingKind) {
@@ -6405,21 +4854,6 @@ function moneyInputValue(value: number | null | undefined) {
   }
 
   return String(Math.round(value * 100) / 100);
-}
-
-function formatBundleCount(count: number) {
-  const lastTwo = count % 100;
-  const last = count % 10;
-  const suffix =
-    lastTwo >= 11 && lastTwo <= 14
-      ? "наборов"
-      : last === 1
-        ? "набор"
-        : last >= 2 && last <= 4
-          ? "набора"
-          : "наборов";
-
-  return `${formatNumber(count)} ${suffix}`;
 }
 
 function parseMoney(value: string) {

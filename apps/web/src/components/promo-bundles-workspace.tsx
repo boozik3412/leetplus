@@ -40,6 +40,7 @@ import {
   promoBundleTemplate,
   promoBundleTemplates,
   promoBundleWizardSteps,
+  returnWithPromoBundle,
   suggestedGuestPrice,
   type PromoBundleAudienceMode,
   type PromoBundleCardState,
@@ -56,6 +57,8 @@ type WorkspaceProps = {
   view: PromoBundlesView;
   editId: string | null;
   usageBundleId: string | null;
+  /** Set when another wizard (a campaign) sent the user here to make a bundle. */
+  returnTo?: string | null;
   initialStep: PromoBundleWizardStep | null;
   promoBundles: MarketingPromoBundle[];
   promoBundleLaunches: MarketingPromoBundleLaunch[];
@@ -79,6 +82,7 @@ export function PromoBundlesWorkspace(props: WorkspaceProps) {
         key={bundle?.id ?? "new"}
         bundle={bundle}
         initialStep={props.initialStep}
+        returnTo={props.returnTo ?? null}
         launches={props.promoBundleLaunches}
         products={props.products}
         tariffConditions={props.tariffConditions}
@@ -567,6 +571,7 @@ function productCost(product: Product) {
 function PromoBundleWizard({
   bundle,
   initialStep,
+  returnTo,
   launches,
   products,
   tariffConditions,
@@ -575,6 +580,7 @@ function PromoBundleWizard({
 }: {
   bundle: MarketingPromoBundle | null;
   initialStep: PromoBundleWizardStep | null;
+  returnTo: string | null;
   launches: MarketingPromoBundleLaunch[];
   products: Product[];
   tariffConditions: MarketingTariffConditions;
@@ -582,8 +588,15 @@ function PromoBundleWizard({
   audiences: GuestAudience[];
 }) {
   const router = useRouter();
-  const [step, setStep] = useState<PromoBundleWizardStep>(
-    initialStep ?? "what",
+  // From a campaign the group and clubs are chosen there, so «Кому и где»
+  // is left out and the wizard returns with the saved bundle.
+  const steps = returnTo
+    ? promoBundleWizardSteps.filter((item) => item.id !== "who")
+    : promoBundleWizardSteps;
+  const [step, setStep] = useState<PromoBundleWizardStep>(() =>
+    initialStep && steps.some((item) => item.id === initialStep)
+      ? initialStep
+      : "what",
   );
   const [form, setForm] = useState<WizardForm>(() =>
     initialWizardForm(bundle, launches),
@@ -789,12 +802,9 @@ function PromoBundleWizard({
               ? "Дата окончания раньше даты начала."
               : null,
   };
-  const stepIndex = promoBundleWizardSteps.findIndex(
-    (item) => item.id === step,
-  );
+  const stepIndex = steps.findIndex((item) => item.id === step);
   const stepDone = (id: PromoBundleWizardStep) =>
-    promoBundleWizardSteps.findIndex((item) => item.id === id) < stepIndex &&
-    !stepIssue[id];
+    steps.findIndex((item) => item.id === id) < stepIndex && !stepIssue[id];
 
   function buildDraftForSave(): PromoBundleDraft {
     const discount = Math.max(0, basePrice - guestPrice);
@@ -880,10 +890,11 @@ function PromoBundleWizard({
       return;
     }
     const launchNeeded =
+      !returnTo &&
       mode === "launch" &&
       form.audienceMode !== "GAME" &&
       currentLaunches.length === 0;
-    if (mode === "launch" && stepIssue.who) {
+    if (!returnTo && mode === "launch" && stepIssue.who) {
       setError(stepIssue.who);
       return;
     }
@@ -924,6 +935,12 @@ function PromoBundleWizard({
       }
     }
 
+    if (returnTo) {
+      router.push(returnWithPromoBundle(returnTo, saved.id));
+      router.refresh();
+      return;
+    }
+
     if (mode === "launch" && form.audienceMode === "GAME") {
       router.push(
         `/gamification/missions/wizard?promoCodeId=${encodeURIComponent(saved.id)}`,
@@ -958,9 +975,10 @@ function PromoBundleWizard({
     setStoppingLaunchId(null);
   }
 
-  const isLast = step === "who";
-  const finalLabel =
-    form.audienceMode === "GAME"
+  const isLast = step === steps[steps.length - 1].id;
+  const finalLabel = returnTo
+    ? "Сохранить и вернуться в кампанию"
+    : form.audienceMode === "GAME"
       ? "Сохранить и выбрать задание"
       : currentLaunches.length > 0
         ? "Сохранить изменения"
@@ -973,8 +991,9 @@ function PromoBundleWizard({
           {bundle ? bundle.name : "Новый промо-набор"}
         </h1>
         <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-          Четыре коротких шага. Справа видно, как набор увидит администратор на
-          кассе.
+          {returnTo
+            ? "Три коротких шага. Кому и в каких клубах, выберете дальше в кампании."
+            : "Четыре коротких шага. Справа видно, как набор увидит администратор на кассе."}
         </p>
       </div>
 
@@ -983,7 +1002,7 @@ function PromoBundleWizard({
           aria-label="Шаги"
           className="grid h-fit grid-cols-2 gap-1 rounded-xl border border-zinc-200 bg-white p-2 sm:grid-cols-4 lg:grid-cols-1 dark:border-zinc-800 dark:bg-zinc-900"
         >
-          {promoBundleWizardSteps.map((item, index) => {
+          {steps.map((item, index) => {
             const isActive = item.id === step;
             const isDone = stepDone(item.id);
             return (
@@ -1620,18 +1639,22 @@ function PromoBundleWizard({
             {stepIndex > 0 ? (
               <button
                 type="button"
-                onClick={() => goTo(promoBundleWizardSteps[stepIndex - 1].id)}
+                onClick={() => goTo(steps[stepIndex - 1].id)}
                 className={secondaryButtonClass}
               >
                 Назад
               </button>
             ) : (
-              <Link href={basePath} className={secondaryButtonClass}>
-                К списку
+              <Link
+                href={returnTo ?? basePath}
+                className={secondaryButtonClass}
+              >
+                {returnTo ? "Назад" : "К списку"}
               </Link>
             )}
             <div className="flex flex-wrap gap-2">
-              {(isLast || bundle) &&
+              {!returnTo &&
+              (isLast || bundle) &&
               !(
                 isLast &&
                 currentLaunches.length > 0 &&
@@ -1663,7 +1686,7 @@ function PromoBundleWizard({
                 <button
                   type="button"
                   disabled={Boolean(stepIssue[step])}
-                  onClick={() => goTo(promoBundleWizardSteps[stepIndex + 1].id)}
+                  onClick={() => goTo(steps[stepIndex + 1].id)}
                   className={primaryButtonClass}
                 >
                   Дальше
@@ -1700,7 +1723,10 @@ function PromoBundleWizard({
               ))}
             </ul>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Кому: {previewAudience(form, audienceRows, stores)}
+              Кому:{" "}
+              {returnTo
+                ? "выберете в кампании"
+                : previewAudience(form, audienceRows, stores)}
             </p>
           </div>
           {guestPrice > 0 && basePrice > 0 ? (

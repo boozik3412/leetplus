@@ -9,6 +9,8 @@ import {
   promoBundleCardState,
   promoBundleLaunchSummary,
   promoBundleOfferLine,
+  returnWithPromoBundle,
+  safeReturnPath,
   suggestedGuestPrice,
 } from "./promo-bundle-wizard.ts";
 
@@ -248,5 +250,24 @@ test("top-up bundles are judged by the bonus share, not a margin", () => {
       kind: "balance_bonus",
     }).tone,
     "warning",
+  );
+});
+
+test("return path after the wizard stays on this site", () => {
+  assert.equal(
+    safeReturnPath("/marketing/new?audience=a1"),
+    "/marketing/new?audience=a1",
+  );
+  assert.equal(safeReturnPath("//evil.example/x"), null);
+  assert.equal(safeReturnPath("https://evil.example"), null);
+  assert.equal(safeReturnPath("/\\evil.example"), null);
+  assert.equal(safeReturnPath(null), null);
+  assert.equal(
+    returnWithPromoBundle("/marketing/new?audience=a1", "b 1"),
+    "/marketing/new?audience=a1&promoBundle=b%201",
+  );
+  assert.equal(
+    returnWithPromoBundle("/marketing/new#mechanic", "b1"),
+    "/marketing/new?promoBundle=b1#mechanic",
   );
 });

@@ -848,7 +848,10 @@ function staffDefinitions(): readonly ControllerDefinition[] {
       'staff-discipline.controller.ts',
       'administrator-ratings',
       'NETWORK_VERIFIED',
-      [['GET', ['']]],
+      [
+        ['GET', ['']],
+        ['POST', ['adjustments', 'adjustments/:id/cancel']],
+      ],
     ),
     staffController(
       'staff-checklists.controller.ts',

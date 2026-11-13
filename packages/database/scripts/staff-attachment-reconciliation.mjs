@@ -8,13 +8,11 @@ import {
 } from "./staff-attachment-backfill-dry-run.mjs";
 import { canonicalJson } from "./current-network-access-scope-classification.mjs";
 
-export const RECONCILIATION_CONTRACT =
-  "STAFF_ATTACHMENT_RECONCILIATION_V1";
+export const RECONCILIATION_CONTRACT = "STAFF_ATTACHMENT_RECONCILIATION_V1";
 export const PLAN_CONTRACT = "STAFF_ATTACHMENT_RECONCILIATION_PLAN_V1";
 export const APPROVAL_CONTRACT =
   "STAFF_ATTACHMENT_RECONCILIATION_DETACHED_APPROVAL_V1";
-export const RECEIPT_CONTRACT =
-  "STAFF_ATTACHMENT_RECONCILIATION_RECEIPT_V1";
+export const RECEIPT_CONTRACT = "STAFF_ATTACHMENT_RECONCILIATION_RECEIPT_V1";
 export const RESIDUAL_RECONCILIATION_CONTRACT =
   "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_V1";
 export const RESIDUAL_PLAN_CONTRACT =
@@ -23,9 +21,9 @@ export const RESIDUAL_APPROVAL_CONTRACT =
   "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_DETACHED_APPROVAL_V1";
 export const RESIDUAL_RECEIPT_CONTRACT =
   "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_RECEIPT_V1";
-export const EXPECTED_MIGRATION_COUNT = 205;
+export const EXPECTED_MIGRATION_COUNT = 206;
 export const EXPECTED_MIGRATION_HEAD =
-  "20261113120000_staff_checklist_escalated_at";
+  "20261113150000_staff_admin_rating_adjustments";
 export const PRODUCTION_ATTESTATION =
   "I_ATTEST_THIS_IS_THE_REVIEWED_STAFF_ATTACHMENT_RECONCILIATION_TARGET";
 export const APPROVAL_PHRASES = Object.freeze({
@@ -34,8 +32,7 @@ export const APPROVAL_PHRASES = Object.freeze({
 });
 export const RESIDUAL_APPROVAL_PHRASES = Object.freeze({
   APPLY: "I_ACCEPT_EXACT_STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_APPLY",
-  ROLLBACK:
-    "I_ACCEPT_EXACT_STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_ROLLBACK",
+  ROLLBACK: "I_ACCEPT_EXACT_STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_ROLLBACK",
 });
 
 const TARGETS = new Set(["development", "staging", "production"]);
@@ -58,8 +55,7 @@ const RESIDUAL_APPLY_AUDIT_ACTION =
   "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_APPLY_V1";
 const RESIDUAL_ROLLBACK_AUDIT_ACTION =
   "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_ROLLBACK_V1";
-const RESIDUAL_TARGET_TYPE =
-  "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_PLAN";
+const RESIDUAL_TARGET_TYPE = "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_PLAN";
 const RESIDUAL_POLICY =
   "BIND_ALL_NORMALIZED_PRIMARY_PARENTS_OR_QUARANTINE_NO_PARENT_V1";
 const REQUIRED_ENUMS = Object.freeze({
@@ -193,7 +189,10 @@ function exactInteger(value, minimum, maximum, reasonCode) {
   return value;
 }
 
-function iso(value, reasonCode = "ATTACHMENT_RECONCILIATION_TIMESTAMP_INVALID") {
+function iso(
+  value,
+  reasonCode = "ATTACHMENT_RECONCILIATION_TIMESTAMP_INVALID",
+) {
   const parsed = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(parsed.valueOf())) fail(reasonCode);
   return parsed.toISOString();
@@ -245,7 +244,13 @@ function deterministicUuid(domain, ...parts) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function sourceKeyFor({ attachmentId, resourceKind, resourceId, source, tenantId }) {
+function sourceKeyFor({
+  attachmentId,
+  resourceKind,
+  resourceId,
+  source,
+  tenantId,
+}) {
   return digest("binding-source-key", {
     attachmentId,
     resourceKind,
@@ -312,7 +317,12 @@ export function buildStaffAttachmentReconciliationPlan(snapshot) {
     normalizeSnapshot(snapshot);
   const attachmentsById = mapBy(
     attachments,
-    (entry) => exactString(entry.id, UUID, "ATTACHMENT_RECONCILIATION_ATTACHMENT_ID_INVALID"),
+    (entry) =>
+      exactString(
+        entry.id,
+        UUID,
+        "ATTACHMENT_RECONCILIATION_ATTACHMENT_ID_INVALID",
+      ),
     "ATTACHMENT_RECONCILIATION_ATTACHMENT_DUPLICATE",
   );
   const occurrencesByAttachment = new Map();
@@ -340,7 +350,9 @@ export function buildStaffAttachmentReconciliationPlan(snapshot) {
   const signalAttachmentIds = new Set(
     signals
       .map((signal) => signal.attachmentId)
-      .filter((attachmentId) => attachmentId !== null && attachmentId !== undefined)
+      .filter(
+        (attachmentId) => attachmentId !== null && attachmentId !== undefined,
+      )
       .map((attachmentId) =>
         exactString(
           attachmentId,
@@ -356,7 +368,8 @@ export function buildStaffAttachmentReconciliationPlan(snapshot) {
     String(a.id).localeCompare(String(b.id), "en"),
   )) {
     const reasons = new Set();
-    const candidateOccurrences = occurrencesByAttachment.get(attachment.id) ?? [];
+    const candidateOccurrences =
+      occurrencesByAttachment.get(attachment.id) ?? [];
     const validOccurrences = [];
     const parentsByKey = new Map();
     for (const occurrence of candidateOccurrences) {
@@ -374,10 +387,7 @@ export function buildStaffAttachmentReconciliationPlan(snapshot) {
       const key = parentKey(occurrence);
       const parent = normalizedParent(occurrence);
       const previous = parentsByKey.get(key);
-      if (
-        previous &&
-        previous.resourceStoreId !== parent.resourceStoreId
-      ) {
+      if (previous && previous.resourceStoreId !== parent.resourceStoreId) {
         reasons.add("PRIMARY_PARENT_STORE_CONFLICT");
       }
       parentsByKey.set(key, parent);
@@ -585,13 +595,15 @@ export function validateStaffAttachmentReconciliationPlan(plan) {
   ) {
     fail("ATTACHMENT_RECONCILIATION_PLAN_INVALID");
   }
-  exactIso(plan.generatedAt, "ATTACHMENT_RECONCILIATION_PLAN_TIMESTAMP_INVALID");
+  exactIso(
+    plan.generatedAt,
+    "ATTACHMENT_RECONCILIATION_PLAN_TIMESTAMP_INVALID",
+  );
   if (
     !SHA256.test(plan.inventoryDigest ?? "") ||
     !SHA256.test(plan.sourceGraphDigest ?? "") ||
     plan.safety?.autoQuarantineSupported !== false ||
-    plan.safety?.automaticDisposition !==
-      "UNIQUE_VALID_PRIMARY_PARENT_ONLY" ||
+    plan.safety?.automaticDisposition !== "UNIQUE_VALID_PRIMARY_PARENT_ONLY" ||
     plan.safety?.databaseWrites !== false ||
     plan.safety?.pendingLifecycleMutationSupported !== false ||
     plan.safety?.planContainsProtectedRawIdentifiers !== true ||
@@ -616,9 +628,9 @@ export function validateStaffAttachmentReconciliationPlan(plan) {
   ) {
     fail("ATTACHMENT_RECONCILIATION_PLAN_DATABASE_INVALID");
   }
-  const normalizedOrigins = [...parseAllowedOrigins(
-    plan.database.allowedHttpsOrigins.join(","),
-  )].sort();
+  const normalizedOrigins = [
+    ...parseAllowedOrigins(plan.database.allowedHttpsOrigins.join(",")),
+  ].sort();
   if (
     canonicalJson(normalizedOrigins) !==
     canonicalJson(plan.database.allowedHttpsOrigins)
@@ -646,8 +658,15 @@ export function validateStaffAttachmentReconciliationPlan(plan) {
   const actionIds = new Set();
   let previousId = "";
   for (const action of plan.actions) {
-    exactString(action.attachmentId, UUID, "ATTACHMENT_RECONCILIATION_PLAN_ACTION_INVALID");
-    if (actionIds.has(action.attachmentId) || action.attachmentId <= previousId) {
+    exactString(
+      action.attachmentId,
+      UUID,
+      "ATTACHMENT_RECONCILIATION_PLAN_ACTION_INVALID",
+    );
+    if (
+      actionIds.has(action.attachmentId) ||
+      action.attachmentId <= previousId
+    ) {
       fail("ATTACHMENT_RECONCILIATION_PLAN_ACTION_ORDER_INVALID");
     }
     actionIds.add(action.attachmentId);
@@ -733,8 +752,7 @@ export function validateStaffAttachmentReconciliationPlan(plan) {
   }
   for (const signal of plan.signalReviews) {
     if (
-      (signal.attachmentId !== null &&
-        !UUID.test(signal.attachmentId ?? "")) ||
+      (signal.attachmentId !== null && !UUID.test(signal.attachmentId ?? "")) ||
       (signal.attachmentId !== null && actionIds.has(signal.attachmentId)) ||
       !/^[A-Z][A-Z0-9_]{2,100}$/u.test(signal.reasonCode ?? "") ||
       !OPAQUE_ID.test(signal.resourceId ?? "") ||
@@ -843,9 +861,13 @@ export function parseStaffAttachmentReconciliationRuntime(environment) {
   if (!TARGETS.has(target)) fail("ATTACHMENT_RECONCILIATION_TARGET_INVALID");
   const productionRequested =
     target === "production" ||
-    String(environment.NODE_ENV ?? "").trim().toLowerCase() === "production";
+    String(environment.NODE_ENV ?? "")
+      .trim()
+      .toLowerCase() === "production";
   if (
-    String(environment.NODE_ENV ?? "").trim().toLowerCase() === "production" &&
+    String(environment.NODE_ENV ?? "")
+      .trim()
+      .toLowerCase() === "production" &&
     target !== "production"
   ) {
     fail("ATTACHMENT_RECONCILIATION_PRODUCTION_TARGET_MISMATCH");
@@ -883,15 +905,15 @@ export function parseStaffAttachmentReconciliationRuntime(environment) {
     fail("ATTACHMENT_RECONCILIATION_DATABASE_NAME_MISMATCH");
   }
   const publicConfig = Object.freeze({
-    allowedHttpsOrigins: [...parseAllowedOrigins(
-      environment.STAFF_ATTACHMENT_ALLOWED_HTTPS_ORIGINS ?? "",
-    )].sort(),
+    allowedHttpsOrigins: [
+      ...parseAllowedOrigins(
+        environment.STAFF_ATTACHMENT_ALLOWED_HTTPS_ORIGINS ?? "",
+      ),
+    ].sort(),
     databaseName,
     databaseTargetFingerprint: targetFingerprint,
     expectedRoleName: exactString(
-      String(
-        environment.STAFF_ATTACHMENT_RECONCILIATION_EXPECTED_ROLE ?? "",
-      ),
+      String(environment.STAFF_ATTACHMENT_RECONCILIATION_EXPECTED_ROLE ?? ""),
       ROLE_NAME,
       "ATTACHMENT_RECONCILIATION_ROLE_REQUIRED",
     ),
@@ -957,7 +979,8 @@ function connectionString(config, readOnly) {
 async function schemaCatalog(client) {
   const [columnsResult, enumsResult, triggersResult, constraintsResult] =
     await Promise.all([
-      client.query(`
+      client.query(
+        `
         SELECT table_name AS "tableName", column_name AS "columnName",
                data_type AS "dataType", udt_name AS "udtName",
                is_nullable AS "isNullable", column_default AS "columnDefault"
@@ -965,8 +988,11 @@ async function schemaCatalog(client) {
         WHERE table_schema = 'public'
           AND table_name = ANY($1::text[])
         ORDER BY table_name COLLATE "C", ordinal_position
-      `, [Object.keys(REQUIRED_COLUMNS)]),
-      client.query(`
+      `,
+        [Object.keys(REQUIRED_COLUMNS)],
+      ),
+      client.query(
+        `
         SELECT type_row.typname AS "typeName", enum_row.enumlabel AS "label",
                enum_row.enumsortorder::text AS "sortOrder"
         FROM pg_catalog.pg_type AS type_row
@@ -977,8 +1003,11 @@ async function schemaCatalog(client) {
         WHERE namespace.nspname = 'public'
           AND type_row.typname = ANY($1::text[])
         ORDER BY type_row.typname COLLATE "C", enum_row.enumsortorder
-      `, [Object.keys(REQUIRED_ENUMS)]),
-      client.query(`
+      `,
+        [Object.keys(REQUIRED_ENUMS)],
+      ),
+      client.query(
+        `
         SELECT trigger_row.tgname AS "triggerName",
                relation.relname AS "relationName",
                pg_catalog.pg_get_triggerdef(trigger_row.oid, true) AS "definition",
@@ -992,8 +1021,11 @@ async function schemaCatalog(client) {
           AND trigger_row.tgname = ANY($1::text[])
           AND NOT trigger_row.tgisinternal
         ORDER BY trigger_row.tgname COLLATE "C"
-      `, [REQUIRED_TRIGGERS]),
-      client.query(`
+      `,
+        [REQUIRED_TRIGGERS],
+      ),
+      client.query(
+        `
         SELECT relation.relname AS "relationName",
                constraint_row.conname AS "constraintName",
                constraint_row.contype AS "constraintType",
@@ -1005,7 +1037,15 @@ async function schemaCatalog(client) {
         WHERE namespace.nspname = 'public'
           AND relation.relname = ANY($1::text[])
         ORDER BY relation.relname COLLATE "C", constraint_row.conname COLLATE "C"
-      `, [["StaffAttachment", "StaffAttachmentBinding", "PlatformAdminAuditEvent"]]),
+      `,
+        [
+          [
+            "StaffAttachment",
+            "StaffAttachmentBinding",
+            "PlatformAdminAuditEvent",
+          ],
+        ],
+      ),
     ]);
   const catalog = Object.freeze({
     columns: columnsResult.rows,
@@ -1079,7 +1119,8 @@ async function attestDatabase(client, config) {
   if (
     identity.databaseName !== config.publicConfig.databaseName ||
     identity.roleName !== config.publicConfig.expectedRoleName ||
-    identity.systemIdentifier !== config.publicConfig.expectedSystemIdentifier ||
+    identity.systemIdentifier !==
+      config.publicConfig.expectedSystemIdentifier ||
     Number(identity.serverVersionNumber) < 150000 ||
     identity.superuser !== false ||
     identity.inherits !== false ||
@@ -1106,8 +1147,7 @@ async function attestDatabase(client, config) {
   return Object.freeze({
     databaseIdentityDigest: digest("database-identity", identity),
     databaseName: identity.databaseName,
-    databaseTargetFingerprint:
-      config.publicConfig.databaseTargetFingerprint,
+    databaseTargetFingerprint: config.publicConfig.databaseTargetFingerprint,
     expectedMigrationCount: EXPECTED_MIGRATION_COUNT,
     expectedMigrationHead: EXPECTED_MIGRATION_HEAD,
     releaseSha: config.publicConfig.releaseSha,
@@ -1136,7 +1176,9 @@ async function pagedQuery(client, text, values = []) {
 
 async function collectPrimarySnapshot(client, allowedOrigins) {
   const attachments = (
-    await pagedQuery(client, `
+    await pagedQuery(
+      client,
+      `
       SELECT attachment."id", attachment."tenantId", attachment."state"::text AS "state",
              CASE WHEN attachment."pendingExpiresAt" IS NULL THEN NULL ELSE
                to_char(attachment."pendingExpiresAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
@@ -1148,14 +1190,17 @@ async function collectPrimarySnapshot(client, allowedOrigins) {
       WHERE ($1::text IS NULL OR attachment."id" > $1)
       ORDER BY attachment."id" COLLATE "C"
       LIMIT $2
-    `)
+    `,
+    )
   ).map((row) => ({
     ...row,
     createdAt: iso(row.createdAt),
     pendingExpiresAt: nullableIso(row.pendingExpiresAt),
     stateChangedAt: iso(row.stateChangedAt),
   }));
-  const chatRows = await pagedQuery(client, `
+  const chatRows = await pagedQuery(
+    client,
+    `
     SELECT relation."id", relation."tenantId" AS "sourceTenantId",
            relation."attachmentId", relation."messageId" AS "resourceId",
            message."tenantId" AS "parentTenantId",
@@ -1171,8 +1216,11 @@ async function collectPrimarySnapshot(client, allowedOrigins) {
     WHERE ($1::text IS NULL OR relation."id" > $1)
     ORDER BY relation."id" COLLATE "C"
     LIMIT $2
-  `);
-  const taskRows = await pagedQuery(client, `
+  `,
+  );
+  const taskRows = await pagedQuery(
+    client,
+    `
     SELECT comment."id", comment."tenantId" AS "sourceTenantId",
            comment."evidenceUrl", task."id" AS "resourceId",
            task."tenantId" AS "parentTenantId",
@@ -1185,9 +1233,11 @@ async function collectPrimarySnapshot(client, allowedOrigins) {
       AND ($1::text IS NULL OR comment."id" > $1)
     ORDER BY comment."id" COLLATE "C"
     LIMIT $2
-  `);
-  const bindings = (
-    await pagedQuery(client, `
+  `,
+  );
+  const bindings = await pagedQuery(
+    client,
+    `
       SELECT binding."id", binding."tenantId", binding."attachmentId",
              binding."candidateAttachmentId", binding."resourceKind"::text AS "resourceKind",
              binding."resourceId", binding."resourceStoreId",
@@ -1197,7 +1247,7 @@ async function collectPrimarySnapshot(client, allowedOrigins) {
       WHERE ($1::text IS NULL OR binding."id" > $1)
       ORDER BY binding."id" COLLATE "C"
       LIMIT $2
-    `)
+    `,
   );
   const occurrences = chatRows.map((row) => {
     const storeConflict =
@@ -1208,8 +1258,7 @@ async function collectPrimarySnapshot(client, allowedOrigins) {
     return Object.freeze({
       attachmentId: String(row.attachmentId).toLowerCase(),
       parentTenantId: row.parentTenantId,
-      parentValid:
-        !storeConflict && row.channelTenantId === row.parentTenantId,
+      parentValid: !storeConflict && row.channelTenantId === row.parentTenantId,
       referenceForm: "NORMALIZED_RELATION",
       resourceId: row.resourceId,
       resourceKind: "CHAT_MESSAGE",
@@ -1260,7 +1309,9 @@ async function collectPrimarySnapshot(client, allowedOrigins) {
 export async function createStaffAttachmentReconciliationPlanFromDatabase(
   config,
 ) {
-  const client = new pg.Client({ connectionString: connectionString(config, true) });
+  const client = new pg.Client({
+    connectionString: connectionString(config, true),
+  });
   await client.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
@@ -1317,7 +1368,8 @@ function bindingAfterImage(action, transitionAt) {
 }
 
 function auditEvents(plan, direction, transitionAt) {
-  const action = direction === "APPLY" ? APPLY_AUDIT_ACTION : ROLLBACK_AUDIT_ACTION;
+  const action =
+    direction === "APPLY" ? APPLY_AUDIT_ACTION : ROLLBACK_AUDIT_ACTION;
   return plan.summary.tenantActionCounts.map(({ actionCount, tenantId }) => {
     const beforeState = direction === "APPLY" ? "UNRESOLVED" : "BOUND";
     const afterState = direction === "APPLY" ? "BOUND" : "UNRESOLVED";
@@ -1428,7 +1480,9 @@ function exactAuditSet(plan, direction, rows) {
     "ATTACHMENT_RECONCILIATION_AUDIT_DRIFT",
   );
   const expected = auditEvents(plan, direction, transitionAt);
-  const actual = [...rows].sort((a, b) => a.tenantId.localeCompare(b.tenantId, "en"));
+  const actual = [...rows].sort((a, b) =>
+    a.tenantId.localeCompare(b.tenantId, "en"),
+  );
   if (canonicalJson(actual) !== canonicalJson(expected)) {
     fail("ATTACHMENT_RECONCILIATION_AUDIT_DRIFT");
   }
@@ -1448,8 +1502,12 @@ function compareStateRows(actual, expected, reasonCode) {
 }
 
 function compareBindingRows(actual, expected, reasonCode) {
-  const sortedActual = [...actual].sort((a, b) => a.id.localeCompare(b.id, "en"));
-  const sortedExpected = [...expected].sort((a, b) => a.id.localeCompare(b.id, "en"));
+  const sortedActual = [...actual].sort((a, b) =>
+    a.id.localeCompare(b.id, "en"),
+  );
+  const sortedExpected = [...expected].sort((a, b) =>
+    a.id.localeCompare(b.id, "en"),
+  );
   if (canonicalJson(sortedActual) !== canonicalJson(sortedExpected)) {
     fail(reasonCode);
   }
@@ -1504,7 +1562,10 @@ export function classifyStaffAttachmentReconciliationState({
         expectedBindings,
         "ATTACHMENT_RECONCILIATION_APPLIED_BINDING_DRIFT",
       );
-      return Object.freeze({ disposition: "RECONCILED", transitionAt: applyAudit.transitionAt });
+      return Object.freeze({
+        disposition: "RECONCILED",
+        transitionAt: applyAudit.transitionAt,
+      });
     }
     compareStateRows(
       normalized.attachments,
@@ -1533,7 +1594,10 @@ export function classifyStaffAttachmentReconciliationState({
       [],
       "ATTACHMENT_RECONCILIATION_ROLLBACK_BINDING_DRIFT",
     );
-    return Object.freeze({ disposition: "RECONCILED", transitionAt: rollbackAudit.transitionAt });
+    return Object.freeze({
+      disposition: "RECONCILED",
+      transitionAt: rollbackAudit.transitionAt,
+    });
   }
   compareStateRows(
     normalized.attachments,
@@ -1613,7 +1677,8 @@ async function validateCurrentParents(client, plan, allowedOrigins) {
   const actionById = new Map(
     plan.actions.map((action) => [action.attachmentId, action]),
   );
-  const chatResult = await client.query(`
+  const chatResult = await client.query(
+    `
     SELECT relation."id", relation."tenantId" AS "sourceTenantId",
            relation."attachmentId", relation."messageId" AS "resourceId",
            message."tenantId" AS "parentTenantId", message."storeId" AS "resourceStoreId",
@@ -1626,8 +1691,12 @@ async function validateCurrentParents(client, plan, allowedOrigins) {
     LEFT JOIN public."Store" AS store ON store."id" = message."storeId"
     WHERE relation."attachmentId" = ANY($1::text[])
     ORDER BY relation."attachmentId" COLLATE "C", relation."id" COLLATE "C"
-  `, [ids]);
-  const taskRows = await pagedQuery(client, `
+  `,
+    [ids],
+  );
+  const taskRows = await pagedQuery(
+    client,
+    `
     SELECT comment."id", comment."tenantId" AS "sourceTenantId",
            comment."evidenceUrl", task."id" AS "resourceId",
            task."tenantId" AS "parentTenantId", task."storeId" AS "resourceStoreId",
@@ -1639,20 +1708,24 @@ async function validateCurrentParents(client, plan, allowedOrigins) {
       AND ($1::text IS NULL OR comment."id" > $1)
     ORDER BY comment."id" COLLATE "C"
     LIMIT $2
-  `);
+  `,
+  );
   const observed = new Map(ids.map((id) => [id, new Set()]));
   for (const row of chatResult.rows) {
     const action = actionById.get(row.attachmentId);
     const storeConflict =
       row.channelScope === "STORE" &&
-      (!row.resourceStoreId || !row.channelStoreId || row.resourceStoreId !== row.channelStoreId);
+      (!row.resourceStoreId ||
+        !row.channelStoreId ||
+        row.resourceStoreId !== row.channelStoreId);
     if (
       !action ||
       storeConflict ||
       row.sourceTenantId !== action.tenantId ||
       row.parentTenantId !== action.tenantId ||
       row.channelTenantId !== action.tenantId ||
-      (row.resourceStoreId !== null && row.resourceStoreTenantId !== action.tenantId)
+      (row.resourceStoreId !== null &&
+        row.resourceStoreTenantId !== action.tenantId)
     ) {
       fail("ATTACHMENT_RECONCILIATION_PRIMARY_GRAPH_DRIFT");
     }
@@ -1676,7 +1749,8 @@ async function validateCurrentParents(client, plan, allowedOrigins) {
     if (
       row.sourceTenantId !== action.tenantId ||
       row.parentTenantId !== action.tenantId ||
-      (row.resourceStoreId !== null && row.resourceStoreTenantId !== action.tenantId)
+      (row.resourceStoreId !== null &&
+        row.resourceStoreTenantId !== action.tenantId)
     ) {
       fail("ATTACHMENT_RECONCILIATION_PRIMARY_GRAPH_DRIFT");
     }
@@ -1687,7 +1761,8 @@ async function validateCurrentParents(client, plan, allowedOrigins) {
       fail("ATTACHMENT_RECONCILIATION_PRIMARY_GRAPH_DRIFT");
     }
   }
-  const scopeResult = await client.query(`
+  const scopeResult = await client.query(
+    `
     SELECT desired."attachmentId", desired."resourceKind", desired."resourceId",
            scope."tenantId", scope."storeId"
     FROM jsonb_to_recordset($1::jsonb) AS desired(
@@ -1698,11 +1773,17 @@ async function validateCurrentParents(client, plan, allowedOrigins) {
       desired."resourceId"
     ) AS scope ON true
     ORDER BY desired."attachmentId" COLLATE "C"
-  `, [JSON.stringify(plan.actions.map((action) => ({
-    attachmentId: action.attachmentId,
-    resourceId: action.binding.resourceId,
-    resourceKind: action.binding.resourceKind,
-  })))]);
+  `,
+    [
+      JSON.stringify(
+        plan.actions.map((action) => ({
+          attachmentId: action.attachmentId,
+          resourceId: action.binding.resourceId,
+          resourceKind: action.binding.resourceKind,
+        })),
+      ),
+    ],
+  );
   if (scopeResult.rows.length !== plan.actions.length) {
     fail("ATTACHMENT_RECONCILIATION_PARENT_SCOPE_DRIFT");
   }
@@ -1719,8 +1800,11 @@ async function validateCurrentParents(client, plan, allowedOrigins) {
 }
 
 async function insertBindings(client, plan, transitionAt) {
-  const rows = plan.actions.map((action) => bindingAfterImage(action, transitionAt));
-  const result = await client.query(`
+  const rows = plan.actions.map((action) =>
+    bindingAfterImage(action, transitionAt),
+  );
+  const result = await client.query(
+    `
     INSERT INTO public."StaffAttachmentBinding" (
       "id", "tenantId", "attachmentId", "candidateAttachmentId",
       "resourceKind", "resourceId", "resourceStoreId", "state", "source",
@@ -1743,14 +1827,17 @@ async function insertBindings(client, plan, transitionAt) {
       "createdAt" text, "updatedAt" text
     )
     ORDER BY desired."attachmentId" COLLATE "C"
-  `, [JSON.stringify(rows)]);
+  `,
+    [JSON.stringify(rows)],
+  );
   if (result.rowCount !== plan.actions.length) {
     fail("ATTACHMENT_RECONCILIATION_BINDING_INSERT_COUNT_MISMATCH");
   }
 }
 
 async function transitionAttachmentsToBound(client, plan, transitionAt) {
-  const result = await client.query(`
+  const result = await client.query(
+    `
     UPDATE public."StaffAttachment" AS attachment
     SET "state" = 'BOUND'::public."StaffAttachmentState",
         "pendingExpiresAt" = NULL,
@@ -1766,13 +1853,19 @@ async function transitionAttachmentsToBound(client, plan, transitionAt) {
       AND attachment."pendingExpiresAt" IS NULL
       AND attachment."stateChangedAt" = desired."stateChangedAt"::timestamp(3)
       AND attachment."stateReasonCode" IS NOT DISTINCT FROM desired."stateReasonCode"
-  `, [JSON.stringify(plan.actions.map((action) => ({
-    attachmentId: action.attachmentId,
-    stateChangedAt: action.before.stateChangedAt,
-    stateReasonCode: action.before.stateReasonCode,
-    tenantId: action.tenantId,
-    transitionAt,
-  })))]);
+  `,
+    [
+      JSON.stringify(
+        plan.actions.map((action) => ({
+          attachmentId: action.attachmentId,
+          stateChangedAt: action.before.stateChangedAt,
+          stateReasonCode: action.before.stateReasonCode,
+          tenantId: action.tenantId,
+          transitionAt,
+        })),
+      ),
+    ],
+  );
   if (result.rowCount !== plan.actions.length) {
     fail("ATTACHMENT_RECONCILIATION_ATTACHMENT_UPDATE_COUNT_MISMATCH");
   }
@@ -1780,7 +1873,8 @@ async function transitionAttachmentsToBound(client, plan, transitionAt) {
 
 async function insertAudits(client, events) {
   if (events.length === 0) return;
-  const result = await client.query(`
+  const result = await client.query(
+    `
     INSERT INTO public."PlatformAdminAuditEvent" (
       "id", "tenantId", "requestId", "action", "targetType", "targetId",
       "reason", "before", "after", "metadata", "createdAt"
@@ -1795,14 +1889,17 @@ async function insertAudits(client, events) {
       "before" jsonb, "after" jsonb, "metadata" jsonb, "createdAt" text
     )
     ORDER BY event."tenantId" COLLATE "C"
-  `, [JSON.stringify(events)]);
+  `,
+    [JSON.stringify(events)],
+  );
   if (result.rowCount !== events.length) {
     fail("ATTACHMENT_RECONCILIATION_AUDIT_INSERT_COUNT_MISMATCH");
   }
 }
 
 async function rollbackBindings(client, plan) {
-  const result = await client.query(`
+  const result = await client.query(
+    `
     DELETE FROM public."StaffAttachmentBinding" AS binding
     USING jsonb_to_recordset($1::jsonb) AS desired(
       "id" text, "tenantId" text, "attachmentId" text, "sourceKey" text
@@ -1811,14 +1908,17 @@ async function rollbackBindings(client, plan) {
       AND binding."tenantId" = desired."tenantId"
       AND binding."attachmentId" = desired."attachmentId"
       AND binding."sourceKey" = desired."sourceKey"
-  `, [JSON.stringify(plan.actions.map((action) => action.binding))]);
+  `,
+    [JSON.stringify(plan.actions.map((action) => action.binding))],
+  );
   if (result.rowCount !== plan.actions.length) {
     fail("ATTACHMENT_RECONCILIATION_BINDING_DELETE_COUNT_MISMATCH");
   }
 }
 
 async function restoreAttachments(client, plan, applyTransitionAt) {
-  const result = await client.query(`
+  const result = await client.query(
+    `
     UPDATE public."StaffAttachment" AS attachment
     SET "state" = desired."state"::public."StaffAttachmentState",
         "pendingExpiresAt" = desired."pendingExpiresAt"::timestamp(3),
@@ -1834,11 +1934,18 @@ async function restoreAttachments(client, plan, applyTransitionAt) {
       AND attachment."pendingExpiresAt" IS NULL
       AND attachment."stateReasonCode" IS NULL
       AND attachment."stateChangedAt" = $2::timestamp(3)
-  `, [JSON.stringify(plan.actions.map((action) => ({
-    attachmentId: action.attachmentId,
-    ...action.before,
-    tenantId: action.tenantId,
-  }))), applyTransitionAt]);
+  `,
+    [
+      JSON.stringify(
+        plan.actions.map((action) => ({
+          attachmentId: action.attachmentId,
+          ...action.before,
+          tenantId: action.tenantId,
+        })),
+      ),
+      applyTransitionAt,
+    ],
+  );
   if (result.rowCount !== plan.actions.length) {
     fail("ATTACHMENT_RECONCILIATION_ATTACHMENT_RESTORE_COUNT_MISMATCH");
   }
@@ -1865,15 +1972,21 @@ export async function executeStaffAttachmentReconciliation({
   plan,
 }) {
   validateStaffAttachmentReconciliationApproval(approval, plan, direction);
-  const client = new pg.Client({ connectionString: connectionString(config, false) });
+  const client = new pg.Client({
+    connectionString: connectionString(config, false),
+  });
   await client.connect();
   try {
     const database = await attestDatabase(client, config);
     validatePlanDatabaseBinding(plan, database, config);
     await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
     await client.query(`SET LOCAL lock_timeout = '${config.lockTimeoutMs}ms'`);
-    await client.query(`SET LOCAL statement_timeout = '${config.statementTimeoutMs}ms'`);
-    await client.query(`SET LOCAL idle_in_transaction_session_timeout = '120s'`);
+    await client.query(
+      `SET LOCAL statement_timeout = '${config.statementTimeoutMs}ms'`,
+    );
+    await client.query(
+      `SET LOCAL idle_in_transaction_session_timeout = '120s'`,
+    );
     const lock = await client.query(
       "SELECT pg_catalog.pg_try_advisory_xact_lock($1::integer, $2::integer) AS acquired",
       [ADVISORY_LOCK_NAMESPACE, ADVISORY_LOCK_RESOURCE],
@@ -1881,7 +1994,11 @@ export async function executeStaffAttachmentReconciliation({
     if (lock.rows[0]?.acquired !== true) {
       fail("ATTACHMENT_RECONCILIATION_ADVISORY_LOCK_BUSY");
     }
-    validatePlanDatabaseBinding(plan, await attestDatabase(client, config), config);
+    validatePlanDatabaseBinding(
+      plan,
+      await attestDatabase(client, config),
+      config,
+    );
     const initialState = await readCurrentState(client, plan, true);
     const classification = classifyStaffAttachmentReconciliationState({
       direction,
@@ -1902,7 +2019,7 @@ export async function executeStaffAttachmentReconciliation({
       });
     }
     const transitionResult = await client.query(
-      "SELECT transaction_timestamp() AS \"transitionAt\"",
+      'SELECT transaction_timestamp() AS "transitionAt"',
     );
     const transitionAt = iso(transitionResult.rows[0].transitionAt);
     if (direction === "APPLY") {
@@ -1961,11 +2078,17 @@ export async function checkStaffAttachmentReconciliation({
   plan,
 }) {
   validateStaffAttachmentReconciliationPlan(plan);
-  const client = new pg.Client({ connectionString: connectionString(config, true) });
+  const client = new pg.Client({
+    connectionString: connectionString(config, true),
+  });
   await client.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    validatePlanDatabaseBinding(plan, await attestDatabase(client, config), config);
+    validatePlanDatabaseBinding(
+      plan,
+      await attestDatabase(client, config),
+      config,
+    );
     const state = await readCurrentState(client, plan, false);
     const classification = classifyStaffAttachmentReconciliationState({
       direction,
@@ -2353,7 +2476,10 @@ export function validateStaffAttachmentResidualReconciliationPlan(plan) {
     !Array.isArray(plan.reviews) ||
     !Array.isArray(plan.signalReviews) ||
     !SHA256.test(plan.planDigest ?? "") ||
-    !equalDigest(plan.planDigest, residualDigest("plan", residualPlanCore(plan)))
+    !equalDigest(
+      plan.planDigest,
+      residualDigest("plan", residualPlanCore(plan)),
+    )
   ) {
     fail("ATTACHMENT_RESIDUAL_RECONCILIATION_PLAN_INVALID");
   }
@@ -3059,7 +3185,9 @@ async function validateCurrentResidualParents(client, plan, allowedOrigins) {
       .get(row.attachmentId)
       .add(`CHAT_MESSAGE\0${row.resourceId}`);
   }
-  const taskRows = await pagedQuery(client, `
+  const taskRows = await pagedQuery(
+    client,
+    `
     SELECT comment."id", comment."tenantId" AS "sourceTenantId",
            comment."evidenceUrl", task."id" AS "resourceId",
            task."tenantId" AS "parentTenantId", task."storeId" AS "resourceStoreId",
@@ -3071,7 +3199,8 @@ async function validateCurrentResidualParents(client, plan, allowedOrigins) {
       AND ($1::text IS NULL OR comment."id" > $1)
     ORDER BY comment."id" COLLATE "C"
     LIMIT $2
-  `);
+  `,
+  );
   const allowed = new Set(allowedOrigins);
   for (const row of taskRows) {
     const parsed = parseExactAttachmentReference(row.evidenceUrl, allowed);
@@ -3270,7 +3399,9 @@ async function restoreResidualAttachments(client, plan, applyTransitionAt) {
     [JSON.stringify(desired), applyTransitionAt],
   );
   if (result.rowCount !== plan.actions.length) {
-    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_ATTACHMENT_RESTORE_COUNT_MISMATCH");
+    fail(
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_ATTACHMENT_RESTORE_COUNT_MISMATCH",
+    );
   }
 }
 
@@ -3347,7 +3478,7 @@ export async function executeStaffAttachmentResidualReconciliation({
       });
     }
     const transitionResult = await client.query(
-      "SELECT transaction_timestamp() AS \"transitionAt\"",
+      'SELECT transaction_timestamp() AS "transitionAt"',
     );
     const transitionAt = iso(transitionResult.rows[0].transitionAt);
     if (direction === "APPLY") {
@@ -3373,11 +3504,7 @@ export async function executeStaffAttachmentResidualReconciliation({
         ),
       );
       await deleteResidualBindings(client, plan);
-      await restoreResidualAttachments(
-        client,
-        plan,
-        applyAudit.transitionAt,
-      );
+      await restoreResidualAttachments(client, plan, applyAudit.transitionAt);
       await client.query("SET CONSTRAINTS ALL IMMEDIATE");
       await insertAudits(
         client,
@@ -3580,9 +3707,8 @@ export function selfTestStaffAttachmentReconciliation() {
     ],
     signals: [],
   };
-  const residualPlan = buildStaffAttachmentResidualReconciliationPlan(
-    residualSnapshot,
-  );
+  const residualPlan =
+    buildStaffAttachmentResidualReconciliationPlan(residualSnapshot);
   validateStaffAttachmentResidualReconciliationPlan(residualPlan);
   if (
     residualPlan.summary.actionCount !== 3 ||
@@ -3593,18 +3719,17 @@ export function selfTestStaffAttachmentReconciliation() {
   ) {
     fail("ATTACHMENT_RESIDUAL_RECONCILIATION_SELF_TEST_PLAN_FAILED");
   }
-  const residualApproval =
-    createStaffAttachmentResidualReconciliationApproval({
-      actionCount: 3,
-      bindingCount: 2,
-      confirmationPhrase: RESIDUAL_APPROVAL_PHRASES.APPLY,
-      confirmedPlanDigest: residualPlan.planDigest,
-      direction: "APPLY",
-      plan: residualPlan,
-      quarantineCount: 2,
-      reviewAttachmentCount: 0,
-      now: new Date(generatedAt),
-    });
+  const residualApproval = createStaffAttachmentResidualReconciliationApproval({
+    actionCount: 3,
+    bindingCount: 2,
+    confirmationPhrase: RESIDUAL_APPROVAL_PHRASES.APPLY,
+    confirmedPlanDigest: residualPlan.planDigest,
+    direction: "APPLY",
+    plan: residualPlan,
+    quarantineCount: 2,
+    reviewAttachmentCount: 0,
+    now: new Date(generatedAt),
+  });
   validateStaffAttachmentResidualReconciliationApproval(
     residualApproval,
     residualPlan,

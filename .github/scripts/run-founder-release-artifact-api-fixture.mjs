@@ -10,9 +10,8 @@ const ACTIVATION_ROLE = "leetplus_founder_beta_activation_runtime";
 const DATABASE_PATTERN = /^lp_founder_artifact_api_[0-9a-f]{32}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const MAX_CHILD_OUTPUT_BYTES = 256 * 1024;
-const EXPECTED_MIGRATION =
-  "20261113120000_staff_checklist_escalated_at";
-const EXPECTED_MIGRATION_COUNT = 205;
+const EXPECTED_MIGRATION = "20261113150000_staff_admin_rating_adjustments";
+const EXPECTED_MIGRATION_COUNT = 206;
 
 if (
   process.env.FOUNDER_RELEASE_ARTIFACT_API_CONFIRM !== REQUIRED_CONFIRMATION

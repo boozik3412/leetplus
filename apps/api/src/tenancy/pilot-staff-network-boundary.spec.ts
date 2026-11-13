@@ -48,7 +48,11 @@ const CONTROLLER_BOUNDARIES: readonly ControllerBoundary[] = [
   {
     source: 'staff/staff-discipline.controller.ts',
     className: 'StaffAdministratorRatingsController',
-    routeIds: ['GET /staff/administrator-ratings'],
+    routeIds: [
+      'GET /staff/administrator-ratings',
+      'POST /staff/administrator-ratings/adjustments',
+      'POST /staff/administrator-ratings/adjustments/:id/cancel',
+    ],
   },
   {
     source: 'staff/staff-readiness-report.controller.ts',
@@ -426,7 +430,7 @@ function namedMethod(
 }
 
 describe('Gate 1MT staff scope boundaries', () => {
-  it('binds exactly 18 staff workspace routes to a fresh NETWORK class guard', () => {
+  it('binds exactly 22 staff workspace routes to a fresh NETWORK class guard', () => {
     const allRouteIds: string[] = [];
 
     for (const boundary of CONTROLLER_BOUNDARIES) {
@@ -442,7 +446,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       allRouteIds.push(...boundary.routeIds);
     }
 
-    expect(allRouteIds).toHaveLength(20);
+    expect(allRouteIds).toHaveLength(22);
     expect(new Set(allRouteIds).size).toBe(allRouteIds.length);
     expect(allRouteIds.some((id) => id.includes('/scheduled/'))).toBe(false);
   });
@@ -484,7 +488,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       ...STAFF_CONTROL_METHOD_BOUNDARIES.map(({ routeId }) => routeId),
     ];
 
-    expect(selected).toHaveLength(30);
+    expect(selected).toHaveLength(32);
     expect(
       selected.every(
         (id) =>

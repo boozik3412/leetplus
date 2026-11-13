@@ -104,6 +104,10 @@ describe('administrator rating', () => {
       fines: 1,
       warnings: 1,
       overdueTasks: 1,
+      forgiven: 0,
+      forgivenPoints: 0,
+      bonusPoints: 0,
+      penaltyPoints: 0,
     });
     expect(result.items[1].href).toBe('/staff/discipline?userId=u1');
   });
@@ -252,5 +256,154 @@ describe('administrator rating', () => {
     expect(adminRatingShiftKind(19)).toBe('DAY');
     expect(adminRatingShiftKind(20)).toBe('NIGHT');
     expect(adminRatingShiftKind(0)).toBe('NIGHT');
+  });
+
+  describe('reviewer decisions', () => {
+    const at = new Date('2026-11-10T12:00:00.000Z');
+    const penalties = () =>
+      input({
+        records: [
+          {
+            id: 'd1',
+            level: 'FINE_1',
+            title: 'Опоздание',
+            category: 'Дисциплина',
+            amount: 500,
+            at,
+          },
+        ],
+        tasks: [
+          {
+            id: 't1',
+            title: 'Пересчитать кассу',
+            status: 'OPEN',
+            dueAt: new Date('2026-11-08T12:00:00.000Z'),
+            completedAt: null,
+          },
+        ],
+      });
+
+    it('forgives one item: it stays in the list with 0 points', () => {
+      const base = penalties();
+      const result = computeAdminRating({
+        ...base,
+        adjustments: [
+          {
+            id: 'a1',
+            kind: 'FORGIVE',
+            points: 0,
+            targetKind: 'TASK_OVERDUE',
+            targetId: 't1',
+            reason: 'Ждали поставщика',
+            at,
+            authorName: 'Иванов Иван',
+          },
+        ],
+      });
+
+      const task = result.items.find((item) => item.kind === 'TASK_OVERDUE');
+      expect(task).toMatchObject({
+        points: 0,
+        basePoints: -3,
+        targetId: 't1',
+        forgiven: {
+          adjustmentId: 'a1',
+          reason: 'Ждали поставщика',
+          authorName: 'Иванов Иван',
+        },
+      });
+      expect(result.score).toBe(90);
+      expect(result.counts).toMatchObject({
+        fines: 1,
+        overdueTasks: 0,
+        forgiven: 1,
+        forgivenPoints: 3,
+      });
+    });
+
+    it('does not forgive an item of another kind with the same id', () => {
+      const result = computeAdminRating({
+        ...penalties(),
+        adjustments: [
+          {
+            id: 'a1',
+            kind: 'FORGIVE',
+            points: 0,
+            targetKind: 'FINE',
+            targetId: 't1',
+            reason: 'Ошибка',
+            at,
+            authorName: null,
+          },
+        ],
+      });
+
+      expect(result.score).toBe(87);
+      expect(result.counts.forgiven).toBe(0);
+    });
+
+    it('adds bonuses and penalties with their reason and author', () => {
+      const result = computeAdminRating({
+        ...penalties(),
+        adjustments: [
+          {
+            id: 'b1',
+            kind: 'BONUS',
+            points: 5,
+            targetKind: null,
+            targetId: null,
+            reason: 'Вышел на замену',
+            at,
+            authorName: 'Иванов Иван',
+          },
+          {
+            id: 'p1',
+            kind: 'PENALTY',
+            points: -2,
+            targetKind: null,
+            targetId: null,
+            reason: 'Грубость гостю',
+            at,
+            authorName: null,
+          },
+        ],
+      });
+
+      expect(result.items.map((item) => [item.kind, item.points])).toEqual([
+        ['FINE', -10],
+        ['TASK_OVERDUE', -3],
+        ['MANUAL_BONUS', 5],
+        ['MANUAL_PENALTY', -2],
+      ]);
+      expect(result.items[2]).toMatchObject({
+        title: 'Поощрение',
+        detail: '«Вышел на замену» · Иванов Иван · 2026-11-10',
+        decision: { adjustmentId: 'b1' },
+      });
+      expect(result.score).toBe(90);
+      expect(result.counts).toMatchObject({ bonusPoints: 5, penaltyPoints: 2 });
+    });
+
+    it('keeps the score at 100 but lets a bonus break the tie', () => {
+      const result = computeAdminRating(
+        input({
+          adjustments: [
+            {
+              id: 'b1',
+              kind: 'BONUS',
+              points: 4,
+              targetKind: null,
+              targetId: null,
+              reason: 'Помог соседнему клубу',
+              at,
+              authorName: null,
+            },
+          ],
+        }),
+      );
+
+      expect(result.score).toBe(100);
+      expect(result.rawScore).toBe(104);
+    });
   });
 });

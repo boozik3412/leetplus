@@ -323,6 +323,8 @@ const STAFF_NETWORK_ROUTE_IDS = [
   'PATCH /staff/salary/schemes/:id',
   'POST /guests/staff-control/identity-mappings',
   'POST /guests/staff-control/identity-mappings/events/:id/rollback',
+  'POST /staff/administrator-ratings/adjustments',
+  'POST /staff/administrator-ratings/adjustments/:id/cancel',
   'POST /staff/assessments',
   'POST /staff/assessments/:id/results',
   'POST /staff/discipline/records',
@@ -641,8 +643,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(357);
-    expect(allowed).toHaveLength(289);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(359);
+    expect(allowed).toHaveLength(291);
     expect(blocked).toHaveLength(68);
     expect(outbound).toHaveLength(22);
     expect(
@@ -811,8 +813,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.minimumScope === 'NETWORK',
     );
 
-    expect(staff).toHaveLength(88);
-    expect(allowed).toHaveLength(87);
+    expect(staff).toHaveLength(90);
+    expect(allowed).toHaveLength(89);
     expect(networkAllowed.map(({ id }) => id).sort()).toEqual(
       [...STAFF_NETWORK_ROUTE_IDS].sort(),
     );

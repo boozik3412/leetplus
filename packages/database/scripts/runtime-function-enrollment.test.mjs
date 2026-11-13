@@ -67,8 +67,7 @@ function compliantSnapshot() {
         expectedVolatility: entry.volatility,
         expectedLanguage: entry.language ?? null,
         expectedSearchPath: entry.enrollmentSearchPath ?? "pg_catalog",
-        allowLegacyUnsetSearchPath:
-          entry.allowLegacyUnsetSearchPath === true,
+        allowLegacyUnsetSearchPath: entry.allowLegacyUnsetSearchPath === true,
         exists: true,
         ownerName: "migration_owner",
         securityDefiner: entry.securityDefiner,
@@ -254,7 +253,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20261113120000_staff_checklist_escalated_at 205$/u,
+    /20261113150000_staff_admin_rating_adjustments 206$/u,
   );
 });
 

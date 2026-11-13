@@ -10,6 +10,8 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { GuestGroupBuilder } from "@/components/guest-group-builder";
+import { guestsWord, pluralize } from "@/lib/guest-insights";
 import type { GuestAudience, GuestCrmUser } from "@/lib/guests";
 import type {
   MarketingCampaign,
@@ -691,8 +693,11 @@ export function MarketingCampaignsPanel({
   tariffConditions = emptyMarketingTariffConditions,
   stores,
   view = "list",
+  initialAudienceId,
 }: {
   view?: MarketingCampaignsView;
+  /** «Создать кампанию» on a guest group opens the wizard with it chosen. */
+  initialAudienceId?: string;
   campaigns: MarketingCampaign[];
   audiences: GuestAudience[];
   users: GuestCrmUser[];
@@ -704,7 +709,14 @@ export function MarketingCampaignsPanel({
   const [rows, setRows] = useState(campaigns);
   const [savedPromoBundles, setSavedPromoBundles] = useState(promoBundles);
   const [promoLaunchRows, setPromoLaunchRows] = useState(promoBundleLaunches);
-  const [form, setForm] = useState<CampaignFormState>(emptyForm);
+  const [audienceRows, setAudienceRows] = useState(audiences);
+  const [form, setForm] = useState<CampaignFormState>(() =>
+    initialAudienceId &&
+    audiences.some((audience) => audience.id === initialAudienceId)
+      ? { ...emptyForm, audienceId: initialAudienceId }
+      : emptyForm,
+  );
+  const [groupBuilderOpen, setGroupBuilderOpen] = useState(false);
   const [launchForm, setLaunchForm] = useState<PromoBundleLaunchFormState>({
     ...emptyPromoBundleLaunchForm,
     promoBundleId: promoBundles[0]?.id ?? "",
@@ -767,7 +779,7 @@ export function MarketingCampaignsPanel({
     [rows, statusFilter],
   );
   const selectedAudience =
-    audiences.find((audience) => audience.id === form.audienceId) ?? null;
+    audienceRows.find((audience) => audience.id === form.audienceId) ?? null;
   const selectedFormPromoBundle =
     savedPromoBundles.find((bundle) => bundle.id === form.promoBundleId) ?? null;
   const selectedLaunchPromoBundle =
@@ -1288,9 +1300,9 @@ export function MarketingCampaignsPanel({
                     className={fieldClassName}
                   >
                     <option value="">Без группы</option>
-                    {audiences.map((audience) => (
+                    {audienceRows.map((audience) => (
                       <option key={audience.id} value={audience.id}>
-                        {audience.name} · {audience.guestsCount} гостей
+                        {audience.name} · {pluralize(audience.guestsCount, guestsWord)}
                       </option>
                     ))}
                   </select>
@@ -1314,8 +1326,24 @@ export function MarketingCampaignsPanel({
               </div>
             <CampaignGroupRoute
               selectedAudience={selectedAudience}
-              audiencesCount={audiences.length}
+              audiencesCount={audienceRows.length}
+              onCreateGroup={() => setGroupBuilderOpen(true)}
             />
+            {groupBuilderOpen ? (
+              <GroupBuilderDialog
+                stores={stores}
+                defaultStoreId={form.storeId}
+                onClose={() => setGroupBuilderOpen(false)}
+                onCreated={(audience) => {
+                  setAudienceRows((current) => [audience, ...current]);
+                  setForm((current) => ({
+                    ...current,
+                    audienceId: audience.id,
+                  }));
+                  setGroupBuilderOpen(false);
+                }}
+              />
+            ) : null}
             </div>
           ) : null}
 
@@ -5378,9 +5406,11 @@ function Field({
 function CampaignGroupRoute({
   selectedAudience,
   audiencesCount,
+  onCreateGroup,
 }: {
   selectedAudience: GuestAudience | null;
   audiencesCount: number;
+  onCreateGroup: () => void;
 }) {
   return (
     <div className="grid gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60 lg:col-span-12 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
@@ -5390,29 +5420,83 @@ function CampaignGroupRoute({
         </p>
         <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
           {selectedAudience
-            ? `Выбрана группа "${selectedAudience.name}" на ${formatNumber(
+            ? `Выбрана группа «${selectedAudience.name}», ${pluralize(
                 selectedAudience.guestsCount,
-              )} гостей. Контакты, согласия и эффект будут считаться по ней.`
+                guestsWord,
+              )}. Охват, согласия и эффект кампании считаются по ней.`
             : audiencesCount > 0
-              ? "Выберите сохраненную группу выше или создайте новую из фильтров гостей, чтобы кампания считала охват и согласия."
-              : "Сохраненных групп пока нет. Сначала соберите группу из фильтров гостей, затем вернитесь к запуску кампании."}
+              ? "Выберите группу выше или соберите новую за пару минут, кампания при этом не потеряется."
+              : "Групп пока нет. Соберите первую за пару минут, кампания при этом не потеряется."}
         </p>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Link
-          href="/guests/report#audiences"
-          className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-        >
-          Создать из фильтров
-        </Link>
-        <Link
-          href="/guests/crm"
-          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-zinc-950"
-        >
-          Открыть CRM-группы
-        </Link>
-      </div>
+      <button
+        type="button"
+        onClick={onCreateGroup}
+        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+      >
+        Собрать новую группу
+      </button>
     </div>
+  );
+}
+
+/** The step-by-step group builder over the campaign wizard. */
+function GroupBuilderDialog({
+  stores,
+  defaultStoreId,
+  onClose,
+  onCreated,
+}: {
+  stores: Store[];
+  defaultStoreId: string;
+  onClose: () => void;
+  onCreated: (audience: GuestAudience) => void;
+}) {
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Новая группа гостей"
+      className="fixed inset-0 z-50 overflow-y-auto bg-zinc-950/60 px-3 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="mx-auto max-w-4xl rounded-2xl bg-zinc-50 p-4 shadow-xl sm:p-5 dark:bg-zinc-900">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold tracking-wide text-emerald-600 uppercase dark:text-emerald-400">
+              Новая группа гостей
+            </p>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+              После сохранения группа сразу выберется в кампании.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="min-h-10 rounded-xl border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-950"
+          >
+            Закрыть
+          </button>
+        </div>
+        <GuestGroupBuilder
+          stores={stores.map((store) => ({ id: store.id, name: store.name }))}
+          defaultStoreId={defaultStoreId}
+          onCancel={onClose}
+          onCreated={onCreated}
+        />
+      </div>
+    </div>,
+    document.body,
   );
 }
 

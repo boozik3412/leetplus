@@ -2279,6 +2279,21 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
 - Worker endpoints остаются за service token, tenant execution admission,
   rollout flags, bounded batch/lease и отдельной observability.
 
+### «Тест запуска» только владельцу (13.11.2026)
+
+Вкладка «Игровой модуль → Тест запуска» и её маршруты
+`POST /guests/gamification/dry-run`, `GET /guests/gamification/facts`,
+`POST /guests/gamification/process-event` и
+`POST /guests/gamification/pipeline/run` доступны только ролям `OWNER` и
+`ADMIN`; администратор платформы попадает сюда как `OWNER` подписанного
+tenant-контекста. API проверяет это `StrictRoles(OWNER, ADMIN)` поверх
+прежних capability и `FreshNetworkScopeGuard`, поэтому `MANAGER` и роли ниже
+получают `403` даже с правами геймификации. Web скрывает вкладку и кнопку
+«Открыть dry-run» по тому же правилу (`canUseGuestGameTestRun`), а
+`?tab=testRun` открывает обзор. Service-token
+`/guests/gamification/scheduled/pipeline/run` worker-контура не меняется.
+Новых capability, секретов, egress, миграций и владельцев расписания нет.
+
 ### Игровая проекция в контуре гостей (30.09.2026)
 
 - `GET /guests/summary`, `GET /guests`, `GET /guests/:id` и `GET /guests/export`

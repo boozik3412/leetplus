@@ -17,7 +17,11 @@ type StrictOwnerAdminHandlerName =
   | 'previewLootBoxEntitlementReconciliation'
   | 'applyLootBoxEntitlementReconciliation'
   | 'previewLootBoxEntitlementOverLimitRepair'
-  | 'applyLootBoxEntitlementOverLimitRepair';
+  | 'applyLootBoxEntitlementOverLimitRepair'
+  | 'dryRun'
+  | 'getSnapshotFacts'
+  | 'processEvent'
+  | 'runSnapshotPipeline';
 
 type LedgerHandlerName =
   | 'queueBonusLedger'
@@ -34,6 +38,11 @@ const strictOwnerAdminHandlerNames: StrictOwnerAdminHandlerName[] = [
   'applyLootBoxEntitlementReconciliation',
   'previewLootBoxEntitlementOverLimitRepair',
   'applyLootBoxEntitlementOverLimitRepair',
+  // «Тест запуска» tab: owner and platform admins only.
+  'dryRun',
+  'getSnapshotFacts',
+  'processEvent',
+  'runSnapshotPipeline',
 ];
 
 const ledgerHandlerNames: LedgerHandlerName[] = [
@@ -129,6 +138,27 @@ describe('GuestGamificationController strict OWNER/ADMIN authorization', () => {
           strictOwnerAdminContext(methodName, UserRole.MARKETER),
         ),
       ).toThrow(ForbiddenException);
+    },
+  );
+
+  it.each([
+    'dryRun',
+    'getSnapshotFacts',
+    'processEvent',
+    'runSnapshotPipeline',
+  ] as const)(
+    'denies network managers and lower roles on test-run handler %s',
+    (methodName) => {
+      for (const role of [
+        UserRole.MANAGER,
+        UserRole.CLUB_MANAGER,
+        UserRole.MARKETER,
+        UserRole.SENIOR_ADMINISTRATOR,
+      ]) {
+        expect(() =>
+          guard.canActivate(strictOwnerAdminContext(methodName, role)),
+        ).toThrow(ForbiddenException);
+      }
     },
   );
 });

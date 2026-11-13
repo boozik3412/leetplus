@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { guestListHref } from "@/lib/guest-insights";
 import type {
   GuestAudience,
   GuestCrmContactEvent,
@@ -21,8 +20,6 @@ type GuestAudiencesPanelProps = {
   crmTasks: GuestCrmTask[];
   crmUsers: GuestCrmUser[];
   crmContactEvents: GuestCrmContactEvent[];
-  /** «groups» shows only saved groups (the «Группы» tab on /guests). */
-  variant?: "full" | "groups";
 };
 
 export function GuestAudiencesPanel({
@@ -33,7 +30,6 @@ export function GuestAudiencesPanel({
   crmTasks,
   crmUsers,
   crmContactEvents,
-  variant = "full",
 }: GuestAudiencesPanelProps) {
   const router = useRouter();
   const [name, setName] = useState("");
@@ -456,8 +452,7 @@ export function GuestAudiencesPanel({
         </p>
       ) : null}
 
-      {variant === "full" ? (
-        <div className="mt-4 rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+      <div className="mt-4 rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
           <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
@@ -531,7 +526,6 @@ export function GuestAudiencesPanel({
             </div>
           </div>
         </div>
-      ) : null}
 
       {audiences.length > 0 ? (
         <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -555,11 +549,7 @@ export function GuestAudiencesPanel({
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <Link
-                  href={
-                    variant === "groups"
-                      ? guestListHref({ ...audience.filters, page: "1" })
-                      : reportHref(audience.filters)
-                  }
+                  href={reportHref(audience.filters)}
                   className="inline-flex h-9 items-center justify-center rounded-md bg-zinc-950 px-3 text-xs font-semibold text-white hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
                 >
                   Открыть
@@ -592,8 +582,7 @@ export function GuestAudiencesPanel({
         </p>
       )}
 
-      {variant === "full" ? (
-        <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)]">
+      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)]">
           <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
             <div className="flex flex-col gap-1">
               <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
@@ -1093,7 +1082,6 @@ export function GuestAudiencesPanel({
             </div>
           </section>
         </div>
-      ) : null}
     </section>
   );
 }

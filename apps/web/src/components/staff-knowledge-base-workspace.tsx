@@ -682,16 +682,21 @@ function draftReadingData(
 
 export function StaffKnowledgeBaseWorkspace({
   report,
+  initialArticleId = null,
 }: {
   report: StaffKnowledgeBaseReport;
+  /** Opens this article first, e.g. from «Обучение и база знаний». */
+  initialArticleId?: string | null;
 }) {
   const router = useRouter();
   const defaultStoreId =
     report.accessScope === "STORES" ? (report.stores[0]?.id ?? "") : "";
   const [reviewQueueTab, setReviewQueueTab] =
     useState<(typeof reviewQueueTabs)[number]["key"]>("REVIEW");
-  const initialDraft = report.rows[0]
-    ? fromArticle(report.rows[0])
+  const initialRow =
+    report.rows.find((row) => row.id === initialArticleId) ?? report.rows[0];
+  const initialDraft = initialRow
+    ? fromArticle(initialRow)
     : defaultDraft(defaultStoreId);
   const [draft, setDraft] = useState<DraftArticle>(() => initialDraft);
   const [savedDraftSnapshot, setSavedDraftSnapshot] = useState(() =>

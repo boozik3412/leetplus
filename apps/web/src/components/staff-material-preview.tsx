@@ -329,9 +329,7 @@ function PreviewStep({
       </div>
 
       {step.content ? (
-        <p className="mt-3 whitespace-pre-line text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-          {step.content}
-        </p>
+        <KnowledgeArticleRichText value={step.content} className="mt-3 text-sm" />
       ) : null}
       {step.url ? (
         <a

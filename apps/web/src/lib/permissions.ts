@@ -710,6 +710,7 @@ const shiftStaffAllowedPrefixes = [
   "/staff/training-courses",
   "/staff/assessments",
   "/staff/knowledge-base",
+  "/staff/learning",
   "/staff/shift-workspace",
   "/staff/team-chat",
   "/staff/notifications",
@@ -792,6 +793,20 @@ export function can(user: AuthUser | null, capability: Capability) {
   );
 }
 
+// «Игровой модуль → Тест запуска» is for the owner and platform admins (who
+// act as OWNER in a signed tenant context). The API enforces the same
+// OWNER/ADMIN ceiling with StrictRoles on dry-run, facts, process-event and
+// pipeline/run; capabilities alone do not open it to network managers.
+const guestGameTestRunRoles = new Set<AuthUser["role"]>(["OWNER", "ADMIN"]);
+
+export function canUseGuestGameTestRun(user: AuthUser | null) {
+  return Boolean(
+    user &&
+    guestGameTestRunRoles.has(user.role) &&
+    can(user, "view_guest_gamification"),
+  );
+}
+
 function isShiftWorkspaceRole(user: AuthUser | null) {
   return Boolean(user && shiftWorkspaceRoles.has(user.role));
 }
@@ -867,6 +882,7 @@ function resolveStaffPathCapability(href: string): Capability {
 
   if (
     path.startsWith("/staff/training-courses") ||
+    path.startsWith("/staff/learning/courses") ||
     path.startsWith("/staff/training-profiles") ||
     path.startsWith("/staff/readiness-report") ||
     path.startsWith("/staff/onboarding") ||
@@ -875,7 +891,12 @@ function resolveStaffPathCapability(href: string): Capability {
     return "view_staff_training";
   }
 
-  if (path.startsWith("/staff/knowledge-base")) {
+  // «Обучение и база знаний» home shows courses only to those who may see
+  // them; everybody with the knowledge base can open the page itself.
+  if (
+    path.startsWith("/staff/knowledge-base") ||
+    path.startsWith("/staff/learning")
+  ) {
     return "view_staff_knowledge";
   }
 

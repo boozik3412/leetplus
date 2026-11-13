@@ -346,6 +346,16 @@ body.editing #gl.pointer{cursor:move}
 .swbtn.sec{background:var(--surface-2);color:var(--fg)}
 .swbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 html.embed .swcard{display:none!important}
+.swbtn[hidden]{display:none}
+.swwho{display:flex;align-items:center;gap:8px;margin:-2px -4px 2px;padding:6px 6px 6px 10px;border-radius:10px;background:var(--accent-soft);font-size:12px;min-width:0}
+.swwl{font-size:10.5px;font-weight:800;letter-spacing:.02em;text-transform:uppercase;color:var(--accent);white-space:nowrap}
+.swwho b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.swx{all:unset;box-sizing:border-box;min-height:32px;padding:0 10px;border-radius:8px;background:var(--surface);color:var(--fg);font-size:12px;font-weight:700;cursor:pointer}
+.swx:hover{background:var(--surface-2)}
+.swx:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.swmode p{margin:4px 0 10px;font-size:12.5px;line-height:1.45;color:var(--muted)}
+.swmode .swbtn{width:100%;justify-content:center}
+.swempty a{color:var(--accent);font-weight:700}
 .amk{position:absolute;left:0;top:0;pointer-events:auto;cursor:pointer;display:flex;align-items:center;gap:3px;padding:2px 7px 2px 3px;border:2px solid rgba(255,255,255,.9);border-radius:999px;color:#fff;font:800 11.5px/1.2 inherit;font-family:inherit;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.35);z-index:3}
 .amk i{display:grid;place-items:center;width:17px;height:17px;border-radius:99px;background:rgba(0,0,0,.25)}
 .amk i svg{width:11px;height:11px}

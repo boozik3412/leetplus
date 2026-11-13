@@ -20,8 +20,18 @@ async function safeList<T>(promise: Promise<T[]>): Promise<T[]> {
   }
 }
 
-export default async function NewMarketingCampaignPage() {
+type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
+
+export default async function NewMarketingCampaignPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
   await requirePageAccess("/marketing/new");
+  const audienceParam = (await searchParams).audience;
+  const initialAudienceId = Array.isArray(audienceParam)
+    ? audienceParam[0]
+    : audienceParam;
 
   const [groups, users, campaigns, promoBundles, promoBundleLaunches, stores] =
     await Promise.all([
@@ -49,6 +59,7 @@ export default async function NewMarketingCampaignPage() {
         </p>
         <MarketingCampaignsPanel
           view="new"
+          initialAudienceId={initialAudienceId}
           campaigns={campaigns}
           audiences={groups}
           users={users}

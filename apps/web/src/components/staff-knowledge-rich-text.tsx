@@ -2,6 +2,7 @@
 
 import {
   useRef,
+  useSyncExternalStore,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -202,6 +203,23 @@ function normalizeSafeImageUrl(value: string | null | undefined) {
   }
 
   return isSafeImageUrl(url) ? url : null;
+}
+
+function subscribeToNothing() {
+  return () => {};
+}
+
+function htmlToPlainText(value: string | null | undefined) {
+  return (value ?? "")
+    .replace(/<(?:br|\/p|\/h[1-6]|\/li|\/blockquote|\/div)\b[^>]*>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function isHtmlContent(value: string | null | undefined) {
@@ -651,6 +669,31 @@ export function KnowledgeArticleRichText({
   value: string | null | undefined;
   className?: string;
 }) {
+  // The sanitizer needs a DOM. On the server (and while hydrating) there is
+  // none, so HTML is shown as plain text first and swapped right after.
+  const canSanitize = useSyncExternalStore(
+    subscribeToNothing,
+    () => true,
+    () => false,
+  );
+
+  if (isHtmlContent(value) && !canSanitize) {
+    const text = htmlToPlainText(value);
+
+    return text ? (
+      <div
+        className={[
+          "whitespace-pre-line text-sm leading-7 text-zinc-700 dark:text-zinc-300",
+          className,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        {text}
+      </div>
+    ) : null;
+  }
+
   if (isHtmlContent(value)) {
     const html = sanitizeKnowledgeHtml(value);
 
@@ -2114,4 +2157,24 @@ export function openKnowledgeReadingWindow(data: KnowledgeReadingWindowData) {
   popup.focus();
 
   return true;
+}
+
+/** True when stored content is HTML (the formatted editor) rather than light markdown. */
+export function isKnowledgeHtmlContent(value: string | null | undefined) {
+  return isHtmlContent(value);
+}
+
+/**
+ * Stored content (HTML or the old light markdown) as safe HTML for an
+ * editable page. Browser only: on the server it falls back to escaped text.
+ */
+export function knowledgeContentToEditableHtml(
+  value: string | null | undefined,
+) {
+  return contentToHtml(value);
+}
+
+/** Cleans HTML produced by a contenteditable page before it is saved. */
+export function sanitizeKnowledgeContentHtml(value: string | null | undefined) {
+  return sanitizeKnowledgeHtml(value);
 }

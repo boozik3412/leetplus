@@ -10,6 +10,8 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { GuestGroupBuilder } from "@/components/guest-group-builder";
+import { guestsWord, pluralize } from "@/lib/guest-insights";
 import type { GuestAudience, GuestCrmUser } from "@/lib/guests";
 import type {
   MarketingCampaign,
@@ -27,6 +29,7 @@ import type {
   MarketingTariffConditionItem,
   MarketingTariffConditions,
 } from "@/lib/marketing";
+import { MoreFields } from "@/components/more-fields";
 import type { Product } from "@/lib/products";
 import type { Store } from "@/lib/stores";
 
@@ -88,7 +91,7 @@ type PromoMechanicTemplate = {
   note: string;
 };
 
-type PromoBundleType =
+export type PromoBundleType =
   | "game_product"
   | "game_bonus"
   | "product_product"
@@ -96,11 +99,11 @@ type PromoBundleType =
 
 type PromoBundlePart = "first" | "second";
 
-type PromoBundleAccountingKind = "PRODUCT" | "SERVICE" | "BONUS" | "MANUAL";
+export type PromoBundleAccountingKind = "PRODUCT" | "SERVICE" | "BONUS" | "MANUAL";
 
 type PromoBundleWriteOffRule = "ON_REDEEM" | "ON_SALE" | "MANUAL";
 
-type PromoBundleDraft = {
+export type PromoBundleDraft = {
   bundleType: PromoBundleType;
   gameItem: string;
   barItems: string;
@@ -585,7 +588,7 @@ const promoBundleTypeOptions: PromoBundleTypeOption[] = [
   },
 ];
 
-const emptyBundleDraft: PromoBundleDraft = {
+export const emptyBundleDraft: PromoBundleDraft = {
   bundleType: "game_product",
   gameItem: "Игровое время или пакет часов",
   barItems: "Напиток + снек",
@@ -691,8 +694,11 @@ export function MarketingCampaignsPanel({
   tariffConditions = emptyMarketingTariffConditions,
   stores,
   view = "list",
+  initialAudienceId,
 }: {
   view?: MarketingCampaignsView;
+  /** «Создать кампанию» on a guest group opens the wizard with it chosen. */
+  initialAudienceId?: string;
   campaigns: MarketingCampaign[];
   audiences: GuestAudience[];
   users: GuestCrmUser[];
@@ -704,7 +710,14 @@ export function MarketingCampaignsPanel({
   const [rows, setRows] = useState(campaigns);
   const [savedPromoBundles, setSavedPromoBundles] = useState(promoBundles);
   const [promoLaunchRows, setPromoLaunchRows] = useState(promoBundleLaunches);
-  const [form, setForm] = useState<CampaignFormState>(emptyForm);
+  const [audienceRows, setAudienceRows] = useState(audiences);
+  const [form, setForm] = useState<CampaignFormState>(() =>
+    initialAudienceId &&
+    audiences.some((audience) => audience.id === initialAudienceId)
+      ? { ...emptyForm, audienceId: initialAudienceId }
+      : emptyForm,
+  );
+  const [groupBuilderOpen, setGroupBuilderOpen] = useState(false);
   const [launchForm, setLaunchForm] = useState<PromoBundleLaunchFormState>({
     ...emptyPromoBundleLaunchForm,
     promoBundleId: promoBundles[0]?.id ?? "",
@@ -767,7 +780,7 @@ export function MarketingCampaignsPanel({
     [rows, statusFilter],
   );
   const selectedAudience =
-    audiences.find((audience) => audience.id === form.audienceId) ?? null;
+    audienceRows.find((audience) => audience.id === form.audienceId) ?? null;
   const selectedFormPromoBundle =
     savedPromoBundles.find((bundle) => bundle.id === form.promoBundleId) ?? null;
   const selectedLaunchPromoBundle =
@@ -1288,9 +1301,9 @@ export function MarketingCampaignsPanel({
                     className={fieldClassName}
                   >
                     <option value="">Без группы</option>
-                    {audiences.map((audience) => (
+                    {audienceRows.map((audience) => (
                       <option key={audience.id} value={audience.id}>
-                        {audience.name} · {audience.guestsCount} гостей
+                        {audience.name} · {pluralize(audience.guestsCount, guestsWord)}
                       </option>
                     ))}
                   </select>
@@ -1314,8 +1327,24 @@ export function MarketingCampaignsPanel({
               </div>
             <CampaignGroupRoute
               selectedAudience={selectedAudience}
-              audiencesCount={audiences.length}
+              audiencesCount={audienceRows.length}
+              onCreateGroup={() => setGroupBuilderOpen(true)}
             />
+            {groupBuilderOpen ? (
+              <GroupBuilderDialog
+                stores={stores}
+                defaultStoreId={form.storeId}
+                onClose={() => setGroupBuilderOpen(false)}
+                onCreated={(audience) => {
+                  setAudienceRows((current) => [audience, ...current]);
+                  setForm((current) => ({
+                    ...current,
+                    audienceId: audience.id,
+                  }));
+                  setGroupBuilderOpen(false);
+                }}
+              />
+            ) : null}
             </div>
           ) : null}
 
@@ -1783,163 +1812,52 @@ export function MarketingCampaignsPanel({
   );
 }
 
-export function MarketingPromoBundlesWorkspace({
+// «Использования и учёт» tab of /marketing/promo-bundles: usage journal,
+// reconciliation with stock write-offs and usage analytics. Creating and
+// editing bundles lives in components/promo-bundles-workspace.tsx.
+export function MarketingPromoBundleUsageWorkspace({
   promoBundles,
   promoBundleLaunches = [],
   promoBundleUsages = [],
   promoBundleReconciliation = [],
-  productOptions = [],
-  tariffConditions = emptyMarketingTariffConditions,
   stores = [],
+  initialBundleId = null,
+  onEditBundle,
 }: {
   promoBundles: MarketingPromoBundle[];
   promoBundleLaunches?: MarketingPromoBundleLaunch[];
   promoBundleUsages?: MarketingPromoBundleUsage[];
   promoBundleReconciliation?: MarketingPromoBundleReconciliation[];
-  productOptions?: Product[];
-  tariffConditions?: MarketingTariffConditions;
   stores?: Store[];
+  initialBundleId?: string | null;
+  onEditBundle: (bundle: MarketingPromoBundle) => void;
 }) {
-  const [savedPromoBundles, setSavedPromoBundles] = useState(promoBundles);
   const [usageRows, setUsageRows] = useState(promoBundleUsages);
-  const [selectedBundleId, setSelectedBundleId] = useState<string | null>(
-    promoBundles[0]?.id ?? null,
-  );
-  const [usageForm, setUsageForm] = useState<PromoBundleUsageFormState>({
-    ...emptyPromoBundleUsageForm,
-    promoBundleId: promoBundles[0]?.id ?? "",
+  const [usageForm, setUsageForm] = useState<PromoBundleUsageFormState>(() => {
+    const bundle =
+      promoBundles.find((item) => item.id === initialBundleId) ?? null;
+
+    return bundle
+      ? usageFormForBundle(emptyPromoBundleUsageForm, bundle, promoBundleLaunches)
+      : { ...emptyPromoBundleUsageForm, promoBundleId: promoBundles[0]?.id ?? "" };
   });
-  const [bundleDraft, setBundleDraft] =
-    useState<PromoBundleDraft>(
-      promoBundles[0] ? promoBundleToDraft(promoBundles[0]) : emptyBundleDraft,
-    );
-  const [bundleCatalogNotice, setBundleCatalogNotice] = useState<string | null>(
-    null,
-  );
-  const [isSavingBundle, setIsSavingBundle] = useState(false);
   const [isSavingUsage, setIsSavingUsage] = useState(false);
   const [pendingUsageId, setPendingUsageId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const selectedBundle =
-    savedPromoBundles.find((bundle) => bundle.id === selectedBundleId) ?? null;
-  const isEditingBundle = Boolean(selectedBundle);
-  const bundleEconomics = useMemo(
-    () => buildPromoBundleEconomics(bundleDraft),
-    [bundleDraft],
-  );
-  const bundleVerdict = useMemo(
-    () => buildPromoBundleVerdict(bundleDraft, bundleEconomics),
-    [bundleDraft, bundleEconomics],
-  );
 
-  async function saveBundleDraft() {
-    if (bundleVerdict.tone === "blocked" || isSavingBundle) {
+  useEffect(() => {
+    if (!initialBundleId) {
       return;
     }
 
-    setIsSavingBundle(true);
-    setError(null);
-    const note = buildPromoBundleNote(
-      bundleDraft,
-      bundleEconomics,
-      productOptions,
-      tariffConditions,
-    );
-    const bundleType = getPromoBundleTypeOption(bundleDraft.bundleType);
-    const mechanicConfig = buildPromoBundleConfig(
-      bundleDraft,
-      bundleEconomics,
-      bundleVerdict,
-      productOptions,
-      tariffConditions,
-    );
-    const endpoint = selectedBundle
-      ? `/api/marketing/promo-bundles/${selectedBundle.id}`
-      : "/api/marketing/promo-bundles";
-    const response = await fetch(endpoint, {
-      method: selectedBundle ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: selectedBundle?.name ?? `Комбо: ${bundleType.title}`,
-        bundleType: bundleDraft.bundleType,
-        mechanicConfig,
-        note,
-      }),
-    });
-
-    if (!response.ok) {
-      setError(await readError(response));
-      setIsSavingBundle(false);
-      return;
-    }
-
-    const promoBundle = (await response.json()) as MarketingPromoBundle;
-    setSavedPromoBundles((current) => [
-      promoBundle,
-      ...current.filter((item) => item.id !== promoBundle.id),
-    ]);
-    setSelectedBundleId(promoBundle.id);
-    setUsageForm((current) => ({
-      ...current,
-      promoBundleId: promoBundle.id,
-      launchId: promoBundleLaunches.some(
-        (launch) =>
-          launch.id === current.launchId &&
-          launch.promoBundle.id === promoBundle.id,
-      )
-        ? current.launchId
-        : "",
-    }));
-    setBundleCatalogNotice(
-      selectedBundle
-        ? "Изменения сохранены в существующем промо-наборе."
-        : "Промо-набор сохранен в каталоге.",
-    );
-    setIsSavingBundle(false);
-  }
-
-  function selectExistingPromoBundle(promoBundle: MarketingPromoBundle) {
-    const draft = promoBundleToDraft(promoBundle);
-
-    setBundleDraft(draft);
-    setSelectedBundleId(promoBundle.id);
-    setUsageForm((current) => ({
-      ...current,
-      promoBundleId: promoBundle.id,
-      launchId: promoBundleLaunches.some(
-        (launch) =>
-          launch.id === current.launchId &&
-          launch.promoBundle.id === promoBundle.id,
-      )
-        ? current.launchId
-        : "",
-    }));
-    setBundleCatalogNotice(
-      "Набор загружен в конструктор. Внесите правки и сохраните изменения.",
-    );
     window.requestAnimationFrame(() => {
-      scrollToMarketingSection("promo-bundle-builder");
+      scrollToMarketingSection("promo-bundle-usage-journal");
     });
-  }
+  }, [initialBundleId]);
 
   function prefillUsageFromBundle(promoBundle: MarketingPromoBundle) {
-    const launch = pickPromoBundleLaunchForUsage(
-      promoBundleLaunches,
-      promoBundle.id,
-    );
-    const structure = promoBundleStructureFromBundle(promoBundle);
-
-    setUsageForm((current) => ({
-      ...current,
-      promoBundleId: promoBundle.id,
-      launchId: launch?.id ?? "",
-      storeId: launch?.storeIds.length === 1 ? launch.storeIds[0] : "",
-      quantity: current.promoBundleId === promoBundle.id ? current.quantity : "1",
-      amount: moneyInputValue(structure.pricing.promoPrice),
-      costAmount: moneyInputValue(structure.pricing.expectedCost),
-    }));
-    setBundleCatalogNotice(
-      "Набор выбран для фиксации использования. Проверьте клуб, дату и чек в журнале ниже.",
+    setUsageForm((current) =>
+      usageFormForBundle(current, promoBundle, promoBundleLaunches),
     );
     window.requestAnimationFrame(() => {
       scrollToMarketingSection("promo-bundle-usage-journal");
@@ -1950,7 +1868,7 @@ export function MarketingPromoBundlesWorkspace({
     event.preventDefault();
 
     if (!usageForm.promoBundleId) {
-      setError("Сначала выберите промо-набор для фиксации использования.");
+      setError("Сначала выберите промо-набор.");
       return;
     }
 
@@ -2025,45 +1943,18 @@ export function MarketingPromoBundlesWorkspace({
     setPendingUsageId(null);
   }
 
-  function createNewBundleDraft() {
-    setSelectedBundleId(null);
-    setBundleDraft(emptyBundleDraft);
-    setBundleCatalogNotice("Создается новый промо-набор.");
-    setError(null);
-    window.requestAnimationFrame(() => {
-      scrollToMarketingSection("promo-bundle-builder");
-    });
-  }
-
   return (
-    <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="grid gap-4 border-b border-zinc-200 p-6 dark:border-zinc-800 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-        <div>
-          <p className="text-sm font-bold uppercase tracking-wide text-emerald-500">
-            Промо-наборы
-          </p>
-          <h1 className="mt-2 text-3xl font-bold tracking-normal text-zinc-950 dark:text-white md:text-4xl">
-            Конструктор промо-наборов
-          </h1>
-          <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-            Соберите состав, цену, скидку и ограничения набора. Существующие
-            наборы можно открыть из каталога, поправить и сохранить без создания
-            кампании.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 gap-2 text-center">
-          <MetricPill label="Наборов" value={savedPromoBundles.length} />
-        </div>
-      </div>
-
+    <div className="grid gap-4">
       {error ? (
-        <p className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200">
+        <p
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200"
+        >
           {error}
         </p>
       ) : null}
-
-      <PromoBundlesCatalogPanel
-        promoBundles={savedPromoBundles}
+      <PromoBundlesAccountingReport
+        promoBundles={promoBundles}
         promoBundleLaunches={promoBundleLaunches}
         promoBundleUsages={usageRows}
         promoBundleReconciliation={promoBundleReconciliation}
@@ -2071,169 +1962,36 @@ export function MarketingPromoBundlesWorkspace({
         usageForm={usageForm}
         isSavingUsage={isSavingUsage}
         pendingUsageId={pendingUsageId}
-        selectedBundleId={selectedBundleId}
         onUsageFormChange={setUsageForm}
         onCreateUsage={createPromoBundleUsage}
         onUpdateUsageStatus={updatePromoBundleUsageStatus}
-        onEditBundle={selectExistingPromoBundle}
+        onEditBundle={onEditBundle}
         onRecordUsage={prefillUsageFromBundle}
-        onCreateNew={createNewBundleDraft}
       />
-
-      <PromoMechanicsBuilder
-        mode="catalog"
-        showCatalogChooser={false}
-        productOptions={productOptions}
-        tariffConditions={tariffConditions}
-        bundleActionLabel={
-          isEditingBundle ? "Сохранить изменения" : "Создать промо-набор"
-        }
-        selectedTemplate={promoMechanicTemplates[0]}
-        selectedTemplateId={promoMechanicTemplates[0]?.id ?? ""}
-        promoBundles={savedPromoBundles}
-        bundleDraft={bundleDraft}
-        bundleEconomics={bundleEconomics}
-        bundleVerdict={bundleVerdict}
-        bundleCatalogNotice={bundleCatalogNotice}
-        isSavingBundle={isSavingBundle}
-        onSelectTemplate={() => undefined}
-        onApplyTemplate={() => undefined}
-        bundleApplyNotice={Boolean(bundleCatalogNotice)}
-        onBundleDraftChange={(draft) => {
-          setBundleCatalogNotice(null);
-          setBundleDraft(draft);
-        }}
-        onUsePromoBundle={selectExistingPromoBundle}
-        onApplyBundle={saveBundleDraft}
-      />
-    </section>
+    </div>
   );
 }
 
-function PromoBundlesCatalogPanel({
-  promoBundles,
-  promoBundleLaunches,
-  promoBundleUsages,
-  promoBundleReconciliation,
-  stores,
-  usageForm,
-  isSavingUsage,
-  pendingUsageId,
-  selectedBundleId,
-  onUsageFormChange,
-  onCreateUsage,
-  onUpdateUsageStatus,
-  onEditBundle,
-  onRecordUsage,
-  onCreateNew,
-}: {
-  promoBundles: MarketingPromoBundle[];
-  promoBundleLaunches: MarketingPromoBundleLaunch[];
-  promoBundleUsages: MarketingPromoBundleUsage[];
-  promoBundleReconciliation: MarketingPromoBundleReconciliation[];
-  stores: Store[];
-  usageForm: PromoBundleUsageFormState;
-  isSavingUsage: boolean;
-  pendingUsageId: string | null;
-  selectedBundleId: string | null;
-  onUsageFormChange: (next: PromoBundleUsageFormState) => void;
-  onCreateUsage: (event: FormEvent<HTMLFormElement>) => void;
-  onUpdateUsageStatus: (
-    usage: MarketingPromoBundleUsage,
-    status: MarketingPromoBundleUsageStatus,
-  ) => void;
-  onEditBundle: (bundle: MarketingPromoBundle) => void;
-  onRecordUsage: (bundle: MarketingPromoBundle) => void;
-  onCreateNew: () => void;
-}) {
-  const [query, setQuery] = useState("");
-  const normalizedQuery = query.trim().toLocaleLowerCase("ru-RU");
-  const filteredBundles = useMemo(() => {
-    if (!normalizedQuery) {
-      return promoBundles;
-    }
-
-    return promoBundles.filter((bundle) =>
-      [
-        bundle.name,
-        promoBundleTypeLabel(bundle.bundleType),
-        bundle.note ?? "",
-      ]
-        .join(" ")
-        .toLocaleLowerCase("ru-RU")
-        .includes(normalizedQuery),
-    );
-  }, [normalizedQuery, promoBundles]);
-
-  return (
-    <section className="border-b border-zinc-200 p-4 dark:border-zinc-800">
-      <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-              Каталог
-            </p>
-            <h2 className="mt-2 text-xl font-semibold text-zinc-950 dark:text-white">
-              Существующие промо-наборы
-            </h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Откройте набор для правки или начните новый. В каталоге нет групп
-              гостей, задач и кампаний.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onCreateNew}
-            className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-          >
-            Новый набор
-          </button>
-        </div>
-
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Поиск по названию, типу или заметке"
-          className="mt-4 h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-950 outline-none transition placeholder:text-zinc-400 hover:border-zinc-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white dark:hover:border-zinc-600"
-        />
-
-        <div className="mt-3 grid gap-2">
-          {filteredBundles.length > 0 ? (
-            filteredBundles.map((bundle) => (
-              <PromoBundleCatalogRow
-                key={bundle.id}
-                bundle={bundle}
-                isActive={bundle.id === selectedBundleId}
-                onEdit={() => onEditBundle(bundle)}
-              />
-            ))
-          ) : (
-            <div className="rounded-lg border border-dashed border-zinc-300 px-3 py-4 text-sm leading-6 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-              {promoBundles.length === 0
-                ? "Сохраненных промо-наборов пока нет. Создайте первый в конструкторе ниже."
-                : "По этому запросу наборов не найдено."}
-            </div>
-          )}
-        </div>
-
-        <PromoBundlesAccountingReport
-          promoBundles={filteredBundles}
-          promoBundleLaunches={promoBundleLaunches}
-          promoBundleUsages={promoBundleUsages}
-          promoBundleReconciliation={promoBundleReconciliation}
-          stores={stores}
-          usageForm={usageForm}
-          isSavingUsage={isSavingUsage}
-          pendingUsageId={pendingUsageId}
-          onUsageFormChange={onUsageFormChange}
-          onCreateUsage={onCreateUsage}
-          onUpdateUsageStatus={onUpdateUsageStatus}
-          onEditBundle={onEditBundle}
-          onRecordUsage={onRecordUsage}
-        />
-      </div>
-    </section>
+function usageFormForBundle(
+  current: PromoBundleUsageFormState,
+  promoBundle: MarketingPromoBundle,
+  promoBundleLaunches: MarketingPromoBundleLaunch[],
+): PromoBundleUsageFormState {
+  const launch = pickPromoBundleLaunchForUsage(
+    promoBundleLaunches,
+    promoBundle.id,
   );
+  const structure = promoBundleStructureFromBundle(promoBundle);
+
+  return {
+    ...current,
+    promoBundleId: promoBundle.id,
+    launchId: launch?.id ?? "",
+    storeId: launch?.storeIds.length === 1 ? launch.storeIds[0] : "",
+    quantity: current.promoBundleId === promoBundle.id ? current.quantity : "1",
+    amount: moneyInputValue(structure.pricing.promoPrice),
+    costAmount: moneyInputValue(structure.pricing.costPerUse),
+  };
 }
 
 function PromoBundlesAccountingReport({
@@ -2340,7 +2098,20 @@ function PromoBundlesAccountingReport({
   }
 
   return (
-    <div className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+    <div className="grid gap-4">
+      <PromoBundleUsageJournal
+        promoBundles={promoBundles}
+        promoBundleLaunches={promoBundleLaunches}
+        promoBundleUsages={promoBundleUsages}
+        stores={stores}
+        form={usageForm}
+        isSaving={isSavingUsage}
+        pendingUsageId={pendingUsageId}
+        onFormChange={onUsageFormChange}
+        onSubmit={onCreateUsage}
+        onUpdateUsageStatus={onUpdateUsageStatus}
+      />
+      <MoreFields label="Сводка по наборам и сверка со складом">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
@@ -2392,18 +2163,7 @@ function PromoBundlesAccountingReport({
         ))}
       </div>
 
-      <PromoBundleUsageJournal
-        promoBundles={promoBundles}
-        promoBundleLaunches={promoBundleLaunches}
-        promoBundleUsages={promoBundleUsages}
-        stores={stores}
-        form={usageForm}
-        isSaving={isSavingUsage}
-        pendingUsageId={pendingUsageId}
-        onFormChange={onUsageFormChange}
-        onSubmit={onCreateUsage}
-        onUpdateUsageStatus={onUpdateUsageStatus}
-      />
+      </MoreFields>
     </div>
   );
 }
@@ -2989,7 +2749,7 @@ function PromoBundleUsageJournal({
                   ? moneyInputValue(structure.pricing.promoPrice)
                   : form.amount,
                 costAmount: structure
-                  ? moneyInputValue(structure.pricing.expectedCost)
+                  ? moneyInputValue(structure.pricing.costPerUse)
                   : form.costAmount,
               });
             }}
@@ -3179,63 +2939,6 @@ function PromoBundleUsageJournal({
         )}
       </div>
     </div>
-  );
-}
-
-function PromoBundleCatalogRow({
-  bundle,
-  isActive,
-  onEdit,
-}: {
-  bundle: MarketingPromoBundle;
-  isActive: boolean;
-  onEdit: () => void;
-}) {
-  const structure = promoBundleStructureFromBundle(bundle);
-  const margin =
-    structure.pricing.marginPercent === null
-      ? "маржа не рассчитана"
-      : `маржа ${formatPercent(structure.pricing.marginPercent)}`;
-  const tariffSummary = structure.conditions?.tariffSummary ?? "любой тариф";
-
-  return (
-    <article
-      className={[
-        "grid gap-3 rounded-lg border p-3 transition md:grid-cols-[minmax(0,1fr)_auto] md:items-center",
-        isActive
-          ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
-          : "border-zinc-200 bg-white hover:border-emerald-400/70 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-emerald-500/60",
-      ].join(" ")}
-    >
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="truncate text-sm font-semibold text-zinc-950 dark:text-white">
-            {bundle.name}
-          </h3>
-          <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
-            {promoBundleTypeLabel(bundle.bundleType)}
-          </span>
-        </div>
-        <p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-          {structure.composition.summary}
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-          <span>{formatRubles(structure.pricing.promoPrice)}</span>
-          <span>{margin}</span>
-          <span>{formatNumber(structure.limits.expectedUses)} исп.</span>
-          {tariffSummary !== "любой тариф" ? <span>{tariffSummary}</span> : null}
-          <span>{structure.accounting.label}</span>
-          <span>обновлен {formatDate(bundle.updatedAt)}</span>
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={onEdit}
-        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
-      >
-        Редактировать
-      </button>
-    </article>
   );
 }
 
@@ -5378,9 +5081,11 @@ function Field({
 function CampaignGroupRoute({
   selectedAudience,
   audiencesCount,
+  onCreateGroup,
 }: {
   selectedAudience: GuestAudience | null;
   audiencesCount: number;
+  onCreateGroup: () => void;
 }) {
   return (
     <div className="grid gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60 lg:col-span-12 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
@@ -5390,29 +5095,83 @@ function CampaignGroupRoute({
         </p>
         <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
           {selectedAudience
-            ? `Выбрана группа "${selectedAudience.name}" на ${formatNumber(
+            ? `Выбрана группа «${selectedAudience.name}», ${pluralize(
                 selectedAudience.guestsCount,
-              )} гостей. Контакты, согласия и эффект будут считаться по ней.`
+                guestsWord,
+              )}. Охват, согласия и эффект кампании считаются по ней.`
             : audiencesCount > 0
-              ? "Выберите сохраненную группу выше или создайте новую из фильтров гостей, чтобы кампания считала охват и согласия."
-              : "Сохраненных групп пока нет. Сначала соберите группу из фильтров гостей, затем вернитесь к запуску кампании."}
+              ? "Выберите группу выше или соберите новую за пару минут, кампания при этом не потеряется."
+              : "Групп пока нет. Соберите первую за пару минут, кампания при этом не потеряется."}
         </p>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Link
-          href="/guests/report#audiences"
-          className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-        >
-          Создать из фильтров
-        </Link>
-        <Link
-          href="/guests/crm"
-          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-zinc-950"
-        >
-          Открыть CRM-группы
-        </Link>
-      </div>
+      <button
+        type="button"
+        onClick={onCreateGroup}
+        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+      >
+        Собрать новую группу
+      </button>
     </div>
+  );
+}
+
+/** The step-by-step group builder over the campaign wizard. */
+function GroupBuilderDialog({
+  stores,
+  defaultStoreId,
+  onClose,
+  onCreated,
+}: {
+  stores: Store[];
+  defaultStoreId: string;
+  onClose: () => void;
+  onCreated: (audience: GuestAudience) => void;
+}) {
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Новая группа гостей"
+      className="fixed inset-0 z-50 overflow-y-auto bg-zinc-950/60 px-3 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="mx-auto max-w-4xl rounded-2xl bg-zinc-50 p-4 shadow-xl sm:p-5 dark:bg-zinc-900">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold tracking-wide text-emerald-600 uppercase dark:text-emerald-400">
+              Новая группа гостей
+            </p>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+              После сохранения группа сразу выберется в кампании.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="min-h-10 rounded-xl border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-950"
+          >
+            Закрыть
+          </button>
+        </div>
+        <GuestGroupBuilder
+          stores={stores.map((store) => ({ id: store.id, name: store.name }))}
+          defaultStoreId={defaultStoreId}
+          onCancel={onClose}
+          onCreated={onCreated}
+        />
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -5485,7 +5244,7 @@ function CompactInfo({ label, value }: { label: string; value: string }) {
   );
 }
 
-function buildPromoBundleEconomics(
+export function buildPromoBundleEconomics(
   draft: PromoBundleDraft,
 ): PromoBundleEconomics {
   const basePrice =
@@ -5513,7 +5272,7 @@ function buildPromoBundleEconomics(
   };
 }
 
-function buildPromoBundleVerdict(
+export function buildPromoBundleVerdict(
   draft: PromoBundleDraft,
   economics: PromoBundleEconomics,
 ): PromoBundleVerdict {
@@ -5824,7 +5583,7 @@ function promoBundleTariffConditionLabels(
   };
 }
 
-function promoBundleToDraft(bundle: MarketingPromoBundle): PromoBundleDraft {
+export function promoBundleToDraft(bundle: MarketingPromoBundle): PromoBundleDraft {
   const config = isRecord(bundle.mechanicConfig) ? bundle.mechanicConfig : {};
   const bundleType = resolvePromoBundleType(
     optionalText(config.bundleType, bundle.bundleType),
@@ -5906,7 +5665,7 @@ function promoBundleToDraft(bundle: MarketingPromoBundle): PromoBundleDraft {
   };
 }
 
-function promoBundleStructureFromBundle(
+export function promoBundleStructureFromBundle(
   bundle: MarketingPromoBundle,
 ): MarketingPromoBundleStructure {
   if (bundle.structure) {
@@ -6109,7 +5868,7 @@ function optionalWriteOffRule(value: unknown, fallback: PromoBundleWriteOffRule)
     : fallback;
 }
 
-function buildPromoBundleNote(
+export function buildPromoBundleNote(
   draft: PromoBundleDraft,
   economics: PromoBundleEconomics,
   productOptions: Product[] = [],
@@ -6183,7 +5942,7 @@ function buildPromoBundleNote(
   ].join(" ");
 }
 
-function buildPromoBundleConfig(
+export function buildPromoBundleConfig(
   draft: PromoBundleDraft,
   economics: PromoBundleEconomics,
   verdict: PromoBundleVerdict,
@@ -6264,7 +6023,7 @@ function cleanPayload(form: CampaignFormState) {
   };
 }
 
-async function readError(response: Response) {
+export async function readError(response: Response) {
   try {
     const data = (await response.json()) as { message?: string };
     return data.message ?? "Не удалось сохранить изменения";

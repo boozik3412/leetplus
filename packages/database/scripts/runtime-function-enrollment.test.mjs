@@ -254,7 +254,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20261113090000_staff_langame_auto_link 204$/u,
+    /20261113120000_staff_checklist_escalated_at 205$/u,
   );
 });
 

@@ -63,6 +63,7 @@ export function OverviewTab({
   canOperateLedger,
   canManageRules,
   canViewIntegrationReadiness,
+  canOpenTestRun,
   diagnosticsLead,
   onPrepareOutbox,
   onDispatchOutbox,
@@ -92,6 +93,7 @@ export function OverviewTab({
   canOperateLedger: boolean;
   canManageRules: boolean;
   canViewIntegrationReadiness: boolean;
+  canOpenTestRun: boolean;
   /** Support-only controls from the panel, shown first inside «Диагностика». */
   diagnosticsLead?: ReactNode;
   onPrepareOutbox: () => void;
@@ -327,6 +329,7 @@ export function OverviewTab({
             readiness={workspace.pilotReadiness}
             saving={saving}
             canApproveRewards={canOperateLedger}
+            canOpenDryRun={canOpenTestRun}
             onOpenDryRun={() => onOpenTab("testRun")}
             onQueueBonusLedger={onQueueBonusLedger}
             onDryRunBonusLedger={onDryRunBonusLedger}
@@ -525,6 +528,7 @@ export function PilotReadinessCard({
   readiness,
   saving,
   canApproveRewards,
+  canOpenDryRun,
   onOpenDryRun,
   onQueueBonusLedger,
   onDryRunBonusLedger,
@@ -535,6 +539,7 @@ export function PilotReadinessCard({
   readiness: GuestGamificationWorkspace["pilotReadiness"];
   saving: string | null;
   canApproveRewards: boolean;
+  canOpenDryRun: boolean;
   onOpenDryRun: () => void;
   onQueueBonusLedger: (options?: BonusLedgerActionOptions) => void;
   onDryRunBonusLedger: (options?: BonusLedgerActionOptions) => void;
@@ -546,6 +551,9 @@ export function PilotReadinessCard({
   const runbook = readiness.runbook;
   const ledgerPreflight = runbook.ledgerPreflight;
   const firstBonus = runbook.firstBonusReconciliation;
+  const runbookActions = runbook.actions.filter(
+    (action) => action.key !== "OPEN_DRY_RUN" || canOpenDryRun,
+  );
   const pilotLedgerScope = {
     storeId: target?.id ?? null,
     limit: 1,
@@ -849,9 +857,9 @@ export function PilotReadinessCard({
             ) : null}
           </div>
 
-          {runbook.actions.length ? (
+          {runbookActions.length ? (
             <div className="mt-3 flex flex-wrap gap-2">
-              {runbook.actions.map((action) => {
+              {runbookActions.map((action) => {
                 const requiresRewardAccess =
                   pilotRunbookActionRequiresRewardAccess(action.key);
                 const disabledByAccess =

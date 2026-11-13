@@ -216,6 +216,10 @@ type LiveSnapshot = {
   domain: string | null;
   seats: Map<number, LiveSeat>;
   purchasesByGuest: Map<string, LangameProductExpense[]>;
+  /** Administrator of the open Langame shift and their LeetPlus account. */
+  shiftAdmin: { name: string | null; userId: string | null } | null;
+  /** Langame did not answer about the shift. */
+  shiftFailed: boolean;
 };
 
 type LiveStore = {
@@ -563,6 +567,26 @@ export class StoreFloorPlanLiveService {
   }
 
   /** The guest of a session who has no LeetPlus card yet (see `newGuest`). */
+  /**
+   * The open Langame shift of the club and its administrator's LeetPlus
+   * account, from the same shared 15-second Langame read as the club view.
+   * Never sent whole: «Режим администратора смены» uses it server-side.
+   */
+  async shiftAdminOf(
+    storeId: string,
+    user: AuthenticatedUser,
+    now = new Date(),
+  ) {
+    const { store, snapshot } = await this.snapshot(storeId, user, now);
+    return {
+      store,
+      status: snapshot.view.status,
+      startedAt: snapshot.view.shift?.startedAt ?? null,
+      admin: snapshot.shiftAdmin,
+      failed: snapshot.shiftFailed,
+    };
+  }
+
   private async newSeatGuest(
     store: LiveStore,
     snapshot: LiveSnapshot,
@@ -841,6 +865,8 @@ export class StoreFloorPlanLiveService {
       domain: null,
       seats: new Map(),
       purchasesByGuest: new Map(),
+      shiftAdmin: null,
+      shiftFailed: false,
     };
   }
 
@@ -984,10 +1010,10 @@ export class StoreFloorPlanLiveService {
     );
 
     const since = openShift?.startedAt ?? localMidnight(now, store.timeZone);
-    const [adminName, revenueResult, goodsResult, gameResult] =
+    const [shiftAdmin, revenueResult, goodsResult, gameResult] =
       await Promise.all([
         openShift
-          ? this.adminName(store, source.domain, openShift.userId)
+          ? this.shiftAdmin(store, source.domain, openShift.userId)
           : null,
         this.loadRevenue(store, langame, since, now).then(
           (value) => ({ ok: true as const, value }),
@@ -1026,7 +1052,7 @@ export class StoreFloorPlanLiveService {
       guests: sessions ? guestIds.size : null,
       shift: openShift
         ? {
-            adminName,
+            adminName: shiftAdmin?.name ?? null,
             startedAt: openShift.startedAt?.toISOString() ?? null,
           }
         : null,
@@ -1048,6 +1074,8 @@ export class StoreFloorPlanLiveService {
       purchasesByGuest: goodsResult.ok
         ? goodsResult.value.byGuest
         : new Map<string, LangameProductExpense[]>(),
+      shiftAdmin,
+      shiftFailed: shiftResult.status === 'rejected',
     };
   }
 
@@ -1228,12 +1256,16 @@ export class StoreFloorPlanLiveService {
     return best;
   }
 
-  private async adminName(
+  /**
+   * Name of the shift administrator (staff card first, then the Langame
+   * login) and the LeetPlus account linked to that staff card.
+   */
+  private async shiftAdmin(
     store: LiveStore,
     domain: string,
     externalUserId: string | null,
-  ) {
-    if (!externalUserId) return null;
+  ): Promise<{ name: string | null; userId: string | null }> {
+    if (!externalUserId) return { name: null, userId: null };
     const [member, langameUser] = await Promise.all([
       this.prisma.staffMember.findFirst({
         where: {
@@ -1242,7 +1274,7 @@ export class StoreFloorPlanLiveService {
           externalDomain: domain,
           externalUserId,
         },
-        select: { displayName: true },
+        select: { displayName: true, userId: true },
       }),
       this.prisma.langameStaffUser.findFirst({
         where: {
@@ -1253,7 +1285,10 @@ export class StoreFloorPlanLiveService {
         select: { username: true },
       }),
     ]);
-    return member?.displayName ?? langameUser?.username ?? null;
+    return {
+      name: member?.displayName ?? langameUser?.username ?? null,
+      userId: member?.userId ?? null,
+    };
   }
 
   private async loadRevenue(

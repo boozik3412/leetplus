@@ -514,6 +514,47 @@ export class StaffTasksService {
     };
   }
 
+  /**
+   * Open tasks of the administrator of the open Langame shift in one club,
+   * for «Режим администратора смены» on «Схема клуба»: overdue first, then by
+   * due time. The floor plan has already checked the viewer's role and that
+   * `adminUserId` is the shift administrator; the viewer's own task
+   * visibility still applies.
+   */
+  async getShiftAdminTasks(
+    user: AuthenticatedUser,
+    storeId: string,
+    adminUserId: string,
+  ): Promise<{ rows: StaffTaskResponse[]; total: number }> {
+    if (!hasCapability(user, 'view_staff_tasks')) {
+      throw new ForbiddenException('Staff tasks are not available');
+    }
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
+    this.assertTaskStoreFilterAllowed(user, storeId);
+    const where: Prisma.StaffTaskWhereInput = {
+      AND: [
+        { tenantId, assignedToUserId: adminUserId },
+        { status: { notIn: ['DONE', 'CANCELED'] } },
+        { OR: [{ storeId }, { storeId: null }] },
+        this.buildTaskVisibilityWhere(user, accessScope),
+      ],
+    };
+    const [rows, total] = await Promise.all([
+      this.prisma.staffTask.findMany({
+        where,
+        include: taskInclude,
+        orderBy: [
+          { dueAt: { sort: 'asc', nulls: 'last' } },
+          { createdAt: 'asc' },
+        ],
+        take: 50,
+      }),
+      this.prisma.staffTask.count({ where }),
+    ]);
+    return { rows: rows.map((row) => this.toTaskResponse(row)), total };
+  }
+
   async exportTasks(
     user: AuthenticatedUser,
     query: StaffTasksExportQuery = {},

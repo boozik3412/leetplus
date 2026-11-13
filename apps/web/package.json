@@ -12,7 +12,7 @@
     "test:executive-dashboard": "node --test --experimental-strip-types src/lib/executive-history.test.mts src/lib/executive-priority-rules.test.mts src/lib/executive-driver-rules.test.mts src/lib/executive-links.test.mts src/lib/executive-closures.test.mts src/lib/store-closure-state.test.mts src/lib/navigation-labels.test.mts src/lib/executive-verdict.test.mts src/lib/setup-progress.test.mts",
     "test:invite-secret-transport": "node --test --experimental-strip-types src/lib/invite-secret.test.mts src/lib/invite-transport-core.test.mts",
     "test:pilot-bff-boundary": "node --test --experimental-strip-types src/lib/pilot-bff-boundary.test.mts",
-    "test:users-roles-bff-boundary": "node --test --experimental-strip-types src/lib/users-roles-bff-boundary.test.mts src/lib/capability-parity.test.mts src/lib/page-access.test.mts src/lib/club-floor-plan-templates.test.mts src/lib/club-live-summary.test.mts src/lib/game-completions.test.mts",
+    "test:users-roles-bff-boundary": "node --test --experimental-strip-types src/lib/users-roles-bff-boundary.test.mts src/lib/capability-parity.test.mts src/lib/page-access.test.mts src/lib/club-floor-plan-templates.test.mts src/lib/club-live-summary.test.mts src/lib/guest-group-builder.test.mts src/lib/game-completions.test.mts src/lib/learning-documents.test.mts src/lib/learning-course-editor.test.mts src/lib/learning-article-editor.test.mts",
     "test:gate-1mt-staff-attachments-browser-boundary": "node --test --experimental-strip-types src/lib/gate-1mt-staff-attachments-browser-boundary.test.mts src/lib/staff-checklist-update-payload.test.mts",
     "test:release-build-boundary": "node --test --experimental-strip-types src/lib/release-build-boundary.test.mts src/lib/api-url.test.mts src/lib/web-release-identity.test.mts src/lib/guest-reward-status-labels.test.mts src/lib/guest-reward-history.test.mts src/lib/guest-leaderboard.test.mts src/lib/guest-game-tutorial.test.mts src/lib/guest-game-accounts.test.mts",
     "test:guest-session-transport": "node --test --experimental-strip-types src/lib/guest-session-transport.test.mts src/lib/user-call-feedback.test.mts",
@@ -22,10 +22,10 @@
     "test:langame-simple-onboarding": "node --test --experimental-strip-types src/lib/langame-simple-onboarding-bff.test.mts src/lib/langame-sync-status.test.mts src/lib/langame-connections.test.mts src/lib/guest-sync-observation.test.mts",
     "test:employee-invite-current189-bff-candidate": "node --test --experimental-strip-types src/lib/employee-invite-current189-bff-candidate.test.mts",
     "test:owner-invite-link-bff-boundary": "node --test --experimental-strip-types src/lib/owner-invite-link-bff-boundary.test.mts",
-    "test:guest-insights": "node --test --experimental-strip-types src/lib/guest-insights.test.mts src/lib/guest-game-effect.test.mts src/lib/manual-rewards.test.mts src/lib/board.test.mts src/lib/crm-leads.test.mts src/lib/staff-task-moves.test.mts src/lib/checklist-today.test.mts",
+    "test:guest-insights": "node --test --experimental-strip-types src/lib/guest-insights.test.mts src/lib/guest-game-effect.test.mts src/lib/manual-rewards.test.mts src/lib/board.test.mts src/lib/crm-leads.test.mts src/lib/staff-task-moves.test.mts src/lib/checklist-today.test.mts src/lib/promo-bundle-wizard.test.mts",
     "test:daily-report": "node --test --experimental-strip-types src/lib/daily-report-view.test.mts",
-    "test:ui-copy": "node --test --experimental-strip-types src/lib/ui-copy-jargon.test.mts",
-    "test:assortment": "node --test --experimental-strip-types src/lib/stock-value.test.mts src/lib/assortment-report-query.test.mts src/lib/assortment-risk.test.mts src/lib/money-loss-report.test.mts"
+    "test:ui-copy": "node --test --experimental-strip-types src/lib/ui-copy-jargon.test.mts src/lib/loading-region-copy.test.mts",
+    "test:assortment": "node --test --experimental-strip-types src/lib/abc-rating.test.mts src/lib/stock-value.test.mts src/lib/assortment-report-query.test.mts src/lib/assortment-risk.test.mts src/lib/money-loss-report.test.mts"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

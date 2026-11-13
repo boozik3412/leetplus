@@ -123,6 +123,7 @@ export default async function StaffKnowledgeBasePage({
           items={[
             { href: "/dashboard", label: "Дашборд" },
             { href: "/staff/tasks", label: "Персонал" },
+            { href: "/staff/learning", label: "Обучение и база знаний" },
           ]}
         />
 
@@ -272,7 +273,11 @@ export default async function StaffKnowledgeBasePage({
         </section>
 
         <section className="mt-6">
-          <StaffKnowledgeBaseWorkspace report={report} />
+          <StaffKnowledgeBaseWorkspace
+            key={searchParam(params.articleId) ?? "first"}
+            report={report}
+            initialArticleId={searchParam(params.articleId) ?? null}
+          />
         </section>
       </div>
     </main>

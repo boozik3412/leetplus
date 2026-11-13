@@ -2146,6 +2146,29 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   Статусы на сцене не меняются: «Да» в окне «Изменить статус?» открывает
   задачу (`/staff/tasks?taskId=`) или чек-лист (`/staff/shift-workspace?checklistRunId=`)
   в новой вкладке.
+- «Режим администратора смены» (13.11.2026): `GET /stores/:id/floor-plan/live/shift-admin`
+  (`StoreFloorPlansController`, JWT + `RolesGuard` → `view_club_scheme`,
+  `@Roles` OWNER/ADMIN/MANAGER/CLUB_MANAGER/STANDARDS_MANAGER/SENIOR_ADMINISTRATOR
+  и та же проверка в `StoreFloorPlanShiftAdminService`, manifest
+  `STORES_VERIFIED`). Чей чек-лист читать, выбирает сервер, не зритель:
+  `user_id` открытой смены из общего 15-секундного чтения Langame →
+  `StaffMember` (`tenantId` + `externalDomain` + `externalUserId`, привязка из
+  карточки сотрудника) → `StaffMember.userId`. Без открытой смены — `NO_SHIFT`,
+  без привязки к учётной записи — `NOT_LINKED`, чек-листы и задачи не читаются.
+  Чек-листы: `StaffChecklistsService.getShiftAdminRuns` — прогоны этого клуба,
+  назначенные админу смены или никому (и его прогоны без клуба), активные и
+  изменённые за 14 часов, с `view_staff_standards` и store scope зрителя;
+  ограничение «только свои» для `SENIOR_ADMINISTRATOR` здесь сознательно не
+  применяется, но только на чтение. Задачи: `StaffTasksService.getShiftAdminTasks` —
+  открытые задачи админа смены в клубе или без клуба, с `view_staff_tasks` и
+  обычной видимостью задач зрителя. В ответе имя и `userId` админа смены (для
+  ссылки на его задачи). Записей нет; статусы меняются только на страницах
+  задач и чек-листов с их правами (старшему администратору чужой пункт
+  чек-листа не открывается). `StoresModule` импортирует `StaffModule`, тот
+  экспортирует оба сервиса; оба модуля и так в corporate runtime, новых
+  worker/scheduler нет. Web: BFF `GET /api/stores/:id/floor-plan/live/shift-admin`
+  через `proxyJsonRequest`; сцена включает режим кнопкой в карточке «Стойка и
+  бар» (клик по администратору), помнит его в `sessionStorage` вкладки.
 - Роли `CLUB_ADMINISTRATOR` и `SENIOR_ADMINISTRATOR` (12.11.2026) получили
   `view_club_scheme` и `view_guests`: схема зала на «Моя смена» и полная
   карточка гостя по клику. `view_guests` открывает им раздел «Гости» всей
@@ -2255,6 +2278,21 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   не должен запускать автономный ledger/sync/materializer scheduler.
 - Worker endpoints остаются за service token, tenant execution admission,
   rollout flags, bounded batch/lease и отдельной observability.
+
+### «Тест запуска» только владельцу (13.11.2026)
+
+Вкладка «Игровой модуль → Тест запуска» и её маршруты
+`POST /guests/gamification/dry-run`, `GET /guests/gamification/facts`,
+`POST /guests/gamification/process-event` и
+`POST /guests/gamification/pipeline/run` доступны только ролям `OWNER` и
+`ADMIN`; администратор платформы попадает сюда как `OWNER` подписанного
+tenant-контекста. API проверяет это `StrictRoles(OWNER, ADMIN)` поверх
+прежних capability и `FreshNetworkScopeGuard`, поэтому `MANAGER` и роли ниже
+получают `403` даже с правами геймификации. Web скрывает вкладку и кнопку
+«Открыть dry-run» по тому же правилу (`canUseGuestGameTestRun`), а
+`?tab=testRun` открывает обзор. Service-token
+`/guests/gamification/scheduled/pipeline/run` worker-контура не меняется.
+Новых capability, секретов, egress, миграций и владельцев расписания нет.
 
 ### Игровая проекция в контуре гостей (30.09.2026)
 

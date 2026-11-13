@@ -26,6 +26,10 @@ import {
   type StaffDisciplineRecordDto,
   type StaffDisciplineRecordUpdateDto,
 } from './staff-discipline.service';
+import {
+  StaffAdminRatingAdjustmentsService,
+  type StaffAdminRatingAdjustmentDto,
+} from './staff-admin-rating-adjustments.service';
 
 @Controller('staff/discipline')
 @Roles(
@@ -127,6 +131,7 @@ export class StaffOwnDisciplineController {
 export class StaffAdministratorRatingsController {
   constructor(
     private readonly staffDisciplineService: StaffDisciplineService,
+    private readonly adjustmentsService: StaffAdminRatingAdjustmentsService,
   ) {}
 
   @Get()
@@ -135,5 +140,22 @@ export class StaffAdministratorRatingsController {
     @Query() query: StaffAdministratorRatingsQuery,
   ) {
     return this.staffDisciplineService.getAdministratorRatings(user, query);
+  }
+
+  /** A reviewer forgives a penalty item or gives a bonus / penalty. */
+  @Post('adjustments')
+  createAdjustment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: StaffAdminRatingAdjustmentDto,
+  ) {
+    return this.adjustmentsService.create(user, dto);
+  }
+
+  @Post('adjustments/:id/cancel')
+  cancelAdjustment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.adjustmentsService.cancel(user, id);
   }
 }

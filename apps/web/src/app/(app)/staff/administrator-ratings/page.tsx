@@ -8,7 +8,10 @@ import {
   type StaffAdministratorRating,
   type StaffDisciplineFilters,
 } from "@/lib/staff-discipline";
-import type { AdminRatingView } from "@/lib/staff-admin-rating";
+import {
+  EMPTY_ADMIN_RATING_COUNTS,
+  type AdminRatingView,
+} from "@/lib/staff-admin-rating";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
@@ -171,6 +174,7 @@ export default async function StaffAdministratorRatingsPage({
         <div className="mt-6">
           <AdminRatingPanel
             rows={report.rows.map(toAdminRatingView)}
+            canAdjust={report.canAdjust === true}
             emptyText="Администраторы по выбранным фильтрам не найдены."
             renderExtra={(view) => {
               const row = rowsById.get(view.id);
@@ -190,12 +194,7 @@ function toAdminRatingView(row: StaffAdministratorRating): AdminRatingView {
     score: row.score,
     riskLevel: row.riskLevel,
     items: row.rating?.items ?? [],
-    counts: row.rating?.counts ?? {
-      escalatedChecklists: 0,
-      fines: 0,
-      warnings: 0,
-      overdueTasks: 0,
-    },
+    counts: row.rating?.counts ?? EMPTY_ADMIN_RATING_COUNTS,
     averageCheck: row.rating?.averageCheck ?? {
       day: emptyCheck("DAY"),
       night: emptyCheck("NIGHT"),

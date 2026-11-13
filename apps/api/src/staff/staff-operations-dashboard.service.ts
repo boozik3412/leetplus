@@ -8,6 +8,7 @@ import {
   StaffAdminRatingService,
   type StaffAdminRatingRow,
 } from './staff-admin-rating.service';
+import { StaffAdminRatingAdjustmentsService } from './staff-admin-rating-adjustments.service';
 import {
   StaffReadinessReportService,
   type StaffReadinessRow,
@@ -132,6 +133,8 @@ export type StaffOperationsDashboard = {
   clubs: StaffOperationsRating[];
   /** Administrator rating, the same as on «Рейтинг администраторов». */
   administrators: StaffAdminRatingRow[];
+  /** The caller may forgive items and give bonuses / penalties. */
+  canAdjustAdministratorRating: boolean;
   staffControl: StaffOperationsStaffControl;
   recurringIssues: StaffOperationsRecurringIssue[];
   latestRisks: StaffOperationsRiskItem[];
@@ -424,6 +427,8 @@ export class StaffOperationsDashboardService {
       summary: this.toSummary(summaryMetrics, staffControl),
       clubs: this.finalizeRatings(clubDrafts),
       administrators,
+      canAdjustAdministratorRating:
+        StaffAdminRatingAdjustmentsService.canAdjust(user),
       staffControl,
       recurringIssues,
       latestRisks: this.buildLatestRisks(

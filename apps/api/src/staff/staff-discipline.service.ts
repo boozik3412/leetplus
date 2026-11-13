@@ -9,6 +9,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { StaffAdminRatingService } from './staff-admin-rating.service';
 import {
   buildStaffExportFile,
   formatStaffDateTime,
@@ -141,7 +142,6 @@ type StaffDisciplineLevel =
   | 'FINE_2'
   | 'FINE_3';
 type StaffDisciplineRecordStatus = (typeof recordStatuses)[number];
-type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
 type StaffDisciplineAccessMode = 'MANAGE' | 'SELF';
 type StoreOption = { id: string; name: string; isActive: boolean };
 
@@ -227,6 +227,7 @@ export class StaffDisciplineService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly freshStoreScopeService: FreshStoreScopeService,
+    private readonly staffAdminRatingService: StaffAdminRatingService,
   ) {}
 
   async getReport(user: AuthenticatedUser, query: StaffDisciplineQuery = {}) {
@@ -543,6 +544,7 @@ export class StaffDisciplineService {
       acknowledgements,
       assessments,
       records,
+      ratings,
     ] = await Promise.all([
       this.prisma.user.findMany({
         where: this.buildAdministratorWhere(tenantId, filters),
@@ -620,8 +622,17 @@ export class StaffDisciplineService {
         },
         take: 10000,
       }),
+      this.staffAdminRatingService.getRatings(tenantId, {
+        start: filters.start,
+        end: filters.end,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+        storeId: filters.storeId,
+        search: filters.search,
+      }),
     ]);
 
+    const ratingByUser = new Map(ratings.map((rating) => [rating.id, rating]));
     const checklistByUser = this.groupChecklistsByUser(checklists);
     const acknowledgementsSet = new Set(
       acknowledgements.map(
@@ -661,7 +672,6 @@ export class StaffDisciplineService {
           : checklist.total > 0
             ? Math.round((checklist.accepted / checklist.total) * 100)
             : 100;
-      const attestationScore = assessment ? assessment.score : 100;
       const disciplineScore = Math.max(
         0,
         100 -
@@ -669,12 +679,10 @@ export class StaffDisciplineService {
           discipline.fines * 12 -
           Math.round(discipline.fineAmount / 100),
       );
-      const score = Math.round(
-        regulationScore * 0.25 +
-          checklistScore * 0.35 +
-          attestationScore * 0.25 +
-          disciplineScore * 0.15,
-      );
+      // The score is the administrator rating (staff-admin-rating.ts); the
+      // criteria below are shown for context and do not change it.
+      const rating = ratingByUser.get(row.id) ?? null;
+      const score = rating?.score ?? 100;
 
       return {
         id: row.id,
@@ -686,7 +694,16 @@ export class StaffDisciplineService {
           stores,
         },
         score,
-        riskLevel: this.ratingRisk(score, assessment, discipline, checklist),
+        riskLevel: rating?.riskLevel ?? 'LOW',
+        rating: rating
+          ? {
+              items: rating.items,
+              counts: rating.counts,
+              averageCheck: rating.averageCheck,
+              linkedToLangame: rating.linkedToLangame,
+              shiftsTotal: rating.shiftsTotal,
+            }
+          : null,
         regulations: {
           required: requiredRegulations.length,
           acknowledged,
@@ -718,7 +735,10 @@ export class StaffDisciplineService {
     });
 
     rows.sort(
-      (a, b) => b.score - a.score || a.discipline.fines - b.discipline.fines,
+      (a, b) =>
+        b.score - a.score ||
+        (ratingByUser.get(b.id)?.rawScore ?? 100) -
+          (ratingByUser.get(a.id)?.rawScore ?? 100),
     );
 
     return {
@@ -1189,33 +1209,6 @@ export class StaffDisciplineService {
       regulation.roleScope === 'ADMINISTRATOR' ||
       regulation.roleScope === role
     );
-  }
-
-  private ratingRisk(
-    score: number,
-    assessment: { passed: boolean; status: string } | null,
-    discipline: { fines: number; warnings: number },
-    checklist: { failedItems: number; returned: number },
-  ): RiskLevel {
-    if (
-      score < 65 ||
-      assessment?.passed === false ||
-      discipline.fines >= 3 ||
-      checklist.failedItems >= 5
-    ) {
-      return 'HIGH';
-    }
-
-    if (
-      score < 85 ||
-      discipline.fines > 0 ||
-      discipline.warnings > 0 ||
-      checklist.returned > 0
-    ) {
-      return 'MEDIUM';
-    }
-
-    return 'LOW';
   }
 
   private resolveDisciplineAccess(

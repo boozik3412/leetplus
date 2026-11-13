@@ -5,9 +5,12 @@ import { staffLangameIdentityKey } from '../integrations/langame-staff-link';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import {
+  StaffAdminRatingService,
+  type StaffAdminRatingRow,
+} from './staff-admin-rating.service';
+import {
   StaffReadinessReportService,
   type StaffReadinessRow,
-  type StaffReadinessStatus,
 } from './staff-readiness-report.service';
 
 const taskClosedStatuses = ['DONE', 'CANCELED'];
@@ -127,7 +130,8 @@ export type StaffOperationsDashboard = {
   };
   summary: StaffOperationsSummary;
   clubs: StaffOperationsRating[];
-  employees: StaffOperationsEmployeeRating[];
+  /** Administrator rating, the same as on «Рейтинг администраторов». */
+  administrators: StaffAdminRatingRow[];
   staffControl: StaffOperationsStaffControl;
   recurringIssues: StaffOperationsRecurringIssue[];
   latestRisks: StaffOperationsRiskItem[];
@@ -217,13 +221,6 @@ export type StaffOperationsRating = {
   href: string | null;
 };
 
-export type StaffOperationsEmployeeRating = StaffOperationsRating & {
-  user: UserOption | null;
-  readinessStatus: StaffReadinessStatus | null;
-  readinessPercent: number | null;
-  trainingBlockers: number;
-};
-
 export type StaffOperationsRecurringIssue = {
   id: string;
   title: string;
@@ -288,13 +285,6 @@ type RatingDraft = DisciplineMetrics & {
   href: string | null;
 };
 
-type EmployeeRatingDraft = RatingDraft & {
-  user: UserOption | null;
-  readinessStatus: StaffReadinessStatus | null;
-  readinessPercent: number | null;
-  trainingBlockers: number;
-};
-
 type FailedIssue = {
   title: string;
   date: Date;
@@ -307,6 +297,7 @@ export class StaffOperationsDashboardService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly staffReadinessReportService: StaffReadinessReportService,
+    private readonly staffAdminRatingService: StaffAdminRatingService,
   ) {}
 
   async getDashboard(
@@ -316,53 +307,69 @@ export class StaffOperationsDashboardService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const filters = this.resolveFilters(query);
 
-    const [tasks, checklists, shifts, stores, users, readiness] =
-      await Promise.all([
-        this.prisma.staffTask.findMany({
-          where: this.buildTaskWhere(tenantId, filters),
-          select: taskDashboardSelect,
-          orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
-          take: 5000,
-        }),
-        this.prisma.staffChecklistRun.findMany({
-          where: this.buildChecklistWhere(tenantId, filters),
-          select: checklistDashboardSelect,
-          orderBy: [
-            { submittedAt: 'desc' },
-            { scheduledAt: 'desc' },
-            { createdAt: 'desc' },
-          ],
-          take: 5000,
-        }),
-        this.prisma.guestWorkingShift.findMany({
-          where: this.buildShiftWhere(tenantId, filters),
-          select: shiftDashboardSelect,
-          orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
-          take: 5000,
-        }),
-        this.prisma.store.findMany({
-          where: { tenantId },
-          select: { id: true, name: true, isActive: true },
-          orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-        }),
-        this.prisma.user.findMany({
-          where: { tenantId, isActive: true },
-          select: { id: true, email: true, fullName: true },
-          orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
-        }),
-        this.staffReadinessReportService.getReport(user, {
-          storeId: filters.storeId ?? undefined,
-          userId: filters.userId ?? undefined,
-          search: filters.search ?? undefined,
-          status: 'all',
-          role: 'all',
-        }),
-      ]);
-
     const now = new Date();
+    const [
+      tasks,
+      checklists,
+      shifts,
+      stores,
+      users,
+      readiness,
+      administrators,
+    ] = await Promise.all([
+      this.prisma.staffTask.findMany({
+        where: this.buildTaskWhere(tenantId, filters),
+        select: taskDashboardSelect,
+        orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
+        take: 5000,
+      }),
+      this.prisma.staffChecklistRun.findMany({
+        where: this.buildChecklistWhere(tenantId, filters),
+        select: checklistDashboardSelect,
+        orderBy: [
+          { submittedAt: 'desc' },
+          { scheduledAt: 'desc' },
+          { createdAt: 'desc' },
+        ],
+        take: 5000,
+      }),
+      this.prisma.guestWorkingShift.findMany({
+        where: this.buildShiftWhere(tenantId, filters),
+        select: shiftDashboardSelect,
+        orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 5000,
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId },
+        select: { id: true, name: true, isActive: true },
+        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      }),
+      this.prisma.user.findMany({
+        where: { tenantId, isActive: true },
+        select: { id: true, email: true, fullName: true },
+        orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+      }),
+      this.staffReadinessReportService.getReport(user, {
+        storeId: filters.storeId ?? undefined,
+        userId: filters.userId ?? undefined,
+        search: filters.search ?? undefined,
+        status: 'all',
+        role: 'all',
+      }),
+      this.staffAdminRatingService.getRatings(tenantId, {
+        start: filters.start,
+        end: filters.end,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+        storeId: filters.storeId,
+        userId: filters.userId,
+        search: filters.search,
+        now,
+      }),
+    ]);
+
     const summaryMetrics = this.createMetrics();
     const clubDrafts = new Map<string, RatingDraft>();
-    const employeeDrafts = new Map<string, EmployeeRatingDraft>();
 
     tasks.forEach((task) => {
       this.addTaskToMetrics(summaryMetrics, task, now);
@@ -374,11 +381,6 @@ export class StaffOperationsDashboardService {
             storeId: task.store?.id ?? null,
           }),
         ),
-        task,
-        now,
-      );
-      this.addTaskToMetrics(
-        this.getEmployeeDraft(employeeDrafts, task.assignedToUser),
         task,
         now,
       );
@@ -397,27 +399,12 @@ export class StaffOperationsDashboardService {
         run,
         now,
       );
-      this.addChecklistToMetrics(
-        this.getEmployeeDraft(employeeDrafts, run.assignedToUser),
-        run,
-        now,
-      );
     });
 
-    this.applyReadinessRows(
-      readiness.rows,
-      clubDrafts,
-      employeeDrafts,
-      filters,
-    );
+    this.applyReadinessRows(readiness.rows, clubDrafts, filters);
 
     const recurringIssues = this.buildRecurringIssues(checklists);
-    this.applyRecurringIssues(
-      recurringIssues,
-      clubDrafts,
-      employeeDrafts,
-      filters,
-    );
+    this.applyRecurringIssues(recurringIssues, clubDrafts, filters);
     summaryMetrics.repeatedIssues = recurringIssues.length;
     const staffControl = this.buildStaffControl(
       shifts,
@@ -436,7 +423,7 @@ export class StaffOperationsDashboardService {
       },
       summary: this.toSummary(summaryMetrics, staffControl),
       clubs: this.finalizeRatings(clubDrafts),
-      employees: this.finalizeEmployeeRatings(employeeDrafts),
+      administrators,
       staffControl,
       recurringIssues,
       latestRisks: this.buildLatestRisks(
@@ -753,51 +740,12 @@ export class StaffOperationsDashboardService {
     return draft;
   }
 
-  private getEmployeeDraft(
-    drafts: Map<string, EmployeeRatingDraft>,
-    user: UserOption | null,
-  ) {
-    const id = user?.id ?? 'unassigned';
-    const existing = drafts.get(id);
-
-    if (existing) {
-      return existing;
-    }
-
-    const draft: EmployeeRatingDraft = {
-      id,
-      label: user?.fullName ?? user?.email ?? 'Не назначен',
-      caption: user?.email ?? null,
-      href: user ? `/staff/operations-dashboard?userId=${user.id}` : null,
-      user,
-      readinessStatus: null,
-      readinessPercent: null,
-      trainingBlockers: 0,
-      ...this.createMetrics(),
-    };
-    drafts.set(id, draft);
-
-    return draft;
-  }
-
   private applyReadinessRows(
     rows: StaffReadinessRow[],
     clubDrafts: Map<string, RatingDraft>,
-    employeeDrafts: Map<string, EmployeeRatingDraft>,
     filters: ResolvedStaffOperationsDashboardFilters,
   ) {
     rows.forEach((row) => {
-      const employee = this.getEmployeeDraft(employeeDrafts, row.user);
-      employee.readinessStatus = row.readinessStatus;
-      employee.readinessPercent = row.readinessPercent;
-      employee.trainingBlockers = row.blockers.length;
-
-      if (row.readinessStatus === 'BLOCKED') {
-        employee.readinessBlocked += 1;
-      } else if (row.readinessStatus === 'ATTENTION') {
-        employee.readinessAttention += 1;
-      }
-
       const stores = row.user.stores.length > 0 ? row.user.stores : [null];
       stores
         .filter((store) => !filters.storeId || store?.id === filters.storeId)
@@ -898,7 +846,6 @@ export class StaffOperationsDashboardService {
   private applyRecurringIssues(
     issues: StaffOperationsRecurringIssue[],
     clubDrafts: Map<string, RatingDraft>,
-    employeeDrafts: Map<string, EmployeeRatingDraft>,
     filters: ResolvedStaffOperationsDashboardFilters,
   ) {
     issues.forEach((issue) => {
@@ -909,7 +856,6 @@ export class StaffOperationsDashboardService {
           storeId: issue.club?.id ?? null,
         }),
       ).repeatedIssues += 1;
-      this.getEmployeeDraft(employeeDrafts, issue.employee).repeatedIssues += 1;
     });
   }
 
@@ -1824,19 +1770,6 @@ export class StaffOperationsDashboardService {
       .map((draft) => this.finalizeRating(draft))
       .sort((a, b) => b.score - a.score || a.overdue - b.overdue)
       .slice(0, 20);
-  }
-
-  private finalizeEmployeeRatings(drafts: Map<string, EmployeeRatingDraft>) {
-    return Array.from(drafts.values())
-      .map((draft) => ({
-        ...this.finalizeRating(draft),
-        user: draft.user,
-        readinessStatus: draft.readinessStatus,
-        readinessPercent: draft.readinessPercent,
-        trainingBlockers: draft.trainingBlockers,
-      }))
-      .sort((a, b) => b.score - a.score || a.overdue - b.overdue)
-      .slice(0, 30);
   }
 
   private finalizeRating(draft: RatingDraft): StaffOperationsRating {

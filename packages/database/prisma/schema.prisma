@@ -5201,6 +5201,9 @@ model StaffChecklistRun {
   startedAt          DateTime?
   submittedAt        DateTime?
   reviewedAt         DateTime?
+  /// Last time a reviewer passed the run to a manager. Stays when the run is
+  /// accepted later: the administrator rating counts the escalation.
+  escalatedAt        DateTime?
   sectionsSnapshot   Json
   answers            Json
   scoreTotal         Int       @default(0)

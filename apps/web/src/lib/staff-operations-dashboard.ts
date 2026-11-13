@@ -1,7 +1,5 @@
 import { getApiUrl, getAuthHeaders } from "./api";
-import type {
-  StaffReadinessStatus,
-} from "./staff-readiness-report";
+import type { AdminRatingView } from "./staff-admin-rating";
 import type { StaffTaskStore } from "./staff-tasks";
 import type { StaffTrainingProfileUser } from "./staff-training-profiles";
 
@@ -96,13 +94,6 @@ export type StaffOperationsRating = {
   href: string | null;
 };
 
-export type StaffOperationsEmployeeRating = StaffOperationsRating & {
-  user: Pick<StaffTrainingProfileUser, "id" | "email" | "fullName"> | null;
-  readinessStatus: StaffReadinessStatus | null;
-  readinessPercent: number | null;
-  trainingBlockers: number;
-};
-
 export type StaffOperationsRecurringIssue = {
   id: string;
   title: string;
@@ -147,7 +138,8 @@ export type StaffOperationsDashboard = {
   };
   summary: StaffOperationsSummary;
   clubs: StaffOperationsRating[];
-  employees: StaffOperationsEmployeeRating[];
+  /** Administrator rating, the same as on «Рейтинг администраторов». */
+  administrators: AdminRatingView[];
   staffControl: StaffOperationsStaffControl;
   recurringIssues: StaffOperationsRecurringIssue[];
   latestRisks: StaffOperationsRiskItem[];

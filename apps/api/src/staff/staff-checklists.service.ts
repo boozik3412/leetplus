@@ -1215,6 +1215,7 @@ export class StaffChecklistsService {
           submittedAt: isSubmit ? now : undefined,
           reviewedAt: isReview ? now : undefined,
           reviewedByUserId: isReview ? user.id : undefined,
+          escalatedAt: isEscalation ? now : undefined,
         },
         select: { id: true },
       });

@@ -931,7 +931,7 @@ function renderPanel() {
     } else {
       const sh = shiftInfo(), r = LIVE.revenue;
       h += `<div class="ph"><div><div class="eyebrow">Админ</div><h2>Стойка и бар</h2><div class="sub">Смена, выручка и продажи товаров на стойке</div></div><span class="chip ${sh ? 'good' : 'off'}">${sh ? 'Смена открыта' : 'Смена не открыта'}</span></div>
-      <div class="sec"><h3>Смена</h3><dl class="kv"><dt>Администратор</dt><dd>${sh ? esc(sh.full) : '—'}</dd><dt>Начало</dt><dd>${sh ? `${sh.start}, идёт ${sh.dur}` : '—'}</dd><dt>${r && r.period === 'TODAY' ? 'Выручка за сегодня' : 'Выручка за смену'}</dt><dd>${rubOr(r && r.total)}</dd><dt>Товары</dt><dd>${rubOr(r && r.goods)}${r && r.goodsCount != null ? ' · ' + plural(r.goodsCount, 'товар', 'товара', 'товаров') : ''}</dd></dl></div>
+      <div class="sec"><h3>Смена</h3><dl class="kv"><dt>Администратор</dt><dd>${sh ? esc(sh.full) : '—'}</dd><dt>Начало</dt><dd>${sh ? `${sh.start}, идёт ${sh.dur}` : '—'}</dd><dt>${r && r.period === 'TODAY' ? 'Выручка за сегодня' : 'Выручка за смену'}</dt><dd>${rubOr(r && r.total)}</dd><dt>Товары</dt><dd>${rubOr(r && r.goods)}${r && r.goodsCount != null ? ' · ' + plural(r.goodsCount, 'товар', 'товара', 'товаров') : ''}</dd></dl></div>${swModeHtml()}
       <div class="statgrid"><div class="stat"><small>Товары</small><b class="num">${rubOr(r && r.goods)}</b></div><div class="stat"><small>Гостей</small><b class="num">${LIVE.guests == null ? '—' : fmt.format(LIVE.guests)}</b></div><div class="stat"><small>ПК заняты</small><b class="num">${seats.filter(s => s.state === 'busy').length}</b></div></div>${purchasesHtml()}`;
     }
   } else if (view.type === 'seat') {
@@ -1467,15 +1467,24 @@ if (CALM) {
    For a shift administrator looking at the hall under their own account: the shift
    checklist (planned time and status of every item) under «Обзор клуба» and the
    administrator's tasks above «Лента клуба». A click asks «Изменить статус?» and
-   «Да» opens the task or the checklist in a new LeetPlus tab. `var`: the scene is
-   built before this part of the script runs (see attention.js). */
-var SW = { me: null, run: null, tasks: null, taskTotal: 0, failed: false, timer: 0, scrolled: false, ask: null, back: null };
+   «Да» opens the task or the checklist in a new LeetPlus tab.
+   «Режим администратора смены» (a senior administrator, a standards manager and
+   above; switched in the «Стойка и бар» card): the same cards for whoever holds
+   the open Langame shift, from GET /api/stores/:id/floor-plan/live/shift-admin.
+   `var`: the scene is built before this part of the script runs (see attention.js). */
+var SW = { me: null, own: false, lead: false, mode: null, target: null, canOpenRuns: false, run: null, tasks: null, taskTotal: 0, failed: false, timer: 0, scrolled: false, ask: null, back: null };
 var SW_ROLES = ['SENIOR_ADMINISTRATOR', 'CLUB_ADMINISTRATOR'];
+var SW_LEAD_ROLES = ['OWNER', 'ADMIN', 'MANAGER', 'CLUB_MANAGER', 'STANDARDS_MANAGER', 'SENIOR_ADMINISTRATOR'];
+var SW_USE_ONLY = ['SENIOR_ADMINISTRATOR', 'CLUB_ADMINISTRATOR', 'TRAINEE'];
 var SW_POLL_MS = 60000;
 var SW_ACTIVE_RUN = ['OPEN', 'IN_PROGRESS', 'RETURNED', 'ESCALATED'];
 var SW_DONE_TASK = ['DONE', 'CANCELED'];
 
-function swOn() { return !!(SW && SW.me) && !EMBED; }
+function swOn() { return !!(SW && SW.me && SW.mode) && !EMBED; }
+function swAdminMode() { return swOn() && SW.mode === 'admin'; }
+function swModeKey() { return 'leetplus-floor-plan-shift-admin:' + STORE_ID; }
+function swStoredMode() { try { return sessionStorage.getItem(swModeKey()); } catch (e) { return null; } }
+function swStoreMode(mode) { try { if (mode === 'admin') sessionStorage.setItem(swModeKey(), 'admin'); else sessionStorage.removeItem(swModeKey()); } catch (e) { /* private window */ } }
 function swJson(url) {
   return fetch(url, { credentials: 'same-origin', cache: 'no-store' }).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))));
 }
@@ -1483,9 +1492,16 @@ function startShiftWork() {
   if (EMBED || !STORE_ID) return;
   swJson('/api/auth/me').then(body => {
     const u = body && body.user;
-    if (!u || !SW_ROLES.includes(u.role)) return;
+    if (!u) return;
+    SW.own = SW_ROLES.includes(u.role);
+    SW.lead = !!u.isPlatformAdmin || SW_LEAD_ROLES.includes(u.role);
+    if (!SW.own && !SW.lead) return;
     SW.me = { id: u.id };
+    SW.canOpenRuns = !SW_USE_ONLY.includes(u.role);
+    SW.mode = SW.lead && swStoredMode() === 'admin' ? 'admin' : SW.own ? 'own' : null;
     buildShiftWork();
+    pbody.addEventListener('click', e => { const b = e.target.closest('[data-swmode]'); if (b) swSetMode(b.dataset.swmode === 'on' ? 'admin' : null); });
+    if (view.type === 'zone' && view.id === 'admin') renderPanel();
     loadShiftWork();
     SW.timer = setInterval(loadShiftWork, SW_POLL_MS);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) loadShiftWork(); });
@@ -1494,27 +1510,87 @@ function startShiftWork() {
 function swMine(row) { return !row.assignedToUser || row.assignedToUser.id === SW.me.id; }
 function swHere(row) { return !row.store || !row.store.id || row.store.id === STORE_ID; }
 function swAt(row) { return new Date(row.shift && row.shift.startedAt || row.startedAt || row.scheduledAt || row.createdAt || 0).getTime(); }
-function loadShiftWork() {
+function swPickRun(rows) {
+  const active = rows.filter(r => SW_ACTIVE_RUN.includes(r.status)).sort((a, b) => swAt(b) - swAt(a));
+  // a checklist handed in during the last 14 hours stays visible as done
+  const recent = rows.filter(r => !SW_ACTIVE_RUN.includes(r.status) && r.status !== 'CANCELED' && Date.now() - swAt(r) < 14 * 3600e3).sort((a, b) => swAt(b) - swAt(a));
+  return active[0] || recent[0] || null;
+}
+function swOpenTasks(rows) {
+  const open = rows.filter(t => !SW_DONE_TASK.includes(t.status) && swHere(t));
+  return open.sort((a, b) => (b.isOverdue - a.isOverdue) || ((a.dueAt ? Date.parse(a.dueAt) : Infinity) - (b.dueAt ? Date.parse(b.dueAt) : Infinity)));
+}
+/* «Переключиться» / «Выйти»: null goes back to the viewer's own cards, if any. */
+function swSetMode(next) {
   if (!SW.me) return;
+  const mode = next === 'admin' && SW.lead ? 'admin' : SW.own ? 'own' : null;
+  swStoreMode(mode);
+  Object.assign(SW, { mode, target: null, run: null, tasks: null, taskTotal: 0, failed: false, scrolled: false });
+  if (mode === 'admin' && view.type !== 'home') select({ type: 'home' });
+  else if (view.type === 'zone' && view.id === 'admin') renderPanel();
+  renderShiftWork();
+  placeShiftWork();
+  loadShiftWork();
+}
+function loadShiftWork() {
+  if (!swOn()) return;
+  if (SW.mode === 'admin') return loadShiftAdminWork();
   Promise.all([
     swJson('/api/staff/checklists?status=all').catch(() => null),
     swJson('/api/staff/tasks?view=my&status=all&sort=dueAt&direction=asc&pageSize=50').catch(() => null),
   ]).then(([checklists, tasks]) => {
-    if (checklists && Array.isArray(checklists.rows)) {
-      const rows = checklists.rows.filter(r => swMine(r) && swHere(r));
-      const active = rows.filter(r => SW_ACTIVE_RUN.includes(r.status)).sort((a, b) => swAt(b) - swAt(a));
-      // a checklist handed in during the last 14 hours stays visible as done
-      const recent = rows.filter(r => !SW_ACTIVE_RUN.includes(r.status) && r.status !== 'CANCELED' && Date.now() - swAt(r) < 14 * 3600e3).sort((a, b) => swAt(b) - swAt(a));
-      SW.run = active[0] || recent[0] || null;
-    }
-    if (tasks && Array.isArray(tasks.rows)) {
-      const open = tasks.rows.filter(t => !SW_DONE_TASK.includes(t.status) && swHere(t));
-      open.sort((a, b) => (b.isOverdue - a.isOverdue) || ((a.dueAt ? Date.parse(a.dueAt) : Infinity) - (b.dueAt ? Date.parse(b.dueAt) : Infinity)));
-      SW.tasks = open; SW.taskTotal = open.length;
-    }
+    if (SW.mode !== 'own') return;
+    if (checklists && Array.isArray(checklists.rows)) SW.run = swPickRun(checklists.rows.filter(r => swMine(r) && swHere(r)));
+    if (tasks && Array.isArray(tasks.rows)) { SW.tasks = swOpenTasks(tasks.rows); SW.taskTotal = SW.tasks.length; }
     SW.failed = !checklists && !tasks;
     renderShiftWork();
   });
+}
+function loadShiftAdminWork() {
+  swJson(`/api/stores/${encodeURIComponent(STORE_ID)}/floor-plan/live/shift-admin`).then(w => {
+    if (SW.mode !== 'admin') return;
+    const changed = !SW.target || !w.admin || !SW.target.admin || SW.target.admin.userId !== w.admin.userId;
+    SW.target = w; SW.failed = false;
+    if (changed) SW.scrolled = false;
+    SW.run = Array.isArray(w.checklists) ? swPickRun(w.checklists.filter(swHere)) : null;
+    SW.tasks = Array.isArray(w.tasks) ? swOpenTasks(w.tasks) : w.state === 'READY' ? null : [];
+    SW.taskTotal = Array.isArray(w.tasks) ? Math.max(w.taskTotal || 0, SW.tasks.length) : 0;
+    renderShiftWork();
+  }).catch(() => {
+    if (SW.mode !== 'admin') return;
+    SW.failed = true;
+    renderShiftWork();
+  });
+}
+function swAdminName(short) {
+  const a = SW.target && SW.target.admin, sh = shiftInfo();
+  const full = (a && a.name) || (sh && sh.full) || 'Администратор смены';
+  return short ? shortName(full) : full;
+}
+/* Why the admin mode has no checklist or tasks to show, or null. */
+function swAdminEmpty(part) {
+  const w = SW.target;
+  if (!w) return SW.failed ? 'Не удалось загрузить, попробую через минуту.' : 'Загружаю…';
+  if (w.state === 'NO_SHIFT') return 'В Langame нет открытой смены.';
+  if (w.state === 'NOT_CONNECTED') return 'Клуб не подключён к Langame.';
+  if (w.state === 'UNAVAILABLE') return 'Langame не ответил про смену, попробую через минуту.';
+  if (w.state === 'NOT_LINKED') return `Администратор Langame «${esc(swAdminName(false))}» не привязан к сотруднику LeetPlus. Привязку делают в <a href="/staff/directory" target="_blank" rel="noopener">карточке сотрудника</a>.`;
+  if (part === 'checklist' && w.checklistAccess === 'NO_CAPABILITY') return 'Чек-листы смены недоступны вашей роли.';
+  if (part === 'tasks' && w.taskAccess === 'NO_CAPABILITY') return 'Задачи недоступны вашей роли.';
+  return null;
+}
+function swWhoHtml() {
+  if (!swAdminMode()) return '';
+  return `<div class="swwho"><span class="swwl">Режим администратора смены</span><b title="${esc(swAdminName(false))}">${esc(swAdminName(true))}</b><button type="button" class="swx" data-swmode="off">Выйти</button></div>`;
+}
+/* The switch in the «Стойка и бар» card, for a senior administrator and above. */
+function swModeHtml() {
+  if (!SW || !SW.lead || EMBED || isPhone()) return '';
+  const sh = shiftInfo();
+  const head = '<div class="sec swmode"><h3>Режим администратора смены</h3>';
+  if (SW.mode === 'admin') return `${head}<p>На схеме чек-лист и задачи администратора смены${sh ? ` (${esc(sh.short)})` : ''}: под обзором клуба и над лентой.</p><button type="button" class="swbtn sec" data-swmode="off">Выйти из режима</button></div>`;
+  if (!sh) return `${head}<p>Станет доступен, когда в Langame откроют смену.</p></div>`;
+  return `${head}<p>Покажет на схеме чек-лист и задачи администратора смены (${esc(sh.short)}): что сделано, что просрочено и что на очереди.</p><button type="button" class="swbtn pri" data-swmode="on">Переключиться</button></div>`;
 }
 
 /* ---- checklist items with their time and status ---- */
@@ -1565,12 +1641,20 @@ var SW_DOT = {
 };
 var SW_CHIP = { ok: 'good', late: 'warn', bad: 'bad', now: 'acc', wait: 'off' };
 
-function swRunHref(run) { return `/staff/shift-workspace?checklistRunId=${encodeURIComponent(run.id)}`; }
+function swRunHref(run) {
+  if (swAdminMode()) return SW.canOpenRuns ? `/staff/checklists?runId=${encodeURIComponent(run.id)}` : null;
+  return `/staff/shift-workspace?checklistRunId=${encodeURIComponent(run.id)}`;
+}
+function swTasksHref() {
+  const a = swAdminMode() && SW.target && SW.target.admin;
+  return a && a.userId ? `/staff/tasks?view=all&amp;status=all&amp;assignedToUserId=${encodeURIComponent(a.userId)}&amp;storeId=${encodeURIComponent(STORE_ID)}` : '/staff/tasks?view=my&amp;status=all';
+}
 function swTaskHref(task) { return `/staff/tasks?taskId=${encodeURIComponent(task.id)}`; }
 
 function checklistCardHtml() {
-  const run = SW.run;
-  let h = `<div class="swhd"><h3>Чек-лист смены</h3>${run ? `<a href="${swRunHref(run)}" target="_blank" rel="noopener">Открыть</a>` : `<a href="/staff/shift-workspace" target="_blank" rel="noopener">Моя смена</a>`}</div>`;
+  const run = SW.run, admin = swAdminMode(), href = run && swRunHref(run);
+  let h = swWhoHtml() + `<div class="swhd"><h3>Чек-лист смены</h3>${href ? `<a href="${href}" target="_blank" rel="noopener">Открыть</a>` : admin ? '' : `<a href="/staff/shift-workspace" target="_blank" rel="noopener">Моя смена</a>`}</div>`;
+  if (admin && !run) return h + `<div class="swempty">${swAdminEmpty('checklist') || 'У администратора смены нет чек-листа на эту смену.'}</div>`;
   if (!run) return h + `<div class="swempty">${SW.failed ? 'Не удалось загрузить чек-лист, попробую через минуту.' : 'На эту смену чек-лист не назначен. Его можно начать на странице «Моя смена».'}</div>`;
   const items = swItems(run), total = items.length || 1;
   const n = tone => items.filter(i => i.done ? (tone === 'ok' ? i.tone === 'ok' || i.tone === 'wait' : i.tone === tone) : (tone === 'bad' && i.tone === 'bad')).length;
@@ -1596,9 +1680,11 @@ function swTaskChip(t) {
 }
 function tasksCardHtml() {
   const list = SW.tasks;
-  let h = `<div class="swhd"><h3>Задачи на смену</h3><a href="/staff/tasks?view=my&amp;status=all" target="_blank" rel="noopener">Все задачи${SW.taskTotal ? ' · ' + SW.taskTotal : ''}</a></div>`;
+  const admin = swAdminMode(), why = admin ? swAdminEmpty('tasks') : null;
+  let h = `<div class="swhd"><h3>${admin ? 'Задачи администратора' : 'Задачи на смену'}</h3>${why ? '' : `<a href="${swTasksHref()}" target="_blank" rel="noopener">Все задачи${SW.taskTotal ? ' · ' + SW.taskTotal : ''}</a>`}</div>`;
+  if (why) return h + `<div class="swempty">${why}</div>`;
   if (!list) return h + `<div class="swempty">${SW.failed ? 'Не удалось загрузить задачи, попробую через минуту.' : 'Загружаю задачи…'}</div>`;
-  if (!list.length) return h + '<div class="swempty">Открытых задач на смену нет.</div>';
+  if (!list.length) return h + `<div class="swempty">${admin ? 'У администратора смены нет открытых задач.' : 'Открытых задач на смену нет.'}</div>`;
   return h + `<div class="swlist">${list.slice(0, 4).map((t, k) => {
     const [tone, label] = swTaskChip(t);
     const pr = t.priority === 'URGENT' || t.priority === 'HIGH' ? 'var(--bad)' : t.priority === 'NORMAL' ? 'var(--warn)' : 'var(--muted)';
@@ -1615,12 +1701,12 @@ function buildShiftWork() {
   const dlg = document.createElement('div'); dlg.id = 'swask'; dlg.hidden = true;
   dlg.innerHTML = '<div class="swscrim" data-swno="1"></div><div class="swdlg" role="dialog" aria-modal="true" aria-labelledby="swq"><h4 id="swq"></h4><div class="swwhat"></div><p></p><div class="swacts"><button type="button" class="swbtn sec" data-swno="1">Нет</button><button type="button" class="swbtn pri" data-swyes="1">Да, открыть</button></div></div>';
   stage.appendChild(cl); stage.appendChild(tk); stage.appendChild(dlg);
-  cl.addEventListener('click', e => { const b = e.target.closest('[data-switem]'); if (b && SW.items && SW.run) swAsk('item', SW.items[+b.dataset.switem], b); });
+  cl.addEventListener('click', e => { if (e.target.closest('[data-swmode]')) return swSetMode(null); const b = e.target.closest('[data-switem]'); if (b && SW.items && SW.run) swAsk('item', SW.items[+b.dataset.switem], b); });
   tk.addEventListener('click', e => { const b = e.target.closest('[data-swtask]'); if (b && SW.tasks) swAsk('task', SW.tasks[+b.dataset.swtask], b); });
   dlg.addEventListener('click', e => { if (e.target.closest('[data-swyes]')) swAnswer(true); else if (e.target.closest('[data-swno]')) swAnswer(false); });
   dlg.addEventListener('keydown', e => {
     if (e.key === 'Escape') { e.preventDefault(); swAnswer(false); }
-    if (e.key === 'Tab') { const b = [...dlg.querySelectorAll('button')]; const i = b.indexOf(document.activeElement); e.preventDefault(); b[(i + (e.shiftKey ? b.length - 1 : 1)) % b.length].focus(); }
+    if (e.key === 'Tab') { const b = [...dlg.querySelectorAll('button')].filter(x => !x.hidden); const i = b.indexOf(document.activeElement); e.preventDefault(); b[(i + (e.shiftKey ? b.length - 1 : 1)) % b.length].focus(); }
   });
   const panelEl = document.getElementById('panel'), feedEl = document.querySelector('.feed');
   if (window.ResizeObserver) { const ro = new ResizeObserver(() => placeShiftWork()); ro.observe(panelEl); if (feedEl) ro.observe(feedEl); ro.observe(stage); }
@@ -1628,20 +1714,31 @@ function buildShiftWork() {
 function swAsk(kind, row, trigger) {
   if (!row) return;
   const dlg = document.getElementById('swask'); if (!dlg) return;
+  const admin = swAdminMode();
+  let ask = true;
   if (kind === 'task') {
     SW.ask = { href: swTaskHref(row) };
     dlg.querySelector('h4').textContent = 'Изменить статус задачи?';
     dlg.querySelector('.swwhat').innerHTML = `<b>${esc(row.title)}</b><small>${esc([swTaskChip(row)[1], swTaskLine(row)].join(' · '))}</small>`;
-    dlg.querySelector('p').textContent = 'Задача откроется в новой вкладке LeetPlus: там можно сменить статус, оставить комментарий и фото.';
+    dlg.querySelector('p').textContent = admin ? 'Задача администратора смены откроется в новой вкладке LeetPlus: там можно сменить статус, оставить комментарий и фото.' : 'Задача откроется в новой вкладке LeetPlus: там можно сменить статус, оставить комментарий и фото.';
   } else {
-    SW.ask = { href: swRunHref(SW.run) };
-    dlg.querySelector('h4').textContent = 'Изменить статус пункта?';
+    const href = swRunHref(SW.run);
+    ask = !!href;
+    SW.ask = href ? { href } : null;
+    dlg.querySelector('h4').textContent = ask ? 'Изменить статус пункта?' : 'Пункт чек-листа администратора';
     dlg.querySelector('.swwhat').innerHTML = `<b>${esc(row.title)}</b><small>${esc([SW.run.title, row.time ? 'в ' + row.time : null, row.chip.toLowerCase()].filter(Boolean).join(' · '))}</small>`;
-    dlg.querySelector('p').textContent = 'Чек-лист откроется в новой вкладке на странице «Моя смена»: там пункт можно отметить выполненным или указать проблему.';
+    dlg.querySelector('p').textContent = !admin
+      ? 'Чек-лист откроется в новой вкладке на странице «Моя смена»: там пункт можно отметить выполненным или указать проблему.'
+      : ask
+        ? 'Чек-лист администратора смены откроется в новой вкладке в разделе «Чек-листы»: там видны ответы и фото, пункт можно вернуть на доработку.'
+        : 'Отметить пункт может только администратор смены. Ход чек-листа виден здесь, на схеме, и обновляется каждую минуту.';
   }
+  const yes = dlg.querySelector('[data-swyes]'), no = dlg.querySelector('.swacts [data-swno]');
+  yes.hidden = !ask;
+  no.textContent = ask ? 'Нет' : 'Понятно';
   SW.back = trigger || null;
   dlg.hidden = false;
-  dlg.querySelector('[data-swyes]').focus();
+  (ask ? yes : no).focus();
 }
 function swAnswer(yes) {
   const dlg = document.getElementById('swask'); if (!dlg || dlg.hidden) return;
@@ -1664,11 +1761,10 @@ function renderShiftWork() {
 }
 /* The checklist goes under the compact «Обзор клуба», the tasks above «Лента клуба». */
 function placeShiftWork() {
-  if (!swOn()) return;
   const cl = document.getElementById('swcl'), tk = document.getElementById('swtk');
   const stage = document.getElementById('stage'), panelEl = document.getElementById('panel'), feedEl = document.querySelector('.feed');
   if (!cl || !tk || !stage) return;
-  const show = view.type === 'home' && !editing && !isPhone();
+  const show = swOn() && view.type === 'home' && !editing && !isPhone();
   cl.hidden = !show; tk.hidden = !show;
   if (!show) return;
   // the overview grows over the checklist while hovered; keep the checklist where it was

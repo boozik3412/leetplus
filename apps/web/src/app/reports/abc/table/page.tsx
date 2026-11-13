@@ -1,5 +1,6 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { SimpleReportTable } from "@/components/simple-report-table";
+import { AbcRatingView } from "@/components/abc-rating-view";
+import { isAbcCellKey, isAbcRatingView } from "@/lib/abc-rating";
 import { requirePageAccess } from "@/lib/auth";
 import { getSkuPerformanceReport } from "@/lib/reports";
 import { getStores } from "@/lib/stores";
@@ -40,23 +41,8 @@ export default async function SkuRatingTablePage({
     }),
     getStores(),
   ]);
-  const byRevenue = [...report.rows].sort((a, b) => b.revenue - a.revenue);
-  const rows = byRevenue.map((row, index) => ({
-    rank: index + 1,
-    article: row.article,
-    name: row.name,
-    categoryName: row.categoryName ?? "Без категории",
-    supplierName: row.supplierName ?? "Без поставщика",
-    abcRevenueGroup: row.abcRevenueGroup,
-    abcProfitGroup: row.abcProfitGroup,
-    soldQuantity: row.soldQuantity,
-    revenue: row.revenue,
-    grossProfit: row.grossProfit,
-    marginPercent: row.marginPercent,
-    revenueSharePercent: row.revenueSharePercent,
-    profitSharePercent: row.profitSharePercent,
-    salesPerFacing: row.salesPerFacing,
-  }));
+  const view = searchParam(params.view);
+  const cell = searchParam(params.cell);
 
   return (
     <main className="min-h-screen bg-[var(--background)] text-zinc-950">
@@ -69,11 +55,9 @@ export default async function SkuRatingTablePage({
               Рейтинг SKU и ABC
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-zinc-600">
-              Продажи за {formatDateLabel(report.from)} —{" "}
-              {formatDateLabel(report.to)} по дням клуба: место по выручке,
-              группы ABC по выручке и прибыли, доли и эффективность фейса.
-              Фильтруйте по группе, категории или поставщику и сортируйте по
-              любой колонке.
+              Какие товары приносят основные деньги, а какие только занимают
+              полку. Продажи за {formatDateLabel(report.from)} —{" "}
+              {formatDateLabel(report.to)} по дням клуба.
             </p>
           </div>
           <a
@@ -125,53 +109,10 @@ export default async function SkuRatingTablePage({
           </button>
         </form>
       </div>
-      <SimpleReportTable
-        title="Рейтинг SKU и ABC"
-        rows={rows}
-        columns={[
-          { key: "rank", label: "Место", align: "right" },
-          { key: "article", label: "Артикул" },
-          { key: "name", label: "Товар" },
-          { key: "categoryName", label: "Категория" },
-          { key: "supplierName", label: "Поставщик" },
-          {
-            key: "abcRevenueGroup",
-            label: "ABC выручка",
-            tooltip:
-              "A — товары, дающие первые 80% выручки, B — следующие 15%, C — остальное.",
-          },
-          {
-            key: "abcProfitGroup",
-            label: "ABC прибыль",
-            tooltip: "То же разбиение по валовой прибыли.",
-          },
-          { key: "soldQuantity", label: "Продано", align: "right" },
-          { key: "revenue", label: "Выручка", align: "right" },
-          { key: "grossProfit", label: "Прибыль", align: "right" },
-          { key: "marginPercent", label: "Маржа, %", align: "right" },
-          {
-            key: "revenueSharePercent",
-            label: "Доля выручки, %",
-            align: "right",
-          },
-          {
-            key: "profitSharePercent",
-            label: "Доля прибыли, %",
-            align: "right",
-          },
-          {
-            key: "salesPerFacing",
-            label: "Продажи на фейс",
-            align: "right",
-          },
-        ]}
-        filters={[
-          { key: "name", label: "Товар", type: "text" },
-          { key: "abcRevenueGroup", label: "ABC выручка", type: "select" },
-          { key: "abcProfitGroup", label: "ABC прибыль", type: "select" },
-          { key: "categoryName", label: "Категория", type: "multi-select" },
-          { key: "supplierName", label: "Поставщик", type: "multi-select" },
-        ]}
+      <AbcRatingView
+        report={report}
+        initialView={isAbcRatingView(view) ? view : "matrix"}
+        initialCell={isAbcCellKey(cell) ? cell : null}
       />
     </main>
   );

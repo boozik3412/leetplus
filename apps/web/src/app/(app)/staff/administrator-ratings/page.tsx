@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AdminRatingPanel } from "@/components/admin-rating-panel";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffControlTabs } from "@/components/staff-control-tabs";
 import { requirePageAccess } from "@/lib/auth";
@@ -6,17 +7,10 @@ import {
   getStaffAdministratorRatings,
   type StaffAdministratorRating,
   type StaffDisciplineFilters,
-  type StaffDisciplineRiskLevel,
 } from "@/lib/staff-discipline";
-import { getRoleLabel } from "@/lib/roles";
+import type { AdminRatingView } from "@/lib/staff-admin-rating";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
-
-const riskLabels: Record<StaffDisciplineRiskLevel, string> = {
-  LOW: "Норма",
-  MEDIUM: "Внимание",
-  HIGH: "Риск",
-};
 
 function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -41,30 +35,6 @@ function formatMoney(value: number) {
   return `${formatNumber(Math.round(value))} руб`;
 }
 
-function riskClass(level: StaffDisciplineRiskLevel) {
-  if (level === "HIGH") {
-    return "border-red-200 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-500/10 dark:text-red-200";
-  }
-
-  if (level === "MEDIUM") {
-    return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-500/10 dark:text-amber-200";
-  }
-
-  return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-500/10 dark:text-emerald-200";
-}
-
-function scoreBarClass(level: StaffDisciplineRiskLevel) {
-  if (level === "HIGH") {
-    return "bg-red-500";
-  }
-
-  if (level === "MEDIUM") {
-    return "bg-amber-400";
-  }
-
-  return "bg-emerald-500";
-}
-
 export default async function StaffAdministratorRatingsPage({
   searchParams,
 }: {
@@ -73,6 +43,7 @@ export default async function StaffAdministratorRatingsPage({
   const user = await requirePageAccess("/staff/administrator-ratings");
   const params = await searchParams;
   const report = await getStaffAdministratorRatings(resolveFilters(params));
+  const rowsById = new Map(report.rows.map((row) => [row.id, row]));
   const cards = [
     { label: "Администраторы", value: report.summary.administrators },
     { label: "Средний рейтинг", value: `${report.summary.averageScore}%` },
@@ -103,9 +74,10 @@ export default async function StaffAdministratorRatingsPage({
               Рейтинг администраторов
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Общий рейтинг собирает соблюдение регламентов, выполнение
-              чеклистов, результаты аттестации, предупреждения и штрафы в одну
-              управленческую картину по администраторам.
+              Каждый администратор начинает период со 100 баллов. Эскалации
+              чек-листов, штрафы, предупреждения и просроченные задачи их
+              снимают, средний чек двигает в обе стороны. Регламенты и
+              аттестация показаны справочно и на балл не влияют.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -196,122 +168,94 @@ export default async function StaffAdministratorRatingsPage({
           </div>
         </form>
 
-        <section className="mt-6 space-y-3">
-          {report.rows.length > 0 ? (
-            report.rows.map((row) => <RatingRow key={row.id} row={row} />)
-          ) : (
-            <div className="rounded-lg border border-dashed border-zinc-300 p-5 text-sm text-zinc-500 dark:border-zinc-700">
-              Администраторы по выбранным фильтрам не найдены.
-            </div>
-          )}
-        </section>
+        <div className="mt-6">
+          <AdminRatingPanel
+            rows={report.rows.map(toAdminRatingView)}
+            emptyText="Администраторы по выбранным фильтрам не найдены."
+            renderExtra={(view) => {
+              const row = rowsById.get(view.id);
+              return row ? <ReferenceFacts row={row} /> : null;
+            }}
+          />
+        </div>
       </div>
     </main>
   );
 }
 
-function RatingRow({ row }: { row: StaffAdministratorRating }) {
-  return (
-    <article className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">
-            {row.user.fullName ?? row.user.email}
-          </h2>
-          <p className="mt-1 text-xs text-zinc-500">
-            {getRoleLabel(row.user.role)} ·{" "}
-            {row.user.stores.length > 0
-              ? row.user.stores.map((store) => store.name).join(", ")
-              : "вся сеть"}
-          </p>
-        </div>
-        <span
-          className={[
-            "inline-flex rounded-full border px-2.5 py-1 text-xs font-bold uppercase",
-            riskClass(row.riskLevel),
-          ].join(" ")}
-        >
-          {riskLabels[row.riskLevel]}
-        </span>
-      </div>
-
-      <div className="mt-4">
-        <div className="flex items-center justify-between text-xs text-zinc-500">
-          <span>Итоговый рейтинг</span>
-          <span>{row.score}%</span>
-        </div>
-        <div className="mt-1 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
-          <div
-            className={["h-full rounded-full", scoreBarClass(row.riskLevel)].join(
-              " ",
-            )}
-            style={{ width: `${row.score}%` }}
-          />
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <CriterionCard
-          title="Регламенты"
-          score={row.regulations.score}
-          detail={`${row.regulations.acknowledged}/${row.regulations.required} ознакомлений`}
-        />
-        <CriterionCard
-          title="Чеклисты"
-          score={row.checklists.score}
-          detail={`${row.checklists.accepted}/${row.checklists.total} принято, провалов: ${row.checklists.failedItems}`}
-        />
-        <CriterionCard
-          title="Аттестация"
-          score={row.attestation.score ?? 100}
-          detail={
-            row.attestation.score === null
-              ? "нет результата"
-              : row.attestation.passed
-                ? "сдана"
-                : "не сдана"
-          }
-        />
-        <CriterionCard
-          title="Предупреждения и штрафы"
-          score={row.discipline.score}
-          detail={`${row.discipline.warnings} пред., ${row.discipline.fines} штрафов, ${formatMoney(row.discipline.fineAmount)}`}
-        />
-      </div>
-
-      {row.discipline.byCategory.length > 0 ? (
-        <div className="mt-4 flex flex-wrap gap-2 text-xs">
-          {row.discipline.byCategory.map((category) => (
-            <span
-              key={category.category}
-              className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
-            >
-              {category.category}: {category.warnings} пред., {category.fines}{" "}
-              штрафов
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </article>
-  );
+function toAdminRatingView(row: StaffAdministratorRating): AdminRatingView {
+  return {
+    id: row.id,
+    user: row.user,
+    score: row.score,
+    riskLevel: row.riskLevel,
+    items: row.rating?.items ?? [],
+    counts: row.rating?.counts ?? {
+      escalatedChecklists: 0,
+      fines: 0,
+      warnings: 0,
+      overdueTasks: 0,
+    },
+    averageCheck: row.rating?.averageCheck ?? {
+      day: emptyCheck("DAY"),
+      night: emptyCheck("NIGHT"),
+    },
+    linkedToLangame: row.rating?.linkedToLangame ?? false,
+    shiftsTotal: row.rating?.shiftsTotal ?? 0,
+  };
 }
 
-function CriterionCard({
-  title,
-  score,
-  detail,
-}: {
-  title: string;
-  score: number;
-  detail: string;
-}) {
+function emptyCheck(shiftKind: "DAY" | "NIGHT") {
+  return {
+    shiftKind,
+    shifts: 0,
+    average: null,
+    clubAverage: null,
+    deltaPercent: null,
+    points: 0,
+  };
+}
+
+/** Context that does not change the score. */
+function ReferenceFacts({ row }: { row: StaffAdministratorRating }) {
+  const facts = [
+    {
+      title: "Регламенты",
+      detail: `${row.regulations.acknowledged} из ${row.regulations.required} прочитано`,
+    },
+    {
+      title: "Чек-листы",
+      detail: `${row.checklists.accepted} из ${row.checklists.total} принято, возвратов ${row.checklists.returned}, проблемных пунктов ${row.checklists.failedItems}`,
+    },
+    {
+      title: "Аттестация",
+      detail:
+        row.attestation.score === null
+          ? "нет результата"
+          : `${row.attestation.passed ? "сдана" : "не сдана"}, ${row.attestation.score}%`,
+    },
+    {
+      title: "Сумма штрафов",
+      detail: formatMoney(row.discipline.fineAmount),
+    },
+  ];
+
   return (
-    <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-semibold">{title}</p>
-        <span className="text-sm font-bold">{score}%</span>
-      </div>
-      <p className="mt-2 text-xs text-zinc-500">{detail}</p>
+    <div className="mt-3">
+      <h3 className="text-xs font-semibold uppercase text-zinc-500">
+        Справочно, на балл не влияет
+      </h3>
+      <dl className="mt-1 grid gap-2 text-xs sm:grid-cols-2">
+        {facts.map((fact) => (
+          <div
+            key={fact.title}
+            className="rounded-md border border-zinc-200 px-2.5 py-2 dark:border-zinc-800"
+          >
+            <dt className="font-semibold">{fact.title}</dt>
+            <dd className="mt-0.5 text-zinc-500">{fact.detail}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }

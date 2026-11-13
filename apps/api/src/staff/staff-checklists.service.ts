@@ -772,6 +772,58 @@ export class StaffChecklistsService {
     };
   }
 
+  /**
+   * Checklist runs of the administrator of the open Langame shift in one
+   * club, for «Режим администратора смены» on «Схема клуба». The floor plan
+   * has already checked the viewer's role and that `adminUserId` is the shift
+   * administrator; here the club must be readable for the viewer. Active
+   * runs plus the ones of the last 14 hours, newest first.
+   */
+  async getShiftAdminRuns(
+    user: AuthenticatedUser,
+    storeId: string,
+    adminUserId: string,
+    now = new Date(),
+  ): Promise<StaffChecklistRunResponse[]> {
+    const access = await this.accessPolicy.resolve(user);
+    this.accessPolicy.assertRequestedStore(access, storeId);
+    const rows = await this.prisma.staffChecklistRun.findMany({
+      where: {
+        AND: [
+          { tenantId: access.tenantId },
+          {
+            OR: [
+              {
+                storeId,
+                OR: [
+                  { assignedToUserId: adminUserId },
+                  { assignedToUserId: null },
+                ],
+              },
+              { storeId: null, assignedToUserId: adminUserId },
+            ],
+          },
+          { status: { not: 'CANCELED' } },
+          {
+            OR: [
+              {
+                status: {
+                  in: ['OPEN', 'IN_PROGRESS', 'RETURNED', 'ESCALATED'],
+                },
+              },
+              { updatedAt: { gte: new Date(now.getTime() - 14 * 3_600_000) } },
+            ],
+          },
+          this.accessPolicy.readableRunWhere(access),
+        ],
+      },
+      include: checklistRunInclude,
+      orderBy: [{ scheduledAt: 'desc' }, { createdAt: 'desc' }],
+      take: 20,
+    });
+    return rows.map((row) => this.toRunResponse(row));
+  }
+
   async getExecutionReport(
     user: AuthenticatedUser,
     query: StaffChecklistExecutionReportQuery = {},

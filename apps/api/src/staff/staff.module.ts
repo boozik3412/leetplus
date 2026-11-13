@@ -123,6 +123,6 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffDisciplineService,
     StaffSalaryService,
   ],
-  exports: [StaffTeamChatService],
+  exports: [StaffTeamChatService, StaffChecklistsService, StaffTasksService],
 })
 export class StaffModule {}

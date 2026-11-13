@@ -441,6 +441,22 @@ describe('StoreFloorPlanLiveService', () => {
     });
   });
 
+  it('finds the LeetPlus account of the shift administrator', async () => {
+    prisma.staffMember.findFirst.mockResolvedValue({
+      displayName: 'Иванова Мария Сергеевна',
+      userId: 'user-admin',
+    });
+    const shift = await service.shiftAdminOf('store-kh', user, NOW);
+
+    expect(shift).toMatchObject({
+      status: 'LIVE',
+      admin: { name: 'Иванова Мария Сергеевна', userId: 'user-admin' },
+      failed: false,
+    });
+    const view = await service.get('store-kh', user, NOW);
+    expect(JSON.stringify(view)).not.toContain('user-admin');
+  });
+
   it('lists the game mechanics running in the club now', async () => {
     const view = await service.get('store-kh', user, NOW);
 

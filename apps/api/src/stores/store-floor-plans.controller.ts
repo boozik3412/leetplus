@@ -16,6 +16,10 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { StoreFloorPlanAttentionService } from './store-floor-plan-attention.service';
 import { StoreFloorPlanLiveService } from './store-floor-plan-live.service';
 import {
+  SHIFT_ADMIN_VIEWER_ROLES,
+  StoreFloorPlanShiftAdminService,
+} from './store-floor-plan-shift-admin.service';
+import {
   StoreFloorPlansService,
   type SaveStoreFloorPlanDto,
 } from './store-floor-plans.service';
@@ -29,6 +33,7 @@ export class StoreFloorPlansController {
     private readonly storeFloorPlansService: StoreFloorPlansService,
     private readonly storeFloorPlanLiveService: StoreFloorPlanLiveService,
     private readonly storeFloorPlanAttentionService: StoreFloorPlanAttentionService,
+    private readonly storeFloorPlanShiftAdminService: StoreFloorPlanShiftAdminService,
   ) {}
 
   @Roles(...TENANT_USER_ROLES)
@@ -89,6 +94,20 @@ export class StoreFloorPlansController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.storeFloorPlanLiveService.getGameCompletions(id, user);
+  }
+
+  /**
+   * «Режим администратора смены»: checklist and tasks of the administrator
+   * of the open Langame shift, for a senior administrator and above.
+   */
+  @Roles(...SHIFT_ADMIN_VIEWER_ROLES)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get(':id/floor-plan/live/shift-admin')
+  getFloorPlanShiftAdmin(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.storeFloorPlanShiftAdminService.getShiftAdminWork(id, user);
   }
 
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)

@@ -46,6 +46,17 @@ export type GameEffectCohortView = {
   cost: { bonusRub: number; prizes: number; bonusPerGuest: number | null };
   moneyPerBonusRub: number | null;
   verdict: GameEffectVerdict;
+  /** First and last start day (YYYY-MM-DD) of measured guests, null if none. */
+  measuredFrom: string | null;
+  measuredTo: string | null;
+};
+
+/** Start-day filter of the report; null ends are open. */
+export type GameEffectPeriod = {
+  from: string | null;
+  to: string | null;
+  /** Latest start day whose whole window has passed. */
+  measurableTo: string;
 };
 
 export type GameEffectHoldoutView = {
@@ -83,6 +94,7 @@ export type GameEffectReport = {
   windowDays: number;
   lastCompleteDay: string;
   storeId: string | null;
+  period: GameEffectPeriod;
   stores: Array<{ id: string; name: string }>;
   dataQuality: {
     transactionsDated: number;
@@ -389,6 +401,151 @@ export function gameEffectHoldoutStatus(holdout: GameEffectHoldoutView | null) {
   return base;
 }
 
+const MONTH_FULL_NAMES = [
+  "Январь",
+  "Февраль",
+  "Март",
+  "Апрель",
+  "Май",
+  "Июнь",
+  "Июль",
+  "Август",
+  "Сентябрь",
+  "Октябрь",
+  "Ноябрь",
+  "Декабрь",
+];
+
+/** "2026-10-01" → "01.10.2026", without time zone shifts. */
+export function formatGameEffectDay(day: string): string {
+  const [year, month, date] = day.slice(0, 10).split("-");
+  return `${date}.${month}.${year}`;
+}
+
+/** Last day of a `YYYY-MM` month as `YYYY-MM-DD`. */
+function monthEnd(month: string): string {
+  const [year, value] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, value, 0)).toISOString().slice(0, 10);
+}
+
+function shiftMonth(month: string, count: number): string {
+  const [year, value] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, value - 1 + count, 1))
+    .toISOString()
+    .slice(0, 7);
+}
+
+export type GameEffectPeriodRange = { from: string | null; to: string | null };
+
+export type GameEffectPeriodPreset = GameEffectPeriodRange & {
+  id: string;
+  label: string;
+};
+
+export const GAME_EFFECT_ALL_TIME: GameEffectPeriodPreset = {
+  id: "all",
+  label: "За всё время",
+  from: null,
+  to: null,
+};
+
+/** «За всё время» and the last `count` calendar months, newest first. */
+export function gameEffectPeriodPresets(
+  today: string,
+  count = 12,
+): GameEffectPeriodPreset[] {
+  const current = today.slice(0, 7);
+  const months = Array.from({ length: count }, (_, index) => {
+    const month = shiftMonth(current, -index);
+    const [year, value] = month.split("-");
+    return {
+      id: month,
+      label: `${MONTH_FULL_NAMES[Number(value) - 1]} ${year}`,
+      from: `${month}-01`,
+      to: monthEnd(month),
+    };
+  });
+  return [GAME_EFFECT_ALL_TIME, ...months];
+}
+
+/** Preset id of a range, or "custom" when no preset matches. */
+export function gameEffectPeriodPresetId(
+  presets: readonly GameEffectPeriodPreset[],
+  range: GameEffectPeriodRange,
+): string {
+  return (
+    presets.find(
+      (preset) => preset.from === range.from && preset.to === range.to,
+    )?.id ?? "custom"
+  );
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/u;
+
+/** Reads `periodFrom`/`periodTo` from the page URL; broken values are dropped. */
+export function gameEffectPeriodFromSearch(
+  search: string,
+): GameEffectPeriodRange {
+  const params = new URLSearchParams(search);
+  const read = (key: string) => {
+    const value = params.get(key);
+    return value && ISO_DAY.test(value) ? value : null;
+  };
+  const from = read("periodFrom");
+  const to = read("periodTo");
+  if (from && to && from > to) return { from: null, to: null };
+  return { from, to };
+}
+
+/** Human range of start days: "с 01.10.2026 по 31.10.2026". */
+export function formatGameEffectRange(range: GameEffectPeriodRange): string {
+  if (range.from && range.to) {
+    return range.from === range.to
+      ? formatGameEffectDay(range.from)
+      : `с ${formatGameEffectDay(range.from)} по ${formatGameEffectDay(range.to)}`;
+  }
+  if (range.from) return `с ${formatGameEffectDay(range.from)}`;
+  if (range.to) return `по ${formatGameEffectDay(range.to)}`;
+  return "за всё время";
+}
+
+/**
+ * The sentence that says what period the numbers cover: whose start days are
+ * in, which of them could be measured yet and the data date.
+ */
+export function gameEffectPeriodSummary(report: GameEffectReport): string {
+  const period = report.period;
+  const game = report.game;
+  const window = report.windowDays;
+  const chosen = period.from || period.to;
+  const parts: string[] = [];
+  parts.push(
+    chosen
+      ? `Игроки, которые начали ${formatGameEffectRange(period)}.`
+      : "Все игроки с начала игры.",
+  );
+  if (game.measuredFrom && game.measuredTo) {
+    parts.push(
+      `Измерены старты ${formatGameEffectRange({ from: game.measuredFrom, to: game.measuredTo })}: у каждого ${window} дней до старта против ${window} дней после.`,
+    );
+  } else {
+    parts.push("Измеренных игроков в этом периоде нет.");
+  }
+  if (!period.to || period.to > period.measurableTo) {
+    parts.push(
+      `Старт после ${formatGameEffectDay(period.measurableTo)} пока не измерить: ${window} дней после него ещё не прошли.`,
+    );
+  }
+  parts.push(`Данные по ${formatGameEffectDay(report.lastCompleteDay)}.`);
+  return parts.join(" ");
+}
+
+/** Short start range of one cohort for a scenario card. */
+export function gameEffectCohortRange(cohort: GameEffectCohortView): string {
+  if (!cohort.measuredFrom || !cohort.measuredTo) return "";
+  return `старт ${formatGameEffectRange({ from: cohort.measuredFrom, to: cohort.measuredTo })}`;
+}
+
 function csvCell(value: unknown) {
   const text = value === null || value === undefined ? "" : String(value);
   return /[",\n;]/u.test(text) ? `"${text.replace(/"/gu, '""')}"` : text;
@@ -404,6 +561,8 @@ export function gameEffectReportCsv(report: GameEffectReport): string {
     "Окно ещё идёт",
     "Без пары",
     "Гостей в сравнении",
+    "Старт измеренных: с",
+    "Старт измеренных: по",
     ...GAME_EFFECT_METRICS.flatMap((metric) => [
       `${GAME_EFFECT_METRIC_LABELS[metric]}: до`,
       `${GAME_EFFECT_METRIC_LABELS[metric]}: после`,
@@ -441,6 +600,8 @@ export function gameEffectReportCsv(report: GameEffectReport): string {
     cohort.immature,
     cohort.unmatched,
     cohort.comparisonGuests,
+    cohort.measuredFrom ? formatGameEffectDay(cohort.measuredFrom) : "",
+    cohort.measuredTo ? formatGameEffectDay(cohort.measuredTo) : "",
     ...GAME_EFFECT_METRICS.flatMap((metric) => {
       const view = cohort.metrics[metric];
       return [

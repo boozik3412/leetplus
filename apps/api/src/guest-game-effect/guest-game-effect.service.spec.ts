@@ -254,6 +254,75 @@ describe('GuestGameEffectService', () => {
     ]);
   });
 
+  it('keeps every start day without a period and names the measured range', async () => {
+    const { service } = createService();
+    const report = await service.getReport('tenant-1');
+
+    expect(report.period).toEqual({
+      from: null,
+      to: null,
+      // Last complete day 13.10 minus the 28-day window.
+      measurableTo: '2026-09-15',
+    });
+    expect(report.game.measuredFrom).toBe(ACTIVATION);
+    expect(report.game.measuredTo).toBe(ACTIVATION);
+    const mission = report.scenarios.find((row) => row.id === 'mission-1');
+    expect(mission?.cohort.measuredFrom).toBe(ACTIVATION);
+  });
+
+  it('measures only guests who started inside the period', async () => {
+    const { service } = createService({
+      monthlyVisits: [
+        { guestId: 'player-0', month: '2026-08' },
+        { guestId: 'player-0', month: '2026-09' },
+        { guestId: 'player-0', month: '2026-10' },
+      ],
+    });
+    const september = await service.getReport('tenant-1', {
+      from: '2026-09-01',
+      to: '2026-09-30',
+    });
+    expect(september.period).toMatchObject({
+      from: '2026-09-01',
+      to: '2026-09-30',
+    });
+    expect(september.game.participants).toBe(12);
+    expect(september.game.measured).toBe(12);
+    expect(september.game.metrics.visitDays.effect).toBe(6);
+    expect(september.costByMonth.map((row) => row.month)).toEqual(['2026-09']);
+    expect(september.returnByMonth.map((row) => row.month)).toEqual([
+      '2026-09',
+    ]);
+
+    const october = await service.getReport('tenant-1', {
+      from: '2026-10-01',
+    });
+    expect(october.game.participants).toBe(0);
+    expect(october.game.measuredFrom).toBeNull();
+    expect(october.game.verdict).toBe('NOT_ENOUGH_DATA');
+    const mission = october.scenarios.find((row) => row.id === 'mission-1');
+    expect(mission?.cohort.participants).toBe(0);
+    expect(october.costByMonth).toEqual([]);
+
+    const untilAugust = await service.getReport('tenant-1', {
+      to: '2026-08-31',
+    });
+    expect(untilAugust.game.participants).toBe(0);
+  });
+
+  it('rejects a broken period', async () => {
+    const { service } = createService();
+    await expect(
+      service.getReport('tenant-1', { from: '01.09.2026' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.getReport('tenant-1', { to: '2026-02-30' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.getReport('tenant-1', { from: '2026-10-01', to: '2026-09-01' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('filters the report to the home club of guests', async () => {
     const { service } = createService();
     const report = await service.getReport('tenant-1', { storeId: 'store-2' });

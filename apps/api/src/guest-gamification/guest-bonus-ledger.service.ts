@@ -3060,6 +3060,8 @@ export class GuestBonusLedgerService {
         where: {
           tenantId,
           phone: { not: null },
+          // Admins removed from Langame no longer mark guests as staff.
+          missingFromSourceAt: null,
         },
         select: { phone: true },
         take: 1000,

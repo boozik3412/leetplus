@@ -1007,12 +1007,19 @@ export type StaffOperatorShiftDetail = {
   signals: StaffControlAnomalyType[];
 };
 
+export type StaffOperatorStaffMember = {
+  id: string;
+  displayName: string;
+};
+
 export type StaffOperatorReportRow = {
   externalDomain: string | null;
   externalUserId: string;
   mappingId: string | null;
   mappingNote: string | null;
   linkedGuest: GuestDashboardRow | null;
+  /** The main link: the LeetPlus staff card with this Langame user_id. */
+  staffMember: StaffOperatorStaffMember | null;
   langameUser: StaffLangameUserSummary | null;
   storeNames: string[];
   lastClosedShiftExternalShiftId: string | null;
@@ -1137,6 +1144,7 @@ type StaffOperatorMetrics = StaffShiftMetrics & {
   externalDomain: string | null;
   externalUserId: string;
   linkedGuest: GuestDashboardRow | null;
+  staffMember: StaffOperatorStaffMember | null;
   langameUser: StaffLangameUserSummary | null;
   mappingId: string | null;
   mappingNote: string | null;
@@ -3434,12 +3442,13 @@ export class GuestsService {
         'Комментарий привязки',
       ],
       ...report.rows.map((row) => [
-        row.linkedGuest?.displayName ??
+        row.staffMember?.displayName ??
+          row.linkedGuest?.displayName ??
           row.langameUser?.displayName ??
           `user_id ${row.externalUserId}`,
         row.externalUserId,
         row.externalDomain,
-        row.linkedGuest ? 'Привязан' : 'Без привязки',
+        row.staffMember ? 'Привязан' : 'Без привязки',
         row.mappingId,
         row.storeNames.join(', '),
         row.lastClosedShiftExternalShiftId,
@@ -6333,99 +6342,107 @@ export class GuestsService {
       externalUserId: string;
     },
   ): Promise<StaffOperatorReportRow[]> {
-    const [rows, mappings, groupsByKey, sales, sessions, langameUsersByKey] =
-      await Promise.all([
-        this.prisma.guestWorkingShift.findMany({
-          where: {
-            tenantId,
-            startedAt: { gte: period.fromDate, lte: period.toDate },
-            ...(storeId ? { storeId } : {}),
-            externalUserId: identity ? identity.externalUserId : { not: null },
-            ...(identity?.externalDomain
-              ? { externalDomain: identity.externalDomain }
-              : {}),
-          },
-          select: {
-            guestId: true,
-            storeId: true,
-            externalDomain: true,
-            externalShiftId: true,
-            externalUserId: true,
-            startedAt: true,
-            stoppedAt: true,
-            durationMinutes: true,
-            cashAmount: true,
-            cashlessAmount: true,
-            refundsCash: true,
-            refundsCashless: true,
-            mobilePay: true,
-            yandexPay: true,
-            incassAmount: true,
-            middleCheck: true,
-            store: { select: { name: true, timeZone: true } },
-            guest: { select: this.guestSelect() },
-          },
-        }),
-        this.prisma.guestStaffIdentityMapping.findMany({
-          where: {
-            tenantId,
-            externalProvider: IntegrationProvider.LANGAME,
-            ...(identity
-              ? {
-                  externalUserId: identity.externalUserId,
-                  ...(identity.externalDomain
-                    ? { externalDomain: identity.externalDomain }
-                    : {}),
-                }
-              : {}),
-          },
-          select: {
-            id: true,
-            externalDomain: true,
-            externalUserId: true,
-            note: true,
-            guest: { select: this.guestSelect() },
-          },
-        }),
-        this.loadGuestGroups(tenantId),
-        this.prisma.salesFact.findMany({
-          where: {
-            tenantId,
-            saleDate: { gte: period.fromDate, lte: period.toDate },
-            isCanceled: false,
-            ...(storeId ? { storeId } : {}),
-          },
-          select: {
-            storeId: true,
-            saleDate: true,
-            revenue: true,
-            productNameAtSale: true,
-            product: {
-              select: {
-                name: true,
-                category: { select: { name: true } },
-              },
+    const [
+      rows,
+      mappings,
+      groupsByKey,
+      sales,
+      sessions,
+      langameUsersByKey,
+      staffMembersByKey,
+    ] = await Promise.all([
+      this.prisma.guestWorkingShift.findMany({
+        where: {
+          tenantId,
+          startedAt: { gte: period.fromDate, lte: period.toDate },
+          ...(storeId ? { storeId } : {}),
+          externalUserId: identity ? identity.externalUserId : { not: null },
+          ...(identity?.externalDomain
+            ? { externalDomain: identity.externalDomain }
+            : {}),
+        },
+        select: {
+          guestId: true,
+          storeId: true,
+          externalDomain: true,
+          externalShiftId: true,
+          externalUserId: true,
+          startedAt: true,
+          stoppedAt: true,
+          durationMinutes: true,
+          cashAmount: true,
+          cashlessAmount: true,
+          refundsCash: true,
+          refundsCashless: true,
+          mobilePay: true,
+          yandexPay: true,
+          incassAmount: true,
+          middleCheck: true,
+          store: { select: { name: true, timeZone: true } },
+          guest: { select: this.guestSelect() },
+        },
+      }),
+      this.prisma.guestStaffIdentityMapping.findMany({
+        where: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          ...(identity
+            ? {
+                externalUserId: identity.externalUserId,
+                ...(identity.externalDomain
+                  ? { externalDomain: identity.externalDomain }
+                  : {}),
+              }
+            : {}),
+        },
+        select: {
+          id: true,
+          externalDomain: true,
+          externalUserId: true,
+          note: true,
+          guest: { select: this.guestSelect() },
+        },
+      }),
+      this.loadGuestGroups(tenantId),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          saleDate: { gte: period.fromDate, lte: period.toDate },
+          isCanceled: false,
+          ...(storeId ? { storeId } : {}),
+        },
+        select: {
+          storeId: true,
+          saleDate: true,
+          revenue: true,
+          productNameAtSale: true,
+          product: {
+            select: {
+              name: true,
+              category: { select: { name: true } },
             },
           },
-        }),
-        this.prisma.guestSession.findMany({
-          where: {
-            tenantId,
-            startedAt: { gte: period.fromDate, lte: period.toDate },
-            ...(storeId ? { storeId } : {}),
-          },
-          select: {
-            guestId: true,
-            storeId: true,
-            externalDomain: true,
-            externalGuestId: true,
-            externalSessionId: true,
-            startedAt: true,
-            stoppedAt: true,
-          },
-        }),
-        this.loadLangameStaffUsersByOperatorKey(tenantId, identity),
-      ]);
+        },
+      }),
+      this.prisma.guestSession.findMany({
+        where: {
+          tenantId,
+          startedAt: { gte: period.fromDate, lte: period.toDate },
+          ...(storeId ? { storeId } : {}),
+        },
+        select: {
+          guestId: true,
+          storeId: true,
+          externalDomain: true,
+          externalGuestId: true,
+          externalSessionId: true,
+          startedAt: true,
+          stoppedAt: true,
+        },
+      }),
+      this.loadLangameStaffUsersByOperatorKey(tenantId, identity),
+      this.loadStaffMembersByOperatorKey(tenantId),
+    ]);
     const mappingsByKey = new Map(
       mappings.map((mapping) => [
         this.staffOperatorKey(
@@ -6458,6 +6475,7 @@ export class GuestsService {
           linkedGuest
             ? this.toDashboardRow(linkedGuest, undefined, period, groupsByKey)
             : null,
+          staffMembersByKey.get(key) ?? null,
         );
 
       if (!metrics.linkedGuest && linkedGuest) {
@@ -6481,7 +6499,7 @@ export class GuestsService {
       const incassAmount = this.decimalToNumber(row.incassAmount) ?? 0;
       const middleCheck = this.decimalToNumber(row.middleCheck);
       this.addShiftMetrics(metrics, {
-        linked: Boolean(metrics.linkedGuest),
+        linked: Boolean(metrics.staffMember),
         externalShiftId: row.externalShiftId,
         startedAt: row.startedAt,
         stoppedAt: row.stoppedAt,
@@ -6657,6 +6675,30 @@ export class GuestsService {
 
     return Array.from(byOperator.values()).map((metrics) =>
       this.toStaffOperatorReportRow(metrics),
+    );
+  }
+
+  /** Staff cards linked to a Langame user_id, by operator key. */
+  private async loadStaffMembersByOperatorKey(tenantId: string) {
+    const members = await this.prisma.staffMember.findMany({
+      where: {
+        tenantId,
+        externalDomain: { not: null },
+        externalUserId: { not: null },
+      },
+      select: {
+        id: true,
+        displayName: true,
+        externalDomain: true,
+        externalUserId: true,
+      },
+    });
+
+    return new Map<string, StaffOperatorStaffMember>(
+      members.map((member) => [
+        this.staffOperatorKey(member.externalDomain, member.externalUserId!),
+        { id: member.id, displayName: member.displayName },
+      ]),
     );
   }
 
@@ -6843,12 +6885,14 @@ export class GuestsService {
     mappingNote: string | null,
     langameUser: StaffLangameUserSummary | null,
     linkedGuest: GuestDashboardRow | null,
+    staffMember: StaffOperatorStaffMember | null = null,
   ): StaffOperatorMetrics {
     return {
       ...this.emptyStaffShiftMetrics(),
       externalDomain,
       externalUserId,
       linkedGuest,
+      staffMember,
       langameUser,
       mappingId,
       mappingNote,
@@ -6897,6 +6941,7 @@ export class GuestsService {
       mappingId: metrics.mappingId,
       mappingNote: metrics.mappingNote,
       linkedGuest: metrics.linkedGuest,
+      staffMember: metrics.staffMember,
       langameUser: metrics.langameUser,
       storeNames: Array.from(metrics.storeNames).sort(),
       lastClosedShiftExternalShiftId: metrics.lastClosedShiftExternalShiftId,
@@ -6967,7 +7012,7 @@ export class GuestsService {
   ): StaffControlAnomalyType[] {
     const signals: StaffControlAnomalyType[] = [];
 
-    if (!metrics.linkedGuest && shift.paymentAmount >= 10000) {
+    if (!metrics.staffMember && shift.paymentAmount >= 10000) {
       signals.push('unmapped-operator');
     }
     if (shift.refundAmount > 0) {
@@ -7247,11 +7292,11 @@ export class GuestsService {
     status: NonNullable<StaffOperatorReportQuery['status']>,
   ) {
     if (status === 'linked') {
-      return Boolean(row.linkedGuest);
+      return Boolean(row.staffMember);
     }
 
     if (status === 'unlinked') {
-      return !row.linkedGuest;
+      return !row.staffMember;
     }
 
     return true;
@@ -7317,6 +7362,7 @@ export class GuestsService {
       row.langameUser?.adminStatus,
       row.langameUser?.phone,
       row.langameUser?.workPointLabel,
+      row.staffMember?.displayName,
       row.linkedGuest?.displayName,
       row.linkedGuest?.externalGuestId,
       row.linkedGuest?.guestGroupName,

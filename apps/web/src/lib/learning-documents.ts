@@ -10,7 +10,33 @@ export type LearningRoleScope =
   | "MANAGER"
   | "STANDARDS_MANAGER";
 
-export type LearningDocumentKind = "COURSE" | "ARTICLE";
+export type LearningDocumentKind = "COURSE" | "ARTICLE" | "TEST";
+
+/**
+ * What the document is, as people name it: a course, a regulation, a script,
+ * a checklist, a plain article, an announcement or a test.
+ */
+export type LearningDocumentType =
+  | "COURSE"
+  | "REGULATION"
+  | "SCRIPT"
+  | "CHECKLIST"
+  | "ARTICLE"
+  | "NOTICE"
+  | "TEST"
+  | "ATTESTATION";
+
+export const learningDocumentTypeLabels: Record<LearningDocumentType, string> =
+  {
+    COURSE: "Курс",
+    REGULATION: "Регламент",
+    SCRIPT: "Скрипт",
+    CHECKLIST: "Чек-лист",
+    ARTICLE: "Статья",
+    NOTICE: "Объявление",
+    TEST: "Тест",
+    ATTESTATION: "Аттестация",
+  };
 
 export type LearningThumbnailBlock = {
   kind: "title" | "heading" | "paragraph" | "item" | "task" | "tabs";
@@ -25,6 +51,7 @@ export type LearningDocumentBadge = {
 export type LearningDocument = {
   id: string;
   kind: LearningDocumentKind;
+  type: LearningDocumentType;
   title: string;
   href: string;
   updatedAt: string;
@@ -63,6 +90,8 @@ export type LearningArticleInput = {
   summary: string | null;
   content: string | null;
   folder: string;
+  category?: string | null;
+  templateKey?: string | null;
   roleScope: LearningRoleScope;
   status: "DRAFT" | "REVIEW" | "RETURNED" | "PUBLISHED" | "ARCHIVED";
   requiresReading: boolean;
@@ -74,6 +103,18 @@ export type LearningArticleInput = {
     requiredByMe: boolean;
     readByMe: boolean;
   };
+};
+
+export type LearningTestInput = {
+  id: string;
+  title: string;
+  description: string | null;
+  roleScope: LearningRoleScope;
+  status: "DRAFT" | "ACTIVE" | "ARCHIVED";
+  assessmentKind: "TEST" | "ATTESTATION";
+  questions: Array<{ title: string }>;
+  updatedAt: string;
+  latestResult: { passed: boolean } | null;
 };
 
 export const learningRoleScopeLabels: Record<LearningRoleScope, string> = {
@@ -88,12 +129,28 @@ export const learningRoleScopeLabels: Record<LearningRoleScope, string> = {
 export const learningFilters = [
   "all",
   "courses",
+  "regulations",
+  "scripts",
+  "checklists",
   "articles",
+  "tests",
   "drafts",
   "to-read",
 ] as const;
 
 export type LearningFilter = (typeof learningFilters)[number];
+
+/** Filters that pick documents by their type; the rest pick by state. */
+export const learningTypeFilters: Partial<
+  Record<LearningFilter, LearningDocumentType[]>
+> = {
+  courses: ["COURSE"],
+  regulations: ["REGULATION"],
+  scripts: ["SCRIPT"],
+  checklists: ["CHECKLIST"],
+  articles: ["ARTICLE", "NOTICE"],
+  tests: ["TEST", "ATTESTATION"],
+};
 
 export function isLearningFilter(value: unknown): value is LearningFilter {
   return (
@@ -278,6 +335,45 @@ function articleThumbnail(article: LearningArticleInput) {
   return [...blocks, ...body].slice(0, THUMBNAIL_BLOCKS + 1);
 }
 
+/** Folder a template of this type puts the article in. */
+const typeFolders: Partial<Record<LearningDocumentType, string>> = {
+  REGULATION: "Регламенты",
+  SCRIPT: "Скрипты",
+  CHECKLIST: "Чек-листы",
+};
+
+/**
+ * The type of a knowledge-base article: from the template it was made from,
+ * otherwise from its folder or category («Регламенты», «Скрипты»…).
+ */
+export function articleDocumentType(
+  article: Pick<
+    LearningArticleInput,
+    "kind" | "templateKey" | "folder" | "category"
+  >,
+): LearningDocumentType {
+  if (article.kind === "INFORMATION") {
+    return "NOTICE";
+  }
+
+  const template = (article.templateKey ?? "").toLowerCase();
+  const place = `${article.folder} ${article.category ?? ""}`.toLowerCase();
+
+  if (template.includes("regulation") || place.includes("регламент")) {
+    return "REGULATION";
+  }
+
+  if (template.includes("script") || place.includes("скрипт")) {
+    return "SCRIPT";
+  }
+
+  if (template.includes("checklist") || /чек-?лист/.test(place)) {
+    return "CHECKLIST";
+  }
+
+  return "ARTICLE";
+}
+
 export function formatLearningDate(value: string) {
   const date = new Date(value);
 
@@ -310,6 +406,7 @@ export function courseToLearningDocument(
   return {
     id: course.id,
     kind: "COURSE",
+    type: "COURSE",
     title: course.title,
     href: `/staff/learning/courses/${encodeURIComponent(course.id)}`,
     updatedAt: course.updatedAt,
@@ -360,18 +457,23 @@ export function articleToLearningDocument(
     article.requiresReading && reading.requiredCount > 0
       ? `Прочитали ${reading.readCount} из ${reading.requiredCount}`
       : learningRoleScopeLabels[article.roleScope];
-  const label = article.kind === "INFORMATION" ? "Объявление · " : "";
+  const type = articleDocumentType(article);
+  const folder =
+    article.folder && article.folder !== typeFolders[type]
+      ? ` · ${article.folder}`
+      : "";
 
   return {
     id: article.id,
     kind: "ARTICLE",
+    type,
     title: article.title,
     href: `/staff/learning/articles/${encodeURIComponent(article.id)}`,
     updatedAt: article.updatedAt,
     roleScope: article.roleScope,
     isDraft,
     requiredForMe: toRead,
-    meta: `${label}${article.folder} · ${formatLearningDate(article.updatedAt)}`,
+    meta: `${learningDocumentTypeLabels[type]}${folder} · ${formatLearningDate(article.updatedAt)}`,
     note,
     noteTone: toRead ? "attention" : "muted",
     badge,
@@ -382,15 +484,82 @@ export function articleToLearningDocument(
   };
 }
 
+function testThumbnail(test: LearningTestInput) {
+  const blocks: LearningThumbnailBlock[] = [
+    { kind: "title", text: clip(test.title) },
+  ];
+
+  if (test.description) {
+    blocks.push({ kind: "paragraph", text: clip(test.description) });
+  }
+
+  if (test.questions.length === 0) {
+    blocks.push({ kind: "paragraph", text: "Вопросов пока нет" });
+  }
+
+  test.questions.slice(0, 6).forEach((question, index) => {
+    blocks.push({
+      kind: "item",
+      text: clip(`${index + 1}. ${question.title}`),
+    });
+  });
+
+  return blocks.slice(0, THUMBNAIL_BLOCKS + 1);
+}
+
+export function testToLearningDocument(
+  test: LearningTestInput,
+): LearningDocument {
+  const type: LearningDocumentType =
+    test.assessmentKind === "ATTESTATION" ? "ATTESTATION" : "TEST";
+  const questions = test.questions.length;
+  const badge: LearningDocumentBadge | null =
+    test.status === "DRAFT"
+      ? { label: "Черновик", tone: "gray" }
+      : test.status === "ARCHIVED"
+        ? { label: "Архив", tone: "gray" }
+        : test.latestResult?.passed
+          ? { label: "Сдан", tone: "green" }
+          : test.latestResult
+            ? { label: "Не сдан", tone: "amber" }
+            : null;
+
+  return {
+    id: test.id,
+    kind: "TEST",
+    type,
+    title: test.title,
+    href: `/staff/assessments?assessmentId=${encodeURIComponent(test.id)}`,
+    updatedAt: test.updatedAt,
+    roleScope: test.roleScope,
+    isDraft: test.status === "DRAFT",
+    requiredForMe: false,
+    meta: `${learningDocumentTypeLabels[type]} · ${questions} ${plural(questions, "вопрос", "вопроса", "вопросов")} · ${formatLearningDate(test.updatedAt)}`,
+    note: learningRoleScopeLabels[test.roleScope],
+    noteTone: "muted",
+    badge,
+    thumbnail: testThumbnail(test),
+    searchText: [
+      test.title,
+      test.description ?? "",
+      ...test.questions.map((question) => question.title),
+    ]
+      .join(" ")
+      .toLowerCase(),
+  };
+}
+
 /** Newest first, the way a document list shows «Недавние». */
 export function buildLearningDocuments(
   courses: LearningCourseInput[],
   articles: LearningArticleInput[],
   now: Date = new Date(),
+  tests: LearningTestInput[] = [],
 ) {
   return [
     ...courses.map(courseToLearningDocument),
     ...articles.map((article) => articleToLearningDocument(article, now)),
+    ...tests.map(testToLearningDocument),
   ].sort(
     (left, right) =>
       new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
@@ -404,12 +573,10 @@ export function filterLearningDocuments(
 ) {
   const query = search.trim().toLowerCase();
 
-  return documents.filter((document) => {
-    if (filter === "courses" && document.kind !== "COURSE") {
-      return false;
-    }
+  const types = learningTypeFilters[filter];
 
-    if (filter === "articles" && document.kind !== "ARTICLE") {
+  return documents.filter((document) => {
+    if (types && !types.includes(document.type)) {
       return false;
     }
 
@@ -425,15 +592,25 @@ export function filterLearningDocuments(
   });
 }
 
-export function countLearningDocuments(documents: LearningDocument[]) {
+export function countLearningDocuments(
+  documents: LearningDocument[],
+): Record<LearningFilter, number> {
+  const ofTypes = (filter: LearningFilter) =>
+    documents.filter((document) =>
+      learningTypeFilters[filter]?.includes(document.type),
+    ).length;
+
   return {
     all: documents.length,
-    courses: documents.filter((document) => document.kind === "COURSE").length,
-    articles: documents.filter((document) => document.kind === "ARTICLE")
-      .length,
+    courses: ofTypes("courses"),
+    regulations: ofTypes("regulations"),
+    scripts: ofTypes("scripts"),
+    checklists: ofTypes("checklists"),
+    articles: ofTypes("articles"),
+    tests: ofTypes("tests"),
     drafts: documents.filter((document) => document.isDraft).length,
     "to-read": documents.filter((document) => document.requiredForMe).length,
-  } satisfies Record<LearningFilter, number>;
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -477,7 +654,22 @@ export type LearningArticleTemplate = {
   };
 };
 
-export type LearningTemplate = LearningCourseTemplate | LearningArticleTemplate;
+export type LearningTestTemplate = {
+  key: string;
+  kind: "TEST";
+  name: string;
+  hint: string;
+  thumbnail: LearningThumbnailBlock[];
+  test: {
+    title: string;
+    roleScope: LearningRoleScope;
+  };
+};
+
+export type LearningTemplate =
+  | LearningCourseTemplate
+  | LearningArticleTemplate
+  | LearningTestTemplate;
 
 function html(...blocks: string[]) {
   return blocks.join("");
@@ -503,9 +695,15 @@ export const learningTemplates: LearningTemplate[] = [
   {
     key: "blank-course",
     kind: "COURSE",
-    name: "Пустой курс",
-    hint: "документ с вкладками",
-    thumbnail: [],
+    name: "Курс",
+    hint: "шаги во вкладках",
+    thumbnail: [
+      { kind: "title", text: "Курс" },
+      { kind: "tabs", text: "1 Введение · 2 Шаг · 3 Задание" },
+      { kind: "paragraph", text: "Чему научит курс и сколько он займёт." },
+      { kind: "item", text: "Шаг курса" },
+      { kind: "task", text: "Задание с наставником" },
+    ],
     course: {
       title: "Новый курс",
       description: null,
@@ -522,10 +720,108 @@ export const learningTemplates: LearningTemplate[] = [
     },
   },
   {
+    key: "article-regulation",
+    kind: "ARTICLE",
+    name: "Регламент",
+    hint: "порядок работы",
+    thumbnail: [
+      { kind: "title", text: "Регламент работы" },
+      { kind: "heading", text: "1. Общие положения" },
+      { kind: "paragraph", text: "Обязанности и порядок работы в клубе." },
+      { kind: "heading", text: "2. Начало смены" },
+      { kind: "item", text: "Приёмка зала" },
+      { kind: "item", text: "Касса и инкассация" },
+    ],
+    article: {
+      title: "Регламент работы",
+      summary: "Обязанности и порядок работы сотрудника в клубе.",
+      content: html(
+        "<h2>1. Общие положения</h2><p>Кого касается регламент и что в нём описано.</p>",
+        "<h2>2. Начало смены</h2><ul><li>Приёмка зала</li><li>Касса</li></ul>",
+        "<h2>3. Во время смены</h2><p>Работа с гостями и залом.</p>",
+        "<h2>4. Закрытие смены</h2><ul><li>Инкассация</li><li>Отчёт управляющему</li></ul>",
+      ),
+      folder: "Регламенты",
+      category: "Регламенты",
+      roleScope: "ADMINISTRATOR",
+      templateKey: "learning-regulation",
+    },
+  },
+  {
+    key: "article-guest-script",
+    kind: "ARTICLE",
+    name: "Скрипт",
+    hint: "что говорить гостю",
+    thumbnail: [
+      { kind: "title", text: "Скрипт общения с гостем" },
+      { kind: "heading", text: "Гость пришёл впервые" },
+      {
+        kind: "paragraph",
+        text: "«Добрый день! Вы у нас впервые? Расскажу про тарифы…»",
+      },
+      { kind: "heading", text: "Гость недоволен" },
+    ],
+    article: {
+      title: "Скрипт общения с гостем",
+      summary: "Что говорить гостю в типичных ситуациях.",
+      content: html(
+        "<h2>Гость пришёл впервые</h2><p>«Добрый день! Вы у нас впервые? Расскажу, как всё устроено и какие есть тарифы.»</p>",
+        "<h2>Гость недоволен</h2><p>Выслушать, извиниться, предложить решение, позвать старшего, если нужно.</p>",
+        "<h2>Гость спрашивает про акции</h2><p>Назвать действующие акции и предложить подходящую.</p>",
+      ),
+      folder: "Скрипты",
+      category: "Сервис",
+      roleScope: "ALL_STAFF",
+      templateKey: "learning-guest-script",
+    },
+  },
+  {
+    key: "article-checklist",
+    kind: "ARTICLE",
+    name: "Чек-лист",
+    hint: "пункты проверки",
+    thumbnail: [
+      { kind: "title", text: "Чек-лист уборки" },
+      { kind: "item", text: "☐ Протереть игровые места" },
+      { kind: "item", text: "☐ Пополнить санузлы" },
+      { kind: "item", text: "☐ Вынести мусор" },
+      { kind: "item", text: "☐ Помыть гриль" },
+    ],
+    article: {
+      title: "Чек-лист",
+      summary: "Пункты, которые нужно проверить.",
+      content: html(
+        "<ul><li>☐ Первый пункт</li><li>☐ Второй пункт</li><li>☐ Третий пункт</li></ul>",
+      ),
+      folder: "Чек-листы",
+      category: "Чистота",
+      roleScope: "ADMINISTRATOR",
+      templateKey: "learning-checklist",
+    },
+  },
+  {
+    key: "test-blank",
+    kind: "TEST",
+    name: "Тест",
+    hint: "вопросы и ответы",
+    thumbnail: [
+      { kind: "title", text: "Тест" },
+      { kind: "item", text: "1. Вопрос" },
+      { kind: "paragraph", text: "○ Вариант ответа" },
+      { kind: "paragraph", text: "● Правильный ответ" },
+      { kind: "item", text: "2. Вопрос" },
+      { kind: "paragraph", text: "○ Вариант ответа" },
+    ],
+    test: {
+      title: "Новый тест",
+      roleScope: "ADMINISTRATOR",
+    },
+  },
+  {
     key: "course-administrator-onboarding",
     kind: "COURSE",
     name: "Онбординг администратора",
-    hint: "курс · 11 вкладок",
+    hint: "готовый курс",
     thumbnail: [
       { kind: "title", text: "Онбординг администратора" },
       { kind: "tabs", text: "1 Добро пожаловать · 2 Регламент · 3 Langame" },
@@ -616,7 +912,7 @@ export const learningTemplates: LearningTemplate[] = [
     key: "course-senior-administrator",
     kind: "COURSE",
     name: "Старший администратор",
-    hint: "курс · контроль смены",
+    hint: "готовый курс",
     thumbnail: [
       { kind: "title", text: "Старший администратор" },
       { kind: "tabs", text: "1 Чек-листы · 2 Отклонения · 3 Пересменка" },
@@ -660,7 +956,7 @@ export const learningTemplates: LearningTemplate[] = [
     key: "course-standards-manager",
     kind: "COURSE",
     name: "Менеджер по стандартам",
-    hint: "курс · аттестация",
+    hint: "готовый курс",
     thumbnail: [
       { kind: "title", text: "Аттестация по стандартам" },
       {
@@ -686,86 +982,6 @@ export const learningTemplates: LearningTemplate[] = [
             "Выберите регламент, чек-лист и две статьи базы знаний, которые попадут в проверку.",
         },
       ],
-    },
-  },
-  {
-    key: "article-regulation",
-    kind: "ARTICLE",
-    name: "Регламент",
-    hint: "статья",
-    thumbnail: [
-      { kind: "title", text: "Регламент работы" },
-      { kind: "heading", text: "1. Общие положения" },
-      { kind: "paragraph", text: "Обязанности и порядок работы в клубе." },
-      { kind: "heading", text: "2. Начало смены" },
-      { kind: "item", text: "Приёмка зала" },
-      { kind: "item", text: "Касса и инкассация" },
-    ],
-    article: {
-      title: "Регламент работы",
-      summary: "Обязанности и порядок работы сотрудника в клубе.",
-      content: html(
-        "<h2>1. Общие положения</h2><p>Кого касается регламент и что в нём описано.</p>",
-        "<h2>2. Начало смены</h2><ul><li>Приёмка зала</li><li>Касса</li></ul>",
-        "<h2>3. Во время смены</h2><p>Работа с гостями и залом.</p>",
-        "<h2>4. Закрытие смены</h2><ul><li>Инкассация</li><li>Отчёт управляющему</li></ul>",
-      ),
-      folder: "Регламенты",
-      category: "Регламенты",
-      roleScope: "ADMINISTRATOR",
-      templateKey: "learning-regulation",
-    },
-  },
-  {
-    key: "article-guest-script",
-    kind: "ARTICLE",
-    name: "Скрипт общения",
-    hint: "статья",
-    thumbnail: [
-      { kind: "title", text: "Скрипт общения с гостем" },
-      { kind: "heading", text: "Гость пришёл впервые" },
-      {
-        kind: "paragraph",
-        text: "«Добрый день! Вы у нас впервые? Расскажу про тарифы…»",
-      },
-      { kind: "heading", text: "Гость недоволен" },
-    ],
-    article: {
-      title: "Скрипт общения с гостем",
-      summary: "Что говорить гостю в типичных ситуациях.",
-      content: html(
-        "<h2>Гость пришёл впервые</h2><p>«Добрый день! Вы у нас впервые? Расскажу, как всё устроено и какие есть тарифы.»</p>",
-        "<h2>Гость недоволен</h2><p>Выслушать, извиниться, предложить решение, позвать старшего, если нужно.</p>",
-        "<h2>Гость спрашивает про акции</h2><p>Назвать действующие акции и предложить подходящую.</p>",
-      ),
-      folder: "Скрипты",
-      category: "Сервис",
-      roleScope: "ALL_STAFF",
-      templateKey: "learning-guest-script",
-    },
-  },
-  {
-    key: "article-checklist",
-    kind: "ARTICLE",
-    name: "Чек-лист",
-    hint: "статья",
-    thumbnail: [
-      { kind: "title", text: "Чек-лист уборки" },
-      { kind: "item", text: "☐ Протереть игровые места" },
-      { kind: "item", text: "☐ Пополнить санузлы" },
-      { kind: "item", text: "☐ Вынести мусор" },
-      { kind: "item", text: "☐ Помыть гриль" },
-    ],
-    article: {
-      title: "Чек-лист",
-      summary: "Пункты, которые нужно проверить.",
-      content: html(
-        "<ul><li>☐ Первый пункт</li><li>☐ Второй пункт</li><li>☐ Третий пункт</li></ul>",
-      ),
-      folder: "Чек-листы",
-      category: "Чистота",
-      roleScope: "ADMINISTRATOR",
-      templateKey: "learning-checklist",
     },
   },
 ];

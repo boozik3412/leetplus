@@ -3,20 +3,29 @@
 import {
   BookOpenText,
   Books,
+  ChatsCircle,
+  Exam,
   FileText,
   ListBullets,
+  ListChecks,
   MagnifyingGlass,
+  Megaphone,
   Plus,
+  Scroll,
   SquaresFour,
+  type Icon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type {
-  LearningDocument,
-  LearningFilter,
-  LearningTemplate,
-  LearningThumbnailBlock,
+import {
+  learningDocumentTypeLabels,
+  learningTypeFilters,
+  type LearningDocument,
+  type LearningDocumentType,
+  type LearningFilter,
+  type LearningTemplate,
+  type LearningThumbnailBlock,
 } from "@/lib/learning-documents";
 
 type Counts = Record<LearningFilter, number>;
@@ -24,9 +33,42 @@ type Counts = Record<LearningFilter, number>;
 const filterLabels: Record<LearningFilter, string> = {
   all: "Все",
   courses: "Курсы",
+  regulations: "Регламенты",
+  scripts: "Скрипты",
+  checklists: "Чек-листы",
   articles: "Статьи",
+  tests: "Тесты",
   drafts: "Черновики",
   "to-read": "Мне нужно прочитать",
+};
+
+const typeIcons: Record<
+  LearningDocumentType,
+  { icon: Icon; className: string }
+> = {
+  COURSE: {
+    icon: Books,
+    className: "text-emerald-600 dark:text-emerald-400",
+  },
+  REGULATION: {
+    icon: Scroll,
+    className: "text-indigo-600 dark:text-indigo-400",
+  },
+  SCRIPT: {
+    icon: ChatsCircle,
+    className: "text-violet-600 dark:text-violet-400",
+  },
+  CHECKLIST: {
+    icon: ListChecks,
+    className: "text-teal-600 dark:text-teal-400",
+  },
+  ARTICLE: { icon: FileText, className: "text-sky-600 dark:text-sky-400" },
+  NOTICE: {
+    icon: Megaphone,
+    className: "text-amber-600 dark:text-amber-400",
+  },
+  TEST: { icon: Exam, className: "text-rose-600 dark:text-rose-400" },
+  ATTESTATION: { icon: Exam, className: "text-rose-600 dark:text-rose-400" },
 };
 
 const badgeClassNames = {
@@ -120,19 +162,14 @@ function PagePreview({
   );
 }
 
-function KindIcon({ kind }: { kind: LearningDocument["kind"] }) {
-  return kind === "COURSE" ? (
-    <Books
+function TypeIcon({ type }: { type: LearningDocumentType }) {
+  const { icon: TypeGlyph, className } = typeIcons[type];
+
+  return (
+    <TypeGlyph
       role="img"
-      aria-label="Курс"
-      className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400"
-      weight="duotone"
-    />
-  ) : (
-    <FileText
-      role="img"
-      aria-label="Статья"
-      className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400"
+      aria-label={learningDocumentTypeLabels[type]}
+      className={`h-4 w-4 shrink-0 ${className}`}
       weight="duotone"
     />
   );
@@ -160,58 +197,79 @@ function newStepId() {
   return `step-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function templateRequest(template: LearningTemplate, storeId: string | null) {
+  switch (template.kind) {
+    case "COURSE":
+      return {
+        url: "/api/staff/training-courses",
+        failure: "Не удалось создать курс. Повторите ещё раз.",
+        body: {
+          title: template.course.title,
+          description: template.course.description,
+          roleScope: template.course.roleScope,
+          status: "DRAFT",
+          required: template.course.required,
+          dueDays:
+            template.course.dueDays === null
+              ? null
+              : String(template.course.dueDays),
+          storeId,
+          steps: template.course.steps.map((step) => ({
+            id: newStepId(),
+            title: step.title,
+            type: step.type,
+            articleId: null,
+            content: step.content,
+            url: null,
+            required: true,
+          })),
+        },
+      };
+    case "TEST":
+      return {
+        url: "/api/staff/assessments",
+        failure: "Не удалось создать тест. Повторите ещё раз.",
+        body: {
+          title: template.test.title,
+          description: null,
+          roleScope: template.test.roleScope,
+          status: "DRAFT",
+          assessmentKind: "TEST",
+          storeId,
+          questions: [],
+        },
+      };
+    default:
+      return {
+        url: "/api/staff/knowledge-base",
+        failure: "Не удалось создать документ. Повторите ещё раз.",
+        body: {
+          kind: "ARTICLE",
+          title: template.article.title,
+          summary: template.article.summary,
+          content: template.article.content || null,
+          folder: template.article.folder,
+          category: template.article.category,
+          roleScope: template.article.roleScope,
+          status: "DRAFT",
+          templateKey: template.article.templateKey,
+          requiresReading: false,
+          revisionSlaDays: null,
+          storeId,
+          tags: [],
+          materials: [],
+          relatedLinks: [],
+          approvalNote: null,
+        },
+      };
+  }
+}
+
 async function createFromTemplate(
   template: LearningTemplate,
   storeId: string | null,
 ) {
-  const request =
-    template.kind === "COURSE"
-      ? {
-          url: "/api/staff/training-courses",
-          body: {
-            title: template.course.title,
-            description: template.course.description,
-            roleScope: template.course.roleScope,
-            status: "DRAFT",
-            required: template.course.required,
-            dueDays:
-              template.course.dueDays === null
-                ? null
-                : String(template.course.dueDays),
-            storeId,
-            steps: template.course.steps.map((step) => ({
-              id: newStepId(),
-              title: step.title,
-              type: step.type,
-              articleId: null,
-              content: step.content,
-              url: null,
-              required: true,
-            })),
-          },
-        }
-      : {
-          url: "/api/staff/knowledge-base",
-          body: {
-            kind: "ARTICLE",
-            title: template.article.title,
-            summary: template.article.summary,
-            content: template.article.content || null,
-            folder: template.article.folder,
-            category: template.article.category,
-            roleScope: template.article.roleScope,
-            status: "DRAFT",
-            templateKey: template.article.templateKey,
-            requiresReading: false,
-            revisionSlaDays: null,
-            storeId,
-            tags: [],
-            materials: [],
-            relatedLinks: [],
-            approvalNote: null,
-          },
-        };
-
+  const request = templateRequest(template, storeId);
   const response = await fetch(request.url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -222,19 +280,20 @@ async function createFromTemplate(
     const data = (await response.json().catch(() => null)) as {
       message?: string;
     } | null;
-    throw new Error(
-      data?.message ??
-        (template.kind === "COURSE"
-          ? "Не удалось создать курс. Повторите ещё раз."
-          : "Не удалось создать документ. Повторите ещё раз."),
-    );
+    throw new Error(data?.message ?? request.failure);
   }
 
   const created = (await response.json()) as { id: string };
+  const id = encodeURIComponent(created.id);
 
-  return template.kind === "COURSE"
-    ? `/staff/learning/courses/${encodeURIComponent(created.id)}`
-    : `/staff/learning/articles/${encodeURIComponent(created.id)}`;
+  switch (template.kind) {
+    case "COURSE":
+      return `/staff/learning/courses/${id}`;
+    case "TEST":
+      return `/staff/assessments?assessmentId=${id}`;
+    default:
+      return `/staff/learning/articles/${id}`;
+  }
 }
 
 function TemplateRow({
@@ -351,7 +410,7 @@ function DocumentCard({ document }: { document: LearningDocument }) {
           {document.title}
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
-          <KindIcon kind={document.kind} />
+          <TypeIcon type={document.type} />
           <span className="truncate">{document.meta}</span>
         </span>
         <span className="flex min-w-0 items-center gap-1.5">
@@ -379,7 +438,7 @@ function DocumentRow({ document }: { document: LearningDocument }) {
         href={document.href}
         className="flex min-h-14 items-center gap-3 rounded-md px-3 py-2 outline-none transition hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-emerald-500 dark:hover:bg-zinc-900"
       >
-        <KindIcon kind={document.kind} />
+        <TypeIcon type={document.type} />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-2">
             <span className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
@@ -413,7 +472,6 @@ export function StaffLearningHome({
   view,
   templates,
   defaultStoreId,
-  showCourseFilters,
   loadFailed,
 }: {
   documents: LearningDocument[];
@@ -423,11 +481,11 @@ export function StaffLearningHome({
   view: "grid" | "list";
   templates: LearningTemplate[];
   defaultStoreId: string | null;
-  showCourseFilters: boolean;
   loadFailed: boolean;
 }) {
+  // A type chip shows only when there is something of that type.
   const filters = (Object.keys(filterLabels) as LearningFilter[]).filter(
-    (key) => showCourseFilters || (key !== "courses" && key !== "articles"),
+    (key) => !learningTypeFilters[key] || counts[key] > 0 || key === filter,
   );
   const isEmptyLibrary = counts.all === 0;
 
@@ -455,14 +513,14 @@ export function StaffLearningHome({
               className="h-5 w-5 shrink-0 text-zinc-500"
             />
             <label htmlFor="learning-search" className="sr-only">
-              Поиск по курсам и статьям
+              Поиск по документам
             </label>
             <input
               id="learning-search"
               name="q"
               type="search"
               defaultValue={search}
-              placeholder="Поиск по курсам и статьям"
+              placeholder="Поиск по документам"
               className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-500"
             />
             {filter !== "all" ? (
@@ -571,7 +629,7 @@ export function StaffLearningHome({
             <p className="mx-auto mt-2 max-w-md text-sm text-zinc-600 dark:text-zinc-400">
               {isEmptyLibrary
                 ? templates.length > 0
-                  ? "Начните с шаблона выше: например, «Онбординг администратора» или «Регламент»."
+                  ? "Начните с типа выше: например, «Регламент», «Чек-лист» или «Курс»."
                   : "Когда руководитель добавит регламенты и курсы, они появятся здесь."
                 : filter === "to-read"
                   ? "Все обязательные статьи прочитаны."

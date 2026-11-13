@@ -9,6 +9,10 @@ import {
 } from "@/lib/learning-documents";
 import { canAccessPath } from "@/lib/permissions";
 import {
+  getStaffAssessmentsReport,
+  type StaffAssessmentsReport,
+} from "@/lib/staff-assessments";
+import {
   getStaffKnowledgeBaseReport,
   type StaffKnowledgeBaseReport,
 } from "@/lib/staff-knowledge-base";
@@ -37,8 +41,9 @@ export default async function StaffLearningPage({
 
   const canSeeCourses = canAccessPath(user, "/staff/training-courses");
   const canSeeArticles = canAccessPath(user, "/staff/knowledge-base");
+  const canSeeTests = canAccessPath(user, "/staff/assessments");
 
-  const [training, knowledge] = await Promise.all([
+  const [training, knowledge, assessments] = await Promise.all([
     canSeeCourses
       ? getStaffTrainingCoursesReport({ status: "all" }).catch(
           () => null as StaffTrainingCoursesReport | null,
@@ -49,19 +54,31 @@ export default async function StaffLearningPage({
           () => null as StaffKnowledgeBaseReport | null,
         )
       : Promise.resolve(null),
+    canSeeTests
+      ? getStaffAssessmentsReport({ status: "all" }).catch(
+          () => null as StaffAssessmentsReport | null,
+        )
+      : Promise.resolve(null),
   ]);
 
   const documents = buildLearningDocuments(
     training?.rows ?? [],
     knowledge?.rows ?? [],
+    new Date(),
+    assessments?.rows ?? [],
   );
   const counts = countLearningDocuments(documents);
   const visible = filterLearningDocuments(documents, filter, search);
 
   const canCreateCourses = training?.canManageTraining === true;
   const canCreateArticles = knowledge?.canEditKnowledge === true;
+  const canCreateTests = assessments?.canManageAssessments === true;
   const templates = learningTemplates.filter((template) =>
-    template.kind === "COURSE" ? canCreateCourses : canCreateArticles,
+    template.kind === "COURSE"
+      ? canCreateCourses
+      : template.kind === "TEST"
+        ? canCreateTests
+        : canCreateArticles,
   );
   const accessScope = training?.accessScope ?? knowledge?.accessScope;
   const stores = training?.stores ?? knowledge?.stores ?? [];
@@ -77,10 +94,10 @@ export default async function StaffLearningPage({
       view={view}
       templates={templates}
       defaultStoreId={defaultStoreId}
-      showCourseFilters={canSeeCourses}
       loadFailed={
         (canSeeCourses && training === null) ||
-        (canSeeArticles && knowledge === null)
+        (canSeeArticles && knowledge === null) ||
+        (canSeeTests && assessments === null)
       }
     />
   );

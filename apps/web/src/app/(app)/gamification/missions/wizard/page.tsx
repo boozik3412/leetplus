@@ -21,6 +21,7 @@ export default async function GuestMissionWizardPage({
   searchParams: Promise<{
     missionId?: string | string[];
     taskType?: string | string[];
+    promoCodeId?: string | string[];
   }>;
 }) {
   const params = await searchParams;
@@ -30,6 +31,10 @@ export default async function GuestMissionWizardPage({
   const requestedTaskType = Array.isArray(params.taskType)
     ? params.taskType[0]
     : params.taskType;
+  const initialPromoCodeId =
+    (Array.isArray(params.promoCodeId)
+      ? params.promoCodeId[0]
+      : params.promoCodeId) ?? null;
   const initialTaskType =
     requestedTaskType === "CHECK_IN" ? "CHECK_IN" : undefined;
   const user = await requireCurrentUser();
@@ -88,6 +93,7 @@ export default async function GuestMissionWizardPage({
           lootBoxes={lootBoxes}
           initialMissionId={initialMissionId ?? null}
           initialTaskType={initialTaskType}
+          initialPromoCodeId={initialPromoCodeId}
           promoBundles={promoBundles.filter(
             (bundle) => bundle.status === "ACTIVE",
           )}

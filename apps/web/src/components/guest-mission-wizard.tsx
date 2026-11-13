@@ -263,6 +263,7 @@ export function GuestMissionWizard({
   promoBundles,
   initialMissionId,
   initialTaskType,
+  initialPromoCodeId = null,
 }: {
   stores: Store[];
   audiences: GuestAudience[];
@@ -270,6 +271,8 @@ export function GuestMissionWizard({
   promoBundles: MarketingPromoBundle[];
   initialMissionId?: string | null;
   initialTaskType?: TaskType;
+  /** Opened from a promo bundle («как награда в игровом задании»). */
+  initialPromoCodeId?: string | null;
 }) {
   const startsFromExisting = Boolean(initialMissionId || initialTaskType);
   const [step, setStep] = useState<Step>(
@@ -279,7 +282,11 @@ export function GuestMissionWizard({
     startsFromExisting ? "blank" : null,
   );
   const [form, setForm] = useState<WizardState>(() =>
-    initialState(stores, initialTaskType),
+    withInitialPromoCode(
+      initialState(stores, initialTaskType),
+      promoBundles,
+      initialPromoCodeId,
+    ),
   );
   const [selectedProducts, setSelectedProducts] = useState<SelectedProduct[]>(
     [],
@@ -584,7 +591,13 @@ export function GuestMissionWizard({
     const template = missionTemplates.find((item) => item.id === id);
     if (!template) return;
     setTemplateId(id);
-    setForm(template.apply(initialState(stores), rewardLootBoxes));
+    setForm(
+      withInitialPromoCode(
+        template.apply(initialState(stores), rewardLootBoxes),
+        promoBundles,
+        initialPromoCodeId,
+      ),
+    );
     setSelectedProducts([]);
     setSelectedProductGroups([]);
     goToStep("what");
@@ -3841,6 +3854,22 @@ async function renderMissionCoverFile(
   throw new Error(
     "Не удалось уменьшить обложку до 2 МБ. Выберите изображение меньшего размера.",
   );
+}
+
+function withInitialPromoCode(
+  state: WizardState,
+  promoBundles: MarketingPromoBundle[],
+  promoCodeId: string | null,
+): WizardState {
+  const promo = promoBundles.find((bundle) => bundle.id === promoCodeId);
+  return promo
+    ? {
+        ...state,
+        rewardType: "PROMOCODE",
+        promoCodeId: promo.id,
+        rewardLabel: promo.name,
+      }
+    : state;
 }
 
 function initialState(

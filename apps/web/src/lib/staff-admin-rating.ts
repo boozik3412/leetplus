@@ -56,7 +56,10 @@ export type AdminRatingView = {
   riskLevel: AdminRatingRiskLevel;
   items: AdminRatingItem[];
   counts: AdminRatingCounts;
-  averageCheck: { day: AdminRatingAverageCheck; night: AdminRatingAverageCheck };
+  averageCheck: {
+    day: AdminRatingAverageCheck;
+    night: AdminRatingAverageCheck;
+  };
   linkedToLangame: boolean;
   shiftsTotal: number;
 };
@@ -88,12 +91,19 @@ export function signedPercent(value: number) {
   return "0%";
 }
 
-export type AdminRatingChip = { label: string; tone: "minus" | "plus" | "neutral" };
+export type AdminRatingChip = {
+  label: string;
+  tone: "minus" | "plus" | "neutral";
+};
 
 /** Short reasons under the name: what moved the score, biggest first. */
 export function adminRatingChips(row: AdminRatingView): AdminRatingChip[] {
   const chips: AdminRatingChip[] = [];
-  const minus = (count: number, forms: [string, string, string], points: number) => {
+  const minus = (
+    count: number,
+    forms: [string, string, string],
+    points: number,
+  ) => {
     if (count <= 0) return;
     const word = pluralRu(count, forms);
     chips.push({
@@ -102,7 +112,11 @@ export function adminRatingChips(row: AdminRatingView): AdminRatingChip[] {
     });
   };
 
-  minus(row.counts.fines, ["штраф", "штрафа", "штрафов"], ADMIN_RATING_RULE_POINTS.fine);
+  minus(
+    row.counts.fines,
+    ["штраф", "штрафа", "штрафов"],
+    ADMIN_RATING_RULE_POINTS.fine,
+  );
   minus(
     row.counts.escalatedChecklists,
     ["эскалация", "эскалации", "эскалаций"],

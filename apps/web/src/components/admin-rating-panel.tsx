@@ -120,7 +120,10 @@ function AdminRatingRow({
             <span className="block truncate text-sm font-semibold" title={name}>
               {name}
             </span>
-            <span className="block truncate text-xs text-zinc-500" title={subtitle}>
+            <span
+              className="block truncate text-xs text-zinc-500"
+              title={subtitle}
+            >
               {subtitle}
             </span>
             <span className="mt-1 flex flex-wrap gap-1.5">
@@ -149,7 +152,10 @@ function AdminRatingRow({
             title={riskLabels[row.riskLevel]}
           >
             {row.score}
-            <span className="sr-only"> баллов, {riskLabels[row.riskLevel]}</span>
+            <span className="sr-only">
+              {" "}
+              баллов, {riskLabels[row.riskLevel]}
+            </span>
           </span>
         </summary>
         <div className="border-t border-dashed border-zinc-200 px-3 pb-3 pt-2 dark:border-zinc-800">

@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import {
+  GAME_EFFECT_ALL_TIME,
   GAME_EFFECT_COST_KINDS,
   GAME_EFFECT_COST_KIND_LABELS,
   GAME_EFFECT_METRICS,
@@ -25,8 +26,13 @@ import {
   formatGameEffectMonth,
   formatGameEffectShare,
   formatGameEffectValue,
+  gameEffectCohortRange,
   gameEffectHoldoutStatus,
   gameEffectMetricTone,
+  gameEffectPeriodFromSearch,
+  gameEffectPeriodPresetId,
+  gameEffectPeriodPresets,
+  gameEffectPeriodSummary,
   gameEffectReportCsv,
   gameEffectReturnSeries,
   gameEffectReturnShare,
@@ -35,6 +41,7 @@ import {
   type GameEffectCohortView,
   type GameEffectCostKind,
   type GameEffectMetric,
+  type GameEffectPeriodRange,
   type GameEffectReport,
   type GameEffectReturnGroup,
   type GameEffectScenarioView,
@@ -64,15 +71,45 @@ const deltaClasses: Record<GameEffectTone, string> = {
 
 export function GuestGamificationEffectTab({ canManage }: Props) {
   const [storeId, setStoreId] = useState("");
+  const [period, setPeriod] = useState<GameEffectPeriodRange>({
+    from: null,
+    to: null,
+  });
+  // The period comes from the URL, which only exists in the browser.
+  const [periodReady, setPeriodReady] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const [data, setData] = useState<GameEffectReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const fromUrl = gameEffectPeriodFromSearch(window.location.search);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one read of the URL after mount
+    setPeriod(fromUrl);
+    setPeriodReady(true);
+  }, []);
+
+  function changePeriod(next: GameEffectPeriodRange) {
+    setPeriod(next);
+    const url = new URL(window.location.href);
+    if (next.from) url.searchParams.set("periodFrom", next.from);
+    else url.searchParams.delete("periodFrom");
+    if (next.to) url.searchParams.set("periodTo", next.to);
+    else url.searchParams.delete("periodTo");
+    window.history.replaceState(
+      null,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }
+
+  useEffect(() => {
+    if (!periodReady) return;
     const controller = new AbortController();
     const params = new URLSearchParams();
     if (storeId) params.set("storeId", storeId);
+    if (period.from) params.set("from", period.from);
+    if (period.to) params.set("to", period.to);
 
     async function load() {
       await Promise.resolve();
@@ -108,7 +145,7 @@ export function GuestGamificationEffectTab({ canManage }: Props) {
 
     void load();
     return () => controller.abort();
-  }, [storeId, reloadToken]);
+  }, [storeId, period.from, period.to, periodReady, reloadToken]);
 
   function downloadCsv() {
     if (!data) return;
@@ -118,7 +155,11 @@ export function GuestGamificationEffectTab({ canManage }: Props) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `effect-${data.lastCompleteDay}.csv`;
+    const range =
+      data.period.from || data.period.to
+        ? `-${data.period.from ?? "start"}_${data.period.to ?? data.lastCompleteDay}`
+        : "";
+    link.download = `effect${range}-${data.lastCompleteDay}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -147,27 +188,6 @@ export function GuestGamificationEffectTab({ canManage }: Props) {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-300">
-              <label className="flex items-center gap-2">
-                <span className="sr-only">Клуб</span>
-                <select
-                  value={storeId}
-                  onChange={(event) => setStoreId(event.target.value)}
-                  className="rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 font-semibold text-white"
-                >
-                  <option value="" className="text-zinc-900">
-                    Вся сеть
-                  </option>
-                  {(data?.stores ?? []).map((store) => (
-                    <option
-                      key={store.id}
-                      value={store.id}
-                      className="text-zinc-900"
-                    >
-                      {store.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <button
                 type="button"
                 onClick={downloadCsv}
@@ -185,6 +205,44 @@ export function GuestGamificationEffectTab({ canManage }: Props) {
                 {loading ? "Считаем…" : "Обновить"}
               </button>
             </div>
+          </div>
+          <div className="relative mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="flex flex-wrap items-start gap-3 text-xs text-zinc-300">
+              <PeriodPicker
+                period={period}
+                today={data?.generatedAt ?? null}
+                onChange={changePeriod}
+              />
+              <label className="flex flex-col gap-1.5">
+                <span className="font-semibold text-zinc-400">Клуб</span>
+                <select
+                  value={storeId}
+                  onChange={(event) => setStoreId(event.target.value)}
+                  className="cursor-pointer rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 font-semibold text-white"
+                >
+                  <option value="" className="text-zinc-900">
+                    Вся сеть
+                  </option>
+                  {(data?.stores ?? []).map((store) => (
+                    <option
+                      key={store.id}
+                      value={store.id}
+                      className="text-zinc-900"
+                    >
+                      {store.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {data ? (
+              <p
+                className="mt-3 text-sm leading-6 text-zinc-200"
+                aria-live="polite"
+              >
+                {gameEffectPeriodSummary(data)}
+              </p>
+            ) : null}
           </div>
         </div>
       </header>
@@ -231,6 +289,120 @@ export function GuestGamificationEffectTab({ canManage }: Props) {
         </div>
       ) : null}
     </section>
+  );
+}
+
+function PeriodPicker({
+  period,
+  today,
+  onChange,
+}: {
+  period: GameEffectPeriodRange;
+  today: string | null;
+  onChange: (next: GameEffectPeriodRange) => void;
+}) {
+  const presets = useMemo(
+    () => (today ? gameEffectPeriodPresets(today) : [GAME_EFFECT_ALL_TIME]),
+    [today],
+  );
+  const presetId = gameEffectPeriodPresetId(presets, period);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [draft, setDraft] = useState<GameEffectPeriodRange>(period);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const showCustom = customOpen || presetId === "custom";
+
+  function choose(id: string) {
+    if (id === "custom") {
+      setDraft(period);
+      setDraftError(null);
+      setCustomOpen(true);
+      return;
+    }
+    const preset = presets.find((item) => item.id === id);
+    if (!preset) return;
+    setCustomOpen(false);
+    setDraftError(null);
+    onChange({ from: preset.from, to: preset.to });
+  }
+
+  function changeDraft(next: GameEffectPeriodRange) {
+    setDraft(next);
+    if (next.from && next.to && next.from > next.to) {
+      setDraftError("Начало периода позже конца — поменяйте даты местами.");
+      return;
+    }
+    setDraftError(null);
+    onChange(next);
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1.5">
+          <span className="font-semibold text-zinc-400">
+            Период: кто начал играть
+          </span>
+          <select
+            value={showCustom ? "custom" : presetId}
+            onChange={(event) => choose(event.target.value)}
+            title="Каких игроков считать: по дню их старта в игре или в сценарии"
+            className="cursor-pointer rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 font-semibold text-white"
+          >
+            {presets.map((preset) => (
+              <option
+                key={preset.id}
+                value={preset.id}
+                className="text-zinc-900"
+              >
+                {preset.label}
+              </option>
+            ))}
+            <option value="custom" className="text-zinc-900">
+              Свой период…
+            </option>
+          </select>
+        </label>
+        {showCustom ? (
+          <>
+            <label className="flex flex-col gap-1.5">
+              <span className="font-semibold text-zinc-400">с</span>
+              <input
+                type="date"
+                value={draft.from ?? ""}
+                max={draft.to ?? undefined}
+                onChange={(event) =>
+                  changeDraft({ ...draft, from: event.target.value || null })
+                }
+                aria-describedby={
+                  draftError ? "effect-period-error" : undefined
+                }
+                className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 font-semibold text-white [color-scheme:dark]"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="font-semibold text-zinc-400">по</span>
+              <input
+                type="date"
+                value={draft.to ?? ""}
+                min={draft.from ?? undefined}
+                onChange={(event) =>
+                  changeDraft({ ...draft, to: event.target.value || null })
+                }
+                aria-describedby={
+                  draftError ? "effect-period-error" : undefined
+                }
+                className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 font-semibold text-white [color-scheme:dark]"
+              />
+            </label>
+          </>
+        ) : null}
+      </div>
+      {showCustom && draftError ? (
+        <span id="effect-period-error" role="alert" className="text-red-300">
+          {draftError}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -301,6 +473,8 @@ function Delta({
 
 function coverageText(cohort: GameEffectCohortView) {
   const parts = [`измерено ${cohort.measured} из ${cohort.participants}`];
+  const range = gameEffectCohortRange(cohort);
+  if (range) parts.push(range);
   if (cohort.immature) parts.push(`окно ещё идёт у ${cohort.immature}`);
   if (cohort.unmatched)
     parts.push(`без пары для сравнения ${cohort.unmatched}`);
@@ -444,7 +618,15 @@ const chartTooltipStyle = {
 };
 
 function networkNote(report: GameEffectReport) {
-  return report.storeId ? " Считается по всей сети, без фильтра клуба." : "";
+  const months =
+    report.period.from || report.period.to
+      ? " Показаны месяцы выбранного периода."
+      : " Показаны последние 12 месяцев.";
+  return `${months}${report.storeId ? " Считается по всей сети, без фильтра клуба." : ""}`;
+}
+
+function hasPeriod(report: GameEffectReport) {
+  return Boolean(report.period.from || report.period.to);
 }
 
 function StatTile({
@@ -595,7 +777,11 @@ function ReturnSection({ report }: { report: GameEffectReport }) {
           ) : null}
         </>
       ) : (
-        <p className="text-sm text-zinc-500">Визитов за последний год нет.</p>
+        <p className="text-sm text-zinc-500">
+          {hasPeriod(report)
+            ? "В месяцах этого периода визитов нет."
+            : "Визитов за последний год нет."}
+        </p>
       )}
     </Card>
   );
@@ -721,7 +907,11 @@ function CostSection({ report }: { report: GameEffectReport }) {
           </div>
         </>
       ) : (
-        <p className="text-sm text-zinc-500">Выплаченных наград пока нет.</p>
+        <p className="text-sm text-zinc-500">
+          {hasPeriod(report)
+            ? "В месяцах этого периода наград не выплачивали."
+            : "Выплаченных наград пока нет."}
+        </p>
       )}
     </Card>
   );
@@ -789,7 +979,7 @@ function ScenarioSection({
   return (
     <Card
       title="Сценарии: участники против игроков, которые не участвовали"
-      subtitle="Участник — получил хотя бы одну награду сценария. Сравнение — активные игроки, которые были в клубе в тот же день, но в сценарии не участвовали. Это честнее, чем «вернулся ли гость», но участники всё равно сами выбирают участвовать; точный ответ даёт только контрольная группа."
+      subtitle="Участник — получил хотя бы одну награду сценария. Сравнение — активные игроки, которые были в клубе в тот же день, но в сценарии не участвовали. Это честнее, чем «вернулся ли гость», но участники всё равно сами выбирают участвовать; точный ответ даёт только контрольная группа. Контрольная группа считается с даты её запуска, выбранный период на неё не влияет."
     >
       {report.scenarios.length ? (
         <div className="space-y-3">
@@ -1030,6 +1220,12 @@ function MethodNote({ report }: { report: GameEffectReport }) {
         Как считается эффект
       </summary>
       <ul className="mt-3 list-disc space-y-1 pl-5">
+        <li>
+          Период выбирает игроков по дню старта: «Октябрь» — те, кто начал
+          играть (или получил первую награду сценария) в октябре. Каждый из них
+          измеряется своим окном, поэтому «после» может заходить в следующий
+          месяц. Графики затрат и возвратов показывают месяцы периода.
+        </li>
         <li>
           День старта — активация игры гостем или первая награда сценария.
           Сравниваем {report.windowDays} дней до и {report.windowDays} дней

@@ -160,10 +160,8 @@
     "api": 2
   },
   "components/marketing-campaigns-panel.tsx": {
-    "anti-fraud": 3,
-    "api": 2,
-    "endpoint": 1,
-    "snapshot": 1
+    "anti-fraud": 2,
+    "api": 2
   },
   "components/module-choice-page.tsx": {
     "lootbox": 1

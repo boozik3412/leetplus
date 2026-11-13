@@ -1,4 +1,5 @@
 import {
+  storeFloorPlanAdminTip,
   storeFloorPlanAlertText,
   storeFloorPlanSeatHints,
   type StoreFloorPlanHintInput,
@@ -134,7 +135,7 @@ describe('storeFloorPlanSeatHints', () => {
     );
     expect(hints.map((hint) => [hint.key, hint.title])).toEqual([
       ['VIP', 'VIP'],
-      ['RETURNED', 'Вернулся через 45 дн.'],
+      ['RETURNED', 'Не был(а) 45 дней'],
     ]);
   });
 
@@ -163,7 +164,7 @@ describe('storeFloorPlanSeatHints', () => {
       'KNOW',
       'KNOW',
     ]);
-    expect(hints[1].title).toBe('1 200 бонусов лежат');
+    expect(hints[1].title).toBe('1 200 бонусов не потрачены');
     expect(hints[2].key).toBe('TASK');
     expect(hints[2].hint.length).toBeLessThanOrEqual(140);
   });
@@ -175,5 +176,76 @@ describe('storeFloorPlanAlertText', () => {
       'Не работает гарнитура',
     );
     expect(storeFloorPlanAlertText('а'.repeat(500))).toHaveLength(200);
+  });
+});
+
+describe('storeFloorPlanAdminTip («Подсказка админу» on the scheme)', () => {
+  const base = {
+    crmStatus: 'NONE',
+    nextAction: null,
+    pendingRewards: 0,
+    expectedIntervalDays: null,
+    previousVisitAt: null,
+    sessionStartedAt: now,
+  };
+  const tip = (key: string, patch: Record<string, unknown> = {}) =>
+    storeFloorPlanAdminTip({
+      ...base,
+      action: { key, label: 'CRM', reason: 'CRM reason' },
+      ...patch,
+    });
+
+  it('says the CRM recommendations as what to do at the computer', () => {
+    expect(
+      tip('WIN_BACK', {
+        expectedIntervalDays: 7,
+        previousVisitAt: new Date('2026-09-28T15:00:00.000Z'),
+      }),
+    ).toEqual({
+      key: 'WIN_BACK',
+      label:
+        'Давно не был(а): 45 дней, обычно раз в неделю. Скажи, что рады видеть, и напомни про бонусы',
+      reason: '',
+    });
+    expect(tip('WIN_BACK')?.label).toBe(
+      'Давно не был(а) в клубе. Скажи, что рады видеть, и напомни про бонусы',
+    );
+    expect(tip('REACTIVATE')?.label).toBe(
+      'Снова в клубе после долгого перерыва. Уточни телефон и предложи Telegram-бот клуба, чтобы не пропадать',
+    );
+    expect(tip('SECOND_VISIT')?.label).toBe(
+      'Пока один визит. Расскажи, зачем прийти снова, и предложи Telegram-бот',
+    );
+    expect(tip('CLAIM_REWARD', { pendingRewards: 2 })?.label).toBe(
+      '2 награды ждут в приложении. Подскажи, где забрать',
+    );
+    expect(tip('CLAIM_REWARD', { pendingRewards: 5 })?.label).toBe(
+      '5 наград ждут в приложении. Подскажи, где забрать',
+    );
+    expect(tip('INVITE_TO_GAME')?.label).toBe(
+      'Не в игре. Покажи QR на стойке, за регистрацию будет первый кейс',
+    );
+    expect(tip('KEEP_WARM')?.label).toBe(
+      'Один из лучших гостей клуба. Поздоровайся по имени и поблагодари',
+    );
+    expect(
+      tip('MANUAL', { nextAction: '  Вернуть  наушники\nв зал ' })?.label,
+    ).toBe('Задача из CRM: Вернуть наушники в зал');
+  });
+
+  it('shows «не беспокоить» and hides what the hall cannot do', () => {
+    expect(tip('OBSERVE', { crmStatus: 'DO_NOT_CONTACT' })?.label).toBe(
+      'Отказался(ась) от сообщений. Обслуживай как обычно, но акции и рассылки не предлагай',
+    );
+    expect(tip('OBSERVE')).toBeNull();
+    expect(tip('SOFT_TOUCH')).toBeNull();
+  });
+
+  it('keeps an unknown recommendation as the card says it', () => {
+    expect(tip('SOMETHING_NEW')).toEqual({
+      key: 'SOMETHING_NEW',
+      label: 'CRM',
+      reason: 'CRM reason',
+    });
   });
 });

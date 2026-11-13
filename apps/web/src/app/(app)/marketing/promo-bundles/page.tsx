@@ -18,6 +18,7 @@ import {
 import { getProducts } from "@/lib/products";
 import {
   promoBundleWizardSteps,
+  safeReturnPath,
   type PromoBundleWizardStep,
 } from "@/lib/promo-bundle-wizard";
 import { getStores } from "@/lib/stores";
@@ -132,6 +133,7 @@ export default async function MarketingPromoBundlesPage({
             editId={editedBundle?.id ?? null}
             usageBundleId={firstParam(params.bundle)}
             initialStep={initialStep}
+            returnTo={safeReturnPath(firstParam(params.returnTo))}
             promoBundles={promoBundles}
             promoBundleLaunches={promoBundleLaunches}
             promoBundleUsages={promoBundleUsages}

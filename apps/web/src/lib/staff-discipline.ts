@@ -155,6 +155,8 @@ export type StaffAdministratorRatingsReport = {
     attestationProblems: number;
   };
   rows: StaffAdministratorRating[];
+  /** The viewer may forgive items and give bonuses / penalties. */
+  canAdjust?: boolean;
   stores: StaffTaskStore[];
 };
 

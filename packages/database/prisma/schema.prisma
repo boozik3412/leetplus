@@ -381,6 +381,7 @@ model Tenant {
   staffDisciplinePolicies              StaffDisciplinePolicy[]
   staffDisciplineRules                 StaffDisciplineRule[]
   staffDisciplineRecords               StaffDisciplineRecord[]
+  staffAdminRatingAdjustments          StaffAdminRatingAdjustment[]
   staffSalarySchemes                   StaffSalaryScheme[]
   staffChatChannels                    StaffChatChannel[]
   staffChatChannelMembers              StaffChatChannelMember[]
@@ -542,6 +543,9 @@ model User {
   createdStaffDisciplineRules          StaffDisciplineRule[]                  @relation("StaffDisciplineRuleCreatedBy")
   staffDisciplineRecords               StaffDisciplineRecord[]                @relation("StaffDisciplineRecordUser")
   createdStaffDisciplineRecords        StaffDisciplineRecord[]                @relation("StaffDisciplineRecordCreatedBy")
+  staffAdminRatingAdjustments          StaffAdminRatingAdjustment[]           @relation("StaffAdminRatingAdjustmentUser")
+  createdStaffAdminRatingAdjustments   StaffAdminRatingAdjustment[]           @relation("StaffAdminRatingAdjustmentCreatedBy")
+  canceledStaffAdminRatingAdjustments  StaffAdminRatingAdjustment[]           @relation("StaffAdminRatingAdjustmentCanceledBy")
   createdStaffSalarySchemes            StaffSalaryScheme[]                    @relation("StaffSalarySchemeCreatedBy")
   guestSavedFilters                    GuestSavedFilter[]
   guestAudiences                       GuestAudience[]
@@ -5817,4 +5821,34 @@ model GuestDataProfileRun {
   @@index([tenantId, startedAt])
   @@index([integrationSourceId])
   @@index([status])
+}
+
+/// A reviewer's decision on the administrator rating (staff-admin-rating.ts):
+/// BONUS (+points) or PENALTY (-points) dated inside the period, or FORGIVE of
+/// one penalty item (targetKind + targetId). Canceled rows stay for history;
+/// the partial unique index staff_admin_rating_adjustment_forgive_uidx keeps
+/// one active FORGIVE per item.
+model StaffAdminRatingAdjustment {
+  id               String    @id @default(uuid())
+  tenantId         String
+  userId           String
+  createdByUserId  String?
+  kind             String
+  points           Int       @default(0)
+  targetKind       String?
+  targetId         String?
+  reason           String
+  occurredAt       DateTime  @default(now())
+  status           String    @default("ACTIVE")
+  canceledAt       DateTime?
+  canceledByUserId String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant         Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user           User   @relation("StaffAdminRatingAdjustmentUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdByUser  User?  @relation("StaffAdminRatingAdjustmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  canceledByUser User?  @relation("StaffAdminRatingAdjustmentCanceledBy", fields: [canceledByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, userId, occurredAt], map: "staff_admin_rating_adjustment_user_idx")
 }

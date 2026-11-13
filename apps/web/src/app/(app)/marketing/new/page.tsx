@@ -28,10 +28,15 @@ export default async function NewMarketingCampaignPage({
   searchParams: SearchParams;
 }) {
   await requirePageAccess("/marketing/new");
-  const audienceParam = (await searchParams).audience;
+  const params = await searchParams;
+  const audienceParam = params.audience;
   const initialAudienceId = Array.isArray(audienceParam)
     ? audienceParam[0]
     : audienceParam;
+  const bundleParam = params.promoBundle;
+  const initialPromoBundleId = Array.isArray(bundleParam)
+    ? bundleParam[0]
+    : bundleParam;
 
   const [groups, users, campaigns, promoBundles, promoBundleLaunches, stores] =
     await Promise.all([
@@ -60,6 +65,7 @@ export default async function NewMarketingCampaignPage({
         <MarketingCampaignsPanel
           view="new"
           initialAudienceId={initialAudienceId}
+          initialPromoBundleId={initialPromoBundleId}
           campaigns={campaigns}
           audiences={groups}
           users={users}

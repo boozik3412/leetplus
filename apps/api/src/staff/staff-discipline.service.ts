@@ -9,6 +9,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { StaffAdminRatingAdjustmentsService } from './staff-admin-rating-adjustments.service';
 import { StaffAdminRatingService } from './staff-admin-rating.service';
 import {
   buildStaffExportFile,
@@ -769,6 +770,7 @@ export class StaffDisciplineService {
         ).length,
       },
       rows,
+      canAdjust: StaffAdminRatingAdjustmentsService.canAdjust(user),
       stores: await this.prisma.store.findMany({
         where: { tenantId },
         select: { id: true, name: true, isActive: true },

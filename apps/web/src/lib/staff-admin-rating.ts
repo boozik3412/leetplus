@@ -4,7 +4,8 @@ import type { StaffTaskStore } from "./staff-tasks";
 /**
  * Administrator rating as the API returns it (apps/api/src/staff/
  * staff-admin-rating.ts): 100 at the start of the period, minus escalations,
- * fines, warnings and overdue tasks, plus or minus the average check.
+ * fines, warnings and overdue tasks, plus or minus the average check, and
+ * the reviewer's decisions (forgiven items, bonuses and penalties).
  */
 export type AdminRatingRiskLevel = "LOW" | "MEDIUM" | "HIGH";
 
@@ -13,15 +14,39 @@ export type AdminRatingItemKind =
   | "FINE"
   | "WARNING"
   | "TASK_OVERDUE"
-  | "AVERAGE_CHECK";
+  | "AVERAGE_CHECK"
+  | "MANUAL_BONUS"
+  | "MANUAL_PENALTY";
+
+/** Penalty items a reviewer may forgive. */
+export const ADMIN_RATING_FORGIVABLE_KINDS: readonly AdminRatingItemKind[] = [
+  "CHECKLIST_ESCALATED",
+  "FINE",
+  "WARNING",
+  "TASK_OVERDUE",
+];
+
+/** A reviewer's decision: who, when and why. */
+export type AdminRatingDecision = {
+  adjustmentId: string;
+  reason: string;
+  authorName: string | null;
+  at: string;
+};
 
 export type AdminRatingItem = {
   kind: AdminRatingItemKind;
+  /** What counts in the score: 0 for a forgiven item. */
   points: number;
+  /** The rule's points before a reviewer's decision. */
+  basePoints: number;
   title: string;
   detail: string | null;
   date: string | null;
   href: string | null;
+  targetId: string | null;
+  forgiven: AdminRatingDecision | null;
+  decision: AdminRatingDecision | null;
 };
 
 export type AdminRatingAverageCheck = {
@@ -38,6 +63,21 @@ export type AdminRatingCounts = {
   fines: number;
   warnings: number;
   overdueTasks: number;
+  forgiven: number;
+  forgivenPoints: number;
+  bonusPoints: number;
+  penaltyPoints: number;
+};
+
+export const EMPTY_ADMIN_RATING_COUNTS: AdminRatingCounts = {
+  escalatedChecklists: 0,
+  fines: 0,
+  warnings: 0,
+  overdueTasks: 0,
+  forgiven: 0,
+  forgivenPoints: 0,
+  bonusPoints: 0,
+  penaltyPoints: 0,
 };
 
 export type AdminRatingUser = {
@@ -72,7 +112,39 @@ export const ADMIN_RATING_RULE_POINTS = {
   averageCheckStepPercent: 5,
   averageCheckMaxPoints: 5,
   averageCheckMinShifts: 2,
+  adjustmentMaxPoints: 10,
 } as const;
+
+export function canForgiveAdminRatingItem(item: AdminRatingItem) {
+  return (
+    ADMIN_RATING_FORGIVABLE_KINDS.includes(item.kind) &&
+    Boolean(item.targetId) &&
+    !item.forgiven
+  );
+}
+
+export type AdminRatingAdjustmentBody =
+  | {
+      userId: string;
+      kind: "FORGIVE";
+      targetKind: AdminRatingItemKind;
+      targetId: string;
+      reason: string;
+    }
+  | {
+      userId: string;
+      kind: "BONUS" | "PENALTY";
+      points: number;
+      reason: string;
+      occurredAt?: string;
+    };
+
+export const ADMIN_RATING_ADJUSTMENTS_URL =
+  "/api/staff/administrator-ratings/adjustments";
+
+export function adminRatingCancelUrl(adjustmentId: string) {
+  return `${ADMIN_RATING_ADJUSTMENTS_URL}/${encodeURIComponent(adjustmentId)}/cancel`;
+}
 
 function pluralRu(value: number, forms: [string, string, string]) {
   const plural = new Intl.PluralRules("ru-RU").select(value);
@@ -133,6 +205,13 @@ export function adminRatingChips(row: AdminRatingView): AdminRatingChip[] {
     ADMIN_RATING_RULE_POINTS.overdueTask,
   );
 
+  if (row.counts.penaltyPoints > 0) {
+    chips.push({
+      label: `снижение ${signedPoints(-row.counts.penaltyPoints)}`,
+      tone: "minus",
+    });
+  }
+
   [row.averageCheck.day, row.averageCheck.night].forEach((check) => {
     if (check.points === 0 || check.deltaPercent === null) return;
     chips.push({
@@ -140,6 +219,20 @@ export function adminRatingChips(row: AdminRatingView): AdminRatingChip[] {
       tone: check.points > 0 ? "plus" : "minus",
     });
   });
+
+  if (row.counts.bonusPoints > 0) {
+    chips.push({
+      label: `поощрение ${signedPoints(row.counts.bonusPoints)}`,
+      tone: "plus",
+    });
+  }
+
+  if (row.counts.forgiven > 0) {
+    chips.push({
+      label: `прощено ${row.counts.forgiven} · ${signedPoints(row.counts.forgivenPoints)}`,
+      tone: "neutral",
+    });
+  }
 
   if (chips.length === 0) {
     chips.push({ label: "без замечаний", tone: "neutral" });

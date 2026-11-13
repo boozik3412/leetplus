@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   StaffAssessment,
   StaffAssessmentKind,
@@ -235,15 +235,53 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
 
+/**
+ * The test opened from «Обучение и база знаний» (?assessmentId=). A new test
+ * comes without questions, so it starts with one empty question to fill in.
+ */
+function initialDraft(
+  report: StaffAssessmentsReport,
+  initialAssessmentId: string | null,
+): DraftAssessment {
+  const opened = initialAssessmentId
+    ? report.rows.find((row) => row.id === initialAssessmentId)
+    : undefined;
+
+  if (opened) {
+    const draft = fromAssessment(opened);
+
+    return report.canManageAssessments && draft.questions.length === 0
+      ? // A fixed id: this runs on the server and in the browser alike.
+        { ...draft, questions: [{ ...emptyQuestion(), id: "question-1" }] }
+      : draft;
+  }
+
+  return report.rows[0] ? fromAssessment(report.rows[0]) : defaultDraft();
+}
+
 export function StaffAssessmentsWorkspace({
   report,
+  initialAssessmentId = null,
 }: {
   report: StaffAssessmentsReport;
+  initialAssessmentId?: string | null;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<DraftAssessment>(() =>
-    report.rows[0] ? fromAssessment(report.rows[0]) : defaultDraft(),
+    initialDraft(report, initialAssessmentId),
   );
+  const openedSectionRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (
+      initialAssessmentId &&
+      report.rows.some((row) => row.id === initialAssessmentId)
+    ) {
+      openedSectionRef.current?.scrollIntoView({ block: "start" });
+    }
+    // Only when the page opens with a test in the address.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [answers, setAnswers] = useState<Record<string, DraftAnswer>>({});
   const [isPending, setIsPending] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -536,7 +574,10 @@ export function StaffAssessmentsWorkspace({
           </div>
         </section>
 
-        <section className="space-y-6">
+        <section
+          ref={openedSectionRef}
+          className="scroll-mt-4 space-y-6"
+        >
           {report.canManageAssessments ? (
             <AssessmentEditor
               draft={draft}

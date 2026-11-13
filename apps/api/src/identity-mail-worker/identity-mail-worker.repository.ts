@@ -15,8 +15,8 @@ import type {
 } from './identity-mail-worker.types';
 
 const CURRENT_MIGRATION =
-  '20261113120000_staff_checklist_escalated_at' as const;
-const CURRENT_MIGRATION_COUNT = 205 as const;
+  '20261113150000_staff_admin_rating_adjustments' as const;
+const CURRENT_MIGRATION_COUNT = 206 as const;
 const PRETERMINAL_MIGRATION_MANIFEST_DIGESTS = new Set<string>([
   // Canonical clean install.
   '589dd0a39f2372041a284392c72ad6ed59027877e909e1a5d377b9017c662fda',

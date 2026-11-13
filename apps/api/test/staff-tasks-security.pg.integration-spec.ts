@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   Prisma,
   PrismaClient,
@@ -10,6 +14,8 @@ import type { AuthenticatedUser } from '../src/auth/auth.types';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { AccessScopeService } from '../src/tenancy/access-scope.service';
 import { TenantContextService } from '../src/tenancy/tenant-context.service';
+import { StaffAdminRatingAdjustmentsService } from '../src/staff/staff-admin-rating-adjustments.service';
+import { StaffAdminRatingService } from '../src/staff/staff-admin-rating.service';
 import { StaffAttachmentBindingsService } from '../src/staff/staff-attachment-bindings.service';
 import { StaffTasksService } from '../src/staff/staff-tasks.service';
 import type { StaffTeamChatService } from '../src/staff/staff-team-chat.service';
@@ -145,6 +151,108 @@ describePostgres('StaffTasksService PostgreSQL security integration', () => {
     await expect(
       prisma.staffTask.count({ where: { id: fixture.taskId } }),
     ).resolves.toBe(1);
+  });
+
+  it('forgives an overdue task in the administrator rating once, until canceled', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantId);
+    const now = new Date();
+    await prisma.user.update({
+      where: { id: fixture.otherUserId },
+      data: { role: UserRole.CLUB_ADMINISTRATOR },
+    });
+    await prisma.staffTask.update({
+      where: { id: fixture.taskId },
+      data: {
+        assignedToUserId: fixture.otherUserId,
+        dueAt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
+      },
+    });
+    const reviewer: AuthenticatedUser = {
+      ...buildActor(fixture),
+      permissions: ['view_staff_control', 'manage_staff_control'],
+      accessScope: 'NETWORK',
+      allowedStoreIds: [],
+    };
+    const adjustments = new StaffAdminRatingAdjustmentsService(
+      prisma,
+      new TenantContextService(),
+    );
+    const ratings = new StaffAdminRatingService(prisma);
+    const ratingOf = async () => {
+      const rows = await ratings.getRatings(fixture.tenantId, {
+        start: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+        end: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+        dateFrom: '2026-11-01',
+        dateTo: '2026-11-30',
+        storeId: null,
+        search: null,
+        now,
+      });
+      return rows.find((row) => row.id === fixture.otherUserId);
+    };
+    const forgive = {
+      userId: fixture.otherUserId,
+      kind: 'FORGIVE',
+      targetKind: 'TASK_OVERDUE',
+      targetId: fixture.taskId,
+      reason: 'Ждали поставку',
+    };
+
+    await expect(ratingOf()).resolves.toMatchObject({ score: 97 });
+
+    const first = await adjustments.create(reviewer, forgive);
+    await expect(adjustments.create(reviewer, forgive)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    await adjustments.create(reviewer, {
+      userId: fixture.otherUserId,
+      kind: 'BONUS',
+      points: 4,
+      reason: 'Вышел на подмену',
+    });
+
+    const rated = await ratingOf();
+    expect(rated).toMatchObject({ score: 100, rawScore: 104 });
+    expect(
+      rated?.items.find((item) => item.kind === 'TASK_OVERDUE'),
+    ).toMatchObject({
+      points: 0,
+      basePoints: -3,
+      forgiven: { adjustmentId: first.id, authorName: 'Store A1 actor' },
+    });
+
+    await adjustments.cancel(reviewer, first.id);
+    await expect(ratingOf()).resolves.toMatchObject({ rawScore: 101 });
+    await expect(adjustments.create(reviewer, forgive)).resolves.toMatchObject({
+      kind: 'FORGIVE',
+    });
+
+    // The table refuses inconsistent rows even without the service.
+    await expect(
+      prisma.staffAdminRatingAdjustment.create({
+        data: {
+          tenantId: fixture.tenantId,
+          userId: fixture.otherUserId,
+          kind: 'FORGIVE',
+          points: 5,
+          targetKind: 'FINE',
+          targetId: randomUUID(),
+          reason: 'points on forgiveness',
+        },
+      }),
+    ).rejects.toThrow();
+    await expect(
+      prisma.staffAdminRatingAdjustment.create({
+        data: {
+          tenantId: fixture.tenantId,
+          userId: fixture.otherUserId,
+          kind: 'BONUS',
+          points: -2,
+          reason: 'negative bonus',
+        },
+      }),
+    ).rejects.toThrow();
   });
 
   it.each([
@@ -410,6 +518,7 @@ async function attachmentState(
 
 async function cleanupFixture(prismaClient: PrismaClient, tenantId: string) {
   await prismaClient.$transaction([
+    prismaClient.staffAdminRatingAdjustment.deleteMany({ where: { tenantId } }),
     prismaClient.staffAttachmentBinding.deleteMany({ where: { tenantId } }),
     prismaClient.staffTaskComment.deleteMany({ where: { tenantId } }),
     prismaClient.staffTaskAuditEvent.deleteMany({ where: { tenantId } }),

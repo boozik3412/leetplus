@@ -19,6 +19,7 @@ import type {
   StaffChecklistTemplateOption,
 } from "@/lib/staff-checklists";
 import { buildStaffChecklistUpdatePayload } from "@/lib/staff-checklist-update-payload";
+import { checklistTimingSummary } from "@/lib/checklist-timing-summary";
 
 const statusLabels: Record<StaffChecklistStatus, string> = {
   OPEN: "Новый",
@@ -791,6 +792,7 @@ function ChecklistRunEditor({
     () => new Map(answers.map((answer) => [answerKey(answer), answer])),
     [answers],
   );
+  const timingSummary = checklistTimingSummary(run);
   const localBlockingIssues = useMemo(
     () =>
       run.sections.flatMap((section) =>
@@ -1200,11 +1202,11 @@ function ChecklistRunEditor({
           <Metric
             label="В срок"
             value={
-              run.timedItemsTotal > 0
-                ? `${formatNumber(run.timedItemsOnTime)}/${formatNumber(run.timedItemsTotal)}`
-                : "нет"
+              timingSummary.total > 0
+                ? `${formatNumber(timingSummary.onTime)}/${formatNumber(timingSummary.total)}`
+                : "нет пунктов со временем"
             }
-            tone={run.timingViolations > 0 ? "bad" : "good"}
+            tone={timingSummary.late > 0 ? "bad" : "good"}
           />
           <Metric
             label="Блокеры сдачи"

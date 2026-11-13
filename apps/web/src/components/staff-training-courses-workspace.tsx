@@ -190,15 +190,21 @@ function formatDate(value: string) {
 
 export function StaffTrainingCoursesWorkspace({
   report,
+  initialCourseId = null,
 }: {
   report: StaffTrainingCoursesReport;
+  /** Opens this course first, e.g. from «Обучение и база знаний». */
+  initialCourseId?: string | null;
 }) {
   const router = useRouter();
   const defaultStoreId =
     report.accessScope === "STORES" ? (report.stores[0]?.id ?? "") : "";
-  const [draft, setDraft] = useState<DraftCourse>(() =>
-    report.rows[0] ? fromCourse(report.rows[0]) : defaultDraft(defaultStoreId),
-  );
+  const [draft, setDraft] = useState<DraftCourse>(() => {
+    const initialRow =
+      report.rows.find((row) => row.id === initialCourseId) ?? report.rows[0];
+
+    return initialRow ? fromCourse(initialRow) : defaultDraft(defaultStoreId);
+  });
   const [isPending, setIsPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

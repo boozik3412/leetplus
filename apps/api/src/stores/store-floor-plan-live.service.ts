@@ -17,6 +17,7 @@ import type {
 } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
+import { storeFloorPlanAdminTip } from './store-floor-plan-attention';
 
 export type StoreFloorPlanLivePc = {
   /** Computer name in Langame, as the club calls it. */
@@ -728,15 +729,17 @@ export class StoreFloorPlanLiveService {
         : null,
       balance: money?.balance ?? null,
       bonusBalance: money?.bonusBalance ?? null,
-      recommendedAction:
-        detail.recommendedAction.key === 'OBSERVE' ||
-        !detail.recommendedAction.label
-          ? null
-          : {
-              key: detail.recommendedAction.key,
-              label: detail.recommendedAction.label,
-              reason: detail.recommendedAction.reason,
-            },
+      recommendedAction: storeFloorPlanAdminTip({
+        action: detail.recommendedAction,
+        crmStatus: detail.crmStatus,
+        nextAction: detail.nextAction,
+        pendingRewards: profile?.pendingRewards ?? 0,
+        expectedIntervalDays: detail.churnRisk?.expectedIntervalDays ?? null,
+        previousVisitAt: previous?.startedAt
+          ? new Date(previous.startedAt)
+          : null,
+        sessionStartedAt: seat.startedAt,
+      }),
       purchases: shown.map((row) => this.purchase(store, row, names)),
       gameAccess: detail.gameAccess,
       game: profile

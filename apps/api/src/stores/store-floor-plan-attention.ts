@@ -201,7 +201,7 @@ export function storeFloorPlanSeatHints(
       hints.push({
         key: 'GAME_IDLE',
         tone: 'OFFER',
-        title: 'Давно не заходил в игру',
+        title: 'Давно не открывает игру',
         hint: 'Расскажи о новых заданиях и кейсах',
       });
     }
@@ -209,7 +209,7 @@ export function storeFloorPlanSeatHints(
     hints.push({
       key: 'NOT_IN_GAME',
       tone: 'OFFER',
-      title: 'Ходит часто, не в игре',
+      title: 'Постоянный гость, но не в игре',
       hint: 'Пригласи в игру: QR на стойке, первый кейс',
     });
   }
@@ -218,7 +218,7 @@ export function storeFloorPlanSeatHints(
     hints.push({
       key: 'BONUS_IDLE',
       tone: 'OFFER',
-      title: `${whole(row.bonusLoad.currentBalance)} бонусов лежат`,
+      title: `${whole(row.bonusLoad.currentBalance)} бонусов не потрачены`,
       hint: 'Подскажи, что бонусами можно оплатить время и бар',
     });
   }
@@ -253,7 +253,7 @@ export function storeFloorPlanSeatHints(
       hints.push({
         key: 'RETURNED',
         tone: 'KNOW',
-        title: `Вернулся через ${days} дн.`,
+        title: `Не был(а) ${days} ${plural(days, 'день', 'дня', 'дней')}`,
         hint: 'Скажи, что рады видеть снова',
       });
     }
@@ -279,4 +279,113 @@ export function sortHints(hints: StoreFloorPlanHint[]) {
 export function storeFloorPlanAlertText(value: string) {
   const line = value.replace(/\s+/gu, ' ').trim();
   return line.length > 200 ? `${line.slice(0, 199)}…` : line;
+}
+
+/** The guest-card recommendation as the scheme shows it to the administrator. */
+export type StoreFloorPlanAdminTip = {
+  key: string;
+  label: string;
+  reason: string;
+};
+
+export type StoreFloorPlanAdminTipInput = {
+  /** `recommendGuestAction` of the guest card (written for the CRM). */
+  action: { key: string; label: string; reason: string };
+  crmStatus: string;
+  nextAction: string | null;
+  pendingRewards: number;
+  /** Usual days between visits from the churn model; null when unknown. */
+  expectedIntervalDays: number | null;
+  /** Start of the guest's previous visit and of the running session. */
+  previousVisitAt: Date | null;
+  sessionStartedAt: Date;
+};
+
+function everyText(days: number) {
+  if (days <= 1) return 'каждый день';
+  if (days === 7) return 'раз в неделю';
+  if (days === 14) return 'раз в две недели';
+  return `раз в ${days} ${plural(days, 'день', 'дня', 'дней')}`;
+}
+
+/**
+ * «Подсказка админу» of a computer on the scheme. The guest card speaks to a
+ * marketer working the base remotely («подготовить реактивацию»); the
+ * administrator stands next to a guest who is in the club right now, so the
+ * same recommendation is said as what to do or say at the computer. `null`
+ * when there is nothing to do in the hall.
+ */
+export function storeFloorPlanAdminTip(
+  input: StoreFloorPlanAdminTipInput,
+): StoreFloorPlanAdminTip | null {
+  const { action } = input;
+  const tip = (label: string) => ({ key: action.key, label, reason: '' });
+  switch (action.key) {
+    case 'MANUAL': {
+      const task = (input.nextAction ?? action.label)
+        .replace(/\s+/gu, ' ')
+        .trim();
+      if (!task) return null;
+      return tip(
+        `Задача из CRM: ${
+          task.length > TASK_TEXT_LIMIT
+            ? `${task.slice(0, TASK_TEXT_LIMIT - 1)}…`
+            : task
+        }`,
+      );
+    }
+    case 'OBSERVE':
+      return input.crmStatus === 'DO_NOT_CONTACT'
+        ? tip(
+            'Отказался(ась) от сообщений. Обслуживай как обычно, но акции и рассылки не предлагай',
+          )
+        : null;
+    case 'WIN_BACK': {
+      const days = input.previousVisitAt
+        ? Math.floor(
+            (input.sessionStartedAt.getTime() -
+              input.previousVisitAt.getTime()) /
+              DAY_MS,
+          )
+        : null;
+      const usual =
+        input.expectedIntervalDays && input.expectedIntervalDays > 0
+          ? `, обычно ${everyText(Math.round(input.expectedIntervalDays))}`
+          : '';
+      return tip(
+        days !== null && days >= 1
+          ? `Давно не был(а): ${days} ${plural(days, 'день', 'дня', 'дней')}${usual}. Скажи, что рады видеть, и напомни про бонусы`
+          : 'Давно не был(а) в клубе. Скажи, что рады видеть, и напомни про бонусы',
+      );
+    }
+    case 'REACTIVATE':
+      return tip(
+        'Снова в клубе после долгого перерыва. Уточни телефон и предложи Telegram-бот клуба, чтобы не пропадать',
+      );
+    case 'SECOND_VISIT':
+      return tip(
+        'Пока один визит. Расскажи, зачем прийти снова, и предложи Telegram-бот',
+      );
+    case 'CLAIM_REWARD': {
+      const count = Math.max(1, input.pendingRewards);
+      return tip(
+        `${count} ${plural(count, 'награда ждёт', 'награды ждут', 'наград ждут')} в приложении. Подскажи, где забрать`,
+      );
+    }
+    case 'INVITE_TO_GAME':
+      return tip(
+        'Не в игре. Покажи QR на стойке, за регистрацию будет первый кейс',
+      );
+    case 'KEEP_WARM':
+      return tip(
+        'Один из лучших гостей клуба. Поздоровайся по имени и поблагодари',
+      );
+    case 'SOFT_TOUCH':
+      // «Добавить в мягкую коммуникацию»: nothing to do in the hall.
+      return null;
+    default:
+      return action.label
+        ? { key: action.key, label: action.label, reason: action.reason }
+        : null;
+  }
 }

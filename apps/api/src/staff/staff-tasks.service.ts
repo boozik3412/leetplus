@@ -1188,6 +1188,47 @@ export class StaffTasksService {
     return this.toTaskResponse(task);
   }
 
+  /**
+   * Removes a task for good: comments, observers and history go with it, and
+   * its attachments lose this task as a holder. Only a manager may do it, so
+   * an administrator cannot erase their own overdue task from the rating.
+   */
+  async deleteTask(user: AuthenticatedUser, id: string) {
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
+
+    if (!this.canReviewTask(user)) {
+      throw new ForbiddenException(
+        'Удалить задачу может управляющий клубом, управляющий сети или владелец',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const locked = await this.lockVisibleTaskForMutation(
+        tx,
+        tenantId,
+        id,
+        user,
+        accessScope,
+        'UPDATE',
+      );
+
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.STAFF_TASK,
+          resourceId: locked.id,
+          attachmentIds: [],
+        },
+      );
+      await tx.staffTask.delete({ where: { id: locked.id } });
+
+      return { id: locked.id, deleted: true };
+    });
+  }
+
   async createTaskComment(
     user: AuthenticatedUser,
     id: string,

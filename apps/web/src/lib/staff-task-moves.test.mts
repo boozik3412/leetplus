@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   allowedStaffTaskTargets,
+  canDeleteStaffTask,
+  staffTaskDeleteRequest,
   staffTaskCandidateUserIds,
   staffTaskMoveRefusal,
   staffTaskMoves,
@@ -99,4 +101,25 @@ test("reads candidate ids from task labels", () => {
   );
   assert.deepEqual(staffTaskCandidateUserIds(null), []);
   assert.deepEqual(staffTaskCandidateUserIds(["a"]), []);
+});
+
+test("only managers delete tasks, administrators cancel them", () => {
+  assert.equal(canDeleteStaffTask(manager), true);
+  assert.equal(canDeleteStaffTask(admin), false);
+  assert.equal(
+    canDeleteStaffTask({
+      id: "senior",
+      role: "SENIOR_ADMINISTRATOR",
+      isPlatformAdmin: false,
+    }),
+    false,
+  );
+  assert.equal(
+    canDeleteStaffTask({ ...stranger, isPlatformAdmin: true }),
+    true,
+  );
+  assert.deepEqual(staffTaskDeleteRequest("a/b"), {
+    url: "/api/staff/tasks/a%2Fb",
+    method: "DELETE",
+  });
 });

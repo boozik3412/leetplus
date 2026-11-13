@@ -211,6 +211,7 @@ const STAFF_STORE_BOUNDARIES: readonly ControllerBoundary[] = [
     source: 'staff/staff-tasks.controller.ts',
     className: 'StaffTasksController',
     routeIds: [
+      'DELETE /staff/tasks/:id',
       'GET /staff/tasks',
       'GET /staff/tasks/export',
       'PATCH /staff/tasks/:id',
@@ -548,7 +549,7 @@ describe('Gate 1MT staff scope boundaries', () => {
     }
   });
 
-  it('binds all 25 store-aware staff routes to fresh NETWORK or STORES authority', () => {
+  it('binds all 26 store-aware staff routes to fresh NETWORK or STORES authority', () => {
     const routeIds: string[] = [];
 
     for (const boundary of STAFF_STORE_BOUNDARIES) {
@@ -564,7 +565,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       routeIds.push(...boundary.routeIds);
     }
 
-    expect(routeIds).toHaveLength(25);
+    expect(routeIds).toHaveLength(26);
     expect(new Set(routeIds).size).toBe(routeIds.length);
   });
 

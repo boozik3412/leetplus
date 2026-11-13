@@ -65,6 +65,21 @@ export function canCancelStaffTask(actor: StaffTaskActor) {
   return actor.isPlatformAdmin || statusManagerRoles.has(actor.role);
 }
 
+/**
+ * Deleting removes the task for good, so only managers may do it: an
+ * administrator must not erase their own overdue task from the rating.
+ */
+export function canDeleteStaffTask(actor: StaffTaskActor) {
+  return isReviewer(actor);
+}
+
+export function staffTaskDeleteRequest(taskId: string) {
+  return {
+    url: `/api/staff/tasks/${encodeURIComponent(taskId)}`,
+    method: "DELETE" as const,
+  };
+}
+
 /** Forward moves shown as buttons (without «Отменить»). */
 export function staffTaskMoves(
   task: StaffTaskMoveSubject,

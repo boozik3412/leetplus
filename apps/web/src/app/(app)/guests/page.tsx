@@ -3,7 +3,6 @@ import Link from "next/link";
 import { BusinessSnapshotGate } from "@/components/business-snapshot-gate";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { GuestActionCenter } from "@/components/guest-action-center";
-import { GuestAudiencesPanel } from "@/components/guest-audiences-panel";
 import { GuestAttentionPanel } from "@/components/guest-attention-panel";
 import {
   BonusLoadPanel,
@@ -19,11 +18,12 @@ import { GuestDashboardFilters } from "@/components/guest-dashboard-filters";
 import { GuestGamificationOverview } from "@/components/guest-gamification-overview";
 import { GuestHealthPanel } from "@/components/guest-health-panel";
 import { KpiTile, PillLink } from "@/components/guest-insight-ui";
+import { GuestGroupsList } from "@/components/guest-groups-list";
 import { GuestListTable } from "@/components/guest-list-table";
 import { requireCurrentUser } from "@/lib/auth";
 import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
 import { getDefaultLandingPath } from "@/lib/landing";
-import { can } from "@/lib/permissions";
+import { can, canAccessPath } from "@/lib/permissions";
 import {
   formatDateTime,
   formatNumber,
@@ -176,6 +176,9 @@ export default async function GuestsPage({
           ))}
         </nav>
 
+        {/* Groups are built step by step on their own page: the period and
+            club filters do not apply to the saved list. */}
+        {tab !== "groups" ? (
         <GuestDashboardFilters
           tab={tab}
           key={[
@@ -198,6 +201,7 @@ export default async function GuestsPage({
           periodTo={summary.periodTo}
           gameAvailable={gameAvailable}
         />
+        ) : null}
 
         <BusinessSnapshotGate snapshot={guestSnapshot} type="GUESTS" />
 
@@ -281,19 +285,11 @@ export default async function GuestsPage({
         ) : null}
 
         {tab === "groups" ? (
-          <GuestAudiencesPanel
-            variant="groups"
-            currentFilters={{
-              ...filters,
-              dateFrom: summary.periodFrom,
-              dateTo: summary.periodTo,
-            }}
-            totalRows={summary.totalGuests}
+          <GuestGroupsList
             audiences={audiences}
-            crmLeads={[]}
-            crmTasks={[]}
-            crmUsers={[]}
-            crmContactEvents={[]}
+            stores={options.stores}
+            createdId={searchParam(params.created) ?? null}
+            canCreateCampaign={canAccessPath(user, "/marketing/new")}
           />
         ) : null}
 

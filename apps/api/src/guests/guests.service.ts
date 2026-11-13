@@ -1857,7 +1857,12 @@ export class GuestsService {
     const normalizedFilters = this.guestSavedFilterPayload(
       filters as unknown as Prisma.JsonValue,
     );
-    const guestList = await this.buildGuestList(user, normalizedFilters);
+    // The same three-month window as the guest list the group was built
+    // from, so the saved snapshot holds exactly the guests that were shown.
+    const guestList = await this.buildGuestList(user, normalizedFilters, {
+      minimumPeriodMonths: GUEST_ANALYTICS_MIN_PERIOD_MONTHS,
+      maximumPeriodMonths: GUEST_ANALYTICS_MIN_PERIOD_MONTHS,
+    });
     const description = this.normalizeText(dto.description, 200);
     const memberRows = guestList.rows.map((row) => ({
       tenantId,

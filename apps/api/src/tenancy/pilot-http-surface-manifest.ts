@@ -259,6 +259,7 @@ const definitions: readonly ControllerDefinition[] = [
           ':id/floor-plan/live',
           ':id/floor-plan/live/seats/:number',
           ':id/floor-plan/live/attention',
+          ':id/floor-plan/live/game-completions',
         ],
       ],
       ['PATCH', [':id/floor-plan']],

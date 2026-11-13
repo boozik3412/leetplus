@@ -750,7 +750,7 @@ function capabilityMatches(
 export function isClubSchemeReadPath(path: string) {
   return (
     path === '/stores/floor-plans' ||
-    /^\/stores\/[^/]+\/floor-plan(?:\/live(?:\/seats\/[^/]+|\/attention)?)?$/.test(
+    /^\/stores\/[^/]+\/floor-plan(?:\/live(?:\/seats\/[^/]+|\/attention|\/game-completions)?)?$/.test(
       path,
     )
   );

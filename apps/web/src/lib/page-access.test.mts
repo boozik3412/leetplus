@@ -98,6 +98,10 @@ const guardedPages = [
   ["(app)/utilities/page.tsx", "/utilities"],
   ["(app)/visualization/page.tsx", "/visualization"],
   [
+    "(app)/visualization/game-activity/page.tsx",
+    "/visualization/game-activity",
+  ],
+  [
     "(app)/utilities/product-parsing/manual/page.tsx",
     "/utilities/product-parsing/manual",
   ],

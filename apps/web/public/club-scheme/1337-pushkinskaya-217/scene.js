@@ -126,7 +126,9 @@ function gameHtml() {
       body = `<div class="gnow">Активно сейчас · ${esc(gameCounts({ items }) || 'только сезон')}</div>${seasonHtml}<div class="list games">${rows}</div>${items.length > shown.length ? `<div class="note">И ещё ${plural(items.length - shown.length, 'активность', 'активности', 'активностей')}, все в разделе «Игровой модуль».</div>` : ''}`;
     }
   }
-  return `<div class="sec fsec gamesec${FOLD.game ? ' open' : ''}">${foldHead('game', 'Игровой модуль', summary)}<div class="fbody">${body}</div></div>`;
+  // «Подробнее»: what the guests completed this shift, in a new LeetPlus tab.
+  const more = g && STORE_ID ? `<a class="gmore" href="/visualization/game-activity?store=${encodeURIComponent(STORE_ID)}" target="_blank" rel="noopener">Подробнее<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6 3h7v7M13 3L5 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></a>` : '';
+  return `<div class="sec fsec gamesec${FOLD.game ? ' open' : ''}">${foldHead('game', 'Игровой модуль', summary)}${more}<div class="fbody">${body}</div></div>`;
 }
 function purchasesHtml() {
   const list = LIVE.purchases, r = LIVE.revenue;
@@ -917,6 +919,7 @@ function liveNote() {
 function renderPanel() {
   panel.classList.toggle('home', view.type === 'home' && !editing && !EMBED);
   layoutChrome();
+  placeShiftWork();
   if (editing) { panel.classList.toggle('collapsed', isPhone() && !sheetOpen); renderEditor(); syncPills(); return; }
   panel.classList.toggle('collapsed', isPhone() && !sheetOpen);
   $('#grab').setAttribute('aria-label', sheetOpen ? 'Свернуть панель' : 'Развернуть панель');
@@ -1479,6 +1482,226 @@ if (CALM) {
   for (const m of movers) m.o.visible = false;
   for (const w of walkers) w.p.visible = false;
 }
+/* ---------------- shift work of the administrator: GET /api/staff/checklists, /api/staff/tasks ----------------
+   For a shift administrator looking at the hall under their own account: the shift
+   checklist (planned time and status of every item) under «Обзор клуба» and the
+   administrator's tasks above «Лента клуба». A click asks «Изменить статус?» and
+   «Да» opens the task or the checklist in a new LeetPlus tab. `var`: the scene is
+   built before this part of the script runs (see attention.js). */
+var SW = { me: null, run: null, tasks: null, taskTotal: 0, failed: false, timer: 0, scrolled: false, ask: null, back: null };
+var SW_ROLES = ['SENIOR_ADMINISTRATOR', 'CLUB_ADMINISTRATOR'];
+var SW_POLL_MS = 60000;
+var SW_ACTIVE_RUN = ['OPEN', 'IN_PROGRESS', 'RETURNED', 'ESCALATED'];
+var SW_DONE_TASK = ['DONE', 'CANCELED'];
+
+function swOn() { return !!(SW && SW.me) && !EMBED; }
+function swJson(url) {
+  return fetch(url, { credentials: 'same-origin', cache: 'no-store' }).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))));
+}
+function startShiftWork() {
+  if (EMBED || !STORE_ID) return;
+  swJson('/api/auth/me').then(body => {
+    const u = body && body.user;
+    if (!u || !SW_ROLES.includes(u.role)) return;
+    SW.me = { id: u.id };
+    buildShiftWork();
+    loadShiftWork();
+    SW.timer = setInterval(loadShiftWork, SW_POLL_MS);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) loadShiftWork(); });
+  }).catch(() => { /* no session or no access: the hall works without the cards */ });
+}
+function swMine(row) { return !row.assignedToUser || row.assignedToUser.id === SW.me.id; }
+function swHere(row) { return !row.store || !row.store.id || row.store.id === STORE_ID; }
+function swAt(row) { return new Date(row.shift && row.shift.startedAt || row.startedAt || row.scheduledAt || row.createdAt || 0).getTime(); }
+function loadShiftWork() {
+  if (!SW.me) return;
+  Promise.all([
+    swJson('/api/staff/checklists?status=all').catch(() => null),
+    swJson('/api/staff/tasks?view=my&status=all&sort=dueAt&direction=asc&pageSize=50').catch(() => null),
+  ]).then(([checklists, tasks]) => {
+    if (checklists && Array.isArray(checklists.rows)) {
+      const rows = checklists.rows.filter(r => swMine(r) && swHere(r));
+      const active = rows.filter(r => SW_ACTIVE_RUN.includes(r.status)).sort((a, b) => swAt(b) - swAt(a));
+      // a checklist handed in during the last 14 hours stays visible as done
+      const recent = rows.filter(r => !SW_ACTIVE_RUN.includes(r.status) && r.status !== 'CANCELED' && Date.now() - swAt(r) < 14 * 3600e3).sort((a, b) => swAt(b) - swAt(a));
+      SW.run = active[0] || recent[0] || null;
+    }
+    if (tasks && Array.isArray(tasks.rows)) {
+      const open = tasks.rows.filter(t => !SW_DONE_TASK.includes(t.status) && swHere(t));
+      open.sort((a, b) => (b.isOverdue - a.isOverdue) || ((a.dueAt ? Date.parse(a.dueAt) : Infinity) - (b.dueAt ? Date.parse(b.dueAt) : Infinity)));
+      SW.tasks = open; SW.taskTotal = open.length;
+    }
+    SW.failed = !checklists && !tasks;
+    renderShiftWork();
+  });
+}
+
+/* ---- checklist items with their time and status ---- */
+function swMinutes(ms) { const m = Math.round(ms / 60000); return m < 60 ? `${m} мин` : `${Math.floor(m / 60)} ч${m % 60 ? ' ' + (m % 60) + ' мин' : ''}`; }
+function swItems(run) {
+  const key = (s, i) => `${s}::${i}`;
+  const answers = new Map((run.answers || []).map(a => [key(a.sectionId, a.itemId), a]));
+  const plans = new Map((run.itemTimings || []).map(p => [key(p.sectionId, p.itemId), p.timing]));
+  const now = Date.now(), list = [];
+  let order = 0;
+  for (const section of run.sections || []) for (const item of section.items || []) {
+    const a = answers.get(key(section.id, item.id)) || null;
+    const t = (a && a.timing) || plans.get(key(section.id, item.id)) || null;
+    const planned = t && t.plannedAt ? Date.parse(t.plannedAt) : null;
+    const end = t && t.windowEndAt ? Date.parse(t.windowEndAt) : null;
+    const start = t && t.windowStartAt ? Date.parse(t.windowStartAt) : null;
+    let tone, chip, sub = '';
+    if (a && a.status) {
+      const at = a.completedAt ? hhmm(new Date(a.completedAt)) : null;
+      sub = at ? `отмечено в ${at}` : 'отмечено';
+      if (a.status === 'FAILED') { tone = 'bad'; chip = 'Проблема'; }
+      else if (a.status === 'NOT_APPLICABLE') { tone = 'wait'; chip = 'Не применимо'; }
+      else if (t && t.status === 'LATE') { tone = 'late'; chip = `+${swMinutes((t.deviationMinutes || 0) * 60000)}`; }
+      else if (t && t.status === 'EARLY') { tone = 'ok'; chip = 'Раньше срока'; }
+      else { tone = 'ok'; chip = t && t.status === 'ON_TIME' ? 'Вовремя' : 'Готово'; }
+    } else if (t && t.status === 'MISSED') {
+      tone = 'bad'; chip = 'Просрочено'; sub = end ? `окно до ${hhmm(new Date(end))} закрыто` : '';
+    } else if (end && start && now >= start) {
+      tone = 'now'; chip = 'Сейчас'; sub = `окно до ${hhmm(new Date(end))} · осталось ${swMinutes(end - now)}`;
+    } else if (start && start > now) {
+      tone = 'wait'; chip = start - now <= 3 * 3600e3 ? `Через ${swMinutes(start - now)}` : 'Запланировано';
+    } else if (run.isOverdue) {
+      tone = 'bad'; chip = 'Просрочено';
+    } else {
+      tone = 'wait'; chip = 'Сделать';
+    }
+    list.push({ section: section.title, title: item.title, time: planned ? hhmm(new Date(planned)) : '', planned, tone, chip, sub, done: !!(a && a.status), order: order++ });
+  }
+  // timed items by their time, the rest in checklist order after them
+  return list.sort((x, y) => (x.planned == null) - (y.planned == null) || (x.planned || 0) - (y.planned || 0) || x.order - y.order);
+}
+var SW_DOT = {
+  ok: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--good)"/><path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--surface)" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  late: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--warn)"/><path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--surface)" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  bad: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--bad)"/><path d="M8 4.5v4.2M8 11.2v.3" stroke="var(--surface)" stroke-width="1.9" stroke-linecap="round"/></svg>',
+  now: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="var(--accent)" stroke-width="1.8"/><circle cx="8" cy="8" r="2.6" fill="var(--accent)"/></svg>',
+  wait: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="var(--muted)" stroke-width="1.6"/></svg>'
+};
+var SW_CHIP = { ok: 'good', late: 'warn', bad: 'bad', now: 'acc', wait: 'off' };
+
+function swRunHref(run) { return `/staff/shift-workspace?checklistRunId=${encodeURIComponent(run.id)}`; }
+function swTaskHref(task) { return `/staff/tasks?taskId=${encodeURIComponent(task.id)}`; }
+
+function checklistCardHtml() {
+  const run = SW.run;
+  let h = `<div class="swhd"><h3>Чек-лист смены</h3>${run ? `<a href="${swRunHref(run)}" target="_blank" rel="noopener">Открыть</a>` : `<a href="/staff/shift-workspace" target="_blank" rel="noopener">Моя смена</a>`}</div>`;
+  if (!run) return h + `<div class="swempty">${SW.failed ? 'Не удалось загрузить чек-лист, попробую через минуту.' : 'На эту смену чек-лист не назначен. Его можно начать на странице «Моя смена».'}</div>`;
+  const items = swItems(run), total = items.length || 1;
+  const n = tone => items.filter(i => i.done ? (tone === 'ok' ? i.tone === 'ok' || i.tone === 'wait' : i.tone === tone) : (tone === 'bad' && i.tone === 'bad')).length;
+  const ok = n('ok'), late = n('late'), bad = items.filter(i => i.tone === 'bad').length, done = items.filter(i => i.done).length;
+  h += `<div class="swsub">${esc(run.title)} · ${done} из ${items.length} · сейчас ${hhmm(new Date())}</div>`;
+  h += `<div class="swbar" role="img" aria-label="Выполнено ${done} из ${items.length}"><i style="width:${ok / total * 100}%;background:var(--good)"></i><i style="width:${late / total * 100}%;background:var(--warn)"></i><i style="width:${bad / total * 100}%;background:var(--bad)"></i></div>`;
+  h += `<div class="swleg"><span><i style="background:var(--good)"></i>${ok} вовремя</span><span><i style="background:var(--warn)"></i>${late} с опозданием</span><span><i style="background:var(--bad)"></i>${bad} ${bad === 1 ? 'просрочен' : 'просрочено'}</span></div>`;
+  h += `<div class="swlist">${items.map((i, k) => `<button type="button" class="swrow${i.tone === 'now' ? ' isnow' : ''}" data-switem="${k}"><span class="swt">${i.time || '—'}</span>${SW_DOT[i.tone]}<span class="swn"><b>${esc(i.title)}</b>${i.sub ? `<small>${esc(i.sub)}</small>` : ''}</span><span class="chip ${SW_CHIP[i.tone]}">${esc(i.chip)}</span></button>`).join('')}</div>`;
+  SW.items = items;
+  return h;
+}
+function swTaskLine(t) {
+  const due = t.dueAt ? new Date(t.dueAt) : null;
+  const sameDay = due && due.toDateString() === new Date().toDateString();
+  const when = !due ? 'без срока' : t.isOverdue ? `срок был ${sameDay ? hhmm(due) : ddmm(due) + ' ' + hhmm(due)}` : `до ${sameDay ? hhmm(due) : ddmm(due) + ' ' + hhmm(due)}`;
+  return [t.priority === 'URGENT' ? 'срочно' : t.priority === 'HIGH' ? 'важно' : null, when].filter(Boolean).join(' · ');
+}
+function swTaskChip(t) {
+  if (t.isOverdue) return ['bad', 'Просрочена'];
+  if (t.status === 'IN_PROGRESS') return ['acc', 'В работе'];
+  if (t.status === 'ON_REVIEW') return ['lilac', 'На проверке'];
+  return ['off', 'Новая'];
+}
+function tasksCardHtml() {
+  const list = SW.tasks;
+  let h = `<div class="swhd"><h3>Задачи на смену</h3><a href="/staff/tasks?view=my&amp;status=all" target="_blank" rel="noopener">Все задачи${SW.taskTotal ? ' · ' + SW.taskTotal : ''}</a></div>`;
+  if (!list) return h + `<div class="swempty">${SW.failed ? 'Не удалось загрузить задачи, попробую через минуту.' : 'Загружаю задачи…'}</div>`;
+  if (!list.length) return h + '<div class="swempty">Открытых задач на смену нет.</div>';
+  return h + `<div class="swlist">${list.slice(0, 4).map((t, k) => {
+    const [tone, label] = swTaskChip(t);
+    const pr = t.priority === 'URGENT' || t.priority === 'HIGH' ? 'var(--bad)' : t.priority === 'NORMAL' ? 'var(--warn)' : 'var(--muted)';
+    return `<button type="button" class="swrow swtask" data-swtask="${k}"><span class="swpr" style="background:${pr}"></span><span class="swn"><b>${esc(t.title)}</b><small>${esc(swTaskLine(t))}</small></span><span class="chip ${tone}">${label}</span></button>`;
+  }).join('')}</div>`;
+}
+
+/* ---- cards, placement and the «Изменить статус?» window ---- */
+function buildShiftWork() {
+  const stage = document.getElementById('stage');
+  if (!stage || document.getElementById('swcl')) return;
+  const cl = document.createElement('section'); cl.id = 'swcl'; cl.className = 'swcard'; cl.setAttribute('aria-label', 'Чек-лист смены'); cl.hidden = true;
+  const tk = document.createElement('section'); tk.id = 'swtk'; tk.className = 'swcard'; tk.setAttribute('aria-label', 'Задачи на смену'); tk.hidden = true;
+  const dlg = document.createElement('div'); dlg.id = 'swask'; dlg.hidden = true;
+  dlg.innerHTML = '<div class="swscrim" data-swno="1"></div><div class="swdlg" role="dialog" aria-modal="true" aria-labelledby="swq"><h4 id="swq"></h4><div class="swwhat"></div><p></p><div class="swacts"><button type="button" class="swbtn sec" data-swno="1">Нет</button><button type="button" class="swbtn pri" data-swyes="1">Да, открыть</button></div></div>';
+  stage.appendChild(cl); stage.appendChild(tk); stage.appendChild(dlg);
+  cl.addEventListener('click', e => { const b = e.target.closest('[data-switem]'); if (b && SW.items && SW.run) swAsk('item', SW.items[+b.dataset.switem], b); });
+  tk.addEventListener('click', e => { const b = e.target.closest('[data-swtask]'); if (b && SW.tasks) swAsk('task', SW.tasks[+b.dataset.swtask], b); });
+  dlg.addEventListener('click', e => { if (e.target.closest('[data-swyes]')) swAnswer(true); else if (e.target.closest('[data-swno]')) swAnswer(false); });
+  dlg.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.preventDefault(); swAnswer(false); }
+    if (e.key === 'Tab') { const b = [...dlg.querySelectorAll('button')]; const i = b.indexOf(document.activeElement); e.preventDefault(); b[(i + (e.shiftKey ? b.length - 1 : 1)) % b.length].focus(); }
+  });
+  const panelEl = document.getElementById('panel'), feedEl = document.querySelector('.feed');
+  if (window.ResizeObserver) { const ro = new ResizeObserver(() => placeShiftWork()); ro.observe(panelEl); if (feedEl) ro.observe(feedEl); ro.observe(stage); }
+}
+function swAsk(kind, row, trigger) {
+  if (!row) return;
+  const dlg = document.getElementById('swask'); if (!dlg) return;
+  if (kind === 'task') {
+    SW.ask = { href: swTaskHref(row) };
+    dlg.querySelector('h4').textContent = 'Изменить статус задачи?';
+    dlg.querySelector('.swwhat').innerHTML = `<b>${esc(row.title)}</b><small>${esc([swTaskChip(row)[1], swTaskLine(row)].join(' · '))}</small>`;
+    dlg.querySelector('p').textContent = 'Задача откроется в новой вкладке LeetPlus: там можно сменить статус, оставить комментарий и фото.';
+  } else {
+    SW.ask = { href: swRunHref(SW.run) };
+    dlg.querySelector('h4').textContent = 'Изменить статус пункта?';
+    dlg.querySelector('.swwhat').innerHTML = `<b>${esc(row.title)}</b><small>${esc([SW.run.title, row.time ? 'в ' + row.time : null, row.chip.toLowerCase()].filter(Boolean).join(' · '))}</small>`;
+    dlg.querySelector('p').textContent = 'Чек-лист откроется в новой вкладке на странице «Моя смена»: там пункт можно отметить выполненным или указать проблему.';
+  }
+  SW.back = trigger || null;
+  dlg.hidden = false;
+  dlg.querySelector('[data-swyes]').focus();
+}
+function swAnswer(yes) {
+  const dlg = document.getElementById('swask'); if (!dlg || dlg.hidden) return;
+  if (yes && SW.ask) window.open(SW.ask.href, '_blank', 'noopener');
+  dlg.hidden = true; SW.ask = null;
+  if (SW.back && document.contains(SW.back)) SW.back.focus();
+  SW.back = null;
+}
+function renderShiftWork() {
+  if (!swOn()) return;
+  const cl = document.getElementById('swcl'), tk = document.getElementById('swtk');
+  if (!cl || !tk) return;
+  const keep = cl.querySelector('.swlist') ? cl.querySelector('.swlist').scrollTop : null;
+  cl.innerHTML = checklistCardHtml();
+  tk.innerHTML = tasksCardHtml();
+  const list = cl.querySelector('.swlist');
+  if (list && keep !== null && SW.scrolled) list.scrollTop = keep;
+  placeShiftWork();
+  if (list && !SW.scrolled) { const now = list.querySelector('.isnow') || [...list.querySelectorAll('.swrow')].find(r => !r.querySelector('.chip.good')); if (now) { list.scrollTop = Math.max(0, now.offsetTop - list.offsetTop - 40); SW.scrolled = true; } }
+}
+/* The checklist goes under the compact «Обзор клуба», the tasks above «Лента клуба». */
+function placeShiftWork() {
+  if (!swOn()) return;
+  const cl = document.getElementById('swcl'), tk = document.getElementById('swtk');
+  const stage = document.getElementById('stage'), panelEl = document.getElementById('panel'), feedEl = document.querySelector('.feed');
+  if (!cl || !tk || !stage) return;
+  const show = view.type === 'home' && !editing && !isPhone();
+  cl.hidden = !show; tk.hidden = !show;
+  if (!show) return;
+  // the overview grows over the checklist while hovered; keep the checklist where it was
+  if (!panelEl.matches(':hover') && !panelEl.matches(':focus-within')) {
+    const top = panelEl.offsetTop + panelEl.offsetHeight + 10;
+    cl.style.top = top + 'px';
+    cl.style.width = panelEl.offsetWidth + 'px';
+    cl.style.maxHeight = Math.max(120, stage.clientHeight - top - 14) + 'px';
+    cl.hidden = stage.clientHeight - top < 120;
+  }
+  const feedTop = feedEl && feedEl.offsetParent ? feedEl.offsetTop : stage.clientHeight - 14;
+  tk.style.bottom = (stage.clientHeight - feedTop + 10) + 'px';
+  tk.style.maxHeight = Math.max(120, Math.min(330, feedTop - 150)) + 'px';
+}
 /* ---------------- other clubs of the network with a drawn hall (full screen only) ---------------- */
 async function loadClubNav() {
   if (window.parent !== window || !STORE_ID) return;
@@ -1572,8 +1795,13 @@ canvas.addEventListener('pointerup', e => {
   if (editing) { downAt = null; return; }
   if (!downAt) return; const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]); downAt = null;
   if (moved > 6) return;
-  if (staffHit(e)) { select({ type: 'zone', id: 'admin' }); staffTipUntil = performance.now() + 6000; setAdminHL(true); return; }
-  const h = hit(e); if (!h) return;
+  const other = e.button !== 0;
+  if (staffHit(e)) { if (!other) { select({ type: 'zone', id: 'admin' }); staffTipUntil = performance.now() + 6000; setAdminHL(true); } return; }
+  const h = hit(e);
+  // the floor of a zone counts as empty while a card is open
+  const empty = !h || (h.data.type === 'zone' && h.data.id !== 'admin' && view.type !== 'home');
+  if (empty) { if (view.type !== 'home') { staffTipUntil = 0; tip.hidden = true; setAdminHL(false); select({ type: 'home' }); } return; }
+  if (other) return;
   if (h.data.type === 'seat') select({ type: 'seat', id: h.data.id }); else select({ type: 'zone', id: h.data.id });
 });
 canvas.addEventListener('pointermove', e => {
@@ -1598,6 +1826,7 @@ canvas.addEventListener('pointermove', e => {
   else { hoverRing.visible = false; tip.hidden = true; }
 });
 canvas.addEventListener('pointerleave', () => { tip.hidden = true; hoverRing.visible = false; setAdminHL(false); });
+canvas.addEventListener('contextmenu', e => { if (!editing) e.preventDefault(); });
 let staffTipUntil = 0;
 addEventListener('pointerup', () => { if (!editing) setTimeout(() => { downAt = null; }, 0); });
 function staffTipHtml() { const s = shiftInfo(), r = LIVE.revenue; if (!s) return `<b>Администратор</b><span class="tl">${LIVE.loaded ? 'в Langame нет открытой смены' : 'загружаю смену'}</span>`; return `<b>${esc(s.full)}</b> · администратор смены<span class="tl">смена с ${s.start}, идёт ${s.dur} · товары ${rubOr(r && r.goods)}${r && r.goodsCount != null ? ', ' + plural(r.goodsCount, 'товар', 'товара', 'товаров') : ''} · выручка ${rubOr(r && r.total)}</span>`; }
@@ -2017,6 +2246,7 @@ animate();
 
 loadPlan().then(poll);
 startAttention();
+startShiftWork();
 setInterval(minuteTick, 30000);
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { redrawTextures(); measureObstacles(); });
 window.__club = { select, seats, camera, controls, sel: () => selected, items: () => items, select3d, settle, Box3: THREE.Box3 };

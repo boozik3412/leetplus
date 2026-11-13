@@ -208,6 +208,12 @@ export type StaffChecklistRun = {
   reviewedAt: string | null;
   sections: StaffChecklistSection[];
   answers: StaffChecklistAnswer[];
+  /** Planned time of every timed item, answered or not. */
+  itemTimings?: Array<{
+    sectionId: string;
+    itemId: string;
+    timing: StaffChecklistAnswerTiming;
+  }>;
   scoreTotal: number;
   scoreEarned: number;
   requiredItemsTotal: number;

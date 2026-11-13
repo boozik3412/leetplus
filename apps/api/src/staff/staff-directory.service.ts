@@ -8,6 +8,11 @@ import {
 import { IntegrationProvider, Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { LangameClient } from '../integrations/langame.client';
+import {
+  autoLinkStaffMembersToLangame,
+  STAFF_LANGAME_LINK_SOURCES,
+  type StaffLangameLinkSource,
+} from '../integrations/langame-staff-link';
 import { parseLangameDate as parseLangameDateValue } from '../integrations/langame-date';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type { LangameWorkingShift } from '../integrations/langame.types';
@@ -129,6 +134,8 @@ export type StaffMemberResponse = {
   externalProvider: IntegrationProvider | null;
   externalDomain: string | null;
   externalUserId: string | null;
+  externalLinkSource: StaffLangameLinkSource | null;
+  externalLinkedAt: string | null;
   note: string | null;
   createdAt: string;
   updatedAt: string;
@@ -170,6 +177,8 @@ export type StaffLangameUserOption = {
   phone: string | null;
   externalGuestId: string | null;
   workPointLabel: string | null;
+  /** The last complete Langame list of the domain no longer has this admin. */
+  missingFromSource: boolean;
   mappedStaffMemberId: string | null;
   updatedAt: string;
 };
@@ -267,6 +276,7 @@ export class StaffDirectoryService {
     }
 
     await this.ensureAccountBackedStaffMembers(tenantId, user);
+    await this.autoLinkLangameIdentities(tenantId, user);
     const where = this.buildWhere(tenantId, filters, visibleStoreIds);
     const canManageDirectory = this.canManageDirectory(user);
 
@@ -327,6 +337,7 @@ export class StaffDirectoryService {
     const visibleStoreIds =
       this.accessScopeService.resolveRequestedStoreIds(user);
     await this.ensureAccountBackedStaffMembers(tenantId, user, user.id);
+    await this.autoLinkLangameIdentities(tenantId, user, user.id);
     const rows = await this.prisma.staffMember.findMany({
       where: {
         tenantId,
@@ -745,6 +756,18 @@ export class StaffDirectoryService {
                 : null,
             externalDomain,
             externalUserId,
+            ...(this.langameIdentityChanged(
+              requireName,
+              currentMember,
+              externalDomain,
+              externalUserId,
+            )
+              ? {
+                  externalLinkSource: 'MANUAL',
+                  externalLinkedAt:
+                    externalDomain && externalUserId ? new Date() : null,
+                }
+              : {}),
           }
         : {}),
       note: this.cleanString(dto.note, 1000),
@@ -845,6 +868,28 @@ export class StaffDirectoryService {
     ) {
       this.accessScopeService.assertNetwork(actor);
     }
+  }
+
+  /**
+   * A person decided the link: set, replaced or cleared it. Re-saving the
+   * card with the same identity keeps an automatic link automatic.
+   */
+  private langameIdentityChanged(
+    isCreate: boolean,
+    current:
+      | { externalDomain: string | null; externalUserId: string | null }
+      | undefined,
+    externalDomain: string | null,
+    externalUserId: string | null,
+  ) {
+    if (isCreate) {
+      return Boolean(externalDomain || externalUserId);
+    }
+
+    return (
+      (current?.externalDomain ?? null) !== externalDomain ||
+      (current?.externalUserId ?? null) !== externalUserId
+    );
   }
 
   private assertLangameIdentityCreateScope(
@@ -1048,6 +1093,50 @@ export class StaffDirectoryService {
       note: row.note,
       mappedStaffMemberId: null,
     }));
+  }
+
+  /**
+   * System pass, not the actor's edit: links still-undecided cards to the
+   * single Langame admin with the same email or phone. Opening the
+   * directory with NETWORK scope covers the tenant; opening «Моя смена»
+   * covers only the caller's own card. A STORES directory read does not run
+   * it, so club-scoped reads never touch network-wide Langame admin data.
+   */
+  private async autoLinkLangameIdentities(
+    tenantId: string,
+    actor: AuthenticatedUser,
+    userId?: string,
+  ) {
+    if (!userId) {
+      if (this.accessScopeService.resolve(actor).mode !== 'NETWORK') {
+        return;
+      }
+
+      await autoLinkStaffMembersToLangame(this.prisma, tenantId);
+      return;
+    }
+
+    const visibleStoreIds =
+      this.accessScopeService.resolveRequestedStoreIds(actor);
+    const own = await this.prisma.staffMember.findMany({
+      where: {
+        tenantId,
+        ...(visibleStoreIds ? { storeId: { in: [...visibleStoreIds] } } : {}),
+        userId,
+        externalUserId: null,
+        externalLinkSource: null,
+      },
+      select: { id: true },
+      take: 5,
+    });
+
+    if (own.length === 0) {
+      return;
+    }
+
+    await autoLinkStaffMembersToLangame(this.prisma, tenantId, {
+      memberIds: own.map((member) => member.id),
+    });
   }
 
   private async ensureAccountBackedStaffMembers(
@@ -1432,6 +1521,7 @@ export class StaffDirectoryService {
         phone: true,
         externalGuestId: true,
         workPoint: true,
+        missingFromSourceAt: true,
         updatedAt: true,
       },
       orderBy: [
@@ -1484,6 +1574,7 @@ export class StaffDirectoryService {
         phone: true,
         externalGuestId: true,
         workPoint: true,
+        missingFromSourceAt: true,
         updatedAt: true,
       },
     });
@@ -1553,6 +1644,7 @@ export class StaffDirectoryService {
       phone: string | null;
       externalGuestId: string | null;
       workPoint: Prisma.JsonValue | null;
+      missingFromSourceAt: Date | null;
       updatedAt: Date;
     },
     mappedStaffMemberId: string | null = null,
@@ -1569,6 +1661,7 @@ export class StaffDirectoryService {
       phone: row.phone,
       externalGuestId: row.externalGuestId,
       workPointLabel: this.langameJsonLabel(row.workPoint),
+      missingFromSource: row.missingFromSourceAt !== null,
       mappedStaffMemberId,
       updatedAt: row.updatedAt.toISOString(),
     };
@@ -1660,6 +1753,12 @@ export class StaffDirectoryService {
       externalProvider: row.externalProvider,
       externalDomain: row.externalDomain,
       externalUserId: row.externalUserId,
+      externalLinkSource: STAFF_LANGAME_LINK_SOURCES.includes(
+        row.externalLinkSource as StaffLangameLinkSource,
+      )
+        ? (row.externalLinkSource as StaffLangameLinkSource)
+        : null,
+      externalLinkedAt: row.externalLinkedAt?.toISOString() ?? null,
       note: row.note,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),

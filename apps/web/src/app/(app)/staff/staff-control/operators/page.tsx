@@ -492,12 +492,12 @@ export default async function StaffOperatorsPage({
                           ) : null}
                         </td>
                         <td className="px-3 py-3 align-top">
-                          {row.linkedGuest ? (
+                          {row.staffMember ? (
                             <Link
-                              href={`/guests/${row.linkedGuest.id}`}
+                              href={staffCardHref(row.staffMember)}
                               className="block truncate font-medium underline underline-offset-4"
                             >
-                              {row.linkedGuest.displayName}
+                              {row.staffMember.displayName}
                             </Link>
                           ) : (
                             <div className="space-y-1">
@@ -507,15 +507,26 @@ export default async function StaffOperatorsPage({
                               <p className="text-xs text-zinc-500">
                                 Смены пришли из Langame, но еще не закреплены за карточкой сотрудника.
                               </p>
-                              <a
-                                href={`#${staffMappingAnchorId(row.externalDomain, row.externalUserId)}`}
+                              <Link
+                                href="/staff/directory"
                                 className="inline-flex text-xs font-semibold text-emerald-700 underline underline-offset-4 dark:text-emerald-300"
                               >
-                                Открыть блок привязки
-                              </a>
+                                Привязать в справочнике сотрудников
+                              </Link>
                             </div>
                           )}
-                          {!row.linkedGuest && row.langameUser ? (
+                          {row.linkedGuest ? (
+                            <p className="mt-1 truncate text-xs text-zinc-500">
+                              Гость:{" "}
+                              <Link
+                                href={`/guests/${row.linkedGuest.id}`}
+                                className="underline underline-offset-4"
+                              >
+                                {row.linkedGuest.displayName}
+                              </Link>
+                            </p>
+                          ) : null}
+                          {!row.staffMember && row.langameUser ? (
                             <p className="mt-1 text-xs text-zinc-500">
                               Langame:{" "}
                               {row.langameUser.email ??
@@ -598,7 +609,7 @@ export default async function StaffOperatorsPage({
 
 function AdminCompactOverview({ report }: { report: StaffOperatorReport }) {
   const rows = report.rows;
-  const linkedCount = rows.filter((row) => row.linkedGuest).length;
+  const linkedCount = rows.filter((row) => row.staffMember).length;
   const totalShifts = rows.reduce((sum, row) => sum + row.shiftsCount, 0);
   const totalHours = rows.reduce((sum, row) => sum + row.shiftHours, 0);
   const totalCash = rows.reduce((sum, row) => sum + row.shiftPaymentAmount, 0);
@@ -1031,8 +1042,13 @@ function IdentityHint({ title, text }: { title: string; text: string }) {
   );
 }
 
+function staffCardHref(member: { displayName: string }) {
+  return `/staff/directory?status=all&search=${encodeURIComponent(member.displayName)}`;
+}
+
 function adminDisplayName(row: StaffOperatorReport["rows"][number]) {
   return (
+    row.staffMember?.displayName ??
     row.linkedGuest?.displayName ??
     row.langameUser?.displayName ??
     `user_id ${row.externalUserId}`
@@ -1063,7 +1079,7 @@ function AdminComparisonRow({
   maxMiddleCheck: number;
 }) {
   const name = adminDisplayName(row);
-  const subtitle = row.linkedGuest
+  const subtitle = row.staffMember
     ? `${row.externalDomain ?? "источник"} · привязан`
     : `${row.externalDomain ?? "источник"} · без привязки`;
 
@@ -1404,27 +1420,27 @@ function OperatorCard({
         <span
           className={[
             "shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold",
-            row.linkedGuest
+            row.staffMember
               ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
               : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
           ].join(" ")}
         >
-          {row.linkedGuest ? "Привязан" : "нужно сопоставить"}
+          {row.staffMember ? "Привязан" : "нужно сопоставить"}
         </span>
       </div>
 
-      {!row.linkedGuest ? (
+      {!row.staffMember ? (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50/70 p-3 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
           <p className="font-semibold">Что это значит?</p>
           <p className="mt-1 text-xs leading-5 text-amber-900/80 dark:text-amber-100/80">
-            Эти смены пришли от одного Langame user_id, но LeetPlus еще не знает, какому сотруднику их относить. Сверьте смены и выберите карточку сотрудника в блоке ниже.
+            Эти смены пришли от одного Langame user_id, но LeetPlus еще не знает, какому сотруднику их относить. Если почта или телефон в Langame совпадают с карточкой сотрудника, LeetPlus привяжет его сам; иначе укажите user_id в карточке.
           </p>
-          <a
-            href={`#${staffMappingAnchorId(row.externalDomain, row.externalUserId)}`}
+          <Link
+            href="/staff/directory"
             className="mt-2 inline-flex text-xs font-semibold underline underline-offset-4"
           >
-            Перейти к привязке
-          </a>
+            Привязать в справочнике сотрудников
+          </Link>
         </div>
       ) : null}
 
@@ -1432,12 +1448,12 @@ function OperatorCard({
         <p className="text-xs font-medium uppercase text-zinc-500">
           Сотрудник
         </p>
-        {row.linkedGuest ? (
+        {row.staffMember ? (
           <Link
-            href={`/guests/${row.linkedGuest.id}`}
+            href={staffCardHref(row.staffMember)}
             className="mt-1 block truncate font-semibold underline underline-offset-4"
           >
-            {row.linkedGuest.displayName}
+            {row.staffMember.displayName}
           </Link>
         ) : row.langameUser ? (
           <div className="mt-1">
@@ -1451,6 +1467,17 @@ function OperatorCard({
         ) : (
           <p className="mt-1 text-zinc-500">не привязан</p>
         )}
+        {row.linkedGuest ? (
+          <p className="mt-1 truncate text-xs text-zinc-500">
+            Гость:{" "}
+            <Link
+              href={`/guests/${row.linkedGuest.id}`}
+              className="underline underline-offset-4"
+            >
+              {row.linkedGuest.displayName}
+            </Link>
+          </p>
+        ) : null}
         {row.mappingNote ? (
           <p className="mt-1 text-xs text-zinc-500">{row.mappingNote}</p>
         ) : null}

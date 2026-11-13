@@ -535,6 +535,57 @@ describe('StaffDirectoryService AccessScope', () => {
     expect(harness.langameStaffUserFindFirst).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      scenario: 'clearing an automatic link',
+      identity: { externalDomain: null, externalUserId: null },
+      linked: false,
+    },
+    {
+      scenario: 'replacing the Langame user_id',
+      identity: {
+        externalDomain: 'tenant-a.langame.test',
+        externalUserId: 'langame-user-2',
+      },
+      linked: true,
+    },
+  ])(
+    'marks the link MANUAL after $scenario so the automatic pass leaves it alone',
+    async ({ identity, linked }) => {
+      const current = staffMemberRow('member-a1', 'a1', {
+        domain: 'tenant-a.langame.test',
+        userId: 'langame-user-1',
+      });
+      const harness = createHarness({ directMember: current });
+
+      await harness.service.updateMember(networkActor, current.id, {
+        displayName: 'Employee',
+        ...identity,
+      });
+
+      const updateData = harness.staffMemberUpdate.mock.calls[0]?.[0]?.data;
+      expect(updateData).toMatchObject({ externalLinkSource: 'MANUAL' });
+      expect(updateData?.externalLinkedAt instanceof Date).toBe(linked);
+    },
+  );
+
+  it('keeps an automatic link automatic when the card is saved with the same identity', async () => {
+    const current = staffMemberRow('member-a1', 'a1', {
+      domain: 'tenant-a.langame.test',
+      userId: 'langame-user-1',
+    });
+    const harness = createHarness({ directMember: current });
+
+    await harness.service.updateMember(networkActor, current.id, {
+      displayName: 'Employee',
+      externalDomain: 'tenant-a.langame.test',
+      externalUserId: 'langame-user-1',
+    });
+
+    const updateData = harness.staffMemberUpdate.mock.calls[0]?.[0]?.data;
+    expect(updateData).not.toHaveProperty('externalLinkSource');
+  });
+
   it('never exposes full Langame detail in STORES direct or current member responses', async () => {
     const current = {
       ...staffMemberRow('member-a1', 'a1', {

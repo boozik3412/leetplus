@@ -1300,15 +1300,23 @@ async function loadAttention() {
   attnRefreshPanel();
   renderAttnLegend();
 }
-/* Colour legend of the guest markers on the full scene, bottom right; each
-   row also hides or shows its markers. «Моя смена» has the same colours as
+/* Colour legend of the guest markers on the full scene, bottom right. It is
+   collapsed by default to one line as tall as «Лента клуба»; opened, each row
+   also hides or shows its markers. «Моя смена» has the same colours as
    chips in its panel. */
 var ATTN_TONE_NOTE = { ALERT: 'гость написал в Telegram или приложении', TODAY: 'кончается время, сгорает награда', OFFER: 'бар, бонусы, позвать в игру', NEW: 'первый визит в клуб', KNOW: 'VIP, давно не был(а), задача из CRM' };
+var ATTN_LEG_KEY = 'lp-club-scheme-legend-open';
+function attnLegOpen() { try { return localStorage.getItem(ATTN_LEG_KEY) === '1'; } catch (e) { return false; } }
+function attnSetLegOpen(open) { ATTN.legOpen = open; try { localStorage.setItem(ATTN_LEG_KEY, open ? '1' : '0'); } catch (e) { /* private window */ } }
 function attnLegendHtml(d, done) {
   const count = {};
   for (const seat of d.seats) for (const h of seat.hints) if (h.key !== 'GUEST_MESSAGE' && !attnIsDone(seat, h, done)) count[h.tone] = (count[h.tone] || 0) + 1;
   count.ALERT = d.alerts.filter(a => a.status !== 'RESOLVED').length;
-  return `<h3>Маркеры гостей</h3><div class="alegl">${ATTN_TONES.map(t => `<button type="button" class="alegr" data-tone="${t}" aria-pressed="${ATTN.off.has(t) ? 'false' : 'true'}" title="${ATTN.off.has(t) ? 'Показать' : 'Скрыть'} на схеме"><i class="t-${t}"></i><span><b>${ATTN_TONE_LABEL[t]}</b><small>${ATTN_TONE_NOTE[t]}</small></span><em class="num">${count[t] || 0}</em></button>`).join('')}</div>`;
+  const open = !!ATTN.legOpen;
+  const head = `<button type="button" class="alegh" data-leg aria-expanded="${open}"><span>Маркеры гостей</span><em>${open ? 'Свернуть' : 'Подробнее'}<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></em></button>`;
+  // collapsed: one line, colour and number of guests, like «Лента клуба»
+  if (!open) return head + `<div class="alegs">${ATTN_TONES.map(t => `<span class="${ATTN.off.has(t) ? 'off' : ''}" title="${ATTN_TONE_LABEL[t]}${ATTN.off.has(t) ? ' · скрыто' : ''}"><i class="t-${t}"></i>${count[t] || 0}</span>`).join('')}</div>`;
+  return head + `<div class="alegl">${ATTN_TONES.map(t => `<button type="button" class="alegr" data-tone="${t}" aria-pressed="${ATTN.off.has(t) ? 'false' : 'true'}" title="${ATTN.off.has(t) ? 'Показать' : 'Скрыть'} на схеме"><i class="t-${t}"></i><span><b>${ATTN_TONE_LABEL[t]}</b><small>${ATTN_TONE_NOTE[t]}</small></span><em class="num">${count[t] || 0}</em></button>`).join('')}</div>`;
 }
 function renderAttnLegend() {
   if (EMBED || !API) return;
@@ -1319,6 +1327,13 @@ function renderAttnLegend() {
     el = document.createElement('section'); el.id = 'attleg'; el.className = 'attleg'; el.setAttribute('aria-label', 'Цвета маркеров гостей'); el.hidden = true;
     stage.appendChild(el);
     el.addEventListener('click', e => {
+      // collapsed by default: the same colours are in the guest panel; a click opens the descriptions
+      if (e.target.closest('[data-leg]') || !ATTN.legOpen) {
+        attnSetLegOpen(!ATTN.legOpen);
+        renderAttnLegend();
+        const h = el.querySelector('[data-leg]'); if (h) h.focus();
+        return;
+      }
       const b = e.target.closest('[data-tone]'); if (!b) return;
       const t = b.dataset.tone; if (ATTN.off.has(t)) ATTN.off.delete(t); else ATTN.off.add(t);
       renderAttnLegend();
@@ -1328,7 +1343,11 @@ function renderAttnLegend() {
   const show = !!ATTN.data && view.type === 'home' && !(typeof editing !== 'undefined' && editing) && !isPhone();
   el.hidden = !show;
   if (!show) return;
-  el.innerHTML = attnLegendHtml(ATTN.data, attnDone());
+  if (ATTN.legOpen === undefined) ATTN.legOpen = attnLegOpen();
+  el.classList.toggle('open', !!ATTN.legOpen);
+  // renderPanel runs often: rewrite only on change, so hover and focus stay put
+  const html = attnLegendHtml(ATTN.data, attnDone());
+  if (html !== el.__html) { el.innerHTML = html; el.__html = html; }
   if (typeof placeShiftWork === 'function') placeShiftWork();
 }
 function attnRefreshPanel() {

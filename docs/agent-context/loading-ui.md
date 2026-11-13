@@ -13,8 +13,11 @@ shows one.
 - `components/loading/skeleton.tsx`: `Sk` (a block: give it the real block's size and
   radius, `delay` staggers the shimmer) and `SkCard`.
 - `components/loading/loading-region.tsx`: client wrapper of a skeleton. Screen-reader
-  status text; after 6 s a floating «Считаем дольше обычного» notice, after 45 s an
-  error with «Повторить». The notices float (`sticky` + zero height), so nothing shifts.
+  status text; after 6 s a floating «Считаем дольше обычного» notice, after 45 s
+  «Всё ещё считаем… экран откроется сам». A timer never shows an error: it cannot know
+  that the request failed, and the page often arrives later (owner, 13.11.2026). Real
+  failures are the route's `error.tsx`. The notices float (`sticky` + zero height), so
+  nothing shifts.
 - `components/loading/brand-loader.tsx`: `BrandLoader` (mark, rotating status, four
   sources, rotating product tips). Root `app/loading.tsx` (full screen) and
   `app/(app)/loading.tsx` (generic fallback).
@@ -52,3 +55,4 @@ shows one.
   status text.
 - `prefers-reduced-motion`: no rotation, no shimmer, the text stays.
 - Never invent progress, counts or percentages in a loading state.
+- Never show an error from a wait timer; only a failed request is an error.

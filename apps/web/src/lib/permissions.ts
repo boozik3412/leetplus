@@ -792,6 +792,20 @@ export function can(user: AuthUser | null, capability: Capability) {
   );
 }
 
+// «Игровой модуль → Тест запуска» is for the owner and platform admins (who
+// act as OWNER in a signed tenant context). The API enforces the same
+// OWNER/ADMIN ceiling with StrictRoles on dry-run, facts, process-event and
+// pipeline/run; capabilities alone do not open it to network managers.
+const guestGameTestRunRoles = new Set<AuthUser["role"]>(["OWNER", "ADMIN"]);
+
+export function canUseGuestGameTestRun(user: AuthUser | null) {
+  return Boolean(
+    user &&
+    guestGameTestRunRoles.has(user.role) &&
+    can(user, "view_guest_gamification"),
+  );
+}
+
 function isShiftWorkspaceRole(user: AuthUser | null) {
   return Boolean(user && shiftWorkspaceRoles.has(user.role));
 }

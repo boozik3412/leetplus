@@ -195,9 +195,7 @@ export function contentToThumbnailBlocks(
     }
 
     if (blocks.length === 0) {
-      const text = clip(
-        decodeEntities(withoutImages.replace(/<[^>]*>/g, " ")),
-      );
+      const text = clip(decodeEntities(withoutImages.replace(/<[^>]*>/g, " ")));
 
       return text ? [{ kind: "paragraph", text }] : [];
     }
@@ -368,7 +366,7 @@ export function articleToLearningDocument(
     id: article.id,
     kind: "ARTICLE",
     title: article.title,
-    href: `/staff/knowledge-base?articleId=${encodeURIComponent(article.id)}`,
+    href: `/staff/learning/articles/${encodeURIComponent(article.id)}`,
     updatedAt: article.updatedAt,
     roleScope: article.roleScope,
     isDraft,

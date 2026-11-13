@@ -12,7 +12,9 @@ import {
   type LearningCourseInput,
 } from "./learning-documents.ts";
 
-function course(overrides: Partial<LearningCourseInput> = {}): LearningCourseInput {
+function course(
+  overrides: Partial<LearningCourseInput> = {},
+): LearningCourseInput {
   return {
     id: "course-1",
     title: "Онбординг администратора",
@@ -70,7 +72,9 @@ test("thumbnail reads headings, paragraphs and items from article HTML", () => {
 
 test("thumbnail reads the light markdown of the old editor", () => {
   assert.deepEqual(
-    contentToThumbnailBlocks("# Заголовок\n\n- **пункт**\nобычный [текст](https://x)"),
+    contentToThumbnailBlocks(
+      "# Заголовок\n\n- **пункт**\nобычный [текст](https://x)",
+    ),
     [
       { kind: "heading", text: "Заголовок" },
       { kind: "item", text: "пункт" },
@@ -106,6 +110,7 @@ test("a course becomes a document with tabs, a task and its audience", () => {
 test("an article shows reading progress and asks me to read it", () => {
   const read = articleToLearningDocument(article());
   assert.equal(read.note, "Прочитали 15 из 18");
+  assert.equal(read.href, "/staff/learning/articles/article-1");
   assert.match(read.meta, /^Регламенты · /);
   assert.equal(read.requiredForMe, false);
   assert.equal(read.badge, null);
@@ -133,7 +138,14 @@ test("an article shows reading progress and asks me to read it", () => {
 
 test("recent documents mix courses and articles newest first and filter", () => {
   const documents = buildLearningDocuments(
-    [course(), course({ id: "course-2", status: "DRAFT", updatedAt: "2026-10-01T00:00:00.000Z" })],
+    [
+      course(),
+      course({
+        id: "course-2",
+        status: "DRAFT",
+        updatedAt: "2026-10-01T00:00:00.000Z",
+      }),
+    ],
     [
       article({
         id: "article-2",

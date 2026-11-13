@@ -21,6 +21,7 @@ import {
   GAME_EFFECT_WINDOW_DAYS,
   addMonths,
   buildGameEffectDataset,
+  dayNumberFromIso,
   dayNumberToIso,
   gameEffectVerdict,
   isInGameHoldout,
@@ -100,6 +101,20 @@ export type GuestGameEffectCohortView = {
   /** Extra guest money per bonus rouble handed out, null without bonuses. */
   moneyPerBonusRub: number | null;
   verdict: GameEffectVerdict;
+  /** First and last start day of the measured guests, null when none. */
+  measuredFrom: string | null;
+  measuredTo: string | null;
+};
+
+/**
+ * Start-day filter of the cohorts: only guests who started (activated or got
+ * the first scenario reward) on these days are measured. Null ends are open.
+ */
+export type GuestGameEffectPeriod = {
+  from: string | null;
+  to: string | null;
+  /** Latest start day whose whole window has passed. */
+  measurableTo: string;
 };
 
 export type GuestGameEffectHoldoutView = {
@@ -135,6 +150,7 @@ export type GuestGameEffectReport = {
   windowDays: number;
   lastCompleteDay: string;
   storeId: string | null;
+  period: GuestGameEffectPeriod;
   stores: Array<{ id: string; name: string }>;
   dataQuality: {
     transactionsDated: number;
@@ -151,11 +167,62 @@ export type GuestGameEffectReport = {
     }>;
   };
   scenarios: GuestGameEffectScenarioView[];
-  /** Paid bonuses and prizes per month and mechanic, whole network. */
+  /**
+   * Paid bonuses and prizes per month and mechanic, whole network; with a
+   * period only the months it touches.
+   */
   costByMonth: GameEffectMonthlyCost[];
-  /** Next-month return of players, future players and the rest, whole network. */
+  /**
+   * Next-month return of players, future players and the rest, whole network;
+   * with a period only the months it touches.
+   */
   returnByMonth: GameEffectMonthlyReturn[];
 };
+
+type DayRange = { fromDay: number | null; toDay: number | null };
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/u;
+
+function parsePeriodDay(value: unknown, label: string): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || !ISO_DAY.test(value)) {
+    throw new BadRequestException(
+      `${label} периода: укажите дату в формате ГГГГ-ММ-ДД.`,
+    );
+  }
+  const day = dayNumberFromIso(value);
+  if (!Number.isFinite(day) || dayNumberToIso(day) !== value) {
+    throw new BadRequestException(`${label} периода: такой даты нет.`);
+  }
+  return day;
+}
+
+/** Validates `from`/`to` query dates (YYYY-MM-DD, both optional). */
+export function parseGameEffectPeriod(query: {
+  from?: unknown;
+  to?: unknown;
+}): DayRange {
+  const fromDay = parsePeriodDay(query.from, 'Начало');
+  const toDay = parsePeriodDay(query.to, 'Конец');
+  if (fromDay !== null && toDay !== null && fromDay > toDay) {
+    throw new BadRequestException('Начало периода позже его конца.');
+  }
+  return { fromDay, toDay };
+}
+
+function inRange(range: DayRange, day: number) {
+  return (
+    (range.fromDay === null || day >= range.fromDay) &&
+    (range.toDay === null || day <= range.toDay)
+  );
+}
+
+function monthInRange(range: DayRange, month: string) {
+  return (
+    (range.fromDay === null || month >= monthOfDay(range.fromDay)) &&
+    (range.toDay === null || month <= monthOfDay(range.toDay))
+  );
+}
 
 export type GuestGameGuestEffect = {
   windowDays: number;
@@ -287,20 +354,21 @@ export class GuestGameEffectService {
 
   async getReport(
     tenantId: string,
-    query: { storeId?: string | null } = {},
+    query: { storeId?: string | null; from?: unknown; to?: unknown } = {},
   ): Promise<GuestGameEffectReport> {
+    const period = parseGameEffectPeriod(query);
     const data = await this.data(tenantId);
     const storeId =
       query.storeId && data.stores.some((store) => store.id === query.storeId)
         ? query.storeId
         : null;
-    const game = this.gameCohort(data, storeId);
+    const game = this.gameCohort(data, storeId, period);
     const byStore = storeId
       ? []
       : data.stores.map((store) => ({
           storeId: store.id,
           storeName: store.name,
-          cohort: this.gameCohort(data, store.id),
+          cohort: this.gameCohort(data, store.id, period),
         }));
 
     return {
@@ -310,18 +378,29 @@ export class GuestGameEffectService {
       windowDays: GAME_EFFECT_WINDOW_DAYS,
       lastCompleteDay: dayNumberToIso(data.lastCompleteDay),
       storeId,
+      period: {
+        from: period.fromDay === null ? null : dayNumberToIso(period.fromDay),
+        to: period.toDay === null ? null : dayNumberToIso(period.toDay),
+        measurableTo: dayNumberToIso(
+          data.lastCompleteDay - GAME_EFFECT_WINDOW_DAYS,
+        ),
+      },
       stores: data.stores,
       dataQuality: data.dataQuality,
       game: { ...game, byStore },
       scenarios: data.scenarios
-        .map((scenario) => this.scenarioView(data, scenario, storeId))
+        .map((scenario) => this.scenarioView(data, scenario, storeId, period))
         .sort(
           (left, right) =>
             right.cohort.participants - left.cohort.participants ||
             left.name.localeCompare(right.name, 'ru'),
         ),
-      costByMonth: data.costByMonth,
-      returnByMonth: data.returnByMonth,
+      costByMonth: data.costByMonth.filter((row) =>
+        monthInRange(period, row.month),
+      ),
+      returnByMonth: data.returnByMonth.filter((row) =>
+        monthInRange(period, row.month),
+      ),
     };
   }
 
@@ -505,10 +584,12 @@ export class GuestGameEffectService {
   private gameCohort(
     data: EffectData,
     storeId: string | null,
+    period: DayRange,
   ): GuestGameEffectCohortView {
     const participants: GameEffectParticipant[] = [];
     data.players.forEach((player, guestId) => {
       if (player.isStaffTest || player.activationDay === null) return;
+      if (!inRange(period, player.activationDay)) return;
       if (storeId && this.homeStore(data, guestId) !== storeId) return;
       participants.push({ guestId, exposureDay: player.activationDay });
     });
@@ -538,6 +619,7 @@ export class GuestGameEffectService {
     data: EffectData,
     scenario: Scenario,
     storeId: string | null,
+    period: DayRange,
   ): GuestGameEffectScenarioView {
     const key = scenarioKey(scenario.kind, scenario.id);
     const participation =
@@ -551,6 +633,7 @@ export class GuestGameEffectService {
     const participants: GameEffectParticipant[] = [];
     participation.forEach((day, guestId) => {
       if (data.staffGuestIds.has(guestId)) return;
+      if (!inRange(period, day)) return;
       if (storeId && this.homeStore(data, guestId) !== storeId) return;
       participants.push({ guestId, exposureDay: day });
     });
@@ -666,6 +749,11 @@ export class GuestGameEffectService {
     );
     let bonusRub = 0;
     let prizes = 0;
+    const measuredDays = result.measuredGuestIds.map(
+      (guestId) => exposure.get(guestId)!,
+    );
+    const measuredFrom = measuredDays.length ? Math.min(...measuredDays) : null;
+    const measuredTo = measuredDays.length ? Math.max(...measuredDays) : null;
     result.measuredGuestIds.forEach((guestId) => {
       const day = exposure.get(guestId)!;
       (data.costs.get(guestId) ?? []).forEach((cost) => {
@@ -696,6 +784,8 @@ export class GuestGameEffectService {
       moneyPerBonusRub:
         bonusRub > 0 && result.measured ? round(money.total / bonusRub) : null,
       verdict: gameEffectVerdict(result.measured, result.metrics),
+      measuredFrom: measuredFrom === null ? null : dayNumberToIso(measuredFrom),
+      measuredTo: measuredTo === null ? null : dayNumberToIso(measuredTo),
     };
   }
 

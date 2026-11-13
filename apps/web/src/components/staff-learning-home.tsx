@@ -234,7 +234,7 @@ async function createFromTemplate(
 
   return template.kind === "COURSE"
     ? `/staff/learning/courses/${encodeURIComponent(created.id)}`
-    : `/staff/knowledge-base?articleId=${encodeURIComponent(created.id)}`;
+    : `/staff/learning/articles/${encodeURIComponent(created.id)}`;
 }
 
 function TemplateRow({
@@ -427,8 +427,7 @@ export function StaffLearningHome({
   loadFailed: boolean;
 }) {
   const filters = (Object.keys(filterLabels) as LearningFilter[]).filter(
-    (key) =>
-      showCourseFilters || (key !== "courses" && key !== "articles"),
+    (key) => showCourseFilters || (key !== "courses" && key !== "articles"),
   );
   const isEmptyLibrary = counts.all === 0;
 

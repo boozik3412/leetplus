@@ -131,9 +131,7 @@ export function courseSaveProblem(draft: CourseDraft): {
   }
 
   for (const [index, step] of draft.steps.entries()) {
-    const name = step.title.trim()
-      ? `«${step.title.trim()}»`
-      : `№${index + 1}`;
+    const name = step.title.trim() ? `«${step.title.trim()}»` : `№${index + 1}`;
 
     if (!step.title.trim()) {
       return { tabId: step.id, message: `Назовите вкладку ${name}.` };
@@ -152,9 +150,7 @@ export function courseSaveProblem(draft: CourseDraft): {
       };
     }
 
-    if (
-      (step.content ?? "").length > COURSE_TAB_CONTENT_MAX_LENGTH
-    ) {
+    if ((step.content ?? "").length > COURSE_TAB_CONTENT_MAX_LENGTH) {
       return {
         tabId: step.id,
         message: `Вкладка ${name} слишком длинная: разделите её на две.`,
@@ -172,7 +168,10 @@ export function courseSaveProblem(draft: CourseDraft): {
       const url = step.url?.trim() ?? "";
 
       if (!url) {
-        return { tabId: step.id, message: `Вставьте ссылку во вкладку ${name}.` };
+        return {
+          tabId: step.id,
+          message: `Вставьте ссылку во вкладку ${name}.`,
+        };
       }
 
       if (!isAllowedUrl(url)) {

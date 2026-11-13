@@ -8,32 +8,21 @@ import {
   Books,
   CheckSquare,
   FileText,
-  Image as ImageIcon,
   LinkSimple,
-  ListBullets,
-  ListNumbers,
   Plus,
-  Quotes,
-  TextB,
-  TextItalic,
-  TextUnderline,
   Trash,
 } from "@phosphor-icons/react";
 import Link from "next/link";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ClipboardEvent,
-  type FormEvent,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SidePanel } from "@/components/side-panel";
-import { uploadStaffImage } from "@/components/staff-attachment-upload";
+import {
+  EditablePage,
+  FormatToolbar,
+  formatSavedTime,
+  type PageCommands,
+} from "@/components/staff-document-page-editor";
 import {
   KnowledgeArticleRichText,
-  knowledgeContentToEditableHtml,
   sanitizeKnowledgeContentHtml,
 } from "@/components/staff-knowledge-rich-text";
 import {
@@ -85,13 +74,6 @@ function newTabId() {
   return `step-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function formatTime(value: string) {
-  return new Intl.DateTimeFormat("ru-RU", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
-
 function TabIcon({ type }: { type: CourseTabType }) {
   const className = "h-4 w-4 shrink-0";
 
@@ -108,390 +90,6 @@ function TabIcon({ type }: { type: CourseTabType }) {
   }
 
   return <FileText aria-hidden="true" className={className} />;
-}
-
-/* ------------------------------------------------------------------ */
-/* Formatted page                                                      */
-/* ------------------------------------------------------------------ */
-
-type PageCommands = {
-  run: (command: string, value?: string) => void;
-  insertImage: (file: File) => Promise<void>;
-  insertLink: (url: string) => void;
-};
-
-function ToolbarButton({
-  label,
-  onPress,
-  children,
-}: {
-  label: string;
-  onPress: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={onPress}
-      className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-zinc-700 outline-none transition hover:bg-zinc-200 focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-zinc-200 dark:hover:bg-zinc-800"
-    >
-      {children}
-    </button>
-  );
-}
-
-function FormatToolbar({
-  commands,
-  disabled,
-  onError,
-}: {
-  commands: PageCommands | null;
-  disabled: boolean;
-  onError: (message: string | null) => void;
-}) {
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
-  const [linkOpen, setLinkOpen] = useState(false);
-  const [linkValue, setLinkValue] = useState("https://");
-  const [uploading, setUploading] = useState(false);
-
-  if (!commands || disabled) {
-    return null;
-  }
-
-  function submitLink(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const url = linkValue.trim();
-
-    if (!/^https?:\/\/\S+$/i.test(url)) {
-      onError("Ссылка должна начинаться с https://");
-      return;
-    }
-
-    commands?.insertLink(url);
-    setLinkOpen(false);
-    setLinkValue("https://");
-    onError(null);
-  }
-
-  return (
-    <div
-      role="toolbar"
-      aria-label="Оформление текста"
-      className="relative flex flex-wrap items-center gap-0.5 rounded-full bg-zinc-100 px-3 py-1 dark:bg-zinc-900"
-    >
-      <label className="sr-only" htmlFor="course-block-style">
-        Стиль текста
-      </label>
-      <select
-        id="course-block-style"
-        defaultValue=""
-        onChange={(event) => {
-          if (event.target.value) {
-            commands.run("formatBlock", event.target.value);
-          }
-          event.target.value = "";
-        }}
-        className="h-8 cursor-pointer rounded-md bg-transparent px-2 text-sm text-zinc-700 outline-none hover:bg-zinc-200 focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-zinc-200 dark:hover:bg-zinc-800"
-      >
-        <option value="" disabled>
-          Стиль текста
-        </option>
-        <option value="p">Обычный текст</option>
-        <option value="h2">Заголовок 1</option>
-        <option value="h3">Заголовок 2</option>
-        <option value="h4">Заголовок 3</option>
-      </select>
-      <span aria-hidden="true" className="mx-1 h-5 w-px bg-zinc-300 dark:bg-zinc-700" />
-      <ToolbarButton label="Жирный (Ctrl+B)" onPress={() => commands.run("bold")}>
-        <TextB aria-hidden="true" className="h-4 w-4" weight="bold" />
-      </ToolbarButton>
-      <ToolbarButton label="Курсив (Ctrl+I)" onPress={() => commands.run("italic")}>
-        <TextItalic aria-hidden="true" className="h-4 w-4" />
-      </ToolbarButton>
-      <ToolbarButton
-        label="Подчёркнутый (Ctrl+U)"
-        onPress={() => commands.run("underline")}
-      >
-        <TextUnderline aria-hidden="true" className="h-4 w-4" />
-      </ToolbarButton>
-      <span aria-hidden="true" className="mx-1 h-5 w-px bg-zinc-300 dark:bg-zinc-700" />
-      <ToolbarButton
-        label="Маркированный список"
-        onPress={() => commands.run("insertUnorderedList")}
-      >
-        <ListBullets aria-hidden="true" className="h-4 w-4" />
-      </ToolbarButton>
-      <ToolbarButton
-        label="Нумерованный список"
-        onPress={() => commands.run("insertOrderedList")}
-      >
-        <ListNumbers aria-hidden="true" className="h-4 w-4" />
-      </ToolbarButton>
-      <ToolbarButton
-        label="Важная заметка"
-        onPress={() => commands.run("formatBlock", "blockquote")}
-      >
-        <Quotes aria-hidden="true" className="h-4 w-4" />
-      </ToolbarButton>
-      <span aria-hidden="true" className="mx-1 h-5 w-px bg-zinc-300 dark:bg-zinc-700" />
-      <ToolbarButton
-        label="Ссылка"
-        onPress={() => setLinkOpen((value) => !value)}
-      >
-        <LinkSimple aria-hidden="true" className="h-4 w-4" />
-      </ToolbarButton>
-      <ToolbarButton
-        label={uploading ? "Картинка загружается" : "Картинка"}
-        onPress={() => imageInputRef.current?.click()}
-      >
-        <ImageIcon aria-hidden="true" className="h-4 w-4" />
-      </ToolbarButton>
-      <input
-        ref={imageInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={async (event) => {
-          const file = event.target.files?.[0];
-          event.target.value = "";
-
-          if (!file) {
-            return;
-          }
-
-          setUploading(true);
-          onError(null);
-
-          try {
-            await commands.insertImage(file);
-          } catch (caught) {
-            onError(
-              caught instanceof Error
-                ? caught.message
-                : "Не удалось загрузить картинку",
-            );
-          } finally {
-            setUploading(false);
-          }
-        }}
-      />
-      {uploading ? (
-        <span className="ml-2 text-xs text-zinc-500" role="status">
-          Загружаем картинку…
-        </span>
-      ) : null}
-
-      {linkOpen ? (
-        <form
-          onSubmit={submitLink}
-          className="absolute left-0 top-full z-20 mt-2 flex w-80 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-lg border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-950"
-        >
-          <label htmlFor="course-link-url" className="sr-only">
-            Адрес ссылки
-          </label>
-          <input
-            id="course-link-url"
-            type="url"
-            autoFocus
-            value={linkValue}
-            onChange={(event) => setLinkValue(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                setLinkOpen(false);
-              }
-            }}
-            className="h-9 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <button
-            type="submit"
-            className="h-9 cursor-pointer rounded-md bg-emerald-600 px-3 text-sm font-semibold text-white hover:bg-emerald-700"
-          >
-            Вставить
-          </button>
-        </form>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * One tab's text as an editable page. Uncontrolled on purpose: the browser
- * owns the DOM while the person types; the parent only receives HTML.
- * Mounted with key={tab.id}, so switching tabs loads the new content.
- */
-function EditablePage({
-  initialContent,
-  placeholder,
-  onChange,
-  onCommandsReady,
-  onError,
-}: {
-  initialContent: string | null;
-  placeholder: string;
-  onChange: (html: string) => void;
-  onCommandsReady: (commands: PageCommands | null) => void;
-  onError: (message: string | null) => void;
-}) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const rangeRef = useRef<Range | null>(null);
-  const [isEmpty, setIsEmpty] = useState(false);
-
-  const emit = useCallback(() => {
-    const element = ref.current;
-
-    if (!element) {
-      return;
-    }
-
-    setIsEmpty(!element.textContent?.trim() && !element.querySelector("img"));
-    onChange(element.innerHTML);
-  }, [onChange]);
-
-  const rememberRange = useCallback(() => {
-    const selection = window.getSelection();
-    const element = ref.current;
-
-    if (
-      selection &&
-      selection.rangeCount > 0 &&
-      element?.contains(selection.anchorNode)
-    ) {
-      rangeRef.current = selection.getRangeAt(0).cloneRange();
-    }
-  }, []);
-
-  const restoreRange = useCallback(() => {
-    const element = ref.current;
-
-    if (!element) {
-      return;
-    }
-
-    element.focus({ preventScroll: true });
-    const selection = window.getSelection();
-
-    if (rangeRef.current && selection) {
-      selection.removeAllRanges();
-      selection.addRange(rangeRef.current);
-    }
-  }, []);
-
-  useEffect(() => {
-    const element = ref.current;
-
-    if (!element) {
-      return;
-    }
-
-    element.innerHTML = knowledgeContentToEditableHtml(initialContent);
-    setIsEmpty(!element.textContent?.trim() && !element.querySelector("img"));
-    document.execCommand("defaultParagraphSeparator", false, "p");
-    // Only on mount: later the DOM is the source of truth.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    document.addEventListener("selectionchange", rememberRange);
-    return () => document.removeEventListener("selectionchange", rememberRange);
-  }, [rememberRange]);
-
-  useEffect(() => {
-    const insertImage = async (file: File) => {
-      const attachment = await uploadStaffImage(file);
-      restoreRange();
-      const image = document.createElement("img");
-      image.src = attachment.url;
-      image.alt = attachment.fileName;
-      document.execCommand("insertHTML", false, image.outerHTML);
-      emit();
-    };
-
-    onCommandsReady({
-      run(command, value) {
-        restoreRange();
-        document.execCommand(
-          command,
-          false,
-          command === "formatBlock" && value ? `<${value}>` : value,
-        );
-        emit();
-      },
-      insertImage,
-      insertLink(url) {
-        restoreRange();
-        const selection = window.getSelection();
-
-        if (selection && selection.isCollapsed) {
-          const anchor = document.createElement("a");
-          anchor.href = url;
-          anchor.textContent = url;
-          document.execCommand("insertHTML", false, anchor.outerHTML);
-        } else {
-          document.execCommand("createLink", false, url);
-        }
-
-        emit();
-      },
-    });
-
-    return () => onCommandsReady(null);
-  }, [emit, onCommandsReady, restoreRange]);
-
-  async function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
-    const file = Array.from(event.clipboardData.files).find((item) =>
-      item.type.startsWith("image/"),
-    );
-
-    if (!file) {
-      return;
-    }
-
-    event.preventDefault();
-    rememberRange();
-
-    try {
-      const attachment = await uploadStaffImage(file);
-      restoreRange();
-      const image = document.createElement("img");
-      image.src = attachment.url;
-      image.alt = attachment.fileName;
-      document.execCommand("insertHTML", false, image.outerHTML);
-      emit();
-      onError(null);
-    } catch (caught) {
-      onError(
-        caught instanceof Error ? caught.message : "Не удалось вставить картинку",
-      );
-    }
-  }
-
-  return (
-    <div className="relative">
-      {isEmpty ? (
-        <p
-          aria-hidden="true"
-          className="pointer-events-none absolute left-0 top-0 text-zinc-400"
-        >
-          {placeholder}
-        </p>
-      ) : null}
-      <div
-        ref={ref}
-        role="textbox"
-        aria-multiline="true"
-        aria-label="Текст вкладки"
-        contentEditable
-        suppressContentEditableWarning
-        onInput={emit}
-        onBlur={rememberRange}
-        onPaste={handlePaste}
-        className="course-page min-h-64 text-[15px] leading-7 text-zinc-800 outline-none dark:text-zinc-200 [&_a]:text-emerald-700 [&_a]:underline dark:[&_a]:text-emerald-300 [&_blockquote]:my-3 [&_blockquote]:rounded-md [&_blockquote]:border [&_blockquote]:border-emerald-200 [&_blockquote]:bg-emerald-50 [&_blockquote]:px-4 [&_blockquote]:py-2 dark:[&_blockquote]:border-emerald-500/30 dark:[&_blockquote]:bg-emerald-500/10 [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:mb-1 [&_h4]:mt-3 [&_h4]:font-semibold [&_img]:my-3 [&_img]:max-h-[480px] [&_img]:max-w-full [&_img]:rounded-md [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-3 [&_ul]:list-disc [&_ul]:pl-6"
-      />
-    </div>
-  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -544,11 +142,14 @@ export function StaffCourseDocumentEditor({
     draft.steps.find((step) => step.id === activeTabId) ?? draft.steps[0];
   const articleById = new Map(articleContents.map((item) => [item.id, item]));
 
-  const update = useCallback((recipe: (current: CourseDraft) => CourseDraft) => {
-    setDraft((current) => recipe(current));
-    versionRef.current += 1;
-    setSaveState({ kind: "pending" });
-  }, []);
+  const update = useCallback(
+    (recipe: (current: CourseDraft) => CourseDraft) => {
+      setDraft((current) => recipe(current));
+      versionRef.current += 1;
+      setSaveState({ kind: "pending" });
+    },
+    [],
+  );
 
   const updateTab = useCallback(
     (id: string, patch: Partial<CourseTab>) =>
@@ -682,7 +283,7 @@ export function StaffCourseDocumentEditor({
   const saveLabel =
     saveState.kind === "saved"
       ? saveState.at
-        ? `Все изменения сохранены в ${formatTime(saveState.at)}`
+        ? `Все изменения сохранены в ${formatSavedTime(saveState.at)}`
         : "Все изменения сохранены"
       : saveState.kind === "saving"
         ? "Сохраняем…"
@@ -731,7 +332,10 @@ export function StaffCourseDocumentEditor({
                 value={draft.title}
                 readOnly={!canManage}
                 onChange={(event) =>
-                  update((current) => ({ ...current, title: event.target.value }))
+                  update((current) => ({
+                    ...current,
+                    title: event.target.value,
+                  }))
                 }
                 placeholder="Название курса"
                 className="min-w-[8rem] max-w-full rounded-md bg-transparent! px-1 text-lg font-medium [field-sizing:content] outline-none hover:bg-zinc-100! focus-visible:ring-2 focus-visible:ring-emerald-500 dark:hover:bg-zinc-900! sm:max-w-md"
@@ -848,7 +452,9 @@ export function StaffCourseDocumentEditor({
                           type="button"
                           role="menuitem"
                           autoFocus={type === "TEXT"}
-                          disabled={type === "ARTICLE" && articleOptions.length === 0}
+                          disabled={
+                            type === "ARTICLE" && articleOptions.length === 0
+                          }
                           onClick={() => addTab(type)}
                           className="flex w-full cursor-pointer items-start gap-2 rounded-md px-3 py-2 text-left outline-none hover:bg-zinc-100 focus-visible:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-zinc-900 dark:focus-visible:bg-zinc-900"
                         >
@@ -856,7 +462,9 @@ export function StaffCourseDocumentEditor({
                             <TabIcon type={type} />
                           </span>
                           <span className="flex flex-col">
-                            <span className="text-sm">{courseTabTypeLabels[type]}</span>
+                            <span className="text-sm">
+                              {courseTabTypeLabels[type]}
+                            </span>
                             <span className="text-xs text-zinc-500 dark:text-zinc-400">
                               {type === "ARTICLE" && articleOptions.length === 0
                                 ? "в базе знаний пока нет статей"
@@ -911,7 +519,8 @@ export function StaffCourseDocumentEditor({
         <div className="min-w-0 flex-1">
           {activeTab ? (
             <>
-              {canManage && (activeTab.type === "TEXT" || activeTab.type === "TASK") ? (
+              {canManage &&
+              (activeTab.type === "TEXT" || activeTab.type === "TASK") ? (
                 <div className="sticky top-24 z-[5] mb-3">
                   <FormatToolbar
                     commands={commands}
@@ -923,8 +532,11 @@ export function StaffCourseDocumentEditor({
               <article className="mx-auto max-w-3xl rounded-sm border border-zinc-200 bg-white px-6 py-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:px-14 sm:py-12">
                 <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
                   <span>
-                    Вкладка {draft.steps.findIndex((step) => step.id === activeTab.id) + 1}{" "}
-                    из {draft.steps.length} · {courseTabTypeLabels[activeTab.type]}
+                    Вкладка{" "}
+                    {draft.steps.findIndex((step) => step.id === activeTab.id) +
+                      1}{" "}
+                    из {draft.steps.length} ·{" "}
+                    {courseTabTypeLabels[activeTab.type]}
                   </span>
                   {canManage ? (
                     <span className="ml-auto flex items-center gap-1">
@@ -935,7 +547,11 @@ export function StaffCourseDocumentEditor({
                         onClick={() =>
                           update((current) => ({
                             ...current,
-                            steps: moveCourseTab(current.steps, activeTab.id, -1),
+                            steps: moveCourseTab(
+                              current.steps,
+                              activeTab.id,
+                              -1,
+                            ),
                           }))
                         }
                         className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-900"
@@ -949,7 +565,11 @@ export function StaffCourseDocumentEditor({
                         onClick={() =>
                           update((current) => ({
                             ...current,
-                            steps: moveCourseTab(current.steps, activeTab.id, 1),
+                            steps: moveCourseTab(
+                              current.steps,
+                              activeTab.id,
+                              1,
+                            ),
                           }))
                         }
                         className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-900"
@@ -1004,10 +624,13 @@ export function StaffCourseDocumentEditor({
 
                 {activeTab.type === "TASK" ? (
                   <div className="mb-4 flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
-                    <CheckSquare aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" />
+                    <CheckSquare
+                      aria-hidden="true"
+                      className="mt-0.5 h-5 w-5 shrink-0"
+                    />
                     <p>
-                      <b>Задание.</b> Сотрудник выполняет его на смене, наставник
-                      отмечает выполнение в профиле обучения.
+                      <b>Задание.</b> Сотрудник выполняет его на смене,
+                      наставник отмечает выполнение в профиле обучения.
                     </p>
                   </div>
                 ) : null}
@@ -1040,7 +663,9 @@ export function StaffCourseDocumentEditor({
                   <div className="space-y-4">
                     {canManage ? (
                       <label className="block space-y-1">
-                        <span className="text-sm font-medium">Статья из базы знаний</span>
+                        <span className="text-sm font-medium">
+                          Статья из базы знаний
+                        </span>
                         <select
                           value={activeTab.articleId ?? ""}
                           onChange={(event) => {
@@ -1080,14 +705,18 @@ export function StaffCourseDocumentEditor({
                         <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
                           <div className="mb-3 flex flex-wrap items-center gap-2">
                             <span className="text-xs font-semibold text-sky-700 dark:text-sky-300">
-                              Статья · {articleById.get(activeTab.articleId)?.folder}
+                              Статья ·{" "}
+                              {articleById.get(activeTab.articleId)?.folder}
                             </span>
                             <Link
                               href={`/staff/knowledge-base?articleId=${encodeURIComponent(activeTab.articleId)}`}
                               className="ml-auto inline-flex items-center gap-1 text-sm font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
                             >
                               Открыть статью
-                              <ArrowSquareOut aria-hidden="true" className="h-4 w-4" />
+                              <ArrowSquareOut
+                                aria-hidden="true"
+                                className="h-4 w-4"
+                              />
                             </Link>
                           </div>
                           <KnowledgeArticleRichText
@@ -1111,13 +740,17 @@ export function StaffCourseDocumentEditor({
                     {canManage ? (
                       <>
                         <label className="block space-y-1">
-                          <span className="text-sm font-medium">Адрес ссылки</span>
+                          <span className="text-sm font-medium">
+                            Адрес ссылки
+                          </span>
                           <input
                             type="url"
                             inputMode="url"
                             value={activeTab.url ?? ""}
                             onChange={(event) =>
-                              updateTab(activeTab.id, { url: event.target.value })
+                              updateTab(activeTab.id, {
+                                url: event.target.value,
+                              })
                             }
                             placeholder="https://"
                             className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-900"
@@ -1155,7 +788,10 @@ export function StaffCourseDocumentEditor({
                         className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
                       >
                         Открыть ссылку
-                        <ArrowSquareOut aria-hidden="true" className="h-4 w-4" />
+                        <ArrowSquareOut
+                          aria-hidden="true"
+                          className="h-4 w-4"
+                        />
                       </a>
                     ) : null}
                   </div>
@@ -1167,7 +803,9 @@ export function StaffCourseDocumentEditor({
                       type="checkbox"
                       checked={activeTab.required}
                       onChange={(event) =>
-                        updateTab(activeTab.id, { required: event.target.checked })
+                        updateTab(activeTab.id, {
+                          required: event.target.checked,
+                        })
                       }
                       className="h-4 w-4 accent-emerald-600"
                     />
@@ -1175,7 +813,10 @@ export function StaffCourseDocumentEditor({
                   </label>
                 ) : null}
 
-                <p role="alert" className="mt-2 min-h-5 text-sm text-red-700 dark:text-red-300">
+                <p
+                  role="alert"
+                  className="mt-2 min-h-5 text-sm text-red-700 dark:text-red-300"
+                >
                   {pageError}
                 </p>
               </article>
@@ -1219,13 +860,13 @@ export function StaffCourseDocumentEditor({
                 }
                 className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               >
-                {(Object.keys(learningRoleScopeLabels) as LearningRoleScope[]).map(
-                  (value) => (
-                    <option key={value} value={value}>
-                      {learningRoleScopeLabels[value]}
-                    </option>
-                  ),
-                )}
+                {(
+                  Object.keys(learningRoleScopeLabels) as LearningRoleScope[]
+                ).map((value) => (
+                  <option key={value} value={value}>
+                    {learningRoleScopeLabels[value]}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="block space-y-1">
@@ -1233,7 +874,10 @@ export function StaffCourseDocumentEditor({
               <select
                 value={draft.storeId}
                 onChange={(event) =>
-                  update((current) => ({ ...current, storeId: event.target.value }))
+                  update((current) => ({
+                    ...current,
+                    storeId: event.target.value,
+                  }))
                 }
                 className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               >
@@ -1248,7 +892,9 @@ export function StaffCourseDocumentEditor({
               </select>
             </label>
             <label className="block space-y-1">
-              <span className="text-sm font-medium">Срок прохождения, дней</span>
+              <span className="text-sm font-medium">
+                Срок прохождения, дней
+              </span>
               <input
                 type="text"
                 inputMode="numeric"
@@ -1263,7 +909,10 @@ export function StaffCourseDocumentEditor({
                 aria-describedby="course-due-hint"
                 className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               />
-              <span id="course-due-hint" className="block text-xs text-zinc-500">
+              <span
+                id="course-due-hint"
+                className="block text-xs text-zinc-500"
+              >
                 Считается от дня, когда сотруднику назначили курс. От 0 до 365.
               </span>
             </label>
@@ -1272,7 +921,10 @@ export function StaffCourseDocumentEditor({
                 type="checkbox"
                 checked={draft.required}
                 onChange={(event) =>
-                  update((current) => ({ ...current, required: event.target.checked }))
+                  update((current) => ({
+                    ...current,
+                    required: event.target.checked,
+                  }))
                 }
                 className="h-4 w-4 accent-emerald-600"
               />
@@ -1304,13 +956,13 @@ export function StaffCourseDocumentEditor({
                 }
                 className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               >
-                {(Object.keys(courseStatusLabels) as CourseDraft["status"][]).map(
-                  (value) => (
-                    <option key={value} value={value}>
-                      {courseStatusLabels[value]}
-                    </option>
-                  ),
-                )}
+                {(
+                  Object.keys(courseStatusLabels) as CourseDraft["status"][]
+                ).map((value) => (
+                  <option key={value} value={value}>
+                    {courseStatusLabels[value]}
+                  </option>
+                ))}
               </select>
             </label>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">

@@ -22,8 +22,16 @@ function draft(overrides: Partial<CourseDraft> = {}): CourseDraft {
     dueDays: "",
     storeId: "",
     steps: [
-      { ...newCourseTab("TEXT", "t1"), title: "Добро пожаловать", content: "<p>Привет</p>" },
-      { ...newCourseTab("TASK", "t2"), title: "Бар", content: "<p>Продай бар</p>" },
+      {
+        ...newCourseTab("TEXT", "t1"),
+        title: "Добро пожаловать",
+        content: "<p>Привет</p>",
+      },
+      {
+        ...newCourseTab("TASK", "t2"),
+        title: "Бар",
+        content: "<p>Продай бар</p>",
+      },
     ],
     ...overrides,
   };

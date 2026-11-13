@@ -225,6 +225,12 @@ describe('GuestDataFoundationService', () => {
     },
     langameStaffUser: {
       upsert: jest.fn(),
+      updateMany: jest.fn(),
+      findMany: jest.fn(),
+    },
+    staffMember: {
+      findMany: jest.fn(),
+      updateMany: jest.fn(),
     },
     guestStaffIdentityMapping: {
       findMany: jest.fn(),
@@ -351,6 +357,10 @@ describe('GuestDataFoundationService', () => {
     prisma.guestBonusBalanceCurrent.upsert.mockResolvedValue({});
     prisma.guestSession.findUnique.mockResolvedValue(null);
     prisma.langameStaffUser.upsert.mockResolvedValue({});
+    prisma.langameStaffUser.updateMany.mockResolvedValue({ count: 0 });
+    prisma.langameStaffUser.findMany.mockResolvedValue([]);
+    prisma.staffMember.findMany.mockResolvedValue([]);
+    prisma.staffMember.updateMany.mockResolvedValue({ count: 0 });
 
     langameClient.listGuestGroups.mockResolvedValue([
       { id: 7, name: 'VIP', percent: '10' },
@@ -468,6 +478,11 @@ describe('GuestDataFoundationService', () => {
   });
 
   it('syncs guest foundation data without storing raw personal data', async () => {
+    // Admin user_id 42 has its own Langame guest account 42 (users/list
+    // guest_id); the shift is linked through it.
+    prisma.langameStaffUser.findMany.mockResolvedValue([
+      { externalUserId: '42', externalGuestId: '42' },
+    ]);
     const result = await service.syncTenant(user, {
       dateFrom: '2026-05-01',
       dateTo: '2026-05-01',
@@ -739,6 +754,62 @@ describe('GuestDataFoundationService', () => {
       ],
     );
     expect(langameSettingsService.resolveTenantAccess).not.toHaveBeenCalled();
+  });
+
+  it('does not link a shift to a guest whose guest_id merely equals the admin user_id', async () => {
+    // users/list has no guest_id for admin 42; guest 42 is somebody else.
+    await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    const [[shiftUpsert]] = prisma.guestWorkingShift.upsert.mock.calls as [
+      [{ create: { guestId: string | null; externalUserId: string | null } }],
+    ];
+    expect(shiftUpsert.create.externalUserId).toBe('42');
+    expect(shiftUpsert.create.guestId).toBeNull();
+  });
+
+  it('marks admins missing only after a complete users list', async () => {
+    langameClient.listUsers.mockResolvedValue([
+      { id: 7, username: 'admin7', email: 'a7@club.example', guest_id: 42 },
+    ]);
+
+    await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    expect(prisma.langameStaffUser.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          missingFromSourceAt: null,
+        }) as unknown,
+      }),
+    );
+    expect(prisma.langameStaffUser.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club.example',
+        externalUserId: { notIn: ['7'] },
+        missingFromSourceAt: null,
+      },
+      data: { missingFromSourceAt: expect.any(Date) as Date },
+    });
+  });
+
+  it('does not mark admins missing when users list is denied', async () => {
+    langameClient.listUsers.mockRejectedValue(
+      Object.assign(new Error('Forbidden'), { status: 403 }),
+    );
+
+    await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    expect(prisma.langameStaffUser.updateMany).not.toHaveBeenCalled();
   });
 
   it('runs an admitted external scheduled child under the revision-fenced policy', async () => {

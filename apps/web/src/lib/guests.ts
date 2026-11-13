@@ -1009,6 +1009,8 @@ export type StaffOperatorReportRow = {
   mappingId: string | null;
   mappingNote: string | null;
   linkedGuest: GuestDashboardRow | null;
+  /** The main link: the LeetPlus staff card with this Langame user_id. */
+  staffMember: { id: string; displayName: string } | null;
   langameUser: StaffLangameUserSummary | null;
   storeNames: string[];
   lastClosedShiftExternalShiftId: string | null;

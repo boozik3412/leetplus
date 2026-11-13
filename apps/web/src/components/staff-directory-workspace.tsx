@@ -161,6 +161,22 @@ function formatMoney(value: number | null) {
   return `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value)} ₽`;
 }
 
+function langameLinkSourceNote(member: StaffDirectoryMember) {
+  const missing = member.langameUser?.missingFromSource
+    ? " · больше нет в Langame"
+    : "";
+  if (member.externalLinkSource === "AUTO_EMAIL") {
+    return ` · привязан автоматически по почте${missing}`;
+  }
+  if (member.externalLinkSource === "AUTO_PHONE") {
+    return ` · привязан автоматически по телефону${missing}`;
+  }
+  if (member.externalLinkSource === "AUTO_NAME") {
+    return ` · привязан автоматически по ФИО${missing}`;
+  }
+  return missing;
+}
+
 function formatCompensation(member: StaffDirectoryMember) {
   if (!member.compensationType || member.compensationAmount === null) {
     return "мотивация не указана";
@@ -925,6 +941,13 @@ export function StaffDirectoryWorkspace({
                 />
               </Field>
             </div>
+            <p className="mt-2 text-xs text-zinc-500">
+              Если почта, телефон или ФИО в карточке совпадают ровно с одним
+              администратором Langame в клубе сотрудника, LeetPlus привяжет
+              его сам. Привязку,
+              которую вы поменяли или очистили здесь, LeetPlus больше не
+              трогает.
+            </p>
           </div>
           <Field label="Заметка">
             <textarea
@@ -1030,6 +1053,9 @@ export function StaffDirectoryWorkspace({
                           ? `${member.langameUser.displayName} / ${member.externalUserId}`
                           : `${member.externalDomain ?? "домен"} / ${member.externalUserId}`
                         : "не привязан"}
+                      {member.externalUserId
+                        ? langameLinkSourceNote(member)
+                        : null}
                     </span>
                     <span>Мотивация: {formatCompensation(member)}</span>
                     <span>Обновлено: {formatDate(member.updatedAt)}</span>
@@ -1060,6 +1086,11 @@ export function StaffDirectoryWorkspace({
                     <span className="block text-xs text-zinc-500">
                       {user.externalDomain} · user_id {user.externalUserId}
                     </span>
+                    {user.missingFromSource ? (
+                      <span className="block text-xs text-amber-700 dark:text-amber-300">
+                        Больше нет в Langame
+                      </span>
+                    ) : null}
                     {user.adminStatus || user.workPointLabel ? (
                       <span className="block text-xs text-zinc-500">
                         {[user.adminStatus, user.workPointLabel]

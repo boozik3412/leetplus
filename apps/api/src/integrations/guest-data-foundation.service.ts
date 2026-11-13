@@ -37,6 +37,7 @@ import {
   GuestIdentityResolverService,
   type GuestIdentitySnapshotCandidate,
 } from './guest-identity-resolver.service';
+import { autoLinkStaffMembersToLangame } from './langame-staff-link';
 import { LangameClient } from './langame.client';
 import {
   assertExactExternalImportLockHeld,
@@ -1395,7 +1396,13 @@ export class GuestDataFoundationService {
       ),
     );
     this.profileRows(profile.langameUsers, langameUsers);
-    await this.syncLangameUsers(tenantId, domain, langameUsers);
+    await this.syncLangameUsers(
+      tenantId,
+      domain,
+      langameUsers,
+      !profile.endpointErrors['users/list'],
+    );
+    await autoLinkStaffMembersToLangame(this.prisma, tenantId);
 
     let workingShifts: LangameWorkingShift[] = [];
     if (query.includeWorkingShifts ?? true) {
@@ -2629,6 +2636,10 @@ export class GuestDataFoundationService {
   ) {
     const staffGuestIdsByExternalUserId =
       await this.loadStaffGuestIdentityMappings(tenantId, domain);
+    const adminGuestIdsByExternalUserId = await this.loadAdminOwnGuestIds(
+      tenantId,
+      domain,
+    );
 
     for (const row of rows) {
       const externalShiftId = this.toNullableString(row.id);
@@ -2649,9 +2660,15 @@ export class GuestDataFoundationService {
         this.toNullableString(row.date_stop),
         storeRef?.timeZone,
       );
+      // Langame admin user_id and guest_id are separate numberings: the
+      // admin's own guest account comes from /users/list guest_id, never
+      // from a guest whose guest_id happens to equal the user_id.
+      const adminGuestId = externalUserId
+        ? adminGuestIdsByExternalUserId.get(externalUserId)
+        : undefined;
       const guestId = externalUserId
         ? (staffGuestIdsByExternalUserId.get(externalUserId) ??
-          guestsByExternalId.get(externalUserId)?.id ??
+          (adminGuestId ? guestsByExternalId.get(adminGuestId)?.id : null) ??
           null)
         : null;
 
@@ -2733,16 +2750,41 @@ export class GuestDataFoundationService {
     );
   }
 
+  /** Langame admin user_id → the admin's own Langame guest_id. */
+  private async loadAdminOwnGuestIds(tenantId: string, domain: string) {
+    const admins = await this.prisma.langameStaffUser.findMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: domain,
+        externalGuestId: { not: null },
+      },
+      select: { externalUserId: true, externalGuestId: true },
+    });
+
+    return new Map(
+      admins.map((admin) => [admin.externalUserId, admin.externalGuestId!]),
+    );
+  }
+
+  /**
+   * Upserts the domain's Langame admins.
+   * Only a complete, non-empty list may mark absent admins as missing: a
+   * failed page or a key without the users right says nothing about them.
+   */
   private async syncLangameUsers(
     tenantId: string,
     domain: string,
     rows: LangameUser[],
+    complete: boolean,
   ) {
+    const seenUserIds: string[] = [];
     for (const row of rows) {
       const externalUserId = this.toNullableString(row.id);
       if (!externalUserId) {
         continue;
       }
+      seenUserIds.push(externalUserId);
 
       const data = {
         tenantId,
@@ -2768,6 +2810,7 @@ export class GuestDataFoundationService {
         externalGuestId: this.toNullableString(row.guest_id),
         workPoint: this.toNullableJson(row.work_point),
         sourcePayloadHash: this.payloadHash(row),
+        missingFromSourceAt: null,
       };
 
       await this.prisma.langameStaffUser.upsert({
@@ -2796,7 +2839,21 @@ export class GuestDataFoundationService {
           externalGuestId: data.externalGuestId,
           workPoint: data.workPoint,
           sourcePayloadHash: data.sourcePayloadHash,
+          missingFromSourceAt: null,
         },
+      });
+    }
+
+    if (complete && seenUserIds.length > 0) {
+      await this.prisma.langameStaffUser.updateMany({
+        where: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          externalUserId: { notIn: seenUserIds },
+          missingFromSourceAt: null,
+        },
+        data: { missingFromSourceAt: new Date() },
       });
     }
   }

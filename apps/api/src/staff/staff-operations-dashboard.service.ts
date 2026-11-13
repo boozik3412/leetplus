@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { staffLangameIdentityKey } from '../integrations/langame-staff-link';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import {
@@ -418,7 +419,12 @@ export class StaffOperationsDashboardService {
       filters,
     );
     summaryMetrics.repeatedIssues = recurringIssues.length;
-    const staffControl = this.buildStaffControl(shifts, checklists, filters);
+    const staffControl = this.buildStaffControl(
+      shifts,
+      checklists,
+      filters,
+      await this.loadLinkedLangameAdminKeys(tenantId),
+    );
 
     return {
       filters: {
@@ -467,7 +473,12 @@ export class StaffOperationsDashboardService {
         take: 5000,
       }),
     ]);
-    const staffControl = this.buildStaffControl(shifts, checklists, filters);
+    const staffControl = this.buildStaffControl(
+      shifts,
+      checklists,
+      filters,
+      await this.loadLinkedLangameAdminKeys(tenantId),
+    );
 
     return {
       dateFrom: filters.dateFrom,
@@ -955,10 +966,32 @@ export class StaffOperationsDashboardService {
     return map;
   }
 
+  /** Langame admins linked to a LeetPlus staff card (the main link). */
+  private async loadLinkedLangameAdminKeys(tenantId: string) {
+    const members = await this.prisma.staffMember.findMany({
+      where: {
+        tenantId,
+        externalDomain: { not: null },
+        externalUserId: { not: null },
+      },
+      select: { externalDomain: true, externalUserId: true },
+    });
+
+    return new Set(
+      members.map((member) =>
+        staffLangameIdentityKey(
+          member.externalDomain ?? '',
+          member.externalUserId ?? '',
+        ),
+      ),
+    );
+  }
+
   private buildStaffControl(
     shifts: ShiftDashboardRow[],
     checklists: ChecklistDashboardRow[],
     filters: ResolvedStaffOperationsDashboardFilters,
+    linkedAdminKeys: ReadonlySet<string> = new Set(),
   ): StaffOperationsStaffControl {
     const summary = this.emptyStaffControlSummary();
     let middleCheckSum = 0;
@@ -1015,8 +1048,13 @@ export class StaffOperationsDashboardService {
     );
     const unlinkedHighCashRows = shifts.filter(
       (shift) =>
-        !shift.guestId &&
         Boolean(shift.externalUserId) &&
+        !linkedAdminKeys.has(
+          staffLangameIdentityKey(
+            shift.externalDomain ?? '',
+            shift.externalUserId ?? '',
+          ),
+        ) &&
         this.shiftPaymentAmount(shift) >= 10_000,
     );
     const longShiftRows = shifts.filter(

@@ -54,6 +54,14 @@ export type StaffDirectoryMember = {
   externalProvider: "LANGAME" | null;
   externalDomain: string | null;
   externalUserId: string | null;
+  /** MANUAL — set in the card; AUTO_* — LeetPlus matched by email/phone. */
+  externalLinkSource:
+    | "MANUAL"
+    | "AUTO_EMAIL"
+    | "AUTO_PHONE"
+    | "AUTO_NAME"
+    | null;
+  externalLinkedAt: string | null;
   note: string | null;
   createdAt: string;
   updatedAt: string;
@@ -89,6 +97,8 @@ export type StaffLangameUserOption = {
   phone: string | null;
   externalGuestId: string | null;
   workPointLabel: string | null;
+  /** The last complete Langame list of the domain no longer has this admin. */
+  missingFromSource: boolean;
   mappedStaffMemberId: string | null;
   updatedAt: string;
 };

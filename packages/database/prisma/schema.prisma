@@ -4446,6 +4446,8 @@ model LangameStaffUser {
   externalGuestId      String?
   workPoint            Json?
   sourcePayloadHash    String?
+  /// Set when a complete Langame /users/list of the domain no longer returns this admin.
+  missingFromSourceAt  DateTime?
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 
@@ -4476,6 +4478,9 @@ model StaffMember {
   externalProvider   IntegrationProvider?
   externalDomain     String?
   externalUserId     String?
+  /// MANUAL | AUTO_EMAIL | AUTO_PHONE | AUTO_NAME; NULL for links made before 13.11.2026.
+  externalLinkSource String?
+  externalLinkedAt   DateTime?
   note               String?
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt

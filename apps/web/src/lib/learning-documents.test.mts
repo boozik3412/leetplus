@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  articleDocumentType,
   articleToLearningDocument,
   buildLearningDocuments,
   contentToThumbnailBlocks,
@@ -8,9 +9,28 @@ import {
   courseToLearningDocument,
   filterLearningDocuments,
   learningTemplates,
+  testToLearningDocument,
   type LearningArticleInput,
   type LearningCourseInput,
+  type LearningTestInput,
 } from "./learning-documents.ts";
+
+function testInput(
+  overrides: Partial<LearningTestInput> = {},
+): LearningTestInput {
+  return {
+    id: "test-1",
+    title: "Тест по кассе",
+    description: null,
+    roleScope: "ADMINISTRATOR",
+    status: "ACTIVE",
+    assessmentKind: "TEST",
+    questions: [{ title: "Как открыть смену?" }, { title: "Где Z-отчёт?" }],
+    updatedAt: "2026-11-12T12:00:00.000Z",
+    latestResult: null,
+    ...overrides,
+  };
+}
 
 function course(
   overrides: Partial<LearningCourseInput> = {},
@@ -111,7 +131,8 @@ test("an article shows reading progress and asks me to read it", () => {
   const read = articleToLearningDocument(article());
   assert.equal(read.note, "Прочитали 15 из 18");
   assert.equal(read.href, "/staff/learning/articles/article-1");
-  assert.match(read.meta, /^Регламенты · /);
+  assert.equal(read.type, "REGULATION");
+  assert.match(read.meta, /^Регламент · \d/);
   assert.equal(read.requiredForMe, false);
   assert.equal(read.badge, null);
 
@@ -167,7 +188,11 @@ test("recent documents mix courses and articles newest first and filter", () => 
   assert.deepEqual(countLearningDocuments(documents), {
     all: 3,
     courses: 2,
-    articles: 1,
+    regulations: 1,
+    scripts: 0,
+    checklists: 0,
+    articles: 0,
+    tests: 0,
     drafts: 1,
     "to-read": 1,
   });
@@ -185,6 +210,78 @@ test("recent documents mix courses and articles newest first and filter", () => 
   );
 });
 
+test("an article's type comes from its template, folder or category", () => {
+  const base = { kind: "ARTICLE" as const, templateKey: null, category: null };
+
+  assert.equal(
+    articleDocumentType({ ...base, folder: "Регламенты" }),
+    "REGULATION",
+  );
+  assert.equal(
+    articleDocumentType({
+      ...base,
+      folder: "Общие",
+      templateKey: "learning-guest-script",
+    }),
+    "SCRIPT",
+  );
+  assert.equal(
+    articleDocumentType({ ...base, folder: "Бар", category: "Чеклисты" }),
+    "CHECKLIST",
+  );
+  assert.equal(articleDocumentType({ ...base, folder: "Касса" }), "ARTICLE");
+  assert.equal(
+    articleDocumentType({ ...base, kind: "INFORMATION", folder: "Регламенты" }),
+    "NOTICE",
+  );
+
+  const plain = articleToLearningDocument(article({ folder: "Касса" }));
+  assert.match(plain.meta, /^Статья · Касса · /);
+});
+
+test("a test is a document that opens in the test editor", () => {
+  const draft = testToLearningDocument(testInput({ status: "DRAFT" }));
+  assert.equal(draft.kind, "TEST");
+  assert.equal(draft.type, "TEST");
+  assert.equal(draft.href, "/staff/assessments?assessmentId=test-1");
+  assert.match(draft.meta, /^Тест · 2 вопроса · /);
+  assert.equal(draft.isDraft, true);
+  assert.deepEqual(draft.badge, { label: "Черновик", tone: "gray" });
+  assert.deepEqual(
+    draft.thumbnail.map((block) => block.text),
+    ["Тест по кассе", "1. Как открыть смену?", "2. Где Z-отчёт?"],
+  );
+
+  const passed = testToLearningDocument(
+    testInput({
+      assessmentKind: "ATTESTATION",
+      latestResult: { passed: true },
+    }),
+  );
+  assert.equal(passed.type, "ATTESTATION");
+  assert.match(passed.meta, /^Аттестация · /);
+  assert.deepEqual(passed.badge, { label: "Сдан", tone: "green" });
+
+  const documents = buildLearningDocuments(
+    [course()],
+    [article({ folder: "Скрипты", status: "DRAFT" })],
+    new Date("2026-11-13T00:00:00.000Z"),
+    [testInput()],
+  );
+  assert.deepEqual(
+    filterLearningDocuments(documents, "tests", "").map((d) => d.id),
+    ["test-1"],
+  );
+  assert.deepEqual(
+    filterLearningDocuments(documents, "scripts", "").map((d) => d.id),
+    ["article-1"],
+  );
+  assert.deepEqual(
+    filterLearningDocuments(documents, "all", "z-отчёт").map((d) => d.id),
+    ["test-1"],
+  );
+});
+
 test("templates create valid courses and articles", () => {
   const keys = new Set<string>();
 
@@ -199,10 +296,18 @@ test("templates create valid courses and articles", () => {
         assert.ok(step.title.trim(), `${template.key}: step title`);
         assert.ok(step.content.trim(), `${template.key}: step text`);
       }
-    } else {
+    } else if (template.kind === "ARTICLE") {
       assert.ok(template.article.title.trim());
+    } else {
+      assert.ok(template.test.title.trim());
     }
   }
+
+  // The plain types come first, ready-made role courses after them.
+  assert.deepEqual(
+    learningTemplates.slice(0, 6).map((template) => template.name),
+    ["Пустой документ", "Курс", "Регламент", "Скрипт", "Чек-лист", "Тест"],
+  );
 
   const onboarding = learningTemplates.find(
     (template) => template.key === "course-administrator-onboarding",

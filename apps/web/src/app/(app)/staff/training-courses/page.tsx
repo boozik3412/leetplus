@@ -106,6 +106,7 @@ export default async function StaffTrainingCoursesPage({
           items={[
             { href: "/dashboard", label: "Дашборд" },
             { href: "/staff/tasks", label: "Персонал" },
+            { href: "/staff/learning", label: "Обучение и база знаний" },
           ]}
         />
 
@@ -245,7 +246,11 @@ export default async function StaffTrainingCoursesPage({
         </section>
 
         <section className="mt-6">
-          <StaffTrainingCoursesWorkspace report={report} />
+          <StaffTrainingCoursesWorkspace
+            key={searchParam(params.courseId) ?? "first"}
+            report={report}
+            initialCourseId={searchParam(params.courseId) ?? null}
+          />
         </section>
       </div>
     </main>

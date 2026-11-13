@@ -710,6 +710,7 @@ const shiftStaffAllowedPrefixes = [
   "/staff/training-courses",
   "/staff/assessments",
   "/staff/knowledge-base",
+  "/staff/learning",
   "/staff/shift-workspace",
   "/staff/team-chat",
   "/staff/notifications",
@@ -881,6 +882,7 @@ function resolveStaffPathCapability(href: string): Capability {
 
   if (
     path.startsWith("/staff/training-courses") ||
+    path.startsWith("/staff/learning/courses") ||
     path.startsWith("/staff/training-profiles") ||
     path.startsWith("/staff/readiness-report") ||
     path.startsWith("/staff/onboarding") ||
@@ -889,7 +891,12 @@ function resolveStaffPathCapability(href: string): Capability {
     return "view_staff_training";
   }
 
-  if (path.startsWith("/staff/knowledge-base")) {
+  // «Обучение и база знаний» home shows courses only to those who may see
+  // them; everybody with the knowledge base can open the page itself.
+  if (
+    path.startsWith("/staff/knowledge-base") ||
+    path.startsWith("/staff/learning")
+  ) {
     return "view_staff_knowledge";
   }
 

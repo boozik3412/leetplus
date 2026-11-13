@@ -235,3 +235,24 @@ export function StaffAttachmentUpload({
     </div>
   );
 }
+
+/**
+ * Compresses an image like the upload button does and stores it as a staff
+ * attachment. For editors that insert the picture themselves.
+ */
+export async function uploadStaffImage(sourceFile: File) {
+  const file = await prepareUploadFile(
+    sourceFile,
+    true,
+    DEFAULT_IMAGE_MAX_SIDE,
+    DEFAULT_IMAGE_QUALITY,
+  );
+
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    throw new Error(
+      `${sourceFile.name}: картинка должна быть не больше 5 МБ после сжатия`,
+    );
+  }
+
+  return uploadFile(file);
+}

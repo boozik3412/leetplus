@@ -147,8 +147,12 @@ const navGroups: NavGroup[] = [
         activePaths: ["/staff/checklist-templates"],
       },
       { href: "/staff/shift-regulations", label: "Регламенты смены" },
-      { href: "/staff/training-courses", label: "Обучение и аттестации" },
-      { href: "/staff/knowledge-base", label: "База знаний" },
+      {
+        href: "/staff/learning",
+        label: "Обучение и база знаний",
+        activePaths: ["/staff/training-courses", "/staff/knowledge-base"],
+        fallbackHrefs: ["/staff/training-courses"],
+      },
       {
         href: "/staff/administrator-ratings",
         label: "Контроль и мотивация",
@@ -204,6 +208,7 @@ const personalNavItems: PersonalNavItem[] = [
 const shiftWorkspaceNavHrefs = new Set([
   "/staff/tasks",
   "/staff/shift-regulations",
+  "/staff/learning",
   "/staff/training-courses",
   "/staff/knowledge-base",
   "/staff/discipline",

@@ -2115,3 +2115,23 @@ export function openKnowledgeReadingWindow(data: KnowledgeReadingWindowData) {
 
   return true;
 }
+
+/** True when stored content is HTML (the formatted editor) rather than light markdown. */
+export function isKnowledgeHtmlContent(value: string | null | undefined) {
+  return isHtmlContent(value);
+}
+
+/**
+ * Stored content (HTML or the old light markdown) as safe HTML for an
+ * editable page. Browser only: on the server it falls back to escaped text.
+ */
+export function knowledgeContentToEditableHtml(
+  value: string | null | undefined,
+) {
+  return contentToHtml(value);
+}
+
+/** Cleans HTML produced by a contenteditable page before it is saved. */
+export function sanitizeKnowledgeContentHtml(value: string | null | undefined) {
+  return sanitizeKnowledgeHtml(value);
+}

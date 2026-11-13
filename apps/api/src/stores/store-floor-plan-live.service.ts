@@ -164,6 +164,45 @@ export type StoreFloorPlanSeatedGuests = {
   }>;
 };
 
+/** One reward a guest of the club got in the shift: «Подробнее» list. */
+export type StoreFloorPlanGameCompletion = {
+  id: string;
+  /** When the guest earned it. */
+  qualifiedAt: string;
+  kind: 'MISSION' | 'CASE' | 'SEASON' | 'MANUAL' | 'OTHER';
+  /** Mission trigger (CHECK_IN, PLAY_HOUR…) or the case opening trigger. */
+  triggerKind: string | null;
+  /** Mission, case or season name; `null` for a manual reward. */
+  title: string | null;
+  /** Mission text the guest sees; for the rest, what the reward was for. */
+  description: string | null;
+  reward: {
+    label: string;
+    type: string;
+    amount: number;
+    status: string;
+    paidAt: string | null;
+    expiresAt: string | null;
+  };
+  /** `null` when the viewer lacks the «Гости» section (see `guestAccess`). */
+  guest: { id: string | null; name: string; phone: string | null } | null;
+};
+
+export type StoreFloorPlanGameCompletions = {
+  storeId: string;
+  storeName: string;
+  /** Club time zone, to show the times as the club sees them. */
+  timeZone: string | null;
+  /** SHIFT: since the open Langame shift started; TODAY: since midnight. */
+  period: 'SHIFT' | 'TODAY';
+  since: string;
+  generatedAt: string;
+  guestAccess: 'AVAILABLE' | 'NO_CAPABILITY';
+  items: StoreFloorPlanGameCompletion[];
+  /** More rewards than the list holds; the newest are shown. */
+  truncated: boolean;
+};
+
 type LiveSeat = {
   guestId: string | null;
   startedAt: Date;
@@ -215,6 +254,7 @@ const GUEST_PURCHASES_SHOWN = 10;
 const TARIFF_TTL_MS = 10 * 60_000;
 const NEW_GUEST_NAME_TTL_MS = 10 * 60_000;
 const GAME_ITEMS_SHOWN = 30;
+const GAME_COMPLETIONS_SHOWN = 500;
 /** Rewards that really went to a guest (not cancelled or expired). */
 const COUNTED_REWARD_STATUSES = ['PENDING', 'APPROVED', 'PAID'];
 /** Cases a guest can get directly; templates are only handed out by missions. */
@@ -404,6 +444,122 @@ export class StoreFloorPlanLiveService {
       );
     }
     return result;
+  }
+
+  /**
+   * Rewards the guests of the club got in the shift (or today), newest first:
+   * the «Подробнее» list of the game module block. Same period and statuses
+   * as the counters of the block; guest name and phone only for roles that
+   * see the «Гости» section.
+   */
+  async getGameCompletions(
+    storeId: string,
+    user: AuthenticatedUser,
+    now = new Date(),
+  ): Promise<StoreFloorPlanGameCompletions> {
+    const { store, snapshot } = await this.snapshot(storeId, user, now);
+    const guestAccess = canViewGuests(user) ? 'AVAILABLE' : 'NO_CAPABILITY';
+    // The block counts from the open Langame shift; without Langame, today.
+    const revenue = snapshot.view.revenue;
+    const since = revenue
+      ? new Date(revenue.since)
+      : localMidnight(now, store.timeZone);
+    const [club, rows] = await Promise.all([
+      this.prisma.store.findFirst({
+        where: { tenantId: store.tenantId, id: store.id },
+        select: { name: true },
+      }),
+      this.prisma.guestGameReward.findMany({
+        where: {
+          tenantId: store.tenantId,
+          storeId: store.id,
+          status: { in: COUNTED_REWARD_STATUSES },
+          qualifiedAt: { gte: since, lte: now },
+        },
+        select: {
+          id: true,
+          guestId: true,
+          qualifiedAt: true,
+          status: true,
+          source: true,
+          rewardType: true,
+          rewardAmount: true,
+          rewardLabel: true,
+          rewardRarityLabel: true,
+          paidAt: true,
+          expiresAt: true,
+          claimExpiresAt: true,
+          note: true,
+          profile: {
+            select: { guestId: true, displayName: true, contactMasked: true },
+          },
+          mission: {
+            select: {
+              name: true,
+              missionType: true,
+              triggerKind: true,
+              conditions: true,
+            },
+          },
+          lootBox: { select: { name: true, triggerKind: true } },
+          season: { select: { name: true } },
+        },
+        orderBy: [{ qualifiedAt: 'desc' }, { id: 'asc' }],
+        take: GAME_COMPLETIONS_SHOWN + 1,
+      }),
+    ]);
+    const shown = rows.slice(0, GAME_COMPLETIONS_SHOWN);
+    const contacts =
+      guestAccess === 'AVAILABLE'
+        ? await this.guestsService.floorPlanGuestContacts(
+            store.tenantId,
+            shown
+              .map((row) => row.guestId ?? row.profile?.guestId ?? null)
+              .filter((id): id is string => id !== null),
+          )
+        : new Map<string, { name: string; phone: string | null }>();
+
+    return {
+      storeId: store.id,
+      storeName: club?.name ?? '',
+      timeZone: store.timeZone,
+      period: revenue?.period ?? 'TODAY',
+      since: since.toISOString(),
+      generatedAt: now.toISOString(),
+      guestAccess,
+      truncated: rows.length > GAME_COMPLETIONS_SHOWN,
+      items: shown.map((row): StoreFloorPlanGameCompletion => {
+        const guestId = row.guestId ?? row.profile?.guestId ?? null;
+        const contact = guestId ? contacts.get(guestId) : undefined;
+        const guest =
+          guestAccess !== 'AVAILABLE'
+            ? null
+            : contact
+              ? { id: guestId, ...contact }
+              : row.profile
+                ? {
+                    id: guestId,
+                    name: text(row.profile.displayName) ?? 'Гость без карточки',
+                    phone: text(row.profile.contactMasked),
+                  }
+                : null;
+        return {
+          id: row.id,
+          qualifiedAt: row.qualifiedAt.toISOString(),
+          ...gameCompletionActivity(row),
+          reward: {
+            label: row.rewardLabel,
+            type: row.rewardType,
+            amount: Number(row.rewardAmount),
+            status: row.status,
+            paidAt: row.paidAt?.toISOString() ?? null,
+            expiresAt:
+              (row.claimExpiresAt ?? row.expiresAt)?.toISOString() ?? null,
+          },
+          guest,
+        };
+      }),
+    };
   }
 
   /** The guest of a session who has no LeetPlus card yet (see `newGuest`). */
@@ -1437,6 +1593,71 @@ export class StoreFloorPlanLiveService {
       byGuest,
     };
   }
+}
+
+type GameCompletionSource = {
+  source: string;
+  note: string | null;
+  rewardRarityLabel: string | null;
+  mission: {
+    name: string;
+    missionType: string;
+    triggerKind: string;
+    conditions: Prisma.JsonValue;
+  } | null;
+  lootBox: { name: string; triggerKind: string } | null;
+  season: { name: string } | null;
+};
+
+function jsonObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/** What the reward was for: kind, name and the text the guest saw. */
+function gameCompletionActivity(
+  row: GameCompletionSource,
+): Pick<
+  StoreFloorPlanGameCompletion,
+  'kind' | 'triggerKind' | 'title' | 'description'
+> {
+  if (row.mission) {
+    const conditions = jsonObject(row.mission.conditions);
+    const presentation = jsonObject(conditions.presentation);
+    return {
+      kind: 'MISSION',
+      triggerKind: row.mission.triggerKind || row.mission.missionType || null,
+      title: row.mission.name,
+      description:
+        text(presentation.description) ?? text(conditions.description),
+    };
+  }
+  if (row.lootBox) {
+    return {
+      kind: 'CASE',
+      triggerKind: row.lootBox.triggerKind || null,
+      title: row.lootBox.name,
+      description: row.rewardRarityLabel
+        ? `Выпало из кейса · ${row.rewardRarityLabel}`
+        : 'Выпало из кейса',
+    };
+  }
+  if (row.season) {
+    return {
+      kind: 'SEASON',
+      triggerKind: null,
+      title: row.season.name,
+      description: 'Награда уровня сезона',
+    };
+  }
+  const manual = row.source === 'MANUAL' || row.source === 'CASHIER';
+  return {
+    kind: manual ? 'MANUAL' : 'OTHER',
+    triggerKind: null,
+    title: null,
+    description: text(row.note),
+  };
 }
 
 /** `fio` of the Langame `/guests/{id}` answer (`data` is a row or a list). */

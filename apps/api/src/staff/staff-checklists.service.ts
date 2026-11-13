@@ -430,6 +430,12 @@ export type StaffChecklistTemplateOption = {
   requiredEvidenceItems: number;
 };
 
+export type StaffChecklistItemPlannedTiming = {
+  sectionId: string;
+  itemId: string;
+  timing: StaffChecklistAnswerTiming;
+};
+
 export type StaffChecklistRunResponse = {
   id: string;
   regulationId: string | null;
@@ -446,6 +452,11 @@ export type StaffChecklistRunResponse = {
   reviewedAt: string | null;
   sections: StaffChecklistSection[];
   answers: StaffChecklistAnswer[];
+  /**
+   * Planned time of every timed item, answered or not (for an unanswered item
+   * the answer carries no timing): WAITING until its window ends, then MISSED.
+   */
+  itemTimings: StaffChecklistItemPlannedTiming[];
   scoreTotal: number;
   scoreEarned: number;
   requiredItemsTotal: number;
@@ -2262,6 +2273,7 @@ export class StaffChecklistsService {
       reviewedAt: row.reviewedAt?.toISOString() ?? null,
       sections,
       answers,
+      itemTimings: this.plannedItemTimings(row, sections, normalizedAnswers),
       scoreTotal: row.scoreTotal,
       scoreEarned: row.scoreEarned,
       requiredItemsTotal: row.requiredItemsTotal,
@@ -2734,6 +2746,33 @@ export class StaffChecklistsService {
         timing: item ? this.evaluateAnswerTiming(row, item, answer) : null,
       };
     });
+  }
+
+  private plannedItemTimings(
+    row: ChecklistTimingRun,
+    sections: StaffChecklistSection[],
+    answers: StaffChecklistAnswer[],
+  ): StaffChecklistItemPlannedTiming[] {
+    const answerByKey = new Map(
+      answers.map((answer) => [
+        `${answer.sectionId}::${answer.itemId}`,
+        answer,
+      ]),
+    );
+
+    return sections.flatMap((section) =>
+      section.items.flatMap((item) => {
+        const timing = this.evaluateAnswerTiming(
+          row,
+          item,
+          answerByKey.get(`${section.id}::${item.id}`),
+        );
+
+        return timing
+          ? [{ sectionId: section.id, itemId: item.id, timing }]
+          : [];
+      }),
+    );
   }
 
   private evaluateAnswerTiming(

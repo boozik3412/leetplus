@@ -2119,6 +2119,33 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
   не назначается; в `GuestSupportTicketAuditEvent` пишется
   `UPDATED_FROM_CLUB_SCHEME` с автором и статусами. Гостю ничего не
   отправляется.
+- «Подробнее» игрового модуля (13.11.2026): `GET /stores/:id/floor-plan/live/game-completions`
+  (`StoreFloorPlansController`, JWT + `RolesGuard` → `view_club_scheme`,
+  manifest `STORES_VERIFIED`) проверяет свежий store scope тем же
+  15-секундным чтением Langame и берёт из него начало открытой смены (без
+  смены — полночь клуба). Читает только `GuestGameReward` этого клуба
+  (`tenantId` + `storeId`, статусы PENDING/APPROVED/PAID, `qualifiedAt` с
+  начала смены, новые сверху, до 500) с названием миссии, кейса или сезона и
+  текстом миссии для гостя. Имя и телефон гостя (расшифрованные, как в
+  карточке гостя, `GuestsService.floorPlanGuestContacts`; для награды без
+  карточки — имя и маска контакта игрового профиля) — только с `view_guests`,
+  иначе `guestAccess = NO_CAPABILITY` и `guest = null`. Записей, запросов к
+  Langame сверх общего чтения, worker и scheduler нет. Web: страница
+  `/visualization/game-activity?store=` (правило раздела `/visualization`)
+  и BFF `GET /api/stores/:id/floor-plan/live/game-completions` через
+  `proxyJsonRequest`; сцена открывает её ссылкой «Подробнее» в новой вкладке.
+- Чек-лист и задачи администратора на схеме (13.11.2026): полная сцена (не
+  `embed=shift`) спрашивает `GET /api/auth/me` и только для ролей
+  `SENIOR_ADMINISTRATOR` / `CLUB_ADMINISTRATOR` читает уже существующие BFF
+  `GET /api/staff/checklists?status=all` и
+  `GET /api/staff/tasks?view=my&status=all` с cookie пользователя (те же
+  права и scope, что у страниц «Чек-листы» и «Задачи»; новых маршрутов нет).
+  Ответ чек-листа получил поле `itemTimings`: плановое время, окно и статус
+  (WAITING/MISSED/ON_TIME/EARLY/LATE) каждого пункта со временем, в том числе
+  ещё не отмеченного; считается тем же кодом, что `answers[].timing`.
+  Статусы на сцене не меняются: «Да» в окне «Изменить статус?» открывает
+  задачу (`/staff/tasks?taskId=`) или чек-лист (`/staff/shift-workspace?checklistRunId=`)
+  в новой вкладке.
 - Роли `CLUB_ADMINISTRATOR` и `SENIOR_ADMINISTRATOR` (12.11.2026) получили
   `view_club_scheme` и `view_guests`: схема зала на «Моя смена» и полная
   карточка гостя по клику. `view_guests` открывает им раздел «Гости» всей

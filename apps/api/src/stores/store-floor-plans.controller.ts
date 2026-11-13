@@ -80,6 +80,17 @@ export class StoreFloorPlansController {
     return this.storeFloorPlanAttentionService.get(id, user);
   }
 
+  /** «Подробнее» of the game module block: rewards guests got this shift. */
+  @Roles(...TENANT_USER_ROLES)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get(':id/floor-plan/live/game-completions')
+  getFloorPlanGameCompletions(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.storeFloorPlanLiveService.getGameCompletions(id, user);
+  }
+
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Patch(':id/floor-plan')

@@ -34,7 +34,9 @@ const previousRelease201MigrationName =
   "20261112120000_guest_telegram_campaigns";
 const previousRelease202MigrationName = "20261112150000_guest_visit_ratings";
 const previousRelease203MigrationName = "20261112170000_guest_crm_lead_stage";
-const releaseMigrationName = "20261113090000_staff_langame_auto_link";
+const previousRelease204MigrationName =
+  "20261113090000_staff_langame_auto_link";
+const releaseMigrationName = "20261113120000_staff_checklist_escalated_at";
 const predecessorName = "20260818020000_identity_mail_delivery_current_head_v1";
 const preterminalManifestDigest =
   "589dd0a39f2372041a284392c72ad6ed59027877e909e1a5d377b9017c662fda";
@@ -43,7 +45,7 @@ const productionHistoryPreterminalManifestDigest =
 const workerAssertSourceDigest =
   "645feb480c46c42d7d8ca2dae07ec1c82f88264ac5d0e30d26593a8e566f3f66";
 const workerAssertDefinitionDigest =
-  "0d3a3f8fca70ce4b108e3f8e1cae3cda9c72f37ca4c0ec35de2c52d4873df514";
+  "fc898158ea7b04281aa74b6bb4f8a1f29faea3e676165e60e1d2993fe15fd1e6";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -68,31 +70,32 @@ async function canonicalManifest() {
   return { entries, rows };
 }
 
-test("CURRENT204 preserves the reviewed CURRENT185 digest and advances readiness exactly once", async () => {
+test("CURRENT205 preserves the reviewed CURRENT185 digest and advances readiness exactly once", async () => {
   const { entries, rows } = await canonicalManifest();
-  assert.equal(entries.length, 204);
-  assert.equal(entries.at(-20), predecessorName);
-  assert.equal(entries.at(-19), guardMigrationName);
-  assert.equal(entries.at(-18), telegramMigrationName);
-  assert.equal(entries.at(-17), previousCurrentMigrationName);
-  assert.equal(entries.at(-16), previousCurrent189MigrationName);
-  assert.equal(entries.at(-15), currentMigrationName);
-  assert.equal(entries.at(-14), previousRelease191MigrationName);
-  assert.equal(entries.at(-13), previousRelease192MigrationName);
-  assert.equal(entries.at(-12), previousRelease193MigrationName);
-  assert.equal(entries.at(-11), previousRelease194MigrationName);
-  assert.equal(entries.at(-10), previousRelease195MigrationName);
-  assert.equal(entries.at(-9), previousRelease196MigrationName);
-  assert.equal(entries.at(-8), previousRelease197MigrationName);
-  assert.equal(entries.at(-7), previousRelease198MigrationName);
-  assert.equal(entries.at(-6), previousRelease199MigrationName);
-  assert.equal(entries.at(-5), previousRelease200MigrationName);
-  assert.equal(entries.at(-4), previousRelease201MigrationName);
-  assert.equal(entries.at(-3), previousRelease202MigrationName);
-  assert.equal(entries.at(-2), previousRelease203MigrationName);
+  assert.equal(entries.length, 205);
+  assert.equal(entries.at(-21), predecessorName);
+  assert.equal(entries.at(-20), guardMigrationName);
+  assert.equal(entries.at(-19), telegramMigrationName);
+  assert.equal(entries.at(-18), previousCurrentMigrationName);
+  assert.equal(entries.at(-17), previousCurrent189MigrationName);
+  assert.equal(entries.at(-16), currentMigrationName);
+  assert.equal(entries.at(-15), previousRelease191MigrationName);
+  assert.equal(entries.at(-14), previousRelease192MigrationName);
+  assert.equal(entries.at(-13), previousRelease193MigrationName);
+  assert.equal(entries.at(-12), previousRelease194MigrationName);
+  assert.equal(entries.at(-11), previousRelease195MigrationName);
+  assert.equal(entries.at(-10), previousRelease196MigrationName);
+  assert.equal(entries.at(-9), previousRelease197MigrationName);
+  assert.equal(entries.at(-8), previousRelease198MigrationName);
+  assert.equal(entries.at(-7), previousRelease199MigrationName);
+  assert.equal(entries.at(-6), previousRelease200MigrationName);
+  assert.equal(entries.at(-5), previousRelease201MigrationName);
+  assert.equal(entries.at(-4), previousRelease202MigrationName);
+  assert.equal(entries.at(-3), previousRelease203MigrationName);
+  assert.equal(entries.at(-2), previousRelease204MigrationName);
   assert.equal(entries.at(-1), releaseMigrationName);
   assert.equal(
-    sha256(`${rows.slice(0, -19).join("\n")}\n`),
+    sha256(`${rows.slice(0, -20).join("\n")}\n`),
     preterminalManifestDigest,
   );
 
@@ -464,6 +467,25 @@ test("CURRENT204 preserves the reviewed CURRENT185 digest and advances readiness
   );
   assert.match(release203Sql, /not CURRENT_203/u);
 
+  const release204Sql = normalizedBytes(
+    await readFile(
+      path.join(
+        migrationsRoot,
+        previousRelease204MigrationName,
+        "migration.sql",
+      ),
+    ),
+  ).toString("utf8");
+  assert.match(
+    release204Sql,
+    /ALTER TABLE public\."LangameStaffUser"\s+ADD COLUMN "missingFromSourceAt" TIMESTAMP\(3\)/u,
+  );
+  assert.match(
+    release204Sql,
+    /migration_count IS DISTINCT FROM 204[\s\S]*20261113090000_staff_langame_auto_link/u,
+  );
+  assert.match(release204Sql, /not CURRENT_204/u);
+
   const releaseSql = normalizedBytes(
     await readFile(
       path.join(migrationsRoot, releaseMigrationName, "migration.sql"),
@@ -471,11 +493,7 @@ test("CURRENT204 preserves the reviewed CURRENT185 digest and advances readiness
   ).toString("utf8");
   assert.match(
     releaseSql,
-    /ALTER TABLE public\."LangameStaffUser"\s+ADD COLUMN "missingFromSourceAt" TIMESTAMP\(3\)/u,
-  );
-  assert.match(
-    releaseSql,
-    /ADD COLUMN "externalLinkSource" TEXT,\s+ADD COLUMN "externalLinkedAt" TIMESTAMP\(3\)/u,
+    /ALTER TABLE public\."StaffChecklistRun"\s+ADD COLUMN "escalatedAt" TIMESTAMP\(3\)/u,
   );
   assert.match(
     releaseSql,
@@ -483,24 +501,25 @@ test("CURRENT204 preserves the reviewed CURRENT185 digest and advances readiness
   );
   assert.match(
     releaseSql,
-    /migration_count IS DISTINCT FROM 204[\s\S]*20261113090000_staff_langame_auto_link/u,
+    /migration_count IS DISTINCT FROM 205[\s\S]*20261113120000_staff_checklist_escalated_at/u,
   );
   assert.match(
     releaseSql,
-    /20261112170000_guest_crm_lead_stage',\s*'20261113090000_staff_langame_auto_link'/u,
+    /20261113090000_staff_langame_auto_link',\s*'20261113120000_staff_checklist_escalated_at'/u,
   );
-  assert.match(releaseSql, /not CURRENT_204/u);
-  // Expand only: nullable columns on LangameStaffUser and StaffMember.
+  assert.match(releaseSql, /not CURRENT_205/u);
+  // Expand only: a nullable column on StaffChecklistRun; the one UPDATE fills
+  // it for runs that are escalated now.
   assert.doesNotMatch(releaseSql, /\b(?:DROP|TRUNCATE|DELETE\s+FROM)\b/iu);
-  assert.doesNotMatch(releaseSql, /UPDATE\s+public\./iu);
+  assert.doesNotMatch(releaseSql, /UPDATE\s+public\."(?!StaffChecklistRun")/iu);
   assert.doesNotMatch(
     releaseSql,
-    /ALTER TABLE public\."(?!LangameStaffUser"|StaffMember")/u,
+    /ALTER TABLE public\."(?!StaffChecklistRun")/u,
   );
   assert.doesNotMatch(releaseSql, /^\s*(?:BEGIN|COMMIT);/imu);
 });
 
-test("the active worker repository consumes the exact CURRENT204 receipt", async () => {
+test("the active worker repository consumes the exact CURRENT205 receipt", async () => {
   const repository = await readFile(
     path.join(
       repositoryRoot,
@@ -513,7 +532,7 @@ test("the active worker repository consumes the exact CURRENT204 receipt", async
     "utf8",
   );
   assert.match(repository, new RegExp(releaseMigrationName, "u"));
-  assert.match(repository, /CURRENT_MIGRATION_COUNT = 204 as const/u);
+  assert.match(repository, /CURRENT_MIGRATION_COUNT = 205 as const/u);
   assert.match(repository, new RegExp(preterminalManifestDigest, "u"));
   assert.match(
     repository,
@@ -525,7 +544,7 @@ test("the active worker repository consumes the exact CURRENT204 receipt", async
   );
 });
 
-test("the legacy inventory pins the CURRENT204 worker function definition", async () => {
+test("the legacy inventory pins the CURRENT205 worker function definition", async () => {
   const inventory = await readFile(
     path.join(
       databaseRoot,

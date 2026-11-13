@@ -88,6 +88,7 @@ function createHarness(
       prisma,
       tenantContext,
       freshStoreScope as unknown as FreshStoreScopeService,
+      {} as never,
     ),
     recordFindMany,
     storeFindMany,
@@ -221,7 +222,12 @@ describe('StaffDisciplineService report period', () => {
 
 describe('Staff discipline period filters', () => {
   function createService() {
-    return new StaffDisciplineService({} as never, {} as never, {} as never);
+    return new StaffDisciplineService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
   }
 
   function resolveFilters(

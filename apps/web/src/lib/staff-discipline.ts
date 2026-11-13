@@ -1,5 +1,10 @@
 import { getApiUrl, getAuthHeaders } from "./api";
 import type { UserRole } from "./roles";
+import type {
+  AdminRatingCounts,
+  AdminRatingItem,
+  AdminRatingView,
+} from "./staff-admin-rating";
 import type { StaffTaskStore } from "./staff-tasks";
 
 export type StaffDisciplineRiskLevel = "LOW" | "MEDIUM" | "HIGH";
@@ -126,6 +131,14 @@ export type StaffAdministratorRating = {
     }>;
     score: number;
   };
+  /** The administrator rating behind `score`; the criteria above are context. */
+  rating: {
+    items: AdminRatingItem[];
+    counts: AdminRatingCounts;
+    averageCheck: AdminRatingView["averageCheck"];
+    linkedToLangame: boolean;
+    shiftsTotal: number;
+  } | null;
 };
 
 export type StaffAdministratorRatingsReport = {

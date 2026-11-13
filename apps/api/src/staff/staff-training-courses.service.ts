@@ -30,6 +30,9 @@ const roleScopes = [
   'STANDARDS_MANAGER',
 ] as const;
 const stepTypes = ['ARTICLE', 'TEXT', 'LINK', 'TASK'] as const;
+// A course tab is a formatted page (sanitised HTML in the web editor), so the
+// limit is per tab and generous; longer text is refused, never cut mid-tag.
+const COURSE_STEP_CONTENT_MAX_LENGTH = 60000;
 
 export type StaffTrainingCourseStatus = (typeof courseStatuses)[number];
 export type StaffTrainingRoleScope = (typeof roleScopes)[number];
@@ -601,12 +604,16 @@ export class StaffTrainingCoursesService {
         throw new BadRequestException('Course step text is required');
       }
 
+      if (content && content.length > COURSE_STEP_CONTENT_MAX_LENGTH) {
+        throw new BadRequestException('Course step text is too long');
+      }
+
       steps.push({
         id: this.normalizeOptionalString(record.id) ?? `step-${index + 1}`,
         title: title.slice(0, 180),
         type,
         articleId: type === 'ARTICLE' ? articleId : null,
-        content: content?.slice(0, 6000) ?? null,
+        content: content ?? null,
         url: url?.slice(0, 2000) ?? null,
         required: this.normalizeBoolean(record.required, true),
       });

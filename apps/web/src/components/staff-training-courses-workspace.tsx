@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
+import { KnowledgeArticleRichText } from "@/components/staff-knowledge-rich-text";
 import { StaffMaterialPreview } from "@/components/staff-material-preview";
 import type {
   StaffTrainingCourse,
@@ -847,9 +848,10 @@ function CoursePreview({
                 </p>
               ) : null}
               {step.content ? (
-                <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                  {step.content}
-                </p>
+                <KnowledgeArticleRichText
+                  value={step.content}
+                  className="mt-2 text-sm"
+                />
               ) : null}
               {step.url ? (
                 <a

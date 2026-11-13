@@ -313,7 +313,7 @@ export function courseToLearningDocument(
     id: course.id,
     kind: "COURSE",
     title: course.title,
-    href: `/staff/training-courses?courseId=${encodeURIComponent(course.id)}`,
+    href: `/staff/learning/courses/${encodeURIComponent(course.id)}`,
     updatedAt: course.updatedAt,
     roleScope: course.roleScope,
     isDraft,

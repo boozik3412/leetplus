@@ -882,6 +882,7 @@ function resolveStaffPathCapability(href: string): Capability {
 
   if (
     path.startsWith("/staff/training-courses") ||
+    path.startsWith("/staff/learning/courses") ||
     path.startsWith("/staff/training-profiles") ||
     path.startsWith("/staff/readiness-report") ||
     path.startsWith("/staff/onboarding") ||

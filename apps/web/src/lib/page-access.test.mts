@@ -70,6 +70,7 @@ const guardedPages = [
   ["(app)/staff/directory/page.tsx", "/staff/directory"],
   ["(app)/staff/knowledge-base/page.tsx", "/staff/knowledge-base"],
   ["(app)/staff/learning/page.tsx", "/staff/learning"],
+  ["(app)/staff/learning/courses/[id]/page.tsx", "/staff/learning/courses"],
   ["(app)/staff/onboarding/page.tsx", "/staff/onboarding"],
   ["(app)/staff/operations-dashboard/page.tsx", "/staff/operations-dashboard"],
   ["(app)/staff/readiness-report/page.tsx", "/staff/readiness-report"],

@@ -84,7 +84,7 @@ test("a course becomes a document with tabs, a task and its audience", () => {
   const document = courseToLearningDocument(course());
 
   assert.equal(document.kind, "COURSE");
-  assert.equal(document.href, "/staff/training-courses?courseId=course-1");
+  assert.equal(document.href, "/staff/learning/courses/course-1");
   assert.match(document.meta, /^Курс · 2 вкладки · /);
   assert.equal(document.note, "Администраторы");
   assert.deepEqual(document.badge, { label: "Обязательный", tone: "green" });

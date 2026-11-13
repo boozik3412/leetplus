@@ -233,7 +233,7 @@ async function createFromTemplate(
   const created = (await response.json()) as { id: string };
 
   return template.kind === "COURSE"
-    ? `/staff/training-courses?courseId=${encodeURIComponent(created.id)}`
+    ? `/staff/learning/courses/${encodeURIComponent(created.id)}`
     : `/staff/knowledge-base?articleId=${encodeURIComponent(created.id)}`;
 }
 

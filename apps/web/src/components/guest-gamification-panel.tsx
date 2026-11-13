@@ -255,6 +255,7 @@ type Props = {
     canViewGuestPii: boolean;
     isPlatformAdmin: boolean;
     canRunRewardMaterializer: boolean;
+    canUseTestRun: boolean;
   };
 };
 
@@ -301,7 +302,7 @@ type PromoBannerDragState = {
   offsetY: number;
 };
 
-const tabs: Array<{ id: TabId; label: string }> = [
+const allTabs: Array<{ id: TabId; label: string }> = [
   { id: "overview", label: "Обзор" },
   { id: "statistics", label: "Статистика" },
   { id: "effect", label: "Эффект" },
@@ -886,6 +887,10 @@ export function GuestGamificationPanel({
 }: Props) {
   const [workspace, setWorkspace] = useState(initialWorkspace);
   const [activeTab, setActiveTab] = useState<TabId>(initialTab);
+  // «Тест запуска» is shown to the owner and platform admins only.
+  const tabs = allTabs.filter(
+    (tab) => tab.id !== "testRun" || access.canUseTestRun,
+  );
   const [editorMode, setEditorMode] = useState<EditorMode>(initialEditorMode);
   const [directoryGuests, setDirectoryGuests] = useState(guests);
   const [directoryLeads, setDirectoryLeads] = useState(leads);
@@ -2444,6 +2449,7 @@ export function GuestGamificationPanel({
               canOperateLedger={access.canOperateLedger}
               canManageRules={access.canManageRules}
               canViewIntegrationReadiness={access.isPlatformAdmin}
+              canOpenTestRun={access.canUseTestRun}
               diagnosticsLead={
                 <>
                   {access.isPlatformAdmin ? (
@@ -2663,7 +2669,7 @@ export function GuestGamificationPanel({
             />
           ) : null}
 
-          {activeTab === "testRun" ? (
+          {activeTab === "testRun" && access.canUseTestRun ? (
             <DryRunTab
               form={dryRunForm}
               setForm={setDryRunForm}

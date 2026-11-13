@@ -195,7 +195,11 @@ export class GuestGamificationController {
     });
   }
 
+  // «Тест запуска» is an owner/platform tool: network managers and lower
+  // roles must not run it even with gamification capabilities.
   @Post('dry-run')
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
   dryRun(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: GuestGameDryRunDto,
@@ -204,6 +208,8 @@ export class GuestGamificationController {
   }
 
   @Get('facts')
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
   getSnapshotFacts(
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GuestGameSnapshotFactsResult> {
@@ -428,6 +434,8 @@ export class GuestGamificationController {
   }
 
   @Post('process-event')
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
   processEvent(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: GuestGameProcessEventDto,
@@ -444,6 +452,8 @@ export class GuestGamificationController {
   }
 
   @Post('pipeline/run')
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
   runSnapshotPipeline(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: GuestGamePipelineRunDto,

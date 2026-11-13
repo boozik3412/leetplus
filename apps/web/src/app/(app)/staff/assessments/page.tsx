@@ -113,10 +113,11 @@ export default async function StaffAssessmentsPage({
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
-          current="Аттестации"
+          current="Тесты и аттестации"
           items={[
             { href: "/dashboard", label: "Дашборд" },
             { href: "/staff/tasks", label: "Персонал" },
+            { href: "/staff/learning", label: "Обучение и база знаний" },
           ]}
         />
 
@@ -135,10 +136,10 @@ export default async function StaffAssessmentsPage({
             </p>
           </div>
           <Link
-            href="/staff/training-courses"
+            href="/staff/learning?type=tests"
             className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
           >
-            Курсы обучения
+            Обучение и база знаний
           </Link>
         </header>
 
@@ -235,7 +236,10 @@ export default async function StaffAssessmentsPage({
         </section>
 
         <section className="mt-6">
-          <StaffAssessmentsWorkspace report={report} />
+          <StaffAssessmentsWorkspace
+            report={report}
+            initialAssessmentId={searchParam(params.assessmentId) ?? null}
+          />
         </section>
       </div>
     </main>

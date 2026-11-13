@@ -1,6 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
+import { useUnsavedDraftPrompt } from "@/hooks/use-unsaved-draft-prompt";
 import {
   type StaffDirectoryMember,
   type StaffDirectoryReport,
@@ -185,6 +194,9 @@ export function StaffDirectoryWorkspace({
   const [draft, setDraft] = useState<DraftMember>(() =>
     report.rows[0] ? draftFromMember(report.rows[0]) : emptyDraft(),
   );
+  // What the card looked like when it was opened or last saved: closing it
+  // with anything else asks whether to keep the changes.
+  const [savedDraft, setSavedDraft] = useState<DraftMember>(draft);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [activeShiftReport, setActiveShiftReport] =
@@ -195,6 +207,11 @@ export function StaffDirectoryWorkspace({
   );
   const [langameSearch, setLangameSearch] = useState("");
   const [isCardOpen, setIsCardOpen] = useState(false);
+  const backdropPressRef = useRef(false);
+  const hasUnsavedChanges =
+    isCardOpen &&
+    report.canManageDirectory &&
+    JSON.stringify(draft) !== JSON.stringify(savedDraft);
 
   const selectedMember = useMemo(
     () => members.find((member) => member.id === draft.id) ?? null,
@@ -254,22 +271,6 @@ export function StaffDirectoryWorkspace({
       })
       .slice(0, 8);
   }, [langameSearch, report.langameUsers, selectedStore]);
-
-  useEffect(() => {
-    if (!isCardOpen) {
-      return undefined;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsCardOpen(false);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isCardOpen]);
 
   useEffect(() => {
     const storeId = draft.storeId;
@@ -347,7 +348,9 @@ export function StaffDirectoryWorkspace({
   }
 
   function openMemberCard(member: StaffDirectoryMember | null) {
-    setDraft(member ? draftFromMember(member) : emptyDraft());
+    const next = member ? draftFromMember(member) : emptyDraft();
+    setDraft(next);
+    setSavedDraft(next);
     setMessage(null);
     openCardWindow();
   }
@@ -403,7 +406,8 @@ export function StaffDirectoryWorkspace({
     openCardWindow();
   }
 
-  async function saveMember() {
+  /** Saves the card; returns the error text, or null once it is saved. */
+  async function saveMember(): Promise<string | null> {
     setPending(true);
     setMessage(null);
 
@@ -472,16 +476,73 @@ export function StaffDirectoryWorkspace({
           ? current.map((member) => (member.id === saved.id ? saved : member))
           : [saved, ...current];
       });
-      setDraft(draftFromMember(saved));
+      const savedMember = draftFromMember(saved);
+      setDraft(savedMember);
+      setSavedDraft(savedMember);
       setMessage("Карточка сотрудника сохранена.");
+      return null;
     } catch (error) {
-      setMessage(
+      const text =
         error instanceof Error
           ? error.message
-          : "Не удалось сохранить сотрудника",
-      );
+          : "Не удалось сохранить сотрудника";
+      setMessage(text);
+      return text;
     } finally {
       setPending(false);
+    }
+  }
+
+  const { prompt: unsavedChangesPrompt, guardAction } = useUnsavedDraftPrompt({
+    enabled: hasUnsavedChanges,
+    onSaveDraft: async () => {
+      const error = await saveMember();
+      if (error) {
+        throw new Error(error);
+      }
+    },
+    title: "Сохранить изменения в карточке?",
+    message: "В карточке сотрудника есть несохранённые изменения.",
+    saveLabel: "Сохранить и закрыть",
+    discardLabel: "Не сохранять",
+    stayLabel: "Отмена",
+  });
+
+  const requestCloseCard = useCallback(() => {
+    guardAction(() => {
+      setDraft(savedDraft);
+      setIsCardOpen(false);
+    });
+  }, [guardAction, savedDraft]);
+
+  useEffect(() => {
+    if (!isCardOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        requestCloseCard();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isCardOpen, requestCloseCard]);
+
+  // Closes on a click in the empty area around the card. Both the press and
+  // the release must land there, so selecting text and dragging out of a
+  // field does not close it.
+  function handleBackdropMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
+    backdropPressRef.current = event.target === event.currentTarget;
+  }
+
+  function handleBackdropClick(event: ReactMouseEvent<HTMLDivElement>) {
+    const pressedOnBackdrop = backdropPressRef.current;
+    backdropPressRef.current = false;
+    if (pressedOnBackdrop && event.target === event.currentTarget) {
+      requestCloseCard();
     }
   }
 
@@ -490,6 +551,8 @@ export function StaffDirectoryWorkspace({
       className="fixed inset-0 z-50 overflow-y-auto bg-zinc-950/60 px-3 py-6 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
+      onMouseDown={handleBackdropMouseDown}
+      onClick={handleBackdropClick}
     >
       <section className="mx-auto max-w-5xl rounded-lg border border-zinc-200 bg-white p-4 shadow-xl dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -503,7 +566,7 @@ export function StaffDirectoryWorkspace({
           </div>
           <button
             type="button"
-            onClick={() => setIsCardOpen(false)}
+            onClick={requestCloseCard}
             className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
           >
             Закрыть
@@ -903,7 +966,7 @@ export function StaffDirectoryWorkspace({
           {report.canManageDirectory ? (
             <button
               type="button"
-              onClick={saveMember}
+              onClick={() => void saveMember()}
               disabled={pending || !draft.displayName.trim()}
               className="w-full rounded-md bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -1074,6 +1137,7 @@ export function StaffDirectoryWorkspace({
         </section>
       </div>
       {cardPanel}
+      {unsavedChangesPrompt}
     </>
   );
 }

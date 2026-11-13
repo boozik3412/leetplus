@@ -2953,6 +2953,34 @@ export class GuestsService {
   }
 
   /**
+   * Name and phone of guests as the guest card shows them (decrypted, else
+   * masked), for the list of game completions of «Схема клуба». The caller
+   * checks `view_guests` before calling.
+   */
+  async floorPlanGuestContacts(
+    tenantId: string,
+    guestIds: readonly string[],
+  ): Promise<Map<string, { name: string; phone: string | null }>> {
+    const ids = Array.from(new Set(guestIds));
+    const contacts = new Map<string, { name: string; phone: string | null }>();
+    if (ids.length === 0) return contacts;
+    const guests = await this.prisma.guest.findMany({
+      where: { tenantId, id: { in: ids } },
+      select: this.guestSelect(),
+    });
+    for (const guest of guests) {
+      contacts.set(guest.id, {
+        name: this.guestDisplayName(guest, true),
+        phone:
+          this.decryptSensitiveValue(guest.phoneEncrypted) ??
+          guest.phoneMasked ??
+          null,
+      });
+    }
+    return contacts;
+  }
+
+  /**
    * Rows of the guests sitting in a club now, for the hints of «Схема клуба»:
    * the same dashboard rows as the guest list (segment, RFM, CRM, bonus load,
    * game profile brief). Game facts are read even when the viewer lacks

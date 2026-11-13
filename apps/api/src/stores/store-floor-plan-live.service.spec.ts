@@ -1,4 +1,4 @@
-import { IntegrationProvider, UserRole } from '@prisma/client';
+import { IntegrationProvider, Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   StoreFloorPlanLiveService,
@@ -38,10 +38,10 @@ describe('StoreFloorPlanLiveService', () => {
     guestGameLootBox: { findMany: jest.Mock };
     guestGameSeason: { findMany: jest.Mock };
     guestGamePromoCard: { findMany: jest.Mock };
-    guestGameReward: { count: jest.Mock };
+    guestGameReward: { count: jest.Mock; findMany?: jest.Mock };
     guest: { findFirst: jest.Mock };
   };
-  let guests: { getGuest: jest.Mock };
+  let guests: { getGuest: jest.Mock; floorPlanGuestContacts?: jest.Mock };
   let scope: { resolveRequestedStoreIds: jest.Mock };
   let settings: { resolveTenantAccess: jest.Mock };
   let client: Record<string, jest.Mock>;
@@ -653,6 +653,164 @@ describe('StoreFloorPlanLiveService', () => {
     expect(prisma.guest.findFirst).not.toHaveBeenCalled();
     expect(guests.getGuest).not.toHaveBeenCalled();
     expect(client.getDiagnosticEndpoint).not.toHaveBeenCalled();
+  });
+
+  describe('game completions («Подробнее»)', () => {
+    const reward = (overrides: Record<string, unknown>) => ({
+      id: 'reward-1',
+      guestId: null,
+      qualifiedAt: new Date('2026-11-10T07:40:00.000Z'),
+      status: 'PENDING',
+      source: 'MISSION',
+      rewardType: 'BONUS_BALANCE',
+      rewardAmount: new Prisma.Decimal(500),
+      rewardLabel: '500 бонусов на баланс',
+      rewardRarityLabel: null,
+      paidAt: null,
+      expiresAt: null,
+      claimExpiresAt: null,
+      note: null,
+      profile: null,
+      mission: null,
+      lootBox: null,
+      season: null,
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      prisma.store.findFirst.mockImplementation(
+        ({ select }: { select: Record<string, unknown> }) =>
+          Promise.resolve(select.name ? { name: '1337-Пушкинская' } : store),
+      );
+      prisma.guestGameReward.findMany = jest.fn().mockResolvedValue([
+        reward({
+          id: 'reward-mission',
+          guestId: 'guest-501',
+          mission: {
+            name: '7 ДНЕЙ',
+            missionType: 'VISIT_STREAK',
+            triggerKind: 'CHECK_IN',
+            conditions: {
+              presentation: { description: 'Приходи 7 дней подряд' },
+            },
+          },
+        }),
+        reward({
+          id: 'reward-case',
+          qualifiedAt: new Date('2026-11-10T07:00:00.000Z'),
+          status: 'PAID',
+          paidAt: new Date('2026-11-10T07:05:00.000Z'),
+          source: 'LOOT_BOX',
+          rewardLabel: '100 бонусов',
+          rewardAmount: new Prisma.Decimal(100),
+          rewardRarityLabel: 'Редкая',
+          profile: {
+            guestId: null,
+            displayName: 'Пётр',
+            contactMasked: '+7 *** ***-12-34',
+          },
+          lootBox: { name: 'КЕЙС «WEEKEND»', triggerKind: 'MANUAL_OPEN' },
+        }),
+      ]);
+      guests.floorPlanGuestContacts = jest
+        .fn()
+        .mockResolvedValue(
+          new Map([
+            ['guest-501', { name: 'Иванов Иван', phone: '+79120000000' }],
+          ]),
+        );
+      service = new StoreFloorPlanLiveService(
+        prisma as never,
+        scope as never,
+        settings as never,
+        client as never,
+        guests as never,
+      );
+    });
+
+    it('lists the rewards of the open shift with the guest', async () => {
+      const list = await service.getGameCompletions('store-kh', user, NOW);
+
+      const [query] = prisma.guestGameReward.findMany!.mock.calls[0] as [
+        { where: Record<string, unknown> },
+      ];
+      expect(query.where).toEqual({
+        tenantId: 'tenant-demo',
+        storeId: 'store-kh',
+        status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+        qualifiedAt: {
+          gte: new Date('2026-11-10T05:00:00.000Z'),
+          lte: NOW,
+        },
+      });
+      expect(list).toMatchObject({
+        storeId: 'store-kh',
+        storeName: '1337-Пушкинская',
+        timeZone: TZ,
+        period: 'SHIFT',
+        since: '2026-11-10T05:00:00.000Z',
+        guestAccess: 'AVAILABLE',
+        truncated: false,
+      });
+      expect(guests.floorPlanGuestContacts).toHaveBeenCalledWith(
+        'tenant-demo',
+        ['guest-501'],
+      );
+      expect(list.items).toEqual([
+        {
+          id: 'reward-mission',
+          qualifiedAt: '2026-11-10T07:40:00.000Z',
+          kind: 'MISSION',
+          triggerKind: 'CHECK_IN',
+          title: '7 ДНЕЙ',
+          description: 'Приходи 7 дней подряд',
+          reward: {
+            label: '500 бонусов на баланс',
+            type: 'BONUS_BALANCE',
+            amount: 500,
+            status: 'PENDING',
+            paidAt: null,
+            expiresAt: null,
+          },
+          guest: {
+            id: 'guest-501',
+            name: 'Иванов Иван',
+            phone: '+79120000000',
+          },
+        },
+        {
+          id: 'reward-case',
+          qualifiedAt: '2026-11-10T07:00:00.000Z',
+          kind: 'CASE',
+          triggerKind: 'MANUAL_OPEN',
+          title: 'КЕЙС «WEEKEND»',
+          description: 'Выпало из кейса · Редкая',
+          reward: {
+            label: '100 бонусов',
+            type: 'BONUS_BALANCE',
+            amount: 100,
+            status: 'PAID',
+            paidAt: '2026-11-10T07:05:00.000Z',
+            expiresAt: null,
+          },
+          guest: { id: null, name: 'Пётр', phone: '+7 *** ***-12-34' },
+        },
+      ]);
+    });
+
+    it('hides guest names and phones from a role without guests', async () => {
+      const manager: AuthenticatedUser = {
+        ...user,
+        role: UserRole.STANDARDS_MANAGER,
+        permissions: ['view_club_scheme'],
+      };
+      const list = await service.getGameCompletions('store-kh', manager, NOW);
+
+      expect(list.guestAccess).toBe('NO_CAPABILITY');
+      expect(list.items.map((item) => item.guest)).toEqual([null, null]);
+      expect(guests.floorPlanGuestContacts).not.toHaveBeenCalled();
+      expect(JSON.stringify(list)).not.toContain('Пётр');
+    });
   });
 
   it('has no session for a free computer', async () => {

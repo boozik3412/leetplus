@@ -1280,7 +1280,7 @@ function buildStoreOpportunity(summary: DashboardSummary) {
     title: `Главная возможность: поднять долю товаров в ${opportunity.storeName}`,
     description:
       opportunity.gapPoints > 0
-        ? `Клуб ниже медианы сети на ${formatDecimal(opportunity.gapPoints)} п.п. Ориентир при достижении медианы — ${formatSignedRubles(opportunity.revenueOpportunity)} за выбранный период.`
+        ? `Клуб ниже медианы сети на ${formatDecimal(opportunity.gapPoints)}%. Ориентир при достижении медианы — ${formatSignedRubles(opportunity.revenueOpportunity)} за выбранный период.`
         : `Доля товарной выручки — ${formatPercent(opportunity.currentSharePercent ?? 0)}. Проверьте наличие хитов и предложение в часы максимального трафика.`,
     href: "/dashboard/revenue-by-club",
   };
@@ -1320,7 +1320,7 @@ function formatPointsDelta(value: number | null) {
     return "нет сопоставимого периода";
   }
 
-  return `${value >= 0 ? "+" : ""}${formatDecimal(value)} п.п. к прошлому периоду`;
+  return `${value >= 0 ? "+" : ""}${formatDecimal(value)}% к прошлому периоду`;
 }
 
 function formatCompactRubles(value: number) {

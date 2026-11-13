@@ -187,10 +187,10 @@ function formatDeltaPoints(value: number | null) {
   }
 
   if (value === 0) {
-    return "0 п.п.";
+    return "0%";
   }
 
-  return `${value > 0 ? "+" : ""}${value.toFixed(1)} п.п.`;
+  return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
 function getDailyWeekday(dateValue: string, period: string) {

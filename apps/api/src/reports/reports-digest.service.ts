@@ -926,7 +926,7 @@ export class ReportsDigestService {
     const delta = current - previous;
     const sign = delta > 0 ? '+' : '';
 
-    return `${sign}${this.formatNumber(delta, 1)} п.п.`;
+    return `${sign}${this.formatNumber(delta, 1)}%`;
   }
 
   private formatNumber(value: number, maximumFractionDigits = 0) {

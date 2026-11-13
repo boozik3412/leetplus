@@ -24,7 +24,7 @@ const demoMetrics = [
   {
     label: "Повторные визиты",
     value: "42%",
-    note: "+6 п.п. после CRM-контактов",
+    note: "+6% после CRM-контактов",
     tone: "amber",
   },
 ];

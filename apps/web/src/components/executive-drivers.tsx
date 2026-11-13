@@ -135,7 +135,7 @@ function factorChange(
     const points = current - previous;
     return {
       tone: tone(points),
-      text: `${formatSigned(points, 1)} п.п.`,
+      text: `${formatSigned(points, 1)}%`,
       before: `было ${formatFactor(factor, previous)}`,
     };
   }

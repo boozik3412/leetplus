@@ -108,7 +108,7 @@ function change(
   if (delta === null) return null;
   return {
     text: item.points
-      ? `${formatSigned(delta, 1)} п.п.`
+      ? `${formatSigned(delta, 1)}%`
       : formatSigned(delta, 1, "%"),
     tone:
       Math.abs(delta) < 1e-9

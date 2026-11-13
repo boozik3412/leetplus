@@ -22,7 +22,7 @@
     "test:langame-simple-onboarding": "node --test --experimental-strip-types src/lib/langame-simple-onboarding-bff.test.mts src/lib/langame-sync-status.test.mts src/lib/langame-connections.test.mts src/lib/guest-sync-observation.test.mts",
     "test:employee-invite-current189-bff-candidate": "node --test --experimental-strip-types src/lib/employee-invite-current189-bff-candidate.test.mts",
     "test:owner-invite-link-bff-boundary": "node --test --experimental-strip-types src/lib/owner-invite-link-bff-boundary.test.mts",
-    "test:guest-insights": "node --test --experimental-strip-types src/lib/guest-insights.test.mts src/lib/guest-game-effect.test.mts src/lib/manual-rewards.test.mts src/lib/board.test.mts src/lib/crm-leads.test.mts src/lib/staff-task-moves.test.mts src/lib/checklist-today.test.mts src/lib/promo-bundle-wizard.test.mts",
+    "test:guest-insights": "node --test --experimental-strip-types src/lib/guest-insights.test.mts src/lib/guest-game-effect.test.mts src/lib/manual-rewards.test.mts src/lib/board.test.mts src/lib/crm-leads.test.mts src/lib/staff-task-moves.test.mts src/lib/staff-admin-rating.test.mts src/lib/checklist-today.test.mts src/lib/promo-bundle-wizard.test.mts",
     "test:daily-report": "node --test --experimental-strip-types src/lib/daily-report-view.test.mts",
     "test:ui-copy": "node --test --experimental-strip-types src/lib/ui-copy-jargon.test.mts src/lib/loading-region-copy.test.mts",
     "test:assortment": "node --test --experimental-strip-types src/lib/abc-rating.test.mts src/lib/stock-value.test.mts src/lib/assortment-report-query.test.mts src/lib/assortment-risk.test.mts src/lib/money-loss-report.test.mts"

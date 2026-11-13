@@ -140,6 +140,8 @@ export type StaffOperationsDashboard = {
   clubs: StaffOperationsRating[];
   /** Administrator rating, the same as on «Рейтинг администраторов». */
   administrators: AdminRatingView[];
+  /** The viewer may forgive items and give bonuses / penalties. */
+  canAdjustAdministratorRating?: boolean;
   staffControl: StaffOperationsStaffControl;
   recurringIssues: StaffOperationsRecurringIssue[];
   latestRisks: StaffOperationsRiskItem[];

@@ -249,7 +249,10 @@ export default async function StaffOperationsDashboardPage({
         </section>
 
         <div className="mt-6">
-          <AdminRatingPanel rows={dashboard.administrators} />
+          <AdminRatingPanel
+            rows={dashboard.administrators}
+            canAdjust={dashboard.canAdjustAdministratorRating === true}
+          />
         </div>
 
         <section className="mt-6 grid gap-4 lg:grid-cols-2">

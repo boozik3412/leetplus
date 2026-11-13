@@ -7,6 +7,7 @@ import {
   adminRatingShiftKind,
   buildClubAverages,
   computeAdminRating,
+  type AdminRatingAdjustment,
   type AdminRatingDisciplineRecord,
   type AdminRatingEscalation,
   type AdminRatingResult,
@@ -84,98 +85,122 @@ export class StaffAdminRatingService {
     const storeWhere = query.storeId ? { storeId: query.storeId } : {};
     const period = { gte: query.start, lte: query.end };
 
-    const [stores, members, shifts, runs, records, tasks] = await Promise.all([
-      this.prisma.store.findMany({
-        where: { tenantId },
-        select: { id: true, timeZone: true, externalDomain: true },
-      }),
-      this.prisma.staffMember.findMany({
-        where: {
-          tenantId,
-          userId: { in: userIds },
-          externalDomain: { not: null },
-          externalUserId: { not: null },
-        },
-        select: { userId: true, externalDomain: true, externalUserId: true },
-      }),
-      // Every shift of the clubs: the club average needs the other
-      // administrators' shifts too.
-      this.prisma.guestWorkingShift.findMany({
-        where: {
-          tenantId,
-          startedAt: period,
-          middleCheck: { gt: 0 },
-          ...storeWhere,
-        },
-        select: {
-          storeId: true,
-          externalDomain: true,
-          externalUserId: true,
-          startedAt: true,
-          middleCheck: true,
-        },
-        take: ROW_LIMIT,
-      }),
-      this.prisma.staffChecklistRun.findMany({
-        where: {
-          tenantId,
-          assignedToUserId: { in: userIds },
-          ...storeWhere,
-          OR: [
-            { escalatedAt: period },
-            // Escalated by a release that did not record escalatedAt yet.
-            { escalatedAt: null, status: 'ESCALATED', updatedAt: period },
-          ],
-        },
-        select: {
-          id: true,
-          title: true,
-          assignedToUserId: true,
-          escalatedAt: true,
-          updatedAt: true,
-          failedItems: true,
-          store: { select: { name: true } },
-        },
-        take: ROW_LIMIT,
-      }),
-      this.prisma.staffDisciplineRecord.findMany({
-        where: {
-          tenantId,
-          userId: { in: userIds },
-          status: 'ACTIVE',
-          occurredAt: period,
-          ...storeWhere,
-        },
-        select: {
-          id: true,
-          userId: true,
-          level: true,
-          ruleTitleSnapshot: true,
-          categorySnapshot: true,
-          amount: true,
-          occurredAt: true,
-        },
-        take: ROW_LIMIT,
-      }),
-      this.prisma.staffTask.findMany({
-        where: {
-          tenantId,
-          assignedToUserId: { in: userIds },
-          dueAt: period,
-          status: { not: 'CANCELED' },
-          ...storeWhere,
-        },
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          dueAt: true,
-          completedAt: true,
-          assignedToUserId: true,
-        },
-        take: ROW_LIMIT,
-      }),
-    ]);
+    const [stores, members, shifts, runs, records, tasks, adjustments] =
+      await Promise.all([
+        this.prisma.store.findMany({
+          where: { tenantId },
+          select: { id: true, timeZone: true, externalDomain: true },
+        }),
+        this.prisma.staffMember.findMany({
+          where: {
+            tenantId,
+            userId: { in: userIds },
+            externalDomain: { not: null },
+            externalUserId: { not: null },
+          },
+          select: { userId: true, externalDomain: true, externalUserId: true },
+        }),
+        // Every shift of the clubs: the club average needs the other
+        // administrators' shifts too.
+        this.prisma.guestWorkingShift.findMany({
+          where: {
+            tenantId,
+            startedAt: period,
+            middleCheck: { gt: 0 },
+            ...storeWhere,
+          },
+          select: {
+            storeId: true,
+            externalDomain: true,
+            externalUserId: true,
+            startedAt: true,
+            middleCheck: true,
+          },
+          take: ROW_LIMIT,
+        }),
+        this.prisma.staffChecklistRun.findMany({
+          where: {
+            tenantId,
+            assignedToUserId: { in: userIds },
+            ...storeWhere,
+            OR: [
+              { escalatedAt: period },
+              // Escalated by a release that did not record escalatedAt yet.
+              { escalatedAt: null, status: 'ESCALATED', updatedAt: period },
+            ],
+          },
+          select: {
+            id: true,
+            title: true,
+            assignedToUserId: true,
+            escalatedAt: true,
+            updatedAt: true,
+            failedItems: true,
+            store: { select: { name: true } },
+          },
+          take: ROW_LIMIT,
+        }),
+        this.prisma.staffDisciplineRecord.findMany({
+          where: {
+            tenantId,
+            userId: { in: userIds },
+            status: 'ACTIVE',
+            occurredAt: period,
+            ...storeWhere,
+          },
+          select: {
+            id: true,
+            userId: true,
+            level: true,
+            ruleTitleSnapshot: true,
+            categorySnapshot: true,
+            amount: true,
+            occurredAt: true,
+          },
+          take: ROW_LIMIT,
+        }),
+        this.prisma.staffTask.findMany({
+          where: {
+            tenantId,
+            assignedToUserId: { in: userIds },
+            dueAt: period,
+            status: { not: 'CANCELED' },
+            ...storeWhere,
+          },
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            dueAt: true,
+            completedAt: true,
+            assignedToUserId: true,
+          },
+          take: ROW_LIMIT,
+        }),
+        // Reviewer decisions: bonuses and penalties dated in the period, and
+        // every forgiveness (the forgiven item itself is filtered by period).
+        this.prisma.staffAdminRatingAdjustment.findMany({
+          where: {
+            tenantId,
+            userId: { in: userIds },
+            status: 'ACTIVE',
+            OR: [{ kind: 'FORGIVE' }, { occurredAt: period }],
+          },
+          select: {
+            id: true,
+            userId: true,
+            kind: true,
+            points: true,
+            targetKind: true,
+            targetId: true,
+            reason: true,
+            occurredAt: true,
+            createdByUser: { select: { fullName: true, email: true } },
+          },
+          orderBy: { occurredAt: 'desc' },
+          take: ROW_LIMIT,
+        }),
+      ]);
 
     const zoneOf = clubTimeZoneResolver(stores);
     const formatters = new Map<string, Intl.DateTimeFormat>();
@@ -266,6 +291,30 @@ export class StaffAdminRatingService {
       });
     });
 
+    const adjustmentsByUser = new Map<string, AdminRatingAdjustment[]>();
+    adjustments.forEach((adjustment) => {
+      if (
+        adjustment.kind !== 'BONUS' &&
+        adjustment.kind !== 'PENALTY' &&
+        adjustment.kind !== 'FORGIVE'
+      ) {
+        return;
+      }
+      push(adjustmentsByUser, adjustment.userId, {
+        id: adjustment.id,
+        kind: adjustment.kind,
+        points: adjustment.points,
+        targetKind: adjustment.targetKind,
+        targetId: adjustment.targetId,
+        reason: adjustment.reason,
+        at: adjustment.occurredAt,
+        authorName:
+          adjustment.createdByUser?.fullName ??
+          adjustment.createdByUser?.email ??
+          null,
+      });
+    });
+
     const rows = users.map((user): StaffAdminRatingRow => {
       const own = shiftsByUser.get(user.id) ?? [];
       const disciplineParams = new URLSearchParams({
@@ -283,6 +332,7 @@ export class StaffAdminRatingService {
         clubAverages,
         linkedToLangame: linkedUsers.has(user.id),
         disciplineHref: `/staff/discipline?${disciplineParams.toString()}`,
+        adjustments: adjustmentsByUser.get(user.id) ?? [],
         formatDate,
       });
 

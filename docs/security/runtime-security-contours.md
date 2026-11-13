@@ -2014,6 +2014,28 @@ forward-socks5t 127.0.0.1:9050 -> Tor remote DNS -> api.telegram.org`.
 - Не выполненный пункт чек-листа больше не создаёт задачу «Проверить пункт
   чеклиста»; инцидент в чате и уведомления остаются.
 
+### Решения проверяющего в рейтинге администраторов (13.11.2026)
+
+- `POST /staff/administrator-ratings/adjustments` и
+  `POST /staff/administrator-ratings/adjustments/:id/cancel` — corporate
+  tenant write в `StaffAdministratorRatingsController` (JWT + `RolesGuard` +
+  `FreshNetworkScopeGuard`, capability `manage_staff_control`, manifest
+  `NETWORK_VERIFIED`). Сервис дополнительно требует роль проверяющего
+  (OWNER/ADMIN/MANAGER/CLUB_MANAGER/STANDARDS_MANAGER или platform admin);
+  старший администратор видит рейтинг, но не меняет его. Свой рейтинг менять
+  нельзя.
+- Решение — строка `StaffAdminRatingAdjustment` (миграция 206, grant
+  `leetplus_runtime`): `FORGIVE` одного пункта (чек-лист, штраф,
+  предупреждение, просроченная задача этого же администратора, проверяется
+  в tenant), `BONUS`/`PENALTY` на 1–10 баллов с обязательной причиной.
+  Решение не редактируется, только отменяется (`CANCELED`, кто и когда).
+  Активное прощение одного пункта одно (частичный уникальный индекс).
+- Прощение действует только на рейтинг: штраф в «Мотивации персонала» и
+  задача не меняются. Итог по-прежнему 0–100.
+- Web: BFF `POST /api/staff/administrator-ratings/adjustments` и
+  `…/adjustments/:id/cancel` через `proxyJsonRequest`; кнопки показываются по
+  `canAdjust` из ответа рейтинга.
+
 ### Удаление клуба
 
 - Два входа в один `StoreDeletionService`: control plane

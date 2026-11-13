@@ -1,12 +1,20 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import {
+  AdjustScoreForm,
+  CancelDecisionButton,
+  ForgiveItemControl,
+} from "@/components/admin-rating-decisions";
 import { getRoleLabel } from "@/lib/roles";
 import {
   ADMIN_RATING_RULE_POINTS,
   adminRatingChips,
+  canForgiveAdminRatingItem,
   signedPercent,
   signedPoints,
   type AdminRatingAverageCheck,
+  type AdminRatingDecision,
+  type AdminRatingItem,
   type AdminRatingRiskLevel,
   type AdminRatingView,
 } from "@/lib/staff-admin-rating";
@@ -39,8 +47,11 @@ export function AdminRatingPanel({
   description = "Сильные сверху. Откройте строку, чтобы увидеть, из чего сложился балл.",
   emptyText = "Администраторов по выбранным фильтрам нет.",
   renderExtra,
+  canAdjust = false,
 }: {
   rows: AdminRatingView[];
+  /** The viewer may forgive items and give bonuses / penalties. */
+  canAdjust?: boolean;
   title?: string;
   description?: string;
   emptyText?: string;
@@ -71,6 +82,7 @@ export function AdminRatingPanel({
                 key={row.id}
                 row={row}
                 rank={index + 1}
+                canAdjust={canAdjust}
                 extra={renderExtra?.(row)}
               />
             ))
@@ -89,10 +101,12 @@ export function AdminRatingPanel({
 function AdminRatingRow({
   row,
   rank,
+  canAdjust,
   extra,
 }: {
   row: AdminRatingView;
   rank: number;
+  canAdjust: boolean;
   extra?: ReactNode;
 }) {
   const name = row.user.fullName ?? row.user.email;
@@ -159,7 +173,7 @@ function AdminRatingRow({
           </span>
         </summary>
         <div className="border-t border-dashed border-zinc-200 px-3 pb-3 pt-2 dark:border-zinc-800">
-          <AdminRatingBreakdown row={row} />
+          <AdminRatingBreakdown row={row} canAdjust={canAdjust} />
           {extra}
         </div>
       </details>
@@ -167,7 +181,33 @@ function AdminRatingRow({
   );
 }
 
-function AdminRatingBreakdown({ row }: { row: AdminRatingView }) {
+function formatDecisionDate(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Europe/Moscow",
+  }).format(new Date(value));
+}
+
+function decisionLine(decision: AdminRatingDecision) {
+  return [
+    `«${decision.reason}»`,
+    decision.authorName,
+    formatDecisionDate(decision.at),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function AdminRatingBreakdown({
+  row,
+  canAdjust,
+}: {
+  row: AdminRatingView;
+  canAdjust: boolean;
+}) {
+  const name = row.user.fullName ?? row.user.email;
+
   return (
     <div>
       <h3 className="text-sm font-semibold">Из чего сложился балл</h3>
@@ -179,38 +219,12 @@ function AdminRatingBreakdown({ row }: { row: AdminRatingView }) {
               <td className="py-1.5 text-right font-bold tabular-nums">100</td>
             </tr>
             {row.items.map((item, index) => (
-              <tr
-                key={`${item.kind}-${index}`}
-                className="border-b border-zinc-200 align-top dark:border-zinc-800"
-              >
-                <td className="py-1.5 pr-3">
-                  {item.href ? (
-                    <Link
-                      href={item.href}
-                      className="font-medium text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 dark:text-emerald-300"
-                    >
-                      {item.title}
-                    </Link>
-                  ) : (
-                    <span className="font-medium">{item.title}</span>
-                  )}
-                  {item.detail ? (
-                    <span className="block text-xs text-zinc-500">
-                      {item.detail}
-                    </span>
-                  ) : null}
-                </td>
-                <td
-                  className={[
-                    "whitespace-nowrap py-1.5 text-right font-bold tabular-nums",
-                    item.points < 0
-                      ? "text-red-700 dark:text-red-300"
-                      : "text-emerald-700 dark:text-emerald-300",
-                  ].join(" ")}
-                >
-                  {signedPoints(item.points)}
-                </td>
-              </tr>
+              <AdminRatingItemRow
+                key={`${item.kind}-${item.targetId ?? item.decision?.adjustmentId ?? index}`}
+                item={item}
+                userId={row.id}
+                canAdjust={canAdjust}
+              />
             ))}
             <tr>
               <td className="pt-2 pr-3 font-semibold">Рейтинг</td>
@@ -221,6 +235,7 @@ function AdminRatingBreakdown({ row }: { row: AdminRatingView }) {
           </tbody>
         </table>
       </div>
+      {canAdjust ? <AdjustScoreForm userId={row.id} name={name} /> : null}
       {row.linkedToLangame ? (
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           <AverageCheckBox check={row.averageCheck.day} />
@@ -239,6 +254,91 @@ function AdminRatingBreakdown({ row }: { row: AdminRatingView }) {
         </p>
       )}
     </div>
+  );
+}
+
+function AdminRatingItemRow({
+  item,
+  userId,
+  canAdjust,
+}: {
+  item: AdminRatingItem;
+  userId: string;
+  canAdjust: boolean;
+}) {
+  const forgiven = item.forgiven;
+
+  return (
+    <tr className="border-b border-zinc-200 align-top dark:border-zinc-800">
+      <td className="py-1.5 pr-3">
+        {item.href ? (
+          <Link
+            href={item.href}
+            className={[
+              "font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400",
+              forgiven
+                ? "text-zinc-500 line-through dark:text-zinc-400"
+                : "text-emerald-700 dark:text-emerald-300",
+            ].join(" ")}
+          >
+            {item.title}
+          </Link>
+        ) : (
+          <span className="font-medium">{item.title}</span>
+        )}
+        {forgiven ? (
+          <span className="ml-1.5 whitespace-nowrap rounded-full border border-zinc-200 px-1.5 py-px text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+            прощено
+          </span>
+        ) : null}
+        {item.detail ? (
+          <span className="block text-xs text-zinc-500">{item.detail}</span>
+        ) : null}
+        {forgiven ? (
+          <span className="block text-xs text-zinc-600 dark:text-zinc-300">
+            {decisionLine(forgiven)}
+          </span>
+        ) : null}
+        {canAdjust ? (
+          <span className="mt-0.5 block">
+            {forgiven ? (
+              <CancelDecisionButton
+                adjustmentId={forgiven.adjustmentId}
+                label={`Вернуть ${signedPoints(item.basePoints)}`}
+              />
+            ) : item.decision ? (
+              <CancelDecisionButton
+                adjustmentId={item.decision.adjustmentId}
+                label="Отменить"
+              />
+            ) : canForgiveAdminRatingItem(item) ? (
+              <ForgiveItemControl userId={userId} item={item} />
+            ) : null}
+          </span>
+        ) : null}
+      </td>
+      <td
+        className={[
+          "whitespace-nowrap py-1.5 text-right font-bold tabular-nums",
+          forgiven
+            ? "text-zinc-500"
+            : item.points < 0
+              ? "text-red-700 dark:text-red-300"
+              : "text-emerald-700 dark:text-emerald-300",
+        ].join(" ")}
+      >
+        {forgiven ? (
+          <>
+            <span className="mr-1.5 text-xs font-normal line-through">
+              {signedPoints(item.basePoints)}
+            </span>
+            0
+          </>
+        ) : (
+          signedPoints(item.points)
+        )}
+      </td>
+    </tr>
   );
 }
 
@@ -334,11 +434,21 @@ function AdminRatingRules() {
             сделана позже срока или всё ещё открыта.
           </span>
         </li>
+        <li>
+          <span className="font-semibold">Решение проверяющего</span>
+          <span className="block text-zinc-500">
+            «Простить» снимает конкретный минус, если была уважительная причина.
+            «Поощрить» или «Снизить» меняет балл на 1–
+            {rules.adjustmentMaxPoints} с причиной. Решает управляющий клубом,
+            управляющий сети или владелец. Решение можно отменить, в разборе
+            видно, кто, когда и почему.
+          </span>
+        </li>
       </ol>
       <p className="mt-4 border-t border-zinc-200 pt-3 text-xs text-zinc-500 dark:border-zinc-800">
         Дневная смена началась в Langame с 8:00 до 19:59 по времени клуба,
         остальные ночные. Смены берутся по связке сотрудника с Langame. При
-        равных баллах выше тот, у кого лучше средний чек.
+        равных баллах выше тот, у кого больше поощрений и лучше средний чек.
       </p>
     </aside>
   );

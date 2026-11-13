@@ -1607,9 +1607,9 @@ function swModeHtml() {
   if (!SW || !SW.lead || EMBED || isPhone()) return '';
   const sh = shiftInfo();
   const head = '<div class="sec swmode"><h3>Режим администратора смены</h3>';
-  if (SW.mode === 'admin') return `${head}<p>На схеме чек-лист и задачи администратора ${esc(sh ? sh.short : 'смены')}: под обзором клуба и над лентой.</p><button type="button" class="swbtn sec" data-swmode="off">Выйти из режима</button></div>`;
+  if (SW.mode === 'admin') return `${head}<p>На схеме чек-лист и задачи администратора смены${sh ? ` (${esc(sh.short)})` : ''}: под обзором клуба и над лентой.</p><button type="button" class="swbtn sec" data-swmode="off">Выйти из режима</button></div>`;
   if (!sh) return `${head}<p>Станет доступен, когда в Langame откроют смену.</p></div>`;
-  return `${head}<p>Покажет на схеме чек-лист и задачи администратора ${esc(sh.short)}: что сделано, что просрочено и что на очереди.</p><button type="button" class="swbtn pri" data-swmode="on">Переключиться</button></div>`;
+  return `${head}<p>Покажет на схеме чек-лист и задачи администратора смены (${esc(sh.short)}): что сделано, что просрочено и что на очереди.</p><button type="button" class="swbtn pri" data-swmode="on">Переключиться</button></div>`;
 }
 
 /* ---- checklist items with their time and status ---- */

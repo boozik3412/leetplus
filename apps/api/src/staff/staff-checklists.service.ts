@@ -178,6 +178,7 @@ export type StaffChecklistUpdateDto = {
   status?: StaffChecklistStatus;
   answers?: unknown;
   reviewComment?: string | null;
+  /** Ignored: failed items no longer become staff tasks. */
   createFollowUpTasks?: boolean;
 };
 
@@ -1230,21 +1231,6 @@ export class StaffChecklistsService {
             resourceId: current.id,
             attachmentIds: extractStaffAttachmentIds([answers]),
           },
-        );
-      }
-
-      if (
-        isSubmit &&
-        metrics.failedItems > 0 &&
-        dto.createFollowUpTasks !== false
-      ) {
-        await this.createFailedItemTasks(
-          tx,
-          tenantId,
-          user.id,
-          current,
-          sections,
-          answers,
         );
       }
 
@@ -3300,82 +3286,6 @@ export class StaffChecklistsService {
     });
   }
 
-  private async createFailedItemTasks(
-    tx: Prisma.TransactionClient,
-    tenantId: string,
-    actorUserId: string,
-    run: StaffChecklistRunRow,
-    sections: StaffChecklistSection[],
-    answers: StaffChecklistAnswer[],
-  ) {
-    const itemByKey = new Map(
-      sections.flatMap((section) =>
-        section.items.map((item) => [
-          `${section.id}::${item.id}`,
-          { section, item },
-        ]),
-      ),
-    );
-    const failedAnswers = answers.filter(
-      (answer) => answer.status === 'FAILED',
-    );
-
-    for (const answer of failedAnswers.slice(0, 20)) {
-      const source = itemByKey.get(`${answer.sectionId}::${answer.itemId}`);
-
-      if (!source) {
-        continue;
-      }
-
-      const task = await tx.staffTask.create({
-        data: {
-          tenantId,
-          title: `Проверить пункт чеклиста: ${source.item.title}`.slice(0, 240),
-          description: [
-            `Чеклист: ${run.title}`,
-            `Раздел: ${source.section.title}`,
-            answer.note ? `Комментарий: ${answer.note}` : null,
-            this.formatAnswerEvidenceLinks(answer),
-          ]
-            .filter(Boolean)
-            .join('\n'),
-          type: 'SHIFT',
-          priority: 'HIGH',
-          status: 'OPEN',
-          storeId: run.storeId,
-          shiftId: run.shiftId,
-          assignedToUserId: run.assignedToUserId,
-          createdByUserId: actorUserId,
-          checklist: {
-            source: 'CHECKLIST_FAILED_ITEM',
-            checklistRunId: run.id,
-            regulationId: run.regulationId,
-            templateId: run.templateId,
-            sectionId: answer.sectionId,
-            itemId: answer.itemId,
-          },
-        },
-        select: { id: true },
-      });
-
-      await tx.staffTaskAuditEvent.create({
-        data: {
-          tenantId,
-          taskId: task.id,
-          actorUserId,
-          action: 'CREATED_FROM_CHECKLIST',
-          message: 'Task created from failed checklist item',
-          metadata: {
-            checklistRunId: run.id,
-            regulationId: run.regulationId,
-            templateId: run.templateId,
-            itemId: answer.itemId,
-          },
-        },
-      });
-    }
-  }
-
   private async createChecklistIncidentMessage(
     tx: Prisma.TransactionClient,
     tenantId: string,
@@ -3834,18 +3744,6 @@ export class StaffChecklistsService {
     return Boolean(
       answer?.evidenceUrl || (answer?.evidenceAttachments?.length ?? 0) > 0,
     );
-  }
-
-  private formatAnswerEvidenceLinks(answer: StaffChecklistAnswer) {
-    const links = [
-      ...answer.evidenceAttachments.map((attachment) => attachment.url),
-      answer.evidenceUrl,
-    ].filter((value): value is string => Boolean(value));
-    const uniqueLinks = Array.from(new Set(links));
-
-    return uniqueLinks.length > 0
-      ? `Доказательства: ${uniqueLinks.join(', ')}`
-      : null;
   }
 
   private normalizeEvidenceAttachments(

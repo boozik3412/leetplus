@@ -99,6 +99,54 @@ describePostgres('StaffTasksService PostgreSQL security integration', () => {
     );
   });
 
+  it('deletes a task with its comments and quarantines its only attachment', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantId);
+    const user = buildActor(fixture);
+    const service = buildService(prisma);
+
+    await service.createTaskComment(user, fixture.taskId, {
+      body: 'Photo of the shelf',
+      attachmentIds: [fixture.attachmentId],
+    });
+    await expect(attachmentState(prisma, fixture.attachmentId)).resolves.toBe(
+      StaffAttachmentState.BOUND,
+    );
+
+    await expect(service.deleteTask(user, fixture.taskId)).resolves.toEqual({
+      id: fixture.taskId,
+      deleted: true,
+    });
+
+    await expect(
+      prisma.staffTask.count({ where: { id: fixture.taskId } }),
+    ).resolves.toBe(0);
+    await expect(mutationCounts(prisma, fixture)).resolves.toEqual({
+      comments: 0,
+      auditEvents: 0,
+      bindings: 0,
+    });
+    await expect(attachmentState(prisma, fixture.attachmentId)).resolves.toBe(
+      StaffAttachmentState.QUARANTINED,
+    );
+  });
+
+  it('does not delete a task of a club outside the manager scope', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantId);
+    await prisma.staffTask.update({
+      where: { id: fixture.taskId },
+      data: { storeId: fixture.deniedStoreId },
+    });
+
+    await expect(
+      buildService(prisma).deleteTask(buildActor(fixture), fixture.taskId),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      prisma.staffTask.count({ where: { id: fixture.taskId } }),
+    ).resolves.toBe(1);
+  });
+
   it.each([
     {
       label: 'attachment uploaded by another user',

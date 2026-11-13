@@ -999,6 +999,7 @@ function staffDefinitions(): readonly ControllerDefinition[] {
       ['GET', ['', 'export']],
       ['POST', ['', ':id/comments']],
       ['PATCH', [':id']],
+      ['DELETE', [':id']],
     ]),
     staffController(
       'staff-training-profiles.controller.ts',

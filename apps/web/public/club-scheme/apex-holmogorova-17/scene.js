@@ -462,7 +462,7 @@ for (const x of [287, 517]) for (const z of [-2.62, 2.62]) { B(club, 0.04, 0.45,
 [[40, 878], [41, 910], [42, 942], [43, 974], [44, 1006]].forEach(([n, x]) => makePC(pcId(n), 'vip', QX(x), -2.62, 0));
 makePC(pcId(37), 'solo', QX(810) + 0.05, PZ(174), Math.PI / 2, 1.0);
 makePC(pcId(45), 'solo', QX(1000) - 0.05, PZ(174), -Math.PI / 2, 1.0);
-[[48, 75], [47, 108], [46, 140]].forEach(([n, y]) => makePC(pcId(n), 'cyber', CYBER[0][1] - 0.42, PZ(y) + 0.03, -Math.PI / 2));
+[[48, 75], [47, 108], [46, 140]].forEach(([n, y]) => makePC(pcId(n), 'cyber', CYBER[0][0] + 0.42, PZ(y) + 0.03, Math.PI / 2)); // first room is mirrored: desks on the left wall
 [[49, 75], [50, 108], [51, 140]].forEach(([n, y]) => makePC(pcId(n), 'cyber', CYBER[1][1] - 0.42, PZ(y) + 0.03, -Math.PI / 2));
 
 // street pylon
@@ -643,7 +643,7 @@ const DEFAULT_ITEMS = [
   { id: 'bar-fridge-1', type: 'fridgeBar', x: 3.0, y: 1.1, z: 0.85, ry: RY_W },
   { id: 'lobby-sofa', type: 'sofa3', x: -16.3, z: -2.55, ry: 0, color: 'blue' },
   { id: 'lockers-1', type: 'lockers', x: -16.4, z: 2.9, ry: Math.PI, color: 'teal' },
-  { id: 'cyber-sofa-1', type: 'sofa3', x: r2w(CYBER[0][0] + 0.55), z: -1.6, ry: Math.PI / 2, color: 'blue' },
+  { id: 'cyber-sofa-1', type: 'sofa3', x: r2w(CYBER[0][1] - 0.55), z: -1.6, ry: -Math.PI / 2, color: 'blue' },
   { id: 'cyber-sofa-2', type: 'sofa3', x: r2w(CYBER[1][0] + 0.55), z: -1.6, ry: Math.PI / 2, color: 'lilac' },
   { id: 'plant-1', type: 'plant', x: -17.8, z: -2.9, ry: 0 }, { id: 'plant-2', type: 'plant', x: -17.8, z: 2.9, ry: 0 },
   { id: 'plant-3', type: 'plant', x: r2w(X_END - 0.5), z: -2.9, ry: 0 }, { id: 'plant-4', type: 'plant', x: -14.9, z: 2.9, ry: 0 }

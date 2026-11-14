@@ -383,18 +383,17 @@ const wcDoors = [];
 wallX(QX(858), -3.25, PZ(118));               // duo / vip
 wallZ(PZ(150), QX(783), QX(858));             // solo 37 booth
 wallX(QX(858), PZ(150), CORR);
-wallZ(PZ(150), QX(952), QX(1022));            // solo 45 booth
+wallZ(PZ(150), QX(952), CYBER[0][0]);         // solo 45 booth, up to the cybersport wall
 wallX(QX(952), PZ(150), CORR);
-wallX(QX(1022), PZ(118), CORR);
 for (const [a, b] of CYBER) { wallX(a, -3.25, CORR); wallX(b, -3.25, CORR); wallZ(CORR, a, a + 1.6); } // cybersport rooms, door on the right
 
 // zone carpets (click targets)
 function carpet(zone, mat, x0, x1, z0, z1) { const m = B(club, x1 - x0, 0.02, z1 - z0, mat, (x0 + x1) / 2, 0, (z0 + z1) / 2, 0.01); m.castShadow = false; setPick(m, { type: 'zone', id: zone }); return m; }
 carpet('standart', M.carpetH, PX(188), PX(684), -3.2, 3.2);
 carpet('duo', M.carpetB, QX(785), QX(856), -3.2, PZ(118));
-carpet('vip', M.carpetV, QX(860), QX(1020), -3.2, PZ(118));
+carpet('vip', M.carpetV, QX(860), CYBER[0][0] - 0.05, -3.2, PZ(118));
 carpet('solo', M.carpetS, QX(785), QX(856), PZ(152), PZ(195));
-carpet('solo', M.carpetS, QX(954), QX(1020), PZ(152), PZ(195));
+carpet('solo', M.carpetS, QX(954), CYBER[0][0] - 0.05, PZ(152), PZ(195));
 for (const [a, b] of CYBER) carpet('cyber', M.rugC, a + 0.05, b - 0.05, -3.2, PZ(195));
 carpet('admin', M.carpetK, PX(686), ADMIN_WALL - 0.05, -3.2, CORR);
 

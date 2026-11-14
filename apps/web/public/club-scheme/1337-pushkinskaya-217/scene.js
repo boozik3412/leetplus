@@ -2148,7 +2148,7 @@ async function loadClubNav() {
   if (!clubs.length) return;
   const nav = $('#clubNav');
   nav.innerHTML = clubs.map(c => {
-    const p = new URLSearchParams({ store: c.id }); if (CAN_EDIT) p.set('edit', '1'); if (Q.get('theme')) p.set('theme', Q.get('theme'));
+    const p = new URLSearchParams({ store: c.id }); if (CAN_EDIT) p.set('edit', '1'); if (CALM && !EMBED) p.set('calm', '1'); if (Q.get('theme')) p.set('theme', Q.get('theme'));
     const street = String(c.address || '').replace(/^\s*(г\.|город)\s*[^,]+,\s*/iu, '').trim();
     return `<a class="club" href="../${c.template}/index.html?${p}" title="Схема клуба ${esc(c.name)}" aria-label="Схема клуба ${esc(c.name)}"><span class="ic">${esc(clubInitials(c.name))}</span><span><b>${esc(c.name)}</b><span>${esc(street || 'Схема клуба')}</span></span></a>`;
   }).join('');

@@ -4,6 +4,7 @@ import { fetchWithTimeout, getApiUrl, getAuthHeaders } from "@/lib/api";
 import { ensurePageAccess, requireCurrentUser } from "@/lib/auth";
 import {
   CLUB_FLOOR_PLAN_TEMPLATES,
+  clubFloorPlanCalmFor,
   clubFloorPlanSceneUrl,
   clubFloorPlanTemplateFor,
   type ClubFloorPlanTemplate,
@@ -67,7 +68,13 @@ export default async function VisualizationPage({
     : null;
   const sceneUrl =
     selected && template
-      ? clubFloorPlanSceneUrl(template, selected.store.id, canEdit)
+      ? clubFloorPlanSceneUrl(
+          template,
+          selected.store.id,
+          canEdit,
+          undefined,
+          clubFloorPlanCalmFor(user.role),
+        )
       : null;
 
   return (

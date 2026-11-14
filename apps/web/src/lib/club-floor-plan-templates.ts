@@ -20,6 +20,11 @@ export const CLUB_FLOOR_PLAN_TEMPLATES: readonly ClubFloorPlanTemplate[] = [
     title: "1337 · Пушкинская 217",
     matches: /пушкинск/iu,
   },
+  {
+    id: "1337-radishcheva-12",
+    title: "1337 · Радищева 12",
+    matches: /радищев/iu,
+  },
 ];
 
 export function clubFloorPlanTemplateById(id: string | null | undefined) {

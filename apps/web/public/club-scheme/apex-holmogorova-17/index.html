@@ -210,7 +210,8 @@ body.editing #gl.pointer{cursor:move}
   .kpi{min-width:0;padding:8px 12px 8px 8px} .kpi .kic{width:30px;height:30px} .kpi b{font-size:17px}
   .tools{display:none}
   .panel{top:auto;bottom:max(10px,env(safe-area-inset-bottom,0px));left:max(16px,env(safe-area-inset-left,0px));right:max(16px,env(safe-area-inset-right,0px));width:auto;max-height:56%}
-  .panel .grab{display:block;border:0;background:transparent;padding:8px 0 0;cursor:pointer;width:100%}
+  .panel .grab{display:block;border:0;background:transparent;padding:10px 0 14px;margin-bottom:-12px;cursor:pointer;width:100%;touch-action:none;position:relative;z-index:1}
+  .panel .ph{cursor:pointer;touch-action:none}
   .panel .grab::before{content:"";display:block;margin:auto;width:40px;height:4px;border-radius:9px;background:var(--line)}
   .panel.collapsed .pbody>*:not(.ph){display:none}
   .pbody{padding:10px 16px 16px;gap:14px}

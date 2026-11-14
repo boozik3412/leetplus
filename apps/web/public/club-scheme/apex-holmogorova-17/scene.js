@@ -724,8 +724,8 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme
 /* ---------------- camera ---------------- */
 const DIR = new THREE.Vector3(0.32, 0.86, 0.92).normalize();
 const HOME = { t: [4.2, 0, 1.2], d: 72 };
-const baseHomeView = () => innerWidth <= 760 ? { t: [3.4, 0, 0.3], d: 38, rot: 1.12 } : HOME;
-const homeView = () => { const v = baseHomeView(); return EMBED && innerWidth > 760 ? Object.assign({}, v, { d: v.d * 1 }) : v; };
+const baseHomeView = () => matchMedia('(max-width:760px)').matches ? { t: [3.4, 0, 0.3], d: 38, rot: 1.12 } : HOME;
+const homeView = () => { const v = baseHomeView(); return EMBED && !matchMedia('(max-width:760px)').matches ? Object.assign({}, v, { d: v.d * 1 }) : v; };
 let fly = null;
 function camFor(p) { const t = new THREE.Vector3(...p.t); return { t, pos: t.clone().add((p.dir ? new THREE.Vector3(...p.dir).normalize() : DIR.clone()).applyAxisAngle(new THREE.Vector3(0, 1, 0), p.rot || 0).multiplyScalar(p.d * fitScale())) }; }
 function fitScale() { const a = camera.aspect; return a < 0.8 ? 1.75 : a < 1.2 ? 1.3 : 1; }
@@ -739,7 +739,8 @@ const ease = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
 /* ---------------- UI: state ---------------- */
 let view = { type: 'home' }; let sheetOpen = false;
 const panel = $('#panel'), pbody = $('#pbody');
-const isPhone = () => innerWidth <= 760;
+const PHONE_MQ = matchMedia('(max-width:760px)'); // same test as the CSS: innerWidth can disagree inside an iOS iframe
+const isPhone = () => PHONE_MQ.matches;
 /* KPI cards wrap on the left; the overview card keeps the top-right corner on the same line. */
 const PANEL_W = 340, PANEL_COMPACT_W = 300;
 function layoutChrome() {
@@ -959,7 +960,23 @@ pbody.addEventListener('click', e => {
   const a = e.target.closest('[data-act]'); if (!a) return;
   if (a.dataset.act === 'home') return select({ type: 'home' });
 });
-$('#grab').addEventListener('click', () => { sheetOpen = !sheetOpen; renderPanel(); });
+const setSheet = open => { sheetOpen = open; renderPanel(); };
+$('#grab').addEventListener('click', () => setSheet(!sheetOpen));
+var sheetGesture = false; // live refresh must not rebuild the header under a finger
+{ // phone sheet: swipe the handle or header down/up, tap the header to toggle
+  let sy = null, moved = false, guard = 0;
+  const hold = on => { sheetGesture = on; clearTimeout(guard); if (on) guard = setTimeout(() => { sheetGesture = false; }, 2000); };
+  const onHead = t => t.closest('#grab') || (t.closest('.ph') && !t.closest('button, a, input, select, textarea'));
+  panel.addEventListener('touchstart', e => { sy = isPhone() && e.touches.length === 1 && onHead(e.target) ? e.touches[0].clientY : null; moved = false; hold(sy != null); }, { passive: true });
+  panel.addEventListener('touchmove', e => { if (sy != null && Math.abs(e.touches[0].clientY - sy) > 8) moved = true; }, { passive: true });
+  panel.addEventListener('touchcancel', () => { sy = null; hold(false); });
+  panel.addEventListener('touchend', e => {
+    if (sy == null) return; const dy = e.changedTouches[0].clientY - sy; sy = null; hold(false);
+    if (dy > 30 && sheetOpen) setSheet(false); else if (dy < -30 && !sheetOpen) setSheet(true);
+  });
+  $('#pbody').addEventListener('click', e => { if (isPhone() && !moved && e.target.closest('.ph') && onHead(e.target)) setSheet(!sheetOpen); });
+}
+PHONE_MQ.addEventListener('change', () => renderPanel());
 $('#clubBtn').addEventListener('click', () => { if (!editing) select({ type: 'home' }); });
 
 /* ---------------- feed ---------------- */
@@ -2118,7 +2135,7 @@ async function loadClubNav() {
   nav.hidden = false;
 }
 loadClubNav();
-function refresh() { renderKPIs(); renderCards(); if (editing) return; renderPanel(); }
+function refresh() { renderKPIs(); renderCards(); if (editing) return; if (!sheetGesture) renderPanel(); else syncPills(); }
 let pollTimer = null, pollBusy = false;
 const POLL_MS = 20000, POLL_HIDDEN_MS = 60000;
 function setStatus(textValue, kind) {
@@ -2588,7 +2605,7 @@ function resize() {
   stageW = stage.clientWidth; stageH = stage.clientHeight;
   renderer.setSize(stageW, stageH, false);
   camera.aspect = stageW / stageH;
-  const panelW = isPhone() ? 0 : (innerWidth > 760 ? 340 + 16 : 0);
+  const panelW = isPhone() ? 0 : 340 + 16;
   const shiftY = isPhone() ? stageH * 0.12 : 0;
   camera.setViewOffset(stageW, stageH, panelW / 2, shiftY, stageW, stageH);
   camera.updateProjectionMatrix();

@@ -106,10 +106,10 @@
     "canary": 1,
     "dispatch": 3,
     "ledger": 6,
-    "lootbox": 30,
+    "lootbox": 6,
     "materializer": 1,
     "payload": 1,
-    "snapshot": 2
+    "snapshot": 1
   },
   "components/guest-gamification-statistics-tab.tsx": {
     "lootbox": 1
@@ -127,6 +127,10 @@
     "idempotency": 2,
     "lootbox": 2,
     "snapshot": 6
+  },
+  "components/guest-gamification/tabs/loot-boxes-tab.tsx": {
+    "lootbox": 24,
+    "snapshot": 1
   },
   "components/guest-gamification/tabs/overview-tab.tsx": {
     "anti-fraud": 1,

@@ -51,7 +51,7 @@ const PX = x => (x - 637.5) / 31.5, PZ = y => (y - 159.5) / 31.5;
 // The real hall is longer than the booking scheme: the admin zone is 3x deeper (+2.2 m) and both cybersport rooms are 2x wider.
 const D = 2.2, QX = x => PX(x) + D;            // plan x for everything right of the admin zone
 const ADMIN_WALL = QX(720);
-const CYBER = [[QX(1035), QX(1035) + 3.4], [QX(1035) + 3.78, QX(1035) + 7.58]];
+const CYBER = [[QX(1035), QX(1035) + 3.4], [QX(1035) + 3.4, QX(1035) + 7.58]]; // two rooms sharing one wall
 const X0 = -18.35, X_END = CYBER[1][1] + 1.76, HALL_C = (X0 + X_END) / 2, HALL_W = X_END - X0;
 const PLOT_C = HALL_C + 0.15, PLOT_W = HALL_W + 10.6;
 
@@ -385,7 +385,7 @@ wallZ(PZ(150), QX(783), QX(858));             // solo 37 booth
 wallX(QX(858), PZ(150), CORR);
 wallZ(PZ(150), QX(952), CYBER[0][0]);         // solo 45 booth, up to the cybersport wall
 wallX(QX(952), PZ(150), CORR);
-for (const [a, b] of CYBER) { wallX(a, -3.25, CORR); wallX(b, -3.25, CORR); wallZ(CORR, a, a + 1.6); } // cybersport rooms, door on the right
+CYBER.forEach(([a, b], i) => { if (i === 0) wallX(a, -3.25, CORR); wallX(b, -3.25, CORR); wallZ(CORR, a, a + 1.6); }); // cybersport rooms share walls, door on the right
 
 // zone carpets (click targets)
 function carpet(zone, mat, x0, x1, z0, z1) { const m = B(club, x1 - x0, 0.02, z1 - z0, mat, (x0 + x1) / 2, 0, (z0 + z1) / 2, 0.01); m.castShadow = false; setPick(m, { type: 'zone', id: zone }); return m; }

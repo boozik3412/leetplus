@@ -53,14 +53,34 @@ export function clubFloorPlanTemplateFor(
 }
 
 /**
+ * Roles that work in the hall (administrators and the managers above them)
+ * get the calm scene: no cars and passers-by in the street, guests do not
+ * walk in, and the map turns only when the viewer turns it (user, 14.11).
+ */
+export const CALM_CLUB_FLOOR_PLAN_ROLES: readonly string[] = [
+  "TRAINEE",
+  "CLUB_ADMINISTRATOR",
+  "SENIOR_ADMINISTRATOR",
+  "STANDARDS_MANAGER",
+  "CLUB_MANAGER",
+  "MANAGER",
+];
+
+export function clubFloorPlanCalmFor(role: string | null | undefined) {
+  return !!role && CALM_CLUB_FLOOR_PLAN_ROLES.includes(role);
+}
+
+/**
  * `embed: "shift"` is the calm hall on «Моя смена»: no street traffic, no
  * auto-rotation, hints over the guests and the guests' messages in the panel.
+ * `calm` is the same quiet hall on the full scene (see the roles above).
  */
 export function clubFloorPlanSceneUrl(
   template: ClubFloorPlanTemplate,
   storeId: string,
   canEdit: boolean,
   embed?: "shift",
+  calm = false,
 ) {
   const params = new URLSearchParams({ store: storeId });
   if (canEdit) {
@@ -68,6 +88,8 @@ export function clubFloorPlanSceneUrl(
   }
   if (embed) {
     params.set("embed", embed);
+  } else if (calm) {
+    params.set("calm", "1");
   }
   return `/club-scheme/${template.id}/index.html?${params.toString()}`;
 }

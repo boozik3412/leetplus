@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  clubFloorPlanCalmFor,
   clubFloorPlanForShift,
   clubFloorPlanSceneUrl,
   clubFloorPlanSwitcher,
@@ -74,6 +75,30 @@ test("the scene opens for one club and edits only when allowed", () => {
     clubFloorPlanSceneUrl(template, "s1", false, "shift"),
     "/club-scheme/apex-holmogorova-17/index.html?store=s1&embed=shift",
   );
+  assert.equal(
+    clubFloorPlanSceneUrl(template, "s1", true, undefined, true),
+    "/club-scheme/apex-holmogorova-17/index.html?store=s1&edit=1&calm=1",
+  );
+  assert.equal(
+    clubFloorPlanSceneUrl(template, "s1", false, "shift", true),
+    "/club-scheme/apex-holmogorova-17/index.html?store=s1&embed=shift",
+  );
+});
+
+test("administrators and managers get the calm hall, the owner the full one", () => {
+  for (const role of [
+    "TRAINEE",
+    "CLUB_ADMINISTRATOR",
+    "SENIOR_ADMINISTRATOR",
+    "STANDARDS_MANAGER",
+    "CLUB_MANAGER",
+    "MANAGER",
+  ]) {
+    assert.equal(clubFloorPlanCalmFor(role), true, role);
+  }
+  for (const role of ["OWNER", "ADMIN", "BUYER", "MARKETER", null]) {
+    assert.equal(clubFloorPlanCalmFor(role), false, String(role));
+  }
 });
 
 test("lists only clubs with a hall for the scene switcher", () => {

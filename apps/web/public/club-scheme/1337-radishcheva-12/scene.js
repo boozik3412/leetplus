@@ -1,0 +1,2758 @@
+/* LeetPlus «Схема клуба»: 3D-сцена зала 1337 · Радищева 12 (шаблон 1337-radishcheva-12).
+   Данные: GET/PATCH /api/stores/:id/floor-plan, GET /api/stores/:id/floor-plan/live, /live/seats/:n и /live/attention, POST /live/alerts/:id. */
+(() => {
+'use strict';
+/* ---------------- helpers ---------------- */
+const $ = s => document.querySelector(s);
+/* ---------------- page parameters ---------------- */
+const Q = new URLSearchParams(location.search);
+const STORE_ID = Q.get('store') || '';
+const CAN_EDIT = Q.get('edit') === '1';
+// embed=shift: the hall on «Моя смена». Calm: no street traffic, no auto-rotation, guests do not walk in.
+const EMBED = Q.get('embed') === 'shift';
+const CALM = EMBED || Q.get('calm') === '1';
+if (EMBED) document.documentElement.classList.add('embed');
+const TEMPLATE = '1337-radishcheva-12';
+if (Q.get('theme') === 'dark' || Q.get('theme') === 'light') document.documentElement.setAttribute('data-theme', Q.get('theme'));
+// Inside the LeetPlus cabinet the scene follows the cabinet's theme switch.
+(() => {
+  if (Q.get('theme') || window.parent === window) return;
+  let root = null; try { root = window.parent.document.documentElement; } catch (e) { return; }
+  const sync = () => { const t = root.dataset.theme; if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t); else document.documentElement.removeAttribute('data-theme'); };
+  sync(); new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+const API = STORE_ID ? `/api/stores/${encodeURIComponent(STORE_ID)}/floor-plan` : null;
+const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const cfgOf = (z, k) => { const r = (z.cfg || []).find(c => c[0] === k); return r ? r[1] : '—'; };
+const clubInitials = name => { const w = String(name).replace(/[^\p{L}\p{N} ]+/gu, ' ').trim().split(/\s+/).filter(Boolean); return (w.length > 1 ? w[0][0] + w[1][0] : (w[0] || '··').slice(0, 2)).toUpperCase(); };
+const rnd = (() => { let a = 1337; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();
+const pick = arr => arr[Math.floor(rnd() * arr.length)];
+const fmt = new Intl.NumberFormat('ru-RU');
+const rub = n => fmt.format(Math.round(n)) + ' ₽';
+const hm = m => { m = Math.max(0, Math.round(m)); return Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); };
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const isDark = () => { const t = document.documentElement.getAttribute('data-theme'); if (t === 'dark') return true; if (t === 'light') return false; return matchMedia('(prefers-color-scheme: dark)').matches; };
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const now = () => { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+
+/* ---------------- data ---------------- */
+const GAMES = {
+  'CS2': ['#F2A65A', '#5B3A1E'], 'Dota 2': ['#E86A6A', '#3A1416'], 'Valorant': ['#F27896', '#3C1524'],
+  'PUBG': ['#F2CB5A', '#3B3214'], 'Fortnite': ['#9C8CF5', '#211B48'], 'LoL': ['#61B8EC', '#0E2A3D'], 'Apex': ['#EE8462', '#381A12']
+};
+const NICKS = ['Kirito', 'dasha.gg', 'NeoVlad', 'Mamba', 'kot_v_sapogah', 'Zeus_jr', 'Lina', 'Art3m', 'tilted', 'ez4ence', 'Bober', 'MoonWalker', 'R1ck', 'Shadow', 'Pelmen', 'Vortex', 'Sasha_99', 'frost', 'Nyasha', 'Hawk', 'Gl1tch', 'Toxa', 'Ramen', 'Iris', 'Kuzya', 'Bolt', 'Nika', 'Fenix', 'Yuki', 'Grom', 'Leo', 'Masha_k', 'Blink', 'Duck', 'Orbit', 'Zhenya', 'Raven', 'Sova', 'Mitya', 'Hollow', 'Slava', 'Kris', 'Tom', 'Panda', 'Dima_3', 'Nord'];
+const AVA = ['#7FD3D8', '#B9A6F0', '#F7B48A', '#8FB8F5', '#F2A0B4', '#A8DDB5', '#F5D27A'];
+const SHIRTS = [0x7FD3D8, 0xB9A6F0, 0xF7B48A, 0x8FB8F5, 0xF2A0B4, 0xA8DDB5, 0xF5D27A, 0xffffff, 0x3B4A55, 0x9AD0C2];
+const HAIRS = [0x2b2220, 0x4a3226, 0x1d1d22, 0x8a5a3c, 0xd8b26a, 0x6b4b8f, 0x2f3e46];
+const SKINS = [0xf1cfb4, 0xe6b896, 0xd39e7c, 0xf6dcc6, 0xb67d5e];
+
+// Plan coordinates: 1 m = 50 px of the Langame booking scheme, origin at the hall centre.
+// x runs left to right on the scheme, z top to bottom; the entrance and the street are at +z.
+const PX = x => (x - 651) / 50, PZ = y => (y - 685) / 50;
+// v5: comfort is a vertical room above cybersport b (user's sketch 14.11), the bottom part is 0.9 m deeper than on the scheme
+const X0 = PX(77), X_END = PX(1225), Z0 = PZ(135), Z_END = PZ(1106), Z_SOLO = PZ(1188);
+const CF_X0 = PX(353), CF_X1 = PX(491), CF_XW = PX(557), CF_STEP = PZ(285), CF_Z1 = PZ(465);   // comfort: lower part x0..x1, upper part x0..xw above the step
+const WC_X0 = PX(182), WC_Z1 = PZ(375);          // the left toilet, at the top of the corridor
+const HALL_C = (X0 + X_END) / 2, HALL_W = X_END - X0, HALL_ZC = (Z0 + Z_END) / 2, HALL_D = Z_END - Z0;
+const PLOT_C = HALL_C, PLOT_W = HALL_W + 13, PLOT_Z0 = Z0 - 3.6;
+const DOOR_X = PX(724);                          // the entrance, 689–759 px
+const cfgVal = (z, k) => { const r = (z.cfg || []).find(c => c[0] === k); return r ? r[1] : '—'; };
+
+const ZONES = {
+  standart: { name: 'Standart', range: 'ПК 1–23', total: 22, note: 'ПК 3 на схеме нет.', color: '#4FB8C0', c3: 0x7FD3D8, anchor: [3.9, 2.3, 1.6], off: [80, 140], cam: { t: [3.4, 0, 2.2], d: 26 },
+    cfg: [['Видеокарта', 'RTX 5060'], ['Монитор', 'MSI 300 Гц'], ['Девайсы', 'DP Arena']] },
+  vip: { name: 'VIP', range: 'ПК 26–30', color: '#8E78E8', c3: 0xB9A6F0, anchor: [-9.6, 2.1, -0.7], off: [-168, 14], cam: { t: [-9.6, 0, -0.6], d: 14 },
+    cfg: [['Видеокарта', 'RTX 5060 Ti'], ['Монитор', 'MSI 300 Гц'], ['Девайсы', 'DP Arena']] },
+  duo: { name: 'Duo', range: 'ПК 37–40', color: '#E8955E', c3: 0xF7B48A, anchor: [-0.6, 2.1, -3.6], off: [-21, -88], cam: { t: [4.0, 0, -1.0], d: 30 },
+    cfg: [['Видеокарта', 'RTX 5070'], ['Монитор', 'MSI 2K 320 Гц'], ['Девайсы', 'DP Arena']] },
+  solo: { name: 'Solo', range: 'ПК 45–46', color: '#E26D8E', c3: 0xF2A0B4, anchor: [5.8, 1.8, -3.6], off: [45, -130], cam: { t: [6.0, 0, 2.0], d: 30 },
+    cfg: [['Видеокарта', 'RTX 5070 Ti'], ['Монитор', 'Alienware 500 Гц'], ['Девайсы', 'Logitech Superlight 2']] },
+  cyber: { name: 'Cybersport', range: 'ПК 31–36, 41–43', color: '#5E93E0', c3: 0x8FB8F5, anchor: [-5.6, 2.2, -2.3], off: [-198, 110], cam: { t: [0, 0, 1.0], d: 40 },
+    cfg: [['Видеокарта', 'RTX 5070'], ['Монитор', 'MSI 360 Гц'], ['Девайсы', 'Logitech Superlight 2']] },
+  comfort: { name: 'Comfort', range: 'ПК 50–53 и PS5 Pro, целиком', color: '#4FAF72', c3: 0x8ED6A6, anchor: [-4.2, 2.2, -8.6], off: [-150, -30], cam: { t: [-4.4, 0, -7.4], d: 17 },
+    cfg: [['Видеокарта', 'RTX 5070'], ['Монитор', 'MSI 2K 320 Гц'], ['Девайсы', 'DP Arena']] },
+  admin: { name: 'Админ', range: 'стойка и чек-ины LeetPlus', color: '#007681', c3: 0x2BA3AD, anchor: [-1.9, 2.4, 6.6], off: [-160, 110], cam: { t: [-1.6, 0, 6.2], d: 14, rot: -0.5 } }
+};
+
+const seats = [];
+let guestPool = NICKS.slice();
+function takeNick() { if (!guestPool.length) guestPool = NICKS.slice(); return guestPool.splice(Math.floor(rnd() * guestPool.length), 1)[0]; }
+function newGuest() { const nick = takeNick(); return { nick, ava: pick(AVA), lvl: 3 + Math.floor(rnd() * 38), xp: Math.floor(rnd() * 100), spent: 200 + Math.floor(rnd() * 1400), quest: Math.floor(rnd() * 100), shirt: pick(SHIRTS), hair: pick(HAIRS), skin: pick(SKINS) }; }
+
+/* ---------------- live club state (Langame through the LeetPlus API) ---------------- */
+const LIVE = { loaded: false, status: 'LOADING', at: null, guests: null, shift: null, revenue: null, purchases: null, game: null, warnings: [], failed: false };
+function plural(n, one, few, many) { const a = n % 10, b = n % 100; return `${fmt.format(n)} ${a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many}`; }
+const pad2 = n => String(n).padStart(2, '0');
+const hhmm = d => pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+const rubOr = v => v == null ? '—' : rub(v);
+function shortName(full) { const p = String(full).trim().split(/\s+/); return p.length < 2 ? p[0] : `${p[0]} ${p.slice(1, 3).map(x => x[0].toUpperCase() + '.').join(' ')}`; }
+function shiftInfo() {
+  const s = LIVE.shift; if (!s) return null;
+  const st = s.startedAt ? new Date(s.startedAt) : null;
+  const mins = st ? Math.max(0, Math.floor((Date.now() - st.getTime()) / 60000)) : null;
+  const full = s.adminName || 'Администратор';
+  return { full, short: shortName(full), start: st ? hhmm(st) : '—', dur: mins == null ? '' : `${Math.floor(mins / 60)} ч ${pad2(mins % 60)} мин` };
+}
+const GAME_KIND = { MISSION: ['Миссия', 'acc'], CASE: ['Кейс', 'warn'], PROMO: ['Акция', 'lilac'] };
+const ddmm = d => pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1);
+function gameCounts(g) {
+  const n = k => g.items.filter(i => i.kind === k).length;
+  return [[n('MISSION'), 'миссия', 'миссии', 'миссий'], [n('CASE'), 'кейс', 'кейса', 'кейсов'], [n('PROMO'), 'акция', 'акции', 'акций']].filter(x => x[0]).map(x => plural(...x)).join(', ');
+}
+const FOLD = { zones: false, game: false };
+try { Object.assign(FOLD, JSON.parse(localStorage.getItem('leetplus-floor-plan-fold') || '{}')); } catch (e) { }
+function toggleFold(id) { FOLD[id] = !FOLD[id]; try { localStorage.setItem('leetplus-floor-plan-fold', JSON.stringify(FOLD)); } catch (e) { } }
+const CHEVRON = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+function foldHead(id, title, summary) {
+  const open = !!FOLD[id];
+  return `<button class="fold" type="button" data-fold="${id}" aria-expanded="${open}"><span class="ft"><b>${title}</b><span class="fs">${summary}</span></span><span class="fc">${open ? 'Свернуть' : 'Развернуть'}${CHEVRON}</span></button>`;
+}
+function gameHtml() {
+  const g = LIVE.game, r = LIVE.revenue;
+  const when = r && r.period === 'TODAY' ? 'За сегодня' : 'За смену';
+  let summary, body;
+  if (!LIVE.loaded) { summary = 'загружаю…'; body = '<div class="note">Загружаю игровой модуль…</div>'; }
+  else if (!g) { summary = 'нет данных'; body = '<div class="note">Не удалось получить активности игрового модуля, попробую при следующем обновлении.</div>'; }
+  else {
+    const done = g.completed || {}, items = Array.isArray(g.items) ? g.items : [], season = g.season;
+    summary = `${when} выполнено: ${plural(done.missions || 0, 'миссия', 'миссии', 'миссий')}, ${plural(done.cases || 0, 'кейс', 'кейса', 'кейсов')}, ${plural(done.rewards || 0, 'награда', 'награды', 'наград')}`;
+    if (!items.length && !season) body = '<div class="note">Для этого клуба сейчас нет запущенных миссий, кейсов и акций.</div>';
+    else {
+      const shown = items.slice(0, 6);
+      const rows = shown.map(i => {
+        const k = GAME_KIND[i.kind] || ['Активность', 'off'];
+        const meta = [i.reward, i.xp ? `+${fmt.format(i.xp)} XP` : null, i.segment ? 'для сегмента' : null].filter(Boolean).map(esc).join(' · ');
+        const end = i.endsAt ? `до ${ddmm(new Date(i.endsAt))}` : 'бессрочно';
+        return `<div class="li"><span class="chip ${k[1]} gk">${k[0]}</span><span class="grow"><b title="${esc(i.title)}">${esc(i.title)}</b>${meta ? `<span>${meta}</span>` : ''}</span><span class="r num">${end}</span></div>`;
+      }).join('');
+      const seasonHtml = season ? `<div class="gseason"><span class="grow"><b>${esc(season.name)}</b><span>Сезон${season.levels ? ' · ' + plural(season.levels, 'уровень', 'уровня', 'уровней') : ''}</span></span><span class="r num">${season.endsAt ? 'до ' + ddmm(new Date(season.endsAt)) : 'бессрочно'}</span></div>` : '';
+      body = `<div class="gnow">Активно сейчас · ${esc(gameCounts({ items }) || 'только сезон')}</div>${seasonHtml}<div class="list games">${rows}</div>${items.length > shown.length ? `<div class="note">И ещё ${plural(items.length - shown.length, 'активность', 'активности', 'активностей')}, все в разделе «Игровой модуль».</div>` : ''}`;
+    }
+  }
+  // «Подробнее»: what the guests completed this shift, in a new LeetPlus tab.
+  const more = g && STORE_ID ? `<a class="gmore" href="/visualization/game-activity?store=${encodeURIComponent(STORE_ID)}" target="_blank" rel="noopener">Подробнее<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6 3h7v7M13 3L5 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></a>` : '';
+  return `<div class="sec fsec gamesec${FOLD.game ? ' open' : ''}">${foldHead('game', 'Игровой модуль', summary)}${more}<div class="fbody">${body}</div></div>`;
+}
+function purchasesHtml() {
+  const list = LIVE.purchases, r = LIVE.revenue;
+  const when = r && r.period === 'TODAY' ? 'за сегодня' : 'за смену';
+  let body;
+  if (!LIVE.loaded) body = '<div class="note">Загружаю продажи…</div>';
+  else if (!Array.isArray(list)) body = '<div class="note">Langame не отдал продажи, попробую при следующем обновлении.</div>';
+  else if (!list.length) body = `<div class="note">${when === 'за смену' ? 'В этой смене' : 'Сегодня'} ещё ничего не продано.</div>`;
+  else body = `<div class="list buys">${list.map(p => {
+    const at = p.at ? hhmm(new Date(p.at)) : '—';
+    const qty = p.quantity && p.quantity !== 1 ? ` × ${fmt.format(p.quantity)}` : '';
+    return `<div class="li"><span class="t num">${at}</span><span class="grow"><b title="${esc(p.title)}">${esc(p.title)}${qty}</b>${p.category ? `<span>${esc(p.category)}</span>` : ''}</span><span class="r num">${rub(p.sum)}</span></div>`;
+  }).join('')}</div>`;
+  return `<div class="sec buysec"><h3>Последние покупки <span>${when}</span></h3>${body}</div>`;
+}
+/* ---------------- three setup ---------------- */
+const canvas = $('#gl');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, preserveDrawingBuffer: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, 1, 0.5, 400);
+const controls = new THREE.OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.minDistance = 8; controls.maxDistance = 105;
+controls.minPolarAngle = 0.25; controls.maxPolarAngle = 1.22;
+controls.autoRotateSpeed = 0.35;
+controls.screenSpacePanning = false;
+controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0xdbe5e5, 0.82);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 0.62);
+sun.position.set(-20, 40, 22); sun.target.position.set(0, 0, 1); scene.add(sun.target);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 27, bottom: -27, near: 1, far: 110 });
+sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.02; sun.shadow.radius = 4;
+scene.add(sun);
+const nightLights = [
+  [0x5fd0da, 2.0, 2.6, 0.6, 10], [0x5fd0da, 5.6, 2.6, 3.6, 10], [0xa58cff, -9.6, 2.2, -0.6, 6], [0x7ee0a2, -4.4, 2.2, -7.6, 8],
+  [0x7fa8ff, -5.6, 2.2, -2.6, 5], [0x7fa8ff, -6.4, 2.2, 3.7, 5], [0x7fa8ff, 9.9, 2.2, 5.0, 5], [0xffb27a, -0.6, 1.8, -3.6, 4], [0xffb27a, 9.9, 1.8, 2.4, 5],
+  [0xff8fb0, 5.8, 1.6, -3.6, 3.5], [0xff8fb0, 6.1, 1.6, 8.3, 3.5], [0x83e4ec, -1.9, 2.2, 6.8, 6], [0x83e4ec, 1.5, 2.2, 6.2, 7]
+].map(([c, x, y, z, d]) => { const l = new THREE.PointLight(c, 0, d, 1.6); l.position.set(x, y, z); scene.add(l); return l; });
+/* ---------------- material registry ---------------- */
+const themed = [];
+function std(light, dark, extra) {
+  const m = new THREE.MeshStandardMaterial(Object.assign({ color: light, roughness: 0.88, metalness: 0 }, extra || {}));
+  m.userData.c = [light, dark == null ? light : dark]; themed.push(m); return m;
+}
+const flatCache = {};
+function flat(hex) { return flatCache[hex] || (flatCache[hex] = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.85 })); }
+const glow = hex => new THREE.MeshBasicMaterial({ color: hex });
+
+const M = {
+  plot: std(0xF8FAFA, 0x12252A), plotSide: std(0xEEF3F3, 0x0D1D21), grass: std(0xD6EEE2, 0x16332B), road: std(0xD5DDE0, 0x1A2B30),
+  side: std(0xEBF0F1, 0x1E3237), dash: std(0xFFFFFF, 0x557178), floor: std(0xF3F6F6, 0x1A2E33), wall: std(0xFFFFFF, 0x223A40), wallTop: std(0xE6EEEF, 0x2B464C),
+  trim: std(0x007681, 0x2F9BA5), desk: std(0xFFFFFF, 0x2C4349), deskLeg: std(0xD9E2E4, 0x22383E), dark: std(0x2C3A40, 0x0D1619), tower: std(0xEDF2F3, 0x1C2C31),
+  wood: std(0xE7CFAE, 0x6B5236), woodDark: std(0xC9A47C, 0x523C25), sofaT: std(0x8FB8F5, 0x4A6FA8), sofaV: std(0xB9A6F0, 0x6E5BB0), rugC: std(0xDCE7FA, 0x22334F),
+  carpetH: std(0xE2F3F4, 0x173A3F), carpetV: std(0xEDE8FB, 0x2A2647), carpetB: std(0xFCEBDD, 0x3A2B22), carpetBar: std(0xF7ECE2, 0x33281F), carpetK: std(0xE4F3F1, 0x173634),
+  leaf: std(0x9ED9B4, 0x3E7D5C), leaf2: std(0x7CC9A0, 0x2F6A4C), trunk: std(0xB89272, 0x5E4632), pot: std(0xFFFFFF, 0x2C4349),
+  steel: std(0xC9D3D6, 0x41565C), pole: std(0xB8C4C8, 0x3A4D52)
+};
+const glass = new THREE.MeshStandardMaterial({ color: 0xCFEFF3, transparent: true, opacity: 0.32, roughness: 0.1, metalness: 0.1, depthWrite: false });
+const LED = { free: glow(0x34C98A), busy: glow(0x2BB3BE), ending: glow(0xF2A142), booked: glow(0xA48CF2), off: glow(0x9AA7AB) };
+const lampMat = glow(0xFFF3D6);
+
+/* ---------------- geometry helpers ---------------- */
+const gcache = {};
+function rbox(w, h, d, r) {
+  r = Math.min(r == null ? 0.05 : r, Math.min(w, h, d) / 2 - 0.001);
+  const k = w + ',' + h + ',' + d + ',' + r;
+  return gcache[k] || (gcache[k] = r > 0.004 ? new THREE.RoundedBoxGeometry(w, h, d, 2, r) : new THREE.BoxGeometry(w, h, d));
+}
+function mesh(parent, geo, mat, x, y, z, shadow = true) {
+  const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z);
+  m.castShadow = shadow; m.receiveShadow = true; parent.add(m); return m;
+}
+// Box with y = bottom
+function B(parent, w, h, d, mat, x, y, z, r) { return mesh(parent, rbox(w, h, d, r), mat, x, y + h / 2, z); }
+const cylG = {}; function cyl(rt, rb, h, seg = 16) { const k = [rt, rb, h, seg].join(); return cylG[k] || (cylG[k] = new THREE.CylinderGeometry(rt, rb, h, seg)); }
+const sphG = {}; function sph(r, w = 16, h = 12) { const k = [r, w, h].join(); return sphG[k] || (sphG[k] = new THREE.SphereGeometry(r, w, h)); }
+function C(parent, rt, rb, h, mat, x, y, z, seg) { return mesh(parent, cyl(rt, rb, h, seg), mat, x, y + h / 2, z); }
+function plane(parent, w, h, mat, x, y, z, ry = 0) { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); m.position.set(x, y, z); m.rotation.y = ry; parent.add(m); return m; }
+
+/* ---------------- canvas textures ---------------- */
+const MARK = 'M6 32 30 8H52V22H38V40H22V54H6Z M58 8H82L90 16V40H58Z';
+const GLYPHS = [...document.querySelectorAll('.logo .tx path')].map(p => [parseFloat(p.getAttribute('transform').match(/translate\(([-\d.]+)/)[1]), p.getAttribute('d')]);
+function drawLogo(ctx, x, y, s, markColor, textColor) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  const mk = new Path2D(MARK); ctx.fillStyle = markColor; ctx.fill(mk);
+  ctx.save(); ctx.translate(48, 48); ctx.rotate(Math.PI); ctx.translate(-48, -48); ctx.fill(mk); ctx.restore();
+  if (textColor) { ctx.fillStyle = textColor; ctx.translate(126, 73.5); ctx.scale(0.075, -0.075); for (const [dx, d] of GLYPHS) { ctx.save(); ctx.translate(dx, 0); ctx.fill(new Path2D(d)); ctx.restore(); } }
+  ctx.restore();
+}
+const textures = [];
+function ctex(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4;
+  const rec = { c, t, draw }; textures.push(rec); draw(c.getContext('2d'), w, h, isDark()); return t;
+}
+function redrawTextures() { const d = isDark(); for (const r of textures) { const ctx = r.c.getContext('2d'); ctx.clearRect(0, 0, r.c.width, r.c.height); r.draw(ctx, r.c.width, r.c.height, d); r.t.needsUpdate = true; } }
+const F = (w, s) => `${w} ${s}px Manrope, "Segoe UI", sans-serif`;
+function rr(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); }
+
+function gameScreen(name, cols, big) {
+  return ctex(big ? 512 : 160, big ? 288 : 80, (ctx, w, h) => {
+    const g = ctx.createLinearGradient(0, 0, w, h); g.addColorStop(0, cols[0]); g.addColorStop(1, cols[1]);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    ctx.globalAlpha = .25; ctx.fillStyle = '#fff';
+    for (let i = 0; i < 6; i++) { ctx.fillRect((i * 0.17 + 0.05) * w, h * (0.55 + (i % 3) * 0.1), w * 0.12, h * 0.25); }
+    ctx.globalAlpha = .9; ctx.strokeStyle = '#fff'; ctx.lineWidth = w / 80;
+    ctx.beginPath(); ctx.arc(w / 2, h / 2, h / 9, 0, 7); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.fillStyle = '#fff'; ctx.font = F(800, big ? 34 : 13); ctx.fillText(name, w * 0.05, h * 0.2);
+    ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(0, h * 0.86, w, h * 0.14); ctx.fillStyle = '#fff'; ctx.fillRect(w * 0.04, h * 0.91, w * 0.3, h * 0.04);
+  });
+}
+const SCREEN = {};
+SCREEN.play = new THREE.MeshBasicMaterial({ map: gameScreen('В игре', ['#2BB3BE', '#0E3A40']) });
+SCREEN.free = new THREE.MeshBasicMaterial({ map: ctex(160, 80, (ctx, w, h, d) => {
+  const g = ctx.createLinearGradient(0, 0, w, h); g.addColorStop(0, d ? '#0E3A40' : '#0B7C86'); g.addColorStop(1, d ? '#06191C' : '#04545C');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); drawLogo(ctx, w / 2 - 15, h / 2 - 22, 0.32, '#83E4EC'); ctx.fillStyle = '#CFF6F9'; ctx.font = F(700, 10); ctx.textAlign = 'center'; ctx.fillText('Свободен', w / 2, h - 12);
+}) });
+SCREEN.booked = new THREE.MeshBasicMaterial({ map: ctex(160, 80, (ctx, w, h) => {
+  const g = ctx.createLinearGradient(0, 0, w, h); g.addColorStop(0, '#A48CF2'); g.addColorStop(1, '#4B3B99');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); ctx.fillStyle = '#fff'; ctx.font = F(800, 16); ctx.textAlign = 'center'; ctx.fillText('БРОНЬ', w / 2, h / 2 + 2); ctx.font = F(600, 10); ctx.fillText('с 19:00', w / 2, h / 2 + 18);
+}) });
+
+/* ---------------- people ---------------- */
+const capsule = new THREE.CapsuleGeometry(0.2, 0.32, 4, 10);
+function makePerson(o, sit) {
+  const g = new THREE.Group();
+  const shirt = flat(o.shirt), skin = flat(o.skin), hair = flat(o.hair), pants = flat(o.pants || 0x3B4A55);
+  const torso = mesh(g, capsule, shirt, 0, sit ? 0.98 : 1.18, 0); torso.scale.set(1, 1, 0.72);
+  const head = mesh(g, sph(0.155), skin, 0, sit ? 1.47 : 1.67, 0);
+  const hairM = new THREE.Mesh(new THREE.SphereGeometry(0.163, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), hair);
+  hairM.position.copy(head.position); hairM.rotation.x = 0.35; hairM.castShadow = true; g.add(hairM);
+  g.userData.head = head; g.userData.hair = hairM;
+  if (sit) {
+    B(g, 0.36, 0.14, 0.44, pants, 0, 0.52, -0.2, 0.05);
+    B(g, 0.32, 0.52, 0.14, pants, 0, 0.02, -0.38, 0.05);
+    const aL = B(g, 0.09, 0.09, 0.5, shirt, -0.22, 0.93, -0.26, 0.04); const aR = B(g, 0.09, 0.09, 0.5, shirt, 0.22, 0.93, -0.26, 0.04);
+    aL.rotation.x = aR.rotation.x = 0.18;
+  } else {
+    const legs = []; for (const sx of [-0.1, 0.1]) { const p = new THREE.Group(); p.position.set(sx, 0.78, 0); B(p, 0.14, 0.78, 0.17, pants, 0, -0.78, 0, 0.05); g.add(p); legs.push(p); }
+    const arms = []; for (const sx of [-0.27, 0.27]) { const p = new THREE.Group(); p.position.set(sx, 1.42, 0); B(p, 0.09, 0.56, 0.1, shirt, 0, -0.56, 0, 0.04); g.add(p); arms.push(p); }
+    g.userData.legs = legs; g.userData.arms = arms;
+  }
+  return g;
+}
+
+/* ---------------- world ---------------- */
+const world = new THREE.Group(); scene.add(world);
+const pickables = [];
+function setPick(obj, data) { obj.userData.pick = data; pickables.push(obj); }
+M.carpetS = std(0xFCE6EE, 0x3A2230);
+
+// plot & street (a pedestrian street along the entrance side, +z, no cars; solo b sticks out into the yard)
+const SIDE_Z = Z_SOLO + 1.6, ROAD_Z = SIDE_Z + 3.5, PLOT_Z1 = ROAD_Z + 2.4;
+B(world, PLOT_W + 0.6, 1.4, PLOT_Z1 - PLOT_Z0 + 0.6, M.plotSide, PLOT_C, -1.4, (PLOT_Z0 + PLOT_Z1) / 2, 0.6);
+B(world, PLOT_W, 0.02, PLOT_Z1 - PLOT_Z0, M.plot, PLOT_C, -0.02, (PLOT_Z0 + PLOT_Z1) / 2, 0.01);
+M.paving = std(0xE6EDEE, 0x1A2B30); M.pavingLine = std(0xD3DEE0, 0x24383E);
+B(world, PLOT_W, 0.06, 4, M.paving, PLOT_C, 0, ROAD_Z, 0.015);
+for (let x = PLOT_C - PLOT_W / 2 + 1.0; x < PLOT_C + PLOT_W / 2 - 0.5; x += 2.0) B(world, 0.06, 0.065, 4, M.pavingLine, x, 0, ROAD_Z, 0.005);   // paving joints
+for (const x of [-8.5, 4.0, 13.5]) { C(world, 0.55, 0.6, 0.45, M.plotSide, x, 0, ROAD_Z, 16); mesh(world, sph(0.5, 12, 8), M.leaf, x, 0.6, ROAD_Z); }   // planters
+B(world, PLOT_W, 0.08, 2.6, M.side, PLOT_C, 0, SIDE_Z, 0.02);
+B(world, PLOT_W, 0.05, 3.0, M.grass, PLOT_C, 0, Z0 - 1.9, 0.02);
+B(world, 2.6, 0.05, HALL_D, M.grass, X0 - 2.6, 0, HALL_ZC, 0.02);
+B(world, 2.6, 0.05, HALL_D, M.grass, X_END + 2.6, 0, HALL_ZC, 0.02);
+B(world, PX(272) - X0 - 0.4, 0.05, Z_END - PZ(744) - 0.4, M.grass, (X0 + PX(272)) / 2, 0, (PZ(744) + Z_END) / 2, 0.02);   // yard left of the admin
+B(world, X_END - CF_XW - 0.4, 0.05, PZ(465) - Z0 - 0.4, M.grass, (CF_XW + X_END) / 2, 0, (Z0 + PZ(465)) / 2, 0.02);     // yard behind the hall
+B(world, CF_X0 - X0 - 0.4, 0.05, CF_STEP - Z0 - 0.4, M.grass, (X0 + CF_X0) / 2, 0, (Z0 + CF_STEP) / 2, 0.02);           // yard left of comfort
+B(world, WC_X0 - X0 - 0.4, 0.05, PZ(546) - CF_STEP - 0.4, M.grass, (X0 + WC_X0) / 2, 0, (CF_STEP + PZ(546)) / 2, 0.02);  // yard above vip
+B(world, 1.7, 0.07, SIDE_Z - Z_END - 1.1, M.side, DOOR_X, 0, (Z_END + SIDE_Z - 1.3) / 2 + 0.1, 0.02);   // path to the door
+
+function tree(x, z, s = 1, round = true) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.scale.setScalar(s);
+  C(g, 0.09, 0.12, 0.9, M.trunk, 0, 0, 0, 8);
+  if (round) mesh(g, sph(0.62, 14, 10), rnd() > 0.5 ? M.leaf : M.leaf2, 0, 1.4, 0);
+  else mesh(g, new THREE.ConeGeometry(0.62, 1.4, 10), M.leaf2, 0, 1.45, 0);
+  world.add(g); return g;
+}
+[[-15.5, -12.4], [-11.5, -12.9], [-7.5, -12.3], [-3.5, -12.9], [0.5, -12.4], [4.5, -12.9], [8.5, -12.3], [12.5, -12.9], [15.5, -12.4],
+ [-1.6, -6.4], [3.2, -6.6], [8.0, -6.3], [10.8, -6.6], [-10.2, 3.6], [-9.0, 6.2], [-11.0, -7.0], [-8.4, -9.4], [-11.8, -3.6], [1.2, -9.0], [6.0, -9.6], [11.5, -9.2],
+ [-14.2, -5.5], [-14.4, -1.0], [-14.1, 4.0], [14.2, -3.5], [14.4, 1.0], [14.1, 5.4],
+ [-14.5, 11.6], [-9.5, 11.6], [11.0, 11.6], [15.0, 11.6]].forEach(([x, z], i) => tree(x, z, 0.8 + rnd() * 0.35, i % 3 !== 1));
+const lampHeads = [];
+for (const x of [-11, 1.4, 12]) { C(world, 0.05, 0.07, 3.6, M.pole, x, 0, SIDE_Z + 1.0, 8); B(world, 0.9, 0.08, 0.14, M.pole, x + 0.4, 3.55, SIDE_Z + 1.0, 0.02); lampHeads.push(B(world, 0.4, 0.06, 0.2, lampMat, x + 0.7, 3.5, SIDE_Z + 1.0, 0.02)); }
+for (const x of [-6, 8.5]) { B(world, 1.6, 0.08, 0.45, M.wood, x, 0.42, SIDE_Z + 0.75, 0.03); B(world, 0.1, 0.42, 0.4, M.steel, x - 0.65, 0, SIDE_Z + 0.75, 0.02); B(world, 0.1, 0.42, 0.4, M.steel, x + 0.65, 0, SIDE_Z + 0.75, 0.02); }
+for (let i = 0; i < 3; i++) { const g = new THREE.Group(); g.position.set(DOOR_X - 2.6 + i * 0.55, 0.08, SIDE_Z - 0.6); B(g, 0.12, 0.06, 0.9, flat(0x2BA3AD), 0, 0.12, 0, 0.02); C(g, 0.025, 0.025, 1, M.dark, 0, 0.12, -0.4, 6); for (const z of [-0.38, 0.38]) { const w = mesh(g, cyl(0.11, 0.11, 0.06, 12), M.dark, 0, 0.11, z); w.rotation.z = Math.PI / 2; } world.add(g); }
+
+function car(color, x, z, ry) {
+  const g = new THREE.Group(); g.position.set(x, 0.04, z); g.rotation.y = ry;
+  B(g, 3.6, 0.7, 1.7, flat(color), 0, 0.3, 0, 0.22);
+  B(g, 2.1, 0.55, 1.5, flat(0xffffff), -0.2, 0.95, 0, 0.18);
+  B(g, 2.14, 0.38, 1.54, flat(0x6B8C99), -0.2, 1.0, 0, 0.12);
+  for (const [cx, cz] of [[-1.15, 0.8], [1.15, 0.8], [-1.15, -0.8], [1.15, -0.8]]) { const w = mesh(g, cyl(0.34, 0.34, 0.24, 14), M.dark, cx, 0.34, cz); w.rotation.x = Math.PI / 2; }
+  B(g, 0.06, 0.14, 0.3, glow(0xFFF1C7), 1.8, 0.62, 0.55, 0.02); B(g, 0.06, 0.14, 0.3, glow(0xFFF1C7), 1.8, 0.62, -0.55, 0.02);
+  world.add(g); return g;
+}
+const movers = [];   // pedestrian street: no cars
+const MOVER_X = [PLOT_C - PLOT_W / 2 + 2, PLOT_C + PLOT_W / 2 - 2];
+
+/* ---------------- building shell (Langame scheme: 1337 Радищева 12) ---------------- */
+const club = new THREE.Group(); club.position.y = 0.08; world.add(club);
+const wallRects = [];      // xz footprints of walls, used to find a free spot for new furniture
+const wallRect = (x0, x1, z0, z1) => wallRects.push({ x0: Math.min(x0, x1), x1: Math.max(x0, x1), z0: Math.min(z0, z1), z1: Math.max(z0, z1) });
+function floorRect(x0, x1, z0, z1, mat = M.floor) { B(world, x1 - x0 + 0.2, 0.08, z1 - z0 + 0.2, mat, (x0 + x1) / 2, 0, (z0 + z1) / 2, 0.04); }
+floorRect(CF_X0, CF_XW, Z0, CF_STEP);            // comfort, upper part
+floorRect(CF_X0, CF_X1, CF_STEP, PZ(546));       // comfort, lower part, and cybersport b
+floorRect(WC_X0, PX(272), CF_STEP, WC_Z1);        // wc
+floorRect(PX(272), CF_X0, CF_STEP, PZ(546));     // the corridor up to comfort
+floorRect(X0, PX(272), PZ(546), PZ(744));        // vip
+floorRect(PX(272), PX(491), PZ(546), Z_END);     // left wing: cybersport a/b, admin
+floorRect(PX(491), X_END, PZ(546), Z_END);       // main hall
+floorRect(PX(557), PX(705), PZ(465), PZ(546));   // duo a
+floorRect(PX(897), PX(981), PZ(465), PZ(546));   // solo a
+floorRect(PX(914), PX(998), Z_END, Z_SOLO);      // solo b
+// closed room: the back office behind the admin (black on the scheme)
+M.neighbour = std(0xE3EAEB, 0x14262B);
+const BO_Y = PZ(986), BO_X = PX(474);           // the reception takes a strip of the back office below its top counter
+const NEIGHBOURS = [[PX(272) + 0.15, PX(507) - 0.05, PZ(920) + 0.05, BO_Y - 0.05], [PX(272) + 0.15, BO_X - 0.05, BO_Y - 0.05, Z_END - 0.15]];   // inside the 0.3 m outer walls
+for (const [x0, x1, z0, z1] of NEIGHBOURS) B(club, x1 - x0 - 0.2, 0.16, z1 - z0 - 0.2, M.neighbour, (x0 + x1) / 2, 0, (z0 + z1) / 2, 0.04);
+// outside the walls (the yards), kept free of furniture
+const OUTSIDE = [[X0, PX(272), PZ(744), Z_END], [X0, CF_X0, Z0, CF_STEP], [X0, WC_X0, CF_STEP, PZ(546)], [WC_X0, PX(272), WC_Z1, PZ(546)],
+  [CF_X1, PX(557), CF_STEP, PZ(546)], [CF_XW, PX(705), Z0, PZ(465)], [PX(705), PX(897), Z0, PZ(546)], [PX(897), PX(981), Z0, PZ(465)], [PX(981), X_END, Z0, PZ(546)]];
+
+// outer walls: full height on the back (-z) and left (-x) sides, 1.5 m on the right, low on the entrance side
+const HW = 2.8, LOW = 0.45, PH = 1.5, T = 0.3;
+function owallX(z, x0, x1, h) {   // runs along x
+  const len = Math.abs(x1 - x0) + T, mx = (x0 + x1) / 2;
+  B(club, len, h, T, M.wall, mx, 0, z, 0.04); if (h > 1) B(club, len, 0.08, T + 0.02, M.wallTop, mx, h, z, 0.02);
+  wallRect(Math.min(x0, x1) - T / 2, Math.max(x0, x1) + T / 2, z - T / 2, z + T / 2);
+}
+function owallZ(x, z0, z1, h) {   // runs along z
+  const len = Math.abs(z1 - z0) + T, mz = (z0 + z1) / 2;
+  B(club, T, h, len, M.wall, x, 0, mz, 0.04); if (h > 1) B(club, T + 0.02, 0.08, len, M.wallTop, x, h, mz, 0.02);
+  wallRect(x - T / 2, x + T / 2, Math.min(z0, z1) - T / 2, Math.max(z0, z1) + T / 2);
+}
+owallX(Z0, CF_X0, CF_XW, HW);                   // comfort: back, right side with the step, left side above the corridor
+owallZ(CF_XW, Z0, CF_STEP, HW); owallX(CF_STEP, CF_X1, CF_XW, HW); owallZ(CF_X1, CF_STEP, PZ(546), HW);
+owallZ(CF_X0, Z0, CF_STEP, HW);
+owallX(CF_STEP, WC_X0, CF_X0, HW);              // top of the corridor and the wc
+owallZ(WC_X0, CF_STEP, WC_Z1, HW); owallX(WC_Z1, WC_X0, PX(272), HW);
+owallZ(PX(272), WC_Z1, PZ(546), HW);            // left wall of the corridor
+owallX(PZ(546), X0, PX(272), HW);               // top of vip
+owallX(PZ(546), PX(491), PX(557), HW);          // back wall of the hall, with the duo a and solo a niches
+owallZ(PX(557), PZ(465), PZ(546), HW); owallX(PZ(465), PX(557), PX(705), HW); owallZ(PX(705), PZ(465), PZ(546), HW);
+owallX(PZ(546), PX(705), PX(897), HW);
+owallZ(PX(897), PZ(465), PZ(546), HW); owallX(PZ(465), PX(897), PX(981), HW); owallZ(PX(981), PZ(465), PZ(546), HW);
+owallX(PZ(546), PX(981), X_END, HW);
+owallZ(X_END, PZ(546), Z_END, PH);              // right wall
+owallX(Z_END, PX(998), X_END, LOW);             // front wall, solo b sticks out, the entrance between 689 and 759 px
+owallZ(PX(998), Z_END, Z_SOLO, LOW); owallX(Z_SOLO, PX(914), PX(998), LOW); owallZ(PX(914), Z_END, Z_SOLO, LOW);
+owallX(Z_END, PX(759), PX(914), LOW);
+owallX(Z_END, PX(272), PX(689), LOW);
+owallZ(PX(272), PZ(744), Z_END, HW);            // left wall of cybersport a and the admin
+owallX(PZ(744), X0, PX(272), PH);               // below vip
+owallZ(X0, PZ(546), PZ(744), HW);               // left wall of vip
+B(club, PZ(744) - PZ(546) - 0.6, 0.06, 0.04, LED.busy, X0 + 0.17, 2.45, (PZ(546) + PZ(744)) / 2, 0.01).rotation.y = Math.PI / 2;
+B(club, CF_XW - CF_X0 - 0.5, 0.06, 0.04, LED.busy, (CF_X0 + CF_XW) / 2, 2.45, Z0 + 0.17, 0.01);
+B(club, CF_XW - CF_X0 - 0.5, 0.12, 0.04, M.trim, (CF_X0 + CF_XW) / 2, 0, Z0 + 0.17, 0.01);
+B(club, X_END - PX(491) - 0.5, 0.06, 0.04, LED.busy, (PX(491) + X_END) / 2, 2.45, PZ(546) + 0.17, 0.01);
+B(club, 1.4, 0.02, 1.2, flat(0x2BA3AD), DOOR_X, 0, Z_END - 0.75, 0.01);   // door mat
+
+// interior partitions (cut at 1.5 m so the zones stay readable)
+function wallX(x, z0, z1, h = PH) { B(club, 0.1, h, Math.abs(z1 - z0), M.wall, x, 0, (z0 + z1) / 2, 0.03); B(club, 0.12, 0.04, Math.abs(z1 - z0), M.trim, x, h, (z0 + z1) / 2, 0.01); wallRect(x - 0.05, x + 0.05, z0, z1); }
+function wallZ(z, x0, x1, h = PH) { B(club, Math.abs(x1 - x0), h, 0.1, M.wall, (x0 + x1) / 2, 0, z, 0.03); B(club, Math.abs(x1 - x0), 0.04, 0.12, M.trim, (x0 + x1) / 2, h, z, 0.01); wallRect(x0, x1, z - 0.05, z + 0.05); }
+const XL = X0 + T / 2, XR = X_END - T / 2;      // inner faces of the left and right walls
+wallZ(CF_Z1, CF_X0, CF_X1 - T / 2);                                    // comfort | cybersport b
+wallX(PX(272), CF_STEP + T / 2, PZ(300)); wallX(PX(272), PZ(345), WC_Z1 - T / 2);   // wc, door on the corridor side
+wallX(PX(272), PZ(546), PZ(638)); wallX(PX(272), PZ(692), PZ(744) - T / 2);   // vip, door 638–692 px
+wallX(CF_X0, PZ(355), PZ(605)); wallZ(PZ(605), PX(353), PX(380)); wallZ(PZ(605), PX(475), PX(491));   // comfort door at the top of the corridor, cybersport b door at the bottom
+wallX(PX(491), PZ(546), PZ(776));                                        // left wing | hall
+wallZ(PZ(781), PX(272) + T / 2, PX(427)); wallX(PX(427), PZ(781), PZ(817)); wallX(PX(427), PZ(880), PZ(920));   // cybersport a, door on the right
+wallZ(PZ(920), PX(272) + T / 2, PX(507));                                // cybersport a | admin
+wallZ(PZ(546), PX(557), PX(583)); wallZ(PZ(546), PX(629), PX(705));      // duo a front, door 583–629 px
+wallZ(PZ(546), PX(897), PX(924)); wallZ(PZ(546), PX(963), PX(981));      // solo a front, door 924–963 px
+wallZ(Z_END, PX(914), PX(932)); wallZ(Z_END, PX(979), PX(998));          // solo b front, door 932–979 px
+wallX(PX(1076), PZ(546), PZ(588)); wallX(PX(1076), PZ(636), PZ(670)); wallX(PX(1076), PZ(709), PZ(840)); wallX(PX(1076), PZ(888), PZ(970));   // right rooms
+for (const y of [652, 775, 905]) wallZ(PZ(y), PX(1076), XR);   // two toilets, duo b, cybersport c
+wallX(PX(507), PZ(920), BO_Y); wallZ(BO_Y, BO_X, PX(507)); wallX(BO_X, BO_Y, Z_END - T / 2);   // back office | admin, stepped for the shelf
+{ const g = new THREE.Group(); g.position.set(PX(565), 0, PZ(1077)); club.add(g); B(g, 0.05, 0.95, 0.5, M.wall, 0, 0.05, 0, 0.02); B(g, 0.07, 0.04, 0.52, M.wood, 0, 0.98, 0, 0.01); }   // the counter gate
+wallZ(PZ(887), PX(637), PX(819)); wallX(PX(637), PZ(887), PZ(913)); wallX(PX(819), PZ(887), PZ(913));   // drinks niche opposite the entrance
+
+// toilets: one by the corridor, two on the right; doors swing out
+M.door = std(0xDCEAF3, 0x2E4756); M.tile = std(0xA8C8F5, 0x2A4F80);   // toilets: pale blue tile, like the WC sign M.porcelain = std(0xFFFFFF, 0xC9D6DA);
+const wcTex = ctex(128, 128, (ctx, w, h, d) => { ctx.fillStyle = d ? '#8FB8F5' : '#5E93E0'; rr(ctx, 8, 8, 112, 112, 20); ctx.fill(); ctx.fillStyle = '#fff'; ctx.font = F(800, 52); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('WC', 64, 68); });
+const wcMat = new THREE.MeshBasicMaterial({ map: wcTex, transparent: true });
+const wcDoors = [];
+// a cubicle between x0..x1 / z0..z1; the door is in its left or right wall (side -1 / +1) between zd0..zd1
+function wc(x0, x1, z0, z1, side, zd0, zd1) {
+  const dx = side < 0 ? x0 : x1, pv = new THREE.Group(); pv.position.set(dx, 0, zd0); pv.rotation.y = -Math.PI / 2 + side * 1.0; club.add(pv);
+  const L = zd1 - zd0 - 0.04;
+  B(pv, L, 1.42, 0.04, M.door, L / 2, 0.02, 0, 0.015);
+  B(pv, 0.1, 0.03, 0.05, M.steel, L - 0.12, 0.92, 0.035, 0.01);
+  plane(pv, 0.28, 0.28, wcMat, L / 2, 1.08, 0.022);
+  wcDoors.push(pv);
+  const bx = side < 0 ? x1 - 0.1 : x0 + 0.1, cz = (z0 + z1) / 2, g = new THREE.Group(); g.position.set(bx, 0, cz); g.rotation.y = side < 0 ? -Math.PI / 2 : Math.PI / 2; club.add(g);
+  B(club, x1 - x0 - 0.06, 0.02, z1 - z0 - 0.06, M.tile, (x0 + x1) / 2, 0, cz, 0.01).castShadow = false;
+  B(g, 0.38, 0.34, 0.16, M.porcelain, 0, 0.36, 0.08, 0.04);
+  C(g, 0.18, 0.13, 0.4, M.porcelain, 0, 0, 0.34, 16);
+}
+wc(WC_X0 + T / 2 + 0.05, PX(272) - 0.05, CF_STEP + T / 2 + 0.05, WC_Z1 - T / 2 - 0.05, 1, PZ(300), PZ(345));
+wc(PX(1076) + 0.05, XR, PZ(546) + T / 2 + 0.05, PZ(652) - 0.05, -1, PZ(588), PZ(636));
+wc(PX(1076) + 0.05, XR, PZ(652) + 0.05, PZ(775) - 0.05, -1, PZ(670), PZ(709));
+
+// zone carpets (click targets)
+function carpet(zone, mat, x0, x1, z0, z1) { const m = B(club, x1 - x0, 0.02, z1 - z0, mat, (x0 + x1) / 2, 0, (z0 + z1) / 2, 0.01); m.castShadow = false; setPick(m, { type: 'zone', id: zone }); return m; }
+M.carpetS = std(0xFCE6EE, 0x3A2230); M.carpetC = std(0xE3F4E8, 0x1B3526);
+carpet('standart', M.carpetH, PX(640), PX(1000), PZ(585), PZ(1020));
+carpet('standart', M.carpetH, PX(496), PX(590), PZ(605), PZ(780));
+carpet('vip', M.carpetV, XL + 0.05, PX(272) - 0.08, PZ(546) + 0.08, PZ(744) - T / 2 - 0.05);
+carpet('comfort', M.carpetC, CF_X0 + T / 2 + 0.05, CF_XW - T / 2 - 0.05, Z0 + T / 2 + 0.05, CF_STEP - T / 2 - 0.05);
+carpet('comfort', M.carpetC, CF_X0 + 0.08, CF_X1 - T / 2 - 0.05, CF_STEP - T / 2 - 0.05, CF_Z1 - 0.08);
+carpet('cyber', M.rugC, PX(353) + 0.08, PX(491) - 0.08, PZ(465) + 0.08, PZ(605) - 0.08);
+carpet('cyber', M.rugC, PX(272) + T / 2 + 0.05, PX(427) - 0.08, PZ(781) + 0.08, PZ(920) - 0.08);
+carpet('cyber', M.rugC, PX(1076) + 0.08, XR - 0.05, PZ(905) + 0.08, Z_END - T / 2 - 0.05);
+carpet('duo', M.carpetB, PX(557) + T / 2 + 0.05, PX(705) - T / 2 - 0.05, PZ(465) + T / 2 + 0.05, PZ(546) - 0.08);
+carpet('duo', M.carpetB, PX(1076) + 0.08, XR - 0.05, PZ(775) + 0.08, PZ(905) - 0.08);
+carpet('solo', M.carpetS, PX(897) + T / 2 + 0.05, PX(981) - T / 2 - 0.05, PZ(465) + T / 2 + 0.05, PZ(546) - 0.08);
+carpet('solo', M.carpetS, PX(914) + T / 2 + 0.05, PX(998) - T / 2 - 0.05, Z_END + 0.08, Z_SOLO - T / 2 - 0.05);
+carpet('admin', M.carpetK, BO_X + 0.06, PX(565) + 0.32, BO_Y + 0.08, Z_END - T / 2 - 0.05);
+
+// floor labels like on the scheme
+const floorLabels = [];
+function floorLabel(text, x, z, w, h, size, rot = 0) {
+  const tex = ctex(Math.round(w * 160), Math.round(h * 160), (ctx, cw, ch, d) => {
+    ctx.fillStyle = d ? 'rgba(147,174,179,.75)' : 'rgba(11,25,29,.45)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = F(800, size); ctx.fillText(text, cw / 2, ch / 2);
+  });
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2; m.rotation.z = rot; m.position.set(x, 0.035, z); club.add(m); floorLabels.push(m); return m;
+}
+floorLabel('STANDART', PX(820), PZ(745), 3.6, 0.6, 80, Math.PI / 2);
+floorLabel('VIP', PX(205), PZ(690), 1.0, 0.4, 56);
+floorLabel('COMFORT', PX(455), PZ(268), 2.0, 0.4, 56);
+floorLabel('CYBER SPORT B', PX(422), PZ(585), 2.2, 0.3, 40);
+floorLabel('CYBER SPORT A', PX(380), PZ(800), 2.2, 0.3, 40);
+floorLabel('CYBER SPORT C', PX(1150), PZ(1084), 2.2, 0.3, 40);
+floorLabel('DUO A', PX(606), PZ(568), 1.2, 0.36, 48);
+floorLabel('DUO B', PX(1118), PZ(885), 1.2, 0.36, 48);
+floorLabel('SOLO A', PX(944), PZ(568), 1.2, 0.36, 48);
+floorLabel('SOLO B', PX(956), PZ(1080), 1.2, 0.36, 48);
+floorLabel('ВХОД', DOOR_X, Z_END - 1.5, 1.4, 0.45, 56);
+floorLabel('НАПИТКИ', PX(728), PZ(940), 1.6, 0.36, 44);
+floorLabel('WC', (WC_X0 + PX(272)) / 2, PZ(352), 0.8, 0.36, 48);
+floorLabel('WC', PX(1150), PZ(625), 0.8, 0.36, 48);
+floorLabel('WC', PX(1150), PZ(745), 0.8, 0.36, 48);
+
+// signage on the back wall of the hall
+const wallLogo = ctex(1024, 256, (ctx, w, h, d) => drawLogo(ctx, 40, 32, 1.9, d ? '#83E4EC' : '#007681', d ? '#F4FBFC' : '#0B191D'));
+plane(club, 3.4, 0.85, new THREE.MeshBasicMaterial({ map: wallLogo, transparent: true }), PX(800), 1.75, PZ(546) + T / 2 + 0.01);
+/* ---------------- PCs ---------------- */
+function makePC(id, zone, x, z, ry, deskW = 0.94) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; club.add(g);
+  const zc = ZONES[zone].c3;
+  B(g, deskW, 0.05, 0.72, M.desk, 0, 0.72, 0, 0.03);
+  B(g, 0.05, 0.72, 0.62, M.deskLeg, -deskW / 2 + 0.06, 0, -0.02, 0.02); B(g, 0.05, 0.72, 0.62, M.deskLeg, deskW / 2 - 0.06, 0, -0.02, 0.02);
+  B(g, 0.06, 0.22, 0.06, M.dark, 0, 0.77, -0.22, 0.02); B(g, 0.26, 0.02, 0.16, M.dark, 0, 0.77, -0.22, 0.01);
+  B(g, 0.82, 0.44, 0.05, M.dark, 0, 0.94, -0.25, 0.02);
+  const scr = plane(g, 0.76, 0.38, SCREEN.free, 0, 1.16, -0.222); scr.userData.unmirror = true;
+  B(g, 0.44, 0.025, 0.15, M.dark, 0, 0.77, 0.06, 0.01); B(g, 0.06, 0.025, 0.1, M.dark, 0.33, 0.77, 0.08, 0.01);
+  B(g, 0.2, 0.44, 0.42, M.tower, deskW / 2 - 0.16, 0, -0.1, 0.04);
+  B(g, 0.02, 0.28, 0.02, glow(zc), deskW / 2 - 0.16, 0.08, 0.115, 0.005);
+  const led = B(g, deskW - 0.1, 0.03, 0.015, LED.free, 0, 0.705, 0.362, 0.005); led.castShadow = false;
+  const ch = new THREE.Group(); ch.position.set(0, 0, 0.78); g.add(ch);
+  const chairMat = flat(zc), chairDark = flat(0x34444C);
+  C(ch, 0.3, 0.3, 0.05, chairDark, 0, 0, 0, 10); C(ch, 0.035, 0.035, 0.42, chairDark, 0, 0.04, 0, 8);
+  B(ch, 0.56, 0.09, 0.54, chairDark, 0, 0.46, 0, 0.04);
+  B(ch, 0.5, 0.02, 0.5, chairMat, 0, 0.55, 0, 0.01);
+  B(ch, 0.56, 0.86, 0.11, chairDark, 0, 0.58, 0.3, 0.05);
+  B(ch, 0.36, 0.6, 0.02, chairMat, 0, 0.7, 0.24, 0.01);
+  B(ch, 0.06, 0.06, 0.34, chairDark, -0.3, 0.72, 0.02, 0.02); B(ch, 0.06, 0.06, 0.34, chairDark, 0.3, 0.72, 0.02, 0.02);
+  setPick(g, { type: 'seat', id });
+  const seat = { id, num: Number(String(id).replace(/\D+/g, '')), zone, g, scr, led, ch, person: null, state: 'off', guest: null, game: null, left: null, until: null, booked: null };
+  seats.push(seat); return seat;
+}
+const pcId = n => 'ПК-' + String(n).padStart(2, '0');
+// A desk stands 0.4 m off the wall it backs onto. ry: 0 the guest faces -z, PI faces +z, PI/2 faces -x, -PI/2 faces +x.
+const OFF = 0.4;
+// standart: two blocks of desks back to back, guests face each other's backs across the aisles
+const SA = PX(732.5), SB = PX(907.5), BB = 0.38;
+[[1, 617], [2, 674], [4, 788], [5, 845]].forEach(([n, y]) => makePC(pcId(n), 'standart', SA - BB, PZ(y), -Math.PI / 2));
+[[10, 617], [9, 674], [8, 731], [7, 788], [6, 845]].forEach(([n, y]) => makePC(pcId(n), 'standart', SA + BB, PZ(y), Math.PI / 2));
+[[11, 731], [12, 788], [13, 845], [14, 902], [15, 959]].forEach(([n, y]) => makePC(pcId(n), 'standart', SB - BB, PZ(y), -Math.PI / 2));
+[[20, 731], [19, 788], [18, 845], [17, 902], [16, 959]].forEach(([n, y]) => makePC(pcId(n), 'standart', SB + BB, PZ(y), Math.PI / 2));
+// 21–23 along the left-wing wall, facing it
+[[23, 635], [22, 692], [21, 749]].forEach(([n, y]) => makePC(pcId(n), 'standart', PX(491) + 0.05 + OFF, PZ(y), Math.PI / 2));
+// vip: three desks on the top wall, two on the left wall
+[[28, 142], [29, 190], [30, 238]].forEach(([n, x]) => makePC(pcId(n), 'vip', PX(x), PZ(546) + 0.05 + OFF, 0, 0.9));
+[[27, 650], [26, 705]].forEach(([n, y]) => makePC(pcId(n), 'vip', XL + OFF, PZ(y), Math.PI / 2));
+// comfort (lower part): 50 and 51 side by side across the room facing the entrance side, 52 and 53 on the right wall
+[[50, 414], [51, 460]].forEach(([n, x]) => makePC(pcId(n), 'comfort', PX(x), PZ(343), Math.PI, 0.9));
+[[52, 393], [53, 440]].forEach(([n, y]) => makePC(pcId(n), 'comfort', CF_X1 - T / 2 - OFF, PZ(y), -Math.PI / 2, 0.9));
+// cybersport b: two on the top wall, one on the left wall
+[[35, 415], [36, 461]].forEach(([n, x]) => makePC(pcId(n), 'cyber', PX(x), PZ(465) + 0.05 + OFF, 0, 0.9));
+makePC(pcId(34), 'cyber', PX(353) + 0.05 + OFF, PZ(574), Math.PI / 2, 0.9);
+// cybersport a: one on the left wall, two on the bottom wall
+makePC(pcId(33), 'cyber', PX(272) + T / 2 + OFF, PZ(815), Math.PI / 2, 0.9);
+[[32, 335], [31, 383]].forEach(([n, x]) => makePC(pcId(n), 'cyber', PX(x), PZ(920) - 0.05 - OFF, Math.PI, 0.9));
+// cybersport c: two on the top wall, one on the right wall
+[[41, 1118], [42, 1183]].forEach(([n, x]) => makePC(pcId(n), 'cyber', PX(x), PZ(905) + 0.05 + OFF, 0));
+makePC(pcId(43), 'cyber', XR - OFF, PZ(1040), -Math.PI / 2);
+// duo a in the niche, duo b on the top and right walls
+[[37, 598], [38, 663]].forEach(([n, x]) => makePC(pcId(n), 'duo', PX(x), PZ(465) + T / 2 + OFF, 0));
+makePC(pcId(39), 'duo', PX(1118), PZ(775) + 0.05 + OFF, 0);
+makePC(pcId(40), 'duo', XR - OFF, PZ(862), -Math.PI / 2);
+// solo booths: a in the back niche, b in the front one
+makePC(pcId(46), 'solo', PX(939), PZ(465) + T / 2 + OFF, 0, 1.0);
+makePC(pcId(45), 'solo', PX(956), Z_SOLO - T / 2 - OFF, Math.PI, 1.0);
+
+// street pylon
+const pylonTex = ctex(256, 640, (ctx, w, h, d) => {
+  ctx.fillStyle = d ? '#0F2227' : '#FFFFFF'; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = d ? '#F4FBFC' : '#0B191D'; ctx.textAlign = 'center'; ctx.font = F(800, 70); ctx.fillText('1337', w / 2, 120);
+  ctx.font = F(600, 24); ctx.fillStyle = d ? '#93AEB3' : '#5A6D71'; ctx.fillText('компьютерный клуб', w / 2, 168); ctx.fillText('Радищева 12', w / 2, 200);
+  drawLogo(ctx, w / 2 - 58, 270, 1.2, d ? '#83E4EC' : '#007681');
+  ctx.fillStyle = d ? '#83E4EC' : '#007681'; rr(ctx, 30, 420, w - 60, 70, 14); ctx.fill(); ctx.fillStyle = d ? '#071317' : '#fff'; ctx.font = F(800, 24); ctx.fillText('Leetplus.ru', w / 2, 464);
+  ctx.font = F(600, 21); ctx.fillStyle = d ? '#93AEB3' : '#5A6D71'; ctx.fillText('лутай бонусы', w / 2, 536); ctx.fillText('на халяву', w / 2, 564);
+});
+{ const g = new THREE.Group(); g.position.set(DOOR_X + 2.3, 0.08, SIDE_Z + 0.2); g.rotation.y = -0.25; world.add(g); B(g, 1.3, 3.2, 0.4, M.wall, 0, 0, 0, 0.08); B(g, 1.4, 0.1, 0.5, M.trim, 0, 0, 0, 0.03); plane(g, 1.16, 2.9, new THREE.MeshBasicMaterial({ map: pylonTex }), 0, 1.65, 0.205); }
+/* ---------------- walkers ---------------- */
+function walker(path, opts) {
+  const p = makePerson({ shirt: opts.shirt, hair: pick(HAIRS), skin: pick(SKINS) }, false);
+  p.position.set(path[0][0], 0.08, path[0][1]); world.add(p);
+  return { p, path, i: 0, t: 0, speed: opts.speed || 1.3, wait: 0, pauses: opts.pauses || {} };
+}
+const DESK_X = PX(565) + 0.8, AISLE_X = PX(820);
+const walkers = [
+  walker([[11, SIDE_Z + 0.4], [DOOR_X, SIDE_Z + 0.4], [DOOR_X, Z_END - 0.6], [DESK_X, PZ(1030)], [DESK_X, PZ(1030)], [DOOR_X, Z_END - 0.6], [DOOR_X, SIDE_Z + 0.4]], { shirt: 0xF2A0B4, pauses: { 4: 3.5 } }),
+  walker([[AISLE_X, PZ(1040)], [AISLE_X, PZ(592)], [PX(606), PZ(592)], [PX(606), PZ(560)], [PX(606), PZ(592)], [AISLE_X, PZ(592)], [AISLE_X, PZ(1040)], [AISLE_X, PZ(1040)]], { shirt: 0xF5D27A, speed: 1.0, pauses: { 4: 2.5, 7: 2.5 } }),
+  walker([[MOVER_X[0] - 1, SIDE_Z - 0.3], [MOVER_X[1] + 1, SIDE_Z - 0.3]], { shirt: 0x8FB8F5, speed: 1.4 }),
+  walker([[MOVER_X[1] + 1, ROAD_Z + 1.2], [MOVER_X[0] - 1, ROAD_Z + 1.2]], { shirt: 0xB9A6F0, speed: 1.1 }),
+  walker([[MOVER_X[0] + 3, ROAD_Z - 1.0], [MOVER_X[1] - 3, ROAD_Z - 1.0]], { shirt: 0xF7B48A, speed: 0.9 })
+];
+/* ---------------- furniture catalog (editable items) ---------------- */
+const SOFA_COLORS = { teal: [0x7FD3D8, 0x3F8F96, 'Бирюзовый'], blue: [0x8FB8F5, 0x4A6FA8, 'Голубой'], lilac: [0xB9A6F0, 0x6E5BB0, 'Лавандовый'], peach: [0xF7B48A, 0xA8684A, 'Персиковый'], graphite: [0x5B6B73, 0x34444C, 'Графит'] };
+const colorMats = {};
+function sofaMat(c) { const k = SOFA_COLORS[c] ? c : 'blue'; return colorMats[k] || (colorMats[k] = std(SOFA_COLORS[k][0], SOFA_COLORS[k][1])); }
+Object.assign(M, { fridge: std(0xFFFFFF, 0x2C4349), fridgeIn: std(0xE3F3F5, 0x2A5961), cabinet: std(0xF4F7F7, 0x26393F), locker: std(0xE9EFF0, 0x203338) });
+const GOODS = [0x2BB3BE, 0xF2A65A, 0xE86A6A, 0x9C8CF5, 0x7CC9A0, 0xF5D27A, 0x5E93E0, 0xF27896].map(flat);
+const adminTex = ctex(640, 160, (ctx, w, h, d) => {
+  drawLogo(ctx, 20, 18, 1.3, d ? '#83E4EC' : '#007681');
+  ctx.fillStyle = d ? '#F4FBFC' : '#0B191D'; ctx.font = F(800, 70); ctx.textBaseline = 'middle'; ctx.fillText('АДМИН', 170, h / 2 + 4);
+});
+const adminMat = new THREE.MeshBasicMaterial({ map: adminTex, transparent: true });
+const stripMat = (text, w, h) => new THREE.MeshBasicMaterial({ map: ctex(w, h, (ctx, cw, ch, d) => {
+  ctx.fillStyle = d ? '#0E3A40' : '#007681'; rr(ctx, 0, 0, cw, ch, ch * 0.2); ctx.fill();
+  ctx.fillStyle = '#F4FBFC'; ctx.font = F(800, Math.round(ch * 0.5)); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, cw / 2, ch / 2 + 1);
+}), transparent: true });
+const coldMat = stripMat('ХОЛОДНЫЕ НАПИТКИ', 384, 72), barMat = stripMat('БАР · СНЕКИ · НАПИТКИ', 512, 80);
+const merchMat = new THREE.MeshBasicMaterial({ map: ctex(512, 96, (ctx, w, h, d) => {
+  ctx.fillStyle = d ? '#0F2227' : '#FFFFFF'; rr(ctx, 0, 0, w, h, 16); ctx.fill();
+  drawLogo(ctx, 26, 6, 0.85, d ? '#83E4EC' : '#007681', d ? '#F4FBFC' : '#0B191D');
+}), transparent: true });
+const tvMat = new THREE.MeshBasicMaterial({ map: gameScreen('LeetPlus', ['#2BB3BE', '#0E3A40'], true) });
+const STAFF = { shirt: 0x007681, hair: 0x1d1d22, skin: 0xd39e7c };
+const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+function staffAt(g, x, z) { const p = makePerson(STAFF, false); p.position.set(x, 0, z); p.userData.isStaff = true; mesh(p, cyl(0.36, 0.36, 1.9, 10), hitMat, 0, 0.95, 0, false); g.add(p); g.userData.staff = p; }
+function deskMonitor(g, x, z, ry = Math.PI) { const m = new THREE.Group(); m.position.set(x, 1.1, z); m.rotation.y = ry; g.add(m); B(m, 0.05, 0.18, 0.05, M.dark, 0, 0, 0, 0.02); B(m, 0.62, 0.38, 0.04, M.dark, 0, 0.16, 0, 0.02); }
+function sofaBody(g, w, mat, x = 0, z = 0, ry = 0, arms = [true, true]) {
+  const s = new THREE.Group(); s.position.set(x, 0, z); s.rotation.y = ry; g.add(s);
+  B(s, w, 0.42, 0.9, mat, 0, 0, 0, 0.12); B(s, w, 0.55, 0.22, mat, 0, 0.35, -0.36, 0.1);
+  if (arms[0]) B(s, 0.22, 0.6, 0.9, mat, -w / 2 + 0.11, 0, 0, 0.1);
+  if (arms[1]) B(s, 0.22, 0.6, 0.9, mat, w / 2 - 0.11, 0, 0, 0.1);
+  const n = Math.max(1, Math.round((w - 0.44) / 0.62)), cw = (w - 0.44) / n;
+  for (let i = 0; i < n; i++) B(s, cw - 0.05, 0.1, 0.62, mat, -w / 2 + 0.22 + cw * (i + 0.5), 0.42, 0.08, 0.05);
+  return s;
+}
+function ringSector(r0, r1, h) {
+  const sh = new THREE.Shape(); sh.absarc(0, 0, r1, Math.PI, Math.PI * 2, false); sh.absarc(0, 0, r0, Math.PI * 2, Math.PI, true);
+  const g = new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false, curveSegments: 28 }); g.rotateX(-Math.PI / 2); return g;
+}
+// a row of goods on a shelf: cans, bottles, snack packs, mugs, folded tees or caps
+function goodsRow(g, kind, x0, x1, y, z, seed = 0) {
+  const step = { can: 0.085, bottle: 0.09, pack: 0.13, mug: 0.12, tee: 0.24, cap: 0.2 }[kind];
+  const n = Math.max(1, Math.floor((x1 - x0) / step)), pad = (x1 - x0 - n * step) / 2;
+  for (let i = 0; i < n; i++) {
+    const x = x0 + pad + step * (i + 0.5), m = GOODS[(i + seed) % GOODS.length];
+    if (kind === 'can') C(g, 0.032, 0.032, 0.12, m, x, y, z, 10);
+    else if (kind === 'bottle') { C(g, 0.034, 0.034, 0.17, m, x, y, z, 10); C(g, 0.012, 0.03, 0.07, M.steel, x, y + 0.17, z, 8); }
+    else if (kind === 'pack') B(g, 0.11, 0.16, 0.05, m, x, y, z, 0.015);
+    else if (kind === 'mug') { C(g, 0.04, 0.04, 0.09, i % 2 ? M.fridge : GOODS[0], x, y, z, 12); }
+    else if (kind === 'tee') { B(g, 0.2, 0.035, 0.16, i % 2 ? M.fridge : GOODS[0], x, y, z, 0.01); B(g, 0.2, 0.035, 0.16, M.dark, x, y + 0.035, z, 0.01); }
+    else if (kind === 'cap') { const c = mesh(g, new THREE.SphereGeometry(0.075, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), i % 2 ? M.dark : GOODS[0], x, y, z); B(g, 0.11, 0.008, 0.08, i % 2 ? M.dark : GOODS[0], x, y, z + 0.08, 0.003); }
+  }
+}
+// glass-front cabinet: fridges and the merch case share this shell
+function glassCase(g, w, h, d, o) {
+  const t = 0.05, top = o.top, base = o.base, body = o.mat || M.fridge;
+  B(g, w, h, t, body, 0, 0, -d / 2 + t / 2, 0.02);
+  B(g, t, h, d, body, -w / 2 + t / 2, 0, 0, 0.02); B(g, t, h, d, body, w / 2 - t / 2, 0, 0, 0.02);
+  B(g, w, base, d, body, 0, 0, 0, 0.02); B(g, w, top, d, body, 0, h - top, 0, 0.02);
+  const inner = B(g, w - 2 * t, h - top - base, 0.01, o.inMat || M.fridgeIn, 0, base, -d / 2 + t + 0.006, 0); inner.castShadow = false;
+  const n = o.rows.length, iy0 = base, ih = h - top - base;
+  o.rows.forEach((kind, i) => {
+    const y = iy0 + ih * i / n;
+    if (i) B(g, w - 2 * t, 0.012, d - t - 0.03, M.steel, 0, y - 0.012, 0.0, 0.002);
+    goodsRow(g, kind, -w / 2 + t + 0.02, w / 2 - t - 0.02, y, 0.02, i * 3);
+  });
+  const door = B(g, w - 0.02, ih + 0.02, 0.02, glass, 0, base - 0.01, d / 2 - 0.012, 0.01); door.castShadow = false;
+  B(g, 0.025, Math.min(0.5, ih * 0.5), 0.03, M.steel, w / 2 - 0.07, base + ih * 0.35, d / 2 + 0.012, 0.01);
+  if (o.sign) { const p = plane(g, w - 0.06, top - 0.03, o.sign, 0, h - top / 2, d / 2 + 0.003); p.userData.unmirror = true; }
+}
+const CATALOG = {
+  sofa2: { fam: 'sofa', name: 'Диван на двоих', colors: 'teal', icon: '<rect x="4" y="9" width="24" height="12" rx="3"/><rect x="4" y="6" width="24" height="4" rx="2"/>', build: (g, it) => sofaBody(g, 1.6, sofaMat(it.color)) },
+  sofa3: { fam: 'sofa', name: 'Диван на троих', colors: 'teal', icon: '<rect x="1" y="9" width="30" height="12" rx="3"/><rect x="1" y="6" width="30" height="4" rx="2"/>', build: (g, it) => sofaBody(g, 2.2, sofaMat(it.color)) },
+  sofaL: { fam: 'sofa', name: 'Угловой диван', colors: 'teal', icon: '<path d="M2 7h28v8h-8v12h-8V15H2z" stroke-linejoin="round"/>', build: (g, it) => { const m = sofaMat(it.color); sofaBody(g, 2.4, m, 0, 0, 0, [true, false]); sofaBody(g, 1.5, m, 1.65, 0.75, -Math.PI / 2, [false, true]); B(g, 0.9, 0.42, 0.9, m, 1.65, 0, 0, 0.12); B(g, 0.9, 0.55, 0.22, m, 1.65, 0.35, -0.36, 0.1); } },
+  armchair: { fam: 'sofa', name: 'Кресло', colors: 'teal', icon: '<rect x="9" y="9" width="14" height="13" rx="3"/><rect x="9" y="6" width="14" height="4" rx="2"/>', build: (g, it) => sofaBody(g, 0.95, sofaMat(it.color)) },
+  beanbag: { fam: 'sofa', name: 'Кресло-мешок', colors: 'teal', icon: '<ellipse cx="16" cy="15" rx="10" ry="8"/>', build: (g, it) => { const m = mesh(g, sph(0.48, 16, 12), sofaMat(it.color), 0, 0.3, 0); m.scale.set(1, 0.62, 1); } },
+  recStraight: { fam: 'reception', name: 'Стойка прямая', len: [1.6, 4.4, 2.4], icon: '<rect x="2" y="11" width="28" height="8" rx="2"/><circle cx="16" cy="25" r="2.5"/>', build: (g, it) => {
+    const L = it.len || 2.4; B(g, L, 1.05, 0.6, M.wall, 0, 0, 0, 0.06); B(g, L + 0.16, 0.05, 0.84, M.wood, 0, 1.05, -0.08, 0.02);
+    B(g, L - 0.1, 0.04, 0.02, LED.busy, 0, 0.12, 0.305, 0.01);
+    plane(g, Math.min(L - 0.3, 2.4), Math.min(L - 0.3, 2.4) / 4, adminMat, 0, 0.6, 0.302).userData.unmirror = true;
+    deskMonitor(g, -L / 4, -0.15); if (L > 2.2) deskMonitor(g, L / 4, -0.15);
+    if (it.staff) staffAt(g, 0, -0.85);
+  } },
+  recL: { fam: 'reception', name: 'Стойка угловая', icon: '<path d="M3 10h26v8H11v10H3z" stroke-linejoin="round"/>', build: (g, it) => {
+    B(g, 2.4, 1.05, 0.6, M.wall, 0, 0, 0, 0.06); B(g, 2.56, 0.05, 0.84, M.wood, 0, 1.05, -0.08, 0.02);
+    B(g, 0.6, 1.05, 1.5, M.wall, -0.9, 0, -1.05, 0.06); B(g, 0.84, 0.05, 1.6, M.wood, -0.98, 1.05, -1.05, 0.02);
+    B(g, 2.3, 0.04, 0.02, LED.busy, 0, 0.12, 0.305, 0.01); plane(g, 2.0, 0.5, adminMat, 0.1, 0.6, 0.302).userData.unmirror = true;
+    deskMonitor(g, 0.2, -0.15); if (it.staff) staffAt(g, 0.3, -0.85);
+  } },
+  recRound: { fam: 'reception', name: 'Стойка полукруглая', icon: '<path d="M3 12a13 13 0 0 0 26 0h-6a7 7 0 0 1-14 0z" stroke-linejoin="round"/>', build: (g, it) => {
+    mesh(g, ringSector(0.95, 1.3, 1.05), M.wall, 0, 0, 0); mesh(g, ringSector(0.88, 1.4, 0.05), M.wood, 0, 1.05, 0);
+    plane(g, 1.0, 0.25, adminMat, 0, 0.62, 1.312).userData.unmirror = true;
+    deskMonitor(g, -0.45, 0.55, Math.PI + 0.4); deskMonitor(g, 0.45, 0.55, Math.PI - 0.4); if (it.staff) staffAt(g, 0, 0.2);
+  } },
+  barShelf: { fam: 'bar', name: 'Барные полки с товарами', len: [1.0, 3.6, 2.1], icon: '<rect x="3" y="4" width="26" height="22" rx="2"/><path d="M3 12h26M3 19h26M8 7v3M12 7v3M17 7v3M22 7v3"/>', build: (g, it) => {
+    const L = it.len || 2.1, nd = Math.max(1, Math.round(L / 0.55)), dw = L / nd;
+    B(g, L, 0.9, 0.42, M.cabinet, 0, 0, 0, 0.03); B(g, L + 0.04, 0.04, 0.46, M.wood, 0, 0.9, 0, 0.01);
+    for (let i = 0; i < nd; i++) B(g, dw - 0.03, 0.74, 0.012, M.wallTop, -L / 2 + dw * (i + 0.5), 0.08, 0.212, 0.005);
+    B(g, L, 0.86, 0.03, M.woodDark, 0, 0.94, -0.195, 0.01);
+    for (const y of [1.22, 1.5]) { B(g, L, 0.03, 0.24, M.wood, 0, y, -0.07, 0.008); const s = B(g, L - 0.04, 0.012, 0.012, LED.busy, 0, y - 0.014, 0.045, 0.002); s.castShadow = false; }
+    goodsRow(g, 'pack', -L / 2 + 0.06, L / 2 - 0.06, 0.94, 0.0, 1); goodsRow(g, 'bottle', -L / 2 + 0.06, L / 2 - 0.06, 1.25, -0.08, 3); goodsRow(g, 'can', -L / 2 + 0.06, L / 2 - 0.06, 1.53, -0.08, 5);
+    plane(g, Math.min(L - 0.2, 1.5), Math.min(L - 0.2, 1.5) / 6.4, barMat, 0, 0.6, 0.22).userData.unmirror = true;
+  } },
+  fridge: { fam: 'bar', name: 'ХО однодверный', icon: '<rect x="9" y="2" width="14" height="26" rx="2"/><path d="M9 7h14M19 12v6"/>', build: g => glassCase(g, 0.62, 1.95, 0.62, { top: 0.18, base: 0.1, rows: ['bottle', 'can', 'bottle', 'can', 'can'], sign: coldMat }) },
+  fridgeBar: { fam: 'bar', name: 'ХО барный', stack: true, icon: '<rect x="7" y="10" width="18" height="16" rx="2"/><path d="M7 14h18M21 17v5"/>', build: g => glassCase(g, 0.5, 0.56, 0.48, { top: 0.06, base: 0.05, rows: ['can', 'can'] }) },
+  stool: { fam: 'bar', name: 'Барный стул', colors: 'graphite', icon: '<ellipse cx="16" cy="7" rx="7" ry="3"/><path d="M16 10v16M11 27h10M12 19h8"/>', build: (g, it) => {
+    C(g, 0.2, 0.22, 0.03, M.steel, 0, 0, 0, 16); C(g, 0.025, 0.025, 0.72, M.steel, 0, 0.03, 0, 8);
+    const r = mesh(g, new THREE.TorusGeometry(0.15, 0.012, 6, 20), M.steel, 0, 0.3, 0); r.rotation.x = Math.PI / 2;
+    C(g, 0.2, 0.18, 0.08, sofaMat(it.color || 'graphite'), 0, 0.72, 0, 18);
+  } },
+  lockers: { fam: 'storage', name: 'Шкафчики для одежды', colors: 'teal', icon: '<rect x="4" y="3" width="24" height="24" rx="2"/><path d="M12 3v24M20 3v24M4 15h24"/>', build: (g, it) => {
+    const w = 1.2, cw = w / 3, m = sofaMat(it.color || 'teal');
+    B(g, w, 1.85, 0.5, M.locker, 0, 0, 0, 0.02); B(g, w + 0.02, 0.03, 0.52, M.trim, 0, 1.85, 0, 0.01);
+    for (let c = 0; c < 3; c++) for (let r = 0; r < 2; r++) {
+      const x = -w / 2 + cw * (c + 0.5), y = 0.06 + r * 0.89;
+      B(g, cw - 0.04, 0.85, 0.02, m, x, y, 0.255, 0.01);
+      B(g, 0.03, 0.06, 0.015, M.dark, x + cw / 2 - 0.08, y + 0.42, 0.27, 0.005);
+      for (let k = 0; k < 3; k++) B(g, cw * 0.5, 0.012, 0.01, M.dark, x, y + 0.66 + k * 0.045, 0.268, 0.003);
+    }
+  } },
+  merch: { fam: 'storage', name: 'Шкафчик для мерча и продуктов', icon: '<rect x="6" y="2" width="20" height="26" rx="2"/><path d="M6 9h20M6 16h20M6 22h20M11 5h10"/>', build: g => glassCase(g, 0.9, 1.9, 0.46, { top: 0.2, base: 0.1, rows: ['pack', 'mug', 'tee', 'cap'], mat: M.cabinet, inMat: M.wallTop, sign: merchMat }) },
+  merchSlim: { fam: 'storage', name: 'Узкий шкаф для мерча', icon: '<rect x="10" y="2" width="12" height="26" rx="2"/><path d="M10 9h12M10 16h12M10 22h12"/>', build: g => glassCase(g, 0.5, 1.9, 0.42, { top: 0.12, base: 0.1, rows: ['pack', 'mug', 'cap', 'tee'], mat: M.cabinet, inMat: M.wallTop }) },
+  coatRack: { fam: 'storage', name: 'Напольная вешалка', len: [0.8, 2.0, 1.2], icon: '<path d="M4 6h24M6 6v20M26 6v20M3 26h6M23 26h6M11 6v14M16 6v16M21 6v14"/>', build: (g, it) => {
+    const L = it.len || 1.2;
+    for (const x of [-L / 2, L / 2]) { C(g, 0.018, 0.018, 1.6, M.steel, x, 0.04, 0, 8); B(g, 0.06, 0.04, 0.5, M.steel, x, 0, 0, 0.01); }
+    const bar = mesh(g, cyl(0.016, 0.016, L, 8), M.steel, 0, 1.62, 0); bar.rotation.z = Math.PI / 2;
+    const n = Math.max(2, Math.floor((L - 0.2) / 0.2));
+    for (let i = 0; i < n; i++) { const x = -L / 2 + 0.15 + (L - 0.3) * i / (n - 1); B(g, 0.05, 0.7 - (i % 3) * 0.08, 0.38, GOODS[(i * 3) % GOODS.length], x, 0.88 + (i % 3) * 0.08, 0, 0.03); }
+  } },
+  foodBar: { fam: 'bar', name: 'Барная стойка для еды', len: [0.8, 3.0, 1.3], icon: '<rect x="2" y="9" width="28" height="5" rx="1.5"/><path d="M6 14v13M26 14v13M6 22h20"/>', build: (g, it) => {
+    const L = it.len || 1.3;
+    B(g, L, 0.05, 0.45, M.wood, 0, 1.03, 0, 0.015);
+    for (const x of [-L / 2 + 0.06, L / 2 - 0.06]) B(g, 0.05, 1.03, 0.4, M.steel, x, 0, -0.02, 0.01);
+    const foot = mesh(g, cyl(0.015, 0.015, L - 0.1, 8), M.steel, 0, 0.28, 0.16); foot.rotation.z = Math.PI / 2;
+    B(g, L - 0.12, 0.02, 0.02, LED.busy, 0, 1.0, 0.21, 0.005).castShadow = false;
+  } },
+  tv: { fam: 'other', name: 'Телевизор на стене', icon: '<rect x="3" y="6" width="26" height="16" rx="2"/><path d="M12 26h8"/>', build: g => {
+    B(g, 1.25, 0.74, 0.05, M.dark, 0, 1.0, 0, 0.02);
+    plane(g, 1.17, 0.66, tvMat, 0, 1.37, 0.027).userData.unmirror = true;
+  } },
+  table: { fam: 'other', name: 'Журнальный столик', icon: '<rect x="7" y="10" width="18" height="12" rx="2"/>', build: g => { B(g, 0.9, 0.06, 0.55, M.wood, 0, 0.38, 0, 0.02); for (const [x, z] of [[-0.38, -0.2], [0.38, -0.2], [-0.38, 0.2], [0.38, 0.2]]) B(g, 0.05, 0.38, 0.05, M.woodDark, x, 0, z, 0.01); } },
+  plant: { fam: 'other', name: 'Растение', icon: '<circle cx="16" cy="16" r="9"/><path d="M16 9v14M10 14l6 3 6-4"/>', build: g => { C(g, 0.22, 0.17, 0.42, M.pot, 0, 0, 0, 14); mesh(g, sph(0.36, 12, 9), M.leaf2, 0, 0.75, 0); mesh(g, sph(0.26, 12, 9), M.leaf, 0.14, 1.02, 0.05); } }
+};
+const FAMILY = { sofa: ['sofa2', 'sofa3', 'sofaL', 'armchair', 'beanbag'], reception: ['recStraight', 'recL', 'recRound'], bar: ['barShelf', 'fridge', 'fridgeBar', 'foodBar', 'stool'], storage: ['lockers', 'merch', 'merchSlim', 'coatRack'], other: ['table', 'plant', 'tv'] };
+const FAMILY_TITLE = { sofa: 'диваны', reception: 'ресепшен', bar: 'бар и холодильники', storage: 'шкафы', other: 'другое' };
+const RY_E = Math.PI / 2;   // items with ry RY_E face +x
+const DEFAULT_ITEMS = [
+  // admin (user's sketch 14.11): the counter faces the hall, a second counter closes it from the top, a gate by the front wall,
+  // shelves on the back-office wall behind the admin, a fridge in the corner above the counter, merch by the gate
+  { id: 'reception', type: 'recStraight', x: r2w(PX(565)), z: r2w(PZ(1032)), ry: RY_E, len: 1.7, staff: true },
+  { id: 'reception-top', type: 'recStraight', x: r2w(PX(543)), z: r2w(PZ(975)), ry: Math.PI, len: 1.45 },
+  { id: 'bar-shelf', type: 'barShelf', x: r2w(BO_X + 0.05 + 0.21), z: r2w((BO_Y + Z_END - T / 2) / 2), ry: RY_E, len: 2.2 },
+  { id: 'admin-fridge', type: 'fridge', x: r2w(PX(507) + 0.05 + 0.31), z: r2w(PZ(920) + 0.05 + 0.4), ry: RY_E },
+  { id: 'merch', type: 'merch', x: r2w(PX(612)), z: r2w(Z_END - T / 2 - 0.25), ry: Math.PI },
+  // drinks: three fridges facing the entrance
+  { id: 'drinks-1', type: 'fridge', x: r2w(PX(668)), z: r2w(PZ(887) + 0.05 + 0.33), ry: 0 },
+  { id: 'drinks-2', type: 'fridge', x: r2w(PX(728)), z: r2w(PZ(887) + 0.05 + 0.33), ry: 0 },
+  { id: 'drinks-3', type: 'fridge', x: r2w(PX(788)), z: r2w(PZ(887) + 0.05 + 0.33), ry: 0 },
+  // comfort (upper part): TV with the PS5 on the left wall, two armchairs on the right facing it
+  { id: 'comfort-tv', type: 'tv', x: r2w(CF_X0 + T / 2 + 0.08), z: r2w(PZ(212)), ry: RY_E },
+  { id: 'comfort-chair-1', type: 'armchair', x: r2w(CF_XW - T / 2 - 0.55), z: r2w(PZ(178)), ry: -RY_E, color: 'lilac' },
+  { id: 'comfort-chair-2', type: 'armchair', x: r2w(CF_XW - T / 2 - 0.55), z: r2w(PZ(246)), ry: -RY_E, color: 'lilac' },
+  // entrance
+  { id: 'coat-rack', type: 'coatRack', x: r2w(PX(845)), z: r2w(Z_END - T / 2 - 0.26), ry: Math.PI, len: 1.2 },
+  { id: 'plant-1', type: 'plant', x: r2w(PX(668)), z: r2w(Z_END - 0.5), ry: 0 },
+  { id: 'plant-2', type: 'plant', x: r2w(PX(1040)), z: r2w(PZ(580)), ry: 0 }
+];
+function r2w(v) { return Math.round(v * 100) / 100; }
+// mx: mirrored left-right, mz: front-back (in the object's own axes); text planes are flipped back so they stay readable
+function applyMirror(g, mx, mz) { g.scale.x = mx ? -1 : 1; g.scale.z = mz ? -1 : 1; const odd = !!mx !== !!mz; g.traverse(o => { if (o !== g && o.userData.unmirror) o.scale.x = odd ? -1 : 1; }); }
+let items = [];          // [{data, g}]
+function buildItem(data) {
+  const g = new THREE.Group(); g.position.set(data.x, data.y || 0, data.z); g.rotation.y = data.ry || 0;
+  CATALOG[data.type].build(g, data);
+  g.traverse(o => { if (o.isMesh) { const basic = o.material && o.material.isMeshBasicMaterial; const tr = o.material && o.material.transparent; o.castShadow = !basic && !tr; o.receiveShadow = !basic; } });
+  applyMirror(g, !!data.mx, !!data.mz);
+  g.userData.editable = { kind: 'item', data };
+  const fam = CATALOG[data.type].fam;
+  if (fam === 'reception' || fam === 'bar') g.userData.pick = { type: 'zone', id: 'admin' };
+  club.add(g); return g;
+}
+function addItem(data) { const it = { data, g: buildItem(data) }; items.push(it); return it; }
+function removeItem(it) { club.remove(it.g); items = items.filter(x => x !== it); }
+function rebuildItem(it) { const p = it.g.position; Object.assign(it.data, { x: p.x, z: p.z, ry: it.g.rotation.y, y: CATALOG[it.data.type].stack ? p.y : 0 }); const g = buildItem(it.data); club.remove(it.g); it.g = g; return it; }
+seats.forEach(s => { s.def = { x: s.g.position.x, z: s.g.position.z, ry: s.g.rotation.y, mx: false, mz: false }; s.g.userData.editable = { kind: 'pc', seat: s }; });
+DEFAULT_ITEMS.forEach(d => addItem(JSON.parse(JSON.stringify(d))));
+
+/* ---------------- selection ring ---------------- */
+const ring = new THREE.Mesh(new THREE.RingGeometry(0.85, 1.0, 40), new THREE.MeshBasicMaterial({ color: 0x2BB3BE, transparent: true, opacity: 0.9 }));
+ring.rotation.x = -Math.PI / 2; ring.visible = false; club.add(ring);
+const hoverRing = new THREE.Mesh(new THREE.RingGeometry(0.85, 1.0, 40), new THREE.MeshBasicMaterial({ color: 0x2BB3BE, transparent: true, opacity: 0.35 }));
+hoverRing.rotation.x = -Math.PI / 2; hoverRing.visible = false; club.add(hoverRing);
+
+/* ---------------- seat state ---------------- */
+function seatWorld(s) { const v = new THREE.Vector3(0, 0, 0.78); s.g.localToWorld(v); return v; }
+function seatState(s) { return s.state === 'busy' && s.left != null && s.left < 15 ? 'ending' : s.state; }
+function applySeat(s) {
+  const st = seatState(s);
+  s.led.material = LED[st];
+  s.scr.material = s.state === 'busy' ? SCREEN[s.game] : s.state === 'booked' ? SCREEN.booked : SCREEN.free;
+  if (s.state === 'busy') {
+    if (!s.person && !s.arriving) { s.person = makePerson(s.guest, true); s.person.position.set(0, 0, 0.82); s.g.add(s.person); s.person.userData.ph = rnd() * 6; }
+    s.ch.rotation.y = 0;
+  } else {
+    if (s.person) { s.g.remove(s.person); s.person = null; }
+    s.ch.rotation.y = s.state === 'free' ? ((s.num * 37) % 11 - 5) * 0.06 : 0;
+  }
+}
+function occupy(s, until) {
+  if (s.state !== 'busy') { s.guest = newGuest(); s.arriving = canWalk(); }
+  s.state = 'busy'; s.game = 'play'; s.until = until; s.left = until ? Math.max(0, (until - Date.now()) / 60000) : null;
+  applySeat(s);
+}
+function free(s) { if (s.state === 'busy') startDeparture(s, s.guest); forgetSeatInfo(s); s.state = 'free'; s.guest = null; s.game = null; s.left = null; s.until = null; applySeat(s); }
+function setOff(s) { if (s.state === 'busy') startDeparture(s, s.guest); forgetSeatInfo(s); s.state = 'off'; s.guest = null; s.game = null; s.left = null; s.until = null; applySeat(s); }
+seats.forEach(setOff);
+
+function zoneSeats(z) { return seats.filter(s => s.zone === z); }
+function busyCount(z) { return zoneSeats(z).filter(s => s.state === 'busy').length; }
+function linkedSeats(list = seats) { return list.filter(s => s.state !== 'off'); }
+
+/* ---------------- shadows: receive on all ---------------- */
+scene.traverse(o => { if (o.isMesh && o.material && o.material.isMeshBasicMaterial) { o.castShadow = false; o.receiveShadow = false; } });
+
+/* ---------------- theme ---------------- */
+function applyTheme() {
+  const d = isDark();
+  themed.forEach(m => m.color.setHex(m.userData.c[d ? 1 : 0]));
+  renderer.setClearColor(new THREE.Color(css('--bg') || (d ? '#071317' : '#E9F0F0')));
+  hemi.intensity = d ? 0.38 : 0.82; hemi.color.setHex(d ? 0x9fc4cf : 0xffffff); hemi.groundColor.setHex(d ? 0x0b1a1e : 0xdbe5e5);
+  sun.intensity = d ? 0.22 : 0.62; sun.color.setHex(d ? 0x9ab8ff : 0xffffff);
+  nightLights.forEach(l => l.intensity = d ? 1.1 : 0);
+  lampMat.color.setHex(d ? 0xFFE9B0 : 0xF3F0E6);
+  glass.opacity = d ? 0.18 : 0.32;
+  ring.material.color.setHex(d ? 0x83E4EC : 0x007681); hoverRing.material.color.setHex(d ? 0x83E4EC : 0x007681);
+  redrawTextures();
+}
+new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+
+/* ---------------- camera ---------------- */
+const DIR = new THREE.Vector3(0.32, 0.86, 0.92).normalize();
+const HOME = { t: [0, 0, -0.2], d: 60 };
+const baseHomeView = () => matchMedia('(max-width:760px)').matches ? { t: [0, 0, -0.4], d: 58 } : HOME;
+const homeView = () => { const v = baseHomeView(); return EMBED && !matchMedia('(max-width:760px)').matches ? Object.assign({}, v, { d: v.d * 0.8 }) : v; };
+let fly = null;
+function camFor(p) { const t = new THREE.Vector3(...p.t); return { t, pos: t.clone().add((p.dir ? new THREE.Vector3(...p.dir).normalize() : DIR.clone()).applyAxisAngle(new THREE.Vector3(0, 1, 0), p.rot || 0).multiplyScalar(p.d * fitScale())) }; }
+function fitScale() { const a = camera.aspect; return a < 0.8 ? 1.75 : a < 1.2 ? 1.3 : 1; }
+function flyTo(p, instant) {
+  const { t, pos } = camFor(p.zoneCam ? p : p);
+  if (instant || reduced) { camera.position.copy(pos); controls.target.copy(t); controls.update(); fly = null; return; }
+  fly = { t0: performance.now(), dur: 1100, fp: camera.position.clone(), ft: controls.target.clone(), tp: pos, tt: t };
+}
+const ease = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+
+/* ---------------- UI: state ---------------- */
+let view = { type: 'home' }; let sheetOpen = false;
+const panel = $('#panel'), pbody = $('#pbody');
+const PHONE_MQ = matchMedia('(max-width:760px)'); // same test as the CSS: innerWidth can disagree inside an iOS iframe
+const isPhone = () => PHONE_MQ.matches;
+/* KPI cards wrap on the left; the overview card keeps the top-right corner on the same line. */
+const PANEL_W = 340, PANEL_COMPACT_W = 300;
+function layoutChrome() {
+  const st = document.getElementById('stage'), p = document.getElementById('panel');
+  if (!st || !p) return;
+  if (isPhone()) { st.style.removeProperty('--pw'); return; }
+  const pw = p.classList.contains('home') && matchMedia('(hover: hover)').matches ? PANEL_COMPACT_W : PANEL_W;
+  st.style.setProperty('--pw', pw + 'px');
+}
+
+function select(v, opts = {}) {
+  view = v;
+  if (v.type === 'home') { flyTo(homeView()); ring.visible = false; setAuto(!reduced && !opts.keepRot ? autoPref : false); }
+  else if (v.type === 'zone') { flyTo(ZONES[v.id].cam); ring.visible = false; setAuto(false); }
+  else if (v.type === 'seat') {
+    const s = seats.find(x => x.id === v.id); const z = ZONES[s.zone]; const w = seatWorld(s);
+    flyTo({ t: [w.x, 0, w.z - 0.4], d: 17 }); ring.visible = true; ring.position.set(w.x, 0.05, w.z); setAuto(false);
+  }
+  if (isPhone() && v.type !== 'home') { sheetOpen = true; }
+  renderPanel(); renderCards();
+}
+
+/* ---------------- KPI tiles ---------------- */
+const ICON = {
+  users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 14.6c2.4 0 4.2 1.3 5 4"/></svg>',
+  pc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/></svg>',
+  rub: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 20V4h5.5a4 4 0 0 1 0 8H6M6 16h8"/></svg>',
+  star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>',
+  cup: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h11v6a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z"/><path d="M16 10h1.5a2.5 2.5 0 0 1 0 5H16M8 3v2M12 3v2"/></svg>',
+  gift: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v8h14v-8M12 8v12M12 8c-1.5-3-5-3.5-5-1.2C7 8 12 8 12 8s5 0 5-1.2C17 4.5 13.5 5 12 8z"/></svg>',
+  in: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l4-4-4-4M14 12H4"/></svg>',
+  out: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4M16 16l4-4-4-4M20 12H10"/></svg>',
+  badge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 20.5c.9-3.8 3.7-5.8 7-5.8s6.1 2 7 5.8"/><path d="m12 14.7-1.3 2.3 1.3 3.5 1.3-3.5z"/></svg>',
+  up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>'
+};
+let adminHL = false;
+const prevK = {};
+function renderKPIs() {
+  const linked = linkedSeats(), pcsBusy = seats.filter(s => s.state === 'busy').length;
+  const sh = shiftInfo(), r = LIVE.revenue, today = r && r.period === 'TODAY';
+  const since = r && r.since ? hhmm(new Date(r.since)) : null;
+  const k = [
+    ['admin', 'Администратор смены', sh ? sh.short : (LIVE.loaded ? 'Смена не открыта' : '—'), sh ? `смена с ${sh.start} · ${sh.dur}` : (LIVE.loaded ? 'в Langame нет открытой смены' : 'загружаю'), ICON.badge, 'var(--accent-soft)', 'var(--accent)', true],
+    ['rev', today ? 'Выручка за сегодня' : 'Выручка за смену', rubOr(r && r.total), since ? `с ${since}` : '', ICON.rub, 'var(--good-soft)', 'var(--good)', true],
+    ['goods', 'Выручка: товары', rubOr(r && r.goods), r && r.goodsCount != null ? plural(r.goodsCount, 'товар', 'товара', 'товаров') : '', ICON.cup, 'var(--rose-soft)', 'var(--rose)', true],
+    ['pcs', 'ПК заняты', linked.length ? `${pcsBusy} / ${linked.length}` : '—', linked.length ? Math.round(pcsBusy / linked.length * 100) + '% загрузка' : 'нет данных о ПК', ICON.pc, 'var(--lilac-soft)', 'var(--lilac)', true],
+    ['guests', 'Гостей в клубе', LIVE.guests == null ? '—' : fmt.format(LIVE.guests), '', ICON.users, 'var(--accent-soft)', 'var(--accent)', true]
+  ];
+  $('#kpis').innerHTML = k.map(([id, l, v, sub, ic, bg, fg, mutedSub]) =>
+    `<div class="kpi${id === 'admin' && adminHL ? ' hl' : ''}" data-k="${id}"${id === 'admin' && sh ? ` title="${esc(sh.full)} · смена с ${sh.start}"` : ''}><div class="kic" style="background:${bg};color:${fg}">${ic}</div><div><small>${l}</small><b class="num ${prevK[id] !== undefined && prevK[id] !== v ? 'flash' : ''}">${esc(v)}</b>${sub ? `<em class="${mutedSub ? 'muted' : ''}">${esc(sub)}</em>` : ''}</div></div>`).join('');
+  k.forEach(([id, , v]) => prevK[id] = v);
+  layoutChrome();
+}
+
+/* ---------------- floating cards ---------------- */
+const overlay = $('#overlay'), linesSvg = $('#lines');
+const cardEls = {}, pinEls = {}, lineEls = {};
+for (const [id, z] of Object.entries(ZONES)) {
+  const pin = document.createElement('div'); pin.className = 'pin'; pin.style.background = z.color; pin.style.color = z.color; overlay.appendChild(pin); pinEls[id] = pin;
+  const card = document.createElement('button'); card.type = 'button'; card.className = 'card'; card.addEventListener('click', () => select({ type: 'zone', id }));
+  overlay.appendChild(card); cardEls[id] = card;
+  const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line'); ln.setAttribute('stroke', z.color); ln.setAttribute('stroke-width', '2.4'); ln.setAttribute('stroke-dasharray', '0.1 6'); ln.setAttribute('stroke-linecap', 'round'); linesSvg.appendChild(ln); lineEls[id] = ln;
+}
+function cardContent(id) {
+  const z = ZONES[id];
+  if (id === 'admin') { const sh = shiftInfo(); return ['Админ · смена', sh ? sh.short : 'смена не открыта', `товары ${rubOr(LIVE.revenue && LIVE.revenue.goods)}`]; }
+  const ss = zoneSeats(id), b = busyCount(id), end = ss.filter(s => seatState(s) === 'ending').length, ln = linkedSeats(ss).length;
+  const sub = id === 'standart' ? `${end} заканчивают · ${cfgOf(z, 'Видеокарта')}` : `${cfgOf(z, 'Видеокарта')} · ${cfgOf(z, 'Монитор').replace(/^.* (\d)/, '$1')}`;
+  return [`${z.name} · ${z.range}`, ln ? `${b} / ${ln} заняты` : 'нет данных', sub];
+}
+function renderCards() {
+  for (const id of Object.keys(ZONES)) {
+    const [l, v, s] = cardContent(id);
+    cardEls[id].innerHTML = `<div class="cl"><i style="background:${ZONES[id].color}"></i>${l}</div><div class="cv num">${v}</div><div class="cs">${s}</div>`;
+    cardEls[id].setAttribute('aria-label', `${l}: ${v}. ${s}`);
+  }
+}
+// seat pills (zone view)
+const pillEls = new Map();
+function syncPills() {
+  const want = new Set();
+  if (!editing && (view.type === 'zone' || view.type === 'seat')) {
+    const zid = view.type === 'zone' ? view.id : seats.find(s => s.id === view.id).zone;
+    zoneSeats(zid).forEach(s => want.add(s.id));
+  }
+  for (const [id, el] of pillEls) if (!want.has(id)) { el.remove(); pillEls.delete(id); }
+  for (const id of want) {
+    let el = pillEls.get(id);
+    if (!el) { el = document.createElement('button'); el.type = 'button'; el.className = 'pill'; el.addEventListener('click', () => select({ type: 'seat', id })); overlay.appendChild(el); pillEls.set(id, el); }
+    const s = seats.find(x => x.id === id); const st = seatState(s);
+    const col = COL[st];
+    const txt = s.state === 'busy' ? (s.left == null ? 'играет' : hm(s.left)) : s.state === 'off' ? 'нет данных' : 'свободен';
+    el.innerHTML = `<i style="background:${col}"></i>${id.replace('ПК-', '')}<span class="num" style="color:var(--muted);font-weight:700">${txt}</span>`;
+  }
+}
+
+const v3 = new THREE.Vector3();
+function project(x, y, z) { v3.set(x, y, z); v3.project(camera); return [(v3.x + 1) / 2 * stageW, (1 - v3.y) / 2 * stageH, v3.z]; }
+let stageW = 1, stageH = 1;
+function rectOf(el) { const r = el.getBoundingClientRect(), s = stage.getBoundingClientRect(); return { l: r.left - s.left, t: r.top - s.top, r: r.right - s.left, b: r.bottom - s.top }; }
+const stage = $('#stage');
+let obstacles = [];
+function measureObstacles() { obstacles = ['#kpis', '.tools', '#panel', '.feed'].map(s => $(s)).filter(e => e && e.offsetParent !== null).map(rectOf); }
+function updateOverlay() {
+  const zoneMode = view.type !== 'home' || editing;
+  const phone = isPhone();
+  const placed = [];
+  for (const id of Object.keys(ZONES)) {
+    const z = ZONES[id], card = cardEls[id], pin = pinEls[id], ln = lineEls[id];
+    const [ax, ay, depth] = project(...z.anchor);
+    const hide = zoneMode || depth > 1;
+    card.classList.toggle('hide', hide); pin.classList.toggle('hide', hide); ln.style.opacity = hide ? 0 : 1;
+    if (hide) continue;
+    pin.style.transform = `translate(${ax}px,${ay}px)`;
+    const cw = card.offsetWidth, chh = card.offsetHeight;
+    const k = phone ? 0.45 : 1;
+    let cx = ax + z.off[0] * k - cw / 2, cy = ay + z.off[1] * k - chh / 2;
+    const pad = 10;
+    const maxR = stageW - (phone ? 16 : (obstacles.find(o => o.l > stageW * 0.5 && o.t < 40 && o.b > stageH * 0.5) ? stageW - obstacles.find(o => o.l > stageW * 0.5 && o.t < 40 && o.b > stageH * 0.5).l + 12 : 16));
+    cx = Math.max(16, Math.min(cx, maxR - cw)); cy = Math.max(12, Math.min(cy, stageH - chh - 12));
+    // push out of obstacles and already-placed cards
+    for (let pass = 0; pass < 3; pass++) {
+      for (const o of obstacles.concat(placed)) {
+        if (cx < o.r + pad && cx + cw > o.l - pad && cy < o.b + pad && cy + chh > o.t - pad) {
+          const down = o.b + pad - cy, up = cy + chh - (o.t - pad);
+          if (down < up && o.b + pad + chh < stageH) cy = o.b + pad; else cy = o.t - pad - chh;
+        }
+      }
+    }
+    placed.push({ l: cx, t: cy, r: cx + cw, b: cy + chh });
+    card.style.transform = `translate(${cx}px,${cy}px)`;
+    const ex = Math.max(cx, Math.min(ax, cx + cw)), ey = Math.max(cy, Math.min(ay, cy + chh));
+    ln.setAttribute('x1', ax); ln.setAttribute('y1', ay); ln.setAttribute('x2', ex); ln.setAttribute('y2', ey);
+  }
+  placeAttentionMarkers();
+  for (const [id, el] of pillEls) {
+    const s = seats.find(x => x.id === id); const w = seatWorld(s);
+    const [px, py] = project(w.x, 1.9, w.z);
+    el.style.left = px + 'px'; el.style.top = py + 'px';
+  }
+}
+
+/* ---------------- panel ---------------- */
+const STC = { free: ['Свободен', 'good'], busy: ['Играет', 'acc'], ending: ['Скоро освободится', 'warn'], booked: ['Бронь', 'lilac'], off: ['Нет в Langame', 'off'] };
+const COL = { free: 'var(--good)', busy: 'var(--accent)', ending: 'var(--warn)', booked: 'var(--lilac)', off: 'var(--muted)' };
+function initials(n) { return n.replace(/[^A-Za-zА-Яа-я0-9]/g, '').slice(0, 2).toUpperCase(); }
+function zoneOcc(id) { if (id === 'admin') return null; return [busyCount(id), zoneSeats(id).length]; }
+
+function cfgHtml(z) { return `<dl class="kv">${z.cfg.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`; }
+function liveNote() {
+  if (!STORE_ID) return 'Клуб не выбран.';
+  if (LIVE.status === 'NOT_CONNECTED') return esc(LIVE.warnings[0] || 'Клуб не подключён к Langame.');
+  if (!LIVE.loaded) return 'Загружаю данные Langame…';
+  const at = LIVE.at ? hhmm(new Date(LIVE.at)) : '';
+  return `Статусы ПК, смена и выручка из Langame, обновление каждые 20 секунд${at ? ` · последнее в ${at}` : ''}.${LIVE.warnings.length ? ' ' + LIVE.warnings.map(esc).join(' ') : ''}`;
+}
+function renderPanel() {
+  panel.classList.toggle('home', view.type === 'home' && !editing && !EMBED);
+  layoutChrome();
+  placeShiftWork();
+  renderAttnLegend();
+  if (editing) { panel.classList.toggle('collapsed', isPhone() && !sheetOpen); renderEditor(); syncPills(); return; }
+  panel.classList.toggle('collapsed', isPhone() && !sheetOpen);
+  $('#grab').setAttribute('aria-label', sheetOpen ? 'Свернуть панель' : 'Развернуть панель');
+  let h = '';
+  if (view.type === 'home' && EMBED) {
+    h += attentionHomeHtml();
+  } else if (view.type === 'home') {
+    const linked = linkedSeats(), pcs = seats.filter(s => s.state === 'busy').length, freeN = seats.filter(s => s.state === 'free').length, ending = seats.filter(s => seatState(s) === 'ending').length;
+    h += `<div class="ph"><div><div class="eyebrow">Обзор клуба</div><h2>${esc(CLUB.name)}</h2><div class="sub">Планировка по схеме бронирования Langame · ${seats.length} мест на схеме</div></div><span class="chip ${LIVE.status === 'LIVE' ? 'good' : 'off'}">${LIVE.status === 'LIVE' ? 'Live' : 'Нет данных'}</span></div>
+    <div class="statgrid"><div class="stat"><small>Загрузка</small><b class="num">${linked.length ? Math.round(pcs / linked.length * 100) + '%' : '—'}</b></div><div class="stat"><small>Свободно</small><b class="num">${linked.length ? freeN : '—'}</b></div><div class="stat"><small>Заканчивают</small><b class="num">${linked.length ? ending : '—'}</b></div></div>
+    <div class="sec fsec zonesec${FOLD.zones ? ' open' : ''}">${foldHead('zones', 'Зоны и компьютеры', linked.length ? `${pcs} из ${linked.length} ПК заняты · ${plural(Object.keys(ZONES).length - 1, 'зона', 'зоны', 'зон')}` : 'нет данных Langame')}<div class="fbody"><div class="fhint">Нажмите на зону, чтобы приблизить</div>${Object.keys(ZONES).map(id => {
+      const z = ZONES[id], ss = id === 'admin' ? [] : zoneSeats(id), ln = linkedSeats(ss).length, b = busyCount(id);
+      const val = id === 'admin' ? rubOr(LIVE.revenue && LIVE.revenue.goods) : ln ? `${b} / ${ln}` : '—';
+      const pct = id === 'admin' ? (shiftInfo() ? 100 : 0) : ln ? b / ln * 100 : 0;
+      return `<button class="zrow" type="button" data-zone="${id}"><span class="dot" style="background:${z.color}"></span><b>${z.name} <span style="color:var(--muted);font-weight:600;font-size:11.5px">${z.range}</span></b><span class="v num">${val}</span><span class="bar"><i style="width:${pct}%;background:${z.color}"></i></span></button>`;
+    }).join('')}</div></div>${gameHtml()}${purchasesHtml()}`;
+  } else if (view.type === 'zone') {
+    const id = view.id, z = ZONES[id];
+    h += `<button class="back" type="button" data-act="home">← Весь клуб</button>`;
+    if (id !== 'admin') {
+      const ss = zoneSeats(id); const c = st => ss.filter(s => seatState(s) === st).length;
+      h += `<div class="ph"><div><div class="eyebrow">Зона</div><h2>${z.name}</h2><div class="sub">${z.range}${z.total && ss.length !== z.total ? ` · на схеме ${ss.length} мест` : ''}</div></div><span class="chip acc">${ss.filter(s => s.state === 'busy').length} / ${linkedSeats(ss).length || ss.length}</span></div>
+      <div class="statgrid"><div class="stat"><small>Свободно</small><b class="num">${c('free')}</b></div><div class="stat"><small>Заканчивают</small><b class="num">${c('ending')}</b></div><div class="stat"><small>Играют</small><b class="num">${c('busy') + c('ending')}</b></div></div>
+      <div class="sec"><h3>Места</h3><div class="seats">${ss.map(s => { const st = seatState(s); return `<button class="seat" type="button" data-seat="${s.id}" style="--sc:${COL[st]}"><b>${s.id}</b><span>${STC[st][0]}</span><span class="num">${s.state === 'busy' && s.left != null ? 'ещё ' + hm(s.left) : '&nbsp;'}</span></button>`; }).join('')}</div>
+      <div class="legend"><span><i style="background:var(--accent)"></i>играет</span><span><i style="background:var(--warn)"></i>меньше 15 мин</span><span><i style="background:var(--good)"></i>свободен</span><span><i style="background:var(--muted)"></i>нет в Langame</span></div>
+      ${z.note ? `<div class="note">${esc(z.note)}</div>` : ''}</div>
+      <div class="sec"><h3>Конфиг</h3>${cfgHtml(z)}</div>`;
+    } else {
+      const sh = shiftInfo(), r = LIVE.revenue;
+      h += `<div class="ph"><div><div class="eyebrow">Админ</div><h2>Стойка и бар</h2><div class="sub">Смена, выручка и продажи товаров на стойке</div></div><span class="chip ${sh ? 'good' : 'off'}">${sh ? 'Смена открыта' : 'Смена не открыта'}</span></div>
+      <div class="sec"><h3>Смена</h3><dl class="kv"><dt>Администратор</dt><dd>${sh ? esc(sh.full) : '—'}</dd><dt>Начало</dt><dd>${sh ? `${sh.start}, идёт ${sh.dur}` : '—'}</dd><dt>${r && r.period === 'TODAY' ? 'Выручка за сегодня' : 'Выручка за смену'}</dt><dd>${rubOr(r && r.total)}</dd><dt>Товары</dt><dd>${rubOr(r && r.goods)}${r && r.goodsCount != null ? ' · ' + plural(r.goodsCount, 'товар', 'товара', 'товаров') : ''}</dd></dl></div>${swModeHtml()}
+      <div class="statgrid"><div class="stat"><small>Товары</small><b class="num">${rubOr(r && r.goods)}</b></div><div class="stat"><small>Гостей</small><b class="num">${LIVE.guests == null ? '—' : fmt.format(LIVE.guests)}</b></div><div class="stat"><small>ПК заняты</small><b class="num">${seats.filter(s => s.state === 'busy').length}</b></div></div>${purchasesHtml()}`;
+    }
+  } else if (view.type === 'seat') {
+    const s = seats.find(x => x.id === view.id), z = ZONES[s.zone], st = seatState(s);
+    h += `<button class="back" type="button" data-zone="${s.zone}">← ${z.name}</button>
+    <div class="ph"><div><div class="eyebrow">${z.name}</div><h2>${s.id}</h2><div class="sub">${cfgOf(z, 'Видеокарта')} · ${cfgOf(z, 'Монитор')}</div></div><span class="chip ${STC[st][1]}">${STC[st][0]}</span></div>`;
+    if (s.state === 'busy') {
+      h += seatHintsHtml(s) + seatSessionHtml(s, st);
+    } else if (s.state === 'free') {
+      h += `<dl class="kv"><dt>Статус</dt><dd>свободен</dd></dl>`;
+    } else {
+      h += `<div class="note">Компьютера с номером ${s.num} нет в Langame этого клуба, поэтому его статус неизвестен.</div>`;
+    }
+    h += `<div class="sec"><h3>Конфиг</h3>${cfgHtml(z)}</div>`;
+  }
+  if (view.type === 'home' && !EMBED) h += `<div class="more">Наведите, чтобы раскрыть</div>`;
+  h += `<div class="note">${liveNote()}</div>`;
+  pbody.innerHTML = h;
+  syncPills();
+}
+pbody.addEventListener('click', e => {
+  const z = e.target.closest('[data-zone]'); if (z) return select({ type: 'zone', id: z.dataset.zone });
+  const s = e.target.closest('[data-seat]'); if (s) return select({ type: 'seat', id: s.dataset.seat });
+  const f = e.target.closest('[data-fold]'); if (f) { toggleFold(f.dataset.fold); return renderPanel(); }
+  const a = e.target.closest('[data-act]'); if (!a) return;
+  if (a.dataset.act === 'home') return select({ type: 'home' });
+});
+const setSheet = open => { sheetOpen = open; renderPanel(); };
+$('#grab').addEventListener('click', () => setSheet(!sheetOpen));
+var sheetGesture = false; // live refresh must not rebuild the header under a finger
+{ // phone sheet: swipe the handle or header down/up, tap the header to toggle
+  let sy = null, moved = false, guard = 0;
+  const hold = on => { sheetGesture = on; clearTimeout(guard); if (on) guard = setTimeout(() => { sheetGesture = false; }, 2000); };
+  const onHead = t => t.closest('#grab') || (t.closest('.ph') && !t.closest('button, a, input, select, textarea'));
+  panel.addEventListener('touchstart', e => { sy = isPhone() && e.touches.length === 1 && onHead(e.target) ? e.touches[0].clientY : null; moved = false; hold(sy != null); }, { passive: true });
+  panel.addEventListener('touchmove', e => { if (sy != null && Math.abs(e.touches[0].clientY - sy) > 8) moved = true; }, { passive: true });
+  panel.addEventListener('touchcancel', () => { sy = null; hold(false); });
+  panel.addEventListener('touchend', e => {
+    if (sy == null) return; const dy = e.changedTouches[0].clientY - sy; sy = null; hold(false);
+    if (dy > 30 && sheetOpen) setSheet(false); else if (dy < -30 && !sheetOpen) setSheet(true);
+  });
+  $('#pbody').addEventListener('click', e => { if (isPhone() && !moved && e.target.closest('.ph') && onHead(e.target)) setSheet(!sheetOpen); });
+}
+PHONE_MQ.addEventListener('change', () => renderPanel());
+$('#clubBtn').addEventListener('click', () => { if (!editing) select({ type: 'home' }); });
+
+/* ---------------- feed ---------------- */
+const feed = [];
+const EVC = { star: ['var(--warn-soft)', 'var(--warn)'], cup: ['var(--good-soft)', 'var(--good)'], gift: ['var(--lilac-soft)', 'var(--lilac)'], in: ['var(--accent-soft)', 'var(--accent)'], out: ['var(--surface-2)', 'var(--muted)'], up: ['var(--accent-soft)', 'var(--accent)'] };
+function addEvent(icon, text, right) {
+  feed.unshift({ icon, text, right, t: now(), fresh: true }); if (feed.length > 4) feed.length = 4;
+  renderFeed();
+}
+function renderFeed() {
+  if (!feed.length) { $('#feed').innerHTML = '<div class="empty">Здесь появятся занятые и освободившиеся ПК</div>'; return; }
+  $('#feed').innerHTML = feed.map(f => `<div class="ev ${f.fresh ? 'new' : ''}"><span class="eic" style="background:${EVC[f.icon][0]};color:${EVC[f.icon][1]}">${ICON[f.icon]}</span><span>${f.text}${f.right ? ` <b class="num" style="white-space:nowrap">${f.right}</b>` : ''}</span><time class="num">${f.t}</time></div>`).join('');
+  feed.forEach(f => f.fresh = false);
+}
+let toastT;
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2200); }
+
+/* ---------------- live simulation ---------------- */
+/* ---------------- guests walk in from the street when a session starts and out when it ends ---------------- */
+const ENTRY = { side: SIDE_Z + 0.4, turn: DOOR_X, path: [[DOOR_X, Z_END - 0.7]] };
+const NAV = { sig: '', cell: 0.15, w: 0, h: 0, x0: 0, z0: 0, block: null };
+const NAV_R = 0.14, VISIT_MAX = 12, VISIT_SPEED = 1.45;
+const visitors = [];
+function navSig() {
+  let s = items.length + '|';
+  for (const it of items) s += it.g.position.x.toFixed(1) + ',' + it.g.position.z.toFixed(1) + ',' + it.g.rotation.y.toFixed(2) + ';';
+  for (const x of seats) s += x.g.position.x.toFixed(1) + ',' + x.g.position.z.toFixed(1) + ',' + x.g.rotation.y.toFixed(2) + ';';
+  return s;
+}
+function navBuild() {
+  const sig = navSig();
+  if (NAV.block && NAV.sig === sig) return;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const r of wallRects) { x0 = Math.min(x0, r.x0); x1 = Math.max(x1, r.x1); z0 = Math.min(z0, r.z0); z1 = Math.max(z1, r.z1); }
+  const c = NAV.cell; NAV.x0 = x0 - 1; NAV.z0 = z0 - 1;
+  NAV.w = Math.ceil((x1 - x0 + 2) / c); NAV.h = Math.ceil((z1 - z0 + 2) / c);
+  const block = new Uint8Array(NAV.w * NAV.h);
+  const fill = (rx0, rx1, rz0, rz1) => {
+    // cells whose centre lies inside the rectangle grown by the body radius
+    const i0 = Math.max(0, Math.ceil((rx0 - NAV_R - NAV.x0) / c - 0.5)), i1 = Math.min(NAV.w - 1, Math.floor((rx1 + NAV_R - NAV.x0) / c - 0.5));
+    const j0 = Math.max(0, Math.ceil((rz0 - NAV_R - NAV.z0) / c - 0.5)), j1 = Math.min(NAV.h - 1, Math.floor((rz1 + NAV_R - NAV.z0) / c - 0.5));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) block[j * NAV.w + i] = 1;
+  };
+  for (const r of wallRects) fill(r.x0, r.x1, r.z0, r.z1);
+  for (const it of items) { const b = new THREE.Box3().setFromObject(it.g); if (b.max.y - b.min.y > 0.25 && b.max.y > 0.3) fill(b.min.x, b.max.x, b.min.z, b.max.z); }
+  // a desk blocks the way; behind its chair one may pass if there is no other way
+  const v = new THREE.Vector3();
+  for (const s of seats) {
+    s.g.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(s.g.matrixWorld).invert();
+    const b = new THREE.Box3();
+    for (const [lx, lz] of [[-0.5, -0.42], [0.5, -0.42], [-0.5, 1.05], [0.5, 1.05]]) { v.set(lx, 0, lz); s.g.localToWorld(v); b.expandByPoint(v); }
+    const i0 = Math.max(0, Math.floor((b.min.x - NAV_R - NAV.x0) / c)), i1 = Math.min(NAV.w - 1, Math.floor((b.max.x + NAV_R - NAV.x0) / c));
+    const j0 = Math.max(0, Math.floor((b.min.z - NAV_R - NAV.z0) / c)), j1 = Math.min(NAV.h - 1, Math.floor((b.max.z + NAV_R - NAV.z0) / c));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      v.set(NAV.x0 + (i + 0.5) * c, 0, NAV.z0 + (j + 0.5) * c).applyMatrix4(inv);
+      if (Math.abs(v.x) > 0.5 + NAV_R || v.z < -0.42 - NAV_R || v.z > 1.05 + NAV_R) continue;
+      const n = j * NAV.w + i; block[n] = v.z <= 0.42 + NAV_R ? 1 : Math.max(block[n], 2);
+    }
+  }
+  NAV.block = block; NAV.sig = sig;
+}
+const navCell = (x, z) => [Math.floor((x - NAV.x0) / NAV.cell), Math.floor((z - NAV.z0) / NAV.cell)];
+const navFree = (i, j) => i >= 0 && j >= 0 && i < NAV.w && j < NAV.h && NAV.block[j * NAV.w + i] !== 1;
+const navClear = (i, j) => i >= 0 && j >= 0 && i < NAV.w && j < NAV.h && !NAV.block[j * NAV.w + i];
+const navPoint = (i, j) => [NAV.x0 + (i + 0.5) * NAV.cell, NAV.z0 + (j + 0.5) * NAV.cell];
+function navNearest(i, j) {
+  if (navFree(i, j)) return [i, j];
+  for (let r = 1; r <= 10; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+    if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
+    if (navFree(i + di, j + dj)) return [i + di, j + dj];
+  }
+  return null;
+}
+function navSight(a, b) {
+  const d = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.ceil(d / (NAV.cell * 0.5));
+  for (let k = 1; k < n; k++) { const [i, j] = navCell(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n); if (!navClear(i, j)) return false; }
+  return true;
+}
+// A* on the floor grid, then the corners that keep a clear line of sight
+function navPath(from, to) {
+  navBuild();
+  const s = navNearest(...navCell(from[0], from[1])), g = navNearest(...navCell(to[0], to[1]));
+  if (!s || !g) return null;
+  const W = NAV.w, start = s[1] * W + s[0], goal = g[1] * W + g[0];
+  const cost = new Float32Array(W * NAV.h).fill(Infinity), prev = new Int32Array(W * NAV.h).fill(-1), shut = new Uint8Array(W * NAV.h);
+  const heap = [], hv = [];
+  const push = (n, f) => { heap.push(n); hv.push(f); let k = heap.length - 1; while (k > 0) { const p = (k - 1) >> 1; if (hv[p] <= hv[k]) break; [heap[p], heap[k]] = [heap[k], heap[p]]; [hv[p], hv[k]] = [hv[k], hv[p]]; k = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop(), lv = hv.pop(); if (heap.length) { heap[0] = last; hv[0] = lv; let k = 0; for (;;) { const l = 2 * k + 1, r = l + 1; let m = k; if (l < heap.length && hv[l] < hv[m]) m = l; if (r < heap.length && hv[r] < hv[m]) m = r; if (m === k) break; [heap[m], heap[k]] = [heap[k], heap[m]]; [hv[m], hv[k]] = [hv[k], hv[m]]; k = m; } } return top; };
+  const hx = n => { const dx = Math.abs(n % W - g[0]), dz = Math.abs(((n / W) | 0) - g[1]); return Math.max(dx, dz) + 0.414 * Math.min(dx, dz); };
+  cost[start] = 0; push(start, hx(start));
+  while (heap.length) {
+    const n = pop(); if (n === goal) break; if (shut[n]) continue; shut[n] = 1;
+    const i = n % W, j = (n / W) | 0;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      if (!di && !dj) continue;
+      if (!navFree(i + di, j + dj)) continue;
+      if (di && dj && (!navFree(i + di, j) || !navFree(i, j + dj))) continue;
+      const m = (j + dj) * W + i + di, c = cost[n] + (di && dj ? 1.414 : 1) * (NAV.block[m] === 2 ? 5 : 1);
+      if (c < cost[m]) { cost[m] = c; prev[m] = n; push(m, c + hx(m)); }
+    }
+  }
+  if (prev[goal] < 0 && goal !== start) return null;
+  const cells = []; for (let n = goal; n >= 0; n = prev[n]) { cells.push(navPoint(n % W, (n / W) | 0)); if (n === start) break; }
+  cells.reverse();
+  const pts = [from]; let a = from;
+  for (let k = 1; k < cells.length; k++) if (!navSight(a, cells[k]) ) { a = cells[k - 1]; pts.push(a); }
+  pts.push(to);
+  return pts;
+}
+function seatPoint(s, z) { const v = new THREE.Vector3(0, 0, z); s.g.localToWorld(v); return [v.x, v.z]; }
+function streetIn() {
+  let dir = rnd() < 0.5 ? -1 : 1, d = 6 + rnd() * 8, sx = ENTRY.turn + dir * d;
+  if (sx < MOVER_X[0] + 1 || sx > MOVER_X[1] - 1) sx = ENTRY.turn - dir * d;
+  sx = THREE.MathUtils.clamp(sx, MOVER_X[0] + 1, MOVER_X[1] - 1);
+  return [[sx, ENTRY.side], [ENTRY.turn, ENTRY.side], ...ENTRY.path];
+}
+const canWalk = () => LIVE.loaded && !CALM && !editing && !reduced && document.visibilityState === 'visible' && visitors.length < VISIT_MAX;
+function addVisitor(guest, pts, seat, mode) {
+  const p = makePerson({ shirt: guest.shirt, hair: guest.hair, skin: guest.skin }, false);
+  p.position.set(pts[0][0], 0.08, pts[0][1]); world.add(p);
+  const v = { p, pts, i: 0, t: 0, seat, mode, guest }; visitors.push(v); return v;
+}
+function startArrival(s) {
+  const street = streetIn(), door = street[street.length - 1];
+  const inside = navPath(door, seatPoint(s, 1.5));
+  if (!inside) { s.arriving = false; applySeat(s); return; }
+  s.visitor = addVisitor(s.guest, [...street, ...inside.slice(1), seatPoint(s, 0.82)], s, 'in');
+}
+function leavePath(from) {
+  const street = streetIn(), door = street[street.length - 1];
+  const inside = navPath(from, door);
+  return inside ? [...inside, ...street.slice(0, -1).reverse()] : null;
+}
+function startDeparture(s, guest) {
+  if (s.visitor) { turnBack(s.visitor); return; }
+  if (!guest || !canWalk()) return;
+  const out = leavePath(seatPoint(s, 1.5));
+  if (out) addVisitor(guest, [seatPoint(s, 0.82), ...out], null, 'out');
+}
+function turnBack(v) {
+  const here = [v.p.position.x, v.p.position.z], out = leavePath(here);
+  if (v.seat) { v.seat.arriving = false; v.seat.visitor = null; v.seat = null; }
+  if (!out) { dropVisitor(v); return; }
+  v.pts = out; v.i = 0; v.t = 0; v.mode = 'out';
+}
+function dropVisitor(v) { world.remove(v.p); const k = visitors.indexOf(v); if (k >= 0) visitors.splice(k, 1); }
+function finishVisitor(v) {
+  dropVisitor(v);
+  if (v.mode === 'in' && v.seat) { const s = v.seat; s.arriving = false; s.visitor = null; applySeat(s); }
+}
+function finishVisitors() { for (const v of visitors.slice()) finishVisitor(v); }
+function stepVisitors(dt, t) {
+  for (const v of visitors.slice()) {
+    const a = v.pts[v.i], b = v.pts[v.i + 1];
+    if (!b) { finishVisitor(v); continue; }
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 0.001;
+    v.t += dt * VISIT_SPEED / len;
+    if (v.t >= 1) { v.t = 0; v.i++; continue; }
+    v.p.position.x = a[0] + (b[0] - a[0]) * v.t; v.p.position.z = a[1] + (b[1] - a[1]) * v.t;
+    if (len > 0.01) { const target = Math.atan2(b[0] - a[0], b[1] - a[1]); let d = target - v.p.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); v.p.rotation.y += d * Math.min(1, dt * 8); }
+    const sw = Math.sin(t * 7 * VISIT_SPEED + v.p.id) * 0.5; v.p.userData.legs[0].rotation.x = sw; v.p.userData.legs[1].rotation.x = -sw; v.p.userData.arms[0].rotation.x = -sw * 0.7; v.p.userData.arms[1].rotation.x = sw * 0.7;
+  }
+}
+/* ---------------- guest at a computer: GET /api/stores/:id/floor-plan/live/seats/:n ----------------
+   `var`: seats are built and rendered before this part of the script runs. */
+var SEAT_INFO = new Map();
+var SEAT_INFO_TTL = 20000;
+var LEVEL_XP = 500;
+var SEG_LABEL = { active: 'Активный', new: 'Новый', repeat: 'Постоянный', risk: 'В риске', lost: 'Давно не был', quiet: 'Редко ходит' };
+var SEG_TONE = { active: 'good', new: 'acc', repeat: 'lilac', risk: 'warn', lost: 'off', quiet: 'off' };
+var CRM_LABEL = { WATCH: 'Наблюдать', CONTACT: 'Связаться', INVITED: 'Приглашён', LOYAL: 'Лояльный', VIP: 'VIP', PROBLEM: 'Проблема', DO_NOT_CONTACT: 'Не беспокоить' };
+function seatInfo(s, want) {
+  if (!SEAT_INFO || !API || !s || s.state !== 'busy' || !s.num) return null;
+  const e = SEAT_INFO.get(s.num);
+  if (want && !(e && e.pending) && !(e && performance.now() - e.at < SEAT_INFO_TTL)) loadSeatInfo(s.num);
+  return e ? e.data : null;
+}
+async function loadSeatInfo(num) {
+  const prev = SEAT_INFO.get(num);
+  SEAT_INFO.set(num, { at: prev ? prev.at : 0, data: prev ? prev.data : null, pending: true });
+  let data = null;
+  try {
+    const r = await fetch(`${API}/live/seats/${encodeURIComponent(num)}`, { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } });
+    if (r.ok) data = await r.json();
+  } catch (e) { data = null; }
+  if (!SEAT_INFO.has(num)) return;
+  SEAT_INFO.set(num, { at: performance.now(), data: data || (prev && prev.data && !prev.data.failed ? prev.data : { failed: true }), pending: false });
+  if (!editing && view.type === 'seat') { const s = seats.find(x => x.id === view.id); if (s && s.num === num) renderPanel(); }
+}
+function forgetSeatInfo(s) { if (SEAT_INFO && s && s.num) SEAT_INFO.delete(s.num); }
+function agoText(iso) {
+  const d = new Date(iso); if (isNaN(d)) return '—';
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  return days <= 0 ? 'сегодня' : days === 1 ? 'вчера' : plural(days, 'день', 'дня', 'дней') + ' назад';
+}
+function sinceText(iso) {
+  const d = new Date(iso); if (isNaN(d)) return null;
+  return 'с ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(/^\d+\s*/, '') + ' ' + d.getFullYear();
+}
+function initials(name) { return String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'; }
+function seatSessionHtml(s, st) {
+  const info = seatInfo(s, true), ses = info && info.session;
+  const started = ses && ses.startedAt ? new Date(ses.startedAt) : null;
+  let h = `<dl class="kv"><dt>Статус</dt><dd>идёт сеанс</dd>`;
+  if (started && !isNaN(started)) h += `<dt>В клубе</dt><dd class="num">${hm((Date.now() - started.getTime()) / 60000)}, с ${hhmm(started)}</dd>`;
+  h += `<dt>Осталось</dt><dd class="num" style="color:${st === 'ending' ? 'var(--warn)' : 'inherit'}">${s.left == null ? 'без конца в Langame' : hm(s.left)}</dd>${s.until ? `<dt>До</dt><dd class="num">${hhmm(new Date(s.until))}</dd>` : ''}`;
+  if (ses && ses.tariff) h += `<dt>Тариф</dt><dd>${esc(ses.tariff)}</dd>`;
+  h += `</dl>`;
+  return h + seatGuestHtml(info);
+}
+function seatGuestHtml(info) {
+  if (!API) return '';
+  if (!info) return `<div class="sec gsec"><h3>Гость</h3><div class="note">Загружаю данные гостя…</div></div>`;
+  if (info.failed) return `<div class="sec gsec"><h3>Гость</h3><div class="note">Не удалось получить данные гостя, попробую ещё раз.</div></div>`;
+  if (info.guestAccess !== 'AVAILABLE') return `<div class="sec gsec"><h3>Гость</h3><div class="lockn">Имя, визиты и покупки гостя видят роли с доступом к разделу «Гости».</div></div>`;
+  const g = info.guest;
+  if (!g) return newGuestHtml(info.newGuest);
+  const tags = [];
+  if (g.isStaff) tags.push(`<span class="chip off">Сотрудник</span>`);
+  if (SEG_LABEL[g.segment]) tags.push(`<span class="chip ${SEG_TONE[g.segment] || 'off'}">${SEG_LABEL[g.segment]}</span>`);
+  if (CRM_LABEL[g.crmStatus]) tags.push(`<span class="chip ${g.crmStatus === 'VIP' ? 'lilac' : g.crmStatus === 'PROBLEM' || g.crmStatus === 'DO_NOT_CONTACT' ? 'warn' : 'off'}">${CRM_LABEL[g.crmStatus]}</span>`);
+  const since = g.since ? sinceText(g.since) : null;
+  if (since) tags.push(`<span class="chip off">${since}</span>`);
+  let h = `<div class="sec gsec"><h3>Гость <a class="glink" href="/guests/${encodeURIComponent(g.id)}" target="_top">Карточка гостя →</a></h3>
+    <div class="gwho"><div class="gav">${esc(initials(g.displayName))}</div><div class="grow"><b>${esc(g.displayName)}</b><div class="gtags">${tags.join('')}</div></div></div>
+    <div class="statgrid"><div class="stat"><small>Визитов</small><b class="num">${fmt.format(g.visitsDays)}</b></div><div class="stat"><small>Часов игры</small><b class="num">${fmt.format(Math.round(g.playHours))}</b></div><div class="stat"><small>Потратил</small><b class="num">${rub(g.totalRevenue)}</b></div></div>
+    <dl class="kv">`;
+  h += `<dt>Прошлый визит</dt><dd>${g.previousVisit ? `${agoText(g.previousVisit.at)}${g.previousVisit.storeName && g.previousVisit.storeName !== CLUB.name ? ', ' + esc(g.previousVisit.storeName) : ''}` : 'первый визит'}</dd>`;
+  if (g.balance != null || g.bonusBalance != null) h += `<dt>Баланс · бонусы</dt><dd class="num">${rubOr(g.balance)} · ${g.bonusBalance == null ? '—' : fmt.format(Math.round(g.bonusBalance)) + ' Б'}</dd>`;
+  if (g.nextAction) h += `<dt>Следующий шаг</dt><dd>${esc(g.nextAction)}</dd>`;
+  h += `</dl>`;
+  if (g.crmNote) h += `<div class="note">${esc(g.crmNote)}</div>`;
+  h += `</div>`;
+  h += guestBuysHtml(g.purchases);
+  if (g.gameAccess === 'AVAILABLE') {
+    const gm = g.game;
+    if (!gm) h += `<div class="sec"><h3>Игровой модуль</h3><div class="note">Гость ещё не в игре.</div></div>`;
+    else {
+      const pct = Math.round((LEVEL_XP - Math.min(LEVEL_XP, gm.xpToNextLevel)) / LEVEL_XP * 100);
+      h += `<div class="sec"><h3>Игровой модуль</h3><dl class="kv"><dt>Уровень ${fmt.format(gm.level)}</dt><dd class="num">ещё ${fmt.format(gm.xpToNextLevel)} XP</dd></dl><span class="gbar"><i style="width:${Math.max(0, Math.min(100, pct))}%"></i></span>
+      <dl class="kv"><dt>Не забрал наград</dt><dd class="num">${fmt.format(gm.pendingRewards)}${gm.rewardsExpiringSoon ? ` · ${fmt.format(gm.rewardsExpiringSoon)} скоро сгорит` : ''}</dd>${gm.nearestRewardExpiresAt && gm.pendingRewards ? `<dt>Ближайшая сгорает</dt><dd class="num">${new Date(gm.nearestRewardExpiresAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}</dd>` : ''}<dt>Получил наград</dt><dd class="num">${fmt.format(gm.rewardsPaidTotal)}</dd></dl></div>`;
+    }
+  }
+  if (g.recommendedAction && !tipRepeatsHints(g.recommendedAction.key)) h += `<div class="gtip"><b>Подсказка админу</b>${esc(g.recommendedAction.label)}${g.recommendedAction.reason ? `: ${esc(g.recommendedAction.reason)}` : ''}</div>`;
+  return h;
+}
+/* The tip is left out when «На что обратить внимание» above already says it. */
+var TIP_REPEATS = { CLAIM_REWARD: ['REWARDS_WAITING', 'REWARD_EXPIRING'], INVITE_TO_GAME: ['NOT_IN_GAME'], KEEP_WARM: ['VIP'], SECOND_VISIT: ['FIRST_VISIT'], MANUAL: ['TASK'], WIN_BACK: ['RETURNED'] };
+function tipRepeatsHints(key) {
+  const keys = TIP_REPEATS[key];
+  if (!keys || view.type !== 'seat' || typeof ATTN === 'undefined' || !ATTN || !ATTN.data) return false;
+  const s = seats.find(x => x.id === view.id);
+  const at = s && ATTN.data.seats.find(x => x.number === s.num);
+  return !!at && at.hints.some(h => keys.includes(h.key));
+}
+function guestBuysHtml(list) {
+  const when = LIVE.revenue && LIVE.revenue.period === 'TODAY' ? 'за сегодня' : 'за смену';
+  return `<div class="sec"><h3>Купил ${when}</h3>${list && list.length ? `<div class="list buys">${list.map(p => {
+    const qty = p.quantity && p.quantity !== 1 ? ` × ${fmt.format(p.quantity)}` : '';
+    return `<div class="li"><span class="t num">${p.at ? hhmm(new Date(p.at)) : '—'}</span><span class="grow"><b title="${esc(p.title)}">${esc(p.title)}${qty}</b></span><span class="r num">${rub(p.sum)}</span></div>`;
+  }).join('')}</div>` : `<div class="note">Пока ничего не покупал.</div>`}</div>`;
+}
+/* A guest registered after the nightly guest sync: no LeetPlus card yet. */
+function newGuestHtml(ng) {
+  if (!ng) return `<div class="sec gsec"><h3>Гость</h3><div class="note">Гость ещё не загружен из Langame, данные появятся после синхронизации.</div></div>`;
+  const name = ng.displayName || 'Гость Langame';
+  return `<div class="sec gsec"><h3>Гость</h3>
+    <div class="gwho"><div class="gav">${esc(initials(name))}</div><div class="grow"><b>${esc(name)}</b><div class="gtags"><span class="chip acc">Новый гость</span></div></div></div>
+    <div class="note">Карточки гостя в LeetPlus ещё нет: справочник гостей приходит из Langame ночью, тогда появятся визиты, баланс и ссылка на карточку.</div></div>` + guestBuysHtml(ng.purchases);
+}
+function seatTipHtml(s) {
+  let h = `<b>${s.id}</b> · играет${s.left != null ? ` · ещё <span class="num">${hm(s.left)}</span>` : ''}`;
+  const info = seatInfo(s, false), g = info && info.guest;
+  if (!g && info && info.newGuest && info.newGuest.displayName) h += `<br><span class="gtipn">${esc(info.newGuest.displayName)} · новый гость</span>`;
+  if (g) h += `<br><span class="gtipn">${esc(g.displayName)}${g.game ? ` · ур. ${fmt.format(g.game.level)}` : ''}${SEG_LABEL[g.segment] ? ' · ' + SEG_LABEL[g.segment].toLowerCase() : ''}</span>`;
+  return h;
+}
+var tipSeatNum = null, tipSeatTimer = 0;
+function hoverSeatInfo(s) {
+  const num = s && s.state === 'busy' ? s.num : null;
+  if (num === tipSeatNum) return;
+  tipSeatNum = num; clearTimeout(tipSeatTimer);
+  if (num) tipSeatTimer = setTimeout(() => { if (tipSeatNum === num) seatInfo(s, true); }, 350);
+}
+/* ---------------- attention: GET /api/stores/:id/floor-plan/live/attention ----------------
+   Hints over the computers (what to pay attention to about the guest) and the
+   guests' messages. `var`: the scene is built before this part of the script runs,
+   and CLUB / editing are declared further down, so only callbacks touch them. */
+var ATTN = { data: null, pending: false, failed: false, off: new Set(), busy: new Set(), timer: 0, back: 0 };
+var ATTN_POLL_MS = 15000;
+var ATTN_TONES = ['ALERT', 'TODAY', 'OFFER', 'NEW', 'KNOW'];
+var ATTN_TONE_LABEL = { ALERT: 'Обращение', TODAY: 'Сделать сейчас', OFFER: 'Предложить', NEW: 'Новый гость', KNOW: 'Знать о госте' };
+var ATTN_SVG = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+var ATTN_ICON = {
+  GUEST_MESSAGE: ATTN_SVG('<path d="M12 5v9M12 18.5v.5"/>'),
+  REWARD_EXPIRING: ICON.gift, REWARDS_WAITING: ICON.gift,
+  TIME_ENDING: ATTN_SVG('<circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2M9.5 2.5h5"/>'),
+  TASK: ATTN_SVG('<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
+  NOT_IN_GAME: ICON.star, GAME_IDLE: ICON.star, BONUS_IDLE: ICON.rub, NO_PURCHASES: ICON.cup,
+  FIRST_VISIT: ATTN_SVG('<path d="M12 5v14M5 12h14"/>'),
+  VIP: ICON.badge, RETURNED: ATTN_SVG('<path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v5h5"/>')
+};
+var attnMarkers = new Map();
+
+function attnDayKey() { const d = new Date(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; }
+function attnDoneKey() { return `lp-attn-done:${STORE_ID}:${attnDayKey()}`; }
+function attnDone() {
+  try { const v = JSON.parse(localStorage.getItem(attnDoneKey()) || '[]'); return new Set(Array.isArray(v) ? v : []); } catch (e) { return new Set(); }
+}
+function attnMarkDone(id) {
+  const done = attnDone(); done.add(id);
+  try { localStorage.setItem(attnDoneKey(), JSON.stringify([...done].slice(-300))); } catch (e) { /* private mode: hidden until reload */ }
+  ATTN.hidden = ATTN.hidden || new Set(); ATTN.hidden.add(id);
+}
+function attnHintId(seat, hint) { return `${seat.number}:${seat.guestId || ''}:${hint.key}`; }
+function attnIsDone(seat, hint, done) { const id = attnHintId(seat, hint); return done.has(id) || (ATTN.hidden && ATTN.hidden.has(id)); }
+/* Hints of a seat that are still open and pass the tone filter, most urgent first. */
+function attnOpenHints(seat, done) {
+  return seat.hints.filter(h => !ATTN.off.has(h.tone) && (h.key === 'GUEST_MESSAGE' || !attnIsDone(seat, h, done)));
+}
+function attnSceneSeat(num) { return seats.find(x => x.num === num) || null; }
+function attnAgo(iso) {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (!isFinite(m)) return '';
+  return m < 1 ? 'только что' : m < 60 ? `${m} мин назад` : `${Math.floor(m / 60)} ч ${m % 60} мин назад`;
+}
+
+async function loadAttention() {
+  if (!API || ATTN.pending || document.hidden) return;
+  ATTN.pending = true;
+  try {
+    const r = await fetch(`${API}/live/attention`, { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } });
+    if (r.ok) { ATTN.data = await r.json(); ATTN.failed = false; } else ATTN.failed = true;
+  } catch (e) { ATTN.failed = true; }
+  ATTN.pending = false;
+  attnRefreshPanel();
+  renderAttnLegend();
+}
+/* Colour legend of the guest markers on the full scene, bottom right. It is
+   collapsed by default to one line as tall as «Лента клуба»; opened, each row
+   also hides or shows its markers. «Моя смена» has the same colours as
+   chips in its panel. */
+var ATTN_TONE_NOTE = { ALERT: 'гость написал в Telegram или приложении', TODAY: 'кончается время, сгорает награда', OFFER: 'бар, бонусы, позвать в игру', NEW: 'первый визит в клуб', KNOW: 'VIP, давно не был(а), задача из CRM' };
+var ATTN_LEG_KEY = 'lp-club-scheme-legend-open';
+function attnLegOpen() { try { return localStorage.getItem(ATTN_LEG_KEY) === '1'; } catch (e) { return false; } }
+function attnSetLegOpen(open) { ATTN.legOpen = open; try { localStorage.setItem(ATTN_LEG_KEY, open ? '1' : '0'); } catch (e) { /* private window */ } }
+function attnLegendHtml(d, done) {
+  const count = {};
+  for (const seat of d.seats) for (const h of seat.hints) if (h.key !== 'GUEST_MESSAGE' && !attnIsDone(seat, h, done)) count[h.tone] = (count[h.tone] || 0) + 1;
+  count.ALERT = d.alerts.filter(a => a.status !== 'RESOLVED').length;
+  const open = !!ATTN.legOpen;
+  const head = `<button type="button" class="alegh" data-leg aria-expanded="${open}"><span>Маркеры гостей</span><em>${open ? 'Свернуть' : 'Подробнее'}<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></em></button>`;
+  // collapsed: one line, colour and number of guests, like «Лента клуба»
+  if (!open) return head + `<div class="alegs">${ATTN_TONES.map(t => `<span class="${ATTN.off.has(t) ? 'off' : ''}" title="${ATTN_TONE_LABEL[t]}${ATTN.off.has(t) ? ' · скрыто' : ''}"><i class="t-${t}"></i>${count[t] || 0}</span>`).join('')}</div>`;
+  return head + `<div class="alegl">${ATTN_TONES.map(t => `<button type="button" class="alegr" data-tone="${t}" aria-pressed="${ATTN.off.has(t) ? 'false' : 'true'}" title="${ATTN.off.has(t) ? 'Показать' : 'Скрыть'} на схеме"><i class="t-${t}"></i><span><b>${ATTN_TONE_LABEL[t]}</b><small>${ATTN_TONE_NOTE[t]}</small></span><em class="num">${count[t] || 0}</em></button>`).join('')}</div>`;
+}
+function renderAttnLegend() {
+  if (EMBED || !API) return;
+  const stage = document.getElementById('stage');
+  if (!stage) return;
+  let el = document.getElementById('attleg');
+  if (!el) {
+    el = document.createElement('section'); el.id = 'attleg'; el.className = 'attleg'; el.setAttribute('aria-label', 'Цвета маркеров гостей'); el.hidden = true;
+    stage.appendChild(el);
+    el.addEventListener('click', e => {
+      // collapsed by default: the same colours are in the guest panel; a click opens the descriptions
+      if (e.target.closest('[data-leg]') || !ATTN.legOpen) {
+        attnSetLegOpen(!ATTN.legOpen);
+        renderAttnLegend();
+        const h = el.querySelector('[data-leg]'); if (h) h.focus();
+        return;
+      }
+      const b = e.target.closest('[data-tone]'); if (!b) return;
+      const t = b.dataset.tone; if (ATTN.off.has(t)) ATTN.off.delete(t); else ATTN.off.add(t);
+      renderAttnLegend();
+      const f = el.querySelector(`[data-tone="${t}"]`); if (f) f.focus();
+    });
+  }
+  const show = !!ATTN.data && view.type === 'home' && !(typeof editing !== 'undefined' && editing) && !isPhone();
+  el.hidden = !show;
+  if (!show) return;
+  if (ATTN.legOpen === undefined) ATTN.legOpen = attnLegOpen();
+  el.classList.toggle('open', !!ATTN.legOpen);
+  // renderPanel runs often: rewrite only on change, so hover and focus stay put
+  const html = attnLegendHtml(ATTN.data, attnDone());
+  if (html !== el.__html) { el.innerHTML = html; el.__html = html; }
+  if (typeof placeShiftWork === 'function') placeShiftWork();
+}
+function attnRefreshPanel() {
+  if (typeof editing === 'undefined' || editing) return;
+  if ((view.type === 'home' && EMBED) || view.type === 'seat') renderPanel();
+}
+function startAttention() {
+  if (!API) return;
+  loadAttention();
+  clearInterval(ATTN.timer);
+  ATTN.timer = setInterval(loadAttention, ATTN_POLL_MS);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) loadAttention(); });
+}
+
+async function setAlertStatus(id, status) {
+  if (!API || ATTN.busy.has(id)) return;
+  ATTN.busy.add(id); attnRefreshPanel();
+  let ok = false, msg = null;
+  try {
+    const r = await fetch(`${API}/live/alerts/${encodeURIComponent(id)}`, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ status }) });
+    ok = r.ok;
+    if (!ok) { const d = await r.json().catch(() => null); msg = d && typeof d.message === 'string' ? d.message : null; if (r.status === 403) msg = 'Нет прав менять обращения'; if (r.status === 409) msg = msg || 'Обращение уже изменили'; }
+  } catch (e) { ok = false; }
+  ATTN.busy.delete(id);
+  if (ok && ATTN.data) {
+    const a = ATTN.data.alerts.find(x => x.id === id); if (a) a.status = status;
+    if (status === 'RESOLVED') for (const s of ATTN.data.seats) s.hints = s.hints.filter(h => !(h.key === 'GUEST_MESSAGE' && h.alertId === id));
+  }
+  toast(ok ? (status === 'RESOLVED' ? 'Обращение решено' : 'Отметили, что вы идёте') : (msg || 'Не получилось изменить обращение'));
+  attnRefreshPanel();
+  loadAttention();
+}
+
+/* ---------------- markers over the heads of the guests ---------------- */
+function placeAttentionMarkers() {
+  const d = ATTN.data;
+  const show = d && typeof editing !== 'undefined' && !editing && view.type !== 'seat';
+  const want = new Set();
+  const placed = [];
+  if (show) {
+    const done = attnDone();
+    const rows = [];
+    for (const seat of d.seats) {
+      const open = attnOpenHints(seat, done);
+      const s = attnSceneSeat(seat.number);
+      if (!open.length || !s || s.state !== 'busy') continue;
+      let w;
+      if (s.person && s.person.userData.head) { w = s.person.userData.head.getWorldPosition(new THREE.Vector3()); w.y += 0.42; }
+      else { w = seatWorld(s); w.y = 1.9; }
+      const [x, y, depth] = project(w.x, w.y, w.z);
+      if (depth > 1) continue;
+      rows.push({ seat, s, top: open[0], more: open.length - 1, x, y });
+    }
+    rows.sort((a, b) => ATTN_TONES.indexOf(a.top.tone) - ATTN_TONES.indexOf(b.top.tone) || b.y - a.y);
+    for (const r of rows) {
+      const key = String(r.seat.number); want.add(key);
+      let el = attnMarkers.get(key);
+      if (!el) {
+        el = document.createElement('button'); el.type = 'button'; el.className = 'amk';
+        el.addEventListener('click', () => { const s = attnSceneSeat(Number(el.dataset.n)); if (s) select({ type: 'seat', id: s.id }); });
+        overlay.appendChild(el); attnMarkers.set(key, el);
+      }
+      el.dataset.n = key;
+      const wide = r.top.tone === 'ALERT';
+      const sig = `${r.top.tone}|${r.top.key}|${r.more}|${wide ? r.top.title : ''}`;
+      if (el.dataset.sig !== sig) {
+        el.dataset.sig = sig;
+        el.className = `amk t-${r.top.tone}${wide ? ' wide' : ''}`;
+        el.innerHTML = `<i>${ATTN_ICON[r.top.key] || ''}</i><span>${wide ? 'Обращение' : esc(r.s.num)}</span>${r.more > 0 ? `<em>+${r.more}</em>` : ''}`;
+        el.setAttribute('aria-label', `ПК ${r.seat.number}${r.seat.guestName ? ', ' + r.seat.guestName : ''}: ${r.top.title}`);
+        el.title = `ПК ${r.seat.number} · ${r.top.title}`;
+      }
+      const w = el.offsetWidth || 40, h = el.offsetHeight || 24;
+      // Nearest free spot: above the head, then beside it, then one row higher.
+      const hits = (x, y) => placed.some(p => Math.abs(p.x - x) < (p.w + w) / 2 + 3 && Math.abs(p.y - y) < h + 2);
+      const side = w + 4, up = h + 3;
+      const spots = [[0, 0], [side * 0.6, 0], [-side * 0.6, 0], [0, -up], [side * 0.6, -up], [-side * 0.6, -up], [side * 1.2, 0], [-side * 1.2, 0], [0, -2 * up]];
+      let x = r.x, y = r.y;
+      for (const [dx, dy] of spots) if (!hits(r.x + dx, r.y + dy)) { x = r.x + dx; y = r.y + dy; break; }
+      placed.push({ x, y, w });
+      el.style.transform = `translate(${Math.round(x)}px,${Math.round(y)}px) translate(-50%,-100%)`;
+    }
+  }
+  for (const [key, el] of attnMarkers) if (!want.has(key)) { el.remove(); attnMarkers.delete(key); }
+}
+
+/* ---------------- panel: the hall on «Моя смена» ---------------- */
+function attnChipsHtml(d, done) {
+  const count = {};
+  for (const seat of d.seats) for (const h of seat.hints) if (h.key !== 'GUEST_MESSAGE' && !attnIsDone(seat, h, done)) count[h.tone] = (count[h.tone] || 0) + 1;
+  count.ALERT = d.alerts.filter(a => a.status !== 'RESOLVED').length;
+  return `<div class="achips" role="group" aria-label="Что показывать на схеме">${ATTN_TONES.map(t => `<button type="button" class="achip" data-tone="${t}" aria-pressed="${ATTN.off.has(t) ? 'false' : 'true'}"><i class="t-${t}"></i>${ATTN_TONE_LABEL[t]}<em class="num">${count[t] || 0}</em></button>`).join('')}</div>`;
+}
+function attnAlertHtml(a) {
+  const busy = ATTN.busy.has(a.id);
+  const seat = a.number != null ? attnSceneSeat(a.number) : null;
+  const who = `${a.number != null ? `ПК ${a.number}` : 'Не за ПК'}${a.guestName ? ' · ' + esc(a.guestName) : ''}`;
+  const acts = a.status === 'RESOLVED' ? `<span class="adone">Решено</span>`
+    : `${a.status === 'NEW' ? `<button type="button" class="abtn" data-alert="${esc(a.id)}" data-status="IN_PROGRESS"${busy ? ' disabled' : ''}>Иду</button>` : `<span class="aprog">Администратор идёт</span>`}<button type="button" class="abtn pri" data-alert="${esc(a.id)}" data-status="RESOLVED"${busy ? ' disabled' : ''}>Решено</button>`;
+  return `<div class="arow s-${a.status}"${seat ? ` data-seat="${esc(seat.id)}" role="button" tabindex="0"` : ''}><div class="atop"><b>${who}</b><time>${a.channel === 'TELEGRAM' ? 'Telegram' : 'Приложение'} · ${attnAgo(a.lastActivityAt || a.createdAt)}</time></div><q>${esc(a.text)}</q><div class="aacts">${acts}</div></div>`;
+}
+function attentionHomeHtml() {
+  const linked = linkedSeats(), busyN = seats.filter(s => s.state === 'busy').length;
+  let h = `<div class="ph"><div><div class="eyebrow">Сейчас в зале</div><h2>${esc(CLUB.name)}</h2><div class="sub">${linked.length ? `${busyN} из ${linked.length} ПК заняты` : 'Нет данных Langame о компьютерах'}</div></div><span class="chip ${LIVE.status === 'LIVE' ? 'good' : 'off'}">${LIVE.status === 'LIVE' ? 'Live' : 'Нет данных'}</span></div>`;
+  const d = ATTN.data;
+  if (!d) return h + `<div class="note">${ATTN.failed ? 'Не удалось получить подсказки, попробую ещё раз.' : 'Загружаю подсказки по гостям…'}</div>`;
+  const done = attnDone();
+  h += attnChipsHtml(d, done);
+  if (d.guestAccess === 'AVAILABLE') {
+    const open = d.alerts.filter(a => a.status !== 'RESOLVED').length;
+    const alerts = ATTN.off.has('ALERT') ? [] : d.alerts;
+    h += `<div class="sec asec"><h3>Обращения гостей <span class="acnt${open ? ' red' : ''}">${open}</span></h3>${alerts.length ? `<div class="alist">${alerts.map(attnAlertHtml).join('')}</div>` : `<div class="aempty">${ATTN.off.has('ALERT') ? 'Обращения скрыты фильтром' : 'Новых обращений нет'}</div>`}</div>`;
+  }
+  const rows = [];
+  for (const seat of d.seats) {
+    const open = attnOpenHints(seat, done).filter(x => x.key !== 'GUEST_MESSAGE');
+    if (open.length) rows.push({ seat, open });
+  }
+  rows.sort((a, b) => ATTN_TONES.indexOf(a.open[0].tone) - ATTN_TONES.indexOf(b.open[0].tone) || a.seat.number - b.seat.number);
+  h += `<div class="sec"><h3>На что обратить внимание <span class="acnt">${rows.length}</span></h3>${rows.length ? `<div class="alist">${rows.map(({ seat, open }) => {
+    const s = attnSceneSeat(seat.number), top = open[0];
+    return `<div class="lrow"${s ? ` data-seat="${esc(s.id)}" role="button" tabindex="0"` : ''}><span class="apc t-${top.tone}">${seat.number}</span><span class="lt"><b>${seat.guestName ? esc(seat.guestName) + ' · ' : ''}${esc(top.title)}</b><span>${esc(top.hint)}${open.length > 1 ? ` · ещё ${open.length - 1}` : ''}</span></span><button type="button" class="aok" data-done="${esc(attnHintId(seat, top))}" aria-label="Готово: ${esc(top.title)}">Готово</button></div>`;
+  }).join('')}</div>` : `<div class="aempty">Сейчас подсказок нет. Метки появятся над ПК, когда будет повод.</div>`}</div>`;
+  if (d.guestAccess !== 'AVAILABLE') h += `<div class="lockn">Подсказки по гостям и обращения видят роли с доступом к разделу «Гости». Сейчас видно только, у кого заканчивается время.</div>`;
+  return h;
+}
+/* Hints of the guest at the selected computer, above the session block. */
+function seatHintsHtml(s) {
+  const d = ATTN.data;
+  if (!d || !s || s.state !== 'busy') return '';
+  const seat = d.seats.find(x => x.number === s.num);
+  if (!seat || !seat.hints.length) return '';
+  const done = attnDone();
+  const items = seat.hints.map(hint => {
+    const isDone = hint.key !== 'GUEST_MESSAGE' && attnIsDone(seat, hint, done);
+    const alert = hint.key === 'GUEST_MESSAGE' && hint.alertId ? d.alerts.find(a => a.id === hint.alertId) : null;
+    let acts = '';
+    if (alert && alert.status !== 'RESOLVED') {
+      const busy = ATTN.busy.has(alert.id);
+      acts = `<div class="aacts">${alert.status === 'NEW' ? `<button type="button" class="abtn" data-alert="${esc(alert.id)}" data-status="IN_PROGRESS"${busy ? ' disabled' : ''}>Иду</button>` : `<span class="aprog">Администратор идёт</span>`}<button type="button" class="abtn pri" data-alert="${esc(alert.id)}" data-status="RESOLVED"${busy ? ' disabled' : ''}>Решено</button></div>`;
+    } else if (!isDone && hint.key !== 'GUEST_MESSAGE') {
+      acts = `<div class="aacts"><button type="button" class="aok" data-done="${esc(attnHintId(seat, hint))}">Готово</button></div>`;
+    }
+    return `<li class="${isDone ? 'isdone' : ''}"><i class="t-${hint.tone}"></i><div><b>${esc(hint.title)}</b><span class="say">${esc(hint.hint)}</span>${acts}</div></li>`;
+  }).join('');
+  return `<div class="sec ahints"><h3>На что обратить внимание</h3><ul>${items}</ul></div>`;
+}
+
+/* Buttons inside the panel run before the panel's own click handler, which
+   would open the computer of the row. */
+pbody.addEventListener('click', e => {
+  const tone = e.target.closest('[data-tone]');
+  const done = e.target.closest('[data-done]');
+  const alert = e.target.closest('[data-alert]');
+  if (!tone && !done && !alert) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  if (tone) { const t = tone.dataset.tone; if (ATTN.off.has(t)) ATTN.off.delete(t); else ATTN.off.add(t); renderPanel(); return; }
+  if (done) { attnMarkDone(done.dataset.done); toast('Подсказка скрыта до конца дня'); renderPanel(); return; }
+  if (alert && !alert.disabled) setAlertStatus(alert.dataset.alert, alert.dataset.status);
+}, true);
+pbody.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-seat][role="button"]')) { e.preventDefault(); e.target.click(); }
+});
+
+/* On «Моя смена» the hall goes back to its place 20 seconds after the last touch. */
+if (EMBED) {
+  controls.addEventListener('end', () => {
+    clearTimeout(ATTN.back);
+    ATTN.back = setTimeout(() => { if (view.type === 'home' && !fly && !(typeof editing !== 'undefined' && editing)) flyTo(homeView()); }, 20000);
+  });
+}
+/* Calm hall: no cars and no people in the street. */
+if (CALM) {
+  for (const m of movers) m.o.visible = false;
+  for (const w of walkers) w.p.visible = false;
+}
+/* ---------------- shift work of the administrator: GET /api/staff/checklists, /api/staff/tasks ----------------
+   For a shift administrator looking at the hall under their own account: the shift
+   checklist (planned time and status of every item) in place of «Обзор клуба» and
+   the administrator's tasks above «Лента клуба». The administrator works right here:
+   a simple item is marked with one tap on its circle (8 s «Отменить»), an item with a
+   photo, a number or a text opens an editor in the card, «Сдать чек-лист» hands it in;
+   a task is taken into work and handed in for review with a comment and photos.
+   Saving goes through the same BFF routes as «Моя смена» and «Задачи»
+   (PATCH /api/staff/checklists/:id, POST /api/staff/tasks/:id/comments,
+   POST /api/staff/attachments), so the API applies the same rights.
+   «Режим администратора смены» (a senior administrator, a standards manager and
+   above; switched in the «Стойка и бар» card): the same cards for whoever holds
+   the open Langame shift, from GET /api/stores/:id/floor-plan/live/shift-admin,
+   read-only (the user chose 14.11: the senior administrator only watches here).
+   `var`: the scene is built before this part of the script runs (see attention.js). */
+var SW = { me: null, own: false, lead: false, mode: null, target: null, canOpenRuns: false, run: null, tasks: null, taskTotal: 0, failed: false, timer: 0, scrolled: false, open: null, failFor: null, drafts: {}, busy: false, err: null, task: null, submitFor: null, tdraft: null, stale: false, toast: null, rev: 0 };
+var SW_ROLES = ['SENIOR_ADMINISTRATOR', 'CLUB_ADMINISTRATOR'];
+var SW_LEAD_ROLES = ['OWNER', 'ADMIN', 'MANAGER', 'CLUB_MANAGER', 'STANDARDS_MANAGER', 'SENIOR_ADMINISTRATOR'];
+var SW_USE_ONLY = ['SENIOR_ADMINISTRATOR', 'CLUB_ADMINISTRATOR', 'TRAINEE'];
+var SW_POLL_MS = 60000;
+var SW_ACTIVE_RUN = ['OPEN', 'IN_PROGRESS', 'RETURNED', 'ESCALATED'];
+var SW_DONE_TASK = ['DONE', 'CANCELED'];
+
+function swOn() { return !!(SW && SW.me && SW.mode) && !EMBED; }
+function swAdminMode() { return swOn() && SW.mode === 'admin'; }
+function swModeKey() { return 'leetplus-floor-plan-shift-admin:' + STORE_ID; }
+function swStoredMode() { try { return sessionStorage.getItem(swModeKey()); } catch (e) { return null; } }
+function swStoreMode(mode) { try { if (mode === 'admin') sessionStorage.setItem(swModeKey(), 'admin'); else sessionStorage.removeItem(swModeKey()); } catch (e) { /* private window */ } }
+function swJson(url) {
+  return fetch(url, { credentials: 'same-origin', cache: 'no-store' }).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))));
+}
+function startShiftWork() {
+  if (EMBED || !STORE_ID) return;
+  swJson('/api/auth/me').then(body => {
+    const u = body && body.user;
+    if (!u) return;
+    SW.own = SW_ROLES.includes(u.role);
+    SW.lead = !!u.isPlatformAdmin || SW_LEAD_ROLES.includes(u.role);
+    if (!SW.own && !SW.lead) return;
+    SW.me = { id: u.id };
+    SW.canOpenRuns = !SW_USE_ONLY.includes(u.role);
+    SW.mode = SW.lead && swStoredMode() === 'admin' ? 'admin' : SW.own ? 'own' : null;
+    buildShiftWork();
+    pbody.addEventListener('click', e => { const b = e.target.closest('[data-swmode]'); if (b) swSetMode(b.dataset.swmode === 'on' ? 'admin' : null); });
+    if (view.type === 'zone' && view.id === 'admin') renderPanel();
+    loadShiftWork();
+    SW.timer = setInterval(loadShiftWork, SW_POLL_MS);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) loadShiftWork(); });
+  }).catch(() => { /* no session or no access: the hall works without the cards */ });
+}
+function swMine(row) { return !row.assignedToUser || row.assignedToUser.id === SW.me.id; }
+function swHere(row) { return !row.store || !row.store.id || row.store.id === STORE_ID; }
+function swAt(row) { return new Date(row.shift && row.shift.startedAt || row.startedAt || row.scheduledAt || row.createdAt || 0).getTime(); }
+function swPickRun(rows) {
+  const active = rows.filter(r => SW_ACTIVE_RUN.includes(r.status)).sort((a, b) => swAt(b) - swAt(a));
+  // a checklist handed in during the last 14 hours stays visible as done
+  const recent = rows.filter(r => !SW_ACTIVE_RUN.includes(r.status) && r.status !== 'CANCELED' && Date.now() - swAt(r) < 14 * 3600e3).sort((a, b) => swAt(b) - swAt(a));
+  return active[0] || recent[0] || null;
+}
+function swOpenTasks(rows) {
+  const open = rows.filter(t => !SW_DONE_TASK.includes(t.status) && swHere(t));
+  return open.sort((a, b) => (b.isOverdue - a.isOverdue) || ((a.dueAt ? Date.parse(a.dueAt) : Infinity) - (b.dueAt ? Date.parse(b.dueAt) : Infinity)));
+}
+/* «Переключиться» / «Выйти»: null goes back to the viewer's own cards, if any. */
+function swSetMode(next) {
+  if (!SW.me) return;
+  const mode = next === 'admin' && SW.lead ? 'admin' : SW.own ? 'own' : null;
+  swStoreMode(mode);
+  Object.assign(SW, { mode, target: null, run: null, tasks: null, taskTotal: 0, failed: false, scrolled: false, open: null, failFor: null, task: null, submitFor: null, tdraft: null, err: null });
+  if (mode === 'admin' && view.type !== 'home') select({ type: 'home' });
+  else if (view.type === 'zone' && view.id === 'admin') renderPanel();
+  renderShiftWork();
+  placeShiftWork();
+  loadShiftWork();
+}
+function loadShiftWork() {
+  if (!swOn()) return;
+  if (SW.mode === 'admin') return loadShiftAdminWork();
+  const rev = SW.rev;
+  Promise.all([
+    swJson('/api/staff/checklists?status=all').catch(() => null),
+    swJson('/api/staff/tasks?view=my&status=all&sort=dueAt&direction=asc&pageSize=50').catch(() => null),
+  ]).then(([checklists, tasks]) => {
+    if (SW.mode !== 'own') return;
+    // a save made while this poll was on its way is newer than what it brought
+    if (rev !== SW.rev || SW.busy) return;
+    if (checklists && Array.isArray(checklists.rows)) SW.run = swPickRun(checklists.rows.filter(r => swMine(r) && swHere(r)));
+    if (tasks && Array.isArray(tasks.rows)) { SW.tasks = swOpenTasks(tasks.rows); SW.taskTotal = SW.tasks.length; }
+    SW.failed = !checklists && !tasks;
+    renderShiftWork();
+  });
+}
+function loadShiftAdminWork() {
+  swJson(`/api/stores/${encodeURIComponent(STORE_ID)}/floor-plan/live/shift-admin`).then(w => {
+    if (SW.mode !== 'admin') return;
+    const changed = !SW.target || !w.admin || !SW.target.admin || SW.target.admin.userId !== w.admin.userId;
+    SW.target = w; SW.failed = false;
+    if (changed) SW.scrolled = false;
+    SW.run = Array.isArray(w.checklists) ? swPickRun(w.checklists.filter(swHere)) : null;
+    SW.tasks = Array.isArray(w.tasks) ? swOpenTasks(w.tasks) : w.state === 'READY' ? null : [];
+    SW.taskTotal = Array.isArray(w.tasks) ? Math.max(w.taskTotal || 0, SW.tasks.length) : 0;
+    renderShiftWork();
+  }).catch(() => {
+    if (SW.mode !== 'admin') return;
+    SW.failed = true;
+    renderShiftWork();
+  });
+}
+function swAdminName(short) {
+  const a = SW.target && SW.target.admin, sh = shiftInfo();
+  const full = (a && a.name) || (sh && sh.full) || 'Администратор смены';
+  return short ? shortName(full) : full;
+}
+/* Why the admin mode has no checklist or tasks to show, or null. */
+function swAdminEmpty(part) {
+  const w = SW.target;
+  if (!w) return SW.failed ? 'Не удалось загрузить, попробую через минуту.' : 'Загружаю…';
+  if (w.state === 'NO_SHIFT') return 'В Langame нет открытой смены.';
+  if (w.state === 'NOT_CONNECTED') return 'Клуб не подключён к Langame.';
+  if (w.state === 'UNAVAILABLE') return 'Langame не ответил про смену, попробую через минуту.';
+  if (w.state === 'NOT_LINKED') return `Администратор Langame «${esc(swAdminName(false))}» не привязан к сотруднику LeetPlus. Привязку делают в <a href="/staff/directory" target="_blank" rel="noopener">карточке сотрудника</a>.`;
+  if (part === 'checklist' && w.checklistAccess === 'NO_CAPABILITY') return 'Чек-листы смены недоступны вашей роли.';
+  if (part === 'tasks' && w.taskAccess === 'NO_CAPABILITY') return 'Задачи недоступны вашей роли.';
+  return null;
+}
+function swWhoHtml() {
+  if (!swAdminMode()) return '';
+  return `<div class="swwho"><span class="swwt"><span class="swwl">Режим администратора смены</span><b title="${esc(swAdminName(false))}">${esc(swAdminName(true))}</b></span><button type="button" class="swx" data-swmode="off">Выйти</button></div>`;
+}
+/* The switch in the «Стойка и бар» card, for a senior administrator and above. */
+function swModeHtml() {
+  if (!SW || !SW.lead || EMBED || isPhone()) return '';
+  const sh = shiftInfo();
+  const head = '<div class="sec swmode"><h3>Режим администратора смены</h3>';
+  if (SW.mode === 'admin') return `${head}<p>На схеме чек-лист и задачи администратора смены${sh ? ` (${esc(sh.short)})` : ''}: под обзором клуба и над лентой.</p><button type="button" class="swbtn sec" data-swmode="off">Выйти из режима</button></div>`;
+  if (!sh) return `${head}<p>Станет доступен, когда в Langame откроют смену.</p></div>`;
+  return `${head}<p>Покажет на схеме чек-лист и задачи администратора смены (${esc(sh.short)}): что сделано, что просрочено и что на очереди.</p><button type="button" class="swbtn pri" data-swmode="on">Переключиться</button></div>`;
+}
+
+/* ---- checklist items with their time and status ---- */
+function swMinutes(ms) { const m = Math.round(ms / 60000); return m < 60 ? `${m} мин` : `${Math.floor(m / 60)} ч${m % 60 ? ' ' + (m % 60) + ' мин' : ''}`; }
+function swKey(sectionId, itemId) { return `${sectionId}::${itemId}`; }
+function swPhotos(a) { return a ? (a.evidenceAttachments || []).length + (a.evidenceUrl && !(a.evidenceAttachments || []).length ? 1 : 0) : 0; }
+function swHasEvidence(a) { return !!(a && (a.evidenceUrl || (a.evidenceAttachments || []).length)); }
+/* What the item asks for besides a mark: a photo, a number or a text. */
+function swNeeds(item) {
+  if (item.valueType === 'PHOTO_LINK' || item.valueType === 'FILE_LINK' || item.evidenceRequired) return 'photo';
+  if (item.valueType === 'NUMBER') return 'number';
+  if (item.valueType === 'TEXT' || item.valueType === 'SELECT') return 'text';
+  return null;
+}
+function swItems(run) {
+  const answers = new Map((run.answers || []).map(a => [swKey(a.sectionId, a.itemId), a]));
+  const plans = new Map((run.itemTimings || []).map(p => [swKey(p.sectionId, p.itemId), p.timing]));
+  const now = Date.now(), list = [];
+  let order = 0;
+  for (const section of run.sections || []) for (const item of section.items || []) {
+    const key = swKey(section.id, item.id);
+    const a = answers.get(key) || null;
+    const t = (a && a.timing) || plans.get(key) || null;
+    const planned = t && t.plannedAt ? Date.parse(t.plannedAt) : null;
+    const end = t && t.windowEndAt ? Date.parse(t.windowEndAt) : null;
+    const start = t && t.windowStartAt ? Date.parse(t.windowStartAt) : null;
+    const needs = swNeeds(item), photos = swPhotos(a);
+    let tone, chip, sub = '';
+    if (a && a.status) {
+      const at = a.completedAt ? hhmm(new Date(a.completedAt)) : null;
+      sub = [at ? `отмечено в ${at}` : 'отмечено', photos ? `${photos} фото` : null, item.evidenceRequired && !photos ? 'нет фото' : null].filter(Boolean).join(' · ');
+      if (a.status === 'FAILED') { tone = 'bad'; chip = 'Не выполнено'; if (a.note) sub = a.note; }
+      else if (a.status === 'NOT_APPLICABLE') { tone = 'na'; chip = 'Не относится'; }
+      else if (t && t.status === 'LATE') { tone = 'late'; chip = `+${swMinutes((t.deviationMinutes || 0) * 60000)}`; }
+      else if (t && t.status === 'EARLY') { tone = 'ok'; chip = 'Раньше срока'; }
+      else { tone = 'ok'; chip = t && t.status === 'ON_TIME' ? 'Вовремя' : 'Готово'; }
+    } else if (t && t.status === 'MISSED') {
+      tone = 'bad'; chip = 'Просрочено'; sub = end ? `окно до ${hhmm(new Date(end))} закрыто` : '';
+    } else if (end && start && now >= start) {
+      tone = 'now'; chip = 'Сейчас'; sub = `окно до ${hhmm(new Date(end))} · осталось ${swMinutes(end - now)}`;
+    } else if (start && start > now) {
+      tone = 'wait'; chip = start - now <= 3 * 3600e3 ? `Через ${swMinutes(start - now)}` : 'Запланировано';
+    } else if (run.isOverdue) {
+      tone = 'bad'; chip = 'Просрочено';
+    } else {
+      tone = 'wait'; chip = 'Сделать';
+    }
+    if (!(a && a.status) && !sub) sub = needs === 'photo' ? 'нужно фото' : needs === 'number' ? 'нужно число' : needs === 'text' ? 'нужен текст' : '';
+    list.push({ key, sectionId: section.id, itemId: item.id, item, answer: a, needs, section: section.title, title: item.title, time: planned ? hhmm(new Date(planned)) : '', planned, tone, chip, sub, done: !!(a && a.status), order: order++ });
+  }
+  // timed items by their time, the rest in checklist order after them
+  return list.sort((x, y) => (x.planned == null) - (y.planned == null) || (x.planned || 0) - (y.planned || 0) || x.order - y.order);
+}
+/* Required items still to mark and photos still to add: what keeps «Сдать чек-лист» off
+   (the API refuses ON_REVIEW for the same reasons). */
+function swLeft(items) {
+  return items.filter(i => (i.item.required && !i.done) || (i.item.evidenceRequired && !swHasEvidence(i.answer))).length;
+}
+var SW_TICK = '<path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--surface)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>';
+var SW_DOT = {
+  ok: `<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--good)"/>${SW_TICK}</svg>`,
+  late: `<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--warn)"/>${SW_TICK}</svg>`,
+  bad: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--bad)"/><path d="M8 4.5v4.2M8 11.2v.3" stroke="var(--surface)" stroke-width="1.9" stroke-linecap="round"/></svg>',
+  failed: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--bad)"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="var(--surface)" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  na: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" fill="var(--surface-2)" stroke="var(--muted)" stroke-width="1.3"/><path d="M5.2 8h5.6" stroke="var(--muted)" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  over: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="var(--bad)" stroke-width="1.8"/></svg>',
+  now: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="var(--accent)" stroke-width="1.8"/><circle cx="8" cy="8" r="2.6" fill="var(--accent)"/></svg>',
+  wait: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="var(--muted)" stroke-width="1.6"/></svg>'
+};
+var SW_CAM = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+var SW_CHIP = { ok: 'good', late: 'warn', bad: 'bad', now: 'acc', wait: 'off', na: 'off' };
+function swDot(i) {
+  if (i.done) return i.answer.status === 'FAILED' ? SW_DOT.failed : i.tone === 'na' ? SW_DOT.na : SW_DOT[i.tone] || SW_DOT.ok;
+  return i.tone === 'bad' ? SW_DOT.over : SW_DOT[i.tone] || SW_DOT.wait;
+}
+
+function swRunHref(run) {
+  if (swAdminMode()) return SW.canOpenRuns ? `/staff/checklists?runId=${encodeURIComponent(run.id)}` : null;
+  return `/staff/shift-workspace?checklistRunId=${encodeURIComponent(run.id)}`;
+}
+function swTasksHref() {
+  const a = swAdminMode() && SW.target && SW.target.admin;
+  return a && a.userId ? `/staff/tasks?view=all&amp;status=all&amp;assignedToUserId=${encodeURIComponent(a.userId)}&amp;storeId=${encodeURIComponent(STORE_ID)}` : '/staff/tasks?view=my&amp;status=all';
+}
+function swTaskHref(task) { return `/staff/tasks?taskId=${encodeURIComponent(task.id)}`; }
+/* Marks are made only by the administrator of the shift, on their own checklist that
+   is not handed in yet. */
+function swCanMark() { return SW.mode === 'own' && !!SW.run && SW_ACTIVE_RUN.includes(SW.run.status) && swMine(SW.run); }
+function swCanTask() { return SW.mode === 'own'; }
+
+function checklistCardHtml() {
+  const run = SW.run, admin = swAdminMode(), href = run && swRunHref(run);
+  let h = swWhoHtml() + `<div class="swhd"><h3>Чек-лист смены</h3>${href ? `<a href="${href}" target="_blank" rel="noopener">Открыть</a>` : admin ? '' : `<a href="/staff/shift-workspace" target="_blank" rel="noopener">Моя смена</a>`}</div>`;
+  SW.items = null;
+  if (admin && !run) return h + `<div class="swempty">${swAdminEmpty('checklist') || 'У администратора смены нет чек-листа на эту смену.'}</div>`;
+  if (!run) return h + `<div class="swempty">${SW.failed ? 'Не удалось загрузить чек-лист, попробую через минуту.' : 'На эту смену чек-лист не назначен. Его можно начать на странице «Моя смена».'}</div>`;
+  const items = swItems(run), total = items.length || 1, can = swCanMark();
+  const ok = items.filter(i => i.done && i.tone === 'ok').length, late = items.filter(i => i.tone === 'late').length;
+  const bad = items.filter(i => i.tone === 'bad').length, na = items.filter(i => i.tone === 'na').length, done = items.filter(i => i.done).length;
+  h += `<div class="swsub">${esc(run.title)} · ${done} из ${items.length} · сейчас ${hhmm(new Date())}</div>`;
+  h += `<div class="swbar" role="img" aria-label="Отмечено ${done} из ${items.length}"><i style="width:${ok / total * 100}%;background:var(--good)"></i><i style="width:${late / total * 100}%;background:var(--warn)"></i><i style="width:${bad / total * 100}%;background:var(--bad)"></i><i style="width:${na / total * 100}%;background:var(--muted)"></i></div>`;
+  h += `<div class="swleg"><span><i style="background:var(--good)"></i>${ok} вовремя</span><span><i style="background:var(--warn)"></i>${late} с опозданием</span><span><i style="background:var(--bad)"></i>${bad} ${bad === 1 ? 'проблема' : 'проблем'}</span></div>`;
+  h += `<div class="swlist">${items.map((i, k) => {
+    const open = SW.open === i.key;
+    const quick = can && !i.done && !i.needs;
+    const ckLabel = i.done ? i.chip : quick ? `Отметить «${i.title}» выполненным` : `Открыть пункт «${i.title}»`;
+    const ck = can && !i.done
+      ? `<button type="button" class="swck" data-swck="${k}" aria-label="${esc(ckLabel)}"${SW.busy ? ' disabled' : ''}>${swDot(i)}</button>`
+      : `<span class="swck" role="img" aria-label="${esc(ckLabel)}">${swDot(i)}</span>`;
+    const cam = i.needs === 'photo' && !i.done ? SW_CAM.replace('width="14" height="14"', 'width="11" height="11" class="swcam"') + ' ' : '';
+    return `<div class="swrow${i.tone === 'now' ? ' isnow' : ''}${open ? ' open' : ''}" data-swrow="${k}"><span class="swt">${i.time || '—'}</span>${ck}<button type="button" class="swtt" data-swopen="${k}" aria-expanded="${open}"><b>${esc(i.title)}</b>${i.sub ? `<small>${esc(i.sub)}</small>` : ''}</button><span class="chip ${SW_CHIP[i.tone] || 'off'}">${cam}${esc(i.chip)}</span></div>${open ? swEditorHtml(i, k, can) : ''}`;
+  }).join('')}</div>`;
+  SW.items = items;
+  if (can) {
+    const left = swLeft(items);
+    h += `<div class="swfoot"><small>${left ? `Осталось обязательных: ${left}` : 'Все обязательные пункты отмечены'}</small><button type="button" class="swbtn pri sm" data-swsubmit="1"${left || SW.busy ? ' disabled' : ''}>Сдать чек-лист</button></div>`;
+  } else if (SW.mode === 'own') {
+    h += `<div class="swro">${run.status === 'ON_REVIEW' ? 'Чек-лист сдан на проверку. Отметки менять нельзя, пока его не вернут.' : run.status === 'ACCEPTED' ? 'Чек-лист принят.' : 'Чек-лист закрыт.'}</div>`;
+  } else {
+    h += '<div class="swro">Отмечать пункты может только администратор этой смены. Здесь виден ход смены.</div>';
+  }
+  return h;
+}
+function swDraft(key) {
+  if (!SW.drafts[key]) {
+    const i = SW.items && SW.items.find(x => x.key === key), a = i && i.answer;
+    SW.drafts[key] = { value: (a && a.value) || '', note: (a && a.note) || '', photos: (a && a.evidenceAttachments) ? a.evidenceAttachments.slice() : [], uploading: false };
+  }
+  return SW.drafts[key];
+}
+function swPhotoHtml(list, attr, k, label, busy) {
+  const thumbs = list.map(p => `<a class="swthumb" href="${esc(p.url)}" target="_blank" rel="noopener" title="${esc(p.fileName || 'фото')}"><img src="${esc(p.url)}" alt="${esc(p.fileName || 'Фото')}" loading="lazy"></a>`).join('');
+  return `<div class="swphoto">${thumbs}<label class="swbtn sec sm swfile${busy ? ' busy' : ''}">${SW_CAM}<span>${busy ? 'Загружаю…' : list.length ? 'Ещё фото' : label}</span><input type="file" accept="image/*" ${attr}="${k}"${busy ? ' disabled' : ''}></label></div>`;
+}
+function swEditorHtml(i, k, can) {
+  const ins = i.item.instruction ? `<div class="swins">${esc(i.item.instruction)}</div>` : '';
+  const a = i.answer;
+  if (!can) {
+    const what = a && a.status ? `<div>${esc(i.chip)}${a.note ? ': ' + esc(a.note) : ''}${a.value ? ' · ' + esc(a.value) : ''}</div>` : '';
+    return `<div class="swed">${ins || '<div class="swins">Инструкции нет.</div>'}${what}${SW.mode === 'admin' ? '<div class="swins">Отмечает администратор смены.</div>' : ''}</div>`;
+  }
+  const err = SW.err && SW.err.key === i.key ? `<div class="swerr" role="alert">${esc(SW.err.text)}</div>` : '';
+  const dis = SW.busy ? ' disabled' : '';
+  if (i.done) {
+    const photos = (a.evidenceAttachments || []).map(p => `<a class="swthumb" href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.url)}" alt="${esc(p.fileName || 'Фото')}" loading="lazy"></a>`).join('');
+    return `<div class="swed">${ins}<div>${esc(i.chip)}${a.note ? ': ' + esc(a.note) : ''}${a.value ? ' · ' + esc(a.value) : ''}</div>${photos ? `<div class="swphoto">${photos}</div>` : ''}${err}<div class="swbtns"><button type="button" class="swbtn sec sm" data-swundo="${k}"${dis}>Снять отметку</button></div></div>`;
+  }
+  const d = swDraft(i.key);
+  if (SW.failFor === i.key) {
+    return `<div class="swed"><label class="swlbl" for="swwhy">Почему не выполнено</label><textarea id="swwhy" data-swnote="${k}" rows="2" placeholder="Например: нет ключа от подсобки">${esc(d.note)}</textarea>${err}<div class="swbtns"><button type="button" class="swbtn pri sm" data-swfailok="${k}"${d.note.trim() ? '' : ' disabled'}${dis}>Сохранить</button><button type="button" class="swbtn ghost sm" data-swfailno="${k}">Назад</button></div></div>`;
+  }
+  let field = '', ready = true;
+  if (i.needs === 'photo') { field = swPhotoHtml(d.photos, 'data-swfile', k, 'Сделать фото', d.uploading); ready = d.photos.length > 0; }
+  if (i.needs === 'number') { field = `<label class="swlbl" for="swnum">Значение</label><input type="number" id="swnum" inputmode="decimal" data-swval="${k}" value="${esc(d.value)}" placeholder="0">`; ready = d.value.trim() !== ''; }
+  if (i.needs === 'text') { field = `<label class="swlbl" for="swtxt">Ответ</label><textarea id="swtxt" rows="2" data-swval="${k}" placeholder="Коротко, что сделано">${esc(d.value)}</textarea>`; ready = d.value.trim() !== ''; }
+  return `<div class="swed">${ins}${field}${err}<div class="swbtns"><button type="button" class="swbtn pri sm" data-swok="${k}"${ready && !d.uploading ? '' : ' disabled'}${dis}>Готово</button><button type="button" class="swbtn sec sm" data-swfail="${k}"${dis}>Не выполнено</button>${i.item.required ? '' : `<button type="button" class="swbtn ghost sm" data-swna="${k}"${dis}>Не относится</button>`}</div></div>`;
+}
+
+/* ---- tasks ---- */
+function swTaskLine(t) {
+  const due = t.dueAt ? new Date(t.dueAt) : null;
+  const sameDay = due && due.toDateString() === new Date().toDateString();
+  const when = !due ? 'без срока' : t.isOverdue ? `срок был ${sameDay ? hhmm(due) : ddmm(due) + ' ' + hhmm(due)}` : `до ${sameDay ? hhmm(due) : ddmm(due) + ' ' + hhmm(due)}`;
+  return [t.priority === 'URGENT' ? 'срочно' : t.priority === 'HIGH' ? 'важно' : null, when].filter(Boolean).join(' · ');
+}
+function swTaskChip(t) {
+  if (t.status === 'ON_REVIEW') return ['lilac', 'На проверке'];
+  if (t.isOverdue) return ['bad', 'Просрочена'];
+  if (t.status === 'IN_PROGRESS') return ['acc', 'В работе'];
+  return ['off', 'Новая'];
+}
+function swUserName(u) { return u ? (u.fullName || u.email || '') : ''; }
+/* The latest comment of somebody else: usually why the task came back. */
+function swTaskNote(t) {
+  const list = (t.comments || []).filter(c => c.body && (!c.authorUser || !SW.me || c.authorUser.id !== SW.me.id));
+  if (!list.length) return null;
+  return list.reduce((x, y) => Date.parse(y.createdAt) > Date.parse(x.createdAt) ? y : x);
+}
+function tasksCardHtml() {
+  const list = SW.tasks;
+  const admin = swAdminMode(), why = admin ? swAdminEmpty('tasks') : null;
+  const t = list && SW.task ? list.find(x => x.id === SW.task) : null;
+  if (t) return swTaskDetailHtml(t);
+  let h = `<div class="swhd"><h3>${admin ? 'Задачи администратора' : 'Задачи на смену'}</h3>${why ? '' : `<a href="${swTasksHref()}" target="_blank" rel="noopener">Все задачи${SW.taskTotal ? ' · ' + SW.taskTotal : ''}</a>`}</div>`;
+  if (why) return h + `<div class="swempty">${why}</div>`;
+  if (!list) return h + `<div class="swempty">${SW.failed ? 'Не удалось загрузить задачи, попробую через минуту.' : 'Загружаю задачи…'}</div>`;
+  if (!list.length) return h + `<div class="swempty">${admin ? 'У администратора смены нет открытых задач.' : 'Открытых задач на смену нет.'}</div>`;
+  return h + `<div class="swlist">${list.slice(0, 6).map((x, k) => {
+    const [tone, label] = swTaskChip(x);
+    const pr = x.priority === 'URGENT' || x.priority === 'HIGH' ? 'var(--bad)' : x.priority === 'NORMAL' ? 'var(--warn)' : 'var(--muted)';
+    return `<button type="button" class="swrow swtask" data-swtask="${k}"><span class="swpr" style="background:${pr}"></span><span class="swn"><b>${esc(x.title)}</b><small>${esc(swTaskLine(x))}</small></span><span class="chip ${tone}">${label}</span></button>`;
+  }).join('')}</div>`;
+}
+function swTaskDetailHtml(t) {
+  const [tone, label] = swTaskChip(t), can = swCanTask(), note = swTaskNote(t);
+  const err = SW.err && SW.err.key === 'task:' + t.id ? `<div class="swerr" role="alert">${esc(SW.err.text)}</div>` : '';
+  const dis = SW.busy ? ' disabled' : '';
+  let act = '';
+  if (!can) act = '<div class="swnote"><b>Только просмотр</b>С задачей работает администратор смены.</div>';
+  else if (t.status === 'OPEN') act = `<div class="swbtns"><button type="button" class="swbtn pri sm" data-swtake="1"${dis}>Взять в работу</button></div>`;
+  else if (t.status === 'IN_PROGRESS' && SW.submitFor !== t.id) act = `<div class="swbtns"><button type="button" class="swbtn pri sm" data-swsub="1"${dis}>Сдать на проверку</button></div>`;
+  else if (t.status === 'IN_PROGRESS') {
+    const d = SW.tdraft || (SW.tdraft = { body: '', photos: [], uploading: false });
+    act = `<label class="swlbl" for="swres">Что сделано</label><textarea id="swres" rows="3" data-swtbody="1" placeholder="Например: мышь заменил, старую убрал на списание">${esc(d.body)}</textarea>${swPhotoHtml(d.photos, 'data-swtfile', '1', 'Приложить фото', d.uploading)}<div class="swbtns"><button type="button" class="swbtn pri sm" data-swsend="1"${d.uploading ? ' disabled' : ''}${dis}>Отправить на проверку</button><button type="button" class="swbtn ghost sm" data-swnosend="1">Отмена</button></div>`;
+  } else if (t.status === 'ON_REVIEW') act = '<div class="swnote"><b>Ждёт проверки</b>Руководитель примет задачу или вернёт её с комментарием.</div>';
+  const meta = [swTaskLine(t), t.createdByUser ? 'от ' + shortName(swUserName(t.createdByUser)) : null].filter(Boolean).join(' · ');
+  return `<div class="swhd"><button type="button" class="swback" data-swback="1">← Все задачи</button><span class="chip ${tone}">${label}</span></div>
+<div class="swtkd"><h4>${esc(t.title)}</h4><div class="swmeta">${esc(meta)}</div>${t.description ? `<div class="swdesc">${esc(t.description)}</div>` : ''}${note ? `<div class="swnote warn"><b>${esc(shortName(swUserName(note.authorUser)) || 'Комментарий')} · ${hhmm(new Date(note.createdAt))}</b>${esc(note.body)}</div>` : ''}${err}${act}<a class="swmore" href="${swTaskHref(t)}" target="_blank" rel="noopener">Открыть в «Задачах»</a></div>`;
+}
+
+/* ---- saving ---- */
+function swSend(url, method, body) {
+  return fetch(url, { method, credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(r => r.json().catch(() => ({})).then(j => r.ok ? j : Promise.reject(new Error(swErrText(r.status, j)))));
+}
+function swErrText(status, j) {
+  const m = j && (Array.isArray(j.message) ? j.message.join(', ') : j.message);
+  if (status === 401) return 'Сессия закончилась: обновите страницу и войдите снова.';
+  if (status === 403) return m && /[а-я]/i.test(m) ? m : 'Недостаточно прав для этого действия.';
+  if (m === 'Required checklist answers or evidence are missing') return 'Не все обязательные пункты отмечены или нет фото.';
+  if (m === 'Task must be submitted for review before completion') return 'Сначала отправьте задачу на проверку.';
+  return m && /[а-я]/i.test(m) ? m : 'Не сохранилось. Проверьте связь и попробуйте ещё раз.';
+}
+/* Images are shrunk to 1600 px before upload (the BFF takes up to 5 MB). */
+function swShrink(file) {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size < 900e3 || !window.createImageBitmap) return Promise.resolve(file);
+  return createImageBitmap(file).then(bmp => {
+    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return new Promise(res => c.toBlob(b => res(b ? new File([b], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file), 'image/jpeg', 0.82));
+  }).catch(() => file);
+}
+function swUpload(file) {
+  return swShrink(file).then(f => {
+    const fd = new FormData(); fd.set('file', f);
+    return fetch('/api/staff/attachments', { method: 'POST', credentials: 'same-origin', body: fd })
+      .then(r => r.json().catch(() => ({})).then(j => r.ok ? j : Promise.reject(new Error(swErrText(r.status, j)))));
+  });
+}
+function swAddPhoto(draft, file, errKey) {
+  if (!file) return;
+  draft.uploading = true; SW.err = null; renderShiftWork();
+  swUpload(file).then(p => {
+    draft.photos.push({ id: p.id, fileName: p.fileName, contentType: p.contentType, byteSize: p.byteSize, url: p.url, createdAt: p.createdAt });
+  }).catch(e => { SW.err = { key: errKey, text: e.message }; }).then(() => { draft.uploading = false; renderShiftWork(); });
+}
+/* The API takes the whole list of answers: every other answer goes back as it came
+   (its completedAt stays), the changed one goes with completedAt null so the server
+   stamps the time of the mark. */
+function swSaveAnswer(i, patch, okText, undoable) {
+  const run = SW.run; if (!run || SW.busy) return;
+  const before = i.answer ? Object.assign({}, i.answer) : null;
+  const answers = (run.answers || []).map(a => {
+    const x = Object.assign({}, a); delete x.timing;
+    if (swKey(a.sectionId, a.itemId) !== i.key) return x;
+    return Object.assign(x, patch, { completedAt: null });
+  });
+  if (!answers.some(a => swKey(a.sectionId, a.itemId) === i.key)) answers.push(Object.assign({ sectionId: i.sectionId, itemId: i.itemId, value: null, note: null, evidenceUrl: null, evidenceAttachments: [], reviewThreads: [] }, patch, { completedAt: null }));
+  const body = { answers };
+  if (['OPEN', 'RETURNED', 'ESCALATED'].includes(run.status) && patch.status) body.status = 'IN_PROGRESS';
+  SW.busy = true; SW.err = null; SW.rev++;
+  renderShiftWork();
+  swSend(`/api/staff/checklists/${encodeURIComponent(run.id)}`, 'PATCH', body).then(next => {
+    if (!next.itemTimings && run.itemTimings) next.itemTimings = run.itemTimings;
+    SW.run = next; SW.open = null; SW.failFor = null; delete SW.drafts[i.key];
+    swToast(okText, undoable && before !== undefined ? () => swUndo(i.key, before) : null);
+  }).catch(e => { SW.err = { key: i.key, text: e.message }; SW.open = i.key; swToast(e.message); })
+    .then(() => { SW.busy = false; SW.rev++; renderShiftWork(); swFocusRow(i.key); });
+}
+function swUndo(key, before) {
+  const i = SW.run && swItems(SW.run).find(x => x.key === key); if (!i) return;
+  const prev = before || { value: null, note: null, status: null, evidenceUrl: null, evidenceAttachments: [] };
+  swSaveAnswer(i, { value: prev.value || null, note: prev.note || null, status: prev.status || null, evidenceUrl: prev.evidenceUrl || null, evidenceAttachments: prev.evidenceAttachments || [] }, 'Отметка отменена', false);
+}
+function swSubmitRun() {
+  const run = SW.run; if (!run || SW.busy) return;
+  SW.busy = true; SW.err = null; SW.rev++; renderShiftWork();
+  swSend(`/api/staff/checklists/${encodeURIComponent(run.id)}`, 'PATCH', { status: 'ON_REVIEW' }).then(next => {
+    if (!next.itemTimings && run.itemTimings) next.itemTimings = run.itemTimings;
+    SW.run = next; SW.open = null;
+    swToast('Чек-лист сдан на проверку');
+  }).catch(e => swToast(e.message)).then(() => { SW.busy = false; SW.rev++; renderShiftWork(); });
+}
+/* Status moves go through a comment, like the «Задачи» board: the history keeps who moved it. */
+function swMoveTask(t, status, body, photos, okText) {
+  if (SW.busy) return;
+  const payload = { status };
+  if (body) payload.body = body;
+  if (photos && photos.length) payload.attachmentIds = photos.map(p => p.id);
+  SW.busy = true; SW.err = null; SW.rev++; renderShiftWork();
+  swSend(`/api/staff/tasks/${encodeURIComponent(t.id)}/comments`, 'POST', payload).then(next => {
+    const k = SW.tasks ? SW.tasks.findIndex(x => x.id === t.id) : -1;
+    if (k >= 0 && next && next.id) SW.tasks[k] = next;
+    SW.submitFor = null; SW.tdraft = null;
+    swToast(okText);
+  }).catch(e => { SW.err = { key: 'task:' + t.id, text: e.message }; })
+    .then(() => { SW.busy = false; SW.rev++; renderShiftWork(); });
+}
+
+/* ---- toast with «Отменить» ---- */
+function swToast(text, undo) {
+  const el = document.getElementById('swtoast'); if (!el) return;
+  clearTimeout(SW.toastTimer);
+  SW.toast = undo || null;
+  el.innerHTML = `<span>${esc(text)}</span>${undo ? '<button type="button" data-swundolast="1">Отменить</button>' : ''}`;
+  el.hidden = false;
+  SW.toastTimer = setTimeout(() => { el.hidden = true; SW.toast = null; }, 8000);
+}
+function swFocusRow(key, title) {
+  const k = SW.items ? SW.items.findIndex(x => x.key === key) : -1; if (k < 0) return;
+  const cl = document.getElementById('swcl');
+  const b = cl && ((!title && cl.querySelector(`button[data-swck="${k}"]`)) || cl.querySelector(`[data-swopen="${k}"]`));
+  if (b && cl.contains(document.activeElement) === false && document.activeElement !== document.body) return;
+  if (b) b.focus({ preventScroll: true });
+}
+
+/* ---- cards, placement and clicks ---- */
+function buildShiftWork() {
+  const stage = document.getElementById('stage');
+  if (!stage || document.getElementById('swcl')) return;
+  const cl = document.createElement('section'); cl.id = 'swcl'; cl.className = 'swcard'; cl.setAttribute('aria-label', 'Чек-лист смены'); cl.hidden = true;
+  const tk = document.createElement('section'); tk.id = 'swtk'; tk.className = 'swcard'; tk.setAttribute('aria-label', 'Задачи на смену'); tk.hidden = true;
+  const toast = document.createElement('div'); toast.id = 'swtoast'; toast.setAttribute('role', 'status'); toast.hidden = true;
+  stage.appendChild(cl); stage.appendChild(tk); stage.appendChild(toast);
+  cl.addEventListener('click', swClickChecklist);
+  tk.addEventListener('click', swClickTasks);
+  toast.addEventListener('click', e => { if (e.target.closest('[data-swundolast]') && SW.toast) { const f = SW.toast; SW.toast = null; toast.hidden = true; f(); } });
+  // the toast waits while the pointer or the keyboard is on it
+  const hold = () => clearTimeout(SW.toastTimer), go = () => { clearTimeout(SW.toastTimer); SW.toastTimer = setTimeout(() => { toast.hidden = true; SW.toast = null; }, 4000); };
+  toast.addEventListener('mouseenter', hold); toast.addEventListener('focusin', hold);
+  toast.addEventListener('mouseleave', go); toast.addEventListener('focusout', go);
+  const typed = e => {
+    const t = e.target, d = t.dataset || {};
+    if (d.swval !== undefined && SW.items) { swDraft(SW.items[+d.swval].key).value = t.value; swSyncReady(cl); }
+    if (d.swnote !== undefined && SW.items) { swDraft(SW.items[+d.swnote].key).note = t.value; swSyncReady(cl); }
+    if (d.swtbody !== undefined && SW.tdraft) SW.tdraft.body = t.value;
+  };
+  cl.addEventListener('input', typed); tk.addEventListener('input', typed);
+  cl.addEventListener('change', e => { const d = e.target.dataset || {}; if (d.swfile !== undefined && SW.items) { const i = SW.items[+d.swfile]; swAddPhoto(swDraft(i.key), e.target.files && e.target.files[0], i.key); } });
+  tk.addEventListener('change', e => { const d = e.target.dataset || {}; if (d.swtfile !== undefined && SW.tdraft && SW.task) swAddPhoto(SW.tdraft, e.target.files && e.target.files[0], 'task:' + SW.task); });
+  // a poll does not redraw a card while somebody types in it; it catches up on leaving
+  const later = e => { const card = e.currentTarget; setTimeout(() => { if (SW.stale && !card.contains(document.activeElement)) renderShiftWork(); }, 0); };
+  cl.addEventListener('focusout', later); tk.addEventListener('focusout', later);
+  cl.addEventListener('keydown', e => { if (e.key === 'Escape' && SW.open) { const key = SW.open; SW.open = null; SW.failFor = null; SW.err = null; renderShiftWork(); swFocusRow(key); } });
+  tk.addEventListener('keydown', e => { if (e.key === 'Escape' && SW.task) { SW.task = null; SW.submitFor = null; renderShiftWork(); } });
+  const panelEl = document.getElementById('panel'), feedEl = document.querySelector('.feed');
+  if (window.ResizeObserver) { const ro = new ResizeObserver(() => placeShiftWork()); ro.observe(panelEl); if (feedEl) ro.observe(feedEl); ro.observe(stage); }
+}
+/* «Готово» / «Сохранить» follow what is typed without redrawing the field. */
+function swSyncReady(cl) {
+  const k = SW.items ? SW.items.findIndex(x => x.key === SW.open) : -1; if (k < 0) return;
+  const d = swDraft(SW.items[k].key);
+  const ok = cl.querySelector(`[data-swok="${k}"]`); if (ok) ok.disabled = SW.busy || d.uploading || (SW.items[k].needs === 'photo' ? !d.photos.length : SW.items[k].needs ? !d.value.trim() : false);
+  const fo = cl.querySelector(`[data-swfailok="${k}"]`); if (fo) fo.disabled = SW.busy || !d.note.trim();
+}
+function swClickChecklist(e) {
+  if (e.target.closest('[data-swmode]')) return swSetMode(null);
+  const b = e.target.closest('button'); if (!b || b.disabled || !SW.items) return;
+  const d = b.dataset, item = v => SW.items[+v];
+  if (d.swsubmit) return swSubmitRun();
+  if (d.swck !== undefined) {
+    const i = item(d.swck);
+    if (!i.needs) return swSaveAnswer(i, { status: 'PASS' }, `Отмечено: ${i.title}`, true);
+    SW.open = i.key; SW.failFor = null; SW.err = null; renderShiftWork(); return swFocusEditor();
+  }
+  if (d.swopen !== undefined) { const i = item(d.swopen); SW.open = SW.open === i.key ? null : i.key; SW.failFor = null; SW.err = null; renderShiftWork(); swFocusRow(i.key, true); return; }
+  if (d.swok !== undefined) {
+    const i = item(d.swok), dr = swDraft(i.key), patch = { status: 'PASS' };
+    if (i.needs === 'photo') { patch.evidenceAttachments = dr.photos; patch.evidenceUrl = null; }
+    if (i.needs === 'number' || i.needs === 'text') patch.value = dr.value.trim();
+    return swSaveAnswer(i, patch, `Отмечено: ${i.title}`, true);
+  }
+  if (d.swfail !== undefined) { SW.failFor = item(d.swfail).key; SW.err = null; renderShiftWork(); const w = document.getElementById('swwhy'); if (w) w.focus(); return; }
+  if (d.swfailno !== undefined) { SW.failFor = null; renderShiftWork(); return; }
+  if (d.swfailok !== undefined) {
+    const i = item(d.swfailok), dr = swDraft(i.key), patch = { status: 'FAILED', note: dr.note.trim() };
+    if (dr.photos.length) patch.evidenceAttachments = dr.photos;
+    return swSaveAnswer(i, patch, `Не выполнено: ${i.title}`, true);
+  }
+  if (d.swna !== undefined) { const i = item(d.swna); return swSaveAnswer(i, { status: 'NOT_APPLICABLE' }, `Не относится: ${i.title}`, true); }
+  if (d.swundo !== undefined) { const i = item(d.swundo); return swSaveAnswer(i, { status: null }, `Отметка снята: ${i.title}`, false); }
+}
+function swFocusEditor() { const cl = document.getElementById('swcl'); const f = cl && cl.querySelector('.swed input:not([type=file]), .swed textarea, .swed .swfile, .swed .swbtn'); if (f) f.focus({ preventScroll: false }); }
+function swClickTasks(e) {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  const d = b.dataset, t = SW.tasks && SW.task ? SW.tasks.find(x => x.id === SW.task) : null;
+  if (d.swtask !== undefined && SW.tasks) { const x = SW.tasks[+d.swtask]; if (!x) return; SW.task = x.id; SW.submitFor = null; SW.tdraft = null; SW.err = null; renderShiftWork(); const back = document.querySelector('#swtk [data-swback]'); if (back) back.focus(); return; }
+  if (d.swback) { const id = SW.task; SW.task = null; SW.submitFor = null; SW.tdraft = null; SW.err = null; renderShiftWork(); const k = SW.tasks ? SW.tasks.findIndex(x => x.id === id) : -1; const r = document.querySelector(`#swtk [data-swtask="${k}"]`); if (r) r.focus(); return; }
+  if (!t) return;
+  if (d.swtake) return swMoveTask(t, 'IN_PROGRESS', null, null, 'Задача в работе');
+  if (d.swsub) { SW.submitFor = t.id; SW.tdraft = { body: '', photos: [], uploading: false }; renderShiftWork(); const r = document.getElementById('swres'); if (r) r.focus(); return; }
+  if (d.swnosend) { SW.submitFor = null; SW.tdraft = null; renderShiftWork(); return; }
+  if (d.swsend) { const dr = SW.tdraft || { body: '', photos: [] }; return swMoveTask(t, 'ON_REVIEW', dr.body.trim() || null, dr.photos, 'Задача отправлена на проверку'); }
+}
+function swTyping(card) { const a = document.activeElement; return !!(a && card.contains(a) && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'file'))); }
+function renderShiftWork() {
+  if (!swOn()) return;
+  const cl = document.getElementById('swcl'), tk = document.getElementById('swtk');
+  if (!cl || !tk) return;
+  SW.stale = false;
+  if (swTyping(cl) || swTyping(tk)) { SW.stale = true; placeShiftWork(); return; }
+  if (SW.task && SW.tasks && !SW.tasks.some(x => x.id === SW.task)) { SW.task = null; SW.submitFor = null; SW.tdraft = null; }
+  const keep = cl.querySelector('.swlist') ? cl.querySelector('.swlist').scrollTop : null;
+  const keepT = tk.querySelector('.swtkd') ? tk.querySelector('.swtkd').scrollTop : null;
+  cl.innerHTML = checklistCardHtml();
+  tk.innerHTML = tasksCardHtml();
+  if (SW.open && !(SW.items || []).some(x => x.key === SW.open)) SW.open = null;
+  const list = cl.querySelector('.swlist');
+  if (list && keep !== null && SW.scrolled) list.scrollTop = keep;
+  const det = tk.querySelector('.swtkd'); if (det && keepT !== null) det.scrollTop = keepT;
+  placeShiftWork();
+  if (list && SW.open) { const ed = list.querySelector('.swed'); if (ed && ed.offsetTop + ed.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = ed.offsetTop + ed.offsetHeight - list.clientHeight + 6; }
+  if (list && !SW.scrolled) { const now = list.querySelector('.isnow') || [...list.querySelectorAll('.swrow')].find(r => !r.querySelector('.chip.good')); if (now) { list.scrollTop = Math.max(0, now.offsetTop - list.offsetTop - 40); SW.scrolled = true; } }
+}
+/* For the administrator the checklist takes the place of «Обзор клуба» (the
+   overview comes back with any card: a click on a guest opens the guest panel
+   as before); the tasks stay above «Лента клуба». */
+function placeShiftWork() {
+  const cl = document.getElementById('swcl'), tk = document.getElementById('swtk');
+  const stage = document.getElementById('stage'), panelEl = document.getElementById('panel'), feedEl = document.querySelector('.feed');
+  if (!cl || !tk || !stage) return;
+  const show = swOn() && view.type === 'home' && !editing && !isPhone();
+  if (panelEl) panelEl.classList.toggle('swoff', show);
+  cl.hidden = !show; tk.hidden = !show;
+  const toast = document.getElementById('swtoast'); if (toast && !show) toast.hidden = true;
+  if (!show) return;
+  const top = 14;
+  cl.style.top = top + 'px';
+  cl.style.width = '340px';
+  // the marker legend sits under the checklist, bottom right
+  const leg = document.getElementById('attleg');
+  const below = leg && !leg.hidden ? leg.offsetHeight + 10 : 0;
+  cl.style.maxHeight = Math.max(120, stage.clientHeight - top - 14 - below) + 'px';
+  const feedTop = feedEl && feedEl.offsetParent ? feedEl.offsetTop : stage.clientHeight - 14;
+  tk.style.bottom = (stage.clientHeight - feedTop + 10) + 'px';
+  // same width as «Лента клуба» under it
+  tk.style.width = feedEl && feedEl.offsetParent ? feedEl.offsetWidth + 'px' : '';
+  // an open task gets more room upwards
+  tk.style.maxHeight = Math.max(120, SW.task ? feedTop - 110 : Math.min(330, feedTop - 150)) + 'px';
+  if (toast) toast.style.bottom = (stage.clientHeight - feedTop + 10) + 'px';
+}
+/* ---------------- other clubs of the network with a drawn hall (full screen only) ---------------- */
+async function loadClubNav() {
+  if (window.parent !== window || !STORE_ID) return;
+  let data = null;
+  try { const r = await fetch('/api/stores/floor-plans', { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } }); if (!r.ok) return; data = await r.json(); } catch (e) { return; }
+  const clubs = (data && Array.isArray(data.clubs) ? data.clubs : []).filter(c => c && c.id && c.id !== STORE_ID && /^[a-z0-9-]+$/.test(c.template || ''));
+  if (!clubs.length) return;
+  const nav = $('#clubNav');
+  nav.innerHTML = clubs.map(c => {
+    const p = new URLSearchParams({ store: c.id }); if (CAN_EDIT) p.set('edit', '1'); if (CALM && !EMBED) p.set('calm', '1'); if (Q.get('theme')) p.set('theme', Q.get('theme'));
+    const street = String(c.address || '').replace(/^\s*(г\.|город)\s*[^,]+,\s*/iu, '').trim();
+    return `<a class="club" href="../${c.template}/index.html?${p}" title="Схема клуба ${esc(c.name)}" aria-label="Схема клуба ${esc(c.name)}"><span class="ic">${esc(clubInitials(c.name))}</span><span><b>${esc(c.name)}</b><span>${esc(street || 'Схема клуба')}</span></span></a>`;
+  }).join('');
+  nav.hidden = false;
+}
+loadClubNav();
+function refresh() { renderKPIs(); renderCards(); if (editing) return; if (!sheetGesture) renderPanel(); else syncPills(); }
+let pollTimer = null, pollBusy = false;
+const POLL_MS = 20000, POLL_HIDDEN_MS = 60000;
+function setStatus(textValue, kind) {
+  const el = $('#dataStatus'); el.textContent = textValue; el.classList.toggle('warn', kind === 'warn');
+  const badge = $('#liveBadge'); badge.classList.toggle('stale', kind === 'warn'); badge.classList.toggle('off', kind === 'off');
+}
+function applyLive(data) {
+  const before = new Map(seats.map(s => [s.id, s.state]));
+  LIVE.status = data.status; LIVE.at = data.generatedAt; LIVE.guests = data.guests; LIVE.shift = data.shift; LIVE.revenue = data.revenue; LIVE.purchases = Array.isArray(data.purchases) ? data.purchases : null; LIVE.game = data.game && typeof data.game === 'object' ? data.game : null; LIVE.warnings = Array.isArray(data.warnings) ? data.warnings : []; LIVE.failed = false;
+  const byNum = new Map();
+  for (const pc of Array.isArray(data.pcs) ? data.pcs : []) if (pc && pc.number != null && !byNum.has(pc.number)) byNum.set(pc.number, pc);
+  for (const s of seats) {
+    const pc = byNum.get(s.num);
+    if (!pc) setOff(s);
+    else if (pc.busy) occupy(s, pc.busyUntil ? Date.parse(pc.busyUntil) : null);
+    else free(s);
+  }
+  if (LIVE.loaded) for (const s of seats) {
+    const was = before.get(s.id);
+    if (s.arriving && !s.visitor) startArrival(s);
+    if (was !== 'busy' && s.state === 'busy') addEvent('in', `${s.id} занят`, ZONES[s.zone].name);
+    else if (was === 'busy' && s.state === 'free') addEvent('out', `${s.id} освободился`, ZONES[s.zone].name);
+  }
+  LIVE.loaded = true;
+  const at = data.generatedAt ? new Date(data.generatedAt) : new Date();
+  $('#clock').textContent = hhmm(at);
+  if (data.status === 'NOT_CONNECTED') setStatus(LIVE.warnings[0] || 'Клуб не подключён к Langame', 'off');
+  else if (data.status === 'UNAVAILABLE') setStatus('Langame сейчас не отвечает', 'warn');
+  else if (LIVE.warnings.length) setStatus('Langame · часть данных недоступна', 'warn');
+  else setStatus('Данные Langame · обновлено в ' + hhmm(at) + ':' + pad2(at.getSeconds()));
+  $('#dataStatus').title = LIVE.warnings.join(' ');
+  refresh();
+}
+async function poll() {
+  clearTimeout(pollTimer); pollTimer = null;
+  if (!API || pollBusy) return;
+  pollBusy = true;
+  try {
+    const r = await fetch(API + '/live', { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } });
+    if (r.status === 401) { setStatus('Сессия истекла, обновите страницу', 'warn'); return; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    applyLive(await r.json());
+  } catch (e) {
+    LIVE.failed = true;
+    setStatus(LIVE.loaded ? 'Нет связи, показываю данные на ' + (LIVE.at ? hhmm(new Date(LIVE.at)) : '—') : 'Не удалось загрузить данные клуба', 'warn');
+  } finally {
+    pollBusy = false;
+    if (!pollTimer) pollTimer = setTimeout(poll, document.hidden ? POLL_HIDDEN_MS : POLL_MS);
+  }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+function minuteTick() {
+  for (const s of seats) if (s.state === 'busy' && s.until) { s.left = Math.max(0, (s.until - Date.now()) / 60000); applySeat(s); }
+  refresh();
+}
+
+/* ---------------- picking & hover ---------------- */
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+const tip = $('#tip');
+function hit(e) {
+  const r = canvas.getBoundingClientRect();
+  mouse.set((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const hits = ray.intersectObjects(pickables.concat(items.map(i => i.g)), true);
+  for (const h of hits) { let o = h.object; while (o && !o.userData.pick) o = o.parent; if (o) return { data: o.userData.pick, x: e.clientX - r.left, y: e.clientY - r.top }; }
+  return null;
+}
+let downAt = null;
+const hintEl = $('#hint'); if (matchMedia('(pointer: coarse)').matches) hintEl.textContent = 'Один палец двигает карту, двумя пальцами вращение и масштаб';
+setTimeout(() => hintEl.classList.add('gone'), 9000);
+canvas.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY, performance.now()]; clickStart = [e.clientX, e.clientY]; userTouched(); hintEl.classList.add('gone'); });
+let clickStart = [0, 0];
+canvas.addEventListener('pointerup', e => {
+  if (editing) { downAt = null; return; }
+  if (!downAt) return; const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]); downAt = null;
+  if (moved > 6) return;
+  const other = e.button !== 0;
+  if (staffHit(e)) { if (!other) { select({ type: 'zone', id: 'admin' }); staffTipUntil = performance.now() + 6000; setAdminHL(true); } return; }
+  const h = hit(e);
+  // the floor of a zone counts as empty while a card is open
+  const empty = !h || (h.data.type === 'zone' && h.data.id !== 'admin' && view.type !== 'home');
+  if (empty) { if (view.type !== 'home') { staffTipUntil = 0; tip.hidden = true; setAdminHL(false); select({ type: 'home' }); } return; }
+  if (other) return;
+  if (h.data.type === 'seat') select({ type: 'seat', id: h.data.id }); else select({ type: 'zone', id: h.data.id });
+});
+canvas.addEventListener('pointermove', e => {
+  if (editing) { const g = e.pointerType === 'mouse' && !dragging ? editableAt(e) : null; canvas.classList.toggle('pointer', !!g); return; }
+  if (e.pointerType === 'touch' || downAt) { if (!staffTipUntil) tip.hidden = true; setAdminHL(false); return; }
+  staffTipUntil = 0;
+  const sh = staffHit(e);
+  if (sh) {
+    setAdminHL(true); canvas.classList.add('pointer'); hoverRing.visible = true; hoverRing.position.set(sh.p.x, 0.05, sh.p.z);
+    tip.hidden = false; tip.style.left = sh.x + 'px'; tip.style.top = sh.y + 'px'; tip.innerHTML = staffTipHtml();
+    return;
+  }
+  setAdminHL(false);
+  const h = hit(e);
+  canvas.classList.toggle('pointer', !!h);
+  if (h && h.data.type === 'seat') {
+    const s = seats.find(x => x.id === h.data.id); const w = seatWorld(s); hoverRing.visible = true; hoverRing.position.set(w.x, 0.05, w.z);
+    tip.hidden = false; tip.style.left = h.x + 'px'; tip.style.top = h.y + 'px';
+    hoverSeatInfo(s);
+    tip.innerHTML = s.state === 'busy' ? seatTipHtml(s) : `<b>${s.id}</b> · ${s.state === 'free' ? 'свободен' : 'нет данных Langame'}`;
+  } else if (h) { hoverRing.visible = false; tip.hidden = false; tip.style.left = h.x + 'px'; tip.style.top = h.y + 'px'; tip.innerHTML = `<b>${ZONES[h.data.id].name}</b> · открыть`; }
+  else { hoverRing.visible = false; tip.hidden = true; }
+});
+canvas.addEventListener('pointerleave', () => { tip.hidden = true; hoverRing.visible = false; setAdminHL(false); });
+canvas.addEventListener('contextmenu', e => { if (!editing) e.preventDefault(); });
+let staffTipUntil = 0;
+addEventListener('pointerup', () => { if (!editing) setTimeout(() => { downAt = null; }, 0); });
+function staffTipHtml() { const s = shiftInfo(), r = LIVE.revenue; if (!s) return `<b>Администратор</b><span class="tl">${LIVE.loaded ? 'в Langame нет открытой смены' : 'загружаю смену'}</span>`; return `<b>${esc(s.full)}</b> · администратор смены<span class="tl">смена с ${s.start}, идёт ${s.dur} · товары ${rubOr(r && r.goods)}${r && r.goodsCount != null ? ', ' + plural(r.goodsCount, 'товар', 'товара', 'товаров') : ''} · выручка ${rubOr(r && r.total)}</span>`; }
+// after a tap on the admin model the tip follows the model while the camera flies
+const stv = new THREE.Vector3();
+function updateStaffTip() {
+  if (!staffTipUntil) return;
+  const p = staffList()[0];
+  if (!p || editing || performance.now() > staffTipUntil) { staffTipUntil = 0; tip.hidden = true; setAdminHL(false); return; }
+  p.getWorldPosition(stv); stv.y += 1.95; stv.project(camera);
+  tip.hidden = false; tip.style.left = (stv.x + 1) / 2 * stageW + 'px'; tip.style.top = (1 - stv.y) / 2 * stageH + 'px'; tip.innerHTML = staffTipHtml();
+}
+function staffList() { return items.map(i => i.g.userData.staff).filter(Boolean); }
+function staffHit(e) {
+  const r = canvas.getBoundingClientRect();
+  mouse.set((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(mouse, camera);
+  const hits = ray.intersectObjects(staffList(), true); if (!hits.length) return null;
+  let o = hits[0].object; while (o && !o.userData.isStaff) o = o.parent;
+  return { p: o.getWorldPosition(new THREE.Vector3()), x: e.clientX - r.left, y: e.clientY - r.top };
+}
+function setAdminHL(on) { if (adminHL === on) return; adminHL = on; const el = $('#kpis .kpi[data-k="admin"]'); if (el) el.classList.toggle('hl', on); }
+// the admin tile points at the admin model and opens the admin zone
+$('#kpis').addEventListener('pointerover', e => { if (editing || !e.target.closest('[data-k="admin"]')) return; const p = staffList()[0]; if (p) { const w = p.getWorldPosition(new THREE.Vector3()); hoverRing.visible = true; hoverRing.position.set(w.x, 0.05, w.z); } });
+$('#kpis').addEventListener('pointerout', e => { if (e.target.closest('[data-k="admin"]') && !e.relatedTarget?.closest?.('[data-k="admin"]')) hoverRing.visible = false; });
+$('#kpis').addEventListener('click', e => { if (!editing && e.target.closest('[data-k="admin"]')) select({ type: 'zone', id: 'admin' }); });
+
+/* ---------------- tools ---------------- */
+let autoPref = !reduced && !CALM;
+function setAuto(on) { controls.autoRotate = on; $('#rot').setAttribute('aria-pressed', String(on)); }
+function userTouched() { fly = null; if (controls.autoRotate) setAuto(false); }
+controls.addEventListener('start', userTouched);
+function zoomBy(f) { const off = camera.position.clone().sub(controls.target); const d = THREE.MathUtils.clamp(off.length() * f, controls.minDistance, controls.maxDistance); fly = { t0: performance.now(), dur: 450, fp: camera.position.clone(), ft: controls.target.clone(), tp: controls.target.clone().add(off.setLength(d)), tt: controls.target.clone() }; }
+$('#zin').addEventListener('click', () => zoomBy(0.75));
+$('#zout').addEventListener('click', () => zoomBy(1.33));
+$('#rot').addEventListener('click', () => { autoPref = !controls.autoRotate; setAuto(autoPref); });
+$('#home').addEventListener('click', () => select({ type: 'home' }));
+addEventListener('keydown', e => { if (editing) { if (e.key === 'Escape') { deselect(); renderPanel(); } return; } if (e.key === 'Escape') { if (view.type === 'seat') { const s = seats.find(x => x.id === view.id); select({ type: 'zone', id: s.zone }); } else select({ type: 'home' }); } });
+
+/* ---------------- layout editor ---------------- */
+const CLUB = { name: 'Клуб' };
+
+let editing = false, selected = null, dirty = false, dragging = null, savedLayout = null;
+let store = { revision: 0, status: 'Загружаю сохранённую схему…', loading: true, failed: false };
+const boxHelper = new THREE.BoxHelper(new THREE.Object3D(), 0x007681); boxHelper.visible = false; scene.add(boxHelper);
+const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.08);
+const otb = document.createElement('div'); otb.className = 'otb'; otb.hidden = true; $('#stage').appendChild(otb);
+const r2 = v => Math.round(v * 100) / 100;
+const snap = v => Math.round(v / 0.05) * 0.05;
+const deg = ry => { let d = Math.round(ry * 180 / Math.PI) % 360; if (d < 0) d += 360; return d; };
+
+function currentLayout() {
+  const pcs = {};
+  for (const s of seats) { const p = s.g.position, d = s.def; if (Math.abs(p.x - d.x) > 0.01 || Math.abs(p.z - d.z) > 0.01 || Math.abs(s.g.rotation.y - d.ry) > 0.01 || !!s.mx !== !!d.mx || !!s.mz !== !!d.mz) pcs[s.id] = { x: r2(p.x), z: r2(p.z), ry: +s.g.rotation.y.toFixed(4), mx: !!s.mx, mz: !!s.mz }; }
+  return { template: TEMPLATE, v: 2, items: items.map(it => { const o = { ...it.data, x: r2(it.g.position.x), z: r2(it.g.position.z), ry: +it.g.rotation.y.toFixed(4) }; if (it.g.position.y > 0.005) o.y = r2(it.g.position.y); else delete o.y; if (!o.mx) delete o.mx; if (!o.mz) delete o.mz; return o; }), pcs };
+}
+function applyLayout(layout) {
+  deselect();
+  items.slice().forEach(removeItem);
+  const list = layout && Array.isArray(layout.items) ? layout.items : DEFAULT_ITEMS;
+  list.filter(d => d && CATALOG[d.type]).forEach(d => addItem(JSON.parse(JSON.stringify(d))));
+  const pcs = (layout && layout.pcs) || {};
+  for (const s of seats) { const o = pcs[s.id] || s.def; s.g.position.x = o.x; s.g.position.z = o.z; s.g.rotation.y = o.ry; s.mx = !!o.mx; s.mz = !!o.mz; applyMirror(s.g, s.mx, s.mz); }
+}
+function markDirty() { if (!dirty) { dirty = true; } renderPanel(); }
+
+/* persistence: the club floor plan in LeetPlus */
+function savedAtText(iso) { return iso ? new Date(iso).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''; }
+async function loadPlan() {
+  if (!API) { store.loading = false; store.status = 'Клуб не выбран'; return; }
+  try {
+    const r = await fetch(API, { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    CLUB.name = data.storeName || CLUB.name; $('#clubName').textContent = CLUB.name; $('#clubIc').textContent = clubInitials(CLUB.name); document.title = 'Схема клуба · ' + CLUB.name;
+    const plan = data.plan && data.plan.layout && data.plan.layout.template === TEMPLATE ? data.plan : null;
+    store.revision = data.plan ? data.plan.revision : 0;
+    savedLayout = plan ? plan.layout : null;
+    if (!dirty && !dragging) { applyLayout(savedLayout); }
+    store.status = plan ? `Схема сохранена ${savedAtText(plan.updatedAt)}` : 'Исходная схема Langame · ещё не сохраняли';
+  } catch (e) {
+    store.failed = true; store.status = 'Сохранённую схему не удалось загрузить, показываю исходную';
+  } finally {
+    store.loading = false; refresh(); if (editing) renderPanel();
+  }
+}
+let saving = false;
+async function saveLayout() {
+  if (!API || saving) return;
+  saving = true;
+  const layout = currentLayout();
+  try {
+    const r = await fetch(API, { method: 'PATCH', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ layout, revision: store.revision }) });
+    const data = await r.json().catch(() => null);
+    if (!r.ok) { toast((data && typeof data.message === 'string' && data.message) || (r.status === 403 ? 'Нет прав менять схему клуба' : 'Не получилось сохранить схему')); return; }
+    store.revision = data.plan ? data.plan.revision : store.revision + 1;
+    savedLayout = data.plan ? data.plan.layout : layout; dirty = false;
+    store.status = `Схема сохранена ${savedAtText(data.plan && data.plan.updatedAt)}`;
+    toast('Схема сохранена для всех, кто открывает страницу');
+    window.parent && window.parent !== window && window.parent.postMessage({ type: 'leetplus:floor-plan-saved', storeId: STORE_ID }, location.origin);
+  } catch (e) {
+    toast('Не получилось сохранить: нет связи с сервером');
+  } finally {
+    saving = false; renderPanel();
+  }
+}
+
+/* selection */
+function select3d(g) { selected = g; boxHelper.setFromObject(g); boxHelper.visible = true; otb.hidden = false; renderOtb(); renderPanel(); }
+function deselect() { selected = null; boxHelper.visible = false; otb.hidden = true; }
+function selItem() { return selected && selected.userData.editable.kind === 'item' ? items.find(i => i.g === selected) : null; }
+function selSeat() { return selected && selected.userData.editable.kind === 'pc' ? selected.userData.editable.seat : null; }
+function renderOtb() {
+  const it = selItem();
+  otb.innerHTML = `<button type="button" data-o="rl" title="Повернуть влево (Shift+R)" aria-label="Повернуть влево">${SVG.rl}</button><button type="button" data-o="rr" title="Повернуть вправо (R)" aria-label="Повернуть вправо">${SVG.rr}</button><button type="button" data-o="mx" title="Отразить слева направо (M)" aria-label="Отразить слева направо">${SVG.mx}</button><button type="button" data-o="mz" title="Отразить сверху вниз (Shift+M)" aria-label="Отразить сверху вниз">${SVG.mz}</button>` +
+    (it ? `<button type="button" data-o="dup" title="Копия" aria-label="Сделать копию">${SVG.dup}</button><button type="button" data-o="del" title="Удалить (Delete)" aria-label="Удалить" class="danger">${SVG.del}</button>` : '');
+}
+const SVG = {
+  mx: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18" stroke-dasharray="2 3"/><path d="M9 7 3 17h6z"/><path d="M15 7l6 10h-6z"/></svg>',
+  mz: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18" stroke-dasharray="2 3"/><path d="M7 9 17 3v6z"/><path d="M7 15l10 6v-6z"/></svg>',
+  rl: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.34-5.66"/><path d="M4 4v4h4"/></svg>',
+  rr: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v4h-4"/></svg>',
+  dup: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
+  del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>'
+};
+otb.addEventListener('click', e => { const b = e.target.closest('[data-o]'); if (b) objAction(b.dataset.o); });
+function objAction(a) {
+  if (!selected) return;
+  if (a === 'rl' || a === 'rr') { selected.rotation.y += (a === 'rr' ? -1 : 1) * Math.PI / 12; boxHelper.setFromObject(selected); markDirty(); return; }
+  // mirror across the plan axes: left-right (mx) or top-bottom (mz); the turn angle changes sign
+  if (a === 'mx' || a === 'mz') { const i = selItem(), h = i ? i.data : selSeat(); if (!h) return; h[a] = !h[a]; selected.rotation.y = -selected.rotation.y; applyMirror(selected, h.mx, h.mz); boxHelper.setFromObject(selected); markDirty(); return; }
+  const it = selItem(); if (!it) return;
+  if (a === 'del') { removeItem(it); deselect(); markDirty(); return; }
+  if (a === 'dup') { const d = { ...it.data, id: it.data.type + '-' + Date.now().toString(36), x: r2(clampX(it.g.position.x + 0.6)), z: r2(clampZ(it.g.position.z + 0.6)), y: it.g.position.y, ry: it.g.rotation.y }; const n = addItem(d); const sp = findFreeSpot(n.g, d.x, d.z); if (sp && !CATALOG[d.type].stack) { n.g.position.x = d.x = sp[0]; n.g.position.z = d.z = sp[1]; } select3d(n.g); markDirty(); }
+}
+const clampX = x => THREE.MathUtils.clamp(x, X0 + 0.3, X_END - 0.3), clampZ = z => THREE.MathUtils.clamp(z, Z0 + 0.3, Z_END - 0.3);
+
+/* free spot search: walls, other furniture and PCs block a spot; toilets and the service room are off limits */
+for (const [x0, x1, z0, z1] of NEIGHBOURS.concat(OUTSIDE)) wallRects.push({ x0, x1, z0, z1, noSnap: true });
+function rectOf3(obj) { const b = new THREE.Box3().setFromObject(obj); return { x0: b.min.x, x1: b.max.x, z0: b.min.z, z1: b.max.z }; }
+function findFreeSpot(g, cx, cz) {
+  g.updateMatrixWorld(true);
+  const b = rectOf3(g), px = g.position.x, pz = g.position.z, m = 0.08;
+  const hx0 = b.x0 - px, hx1 = b.x1 - px, hz0 = b.z0 - pz, hz1 = b.z1 - pz;
+  const occ = wallRects.concat(items.filter(i => i.g !== g).map(i => rectOf3(i.g)), seats.map(s => rectOf3(s.g)));
+  const fits = (x, z) => {
+    const x0 = x + hx0 - m, x1 = x + hx1 + m, z0 = z + hz0 - m, z1 = z + hz1 + m;
+    if (x0 < X0 + 0.15 || x1 > X_END - 0.15 || z0 < Z0 + 0.15 || z1 > Z_END - 0.15) return false;
+    for (const o of occ) if (x0 < o.x1 && x1 > o.x0 && z0 < o.z1 && z1 > o.z0) return false;
+    return true;
+  };
+  for (let rad = 0; rad <= 30; rad += 0.25) {
+    const n = rad === 0 ? 1 : Math.ceil(2 * Math.PI * rad / 0.3);
+    for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, x = snap(cx + Math.cos(a) * rad), z = snap(cz + Math.sin(a) * rad); if (fits(x, z)) return [r2(x), r2(z)]; }
+  }
+  return null;
+}
+/* items that can stand on a counter, a table or a PC desk */
+const downRay = new THREE.Raycaster(), RAY_UP = new THREE.Vector3(), RAY_DOWN = new THREE.Vector3(0, -1, 0);
+function surfaceY(g) {
+  RAY_UP.set(g.position.x, 4, g.position.z); downRay.set(RAY_UP, RAY_DOWN);
+  const hits = downRay.intersectObjects(items.filter(i => i.g !== g).map(i => i.g).concat(seats.map(s => s.g)), true);
+  for (const h of hits) { if (h.object.material && h.object.material.transparent) continue; let o = h.object, person = false; while (o) { if (o.userData.isStaff || o === g) person = true; o = o.parent; } if (person) continue; if (h.face && h.face.normal.y > 0.9 && h.point.y - 0.08 <= 1.2) return r2(h.point.y - 0.08); }
+  return 0;
+}
+function settle(g) { const it = items.find(i => i.g === g); if (it && CATALOG[it.data.type].stack) g.position.y = surfaceY(g); }
+
+/* add a catalog item: free spot near the centre of the view, then the camera flies to it */
+function spawn(type) {
+  const cat = CATALOG[type], c = controls.target;
+  const d = { id: type + '-' + Date.now().toString(36), type, x: r2(snap(clampX(c.x))), z: r2(snap(clampZ(c.z))), ry: 0 };
+  if (cat.colors) d.color = cat.colors;
+  if (cat.len) d.len = cat.len[2];
+  if (cat.fam === 'reception') d.staff = true;
+  const it = addItem(d);
+  const sp = findFreeSpot(it.g, d.x, d.z);
+  if (sp) { it.g.position.x = d.x = sp[0]; it.g.position.z = d.z = sp[1]; }
+  else toast('Рядом нет свободного места: поставил в центр, передвиньте предмет');
+  select3d(it.g); markDirty();
+  flyTo({ t: [it.g.position.x, 0, it.g.position.z + 0.3], d: isPhone() ? 11 : 14, dir: EDIT_VIEW.dir });
+}
+
+/* dragging objects (capture phase, so the camera does not pan underneath) */
+function floorAt(e) {
+  const r = canvas.getBoundingClientRect(); const m = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  const rc = new THREE.Raycaster(); rc.setFromCamera(m, camera); const p = new THREE.Vector3(); return rc.ray.intersectPlane(floorPlane, p) ? p : null;
+}
+function editableAt(e) {
+  const r = canvas.getBoundingClientRect(); const m = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  const rc = new THREE.Raycaster(); rc.setFromCamera(m, camera);
+  const hits = rc.intersectObjects(items.map(i => i.g).concat(seats.map(s => s.g)), true);
+  for (const h of hits) { let o = h.object; while (o && !o.userData.editable) o = o.parent; if (o) return o; }
+  return null;
+}
+canvas.addEventListener('pointerdown', e => {
+  if (!editing || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  const g = editableAt(e); if (!g) return;
+  const p = floorAt(e); if (!p) return;
+  controls.enabled = false; e.stopPropagation();
+  dragging = { g, off: g.position.clone().sub(p).setY(0), moved: false, id: e.pointerId, start: g.position.clone(), ext: extentsOf(g), targets: snapTargets(g) };
+  canvas.setPointerCapture(e.pointerId);
+  if (selected !== g) select3d(g);
+}, { capture: true });
+/* snapping: walls (contact), other furniture and PCs (contact, same edge line, same centre line) */
+let snapOn = true; try { snapOn = localStorage.getItem('leetplus-floor-plan-snap') !== 'off'; } catch (e) { }
+const SNAP_T = 0.25;
+function extentsOf(g) { g.updateMatrixWorld(true); const b = rectOf3(g), p = g.position; return { hx0: b.x0 - p.x, hx1: b.x1 - p.x, hz0: b.z0 - p.z, hz1: b.z1 - p.z }; }
+function snapTargets(g) {
+  return wallRects.filter(r => !r.noSnap).map(r => ({ ...r, wall: true }))
+    .concat(items.filter(i => i.g !== g).map(i => rectOf3(i.g)), seats.filter(s => s.g !== g).map(s => rectOf3(s.g)));
+}
+// best shift (|d| < SNAP_T) of the range [lo, hi] on one axis; the guide is drawn along the other axis
+function snapAxis(lo, hi, axis, targets, olo, ohi) {
+  let best = null;
+  const mid = (lo + hi) / 2;
+  for (const t of targets) {
+    const t0 = axis === 'x' ? t.x0 : t.z0, t1 = axis === 'x' ? t.x1 : t.z1, o0 = axis === 'x' ? t.z0 : t.x0, o1 = axis === 'x' ? t.z1 : t.x1;
+    const gap = Math.max(0, o0 - ohi, olo - o1);
+    const cand = [];
+    if (t.wall) {
+      if (gap > 0.01) continue;
+      if (lo < t1 && hi > t0) {                      // inside a wall: push out to the nearer face
+        const dn = t0 - hi, up = t1 - lo, d = Math.abs(dn) < Math.abs(up) ? dn : up;
+        if (Math.abs(d) < 0.8 && (!best || best.score > -1)) best = { d, c: d === dn ? t0 : t1, score: -1, axis, s0: Math.min(olo, o0), s1: Math.max(ohi, o1) };
+        continue;
+      }
+      cand.push([t0 - hi, t0, 2], [t1 - lo, t1, 2]);
+    }
+    else {
+      if (gap > 4) continue;
+      if (gap < 0.5) cand.push([t0 - hi, t0, 2], [t1 - lo, t1, 2]);
+      cand.push([t0 - lo, t0, 1], [t1 - hi, t1, 1], [(t0 + t1) / 2 - mid, (t0 + t1) / 2, 1]);
+    }
+    for (const [d, c, w] of cand) {
+      const score = Math.abs(d) - (w === 2 ? 0.04 : 0);       // contact wins a near tie over alignment
+      if (Math.abs(d) < SNAP_T && (!best || score < best.score)) best = { d, c, score, axis, s0: Math.min(olo, o0), s1: Math.max(ohi, o1) };
+    }
+  }
+  return best;
+}
+const guideMat = new THREE.LineDashedMaterial({ color: 0xE8558A, dashSize: 0.16, gapSize: 0.1, depthTest: false, transparent: true });
+function mkGuide() { const g = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3)); const l = new THREE.Line(g, guideMat); l.visible = false; l.renderOrder = 20; l.frustumCulled = false; scene.add(l); return l; }
+const guideX = mkGuide(), guideZ = mkGuide();
+function showGuide(l, s) {
+  if (!s) { l.visible = false; return; }
+  const a = l.geometry.attributes.position, y = 0.14, pad = 0.4;
+  if (s.axis === 'x') { a.setXYZ(0, s.c, y, s.s0 - pad); a.setXYZ(1, s.c, y, s.s1 + pad); } else { a.setXYZ(0, s.s0 - pad, y, s.c); a.setXYZ(1, s.s1 + pad, y, s.c); }
+  a.needsUpdate = true; l.computeLineDistances(); l.visible = true;
+}
+canvas.addEventListener('pointermove', e => {
+  if (!dragging || e.pointerId !== dragging.id) return;
+  const p = floorAt(e); if (!p) return;
+  let nx = clampX(p.x + dragging.off.x), nz = clampZ(p.z + dragging.off.z), sx = null, sz = null;
+  if (snapOn && !e.altKey) {
+    const x = dragging.ext;
+    sx = snapAxis(nx + x.hx0, nx + x.hx1, 'x', dragging.targets, nz + x.hz0, nz + x.hz1); if (sx) nx += sx.d;
+    sz = snapAxis(nz + x.hz0, nz + x.hz1, 'z', dragging.targets, nx + x.hx0, nx + x.hx1); if (sz) nz += sz.d;
+  }
+  if (!sx) nx = snap(nx); if (!sz) nz = snap(nz);
+  nx = r2(clampX(nx)); nz = r2(clampZ(nz));
+  showGuide(guideX, sx); showGuide(guideZ, sz);
+  if (nx !== dragging.g.position.x || nz !== dragging.g.position.z) { dragging.g.position.x = nx; dragging.g.position.z = nz; settle(dragging.g); dragging.moved = true; boxHelper.setFromObject(dragging.g); }
+});
+function endDrag(e) {
+  if (!dragging || (e && e.pointerId !== dragging.id)) return;
+  const moved = dragging.moved; dragging = null; controls.enabled = true; showGuide(guideX, null); showGuide(guideZ, null);
+  if (moved) markDirty();
+}
+canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('click', e => { if (editing && Math.hypot(e.clientX - clickStart[0], e.clientY - clickStart[1]) < 6 && !editableAt(e) && !dragging) { deselect(); renderPanel(); } });
+addEventListener('keydown', e => {
+  if (!editing || e.target.closest('input,select,textarea')) return;
+  if (!selected) return;
+  if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') { objAction(e.shiftKey ? 'rl' : 'rr'); e.preventDefault(); }
+  else if (e.key === 'm' || e.key === 'M' || e.key === 'ь' || e.key === 'Ь') { objAction(e.shiftKey ? 'mz' : 'mx'); e.preventDefault(); }
+  else if (e.key === 'Delete' || e.key === 'Backspace') { objAction('del'); e.preventDefault(); }
+  else if (e.key.startsWith('Arrow')) {
+    const st = e.shiftKey ? 0.5 : 0.05; const p = selected.position;
+    if (e.key === 'ArrowLeft') p.x = clampX(p.x - st); if (e.key === 'ArrowRight') p.x = clampX(p.x + st);
+    if (e.key === 'ArrowUp') p.z = clampZ(p.z - st); if (e.key === 'ArrowDown') p.z = clampZ(p.z + st);
+    settle(selected); boxHelper.setFromObject(selected); markDirty(); e.preventDefault();
+  }
+});
+
+/* mode switch */
+const EDIT_VIEW = { t: [1.7, 0, 0.6], d: 62, dir: [0.06, 1.7, 0.6] };
+function setEditing(on) {
+  editing = on; document.body.classList.toggle('editing', on); if (on) finishVisitors();
+  $('#editBtn').setAttribute('aria-pressed', String(on)); $('#editBtn span').textContent = on ? 'Готово' : 'Редактор схемы';
+  if (on) { view = { type: 'home' }; ring.visible = false; setAuto(false); flyTo(isPhone() ? { t: [3.4, 0, 0], d: 30, rot: 1.12, dir: EDIT_VIEW.dir } : EDIT_VIEW); if (isPhone()) sheetOpen = true; syncPills(); }
+  else { deselect(); select({ type: 'home' }); }
+  tip.hidden = true; hoverRing.visible = false;
+  renderPanel(); renderCards();
+}
+$('#editBtn').hidden = !CAN_EDIT;
+$('#editBtn').addEventListener('click', () => { if (CAN_EDIT) setEditing(!editing); });
+
+/* editor panel */
+function catBtn(type) { const c = CATALOG[type]; return `<button class="cat" type="button" data-add="${type}"><svg viewBox="0 0 32 30" fill="none" stroke="currentColor" stroke-width="1.8">${c.icon}</svg><span>${c.name}</span></button>`; }
+function renderEditor() {
+  let h = `<div class="ph"><div><div class="eyebrow">Редактор схемы</div><h2>${esc(CLUB.name)}</h2><div class="sub">${matchMedia('(pointer: coarse)').matches ? 'Тяните объект пальцем. Пустое место двигает карту, двумя пальцами масштаб и поворот.' : 'Тяните объект мышью. Пустое место двигает карту, колесо меняет масштаб, правая кнопка вращает.'}</div></div><span class="chip ${dirty ? 'warn' : 'good'}">${dirty ? 'Не сохранено' : 'Сохранено'}</span></div>`;
+  const it = selItem(), s = selSeat();
+  if (it) {
+    const c = CATALOG[it.data.type], fam = FAMILY[c.fam];
+    h += `<div class="sec selbox"><h3>Выбрано <span>${deg(it.g.rotation.y)}°${it.data.mx || it.data.mz ? ' · зеркально' : ''}</span></h3><b class="selname">${c.name}</b>
+      ${fam.length > 1 ? `<div class="seg" role="group" aria-label="Вариант">${fam.map(t => `<button type="button" data-variant="${t}" aria-pressed="${t === it.data.type}">${CATALOG[t].name}</button>`).join('')}</div>` : ''}
+      ${c.colors ? `<div class="sw" role="group" aria-label="Цвет">${Object.entries(SOFA_COLORS).map(([k, v]) => `<button type="button" data-color="${k}" title="${v[2]}" aria-label="${v[2]}" aria-pressed="${(it.data.color || 'blue') === k}" style="--c:#${v[0].toString(16).padStart(6, '0')}"></button>`).join('')}</div>` : ''}
+      ${c.len ? `<label class="rng" for="lenRange">Длина <b class="num" id="lenVal">${(it.data.len || c.len[2]).toFixed(1)} м</b><input id="lenRange" type="range" min="${c.len[0]}" max="${c.len[1]}" step="0.1" value="${it.data.len || c.len[2]}"></label>` : ''}
+      ${c.stack ? `<div class="note">${it.g.position.y > 0.005 ? `Стоит на поверхности, высота ${it.g.position.y.toFixed(2)} м.` : 'Перетащите на стойку, стол или компьютерный стол, и он встанет сверху.'}</div>` : ''}
+      ${c.fam === 'reception' ? `<label class="chk" for="staffChk"><input id="staffChk" type="checkbox" ${it.data.staff ? 'checked' : ''}> Администратор за стойкой</label>` : ''}
+      <div class="acts"><button class="btn ghost" type="button" data-oa="rl">↺ 15°</button><button class="btn ghost" type="button" data-oa="rr">↻ 15°</button><button class="btn ghost" type="button" data-oa="mx" title="Слева направо">⇆ Отразить</button><button class="btn ghost" type="button" data-oa="mz" title="Сверху вниз">⇅ Отразить</button><button class="btn ghost" type="button" data-oa="dup">Копия</button><button class="btn ghost danger" type="button" data-oa="del">Удалить</button></div></div>`;
+  } else if (s) {
+    h += `<div class="sec selbox"><h3>Выбрано <span>${deg(s.g.rotation.y)}°${s.mx || s.mz ? ' · зеркально' : ''}</span></h3><b class="selname">${s.id} · ${ZONES[s.zone].name}</b>
+      <div class="note">ПК приходят из Langame, поэтому их можно двигать и поворачивать, но не удалять.</div>
+      <div class="acts"><button class="btn ghost" type="button" data-oa="rl">↺ 15°</button><button class="btn ghost" type="button" data-oa="rr">↻ 15°</button><button class="btn ghost" type="button" data-oa="mx" title="Слева направо">⇆ Отразить</button><button class="btn ghost" type="button" data-oa="mz" title="Сверху вниз">⇅ Отразить</button><button class="btn ghost" type="button" data-oa="pcreset">Вернуть как на схеме</button></div></div>`;
+  } else {
+    h += `<div class="note">Нажмите на диван, стойку или ПК, чтобы выбрать${matchMedia('(pointer: coarse)').matches ? '' : '. Клавиши: R поворот, M и Shift+M отражение, стрелки сдвиг, Delete удалить'}. Новый предмет встаёт на свободное место рядом с центром экрана. При перетаскивании предметы прилипают к стенам и выравниваются по соседям${matchMedia('(pointer: coarse)').matches ? '' : ', Alt временно отключает привязку'}.</div>`;
+  }
+  h += Object.keys(FAMILY).map(f => `<div class="sec"><h3>Добавить · ${FAMILY_TITLE[f]}</h3><div class="cats">${FAMILY[f].map(catBtn).join('')}</div></div>`).join('') + `
+<div class="sec"><label class="chk" for="snapChk"><input id="snapChk" type="checkbox" ${snapOn ? 'checked' : ''}> Привязка к стенам и предметам</label><div class="acts"><button class="btn" type="button" data-ed="save" ${dirty ? '' : 'disabled'}>Сохранить схему</button><button class="btn ghost" type="button" data-ed="revert" ${dirty ? '' : 'disabled'}>Отменить правки</button></div>
+    <button class="linkbtn" type="button" data-ed="reset">${resetArmed ? 'Точно вернуть исходную схему Langame? Нажмите ещё раз' : 'Вернуть исходную схему Langame'}</button>
+    <div class="note">${esc(store.status)}</div></div>`;
+  pbody.innerHTML = h;
+}
+let resetArmed = false;
+pbody.addEventListener('click', e => {
+  if (!editing) return;
+  const add = e.target.closest('[data-add]'); if (add) return spawn(add.dataset.add);
+  const oa = e.target.closest('[data-oa]');
+  if (oa) { if (oa.dataset.oa === 'pcreset') { const s = selSeat(); if (s) { s.g.position.x = s.def.x; s.g.position.z = s.def.z; s.g.rotation.y = s.def.ry; s.mx = s.mz = false; applyMirror(s.g, false, false); renderPanel(); boxHelper.setFromObject(s.g); markDirty(); } return; } return objAction(oa.dataset.oa); }
+  const it = selItem();
+  const v = e.target.closest('[data-variant]'); if (v && it) { const nc = CATALOG[v.dataset.variant]; it.data.type = v.dataset.variant; it.data.x = it.g.position.x; it.data.z = it.g.position.z; it.data.ry = it.g.rotation.y; if (nc.len) it.data.len = THREE.MathUtils.clamp(it.data.len || nc.len[2], nc.len[0], nc.len[1]); if (nc.colors && !it.data.color) it.data.color = nc.colors; if (nc.fam === 'reception' && it.data.staff == null) it.data.staff = true; it.data.y = nc.stack ? it.g.position.y : 0; rebuildItem(it); settle(it.g); select3d(it.g); markDirty(); return; }
+  const c = e.target.closest('[data-color]'); if (c && it) { it.data.color = c.dataset.color; it.data.x = it.g.position.x; it.data.z = it.g.position.z; it.data.ry = it.g.rotation.y; rebuildItem(it); select3d(it.g); markDirty(); return; }
+  const ed = e.target.closest('[data-ed]'); if (!ed) return;
+  if (ed.dataset.ed === 'save') saveLayout();
+  if (ed.dataset.ed === 'revert') { applyLayout(savedLayout); dirty = false; renderPanel(); toast('Правки отменены'); }
+  if (ed.dataset.ed === 'reset') { if (!resetArmed) { resetArmed = true; renderPanel(); setTimeout(() => { resetArmed = false; if (editing) renderPanel(); }, 4000); return; } resetArmed = false; applyLayout(null); markDirty(); toast('Вернул исходную схему. Сохраните, чтобы применить для всех'); }
+});
+pbody.addEventListener('input', e => {
+  const it = selItem(); if (!editing || !it) return;
+  if (e.target.id === 'lenRange') { it.data.len = +e.target.value; $('#lenVal').textContent = it.data.len.toFixed(1) + ' м'; it.data.x = it.g.position.x; it.data.z = it.g.position.z; it.data.ry = it.g.rotation.y; rebuildItem(it); selected = it.g; boxHelper.setFromObject(it.g); dirty = true; }
+});
+pbody.addEventListener('change', e => { if (e.target.id === 'snapChk') { snapOn = e.target.checked; try { localStorage.setItem('leetplus-floor-plan-snap', snapOn ? 'on' : 'off'); } catch (er) { } } });
+pbody.addEventListener('change', e => {
+  const it = selItem(); if (!editing || !it) return;
+  if (e.target.id === 'lenRange') renderPanel();
+  if (e.target.id === 'staffChk') { it.data.staff = e.target.checked; it.data.x = it.g.position.x; it.data.z = it.g.position.z; it.data.ry = it.g.rotation.y; rebuildItem(it); select3d(it.g); markDirty(); }
+});
+addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+const v3o = new THREE.Vector3();
+function updateEditorOverlay() {
+  if (!editing || !selected) { otb.hidden = true; return; }
+  const b = new THREE.Box3().setFromObject(selected); v3o.set((b.min.x + b.max.x) / 2, b.max.y + 0.3, (b.min.z + b.max.z) / 2).project(camera);
+  otb.hidden = false; otb.style.transform = `translate(${(v3o.x + 1) / 2 * stageW}px,${(1 - v3o.y) / 2 * stageH}px) translate(-50%, -100%)`;
+}
+
+/* ---------------- resize ---------------- */
+function resize() {
+  stageW = stage.clientWidth; stageH = stage.clientHeight;
+  renderer.setSize(stageW, stageH, false);
+  camera.aspect = stageW / stageH;
+  const panelW = isPhone() ? 0 : 340 + 16;
+  const shiftY = isPhone() ? stageH * 0.12 : 0;
+  camera.setViewOffset(stageW, stageH, panelW / 2, shiftY, stageW, stageH);
+  camera.updateProjectionMatrix();
+  linesSvg.setAttribute('viewBox', `0 0 ${stageW} ${stageH}`);
+  measureObstacles();
+  renderPanel();
+}
+addEventListener('resize', () => { resize(); if (view.type === 'home') flyTo(homeView(), true); });
+
+/* ---------------- loop ---------------- */
+const clock = new THREE.Clock();
+function animate() {
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+  if (fly) {
+    const k = Math.min(1, (performance.now() - fly.t0) / fly.dur), e = ease(k);
+    camera.position.lerpVectors(fly.fp, fly.tp, e); controls.target.lerpVectors(fly.ft, fly.tt, e);
+    if (k >= 1) fly = null;
+  }
+  // clamp target
+  controls.target.x = THREE.MathUtils.clamp(controls.target.x, X0 - 2, X_END + 2); controls.target.z = THREE.MathUtils.clamp(controls.target.z, Z0 - 2, Z_SOLO + 4); controls.target.y = 0;
+  controls.update();
+  if (!reduced && !CALM) {
+    for (const s of seats) if (s.person) { const ph = s.person.userData.ph; s.person.userData.head.position.y = 1.47 + Math.sin(t * 2 + ph) * 0.012; s.person.userData.hair.position.y = s.person.userData.head.position.y; s.person.rotation.y = Math.sin(t * 0.5 + ph) * 0.06; }
+    items.forEach((it, i) => { const p = it.g.userData.staff; if (p) p.rotation.y = Math.sin(t * 0.3 + i) * 0.35; });
+    for (const m of movers) { m.o.position.x += m.v * dt; if (m.o.position.x > MOVER_X[1]) m.o.position.x = MOVER_X[0]; if (m.o.position.x < MOVER_X[0]) m.o.position.x = MOVER_X[1]; }
+    for (const w of walkers) {
+      if (w.wait > 0) { w.wait -= dt; w.p.userData.legs.forEach(l => l.rotation.x *= 0.85); continue; }
+      const a = w.path[w.i], b = w.path[(w.i + 1) % w.path.length];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 0.001;
+      w.t += dt * w.speed / len;
+      if (w.t >= 1) { w.t = 0; w.i = (w.i + 1) % w.path.length; if (w.pauses[w.i]) w.wait = w.pauses[w.i]; continue; }
+      w.p.position.x = a[0] + (b[0] - a[0]) * w.t; w.p.position.z = a[1] + (b[1] - a[1]) * w.t;
+      if (len > 0.01) { const target = Math.atan2(b[0] - a[0], b[1] - a[1]); let d = target - w.p.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); w.p.rotation.y += d * Math.min(1, dt * 8); }
+      const sw = Math.sin(t * 7 * w.speed) * 0.5; w.p.userData.legs[0].rotation.x = sw; w.p.userData.legs[1].rotation.x = -sw; w.p.userData.arms[0].rotation.x = -sw * 0.7; w.p.userData.arms[1].rotation.x = sw * 0.7;
+    }
+    stepVisitors(dt, t);
+    ring.scale.setScalar(0.75 + Math.sin(t * 4) * 0.05);
+  }
+  if (selected && editing) boxHelper.setFromObject(selected);
+  renderer.render(scene, camera);
+  updateOverlay(); updateEditorOverlay(); updateStaffTip();
+  requestAnimationFrame(animate);
+}
+
+/* ---------------- boot ---------------- */
+applyTheme();
+resize();
+renderKPIs(); renderCards();
+renderFeed();
+select({ type: 'home' });
+flyTo(homeView(), true);
+setAuto(autoPref);
+requestAnimationFrame(() => { measureObstacles(); });
+animate();
+
+loadPlan().then(poll);
+startAttention();
+startShiftWork();
+setInterval(minuteTick, 30000);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { redrawTextures(); measureObstacles(); });
+window.__club = { select, seats, camera, controls, sel: () => selected, items: () => items, select3d, settle, Box3: THREE.Box3 };
+})();

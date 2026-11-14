@@ -51,7 +51,7 @@ const PX = x => (x - 637.5) / 31.5, PZ = y => (y - 159.5) / 31.5;
 // The real hall is longer than the booking scheme: the admin zone is 3x deeper (+2.2 m) and both cybersport rooms are 2x wider.
 const D = 2.2, QX = x => PX(x) + D;            // plan x for everything right of the admin zone
 const ADMIN_WALL = QX(720);
-const CYBER = [[QX(1035), QX(1035) + 3.4], [QX(1035) + 3.78, QX(1035) + 7.58]];
+const CYBER = [[QX(1035), QX(1035) + 3.4], [QX(1035) + 3.4, QX(1035) + 7.58]]; // two rooms sharing one wall
 const X0 = -18.35, X_END = CYBER[1][1] + 1.76, HALL_C = (X0 + X_END) / 2, HALL_W = X_END - X0;
 const PLOT_C = HALL_C + 0.15, PLOT_W = HALL_W + 10.6;
 
@@ -383,18 +383,17 @@ const wcDoors = [];
 wallX(QX(858), -3.25, PZ(118));               // duo / vip
 wallZ(PZ(150), QX(783), QX(858));             // solo 37 booth
 wallX(QX(858), PZ(150), CORR);
-wallZ(PZ(150), QX(952), QX(1022));            // solo 45 booth
+wallZ(PZ(150), QX(952), CYBER[0][0]);         // solo 45 booth, up to the cybersport wall
 wallX(QX(952), PZ(150), CORR);
-wallX(QX(1022), PZ(118), CORR);
-for (const [a, b] of CYBER) { wallX(a, -3.25, CORR); wallX(b, -3.25, CORR); wallZ(CORR, a, a + 1.6); } // cybersport rooms, door on the right
+CYBER.forEach(([a, b], i) => { if (i === 0) wallX(a, -3.25, CORR); wallX(b, -3.25, CORR); wallZ(CORR, a, a + 1.6); }); // cybersport rooms share walls, door on the right
 
 // zone carpets (click targets)
 function carpet(zone, mat, x0, x1, z0, z1) { const m = B(club, x1 - x0, 0.02, z1 - z0, mat, (x0 + x1) / 2, 0, (z0 + z1) / 2, 0.01); m.castShadow = false; setPick(m, { type: 'zone', id: zone }); return m; }
 carpet('standart', M.carpetH, PX(188), PX(684), -3.2, 3.2);
 carpet('duo', M.carpetB, QX(785), QX(856), -3.2, PZ(118));
-carpet('vip', M.carpetV, QX(860), QX(1020), -3.2, PZ(118));
+carpet('vip', M.carpetV, QX(860), CYBER[0][0] - 0.05, -3.2, PZ(118));
 carpet('solo', M.carpetS, QX(785), QX(856), PZ(152), PZ(195));
-carpet('solo', M.carpetS, QX(954), QX(1020), PZ(152), PZ(195));
+carpet('solo', M.carpetS, QX(954), CYBER[0][0] - 0.05, PZ(152), PZ(195));
 for (const [a, b] of CYBER) carpet('cyber', M.rugC, a + 0.05, b - 0.05, -3.2, PZ(195));
 carpet('admin', M.carpetK, PX(686), ADMIN_WALL - 0.05, -3.2, CORR);
 
@@ -463,7 +462,7 @@ for (const x of [287, 517]) for (const z of [-2.62, 2.62]) { B(club, 0.04, 0.45,
 [[40, 878], [41, 910], [42, 942], [43, 974], [44, 1006]].forEach(([n, x]) => makePC(pcId(n), 'vip', QX(x), -2.62, 0));
 makePC(pcId(37), 'solo', QX(810) + 0.05, PZ(174), Math.PI / 2, 1.0);
 makePC(pcId(45), 'solo', QX(1000) - 0.05, PZ(174), -Math.PI / 2, 1.0);
-[[48, 75], [47, 108], [46, 140]].forEach(([n, y]) => makePC(pcId(n), 'cyber', CYBER[0][1] - 0.42, PZ(y) + 0.03, -Math.PI / 2));
+[[48, 75], [47, 108], [46, 140]].forEach(([n, y]) => makePC(pcId(n), 'cyber', CYBER[0][0] + 0.42, PZ(y) + 0.03, Math.PI / 2)); // first room is mirrored: desks on the left wall
 [[49, 75], [50, 108], [51, 140]].forEach(([n, y]) => makePC(pcId(n), 'cyber', CYBER[1][1] - 0.42, PZ(y) + 0.03, -Math.PI / 2));
 
 // street pylon
@@ -644,7 +643,7 @@ const DEFAULT_ITEMS = [
   { id: 'bar-fridge-1', type: 'fridgeBar', x: 3.0, y: 1.1, z: 0.85, ry: RY_W },
   { id: 'lobby-sofa', type: 'sofa3', x: -16.3, z: -2.55, ry: 0, color: 'blue' },
   { id: 'lockers-1', type: 'lockers', x: -16.4, z: 2.9, ry: Math.PI, color: 'teal' },
-  { id: 'cyber-sofa-1', type: 'sofa3', x: r2w(CYBER[0][0] + 0.55), z: -1.6, ry: Math.PI / 2, color: 'blue' },
+  { id: 'cyber-sofa-1', type: 'sofa3', x: r2w(CYBER[0][1] - 0.55), z: -1.6, ry: -Math.PI / 2, color: 'blue' },
   { id: 'cyber-sofa-2', type: 'sofa3', x: r2w(CYBER[1][0] + 0.55), z: -1.6, ry: Math.PI / 2, color: 'lilac' },
   { id: 'plant-1', type: 'plant', x: -17.8, z: -2.9, ry: 0 }, { id: 'plant-2', type: 'plant', x: -17.8, z: 2.9, ry: 0 },
   { id: 'plant-3', type: 'plant', x: r2w(X_END - 0.5), z: -2.9, ry: 0 }, { id: 'plant-4', type: 'plant', x: -14.9, z: 2.9, ry: 0 }

@@ -130,7 +130,6 @@ import { OverviewTab } from "./guest-gamification/tabs/overview-tab";
 import { PromoBannersTab } from "./guest-gamification/tabs/promo-banners-tab";
 import {
   SeasonsTab,
-  nextSeasonStepId,
 } from "./guest-gamification/tabs/seasons-tab";
 import { MissionsTab } from "./guest-gamification/tabs/missions-tab";
 import { LootBoxesTab } from "./guest-gamification/tabs/loot-boxes-tab";
@@ -3684,50 +3683,6 @@ function buildAutomaticSeasonLevels(form: SeasonForm) {
       ),
     };
   });
-}
-
-function buildAutomaticSeasonLevelSteps(
-  form: SeasonForm,
-): SeasonLevelStepForm[] {
-  return buildAutomaticSeasonLevels(form).map((level) => ({
-    id: nextSeasonStepId(),
-    level: String(level.level),
-    xp: String(level.xp),
-    title: level.title,
-    condition: level.condition,
-    description: level.description ?? "",
-    freeReward: level.freeReward ?? "",
-    premiumReward: level.premiumReward ?? "",
-    conditionV2: { ...defaultBattlePassStepCondition },
-    triggerKind: "",
-    sessionType: "",
-    timeWindowMode: "ANY",
-    weekdayMode: "ANY",
-    selectedWeekdays: weekdayPresets.ANY,
-    hourFrom: "10:00",
-    hourTo: "16:00",
-    tariffGroupId: "",
-    tariffPeriodId: "",
-    tariffTypeId: "",
-    guestLogTypes: "",
-    blockedGuestLogTypes: "",
-    freeRewardType: level.freeReward ? "ADMIN_OTHER" : "",
-    freeRewardAmount: "",
-    freeRewardLabel: level.freeReward ?? "",
-    freeRewardCode: "",
-    freeRewardLootBoxId: "",
-    freeRewardLootBoxName: "",
-    freeRewardLootBoxRarity: "common",
-    freeRewardDelivery: "ADMIN",
-    premiumRewardType: level.premiumReward ? "ADMIN_OTHER" : "",
-    premiumRewardAmount: "",
-    premiumRewardLabel: level.premiumReward ?? "",
-    premiumRewardCode: "",
-    premiumRewardLootBoxId: "",
-    premiumRewardLootBoxName: "",
-    premiumRewardLootBoxRarity: "common",
-    premiumRewardDelivery: "ADMIN",
-  }));
 }
 
 function seasonLevelStepFormsToLevels(form: SeasonForm) {

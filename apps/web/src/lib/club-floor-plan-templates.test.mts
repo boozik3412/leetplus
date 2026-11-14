@@ -33,6 +33,14 @@ test("finds the hall of a club by its name or address", () => {
       ?.id,
     "1337-pushkinskaya-217",
   );
+  assert.equal(
+    clubFloorPlanTemplateFor({ name: "1337 Радищева" })?.id,
+    "1337-radishcheva-12",
+  );
+  assert.equal(
+    clubFloorPlanTemplateFor({ name: "1337", address: "ул. Радищева, 12" })?.id,
+    "1337-radishcheva-12",
+  );
   assert.equal(clubFloorPlanTemplateFor({ name: "APEKS" }), null);
   assert.equal(clubFloorPlanTemplateFor({ name: "Ленина 5" }), null);
 });
@@ -140,6 +148,12 @@ test("lists only clubs with a hall for the scene switcher", () => {
           name: "1337-Пушкинская",
           address: "г. Ижевск, ул. Пушкинская, 217",
           template: "1337-pushkinskaya-217",
+        },
+        {
+          id: "b",
+          name: "1337 Радищева",
+          address: "г. Екатеринбург, ул. Радищева, 12",
+          template: "1337-radishcheva-12",
         },
         {
           id: "c",

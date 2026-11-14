@@ -943,7 +943,7 @@ function renderPanel() {
     h += `<button class="back" type="button" data-act="home">← Весь клуб</button>`;
     if (id !== 'admin') {
       const ss = zoneSeats(id); const c = st => ss.filter(s => seatState(s) === st).length;
-      h += `<div class="ph"><div><div class="eyebrow">Зона</div><h2>${z.name}</h2><div class="sub">${z.range}${z.total && ss.length !== z.total ? ` · на схеме ${ss.length} мест` : ''}</div></div><span class="chip acc">${ss.filter(s => s.state === 'busy').length} / ${linkedSeats(ss).length || ss.length}</span></div>
+      h += `<div class="ph"><div><div class="eyebrow">Зона</div><h2>${z.name}</h2><div class="sub">${z.range}${z.total && ss.length !== z.total ? ` · на схеме ${ss.length} мест` : ''}</div></div><span class="chip acc">${ss.filter(s => s.state === 'busy').length} / ${linkedSeats(ss).length || ss.length}</span></div>${ntHtml(id)}
       <div class="statgrid"><div class="stat"><small>Свободно</small><b class="num">${c('free')}</b></div><div class="stat"><small>Заканчивают</small><b class="num">${c('ending')}</b></div><div class="stat"><small>Играют</small><b class="num">${c('busy') + c('ending')}</b></div></div>
       <div class="sec"><h3>Места</h3><div class="seats">${ss.map(s => { const st = seatState(s); return `<button class="seat" type="button" data-seat="${s.id}" style="--sc:${COL[st]}"><b>${s.id}</b><span>${STC[st][0]}</span><span class="num">${s.state === 'busy' && s.left != null ? 'ещё ' + hm(s.left) : '&nbsp;'}</span></button>`; }).join('')}</div>
       <div class="legend"><span><i style="background:var(--accent)"></i>играет</span><span><i style="background:var(--warn)"></i>меньше 15 мин</span><span><i style="background:var(--good)"></i>свободен</span><span><i style="background:var(--muted)"></i>нет в Langame</span></div>
@@ -951,7 +951,7 @@ function renderPanel() {
       <div class="sec"><h3>Конфиг</h3>${cfgHtml(z)}</div>`;
     } else {
       const sh = shiftInfo(), r = LIVE.revenue;
-      h += `<div class="ph"><div><div class="eyebrow">Админ</div><h2>Стойка и бар</h2><div class="sub">Смена, выручка и продажи товаров на стойке</div></div><span class="chip ${sh ? 'good' : 'off'}">${sh ? 'Смена открыта' : 'Смена не открыта'}</span></div>
+      h += `<div class="ph"><div><div class="eyebrow">Админ</div><h2>Стойка и бар</h2><div class="sub">Смена, выручка и продажи товаров на стойке</div></div><span class="chip ${sh ? 'good' : 'off'}">${sh ? 'Смена открыта' : 'Смена не открыта'}</span></div>${ntHtml(id)}
       <div class="sec"><h3>Смена</h3><dl class="kv"><dt>Администратор</dt><dd>${sh ? esc(sh.full) : '—'}</dd><dt>Начало</dt><dd>${sh ? `${sh.start}, идёт ${sh.dur}` : '—'}</dd><dt>${r && r.period === 'TODAY' ? 'Выручка за сегодня' : 'Выручка за смену'}</dt><dd>${rubOr(r && r.total)}</dd><dt>Товары</dt><dd>${rubOr(r && r.goods)}${r && r.goodsCount != null ? ' · ' + plural(r.goodsCount, 'товар', 'товара', 'товаров') : ''}</dd></dl></div>${swModeHtml()}
       <div class="statgrid"><div class="stat"><small>Товары</small><b class="num">${rubOr(r && r.goods)}</b></div><div class="stat"><small>Гостей</small><b class="num">${LIVE.guests == null ? '—' : fmt.format(LIVE.guests)}</b></div><div class="stat"><small>ПК заняты</small><b class="num">${seats.filter(s => s.state === 'busy').length}</b></div></div>${purchasesHtml()}`;
     }
@@ -959,6 +959,7 @@ function renderPanel() {
     const s = seats.find(x => x.id === view.id), z = ZONES[s.zone], st = seatState(s);
     h += `<button class="back" type="button" data-zone="${s.zone}">← ${z.name}</button>
     <div class="ph"><div><div class="eyebrow">${z.name}</div><h2>${s.id}</h2><div class="sub">${cfgOf(z, 'Видеокарта')} · ${cfgOf(z, 'Монитор')}</div></div><span class="chip ${STC[st][1]}">${STC[st][0]}</span></div>`;
+    h += ntHtml('pc:' + s.id);
     if (s.state === 'busy') {
       h += seatHintsHtml(s) + seatSessionHtml(s, st);
     } else if (s.state === 'free') {
@@ -970,7 +971,9 @@ function renderPanel() {
   }
   if (view.type === 'home' && !EMBED) h += `<div class="more">Наведите, чтобы раскрыть</div>`;
   h += `<div class="note">${liveNote()}</div>`;
+  const ntF = ntFocus();
   pbody.innerHTML = h;
+  ntRefocus(ntF);
   syncPills();
 }
 pbody.addEventListener('click', e => {
@@ -1604,7 +1607,8 @@ function startShiftWork() {
     SW.mode = SW.lead && swStoredMode() === 'admin' ? 'admin' : SW.own ? 'own' : null;
     buildShiftWork();
     pbody.addEventListener('click', e => { const b = e.target.closest('[data-swmode]'); if (b) swSetMode(b.dataset.swmode === 'on' ? 'admin' : null); });
-    if (view.type === 'zone' && view.id === 'admin') renderPanel();
+    pbody.addEventListener('click', ntClick); pbody.addEventListener('input', ntInput); pbody.addEventListener('keydown', ntKey);
+    if (view.type === 'zone' || view.type === 'seat') renderPanel();
     loadShiftWork();
     SW.timer = setInterval(loadShiftWork, SW_POLL_MS);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) loadShiftWork(); });
@@ -2139,6 +2143,107 @@ function placeShiftWork() {
   tk.style.maxHeight = Math.max(120, SW.task ? feedTop - 110 : Math.min(330, feedTop - 150)) + 'px';
   if (toast) toast.style.bottom = (stage.clientHeight - feedTop + 10) + 'px';
 }
+
+/* ---- a task for the shift administrator from a zone card (14.11) ----
+   A senior administrator, a standards manager, a manager or the owner clicks the
+   administrator or a zone and sets a task for whoever holds the open Langame shift:
+   POST /api/staff/tasks through the same BFF route as «Задачи», so the API applies
+   the same rules (a senior administrator may assign only administrators and trainees
+   of his clubs). The zone goes into the description. */
+var NT_DUE = [['30m', '30 мин', 30], ['1h', '1 час', 60], ['3h', '3 часа', 180], ['none', 'Без срока', null]];
+var NT_PRIO = [['NORMAL', 'Обычная'], ['HIGH', 'Важная'], ['URGENT', 'Срочная']];
+function ntCan() { return !!(SW && SW.me && SW.lead) && !EMBED && !!STORE_ID; }
+/* A target is a zone id, 'admin' for the desk, or 'pc:<seat id>' for one computer. */
+function ntSeat(key) { return /^pc:/.test(key) ? seats.find(s => s.id === key.slice(3)) || null : null; }
+function ntWhere(key) {
+  const s = ntSeat(key); if (s) { const z = ZONES[s.zone]; return z ? `${s.id}, ${z.name}` : s.id; }
+  const z = ZONES[key]; return z ? (key === 'admin' ? 'Стойка и бар' : `${z.name} · ${z.range}`) : '';
+}
+/* The shift administrator to assign: from the shift-admin read the mode already keeps, or a fresh one. */
+function ntLoadAdmin() {
+  const nt = SW.nt; if (!nt) return;
+  nt.who = null; nt.whoState = 'LOADING';
+  swJson(`/api/stores/${encodeURIComponent(STORE_ID)}/floor-plan/live/shift-admin`).then(w => {
+    if (SW.nt !== nt) return;
+    nt.who = w && w.admin ? w.admin : null; nt.whoState = w ? w.state : 'UNAVAILABLE';
+  }).catch(() => { if (SW.nt === nt) nt.whoState = 'UNAVAILABLE'; }).then(() => { if (SW.nt === nt) ntRender(); });
+}
+function ntAssignee() { const nt = SW.nt; return nt && nt.whoState === 'READY' && nt.who && nt.who.userId && !nt.who.isMe ? nt.who : null; }
+function ntWhoHtml() {
+  const nt = SW.nt, a = ntAssignee();
+  if (a) return `<div class="ntwho"><span class="gav">${esc(initials(a.name))}</span><span><b>${esc(shortName(a.name))}</b><small>администратор смены</small></span></div>`;
+  let why;
+  if (nt.whoState === 'LOADING') why = 'Узнаю, кто сейчас на смене…';
+  else if (nt.whoState === 'NO_SHIFT') why = 'Смена в Langame не открыта: поставить задачу некому.';
+  else if (nt.whoState === 'NOT_LINKED') why = `Администратор Langame «${esc(nt.who && nt.who.name || '—')}» не привязан к сотруднику LeetPlus, задачу ему не назначить.`;
+  else if (nt.whoState === 'READY' && nt.who && nt.who.isMe) why = 'Сейчас на смене вы сами.';
+  else why = 'Не удалось узнать администратора смены, попробуйте ещё раз.';
+  return `<div class="swnote warn"><b>Некому назначить</b>${why} Задачу другому сотруднику можно поставить в <a href="/staff/tasks" target="_blank" rel="noopener">«Задачах»</a>.</div>`;
+}
+function ntHtml(zoneId) {
+  if (!ntCan()) return '';
+  const nt = SW.nt && SW.nt.zone === zoneId ? SW.nt : null;
+  if (!nt) return `<div class="ntopen"><button type="button" class="swbtn sec" data-ntopen="${esc(zoneId)}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Поставить задачу администратору</button></div>`;
+  const a = ntAssignee(), ok = !!a && nt.title.trim().length >= 3 && !nt.busy;
+  const ex = ntSeat(zoneId) ? 'проверить гарнитуру, звук только в одном ухе' : zoneId === 'admin' ? 'пополнить холодильник с напитками' : `протереть столы в зоне ${ZONES[zoneId].name}`;
+  return `<div class="sec ntform" id="ntform"><h3>Задача администратору</h3>${ntWhoHtml()}
+    <label class="ntl" for="ntt">Что сделать</label><input id="ntt" type="text" maxlength="160" autocomplete="off" placeholder="Например: ${esc(ex)}" value="${esc(nt.title)}">
+    <label class="ntl" for="ntd">Подробности <span>необязательно</span></label><textarea id="ntd" rows="2" maxlength="1000">${esc(nt.desc)}</textarea>
+    <div class="ntl">Где</div><div class="ntwhere">${esc(ntWhere(zoneId))}</div>
+    <div class="ntl" id="ntdl">Срок</div><div class="ntseg" role="group" aria-labelledby="ntdl">${NT_DUE.map(([k, t]) => `<button type="button" data-ntdue="${k}" aria-pressed="${nt.due === k}">${t}</button>`).join('')}</div>
+    <div class="ntl" id="ntpl">Важность</div><div class="ntseg" role="group" aria-labelledby="ntpl">${NT_PRIO.map(([k, t]) => `<button type="button" data-ntprio="${k}" aria-pressed="${nt.prio === k}">${t}</button>`).join('')}</div>
+    ${nt.err ? `<div class="swerr" role="alert">${esc(nt.err)}</div>` : ''}
+    <div class="swbtns"><button type="button" class="swbtn pri sm" data-ntsend="1"${ok ? '' : ' disabled'}>${nt.busy ? 'Ставлю…' : 'Поставить задачу'}</button><button type="button" class="swbtn ghost sm" data-ntcancel="1">Отмена</button></div></div>`;
+}
+/* Typing in the form must survive the 20-second refresh: the panel waits while the form has focus. */
+function ntTyping() { const f = document.getElementById('ntform'); return !!(f && f.contains(document.activeElement)); }
+/* Guest cards, alerts and the live refresh re-render the panel on their own: the caret stays where it was. */
+function ntFocus() { const a = document.activeElement; return a && (a.id === 'ntt' || a.id === 'ntd') ? { id: a.id, s: a.selectionStart, e: a.selectionEnd } : null; }
+function ntRefocus(f) { if (!f) return; const el = document.getElementById(f.id); if (!el) return; el.focus({ preventScroll: true }); try { el.setSelectionRange(f.s, f.e); } catch (e) { } }
+function ntRender() { renderPanel(); }
+function ntOpen(zoneId) {
+  SW.nt = { zone: zoneId, title: '', desc: '', due: '1h', prio: 'NORMAL', busy: false, err: null, who: null, whoState: 'LOADING' };
+  renderPanel(); ntLoadAdmin();
+  const t = document.getElementById('ntt'); if (t) { t.focus(); t.scrollIntoView({ block: 'nearest' }); }
+}
+function ntSend() {
+  const nt = SW.nt, a = ntAssignee(); if (!nt || !a || nt.busy || nt.title.trim().length < 3) return;
+  const due = NT_DUE.find(d => d[0] === nt.due);
+  const body = {
+    title: nt.title.trim(),
+    description: [nt.desc.trim(), `Где: ${ntWhere(nt.zone)}. Поставлено со схемы клуба.`].filter(Boolean).join('\n\n'),
+    priority: nt.prio,
+    dueAt: due && due[2] ? new Date(Date.now() + due[2] * 60e3).toISOString() : null,
+    storeId: STORE_ID,
+    assignedToUserId: a.userId,
+  };
+  nt.busy = true; nt.err = null; ntRender();
+  swSend('/api/staff/tasks', 'POST', body).then(() => {
+    SW.nt = null; renderPanel();
+    toast(`Задача поставлена: ${shortName(a.name)}`);
+    if (swAdminMode()) loadShiftWork();
+  }).catch(e => { if (SW.nt === nt) { nt.busy = false; nt.err = e.message; ntRender(); } });
+}
+function ntClick(e) {
+  const t = e.target;
+  const o = t.closest('[data-ntopen]'); if (o) return ntOpen(o.dataset.ntopen);
+  if (!SW.nt) return;
+  const d = t.closest('[data-ntdue]'); if (d) { SW.nt.due = d.dataset.ntdue; return ntRender(); }
+  const p = t.closest('[data-ntprio]'); if (p) { SW.nt.prio = p.dataset.ntprio; return ntRender(); }
+  if (t.closest('[data-ntsend]')) return ntSend();
+  if (t.closest('[data-ntcancel]')) { const z = SW.nt.zone; SW.nt = null; renderPanel(); const b = pbody.querySelector(`[data-ntopen="${z}"]`); if (b) b.focus(); }
+}
+function ntInput(e) {
+  if (!SW.nt) return;
+  if (e.target.id === 'ntt') { SW.nt.title = e.target.value; const s = pbody.querySelector('[data-ntsend]'); if (s) s.disabled = !(ntAssignee() && SW.nt.title.trim().length >= 3 && !SW.nt.busy); }
+  if (e.target.id === 'ntd') SW.nt.desc = e.target.value;
+}
+function ntKey(e) {
+  if (!SW.nt || !e.target.closest || !e.target.closest('#ntform')) return;
+  if (e.key === 'Enter' && e.target.id === 'ntt') { e.preventDefault(); ntSend(); }
+  // Escape closes the form, not the zone card
+  if (e.key === 'Escape') { e.stopPropagation(); const z = SW.nt.zone; SW.nt = null; renderPanel(); const b = pbody.querySelector(`[data-ntopen="${z}"]`); if (b) b.focus(); }
+}
 /* ---------------- other clubs of the network with a drawn hall (full screen only) ---------------- */
 async function loadClubNav() {
   if (window.parent !== window || !STORE_ID) return;
@@ -2155,7 +2260,7 @@ async function loadClubNav() {
   nav.hidden = false;
 }
 loadClubNav();
-function refresh() { renderKPIs(); renderCards(); if (editing) return; if (!sheetGesture) renderPanel(); else syncPills(); }
+function refresh() { renderKPIs(); renderCards(); if (editing) return; if (!sheetGesture && !ntTyping()) renderPanel(); else syncPills(); }
 let pollTimer = null, pollBusy = false;
 const POLL_MS = 20000, POLL_HIDDEN_MS = 60000;
 function setStatus(textValue, kind) {

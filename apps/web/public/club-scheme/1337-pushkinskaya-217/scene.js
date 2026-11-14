@@ -1545,14 +1545,20 @@ if (CALM) {
 }
 /* ---------------- shift work of the administrator: GET /api/staff/checklists, /api/staff/tasks ----------------
    For a shift administrator looking at the hall under their own account: the shift
-   checklist (planned time and status of every item) under «Обзор клуба» and the
-   administrator's tasks above «Лента клуба». A click asks «Изменить статус?» and
-   «Да» opens the task or the checklist in a new LeetPlus tab.
+   checklist (planned time and status of every item) in place of «Обзор клуба» and
+   the administrator's tasks above «Лента клуба». The administrator works right here:
+   a simple item is marked with one tap on its circle (8 s «Отменить»), an item with a
+   photo, a number or a text opens an editor in the card, «Сдать чек-лист» hands it in;
+   a task is taken into work and handed in for review with a comment and photos.
+   Saving goes through the same BFF routes as «Моя смена» and «Задачи»
+   (PATCH /api/staff/checklists/:id, POST /api/staff/tasks/:id/comments,
+   POST /api/staff/attachments), so the API applies the same rights.
    «Режим администратора смены» (a senior administrator, a standards manager and
    above; switched in the «Стойка и бар» card): the same cards for whoever holds
-   the open Langame shift, from GET /api/stores/:id/floor-plan/live/shift-admin.
+   the open Langame shift, from GET /api/stores/:id/floor-plan/live/shift-admin,
+   read-only (the user chose 14.11: the senior administrator only watches here).
    `var`: the scene is built before this part of the script runs (see attention.js). */
-var SW = { me: null, own: false, lead: false, mode: null, target: null, canOpenRuns: false, run: null, tasks: null, taskTotal: 0, failed: false, timer: 0, scrolled: false, ask: null, back: null };
+var SW = { me: null, own: false, lead: false, mode: null, target: null, canOpenRuns: false, run: null, tasks: null, taskTotal: 0, failed: false, timer: 0, scrolled: false, open: null, failFor: null, drafts: {}, busy: false, err: null, task: null, submitFor: null, tdraft: null, stale: false, toast: null, rev: 0 };
 var SW_ROLES = ['SENIOR_ADMINISTRATOR', 'CLUB_ADMINISTRATOR'];
 var SW_LEAD_ROLES = ['OWNER', 'ADMIN', 'MANAGER', 'CLUB_MANAGER', 'STANDARDS_MANAGER', 'SENIOR_ADMINISTRATOR'];
 var SW_USE_ONLY = ['SENIOR_ADMINISTRATOR', 'CLUB_ADMINISTRATOR', 'TRAINEE'];
@@ -1605,7 +1611,7 @@ function swSetMode(next) {
   if (!SW.me) return;
   const mode = next === 'admin' && SW.lead ? 'admin' : SW.own ? 'own' : null;
   swStoreMode(mode);
-  Object.assign(SW, { mode, target: null, run: null, tasks: null, taskTotal: 0, failed: false, scrolled: false });
+  Object.assign(SW, { mode, target: null, run: null, tasks: null, taskTotal: 0, failed: false, scrolled: false, open: null, failFor: null, task: null, submitFor: null, tdraft: null, err: null });
   if (mode === 'admin' && view.type !== 'home') select({ type: 'home' });
   else if (view.type === 'zone' && view.id === 'admin') renderPanel();
   renderShiftWork();
@@ -1615,11 +1621,14 @@ function swSetMode(next) {
 function loadShiftWork() {
   if (!swOn()) return;
   if (SW.mode === 'admin') return loadShiftAdminWork();
+  const rev = SW.rev;
   Promise.all([
     swJson('/api/staff/checklists?status=all').catch(() => null),
     swJson('/api/staff/tasks?view=my&status=all&sort=dueAt&direction=asc&pageSize=50').catch(() => null),
   ]).then(([checklists, tasks]) => {
     if (SW.mode !== 'own') return;
+    // a save made while this poll was on its way is newer than what it brought
+    if (rev !== SW.rev || SW.busy) return;
     if (checklists && Array.isArray(checklists.rows)) SW.run = swPickRun(checklists.rows.filter(r => swMine(r) && swHere(r)));
     if (tasks && Array.isArray(tasks.rows)) { SW.tasks = swOpenTasks(tasks.rows); SW.taskTotal = SW.tasks.length; }
     SW.failed = !checklists && !tasks;
@@ -1675,24 +1684,35 @@ function swModeHtml() {
 
 /* ---- checklist items with their time and status ---- */
 function swMinutes(ms) { const m = Math.round(ms / 60000); return m < 60 ? `${m} мин` : `${Math.floor(m / 60)} ч${m % 60 ? ' ' + (m % 60) + ' мин' : ''}`; }
+function swKey(sectionId, itemId) { return `${sectionId}::${itemId}`; }
+function swPhotos(a) { return a ? (a.evidenceAttachments || []).length + (a.evidenceUrl && !(a.evidenceAttachments || []).length ? 1 : 0) : 0; }
+function swHasEvidence(a) { return !!(a && (a.evidenceUrl || (a.evidenceAttachments || []).length)); }
+/* What the item asks for besides a mark: a photo, a number or a text. */
+function swNeeds(item) {
+  if (item.valueType === 'PHOTO_LINK' || item.valueType === 'FILE_LINK' || item.evidenceRequired) return 'photo';
+  if (item.valueType === 'NUMBER') return 'number';
+  if (item.valueType === 'TEXT' || item.valueType === 'SELECT') return 'text';
+  return null;
+}
 function swItems(run) {
-  const key = (s, i) => `${s}::${i}`;
-  const answers = new Map((run.answers || []).map(a => [key(a.sectionId, a.itemId), a]));
-  const plans = new Map((run.itemTimings || []).map(p => [key(p.sectionId, p.itemId), p.timing]));
+  const answers = new Map((run.answers || []).map(a => [swKey(a.sectionId, a.itemId), a]));
+  const plans = new Map((run.itemTimings || []).map(p => [swKey(p.sectionId, p.itemId), p.timing]));
   const now = Date.now(), list = [];
   let order = 0;
   for (const section of run.sections || []) for (const item of section.items || []) {
-    const a = answers.get(key(section.id, item.id)) || null;
-    const t = (a && a.timing) || plans.get(key(section.id, item.id)) || null;
+    const key = swKey(section.id, item.id);
+    const a = answers.get(key) || null;
+    const t = (a && a.timing) || plans.get(key) || null;
     const planned = t && t.plannedAt ? Date.parse(t.plannedAt) : null;
     const end = t && t.windowEndAt ? Date.parse(t.windowEndAt) : null;
     const start = t && t.windowStartAt ? Date.parse(t.windowStartAt) : null;
+    const needs = swNeeds(item), photos = swPhotos(a);
     let tone, chip, sub = '';
     if (a && a.status) {
       const at = a.completedAt ? hhmm(new Date(a.completedAt)) : null;
-      sub = at ? `отмечено в ${at}` : 'отмечено';
-      if (a.status === 'FAILED') { tone = 'bad'; chip = 'Проблема'; }
-      else if (a.status === 'NOT_APPLICABLE') { tone = 'wait'; chip = 'Не применимо'; }
+      sub = [at ? `отмечено в ${at}` : 'отмечено', photos ? `${photos} фото` : null, item.evidenceRequired && !photos ? 'нет фото' : null].filter(Boolean).join(' · ');
+      if (a.status === 'FAILED') { tone = 'bad'; chip = 'Не выполнено'; if (a.note) sub = a.note; }
+      else if (a.status === 'NOT_APPLICABLE') { tone = 'na'; chip = 'Не относится'; }
       else if (t && t.status === 'LATE') { tone = 'late'; chip = `+${swMinutes((t.deviationMinutes || 0) * 60000)}`; }
       else if (t && t.status === 'EARLY') { tone = 'ok'; chip = 'Раньше срока'; }
       else { tone = 'ok'; chip = t && t.status === 'ON_TIME' ? 'Вовремя' : 'Готово'; }
@@ -1707,19 +1727,34 @@ function swItems(run) {
     } else {
       tone = 'wait'; chip = 'Сделать';
     }
-    list.push({ section: section.title, title: item.title, time: planned ? hhmm(new Date(planned)) : '', planned, tone, chip, sub, done: !!(a && a.status), order: order++ });
+    if (!(a && a.status) && !sub) sub = needs === 'photo' ? 'нужно фото' : needs === 'number' ? 'нужно число' : needs === 'text' ? 'нужен текст' : '';
+    list.push({ key, sectionId: section.id, itemId: item.id, item, answer: a, needs, section: section.title, title: item.title, time: planned ? hhmm(new Date(planned)) : '', planned, tone, chip, sub, done: !!(a && a.status), order: order++ });
   }
   // timed items by their time, the rest in checklist order after them
   return list.sort((x, y) => (x.planned == null) - (y.planned == null) || (x.planned || 0) - (y.planned || 0) || x.order - y.order);
 }
+/* Required items still to mark and photos still to add: what keeps «Сдать чек-лист» off
+   (the API refuses ON_REVIEW for the same reasons). */
+function swLeft(items) {
+  return items.filter(i => (i.item.required && !i.done) || (i.item.evidenceRequired && !swHasEvidence(i.answer))).length;
+}
+var SW_TICK = '<path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--surface)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>';
 var SW_DOT = {
-  ok: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--good)"/><path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--surface)" stroke-width="1.8" stroke-linecap="round"/></svg>',
-  late: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--warn)"/><path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--surface)" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  ok: `<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--good)"/>${SW_TICK}</svg>`,
+  late: `<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--warn)"/>${SW_TICK}</svg>`,
   bad: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--bad)"/><path d="M8 4.5v4.2M8 11.2v.3" stroke="var(--surface)" stroke-width="1.9" stroke-linecap="round"/></svg>',
+  failed: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--bad)"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="var(--surface)" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  na: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" fill="var(--surface-2)" stroke="var(--muted)" stroke-width="1.3"/><path d="M5.2 8h5.6" stroke="var(--muted)" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  over: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="var(--bad)" stroke-width="1.8"/></svg>',
   now: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="var(--accent)" stroke-width="1.8"/><circle cx="8" cy="8" r="2.6" fill="var(--accent)"/></svg>',
   wait: '<svg class="swdot" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="var(--muted)" stroke-width="1.6"/></svg>'
 };
-var SW_CHIP = { ok: 'good', late: 'warn', bad: 'bad', now: 'acc', wait: 'off' };
+var SW_CAM = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+var SW_CHIP = { ok: 'good', late: 'warn', bad: 'bad', now: 'acc', wait: 'off', na: 'off' };
+function swDot(i) {
+  if (i.done) return i.answer.status === 'FAILED' ? SW_DOT.failed : i.tone === 'na' ? SW_DOT.na : SW_DOT[i.tone] || SW_DOT.ok;
+  return i.tone === 'bad' ? SW_DOT.over : SW_DOT[i.tone] || SW_DOT.wait;
+}
 
 function swRunHref(run) {
   if (swAdminMode()) return SW.canOpenRuns ? `/staff/checklists?runId=${encodeURIComponent(run.id)}` : null;
@@ -1730,22 +1765,80 @@ function swTasksHref() {
   return a && a.userId ? `/staff/tasks?view=all&amp;status=all&amp;assignedToUserId=${encodeURIComponent(a.userId)}&amp;storeId=${encodeURIComponent(STORE_ID)}` : '/staff/tasks?view=my&amp;status=all';
 }
 function swTaskHref(task) { return `/staff/tasks?taskId=${encodeURIComponent(task.id)}`; }
+/* Marks are made only by the administrator of the shift, on their own checklist that
+   is not handed in yet. */
+function swCanMark() { return SW.mode === 'own' && !!SW.run && SW_ACTIVE_RUN.includes(SW.run.status) && swMine(SW.run); }
+function swCanTask() { return SW.mode === 'own'; }
 
 function checklistCardHtml() {
   const run = SW.run, admin = swAdminMode(), href = run && swRunHref(run);
   let h = swWhoHtml() + `<div class="swhd"><h3>Чек-лист смены</h3>${href ? `<a href="${href}" target="_blank" rel="noopener">Открыть</a>` : admin ? '' : `<a href="/staff/shift-workspace" target="_blank" rel="noopener">Моя смена</a>`}</div>`;
+  SW.items = null;
   if (admin && !run) return h + `<div class="swempty">${swAdminEmpty('checklist') || 'У администратора смены нет чек-листа на эту смену.'}</div>`;
   if (!run) return h + `<div class="swempty">${SW.failed ? 'Не удалось загрузить чек-лист, попробую через минуту.' : 'На эту смену чек-лист не назначен. Его можно начать на странице «Моя смена».'}</div>`;
-  const items = swItems(run), total = items.length || 1;
-  const n = tone => items.filter(i => i.done ? (tone === 'ok' ? i.tone === 'ok' || i.tone === 'wait' : i.tone === tone) : (tone === 'bad' && i.tone === 'bad')).length;
-  const ok = n('ok'), late = n('late'), bad = items.filter(i => i.tone === 'bad').length, done = items.filter(i => i.done).length;
+  const items = swItems(run), total = items.length || 1, can = swCanMark();
+  const ok = items.filter(i => i.done && i.tone === 'ok').length, late = items.filter(i => i.tone === 'late').length;
+  const bad = items.filter(i => i.tone === 'bad').length, na = items.filter(i => i.tone === 'na').length, done = items.filter(i => i.done).length;
   h += `<div class="swsub">${esc(run.title)} · ${done} из ${items.length} · сейчас ${hhmm(new Date())}</div>`;
-  h += `<div class="swbar" role="img" aria-label="Выполнено ${done} из ${items.length}"><i style="width:${ok / total * 100}%;background:var(--good)"></i><i style="width:${late / total * 100}%;background:var(--warn)"></i><i style="width:${bad / total * 100}%;background:var(--bad)"></i></div>`;
-  h += `<div class="swleg"><span><i style="background:var(--good)"></i>${ok} вовремя</span><span><i style="background:var(--warn)"></i>${late} с опозданием</span><span><i style="background:var(--bad)"></i>${bad} ${bad === 1 ? 'просрочен' : 'просрочено'}</span></div>`;
-  h += `<div class="swlist">${items.map((i, k) => `<button type="button" class="swrow${i.tone === 'now' ? ' isnow' : ''}" data-switem="${k}"><span class="swt">${i.time || '—'}</span>${SW_DOT[i.tone]}<span class="swn"><b>${esc(i.title)}</b>${i.sub ? `<small>${esc(i.sub)}</small>` : ''}</span><span class="chip ${SW_CHIP[i.tone]}">${esc(i.chip)}</span></button>`).join('')}</div>`;
+  h += `<div class="swbar" role="img" aria-label="Отмечено ${done} из ${items.length}"><i style="width:${ok / total * 100}%;background:var(--good)"></i><i style="width:${late / total * 100}%;background:var(--warn)"></i><i style="width:${bad / total * 100}%;background:var(--bad)"></i><i style="width:${na / total * 100}%;background:var(--muted)"></i></div>`;
+  h += `<div class="swleg"><span><i style="background:var(--good)"></i>${ok} вовремя</span><span><i style="background:var(--warn)"></i>${late} с опозданием</span><span><i style="background:var(--bad)"></i>${bad} ${bad === 1 ? 'проблема' : 'проблем'}</span></div>`;
+  h += `<div class="swlist">${items.map((i, k) => {
+    const open = SW.open === i.key;
+    const quick = can && !i.done && !i.needs;
+    const ckLabel = i.done ? i.chip : quick ? `Отметить «${i.title}» выполненным` : `Открыть пункт «${i.title}»`;
+    const ck = can && !i.done
+      ? `<button type="button" class="swck" data-swck="${k}" aria-label="${esc(ckLabel)}"${SW.busy ? ' disabled' : ''}>${swDot(i)}</button>`
+      : `<span class="swck" role="img" aria-label="${esc(ckLabel)}">${swDot(i)}</span>`;
+    const cam = i.needs === 'photo' && !i.done ? SW_CAM.replace('width="14" height="14"', 'width="11" height="11" class="swcam"') + ' ' : '';
+    return `<div class="swrow${i.tone === 'now' ? ' isnow' : ''}${open ? ' open' : ''}" data-swrow="${k}"><span class="swt">${i.time || '—'}</span>${ck}<button type="button" class="swtt" data-swopen="${k}" aria-expanded="${open}"><b>${esc(i.title)}</b>${i.sub ? `<small>${esc(i.sub)}</small>` : ''}</button><span class="chip ${SW_CHIP[i.tone] || 'off'}">${cam}${esc(i.chip)}</span></div>${open ? swEditorHtml(i, k, can) : ''}`;
+  }).join('')}</div>`;
   SW.items = items;
+  if (can) {
+    const left = swLeft(items);
+    h += `<div class="swfoot"><small>${left ? `Осталось обязательных: ${left}` : 'Все обязательные пункты отмечены'}</small><button type="button" class="swbtn pri sm" data-swsubmit="1"${left || SW.busy ? ' disabled' : ''}>Сдать чек-лист</button></div>`;
+  } else if (SW.mode === 'own') {
+    h += `<div class="swro">${run.status === 'ON_REVIEW' ? 'Чек-лист сдан на проверку. Отметки менять нельзя, пока его не вернут.' : run.status === 'ACCEPTED' ? 'Чек-лист принят.' : 'Чек-лист закрыт.'}</div>`;
+  } else {
+    h += '<div class="swro">Отмечать пункты может только администратор этой смены. Здесь виден ход смены.</div>';
+  }
   return h;
 }
+function swDraft(key) {
+  if (!SW.drafts[key]) {
+    const i = SW.items && SW.items.find(x => x.key === key), a = i && i.answer;
+    SW.drafts[key] = { value: (a && a.value) || '', note: (a && a.note) || '', photos: (a && a.evidenceAttachments) ? a.evidenceAttachments.slice() : [], uploading: false };
+  }
+  return SW.drafts[key];
+}
+function swPhotoHtml(list, attr, k, label, busy) {
+  const thumbs = list.map(p => `<a class="swthumb" href="${esc(p.url)}" target="_blank" rel="noopener" title="${esc(p.fileName || 'фото')}"><img src="${esc(p.url)}" alt="${esc(p.fileName || 'Фото')}" loading="lazy"></a>`).join('');
+  return `<div class="swphoto">${thumbs}<label class="swbtn sec sm swfile${busy ? ' busy' : ''}">${SW_CAM}<span>${busy ? 'Загружаю…' : list.length ? 'Ещё фото' : label}</span><input type="file" accept="image/*" ${attr}="${k}"${busy ? ' disabled' : ''}></label></div>`;
+}
+function swEditorHtml(i, k, can) {
+  const ins = i.item.instruction ? `<div class="swins">${esc(i.item.instruction)}</div>` : '';
+  const a = i.answer;
+  if (!can) {
+    const what = a && a.status ? `<div>${esc(i.chip)}${a.note ? ': ' + esc(a.note) : ''}${a.value ? ' · ' + esc(a.value) : ''}</div>` : '';
+    return `<div class="swed">${ins || '<div class="swins">Инструкции нет.</div>'}${what}${SW.mode === 'admin' ? '<div class="swins">Отмечает администратор смены.</div>' : ''}</div>`;
+  }
+  const err = SW.err && SW.err.key === i.key ? `<div class="swerr" role="alert">${esc(SW.err.text)}</div>` : '';
+  const dis = SW.busy ? ' disabled' : '';
+  if (i.done) {
+    const photos = (a.evidenceAttachments || []).map(p => `<a class="swthumb" href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.url)}" alt="${esc(p.fileName || 'Фото')}" loading="lazy"></a>`).join('');
+    return `<div class="swed">${ins}<div>${esc(i.chip)}${a.note ? ': ' + esc(a.note) : ''}${a.value ? ' · ' + esc(a.value) : ''}</div>${photos ? `<div class="swphoto">${photos}</div>` : ''}${err}<div class="swbtns"><button type="button" class="swbtn sec sm" data-swundo="${k}"${dis}>Снять отметку</button></div></div>`;
+  }
+  const d = swDraft(i.key);
+  if (SW.failFor === i.key) {
+    return `<div class="swed"><label class="swlbl" for="swwhy">Почему не выполнено</label><textarea id="swwhy" data-swnote="${k}" rows="2" placeholder="Например: нет ключа от подсобки">${esc(d.note)}</textarea>${err}<div class="swbtns"><button type="button" class="swbtn pri sm" data-swfailok="${k}"${d.note.trim() ? '' : ' disabled'}${dis}>Сохранить</button><button type="button" class="swbtn ghost sm" data-swfailno="${k}">Назад</button></div></div>`;
+  }
+  let field = '', ready = true;
+  if (i.needs === 'photo') { field = swPhotoHtml(d.photos, 'data-swfile', k, 'Сделать фото', d.uploading); ready = d.photos.length > 0; }
+  if (i.needs === 'number') { field = `<label class="swlbl" for="swnum">Значение</label><input type="number" id="swnum" inputmode="decimal" data-swval="${k}" value="${esc(d.value)}" placeholder="0">`; ready = d.value.trim() !== ''; }
+  if (i.needs === 'text') { field = `<label class="swlbl" for="swtxt">Ответ</label><textarea id="swtxt" rows="2" data-swval="${k}" placeholder="Коротко, что сделано">${esc(d.value)}</textarea>`; ready = d.value.trim() !== ''; }
+  return `<div class="swed">${ins}${field}${err}<div class="swbtns"><button type="button" class="swbtn pri sm" data-swok="${k}"${ready && !d.uploading ? '' : ' disabled'}${dis}>Готово</button><button type="button" class="swbtn sec sm" data-swfail="${k}"${dis}>Не выполнено</button>${i.item.required ? '' : `<button type="button" class="swbtn ghost sm" data-swna="${k}"${dis}>Не относится</button>`}</div></div>`;
+}
+
+/* ---- tasks ---- */
 function swTaskLine(t) {
   const due = t.dueAt ? new Date(t.dueAt) : null;
   const sameDay = due && due.toDateString() === new Date().toDateString();
@@ -1753,90 +1846,253 @@ function swTaskLine(t) {
   return [t.priority === 'URGENT' ? 'срочно' : t.priority === 'HIGH' ? 'важно' : null, when].filter(Boolean).join(' · ');
 }
 function swTaskChip(t) {
+  if (t.status === 'ON_REVIEW') return ['lilac', 'На проверке'];
   if (t.isOverdue) return ['bad', 'Просрочена'];
   if (t.status === 'IN_PROGRESS') return ['acc', 'В работе'];
-  if (t.status === 'ON_REVIEW') return ['lilac', 'На проверке'];
   return ['off', 'Новая'];
+}
+function swUserName(u) { return u ? (u.fullName || u.email || '') : ''; }
+/* The latest comment of somebody else: usually why the task came back. */
+function swTaskNote(t) {
+  const list = (t.comments || []).filter(c => c.body && (!c.authorUser || !SW.me || c.authorUser.id !== SW.me.id));
+  if (!list.length) return null;
+  return list.reduce((x, y) => Date.parse(y.createdAt) > Date.parse(x.createdAt) ? y : x);
 }
 function tasksCardHtml() {
   const list = SW.tasks;
   const admin = swAdminMode(), why = admin ? swAdminEmpty('tasks') : null;
+  const t = list && SW.task ? list.find(x => x.id === SW.task) : null;
+  if (t) return swTaskDetailHtml(t);
   let h = `<div class="swhd"><h3>${admin ? 'Задачи администратора' : 'Задачи на смену'}</h3>${why ? '' : `<a href="${swTasksHref()}" target="_blank" rel="noopener">Все задачи${SW.taskTotal ? ' · ' + SW.taskTotal : ''}</a>`}</div>`;
   if (why) return h + `<div class="swempty">${why}</div>`;
   if (!list) return h + `<div class="swempty">${SW.failed ? 'Не удалось загрузить задачи, попробую через минуту.' : 'Загружаю задачи…'}</div>`;
   if (!list.length) return h + `<div class="swempty">${admin ? 'У администратора смены нет открытых задач.' : 'Открытых задач на смену нет.'}</div>`;
-  return h + `<div class="swlist">${list.slice(0, 4).map((t, k) => {
-    const [tone, label] = swTaskChip(t);
-    const pr = t.priority === 'URGENT' || t.priority === 'HIGH' ? 'var(--bad)' : t.priority === 'NORMAL' ? 'var(--warn)' : 'var(--muted)';
-    return `<button type="button" class="swrow swtask" data-swtask="${k}"><span class="swpr" style="background:${pr}"></span><span class="swn"><b>${esc(t.title)}</b><small>${esc(swTaskLine(t))}</small></span><span class="chip ${tone}">${label}</span></button>`;
+  return h + `<div class="swlist">${list.slice(0, 6).map((x, k) => {
+    const [tone, label] = swTaskChip(x);
+    const pr = x.priority === 'URGENT' || x.priority === 'HIGH' ? 'var(--bad)' : x.priority === 'NORMAL' ? 'var(--warn)' : 'var(--muted)';
+    return `<button type="button" class="swrow swtask" data-swtask="${k}"><span class="swpr" style="background:${pr}"></span><span class="swn"><b>${esc(x.title)}</b><small>${esc(swTaskLine(x))}</small></span><span class="chip ${tone}">${label}</span></button>`;
   }).join('')}</div>`;
 }
+function swTaskDetailHtml(t) {
+  const [tone, label] = swTaskChip(t), can = swCanTask(), note = swTaskNote(t);
+  const err = SW.err && SW.err.key === 'task:' + t.id ? `<div class="swerr" role="alert">${esc(SW.err.text)}</div>` : '';
+  const dis = SW.busy ? ' disabled' : '';
+  let act = '';
+  if (!can) act = '<div class="swnote"><b>Только просмотр</b>С задачей работает администратор смены.</div>';
+  else if (t.status === 'OPEN') act = `<div class="swbtns"><button type="button" class="swbtn pri sm" data-swtake="1"${dis}>Взять в работу</button></div>`;
+  else if (t.status === 'IN_PROGRESS' && SW.submitFor !== t.id) act = `<div class="swbtns"><button type="button" class="swbtn pri sm" data-swsub="1"${dis}>Сдать на проверку</button></div>`;
+  else if (t.status === 'IN_PROGRESS') {
+    const d = SW.tdraft || (SW.tdraft = { body: '', photos: [], uploading: false });
+    act = `<label class="swlbl" for="swres">Что сделано</label><textarea id="swres" rows="3" data-swtbody="1" placeholder="Например: мышь заменил, старую убрал на списание">${esc(d.body)}</textarea>${swPhotoHtml(d.photos, 'data-swtfile', '1', 'Приложить фото', d.uploading)}<div class="swbtns"><button type="button" class="swbtn pri sm" data-swsend="1"${d.uploading ? ' disabled' : ''}${dis}>Отправить на проверку</button><button type="button" class="swbtn ghost sm" data-swnosend="1">Отмена</button></div>`;
+  } else if (t.status === 'ON_REVIEW') act = '<div class="swnote"><b>Ждёт проверки</b>Руководитель примет задачу или вернёт её с комментарием.</div>';
+  const meta = [swTaskLine(t), t.createdByUser ? 'от ' + shortName(swUserName(t.createdByUser)) : null].filter(Boolean).join(' · ');
+  return `<div class="swhd"><button type="button" class="swback" data-swback="1">← Все задачи</button><span class="chip ${tone}">${label}</span></div>
+<div class="swtkd"><h4>${esc(t.title)}</h4><div class="swmeta">${esc(meta)}</div>${t.description ? `<div class="swdesc">${esc(t.description)}</div>` : ''}${note ? `<div class="swnote warn"><b>${esc(shortName(swUserName(note.authorUser)) || 'Комментарий')} · ${hhmm(new Date(note.createdAt))}</b>${esc(note.body)}</div>` : ''}${err}${act}<a class="swmore" href="${swTaskHref(t)}" target="_blank" rel="noopener">Открыть в «Задачах»</a></div>`;
+}
 
-/* ---- cards, placement and the «Изменить статус?» window ---- */
+/* ---- saving ---- */
+function swSend(url, method, body) {
+  return fetch(url, { method, credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(r => r.json().catch(() => ({})).then(j => r.ok ? j : Promise.reject(new Error(swErrText(r.status, j)))));
+}
+function swErrText(status, j) {
+  const m = j && (Array.isArray(j.message) ? j.message.join(', ') : j.message);
+  if (status === 401) return 'Сессия закончилась: обновите страницу и войдите снова.';
+  if (status === 403) return m && /[а-я]/i.test(m) ? m : 'Недостаточно прав для этого действия.';
+  if (m === 'Required checklist answers or evidence are missing') return 'Не все обязательные пункты отмечены или нет фото.';
+  if (m === 'Task must be submitted for review before completion') return 'Сначала отправьте задачу на проверку.';
+  return m && /[а-я]/i.test(m) ? m : 'Не сохранилось. Проверьте связь и попробуйте ещё раз.';
+}
+/* Images are shrunk to 1600 px before upload (the BFF takes up to 5 MB). */
+function swShrink(file) {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size < 900e3 || !window.createImageBitmap) return Promise.resolve(file);
+  return createImageBitmap(file).then(bmp => {
+    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return new Promise(res => c.toBlob(b => res(b ? new File([b], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file), 'image/jpeg', 0.82));
+  }).catch(() => file);
+}
+function swUpload(file) {
+  return swShrink(file).then(f => {
+    const fd = new FormData(); fd.set('file', f);
+    return fetch('/api/staff/attachments', { method: 'POST', credentials: 'same-origin', body: fd })
+      .then(r => r.json().catch(() => ({})).then(j => r.ok ? j : Promise.reject(new Error(swErrText(r.status, j)))));
+  });
+}
+function swAddPhoto(draft, file, errKey) {
+  if (!file) return;
+  draft.uploading = true; SW.err = null; renderShiftWork();
+  swUpload(file).then(p => {
+    draft.photos.push({ id: p.id, fileName: p.fileName, contentType: p.contentType, byteSize: p.byteSize, url: p.url, createdAt: p.createdAt });
+  }).catch(e => { SW.err = { key: errKey, text: e.message }; }).then(() => { draft.uploading = false; renderShiftWork(); });
+}
+/* The API takes the whole list of answers: every other answer goes back as it came
+   (its completedAt stays), the changed one goes with completedAt null so the server
+   stamps the time of the mark. */
+function swSaveAnswer(i, patch, okText, undoable) {
+  const run = SW.run; if (!run || SW.busy) return;
+  const before = i.answer ? Object.assign({}, i.answer) : null;
+  const answers = (run.answers || []).map(a => {
+    const x = Object.assign({}, a); delete x.timing;
+    if (swKey(a.sectionId, a.itemId) !== i.key) return x;
+    return Object.assign(x, patch, { completedAt: null });
+  });
+  if (!answers.some(a => swKey(a.sectionId, a.itemId) === i.key)) answers.push(Object.assign({ sectionId: i.sectionId, itemId: i.itemId, value: null, note: null, evidenceUrl: null, evidenceAttachments: [], reviewThreads: [] }, patch, { completedAt: null }));
+  const body = { answers };
+  if (['OPEN', 'RETURNED', 'ESCALATED'].includes(run.status) && patch.status) body.status = 'IN_PROGRESS';
+  SW.busy = true; SW.err = null; SW.rev++;
+  renderShiftWork();
+  swSend(`/api/staff/checklists/${encodeURIComponent(run.id)}`, 'PATCH', body).then(next => {
+    if (!next.itemTimings && run.itemTimings) next.itemTimings = run.itemTimings;
+    SW.run = next; SW.open = null; SW.failFor = null; delete SW.drafts[i.key];
+    swToast(okText, undoable && before !== undefined ? () => swUndo(i.key, before) : null);
+  }).catch(e => { SW.err = { key: i.key, text: e.message }; SW.open = i.key; swToast(e.message); })
+    .then(() => { SW.busy = false; SW.rev++; renderShiftWork(); swFocusRow(i.key); });
+}
+function swUndo(key, before) {
+  const i = SW.run && swItems(SW.run).find(x => x.key === key); if (!i) return;
+  const prev = before || { value: null, note: null, status: null, evidenceUrl: null, evidenceAttachments: [] };
+  swSaveAnswer(i, { value: prev.value || null, note: prev.note || null, status: prev.status || null, evidenceUrl: prev.evidenceUrl || null, evidenceAttachments: prev.evidenceAttachments || [] }, 'Отметка отменена', false);
+}
+function swSubmitRun() {
+  const run = SW.run; if (!run || SW.busy) return;
+  SW.busy = true; SW.err = null; SW.rev++; renderShiftWork();
+  swSend(`/api/staff/checklists/${encodeURIComponent(run.id)}`, 'PATCH', { status: 'ON_REVIEW' }).then(next => {
+    if (!next.itemTimings && run.itemTimings) next.itemTimings = run.itemTimings;
+    SW.run = next; SW.open = null;
+    swToast('Чек-лист сдан на проверку');
+  }).catch(e => swToast(e.message)).then(() => { SW.busy = false; SW.rev++; renderShiftWork(); });
+}
+/* Status moves go through a comment, like the «Задачи» board: the history keeps who moved it. */
+function swMoveTask(t, status, body, photos, okText) {
+  if (SW.busy) return;
+  const payload = { status };
+  if (body) payload.body = body;
+  if (photos && photos.length) payload.attachmentIds = photos.map(p => p.id);
+  SW.busy = true; SW.err = null; SW.rev++; renderShiftWork();
+  swSend(`/api/staff/tasks/${encodeURIComponent(t.id)}/comments`, 'POST', payload).then(next => {
+    const k = SW.tasks ? SW.tasks.findIndex(x => x.id === t.id) : -1;
+    if (k >= 0 && next && next.id) SW.tasks[k] = next;
+    SW.submitFor = null; SW.tdraft = null;
+    swToast(okText);
+  }).catch(e => { SW.err = { key: 'task:' + t.id, text: e.message }; })
+    .then(() => { SW.busy = false; SW.rev++; renderShiftWork(); });
+}
+
+/* ---- toast with «Отменить» ---- */
+function swToast(text, undo) {
+  const el = document.getElementById('swtoast'); if (!el) return;
+  clearTimeout(SW.toastTimer);
+  SW.toast = undo || null;
+  el.innerHTML = `<span>${esc(text)}</span>${undo ? '<button type="button" data-swundolast="1">Отменить</button>' : ''}`;
+  el.hidden = false;
+  SW.toastTimer = setTimeout(() => { el.hidden = true; SW.toast = null; }, 8000);
+}
+function swFocusRow(key, title) {
+  const k = SW.items ? SW.items.findIndex(x => x.key === key) : -1; if (k < 0) return;
+  const cl = document.getElementById('swcl');
+  const b = cl && ((!title && cl.querySelector(`button[data-swck="${k}"]`)) || cl.querySelector(`[data-swopen="${k}"]`));
+  if (b && cl.contains(document.activeElement) === false && document.activeElement !== document.body) return;
+  if (b) b.focus({ preventScroll: true });
+}
+
+/* ---- cards, placement and clicks ---- */
 function buildShiftWork() {
   const stage = document.getElementById('stage');
   if (!stage || document.getElementById('swcl')) return;
   const cl = document.createElement('section'); cl.id = 'swcl'; cl.className = 'swcard'; cl.setAttribute('aria-label', 'Чек-лист смены'); cl.hidden = true;
   const tk = document.createElement('section'); tk.id = 'swtk'; tk.className = 'swcard'; tk.setAttribute('aria-label', 'Задачи на смену'); tk.hidden = true;
-  const dlg = document.createElement('div'); dlg.id = 'swask'; dlg.hidden = true;
-  dlg.innerHTML = '<div class="swscrim" data-swno="1"></div><div class="swdlg" role="dialog" aria-modal="true" aria-labelledby="swq"><h4 id="swq"></h4><div class="swwhat"></div><p></p><div class="swacts"><button type="button" class="swbtn sec" data-swno="1">Нет</button><button type="button" class="swbtn pri" data-swyes="1">Да, открыть</button></div></div>';
-  stage.appendChild(cl); stage.appendChild(tk); stage.appendChild(dlg);
-  cl.addEventListener('click', e => { if (e.target.closest('[data-swmode]')) return swSetMode(null); const b = e.target.closest('[data-switem]'); if (b && SW.items && SW.run) swAsk('item', SW.items[+b.dataset.switem], b); });
-  tk.addEventListener('click', e => { const b = e.target.closest('[data-swtask]'); if (b && SW.tasks) swAsk('task', SW.tasks[+b.dataset.swtask], b); });
-  dlg.addEventListener('click', e => { if (e.target.closest('[data-swyes]')) swAnswer(true); else if (e.target.closest('[data-swno]')) swAnswer(false); });
-  dlg.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { e.preventDefault(); swAnswer(false); }
-    if (e.key === 'Tab') { const b = [...dlg.querySelectorAll('button')].filter(x => !x.hidden); const i = b.indexOf(document.activeElement); e.preventDefault(); b[(i + (e.shiftKey ? b.length - 1 : 1)) % b.length].focus(); }
-  });
+  const toast = document.createElement('div'); toast.id = 'swtoast'; toast.setAttribute('role', 'status'); toast.hidden = true;
+  stage.appendChild(cl); stage.appendChild(tk); stage.appendChild(toast);
+  cl.addEventListener('click', swClickChecklist);
+  tk.addEventListener('click', swClickTasks);
+  toast.addEventListener('click', e => { if (e.target.closest('[data-swundolast]') && SW.toast) { const f = SW.toast; SW.toast = null; toast.hidden = true; f(); } });
+  // the toast waits while the pointer or the keyboard is on it
+  const hold = () => clearTimeout(SW.toastTimer), go = () => { clearTimeout(SW.toastTimer); SW.toastTimer = setTimeout(() => { toast.hidden = true; SW.toast = null; }, 4000); };
+  toast.addEventListener('mouseenter', hold); toast.addEventListener('focusin', hold);
+  toast.addEventListener('mouseleave', go); toast.addEventListener('focusout', go);
+  const typed = e => {
+    const t = e.target, d = t.dataset || {};
+    if (d.swval !== undefined && SW.items) { swDraft(SW.items[+d.swval].key).value = t.value; swSyncReady(cl); }
+    if (d.swnote !== undefined && SW.items) { swDraft(SW.items[+d.swnote].key).note = t.value; swSyncReady(cl); }
+    if (d.swtbody !== undefined && SW.tdraft) SW.tdraft.body = t.value;
+  };
+  cl.addEventListener('input', typed); tk.addEventListener('input', typed);
+  cl.addEventListener('change', e => { const d = e.target.dataset || {}; if (d.swfile !== undefined && SW.items) { const i = SW.items[+d.swfile]; swAddPhoto(swDraft(i.key), e.target.files && e.target.files[0], i.key); } });
+  tk.addEventListener('change', e => { const d = e.target.dataset || {}; if (d.swtfile !== undefined && SW.tdraft && SW.task) swAddPhoto(SW.tdraft, e.target.files && e.target.files[0], 'task:' + SW.task); });
+  // a poll does not redraw a card while somebody types in it; it catches up on leaving
+  const later = e => { const card = e.currentTarget; setTimeout(() => { if (SW.stale && !card.contains(document.activeElement)) renderShiftWork(); }, 0); };
+  cl.addEventListener('focusout', later); tk.addEventListener('focusout', later);
+  cl.addEventListener('keydown', e => { if (e.key === 'Escape' && SW.open) { const key = SW.open; SW.open = null; SW.failFor = null; SW.err = null; renderShiftWork(); swFocusRow(key); } });
+  tk.addEventListener('keydown', e => { if (e.key === 'Escape' && SW.task) { SW.task = null; SW.submitFor = null; renderShiftWork(); } });
   const panelEl = document.getElementById('panel'), feedEl = document.querySelector('.feed');
   if (window.ResizeObserver) { const ro = new ResizeObserver(() => placeShiftWork()); ro.observe(panelEl); if (feedEl) ro.observe(feedEl); ro.observe(stage); }
 }
-function swAsk(kind, row, trigger) {
-  if (!row) return;
-  const dlg = document.getElementById('swask'); if (!dlg) return;
-  const admin = swAdminMode();
-  let ask = true;
-  if (kind === 'task') {
-    SW.ask = { href: swTaskHref(row) };
-    dlg.querySelector('h4').textContent = 'Изменить статус задачи?';
-    dlg.querySelector('.swwhat').innerHTML = `<b>${esc(row.title)}</b><small>${esc([swTaskChip(row)[1], swTaskLine(row)].join(' · '))}</small>`;
-    dlg.querySelector('p').textContent = admin ? 'Задача администратора смены откроется в новой вкладке LeetPlus: там можно сменить статус, оставить комментарий и фото.' : 'Задача откроется в новой вкладке LeetPlus: там можно сменить статус, оставить комментарий и фото.';
-  } else {
-    const href = swRunHref(SW.run);
-    ask = !!href;
-    SW.ask = href ? { href } : null;
-    dlg.querySelector('h4').textContent = ask ? 'Изменить статус пункта?' : 'Пункт чек-листа администратора';
-    dlg.querySelector('.swwhat').innerHTML = `<b>${esc(row.title)}</b><small>${esc([SW.run.title, row.time ? 'в ' + row.time : null, row.chip.toLowerCase()].filter(Boolean).join(' · '))}</small>`;
-    dlg.querySelector('p').textContent = !admin
-      ? 'Чек-лист откроется в новой вкладке на странице «Моя смена»: там пункт можно отметить выполненным или указать проблему.'
-      : ask
-        ? 'Чек-лист администратора смены откроется в новой вкладке в разделе «Чек-листы»: там видны ответы и фото, пункт можно вернуть на доработку.'
-        : 'Отметить пункт может только администратор смены. Ход чек-листа виден здесь, на схеме, и обновляется каждую минуту.';
+/* «Готово» / «Сохранить» follow what is typed without redrawing the field. */
+function swSyncReady(cl) {
+  const k = SW.items ? SW.items.findIndex(x => x.key === SW.open) : -1; if (k < 0) return;
+  const d = swDraft(SW.items[k].key);
+  const ok = cl.querySelector(`[data-swok="${k}"]`); if (ok) ok.disabled = SW.busy || d.uploading || (SW.items[k].needs === 'photo' ? !d.photos.length : SW.items[k].needs ? !d.value.trim() : false);
+  const fo = cl.querySelector(`[data-swfailok="${k}"]`); if (fo) fo.disabled = SW.busy || !d.note.trim();
+}
+function swClickChecklist(e) {
+  if (e.target.closest('[data-swmode]')) return swSetMode(null);
+  const b = e.target.closest('button'); if (!b || b.disabled || !SW.items) return;
+  const d = b.dataset, item = v => SW.items[+v];
+  if (d.swsubmit) return swSubmitRun();
+  if (d.swck !== undefined) {
+    const i = item(d.swck);
+    if (!i.needs) return swSaveAnswer(i, { status: 'PASS' }, `Отмечено: ${i.title}`, true);
+    SW.open = i.key; SW.failFor = null; SW.err = null; renderShiftWork(); return swFocusEditor();
   }
-  const yes = dlg.querySelector('[data-swyes]'), no = dlg.querySelector('.swacts [data-swno]');
-  yes.hidden = !ask;
-  no.textContent = ask ? 'Нет' : 'Понятно';
-  SW.back = trigger || null;
-  dlg.hidden = false;
-  (ask ? yes : no).focus();
+  if (d.swopen !== undefined) { const i = item(d.swopen); SW.open = SW.open === i.key ? null : i.key; SW.failFor = null; SW.err = null; renderShiftWork(); swFocusRow(i.key, true); return; }
+  if (d.swok !== undefined) {
+    const i = item(d.swok), dr = swDraft(i.key), patch = { status: 'PASS' };
+    if (i.needs === 'photo') { patch.evidenceAttachments = dr.photos; patch.evidenceUrl = null; }
+    if (i.needs === 'number' || i.needs === 'text') patch.value = dr.value.trim();
+    return swSaveAnswer(i, patch, `Отмечено: ${i.title}`, true);
+  }
+  if (d.swfail !== undefined) { SW.failFor = item(d.swfail).key; SW.err = null; renderShiftWork(); const w = document.getElementById('swwhy'); if (w) w.focus(); return; }
+  if (d.swfailno !== undefined) { SW.failFor = null; renderShiftWork(); return; }
+  if (d.swfailok !== undefined) {
+    const i = item(d.swfailok), dr = swDraft(i.key), patch = { status: 'FAILED', note: dr.note.trim() };
+    if (dr.photos.length) patch.evidenceAttachments = dr.photos;
+    return swSaveAnswer(i, patch, `Не выполнено: ${i.title}`, true);
+  }
+  if (d.swna !== undefined) { const i = item(d.swna); return swSaveAnswer(i, { status: 'NOT_APPLICABLE' }, `Не относится: ${i.title}`, true); }
+  if (d.swundo !== undefined) { const i = item(d.swundo); return swSaveAnswer(i, { status: null }, `Отметка снята: ${i.title}`, false); }
 }
-function swAnswer(yes) {
-  const dlg = document.getElementById('swask'); if (!dlg || dlg.hidden) return;
-  if (yes && SW.ask) window.open(SW.ask.href, '_blank', 'noopener');
-  dlg.hidden = true; SW.ask = null;
-  if (SW.back && document.contains(SW.back)) SW.back.focus();
-  SW.back = null;
+function swFocusEditor() { const cl = document.getElementById('swcl'); const f = cl && cl.querySelector('.swed input:not([type=file]), .swed textarea, .swed .swfile, .swed .swbtn'); if (f) f.focus({ preventScroll: false }); }
+function swClickTasks(e) {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  const d = b.dataset, t = SW.tasks && SW.task ? SW.tasks.find(x => x.id === SW.task) : null;
+  if (d.swtask !== undefined && SW.tasks) { const x = SW.tasks[+d.swtask]; if (!x) return; SW.task = x.id; SW.submitFor = null; SW.tdraft = null; SW.err = null; renderShiftWork(); const back = document.querySelector('#swtk [data-swback]'); if (back) back.focus(); return; }
+  if (d.swback) { const id = SW.task; SW.task = null; SW.submitFor = null; SW.tdraft = null; SW.err = null; renderShiftWork(); const k = SW.tasks ? SW.tasks.findIndex(x => x.id === id) : -1; const r = document.querySelector(`#swtk [data-swtask="${k}"]`); if (r) r.focus(); return; }
+  if (!t) return;
+  if (d.swtake) return swMoveTask(t, 'IN_PROGRESS', null, null, 'Задача в работе');
+  if (d.swsub) { SW.submitFor = t.id; SW.tdraft = { body: '', photos: [], uploading: false }; renderShiftWork(); const r = document.getElementById('swres'); if (r) r.focus(); return; }
+  if (d.swnosend) { SW.submitFor = null; SW.tdraft = null; renderShiftWork(); return; }
+  if (d.swsend) { const dr = SW.tdraft || { body: '', photos: [] }; return swMoveTask(t, 'ON_REVIEW', dr.body.trim() || null, dr.photos, 'Задача отправлена на проверку'); }
 }
+function swTyping(card) { const a = document.activeElement; return !!(a && card.contains(a) && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'file'))); }
 function renderShiftWork() {
   if (!swOn()) return;
   const cl = document.getElementById('swcl'), tk = document.getElementById('swtk');
   if (!cl || !tk) return;
+  SW.stale = false;
+  if (swTyping(cl) || swTyping(tk)) { SW.stale = true; placeShiftWork(); return; }
+  if (SW.task && SW.tasks && !SW.tasks.some(x => x.id === SW.task)) { SW.task = null; SW.submitFor = null; SW.tdraft = null; }
   const keep = cl.querySelector('.swlist') ? cl.querySelector('.swlist').scrollTop : null;
+  const keepT = tk.querySelector('.swtkd') ? tk.querySelector('.swtkd').scrollTop : null;
   cl.innerHTML = checklistCardHtml();
   tk.innerHTML = tasksCardHtml();
+  if (SW.open && !(SW.items || []).some(x => x.key === SW.open)) SW.open = null;
   const list = cl.querySelector('.swlist');
   if (list && keep !== null && SW.scrolled) list.scrollTop = keep;
+  const det = tk.querySelector('.swtkd'); if (det && keepT !== null) det.scrollTop = keepT;
   placeShiftWork();
+  if (list && SW.open) { const ed = list.querySelector('.swed'); if (ed && ed.offsetTop + ed.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = ed.offsetTop + ed.offsetHeight - list.clientHeight + 6; }
   if (list && !SW.scrolled) { const now = list.querySelector('.isnow') || [...list.querySelectorAll('.swrow')].find(r => !r.querySelector('.chip.good')); if (now) { list.scrollTop = Math.max(0, now.offsetTop - list.offsetTop - 40); SW.scrolled = true; } }
 }
 /* For the administrator the checklist takes the place of «Обзор клуба» (the
@@ -1849,6 +2105,7 @@ function placeShiftWork() {
   const show = swOn() && view.type === 'home' && !editing && !isPhone();
   if (panelEl) panelEl.classList.toggle('swoff', show);
   cl.hidden = !show; tk.hidden = !show;
+  const toast = document.getElementById('swtoast'); if (toast && !show) toast.hidden = true;
   if (!show) return;
   const top = 14;
   cl.style.top = top + 'px';
@@ -1861,7 +2118,9 @@ function placeShiftWork() {
   tk.style.bottom = (stage.clientHeight - feedTop + 10) + 'px';
   // same width as «Лента клуба» under it
   tk.style.width = feedEl && feedEl.offsetParent ? feedEl.offsetWidth + 'px' : '';
-  tk.style.maxHeight = Math.max(120, Math.min(330, feedTop - 150)) + 'px';
+  // an open task gets more room upwards
+  tk.style.maxHeight = Math.max(120, SW.task ? feedTop - 110 : Math.min(330, feedTop - 150)) + 'px';
+  if (toast) toast.style.bottom = (stage.clientHeight - feedTop + 10) + 'px';
 }
 /* ---------------- other clubs of the network with a drawn hall (full screen only) ---------------- */
 async function loadClubNav() {
